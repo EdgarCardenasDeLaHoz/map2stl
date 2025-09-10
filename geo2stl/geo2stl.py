@@ -3,6 +3,9 @@ from PIL import Image
 import re
 import os
 
+from skimage import io
+
+
 def parse_extent_from_filename(filename):
 	match = re.search(r'n([-\d.]+)_s([-\d.]+)_w([-\d.]+)_e([-\d.]+)', filename)
 	if match:
@@ -114,35 +117,41 @@ def proj_map_height(mat,NSEW):
     #zv = zv - np.min(zv)
         
     return zv
-def proj_map_geo_to_2D(mat,NSEW):
-    
-    lat = NSEW[[0,1]]
-    lon = NSEW[[2,3]]
 
-    m, n = mat.shape
-    xv,yv = np.meshgrid(range(n),range(m))
 
-    xc = (n-1)/2
-    yc = (m-1)/2
-    xv_c = (xv - xc).astype(int)
-    yv_c = (yv - yc).astype(int)
+def proj_map_geo_to_2D(mat,NSEW, clip_out=True):
+		
+		lat = NSEW[[0,1]]
+		lon = NSEW[[2,3]]
 
-    lat_v = np.linspace(lat[0],lat[1],m)
-    lat_v = np.deg2rad(lat_v[:,None])
-    xv_adj = xv_c * np.cos(lat_v )
+		m, n = mat.shape
+		xv,yv = np.meshgrid(range(n),range(m))
 
-    xv2 = (xv_adj + xc).astype(int)
-    yv2 = (yv_c + yc).astype(int)
+		xc = (n-1)/2
+		yc = (m-1)/2
+		xv_c = (xv - xc).astype(int)
+		yv_c = (yv - yc).astype(int)
 
-    mat_adj = mat*0.0 
-    mat_adj[:] = np.nan
-    mat_adj[yv2, xv2] = mat[yv, xv]
-    
-    y1,y2 = np.min(yv2),np.max(yv2)
-    x1,x2 = np.min(xv2),np.max(xv2)
-    
-    mat_adj = mat_adj[y1:y2,x1:x2]
-    return mat_adj  
+		lat_v = np.linspace(lat[0],lat[1],m)
+		lat_v = np.deg2rad(lat_v[:,None])
+		xv_adj = xv_c * np.cos(lat_v )
+
+		xv2 = (xv_adj + xc).astype(int)
+		yv2 = (yv_c + yc).astype(int)
+
+		mat_adj = mat*0.0 
+		mat_adj[:] = np.nan
+		mat_adj[yv2, xv2] = mat[yv, xv]
+		
+		y1,y2 = np.min(yv2),np.max(yv2)
+		x1,x2 = np.min(xv2),np.max(xv2)
+		
+		mat_adj = mat_adj[y1:y2,x1:x2]
+
+		if clip_out:
+			mat_adj = mat_adj[:,~np.any(np.isnan(mat_adj),axis=0)]
+
+		return mat_adj  
 
 def mat2coor(limits, matsize, index):
   [x1,x2,y1,y2] = index
@@ -162,23 +171,4 @@ def mat2coor(limits, matsize, index):
 
   return coor
 
-def savefile(out_dir, name, im2 ):
 
-	if im2.min()< 1:
-		print("warning values less than zero")
-		return 
-	
-	
-	if not os.path.isdir(out_dir): return
-
-	out_dir = out_dir + "/" + name 
-	os.makedirs(out_dir,exist_ok=True)
-
-	print("Saving Image")
-	np.save(out_dir + "/" + name + ".npy", im2)
-	
-	tri = np3D.numpy2stl(im2)
-	facets = np3D.triangles_to_facets(tri)
-	
-	print("Saving STL")
-	np3D.writeSTL(facets, out_dir + "/" + name + ".stl")

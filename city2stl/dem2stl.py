@@ -27,7 +27,7 @@ import matplotlib.cm as cm
 
 from skimage.transform import resize
 
-from .numpy2stl import numpy2stl as np2stl
+from numpy2stl import numpy2stl as np2stl
 #import numpy2stl as np2stl
 
 class DEM:
@@ -89,7 +89,7 @@ class DEM:
         DEM = self.data
         if outsize > 0:
             res = np.array(outsize / np.amax(DEM.shape))
-            DEM = resize(DEM, np.round(np.array(DEM.shape) * res))
+            DEM = resize(DEM, np.round(np.array(DEM.shape) * res),order=3)
         self.data = DEM
 
     def mask_region(self, polygon):

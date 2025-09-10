@@ -92,8 +92,7 @@ def get_rivers(bbox, incl_streams=True):
     infra = '["waterway"="river"]'
     if incl_streams:
         infra = infra + '["waterway"="stream"]'     
-    G = ox.graph_from_bbox(*bbox, custom_filter = infra, 
-    simplify=True,  retain_all=True,  clean_periphery=False)
+    G = ox.graph_from_bbox(bbox, custom_filter = infra, simplify=True,  retain_all=True) #clean_periphery=False)
 
     rivers = []
     for u, v, data in G.edges(keys=False, data=True):
