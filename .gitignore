@@ -7,3 +7,5 @@ cache
 *.tif
 *.tiff
 *.png
+
+osm_raw_cache
