@@ -112,17 +112,20 @@ def building_heights(gdf):
 
         b_h,b_l = row[["height","building:levels"]]
 
+        H = 10
+
         if not pd.isnull(b_h):
             H = b_h
-        else:    
-            if not pd.isnull(b_l):    H = float(b_l) * 3.9  
-            else:                    H = 20
+        elif not pd.isnull(b_l):    
+            H = float(b_l) * 3  
 
         geometry = row.geometry
         if isinstance(geometry, Polygon):
             Heights.append(float(H))
         elif isinstance(geometry, MultiPolygon):
-            Heights.append(20)
+            Heights.append(H)
+        else:
+            Heights.append(H)
             #for subpolygon in geometry.geoms: 
                 
 

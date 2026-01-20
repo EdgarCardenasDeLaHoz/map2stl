@@ -5,62 +5,103 @@ import numpy as np
 import pandas as pd
 from shapely.geometry import Polygon
 import osmnx as ox
+from skimage import filters,transform
+
 
 from .buildings import *
 from .dem2stl import *
 from .osm2stl import *
 
-from .numpy2stl import numpy2stl as np2stl
 
-import glob 
+from numpy2stl.numpy2stl import simplify as simp
+
+def get_building_model(gdf, scale):
+
+    building_poly = get_polygons(gdf)
+    tris = triangulate_prism(building_poly)
+
+    vertices, faces = np2stl.vertices_to_index(tris)
+    vertices[:,[1,0]] = vertices[:,[0,1]]*1000
+    vertices[:,2] = vertices[:,2]*scale
+
+    return vertices, faces
 
 
-def location2solid(center, scale, tags, dist):
+def get_landspace_model(data, bounds_NW=None, scale=1, simplify=True):
 
-    coor_lims = np.array([(38, 37),(-4, -3)])
-    fn = "C:/Users/eac84/Desktop/Desktop/Tasks/srtm_tifs/n37_w004_1arc_v3.jpg"
-    xl_fn = glob.glob(fn)
-    im = plt.imread(xl_fn[0])
+    ####################
+    facet = np2stl.numpy2stl(data)
+    solid = np2stl.Solid(facet)
+    
+    vx = solid.vertices.copy().astype(float)
+    fs = solid.faces.copy()
 
-    gdf = ox.features.features_from_point(center, tags, dist=dist)
+    if simplify:
+        _, fs = simp.simplify_mesh_surfaces(vx,fs)
 
-    ##################
-    tris = collect_building_heights(gdf, im, coor_lims)
+        ########################
+    if bounds_NW is None:
+        im_lims = ((0,data.shape[0]),(0,data.shape[1])) 
+        vx = reposition_dem(vx, im_lims, bounds_NW )
+
+    ########################
+    vx[:,[0,1]] = vx[:,[0,1]]*1000    
+    vx[:,2] = vx[:,2] * scale    
+
+    return vx, fs
+
+def get_bounds_model(gdf, scale):
+    
+    
+    x_ = gdf["geometry"]
+    xy_list = np.array([[x.centroid.x,  x.centroid.y] for x in x_])
+    Nc,Wc = xy_list.T
+    c,d,a,b= Nc.max(),Nc.min(),Wc.max(),Wc.min()    
+
+    prism_dict = {}
+    prism_dict['z1'] = 100
+    prism_dict['z0'] = 0
+    prism_dict['points'] = np.array([[c,a],[c,b],[d,b],[d,a],[c,a]]).T
+
+    tris = triangulate_prism([prism_dict])
     vertices, faces = np2stl.vertices_to_index(tris)
     vertices[:,[1,0]] = vertices[:,[0,1]]
     vertices[:,2] = vertices[:,2] * scale
     vertices = vertices*1000
-    ##################
 
+    return vertices, faces
+
+
+def get_bbox(gdf):
     x_ = gdf["geometry"]
     xy_list = np.array([[x.centroid.x,  x.centroid.y] for x in x_])
-    im_lims = np.array(((0,im.shape[0]),(0,im.shape[1])))
-    Nc, Wc = coor2im(coor_lims, im_lims, xy_list)
-    bounds = Nc.max(),Nc.min(),Wc.max(),Wc.min()
-    vx, solid = bounds_to_vertices(im, coor_lims, bounds, scale=scale )
+    Nc,Wc = xy_list.T
+    bounds_rc = Nc.max(),Nc.min(),Wc.max(),Wc.min()    
 
-    models = {}
-    models["buildings"] = (vertices, faces)
-    models["landscape"] = (vx, solid.faces)
+    b = bounds_rc
+    bounds_rc = [[b[2],b[3]],[b[1],b[0]]]
 
-    return models
+    return bounds_rc
 
 
 
-def collect_building_heights(gdf, im, coor_lims):
+def get_bounds_(gdf, im_shape, coor_lims):
+    x_ = gdf["geometry"]
+    xy_list = np.array([[x.centroid.x,  x.centroid.y] for x in x_])
+    Nc,Wc = xy_list.T
+    bounds_rc = Nc.max(),Nc.min(),Wc.max(),Wc.min()    
 
-    H = get_base_height(gdf, im, coor_lims)   
-     
-    gdf["heights"] = building_heights(gdf)*.05
+    b = bounds_rc
+    bounds_rc = [[b[2],b[3]],[b[1],b[0]]]
+    
+    #Flip these commands to that mx and min happen before conversion 
 
-    gdf["topo_base"] = H
-    gdf["z0"] = gdf["topo_base"]
-    gdf["z1"] = gdf["z0"]+ gdf["heights"]
+    im_lims = np.array(((0,im_shape[0]),(0,im_shape[1])))
+    Yc, Xc = coor2im(coor_lims, im_lims, xy_list)
+    bounds = Yc.max(),Yc.min(),Xc.max(),Xc.min()
 
-    building_poly = get_polygons(gdf)
-    tris = triangulate_buildings(building_poly)
 
-    return tris
+    return bounds, bounds_rc
 
 def get_base_height(gdf, im, coor_lims):
 
@@ -75,15 +116,12 @@ def get_base_height(gdf, im, coor_lims):
     ###########################
     im_lims = np.array([(0,im.shape[0]),(0,im.shape[1])])
     Nc, Wc = coor2im(coor_lims, im_lims, xy_list)
-    
-    Nx,Sx = Nc.max(),Nc.min()
-    Ex,Wx = Wc.max(),Wc.min()
 
+    Nc = Nc.clip(0,im.shape[0]-1)
+    Wc = Wc.clip(0,im.shape[1]-1)
+    
     ############################
-    H = im[Nc, Wc] *.8
-    data =  im[int(Sx):int(Nx), int(Wx):int(Ex)] *.8
-    #####################
-    H = (H) - data.min() + 1
+    H = im[Nc, Wc] 
 
     return H
 
@@ -119,56 +157,33 @@ def coor2im(coor_lims, im_lims, xy_list, asint=True):
 
     return Ncoor, Wcoor
 
-from skimage import filters,transform
-
-def bounds_to_vertices(im, coor_lims, bounds,  scale=.1 ):
-          
+def crop_image_bounds(im, bounds):
     Nx,Sx, Ex,Wx = bounds
         
     ###################### 
     data =  im[int(Sx):int(Nx), int(Wx):int(Ex)]
-    data = 0.8 * data
-    data = data - data.min() + 1
-    im_lims = ((0,im.shape[0]),(0,im.shape[1]))
-        
-    ##################### 
-    rho = 2
+    data = 1.0 * data
+
+    rho = 0.2
     outshape = np.array(data.shape)*rho
     data = transform.resize(data, outshape)
-    im_lims = np.array(im_lims)*rho
-    bounds = np.array(bounds)*rho
+
         
-    ####################
-    facet = np2stl.numpy2stl(data)
-    solid = np2stl.Solid(facet)
-    vx = solid.vertices.copy().astype(float)
-    ########################
-    vx = reposition_dem(vx, im_lims, coor_lims, bounds)
-    ########################
-    vx[:,2] = vx[:,2] * scale
-    vx = vx*1000
-
-    return vx, solid
+    return data
 
 
-def reposition_dem(vx, im_lims, coor_lims, bounds):
-
-  Nx,Sx,Wx,Ex = bounds
-  x,y = vx[:,1],vx[:,0]
-  x = x + Sx
-  y = y + Ex
-
-  imcoor = np.array((y,x)).T*1.
+def reposition_dem(vx, im_lims, coor_lims):
 
   N0,N1 = coor_lims[0]
-
   W0,W1 = coor_lims[1]
   X0,X1 = im_lims[0]
   Y0,Y1 = im_lims[1]
 
   #if N1<N0: N1,N0 = N0,N1
-  #if W1<W0: W1,W0 = W0,W1
+  #if W1<W0: W1,W0 = W0,W1  
+  x,y = vx[:,1],vx[:,0]
 
+  imcoor = np.array((y,x)).T*1.
   Ncoor = map( X0*1., X1*1., N0,N1, imcoor[:,1])
   Wcoor = map( Y0*1., Y1*1., W0,W1, imcoor[:,0])
   
@@ -187,9 +202,6 @@ def map(low_in, high_in, low_out, high_out, qx):
 
   return ix
 
-
-from shapely.ops import cascaded_union
-from shapely.geometry import Polygon,MultiPolygon
 from shapely.geometry import polygon
 
 def polygon_to_perimeter(poly):
@@ -263,7 +275,7 @@ def shapely_to_buildings(shp_poly, z0=1,z1=39,polygons=None):
         
     return polygons
 
-def triangulate_buildings(polygons):
+def triangulate_prism(polygons):
 
     triangles = []
 
@@ -271,10 +283,10 @@ def triangulate_buildings(polygons):
 
         roof = p['z1'] 
         base = p['z0'] 
-        vert = p['points'].T
+        vert = np.array(p['points']).T
 
-        #if (np.isclose(vert[0],vert[-1])):   
-        vert = vert[:-1]
+        if (np.isclose(vert[0],vert[-1]).all()):   
+            vert = vert[:-1]
 
         zdim = np.zeros((len(vert),1)) + roof
         vert = np.concatenate([vert, zdim],axis=1)        
