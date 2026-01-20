@@ -1,6 +1,7 @@
 import os
 
-
+import numpy as np
+from numpy2stl.numpy2stl import numpy2stl, triangles_to_facets, writeSTL
 
 def savefile(out_dir, name, im2 ):
 
