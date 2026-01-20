@@ -7,6 +7,7 @@ def view3D_napari(solid):
 	
 	vertices = solid.vertices.copy().astype(float)
 	faces = solid.faces
+	
 	v = napari.current_viewer()
 	if v is None: v = napari.Viewer()
 	v.layers.clear()
