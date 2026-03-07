@@ -1,40 +1,34 @@
 import os 
 import sys
 
+import trimesh
+import glob
 
 import numpy as np
 import pandas as pd
-from shapely.geometry import Polygon
+
 import osmnx as ox
+import cv2
 
-from geo2stl import geo2stl as g2s
-from geo2stl import sat2stl as s2s
-
-import trimesh
-import glob
+from shapely.geometry import Polygon
+from shapely.geometry import Polygon, MultiPolygon
+from shapely.ops import unary_union
 
 import numba
 import matplotlib.pyplot as plt
 
-from city2stl.create import (get_building_model, 
-														 get_landspace_model, 
-														 get_bounds_model, crop_image_bounds, 
-														 get_bounds_, get_bbox)
-from city2stl import create
+from skimage import io, filters, morphology, transform
 
-import city2stl.dem2stl as d2s
-from skimage import transform
 from numpy2stl import numpy2stl as n2s
+from geo2stl import geo2stl as g2s
+from geo2stl import sat2stl as s2s
 
-from shapely.geometry import Polygon, MultiPolygon
-from shapely.ops import unary_union
-
-import cv2
-
+from city2stl import create
+import city2stl.dem2stl as d2s
 
 def fill_building_heights(gdf):
-
-		a = 20
+		
+		cut_off = 50
 
 		if 'building:levels' not in gdf.columns:
 			gdf['building:levels'] = 3
@@ -44,13 +38,19 @@ def fill_building_heights(gdf):
 		
 		gdf['building_m'] = gdf['building:levels'] * 4.0
 
+
 		if 'height' not in gdf.columns:
 			gdf['height'] = gdf['building_m']
 			
 		gdf['height'] = gdf['height'].fillna(gdf['building_m'])
 		gdf['height'] = pd.to_numeric(gdf['height'], errors='coerce').fillna(10) 
-		gdf['height'] = ((gdf['height']/a).round(0)*a).astype(int)
-		gdf['height'] = gdf['height'] * 0.1
+		
+		H = gdf['height'].values
+		bx = H<cut_off
+		x = H[bx]
+		x = x.round(1).clip(cut_off)
+		H[bx] = x 		
+		gdf['height'] = H
 
 		return gdf
 
@@ -214,7 +214,7 @@ def resize_max(im, max_size=1000):
 
 ################### Write to file ##########################
 
-def rescale(im, max_size=600, height=20, base=0.1, clip= None, smooth=None):
+def rescale(im, max_size=600, height=20, base=10, clip= None, smooth=None):
 	
 	im = resize_max(im, max_size=max_size)
 
@@ -228,9 +228,10 @@ def rescale(im, max_size=600, height=20, base=0.1, clip= None, smooth=None):
 		lo,hi = np.percentile(im.ravel(), clip)
 		im = im.clip(lo,hi)	
 	
-	im  = im - im.min() + im.ptp()*base
-	im = im / im.ptp()*height
+	im = im - im.min() 
 
+	im = im / im.ptp()* height
+	im = im + base
 	return im 
 
 

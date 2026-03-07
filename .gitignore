@@ -9,3 +9,4 @@ cache
 *.png
 
 osm_raw_cache
+ee_cache/*

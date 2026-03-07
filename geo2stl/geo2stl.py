@@ -5,6 +5,18 @@ import os
 
 from skimage import io
 
+import json
+import glob
+import os
+
+# Load the configuration
+with open('config.json', 'r') as f:
+    config = json.load(f)
+
+# Access the path from the JSON
+ocean_root = config["ocean_root"]
+tile_files = glob.glob(os.path.join(ocean_root, "*.tif"))
+
 
 def parse_extent_from_filename(filename):
 	match = re.search(r'n([-\d.]+)_s([-\d.]+)_w([-\d.]+)_e([-\d.]+)', filename)
@@ -53,8 +65,8 @@ def parse_extent_from_filename(filename):
 	else:
 		raise ValueError(f"Could not parse extent from filename: {filename}")
 
-def stitch_tiles_no_rasterio(tile_files, target_bbox):
-	print("==== Stitching tiles without rasterio ====")
+def stitch_tiles_no_rasterio(target_bbox):
+	print("==== Stitching tiles ====")
 	print(f"Target bounding box: {target_bbox}")
 	
 
@@ -92,7 +104,8 @@ def stitch_tiles_no_rasterio(tile_files, target_bbox):
 		stitched_rows.append(row)
 
 	final_image = np.vstack(stitched_rows)
-	print("✅ Finished stitching without rasterio.")
+
+	print("✅ Finished stitching")
 	return final_image
 
 
@@ -120,6 +133,8 @@ def proj_map_height(mat,NSEW):
 
 
 def proj_map_geo_to_2D(mat,NSEW, clip_out=True):
+		
+		NSEW = np.array(NSEW)
 		
 		lat = NSEW[[0,1]]
 		lon = NSEW[[2,3]]

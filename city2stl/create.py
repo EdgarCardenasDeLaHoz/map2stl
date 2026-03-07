@@ -22,6 +22,7 @@ def get_building_model(gdf, scale):
 
     vertices, faces = np2stl.vertices_to_index(tris)
     vertices[:,[1,0]] = vertices[:,[0,1]]*1000
+
     vertices[:,2] = vertices[:,2]*scale
 
     return vertices, faces
@@ -36,16 +37,16 @@ def get_landspace_model(data, bounds_NW=None, scale=1, simplify=True):
     vx = solid.vertices.copy().astype(float)
     fs = solid.faces.copy()
 
-    if simplify:
-        _, fs = simp.simplify_mesh_surfaces(vx,fs)
-
-        ########################
-    if bounds_NW is None:
+    if bounds_NW is not None:
         im_lims = ((0,data.shape[0]),(0,data.shape[1])) 
         vx = reposition_dem(vx, im_lims, bounds_NW )
+        vx[:,[0,1]] = vx[:,[0,1]]*1000
+
+    if simplify:
+        fs = simp.simplify_mesh_surfaces(vx,fs)
 
     ########################
-    vx[:,[0,1]] = vx[:,[0,1]]*1000    
+    vx[:,[0,1]] = vx[:,[0,1]]    
     vx[:,2] = vx[:,2] * scale    
 
     return vx, fs

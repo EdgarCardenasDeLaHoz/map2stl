@@ -3,36 +3,53 @@ import os
 import numpy as np
 from numpy2stl.numpy2stl import numpy2stl, triangles_to_facets, writeSTL
 
-def savefile(out_dir, name, im2 ):
+def savefile(out_dir, name, im ):
 
-	im2 = im2.copy()
+		im = im.copy()
+		if not os.path.isdir(out_dir): 
+			print("folder not found")
+			return
+		
+		if im.min()< 0.001:
+			print("warning values less than zero")
+			return 
 
-	if im2.min()< 1:
-		print("warning values less than zero")
-		#return 
-	
-	if not os.path.isdir(out_dir): return
+		out_dir = out_dir + "/" + name 
+		os.makedirs(out_dir,exist_ok=True)
 
-	out_dir = out_dir + "/" + name 
-	os.makedirs(out_dir,exist_ok=True)
+		filename = out_dir + "/" + name + ".npy"
+		save_im(filename, im)
 
-	print("Saving Image")
+		filename = out_dir + "/" + name + ".stl"
+		save_stl(filename, im)
 
-	filename = out_dir + "/" + name + ".npy"
-	if os.path.isfile(filename):
-		filename = filename.replace(".npy", "_1.npy")
+
+def save_im(filename, im):
+		if os.path.isfile(filename):
+			filename = filename.replace(".npy", "_1.npy")
 		print("File already exists, saving as " + filename)
-	np.save(filename, im2)
+		np.save(filename, im)
 
-	im2 = im2[::-1]
-	
-	tri = numpy2stl(im2)
-	facets = triangles_to_facets(tri)
+def save_stl(filename, im):
 
-	filename = out_dir + "/" + name + ".stl"
-	if os.path.isfile(filename):
-		filename = filename.replace(".stl", "_1.stl")
-	
-	print("Saving STL")
-	writeSTL(facets, filename)
+		im = im[::-1]
+		
+		tri = numpy2stl(im)
+		facets = triangles_to_facets(tri)
+
+		
+		if os.path.isfile(filename):
+			filename = filename.replace(".stl", "_1.stl")
+		
+		print("Saving STL")
+		writeSTL(facets, filename)
+
+
+
+
+
+
+
+
+
      
