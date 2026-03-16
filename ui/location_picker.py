@@ -26,7 +26,8 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),  # Keep logging to console
-        RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=3)  # Log to file with rotation
+        RotatingFileHandler(log_file, maxBytes=5*1024*1024,
+                            backupCount=3)  # Log to file with rotation
     ]
 )
 logger = logging.getLogger(__name__)
@@ -104,10 +105,14 @@ else:
 
 class BoundingBox(BaseModel):
     """Geographic bounding box using cardinal directions."""
-    north: float = Field(..., ge=-90, le=90, description="Northern latitude bound")
-    south: float = Field(..., ge=-90, le=90, description="Southern latitude bound")
-    east: float = Field(..., ge=-180, le=180, description="Eastern longitude bound")
-    west: float = Field(..., ge=-180, le=180, description="Western longitude bound")
+    north: float = Field(..., ge=-90, le=90,
+                         description="Northern latitude bound")
+    south: float = Field(..., ge=-90, le=90,
+                         description="Southern latitude bound")
+    east: float = Field(..., ge=-180, le=180,
+                        description="Eastern longitude bound")
+    west: float = Field(..., ge=-180, le=180,
+                        description="Western longitude bound")
 
     @validator("north")
     def north_gt_south(cls, v, values):
@@ -128,18 +133,24 @@ class BoundingBoxLegacy(BaseModel):
 
 class RegionParameters(BaseModel):
     """Rendering and export parameters stored with a saved region."""
-    dim: int = Field(200, ge=1, le=2000, description="Grid resolution (pixels per side)")
-    depth_scale: float = Field(0.5, ge=0.0, le=10.0, description="Depth scaling for ocean floor")
-    water_scale: float = Field(0.05, ge=0.0, le=1.0, description="Water subtraction strength")
+    dim: int = Field(200, ge=1, le=2000,
+                     description="Grid resolution (pixels per side)")
+    depth_scale: float = Field(
+        0.5, ge=0.0, le=10.0, description="Depth scaling for ocean floor")
+    water_scale: float = Field(
+        0.05, ge=0.0, le=1.0, description="Water subtraction strength")
     height: float = Field(10.0, ge=0.0, description="Model height in mm")
     base: float = Field(2.0, ge=0.0, description="Base thickness in mm")
-    subtract_water: bool = Field(True, description="Whether to subtract water bodies from terrain")
-    sat_scale: int = Field(500, ge=10, description="Earth Engine scale in metres/pixel for satellite data")
+    subtract_water: bool = Field(
+        True, description="Whether to subtract water bodies from terrain")
+    sat_scale: int = Field(
+        500, ge=10, description="Earth Engine scale in metres/pixel for satellite data")
 
 
 class RegionCreate(BoundingBox):
     """Request body for creating or updating a saved region."""
-    name: str = Field(..., min_length=1, max_length=128, description="Unique region name")
+    name: str = Field(..., min_length=1, max_length=128,
+                      description="Unique region name")
     description: Optional[str] = Field(None, max_length=512)
     parameters: Optional[RegionParameters] = None
 
@@ -165,14 +176,18 @@ class DEMRequest(BoundingBox):
     height: float = Field(10.0, ge=0.0)
     base: float = Field(2.0, ge=0.0)
     subtract_water: bool = True
-    dataset: str = Field("esa", description="Elevation dataset: 'esa', 'copernicus', 'nasadem', 'usgs', 'gebco'")
-    colormap: str = Field("terrain", description="Matplotlib colormap name for client-side rendering")
-    show_landuse: bool = Field(False, description="Include ESA land-cover overlay")
+    dataset: str = Field(
+        "esa", description="Elevation dataset: 'esa', 'copernicus', 'nasadem', 'usgs', 'gebco'")
+    colormap: str = Field(
+        "terrain", description="Matplotlib colormap name for client-side rendering")
+    show_landuse: bool = Field(
+        False, description="Include ESA land-cover overlay")
 
 
 class DEMResponse(BaseModel):
     """Raw elevation data returned for client-side rendering."""
-    dem_values: List[float] = Field(..., description="Flat row-major array of elevation values (metres)")
+    dem_values: List[float] = Field(
+        ..., description="Flat row-major array of elevation values (metres)")
     dimensions: List[int] = Field(..., description="[height_px, width_px]")
     min_elevation: float
     max_elevation: float
@@ -190,26 +205,33 @@ class RawDEMResponse(BaseModel):
     min_elevation: float
     max_elevation: float
     mean_elevation: float
-    ptp: float = Field(..., description="Peak-to-peak range for client-side water scale calculation")
+    ptp: float = Field(...,
+                       description="Peak-to-peak range for client-side water scale calculation")
     bbox: List[float]
 
 
 class WaterMaskRequest(BoundingBox):
     """Parameters for fetching a water / land-cover mask."""
-    sat_scale: int = Field(500, ge=10, description="Earth Engine resolution in metres/pixel")
+    sat_scale: int = Field(
+        500, ge=10, description="Earth Engine resolution in metres/pixel")
     dim: int = Field(200, ge=1, le=2000)
-    target_width: Optional[int] = Field(None, description="Resize output to match DEM pixel width")
-    target_height: Optional[int] = Field(None, description="Resize output to match DEM pixel height")
+    target_width: Optional[int] = Field(
+        None, description="Resize output to match DEM pixel width")
+    target_height: Optional[int] = Field(
+        None, description="Resize output to match DEM pixel height")
 
 
 class WaterMaskResponse(BaseModel):
     """Binary water mask and ESA land-cover data for the requested bbox."""
-    water_mask_values: List[float] = Field(..., description="Flat binary array: 1 = water, 0 = land")
-    water_mask_dimensions: List[int] = Field(..., description="[height_px, width_px]")
+    water_mask_values: List[float] = Field(
+        ..., description="Flat binary array: 1 = water, 0 = land")
+    water_mask_dimensions: List[int] = Field(...,
+                                             description="[height_px, width_px]")
     water_pixels: int
     total_pixels: int
     water_percentage: float
-    esa_values: Optional[List[float]] = Field(None, description="Raw ESA WorldCover class values")
+    esa_values: Optional[List[float]] = Field(
+        None, description="Raw ESA WorldCover class values")
     esa_dimensions: Optional[List[int]] = None
 
 
@@ -217,7 +239,8 @@ class SatelliteRequest(BoundingBox):
     """Parameters for fetching satellite / land-cover imagery."""
     dataset: str = Field("esa", description="'esa', 'copernicus', 'jrc'")
     dim: int = Field(200, ge=1, le=2000)
-    scale: Optional[int] = Field(None, description="Earth Engine resolution in metres/pixel")
+    scale: Optional[int] = Field(
+        None, description="Earth Engine resolution in metres/pixel")
 
 
 class SatelliteResponse(BaseModel):
@@ -232,13 +255,18 @@ class SatelliteResponse(BaseModel):
 
 class ExportRequest(BoundingBox):
     """Parameters for generating a 3D model file."""
-    dem_values: List[float] = Field(..., description="Flat row-major elevation array from /api/terrain/dem")
+    dem_values: List[float] = Field(
+        ..., description="Flat row-major elevation array from /api/terrain/dem")
     height: int = Field(0, description="Grid height in pixels")
     width: int = Field(0, description="Grid width in pixels")
-    model_height: float = Field(20.0, ge=0.1, description="Physical model height in mm")
-    base_height: float = Field(5.0, ge=0.0, description="Base plate thickness in mm")
-    exaggeration: float = Field(1.0, ge=0.0, description="Vertical exaggeration multiplier")
-    name: str = Field("terrain", max_length=64, description="Output file base name")
+    model_height: float = Field(
+        20.0, ge=0.1, description="Physical model height in mm")
+    base_height: float = Field(
+        5.0, ge=0.0, description="Base plate thickness in mm")
+    exaggeration: float = Field(
+        1.0, ge=0.0, description="Vertical exaggeration multiplier")
+    name: str = Field("terrain", max_length=64,
+                      description="Output file base name")
 
 
 class ExportResponse(BaseModel):
@@ -777,12 +805,14 @@ async def get_water_mask(request: Request):
         _mid_lat = (north + south) / 2.0
         _m_per_deg_lon = 111000.0 * _math.cos(_math.radians(_mid_lat))
         _m_per_deg_lat = 111000.0
-        _est_px = (_bbox_w * _m_per_deg_lon / sat_scale) * (_bbox_h * _m_per_deg_lat / sat_scale)
+        _est_px = (_bbox_w * _m_per_deg_lon / sat_scale) * \
+            (_bbox_h * _m_per_deg_lat / sat_scale)
         _MAX_PX = 5_000_000
         if _est_px > _MAX_PX:
             _scale_factor = _math.sqrt(_est_px / _MAX_PX)
             sat_scale = max(sat_scale, int(sat_scale * _scale_factor))
-            logger.info(f"Auto-scaled sat_scale to {sat_scale} for {_bbox_w:.1f}° × {_bbox_h:.1f}° area")
+            logger.info(
+                f"Auto-scaled sat_scale to {sat_scale} for {_bbox_w:.1f}° × {_bbox_h:.1f}° area")
 
         if TEST_MODE:
             h, w = (target_height or dim, target_width or dim)
@@ -820,13 +850,15 @@ async def get_water_mask(request: Request):
                 from geo2stl.geo2stl import stitch_tiles_no_rasterio as _stitch
                 _elevation_raw = _stitch((north, south, east, west))
             except Exception as _e:
-                logger.warning(f"Could not fetch elevation tiles for bathymetry check: {_e}")
+                logger.warning(
+                    f"Could not fetch elevation tiles for bathymetry check: {_e}")
         finally:
             os.chdir(original_cwd)
 
         if img is None:
             return JSONResponse(
-                content={"error": "Failed to fetch ESA land cover data. The area may be too large or outside coverage."},
+                content={
+                    "error": "Failed to fetch ESA land cover data. The area may be too large or outside coverage."},
                 status_code=500
             )
 
@@ -838,7 +870,8 @@ async def get_water_mask(request: Request):
 
         # Resize to match DEM pixel dimensions if provided
         if target_width and target_height and (img.shape[1] != target_width or img.shape[0] != target_height):
-            img = _cv2.resize(img.astype(np.float32), (target_width, target_height), interpolation=_cv2.INTER_NEAREST)
+            img = _cv2.resize(img.astype(
+                np.float32), (target_width, target_height), interpolation=_cv2.INTER_NEAREST)
 
         h, w = img.shape
 
@@ -852,7 +885,8 @@ async def get_water_mask(request: Request):
                 _elevation_raw.astype(np.float32), (w, h),
                 interpolation=_cv2.INTER_LINEAR
             )
-            water_mask = np.maximum(water_mask, (elev_resized < 0).astype(float))
+            water_mask = np.maximum(
+                water_mask, (elev_resized < 0).astype(float))
 
         water_pixels = int(np.sum(water_mask))
         total_pixels = h * w
@@ -1250,7 +1284,8 @@ async def create_region(region: RegionCreate):
     """Save a new geographic region."""
     coordinates_path = COORDINATES_PATH
     try:
-        data = json.loads(coordinates_path.read_text()) if coordinates_path.exists() else {"regions": []}
+        data = json.loads(coordinates_path.read_text()
+                          ) if coordinates_path.exists() else {"regions": []}
         payload = region.dict()
         if payload.get("parameters") is None:
             payload["parameters"] = RegionParameters().dict()
@@ -1267,13 +1302,15 @@ async def update_region(name: str, region: RegionCreate):
     """Update an existing saved region by name."""
     coordinates_path = COORDINATES_PATH
     try:
-        data = json.loads(coordinates_path.read_text()) if coordinates_path.exists() else {"regions": []}
+        data = json.loads(coordinates_path.read_text()
+                          ) if coordinates_path.exists() else {"regions": []}
         regions = data.get("regions", [])
         for i, r in enumerate(regions):
             if r.get("name") == name:
                 payload = region.dict()
                 if payload.get("parameters") is None:
-                    payload["parameters"] = r.get("parameters", RegionParameters().dict())
+                    payload["parameters"] = r.get(
+                        "parameters", RegionParameters().dict())
                 regions[i] = payload
                 coordinates_path.write_text(json.dumps(data, indent=2))
                 return JSONResponse(content=payload)
@@ -1356,7 +1393,8 @@ async def get_elevation_profile(
     lon1: float = Query(..., ge=-180, le=180, description="Start longitude"),
     lat2: float = Query(..., ge=-90, le=90, description="End latitude"),
     lon2: float = Query(..., ge=-180, le=180, description="End longitude"),
-    samples: int = Query(100, ge=2, le=1000, description="Number of sample points along the transect"),
+    samples: int = Query(
+        100, ge=2, le=1000, description="Number of sample points along the transect"),
 ):
     """
     Return an elevation profile along a straight transect between two points.
@@ -1446,16 +1484,20 @@ async def list_colormaps():
           can show a tooltip.
     """
     colormaps = [
-        ColormapInfo(id="terrain", description="Classic green-brown-white terrain"),
-        ColormapInfo(id="viridis", description="Perceptually uniform, colorblind-safe"),
+        ColormapInfo(
+            id="terrain", description="Classic green-brown-white terrain"),
+        ColormapInfo(
+            id="viridis", description="Perceptually uniform, colorblind-safe"),
         ColormapInfo(id="plasma", description="High-contrast warm gradient"),
         ColormapInfo(id="magma", description="Dark background, bright peaks"),
-        ColormapInfo(id="inferno", description="Black-to-yellow fire gradient"),
+        ColormapInfo(
+            id="inferno", description="Black-to-yellow fire gradient"),
         ColormapInfo(id="cividis", description="Colorblind-safe blue-yellow"),
         ColormapInfo(id="gray", description="Grayscale hillshade"),
         ColormapInfo(id="ocean", description="Blue depth gradient"),
         ColormapInfo(id="hot", description="Black-red-yellow-white"),
-        ColormapInfo(id="RdBu", description="Diverging red-blue for anomaly maps"),
+        ColormapInfo(
+            id="RdBu", description="Diverging red-blue for anomaly maps"),
     ]
     return JSONResponse(content={"colormaps": [c.dict() for c in colormaps]})
 
@@ -1469,12 +1511,18 @@ async def list_datasets():
           code changes.
     """
     datasets = [
-        DatasetInfo(id="esa", name="ESA WorldCover 2020", description="10 m land cover classification", source="ESA/WorldCover/v100/2020", requires_auth=True),
-        DatasetInfo(id="copernicus", name="Copernicus DEM GLO-30", description="30 m global elevation model", source="COPERNICUS/DEM/GLO30", requires_auth=True),
-        DatasetInfo(id="nasadem", name="NASA SRTM / NASADEM", description="30 m void-filled SRTM elevation", source="NASA/NASADEM_HGT/001", requires_auth=True),
-        DatasetInfo(id="usgs", name="USGS 3DEP 10 m", description="10 m elevation (CONUS only)", source="USGS/3DEP/10m", requires_auth=True),
-        DatasetInfo(id="gebco", name="GEBCO 2022", description="450 m global ocean bathymetry + land", source="Local GEBCO GeoTIFFs", requires_auth=False),
-        DatasetInfo(id="jrc", name="JRC Global Surface Water", description="Water occurrence 1984–2021", source="JRC/GSW1_4/GlobalSurfaceWater", requires_auth=True),
+        DatasetInfo(id="esa", name="ESA WorldCover 2020", description="10 m land cover classification",
+                    source="ESA/WorldCover/v100/2020", requires_auth=True),
+        DatasetInfo(id="copernicus", name="Copernicus DEM GLO-30",
+                    description="30 m global elevation model", source="COPERNICUS/DEM/GLO30", requires_auth=True),
+        DatasetInfo(id="nasadem", name="NASA SRTM / NASADEM", description="30 m void-filled SRTM elevation",
+                    source="NASA/NASADEM_HGT/001", requires_auth=True),
+        DatasetInfo(id="usgs", name="USGS 3DEP 10 m", description="10 m elevation (CONUS only)",
+                    source="USGS/3DEP/10m", requires_auth=True),
+        DatasetInfo(id="gebco", name="GEBCO 2022", description="450 m global ocean bathymetry + land",
+                    source="Local GEBCO GeoTIFFs", requires_auth=False),
+        DatasetInfo(id="jrc", name="JRC Global Surface Water", description="Water occurrence 1984–2021",
+                    source="JRC/GSW1_4/GlobalSurfaceWater", requires_auth=True),
     ]
     return JSONResponse(content={"datasets": [d.dict() for d in datasets]})
 
@@ -1501,7 +1549,7 @@ def _build_global_dem_cache(force: bool = False) -> bool:
 
     static_dir = Path(__file__).parent / "static"
     static_dir.mkdir(exist_ok=True)
-    png_path  = static_dir / "global_dem.png"
+    png_path = static_dir / "global_dem.png"
     meta_path = static_dir / "global_dem_meta.json"
 
     if png_path.exists() and meta_path.exists() and not force:
@@ -1549,9 +1597,11 @@ def _build_global_dem_cache(force: bool = False) -> bool:
         (0.80, (0.55, 0.35, 0.20)),
         (1.00, (1.00, 1.00, 1.00)),
     ]
+
     def _tc(t):
         for i in range(len(_stops) - 1):
-            t0, c0 = _stops[i]; t1, c1 = _stops[i + 1]
+            t0, c0 = _stops[i]
+            t1, c1 = _stops[i + 1]
             if t0 <= t <= t1:
                 f = (t - t0) / (t1 - t0)
                 return tuple(c0[j] + f * (c1[j] - c0[j]) for j in range(3))
@@ -1588,7 +1638,7 @@ async def get_global_dem_overview(regen: bool = False):
     import json as _json
 
     static_dir = Path(__file__).parent / "static"
-    png_path  = static_dir / "global_dem.png"
+    png_path = static_dir / "global_dem.png"
     meta_path = static_dir / "global_dem_meta.json"
 
     if regen or not png_path.exists() or not meta_path.exists():
