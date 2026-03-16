@@ -1,0 +1,7 @@
+// Ensure the target element exists before setting innerHTML
+const satImageElement = document.getElementById('satImage');
+if (satImageElement) {
+satImageElement.innerHTML = 'Updated content';
+} else {
+console.error('satImage element not found in the DOM.');
+}

@@ -1,0 +1,776 @@
+/**
+ * 3D Maps Application - Main CSS Styles
+ * Extracted and organized from inline styles
+ */
+
+/* ============================================
+   CSS Variables
+   ============================================ */
+:root {
+  /* Colors */
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #2d2d2d;
+  --bg-tertiary: #404040;
+  --bg-input: #404040;
+
+  --text-primary: #e0e0e0;
+  --text-secondary: #aaaaaa;
+  --text-muted: #888888;
+
+  --accent-primary: #007acc;
+  --accent-hover: #005999;
+  --accent-light: #44aaff;
+
+  --border-color: #404040;
+  --border-light: #555555;
+  --border-dark: #444444;
+
+  --error-color: #ff4444;
+  --success-color: #44ff44;
+  --warning-color: #ffaa00;
+
+  /* Spacing */
+  --spacing-xs: 5px;
+  --spacing-sm: 10px;
+  --spacing-md: 15px;
+  --spacing-lg: 20px;
+  --spacing-xl: 30px;
+
+  /* Border Radius */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+
+  /* Transitions */
+  --transition-fast: 0.2s ease;
+  --transition-normal: 0.3s ease;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.4);
+
+  /* Sidebar */
+  --sidebar-width: 320px;
+  --sidebar-collapsed-width: 50px;
+}
+
+/* ============================================
+   Reset & Base Styles
+   ============================================ */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+  line-height: 1.5;
+}
+
+/* ============================================
+   Layout - App Container
+   ============================================ */
+.app-container {
+  display: flex;
+  height: 100vh;
+}
+
+/* ============================================
+   Sidebar Styles
+   ============================================ */
+.sidebar {
+  width: var(--sidebar-width);
+  background-color: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  transition: width var(--transition-normal);
+  overflow: hidden;
+}
+
+.sidebar.collapsed {
+  width: var(--sidebar-collapsed-width);
+}
+
+.sidebar-header {
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #333;
+}
+
+.sidebar.collapsed .sidebar-header {
+  padding: var(--spacing-md) var(--spacing-sm);
+  justify-content: center;
+}
+
+.sidebar-title {
+  font-size: 16px;
+  font-weight: 600;
+  transition: opacity var(--transition-normal);
+}
+
+.sidebar.collapsed .sidebar-title {
+  opacity: 0;
+}
+
+.sidebar-content {
+  flex: 1;
+  padding: var(--spacing-md);
+  overflow-y: auto;
+  transition: opacity var(--transition-normal);
+}
+
+.sidebar.collapsed .sidebar-content {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Toggle Button */
+.toggle-btn {
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 18px;
+  cursor: pointer;
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-fast);
+}
+
+.toggle-btn:hover {
+  background-color: var(--bg-tertiary);
+}
+
+/* Open Sidebar Button (floating) */
+.open-sidebar {
+  position: fixed;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2000;
+  background: var(--bg-secondary);
+  color: #fff;
+  border: none;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+/* ============================================
+   Main Content Area
+   ============================================ */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.main-header {
+  padding: var(--spacing-md) var(--spacing-lg);
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.main-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.content-area {
+  flex: 1;
+  padding: var(--spacing-lg);
+  overflow: hidden;
+  background-color: var(--bg-primary);
+}
+
+/* ============================================
+   Tabs
+   ============================================ */
+.tabs {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.tab {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  background-color: var(--bg-tertiary);
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  transition: all var(--transition-fast);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.tab:hover {
+  background-color: #505050;
+}
+
+.tab.active {
+  background-color: var(--accent-primary);
+  color: white;
+}
+
+/* DEM Subtabs */
+.dem-subtabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: var(--spacing-xs);
+  padding: 3px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.dem-subtab {
+  padding: 4px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  color: #ccc;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all var(--transition-fast);
+}
+
+.dem-subtab:hover {
+  background: #4a4a4a;
+  color: #fff;
+}
+
+.dem-subtab.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #fff;
+}
+
+/* ============================================
+   View Containers (Map, Globe, DEM)
+   ============================================ */
+.map-container,
+.globe-container,
+.dem-container {
+  height: 100%;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  background-color: #252525;
+}
+
+#map,
+#globe {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-xl);
+}
+
+/* ============================================
+   DEM Container Layout
+   ============================================ */
+.dem-container {
+  display: flex;
+  gap: var(--spacing-lg);
+  height: 100%;
+}
+
+.dem-image-section {
+  flex: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.dem-image-container {
+  flex: 1;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background-color: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+}
+
+.dem-image-container img,
+.dem-image-container canvas {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+/* DEM Image */
+#demImage {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-xl);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* DEM Controls Panel */
+.dem-controls {
+  flex: 1;
+  background-color: var(--bg-secondary);
+  padding: var(--spacing-lg);
+  border-radius: var(--radius-xl);
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+}
+
+/* Land Cover Container */
+.dem-landuse-container {
+  flex: 1;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background-color: var(--bg-primary);
+  margin-top: var(--spacing-sm);
+}
+
+/* DEM Info */
+.dem-info {
+  margin-top: var(--spacing-xs);
+  font-size: 12px;
+  color: #ccc;
+}
+
+/* ============================================
+   Water Mask & Satellite Containers
+   ============================================ */
+.water-mask-container,
+.satellite-container,
+.combined-container {
+  flex: 1;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background-color: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  min-height: 400px;
+}
+
+#waterMaskImage,
+#satelliteImage,
+#combinedImage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.water-mask-controls,
+.combined-controls {
+  padding: var(--spacing-sm);
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-dark);
+}
+
+.water-mask-controls .param-group,
+.combined-controls .param-group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: 8px;
+}
+
+.water-mask-controls label,
+.combined-controls label {
+  min-width: 180px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.water-mask-controls input[type="range"],
+.combined-controls input[type="range"] {
+  flex: 1;
+}
+
+.water-mask-controls button,
+.combined-controls button {
+  padding: 6px 12px;
+  margin-right: 8px;
+  background: var(--accent-primary);
+  border: none;
+  border-radius: var(--radius-md);
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.water-mask-controls button:hover,
+.combined-controls button:hover {
+  background: var(--accent-hover);
+}
+
+/* ============================================
+   Axes Overlay
+   ============================================ */
+.dem-axes-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: #ddd;
+  font-size: 12px;
+}
+
+.dem-axes-overlay .top,
+.dem-axes-overlay .bottom {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.dem-axes-overlay .left,
+.dem-axes-overlay .right {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.dem-axes-overlay .top {
+  top: 6px;
+}
+
+.dem-axes-overlay .bottom {
+  bottom: 6px;
+}
+
+.dem-axes-overlay .left {
+  left: 6px;
+  transform: translateY(-50%) rotate(-90deg);
+  transform-origin: left center;
+}
+
+.dem-axes-overlay .right {
+  right: 6px;
+  transform: translateY(-50%) rotate(90deg);
+  transform-origin: right center;
+}
+
+/* ============================================
+   Canvas Wrapper & Gridlines
+   ============================================ */
+.dem-canvas-wrapper {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  max-width: 100%;
+}
+
+.dem-gridlines-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.gridlines-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+
+.gridlines-toggle label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+/* ============================================
+   Form Controls
+   ============================================ */
+.control-group {
+  margin-bottom: var(--spacing-lg);
+}
+
+.control-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.control-group input,
+.control-group select {
+  width: 100%;
+  padding: var(--spacing-sm);
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.control-group input:focus,
+.control-group select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+/* Parameter Groups */
+.param-group {
+  margin: var(--spacing-md) 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.param-group label {
+  flex: 1;
+  font-weight: 500;
+}
+
+.param-group input {
+  flex: 1;
+  max-width: 100px;
+  padding: 6px 8px;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+}
+
+.param-group input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+/* ============================================
+   Buttons
+   ============================================ */
+.buttons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.buttons button {
+  padding: 12px;
+  background-color: var(--accent-primary);
+  border: none;
+  border-radius: var(--radius-md);
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color var(--transition-fast);
+}
+
+.buttons button:hover {
+  background-color: #0056b3;
+}
+
+.buttons button:disabled {
+  background-color: var(--border-light);
+  cursor: not-allowed;
+}
+
+/* ============================================
+   Coordinates List
+   ============================================ */
+.coordinates-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-md);
+  background-color: #252525;
+}
+
+.coordinate-item {
+  padding: 12px 15px;
+  border-bottom: 1px solid var(--border-dark);
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: background-color var(--transition-fast);
+}
+
+.coordinate-item:last-child {
+  border-bottom: none;
+}
+
+.coordinate-item:hover {
+  background-color: #333;
+}
+
+.coordinate-item.selected {
+  background-color: var(--accent-primary);
+  color: white;
+}
+
+/* ============================================
+   Coordinates Table
+   ============================================ */
+#coordsTable {
+  margin-top: var(--spacing-sm);
+}
+
+#coordsTable table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: #252525;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border-dark);
+}
+
+#coordsTable th,
+#coordsTable td {
+  border: 1px solid var(--border-dark);
+  padding: var(--spacing-sm);
+  text-align: left;
+}
+
+#coordsTable th {
+  background-color: #333;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+#coordsTable tbody tr:hover {
+  background-color: #333;
+}
+
+/* ============================================
+   Histogram & Colorbar
+   ============================================ */
+#histogram {
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background-color: #252525;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-dark);
+  min-height: 140px;
+}
+
+#histogram canvas {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  display: block;
+}
+
+#histogram img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+}
+
+#colorbar {
+  width: 100%;
+  height: 20px;
+  margin-top: var(--spacing-xs);
+}
+
+/* ============================================
+   Loading & Status
+   ============================================ */
+.loading {
+  text-align: center;
+  color: #666;
+  padding: var(--spacing-lg);
+}
+
+/* ============================================
+   Utility Classes
+   ============================================ */
+.hidden {
+  display: none !important;
+}
+
+/* ============================================
+   Model Container
+   ============================================ */
+.model-container {
+  display: none;
+  flex-direction: column;
+  height: 100%;
+}
+
+.model-viewport {
+  flex: 2;
+  background: var(--bg-primary);
+  border-radius: var(--radius-xl);
+  position: relative;
+}
+
+.model-overlay {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  color: #ccc;
+  font-size: 12px;
+}
+
+.model-controls {
+  flex: 1;
+  background: var(--bg-secondary);
+  padding: var(--spacing-lg);
+  border-radius: var(--radius-xl);
+  margin-top: var(--spacing-sm);
+  overflow-y: auto;
+}
+
+/* ============================================
+   Responsive Styles
+   ============================================ */
+@media (max-width: 1200px) {
+  .sidebar {
+    width: 280px;
+  }
+
+  .sidebar.collapsed {
+    width: 40px;
+  }
+}
+
+@media (max-width: 992px) {
+  .dem-container {
+    flex-direction: column;
+  }
+
+  .dem-controls {
+    flex: none;
+    max-height: 300px;
+  }
+}
+
+@media (max-width: 768px) {
+  .main-header {
+    flex-direction: column;
+    gap: var(--spacing-sm);
+  }
+
+  .tabs {
+    flex-wrap: wrap;
+  }
+
+  .sidebar {
+    position: absolute;
+    z-index: 10;
+    width: 100%;
+    height: auto;
+  }
+}
