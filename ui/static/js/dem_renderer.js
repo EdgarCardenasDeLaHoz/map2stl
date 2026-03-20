@@ -1,3 +1,4 @@
+/* DEAD — not loaded by app.js or index.html. Editing this file has no effect on the running app. */
 // dem_renderer.js
 // Provides functions to render DEM canvas, draw colorbar, and render histogram using Plotly
 

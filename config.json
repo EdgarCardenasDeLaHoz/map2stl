@@ -1,3 +1,4 @@
 {
-    "ocean_root": "C:/Users/eac84/Desktop/Desktop/Tasks/srtm_tifs/gebco_2025_geotiff/"
+    "ocean_root": "C:/Users/eac84/Desktop/Desktop/Tasks/srtm_tifs/gebco_2025_geotiff/", 
+    "opentopo_api_key": "3d2f68e9d187c83d3a6ae01e171da59d"
 }

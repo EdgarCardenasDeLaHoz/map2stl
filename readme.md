@@ -72,23 +72,19 @@ import numpy as np
 ```
 
 ### Web UI
-Launch the location picker UI:
+Launch the interactive terrain editor:
 ```bash
-python strm2stl/ui/location_picker.py
+python main.py          # or: python strm2stl/ui/location_picker.py
 ```
-Then open http://127.0.0.1:9000 in your browser to select bounding boxes interactively.
+Then open http://localhost:9000 in your browser.
 
-The interface allows you to:
+The UI has three main views:
 
-- Draw or edit bounding boxes on a 2D map.
-- Toggle to a 3D globe showing markers for every stored region.
-- Load a previously saved region from a dropdown list.
-- Preview DEM statistics for the current selection.
-- Save custom selections by giving them a name.
+- **Explore** — 2D Leaflet map + 3D globe. Draw or select a bounding box, manage saved regions.
+- **Edit** — DEM preview with stacked layer canvas (elevation, water mask, satellite, gridlines). Adjust colormap, projection, resolution, and bbox. Export STL/OBJ/3MF directly from this view.
+- **Extrude** — 3D model preview (Three.js) with orbit controls; download the final model.
 
-All saved regions are kept in the `coordinates.json` file located at the package root. The UI reads from and writes to this file, and it is pre-populated with a set of regions extracted from the original `Oceans.ipynb` notebook, including entries such as `Appalachia`, `Vermont`, `North Jersey`, `Grand Canyon`, `Amazon`, and more.
-
-The file has the following structure:
+Saved regions are stored in `strm2stl/coordinates.json`:
 
 ```json
 {
@@ -99,13 +95,14 @@ The file has the following structure:
       "south": 40.0,
       "east": -70.0,
       "west": -80.0,
-      "description": "Optional text"
+      "description": "Optional text",
+      "parameters": { "dim": 200, "depth_scale": 0.5, "height": 10.0, "base": 2.0 }
     }
   ]
 }
 ```
 
-You can manually edit this JSON or let the application manage it through the "Save Current Selection" button.
+Use the **💾 Save bbox** button in the Edit view to persist a modified bounding box back to this file. See `docs/WEB_APP_ANALYSIS.md` for full API and feature reference.
 
 ### CLI
 Use the command-line interface for batch processing of geographic regions:
@@ -206,8 +203,10 @@ See `notebooks/Oceans.ipynb` for full example.
 
 ## Roadmap
 
-- [ ] CLI interface
-- [ ] More data sources (e.g., USGS, Copernicus)
-- [ ] Web API
+- [x] CLI interface (`strm2stl-ui` entry point)
+- [x] More data sources (ESA, Copernicus, NASADEM, USGS, GEBCO)
+- [x] Web API (FastAPI, see `docs/WEB_APP_ANALYSIS.md`)
+- [x] Unit tests (pytest suite in `tests/`)
 - [ ] Docker container
-- [ ] Unit tests 
+- [ ] Elevation profile / cross-section endpoint
+- [ ] Offline tile fallback (no Earth Engine auth required)

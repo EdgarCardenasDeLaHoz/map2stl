@@ -1,3 +1,4 @@
+/* DEAD — not loaded by app.js or index.html. Editing this file has no effect on the running app. */
 /**
  * LayerManager - Unified state management for map layers
  * 

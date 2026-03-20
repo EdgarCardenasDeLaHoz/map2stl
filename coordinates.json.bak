@@ -324,6 +324,7 @@
     },
     {
       "name": "Galapagos",
+      "label": "South America",
       "north": 1.0,
       "south": -2.0,
       "east": -89.0,
@@ -470,6 +471,7 @@
     },
     {
       "name": "Cabo Verde",
+      "label": "Africa",
       "north": 18.0,
       "south": 14.0,
       "east": -21.5,
@@ -550,10 +552,10 @@
       }
     },
     {
-      "north": 50.28934,
-      "south": 31.65338,
-      "east": -101.95408,
-      "west": -126.38672,
+      "north": 49.2678,
+      "south": 30.44867,
+      "east": -101.60167,
+      "west": -126.91503,
       "name": "WestAmerica",
       "description": "Custom region: WestAmerica",
       "parameters": {
@@ -582,6 +584,33 @@
         "subtract_water": false,
         "sat_scale": 500
       }
+    },
+    {
+      "name": "Philadelphia",
+      "label": "cities",
+      "north": 39.9745,
+      "south": 39.9295,
+      "east": -75.1343,
+      "west": -75.1929,
+      "description": "Philadelphia city center — from Cities.ipynb (center 39.952,-75.164 dist=2500m)"
+    },
+    {
+      "name": "Granada",
+      "label": "cities",
+      "north": 37.1873,
+      "south": 37.1693,
+      "east": -3.5867,
+      "west": -3.6093,
+      "description": "Granada, Spain city center — from Cities.ipynb (center 37.178,-3.598 dist=1000m)"
+    },
+    {
+      "name": "Cartagena",
+      "label": "cities",
+      "north": 10.4295,
+      "south": 10.3845,
+      "east": -75.5221,
+      "west": -75.5679,
+      "description": "Cartagena, Colombia city center — from Cities.ipynb (center 10.407,-75.545 dist=2500m)"
     }
   ]
 }

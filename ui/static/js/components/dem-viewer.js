@@ -1,3 +1,4 @@
+/* DEAD — not loaded by app.js or index.html. Editing this file has no effect on the running app. */
 /**
  * DEM Viewer Component Module
  * Digital Elevation Model visualization and interaction
@@ -262,9 +263,9 @@ export function renderEsaLandCover(data) {
   canvas.style.height = 'auto';
 
   // Also render in sat preview
-  const previewContainer = document.getElementById('satImage');
+  const previewContainer = document.getElementById('satelliteImage');
   if (!previewContainer) {
-    console.error('satImage element not found');
+    console.error('satelliteImage element not found');
     return;
   }
   const previewCanvas = renderEsaCanvas(esa_values, w, h);
@@ -601,6 +602,15 @@ if (typeof window !== 'undefined') {
     let startX, startY;
     let offsetX = 0, offsetY = 0;
     let scale = 1;
+    // Minimum scale: ~0.67 (lets you zoom out to see 1.5× the image area)
+    const minScale = 0.67;
+    const maxScale = 8;
+
+    // Capture the current canvas as an offscreen image (used when no renderFn given)
+    const offscreen = document.createElement('canvas');
+    offscreen.width = canvas.width;
+    offscreen.height = canvas.height;
+    offscreen.getContext('2d').drawImage(canvas, 0, 0);
 
     const redraw = () => {
       const ctx = canvas.getContext('2d');
@@ -608,7 +618,11 @@ if (typeof window !== 'undefined') {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.translate(offsetX, offsetY);
       ctx.scale(scale, scale);
-      renderFn(ctx);
+      if (typeof renderFn === 'function') {
+        renderFn(ctx);
+      } else {
+        ctx.drawImage(offscreen, 0, 0);
+      }
       ctx.restore();
     };
 
@@ -616,6 +630,7 @@ if (typeof window !== 'undefined') {
       isPanning = true;
       startX = e.clientX - offsetX;
       startY = e.clientY - offsetY;
+      canvas.style.cursor = 'grabbing';
     });
 
     canvas.addEventListener('mousemove', (e) => {
@@ -626,15 +641,18 @@ if (typeof window !== 'undefined') {
       }
     });
 
-    canvas.addEventListener('mouseup', () => { isPanning = false; });
+    canvas.addEventListener('mouseup', () => { isPanning = false; canvas.style.cursor = 'grab'; });
+    canvas.addEventListener('mouseleave', () => { isPanning = false; });
 
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       const zoomFactor = 0.1;
       const delta = e.deltaY > 0 ? -zoomFactor : zoomFactor;
-      scale = Math.min(Math.max(0.1, scale + delta), 5);
+      scale = Math.min(maxScale, Math.max(minScale, scale + delta));
       redraw();
     });
+
+    canvas.style.cursor = 'grab';
   };
 
   window.computeVisibleBounds = computeVisibleBounds;

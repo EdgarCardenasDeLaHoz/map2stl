@@ -1,3 +1,4 @@
+/* DEAD — not loaded by app.js or index.html. Editing this file has no effect on the running app. */
 /**
  * API Module
  * Centralized API calls for the 3D Maps application
@@ -84,10 +85,8 @@ export async function saveCoordinate(regionData) {
  * @returns {Promise<Object>} Delete result
  */
 export async function deleteCoordinate(name) {
-    const response = await fetch('/api/delete_coordinate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
+    const response = await fetch(`/api/regions/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
     });
 
     if (!response.ok) {

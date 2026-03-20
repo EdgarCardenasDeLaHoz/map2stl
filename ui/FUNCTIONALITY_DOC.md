@@ -1,323 +1,143 @@
-# 3D Maps UI Functionality Documentation
+# UI Functionality Reference
 
-## Overview
-This document catalogs all UI features in `index.html`, their implementation status, and identifies unused code.
+_Last updated: 2026-03-18_
 
----
-
-## Code Cleanup Completed (This Session)
-
-### Removed Dead Code
-1. **`renderLanduseCanvas()`** - Never called, replaced by `renderEsaLandCover()`
-2. **`toggleCoordsTable()` / `populateCoordsTable()`** - Never called, no button to trigger
-3. **`drawZoomedAndPannedCanvas()`** - Empty function, CSS transforms used instead
-4. **`#coordsTable` CSS** - Orphaned styles for removed functionality
-5. **`.dem-subtab` CSS and JS** - Replaced by `.layer-tab`, all references removed
-
-### Lines Removed: ~100 lines
-### Current File Size: ~8163 lines (was ~8303)
+This document is a high-level map of all implemented features in `strm2stl/ui/templates/index.html`.
+Line numbers are approximate — the file grows over time.
 
 ---
 
-## Expected UI Features (Based on Conversation History)
+## Implemented Features
 
-### ✅ IMPLEMENTED & WORKING
+### Navigation & Views
+| Feature | JS Function | Notes |
+|---------|-------------|-------|
+| 3-tab navigation (Explore/Edit/Extrude) | `switchView(view)` | State persists across switches |
+| Settings panel collapse/expand | `toggleSettingsPanel()` | Collapses to 0 width; vertical re-open tab stays visible |
+| Layer sub-tabs (Layers / Compare) | `switchDemSubtab(subtab)` | Horizontal strip at top of settings panel |
 
-#### 1. Main Tab Navigation (Explore/Edit/Extrude)
-- **Location**: Lines 192-217 (CSS), ~2200 (HTML)
-- **Function**: `switchView(view)` - Line 6115
-- **Status**: ✅ Working, tabs renamed from Map/DEM/Model
+### Explore View
+| Feature | JS Function | Notes |
+|---------|-------------|-------|
+| Leaflet 2D map | `initMap()` | 7 base tile options |
+| Terrain hillshade overlay | `toggleTerrainOverlay()` | Optional; opacity slider |
+| Three.js globe | `initGlobe()` / `animateGlobe()` | Region markers, orbit controls |
+| Sidebar 3-state | `cycleSidebarState()` | Compact → expanded table → hidden |
+| Sidebar visibility toggle | `toggleBboxLayerVisibility()` | Shows/hides bbox rectangles + edit markers |
+| Expanded sidebar table | `renderSidebarTable()` | N/S/E/W, dim, Edit + Map actions |
 
-#### 2. Layer Tabs (Layers/Compare)
-- **Location**: Lines 1593-1630 (CSS), ~2450 (HTML)
-- **Function**: `switchDemSubtab(subtab)` - Line 7555
-- **Status**: ✅ Working, smaller horizontal layout
+### Edit View — Layer Canvas
+| Feature | JS Function | Notes |
+|---------|-------------|-------|
+| DEM rendering | `renderDEMCanvas()` / `recolorDEM()` | Colormaps, elevation curves |
+| Water mask / ESA land cover | `renderWaterMask()` / `renderEsaLandCover()` | Combined from `/api/terrain/water-mask` |
+| Satellite imagery | `renderSatelliteCanvas()` | ESA WorldCover fallback |
+| Stacked layer view | `updateStackedLayers()` | Napari-style compositing |
+| Gridline overlay | `drawGridlinesOverlay()` | Projection-aware (Mercator, sinusoidal, etc.) |
+| Map projection | `applyProjection()` | None / Cosine / Mercator / Lambert / Sinusoidal |
+| Zoom & pan | `enableStackedZoomPan()` | Wheel/pinch zoom, drag pan, double-click reset |
+| Hover tooltip | `setupHoverTooltip()` | Elevation + lat/lon under cursor |
+| Colorbar | `drawColorbar()` | Inline in bbox row; reflects active colormap |
 
-#### 3. Stacked Layers View with Alignment
-- **Location**: Lines ~5528-5790 (JS)
-- **Functions**: 
-  - `setupStackedLayers()` - Line 5528
-  - `updateStackedLayers()` - Line 5557
-  - `drawLayerToTarget()` - Line 5609
-  - `applyStackedTransform()` - Line 5776
-- **Status**: ✅ Working, layers aligned using common bbox-based target rectangle
+### Edit View — Bbox Controls
+| Feature | JS Function / Element | Notes |
+|---------|----------------------|-------|
+| N/S/E/W inputs + Reload | `#bboxReloadBtn` | Validates, clamps, reloads all layers |
+| Inline mini-map | `toggleBboxMiniMap()` / `initBboxMiniMap()` | Leaflet rect with drag handles |
+| Save bbox to backend | `#saveBboxBtn` | PUT `/api/regions/{name}`; updates local cache |
+| Elevation range display | `#bboxElevRange` | Shows min/max after DEM loads |
 
-#### 4. Collapsible Histogram + Elevation Curves (Merged)
-- **Location**: Lines ~2580 (HTML), ~6855 (JS)
-- **Functions**: 
-  - `drawHistogram()` - Line 6855
-  - `toggleCollapsible()` - Line 3180
-- **Status**: ✅ Working, histogram collapsible with cumulative (80px height)
+### Settings — Histogram & Curves
+| Feature | JS Function | Notes |
+|---------|-------------|-------|
+| Elevation histogram | `drawHistogram()` | 80 px height, cumulative mode |
+| Curve editor | `initCurveEditor()` / `drawCurve()` | Drag control points; presets |
+| Curve presets | `setCurvePreset()` | Linear, Peaks, Depths, S-Curve |
+| Sea level buffer | `#seaLevelBufferBtn` | Compresses ocean depths, adds shelf |
 
-#### 5. Elevation Curve Editor
-- **Location**: Lines ~4525-4820 (JS)
-- **Functions**:
-  - `initCurveEditor()` - Line 4525
-  - `setupCurveEventListeners()` - Line 4543
-  - `setCurvePreset()` - Line 4625
-  - `drawCurve()` - Line 4667
-  - `applyCurveTodem()` - Line 4738
-  - `applyCurveTodemSilent()` - Line 4770 (auto-apply)
-- **Status**: ✅ Working with auto-rerender on curve changes
+### Settings — Map Display
+| Feature | Element/Function | Notes |
+|---------|-----------------|-------|
+| Map style | `#mapTileLayer` | 7 providers |
+| Terrain overlay | `#showTerrainOverlay` | Hillshade; opacity sub-row shown when enabled |
+| Show gridlines | `#showGridlines` | Toggle lat/lon grid on DEM canvas |
+| Gridline count | `#gridlineCount` | 3 / 5 / 7 / 10 lines |
+| Auto-reload layers | `#autoReloadLayers` | Reloads on bbox/settings change |
+| Map projection | `#paramProjection` | Client-side only; re-renders all layers |
 
-#### 6. Collapsible Layer Settings Panel
-- **Location**: Lines 1593-1680 (CSS), ~2485 (HTML)
-- **Function**: `toggleLayersControls(header)` - Line 3205
-- **Status**: ✅ Working with toggle header
-
-#### 7. 3-State Sidebar (Normal → Expanded → Hidden)
-- **Location**: Lines 6950-7050 (JS)
-- **Functions**:
-  - `cycleSidebarState()` - Line 6953
-- **Status**: ✅ Working
-
-#### 8. Leaflet Map with DEM Overlay
-- **Location**: Lines ~3771-3940 (JS)
-- **Functions**:
-  - `initMap()` - Line 3771
-  - `toggleDemOverlay()` - Line 3610
-  - `toggleTerrainOverlay()` - Line 3717
-  - `setTileLayer()` - Line 3591
-- **Status**: ✅ Working
-
-#### 9. Globe View (Three.js)
-- **Location**: Lines ~3950-4100 (JS)
-- **Functions**:
-  - `initGlobe()` - Line 3950
-  - `animateGlobe()` - Line 3993
-  - `updateGlobeMarkers()` - Line 4078
-  - `createGlobeMarker()` - Line 4105
-- **Status**: ✅ Working
-
-#### 10. Coordinate/Region Selection
-- **Location**: Lines ~4000-4175 (JS)
-- **Functions**:
-  - `loadCoordinates()` - Line 4000
-  - `selectCoordinate()` - Line 4121
-  - `renderCoordinatesList()` - Line 5106
-  - `populateRegionsTable()` - Line 5167
-- **Status**: ✅ Working
-
-#### 11. DEM Rendering with Colormaps
-- **Location**: Lines ~6555-6810 (JS)
-- **Functions**:
-  - `renderDEMCanvas()` - Line 6555
-  - `mapElevationToColor()` - Line 6747
-  - `drawColorbar()` - Line 6815
-  - `recolorDEM()` - Line 6021
-- **Status**: ✅ Working
-
-#### 12. Water Mask / ESA Land Cover
-- **Location**: Lines ~7700-7850 (JS)
-- **Functions**:
-  - `loadWaterMask()` - Line 7588
-  - `renderWaterMask()` - Line 7775
-  - `renderEsaLandCover()` - Line 7800
-- **Status**: ✅ Working with layer stack integration
-
-#### 13. 3D Model Generation & Export
-- **Location**: Lines ~7100-7500 (JS)
-- **Functions**:
-  - `generateModelFromTab()` - Line 7175
-  - `downloadSTL()` - Line 7241
-  - `downloadModel()` - Line 7305
-  - `initModelViewer()` - Line 7378
-  - `createTerrainMesh()` - Line 7464
-  - `previewModelIn3D()` - Line 7509
-- **Status**: ✅ Working
-
-#### 14. Preset Profiles (Save/Load/Delete)
-- **Location**: Lines ~4881-5080 (JS)
-- **Functions**:
-  - `initPresetProfiles()` - Line 4881
-  - `loadSelectedPreset()` - Line 4949
-  - `applyPreset()` - Line 4973
-  - `saveNewPreset()` - Line 5025
-  - `deleteSelectedPreset()` - Line 5057
-- **Status**: ✅ Working
-
-#### 15. Cache Management (Client + Server)
-- **Location**: Lines ~3364-3500 (JS)
-- **Functions**:
-  - `updateCacheStatusUI()` - Line 3364
-  - `fetchServerCacheStatus()` - Line 3377
-  - `preloadAllRegions()` - Line 3396
-  - `clearClientCache()` - Line 3476
-  - `clearServerCache()` - Line 3484
-- **Status**: ✅ Working
-
-#### 16. Region Notes Modal
-- **Location**: Lines ~5263-5330 (JS)
-- **Functions**:
-  - `initRegionNotes()` - Line 5263
-  - `showNotesModal()` - Line 5292
-  - `saveRegionNotes()` - Line 5310
-- **Status**: ✅ Working
-
-#### 17. Favorites System
-- **Location**: Lines ~5084-5105 (JS)
-- **Functions**:
-  - `initFavorites()` - Line 5084
-  - `toggleFavorite()` - Line 5241
-- **Status**: ✅ Working
-
-#### 18. Compare Mode
-- **Location**: Lines ~5336-5440 (JS)
-- **Functions**:
-  - `initCompareMode()` - Line 5336
-  - `updateCompareCanvases()` - Line 5360
-  - `loadCompareRegion()` - Line 5365
-- **Status**: ✅ Working (inline mode)
-
-#### 19. DEM Hover Tooltip
-- **Location**: Lines ~8085-8150 (JS)
-- **Function**: `setupHoverTooltip()` - Line 8085
-- **Status**: ✅ Working
-
-#### 20. Zoom/Pan on Layers
-- **Location**: Lines ~5724-5785 (stacked), ~8153-8250 (DEM)
-- **Functions**:
-  - `enableStackedZoomPan()` - Line 5724
-  - `enableZoomAndPan()` - Line 8153
-- **Status**: ✅ Working
+### Region Management
+| Feature | JS Function | Notes |
+|---------|-------------|-------|
+| Load / save / delete presets | `initPresetProfiles()` | 5 built-in + custom (localStorage) |
+| Favorites | `toggleFavorite()` | Star icon, localStorage |
+| Region notes | `showNotesModal()` / `saveRegionNotes()` | Modal, localStorage |
+| Compare mode | `initCompareMode()` | Inline side-by-side, independent settings |
+| Cache management | `clearClientCache()` / `clearServerCache()` | Client + server-side clear |
+| Keyboard shortcuts | `setupKeyboardShortcuts()` | Ctrl+1–4 tabs, Ctrl+S, Ctrl+R, Arrows |
 
 ---
 
-## ⚠️ USEFUL BUT UNDERUTILIZED FEATURES
+## Dead Code Removed (Historical)
 
-### 1. High-Resolution DEM Loading
-- **Function**: `loadHighResDEM()` - Line 6433
-- **Usage**: Available but button may be hidden
-- **Recommendation**: Keep - useful for detailed exports
-
-### 2. Grid Overlay Toggle
-- **Function**: `drawGridlinesOverlay()` - Line 6444
-- **Controls**: `showGridlines`, `gridlineCount` checkboxes
-- **Usage**: In visualization settings, works but less discoverable
-- **Recommendation**: Keep
-
-### 3. Rescale DEM Values
-- **Functions**: `rescaleDEM()` - Line 6050, `resetRescale()` - Line 6089
-- **Usage**: Working but inputs may be hidden in collapsed panel
-- **Recommendation**: Keep
-
-### 4. Auto-Reload on Changes
-- **Function**: `setupAutoReload()` - Line 5913
-- **Usage**: Sets up observer, but may not be fully utilized
-- **Recommendation**: Keep
-
-### 5. Satellite Color Mapping Table
-- **Location**: HTML around line ~2780
-- **Usage**: ESA land cover legend - informational only
-- **Recommendation**: Keep
-
-### 6. Keyboard Shortcuts
-- **Function**: `setupKeyboardShortcuts()` - Line 4441
-- **Usage**: Defined but shortcuts may not be documented to user
-- **Recommendation**: Keep, add user documentation
+| Function/Element | Reason |
+|-----------------|--------|
+| `renderLanduseCanvas()` | Never called; replaced by `renderEsaLandCover()` |
+| `toggleCoordsTable()` / `populateCoordsTable()` | Button `#toggleCoords` never existed |
+| `drawZoomedAndPannedCanvas()` | Empty function; CSS transforms used instead |
+| `#coordsTable` CSS | Orphaned styles |
+| `.dem-subtab` CSS + JS | Replaced by `.layer-tab` |
 
 ---
 
-## ✅ CLEANED UP (This Session)
+## Architecture Notes
 
-The following dead code was removed:
-
-### 1. `renderLanduseCanvas()` function
-- **Was at**: Line ~6650
-- **Reason**: Never called - replaced by `renderEsaLandCover()`
-
-### 2. `toggleCoordsTable()` and `populateCoordsTable()` functions
-- **Was at**: Lines ~7035-7060
-- **Reason**: Button `#toggleCoords` doesn't exist - functions never called
-
-### 3. `drawZoomedAndPannedCanvas()` function  
-- **Was at**: Line ~8276
-- **Reason**: Empty function - CSS transforms used instead
-
-### 4. `#coordsTable` CSS styles
-- **Was at**: Lines ~1109-1135
-- **Reason**: No HTML element uses these styles
-
-### 5. `.dem-subtab` CSS and JS references
-- **Was at**: CSS lines ~859-890, JS multiple locations
-- **Reason**: All tabs now use `.layer-tab` class only
+- **Split-file SPA:** HTML/CSS/JS are separate files (`templates/index.html` ~1 151 lines, `static/css/app.css` ~2 879 lines, `static/js/app.js` ~8 183 lines). Refactored from original 9 700-line single `index.html` in 2026-03-17 session.
+- **Three bbox state variables:** `boundingBox` (Leaflet draw bounds), `selectedRegion` (saved region object), `currentDemBbox` (plain object after DEM loads). All three are updated together in `_onBboxMiniMouseUp()` and the Reload handler.
+- **Layer cache:** `lastDemData`, `lastWaterMaskData`, `lastRawDemData` are nulled by `clearLayerCache()` on any bbox change.
+- **Projection:** `applyProjection(srcCanvas, bbox)` is called after every render. Adding a new projection = one `if` branch here + one `<option>` in `#paramProjection`.
+- **API routes:** Backend uses both legacy routes (`/api/preview_dem`, `/api/water_mask`) and new typed routes (`/api/terrain/dem`, `/api/terrain/water-mask`). app.js primarily calls the new routes.
+- **Extracted modules:** `city-overlay.js` and `stacked-layers.js` live in `static/js/modules/`, loaded as plain `<script>` tags before `app.js`. Functions exposed on `window`; shared state via `window.appState`.
+- **CSS variables:** All colours and the panel width are defined as `--bg-dark`, `--bg-mid`, `--bg-light`, `--border`, `--border-light`, `--text-dim`, `--text-muted`, `--panel-width` in the `:root` block in `app.css`.
 
 ---
 
-## ⚠️ REMAINING ITEMS TO CONSIDER
+## Completed Refactoring (2026-03-18)
 
-### Hidden Containers (KEEP - Still Used)
-The following containers appear hidden but their child divs are used as render targets:
-```html
-<div id="demSubtabContent" class="hidden">  <!-- Contains #demImage -->
-<div id="waterMaskContainer" class="hidden"> <!-- Contains #waterMaskImage -->
-<div id="satelliteContainer" class="hidden"> <!-- Contains #satelliteImage -->
-<div id="combinedContainer" class="hidden">  <!-- Contains #combinedImage -->
-```
-**Status**: These ARE still referenced by JavaScript for canvas rendering. DO NOT REMOVE.
+### Settings Panel
+| Fix | Detail |
+|-----|--------|
+| "Map Display" section removed | Map tile/terrain overlay controls hidden; DEM-relevant controls (gridlines, projection, auto-reload) kept inline |
+| "Parameter Presets" renamed + collapsed | Was "Preset Profiles"; now collapsed by default with tooltip |
+| Tooltips on all controls | Added `title="..."` to all Extrude tab inputs/buttons, Puzzle controls, City Load/Clear |
+| "Visualization & Display" reordered | Moved above "Histogram & Curves" section |
+| Auto-rescale on by default | `#autoRescale` checkbox has `checked` attribute |
+| Settings panel resize fixed | Resize `mouseup` now calls `updateStackedLayers()` so canvas reflows |
 
-### Legacy `#regionsContainer`
-- May be fully unused - needs further verification
-- Contains old regions table structure
+### Bug Fixes
+| Bug | Fix |
+|-----|-----|
+| OBJ/3MF export 404 | `downloadModel()` now calls `/api/export/${format}` (was `/api/generate_${format}`) |
+| Compare view broken | `loadCompareRegion()` now renders `dem_values` client-side (was looking for `dem_image` which API no longer returns) |
+| Merge panel broken | `runMerge()` now renders merged DEM via `renderDEMCanvas()` → `applyProjection()` (was calling undefined `renderDEM()`) |
 
----
+### Elevation Curve Editor
+| Fix | Detail |
+|-----|--------|
+| Min/max rescale shifts control points | Added `curveDataVmin/Vmax` — stable reference captured at load time |
+| Accidental point creation | Hit radius increased; click-to-add no longer fires after a drag |
+| Delete interaction | Right-click on point deletes it; points drawn larger (8px) with × hint |
+| Sea level point auto-inserted | Inserted when DEM loads with sub-zero elevations |
+| Canvas tooltip | Explains left-click=add, drag=move, right-click=delete |
 
-## CSS Classes to Review
-- `.compare-container` - Legacy compare view styles
-- `.satellite-container` - Legacy satellite view
-- `.water-container` - Legacy water mask view
-- `.combined-container` - Legacy combined view
+### JS Module Extractions
+| Module | Contents |
+|--------|---------|
+| `modules/city-overlay.js` | `loadCityData`, `renderCityOverlay`, `clearCityOverlay`, `_updateCityLayerCount` |
+| `modules/stacked-layers.js` | `updateStackedLayers`, `applyStackedTransform`, `enableStackedZoomPan`, `drawLayerGrid`, `updateLayerAxisLabels`, `drawGridOverlay` |
 
-### CSS that should be kept
-- `.layers-controls` - Active layer settings panel
-- `.collapsible-*` - Used for all collapsible sections
-- `.layer-tab` - Current tab system
-- `.stacked-*` - Stacked layers view
-
----
-
-## Recommendations Summary
-
-### Keep but Document
-1. `loadHighResDEM()` - useful feature
-2. Keyboard shortcuts
-3. Preset profiles system
-4. Cache management
-
----
-
-## File Size Analysis
-
-### Before Cleanup
-- Total Lines: ~8303
-
-### After Cleanup  
-- Total Lines: ~8163
-- **Lines Removed: ~140 lines**
-
-### Breakdown
-- CSS: ~2070 lines
-- HTML: ~1000 lines
-- JavaScript: ~5090 lines
-
----
-
-## Session Summary
-
-### Completed Tasks
-1. ✅ Audited full code structure (8303 lines)
-2. ✅ Documented 20+ working UI features
-3. ✅ Identified 6+ unused code sections
-4. ✅ Removed 5 dead code sections (~140 lines)
-5. ✅ Created this functionality documentation
-
-### Code Quality Improvements
-- Removed never-called functions
-- Cleaned up orphaned CSS
-- Unified tab class references (`.layer-tab` only)
-- Removed empty placeholder functions
-
----
-
-*Last Updated: Current Session*
-*Author: Code Audit Tool*
+### CSS / State
+| Change | Detail |
+|--------|--------|
+| CSS variables | 8 custom properties in `:root`; all hardcoded colour hex values replaced |
+| `state.js` updated | Added `currentDemBbox`, `layerBboxes`, `layerStatus`, `activeDemSubtab`, `osmCityData`, all `cache.*` fields |
+| Dead `osmCityData` local removed | `let osmCityData = null` in app.js was orphaned after module extraction |

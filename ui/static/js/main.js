@@ -1,3 +1,4 @@
+/* DEAD — not loaded by app.js or index.html. Editing this file has no effect on the running app. */
 /**
  * 3D Maps Application - Main Entry Point
  * Initializes all components and sets up event handlers

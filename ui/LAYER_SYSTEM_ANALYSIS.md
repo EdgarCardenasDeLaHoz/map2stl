@@ -1,5 +1,11 @@
 # Layer System Analysis & Improvement Plan
 
+_Last updated: 2026-03-16_
+
+> **Status summary:** Issues 1 & 2 (stale cache, water mask on region change) are fixed in the current codebase via `clearLayerCache()`. Issues 3 & 4 are partially addressed — the stacked canvas view replaces the old separate-container tabs, and the layer status panel shows per-layer load state. The `LayerManager` class and split API endpoints (Phases 2–5) remain proposals, not implemented.
+
+---
+
 ## Current Issues Identified
 
 ### 1. **Water Mask Bug on Region Change**
