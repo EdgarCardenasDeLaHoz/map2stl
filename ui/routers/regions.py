@@ -166,9 +166,9 @@ async def create_region(region: RegionCreate):
                 ),
             )
             conn.commit()
-        payload = region.dict()
+        payload = region.model_dump()
         if payload.get("parameters") is None:
-            payload["parameters"] = RegionParameters().dict()
+            payload["parameters"] = RegionParameters().model_dump()
         return JSONResponse(content=payload, status_code=201)
     except sqlite3.IntegrityError as e:
         return JSONResponse(content={"error": str(e)}, status_code=400)
@@ -294,9 +294,9 @@ def _list_regions_json():
 def _create_region_json(region: RegionCreate):
     try:
         data = json.loads(COORDINATES_PATH.read_text()) if COORDINATES_PATH.exists() else {"regions": []}
-        payload = region.dict()
+        payload = region.model_dump()
         if payload.get("parameters") is None:
-            payload["parameters"] = RegionParameters().dict()
+            payload["parameters"] = RegionParameters().model_dump()
         data["regions"].append(payload)
         COORDINATES_PATH.write_text(json.dumps(data, indent=2))
         return JSONResponse(content=payload, status_code=201)

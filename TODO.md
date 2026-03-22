@@ -575,3 +575,79 @@ Show a small DEM preview thumbnail when hovering over a region bbox on the map, 
 - [x] BE2. Temp file cleanup via `BackgroundTask(os.unlink, ...)` added to all 4 export responses in `core/export.py`
 - [x] BS4. All `os.chdir()` calls removed from `server.py`, `terrain.py`, `core/dem.py`, `core/export.py`; module-level `sys.path.insert(0, _STRM2STL_DIR)` added to each
 - [x] BE1. OSM layer catches add `exc_info=True`; cities.py silent `except: pass` → debug log; 3MF error generic message
+
+---
+
+### Architecture & Cleanup (Session 15)
+
+#### [x] IMP1. Remove API key from config.json — use env var only
+**Problem:** `config.json` contains an OpenTopography API key committed to the repo; any git push exposes it.
+**Fix:** Remove the key from `config.json`, add `config.json` to `.gitignore`, read key from `OPENTOPO_API_KEY` env var (with fallback to empty string + warning log). Update `config.py` to read `os.environ.get("OPENTOPO_API_KEY", "")`.
+**Impact:** Eliminates credential exposure risk.
+**Effort:** 15 min
+
+#### [x] IMP2. Rewrite broken tests against current router API
+**Problem:** `test_api.py`, `test_ui.py`, `test_frontend_rendering.py`, `test_layers.py` reference `location_picker.COORDINATES_PATH` / `location_picker.get_water_mask` which moved to routers in session 5. 33 errors + 23 failures.
+**Fix:** Rewrite tests to import from `ui.server` (the FastAPI app), use `httpx.AsyncClient(app=app, base_url="http://test")` for route tests, mock `core/dem.py` and `core/export.py` at the correct module paths.
+**Impact:** Green test suite; catches regressions early.
+**Effort:** 2–3 hrs
+
+#### [x] IMP3. PERF5 — viewport culling in city-overlay.js
+**Problem:** `_drawCityCanvas` iterates all features even when most are off-screen during zoom/pan.
+**Fix:** Each feature has a pre-computed `feat._bbox`. Before drawing, skip features where `_bbox` doesn't intersect the current canvas viewport rectangle. Single comparison per feature, O(n) filter pass before any canvas state changes.
+**Impact:** City overlay render time drops ~60–80% at high zoom levels with large OSM datasets.
+**Effort:** ~1 hr
+
+#### [ ] IMP4. Extract dem-loader.js from app.js
+**Problem:** `window.loadDEM`, `renderDEMCanvas`, `recolorDEM`, `drawColorbar`, `drawHistogram` are ~800 lines buried in the app.js monolith.
+**Fix:** Extract into `ui/static/js/modules/dem-loader.js` as a plain `<script>` module. Functions stay on `window` for backward compat. Shared state read/written via `window.appState`.
+**Impact:** Reduces app.js by ~800 lines; makes DEM rendering independently testable.
+**Effort:** 3–4 hrs
+
+#### [ ] IMP5. Unify appState — remove dual state from app.js
+**Problem:** `window.appState` (used by city-overlay.js, stacked-layers.js) is a subset of the real state; app.js still reads/writes ~30 loose closure variables. Two sources of truth cause sync bugs.
+**Fix:** Canonicalise all shared state through `window.appState`. Replace loose variable references in app.js with `appState.xxx`. Remove the manual `appState` sync assignments scattered through `loadDEM`, `selectCoordinate`, etc.
+**Impact:** Eliminates stale-state class of bugs; prerequisite for further module extraction.
+**Effort:** 4–6 hrs
+
+#### [x] IMP6. Clean stale .gitmodules in strm2stl repo
+**Problem:** `strm2stl/.gitmodules` still declares `numpy2stl` as a submodule pointing at the old path, even though the submodule relationship was dissolved.
+**Fix:** `git rm --cached numpy2stl && rm .gitmodules` in the strm2stl repo root (or `git rm .gitmodules` if no other submodules exist). Commit the removal.
+**Impact:** Eliminates confusing `git submodule status` warnings; repo is honest about its layout.
+**Effort:** 10 min
+
+#### [x] IMP7. Clean up root Code/cache/ duplicate
+**Problem:** `Code/cache/` is a stray directory that duplicates entries from `Code/strm2stl/cache/`. It was likely created by old `os.chdir()` calls that have since been removed.
+**Fix:** Verify `Code/cache/` contains no unique data, then delete it. Add `cache/` to the root `.gitignore` (and `strm2stl/.gitignore`) to prevent re-creation.
+**Impact:** Reduces confusion about which cache is active.
+**Effort:** 15 min
+
+#### [x] IMP8. Delete get_open_edges_old duplicates in solid.py
+**Problem:** `numpy2stl/solid.py` has two identical `get_open_edges_old` function definitions (lines ~426 and ~444). The second silently shadows the first.
+**Fix:** Delete one of the two identical definitions (keep either; they are identical). Add a comment pointing to the current `get_open_edges` implementation.
+**Impact:** Removes dead code; eliminates Python lint warning about duplicate function definition.
+**Effort:** 5 min
+
+#### [x] IMP9. Delete or update location_picker.py shim
+**Problem:** `ui/location_picker.py` is a backward-compat shim that re-exports `server.py`. The CLI entry point is now `server.py`. Having two entry points is confusing.
+**Fix:** Either delete `location_picker.py` and update any docs/scripts that reference it, or update it to print a deprecation warning and call `run_server()` directly (making it clear it is an alias only).
+**Impact:** Removes confusion about entry points; one less file to maintain.
+**Effort:** 15 min
+
+#### [x] IMP10. Reconcile duplicate requirements.txt files
+**Problem:** `Code/requirements.txt` and `Code/strm2stl/requirements.txt` both exist but may have drifted out of sync.
+**Fix:** Compare the two files. Merge into a single canonical `Code/strm2stl/requirements.txt` (the app's deps). Add a note or symlink at `Code/requirements.txt` pointing to it, or delete `Code/requirements.txt` if it's redundant.
+**Impact:** Single authoritative dependency list; `pip install -r requirements.txt` always works from the right path.
+**Effort:** 20 min
+
+#### [ ] IMP11. Extract JS UI modules from app.js monolith
+**Problem:** app.js is ~8300 lines. Remaining large extractable sections: water-mask (~500 lines), region-manager (~400 lines), curve-editor (~400 lines), model-viewer (~300 lines), merge-panel (~350 lines).
+**Fix:** Follow the same pattern as `city-overlay.js` and `stacked-layers.js`. Extract each section into `ui/static/js/modules/<name>.js`. All functions stay on `window`; shared state via `window.appState`. Load as plain `<script>` before app.js in `index.html`.
+**Impact:** app.js drops to ~5000 lines; each module can be read/tested in isolation.
+**Effort:** 2–3 hrs per module (10–15 hrs total)
+
+#### [ ] IMP12. Vite bundler + Vitest unit tests
+**Problem:** No build step means no tree-shaking, no minification, no module-level imports, and no unit test framework for the frontend.
+**Fix:** Introduce Vite as a dev/build tool. Convert extracted modules (IMP11) to ES modules. Keep legacy `<script>` entry for app.js during transition. Add Vitest for unit tests on pure functions (colormap, curve interpolation, projection, coordinate conversion).
+**Impact:** Enables proper JS testing; smaller production bundle; standard modern toolchain.
+**Effort:** 1–2 days (best done after IMP5 + IMP11 are complete)

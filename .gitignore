@@ -10,3 +10,6 @@ cache
 
 osm_raw_cache
 ee_cache/*
+
+# Local config — may contain API keys; do not commit
+config.json

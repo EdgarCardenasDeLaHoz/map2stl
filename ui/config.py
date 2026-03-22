@@ -9,9 +9,12 @@ them across files.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Optional
+
+_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Test mode
@@ -53,6 +56,12 @@ except Exception:
     pass
 
 OPENTOPO_API_KEY: Optional[str] = _OPENTOPO_API_KEY
+
+if not OPENTOPO_API_KEY:
+    _log.warning(
+        "No OpenTopography API key found. "
+        "Set the OPENTOPO_API_KEY environment variable to enable DEM downloads."
+    )
 
 # ---------------------------------------------------------------------------
 # Supported OpenTopography DEM types

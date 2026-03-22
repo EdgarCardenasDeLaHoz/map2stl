@@ -55,12 +55,12 @@ async def list_projections():
         sys.path.append(str(_strm2stl))
         from geo2stl.projections import get_projection_info
         info = get_projection_info()
-        projections = [ProjectionInfo(id=k, name=v.get("name", k), description=v.get("description", "")).dict()
+        projections = [ProjectionInfo(id=k, name=v.get("name", k), description=v.get("description", "")).model_dump()
                        for k, v in info.items()]
     except Exception:
         projections = [
-            ProjectionInfo(id="none", name="None", description="No projection applied").dict(),
-            ProjectionInfo(id="cosine", name="Cosine", description="Cosine latitude correction").dict(),
+            ProjectionInfo(id="none", name="None", description="No projection applied").model_dump(),
+            ProjectionInfo(id="cosine", name="Cosine", description="Cosine latitude correction").model_dump(),
         ]
     return JSONResponse(content={"projections": projections})
 
@@ -80,7 +80,7 @@ async def list_colormaps():
         ColormapInfo(id="hot",      description="Black-red-yellow-white"),
         ColormapInfo(id="RdBu",     description="Diverging red-blue for anomaly maps"),
     ]
-    return JSONResponse(content={"colormaps": [c.dict() for c in colormaps]})
+    return JSONResponse(content={"colormaps": [c.model_dump() for c in colormaps]})
 
 
 @router.get("/api/settings/datasets")
@@ -94,4 +94,4 @@ async def list_datasets():
         DatasetInfo(id="gebco",     name="GEBCO 2022",                 description="450 m global ocean bathymetry + land",source="Local GEBCO GeoTIFFs",             requires_auth=False),
         DatasetInfo(id="jrc",       name="JRC Global Surface Water",   description="Water occurrence 1984–2021",          source="JRC/GSW1_4/GlobalSurfaceWater",    requires_auth=True),
     ]
-    return JSONResponse(content={"datasets": [d.dict() for d in datasets]})
+    return JSONResponse(content={"datasets": [d.model_dump() for d in datasets]})
