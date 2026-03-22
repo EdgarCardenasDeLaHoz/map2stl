@@ -1,7 +1,7 @@
 # CLAUDE.md — strm2stl Project Reference
 
 > **Purpose**: Permanent reference for AI coding sessions. Read this file first before touching any source file.
-> Last updated: 2026-03-19 (session 5 — server.py refactor complete, terrain router, city overlay alignment fix, curve editor re-normalization, compare window redesign)
+> Last updated: 2026-03-20 (session 10 — FQ3: `??` vs `||` for nullable defaults; SRTM h5 fallback to SRTMGL3 via OpenTopography when h5 absent or region uncovered; see TODO.md Completed section for full list)
 
 ---
 
@@ -53,7 +53,7 @@ strm2stl is a web application for selecting geographic regions, downloading Digi
 | Rendering | HTML5 Canvas API (client-side) |
 | Frontend state | Vanilla JS global variables (no framework) |
 | Module system | Mixed — see Frontend Architecture |
-| Persistence | `data.db` SQLite (regions + region_settings, WAL mode). Legacy `coordinates.json` and `region_settings.json` backed up as `.json.bak` post-migration. `localStorage` still used for presets and notes. |
+| Persistence | `data.db` SQLite (regions + region_settings, WAL mode). `localStorage` still used for presets and notes. |
 | STL generation | `numpy2stl` package (server-side) |
 
 ---
@@ -65,11 +65,10 @@ strm2stl/
 ├── CLAUDE.md                        ← this file
 ├── TODO.md                          ← Active task list (UI fixes, features, backend refactor, caching, SQLite)
 ├── TODO_ADVANCED.md                 ← Research notes: Google 3D Tiles / py3dtiles / Blender pipeline
-├── coordinates.json.bak             ← Legacy region store (backed up after SQLite migration)
-├── region_settings.json.bak         ← Legacy settings store (backed up after SQLite migration)
 ├── data.db                          ← SQLite database: regions + region_settings (WAL mode)
 ├── ui/
 │   ├── server.py                    ← FastAPI app init, startup lifespan, run_server (~328 lines)
+│   ├── location_picker.py           ← Backward-compat shim — re-exports server.py (legacy entry point)
 │   ├── schemas.py                   ← All ~30 Pydantic models (BoundingBox, DEMRequest, ExportRequest…)
 │   ├── config.py                    ← Constants: OPENTOPO_DATASETS, path consts, TEST_MODE, API keys
 │   ├── core/
@@ -92,15 +91,7 @@ strm2stl/
 │       ├── css/
 │       │   └── app.css
 │       ├── js/
-│       │   ├── app.js               ← ~8200-line monolith (the REAL running app)
-│       │   ├── api.js               ← ES module (exists but NOT used by app.js)
-│       │   ├── state.js             ← ES module (schema doc only — NOT used by app.js)
-│       │   ├── main.js              ← ES module (exists but NOT used by app.js)
-│       │   ├── components/
-│       │   │   └── dem-viewer.js    ← ES module (exists but NOT used by app.js)
-│       │   ├── utils/
-│       │   │   ├── canvas.js        ← ES module (exists but NOT used by app.js)
-│       │   │   └── colors.js        ← ES module (exists but NOT used by app.js)
+│       │   ├── app.js               ← ~8300-line monolith (the REAL running app)
 │       │   └── modules/             ← Plain <script> modules (loaded before app.js)
 │       │       ├── city-overlay.js  ← loadCityData, renderCityOverlay, clearCityOverlay, _updateCityLayerCount
 │       │       └── stacked-layers.js ← updateStackedLayers, applyStackedTransform, enableStackedZoomPan, drawLayerGrid
@@ -122,18 +113,17 @@ All files in the directory tree above now exist and are used. The backend refact
 
 ## Frontend Architecture
 
-### The Dual-Architecture Problem (CRITICAL)
+### Architecture
 
-**app.js is a 7300-line `<script>` tag — it is NOT an ES module.**
+**app.js is an ~8300-line `<script>` tag — it is NOT an ES module.**
 
-The files `api.js`, `state.js`, `main.js`, `dem-viewer.js`, `canvas.js`, and `colors.js` all exist as proper ES modules with `export` statements, but **none of them are imported anywhere in the running application**. They are effectively dead code relative to the running app.
+All business logic lives inline in `app.js`. Two active plain-script modules are loaded before it:
+- `modules/city-overlay.js` — city overlay rendering
+- `modules/stacked-layers.js` — stacked layers view
 
 This means:
 - `app.js` contains its own copy of every helper function (renderDEMCanvas, mapElevationToColor, hslToRgb, drawColorbar, drawHistogram, drawGridlinesOverlay, etc.)
-- `app.js` manages its own state via loose global variables instead of `state.js`
-- `api.js` functions are duplicated inline in `app.js` as direct `fetch()` calls
-
-**Do not attempt to import the ES modules into app.js without a full integration plan.** See Refactoring Plan section.
+- `app.js` manages its own state via loose global variables
 
 ### How app.js is loaded
 
@@ -746,38 +736,18 @@ User clicks "🏙️ 3MF + Buildings" button (Extrude tab, City Buildings row)
 
 ## Known Issues
 
-### 1. Dead Module Files
-`api.js`, `state.js`, `main.js`, `dem-viewer.js`, `canvas.js`, `colors.js` are never imported by the running application. They represent a parallel (incomplete) modularisation attempt. Any changes to these files have NO effect on the running app.
+### 1. Duplicate Functions (Long-term — not urgent)
+The following functions exist in both `app.js` AND in the two active plain-script modules:
+`renderDEMCanvas`, `mapElevationToColor`, `hslToRgb`, `drawColorbar`, `drawHistogram`, `drawGridlinesOverlay`, `enableZoomAndPan`, `loadCoordinates`, `recolorDEM`. Remove duplicates when extracting modules.
 
-### 2. Duplicate Functions
-The following functions exist in both `app.js` AND in module files, with the `app.js` versions being the ones actually used:
-- `renderDEMCanvas` (also in `canvas.js`)
-- `mapElevationToColor` (also in `colors.js`)
-- `hslToRgb` (also in `colors.js`)
-- `drawColorbar` (also in `canvas.js`)
-- `drawHistogram` (also in `canvas.js`)
-- `drawGridlinesOverlay` (also in `dem-viewer.js`)
-- `enableZoomAndPan` (also in `canvas.js`)
-- `loadCoordinates` (also in `api.js` and `main.js`)
-- `recolorDEM` (also in `dem-viewer.js`)
+### 2. Loose Global State (Long-term — not urgent)
+app.js uses ~30 loose closure variables alongside `window.appState` mirrors. Long-term: single source of truth via a dedicated state object.
 
-### 3. Loose Global State
-app.js uses ~30 loose global variables instead of a centralised state object. `state.js` exists but is unused. This makes reasoning about state changes difficult.
+### 3. `<script>` vs Module Boundary
+Because app.js is loaded as `<script>` (not `type="module"`), it cannot use `import`/`export`. Converting it to a module requires restructuring the entire file and changing the HTML script tag. Many HTML `onclick` handlers reference global functions — these must remain on `window` or be updated.
 
-### 4. state.js / window.appState
-`state.js` is an ES module (unused by app.js) that now documents the full state schema including `currentDemBbox`, `layerBboxes`, `layerStatus`, `activeDemSubtab`, `osmCityData`, and all `cache.*` fields. The live cross-module state is `window.appState` (set up in app.js); the closure-local variables (`lastDemData`, `currentDemBbox`, `layerBboxes`, `layerStatus`) still exist in app.js alongside their `window.appState` mirrors.
-
-### 5. Two `loadCoordinates()` Functions in app.js
-There is a stub `loadCoordinates()` at the very top of app.js (~line 20) and the real async implementation at ~line 1057 inside the `DOMContentLoaded` closure. The outer stub is a leftover.
-
-### 6. `<script>` vs Module Boundary
-Because app.js is loaded as `<script>` (not `type="module"`), it cannot use `import`/`export`. Converting it to a module requires restructuring the entire file and changing the HTML script tag.
-
-### 7. ~~Broken OBJ/3MF Export Route~~ — FIXED
-`downloadModel(format)` now calls `/api/export/${format}` correctly. All three export formats (STL, OBJ, 3MF) use the `/api/export/{format}` endpoints and work.
-
-### 8. ~~STL Export Data Flow Mismatch~~ — RESOLVED
-STL export correctly POSTs to `/api/export/stl` with DEM values in the request body. The Data Flow section below has been updated to reflect this accurately.
+### 4. City overlay letterbox clipping (fixed session 9)
+`renderCityOverlay()` in `city-overlay.js` now uses `ctx.save()/rect(tX,tY,tW,tH)/clip()/restore()` to constrain all city feature drawing to the letterbox rect. This prevents visual overflow into the margin bands regardless of zoom state.
 
 ---
 
@@ -795,11 +765,9 @@ STL export correctly POSTs to `/api/export/stl` with DEM values in the request b
 
 6. **The waterMaskCache is not a class.** It is a plain object with methods. It lives at file-top scope so it persists across DOMContentLoaded.
 
-7. **Do not edit module files** (api.js, state.js, etc.) expecting the changes to affect the running app. Those files are unused.
+7. **Test with the actual server.** Run `python ui/server.py` from the `ui/` directory with the venv activated (`Code/.venv`). The server must be running on port 9000.
 
-8. **Test with the actual server.** Run `python ui/server.py` from the `ui/` directory with the venv activated (`Code/.venv`). The server must be running on port 9000.
-
-9. **When adding new API calls**, add the route to the appropriate `ui/routers/` file (or create a new one) and add a corresponding call in app.js. Business logic goes in `ui/core/`. Do not add to api.js (unused) unless you are also integrating the module system.
+8. **When adding new API calls**, add the route to the appropriate `ui/routers/` file (or create a new one) and add a corresponding call in app.js. Business logic goes in `ui/core/`.
 
 10. **Colormap names** used in the app: `terrain`, `viridis`, `jet`, `rainbow`, `hot`, `gray`. These must match the `COLORMAPS` object in the local `mapElevationToColor()` implementation inside app.js.
 
@@ -825,26 +793,10 @@ STL export correctly POSTs to `/api/export/stl` with DEM values in the request b
 - Internal state: `stackZoom`, `stackZoomInitialized` (module-scoped)
 - Shared state via `window.appState` (currentDemBbox, selectedRegion, lastDemData [new])
 
-**Task 5 — DONE** — Clean up state.js
-- Added missing properties: `currentDemBbox`, `layerBboxes`, `layerStatus`, `activeDemSubtab`, `osmCityData`, and all `cache.*` fields
-- Added JSDoc to all functions; updated `clearCache()` to also reset layer tracking state
-- Removed dead `let osmCityData = null` from app.js (orphaned after city-overlay.js extraction)
-- `state.js` remains an ES module (unused by app.js) but now accurately documents the full state schema
-
-### Medium-term (future)
-
-- **Integrate api.js**: Replace direct `fetch()` calls in app.js with calls to `api.js` functions. Requires either making app.js a module or exposing api.js functions on `window`.
-- **Integrate state.js**: Replace loose globals with `getState()`/`updateState()` calls.
-- **Integrate canvas.js / colors.js**: Remove duplicated rendering functions from app.js.
-- **Integrate dem-viewer.js**: Consolidate DEM rendering logic.
-
 ### Long-term (ideal target — JS)
 
-- Split app.js into proper ES modules under `ui/static/js/modules/`
-- Load via `<script type="module" src="/static/js/main.js">`
-- `main.js` imports and wires all modules
-- `window.x` bridge for any remaining HTML onclick handlers
-- Full state management via `state.js`
+- Split app.js into plain-script modules under `ui/static/js/modules/` (continuing the pattern of city-overlay.js and stacked-layers.js)
+- Introduce a central `appState` event-emitter object (see ARCH1 in TODO.md)
 - Unit tests for pure functions (projection, colormap, curve interpolation)
 
 ---
@@ -876,6 +828,8 @@ ui/
 
 **Cache**: DEM arrays stored as `.npz` (float32, ~350 KB/region). OSM data as `.json.gz`. Cache key: `MD5(namespace + ":" + bbox_4dp + ":" + sorted_params)`. Pruned at startup via `prune_all_caches()`.
 
+**sys.path**: `server.py` bootstraps `_STRM2STL_ROOT` at the very top so all routers and core modules can import `numpy2stl` and `geo2stl` without `os.chdir()`. `core/dem.py`, `core/export.py`, and `routers/terrain.py` each add their own module-level `sys.path.insert(0, _STRM2STL_DIR)` guard for safety. Never use `os.chdir()` in request handlers — it is process-global and causes data races under concurrent FastAPI requests.
+
 **SQLite**: `data.db` has `regions` + `region_settings` tables. Legacy `coordinates.json` / `region_settings.json` backed up as `.bak` after migration. `scripts/migrate_json_to_sqlite.py` was the one-time migration script.
 
 ---
@@ -885,7 +839,7 @@ ui/
 | ID | Feature | Status |
 |----|---------|--------|
 | P1 | Physical dimensions panel in Extrude tab | ✅ Done |
-| P2 | Print-bed fit optimizer (auto-scale to fit Bambu 256, Prusa 250, etc.) | Pending |
+| P2 | Print-bed fit optimizer (auto-scale to fit Bambu 256, Prusa 250, etc.) | ✅ Done (`_updateBedOptimizer` + `bedSizeSelect`/`bedOptimizerResult` in UI) |
 | P3 | Contour lines baked into STL surface | ✅ Done |
 | P4 | Base label engraving (region name embossed on base) | ✅ Done |
 | P5 | STL mesh repair (trimesh watertight check + auto-fix) | ✅ Done |

@@ -21,6 +21,13 @@
 const ALPHA_BUCKETS = 8;   // number of opacity bands for building height shading
 
 // ---------------------------------------------------------------------------
+// PERF1 — shared output object for geoToPx so every call reuses one allocation
+// instead of creating a new [x, y] array per vertex.
+// Callers must read _pt.x / _pt.y immediately and never store the reference.
+// ---------------------------------------------------------------------------
+const _pt = { x: 0, y: 0 };
+
+// ---------------------------------------------------------------------------
 // Debounce tokens — prevents duplicate renders when called multiple times
 // within the same animation frame.
 // ---------------------------------------------------------------------------
@@ -28,22 +35,165 @@ let _stackRafId  = null;
 let _demRafId    = null;
 
 // ---------------------------------------------------------------------------
-// Offscreen canvas cache — keyed by (dataVersion, W, H, zoom.scale).
-// When the key matches, blit from cache instead of re-drawing all features.
-// Invalidated on data load (osmCityData reassignment increments _cityDataVersion).
+// PERF6 Part A — per-layer OffscreenCanvas cache.
+//
+// Each of the four city layers (buildings, roads, waterways, pois) is rendered
+// to its own OffscreenCanvas and cached independently.  Toggling a layer only
+// re-composites (4 drawImage blits) without re-drawing anything.  Only the
+// specific layer whose data or canvas layout changed is re-rendered.
+//
+// Two cache sets: one for the stacked-layers view, one for the DEM canvas view.
+// Invalidated by _invalidateCityCache() (data change) or by cache-key mismatch
+// (canvas resize / bbox change / projection change).
 // ---------------------------------------------------------------------------
-let _cityDataVersion  = 0;   // incremented every time osmCityData changes
-let _stackCacheKey    = '';
-let _stackOffscreen   = null; // OffscreenCanvas or null
-let _demCacheKey      = '';
-let _demOffscreen     = null;
+const _LAYER_NAMES = ['waterways', 'buildings', 'roads', 'pois'];
 
-/** Bump version so next render bypasses the cache. Call after loading new data. */
-window._invalidateCityCache = function () { _cityDataVersion++; };
+/** Maps layer name → the DOM toggle checkbox ID for that layer. */
+const _LAYER_TOGGLES = {
+    buildings: 'layerBuildingsToggle',
+    roads:     'layerRoadsToggle',
+    waterways: 'layerWaterwaysToggle',
+    pois:      'layerPoisToggle',
+};
 
-/** Serialise a cache key from the parameters that affect pixel output. */
-function _makeCacheKey(version, W, H, invZ, bboxKey) {
-    return `${version}|${W}|${H}|${invZ.toFixed(3)}|${bboxKey}`;
+function _makeLayerCache() {
+    return Object.fromEntries(_LAYER_NAMES.map(n => [n, { canvas: null, key: '' }]));
+}
+
+let _cityDataVersion = 0;   // incremented every time osmCityData changes
+const _stackLayer    = _makeLayerCache();  // per-layer offscreen cache for stacked view
+const _demLayer      = _makeLayerCache();  // per-layer offscreen cache for DEM view
+
+/** null = untested, true = OffscreenCanvas available, false = not available */
+let _offscreenOk = null;
+
+/**
+ * Bump the data version and invalidate all per-layer caches.
+ * Call after loading new city data so the next render re-draws all layers.
+ */
+window._invalidateCityCache = function () {
+    _cityDataVersion++;
+    for (const obj of Object.values(_stackLayer)) { obj.canvas = null; obj.key = ''; }
+    for (const obj of Object.values(_demLayer))   { obj.canvas = null; obj.key = ''; }
+};
+
+/**
+ * Serialise a cache key from the parameters that affect pixel output.
+ * PERF2: invZ removed — CSS transform handles intermediate zoom frames.
+ * The cache is only invalidated when the actual pixel layout or data changes,
+ * not on every zoom step.
+ */
+function _makeCacheKey(version, W, H, bboxKey) {
+    const proj = document.getElementById('paramProjection')?.value || 'none';
+    return `${version}|${W}|${H}|${bboxKey}|${proj}`;
+}
+
+/**
+ * Build a projection-aware geoToPx function.
+ * Maps (lat, lon) → writes result into the shared _pt object (PERF1).
+ * Caller MUST read _pt.x / _pt.y immediately after the call and never store
+ * the returned reference, since _pt is overwritten by the next call.
+ *
+ * @param {number} north/south/east/west  – bbox bounds
+ * @param {number} canvasX/Y             – top-left of the drawing rect within the canvas
+ * @param {number} canvasW/H             – size of the drawing rect
+ * @returns {function(lat:number, lon:number): typeof _pt}
+ */
+function _buildGeoToPx(north, south, east, west, canvasX, canvasY, canvasW, canvasH) {
+    const latRange   = north - south;
+    const lonRange   = east  - west;
+    const projection = document.getElementById('paramProjection')?.value || 'none';
+    const toRad      = d => d * Math.PI / 180;
+    const mercYfn    = l => Math.log(Math.tan(Math.PI / 4 + toRad(Math.max(-85, Math.min(85, l))) / 2));
+    const mercN      = mercYfn(north), mercS = mercYfn(south), mercRange = mercN - mercS;
+    const midCos     = Math.cos(toRad((north + south) / 2));
+
+    return function geoToPx(lat, lon) {
+        const xLin = (lon - west) / lonRange;
+        const yLin = (north - lat) / latRange;
+        let xFrac, yFrac;
+        switch (projection) {
+            case 'mercator':
+                xFrac = xLin;
+                yFrac = mercRange > 1e-10 ? (mercN - mercYfn(lat)) / mercRange : yLin;
+                break;
+            case 'cosine':
+            case 'lambert':
+                xFrac = (1 - midCos) / 2 + xLin * midCos;
+                yFrac = yLin;
+                break;
+            case 'sinusoidal': {
+                const rowCos = Math.cos(toRad(lat));
+                xFrac = (1 - rowCos) / 2 + xLin * rowCos;
+                yFrac = yLin;
+                break;
+            }
+            default:
+                xFrac = xLin;
+                yFrac = yLin;
+        }
+        // PERF1: write into shared object, no allocation
+        _pt.x = canvasX + xFrac * canvasW;
+        _pt.y = canvasY + yFrac * canvasH;
+        return _pt;
+    };
+}
+
+/**
+ * PERF4: Pre-bake all features' coordinates into a flat Float32Array in pixel space,
+ * and record the pixel bounding box for PERF5 viewport culling.
+ *
+ * Each feature gets `feat._px = { buf, counts, key, x0, y0, x1, y1 }` where:
+ *   buf    — flat Float32Array of [x0,y0, x1,y1, ...] for every vertex across all rings
+ *   counts — Uint16Array of vertex count per ring
+ *   key    — the bakKey this was baked for (used to detect stale caches)
+ *   x0/y0/x1/y1 — pixel bounding box (for PERF5 culling)
+ *
+ * If bakKey matches feat._px.key the feature is already up to date and skipped.
+ * Baking is O(total vertices) and only runs when the canvas layout or bbox changes.
+ *
+ * @param {Array}    features  — GeoJSON Feature array (mutated in place)
+ * @param {Function} geoToPx  — projection function from _buildGeoToPx
+ * @param {string}   bakKey   — stable key for the current canvas/bbox/projection config
+ */
+function _prebakeFeatures(features, geoToPx, bakKey) {
+    for (const feat of features) {
+        if (feat._px?.key === bakKey) continue;   // already baked for this config
+
+        const geom = feat.geometry;
+        if (!geom?.coordinates) { feat._px = null; continue; }
+
+        let rings;
+        switch (geom.type) {
+            case 'Polygon':         rings = geom.coordinates;          break;
+            case 'MultiPolygon':    rings = geom.coordinates.flat(1);  break;
+            case 'LineString':      rings = [geom.coordinates];        break;
+            case 'MultiLineString': rings = geom.coordinates;          break;
+            case 'Point':           rings = [[geom.coordinates]];      break;
+            default:                rings = null;
+        }
+        if (!rings) { feat._px = null; continue; }
+
+        // Count total vertices across all rings
+        const counts = new Uint16Array(rings.length);
+        let total = 0;
+        rings.forEach((r, i) => { counts[i] = r.length; total += r.length; });
+
+        // Fill pixel coords and compute pixel bbox in one pass
+        const buf = new Float32Array(total * 2);
+        let idx = 0;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const ring of rings) {
+            for (const coord of ring) {
+                geoToPx(coord[1], coord[0]);   // writes into _pt
+                buf[idx++] = _pt.x;
+                buf[idx++] = _pt.y;
+                if (_pt.x < x0) x0 = _pt.x;  if (_pt.x > x1) x1 = _pt.x;
+                if (_pt.y < y0) y0 = _pt.y;  if (_pt.y > y1) y1 = _pt.y;
+            }
+        }
+        feat._px = { buf, counts, key: bakKey, x0, y0, x1, y1 };
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -72,23 +222,28 @@ window.loadCityData = async function loadCityData() {
     if (statusEl) statusEl.textContent = 'Checking cache…';
     if (loadBtn)  loadBtn.disabled = true;
 
-    try {
-        // Check server cache first
-        const cacheResp = await fetch(
-            `/api/cities/cached?north=${selectedRegion.north}&south=${selectedRegion.south}` +
-            `&east=${selectedRegion.east}&west=${selectedRegion.west}`
-        );
-        const cacheInfo = await cacheResp.json();
-        if (statusEl) statusEl.textContent = cacheInfo.cached ? 'Loading from cache…' : 'Fetching from OpenStreetMap…';
+    // Show loading dot on cities strip button
+    const citiesDot = document.getElementById('stripDotCities');
+    if (citiesDot) { citiesDot.classList.remove('loaded', 'error'); citiesDot.classList.add('loading'); }
 
+    try {
         const layers = [];
         if (document.getElementById('layerBuildingsToggle')?.checked)  layers.push('buildings');
         if (document.getElementById('layerRoadsToggle')?.checked)      layers.push('roads');
         if (document.getElementById('layerWaterwaysToggle')?.checked)  layers.push('waterways');
         if (document.getElementById('layerPoisToggle')?.checked)       layers.push('pois');
 
-        const simplifyTol = parseFloat(document.getElementById('citySimplifyTolerance')?.value) || 2.0;
-        const minArea     = parseFloat(document.getElementById('cityMinArea')?.value) || 20.0;
+        const simplifyTol = parseFloat(document.getElementById('citySimplifyTolerance')?.value) || 0.5;
+        const minArea     = parseFloat(document.getElementById('cityMinArea')?.value) || 5.0;
+
+        // Check cache using the same key params as the actual data endpoint
+        const cacheResp = await fetch(
+            `/api/cities/cached?north=${selectedRegion.north}&south=${selectedRegion.south}` +
+            `&east=${selectedRegion.east}&west=${selectedRegion.west}` +
+            `&simplify_tolerance=${simplifyTol}&min_area=${minArea}`
+        );
+        const cacheInfo = await cacheResp.json();
+        if (statusEl) statusEl.textContent = cacheInfo.cached ? 'Loading from cache…' : 'Fetching from OpenStreetMap…';
 
         const resp = await fetch('/api/cities', {
             method: 'POST',
@@ -122,6 +277,21 @@ window.loadCityData = async function loadCityData() {
         _updateCityLayerCount('waterways', data.waterways?.features?.length);
         _updateCityLayerCount('pois',      data.pois?.features?.length);
 
+        // Update cities strip dot
+        const citiesDot = document.getElementById('stripDotCities');
+        if (citiesDot) { citiesDot.classList.remove('loading', 'error'); citiesDot.classList.add('loaded'); }
+
+        // Count malformed features (missing geometry or unrecognised type)
+        let skippedCount = 0;
+        for (const collection of [data.buildings, data.roads, data.waterways, data.pois]) {
+            for (const feat of (collection?.features || [])) {
+                if (!feat.geometry || !feat.geometry.coordinates) skippedCount++;
+            }
+        }
+        if (skippedCount > 0 && showToast) {
+            showToast(`Warning: ${skippedCount} feature${skippedCount > 1 ? 's' : ''} had missing geometry and were skipped`, 'warning');
+        }
+
         renderCityOverlay();
         if (statusEl) statusEl.textContent = `Loaded (${data.diagonal_km?.toFixed(1) ?? '?'} km)`;
         if (showToast) showToast('City data loaded', 'success');
@@ -129,6 +299,8 @@ window.loadCityData = async function loadCityData() {
         const showToastFn = window.appState?.showToast;
         if (showToastFn) showToastFn('City data error: ' + e.message, 'error');
         if (statusEl) statusEl.textContent = 'Error.';
+        const cd = document.getElementById('stripDotCities');
+        if (cd) { cd.classList.remove('loading', 'loaded'); cd.classList.add('error'); }
     } finally {
         if (loadBtn) loadBtn.disabled = false;
     }
@@ -196,9 +368,11 @@ function _computeTerrainZ(geojson, demData) {
         feat._bbox = _computeGeomBbox(feat.geometry);
     }
 
-    if (!demData?.dem_values) return;
-    const vals = demData.dem_values;
-    const [demH, demW] = demData.dimensions || [0, 0];
+    // Support both {values, width, height} (lastDemData) and legacy {dem_values, dimensions}
+    const vals = demData?.values ?? demData?.dem_values;
+    if (!vals) return;
+    const demH = demData.height ?? (demData.dimensions || [])[0] ?? 0;
+    const demW = demData.width  ?? (demData.dimensions || [])[1] ?? 0;
     if (!demH || !demW) return;
     // bbox may be [west, south, east, north] array or {north,south,east,west} object
     let bWest, bSouth, bEast, bNorth;
@@ -267,6 +441,8 @@ window.clearCityOverlay = function clearCityOverlay() {
         const el = document.getElementById(id);
         if (el) el.textContent = '';
     });
+    const cd = document.getElementById('stripDotCities');
+    if (cd) cd.classList.remove('loaded', 'loading', 'error');
 };
 
 // ---------------------------------------------------------------------------
@@ -276,31 +452,59 @@ window.clearCityOverlay = function clearCityOverlay() {
 /**
  * Draw OSM city features onto a canvas context.
  *
- * Buildings are batched into ALPHA_BUCKETS opacity groups to minimise
- * ctx.globalAlpha state changes (the main performance bottleneck).
- * Roads are batched by rounded lineWidth for the same reason.
+ * PERF4: Uses pre-baked Float32Array pixel coords (feat._px.buf) when available,
+ * eliminating all per-frame projection math and per-vertex allocations.
+ * Falls back to geoToPx for features that haven't been baked yet.
+ *
+ * PERF5: Viewport culling skips features whose pixel bbox doesn't intersect
+ * the visible draw rectangle, cutting path commands 60–80% at high zoom.
+ *
+ * Buildings are batched into ALPHA_BUCKETS opacity groups (minimises globalAlpha changes).
+ * Roads are batched by rounded lineWidth (minimises lineWidth state changes).
  *
  * @param {CanvasRenderingContext2D} ctx
- * @param {function(number, number): [number, number]} geoToPx  (lat, lon) → [x, y]
- * @param {number} invZ   CSS zoom compensation factor (1 / stackZoom.scale)
- * @param {Object} osmCityData
- * @param {number} W      canvas pixel width  (for road metre-to-pixel scaling)
- * @param {number} [tW]   letterboxed draw width (for stacked view); defaults to W
- * @param {number} bboxLonM  longitudinal span of the bbox in metres
+ * @param {Function} geoToPx    - fallback for unbaked features: geoToPx(lat, lon) → _pt
+ * @param {number}   invZ       - CSS zoom compensation (1 / stackZoom.scale) for stroke widths
+ * @param {Object}   osmCityData
+ * @param {number}   W          - canvas pixel width (for road metre→pixel scaling)
+ * @param {number}   [tW]       - letterboxed draw width; defaults to W
+ * @param {number}   bboxLonM   - longitudinal bbox span in metres
+ * @param {Object}   [clipRect] - visible rectangle {x0,y0,x1,y1} for viewport culling (PERF5)
+ * @param {string|null} [onlyLayer] - PERF6: if set, draw only this layer unconditionally
+ *   (toggle state ignored).  If null/undefined, check toggle state for all layers.
  */
-function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM) {
-    const drawW = tW != null ? tW : W;
+function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, onlyLayer) {
+    const drawW      = tW != null ? tW : W;
     const metrePerPx = bboxLonM / drawW;
 
-    // ── Waterways ──────────────────────────────────────────────────────────
-    if (document.getElementById('layerWaterwaysToggle')?.checked && osmCityData.waterways?.features) {
-        const c = document.getElementById('layerWaterwaysColor')?.value || '#4488cc';
-        ctx.fillStyle   = c + '88';
-        ctx.strokeStyle = c;
-        ctx.lineWidth   = 1.5 * invZ;
-        ctx.globalAlpha = 0.65;
-        ctx.beginPath();
-        osmCityData.waterways.features.forEach(feat => {
+    /**
+     * PERF6: Return true if this layer should be drawn in the current call.
+     * When onlyLayer is set (per-layer offscreen bake), always draw that one layer.
+     * When onlyLayer is null/undefined (legacy / fallback path), check toggle state.
+     */
+    function _shouldDraw(layerName) {
+        if (onlyLayer != null) return onlyLayer === layerName;
+        return !!document.getElementById(_LAYER_TOGGLES[layerName])?.checked;
+    }
+
+    /**
+     * Draw a feature's path using pre-baked pixel coords when available.
+     * @param {Object} feat        - GeoJSON feature with optional feat._px
+     * @param {boolean} closePaths - true for polygons, false for linestrings
+     */
+    function _drawFeatPath(feat, closePaths) {
+        const px = feat._px;
+        if (px?.buf) {
+            // PERF4 hot path — pure array iteration, no projection math
+            const { buf, counts } = px;
+            let i = 0;
+            for (const count of counts) {
+                ctx.moveTo(buf[i], buf[i + 1]); i += 2;
+                for (let v = 1; v < count; v++, i += 2) ctx.lineTo(buf[i], buf[i + 1]);
+                if (closePaths) ctx.closePath();
+            }
+        } else {
+            // Fallback: live geoToPx (feature not yet baked)
             const geom = feat.geometry;
             if (!geom) return;
             const rings =
@@ -309,65 +513,89 @@ function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM) {
                 geom.type === 'LineString'      ? [geom.coordinates] :
                 geom.type === 'MultiLineString' ? geom.coordinates : null;
             if (!rings) return;
-            rings.forEach(ring => {
+            for (const ring of rings) {
                 let first = true;
-                for (const [lo, la] of ring) {
-                    const [px, py] = geoToPx(la, lo);
-                    if (first) { ctx.moveTo(px, py); first = false; } else ctx.lineTo(px, py);
+                for (const coord of ring) {
+                    geoToPx(coord[1], coord[0]);
+                    if (first) { ctx.moveTo(_pt.x, _pt.y); first = false; }
+                    else ctx.lineTo(_pt.x, _pt.y);
                 }
-                ctx.closePath();
-            });
-        });
+                if (closePaths) ctx.closePath();
+            }
+        }
+    }
+
+    /**
+     * PERF5: Check whether a feature's pixel bbox is visible in clipRect.
+     * Returns true if the feature should be culled (skipped).
+     */
+    function _culled(feat) {
+        if (!clipRect) return false;
+        const px = feat._px;
+        if (px) {
+            return px.x1 < clipRect.x0 || px.x0 > clipRect.x1 ||
+                   px.y1 < clipRect.y0 || px.y0 > clipRect.y1;
+        }
+        // Fallback geo bbox cull for unbaked features
+        if (feat._bbox) {
+            geoToPx(feat._bbox.minLat, feat._bbox.minLon); const bx0 = _pt.x;
+            geoToPx(feat._bbox.maxLat, feat._bbox.maxLon); const bx1 = _pt.x;
+            return bx1 < clipRect.x0 || bx0 > clipRect.x1;
+        }
+        return false;
+    }
+
+    // ── Waterways ──────────────────────────────────────────────────────────
+    if (_shouldDraw('waterways') && osmCityData.waterways?.features) {
+        const c = document.getElementById('layerWaterwaysColor')?.value || '#4488cc';
+        ctx.fillStyle   = c + '88';
+        ctx.strokeStyle = c;
+        ctx.lineWidth   = 1.5 * invZ;
+        ctx.globalAlpha = 0.65;
+        ctx.beginPath();
+        for (const feat of osmCityData.waterways.features) {
+            if (!feat.geometry || _culled(feat)) continue;
+            const isLine = feat.geometry.type === 'LineString' || feat.geometry.type === 'MultiLineString';
+            _drawFeatPath(feat, !isLine);
+        }
         ctx.fill();
         ctx.stroke();
         ctx.globalAlpha = 1;
     }
 
     // ── Buildings — batched by opacity bucket ──────────────────────────────
-    // Batching reduces globalAlpha changes from ~N_buildings to ALPHA_BUCKETS.
-    if (document.getElementById('layerBuildingsToggle')?.checked && osmCityData.buildings?.features?.length) {
+    if (_shouldDraw('buildings') && osmCityData.buildings?.features?.length) {
         const baseC = document.getElementById('layerBuildingsColor')?.value || '#c8b89a';
         ctx.strokeStyle = baseC;
         ctx.lineWidth   = 0.5 * invZ;
         ctx.fillStyle   = baseC;
 
-        // Assign each feature to a bucket index based on height_m.
-        // Skip features whose pre-computed geo bbox would render < 1.5 px in each
-        // dimension — they are invisible at the current zoom level.
         const buckets = Array.from({ length: ALPHA_BUCKETS }, () => []);
         for (const feat of osmCityData.buildings.features) {
-            // Sub-pixel culling using pre-computed geo bbox (_bbox set at load time)
-            if (feat._bbox) {
-                const [x0] = geoToPx(feat._bbox.minLat, feat._bbox.minLon);
-                const [x1] = geoToPx(feat._bbox.maxLat, feat._bbox.maxLon);
-                if (Math.abs(x1 - x0) < 1.5) continue;   // too small to see
+            // PERF5: sub-pixel + viewport cull using pre-baked pixel bbox
+            const px = feat._px;
+            if (px) {
+                if (px.x1 - px.x0 < 0.5 && px.y1 - px.y0 < 0.5) continue;  // sub-pixel
+                if (clipRect && (px.x1 < clipRect.x0 || px.x0 > clipRect.x1 ||
+                                 px.y1 < clipRect.y0 || px.y0 > clipRect.y1)) continue;
+            } else if (feat._bbox) {
+                // Fallback cull for unbaked features
+                geoToPx(feat._bbox.minLat, feat._bbox.minLon); const bx0 = _pt.x;
+                geoToPx(feat._bbox.maxLat, feat._bbox.maxLon); const bx1 = _pt.x;
+                if (Math.abs(bx1 - bx0) < 0.5) continue;
             }
-            const h = feat.properties?.height_m || 10;
-            const t = Math.min(1, Math.max(0, (h - 3) / 77));
+            const h  = feat.properties?.height_m || 10;
+            const t  = Math.min(1, Math.max(0, (h - 3) / 77));
             const bi = Math.min(ALPHA_BUCKETS - 1, Math.floor(t * ALPHA_BUCKETS));
             buckets[bi].push(feat);
         }
 
         for (let bi = 0; bi < ALPHA_BUCKETS; bi++) {
             if (!buckets[bi].length) continue;
-            // Set alpha once for the whole bucket
             ctx.globalAlpha = 0.40 + (bi / (ALPHA_BUCKETS - 1)) * 0.45;
             ctx.beginPath();
             for (const feat of buckets[bi]) {
-                const geom = feat.geometry;
-                if (!geom) continue;
-                const rings =
-                    geom.type === 'Polygon'      ? geom.coordinates :
-                    geom.type === 'MultiPolygon' ? geom.coordinates.flat(1) : null;
-                if (!rings) continue;
-                for (const ring of rings) {
-                    let first = true;
-                    for (const [lo, la] of ring) {
-                        const [px, py] = geoToPx(la, lo);
-                        if (first) { ctx.moveTo(px, py); first = false; } else ctx.lineTo(px, py);
-                    }
-                    ctx.closePath();
-                }
+                _drawFeatPath(feat, true);
             }
             ctx.fill();
             ctx.stroke();
@@ -376,19 +604,18 @@ function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM) {
     }
 
     // ── Roads — batched by lineWidth ───────────────────────────────────────
-    // Group features sharing the same rounded pixel width into a single path.
-    if (document.getElementById('layerRoadsToggle')?.checked && osmCityData.roads?.features?.length) {
+    if (_shouldDraw('roads') && osmCityData.roads?.features?.length) {
         const c         = document.getElementById('layerRoadsColor')?.value || '#cc8844';
         const baseWidth = parseFloat(document.getElementById('cityRoadWidth')?.value) || 1.5;
         ctx.strokeStyle = c;
         ctx.globalAlpha = 0.75;
 
-        // Group by rounded lineWidth (0.5-px resolution avoids too many groups)
         const groups = new Map();
         for (const feat of osmCityData.roads.features) {
+            if (_culled(feat)) continue;  // PERF5: viewport cull
             const widthM  = feat.properties?.road_width_m || baseWidth;
             const widthPx = Math.max(0.5, (widthM / metrePerPx) * invZ);
-            const key     = Math.round(widthPx * 2) / 2;   // round to nearest 0.5
+            const key     = Math.round(widthPx * 2) / 2;
             if (!groups.has(key)) groups.set(key, []);
             groups.get(key).push(feat);
         }
@@ -397,19 +624,7 @@ function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM) {
             ctx.lineWidth = lineWidth;
             ctx.beginPath();
             for (const feat of feats) {
-                const geom = feat.geometry;
-                if (!geom) continue;
-                const rings =
-                    geom.type === 'LineString'      ? [geom.coordinates] :
-                    geom.type === 'MultiLineString' ? geom.coordinates : null;
-                if (!rings) continue;
-                for (const ring of rings) {
-                    let first = true;
-                    for (const [lo, la] of ring) {
-                        const [px, py] = geoToPx(la, lo);
-                        if (first) { ctx.moveTo(px, py); first = false; } else ctx.lineTo(px, py);
-                    }
-                }
+                _drawFeatPath(feat, false);
             }
             ctx.stroke();
         }
@@ -417,7 +632,7 @@ function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM) {
     }
 
     // ── POIs — only above zoom threshold ──────────────────────────────────
-    if (document.getElementById('layerPoisToggle')?.checked && osmCityData.pois?.features) {
+    if (_shouldDraw('pois') && osmCityData.pois?.features) {
         const zoom = window.appState?.stackZoom?.scale || 1;
         if (zoom >= 1.5) {
             const c = document.getElementById('layerPoisColor')?.value || '#ff6644';
@@ -428,9 +643,17 @@ function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM) {
             for (const feat of osmCityData.pois.features) {
                 const geom = feat.geometry;
                 if (geom?.type !== 'Point') continue;
-                const [px, py] = geoToPx(geom.coordinates[1], geom.coordinates[0]);
-                ctx.beginPath();
-                ctx.arc(px, py, 3, 0, 2 * Math.PI);
+                if (clipRect) {
+                    geoToPx(geom.coordinates[1], geom.coordinates[0]);
+                    if (_pt.x < clipRect.x0 || _pt.x > clipRect.x1 ||
+                        _pt.y < clipRect.y0 || _pt.y > clipRect.y1) continue;
+                    ctx.beginPath();
+                    ctx.arc(_pt.x, _pt.y, 3, 0, 2 * Math.PI);
+                } else {
+                    geoToPx(geom.coordinates[1], geom.coordinates[0]);
+                    ctx.beginPath();
+                    ctx.arc(_pt.x, _pt.y, 3, 0, 2 * Math.PI);
+                }
                 ctx.fill();
             }
             ctx.globalAlpha = 1;
@@ -466,7 +689,6 @@ function _doRenderCityOverlay() {
 
     const { north, south, east, west } = bbox;
     const latRange = north - south;
-    const lonRange = east - west;
 
     // Get or create overlay canvas inside the stack
     let overlay = stack.querySelector('.osm-overlay');
@@ -499,33 +721,57 @@ function _doRenderCityOverlay() {
     const invZ      = 1 / (stackZoom.scale || 1);
     const bboxLonM  = (east - west) * latCos * 111_000;
     const bboxKey   = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
-    const cacheKey  = _makeCacheKey(_cityDataVersion, W, H, invZ, bboxKey);
+    // PERF2: invZ excluded from cache key — CSS transform covers intermediate zoom frames
+    const cacheKey  = _makeCacheKey(_cityDataVersion, W, H, bboxKey);
 
     overlay.width  = W;
     overlay.height = H;
     const ctx = overlay.getContext('2d');
 
-    if (cacheKey === _stackCacheKey && _stackOffscreen) {
-        // Cache hit — blit stored pixels; skip re-drawing thousands of features
-        ctx.drawImage(_stackOffscreen, 0, 0);
-    } else {
-        // Cache miss — full draw then store result
-        ctx.clearRect(0, 0, W, H);
+    // Test OffscreenCanvas support once (same browser capability for the entire session)
+    if (_offscreenOk === null) {
+        try { new OffscreenCanvas(1, 1); _offscreenOk = true; } catch (_) { _offscreenOk = false; }
+    }
 
-        function geoToPx(lat, lon) {
-            const xFrac = Math.max(0, Math.min(1, (lon - west) / lonRange));
-            const yFrac = Math.max(0, Math.min(1, (north - lat) / latRange));
-            return [tX + xFrac * tW, tY + yFrac * tH];
+    // Common setup used by both the per-layer and fallback paths
+    const geoToPx  = _buildGeoToPx(north, south, east, west, tX, tY, tW, tH);
+    const clipRect = { x0: tX, y0: tY, x1: tX + tW, y1: tY + tH };
+    const bakKey   = `stack|${W}|${H}|${bboxKey}|${document.getElementById('paramProjection')?.value || 'none'}`;
+
+    // PERF4: pre-bake pixel coords (no-op for features already baked for this bakKey)
+    if (osmCityData.buildings?.features) _prebakeFeatures(osmCityData.buildings.features, geoToPx, bakKey);
+    if (osmCityData.roads?.features)     _prebakeFeatures(osmCityData.roads.features,     geoToPx, bakKey);
+    if (osmCityData.waterways?.features) _prebakeFeatures(osmCityData.waterways.features, geoToPx, bakKey);
+    if (osmCityData.pois?.features)      _prebakeFeatures(osmCityData.pois.features,      geoToPx, bakKey);
+
+    if (_offscreenOk) {
+        // PERF6 Part A: render each stale layer to its own OffscreenCanvas.
+        // Layers whose cacheKey already matches are skipped (no re-draw).
+        // Compositing is always just 4 drawImage blits.
+        for (const layer of _LAYER_NAMES) {
+            if (_stackLayer[layer].key === cacheKey && _stackLayer[layer].canvas) continue;
+            const offscreen = new OffscreenCanvas(W, H);
+            const octx = offscreen.getContext('2d');
+            octx.save();
+            octx.beginPath(); octx.rect(tX, tY, tW, tH); octx.clip();
+            _drawCityCanvas(octx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, layer);
+            octx.restore();
+            _stackLayer[layer].canvas = offscreen;
+            _stackLayer[layer].key    = cacheKey;
         }
-
-        _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM);
-
-        // Store in offscreen cache for subsequent re-renders with same parameters
-        try {
-            _stackOffscreen = new OffscreenCanvas(W, H);
-            _stackOffscreen.getContext('2d').drawImage(overlay, 0, 0);
-            _stackCacheKey  = cacheKey;
-        } catch (_) { _stackOffscreen = null; _stackCacheKey = ''; }
+        // Composite: blit only the visible layers (toggle state checked here, not at bake time)
+        ctx.clearRect(0, 0, W, H);
+        for (const layer of _LAYER_NAMES) {
+            if (!document.getElementById(_LAYER_TOGGLES[layer])?.checked) continue;
+            ctx.drawImage(_stackLayer[layer].canvas, 0, 0);
+        }
+    } else {
+        // Fallback: draw all visible layers in one pass directly to visible canvas
+        ctx.clearRect(0, 0, W, H);
+        ctx.save();
+        ctx.beginPath(); ctx.rect(tX, tY, tW, tH); ctx.clip();
+        _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, null);
+        ctx.restore();
     }
 
     // Re-apply the current stackZoom CSS transform so this canvas stays aligned
@@ -591,34 +837,76 @@ function _doRenderCityOnDEM() {
     overlay.style.height = demCSSRect.height + 'px';
 
     const { north, south, east, west } = bbox;
-    const latRange = north - south;
     const lonRange = east - west;
     const latMid   = (north + south) / 2;
     const bboxLonM = lonRange * Math.cos(latMid * Math.PI / 180) * 111_000;
     const bboxKey  = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
-    const cacheKey = _makeCacheKey(_cityDataVersion, W, H, 1, bboxKey);
+    // PERF2: invZ (=1 for DEM view) excluded for consistency; cacheKey only needs data+layout
+    const cacheKey = _makeCacheKey(_cityDataVersion, W, H, bboxKey);
 
     const ctx = overlay.getContext('2d');
 
-    if (cacheKey === _demCacheKey && _demOffscreen) {
-        ctx.drawImage(_demOffscreen, 0, 0);
-        return;
+    // _offscreenOk already set by _doRenderCityOverlay; test here too in case
+    // _doRenderCityOnDEM is called first (e.g., DEM view only, no stacked view).
+    if (_offscreenOk === null) {
+        try { new OffscreenCanvas(1, 1); _offscreenOk = true; } catch (_) { _offscreenOk = false; }
     }
 
-    ctx.clearRect(0, 0, W, H);
+    const geoToPx  = _buildGeoToPx(north, south, east, west, 0, 0, W, H);
+    const clipRect = { x0: 0, y0: 0, x1: W, y1: H };
 
-    function geoToPx(lat, lon) {
-        return [
-            ((lon - west) / lonRange) * W,
-            ((north - lat) / latRange) * H,
-        ];
+    // PERF4: pre-bake pixel coords (DEM view has different geoToPx than stack view)
+    const bakKey = `dem|${W}|${H}|${bboxKey}|${document.getElementById('paramProjection')?.value || 'none'}`;
+    if (osmCityData.buildings?.features) _prebakeFeatures(osmCityData.buildings.features, geoToPx, bakKey);
+    if (osmCityData.roads?.features)     _prebakeFeatures(osmCityData.roads.features,     geoToPx, bakKey);
+    if (osmCityData.waterways?.features) _prebakeFeatures(osmCityData.waterways.features, geoToPx, bakKey);
+    if (osmCityData.pois?.features)      _prebakeFeatures(osmCityData.pois.features,      geoToPx, bakKey);
+
+    if (_offscreenOk) {
+        // PERF6 Part A: per-layer offscreen cache for DEM view
+        for (const layer of _LAYER_NAMES) {
+            if (_demLayer[layer].key === cacheKey && _demLayer[layer].canvas) continue;
+            const offscreen = new OffscreenCanvas(W, H);
+            const octx = offscreen.getContext('2d');
+            _drawCityCanvas(octx, geoToPx, 1, osmCityData, W, W, bboxLonM, clipRect, layer);
+            _demLayer[layer].canvas = offscreen;
+            _demLayer[layer].key    = cacheKey;
+        }
+        ctx.clearRect(0, 0, W, H);
+        for (const layer of _LAYER_NAMES) {
+            if (!document.getElementById(_LAYER_TOGGLES[layer])?.checked) continue;
+            ctx.drawImage(_demLayer[layer].canvas, 0, 0);
+        }
+    } else {
+        // Fallback: draw all visible layers directly to visible canvas
+        ctx.clearRect(0, 0, W, H);
+        _drawCityCanvas(ctx, geoToPx, 1, osmCityData, W, W, bboxLonM, clipRect, null);
     }
-
-    _drawCityCanvas(ctx, geoToPx, 1, osmCityData, W, W, bboxLonM);
-
-    try {
-        _demOffscreen = new OffscreenCanvas(W, H);
-        _demOffscreen.getContext('2d').drawImage(overlay, 0, 0);
-        _demCacheKey  = cacheKey;
-    } catch (_) { _demOffscreen = null; _demCacheKey = ''; }
 }
+
+// ---------------------------------------------------------------------------
+// Reactive subscriptions via appState (ARCH1)
+// Re-render overlays automatically when data or bbox changes.
+// ---------------------------------------------------------------------------
+document.addEventListener('DOMContentLoaded', () => {
+    if (!window.appState?.on) return;   // state.js not loaded
+
+    // When DEM data changes, re-compute terrain Z for existing city features and re-render
+    window.appState.on('lastDemData', (demData) => {
+        const city = window.appState.osmCityData;
+        if (!city) return;
+        _computeTerrainZ(city.buildings, demData);
+        _computeTerrainZ(city.roads, demData);
+        window._invalidateCityCache();
+        window.renderCityOverlay?.();
+        window.renderCityOnDEM?.();
+    });
+
+    // When bbox changes, cache is stale — re-render with new projection
+    window.appState.on('currentDemBbox', () => {
+        if (!window.appState.osmCityData) return;
+        window._invalidateCityCache();
+        window.renderCityOverlay?.();
+        window.renderCityOnDEM?.();
+    });
+});

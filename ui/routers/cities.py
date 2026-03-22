@@ -43,9 +43,11 @@ except ImportError:
 # OSM fetch helper
 # ---------------------------------------------------------------------------
 try:
-    from core.osm import fetch_osm_data as _fetch_osm_data
+    from core.osm import fetch_osm_data as _fetch_osm_data, rasterize_city_data as _rasterize_city_data
 except ImportError:
     def _fetch_osm_data(*a, **kw):
+        raise RuntimeError("core.osm not available")
+    def _rasterize_city_data(*a, **kw):
         raise RuntimeError("core.osm not available")
 
 # ---------------------------------------------------------------------------
@@ -62,10 +64,10 @@ except ImportError:
 # Schema
 # ---------------------------------------------------------------------------
 try:
-    from schemas import CityRequest
+    from schemas import CityRequest, CityRasterRequest
 except ImportError:
     from pydantic import BaseModel, Field
-    from typing import List, Optional
+    from typing import Any, Dict, List, Optional
 
     class CityRequest(BaseModel):
         north: float
@@ -73,8 +75,18 @@ except ImportError:
         east: float
         west: float
         layers: Optional[List[str]] = Field(default=["buildings", "roads", "waterways"])
-        simplify_tolerance: float = 2.0
-        min_area: float = 20.0
+        simplify_tolerance: float = 0.5
+        min_area: float = 5.0
+
+    class CityRasterRequest(BaseModel):
+        north: float; south: float; east: float; west: float
+        dim: int = 200
+        buildings: Dict[str, Any] = Field(default_factory=dict)
+        roads: Dict[str, Any] = Field(default_factory=dict)
+        waterways: Dict[str, Any] = Field(default_factory=dict)
+        building_scale: float = 1.0
+        road_depression_m: float = 0.0
+        water_depression_m: float = -2.0
 
 
 from pydantic import BaseModel
@@ -103,9 +115,14 @@ class CityExportRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/api/cities/cached")
-async def check_city_cache(north: float, south: float, east: float, west: float):
+async def check_city_cache(
+    north: float, south: float, east: float, west: float,
+    simplify_tolerance: float = 2.0, min_area: float = 20.0,
+):
     """Check whether OSM city data for this bbox is already cached locally."""
-    key = hashlib.md5(f"{north:.4f}_{south:.4f}_{east:.4f}_{west:.4f}".encode()).hexdigest()
+    key = hashlib.md5(
+        f"{north:.4f}_{south:.4f}_{east:.4f}_{west:.4f}_t{simplify_tolerance}_a{min_area}".encode()
+    ).hexdigest()
     if _CACHE_AVAILABLE:
         cached = (CACHE_ROOT / "osm" / f"{key}.json.gz").exists()
     else:
@@ -152,8 +169,8 @@ async def get_city_data(city_req: CityRequest):
                 cached_data = json.loads(cache_file.read_text())
                 logger.info(f"Serving OSM data from legacy cache: {cache_key}")
                 return JSONResponse(content=cached_data)
-            except Exception:
-                pass
+            except Exception as cache_read_err:
+                logger.debug(f"Legacy OSM cache read failed, re-fetching: {cache_read_err}")
 
     loop = asyncio.get_running_loop()
     try:
@@ -177,6 +194,75 @@ async def get_city_data(city_req: CityRequest):
                 (OSM_CACHE_PATH / f"{cache_key}.json").write_text(json.dumps(result))
             except Exception as ce:
                 logger.warning(f"OSM cache write failed: {ce}")
+
+    return JSONResponse(content=result)
+
+
+@router.post("/api/cities/raster")
+async def get_city_raster(req: CityRasterRequest):
+    """
+    Burn OSM building/road/waterway GeoJSON onto a dim×dim float32 height-map.
+    Buildings are raised by their height_m, roads are flat, waterways depressed.
+    Returns a DEM-compatible response: { values, width, height, vmin, vmax, bbox }.
+    Cached as .npz alongside other DEM rasters.
+    """
+    import hashlib
+
+    cache_key = hashlib.md5(
+        f"cityRaster|{req.north:.4f}_{req.south:.4f}_{req.east:.4f}_{req.west:.4f}"
+        f"_dim{req.dim}_bs{req.building_scale}_rd{req.road_depression_m}_wd{req.water_depression_m}".encode()
+    ).hexdigest()
+
+    # Cache check
+    if _CACHE_AVAILABLE and CACHE_ROOT is not None:
+        import numpy as np
+        cache_path = CACHE_ROOT / "dem" / f"{cache_key}.npz"
+        if cache_path.exists():
+            try:
+                arr = np.load(cache_path)
+                values = arr["values"].flatten().tolist()
+                return JSONResponse(content={
+                    "values": values,
+                    "width": int(arr["width"]),
+                    "height": int(arr["height"]),
+                    "vmin": float(arr["vmin"]),
+                    "vmax": float(arr["vmax"]),
+                    "bbox": {"north": req.north, "south": req.south,
+                             "east": req.east, "west": req.west},
+                })
+            except Exception as e:
+                logger.debug(f"City raster cache read failed: {e}")
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: _rasterize_city_data(
+                req.north, req.south, req.east, req.west, req.dim,
+                req.buildings, req.roads, req.waterways,
+                req.building_scale, req.road_depression_m, req.water_depression_m,
+            ),
+        )
+    except Exception as e:
+        logger.error(f"City raster error: {e}", exc_info=True)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    # Cache result
+    if _CACHE_AVAILABLE and CACHE_ROOT is not None:
+        try:
+            import numpy as np
+            cache_path = CACHE_ROOT / "dem" / f"{cache_key}.npz"
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(
+                cache_path,
+                values=np.array(result["values"], dtype=np.float32),
+                width=np.array(result["width"]),
+                height=np.array(result["height"]),
+                vmin=np.array(result["vmin"]),
+                vmax=np.array(result["vmax"]),
+            )
+        except Exception as e:
+            logger.debug(f"City raster cache write failed: {e}")
 
     return JSONResponse(content=result)
 
@@ -219,5 +305,5 @@ async def export_city_3mf(req: CityExportRequest):
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
     except Exception as e:
-        logger.error(f"City 3MF export error: {e}")
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        logger.error(f"City 3MF export error: {e}", exc_info=True)
+        return JSONResponse(content={"error": "3MF export failed"}, status_code=500)

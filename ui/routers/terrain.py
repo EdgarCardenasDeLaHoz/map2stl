@@ -9,7 +9,13 @@ import os
 import sys
 import asyncio
 import logging
+from functools import partial
 from pathlib import Path
+
+# Ensure local packages (numpy2stl, geo2stl) are importable without os.chdir.
+_STRM2STL_DIR = str(Path(__file__).parent.parent.parent)
+if _STRM2STL_DIR not in sys.path:
+    sys.path.insert(0, _STRM2STL_DIR)
 
 import numpy as np
 from fastapi import APIRouter, Request, Query
@@ -20,15 +26,12 @@ from config import (
     OPENTOPO_DATASETS,
     OPENTOPO_API_KEY as _OPENTOPO_API_KEY,
     H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
-    H5_SRTM_FILE as _H5_SRTM_FILE,
 )
 from core.cache import make_cache_key, write_array_cache, read_array_cache
 from core.dem import (
     fetch_layer_data as _fetch_layer_data,
     apply_layer_processing as _apply_layer_processing,
     blend_layers as _blend_layers,
-    fetch_opentopo_dem as _fetch_opentopo_dem,
-    fetch_h5_dem as _fetch_h5_dem,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,6 +69,182 @@ def _parse_bool(params, key, default=False):
     return val.lower() in ('true', '1', 'yes', 'on')
 
 
+def _validate_bbox(north, south, east, west):
+    """Return a JSONResponse error if bbox is missing or incoherent, else None."""
+    if any(v is None for v in (north, south, east, west)):
+        return JSONResponse(content={"error": "north, south, east, west are all required"}, status_code=400)
+    if north <= south:
+        return JSONResponse(content={"error": "north must be greater than south"}, status_code=400)
+    if east <= west:
+        return JSONResponse(content={"error": "east must be greater than west"}, status_code=400)
+    return None
+
+
+def _validate_dim(dim, max_dim=2000):
+    """Return a JSONResponse error if dim is out of range, else None."""
+    if dim is not None and not (1 <= dim <= max_dim):
+        return JSONResponse(content={"error": f"dim must be between 1 and {max_dim}"}, status_code=400)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Sync compute helpers (called via run_in_executor to avoid blocking the loop)
+# ---------------------------------------------------------------------------
+
+def _make_local_dem(north, south, east, west, dim, depth_scale, water_scale,
+                    height, base, subtract_water, projection, maintain_dimensions):
+    """Run make_dem_image synchronously. Called from run_in_executor."""
+    from numpy2stl.oceans import make_dem_image
+    target_bbox = (north, south, east, west)
+    try:
+        return make_dem_image(
+            target_bbox, dim=dim, depth_scale=depth_scale,
+            water_scale=water_scale, height=height, base=base,
+            subtract_water=subtract_water, projection=projection,
+            maintain_dimensions=maintain_dimensions)
+    except TypeError:
+        return make_dem_image(
+            target_bbox, dim=dim, depth_scale=depth_scale,
+            water_scale=water_scale, height=height, base=base,
+            subtract_water=subtract_water,
+            maintain_dimensions=maintain_dimensions)
+
+
+def _fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, dim):
+    """Fetch + resize satellite overlay. Returns (values_list, w, h) or None."""
+    import cv2 as _cv2
+    import numpy as _np
+    from geo2stl.sat2stl import fetch_bbox_image
+    sat = fetch_bbox_image(north, south, east, west, scale=30, dataset=dataset)
+    if sat is None:
+        return None
+    sat_arr = _np.array(sat)
+    if sat_arr.size == 0:
+        return None
+    sat_tw = max(width_px, dim or width_px)
+    sat_th = max(height_px, dim or height_px)
+    sat_arr = _cv2.resize(sat_arr, (sat_tw, sat_th), interpolation=_cv2.INTER_LINEAR)
+    return (sat_arr.ravel().tolist(), sat_arr.shape[1], sat_arr.shape[0])
+
+
+def _compute_raw_dem(north, south, east, west, dim, depth_scale):
+    """Compute raw (unprocessed) DEM array. Called from run_in_executor."""
+    import cv2 as _cv2
+    import numpy as _np
+    from numpy2stl.oceans import stitch_tiles_no_rasterio, proj_map_geo_to_2D
+    target_bbox = _np.array((north, south, east, west))
+    im = stitch_tiles_no_rasterio(target_bbox) * 1.0
+    im[im < 0] = im[im < 0] * depth_scale
+    im = proj_map_geo_to_2D(im, target_bbox)
+    im = im[:, ~_np.any(_np.isnan(im), axis=0)]
+    h, w = im.shape
+    if h > w:
+        new_h, new_w = dim, max(1, int(dim * w / h))
+    else:
+        new_w, new_h = dim, max(1, int(dim * h / w))
+    im_r = _cv2.resize(im, (new_w, new_h), interpolation=_cv2.INTER_LINEAR)
+    return im_r
+
+
+def _fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset,
+                              target_width, target_height):
+    """Fetch ESA/JRC images and optional elevation for bathymetry. Called from run_in_executor.
+    Returns (img, jrc_img_or_None, elevation_raw_or_None).
+    """
+    import cv2 as _cv2
+    from geo2stl.sat2stl import fetch_bbox_image
+    img = fetch_bbox_image(north, south, east, west,
+                           scale=sat_scale, dataset="esa", use_cache=True)
+    jrc_img = None
+    if water_dataset == "jrc":
+        try:
+            jrc_img = fetch_bbox_image(north, south, east, west,
+                                       scale=sat_scale, dataset="jrc", use_cache=True)
+        except Exception:
+            pass
+    elevation_raw = None
+    try:
+        from geo2stl.geo2stl import stitch_tiles_no_rasterio as _stitch
+        elevation_raw = _stitch((north, south, east, west))
+    except Exception:
+        pass
+    # Resize img to target dims if needed
+    if img is not None and img.ndim == 3:
+        img = img[:, :, 0]
+    if img is not None and target_width and target_height and \
+            (img.shape[1] != target_width or img.shape[0] != target_height):
+        img = _cv2.resize(img.astype(float), (target_width, target_height),
+                          interpolation=_cv2.INTER_NEAREST)
+    return img, jrc_img, elevation_raw
+
+
+def _fetch_dem_array(dem_source, north, south, east, west, dim,
+                     depth_scale, water_scale, height, base,
+                     subtract_water, projection, maintain_dimensions):
+    """
+    Fetch a DEM array from the specified source. Sync — call via run_in_executor.
+
+    Routing:
+      h5_local or any OPENTOPO_DATASETS key → _fetch_layer_data (handles h5→SRTMGL3 fallback)
+      "local" or unknown                    → _make_local_dem (local SRTM tiles)
+    """
+    if dem_source in ("h5_local", *OPENTOPO_DATASETS):
+        return _fetch_layer_data(dem_source, north, south, east, west, dim)
+
+    try:
+        return _make_local_dem(north, south, east, west, dim, depth_scale,
+                               water_scale, height, base, subtract_water,
+                               projection, maintain_dimensions)
+    except Exception as dem_err:
+        logger.warning(f"Local DEM failed: {dem_err}, returning zeros")
+        lat_r = abs(north - south)
+        lon_r = abs(east - west)
+        if lat_r > lon_r:
+            mh, mw = dim, max(1, int(dim * lon_r / lat_r))
+        else:
+            mw, mh = dim, max(1, int(dim * lat_r / lon_r))
+        return np.zeros((mh, mw), dtype=float)
+
+
+def _upsample_dem(im: np.ndarray, dim: int) -> np.ndarray:
+    """Upsample DEM if its native resolution is smaller than dim."""
+    import cv2 as _cv2
+    if dim and im is not None:
+        h_nat, w_nat = im.shape[:2]
+        if max(h_nat, w_nat) < dim:
+            scale = float(dim) / float(max(h_nat, w_nat))
+            new_w = max(1, int(round(w_nat * scale)))
+            new_h = max(1, int(round(h_nat * scale)))
+            logger.info(f"Upsampling DEM {w_nat}×{h_nat} → {new_w}×{new_h}")
+            im = _cv2.resize(im, (new_w, new_h), interpolation=_cv2.INTER_LINEAR)
+    return im
+
+
+def _make_dem_payload(im: np.ndarray, west, south, east, north,
+                      show_sat: bool, upscale_dim: int = None) -> dict:
+    """
+    Build the standard DEM response dict from a numpy array.
+    Optionally upsamples to upscale_dim before serialising (used for cache hits).
+    """
+    import cv2 as _cv2
+    if upscale_dim:
+        im = _upsample_dem(im, upscale_dim)
+    im_clean = np.nan_to_num(im, nan=0.0,
+                              posinf=np.finfo(np.float32).max,
+                              neginf=np.finfo(np.float32).min)
+    h_px, w_px = im_clean.shape
+    return {
+        "dem_values":     im_clean.ravel().tolist(),
+        "dimensions":     [h_px, w_px],
+        "min_elevation":  float(np.nanmin(im)),
+        "max_elevation":  float(np.nanmax(im)),
+        "mean_elevation": float(np.nanmean(im)),
+        "bbox":           [west, south, east, north],
+        "show_sat":       show_sat,
+        "sat_available":  False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -95,196 +274,88 @@ async def get_terrain_dem(request: Request):
     maintain_dimensions = _parse_bool(params, "maintain_dimensions", True)
     dem_source          = params.get("dem_source", "local")
 
+    err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
+    if err:
+        return err
+
     logger.debug(
         f"GET /api/terrain/dem north={north} south={south} east={east} "
         f"west={west} dim={dim} show_sat={show_sat}")
 
     # --- DEM disk cache check ---
-    _dem_cache_key = None
-    if north is not None and south is not None and east is not None and west is not None:
-        _dem_cache_key = make_cache_key("dem", north, south, east, west, {
-            "dim": dim, "src": dem_source, "proj": projection,
-            "ds": depth_scale, "ws": water_scale, "h": height, "b": base,
-            "sw": subtract_water, "md": maintain_dimensions
-        })
-        _cached = read_array_cache("dem", _dem_cache_key)
-        if _cached is not None:
-            _arrays, _meta = _cached
-            _im = _arrays.get("dem")
-            if _im is not None:
-                logger.info(f"DEM cache hit: {_dem_cache_key[:8]}…")
-                if dim and _im is not None:
-                    _h, _w = _im.shape[:2]
-                    if max(_h, _w) < dim:
-                        import cv2 as _cv2_cache
-                        _scale = float(dim) / float(max(_h, _w))
-                        _nw = max(1, int(round(_w * _scale)))
-                        _nh = max(1, int(round(_h * _scale)))
-                        _im = _cv2_cache.resize(
-                            _im.astype(np.float32), (_nw, _nh),
-                            interpolation=_cv2_cache.INTER_LINEAR)
-                _im_clean = np.nan_to_num(_im, nan=0.0)
-                return JSONResponse(content={
-                    "dem_values": _im_clean.ravel().tolist(),
-                    "dimensions": list(_im.shape),
-                    "min_elevation": float(np.nanmin(_im)),
-                    "max_elevation": float(np.nanmax(_im)),
-                    "mean_elevation": float(np.nanmean(_im)),
-                    "bbox": [west, south, east, north],
-                    "show_sat": show_sat,
-                    "sat_available": False,
-                    "from_cache": True,
-                })
+    _dem_cache_key = make_cache_key("dem", north, south, east, west, {
+        "dim": dim, "src": dem_source, "proj": projection,
+        "ds": depth_scale, "ws": water_scale, "h": height, "b": base,
+        "sw": subtract_water, "md": maintain_dimensions,
+        "sat": show_sat, "lu": show_landuse,
+    })
+    _cached = read_array_cache("dem", _dem_cache_key)
+    if _cached is not None and _cached[0].get("dem") is not None:
+        logger.info(f"DEM cache hit: {_dem_cache_key[:8]}…")
+        payload = _make_dem_payload(_cached[0]["dem"], west, south, east, north,
+                                    show_sat, upscale_dim=dim)
+        payload["from_cache"] = True
+        return JSONResponse(content=payload)
 
     # TEST_MODE: return deterministic gradient without network I/O
     if TEST_MODE:
         im = np.linspace(0, 100, num=(dim * dim), dtype=float).reshape((dim, dim))
-        im_clean = np.nan_to_num(im, nan=0.0,
-                                 posinf=np.finfo(np.float32).max,
-                                 neginf=np.finfo(np.float32).min)
-        h_px, w_px = im.shape
-        return JSONResponse(content={
-            "dem_values": im_clean.ravel().tolist(),
-            "dimensions": [h_px, w_px],
-            "min_elevation": float(np.nanmin(im)),
-            "max_elevation": float(np.nanmax(im)),
-            "mean_elevation": float(np.nanmean(im)),
-            "bbox": [west or 0.0, south or 0.0, east or 0.0, north or 0.0],
-            "show_sat": False,
-            "sat_available": False,
-        })
+        payload = _make_dem_payload(im, west or 0.0, south or 0.0,
+                                    east or 0.0, north or 0.0, show_sat=False)
+        payload["sat_available"] = False
+        return JSONResponse(content=payload)
+
+    # Guard: bbox already validated above but south/north could be None only in edge cases
+    if north is None or south is None:
+        south, north = -0.01, 0.01
+    if east is None or west is None:
+        west, east = -0.01, 0.01
 
     try:
-        original_cwd = os.getcwd()
-        strm2stl_dir = Path(__file__).parent.parent.parent
-        os.chdir(str(strm2stl_dir))
-        sys.path.append(str(strm2stl_dir))
-        from numpy2stl.numpy2stl.oceans import make_dem_image
+        loop = asyncio.get_running_loop()
 
-        # Fallback for missing bbox params
-        if north is None or south is None:
-            south, north = -0.01, 0.01
-        if east is None or west is None:
-            west, east = -0.01, 0.01
+        im = await loop.run_in_executor(
+            None, partial(_fetch_dem_array, dem_source,
+                          north, south, east, west, dim,
+                          depth_scale, water_scale, height, base,
+                          subtract_water, projection, maintain_dimensions))
+        im = _upsample_dem(im, dim)
 
-        target_bbox = (north, south, east, west)
-
-        if dem_source == "h5_local":
-            if not _H5_SRTM_AVAILABLE:
-                return JSONResponse(
-                    content={"error": "h5_local source unavailable — strm_data.h5 not found",
-                             "h5_path": str(_H5_SRTM_FILE)},
-                    status_code=503)
-            im = await asyncio.get_running_loop().run_in_executor(
-                None, lambda: _fetch_h5_dem(north, south, east, west, _H5_SRTM_FILE))
-
-        elif dem_source and dem_source != "local" and dem_source in OPENTOPO_DATASETS:
-            try:
-                im = await asyncio.get_running_loop().run_in_executor(
-                    None,
-                    lambda: _fetch_opentopo_dem(
-                        north, south, east, west,
-                        demtype=dem_source, api_key=_OPENTOPO_API_KEY, dim=dim))
-            except RuntimeError as ot_err:
-                logger.error(f"OpenTopography fetch failed: {ot_err}")
-                return JSONResponse(
-                    content={"error": str(ot_err), "source": dem_source},
-                    status_code=502)
-        else:
-            try:
-                try:
-                    im = make_dem_image(
-                        target_bbox, dim=dim, depth_scale=depth_scale,
-                        water_scale=water_scale, height=height, base=base,
-                        subtract_water=subtract_water, projection=projection,
-                        maintain_dimensions=maintain_dimensions)
-                except TypeError:
-                    im = make_dem_image(
-                        target_bbox, dim=dim, depth_scale=depth_scale,
-                        water_scale=water_scale, height=height, base=base,
-                        subtract_water=subtract_water,
-                        maintain_dimensions=maintain_dimensions)
-            except Exception as dem_err:
-                logger.warning(f"DEM generation failed: {dem_err}, returning zeros")
-                lat_r = abs(north - south)
-                lon_r = abs(east - west)
-                if lat_r > lon_r:
-                    mh, mw = dim, max(1, int(dim * lon_r / lat_r))
-                else:
-                    mw, mh = dim, max(1, int(dim * lat_r / lon_r))
-                im = np.zeros((mh, mw), dtype=float)
-
-        import cv2 as _cv2
-        # Upsample if native resolution is smaller than requested dim
-        if dim and im is not None:
-            h_nat, w_nat = im.shape[:2]
-            if max(h_nat, w_nat) < dim:
-                scale = float(dim) / float(max(h_nat, w_nat))
-                new_w = max(1, int(round(w_nat * scale)))
-                new_h = max(1, int(round(h_nat * scale)))
-                logger.info(f"Upsampling DEM {w_nat}×{h_nat} → {new_w}×{new_h}")
-                im = _cv2.resize(im, (new_w, new_h), interpolation=_cv2.INTER_LINEAR)
-
-        im_clean = np.nan_to_num(im, nan=0.0,
-                                 posinf=np.finfo(np.float32).max,
-                                 neginf=np.finfo(np.float32).min)
-        dem_values = im_clean.ravel().tolist()
-        height_px, width_px = im.shape
+        response_content = _make_dem_payload(im, west, south, east, north, show_sat)
+        height_px, width_px = response_content["dimensions"]
 
         # Optional satellite/land-use overlay
-        sat_values = sat_width = sat_height = None
-        sat_available = False
         if show_sat or show_landuse:
             try:
-                from geo2stl.sat2stl import fetch_bbox_image
-                sat = fetch_bbox_image(north, south, east, west, scale=30, dataset=dataset)
-                if sat is not None:
-                    sat_arr = np.array(sat)
-                    if sat_arr.size > 0:
-                        sat_tw = max(width_px, dim or width_px)
-                        sat_th = max(height_px, dim or height_px)
-                        sat_arr = _cv2.resize(sat_arr, (sat_tw, sat_th),
-                                              interpolation=_cv2.INTER_LINEAR)
-                        sat_values = sat_arr.ravel().tolist()
-                        sat_height, sat_width = sat_arr.shape[:2]
-                        sat_available = True
+                sat_result = await loop.run_in_executor(
+                    None, partial(_fetch_sat_overlay, north, south, east, west,
+                                  dataset, width_px, height_px, dim))
+                if sat_result is not None:
+                    sat_values, sat_width, sat_height = sat_result
+                    response_content["sat_available"] = True
+                    response_content["sat_values"] = sat_values
+                    response_content["sat_dimensions"] = [sat_height, sat_width]
             except Exception as sat_err:
                 logger.warning(f"Satellite fetch failed: {sat_err}")
 
-        os.chdir(original_cwd)
-
-        response_content = {
-            "dem_values": dem_values,
-            "dimensions": [height_px, width_px],
-            "min_elevation": float(np.nanmin(im)),
-            "max_elevation": float(np.nanmax(im)),
-            "mean_elevation": float(np.nanmean(im)),
-            "bbox": [west, south, east, north],
-            "show_sat": show_sat,
-            "sat_available": sat_available,
-        }
-        if sat_values is not None:
-            response_content["sat_values"] = sat_values
-            response_content["sat_dimensions"] = [sat_height, sat_width]
-
-        # Write DEM disk cache
-        if _dem_cache_key and not show_sat:
+        # Write DEM disk cache (skip when satellite overlay is embedded)
+        if not show_sat:
+            im_clean = np.array(response_content["dem_values"], dtype=np.float32).reshape(
+                height_px, width_px)
             write_array_cache(
                 "dem", _dem_cache_key,
-                {"dem": im_clean.reshape(height_px, width_px)},
-                {"min_elevation": float(np.nanmin(im)),
-                 "max_elevation": float(np.nanmax(im)),
-                 "mean_elevation": float(np.nanmean(im)),
+                {"dem": im_clean},
+                {"min_elevation": response_content["min_elevation"],
+                 "max_elevation": response_content["max_elevation"],
+                 "mean_elevation": response_content["mean_elevation"],
                  "bbox": [west, south, east, north],
                  "shape": [height_px, width_px]})
 
         return JSONResponse(content=response_content)
 
     except Exception as e:
-        logger.error(f"Error in get_terrain_dem: {e}")
-        import traceback
-        return JSONResponse(content={"error": str(e), "traceback": traceback.format_exc()},
-                            status_code=500)
+        logger.error(f"Error in get_terrain_dem: {e}", exc_info=True)
+        return JSONResponse(content={"error": "DEM processing failed"}, status_code=500)
 
 
 @router.api_route("/api/terrain/dem/raw", methods=["GET", "POST"], tags=["terrain"])
@@ -299,10 +370,9 @@ async def get_terrain_dem_raw(request: Request):
     dim         = _parse_int(params, "dim", 200)
     depth_scale = _parse_float(params, "depth_scale", 0.5)
 
-    if north is None or south is None:
-        south, north = -0.01, 0.01
-    if east is None or west is None:
-        west, east = -0.01, 0.01
+    err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
+    if err:
+        return err
 
     logger.debug(f"GET /api/terrain/dem/raw bbox=({north},{south},{east},{west}) dim={dim}")
 
@@ -317,28 +387,9 @@ async def get_terrain_dem_raw(request: Request):
                 "bbox": [west, south, east, north],
             })
 
-        original_cwd = os.getcwd()
-        strm2stl_dir = Path(__file__).parent.parent.parent
-        os.chdir(str(strm2stl_dir))
-        sys.path.append(str(strm2stl_dir))
-
-        from numpy2stl.numpy2stl.oceans import stitch_tiles_no_rasterio, proj_map_geo_to_2D
-
-        target_bbox = np.array((north, south, east, west))
-        im = stitch_tiles_no_rasterio(target_bbox) * 1.0
-        im[im < 0] = im[im < 0] * depth_scale
-        im = proj_map_geo_to_2D(im, target_bbox)
-        im = im[:, ~np.any(np.isnan(im), axis=0)]
-
-        import cv2 as _cv2
-        h, w = im.shape
-        if h > w:
-            new_h, new_w = dim, max(1, int(dim * w / h))
-        else:
-            new_w, new_h = dim, max(1, int(dim * h / w))
-        im_r = _cv2.resize(im, (new_w, new_h), interpolation=_cv2.INTER_LINEAR)
-
-        os.chdir(original_cwd)
+        im_r = await asyncio.get_running_loop().run_in_executor(
+            None, partial(_compute_raw_dem, north, south, east, west, dim, depth_scale))
+        new_h, new_w = im_r.shape
 
         return JSONResponse(content={
             "dem_values": im_r.ravel().tolist(),
@@ -351,10 +402,8 @@ async def get_terrain_dem_raw(request: Request):
         })
 
     except Exception as e:
-        logger.error(f"Error in get_terrain_dem_raw: {e}")
-        import traceback
-        return JSONResponse(content={"error": str(e), "traceback": traceback.format_exc()},
-                            status_code=500)
+        logger.error(f"Error in get_terrain_dem_raw: {e}", exc_info=True)
+        return JSONResponse(content={"error": "DEM processing failed"}, status_code=500)
 
 
 @router.api_route("/api/terrain/water-mask", methods=["GET", "POST"], tags=["terrain"])
@@ -376,10 +425,9 @@ async def get_terrain_water_mask(request: Request):
         if water_dataset not in ("esa", "jrc"):
             water_dataset = "esa"
 
-        if north is None or south is None or east is None or west is None:
-            return JSONResponse(
-                content={"error": "Missing bbox parameters (north, south, east, west)"},
-                status_code=400)
+        err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
+        if err:
+            return err
 
         # --- Water mask disk cache check ---
         _water_cache_key = make_cache_key("water", north, south, east, west, {
@@ -434,45 +482,15 @@ async def get_terrain_water_mask(request: Request):
                 "esa_dimensions": [h, w],
             })
 
-        original_cwd = os.getcwd()
-        strm2stl_dir = Path(__file__).parent.parent.parent
-        os.chdir(str(strm2stl_dir))
-        sys.path.append(str(strm2stl_dir))
-
-        try:
-            from geo2stl.sat2stl import fetch_bbox_image
-            import cv2 as _cv2
-
-            img = fetch_bbox_image(north, south, east, west,
-                                   scale=sat_scale, dataset="esa", use_cache=True)
-
-            _jrc_img = None
-            if water_dataset == "jrc":
-                try:
-                    _jrc_img = fetch_bbox_image(north, south, east, west,
-                                                scale=sat_scale, dataset="jrc", use_cache=True)
-                except Exception as _jrc_e:
-                    logger.warning(f"JRC fetch failed, falling back to ESA: {_jrc_e}")
-
-            _elevation_raw = None
-            try:
-                from geo2stl.geo2stl import stitch_tiles_no_rasterio as _stitch
-                _elevation_raw = _stitch((north, south, east, west))
-            except Exception as _e:
-                logger.warning(f"Could not fetch elevation for bathymetry check: {_e}")
-        finally:
-            os.chdir(original_cwd)
+        import cv2 as _cv2
+        img, _jrc_img, _elevation_raw = await asyncio.get_running_loop().run_in_executor(
+            None, partial(_fetch_water_mask_images, north, south, east, west,
+                          sat_scale, water_dataset, target_width, target_height))
 
         if img is None:
             return JSONResponse(
                 content={"error": "Failed to fetch ESA land cover data."},
                 status_code=500)
-
-        if img.ndim == 3:
-            img = img[:, :, 0]
-        if target_width and target_height and (img.shape[1] != target_width or img.shape[0] != target_height):
-            img = _cv2.resize(img.astype(np.float32), (target_width, target_height),
-                              interpolation=_cv2.INTER_NEAREST)
 
         h, w = img.shape
 
@@ -522,14 +540,6 @@ async def get_terrain_water_mask(request: Request):
         logger.error(f"Unhandled error in get_terrain_water_mask: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-
-@router.api_route("/api/terrain/satellite", methods=["GET", "POST"], tags=["terrain"])
-async def get_terrain_satellite(request: Request):
-    """
-    Fetch satellite or land-cover imagery for a bounding box.
-    TODO: Implement as a standalone endpoint (currently handled inline in get_terrain_dem).
-    """
-    return JSONResponse(content={"error": "Not implemented"}, status_code=501)
 
 
 @router.get("/api/terrain/sources", tags=["terrain"])
@@ -593,14 +603,13 @@ async def merge_dem_layers(request: Request):
 
     try:
         composite = None
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         for spec in req.layers:
             raw = await loop.run_in_executor(
-                None, lambda s=spec: _fetch_layer_data(
-                    s.source, north, south, east, west, s.dim))
+                None, partial(_fetch_layer_data, spec.source, north, south, east, west, spec.dim))
             processed = await loop.run_in_executor(
-                None, lambda s=spec, r=raw: _apply_layer_processing(r, s.processing))
+                None, partial(_apply_layer_processing, raw, spec.processing))
 
             if composite is None:
                 import cv2 as _cv2
@@ -636,22 +645,9 @@ async def merge_dem_layers(request: Request):
         })
 
     except Exception as e:
-        logger.error(f"DEM merge failed: {e}")
-        import traceback
-        return JSONResponse(content={"error": str(e), "traceback": traceback.format_exc()},
-                            status_code=500)
+        logger.error(f"DEM merge failed: {e}", exc_info=True)
+        return JSONResponse(content={"error": "DEM merge failed"}, status_code=500)
 
-
-@router.get("/api/terrain/elevation-profile", tags=["terrain"])
-async def get_elevation_profile(
-    lat1: float = Query(..., ge=-90, le=90),
-    lon1: float = Query(..., ge=-180, le=180),
-    lat2: float = Query(..., ge=-90, le=90),
-    lon2: float = Query(..., ge=-180, le=180),
-    samples: int = Query(100, ge=2, le=1000),
-):
-    """Return an elevation profile along a straight transect between two points. (TODO: implement)"""
-    return JSONResponse(content={"error": "Not implemented"}, status_code=501)
 
 
 @router.post("/api/export/preview", tags=["terrain"])

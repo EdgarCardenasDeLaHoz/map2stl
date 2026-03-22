@@ -27,8 +27,7 @@ import matplotlib.cm as cm
 
 from skimage.transform import resize
 
-from numpy2stl import numpy2stl as np2stl
-#import numpy2stl as np2stl
+import numpy2stl as np2stl
 
 class DEM:
     def __init__(self, root=None, geo_bounds=None, data=None):
@@ -405,7 +404,7 @@ def DEM2STL(DEM, NSEW, rotation=0, n=1, fn=None):
 
     ## Save to STL
     if fn is not None:
-        triangles = np2stl.numpy2stl( mat_adj )
+        triangles = np2stl.array_to_mesh( mat_adj )
         solid = np2stl.Solid(triangles)
         #solid2 = np2stl.simplify_object_3D(solid)
         solid.save_stl(fn)

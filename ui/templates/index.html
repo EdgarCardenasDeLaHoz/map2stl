@@ -238,10 +238,16 @@
             <div class="main-header">
                 <div class="main-title">3D Maps Globe & Map Selector</div>
                 <div class="tabs">
-                    <button class="tab active" data-view="map">Explore</button>
-                    <button class="tab" data-view="dem">Edit</button>
-                    <button class="tab" data-view="model">Extrude</button>
+                    <button class="tab active" data-view="map" id="tabExplore"><span class="tab-step" id="tabStep1">1</span> Explore</button>
+                    <span class="tab-arrow">›</span>
+                    <button class="tab" data-view="dem" id="tabEdit"><span class="tab-step" id="tabStep2">2</span> Edit</button>
+                    <span class="tab-arrow">›</span>
+                    <button class="tab" data-view="model" id="tabExtrude"><span class="tab-step" id="tabStep3">3</span> Extrude</button>
                 </div>
+            </div>
+            <!-- UX10: workflow hint bar — hidden when all steps are complete -->
+            <div id="workflowHint" class="workflow-hint" role="status" aria-live="polite">
+                <span id="workflowHintText"></span>
             </div>
 
             <div class="content-area">
@@ -429,8 +435,14 @@
                         <span id="status-satellite" class="status-dot empty" style="display:none;"></span>
                         <span id="status-combined" class="status-dot empty" style="display:none;"></span>
 
+                        <!-- Empty state when no DEM loaded -->
+                        <div id="demEmptyState" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:300px;color:#555;font-size:14px;gap:10px;">
+                            <span style="font-size:36px;">🏔️</span>
+                            <span>Select a region and click <strong style="color:#888;">Load DEM</strong> to begin</span>
+                        </div>
+
                         <!-- Stacked Layers View (napari-style) with axis labels -->
-                        <div class="layers-container" id="layersContainer">
+                        <div class="layers-container" id="layersContainer" style="display:none;">
                             <div class="layers-main">
                                 <div class="layers-with-axes">
                                     <div class="layers-y-axis" id="layersYAxis"></div>
@@ -439,6 +451,7 @@
                                             <canvas class="layer-canvas" id="layerDemCanvas"></canvas>
                                             <canvas class="layer-canvas" id="layerWaterCanvas"></canvas>
                                             <canvas class="layer-canvas" id="layerSatCanvas"></canvas>
+                                            <canvas class="layer-canvas" id="layerCityRasterCanvas" style="display:none;"></canvas>
                                             <canvas class="layer-canvas" id="layerGridCanvas"
                                                 style="pointer-events:none; transform:none !important;"></canvas>
                                         </div>
@@ -539,9 +552,8 @@
                     <div class="dem-strip" id="demStrip">
                         <button class="dem-strip-btn active" id="settingsStripBtn" title="Toggle settings panel">⚙ Settings</button>
                         <div style="width:1px;height:16px;background:#444;margin:0 2px;"></div>
-                        <button class="dem-strip-btn active" id="layersStripBtn" data-subtab="layers" title="Switch to Layers view">📚 Layers</button>
+                        <button class="dem-strip-btn active" id="layersStripBtn" data-subtab="layers" title="Switch to Layers view">📚 Layers <span class="strip-status-dots"><span class="strip-dot" id="stripDotDem"></span><span class="strip-dot" id="stripDotWater"></span><span class="strip-dot" id="stripDotLandCover"></span></span></button>
                         <button class="dem-strip-btn" id="compareStripBtn" data-subtab="compare" title="Switch to Compare view">⚖ Compare</button>
-                        <button class="dem-strip-btn" id="citiesStripBtn" data-subtab="cities" title="OSM city layers (small regions only)" style="display:none;">🏙 Cities</button>
                         <button class="dem-strip-btn" id="mergeStripBtn" data-subtab="merge" title="Merge multiple DEM sources">🔧 Merge</button>
                         <div style="flex:1"></div>
                         <button class="dem-strip-btn" id="jsonViewToggleBtn" title="Toggle between form and JSON editor">{ } JSON</button>
@@ -576,6 +588,12 @@
                                         </label>
                                         <input type="range" id="layerSatOpacity" min="0" max="100" value="50" style="width:100%;" title="Land cover layer opacity">
                                         <span id="layerSatOpacityLabel" style="font-size:11px;color:#aaa;text-align:right;">50%</span>
+
+                                        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;white-space:nowrap;" id="layerCityRasterRow" title="Show/hide City Heights raster — buildings and roads burned onto a height-map grid">
+                                            <input type="checkbox" id="layerCityRasterVisible"> 🏙️ City Heights
+                                        </label>
+                                        <input type="range" id="layerCityRasterOpacity" min="0" max="100" value="80" style="width:100%;" title="City Heights layer opacity">
+                                        <span id="layerCityRasterOpacityLabel" style="font-size:11px;color:#aaa;text-align:right;">80%</span>
 
                                         <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;white-space:nowrap;" title="Show/hide lat/lon coordinate gridlines over the canvas">
                                             <input type="checkbox" id="layerGridVisible" checked> 📐 Grid
@@ -827,6 +845,69 @@
                         <input type="hidden" id="demDataset" value="esa">
                         <input type="hidden" id="satResolution" value="200">
 
+                        <!-- Cities Section -->
+                        <div class="collapsible-section collapsed" style="margin-top:10px;" id="citiesSettingsSection">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                <h4>🏙️ Cities <span id="citiesSettingsBadge" style="font-size:10px;font-weight:normal;color:#888;margin-left:6px;"></span></h4>
+                                <span class="collapsible-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div style="font-size:10px;color:#888;margin-bottom:8px;" id="cityInfoRow">
+                                    Load OSM building, road, and water data for small regions (≤ 10 km).
+                                </div>
+                                <!-- Load / Clear buttons -->
+                                <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
+                                    <button id="loadCityDataBtn" class="btn btn-primary" style="flex:1;font-size:11px;" title="Fetch buildings, roads, waterways, and POIs from OpenStreetMap. Only available for regions ≤ 10 km diagonal.">📥 Load Cities</button>
+                                    <button id="clearCityDataBtn" class="btn btn-secondary" style="font-size:11px;" title="Clear city overlay">✕ Clear</button>
+                                </div>
+                                <div id="cityDataStatus" style="font-size:10px;color:#888;margin-bottom:8px;"></div>
+                                <!-- Layer toggles -->
+                                <div style="display:grid;grid-template-columns:auto auto 1fr auto;gap:4px 6px;align-items:center;margin-bottom:8px;">
+                                    <input type="checkbox" id="layerBuildingsToggle" checked>
+                                    <input type="color" id="layerBuildingsColor" value="#c8b89a" class="city-color-swatch" style="width:22px;height:18px;padding:0;border:none;cursor:pointer;background:none;">
+                                    <label for="layerBuildingsToggle" style="font-size:12px;cursor:pointer;">Buildings</label>
+                                    <span id="cityBuildingCount" class="city-layer-count" style="font-size:10px;color:#888;"></span>
+
+                                    <input type="checkbox" id="layerRoadsToggle" checked>
+                                    <input type="color" id="layerRoadsColor" value="#cc8844" class="city-color-swatch" style="width:22px;height:18px;padding:0;border:none;cursor:pointer;background:none;">
+                                    <label for="layerRoadsToggle" style="font-size:12px;cursor:pointer;">Roads</label>
+                                    <span id="cityRoadCount" class="city-layer-count" style="font-size:10px;color:#888;"></span>
+
+                                    <input type="checkbox" id="layerWaterwaysToggle" checked>
+                                    <input type="color" id="layerWaterwaysColor" value="#4488cc" class="city-color-swatch" style="width:22px;height:18px;padding:0;border:none;cursor:pointer;background:none;">
+                                    <label for="layerWaterwaysToggle" style="font-size:12px;cursor:pointer;">Waterways</label>
+                                    <span id="cityWaterwayCount" class="city-layer-count" style="font-size:10px;color:#888;"></span>
+
+                                    <input type="checkbox" id="layerPoisToggle">
+                                    <input type="color" id="layerPoisColor" value="#ff6644" class="city-color-swatch" style="width:22px;height:18px;padding:0;border:none;cursor:pointer;background:none;">
+                                    <label for="layerPoisToggle" style="font-size:12px;cursor:pointer;">POIs</label>
+                                    <span id="cityPoiCount" class="city-layer-count" style="font-size:10px;color:#888;"></span>
+                                </div>
+                                <!-- Simplification params -->
+                                <div style="display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 8px;font-size:11px;border-top:1px solid #333;padding-top:8px;margin-top:4px;">
+                                    <label for="citySimplifyTolerance" title="Polygon simplification tolerance in metres.">Tolerance (m)</label>
+                                    <input type="number" id="citySimplifyTolerance" value="0.5" min="0" max="50" step="0.5"
+                                        style="width:60px;background:#2a2a2a;color:#ccc;border:1px solid #555;padding:2px 4px;border-radius:3px;font-size:11px;">
+                                    <label for="cityMinArea" title="Minimum building footprint in m². Smaller buildings are dropped.">Min area (m²)</label>
+                                    <input type="number" id="cityMinArea" value="5" min="0" max="5000" step="5"
+                                        style="width:60px;background:#2a2a2a;color:#ccc;border:1px solid #555;padding:2px 4px;border-radius:3px;font-size:11px;">
+                                    <label for="cityRoadWidth" title="Road display width multiplier.">Road width</label>
+                                    <input type="number" id="cityRoadWidth" value="1.5" min="0.5" max="6" step="0.5"
+                                        style="width:60px;background:#2a2a2a;color:#ccc;border:1px solid #555;padding:2px 4px;border-radius:3px;font-size:11px;">
+                                </div>
+                                <!-- City Heights raster params -->
+                                <div style="display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 8px;font-size:11px;border-top:1px solid #333;padding-top:8px;margin-top:6px;">
+                                    <label style="font-size:10px;color:#aaa;grid-column:1/-1;margin-bottom:2px;">City Heights Raster</label>
+                                    <label for="cityBuildingScale" title="Multiplier applied to building height_m when generating the raster layer. 1.0 = true scale.">Building scale</label>
+                                    <input type="number" id="cityBuildingScale" value="1.0" min="0" max="10" step="0.1"
+                                        style="width:60px;background:#2a2a2a;color:#ccc;border:1px solid #555;padding:2px 4px;border-radius:3px;font-size:11px;">
+                                    <label for="cityWaterOffset" title="Waterway surface height relative to ground (negative = depressed below terrain).">Water offset (m)</label>
+                                    <input type="number" id="cityWaterOffset" value="-2.0" min="-20" max="0" step="0.5"
+                                        style="width:60px;background:#2a2a2a;color:#ccc;border:1px solid #555;padding:2px 4px;border-radius:3px;font-size:11px;">
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Parameter Presets Section -->
                         <div class="collapsible-section collapsed" style="margin-top:10px;">
                             <div class="collapsible-header" onclick="toggleCollapsible(this)" title="Save and load named snapshots of your current visualization settings (colormap, elevation range, depth scale, etc.). Stored locally in your browser.">
@@ -899,76 +980,69 @@
                         </div>
                     </div>
 
-                    <!-- Cities subtab panel (shown only for small regions) -->
-                    <div id="citiesPanel" class="dem-controls hidden">
-                    <div class="dem-controls-inner">
-                        <div style="font-size:10px;color:#888;margin-bottom:8px;" id="cityInfoRow">
-                            Load OSM building, road and water data for this region.
-                        </div>
-                        <div class="collapsible-section">
-                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
-                                <h4>🏙 City Layers</h4><span class="collapsible-icon">▼</span>
-                            </div>
-                            <div class="collapsible-content">
-                                <div class="city-layer-row" id="cityLayerBuildings">
-                                    <input type="checkbox" id="layerBuildingsToggle" checked>
-                                    <input type="color" id="layerBuildingsColor" value="#c8b89a" class="city-color-swatch">
-                                    <label for="layerBuildingsToggle">Buildings</label>
-                                    <span id="cityBuildingCount" class="city-layer-count"></span>
-                                </div>
-                                <div class="city-layer-row">
-                                    <input type="checkbox" id="layerRoadsToggle" checked>
-                                    <input type="color" id="layerRoadsColor" value="#cc8844" class="city-color-swatch">
-                                    <label for="layerRoadsToggle">Roads</label>
-                                    <span id="cityRoadCount" class="city-layer-count"></span>
-                                </div>
-                                <div class="city-layer-row">
-                                    <input type="checkbox" id="layerWaterwaysToggle" checked>
-                                    <input type="color" id="layerWaterwaysColor" value="#4488cc" class="city-color-swatch">
-                                    <label for="layerWaterwaysToggle">Waterways</label>
-                                    <span id="cityWaterwayCount" class="city-layer-count"></span>
-                                </div>
-                                <div class="city-layer-row">
-                                    <input type="checkbox" id="layerPoisToggle">
-                                    <input type="color" id="layerPoisColor" value="#ff6644" class="city-color-swatch">
-                                    <label for="layerPoisToggle">Points of Interest</label>
-                                    <span id="cityPoiCount" class="city-layer-count"></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="collapsible-section">
-                            <div class="collapsible-header" onclick="toggleCollapsible(this)">
-                                <h4>⚙ Simplification</h4><span class="collapsible-icon">▼</span>
-                            </div>
-                            <div class="collapsible-content">
-                                <div style="display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 8px;font-size:11px;">
-                                    <label for="citySimplifyTolerance" title="Polygon simplification tolerance in metres. Higher = fewer vertices.">Tolerance (m)</label>
-                                    <input type="number" id="citySimplifyTolerance" value="2" min="0" max="50" step="0.5"
-                                        style="width:60px;background:#2a2a2a;color:#ccc;border:1px solid #555;padding:2px 4px;border-radius:3px;font-size:11px;">
-                                    <label for="cityMinArea" title="Minimum building footprint area in square metres. Smaller buildings are dropped.">Min area (m²)</label>
-                                    <input type="number" id="cityMinArea" value="20" min="0" max="5000" step="10"
-                                        style="width:60px;background:#2a2a2a;color:#ccc;border:1px solid #555;padding:2px 4px;border-radius:3px;font-size:11px;">
-                                    <label for="cityRoadWidth" title="Road line width multiplier for display.">Road width</label>
-                                    <input type="number" id="cityRoadWidth" value="1.5" min="0.5" max="6" step="0.5"
-                                        style="width:60px;background:#2a2a2a;color:#ccc;border:1px solid #555;padding:2px 4px;border-radius:3px;font-size:11px;">
-                                </div>
-                            </div>
-                        </div>
-                        <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
-                            <button id="loadCityDataBtn" class="btn btn-primary" style="flex:1;font-size:11px;" title="Fetch buildings, roads, waterways, and POIs from OpenStreetMap for this region. Only available for regions ≤10 km diagonal.">📥 Load City Data</button>
-                            <button id="clearCityDataBtn" class="btn btn-secondary" style="font-size:11px;" title="Clear city overlay from the canvas">✕</button>
-                        </div>
-                        <div id="cityDataStatus" style="font-size:10px;color:#888;margin-top:4px;"></div>
-                    </div>
-                    </div>
 
                     <!-- Merge subtab panel -->
                     <div id="mergePanel" class="hidden">
                     <div class="dem-controls-inner">
 
-                        <div style="font-size:11px;color:#aaa;margin-bottom:10px;">
-                            Stack and blend elevation sources. Each layer is fetched independently,
-                            processed, then composited in order onto the layer below it.
+                        <!-- Pipeline quick settings -->
+                        <div style="background:#2a2a2a;border:1px solid #444;border-radius:4px;padding:8px;margin-bottom:12px;">
+                            <div style="font-size:10px;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Pipeline Settings</div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">
+                                <div>
+                                    <div style="font-size:10px;color:#aaa;margin-bottom:2px;">Dim</div>
+                                    <input type="number" id="pipelineDim" value="200" min="50" max="1000" step="50"
+                                        style="width:100%;padding:3px 5px;font-size:11px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;">
+                                </div>
+                                <div>
+                                    <div style="font-size:10px;color:#aaa;margin-bottom:2px;">Source</div>
+                                    <select id="pipelineSource"
+                                        style="width:100%;padding:3px 4px;font-size:11px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;">
+                                        <option value="local">Local SRTM</option>
+                                        <option value="SRTMGL1">SRTM 30m</option>
+                                        <option value="SRTMGL3">SRTM 90m</option>
+                                        <option value="AW3D30">ALOS 30m</option>
+                                        <option value="COP30">Copernicus 30m</option>
+                                        <option value="SRTM15Plus">SRTM15+ (Bathy)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <div style="font-size:10px;color:#aaa;margin-bottom:2px;">Depth Scale</div>
+                                    <input type="number" id="pipelineDepthScale" value="1.0" step="0.1" min="0.1" max="10"
+                                        style="width:100%;padding:3px 5px;font-size:11px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;">
+                                </div>
+                                <div>
+                                    <div style="font-size:10px;color:#aaa;margin-bottom:2px;">Water Scale</div>
+                                    <input type="number" id="pipelineWaterScale" value="0.05" step="0.01" min="0" max="1"
+                                        style="width:100%;padding:3px 5px;font-size:11px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;">
+                                </div>
+                                <div>
+                                    <div style="font-size:10px;color:#aaa;margin-bottom:2px;">Height (mm)</div>
+                                    <input type="number" id="pipelineHeight" value="30" min="1" max="200"
+                                        style="width:100%;padding:3px 5px;font-size:11px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;">
+                                </div>
+                                <div>
+                                    <div style="font-size:10px;color:#aaa;margin-bottom:2px;">Base (mm)</div>
+                                    <input type="number" id="pipelineBase" value="10" min="0" max="50"
+                                        style="width:100%;padding:3px 5px;font-size:11px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;">
+                                </div>
+                                <div>
+                                    <div style="font-size:10px;color:#aaa;margin-bottom:2px;">Sat Scale</div>
+                                    <input type="number" id="pipelineSatScale" value="600" min="10" max="2000" step="10"
+                                        style="width:100%;padding:3px 5px;font-size:11px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;">
+                                </div>
+                                <div style="display:flex;align-items:flex-end;gap:5px;padding-bottom:2px;">
+                                    <input type="checkbox" id="pipelineSubtractWater" checked style="margin:0 0 3px 0;">
+                                    <label for="pipelineSubtractWater" style="font-size:11px;color:#ccc;margin:0;cursor:pointer;">Subtract Water</label>
+                                </div>
+                            </div>
+                            <button id="pipelineReloadBtn" class="btn btn-primary" style="width:100%;margin-top:8px;font-size:11px;">🔄 Reload DEM</button>
+                        </div>
+
+                        <!-- Layer stack header -->
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                            <span style="font-size:11px;color:#aaa;">Elevation layers</span>
+                            <button id="mergeSyncBtn" class="btn btn-secondary" style="font-size:10px;padding:2px 8px;" title="Rebuild layers from current DEM source and water mask settings">↺ Sync from layers</button>
                         </div>
 
                         <!-- Layer stack -->
@@ -998,6 +1072,10 @@
                     <div class="model-layout">
                         <div class="model-viewport">
                             <div id="modelViewer"></div>
+                            <div id="modelEmptyState" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#444;font-size:14px;gap:10px;pointer-events:none;">
+                                <span style="font-size:40px;">🗺️</span>
+                                <span>Generate a model to preview it here</span>
+                            </div>
                             <div class="model-overlay">
                                 <span id="modelStatus">No model generated</span>
                             </div>
@@ -1261,29 +1339,17 @@
         </div>
     </div>
 
-    <!-- Ensure components/dem-viewer.js is loaded before other scripts -->
-    <script type="module" src="static/js/components/dem-viewer.js"></script>
-    <script type="module" src="static/js/utils/canvas.js"></script>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <!-- Extracted modules — must be loaded before app.js DOMContentLoaded fires -->
+    <script src="/static/js/modules/state.js"></script>
     <script src="/static/js/modules/city-overlay.js"></script>
     <script src="/static/js/modules/stacked-layers.js"></script>
     <script src="/static/js/app.js"></script>
 
     <!-- Load third-party libs from CDN -->
     <script src="https://cdn.plot.ly/plotly-2.29.1.min.js"></script>
-
-    <!-- Application JS (ES module) -->
-    <script type="module">
-        import { initUI } from '/static/js/ui_init.js';
-        try {
-            await initUI();
-        } catch (e) {
-            console.warn('Failed to initialize UI module', e);
-        }
-    </script>
 
     <!-- Dev error overlay: catches uncaught JS errors and shows them on-screen -->
     <div id="devErrorOverlay" style="

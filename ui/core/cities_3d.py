@@ -13,25 +13,15 @@ from __future__ import annotations
 import logging
 import math
 import os
-import sys
 import tempfile
-from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Add strm2stl root to sys.path so `numpy2stl.numpy2stl.*` is importable.
-# Must point to Code/strm2stl/ (outer dir that contains the numpy2stl/ package),
-# NOT Code/strm2stl/numpy2stl/ — that level would cache the inner package as
-# `numpy2stl` and break the `numpy2stl.numpy2stl.oceans` import used by dem.py.
-_STRM2STL_DIR = Path(__file__).parent.parent.parent
-if str(_STRM2STL_DIR) not in sys.path:
-    sys.path.insert(0, str(_STRM2STL_DIR))
-
 try:
-    from numpy2stl.numpy2stl.save import write3MF as _write3mf
+    from numpy2stl.save import write3MF as _write3mf
     _WRITE3MF_AVAILABLE = True
 except ImportError:
     _WRITE3MF_AVAILABLE = False
@@ -398,7 +388,7 @@ def generate_city_3mf(
     # ── Cities 14: optional mesh simplification on terrain ───────────────────
     if simplify_terrain:
         try:
-            from numpy2stl.numpy2stl.simplify import simplify_mesh_surfaces
+            from numpy2stl.simplify import simplify_mesh_surfaces
             t_faces = simplify_mesh_surfaces(t_verts, t_faces)
             logger.info(f"Terrain mesh simplified to {len(t_faces)} faces")
         except Exception as e:

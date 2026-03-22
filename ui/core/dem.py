@@ -53,6 +53,9 @@ except ImportError:
 
 # strm2stl root dir (parent of ui/)
 _STRM2STL_DIR = Path(__file__).parent.parent.parent
+# Ensure local packages (numpy2stl, geo2stl) are importable without os.chdir.
+if str(_STRM2STL_DIR) not in sys.path:
+    sys.path.insert(0, str(_STRM2STL_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +78,16 @@ def fetch_layer_data(
     if source == "water_esa":
         return fetch_esa_water_layer(north, south, east, west, dim)
     elif source == "h5_local":
-        return fetch_h5_dem(north, south, east, west)
+        try:
+            return fetch_h5_dem(north, south, east, west)
+        except FileNotFoundError as exc:
+            logger.warning(
+                "h5_local DEM unavailable (%s); falling back to SRTMGL3 via OpenTopography", exc
+            )
+            return fetch_opentopo_dem(north, south, east, west,
+                                      demtype="SRTMGL3",
+                                      api_key=_OPENTOPO_API_KEY,
+                                      dim=dim)
     elif source in OPENTOPO_DATASETS:
         return fetch_opentopo_dem(north, south, east, west,
                                   demtype=source,
@@ -89,18 +101,12 @@ def fetch_local_dem(
     north: float, south: float, east: float, west: float, dim: int
 ) -> np.ndarray:
     """Fetch local SRTM elevation tiles and return as a float64 array."""
-    original_cwd = os.getcwd()
-    try:
-        os.chdir(str(_STRM2STL_DIR))
-        sys.path.append(str(_STRM2STL_DIR))
-        from numpy2stl.numpy2stl.oceans import make_dem_image
-        target_bbox = (north, south, east, west)
-        im = make_dem_image(target_bbox, dim=dim,
-                            subtract_water=False,
-                            projection="none",
-                            maintain_dimensions=True)
-    finally:
-        os.chdir(original_cwd)
+    from numpy2stl.oceans import make_dem_image
+    target_bbox = (north, south, east, west)
+    im = make_dem_image(target_bbox, dim=dim,
+                        subtract_water=False,
+                        projection="none",
+                        maintain_dimensions=True)
     return np.nan_to_num(im, nan=0.0).astype(np.float64)
 
 
@@ -162,18 +168,26 @@ def fetch_h5_dem(
     mosaic_w = span_x * TILE_PX
     mosaic = np.zeros((mosaic_h, mosaic_w), dtype=np.int16)
 
+    tiles_found = 0
     with h5py.File(str(h5_file), "r") as fh:
         for ix, iy in _product(range(span_x), range(span_y)):
             key = f"srtm_{tx1 + ix:02d}_{ty1 + iy:02d}"
             if key not in fh:
                 logger.debug(f"h5 tile missing: {key}")
                 continue
+            tiles_found += 1
             data = fh[key][:]
             th, tw = data.shape[:2]
             out_r = iy * TILE_PX
             out_c = ix * TILE_PX
             mosaic[out_r:out_r + min(th, TILE_PX),
                    out_c:out_c + min(tw, TILE_PX)] = data[:TILE_PX, :TILE_PX]
+
+    if tiles_found == 0:
+        raise FileNotFoundError(
+            f"h5 file '{Path(h5_file).name}' contains no tiles covering "
+            f"bbox ({north},{south},{east},{west})"
+        )
 
     # Transpose to match row=lat, col=lon orientation and crop
     mosaic = mosaic.T
@@ -198,15 +212,9 @@ def fetch_esa_water_layer(
     Fetch ESA WorldCover water mask (class 80) at the requested resolution.
     Returns a float64 array: 0 = land, 1 = water.
     """
-    original_cwd = os.getcwd()
-    try:
-        os.chdir(str(_STRM2STL_DIR))
-        sys.path.append(str(_STRM2STL_DIR))
-        from geo2stl.sat2stl import fetch_bbox_image
-        import cv2 as _cv2
-        img = fetch_bbox_image(north, south, east, west, scale=30, dataset="esa", use_cache=True)
-    finally:
-        os.chdir(original_cwd)
+    from geo2stl.sat2stl import fetch_bbox_image
+    import cv2 as _cv2
+    img = fetch_bbox_image(north, south, east, west, scale=30, dataset="esa", use_cache=True)
 
     if img is None:
         return np.zeros((dim, dim), dtype=np.float64)
@@ -375,4 +383,7 @@ def blend_layers(
     elif blend_mode == "min":
         return np.minimum(base, layer)
     else:
-        return base.copy()
+        raise ValueError(
+            f"Unknown blend_mode {blend_mode!r}. "
+            "Valid modes: base, replace, blend, rivers, max, min"
+        )

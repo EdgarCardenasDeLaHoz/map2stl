@@ -7,8 +7,8 @@ This file re-exports everything so existing scripts that do
 continue to work.
 """
 
-from server import *  # noqa: F401, F403
-from server import run_server
+from .server import *  # noqa: F401, F403
+from .server import run_server
 
 if __name__ == "__main__":
     run_server()

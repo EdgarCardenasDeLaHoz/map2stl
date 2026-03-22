@@ -46,14 +46,15 @@
 
         // Shared state object — exposed on window so extracted modules can read/write it.
         // Updated wherever these variables change throughout this file.
-        window.appState = {
-            selectedRegion:  null,
-            currentDemBbox:  null,
-            osmCityData:     null,
-            lastDemData:     null,   // set by renderDEMCanvas; read by stacked-layers.js tooltip
-            showToast:       null,   // set after showToast() is defined below
-            haversineDiagKm: null,   // set after haversineDiagKm() is defined below
-        };
+        // Initialise state keys on the reactive Proxy created by modules/state.js.
+        // Do NOT reassign window.appState — that would destroy the Proxy and its listeners.
+        if (!window.appState?.set) window.appState = {};   // fallback if state.js not loaded
+        window.appState.selectedRegion  = null;
+        window.appState.currentDemBbox  = null;
+        window.appState.osmCityData     = null;
+        window.appState.lastDemData     = null;
+        window.appState.showToast       = null;
+        window.appState.haversineDiagKm = null;
         let lastDemData = null;
         let lastWaterMaskData = null;
         let lastEsaData = null;
@@ -107,6 +108,7 @@
             currentDemBbox = null;
             window.appState.currentDemBbox = null;
             window.appState.lastDemData = null;
+            _setDemEmptyState(true);
             originalDemValues = null;  // Reset so next Apply uses new region's data
             curveDataVmin = null;      // Reset stable curve coordinate system
             curveDataVmax = null;
@@ -114,6 +116,8 @@
             // Reset layer tracking
             layerBboxes = { dem: null, water: null, landCover: null };
             layerStatus = { dem: 'empty', water: 'empty', landCover: 'empty' };
+            if (typeof lastCityRasterData !== 'undefined') lastCityRasterData = null;
+            if (window.appState) window.appState.cityRasterSourceCanvas = null;
 
             // Update status indicators
             updateLayerStatusIndicators();
@@ -367,6 +371,17 @@
                     element.classList.add(status);
                 }
             });
+
+            // Update strip button status dots
+            const stripDotMap = { 'dem': 'stripDotDem', 'water': 'stripDotWater', 'landCover': 'stripDotLandCover' };
+            Object.entries(stripDotMap).forEach(([layer, dotId]) => {
+                const dot = document.getElementById(dotId);
+                if (dot) {
+                    dot.classList.remove('loaded', 'loading', 'error');
+                    const s = layerStatus[layer] || 'empty';
+                    if (s !== 'empty') dot.classList.add(s);
+                }
+            });
         }
 
         /**
@@ -503,10 +518,11 @@
                 if (serverCacheCount) serverCacheCount.textContent = 'Checking...';
 
                 const response = await fetch('/api/cache');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
 
                 if (serverCacheCount) {
-                    serverCacheCount.textContent = `${data.total_files} files (${data.total_size_mb} MB)`;
+                    serverCacheCount.textContent = `${data.total_cached_files} files (${data.total_size_mb} MB)`;
                 }
             } catch (e) {
                 console.warn('Could not fetch server cache status:', e);
@@ -619,7 +635,7 @@
                 const data = await response.json();
 
                 if (data.status === 'success') {
-                    showToast(`Server cache cleared (${data.cleared?.[0]?.files_deleted || 0} files)`, 'success');
+                    showToast(`Server cache cleared (${data.cleared?.[0]?.files_deleted ?? 0} files)`, 'success');
                     fetchServerCacheStatus();
                 } else {
                     showToast('Failed to clear server cache', 'error');
@@ -708,6 +724,9 @@
 
             // Initialize merge panel
             setupMergePanel();
+
+            // Initialize city raster layer (City Heights toggle + appState listener)
+            _setupCityRasterLayer();
 
             console.log('App initialization complete');
         });
@@ -828,8 +847,8 @@
                             if (Array.isArray(demVals) && demVals.length && Array.isArray(demVals[0])) {
                                 h = demVals.length; w = demVals[0].length; demVals = demVals.flat();
                             }
-                            const vmin = data.min_elevation || 0;
-                            const vmax = data.max_elevation || 1;
+                            const vmin = data.min_elevation ?? 0;
+                            const vmax = data.max_elevation ?? 1;
                             const canvas = document.createElement('canvas');
                             canvas.width = w; canvas.height = h;
                             const ctx = canvas.getContext('2d');
@@ -953,6 +972,21 @@
             preloadedLayer = new L.FeatureGroup().addTo(map);
             editMarkersLayer = new L.FeatureGroup().addTo(map);
             drawnItems = new L.FeatureGroup().addTo(map);
+
+            // Hide edit markers when their bbox is too small on screen (< 40px diagonal)
+            function _updateEditMarkerVisibility() {
+                if (!editMarkersLayer) return;
+                editMarkersLayer.eachLayer(marker => {
+                    if (!marker._regionBounds) return;
+                    const ne = map.latLngToContainerPoint(marker._regionBounds.getNorthEast());
+                    const sw = map.latLngToContainerPoint(marker._regionBounds.getSouthWest());
+                    const pxDiag = Math.sqrt(Math.pow(ne.x - sw.x, 2) + Math.pow(ne.y - sw.y, 2));
+                    const el = marker.getElement?.();
+                    if (el) el.style.display = pxDiag < 40 ? 'none' : '';
+                });
+            }
+            map.on('zoomend', _updateEditMarkerVisibility);
+            map.on('moveend', _updateEditMarkerVisibility);
 
             // Get next color for drawn rectangles
             /**
@@ -1182,6 +1216,12 @@
                 animateGlobe();
             } catch (error) {
                 console.error('Error initializing globe:', error);
+                // Hide globe toggle if WebGL is unavailable
+                const globeToggle = document.getElementById('floatingGlobeToggle');
+                if (globeToggle) {
+                    globeToggle.style.display = 'none';
+                    globeToggle.title = 'Globe unavailable (WebGL not supported)';
+                }
             }
         }
 
@@ -1276,6 +1316,7 @@
                             keyboard: false,
                             zIndexOffset: 500
                         });
+                        editMarker._regionBounds = L.latLngBounds(bounds[0], bounds[1]);
                         if (editMarkersLayer) editMarkersLayer.addLayer(editMarker);
 
                         preloadedLayer.addLayer(rect);
@@ -1358,6 +1399,8 @@
             // Prevents stale water mask / land cover / DEM from showing with new region
             clearLayerCache();
             clearLayerDisplays();
+            // Clear city overlay so auto-load triggers for the new region
+            if (typeof clearCityOverlay === 'function') clearCityOverlay();
 
             // Highlight in sidebar list
             document.querySelectorAll('.coordinate-item').forEach(item => {
@@ -1390,7 +1433,7 @@
             }
 
             // Show/hide Cities tab based on region diagonal
-            _updateCitiesTabVisibility(selectedRegion);
+            _updateCitiesLoadButton(selectedRegion);
 
             // Auto-select water/land cover resolution (sat_scale) and DEM dim based on region diagonal.
             // ESA WorldCover is 10m native; use that for city scale to avoid quality loss.
@@ -1448,6 +1491,7 @@
                 });
             }
 
+            _updateWorkflowStepper();
         }
 
         /**
@@ -1475,10 +1519,10 @@
                 if (sbW) sbW.value = parseFloat(region.west).toFixed(dec);
             }
 
-            // Show the compact edit view, hide list/table views
-            document.getElementById('sidebarListView')?.classList.add('hidden');
+            // Keep the region list visible so the user can switch to another region
+            document.getElementById('sidebarListView')?.classList.remove('hidden');
             document.getElementById('sidebarTableView')?.classList.add('hidden');
-            document.getElementById('sidebarEditView')?.classList.remove('hidden');
+            document.getElementById('sidebarEditView')?.classList.add('hidden');
 
             // Ensure sidebar is in normal mode (visible, not expanded/hidden)
             if (sidebarState !== 'normal') {
@@ -1520,142 +1564,7 @@
             document.getElementById('saveRegionBtn').onclick = saveCurrentRegion;
             document.getElementById('submitBtn').onclick = submitBoundingBox;
 
-            // Bbox fine-tune: Reload button
-            const bboxReloadBtn = document.getElementById('bboxReloadBtn');
-            if (bboxReloadBtn) {
-                bboxReloadBtn.onclick = () => {
-                    const n = parseFloat(document.getElementById('bboxNorth').value);
-                    const s = parseFloat(document.getElementById('bboxSouth').value);
-                    const e = parseFloat(document.getElementById('bboxEast').value);
-                    const w = parseFloat(document.getElementById('bboxWest').value);
-                    if (isNaN(n) || isNaN(s) || isNaN(e) || isNaN(w)) {
-                        showToast('Enter valid N/S/E/W coordinates', 'warning');
-                        return;
-                    }
-                    if (n <= s) { showToast('North must be greater than South', 'warning'); return; }
-                    if (e === w) { showToast('East and West cannot be equal', 'warning'); return; }
-                    // Clamp to valid lat/lon ranges
-                    const nc = Math.min(90, Math.max(-90, n));
-                    const sc = Math.min(90, Math.max(-90, s));
-                    const ec = Math.min(180, Math.max(-180, e));
-                    const wc = Math.min(180, Math.max(-180, w));
-                    // Update selectedRegion bbox in-place
-                    if (!selectedRegion) selectedRegion = {};
-                    selectedRegion.north = nc; selectedRegion.south = sc;
-                    selectedRegion.east = ec; selectedRegion.west = wc;
-                    window.appState.selectedRegion = selectedRegion;
-                    currentDemBbox = { north: nc, south: sc, east: ec, west: wc };
-                    window.appState.currentDemBbox = currentDemBbox;
-                    syncBboxMiniMap();
-                    clearLayerCache();
-                    loadDEM().then(() => { loadWaterMask(); loadSatelliteImage(); });
-                };
-            }
-
-            // Bbox inputs: Enter key triggers reload
-            ['bboxNorth','bboxSouth','bboxEast','bboxWest'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.addEventListener('keydown', e => {
-                    if (e.key === 'Enter') document.getElementById('bboxReloadBtn')?.click();
-                });
-            });
-
-            // Edit bbox on map — toggle inline mini-map
-            const editBboxOnMapBtn = document.getElementById('editBboxOnMapBtn');
-            if (editBboxOnMapBtn) {
-                editBboxOnMapBtn.onclick = () => toggleBboxMiniMap();
-            }
-
-            // Save bbox — persist current bounding box coordinates back to the selected region
-            const saveBboxBtn = document.getElementById('saveBboxBtn');
-            if (saveBboxBtn) {
-                saveBboxBtn.onclick = async () => {
-                    if (!selectedRegion || !selectedRegion.name) {
-                        showToast('No region selected — load a region first', 'warning');
-                        return;
-                    }
-                    const bbox = currentDemBbox || selectedRegion;
-                    if (!bbox) { showToast('No bbox to save', 'warning'); return; }
-                    const payload = {
-                        name: selectedRegion.name,
-                        description: selectedRegion.description || '',
-                        north: bbox.north, south: bbox.south,
-                        east: bbox.east, west: bbox.west,
-                        parameters: selectedRegion.parameters || {}
-                    };
-                    try {
-                        saveBboxBtn.disabled = true;
-                        saveBboxBtn.textContent = '⏳ Saving…';
-                        const res = await fetch(`/api/regions/${encodeURIComponent(selectedRegion.name)}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-                        if (res.ok) {
-                            // Update local cache so region list stays in sync
-                            const updated = await res.json();
-                            const idx = coordinatesData.findIndex(r => r.name === selectedRegion.name);
-                            if (idx >= 0) coordinatesData[idx] = updated;
-                            selectedRegion = updated;
-                            window.appState.selectedRegion = selectedRegion;
-                            showToast(`Saved bbox for "${selectedRegion.name}"`, 'success');
-                        } else {
-                            const err = await res.json().catch(() => ({}));
-                            showToast(`Save failed: ${err.error || res.statusText}`, 'error');
-                        }
-                    } catch (e) {
-                        showToast(`Save error: ${e.message}`, 'error');
-                    } finally {
-                        saveBboxBtn.disabled = false;
-                        saveBboxBtn.textContent = '💾 Save bbox';
-                    }
-                };
-            }
-
-            // Region label editor — save group label for selected region
-            const saveRegionLabelBtn = document.getElementById('saveRegionLabelBtn');
-            if (saveRegionLabelBtn) {
-                saveRegionLabelBtn.onclick = async () => {
-                    if (!selectedRegion || !selectedRegion.name) {
-                        showToast('No region selected — load a region first', 'warning');
-                        return;
-                    }
-                    const newLabel = (document.getElementById('regionLabelEdit')?.value || '').trim() || null;
-                    const payload = {
-                        name: selectedRegion.name,
-                        label: newLabel,
-                        description: selectedRegion.description || '',
-                        north: selectedRegion.north, south: selectedRegion.south,
-                        east: selectedRegion.east, west: selectedRegion.west,
-                    };
-                    try {
-                        saveRegionLabelBtn.disabled = true;
-                        saveRegionLabelBtn.textContent = '⏳…';
-                        const res = await fetch(`/api/regions/${encodeURIComponent(selectedRegion.name)}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-                        if (res.ok) {
-                            const updated = await res.json();
-                            const idx = coordinatesData.findIndex(r => r.name === selectedRegion.name);
-                            if (idx >= 0) coordinatesData[idx] = updated;
-                            selectedRegion = updated;
-                            window.appState.selectedRegion = selectedRegion;
-                            renderCoordinatesList();
-                            showToast(`Label updated to "${newLabel || '(auto-detect)'}"`, 'success');
-                        } else {
-                            const err = await res.json().catch(() => ({}));
-                            showToast(`Save failed: ${err.error || res.statusText}`, 'error');
-                        }
-                    } catch (e) {
-                        showToast(`Save error: ${e.message}`, 'error');
-                    } finally {
-                        saveRegionLabelBtn.disabled = false;
-                        saveRegionLabelBtn.textContent = '🏷 Save';
-                    }
-                };
-            }
+            _setupBboxListeners();
 
             // 3-state sidebar toggle button
             const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
@@ -1682,443 +1591,9 @@
             const clearBboxBtn = document.getElementById('clearBboxBtn');
             if (clearBboxBtn) clearBboxBtn.onclick = clearAllBoundingBoxes;
 
-            // Model tab buttons
-            const generateModelBtn2 = document.getElementById('generateModelBtn2');
-            if (generateModelBtn2) generateModelBtn2.onclick = generateModelFromTab;
-            const downloadSTLBtn = document.getElementById('downloadSTLBtn');
-            if (downloadSTLBtn) downloadSTLBtn.onclick = downloadSTL;
+            _setupModelExportListeners();
 
-            // Physical dimensions panel — update on any model input change
-            ['modelResolution', 'modelBaseHeight'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.addEventListener('change', updatePrintDimensions);
-            });
-
-            // Bed optimizer controls
-            const bedSel = document.getElementById('bedSizeSelect');
-            if (bedSel) {
-                bedSel.addEventListener('change', () => {
-                    const isCustom = bedSel.value === 'custom';
-                    const customRow = document.getElementById('bedCustomRow');
-                    if (customRow) customRow.style.display = isCustom ? 'flex' : 'none';
-                    updatePrintDimensions();
-                });
-            }
-            ['bedCustomW', 'bedCustomH'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.addEventListener('input', updatePrintDimensions);
-            });
-            // Contour lines toggle — show/hide interval+style params
-            const contoursChk = document.getElementById('modelContours');
-            if (contoursChk) {
-                contoursChk.addEventListener('change', () => {
-                    const p = document.getElementById('modelContoursParams');
-                    if (p) p.style.display = contoursChk.checked ? 'block' : 'none';
-                });
-            }
-
-            const downloadOBJBtn = document.getElementById('downloadOBJBtn');
-            if (downloadOBJBtn) downloadOBJBtn.onclick = () => downloadModel('obj');
-            const download3MFBtn = document.getElementById('download3MFBtn');
-            if (download3MFBtn) download3MFBtn.onclick = () => downloadModel('3mf');
-            const previewModelBtn = document.getElementById('previewModelBtn');
-            if (previewModelBtn) previewModelBtn.onclick = previewModelIn3D;
-
-            // Cross-section export
-            const crossMidBtn = document.getElementById('crossSectionMidBtn');
-            if (crossMidBtn) {
-                crossMidBtn.onclick = () => {
-                    const axis = document.getElementById('crossSectionAxis')?.value || 'lat';
-                    const r = selectedRegion || window.appState?.selectedRegion;
-                    if (!r) { showToast('Select a region first', 'warning'); return; }
-                    const mid = axis === 'lat'
-                        ? ((r.north + r.south) / 2).toFixed(4)
-                        : ((r.east + r.west) / 2).toFixed(4);
-                    const el = document.getElementById('crossSectionValue');
-                    if (el) el.value = mid;
-                };
-            }
-            // Update mid button tooltip when axis changes
-            const crossAxisSel = document.getElementById('crossSectionAxis');
-            if (crossAxisSel) {
-                crossAxisSel.addEventListener('change', () => {
-                    // Auto-update value to midpoint of new axis if a region is selected
-                    const r = selectedRegion || window.appState?.selectedRegion;
-                    if (!r) return;
-                    const mid = crossAxisSel.value === 'lat'
-                        ? ((r.north + r.south) / 2).toFixed(4)
-                        : ((r.east + r.west) / 2).toFixed(4);
-                    const el = document.getElementById('crossSectionValue');
-                    if (el && !el.value) el.value = mid;
-                });
-            }
-            const downloadCrossSectionBtn = document.getElementById('downloadCrossSectionBtn');
-            if (downloadCrossSectionBtn) downloadCrossSectionBtn.onclick = downloadCrossSection;
-
-            // Colormap change - recolor without refetching
-            document.getElementById('demColormap').onchange = recolorDEM;
-
-            // Projection change triggers client-side re-render only (no backend call)
-            const projSelect = document.getElementById('paramProjection');
-            if (projSelect) {
-                const projDescriptions = {
-                    'none': 'No correction — raw lat/lon grid displayed as-is.',
-                    'cosine': 'Horizontal scaling by cos(latitude). Correct east-west distances.',
-                    'mercator': 'Web Mercator — vertical stretching increases towards poles.',
-                    'lambert': 'Lambert Cylindrical Equal-Area — preserves area at the cost of shape.',
-                    'sinusoidal': 'Sinusoidal — each row scaled by cos(lat), centred on meridian.'
-                };
-                projSelect.addEventListener('change', () => {
-                    const desc = document.getElementById('projectionDescription');
-                    if (desc) desc.textContent = projDescriptions[projSelect.value] || '';
-                    recolorDEM();
-                    // Re-project water mask and land cover layers if cached
-                    if (lastWaterMaskData) {
-                        renderWaterMask(lastWaterMaskData);
-                        renderEsaLandCover(lastWaterMaskData);
-                    }
-                    // Gridlines are redrawn inside recolorDEM via requestAnimationFrame —
-                    // no direct call here to avoid drawing before the new canvas is painted.
-                });
-            }
-
-            // Rescaling buttons
-            const applyRescaleBtn = document.getElementById('applyRescaleBtn');
-            if (applyRescaleBtn) {
-                applyRescaleBtn.onclick = () => {
-                    const minVal = parseFloat(document.getElementById('rescaleMin').value);
-                    const maxVal = parseFloat(document.getElementById('rescaleMax').value);
-                    if (isNaN(minVal) || isNaN(maxVal)) {
-                        showToast('Enter valid min and max values', 'warning');
-                        return;
-                    }
-                    if (minVal >= maxVal) {
-                        showToast('Min must be less than max', 'warning');
-                        return;
-                    }
-                    rescaleDEM(minVal, maxVal);
-                };
-            }
-
-            const resetRescaleBtn = document.getElementById('resetRescaleBtn');
-            if (resetRescaleBtn) {
-                resetRescaleBtn.onclick = resetRescale;
-            }
-
-            // Map tile layer selector
-            const tileLayerSelect = document.getElementById('mapTileLayer');
-            if (tileLayerSelect) {
-                tileLayerSelect.onchange = (e) => {
-                    setTileLayer(e.target.value);
-                    showToast(`Map style: ${e.target.options[e.target.selectedIndex].text}`, 'info');
-                };
-            }
-
-            // Terrain relief overlay toggle
-            const terrainOverlayCheckbox = document.getElementById('showTerrainOverlay');
-            if (terrainOverlayCheckbox) {
-                terrainOverlayCheckbox.onchange = (e) => {
-                    toggleTerrainOverlay(e.target.checked);
-                    updateFloatingTerrainButton(e.target.checked);
-                    showToast(e.target.checked ? 'Terrain relief enabled' : 'Terrain relief disabled', 'info');
-                };
-            }
-
-            // Floating terrain toggle button in map
-            const floatingTerrainBtn = document.getElementById('floatingTerrainToggle');
-            if (floatingTerrainBtn) {
-                floatingTerrainBtn.onclick = () => {
-                    const checkbox = document.getElementById('showTerrainOverlay');
-                    if (checkbox) {
-                        checkbox.checked = !checkbox.checked;
-                        checkbox.dispatchEvent(new Event('change'));
-                    }
-                };
-            }
-
-            // Generate global DEM terrain cache
-            const genGlobalDemBtn = document.getElementById('genGlobalDemBtn');
-            if (genGlobalDemBtn) {
-                genGlobalDemBtn.onclick = async () => {
-                    const status = document.getElementById('genGlobalDemStatus');
-                    genGlobalDemBtn.disabled = true;
-                    if (status) status.textContent = 'Generating…';
-                    showToast('Generating terrain cache — this runs once and may take a minute', 'info', 5000);
-                    try {
-                        const resp = await fetch('/api/global_dem_overview?regen=true');
-                        if (resp.ok) {
-                            if (status) status.textContent = '✓ Done';
-                            showToast('Terrain cache generated', 'success');
-                        } else {
-                            const d = await resp.json().catch(() => ({}));
-                            if (status) status.textContent = '✗ Failed';
-                            showToast('Failed: ' + (d.error || resp.statusText), 'error');
-                        }
-                    } catch (e) {
-                        if (status) status.textContent = '✗ Error';
-                        showToast('Error generating cache', 'error');
-                    } finally {
-                        genGlobalDemBtn.disabled = false;
-                    }
-                };
-            }
-
-            // Floating grid toggle button in map
-            const floatingGridBtn = document.getElementById('floatingGridToggle');
-            if (floatingGridBtn) {
-                floatingGridBtn.onclick = () => {
-                    mapGridEnabled = !mapGridEnabled;
-                    toggleMapGrid(mapGridEnabled);
-                    showToast(mapGridEnabled ? 'Grid enabled' : 'Grid disabled', 'info');
-                };
-            }
-
-            // Floating globe toggle button
-            const floatingGlobeBtn = document.getElementById('floatingGlobeToggle');
-            if (floatingGlobeBtn) {
-                floatingGlobeBtn.onclick = () => {
-                    const globeContainer = document.getElementById('globeContainer');
-                    const mapContainer = document.getElementById('mapContainer');
-                    if (globeContainer.classList.contains('hidden')) {
-                        // Show globe overlay
-                        globeContainer.classList.remove('hidden');
-                        globeContainer.style.position = 'absolute';
-                        globeContainer.style.top = '0';
-                        globeContainer.style.left = '0';
-                        globeContainer.style.width = '100%';
-                        globeContainer.style.height = '100%';
-                        globeContainer.style.zIndex = '500';
-                        floatingGlobeBtn.classList.add('active');
-                        initGlobe();
-                    } else {
-                        // Hide globe
-                        globeContainer.classList.add('hidden');
-                        globeContainer.style.position = '';
-                        floatingGlobeBtn.classList.remove('active');
-                    }
-                };
-            }
-
-            // Floating regions panel toggle
-            const floatingRegionsBtn = document.getElementById('floatingRegionsToggle');
-            const regionsPanel = document.getElementById('regionsPanel');
-            const closeRegionsBtn = document.getElementById('closeRegionsPanel');
-
-            if (floatingRegionsBtn && regionsPanel) {
-                floatingRegionsBtn.onclick = () => {
-                    regionsPanel.classList.toggle('hidden');
-                    floatingRegionsBtn.classList.toggle('active', !regionsPanel.classList.contains('hidden'));
-                    if (!regionsPanel.classList.contains('hidden')) {
-                        populateRegionsPanelTable();
-                    }
-                };
-            }
-
-            if (closeRegionsBtn && regionsPanel) {
-                closeRegionsBtn.onclick = () => {
-                    regionsPanel.classList.add('hidden');
-                    if (floatingRegionsBtn) floatingRegionsBtn.classList.remove('active');
-                };
-            }
-
-            // ── Map Settings panel (⚙️ button) ──────────────────────────────
-            const mapSettingsBtn = document.getElementById('floatingMapSettingsBtn');
-            const mapSettingsPanel = document.getElementById('mapSettingsPanel');
-            const closeMapSettingsBtn = document.getElementById('closeMapSettingsBtn');
-
-            if (mapSettingsBtn && mapSettingsPanel) {
-                mapSettingsBtn.onclick = () => {
-                    mapSettingsPanel.classList.toggle('hidden');
-                    mapSettingsBtn.classList.toggle('active', !mapSettingsPanel.classList.contains('hidden'));
-                };
-            }
-            if (closeMapSettingsBtn) {
-                closeMapSettingsBtn.onclick = () => {
-                    mapSettingsPanel.classList.add('hidden');
-                    mapSettingsBtn?.classList.remove('active');
-                };
-            }
-
-            // Map Style select in explore panel — mirrors the one in Edit settings
-            const mapTileLayerExplore = document.getElementById('mapTileLayerExplore');
-            const mapTileLayerEdit = document.getElementById('mapTileLayer');
-            if (mapTileLayerExplore) {
-                mapTileLayerExplore.addEventListener('change', () => {
-                    setTileLayer(mapTileLayerExplore.value);
-                    if (mapTileLayerEdit) mapTileLayerEdit.value = mapTileLayerExplore.value;
-                });
-            }
-            // Keep Explore select in sync when Edit select changes
-            if (mapTileLayerEdit) {
-                mapTileLayerEdit.addEventListener('change', () => {
-                    if (mapTileLayerExplore) mapTileLayerExplore.value = mapTileLayerEdit.value;
-                });
-            }
-
-            // Terrain overlay toggle in explore panel
-            const terrainCheckboxExplore = document.getElementById('showTerrainOverlayExplore');
-            const terrainRowExplore = document.getElementById('terrainOpacityRowExplore');
-            const terrainOpacityExplore = document.getElementById('terrainOverlayOpacityExplore');
-            const terrainOpacityLabelExplore = document.getElementById('terrainOpacityValueExplore');
-            if (terrainCheckboxExplore) {
-                terrainCheckboxExplore.addEventListener('change', () => {
-                    const on = terrainCheckboxExplore.checked;
-                    toggleTerrainOverlay(on);
-                    if (terrainRowExplore) terrainRowExplore.style.display = on ? 'flex' : 'none';
-                    // Keep Edit settings in sync
-                    const editCb = document.getElementById('showTerrainOverlay');
-                    if (editCb) editCb.checked = on;
-                });
-            }
-            if (terrainOpacityExplore) {
-                terrainOpacityExplore.addEventListener('input', () => {
-                    const val = parseInt(terrainOpacityExplore.value);
-                    setTerrainOverlayOpacity(val);
-                    if (terrainOpacityLabelExplore) terrainOpacityLabelExplore.textContent = val + '%';
-                    // Keep Edit settings in sync
-                    const editSlider = document.getElementById('terrainOverlayOpacity');
-                    if (editSlider) {
-                        editSlider.value = val;
-                        document.getElementById('terrainOpacityValue').textContent = val + '%';
-                    }
-                });
-            }
-
-            // Grid lines toggle in explore panel mirrors floatingGridToggle
-            const gridCheckboxExplore = document.getElementById('showGridlinesExplore');
-            if (gridCheckboxExplore) {
-                gridCheckboxExplore.addEventListener('change', () => {
-                    mapGridEnabled = gridCheckboxExplore.checked;
-                    toggleMapGrid(mapGridEnabled);
-                });
-            }
-
-            // Regions panel search
-            const regionsPanelSearch = document.getElementById('regionsPanelSearch');
-            if (regionsPanelSearch) {
-                regionsPanelSearch.oninput = () => populateRegionsPanelTable();
-            }
-
-            // Regions panel "New" button — activate draw tool and close panel
-            const regionsPanelNewBtn = document.getElementById('regionsPanelNewBtn');
-            if (regionsPanelNewBtn) {
-                regionsPanelNewBtn.onclick = () => {
-                    closeRegionsPanel();
-                    // Activate the Leaflet draw rectangle tool
-                    if (drawControl && drawControl._toolbars && drawControl._toolbars.draw) {
-                        try { drawControl._toolbars.draw._modes.rectangle.handler.enable(); } catch(e) {}
-                    }
-                    showToast('Draw a rectangle on the map to create a new region', 'info');
-                };
-            }
-
-            // Helper: activate Leaflet rectangle draw tool
-            /**
-             * Programmatically enable the Leaflet rectangle draw mode and show a guide toast.
-             */
-            function activateDrawTool() {
-                if (drawControl && drawControl._toolbars && drawControl._toolbars.draw) {
-                    try { drawControl._toolbars.draw._modes.rectangle.handler.enable(); } catch(e) {}
-                }
-                const btn = document.getElementById('floatingDrawBtn');
-                if (btn) btn.classList.add('drawing');
-                showToast('Draw a rectangle on the map, then enter a name and click Save Region', 'info');
-            }
-
-            // Floating "New Region" button on map
-            const floatingDrawBtn = document.getElementById('floatingDrawBtn');
-            if (floatingDrawBtn) {
-                floatingDrawBtn.onclick = activateDrawTool;
-            }
-
-            // Sidebar "Draw on Map" button
-            const startDrawBtn = document.getElementById('startDrawBtn');
-            if (startDrawBtn) {
-                startDrawBtn.onclick = () => {
-                    activateDrawTool();
-                    switchView('map');
-                };
-            }
-
-            // Reset drawing state when draw completes
-            if (map) {
-                map.on(L.Draw.Event.CREATED, () => {
-                    const btn = document.getElementById('floatingDrawBtn');
-                    if (btn) btn.classList.remove('drawing');
-                });
-                map.on(L.Draw.Event.DRAWSTOP, () => {
-                    const btn = document.getElementById('floatingDrawBtn');
-                    if (btn) btn.classList.remove('drawing');
-                });
-            }
-
-            // Grid visibility toggle (layer grid)
-            const gridVisibleCheckbox = document.getElementById('layerGridVisible');
-            const gridDensitySelect = document.getElementById('layerGridDensity');
-            if (gridVisibleCheckbox) {
-                gridVisibleCheckbox.onchange = () => {
-                    const gridCanvas = document.getElementById('layerGridCanvas');
-                    if (gridCanvas) {
-                        gridCanvas.style.display = gridVisibleCheckbox.checked ? 'block' : 'none';
-                        if (gridVisibleCheckbox.checked) drawLayerGrid();
-                    }
-                };
-            }
-            if (gridDensitySelect) {
-                gridDensitySelect.onchange = () => {
-                    if (gridVisibleCheckbox && gridVisibleCheckbox.checked) {
-                        drawLayerGrid();
-                    }
-                };
-            }
-
-            // Terrain overlay opacity slider
-            const terrainOpacitySlider = document.getElementById('terrainOverlayOpacity');
-            if (terrainOpacitySlider) {
-                terrainOpacitySlider.oninput = (e) => {
-                    const val = e.target.value;
-                    document.getElementById('terrainOpacityValue').textContent = `${val}%`;
-                    setTerrainOverlayOpacity(val);
-                };
-            }
-
-            // Resolution warnings
-            const paramDim = document.getElementById('paramDim');
-            const paramSatScale = document.getElementById('paramSatScale');
-            const waterResolution = document.getElementById('waterResolution');
-
-            if (paramDim) {
-                paramDim.oninput = () => {
-                    const val = parseInt(paramDim.value);
-                    const warning = document.getElementById('demResWarning');
-                    if (warning) {
-                        warning.style.display = val > 500 ? 'block' : 'none';
-                    }
-                };
-            }
-
-            if (paramSatScale) {
-                paramSatScale.oninput = () => {
-                    const val = parseInt(paramSatScale.value);
-                    const warning = document.getElementById('satResWarning');
-                    if (warning) {
-                        // Warn if resolution is too high for region size
-                        warning.style.display = val < 100 ? 'block' : 'none';
-                    }
-                };
-            }
-
-            if (waterResolution) {
-                waterResolution.onchange = () => {
-                    const val = parseInt(waterResolution.value);
-                    const warning = document.getElementById('waterResWarning');
-                    if (warning) {
-                        warning.style.display = val >= 500 ? 'block' : 'none';
-                    }
-                    // Reload water mask with new resolution
-                    loadWaterMask();
-                };
-            }
+            _setupMapAndDemListeners();
 
             // Layer opacity controls
             setupOpacityControls();
@@ -2138,65 +1613,7 @@
             // Setup keyboard shortcuts
             setupKeyboardShortcuts();
 
-            // Resizable settings panel (drag left edge)
-            const resizeHandle = document.getElementById('settingsPanelResizeHandle');
-            const rightPanel = document.getElementById('demRightPanel');
-            if (resizeHandle && rightPanel) {
-                let resizing = false, startX, startW, rafPending = false;
-                resizeHandle.addEventListener('mousedown', (e) => {
-                    resizing = true;
-                    startX = e.clientX;
-                    startW = rightPanel.offsetWidth;
-                    resizeHandle.classList.add('dragging');
-                    document.body.style.cursor = 'col-resize';
-                    document.body.style.userSelect = 'none';
-                    e.preventDefault();
-                });
-                document.addEventListener('mousemove', (e) => {
-                    if (!resizing) return;
-                    const dx = startX - e.clientX; // dragging left = wider panel
-                    const newW = Math.max(280, Math.min(900, startW + dx));
-                    rightPanel.style.width = newW + 'px';
-                    // Reflow all canvases continuously during drag (throttled to one rAF per frame)
-                    if (!rafPending) {
-                        rafPending = true;
-                        requestAnimationFrame(() => {
-                            updateStackedLayers();
-                            // Redraw histogram + colorbar at new panel width
-                            if (lastDemData?.values?.length) recolorDEM();
-                            rafPending = false;
-                        });
-                    }
-                });
-                document.addEventListener('mouseup', () => {
-                    if (!resizing) return;
-                    resizing = false;
-                    resizeHandle.classList.remove('dragging');
-                    document.body.style.cursor = '';
-                    document.body.style.userSelect = '';
-                    localStorage.setItem('settingsPanelWidth', rightPanel.offsetWidth);
-                    requestAnimationFrame(() => updateStackedLayers());
-                });
-                // Restore saved width
-                const savedW = localStorage.getItem('settingsPanelWidth');
-                if (savedW) rightPanel.style.width = parseInt(savedW) + 'px';
-
-                // ResizeObserver: reflow visible canvases whenever the panel's dimensions change
-                // (covers both drag resize and programmatic width changes)
-                const panelResizeObserver = new ResizeObserver(() => {
-                    const cc = rightPanel.querySelector('#curveCanvas');
-                    if (cc) {
-                        const cont = cc.parentElement;
-                        if (cont.clientWidth > 0 && cont.clientHeight > 0) {
-                            cc.width  = cont.clientWidth;
-                            cc.height = cont.clientHeight;
-                            if (typeof drawCurve === 'function') drawCurve();
-                        }
-                    }
-                    if (lastDemData?.values?.length) recolorDEM();
-                });
-                panelResizeObserver.observe(rightPanel);
-            }
+            _setupResizablePanel();
 
             // Initialize elevation curve editor
             initCurveEditor();
@@ -2210,182 +1627,672 @@
             // Initialize stacked layers zoom/pan (once only)
             enableStackedZoomPan();
 
-            // --- Feature 1: Save Settings + JSON toggle ---
-            const saveSettingsBtn = document.getElementById('saveRegionSettingsBtn');
-            if (saveSettingsBtn) saveSettingsBtn.onclick = saveRegionSettings;
+            _setupSettingsJsonToggle();
+            _setupCityAndExportListeners();
 
-            const jsonToggleBtn = document.getElementById('jsonViewToggleBtn');
-            const jsonView = document.getElementById('settingsJsonView');
-            const demControlsInner = document.getElementById('demControlsInner');
-            const settingsSaveRow = document.getElementById('settingsSaveRow');
+            _setupSidebarEditView();
 
-            if (jsonToggleBtn && jsonView) {
-                let jsonViewOpen = false;
-                jsonToggleBtn.addEventListener('click', () => {
-                    jsonViewOpen = !jsonViewOpen;
-                    jsonToggleBtn.classList.toggle('active', jsonViewOpen);
-                    if (jsonViewOpen) {
-                        // Populate textarea with current settings
-                        const editor = document.getElementById('settingsJsonEditor');
-                        if (editor) editor.value = JSON.stringify(collectAllSettings(), null, 2);
-                        jsonView.classList.remove('hidden');
-                        if (demControlsInner) demControlsInner.classList.add('hidden');
-                        if (settingsSaveRow) settingsSaveRow.style.display = 'none';
-                    } else {
-                        jsonView.classList.add('hidden');
-                        if (demControlsInner) demControlsInner.classList.remove('hidden');
-                        if (settingsSaveRow) settingsSaveRow.style.display = '';
-                        document.getElementById('settingsJsonError')?.classList.add('hidden');
+            // ── Draw tool helper ─────────────────────────────────────────────────────
+            /**
+             * Programmatically enable the Leaflet rectangle draw mode and show a guide toast.
+             */
+            function activateDrawTool() {
+                if (drawControl && drawControl._toolbars?.draw) {
+                    try { drawControl._toolbars.draw._modes.rectangle.handler.enable(); } catch(e) {}
+                }
+                const btn = document.getElementById('floatingDrawBtn');
+                if (btn) btn.classList.add('drawing');
+                showToast('Draw a rectangle on the map, then enter a name and click Save Region', 'info');
+            }
+
+            // ── Sidebar compact edit view (sbBackBtn / sbReloadBtn) ────────────────
+            function _setupSidebarEditView() {
+                document.getElementById('sbBackBtn')?.addEventListener('click', () => {
+                    document.getElementById('sidebarEditView')?.classList.add('hidden');
+                    _setSidebarViews(sidebarState);
+                });
+                document.getElementById('sbReloadBtn')?.addEventListener('click', () => {
+                    const n = document.getElementById('sbNorth')?.value;
+                    const s = document.getElementById('sbSouth')?.value;
+                    const e = document.getElementById('sbEast')?.value;
+                    const w = document.getElementById('sbWest')?.value;
+                    if (n != null) setBboxInputValues(n, s, e, w);
+                    const nf = parseFloat(n), sf = parseFloat(s),
+                          ef = parseFloat(e), wf = parseFloat(w);
+                    if (!isNaN(nf) && !isNaN(sf) && !isNaN(ef) && !isNaN(wf)) {
+                        if (boundingBox) map.removeLayer(boundingBox);
+                        boundingBox = L.rectangle([[sf, wf], [nf, ef]],
+                            { color: '#e74c3c', weight: 2, fillOpacity: 0.05 });
+                        boundingBox.addTo(map);
                     }
+                    loadAllLayers();
                 });
             }
 
-            document.getElementById('applyJsonSettingsBtn')?.addEventListener('click', () => {
-                const editor = document.getElementById('settingsJsonEditor');
-                const errorEl = document.getElementById('settingsJsonError');
-                try {
-                    const parsed = JSON.parse(editor.value);
-                    applyAllSettings(parsed);
-                    // Switch back to form view
-                    document.getElementById('jsonViewToggleBtn')?.click();
-                    showToast('Settings applied from JSON', 'success');
-                } catch (e) {
-                    if (errorEl) {
-                        errorEl.textContent = 'Invalid JSON: ' + e.message;
-                        errorEl.classList.remove('hidden');
-                    }
-                }
-            });
+            // ── DEM display, map overlays, draw tool, grid, opacity, warnings ────────
+            function _setupMapAndDemListeners() {
+                // Colormap change — recolor without refetching
+                document.getElementById('demColormap').onchange = recolorDEM;
 
-            document.getElementById('cancelJsonSettingsBtn')?.addEventListener('click', () => {
-                document.getElementById('jsonViewToggleBtn')?.click();
-            });
-
-            // --- Feature 2: Cities tab ---
-            const loadCityBtn = document.getElementById('loadCityDataBtn');
-            if (loadCityBtn) loadCityBtn.onclick = loadCityData;
-
-            const clearCityBtn = document.getElementById('clearCityDataBtn');
-            if (clearCityBtn) clearCityBtn.onclick = clearCityOverlay;
-
-            // Layer toggle handlers — invalidate offscreen cache before re-render
-            // so changes to visibility/colour are reflected in the new pixels.
-            ['Buildings', 'Roads', 'Waterways', 'Pois'].forEach(layer => {
-                const toggle = document.getElementById(`layer${layer}Toggle`);
-                const swatch = document.getElementById(`layer${layer}Color`);
-                if (toggle) toggle.addEventListener('change', () => {
-                    window._invalidateCityCache?.();
-                    renderCityOverlay();
-                });
-                if (swatch) swatch.addEventListener('input', () => {
-                    window._invalidateCityCache?.();
-                    renderCityOverlay();
-                });
-            });
-            // Road width re-renders live; tolerance/minArea require a new fetch
-            document.getElementById('cityRoadWidth')?.addEventListener('input', () => renderCityOverlay());
-
-            // Export city + terrain as 3MF (Cities 10+12)
-            document.getElementById('exportCityBtn')?.addEventListener('click', async () => {
-                const buildings = window.appState?.osmCityData?.buildings;
-                const demData   = lastDemData;
-                if (!buildings?.features?.length) {
-                    showToast('Load city data first', 'warning'); return;
-                }
-                if (!demData?.values?.length) {
-                    showToast('Load DEM first', 'warning'); return;
-                }
-                const bbox = currentDemBbox || selectedRegion;
-                if (!bbox) { showToast('No bounding box', 'warning'); return; }
-
-                const btn = document.getElementById('exportCityBtn');
-                if (btn) { btn.disabled = true; btn.textContent = '⏳ Exporting…'; }
-                try {
-                    const payload = {
-                        north: bbox.north, south: bbox.south,
-                        east:  bbox.east,  west:  bbox.west,
-                        dem_values:  Array.from(demData.values),
-                        dem_width:   demData.width,
-                        dem_height:  demData.height,
-                        buildings:   buildings,
-                        model_height_mm: parseFloat(document.getElementById('modelHeight')?.value) || 20,
-                        base_mm:         parseFloat(document.getElementById('baseHeight')?.value)  || 5,
-                        building_z_scale:  parseFloat(document.getElementById('buildingZScale')?.value) || 0.5,
-                        simplify_terrain:  document.getElementById('citySimplifyMesh')?.checked ?? true,
-                        name: (selectedRegion?.name || 'city').replace(/[^a-z0-9_-]/gi, '_'),
+                // Projection change triggers client-side re-render only
+                const projSelect = document.getElementById('paramProjection');
+                if (projSelect) {
+                    const projDescriptions = {
+                        'none':        'No correction — raw lat/lon grid displayed as-is.',
+                        'cosine':      'Horizontal scaling by cos(latitude). Correct east-west distances.',
+                        'mercator':    'Web Mercator — vertical stretching increases towards poles.',
+                        'lambert':     'Lambert Cylindrical Equal-Area — preserves area at the cost of shape.',
+                        'sinusoidal':  'Sinusoidal — each row scaled by cos(lat), centred on meridian.',
                     };
-                    const resp = await fetch('/api/cities/export3mf', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload),
+                    projSelect.addEventListener('change', () => {
+                        const desc = document.getElementById('projectionDescription');
+                        if (desc) desc.textContent = projDescriptions[projSelect.value] || '';
+                        recolorDEM();
+                        if (lastWaterMaskData) {
+                            renderWaterMask(lastWaterMaskData);
+                            renderEsaLandCover(lastWaterMaskData);
+                        }
                     });
-                    if (!resp.ok) {
-                        const err = await resp.json().catch(() => ({}));
-                        throw new Error(err.error || resp.status);
-                    }
-                    const blob = await resp.blob();
-                    const url  = URL.createObjectURL(blob);
-                    const a    = document.createElement('a');
-                    a.href     = url;
-                    a.download = payload.name + '_city.3mf';
-                    a.click();
-                    URL.revokeObjectURL(url);
-                    showToast('City 3MF exported', 'success');
-                } catch (e) {
-                    showToast('Export failed: ' + e.message, 'error');
-                } finally {
-                    if (btn) { btn.disabled = false; btn.innerHTML = '<span class="btn-icon">🏙️</span> 3MF + Buildings'; }
                 }
-            });
 
-            // Cities strip button wiring is handled by switchDemSubtab via data-subtab listeners below.
+                // Rescale buttons
+                document.getElementById('applyRescaleBtn')?.addEventListener('click', () => {
+                    const minVal = parseFloat(document.getElementById('rescaleMin').value);
+                    const maxVal = parseFloat(document.getElementById('rescaleMax').value);
+                    if (isNaN(minVal) || isNaN(maxVal)) { showToast('Enter valid min and max values', 'warning'); return; }
+                    if (minVal >= maxVal) { showToast('Min must be less than max', 'warning'); return; }
+                    rescaleDEM(minVal, maxVal);
+                });
+                document.getElementById('resetRescaleBtn')?.addEventListener('click', resetRescale);
 
-            // --- Feature 3: Puzzle controls ---
-            const puzzleEnabledChk = document.getElementById('puzzleEnabled');
-            const puzzleParams = document.getElementById('puzzleParams');
-            if (puzzleEnabledChk && puzzleParams) {
-                puzzleEnabledChk.addEventListener('change', () => {
-                    puzzleParams.style.display = puzzleEnabledChk.checked ? '' : 'none';
-                    updatePuzzlePreview();
+                // Map tile layer selector (Edit panel)
+                const tileLayerSelect = document.getElementById('mapTileLayer');
+                if (tileLayerSelect) {
+                    tileLayerSelect.onchange = e => {
+                        setTileLayer(e.target.value);
+                        showToast(`Map style: ${e.target.options[e.target.selectedIndex].text}`, 'info');
+                    };
+                }
+
+                // Terrain relief overlay toggle (Edit panel)
+                document.getElementById('showTerrainOverlay')?.addEventListener('change', e => {
+                    toggleTerrainOverlay(e.target.checked);
+                    updateFloatingTerrainButton(e.target.checked);
+                    showToast(e.target.checked ? 'Terrain relief enabled' : 'Terrain relief disabled', 'info');
+                });
+                document.getElementById('floatingTerrainToggle')?.addEventListener('click', () => {
+                    const cb = document.getElementById('showTerrainOverlay');
+                    if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
+                });
+
+                // Generate global DEM terrain cache
+                const genGlobalDemBtn = document.getElementById('genGlobalDemBtn');
+                if (genGlobalDemBtn) {
+                    genGlobalDemBtn.onclick = async () => {
+                        const status = document.getElementById('genGlobalDemStatus');
+                        genGlobalDemBtn.disabled = true;
+                        if (status) status.textContent = 'Generating…';
+                        showToast('Generating terrain cache — this runs once and may take a minute', 'info', 5000);
+                        try {
+                            const resp = await fetch('/api/global_dem_overview?regen=true');
+                            if (resp.ok) {
+                                if (status) status.textContent = '✓ Done';
+                                showToast('Terrain cache generated', 'success');
+                            } else {
+                                const d = await resp.json().catch(() => ({}));
+                                if (status) status.textContent = '✗ Failed';
+                                showToast('Failed: ' + (d.error || resp.statusText), 'error');
+                            }
+                        } catch (e) {
+                            if (status) status.textContent = '✗ Error';
+                            showToast('Error generating cache', 'error');
+                        } finally {
+                            genGlobalDemBtn.disabled = false;
+                        }
+                    };
+                }
+
+                // Floating grid toggle
+                document.getElementById('floatingGridToggle')?.addEventListener('click', () => {
+                    mapGridEnabled = !mapGridEnabled;
+                    toggleMapGrid(mapGridEnabled);
+                    showToast(mapGridEnabled ? 'Grid enabled' : 'Grid disabled', 'info');
+                });
+
+                // Floating globe toggle
+                document.getElementById('floatingGlobeToggle')?.addEventListener('click', () => {
+                    const gc  = document.getElementById('globeContainer');
+                    const btn = document.getElementById('floatingGlobeToggle');
+                    if (gc.classList.contains('hidden')) {
+                        Object.assign(gc.style, { position: 'absolute', top: '0', left: '0',
+                                                   width: '100%', height: '100%', zIndex: '500' });
+                        gc.classList.remove('hidden');
+                        btn?.classList.add('active');
+                        initGlobe();
+                    } else {
+                        gc.classList.add('hidden');
+                        gc.style.position = '';
+                        btn?.classList.remove('active');
+                    }
+                });
+
+                // Floating regions panel toggle + close
+                const floatingRegionsBtn = document.getElementById('floatingRegionsToggle');
+                const regionsPanel       = document.getElementById('regionsPanel');
+                if (floatingRegionsBtn && regionsPanel) {
+                    floatingRegionsBtn.onclick = () => {
+                        regionsPanel.classList.toggle('hidden');
+                        floatingRegionsBtn.classList.toggle('active', !regionsPanel.classList.contains('hidden'));
+                        if (!regionsPanel.classList.contains('hidden')) populateRegionsPanelTable();
+                    };
+                }
+                document.getElementById('closeRegionsPanel')?.addEventListener('click', () => {
+                    regionsPanel?.classList.add('hidden');
+                    floatingRegionsBtn?.classList.remove('active');
+                });
+
+                // Map settings panel (⚙️ button)
+                const mapSettingsBtn   = document.getElementById('floatingMapSettingsBtn');
+                const mapSettingsPanel = document.getElementById('mapSettingsPanel');
+                mapSettingsBtn?.addEventListener('click', () => {
+                    mapSettingsPanel?.classList.toggle('hidden');
+                    mapSettingsBtn.classList.toggle('active', !mapSettingsPanel?.classList.contains('hidden'));
+                });
+                document.getElementById('closeMapSettingsBtn')?.addEventListener('click', () => {
+                    mapSettingsPanel?.classList.add('hidden');
+                    mapSettingsBtn?.classList.remove('active');
+                });
+
+                // Tile layer selector in Explore panel (mirrors Edit)
+                const mapTileLayerExplore = document.getElementById('mapTileLayerExplore');
+                const mapTileLayerEdit    = document.getElementById('mapTileLayer');
+                mapTileLayerExplore?.addEventListener('change', () => {
+                    setTileLayer(mapTileLayerExplore.value);
+                    if (mapTileLayerEdit) mapTileLayerEdit.value = mapTileLayerExplore.value;
+                });
+                mapTileLayerEdit?.addEventListener('change', () => {
+                    if (mapTileLayerExplore) mapTileLayerExplore.value = mapTileLayerEdit.value;
+                });
+
+                // Terrain overlay controls in Explore panel
+                const terrainCheckboxExplore     = document.getElementById('showTerrainOverlayExplore');
+                const terrainRowExplore          = document.getElementById('terrainOpacityRowExplore');
+                const terrainOpacityExplore      = document.getElementById('terrainOverlayOpacityExplore');
+                const terrainOpacityLabelExplore = document.getElementById('terrainOpacityValueExplore');
+                terrainCheckboxExplore?.addEventListener('change', () => {
+                    const on = terrainCheckboxExplore.checked;
+                    toggleTerrainOverlay(on);
+                    if (terrainRowExplore) terrainRowExplore.style.display = on ? 'flex' : 'none';
+                    const editCb = document.getElementById('showTerrainOverlay');
+                    if (editCb) editCb.checked = on;
+                });
+                terrainOpacityExplore?.addEventListener('input', () => {
+                    const val = parseInt(terrainOpacityExplore.value);
+                    setTerrainOverlayOpacity(val);
+                    if (terrainOpacityLabelExplore) terrainOpacityLabelExplore.textContent = val + '%';
+                    const editSlider = document.getElementById('terrainOverlayOpacity');
+                    if (editSlider) {
+                        editSlider.value = val;
+                        document.getElementById('terrainOpacityValue').textContent = val + '%';
+                    }
+                });
+
+                // Grid lines toggle in Explore panel
+                document.getElementById('showGridlinesExplore')?.addEventListener('change', e => {
+                    mapGridEnabled = e.target.checked;
+                    toggleMapGrid(mapGridEnabled);
+                });
+
+                // Regions panel search
+                document.getElementById('regionsPanelSearch')
+                    ?.addEventListener('input', () => populateRegionsPanelTable());
+
+                // Regions panel "New" button
+                document.getElementById('regionsPanelNewBtn')?.addEventListener('click', () => {
+                    closeRegionsPanel();
+                    if (drawControl && drawControl._toolbars?.draw) {
+                        try { drawControl._toolbars.draw._modes.rectangle.handler.enable(); } catch(e) {}
+                    }
+                    showToast('Draw a rectangle on the map to create a new region', 'info');
+                });
+
+                // Draw tool wiring (activateDrawTool is a hoisted fn in setupEventListeners scope)
+                document.getElementById('floatingDrawBtn')?.addEventListener('click', activateDrawTool);
+                document.getElementById('startDrawBtn')?.addEventListener('click', () => {
+                    activateDrawTool();
+                    switchView('map');
+                });
+                if (map) {
+                    map.on(L.Draw.Event.CREATED, () => {
+                        document.getElementById('floatingDrawBtn')?.classList.remove('drawing');
+                    });
+                    map.on(L.Draw.Event.DRAWSTOP, () => {
+                        document.getElementById('floatingDrawBtn')?.classList.remove('drawing');
+                    });
+                }
+
+                // Layer grid (stacked layers view)
+                const gridVisibleCb = document.getElementById('layerGridVisible');
+                document.getElementById('layerGridVisible')?.addEventListener('change', () => {
+                    const gc = document.getElementById('layerGridCanvas');
+                    if (gc) {
+                        gc.style.display = gridVisibleCb.checked ? 'block' : 'none';
+                        if (gridVisibleCb.checked) drawLayerGrid();
+                    }
+                });
+                document.getElementById('layerGridDensity')?.addEventListener('change', () => {
+                    if (gridVisibleCb?.checked) drawLayerGrid();
+                });
+
+                // Terrain overlay opacity slider (Edit panel)
+                document.getElementById('terrainOverlayOpacity')?.addEventListener('input', e => {
+                    const val = e.target.value;
+                    document.getElementById('terrainOpacityValue').textContent = `${val}%`;
+                    setTerrainOverlayOpacity(val);
+                });
+
+                // Resolution warnings
+                document.getElementById('paramDim')?.addEventListener('input', () => {
+                    const val = parseInt(document.getElementById('paramDim').value);
+                    const w   = document.getElementById('demResWarning');
+                    if (w) w.style.display = val > 500 ? 'block' : 'none';
+                });
+                document.getElementById('paramSatScale')?.addEventListener('input', () => {
+                    const val = parseInt(document.getElementById('paramSatScale').value);
+                    const w   = document.getElementById('satResWarning');
+                    if (w) w.style.display = val < 100 ? 'block' : 'none';
+                });
+                document.getElementById('waterResolution')?.addEventListener('change', () => {
+                    const val = parseInt(document.getElementById('waterResolution').value);
+                    const w   = document.getElementById('waterResWarning');
+                    if (w) w.style.display = val >= 500 ? 'block' : 'none';
+                    loadWaterMask();
                 });
             }
-            ['puzzlePiecesX', 'puzzlePiecesY', 'puzzleNotchDepth', 'puzzleMargin'].forEach(id => {
-                document.getElementById(id)?.addEventListener('input', updatePuzzlePreview);
-            });
 
-            document.getElementById('viewerWireframe')?.addEventListener('change', (e) => {
-                if (terrainMesh) {
-                    terrainMesh.material.wireframe = e.target.checked;
+            // ── Model tab: generate, download (STL/OBJ/3MF), cross-section ─────────
+            function _setupModelExportListeners() {
+                document.getElementById('generateModelBtn2')?.addEventListener('click', generateModelFromTab);
+                document.getElementById('downloadSTLBtn')?.addEventListener('click', downloadSTL);
+                document.getElementById('downloadOBJBtn')?.addEventListener('click', () => downloadModel('obj'));
+                document.getElementById('download3MFBtn')?.addEventListener('click', () => downloadModel('3mf'));
+                document.getElementById('previewModelBtn')?.addEventListener('click', previewModelIn3D);
+
+                // Physical dimensions + bed optimizer
+                ['modelResolution', 'modelBaseHeight'].forEach(id => {
+                    document.getElementById(id)?.addEventListener('change', updatePrintDimensions);
+                });
+                const bedSel = document.getElementById('bedSizeSelect');
+                if (bedSel) {
+                    bedSel.addEventListener('change', () => {
+                        const customRow = document.getElementById('bedCustomRow');
+                        if (customRow) customRow.style.display = bedSel.value === 'custom' ? 'flex' : 'none';
+                        updatePrintDimensions();
+                    });
                 }
-            });
+                ['bedCustomW', 'bedCustomH'].forEach(id => {
+                    document.getElementById(id)?.addEventListener('input', updatePrintDimensions);
+                });
 
-            document.getElementById('viewerAutoRotate')?.addEventListener('change', (e) => {
-                viewerAutoRotate = e.target.checked;
-            });
-
-            document.getElementById('exportPuzzle3MFBtn')?.addEventListener('click', exportPuzzle3MF);
-
-            // --- Sidebar compact edit view ---
-            document.getElementById('sbBackBtn')?.addEventListener('click', () => {
-                document.getElementById('sidebarEditView')?.classList.add('hidden');
-                _setSidebarViews(sidebarState);
-            });
-
-            document.getElementById('sbReloadBtn')?.addEventListener('click', () => {
-                const n = document.getElementById('sbNorth')?.value;
-                const s = document.getElementById('sbSouth')?.value;
-                const e = document.getElementById('sbEast')?.value;
-                const w = document.getElementById('sbWest')?.value;
-                if (n != null) setBboxInputValues(n, s, e, w);
-                // Redraw bounding box on map
-                const nf = parseFloat(n), sf = parseFloat(s), ef = parseFloat(e), wf = parseFloat(w);
-                if (!isNaN(nf) && !isNaN(sf) && !isNaN(ef) && !isNaN(wf)) {
-                    if (boundingBox) map.removeLayer(boundingBox);
-                    boundingBox = L.rectangle([[sf, wf], [nf, ef]], { color: '#e74c3c', weight: 2, fillOpacity: 0.05 });
-                    boundingBox.addTo(map);
+                // Contour lines toggle
+                const contoursChk = document.getElementById('modelContours');
+                if (contoursChk) {
+                    contoursChk.addEventListener('change', () => {
+                        const p = document.getElementById('modelContoursParams');
+                        if (p) p.style.display = contoursChk.checked ? 'block' : 'none';
+                    });
                 }
-                loadAllLayers();
-            });
+
+                // Cross-section export
+                const _setMidVal = () => {
+                    const axis = document.getElementById('crossSectionAxis')?.value || 'lat';
+                    const r = selectedRegion || window.appState?.selectedRegion;
+                    if (!r) { showToast('Select a region first', 'warning'); return; }
+                    const mid = axis === 'lat'
+                        ? ((r.north + r.south) / 2).toFixed(4)
+                        : ((r.east + r.west) / 2).toFixed(4);
+                    const el = document.getElementById('crossSectionValue');
+                    if (el) el.value = mid;
+                };
+                document.getElementById('crossSectionMidBtn')?.addEventListener('click', _setMidVal);
+                document.getElementById('crossSectionAxis')?.addEventListener('change', () => {
+                    const el = document.getElementById('crossSectionValue');
+                    if (el && !el.value) _setMidVal();
+                });
+                document.getElementById('downloadCrossSectionBtn')
+                    ?.addEventListener('click', downloadCrossSection);
+            }
+
+            // ── Resizable settings panel (drag-to-resize + ResizeObserver) ────────
+            function _setupResizablePanel() {
+                const resizeHandle = document.getElementById('settingsPanelResizeHandle');
+                const rightPanel   = document.getElementById('demRightPanel');
+                if (!resizeHandle || !rightPanel) return;
+
+                let resizing = false, startX, startW, rafPending = false;
+                resizeHandle.addEventListener('mousedown', e => {
+                    resizing = true;
+                    startX   = e.clientX;
+                    startW   = rightPanel.offsetWidth;
+                    resizeHandle.classList.add('dragging');
+                    document.body.style.cursor     = 'col-resize';
+                    document.body.style.userSelect = 'none';
+                    e.preventDefault();
+                });
+                document.addEventListener('mousemove', e => {
+                    if (!resizing) return;
+                    const newW = Math.max(280, Math.min(900, startW + (startX - e.clientX)));
+                    rightPanel.style.width = newW + 'px';
+                    if (!rafPending) {
+                        rafPending = true;
+                        requestAnimationFrame(() => {
+                            updateStackedLayers();
+                            if (lastDemData?.values?.length) recolorDEM();
+                            rafPending = false;
+                        });
+                    }
+                });
+                document.addEventListener('mouseup', () => {
+                    if (!resizing) return;
+                    resizing = false;
+                    resizeHandle.classList.remove('dragging');
+                    document.body.style.cursor     = '';
+                    document.body.style.userSelect = '';
+                    try { localStorage.setItem('strm2stl_settingsPanelWidth', rightPanel.offsetWidth); } catch (_) {}
+                    requestAnimationFrame(() => updateStackedLayers());
+                });
+                // Restore saved width
+                try {
+                    const savedW = localStorage.getItem('strm2stl_settingsPanelWidth');
+                    if (savedW) rightPanel.style.width = parseInt(savedW) + 'px';
+                } catch (_) {}
+
+                // ResizeObserver: reflow canvases on any panel size change
+                let _raf = null;
+                new ResizeObserver(() => {
+                    if (_raf) return;
+                    _raf = requestAnimationFrame(() => {
+                        _raf = null;
+                        const cc = rightPanel.querySelector('#curveCanvas');
+                        if (cc) {
+                            const cont = cc.parentElement;
+                            if (cont.clientWidth > 0 && cont.clientHeight > 0) {
+                                cc.width  = cont.clientWidth;
+                                cc.height = cont.clientHeight;
+                                if (typeof drawCurve === 'function') drawCurve();
+                            }
+                        }
+                        if (lastDemData?.values?.length) recolorDEM();
+                    });
+                }).observe(rightPanel);
+            }
+
+            // ── Settings save + JSON view toggle ─────────────────────────────────
+            function _setupSettingsJsonToggle() {
+                const saveSettingsBtn = document.getElementById('saveRegionSettingsBtn');
+                if (saveSettingsBtn) saveSettingsBtn.onclick = saveRegionSettings;
+
+                const jsonToggleBtn    = document.getElementById('jsonViewToggleBtn');
+                const jsonView         = document.getElementById('settingsJsonView');
+                const demControlsInner = document.getElementById('demControlsInner');
+                const settingsSaveRow  = document.getElementById('settingsSaveRow');
+
+                if (jsonToggleBtn && jsonView) {
+                    let jsonViewOpen = false;
+                    jsonToggleBtn.addEventListener('click', () => {
+                        jsonViewOpen = !jsonViewOpen;
+                        jsonToggleBtn.classList.toggle('active', jsonViewOpen);
+                        if (jsonViewOpen) {
+                            const editor = document.getElementById('settingsJsonEditor');
+                            if (editor) editor.value = JSON.stringify(collectAllSettings(), null, 2);
+                            jsonView.classList.remove('hidden');
+                            if (demControlsInner) demControlsInner.classList.add('hidden');
+                            if (settingsSaveRow) settingsSaveRow.style.display = 'none';
+                        } else {
+                            jsonView.classList.add('hidden');
+                            if (demControlsInner) demControlsInner.classList.remove('hidden');
+                            if (settingsSaveRow) settingsSaveRow.style.display = '';
+                            document.getElementById('settingsJsonError')?.classList.add('hidden');
+                        }
+                    });
+                }
+
+                document.getElementById('applyJsonSettingsBtn')?.addEventListener('click', () => {
+                    const editor  = document.getElementById('settingsJsonEditor');
+                    const errorEl = document.getElementById('settingsJsonError');
+                    try {
+                        applyAllSettings(JSON.parse(editor.value));
+                        document.getElementById('jsonViewToggleBtn')?.click();
+                        showToast('Settings applied from JSON', 'success');
+                    } catch (e) {
+                        if (errorEl) {
+                            errorEl.textContent = 'Invalid JSON: ' + e.message;
+                            errorEl.classList.remove('hidden');
+                        }
+                    }
+                });
+
+                document.getElementById('cancelJsonSettingsBtn')?.addEventListener('click', () => {
+                    document.getElementById('jsonViewToggleBtn')?.click();
+                });
+            }
+
+            // ── City overlay + puzzle + viewer export listeners ──────────────────
+            function _setupCityAndExportListeners() {
+                // Cities tab: load / clear
+                const loadCityBtn = document.getElementById('loadCityDataBtn');
+                if (loadCityBtn) loadCityBtn.onclick = loadCityData;
+                const clearCityBtn = document.getElementById('clearCityDataBtn');
+                if (clearCityBtn) clearCityBtn.onclick = clearCityOverlay;
+
+                // Layer toggle handlers — invalidate offscreen cache before re-render
+                ['Buildings', 'Roads', 'Waterways', 'Pois'].forEach(layer => {
+                    const toggle = document.getElementById(`layer${layer}Toggle`);
+                    const swatch = document.getElementById(`layer${layer}Color`);
+                    if (toggle) toggle.addEventListener('change', () => {
+                        window._invalidateCityCache?.();
+                        renderCityOverlay();
+                    });
+                    if (swatch) swatch.addEventListener('input', () => {
+                        window._invalidateCityCache?.();
+                        renderCityOverlay();
+                    });
+                });
+                // Road width re-renders live; tolerance/minArea require a new fetch
+                document.getElementById('cityRoadWidth')
+                    ?.addEventListener('input', () => renderCityOverlay());
+
+                // Export city + terrain as 3MF
+                document.getElementById('exportCityBtn')?.addEventListener('click', async () => {
+                    const buildings = window.appState?.osmCityData?.buildings;
+                    const demData   = lastDemData;
+                    if (!buildings?.features?.length) {
+                        showToast('Load city data first', 'warning'); return;
+                    }
+                    if (!demData?.values?.length) {
+                        showToast('Load DEM first', 'warning'); return;
+                    }
+                    const bbox = currentDemBbox || selectedRegion;
+                    if (!bbox) { showToast('No bounding box', 'warning'); return; }
+
+                    const btn = document.getElementById('exportCityBtn');
+                    if (btn) { btn.disabled = true; btn.textContent = '⏳ Exporting…'; }
+                    try {
+                        const payload = {
+                            north: bbox.north, south: bbox.south,
+                            east:  bbox.east,  west:  bbox.west,
+                            dem_values:  Array.from(demData.values),
+                            dem_width:   demData.width,
+                            dem_height:  demData.height,
+                            buildings:   buildings,
+                            model_height_mm: parseFloat(document.getElementById('modelHeight')?.value) || 20,
+                            base_mm:         parseFloat(document.getElementById('baseHeight')?.value)  || 5,
+                            building_z_scale: parseFloat(document.getElementById('buildingZScale')?.value) || 0.5,
+                            simplify_terrain: document.getElementById('citySimplifyMesh')?.checked ?? true,
+                            name: (selectedRegion?.name || 'city').replace(/[^a-z0-9_-]/gi, '_'),
+                        };
+                        const resp = await fetch('/api/cities/export3mf', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload),
+                        });
+                        if (!resp.ok) {
+                            const err = await resp.json().catch(() => ({}));
+                            throw new Error(err.error || resp.status);
+                        }
+                        const blob = await resp.blob();
+                        const url  = URL.createObjectURL(blob);
+                        const a    = document.createElement('a');
+                        a.href     = url;
+                        a.download = payload.name + '_city.3mf';
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        showToast('City 3MF exported', 'success');
+                    } catch (e) {
+                        showToast('Export failed: ' + e.message, 'error');
+                    } finally {
+                        if (btn) {
+                            btn.disabled = false;
+                            btn.innerHTML = '<span class="btn-icon">🏙️</span> 3MF + Buildings';
+                        }
+                    }
+                });
+
+                // Puzzle controls
+                const puzzleEnabledChk = document.getElementById('puzzleEnabled');
+                const puzzleParams = document.getElementById('puzzleParams');
+                if (puzzleEnabledChk && puzzleParams) {
+                    puzzleEnabledChk.addEventListener('change', () => {
+                        puzzleParams.style.display = puzzleEnabledChk.checked ? '' : 'none';
+                        updatePuzzlePreview();
+                    });
+                }
+                ['puzzlePiecesX', 'puzzlePiecesY', 'puzzleNotchDepth', 'puzzleMargin'].forEach(id => {
+                    document.getElementById(id)?.addEventListener('input', updatePuzzlePreview);
+                });
+
+                // 3D viewer toggles
+                document.getElementById('viewerWireframe')?.addEventListener('change', e => {
+                    if (terrainMesh) terrainMesh.material.wireframe = e.target.checked;
+                });
+                document.getElementById('viewerAutoRotate')?.addEventListener('change', e => {
+                    viewerAutoRotate = e.target.checked;
+                });
+
+                document.getElementById('exportPuzzle3MFBtn')
+                    ?.addEventListener('click', exportPuzzle3MF);
+            }
+
+            // ── Bbox fine-tune listeners (extracted helper) ─────────────────────
+            function _setupBboxListeners() {
+                const bboxReloadBtn = document.getElementById('bboxReloadBtn');
+                if (bboxReloadBtn) {
+                    bboxReloadBtn.onclick = () => {
+                        const n = parseFloat(document.getElementById('bboxNorth')?.value);
+                        const s = parseFloat(document.getElementById('bboxSouth')?.value);
+                        const e = parseFloat(document.getElementById('bboxEast')?.value);
+                        const w = parseFloat(document.getElementById('bboxWest')?.value);
+                        if (isNaN(n) || isNaN(s) || isNaN(e) || isNaN(w)) {
+                            showToast('Invalid coordinates', 'error'); return;
+                        }
+                        const nc = Math.max(-90,  Math.min(90,  n));
+                        const sc = Math.max(-90,  Math.min(90,  s));
+                        const ec = Math.max(-180, Math.min(180, e));
+                        const wc = Math.max(-180, Math.min(180, w));
+                        setBboxInputValues(nc, sc, ec, wc);
+                        if (!selectedRegion) selectedRegion = {};
+                        selectedRegion.north = nc; selectedRegion.south = sc;
+                        selectedRegion.east  = ec; selectedRegion.west  = wc;
+                        window.appState.selectedRegion = selectedRegion;
+                        currentDemBbox = { north: nc, south: sc, east: ec, west: wc };
+                        window.appState.currentDemBbox = currentDemBbox;
+                        if (boundingBox) map.removeLayer(boundingBox);
+                        boundingBox = L.rectangle([[sc, wc], [nc, ec]],
+                            { color: '#e74c3c', weight: 2, fillOpacity: 0.05 });
+                        boundingBox.addTo(map);
+                        clearLayerCache();
+                        loadAllLayers();
+                    };
+                }
+
+                // Enter key on any bbox input triggers reload
+                ['bboxNorth', 'bboxSouth', 'bboxEast', 'bboxWest'].forEach(id => {
+                    document.getElementById(id)?.addEventListener('keydown', ev => {
+                        if (ev.key === 'Enter') bboxReloadBtn?.click();
+                    });
+                });
+
+                // Mini-map toggle
+                document.getElementById('editBboxOnMapBtn')
+                    ?.addEventListener('click', toggleBboxMiniMap);
+
+                // Save bbox coordinates back to the selected region
+                document.getElementById('saveBboxBtn')?.addEventListener('click', async () => {
+                    if (!selectedRegion?.name) { showToast('No region selected', 'error'); return; }
+                    const n = parseFloat(document.getElementById('bboxNorth')?.value);
+                    const s = parseFloat(document.getElementById('bboxSouth')?.value);
+                    const e = parseFloat(document.getElementById('bboxEast')?.value);
+                    const w = parseFloat(document.getElementById('bboxWest')?.value);
+                    if (isNaN(n) || isNaN(s) || isNaN(e) || isNaN(w)) {
+                        showToast('Invalid coordinates', 'error'); return;
+                    }
+                    try {
+                        const resp = await fetch(
+                            `/api/regions/${encodeURIComponent(selectedRegion.name)}`,
+                            {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    name:  selectedRegion.name,
+                                    label: selectedRegion.label || '',
+                                    north: n, south: s, east: e, west: w,
+                                }),
+                            }
+                        );
+                        if (!resp.ok) {
+                            const err = await resp.json().catch(() => ({}));
+                            throw new Error(err.error || resp.status);
+                        }
+                        selectedRegion.north = n; selectedRegion.south = s;
+                        selectedRegion.east  = e; selectedRegion.west  = w;
+                        showToast('Bbox saved', 'success');
+                        await loadCoordinates();
+                    } catch (err) {
+                        showToast('Save failed: ' + err.message, 'error');
+                    }
+                });
+
+                // Save group label for selected region
+                document.getElementById('saveRegionLabelBtn')?.addEventListener('click', async () => {
+                    if (!selectedRegion?.name) { showToast('No region selected', 'error'); return; }
+                    const label = document.getElementById('regionLabelEdit')?.value.trim() ?? '';
+                    try {
+                        const resp = await fetch(
+                            `/api/regions/${encodeURIComponent(selectedRegion.name)}`,
+                            {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    name:  selectedRegion.name,
+                                    label,
+                                    north: selectedRegion.north, south: selectedRegion.south,
+                                    east:  selectedRegion.east,  west:  selectedRegion.west,
+                                }),
+                            }
+                        );
+                        if (!resp.ok) {
+                            const err = await resp.json().catch(() => ({}));
+                            throw new Error(err.error || resp.status);
+                        }
+                        selectedRegion.label = label;
+                        window.appState.selectedRegion = selectedRegion;
+                        showToast('Label saved', 'success');
+                        await loadCoordinates();
+                    } catch (err) {
+                        showToast('Save failed: ' + err.message, 'error');
+                    }
+                });
+            }
         }
 
         /**
@@ -2475,6 +2382,7 @@
         let activeCurvePreset = 'linear';
         let originalDemValues = null;  // Store original DEM values before curve application
         let curveDataVmin = null, curveDataVmax = null;  // Stable reference range for curve coordinate system (set at load, never changed by rescale)
+        let _curveLUT = null;  // 1024-point float LUT, invalidated when curvePoints changes
 
         const curvePresets = {
             'linear': [[0, 0], [1, 1]],
@@ -2506,15 +2414,22 @@
             // Setup event listeners
             setupCurveEventListeners();
 
-            // Observe for resize when section is expanded
-            const resizeObserver = new ResizeObserver(() => {
+            // Observe for resize when section is expanded; debounce via RAF and fire once on init
+            let _curveResizeRaf = null;
+            const _applyCurveResize = () => {
                 if (container.clientWidth > 0 && container.clientHeight > 0) {
                     curveCanvas.width = container.clientWidth;
                     curveCanvas.height = container.clientHeight;
                     drawCurve();
                 }
+            };
+            const resizeObserver = new ResizeObserver(() => {
+                if (_curveResizeRaf) return;
+                _curveResizeRaf = requestAnimationFrame(() => { _curveResizeRaf = null; _applyCurveResize(); });
             });
             resizeObserver.observe(container);
+            // Fire immediately in case container already has its final size
+            _applyCurveResize();
         }
 
         /**
@@ -2756,6 +2671,7 @@
          * the spline curve, and all control point handles.
          */
         function drawCurve() {
+            _curveLUT = null;  // Invalidate LUT whenever curve control points change
             if (!curveCtx || !curveCanvas) return;
 
             const w = curveCanvas.width;
@@ -2888,11 +2804,16 @@
             })();
             const range = vmax - vmin || 1;
 
-            // Apply curve mapping
+            // Build 1024-point LUT once (reused across all pixels)
+            if (!_curveLUT) {
+                _curveLUT = new Float32Array(1024);
+                for (let i = 0; i < 1024; i++) _curveLUT[i] = interpolateCurve(i / 1023);
+            }
+
+            // Apply curve mapping via LUT (avoids per-pixel spline eval)
             const remappedValues = values.map(v => {
-                const normalized = (v - vmin) / range;  // [0, 1]
-                const output = interpolateCurve(normalized);
-                return vmin + output * range;
+                const normalized = Math.max(0, Math.min(1, (v - vmin) / range));
+                return vmin + _curveLUT[Math.round(normalized * 1023)] * range;
             });
 
             // Update lastDemData
@@ -2950,11 +2871,16 @@
             })();
             const range = vmax - vmin || 1;
 
-            // Apply curve mapping
+            // Build 1024-point LUT once (reused across all pixels)
+            if (!_curveLUT) {
+                _curveLUT = new Float32Array(1024);
+                for (let i = 0; i < 1024; i++) _curveLUT[i] = interpolateCurve(i / 1023);
+            }
+
+            // Apply curve mapping via LUT (avoids per-pixel spline eval)
             const remappedValues = values.map(v => {
-                const normalized = (v - vmin) / range;
-                const output = interpolateCurve(normalized);
-                return vmin + output * range;
+                const normalized = Math.max(0, Math.min(1, (v - vmin) / range));
+                return vmin + _curveLUT[Math.round(normalized * 1023)] * range;
             });
 
             // Update lastDemData
@@ -3063,7 +2989,8 @@
          */
         function initPresetProfiles() {
             // Load user presets from localStorage
-            const saved = localStorage.getItem('userPresets');
+            let saved = null;
+            try { saved = localStorage.getItem('strm2stl_userPresets'); } catch (_) {}
             if (saved) {
                 try {
                     userPresets = JSON.parse(saved);
@@ -3376,7 +3303,7 @@
             userPresets[name] = getCurrentSettings();
 
             // Persist to localStorage
-            localStorage.setItem('userPresets', JSON.stringify(userPresets));
+            try { localStorage.setItem('strm2stl_userPresets', JSON.stringify(userPresets)); } catch (_) { showToast('Could not save preset — storage full or unavailable', 'warning'); }
 
             // Update select
             updatePresetSelect();
@@ -3408,7 +3335,7 @@
             const name = select.value.substring(5);
             if (confirm(`Delete preset "${name}"?`)) {
                 delete userPresets[name];
-                localStorage.setItem('userPresets', JSON.stringify(userPresets));
+                try { localStorage.setItem('strm2stl_userPresets', JSON.stringify(userPresets)); } catch (_) { showToast('Could not save preset — storage full or unavailable', 'warning'); }
                 updatePresetSelect();
                 showToast(`Preset "${name}" deleted`, 'info');
             }
@@ -3499,6 +3426,8 @@
 
             const groups = groupRegionsByContinent(filtered);
 
+            const outerFrag = document.createDocumentFragment();
+
             groups.forEach(({ continent, regions: groupRegions }) => {
                 const isHidden = CONTINENT_HIDDEN.has(continent);
 
@@ -3522,6 +3451,8 @@
                 body.className = 'continent-body-sidebar';
                 if (isHidden) body.classList.add('collapsed');
 
+                // Batch item nodes via DocumentFragment to avoid per-item layout thrash
+                const itemFrag = document.createDocumentFragment();
                 groupRegions.forEach(region => {
                     const originalIndex = coordinatesData.findIndex(r => r.name === region.name);
                     const hasNote = regionNotes[region.name] && regionNotes[region.name].trim() !== '';
@@ -3537,14 +3468,24 @@
                               onclick="event.stopPropagation(); showNotesModal('${region.name.replace(/'/g, "\\'")}')"
                               title="${hasNote ? 'View/edit notes' : 'Add notes'}">📝</span>
                     `;
+                    item.tabIndex = 0;
+                    item.setAttribute('role', 'option');
                     item.onclick = () => selectCoordinate(originalIndex);
-                    body.appendChild(item);
+                    item.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectCoordinate(originalIndex); }
+                        else if (e.key === 'ArrowDown') { e.preventDefault(); const next = item.nextElementSibling || item.parentElement.nextElementSibling?.querySelector('.coordinate-item'); if (next) next.focus(); }
+                        else if (e.key === 'ArrowUp') { e.preventDefault(); const prev = item.previousElementSibling || item.parentElement.previousElementSibling?.querySelector('.coordinate-item:last-child'); if (prev) prev.focus(); }
+                    });
+                    itemFrag.appendChild(item);
                 });
+                body.appendChild(itemFrag);
 
                 groupEl.appendChild(header);
                 groupEl.appendChild(body);
-                list.appendChild(groupEl);
+                outerFrag.appendChild(groupEl);
             });
+
+            list.appendChild(outerFrag);
         }
 
         // =====================================================
@@ -3654,7 +3595,8 @@
          */
         function initRegionNotes() {
             // Load notes from localStorage
-            const saved = localStorage.getItem('regionNotes');
+            let saved = null;
+            try { saved = localStorage.getItem('strm2stl_regionNotes'); } catch (_) {}
             if (saved) {
                 try {
                     regionNotes = JSON.parse(saved);
@@ -3735,7 +3677,7 @@
                 delete regionNotes[currentNotesRegion];
             }
 
-            localStorage.setItem('regionNotes', JSON.stringify(regionNotes));
+            try { localStorage.setItem('strm2stl_regionNotes', JSON.stringify(regionNotes)); } catch (_) { showToast('Could not save notes — storage full or unavailable', 'warning'); }
             hideNotesModal();
             renderCoordinatesList();
             showToast('Notes saved!', 'success');
@@ -4271,7 +4213,7 @@
          */
         async function loadAllLayers() {
             if (!boundingBox && !selectedRegion) {
-                alert('Please select a region or draw a bounding box first.');
+                showToast('Please select a region or draw a bounding box first.', 'warning');
                 return;
             }
 
@@ -4294,7 +4236,7 @@
 
             } catch (error) {
                 console.error('Error loading layers:', error);
-                alert('Error loading layers: ' + error.message);
+                showToast('Error loading layers: ' + error.message, 'error');
             }
         }
 
@@ -4481,6 +4423,10 @@
             const newRegionSection = document.getElementById('newRegionSection');
             const tabs = document.querySelectorAll('.tab');
 
+            // Restore sidebar visibility (may have been hidden in model view)
+            const sidebar = document.querySelector('.sidebar');
+            if (sidebar) sidebar.style.display = '';
+
             // Hide all
             mapContainer.classList.add('hidden');
             globeContainer.classList.add('hidden');
@@ -4514,6 +4460,15 @@
             } else if (view === 'dem') {
                 demContainer.classList.remove('hidden');
                 document.querySelector('[data-view="dem"]').classList.add('active');
+                // Ensure sidebar shows the region list so the user can switch regions
+                document.getElementById('sidebarListView')?.classList.remove('hidden');
+                document.getElementById('sidebarTableView')?.classList.add('hidden');
+                document.getElementById('sidebarEditView')?.classList.add('hidden');
+                // Fill bbox inputs immediately if a region is selected (they're normally filled
+                // after DEM loads, leaving them blank if the user arrives via the tab button)
+                if (selectedRegion) {
+                    setBboxInputValues(selectedRegion.north, selectedRegion.south, selectedRegion.east, selectedRegion.west);
+                }
                 // Don't auto-load here - let the caller decide when to load
                 // This prevents infinite recursion when selectRegion calls switchView then loadDEM
             } else if (view === 'model') {
@@ -4522,6 +4477,9 @@
                     modelContainer.style.display = 'flex';
                 }
                 document.querySelector('[data-view="model"]').classList.add('active');
+                // Auto-collapse sidebar so the 3D viewport gets full width
+                const sidebar = document.querySelector('.sidebar');
+                if (sidebar) sidebar.style.display = 'none';
             } else if (view === 'regions') {
                 if (regionsContainer) {
                     regionsContainer.classList.remove('hidden');
@@ -4543,7 +4501,7 @@
          */
         function loadSelectedRegion() {
             if (!selectedRegion) {
-                alert('Please select a region first!');
+                showToast('Please select a region first.', 'warning');
                 return;
             }
 
@@ -4686,6 +4644,10 @@
             layerStatus.dem = 'loading';
             updateLayerStatusIndicators();
 
+            // Show loading overlay on stacked layers view
+            const stackContainer = document.getElementById('dem-image-section');
+            if (stackContainer) showLoading(stackContainer, 'Loading DEM...');
+
             // Show loading indicator and clear old DEM
             const demImageContainer = document.getElementById('demImage');
             demImageContainer.innerHTML = `<div class="loading"><span class="spinner"></span>Loading DEM... <button onclick="window.loadDEM._controller&&window.loadDEM._controller.abort()" style="margin-left:10px;padding:2px 8px;background:#c0392b;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px;">✕ Cancel</button></div>`;
@@ -4719,7 +4681,7 @@
                     if (!response.ok) {
                         const errMsg = data && data.error ? data.error : `HTTP ${response.status}: ${response.statusText}`;
                         console.error('Server returned error for /api/terrain/dem:', response.status, response.statusText, data);
-                        document.getElementById('demImage').innerHTML = `<p>Error: ${errMsg}</p>`;
+                        { const _p = document.createElement('p'); _p.textContent = `Error: ${errMsg}`; document.getElementById('demImage').replaceChildren(_p); }
                         layerStatus.dem = 'error';
                         updateLayerStatusIndicators();
                         showToast('Failed to load DEM: ' + errMsg, 'error');
@@ -4728,7 +4690,7 @@
                 }
 
                 if (data.error) {
-                    document.getElementById('demImage').innerHTML = `<p>Error: ${data.error}</p>`;
+                    { const _p = document.createElement('p'); _p.textContent = `Error: ${data.error}`; document.getElementById('demImage').replaceChildren(_p); }
                     layerStatus.dem = 'error';
                     updateLayerStatusIndicators();
                     showToast('Failed to load DEM: ' + data.error, 'error');
@@ -4739,6 +4701,9 @@
                 layerBboxes.dem = { north, south, east, west };
                 layerStatus.dem = 'loaded';
                 updateLayerStatusIndicators();
+                // Remove loading overlay from stacked layers
+                const stackC = document.getElementById('dem-image-section');
+                if (stackC) hideLoading(stackC);
 
                 // Client-side rendering of DEM data
                 if (data.dem_values && data.dimensions) {
@@ -4822,6 +4787,13 @@
                     // Cities 8: refresh city overlay on DEM canvas after reload
                     if (window.appState?.osmCityData) requestAnimationFrame(() => window.renderCityOnDEM?.());
 
+                    // Auto-load city data if any city layer toggle is enabled and region is small enough
+                    const _anyLayerOn = ['layerBuildingsToggle','layerRoadsToggle','layerWaterwaysToggle']
+                        .some(id => document.getElementById(id)?.checked);
+                    if (_anyLayerOn && !window.appState?.osmCityData && typeof loadCityData === 'function') {
+                        loadCityData();
+                    }
+
                     // Update print dimensions panel (Extrude tab)
                     updatePrintDimensions();
 
@@ -4841,10 +4813,13 @@
                 }
                 console.error('Error loading DEM:', error);
                 console.error('Error stack:', error.stack);
-                document.getElementById('demImage').innerHTML = `<p>Failed to load DEM: ${error.message || error}</p>`;
+                { const _p = document.createElement('p'); _p.textContent = `Failed to load DEM: ${error.message || error}`; document.getElementById('demImage').replaceChildren(_p); }
                 layerStatus.dem = 'error';
                 updateLayerStatusIndicators();
                 showToast('Failed to load DEM', 'error');
+            } finally {
+                const stackF = document.getElementById('dem-image-section');
+                if (stackF) hideLoading(stackF);
             }
         }
 
@@ -5181,6 +5156,8 @@
             // store last DEM
             lastDemData = { values: (Array.isArray(values) ? values.slice() : []), width, height, colormap, vmin, vmax };
             window.appState.lastDemData = lastDemData;
+            _setDemEmptyState(false);
+            _updateWorkflowStepper();
 
             // Lock in the stable coordinate system for the curve editor.
             // If the curve already has a coordinate system (same region, different dim), re-normalize
@@ -5862,7 +5839,12 @@
          * Renders the result to the `#satelliteImage` container via `renderSatelliteCanvas`.
          * @returns {Promise<void>}
          */
+        let _satelliteAbortController = null;
         async function loadSatelliteImage() {
+            if (_satelliteAbortController) _satelliteAbortController.abort();
+            _satelliteAbortController = new AbortController();
+            const signal = _satelliteAbortController.signal;
+
             if (!boundingBox && !selectedRegion) {
                 document.getElementById('satelliteImage').innerHTML = '<p>Please select a region or draw a bounding box first.</p>';
                 return;
@@ -5896,14 +5878,14 @@
             document.getElementById('satelliteImage').innerHTML = '<p style="text-align:center;padding:20px;">Loading satellite data...</p>';
 
             try {
-                const response = await fetch(`/api/terrain/dem?${params}`);
+                const response = await fetch(`/api/terrain/dem?${params}`, { signal });
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 const data = await response.json();
 
                 if (data.error) {
-                    document.getElementById('satelliteImage').innerHTML = `<p>Error: ${data.error}</p>`;
+                    { const _p = document.createElement('p'); _p.textContent = `Error: ${data.error}`; document.getElementById('satelliteImage').replaceChildren(_p); }
                     return;
                 }
 
@@ -5928,6 +5910,7 @@
                     `;
                 }
             } catch (error) {
+                if (error.name === 'AbortError') return;
                 console.error('Error loading satellite image:', error);
                 document.getElementById('satelliteImage').innerHTML = '<p>Failed to load satellite image.</p>';
             }
@@ -5939,6 +5922,82 @@
         // ============================================================
 
         let generatedModelData = null;
+
+        /** Enable or disable all model export buttons, and show/hide the model empty state. */
+        function _setExportButtonsEnabled(enabled) {
+            const ids = ['downloadSTLBtn', 'downloadOBJBtn', 'download3MFBtn',
+                         'exportCityBtn', 'exportCrossSectionBtn', 'exportPuzzleBtn'];
+            for (const id of ids) {
+                const el = document.getElementById(id);
+                if (!el) continue;
+                el.disabled = !enabled;
+                el.style.opacity = enabled ? '' : '0.4';
+                el.style.cursor  = enabled ? '' : 'not-allowed';
+            }
+            const emptyEl = document.getElementById('modelEmptyState');
+            if (emptyEl) emptyEl.style.display = enabled ? 'none' : 'flex';
+        }
+        /** Show or hide the DEM empty state and layers container. */
+        function _setDemEmptyState(isEmpty) {
+            const emptyEl = document.getElementById('demEmptyState');
+            const layersEl = document.getElementById('layersContainer');
+            if (emptyEl) emptyEl.style.display = isEmpty ? 'flex' : 'none';
+            if (layersEl) layersEl.style.display = isEmpty ? 'none' : '';
+        }
+
+        /**
+         * UX10: Update the workflow stepper in the header.
+         *
+         * Three steps: (1) region selected, (2) DEM loaded, (3) model generated.
+         * Marks tab step badges with ✓ when complete and shows a hint bar
+         * pointing the user to the next action. The hint bar hides once all
+         * three steps are done.
+         */
+        function _updateWorkflowStepper() {
+            const step1Done = !!selectedRegion;
+            const step2Done = !!lastDemData;
+            const step3Done = !!generatedModelData;
+
+            // Update tab badges
+            document.getElementById('tabExplore')?.classList.toggle('step-done', step1Done);
+            document.getElementById('tabEdit')?.classList.toggle('step-done', step2Done);
+            document.getElementById('tabExtrude')?.classList.toggle('step-done', step3Done);
+
+            // Build hint bar content
+            const hint = document.getElementById('workflowHint');
+            const hintText = document.getElementById('workflowHintText');
+            if (!hint || !hintText) return;
+
+            if (step1Done && step2Done && step3Done) {
+                hint.hidden = true;
+                return;
+            }
+            hint.hidden = false;
+
+            function _stepEl(n, label, state) {
+                // state: 'done' | 'active' | 'pending'
+                const icon = state === 'done' ? '✓' : String(n);
+                return `<span class="workflow-hint-step ${state}">${icon} ${label}</span>`;
+            }
+
+            const s1 = _stepEl(1, 'Select region', step1Done ? 'done' : 'active');
+            const s2 = _stepEl(2, 'Load DEM',      step2Done ? 'done' : (step1Done ? 'active' : 'pending'));
+            const s3 = _stepEl(3, 'Generate model', step3Done ? 'done' : (step2Done ? 'active' : 'pending'));
+
+            let nextAction = '';
+            if (!step1Done)      nextAction = '— select or draw a region in Explore';
+            else if (!step2Done) nextAction = '— click Load DEM in the Edit tab';
+            else                 nextAction = '— click Generate Model in the Extrude tab';
+
+            hintText.innerHTML = `${s1} <span class="workflow-hint-sep">›</span> ${s2} <span class="workflow-hint-sep">›</span> ${s3} <span style="color:#555;margin-left:6px;">${nextAction}</span>`;
+        }
+
+        // Disable on load — enabled after generateModelFromTab succeeds
+        document.addEventListener('DOMContentLoaded', () => {
+            _setExportButtonsEnabled(false);
+            _setDemEmptyState(true);
+            _updateWorkflowStepper();
+        });
         let modelScene, modelCamera, modelRenderer, modelMesh, modelControls;
 
         /**
@@ -6072,7 +6131,7 @@
          */
         function generateModelFromTab() {
             if (!lastDemData || !lastDemData.values || !lastDemData.values.length) {
-                alert('Please load a DEM first by selecting a region on the map.');
+                showToast('Please load a DEM first by selecting a region on the map.', 'warning');
                 return;
             }
 
@@ -6081,10 +6140,24 @@
             const baseHeight = parseFloat(document.getElementById('modelBaseHeight').value);
             const simplify = document.getElementById('modelSimplify').checked;
 
+            if (!resolution || resolution < 1 || resolution > 2000) {
+                showToast('Resolution must be between 1 and 2000.', 'warning'); return;
+            }
+            if (!exaggeration || exaggeration <= 0 || exaggeration > 100) {
+                showToast('Exaggeration must be between 0 and 100.', 'warning'); return;
+            }
+            if (isNaN(baseHeight) || baseHeight < 0 || baseHeight > 100) {
+                showToast('Base height must be between 0 and 100 mm.', 'warning'); return;
+            }
+
             const progress = document.getElementById('modelProgress');
             const progressBar = document.getElementById('modelProgressBar');
             const progressText = document.getElementById('modelProgressText');
             const status = document.getElementById('modelStatus');
+
+            // Show loading overlay on the viewport
+            const viewportEl = document.querySelector('.model-viewport');
+            if (viewportEl) showLoading(viewportEl, 'Generating model...');
 
             progress.style.display = 'block';
             progressBar.style.width = '0%';
@@ -6114,7 +6187,12 @@
                     vmin: lastDemData.vmin,
                     vmax: lastDemData.vmax
                 };
+                _setExportButtonsEnabled(true);
+                _updateWorkflowStepper();
                 status.textContent = `Model ready (${resolution}x${resolution}, ${exaggeration}x exaggeration)`;
+                // Remove loading overlay from viewport
+                const vp = document.querySelector('.model-viewport');
+                if (vp) hideLoading(vp);
 
                 setTimeout(() => {
                     progress.style.display = 'none';
@@ -6128,7 +6206,7 @@
          */
         function downloadSTL() {
             if (!generatedModelData) {
-                alert('Please generate a model first.');
+                showToast('Please generate a model first.', 'warning');
                 return;
             }
 
@@ -6224,7 +6302,7 @@
          */
         function downloadModel(format) {
             if (!generatedModelData) {
-                alert('Please generate a model first.');
+                showToast('Please generate a model first.', 'warning');
                 return;
             }
 
@@ -6310,7 +6388,7 @@
          */
         function downloadCrossSection() {
             if (!generatedModelData) {
-                alert('Please generate a model first.');
+                showToast('Please generate a model first.', 'warning');
                 return;
             }
             const cutAxis = document.getElementById('crossSectionAxis')?.value || 'lat';
@@ -6337,8 +6415,8 @@
                     dem_values: generatedModelData.values,
                     height: generatedModelData.height,
                     width: generatedModelData.width,
-                    north: r.north || 0, south: r.south || 0,
-                    east: r.east || 0,   west: r.west || 0,
+                    north: r.north ?? 0, south: r.south ?? 0,
+                    east: r.east ?? 0,   west: r.west ?? 0,
                     cut_axis: cutAxis,
                     cut_value: cutValue,
                     model_height: generatedModelData.resolution,
@@ -6395,7 +6473,13 @@
             modelCamera.lookAt(0, 0, 0);
 
             // Create renderer
-            modelRenderer = new THREE.WebGLRenderer({ antialias: true });
+            try {
+                modelRenderer = new THREE.WebGLRenderer({ antialias: true });
+            } catch (webglErr) {
+                console.error('WebGL unavailable for 3D viewer:', webglErr);
+                container.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">3D preview unavailable (WebGL not supported by this browser/GPU)</div>';
+                return;
+            }
             modelRenderer.setSize(container.clientWidth, container.clientHeight);
             container.appendChild(modelRenderer.domElement);
 
@@ -6681,19 +6765,22 @@
          * for Overpass API queries (max diagonal 10 km).
          * @param {Object} region - Region object with north/south/east/west
          */
-        function _updateCitiesTabVisibility(region) {
-            if (!region) return;
-            const btn = document.getElementById('citiesStripBtn');
-            if (!btn) return;
-            const diagKm = haversineDiagKm(region.north, region.south, region.east, region.west);
-            const visible = diagKm <= 10;
-            btn.style.display = visible ? '' : 'none';
+        function _updateCitiesLoadButton(region) {
+            const loadBtn = document.getElementById('loadCityDataBtn');
             const infoRow = document.getElementById('cityInfoRow');
-            if (infoRow && visible) infoRow.textContent = `Region diagonal: ${diagKm.toFixed(1)} km — OSM data available.`;
-            if (!visible) {
-                // Hide cities panel if region too large, switch back to Settings
-                switchDemSubtab('dem');
-                btn.classList.remove('active');
+            if (!loadBtn || !region) return;
+            const diagKm = haversineDiagKm(region.north, region.south, region.east, region.west);
+            const available = diagKm <= 10;
+            loadBtn.disabled = !available;
+            loadBtn.style.opacity = available ? '' : '0.4';
+            loadBtn.style.cursor = available ? '' : 'not-allowed';
+            loadBtn.title = available
+                ? `Fetch OSM data for this region (${diagKm.toFixed(1)} km)`
+                : `Region too large (${diagKm.toFixed(1)} km — max 10 km)`;
+            if (infoRow) {
+                infoRow.textContent = available
+                    ? `Region diagonal: ${diagKm.toFixed(1)} km — OSM data available.`
+                    : `Region too large (${diagKm.toFixed(1)} km). Max 10 km for city data.`;
             }
         }
 
@@ -6701,6 +6788,114 @@
         // Extracted to ui/static/js/modules/city-overlay.js (TODO item 15).
         // Functions are defined on window by that script, loaded in index.html before app.js.
         // window.appState.osmCityData is the shared state used by both sides.
+
+        let lastCityRasterData = null;
+
+        /**
+         * Fetch the City Heights raster from /api/cities/raster using the already-loaded
+         * osmCityData GeoJSON. Renders the result into #layerCityRasterCanvas.
+         * Called automatically when the "City Heights" layer toggle is turned on and
+         * osmCityData is available.
+         */
+        async function loadCityRaster() {
+            const cityData = window.appState?.osmCityData;
+            const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion;
+            if (!cityData || !bbox) return;
+
+            const dim = parseInt(document.getElementById('paramDim')?.value) || 200;
+            const buildingScale = parseFloat(document.getElementById('cityBuildingScale')?.value) || 1.0;
+            const waterOffset   = parseFloat(document.getElementById('cityWaterOffset')?.value) ?? -2.0;
+
+            setLayerStatus('cityRaster', 'loading');
+            try {
+                const resp = await fetch('/api/cities/raster', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        north: bbox.north, south: bbox.south,
+                        east: bbox.east,   west: bbox.west,
+                        dim,
+                        buildings:  cityData.buildings  || { type: 'FeatureCollection', features: [] },
+                        roads:      cityData.roads       || { type: 'FeatureCollection', features: [] },
+                        waterways:  cityData.waterways   || { type: 'FeatureCollection', features: [] },
+                        building_scale: buildingScale,
+                        road_depression_m: 0,
+                        water_depression_m: waterOffset,
+                    }),
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                lastCityRasterData = data;
+
+                // Render to an offscreen canvas; store it so updateStackedLayers() can
+                // composite it into the stack at the correct letterbox position.
+                const colormap = document.getElementById('demColormap')?.value || 'terrain';
+                const canvas = renderDEMCanvas(
+                    data.values, data.width, data.height, colormap, data.vmin, data.vmax
+                );
+                if (canvas && window.appState) {
+                    window.appState.cityRasterSourceCanvas = canvas;
+                }
+                setLayerStatus('cityRaster', 'ready');
+                updateStackedLayers();
+            } catch (e) {
+                setLayerStatus('cityRaster', 'error');
+                showToast('City raster failed: ' + e.message, 'error');
+            }
+        }
+
+        /** Wire the City Heights visibility toggle and opacity slider. */
+        function _setupCityRasterLayer() {
+            const toggle  = document.getElementById('layerCityRasterVisible');
+            const opacity = document.getElementById('layerCityRasterOpacity');
+            const label   = document.getElementById('layerCityRasterOpacityLabel');
+            const canvas  = document.getElementById('layerCityRasterCanvas');
+            if (!toggle || !canvas) return;
+
+            toggle.addEventListener('change', () => {
+                if (toggle.checked) {
+                    canvas.style.display = '';
+                    if (!lastCityRasterData && window.appState?.osmCityData) loadCityRaster();
+                } else {
+                    canvas.style.display = 'none';
+                }
+                updateStackedLayers();
+            });
+
+            if (opacity && label) {
+                opacity.addEventListener('input', () => {
+                    const pct = opacity.value;
+                    label.textContent = pct + '%';
+                    canvas.style.opacity = pct / 100;
+                });
+            }
+
+            // Auto-trigger when city data loads
+            if (window.appState?.on) {
+                window.appState.on('osmCityData', (data) => {
+                    // Update badge in Cities section header
+                    const badge = document.getElementById('citiesSettingsBadge');
+                    if (badge) {
+                        if (data) {
+                            const nb = data.buildings?.features?.length || 0;
+                            const nr = data.roads?.features?.length || 0;
+                            badge.textContent = `${nb} buildings · ${nr} roads`;
+                            badge.style.color = '#4a9';
+                        } else {
+                            badge.textContent = '';
+                        }
+                    }
+                    // Auto-expand the Cities section once when data first loads
+                    if (data) {
+                        const sec = document.getElementById('citiesSettingsSection');
+                        if (sec?.classList.contains('collapsed')) sec.classList.remove('collapsed');
+                    }
+                    // Invalidate raster cache and reload if toggle is on
+                    lastCityRasterData = null;
+                    if (document.getElementById('layerCityRasterVisible')?.checked) loadCityRaster();
+                });
+            }
+        }
 
         // ================================================================
         // Feature 3 — 3D Terrain Viewer + Puzzle Controls
@@ -7173,22 +7368,103 @@
          * Initialise the merge panel: seed with one base layer and wire the
          * Add Layer, Preview, and Apply button events.
          */
+        /**
+         * Populate merge layers from the currently active DEM source + water mask settings.
+         * Called automatically on first open and via the "Sync from layers" button.
+         */
+        function _syncMergeFromCurrentLayers() {
+            const source = document.getElementById('paramDemSource')?.value || 'local';
+            const dim    = parseInt(document.getElementById('paramDim')?.value) || 300;
+            _mergeLayers = [_createMergeLayerObj({ source, dim, blend_mode: 'base' })];
+            if (lastWaterMaskData) {
+                _mergeLayers.push(_createMergeLayerObj({ source: 'water_esa', dim, blend_mode: 'rivers' }));
+            }
+            _renderMergePanel();
+        }
+
+        /**
+         * Read current param* hidden input values into the pipeline quick-settings panel.
+         * Called each time the merge subtab is opened so the panel stays current.
+         */
+        function _refreshPipelinePanel() {
+            const get = id => document.getElementById(id);
+            const pairs = [
+                ['pipelineDim',         'paramDim'],
+                ['pipelineDepthScale',  'paramDepthScale'],
+                ['pipelineWaterScale',  'paramWaterScale'],
+                ['pipelineHeight',      'paramHeight'],
+                ['pipelineBase',        'paramBase'],
+                ['pipelineSatScale',    'paramSatScale'],
+            ];
+            for (const [pipeId, paramId] of pairs) {
+                const pEl = get(pipeId); const hEl = get(paramId);
+                if (pEl && hEl && hEl.value) pEl.value = hEl.value;
+            }
+            const swPipe  = get('pipelineSubtractWater');
+            const swParam = get('paramSubtractWater');
+            if (swPipe && swParam) swPipe.checked = swParam.value !== 'false';
+            // Also mirror paramDemSource → pipelineSource
+            const srcPipe  = get('pipelineSource');
+            const srcParam = get('paramDemSource');
+            if (srcPipe && srcParam) srcPipe.value = srcParam.value;
+        }
+
         function setupMergePanel() {
-            // Populate sources from server response (already loaded by _initDemSources)
-            // Seed with one base layer
-            if (_mergeLayers.length === 0) {
-                _mergeLayers.push(_createMergeLayerObj({ source: 'local', blend_mode: 'base' }));
-                _renderMergePanel();
+            // Wire pipeline quick-settings inputs → hidden param inputs (and Extrude tab mirrors)
+            const get = id => document.getElementById(id);
+            const pipelineBindings = [
+                ['pipelineDim',        'paramDim',        null],
+                ['pipelineDepthScale', 'paramDepthScale', 'modelDepthScale'],
+                ['pipelineWaterScale', 'paramWaterScale', 'modelWaterScale'],
+                ['pipelineHeight',     'paramHeight',     null],
+                ['pipelineBase',       'paramBase',       'modelBaseHeight'],
+                ['pipelineSatScale',   'paramSatScale',   null],
+            ];
+            for (const [pipeId, paramId, mirrorId] of pipelineBindings) {
+                const pEl = get(pipeId);
+                if (!pEl) continue;
+                pEl.addEventListener('change', () => {
+                    const h = get(paramId); if (h) h.value = pEl.value;
+                    if (mirrorId) { const m = get(mirrorId); if (m) m.value = pEl.value; }
+                });
+            }
+            const swPipe = get('pipelineSubtractWater');
+            if (swPipe) {
+                swPipe.addEventListener('change', () => {
+                    const h = get('paramSubtractWater'); if (h) h.value = String(swPipe.checked);
+                    const m = get('modelSubtractWater'); if (m) m.checked = swPipe.checked;
+                });
+            }
+            const srcPipe = get('pipelineSource');
+            if (srcPipe) {
+                srcPipe.addEventListener('change', () => {
+                    const h = get('paramDemSource'); if (h) h.value = srcPipe.value;
+                });
             }
 
-            document.getElementById('mergeAddLayerBtn')?.addEventListener('click', () => {
+            // "Reload DEM" button — syncs dim/source then re-fetches
+            get('pipelineReloadBtn')?.addEventListener('click', () => {
+                const pDim = get('pipelineDim'); const hDim = get('paramDim');
+                if (pDim && hDim) hDim.value = pDim.value;
+                const pSrc = get('pipelineSource'); const hSrc = get('paramDemSource');
+                if (pSrc && hSrc) hSrc.value = pSrc.value;
+                if (typeof window.loadDEM === 'function') window.loadDEM();
+            });
+
+            // "Sync from layers" button — rebuilds layer stack from current settings
+            get('mergeSyncBtn')?.addEventListener('click', _syncMergeFromCurrentLayers);
+
+            // Seed layer stack from current settings on first open
+            if (_mergeLayers.length === 0) _syncMergeFromCurrentLayers();
+
+            get('mergeAddLayerBtn')?.addEventListener('click', () => {
                 const mode = _mergeLayers.length === 0 ? 'base' : 'blend';
                 _mergeLayers.push(_createMergeLayerObj({ blend_mode: mode }));
                 _renderMergePanel();
             });
 
-            document.getElementById('mergePreviewBtn')?.addEventListener('click', () => runMerge(false));
-            document.getElementById('mergeApplyBtn')?.addEventListener('click', () => runMerge(true));
+            get('mergePreviewBtn')?.addEventListener('click', () => runMerge(false));
+            get('mergeApplyBtn')?.addEventListener('click', () => runMerge(true));
         }
 
         // ============================================================
@@ -7204,7 +7480,7 @@
         function setupDemSubtabs() {
             // Subtab buttons in the top bar
             document.querySelectorAll('#demStrip [data-subtab]').forEach(btn => {
-                btn.addEventListener('click', () => switchDemSubtab(btn.dataset.subtab));
+                btn.addEventListener('click', () => { if (!btn.disabled) switchDemSubtab(btn.dataset.subtab); });
             });
 
             // Settings toggle — collapses/expands the right panel completely
@@ -7239,8 +7515,8 @@
          * @param {'dem'|'water'|'landcover'|'combined'|'satellite'|'cities'|'merge'|'compare'} subtab
          */
         function switchDemSubtab(subtab) {
-            // For cities/merge the right panel IS the content — expand it if collapsed
-            if (subtab === 'cities' || subtab === 'merge') {
+            // For merge the right panel IS the content — expand it if collapsed
+            if (subtab === 'merge') {
                 const rightPanel = document.getElementById('demRightPanel');
                 rightPanel?.classList.remove('settings-collapsed');
             }
@@ -7254,7 +7530,6 @@
             document.getElementById('layersContainer')?.classList.add('hidden');
             document.getElementById('compareInlineContainer')?.classList.add('hidden');
             document.getElementById('combinedContainer')?.classList.add('hidden');
-            document.getElementById('citiesPanel')?.classList.add('hidden');
             document.getElementById('mergePanel')?.classList.add('hidden');
             document.getElementById('demControlsInner')?.classList.remove('hidden');
             // Close JSON editor if open
@@ -7278,19 +7553,10 @@
                     document.getElementById('compareInlineContainer')?.classList.remove('hidden');
                     updateCompareCanvases();
                     break;
-                case 'cities':
-                    document.getElementById('layersContainer')?.classList.remove('hidden');
-                    document.getElementById('citiesPanel')?.classList.remove('hidden');
-                    document.getElementById('demControlsInner')?.classList.add('hidden');
-                    updateStackedLayers();
-                    // Auto-load city data if not already loaded for this region
-                    if (!window.appState?.osmCityData && typeof loadCityData === 'function') {
-                        loadCityData();
-                    }
-                    break;
                 case 'merge':
                     document.getElementById('mergePanel')?.classList.remove('hidden');
                     document.getElementById('demControlsInner')?.classList.add('hidden');
+                    _refreshPipelinePanel();
                     break;
                 default:
                     // Default: show layers stack
@@ -7311,7 +7577,12 @@
          * in `lastWaterMaskData` and renders both water and land cover canvases.
          * @returns {Promise<void>}
          */
+        let _waterMaskAbortController = null;
         async function loadWaterMask() {
+            if (_waterMaskAbortController) _waterMaskAbortController.abort();
+            _waterMaskAbortController = new AbortController();
+            const signal = _waterMaskAbortController.signal;
+
             if (!boundingBox && !selectedRegion) {
                 document.getElementById('waterMaskImage').innerHTML = '<p>Please select a region first.</p>';
                 return;
@@ -7401,14 +7672,14 @@
             showToast('Loading water mask from Earth Engine...', 'info');
 
             try {
-                const response = await fetch(`/api/terrain/water-mask?${params}`);
+                const response = await fetch(`/api/terrain/water-mask?${params}`, { signal });
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 const data = await response.json();
 
                 if (data.error) {
-                    document.getElementById('waterMaskImage').innerHTML = `<p>Error: ${data.error}</p>`;
+                    { const _p = document.createElement('p'); _p.textContent = `Error: ${data.error}`; document.getElementById('waterMaskImage').replaceChildren(_p); }
                     layerStatus.water = 'error';
                     layerStatus.landCover = 'error';
                     updateLayerStatusIndicators();
@@ -7445,8 +7716,9 @@
                 showToast(`Water & land cover loaded`, 'success');
 
             } catch (error) {
+                if (error.name === 'AbortError') return;
                 console.error('Error loading water mask:', error);
-                document.getElementById('waterMaskImage').innerHTML = `<p>Error: ${error.message}</p>`;
+                { const _p = document.createElement('p'); _p.textContent = `Error: ${error.message}`; document.getElementById('waterMaskImage').replaceChildren(_p); }
                 layerStatus.water = 'error';
                 layerStatus.landCover = 'error';
                 updateLayerStatusIndicators();
@@ -7586,7 +7858,7 @@
             // Verify dimensions match
             if (lastWaterMaskData && lastDemData) {
                 const demSize = lastDemData.width * lastDemData.height;
-                const waterSize = lastWaterMaskData.water_mask_values?.length || 0;
+                const waterSize = lastWaterMaskData.water_mask_values?.length ?? 0;
 
                 if (demSize !== waterSize) {
                     console.warn('DEM and water mask dimension mismatch - reloading water mask');
@@ -7689,7 +7961,7 @@
             // Apply water subtraction
             const ptp = lastDemData.vmax - lastDemData.vmin;
             const adjustedDem = demVals.map((v, i) => {
-                const waterVal = waterVals[i] || 0;
+                const waterVal = waterVals[i] ?? 0;
                 return v - (waterVal * ptp * waterScale);
             });
 
@@ -7711,7 +7983,7 @@
                 const idx = i * 4;
 
                 // Blend with water overlay
-                const waterVal = waterVals[i] || 0;
+                const waterVal = waterVals[i] ?? 0;
                 if (waterVal > 0.5 && opacityVal > 0) {
                     imgData.data[idx] = Math.round((r * 255) * (1 - opacityVal) + 0 * opacityVal);
                     imgData.data[idx + 1] = Math.round((g * 255) * (1 - opacityVal) + 100 * opacityVal);
@@ -7739,7 +8011,7 @@
          */
         function applyWaterSubtract() {
             if (!lastDemData || !lastWaterMaskData) {
-                alert('Please load both DEM and Water Mask first.');
+                showToast('Please load both DEM and Water Mask first.', 'warning');
                 return;
             }
 
@@ -7750,7 +8022,7 @@
 
             // Apply water subtraction
             const adjustedDem = demVals.map((v, i) => {
-                const waterVal = waterVals[i] || 0;
+                const waterVal = waterVals[i] ?? 0;
                 return v - (waterVal * ptp * waterScale);
             });
 
@@ -7764,7 +8036,7 @@
             recolorDEM();
             switchDemSubtab('dem');
 
-            alert('Water subtraction applied to DEM.');
+            showToast('Water subtraction applied to DEM.', 'success');
         }
 
         /**
@@ -8094,6 +8366,70 @@
                 if (currentDemBbox) {
                     requestAnimationFrame(redrawAllGridlines);
                 }
+            });
+        }
+
+        /**
+         * Attach mouse-wheel zoom and drag-pan to a canvas element using CSS transforms.
+         * Each call is independent — state is scoped to the closure.
+         * Double-click resets to the original view.
+         * @param {HTMLCanvasElement} canvas
+         */
+        function enableZoomAndPan(canvas) {
+            if (!canvas) return;
+            // Guard: remove previous listeners if canvas is reused
+            if (canvas._zoomPanInited) return;
+            canvas._zoomPanInited = true;
+
+            let scale = 1, tx = 0, ty = 0;
+            let dragging = false, lastX = 0, lastY = 0;
+
+            function applyTransform() {
+                canvas.style.transformOrigin = '0 0';
+                canvas.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
+                canvas.style.cursor = dragging ? 'grabbing' : (scale > 1 ? 'grab' : 'default');
+            }
+
+            canvas.addEventListener('wheel', e => {
+                e.preventDefault();
+                const rect   = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                const delta  = e.deltaY < 0 ? 1.15 : (1 / 1.15);
+                const newScale = Math.max(1, Math.min(10, scale * delta));
+                // Zoom towards the cursor
+                tx = mouseX - (mouseX - tx) * (newScale / scale);
+                ty = mouseY - (mouseY - ty) * (newScale / scale);
+                scale = newScale;
+                if (scale === 1) { tx = 0; ty = 0; }
+                applyTransform();
+            }, { passive: false });
+
+            canvas.addEventListener('mousedown', e => {
+                if (scale <= 1) return;
+                dragging = true;
+                lastX = e.clientX;
+                lastY = e.clientY;
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', e => {
+                if (!dragging) return;
+                tx += e.clientX - lastX;
+                ty += e.clientY - lastY;
+                lastX = e.clientX;
+                lastY = e.clientY;
+                applyTransform();
+            });
+
+            document.addEventListener('mouseup', () => {
+                dragging = false;
+                if (scale > 1) canvas.style.cursor = 'grab';
+            });
+
+            canvas.addEventListener('dblclick', () => {
+                scale = 1; tx = 0; ty = 0;
+                applyTransform();
             });
         }
 

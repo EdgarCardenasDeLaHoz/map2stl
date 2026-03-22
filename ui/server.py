@@ -1,14 +1,16 @@
 # ── sys.path bootstrap ────────────────────────────────────────────────────────
-# The venv may have an older/stub numpy2stl installed at Code/numpy2stl/ which
-# shadows the full copy at Code/strm2stl/numpy2stl/. Ensure strm2stl root is
-# first in sys.path so our numpy2stl (with oceans.py, generate.py, save.py, …)
-# always wins the import resolution, regardless of venv site-packages order.
+# Ensure Code/ (numpy2stl peer) and ui/ (config, routers, core) are importable
+# whether this file is run as a script (python ui/server.py) or imported as a
+# module (from strm2stl.ui import server).
 import sys as _sys
 from pathlib import Path as _Path
-_STRM2STL_ROOT = str(_Path(__file__).parent.parent)
-if _STRM2STL_ROOT not in _sys.path:
-    _sys.path.insert(0, _STRM2STL_ROOT)
-del _sys, _Path, _STRM2STL_ROOT
+_UI_DIR = str(_Path(__file__).parent)          # .../strm2stl/ui/
+_STRM2STL_ROOT = str(_Path(__file__).parent.parent)  # .../strm2stl/
+_CODE_ROOT = str(_Path(__file__).parent.parent.parent)  # .../Code/
+for _p in (_CODE_ROOT, _STRM2STL_ROOT, _UI_DIR):
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+del _sys, _Path, _UI_DIR, _STRM2STL_ROOT, _CODE_ROOT
 # ─────────────────────────────────────────────────────────────────────────────
 
 import webbrowser
@@ -64,7 +66,7 @@ from contextlib import asynccontextmanager
 async def _lifespan(app):
     """FastAPI lifespan: run startup tasks, then yield control to the server."""
     import asyncio
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     # Generate global DEM overview in background
     loop.run_in_executor(None, _build_global_dem_cache, False)
     # Cache maintenance
@@ -201,20 +203,12 @@ def _build_global_dem_cache(force: bool = False) -> bool:
         return True
 
     logger.info("Building global DEM cache (full globe, 90/-90/180/-180) …")
-    original_cwd = os.getcwd()
-    try:
-        strm2stl_dir = Path(__file__).parent.parent
-        os.chdir(str(strm2stl_dir))
-        sys.path.append(str(strm2stl_dir))
+    from geo2stl.geo2stl import stitch_tiles_no_rasterio, tile_files as _tile_files
+    if not _tile_files:
+        logger.warning("Global DEM cache: no elevation tiles found.")
+        return False
 
-        from geo2stl.geo2stl import stitch_tiles_no_rasterio, tile_files as _tile_files
-        if not _tile_files:
-            logger.warning("Global DEM cache: no elevation tiles found.")
-            return False
-
-        img_arr = stitch_tiles_no_rasterio((90.0, -90.0, 180.0, -180.0))
-    finally:
-        os.chdir(original_cwd)
+    img_arr = stitch_tiles_no_rasterio((90.0, -90.0, 180.0, -180.0))
 
     if img_arr is None or img_arr.size == 0:
         logger.error("Global DEM cache: stitching returned empty array.")

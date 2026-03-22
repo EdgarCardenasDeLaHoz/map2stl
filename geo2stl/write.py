@@ -1,7 +1,7 @@
 import os
 
 import numpy as np
-from numpy2stl.numpy2stl import numpy2stl, triangles_to_facets, writeSTL
+from numpy2stl import array_to_mesh, triangles_to_facets, writeSTL
 
 def savefile(out_dir, name, im ):
 
@@ -34,7 +34,7 @@ def save_stl(filename, im):
 
 		im = im[::-1]
 		
-		tri = numpy2stl(im)
+		tri = array_to_mesh(im)
 		facets = triangles_to_facets(tri)
 
 		

@@ -139,7 +139,11 @@ window.updateStackedLayers = function updateStackedLayers() {
     drawLayerToTarget(document.getElementById('layerWaterCanvas'), waterCanvas);
     drawLayerToTarget(document.getElementById('layerSatCanvas'),   satCanvas);
 
-    ['Dem', 'Water', 'Sat'].forEach(layer => {
+    // City Heights raster — source canvas is stored on appState by loadCityRaster()
+    const cityRasterSrc = window.appState?.cityRasterSourceCanvas;
+    drawLayerToTarget(document.getElementById('layerCityRasterCanvas'), cityRasterSrc || null);
+
+    ['Dem', 'Water', 'Sat', 'CityRaster'].forEach(layer => {
         const checkbox = document.getElementById(`layer${layer}Visible`);
         const slider   = document.getElementById(`layer${layer}Opacity`);
         const canvas   = document.getElementById(`layer${layer}Canvas`);
@@ -214,7 +218,8 @@ window.drawLayerGrid = function drawLayerGrid() {
     ctx.lineWidth = 1;
     ctx.font      = '9px monospace';
 
-    // Longitude (vertical) grid lines
+    // Longitude (vertical) grid lines — batch label insertions via DocumentFragment
+    const xFrag = xAxis ? document.createDocumentFragment() : null;
     const lonStart = Math.ceil((bbox.west - 1e-9) / lonInterval) * lonInterval;
     for (let lon = lonStart; lon <= bbox.east + 1e-9; lon = Math.round((lon + lonInterval) * 1e8) / 1e8) {
         const x = lonToX(lon);
@@ -226,16 +231,18 @@ window.drawLayerGrid = function drawLayerGrid() {
         ctx.strokeStyle = tickColor;
         ctx.beginPath(); ctx.moveTo(x, 0);  ctx.lineTo(x, 6);      ctx.stroke();
         ctx.beginPath(); ctx.moveTo(x, gh); ctx.lineTo(x, gh - 6); ctx.stroke();
-        if (xAxis) {
+        if (xFrag) {
             const span = document.createElement('span');
             span.className = 'axis-tick';
             span.style.left = x + 'px';
             span.textContent = formatCoord(lon, false, lonInterval);
-            xAxis.appendChild(span);
+            xFrag.appendChild(span);
         }
     }
+    if (xAxis && xFrag) xAxis.appendChild(xFrag);
 
-    // Latitude (horizontal) grid lines
+    // Latitude (horizontal) grid lines — batch label insertions via DocumentFragment
+    const yFrag = yAxis ? document.createDocumentFragment() : null;
     const latStart = Math.ceil((bbox.south - 1e-9) / latInterval) * latInterval;
     for (let lat = latStart; lat <= bbox.north + 1e-9; lat = Math.round((lat + latInterval) * 1e8) / 1e8) {
         const y = latToY(lat);
@@ -247,14 +254,15 @@ window.drawLayerGrid = function drawLayerGrid() {
         ctx.strokeStyle = tickColor;
         ctx.beginPath(); ctx.moveTo(0,  y); ctx.lineTo(6,      y); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(gw, y); ctx.lineTo(gw - 6, y); ctx.stroke();
-        if (yAxis) {
+        if (yFrag) {
             const span = document.createElement('span');
             span.className = 'axis-tick';
             span.style.top = y + 'px';
             span.textContent = formatCoord(lat, true, latInterval);
-            yAxis.appendChild(span);
+            yFrag.appendChild(span);
         }
     }
+    if (yAxis && yFrag) yAxis.appendChild(yFrag);
 
     if (yAxis) yAxis.style.height = gh + 'px';
 };
@@ -276,7 +284,7 @@ let _cityOverlayDebounceTimer = null;
 window.applyStackedTransform = function applyStackedTransform() {
     const xfm = `translate(${stackZoom.offsetX}px, ${stackZoom.offsetY}px) scale(${stackZoom.scale})`;
 
-    ['Dem', 'Water', 'Sat'].forEach(layer => {
+    ['Dem', 'Water', 'Sat', 'CityRaster'].forEach(layer => {
         const canvas = document.getElementById(`layer${layer}Canvas`);
         if (canvas) { canvas.style.transformOrigin = '0 0'; canvas.style.transform = xfm; }
     });
@@ -343,7 +351,7 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
     // Lightweight CSS-only pan — no grid redraw (called on every mousemove tick)
     function _applyCSSTransformOnly() {
         const xfm = `translate(${stackZoom.offsetX}px, ${stackZoom.offsetY}px) scale(${stackZoom.scale})`;
-        ['Dem', 'Water', 'Sat'].forEach(layer => {
+        ['Dem', 'Water', 'Sat', 'CityRaster'].forEach(layer => {
             const canvas = document.getElementById(`layer${layer}Canvas`);
             if (canvas) { canvas.style.transformOrigin = '0 0'; canvas.style.transform = xfm; }
         });

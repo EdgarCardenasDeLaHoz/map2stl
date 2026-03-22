@@ -189,6 +189,7 @@
         .tabs {
             display: flex;
             gap: 3px;
+            align-items: center;
         }
 
         .tab {
@@ -211,6 +212,70 @@
             background-color: #007acc;
             color: white;
         }
+
+        .tab-step {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 16px; height: 16px; border-radius: 50%;
+            background: rgba(255,255,255,0.15); font-size: 10px; font-weight: 700;
+            margin-right: 3px; vertical-align: middle;
+            transition: background 0.25s, color 0.25s;
+        }
+        .tab.active .tab-step { background: rgba(255,255,255,0.3); }
+
+        /* UX10: completed step — green badge with checkmark */
+        .tab.step-done .tab-step {
+            background: #2ecc71;
+            color: #111;
+            font-size: 9px;
+        }
+        .tab.step-done .tab-step::after { content: '✓'; }
+        /* Hide the number text when showing checkmark */
+        .tab.step-done .tab-step { font-size: 0; }
+        .tab.step-done .tab-step::after { font-size: 10px; }
+
+        .tab-arrow { color: #555; font-size: 16px; line-height: 1; align-self: center; user-select: none; }
+        /* Arrow turns green when left step is done */
+        .tab.step-done + .tab-arrow { color: #2ecc71; opacity: 0.6; }
+
+        /* UX10: workflow hint bar */
+        .workflow-hint {
+            background: #1a2a1a;
+            border-bottom: 1px solid #2a3a2a;
+            padding: 4px 14px;
+            font-size: 11px;
+            color: #7aaa7a;
+            min-height: 24px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: opacity 0.3s;
+        }
+        .workflow-hint:empty,
+        .workflow-hint[hidden] { display: none; }
+        .workflow-hint-step {
+            display: inline-flex; align-items: center;
+            gap: 4px;
+            padding: 1px 7px;
+            border-radius: 10px;
+            background: rgba(46,204,113,0.12);
+            border: 1px solid rgba(46,204,113,0.25);
+            white-space: nowrap;
+        }
+        .workflow-hint-step.done {
+            color: #2ecc71;
+        }
+        .workflow-hint-step.active {
+            background: rgba(0,122,204,0.2);
+            border-color: rgba(0,122,204,0.4);
+            color: #66b8e8;
+            font-weight: 600;
+        }
+        .workflow-hint-step.pending {
+            color: #555;
+            background: transparent;
+            border-color: #333;
+        }
+        .workflow-hint-sep { color: #333; user-select: none; }
 
         .content-area {
             flex: 1;
@@ -568,9 +633,12 @@
         /* Model container specific styles */
         .model-layout {
             display: flex;
+            flex: 1;          /* BUG3: fill the model-container instead of staying at intrinsic width */
+            width: 100%;
             height: 100%;
             gap: 20px;
             padding: 15px;
+            box-sizing: border-box;
         }
 
         .model-viewport {
@@ -600,6 +668,7 @@
 
         .model-sidebar {
             flex: 1;
+            min-width: 280px;   /* LP1: prevent label wrapping at narrow viewport sizes */
             background: #2d2d2d;
             padding: 20px;
             border-radius: 8px;
@@ -692,7 +761,7 @@
         .curve-canvas-container {
             position: relative;
             width: 100%;
-            height: 150px;
+            height: 220px;
             background: #252525;
             border-radius: 4px;
             margin-bottom: 10px;
@@ -1199,6 +1268,17 @@
         .dem-strip-btn:hover { color: #ccc; background: var(--bg-light); border-color: var(--border); }
         .dem-strip-btn.active { color: #ddd; background: #383838; border-color: var(--border-light); }
 
+        /* Strip button status dots */
+        .strip-status-dots { display: inline-flex; gap: 2px; margin-left: 2px; vertical-align: middle; }
+        .strip-dot {
+            display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+            background: #555; vertical-align: middle; transition: background 0.3s ease;
+        }
+        .strip-dot.loaded { background: #4caf50; }
+        .strip-dot.loading { background: #ff9800; animation: dotPulse 1s infinite; }
+        .strip-dot.error { background: #f44336; }
+        @keyframes dotPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
         /* Collapsible settings panel — fills remaining height */
         .dem-controls {
             width: 100%;
@@ -1310,7 +1390,7 @@
 
         #colorbar {
             width: 100%;
-            height: 20px;
+            height: 26px;   /* LP3: taller = readable elevation labels */
             background: linear-gradient(to right, #006400, #8B4513, #ffffff);
             /* default terrain approximation */
         }
@@ -2228,9 +2308,10 @@
         .coordinate-item {
             padding: 7px 8px;
             border-bottom: 1px solid #2e2e2e;
+            border-left: 3px solid transparent;
             cursor: pointer;
             color: #ccc;
-            transition: background 0.15s ease;
+            transition: background 0.15s ease, border-color 0.15s ease;
             display: flex;
             align-items: center;
             gap: 6px;
@@ -2240,8 +2321,12 @@
             border-bottom: none;
         }
 
-        .coordinate-item:hover {
+        .coordinate-item:hover,
+        .coordinate-item:focus-visible {
             background: var(--bg-light);
+            border-left-color: #007acc;
+            color: #fff;
+            outline: none;
         }
 
         /* Permanent edit button inside bbox rectangles on the map */
@@ -2267,6 +2352,7 @@
             background: linear-gradient(90deg, #007acc 0%, #005fa3 100%);
             color: white;
             border-color: #007acc;
+            border-left-color: #fff;
         }
 
         .coordinate-item-icon {

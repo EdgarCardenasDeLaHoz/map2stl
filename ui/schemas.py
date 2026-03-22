@@ -7,7 +7,7 @@ Import from here; location_picker.py re-exports everything for backward compat.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -120,8 +120,23 @@ class CityRequest(BoundingBox):
         default=["buildings", "roads", "waterways"],
         description="Which OSM layers to fetch"
     )
-    simplify_tolerance: float = Field(default=2.0, description="Polygon simplification tolerance in metres")
-    min_area: float = Field(default=20.0, description="Minimum building area in square metres to keep")
+    simplify_tolerance: float = Field(default=0.5, description="Polygon simplification tolerance in metres")
+    min_area: float = Field(default=5.0, description="Minimum building area in square metres to keep")
+
+
+class CityRasterRequest(BaseModel):
+    """Request body for POST /api/cities/raster — burns OSM features onto a height-map grid."""
+    north: float
+    south: float
+    east: float
+    west: float
+    dim: int = Field(200, ge=10, le=2000, description="Output grid dimension (dim × dim pixels)")
+    buildings: Dict[str, Any] = Field(default_factory=dict, description="GeoJSON FeatureCollection")
+    roads: Dict[str, Any] = Field(default_factory=dict, description="GeoJSON FeatureCollection")
+    waterways: Dict[str, Any] = Field(default_factory=dict, description="GeoJSON FeatureCollection")
+    building_scale: float = Field(1.0, ge=0.0, description="Multiplier applied to height_m when burning buildings")
+    road_depression_m: float = Field(0.0, description="Road surface height relative to 0 (negative = depressed)")
+    water_depression_m: float = Field(-2.0, description="Waterway surface height relative to 0")
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +320,7 @@ class MergeLayerSpec(BaseModel):
     """One layer in the merge stack."""
     source: str = "local"
     dim: int = Field(300, ge=50, le=2000)
-    blend_mode: str = "base"
+    blend_mode: Literal["base", "replace", "blend", "rivers", "max", "min"] = "base"
     weight: float = Field(1.0, ge=0.0, le=10.0)
     processing: ProcessingSpec = Field(default_factory=ProcessingSpec)
     label: Optional[str] = None

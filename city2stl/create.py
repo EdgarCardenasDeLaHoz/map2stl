@@ -1,321 +1,365 @@
+"""
+city2stl/create.py — High-level mesh assembly helpers.
 
-import os 
-import sys
+Provides functions to convert OSM building GeoDataFrames, DEM arrays,
+and bounding-box metadata into vertex/face arrays suitable for STL export.
+
+Note: this module is research/notebook code and is not part of the active
+FastAPI application (that pipeline lives in ui/core/). These helpers remain
+here for offline experimentation via the Jupyter notebooks in strm2stl/notebooks/.
+"""
+
+from __future__ import annotations
+
 import numpy as np
-import pandas as pd
-from shapely.geometry import Polygon
-import osmnx as ox
-from skimage import filters,transform
+from shapely.geometry import polygon as shapely_polygon
+
+from .buildings import get_polygons, triangulate_prism as _tri_prism
+from .dem2stl import reposition_dem as _reposition
+from .osm2stl import perimeter_to_walls as np2stl  # noqa: F401 – re-export for notebook compat
+
+from numpy2stl import array_to_mesh
+import numpy2stl.simplify as simp
 
 
-from .buildings import *
-from .dem2stl import *
-from .osm2stl import *
+# ---------------------------------------------------------------------------
+# Public mesh builders
+# ---------------------------------------------------------------------------
 
+def get_building_model(gdf, scale: float):
+    """
+    Convert an OSM building GeoDataFrame into a (vertices, faces) mesh.
 
-from numpy2stl.numpy2stl import simplify as simp
+    Parameters
+    ----------
+    gdf :   GeoDataFrame with building polygon geometries
+    scale : vertical scale factor applied to z-coordinates
 
-def get_building_model(gdf, scale):
-
+    Returns
+    -------
+    vertices : ndarray, shape (N, 3)
+    faces    : ndarray of face index triples
+    """
     building_poly = get_polygons(gdf)
-    tris = triangulate_prism(building_poly)
+    tris = _triangulate_prism(building_poly)
 
-    vertices, faces = np2stl.vertices_to_index(tris)
-    vertices[:,[1,0]] = vertices[:,[0,1]]*1000
-
-    vertices[:,2] = vertices[:,2]*scale
-
+    vertices, faces = _vertices_to_index(tris)
+    vertices[:, [1, 0]] = vertices[:, [0, 1]] * 1000
+    vertices[:, 2] = vertices[:, 2] * scale
     return vertices, faces
 
 
-def get_landspace_model(data, bounds_NW=None, scale=1, simplify=True):
+def get_landspace_model(data: np.ndarray, bounds_NW=None, scale: float = 1, simplify: bool = True):
+    """
+    Convert a 2-D elevation array into a terrain mesh.
 
-    ####################
-    facet = np2stl.numpy2stl(data)
-    solid = np2stl.Solid(facet)
-    
-    vx = solid.vertices.copy().astype(float)
-    fs = solid.faces.copy()
+    Parameters
+    ----------
+    data      : 2-D float array of elevation values
+    bounds_NW : optional [[N0,N1],[W0,W1]] geographic bounds for reprojection
+    scale     : vertical scale factor
+    simplify  : whether to run mesh simplification
+
+    Returns
+    -------
+    vertices : ndarray, shape (N, 3)
+    faces    : ndarray of face index triples
+    """
+    vx, fs = array_to_mesh(data)
+    vx = vx.astype(float)
 
     if bounds_NW is not None:
-        im_lims = ((0,data.shape[0]),(0,data.shape[1])) 
-        vx = reposition_dem(vx, im_lims, bounds_NW )
-        vx[:,[0,1]] = vx[:,[0,1]]*1000
+        im_lims = ((0, data.shape[0]), (0, data.shape[1]))
+        vx = _reposition(vx, im_lims, bounds_NW)
+        vx[:, [0, 1]] = vx[:, [0, 1]] * 1000
 
     if simplify:
-        fs = simp.simplify_mesh_surfaces(vx,fs)
+        fs = simp.simplify_mesh_surfaces(vx, fs)
 
-    ########################
-    vx[:,[0,1]] = vx[:,[0,1]]    
-    vx[:,2] = vx[:,2] * scale    
-
+    vx[:, 2] = vx[:, 2] * scale
     return vx, fs
 
-def get_bounds_model(gdf, scale):
-    
-    
-    x_ = gdf["geometry"]
-    xy_list = np.array([[x.centroid.x,  x.centroid.y] for x in x_])
-    Nc,Wc = xy_list.T
-    c,d,a,b= Nc.max(),Nc.min(),Wc.max(),Wc.min()    
 
-    prism_dict = {}
-    prism_dict['z1'] = 100
-    prism_dict['z0'] = 0
-    prism_dict['points'] = np.array([[c,a],[c,b],[d,b],[d,a],[c,a]]).T
+def get_bounds_model(gdf, scale: float):
+    """
+    Build a rectangular prism mesh that encloses the bounding box of *gdf*.
 
-    tris = triangulate_prism([prism_dict])
-    vertices, faces = np2stl.vertices_to_index(tris)
-    vertices[:,[1,0]] = vertices[:,[0,1]]
-    vertices[:,2] = vertices[:,2] * scale
-    vertices = vertices*1000
+    Returns
+    -------
+    vertices : ndarray, shape (N, 3)
+    faces    : ndarray of face index triples
+    """
+    centroids = np.array([[g.centroid.x, g.centroid.y] for g in gdf["geometry"]])
+    Nc, Wc = centroids.T
+    c, d, a, b = Nc.max(), Nc.min(), Wc.max(), Wc.min()
 
+    prism = {
+        'z1': 100,
+        'z0': 0,
+        'points': np.array([[c, a], [c, b], [d, b], [d, a], [c, a]]).T,
+    }
+    tris = _triangulate_prism([prism])
+    vertices, faces = _vertices_to_index(tris)
+    vertices[:, [1, 0]] = vertices[:, [0, 1]]
+    vertices[:, 2] = vertices[:, 2] * scale
+    vertices = vertices * 1000
     return vertices, faces
 
 
-def get_bbox(gdf):
-    x_ = gdf["geometry"]
-    xy_list = np.array([[x.centroid.x,  x.centroid.y] for x in x_])
-    Nc,Wc = xy_list.T
-    bounds_rc = Nc.max(),Nc.min(),Wc.max(),Wc.min()    
+# ---------------------------------------------------------------------------
+# Bounding-box helpers
+# ---------------------------------------------------------------------------
 
-    b = bounds_rc
-    bounds_rc = [[b[2],b[3]],[b[1],b[0]]]
-
-    return bounds_rc
-
-
-
-def get_bounds_(gdf, im_shape, coor_lims):
-    x_ = gdf["geometry"]
-    xy_list = np.array([[x.centroid.x,  x.centroid.y] for x in x_])
-    Nc,Wc = xy_list.T
-    bounds_rc = Nc.max(),Nc.min(),Wc.max(),Wc.min()    
-
-    b = bounds_rc
-    bounds_rc = [[b[2],b[3]],[b[1],b[0]]]
-    
-    #Flip these commands to that mx and min happen before conversion 
-
-    im_lims = np.array(((0,im_shape[0]),(0,im_shape[1])))
-    Yc, Xc = coor2im(coor_lims, im_lims, xy_list)
-    bounds = Yc.max(),Yc.min(),Xc.max(),Xc.min()
+def get_bbox(gdf) -> list:
+    """
+    Return [[south, north], [west, east]] geographic bounds for *gdf*.
+    """
+    centroids = np.array([[g.centroid.x, g.centroid.y] for g in gdf["geometry"]])
+    Nc, Wc = centroids.T
+    c, d, a, b = Nc.max(), Nc.min(), Wc.max(), Wc.min()
+    return [[a, b], [d, c]]
 
 
-    return bounds, bounds_rc
+def get_bounds_(gdf, im_shape: tuple, coor_lims: list) -> tuple:
+    """
+    Return (pixel_bounds, geo_bounds) for *gdf* projected onto an image.
 
-def get_base_height(gdf, im, coor_lims):
+    Parameters
+    ----------
+    gdf       : GeoDataFrame
+    im_shape  : (height, width) of the target image
+    coor_lims : [[N0, N1], [W0, W1]] geographic coordinate limits
 
-    x_ = gdf["geometry"]
+    Returns
+    -------
+    pixel_bounds : (Nx, Sx, Ex, Wx) in pixel space
+    geo_bounds   : [[S, N], [W, E]]
+    """
+    centroids = np.array([[g.centroid.x, g.centroid.y] for g in gdf["geometry"]])
+    Nc, Wc = centroids.T
+    c, d, a, b = Nc.max(), Nc.min(), Wc.max(), Wc.min()
+    geo_bounds = [[a, b], [d, c]]
 
-    ###########################
-    xy_list = []
-    for x in x_:
-      xy_list.append([x.centroid.x,  x.centroid.y])
-    xy_list = np.array(xy_list)
+    im_lims = np.array(((0, im_shape[0]), (0, im_shape[1])))
+    Yc, Xc = coor2im(coor_lims, im_lims, centroids)
+    pixel_bounds = (Yc.max(), Yc.min(), Xc.max(), Xc.min())
+    return pixel_bounds, geo_bounds
 
-    ###########################
-    im_lims = np.array([(0,im.shape[0]),(0,im.shape[1])])
-    Nc, Wc = coor2im(coor_lims, im_lims, xy_list)
 
-    Nc = Nc.clip(0,im.shape[0]-1)
-    Wc = Wc.clip(0,im.shape[1]-1)
-    
-    ############################
-    H = im[Nc, Wc] 
+def get_base_height(gdf, im: np.ndarray, coor_lims: list) -> np.ndarray:
+    """
+    Sample elevation values from *im* at the centroid of each feature in *gdf*.
 
-    return H
+    Returns
+    -------
+    H : 1-D array of sampled elevation values, one per feature
+    """
+    centroids = np.array([[g.centroid.x, g.centroid.y] for g in gdf["geometry"]])
+    im_lims = np.array([(0, im.shape[0]), (0, im.shape[1])])
+    Nc, Wc = coor2im(coor_lims, im_lims, centroids)
+    Nc = Nc.clip(0, im.shape[0] - 1)
+    Wc = Wc.clip(0, im.shape[1] - 1)
+    return im[Nc, Wc]
 
-def get_bounds(gdf, im, coor_lims):
-     
-    x_ = gdf["geometry"]
-    
-    xy_list = [[x.centroid.x,  x.centroid.y] for x in x_]
-    xy_list = np.array(xy_list)
 
-    im_lims = np.array([(0,im.shape[0]),(0,im.shape[1])])
-    Nc, Wc = coor2im(coor_lims, im_lims, xy_list)
+def get_bounds(gdf, im: np.ndarray, coor_lims: list) -> tuple:
+    """
+    Return (Nx, Sx, Ex, Wx) pixel-space bounds of *gdf* projected onto *im*.
+    """
+    centroids = np.array([[g.centroid.x, g.centroid.y] for g in gdf["geometry"]])
+    im_lims = np.array([(0, im.shape[0]), (0, im.shape[1])])
+    Nc, Wc = coor2im(coor_lims, im_lims, centroids)
+    return Nc.max(), Nc.min(), Wc.max(), Wc.min()
 
-    #################
-    Nx,Sx = Nc.max(),Nc.min()
-    Ex,Wx = Wc.max(),Wc.min()
-    
-    return Nx,Sx,Ex,Wx
-    
-  
-def coor2im(coor_lims, im_lims, xy_list, asint=True):
-    
-    N0,N1 = coor_lims[0]
-    W0,W1 = coor_lims[1]
-    X0,X1 = im_lims[0]
-    Y0,Y1 = im_lims[1]
 
-    Ncoor = map( N0,N1, X0, X1, xy_list[:,1])
-    Wcoor = map( W0,W1, Y0, Y1, xy_list[:,0])
-    
+# ---------------------------------------------------------------------------
+# Coordinate conversion
+# ---------------------------------------------------------------------------
+
+def coor2im(coor_lims, im_lims, xy_list: np.ndarray, asint: bool = True):
+    """
+    Map geographic (lon, lat) coordinates to image pixel indices.
+
+    Parameters
+    ----------
+    coor_lims : [[N0, N1], [W0, W1]]   geographic range
+    im_lims   : [[X0, X1], [Y0, Y1]]   pixel range
+    xy_list   : (M, 2) array of [lon, lat] coordinates
+    asint     : round to integer pixel indices (default True)
+
+    Returns
+    -------
+    row_indices, col_indices : two 1-D arrays
+    """
+    N0, N1 = coor_lims[0]
+    W0, W1 = coor_lims[1]
+    X0, X1 = im_lims[0]
+    Y0, Y1 = im_lims[1]
+
+    rows = _linear_map(N0, N1, X0, X1, xy_list[:, 1])
+    cols = _linear_map(W0, W1, Y0, Y1, xy_list[:, 0])
+
     if asint:
-        Ncoor,Wcoor = Ncoor.astype(int), Wcoor.astype(int)
-
-    return Ncoor, Wcoor
-
-def crop_image_bounds(im, bounds):
-    Nx,Sx, Ex,Wx = bounds
-        
-    ###################### 
-    data =  im[int(Sx):int(Nx), int(Wx):int(Ex)]
-    data = 1.0 * data
-
-    rho = 0.2
-    outshape = np.array(data.shape)*rho
-    data = transform.resize(data, outshape)
-
-        
-    return data
+        return rows.astype(int), cols.astype(int)
+    return rows, cols
 
 
-def reposition_dem(vx, im_lims, coor_lims):
+def crop_image_bounds(im: np.ndarray, bounds: tuple, scale: float = 0.2) -> np.ndarray:
+    """
+    Crop *im* to pixel *bounds* and downscale by *scale*.
 
-  N0,N1 = coor_lims[0]
-  W0,W1 = coor_lims[1]
-  X0,X1 = im_lims[0]
-  Y0,Y1 = im_lims[1]
+    Parameters
+    ----------
+    im     : source image array
+    bounds : (Nx, Sx, Ex, Wx) pixel limits
+    scale  : resize factor (default 0.2 → 20 % of original size)
+    """
+    from skimage import transform as sktr
+    Nx, Sx, Ex, Wx = bounds
+    data = im[int(Sx):int(Nx), int(Wx):int(Ex)].astype(float)
+    out_shape = (np.array(data.shape) * scale).astype(int)
+    return sktr.resize(data, out_shape)
 
-  #if N1<N0: N1,N0 = N0,N1
-  #if W1<W0: W1,W0 = W0,W1  
-  x,y = vx[:,1],vx[:,0]
 
-  imcoor = np.array((y,x)).T*1.
-  Ncoor = map( X0*1., X1*1., N0,N1, imcoor[:,1])
-  Wcoor = map( Y0*1., Y1*1., W0,W1, imcoor[:,0])
-  
-  vx[:,0], vx[:,1] = Ncoor, Wcoor
-
-  return vx 
-#########################
-
-def map(low_in, high_in, low_out, high_out, qx):
-
-  ix = (qx - low_in)
-  ix = (ix / (high_in - low_in))
-
-  ix = ix * (high_out - low_out)
-  ix = ix + low_out
-
-  return ix
-
-from shapely.geometry import polygon
+# ---------------------------------------------------------------------------
+# Geometry helpers
+# ---------------------------------------------------------------------------
 
 def polygon_to_perimeter(poly):
-    
-    poly = polygon.orient(poly)
-    
-    verts,peri = [],[]
+    """
+    Decompose a Shapely Polygon into vertices and perimeter index arrays.
+
+    Collinear vertices (interior angle ~180°) are removed from the perimeter
+    to reduce the triangle count before ear-clip triangulation.
+
+    Returns
+    -------
+    verts      : (N, 2) float array of all vertex coordinates
+    perimeters : list of index arrays, one per ring (exterior + holes)
+    """
+    poly = shapely_polygon.orient(poly)
+    verts, peri = [], []
     n_v = 0
-    exter = np.array(poly.exterior.coords)
-    exter = exter[:-1]
-    verts.extend(exter)
-    peri.append( np.arange(len(exter) + n_v ))
-    n_v = len(exter) + n_v 
-    
-    
-    inter = poly.interiors
-    for p in inter:
-        pts = p.coords[:-1]
-        verts.extend( pts )
-        peri.append( np.arange(len(pts)) + n_v )
-        n_v = len(pts) + n_v             
-               
+
+    exterior = np.array(poly.exterior.coords)[:-1]   # drop closing duplicate
+    verts.extend(exterior)
+    peri.append(np.arange(len(exterior) + n_v))
+    n_v = len(exterior)
+
+    for ring in poly.interiors:
+        pts = np.array(ring.coords[:-1])
+        verts.extend(pts)
+        peri.append(np.arange(len(pts)) + n_v)
+        n_v += len(pts)
+
     verts = np.array(verts)
-    
+
     perimeters = []
     for line_idx in peri:
         line = verts[line_idx]
-        
-        angles = get_perimeter_angles( line) 
-        simpified_line = np.array(line_idx[  (angles < 179) | (angles > 181) ])
-        perimeters.append(simpified_line)
-    
+        angles = _perimeter_angles(line)
+        simplified = line_idx[(angles < 179) | (angles > 181)]
+        perimeters.append(simplified)
 
-    return verts,perimeters
+    return verts, perimeters
 
-def polygon_to_prism(polygons,heights,base_val=0):
+
+def polygon_to_prism(polygons, heights, base_val: float = 0) -> list:
+    """
+    Extrude a list of Shapely Polygons into 3-D prism triangle arrays.
+
+    Parameters
+    ----------
+    polygons  : iterable of Shapely Polygon objects
+    heights   : iterable of roof heights (one per polygon)
+    base_val  : floor z-coordinate (default 0)
+
+    Returns
+    -------
+    list of triangle arrays (one ndarray per polygon that succeeded)
+    """
     all_triangles = []
-
-    for n,poly in enumerate(polygons):
-        print(n)
-        #if poly.area < 500: continue        
-        
+    for n, poly in enumerate(polygons):
         verts, peri = polygon_to_perimeter(poly)
-        verts = np.concatenate((verts, verts[:,0:1]*0),axis=1)
-        
-        verts[:,2] = heights[n]
+        verts = np.concatenate((verts, np.zeros((len(verts), 1))), axis=1)
+        verts[:, 2] = heights[n]
         try:
-            _, faces = np2stl.simplify_surface(verts, peri)
-        except: 
+            _, faces = _simplify_surface(verts, peri)
+        except Exception:
             continue
-        
-        #    print(verts)
-        ## Add Z value
         top_tris = verts[faces]
-        all_triangles.append( top_tris )
-        wall_tris = np2stl.perimeter_to_walls(verts, peri, floor_val=base_val)
-        all_triangles.append( wall_tris )
+        all_triangles.append(top_tris)
+        wall_tris = _perimeter_to_walls(verts, peri, floor_val=base_val)
+        all_triangles.append(wall_tris)
 
     return all_triangles
 
-def shapely_to_buildings(shp_poly, z0=1,z1=39,polygons=None):
 
-    if polygons is None:    polygons = []
-        
+def shapely_to_buildings(shp_poly, z0: float = 1, z1: float = 39, polygons: list | None = None) -> list:
+    """
+    Convert a Shapely MultiPolygon into a list of building prism dicts.
+
+    Each dict has keys: roof_height, base_height, points (2×N coord array).
+    """
+    if polygons is None:
+        polygons = []
     for poly in shp_poly.geoms:
-        p = {}
-        p['roof_height'] = z1
-        p['base_height'] = z0
-        p['points'] = np.array(poly.exterior.coords).T
-        polygons.append(p)
-        
+        polygons.append({
+            'roof_height': z1,
+            'base_height': z0,
+            'points': np.array(poly.exterior.coords).T,
+        })
     return polygons
 
-def triangulate_prism(polygons):
 
+def _triangulate_prism(polygons: list) -> np.ndarray:
+    """
+    Triangulate a list of prism dicts (each with z1, z0, points).
+
+    Returns concatenated triangle array.
+    """
+    from .osm2stl import polygon_to_prism as _p2p
     triangles = []
-
-    for _,p in enumerate( polygons ):
-
-        roof = p['z1'] 
-        base = p['z0'] 
+    for p in polygons:
         vert = np.array(p['points']).T
-
-        if (np.isclose(vert[0],vert[-1]).all()):   
+        if np.isclose(vert[0], vert[-1]).all():
             vert = vert[:-1]
+        zdim = np.zeros((len(vert), 1)) + p['z1']
+        vert = np.concatenate([vert, zdim], axis=1)
+        tri = _p2p(vert, base_val=p['z0'])
+        triangles.append(tri)
+    return np.concatenate(triangles)
 
-        zdim = np.zeros((len(vert),1)) + roof
-        vert = np.concatenate([vert, zdim],axis=1)        
-        tri = np2stl.polygon_to_prism(vert, base_val=base)
-        triangles.append( tri )
 
-    triangles = np.concatenate(triangles)   
-    return triangles
+def boundry_to_poly(geo_poly) -> list:
+    """
+    Wrap a Shapely Polygon exterior as a single prism dict at z=0 / z=-30.
+    """
+    pts = np.array(geo_poly.exterior.coords).T
+    return [{'points': pts, 'roof_height': 0, 'base_height': -30}]
 
-def boundry_to_poly(GEO_poly):
-    pts = np.array(GEO_poly.exterior.coords).T
-    p = {"points":pts,"roof_height":0,"base_height":-30}
-    polygons = [p]
 
-    return polygons
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
-def get_waterways( GEO ):
-    
-    ftpt = ox.footprints_from_polygon(GEO, footprint_type="natural")    
-    
-    x = ftpt[ftpt["natural"]=="water"]
-    x = x.dropna(axis=1, how='all')
-    x = x[["geometry","name","waterway","natural"]]
-    areas = [i["geometry"].area*10000000 for n,i in x.iterrows()]
-    x["areas"] = areas
-    x = x[x["areas"]>1]
-    
-    polys = [ i["geometry"].intersection(GEO) for n,i in x.iterrows()]
-    x["geometry"] = polys
-    x = ox.project_gdf(x)
-    return x 
+def _linear_map(low_in: float, high_in: float, low_out: float, high_out: float,
+                qx: np.ndarray) -> np.ndarray:
+    """Linearly map values from [low_in, high_in] to [low_out, high_out]."""
+    return (qx - low_in) / (high_in - low_in) * (high_out - low_out) + low_out
+
+
+def _perimeter_angles(line: np.ndarray) -> np.ndarray:
+    """
+    Compute interior angles (in degrees) at each vertex of a closed polygon.
+    Used to detect and remove collinear vertices before ear-clip triangulation.
+    """
+    n = len(line)
+    prev_pts = np.roll(line, 1, axis=0)
+    next_pts = np.roll(line, -1, axis=0)
+    v1 = prev_pts - line
+    v2 = next_pts - line
+    cos_a = (v1 * v2).sum(axis=1) / (
+        np.linalg.norm(v1, axis=1) * np.linalg.norm(v2, axis=1) + 1e-12
+    )
+    return np.degrees(np.arccos(np.clip(cos_a, -1, 1)))

@@ -8,9 +8,11 @@ Falls back to JSON-file storage if core.db cannot be imported.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
+from functools import partial
 from typing import List, Optional
 
 from fastapi import APIRouter
@@ -121,7 +123,8 @@ def _ensure_db() -> None:
 async def list_regions():
     """Return all saved geographic regions."""
     if not _DB_AVAILABLE:
-        return _list_regions_json()
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _list_regions_json)
 
     try:
         _ensure_db()
@@ -142,7 +145,8 @@ async def list_regions():
 async def create_region(region: RegionCreate):
     """Save a new geographic region."""
     if not _DB_AVAILABLE:
-        return _create_region_json(region)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, partial(_create_region_json, region))
 
     try:
         _ensure_db()
@@ -177,7 +181,8 @@ async def create_region(region: RegionCreate):
 async def update_region(name: str, region: RegionCreate):
     """Update an existing saved region by name."""
     if not _DB_AVAILABLE:
-        return _update_region_json(name, region)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, partial(_update_region_json, name, region))
 
     try:
         _ensure_db()
@@ -210,7 +215,8 @@ async def update_region(name: str, region: RegionCreate):
 async def delete_region(name: str):
     """Delete a saved region by name. ON DELETE CASCADE removes its settings."""
     if not _DB_AVAILABLE:
-        return _delete_region_json(name)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, partial(_delete_region_json, name))
 
     try:
         _ensure_db()
@@ -229,7 +235,8 @@ async def delete_region(name: str):
 async def get_region_settings(name: str):
     """Fetch saved panel settings for a region. Returns 404 if none saved yet."""
     if not _DB_AVAILABLE:
-        return _get_region_settings_json(name)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, partial(_get_region_settings_json, name))
 
     try:
         _ensure_db()
@@ -250,7 +257,8 @@ async def get_region_settings(name: str):
 async def save_region_settings_route(name: str, settings: RegionSettings):
     """Save or update all panel settings for a region."""
     if not _DB_AVAILABLE:
-        return _save_region_settings_json(name, settings)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, partial(_save_region_settings_json, name, settings))
 
     try:
         _ensure_db()
