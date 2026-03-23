@@ -1,7 +1,7 @@
 # CLAUDE.md — strm2stl Project Reference
 
 > **Purpose**: Permanent reference for AI coding sessions. Read this file first before touching any source file.
-> Last updated: 2026-03-20 (session 10 — FQ3: `??` vs `||` for nullable defaults; SRTM h5 fallback to SRTMGL3 via OpenTopography when h5 absent or region uncovered; see TODO.md Completed section for full list)
+> Last updated: 2026-03-22 (session 17 — IMP5 complete; IMP4 complete: dem-loader.js now owns all DEM canvas helpers; dead code removed)
 
 ---
 
@@ -93,6 +93,8 @@ strm2stl/
 │       ├── js/
 │       │   ├── app.js               ← ~8300-line monolith (the REAL running app)
 │       │   └── modules/             ← Plain <script> modules (loaded before app.js)
+│       │       ├── api.js           ← window.api: all fetch helpers (regions, dem, export, cities, cache, settings, misc)
+│       │       ├── dem-loader.js    ← DEM helpers: hslToRgb, mapElevationToColor, renderSatelliteCanvas, updateAxesOverlay, drawColorbar, drawHistogram, applyProjection, enableZoomAndPan, drawGridlinesOverlay, recolorDEM, rescaleDEM, resetRescale
 │       │       ├── city-overlay.js  ← loadCityData, renderCityOverlay, clearCityOverlay, _updateCityLayerCount
 │       │       └── stacked-layers.js ← updateStackedLayers, applyStackedTransform, enableStackedZoomPan, drawLayerGrid
 │       └── FUNCTIONALITY_DOC.md    ← Completed feature & refactoring history
@@ -117,7 +119,9 @@ All files in the directory tree above now exist and are used. The backend refact
 
 **app.js is an ~8300-line `<script>` tag — it is NOT an ES module.**
 
-All business logic lives inline in `app.js`. Two active plain-script modules are loaded before it:
+All business logic lives inline in `app.js`. Four active plain-script modules are loaded before it:
+- `modules/api.js` — centralized API fetch helpers (`window.api`)
+- `modules/dem-loader.js` — all DEM canvas helpers: colormap math, canvas renderers, axes/colorbar/histogram, projection, zoom/pan, gridlines, recolor/rescale
 - `modules/city-overlay.js` — city overlay rendering
 - `modules/stacked-layers.js` — stacked layers view
 
@@ -736,12 +740,20 @@ User clicks "🏙️ 3MF + Buildings" button (Extrude tab, City Buildings row)
 
 ## Known Issues
 
-### 1. Duplicate Functions (Long-term — not urgent)
-The following functions exist in both `app.js` AND in the two active plain-script modules:
-`renderDEMCanvas`, `mapElevationToColor`, `hslToRgb`, `drawColorbar`, `drawHistogram`, `drawGridlinesOverlay`, `enableZoomAndPan`, `loadCoordinates`, `recolorDEM`. Remove duplicates when extracting modules.
+### 1. Remaining app.js-only functions (IMP4/IMP11 progress)
+After IMP4 extraction, `dem-loader.js` now owns: `hslToRgb`, `mapElevationToColor`, `renderSatelliteCanvas`, `updateAxesOverlay`, `drawColorbar`, `drawHistogram`, `applyProjection`, `enableZoomAndPan`, `drawGridlinesOverlay`, `recolorDEM`, `rescaleDEM`, `resetRescale`.
 
-### 2. Loose Global State (Long-term — not urgent)
-app.js uses ~30 loose closure variables alongside `window.appState` mirrors. Long-term: single source of truth via a dedicated state object.
+**Still in app.js closure only** (not yet moveable):
+- `renderDEMCanvas` — exposed on `window.renderDEMCanvas`; stays in app.js because it writes `lastDemData` closure var and calls `addCurvePoint`/`drawCurve` closures
+- `window.loadDEM` — large async function with many closure dependencies; stays in app.js
+- Curve editor functions (`addCurvePoint`, `drawCurve`, etc.) — candidates for IMP11 `curve-editor.js`
+
+### 2. Loose Global State (Partially addressed — IMP5 done)
+app.js uses ~30 loose closure variables. After IMP5, the key state vars are now mirrored to `window.appState`:
+- **Already mirrored**: `selectedRegion`, `currentDemBbox`, `osmCityData`, `lastDemData`, `showToast`, `haversineDiagKm`
+- **Added by IMP5**: `layerBboxes` (shared ref), `layerStatus` (shared ref), `originalDemValues`, `curveDataVmin`, `curveDataVmax`, `curvePoints` (shared ref)
+- **Callbacks on appState**: `_setDemEmptyState`, `_updateWorkflowStepper`
+- **Still closure-only**: ~20 vars (`boundingBox`, `drawnItems`, `coordinatesData`, `selectedRegion`, `layerBboxes`, `stackedLayerData`, etc.) — not yet needed by any module
 
 ### 3. `<script>` vs Module Boundary
 Because app.js is loaded as `<script>` (not `type="module"`), it cannot use `import`/`export`. Converting it to a module requires restructuring the entire file and changing the HTML script tag. Many HTML `onclick` handlers reference global functions — these must remain on `window` or be updated.
@@ -777,11 +789,13 @@ Because app.js is loaded as `<script>` (not `type="module"`), it cannot use `imp
 
 ### Short-term (current tasks)
 
-**Task 2** — Add section headers and JSDoc to app.js
-- Add `// ============================================================` section dividers
-- Add `/** ... */` JSDoc to every function without one
-- Sections: Global State, Initialization, Map/Globe, Region Management, DEM Loading & Rendering, Water Mask, Satellite/Land Cover, Stacked Layers View, Compare View, Combined View, Curve Editor, City Overlay, Merge Panel, 3D Model Viewer, Preset Management, UI Utilities, Event Listeners
-- No logic changes
+**Task 2 — DONE** — Section headers and JSDoc added to app.js
+
+**Task 5 — DONE** — ARCH3: Centralize API calls into `modules/api.js`
+- `window.api` exposes `api.regions.*`, `api.dem.*`, `api.export.*`, `api.cities.*`, `api.cache.*`, `api.settings.*`, `api.misc.*`
+- All raw `fetch('/api/...')` calls in app.js replaced with `window.api.*`
+- `fetchWithErrorHandling` removed (was dead code after migration)
+- Only two native `fetch()` remain: `api._fetch` internals, and static file check in `toggleDemOverlay`
 
 **Task 3 — DONE** — `ui/static/js/modules/city-overlay.js`
 - Contains: `loadCityData()`, `clearCityOverlay()`, `renderCityOverlay()`, `_updateCityLayerCount()`
@@ -792,6 +806,19 @@ Because app.js is loaded as `<script>` (not `type="module"`), it cannot use `imp
 - Contains: `updateStackedLayers()`, `applyStackedTransform()`, `enableStackedZoomPan()`, `drawLayerGrid()`, `updateLayerAxisLabels()`, `drawGridOverlay()`
 - Internal state: `stackZoom`, `stackZoomInitialized` (module-scoped)
 - Shared state via `window.appState` (currentDemBbox, selectedRegion, lastDemData [new])
+
+**Task 7 — DONE** — IMP4 completion + dead code removal
+- Moved to `dem-loader.js`: `applyProjection`, `enableZoomAndPan`, `drawGridlinesOverlay`, `recolorDEM`, `rescaleDEM`, `resetRescale`
+- `renderDEMCanvas` kept in app.js (closure deps) but exposed as `window.renderDEMCanvas`; dem-loader.js calls it via `window.renderDEMCanvas(...)`
+- `drawGridlinesOverlay` uses `window.appState.currentDemBbox`; `recolorDEM`/`rescaleDEM` use `window.appState.lastDemData`/`currentDemBbox`
+- Removed stale "moved to dem-loader.js" stub comments from previous session
+- No duplicate functions remain between app.js and dem-loader.js
+
+**Task 6 — DONE** — IMP5: Unify appState
+- Added to `window.appState`: `layerBboxes`, `layerStatus` (shared object refs), `originalDemValues`, `curveDataVmin`, `curveDataVmax`, `curvePoints` (shared array ref)
+- Mirrored all write sites in app.js where arrays/objects are replaced (not mutated): `undoCurve`, `redoCurve`, `setCurvePreset`, `applyAllSettings`, `renderDEMCanvas`, sea-level button, `clearLayerCache`, `applyCurveTodem`, `applyCurveTodemSilent`, `runMerge`
+- Exposed `_setDemEmptyState` and `_updateWorkflowStepper` as `window.appState._setDemEmptyState` / `window.appState._updateWorkflowStepper`
+- `renderDEMCanvas`, `recolorDEM`, `rescaleDEM`, `resetRescale` now extractable to dem-loader.js (all their state is on window.appState)
 
 ### Long-term (ideal target — JS)
 

@@ -141,3 +141,73 @@ Line numbers are approximate — the file grows over time.
 | CSS variables | 8 custom properties in `:root`; all hardcoded colour hex values replaced |
 | `state.js` updated | Added `currentDemBbox`, `layerBboxes`, `layerStatus`, `activeDemSubtab`, `osmCityData`, all `cache.*` fields |
 | Dead `osmCityData` local removed | `let osmCityData = null` in app.js was orphaned after module extraction |
+
+---
+
+## Completed Features & Fixes (Sessions 13–15, 2026-03)
+
+### Bug Fixes
+| ID | Fix |
+|----|-----|
+| BUG1 | Cache status label: `data.total_files` → `data.total_cached_files` in `fetchServerCacheStatus()` |
+| BUG2 | Bbox inputs empty on Edit tab switch: `setBboxInputValues()` called immediately in `switchView('dem')` when `selectedRegion` exists |
+| BUG3 | `.model-layout` wasn't filling container: added `flex: 1` to `.model-layout` |
+| BUG4 | Export buttons enabled before generation: all export buttons disabled by default; enabled only after `generateModel()` succeeds |
+
+### UX Improvements
+| ID | Feature |
+|----|---------|
+| UX1 | DEM empty state: `#demEmptyState` + `_setDemEmptyState()` shown when `lastDemData` is null |
+| UX2 | Extrude empty state: `#modelEmptyState` centered overlay in 3D viewport |
+| UX3 | Sidebar auto-collapses when switching to Extrude tab; restored on other tabs |
+| UX4 | Region hover affordance: left border accent + color transition on `.coordinate-item` |
+| UX5 | Continent headers collapsible in sidebar with count badge (already existed, verified) |
+| UX6 | Resolution/Water/Land Cover settings sections collapsed by default (already existed, verified) |
+| UX7 | DEM subtab status dots: colored indicators (gray/orange-pulse/green/red) on layer buttons |
+| UX8 | Keyboard navigation: `tabindex="0"` + `role="option"` on region items; Arrow Up/Down focus |
+| UX9 | Loading spinners on DEM load and model generation via `showLoading`/`hideLoading` |
+
+### Layout & Visual Polish
+| ID | Fix |
+|----|-----|
+| LP1 | Model sidebar `min-width: 280px` |
+| LP2 | Edit markers hide when bbox < 40px diagonal on screen (`_updateEditMarkerVisibility` on `zoomend`/`moveend`) |
+| LP3 | Colorbar height increased to 26px |
+| LP4 | Curve editor canvas height increased from 150px → 220px |
+
+### City Overlay Performance (PERF1–6A)
+| ID | Optimization |
+|----|-------------|
+| PERF1 | Shared `_pt` object in `_buildGeoToPx` — eliminates per-vertex `[x,y]` array allocation |
+| PERF2 | `invZ` removed from cache key — cache survives zoom animation; only misses on zoom settle |
+| PERF3 | Draw to offscreen first, blit to visible — removes GPU readback |
+| PERF4 | Pre-baked `Float32Array` per feature (`feat._px`) — zero projection math per frame |
+| PERF5 | Viewport culling for roads/waterways using `feat._bbox`; x+y sub-pixel check for buildings |
+| PERF6A | Per-layer OffscreenCanvas (`_buildingsOffscreen`, `_roadsOffscreen`, `_waterwaysOffscreen`) — toggle one layer re-renders only that layer |
+
+### City Features
+| ID | Feature |
+|----|---------|
+| CITY1 | City heights raster layer: `POST /api/cities/raster` burns building heights + road/waterway depressions onto a DEM-sized grid using rasterio; exposed as "City Heights" layer in stacked view |
+| CITY2 | Cities controls merged into settings panel collapsible section — removed dedicated subtab |
+
+### Architecture
+| ID | Change |
+|----|--------|
+| ARCH1 | `modules/state.js` Proxy-based reactive `appState` — loaded before other modules; subscribed in city-overlay.js and stacked-layers.js |
+| IMP1 | API key moved from `config.json` to `OPENTOPO_API_KEY` env var; `config.json` added to `.gitignore` |
+| IMP2 | Test suite rewritten: `httpx.AsyncClient` + `ASGITransport(app=app)` pattern for all API tests |
+| IMP3 | PERF5 viewport culling (see above) |
+| IMP6 | Stale `.gitmodules` in strm2stl repo removed |
+| IMP7 | `Code/cache/` stray duplicate directory deleted |
+| IMP8 | Duplicate `get_open_edges_old` functions in `numpy2stl/solid.py` deleted |
+| IMP9 | `location_picker.py` now emits `DeprecationWarning` at import time |
+| IMP10 | `Code/requirements.txt` deleted (duplicate); `strm2stl/requirements.txt` rewritten as clean UTF-8 |
+
+### New Features
+| ID | Feature |
+|----|---------|
+| P11 | Region thumbnail previews: DEM canvas captured as 48×30 JPEG after load, stored in `regionThumbnails` (localStorage key `strm2stl_thumbs`), shown as `<img class="coordinate-item-thumb">` in sidebar list |
+| OSM edge polygon fix | Coordinate clamping removed from `geoToPx` — canvas `clip()` handles bounds |
+| Projection-aware city overlay | `_buildGeoToPx()` reads `paramProjection`, applies mercator/cosine/lambert/sinusoidal |
+| Merge panel auto-populate | `_syncMergeFromCurrentLayers()` pre-populates merge panel from current DEM/water/sat layers |

@@ -16,6 +16,10 @@
  *   set once per bucket rather than once per feature (~8 vs ~3000 state changes).
  *   Roads are batched by rounded lineWidth for the same reason.
  *   Both render functions are debounced through requestAnimationFrame.
+ *
+ * Render functions (renderCityOverlay, renderCityOnDEM) and raster helpers
+ * (loadCityRaster, _setupCityRasterLayer, _clearCityRasterCache, _updateCitiesLoadButton)
+ * live in city-render.js, which must be loaded immediately after this file.
  */
 
 const ALPHA_BUCKETS = 8;   // number of opacity bands for building height shading
@@ -26,13 +30,6 @@ const ALPHA_BUCKETS = 8;   // number of opacity bands for building height shadin
 // Callers must read _pt.x / _pt.y immediately and never store the reference.
 // ---------------------------------------------------------------------------
 const _pt = { x: 0, y: 0 };
-
-// ---------------------------------------------------------------------------
-// Debounce tokens — prevents duplicate renders when called multiple times
-// within the same animation frame.
-// ---------------------------------------------------------------------------
-let _stackRafId  = null;
-let _demRafId    = null;
 
 // ---------------------------------------------------------------------------
 // PERF6 Part A — per-layer OffscreenCanvas cache.
@@ -67,6 +64,20 @@ const _demLayer      = _makeLayerCache();  // per-layer offscreen cache for DEM 
 /** null = untested, true = OffscreenCanvas available, false = not available */
 let _offscreenOk = null;
 
+// ---------------------------------------------------------------------------
+// Shared render state object — city-render.js reads/writes these through
+// window._cityRenderState so module-scoped variables stay encapsulated.
+// ---------------------------------------------------------------------------
+window._cityRenderState = {
+    get offscreenOk()      { return _offscreenOk; },
+    set offscreenOk(v)     { _offscreenOk = v; },
+    get stackLayer()       { return _stackLayer; },
+    get demLayer()         { return _demLayer; },
+    get LAYER_NAMES()      { return _LAYER_NAMES; },
+    get LAYER_TOGGLES()    { return _LAYER_TOGGLES; },
+    get cityDataVersion()  { return _cityDataVersion; },
+};
+
 /**
  * Bump the data version and invalidate all per-layer caches.
  * Call after loading new city data so the next render re-draws all layers.
@@ -87,6 +98,9 @@ function _makeCacheKey(version, W, H, bboxKey) {
     const proj = document.getElementById('paramProjection')?.value || 'none';
     return `${version}|${W}|${H}|${bboxKey}|${proj}`;
 }
+
+// Expose for city-render.js
+window._makeCacheKey = _makeCacheKey;
 
 /**
  * Build a projection-aware geoToPx function.
@@ -138,6 +152,9 @@ function _buildGeoToPx(north, south, east, west, canvasX, canvasY, canvasW, canv
         return _pt;
     };
 }
+
+// Expose for city-render.js
+window._buildGeoToPx = _buildGeoToPx;
 
 /**
  * PERF4: Pre-bake all features' coordinates into a flat Float32Array in pixel space,
@@ -195,6 +212,9 @@ function _prebakeFeatures(features, geoToPx, bakKey) {
         feat._px = { buf, counts, key: bakKey, x0, y0, x1, y1 };
     }
 }
+
+// Expose for city-render.js
+window._prebakeFeatures = _prebakeFeatures;
 
 // ---------------------------------------------------------------------------
 // Data loading
@@ -292,7 +312,7 @@ window.loadCityData = async function loadCityData() {
             showToast(`Warning: ${skippedCount} feature${skippedCount > 1 ? 's' : ''} had missing geometry and were skipped`, 'warning');
         }
 
-        renderCityOverlay();
+        window.renderCityOverlay?.();
         if (statusEl) statusEl.textContent = `Loaded (${data.diagonal_km?.toFixed(1) ?? '?'} km)`;
         if (showToast) showToast('City data loaded', 'success');
     } catch (e) {
@@ -428,9 +448,8 @@ const _updateCityLayerCount = window._updateCityLayerCount;
  */
 window.clearCityOverlay = function clearCityOverlay() {
     if (window.appState) window.appState.osmCityData = null;
-    // Cancel pending renders
-    if (_stackRafId) { cancelAnimationFrame(_stackRafId); _stackRafId = null; }
-    if (_demRafId)   { cancelAnimationFrame(_demRafId);   _demRafId   = null; }
+    // Cancel pending renders (RAF IDs live in city-render.js)
+    window._cancelCityRenders?.();
     // Remove stacked-layers OSM overlay
     document.querySelector('#layersStack .osm-overlay')?.remove();
     // Remove DEM canvas OSM overlay (Cities 8)
@@ -661,234 +680,17 @@ function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipR
     }
 }
 
-// ---------------------------------------------------------------------------
-// Public render functions — both debounced via requestAnimationFrame
-// ---------------------------------------------------------------------------
-
-/**
- * Render window.appState.osmCityData as a canvas overlay on the stacked layers view.
- * Debounced — multiple synchronous calls in the same frame coalesce to one render.
- */
-window.renderCityOverlay = function renderCityOverlay() {
-    if (_stackRafId) return;   // already scheduled this frame
-    _stackRafId = requestAnimationFrame(() => {
-        _stackRafId = null;
-        _doRenderCityOverlay();
-    });
-};
-
-function _doRenderCityOverlay() {
-    const osmCityData = window.appState?.osmCityData;
-    if (!osmCityData) return;
-
-    const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion;
-    if (!bbox) return;
-
-    const stack = document.getElementById('layersStack');
-    if (!stack) return;
-
-    const { north, south, east, west } = bbox;
-    const latRange = north - south;
-
-    // Get or create overlay canvas inside the stack
-    let overlay = stack.querySelector('.osm-overlay');
-    if (!overlay) {
-        overlay = document.createElement('canvas');
-        overlay.className = 'osm-overlay layer-canvas';
-        overlay.style.pointerEvents = 'none';
-        overlay.style.zIndex = '10';
-        stack.appendChild(overlay);
-    }
-
-    // Size the overlay to match the stack's full pixel dimensions
-    const stackRect = stack.getBoundingClientRect();
-    const W = Math.round(stackRect.width)  || 600;
-    const H = Math.round(stackRect.height) || 400;
-
-    // Letterbox target rect matching updateStackedLayers
-    const latMid     = (north + south) / 2;
-    const latCos     = Math.cos(latMid * Math.PI / 180);
-    const bboxAspect = ((east - west) * latCos) / latRange;
-    const stackAspect = W / H;
-    let tX = 0, tY = 0, tW = W, tH = H;
-    if (bboxAspect > stackAspect) {
-        tW = W; tH = W / bboxAspect; tY = (H - tH) / 2;
-    } else {
-        tH = H; tW = H * bboxAspect; tX = (W - tW) / 2;
-    }
-
-    const stackZoom = window.appState?.stackZoom || { scale: 1, offsetX: 0, offsetY: 0 };
-    const invZ      = 1 / (stackZoom.scale || 1);
-    const bboxLonM  = (east - west) * latCos * 111_000;
-    const bboxKey   = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
-    // PERF2: invZ excluded from cache key — CSS transform covers intermediate zoom frames
-    const cacheKey  = _makeCacheKey(_cityDataVersion, W, H, bboxKey);
-
-    overlay.width  = W;
-    overlay.height = H;
-    const ctx = overlay.getContext('2d');
-
-    // Test OffscreenCanvas support once (same browser capability for the entire session)
-    if (_offscreenOk === null) {
-        try { new OffscreenCanvas(1, 1); _offscreenOk = true; } catch (_) { _offscreenOk = false; }
-    }
-
-    // Common setup used by both the per-layer and fallback paths
-    const geoToPx  = _buildGeoToPx(north, south, east, west, tX, tY, tW, tH);
-    const clipRect = { x0: tX, y0: tY, x1: tX + tW, y1: tY + tH };
-    const bakKey   = `stack|${W}|${H}|${bboxKey}|${document.getElementById('paramProjection')?.value || 'none'}`;
-
-    // PERF4: pre-bake pixel coords (no-op for features already baked for this bakKey)
-    if (osmCityData.buildings?.features) _prebakeFeatures(osmCityData.buildings.features, geoToPx, bakKey);
-    if (osmCityData.roads?.features)     _prebakeFeatures(osmCityData.roads.features,     geoToPx, bakKey);
-    if (osmCityData.waterways?.features) _prebakeFeatures(osmCityData.waterways.features, geoToPx, bakKey);
-    if (osmCityData.pois?.features)      _prebakeFeatures(osmCityData.pois.features,      geoToPx, bakKey);
-
-    if (_offscreenOk) {
-        // PERF6 Part A: render each stale layer to its own OffscreenCanvas.
-        // Layers whose cacheKey already matches are skipped (no re-draw).
-        // Compositing is always just 4 drawImage blits.
-        for (const layer of _LAYER_NAMES) {
-            if (_stackLayer[layer].key === cacheKey && _stackLayer[layer].canvas) continue;
-            const offscreen = new OffscreenCanvas(W, H);
-            const octx = offscreen.getContext('2d');
-            octx.save();
-            octx.beginPath(); octx.rect(tX, tY, tW, tH); octx.clip();
-            _drawCityCanvas(octx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, layer);
-            octx.restore();
-            _stackLayer[layer].canvas = offscreen;
-            _stackLayer[layer].key    = cacheKey;
-        }
-        // Composite: blit only the visible layers (toggle state checked here, not at bake time)
-        ctx.clearRect(0, 0, W, H);
-        for (const layer of _LAYER_NAMES) {
-            if (!document.getElementById(_LAYER_TOGGLES[layer])?.checked) continue;
-            ctx.drawImage(_stackLayer[layer].canvas, 0, 0);
-        }
-    } else {
-        // Fallback: draw all visible layers in one pass directly to visible canvas
-        ctx.clearRect(0, 0, W, H);
-        ctx.save();
-        ctx.beginPath(); ctx.rect(tX, tY, tW, tH); ctx.clip();
-        _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, null);
-        ctx.restore();
-    }
-
-    // Re-apply the current stackZoom CSS transform so this canvas stays aligned
-    // with the DEM/Water/Sat layer canvases (which always carry the zoom transform).
-    overlay.style.transformOrigin = '0 0';
-    overlay.style.transform = `translate(${stackZoom.offsetX}px, ${stackZoom.offsetY}px) scale(${stackZoom.scale})`;
-
-    // Also update the DEM canvas overlay (Cities 8) — but only schedule it,
-    // don't run it inline so this frame stays fast.
-    window.renderCityOnDEM?.();
-}
-
-/**
- * Render the city overlay directly onto the main DEM canvas in the Edit tab.
- * Cities 8: buildings + roads painted on top of the terrain image.
- * Debounced — multiple calls coalesce to one render per frame.
- * Only runs if the DEM canvas element is present and has non-zero dimensions.
- */
-window.renderCityOnDEM = function renderCityOnDEM() {
-    if (_demRafId) return;   // already scheduled this frame
-    _demRafId = requestAnimationFrame(() => {
-        _demRafId = null;
-        _doRenderCityOnDEM();
-    });
-};
-
-function _doRenderCityOnDEM() {
-    const osmCityData = window.appState?.osmCityData;
-    if (!osmCityData) return;
-
-    const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion;
-    if (!bbox) return;
-
-    const demContainer = document.getElementById('demImage');
-    if (!demContainer) return;
-
-    // Match the DEM canvas pixel resolution (exclude gridline/overlay canvases)
-    const demCanvas = demContainer.querySelector(
-        'canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay)'
-    );
-    if (!demCanvas) return;
-    const W = demCanvas.width;
-    const H = demCanvas.height;
-    if (!W || !H) return;
-
-    let overlay = demContainer.querySelector('.city-dem-overlay');
-    if (!overlay) {
-        overlay = document.createElement('canvas');
-        overlay.className = 'city-dem-overlay';
-        overlay.style.cssText = 'position:absolute;pointer-events:none;z-index:5;';
-        demContainer.appendChild(overlay);
-    }
-    overlay.width  = W;
-    overlay.height = H;
-
-    // Position overlay to match the DEM canvas's actual CSS rect within #demImage
-    // (#demImage uses flexbox centering, so the canvas may not start at top:0)
-    const demCSSRect = demCanvas.getBoundingClientRect();
-    const containerCSSRect = demContainer.getBoundingClientRect();
-    overlay.style.left   = (demCSSRect.left - containerCSSRect.left) + 'px';
-    overlay.style.top    = (demCSSRect.top  - containerCSSRect.top)  + 'px';
-    overlay.style.width  = demCSSRect.width  + 'px';
-    overlay.style.height = demCSSRect.height + 'px';
-
-    const { north, south, east, west } = bbox;
-    const lonRange = east - west;
-    const latMid   = (north + south) / 2;
-    const bboxLonM = lonRange * Math.cos(latMid * Math.PI / 180) * 111_000;
-    const bboxKey  = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
-    // PERF2: invZ (=1 for DEM view) excluded for consistency; cacheKey only needs data+layout
-    const cacheKey = _makeCacheKey(_cityDataVersion, W, H, bboxKey);
-
-    const ctx = overlay.getContext('2d');
-
-    // _offscreenOk already set by _doRenderCityOverlay; test here too in case
-    // _doRenderCityOnDEM is called first (e.g., DEM view only, no stacked view).
-    if (_offscreenOk === null) {
-        try { new OffscreenCanvas(1, 1); _offscreenOk = true; } catch (_) { _offscreenOk = false; }
-    }
-
-    const geoToPx  = _buildGeoToPx(north, south, east, west, 0, 0, W, H);
-    const clipRect = { x0: 0, y0: 0, x1: W, y1: H };
-
-    // PERF4: pre-bake pixel coords (DEM view has different geoToPx than stack view)
-    const bakKey = `dem|${W}|${H}|${bboxKey}|${document.getElementById('paramProjection')?.value || 'none'}`;
-    if (osmCityData.buildings?.features) _prebakeFeatures(osmCityData.buildings.features, geoToPx, bakKey);
-    if (osmCityData.roads?.features)     _prebakeFeatures(osmCityData.roads.features,     geoToPx, bakKey);
-    if (osmCityData.waterways?.features) _prebakeFeatures(osmCityData.waterways.features, geoToPx, bakKey);
-    if (osmCityData.pois?.features)      _prebakeFeatures(osmCityData.pois.features,      geoToPx, bakKey);
-
-    if (_offscreenOk) {
-        // PERF6 Part A: per-layer offscreen cache for DEM view
-        for (const layer of _LAYER_NAMES) {
-            if (_demLayer[layer].key === cacheKey && _demLayer[layer].canvas) continue;
-            const offscreen = new OffscreenCanvas(W, H);
-            const octx = offscreen.getContext('2d');
-            _drawCityCanvas(octx, geoToPx, 1, osmCityData, W, W, bboxLonM, clipRect, layer);
-            _demLayer[layer].canvas = offscreen;
-            _demLayer[layer].key    = cacheKey;
-        }
-        ctx.clearRect(0, 0, W, H);
-        for (const layer of _LAYER_NAMES) {
-            if (!document.getElementById(_LAYER_TOGGLES[layer])?.checked) continue;
-            ctx.drawImage(_demLayer[layer].canvas, 0, 0);
-        }
-    } else {
-        // Fallback: draw all visible layers directly to visible canvas
-        ctx.clearRect(0, 0, W, H);
-        _drawCityCanvas(ctx, geoToPx, 1, osmCityData, W, W, bboxLonM, clipRect, null);
-    }
-}
+// Expose for city-render.js
+window._drawCityCanvas = _drawCityCanvas;
 
 // ---------------------------------------------------------------------------
 // Reactive subscriptions via appState (ARCH1)
 // Re-render overlays automatically when data or bbox changes.
 // ---------------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
+    // Wire city heights raster layer controls
+    window._setupCityRasterLayer?.();
+
     if (!window.appState?.on) return;   // state.js not loaded
 
     // When DEM data changes, re-compute terrain Z for existing city features and re-render

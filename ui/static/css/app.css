@@ -2330,6 +2330,20 @@
         }
 
         /* Permanent edit button inside bbox rectangles on the map */
+        /* Leaflet tooltip for region hover thumbnail preview (P12) */
+        .leaflet-tooltip.region-thumb-tooltip {
+            background: #1e1e1e;
+            border: 1px solid #444;
+            border-radius: 5px;
+            padding: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            color: #ccc;
+            pointer-events: none;
+        }
+        .leaflet-tooltip.region-thumb-tooltip::before {
+            border-top-color: #444;
+        }
+
         .bbox-edit-icon {
             background: rgba(0,0,0,0.65);
             color: #ddd;
@@ -2551,6 +2565,20 @@
         .continent-body-sidebar.collapsed { display: none; }
 
         /* Region Notes */
+        .coordinate-item-thumb {
+            width: 48px;
+            height: 30px;
+            object-fit: cover;
+            border-radius: 3px;
+            flex-shrink: 0;
+            opacity: 0.85;
+        }
+
+        .coordinate-item.selected .coordinate-item-thumb {
+            opacity: 1;
+            box-shadow: 0 0 0 1px rgba(255,255,255,0.4);
+        }
+
         .coordinate-item-notes {
             cursor: pointer;
             opacity: 0.5;
