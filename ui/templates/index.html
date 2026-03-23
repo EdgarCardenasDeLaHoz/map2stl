@@ -712,6 +712,16 @@
                                             <canvas id="curveCanvas"></canvas>
                                         </div>
                                         <div class="curve-controls">
+                                            <button id="undoCurveBtn" class="btn btn-secondary"
+                                                style="padding:6px 10px;font-size:12px;"
+                                                title="Undo last curve change (Ctrl+Z)" disabled>
+                                                ⟵ Undo
+                                            </button>
+                                            <button id="redoCurveBtn" class="btn btn-secondary"
+                                                style="padding:6px 10px;font-size:12px;"
+                                                title="Redo last curve change (Ctrl+Y)" disabled>
+                                                Redo ⟶
+                                            </button>
                                             <button id="applyCurveBtn" class="btn btn-primary"
                                                 style="padding:6px 12px;font-size:12px;"
                                                 title="Apply the elevation curve — remaps how heights are coloured without reloading data">
@@ -1343,9 +1353,21 @@
     <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <!-- Extracted modules — must be loaded before app.js DOMContentLoaded fires -->
+    <script src="/static/js/modules/api.js"></script>
+    <script src="/static/js/modules/cache.js"></script>
+    <script src="/static/js/modules/ui-helpers.js"></script>
     <script src="/static/js/modules/state.js"></script>
+    <script src="/static/js/modules/dem-loader.js"></script>
+    <script src="/static/js/modules/presets.js"></script>
+    <script src="/static/js/modules/curve-editor.js"></script>
     <script src="/static/js/modules/city-overlay.js"></script>
     <script src="/static/js/modules/stacked-layers.js"></script>
+    <script src="/static/js/modules/export-handlers.js"></script>
+    <script src="/static/js/modules/model-viewer.js"></script>
+    <script src="/static/js/modules/compare-view.js"></script>
+    <script src="/static/js/modules/region-ui.js"></script>
+    <script src="/static/js/modules/dem-merge.js"></script>
+    <script src="/static/js/modules/water-mask.js"></script>
     <script src="/static/js/app.js"></script>
 
     <!-- Load third-party libs from CDN -->
