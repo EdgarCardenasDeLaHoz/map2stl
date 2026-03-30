@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/region-ui.js — Region list, table, notes, and thumbnail UI.
  *
  * Loaded as a plain <script> before app.js.
@@ -28,7 +28,7 @@
  *   window.switchView(view)             — from app.js
  *   window.renderSidebarTable()         — from app.js
  *   window.loadCoordinates()            — from app.js
- *   showToast(msg, type)                — file-top global in app.js
+ *   window.showToast(msg, type)                — file-top global in app.js
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -137,9 +137,8 @@ function renderCoordinatesList() {
             item.className = 'coordinate-item';
             item.dataset.regionName = region.name;
             if (selected && selected.name === region.name) item.classList.add('selected');
-            const thumbSrc = regionThumbnails[region.name];
             item.innerHTML = `
-                ${thumbSrc ? `<img class="coordinate-item-thumb" src="${thumbSrc}" alt="" aria-hidden="true">` : '<span class="coordinate-item-icon">📍</span>'}
+                <span class="coordinate-item-icon">📍</span>
                 <span class="coordinate-item-name">${region.name}</span>
                 <span class="coordinate-item-meta">${region.description || ''}</span>
                 <span class="coordinate-item-notes ${hasNote ? 'has-note' : ''}"
@@ -230,7 +229,7 @@ function setupRegionsTable() {
         refreshBtn.onclick = async () => {
             await window.loadCoordinates?.();
             populateRegionsTable();
-            showToast('Regions refreshed', 'success');
+            window.showToast('Regions refreshed', 'success');
         };
     }
 }
@@ -302,10 +301,10 @@ function saveRegionNotes() {
         delete regionNotes[currentNotesRegion];
     }
     try { localStorage.setItem('strm2stl_regionNotes', JSON.stringify(regionNotes)); }
-    catch (_) { showToast('Could not save notes — storage full or unavailable', 'warning'); }
+    catch (_) { window.showToast('Could not save notes — storage full or unavailable', 'warning'); }
     hideNotesModal();
     renderCoordinatesList();
-    showToast('Notes saved!', 'success');
+    window.showToast('Notes saved!', 'success');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

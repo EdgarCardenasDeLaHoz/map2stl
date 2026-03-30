@@ -1,0 +1,714 @@
+﻿// ============================================================
+// DEM MAIN — modules/dem-main.js
+// Extracted from app.js (DOMContentLoaded closure).
+// Handles main DEM loading, canvas rendering, DEM empty-state,
+// workflow stepper, print dimensions, bed optimizer, and
+// satellite image loading.
+//
+// Loaded as a plain <script> before app.js.
+// All functions exposed on window.*
+// Closure vars accessed via window.appState.* or window.get*()/set*() getters.
+// ============================================================
+
+'use strict';
+
+// ---------------------------------------------------------------------------
+// loadDEM
+// ---------------------------------------------------------------------------
+
+/**
+ * Main DEM loader. Fetches DEM data from /api/terrain/dem for the current bbox,
+ * renders to canvas with colormap and projection, draws histogram and colorbar,
+ * stores result in appState.lastDemData, and updates stacked layers.
+ * Exposed as window.loadDEM for HTML onclick access.
+ * @param {boolean} [highRes=false] - Use 400px dim instead of the form value
+ * @returns {Promise<void>}
+ */
+window.loadDEM = async function loadDEM(highRes = false) {
+    // Abort any in-flight DEM request before starting a new one
+    if (window.loadDEM._controller) {
+        window.loadDEM._controller.abort();
+    }
+    window.loadDEM._controller = new AbortController();
+    const signal = window.loadDEM._controller.signal;
+
+    const boundingBox    = window.getBoundingBox?.();
+    const selectedRegion = window.appState.selectedRegion;
+
+    if (!boundingBox && !selectedRegion) {
+        document.getElementById('demImage').innerHTML = '<p>Please select a region or draw a bounding box first.</p>';
+        window.showToast?.('Please select a region first', 'warning');
+        return;
+    }
+
+    let bounds;
+    if (boundingBox) {
+        bounds = boundingBox;
+    } else if (selectedRegion) {
+        bounds = L.latLngBounds(
+            [selectedRegion.south, selectedRegion.west],
+            [selectedRegion.north, selectedRegion.east]
+        );
+    }
+
+    const north = bounds.getNorth();
+    const south = bounds.getSouth();
+    const east  = bounds.getEast();
+    const west  = bounds.getWest();
+
+    const dataset    = document.getElementById('demDataset').value;
+    const showLandUse = document.getElementById('paramLandUse').checked;
+    const demSource  = document.getElementById('paramDemSource')?.value || 'local';
+
+    const params = new URLSearchParams({
+        north, south, east, west,
+        dim:            highRes ? 400 : document.getElementById('paramDim').value,
+        depth_scale:    document.getElementById('paramDepthScale').value,
+        water_scale:    document.getElementById('paramWaterScale').value,
+        height:         document.getElementById('paramHeight').value,
+        base:           document.getElementById('paramBase').value,
+        subtract_water: document.getElementById('paramSubtractWater').checked,
+        dataset:        dataset,
+        show_landuse:   showLandUse,
+        dem_source:     demSource,
+    });
+
+    // Clear DEM cache before loading new DEM
+    window.clearLayerCache?.();
+
+    // Update layer status
+    window.appState.layerStatus.dem = 'loading';
+    window.events?.emit(window.EV?.STATUS_UPDATE);
+
+    // Show loading overlay on stacked layers view
+    const stackContainer = document.getElementById('dem-image-section');
+    if (stackContainer) window.showLoading?.(stackContainer, 'Loading DEM...');
+
+    // Show loading indicator and clear old DEM
+    const demImageContainer = document.getElementById('demImage');
+    demImageContainer.innerHTML = `<div class="loading"><span class="spinner"></span>Loading DEM... <button onclick="window.loadDEM._controller&&window.loadDEM._controller.abort()" style="margin-left:10px;padding:2px 8px;background:#c0392b;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px;">✕ Cancel</button></div>`;
+    window.showToast?.('Loading DEM data...', 'info');
+
+    // Optionally, show a progress bar
+    let progressBar = document.createElement('div');
+    progressBar.className = 'dem-progress-bar';
+    progressBar.style.width = '100%';
+    progressBar.style.height = '6px';
+    progressBar.style.background = '#eee';
+    progressBar.innerHTML = '<div style="width:0%;height:100%;background:#4a90e2;transition:width 0.3s;" id="demProgress"></div>';
+    demImageContainer.appendChild(progressBar);
+
+    try {
+        const { data, error: loadErr } = await window.api.dem.load(params, signal);
+        if (signal.aborted) return;  // intentional cancellation — not an error
+        if (loadErr) {
+            console.error('Failed to load /api/terrain/dem:', loadErr);
+            { const _p = document.createElement('p'); _p.textContent = `Error: ${loadErr}`; document.getElementById('demImage').replaceChildren(_p); }
+            window.appState.layerStatus.dem = 'error';
+            window.events?.emit(window.EV?.STATUS_UPDATE);
+            window.showToast?.('Failed to load DEM: ' + loadErr, 'error');
+            return;
+        }
+
+        if (data.error) {
+            { const _p = document.createElement('p'); _p.textContent = `Error: ${data.error}`; document.getElementById('demImage').replaceChildren(_p); }
+            window.appState.layerStatus.dem = 'error';
+            window.events?.emit(window.EV?.STATUS_UPDATE);
+            window.showToast?.('Failed to load DEM: ' + data.error, 'error');
+            return;
+        }
+
+        // Track bbox and update status
+        window.appState.layerBboxes.dem = { north, south, east, west };
+        window.appState.layerStatus.dem = 'loaded';
+        window.events?.emit(window.EV?.STATUS_UPDATE);
+
+        // Remove loading overlay from stacked layers
+        const stackC = document.getElementById('dem-image-section');
+        if (stackC) window.hideLoading?.(stackC);
+
+        // Client-side rendering of DEM data
+        if (data.dem_values && data.dimensions) {
+            let demVals = data.dem_values;
+            let h = Number(data.dimensions[0]);
+            let w = Number(data.dimensions[1]);
+
+            // Handle nested arrays
+            if (Array.isArray(demVals) && demVals.length && Array.isArray(demVals[0])) {
+                h = demVals.length;
+                w = demVals[0].length;
+                demVals = demVals.flat();
+            }
+
+            const colormap  = document.getElementById('demColormap').value;
+            const finiteVals = demVals.filter(Number.isFinite);
+            const calcMin   = finiteVals.length ? finiteVals.reduce((a, b) => a < b ? a : b, finiteVals[0]) : 0;
+            const calcMax   = finiteVals.length ? finiteVals.reduce((a, b) => a > b ? a : b, finiteVals[0]) : 1;
+            const vmin      = data.min_elevation !== undefined ? data.min_elevation : calcMin;
+            const vmax      = data.max_elevation !== undefined ? data.max_elevation : calcMax;
+
+            // Store bounding box for gridlines
+            window.appState.currentDemBbox = { north, south, east, west };
+
+            // Render DEM canvas
+            const rawCanvas = window.renderDEMCanvas?.(demVals, w, h, colormap, vmin, vmax);
+            const canvas    = window.applyProjection?.(rawCanvas, { north, south, east, west });
+            const container = document.getElementById('demImage');
+            container.innerHTML = '';
+            container.appendChild(canvas);
+            // Fill container width, preserve aspect ratio
+            canvas.style.width = '100%';
+            canvas.style.height = 'auto';
+            container.style.position = 'relative';
+
+            // Update overlays
+            window.updateAxesOverlay?.(window.appState.currentDemBbox);
+            window.drawColorbar?.(vmin, vmax, colormap);
+            window.drawHistogram?.(demVals);
+
+            // Draw gridlines after canvas is appended and sized
+            requestAnimationFrame(() => window.drawGridlinesOverlay?.('demImage'));
+
+            // Update stacked layers view
+            requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+
+            // Populate bbox fine-tune inputs
+            window.setBboxInputValues?.(north, south, east, west);
+            const elevRange = document.getElementById('bboxElevRange');
+            if (elevRange) elevRange.textContent = `Elevation: ${vmin.toFixed(1)}m — ${vmax.toFixed(1)}m`;
+
+            // Sync mini-map rectangle to new bbox
+            window.syncBboxMiniMap?.();
+
+            // Update rescale inputs with current values
+            document.getElementById('rescaleMin').value = Math.floor(vmin);
+            document.getElementById('rescaleMax').value = Math.ceil(vmax);
+
+            // Handle landuse/satellite data if available
+            const landuseContainer = document.getElementById('demLanduse');
+            const landuseWrapper   = document.querySelector('.dem-landuse-container');
+            if (data.sat_values && data.sat_dimensions && data.sat_available) {
+                const sat_h   = data.sat_dimensions[0];
+                const sat_w   = data.sat_dimensions[1];
+                const satCanvas = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
+                landuseContainer.innerHTML = '';
+                landuseContainer.appendChild(satCanvas);
+                landuseWrapper.classList.remove('hidden');
+            } else {
+                landuseWrapper.classList.add('hidden');
+            }
+
+            // Enable zoom/pan on new canvas
+            window.enableZoomAndPan?.(canvas);
+
+            // Capture a small thumbnail for the sidebar
+            const currentSelectedRegion = window.appState.selectedRegion;
+            if (currentSelectedRegion?.name) {
+                try {
+                    const thumbCanvas = document.createElement('canvas');
+                    thumbCanvas.width = 48; thumbCanvas.height = 30;
+                    thumbCanvas.getContext('2d').drawImage(canvas, 0, 0, 48, 30);
+                    window.saveRegionThumbnail?.(currentSelectedRegion.name, thumbCanvas.toDataURL('image/jpeg', 0.6));
+                    window.renderCoordinatesList?.();
+                } catch (_) {}
+            }
+
+            // Store bbox on lastDemData for physical dimensions calculation
+            if (window.appState.lastDemData) window.appState.lastDemData.bbox = { north, south, east, west };
+
+            // Cities: refresh city overlay on DEM canvas after reload
+            if (window.appState?.osmCityData) requestAnimationFrame(() => window.renderCityOnDEM?.());
+
+            // Auto-load city data if any city layer toggle is enabled and region is small enough
+            const _anyLayerOn = ['layerBuildingsToggle','layerRoadsToggle','layerWaterwaysToggle']
+                .some(id => document.getElementById(id)?.checked);
+            if (_anyLayerOn && !window.appState?.osmCityData && typeof window.loadCityData === 'function') {
+                window.loadCityData?.();
+            }
+
+            // Update print dimensions panel (Extrude tab)
+            window.updatePrintDimensions?.();
+
+            window.showToast?.(`DEM loaded (${vmin.toFixed(0)}m - ${vmax.toFixed(0)}m)`, 'success');
+        } else {
+            document.getElementById('demImage').innerHTML = '<p>No DEM data available</p>';
+            window.appState.layerStatus.dem = 'error';
+            window.events?.emit(window.EV?.STATUS_UPDATE);
+            window.showToast?.('No DEM data available', 'warning');
+        }
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            document.getElementById('demImage').innerHTML = '<p>DEM load cancelled.</p>';
+            window.appState.layerStatus.dem = 'empty';
+            window.events?.emit(window.EV?.STATUS_UPDATE);
+            return;
+        }
+        console.error('Error loading DEM:', error);
+        console.error('Error stack:', error.stack);
+        { const _p = document.createElement('p'); _p.textContent = `Failed to load DEM: ${error.message || error}`; document.getElementById('demImage').replaceChildren(_p); }
+        window.appState.layerStatus.dem = 'error';
+        window.events?.emit(window.EV?.STATUS_UPDATE);
+        window.showToast?.('Failed to load DEM', 'error');
+    } finally {
+        const stackF = document.getElementById('dem-image-section');
+        if (stackF) window.hideLoading?.(stackF);
+    }
+};
+
+// ---------------------------------------------------------------------------
+// renderDEMCanvas
+// ---------------------------------------------------------------------------
+
+/**
+ * Render elevation values to a canvas element using a colour lookup table.
+ * Stores data in appState.lastDemData, then updates layer status.
+ * @param {number[]} values - Flat array of elevation values (row-major)
+ * @param {number} width - Canvas width in pixels
+ * @param {number} height - Canvas height in pixels
+ * @param {string} colormap - Colormap name ('terrain','viridis','jet','rainbow','hot','gray')
+ * @param {number} [vmin] - Minimum value for colour mapping
+ * @param {number} [vmax] - Maximum value for colour mapping
+ * @returns {HTMLCanvasElement} The rendered canvas element
+ */
+window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colormap, vmin, vmax) {
+    // Store last DEM data
+    const lastDemData = { values: (Array.isArray(values) ? values.slice() : []), width, height, colormap, vmin, vmax };
+    window.appState.lastDemData = lastDemData;
+    // app.js closure var lastDemData is synced back by the renderDEMCanvas stub in app.js.
+
+    window._setDemEmptyState?.(false);
+    window._updateWorkflowStepper?.();
+
+    // Let curve-editor.js re-normalize control points and insert sea-level marker.
+    window.appState._onDemLoaded?.(vmin, vmax);
+    window.appState.curveDataVmin = vmin;
+    window.appState.curveDataVmax = vmax;
+
+    // Track DEM layer bbox
+    const currentDemBbox = window.appState.currentDemBbox;
+    if (currentDemBbox) {
+        window.appState.layerBboxes.dem = { ...currentDemBbox };
+        window.appState.layerStatus.dem = 'loaded';
+        window.events?.emit(window.EV?.STATUS_UPDATE);
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width  = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, width, height);
+    const img = ctx.createImageData(width, height);
+
+    const data = img.data;
+    const flat = Array.isArray(values) ? values : [];
+    const len  = flat.length;
+
+    // Find min/max
+    let calcMin = Infinity, calcMax = -Infinity;
+    for (let i = 0; i < len; i++) {
+        const v = flat[i];
+        if (Number.isFinite(v)) {
+            if (v < calcMin) calcMin = v;
+            if (v > calcMax) calcMax = v;
+        }
+    }
+    if (calcMin === Infinity)  calcMin = 0;
+    if (calcMax === -Infinity) calcMax = 1;
+
+    const min      = (typeof vmin === 'number') ? vmin : calcMin;
+    const max      = (typeof vmax === 'number') ? vmax : calcMax;
+    const range    = (max - min) || 1;
+    const invRange = 1 / range;
+
+    // Pre-compute colour lookup table
+    const colorLUT = new Uint8Array(1024 * 3);
+    for (let i = 0; i < 1024; i++) {
+        const t     = i / 1023;
+        const [r, g, b] = window.mapElevationToColor?.(t, colormap) || [0, 0, 0];
+        colorLUT[i * 3]     = Math.round((r || 0) * 255);
+        colorLUT[i * 3 + 1] = Math.round((g || 0) * 255);
+        colorLUT[i * 3 + 2] = Math.round((b || 0) * 255);
+    }
+
+    const total = width * height;
+    for (let i = 0; i < total; i++) {
+        const val = (i < len) ? flat[i] : NaN;
+        const idx = i << 2;
+
+        if (Number.isFinite(val)) {
+            const t        = (val - min) * invRange;
+            const tClamped = t < 0 ? 0 : (t > 1 ? 1 : t);
+            const lutIdx   = (tClamped * 1023 + 0.5 | 0) * 3;
+            data[idx]      = colorLUT[lutIdx];
+            data[idx + 1]  = colorLUT[lutIdx + 1];
+            data[idx + 2]  = colorLUT[lutIdx + 2];
+            data[idx + 3]  = 255;
+        } else {
+            data[idx] = data[idx + 1] = data[idx + 2] = data[idx + 3] = 0;
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+    canvas.style.maxWidth = '100%';
+    canvas.style.height   = 'auto';
+    canvas.style.display  = 'block';
+
+    return canvas;
+};
+
+// Resize handler: ensure canvas scales to container
+window.addEventListener('resize', () => {
+    const container = document.getElementById('demImage');
+    if (!container) return;
+    const canvas = container.querySelector('canvas');
+    if (canvas) {
+        canvas.style.width  = '100%';
+        canvas.style.height = '100%';
+    }
+});
+
+// ---------------------------------------------------------------------------
+// _setDemEmptyState
+// ---------------------------------------------------------------------------
+
+/**
+ * Show or hide the DEM empty state and layers container.
+ * @param {boolean} isEmpty
+ */
+window._setDemEmptyState = function _setDemEmptyState(isEmpty) {
+    const emptyEl  = document.getElementById('demEmptyState');
+    const layersEl = document.getElementById('layersContainer');
+    if (emptyEl)  emptyEl.style.display  = isEmpty ? 'flex' : 'none';
+    if (layersEl) layersEl.style.display = isEmpty ? 'none' : '';
+};
+
+// ---------------------------------------------------------------------------
+// _updateWorkflowStepper
+// ---------------------------------------------------------------------------
+
+/**
+ * Update the workflow stepper in the header.
+ * Three steps: (1) region selected, (2) DEM loaded, (3) model generated.
+ */
+window._updateWorkflowStepper = function _updateWorkflowStepper() {
+    const step1Done = !!window.appState.selectedRegion;
+    const step2Done = !!window.appState.lastDemData;
+    const step3Done = !!window.appState.generatedModelData;
+
+    document.getElementById('tabExplore')?.classList.toggle('step-done', step1Done);
+    document.getElementById('tabEdit')?.classList.toggle('step-done', step2Done);
+    document.getElementById('tabExtrude')?.classList.toggle('step-done', step3Done);
+
+    const hint     = document.getElementById('workflowHint');
+    const hintText = document.getElementById('workflowHintText');
+    if (!hint || !hintText) return;
+
+    if (step1Done && step2Done && step3Done) {
+        hint.hidden = true;
+        return;
+    }
+    hint.hidden = false;
+
+    function _stepEl(n, label, state) {
+        const icon = state === 'done' ? '✓' : String(n);
+        return `<span class="workflow-hint-step ${state}">${icon} ${label}</span>`;
+    }
+
+    const s1 = _stepEl(1, 'Select region', step1Done ? 'done' : 'active');
+    const s2 = _stepEl(2, 'Load DEM',      step2Done ? 'done' : (step1Done ? 'active' : 'pending'));
+    const s3 = _stepEl(3, 'Generate model', step3Done ? 'done' : (step2Done ? 'active' : 'pending'));
+
+    hintText.innerHTML = `${s1} <span class="workflow-hint-sep">›</span> ${s2} <span class="workflow-hint-sep">›</span> ${s3}`;
+};
+
+// ---------------------------------------------------------------------------
+// updatePrintDimensions
+// ---------------------------------------------------------------------------
+
+/**
+ * Update the physical dimensions panel in the Extrude tab.
+ * Calculates real-world bbox area, print footprint in mm, map scale,
+ * model height, and bed fit. Pure JS — no backend call needed.
+ */
+window.updatePrintDimensions = function updatePrintDimensions() {
+    const panel     = document.getElementById('printDimensions');
+    const lastDemData = window.appState.lastDemData;
+    if (!lastDemData || !lastDemData.width || !lastDemData.height) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    const gridW  = lastDemData.width;
+    const gridH  = lastDemData.height;
+    const modelH = parseFloat(document.getElementById('modelResolution').value) || 200;
+    const baseH  = parseFloat(document.getElementById('modelBaseHeight').value) || 0;
+    const totalH = modelH + baseH;
+
+    document.getElementById('dimFootprint').textContent = `${gridW} × ${gridH} mm`;
+    document.getElementById('dimHeight').textContent    = `${totalH} mm (${modelH} terrain + ${baseH} base)`;
+
+    const selectedRegion = window.appState.selectedRegion;
+    const bbox = lastDemData.bbox || (selectedRegion ? {
+        north: selectedRegion.north, south: selectedRegion.south,
+        east:  selectedRegion.east,  west:  selectedRegion.west
+    } : null);
+
+    if (bbox) {
+        const midLat  = (bbox.north + bbox.south) / 2;
+        const latCos  = Math.cos(midLat * Math.PI / 180);
+        const realW_m = Math.abs(bbox.east - bbox.west) * 111320 * latCos;
+        const realH_m = Math.abs(bbox.north - bbox.south) * 110540;
+        const realW_km = realW_m / 1000;
+        const realH_km = realH_m / 1000;
+
+        document.getElementById('dimRealArea').textContent =
+            `${realW_km.toFixed(1)} × ${realH_km.toFixed(1)} km`;
+
+        const scale = Math.round(realW_m / (gridW / 1000));
+        document.getElementById('dimScale').textContent = `1 : ${scale.toLocaleString()}`;
+
+        const beds = [
+            { name: 'Ender 220', w: 220, h: 220 },
+            { name: 'Prusa 250', w: 250, h: 210 },
+            { name: 'Bambu 256', w: 256, h: 256 },
+            { name: 'Bambu 350', w: 350, h: 350 },
+        ];
+        const fitting = beds.filter(b => gridW <= b.w && gridH <= b.h);
+        const fitRow  = document.getElementById('dimBedFitRow');
+        const fitText = document.getElementById('dimBedFitText');
+        if (fitting.length > 0) {
+            fitText.textContent = '✓ ' + fitting.map(b => b.name).join(', ');
+            fitRow.style.color  = '#52b788';
+        } else {
+            fitText.textContent = '⚠ exceeds standard beds';
+            fitRow.style.color  = '#e67e22';
+        }
+    } else {
+        document.getElementById('dimRealArea').textContent  = '—';
+        document.getElementById('dimScale').textContent     = '—';
+        document.getElementById('dimBedFitText').textContent = '—';
+    }
+
+    panel.style.display = 'block';
+
+    // Bed optimizer
+    window._updateBedOptimizer?.(bbox);
+};
+
+// ---------------------------------------------------------------------------
+// _updateBedOptimizer
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the recommended resolution and print scale for the selected printer bed.
+ * @param {Object|null} bbox - {north, south, east, west} or null
+ */
+window._updateBedOptimizer = function _updateBedOptimizer(bbox) {
+    const resultEl = document.getElementById('bedOptimizerResult');
+    if (!resultEl || !bbox) return;
+
+    const sel = document.getElementById('bedSizeSelect')?.value || '250x210';
+    let bedW, bedH;
+    if (sel === 'custom') {
+        bedW = parseFloat(document.getElementById('bedCustomW')?.value) || 220;
+        bedH = parseFloat(document.getElementById('bedCustomH')?.value) || 220;
+    } else {
+        [bedW, bedH] = sel.split('x').map(Number);
+    }
+
+    const midLat  = (bbox.north + bbox.south) / 2;
+    const latCos  = Math.cos(midLat * Math.PI / 180);
+    const realW_m = Math.abs(bbox.east - bbox.west) * 111320 * latCos;
+    const realH_m = Math.abs(bbox.north - bbox.south) * 110540;
+
+    const aspectRatio = realW_m / realH_m;
+    let printW, printH;
+    if (aspectRatio >= bedW / bedH) {
+        printW = bedW; printH = bedW / aspectRatio;
+    } else {
+        printH = bedH; printW = bedH * aspectRatio;
+    }
+
+    const scale  = Math.round(realW_m / (printW / 1000));
+    const pieces = (printW > bedW || printH > bedH) ? Math.ceil(printW / bedW) * Math.ceil(printH / bedH) : 1;
+    const recRes = Math.min(600, Math.max(100, Math.round(printW / 0.5 / 100) * 100));
+
+    let html = `<b>Fit to ${bedW}×${bedH} mm bed:</b><br>`;
+    html += `Print size: ${printW.toFixed(0)} × ${printH.toFixed(0)} mm<br>`;
+    html += `Scale: 1 : ${scale.toLocaleString()}<br>`;
+    html += `Recommended resolution: ${recRes}×${recRes}<br>`;
+    if (pieces > 1) {
+        html += `<span style="color:#e67e22;">⚠ ${printW.toFixed(0)}×${printH.toFixed(0)} mm exceeds bed — needs ${pieces}-piece puzzle</span>`;
+    } else {
+        html += `<span style="color:#52b788;">✓ Fits bed with ${(bedW - printW).toFixed(0)}×${(bedH - printH).toFixed(0)} mm margin</span>`;
+    }
+    resultEl.innerHTML = html;
+};
+
+// ---------------------------------------------------------------------------
+// loadSatelliteImage
+// ---------------------------------------------------------------------------
+
+let _satelliteAbortController = null;
+let _satelliteRGBAbortController = null;
+
+/**
+ * Load satellite/land cover imagery from /api/terrain/dem with show_sat=true.
+ * Renders the result to the #satelliteImage container.
+ * @returns {Promise<void>}
+ */
+window.loadSatelliteImage = async function loadSatelliteImage() {
+    if (_satelliteAbortController) _satelliteAbortController.abort();
+    _satelliteAbortController = new AbortController();
+    const signal = _satelliteAbortController.signal;
+
+    const boundingBox    = window.getBoundingBox?.();
+    const selectedRegion = window.appState.selectedRegion;
+
+    if (!boundingBox && !selectedRegion) {
+        document.getElementById('satelliteImage').innerHTML = '<p>Please select a region or draw a bounding box first.</p>';
+        return;
+    }
+
+    let bounds;
+    if (boundingBox) {
+        bounds = boundingBox;
+    } else if (selectedRegion) {
+        bounds = L.latLngBounds(
+            [selectedRegion.south, selectedRegion.west],
+            [selectedRegion.north, selectedRegion.east]
+        );
+    }
+
+    const north      = bounds.getNorth();
+    const south      = bounds.getSouth();
+    const east       = bounds.getEast();
+    const west       = bounds.getWest();
+    const resolution = document.getElementById('satResolution').value;
+    const dataset    = document.getElementById('satDataset').value;
+
+    const params = new URLSearchParams({
+        north, south, east, west,
+        dim:      resolution,
+        show_sat: true,
+        dataset
+    });
+
+    document.getElementById('satelliteImage').innerHTML = '<p style="text-align:center;padding:20px;">Loading satellite data...</p>';
+
+    try {
+        const { data, error: satErr } = await window.api.dem.load(params, signal);
+        if (satErr) {
+            { const _p = document.createElement('p'); _p.textContent = `Error: ${satErr}`; document.getElementById('satelliteImage').replaceChildren(_p); }
+            return;
+        }
+
+        if (data.error) {
+            { const _p = document.createElement('p'); _p.textContent = `Error: ${data.error}`; document.getElementById('satelliteImage').replaceChildren(_p); }
+            return;
+        }
+
+        if (data.sat_values && data.sat_dimensions && data.sat_available) {
+            const sat_h   = data.sat_dimensions[0];
+            const sat_w   = data.sat_dimensions[1];
+            const canvas  = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
+            canvas.style.width  = '100%';
+            canvas.style.height = 'auto';
+            document.getElementById('satelliteImage').innerHTML = '';
+            document.getElementById('satelliteImage').appendChild(canvas);
+            requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+        } else {
+            document.getElementById('satelliteImage').innerHTML = `
+                <div style="background:#333;padding:30px;text-align:center;border-radius:4px;">
+                    <p style="color:#888;margin:0;">Satellite data not available</p>
+                    <p style="color:#666;font-size:12px;margin-top:5px;">Earth Engine module required</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        if (error.name === 'AbortError') return;
+        console.error('Error loading satellite image:', error);
+        document.getElementById('satelliteImage').innerHTML = '<p>Failed to load satellite image.</p>';
+    }
+};
+
+// ---------------------------------------------------------------------------
+// loadSatelliteRGBImage — fetch real satellite tiles from ESRI WMTS
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch real satellite imagery from /api/terrain/satellite (ESRI World Imagery).
+ * Renders the base64 JPEG to a source canvas stored on appState.satImgSourceCanvas,
+ * then triggers a stacked layers update.
+ * @returns {Promise<void>}
+ */
+window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
+    if (_satelliteRGBAbortController) _satelliteRGBAbortController.abort();
+    _satelliteRGBAbortController = new AbortController();
+    const signal = _satelliteRGBAbortController.signal;
+
+    const boundingBox    = window.getBoundingBox?.();
+    const selectedRegion = window.appState.selectedRegion;
+
+    if (!boundingBox && !selectedRegion) {
+        window.showToast?.('Please select a region or draw a bounding box first.', 'warning');
+        return;
+    }
+
+    let north, south, east, west;
+    if (boundingBox) {
+        north = boundingBox.getNorth();
+        south = boundingBox.getSouth();
+        east  = boundingBox.getEast();
+        west  = boundingBox.getWest();
+    } else {
+        ({ north, south, east, west } = selectedRegion);
+    }
+
+    const dim = parseInt(document.getElementById('paramDim')?.value || 400);
+    const params = new URLSearchParams({ north, south, east, west, dim });
+
+    window.showToast?.('Loading satellite imagery...', 'info');
+
+    try {
+        const resp = await fetch(`/api/terrain/satellite?${params}`, { signal });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        // Draw the JPEG into a canvas and store as source
+        await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                const c = document.createElement('canvas');
+                c.width = img.naturalWidth;
+                c.height = img.naturalHeight;
+                c.getContext('2d').drawImage(img, 0, 0);
+                window.appState.satImgSourceCanvas = c;
+                resolve();
+            };
+            img.onerror = reject;
+            img.src = `data:image/jpeg;base64,${data.image}`;
+        });
+
+        window.events?.emit(window.EV?.STACKED_UPDATE);
+        window.showToast?.('Satellite imagery loaded', 'success');
+    } catch (err) {
+        if (err.name === 'AbortError') return;
+        console.error('loadSatelliteRGBImage error:', err);
+        window.showToast?.(`Satellite load failed: ${err.message}`, 'error');
+    }
+};
+
+// ---------------------------------------------------------------------------
+// DOMContentLoaded: initialise empty state and workflow stepper
+// ---------------------------------------------------------------------------
+
+document.addEventListener('DOMContentLoaded', () => {
+    window._setExportButtonsEnabled?.(false);
+    window._setDemEmptyState?.(true);
+    window._updateWorkflowStepper?.();
+
+    // Wire appState callbacks so other modules (e.g., presets.js) can trigger them
+    window.appState._setDemEmptyState     = window._setDemEmptyState;
+    window.appState._updateWorkflowStepper = window._updateWorkflowStepper;
+});

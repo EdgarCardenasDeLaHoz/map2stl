@@ -249,3 +249,6 @@ window.setupCoordinateSearch = function setupCoordinateSearch() {
         });
     });
 };
+
+// Listen for STATUS_UPDATE events (replaces scattered direct calls)
+window.events?.on(window.EV?.STATUS_UPDATE, () => window.updateLayerStatusIndicators());

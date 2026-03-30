@@ -1,4 +1,4 @@
-/**
+﻿/**
  * city-overlay.js — OSM/city data overlay for the stacked layers view.
  *
  * Extracted from app.js (TODO item 15).  Loaded as a plain <script> before app.js
@@ -34,7 +34,7 @@ const _pt = { x: 0, y: 0 };
 // ---------------------------------------------------------------------------
 // PERF6 Part A — per-layer OffscreenCanvas cache.
 //
-// Each of the four city layers (buildings, roads, waterways, pois) is rendered
+// Each of the three city layers (buildings, roads, waterways) is rendered
 // to its own OffscreenCanvas and cached independently.  Toggling a layer only
 // re-composites (4 drawImage blits) without re-drawing anything.  Only the
 // specific layer whose data or canvas layout changed is re-rendered.
@@ -43,14 +43,13 @@ const _pt = { x: 0, y: 0 };
 // Invalidated by _invalidateCityCache() (data change) or by cache-key mismatch
 // (canvas resize / bbox change / projection change).
 // ---------------------------------------------------------------------------
-const _LAYER_NAMES = ['waterways', 'buildings', 'roads', 'pois'];
+const _LAYER_NAMES = ['waterways', 'buildings', 'roads'];
 
 /** Maps layer name → the DOM toggle checkbox ID for that layer. */
 const _LAYER_TOGGLES = {
-    buildings: 'layerBuildingsToggle',
-    roads:     'layerRoadsToggle',
-    waterways: 'layerWaterwaysToggle',
-    pois:      'layerPoisToggle',
+    buildings:     'layerBuildingsToggle',
+    roads:         'layerRoadsToggle',
+    waterways:     'layerWaterwaysToggle',
 };
 
 function _makeLayerCache() {
@@ -228,12 +227,12 @@ window._prebakeFeatures = _prebakeFeatures;
  */
 window.loadCityData = async function loadCityData() {
     const { selectedRegion, showToast, haversineDiagKm } = window.appState || {};
-    if (!selectedRegion) { if (showToast) showToast('Select a region first', 'warning'); return; }
+    if (!selectedRegion) { window.showToast?.('Select a region first', 'warning'); return; }
     const diagKm = haversineDiagKm
         ? haversineDiagKm(selectedRegion.north, selectedRegion.south, selectedRegion.east, selectedRegion.west)
         : 0;
     if (diagKm > 10) {
-        if (showToast) showToast(`Region too large (${diagKm.toFixed(1)} km). Max 10 km.`, 'error');
+        window.showToast?.(`Region too large (${diagKm.toFixed(1)} km). Max 10 km.`, 'error');
         return;
     }
 
@@ -248,10 +247,9 @@ window.loadCityData = async function loadCityData() {
 
     try {
         const layers = [];
-        if (document.getElementById('layerBuildingsToggle')?.checked)  layers.push('buildings');
+        if (document.getElementById('layerBuildingsToggle')?.checked)  layers.push('buildings', 'walls', 'towers', 'churches', 'fortifications');
         if (document.getElementById('layerRoadsToggle')?.checked)      layers.push('roads');
         if (document.getElementById('layerWaterwaysToggle')?.checked)  layers.push('waterways');
-        if (document.getElementById('layerPoisToggle')?.checked)       layers.push('pois');
 
         const simplifyTol = parseFloat(document.getElementById('citySimplifyTolerance')?.value) || 0.5;
         const minArea     = parseFloat(document.getElementById('cityMinArea')?.value) || 5.0;
@@ -279,23 +277,40 @@ window.loadCityData = async function loadCityData() {
 
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            if (showToast) showToast('OSM error: ' + (err.error || resp.status), 'error');
+            window.showToast?.('OSM error: ' + (err.error || resp.status), 'error');
             if (statusEl) statusEl.textContent = 'Failed.';
             return;
         }
 
         const data = await resp.json();
+
+        // Merge towers, churches, fortifications polygon features into buildings
+        for (const key of ['towers', 'churches', 'fortifications']) {
+            if (data[key]?.features?.length) {
+                if (!data.buildings) data.buildings = { type: 'FeatureCollection', features: [] };
+                for (const feat of data[key].features) {
+                    const t = feat.geometry?.type;
+                    if (t === 'Polygon' || t === 'MultiPolygon') {
+                        data.buildings.features.push(feat);
+                    }
+                }
+            }
+            delete data[key];
+        }
+        // Remove POIs entirely
+        delete data.pois;
+
         // Cities 7: annotate features with terrain_z from the current DEM
         const demData = window.appState?.lastDemData;
         _computeTerrainZ(data.buildings, demData);
         _computeTerrainZ(data.roads,     demData);
+        _computeTerrainZ(data.walls,     demData);
         window.appState.osmCityData = data;
         window._invalidateCityCache();   // new data → force full re-render
 
-        _updateCityLayerCount('buildings', data.buildings?.features?.length);
-        _updateCityLayerCount('roads',     data.roads?.features?.length);
-        _updateCityLayerCount('waterways', data.waterways?.features?.length);
-        _updateCityLayerCount('pois',      data.pois?.features?.length);
+        _updateCityLayerCount('buildings',  data.buildings?.features?.length);
+        _updateCityLayerCount('roads',      data.roads?.features?.length);
+        _updateCityLayerCount('waterways',  data.waterways?.features?.length);
 
         // Update cities strip dot
         const citiesDot = document.getElementById('stripDotCities');
@@ -303,18 +318,18 @@ window.loadCityData = async function loadCityData() {
 
         // Count malformed features (missing geometry or unrecognised type)
         let skippedCount = 0;
-        for (const collection of [data.buildings, data.roads, data.waterways, data.pois]) {
+        for (const collection of [data.buildings, data.roads, data.waterways, data.walls]) {
             for (const feat of (collection?.features || [])) {
                 if (!feat.geometry || !feat.geometry.coordinates) skippedCount++;
             }
         }
         if (skippedCount > 0 && showToast) {
-            showToast(`Warning: ${skippedCount} feature${skippedCount > 1 ? 's' : ''} had missing geometry and were skipped`, 'warning');
+            window.showToast(`Warning: ${skippedCount} feature${skippedCount > 1 ? 's' : ''} had missing geometry and were skipped`, 'warning');
         }
 
         window.renderCityOverlay?.();
         if (statusEl) statusEl.textContent = `Loaded (${data.diagonal_km?.toFixed(1) ?? '?'} km)`;
-        if (showToast) showToast('City data loaded', 'success');
+        window.showToast?.('City data loaded', 'success');
     } catch (e) {
         const showToastFn = window.appState?.showToast;
         if (showToastFn) showToastFn('City data error: ' + e.message, 'error');
@@ -431,10 +446,9 @@ function _computeTerrainZ(geojson, demData) {
  */
 window._updateCityLayerCount = function _updateCityLayerCount(layer, count) {
     const ids = {
-        buildings: 'cityBuildingCount',
-        roads:     'cityRoadCount',
-        waterways: 'cityWaterwayCount',
-        pois:      'cityPoiCount'
+        buildings:     'cityBuildingCount',
+        roads:         'cityRoadCount',
+        waterways:     'cityWaterwayCount',
     };
     const el = document.getElementById(ids[layer]);
     if (el) el.textContent = count != null ? `(${count})` : '';
@@ -456,7 +470,7 @@ window.clearCityOverlay = function clearCityOverlay() {
     document.querySelector('#demImage .city-dem-overlay')?.remove();
     const statusEl = document.getElementById('cityDataStatus');
     if (statusEl) statusEl.textContent = '';
-    ['cityBuildingCount', 'cityRoadCount', 'cityWaterwayCount', 'cityPoiCount'].forEach(id => {
+    ['cityBuildingCount', 'cityRoadCount', 'cityWaterwayCount'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.textContent = '';
     });
@@ -565,20 +579,42 @@ function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipR
     }
 
     // ── Waterways ──────────────────────────────────────────────────────────
+    // Separate polygons (lakes/ponds) from linestrings (rivers/streams) so
+    // fill() only applies to closed polygons, not open river paths.
     if (_shouldDraw('waterways') && osmCityData.waterways?.features) {
         const c = document.getElementById('layerWaterwaysColor')?.value || '#4488cc';
+        ctx.globalAlpha = 0.65;
+
+        // 1) Polygon waterways (lakes, ponds, reservoirs) — fill + stroke
+        //    Each polygon gets its own beginPath/fill/stroke to avoid
+        //    non-zero winding rule artifacts between separate features.
         ctx.fillStyle   = c + '88';
         ctx.strokeStyle = c;
-        ctx.lineWidth   = 1.5 * invZ;
-        ctx.globalAlpha = 0.65;
+        ctx.lineWidth   = 1 * invZ;
+        for (const feat of osmCityData.waterways.features) {
+            if (!feat.geometry || _culled(feat)) continue;
+            const t = feat.geometry.type;
+            if (t === 'Polygon' || t === 'MultiPolygon') {
+                ctx.beginPath();
+                _drawFeatPath(feat, true);
+                ctx.fill();
+                ctx.stroke();
+            }
+        }
+
+        // 2) LineString waterways (rivers, streams, canals) — stroke only
+        ctx.strokeStyle = c;
+        ctx.lineWidth   = 2 * invZ;
         ctx.beginPath();
         for (const feat of osmCityData.waterways.features) {
             if (!feat.geometry || _culled(feat)) continue;
-            const isLine = feat.geometry.type === 'LineString' || feat.geometry.type === 'MultiLineString';
-            _drawFeatPath(feat, !isLine);
+            const t = feat.geometry.type;
+            if (t === 'LineString' || t === 'MultiLineString') {
+                _drawFeatPath(feat, false);
+            }
         }
-        ctx.fill();
         ctx.stroke();
+
         ctx.globalAlpha = 1;
     }
 
@@ -650,33 +686,41 @@ function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipR
         ctx.globalAlpha = 1;
     }
 
-    // ── POIs — only above zoom threshold ──────────────────────────────────
-    if (_shouldDraw('pois') && osmCityData.pois?.features) {
-        const zoom = window.appState?.stackZoom?.scale || 1;
-        if (zoom >= 1.5) {
-            const c = document.getElementById('layerPoisColor')?.value || '#ff6644';
-            ctx.fillStyle   = c;
-            ctx.strokeStyle = c;
-            ctx.lineWidth   = 1 * invZ;
-            ctx.globalAlpha = 0.65;
-            for (const feat of osmCityData.pois.features) {
-                const geom = feat.geometry;
-                if (geom?.type !== 'Point') continue;
-                if (clipRect) {
-                    geoToPx(geom.coordinates[1], geom.coordinates[0]);
-                    if (_pt.x < clipRect.x0 || _pt.x > clipRect.x1 ||
-                        _pt.y < clipRect.y0 || _pt.y > clipRect.y1) continue;
-                    ctx.beginPath();
-                    ctx.arc(_pt.x, _pt.y, 3, 0, 2 * Math.PI);
-                } else {
-                    geoToPx(geom.coordinates[1], geom.coordinates[0]);
-                    ctx.beginPath();
-                    ctx.arc(_pt.x, _pt.y, 3, 0, 2 * Math.PI);
-                }
-                ctx.fill();
+    // ── Walls — stroked with width, rendered with buildings toggle ──────────
+    // Walls are kept as separate data but drawn when buildings are visible,
+    // similar to how waterway LineStrings are handled (stroke with width).
+    if (_shouldDraw('buildings') && osmCityData.walls?.features?.length) {
+        const c = document.getElementById('layerBuildingsColor')?.value || '#c8a882';
+        ctx.strokeStyle = c;
+        ctx.lineWidth   = 3 * invZ;
+        ctx.globalAlpha = 0.85;
+        ctx.lineJoin    = 'round';
+        ctx.lineCap     = 'round';
+
+        // Polygon walls (enclosed wall areas): stroke outline
+        for (const feat of osmCityData.walls.features) {
+            if (!feat.geometry || _culled(feat)) continue;
+            const t = feat.geometry.type;
+            if (t === 'Polygon' || t === 'MultiPolygon') {
+                ctx.beginPath();
+                _drawFeatPath(feat, true);
+                ctx.stroke();
             }
-            ctx.globalAlpha = 1;
         }
+
+        // LineString walls (open wall segments): batched stroke
+        ctx.beginPath();
+        for (const feat of osmCityData.walls.features) {
+            if (!feat.geometry || _culled(feat)) continue;
+            const t = feat.geometry.type;
+            if (t === 'LineString' || t === 'MultiLineString') {
+                _drawFeatPath(feat, false);
+            }
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.lineJoin    = 'miter';
+        ctx.lineCap     = 'butt';
     }
 }
 
@@ -699,6 +743,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!city) return;
         _computeTerrainZ(city.buildings, demData);
         _computeTerrainZ(city.roads, demData);
+        _computeTerrainZ(city.walls, demData);
         window._invalidateCityCache();
         window.renderCityOverlay?.();
         window.renderCityOnDEM?.();

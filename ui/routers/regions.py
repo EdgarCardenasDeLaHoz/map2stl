@@ -205,7 +205,7 @@ async def update_region(name: str, region: RegionCreate):
             conn.commit()
             if cur.rowcount == 0:
                 return JSONResponse(content={"error": f"Region '{name}' not found"}, status_code=404)
-        return JSONResponse(content=region.dict())
+        return JSONResponse(content=region.model_dump())
     except Exception as e:
         logger.error(f"Error updating region: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
@@ -233,7 +233,7 @@ async def delete_region(name: str):
 
 @router.get("/api/regions/{name}/settings")
 async def get_region_settings(name: str):
-    """Fetch saved panel settings for a region. Returns 404 if none saved yet."""
+    """Fetch saved panel settings for a region. Returns empty settings if none saved yet."""
     if not _DB_AVAILABLE:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, partial(_get_region_settings_json, name))
@@ -245,7 +245,7 @@ async def get_region_settings(name: str):
                 "SELECT settings_json FROM region_settings WHERE region_name=?", (name,)
             ).fetchone()
         if row is None:
-            return JSONResponse(content={"detail": f"No saved settings for '{name}'"}, status_code=404)
+            return JSONResponse(content={"name": name, "settings": {}})
         settings = json.loads(row["settings_json"] or "{}")
         return JSONResponse(content={"name": name, "settings": settings})
     except Exception as e:
@@ -310,9 +310,9 @@ def _update_region_json(name: str, region: RegionCreate):
         regions = data.get("regions", [])
         for i, r in enumerate(regions):
             if r.get("name") == name:
-                payload = region.dict()
+                payload = region.model_dump()
                 if payload.get("parameters") is None:
-                    payload["parameters"] = r.get("parameters", RegionParameters().dict())
+                    payload["parameters"] = r.get("parameters", RegionParameters().model_dump())
                 regions[i] = payload
                 COORDINATES_PATH.write_text(json.dumps(data, indent=2))
                 return JSONResponse(content=payload)
@@ -347,10 +347,10 @@ def _delete_region_json(name: str):
 def _get_region_settings_json(name: str):
     try:
         if not REGION_SETTINGS_PATH.exists():
-            return JSONResponse(content={"detail": f"No saved settings for '{name}'"}, status_code=404)
+            return JSONResponse(content={"name": name, "settings": {}})
         data = json.loads(REGION_SETTINGS_PATH.read_text())
         if name not in data:
-            return JSONResponse(content={"detail": f"No saved settings for '{name}'"}, status_code=404)
+            return JSONResponse(content={"name": name, "settings": {}})
         return JSONResponse(content={"name": name, "settings": data[name]})
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)

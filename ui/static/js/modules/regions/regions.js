@@ -105,22 +105,10 @@ async function loadCoordinates() {
                 // Click selects the region (stays on Explore)
                 rect.on('click', () => window.selectCoordinate(originalIndex));
 
-                // Hover thumbnail preview (P12)
-                rect.on('mouseover', function(e) {
-                    const thumb = window.appState.regionThumbnails?.[region.name];
-                    const label = region.label || region.name;
-                    const html = thumb
-                        ? `<img src="${thumb}" style="display:block;width:96px;height:60px;object-fit:cover;border-radius:3px;"><div style="text-align:center;font-size:11px;color:#ccc;margin-top:3px;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${label}</div>`
-                        : `<div style="font-size:12px;padding:3px 6px;">${label}</div>`;
-                    rect.unbindTooltip();
-                    rect.bindTooltip(html, { sticky: false, direction: 'top', className: 'region-thumb-tooltip', offset: [0, -4] });
-                    rect.openTooltip(e.latlng);
-                });
-
-                // Permanent Edit button pinned at the top-right corner of each bbox
+                // Edit button pinned at the top-right corner of each bbox (hidden until hover)
                 const editIcon = L.divIcon({
                     html: `<div class="bbox-edit-icon" onclick="goToEdit(${originalIndex})">✏️ Edit</div>`,
-                    className: '',
+                    className: 'bbox-edit-marker',
                     iconSize: [56, 22],
                     iconAnchor: [56, 0]   // top-right corner of the icon aligns with [north, east]
                 });
@@ -132,6 +120,29 @@ async function loadCoordinates() {
                 });
                 editMarker._regionBounds = L.latLngBounds(bounds[0], bounds[1]);
                 if (editMarkersLayer) editMarkersLayer.addLayer(editMarker);
+
+                // Hover: show tooltip + reveal Edit button
+                rect.on('mouseover', function(e) {
+                    const label = region.label || region.name;
+                    rect.unbindTooltip();
+                    rect.bindTooltip(label, { sticky: false, direction: 'top', offset: [0, -4] });
+                    rect.openTooltip(e.latlng);
+                    editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.add('visible');
+                });
+                rect.on('mouseout', function() {
+                    // Delay hiding so the user can move to the edit button
+                    setTimeout(() => {
+                        const icon = editMarker.getElement()?.querySelector('.bbox-edit-icon');
+                        if (icon && !icon.matches(':hover')) icon.classList.remove('visible');
+                    }, 300);
+                });
+                // Keep edit button visible while hovering it directly
+                editMarker.on('mouseover', function() {
+                    editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.add('visible');
+                });
+                editMarker.on('mouseout', function() {
+                    editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.remove('visible');
+                });
 
                 preloadedLayer.addLayer(rect);
             });
@@ -312,8 +323,16 @@ async function selectCoordinate(index) {
     const demContainer = document.getElementById('demContainer');
     if (demContainer && !demContainer.classList.contains('hidden')) {
         window.loadDEM?.().then(() => {
-            window.loadWaterMask?.();
-            window.loadSatelliteImage?.();
+            // Load secondary layers in parallel (no dependency between them)
+            const tasks = [
+                window.loadWaterMask?.(),
+                window.loadSatelliteImage?.(),
+            ];
+            const diagKm = window.appState?.haversineDiagKm?.();
+            if (diagKm && diagKm <= 15 && window.loadCityData) {
+                tasks.push(window.loadCityData());
+            }
+            return Promise.all(tasks);
         });
     }
 
@@ -369,8 +388,16 @@ function goToEdit(index) {
     }
 
     window.loadDEM?.().then(() => {
-        window.loadWaterMask?.();
-        window.loadSatelliteImage?.();
+        // Load secondary layers in parallel
+        const tasks = [
+            window.loadWaterMask?.(),
+            window.loadSatelliteImage?.(),
+        ];
+        const diagKm = window.appState?.haversineDiagKm?.();
+        if (diagKm && diagKm <= 15 && window.loadCityData) {
+            tasks.push(window.loadCityData());
+        }
+        return Promise.all(tasks);
     });
 }
 window.goToEdit = goToEdit;

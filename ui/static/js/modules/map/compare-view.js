@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/compare-view.js — Side-by-side region DEM comparison panel.
  *
  * Loaded as a plain <script> before app.js.
@@ -17,8 +17,8 @@
  *   window.getCoordinatesData()     — accessor for coordinatesData closure var
  *   window.appState.selectedRegion
  *   window.loadAllLayers()          — trigger DEM + layers reload
- *   mapElevationToColor(t, cmap)    — global from dem-loader.js
- *   showToast(msg, type)            — file-top global in app.js
+ *   window.mapElevationToColor(t, cmap)    — global from dem-loader.js
+ *   window.showToast(msg, type)            — file-top global in app.js
  *   api.dem.load(params)            — from api.js
  */
 
@@ -52,7 +52,7 @@ function renderCompareLayer(side) {
     if (!select || !canvas) return;
 
     const sourceSelectors = {
-        dem:      '#demImage canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay)',
+        dem:      '#demImage canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)',
         water:    '#waterMaskImage canvas',
         sat:      '#satelliteImage canvas',
         combined: '#combinedImage canvas',
@@ -127,7 +127,7 @@ async function loadCompareRegion(side) {
         const imgData = ctx.createImageData(w, h);
         for (let i = 0; i < w * h; i++) {
             const t = Math.max(0, Math.min(1, (demVals[i] - vmin) / range));
-            const [r, g, b] = mapElevationToColor(t, colormap);
+            const [r, g, b] = window.mapElevationToColor(t, colormap);
             imgData.data[i * 4]     = Math.round((r || 0) * 255);
             imgData.data[i * 4 + 1] = Math.round((g || 0) * 255);
             imgData.data[i * 4 + 2] = Math.round((b || 0) * 255);
@@ -215,7 +215,7 @@ function applyRegionParams() {
         if (el) el.value = v;
     });
 
-    showToast('Parameters applied! Loading layers...', 'success');
+    window.showToast('Parameters applied! Loading layers...', 'success');
     window.loadAllLayers?.();
 }
 

@@ -17,9 +17,38 @@
 let stackZoom = { scale: 1, offsetX: 0, offsetY: 0 };
 let stackZoomInitialized = false;
 
+// All layer canvas IDs — kept as hidden source buffers for other modules to write to
+const LAYER_STACK = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem'];
+
+// Active view mode — which buffer is copied to stackViewCanvas
+let _activeMode = 'CompositeDem';
+
+/** Switch the displayed layer mode and refresh the view. */
+window.setStackMode = function setStackMode(mode) {
+    if (!LAYER_STACK.includes(mode)) return;
+    _activeMode = mode;
+    // Update button active states
+    document.querySelectorAll('#layerModeSelector .layer-mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+    window.updateStackedLayers?.();
+};
+
+/** Returns the currently active layer mode key. */
+window.getStackMode = function getStackMode() { return _activeMode; };
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Apply a CSS transform string to the display canvas and OSM overlay. */
+function _applyTransformCSS(xfm) {
+    const displayCanvas = document.getElementById('stackViewCanvas');
+    if (displayCanvas) { displayCanvas.style.transformOrigin = '0 0'; displayCanvas.style.transform = xfm; }
+    const osmOverlay = document.querySelector('#layersStack .osm-overlay');
+    if (osmOverlay) { osmOverlay.style.transformOrigin = '0 0'; osmOverlay.style.transform = xfm; }
+    if (window.appState) window.appState.stackZoom = stackZoom;
+}
 
 /**
  * Pick a "nice" geographic grid interval in degrees targeting approximately
@@ -81,7 +110,7 @@ window.updateLayerAxisLabels = function updateLayerAxisLabels() {
  * Calls applyStackedTransform, drawLayerGrid, and renderCityOverlay.
  */
 window.updateStackedLayers = function updateStackedLayers() {
-    const demCanvas   = document.querySelector('#demImage canvas:not(.dem-gridlines-overlay)');
+    const demCanvas   = document.querySelector('#demImage canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)');
     const waterCanvas = document.querySelector('#waterMaskImage canvas');
     const satCanvas   = document.querySelector('#satelliteImage canvas');
 
@@ -120,38 +149,53 @@ window.updateStackedLayers = function updateStackedLayers() {
     }
 
     /**
-     * Draw a source canvas into a layer canvas at the shared target rect.
-     * @param {HTMLCanvasElement} layerCanvas  - Destination layer canvas
+     * Draw a source canvas into a destination canvas at the shared target rect.
+     * Avoids resetting canvas dimensions when unchanged (prevents GPU context loss).
+     * @param {HTMLCanvasElement} destCanvas   - Destination canvas
      * @param {HTMLCanvasElement} sourceCanvas - Source rendered canvas
      */
-    function drawLayerToTarget(layerCanvas, sourceCanvas) {
-        if (!layerCanvas || !sourceCanvas) return;
-        layerCanvas.width  = stackWidth;
-        layerCanvas.height = stackHeight;
-        const ctx = layerCanvas.getContext('2d');
+    function drawLayerToTarget(destCanvas, sourceCanvas) {
+        if (!destCanvas || !sourceCanvas) return;
+        // Only reset dimensions when they actually change (avoids GPU flush)
+        if (destCanvas.width !== stackWidth)  destCanvas.width  = stackWidth;
+        if (destCanvas.height !== stackHeight) destCanvas.height = stackHeight;
+        const ctx = destCanvas.getContext('2d');
         ctx.clearRect(0, 0, stackWidth, stackHeight);
         ctx.drawImage(sourceCanvas,
             0, 0, sourceCanvas.width, sourceCanvas.height,
             targetX, targetY, targetWidth, targetHeight);
     }
 
-    drawLayerToTarget(document.getElementById('layerDemCanvas'),   demCanvas);
-    drawLayerToTarget(document.getElementById('layerWaterCanvas'), waterCanvas);
-    drawLayerToTarget(document.getElementById('layerSatCanvas'),   satCanvas);
+    // Only draw the active mode's source buffer — skip all others for performance
+    const sourceMap = {
+        Dem:          () => demCanvas,
+        Water:        () => waterCanvas,
+        Sat:          () => satCanvas,
+        SatImg:       () => window.appState?.satImgSourceCanvas || null,
+        CityRaster:   () => window.appState?.cityRasterSourceCanvas || null,
+        CompositeDem: () => window.appState?.compositeDemSourceCanvas || null,
+    };
 
-    // City Heights raster — source canvas is stored on appState by loadCityRaster()
-    const cityRasterSrc = window.appState?.cityRasterSourceCanvas;
-    drawLayerToTarget(document.getElementById('layerCityRasterCanvas'), cityRasterSrc || null);
+    const activeSource = sourceMap[_activeMode]?.();
+    const modeBuffer   = document.getElementById(`layer${_activeMode}Canvas`);
+    if (activeSource && modeBuffer) {
+        drawLayerToTarget(modeBuffer, activeSource);
+    }
 
-    ['Dem', 'Water', 'Sat', 'CityRaster'].forEach(layer => {
-        const checkbox = document.getElementById(`layer${layer}Visible`);
-        const slider   = document.getElementById(`layer${layer}Opacity`);
-        const canvas   = document.getElementById(`layer${layer}Canvas`);
-        if (canvas) {
-            canvas.style.display = checkbox && checkbox.checked ? 'block' : 'none';
-            canvas.style.opacity = slider ? slider.value / 100 : 1;
+    // Copy active mode buffer directly to the single display canvas
+    const displayCanvas = document.getElementById('stackViewCanvas');
+    if (displayCanvas) {
+        if (displayCanvas.width !== stackWidth)  displayCanvas.width  = stackWidth;
+        if (displayCanvas.height !== stackHeight) displayCanvas.height = stackHeight;
+        const dCtx = displayCanvas.getContext('2d');
+        dCtx.clearRect(0, 0, stackWidth, stackHeight);
+        if (modeBuffer && modeBuffer.width > 0 && modeBuffer.height > 0) {
+            const opSlider = document.getElementById('activeLayerOpacity');
+            dCtx.globalAlpha = opSlider ? opSlider.value / 100 : 1;
+            dCtx.drawImage(modeBuffer, 0, 0);
+            dCtx.globalAlpha = 1;
         }
-    });
+    }
 
     updateLayerAxisLabels();
 
@@ -283,18 +327,8 @@ let _cityOverlayDebounceTimer = null;
  */
 window.applyStackedTransform = function applyStackedTransform() {
     const xfm = `translate(${stackZoom.offsetX}px, ${stackZoom.offsetY}px) scale(${stackZoom.scale})`;
-
-    ['Dem', 'Water', 'Sat', 'CityRaster'].forEach(layer => {
-        const canvas = document.getElementById(`layer${layer}Canvas`);
-        if (canvas) { canvas.style.transformOrigin = '0 0'; canvas.style.transform = xfm; }
-    });
-
-    // Apply same transform to city overlay so it moves with the other layers
-    const osmOverlay = document.querySelector('#layersStack .osm-overlay');
-    if (osmOverlay) { osmOverlay.style.transformOrigin = '0 0'; osmOverlay.style.transform = xfm; }
-
+    _applyTransformCSS(xfm);
     drawLayerGrid();
-    if (window.appState) window.appState.stackZoom = stackZoom;
 
     // Schedule city re-render only when needed
     if (window.appState?.osmCityData && typeof window.renderCityOverlay === 'function') {
@@ -351,13 +385,7 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
     // Lightweight CSS-only pan — no grid redraw (called on every mousemove tick)
     function _applyCSSTransformOnly() {
         const xfm = `translate(${stackZoom.offsetX}px, ${stackZoom.offsetY}px) scale(${stackZoom.scale})`;
-        ['Dem', 'Water', 'Sat', 'CityRaster'].forEach(layer => {
-            const canvas = document.getElementById(`layer${layer}Canvas`);
-            if (canvas) { canvas.style.transformOrigin = '0 0'; canvas.style.transform = xfm; }
-        });
-        const osmOverlay = document.querySelector('#layersStack .osm-overlay');
-        if (osmOverlay) { osmOverlay.style.transformOrigin = '0 0'; osmOverlay.style.transform = xfm; }
-        if (window.appState) window.appState.stackZoom = stackZoom;
+        _applyTransformCSS(xfm);
     }
 
     stack.addEventListener('mousemove', (e) => {
@@ -463,3 +491,6 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
 window.drawGridOverlay = function drawGridOverlay() {
     drawLayerGrid();
 };
+
+// Listen for STACKED_UPDATE events (replaces scattered direct calls)
+window.events?.on(window.EV?.STACKED_UPDATE, () => window.updateStackedLayers());

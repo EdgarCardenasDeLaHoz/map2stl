@@ -1,4 +1,4 @@
-/**
+﻿/**
  * city-render.js — Render functions for the city/OSM overlay.
  *
  * Loaded immediately after city-overlay.js.  Depends on city-overlay.js for:
@@ -19,6 +19,60 @@
  *   window._setupCityRasterLayer    — wire city raster visibility toggle & opacity slider
  *   window._cancelCityRenders       — cancel any pending RAF renders (called by clearCityOverlay)
  */
+
+// ---------------------------------------------------------------------------
+// Pure raster canvas renderer (no DEM state side-effects)
+// ---------------------------------------------------------------------------
+
+/**
+ * Render an array of values to a canvas using the current colormap LUT.
+ * Unlike renderDEMCanvas, this does NOT touch lastDemData or workflow state.
+ * @param {number[]} values  - Flat array of values
+ * @param {number}   width   - Grid width
+ * @param {number}   height  - Grid height
+ * @param {string}   colormap - Colormap name
+ * @param {number}   vmin    - Min value for color mapping
+ * @param {number}   vmax    - Max value for color mapping
+ * @returns {HTMLCanvasElement}
+ */
+function _renderRasterCanvas(values, width, height, colormap, vmin, vmax) {
+    const canvas = document.createElement('canvas');
+    canvas.width  = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(width, height);
+    const data = img.data;
+    const range = (vmax - vmin) || 1;
+    const invRange = 1 / range;
+
+    // Build colour LUT
+    const lut = new Uint8Array(1024 * 3);
+    for (let i = 0; i < 1024; i++) {
+        const t = i / 1023;
+        const [r, g, b] = window.mapElevationToColor?.(t, colormap) || [0, 0, 0];
+        lut[i * 3]     = Math.round((r || 0) * 255);
+        lut[i * 3 + 1] = Math.round((g || 0) * 255);
+        lut[i * 3 + 2] = Math.round((b || 0) * 255);
+    }
+
+    for (let i = 0; i < values.length; i++) {
+        const v = values[i];
+        const idx = i * 4;
+        if (!Number.isFinite(v) || v === 0) {
+            // Transparent for zero/nodata (no building/road here)
+            data[idx] = data[idx + 1] = data[idx + 2] = data[idx + 3] = 0;
+        } else {
+            const t = Math.max(0, Math.min(1023, ((v - vmin) * invRange * 1023) | 0));
+            data[idx]     = lut[t * 3];
+            data[idx + 1] = lut[t * 3 + 1];
+            data[idx + 2] = lut[t * 3 + 2];
+            data[idx + 3] = 255;
+        }
+    }
+
+    ctx.putImageData(img, 0, 0);
+    return canvas;
+}
 
 // ---------------------------------------------------------------------------
 // Debounce tokens — only used by render functions defined in this file.
@@ -115,13 +169,15 @@ function _doRenderCityOverlay() {
     const clipRect = { x0: tX, y0: tY, x1: tX + tW, y1: tY + tH };
     const bakKey   = `stack|${W}|${H}|${bboxKey}|${document.getElementById('paramProjection')?.value || 'none'}`;
 
-    // PERF4: pre-bake pixel coords (no-op for features already baked for this bakKey)
-    if (osmCityData.buildings?.features) window._prebakeFeatures(osmCityData.buildings.features, geoToPx, bakKey);
-    if (osmCityData.roads?.features)     window._prebakeFeatures(osmCityData.roads.features,     geoToPx, bakKey);
-    if (osmCityData.waterways?.features) window._prebakeFeatures(osmCityData.waterways.features, geoToPx, bakKey);
-    if (osmCityData.pois?.features)      window._prebakeFeatures(osmCityData.pois.features,      geoToPx, bakKey);
-
     const rs = window._cityRenderState;
+
+    // PERF4: pre-bake pixel coords for all layers (no-op for features already baked for this bakKey)
+    for (const layer of rs.LAYER_NAMES) {
+        if (osmCityData[layer]?.features) window._prebakeFeatures(osmCityData[layer].features, geoToPx, bakKey);
+    }
+    // Walls are rendered inside the buildings layer pass but stored separately
+    if (osmCityData.walls?.features) window._prebakeFeatures(osmCityData.walls.features, geoToPx, bakKey);
+
     if (rs.offscreenOk) {
         // PERF6 Part A: render each stale layer to its own OffscreenCanvas.
         // Layers whose cacheKey already matches are skipped (no re-draw).
@@ -188,7 +244,7 @@ function _doRenderCityOnDEM() {
 
     // Match the DEM canvas pixel resolution (exclude gridline/overlay canvases)
     const demCanvas = demContainer.querySelector(
-        'canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay)'
+        'canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)'
     );
     if (!demCanvas) return;
     const W = demCanvas.width;
@@ -236,12 +292,12 @@ function _doRenderCityOnDEM() {
 
     // PERF4: pre-bake pixel coords (DEM view has different geoToPx than stack view)
     const bakKey = `dem|${W}|${H}|${bboxKey}|${document.getElementById('paramProjection')?.value || 'none'}`;
-    if (osmCityData.buildings?.features) window._prebakeFeatures(osmCityData.buildings.features, geoToPx, bakKey);
-    if (osmCityData.roads?.features)     window._prebakeFeatures(osmCityData.roads.features,     geoToPx, bakKey);
-    if (osmCityData.waterways?.features) window._prebakeFeatures(osmCityData.waterways.features, geoToPx, bakKey);
-    if (osmCityData.pois?.features)      window._prebakeFeatures(osmCityData.pois.features,      geoToPx, bakKey);
-
     const rs = window._cityRenderState;
+    for (const layer of rs.LAYER_NAMES) {
+        if (osmCityData[layer]?.features) window._prebakeFeatures(osmCityData[layer].features, geoToPx, bakKey);
+    }
+    // Walls rendered inside buildings layer pass but stored separately
+    if (osmCityData.walls?.features) window._prebakeFeatures(osmCityData.walls.features, geoToPx, bakKey);
     if (rs.offscreenOk) {
         // PERF6 Part A: per-layer offscreen cache for DEM view
         for (const layer of rs.LAYER_NAMES) {
@@ -326,18 +382,39 @@ window.loadCityRaster = async function loadCityRaster() {
         _lastCityRasterData = data;
 
         const colormap = document.getElementById('demColormap')?.value || 'terrain';
-        const canvas = window.renderDEMCanvas?.(
+        // Render city raster to a standalone canvas WITHOUT overwriting DEM state.
+        // Do NOT call renderDEMCanvas here — it clobbers lastDemData/curveData/workflow.
+        const canvas = _renderRasterCanvas(
             data.values, data.width, data.height, colormap, data.vmin, data.vmax
         );
-        if (canvas && window.appState) {
-            window.appState.cityRasterSourceCanvas = canvas;
+        if (canvas) {
+            // Store raw (unprojected) canvas + bbox so we can re-project on demand
+            if (window.appState) {
+                window.appState._cityRasterRawCanvas = canvas;
+                window.appState._cityRasterBbox = bbox;
+            }
+            // Apply projection to match the DEM canvas
+            const projCanvas = window.applyProjection?.(canvas, bbox) || canvas;
+            if (window.appState) window.appState.cityRasterSourceCanvas = projCanvas;
         }
         setLayerStatus('cityRaster', 'ready');
-        window.updateStackedLayers?.();
+        window.events?.emit(window.EV?.STACKED_UPDATE);
     } catch (e) {
         setLayerStatus('cityRaster', 'error');
-        showToast('City raster failed: ' + e.message, 'error');
+        window.showToast('City raster failed: ' + e.message, 'error');
     }
+};
+
+/**
+ * Re-project the city raster canvas using the current projection setting.
+ * Called when the projection dropdown changes.
+ */
+window._reprojectCityRaster = function _reprojectCityRaster() {
+    const raw  = window.appState?._cityRasterRawCanvas;
+    const bbox = window.appState?._cityRasterBbox;
+    if (!raw || !bbox) return;
+    const projCanvas = window.applyProjection?.(raw, bbox) || raw;
+    if (window.appState) window.appState.cityRasterSourceCanvas = projCanvas;
 };
 
 /** Wire the City Heights visibility toggle and opacity slider. */
@@ -355,7 +432,7 @@ window._setupCityRasterLayer = function _setupCityRasterLayer() {
         } else {
             canvas.style.display = 'none';
         }
-        window.updateStackedLayers?.();
+        window.events?.emit(window.EV?.STACKED_UPDATE);
     });
 
     if (opacity && label) {

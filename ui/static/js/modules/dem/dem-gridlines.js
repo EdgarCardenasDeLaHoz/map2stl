@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/dem-gridlines.js — DEM gridlines overlay and recolor/rescale helpers.
  *
  * Loaded as a plain <script> after dem-loader.js and before app.js.
@@ -6,7 +6,7 @@
  *
  * Functions:
  *   Gridlines:
- *     drawGridlinesOverlay(containerId?)         — reads window.appState.currentDemBbox
+ *     window.drawGridlinesOverlay(containerId?)         — reads window.appState.currentDemBbox
  *   DEM recolor / rescale:
  *     getFiniteMinMax(values)
  *     recolorDEM()                               — reads window.appState.lastDemData/currentDemBbox
@@ -16,13 +16,13 @@
  * Key external dependencies:
  *   window.renderDEMCanvas  — defined in app.js (writes closure lastDemData), exposed on window
  *   window.appState         — shared state proxy (currentDemBbox, lastDemData)
- *   applyProjection()       — global from dem-loader.js
- *   drawColorbar()          — global from dem-loader.js
- *   drawHistogram()         — global from dem-loader.js
- *   enableZoomAndPan()      — global from dem-loader.js
+ *   window.applyProjection()       — global from dem-loader.js
+ *   window.drawColorbar()          — global from dem-loader.js
+ *   window.drawHistogram()         — global from dem-loader.js
+ *   window.enableZoomAndPan()      — global from dem-loader.js
  *   updateAxesOverlay()     — global from dem-loader.js
  *   updateStackedLayers()   — global from stacked-layers.js
- *   showToast()             — global from app.js file-top scope
+ *   window.showToast()             — global from app.js file-top scope
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -41,10 +41,10 @@ function drawGridlinesOverlay(containerId = 'demImage') {
     const container = document.getElementById(containerId);
     if (!container || !currentDemBbox) return;
 
-    const canvas = container.querySelector('canvas:not(.dem-gridlines-overlay)');
+    const canvas = container.querySelector('canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)');
     if (!canvas) return;
 
-    const showGridlines = document.getElementById('showGridlines');
+    const showGridlines = document.getElementById('layerGridVisible') || document.getElementById('showGridlines');
     if (!showGridlines || !showGridlines.checked) {
         const existing = container.querySelector('.dem-gridlines-overlay');
         if (existing) existing.remove();
@@ -252,7 +252,7 @@ function recolorDEM() {
     const { values, width, height, vmin, vmax } = lastDemData;
 
     const rawCanvas = window.renderDEMCanvas(values, width, height, colormap, vmin, vmax);
-    const canvas = applyProjection(rawCanvas, window.appState.currentDemBbox);
+    const canvas = window.applyProjection(rawCanvas, window.appState.currentDemBbox);
     const container = document.getElementById('demImage');
     container.querySelector('canvas')?._zoomPanCleanup?.();
     container.innerHTML = '';
@@ -260,14 +260,14 @@ function recolorDEM() {
     canvas.style.width = '100%';
     canvas.style.height = 'auto';
 
-    drawColorbar(vmin, vmax, colormap);
-    drawHistogram(values);
-    enableZoomAndPan(canvas);
+    window.drawColorbar(vmin, vmax, colormap);
+    window.drawHistogram(values);
+    window.enableZoomAndPan(canvas);
 
     requestAnimationFrame(() => {
-        drawGridlinesOverlay('demImage');
-        drawGridlinesOverlay('inlineLayersCanvas');
-        updateStackedLayers();
+        window.drawGridlinesOverlay('demImage');
+        window.drawGridlinesOverlay('inlineLayersCanvas');
+        window.events?.emit(window.EV?.STACKED_UPDATE);
     });
 }
 
@@ -280,7 +280,7 @@ function recolorDEM() {
 function rescaleDEM(newVmin, newVmax) {
     const lastDemData = window.appState.lastDemData;
     if (!lastDemData || !lastDemData.values || !lastDemData.values.length) {
-        showToast('No DEM data loaded', 'warning');
+        window.showToast('No DEM data loaded', 'warning');
         return;
     }
 
@@ -291,7 +291,7 @@ function rescaleDEM(newVmin, newVmax) {
     lastDemData.vmax = newVmax;
 
     const rawCanvas = window.renderDEMCanvas(values, width, height, colormap, newVmin, newVmax);
-    const canvas = applyProjection(rawCanvas, window.appState.currentDemBbox);
+    const canvas = window.applyProjection(rawCanvas, window.appState.currentDemBbox);
     const container = document.getElementById('demImage');
     container.querySelector('canvas')?._zoomPanCleanup?.();
     container.innerHTML = '';
@@ -299,12 +299,12 @@ function rescaleDEM(newVmin, newVmax) {
     canvas.style.width = '100%';
     canvas.style.height = 'auto';
 
-    drawColorbar(newVmin, newVmax, colormap);
-    drawHistogram(values);
-    enableZoomAndPan(canvas);
-    requestAnimationFrame(() => updateStackedLayers());
+    window.drawColorbar(newVmin, newVmax, colormap);
+    window.drawHistogram(values);
+    window.enableZoomAndPan(canvas);
+    requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
 
-    showToast(`Rescaled to ${newVmin.toFixed(0)}m - ${newVmax.toFixed(0)}m`, 'success');
+    window.showToast(`Rescaled to ${newVmin.toFixed(0)}m - ${newVmax.toFixed(0)}m`, 'success');
 }
 
 /**
@@ -313,7 +313,7 @@ function rescaleDEM(newVmin, newVmax) {
 function resetRescale() {
     const lastDemData = window.appState.lastDemData;
     if (!lastDemData || !lastDemData.values || !lastDemData.values.length) {
-        showToast('No DEM data loaded', 'warning');
+        window.showToast('No DEM data loaded', 'warning');
         return;
     }
 
@@ -323,5 +323,13 @@ function resetRescale() {
     document.getElementById('rescaleMax').value = Math.ceil(calcMax);
 
     rescaleDEM(calcMin, calcMax);
-    showToast('Reset to auto range', 'info');
+    window.showToast('Reset to auto range', 'info');
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Expose on window (ES module — functions are not auto-global)
+// ─────────────────────────────────────────────────────────────────────────────
+window.drawGridlinesOverlay = drawGridlinesOverlay;
+window.recolorDEM = recolorDEM;
+window.rescaleDEM = rescaleDEM;
+window.resetRescale = resetRescale;

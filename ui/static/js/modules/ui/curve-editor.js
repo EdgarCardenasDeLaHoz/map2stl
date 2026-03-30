@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/curve-editor.js — Elevation curve editor.
  *
  * Loaded as a plain <script> before app.js. All public functions are exposed
@@ -25,7 +25,7 @@
  *   window.appState.activeCurvePreset   (kept in sync)
  *   window.appState._onDemLoaded        (registered here for DEM-load events)
  *   window.recolorDEM()                 — from dem-loader.js
- *   showToast(msg, type)               — global from app.js
+ *   window.showToast(msg, type)               — global from app.js
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -228,11 +228,11 @@ function _setupCurveEventListeners() {
             const vmin = window.appState.curveDataVmin;
             const vmax = window.appState.curveDataVmax;
             if (vmin === null || vmin === undefined) {
-                showToast('Load DEM data first', 'warning');
+                window.showToast('Load DEM data first', 'warning');
                 return;
             }
             if (vmin >= 0) {
-                showToast('No sub-sea-level data in this region', 'info');
+                window.showToast('No sub-sea-level data in this region', 'info');
                 return;
             }
             _pushCurveHistory();
@@ -260,7 +260,7 @@ function _setupCurveEventListeners() {
             _syncCurvePoints();
             drawCurve();
             applyCurveTodemSilent();
-            showToast('Sea level shelf applied', 'success');
+            window.showToast('Sea level shelf applied', 'success');
         });
     }
 }
@@ -454,7 +454,7 @@ function _applyCurrentCurve() {
 function applyCurveTodem() {
     const lastDemData = window.appState.lastDemData;
     if (!lastDemData || !lastDemData.values || curvePoints.length < 2) {
-        showToast('Load a DEM first', 'warning');
+        window.showToast('Load a DEM first', 'warning');
         return;
     }
 
@@ -475,7 +475,7 @@ function applyCurveTodem() {
     }
 
     window.recolorDEM?.();
-    showToast('Elevation curve applied!', 'success');
+    window.showToast('Elevation curve applied!', 'success');
 }
 
 function applyCurveTodemSilent() {
@@ -512,7 +512,7 @@ function resetDemToOriginal() {
     if (originalDemVals && lastDemData) {
         lastDemData.values = [...originalDemVals];
         window.recolorDEM?.();
-        showToast('DEM reset to original', 'info');
+        window.showToast('DEM reset to original', 'info');
     }
 }
 

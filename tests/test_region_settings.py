@@ -4,7 +4,7 @@ Tests for per-region settings persistence.
 Endpoints:
   GET  /api/regions/{name}/settings
   PUT  /api/regions/{name}/settings
-  DELETE /api/regions/{name}  (also removes saved settings)
+  DELETE /api/regions/{name}
 """
 import json
 import pytest
@@ -15,15 +15,20 @@ import pytest
 # ---------------------------------------------------------------------------
 
 class TestGetRegionSettings:
-    def test_returns_404_when_no_settings_file(self, client):
+    def test_returns_empty_when_no_settings_file(self, client):
+        """No settings file → 200 with empty settings dict (not 404)."""
         resp = client.get("/api/regions/TestRegion/settings")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "TestRegion"
+        assert data["settings"] == {}
 
-    def test_returns_404_when_region_not_in_file(self, client, tmp_data_dir):
-        # Create a settings file that doesn't contain this region
+    def test_returns_empty_when_region_not_in_file(self, client, tmp_data_dir):
+        """Region absent from settings file → 200 with empty settings."""
         tmp_data_dir["settings_file"].write_text(json.dumps({"OtherRegion": {"dim": 200}}))
         resp = client.get("/api/regions/TestRegion/settings")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        assert resp.json()["settings"] == {}
 
     def test_returns_saved_settings(self, client, tmp_data_dir):
         saved = {"dim": 300, "colormap": "viridis", "projection": "mercator"}
@@ -108,7 +113,6 @@ class TestSaveRegionSettings:
 
 class TestDeleteRegionCleansSettings:
     def test_delete_removes_settings_entry(self, client, tmp_data_dir):
-        # Save settings for the region
         tmp_data_dir["settings_file"].write_text(json.dumps({"TestRegion": {"dim": 200}}))
 
         resp = client.delete("/api/regions/TestRegion")

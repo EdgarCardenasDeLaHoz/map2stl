@@ -1,13 +1,25 @@
 """
 Tests for the OSM cities endpoint.
 
-POST /api/cities     — fetch building/road/waterway data
+POST /api/cities        — fetch building/road/waterway data
 GET  /api/cities/cached — check local cache status
 """
+import gzip
 import json
-import hashlib
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _osm_key(bbox, tol=2.0, min_area=20.0):
+    """Return the expected cache key for the given bbox and defaults."""
+    from core.cache import osm_cache_key
+    return osm_cache_key(
+        bbox["north"], bbox["south"], bbox["east"], bbox["west"], tol, min_area
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -18,10 +30,6 @@ class TestCitiesCached:
     # Small bbox (Philadelphia area, ~2 km diagonal)
     BBOX = {"north": 39.960, "south": 39.950, "east": -75.140, "west": -75.170}
 
-    def _cache_key(self):
-        n, s, e, w = self.BBOX["north"], self.BBOX["south"], self.BBOX["east"], self.BBOX["west"]
-        return hashlib.md5(f"{n:.4f}_{s:.4f}_{e:.4f}_{w:.4f}".encode()).hexdigest()
-
     def test_returns_false_when_not_cached(self, client):
         resp = client.get("/api/cities/cached", params=self.BBOX)
         assert resp.status_code == 200
@@ -30,9 +38,14 @@ class TestCitiesCached:
         assert "cache_key" in data
 
     def test_returns_true_when_cache_file_exists(self, client, tmp_data_dir):
-        key = self._cache_key()
-        cache_file = tmp_data_dir["osm_cache"] / f"{key}.json"
-        cache_file.write_text(json.dumps({"buildings": {"type": "FeatureCollection", "features": []}}))
+        key = _osm_key(self.BBOX)
+        # The new cache stores .json.gz under CACHE_ROOT/osm/
+        osm_dir = tmp_data_dir["cache_root"] / "osm"
+        osm_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = osm_dir / f"{key}.json.gz"
+        cache_file.write_bytes(
+            gzip.compress(json.dumps({"buildings": {"type": "FeatureCollection", "features": []}}).encode())
+        )
 
         resp = client.get("/api/cities/cached", params=self.BBOX)
         assert resp.json()["cached"] is True
@@ -45,7 +58,6 @@ class TestCitiesCached:
 
 class TestCitiesPostSizeGuard:
     def test_rejects_bbox_larger_than_15km(self, client):
-        # Huge bbox — will exceed 15 km
         resp = client.post("/api/cities", json={
             "north": 60.0, "south": 50.0, "east": 30.0, "west": 10.0
         })
@@ -54,11 +66,10 @@ class TestCitiesPostSizeGuard:
 
     def test_accepts_small_bbox(self, client, tmp_data_dir):
         """A ~2 km bbox should not be rejected by the size guard."""
-        # Mock osmnx so we don't need network access
         empty_fc = {"type": "FeatureCollection", "features": []}
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("strm2stl.ui.location_picker._fetch_osm_data", return_value=mock_result):
+        with patch("routers.cities._fetch_osm_data", return_value=mock_result):
             resp = client.post("/api/cities", json={
                 "north": 39.960, "south": 39.950, "east": -75.140, "west": -75.170,
                 "layers": ["buildings", "roads", "waterways"]
@@ -78,7 +89,7 @@ class TestCitiesPostCaching:
         empty_fc = {"type": "FeatureCollection", "features": []}
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("strm2stl.ui.location_picker._fetch_osm_data", return_value=mock_result) as mock_fn:
+        with patch("routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
             client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
             assert mock_fn.call_count == 1
 
@@ -90,19 +101,19 @@ class TestCitiesPostCaching:
         empty_fc = {"type": "FeatureCollection", "features": []}
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("strm2stl.ui.location_picker._fetch_osm_data", return_value=mock_result):
+        with patch("routers.cities._fetch_osm_data", return_value=mock_result):
             resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
 
         body = resp.json()
         assert "cache_key" in body
         assert "diagonal_km" in body
-        assert body["diagonal_km"] < 15  # It's a small bbox
+        assert body["diagonal_km"] < 15
 
     def test_response_structure_has_expected_geojson_layers(self, client, tmp_data_dir):
         empty_fc = {"type": "FeatureCollection", "features": []}
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("strm2stl.ui.location_picker._fetch_osm_data", return_value=mock_result):
+        with patch("routers.cities._fetch_osm_data", return_value=mock_result):
             resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
 
         body = resp.json()
@@ -111,10 +122,10 @@ class TestCitiesPostCaching:
             assert body[layer]["type"] == "FeatureCollection"
 
     def test_osmnx_not_installed_returns_500(self, client, tmp_data_dir):
-        def raise_import(*args, **kwargs):
+        def raise_runtime(*args, **kwargs):
             raise RuntimeError("osmnx is not installed")
 
-        with patch("strm2stl.ui.location_picker._fetch_osm_data", side_effect=raise_import):
+        with patch("routers.cities._fetch_osm_data", side_effect=raise_runtime):
             resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
         assert resp.status_code == 500
         assert "OSM fetch failed" in resp.json()["error"]

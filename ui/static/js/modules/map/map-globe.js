@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/map-globe.js
  * ====================
  * Leaflet 2D map initialisation, tile layers, grid overlay,
@@ -19,6 +19,9 @@
  *   window.initGlobe()
  *   window.animateGlobe()
  *   window.BBOX_COLORS        (array)
+ *   window.getDrawControl()
+ *   window.getMapGridEnabled()
+ *   window.setMapGridEnabled(v)
  *
  * Dependencies (resolved at call-time via window):
  *   window.api.dem.load(...)
@@ -52,6 +55,7 @@ let demOverlayLoading    = false;
 let terrainOverlayLayer  = null;
 let mapGridLayer         = null;
 let mapGridEnabled       = false;
+let _drawControl         = null;
 
 // Color palette for different bounding boxes (distinct, easy to tell apart)
 const BBOX_COLORS = [
@@ -143,7 +147,7 @@ async function toggleDemOverlay(show) {
         if (demOverlayLayer) { _map.removeLayer(demOverlayLayer); demOverlayLayer = null; }
 
         try {
-            showToast('Loading terrain overlay...', 'info');
+            window.showToast('Loading terrain overlay...', 'info');
 
             // ── Strategy 1: pre-cached global DEM PNG ──────────────────
             // Generated at server startup; always covers the full globe.
@@ -157,7 +161,7 @@ async function toggleDemOverlay(show) {
                         [[-90, -180], [90, 180]],
                         { opacity: 0.7, interactive: false }
                     ).addTo(_map);
-                    showToast('Terrain overlay loaded', 'success');
+                    window.showToast('Terrain overlay loaded', 'success');
                     usedGlobal = true;
                 }
             } catch (_) {}
@@ -187,7 +191,7 @@ async function toggleDemOverlay(show) {
                     for (let i = 0; i < demVals.length; i++) {
                         let t = (demVals[i] - vmin) / ((vmax - vmin) || 1);
                         t = Math.max(0, Math.min(1, t));
-                        const [r, g, b] = mapElevationToColor(t, colormap);
+                        const [r, g, b] = window.mapElevationToColor(t, colormap);
                         imgData.data[i*4]=Math.round(r*255); imgData.data[i*4+1]=Math.round(g*255);
                         imgData.data[i*4+2]=Math.round(b*255); imgData.data[i*4+3]=200;
                     }
@@ -217,12 +221,12 @@ async function toggleDemOverlay(show) {
                         [[_bS, _bW], [_bN, _bE]],
                         { opacity: 0.7, interactive: false }
                     ).addTo(_map);
-                    showToast('Terrain overlay loaded', 'success');
+                    window.showToast('Terrain overlay loaded', 'success');
                 }
             }
         } catch (err) {
             console.error('DEM overlay error:', err);
-            showToast('Failed to load terrain overlay', 'error');
+            window.showToast('Failed to load terrain overlay', 'error');
         } finally {
             demOverlayLoading = false;
         }
@@ -341,7 +345,7 @@ function initMap() {
         return colorObj.color;
     }
 
-    const drawControl = new L.Control.Draw({
+    _drawControl = new L.Control.Draw({
         draw: {
             rectangle: {
                 shapeOptions: {
@@ -359,7 +363,7 @@ function initMap() {
             featureGroup: _drawnItems
         }
     });
-    _map.addControl(drawControl);
+    _map.addControl(_drawControl);
 
     _map.on(L.Draw.Event.CREATED, function (event) {
         // Don't clear - keep old boxes visible with different colors
@@ -595,3 +599,9 @@ window.animateGlobe = animateGlobe;
 // ── Expose BBOX_COLORS and other constants ──────────────────────────────────
 
 window.BBOX_COLORS = BBOX_COLORS;
+
+// ── Expose drawControl and mapGridEnabled accessors ─────────────────────────
+
+window.getDrawControl    = () => _drawControl;
+window.getMapGridEnabled = () => mapGridEnabled;
+window.setMapGridEnabled = (v) => { mapGridEnabled = v; };

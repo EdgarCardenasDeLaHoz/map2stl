@@ -1,0 +1,29 @@
+# ruff configuration for strm2stl
+# Run: ruff check ui/ tests/
+# Fix:  ruff check --fix ui/ tests/
+
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes (undefined names, unused imports)
+    "I",   # isort (import ordering)
+    "B",   # flake8-bugbear (common bugs)
+    "UP",  # pyupgrade (modern Python syntax)
+]
+ignore = [
+    "E501",  # line too long — handled by formatter, not linter
+    "B008",  # do not perform function calls in argument defaults (FastAPI uses this)
+    "B006",  # mutable default argument (too noisy for this codebase)
+    "UP007", # use X | Y for union type hints — keep Optional[] for clarity
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["F811"]   # redefinition of unused name (fixture overrides are expected)
+
+[format]
+quote-style = "double"
+indent-style = "space"

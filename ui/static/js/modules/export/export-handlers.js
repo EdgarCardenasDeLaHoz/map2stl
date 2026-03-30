@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/export-handlers.js — Model generation and file export handlers.
  *
  * Loaded as a plain <script> before app.js.
@@ -16,7 +16,7 @@
  *   window.appState.generatedModelData  (written here, read by _updateWorkflowStepper)
  *   window.appState._updateWorkflowStepper()
  *   showLoading(el, msg), hideLoading(el)   — file-top globals in app.js
- *   showToast(msg, type)                    — file-top global in app.js
+ *   window.showToast(msg, type)                    — file-top global in app.js
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ function _exportParams() {
 function generateModelFromTab() {
     const lastDemData = window.appState?.lastDemData;
     if (!lastDemData || !lastDemData.values || !lastDemData.values.length) {
-        showToast('Please load a DEM first by selecting a region on the map.', 'warning');
+        window.showToast('Please load a DEM first by selecting a region on the map.', 'warning');
         return;
     }
 
@@ -107,13 +107,13 @@ function generateModelFromTab() {
     const baseHeight   = parseFloat(document.getElementById('modelBaseHeight').value);
 
     if (!resolution || resolution < 1 || resolution > 2000) {
-        showToast('Resolution must be between 1 and 2000.', 'warning'); return;
+        window.showToast('Resolution must be between 1 and 2000.', 'warning'); return;
     }
     if (!exaggeration || exaggeration <= 0 || exaggeration > 100) {
-        showToast('Exaggeration must be between 0 and 100.', 'warning'); return;
+        window.showToast('Exaggeration must be between 0 and 100.', 'warning'); return;
     }
     if (isNaN(baseHeight) || baseHeight < 0 || baseHeight > 100) {
-        showToast('Base height must be between 0 and 100 mm.', 'warning'); return;
+        window.showToast('Base height must be between 0 and 100 mm.', 'warning'); return;
     }
 
     const pr = _progressEl();
@@ -150,7 +150,7 @@ function generateModelFromTab() {
 
 function downloadSTL() {
     if (!window.appState?.generatedModelData) {
-        showToast('Please generate a model first.', 'warning'); return;
+        window.showToast('Please generate a model first.', 'warning'); return;
     }
     const pr   = _progressEl();
     const name = _regionName();
@@ -172,7 +172,7 @@ function downloadSTL() {
             _triggerDownload(blob, `${name}.stl`);
             const faces   = faceCount ? `${parseInt(faceCount).toLocaleString()} faces` : '';
             const quality = isWatertight ? '✓ watertight' : '⚠ not watertight';
-            showToast(`STL ready — ${faces} ${quality}`, isWatertight ? 'success' : 'info', 4000);
+            window.showToast(`STL ready — ${faces} ${quality}`, isWatertight ? 'success' : 'info', 4000);
             pr.done('Complete!');
         })
         .catch(e => { console.error('STL download error:', e); pr.error('Error: ' + e.message); });
@@ -180,7 +180,7 @@ function downloadSTL() {
 
 function downloadModel(format) {
     if (!window.appState?.generatedModelData) {
-        showToast('Please generate a model first.', 'warning'); return;
+        window.showToast('Please generate a model first.', 'warning'); return;
     }
     const pr   = _progressEl();
     const name = _regionName();
@@ -202,11 +202,11 @@ function downloadModel(format) {
 
 function downloadCrossSection() {
     if (!window.appState?.generatedModelData) {
-        showToast('Please generate a model first.', 'warning'); return;
+        window.showToast('Please generate a model first.', 'warning'); return;
     }
     const cutAxis    = document.getElementById('crossSectionAxis')?.value || 'lat';
     const cutValue   = parseFloat(document.getElementById('crossSectionValue')?.value);
-    if (isNaN(cutValue)) { showToast('Enter a cut coordinate first', 'warning'); return; }
+    if (isNaN(cutValue)) { window.showToast('Enter a cut coordinate first', 'warning'); return; }
     const thickness  = parseFloat(document.getElementById('crossSectionThickness')?.value) || 5;
     const statusEl   = document.getElementById('crossSectionStatus');
     if (statusEl) statusEl.textContent = 'Generating…';
@@ -241,12 +241,12 @@ function downloadCrossSection() {
             const axis     = cutAxis === 'lat' ? `lat${cutValue.toFixed(4)}` : `lon${cutValue.toFixed(4)}`;
             _triggerDownload(blob, `${name}_cross_${axis}.stl`);
             if (statusEl) statusEl.textContent = 'Downloaded.';
-            showToast('Cross-section STL ready', 'success');
+            window.showToast('Cross-section STL ready', 'success');
         })
         .catch(e => {
             console.error('Cross-section error:', e);
             if (statusEl) statusEl.textContent = 'Error: ' + e.message;
-            showToast('Cross-section error: ' + e.message, 'error');
+            window.showToast('Cross-section error: ' + e.message, 'error');
         });
 }
 

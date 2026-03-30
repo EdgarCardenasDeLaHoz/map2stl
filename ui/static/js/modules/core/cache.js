@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/cache.js — Client-side water mask LRU cache + cache management UI.
  *
  * Loaded as a plain <script> before app.js. Exposes:
@@ -116,7 +116,7 @@ window.fetchServerCacheStatus = async function fetchServerCacheStatus() {
 window.preloadAllRegions = async function preloadAllRegions() {
     const coordinatesData = window.getCoordinatesData?.() || [];
     if (!coordinatesData.length) {
-        showToast('No regions to preload', 'warning');
+        window.showToast('No regions to preload', 'warning');
         return;
     }
 
@@ -133,7 +133,7 @@ window.preloadAllRegions = async function preloadAllRegions() {
     let skipped = 0;
     const total = coordinatesData.length;
 
-    showToast(`Starting preload of ${total} regions...`, 'info');
+    window.showToast(`Starting preload of ${total} regions...`, 'info');
 
     for (const region of coordinatesData) {
         const bbox = {
@@ -183,7 +183,7 @@ window.preloadAllRegions = async function preloadAllRegions() {
     preloadBtn.disabled = false;
     preloadBtn.innerHTML = '<span class="btn-icon">⚡</span> Preload All Regions';
 
-    showToast(`Preload complete: ${loaded} loaded, ${skipped} already cached`, 'success');
+    window.showToast(`Preload complete: ${loaded} loaded, ${skipped} already cached`, 'success');
 
     setTimeout(() => {
         progressContainer.classList.add('hidden');
@@ -197,7 +197,7 @@ window.clearClientCache = function clearClientCache() {
     window.waterMaskCache.clear();
     window.clearLayerCache?.();
     window.updateCacheStatusUI();
-    showToast('Client cache cleared', 'success');
+    window.showToast('Client cache cleared', 'success');
 };
 
 /**
@@ -210,13 +210,13 @@ window.clearServerCache = async function clearServerCache() {
         if (error) throw new Error(error);
 
         if (data.status === 'success') {
-            showToast(`Server cache cleared (${data.cleared?.[0]?.files_deleted ?? 0} files)`, 'success');
+            window.showToast(`Server cache cleared (${data.cleared?.[0]?.files_deleted ?? 0} files)`, 'success');
             window.fetchServerCacheStatus();
         } else {
-            showToast('Failed to clear server cache', 'error');
+            window.showToast('Failed to clear server cache', 'error');
         }
     } catch (e) {
-        showToast('Error clearing server cache: ' + e.message, 'error');
+        window.showToast('Error clearing server cache: ' + e.message, 'error');
     }
 };
 

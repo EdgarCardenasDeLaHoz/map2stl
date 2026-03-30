@@ -1,4 +1,4 @@
-/**
+﻿/**
  * modules/presets.js — Preset profiles and per-region settings persistence.
  *
  * Loaded as a plain <script> before app.js. All public functions are exposed
@@ -22,7 +22,7 @@
  *   window.appState.activeCurvePreset
  *   window.appState.curvePoints
  *   window.appState._applyCurveSettings(points, presetName)
- *   showToast(msg, type)        — global from app.js file-top
+ *   window.showToast(msg, type)        — global from app.js file-top
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -121,17 +121,17 @@ function updatePresetSelect() {
 
 function loadSelectedPreset() {
     const select = document.getElementById('presetSelect');
-    if (!select || !select.value) { showToast('Select a preset first', 'warning'); return; }
+    if (!select || !select.value) { window.showToast('Select a preset first', 'warning'); return; }
 
     _lastAppliedPresetName = select.value;
     const preset = select.value.startsWith('user:')
         ? _userPresets[select.value.substring(5)]
         : builtInPresets[select.value];
 
-    if (!preset) { showToast('Preset not found', 'error'); return; }
+    if (!preset) { window.showToast('Preset not found', 'error'); return; }
 
     applyPreset(preset);
-    showToast('Preset loaded!', 'success');
+    window.showToast('Preset loaded!', 'success');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -250,28 +250,28 @@ function applyAllSettings(s) {
 
 async function saveRegionSettings() {
     const region = window.appState.selectedRegion;
-    if (!region) { showToast('Select a region first', 'warning'); return; }
+    if (!region) { window.showToast('Select a region first', 'warning'); return; }
     const settings = collectAllSettings();
     const statusEl = document.getElementById('saveSettingsStatus');
     if (statusEl) statusEl.textContent = 'Saving…';
     try {
-        const { error } = await api.regions.saveSettings(region.name, settings);
+        const { error } = await window.api.regions.saveSettings(region.name, settings);
         if (!error) {
             if (statusEl) { statusEl.textContent = 'Saved ✓'; setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 2000); }
-            showToast('Settings saved for ' + region.name, 'success');
+            window.showToast('Settings saved for ' + region.name, 'success');
         } else {
-            showToast('Save failed: ' + error, 'error');
+            window.showToast('Save failed: ' + error, 'error');
             if (statusEl) statusEl.textContent = 'Error';
         }
     } catch (e) {
-        showToast('Save failed: ' + e.message, 'error');
+        window.showToast('Save failed: ' + e.message, 'error');
         if (statusEl) statusEl.textContent = 'Error';
     }
 }
 
 async function loadAndApplyRegionSettings(regionName) {
     try {
-        const { data, error } = await api.regions.getSettings(regionName);
+        const { data, error } = await window.api.regions.getSettings(regionName);
         if (!error && data) { applyAllSettings(data.settings); return true; }
     } catch (_) { /* network error — use defaults */ }
     return false;
@@ -294,32 +294,32 @@ function hideSavePresetDialog() {
 function saveNewPreset() {
     const input = document.getElementById('newPresetName');
     const name  = input?.value?.trim();
-    if (!name) { showToast('Enter a preset name', 'warning'); return; }
-    if (builtInPresets[name.toLowerCase()]) { showToast('Cannot overwrite built-in preset', 'error'); return; }
+    if (!name) { window.showToast('Enter a preset name', 'warning'); return; }
+    if (builtInPresets[name.toLowerCase()]) { window.showToast('Cannot overwrite built-in preset', 'error'); return; }
 
     _userPresets[name] = getCurrentSettings();
     try { localStorage.setItem('strm2stl_userPresets', JSON.stringify(_userPresets)); }
-    catch (_) { showToast('Could not save preset — storage full or unavailable', 'warning'); }
+    catch (_) { window.showToast('Could not save preset — storage full or unavailable', 'warning'); }
 
     updatePresetSelect();
     const select = document.getElementById('presetSelect');
     if (select) select.value = 'user:' + name;
     hideSavePresetDialog();
-    showToast(`Preset "${name}" saved!`, 'success');
+    window.showToast(`Preset "${name}" saved!`, 'success');
 }
 
 function deleteSelectedPreset() {
     const select = document.getElementById('presetSelect');
-    if (!select || !select.value) { showToast('Select a preset to delete', 'warning'); return; }
-    if (!select.value.startsWith('user:')) { showToast('Cannot delete built-in presets', 'warning'); return; }
+    if (!select || !select.value) { window.showToast('Select a preset to delete', 'warning'); return; }
+    if (!select.value.startsWith('user:')) { window.showToast('Cannot delete built-in presets', 'warning'); return; }
 
     const name = select.value.substring(5);
     if (confirm(`Delete preset "${name}"?`)) {
         delete _userPresets[name];
         try { localStorage.setItem('strm2stl_userPresets', JSON.stringify(_userPresets)); }
-        catch (_) { showToast('Could not save preset — storage full or unavailable', 'warning'); }
+        catch (_) { window.showToast('Could not save preset — storage full or unavailable', 'warning'); }
         updatePresetSelect();
-        showToast(`Preset "${name}" deleted`, 'info');
+        window.showToast(`Preset "${name}" deleted`, 'info');
     }
 }
 
