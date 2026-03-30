@@ -109,13 +109,15 @@ from routers.cities import router as _cities_router
 from routers.export import router as _export_router
 from routers.cache import router as _cache_router
 from routers.settings import router as _settings_router
+from routers.composite import router as _composite_router
 app.include_router(_regions_router)
 app.include_router(_terrain_router)
 app.include_router(_cities_router)
 app.include_router(_export_router)
 app.include_router(_cache_router)
 app.include_router(_settings_router)
-logger.info("Routers loaded: regions, terrain, cities, export, cache, settings")
+app.include_router(_composite_router)
+logger.info("Routers loaded: regions, terrain, cities, export, cache, settings, composite")
 
 
 # ============================================================

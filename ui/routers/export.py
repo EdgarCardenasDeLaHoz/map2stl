@@ -20,6 +20,7 @@ from core.export import (
     generate_obj,
     generate_3mf,
     generate_crosssection,
+    generate_mesh_preview,
 )
 
 
@@ -42,6 +43,15 @@ async def export_3mf(request: Request):
     """Generate and download a 3MF file from DEM data."""
     data = await request.json()
     return generate_3mf(data)
+
+
+@router.post("/api/export/preview")
+async def export_preview(request: Request):
+    """Return numpy2stl vertices+faces as JSON for the in-browser 3D viewer."""
+    import asyncio
+    data = await request.json()
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, generate_mesh_preview, data)
 
 
 @router.post("/api/export/crosssection")

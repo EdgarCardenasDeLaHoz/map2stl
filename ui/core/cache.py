@@ -43,6 +43,7 @@ NAMESPACE_TTL = {
     "water":     14 * 86400,   # 14 days
     "satellite": 14 * 86400,   # 14 days
     "osm":        7 * 86400,   #  7 days
+    "composite": 30 * 86400,   # 30 days (city rasters tied to OSM data)
 }
 MAX_FILES_PER_NAMESPACE = 200
 
@@ -58,6 +59,18 @@ def make_cache_key(namespace: str, north: float, south: float,
     extra_str = json.dumps(extra or {}, sort_keys=True, separators=(',', ':'))
     raw = f"{namespace}:{bbox_str}:{extra_str}"
     return hashlib.md5(raw.encode()).hexdigest()
+
+
+def osm_cache_key(north: float, south: float, east: float, west: float,
+                  tol: float = 0.5, min_area: float = 5.0) -> str:
+    """Return the MD5 key used by the OSM cache for a given bbox + simplification params.
+
+    Matches the key written by routers/cities.py so other routers can read OSM
+    data without re-fetching it.
+    """
+    return hashlib.md5(
+        f"{north:.4f}_{south:.4f}_{east:.4f}_{west:.4f}_t{tol}_a{min_area}".encode()
+    ).hexdigest()
 
 
 # ---------------------------------------------------------------------------

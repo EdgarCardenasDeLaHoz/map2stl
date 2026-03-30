@@ -27,19 +27,10 @@
             </div>
             <div class="sidebar-content">
                 <!-- Compact list view (shown in normal state) -->
-                <div id="sidebarListView" class="hidden">
-                    <!-- Regions list (collapsible, open by default) -->
-                    <div class="control-group collapsible-section">
-                        <div class="collapsible-header" onclick="toggleCollapsible(this)">
-                            <h4>Regions</h4>
-                            <span class="collapsible-icon">▼</span>
-                        </div>
-                        <div class="collapsible-content">
-                            <input type="text" id="coordSearch" class="search-input" placeholder="Search regions...">
-                            <div id="coordinatesList" class="coordinates-list">
-                                <div class="loading"><span class="spinner"></span>Loading coordinates...</div>
-                            </div>
-                        </div>
+                <div id="sidebarListView" class="hidden" style="display:flex;flex-direction:column;height:100%;">
+                    <input type="text" id="coordSearch" class="search-input" placeholder="Search regions..." style="margin:4px 6px;width:calc(100% - 12px);flex-shrink:0;box-sizing:border-box;margin-bottom:4px;">
+                    <div id="coordinatesList" class="coordinates-list" style="flex:1;overflow-y:auto;">
+                        <div class="loading"><span class="spinner"></span>Loading coordinates...</div>
                     </div>
                 </div>
 
@@ -448,10 +439,16 @@
                                     <div class="layers-y-axis" id="layersYAxis"></div>
                                     <div class="layers-stack-wrapper">
                                         <div class="layers-stack" id="layersStack">
-                                            <canvas class="layer-canvas" id="layerDemCanvas"></canvas>
-                                            <canvas class="layer-canvas" id="layerWaterCanvas"></canvas>
-                                            <canvas class="layer-canvas" id="layerSatCanvas"></canvas>
+                                            <!-- Hidden source buffers — written to by layer renderers, never displayed directly -->
+                                            <canvas class="layer-canvas" id="layerDemCanvas" style="display:none;"></canvas>
+                                            <canvas class="layer-canvas" id="layerWaterCanvas" style="display:none;"></canvas>
+                                            <canvas class="layer-canvas" id="layerSatCanvas" style="display:none;"></canvas>
+                                            <canvas class="layer-canvas" id="layerSatImgCanvas" style="display:none;"></canvas>
                                             <canvas class="layer-canvas" id="layerCityRasterCanvas" style="display:none;"></canvas>
+                                            <canvas class="layer-canvas" id="layerCompositeDemCanvas" style="display:none;"></canvas>
+                                            <!-- Single display canvas — shows the active view mode -->
+                                            <canvas class="layer-canvas" id="stackViewCanvas"></canvas>
+                                            <!-- Grid overlay — always on top, exempt from zoom transform -->
                                             <canvas class="layer-canvas" id="layerGridCanvas"
                                                 style="pointer-events:none; transform:none !important;"></canvas>
                                         </div>
@@ -513,36 +510,28 @@
                             <div class="bbox-editor" id="bboxEditor">
                                 <div class="bbox-row">
                                     <label class="bbox-lbl">N</label>
-                                    <input type="number" id="bboxNorth" class="bbox-input" step="0.01" placeholder="North" title="Northern boundary of the region">
+                                    <input type="number" id="bboxNorth" class="bbox-input" step="0.01" placeholder="N" title="Northern boundary">
                                     <label class="bbox-lbl">S</label>
-                                    <input type="number" id="bboxSouth" class="bbox-input" step="0.01" placeholder="South" title="Southern boundary of the region">
+                                    <input type="number" id="bboxSouth" class="bbox-input" step="0.01" placeholder="S" title="Southern boundary">
                                     <label class="bbox-lbl">E</label>
-                                    <input type="number" id="bboxEast" class="bbox-input" step="0.01" placeholder="East" title="Eastern boundary of the region">
+                                    <input type="number" id="bboxEast" class="bbox-input" step="0.01" placeholder="E" title="Eastern boundary">
                                     <label class="bbox-lbl">W</label>
-                                    <input type="number" id="bboxWest" class="bbox-input" step="0.01" placeholder="West" title="Western boundary of the region">
-                                    <button id="bboxReloadBtn" class="bbox-reload-btn" title="Reload layers with these coordinates">↺ Reload</button>
-                                    <button id="editBboxOnMapBtn" class="bbox-reload-btn" title="Toggle inline map to drag-resize the bounding box" style="background:#356;">🗺 Map</button>
-                                    <div id="colorbar" style="flex:1;min-width:40px;height:18px;border-radius:3px;overflow:hidden;" title="Elevation colorbar — shows color mapping from min (left) to max (right) elevation"></div>
-                                    <button id="settingsExternalBtn" class="bbox-reload-btn" title="Toggle settings panel" style="margin-left:4px;flex-shrink:0;">⚙</button>
-                                </div>
-                                <div style="display:flex;align-items:center;gap:6px;margin-top:3px;">
-                                    <div id="bboxElevRange" class="bbox-elev-range" style="flex:1;margin-top:0;"></div>
-                                    <button id="saveBboxBtn" class="bbox-reload-btn" title="Save current bounding box coordinates back to the selected region" style="background:#2a5;font-size:11px;padding:3px 8px;">💾 Save bbox</button>
-                                </div>
-                                <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
-                                    <label style="font-size:11px;color:#888;flex-shrink:0;">Group:</label>
-                                    <input type="text" id="regionLabelEdit" list="regionLabelsList"
-                                           placeholder="e.g. cities, Europe…"
-                                           title="Group/label for sidebar organisation. Pick an existing group or type a new one."
-                                           style="flex:1;font-size:11px;padding:2px 6px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;">
-                                    <datalist id="regionLabelsList"></datalist>
-                                    <button id="saveRegionLabelBtn" class="bbox-reload-btn"
-                                            title="Save group label for this region"
-                                            style="background:#267;font-size:11px;padding:3px 8px;">🏷 Save</button>
+                                    <input type="number" id="bboxWest" class="bbox-input" step="0.01" placeholder="W" title="Western boundary">
+                                    <button id="bboxReloadBtn" class="bbox-reload-btn" title="Reload layers">↺</button>
+                                    <button id="editBboxOnMapBtn" class="bbox-reload-btn" title="Drag-edit bbox on mini-map" style="background:#356;">🗺</button>
+                                    <button id="saveBboxBtn" class="bbox-reload-btn" title="Save bbox to region" style="background:#2a5;">💾</button>
+                                    <div style="width:1px;height:14px;background:#444;flex-shrink:0;"></div>
+                                    <div id="colorbar" style="flex:1;min-width:30px;height:14px;border-radius:2px;overflow:hidden;" title="Elevation colorbar"></div>
+                                    <span id="bboxElevRange" class="bbox-elev-range" style="flex-shrink:0;margin:0;white-space:nowrap;"></span>
+                                    <button id="settingsExternalBtn" class="bbox-reload-btn" title="Toggle settings panel" style="margin-left:2px;flex-shrink:0;">⚙</button>
                                 </div>
                             </div>
                             <!-- Inline mini-map for drag-editing the bounding box -->
                             <div id="bboxMiniMap" class="bbox-mini-map hidden"></div>
+                            <!-- Hidden elements kept for JS compatibility -->
+                            <datalist id="regionLabelsList"></datalist>
+                            <input type="hidden" id="regionLabelEdit">
+                            <button id="saveRegionLabelBtn" style="display:none;"></button>
                         </div>
                     </div>
                     <!-- Right panel: horizontal button bar + collapsible settings -->
@@ -554,7 +543,7 @@
                         <div style="width:1px;height:16px;background:#444;margin:0 2px;"></div>
                         <button class="dem-strip-btn active" id="layersStripBtn" data-subtab="layers" title="Switch to Layers view">📚 Layers <span class="strip-status-dots"><span class="strip-dot" id="stripDotDem"></span><span class="strip-dot" id="stripDotWater"></span><span class="strip-dot" id="stripDotLandCover"></span></span></button>
                         <button class="dem-strip-btn" id="compareStripBtn" data-subtab="compare" title="Switch to Compare view">⚖ Compare</button>
-                        <button class="dem-strip-btn" id="mergeStripBtn" data-subtab="merge" title="Merge multiple DEM sources">🔧 Merge</button>
+                        <!-- Merge tab removed — functionality replaced by Composite DEM layer -->
                         <div style="flex:1"></div>
                         <button class="dem-strip-btn" id="jsonViewToggleBtn" title="Toggle between form and JSON editor">{ } JSON</button>
                     </div>
@@ -567,44 +556,35 @@
                                 <span class="collapsible-icon">▼</span>
                             </div>
                             <div class="collapsible-content">
-                                <!-- Layer Visibility & Opacity -->
+                                <!-- View Mode Selector (replaces per-layer checkboxes) -->
                                 <div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #444;">
-                                    <div style="font-size:11px;color:#888;margin-bottom:6px;">Layers</div>
+                                    <div style="font-size:11px;color:#888;margin-bottom:5px;">View Mode</div>
+                                    <div id="layerModeSelector" style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:7px;">
+                                        <button class="layer-mode-btn active" data-mode="CompositeDem" title="Composite DEM — all layer contributions combined">★ Composite</button>
+                                        <button class="layer-mode-btn" data-mode="Dem" title="Base elevation (DEM only)">🏔 DEM</button>
+                                        <button class="layer-mode-btn" data-mode="Water" title="Water mask">💧 Water</button>
+                                        <button class="layer-mode-btn" data-mode="Sat" title="ESA land cover">🌿 ESA</button>
+                                        <button class="layer-mode-btn" data-mode="SatImg" title="Satellite imagery">🛰 Sat</button>
+                                        <button class="layer-mode-btn" data-mode="CityRaster" title="City heights raster">🏙 City</button>
+                                    </div>
                                     <div style="display:grid;grid-template-columns:auto 1fr 32px;gap:4px 6px;align-items:center;">
-                                        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;white-space:nowrap;" title="Show/hide the terrain elevation (DEM) layer">
-                                            <input type="checkbox" id="layerDemVisible" checked> 🏔️ DEM
-                                        </label>
-                                        <input type="range" id="layerDemOpacity" min="0" max="100" value="100" style="width:100%;" title="DEM layer opacity (0=transparent, 100=opaque)">
-                                        <span id="layerDemOpacityLabel" style="font-size:11px;color:#aaa;text-align:right;">100%</span>
-
-                                        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;white-space:nowrap;" title="Show/hide the water mask layer — blue areas indicate detected water (oceans, lakes, rivers)">
-                                            <input type="checkbox" id="layerWaterVisible" checked> 💧 Water
-                                        </label>
-                                        <input type="range" id="layerWaterOpacity" min="0" max="100" value="70" style="width:100%;" title="Water layer opacity">
-                                        <span id="layerWaterOpacityLabel" style="font-size:11px;color:#aaa;text-align:right;">70%</span>
-
-                                        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;white-space:nowrap;" title="Show/hide the ESA WorldCover land classification layer (trees, crops, urban, etc.)">
-                                            <input type="checkbox" id="layerSatVisible"> 🛰️ Sat
-                                        </label>
-                                        <input type="range" id="layerSatOpacity" min="0" max="100" value="50" style="width:100%;" title="Land cover layer opacity">
-                                        <span id="layerSatOpacityLabel" style="font-size:11px;color:#aaa;text-align:right;">50%</span>
-
-                                        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;white-space:nowrap;" id="layerCityRasterRow" title="Show/hide City Heights raster — buildings and roads burned onto a height-map grid">
-                                            <input type="checkbox" id="layerCityRasterVisible"> 🏙️ City Heights
-                                        </label>
-                                        <input type="range" id="layerCityRasterOpacity" min="0" max="100" value="80" style="width:100%;" title="City Heights layer opacity">
-                                        <span id="layerCityRasterOpacityLabel" style="font-size:11px;color:#aaa;text-align:right;">80%</span>
-
-                                        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;white-space:nowrap;" title="Show/hide lat/lon coordinate gridlines over the canvas">
+                                        <span style="font-size:12px;color:#ccc;white-space:nowrap;">Opacity</span>
+                                        <input type="range" id="activeLayerOpacity" min="0" max="100" value="100" style="width:100%;" title="Active view opacity">
+                                        <span id="activeLayerOpacityLabel" style="font-size:11px;color:#aaa;text-align:right;">100%</span>
+                                        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;white-space:nowrap;" title="Show lat/lon gridlines">
                                             <input type="checkbox" id="layerGridVisible" checked> 📐 Grid
                                         </label>
-                                        <select id="layerGridDensity" title="Grid density: number of lat/lon divisions drawn over the canvas"
+                                        <select id="layerGridDensity" title="Grid line density"
                                             style="width:100%;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;">
                                             <option value="4">Sparse</option>
-                                            <option value="10" selected>Normal</option>
-                                            <option value="20">Dense</option>
+                                            <option value="10">Medium</option>
+                                            <option value="20" selected>Normal</option>
                                         </select>
                                         <span></span>
+                                    </div>
+                                    <div style="display:flex;gap:4px;margin-top:6px;">
+                                        <button id="loadSatBtn" class="btn btn-secondary" style="flex:1;font-size:11px;padding:3px 0;" title="Load ESA land cover for this region">🌍 Land Use</button>
+                                        <button id="loadSatImgBtn" class="btn btn-secondary" style="flex:1;font-size:11px;padding:3px 0;" title="Load satellite imagery for this region">📡 Satellite</button>
                                     </div>
                                 </div>
 
@@ -620,27 +600,25 @@
                                         <option value="gray">Gray</option>
                                     </select>
                                 </div>
-                                <div class="param-group">
-                                    <label title="Elevation range (metres) mapped to the colormap. Values outside this range are clamped. Use Auto to fit data.">Elevation Range:</label>
-                                    <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                                        <input type="number" id="rescaleMin" placeholder="Min"
-                                            style="width:65px;background:#404040;color:#ccc;border:1px solid #555;padding:4px;border-radius:3px;"
-                                            title="Minimum elevation (m) mapped to the bottom of the colormap">
-                                        <span style="color:#888;">to</span>
-                                        <input type="number" id="rescaleMax" placeholder="Max"
-                                            style="width:65px;background:#404040;color:#ccc;border:1px solid #555;padding:4px;border-radius:3px;"
-                                            title="Maximum elevation (m) mapped to the top of the colormap">
-                                        <button id="applyRescaleBtn" class="btn btn-secondary"
-                                            style="padding:4px 8px;font-size:11px;"
-                                            title="Apply entered min/max to remap the colormap without reloading data">Apply</button>
-                                        <button id="resetRescaleBtn" class="btn btn-secondary"
-                                            style="padding:4px 8px;font-size:11px;"
-                                            title="Auto-fit: set min/max to the actual data range">Auto</button>
-                                        <label title="Automatically fit the color range to data min/max after each curve change or colormap switch" style="display:flex;align-items:center;gap:3px;font-size:11px;color:#aaa;cursor:pointer;white-space:nowrap;">
-                                            <input type="checkbox" id="autoRescale" checked style="cursor:pointer;">
-                                            Auto-rescale
-                                        </label>
-                                    </div>
+                                <div class="param-group" style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;">
+                                    <label title="Elevation range (metres) mapped to the colormap" style="white-space:nowrap;font-size:12px;">Elevation<br>Range:</label>
+                                    <input type="number" id="rescaleMin" placeholder="Min"
+                                        style="width:55px;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;"
+                                        title="Minimum elevation (m)">
+                                    <span style="color:#888;font-size:11px;">to</span>
+                                    <input type="number" id="rescaleMax" placeholder="Max"
+                                        style="width:55px;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;"
+                                        title="Maximum elevation (m)">
+                                    <button id="applyRescaleBtn" class="btn btn-secondary"
+                                        style="padding:2px 6px;font-size:11px;"
+                                        title="Apply min/max range">Apply</button>
+                                    <button id="resetRescaleBtn" class="btn btn-secondary"
+                                        style="padding:2px 6px;font-size:11px;"
+                                        title="Auto-fit to data range">Auto</button>
+                                    <label title="Auto-fit color range on each update" style="display:flex;align-items:center;gap:2px;font-size:11px;color:#aaa;cursor:pointer;white-space:nowrap;">
+                                        <input type="checkbox" id="autoRescale" checked style="cursor:pointer;">
+                                        Auto
+                                    </label>
                                 </div>
 
                                 <!-- Canvas Projection -->
@@ -660,16 +638,9 @@
                                         </div>
                                     </div>
                                     <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
-                                        <label for="showGridlines" style="font-size:11px;color:#ccc;cursor:pointer;display:flex;align-items:center;gap:4px;"
-                                            title="Show lat/lon gridlines on the legacy DEM canvas view">
-                                            <input type="checkbox" id="showGridlines" checked> Gridlines (legacy)
-                                        </label>
-                                        <select id="gridlineCount" title="Number of gridlines in each direction on the legacy DEM view"
-                                            style="background:#404040;color:#ccc;border:1px solid #555;padding:2px 4px;border-radius:3px;font-size:11px;">
-                                            <option value="3">3</option>
+                                        <input type="checkbox" id="showGridlines" checked style="display:none;">
+                                        <select id="gridlineCount" style="display:none;">
                                             <option value="5" selected>5</option>
-                                            <option value="7">7</option>
-                                            <option value="10">10</option>
                                         </select>
                                         <label for="autoReloadLayers" style="font-size:11px;color:#ccc;cursor:pointer;display:flex;align-items:center;gap:4px;"
                                             title="Automatically reload DEM and water layers when you change the bounding box or select a new region">
@@ -689,7 +660,7 @@
                         </div>
 
                         <!-- Histogram & Curves Section -->
-                        <div class="collapsible-section" id="histogramCurvesSection" style="margin-top:10px;">
+                        <div class="collapsible-section collapsed" id="histogramCurvesSection" style="margin-top:10px;">
                             <div class="collapsible-header" onclick="toggleCollapsible(this)">
                                 <h4>📊 Histogram & Curves</h4>
                                 <span class="collapsible-icon">▼</span>
@@ -888,10 +859,6 @@
                                     <label for="layerWaterwaysToggle" style="font-size:12px;cursor:pointer;">Waterways</label>
                                     <span id="cityWaterwayCount" class="city-layer-count" style="font-size:10px;color:#888;"></span>
 
-                                    <input type="checkbox" id="layerPoisToggle">
-                                    <input type="color" id="layerPoisColor" value="#ff6644" class="city-color-swatch" style="width:22px;height:18px;padding:0;border:none;cursor:pointer;background:none;">
-                                    <label for="layerPoisToggle" style="font-size:12px;cursor:pointer;">POIs</label>
-                                    <span id="cityPoiCount" class="city-layer-count" style="font-size:10px;color:#888;"></span>
                                 </div>
                                 <!-- Simplification params -->
                                 <div style="display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 8px;font-size:11px;border-top:1px solid #333;padding-top:8px;margin-top:4px;">
@@ -968,6 +935,73 @@
                                         Saves: Dimension, Depth/Water scales, Colormap, Elevation curve
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- Composite DEM Controls -->
+                        <div class="collapsible-section" style="margin-top:10px;">
+                            <div class="collapsible-header" onclick="toggleCollapsible(this)" title="Adjust per-layer height contributions to build a composite elevation model">
+                                <h4>📊 Composite DEM</h4>
+                                <span class="collapsible-icon">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div style="margin-bottom:8px;">
+                                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">
+                                        <input type="checkbox" id="compositeEnabled" checked> Enable composite layer
+                                    </label>
+                                </div>
+
+                                <div style="font-size:11px;color:#8cf;margin:6px 0 4px;">Water contribution</div>
+                                <div style="display:grid;grid-template-columns:auto 1fr 36px;gap:2px 6px;align-items:center;font-size:11px;">
+                                    <span style="color:#aaa;">Depth</span>
+                                    <input type="range" id="compositeWaterDepth" min="0" max="50" value="5" step="0.5" style="width:100%;">
+                                    <span id="compositeWaterDepthLabel" style="color:#aaa;text-align:right;">5.0 m</span>
+                                    <span style="color:#aaa;">Weight</span>
+                                    <input type="range" id="compositeWaterWeight" min="0" max="5" value="1" step="0.1" style="width:100%;">
+                                    <span id="compositeWaterWeightLabel" style="color:#aaa;text-align:right;">1.0</span>
+                                </div>
+
+                                <div style="font-size:11px;color:#8cf;margin:8px 0 4px;">City / OSM contribution</div>
+                                <div style="display:grid;grid-template-columns:auto 1fr 36px;gap:2px 6px;align-items:center;font-size:11px;">
+                                    <span style="color:#aaa;">Building scale</span>
+                                    <input type="range" id="compositeBuildingScale" min="0" max="5" value="1" step="0.1" style="width:100%;">
+                                    <span id="compositeBuildingScaleLabel" style="color:#aaa;text-align:right;">1.0</span>
+                                    <span style="color:#aaa;">Road cut</span>
+                                    <input type="range" id="compositeRoadCut" min="0" max="5" value="0.5" step="0.1" style="width:100%;">
+                                    <span id="compositeRoadCutLabel" style="color:#aaa;text-align:right;">0.5 m</span>
+                                    <span style="color:#aaa;">River depth</span>
+                                    <input type="range" id="compositeRiverDepth" min="0" max="20" value="3" step="0.5" style="width:100%;">
+                                    <span id="compositeRiverDepthLabel" style="color:#aaa;text-align:right;">3.0 m</span>
+                                    <span style="color:#aaa;">Weight</span>
+                                    <input type="range" id="compositeCityWeight" min="0" max="5" value="1" step="0.1" style="width:100%;">
+                                    <span id="compositeCityWeightLabel" style="color:#aaa;text-align:right;">1.0</span>
+                                </div>
+
+                                <div style="font-size:11px;color:#8cf;margin:8px 0 4px;">Land cover contribution</div>
+                                <div style="display:grid;grid-template-columns:auto 1fr 36px;gap:2px 6px;align-items:center;font-size:11px;">
+                                    <span style="color:#aaa;">Tree height</span>
+                                    <input type="range" id="compositeTreeHeight" min="0" max="40" value="8" step="0.5" style="width:100%;">
+                                    <span id="compositeTreeHeightLabel" style="color:#aaa;text-align:right;">8.0 m</span>
+                                    <span style="color:#aaa;">Weight</span>
+                                    <input type="range" id="compositeLandcoverWeight" min="0" max="5" value="0" step="0.1" style="width:100%;">
+                                    <span id="compositeLandcoverWeightLabel" style="color:#aaa;text-align:right;">0.0</span>
+                                </div>
+
+                                <div style="font-size:11px;color:#8cf;margin:8px 0 4px;">Satellite vegetation</div>
+                                <div style="display:grid;grid-template-columns:auto 1fr 36px;gap:2px 6px;align-items:center;font-size:11px;">
+                                    <span style="color:#aaa;">Veg height</span>
+                                    <input type="range" id="compositeVegHeight" min="0" max="30" value="5" step="0.5" style="width:100%;">
+                                    <span id="compositeVegHeightLabel" style="color:#aaa;text-align:right;">5.0 m</span>
+                                    <span style="color:#aaa;">Weight</span>
+                                    <input type="range" id="compositeSatWeight" min="0" max="5" value="0" step="0.1" style="width:100%;">
+                                    <span id="compositeSatWeightLabel" style="color:#aaa;text-align:right;">0.0</span>
+                                </div>
+
+                                <div style="margin-top:10px;display:flex;gap:6px;align-items:center;">
+                                    <button id="applyCompositeToDemBtn" class="btn btn-primary" style="flex:1;padding:5px 0;font-size:11px;" title="Replace current DEM with composite values">Apply to DEM</button>
+                                    <span id="compositeStats" style="font-size:10px;color:#aaa;white-space:nowrap;"></span>
+                                </div>
+                                <div style="font-size:10px;color:#666;margin-top:4px;">Replaces base DEM with composite values for STL export</div>
                             </div>
                         </div>
 
@@ -1210,9 +1244,8 @@
                                 </button>
                             </div>
                             <div class="export-buttons" style="margin-top: 8px;">
-                                <label style="font-size: 12px; color: #888; margin-bottom: 4px; display: block;">Export
-                                    Format:</label>
-                                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                                <label style="font-size: 12px; color: #888; margin-bottom: 4px; display: block;">Export Format:</label>
+                                <div style="display: flex; gap: 6px;">
                                     <button id="downloadSTLBtn" class="btn btn-success btn-sm" title="Download the generated terrain as an STL file. Compatible with all 3D printing slicers.">
                                         <span class="btn-icon">💾</span> STL
                                     </button>
@@ -1224,22 +1257,27 @@
                                     </button>
                                 </div>
                             </div>
-                            <div class="export-buttons" style="margin-top: 8px; border-top: 1px solid #333; padding-top: 8px;">
-                                <label style="font-size: 12px; color: #888; margin-bottom: 4px; display: block;">City Buildings:</label>
-                                <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-                                    <button id="exportCityBtn" class="btn btn-success btn-sm" title="Export terrain + OSM buildings as a combined 3MF. Requires city data loaded in the Edit tab.">
-                                        <span class="btn-icon">🏙️</span> 3MF + Buildings
-                                    </button>
+                            <div class="collapsible-section collapsed" style="margin-top:8px;">
+                                <div class="collapsible-header" onclick="toggleCollapsible(this)">
+                                    <h4>🏙️ City Export</h4>
+                                    <span class="collapsible-icon">▼</span>
                                 </div>
-                                <div style="display:flex;align-items:center;gap:6px;margin-top:5px;font-size:10px;color:#aaa;">
-                                    <input type="checkbox" id="citySimplifyMesh" checked title="Reduce triangle count of the terrain mesh before export">
-                                    <label for="citySimplifyMesh" style="cursor:pointer;">Simplify terrain mesh</label>
-                                </div>
-                                <div style="display:flex;align-items:center;gap:6px;margin-top:5px;font-size:10px;color:#aaa;">
-                                    <label for="buildingZScale" style="white-space:nowrap;" title="Scale factor: mm of model height per real-world metre of building height. 0.5 = 1m building → 0.5mm extrusion.">Building height scale (mm/m):</label>
-                                    <input type="number" id="buildingZScale" value="0.5" min="0.05" max="5" step="0.05"
-                                        style="width:60px;background:#404040;color:#ccc;border:1px solid #555;padding:2px 4px;border-radius:3px;font-size:10px;"
-                                        title="mm of model height per real-world metre. Default 0.5. Increase for taller buildings.">
+                                <div class="collapsible-content" style="padding:8px;">
+                                    <div style="display: flex; gap: 6px; align-items: center;">
+                                        <button id="exportCityBtn" class="btn btn-success btn-sm" title="Export terrain + OSM buildings as a combined 3MF. Requires city data loaded in the Edit tab.">
+                                            <span class="btn-icon">🏙️</span> 3MF + Buildings
+                                        </button>
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:6px;margin-top:5px;font-size:10px;color:#aaa;">
+                                        <input type="checkbox" id="citySimplifyMesh" checked title="Reduce triangle count of the terrain mesh before export">
+                                        <label for="citySimplifyMesh" style="cursor:pointer;">Simplify terrain mesh</label>
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:6px;margin-top:5px;font-size:10px;color:#aaa;">
+                                        <label for="buildingZScale" style="white-space:nowrap;" title="Scale factor: mm of model height per real-world metre of building height. 0.5 = 1m building → 0.5mm extrusion.">Building height scale (mm/m):</label>
+                                        <input type="number" id="buildingZScale" value="0.5" min="0.05" max="5" step="0.05"
+                                            style="width:60px;background:#404040;color:#ccc;border:1px solid #555;padding:2px 4px;border-radius:3px;font-size:10px;"
+                                            title="mm of model height per real-world metre. Default 0.5. Increase for taller buildings.">
+                                    </div>
                                 </div>
                             </div>
                             <div id="modelProgress" class="model-progress">
@@ -1289,6 +1327,10 @@
                                         <input type="checkbox" id="viewerWireframe">
                                     </div>
                                     <div class="param-group">
+                                        <label>Normals:</label>
+                                        <input type="checkbox" id="viewerNormals" title="Visualise surface normals (debug mode)">
+                                    </div>
+                                    <div class="param-group">
                                         <label>Colormap:</label>
                                         <select id="viewerColormap">
                                             <option value="terrain" selected>Terrain</option>
@@ -1300,6 +1342,9 @@
                                     <div class="param-group">
                                         <label>Auto-rotate:</label>
                                         <input type="checkbox" id="viewerAutoRotate">
+                                    </div>
+                                    <div class="param-group">
+                                        <button id="viewerResetCamera" class="btn btn-secondary btn-sm" title="Fit camera to terrain">Reset Camera</button>
                                     </div>
                                 </div>
                             </div>
@@ -1352,27 +1397,7 @@
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- Extracted modules — must be loaded before app.js DOMContentLoaded fires -->
-    <script src="/static/js/modules/api.js"></script>
-    <script src="/static/js/modules/cache.js"></script>
-    <script src="/static/js/modules/ui-helpers.js"></script>
-    <script src="/static/js/modules/state.js"></script>
-    <script src="/static/js/modules/dem-loader.js"></script>
-    <script src="/static/js/modules/dem-gridlines.js"></script>
-    <script src="/static/js/modules/presets.js"></script>
-    <script src="/static/js/modules/curve-editor.js"></script>
-    <script src="/static/js/modules/city-overlay.js"></script>
-    <script src="/static/js/modules/city-render.js"></script>
-    <script src="/static/js/modules/stacked-layers.js"></script>
-    <script src="/static/js/modules/export-handlers.js"></script>
-    <script src="/static/js/modules/model-viewer.js"></script>
-    <script src="/static/js/modules/compare-view.js"></script>
-    <script src="/static/js/modules/region-ui.js"></script>
-    <script src="/static/js/modules/dem-merge.js"></script>
-    <script src="/static/js/modules/water-mask.js"></script>
-    <script src="/static/js/modules/map-globe.js"></script>
-    <script src="/static/js/modules/regions.js"></script>
-    <script src="/static/js/app.js"></script>
+    <script type="module" src="/static/js/main.js"></script>
 
     <!-- Load third-party libs from CDN -->
     <script src="https://cdn.plot.ly/plotly-2.29.1.min.js"></script>

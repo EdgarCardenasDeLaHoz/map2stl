@@ -262,6 +262,45 @@ def generate_3mf(data: dict):
     )
 
 
+def generate_mesh_preview(data: dict):
+    """
+    Run the numpy2stl pipeline and return vertices + faces as JSON for the
+    in-browser 3-D viewer.  Uses solid=False (top surface only) to keep the
+    payload small; the full solid is built only when the user exports.
+    """
+    from fastapi.responses import JSONResponse
+    from numpy2stl import array_to_mesh
+
+    p = _parse_export_params(data)
+    if not p["dem_values"] or not p["height"] or not p["width"]:
+        return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
+
+    im, im_min, im_max = _prepare_dem_array(
+        p["dem_values"], p["height"], p["width"],
+        p["model_height"], p["base_height"], p["exaggeration"], p["sea_level_cap"],
+    )
+
+    vertices, faces = array_to_mesh(im, solid=False)
+    logger.info(f"Preview mesh: {len(vertices)} vertices, {len(faces)} faces")
+
+    # Round col/row to integers and z to 2 dp — sufficient for display, halves JSON size.
+    v_rounded = vertices.copy()
+    v_rounded[:, :2] = np.round(v_rounded[:, :2]).astype(np.int32)
+    v_rounded[:, 2]  = np.round(v_rounded[:, 2], 2)
+
+    return JSONResponse(content={
+        "vertices":     v_rounded.tolist(),
+        "faces":        faces.tolist(),
+        "face_count":   int(len(faces)),
+        "model_height": p["model_height"],
+        "base_height":  p["base_height"],
+        "z_min":        round(float(im.min()), 2),
+        "z_max":        round(float(im.max()), 2),
+        "cols":         int(p["width"]),
+        "rows":         int(p["height"]),
+    })
+
+
 def generate_crosssection(data: dict):
     """Generate a cross-section STL along a lat or lon cut line. Returns a FastAPI FileResponse."""
     from fastapi.responses import FileResponse, JSONResponse

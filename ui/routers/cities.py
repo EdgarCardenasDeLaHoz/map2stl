@@ -8,7 +8,6 @@ Delegates OSM fetching to core/osm.py and caching to core/cache.py.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import math
@@ -33,11 +32,11 @@ except ImportError:
 # Cache helpers
 # ---------------------------------------------------------------------------
 try:
-    from core.cache import read_osm_cache, write_osm_cache, CACHE_ROOT
+    from core.cache import read_osm_cache, write_osm_cache, osm_cache_key, CACHE_ROOT
     _CACHE_AVAILABLE = True
 except ImportError:
     _CACHE_AVAILABLE = False
-    read_osm_cache = write_osm_cache = CACHE_ROOT = None  # type: ignore
+    read_osm_cache = write_osm_cache = osm_cache_key = CACHE_ROOT = None  # type: ignore
 
 # ---------------------------------------------------------------------------
 # OSM fetch helper
@@ -120,9 +119,7 @@ async def check_city_cache(
     simplify_tolerance: float = 2.0, min_area: float = 20.0,
 ):
     """Check whether OSM city data for this bbox is already cached locally."""
-    key = hashlib.md5(
-        f"{north:.4f}_{south:.4f}_{east:.4f}_{west:.4f}_t{simplify_tolerance}_a{min_area}".encode()
-    ).hexdigest()
+    key = osm_cache_key(north, south, east, west, simplify_tolerance, min_area)
     if _CACHE_AVAILABLE:
         cached = (CACHE_ROOT / "osm" / f"{key}.json.gz").exists()
     else:
@@ -151,9 +148,8 @@ async def get_city_data(city_req: CityRequest):
             status_code=422,
         )
 
-    cache_key = hashlib.md5(
-        f"{north:.4f}_{south:.4f}_{east:.4f}_{west:.4f}_t{city_req.simplify_tolerance}_a{city_req.min_area}".encode()
-    ).hexdigest()
+    cache_key = osm_cache_key(north, south, east, west,
+                               city_req.simplify_tolerance, city_req.min_area)
 
     # Cache check
     if _CACHE_AVAILABLE:
