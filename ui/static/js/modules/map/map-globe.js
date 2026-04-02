@@ -16,7 +16,6 @@
  *   window.toggleMapGrid(show)
  *   window.updateBboxIndicator(color)
  *   window.initGlobe()
- *   window.animateGlobe()
  *   window.BBOX_COLORS        (array)
  *   window.getDrawControl()
  *   window.getMapGridEnabled()
@@ -613,7 +612,6 @@ function animateGlobe() {
     _globe.rotation.y += 0.005;
     _globeRenderer.render(_globeScene, _globeCamera);
 }
-window.animateGlobe = animateGlobe;
 
 // ── Expose BBOX_COLORS and other constants ──────────────────────────────────
 
