@@ -32,7 +32,9 @@ Modules live in `ui/static/js/modules/` (subdirs). Use grep: `grep -rn "function
 | Function | Purpose |
 |----------|---------|
 | `loadDEM(highRes?)` | Main DEM loader — fetch, render, update state (pass `true` for high-res) |
-
+| `renderDEMCanvas(vals,w,h,cmap,vmin,vmax)` | Render elevation LUT → canvas |
+| `loadSatelliteImage()` | Load ESA land cover (classification raster) |
+| `loadSatelliteRGBImage()` | Load ESRI satellite imagery tiles |
 
 ## modules/layers/water-mask.js
 
@@ -51,8 +53,7 @@ Modules live in `ui/static/js/modules/` (subdirs). Use grep: `grep -rn "function
 | `clearCityOverlay()` | Remove city overlays from canvases |
 | `renderCityOverlay()` | Debounced: paint buildings/roads on stacked + DEM canvases |
 | `_drawCityCanvas(ctx,...)` | Core draw: buildings alpha-batched (8), sub-pixel skipped |
-| `_computeTerrainZ(geojson,dem)` | Sample DEM for feature terrain_z |
-| `window.renderCityOnDEM()` | Paint .city-dem-overlay on #demImage |
+| `renderCityOnDEM()` | Paint .city-dem-overlay on #demImage |
 
 ## modules/layers/stacked-layers.js
 
