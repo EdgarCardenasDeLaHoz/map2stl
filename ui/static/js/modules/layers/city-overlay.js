@@ -255,13 +255,17 @@ window.loadCityData = async function loadCityData() {
         const minArea     = parseFloat(document.getElementById('cityMinArea')?.value) || 5.0;
 
         // Check cache using the same key params as the actual data endpoint
-        const cacheParams = new URLSearchParams({
-            north: selectedRegion.north, south: selectedRegion.south,
-            east: selectedRegion.east, west: selectedRegion.west,
-            simplify_tolerance: simplifyTol, min_area: minArea
-        });
-        const { data: cacheInfo } = await window.api.cities.cached(cacheParams);
-        if (statusEl) statusEl.textContent = cacheInfo?.cached ? 'Loading from cache…' : 'Fetching from OpenStreetMap…';
+        if (window.api.cities.cached) {
+            const cacheParams = new URLSearchParams({
+                north: selectedRegion.north, south: selectedRegion.south,
+                east: selectedRegion.east, west: selectedRegion.west,
+                simplify_tolerance: simplifyTol, min_area: minArea
+            });
+            const { data: cacheInfo } = await window.api.cities.cached(cacheParams);
+            if (statusEl) statusEl.textContent = cacheInfo?.cached ? 'Loading from cache…' : 'Fetching from OpenStreetMap…';
+        } else {
+            if (statusEl) statusEl.textContent = 'Fetching from OpenStreetMap…';
+        }
 
         const { data, error: cityErr } = await window.api.cities.fetch({
             north: selectedRegion.north, south: selectedRegion.south,
@@ -325,8 +329,8 @@ window.loadCityData = async function loadCityData() {
         if (statusEl) statusEl.textContent = `Loaded (${data.diagonal_km?.toFixed(1) ?? '?'} km)`;
         window.showToast?.('City data loaded', 'success');
     } catch (e) {
-        const showToastFn = window.appState?.showToast;
-        if (showToastFn) showToastFn('City data error: ' + e.message, 'error');
+        console.error('loadCityData error:', e);
+        window.showToast?.('City data error: ' + e.message, 'error');
         if (statusEl) statusEl.textContent = 'Error.';
         const cd = document.getElementById('stripDotCities');
         if (cd) { cd.classList.remove('loading', 'loaded'); cd.classList.add('error'); }

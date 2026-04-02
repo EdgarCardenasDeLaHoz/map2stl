@@ -93,11 +93,27 @@ logger.info(f"Templates path: {templates_path}")
 templates = Jinja2Templates(directory=templates_path)
 
 # Mount static files (JS/CSS)
+# Serve via a custom route so we can add no-cache headers for .js/.css
+from fastapi import Response as _Response
+from fastapi.responses import FileResponse as _FileResponse
+import mimetypes as _mimetypes
+
 static_path = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "static")
-if os.path.isdir(static_path):
-    app.mount("/static", StaticFiles(directory=static_path), name="static")
-else:
+
+@app.get("/static/{file_path:path}")
+async def serve_static(file_path: str):
+    full_path = os.path.join(static_path, file_path)
+    if not os.path.isfile(full_path):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404)
+    mime, _ = _mimetypes.guess_type(full_path)
+    headers = {}
+    if full_path.endswith((".js", ".css")):
+        headers["Cache-Control"] = "no-store"
+    return _FileResponse(full_path, media_type=mime or "application/octet-stream", headers=headers)
+
+if not os.path.isdir(static_path):
     logger.warning(f"Static path not found: {static_path}")
 
 # ---------------------------------------------------------------------------
