@@ -1,0 +1,7 @@
+#!/bin/sh
+# Run pytest before every commit. Abort if any test fails.
+set -e
+
+echo "Running tests..."
+cd "$(git rev-parse --show-toplevel)"
+python -m pytest tests/ -q --tb=short
