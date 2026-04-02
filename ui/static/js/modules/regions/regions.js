@@ -5,7 +5,6 @@
  *
  * Public API (exposed on window):
  *   window.loadCoordinates()       → Promise<void>
- *   window.updateGlobeMarkers()
  *   window.selectCoordinate(index) → Promise<void>
  *   window.goToEdit(index)
  *
@@ -189,7 +188,6 @@ function updateGlobeMarkers() {
         markersGroup.add(marker);
     });
 }
-window.updateGlobeMarkers = updateGlobeMarkers;
 
 // ── createGlobeMarker ───────────────────────────────────────────────────────
 

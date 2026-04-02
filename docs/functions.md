@@ -98,8 +98,8 @@ Modules live in `ui/static/js/modules/` (subdirs). Use grep: `grep -rn "function
 |----------|---------|
 | `loadCoordinates()` | Fetch regions, draw map boxes |
 | `selectCoordinate(i)` | Select + fly to region |
+| `goToEdit(i)` | Switch to Edit tab for region |
 | `renderCoordinatesList()` | Sidebar list view |
-| `populateRegionsTable()` | Sidebar table view |
 | `groupRegionsByContinent(regions)` | Group by heuristic continent |
 | `initRegionNotes()` | Load notes from localStorage |
 
