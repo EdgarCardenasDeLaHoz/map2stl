@@ -13,8 +13,6 @@
  *   window.setTerrainOverlayOpacity(opacity)
  *   window.updateFloatingTerrainButton(active)
  *   window.initMap()
- *   window.initMapGrid()
- *   window.updateMapGrid()
  *   window.toggleMapGrid(show)
  *   window.updateBboxIndicator(color)
  *   window.initGlobe()
@@ -420,7 +418,6 @@ function initMapGrid() {
     // Create a custom graticule layer
     mapGridLayer = L.layerGroup();
 }
-window.initMapGrid = initMapGrid;
 
 /**
  * Redraw the map graticule (grid) for the current viewport and zoom level.
@@ -499,7 +496,6 @@ function updateMapGrid() {
         }
     }
 }
-window.updateMapGrid = updateMapGrid;
 
 /**
  * Show or hide the map graticule overlay.
