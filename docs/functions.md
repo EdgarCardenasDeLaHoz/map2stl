@@ -16,7 +16,6 @@ Modules live in `ui/static/js/modules/` (subdirs). Use grep: `grep -rn "function
 
 | Function | Purpose |
 |----------|---------|
-| `hslToRgb(h,s,l)` | HSL → RGB |
 | `mapElevationToColor(t, cmap)` | 0–1 → RGB array (12 colormaps) |
 | `renderSatelliteCanvas(vals,w,h)` | RGB sat pixels → canvas |
 | `updateAxesOverlay(N,S,E,W)` | Draw N/S/E/W axis labels |

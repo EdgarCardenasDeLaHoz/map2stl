@@ -557,7 +557,6 @@ function enableZoomAndPan(canvas) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Expose on window (ES module — functions are not auto-global)
 // ─────────────────────────────────────────────────────────────────────────────
-window.hslToRgb = hslToRgb;
 window.mapElevationToColor = mapElevationToColor;
 window.renderSatelliteCanvas = renderSatelliteCanvas;
 window.updateAxesOverlay = updateAxesOverlay;
