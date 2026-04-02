@@ -1251,18 +1251,19 @@
             align-items: center;
             justify-content: center;
             gap: 6px;
-            padding: 16px 7px;
-            background: var(--bg-mid);
+            padding: 16px 10px;
+            background: #007acc;
             border: none;
             border-left: 1px solid var(--bg-light);
-            color: var(--text-muted);
+            color: #fff;
             font-size: 12px;
+            font-weight: 600;
             cursor: pointer;
             flex-shrink: 0;
-            transition: background 0.15s, color 0.15s;
+            transition: background 0.15s;
             letter-spacing: 0.04em;
         }
-        .settings-collapsed-tab:hover { background: var(--bg-light); color: #ccc; }
+        .settings-collapsed-tab:hover { background: #0088e0; }
         /* Show when the panel is collapsed — CSS sibling selector */
         .dem-right-panel.settings-collapsed ~ .settings-collapsed-tab {
             display: flex;

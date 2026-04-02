@@ -12,7 +12,7 @@ Replaced single horizontal row with a 2×2 coord grid (`.bbox-coords-grid`) + ac
 
 ---
 
-### [ ] UX-5 — Settings panel collapsed tab: make it visible
+### [x] UX-5 — Settings panel collapsed tab: make it visible
 **File:** `index.html` line ~1136, `app.css`
 **Source:** Chrome audit finding 5
 
