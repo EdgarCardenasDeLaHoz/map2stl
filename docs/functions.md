@@ -31,9 +31,8 @@ Modules live in `ui/static/js/modules/` (subdirs). Use grep: `grep -rn "function
 
 | Function | Purpose |
 |----------|---------|
-| `loadDEM(highRes?)` | Main DEM loader — fetch, render, update state |
-| `loadHighResDEM()` | Fetch higher-res version |
-| `setupHoverTooltip(canvas)` | Elevation mouse tooltip |
+| `loadDEM(highRes?)` | Main DEM loader — fetch, render, update state (pass `true` for high-res) |
+
 
 ## modules/layers/water-mask.js
 

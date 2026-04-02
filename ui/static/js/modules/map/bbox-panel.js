@@ -3,7 +3,7 @@
  *
  * Exposed on window:
  *   setBboxInputValues, initBboxMiniMap, syncBboxMiniMap, toggleBboxMiniMap,
- *   setupGridToggle, setupHoverTooltip,
+ *   setupGridToggle,
  *   populateRegionsPanelTable, closeRegionsPanel, toggleContinentVisibility
  *
  * Depends on:
@@ -231,96 +231,6 @@ window.setupGridToggle = function setupGridToggle() {
         if (window.appState.currentDemBbox) {
             requestAnimationFrame(redrawAllGridlines);
         }
-    });
-};
-
-// ─── setupHoverTooltip ────────────────────────────────────────────────────────
-
-/**
- * Attach a mouse-move hover tooltip to a DEM canvas that shows elevation (m)
- * and geographic coordinates for the pixel under the cursor.
- * @param {HTMLCanvasElement} canvas - The DEM canvas element
- */
-window.setupHoverTooltip = function setupHoverTooltip(canvas) {
-    // Create tooltip element if it doesn't exist
-    let tooltip = document.getElementById('demTooltip');
-    if (!tooltip) {
-        tooltip = document.createElement('div');
-        tooltip.id = 'demTooltip';
-        tooltip.style.cssText = `
-            position: fixed;
-            background: rgba(0,0,0,0.85);
-            color: #fff;
-            padding: 6px 10px;
-            border-radius: 4px;
-            font-size: 12px;
-            pointer-events: none;
-            z-index: 10000;
-            display: none;
-            white-space: nowrap;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        `;
-        document.body.appendChild(tooltip);
-    }
-
-    canvas.addEventListener('mousemove', (e) => {
-        const lastDemData    = window.appState.lastDemData;
-        const currentDemBbox = window.appState.currentDemBbox;
-        if (!lastDemData || !currentDemBbox) {
-            tooltip.style.display = 'none';
-            return;
-        }
-
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
-        // Convert to data coordinates
-        const { values, width, height } = lastDemData;
-        const { north, south, east, west } = currentDemBbox;
-
-        // Normalize to 0-1 range in canvas space
-        const canvasX = x / rect.width;
-        const canvasY = y / rect.height;
-
-        // Convert to data indices
-        const dataX = Math.floor(canvasX * width);
-        const dataY = Math.floor(canvasY * height);
-
-        if (dataX >= 0 && dataX < width && dataY >= 0 && dataY < height) {
-            const idx = dataY * width + dataX;
-            const elevation = values[idx];
-
-            // Calculate lat/lon
-            const lat = north - (canvasY * (north - south));
-            const lon = west + (canvasX * (east - west));
-
-            if (Number.isFinite(elevation)) {
-                tooltip.innerHTML = `
-                    <div><strong>Elevation:</strong> ${elevation.toFixed(1)} m</div>
-                    <div><strong>Lat:</strong> ${lat.toFixed(5)}°</div>
-                    <div><strong>Lon:</strong> ${lon.toFixed(5)}°</div>
-                `;
-                tooltip.style.display = 'block';
-                tooltip.style.left = (e.clientX + 15) + 'px';
-                tooltip.style.top = (e.clientY + 15) + 'px';
-            } else {
-                tooltip.innerHTML = `
-                    <div><strong>No data</strong></div>
-                    <div><strong>Lat:</strong> ${lat.toFixed(5)}°</div>
-                    <div><strong>Lon:</strong> ${lon.toFixed(5)}°</div>
-                `;
-                tooltip.style.display = 'block';
-                tooltip.style.left = (e.clientX + 15) + 'px';
-                tooltip.style.top = (e.clientY + 15) + 'px';
-            }
-        } else {
-            tooltip.style.display = 'none';
-        }
-    });
-
-    canvas.addEventListener('mouseleave', () => {
-        tooltip.style.display = 'none';
     });
 };
 
