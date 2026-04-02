@@ -254,7 +254,7 @@ window.updateStackedLayers = function updateStackedLayers() {
  */
 window.drawLayerGrid = function drawLayerGrid() {
     const gridCanvas  = document.getElementById('layerGridCanvas');
-    const demCanvas   = document.getElementById('layerDemCanvas');
+    const demCanvas   = _cachedDemCanvas || document.getElementById('layerDemCanvas');
     const stack       = document.getElementById('layersStack');
     const gridVisible = document.getElementById('layerGridVisible');
     const yAxis       = document.getElementById('layersYAxis');
