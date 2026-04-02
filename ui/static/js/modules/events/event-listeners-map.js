@@ -55,6 +55,8 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
             window.computeCompositeDem?.();
             // Update stacked layers view
             requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+            // Update print dimensions — projection changes canvas aspect ratio
+            requestAnimationFrame(() => window.updatePrintDimensions?.());
         });
     }
 

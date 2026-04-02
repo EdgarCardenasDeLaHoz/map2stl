@@ -453,8 +453,10 @@ window.updatePrintDimensions = function updatePrintDimensions() {
         return;
     }
 
-    const gridW  = lastDemData.width;
-    const gridH  = lastDemData.height;
+    // Use projected canvas dimensions — projection can change aspect ratio (e.g. lambert)
+    const demCanvas = document.querySelector('#demImage canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)');
+    const gridW  = demCanvas?.width  || lastDemData.width;
+    const gridH  = demCanvas?.height || lastDemData.height;
     const modelH = parseFloat(document.getElementById('modelResolution').value) || 200;
     const baseH  = parseFloat(document.getElementById('modelBaseHeight').value) || 0;
     const totalH = modelH + baseH;
