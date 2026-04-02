@@ -42,7 +42,6 @@
 - ~~**UX-8**~~ — done (added `(exported)` / `(preview only)` badges to clarify depth scale vs exaggeration)
 - ~~**MAP-3**~~ — done (verified: no Leaflet instances in compare view; no leak)
 - ~~**EXP-2**~~ — done (verified: WebGL failure already shows fallback message; errors shown in statusEl + toast)
-- **UX-8** (`ui/`) — clarify `modelDepthScale` vs `modelExaggeration` labels
 - ~~**PERF11** + **PERF11-wire** + **PERF12** + **PERF13**~~ — done
 - ~~**MAP-1**~~ — done (globe init guard silenced; TODO updated)
 - ~~**EV-1**~~ — done (`onchange`/`oninput` → `addEventListener` in all JS modules)

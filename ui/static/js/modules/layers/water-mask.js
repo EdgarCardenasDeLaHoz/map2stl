@@ -325,104 +325,6 @@ async function renderCombinedView() {
     window.enableZoomAndPan(canvas);
 }
 
-async function loadSatelliteForTab() {
-    const container = document.getElementById('satelliteImage');
-
-    if (lastWaterMaskData && lastWaterMaskData.esa_values && window.isLayerCurrent('landCover')) {
-        renderEsaLandCover(lastWaterMaskData);
-        return;
-    }
-
-    container.innerHTML = '<p style="text-align:center;padding:50px;">Loading land cover data...</p>';
-    await loadWaterMask();
-
-    if (lastWaterMaskData?.esa_values) {
-        renderEsaLandCover(lastWaterMaskData);
-    } else {
-        container.innerHTML = '<p style="text-align:center;padding:50px;">No land cover data available. Please select a region first.</p>';
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Water subtract
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function previewWaterSubtract() {
-    const lastDemData = window.appState.lastDemData;
-    if (!lastDemData || !lastWaterMaskData) {
-        document.getElementById('combinedImage').innerHTML = '<p>Load DEM and Water Mask first.</p>';
-        return;
-    }
-
-    const waterScale = parseFloat(document.getElementById('waterScaleSlider').value);
-    const opacityVal = window.getWaterOpacity?.() ?? 0.7;
-    const demVals    = lastDemData.values;
-    const waterVals  = lastWaterMaskData.water_mask_values;
-    const w = lastDemData.width;
-    const h = lastDemData.height;
-    const ptp = lastDemData.vmax - lastDemData.vmin;
-
-    const adjustedDem = demVals.map((v, i) => v - ((waterVals[i] ?? 0) * ptp * waterScale));
-
-    const colormap = document.getElementById('demColormap').value;
-    const finiteVals = adjustedDem.filter(Number.isFinite);
-    const vmin = finiteVals.reduce((a, b) => a < b ? a : b, finiteVals[0]);
-    const vmax = finiteVals.reduce((a, b) => a > b ? a : b, finiteVals[0]);
-
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    const imgData = ctx.createImageData(w, h);
-
-    for (let i = 0; i < adjustedDem.length; i++) {
-        const t = (adjustedDem[i] - vmin) / (vmax - vmin);
-        const [r, g, b] = window.mapElevationToColor(t, colormap);
-        const idx = i * 4;
-        const waterVal = waterVals[i] ?? 0;
-        if (waterVal > 0.5 && opacityVal > 0) {
-            imgData.data[idx]     = Math.round((r * 255) * (1 - opacityVal));
-            imgData.data[idx + 1] = Math.round((g * 255) * (1 - opacityVal) + 100 * opacityVal);
-            imgData.data[idx + 2] = Math.round((b * 255) * (1 - opacityVal) + 255 * opacityVal);
-        } else {
-            imgData.data[idx]     = Math.round(r * 255);
-            imgData.data[idx + 1] = Math.round(g * 255);
-            imgData.data[idx + 2] = Math.round(b * 255);
-        }
-        imgData.data[idx + 3] = 255;
-    }
-
-    ctx.putImageData(imgData, 0, 0);
-    const container = document.getElementById('combinedImage');
-    container.innerHTML = '';
-    container.appendChild(canvas);
-    canvas.style.width = '100%';
-    canvas.style.height = 'auto';
-}
-
-function applyWaterSubtract() {
-    const lastDemData = window.appState.lastDemData;
-    if (!lastDemData || !lastWaterMaskData) {
-        window.showToast('Please load both DEM and Water Mask first.', 'warning');
-        return;
-    }
-
-    const waterScale = window.appState?.demParams?.waterScale ?? 0.05;
-    const demVals    = lastDemData.values;
-    const waterVals  = lastWaterMaskData.water_mask_values;
-    const ptp = lastDemData.vmax - lastDemData.vmin;
-
-    const adjustedDem = demVals.map((v, i) => v - ((waterVals[i] ?? 0) * ptp * waterScale));
-    lastDemData.values = adjustedDem;
-    const finiteVals = adjustedDem.filter(Number.isFinite);
-    lastDemData.vmin = finiteVals.reduce((a, b) => a < b ? a : b, finiteVals[0]);
-    lastDemData.vmax = finiteVals.reduce((a, b) => a > b ? a : b, finiteVals[0]);
-
-    window.recolorDEM?.();
-    window.switchDemSubtab?.('dem');
-    window.showToast('Water subtraction applied to DEM.', 'success');
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Land cover editor
 // ─────────────────────────────────────────────────────────────────────────────
@@ -546,9 +448,6 @@ window.loadWaterMask           = loadWaterMask;
 window.renderWaterMask         = renderWaterMask;
 window.renderEsaLandCover      = renderEsaLandCover;
 window.renderCombinedView      = renderCombinedView;
-window.loadSatelliteForTab     = loadSatelliteForTab;
-window.previewWaterSubtract    = previewWaterSubtract;
-window.applyWaterSubtract      = applyWaterSubtract;
 window.renderLandCoverLegend   = renderLandCoverLegend;
 window.setupLandCoverEditor    = setupLandCoverEditor;
 window.setupWaterMaskListeners = setupWaterMaskListeners;

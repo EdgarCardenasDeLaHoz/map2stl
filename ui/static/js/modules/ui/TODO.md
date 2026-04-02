@@ -32,7 +32,7 @@ The empty state says "Select a region and click **Load DEM** to begin" but the L
 
 ---
 
-### [ ] UX-7 — Fix cross-section collapsible icon
+### [x] UX-7 — Fix cross-section collapsible icon
 **File:** `index.html` line ~1318
 **Source:** Chrome audit finding 7
 
@@ -75,7 +75,7 @@ Dead DOM still present:
 
 ---
 
-### [ ] UX-11 — Unify CSS variable declarations
+### [x] UX-11 — Unify CSS variable declarations
 **Files:** `app.css`, `main.css`, `index.html`
 **Source:** Chrome audit finding 11
 

@@ -28,8 +28,6 @@ All variables live in the `DOMContentLoaded` closure in `app.js` (or at file-top
 |----------|------|-------------|
 | `lastDemData` | Object\|null | `{values, width, height, min, max, bbox}` |
 | `lastWaterMaskData` | Object\|null | Water mask + ESA response |
-| `lastRawDemData` | Object\|null | Unprocessed DEM response |
-| `originalDemValues` | Float32Array\|null | DEM values before curve edits |
 | `currentDemBbox` | Object\|null | `{north,south,east,west}` for current DEM |
 | `layerBboxes` | Object | `{dem, water, landCover}` each bbox or null |
 | `layerStatus` | Object | `{dem, water, landCover}` — 'empty'\|'loading'\|'ready'\|'error' |
@@ -41,9 +39,7 @@ All variables live in the `DOMContentLoaded` closure in `app.js` (or at file-top
 |----------|------|-------------|
 | `landCoverConfig` | Object | ESA class → `{color, label, visible}` |
 | `waterOpacity` | Number | 0–1, default 0.7 |
-| `satOpacity` | Number | 0–1, default 0.5 |
 | `curvePoints` | Array | `[{x,y}]` curve editor control points |
-| `curveDataVmin/Vmax` | Number | Current DEM display range |
 | `userPresets` | Object | Named presets from localStorage |
 | `regionNotes` | Object | `{regionName: text}` from localStorage |
 | `sidebarState` | String | 'normal'\|'list'\|'table' |
@@ -77,7 +73,9 @@ Mirrored from closure. Set via `appState.set(key, val)` or direct assignment:
 | `lastDemData` | closure | dem-loader, composite-dem, model-viewer |
 | `osmCityData` | closure | city-overlay, composite-dem |
 | `lastWaterMaskData` | closure | water-mask, composite-dem |
-| `originalDemValues` | closure | curve-editor |
+| `originalDemValues` | appState-only | curve-editor |
+| `curveDataVmin` | appState-only | curve-editor, dem-main |
+| `curveDataVmax` | appState-only | curve-editor, dem-main |
 | `curvePoints` | closure | curve-editor |
 | `layerBboxes` | closure (shared ref) | stacked-layers |
 | `layerStatus` | closure (shared ref) | ui-helpers |

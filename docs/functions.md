@@ -7,63 +7,10 @@ Modules live in `ui/static/js/modules/` (subdirs). Use grep: `grep -rn "function
 
 | Function | Purpose |
 |----------|---------|
-| `clearLayerCache()` | Reset lastDemData, waterMask, ESA, layerBboxes, layerStatus |
+| `clearLayerCache()` | Reset lastDemData, waterMask, layerBboxes, layerStatus, composite canvases |
 | `clearLayerDisplays()` | Clear canvas elements + status indicators |
 | `getCurrentBboxObject()` | Return `{N,S,E,W}` from boundingBox or form inputs |
 | `isLayerCurrent(layer)` | True if layer bbox matches current bbox |
-| `showToast(msg, type, ms)` | Toast notification |
-| `setLayerStatus(layer, status)` | Update layerStatus + DOM badge |
-| `showLoading(el)` / `hideLoading(el)` | Spinner overlay |
-| `waterMaskCache` | LRU object `{get,set,has,generateKey,getStats,clear}` |
-| `preloadAllRegions()` | Background DEM preload for all regions |
-
-## app.js — Map & Globe (DOMContentLoaded)
-
-| Function | Purpose |
-|----------|---------|
-| `setTileLayer(key)` | Switch Leaflet tile layer |
-| `toggleDemOverlay(show)` | Load + render terrain overlay on map |
-| `initMap()` | Init Leaflet map + draw control |
-| `initMapGrid()` / `updateMapGrid()` | SVG grid overlay |
-| `toggleMapGrid(show)` | Show/hide map grid |
-| `initGlobe()` | Three.js globe init |
-| `animateGlobe()` | Globe RAF rotation loop |
-
-## app.js — Regions
-
-| Function | Purpose |
-|----------|---------|
-| `loadCoordinates()` | Fetch /api/coordinates, draw map rectangles |
-| `selectCoordinate(index)` | Select region, fly map, update UI |
-| `goToEdit(index)` | Switch to Edit tab for region |
-| `saveRegionSettings()` | PUT /api/regions/{name}/settings |
-| `loadAndApplyRegionSettings(name)` | GET settings + apply to form |
-| `renderCoordinatesList()` | Render sidebar list |
-| `populateRegionsTable()` | Render sidebar table |
-
-## app.js — Curve Editor
-
-| Function | Purpose |
-|----------|---------|
-| `initCurveEditor()` | Setup curve canvas + state |
-| `setCurvePreset(name)` | Apply named preset shape |
-| `addCurvePoint(x, y)` | Add control point |
-| `drawCurve()` | Re-render curve canvas |
-| `applyCurveTodem()` | Apply curve + re-render DEM |
-| `interpolateCurve(x)` | Monotone cubic spline evaluation |
-| `resetDemToOriginal()` | Restore originalDemValues |
-
-## app.js — DEM Rendering
-
-| Function | Purpose |
-|----------|---------|
-| `setupAutoReload()` | Auto-reload timer |
-| `loadAllLayers()` | Load DEM + water + land cover |
-| `setupOpacityControls()` | Wire #activeLayerOpacity slider |
-| `recolorDEM()` | Re-render with current colormap |
-| `rescaleDEM(vmin, vmax)` | Rescale display range |
-| `renderDEMCanvas(vals,w,h,cmap,vmin,vmax)` | Render elevation LUT → canvas |
-| `setupHoverTooltip(canvas)` | Elevation tooltip on mouse-move |
 
 ## modules/dem/dem-loader.js
 
@@ -97,8 +44,6 @@ Modules live in `ui/static/js/modules/` (subdirs). Use grep: `grep -rn "function
 | `renderWaterMask(data)` | Render water mask canvas |
 | `renderEsaLandCover(data)` | Render ESA classification canvas |
 | `renderCombinedView()` | Composite DEM+water+landcover |
-| `previewWaterSubtract()` | Show DEM with water subtracted |
-| `applyWaterSubtract()` | Apply subtraction to DEM values |
 
 ## modules/layers/city-overlay.js
 

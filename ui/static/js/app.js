@@ -32,8 +32,6 @@ window.appState.lastWaterMaskData = null;
 window.appState.showToast = null;
 window.appState.haversineDiagKm = null;
 let lastDemData = null;
-let lastEsaData = null;
-let lastRawDemData = null;
 
 // Land cover configuration — owned by water-mask.js; exposed on window.appState.
 window.appState.landCoverConfig = {
@@ -92,17 +90,12 @@ window.appState.demParams = {
 function clearLayerCache() {
     lastDemData = null;
     window.clearLastWaterMaskData?.();
-    lastEsaData = null;
-    lastRawDemData = null;
     currentDemBbox = null;
     window.appState.currentDemBbox = null;
     window.appState.lastDemData = null;
     window._setDemEmptyState?.(true);
-    originalDemValues = null;  // Reset so next Apply uses new region's data
-    window.appState.originalDemValues = null;
-    curveDataVmin = null;      // Reset stable curve coordinate system
-    window.appState.curveDataVmin = null;
-    curveDataVmax = null;
+    window.appState.originalDemValues = null;  // Reset so next Apply uses new region's data
+    window.appState.curveDataVmin = null;  // Reset stable curve coordinate system
     window.appState.curveDataVmax = null;
 
     // Reset layer tracking
@@ -260,10 +253,6 @@ document.addEventListener('DOMContentLoaded', async function () {
     console.log('App initialization complete');
 });
 
-// Closure vars referenced by clearLayerCache
-let curveDataVmin = null, curveDataVmax = null;
-let originalDemValues = null;
-
 // Expose closure vars + functions needed by extracted modules.
 window.getCoordinatesData = () => coordinatesData;
 window.getBoundingBox = () => boundingBox;
@@ -288,17 +277,11 @@ window.setGlobeRenderer = (r) => { globeRenderer = r; };
 window.setGlobe = (g) => { globe = g; };
 window.setSidebarState = (s) => { sidebarState = s; };
 
-window.getLastEsaData = () => lastEsaData;
-window.setLastEsaData = (d) => { lastEsaData = d; };
-window.getLastRawDemData = () => lastRawDemData;
-window.setLastRawDemData = (d) => { lastRawDemData = d; };
-
 window.clearLayerDisplays = clearLayerDisplays;
 window.clearLayerCache = clearLayerCache;
 
-// Unified opacity values (used by both stacked and combined views)
+// Unified opacity values
 let waterOpacity = 0.7;
-let satOpacity = 0.5;
 window.getWaterOpacity = () => waterOpacity;
 window.setWaterOpacity = (v) => { waterOpacity = v; };
 
