@@ -43,28 +43,74 @@ window.setGridPixelMode = function setGridPixelMode(on) {
 // All layer canvas IDs — kept as hidden source buffers for other modules to write to
 const LAYER_STACK = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem'];
 
-// Active view mode — which buffer is copied to stackViewCanvas
+// Multi-layer state: set of active layer keys + per-layer opacity (0–1)
+let _activeLayers  = new Set(['CompositeDem']);
+let _layerOpacities = { Dem: 1, Water: 0.7, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CompositeDem: 1 };
+
+// Kept for getStackMode() backward compat — last-toggled-on layer
 let _activeMode = 'CompositeDem';
 
-/** Switch the displayed layer mode and refresh the view. */
+/** Toggle a layer on/off; at least one layer stays on. */
 window.setStackMode = function setStackMode(mode) {
     if (!LAYER_STACK.includes(mode)) return;
-    _activeMode = mode;
-    // Update button active states (cached NodeList)
+
+    if (_activeLayers.has(mode) && _activeLayers.size > 1) {
+        _activeLayers.delete(mode);
+    } else {
+        _activeLayers.add(mode);
+        _activeMode = mode;
+        // Auto-load satellite imagery if switching to SatImg with no data yet
+        if (mode === 'SatImg' && !window.appState?.satImgSourceCanvas) {
+            window.loadSatelliteRGBImage?.().then(() => window.updateStackedLayers?.());
+            return;
+        }
+    }
+
+    // Update button active states
     if (!_layerModeBtns) _layerModeBtns = document.querySelectorAll('#layerModeSelector .layer-mode-btn');
     _layerModeBtns.forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.mode === mode);
+        btn.classList.toggle('active', _activeLayers.has(btn.dataset.mode));
     });
-    // Auto-load satellite imagery if switching to SatImg with no data yet
-    if (mode === 'SatImg' && !window.appState?.satImgSourceCanvas) {
-        window.loadSatelliteRGBImage?.().then(() => window.updateStackedLayers?.());
-        return;
-    }
+
+    _updateLayerOpacitySliders();
     window.updateStackedLayers?.();
 };
 
-/** Returns the currently active layer mode key. */
+/** Returns the last-activated layer mode key (backward compat). */
 window.getStackMode = function getStackMode() { return _activeMode; };
+
+/** Set per-layer opacity (0–1) and refresh. */
+window.setLayerOpacity = function setLayerOpacity(mode, value) {
+    _layerOpacities[mode] = Math.max(0, Math.min(1, value));
+    window.updateStackedLayers?.();
+};
+
+/** Rebuild the per-layer opacity slider rows below the mode buttons. */
+function _updateLayerOpacitySliders() {
+    const container = document.getElementById('layerOpacitySliders');
+    if (!container) return;
+    container.innerHTML = '';
+    // Draw in compositing order so the UI matches render order
+    const order = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem'];
+    const labels = { Dem: '🏔 DEM', Water: '💧 Water', Sat: '🌿 ESA', SatImg: '🛰 Sat', CityRaster: '🏙 City', CompositeDem: '★ Composite' };
+    order.filter(m => _activeLayers.has(m)).forEach(mode => {
+        const pct = Math.round((_layerOpacities[mode] ?? 1) * 100);
+        const row = document.createElement('div');
+        row.style.cssText = 'display:grid;grid-template-columns:70px 1fr 28px;gap:2px 4px;align-items:center;margin-top:3px;';
+        row.innerHTML = `
+            <span style="font-size:10px;color:#aaa;white-space:nowrap;">${labels[mode]}</span>
+            <input type="range" min="0" max="100" value="${pct}" data-layer="${mode}"
+                style="width:100%;" title="${labels[mode]} opacity">
+            <span style="font-size:10px;color:#888;text-align:right;">${pct}%</span>`;
+        const slider = row.querySelector('input');
+        const label  = row.querySelector('span:last-child');
+        slider.addEventListener('input', () => {
+            label.textContent = slider.value + '%';
+            window.setLayerOpacity(mode, slider.value / 100);
+        });
+        container.appendChild(row);
+    });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
@@ -209,7 +255,7 @@ window.updateStackedLayers = function updateStackedLayers() {
             targetX, targetY, targetWidth, targetHeight);
     }
 
-    // Only draw the active mode's source buffer — skip all others for performance
+    // Source canvas for each layer mode
     const sourceMap = {
         Dem:          () => demCanvas,
         Water:        () => waterCanvas,
@@ -219,25 +265,30 @@ window.updateStackedLayers = function updateStackedLayers() {
         CompositeDem: () => window.appState?.compositeDemSourceCanvas || null,
     };
 
-    const activeSource = sourceMap[_activeMode]?.();
-    const modeBuffer   = document.getElementById(`layer${_activeMode}Canvas`);
-    if (activeSource && modeBuffer) {
-        drawLayerToTarget(modeBuffer, activeSource);
-    }
+    // Draw each active layer into its own buffer
+    LAYER_STACK.forEach(mode => {
+        if (!_activeLayers.has(mode)) return;
+        const src    = sourceMap[mode]?.();
+        const buffer = document.getElementById(`layer${mode}Canvas`);
+        if (src && buffer) drawLayerToTarget(buffer, src);
+    });
 
-    // Copy active mode buffer directly to the single display canvas
+    // Composite all active layers onto the display canvas in render order
     const displayCanvas = document.getElementById('stackViewCanvas');
     if (displayCanvas) {
         if (displayCanvas.width !== stackWidth)  displayCanvas.width  = stackWidth;
         if (displayCanvas.height !== stackHeight) displayCanvas.height = stackHeight;
         const dCtx = displayCanvas.getContext('2d');
         dCtx.clearRect(0, 0, stackWidth, stackHeight);
-        if (modeBuffer && modeBuffer.width > 0 && modeBuffer.height > 0) {
-            const opSlider = document.getElementById('activeLayerOpacity');
-            dCtx.globalAlpha = opSlider ? opSlider.value / 100 : 1;
-            dCtx.drawImage(modeBuffer, 0, 0);
-            dCtx.globalAlpha = 1;
-        }
+        const masterOpacity = (document.getElementById('activeLayerOpacity')?.value ?? 100) / 100;
+        LAYER_STACK.forEach(mode => {
+            if (!_activeLayers.has(mode)) return;
+            const buffer = document.getElementById(`layer${mode}Canvas`);
+            if (!buffer || buffer.width === 0 || buffer.height === 0) return;
+            dCtx.globalAlpha = masterOpacity * (_layerOpacities[mode] ?? 1);
+            dCtx.drawImage(buffer, 0, 0);
+        });
+        dCtx.globalAlpha = 1;
     }
 
     const gridCheckbox = document.getElementById('layerGridVisible');
@@ -614,3 +665,10 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
 
 // Listen for STACKED_UPDATE events (replaces scattered direct calls)
 window.events?.on(window.EV?.STACKED_UPDATE, () => window.updateStackedLayers());
+
+// Initialise per-layer opacity sliders once DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _updateLayerOpacitySliders);
+} else {
+    _updateLayerOpacitySliders();
+}
