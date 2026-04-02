@@ -3,6 +3,7 @@ Tests for the OSM cities endpoint.
 
 POST /api/cities        — fetch building/road/waterway data
 GET  /api/cities/cached — check local cache status
+POST /api/cities/raster — rasterize OSM features to a DEM-format height map
 """
 import gzip
 import json
@@ -157,3 +158,75 @@ class TestExportPreview:
         body = resp.json()
         assert "bbox" in body
         assert len(body["bbox"]) == 4
+
+
+# ---------------------------------------------------------------------------
+# POST /api/cities/raster
+# ---------------------------------------------------------------------------
+
+EMPTY_FC = {"type": "FeatureCollection", "features": []}
+SMALL_BBOX = {"north": 39.960, "south": 39.950, "east": -75.140, "west": -75.170}
+
+
+class TestCityRaster:
+    """POST /api/cities/raster — rasterize OSM features to a DEM-format height map."""
+
+    def _payload(self, dim=10, buildings=None, roads=None, waterways=None):
+        return {
+            **SMALL_BBOX,
+            "dim": dim,
+            "buildings":  buildings  or EMPTY_FC,
+            "roads":      roads      or EMPTY_FC,
+            "waterways":  waterways  or EMPTY_FC,
+        }
+
+    def test_returns_200_with_empty_features(self, client, tmp_data_dir):
+        resp = client.post("/api/cities/raster", json=self._payload())
+        assert resp.status_code == 200
+
+    def test_response_has_dem_format_fields(self, client, tmp_data_dir):
+        resp = client.post("/api/cities/raster", json=self._payload())
+        body = resp.json()
+        for key in ("values", "width", "height", "vmin", "vmax", "bbox"):
+            assert key in body, f"Missing field: {key}"
+
+    def test_dimensions_match_dim_param(self, client, tmp_data_dir):
+        dim = 12
+        resp = client.post("/api/cities/raster", json=self._payload(dim=dim))
+        body = resp.json()
+        assert body["width"] == dim
+        assert body["height"] == dim
+        assert len(body["values"]) == dim * dim
+
+    def test_empty_features_produce_zero_values(self, client, tmp_data_dir):
+        resp = client.post("/api/cities/raster", json=self._payload())
+        body = resp.json()
+        assert all(v == 0.0 for v in body["values"])
+
+    def test_building_feature_raises_nonzero_values(self, client, tmp_data_dir):
+        """A building covering the full bbox should produce nonzero height values."""
+        building_fc = {
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [-75.170, 39.950], [-75.140, 39.950],
+                        [-75.140, 39.960], [-75.170, 39.960],
+                        [-75.170, 39.950],
+                    ]]
+                },
+                "properties": {"height_m": 10.0}
+            }]
+        }
+        resp = client.post("/api/cities/raster", json=self._payload(dim=10, buildings=building_fc))
+        body = resp.json()
+        assert any(v > 0 for v in body["values"])
+
+    def test_cache_hit_returns_same_values(self, client, tmp_data_dir):
+        """Two identical requests should return identical results (cache hit on second)."""
+        payload = self._payload(dim=10)
+        r1 = client.post("/api/cities/raster", json=payload).json()
+        r2 = client.post("/api/cities/raster", json=payload).json()
+        assert r1["values"] == r2["values"]

@@ -140,11 +140,11 @@ function loadSelectedPreset() {
 
 function applyPreset(preset) {
     if (preset.dim)                    document.getElementById('paramDim').value = preset.dim;
-    if (preset.depthScale !== undefined) document.getElementById('paramDepthScale').value = preset.depthScale;
-    if (preset.waterScale !== undefined) document.getElementById('paramWaterScale').value = preset.waterScale;
+    if (preset.depthScale !== undefined) window.appState.demParams.depthScale = preset.depthScale;
+    if (preset.waterScale !== undefined) window.appState.demParams.waterScale = preset.waterScale;
     if (preset.colormap)               document.getElementById('demColormap').value = preset.colormap;
-    if (preset.subtractWater !== undefined) document.getElementById('paramSubtractWater').checked = preset.subtractWater;
-    if (preset.satScale)               document.getElementById('paramSatScale').value = preset.satScale;
+    if (preset.subtractWater !== undefined) window.appState.demParams.subtractWater = preset.subtractWater;
+    if (preset.satScale !== undefined) window.appState.demParams.satScale = preset.satScale;
 
     if (preset.elevationCurve && window.curvePresets?.[preset.elevationCurve]) {
         window.setCurvePreset?.(preset.elevationCurve);
@@ -163,13 +163,14 @@ function applyPreset(preset) {
  * @returns {{dim, depthScale, waterScale, colormap, subtractWater, satScale, elevationCurve}}
  */
 function getCurrentSettings() {
+    const p = window.appState.demParams;
     return {
         dim:          parseInt(document.getElementById('paramDim')?.value) || 200,
-        depthScale:   parseFloat(document.getElementById('paramDepthScale')?.value) || 0.5,
-        waterScale:   parseFloat(document.getElementById('paramWaterScale')?.value) || 0.05,
+        depthScale:   p.depthScale,
+        waterScale:   p.waterScale,
         colormap:     document.getElementById('demColormap')?.value || 'terrain',
-        subtractWater: document.getElementById('paramSubtractWater')?.checked ?? true,
-        satScale:     parseInt(document.getElementById('paramSatScale')?.value) || 500,
+        subtractWater: p.subtractWater,
+        satScale:     p.satScale,
         elevationCurve: window.appState.activeCurvePreset || 'linear'
     };
 }
@@ -181,14 +182,15 @@ function getCurrentSettings() {
 function collectAllSettings() {
     const rescaleMin = document.getElementById('rescaleMin')?.value;
     const rescaleMax = document.getElementById('rescaleMax')?.value;
+    const p = window.appState.demParams;
     return {
         dim:           parseInt(document.getElementById('paramDim')?.value) || 200,
-        depth_scale:   parseFloat(document.getElementById('paramDepthScale')?.value) || 0.5,
-        water_scale:   parseFloat(document.getElementById('paramWaterScale')?.value) || 0.05,
-        height:        parseFloat(document.getElementById('paramHeight')?.value) || 10,
-        base:          parseFloat(document.getElementById('paramBase')?.value) || 2,
-        subtract_water: document.getElementById('paramSubtractWater')?.checked ?? true,
-        sat_scale:     parseInt(document.getElementById('paramSatScale')?.value) || 500,
+        depth_scale:   p.depthScale,
+        water_scale:   p.waterScale,
+        height:        p.height,
+        base:          p.base,
+        subtract_water: p.subtractWater,
+        sat_scale:     p.satScale,
         colormap:      document.getElementById('demColormap')?.value || 'terrain',
         projection:    document.getElementById('paramProjection')?.value || 'none',
         rescale_min:   rescaleMin && rescaleMin !== '' ? parseFloat(rescaleMin) : null,
@@ -211,12 +213,12 @@ function applyAllSettings(s) {
     const setChk = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.checked = val; };
 
     set('paramDim',        s.dim);
-    set('paramDepthScale', s.depth_scale);
-    set('paramWaterScale', s.water_scale);
-    set('paramHeight',     s.height);
-    set('paramBase',       s.base);
-    setChk('paramSubtractWater', s.subtract_water);
-    set('paramSatScale',   s.sat_scale);
+    if (s.depth_scale    != null) window.appState.demParams.depthScale    = parseFloat(s.depth_scale);
+    if (s.water_scale    != null) window.appState.demParams.waterScale    = parseFloat(s.water_scale);
+    if (s.height         != null) window.appState.demParams.height        = parseFloat(s.height);
+    if (s.base           != null) window.appState.demParams.base          = parseFloat(s.base);
+    if (s.subtract_water != null) window.appState.demParams.subtractWater = Boolean(s.subtract_water);
+    if (s.sat_scale      != null) window.appState.demParams.satScale      = parseInt(s.sat_scale);
     set('demColormap',     s.colormap);
     set('paramProjection', s.projection);
     if (s.rescale_min != null) set('rescaleMin', s.rescale_min);

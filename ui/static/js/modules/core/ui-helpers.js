@@ -156,29 +156,6 @@ window.setLayerStatus = function setLayerStatus(layer, status) {
 window.updateLayerStatusUI = function updateLayerStatusUI() {
     const layerStatus = window.appState?.layerStatus || {};
 
-    const statusMap = {
-        'dem': 'status-dem',
-        'water': 'status-water',
-        'landCover': 'status-satellite',
-        'combined': 'status-combined'
-    };
-
-    const layerStatusMap = {
-        'dem': 'dem',
-        'water': 'water',
-        'satellite': 'landCover',
-        'combined': 'combined'
-    };
-
-    Object.entries(statusMap).forEach(([layer, elementId]) => {
-        const element = document.getElementById(elementId);
-        if (element) {
-            element.classList.remove('empty', 'loading', 'loaded', 'error');
-            const status = layerStatus[layerStatusMap[layer] || layer] || 'empty';
-            element.classList.add(status);
-        }
-    });
-
     // Update strip button status dots
     const stripDotMap = { 'dem': 'stripDotDem', 'water': 'stripDotWater', 'landCover': 'stripDotLandCover' };
     Object.entries(stripDotMap).forEach(([layer, dotId]) => {

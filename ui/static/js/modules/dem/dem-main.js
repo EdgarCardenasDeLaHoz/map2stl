@@ -12,6 +12,21 @@
 
 'use strict';
 
+// Colormap LUT cache — keyed by colormap name; rebuilt only on first use per colormap.
+const _lutCache = new Map();
+
+/** Invalidate LUT cache entries. Pass a colormap name to drop one entry, or omit to clear all. */
+window._invalidateLutCache = (colormap) => {
+    if (colormap) _lutCache.delete(colormap);
+    else          _lutCache.clear();
+};
+
+// Reusable ImageData — avoids re-allocating Uint8ClampedArray on every render.
+let _demImageData = null;
+
+/** True for both plain Array and typed arrays (Float32Array, etc.) */
+const _isArrayLike = (v) => Array.isArray(v) || ArrayBuffer.isView(v);
+
 // ---------------------------------------------------------------------------
 // loadDEM
 // ---------------------------------------------------------------------------
@@ -56,20 +71,16 @@ window.loadDEM = async function loadDEM(highRes = false) {
     const east  = bounds.getEast();
     const west  = bounds.getWest();
 
-    const dataset    = document.getElementById('demDataset').value;
-    const showLandUse = document.getElementById('paramLandUse').checked;
     const demSource  = document.getElementById('paramDemSource')?.value || 'local';
+    const p          = window.appState.demParams;
 
     const params = new URLSearchParams({
         north, south, east, west,
         dim:            highRes ? 400 : document.getElementById('paramDim').value,
-        depth_scale:    document.getElementById('paramDepthScale').value,
-        water_scale:    document.getElementById('paramWaterScale').value,
-        height:         document.getElementById('paramHeight').value,
-        base:           document.getElementById('paramBase').value,
-        subtract_water: document.getElementById('paramSubtractWater').checked,
-        dataset:        dataset,
-        show_landuse:   showLandUse,
+        depth_scale:    p.depthScale,
+        water_scale:    p.waterScale,
+        subtract_water: p.subtractWater,
+        dataset:        'esa',
         dem_source:     demSource,
     });
 
@@ -272,9 +283,8 @@ window.loadDEM = async function loadDEM(highRes = false) {
  */
 window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colormap, vmin, vmax) {
     // Store last DEM data
-    const lastDemData = { values: (Array.isArray(values) ? values.slice() : []), width, height, colormap, vmin, vmax };
+    const lastDemData = { values: _isArrayLike(values) ? values : [], width, height, colormap, vmin, vmax };
     window.appState.lastDemData = lastDemData;
-    // app.js closure var lastDemData is synced back by the renderDEMCanvas stub in app.js.
 
     window._setDemEmptyState?.(false);
     window._updateWorkflowStepper?.();
@@ -296,11 +306,13 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
     canvas.width  = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, width, height);
-    const img = ctx.createImageData(width, height);
+    if (!_demImageData || _demImageData.width !== width || _demImageData.height !== height) {
+        _demImageData = new ImageData(width, height);
+    }
+    const img = _demImageData;
 
     const data = img.data;
-    const flat = Array.isArray(values) ? values : [];
+    const flat = _isArrayLike(values) ? values : [];
     const len  = flat.length;
 
     // Find min/max
@@ -320,15 +332,19 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
     const range    = (max - min) || 1;
     const invRange = 1 / range;
 
-    // Pre-compute colour lookup table
-    const colorLUT = new Uint8Array(1024 * 3);
-    for (let i = 0; i < 1024; i++) {
-        const t     = i / 1023;
-        const [r, g, b] = window.mapElevationToColor?.(t, colormap) || [0, 0, 0];
-        colorLUT[i * 3]     = Math.round((r || 0) * 255);
-        colorLUT[i * 3 + 1] = Math.round((g || 0) * 255);
-        colorLUT[i * 3 + 2] = Math.round((b || 0) * 255);
+    // Pre-compute colour lookup table (cached by colormap name)
+    if (!_lutCache.has(colormap)) {
+        const lut = new Uint8Array(1024 * 3);
+        for (let i = 0; i < 1024; i++) {
+            const t = i / 1023;
+            const [r, g, b] = window.mapElevationToColor?.(t, colormap) || [0, 0, 0];
+            lut[i * 3]     = Math.round((r || 0) * 255);
+            lut[i * 3 + 1] = Math.round((g || 0) * 255);
+            lut[i * 3 + 2] = Math.round((b || 0) * 255);
+        }
+        _lutCache.set(colormap, lut);
     }
+    const colorLUT = _lutCache.get(colormap);
 
     const total = width * height;
     for (let i = 0; i < total; i++) {
@@ -670,20 +686,24 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
     window.showToast?.('Loading satellite imagery...', 'info');
 
     try {
-        const resp = await fetch(`/api/terrain/satellite?${params}`, { signal });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-        if (data.error) throw new Error(data.error);
+        const { data, error: satImgErr } = await window.api.dem.satellite(params, signal);
+        if (satImgErr) throw new Error(satImgErr);
 
-        // Draw the JPEG into a canvas and store as source
+        // Draw the JPEG into a canvas, apply projection, and store as source
+        const bbox = window.appState?.currentDemBbox || { north, south, east, west };
         await new Promise((resolve, reject) => {
             const img = new Image();
             img.onload = () => {
-                const c = document.createElement('canvas');
-                c.width = img.naturalWidth;
-                c.height = img.naturalHeight;
-                c.getContext('2d').drawImage(img, 0, 0);
-                window.appState.satImgSourceCanvas = c;
+                const raw = document.createElement('canvas');
+                raw.width  = img.naturalWidth;
+                raw.height = img.naturalHeight;
+                raw.getContext('2d').drawImage(img, 0, 0);
+                // Store raw canvas for re-projection when projection setting changes
+                window.appState._satImgRawCanvas = raw;
+                window.appState._satImgBbox      = bbox;
+                // Apply the same projection as DEM/water canvases so layers align
+                const proj = window.applyProjection ? window.applyProjection(raw, bbox) : raw;
+                window.appState.satImgSourceCanvas = proj;
                 resolve();
             };
             img.onerror = reject;
@@ -697,6 +717,18 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
         console.error('loadSatelliteRGBImage error:', err);
         window.showToast?.(`Satellite load failed: ${err.message}`, 'error');
     }
+};
+
+/**
+ * Re-project the satellite RGB canvas using the current projection setting.
+ * Called when the projection dropdown changes (matches _reprojectCityRaster pattern).
+ */
+window._reprojectSatelliteImage = function _reprojectSatelliteImage() {
+    const raw  = window.appState?._satImgRawCanvas;
+    const bbox = window.appState?._satImgBbox;
+    if (!raw || !bbox) return;
+    const proj = window.applyProjection ? window.applyProjection(raw, bbox) : raw;
+    window.appState.satImgSourceCanvas = proj;
 };
 
 // ---------------------------------------------------------------------------

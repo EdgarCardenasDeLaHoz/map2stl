@@ -77,7 +77,7 @@ window.setupStackedLayers = function setupStackedLayers() {
  */
 window.setupAutoReload = function setupAutoReload() {
     const autoReloadCheckbox = document.getElementById('autoReloadLayers');
-    const settingsToWatch = ['paramDim', 'paramDepthScale', 'paramWaterScale', 'paramSatScale', 'paramSubtractWater'];
+    const settingsToWatch = ['paramDim'];
 
     settingsToWatch.forEach(id => {
         const el = document.getElementById(id);

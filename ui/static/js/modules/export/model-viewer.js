@@ -331,24 +331,16 @@ async function previewModelIn3D() {
         const exaggeration = parseFloat(document.getElementById('modelExaggeration')?.value) || 1.5;
         const baseHeight   = parseFloat(document.getElementById('modelBaseHeight')?.value)  || 5;
 
-        const resp = await fetch('/api/export/preview', {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                dem_values:   ldd.values,
-                height:       ldd.height,
-                width:        ldd.width,
-                model_height: parseFloat(document.getElementById('paramHeight')?.value) || 20,
-                base_height:  baseHeight,
-                exaggeration,
-                sea_level_cap: document.getElementById('modelSeaLevelCap')?.checked || false,
-            }),
+        const { data, error: previewErr } = await window.api.export.preview({
+            dem_values:   ldd.values,
+            height:       ldd.height,
+            width:        ldd.width,
+            model_height: window.appState.demParams.height || 20,
+            base_height:  baseHeight,
+            exaggeration,
+            sea_level_cap: document.getElementById('modelSeaLevelCap')?.checked || false,
         });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({}));
-            throw new Error(err.error || `HTTP ${resp.status}`);
-        }
-        const data = await resp.json();
+        if (previewErr) throw new Error(previewErr);
 
         const cmap = document.getElementById('viewerColormap')?.value || 'terrain';
         _replaceMesh(_buildMeshFromPreview(data, cmap));
@@ -357,7 +349,7 @@ async function previewModelIn3D() {
 
         window.appState.generatedModelData = {
             values: ldd.values, width: ldd.width, height: ldd.height,
-            resolution: parseFloat(document.getElementById('paramHeight')?.value) || 20,
+            resolution: window.appState.demParams.height || 20,
             exaggeration, baseHeight,
             vmin: ldd.vmin, vmax: ldd.vmax,
         };

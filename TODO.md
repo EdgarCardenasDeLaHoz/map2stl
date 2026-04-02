@@ -1,48 +1,62 @@
 # TODO — strm2stl
 
 > See `docs/` for architecture reference. Completed items: see `ui/static/FUNCTIONALITY_DOC.md`.
+> Per-module TODOs and improvement plans are in each module's `TODO.md`.
 
 ---
 
-## Open Items
+## Module TODO Files
 
-### Frontend Architecture
-
-#### [~] ARCH4. Add Vite as bundler — config files done, npm install pending
-Already using ESM imports (`main.js` as `type="module"`), so no module-system conversion needed — this is purely adding a build/dev tool layer.
-
-**Work:**
-1. `npm create vite@latest -- --template vanilla` — generates `package.json`, `vite.config.js`
-2. Add proxy in `vite.config.js`: `'/api/' → 'http://localhost:9000'` (~5 lines)
-3. Point Vite's entry at `main.js`; update the `<script type="module">` reference in `index.html`
-4. `npm run dev` gives HMR; `npm run build` produces minified `/dist`
-
-**Value:** HMR, minified production build, source maps, unlocks ARCH5.
-**Status:** `package.json` and `vite.config.js` created at `strm2stl/`. Run `npm install` when network is available, then `npm run dev` for HMR on port 5173 (API proxied to 9000).
-**Risk:** Low — CDN globals (`window.L`, `window.THREE`, `window.Plotly`) already handled correctly.
-
-#### [ ] ARCH5. Unit tests for pure functions (requires ARCH4)
-Add Vitest once Vite is set up.
-
-**Work:**
-1. `npm install -D vitest`; add `"test": "vitest"` to `package.json`
-2. Write `modules/__tests__/*.test.js` for pure functions
-
-**Priority targets:** `interpolateCurve(x)`, `mapElevationToColor(t, cmap)`, `detectContinent(lat, lon)`, `haversineDiagKm()`, cache key generation, `isLayerCurrent()`.
+| Module | File | Key open items |
+|--------|------|----------------|
+| `dem/` | [`modules/dem/TODO.md`](ui/static/js/modules/dem/TODO.md) | Plan A (off-thread render) |
+| `layers/` | [`modules/layers/TODO.md`](ui/static/js/modules/layers/TODO.md) | PERF10, PERF6B |
+| `ui/` | [`modules/ui/TODO.md`](ui/static/js/modules/ui/TODO.md) | PERF-B (curve RAF), UX shortcuts, presets versioning |
+| `core/` | [`modules/core/TODO.md`](ui/static/js/modules/core/TODO.md) | ARCH4 (Vite), ARCH5 (Vitest), typed events |
+| `events/` | [`modules/events/TODO.md`](ui/static/js/modules/events/TODO.md) | onchange cleanup, event bus migration |
+| `map/` | [`modules/map/TODO.md`](ui/static/js/modules/map/TODO.md) | Globe init guard, compare view leak, bbox accessibility |
+| `regions/` | [`modules/regions/TODO.md`](ui/static/js/modules/regions/TODO.md) | Pagination, import/export JSON, settings inheritance |
+| `export/` | [`modules/export/TODO.md`](ui/static/js/modules/export/TODO.md) | P6 (elevation bands), progress indicator, OBJ texture |
 
 ---
 
-### Performance
+## Top-Priority Items (cross-module view)
 
-#### [~] PERF6B. Web Worker for city rendering (Part A done)
-Part A (pre-baking `Float32Array` buffers + `_bbox` per feature) is done. City rendering still runs on the main thread, causing jank on zoom/pan with 500+ buildings.
+### High Impact
+- ~~**PERF10**~~ — done (RAF+scheduler.yield chunking with cancel token)
+- **PERF6B** (`layers/city-render.js`) — Web Worker for city polygon rendering
+- **PERF7** (`layers/stacked-layers.js`) — DOM cache for 60fps hover *(partially done)*
+- ~~**UX-10**~~ — done (status dots removed; mergePanel/regionsContainer retained — still in use)
+- ~~**UX-9**~~ — done (hidden param inputs removed; values now in `appState.demParams`)
 
-**Work:**
-1. Create `workers/city-worker.js` — self-contained draw logic; receives `{type:'init', buildings, roads, waterways}` with `Float32Array` buffers as `Transferable`
-2. In `city-render.js`: call `canvas.transferControlToOffscreen()` on the city overlay canvas; pass the `OffscreenCanvas` to the worker via `postMessage`
-3. For the stacked-layers canvas: worker renders to its own `OffscreenCanvas` and posts back an `ImageBitmap`; main thread composites
-4. Main thread posts `{type:'render', zoom, offset}` on each zoom/pan; worker responds with `{type:'done'}`
-5. Cancel in-flight renders with a generation counter
+### Medium Impact
+- ~~**PERF8**~~ — done
+- ~~**PERF9** + **PERF9-dep**~~ — done
+- **P6** (`export/`) — elevation band multi-material STL
+- ~~**UX-4**~~ — done (2×2 coord grid + action row; font 12px; linked labels)
+- ~~**UX-E**~~ — done (leaflet + leaflet-draw vendored to `ui/static/vendor/`)
+- ~~**UX-11**~~ — done (dead main.css deleted)
 
-**Tricky parts:** `transferControlToOffscreen()` is one-shot; worker can't access `window`/`appState`.
-**Value:** For Philadelphia (~800 buildings), render takes 15–40ms on main thread. With worker: < 1ms.
+### Low Impact / Quick Wins
+- ~~**UX-7**~~ — done (icon was already `▼`; no change needed)
+- ~~**UX-8**~~ — done (added `(exported)` / `(preview only)` badges to clarify depth scale vs exaggeration)
+- ~~**MAP-3**~~ — done (verified: no Leaflet instances in compare view; no leak)
+- ~~**EXP-2**~~ — done (verified: WebGL failure already shows fallback message; errors shown in statusEl + toast)
+- **UX-8** (`ui/`) — clarify `modelDepthScale` vs `modelExaggeration` labels
+- ~~**PERF11** + **PERF11-wire** + **PERF12** + **PERF13**~~ — done
+- ~~**MAP-1**~~ — done (globe init guard silenced; TODO updated)
+- ~~**EV-1**~~ — done (`onchange`/`oninput` → `addEventListener` in all JS modules)
+- ~~**EV-2**~~ — done (`onclick`/`onchange` HTML attrs removed from index.html; compare panel wired in event-listeners.js)
+
+### UX Improvements (from Chrome audit `docs/ux-audit.md`)
+- **UX-1** (`map/`) — consolidate region creation to single entry point
+- **UX-2** (`map/`) — add text labels to floating map buttons
+- **UX-3** (`map/`) — clarify sidebar 3-state toggle
+- **UX-5** (`ui/`) — make settings panel collapsed tab visible
+- **UX-6** (`ui/`) — promote Load DEM as primary CTA on empty state
+- **UX-12** (`ui/`) — replace inline styles with CSS classes (incremental)
+- **UX-M** (`layers/`) — lazy-allocate hidden layer canvases (GPU memory)
+
+### Requires External Setup
+- **ARCH4** — `npm install` (Vite; config already written)
+- **ARCH5** — Vitest unit tests (requires ARCH4)

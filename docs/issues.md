@@ -9,7 +9,7 @@
 `boundingBox`, `drawnItems`, `coordinatesData`, `stackedLayerData`, `compareData`, etc. Not yet needed by any module so not mirrored. If a new module needs them, mirror via `window.appState` first.
 
 ### 3. `<script>` vs Module Boundary
-app.js uses `onclick="fn()"` HTML attributes. Converting to a full ES module requires updating all those handlers. No plan to do this yet — keep public functions on `window.*`.
+HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `addEventListener` in event-listeners.js). One intentional inline `onclick=` remains on the dev-only debug error overlay dismiss button. Converting app.js itself to a full ES module is not planned — keep public functions on `window.*`.
 
 ## Feature Status
 

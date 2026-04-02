@@ -20,7 +20,10 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         window.showToast?.('Draw a rectangle on the map, then enter a name and click Save Region', 'info');
     }
 
-    document.getElementById('demColormap').onchange = () => window.recolorDEM?.();
+    document.getElementById('demColormap')?.addEventListener('change', () => {
+        window._invalidateLutCache?.();
+        window.recolorDEM?.();
+    });
 
     const projSelect = document.getElementById('paramProjection');
     if (projSelect) {
@@ -46,6 +49,8 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
             window.renderCityOnDEM?.();
             // Re-project the city heights raster canvas
             window._reprojectCityRaster?.();
+            // Re-project the satellite RGB canvas
+            window._reprojectSatelliteImage?.();
             // Recompute composite DEM (applies new projection to source canvas)
             window.computeCompositeDem?.();
             // Update stacked layers view
@@ -62,13 +67,10 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     });
     document.getElementById('resetRescaleBtn')?.addEventListener('click', () => window.resetRescale?.());
 
-    const tileLayerSelect = document.getElementById('mapTileLayer');
-    if (tileLayerSelect) {
-        tileLayerSelect.onchange = e => {
-            window.setTileLayer?.(e.target.value);
-            window.showToast?.(`Map style: ${e.target.options[e.target.selectedIndex].text}`, 'info');
-        };
-    }
+    document.getElementById('mapTileLayer')?.addEventListener('change', e => {
+        window.setTileLayer?.(e.target.value);
+        window.showToast?.(`Map style: ${e.target.options[e.target.selectedIndex].text}`, 'info');
+    });
 
     document.getElementById('showTerrainOverlay')?.addEventListener('change', e => {
         window.toggleTerrainOverlay?.(e.target.checked);
@@ -81,29 +83,42 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     });
 
     const genGlobalDemBtn = document.getElementById('genGlobalDemBtn');
-    if (genGlobalDemBtn) {
-        genGlobalDemBtn.onclick = async () => {
-            const status = document.getElementById('genGlobalDemStatus');
-            genGlobalDemBtn.disabled = true;
-            if (status) status.textContent = 'Generating…';
-            window.showToast?.('Generating terrain cache — this runs once and may take a minute', 'info', 5000);
-            try {
-                const { error } = await window.api.misc.globalDemOverview(true);
-                if (!error) {
-                    if (status) status.textContent = '✓ Done';
-                    window.showToast?.('Terrain cache generated', 'success');
-                } else {
-                    if (status) status.textContent = '✗ Failed';
-                    window.showToast?.('Failed: ' + error, 'error');
-                }
-            } catch (e) {
-                if (status) status.textContent = '✗ Error';
-                window.showToast?.('Error generating cache', 'error');
-            } finally {
-                genGlobalDemBtn.disabled = false;
+    genGlobalDemBtn?.addEventListener('click', async () => {
+        const status = document.getElementById('genGlobalDemStatus');
+        genGlobalDemBtn.disabled = true;
+        if (status) status.textContent = 'Generating…';
+        window.showToast?.('Generating terrain cache — this runs once and may take a minute', 'info', 5000);
+        try {
+            const { error } = await window.api.misc.globalDemOverview(true);
+            if (!error) {
+                if (status) status.textContent = '✓ Done';
+                window.showToast?.('Terrain cache generated', 'success');
+            } else {
+                if (status) status.textContent = '✗ Failed';
+                window.showToast?.('Failed: ' + error, 'error');
             }
-        };
+        } catch (e) {
+            if (status) status.textContent = '✗ Error';
+            window.showToast?.('Error generating cache', 'error');
+        } finally {
+            genGlobalDemBtn.disabled = false;
+        }
+    });
+
+    function _setLabels(show) {
+        window.toggleMapLabels?.(show);
+        const btn = document.getElementById('floatingLabelsToggle');
+        btn?.classList.toggle('active', show);
+        const cb = document.getElementById('showLabelsExplore');
+        if (cb) cb.checked = show;
     }
+    document.getElementById('floatingLabelsToggle')?.addEventListener('click', () => {
+        const cb = document.getElementById('showLabelsExplore');
+        _setLabels(cb ? !cb.checked : true);
+    });
+    document.getElementById('showLabelsExplore')?.addEventListener('change', e => {
+        _setLabels(e.target.checked);
+    });
 
     document.getElementById('floatingGridToggle')?.addEventListener('click', () => {
         const cur = window.getMapGridEnabled?.() ?? false;
@@ -131,13 +146,11 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
 
     const floatingRegionsBtn = document.getElementById('floatingRegionsToggle');
     const regionsPanel       = document.getElementById('regionsPanel');
-    if (floatingRegionsBtn && regionsPanel) {
-        floatingRegionsBtn.onclick = () => {
-            regionsPanel.classList.toggle('hidden');
-            floatingRegionsBtn.classList.toggle('active', !regionsPanel.classList.contains('hidden'));
-            if (!regionsPanel.classList.contains('hidden')) window.populateRegionsPanelTable?.();
-        };
-    }
+    floatingRegionsBtn?.addEventListener('click', () => {
+        regionsPanel?.classList.toggle('hidden');
+        floatingRegionsBtn.classList.toggle('active', !regionsPanel?.classList.contains('hidden'));
+        if (!regionsPanel?.classList.contains('hidden')) window.populateRegionsPanelTable?.();
+    });
     document.getElementById('closeRegionsPanel')?.addEventListener('click', () => {
         regionsPanel?.classList.add('hidden');
         floatingRegionsBtn?.classList.remove('active');
@@ -229,6 +242,11 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     document.getElementById('layerGridDensity')?.addEventListener('change', () => {
         if (gridVisibleCb?.checked) window.drawLayerGrid?.();
     });
+    document.getElementById('gridPixelModeBtn')?.addEventListener('click', () => {
+        const btn = document.getElementById('gridPixelModeBtn');
+        const on = btn?.classList.toggle('active');
+        window.setGridPixelMode?.(!!on);
+    });
 
     document.getElementById('terrainOverlayOpacity')?.addEventListener('input', e => {
         const val = e.target.value;
@@ -241,53 +259,52 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         const w   = document.getElementById('demResWarning');
         if (w) w.style.display = val > 500 ? 'block' : 'none';
     });
-    document.getElementById('paramSatScale')?.addEventListener('input', () => {
-        const val = parseInt(document.getElementById('paramSatScale').value);
-        const w   = document.getElementById('satResWarning');
-        if (w) w.style.display = val < 100 ? 'block' : 'none';
-    });
     document.getElementById('waterResolution')?.addEventListener('change', () => {
         const val = parseInt(document.getElementById('waterResolution').value);
         const w   = document.getElementById('waterResWarning');
         if (w) w.style.display = val >= 500 ? 'block' : 'none';
         window.loadWaterMask?.();
     });
+    document.getElementById('loadWaterMaskBtn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('loadWaterMaskBtn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+        try { await window.loadWaterMask?.(); }
+        finally { if (btn) { btn.disabled = false; btn.textContent = '🌊 Load Water & ESA'; } }
+    });
 };
 
 window._setupBboxListeners = function _setupBboxListeners() {
     const bboxReloadBtn = document.getElementById('bboxReloadBtn');
-    if (bboxReloadBtn) {
-        bboxReloadBtn.onclick = () => {
-            const n = parseFloat(document.getElementById('bboxNorth')?.value);
-            const s = parseFloat(document.getElementById('bboxSouth')?.value);
-            const e = parseFloat(document.getElementById('bboxEast')?.value);
-            const w = parseFloat(document.getElementById('bboxWest')?.value);
-            if (isNaN(n) || isNaN(s) || isNaN(e) || isNaN(w)) {
-                window.showToast?.('Invalid coordinates', 'error'); return;
-            }
-            const nc = Math.max(-90,  Math.min(90,  n));
-            const sc = Math.max(-90,  Math.min(90,  s));
-            const ec = Math.max(-180, Math.min(180, e));
-            const wc = Math.max(-180, Math.min(180, w));
-            window.setBboxInputValues?.(nc, sc, ec, wc);
-            let selectedRegion = window.appState.selectedRegion;
-            if (!selectedRegion) selectedRegion = {};
-            selectedRegion.north = nc; selectedRegion.south = sc;
-            selectedRegion.east  = ec; selectedRegion.west  = wc;
-            window.setSelectedRegion?.(selectedRegion);
-            window.appState.selectedRegion = selectedRegion;
-            window.appState.currentDemBbox = { north: nc, south: sc, east: ec, west: wc };
-            const _map = window.getMap?.();
-            const _bb = window.getBoundingBox?.();
-            if (_bb && _map) _map.removeLayer(_bb);
-            const newBb = L.rectangle([[sc, wc], [nc, ec]],
-                { color: '#e74c3c', weight: 2, fillOpacity: 0.05 });
-            if (_map) newBb.addTo(_map);
-            window.setBoundingBox?.(newBb);
-            window.clearLayerCache?.();
-            window.loadAllLayers?.();
-        };
-    }
+    bboxReloadBtn?.addEventListener('click', () => {
+        const n = parseFloat(document.getElementById('bboxNorth')?.value);
+        const s = parseFloat(document.getElementById('bboxSouth')?.value);
+        const e = parseFloat(document.getElementById('bboxEast')?.value);
+        const w = parseFloat(document.getElementById('bboxWest')?.value);
+        if (isNaN(n) || isNaN(s) || isNaN(e) || isNaN(w)) {
+            window.showToast?.('Invalid coordinates', 'error'); return;
+        }
+        const nc = Math.max(-90,  Math.min(90,  n));
+        const sc = Math.max(-90,  Math.min(90,  s));
+        const ec = Math.max(-180, Math.min(180, e));
+        const wc = Math.max(-180, Math.min(180, w));
+        window.setBboxInputValues?.(nc, sc, ec, wc);
+        let selectedRegion = window.appState.selectedRegion;
+        if (!selectedRegion) selectedRegion = {};
+        selectedRegion.north = nc; selectedRegion.south = sc;
+        selectedRegion.east  = ec; selectedRegion.west  = wc;
+        window.setSelectedRegion?.(selectedRegion);
+        window.appState.selectedRegion = selectedRegion;
+        window.appState.currentDemBbox = { north: nc, south: sc, east: ec, west: wc };
+        const _map = window.getMap?.();
+        const _bb = window.getBoundingBox?.();
+        if (_bb && _map) _map.removeLayer(_bb);
+        const newBb = L.rectangle([[sc, wc], [nc, ec]],
+            { color: '#e74c3c', weight: 2, fillOpacity: 0.05 });
+        if (_map) newBb.addTo(_map);
+        window.setBoundingBox?.(newBb);
+        window.clearLayerCache?.();
+        window.loadAllLayers?.();
+    });
 
     ['bboxNorth', 'bboxSouth', 'bboxEast', 'bboxWest'].forEach(id => {
         document.getElementById(id)?.addEventListener('keydown', ev => {

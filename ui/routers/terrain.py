@@ -98,26 +98,26 @@ def _validate_dim(dim, max_dim=2000):
 # ---------------------------------------------------------------------------
 
 def _make_local_dem(north, south, east, west, dim, depth_scale, water_scale,
-                    height, base, subtract_water, projection, maintain_dimensions):
+                    subtract_water, projection, maintain_dimensions):
     """Run make_dem_image synchronously. Called from run_in_executor."""
     from numpy2stl.oceans import make_dem_image
     target_bbox = (north, south, east, west)
     try:
         return make_dem_image(
             target_bbox, dim=dim, depth_scale=depth_scale,
-            water_scale=water_scale, height=height, base=base,
+            water_scale=water_scale,
             subtract_water=subtract_water, projection=projection,
             maintain_dimensions=maintain_dimensions)
     except TypeError:
         return make_dem_image(
             target_bbox, dim=dim, depth_scale=depth_scale,
-            water_scale=water_scale, height=height, base=base,
+            water_scale=water_scale,
             subtract_water=subtract_water,
             maintain_dimensions=maintain_dimensions)
 
 
 def _fetch_dem_array(dem_source, north, south, east, west, dim,
-                     depth_scale, water_scale, height, base,
+                     depth_scale, water_scale,
                      subtract_water, projection, maintain_dimensions):
     """
     Fetch a DEM array from the specified source. Sync — call via run_in_executor.
@@ -131,7 +131,7 @@ def _fetch_dem_array(dem_source, north, south, east, west, dim,
 
     try:
         return _make_local_dem(north, south, east, west, dim, depth_scale,
-                               water_scale, height, base, subtract_water,
+                               water_scale, subtract_water,
                                projection, maintain_dimensions)
     except Exception as dem_err:
         logger.warning(f"Local DEM failed: {dem_err}, returning zeros")
@@ -164,11 +164,8 @@ async def get_terrain_dem(request: Request):
     dim          = _parse_int(params, "dim", 100)
     depth_scale  = _parse_float(params, "depth_scale", 0.5)
     water_scale  = _parse_float(params, "water_scale", 0.05)
-    height       = _parse_float(params, "height", 10)
-    base         = _parse_float(params, "base", 2)
     subtract_water      = _parse_bool(params, "subtract_water", True)
     show_sat            = _parse_bool(params, "show_sat", False)
-    show_landuse        = _parse_bool(params, "show_landuse", False)
     dataset             = params.get("dataset", "esa")
     projection          = params.get("projection", "cosine")
     maintain_dimensions = _parse_bool(params, "maintain_dimensions", True)
@@ -185,9 +182,9 @@ async def get_terrain_dem(request: Request):
     # --- DEM disk cache check ---
     _dem_cache_key = make_cache_key("dem", north, south, east, west, {
         "dim": dim, "src": dem_source, "proj": projection,
-        "ds": depth_scale, "ws": water_scale, "h": height, "b": base,
+        "ds": depth_scale, "ws": water_scale,
         "sw": subtract_water, "md": maintain_dimensions,
-        "sat": show_sat, "lu": show_landuse,
+        "sat": show_sat,
     })
     _cached = read_array_cache("dem", _dem_cache_key)
     if _cached is not None and _cached[0].get("dem") is not None:
@@ -217,7 +214,7 @@ async def get_terrain_dem(request: Request):
         im = await loop.run_in_executor(
             None, partial(_fetch_dem_array, dem_source,
                           north, south, east, west, dim,
-                          depth_scale, water_scale, height, base,
+                          depth_scale, water_scale,
                           subtract_water, projection, maintain_dimensions))
         im = _upsample_dem(im, dim)
 
@@ -225,7 +222,7 @@ async def get_terrain_dem(request: Request):
         height_px, width_px = response_content["dimensions"]
 
         # Optional satellite/land-use overlay
-        if show_sat or show_landuse:
+        if show_sat:
             try:
                 sat_result = await loop.run_in_executor(
                     None, partial(_fetch_sat_overlay, north, south, east, west,
@@ -318,9 +315,7 @@ async def get_terrain_water_mask(request: Request):
         east         = _parse_float(params, "east")
         west         = _parse_float(params, "west")
         sat_scale    = _parse_int(params, "sat_scale", 500)
-        dim          = _parse_int(params, "dim", 200)
-        target_width  = _parse_int(params, "target_width")
-        target_height = _parse_int(params, "target_height")
+        dim          = _parse_int(params, "dim", 200)  # TODO: remove — unused now that target_width/target_height are gone (per-layer-resolution-plan.md step 1)
         water_dataset = params.get("dataset", "esa")
         if water_dataset not in ("esa", "jrc"):
             water_dataset = "esa"
@@ -331,8 +326,7 @@ async def get_terrain_water_mask(request: Request):
 
         # --- Water mask disk cache check ---
         _water_cache_key = make_cache_key("water", north, south, east, west, {
-            "ss": sat_scale, "dim": dim,
-            "tw": target_width, "th": target_height, "ds": water_dataset})
+            "ss": sat_scale, "ds": water_dataset})
         _wc = read_array_cache("water", _water_cache_key)
         if _wc is not None:
             _warr, _wmeta = _wc
@@ -367,7 +361,7 @@ async def get_terrain_water_mask(request: Request):
             logger.info(f"Auto-scaled sat_scale to {sat_scale}")
 
         if TEST_MODE:
-            h, w = (target_height or dim, target_width or dim)
+            h, w = dim, dim
             water_arr = np.zeros((h, w), dtype=float)
             water_arr[h // 4:h // 2, w // 4:w // 2] = 1.0
             wp = int(np.sum(water_arr))
@@ -385,7 +379,7 @@ async def get_terrain_water_mask(request: Request):
         import cv2 as _cv2
         img, _jrc_img, _elevation_raw = await asyncio.get_running_loop().run_in_executor(
             None, partial(_fetch_water_mask_images, north, south, east, west,
-                          sat_scale, water_dataset, target_width, target_height))
+                          sat_scale, water_dataset))
 
         if img is None:
             return JSONResponse(

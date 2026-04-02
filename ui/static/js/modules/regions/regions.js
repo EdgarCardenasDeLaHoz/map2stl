@@ -44,7 +44,6 @@
  * @returns {Promise<void>}
  */
 async function loadCoordinates() {
-    console.log('loadCoordinates() called');
     const list = document.getElementById('coordinatesList');
 
     if (!list) {
@@ -57,7 +56,6 @@ async function loadCoordinates() {
     try {
         const { data, error } = await window.api.regions.list();
         if (error) throw new Error(error);
-        console.log('Got data, regions count:', data.regions?.length || 0);
 
         window.setCoordinatesData?.(data.regions || []);
 
@@ -65,7 +63,6 @@ async function loadCoordinates() {
         renderCoordinatesList();
 
         const coordinatesData = window.getCoordinatesData?.() || [];
-        console.log('Populated', coordinatesData.length, 'regions');
 
         const preloadedLayer   = window.getPreloadedLayer?.();
         const editMarkersLayer = window.getEditMarkersLayer?.();
@@ -248,13 +245,16 @@ async function selectCoordinate(index) {
     // Await so settings are applied before DEM is loaded below.
     const hasSaved = await window.loadAndApplyRegionSettings?.(selectedRegion.name);
     if (!hasSaved && selectedRegion.parameters) {
-        document.getElementById('paramDim').value = selectedRegion.parameters.dim || 100;
-        document.getElementById('paramDepthScale').value = selectedRegion.parameters.depth_scale || 0.5;
-        document.getElementById('paramWaterScale').value = selectedRegion.parameters.water_scale || 0.05;
-        document.getElementById('paramHeight').value = selectedRegion.parameters.height || 10;
-        document.getElementById('paramBase').value = selectedRegion.parameters.base || 2;
-        document.getElementById('paramSubtractWater').checked = selectedRegion.parameters.subtract_water !== false;
-        document.getElementById('paramSatScale').value = selectedRegion.parameters.sat_scale || 500;
+        const rp = selectedRegion.parameters;
+        document.getElementById('paramDim').value = rp.dim || 100;
+        if (window.appState?.demParams) {
+            window.appState.demParams.depthScale    = rp.depth_scale    ?? 0.5;
+            window.appState.demParams.waterScale    = rp.water_scale    ?? 0.05;
+            window.appState.demParams.subtractWater = rp.subtract_water !== false;
+            window.appState.demParams.satScale      = rp.sat_scale      ?? 500;
+            window.appState.demParams.height        = rp.height         ?? 10;
+            window.appState.demParams.base          = rp.base           ?? 2;
+        }
     }
 
     // Populate label editor with selected region's current label

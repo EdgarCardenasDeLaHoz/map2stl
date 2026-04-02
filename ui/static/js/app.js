@@ -72,6 +72,17 @@ let layerStatus = {
 window.appState.layerBboxes = layerBboxes;
 window.appState.layerStatus = layerStatus;
 
+// DEM + export parameters — single source of truth, replaces hidden DOM inputs.
+window.appState.demParams = {
+    dim:           200,
+    depthScale:    0.5,
+    waterScale:    0.05,
+    subtractWater: true,
+    satScale:      500,
+    height:        10,
+    base:          2,
+};
+
 // (lastAppliedPresetName moved to modules/presets.js)
 
 /**
@@ -104,6 +115,9 @@ function clearLayerCache() {
     window.appState.compositeDemSourceCanvas = null;
     window.appState.compositeFeatures = null;
     window.appState.compositeCityRaster = null;
+    window.appState.satImgSourceCanvas = null;
+    window.appState._satImgRawCanvas = null;
+    window.appState._satImgBbox = null;
 
     // Update status indicators
     window['events']?.emit(window.EV?.STATUS_UPDATE);

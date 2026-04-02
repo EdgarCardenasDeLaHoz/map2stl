@@ -452,12 +452,10 @@ def compute_raw_dem(north, south, east, west, dim, depth_scale):
     return im_r
 
 
-def fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset,
-                             target_width, target_height):
+def fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset):
     """Fetch ESA/JRC images and optional elevation for bathymetry. Call via run_in_executor.
-    Returns (img, jrc_img_or_None, elevation_raw_or_None).
+    Returns (img, jrc_img_or_None, elevation_raw_or_None) at native sat_scale resolution.
     """
-    import cv2 as _cv2
     from geo2stl.sat2stl import fetch_bbox_image
     img = fetch_bbox_image(north, south, east, west,
                            scale=sat_scale, dataset="esa", use_cache=True)
@@ -476,10 +474,6 @@ def fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset,
         pass
     if img is not None and img.ndim == 3:
         img = img[:, :, 0]
-    if img is not None and target_width and target_height and \
-            (img.shape[1] != target_width or img.shape[0] != target_height):
-        img = _cv2.resize(img.astype(float), (target_width, target_height),
-                          interpolation=_cv2.INTER_NEAREST)
     return img, jrc_img, elevation_raw
 
 
@@ -557,6 +551,10 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
     session = requests.Session()
     session.headers["User-Agent"] = "strm2stl/1.0"
 
+    tiles_loaded = 0
+    tiles_total  = (tx_max - tx_min + 1) * (ty_max - ty_min + 1)
+    last_tile_err = None
+
     for tx in range(tx_min, tx_max + 1):
         for ty in range(ty_min, ty_max + 1):
             url = TILE_URL.format(z=zoom, y=ty, x=tx)
@@ -565,8 +563,18 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
                 resp.raise_for_status()
                 tile = Image.open(BytesIO(resp.content)).convert("RGB")
                 composite.paste(tile, ((tx - tx_min) * TILE_SIZE, (ty - ty_min) * TILE_SIZE))
+                tiles_loaded += 1
             except Exception as tile_err:
+                last_tile_err = tile_err
                 logger.debug(f"Satellite tile {z}/{ty}/{tx} failed: {tile_err}")
+
+    if tiles_loaded == 0:
+        raise RuntimeError(
+            f"All {tiles_total} satellite tiles failed to load. "
+            f"Last error: {last_tile_err}. "
+            "Check network access to server.arcgisonline.com."
+        )
+    logger.info(f"Satellite tiles: {tiles_loaded}/{tiles_total} loaded at zoom {zoom}")
 
     def _lon2px(lon):
         return int((lon + 180.0) / 360.0 * n * TILE_SIZE) - tx_min * TILE_SIZE

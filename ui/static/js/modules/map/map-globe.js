@@ -7,6 +7,7 @@
  * Public API (exposed on window):
  *   window.resetBboxColorIndex()
  *   window.setTileLayer(layerKey)
+ *   window.toggleMapLabels(show)
  *   window.toggleDemOverlay(show)        → Promise<boolean>
  *   window.toggleTerrainOverlay(show)
  *   window.setTerrainOverlayOpacity(opacity)
@@ -128,6 +129,28 @@ function setTileLayer(layerKey) {
 }
 window.setTileLayer = setTileLayer;
 
+// ── Labels overlay ───────────────────────────────────────────────────────────
+
+let _labelsLayer = null;
+
+/**
+ * Add or remove a labels-only tile overlay on the map.
+ * Uses CartoDB Voyager labels (transparent background, works on any base layer).
+ * @param {boolean} show
+ */
+window.toggleMapLabels = function toggleMapLabels(show) {
+    if (!_map) return;
+    if (show && !_labelsLayer) {
+        _labelsLayer = L.tileLayer(
+            'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png',
+            { attribution: '&copy; CartoDB', opacity: 1 }
+        ).addTo(_map);
+    } else if (!show && _labelsLayer) {
+        _map.removeLayer(_labelsLayer);
+        _labelsLayer = null;
+    }
+};
+
 // ── DEM overlay ─────────────────────────────────────────────────────────────
 
 /**
@@ -172,10 +195,11 @@ async function toggleDemOverlay(show) {
                 const north = bounds.getNorth(), south = bounds.getSouth();
                 const east = bounds.getEast(), west = bounds.getWest();
                 const colormap = document.getElementById('demColormap')?.value || 'terrain';
-                const { data } = await window.api.dem.load(
+                const { data, error: demErr } = await window.api.dem.load(
                     `north=${north}&south=${south}&east=${east}&west=${west}&dim=150&colormap=${colormap}&projection=none&subtract_water=false&depth_scale=1`
                 );
-                if (data.dem_values && data.dimensions) {
+                if (demErr) throw new Error(demErr);
+                if (data && data.dem_values && data.dimensions) {
                     let demVals = data.dem_values;
                     let h = Number(data.dimensions[0]);
                     let w = Number(data.dimensions[1]);
@@ -533,8 +557,7 @@ function initGlobe() {
     try {
         const container = document.getElementById('globe');
         if (!container || container.clientWidth === 0 || container.clientHeight === 0) {
-            console.warn('Globe container not ready, skipping init');
-            return;
+            return; // Globe tab not yet visible — init deferred until first activation
         }
 
         _globeScene    = new THREE.Scene();

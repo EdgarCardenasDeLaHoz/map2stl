@@ -71,8 +71,7 @@ window._setupResizablePanel = function _setupResizablePanel() {
 };
 
 window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {
-    const saveSettingsBtn = document.getElementById('saveRegionSettingsBtn');
-    if (saveSettingsBtn) saveSettingsBtn.onclick = () => window.saveRegionSettings?.();
+    document.getElementById('saveRegionSettingsBtn')?.addEventListener('click', () => window.saveRegionSettings?.());
 
     const jsonToggleBtn    = document.getElementById('jsonViewToggleBtn');
     const jsonView         = document.getElementById('settingsJsonView');

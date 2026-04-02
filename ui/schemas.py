@@ -153,7 +153,6 @@ class DEMRequest(BoundingBox):
     subtract_water: bool = True
     dataset: str = Field("esa", description="Elevation dataset: 'esa', 'copernicus', 'nasadem', 'usgs', 'gebco'")
     colormap: str = Field("terrain", description="Matplotlib colormap name for client-side rendering")
-    show_landuse: bool = Field(False, description="Include ESA land-cover overlay")
 
 
 class DEMResponse(BaseModel):

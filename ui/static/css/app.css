@@ -15,6 +15,16 @@
             box-sizing: border-box;
         }
 
+        /* ── Flex layout utilities ─────────────────────────────────── */
+        .row        { display: flex; align-items: center; }
+        .row-gap4   { display: flex; align-items: center; gap: 4px; }
+        .row-gap6   { display: flex; align-items: center; gap: 6px; }
+        .row-gap8   { display: flex; align-items: center; gap: 8px; }
+        .row-wrap   { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+        .col        { display: flex; flex-direction: column; }
+        .check-label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+        /* ─────────────────────────────────────────────────────────── */
+
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: var(--bg-dark);
@@ -805,6 +815,12 @@
             color: white;
         }
 
+        #gridPixelModeBtn.active {
+            background: #007acc;
+            border-color: #007acc;
+            color: white;
+        }
+
         .curve-controls {
             display: flex;
             gap: 10px;
@@ -835,6 +851,19 @@
         /* Preset Profiles */
         .preset-profiles {
             padding: 5px 0;
+        }
+
+        .preset-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .preset-save-dialog {
+            margin-top: 10px;
+            padding: 10px;
+            background: #2a2a2a;
+            border-radius: 4px;
         }
 
         .btn-danger {
@@ -1270,8 +1299,15 @@
         }
         .dem-strip-btn:hover { color: #ccc; background: var(--bg-light); border-color: var(--border); }
         .dem-strip-btn.active { color: #ddd; background: #383838; border-color: var(--border-light); }
+        .dem-strip-divider { width: 1px; height: 16px; background: #444; margin: 0 2px; flex-shrink: 0; }
 
         /* Layer mode selector buttons (replaces per-layer checkboxes in stacked view) */
+        #layerModeSelector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            margin-bottom: 7px;
+        }
         .layer-mode-btn {
             flex: 1;
             min-width: 52px;
@@ -1362,39 +1398,49 @@
 
         /* Bbox fine-tune editor in Edit view */
         .bbox-editor {
-            padding: 2px 0;
+            padding: 3px 0;
         }
-        .bbox-row {
+        /* Row 1: 2-column grid for N/S/E/W coordinate inputs */
+        .bbox-coords-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 3px;
+            margin-bottom: 4px;
+        }
+        .bbox-coord-cell {
             display: flex;
             align-items: center;
-            flex-wrap: nowrap;
             gap: 4px;
-            overflow: hidden;
         }
         .bbox-lbl {
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 700;
             color: var(--text-muted);
-            min-width: 12px;
+            min-width: 14px;
         }
         .bbox-input {
-            width: 56px;
+            flex: 1;
             min-width: 0;
-            padding: 2px 3px;
+            padding: 3px 5px;
             background: var(--bg-mid);
             border: 1px solid var(--border-light);
             border-radius: 3px;
             color: #e0e0e0;
-            font-size: 11px;
+            font-size: 12px;
             font-family: monospace;
         }
         .bbox-input:focus {
             border-color: #4a8ae8;
             outline: none;
         }
+        /* Row 2: action buttons + colorbar */
+        .bbox-action-row {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
         .bbox-reload-btn {
-            margin-left: 2px;
-            padding: 2px 6px;
+            padding: 3px 7px;
             background: #2e6da4;
             color: #fff;
             border: none;
@@ -1405,17 +1451,35 @@
             flex-shrink: 0;
         }
         .bbox-reload-btn:hover { background: #3a80c0; }
+        .bbox-map-btn  { background: #335566; }
+        .bbox-map-btn:hover  { background: #446688; }
+        .bbox-save-btn { background: #2a5; }
+        .bbox-save-btn:hover { background: #3b6; }
+        .bbox-settings-btn { padding: 3px 6px; }
+        .bbox-divider {
+            width: 1px;
+            height: 14px;
+            background: #444;
+            flex-shrink: 0;
+        }
+        .bbox-colorbar {
+            flex: 1;
+            min-width: 30px;
+            height: 14px;
+            border-radius: 2px;
+            overflow: hidden;
+        }
         .bbox-elev-range {
-            margin-top: 3px;
+            flex-shrink: 0;
             font-size: 10px;
             color: var(--text-dim);
+            white-space: nowrap;
         }
 
         #colorbar {
             width: 100%;
-            height: 26px;   /* LP3: taller = readable elevation labels */
             background: linear-gradient(to right, #006400, #8B4513, #ffffff);
-            /* default terrain approximation */
+            /* default terrain approximation; height controlled by .bbox-colorbar */
         }
 
         #histogram canvas {

@@ -7,7 +7,7 @@
 ```bash
 cd strm2stl && source ../.venv/bin/activate
 python ui/server.py          # starts FastAPI on port 9000
-python -m pytest tests/ -v   # run all 54 tests
+python -m pytest tests/ -v   # run all 108 tests (7 test files)
 ```
 
 ## When to Read What
@@ -59,7 +59,7 @@ strm2stl/
 │       ├── app.js         ← ~8300-line plain script (state + DOMContentLoaded)
 │       ├── main.js        ← ES module entry (imports all modules in order)
 │       └── modules/       ← 30 ES modules in 8 subdirs (see docs/modules.md)
-└── tests/                 ← pytest suite (conftest.py + 6 test files)
+└── tests/                 ← pytest suite (conftest.py + 7 test files, 108 tests)
 ```
 
 ## Editing Rules

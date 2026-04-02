@@ -202,10 +202,11 @@ New module: `ui/static/js/modules/composite-dem.js`
 
 Responsibilities:
 - Contribution computation functions (water, city, landcover, satellite)
-- `computeCompositeDem()` — orchestrator
-- `renderCompositeDemLayer()` — renders to canvas
+- `computeCompositeDem()` — orchestrator (also handles rendering inline; `renderCompositeDemLayer` was not extracted as a separate export)
 - `setupCompositeDemControls()` — wire UI sliders
 - Event subscriptions: auto-recompute when `lastDemData`, `lastWaterMaskData`, `osmCityData` change
+
+> **Implementation note:** `renderCompositeDemLayer()` was originally planned as a standalone export but rendering was kept inline within `computeCompositeDem()` via `_renderCompositeCanvas()`. See `layers/composite-dem.js` for actual implementation.
 
 ---
 

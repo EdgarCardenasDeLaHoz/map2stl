@@ -39,9 +39,9 @@ function initCompareMode() {
     const leftSel  = document.getElementById('compareInlineLeft');
     const rightSel = document.getElementById('compareInlineRight');
     if (leftSel && !leftSel._wired) {
-        leftSel._wired    = true;
-        leftSel.onchange  = () => renderCompareLayer('left');
-        rightSel.onchange = () => renderCompareLayer('right');
+        leftSel._wired = true;
+        leftSel.addEventListener('change',  () => renderCompareLayer('left'));
+        rightSel.addEventListener('change', () => renderCompareLayer('right'));
     }
 }
 
@@ -173,10 +173,10 @@ function updateRegionParamsTable(region) {
         { key: 'south',      label: 'South',            value: region.south || '',                                          type: 'number', step: '0.0001' },
         { key: 'east',       label: 'East',             value: region.east  || '',                                          type: 'number', step: '0.0001' },
         { key: 'west',       label: 'West',             value: region.west  || '',                                          type: 'number', step: '0.0001' },
-        { key: 'dim',        label: 'Dimension',        value: document.getElementById('paramDim')?.value        || 200,    type: 'number', min: 50, max: 1000 },
-        { key: 'depth_scale',label: 'Depth Scale',      value: document.getElementById('paramDepthScale')?.value || 0.5,   type: 'number', step: '0.1' },
-        { key: 'water_scale',label: 'Water Scale',      value: document.getElementById('paramWaterScale')?.value || 0.05,  type: 'number', step: '0.01' },
-        { key: 'sat_scale',  label: 'Satellite Scale',  value: document.getElementById('paramSatScale')?.value   || 500,   type: 'number', min: 100, max: 5000 }
+        { key: 'dim',        label: 'Dimension',        value: document.getElementById('paramDim')?.value || 200,           type: 'number', min: 50, max: 1000 },
+        { key: 'depth_scale',label: 'Depth Scale',      value: window.appState.demParams.depthScale,                       type: 'number', step: '0.1' },
+        { key: 'water_scale',label: 'Water Scale',      value: window.appState.demParams.waterScale,                       type: 'number', step: '0.01' },
+        { key: 'sat_scale',  label: 'Satellite Scale',  value: window.appState.demParams.satScale,                         type: 'number', min: 100, max: 5000 }
     ];
     tbody.innerHTML = params.map(p => `
         <tr>
@@ -202,17 +202,14 @@ function applyRegionParams() {
         const p = input.dataset.param;
         const v = input.value;
         switch (p) {
-            case 'dim':         document.getElementById('paramDim')?.setAttribute('value', v);        break;
-            case 'depth_scale': document.getElementById('paramDepthScale')?.setAttribute('value', v); break;
-            case 'water_scale': document.getElementById('paramWaterScale')?.setAttribute('value', v); break;
-            case 'sat_scale':   document.getElementById('paramSatScale')?.setAttribute('value', v);   break;
+            case 'dim':         { const el = document.getElementById('paramDim'); if (el) el.value = v; } break;
+            case 'depth_scale': window.appState.demParams.depthScale = parseFloat(v); break;
+            case 'water_scale': window.appState.demParams.waterScale = parseFloat(v); break;
+            case 'sat_scale':   window.appState.demParams.satScale   = parseInt(v);   break;
             case 'north': case 'south': case 'east': case 'west':
                 if (region) region[p] = parseFloat(v);
                 break;
         }
-        // Also set .value directly for live inputs
-        const el = document.getElementById({ dim: 'paramDim', depth_scale: 'paramDepthScale', water_scale: 'paramWaterScale', sat_scale: 'paramSatScale' }[p]);
-        if (el) el.value = v;
     });
 
     window.showToast('Parameters applied! Loading layers...', 'success');

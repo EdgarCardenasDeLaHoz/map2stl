@@ -224,13 +224,9 @@ window.clearServerCache = async function clearServerCache() {
  * Wire cache management button click handlers and start the status refresh interval.
  */
 window.setupCacheManagement = function setupCacheManagement() {
-    const preloadBtn = document.getElementById('preloadRegionsBtn');
-    const clearClientBtn = document.getElementById('clearClientCacheBtn');
-    const clearServerBtn = document.getElementById('clearServerCacheBtn');
-
-    if (preloadBtn) preloadBtn.onclick = window.preloadAllRegions;
-    if (clearClientBtn) clearClientBtn.onclick = window.clearClientCache;
-    if (clearServerBtn) clearServerBtn.onclick = window.clearServerCache;
+    document.getElementById('preloadRegionsBtn')?.addEventListener('click', window.preloadAllRegions);
+    document.getElementById('clearClientCacheBtn')?.addEventListener('click', window.clearClientCache);
+    document.getElementById('clearServerCacheBtn')?.addEventListener('click', window.clearServerCache);
 
     window.updateCacheStatusUI();
     window.fetchServerCacheStatus();

@@ -58,10 +58,8 @@ window._setupModelExportListeners = function _setupModelExportListeners() {
 };
 
 window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
-    const loadCityBtn = document.getElementById('loadCityDataBtn');
-    if (loadCityBtn) loadCityBtn.onclick = () => window.loadCityData?.();
-    const clearCityBtn = document.getElementById('clearCityDataBtn');
-    if (clearCityBtn) clearCityBtn.onclick = () => window.clearCityOverlay?.();
+    document.getElementById('loadCityDataBtn')?.addEventListener('click', () => window.loadCityData?.());
+    document.getElementById('clearCityDataBtn')?.addEventListener('click', () => window.clearCityOverlay?.());
 
     ['Buildings', 'Roads', 'Waterways', 'Walls', 'Towers', 'Churches', 'Forts', 'Pois'].forEach(layer => {
         const toggle = document.getElementById(`layer${layer}Toggle`);

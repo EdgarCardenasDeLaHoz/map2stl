@@ -13,38 +13,35 @@
  *   window.setupEventListeners()
  */
 
+// Named so addEventListener deduplicates if setupEventListeners is called more than once
+function _onCollapsibleClick(e) {
+    const header = e.target.closest('.collapsible-header');
+    if (header) window.toggleCollapsible?.(header);
+}
+
 window.setupEventListeners = function setupEventListeners() {
     // Tab buttons
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', () => window.switchView?.(tab.dataset.view));
     });
 
+    // Collapsible section headers — event delegation replaces inline onclick="toggleCollapsible(this)"
+    document.addEventListener('click', _onCollapsibleClick);
+
     // Control buttons
-    document.getElementById('loadRegionBtn').onclick = () => window.loadSelectedRegion?.();
-    document.getElementById('saveRegionBtn').onclick = () => window.saveCurrentRegion?.();
-    document.getElementById('submitBtn').onclick = () => window.submitBoundingBox?.();
+    document.getElementById('loadRegionBtn')?.addEventListener('click', () => window.loadSelectedRegion?.());
+    document.getElementById('saveRegionBtn')?.addEventListener('click', () => window.saveCurrentRegion?.());
+    document.getElementById('submitBtn')?.addEventListener('click', () => window.submitBoundingBox?.());
 
     window._setupBboxListeners?.();
 
-    const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
-    if (sidebarToggleBtn) sidebarToggleBtn.onclick = () => window.cycleSidebarState?.();
+    document.getElementById('sidebarToggleBtn')?.addEventListener('click', () => window.cycleSidebarState?.());
+    document.getElementById('bboxVisToggleBtn')?.addEventListener('click', () => window.toggleBboxLayerVisibility?.());
 
-    const bboxVisToggleBtn = document.getElementById('bboxVisToggleBtn');
-    if (bboxVisToggleBtn) bboxVisToggleBtn.onclick = () => window.toggleBboxLayerVisibility?.();
-
-    const sidebarTableSearch = document.getElementById('sidebarTableSearch');
-    if (sidebarTableSearch) {
-        sidebarTableSearch.addEventListener('input', () => window.renderSidebarTable?.(sidebarTableSearch.value));
-    }
-
-    const statusToggleBtn = document.getElementById('statusToggleBtn');
-    if (statusToggleBtn) statusToggleBtn.onclick = () => window.toggleStatusPanel?.();
-
-    const applyParamsBtn = document.getElementById('applyParamsBtn');
-    if (applyParamsBtn) applyParamsBtn.onclick = () => window.applyRegionParams?.();
-
-    const clearBboxBtn = document.getElementById('clearBboxBtn');
-    if (clearBboxBtn) clearBboxBtn.onclick = () => window.clearAllBoundingBoxes?.();
+    document.getElementById('sidebarTableSearch')?.addEventListener('input', e => window.renderSidebarTable?.(e.target.value));
+    document.getElementById('statusToggleBtn')?.addEventListener('click', () => window.toggleStatusPanel?.());
+    document.getElementById('applyParamsBtn')?.addEventListener('click', () => window.applyRegionParams?.());
+    document.getElementById('clearBboxBtn')?.addEventListener('click', () => window.clearAllBoundingBoxes?.());
 
     window._setupModelExportListeners?.();
     window._setupMapAndDemListeners?.();
@@ -55,6 +52,13 @@ window.setupEventListeners = function setupEventListeners() {
     window.setupCoordinateSearch?.();
     window.setupRegionsTable?.();
     window.setupKeyboardShortcuts?.();
+
+    // Compare view — region load, colormap, exaggeration
+    for (const side of ['Left', 'Right']) {
+        document.getElementById(`compare${side}Region`)?.addEventListener('change', () => window.loadCompareRegion?.(side.toLowerCase()));
+        document.getElementById(`compare${side}Colormap`)?.addEventListener('change', () => window.applyCompareColormap?.(side.toLowerCase()));
+        document.getElementById(`compare${side}Exag`)?.addEventListener('change', () => window.updateCompareExagLabel?.(side.toLowerCase()));
+    }
 
     window._setupResizablePanel?.();
 

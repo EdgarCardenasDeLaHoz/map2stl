@@ -216,22 +216,19 @@ function viewRegionOnMap(index) {
 function setupRegionsTable() {
     const searchInput = document.getElementById('regionsSearch');
     if (searchInput) {
-        searchInput.oninput = (e) => {
+        searchInput.addEventListener('input', (e) => {
             const query = e.target.value.toLowerCase();
             document.querySelectorAll('#regionsTableBody tr').forEach(row => {
                 row.style.display = row.textContent.toLowerCase().includes(query) ? '' : 'none';
             });
-        };
+        });
     }
 
-    const refreshBtn = document.getElementById('refreshRegionsBtn');
-    if (refreshBtn) {
-        refreshBtn.onclick = async () => {
-            await window.loadCoordinates?.();
-            populateRegionsTable();
-            window.showToast('Regions refreshed', 'success');
-        };
-    }
+    document.getElementById('refreshRegionsBtn')?.addEventListener('click', async () => {
+        await window.loadCoordinates?.();
+        populateRegionsTable();
+        window.showToast('Regions refreshed', 'success');
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -266,6 +263,8 @@ function initRegionNotes() {
     const modal = document.getElementById('regionNotesModal');
     if (modal) {
         modal.addEventListener('click', (e) => { if (e.target === modal) hideNotesModal(); });
+        modal.querySelector('[data-action="notes-cancel"]')?.addEventListener('click', hideNotesModal);
+        modal.querySelector('[data-action="notes-save"]')?.addEventListener('click', saveRegionNotes);
     }
 
     document.addEventListener('keydown', (e) => {

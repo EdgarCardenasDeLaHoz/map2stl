@@ -255,34 +255,27 @@ window.loadCityData = async function loadCityData() {
         const minArea     = parseFloat(document.getElementById('cityMinArea')?.value) || 5.0;
 
         // Check cache using the same key params as the actual data endpoint
-        const cacheResp = await fetch(
-            `/api/cities/cached?north=${selectedRegion.north}&south=${selectedRegion.south}` +
-            `&east=${selectedRegion.east}&west=${selectedRegion.west}` +
-            `&simplify_tolerance=${simplifyTol}&min_area=${minArea}`
-        );
-        const cacheInfo = await cacheResp.json();
-        if (statusEl) statusEl.textContent = cacheInfo.cached ? 'Loading from cache…' : 'Fetching from OpenStreetMap…';
+        const cacheParams = new URLSearchParams({
+            north: selectedRegion.north, south: selectedRegion.south,
+            east: selectedRegion.east, west: selectedRegion.west,
+            simplify_tolerance: simplifyTol, min_area: minArea
+        });
+        const { data: cacheInfo } = await window.api.cities.cached(cacheParams);
+        if (statusEl) statusEl.textContent = cacheInfo?.cached ? 'Loading from cache…' : 'Fetching from OpenStreetMap…';
 
-        const resp = await fetch('/api/cities', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                north: selectedRegion.north, south: selectedRegion.south,
-                east:  selectedRegion.east,  west:  selectedRegion.west,
-                layers,
-                simplify_tolerance: simplifyTol,
-                min_area: minArea
-            })
+        const { data, error: cityErr } = await window.api.cities.fetch({
+            north: selectedRegion.north, south: selectedRegion.south,
+            east:  selectedRegion.east,  west:  selectedRegion.west,
+            layers,
+            simplify_tolerance: simplifyTol,
+            min_area: minArea
         });
 
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({}));
-            window.showToast?.('OSM error: ' + (err.error || resp.status), 'error');
+        if (cityErr) {
+            window.showToast?.('OSM error: ' + cityErr, 'error');
             if (statusEl) statusEl.textContent = 'Failed.';
             return;
         }
-
-        const data = await resp.json();
 
         // Merge towers, churches, fortifications polygon features into buildings
         for (const key of ['towers', 'churches', 'fortifications']) {
@@ -307,6 +300,7 @@ window.loadCityData = async function loadCityData() {
         _computeTerrainZ(data.walls,     demData);
         window.appState.osmCityData = data;
         window._invalidateCityCache();   // new data → force full re-render
+        window.loadCityRaster?.();       // auto-load raster view (fast, server-side)
 
         _updateCityLayerCount('buildings',  data.buildings?.features?.length);
         _updateCityLayerCount('roads',      data.roads?.features?.length);

@@ -40,13 +40,20 @@
 |--------|------|-------------|
 | GET | `/api/cities/cached` | Check if OSM bbox is cached |
 | POST | `/api/cities` | Fetch OSM data (rejects >15 km diagonal); cached as `.json.gz` |
+| POST | `/api/cities/raster` | Rasterize OSM buildings/roads/waterways to a DEM-format height map (`values`, `width`, `height`, `vmin`, `vmax`) — used by `loadCityRaster()` in `city-render.js` |
 | POST | `/api/cities/export3mf` | Generate 3MF with terrain + building prisms |
+
+> **Two city rasterization endpoints exist:**
+> - `/api/cities/raster` — returns a flat height map in DEM format (direct canvas rendering via `city-render.js`)
+> - `/api/composite/city-raster` — returns per-feature height-delta arrays used by the composite DEM pipeline
+>
+> They serve different consumers: the first is for the CityRaster layer view; the second feeds `composite-dem.js`.
 
 ## Composite Routes (`ui/routers/composite.py`)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/composite/city-raster` | Rasterize OSM features to height-delta arrays (PIL, ~50× faster than JS) |
+| POST | `/api/composite/city-raster` | Rasterize OSM features to height-delta arrays (PIL, ~50× faster than JS) — used by `composite-dem.js` |
 
 ## Cache & Settings (`ui/routers/cache.py`, `settings.py`)
 

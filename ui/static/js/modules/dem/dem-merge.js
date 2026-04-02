@@ -278,21 +278,16 @@ function _syncMergeFromCurrentLayers() {
 
 function _refreshPipelinePanel() {
     const get = id => document.getElementById(id);
-    const pairs = [
-        ['pipelineDim', 'paramDim'],
-        ['pipelineDepthScale', 'paramDepthScale'],
-        ['pipelineWaterScale', 'paramWaterScale'],
-        ['pipelineHeight', 'paramHeight'],
-        ['pipelineBase', 'paramBase'],
-        ['pipelineSatScale', 'paramSatScale'],
-    ];
-    for (const [pipeId, paramId] of pairs) {
-        const pEl = get(pipeId); const hEl = get(paramId);
-        if (pEl && hEl && hEl.value) pEl.value = hEl.value;
-    }
+    const p = window.appState.demParams;
+    const setVal = (id, v) => { const el = get(id); if (el && v != null) el.value = v; };
+    setVal('pipelineDim',        get('paramDim')?.value);
+    setVal('pipelineDepthScale', p.depthScale);
+    setVal('pipelineWaterScale', p.waterScale);
+    setVal('pipelineHeight',     p.height);
+    setVal('pipelineBase',       p.base);
+    setVal('pipelineSatScale',   p.satScale);
     const swPipe = get('pipelineSubtractWater');
-    const swParam = get('paramSubtractWater');
-    if (swPipe && swParam) swPipe.checked = swParam.value !== 'false';
+    if (swPipe) swPipe.checked = p.subtractWater;
     const srcPipe = get('pipelineSource');
     const srcParam = get('paramDemSource');
     if (srcPipe && srcParam) srcPipe.value = srcParam.value;
@@ -304,26 +299,33 @@ function _refreshPipelinePanel() {
 
 function setupMergePanel() {
     const get = id => document.getElementById(id);
-    const pipelineBindings = [
-        ['pipelineDim', 'paramDim', null],
-        ['pipelineDepthScale', 'paramDepthScale', 'modelDepthScale'],
-        ['pipelineWaterScale', 'paramWaterScale', 'modelWaterScale'],
-        ['pipelineHeight', 'paramHeight', null],
-        ['pipelineBase', 'paramBase', 'modelBaseHeight'],
-        ['pipelineSatScale', 'paramSatScale', null],
+    // Pipeline dim and source write to DOM inputs (paramDim, paramDemSource are kept)
+    const dimPipe = get('pipelineDim');
+    if (dimPipe) dimPipe.addEventListener('change', () => {
+        const h = get('paramDim'); if (h) h.value = dimPipe.value;
+    });
+
+    // Pipeline numeric params write to appState.demParams
+    const numericBindings = [
+        ['pipelineDepthScale', 'depthScale', 'modelDepthScale'],
+        ['pipelineWaterScale', 'waterScale', 'modelWaterScale'],
+        ['pipelineHeight',     'height',     null],
+        ['pipelineBase',       'base',       'modelBaseHeight'],
+        ['pipelineSatScale',   'satScale',   null],
     ];
-    for (const [pipeId, paramId, mirrorId] of pipelineBindings) {
+    for (const [pipeId, stateKey, mirrorId] of numericBindings) {
         const pEl = get(pipeId);
         if (!pEl) continue;
         pEl.addEventListener('change', () => {
-            const h = get(paramId); if (h) h.value = pEl.value;
+            const v = parseFloat(pEl.value);
+            if (!isNaN(v)) window.appState.demParams[stateKey] = v;
             if (mirrorId) { const m = get(mirrorId); if (m) m.value = pEl.value; }
         });
     }
     const swPipe = get('pipelineSubtractWater');
     if (swPipe) {
         swPipe.addEventListener('change', () => {
-            const h = get('paramSubtractWater'); if (h) h.value = String(swPipe.checked);
+            window.appState.demParams.subtractWater = swPipe.checked;
             const m = get('modelSubtractWater'); if (m) m.checked = swPipe.checked;
         });
     }

@@ -8,6 +8,7 @@
  *   Ctrl+Z/Y      — undo / redo curve
  *   Escape        — clear all bounding boxes
  *   Arrow Up/Down — navigate region list
+ *   G             — toggle pixel/geo grid mode
  *
  * Exposes on window:
  *   window.setupKeyboardShortcuts()
@@ -60,6 +61,10 @@ window.setupKeyboardShortcuts = function setupKeyboardShortcuts() {
 
         if (e.key === 'Escape') {
             window.clearAllBoundingBoxes?.();
+        }
+
+        if (e.key === 'g' || e.key === 'G') {
+            document.getElementById('gridPixelModeBtn')?.click();
         }
 
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {

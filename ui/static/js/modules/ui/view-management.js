@@ -335,11 +335,11 @@ window.saveCurrentRegion = async function saveCurrentRegion() {
         description: `Custom region: ${regionName}`,
         parameters:  {
             dim:            parseInt(document.getElementById('paramDim').value),
-            depth_scale:    parseFloat(document.getElementById('paramDepthScale').value),
-            water_scale:    parseFloat(document.getElementById('paramWaterScale').value),
-            height:         parseInt(document.getElementById('paramHeight').value),
-            base:           parseInt(document.getElementById('paramBase').value),
-            subtract_water: document.getElementById('paramSubtractWater').checked
+            depth_scale:    window.appState.demParams.depthScale,
+            water_scale:    window.appState.demParams.waterScale,
+            height:         window.appState.demParams.height,
+            base:           window.appState.demParams.base,
+            subtract_water: window.appState.demParams.subtractWater
         }
     };
 

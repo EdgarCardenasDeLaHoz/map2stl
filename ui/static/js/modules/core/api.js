@@ -88,7 +88,7 @@ window.api = (() => {
         waterMask: (params, signal) => _fetch(`/api/terrain/water-mask?${params}`, signal ? { signal } : {}),
 
         /** GET /api/terrain/satellite?{params} */
-        satellite: (params) => _fetch(`/api/terrain/satellite?${params}`),
+        satellite: (params, signal) => _fetch(`/api/terrain/satellite?${params}`, signal ? { signal } : {}),
 
         /** GET /api/terrain/sources */
         sources: () => _fetch('/api/terrain/sources'),
@@ -109,6 +109,9 @@ window.api = (() => {
 
         /** POST /api/export/crosssection → blob */
         crossSection: (body) => _fetch('/api/export/crosssection', _json(body)),
+
+        /** POST /api/export/preview → mesh data for 3D viewer */
+        preview: (body) => _fetch('/api/export/preview', _json(body)),
     };
 
     // -------------------------------------------------------------------------
@@ -117,6 +120,9 @@ window.api = (() => {
     const cities = {
         /** POST /api/cities */
         fetch: (body) => _fetch('/api/cities', _json(body)),
+
+        /** GET /api/cities/cached?{params} */
+        cached: (params) => _fetch(`/api/cities/cached?${params}`),
 
         /** POST /api/cities/raster */
         raster: (body) => _fetch('/api/cities/raster', _json(body)),

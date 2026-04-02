@@ -16,6 +16,29 @@
 
 let stackZoom = { scale: 1, offsetX: 0, offsetY: 0 };
 let stackZoomInitialized = false;
+let _gridCacheKey = null;
+let _gridPixelMode = false;
+
+// Cached DOM references (populated lazily on first use)
+let _layerModeBtns = null;
+let _cachedDemCanvas = null;
+
+/** Toggle grid labels between lat/lon coordinates and pixel indices. */
+window.setGridPixelMode = function setGridPixelMode(on) {
+    _gridPixelMode = on;
+    _gridCacheKey = null; // force redraw
+    const sizeLabel = document.getElementById('demPixelSizeLabel');
+    if (sizeLabel) {
+        if (on) {
+            const d = window.appState?.lastDemData;
+            sizeLabel.textContent = d ? `DEM: ${d.width} × ${d.height} px` : 'DEM: — px';
+            sizeLabel.style.display = 'block';
+        } else {
+            sizeLabel.style.display = 'none';
+        }
+    }
+    window.drawLayerGrid?.();
+};
 
 // All layer canvas IDs — kept as hidden source buffers for other modules to write to
 const LAYER_STACK = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem'];
@@ -27,10 +50,16 @@ let _activeMode = 'CompositeDem';
 window.setStackMode = function setStackMode(mode) {
     if (!LAYER_STACK.includes(mode)) return;
     _activeMode = mode;
-    // Update button active states
-    document.querySelectorAll('#layerModeSelector .layer-mode-btn').forEach(btn => {
+    // Update button active states (cached NodeList)
+    if (!_layerModeBtns) _layerModeBtns = document.querySelectorAll('#layerModeSelector .layer-mode-btn');
+    _layerModeBtns.forEach(btn => {
         btn.classList.toggle('active', btn.dataset.mode === mode);
     });
+    // Auto-load satellite imagery if switching to SatImg with no data yet
+    if (mode === 'SatImg' && !window.appState?.satImgSourceCanvas) {
+        window.loadSatelliteRGBImage?.().then(() => window.updateStackedLayers?.());
+        return;
+    }
     window.updateStackedLayers?.();
 };
 
@@ -48,6 +77,23 @@ function _applyTransformCSS(xfm) {
     const osmOverlay = document.querySelector('#layersStack .osm-overlay');
     if (osmOverlay) { osmOverlay.style.transformOrigin = '0 0'; osmOverlay.style.transform = xfm; }
     if (window.appState) window.appState.stackZoom = stackZoom;
+}
+
+/**
+ * Pick a "nice" pixel interval targeting approximately `targetLines` grid lines
+ * across a DEM of `totalPixels` pixels.
+ * @param {number} totalPixels - DEM width or height in pixels
+ * @param {number} targetLines - Desired approximate number of grid lines
+ * @returns {number} Interval in pixel indices
+ */
+function nicePixelInterval(totalPixels, targetLines) {
+    const raw = totalPixels / targetLines;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    for (const mult of [1, 2, 5, 10]) {
+        const candidate = mag * mult;
+        if (totalPixels / candidate <= targetLines) return candidate;
+    }
+    return mag * 10;
 }
 
 /**
@@ -97,14 +143,6 @@ function formatCoord(val, isLat, interval) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Update the lat/lon axis label elements along the stacked layer view edges.
- * (Currently a no-op — labels are updated inside drawLayerGrid.)
- */
-window.updateLayerAxisLabels = function updateLayerAxisLabels() {
-    // Axis label update is handled inside drawLayerGrid — no-op here
-};
-
-/**
  * Copy rendered layer canvases into the stacked view, aligning them to a shared
  * aspect ratio derived from the current DEM bbox.
  * Calls applyStackedTransform, drawLayerGrid, and renderCityOverlay.
@@ -146,6 +184,11 @@ window.updateStackedLayers = function updateStackedLayers() {
             targetWidth  = stackHeight * bboxAspect;
             targetX      = (stackWidth - targetWidth) / 2;
         }
+    }
+
+    // Publish letterbox geometry so drawLayerGrid and tooltip can use it
+    if (window.appState) {
+        window.appState.demLayout = { x: targetX, y: targetY, w: targetWidth, h: targetHeight };
     }
 
     /**
@@ -197,8 +240,6 @@ window.updateStackedLayers = function updateStackedLayers() {
         }
     }
 
-    updateLayerAxisLabels();
-
     const gridCheckbox = document.getElementById('layerGridVisible');
     if (gridCheckbox && gridCheckbox.checked) drawLayerGrid();
 
@@ -224,6 +265,17 @@ window.drawLayerGrid = function drawLayerGrid() {
     const gw = rect.width;
     const gh = rect.height;
     if (gw === 0 || gh === 0) return;
+
+    const { currentDemBbox: bbox, lastDemData: demDataRef, demLayout: demLayoutRef } = window.appState || {};
+    const showGrid = !gridVisible || gridVisible.checked;
+    if (!bbox || !demCanvas || demCanvas.width === 0 || demCanvas.height === 0) return;
+
+    const { scale, offsetX, offsetY } = stackZoom;
+    const densityCheck = parseInt(document.getElementById('layerGridDensity')?.value || 10);
+    const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${showGrid}|${_gridPixelMode}`;
+    if (newKey === _gridCacheKey) return;
+    _gridCacheKey = newKey;
+
     gridCanvas.width  = gw;
     gridCanvas.height = gh;
 
@@ -232,81 +284,152 @@ window.drawLayerGrid = function drawLayerGrid() {
 
     if (yAxis) yAxis.innerHTML = '';
     if (xAxis) xAxis.innerHTML = '';
-
-    const bbox     = window.appState?.currentDemBbox;
-    const showGrid = !gridVisible || gridVisible.checked;
-    if (!bbox || !demCanvas || demCanvas.width === 0 || demCanvas.height === 0) return;
-
-    const { scale, offsetX, offsetY } = stackZoom;
-    const cw       = demCanvas.width;
-    const ch       = demCanvas.height;
-    const lonRange = bbox.east  - bbox.west;
-    const latRange = bbox.north - bbox.south;
-
-    const pxPerLon = (cw * scale) / lonRange;
-    const pxPerLat = (ch * scale) / latRange;
-
-    /** @param {number} lon @returns {number} Canvas x pixel */
-    function lonToX(lon) { return (lon - bbox.west) / lonRange * cw * scale + offsetX; }
-    /** @param {number} lat @returns {number} Canvas y pixel */
-    function latToY(lat) { return (bbox.north - lat) / latRange * ch * scale + offsetY; }
-
-    const densityVal  = parseInt(document.getElementById('layerGridDensity')?.value || 10);
-    const targetLines = Math.max(2, Math.round(densityVal / 2));
-
-    const lonInterval = niceGeoInterval(gw, pxPerLon, targetLines);
-    const latInterval = niceGeoInterval(gh, pxPerLat, targetLines);
+    const cw = demCanvas.width;
+    const ch = demCanvas.height;
 
     const gridColor = 'rgba(255, 255, 255, 0.2)';
     const tickColor = 'rgba(255, 255, 255, 0.5)';
     ctx.lineWidth = 1;
     ctx.font      = '9px monospace';
 
-    // Longitude (vertical) grid lines — batch label insertions via DocumentFragment
-    const xFrag = xAxis ? document.createDocumentFragment() : null;
-    const lonStart = Math.ceil((bbox.west - 1e-9) / lonInterval) * lonInterval;
-    for (let lon = lonStart; lon <= bbox.east + 1e-9; lon = Math.round((lon + lonInterval) * 1e8) / 1e8) {
-        const x = lonToX(lon);
-        if (x < -2 || x > gw + 2) continue;
-        if (showGrid) {
-            ctx.strokeStyle = gridColor;
-            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, gh); ctx.stroke();
-        }
-        ctx.strokeStyle = tickColor;
-        ctx.beginPath(); ctx.moveTo(x, 0);  ctx.lineTo(x, 6);      ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(x, gh); ctx.lineTo(x, gh - 6); ctx.stroke();
-        if (xFrag) {
-            const span = document.createElement('span');
-            span.className = 'axis-tick';
-            span.style.left = x + 'px';
-            span.textContent = formatCoord(lon, false, lonInterval);
-            xFrag.appendChild(span);
-        }
-    }
-    if (xAxis && xFrag) xAxis.appendChild(xFrag);
+    if (_gridPixelMode) {
+        // ── Pixel index mode ────────────────────────────────────────────────
+        // Axes show DEM pixel indices (0 … width/height) instead of lat/lon.
+        // The DEM is letterboxed inside the stack container at demLayout.{x,y,w,h}.
+        const demData    = demDataRef;
+        const demWidth   = demData?.width  || cw;
+        const demHeight  = demData?.height || ch;
+        const layout     = demLayoutRef || { x: 0, y: 0, w: cw, h: ch };
 
-    // Latitude (horizontal) grid lines — batch label insertions via DocumentFragment
-    const yFrag = yAxis ? document.createDocumentFragment() : null;
-    const latStart = Math.ceil((bbox.south - 1e-9) / latInterval) * latInterval;
-    for (let lat = latStart; lat <= bbox.north + 1e-9; lat = Math.round((lat + latInterval) * 1e8) / 1e8) {
-        const y = latToY(lat);
-        if (y < -2 || y > gh + 2) continue;
-        if (showGrid) {
-            ctx.strokeStyle = gridColor;
-            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(gw, y); ctx.stroke();
+        // pixel p maps to: letterbox origin + fraction-of-image * letterbox size,
+        // then scaled/panned by the current zoom transform.
+        /** @param {number} px @returns {number} Screen x for pixel column px */
+        function pixToScreenX(px) { return (layout.x + px / demWidth  * layout.w) * scale + offsetX; }
+        /** @param {number} py @returns {number} Screen y for pixel row py */
+        function pixToScreenY(py) { return (layout.y + py / demHeight * layout.h) * scale + offsetY; }
+
+        const targetLines = Math.max(2, Math.round(densityCheck / 2));
+        const xInterval = nicePixelInterval(demWidth,  targetLines);
+        const yInterval = nicePixelInterval(demHeight, targetLines);
+
+        // Vertical grid lines (pixel columns) — pre-compute visible pixel range
+        const xFrag = xAxis ? document.createDocumentFragment() : null;
+        const visPxStart = Math.max(0, Math.floor(((-2 - offsetX) / scale - layout.x) / layout.w * demWidth / xInterval) * xInterval);
+        const visPxEnd   = Math.min(demWidth, Math.ceil(((gw + 2 - offsetX) / scale - layout.x) / layout.w * demWidth));
+        for (let px = visPxStart; px <= visPxEnd; px += xInterval) {
+            const x = pixToScreenX(px);
+            if (x < -2 || x > gw + 2) continue;
+            if (showGrid) {
+                ctx.strokeStyle = gridColor;
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, gh); ctx.stroke();
+            }
+            ctx.strokeStyle = tickColor;
+            ctx.beginPath(); ctx.moveTo(x, 0);  ctx.lineTo(x, 6);      ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x, gh); ctx.lineTo(x, gh - 6); ctx.stroke();
+            if (xFrag) {
+                const span = document.createElement('span');
+                span.className = 'axis-tick';
+                span.style.left = x + 'px';
+                span.textContent = String(px);
+                xFrag.appendChild(span);
+            }
         }
-        ctx.strokeStyle = tickColor;
-        ctx.beginPath(); ctx.moveTo(0,  y); ctx.lineTo(6,      y); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(gw, y); ctx.lineTo(gw - 6, y); ctx.stroke();
-        if (yFrag) {
-            const span = document.createElement('span');
-            span.className = 'axis-tick';
-            span.style.top = y + 'px';
-            span.textContent = formatCoord(lat, true, latInterval);
-            yFrag.appendChild(span);
+        if (xAxis && xFrag) xAxis.appendChild(xFrag);
+
+        // Horizontal grid lines (pixel rows) — pre-compute visible pixel range
+        const yFrag = yAxis ? document.createDocumentFragment() : null;
+        const visPyStart = Math.max(0, Math.floor(((-2 - offsetY) / scale - layout.y) / layout.h * demHeight / yInterval) * yInterval);
+        const visPyEnd   = Math.min(demHeight, Math.ceil(((gh + 2 - offsetY) / scale - layout.y) / layout.h * demHeight));
+        for (let py = visPyStart; py <= visPyEnd; py += yInterval) {
+            const y = pixToScreenY(py);
+            if (y < -2 || y > gh + 2) continue;
+            if (showGrid) {
+                ctx.strokeStyle = gridColor;
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(gw, y); ctx.stroke();
+            }
+            ctx.strokeStyle = tickColor;
+            ctx.beginPath(); ctx.moveTo(0,  y); ctx.lineTo(6,      y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(gw, y); ctx.lineTo(gw - 6, y); ctx.stroke();
+            if (yFrag) {
+                const span = document.createElement('span');
+                span.className = 'axis-tick';
+                span.style.top = y + 'px';
+                span.textContent = String(py);
+                yFrag.appendChild(span);
+            }
         }
+        if (yAxis && yFrag) yAxis.appendChild(yFrag);
+
+    } else {
+        // ── Lat/lon coordinate mode (default) ───────────────────────────────
+        const lonRange = bbox.east  - bbox.west;
+        const latRange = bbox.north - bbox.south;
+        const pxPerLon = (cw * scale) / lonRange;
+        const pxPerLat = (ch * scale) / latRange;
+
+        /** @param {number} lon @returns {number} Canvas x pixel */
+        function lonToX(lon) { return (lon - bbox.west) / lonRange * cw * scale + offsetX; }
+        /** @param {number} lat @returns {number} Canvas y pixel */
+        function latToY(lat) { return (bbox.north - lat) / latRange * ch * scale + offsetY; }
+
+        const targetLines = Math.max(2, Math.round(densityCheck / 2));
+        const lonInterval = niceGeoInterval(gw, pxPerLon, targetLines);
+        const latInterval = niceGeoInterval(gh, pxPerLat, targetLines);
+
+        // Longitude (vertical) grid lines — batch label insertions via DocumentFragment
+        const xFrag = xAxis ? document.createDocumentFragment() : null;
+        // Pre-compute visible lon range from viewport edges to skip off-screen iterations
+        const visLonWest = bbox.west  + (-2 - offsetX) / (cw * scale) * lonRange;
+        const visLonEast = bbox.west  + (gw + 2 - offsetX) / (cw * scale) * lonRange;
+        const lonStart = Math.ceil((Math.max(bbox.west, visLonWest) - 1e-9) / lonInterval) * lonInterval;
+        const lonEnd   = Math.min(bbox.east, visLonEast) + 1e-9;
+        for (let lon = lonStart; lon <= lonEnd; lon = Math.round((lon + lonInterval) * 1e8) / 1e8) {
+            const x = lonToX(lon);
+            if (x < -2 || x > gw + 2) continue;
+            if (showGrid) {
+                ctx.strokeStyle = gridColor;
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, gh); ctx.stroke();
+            }
+            ctx.strokeStyle = tickColor;
+            ctx.beginPath(); ctx.moveTo(x, 0);  ctx.lineTo(x, 6);      ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x, gh); ctx.lineTo(x, gh - 6); ctx.stroke();
+            if (xFrag) {
+                const span = document.createElement('span');
+                span.className = 'axis-tick';
+                span.style.left = x + 'px';
+                span.textContent = formatCoord(lon, false, lonInterval);
+                xFrag.appendChild(span);
+            }
+        }
+        if (xAxis && xFrag) xAxis.appendChild(xFrag);
+
+        // Latitude (horizontal) grid lines — batch label insertions via DocumentFragment
+        const yFrag = yAxis ? document.createDocumentFragment() : null;
+        // Pre-compute visible lat range from viewport edges to skip off-screen iterations
+        const visLatNorth = bbox.north - (-2 - offsetY) / (ch * scale) * latRange;
+        const visLatSouth = bbox.north - (gh + 2 - offsetY) / (ch * scale) * latRange;
+        const latStart = Math.ceil((Math.max(bbox.south, visLatSouth) - 1e-9) / latInterval) * latInterval;
+        const latEnd   = Math.min(bbox.north, visLatNorth) + 1e-9;
+        for (let lat = latStart; lat <= latEnd; lat = Math.round((lat + latInterval) * 1e8) / 1e8) {
+            const y = latToY(lat);
+            if (y < -2 || y > gh + 2) continue;
+            if (showGrid) {
+                ctx.strokeStyle = gridColor;
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(gw, y); ctx.stroke();
+            }
+            ctx.strokeStyle = tickColor;
+            ctx.beginPath(); ctx.moveTo(0,  y); ctx.lineTo(6,      y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(gw, y); ctx.lineTo(gw - 6, y); ctx.stroke();
+            if (yFrag) {
+                const span = document.createElement('span');
+                span.className = 'axis-tick';
+                span.style.top = y + 'px';
+                span.textContent = formatCoord(lat, true, latInterval);
+                yFrag.appendChild(span);
+            }
+        }
+        if (yAxis && yFrag) yAxis.appendChild(yFrag);
     }
-    if (yAxis && yFrag) yAxis.appendChild(yFrag);
 
     if (yAxis) yAxis.style.height = gh + 'px';
 };
@@ -358,6 +481,7 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
     const stack = document.getElementById('layersStack');
     if (!stack || stackZoomInitialized) return;
     stackZoomInitialized = true;
+    _cachedDemCanvas = document.getElementById('layerDemCanvas');
 
     let isPanning = false;
     let startX, startY;
@@ -398,16 +522,19 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
         }
 
         const rect      = stack.getBoundingClientRect();
-        const demCanvas = document.getElementById('layerDemCanvas');
-        const lastDemData = window.appState?.lastDemData;
+        const demCanvas = _cachedDemCanvas;
+        const { lastDemData, demLayout, currentDemBbox } = window.appState || {};
         if (!demCanvas || !lastDemData) { stackTooltip.style.display = 'none'; return; }
 
         const mouseX  = e.clientX - rect.left;
         const mouseY  = e.clientY - rect.top;
+        // Undo zoom/pan to get position in unscaled container space
         const canvasX = (mouseX - stackZoom.offsetX) / stackZoom.scale;
         const canvasY = (mouseY - stackZoom.offsetY) / stackZoom.scale;
-        const normX   = canvasX / demCanvas.width;
-        const normY   = canvasY / demCanvas.height;
+        // Normalize relative to the letterboxed DEM rect, not the full container
+        const layout  = demLayout || { x: 0, y: 0, w: demCanvas.width, h: demCanvas.height };
+        const normX   = (canvasX - layout.x) / layout.w;
+        const normY   = (canvasY - layout.y) / layout.h;
 
         if (normX < 0 || normX > 1 || normY < 0 || normY > 1) {
             stackTooltip.style.display = 'none';
@@ -415,14 +542,14 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
         }
 
         const { width, height, values } = lastDemData;
-        const pixelX = Math.floor(normX * width);
-        const pixelY = Math.floor(normY * height);
+        const pixelX = Math.min(Math.floor(normX * width),  width  - 1);
+        const pixelY = Math.min(Math.floor(normY * height), height - 1);
         const idx    = pixelY * width + pixelX;
 
         if (idx >= 0 && idx < values.length) {
             const elevation = values[idx];
             let lat = '', lon = '';
-            const bbox = window.appState?.currentDemBbox;
+            const bbox = currentDemBbox;
             if (bbox) {
                 lat = (bbox.north - normY * (bbox.north - bbox.south)).toFixed(4);
                 lon = (bbox.west  + normX * (bbox.east  - bbox.west )).toFixed(4);
@@ -483,13 +610,6 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
         stackZoom.scale   = newScale;
         applyStackedTransform();
     });
-};
-
-/**
- * Alias for drawLayerGrid — kept for backward compatibility.
- */
-window.drawGridOverlay = function drawGridOverlay() {
-    drawLayerGrid();
 };
 
 // Listen for STACKED_UPDATE events (replaces scattered direct calls)

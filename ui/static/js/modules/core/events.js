@@ -32,9 +32,19 @@ window.events = {
     },
 };
 
-window.EV = {
+const _evConstants = {
     /** Fired when layer status badges should refresh. */
     STATUS_UPDATE: 'status:update',
     /** Fired when the stacked layers view should re-render. */
     STACKED_UPDATE: 'stacked:update',
 };
+
+// Proxy warns on access to unknown event names — catches typos at runtime.
+window.EV = new Proxy(_evConstants, {
+    get(target, key) {
+        if (typeof key === 'string' && !(key in target)) {
+            console.warn(`[events] Unknown event constant: EV.${key}`);
+        }
+        return target[key];
+    },
+});

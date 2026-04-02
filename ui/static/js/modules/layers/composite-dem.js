@@ -241,13 +241,29 @@ function _satelliteContribution(demW, demH) {
     return out;
 }
 
+// ─── Async yield helper ──────────────────────────────────────────────────────
+
+/**
+ * Yield to the browser event loop between expensive computation chunks.
+ * Uses scheduler.yield() when available (Chrome 115+), falls back to RAF.
+ */
+function _yieldToMain() {
+    if (typeof scheduler !== 'undefined' && scheduler.yield) return scheduler.yield();
+    return new Promise(resolve => requestAnimationFrame(resolve));
+}
+
 // ─── Orchestrator ────────────────────────────────────────────────────────────
+
+/** Cancel token — incremented on each new computeCompositeDem() call to abort stale runs. */
+let _computeGen = 0;
 
 /**
  * Recompute the composite DEM from base DEM + all layer contributions.
  * Renders result to the layerCompositeDemCanvas in the stacked view.
+ * Yields to the browser every ~10k pixels to avoid main-thread freezes.
  */
 window.computeCompositeDem = async function computeCompositeDem() {
+    const gen = ++_computeGen;
     const enabled = document.getElementById('compositeEnabled')?.checked;
     if (!enabled) {
         _compositeValues = null;
@@ -271,22 +287,28 @@ window.computeCompositeDem = async function computeCompositeDem() {
     // Start from base DEM (values is a plain Array; Float32Array constructor copies it)
     const composite = new Float32Array(values);
 
-    // Only compute contributions for non-zero weights (skip expensive work)
+    // Only compute contributions for non-zero weights (skip expensive work).
+    // Yield between each contribution so the browser can handle input events.
     let waterFeat = null, cityFeat = null, lcFeat = null, satFeat = null;
     if (params.waterWeight > 0) {
         try { waterFeat = _waterContribution(W, H); } catch (e) { console.warn('[composite] water:', e); }
+        await _yieldToMain(); if (gen !== _computeGen) return;
     }
     if (params.cityWeight > 0) {
         try {
             const cityRaster = await _fetchCityRaster(W, H);
+            if (gen !== _computeGen) return;
             cityFeat = _cityContributionFromRaster(cityRaster);
         } catch (e) { console.warn('[composite] city:', e); }
+        await _yieldToMain(); if (gen !== _computeGen) return;
     }
     if (params.landcoverWeight > 0) {
-        try { lcFeat  = _landcoverContribution(W, H); } catch (e) { console.warn('[composite] landcover:', e); }
+        try { lcFeat = _landcoverContribution(W, H); } catch (e) { console.warn('[composite] landcover:', e); }
+        await _yieldToMain(); if (gen !== _computeGen) return;
     }
     if (params.satWeight > 0) {
         try { satFeat = _satelliteContribution(W, H); } catch (e) { console.warn('[composite] satellite:', e); }
+        await _yieldToMain(); if (gen !== _computeGen) return;
     }
 
     // Store feature channels on appState for ML pipeline access (lazy — only non-null)
@@ -303,6 +325,8 @@ window.computeCompositeDem = async function computeCompositeDem() {
     _addWeightedFeature(composite, lcFeat,    params.landcoverWeight);
     _addWeightedFeature(composite, satFeat,   params.satWeight);
 
+    await _yieldToMain(); if (gen !== _computeGen) return;
+
     // Compute min/max
     let cMin = Infinity, cMax = -Infinity;
     for (let i = 0; i < composite.length; i++) {
@@ -315,6 +339,8 @@ window.computeCompositeDem = async function computeCompositeDem() {
     _compositeHeight = H;
     _compositeMin    = cMin;
     _compositeMax    = cMax;
+
+    await _yieldToMain(); if (gen !== _computeGen) return;
 
     // Render to a hidden source canvas (stacked-layers.js copies it to the DOM layer canvas)
     const rawCanvas = document.createElement('canvas');
@@ -389,9 +415,7 @@ window.applyCompositeToDem = function applyCompositeToDem() {
     const dem = window.appState?.lastDemData;
     if (!dem) return;
 
-    // renderDEMCanvas expects a plain Array (not Float32Array)
-    const newValues = Array.from(_compositeValues);
-    dem.values = newValues;
+    dem.values = _compositeValues;
     dem.min = _compositeMin;
     dem.max = _compositeMax;
     window.appState.lastDemData = dem;
