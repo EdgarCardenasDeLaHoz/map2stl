@@ -429,7 +429,10 @@
                         <!-- Empty state when no DEM loaded -->
                         <div id="demEmptyState" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:300px;color:#555;font-size:14px;gap:10px;">
                             <span style="font-size:36px;">🏔️</span>
-                            <span>Select a region and click <strong style="color:#888;">Load DEM</strong> to begin</span>
+                            <span>Select a region, then load terrain data to begin</span>
+                            <button id="emptyStateLoadBtn" class="btn btn-primary" style="margin-top:6px;padding:10px 28px;font-size:15px;" title="Load terrain elevation data for the selected region">
+                                ↺ Load DEM
+                            </button>
                         </div>
 
                         <!-- Stacked Layers View (napari-style) with axis labels -->

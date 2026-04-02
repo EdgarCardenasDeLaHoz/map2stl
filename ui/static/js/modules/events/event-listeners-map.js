@@ -312,6 +312,9 @@ window._setupBboxListeners = function _setupBboxListeners() {
         });
     });
 
+    // Empty-state Load DEM button — same action as bboxReloadBtn
+    document.getElementById('emptyStateLoadBtn')?.addEventListener('click', () => bboxReloadBtn?.click());
+
     document.getElementById('editBboxOnMapBtn')
         ?.addEventListener('click', () => window.toggleBboxMiniMap?.());
 

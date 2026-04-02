@@ -52,7 +52,7 @@
 - **UX-2** (`map/`) — add text labels to floating map buttons
 - **UX-3** (`map/`) — clarify sidebar 3-state toggle
 - **UX-5** (`ui/`) — make settings panel collapsed tab visible
-- **UX-6** (`ui/`) — promote Load DEM as primary CTA on empty state
+- ~~**UX-6**~~ — done (added large Load DEM button to empty state; triggers bboxReloadBtn)
 - **UX-12** (`ui/`) — replace inline styles with CSS classes (incremental)
 - **UX-M** (`layers/`) — lazy-allocate hidden layer canvases (GPU memory)
 

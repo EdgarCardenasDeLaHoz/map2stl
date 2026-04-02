@@ -22,7 +22,7 @@ When collapsed, the `⚙ Settings` tab at the bottom right is too subtle — use
 
 ---
 
-### [ ] UX-6 — Load DEM: promote as primary CTA on Edit tab
+### [x] UX-6 — Load DEM: promote as primary CTA on Edit tab
 **File:** `index.html`, `app.css`
 **Source:** Chrome audit finding 6
 
