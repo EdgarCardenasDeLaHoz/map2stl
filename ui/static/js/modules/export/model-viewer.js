@@ -5,7 +5,6 @@
  *
  * Public API (all on window):
  *   initModelViewer()                           — init Three.js scene
- *   createTerrainMesh(vals, w, h, exag)         — build PlaneGeometry mesh
  *   previewModelIn3D()                          — build/replace terrain in viewer
  *   haversineDiagKm(N, S, E, W)                — bbox diagonal in km
  *   updatePuzzlePreview()                       — draw puzzle cut lines in viewer
@@ -277,40 +276,6 @@ function resetViewerCamera() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mesh creation (legacy path — kept for non-API callers)
-// ─────────────────────────────────────────────────────────────────────────────
-
-function createTerrainMesh(demValues, width, height, exaggeration) {
-    const geometry = new THREE.PlaneGeometry(100, 100, width - 1, height - 1);
-    geometry.rotateX(-Math.PI / 2);
-
-    const positions = geometry.attributes.position.array;
-    const vmin  = demValues.reduce((a, b) => Math.min(a, b), Infinity);
-    const vmax  = demValues.reduce((a, b) => Math.max(a, b), -Infinity);
-    const range = vmax - vmin || 1;
-
-    for (let i = 0; i < demValues.length && i * 3 < positions.length; i++) {
-        positions[i * 3 + 1] = ((demValues[i] - vmin) / range) * 30 * exaggeration;
-    }
-    geometry.computeVertexNormals();
-
-    const material = new THREE.MeshStandardMaterial({
-        color: 0x8fbc8f, flatShading: false, side: THREE.DoubleSide,
-    });
-
-    const cmap = document.getElementById('viewerColormap')?.value || 'terrain';
-    const colors = [];
-    for (let i = 0; i < demValues.length; i++) {
-        const rgb = _elevColor((demValues[i] - vmin) / range, cmap);
-        colors.push(rgb[0], rgb[1], rgb[2]);
-    }
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    material.vertexColors = true;
-
-    return new THREE.Mesh(geometry, material);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Preview
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -559,7 +524,6 @@ function setViewerAutoRotate(val) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 window.initModelViewer      = initModelViewer;
-window.createTerrainMesh    = createTerrainMesh;
 window.previewModelIn3D     = previewModelIn3D;
 window.haversineDiagKm      = haversineDiagKm;
 window.updatePuzzlePreview  = updatePuzzlePreview;

@@ -78,7 +78,6 @@ Modules live in `ui/static/js/modules/` (subdirs). Use grep: `grep -rn "function
 | Function | Purpose |
 |----------|---------|
 | `initModelViewer()` | Three.js scene init |
-| `createTerrainMesh(vals,w,h,exag)` | PlaneGeometry from DEM values |
 | `previewModelIn3D()` | Render current DEM in 3D viewer |
 | `haversineDiagKm()` | Bbox diagonal in km |
 | `exportPuzzle3MF()` | Puzzle piece 3MF export |
