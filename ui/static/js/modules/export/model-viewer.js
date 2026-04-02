@@ -4,7 +4,6 @@
  * Loaded as a plain <script> before app.js.
  *
  * Public API (all on window):
- *   initModelViewer()                           — init Three.js scene
  *   previewModelIn3D()                          — build/replace terrain in viewer
  *   haversineDiagKm(N, S, E, W)                — bbox diagonal in km
  *   updatePuzzlePreview()                       — draw puzzle cut lines in viewer
@@ -523,7 +522,6 @@ function setViewerAutoRotate(val) {
 // Expose on window
 // ─────────────────────────────────────────────────────────────────────────────
 
-window.initModelViewer      = initModelViewer;
 window.previewModelIn3D     = previewModelIn3D;
 window.haversineDiagKm      = haversineDiagKm;
 window.updatePuzzlePreview  = updatePuzzlePreview;

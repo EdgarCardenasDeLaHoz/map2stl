@@ -330,10 +330,7 @@ function deleteSelectedPreset() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 window.initPresetProfiles          = initPresetProfiles;
-window.applyPreset                 = applyPreset;
-window.getCurrentSettings          = getCurrentSettings;
 window.collectAllSettings          = collectAllSettings;
 window.applyAllSettings            = applyAllSettings;
 window.saveRegionSettings          = saveRegionSettings;
 window.loadAndApplyRegionSettings  = loadAndApplyRegionSettings;
-window.updatePresetSelect          = updatePresetSelect;

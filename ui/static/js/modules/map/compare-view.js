@@ -221,7 +221,6 @@ function applyRegionParams() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 window.initCompareMode          = initCompareMode;
-window.renderCompareLayer       = renderCompareLayer;
 window.updateCompareCanvases    = updateCompareCanvases;
 window.loadCompareRegion        = loadCompareRegion;
 window.applyCompareColormap     = applyCompareColormap;

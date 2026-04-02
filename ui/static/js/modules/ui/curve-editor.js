@@ -537,13 +537,9 @@ function applyCurveSettings(points, presetName) {
 
 window.initCurveEditor        = initCurveEditor;
 window.setCurvePreset         = setCurvePreset;
-window.addCurvePoint          = addCurvePoint;
 window.drawCurve              = drawCurve;
 window.applyCurveTodem        = applyCurveTodem;
-window.applyCurveTodemSilent  = applyCurveTodemSilent;
 window.applyCurveSettings     = applyCurveSettings;
 window.undoCurve              = undoCurve;
 window.redoCurve              = redoCurve;
-window.interpolateCurve       = interpolateCurve;
-window.resetDemToOriginal     = resetDemToOriginal;
 window.curvePresets           = curvePresets;

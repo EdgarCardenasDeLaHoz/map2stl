@@ -8,11 +8,8 @@
  *   renderWaterMask(data)     — render water mask canvas
  *   renderEsaLandCover(data)  — render ESA land cover canvas
  *   renderCombinedView()      — composite DEM + water overlay
- *   loadSatelliteForTab()     — load ESA land cover for satellite sub-tab
- *   previewWaterSubtract()    — preview DEM with water lowered
- *   applyWaterSubtract()      — permanently apply water subtraction
- *   renderLandCoverLegend()   — render land cover colour-picker legend
- *   setupLandCoverEditor()    — wire land cover editor events
+ *   renderLandCoverLegend()   — internal: render land cover colour-picker legend
+ *   setupLandCoverEditor()    — internal: wire land cover editor events
  *   setupWaterMaskListeners() — wire water mask tab events
  *   getLastWaterMaskData()    — accessor for lastWaterMaskData
  *
@@ -406,8 +403,7 @@ function setupLandCoverEditor() {
 function setupWaterMaskListeners() {
     setupLandCoverEditor();
 
-    document.getElementById('applyWaterSubtractBtn')?.addEventListener('click', applyWaterSubtract);
-    document.getElementById('previewWaterSubtractBtn')?.addEventListener('click', previewWaterSubtract);
+    // applyWaterSubtract / previewWaterSubtract removed (unused feature)
 
     const waterScaleSlider = document.getElementById('waterScaleSlider');
     if (waterScaleSlider) {
@@ -448,8 +444,5 @@ window.loadWaterMask           = loadWaterMask;
 window.renderWaterMask         = renderWaterMask;
 window.renderEsaLandCover      = renderEsaLandCover;
 window.renderCombinedView      = renderCombinedView;
-window.renderLandCoverLegend   = renderLandCoverLegend;
-window.setupLandCoverEditor    = setupLandCoverEditor;
 window.setupWaterMaskListeners = setupWaterMaskListeners;
-window.getLastWaterMaskData    = () => lastWaterMaskData;
 window.clearLastWaterMaskData  = () => { lastWaterMaskData = null; window.appState.lastWaterMaskData = null; };

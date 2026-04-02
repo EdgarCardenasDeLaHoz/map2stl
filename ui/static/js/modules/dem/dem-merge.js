@@ -365,4 +365,3 @@ function setupMergePanel() {
 window._initDemSources = _initDemSources;
 window._refreshPipelinePanel = _refreshPipelinePanel;
 window.setupMergePanel = setupMergePanel;
-window._syncMergeFromCurrentLayers = _syncMergeFromCurrentLayers;
