@@ -37,6 +37,7 @@ let curveCanvas    = null;
 let curveCtx       = null;
 let activeCurvePreset = 'linear';
 let _curveLUT      = null;
+let _dragStartX    = null;
 
 const _CURVE_HISTORY_MAX = 30;
 let _curveHistory    = [];
@@ -52,6 +53,10 @@ const curvePresets = {
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+function _fmtElev(v) {
+    return Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v) + 'm';
+}
 
 function _syncCurvePoints() {
     window.appState.curvePoints = curvePoints;
@@ -169,7 +174,10 @@ function _setupCurveEventListeners() {
         const x = (e.clientX - rect.left) / rect.width;
         const y = 1 - (e.clientY - rect.top) / rect.height;
         draggingPoint = findCurvePointNear(x, y);
-        if (draggingPoint) _pushCurveHistory();
+        if (draggingPoint) {
+            _pushCurveHistory();
+            _dragStartX = draggingPoint.x;
+        }
         didDrag = false;
     });
 
@@ -187,11 +195,7 @@ function _setupCurveEventListeners() {
         let newX = rawX;
         if (isFirst) newX = 0;
         else if (isLast) newX = 1;
-        else {
-            const xMin = curvePoints[idx - 1].x + 0.005;
-            const xMax = curvePoints[idx + 1].x - 0.005;
-            newX = Math.max(xMin, Math.min(xMax, rawX));
-        }
+        else newX = _dragStartX ?? draggingPoint.x;
 
         const prevY = isFirst ? 0 : curvePoints[idx - 1].y;
         const nextY = isLast  ? 1 : curvePoints[idx + 1].y;
@@ -396,16 +400,40 @@ function drawCurve() {
         }
     });
 
+    // Axis tick labels
+    const vmin = window.appState?.curveDataVmin;
+    const vmax = window.appState?.curveDataVmax;
+    const hasElev = vmin != null && vmax != null && isFinite(vmin) && isFinite(vmax);
     curveCtx.fillStyle = '#888';
-    curveCtx.font = '10px sans-serif';
-    curveCtx.fillText('Low',  5,         h - 5);
-    curveCtx.fillText('High', w - 25,    12);
-    curveCtx.fillText('In',   w / 2 - 5, h - 5);
+    curveCtx.font = '9px monospace';
+    curveCtx.textAlign = 'center';
+    // X-axis labels (Input elevation) — 0%, 25%, 50%, 75%, 100%
+    for (let i = 0; i <= 4; i++) {
+        const t = i / 4;
+        const px = t * w;
+        const label = hasElev ? _fmtElev(vmin + t * (vmax - vmin)) : (t * 100 | 0) + '%';
+        if (i === 0) { curveCtx.textAlign = 'left'; curveCtx.fillText(label, 2, h - 3); curveCtx.textAlign = 'center'; }
+        else if (i === 4) { curveCtx.textAlign = 'right'; curveCtx.fillText(label, w - 2, h - 3); curveCtx.textAlign = 'center'; }
+        else curveCtx.fillText(label, px, h - 3);
+    }
+    // Y-axis labels (Output) — 25%, 50%, 75%, 100% (skip 0% to avoid overlap with X label)
+    curveCtx.textAlign = 'left';
+    for (let i = 1; i <= 4; i++) {
+        const t = i / 4;
+        const py = (1 - t) * h;
+        const label = hasElev ? _fmtElev(vmin + t * (vmax - vmin)) : (t * 100 | 0) + '%';
+        curveCtx.fillText(label, 2, py - 2);
+    }
+    // Rotated "Out" axis label
     curveCtx.save();
-    curveCtx.translate(12, h / 2);
-    curveCtx.rotate(-Math.PI / 2);
-    curveCtx.fillText('Out', 0, 0);
+    curveCtx.fillStyle = '#555';
+    curveCtx.font = '9px sans-serif';
+    curveCtx.translate(w - 4, h / 2);
+    curveCtx.rotate(Math.PI / 2);
+    curveCtx.textAlign = 'center';
+    curveCtx.fillText('← Output', 0, 0);
     curveCtx.restore();
+    curveCtx.textAlign = 'left';
 }
 
 function interpolateCurve(x) {
@@ -483,6 +511,14 @@ function applyCurveTodemSilent() {
     if (!lastDemData || !lastDemData.values || curvePoints.length < 2) return;
     const { remapped } = _applyCurrentCurve();
     lastDemData.values = remapped;
+    let newMin = Infinity, newMax = -Infinity;
+    for (const v of remapped) {
+        if (isFinite(v)) { if (v < newMin) newMin = v; if (v > newMax) newMax = v; }
+    }
+    if (isFinite(newMin) && isFinite(newMax)) {
+        lastDemData.vmin = newMin;
+        lastDemData.vmax = newMax;
+    }
     window.recolorDEM?.();
 }
 
