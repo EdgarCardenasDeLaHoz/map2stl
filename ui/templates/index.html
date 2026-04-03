@@ -762,49 +762,42 @@
                                 <span class="collapsible-icon">▼</span>
                             </div>
                             <div class="collapsible-content">
-                                <div id="histogram"></div>
-
-                                <div style="margin-top:10px;padding-top:8px;border-top:1px solid #444;">
-                                    <div style="font-size:10px;color:#888;margin-bottom:6px;" title="Drag control points to remap how elevation values are coloured. Right-click a point to delete it. The blue dashed line marks sea level (0 m).">
-                                        Elevation Curve Editor — drag points to remap · right-click to delete
+                                <!-- Curve canvas first — primary interactive element -->
+                                <div class="curve-editor">
+                                    <div class="curve-canvas-container" title="Left-click to add a point · Drag to move · Right-click to delete">
+                                        <canvas id="curveCanvas"></canvas>
                                     </div>
-                                    <div class="curve-editor">
-                                        <div class="curve-presets">
-                                            <button data-preset="linear" class="active" title="Straight 1:1 mapping — full elevation range used evenly">Linear</button>
-                                            <button data-preset="enhance-peaks" title="Boost contrast at high elevations — mountain peaks appear more defined">Peaks</button>
-                                            <button data-preset="compress-depths" title="Compress low-elevation range — useful for ocean/basin regions">Depths</button>
-                                            <button data-preset="s-curve" title="S-shaped curve — enhances mid-range contrast while compressing extremes">S-Curve</button>
-                                        </div>
-                                        <div class="curve-canvas-container" title="Left-click to add a point · Drag to move · Right-click to delete">
-                                            <canvas id="curveCanvas"></canvas>
-                                        </div>
-                                        <div class="curve-controls">
-                                            <button id="undoCurveBtn" class="btn btn-secondary"
-                                                style="padding:6px 10px;font-size:12px;"
-                                                title="Undo last curve change (Ctrl+Z)" disabled>
-                                                ⟵ Undo
-                                            </button>
-                                            <button id="redoCurveBtn" class="btn btn-secondary"
-                                                style="padding:6px 10px;font-size:12px;"
-                                                title="Redo last curve change (Ctrl+Y)" disabled>
-                                                Redo ⟶
-                                            </button>
-                                            <button id="applyCurveBtn" class="btn btn-primary"
-                                                style="padding:6px 12px;font-size:12px;"
-                                                title="Apply the elevation curve — remaps how heights are coloured without reloading data">
-                                                ✓ Apply
-                                            </button>
-                                            <button id="resetCurveBtn" class="btn btn-secondary"
-                                                style="padding:6px 12px;font-size:12px;"
-                                                title="Reset curve to a straight linear mapping and restore original colours">
-                                                ↺ Reset
-                                            </button>
-                                            <button id="seaLevelBufferBtn" class="btn btn-secondary"
-                                                style="padding:6px 12px;font-size:12px;"
-                                                title="Insert a sea-level shelf — compresses ocean depths to 30% and adds a sharp step at 0 m elevation. Only works when the region has sub-zero elevations.">
-                                                🌊 Sea Level
-                                            </button>
-                                        </div>
+                                    <div class="curve-presets" style="margin-top:6px;">
+                                        <button data-preset="linear" class="active" title="Straight 1:1 mapping — full elevation range used evenly">Linear</button>
+                                        <button data-preset="enhance-peaks" title="Boost contrast at high elevations — mountain peaks appear more defined">Peaks</button>
+                                        <button data-preset="compress-depths" title="Compress low-elevation range — useful for ocean/basin regions">Depths</button>
+                                        <button data-preset="s-curve" title="S-shaped curve — enhances mid-range contrast while compressing extremes">S-Curve</button>
+                                    </div>
+                                </div>
+
+                                <!-- Histogram below — reference data contextualising the curve -->
+                                <div id="histogram" style="margin-top:8px;"></div>
+
+                                <!-- Action buttons: history ops left, apply/reset right -->
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:6px;">
+                                    <div style="display:flex;gap:4px;">
+                                        <button id="undoCurveBtn" class="btn btn-secondary"
+                                            style="padding:6px 10px;font-size:12px;"
+                                            title="Undo last curve change (Ctrl+Z)" disabled>⟵ Undo</button>
+                                        <button id="redoCurveBtn" class="btn btn-secondary"
+                                            style="padding:6px 10px;font-size:12px;"
+                                            title="Redo last curve change (Ctrl+Y)" disabled>Redo ⟶</button>
+                                    </div>
+                                    <div style="display:flex;gap:4px;">
+                                        <button id="applyCurveBtn" class="btn btn-primary"
+                                            style="padding:6px 12px;font-size:12px;"
+                                            title="Apply the elevation curve — remaps how heights are coloured without reloading data">✓ Apply</button>
+                                        <button id="resetCurveBtn" class="btn btn-secondary"
+                                            style="padding:6px 12px;font-size:12px;"
+                                            title="Reset curve to a straight linear mapping and restore original colours">↺ Reset</button>
+                                        <button id="seaLevelBufferBtn" class="btn btn-secondary"
+                                            style="padding:6px 12px;font-size:12px;"
+                                            title="Insert a sea-level shelf — compresses ocean depths to 30% and adds a sharp step at 0 m elevation. Only works when the region has sub-zero elevations.">🌊 Sea Level</button>
                                     </div>
                                 </div>
                             </div>
