@@ -2,6 +2,7 @@
 
 > See `docs/` for architecture reference. Completed items: see `ui/static/FUNCTIONALITY_DOC.md`.
 > Per-module TODOs and improvement plans are in each module's `TODO.md`.
+> **AI-proposed features live in [`docs/proposals.md`](docs/proposals.md) — set status to `approved` there to queue implementation.**
 
 ---
 
@@ -15,7 +16,7 @@
 | `core/` | [`modules/core/TODO.md`](ui/static/js/modules/core/TODO.md) | ARCH4 (Vite), ARCH5 (Vitest) |
 | `events/` | [`modules/events/TODO.md`](ui/static/js/modules/events/TODO.md) | Event bus migration |
 | `map/` | [`modules/map/TODO.md`](ui/static/js/modules/map/TODO.md) | UX-1/2/3, MAP-2 accessibility |
-| `regions/` | [`modules/regions/TODO.md`](ui/static/js/modules/regions/TODO.md) | REG-1 pagination, REG-2 import/export |
+| `regions/` | [`modules/regions/TODO.md`](ui/static/js/modules/regions/TODO.md) | REG-1 pagination, REG-2 import/export (CLEAN-1–5 done) |
 | `export/` | [`modules/export/TODO.md`](ui/static/js/modules/export/TODO.md) | P6 elevation bands, EXP-1 progress |
 
 ---
@@ -33,6 +34,7 @@
 
 - **CLEAN-1** (`ui/`) — Replace remaining inline styles with CSS utility classes (UX-12, incremental)
 - **CLEAN-2** (`map/bbox-panel.js`) — MAP-2: add keyboard accessibility to bbox drag handles
+- ~~**CLEAN-1–5** (`regions/regions.js`) — done: inline onclick, haversineDiagKm fix, AUTO_SCALE constants, globe marker colors, JSDoc~~
 
 ---
 

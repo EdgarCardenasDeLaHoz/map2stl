@@ -9,7 +9,7 @@
 `boundingBox`, `drawnItems`, `coordinatesData`, `stackedLayerData`, `compareData`, etc. Not yet needed by any module so not mirrored. If a new module needs them, mirror via `window.appState` first.
 
 ### 3. `<script>` vs Module Boundary
-HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `addEventListener` in event-listeners.js). One intentional inline `onclick=` remains on the dev-only debug error overlay dismiss button. Converting app.js itself to a full ES module is not planned — keep public functions on `window.*`.
+HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `addEventListener` in event-listeners.js). One intentional inline `onclick=` remains on the dev-only debug error overlay dismiss button. The last non-intentional inline handler (`onclick="goToEdit()"` in regions.js divIcon) was replaced with a Leaflet `.on('click')` listener. Converting app.js itself to a full ES module is not planned — keep public functions on `window.*`.
 
 ## Feature Status
 
@@ -45,5 +45,11 @@ HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `a
 - FA2 ✅ — No duplicate functions between app.js and modules
 - Backend split ✅ — server.py + schemas.py + config.py + core/ + routers/
 - SQLite migration ✅ — data.db with WAL mode
+- Backend DEAD-1 ✅ — removed JSON fallback (~150 lines) from regions.py
+- Backend REFACTOR-1–5 ✅ — split fetch_osm_data, merge _fill_heights, split _rasterize_city, extract H5 tile helpers, satellite tile math
+- Backend EXTRACT-1 ✅ — fetch_water_mask extracted from terrain router to core/dem.py
+- Backend DEAD-2/4 ✅ — removed unused dim param and local import math from terrain.py
+- Frontend CLEAN-1–5 ✅ — regions.js: inline onclick, haversineDiagKm bug, AUTO_SCALE constants, globe marker colors, selectCoordinate JSDoc
+- Frontend DEM-CLEAN-1–3 ✅ — dem-main.js: extracted _applyDemResult, moved progress bar/cancel/sat-unavailable inline styles to CSS
 
 Full history: `ui/static/FUNCTIONALITY_DOC.md`

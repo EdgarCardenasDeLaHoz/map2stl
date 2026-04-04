@@ -28,6 +28,121 @@ let _demImageData = null;
 const _isArrayLike = (v) => Array.isArray(v) || ArrayBuffer.isView(v);
 
 // ---------------------------------------------------------------------------
+// _applyDemResult — post-fetch DEM rendering pipeline
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a successful DEM API response to the canvas and update all dependent UI.
+ * Called by loadDEM after a successful fetch. Not exposed on window.*.
+ *
+ * @param {Object} data            - Parsed API response with dem_values, dimensions, etc.
+ * @param {number} north/south/east/west - Bbox bounds for the loaded DEM
+ */
+function _applyDemResult(data, north, south, east, west) {
+    let demVals = data.dem_values;
+    let h = Number(data.dimensions[0]);
+    let w = Number(data.dimensions[1]);
+
+    // Handle nested arrays
+    if (Array.isArray(demVals) && demVals.length && Array.isArray(demVals[0])) {
+        h = demVals.length;
+        w = demVals[0].length;
+        demVals = demVals.flat();
+    }
+
+    const colormap   = document.getElementById('demColormap').value;
+    const finiteVals = demVals.filter(Number.isFinite);
+    const calcMin    = finiteVals.length ? finiteVals.reduce((a, b) => a < b ? a : b, finiteVals[0]) : 0;
+    const calcMax    = finiteVals.length ? finiteVals.reduce((a, b) => a > b ? a : b, finiteVals[0]) : 1;
+    const vmin       = data.min_elevation !== undefined ? data.min_elevation : calcMin;
+    const vmax       = data.max_elevation !== undefined ? data.max_elevation : calcMax;
+
+    // Store bounding box for gridlines
+    window.appState.currentDemBbox = { north, south, east, west };
+
+    // Render DEM canvas
+    const rawCanvas = window.renderDEMCanvas?.(demVals, w, h, colormap, vmin, vmax);
+    const canvas    = window.applyProjection?.(rawCanvas, { north, south, east, west });
+    const container = document.getElementById('demImage');
+    container.innerHTML = '';
+    container.appendChild(canvas);
+    // Fill container width, preserve aspect ratio
+    canvas.style.width = '100%';
+    canvas.style.height = 'auto';
+    container.style.position = 'relative';
+
+    // Update overlays
+    window.updateAxesOverlay?.(window.appState.currentDemBbox);
+    window.drawColorbar?.(vmin, vmax, colormap);
+    window.drawHistogram?.(demVals);
+
+    // Draw gridlines after canvas is appended and sized
+    requestAnimationFrame(() => window.drawGridlinesOverlay?.('demImage'));
+
+    // Update stacked layers view
+    requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+
+    // Populate bbox fine-tune inputs
+    window.setBboxInputValues?.(north, south, east, west);
+    const elevRange = document.getElementById('bboxElevRange');
+    if (elevRange) elevRange.textContent = `Elevation: ${vmin.toFixed(1)}m — ${vmax.toFixed(1)}m`;
+
+    // Sync mini-map rectangle to new bbox
+    window.syncBboxMiniMap?.();
+
+    // Update rescale inputs with current values
+    document.getElementById('rescaleMin').value = Math.floor(vmin);
+    document.getElementById('rescaleMax').value = Math.ceil(vmax);
+
+    // Handle landuse/satellite data if available
+    const landuseContainer = document.getElementById('demLanduse');
+    const landuseWrapper   = document.querySelector('.dem-landuse-container');
+    if (data.sat_values && data.sat_dimensions && data.sat_available) {
+        const sat_h   = data.sat_dimensions[0];
+        const sat_w   = data.sat_dimensions[1];
+        const satCanvas = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
+        landuseContainer.innerHTML = '';
+        landuseContainer.appendChild(satCanvas);
+        landuseWrapper.classList.remove('hidden');
+    } else {
+        landuseWrapper.classList.add('hidden');
+    }
+
+    // Enable zoom/pan on new canvas
+    window.enableZoomAndPan?.(canvas);
+
+    // Capture a small thumbnail for the sidebar
+    const currentSelectedRegion = window.appState.selectedRegion;
+    if (currentSelectedRegion?.name) {
+        try {
+            const thumbCanvas = document.createElement('canvas');
+            thumbCanvas.width = 48; thumbCanvas.height = 30;
+            thumbCanvas.getContext('2d').drawImage(canvas, 0, 0, 48, 30);
+            window.saveRegionThumbnail?.(currentSelectedRegion.name, thumbCanvas.toDataURL('image/jpeg', 0.6));
+            window.renderCoordinatesList?.();
+        } catch (_) {}
+    }
+
+    // Store bbox on lastDemData for physical dimensions calculation
+    if (window.appState.lastDemData) window.appState.lastDemData.bbox = { north, south, east, west };
+
+    // Cities: refresh city overlay on DEM canvas after reload
+    if (window.appState?.osmCityData) requestAnimationFrame(() => window.renderCityOnDEM?.());
+
+    // Auto-load city data if any city layer toggle is enabled and region is small enough
+    const _anyLayerOn = ['layerBuildingsToggle','layerRoadsToggle','layerWaterwaysToggle']
+        .some(id => document.getElementById(id)?.checked);
+    if (_anyLayerOn && !window.appState?.osmCityData && typeof window.loadCityData === 'function') {
+        window.loadCityData?.();
+    }
+
+    // Update print dimensions panel (Extrude tab)
+    window.updatePrintDimensions?.();
+
+    window.showToast?.(`DEM loaded (${vmin.toFixed(0)}m - ${vmax.toFixed(0)}m)`, 'success');
+}
+
+// ---------------------------------------------------------------------------
 // loadDEM
 // ---------------------------------------------------------------------------
 
@@ -97,16 +212,13 @@ window.loadDEM = async function loadDEM(highRes = false) {
 
     // Show loading indicator and clear old DEM
     const demImageContainer = document.getElementById('demImage');
-    demImageContainer.innerHTML = `<div class="loading"><span class="spinner"></span>Loading DEM... <button onclick="window.loadDEM._controller&&window.loadDEM._controller.abort()" style="margin-left:10px;padding:2px 8px;background:#c0392b;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px;">✕ Cancel</button></div>`;
+    demImageContainer.innerHTML = `<div class="loading"><span class="spinner"></span>Loading DEM... <button onclick="window.loadDEM._controller&&window.loadDEM._controller.abort()" class="dem-cancel-btn">✕ Cancel</button></div>`;
     window.showToast?.('Loading DEM data...', 'info');
 
     // Optionally, show a progress bar
     let progressBar = document.createElement('div');
     progressBar.className = 'dem-progress-bar';
-    progressBar.style.width = '100%';
-    progressBar.style.height = '6px';
-    progressBar.style.background = '#eee';
-    progressBar.innerHTML = '<div style="width:0%;height:100%;background:#4a90e2;transition:width 0.3s;" id="demProgress"></div>';
+    progressBar.innerHTML = '<div style="width:0%" id="demProgress"></div>';
     demImageContainer.appendChild(progressBar);
 
     try {
@@ -140,107 +252,7 @@ window.loadDEM = async function loadDEM(highRes = false) {
 
         // Client-side rendering of DEM data
         if (data.dem_values && data.dimensions) {
-            let demVals = data.dem_values;
-            let h = Number(data.dimensions[0]);
-            let w = Number(data.dimensions[1]);
-
-            // Handle nested arrays
-            if (Array.isArray(demVals) && demVals.length && Array.isArray(demVals[0])) {
-                h = demVals.length;
-                w = demVals[0].length;
-                demVals = demVals.flat();
-            }
-
-            const colormap  = document.getElementById('demColormap').value;
-            const finiteVals = demVals.filter(Number.isFinite);
-            const calcMin   = finiteVals.length ? finiteVals.reduce((a, b) => a < b ? a : b, finiteVals[0]) : 0;
-            const calcMax   = finiteVals.length ? finiteVals.reduce((a, b) => a > b ? a : b, finiteVals[0]) : 1;
-            const vmin      = data.min_elevation !== undefined ? data.min_elevation : calcMin;
-            const vmax      = data.max_elevation !== undefined ? data.max_elevation : calcMax;
-
-            // Store bounding box for gridlines
-            window.appState.currentDemBbox = { north, south, east, west };
-
-            // Render DEM canvas
-            const rawCanvas = window.renderDEMCanvas?.(demVals, w, h, colormap, vmin, vmax);
-            const canvas    = window.applyProjection?.(rawCanvas, { north, south, east, west });
-            const container = document.getElementById('demImage');
-            container.innerHTML = '';
-            container.appendChild(canvas);
-            // Fill container width, preserve aspect ratio
-            canvas.style.width = '100%';
-            canvas.style.height = 'auto';
-            container.style.position = 'relative';
-
-            // Update overlays
-            window.updateAxesOverlay?.(window.appState.currentDemBbox);
-            window.drawColorbar?.(vmin, vmax, colormap);
-            window.drawHistogram?.(demVals);
-
-            // Draw gridlines after canvas is appended and sized
-            requestAnimationFrame(() => window.drawGridlinesOverlay?.('demImage'));
-
-            // Update stacked layers view
-            requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
-
-            // Populate bbox fine-tune inputs
-            window.setBboxInputValues?.(north, south, east, west);
-            const elevRange = document.getElementById('bboxElevRange');
-            if (elevRange) elevRange.textContent = `Elevation: ${vmin.toFixed(1)}m — ${vmax.toFixed(1)}m`;
-
-            // Sync mini-map rectangle to new bbox
-            window.syncBboxMiniMap?.();
-
-            // Update rescale inputs with current values
-            document.getElementById('rescaleMin').value = Math.floor(vmin);
-            document.getElementById('rescaleMax').value = Math.ceil(vmax);
-
-            // Handle landuse/satellite data if available
-            const landuseContainer = document.getElementById('demLanduse');
-            const landuseWrapper   = document.querySelector('.dem-landuse-container');
-            if (data.sat_values && data.sat_dimensions && data.sat_available) {
-                const sat_h   = data.sat_dimensions[0];
-                const sat_w   = data.sat_dimensions[1];
-                const satCanvas = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
-                landuseContainer.innerHTML = '';
-                landuseContainer.appendChild(satCanvas);
-                landuseWrapper.classList.remove('hidden');
-            } else {
-                landuseWrapper.classList.add('hidden');
-            }
-
-            // Enable zoom/pan on new canvas
-            window.enableZoomAndPan?.(canvas);
-
-            // Capture a small thumbnail for the sidebar
-            const currentSelectedRegion = window.appState.selectedRegion;
-            if (currentSelectedRegion?.name) {
-                try {
-                    const thumbCanvas = document.createElement('canvas');
-                    thumbCanvas.width = 48; thumbCanvas.height = 30;
-                    thumbCanvas.getContext('2d').drawImage(canvas, 0, 0, 48, 30);
-                    window.saveRegionThumbnail?.(currentSelectedRegion.name, thumbCanvas.toDataURL('image/jpeg', 0.6));
-                    window.renderCoordinatesList?.();
-                } catch (_) {}
-            }
-
-            // Store bbox on lastDemData for physical dimensions calculation
-            if (window.appState.lastDemData) window.appState.lastDemData.bbox = { north, south, east, west };
-
-            // Cities: refresh city overlay on DEM canvas after reload
-            if (window.appState?.osmCityData) requestAnimationFrame(() => window.renderCityOnDEM?.());
-
-            // Auto-load city data if any city layer toggle is enabled and region is small enough
-            const _anyLayerOn = ['layerBuildingsToggle','layerRoadsToggle','layerWaterwaysToggle']
-                .some(id => document.getElementById(id)?.checked);
-            if (_anyLayerOn && !window.appState?.osmCityData && typeof window.loadCityData === 'function') {
-                window.loadCityData?.();
-            }
-
-            // Update print dimensions panel (Extrude tab)
-            window.updatePrintDimensions?.();
-
-            window.showToast?.(`DEM loaded (${vmin.toFixed(0)}m - ${vmax.toFixed(0)}m)`, 'success');
+            _applyDemResult(data, north, south, east, west);
         } else {
             document.getElementById('demImage').innerHTML = '<p>No DEM data available</p>';
             window.appState.layerStatus.dem = 'error';
@@ -611,7 +623,7 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
         dataset
     });
 
-    document.getElementById('satelliteImage').innerHTML = '<p style="text-align:center;padding:20px;">Loading satellite data...</p>';
+    document.getElementById('satelliteImage').innerHTML = '<p class="loading">Loading satellite data...</p>';
 
     try {
         const { data, error: satErr } = await window.api.dem.load(params, signal);
@@ -635,12 +647,8 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
             document.getElementById('satelliteImage').appendChild(canvas);
             requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
         } else {
-            document.getElementById('satelliteImage').innerHTML = `
-                <div style="background:#333;padding:30px;text-align:center;border-radius:4px;">
-                    <p style="color:#888;margin:0;">Satellite data not available</p>
-                    <p style="color:#666;font-size:12px;margin-top:5px;">Earth Engine module required</p>
-                </div>
-            `;
+            document.getElementById('satelliteImage').innerHTML =
+                '<div class="sat-unavailable"><p>Satellite data not available</p><p>Earth Engine module required</p></div>';
         }
     } catch (error) {
         if (error.name === 'AbortError') return;

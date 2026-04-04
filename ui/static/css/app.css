@@ -1746,6 +1746,47 @@
             padding: 20px;
         }
 
+        .dem-progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #eee;
+        }
+
+        .dem-progress-bar > div {
+            height: 100%;
+            background: #4a90e2;
+            transition: width 0.3s;
+        }
+
+        .dem-cancel-btn {
+            margin-left: 10px;
+            padding: 2px 8px;
+            background: #c0392b;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .sat-unavailable {
+            background: #333;
+            padding: 30px;
+            text-align: center;
+            border-radius: 4px;
+        }
+
+        .sat-unavailable p {
+            margin: 0;
+            color: #888;
+        }
+
+        .sat-unavailable p + p {
+            font-size: 12px;
+            margin-top: 5px;
+            color: #666;
+        }
+
         /* Spinner Animation */
         @keyframes spin {
             0% {

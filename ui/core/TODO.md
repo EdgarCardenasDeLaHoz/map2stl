@@ -6,7 +6,7 @@
 
 ## Refactoring — Separation of Concerns
 
-### [ ] REFACTOR-1 — Split fetch_osm_data into per-layer functions (osm.py)
+### [x] REFACTOR-1 — Split fetch_osm_data into per-layer functions (osm.py)
 **File:** `ui/core/osm.py` lines 181–405
 
 `fetch_osm_data` is 224 lines with 8 near-identical if-blocks, one per layer
@@ -29,7 +29,7 @@ def _fetch_polygon_layer(bbox, tags, geom_types, height_args, keep_cols, label) 
 
 ---
 
-### [ ] REFACTOR-2 — Merge _fill_heights / _fill_building_heights (osm.py)
+### [x] REFACTOR-2 — Merge _fill_heights / _fill_building_heights (osm.py)
 **File:** `ui/core/osm.py` lines 84–155
 
 `_fill_heights` (lines 84–111) and `_fill_building_heights` (lines 114–155) share
@@ -42,7 +42,7 @@ compute `levels * 4.0` as fallback before the final `fillna`. Remove
 
 ---
 
-### [ ] REFACTOR-3 — Split _rasterize_city into per-layer helpers (composite.py)
+### [x] REFACTOR-3 — Split _rasterize_city into per-layer helpers (composite.py)
 **File:** `ui/routers/composite.py` lines 56–178
 
 `_rasterize_city` is 122 lines handling 4 separate layers (buildings, roads,
@@ -65,7 +65,24 @@ from `ui/routers/composite.py` to a new `ui/core/rasterize.py`.
 
 ---
 
-### [ ] REFACTOR-4 — Extract tile coordinate math from fetch_h5_dem (dem.py)
+### [x] REFACTOR-4 — Extract tile coordinate math from fetch_h5_dem (dem.py)
+
+---
+
+### [x] REFACTOR-5 — Promote tile coordinate helpers in fetch_satellite_tiles (dem.py)
+**File:** `ui/core/dem.py`, `fetch_satellite_tiles`
+
+`_lon2tx` and `_lat2ty` are nested inside `fetch_satellite_tiles` but are pure functions of
+`lon`/`lat` + `n` (the zoom-level tile count). They duplicate the Web Mercator projection
+math that `_lon2px`/`_lat2py` also use (with a pixel offset). Extract them to module scope
+so the projection math is in one place and testable independently.
+
+**Fix:** Extract and rename to `_wm_lon_to_tile(lon, n)` and `_wm_lat_to_tile(lat, n)`.
+The px-offset variants `_lon2px`/`_lat2py` become thin wrappers or stay nested since they
+also depend on `tx_min`/`ty_min` locals.
+
+**Also:** The `TILE_SIZE = 256` and `TILE_URL` constants are currently defined inside the
+function. Promote them to module-level constants.
 **File:** `ui/core/dem.py` lines 113–205
 
 `fetch_h5_dem` has a nested `_geo_to_tile_pixel` function (lines ~148–154) and

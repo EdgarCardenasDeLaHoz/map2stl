@@ -59,37 +59,9 @@ except ImportError:
     _CITIES_3D_AVAILABLE = False
     generate_city_3mf = None  # type: ignore
 
-# ---------------------------------------------------------------------------
-# Schema
-# ---------------------------------------------------------------------------
-try:
-    from schemas import CityRequest, CityRasterRequest
-except ImportError:
-    from pydantic import BaseModel, Field
-    from typing import Any, Dict, List, Optional
-
-    class CityRequest(BaseModel):
-        north: float
-        south: float
-        east: float
-        west: float
-        layers: Optional[List[str]] = Field(default=["buildings", "roads", "waterways"])
-        simplify_tolerance: float = 0.5
-        min_area: float = 5.0
-
-    class CityRasterRequest(BaseModel):
-        north: float; south: float; east: float; west: float
-        dim: int = 200
-        buildings: Dict[str, Any] = Field(default_factory=dict)
-        roads: Dict[str, Any] = Field(default_factory=dict)
-        waterways: Dict[str, Any] = Field(default_factory=dict)
-        building_scale: float = 1.0
-        road_depression_m: float = 0.0
-        water_depression_m: float = -2.0
-
-
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
+from schemas import CityRequest, CityRasterRequest
 
 
 class CityExportRequest(BaseModel):

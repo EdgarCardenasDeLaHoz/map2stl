@@ -23,31 +23,67 @@ constants that only served the fallback.
 
 ## Code Cleanup
 
-### [ ] CLEAN-1 — Remove duplicate CityRasterRequest + redundant ImportError guards in cities.py
+### [x] CLEAN-1 — Remove duplicate CityRasterRequest in cities.py
 **File:** `ui/routers/cities.py`
 
-Five `try/except ImportError` blocks at module level all guard the same
-optional deps (rasterio, osmnx, shapely). Only one guard is needed.
-Also `CityRasterRequest` is defined twice (local fallback Pydantic class
-+ import from schemas).
+`CityRasterRequest` was defined twice: once as an inline fallback Pydantic class
+inside a `try/except ImportError` block, and once imported from `schemas`.
+The 5 import guards are for different modules (config, cache, osm, cities_3d,
+schemas) with different availability profiles — they are appropriate as-is.
+
+**Fix:** Removed the fallback schemas block; `CityRequest` and `CityRasterRequest`
+are now unconditionally imported from `schemas`.
+
+---
+
+## Dead Code Removal (continued)
+
+### [x] DEAD-2 — Remove unused `dim` param from get_terrain_water_mask (terrain.py)
+**File:** `ui/routers/terrain.py` line 318
+
+`dim` is parsed and validated but never used in the real fetch path — only in TEST_MODE's
+hardcoded response (lines 363–377). The cache key (lines 328–329) doesn't include it.
+A TODO comment already marks it for removal.
 
 **Fix:**
-- Import `CityRasterRequest` from `schemas` only; remove local definition.
-- Collapse the 5 import guards into a single top-level try/except that
-  sets `_DEPS_AVAILABLE = True/False`, checked once per endpoint.
+- Remove `dim = _parse_int(params, "dim", 200)` (line 318)
+- Remove `_validate_dim(dim)` from the `_validate_bbox(...) or _validate_dim(dim)` call (line 323)
+- In TEST_MODE block, replace `h, w = dim, dim` with `h, w = 50, 50` (a small fixed test size)
+
+---
+
+### [x] DEAD-4 — Move `import math` out of endpoint body in terrain.py
+**File:** `ui/routers/terrain.py` line 352
+
+`import math as _math` is inside `get_terrain_water_mask`. It is used only in that function
+but Python imports are cached — the local form is just noise. Move to module-level imports.
 
 ---
 
 ## Extraction Candidates (business logic in routers)
 
-### [ ] EXTRACT-1 — Move water mask fetch+merge out of get_terrain_water_mask (terrain.py)
+### [x] EXTRACT-1 — Move water mask fetch+merge out of get_terrain_water_mask (terrain.py)
 **File:** `ui/routers/terrain.py` lines 306–435
 
 `get_terrain_water_mask` (130 lines) mixes HTTP handling with:
-- Auto-scaling bbox → sat_scale math
-- Earth Engine API calls
-- Image resize / numpy array merge
+- Auto-scaling `sat_scale` to avoid EE pixel limits (lines 351–361)
+- Earth Engine/ESA fetch via `_fetch_water_mask_images` (lines 379–382)
+- JRC vs ESA mask selection + SRTM bathymetry augmentation (lines 392–411)
+- Array merge and reshape (lines 413–419)
 
-**Fix:** Extract the EE fetch + image merge to `ui/core/dem.py` as
-`fetch_water_mask(north, south, east, west, scale, source)`.
-The endpoint becomes: param validation + cache check + `run_in_executor`.
+**What to extract:** Create `fetch_water_mask(north, south, east, west, sat_scale, dataset)` in
+`ui/core/dem.py` that:
+1. Auto-scales `sat_scale` using the same bbox pixel-count formula (currently lines 352–361)
+2. Calls `_fetch_water_mask_images` (already in `core/dem.py` as `_fetch_water_mask_images`)
+3. Selects JRC vs ESA mask, applies SRTM bathymetry augmentation
+4. Returns `(water_mask: np.ndarray, esa: np.ndarray, sat_scale_used: int)`
+
+Router endpoint after extraction: parse params → cache check → `run_in_executor(fetch_water_mask)`
+→ cache write → JSON response. ~40 lines instead of 130.
+
+**Note:** `_fetch_water_mask_images` is already in `core/dem.py` (confirmed). The `cv2`
+import currently sneaks in at line 379; moving it to `core/dem.py` where it belongs unblocks
+the test mode path. The TEST_MODE early-return (lines 363–377) stays in the router.
+
+**Risk:** Medium — touches Earth Engine + cv2 integration path. No unit test coverage.
+Verify manually: run server, hit `/api/terrain/water-mask`, confirm water mask renders.

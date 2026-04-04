@@ -2,7 +2,7 @@
 
 ## Bug Fixes
 
-### [ ] CLEAN-1 — Replace inline onclick in divIcon with Leaflet event listener
+### [x] CLEAN-1 — Replace inline onclick in divIcon with Leaflet event listener
 **File:** `regions.js` line 106
 
 The edit button inside `L.divIcon` uses `onclick="goToEdit(${originalIndex})"` — the only remaining inline event handler in the codebase. The marker already has mouseover/mouseout wired via `editMarker.on(...)`.
@@ -11,7 +11,7 @@ The edit button inside `L.divIcon` uses `onclick="goToEdit(${originalIndex})"` �
 
 ---
 
-### [ ] CLEAN-2 — Fix haversineDiagKm called as appState method
+### [x] CLEAN-2 — Fix haversineDiagKm called as appState method
 **File:** `regions.js` line 329
 
 `window.appState?.haversineDiagKm?.()` calls a utility function as a method on appState — wrong location. Line 276 already calls it correctly as `window.haversineDiagKm?.(n, s, e, w)`.
@@ -20,7 +20,7 @@ The edit button inside `L.divIcon` uses `onclick="goToEdit(${originalIndex})"` �
 
 ---
 
-### [ ] CLEAN-3 — Extract auto-scale thresholds to named constants
+### [x] CLEAN-3 — Extract auto-scale thresholds to named constants
 **File:** `regions.js` lines 281–304
 
 Four groups of magic `diagKm` breakpoints (for satellite resolution and DEM dimensions) are inline ternary chains. Tuning any threshold requires reading all four to understand the relationship.
@@ -47,7 +47,7 @@ Replace ternary chains with `AUTO_SCALE.satScale.find(t => diagKm <= t.maxKm)?.s
 
 ---
 
-### [ ] CLEAN-4 — Pass BBOX_COLORS to createGlobeMarker
+### [x] CLEAN-4 — Pass BBOX_COLORS to createGlobeMarker
 **File:** `regions.js`, `createGlobeMarker()`
 
 Globe markers are always red (`0xff0000`) regardless of which region they represent. Map rectangles already use `BBOX_COLORS` for per-index colours.
@@ -56,7 +56,7 @@ Globe markers are always red (`0xff0000`) regardless of which region they repres
 
 ---
 
-### [ ] CLEAN-5 — Expand JSDoc on selectCoordinate
+### [x] CLEAN-5 — Expand JSDoc on selectCoordinate
 **File:** `regions.js`, `selectCoordinate()`
 
 The function is the most complex in the module — it triggers map pan, layer loads, settings load, and auto-scaling — but the JSDoc only describes the parameter.

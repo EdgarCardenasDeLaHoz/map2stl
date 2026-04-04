@@ -35,6 +35,29 @@
  *   switchView(view)                (global function in app.js)
  */
 
+// ── Auto-scale thresholds ────────────────────────────────────────────────────
+
+/**
+ * Breakpoint tables used by selectCoordinate to auto-set sat_scale and DEM dim
+ * based on the selected region's diagonal distance.
+ * Each entry applies when diagKm <= maxKm.
+ */
+const AUTO_SCALE = {
+    satScale: [
+        { maxKm: 10,       scale: 10   },
+        { maxKm: 30,       scale: 30   },
+        { maxKm: 100,      scale: 100  },
+        { maxKm: 500,      scale: 500  },
+        { maxKm: Infinity, scale: 1000 },
+    ],
+    dim: [
+        { maxKm: 10,       dim: 600 },
+        { maxKm: 50,       dim: 500 },
+        { maxKm: 200,      dim: 300 },
+        { maxKm: Infinity, dim: 200 },
+    ],
+};
+
 // ── loadCoordinates ─────────────────────────────────────────────────────────
 
 /**
@@ -103,7 +126,7 @@ async function loadCoordinates() {
 
                 // Edit button pinned at the top-right corner of each bbox (hidden until hover)
                 const editIcon = L.divIcon({
-                    html: `<div class="bbox-edit-icon" onclick="goToEdit(${originalIndex})">✏️ Edit</div>`,
+                    html: `<div class="bbox-edit-icon">✏️ Edit</div>`,
                     className: 'bbox-edit-marker',
                     iconSize: [56, 22],
                     iconAnchor: [56, 0]   // top-right corner of the icon aligns with [north, east]
@@ -114,6 +137,7 @@ async function loadCoordinates() {
                     keyboard: false,
                     zIndexOffset: 500
                 });
+                editMarker.on('click', () => window.goToEdit(originalIndex));
                 editMarker._regionBounds = L.latLngBounds(bounds[0], bounds[1]);
                 if (editMarkersLayer) editMarkersLayer.addLayer(editMarker);
 
@@ -178,13 +202,16 @@ function updateGlobeMarkers() {
     }
 
     const coordinatesData = window.getCoordinatesData?.() || [];
+    const BBOX_COLORS = window.BBOX_COLORS || [];
 
     // Add markers for each region
-    coordinatesData.forEach(region => {
+    coordinatesData.forEach((region, i) => {
         const centerLat = (region.north + region.south) / 2;
         const centerLng = (region.east + region.west) / 2;
+        const cssColor = BBOX_COLORS[i % BBOX_COLORS.length]?.color;
+        const color = cssColor ? parseInt(cssColor.slice(1), 16) : 0xff0000;
 
-        const marker = createGlobeMarker(centerLat, centerLng);
+        const marker = createGlobeMarker(centerLat, centerLng, color);
         markersGroup.add(marker);
     });
 }
@@ -193,16 +220,17 @@ function updateGlobeMarkers() {
 
 /**
  * Create a Three.js sprite marker positioned on the globe surface.
- * @param {number} lat - Latitude in degrees
- * @param {number} lng - Longitude in degrees
+ * @param {number} lat   - Latitude in degrees
+ * @param {number} lng   - Longitude in degrees
+ * @param {number} color - Three.js integer color (default red 0xff0000)
  * @returns {THREE.Mesh} The created marker mesh
  */
-function createGlobeMarker(lat, lng) {
+function createGlobeMarker(lat, lng, color = 0xff0000) {
     const phi = (90 - lat) * (Math.PI / 180);
     const theta = (lng + 180) * (Math.PI / 180);
 
     const geometry = new THREE.SphereGeometry(0.05, 8, 8);
-    const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const material = new THREE.MeshBasicMaterial({ color });
     const marker = new THREE.Mesh(geometry, material);
 
     marker.position.x = 5 * Math.sin(phi) * Math.cos(theta);
@@ -217,7 +245,22 @@ function createGlobeMarker(lat, lng) {
 /**
  * Select a region by index: sets `selectedRegion`, flies the map to it,
  * loads and applies region settings, and updates all list/table UIs.
- * @param {number} index - Index into `coordinatesData`
+ *
+ * Side effects (in order):
+ *  1. Sets `window.appState.selectedRegion` and calls `window.setSelectedRegion`.
+ *  2. Calls `clearLayerCache()` and `clearLayerDisplays()` to flush stale layer data.
+ *  3. Calls `clearCityOverlay()` if available so city auto-load triggers for the new region.
+ *  4. Awaits `window.loadAndApplyRegionSettings(name)` — writes demParams, dim, sat_scale etc.
+ *     Falls back to `selectedRegion.parameters` if no saved settings exist.
+ *  5. Auto-sets `#waterResolution`, `#landCoverResolution`, and `#paramDim` via AUTO_SCALE
+ *     breakpoints; never lowers a user's explicit dim choice.
+ *  6. Calls `window.updateRegionParamsTable` if the sidebar is expanded.
+ *  7. Calls `map.fitBounds` (wrapped in try/catch — fails silently if map is hidden).
+ *  8. If the Edit (DEM) view is visible: fires `loadDEM` → then `loadWaterMask`,
+ *     `loadSatelliteImage`, and optionally `loadCityData` (only if diagKm ≤ 15) in parallel.
+ *  9. Calls `window.appState._updateWorkflowStepper`.
+ *
+ * @param {number} index - Index into `coordinatesData` (from `window.getCoordinatesData()`)
  * @returns {Promise<void>}
  */
 async function selectCoordinate(index) {
@@ -278,11 +321,7 @@ async function selectCoordinate(index) {
             selectedRegion.east, selectedRegion.west
         );
         // sat_scale: ESA fetch resolution (m/px) — lower = finer, more pixels
-        const autoSatScale = diagKm > 500 ? 1000
-                           : diagKm > 100 ? 500
-                           : diagKm > 30  ? 100
-                           : diagKm > 10  ? 30
-                           :                10;   // city scale → ESA native 10m
+        const autoSatScale = AUTO_SCALE.satScale.find(t => diagKm <= t.maxKm)?.scale ?? 1000;
         const waterResEl = document.getElementById('waterResolution');
         const landResEl  = document.getElementById('landCoverResolution');
         if (waterResEl) waterResEl.value = String(autoSatScale);
@@ -294,10 +333,7 @@ async function selectCoordinate(index) {
         const dimEl = document.getElementById('paramDim');
         if (dimEl) {
             const currentDim = parseInt(dimEl.value) || 200;
-            const autoDim = diagKm > 200 ? 200
-                          : diagKm > 50  ? 300
-                          : diagKm > 10  ? 500
-                          :                600;  // city → 600px holds ESA 10m detail
+            const autoDim = AUTO_SCALE.dim.find(t => diagKm <= t.maxKm)?.dim ?? 200;
             // Raise dim if it is lower than what the region size warrants.
             // Never lower the user's explicit choice.
             if (autoDim > currentDim) dimEl.value = String(autoDim);
@@ -326,7 +362,10 @@ async function selectCoordinate(index) {
                 window.loadWaterMask?.(),
                 window.loadSatelliteImage?.(),
             ];
-            const diagKm = window.appState?.haversineDiagKm?.();
+            const diagKm = window.haversineDiagKm?.(
+                selectedRegion.north, selectedRegion.south,
+                selectedRegion.east, selectedRegion.west
+            );
             if (diagKm && diagKm <= 15 && window.loadCityData) {
                 tasks.push(window.loadCityData());
             }

@@ -5,6 +5,7 @@ All heavy lifting is in core.dem and core.cache; this module is a thin
 HTTP adapter that parses requests, delegates, and formats responses.
 """
 
+import math
 import os
 import sys
 import asyncio
@@ -35,6 +36,7 @@ from core.dem import (
     upsample_dem as _upsample_dem,
     make_dem_payload as _make_dem_payload,
     compute_raw_dem as _compute_raw_dem,
+    fetch_water_mask as _fetch_water_mask,
     fetch_water_mask_images as _fetch_water_mask_images,
     fetch_sat_overlay as _fetch_sat_overlay,
     fetch_satellite_tiles as _fetch_satellite_tiles,
@@ -315,12 +317,11 @@ async def get_terrain_water_mask(request: Request):
         east         = _parse_float(params, "east")
         west         = _parse_float(params, "west")
         sat_scale    = _parse_int(params, "sat_scale", 500)
-        dim          = _parse_int(params, "dim", 200)  # TODO: remove — unused now that target_width/target_height are gone (per-layer-resolution-plan.md step 1)
         water_dataset = params.get("dataset", "esa")
         if water_dataset not in ("esa", "jrc"):
             water_dataset = "esa"
 
-        err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
+        err = _validate_bbox(north, south, east, west)
         if err:
             return err
 
@@ -348,20 +349,8 @@ async def get_terrain_water_mask(request: Request):
                     "from_cache": True,
                 })
 
-        # Auto-scale sat_scale to avoid Earth Engine pixel limits
-        import math as _math
-        _bbox_w = abs(east - west)
-        _bbox_h = abs(north - south)
-        _mid_lat = (north + south) / 2.0
-        _m_per_deg_lon = 111000.0 * _math.cos(_math.radians(_mid_lat))
-        _m_per_deg_lat = 111000.0
-        _est_px = (_bbox_w * _m_per_deg_lon / sat_scale) * (_bbox_h * _m_per_deg_lat / sat_scale)
-        if _est_px > 5_000_000:
-            sat_scale = max(sat_scale, int(sat_scale * _math.sqrt(_est_px / 5_000_000)))
-            logger.info(f"Auto-scaled sat_scale to {sat_scale}")
-
         if TEST_MODE:
-            h, w = dim, dim
+            h, w = 50, 50
             water_arr = np.zeros((h, w), dtype=float)
             water_arr[h // 4:h // 2, w // 4:w // 2] = 1.0
             wp = int(np.sum(water_arr))
@@ -376,40 +365,14 @@ async def get_terrain_water_mask(request: Request):
                 "esa_dimensions": [h, w],
             })
 
-        import cv2 as _cv2
-        img, _jrc_img, _elevation_raw = await asyncio.get_running_loop().run_in_executor(
-            None, partial(_fetch_water_mask_images, north, south, east, west,
-                          sat_scale, water_dataset))
+        try:
+            water_mask, img, sat_scale = await asyncio.get_running_loop().run_in_executor(
+                None, partial(_fetch_water_mask, north, south, east, west,
+                              sat_scale, water_dataset))
+        except RuntimeError as fetch_err:
+            return JSONResponse(content={"error": str(fetch_err)}, status_code=500)
 
-        if img is None:
-            return JSONResponse(
-                content={"error": "Failed to fetch ESA land cover data."},
-                status_code=500)
-
-        h, w = img.shape
-
-        # Build water mask from selected dataset
-        if water_dataset == "jrc" and _jrc_img is not None:
-            # JRC occurrence >50% = permanent water; correctly classifies coastal peninsulas
-            if _jrc_img.ndim == 3:
-                _jrc_img = _jrc_img[:, :, 0]
-            if _jrc_img.shape != (h, w):
-                _jrc_img = _cv2.resize(_jrc_img.astype(np.float32), (w, h),
-                                       interpolation=_cv2.INTER_LINEAR)
-            water_mask = (_jrc_img > 50).astype(float)
-        else:
-            water_mask = (img == 80).astype(float)
-
-        # SRTM bathymetry augmentation — only for larger regions (> 30 km diagonal)
-        # to avoid misclassifying low-lying coastal land at city scale.
-        _bbox_diag_km = _math.sqrt(
-            (_bbox_h * _m_per_deg_lat) ** 2 + (_bbox_w * _m_per_deg_lon) ** 2
-        ) / 1000.0
-        if _elevation_raw is not None and _elevation_raw.size > 0 and _bbox_diag_km > 30:
-            elev_r = _cv2.resize(_elevation_raw.astype(np.float32), (w, h),
-                                 interpolation=_cv2.INTER_LINEAR)
-            water_mask = np.maximum(water_mask, (elev_r < -2).astype(float))
-
+        h, w = water_mask.shape
         water_pixels = int(np.sum(water_mask))
         total_pixels = h * w
 

@@ -2,6 +2,13 @@
 
 > **Index file only.** Full details are in `docs/`. Read this first, then load only what you need.
 
+## Context Management (read first)
+
+- `/compact` is **user-triggered** — Claude cannot run it. After each commit Claude will output: `--- Task complete. Run /compact before continuing. ---`
+- Run `/compact` when you see that signal, or when context exceeds ~60%
+- Load at most 1–2 `docs/` files per session
+- Keep sessions focused on one module at a time
+
 ## Quick Start
 
 ```bash
@@ -27,13 +34,7 @@ python -m pytest tests/ -v   # run all 108 tests (7 test files)
 | Known bugs / tech debt | `docs/issues.md` |
 | JS module map | `docs/modules.md` |
 | Writing tests | `tests/conftest.py` + relevant test file |
-
-## Context Management
-
-- Run `/compact` after each completed task
-- Run `/compact` when context exceeds ~60%
-- Load at most 1–2 `docs/` files per session
-- After a large function-lookup session: `/compact` before coding
+| Approving / denying AI proposals | `docs/proposals.md` |
 
 ## Project Structure (key paths)
 
@@ -46,7 +47,8 @@ strm2stl/
 │   ├── functions.md       ← function one-liner index
 │   ├── api.md             ← all backend API routes
 │   ├── modules.md         ← JS module map (subdirs + exports)
-│   └── issues.md          ← known issues + feature status
+│   ├── issues.md          ← known issues + feature status
+│   └── proposals.md       ← AI-proposed features (approve/deny/defer here)
 ├── TODO.md                ← open tasks only (ARCH4, ARCH5, PERF6B)
 ├── data.db                ← SQLite: regions + region_settings (WAL)
 ├── ui/
@@ -61,6 +63,15 @@ strm2stl/
 │       └── modules/       ← 30 ES modules in 8 subdirs (see docs/modules.md)
 └── tests/                 ← pytest suite (conftest.py + 7 test files, 108 tests)
 ```
+
+## Proposals Rule
+
+**Before implementing any new feature or significant refactor not explicitly requested in the current conversation:**
+1. Add it to `docs/proposals.md` with status `pending`.
+2. Do **not** implement it until the user sets its status to `approved`.
+3. On session start, read `docs/proposals.md` and only work on `approved` items (plus any direct user requests).
+
+---
 
 ## Editing Rules
 
@@ -83,3 +94,4 @@ strm2stl/
 | JS module map | `docs/modules.md` |
 | Known issues + feature status | `docs/issues.md` |
 | Completed feature history | `ui/static/FUNCTIONALITY_DOC.md` |
+| AI-proposed features (approve/deny) | `docs/proposals.md` |
