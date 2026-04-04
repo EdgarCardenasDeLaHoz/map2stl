@@ -53,25 +53,14 @@ class CityRasterRequest(BaseModel):
     height: int = 512
 
 
-def _rasterize_city(req: CityRasterRequest) -> dict:
-    """Synchronous rasterization — called via run_in_executor."""
-    from PIL import Image, ImageDraw
+# ---------------------------------------------------------------------------
+# Coordinate helpers
+# ---------------------------------------------------------------------------
 
-    N, S, E, W = req.north, req.south, req.east, req.west
-    PW, PH = req.width, req.height
+def _make_geo_to_px(N, S, E, W, PW, PH):
+    """Return (geo_to_px, coords_to_px) closures for this bbox/canvas."""
     lat_span = N - S
     lon_span = E - W
-
-    def _empty_result():
-        z = [0.0] * (PW * PH)
-        return {"buildings": z, "roads": z, "waterways": z, "walls": z,
-                "width": PW, "height": PH}
-
-    if lat_span <= 0 or lon_span <= 0:
-        return _empty_result()
-
-    lat_mid = (N + S) / 2
-    m_per_px = (lon_span * np.cos(np.radians(lat_mid)) * 111320) / PW
 
     def geo_to_px(lon, lat):
         x = (lon - W) / lon_span * PW
@@ -81,16 +70,18 @@ def _rasterize_city(req: CityRasterRequest) -> dict:
     def coords_to_px(coords):
         return [geo_to_px(lon, lat) for lon, lat in coords]
 
-    # Load OSM from disk cache
-    osm_key  = osm_cache_key(N, S, E, W)
-    osm_data = read_osm_cache(osm_key)
-    if not osm_data:
-        logger.debug(f"No OSM cache for composite city-raster ({osm_key[:8]}…)")
-        return _empty_result()
+    return geo_to_px, coords_to_px
 
-    # ── Buildings — per-pixel height (m, scale=1) ─────────────────────────────
-    building_arr = np.zeros((PH, PW), dtype=np.float32)
-    for feat in (osm_data.get("buildings") or {}).get("features") or []:
+
+# ---------------------------------------------------------------------------
+# Per-layer rasterizers
+# ---------------------------------------------------------------------------
+
+def _rasterize_buildings(features, coords_to_px, PW, PH):
+    """Return a float32 array (PH×PW) with per-pixel building height in metres."""
+    from PIL import Image, ImageDraw
+    arr = np.zeros((PH, PW), dtype=np.float32)
+    for feat in features:
         geom  = feat.get("geometry") or {}
         h_m   = float((feat.get("properties") or {}).get("height_m") or 10)
         rings = []
@@ -104,12 +95,16 @@ def _rasterize_city(req: CityRasterRequest) -> dict:
             px = coords_to_px(ring)
             mask = Image.new("1", (PW, PH), 0)
             ImageDraw.Draw(mask).polygon(px, fill=1)
-            building_arr += np.array(mask, dtype=np.float32) * h_m
+            arr += np.array(mask, dtype=np.float32) * h_m
+    return arr
 
-    # ── Roads — binary mask ───────────────────────────────────────────────────
-    road_img  = Image.new("1", (PW, PH), 0)
-    road_draw = ImageDraw.Draw(road_img)
-    for feat in (osm_data.get("roads") or {}).get("features") or []:
+
+def _rasterize_roads(features, coords_to_px, PW, PH, m_per_px):
+    """Return a binary float32 array (PH×PW) marking road pixels."""
+    from PIL import Image, ImageDraw
+    img  = Image.new("1", (PW, PH), 0)
+    draw = ImageDraw.Draw(img)
+    for feat in features:
         geom  = feat.get("geometry") or {}
         w_m   = float((feat.get("properties") or {}).get("road_width_m") or 6)
         w_px  = max(1, round(w_m / m_per_px))
@@ -121,38 +116,44 @@ def _rasterize_city(req: CityRasterRequest) -> dict:
         for line in lines:
             px = coords_to_px(line)
             if len(px) >= 2:
-                road_draw.line(px, fill=1, width=w_px)
-    road_arr = np.array(road_img, dtype=np.float32)
+                draw.line(px, fill=1, width=w_px)
+    return np.array(img, dtype=np.float32)
 
-    # ── Waterways — binary mask ───────────────────────────────────────────────
-    ww_img  = Image.new("1", (PW, PH), 0)
-    ww_draw = ImageDraw.Draw(ww_img)
-    for feat in (osm_data.get("waterways") or {}).get("features") or []:
-        geom  = feat.get("geometry") or {}
-        w_px  = max(2, round(4.0 / m_per_px))
+
+def _rasterize_waterways(features, coords_to_px, PW, PH, m_per_px):
+    """Return a binary float32 array (PH×PW) marking waterway pixels."""
+    from PIL import Image, ImageDraw
+    img  = Image.new("1", (PW, PH), 0)
+    draw = ImageDraw.Draw(img)
+    w_px = max(2, round(4.0 / m_per_px))
+    for feat in features:
+        geom = feat.get("geometry") or {}
         if geom.get("type") == "LineString":
             px = coords_to_px(geom["coordinates"])
             if len(px) >= 2:
-                ww_draw.line(px, fill=1, width=w_px)
+                draw.line(px, fill=1, width=w_px)
         elif geom.get("type") == "MultiLineString":
             for line in geom["coordinates"]:
                 px = coords_to_px(line)
                 if len(px) >= 2:
-                    ww_draw.line(px, fill=1, width=w_px)
+                    draw.line(px, fill=1, width=w_px)
         elif geom.get("type") == "Polygon":
             px = coords_to_px(geom["coordinates"][0])
             if px:
-                ww_draw.polygon(px, fill=1)
+                draw.polygon(px, fill=1)
         elif geom.get("type") == "MultiPolygon":
             for poly in geom["coordinates"]:
                 px = coords_to_px(poly[0])
                 if px:
-                    ww_draw.polygon(px, fill=1)
-    ww_arr = np.array(ww_img, dtype=np.float32)
+                    draw.polygon(px, fill=1)
+    return np.array(img, dtype=np.float32)
 
-    # ── Walls — per-pixel height (m, scale=1) ─────────────────────────────────
-    wall_arr = np.zeros((PH, PW), dtype=np.float32)
-    for feat in (osm_data.get("walls") or {}).get("features") or []:
+
+def _rasterize_walls(features, coords_to_px, PW, PH, m_per_px):
+    """Return a float32 array (PH×PW) with per-pixel wall height in metres."""
+    from PIL import Image, ImageDraw
+    arr = np.zeros((PH, PW), dtype=np.float32)
+    for feat in features:
         geom  = feat.get("geometry") or {}
         h_m   = float((feat.get("properties") or {}).get("height_m") or 5)
         w_px  = max(1, round(2.0 / m_per_px))
@@ -166,7 +167,56 @@ def _rasterize_city(req: CityRasterRequest) -> dict:
             if len(px) >= 2:
                 mask = Image.new("1", (PW, PH), 0)
                 ImageDraw.Draw(mask).line(px, fill=1, width=w_px)
-                wall_arr += np.array(mask, dtype=np.float32) * h_m
+                arr += np.array(mask, dtype=np.float32) * h_m
+    return arr
+
+
+# ---------------------------------------------------------------------------
+# Coordinator
+# ---------------------------------------------------------------------------
+
+def _rasterize_city(req: CityRasterRequest) -> dict:
+    """Synchronous rasterization — called via run_in_executor."""
+    N, S, E, W = req.north, req.south, req.east, req.west
+    PW, PH = req.width, req.height
+    lat_span = N - S
+    lon_span = E - W
+
+    def _empty_result():
+        z = [0.0] * (PW * PH)
+        return {"buildings": z, "roads": z, "waterways": z, "walls": z,
+                "width": PW, "height": PH}
+
+    if lat_span <= 0 or lon_span <= 0:
+        return _empty_result()
+
+    lat_mid  = (N + S) / 2
+    m_per_px = (lon_span * np.cos(np.radians(lat_mid)) * 111320) / PW
+
+    _, coords_to_px = _make_geo_to_px(N, S, E, W, PW, PH)
+
+    osm_key  = osm_cache_key(N, S, E, W)
+    osm_data = read_osm_cache(osm_key)
+    if not osm_data:
+        logger.debug(f"No OSM cache for composite city-raster ({osm_key[:8]}…)")
+        return _empty_result()
+
+    building_arr = _rasterize_buildings(
+        (osm_data.get("buildings") or {}).get("features") or [],
+        coords_to_px, PW, PH,
+    )
+    road_arr = _rasterize_roads(
+        (osm_data.get("roads") or {}).get("features") or [],
+        coords_to_px, PW, PH, m_per_px,
+    )
+    ww_arr = _rasterize_waterways(
+        (osm_data.get("waterways") or {}).get("features") or [],
+        coords_to_px, PW, PH, m_per_px,
+    )
+    wall_arr = _rasterize_walls(
+        (osm_data.get("walls") or {}).get("features") or [],
+        coords_to_px, PW, PH, m_per_px,
+    )
 
     return {
         "buildings":  building_arr.ravel().tolist(),

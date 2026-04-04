@@ -1,11 +1,10 @@
 """
 Tests for /api/regions/* CRUD endpoints (regions.py).
 
-Uses the JSON-fallback path (_DB_AVAILABLE=False) set up by conftest.tmp_data_dir.
-The fixture pre-populates coordinates.json with one region ("TestRegion").
+Uses a fresh SQLite DB (temp file) set up by conftest.tmp_data_dir.
+The fixture pre-populates the DB with one region ("TestRegion").
 """
 
-import json
 import pytest
 
 
@@ -33,8 +32,8 @@ class TestListRegions:
             assert field in reg, f"missing field: {field}"
 
     def test_empty_db_returns_empty_list(self, client, tmp_data_dir):
-        # Overwrite coords file with empty regions list
-        tmp_data_dir["coords_file"].write_text(json.dumps({"regions": []}))
+        # Delete the pre-seeded TestRegion so the list is empty
+        client.delete("/api/regions/TestRegion")
         r = client.get("/api/regions")
         assert r.status_code == 200
         assert r.json()["regions"] == []

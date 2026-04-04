@@ -2,17 +2,14 @@
 routers/regions.py — /api/regions/* CRUD endpoints.
 
 Extracted from location_picker.py (backend refactor, step 6).
-Step 12: reads/writes SQLite via core/db.py instead of JSON files.
-Falls back to JSON-file storage if core.db cannot be imported.
+Step 12: reads/writes SQLite via core/db.py.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import sqlite3
-from functools import partial
 from typing import List, Optional
 
 from fastapi import APIRouter
@@ -21,27 +18,7 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["regions"])
 
-# ---------------------------------------------------------------------------
-# DB import — try core.db, degrade to JSON if unavailable
-# ---------------------------------------------------------------------------
-try:
-    from core.db import get_db, init_db, DB_PATH
-    _DB_AVAILABLE = True
-except ImportError:
-    _DB_AVAILABLE = False
-    logger.warning("core.db unavailable — region routes will use JSON files")
-
-# ---------------------------------------------------------------------------
-# Path imports — for JSON fallback
-# ---------------------------------------------------------------------------
-try:
-    from config import COORDINATES_PATH, REGION_SETTINGS_PATH
-except ImportError:
-    from pathlib import Path
-    _UI_DIR = Path(__file__).parent.parent
-    _STRM2STL_DIR = _UI_DIR.parent
-    COORDINATES_PATH = _STRM2STL_DIR / "coordinates.json"
-    REGION_SETTINGS_PATH = _STRM2STL_DIR / "region_settings.json"
+from core.db import get_db, init_db
 
 # ---------------------------------------------------------------------------
 # Schema imports — try schemas.py first, inline fallback
@@ -116,16 +93,12 @@ def _ensure_db() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Routes — SQLite path
+# Routes
 # ---------------------------------------------------------------------------
 
 @router.get("/api/regions")
 async def list_regions():
     """Return all saved geographic regions."""
-    if not _DB_AVAILABLE:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _list_regions_json)
-
     try:
         _ensure_db()
         with get_db() as conn:
@@ -144,10 +117,6 @@ async def list_regions():
 @router.post("/api/regions", status_code=201)
 async def create_region(region: RegionCreate):
     """Save a new geographic region."""
-    if not _DB_AVAILABLE:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, partial(_create_region_json, region))
-
     try:
         _ensure_db()
         params = region.parameters or RegionParameters()
@@ -180,10 +149,6 @@ async def create_region(region: RegionCreate):
 @router.put("/api/regions/{name}")
 async def update_region(name: str, region: RegionCreate):
     """Update an existing saved region by name."""
-    if not _DB_AVAILABLE:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, partial(_update_region_json, name, region))
-
     try:
         _ensure_db()
         params = region.parameters or RegionParameters()
@@ -214,10 +179,6 @@ async def update_region(name: str, region: RegionCreate):
 @router.delete("/api/regions/{name}")
 async def delete_region(name: str):
     """Delete a saved region by name. ON DELETE CASCADE removes its settings."""
-    if not _DB_AVAILABLE:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, partial(_delete_region_json, name))
-
     try:
         _ensure_db()
         with get_db() as conn:
@@ -234,10 +195,6 @@ async def delete_region(name: str):
 @router.get("/api/regions/{name}/settings")
 async def get_region_settings(name: str):
     """Fetch saved panel settings for a region. Returns empty settings if none saved yet."""
-    if not _DB_AVAILABLE:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, partial(_get_region_settings_json, name))
-
     try:
         _ensure_db()
         with get_db() as conn:
@@ -256,10 +213,6 @@ async def get_region_settings(name: str):
 @router.put("/api/regions/{name}/settings")
 async def save_region_settings_route(name: str, settings: RegionSettings):
     """Save or update all panel settings for a region."""
-    if not _DB_AVAILABLE:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, partial(_save_region_settings_json, name, settings))
-
     try:
         _ensure_db()
         payload = {k: v for k, v in settings.model_dump().items() if v is not None}
@@ -273,95 +226,4 @@ async def save_region_settings_route(name: str, settings: RegionSettings):
         return JSONResponse(content={"status": "saved", "name": name, "settings": payload})
     except Exception as e:
         logger.error(f"Error saving region settings: {e}")
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
-
-# ---------------------------------------------------------------------------
-# JSON fallback implementations (used when _DB_AVAILABLE is False)
-# ---------------------------------------------------------------------------
-
-def _list_regions_json():
-    try:
-        with open(COORDINATES_PATH, "r") as f:
-            data = json.load(f)
-        return JSONResponse(content=data)
-    except FileNotFoundError:
-        return JSONResponse(content={"regions": []})
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
-
-def _create_region_json(region: RegionCreate):
-    try:
-        data = json.loads(COORDINATES_PATH.read_text()) if COORDINATES_PATH.exists() else {"regions": []}
-        payload = region.model_dump()
-        if payload.get("parameters") is None:
-            payload["parameters"] = RegionParameters().model_dump()
-        data["regions"].append(payload)
-        COORDINATES_PATH.write_text(json.dumps(data, indent=2))
-        return JSONResponse(content=payload, status_code=201)
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
-
-def _update_region_json(name: str, region: RegionCreate):
-    try:
-        data = json.loads(COORDINATES_PATH.read_text()) if COORDINATES_PATH.exists() else {"regions": []}
-        regions = data.get("regions", [])
-        for i, r in enumerate(regions):
-            if r.get("name") == name:
-                payload = region.model_dump()
-                if payload.get("parameters") is None:
-                    payload["parameters"] = r.get("parameters", RegionParameters().model_dump())
-                regions[i] = payload
-                COORDINATES_PATH.write_text(json.dumps(data, indent=2))
-                return JSONResponse(content=payload)
-        return JSONResponse(content={"error": f"Region '{name}' not found"}, status_code=404)
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
-
-def _delete_region_json(name: str):
-    try:
-        if not COORDINATES_PATH.exists():
-            return JSONResponse(content={"error": "Region not found"}, status_code=404)
-        data = json.loads(COORDINATES_PATH.read_text())
-        original_count = len(data.get("regions", []))
-        data["regions"] = [r for r in data["regions"] if r.get("name") != name]
-        if len(data["regions"]) == original_count:
-            return JSONResponse(content={"error": f"Region '{name}' not found"}, status_code=404)
-        COORDINATES_PATH.write_text(json.dumps(data, indent=2))
-        if REGION_SETTINGS_PATH.exists():
-            try:
-                sd = json.loads(REGION_SETTINGS_PATH.read_text())
-                if name in sd:
-                    del sd[name]
-                    REGION_SETTINGS_PATH.write_text(json.dumps(sd, indent=2))
-            except Exception:
-                pass
-        return JSONResponse(content={"status": "deleted", "name": name})
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
-
-def _get_region_settings_json(name: str):
-    try:
-        if not REGION_SETTINGS_PATH.exists():
-            return JSONResponse(content={"name": name, "settings": {}})
-        data = json.loads(REGION_SETTINGS_PATH.read_text())
-        if name not in data:
-            return JSONResponse(content={"name": name, "settings": {}})
-        return JSONResponse(content={"name": name, "settings": data[name]})
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
-
-def _save_region_settings_json(name: str, settings: RegionSettings):
-    try:
-        data = json.loads(REGION_SETTINGS_PATH.read_text()) if REGION_SETTINGS_PATH.exists() else {}
-        payload = {k: v for k, v in settings.model_dump().items() if v is not None}
-        data[name] = payload
-        REGION_SETTINGS_PATH.write_text(json.dumps(data, indent=2))
-        return JSONResponse(content={"status": "saved", "name": name, "settings": payload})
-    except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)

@@ -81,12 +81,20 @@ def _reduce_buildings(gdf):
         return gdf
 
 
-def _fill_heights(gdf, default_m: float, lo: float = 2.0, hi: float = 300.0):
-    """Fill height_m for non-building features (walls, towers, churches, fortifications).
+def _fill_heights(
+    gdf,
+    default_m: float,
+    lo: float = 2.0,
+    hi: float = 300.0,
+    levels_col: str | None = None,
+):
+    """Fill height_m for OSM features from the ``height`` tag.
 
-    Uses the OSM ``height`` tag only (no levels heuristic — these aren't multi-storey
-    buildings).  Values are clipped to [lo, hi] m and rounded to one decimal.
-    Falls back to *default_m* when the tag is absent or unparseable.
+    Args:
+        default_m:  Fallback height when tag is absent or unparseable.
+        lo, hi:     Clip bounds in metres.
+        levels_col: If set, use ``gdf[levels_col] * 4.0`` as a secondary
+                    fallback before *default_m* (buildings only).
     """
     try:
         import pandas as pd
@@ -95,48 +103,14 @@ def _fill_heights(gdf, default_m: float, lo: float = 2.0, hi: float = 300.0):
         gdf['height_m'] = float(default_m)
         return gdf
 
-    if 'height' in gdf.columns:
-        raw = gdf['height'].astype(str).str.extract(r'([\d.]+)', expand=False)
-        height_m = (
-            pd.to_numeric(raw, errors='coerce')
-            .clip(lower=lo, upper=hi)
-            .fillna(float(default_m))
-            .round(1)
-        )
+    # Levels-based estimate (buildings only)
+    if levels_col and levels_col in gdf.columns:
+        levels = pd.to_numeric(gdf[levels_col], errors='coerce').fillna(3.0)
+        height_from_levels = levels * 4.0
     else:
-        height_m = pd.Series([float(default_m)] * len(gdf), index=gdf.index)
+        height_from_levels = float(default_m)
 
-    gdf = gdf.copy()
-    gdf['height_m'] = height_m
-    return gdf
-
-
-def _fill_building_heights(gdf):
-    """
-    Ensure every building row has a reliable *height_m* column.
-
-    Priority:
-      1. OSM ``height`` tag (may be "12 m", "12.5", etc.) — strip units, parse.
-      2. ``building:levels`` × 4.0 m per storey (default 3 storeys if missing).
-      3. Hard fallback: 10 m.
-
-    Values are clipped to [3, 300] m and rounded to one decimal.
-    The original ``height`` / ``building:levels`` columns are left intact.
-    """
-    try:
-        import pandas as pd
-    except ImportError:
-        # pandas not available — return gdf unchanged
-        return gdf
-
-    # Levels-based estimate
-    if 'building:levels' in gdf.columns:
-        levels = pd.to_numeric(gdf['building:levels'], errors='coerce').fillna(3.0)
-    else:
-        levels = 3.0
-    height_from_levels = levels * 4.0
-
-    # Explicit OSM height (strip trailing unit strings like " m" or "ft")
+    # Explicit OSM height tag (strip trailing unit strings like " m" or "ft")
     if 'height' in gdf.columns:
         raw = gdf['height'].astype(str).str.extract(r'([\d.]+)', expand=False)
         explicit = pd.to_numeric(raw, errors='coerce')
@@ -146,8 +120,8 @@ def _fill_building_heights(gdf):
 
     height_m = (
         pd.to_numeric(height_m, errors='coerce')
-        .fillna(10.0)
-        .clip(lower=3.0, upper=300.0)
+        .fillna(float(default_m))
+        .clip(lower=lo, upper=hi)
         .round(1)
     )
     gdf = gdf.copy()
@@ -178,6 +152,171 @@ def _get_road_width_m(highway) -> float:
     return float(_HIGHWAY_WIDTHS.get(str(highway), 3.0))
 
 
+def _count_verts(g) -> int:
+    """Count total exterior vertices in a geometry (for simplification logging)."""
+    if g.geom_type == "LineString":
+        return len(g.coords)
+    if g.geom_type == "MultiLineString":
+        return sum(len(l.coords) for l in g.geoms)
+    if g.geom_type == "Polygon":
+        return len(g.exterior.coords)
+    if g.geom_type == "MultiPolygon":
+        return sum(len(p.exterior.coords) for p in g.geoms)
+    return 0
+
+
+def _empty_fc(error: str = "") -> dict:
+    fc: dict = {"type": "FeatureCollection", "features": []}
+    if error:
+        fc["error"] = error
+    return fc
+
+
+# ---------------------------------------------------------------------------
+# Per-layer fetch helpers
+# ---------------------------------------------------------------------------
+
+def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_area: float) -> dict:
+    try:
+        gdf = ox.features_from_bbox(bbox, tags={"building": True})
+        gdf = gdf[gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])].reset_index(drop=True)
+        n_raw = len(gdf)
+        if min_area > 0 and len(gdf):
+            gdf_m = gdf.to_crs(epsg=3857)
+            gdf = gdf[gdf_m.geometry.area >= min_area].reset_index(drop=True)
+        logger.info(
+            f"[buildings] raw={n_raw} features  after area filter (>={min_area} m²): {len(gdf)} features"
+        )
+        if tol_deg > 0 and len(gdf):
+            gdf_m_pre = gdf.to_crs(epsg=3857)
+            verts_before = int(gdf_m_pre.geometry.apply(lambda g: sum(len(p.exterior.coords) for p in ([g] if g.geom_type == 'Polygon' else g.geoms))).sum())
+            area_before  = float(gdf_m_pre.geometry.area.sum())
+            gdf["geometry"] = gdf["geometry"].simplify(tol_deg, preserve_topology=True)
+            gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].reset_index(drop=True)
+            gdf_m_post = gdf.to_crs(epsg=3857)
+            verts_after = int(gdf_m_post.geometry.apply(lambda g: sum(len(p.exterior.coords) for p in ([g] if g.geom_type == 'Polygon' else g.geoms))).sum())
+            area_after  = float(gdf_m_post.geometry.area.sum())
+            area_delta_pct = (area_after - area_before) / area_before * 100 if area_before else 0
+            logger.info(
+                f"[buildings] geometry simplify (tol={simplify_tolerance} m): "
+                f"vertices {verts_before} → {verts_after} ({verts_after/verts_before*100:.1f}%)  |  "
+                f"area {area_before/1e4:.2f} → {area_after/1e4:.2f} ha  (Δ {area_delta_pct:+.2f}%)"
+            )
+        gdf = _fill_heights(gdf, default_m=10.0, lo=3.0, hi=300.0, levels_col='building:levels')
+        n_pre_dissolve = len(gdf)
+        gdf_m_pre_d = gdf.to_crs(epsg=3857)
+        area_pre_dissolve = float(gdf_m_pre_d.geometry.area.sum())
+        gdf = _reduce_buildings(gdf)
+        gdf_m_post_d = gdf.to_crs(epsg=3857)
+        area_post_dissolve = float(gdf_m_post_d.geometry.area.sum())
+        area_dissolve_delta_pct = (area_post_dissolve - area_pre_dissolve) / area_pre_dissolve * 100 if area_pre_dissolve else 0
+        logger.info(
+            f"[buildings] dissolve: {n_pre_dissolve} → {len(gdf)} features  |  "
+            f"area {area_pre_dissolve/1e4:.2f} → {area_post_dissolve/1e4:.2f} ha  (Δ {area_dissolve_delta_pct:+.2f}%)"
+        )
+        keep = ["geometry", "height_m"]
+        gdf = gdf[[c for c in keep if c in gdf.columns]]
+        return json.loads(gdf.to_json())
+    except Exception as e:
+        logger.warning(f"OSM buildings fetch failed: {e}", exc_info=True)
+        return _empty_fc(str(e))
+
+
+def _fetch_roads(ox, bbox) -> dict:
+    try:
+        G = ox.graph_from_bbox(bbox, network_type="drive")
+        _, edges = ox.graph_to_gdfs(G)
+        edges = edges.reset_index(drop=True)
+        if "highway" in edges.columns:
+            edges["road_width_m"] = edges["highway"].apply(_get_road_width_m)
+        keep = ["geometry", "highway", "name", "lanes", "maxspeed", "road_width_m"]
+        edges = edges[[c for c in keep if c in edges.columns]]
+        return json.loads(edges.to_json())
+    except Exception as e:
+        logger.warning(f"OSM roads fetch failed: {e}", exc_info=True)
+        return _empty_fc(str(e))
+
+
+def _fetch_waterways(ox, bbox, tol_deg: float, simplify_tolerance: float) -> dict:
+    try:
+        water_tags = {"waterway": True, "natural": ["water", "wetland"], "landuse": ["reservoir"]}
+        gdf = ox.features_from_bbox(bbox, tags=water_tags)
+        gdf = gdf.reset_index(drop=True)
+        _supported = {"Polygon", "MultiPolygon", "LineString", "MultiLineString"}
+        gdf = gdf[gdf.geometry.notna() & gdf.geometry.geom_type.isin(_supported)].reset_index(drop=True)
+        if tol_deg > 0 and len(gdf):
+            gdf_m_pre = gdf.to_crs(epsg=3857)
+            poly_mask = gdf_m_pre.geometry.geom_type.isin(["Polygon", "MultiPolygon"])
+            verts_before = int(gdf_m_pre.geometry.apply(_count_verts).sum())
+            area_before  = float(gdf_m_pre.geometry[poly_mask].area.sum()) if poly_mask.any() else 0.0
+            gdf["geometry"] = gdf["geometry"].simplify(tol_deg, preserve_topology=True)
+            gdf["geometry"] = gdf.geometry.make_valid()
+            gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].reset_index(drop=True)
+            gdf_m_post = gdf.to_crs(epsg=3857)
+            poly_mask_post = gdf_m_post.geometry.geom_type.isin(["Polygon", "MultiPolygon"])
+            verts_after = int(gdf_m_post.geometry.apply(_count_verts).sum())
+            area_after  = float(gdf_m_post.geometry[poly_mask_post].area.sum()) if poly_mask_post.any() else 0.0
+            area_delta_pct = (area_after - area_before) / area_before * 100 if area_before else 0
+            logger.info(
+                f"[waterways] geometry simplify (tol={simplify_tolerance} m): "
+                f"vertices {verts_before} → {verts_after} ({verts_after/verts_before*100:.1f}% of original)  |  "
+                f"polygon area {area_before/1e4:.2f} → {area_after/1e4:.2f} ha  (Δ {area_delta_pct:+.2f}%)"
+            )
+        else:
+            gdf["geometry"] = gdf.geometry.make_valid()
+            gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].reset_index(drop=True)
+        keep = ["geometry", "waterway", "natural", "name", "water"]
+        gdf = gdf[[c for c in keep if c in gdf.columns]]
+        return json.loads(gdf.to_json())
+    except Exception as e:
+        logger.warning(f"OSM waterways fetch failed: {e}", exc_info=True)
+        return _empty_fc(str(e))
+
+
+def _fetch_pois(ox, bbox) -> dict:
+    try:
+        poi_tags = {"amenity": True, "tourism": True, "historic": True}
+        gdf = ox.features_from_bbox(bbox, tags=poi_tags)
+        gdf = gdf[gdf.geometry.geom_type == "Point"].reset_index(drop=True)
+        keep = ["geometry", "amenity", "tourism", "historic", "name"]
+        gdf = gdf[[c for c in keep if c in gdf.columns]]
+        return json.loads(gdf.to_json())
+    except Exception as e:
+        logger.warning(f"OSM pois fetch failed: {e}", exc_info=True)
+        return _empty_fc(str(e))
+
+
+def _fetch_polygon_layer(
+    ox, bbox, tags: dict,
+    height_default: float, height_lo: float, height_hi: float,
+    keep_cols: list, label: str,
+) -> dict:
+    """Generic fetch for polygon-only layers (walls, towers, churches, fortifications).
+
+    Fetches features, filters to Polygon/MultiPolygon, fills heights, trims columns.
+    """
+    try:
+        gdf = ox.features_from_bbox(bbox, tags=tags)
+        gdf = gdf.reset_index(drop=True)
+        gdf = gdf[
+            gdf.geometry.notna() &
+            gdf.geometry.geom_type.isin({"Polygon", "MultiPolygon", "LineString", "MultiLineString"})
+        ].reset_index(drop=True)
+        gdf = _fill_heights(gdf, default_m=height_default, lo=height_lo, hi=height_hi)
+        keep = ["geometry", "height_m"] + keep_cols
+        gdf = gdf[[c for c in keep if c in gdf.columns]]
+        result = json.loads(gdf.to_json())
+        logger.info(f"[{label}] fetched {len(gdf)} features")
+        return result
+    except Exception as e:
+        logger.warning(f"OSM {label} fetch failed: {e}", exc_info=True)
+        return _empty_fc(str(e))
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 def fetch_osm_data(
     north: float, south: float, east: float, west: float,
     layers: List[str],
@@ -188,8 +327,8 @@ def fetch_osm_data(
     Fetch OSM building, road, waterway, and POI data for a bounding box.
 
     Uses osmnx to query the Overpass API.  Returns a dict with one key per
-    requested layer (buildings / roads / waterways / pois), each value being a
-    GeoJSON FeatureCollection dict.
+    requested layer (buildings / roads / waterways / pois / walls / towers /
+    churches / fortifications), each value being a GeoJSON FeatureCollection.
 
     Raises:
         RuntimeError  if osmnx is not installed.
@@ -202,205 +341,56 @@ def fetch_osm_data(
     # Convert simplification tolerance from metres to degrees (~111 km per degree)
     tol_deg = simplify_tolerance / 111_000.0
 
-    result: dict = {}
-
     # osmnx 2.x bbox format: (left, bottom, right, top) = (west, south, east, north)
     bbox = (west, south, east, north)
 
+    result: dict = {}
+
     if "buildings" in layers:
-        try:
-            gdf = ox.features_from_bbox(bbox, tags={"building": True})
-            gdf = gdf[gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])].reset_index(drop=True)
-            n_raw = len(gdf)
-            if min_area > 0 and len(gdf):
-                # Project to EPSG:3857 (metres) for accurate area calculation; WGS84 degree²
-                # is distorted by cos(lat) and would filter too aggressively at higher latitudes.
-                gdf_m = gdf.to_crs(epsg=3857)
-                gdf = gdf[gdf_m.geometry.area >= min_area].reset_index(drop=True)
-            logger.info(
-                f"[buildings] raw={n_raw} features  after area filter (>={min_area} m²): {len(gdf)} features"
-            )
-            if tol_deg > 0 and len(gdf):
-                gdf_m_pre = gdf.to_crs(epsg=3857)
-                verts_before = int(gdf_m_pre.geometry.apply(lambda g: sum(len(p.exterior.coords) for p in ([g] if g.geom_type == 'Polygon' else g.geoms))).sum())
-                area_before  = float(gdf_m_pre.geometry.area.sum())
-                # Simplify individual building polygons to reduce vertex count before dissolve.
-                gdf["geometry"] = gdf["geometry"].simplify(tol_deg, preserve_topology=True)
-                gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].reset_index(drop=True)
-                gdf_m_post = gdf.to_crs(epsg=3857)
-                verts_after = int(gdf_m_post.geometry.apply(lambda g: sum(len(p.exterior.coords) for p in ([g] if g.geom_type == 'Polygon' else g.geoms))).sum())
-                area_after  = float(gdf_m_post.geometry.area.sum())
-                area_delta_pct = (area_after - area_before) / area_before * 100 if area_before else 0
-                logger.info(
-                    f"[buildings] geometry simplify (tol={simplify_tolerance} m): "
-                    f"vertices {verts_before} → {verts_after} ({verts_after/verts_before*100:.1f}%)  |  "
-                    f"area {area_before/1e4:.2f} → {area_after/1e4:.2f} ha  (Δ {area_delta_pct:+.2f}%)"
-                )
-            # Fill heights before reduce so height_m is available as dissolve key
-            gdf = _fill_building_heights(gdf)
-            n_pre_dissolve = len(gdf)
-            gdf_m_pre_d = gdf.to_crs(epsg=3857)
-            area_pre_dissolve = float(gdf_m_pre_d.geometry.area.sum())
-            # Dissolve touching same-height buildings — reduces polygon count
-            gdf = _reduce_buildings(gdf)
-            gdf_m_post_d = gdf.to_crs(epsg=3857)
-            area_post_dissolve = float(gdf_m_post_d.geometry.area.sum())
-            area_dissolve_delta_pct = (area_post_dissolve - area_pre_dissolve) / area_pre_dissolve * 100 if area_pre_dissolve else 0
-            logger.info(
-                f"[buildings] dissolve: {n_pre_dissolve} → {len(gdf)} features  |  "
-                f"area {area_pre_dissolve/1e4:.2f} → {area_post_dissolve/1e4:.2f} ha  (Δ {area_dissolve_delta_pct:+.2f}%)"
-            )
-            keep = ["geometry", "height_m"]
-            gdf = gdf[[c for c in keep if c in gdf.columns]]
-            result["buildings"] = json.loads(gdf.to_json())
-        except Exception as e:
-            logger.warning(f"OSM buildings fetch failed: {e}", exc_info=True)
-            result["buildings"] = {"type": "FeatureCollection", "features": [], "error": str(e)}
+        result["buildings"] = _fetch_buildings(ox, bbox, tol_deg, simplify_tolerance, min_area)
 
     if "roads" in layers:
-        try:
-            G = ox.graph_from_bbox(bbox, network_type="drive")
-            _, edges = ox.graph_to_gdfs(G)
-            edges = edges.reset_index(drop=True)
-            # Cities 6: add road_width_m per feature for width-aware rendering
-            if "highway" in edges.columns:
-                edges["road_width_m"] = edges["highway"].apply(_get_road_width_m)
-            keep = ["geometry", "highway", "name", "lanes", "maxspeed", "road_width_m"]
-            edges = edges[[c for c in keep if c in edges.columns]]
-            result["roads"] = json.loads(edges.to_json())
-        except Exception as e:
-            logger.warning(f"OSM roads fetch failed: {e}", exc_info=True)
-            result["roads"] = {"type": "FeatureCollection", "features": [], "error": str(e)}
+        result["roads"] = _fetch_roads(ox, bbox)
 
     if "waterways" in layers:
-        try:
-            water_tags = {"waterway": True, "natural": ["water", "wetland"], "landuse": ["reservoir"]}
-            gdf = ox.features_from_bbox(bbox, tags=water_tags)
-            gdf = gdf.reset_index(drop=True)
-            # Drop null geometries and types the renderer can't handle
-            _supported = {"Polygon", "MultiPolygon", "LineString", "MultiLineString"}
-            gdf = gdf[gdf.geometry.notna() & gdf.geometry.geom_type.isin(_supported)].reset_index(drop=True)
-            if tol_deg > 0 and len(gdf):
-                gdf_m_pre = gdf.to_crs(epsg=3857)
-                poly_mask = gdf_m_pre.geometry.geom_type.isin(["Polygon", "MultiPolygon"])
-                def _count_verts(g):
-                    if g.geom_type in ("LineString",): return len(g.coords)
-                    if g.geom_type == "MultiLineString": return sum(len(l.coords) for l in g.geoms)
-                    if g.geom_type == "Polygon": return len(g.exterior.coords)
-                    if g.geom_type == "MultiPolygon": return sum(len(p.exterior.coords) for p in g.geoms)
-                    return 0
-                verts_before = int(gdf_m_pre.geometry.apply(_count_verts).sum())
-                area_before  = float(gdf_m_pre.geometry[poly_mask].area.sum()) if poly_mask.any() else 0.0
-                gdf["geometry"] = gdf["geometry"].simplify(tol_deg, preserve_topology=True)
-                # Fix any degenerate geometries produced by simplification
-                gdf["geometry"] = gdf.geometry.make_valid()
-                gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].reset_index(drop=True)
-                gdf_m_post = gdf.to_crs(epsg=3857)
-                poly_mask_post = gdf_m_post.geometry.geom_type.isin(["Polygon", "MultiPolygon"])
-                verts_after = int(gdf_m_post.geometry.apply(_count_verts).sum())
-                area_after  = float(gdf_m_post.geometry[poly_mask_post].area.sum()) if poly_mask_post.any() else 0.0
-                area_delta_pct = (area_after - area_before) / area_before * 100 if area_before else 0
-                logger.info(
-                    f"[waterways] geometry simplify (tol={simplify_tolerance} m): "
-                    f"vertices {verts_before} → {verts_after} ({verts_after/verts_before*100:.1f}% of original)  |  "
-                    f"polygon area {area_before/1e4:.2f} → {area_after/1e4:.2f} ha  (Δ {area_delta_pct:+.2f}%)"
-                )
-            else:
-                gdf["geometry"] = gdf.geometry.make_valid()
-                gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].reset_index(drop=True)
-            keep = ["geometry", "waterway", "natural", "name", "water"]
-            gdf = gdf[[c for c in keep if c in gdf.columns]]
-            result["waterways"] = json.loads(gdf.to_json())
-        except Exception as e:
-            logger.warning(f"OSM waterways fetch failed: {e}", exc_info=True)
-            result["waterways"] = {"type": "FeatureCollection", "features": [], "error": str(e)}
+        result["waterways"] = _fetch_waterways(ox, bbox, tol_deg, simplify_tolerance)
 
     if "pois" in layers:
-        try:
-            poi_tags = {"amenity": True, "tourism": True, "historic": True}
-            gdf = ox.features_from_bbox(bbox, tags=poi_tags)
-            gdf = gdf[gdf.geometry.geom_type == "Point"].reset_index(drop=True)
-            keep = ["geometry", "amenity", "tourism", "historic", "name"]
-            gdf = gdf[[c for c in keep if c in gdf.columns]]
-            result["pois"] = json.loads(gdf.to_json())
-        except Exception as e:
-            logger.warning(f"OSM pois fetch failed: {e}", exc_info=True)
-            result["pois"] = {"type": "FeatureCollection", "features": [], "error": str(e)}
+        result["pois"] = _fetch_pois(ox, bbox)
 
     if "walls" in layers:
-        try:
-            # historic=city_wall (OSM tag) OR barrier=city_wall (modern barrier tag)
-            gdf = ox.features_from_bbox(bbox, tags={"historic": "city_wall", "barrier": "city_wall"})
-            gdf = gdf.reset_index(drop=True)
-            _supported = {"LineString", "MultiLineString", "Polygon", "MultiPolygon"}
-            gdf = gdf[gdf.geometry.notna() & gdf.geometry.geom_type.isin(_supported)].reset_index(drop=True)
-            gdf = _fill_heights(gdf, default_m=8.0, lo=2.0, hi=30.0)
-            keep = ["geometry", "height_m", "name"]
-            gdf = gdf[[c for c in keep if c in gdf.columns]]
-            result["walls"] = json.loads(gdf.to_json())
-            logger.info(f"[walls] fetched {len(gdf)} features")
-        except Exception as e:
-            logger.warning(f"OSM walls fetch failed: {e}", exc_info=True)
-            result["walls"] = {"type": "FeatureCollection", "features": [], "error": str(e)}
+        result["walls"] = _fetch_polygon_layer(
+            ox, bbox,
+            tags={"historic": "city_wall", "barrier": "city_wall"},
+            height_default=8.0, height_lo=2.0, height_hi=30.0,
+            keep_cols=["name"], label="walls",
+        )
 
     if "towers" in layers:
-        try:
-            # Narrow to architectural/historic tower types: avoids flooding results with
-            # cell/radio/water towers tagged man_made=tower in dense urban areas.
-            tower_tags = {"historic": ["tower", "watchtower", "fortification"],
-                          "man_made": ["defensive_works"],
-                          "tower:type": ["defensive", "watchtower", "bell_tower", "minaret"]}
-            gdf = ox.features_from_bbox(bbox, tags=tower_tags)
-            gdf = gdf.reset_index(drop=True)
-            gdf = gdf[
-                gdf.geometry.notna() &
-                gdf.geometry.geom_type.isin({"Polygon", "MultiPolygon"})
-            ].reset_index(drop=True)
-            gdf = _fill_heights(gdf, default_m=20.0, lo=5.0, hi=200.0)
-            keep = ["geometry", "height_m", "name"]
-            gdf = gdf[[c for c in keep if c in gdf.columns]]
-            result["towers"] = json.loads(gdf.to_json())
-            logger.info(f"[towers] fetched {len(gdf)} features")
-        except Exception as e:
-            logger.warning(f"OSM towers fetch failed: {e}", exc_info=True)
-            result["towers"] = {"type": "FeatureCollection", "features": [], "error": str(e)}
+        result["towers"] = _fetch_polygon_layer(
+            ox, bbox,
+            tags={"historic": ["tower", "watchtower", "fortification"],
+                  "man_made": ["defensive_works"],
+                  "tower:type": ["defensive", "watchtower", "bell_tower", "minaret"]},
+            height_default=20.0, height_lo=5.0, height_hi=200.0,
+            keep_cols=["name"], label="towers",
+        )
 
     if "churches" in layers:
-        try:
-            gdf = ox.features_from_bbox(bbox, tags={"amenity": "place_of_worship"})
-            gdf = gdf.reset_index(drop=True)
-            gdf = gdf[
-                gdf.geometry.notna() &
-                gdf.geometry.geom_type.isin({"Polygon", "MultiPolygon"})
-            ].reset_index(drop=True)
-            gdf = _fill_heights(gdf, default_m=15.0, lo=3.0, hi=150.0)
-            keep = ["geometry", "height_m", "name", "amenity", "religion"]
-            gdf = gdf[[c for c in keep if c in gdf.columns]]
-            result["churches"] = json.loads(gdf.to_json())
-            logger.info(f"[churches] fetched {len(gdf)} features")
-        except Exception as e:
-            logger.warning(f"OSM churches fetch failed: {e}", exc_info=True)
-            result["churches"] = {"type": "FeatureCollection", "features": [], "error": str(e)}
+        result["churches"] = _fetch_polygon_layer(
+            ox, bbox,
+            tags={"amenity": "place_of_worship"},
+            height_default=15.0, height_lo=3.0, height_hi=150.0,
+            keep_cols=["name", "amenity", "religion"], label="churches",
+        )
 
     if "fortifications" in layers:
-        try:
-            gdf = ox.features_from_bbox(
-                bbox,
-                tags={"historic": ["fort", "castle", "fortress", "fortification"]},
-            )
-            gdf = gdf.reset_index(drop=True)
-            gdf = gdf[
-                gdf.geometry.notna() &
-                gdf.geometry.geom_type.isin({"Polygon", "MultiPolygon"})
-            ].reset_index(drop=True)
-            gdf = _fill_heights(gdf, default_m=12.0, lo=3.0, hi=60.0)
-            keep = ["geometry", "height_m", "name", "historic"]
-            gdf = gdf[[c for c in keep if c in gdf.columns]]
-            result["fortifications"] = json.loads(gdf.to_json())
-            logger.info(f"[fortifications] fetched {len(gdf)} features")
-        except Exception as e:
-            logger.warning(f"OSM fortifications fetch failed: {e}", exc_info=True)
-            result["fortifications"] = {"type": "FeatureCollection", "features": [], "error": str(e)}
+        result["fortifications"] = _fetch_polygon_layer(
+            ox, bbox,
+            tags={"historic": ["fort", "castle", "fortress", "fortification"]},
+            height_default=12.0, height_lo=3.0, height_hi=60.0,
+            keep_cols=["name", "historic"], label="fortifications",
+        )
 
     return result
 
@@ -468,7 +458,6 @@ def rasterize_city_data(
             # Convert metres to degrees (approximate at this latitude)
             mid_lat = (north + south) / 2
             import math
-            metres_per_deg_lat = 111_000.0
             metres_per_deg_lon = 111_000.0 * math.cos(math.radians(mid_lat))
             buf_deg = (width_m / 2) / metres_per_deg_lon
             s = shape(geom).buffer(max(buf_deg, (north - south) / dim * 0.5))

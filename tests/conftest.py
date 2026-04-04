@@ -24,13 +24,33 @@ for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT), str(_UI_DIR)):
 os.environ["STRM2STL_TEST_MODE"] = "1"
 
 
+def _seed_db(db_path: Path) -> None:
+    """Initialise a fresh SQLite DB and insert the pre-existing TestRegion."""
+    import core.db as db_module
+    db_module.init_db(db_path)
+    import sqlite3
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute(
+        "INSERT OR REPLACE INTO regions "
+        "(name, label, description, north, south, east, west, "
+        " dim, depth_scale, water_scale, height, base, subtract_water, sat_scale) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("TestRegion", None, "Test region",
+         40.0, 39.9, -75.1, -75.2,
+         100, 0.5, 0.05, 10.0, 2.0, 1, 500),
+    )
+    conn.commit()
+    conn.close()
+
+
 @pytest.fixture()
 def tmp_data_dir(tmp_path, monkeypatch):
     """
     Redirect storage paths to a temporary directory so tests never touch
     real data files or the production SQLite database.
 
-    - Forces JSON fallback in regions router (skips SQLite).
+    - Points core.db.DB_PATH to a fresh tmp SQLite file with TestRegion seeded.
     - Redirects CACHE_ROOT so cache reads/writes go to tmp/.
     - Redirects legacy OSM_CACHE_PATH in the cities router.
 
@@ -41,31 +61,14 @@ def tmp_data_dir(tmp_path, monkeypatch):
     # Trigger the server import first so all modules are in sys.modules
     import strm2stl.ui.server  # noqa: F401 — ensures routers are imported
 
-    import routers.regions as regions_router
+    import core.db as db_module
     import core.cache as cache_module
     import routers.cities as cities_router
 
-    # Use JSON fallback so tests don't depend on a production SQLite DB
-    monkeypatch.setattr(regions_router, "_DB_AVAILABLE", False)
-
-    # Coordinates file with one pre-existing region
-    coords_file = tmp_path / "coordinates.json"
-    coords_file.write_text(json.dumps({"regions": [
-        {
-            "name": "TestRegion",
-            "north": 40.0, "south": 39.9, "east": -75.1, "west": -75.2,
-            "description": "Test region",
-            "label": None,
-            "parameters": {
-                "dim": 100, "depth_scale": 0.5, "water_scale": 0.05,
-                "height": 10, "base": 2, "subtract_water": True, "sat_scale": 500
-            }
-        }
-    ]}))
-
-    settings_file = tmp_path / "region_settings.json"
-    monkeypatch.setattr(regions_router, "COORDINATES_PATH", coords_file)
-    monkeypatch.setattr(regions_router, "REGION_SETTINGS_PATH", settings_file)
+    # Redirect SQLite to a fresh temp file with TestRegion pre-seeded
+    test_db = tmp_path / "test_data.db"
+    _seed_db(test_db)
+    monkeypatch.setattr(db_module, "DB_PATH", test_db)
 
     # Redirect disk cache so tests never write to Code/cache/
     test_cache_root = tmp_path / "cache"
@@ -80,8 +83,7 @@ def tmp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(cities_router, "OSM_CACHE_PATH", osm_cache)
 
     return {
-        "coords_file": coords_file,
-        "settings_file": settings_file,
+        "db_path": test_db,
         "osm_cache": osm_cache,
         "cache_root": test_cache_root,
         "tmp_path": tmp_path,
