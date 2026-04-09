@@ -13,10 +13,11 @@ Cache key scheme
 Directory layout (under project_root/cache/)
 --------------------------------------------
   cache/
-  ├── dem/       {key}.npz  +  {key}.json
-  ├── water/     {key}.npz  +  {key}.json
-  ├── satellite/ {key}.npz  +  {key}.json
-  └── osm/       {key}.json.gz
+  ├── dem/        {key}.npz  +  {key}.json
+  ├── water/      {key}.npz  +  {key}.json
+  ├── satellite/  {key}.npz  +  {key}.json
+  ├── osm/        {key}.json.gz
+  └── opentopo/   {key}.tif  (raw GeoTIFFs from OpenTopography API)
 """
 
 from __future__ import annotations
@@ -39,11 +40,12 @@ CACHE_ROOT = _STRM2STL_DIR / "cache"
 
 # Per-namespace TTLs in seconds
 NAMESPACE_TTL = {
-    "dem":       30 * 86400,   # 30 days
-    "water":     14 * 86400,   # 14 days
-    "satellite": 14 * 86400,   # 14 days
-    "osm":        7 * 86400,   #  7 days
-    "composite": 30 * 86400,   # 30 days (city rasters tied to OSM data)
+    "dem":        30 * 86400,   # 30 days
+    "water":      14 * 86400,   # 14 days
+    "satellite":  14 * 86400,   # 14 days
+    "osm":         7 * 86400,   #  7 days
+    "composite":  30 * 86400,   # 30 days (city rasters tied to OSM data)
+    "opentopo":   90 * 86400,   # 90 days (raw GeoTIFFs rarely change)
 }
 MAX_FILES_PER_NAMESPACE = 200
 

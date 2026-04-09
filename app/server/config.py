@@ -35,8 +35,8 @@ REGION_SETTINGS_PATH = _STRM2STL_DIR / "region_settings.json"
 # Legacy OSM cache (plain JSON — migrated to CACHE_ROOT/osm/ on startup)
 OSM_CACHE_PATH = _STRM2STL_DIR / "osm_raw_cache"
 
-# OpenTopography GeoTIFF tile cache
-OPENTOPO_CACHE_PATH = _STRM2STL_DIR / "opentopo_cache"
+# OpenTopography GeoTIFF tile cache (under unified cache/ tree)
+OPENTOPO_CACHE_PATH = _STRM2STL_DIR / "cache" / "opentopo"
 
 # Earth Engine / legacy ee-joblib cache
 EE_CACHE_DIR = _PROJECT_ROOT / "cache" / "ee"

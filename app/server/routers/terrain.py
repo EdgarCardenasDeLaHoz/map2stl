@@ -14,7 +14,8 @@ from functools import partial
 from pathlib import Path
 
 # Ensure local packages (numpy2stl, geo2stl) are importable without os.chdir.
-_STRM2STL_DIR = str(Path(__file__).parent.parent.parent)
+# app/server/routers → routers → server → app → strm2stl
+_STRM2STL_DIR = str(Path(__file__).parent.parent.parent.parent)
 if _STRM2STL_DIR not in sys.path:
     sys.path.insert(0, _STRM2STL_DIR)
 
@@ -36,6 +37,8 @@ from app.server.core.dem import (
     upsample_dem as _upsample_dem,
     make_dem_payload as _make_dem_payload,
     compute_raw_dem as _compute_raw_dem,
+)
+from app.server.core.sat import (
     fetch_water_mask as _fetch_water_mask,
     fetch_water_mask_images as _fetch_water_mask_images,
     fetch_sat_overlay as _fetch_sat_overlay,
