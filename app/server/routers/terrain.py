@@ -22,14 +22,14 @@ import numpy as np
 from fastapi import APIRouter, Request, Query
 from fastapi.responses import JSONResponse
 
-from app.config import (
+from app.server.config import (
     TEST_MODE,
     OPENTOPO_DATASETS,
     OPENTOPO_API_KEY as _OPENTOPO_API_KEY,
     H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
 )
-from app.core.cache import make_cache_key, write_array_cache, read_array_cache
-from app.core.dem import (
+from app.server.core.cache import make_cache_key, write_array_cache, read_array_cache
+from app.server.core.dem import (
     fetch_layer_data as _fetch_layer_data,
     apply_layer_processing as _apply_layer_processing,
     blend_layers as _blend_layers,
@@ -467,7 +467,7 @@ async def merge_dem_layers(request: Request):
     Merge multiple elevation/mask layers into one composite DEM.
     Each layer specifies a source, resolution, per-layer processing, and a blend mode.
     """
-    from app.schemas import MergeRequest
+    from app.server.schemas import MergeRequest
     try:
         body = await request.json()
         req = MergeRequest(**body)

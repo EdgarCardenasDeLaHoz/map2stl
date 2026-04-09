@@ -13,8 +13,8 @@
 
 ```bash
 cd strm2stl && source ../.venv/bin/activate
-python -m uvicorn app.server:app --port 9000 --reload   # starts FastAPI
-python -m pytest tests/ -v                              # run all tests (108, 7 files)
+python -m uvicorn app.server.server:app --port 9000 --reload   # starts FastAPI
+python -m pytest tests/ -v                                     # run all tests (108, 7 files)
 ```
 
 ## When to Read What
@@ -42,29 +42,25 @@ python -m pytest tests/ -v                              # run all tests (108, 7 
 ```
 strm2stl/
 │
-│  ── web application ────────────────────────────────────────────────────
+│  ── application ────────────────────────────────────────────────────────
 ├── app/
-│   ├── server.py          ← FastAPI app + startup lifespan  (entry: uvicorn app.server:app)
-│   ├── config.py          ← constants, OPENTOPO_DATASETS, API keys
-│   ├── schemas.py         ← all Pydantic models
-│   ├── core/              ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py
-│   └── routers/           ← terrain.py, regions.py, export.py, cities.py, cache.py, settings.py
-│
-│  ── headless session SDK ───────────────────────────────────────────────
-├── session/
-│   ├── terrain_session.py ← Python client wrapping all API endpoints (used in notebooks)
-│   └── viz.py             ← visualisation utilities for session output
+│   ├── server/            ← HTTP server (Python/FastAPI)
+│   │   ├── server.py      ← FastAPI app + lifespan  (entry: uvicorn app.server.server:app)
+│   │   ├── config.py      ← constants, OPENTOPO_DATASETS, API keys
+│   │   ├── schemas.py     ← all Pydantic models
+│   │   ├── core/          ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py
+│   │   └── routers/       ← terrain.py, regions.py, export.py, cities.py, cache.py, settings.py
+│   ├── client/            ← browser client (HTML/CSS/JS)
+│   │   ├── static/js/     ← main.js, modules/ (30 ES modules in 8 subdirs)
+│   │   ├── static/css/    ← app.css
+│   │   └── templates/     ← index.html
+│   └── session/           ← Python SDK client (talks to server over HTTP)
+│       ├── terrain_session.py
+│       └── viz.py
 │
 │  ── geo/mesh libraries ─────────────────────────────────────────────────
 ├── geo2stl/               ← map projections + tile stitching
 ├── city2stl/              ← OSM/building to 3D mesh helpers
-│
-│  ── front-end ──────────────────────────────────────────────────────────
-├── static/js/
-│   ├── app.js             ← thin shim / legacy compat
-│   ├── main.js            ← ES module entry (imports all modules in order)
-│   └── modules/           ← 30 ES modules in 8 subdirs (see docs/modules.md)
-├── templates/index.html   ← single-page app template
 │
 │  ── project tooling ────────────────────────────────────────────────────
 ├── tests/                 ← pytest suite (conftest.py + 7 test files)
@@ -95,7 +91,7 @@ strm2stl/
 3. **Modules expose `window.*`** — they do not import each other. Coordination is via `window.appState` and `window.events`.
 4. **`app.js` is a plain `<script>`** — not an ES module. Keep public functions on `window.*`.
 5. **New closure vars go on `window.appState`** — so modules can access them. See `docs/state.md`.
-6. **Patch at the short-path module boundary in tests** — e.g. `app.routers.regions`, not `strm2stl.ui.routers.regions`.
+6. **Patch at the correct module path in tests** — e.g. `app.server.routers.cities._fetch_osm_data`, not `app.routers.cities._fetch_osm_data`.
 7. **Backend**: blocking ops go in `run_in_executor`; `asyncio.get_running_loop()` not `get_event_loop()`.
 
 ## Full Details

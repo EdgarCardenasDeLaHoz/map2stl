@@ -29,7 +29,7 @@ EMPTY_OSM = {
 def _write_osm_cache(cache_root: Path, bbox: dict, data: dict,
                      tol: float = 0.5, min_area: float = 5.0):
     """Helper: write OSM data as .json.gz where the composite route expects it."""
-    from app.core.cache import osm_cache_key
+    from app.server.core.cache import osm_cache_key
     key = osm_cache_key(
         bbox["north"], bbox["south"], bbox["east"], bbox["west"], tol, min_area
     )
@@ -71,7 +71,7 @@ class TestCityRasterEndpoint:
 
     def test_cache_hit_skips_rasterization(self, client, tmp_data_dir, monkeypatch):
         """Second identical request is served from the array cache."""
-        import app.routers.composite as comp_router
+        import app.server.routers.composite as comp_router
 
         _write_osm_cache(tmp_data_dir["cache_root"], SMALL_BBOX, EMPTY_OSM)
 

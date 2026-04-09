@@ -18,13 +18,13 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["regions"])
 
-from app.core.db import get_db, init_db
+from app.server.core.db import get_db, init_db
 
 # ---------------------------------------------------------------------------
 # Schema imports — try schemas.py first, inline fallback
 # ---------------------------------------------------------------------------
 try:
-    from app.schemas import RegionCreate, RegionParameters, RegionSettings
+    from app.server.schemas import RegionCreate, RegionParameters, RegionSettings
 except ImportError:
     from pydantic import BaseModel, Field
 

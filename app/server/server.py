@@ -3,8 +3,8 @@
 # importable whether this file is run as a script or imported as a module.
 import sys as _sys
 from pathlib import Path as _Path
-_STRM2STL_ROOT = str(_Path(__file__).parent.parent)  # .../strm2stl/
-_CODE_ROOT = str(_Path(__file__).parent.parent.parent)  # .../Code/
+_STRM2STL_ROOT = str(_Path(__file__).parent.parent.parent)      # .../strm2stl/
+_CODE_ROOT = str(_Path(__file__).parent.parent.parent.parent)   # .../Code/
 for _p in (_CODE_ROOT, _STRM2STL_ROOT):
     if _p not in _sys.path:
         _sys.path.insert(0, _p)
@@ -15,10 +15,10 @@ import webbrowser
 import threading
 import uvicorn
 from fastapi import FastAPI, Request
-from app.config import OSM_CACHE_PATH
+from app.server.config import OSM_CACHE_PATH
 # Disk-cache helpers: prune on startup, migrate legacy OSM cache
 try:
-    from app.core.cache import prune_all_caches, migrate_osm_plain_json
+    from app.server.core.cache import prune_all_caches, migrate_osm_plain_json
     _CACHE_AVAILABLE = True
 except ImportError:
     _CACHE_AVAILABLE = False
@@ -39,7 +39,7 @@ from logging.handlers import RotatingFileHandler
 
 # Configure logging to write to a file — use an absolute path so the log
 # file never lands inside a directory watched by uvicorn's auto-reloader.
-log_file = str(Path(__file__).parent.parent / "server.log")
+log_file = str(Path(__file__).parent.parent.parent / "server.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -86,7 +86,7 @@ app = FastAPI(lifespan=_lifespan)
 
 # Template path using absolute path
 templates_path = os.path.join(os.path.dirname(
-    os.path.abspath(__file__)), "templates")
+    os.path.abspath(__file__)), "..", "..", "client", "templates")
 logger.info(f"Templates path: {templates_path}")
 templates = Jinja2Templates(directory=templates_path)
 
@@ -97,7 +97,7 @@ from fastapi.responses import FileResponse as _FileResponse
 import mimetypes as _mimetypes
 
 static_path = os.path.join(os.path.dirname(
-    os.path.abspath(__file__)), "static")
+    os.path.abspath(__file__)), "..", "..", "client", "static")
 
 @app.get("/static/{file_path:path}")
 async def serve_static(file_path: str):
@@ -117,13 +117,13 @@ if not os.path.isdir(static_path):
 # ---------------------------------------------------------------------------
 # Routers (backend refactor step 6)
 # ---------------------------------------------------------------------------
-from app.routers.regions import router as _regions_router
-from app.routers.terrain import router as _terrain_router
-from app.routers.cities import router as _cities_router
-from app.routers.export import router as _export_router
-from app.routers.cache import router as _cache_router
-from app.routers.settings import router as _settings_router
-from app.routers.composite import router as _composite_router
+from app.server.routers.regions import router as _regions_router
+from app.server.routers.terrain import router as _terrain_router
+from app.server.routers.cities import router as _cities_router
+from app.server.routers.export import router as _export_router
+from app.server.routers.cache import router as _cache_router
+from app.server.routers.settings import router as _settings_router
+from app.server.routers.composite import router as _composite_router
 app.include_router(_regions_router)
 app.include_router(_terrain_router)
 app.include_router(_cities_router)
@@ -138,7 +138,7 @@ logger.info("Routers loaded: regions, terrain, cities, export, cache, settings, 
 # Pydantic Schemas — imported from schemas.py (backend refactor step 2)
 # ============================================================
 try:
-    from app.schemas import (
+    from app.server.schemas import (
         BoundingBox, BoundingBoxLegacy,
         RegionParameters, RegionCreate, RegionResponse, RegionsListResponse,
         RegionSettings, CityRequest,
@@ -209,7 +209,7 @@ def _build_global_dem_cache(force: bool = False) -> bool:
     import cv2 as _cv2
     from PIL import Image as _PILImage
 
-    static_dir = Path(__file__).parent / "static"
+    static_dir = Path(__file__).parent.parent.parent / "client" / "static"
     static_dir.mkdir(exist_ok=True)
     png_path = static_dir / "global_dem.png"
     meta_path = static_dir / "global_dem_meta.json"
@@ -284,7 +284,7 @@ async def get_global_dem_overview(regen: bool = False):
     from fastapi.responses import FileResponse as _FR
     import json as _json
 
-    static_dir = Path(__file__).parent / "static"
+    static_dir = Path(__file__).parent.parent.parent / "client" / "static"
     png_path = static_dir / "global_dem.png"
     meta_path = static_dir / "global_dem_meta.json"
 

@@ -37,7 +37,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.core.cache import make_cache_key, osm_cache_key, read_array_cache, write_array_cache, read_osm_cache
+from app.server.core.cache import make_cache_key, osm_cache_key, read_array_cache, write_array_cache, read_osm_cache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["composite"])

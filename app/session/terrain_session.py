@@ -38,8 +38,8 @@ import pandas as pd
 import requests
 from IPython.display import display
 
-# Paths relative to this file (strm2stl/session/)
-_STRM2STL_DIR = Path(__file__).parent.parent   # strm2stl/
+# Paths relative to this file (app/session/ → app/ → strm2stl/)
+_STRM2STL_DIR = Path(__file__).parent.parent.parent   # strm2stl/
 _VENV_PYTHON = _STRM2STL_DIR.parent / ".venv" / "Scripts" / "python.exe"
 
 _DEFAULT_SETTINGS: dict = {
@@ -214,7 +214,7 @@ class TerrainSession:
         python_exe = str(
             _VENV_PYTHON) if _VENV_PYTHON.exists() else sys.executable
         self._server_proc = subprocess.Popen(
-            [python_exe, "-m", "uvicorn", "app.server:app",
+            [python_exe, "-m", "uvicorn", "app.server.server:app",
              "--host", "127.0.0.1", "--port", str(self._port)],
             cwd=str(_STRM2STL_DIR),
             stdout=subprocess.DEVNULL,
@@ -764,7 +764,7 @@ class TerrainSession:
         """
         if self.dem is None:
             raise RuntimeError("Call fetch_dem() first")
-        from session.viz import plot_data
+        from app.session.viz import plot_data
         H, W = self.dem["dimensions"]
         grid = np.array(self.dem["dem_values"]).reshape(
             H, W)  # server returns north-up (row 0 = north)

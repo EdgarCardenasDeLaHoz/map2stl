@@ -23,7 +23,7 @@ router = APIRouter(tags=["cities"])
 # Config imports
 # ---------------------------------------------------------------------------
 try:
-    from app.config import OSM_CACHE_PATH
+    from app.server.config import OSM_CACHE_PATH
 except ImportError:
     _UI_DIR = Path(__file__).parent.parent
     OSM_CACHE_PATH = _UI_DIR.parent / "osm_raw_cache"
@@ -32,7 +32,7 @@ except ImportError:
 # Cache helpers
 # ---------------------------------------------------------------------------
 try:
-    from app.core.cache import read_osm_cache, write_osm_cache, osm_cache_key, CACHE_ROOT
+    from app.server.core.cache import read_osm_cache, write_osm_cache, osm_cache_key, CACHE_ROOT
     _CACHE_AVAILABLE = True
 except ImportError:
     _CACHE_AVAILABLE = False
@@ -42,7 +42,7 @@ except ImportError:
 # OSM fetch helper
 # ---------------------------------------------------------------------------
 try:
-    from app.core.osm import fetch_osm_data as _fetch_osm_data, rasterize_city_data as _rasterize_city_data
+    from app.server.core.osm import fetch_osm_data as _fetch_osm_data, rasterize_city_data as _rasterize_city_data
 except ImportError:
     def _fetch_osm_data(*a, **kw):
         raise RuntimeError("core.osm not available")
@@ -53,7 +53,7 @@ except ImportError:
 # 3D export helper
 # ---------------------------------------------------------------------------
 try:
-    from app.core.cities_3d import generate_city_3mf
+    from app.server.core.cities_3d import generate_city_3mf
     _CITIES_3D_AVAILABLE = True
 except ImportError:
     _CITIES_3D_AVAILABLE = False
@@ -61,7 +61,7 @@ except ImportError:
 
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
-from app.schemas import CityRequest, CityRasterRequest
+from app.server.schemas import CityRequest, CityRasterRequest
 
 
 class CityExportRequest(BaseModel):

@@ -30,16 +30,16 @@ from pathlib import Path
 _TOOLS_DIR      = Path(__file__).resolve().parent   # strm2stl/tools/
 _STRM2STL_DIR   = _TOOLS_DIR.parent                 # strm2stl/
 
-# Add strm2stl/ to path so we can import app.core.db and app.config
+# Add strm2stl/ to path so we can import app.server.core.db and app.config
 sys.path.insert(0, str(_STRM2STL_DIR))
 
 try:
-    from app.core.db import get_db, init_db, DB_PATH
+    from app.server.core.db import get_db, init_db, DB_PATH
 except ImportError as exc:
-    sys.exit(f"Cannot import app.core.db: {exc}\nRun this script from the strm2stl root or ensure the venv is active.")
+    sys.exit(f"Cannot import app.server.core.db: {exc}\nRun this script from the strm2stl root or ensure the venv is active.")
 
 try:
-    from app.config import COORDINATES_PATH, REGION_SETTINGS_PATH
+    from app.server.config import COORDINATES_PATH, REGION_SETTINGS_PATH
 except ImportError:
     COORDINATES_PATH     = _STRM2STL_DIR / "coordinates.json"
     REGION_SETTINGS_PATH = _STRM2STL_DIR / "region_settings.json"

@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["export"])
 
-from app.core.export import (
+from app.server.core.export import (
     generate_stl,
     generate_obj,
     generate_3mf,

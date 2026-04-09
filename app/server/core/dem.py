@@ -18,11 +18,11 @@ from typing import Optional, TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from app.schemas import ProcessingSpec
+    from app.server.schemas import ProcessingSpec
 
 logger = logging.getLogger(__name__)
 
-from app.config import (
+from app.server.config import (
     OPENTOPO_CACHE_PATH,
     OPENTOPO_API_KEY as _OPENTOPO_API_KEY,
     OPENTOPO_DATASETS,
@@ -30,8 +30,8 @@ from app.config import (
     H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
 )
 
-# strm2stl root dir (app/core/dem.py → app/core → app → strm2stl)
-_STRM2STL_DIR = Path(__file__).parent.parent.parent
+# strm2stl root dir (app/server/core/dem.py → core → server → app → strm2stl)
+_STRM2STL_DIR = Path(__file__).parent.parent.parent.parent
 # Ensure local packages (numpy2stl, geo2stl) are importable without os.chdir.
 if str(_STRM2STL_DIR) not in sys.path:
     sys.path.insert(0, str(_STRM2STL_DIR))
