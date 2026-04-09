@@ -32,7 +32,7 @@ except ImportError:
 # Cache helpers
 # ---------------------------------------------------------------------------
 try:
-    from core.cache import read_osm_cache, write_osm_cache, osm_cache_key, CACHE_ROOT
+    from app.core.cache import read_osm_cache, write_osm_cache, osm_cache_key, CACHE_ROOT
     _CACHE_AVAILABLE = True
 except ImportError:
     _CACHE_AVAILABLE = False
@@ -42,7 +42,7 @@ except ImportError:
 # OSM fetch helper
 # ---------------------------------------------------------------------------
 try:
-    from core.osm import fetch_osm_data as _fetch_osm_data, rasterize_city_data as _rasterize_city_data
+    from app.core.osm import fetch_osm_data as _fetch_osm_data, rasterize_city_data as _rasterize_city_data
 except ImportError:
     def _fetch_osm_data(*a, **kw):
         raise RuntimeError("core.osm not available")
@@ -53,7 +53,7 @@ except ImportError:
 # 3D export helper
 # ---------------------------------------------------------------------------
 try:
-    from core.cities_3d import generate_city_3mf
+    from app.core.cities_3d import generate_city_3mf
     _CITIES_3D_AVAILABLE = True
 except ImportError:
     _CITIES_3D_AVAILABLE = False

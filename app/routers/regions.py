@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["regions"])
 
-from core.db import get_db, init_db
+from app.core.db import get_db, init_db
 
 # ---------------------------------------------------------------------------
 # Schema imports — try schemas.py first, inline fallback

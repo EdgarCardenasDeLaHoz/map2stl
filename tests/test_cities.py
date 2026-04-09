@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 def _osm_key(bbox, tol=2.0, min_area=20.0):
     """Return the expected cache key for the given bbox and defaults."""
-    from core.cache import osm_cache_key
+    from app.core.cache import osm_cache_key
     return osm_cache_key(
         bbox["north"], bbox["south"], bbox["east"], bbox["west"], tol, min_area
     )
@@ -70,7 +70,7 @@ class TestCitiesPostSizeGuard:
         empty_fc = {"type": "FeatureCollection", "features": []}
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("routers.cities._fetch_osm_data", return_value=mock_result):
+        with patch("app.routers.cities._fetch_osm_data", return_value=mock_result):
             resp = client.post("/api/cities", json={
                 "north": 39.960, "south": 39.950, "east": -75.140, "west": -75.170,
                 "layers": ["buildings", "roads", "waterways"]
@@ -90,7 +90,7 @@ class TestCitiesPostCaching:
         empty_fc = {"type": "FeatureCollection", "features": []}
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
+        with patch("app.routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
             client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
             assert mock_fn.call_count == 1
 
@@ -102,7 +102,7 @@ class TestCitiesPostCaching:
         empty_fc = {"type": "FeatureCollection", "features": []}
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("routers.cities._fetch_osm_data", return_value=mock_result):
+        with patch("app.routers.cities._fetch_osm_data", return_value=mock_result):
             resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
 
         body = resp.json()
@@ -114,7 +114,7 @@ class TestCitiesPostCaching:
         empty_fc = {"type": "FeatureCollection", "features": []}
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("routers.cities._fetch_osm_data", return_value=mock_result):
+        with patch("app.routers.cities._fetch_osm_data", return_value=mock_result):
             resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
 
         body = resp.json()
@@ -126,7 +126,7 @@ class TestCitiesPostCaching:
         def raise_runtime(*args, **kwargs):
             raise RuntimeError("osmnx is not installed")
 
-        with patch("routers.cities._fetch_osm_data", side_effect=raise_runtime):
+        with patch("app.routers.cities._fetch_osm_data", side_effect=raise_runtime):
             resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
         assert resp.status_code == 500
         assert "OSM fetch failed" in resp.json()["error"]

@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from config import OSM_CACHE_PATH
 # Disk-cache helpers: prune on startup, migrate legacy OSM cache
 try:
-    from core.cache import prune_all_caches, migrate_osm_plain_json
+    from app.core.cache import prune_all_caches, migrate_osm_plain_json
     _CACHE_AVAILABLE = True
 except ImportError:
     _CACHE_AVAILABLE = False
@@ -117,13 +117,13 @@ if not os.path.isdir(static_path):
 # ---------------------------------------------------------------------------
 # Routers (backend refactor step 6)
 # ---------------------------------------------------------------------------
-from routers.regions import router as _regions_router
-from routers.terrain import router as _terrain_router
-from routers.cities import router as _cities_router
-from routers.export import router as _export_router
-from routers.cache import router as _cache_router
-from routers.settings import router as _settings_router
-from routers.composite import router as _composite_router
+from app.routers.regions import router as _regions_router
+from app.routers.terrain import router as _terrain_router
+from app.routers.cities import router as _cities_router
+from app.routers.export import router as _export_router
+from app.routers.cache import router as _cache_router
+from app.routers.settings import router as _settings_router
+from app.routers.composite import router as _composite_router
 app.include_router(_regions_router)
 app.include_router(_terrain_router)
 app.include_router(_cities_router)

@@ -23,11 +23,11 @@ python -m pytest tests/ -v   # run all tests (7 test files)
 |---|---|
 | Backend endpoint | `docs/api.md` + relevant router file |
 | Session client (Python API) | `terrain_session.py` + `notebooks/Session_API_Reference.ipynb` |
-| Cache / storage | `core/cache.py` header + `docs/api.md` |
-| DEM rendering / colormaps | `docs/modules.md` + `dem/dem-loader.js:1-30` |
-| City / OSM features | `docs/modules.md` + `layers/city-overlay.js:1-40` |
-| Stacked layers / composite | `docs/modules.md` + `layers/stacked-layers.js:1-30` |
-| Region CRUD | `docs/api.md` + `routers/regions.py:1-50` |
+| Cache / storage | `app/core/cache.py` header + `docs/api.md` |
+| DEM rendering / colormaps | `docs/modules.md` + `static/js/modules/dem/dem-loader.js:1-30` |
+| City / OSM features | `docs/modules.md` + `static/js/modules/layers/city-overlay.js:1-40` |
+| Stacked layers / composite | `docs/modules.md` + `static/js/modules/layers/stacked-layers.js:1-30` |
+| Region CRUD | `docs/api.md` + `app/routers/regions.py:1-50` |
 | Frontend state variables | `docs/state.md` |
 | View tabs / navigation | `docs/arch.md` |
 | Data flow debugging | `docs/arch.md` (Data Flow section) |
@@ -41,34 +41,41 @@ python -m pytest tests/ -v   # run all tests (7 test files)
 
 ```
 strm2stl/
-├── CLAUDE.md              ← this file (index only)
+│
+│  ── entry points ──────────────────────────────────────────────────────
 ├── server.py              ← FastAPI app + startup lifespan
-├── schemas.py             ← all Pydantic models
+├── terrain_session.py     ← Python session client wrapping all API endpoints
 ├── config.py              ← constants, OPENTOPO_DATASETS, API keys
-├── core/                  ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py
-├── routers/               ← terrain.py, regions.py, export.py, cities.py, cache.py, settings.py
+├── schemas.py             ← all Pydantic models
+│
+│  ── server internals ──────────────────────────────────────────────────
+├── app/
+│   ├── core/              ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py
+│   └── routers/           ← terrain.py, regions.py, export.py, cities.py, cache.py, settings.py
+│
+│  ── geo/mesh libraries ─────────────────────────────────────────────────
+├── geo2stl/               ← map projections + tile stitching
+├── city2stl/              ← OSM/building to 3D mesh helpers
+│
+│  ── front-end ──────────────────────────────────────────────────────────
 ├── static/js/
 │   ├── app.js             ← ~8300-line plain script (state + DOMContentLoaded)
 │   ├── main.js            ← ES module entry (imports all modules in order)
 │   └── modules/           ← 30 ES modules in 8 subdirs (see docs/modules.md)
 ├── templates/index.html   ← single-page app template
-├── docs/                  ← on-demand reference docs
-│   ├── arch.md            ← frontend/backend architecture + data flows
-│   ├── state.md           ← all global state variables
-│   ├── functions.md       ← function one-liner index
-│   ├── api.md             ← all backend API routes
-│   ├── modules.md         ← JS module map (subdirs + exports)
-│   ├── issues.md          ← known issues + feature status
-│   └── proposals.md       ← AI-proposed features (approve/deny/defer here)
-├── TODO.md                ← open tasks only (ARCH4, ARCH5, PERF6B)
-├── terrain_session.py     ← Python session client wrapping all API endpoints
-├── viz.py                 ← shared visualisation utilities for notebooks
-├── notebooks/             ← Jupyter notebooks + helpers
+│
+│  ── project tooling ────────────────────────────────────────────────────
 ├── tests/                 ← pytest suite (conftest.py + 7 test files)
-├── tools/                 ← utility scripts (import_regions, tile_to_geo)
-├── geo2stl/               ← map projections + tile stitching
-├── city2stl/              ← OSM/building to 3D mesh helpers
-└── data.db                ← SQLite: regions + region_settings (WAL, gitignored)
+├── notebooks/             ← Jupyter notebooks + helpers (API_Terrain, Session_API_Reference, …)
+├── tools/                 ← utility scripts + slicer_configs/
+├── docs/                  ← all reference docs (api, arch, state, modules, proposals, …)
+├── viz.py                 ← visualisation utilities used by terrain_session
+│
+│  ── build / config ─────────────────────────────────────────────────────
+├── Makefile, ruff.toml, requirements*.txt, package.json, vite.config.js
+│
+│  ── runtime (gitignored) ───────────────────────────────────────────────
+└── cache/, output/, data.db, server.log
 ```
 
 ## Proposals Rule
@@ -87,7 +94,7 @@ strm2stl/
 3. **Modules expose `window.*`** — they do not import each other. Coordination is via `window.appState` and `window.events`.
 4. **`app.js` is a plain `<script>`** — not an ES module. Keep public functions on `window.*`.
 5. **New closure vars go on `window.appState`** — so modules can access them. See `docs/state.md`.
-6. **Patch at the short-path module boundary in tests** — e.g. `routers.regions`, not `strm2stl.ui.routers.regions`.
+6. **Patch at the short-path module boundary in tests** — e.g. `app.routers.regions`, not `strm2stl.ui.routers.regions`.
 7. **Backend**: blocking ops go in `run_in_executor`; `asyncio.get_running_loop()` not `get_event_loop()`.
 
 ## Full Details
@@ -100,5 +107,5 @@ strm2stl/
 | API routes + Pydantic models | `docs/api.md` |
 | JS module map | `docs/modules.md` |
 | Known issues + feature status | `docs/issues.md` |
-| Completed feature history | `static/FUNCTIONALITY_DOC.md` |
+| Completed feature history | `docs/functionality_doc.md` |
 | AI-proposed features (approve/deny) | `docs/proposals.md` |

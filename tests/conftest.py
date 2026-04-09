@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 # Point to strm2stl root so imports match the app's own paths.
-# server.py uses short paths like `from routers.regions import router` and
-# `from core.cache import ...`.  We must patch those same module objects.
+# server.py uses short paths like `from app.routers.regions import router` and
+# `from app.core.cache import ...`.  We must patch those same module objects.
 _STRM2STL_ROOT = Path(__file__).parent.parent
 for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT)):
     if _p not in sys.path:
@@ -25,7 +25,7 @@ os.environ["STRM2STL_TEST_MODE"] = "1"
 
 def _seed_db(db_path: Path) -> None:
     """Initialise a fresh SQLite DB and insert the pre-existing TestRegion."""
-    import core.db as db_module
+    import app.core.db as db_module
     db_module.init_db(db_path)
     import sqlite3
     conn = sqlite3.connect(str(db_path))
@@ -54,15 +54,15 @@ def tmp_data_dir(tmp_path, monkeypatch):
     - Redirects legacy OSM_CACHE_PATH in the cities router.
 
     IMPORTANT: imports use the same short paths that server.py uses
-    (e.g. `import routers.regions`, not `strm2stl.ui.routers.regions`)
+    (e.g. `import app.routers.regions`, not `strm2stl.ui.routers.regions`)
     so monkeypatching hits the same module objects the app routes close over.
     """
     # Trigger the server import first so all modules are in sys.modules
     import server  # noqa: F401 — ensures routers are imported
 
-    import core.db as db_module
-    import core.cache as cache_module
-    import routers.cities as cities_router
+    import app.core.db as db_module
+    import app.core.cache as cache_module
+    import app.routers.cities as cities_router
 
     # Redirect SQLite to a fresh temp file with TestRegion pre-seeded
     test_db = tmp_path / "test_data.db"

@@ -28,8 +28,8 @@ from config import (
     OPENTOPO_API_KEY as _OPENTOPO_API_KEY,
     H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
 )
-from core.cache import make_cache_key, write_array_cache, read_array_cache
-from core.dem import (
+from app.core.cache import make_cache_key, write_array_cache, read_array_cache
+from app.core.dem import (
     fetch_layer_data as _fetch_layer_data,
     apply_layer_processing as _apply_layer_processing,
     blend_layers as _blend_layers,

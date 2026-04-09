@@ -30,12 +30,12 @@ test-one:
 
 ## Lint all Python files with ruff
 lint:
-	$(RUFF) check core/ routers/ server.py config.py schemas.py tests/
+	$(RUFF) check app/ server.py config.py schemas.py tests/
 
 ## Auto-fix ruff lint issues
 fmt:
-	$(RUFF) check --fix core/ routers/ server.py config.py schemas.py tests/
-	$(RUFF) format core/ routers/ server.py config.py schemas.py tests/
+	$(RUFF) check --fix app/ server.py config.py schemas.py tests/
+	$(RUFF) format app/ server.py config.py schemas.py tests/
 
 ## Install Python dependencies
 install:

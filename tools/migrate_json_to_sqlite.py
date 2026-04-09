@@ -31,13 +31,13 @@ _SCRIPTS_DIR    = Path(__file__).resolve().parent   # strm2stl/scripts/
 _STRM2STL_DIR   = _SCRIPTS_DIR.parent               # strm2stl/
 _UI_DIR         = _STRM2STL_DIR / "ui"
 
-# Add ui/ to path so we can import core.db and config
+# Add ui/ to path so we can import app.core.db and config
 sys.path.insert(0, str(_UI_DIR))
 
 try:
-    from core.db import get_db, init_db, DB_PATH
+    from app.core.db import get_db, init_db, DB_PATH
 except ImportError as exc:
-    sys.exit(f"Cannot import core.db: {exc}\nRun this script from the strm2stl root or ensure the venv is active.")
+    sys.exit(f"Cannot import app.core.db: {exc}\nRun this script from the strm2stl root or ensure the venv is active.")
 
 try:
     from config import COORDINATES_PATH, REGION_SETTINGS_PATH

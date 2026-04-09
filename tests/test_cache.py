@@ -13,7 +13,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from core.cache import (
+from app.core.cache import (
     make_cache_key,
     osm_cache_key,
     write_array_cache,
@@ -32,7 +32,7 @@ from core.cache import (
 @pytest.fixture()
 def patched_cache(tmp_path, monkeypatch):
     """Redirect CACHE_ROOT to a temp directory for all cache operations."""
-    import core.cache as cache_mod
+    import app.core.cache as cache_mod
     monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path)
     return tmp_path
 
