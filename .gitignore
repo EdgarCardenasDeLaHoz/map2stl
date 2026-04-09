@@ -21,6 +21,7 @@ output/*
 # Runtime / generated
 data.db
 server.log
+opentopo_cache/
 
 # ui/ now contains only leftover JSON cache files — no source code
 ui/

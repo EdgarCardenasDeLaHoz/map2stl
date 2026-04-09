@@ -1,15 +1,15 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  // Serve from ui/static so Vite can find main.js and modules/
-  root: 'ui/static',
+  // Serve from static/ so Vite can find main.js and modules/
+  root: 'static',
 
   // Where to write the production build
   build: {
-    outDir: '../../dist',
+    outDir: '../dist',
     emptyOutDir: true,
     rollupOptions: {
-      input: 'ui/static/js/main.js',
+      input: 'static/js/main.js',
     },
   },
 
