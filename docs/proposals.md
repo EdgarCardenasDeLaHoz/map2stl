@@ -15,11 +15,11 @@
 
 | ID | Description | File(s) | Effort | Status |
 |----|-------------|---------|--------|--------|
-| F-P6 | Elevation band export — split STL mesh into per-band solids for multi-material printing | `ui/routers/export.py`, `export/export-handlers.js` | Large | pending |
+| F-P6 | Elevation band export — split STL mesh into per-band solids for multi-material printing | `app/server/routers/export.py`, `export/export-handlers.js` | Large | pending |
 | F-EXP1 | Export progress indicator — spinner/bar during STL generation (poll `/api/export/status` or streaming) | `export/export-handlers.js` | Medium | pending |
 | F-REG1 | Region list pagination — virtual scroll or 20-per-page for 50+ regions | `regions/region-ui.js` | Medium | pending |
 | F-REG2 | Region import/export — download all as `regions.json`; import via file picker | `regions/regions.js`, `regions/region-ui.js` | Small | pending |
-| F-REG3 | Region settings inheritance — "use global defaults" override per region | `regions/regions.js`, `ui/routers/regions.py` | Medium | pending |
+| F-REG3 | Region settings inheritance — "use global defaults" override per region | `regions/regions.js`, `app/server/routers/regions.py` | Medium | pending |
 | F-UX1 | Consolidate region creation — keep only `floatingDrawBtn`; add empty-state hint to panel | `map/`, `index.html`, `events/event-listeners.js` | Small | pending |
 | F-UX2 | Text labels on floating map buttons — visible `<span>` labels below each icon | `index.html`, `app.css` | Small | pending |
 | F-UX3 | Clarify sidebar 3-state toggle — use "Expand / Collapse / Hide" instead of "Hide/Show" | `index.html`, `ui/view-management.js` | Small | pending |
@@ -34,7 +34,7 @@
 |----|-------------|---------|--------|--------|
 | P-PERF6B | Web Worker for city polygon rendering (Part A — Float32Array buffers — done; Part B — OffscreenCanvas) | `layers/city-render.js`, new `workers/city-worker.js` | Large | pending |
 | P-PLANB-DEM | Off-thread DEM pixel loop — post `{values, lut}` to Worker, receive `ImageBitmap` | `dem/dem-main.js`, new `workers/dem-render-worker.js` | Medium | pending |
-| P-RAF | RAF-gate `applyCurveTodemSilent` if it ever moves back into mousemove | `ui/curve-editor.js` | Small | pending |
+| P-RAF | RAF-gate `applyCurveTodemSilent` if it ever moves back into mousemove | `ui/curve-editor.js` (now `app/client/static/js/modules/ui/curve-editor.js`) | Small | pending |
 
 ---
 
@@ -58,7 +58,7 @@
 | A-ARCH4 | Vite bundler — `npm install` (config already at `vite.config.js`); HMR dev server on port 5173 | `package.json`, `index.html` | Medium | pending |
 | A-ARCH5 | Vitest unit tests for pure functions (requires A-ARCH4) — `interpolateCurve`, `mapElevationToColor`, `detectContinent`, `haversineDiagKm`, `niceGeoInterval` | `tests/` (new) | Medium | pending |
 | A-SW | Service worker for API response caching — stale-while-revalidate for `/api/terrain/dem` and `/api/terrain/satellite` | new `sw.js` | Medium | pending |
-| A-OBJ-TEX | OBJ cross-section export with UV map + PNG texture from current colormap | `ui/core/export.py`, `export/export-handlers.js` | Large | pending |
+| A-OBJ-TEX | OBJ cross-section export with UV map + PNG texture from current colormap | `app/server/core/export.py`, `export/export-handlers.js` | Large | pending |
 
 ---
 
@@ -66,8 +66,8 @@
 
 | ID | Description | File(s) | Effort | Status |
 |----|-------------|---------|--------|--------|
-| B-STREAM | Streaming STL generation — Python generators + `StreamingResponse` to reduce peak RAM | `ui/core/export.py`, `ui/routers/export.py` | Medium | pending |
-| B-MULTI | Print-bed multi-piece export — auto-tile large DEMs into N×M pieces with alignment tabs | `ui/core/export.py`, `export/export-handlers.js` | Large | pending |
+| B-STREAM | Streaming STL generation — Python generators + `StreamingResponse` to reduce peak RAM | `app/server/core/export.py`, `app/server/routers/export.py` | Medium | pending |
+| B-MULTI | Print-bed multi-piece export — auto-tile large DEMs into N×M pieces with alignment tabs | `app/server/core/export.py`, `export/export-handlers.js` | Large | pending |
 | B-OPENAPI | OpenAPI schema validation in dev — auto-generate JSON Schema from `/openapi.json`; validate in `api.js` | `core/api.js` | Small | pending |
 
 ---

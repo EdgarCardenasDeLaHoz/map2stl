@@ -39,25 +39,33 @@ All 6 layer canvases (`layerDemCanvas`, `layerWaterCanvas`, etc.) are hidden off
 ### Structure
 
 ```
-ui/
-├── server.py    — FastAPI app init, lifespan, router includes, run_server
-├── schemas.py   — all ~30 Pydantic models
-├── config.py    — paths, OPENTOPO_DATASETS, TEST_MODE, API keys
-├── core/
-│   ├── dem.py        — fetch_layer_data, apply_layer_processing, blend_layers
-│   ├── export.py     — generate_stl/obj/3mf/crosssection
-│   ├── cache.py      — write/read_array_cache (.npz), write/read_osm_cache (.json.gz), prune
-│   ├── db.py         — get_db, init_db, WAL mode (SQLite)
-│   ├── osm.py        — fetch_osm_data, _fill_building_heights, _get_road_width_m
-│   └── cities_3d.py  — generate_city_3mf, 3D building mesh
-└── routers/
-    ├── terrain.py    — /api/terrain/* + /api/dem/merge
-    ├── regions.py    — /api/regions/* (SQLite-first, JSON fallback)
-    ├── export.py     — /api/export/*
-    ├── cities.py     — /api/cities/*
-    ├── composite.py  — /api/composite/*
-    ├── cache.py      — /api/cache/*
-    └── settings.py   — /api/settings/*
+app/
+├── server/                    — HTTP server (Python/FastAPI)
+│   ├── server.py    — FastAPI app init, lifespan, router includes
+│   ├── schemas.py   — all ~30 Pydantic models
+│   ├── config.py    — paths, OPENTOPO_DATASETS, TEST_MODE, API keys
+│   ├── core/
+│   │   ├── dem.py        — fetch_layer_data, apply_layer_processing, blend_layers
+│   │   ├── export.py     — generate_stl/obj/3mf/crosssection
+│   │   ├── cache.py      — write/read_array_cache (.npz), write/read_osm_cache (.json.gz), prune
+│   │   ├── db.py         — get_db, init_db, WAL mode (SQLite)
+│   │   ├── osm.py        — fetch_osm_data, _fill_building_heights, _get_road_width_m
+│   │   └── cities_3d.py  — generate_city_3mf, 3D building mesh
+│   └── routers/
+│       ├── terrain.py    — /api/terrain/* + /api/dem/merge
+│       ├── regions.py    — /api/regions/* (SQLite-first, JSON fallback)
+│       ├── export.py     — /api/export/*
+│       ├── cities.py     — /api/cities/*
+│       ├── composite.py  — /api/composite/*
+│       ├── cache.py      — /api/cache/*
+│       └── settings.py   — /api/settings/*
+├── client/                    — browser client (HTML/CSS/JS)
+│   ├── static/js/   — main.js, modules/ (30 ES modules in 8 subdirs)
+│   ├── static/css/  — app.css
+│   └── templates/   — index.html
+└── session/                   — Python SDK client (talks to server over HTTP)
+    ├── terrain_session.py
+    └── viz.py
 ```
 
 ### Key Backend Rules

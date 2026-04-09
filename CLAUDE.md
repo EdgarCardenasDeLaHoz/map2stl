@@ -22,12 +22,12 @@ python -m pytest tests/ -v                                     # run all tests (
 | Working on | Files to read |
 |---|---|
 | Backend endpoint | `docs/api.md` + relevant router file |
-| Session client (Python API) | `terrain_session.py` + `notebooks/Session_API_Reference.ipynb` |
-| Cache / storage | `app/core/cache.py` header + `docs/api.md` |
-| DEM rendering / colormaps | `docs/modules.md` + `static/js/modules/dem/dem-loader.js:1-30` |
-| City / OSM features | `docs/modules.md` + `static/js/modules/layers/city-overlay.js:1-40` |
-| Stacked layers / composite | `docs/modules.md` + `static/js/modules/layers/stacked-layers.js:1-30` |
-| Region CRUD | `docs/api.md` + `app/routers/regions.py:1-50` |
+| Session client (Python API) | `app/session/terrain_session.py` + `notebooks/Session_API_Reference.ipynb` |
+| Cache / storage | `app/server/core/cache.py` header + `docs/api.md` |
+| DEM rendering / colormaps | `docs/modules.md` + `app/client/static/js/modules/dem/dem-loader.js:1-30` |
+| City / OSM features | `docs/modules.md` + `app/client/static/js/modules/layers/city-overlay.js:1-40` |
+| Stacked layers / composite | `docs/modules.md` + `app/client/static/js/modules/layers/stacked-layers.js:1-30` |
+| Region CRUD | `docs/api.md` + `app/server/routers/regions.py:1-50` |
 | Frontend state variables | `docs/state.md` |
 | View tabs / navigation | `docs/arch.md` |
 | Data flow debugging | `docs/arch.md` (Data Flow section) |

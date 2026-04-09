@@ -52,4 +52,4 @@ HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `a
 - Frontend CLEAN-1–5 ✅ — regions.js: inline onclick, haversineDiagKm bug, AUTO_SCALE constants, globe marker colors, selectCoordinate JSDoc
 - Frontend DEM-CLEAN-1–3 ✅ — dem-main.js: extracted _applyDemResult, moved progress bar/cancel/sat-unavailable inline styles to CSS
 
-Full history: `ui/static/FUNCTIONALITY_DOC.md`
+Full history: `docs/functionality_doc.md`
