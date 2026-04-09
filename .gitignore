@@ -21,3 +21,6 @@ output/*
 # Runtime / generated
 data.db
 server.log
+
+# ui/ now contains only leftover JSON cache files — no source code
+ui/

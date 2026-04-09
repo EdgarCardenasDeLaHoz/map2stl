@@ -14,7 +14,8 @@
 ```bash
 cd strm2stl && source ../.venv/bin/activate
 python server.py             # starts FastAPI on port 9000
-python -m pytest tests/ -v   # run all tests (7 test files)
+python -m pytest tests/ -v   # run all tests (7 test files) — this is the canonical test suite
+# Note: Code/tests/ was removed; all tests live here in strm2stl/tests/
 ```
 
 ## When to Read What
