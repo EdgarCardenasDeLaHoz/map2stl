@@ -7,30 +7,73 @@ from skimage import io
 
 import json
 import glob
-import os
+import logging
 
-# Load the configuration (resolve relative to the package directory)
-config_path = os.path.join(os.path.dirname(
-    os.path.dirname(__file__)), 'config.json')
-if not os.path.exists(config_path):
-    # Fallback to project root config name
-    config_path = os.path.join(os.getcwd(), 'strm2stl', 'config.json')
+logger = logging.getLogger(__name__)
 
-with open(config_path, 'r') as f:
-    config = json.load(f)
+# ---------------------------------------------------------------------------
+# Tile-file registry — loaded lazily on first call to get_tile_files()
+# so that importing this module does not crash when config.json is absent.
+# ---------------------------------------------------------------------------
 
-# Access the path from the JSON
-ocean_root = config.get("ocean_root", ".")
-tile_files = glob.glob(os.path.join(ocean_root, "*.tif"))
+_tile_files: list | None = None
+
+
+def get_tile_files() -> list:
+    """Return the list of local SRTM .tif tile paths (loaded once, then cached)."""
+    global _tile_files
+    if _tile_files is not None:
+        return _tile_files
+
+    config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+    if not os.path.exists(config_path):
+        config_path = os.path.join(os.getcwd(), 'strm2stl', 'config.json')
+
+    if not os.path.exists(config_path):
+        logger.warning(
+            "geo2stl: config.json not found — local SRTM tiles unavailable. "
+            "stitch_tiles_no_rasterio will return None."
+        )
+        _tile_files = []
+        return _tile_files
+
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+
+    ocean_root = config.get("ocean_root", ".")
+    _tile_files = glob.glob(os.path.join(ocean_root, "*.tif"))
+    return _tile_files
+
+
+# Keep module-level name for backward compatibility (used by server.py and notebooks).
+# Accessing it triggers lazy load.
+class _TileFilesProxy:
+    """Lazy proxy for tile_files — evaluates on first attribute/iter access."""
+    def __iter__(self):
+        return iter(get_tile_files())
+    def __len__(self):
+        return len(get_tile_files())
+    def __getitem__(self, idx):
+        return get_tile_files()[idx]
+    def __bool__(self):
+        return bool(get_tile_files())
+
+
+tile_files = _TileFilesProxy()
 
 
 def parse_extent_from_filename(filename):
     match = re.search(r'n([-\d.]+)_s([-\d.]+)_w([-\d.]+)_e([-\d.]+)', filename)
     if match:
-        n, s, w, e = map(float, match.groups())
+        parts = match.groups()
+        # Remove trailing dots and convert to float
+        try:
+            n, s, w, e = [float(p.rstrip('.')) for p in parts]
+        except ValueError:
+            raise ValueError(f"Could not convert parts to float: {parts}")
         return (n, s, e, w)
     else:
-        raise ValueError(f"Could not parse extent from {filename}")
+        raise ValueError(f"Could not parse extent from filename: {filename}")
 
 
 def intersect_bbox(bbox1, bbox2):
@@ -61,35 +104,18 @@ def crop_tile_np(image_array, tile_bbox, crop_bbox):
     return image_array[y1:y2, x1:x2]
 
 
-def parse_extent_from_filename(filename):
-    match = re.search(r'n([-\d.]+)_s([-\d.]+)_w([-\d.]+)_e([-\d.]+)', filename)
-    if match:
-        parts = match.groups()
-        # Remove trailing dots and convert to float
-        try:
-            n, s, w, e = [float(p.rstrip('.')) for p in parts]
-        except ValueError:
-            raise ValueError(f"Could not convert parts to float: {parts}")
-        return (n, s, e, w)
-    else:
-        raise ValueError(f"Could not parse extent from filename: {filename}")
-
-
 def stitch_tiles_no_rasterio(target_bbox):
     print("==== Stitching tiles ====")
     print(f"Target bounding box: {target_bbox}")
 
     rows = {}
 
-    for fn in tile_files:
+    for fn in get_tile_files():
         tile_bbox = parse_extent_from_filename(os.path.basename(fn))
-        # print(f"Tile: {fn}\n Parsed extent: {tile_bbox}")
 
         intersection = intersect_bbox(tile_bbox, target_bbox)
-        # print(f" Intersection: {intersection}")
 
         if not intersection:
-            # print(" Skipping due to no intersection.")
             continue
 
         try:
@@ -131,13 +157,10 @@ def proj_map_height(mat, NSEW):
     yv = ((1-yv/m1)-0.5) * (n-s)
 
     yv = np.deg2rad(yv)
-    # zv = xv_c * yv_c
 
-    zv = np.cos(xv) * np.cos(yv)  # * (12756)
+    zv = np.cos(xv) * np.cos(yv)
 
     zv = zv * m1/(n-s) * 180/np.pi
-
-    # zv = zv - np.min(zv)
 
     return zv
 

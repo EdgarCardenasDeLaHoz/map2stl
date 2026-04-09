@@ -436,7 +436,8 @@ def compute_raw_dem(north, south, east, west, dim, depth_scale):
     """Compute raw (unprocessed) DEM array. Call via run_in_executor."""
     import cv2 as _cv2
     import numpy as _np
-    from numpy2stl.oceans import stitch_tiles_no_rasterio, proj_map_geo_to_2D
+    from geo2stl.geo2stl import stitch_tiles_no_rasterio
+    from geo2stl.projections import proj_map_geo_to_2D
     target_bbox = _np.array((north, south, east, west))
     im = stitch_tiles_no_rasterio(target_bbox) * 1.0
     im[im < 0] = im[im < 0] * depth_scale

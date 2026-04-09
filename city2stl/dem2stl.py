@@ -28,6 +28,7 @@ import matplotlib.cm as cm
 from skimage.transform import resize
 
 import numpy2stl as np2stl
+from geo2stl.geo2stl import proj_map_geo_to_2D
 
 class DEM:
     def __init__(self, root=None, geo_bounds=None, data=None):
@@ -317,41 +318,13 @@ def get_mainland(mat):
     main_land = ccs == np.argmax(component_sizes)
     return main_land
 
-def proj_map_geo_to_2D(mat,NSEW):
-    
-    lat = NSEW[[0,1]]
-    lon = NSEW[[2,3]]
-
-    m, n = mat.shape
-    xv,yv = np.meshgrid(range(n),range(m))
-
-    xc = (n-1)/2
-    yc = (m-1)/2
-    xv_c = (xv - xc).astype(np.int)
-    yv_c = (yv - yc).astype(np.int)
-
-    lat_v = np.linspace(lat[0],lat[1],m)
-    lat_v = np.deg2rad(lat_v[:,None])
-    xv_adj = xv_c * np.cos(lat_v )
-
-    xv2 = (xv_adj + xc).astype(np.int)
-    yv2 = (yv_c + yc).astype(np.int)
-
-    mat_adj = mat*0
-    mat_adj[yv2, xv2] = mat[yv, xv]
-    
-    y1,y2 = np.min(yv2),np.max(yv2)
-    x1,x2 = np.min(xv2),np.max(xv2)
-
-    mat_adj = mat_adj[y1:y2,x1:x2]
-    return mat_adj
 
 def rescale(mat, sz_out=1000, scale=1):
     
     sz = np.array(mat.shape) 
     scale = sz_out / max(sz)
     sz = sz * scale
-    sz = sz.astype(np.int)
+    sz = sz.astype(int)
     mat2 = resize(mat*1.,sz)
     mat2 = mat2 * scale * 1.
     
