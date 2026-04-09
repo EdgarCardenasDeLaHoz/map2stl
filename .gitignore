@@ -13,3 +13,11 @@ ee_cache/*
 
 # Local config — may contain API keys; do not commit
 config.json
+*.gcode
+output/*
+*.curaprofile
+*.ini
+
+# Runtime / generated
+data.db
+server.log
