@@ -21,7 +21,7 @@ router = APIRouter(tags=["cache"])
 # Config imports
 # ---------------------------------------------------------------------------
 try:
-    from config import CACHE_DIRS, CACHE_CLEAR_INTERVAL, CACHE_MAX_FILES, EE_CACHE_DIR
+    from app.config import CACHE_DIRS, CACHE_CLEAR_INTERVAL, CACHE_MAX_FILES, EE_CACHE_DIR
 except ImportError:
     _UI_DIR = Path(__file__).parent.parent
     _PROJECT_ROOT = _UI_DIR.parent.parent

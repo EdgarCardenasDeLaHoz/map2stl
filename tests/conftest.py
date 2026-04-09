@@ -58,7 +58,7 @@ def tmp_data_dir(tmp_path, monkeypatch):
     so monkeypatching hits the same module objects the app routes close over.
     """
     # Trigger the server import first so all modules are in sys.modules
-    import server  # noqa: F401 — ensures routers are imported
+    import app.server  # noqa: F401 — ensures routers are imported
 
     import app.core.db as db_module
     import app.core.cache as cache_module
@@ -93,5 +93,5 @@ def tmp_data_dir(tmp_path, monkeypatch):
 def client(tmp_data_dir):
     """FastAPI TestClient using the real server app with patched paths."""
     from fastapi.testclient import TestClient
-    from server import app
+    from app.server import app
     return TestClient(app)

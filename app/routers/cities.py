@@ -23,7 +23,7 @@ router = APIRouter(tags=["cities"])
 # Config imports
 # ---------------------------------------------------------------------------
 try:
-    from config import OSM_CACHE_PATH
+    from app.config import OSM_CACHE_PATH
 except ImportError:
     _UI_DIR = Path(__file__).parent.parent
     OSM_CACHE_PATH = _UI_DIR.parent / "osm_raw_cache"
@@ -61,7 +61,7 @@ except ImportError:
 
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
-from schemas import CityRequest, CityRasterRequest
+from app.schemas import CityRequest, CityRasterRequest
 
 
 class CityExportRequest(BaseModel):

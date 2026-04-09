@@ -25,14 +25,13 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Resolve paths relative to this script's location (strm2stl/scripts/)
+# Resolve paths relative to this script's location (strm2stl/tools/)
 # ---------------------------------------------------------------------------
-_SCRIPTS_DIR    = Path(__file__).resolve().parent   # strm2stl/scripts/
-_STRM2STL_DIR   = _SCRIPTS_DIR.parent               # strm2stl/
-_UI_DIR         = _STRM2STL_DIR / "ui"
+_TOOLS_DIR      = Path(__file__).resolve().parent   # strm2stl/tools/
+_STRM2STL_DIR   = _TOOLS_DIR.parent                 # strm2stl/
 
-# Add ui/ to path so we can import app.core.db and config
-sys.path.insert(0, str(_UI_DIR))
+# Add strm2stl/ to path so we can import app.core.db and app.config
+sys.path.insert(0, str(_STRM2STL_DIR))
 
 try:
     from app.core.db import get_db, init_db, DB_PATH
@@ -40,7 +39,7 @@ except ImportError as exc:
     sys.exit(f"Cannot import app.core.db: {exc}\nRun this script from the strm2stl root or ensure the venv is active.")
 
 try:
-    from config import COORDINATES_PATH, REGION_SETTINGS_PATH
+    from app.config import COORDINATES_PATH, REGION_SETTINGS_PATH
 except ImportError:
     COORDINATES_PATH     = _STRM2STL_DIR / "coordinates.json"
     REGION_SETTINGS_PATH = _STRM2STL_DIR / "region_settings.json"

@@ -18,7 +18,7 @@ endif
 
 ## Start the FastAPI dev server on port 9000
 serve:
-	$(PYTHON) server.py
+	$(PYTHON) -m uvicorn app.server:app --host 127.0.0.1 --port 9000 --reload
 
 ## Run the full pytest test suite
 test:
@@ -30,12 +30,12 @@ test-one:
 
 ## Lint all Python files with ruff
 lint:
-	$(RUFF) check app/ server.py config.py schemas.py tests/
+	$(RUFF) check app/ session/ tests/
 
 ## Auto-fix ruff lint issues
 fmt:
-	$(RUFF) check --fix app/ server.py config.py schemas.py tests/
-	$(RUFF) format app/ server.py config.py schemas.py tests/
+	$(RUFF) check --fix app/ session/ tests/
+	$(RUFF) format app/ session/ tests/
 
 ## Install Python dependencies
 install:

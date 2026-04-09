@@ -3,8 +3,8 @@
 # importable whether this file is run as a script or imported as a module.
 import sys as _sys
 from pathlib import Path as _Path
-_STRM2STL_ROOT = str(_Path(__file__).parent)        # .../strm2stl/
-_CODE_ROOT = str(_Path(__file__).parent.parent)      # .../Code/
+_STRM2STL_ROOT = str(_Path(__file__).parent.parent)  # .../strm2stl/
+_CODE_ROOT = str(_Path(__file__).parent.parent.parent)  # .../Code/
 for _p in (_CODE_ROOT, _STRM2STL_ROOT):
     if _p not in _sys.path:
         _sys.path.insert(0, _p)
@@ -15,7 +15,7 @@ import webbrowser
 import threading
 import uvicorn
 from fastapi import FastAPI, Request
-from config import OSM_CACHE_PATH
+from app.config import OSM_CACHE_PATH
 # Disk-cache helpers: prune on startup, migrate legacy OSM cache
 try:
     from app.core.cache import prune_all_caches, migrate_osm_plain_json
@@ -39,7 +39,7 @@ from logging.handlers import RotatingFileHandler
 
 # Configure logging to write to a file — use an absolute path so the log
 # file never lands inside a directory watched by uvicorn's auto-reloader.
-log_file = str(Path(__file__).parent.parent.parent / "server.log")
+log_file = str(Path(__file__).parent.parent / "server.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -138,7 +138,7 @@ logger.info("Routers loaded: regions, terrain, cities, export, cache, settings, 
 # Pydantic Schemas — imported from schemas.py (backend refactor step 2)
 # ============================================================
 try:
-    from schemas import (
+    from app.schemas import (
         BoundingBox, BoundingBoxLegacy,
         RegionParameters, RegionCreate, RegionResponse, RegionsListResponse,
         RegionSettings, CityRequest,

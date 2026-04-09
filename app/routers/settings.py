@@ -19,7 +19,7 @@ router = APIRouter(tags=["settings"])
 # Schema imports
 # ---------------------------------------------------------------------------
 try:
-    from schemas import ColormapInfo, DatasetInfo, ProjectionInfo
+    from app.schemas import ColormapInfo, DatasetInfo, ProjectionInfo
 except ImportError:
     from pydantic import BaseModel
     from typing import Optional

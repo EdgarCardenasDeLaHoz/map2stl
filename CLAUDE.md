@@ -13,9 +13,8 @@
 
 ```bash
 cd strm2stl && source ../.venv/bin/activate
-python server.py             # starts FastAPI on port 9000
-python -m pytest tests/ -v   # run all tests (7 test files) — this is the canonical test suite
-# Note: Code/tests/ was removed; all tests live here in strm2stl/tests/
+python -m uvicorn app.server:app --port 9000 --reload   # starts FastAPI
+python -m pytest tests/ -v                              # run all tests (108, 7 files)
 ```
 
 ## When to Read What
@@ -43,16 +42,18 @@ python -m pytest tests/ -v   # run all tests (7 test files) — this is the cano
 ```
 strm2stl/
 │
-│  ── entry points ──────────────────────────────────────────────────────
-├── server.py              ← FastAPI app + startup lifespan
-├── terrain_session.py     ← Python session client wrapping all API endpoints
-├── config.py              ← constants, OPENTOPO_DATASETS, API keys
-├── schemas.py             ← all Pydantic models
-│
-│  ── server internals ──────────────────────────────────────────────────
+│  ── web application ────────────────────────────────────────────────────
 ├── app/
+│   ├── server.py          ← FastAPI app + startup lifespan  (entry: uvicorn app.server:app)
+│   ├── config.py          ← constants, OPENTOPO_DATASETS, API keys
+│   ├── schemas.py         ← all Pydantic models
 │   ├── core/              ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py
 │   └── routers/           ← terrain.py, regions.py, export.py, cities.py, cache.py, settings.py
+│
+│  ── headless session SDK ───────────────────────────────────────────────
+├── session/
+│   ├── terrain_session.py ← Python client wrapping all API endpoints (used in notebooks)
+│   └── viz.py             ← visualisation utilities for session output
 │
 │  ── geo/mesh libraries ─────────────────────────────────────────────────
 ├── geo2stl/               ← map projections + tile stitching
@@ -60,7 +61,7 @@ strm2stl/
 │
 │  ── front-end ──────────────────────────────────────────────────────────
 ├── static/js/
-│   ├── app.js             ← ~8300-line plain script (state + DOMContentLoaded)
+│   ├── app.js             ← thin shim / legacy compat
 │   ├── main.js            ← ES module entry (imports all modules in order)
 │   └── modules/           ← 30 ES modules in 8 subdirs (see docs/modules.md)
 ├── templates/index.html   ← single-page app template
@@ -70,7 +71,6 @@ strm2stl/
 ├── notebooks/             ← Jupyter notebooks + helpers (API_Terrain, Session_API_Reference, …)
 ├── tools/                 ← utility scripts + slicer_configs/
 ├── docs/                  ← all reference docs (api, arch, state, modules, proposals, …)
-├── viz.py                 ← visualisation utilities used by terrain_session
 │
 │  ── build / config ─────────────────────────────────────────────────────
 ├── Makefile, ruff.toml, requirements*.txt, package.json, vite.config.js

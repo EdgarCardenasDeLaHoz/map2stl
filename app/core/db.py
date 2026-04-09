@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 # Path
 # ---------------------------------------------------------------------------
 try:
-    from config import COORDINATES_PATH
+    from app.config import COORDINATES_PATH
     _STRM2STL_DIR = COORDINATES_PATH.parent
 except ImportError:
     _STRM2STL_DIR = Path(__file__).parent.parent.parent

@@ -24,7 +24,7 @@ from app.core.db import get_db, init_db
 # Schema imports — try schemas.py first, inline fallback
 # ---------------------------------------------------------------------------
 try:
-    from schemas import RegionCreate, RegionParameters, RegionSettings
+    from app.schemas import RegionCreate, RegionParameters, RegionSettings
 except ImportError:
     from pydantic import BaseModel, Field
 

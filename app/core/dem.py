@@ -18,41 +18,20 @@ from typing import Optional, TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from schemas import ProcessingSpec
+    from app.schemas import ProcessingSpec
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Import config — fall back to location_picker globals if not available
-# ---------------------------------------------------------------------------
-try:
-    from config import (
-        OPENTOPO_CACHE_PATH,
-        OPENTOPO_API_KEY as _OPENTOPO_API_KEY,
-        OPENTOPO_DATASETS,
-        H5_SRTM_FILE as _H5_SRTM_FILE,
-        H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
-    )
-except ImportError:
-    # Running from a context where config.py is not on sys.path.
-    # Derive the same paths inline so the module is self-contained.
-    _STRM2STL_DIR = Path(__file__).parent.parent
-    OPENTOPO_CACHE_PATH = _STRM2STL_DIR / "opentopo_cache"
-    _OPENTOPO_API_KEY = os.environ.get("OPENTOPO_API_KEY")
-    OPENTOPO_DATASETS = {
-        "SRTMGL1":    {"label": "SRTM 30m (Global)",          "resolution_m": 30},
-        "SRTMGL3":    {"label": "SRTM 90m (Global)",          "resolution_m": 90},
-        "AW3D30":     {"label": "ALOS World 3D 30m",          "resolution_m": 30},
-        "COP30":      {"label": "Copernicus DSM 30m",         "resolution_m": 30},
-        "COP90":      {"label": "Copernicus DSM 90m",         "resolution_m": 90},
-        "SRTM15Plus": {"label": "SRTM15+ (Bathymetry+Land)", "resolution_m": 500},
-    }
-    _h5_path = Path(os.environ.get("STRM_H5_ROOT", r"C:\Users\eac84\Desktop\Desktop\FILES")) / "strm_data.h5"
-    _H5_SRTM_FILE = _h5_path
-    _H5_SRTM_AVAILABLE = _h5_path.exists()
+from app.config import (
+    OPENTOPO_CACHE_PATH,
+    OPENTOPO_API_KEY as _OPENTOPO_API_KEY,
+    OPENTOPO_DATASETS,
+    H5_SRTM_FILE as _H5_SRTM_FILE,
+    H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
+)
 
-# strm2stl root dir
-_STRM2STL_DIR = Path(__file__).parent.parent
+# strm2stl root dir (app/core/dem.py → app/core → app → strm2stl)
+_STRM2STL_DIR = Path(__file__).parent.parent.parent
 # Ensure local packages (numpy2stl, geo2stl) are importable without os.chdir.
 if str(_STRM2STL_DIR) not in sys.path:
     sys.path.insert(0, str(_STRM2STL_DIR))
