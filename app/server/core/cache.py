@@ -33,9 +33,9 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Project-level cache root (sibling of strm2stl/)
-_PROJECT_ROOT = Path(__file__).parent.parent.parent
-CACHE_ROOT = _PROJECT_ROOT / "cache"
+# strm2stl/ root  (app/server/core → core → server → app → strm2stl)
+_STRM2STL_DIR = Path(__file__).parent.parent.parent.parent
+CACHE_ROOT = _STRM2STL_DIR / "cache"
 
 # Per-namespace TTLs in seconds
 NAMESPACE_TTL = {
