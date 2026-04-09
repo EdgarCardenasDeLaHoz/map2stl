@@ -239,7 +239,12 @@ def _fetch_roads(ox, bbox) -> dict:
 
 def _fetch_waterways(ox, bbox, tol_deg: float, simplify_tolerance: float) -> dict:
     try:
-        water_tags = {"waterway": True, "natural": ["water", "wetland"], "landuse": ["reservoir"]}
+        water_tags = {
+            "waterway": True,
+            "natural":  ["water", "wetland", "coastline", "bay", "strait"],
+            "landuse":  ["reservoir", "basin"],
+            "place":    ["ocean", "sea"],
+        }
         gdf = ox.features_from_bbox(bbox, tags=water_tags)
         gdf = gdf.reset_index(drop=True)
         _supported = {"Polygon", "MultiPolygon", "LineString", "MultiLineString"}
