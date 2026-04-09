@@ -1,6 +1,6 @@
 # JS Module Map — strm2stl
 
-All modules in `ui/static/js/modules/`, imported by `main.js` in dependency order.
+All modules in `static/js/modules/`, imported by `main.js` in dependency order.
 Modules expose functions via `window.*` — they do **not** import each other.
 
 ## Subdirectory Groups

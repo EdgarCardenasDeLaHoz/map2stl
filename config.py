@@ -26,8 +26,7 @@ TEST_MODE: bool = os.environ.get("STRM2STL_TEST_MODE", "0") == "1"
 # Filesystem paths
 # ---------------------------------------------------------------------------
 
-_UI_DIR = Path(__file__).parent                             # strm2stl/ui/
-_STRM2STL_DIR = _UI_DIR.parent                              # strm2stl/
+_STRM2STL_DIR = Path(__file__).parent                       # strm2stl/
 _PROJECT_ROOT = _STRM2STL_DIR.parent                        # Code/
 
 COORDINATES_PATH = _STRM2STL_DIR / "coordinates.json"

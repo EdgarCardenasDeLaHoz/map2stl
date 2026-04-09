@@ -18,7 +18,7 @@ endif
 
 ## Start the FastAPI dev server on port 9000
 serve:
-	$(PYTHON) ui/server.py
+	$(PYTHON) server.py
 
 ## Run the full pytest test suite
 test:
@@ -30,12 +30,12 @@ test-one:
 
 ## Lint all Python files with ruff
 lint:
-	$(RUFF) check ui/ tests/
+	$(RUFF) check core/ routers/ server.py config.py schemas.py tests/
 
 ## Auto-fix ruff lint issues
 fmt:
-	$(RUFF) check --fix ui/ tests/
-	$(RUFF) format ui/ tests/
+	$(RUFF) check --fix core/ routers/ server.py config.py schemas.py tests/
+	$(RUFF) format core/ routers/ server.py config.py schemas.py tests/
 
 ## Install Python dependencies
 install:

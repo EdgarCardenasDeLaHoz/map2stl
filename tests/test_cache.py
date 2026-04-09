@@ -13,10 +13,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "ui"))
-
-from strm2stl.ui.core.cache import (
+from core.cache import (
     make_cache_key,
     osm_cache_key,
     write_array_cache,
@@ -35,7 +32,7 @@ from strm2stl.ui.core.cache import (
 @pytest.fixture()
 def patched_cache(tmp_path, monkeypatch):
     """Redirect CACHE_ROOT to a temp directory for all cache operations."""
-    import strm2stl.ui.core.cache as cache_mod
+    import core.cache as cache_mod
     monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path)
     return tmp_path
 

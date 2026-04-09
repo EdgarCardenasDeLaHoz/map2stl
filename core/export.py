@@ -21,8 +21,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# strm2stl root dir (parent of ui/)
-_STRM2STL_DIR = Path(__file__).parent.parent.parent
+# strm2stl root dir
+_STRM2STL_DIR = Path(__file__).parent.parent
 # Ensure local packages (numpy2stl, geo2stl) are importable without os.chdir.
 if str(_STRM2STL_DIR) not in sys.path:
     sys.path.insert(0, str(_STRM2STL_DIR))

@@ -61,7 +61,7 @@ ui/
 ```
 
 ### Key Backend Rules
-- Business logic in `ui/core/`, request handling in `ui/routers/`
+- Business logic in `core/`, request handling in `routers/`
 - Never use `os.chdir()` in handlers — process-global, causes data races
 - Always `asyncio.get_running_loop()` (not deprecated `get_event_loop()`)
 - Blocking work in `loop.run_in_executor(None, fn, *args)`
@@ -82,7 +82,7 @@ ui/
 
 ## HTML Structure
 
-`ui/templates/index.html` — single-page app, all content always in DOM.
+`templates/index.html` — single-page app, all content always in DOM.
 
 ```
 body

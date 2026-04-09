@@ -13,8 +13,8 @@
 
 ```bash
 cd strm2stl && source ../.venv/bin/activate
-python ui/server.py          # starts FastAPI on port 9000
-python -m pytest tests/ -v   # run all 108 tests (7 test files)
+python server.py             # starts FastAPI on port 9000
+python -m pytest tests/ -v   # run all tests (7 test files)
 ```
 
 ## When to Read What
@@ -22,11 +22,12 @@ python -m pytest tests/ -v   # run all 108 tests (7 test files)
 | Working on | Files to read |
 |---|---|
 | Backend endpoint | `docs/api.md` + relevant router file |
-| Cache / storage | `ui/core/cache.py` header + `docs/api.md` |
+| Session client (Python API) | `terrain_session.py` + `notebooks/Session_API_Reference.ipynb` |
+| Cache / storage | `core/cache.py` header + `docs/api.md` |
 | DEM rendering / colormaps | `docs/modules.md` + `dem/dem-loader.js:1-30` |
 | City / OSM features | `docs/modules.md` + `layers/city-overlay.js:1-40` |
 | Stacked layers / composite | `docs/modules.md` + `layers/stacked-layers.js:1-30` |
-| Region CRUD | `docs/api.md` + `ui/routers/regions.py:1-50` |
+| Region CRUD | `docs/api.md` + `routers/regions.py:1-50` |
 | Frontend state variables | `docs/state.md` |
 | View tabs / navigation | `docs/arch.md` |
 | Data flow debugging | `docs/arch.md` (Data Flow section) |
@@ -41,6 +42,16 @@ python -m pytest tests/ -v   # run all 108 tests (7 test files)
 ```
 strm2stl/
 ├── CLAUDE.md              ← this file (index only)
+├── server.py              ← FastAPI app + startup lifespan
+├── schemas.py             ← all Pydantic models
+├── config.py              ← constants, OPENTOPO_DATASETS, API keys
+├── core/                  ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py
+├── routers/               ← terrain.py, regions.py, export.py, cities.py, cache.py, settings.py
+├── static/js/
+│   ├── app.js             ← ~8300-line plain script (state + DOMContentLoaded)
+│   ├── main.js            ← ES module entry (imports all modules in order)
+│   └── modules/           ← 30 ES modules in 8 subdirs (see docs/modules.md)
+├── templates/index.html   ← single-page app template
 ├── docs/                  ← on-demand reference docs
 │   ├── arch.md            ← frontend/backend architecture + data flows
 │   ├── state.md           ← all global state variables
@@ -50,18 +61,14 @@ strm2stl/
 │   ├── issues.md          ← known issues + feature status
 │   └── proposals.md       ← AI-proposed features (approve/deny/defer here)
 ├── TODO.md                ← open tasks only (ARCH4, ARCH5, PERF6B)
-├── data.db                ← SQLite: regions + region_settings (WAL)
-├── ui/
-│   ├── server.py          ← FastAPI app + startup lifespan
-│   ├── schemas.py         ← all Pydantic models
-│   ├── config.py          ← constants, OPENTOPO_DATASETS, API keys
-│   ├── core/              ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py
-│   ├── routers/           ← terrain.py, regions.py, export.py, cities.py, cache.py, settings.py
-│   └── static/js/
-│       ├── app.js         ← ~8300-line plain script (state + DOMContentLoaded)
-│       ├── main.js        ← ES module entry (imports all modules in order)
-│       └── modules/       ← 30 ES modules in 8 subdirs (see docs/modules.md)
-└── tests/                 ← pytest suite (conftest.py + 7 test files, 108 tests)
+├── terrain_session.py     ← Python session client wrapping all API endpoints
+├── viz.py                 ← shared visualisation utilities for notebooks
+├── notebooks/             ← Jupyter notebooks + helpers
+├── tests/                 ← pytest suite (conftest.py + 7 test files)
+├── tools/                 ← utility scripts (import_regions, tile_to_geo)
+├── geo2stl/               ← map projections + tile stitching
+├── city2stl/              ← OSM/building to 3D mesh helpers
+└── data.db                ← SQLite: regions + region_settings (WAL, gitignored)
 ```
 
 ## Proposals Rule
@@ -93,5 +100,5 @@ strm2stl/
 | API routes + Pydantic models | `docs/api.md` |
 | JS module map | `docs/modules.md` |
 | Known issues + feature status | `docs/issues.md` |
-| Completed feature history | `ui/static/FUNCTIONALITY_DOC.md` |
+| Completed feature history | `static/FUNCTIONALITY_DOC.md` |
 | AI-proposed features (approve/deny) | `docs/proposals.md` |

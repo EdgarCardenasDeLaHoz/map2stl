@@ -40,7 +40,7 @@ from IPython.display import display
 
 # Paths relative to this file (strm2stl/)
 _STRM2STL_DIR = Path(__file__).parent
-_UI_DIR = _STRM2STL_DIR / "ui"
+_UI_DIR = _STRM2STL_DIR  # server.py is now at the strm2stl root
 _VENV_PYTHON = _STRM2STL_DIR.parent / ".venv" / "Scripts" / "python.exe"
 
 _DEFAULT_SETTINGS: dict = {

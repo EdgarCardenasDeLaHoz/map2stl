@@ -1,16 +1,14 @@
 # ── sys.path bootstrap ────────────────────────────────────────────────────────
-# Ensure Code/ (numpy2stl peer) and ui/ (config, routers, core) are importable
-# whether this file is run as a script (python ui/server.py) or imported as a
-# module (from strm2stl.ui import server).
+# Ensure strm2stl/ (config, routers, core) and Code/ (numpy2stl peer) are
+# importable whether this file is run as a script or imported as a module.
 import sys as _sys
 from pathlib import Path as _Path
-_UI_DIR = str(_Path(__file__).parent)          # .../strm2stl/ui/
-_STRM2STL_ROOT = str(_Path(__file__).parent.parent)  # .../strm2stl/
-_CODE_ROOT = str(_Path(__file__).parent.parent.parent)  # .../Code/
-for _p in (_CODE_ROOT, _STRM2STL_ROOT, _UI_DIR):
+_STRM2STL_ROOT = str(_Path(__file__).parent)        # .../strm2stl/
+_CODE_ROOT = str(_Path(__file__).parent.parent)      # .../Code/
+for _p in (_CODE_ROOT, _STRM2STL_ROOT):
     if _p not in _sys.path:
         _sys.path.insert(0, _p)
-del _sys, _Path, _UI_DIR, _STRM2STL_ROOT, _CODE_ROOT
+del _sys, _Path, _STRM2STL_ROOT, _CODE_ROOT
 # ─────────────────────────────────────────────────────────────────────────────
 
 import webbrowser

@@ -1,7 +1,7 @@
 # Function Index — strm2stl Frontend
 
 One-liner index. Search by function name — line numbers are omitted because they go stale.
-Modules live in `ui/static/js/modules/` (subdirs). Use grep: `grep -rn "function functionName"`.
+Modules live in `static/js/modules/` (subdirs). Use grep: `grep -rn "function functionName"`.
 
 ## app.js — file-top helpers
 

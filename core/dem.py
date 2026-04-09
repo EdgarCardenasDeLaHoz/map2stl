@@ -36,8 +36,7 @@ try:
 except ImportError:
     # Running from a context where config.py is not on sys.path.
     # Derive the same paths inline so the module is self-contained.
-    _UI_DIR = Path(__file__).parent.parent
-    _STRM2STL_DIR = _UI_DIR.parent
+    _STRM2STL_DIR = Path(__file__).parent.parent
     OPENTOPO_CACHE_PATH = _STRM2STL_DIR / "opentopo_cache"
     _OPENTOPO_API_KEY = os.environ.get("OPENTOPO_API_KEY")
     OPENTOPO_DATASETS = {
@@ -52,8 +51,8 @@ except ImportError:
     _H5_SRTM_FILE = _h5_path
     _H5_SRTM_AVAILABLE = _h5_path.exists()
 
-# strm2stl root dir (parent of ui/)
-_STRM2STL_DIR = Path(__file__).parent.parent.parent
+# strm2stl root dir
+_STRM2STL_DIR = Path(__file__).parent.parent
 # Ensure local packages (numpy2stl, geo2stl) are importable without os.chdir.
 if str(_STRM2STL_DIR) not in sys.path:
     sys.path.insert(0, str(_STRM2STL_DIR))

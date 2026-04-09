@@ -1,6 +1,6 @@
 # Backend API Routes — strm2stl
 
-## Region Routes (`ui/routers/regions.py`)
+## Region Routes (`routers/regions.py`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -14,7 +14,7 @@
 | GET | `/api/regions/{name}/settings` | Get saved panel settings (200 + `{}` if none) |
 | PUT | `/api/regions/{name}/settings` | Save panel settings |
 
-## DEM / Terrain Routes (`ui/routers/terrain.py`)
+## DEM / Terrain Routes (`routers/terrain.py`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -26,7 +26,7 @@
 | POST | `/api/dem/merge` | Merge multiple DEM layers (`MergeRequest`) |
 | POST | `/api/export/preview` | DEM values for Three.js preview (no STL) |
 
-## Export Routes (`ui/routers/export.py`)
+## Export Routes (`routers/export.py`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -34,7 +34,7 @@
 | POST | `/api/export/obj` | Generate + download OBJ |
 | POST | `/api/export/3mf` | Generate + download 3MF |
 
-## City Routes (`ui/routers/cities.py`)
+## City Routes (`routers/cities.py`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -49,13 +49,13 @@
 >
 > They serve different consumers: the first is for the CityRaster layer view; the second feeds `composite-dem.js`.
 
-## Composite Routes (`ui/routers/composite.py`)
+## Composite Routes (`routers/composite.py`)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/composite/city-raster` | Rasterize OSM features to height-delta arrays (PIL, ~50× faster than JS) — used by `composite-dem.js` |
 
-## Cache & Settings (`ui/routers/cache.py`, `settings.py`)
+## Cache & Settings (`routers/cache.py`, `settings.py`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -67,7 +67,7 @@
 | GET | `/api/settings/datasets` | Available DEM datasets |
 | GET | `/api/global_dem_overview` | Cached global DEM PNG |
 
-## Key Pydantic Models (`ui/schemas.py`)
+## Key Pydantic Models (`schemas.py`)
 
 - `BoundingBox` — `{north, south, east, west}`
 - `RegionCreate(BoundingBox)` — `+ name, label?, description?`
@@ -81,7 +81,7 @@
 - `MergeLayerSpec` — `{source, blend_mode, weight, processing: ProcessingSpec}`
 - `ProcessingSpec` — `{clip_min, clip_max, smooth_sigma, sharpen, normalize, invert, extract_rivers, river_max_width_px}`
 
-## DEM Sources (OPENTOPO_DATASETS in `ui/config.py`)
+## DEM Sources (OPENTOPO_DATASETS in `config.py`)
 
 | Key | Description |
 |-----|-------------|

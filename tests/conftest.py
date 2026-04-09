@@ -11,12 +11,11 @@ from pathlib import Path
 
 import pytest
 
-# Point to strm2stl root and strm2stl/ui so imports match the app's own paths.
+# Point to strm2stl root so imports match the app's own paths.
 # server.py uses short paths like `from routers.regions import router` and
 # `from core.cache import ...`.  We must patch those same module objects.
 _STRM2STL_ROOT = Path(__file__).parent.parent
-_UI_DIR = _STRM2STL_ROOT / "ui"
-for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT), str(_UI_DIR)):
+for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -59,7 +58,7 @@ def tmp_data_dir(tmp_path, monkeypatch):
     so monkeypatching hits the same module objects the app routes close over.
     """
     # Trigger the server import first so all modules are in sys.modules
-    import strm2stl.ui.server  # noqa: F401 — ensures routers are imported
+    import server  # noqa: F401 — ensures routers are imported
 
     import core.db as db_module
     import core.cache as cache_module
@@ -94,5 +93,5 @@ def tmp_data_dir(tmp_path, monkeypatch):
 def client(tmp_data_dir):
     """FastAPI TestClient using the real server app with patched paths."""
     from fastapi.testclient import TestClient
-    from strm2stl.ui.server import app
+    from server import app
     return TestClient(app)
