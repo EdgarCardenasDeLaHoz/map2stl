@@ -2,14 +2,11 @@
 
 ## Requires External Setup
 
-### [~] ARCH4 — Add Vite bundler (config done, npm install pending)
-**Files:** `strm2stl/package.json`, `strm2stl/vite.config.js` (already created)
-
-Remaining steps:
-1. `cd strm2stl && npm install`
-2. `npm run dev` — HMR dev server on port 5173 (API proxied to 9000)
-3. Update `<script type="module" src="main.js">` in `index.html` to point at Vite's entry
-4. Verify CDN globals (`window.L`, `window.THREE`, `window.Plotly`) still resolve
+### [x] ARCH4 — Vite bundler (done)
+`npm install` complete. `npm run build` produces `dist/js/main.js` (221 kB → 63 kB gzip).
+`npm run dev` starts HMR dev server on port 5173 with `/api` proxied to FastAPI on port 9000.
+Note: the Jinja template is served by FastAPI, not Vite — use http://localhost:9000 for full
+integration testing; use http://localhost:5173 for JS HMR during frontend-only work.
 
 ---
 

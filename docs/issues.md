@@ -32,9 +32,7 @@ HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `a
 
 | ID | Task | Status |
 |----|------|--------|
-| ARCH4 | Add Vite bundler (HMR + production build) | ⏳ Open |
 | ARCH5 | Vitest unit tests for pure functions (requires ARCH4) | ⏳ Open |
-| PERF6B | Web Worker for city rendering (Part A done) | ⏳ Open |
 
 ## Completed Refactoring Milestones
 
@@ -42,7 +40,10 @@ HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `a
 - IMP5 ✅ — window.appState unified across modules
 - ARCH1 ✅ — state.js Proxy appState + events.js event bus
 - ARCH3 ✅ — api.js centralizes all fetch calls
+- ARCH4 ✅ — Vite bundler installed (npm install + build verified, package.json + vite.config.js)
 - FA2 ✅ — No duplicate functions between app.js and modules
+- PERF6B ✅ — city-worker.js Web Worker for city overlay rendering; generation counter for stale-reply discard; sync fallback preserved
+- Reactive bbox ✅ — N/S/E/W inputs update Leaflet rectangle live on every keystroke (no reload until Enter/button)
 - Backend split ✅ — server.py + schemas.py + config.py + core/ + routers/
 - SQLite migration ✅ — data.db with WAL mode
 - Backend DEAD-1 ✅ — removed JSON fallback (~150 lines) from regions.py

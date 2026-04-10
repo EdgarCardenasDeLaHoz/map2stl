@@ -2,18 +2,13 @@
 
 ## Performance
 
-### [~] PERF6B — Web Worker for city polygon rendering (Part A done)
-**File:** `city-render.js`
+### [x] PERF6B — Web Worker for city polygon rendering (done)
+**Files:** `city-render.js`, `workers/city-worker.js`
 
-Pre-baking Float32Array buffers is done. Main-thread polygon rendering still causes jank with 500+ buildings.
-
-**Remaining work:**
-1. Create `workers/city-worker.js` — receives `{type:'init', buildings, roads, waterways}` with Float32Array buffers as Transferable
-2. `city-render.js`: call `canvas.transferControlToOffscreen()` on city overlay canvas; pass to worker
-3. For stacked view: worker renders to `OffscreenCanvas`, posts back `ImageBitmap`; main thread composites
-4. Main thread posts `{type:'render', zoom, offset}` on each pan/zoom; generation counter cancels stale renders
-
-**Tricky:** `transferControlToOffscreen()` is one-shot; worker cannot access `window`/`appState`.
+Worker receives pre-baked Float32Array buffers + DOM-extracted style/toggle values,
+renders to OffscreenCanvas, posts back ImageBitmap. Generation counter discards stale
+replies. Sync fallback (per-layer OffscreenCanvas, Part A) preserved for browsers
+without Worker support or on worker error.
 
 ---
 

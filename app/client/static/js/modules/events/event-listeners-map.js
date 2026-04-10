@@ -309,8 +309,32 @@ window._setupBboxListeners = function _setupBboxListeners() {
     });
 
     ['bboxNorth', 'bboxSouth', 'bboxEast', 'bboxWest'].forEach(id => {
-        document.getElementById(id)?.addEventListener('keydown', ev => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        // Enter key triggers full reload
+        el.addEventListener('keydown', ev => {
             if (ev.key === 'Enter') bboxReloadBtn?.click();
+        });
+        // Live map rectangle update on every keystroke (no DEM reload)
+        el.addEventListener('input', () => {
+            const n = parseFloat(document.getElementById('bboxNorth')?.value);
+            const s = parseFloat(document.getElementById('bboxSouth')?.value);
+            const e = parseFloat(document.getElementById('bboxEast')?.value);
+            const w = parseFloat(document.getElementById('bboxWest')?.value);
+            if (isNaN(n) || isNaN(s) || isNaN(e) || isNaN(w)) return;
+            if (n <= s || e <= w) return;  // invalid — skip until values are consistent
+            const _map = window.getMap?.();
+            const _bb  = window.getBoundingBox?.();
+            if (!_map) return;
+            if (_bb) {
+                // Update existing rectangle in-place (no layer churn)
+                _bb.setBounds([[s, w], [n, e]]);
+            } else {
+                const newBb = L.rectangle([[s, w], [n, e]],
+                    { color: '#e74c3c', weight: 2, fillOpacity: 0.05 });
+                newBb.addTo(_map);
+                window.setBoundingBox?.(newBb);
+            }
         });
     });
 

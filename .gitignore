@@ -22,3 +22,7 @@ output/*
 data.db
 server.log
 # ui/ was removed (leftover JSON cache — deleted 2026-04-09)
+
+# Node / Vite
+node_modules/
+package-lock.json
