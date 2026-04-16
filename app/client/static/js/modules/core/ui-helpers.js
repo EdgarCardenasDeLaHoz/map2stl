@@ -265,6 +265,47 @@ window.showErrInEl = function showErrInEl(containerId, msg) {
     document.getElementById(containerId)?.replaceChildren(p);
 };
 
+// ============================================================
+// BINARY TRANSPORT HELPERS
+// ============================================================
+
+/**
+ * Decode a DEM (or any float32 grid) from a server response object.
+ * Handles both the legacy `dem_values` plain array and the newer
+ * `dem_values_b64` base64-encoded float32 binary format.
+ *
+ * Returns a Float32Array (b64 path) or the original array (legacy path).
+ * @param {Object} data - Server response containing dem_values or dem_values_b64
+ * @returns {Float32Array|Array}
+ */
+/**
+ * Decode a base64 float32 grid, falling back to a plain array.
+ * @param {string|undefined} b64  - base64-encoded little-endian float32 bytes
+ * @param {Array|undefined}  arr  - fallback plain JS array
+ * @returns {Float32Array|Array}
+ */
+function _decodeGrid(b64, arr) {
+    if (b64) {
+        const bin = atob(b64);
+        const buf = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        return new Float32Array(buf.buffer);
+    }
+    return arr;
+}
+
+window.decodeDemValues = function decodeDemValues(data) {
+    return _decodeGrid(data.dem_values_b64, data.dem_values);
+};
+
+window.decodeWaterMask = function decodeWaterMask(data) {
+    return _decodeGrid(data.water_mask_values_b64, data.water_mask_values);
+};
+
+window.decodeEsaValues = function decodeEsaValues(data) {
+    return _decodeGrid(data.esa_values_b64, data.esa_values);
+};
+
 /**
  * Schedule a STACKED_UPDATE event on the next animation frame.
  * Centralises the repeated `requestAnimationFrame(() => window.events?.emit(...))` pattern.

@@ -24,15 +24,17 @@ class TestTerrainDem:
     def test_response_has_dem_values(self, client):
         r = client.get(f"/api/terrain/dem?{_BBOX_QS}&dim=10")
         data = r.json()
-        assert "dem_values" in data
-        assert isinstance(data["dem_values"], list)
-        assert len(data["dem_values"]) > 0
+        assert "dem_values_b64" in data
+        assert isinstance(data["dem_values_b64"], str)
+        assert len(data["dem_values_b64"]) > 0
 
     def test_dimensions_match_dim_param(self, client):
+        import base64
         r = client.get(f"/api/terrain/dem?{_BBOX_QS}&dim=10")
         data = r.json()
         h, w = data["dimensions"]
-        assert h * w == len(data["dem_values"])
+        n_floats = len(base64.b64decode(data["dem_values_b64"])) // 4
+        assert h * w == n_floats
 
     def test_response_has_bbox(self, client):
         r = client.get(f"/api/terrain/dem?{_BBOX_QS}&dim=10")
@@ -51,7 +53,7 @@ class TestTerrainDem:
         """Same request twice returns identical values."""
         r1 = client.get(f"/api/terrain/dem?{_BBOX_QS}&dim=5")
         r2 = client.get(f"/api/terrain/dem?{_BBOX_QS}&dim=5")
-        assert r1.json()["dem_values"] == r2.json()["dem_values"]
+        assert r1.json()["dem_values_b64"] == r2.json()["dem_values_b64"]
 
     def test_post_request_also_works(self, client):
         r = client.post("/api/terrain/dem", params={**_BBOX, "dim": 10})

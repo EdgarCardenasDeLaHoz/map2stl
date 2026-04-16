@@ -226,17 +226,16 @@ async function runMerge(apply = false) {
                 + `${data.min_elevation?.toFixed(1)}–${data.max_elevation?.toFixed(1)} m`;
         }
 
-        let demVals = data.dem_values;
+        let demVals = window.decodeDemValues(data);
         let h = Number(data.dimensions[0]);
         let w = Number(data.dimensions[1]);
-        if (Array.isArray(demVals[0])) { h = demVals.length; w = demVals[0].length; demVals = demVals.flat(); }
+        if (Array.isArray(demVals) && Array.isArray(demVals[0])) { h = demVals.length; w = demVals[0].length; demVals = demVals.flat(); }
         const vmin = data.min_elevation ?? 0;
         const vmax = data.max_elevation ?? 1;
         const colormap = document.getElementById('demColormap')?.value || 'terrain';
 
         window.appState.currentDemBbox = { north: bbox.north, south: bbox.south, east: bbox.east, west: bbox.west };
-        const rawCanvas = window.renderDEMCanvas(demVals, w, h, colormap, vmin, vmax);
-        const canvas = window.applyProjection(rawCanvas, window.appState.currentDemBbox);
+        const canvas = window.renderDEMCanvas(demVals, w, h, colormap, vmin, vmax);
         const container = document.getElementById('demImage');
         container.innerHTML = '';
         container.appendChild(canvas);
@@ -277,20 +276,7 @@ function _syncMergeFromCurrentLayers() {
 }
 
 function _refreshPipelinePanel() {
-    const get = id => document.getElementById(id);
-    const p = window.appState.demParams;
-    const setVal = (id, v) => { const el = get(id); if (el && v != null) el.value = v; };
-    setVal('pipelineDim',        get('paramDim')?.value);
-    setVal('pipelineDepthScale', p.depthScale);
-    setVal('pipelineWaterScale', p.waterScale);
-    setVal('pipelineHeight',     p.height);
-    setVal('pipelineBase',       p.base);
-    setVal('pipelineSatScale',   p.satScale);
-    const swPipe = get('pipelineSubtractWater');
-    if (swPipe) swPipe.checked = p.subtractWater;
-    const srcPipe = get('pipelineSource');
-    const srcParam = get('paramDemSource');
-    if (srcPipe && srcParam) srcPipe.value = srcParam.value;
+    // Pipeline quick-settings panel removed — params live in DemSourceSection now.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -299,50 +285,6 @@ function _refreshPipelinePanel() {
 
 function setupMergePanel() {
     const get = id => document.getElementById(id);
-    // Pipeline dim and source write to DOM inputs (paramDim, paramDemSource are kept)
-    const dimPipe = get('pipelineDim');
-    if (dimPipe) dimPipe.addEventListener('change', () => {
-        const h = get('paramDim'); if (h) h.value = dimPipe.value;
-    });
-
-    // Pipeline numeric params write to appState.demParams
-    const numericBindings = [
-        ['pipelineDepthScale', 'depthScale', 'modelDepthScale'],
-        ['pipelineWaterScale', 'waterScale', 'modelWaterScale'],
-        ['pipelineHeight',     'height',     null],
-        ['pipelineBase',       'base',       'modelBaseHeight'],
-        ['pipelineSatScale',   'satScale',   null],
-    ];
-    for (const [pipeId, stateKey, mirrorId] of numericBindings) {
-        const pEl = get(pipeId);
-        if (!pEl) continue;
-        pEl.addEventListener('change', () => {
-            const v = parseFloat(pEl.value);
-            if (!isNaN(v)) window.appState.demParams[stateKey] = v;
-            if (mirrorId) { const m = get(mirrorId); if (m) m.value = pEl.value; }
-        });
-    }
-    const swPipe = get('pipelineSubtractWater');
-    if (swPipe) {
-        swPipe.addEventListener('change', () => {
-            window.appState.demParams.subtractWater = swPipe.checked;
-            const m = get('modelSubtractWater'); if (m) m.checked = swPipe.checked;
-        });
-    }
-    const srcPipe = get('pipelineSource');
-    if (srcPipe) {
-        srcPipe.addEventListener('change', () => {
-            const h = get('paramDemSource'); if (h) h.value = srcPipe.value;
-        });
-    }
-
-    get('pipelineReloadBtn')?.addEventListener('click', () => {
-        const pDim = get('pipelineDim'); const hDim = get('paramDim');
-        if (pDim && hDim) hDim.value = pDim.value;
-        const pSrc = get('pipelineSource'); const hSrc = get('paramDemSource');
-        if (pSrc && hSrc) hSrc.value = pSrc.value;
-        if (typeof window.loadDEM === 'function') window.loadDEM();
-    });
 
     get('mergeSyncBtn')?.addEventListener('click', _syncMergeFromCurrentLayers);
 

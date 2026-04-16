@@ -150,7 +150,7 @@ async function loadWaterMask() {
  */
 function renderWaterMask(data) {
     const container = document.getElementById('waterMaskImage');
-    const values = data.water_mask_values;
+    const values = window.decodeWaterMask(data);
     const h = data.water_mask_dimensions[0];
     const w = data.water_mask_dimensions[1];
 
@@ -193,7 +193,7 @@ function renderWaterMask(data) {
  */
 function renderEsaLandCover(data) {
     const container = document.getElementById('satelliteImage');
-    const values = data.esa_values;
+    const values = window.decodeEsaValues(data);
     const h = data.esa_dimensions[0];
     const w = data.esa_dimensions[1];
 
@@ -248,7 +248,8 @@ async function renderCombinedView() {
 
     if (lastWaterMaskData && lastDemData) {
         const demSize = lastDemData.width * lastDemData.height;
-        const waterSize = lastWaterMaskData.water_mask_values?.length ?? 0;
+        const _wm = lastWaterMaskData ? window.decodeWaterMask(lastWaterMaskData) : null;
+        const waterSize = _wm?.length ?? 0;
         if (demSize !== waterSize) {
             console.warn('DEM and water mask dimension mismatch - reloading water mask');
             await loadWaterMask();
@@ -266,7 +267,7 @@ async function renderCombinedView() {
 
     const waterScale = parseFloat(document.getElementById('waterScaleSlider')?.value || 0.05);
     const opacityVal = window.getWaterOpacity?.() ?? 0.7;
-    const waterVals = lastWaterMaskData?.water_mask_values || [];
+    const waterVals = lastWaterMaskData ? window.decodeWaterMask(lastWaterMaskData) : [];
     const ptp = vmax - vmin;
 
     for (let i = 0; i < values.length; i++) {

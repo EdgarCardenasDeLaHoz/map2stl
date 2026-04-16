@@ -18,6 +18,7 @@ Satellite and water-mask imagery lives in core/sat.py.
 
 from __future__ import annotations
 
+import base64
 import logging
 import math
 import os
@@ -412,16 +413,22 @@ def make_dem_payload(im: np.ndarray, west, south, east, north,
                      show_sat: bool, upscale_dim: int = None) -> dict:
     """
     Build the standard DEM response dict from a numpy array.
+
+    Elevation values are encoded as base64 little-endian float32 to avoid
+    the cost of converting large arrays to Python lists and JSON-serialising
+    them on the main event-loop thread.  The client decodes with:
+        new Float32Array(await res.arrayBuffer())  (after atob + Uint8Array)
+
     Optionally upsamples to upscale_dim before serialising (used for cache hits).
     """
     if upscale_dim:
         im = upsample_dem(im, upscale_dim)
     im_clean = np.nan_to_num(im, nan=0.0,
                               posinf=np.finfo(np.float32).max,
-                              neginf=np.finfo(np.float32).min)
+                              neginf=np.finfo(np.float32).min).astype(np.float32)
     h_px, w_px = im_clean.shape
     return {
-        "dem_values":     im_clean.ravel().tolist(),
+        "dem_values_b64": base64.b64encode(im_clean.ravel().tobytes()).decode("ascii"),
         "dimensions":     [h_px, w_px],
         "min_elevation":  float(np.nanmin(im)),
         "max_elevation":  float(np.nanmax(im)),

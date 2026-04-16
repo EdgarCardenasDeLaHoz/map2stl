@@ -144,11 +144,13 @@ class TestExportPreview:
             "north": 40.0, "south": 39.9, "east": -75.1, "west": -75.2,
             "dim": 10
         })
+        import base64
         assert resp.status_code == 200
         body = resp.json()
-        assert "dem_values" in body
+        assert "dem_values_b64" in body
         assert "dimensions" in body
-        assert len(body["dem_values"]) == 100  # 10×10 grid in TEST_MODE
+        n_floats = len(base64.b64decode(body["dem_values_b64"])) // 4
+        assert n_floats == 100  # 10×10 grid in TEST_MODE
 
     def test_response_has_bbox_field(self, client):
         resp = client.post("/api/export/preview", params={

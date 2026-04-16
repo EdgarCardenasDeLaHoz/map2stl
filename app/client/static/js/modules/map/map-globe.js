@@ -196,8 +196,8 @@ async function toggleDemOverlay(show) {
                     `north=${north}&south=${south}&east=${east}&west=${west}&dim=150&colormap=${colormap}&projection=none&subtract_water=false&depth_scale=1`
                 );
                 if (demErr) throw new Error(demErr);
-                if (data && data.dem_values && data.dimensions) {
-                    let demVals = data.dem_values;
+                if (data && (data.dem_values || data.dem_values_b64) && data.dimensions) {
+                    let demVals = window.decodeDemValues(data);
                     let h = Number(data.dimensions[0]);
                     let w = Number(data.dimensions[1]);
                     if (Array.isArray(demVals) && demVals.length && Array.isArray(demVals[0])) {

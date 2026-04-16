@@ -47,11 +47,11 @@ const GEO_M_PER_DEG_LAT = 110540;  // metres per degree latitude
  * @param {number} north/south/east/west - Bbox bounds for the loaded DEM
  */
 function _applyDemResult(data, north, south, east, west) {
-    let demVals = data.dem_values;
+    let demVals = window.decodeDemValues(data);
     let h = Number(data.dimensions[0]);
     let w = Number(data.dimensions[1]);
 
-    // Handle nested arrays
+    // Handle nested arrays (legacy plain-array path only)
     if (Array.isArray(demVals) && demVals.length && Array.isArray(demVals[0])) {
         h = demVals.length;
         w = demVals[0].length;
@@ -243,7 +243,7 @@ window.loadDEM = async function loadDEM(highRes = false) {
         if (stackC) window.hideLoading?.(stackC);
 
         // Client-side rendering of DEM data
-        if (data.dem_values && data.dimensions) {
+        if ((data.dem_values || data.dem_values_b64) && data.dimensions) {
             _applyDemResult(data, north, south, east, west);
         } else {
             document.getElementById('demImage').innerHTML = '<p>No DEM data available</p>';

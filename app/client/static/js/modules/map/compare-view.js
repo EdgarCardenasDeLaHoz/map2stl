@@ -110,12 +110,12 @@ async function loadCompareRegion(side) {
         const params   = new URLSearchParams({ north: region.north, south: region.south, east: region.east, west: region.west, dim: 200 });
         const { data, error: demErr } = await api.dem.load(params);
         if (demErr) throw new Error(demErr);
-        if (!data.dem_values || !data.dimensions) throw new Error(data.error || 'No DEM data returned');
+        if (!(data.dem_values || data.dem_values_b64) || !data.dimensions) throw new Error(data.error || 'No DEM data returned');
 
-        let demVals = data.dem_values;
+        let demVals = window.decodeDemValues(data);
         let h = Number(data.dimensions[0]);
         let w = Number(data.dimensions[1]);
-        if (Array.isArray(demVals[0])) { h = demVals.length; w = demVals[0].length; demVals = demVals.flat(); }
+        if (Array.isArray(demVals) && Array.isArray(demVals[0])) { h = demVals.length; w = demVals[0].length; demVals = demVals.flat(); }
 
         const vmin  = data.min_elevation ?? demVals.filter(Number.isFinite).reduce((a, b) => a < b ? a : b, Infinity);
         const vmax  = data.max_elevation ?? demVals.filter(Number.isFinite).reduce((a, b) => a > b ? a : b, -Infinity);

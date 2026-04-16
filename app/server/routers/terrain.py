@@ -90,6 +90,12 @@ def _parse_bool(params, key, default=False):
     return val.lower() in ('true', '1', 'yes', 'on')
 
 
+def _b64(arr: "np.ndarray") -> str:
+    """Encode a numpy array as base64 little-endian float32 for binary transport."""
+    import base64 as _b64m
+    return _b64m.b64encode(arr.ravel().astype(np.float32).tobytes()).decode("ascii")
+
+
 def _validate_bbox(north, south, east, west):
     """Return a JSONResponse error if bbox is missing or incoherent, else None."""
     if any(v is None for v in (north, south, east, west)):
@@ -359,12 +365,12 @@ async def get_terrain_water_mask(request: Request):
                 _wp = int(np.sum(_wm > 0.5))
                 _tp = _h * _w
                 return JSONResponse(content={
-                    "water_mask_values": _wm.ravel().tolist(),
+                    "water_mask_values_b64": _b64(_wm),
                     "water_mask_dimensions": [_h, _w],
                     "water_pixels": _wp,
                     "total_pixels": _tp,
                     "water_percentage": 100.0 * _wp / _tp if _tp else 0.0,
-                    "esa_values": _esa.ravel().tolist(),
+                    "esa_values_b64": _b64(_esa),
                     "esa_dimensions": [_h, _w],
                     "from_cache": True,
                 })
@@ -376,12 +382,12 @@ async def get_terrain_water_mask(request: Request):
             wp = int(np.sum(water_arr))
             tp = h * w
             return JSONResponse(content={
-                "water_mask_values": water_arr.ravel().tolist(),
+                "water_mask_values_b64": _b64(water_arr),
                 "water_mask_dimensions": [h, w],
                 "water_pixels": wp,
                 "total_pixels": tp,
                 "water_percentage": 100.0 * wp / tp,
-                "esa_values": water_arr.ravel().tolist(),
+                "esa_values_b64": _b64(water_arr),
                 "esa_dimensions": [h, w],
             })
 
@@ -402,12 +408,12 @@ async def get_terrain_water_mask(request: Request):
                           {"shape": [h, w]})
 
         return JSONResponse(content={
-            "water_mask_values": water_mask.ravel().tolist(),
+            "water_mask_values_b64": _b64(water_mask),
             "water_mask_dimensions": [h, w],
             "water_pixels": water_pixels,
             "total_pixels": total_pixels,
             "water_percentage": 100.0 * water_pixels / total_pixels if total_pixels > 0 else 0.0,
-            "esa_values": img.ravel().tolist(),
+            "esa_values_b64": _b64(img),
             "esa_dimensions": [h, w],
         })
 

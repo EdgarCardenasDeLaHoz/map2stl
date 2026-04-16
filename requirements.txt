@@ -5,6 +5,7 @@
 fastapi==0.135.1
 uvicorn==0.41.0
 pydantic==2.12.5
+orjson>=3.9
 starlette==0.52.1
 python-multipart==0.0.22
 aiofiles==25.1.0
