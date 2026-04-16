@@ -23,10 +23,11 @@ router = APIRouter(tags=["cities"])
 # Config imports
 # ---------------------------------------------------------------------------
 try:
-    from app.server.config import OSM_CACHE_PATH
+    from app.server.config import OSM_CACHE_PATH, MAX_BBOX_DIAGONAL_KM
 except ImportError:
     _UI_DIR = Path(__file__).parent.parent
     OSM_CACHE_PATH = _UI_DIR.parent / "osm_raw_cache"
+    MAX_BBOX_DIAGONAL_KM = 15.0
 
 # ---------------------------------------------------------------------------
 # Cache helpers
@@ -114,9 +115,9 @@ async def get_city_data(city_req: CityRequest):
     dLat = (north - south) * math.pi / 180
     dLon = (east - west) * math.pi * math.cos(((north + south) / 2) * math.pi / 180) / 180
     diag_km = math.sqrt((R * dLat) ** 2 + (R * dLon) ** 2)
-    if diag_km > 15:
+    if diag_km > MAX_BBOX_DIAGONAL_KM:
         return JSONResponse(
-            content={"error": f"Bounding box too large ({diag_km:.1f} km diagonal, max 15 km)"},
+            content={"error": f"Bounding box too large ({diag_km:.1f} km diagonal, max {MAX_BBOX_DIAGONAL_KM:.0f} km)"},
             status_code=422,
         )
 

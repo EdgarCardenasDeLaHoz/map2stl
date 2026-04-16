@@ -20,9 +20,42 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         window.showToast?.('Draw a rectangle on the map, then enter a name and click Save Region', 'info');
     }
 
+    let _colormapTimer = null;
     document.getElementById('demColormap')?.addEventListener('change', () => {
         window._invalidateLutCache?.();
-        window.recolorDEM?.();
+        clearTimeout(_colormapTimer);
+        _colormapTimer = setTimeout(() => window.recolorDEM?.(), 50);
+    });
+
+    // DEM source params — sync new DOM inputs into appState.demParams so loadDEM picks them up.
+    // These inputs replaced the old pipeline panel + model terrain settings duplicates.
+    document.getElementById('paramDepthScale')?.addEventListener('change', e => {
+        const v = parseFloat(e.target.value);
+        if (!isNaN(v)) window.appState.demParams.depthScale = v;
+    });
+    document.getElementById('paramWaterScale')?.addEventListener('change', e => {
+        const v = parseFloat(e.target.value);
+        if (!isNaN(v)) window.appState.demParams.waterScale = v;
+    });
+    document.getElementById('paramSubtractWater')?.addEventListener('change', e => {
+        window.appState.demParams.subtractWater = e.target.checked;
+    });
+    document.getElementById('exportModelHeight')?.addEventListener('change', e => {
+        const v = parseFloat(e.target.value);
+        if (!isNaN(v)) window.appState.demParams.height = v;
+    });
+    document.getElementById('exportBaseHeight')?.addEventListener('change', e => {
+        const v = parseFloat(e.target.value);
+        if (!isNaN(v)) window.appState.demParams.base = v;
+        window.updatePrintDimensions?.();
+    });
+    document.getElementById('exportEngraveLabel')?.addEventListener('change', () => {
+        const row = document.getElementById('exportLabelTextRow');
+        if (row) row.style.display = document.getElementById('exportEngraveLabel').checked ? 'block' : 'none';
+    });
+    document.getElementById('exportContours')?.addEventListener('change', () => {
+        const p = document.getElementById('exportContoursParams');
+        if (p) p.style.display = document.getElementById('exportContours').checked ? 'block' : 'none';
     });
 
     const projSelect = document.getElementById('paramProjection');
@@ -34,29 +67,31 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
             'lambert':    'Lambert Cylindrical Equal-Area — preserves area at the cost of shape.',
             'sinusoidal': 'Sinusoidal — each row scaled by cos(lat), centred on meridian.',
         };
+        let _projChangeTimer = null;
         projSelect.addEventListener('change', () => {
+            // Update description immediately — zero cost
             const desc = document.getElementById('projectionDescription');
             if (desc) desc.textContent = projDescriptions[projSelect.value] || '';
-            window.recolorDEM?.();
-            const _wmd = window.appState.lastWaterMaskData;
-            if (_wmd) {
-                window.renderWaterMask?.(_wmd);
-                window.renderEsaLandCover?.(_wmd);
-            }
-            // Invalidate city overlay caches so they re-render with new projection
-            window._invalidateCityCache?.();
-            window.renderCityOverlay?.();
-            window.renderCityOnDEM?.();
-            // Re-project the city heights raster canvas
-            window._reprojectCityRaster?.();
-            // Re-project the satellite RGB canvas
-            window._reprojectSatelliteImage?.();
-            // Recompute composite DEM (applies new projection to source canvas)
-            window.computeCompositeDem?.();
-            // Update stacked layers view
-            requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
-            // Update print dimensions — projection changes canvas aspect ratio
-            requestAnimationFrame(() => window.updatePrintDimensions?.());
+
+            // Debounce 80ms so rapid clicks don't fire multiple fetches.
+            // Projection is now applied server-side: re-fetch every loaded layer
+            // so all canvases arrive pre-projected and aligned.
+            clearTimeout(_projChangeTimer);
+            _projChangeTimer = setTimeout(async () => {
+                if (!window.appState.lastDemData) return;  // nothing loaded yet
+
+                // Re-fetch DEM with new projection param (includes water if subtract_water)
+                await window.loadDEM?.();
+
+                // Re-fetch other layers that were already loaded
+                const tasks = [];
+                if (window.appState.lastWaterMaskData) tasks.push(window.loadWaterMask?.());
+                if (window.appState.satImgSourceCanvas)  tasks.push(window.loadSatelliteRGBImage?.());
+                if (window.appState.osmCityData)          tasks.push(window.loadCityData?.());
+                if (tasks.length) await Promise.all(tasks);
+
+                requestAnimationFrame(() => window.updatePrintDimensions?.());
+            }, 80);
         });
     }
 
@@ -233,17 +268,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         });
     }
 
-    const gridVisibleCb = document.getElementById('layerGridVisible');
-    document.getElementById('layerGridVisible')?.addEventListener('change', () => {
-        const gc = document.getElementById('layerGridCanvas');
-        if (gc) {
-            gc.style.display = gridVisibleCb.checked ? 'block' : 'none';
-            if (gridVisibleCb.checked) window.drawLayerGrid?.();
-        }
-    });
-    document.getElementById('layerGridDensity')?.addEventListener('change', () => {
-        if (gridVisibleCb?.checked) window.drawLayerGrid?.();
-    });
     document.getElementById('gridPixelModeBtn')?.addEventListener('click', () => {
         const btn = document.getElementById('gridPixelModeBtn');
         const on = btn?.classList.toggle('active');
@@ -267,21 +291,55 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         if (w) w.style.display = val >= 500 ? 'block' : 'none';
         window.loadWaterMask?.();
     });
-    document.getElementById('loadWaterMaskBtn')?.addEventListener('click', async () => {
-        const btn = document.getElementById('loadWaterMaskBtn');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
-        try { await window.loadWaterMask?.(); }
-        finally { if (btn) { btn.disabled = false; btn.textContent = '🌊 Load Water & ESA'; } }
+    document.getElementById('waterLayerResolution')?.addEventListener('change', () => {
+        const val = parseInt(document.getElementById('waterLayerResolution').value);
+        const w   = document.getElementById('waterLayerResWarning');
+        if (w) w.style.display = val >= 500 ? 'block' : 'none';
     });
+    /**
+     * Wire a load button to an async action with disable-while-loading guard.
+     * @param {string} btnId  - Element ID of the button
+     * @param {Function} fn   - Async action to invoke on click
+     * @param {Function} [before] - Optional sync setup to run before fn (receives btn)
+     */
+    function _asyncBtn(btnId, fn, before) {
+        document.getElementById(btnId)?.addEventListener('click', async () => {
+            const btn = document.getElementById(btnId);
+            if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+            before?.(btn);
+            try { await fn(); }
+            finally { if (btn) { btn.disabled = false; btn.textContent = '⟳ Load'; } }
+        });
+    }
+
+    _asyncBtn('loadWaterMaskBtn', () => window.loadWaterMask?.());
+    _asyncBtn('loadDemLayerBtn', () => window.loadDEM?.(), () => {
+        // Override paramDim with the layer-view resolution for this load
+        const dimEl = document.getElementById('demLayerResolution');
+        const paramDimEl = document.getElementById('paramDim');
+        if (dimEl && paramDimEl) paramDimEl.value = dimEl.value;
+    });
+    // loadWaterLayerBtn — layer-view per-resolution load (reads #waterLayerResolution)
+    // Distinct from #loadWaterMaskBtn in WaterLandCoverSection (reads persisted #waterResolution)
+    _asyncBtn('loadWaterLayerBtn', () => window.loadWaterMask?.());
+    _asyncBtn('loadSatImgBtn', () => window.loadSatelliteRGBImage?.());
+    _asyncBtn('loadSatBtn', () => window.loadSatelliteImage?.());
 };
 
 window._setupBboxListeners = function _setupBboxListeners() {
+    /** Read the four bbox input fields. Returns { n, s, e, w } as floats (may be NaN). */
+    function _readBboxInputs() {
+        return {
+            n: parseFloat(document.getElementById('bboxNorth')?.value),
+            s: parseFloat(document.getElementById('bboxSouth')?.value),
+            e: parseFloat(document.getElementById('bboxEast')?.value),
+            w: parseFloat(document.getElementById('bboxWest')?.value),
+        };
+    }
+
     const bboxReloadBtn = document.getElementById('bboxReloadBtn');
     bboxReloadBtn?.addEventListener('click', () => {
-        const n = parseFloat(document.getElementById('bboxNorth')?.value);
-        const s = parseFloat(document.getElementById('bboxSouth')?.value);
-        const e = parseFloat(document.getElementById('bboxEast')?.value);
-        const w = parseFloat(document.getElementById('bboxWest')?.value);
+        const { n, s, e, w } = _readBboxInputs();
         if (isNaN(n) || isNaN(s) || isNaN(e) || isNaN(w)) {
             window.showToast?.('Invalid coordinates', 'error'); return;
         }
@@ -317,10 +375,7 @@ window._setupBboxListeners = function _setupBboxListeners() {
         });
         // Live map rectangle update on every keystroke (no DEM reload)
         el.addEventListener('input', () => {
-            const n = parseFloat(document.getElementById('bboxNorth')?.value);
-            const s = parseFloat(document.getElementById('bboxSouth')?.value);
-            const e = parseFloat(document.getElementById('bboxEast')?.value);
-            const w = parseFloat(document.getElementById('bboxWest')?.value);
+            const { n, s, e, w } = _readBboxInputs();
             if (isNaN(n) || isNaN(s) || isNaN(e) || isNaN(w)) return;
             if (n <= s || e <= w) return;  // invalid — skip until values are consistent
             const _map = window.getMap?.();
@@ -347,10 +402,7 @@ window._setupBboxListeners = function _setupBboxListeners() {
     document.getElementById('saveBboxBtn')?.addEventListener('click', async () => {
         const selectedRegion = window.appState.selectedRegion;
         if (!selectedRegion?.name) { window.showToast?.('No region selected', 'error'); return; }
-        const n = parseFloat(document.getElementById('bboxNorth')?.value);
-        const s = parseFloat(document.getElementById('bboxSouth')?.value);
-        const e = parseFloat(document.getElementById('bboxEast')?.value);
-        const w = parseFloat(document.getElementById('bboxWest')?.value);
+        const { n, s, e, w } = _readBboxInputs();
         if (isNaN(n) || isNaN(s) || isNaN(e) || isNaN(w)) {
             window.showToast?.('Invalid coordinates', 'error'); return;
         }

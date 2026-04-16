@@ -87,6 +87,9 @@ window.api = (() => {
         /** GET /api/terrain/water-mask?{params} */
         waterMask: (params, signal) => _fetch(`/api/terrain/water-mask?${params}`, signal ? { signal } : {}),
 
+        /** GET /api/terrain/hydrology?{params} */
+        hydrology: (params, signal) => _fetch(`/api/terrain/hydrology?${params}`, signal ? { signal } : {}),
+
         /** GET /api/terrain/satellite?{params} */
         satellite: (params, signal) => _fetch(`/api/terrain/satellite?${params}`, signal ? { signal } : {}),
 

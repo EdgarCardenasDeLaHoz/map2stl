@@ -19,7 +19,10 @@ function _onCollapsibleClick(e) {
     if (header) window.toggleCollapsible?.(header);
 }
 
+let _listenersWired = false;
 window.setupEventListeners = function setupEventListeners() {
+    if (_listenersWired) return;
+    _listenersWired = true;
     // Tab buttons
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', () => window.switchView?.(tab.dataset.view));
@@ -71,4 +74,12 @@ window.setupEventListeners = function setupEventListeners() {
     window._setupSettingsJsonToggle?.();
     window._setupCityAndExportListeners?.();
     window._setupSidebarEditView?.();
+
+    // Hydrology section
+    document.getElementById('loadHydrologyBtn')?.addEventListener('click', () => window.loadHydrology?.());
+    document.getElementById('clearHydrologyBtn')?.addEventListener('click', () => window.clearHydrology?.());
+    document.getElementById('hydroSource')?.addEventListener('change', e => {
+        const controls = document.getElementById('hydroRiversControls');
+        if (controls) controls.style.display = e.target.value === 'hydrorivers' ? '' : 'none';
+    });
 };

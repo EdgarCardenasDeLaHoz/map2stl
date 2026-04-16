@@ -18,7 +18,7 @@ const _lutCache = new Map();
 /** Invalidate LUT cache entries. Pass a colormap name to drop one entry, or omit to clear all. */
 window._invalidateLutCache = (colormap) => {
     if (colormap) _lutCache.delete(colormap);
-    else          _lutCache.clear();
+    else _lutCache.clear();
 };
 
 // Reusable ImageData — avoids re-allocating Uint8ClampedArray on every render.
@@ -26,6 +26,14 @@ let _demImageData = null;
 
 /** True for both plain Array and typed arrays (Float32Array, etc.) */
 const _isArrayLike = (v) => Array.isArray(v) || ArrayBuffer.isView(v);
+
+// Delegate to shared helpers from ui-helpers.js (loaded before this module).
+const _getBboxCoords = (...a) => window.getBboxCoords(...a);
+const _showErr       = (...a) => window.showErrInEl(...a);
+
+// Geographic scale factors (WGS-84 approximation)
+const GEO_M_PER_DEG_LON = 111320;  // metres per degree longitude at equator
+const GEO_M_PER_DEG_LAT = 110540;  // metres per degree latitude
 
 // ---------------------------------------------------------------------------
 // _applyDemResult — post-fetch DEM rendering pipeline
@@ -50,19 +58,18 @@ function _applyDemResult(data, north, south, east, west) {
         demVals = demVals.flat();
     }
 
-    const colormap   = document.getElementById('demColormap').value;
+    const colormap = document.getElementById('demColormap').value;
     const finiteVals = demVals.filter(Number.isFinite);
-    const calcMin    = finiteVals.length ? finiteVals.reduce((a, b) => a < b ? a : b, finiteVals[0]) : 0;
-    const calcMax    = finiteVals.length ? finiteVals.reduce((a, b) => a > b ? a : b, finiteVals[0]) : 1;
-    const vmin       = data.min_elevation !== undefined ? data.min_elevation : calcMin;
-    const vmax       = data.max_elevation !== undefined ? data.max_elevation : calcMax;
+    const calcMin = finiteVals.length ? finiteVals.reduce((a, b) => a < b ? a : b, finiteVals[0]) : 0;
+    const calcMax = finiteVals.length ? finiteVals.reduce((a, b) => a > b ? a : b, finiteVals[0]) : 1;
+    const vmin = data.min_elevation !== undefined ? data.min_elevation : calcMin;
+    const vmax = data.max_elevation !== undefined ? data.max_elevation : calcMax;
 
     // Store bounding box for gridlines
     window.appState.currentDemBbox = { north, south, east, west };
 
-    // Render DEM canvas
-    const rawCanvas = window.renderDEMCanvas?.(demVals, w, h, colormap, vmin, vmax);
-    const canvas    = window.applyProjection?.(rawCanvas, { north, south, east, west });
+    // Render DEM canvas — projection applied server-side, no client warp needed
+    const canvas = window.renderDEMCanvas?.(demVals, w, h, colormap, vmin, vmax);
     const container = document.getElementById('demImage');
     container.innerHTML = '';
     container.appendChild(canvas);
@@ -80,7 +87,7 @@ function _applyDemResult(data, north, south, east, west) {
     requestAnimationFrame(() => window.drawGridlinesOverlay?.('demImage'));
 
     // Update stacked layers view
-    requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+    window.emitStackUpdate();
 
     // Populate bbox fine-tune inputs
     window.setBboxInputValues?.(north, south, east, west);
@@ -96,10 +103,10 @@ function _applyDemResult(data, north, south, east, west) {
 
     // Handle landuse/satellite data if available
     const landuseContainer = document.getElementById('demLanduse');
-    const landuseWrapper   = document.querySelector('.dem-landuse-container');
+    const landuseWrapper = document.querySelector('.dem-landuse-container');
     if (data.sat_values && data.sat_dimensions && data.sat_available) {
-        const sat_h   = data.sat_dimensions[0];
-        const sat_w   = data.sat_dimensions[1];
+        const sat_h = data.sat_dimensions[0];
+        const sat_w = data.sat_dimensions[1];
         const satCanvas = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
         landuseContainer.innerHTML = '';
         landuseContainer.appendChild(satCanvas);
@@ -120,7 +127,7 @@ function _applyDemResult(data, north, south, east, west) {
             thumbCanvas.getContext('2d').drawImage(canvas, 0, 0, 48, 30);
             window.saveRegionThumbnail?.(currentSelectedRegion.name, thumbCanvas.toDataURL('image/jpeg', 0.6));
             window.renderCoordinatesList?.();
-        } catch (_) {}
+        } catch (_) { }
     }
 
     // Store bbox on lastDemData for physical dimensions calculation
@@ -130,7 +137,7 @@ function _applyDemResult(data, north, south, east, west) {
     if (window.appState?.osmCityData) requestAnimationFrame(() => window.renderCityOnDEM?.());
 
     // Auto-load city data if any city layer toggle is enabled and region is small enough
-    const _anyLayerOn = ['layerBuildingsToggle','layerRoadsToggle','layerWaterwaysToggle']
+    const _anyLayerOn = ['layerBuildingsToggle', 'layerRoadsToggle', 'layerWaterwaysToggle']
         .some(id => document.getElementById(id)?.checked);
     if (_anyLayerOn && !window.appState?.osmCityData && typeof window.loadCityData === 'function') {
         window.loadCityData?.();
@@ -162,49 +169,37 @@ window.loadDEM = async function loadDEM(highRes = false) {
     window.loadDEM._controller = new AbortController();
     const signal = window.loadDEM._controller.signal;
 
-    const boundingBox    = window.getBoundingBox?.();
+    const boundingBox = window.getBoundingBox?.();
     const selectedRegion = window.appState.selectedRegion;
 
-    if (!boundingBox && !selectedRegion) {
+    const coords = _getBboxCoords(boundingBox, selectedRegion);
+    if (!coords) {
         document.getElementById('demImage').innerHTML = '<p>Please select a region or draw a bounding box first.</p>';
         window.showToast?.('Please select a region first', 'warning');
         return;
     }
+    const { north, south, east, west } = coords;
 
-    let bounds;
-    if (boundingBox) {
-        bounds = boundingBox;
-    } else if (selectedRegion) {
-        bounds = L.latLngBounds(
-            [selectedRegion.south, selectedRegion.west],
-            [selectedRegion.north, selectedRegion.east]
-        );
-    }
-
-    const north = bounds.getNorth();
-    const south = bounds.getSouth();
-    const east  = bounds.getEast();
-    const west  = bounds.getWest();
-
-    const demSource  = document.getElementById('paramDemSource')?.value || 'local';
-    const p          = window.appState.demParams;
+    const demSource = document.getElementById('paramDemSource')?.value || 'local';
+    const p = window.appState.demParams;
 
     const params = new URLSearchParams({
         north, south, east, west,
-        dim:            highRes ? 400 : document.getElementById('paramDim').value,
-        depth_scale:    p.depthScale,
-        water_scale:    p.waterScale,
+        dim: highRes ? 400 : document.getElementById('paramDim').value,
+        depth_scale: p.depthScale,
+        water_scale: p.waterScale,
         subtract_water: p.subtractWater,
-        dataset:        'esa',
-        dem_source:     demSource,
+        dataset: 'esa',
+        dem_source: demSource,
+        projection: document.getElementById('paramProjection')?.value || 'none',
+        maintain_dimensions: true,
     });
 
     // Clear DEM cache before loading new DEM
     window.clearLayerCache?.();
 
     // Update layer status
-    window.appState.layerStatus.dem = 'loading';
-    window.events?.emit(window.EV?.STATUS_UPDATE);
+    window.setLayerStatus('dem', 'loading');
 
     // Show loading overlay on stacked layers view
     const stackContainer = document.getElementById('dem-image-section');
@@ -226,25 +221,22 @@ window.loadDEM = async function loadDEM(highRes = false) {
         if (signal.aborted) return;  // intentional cancellation — not an error
         if (loadErr) {
             console.error('Failed to load /api/terrain/dem:', loadErr);
-            { const _p = document.createElement('p'); _p.textContent = `Error: ${loadErr}`; document.getElementById('demImage').replaceChildren(_p); }
-            window.appState.layerStatus.dem = 'error';
-            window.events?.emit(window.EV?.STATUS_UPDATE);
+            _showErr('demImage', loadErr);
+            window.setLayerStatus('dem', 'error');
             window.showToast?.('Failed to load DEM: ' + loadErr, 'error');
             return;
         }
 
         if (data.error) {
-            { const _p = document.createElement('p'); _p.textContent = `Error: ${data.error}`; document.getElementById('demImage').replaceChildren(_p); }
-            window.appState.layerStatus.dem = 'error';
-            window.events?.emit(window.EV?.STATUS_UPDATE);
+            _showErr('demImage', data.error);
+            window.setLayerStatus('dem', 'error');
             window.showToast?.('Failed to load DEM: ' + data.error, 'error');
             return;
         }
 
         // Track bbox and update status
         window.appState.layerBboxes.dem = { north, south, east, west };
-        window.appState.layerStatus.dem = 'loaded';
-        window.events?.emit(window.EV?.STATUS_UPDATE);
+        window.setLayerStatus('dem', 'loaded');
 
         // Remove loading overlay from stacked layers
         const stackC = document.getElementById('dem-image-section');
@@ -255,22 +247,19 @@ window.loadDEM = async function loadDEM(highRes = false) {
             _applyDemResult(data, north, south, east, west);
         } else {
             document.getElementById('demImage').innerHTML = '<p>No DEM data available</p>';
-            window.appState.layerStatus.dem = 'error';
-            window.events?.emit(window.EV?.STATUS_UPDATE);
+            window.setLayerStatus('dem', 'error');
             window.showToast?.('No DEM data available', 'warning');
         }
     } catch (error) {
         if (error.name === 'AbortError') {
             document.getElementById('demImage').innerHTML = '<p>DEM load cancelled.</p>';
-            window.appState.layerStatus.dem = 'empty';
-            window.events?.emit(window.EV?.STATUS_UPDATE);
+            window.setLayerStatus('dem', 'empty');
             return;
         }
         console.error('Error loading DEM:', error);
         console.error('Error stack:', error.stack);
-        { const _p = document.createElement('p'); _p.textContent = `Failed to load DEM: ${error.message || error}`; document.getElementById('demImage').replaceChildren(_p); }
-        window.appState.layerStatus.dem = 'error';
-        window.events?.emit(window.EV?.STATUS_UPDATE);
+        _showErr('demImage', `Failed to load DEM: ${error.message || error}`);
+        window.setLayerStatus('dem', 'error');
         window.showToast?.('Failed to load DEM', 'error');
     } finally {
         const stackF = document.getElementById('dem-image-section');
@@ -310,22 +299,22 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
     const currentDemBbox = window.appState.currentDemBbox;
     if (currentDemBbox) {
         window.appState.layerBboxes.dem = { ...currentDemBbox };
-        window.appState.layerStatus.dem = 'loaded';
-        window.events?.emit(window.EV?.STATUS_UPDATE);
+        window.setLayerStatus('dem', 'loaded');
     }
 
     const canvas = document.createElement('canvas');
-    canvas.width  = width;
+    canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
-    if (!_demImageData || _demImageData.width !== width || _demImageData.height !== height) {
-        _demImageData = new ImageData(width, height);
-    }
-    const img = _demImageData;
+    // Always create a fresh ImageData — never reuse across renders.
+    // Reusing _demImageData when dim changes causes putImageData to write a
+    // mismatched buffer onto the new canvas, corrupting the display.
+    const img = new ImageData(width, height);
+    _demImageData = img;
 
     const data = img.data;
     const flat = _isArrayLike(values) ? values : [];
-    const len  = flat.length;
+    const len = flat.length;
 
     // Find min/max
     let calcMin = Infinity, calcMax = -Infinity;
@@ -336,12 +325,12 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
             if (v > calcMax) calcMax = v;
         }
     }
-    if (calcMin === Infinity)  calcMin = 0;
+    if (calcMin === Infinity) calcMin = 0;
     if (calcMax === -Infinity) calcMax = 1;
 
-    const min      = (typeof vmin === 'number') ? vmin : calcMin;
-    const max      = (typeof vmax === 'number') ? vmax : calcMax;
-    const range    = (max - min) || 1;
+    const min = (typeof vmin === 'number') ? vmin : calcMin;
+    const max = (typeof vmax === 'number') ? vmax : calcMax;
+    const range = (max - min) || 1;
     const invRange = 1 / range;
 
     // Pre-compute colour lookup table (cached by colormap name)
@@ -350,7 +339,7 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
         for (let i = 0; i < 1024; i++) {
             const t = i / 1023;
             const [r, g, b] = window.mapElevationToColor?.(t, colormap) || [0, 0, 0];
-            lut[i * 3]     = Math.round((r || 0) * 255);
+            lut[i * 3] = Math.round((r || 0) * 255);
             lut[i * 3 + 1] = Math.round((g || 0) * 255);
             lut[i * 3 + 2] = Math.round((b || 0) * 255);
         }
@@ -364,21 +353,21 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
         const idx = i << 2;
 
         if (Number.isFinite(val)) {
-            const t        = (val - min) * invRange;
+            const t = (val - min) * invRange;
             const tClamped = t < 0 ? 0 : (t > 1 ? 1 : t);
-            const lutIdx   = (tClamped * 1023 + 0.5 | 0) * 3;
-            data[idx]      = colorLUT[lutIdx];
-            data[idx + 1]  = colorLUT[lutIdx + 1];
-            data[idx + 2]  = colorLUT[lutIdx + 2];
-            data[idx + 3]  = 255;
+            const lutIdx = (tClamped * 1023 + 0.5 | 0) * 3;
+            data[idx] = colorLUT[lutIdx];
+            data[idx + 1] = colorLUT[lutIdx + 1];
+            data[idx + 2] = colorLUT[lutIdx + 2];
+            data[idx + 3] = 255;
         } else {
             data[idx] = data[idx + 1] = data[idx + 2] = data[idx + 3] = 0;
         }
     }
     ctx.putImageData(img, 0, 0);
     canvas.style.maxWidth = '100%';
-    canvas.style.height   = 'auto';
-    canvas.style.display  = 'block';
+    canvas.style.height = 'auto';
+    canvas.style.display = 'block';
 
     return canvas;
 };
@@ -389,7 +378,7 @@ window.addEventListener('resize', () => {
     if (!container) return;
     const canvas = container.querySelector('canvas');
     if (canvas) {
-        canvas.style.width  = '100%';
+        canvas.style.width = '100%';
         canvas.style.height = '100%';
     }
 });
@@ -403,9 +392,9 @@ window.addEventListener('resize', () => {
  * @param {boolean} isEmpty
  */
 window._setDemEmptyState = function _setDemEmptyState(isEmpty) {
-    const emptyEl  = document.getElementById('demEmptyState');
+    const emptyEl = document.getElementById('demEmptyState');
     const layersEl = document.getElementById('layersContainer');
-    if (emptyEl)  emptyEl.style.display  = isEmpty ? 'flex' : 'none';
+    if (emptyEl) emptyEl.style.display = isEmpty ? 'flex' : 'none';
     if (layersEl) layersEl.style.display = isEmpty ? 'none' : '';
 };
 
@@ -426,7 +415,7 @@ window._updateWorkflowStepper = function _updateWorkflowStepper() {
     document.getElementById('tabEdit')?.classList.toggle('step-done', step2Done);
     document.getElementById('tabExtrude')?.classList.toggle('step-done', step3Done);
 
-    const hint     = document.getElementById('workflowHint');
+    const hint = document.getElementById('workflowHint');
     const hintText = document.getElementById('workflowHintText');
     if (!hint || !hintText) return;
 
@@ -442,7 +431,7 @@ window._updateWorkflowStepper = function _updateWorkflowStepper() {
     }
 
     const s1 = _stepEl(1, 'Select region', step1Done ? 'done' : 'active');
-    const s2 = _stepEl(2, 'Load DEM',      step2Done ? 'done' : (step1Done ? 'active' : 'pending'));
+    const s2 = _stepEl(2, 'Load DEM', step2Done ? 'done' : (step1Done ? 'active' : 'pending'));
     const s3 = _stepEl(3, 'Generate model', step3Done ? 'done' : (step2Done ? 'active' : 'pending'));
 
     hintText.innerHTML = `${s1} <span class="workflow-hint-sep">›</span> ${s2} <span class="workflow-hint-sep">›</span> ${s3}`;
@@ -458,7 +447,7 @@ window._updateWorkflowStepper = function _updateWorkflowStepper() {
  * model height, and bed fit. Pure JS — no backend call needed.
  */
 window.updatePrintDimensions = function updatePrintDimensions() {
-    const panel     = document.getElementById('printDimensions');
+    const panel = document.getElementById('printDimensions');
     const lastDemData = window.appState.lastDemData;
     if (!lastDemData || !lastDemData.width || !lastDemData.height) {
         panel.style.display = 'none';
@@ -467,26 +456,26 @@ window.updatePrintDimensions = function updatePrintDimensions() {
 
     // Use projected canvas dimensions — projection can change aspect ratio (e.g. lambert)
     const demCanvas = document.querySelector('#demImage canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)');
-    const gridW  = demCanvas?.width  || lastDemData.width;
-    const gridH  = demCanvas?.height || lastDemData.height;
+    const gridW = demCanvas?.width || lastDemData.width;
+    const gridH = demCanvas?.height || lastDemData.height;
     const modelH = parseFloat(document.getElementById('modelResolution').value) || 200;
-    const baseH  = parseFloat(document.getElementById('modelBaseHeight').value) || 0;
+    const baseH = parseFloat(document.getElementById('exportBaseHeight')?.value) || 0;
     const totalH = modelH + baseH;
 
     document.getElementById('dimFootprint').textContent = `${gridW} × ${gridH} mm`;
-    document.getElementById('dimHeight').textContent    = `${totalH} mm (${modelH} terrain + ${baseH} base)`;
+    document.getElementById('dimHeight').textContent = `${totalH} mm (${modelH} terrain + ${baseH} base)`;
 
     const selectedRegion = window.appState.selectedRegion;
     const bbox = lastDemData.bbox || (selectedRegion ? {
         north: selectedRegion.north, south: selectedRegion.south,
-        east:  selectedRegion.east,  west:  selectedRegion.west
+        east: selectedRegion.east, west: selectedRegion.west
     } : null);
 
     if (bbox) {
-        const midLat  = (bbox.north + bbox.south) / 2;
-        const latCos  = Math.cos(midLat * Math.PI / 180);
-        const realW_m = Math.abs(bbox.east - bbox.west) * 111320 * latCos;
-        const realH_m = Math.abs(bbox.north - bbox.south) * 110540;
+        const midLat = (bbox.north + bbox.south) / 2;
+        const latCos = Math.cos(midLat * Math.PI / 180);
+        const realW_m = Math.abs(bbox.east - bbox.west) * GEO_M_PER_DEG_LON * latCos;
+        const realH_m = Math.abs(bbox.north - bbox.south) * GEO_M_PER_DEG_LAT;
         const realW_km = realW_m / 1000;
         const realH_km = realH_m / 1000;
 
@@ -503,18 +492,18 @@ window.updatePrintDimensions = function updatePrintDimensions() {
             { name: 'Bambu 350', w: 350, h: 350 },
         ];
         const fitting = beds.filter(b => gridW <= b.w && gridH <= b.h);
-        const fitRow  = document.getElementById('dimBedFitRow');
+        const fitRow = document.getElementById('dimBedFitRow');
         const fitText = document.getElementById('dimBedFitText');
         if (fitting.length > 0) {
             fitText.textContent = '✓ ' + fitting.map(b => b.name).join(', ');
-            fitRow.style.color  = '#52b788';
+            fitRow.style.color = '#52b788';
         } else {
             fitText.textContent = '⚠ exceeds standard beds';
-            fitRow.style.color  = '#e67e22';
+            fitRow.style.color = '#e67e22';
         }
     } else {
-        document.getElementById('dimRealArea').textContent  = '—';
-        document.getElementById('dimScale').textContent     = '—';
+        document.getElementById('dimRealArea').textContent = '—';
+        document.getElementById('dimScale').textContent = '—';
         document.getElementById('dimBedFitText').textContent = '—';
     }
 
@@ -545,8 +534,8 @@ window._updateBedOptimizer = function _updateBedOptimizer(bbox) {
         [bedW, bedH] = sel.split('x').map(Number);
     }
 
-    const midLat  = (bbox.north + bbox.south) / 2;
-    const latCos  = Math.cos(midLat * Math.PI / 180);
+    const midLat = (bbox.north + bbox.south) / 2;
+    const latCos = Math.cos(midLat * Math.PI / 180);
     const realW_m = Math.abs(bbox.east - bbox.west) * 111320 * latCos;
     const realH_m = Math.abs(bbox.north - bbox.south) * 110540;
 
@@ -558,7 +547,7 @@ window._updateBedOptimizer = function _updateBedOptimizer(bbox) {
         printH = bedH; printW = bedH * aspectRatio;
     }
 
-    const scale  = Math.round(realW_m / (printW / 1000));
+    const scale = Math.round(realW_m / (printW / 1000));
     const pieces = (printW > bedW || printH > bedH) ? Math.ceil(printW / bedW) * Math.ceil(printH / bedH) : 1;
     const recRes = Math.min(600, Math.max(100, Math.round(printW / 0.5 / 100) * 100));
 
@@ -591,34 +580,22 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
     _satelliteAbortController = new AbortController();
     const signal = _satelliteAbortController.signal;
 
-    const boundingBox    = window.getBoundingBox?.();
+    const boundingBox = window.getBoundingBox?.();
     const selectedRegion = window.appState.selectedRegion;
 
-    if (!boundingBox && !selectedRegion) {
+    const coords = _getBboxCoords(boundingBox, selectedRegion);
+    if (!coords) {
         document.getElementById('satelliteImage').innerHTML = '<p>Please select a region or draw a bounding box first.</p>';
         return;
     }
-
-    let bounds;
-    if (boundingBox) {
-        bounds = boundingBox;
-    } else if (selectedRegion) {
-        bounds = L.latLngBounds(
-            [selectedRegion.south, selectedRegion.west],
-            [selectedRegion.north, selectedRegion.east]
-        );
-    }
-
-    const north      = bounds.getNorth();
-    const south      = bounds.getSouth();
-    const east       = bounds.getEast();
-    const west       = bounds.getWest();
-    const resolution = document.getElementById('satResolution').value;
-    const dataset    = document.getElementById('satDataset').value;
+    const { north, south, east, west } = coords;
+    const resolution = document.getElementById('waterLayerResolution')?.value ||
+                       document.getElementById('waterResolution')?.value || '200';
+    const dataset    = document.getElementById('waterDataset')?.value   || 'esa';
 
     const params = new URLSearchParams({
         north, south, east, west,
-        dim:      resolution,
+        dim: resolution,
         show_sat: true,
         dataset
     });
@@ -628,24 +605,24 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
     try {
         const { data, error: satErr } = await window.api.dem.load(params, signal);
         if (satErr) {
-            { const _p = document.createElement('p'); _p.textContent = `Error: ${satErr}`; document.getElementById('satelliteImage').replaceChildren(_p); }
+            _showErr('satelliteImage', satErr);
             return;
         }
 
         if (data.error) {
-            { const _p = document.createElement('p'); _p.textContent = `Error: ${data.error}`; document.getElementById('satelliteImage').replaceChildren(_p); }
+            _showErr('satelliteImage', data.error);
             return;
         }
 
         if (data.sat_values && data.sat_dimensions && data.sat_available) {
-            const sat_h   = data.sat_dimensions[0];
-            const sat_w   = data.sat_dimensions[1];
-            const canvas  = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
-            canvas.style.width  = '100%';
+            const sat_h = data.sat_dimensions[0];
+            const sat_w = data.sat_dimensions[1];
+            const canvas = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
+            canvas.style.width = '100%';
             canvas.style.height = 'auto';
             document.getElementById('satelliteImage').innerHTML = '';
             document.getElementById('satelliteImage').appendChild(canvas);
-            requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+            window.emitStackUpdate();
         } else {
             document.getElementById('satelliteImage').innerHTML =
                 '<div class="sat-unavailable"><p>Satellite data not available</p><p>Earth Engine module required</p></div>';
@@ -672,25 +649,20 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
     _satelliteRGBAbortController = new AbortController();
     const signal = _satelliteRGBAbortController.signal;
 
-    const boundingBox    = window.getBoundingBox?.();
+    const boundingBox = window.getBoundingBox?.();
     const selectedRegion = window.appState.selectedRegion;
 
-    if (!boundingBox && !selectedRegion) {
+    const coords = _getBboxCoords(boundingBox, selectedRegion);
+    if (!coords) {
         window.showToast?.('Please select a region or draw a bounding box first.', 'warning');
         return;
     }
+    const { north, south, east, west } = coords;
 
-    let north, south, east, west;
-    if (boundingBox) {
-        north = boundingBox.getNorth();
-        south = boundingBox.getSouth();
-        east  = boundingBox.getEast();
-        west  = boundingBox.getWest();
-    } else {
-        ({ north, south, east, west } = selectedRegion);
-    }
-
-    const dim = parseInt(document.getElementById('paramDim')?.value || 400);
+    const dim = parseInt(
+        document.getElementById('satImgResolution')?.value ||
+        document.getElementById('paramDim')?.value || 400
+    );
     const params = new URLSearchParams({ north, south, east, west, dim });
 
     window.showToast?.('Loading satellite imagery...', 'info');
@@ -705,12 +677,12 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
             const img = new Image();
             img.onload = () => {
                 const raw = document.createElement('canvas');
-                raw.width  = img.naturalWidth;
+                raw.width = img.naturalWidth;
                 raw.height = img.naturalHeight;
                 raw.getContext('2d').drawImage(img, 0, 0);
                 // Store raw canvas for re-projection when projection setting changes
                 window.appState._satImgRawCanvas = raw;
-                window.appState._satImgBbox      = bbox;
+                window.appState._satImgBbox = bbox;
                 // Apply the same projection as DEM/water canvases so layers align
                 const proj = window.applyProjection ? window.applyProjection(raw, bbox) : raw;
                 window.appState.satImgSourceCanvas = proj;
@@ -734,7 +706,7 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
  * Called when the projection dropdown changes (matches _reprojectCityRaster pattern).
  */
 window._reprojectSatelliteImage = function _reprojectSatelliteImage() {
-    const raw  = window.appState?._satImgRawCanvas;
+    const raw = window.appState?._satImgRawCanvas;
     const bbox = window.appState?._satImgBbox;
     if (!raw || !bbox) return;
     const proj = window.applyProjection ? window.applyProjection(raw, bbox) : raw;
@@ -751,6 +723,6 @@ document.addEventListener('DOMContentLoaded', () => {
     window._updateWorkflowStepper?.();
 
     // Wire appState callbacks so other modules (e.g., presets.js) can trigger them
-    window.appState._setDemEmptyState     = window._setDemEmptyState;
+    window.appState._setDemEmptyState = window._setDemEmptyState;
     window.appState._updateWorkflowStepper = window._updateWorkflowStepper;
 });

@@ -138,16 +138,17 @@ window.hideLoading = function hideLoading(container) {
 // ============================================================
 
 /**
- * Update a single layer's status and refresh the status UI.
- * Writes to window.appState.layerStatus (shared object reference with app.js).
- * @param {'dem'|'water'|'landCover'} layer - Layer identifier
+ * Update one or more layer statuses and refresh the status UI.
+ * Accepts a single layer name or an array for atomic multi-layer updates.
+ * @param {string|string[]} layer - Layer name(s): 'dem', 'water', 'landCover'
  * @param {'empty'|'loading'|'loaded'|'error'} status - New status value
  */
 window.setLayerStatus = function setLayerStatus(layer, status) {
     if (window.appState?.layerStatus) {
-        window.appState.layerStatus[layer] = status;
+        const layers = Array.isArray(layer) ? layer : [layer];
+        layers.forEach(l => { window.appState.layerStatus[l] = status; });
     }
-    window.updateLayerStatusUI();
+    window.events?.emit(window.EV?.STATUS_UPDATE);
 };
 
 /**
@@ -225,6 +226,51 @@ window.setupCoordinateSearch = function setupCoordinateSearch() {
             item.style.display = name.includes(query) ? '' : 'none';
         });
     });
+};
+
+// ============================================================
+// SHARED FETCH HELPERS
+// ============================================================
+
+/**
+ * Extract { north, south, east, west } from a Leaflet bounding box or a
+ * selectedRegion object. Returns null when neither is available.
+ * Used by all layer loaders to avoid repeating this 15-line block.
+ * @param {L.Rectangle|L.LatLngBounds|null} boundingBox
+ * @param {object|null} selectedRegion
+ * @returns {{ north, south, east, west }|null}
+ */
+window.getBboxCoords = function getBboxCoords(boundingBox, selectedRegion) {
+    if (boundingBox) {
+        const b = typeof boundingBox.getBounds === 'function'
+            ? boundingBox.getBounds()
+            : boundingBox;
+        return { north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() };
+    }
+    if (selectedRegion) {
+        return { north: selectedRegion.north, south: selectedRegion.south,
+                 east:  selectedRegion.east,  west:  selectedRegion.west };
+    }
+    return null;
+};
+
+/**
+ * Replace the contents of a container element with a plain error paragraph.
+ * @param {string} containerId - ID of the container element
+ * @param {string} msg         - Error message (will be prefixed with "Error: ")
+ */
+window.showErrInEl = function showErrInEl(containerId, msg) {
+    const p = document.createElement('p');
+    p.textContent = `Error: ${msg}`;
+    document.getElementById(containerId)?.replaceChildren(p);
+};
+
+/**
+ * Schedule a STACKED_UPDATE event on the next animation frame.
+ * Centralises the repeated `requestAnimationFrame(() => window.events?.emit(...))` pattern.
+ */
+window.emitStackUpdate = function emitStackUpdate() {
+    requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
 };
 
 // Listen for STATUS_UPDATE events (replaces scattered direct calls)

@@ -6,7 +6,6 @@
  *
  * Public API (all on window):
  *   initPresetProfiles()                    — load localStorage presets + wire UI
- *   applyPreset(preset)                     — apply a preset object to form controls
  *   getCurrentSettings()                    — return partial settings snapshot
  *   collectAllSettings()                    — return full settings snapshot
  *   applyAllSettings(s)                     — restore full settings snapshot to form
@@ -138,13 +137,37 @@ function loadSelectedPreset() {
 // Apply / collect settings
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Reusable form field accessors — shared by applyPreset, getCurrentSettings,
+// collectAllSettings, and applyAllSettings.
+const _get    = id => document.getElementById(id);
+const _flt    = (id, def) => { const v = parseFloat(_get(id)?.value); return isNaN(v) ? def : v; };
+const _int    = (id, def) => { const v = parseInt(_get(id)?.value);   return isNaN(v) ? def : v; };
+const _chk    = (id, def) => _get(id) ? _get(id).checked : def;
+const _str    = (id, def) => _get(id)?.value || def;
+const _set    = (id, val) => { const el = _get(id); if (el && val != null) el.value = val; };
+const _setChk = (id, val) => { const el = _get(id); if (el && val != null) el.checked = Boolean(val); };
+
 function applyPreset(preset) {
-    if (preset.dim)                    document.getElementById('paramDim').value = preset.dim;
-    if (preset.depthScale !== undefined) window.appState.demParams.depthScale = preset.depthScale;
-    if (preset.waterScale !== undefined) window.appState.demParams.waterScale = preset.waterScale;
-    if (preset.colormap)               document.getElementById('demColormap').value = preset.colormap;
-    if (preset.subtractWater !== undefined) window.appState.demParams.subtractWater = preset.subtractWater;
-    if (preset.satScale !== undefined) window.appState.demParams.satScale = preset.satScale;
+    const set = _set;
+    const setChk = _setChk;
+    if (preset.dim)        set('paramDim', preset.dim);
+    if (preset.colormap)   set('demColormap', preset.colormap);
+    if (preset.satScale !== undefined) {
+        set('waterResolution', preset.satScale);
+        window.appState.demParams.satScale = preset.satScale;
+    }
+    if (preset.depthScale !== undefined) {
+        set('paramDepthScale', preset.depthScale);
+        window.appState.demParams.depthScale = preset.depthScale;
+    }
+    if (preset.waterScale !== undefined) {
+        set('paramWaterScale', preset.waterScale);
+        window.appState.demParams.waterScale = preset.waterScale;
+    }
+    if (preset.subtractWater !== undefined) {
+        setChk('paramSubtractWater', preset.subtractWater);
+        window.appState.demParams.subtractWater = preset.subtractWater;
+    }
 
     if (preset.elevationCurve && window.curvePresets?.[preset.elevationCurve]) {
         window.setCurvePreset?.(preset.elevationCurve);
@@ -163,86 +186,193 @@ function applyPreset(preset) {
  * @returns {{dim, depthScale, waterScale, colormap, subtractWater, satScale, elevationCurve}}
  */
 function getCurrentSettings() {
-    const p = window.appState.demParams;
     return {
-        dim:          parseInt(document.getElementById('paramDim')?.value) || 200,
-        depthScale:   p.depthScale,
-        waterScale:   p.waterScale,
-        colormap:     document.getElementById('demColormap')?.value || 'terrain',
-        subtractWater: p.subtractWater,
-        satScale:     p.satScale,
-        elevationCurve: window.appState.activeCurvePreset || 'linear'
+        dim:           _int('paramDim', 200),
+        depthScale:    _flt('paramDepthScale', 0.5),
+        waterScale:    _flt('paramWaterScale', 0.05),
+        colormap:      _str('demColormap', 'terrain'),
+        subtractWater: _chk('paramSubtractWater', true),
+        satScale:      _int('waterResolution', 500),
+        elevationCurve: window.appState.activeCurvePreset || 'linear',
     };
 }
 
 /**
- * Collect all editable settings panel values into a flat object for persistence.
- * @returns {Object} Full settings snapshot
+ * Collect all editable settings into a grouped object that mirrors
+ * terrain_session.py's _DEFAULT_SETTINGS structure exactly.
+ * @returns {Object}
  */
 function collectAllSettings() {
-    const rescaleMin = document.getElementById('rescaleMin')?.value;
-    const rescaleMax = document.getElementById('rescaleMax')?.value;
-    const p = window.appState.demParams;
+    // city.layers from individual checkboxes
+    const cityLayers = [];
+    if (_chk('cityLayerBuildings', true))  cityLayers.push('buildings');
+    if (_chk('cityLayerRoads', true))      cityLayers.push('roads');
+    if (_chk('cityLayerWaterways', true))  cityLayers.push('waterways');
+
+    const rescaleMin = _get('rescaleMin')?.value;
+    const rescaleMax = _get('rescaleMax')?.value;
     return {
-        dim:           parseInt(document.getElementById('paramDim')?.value) || 200,
-        depth_scale:   p.depthScale,
-        water_scale:   p.waterScale,
-        height:        p.height,
-        base:          p.base,
-        subtract_water: p.subtractWater,
-        sat_scale:     p.satScale,
-        colormap:      document.getElementById('demColormap')?.value || 'terrain',
-        projection:    document.getElementById('paramProjection')?.value || 'none',
-        rescale_min:   rescaleMin && rescaleMin !== '' ? parseFloat(rescaleMin) : null,
-        rescale_max:   rescaleMax && rescaleMax !== '' ? parseFloat(rescaleMax) : null,
-        gridlines_show:  document.getElementById('showGridlines')?.checked ?? false,
-        gridlines_count: parseInt(document.getElementById('gridlineCount')?.value) || 5,
-        elevation_curve: window.appState.activeCurvePreset || 'linear',
-        elevation_curve_points: (window.appState.curvePoints || []).map(p => [p.x, p.y]),
-        dem_source:    document.getElementById('paramDemSource')?.value || 'local',
+        dem: {
+            dim:            _int('paramDim', 200),
+            depth_scale:    _flt('paramDepthScale', 0.5),
+            water_scale:    _flt('paramWaterScale', 0.05),
+            subtract_water: _chk('paramSubtractWater', true),
+            dem_source:     _str('paramDemSource', 'local'),
+            show_sat:       false,
+        },
+        projection: {
+            projection:          _str('paramProjection', 'none'),
+            maintain_dimensions: _chk('paramMaintainDimensions', false),
+            clip_nans:           true,
+        },
+        view: {
+            colormap:               _str('demColormap', 'terrain'),
+            rescale_min:            rescaleMin && rescaleMin !== '' ? parseFloat(rescaleMin) : null,
+            rescale_max:            rescaleMax && rescaleMax !== '' ? parseFloat(rescaleMax) : null,
+            gridlines_show:         _chk('showGridlines', false),
+            gridlines_count:        _int('gridlineCount', 5),
+            elevation_curve:        window.appState.activeCurvePreset || null,
+            elevation_curve_points: (window.appState.curvePoints || []).map(pt => [pt.x, pt.y]),
+        },
+        water: {
+            sat_scale: _int('waterResolution', 500),
+            dataset:   _str('waterDataset', 'esa'),
+        },
+        satellite: {
+            dim: _int('paramDim', 800),
+        },
+        export: {
+            model_height:     _flt('exportModelHeight', 30.0),
+            base_height:      _flt('exportBaseHeight', 10.0),
+            exaggeration:     _flt('exportExaggeration', 1.0),
+            sea_level_cap:    _chk('exportSeaLevelCap', false),
+            floor_val:        _flt('exportFloorVal', 0.0),
+            engrave_label:    _chk('exportEngraveLabel', false),
+            label_text:       _str('exportLabelText', ''),
+            contours:         _chk('exportContours', false),
+            contour_interval: _flt('exportContourInterval', 100.0),
+            contour_style:    _str('exportContourStyle', 'engraved'),
+            puzzle_z:         null,
+        },
+        split: {
+            split_rows:     _int('splitRows', 4),
+            split_cols:     _int('splitCols', 4),
+            puzzle_m:       _int('splitPuzzleM', 50),
+            puzzle_base_n:  _int('splitPuzzleBaseN', 10),
+            border_height:  _flt('splitBorderHeight', 1.0),
+            border_offset:  _flt('splitBorderOffset', 5.0),
+            include_border: _chk('splitIncludeBorder', true),
+        },
+        city: {
+            layers:             cityLayers.length ? cityLayers : ['buildings', 'roads', 'waterways'],
+            simplify_tolerance: _flt('citySimplifyTolerance', 0.5),
+            min_area:           _flt('cityMinArea', 5.0),
+            building_scale:     _flt('cityBuildingScale', 0.5),
+            road_depression_m:  _flt('cityRoadDepression', 0.0),
+            water_depression_m: _flt('cityWaterOffset', -2.0),
+            simplify_terrain:   true,
+        },
+        hydrology: {
+            source:         _str('hydroSource', 'hydrorivers'),
+            scale_m:        _int('hydroDim', 300),
+            depression_m:   _flt('hydroDepressionM', -5.0),
+            min_order:      _int('hydroMinOrder', 3),
+            order_exponent: _flt('hydroOrderExponent', 1.5),
+        },
     };
 }
 
 /**
- * Apply a full settings snapshot back to all form controls and restore curve state.
- * @param {Object} s — settings object as returned by collectAllSettings()
+ * Apply a grouped settings object (same structure as collectAllSettings) back
+ * to all form controls and appState. Accepts both grouped and legacy flat shapes.
+ * @param {Object} s
  */
 function applyAllSettings(s) {
     if (!s) return;
-    const set    = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
-    const setChk = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.checked = val; };
+    const set    = _set;
+    const setChk = _setChk;
 
-    set('paramDim',        s.dim);
-    if (s.depth_scale    != null) window.appState.demParams.depthScale    = parseFloat(s.depth_scale);
-    if (s.water_scale    != null) window.appState.demParams.waterScale    = parseFloat(s.water_scale);
-    if (s.height         != null) window.appState.demParams.height        = parseFloat(s.height);
-    if (s.base           != null) window.appState.demParams.base          = parseFloat(s.base);
-    if (s.subtract_water != null) window.appState.demParams.subtractWater = Boolean(s.subtract_water);
-    if (s.sat_scale      != null) window.appState.demParams.satScale      = parseInt(s.sat_scale);
-    set('demColormap',     s.colormap);
-    set('paramProjection', s.projection);
-    if (s.rescale_min != null) set('rescaleMin', s.rescale_min);
-    if (s.rescale_max != null) set('rescaleMax', s.rescale_max);
-    setChk('showGridlines', s.gridlines_show);
-    set('gridlineCount',   s.gridlines_count);
-    set('paramDemSource',  s.dem_source);
+    // Support both grouped (new) and flat (legacy preset) shapes
+    const dem  = s.dem        || s;
+    const proj = s.projection || {};
+    const view = s.view       || s;
+    const wat  = s.water      || s;
+    const exp  = s.export     || s;
+    const spl  = s.split      || {};
+    const city = s.city       || {};
 
-    if (s.elevation_curve_points && Array.isArray(s.elevation_curve_points) && s.elevation_curve_points.length >= 2) {
-        const points = s.elevation_curve_points.map(p => ({ x: p[0], y: p[1] }));
-        window.appState._applyCurveSettings?.(points, s.elevation_curve || 'custom');
+    // dem group — new IDs: paramDepthScale, paramWaterScale, paramSubtractWater
+    if (dem.dim            != null) set('paramDim',           dem.dim);
+    if (dem.depth_scale    != null) set('paramDepthScale',    dem.depth_scale);
+    if (dem.water_scale    != null) set('paramWaterScale',    dem.water_scale);
+    if (dem.subtract_water != null) setChk('paramSubtractWater', dem.subtract_water);
+    if (dem.dem_source     != null) set('paramDemSource',     dem.dem_source);
+
+    // projection group — new: paramMaintainDimensions
+    const projVal = proj.projection ?? s.projection;
+    if (projVal != null) {
+        set('paramProjection', projVal);
+        const projDesc = document.getElementById('projectionDescription');
+        if (projDesc) {
+            const descs = {
+                'none':       'No correction — raw lat/lon grid displayed as-is.',
+                'cosine':     'Horizontal scaling by cos(latitude). Corrects east-west distances.',
+                'mercator':   'Web Mercator — vertical stretching increases towards poles.',
+                'lambert':    'Lambert Cylindrical Equal-Area — preserves area at the cost of shape.',
+                'sinusoidal': 'Sinusoidal — each row scaled by cos(lat), centred on meridian.',
+            };
+            projDesc.textContent = descs[projVal] || '';
+        }
+    }
+    if (proj.maintain_dimensions != null) setChk('paramMaintainDimensions', proj.maintain_dimensions);
+
+    // view group — gridlines now use #showGridlines (VisualizationSection)
+    if (view.colormap    != null) set('demColormap', view.colormap);
+    if (view.rescale_min != null) set('rescaleMin',  view.rescale_min);
+    if (view.rescale_max != null) set('rescaleMax',  view.rescale_max);
+    if (view.gridlines_show  != null) setChk('showGridlines', view.gridlines_show);
+    if (view.gridlines_count != null) set('gridlineCount',    view.gridlines_count);
+    if (view.elevation_curve_points && Array.isArray(view.elevation_curve_points) && view.elevation_curve_points.length >= 2) {
+        const points = view.elevation_curve_points.map(pt => ({ x: pt[0], y: pt[1] }));
+        window.appState._applyCurveSettings?.(points, view.elevation_curve || 'custom');
     }
 
-    const projSelect = document.getElementById('paramProjection');
-    const projDesc   = document.getElementById('projectionDescription');
-    if (projSelect && projDesc) {
-        const descs = {
-            'none':       'No correction — raw lat/lon grid displayed as-is.',
-            'cosine':     'Horizontal scaling by cos(latitude). Correct east-west distances.',
-            'mercator':   'Web Mercator — vertical stretching increases towards poles.',
-            'lambert':    'Lambert Cylindrical Equal-Area — preserves area at the cost of shape.',
-            'sinusoidal': 'Sinusoidal — each row scaled by cos(lat), centred on meridian.'
-        };
-        projDesc.textContent = descs[projSelect.value] || '';
+    // water group
+    const satScaleVal = wat.sat_scale ?? s.sat_scale;
+    if (satScaleVal != null) set('waterResolution', satScaleVal);
+    if (wat.dataset != null) set('waterDataset', wat.dataset);
+
+    // export group — new IDs: exportModelHeight, exportBaseHeight, exportExaggeration, etc.
+    if (exp.model_height     != null) set('exportModelHeight',    exp.model_height);
+    if (exp.base_height      != null) set('exportBaseHeight',     exp.base_height);
+    if (exp.exaggeration     != null) set('exportExaggeration',   exp.exaggeration);
+    if (exp.sea_level_cap    != null) setChk('exportSeaLevelCap', exp.sea_level_cap);
+    if (exp.floor_val        != null) set('exportFloorVal',       exp.floor_val);
+    if (exp.engrave_label    != null) setChk('exportEngraveLabel', exp.engrave_label);
+    if (exp.label_text       != null) set('exportLabelText',      exp.label_text);
+    if (exp.contours         != null) setChk('exportContours',    exp.contours);
+    if (exp.contour_interval != null) set('exportContourInterval', exp.contour_interval);
+    if (exp.contour_style    != null) set('exportContourStyle',   exp.contour_style);
+
+    // split group — new IDs: splitRows, splitCols, splitPuzzleM, splitPuzzleBaseN, etc.
+    if (spl.split_rows     != null) set('splitRows',         spl.split_rows);
+    if (spl.split_cols     != null) set('splitCols',         spl.split_cols);
+    if (spl.puzzle_m       != null) set('splitPuzzleM',      spl.puzzle_m);
+    if (spl.puzzle_base_n  != null) set('splitPuzzleBaseN',  spl.puzzle_base_n);
+    if (spl.border_height  != null) set('splitBorderHeight', spl.border_height);
+    if (spl.border_offset  != null) set('splitBorderOffset', spl.border_offset);
+    if (spl.include_border != null) setChk('splitIncludeBorder', spl.include_border);
+
+    // city group — road_depression_m → #cityRoadDepression
+    if (city.simplify_tolerance != null) set('citySimplifyTolerance', city.simplify_tolerance);
+    if (city.min_area           != null) set('cityMinArea',           city.min_area);
+    if (city.building_scale     != null) set('cityBuildingScale',     city.building_scale);
+    if (city.road_depression_m  != null) set('cityRoadDepression',    city.road_depression_m);
+    if (city.water_depression_m != null) set('cityWaterOffset',       city.water_depression_m);
+    if (Array.isArray(city.layers)) {
+        setChk('cityLayerBuildings',  city.layers.includes('buildings'));
+        setChk('cityLayerRoads',      city.layers.includes('roads'));
+        setChk('cityLayerWaterways',  city.layers.includes('waterways'));
     }
 }
 

@@ -44,7 +44,7 @@ window._setupResizablePanel = function _setupResizablePanel() {
         document.body.style.cursor     = '';
         document.body.style.userSelect = '';
         try { localStorage.setItem('strm2stl_settingsPanelWidth', rightPanel.offsetWidth); } catch (_) {}
-        requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+        window.emitStackUpdate();
     });
     try {
         const savedW = localStorage.getItem('strm2stl_settingsPanelWidth');

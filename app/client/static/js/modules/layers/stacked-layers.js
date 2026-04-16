@@ -41,14 +41,14 @@ window.setGridPixelMode = function setGridPixelMode(on) {
 };
 
 // All layer canvas IDs — kept as hidden source buffers for other modules to write to
-const LAYER_STACK = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem'];
+const LAYER_STACK = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem', 'Hydrology'];
 
 // Multi-layer state: set of active layer keys + per-layer opacity (0–1)
-let _activeLayers  = new Set(['CompositeDem']);
-let _layerOpacities = { Dem: 1, Water: 0.7, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CompositeDem: 1 };
+let _activeLayers  = new Set(['Dem']);
+let _layerOpacities = { Dem: 1, Water: 0.7, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CompositeDem: 1, Hydrology: 0.8 };
 
 // Kept for getStackMode() backward compat — last-toggled-on layer
-let _activeMode = 'CompositeDem';
+let _activeMode = 'Dem';
 
 /** Toggle a layer on/off; at least one layer stays on. */
 window.setStackMode = function setStackMode(mode) {
@@ -92,7 +92,7 @@ function _updateLayerOpacitySliders() {
     container.innerHTML = '';
     // Draw in compositing order so the UI matches render order
     const order = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem'];
-    const labels = { Dem: '🏔 DEM', Water: '💧 Water', Sat: '🌿 ESA', SatImg: '🛰 Sat', CityRaster: '🏙 City', CompositeDem: '★ Composite' };
+    const labels = { Dem: '🏔 DEM', Water: '💧 Water', Sat: '🌿 ESA', SatImg: '🛰 Sat', CityRaster: '🏙 City', CompositeDem: '★ Composite', Hydrology: '🌊 Hydro' };
     order.filter(m => _activeLayers.has(m)).forEach(mode => {
         const pct = Math.round((_layerOpacities[mode] ?? 1) * 100);
         const row = document.createElement('div');
@@ -263,6 +263,7 @@ window.updateStackedLayers = function updateStackedLayers() {
         SatImg:       () => window.appState?.satImgSourceCanvas || null,
         CityRaster:   () => window.appState?.cityRasterSourceCanvas || null,
         CompositeDem: () => window.appState?.compositeDemSourceCanvas || null,
+        Hydrology:    () => window.appState?.hydrologySourceCanvas || null,
     };
 
     // Draw each active layer into its own buffer
@@ -291,8 +292,7 @@ window.updateStackedLayers = function updateStackedLayers() {
         dCtx.globalAlpha = 1;
     }
 
-    const gridCheckbox = document.getElementById('layerGridVisible');
-    if (gridCheckbox && gridCheckbox.checked) drawLayerGrid();
+    drawLayerGrid();
 
     applyStackedTransform();
 
@@ -307,7 +307,6 @@ window.drawLayerGrid = function drawLayerGrid() {
     const gridCanvas  = document.getElementById('layerGridCanvas');
     const demCanvas   = _cachedDemCanvas || document.getElementById('layerDemCanvas');
     const stack       = document.getElementById('layersStack');
-    const gridVisible = document.getElementById('layerGridVisible');
     const yAxis       = document.getElementById('layersYAxis');
     const xAxis       = document.getElementById('layersXAxis');
     if (!gridCanvas || !stack) return;
@@ -318,12 +317,11 @@ window.drawLayerGrid = function drawLayerGrid() {
     if (gw === 0 || gh === 0) return;
 
     const { currentDemBbox: bbox, lastDemData: demDataRef, demLayout: demLayoutRef } = window.appState || {};
-    const showGrid = !gridVisible || gridVisible.checked;
     if (!bbox || !demCanvas || demCanvas.width === 0 || demCanvas.height === 0) return;
 
     const { scale, offsetX, offsetY } = stackZoom;
-    const densityCheck = parseInt(document.getElementById('layerGridDensity')?.value || 10);
-    const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${showGrid}|${_gridPixelMode}`;
+    const densityCheck = 10;  // fixed default — no UI control for graticule density
+    const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${_gridPixelMode}`;
     if (newKey === _gridCacheKey) return;
     _gridCacheKey = newKey;
 
@@ -338,6 +336,7 @@ window.drawLayerGrid = function drawLayerGrid() {
     const cw = demCanvas.width;
     const ch = demCanvas.height;
 
+    const showGrid  = document.getElementById('showGridlines')?.checked ?? true;
     const gridColor = 'rgba(255, 255, 255, 0.2)';
     const tickColor = 'rgba(255, 255, 255, 0.5)';
     ctx.lineWidth = 1;

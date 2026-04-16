@@ -8,10 +8,8 @@
  *   renderWaterMask(data)     — render water mask canvas
  *   renderEsaLandCover(data)  — render ESA land cover canvas
  *   renderCombinedView()      — composite DEM + water overlay
- *   renderLandCoverLegend()   — internal: render land cover colour-picker legend
- *   setupLandCoverEditor()    — internal: wire land cover editor events
  *   setupWaterMaskListeners() — wire water mask tab events
- *   getLastWaterMaskData()    — accessor for lastWaterMaskData
+ *   clearLastWaterMaskData()  — reset cached water mask data
  *
  * External dependencies:
  *   window.api                          — from modules/api.js
@@ -62,30 +60,19 @@ async function loadWaterMask() {
     const boundingBox = window.getBoundingBox?.();
     const selectedRegion = window.appState.selectedRegion;
 
-    if (!boundingBox && !selectedRegion) {
+    const bbox = window.getBboxCoords(boundingBox, selectedRegion);
+    if (!bbox) {
         document.getElementById('waterMaskImage').innerHTML = '<p>Please select a region first.</p>';
         return;
     }
+    const { north, south, east, west } = bbox;
 
-    let bounds;
-    if (boundingBox) {
-        bounds = boundingBox;
-    } else {
-        bounds = L.latLngBounds(
-            [selectedRegion.south, selectedRegion.west],
-            [selectedRegion.north, selectedRegion.east]
-        );
-    }
-
-    const north = bounds.getNorth();
-    const south = bounds.getSouth();
-    const east  = bounds.getEast();
-    const west  = bounds.getWest();
-    const bbox  = { north, south, east, west };
-
-    const waterRes    = parseInt(document.getElementById('waterResolution')?.value || '200');
-    const landCoverRes = parseInt(document.getElementById('landCoverResolution')?.value || '200');
-    const satScale    = Math.min(waterRes, landCoverRes);
+    // waterLayerResolution is the per-layer load control; waterResolution is the persisted setting.
+    // The load button reads from waterLayerResolution; they are synced on region select.
+    const satScale = parseInt(
+        document.getElementById('waterLayerResolution')?.value ||
+        document.getElementById('waterResolution')?.value || '200'
+    );
 
     const waterDataset = document.getElementById('waterDataset')?.value || 'esa';
     const cacheKey = { ...bbox, sat_scale: satScale, dataset: waterDataset };
@@ -93,15 +80,13 @@ async function loadWaterMask() {
     const cachedData = window.waterMaskCache.get(cacheKey);
     if (cachedData) {
         _setLastWaterMaskData(cachedData);
-        window.appState.layerBboxes.water    = bbox;
+        window.appState.layerBboxes.water = bbox;
         window.appState.layerBboxes.landCover = bbox;
-        window.appState.layerStatus.water     = 'loaded';
-        window.appState.layerStatus.landCover = 'loaded';
-        window.events?.emit(window.EV?.STATUS_UPDATE);
+        window.setLayerStatus(['water', 'landCover'], 'loaded');
         updateCacheStatusUI();
         renderWaterMask(cachedData);
         renderEsaLandCover(cachedData);
-        requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+        window.emitStackUpdate();
         document.getElementById('waterMaskStats').innerHTML =
             `Water pixels: ${cachedData.water_pixels} / ${cachedData.total_pixels} (${cachedData.water_percentage.toFixed(1)}%) <span style="color:#4CAF50;font-size:10px;">[CACHED]</span>`;
         window.showToast('Water & land cover loaded from cache', 'success');
@@ -110,9 +95,7 @@ async function loadWaterMask() {
 
     const params = new URLSearchParams({ north, south, east, west, sat_scale: satScale, dataset: waterDataset });
 
-    window.appState.layerStatus.water    = 'loading';
-    window.appState.layerStatus.landCover = 'loading';
-    window.events?.emit(window.EV?.STATUS_UPDATE);
+    window.setLayerStatus(['water', 'landCover'], 'loading');
 
     document.getElementById('waterMaskImage').innerHTML = '<div class="loading"><span class="spinner"></span>Loading water mask from Earth Engine...</div>';
     window.showToast('Loading water mask from Earth Engine...', 'info');
@@ -120,18 +103,14 @@ async function loadWaterMask() {
     try {
         const { data, error: wmErr } = await window.api.dem.waterMask(params, signal);
         if (wmErr) {
-            const _p = document.createElement('p'); _p.textContent = `Error: ${wmErr}`; document.getElementById('waterMaskImage').replaceChildren(_p);
-            window.appState.layerStatus.water    = 'error';
-            window.appState.layerStatus.landCover = 'error';
-            window.events?.emit(window.EV?.STATUS_UPDATE);
+            window.showErrInEl('waterMaskImage', wmErr);
+            window.setLayerStatus(['water', 'landCover'], 'error');
             window.showToast('Failed to load water mask: ' + wmErr, 'error');
             return;
         }
         if (data.error) {
-            const _p = document.createElement('p'); _p.textContent = `Error: ${data.error}`; document.getElementById('waterMaskImage').replaceChildren(_p);
-            window.appState.layerStatus.water    = 'error';
-            window.appState.layerStatus.landCover = 'error';
-            window.events?.emit(window.EV?.STATUS_UPDATE);
+            window.showErrInEl('waterMaskImage', data.error);
+            window.setLayerStatus(['water', 'landCover'], 'error');
             window.showToast('Failed to load water mask: ' + data.error, 'error');
             return;
         }
@@ -140,15 +119,13 @@ async function loadWaterMask() {
         updateCacheStatusUI();
         _setLastWaterMaskData(data);
 
-        window.appState.layerBboxes.water    = bbox;
+        window.appState.layerBboxes.water = bbox;
         window.appState.layerBboxes.landCover = bbox;
-        window.appState.layerStatus.water     = 'loaded';
-        window.appState.layerStatus.landCover = 'loaded';
-        window.events?.emit(window.EV?.STATUS_UPDATE);
+        window.setLayerStatus(['water', 'landCover'], 'loaded');
 
         renderWaterMask(data);
         renderEsaLandCover(data);
-        requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+        window.emitStackUpdate();
 
         document.getElementById('waterMaskStats').innerHTML =
             `Water pixels: ${data.water_pixels} / ${data.total_pixels} (${data.water_percentage.toFixed(1)}%)`;
@@ -157,10 +134,8 @@ async function loadWaterMask() {
     } catch (error) {
         if (error.name === 'AbortError') return;
         console.error('Error loading water mask:', error);
-        const _p = document.createElement('p'); _p.textContent = `Error: ${error.message}`; document.getElementById('waterMaskImage').replaceChildren(_p);
-        window.appState.layerStatus.water    = 'error';
-        window.appState.layerStatus.landCover = 'error';
-        window.events?.emit(window.EV?.STATUS_UPDATE);
+        window.showErrInEl('waterMaskImage', error.message);
+        window.setLayerStatus(['water', 'landCover'], 'error');
         window.showToast('Failed to load water mask', 'error');
     }
 }
@@ -190,13 +165,13 @@ function renderWaterMask(data) {
         const idx = i * 4;
         if (val > 0.5) {
             // Water pixel — semi-transparent blue
-            imgData.data[idx]     = 0;
+            imgData.data[idx] = 0;
             imgData.data[idx + 1] = 100;
             imgData.data[idx + 2] = 255;
             imgData.data[idx + 3] = 200;
         } else {
             // Land pixel — fully transparent so DEM/buildings show through
-            imgData.data[idx]     = 0;
+            imgData.data[idx] = 0;
             imgData.data[idx + 1] = 0;
             imgData.data[idx + 2] = 0;
             imgData.data[idx + 3] = 0;
@@ -210,7 +185,7 @@ function renderWaterMask(data) {
     container.appendChild(projectedCanvas);
     projectedCanvas.style.width = '100%';
     projectedCanvas.style.height = 'auto';
-    requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+    window.emitStackUpdate();
 }
 
 /**
@@ -236,7 +211,7 @@ function renderEsaLandCover(data) {
         const idx = i * 4;
         const config = landCoverConfig[val];
         const color = config ? config.color : defaultColor;
-        imgData.data[idx]     = color[0];
+        imgData.data[idx] = color[0];
         imgData.data[idx + 1] = color[1];
         imgData.data[idx + 2] = color[2];
         imgData.data[idx + 3] = 255;
@@ -250,7 +225,7 @@ function renderEsaLandCover(data) {
     projLandCanvas.style.width = '100%';
     projLandCanvas.style.height = 'auto';
 
-    requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+    window.emitStackUpdate();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -272,7 +247,7 @@ async function renderCombinedView() {
     }
 
     if (lastWaterMaskData && lastDemData) {
-        const demSize   = lastDemData.width * lastDemData.height;
+        const demSize = lastDemData.width * lastDemData.height;
         const waterSize = lastWaterMaskData.water_mask_values?.length ?? 0;
         if (demSize !== waterSize) {
             console.warn('DEM and water mask dimension mismatch - reloading water mask');
@@ -291,7 +266,7 @@ async function renderCombinedView() {
 
     const waterScale = parseFloat(document.getElementById('waterScaleSlider')?.value || 0.05);
     const opacityVal = window.getWaterOpacity?.() ?? 0.7;
-    const waterVals  = lastWaterMaskData?.water_mask_values || [];
+    const waterVals = lastWaterMaskData?.water_mask_values || [];
     const ptp = vmax - vmin;
 
     for (let i = 0; i < values.length; i++) {
@@ -303,11 +278,11 @@ async function renderCombinedView() {
         const [r, g, b] = window.mapElevationToColor(t, colormap);
         const idx = i * 4;
         if (waterVals[i] && waterVals[i] > 0.5 && opacityVal > 0) {
-            imgData.data[idx]     = Math.round((r * 255) * (1 - opacityVal) + 30  * opacityVal);
+            imgData.data[idx] = Math.round((r * 255) * (1 - opacityVal) + 30 * opacityVal);
             imgData.data[idx + 1] = Math.round((g * 255) * (1 - opacityVal) + 100 * opacityVal);
             imgData.data[idx + 2] = Math.round((b * 255) * (1 - opacityVal) + 220 * opacityVal);
         } else {
-            imgData.data[idx]     = Math.round(r * 255);
+            imgData.data[idx] = Math.round(r * 255);
             imgData.data[idx + 1] = Math.round(g * 255);
             imgData.data[idx + 2] = Math.round(b * 255);
         }
@@ -383,7 +358,7 @@ function setupLandCoverEditor() {
     });
 
     document.getElementById('resetLandCoverMapping')?.addEventListener('click', () => {
-        const landCoverConfig   = window.appState.landCoverConfig;
+        const landCoverConfig = window.appState.landCoverConfig;
         const landCoverDefaults = window.appState.landCoverConfigDefaults;
         for (const key of Object.keys(landCoverDefaults)) {
             landCoverConfig[key] = JSON.parse(JSON.stringify(landCoverDefaults[key]));
@@ -393,7 +368,7 @@ function setupLandCoverEditor() {
         window.showToast('Land cover colors reset to defaults', 'info');
     });
 
-    document.getElementById('landCoverResolution')?.addEventListener('change', () => loadWaterMask());
+    document.getElementById('waterResolution')?.addEventListener('change', () => loadWaterMask());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -440,9 +415,9 @@ function _setLastWaterMaskData(data) {
 // Expose on window
 // ─────────────────────────────────────────────────────────────────────────────
 
-window.loadWaterMask           = loadWaterMask;
-window.renderWaterMask         = renderWaterMask;
-window.renderEsaLandCover      = renderEsaLandCover;
-window.renderCombinedView      = renderCombinedView;
+window.loadWaterMask = loadWaterMask;
+window.renderWaterMask = renderWaterMask;
+window.renderEsaLandCover = renderEsaLandCover;
+window.renderCombinedView = renderCombinedView;
 window.setupWaterMaskListeners = setupWaterMaskListeners;
-window.clearLastWaterMaskData  = () => { lastWaterMaskData = null; window.appState.lastWaterMaskData = null; };
+window.clearLastWaterMaskData = () => { lastWaterMaskData = null; window.appState.lastWaterMaskData = null; };

@@ -379,105 +379,22 @@ function drawHistogram(values) {
     container.appendChild(canvas);
 
     // Trigger stacked layers update now that DEM data is available
-    requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+    window.emitStackUpdate();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Canvas projection
-// Extracted from app.js. Reads the #paramProjection select; pure canvas math.
+// Canvas projection — PASSTHROUGH
+// Projection is now applied server-side (projection param sent with every DEM
+// fetch). This function is kept as a no-op so existing call sites in
+// recolorDEM, water-mask.js, composite-dem.js, city-render.js etc. don't break.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Apply a client-side map projection to a rendered canvas.
- * Returns a new (or the same) canvas transformed for the chosen projection.
+ * No-op passthrough — projection is applied server-side.
  * @param {HTMLCanvasElement} srcCanvas
- * @param {{north,south,east,west}} bbox
  * @returns {HTMLCanvasElement}
  */
-function applyProjection(srcCanvas, bbox) {
-    const projection = document.getElementById('paramProjection')?.value || 'none';
-    if (!projection || projection === 'none') return srcCanvas;
-    if (!bbox) return srcCanvas;
-
-    const W = srcCanvas.width, H = srcCanvas.height;
-    const { north, south, east, west } = bbox;
-    const latRange = north - south;
-    const lonRange = east - west;
-    if (!latRange || !lonRange) return srcCanvas;
-    const midLat = ((north + south) / 2) * Math.PI / 180;
-
-    if (projection === 'cosine') {
-        const newW = Math.max(1, Math.round(W * Math.cos(midLat)));
-        const dst = document.createElement('canvas');
-        dst.width = W; dst.height = H;
-        const offsetX = Math.floor((W - newW) / 2);
-        dst.getContext('2d').drawImage(srcCanvas, 0, 0, W, H, offsetX, 0, newW, H);
-        return dst;
-    }
-
-    if (projection === 'mercator') {
-        const toRad = d => d * Math.PI / 180;
-        const mercY = l => Math.log(Math.tan(Math.PI / 4 + toRad(l) / 2));
-        const yN = mercY(Math.min(85, north)), yS = mercY(Math.max(-85, south));
-        const yRange = yN - yS;
-        if (Math.abs(yRange) < 1e-10) return srcCanvas;
-        const srcCtx = srcCanvas.getContext('2d');
-        const srcImg = srcCtx.getImageData(0, 0, W, H);
-        const dst = document.createElement('canvas');
-        dst.width = W; dst.height = H;
-        const dstCtx = dst.getContext('2d');
-        const dstImg = dstCtx.createImageData(W, H);
-        for (let dstY = 0; dstY < H; dstY++) {
-            const t = dstY / (H - 1);
-            const mv = yN - t * yRange;
-            const lat = (2 * Math.atan(Math.exp(mv)) - Math.PI / 2) * 180 / Math.PI;
-            const srcY = Math.round((north - lat) / latRange * (H - 1));
-            if (srcY < 0 || srcY >= H) continue;
-            const dstBase = dstY * W * 4, srcBase = srcY * W * 4;
-            dstImg.data.set(srcImg.data.subarray(srcBase, srcBase + W * 4), dstBase);
-        }
-        dstCtx.putImageData(dstImg, 0, 0);
-        return dst;
-    }
-
-    if (projection === 'lambert') {
-        const cosLat = Math.cos(midLat);
-        const newW = Math.max(1, Math.round(W * cosLat));
-        const newH = Math.max(1, Math.round(H / cosLat));
-        const dst = document.createElement('canvas');
-        dst.width = W; dst.height = newH;
-        const offsetX = Math.floor((W - newW) / 2);
-        dst.getContext('2d').drawImage(srcCanvas, 0, 0, W, H, offsetX, 0, newW, newH);
-        return dst;
-    }
-
-    if (projection === 'sinusoidal') {
-        const srcCtx = srcCanvas.getContext('2d');
-        const srcImg = srcCtx.getImageData(0, 0, W, H);
-        const dst = document.createElement('canvas');
-        dst.width = W; dst.height = H;
-        const dstCtx = dst.getContext('2d');
-        const dstImg = dstCtx.createImageData(W, H);
-        for (let y = 0; y < H; y++) {
-            const lat = north - (y / (H - 1)) * latRange;
-            const scale = Math.cos(lat * Math.PI / 180);
-            const rowW = Math.max(1, Math.round(W * scale));
-            const offset = Math.round((W - rowW) / 2);
-            const srcBase = y * W * 4;
-            const dstBase = y * W * 4;
-            for (let dstX = offset; dstX < offset + rowW && dstX < W; dstX++) {
-                const srcX = Math.round((dstX - offset) / rowW * (W - 1));
-                const si = srcBase + srcX * 4, di = dstBase + dstX * 4;
-                dstImg.data[di] = srcImg.data[si];
-                dstImg.data[di+1] = srcImg.data[si+1];
-                dstImg.data[di+2] = srcImg.data[si+2];
-                dstImg.data[di+3] = srcImg.data[si+3];
-            }
-        }
-        dstCtx.putImageData(dstImg, 0, 0);
-        return dst;
-    }
-
+function applyProjection(srcCanvas) {
     return srcCanvas;
 }
 

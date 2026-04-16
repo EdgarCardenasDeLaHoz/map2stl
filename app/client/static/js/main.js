@@ -28,6 +28,7 @@ import './modules/map/compare-view.js';
 import './modules/regions/region-ui.js';
 import './modules/dem/dem-merge.js';
 import './modules/layers/water-mask.js';
+import './modules/layers/hydrology-overlay.js';
 import './modules/map/map-globe.js';
 import './modules/regions/regions.js';
 import './modules/map/bbox-panel.js';

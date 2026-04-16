@@ -102,3 +102,10 @@ H5_SRTM_AVAILABLE: bool = bool(H5_SRTM_FILE and H5_SRTM_FILE.exists())
 CACHE_DIRS = [EE_CACHE_DIR]
 CACHE_CLEAR_INTERVAL = 3600  # seconds between periodic EE cache sweeps
 CACHE_MAX_FILES = 100        # trigger a sweep when this many files exist
+
+# ---------------------------------------------------------------------------
+# Grid / render limits
+# ---------------------------------------------------------------------------
+
+MAX_DIM: int = 2000            # maximum grid resolution accepted by all endpoints
+MAX_BBOX_DIAGONAL_KM: float = 15.0  # cities endpoint bounding-box size cap

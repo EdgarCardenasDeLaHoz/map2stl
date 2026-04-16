@@ -44,7 +44,7 @@ function drawGridlinesOverlay(containerId = 'demImage') {
     const canvas = container.querySelector('canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)');
     if (!canvas) return;
 
-    const showGridlines = document.getElementById('layerGridVisible') || document.getElementById('showGridlines');
+    const showGridlines = document.getElementById('showGridlines');
     if (!showGridlines || !showGridlines.checked) {
         const existing = container.querySelector('.dem-gridlines-overlay');
         if (existing) existing.remove();
@@ -251,8 +251,7 @@ function recolorDEM() {
     }
     const { values, width, height, vmin, vmax } = lastDemData;
 
-    const rawCanvas = window.renderDEMCanvas(values, width, height, colormap, vmin, vmax);
-    const canvas = window.applyProjection(rawCanvas, window.appState.currentDemBbox);
+    const canvas = window.renderDEMCanvas(values, width, height, colormap, vmin, vmax);
     const container = document.getElementById('demImage');
     container.querySelector('canvas')?._zoomPanCleanup?.();
     container.innerHTML = '';
@@ -290,8 +289,7 @@ function rescaleDEM(newVmin, newVmax) {
     lastDemData.vmin = newVmin;
     lastDemData.vmax = newVmax;
 
-    const rawCanvas = window.renderDEMCanvas(values, width, height, colormap, newVmin, newVmax);
-    const canvas = window.applyProjection(rawCanvas, window.appState.currentDemBbox);
+    const canvas = window.renderDEMCanvas(values, width, height, colormap, newVmin, newVmax);
     const container = document.getElementById('demImage');
     container.querySelector('canvas')?._zoomPanCleanup?.();
     container.innerHTML = '';
@@ -302,7 +300,7 @@ function rescaleDEM(newVmin, newVmax) {
     window.drawColorbar(newVmin, newVmax, colormap);
     window.drawHistogram(values);
     window.enableZoomAndPan(canvas);
-    requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+    window.emitStackUpdate();
 
     window.showToast(`Rescaled to ${newVmin.toFixed(0)}m - ${newVmax.toFixed(0)}m`, 'success');
 }
