@@ -23,6 +23,7 @@ from app.server.core.sat import (
 )
 from app.server.core.dem import (
     fetch_layer_data as _fetch_layer_data,
+    fetch_local_dem as _fetch_local_dem,
     apply_layer_processing as _apply_layer_processing,
     blend_layers as _blend_layers,
     upsample_dem as _upsample_dem,
@@ -102,26 +103,18 @@ def _project_water_arrays(water_mask, esa_img, north, south, east, west,
 
 def _make_local_dem(north, south, east, west, dim, depth_scale, water_scale,
                     subtract_water, projection, maintain_dimensions, clip_nans):
-    """Run make_dem_image synchronously. Called from run_in_executor.
+    """Run fetch_local_dem synchronously. Called from run_in_executor.
 
-    Always fetches in Plate Carrée (projection='none') so the server can
+    Always fetches in Plate Carree (projection='none') so the server can
     apply projection externally, consistent with OpenTopo/H5 sources.
     """
-    from numpy2stl.oceans import make_dem_image
-    target_bbox = (north, south, east, west)
-    try:
-        return make_dem_image(
-            target_bbox, dim=dim, depth_scale=depth_scale,
-            water_scale=water_scale,
-            subtract_water=subtract_water, projection='none',
-            maintain_dimensions=maintain_dimensions,
-            clip_nans=False)
-    except TypeError:
-        return make_dem_image(
-            target_bbox, dim=dim, depth_scale=depth_scale,
-            water_scale=water_scale,
-            subtract_water=subtract_water,
-            maintain_dimensions=maintain_dimensions)
+    return _fetch_local_dem(
+        north, south, east, west, dim,
+        depth_scale=depth_scale,
+        water_scale=water_scale,
+        subtract_water=subtract_water,
+        maintain_dimensions=maintain_dimensions,
+    )
 
 
 def _fetch_dem_array(dem_source, north, south, east, west, dim,

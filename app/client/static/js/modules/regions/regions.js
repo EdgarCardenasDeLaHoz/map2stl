@@ -269,6 +269,10 @@ async function selectCoordinate(index) {
     window.setSelectedRegion?.(selectedRegion);
     window.appState.selectedRegion = selectedRegion;
 
+    // Populate bbox inputs immediately so they're never empty after selection
+    window.setBboxInputValues?.(selectedRegion.north, selectedRegion.south,
+        selectedRegion.east, selectedRegion.west);
+
     // CRITICAL: Clear cached layer data and clear visual displays when region changes
     // Prevents stale water mask / land cover / DEM from showing with new region
     clearLayerCache();

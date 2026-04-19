@@ -80,6 +80,12 @@ def validate_bbox(north: float | None, south: float | None,
     if any(v is None for v in (north, south, east, west)):
         return JSONResponse(content={"error": "north, south, east, west are all required"},
                             status_code=400)
+    if not (-90 <= south <= 90 and -90 <= north <= 90):
+        return JSONResponse(content={"error": "latitude must be between -90 and 90"},
+                            status_code=400)
+    if not (-180 <= west <= 180 and -180 <= east <= 180):
+        return JSONResponse(content={"error": "longitude must be between -180 and 180"},
+                            status_code=400)
     if north <= south:
         return JSONResponse(content={"error": "north must be greater than south"},
                             status_code=400)

@@ -386,11 +386,19 @@ window._setupBboxListeners = function _setupBboxListeners() {
         const sc = Math.max(-90, Math.min(90, s));
         const ec = Math.max(-180, Math.min(180, e));
         const wc = Math.max(-180, Math.min(180, w));
+        if (nc !== n || sc !== s || ec !== e || wc !== w) {
+            window.showToast?.('Coordinates clamped to valid range', 'warning');
+        }
         window.setBboxInputValues?.(nc, sc, ec, wc);
+        if (nc <= sc) {
+            window.showToast?.('North must be greater than South', 'error'); return;
+        }
+        if (ec <= wc) {
+            window.showToast?.('East must be greater than West', 'error'); return;
+        }
         let selectedRegion = window.appState.selectedRegion;
         if (!selectedRegion) selectedRegion = { name: null };
-        selectedRegion.north = nc; selectedRegion.south = sc;
-        selectedRegion.east = ec; selectedRegion.west = wc;
+        selectedRegion = { ...selectedRegion, north: nc, south: sc, east: ec, west: wc };
         window.setSelectedRegion?.(selectedRegion);
         window.appState.selectedRegion = selectedRegion;
         window.appState.currentDemBbox = { north: nc, south: sc, east: ec, west: wc };
@@ -415,8 +423,20 @@ window._setupBboxListeners = function _setupBboxListeners() {
         // Live map rectangle update on every keystroke (no DEM reload)
         el.addEventListener('input', () => {
             const { n, s, e, w } = _readBboxInputs();
-            if (isNaN(n) || isNaN(s) || isNaN(e) || isNaN(w)) return;
-            if (n <= s || e <= w) return;  // invalid — skip until values are consistent
+            // Visual validation feedback on inputs
+            const nEl = document.getElementById('bboxNorth');
+            const sEl = document.getElementById('bboxSouth');
+            const eEl = document.getElementById('bboxEast');
+            const wEl = document.getElementById('bboxWest');
+            const latOk = !isNaN(n) && !isNaN(s) && n > s
+                && n >= -90 && n <= 90 && s >= -90 && s <= 90;
+            const lonOk = !isNaN(e) && !isNaN(w) && e > w
+                && e >= -180 && e <= 180 && w >= -180 && w <= 180;
+            if (nEl) nEl.style.borderColor = latOk ? '' : '#e74c3c';
+            if (sEl) sEl.style.borderColor = latOk ? '' : '#e74c3c';
+            if (eEl) eEl.style.borderColor = lonOk ? '' : '#e74c3c';
+            if (wEl) wEl.style.borderColor = lonOk ? '' : '#e74c3c';
+            if (!latOk || !lonOk) return;
             const _map = window.getMap?.();
             const _bb = window.getBoundingBox?.();
             if (!_map) return;

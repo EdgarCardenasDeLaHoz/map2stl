@@ -237,7 +237,7 @@ async function runMerge(apply = false) {
         const container = document.getElementById('demImage');
         container.innerHTML = '';
         container.appendChild(canvas);
-        canvas.style.width = '100%'; canvas.style.height = 'auto';
+        canvas.classList.add('canvas-responsive');
         window.drawColorbar(vmin, vmax, colormap);
         window.drawHistogram(demVals);
         requestAnimationFrame(() => { window.drawGridlinesOverlay('demImage'); window['events']?.emit(window.EV?.STACKED_UPDATE); });

@@ -74,7 +74,7 @@ function initModelViewer() {
     }
 
     container.innerHTML = '';
-    container.style.position = 'relative';
+    container.classList.add('pos-relative');
 
     modelScene = new THREE.Scene();
     modelScene.background = new THREE.Color(0x1a1a1a);
@@ -98,7 +98,7 @@ function initModelViewer() {
         modelRenderer = new THREE.WebGLRenderer({ antialias: true });
     } catch (e) {
         console.error('WebGL unavailable for 3D viewer:', e);
-        container.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">3D preview unavailable (WebGL not supported by this browser/GPU)</div>';
+        container.innerHTML = '<div class="viewer-unavailable">3D preview unavailable (WebGL not supported by this browser/GPU)</div>';
         return;
     }
     modelRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -117,7 +117,7 @@ function initModelViewer() {
     // HUD overlay
     const hud = document.createElement('div');
     hud.id = 'viewerHud';
-    hud.style.cssText = 'position:absolute;bottom:8px;left:8px;color:#ccc;font:11px/1.5 monospace;pointer-events:none;text-shadow:0 1px 3px #000;';
+    hud.className = 'hud-overlay';
     container.appendChild(hud);
 
     _setupOrbitControls();

@@ -154,8 +154,7 @@ function renderSatelliteCanvas(values, width, height) {
         data[idx + 3] = 255;
     }
     ctx.putImageData(img, 0, 0);
-    canvas.style.maxWidth = '100%';
-    canvas.style.height = 'auto';
+    canvas.classList.add('canvas-max-responsive');
     return canvas;
 }
 
@@ -235,8 +234,7 @@ function drawColorbar(min, max, colormap) {
         }
     }
     ctx.putImageData(img, 0, 0);
-    canvas.style.width  = '100%';
-    canvas.style.height = '18px';
+    canvas.classList.add('canvas-histogram');
     bar.title = `Colorbar: ${Math.round(min)} m (left) → ${Math.round(max)} m (right) — ${colormap}`;
     bar.appendChild(canvas);
 }
@@ -365,8 +363,7 @@ function drawHistogram(values) {
     ctx.fillText(min.toFixed(0) + 'm', 2,                   histTop + histHeight + 12);
     ctx.fillText(max.toFixed(0) + 'm', canvas.width - 35,   histTop + histHeight + 12);
 
-    canvas.style.width  = '100%';
-    canvas.style.height = 'auto';
+    canvas.classList.add('canvas-responsive');
     container.appendChild(canvas);
 
     // Trigger stacked layers update now that DEM data is available

@@ -88,7 +88,7 @@ function drawGridlinesOverlay(containerId = 'demImage') {
         container.appendChild(overlay);
     }
 
-    container.style.position = 'relative';
+    container.classList.add('pos-relative');
 
     const canvasRect = canvas.getBoundingClientRect();
     const containerRect = container.getBoundingClientRect();
@@ -97,12 +97,11 @@ function drawGridlinesOverlay(containerId = 'demImage') {
 
     overlay.width = canvasRect.width;
     overlay.height = canvasRect.height;
-    overlay.style.position = 'absolute';
+    overlay.classList.add('overlay-abs');
     overlay.style.left = offsetLeft + 'px';
     overlay.style.top = offsetTop + 'px';
     overlay.style.width = canvasRect.width + 'px';
     overlay.style.height = canvasRect.height + 'px';
-    overlay.style.pointerEvents = 'none';
 
     const ctx = overlay.getContext('2d');
     // No clearRect needed — setting overlay.width above already clears the canvas.
@@ -255,8 +254,7 @@ function recolorDEM() {
     container.querySelector('canvas')?._zoomPanCleanup?.();
     container.innerHTML = '';
     container.appendChild(canvas);
-    canvas.style.width = '100%';
-    canvas.style.height = 'auto';
+    canvas.classList.add('canvas-responsive');
 
     window.drawColorbar(vmin, vmax, colormap);
     window.drawHistogram(values);
@@ -293,8 +291,7 @@ function rescaleDEM(newVmin, newVmax) {
     container.querySelector('canvas')?._zoomPanCleanup?.();
     container.innerHTML = '';
     container.appendChild(canvas);
-    canvas.style.width = '100%';
-    canvas.style.height = 'auto';
+    canvas.classList.add('canvas-responsive');
 
     window.drawColorbar(newVmin, newVmax, colormap);
     window.drawHistogram(values);

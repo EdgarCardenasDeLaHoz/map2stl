@@ -196,8 +196,7 @@ function _doRenderCityOverlay() {
     if (!overlay) {
         overlay = document.createElement('canvas');
         overlay.className = 'osm-overlay layer-canvas';
-        overlay.style.pointerEvents = 'none';
-        overlay.style.zIndex = '10';
+        overlay.classList.add('overlay-z10');
         stack.appendChild(overlay);
     }
 
@@ -388,7 +387,6 @@ function _doRenderCityOnDEM() {
     if (!overlay) {
         overlay = document.createElement('canvas');
         overlay.className = 'city-dem-overlay';
-        overlay.style.cssText = 'position:absolute;pointer-events:none;z-index:5;';
         demContainer.appendChild(overlay);
     }
     overlay.width = W;

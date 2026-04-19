@@ -92,19 +92,19 @@
           <div class="bbox-coords-grid">
             <div class="bbox-coord-cell">
               <label class="bbox-lbl" for="bboxNorth">N</label>
-              <input type="number" id="bboxNorth" class="bbox-input" step="0.01" placeholder="North" title="Northern boundary">
+              <input type="number" id="bboxNorth" class="bbox-input" step="0.01" min="-90" max="90" placeholder="North" title="Northern boundary">
             </div>
             <div class="bbox-coord-cell">
               <label class="bbox-lbl" for="bboxSouth">S</label>
-              <input type="number" id="bboxSouth" class="bbox-input" step="0.01" placeholder="South" title="Southern boundary">
+              <input type="number" id="bboxSouth" class="bbox-input" step="0.01" min="-90" max="90" placeholder="South" title="Southern boundary">
             </div>
             <div class="bbox-coord-cell">
               <label class="bbox-lbl" for="bboxEast">E</label>
-              <input type="number" id="bboxEast" class="bbox-input" step="0.01" placeholder="East" title="Eastern boundary">
+              <input type="number" id="bboxEast" class="bbox-input" step="0.01" min="-180" max="180" placeholder="East" title="Eastern boundary">
             </div>
             <div class="bbox-coord-cell">
               <label class="bbox-lbl" for="bboxWest">W</label>
-              <input type="number" id="bboxWest" class="bbox-input" step="0.01" placeholder="West" title="Western boundary">
+              <input type="number" id="bboxWest" class="bbox-input" step="0.01" min="-180" max="180" placeholder="West" title="Western boundary">
             </div>
           </div>
           <!-- Row 2: action buttons + colorbar -->

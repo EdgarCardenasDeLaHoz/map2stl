@@ -88,15 +88,39 @@ def fetch_layer_data(
 
 
 def fetch_local_dem(
-    north: float, south: float, east: float, west: float, dim: int
+    north: float, south: float, east: float, west: float, dim: int,
+    *,
+    depth_scale: float = 0.5,
+    water_scale: float = 0.05,
+    subtract_water: bool = False,
+    maintain_dimensions: bool = True,
 ) -> np.ndarray:
-    """Fetch local SRTM elevation tiles and return as a float64 array."""
+    """Fetch local SRTM elevation tiles and return as a float64 array.
+
+    Parameters beyond *dim* are optional; callers that just need raw
+    elevation can ignore them (defaults match the old behaviour).
+    """
     from numpy2stl.oceans import make_dem_image
     target_bbox = (north, south, east, west)
-    im = make_dem_image(target_bbox, dim=dim,
-                        subtract_water=False,
-                        projection="none",
-                        maintain_dimensions=True)
+    try:
+        im = make_dem_image(
+            target_bbox, dim=dim,
+            depth_scale=depth_scale,
+            water_scale=water_scale,
+            subtract_water=subtract_water,
+            projection="none",
+            maintain_dimensions=maintain_dimensions,
+            clip_nans=False,
+        )
+    except TypeError:
+        # Older numpy2stl without clip_nans kwarg
+        im = make_dem_image(
+            target_bbox, dim=dim,
+            depth_scale=depth_scale,
+            water_scale=water_scale,
+            subtract_water=subtract_water,
+            maintain_dimensions=maintain_dimensions,
+        )
     return np.nan_to_num(im, nan=0.0).astype(np.float64)
 
 
@@ -444,12 +468,12 @@ def compute_raw_dem(north, south, east, west, dim, depth_scale):
     import cv2 as _cv2
     import numpy as _np
     from geo2stl.geo2stl import stitch_tiles_no_rasterio
-    from geo2stl.projections import proj_map_geo_to_2D
+    from app.server.core.projection import project_grid
     target_bbox = _np.array((north, south, east, west))
     im = stitch_tiles_no_rasterio(target_bbox) * 1.0
     im[im < 0] = im[im < 0] * depth_scale
-    im = proj_map_geo_to_2D(im, target_bbox)
-    im = im[:, ~_np.any(_np.isnan(im), axis=0)]
+    im = project_grid(im, north, south, east, west,
+                      projection='cosine', clip_nans=True)
     h, w = im.shape
     if h > w:
         new_h, new_w = dim, max(1, int(dim * w / h))

@@ -113,7 +113,7 @@ window.showLoading = function showLoading(container, message = 'Loading...') {
     }
 
     if (container) {
-        container.style.position = 'relative';
+        container.classList.add('pos-relative');
         container.appendChild(overlay);
     }
 };
@@ -197,7 +197,6 @@ window.updateLayerStatusIndicators = function updateLayerStatusIndicators() {
         if (!badge) {
             badge = document.createElement('span');
             badge.className = 'layer-badge';
-            badge.style.cssText = 'margin-left:4px;font-size:10px;';
             tab.appendChild(badge);
         }
 
