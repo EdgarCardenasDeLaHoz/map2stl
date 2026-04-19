@@ -5,15 +5,12 @@
            v-model="searchQuery"
            placeholder="Search regions..."
            style="margin:4px 6px;width:calc(100% - 12px);flex-shrink:0;box-sizing:border-box;margin-bottom:4px;">
-    <div id="coordinatesList" class="coordinates-list" style="flex:1;overflow-y:auto;">
-      <div v-if="store.coordinatesData.length === 0" class="loading">
-        <span class="spinner"></span>Loading coordinates...
-      </div>
-      <!-- Existing region-ui.js renderCoordinatesList() writes to #coordinatesList.
-           During the migration the JS still populates this div via innerHTML.
-           Once region-ui.js is fully migrated to composables this div renders
-           from store.coordinatesData instead. -->
-    </div>
+    <!-- region-ui.js / regions.js populate this div via innerHTML.
+         Do NOT place Vue-managed children here — innerHTML replaces them and
+         breaks Vue's virtual-DOM references (causes insertBefore-on-null).
+         Once region-ui.js is fully migrated to composables, render from
+         store.coordinatesData instead. -->
+    <div id="coordinatesList" class="coordinates-list" style="flex:1;overflow-y:auto;"></div>
   </div>
 </template>
 

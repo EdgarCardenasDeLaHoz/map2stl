@@ -185,7 +185,7 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
             gdf_m = gdf.to_crs(epsg=3857)
             gdf = gdf[gdf_m.geometry.area >= min_area].reset_index(drop=True)
         logger.info(
-            f"[buildings] raw={n_raw} features  after area filter (>={min_area} m²): {len(gdf)} features"
+            f"[buildings] raw={n_raw} features  after area filter (>={min_area} m^2): {len(gdf)} features"
         )
         if tol_deg > 0 and len(gdf):
             gdf_m_pre = gdf.to_crs(epsg=3857)

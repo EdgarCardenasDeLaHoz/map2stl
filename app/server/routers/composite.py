@@ -22,6 +22,12 @@ POST /api/composite/city-raster
   Cached under namespace "composite" by (bbox, width, height).
 """
 
+from app.server.core.validation import run_sync, METRES_PER_DEGREE
+from app.server.core.cache import make_cache_key, osm_cache_key, read_array_cache, write_array_cache, read_osm_cache
+from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from fastapi import APIRouter
+import numpy as np
 import asyncio
 import logging
 from functools import partial
@@ -33,17 +39,9 @@ _STRM2STL_DIR = str(Path(__file__).parent.parent.parent.parent)
 if _STRM2STL_DIR not in sys.path:
     sys.path.insert(0, _STRM2STL_DIR)
 
-import numpy as np
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-
-from app.server.core.cache import make_cache_key, osm_cache_key, read_array_cache, write_array_cache, read_osm_cache
-from app.server.core.validation import run_sync, METRES_PER_DEGREE
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["composite"])
-
 
 
 class CityRasterRequest(BaseModel):
@@ -53,6 +51,8 @@ class CityRasterRequest(BaseModel):
     west:   float
     width:  int = 512
     height: int = 512
+    projection: str = "none"
+    clip_nans: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -84,8 +84,8 @@ def _rasterize_buildings(features, coords_to_px, PW, PH):
     from PIL import Image, ImageDraw
     arr = np.zeros((PH, PW), dtype=np.float32)
     for feat in features:
-        geom  = feat.get("geometry") or {}
-        h_m   = float((feat.get("properties") or {}).get("height_m") or 10)
+        geom = feat.get("geometry") or {}
+        h_m = float((feat.get("properties") or {}).get("height_m") or 10)
         rings = []
         if geom.get("type") == "Polygon":
             rings = [geom["coordinates"][0]]
@@ -104,12 +104,12 @@ def _rasterize_buildings(features, coords_to_px, PW, PH):
 def _rasterize_roads(features, coords_to_px, PW, PH, m_per_px):
     """Return a binary float32 array (PH×PW) marking road pixels."""
     from PIL import Image, ImageDraw
-    img  = Image.new("1", (PW, PH), 0)
+    img = Image.new("1", (PW, PH), 0)
     draw = ImageDraw.Draw(img)
     for feat in features:
-        geom  = feat.get("geometry") or {}
-        w_m   = float((feat.get("properties") or {}).get("road_width_m") or 6)
-        w_px  = max(1, round(w_m / m_per_px))
+        geom = feat.get("geometry") or {}
+        w_m = float((feat.get("properties") or {}).get("road_width_m") or 6)
+        w_px = max(1, round(w_m / m_per_px))
         lines = []
         if geom.get("type") == "LineString":
             lines = [geom["coordinates"]]
@@ -125,7 +125,7 @@ def _rasterize_roads(features, coords_to_px, PW, PH, m_per_px):
 def _rasterize_waterways(features, coords_to_px, PW, PH, m_per_px):
     """Return a binary float32 array (PH×PW) marking waterway pixels."""
     from PIL import Image, ImageDraw
-    img  = Image.new("1", (PW, PH), 0)
+    img = Image.new("1", (PW, PH), 0)
     draw = ImageDraw.Draw(img)
     w_px = max(2, round(4.0 / m_per_px))
     for feat in features:
@@ -156,9 +156,9 @@ def _rasterize_walls(features, coords_to_px, PW, PH, m_per_px):
     from PIL import Image, ImageDraw
     arr = np.zeros((PH, PW), dtype=np.float32)
     for feat in features:
-        geom  = feat.get("geometry") or {}
-        h_m   = float((feat.get("properties") or {}).get("height_m") or 5)
-        w_px  = max(1, round(2.0 / m_per_px))
+        geom = feat.get("geometry") or {}
+        h_m = float((feat.get("properties") or {}).get("height_m") or 5)
+        w_px = max(1, round(2.0 / m_per_px))
         lines = []
         if geom.get("type") == "LineString":
             lines = [geom["coordinates"]]
@@ -192,15 +192,17 @@ def _rasterize_city(req: CityRasterRequest) -> dict:
     if lat_span <= 0 or lon_span <= 0:
         return _empty_result()
 
-    lat_mid  = (N + S) / 2
-    m_per_px = (lon_span * np.cos(np.radians(lat_mid)) * METRES_PER_DEGREE) / PW
+    lat_mid = (N + S) / 2
+    m_per_px = (lon_span * np.cos(np.radians(lat_mid))
+                * METRES_PER_DEGREE) / PW
 
     _, coords_to_px = _make_geo_to_px(N, S, E, W, PW, PH)
 
-    osm_key  = osm_cache_key(N, S, E, W)
+    osm_key = osm_cache_key(N, S, E, W)
     osm_data = read_osm_cache(osm_key)
     if not osm_data:
-        logger.debug(f"No OSM cache for composite city-raster ({osm_key[:8]}…)")
+        logger.debug(
+            f"No OSM cache for composite city-raster ({osm_key[:8]}...)")
         return _empty_result()
 
     building_arr = _rasterize_buildings(
@@ -235,15 +237,19 @@ async def get_city_raster(req: CityRasterRequest):
     """
     Rasterize OSM features to height-delta grids using PIL.
     Returns normalized arrays (scale=1); client applies slider weights.
+
+    Supports ``projection`` and ``clip_nans`` for uniform pipeline alignment
+    with all other raster layers (DEM, water, hydrology, satellite, city).
     """
     comp_key = make_cache_key(
         "composite", req.north, req.south, req.east, req.west,
-        {"w": req.width, "h": req.height}
+        {"w": req.width, "h": req.height,
+         "proj": req.projection, "cn": req.clip_nans}
     )
     cached = read_array_cache("composite", comp_key)
     if cached:
         arrays, meta = cached
-        logger.debug(f"Composite city-raster cache hit: {comp_key[:8]}…")
+        logger.debug(f"Composite city-raster cache hit: {comp_key[:8]}...")
         return JSONResponse(content={
             "buildings":  arrays["buildings"].ravel().tolist(),
             "roads":      arrays["roads"].ravel().tolist(),
@@ -266,5 +272,18 @@ async def get_city_raster(req: CityRasterRequest):
         }, {"width": PW, "height": PH})
     except Exception as e:
         logger.warning(f"Failed to cache composite city-raster: {e}")
+
+    # Apply map projection (all raster layers share the same pipeline)
+    if req.projection != "none":
+        from app.server.core.projection import project_grid
+        layer_names = ["buildings", "roads", "waterways", "walls"]
+        PW, PH = result["width"], result["height"]
+        for lname in layer_names:
+            arr = np.array(result[lname], dtype=np.float32).reshape(PH, PW)
+            arr = project_grid(arr, req.north, req.south, req.east, req.west,
+                               req.projection, req.clip_nans, categorical=False)
+            result[lname] = arr.ravel().tolist()
+        # Update dimensions to projected output size
+        result["height"], result["width"] = arr.shape
 
     return JSONResponse(content=result)

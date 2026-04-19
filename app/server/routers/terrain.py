@@ -197,7 +197,7 @@ async def get_terrain_dem(request: Request):
     })
     _cached = read_array_cache("dem", _dem_cache_key)
     if _cached is not None and _cached[0].get("dem") is not None:
-        logger.info(f"DEM cache hit: {_dem_cache_key[:8]}…")
+        logger.info(f"DEM cache hit: {_dem_cache_key[:8]}...")
         payload = _make_dem_payload(_cached[0]["dem"], west, south, east, north,
                                     show_sat, upscale_dim=dim)
         payload["from_cache"] = True
@@ -369,7 +369,7 @@ async def get_terrain_water_mask(request: Request):
             _wm = _warr.get("water_mask")
             _esa = _warr.get("esa")
             if _wm is not None and _esa is not None:
-                logger.info(f"Water mask cache hit: {_water_cache_key[:8]}…")
+                logger.info(f"Water mask cache hit: {_water_cache_key[:8]}...")
                 _h, _w = _wm.shape
                 _wp = int(np.sum(_wm > 0.5))
                 _tp = _h * _w
@@ -473,7 +473,7 @@ async def get_terrain_esa_land_cover(request: Request):
             _earr, _emeta = _ec
             _esa = _earr.get("esa")
             if _esa is not None:
-                logger.info(f"ESA land cover cache hit: {_esa_cache_key[:8]}…")
+                logger.info(f"ESA land cover cache hit: {_esa_cache_key[:8]}...")
                 _h, _w = _esa.shape
                 return JSONResponse(content={
                     "esa_values_b64": _b64(_esa),
@@ -717,13 +717,16 @@ def _fetch_and_rasterize_hydrology(north, south, east, west, dim, scale_m, depre
     try:
         if source == "hydrorivers":
             t_fetch = _time.perf_counter()
-            geojson = _fetch_hydrorivers(north, south, east, west, min_order=min_order)
+            geojson = _fetch_hydrorivers(
+                north, south, east, west, min_order=min_order)
             dt_fetch = _time.perf_counter() - t_fetch
             if geojson is None:
-                logger.info(f"HydroRIVERS: no features in region (fetch took {dt_fetch:.2f}s)")
+                logger.info(
+                    f"HydroRIVERS: no features in region (fetch took {dt_fetch:.2f}s)")
                 return None
             n_features = len(geojson.get("features", []))
-            logger.info(f"HydroRIVERS fetch: {n_features} features in {dt_fetch:.2f}s")
+            logger.info(
+                f"HydroRIVERS fetch: {n_features} features in {dt_fetch:.2f}s")
 
             t_rast = _time.perf_counter()
             river_grid = _rasterize_hydrorivers(
@@ -740,7 +743,8 @@ def _fetch_and_rasterize_hydrology(north, south, east, west, dim, scale_m, depre
         # Default: Natural Earth
         geojson = _fetch_natural_earth_rivers(scale_m=scale_m)
         if geojson is None:
-            logger.warning("Natural Earth hydrology fetch failed (geopandas/requests unavailable?)")
+            logger.warning(
+                "Natural Earth hydrology fetch failed (geopandas/requests unavailable?)")
             return None
         bbox_tuple = (west, south, east, north)
         geojson_filtered = _filter_rivers_by_bbox(geojson, bbox_tuple)
@@ -751,7 +755,8 @@ def _fetch_and_rasterize_hydrology(north, south, east, west, dim, scale_m, depre
         river_grid = _rasterize_rivers_with_buffering(
             geojson_filtered, bbox_tuple, dim, depression_m=depression_m)
         dt_total = _time.perf_counter() - t0
-        logger.info(f"Natural Earth hydrology total: {dt_total:.2f}s, {n_features} features")
+        logger.info(
+            f"Natural Earth hydrology total: {dt_total:.2f}s, {n_features} features")
         return {"river_grid": river_grid, "feature_count": n_features, "source": "natural_earth"}
 
     except Exception as e:

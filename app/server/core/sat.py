@@ -225,13 +225,13 @@ def fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset):
     """
     from geo2stl.sat2stl import fetch_bbox_image
     logger.info(f"fetch_water_mask_images: fetching ESA WorldCover layer "
-                f"(bbox {abs(east-west):.1f}°×{abs(north-south):.1f}°, scale={sat_scale}m/px)")
+                f"(bbox {abs(east-west):.1f}deg x {abs(north-south):.1f}deg, scale={sat_scale}m/px)")
     try:
         img = fetch_bbox_image(north, south, east, west,
                                scale=sat_scale, dataset="esa", use_cache=True)
     except Exception as e:
         logger.error(f"fetch_water_mask_images: ESA WorldCover layer failed "
-                     f"(scale={sat_scale}m/px, bbox {abs(east-west):.1f}°×{abs(north-south):.1f}°): {e}")
+                     f"(scale={sat_scale}m/px, bbox {abs(east-west):.1f}deg x {abs(north-south):.1f}deg): {e}")
         img = None
     jrc_img = None
     if water_dataset == "jrc":
@@ -288,8 +288,8 @@ def fetch_water_mask(
     if est_px > _MAX_ESA_PX:
         sat_scale = max(sat_scale, int(
             math.ceil(math.sqrt(bbox_w_m * bbox_h_m / _MAX_ESA_PX))))
-        logger.info(f"fetch_water_mask (ESA/water layer): pixel limit clamp → sat_scale={sat_scale} "
-                    f"(bbox {bbox_w:.1f}°×{bbox_h:.1f}°, est {est_px/1e6:.1f}M px)")
+        logger.info(f"fetch_water_mask (ESA/water layer): pixel limit clamp -> sat_scale={sat_scale} "
+                    f"(bbox {bbox_w:.1f}deg x {bbox_h:.1f}deg, est {est_px/1e6:.1f}M px)")
 
     # Constraint 2: 32768px max grid dimension on either axis.
     max_dim_px = 32768
@@ -297,8 +297,8 @@ def fetch_water_mask(
     min_scale_h = math.ceil(bbox_h_m / max_dim_px)
     min_safe_dim = max(int(min_scale_w), int(min_scale_h), 1)
     if sat_scale < min_safe_dim:
-        logger.info(f"fetch_water_mask (ESA/water layer): dimension limit clamp → sat_scale={min_safe_dim} "
-                    f"(was {sat_scale}, bbox {bbox_w:.1f}°×{bbox_h:.1f}°)")
+        logger.info(f"fetch_water_mask (ESA/water layer): dimension limit clamp -> sat_scale={min_safe_dim} "
+                    f"(was {sat_scale}, bbox {bbox_w:.1f}deg x {bbox_h:.1f}deg)")
         sat_scale = min_safe_dim
 
     img, jrc_img, elevation_raw = fetch_water_mask_images(
@@ -355,7 +355,7 @@ def fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, di
 
     sat_scale = max(30, min_scale_px, min_scale_dim)
     logger.info(f"fetch_sat_overlay ({dataset}): scale={sat_scale}m/px "
-                f"(bbox {abs(east-west):.1f}°×{abs(north-south):.1f}°, "
+                f"(bbox {abs(east-west):.1f}deg x {abs(north-south):.1f}deg, "
                 f"pixel_min={min_scale_px}, dim_min={min_scale_dim})")
     sat = fetch_bbox_image(north, south, east, west,
                            scale=sat_scale, dataset=dataset)

@@ -43,7 +43,7 @@ NAMESPACE_TTL = {
     "dem":        30 * 86400,   # 30 days
     "water":      14 * 86400,   # 14 days
     "satellite":  14 * 86400,   # 14 days
-    "osm":         7 * 86400,   #  7 days
+    "osm":         7 * 86400,  # 7 days
     "composite":  30 * 86400,   # 30 days (city rasters tied to OSM data)
     "opentopo":   90 * 86400,   # 90 days (raw GeoTIFFs rarely change)
 }
@@ -125,7 +125,8 @@ def read_array_cache(namespace: str, key: str) -> tuple[dict[str, np.ndarray], d
     if not npz_path.exists():
         return None
     try:
-        meta: dict = json.loads(json_path.read_text()) if json_path.exists() else {}
+        meta: dict = json.loads(json_path.read_text()
+                                ) if json_path.exists() else {}
         # TTL check
         if _is_stale(meta.get("_cached_at", 0), namespace):
             logger.debug(f"Array cache stale: {namespace}/{key}")
@@ -153,9 +154,11 @@ def write_osm_cache(key: str, data: dict) -> None:
     """Save GeoJSON dict as gzip-compressed JSON."""
     path = _osm_dir() / f"{key}.json.gz"
     try:
-        compressed = gzip.compress(json.dumps(data).encode("utf-8"), compresslevel=6)
+        compressed = gzip.compress(json.dumps(
+            data).encode("utf-8"), compresslevel=6)
         path.write_bytes(compressed)
-        logger.debug(f"OSM cache written: {key} ({len(compressed) // 1024} KB gz)")
+        logger.debug(
+            f"OSM cache written: {key} ({len(compressed) // 1024} KB gz)")
     except Exception as e:
         logger.warning(f"write_osm_cache failed ({key}): {e}")
         try:
@@ -195,7 +198,8 @@ def prune_cache(namespace: str, ttl_seconds: int | None = None,
     if not d.exists():
         return 0
 
-    ttl = ttl_seconds if ttl_seconds is not None else NAMESPACE_TTL.get(namespace, 7 * 86400)
+    ttl = ttl_seconds if ttl_seconds is not None else NAMESPACE_TTL.get(
+        namespace, 7 * 86400)
     now = time.time()
     deleted = 0
 
@@ -309,7 +313,9 @@ def migrate_osm_plain_json(osm_cache_path: Path) -> int:
             old_file.unlink()
             migrated += 1
         except Exception as e:
-            logger.warning(f"migrate_osm_plain_json: could not migrate {old_file.name}: {e}")
+            logger.warning(
+                f"migrate_osm_plain_json: could not migrate {old_file.name}: {e}")
     if migrated:
-        logger.info(f"Migrated {migrated} plain-JSON OSM cache files → .json.gz")
+        logger.info(
+            f"Migrated {migrated} plain-JSON OSM cache files -> .json.gz")
     return migrated

@@ -404,7 +404,7 @@ def upsample_dem(im: np.ndarray, dim: int) -> np.ndarray:
             scale = float(dim) / float(max(h_nat, w_nat))
             new_w = max(1, int(round(w_nat * scale)))
             new_h = max(1, int(round(h_nat * scale)))
-            logger.info(f"Upsampling DEM {w_nat}×{h_nat} → {new_w}×{new_h}")
+            logger.info(f"Upsampling DEM {w_nat}x{h_nat} -> {new_w}x{new_h}")
             im = _cv2.resize(im, (new_w, new_h), interpolation=_cv2.INTER_LINEAR)
     return im
 

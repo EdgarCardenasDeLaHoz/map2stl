@@ -4,34 +4,43 @@
 
 // ============================================================
 // GLOBAL STATE
-// All application state lives as closure variables inside
-// DOMContentLoaded (or at file-top scope for pre-init state).
-// Shared state is mirrored to window.appState (see modules/state.js).
+// All application state lives on window.appState (reactive Proxy
+// from modules/state.js).  Modules subscribe via .on('key', fn).
+// Legacy window.get*/set* aliases kept for backward compatibility.
 // ============================================================
 
-// Global variables
-let map;
-let globeScene, globeCamera, globeRenderer, globe;
-let drawnItems;
-let preloadedLayer;  // layer for rectangles loaded from saved coordinates
-let editMarkersLayer;  // permanent Edit buttons inside each bbox
-let boundingBox;
-let coordinatesData = [];
-let selectedRegion = null;
-
 // Shared state object — exposed on window so extracted modules can read/write it.
-// Updated wherever these variables change throughout this file.
-// Initialise state keys on the reactive Proxy created by modules/state.js.
+// All application state lives on the reactive Proxy created by modules/state.js.
+// Modules can subscribe via window.appState.on('key', fn).
 // Do NOT reassign window.appState — that would destroy the Proxy and its listeners.
 if (!window.appState?.set) window.appState = {};   // fallback if state.js not loaded
+
+// Map & globe instances (set once during init by map-globe.js)
+window.appState.map = null;
+window.appState.globeScene = null;
+window.appState.globeCamera = null;
+window.appState.globeRenderer = null;
+window.appState.globe = null;
+
+// Map layers
+window.appState.drawnItems = null;
+window.appState.preloadedLayer = null;    // layer for rectangles loaded from saved coordinates
+window.appState.editMarkersLayer = null;  // permanent Edit buttons inside each bbox
+window.appState.boundingBox = null;
+
+// Region management
+window.appState.coordinatesData = [];
 window.appState.selectedRegion = null;
+
+// DEM / layer data
 window.appState.currentDemBbox = null;
 window.appState.osmCityData = null;
 window.appState.lastDemData = null;
 window.appState.lastWaterMaskData = null;
+
+// Shared helpers (set later by modules)
 window.appState.showToast = null;
 window.appState.haversineDiagKm = null;
-let lastDemData = null;
 
 // Land cover configuration — owned by water-mask.js; exposed on window.appState.
 window.appState.landCoverConfig = {
@@ -51,24 +60,18 @@ window.appState.landCoverConfig = {
 window.appState.landCoverConfigDefaults = JSON.parse(JSON.stringify(window.appState.landCoverConfig));
 
 // Track the bbox that each layer was loaded for
-let layerBboxes = {
+window.appState.layerBboxes = {
     dem: null,
     water: null,
     landCover: null
 };
 
 // Layer loading status: 'empty' | 'loading' | 'loaded' | 'error'
-let layerStatus = {
+window.appState.layerStatus = {
     dem: 'empty',
     water: 'empty',
     landCover: 'empty'
 };
-
-// Mirror layerBboxes and layerStatus to window.appState (shared references; property
-// mutations are auto-visible to modules).  Full-object reassignments (clearLayerCache)
-// must re-sync window.appState manually — see clearLayerCache() below.
-window.appState.layerBboxes = layerBboxes;
-window.appState.layerStatus = layerStatus;
 
 // DEM + export parameters — single source of truth, replaces hidden DOM inputs.
 window.appState.demParams = {
@@ -88,21 +91,17 @@ window.appState.demParams = {
  * Call this when changing regions to prevent stale data
  */
 function clearLayerCache() {
-    lastDemData = null;
-    window.clearLastWaterMaskData?.();
-    currentDemBbox = null;
-    window.appState.currentDemBbox = null;
     window.appState.lastDemData = null;
+    window.clearLastWaterMaskData?.();
+    window.appState.currentDemBbox = null;
     window._setDemEmptyState?.(true);
     window.appState.originalDemValues = null;  // Reset so next Apply uses new region's data
     window.appState.curveDataVmin = null;  // Reset stable curve coordinate system
     window.appState.curveDataVmax = null;
 
     // Reset layer tracking
-    layerBboxes = { dem: null, water: null, landCover: null };
-    layerStatus = { dem: 'empty', water: 'empty', landCover: 'empty' };
-    window.appState.layerBboxes = layerBboxes;
-    window.appState.layerStatus = layerStatus;
+    window.appState.layerBboxes = { dem: null, water: null, landCover: null };
+    window.appState.layerStatus = { dem: 'empty', water: 'empty', landCover: 'empty' };
     window._clearCityRasterCache?.();
     window.appState.cityRasterSourceCanvas = null;
     window.appState.compositeDemSourceCanvas = null;
@@ -145,6 +144,8 @@ function clearLayerDisplays() {
  */
 function getCurrentBboxObject() {
     let bounds;
+    const boundingBox = window.appState.boundingBox;
+    const selectedRegion = window.appState.selectedRegion;
     if (boundingBox) {
         // boundingBox is a Leaflet layer (L.rectangle) — extract its LatLngBounds
         bounds = typeof boundingBox.getBounds === 'function'
@@ -174,7 +175,7 @@ function getCurrentBboxObject() {
  */
 function isLayerCurrent(layerName) {
     const currentBbox = getCurrentBboxObject();
-    const layerBbox = layerBboxes[layerName];
+    const layerBbox = window.appState.layerBboxes[layerName];
 
     if (!currentBbox || !layerBbox) return false;
 
@@ -184,9 +185,6 @@ function isLayerCurrent(layerName) {
         Math.abs(currentBbox.east - layerBbox.east) < epsilon &&
         Math.abs(currentBbox.west - layerBbox.west) < epsilon;
 }
-
-window.getCurrentBboxObject = getCurrentBboxObject;
-window.isLayerCurrent = isLayerCurrent;
 
 // BBOX_COLORS and currentBboxColorIndex defined in modules/map-globe.js
 // and exposed as window.BBOX_COLORS / window.resetBboxColorIndex there.
@@ -235,7 +233,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     window.setupCacheManagement?.();
 
     // Start in expanded sidebar state by default
-    sidebarState = 'expanded';
+    window.appState.sidebarState = 'expanded';
     const _sidebar = document.getElementById('sidebar');
     if (_sidebar) { _sidebar.classList.remove('collapsed'); _sidebar.classList.add('expanded'); }
     const _toggleBtn = document.getElementById('sidebarToggleBtn');
@@ -259,51 +257,43 @@ document.addEventListener('DOMContentLoaded', async function () {
     console.log('App initialization complete');
 });
 
-// Expose closure vars + functions needed by extracted modules.
-window.getCoordinatesData = () => coordinatesData;
-window.getBoundingBox = () => boundingBox;
+// Backward-compat aliases — modules should prefer window.appState.xxx directly.
+window.getCoordinatesData = () => window.appState.coordinatesData;
+window.getBoundingBox = () => window.appState.boundingBox;
 
-// Setters so extracted modules can write back to app.js closure vars.
-window.setCoordinatesData = (d) => { coordinatesData = d; };
-window.setSelectedRegion = (r) => { selectedRegion = r; };
-window['getSelectedRegion'] = () => selectedRegion;
-window.setBoundingBox = (b) => { boundingBox = b; };
-window.setMap = (m) => { map = m; };
-window.getMap = () => map;
-window.setPreloadedLayer = (l) => { preloadedLayer = l; };
-window.getPreloadedLayer = () => preloadedLayer;
-window.setEditMarkersLayer = (l) => { editMarkersLayer = l; };
-window.getEditMarkersLayer = () => editMarkersLayer;
-window.setDrawnItems = (d) => { drawnItems = d; };
-window.getDrawnItems = () => drawnItems;
-window.setGlobeScene = (s) => { globeScene = s; };
-window.getGlobeScene = () => globeScene;
-window.setGlobeCamera = (c) => { globeCamera = c; };
-window.setGlobeRenderer = (r) => { globeRenderer = r; };
-window.setGlobe = (g) => { globe = g; };
-window.setSidebarState = (s) => { sidebarState = s; };
+window.setCoordinatesData = (d) => { window.appState.coordinatesData = d; };
+window.setSelectedRegion = (r) => { window.appState.selectedRegion = r; };
+window['getSelectedRegion'] = () => window.appState.selectedRegion;
+window.setBoundingBox = (b) => { window.appState.boundingBox = b; };
+window.setMap = (m) => { window.appState.map = m; };
+window.getMap = () => window.appState.map;
+window.setPreloadedLayer = (l) => { window.appState.preloadedLayer = l; };
+window.getPreloadedLayer = () => window.appState.preloadedLayer;
+window.setEditMarkersLayer = (l) => { window.appState.editMarkersLayer = l; };
+window.getEditMarkersLayer = () => window.appState.editMarkersLayer;
+window.setDrawnItems = (d) => { window.appState.drawnItems = d; };
+window.getDrawnItems = () => window.appState.drawnItems;
+window.setGlobeScene = (s) => { window.appState.globeScene = s; };
+window.getGlobeScene = () => window.appState.globeScene;
+window.setGlobeCamera = (c) => { window.appState.globeCamera = c; };
+window.setGlobeRenderer = (r) => { window.appState.globeRenderer = r; };
+window.setGlobe = (g) => { window.appState.globe = g; };
+window.setSidebarState = (s) => { window.appState.sidebarState = s; };
 
 window.clearLayerDisplays = clearLayerDisplays;
 window.clearLayerCache = clearLayerCache;
 
-// Unified opacity values
-let waterOpacity = 0.7;
-window.getWaterOpacity = () => waterOpacity;
-window.setWaterOpacity = (v) => { waterOpacity = v; };
-
-// ============================================================
-// DEM LOADING & RENDERING
-// ============================================================
-
-// Current bounding box for gridlines (updated when DEM loads)
-let currentDemBbox = null;
+// Appearance
+window.appState.waterOpacity = 0.7;
+window.getWaterOpacity = () => window.appState.waterOpacity;
+window.setWaterOpacity = (v) => { window.appState.waterOpacity = v; };
 
 // ============================================================
 // SIDEBAR
 // ============================================================
 
-let sidebarState = 'normal'; // 'normal', 'expanded', 'hidden'
-window.getSidebarState = () => sidebarState;
+window.appState.sidebarState = 'normal'; // 'normal', 'expanded', 'hidden'
+window.getSidebarState = () => window.appState.sidebarState;
 
 // Open sidebar from floating button (goes to normal state)
 document.getElementById('openSidebarBtn').addEventListener('click', () => {
@@ -312,7 +302,7 @@ document.getElementById('openSidebarBtn').addEventListener('click', () => {
     const icon = toggleBtn.querySelector('.state-icon');
     const label = toggleBtn.querySelector('.state-label');
 
-    sidebarState = 'normal';
+    window.appState.sidebarState = 'normal';
     sidebar.classList.remove('collapsed', 'expanded');
     document.getElementById('regionParamsSection').classList.add('hidden');
     document.getElementById('openSidebarBtn').classList.add('hidden');

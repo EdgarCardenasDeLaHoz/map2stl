@@ -1,6 +1,37 @@
 # ── sys.path bootstrap ────────────────────────────────────────────────────────
 # Ensure strm2stl/ (config, routers, core) and Code/ (numpy2stl peer) are
 # importable whether this file is run as a script or imported as a module.
+from app.server.routers.height import router as _height_router
+from app.server.routers.composite import router as _composite_router
+from app.server.routers.settings import router as _settings_router
+from app.server.routers.cache import router as _cache_router
+from app.server.routers.export import router as _export_router
+from app.server.routers.cities import router as _cities_router
+from app.server.routers.terrain import router as _terrain_router
+from app.server.routers.regions import router as _regions_router
+import mimetypes as _mimetypes
+from fastapi.responses import FileResponse as _FileResponse
+from fastapi import Response as _Response
+from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
+import logging
+from pathlib import Path
+import numpy as np
+import json
+import sys
+import time
+import os
+import asyncio
+from typing import Optional, List, Dict, Any
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, validator, Field
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse, JSONResponse
+from app.server.config import OSM_CACHE_PATH
+from fastapi import FastAPI, Request
+import uvicorn
+import threading
+import webbrowser
 import sys as _sys
 from pathlib import Path as _Path
 _STRM2STL_ROOT = str(_Path(__file__).parent.parent.parent)      # .../strm2stl/
@@ -11,31 +42,12 @@ for _p in (_CODE_ROOT, _STRM2STL_ROOT):
 del _sys, _Path, _STRM2STL_ROOT, _CODE_ROOT
 # ─────────────────────────────────────────────────────────────────────────────
 
-import webbrowser
-import threading
-import uvicorn
-from fastapi import FastAPI, Request
-from app.server.config import OSM_CACHE_PATH
 # Disk-cache helpers: prune on startup, migrate legacy OSM cache
 try:
     from app.server.core.cache import prune_all_caches, migrate_osm_plain_json
     _CACHE_AVAILABLE = True
 except ImportError:
     _CACHE_AVAILABLE = False
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, validator, Field
-from fastapi.staticfiles import StaticFiles
-from typing import Optional, List, Dict, Any
-import asyncio
-import os
-import time
-import sys
-import json
-import numpy as np
-from pathlib import Path
-import logging
-from logging.handlers import RotatingFileHandler
 
 # Configure logging to write to a file — use an absolute path so the log
 # file never lands inside a directory watched by uvicorn's auto-reloader.
@@ -57,7 +69,6 @@ selected_location = {}
 # ---------------------------------------------------------------------------
 # Lifespan (replaces deprecated @app.on_event("startup"))
 # ---------------------------------------------------------------------------
-from contextlib import asynccontextmanager
 
 
 @asynccontextmanager
@@ -76,7 +87,8 @@ async def _lifespan(app):
                 if any(v > 0 for v in counts.values()):
                     logger.info(f"Startup cache prune: {counts}")
             except Exception as e:
-                logger.warning(f"Startup cache maintenance failed (non-fatal): {e}")
+                logger.warning(
+                    f"Startup cache maintenance failed (non-fatal): {e}")
         loop.run_in_executor(None, _startup_cache_maintenance)
     yield  # server runs here
 
@@ -214,27 +226,29 @@ templates = Jinja2Templates(directory=templates_path)
 # ---------------------------------------------------------------------------
 # Mount built documentation sites (MkDocs + Sphinx) if they exist
 # ---------------------------------------------------------------------------
-_strm2stl_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+_strm2stl_root = os.path.join(os.path.dirname(
+    os.path.abspath(__file__)), "..", "..")
 _docs_site_path = os.path.join(_strm2stl_root, "docs_site")
 _sphinx_site_path = os.path.join(_strm2stl_root, "sphinx_site")
 
 if os.path.isdir(_docs_site_path):
-    app.mount("/project-docs", StaticFiles(directory=_docs_site_path, html=True), name="project-docs")
-    logger.info(f"Mounted /project-docs → {_docs_site_path}")
+    app.mount("/project-docs", StaticFiles(directory=_docs_site_path,
+              html=True), name="project-docs")
+    logger.info(f"Mounted /project-docs -> {_docs_site_path}")
 else:
-    logger.info("MkDocs site not built yet — run 'mkdocs build' in strm2stl/ to enable /project-docs")
+    logger.info(
+        "MkDocs site not built yet -- run 'mkdocs build' in strm2stl/ to enable /project-docs")
 
 if os.path.isdir(_sphinx_site_path):
-    app.mount("/api-reference", StaticFiles(directory=_sphinx_site_path, html=True), name="api-reference")
-    logger.info(f"Mounted /api-reference → {_sphinx_site_path}")
+    app.mount("/api-reference", StaticFiles(directory=_sphinx_site_path,
+              html=True), name="api-reference")
+    logger.info(f"Mounted /api-reference -> {_sphinx_site_path}")
 else:
-    logger.info("Sphinx site not built yet — run 'sphinx-build sphinx/ sphinx_site/' in strm2stl/ to enable /api-reference")
+    logger.info(
+        "Sphinx site not built yet -- run 'sphinx-build sphinx/ sphinx_site/' in strm2stl/ to enable /api-reference")
 
 # Mount static files (JS/CSS)
 # Serve via a custom route so we can add no-cache headers for .js/.css
-from fastapi import Response as _Response
-from fastapi.responses import FileResponse as _FileResponse
-import mimetypes as _mimetypes
 
 static_path = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "..", "client", "static")
@@ -243,6 +257,7 @@ static_path = os.path.join(os.path.dirname(
 # Maps /static/js/vue-main.js → dist/js/vue-main.js etc.
 dist_path = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "..", "..", "dist")
+
 
 @app.get("/static/{file_path:path}")
 async def serve_static(file_path: str):
@@ -267,13 +282,6 @@ if not os.path.isdir(static_path):
 # ---------------------------------------------------------------------------
 # Routers (backend refactor step 6)
 # ---------------------------------------------------------------------------
-from app.server.routers.regions import router as _regions_router
-from app.server.routers.terrain import router as _terrain_router
-from app.server.routers.cities import router as _cities_router
-from app.server.routers.export import router as _export_router
-from app.server.routers.cache import router as _cache_router
-from app.server.routers.settings import router as _settings_router
-from app.server.routers.composite import router as _composite_router
 app.include_router(_regions_router)
 app.include_router(_terrain_router)
 app.include_router(_cities_router)
@@ -281,7 +289,9 @@ app.include_router(_export_router)
 app.include_router(_cache_router)
 app.include_router(_settings_router)
 app.include_router(_composite_router)
-logger.info("Routers loaded: regions, terrain, cities, export, cache, settings, composite")
+app.include_router(_height_router)
+logger.info(
+    "Routers loaded: regions, terrain, cities, export, cache, settings, composite, height")
 
 
 # ============================================================
@@ -324,8 +334,8 @@ except ImportError:
                 raise ValueError("north must be greater than south")
             return v
 
-
     # Legacy alias kept for backward-compatibility with older frontend code
+
     class BoundingBoxLegacy(BaseModel):
         southWestLat: float
         southWestLng: float
@@ -336,7 +346,6 @@ except ImportError:
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
-
 
 
 # Function to run FastAPI server
@@ -365,10 +374,10 @@ def _build_global_dem_cache(force: bool = False) -> bool:
     meta_path = static_dir / "global_dem_meta.json"
 
     if png_path.exists() and meta_path.exists() and not force:
-        logger.info("Global DEM cache already exists — skipping generation.")
+        logger.info("Global DEM cache already exists -- skipping generation.")
         return True
 
-    logger.info("Building global DEM cache (full globe, 90/-90/180/-180) …")
+    logger.info("Building global DEM cache (full globe, 90/-90/180/-180) ...")
     from geo2stl.geo2stl import stitch_tiles_no_rasterio, get_tile_files
     if not get_tile_files():
         logger.warning("Global DEM cache: no elevation tiles found.")
@@ -423,9 +432,8 @@ def _build_global_dem_cache(force: bool = False) -> bool:
     meta = {"north": 90.0, "south": -90.0, "east": 180.0, "west": -180.0,
             "vmin": vmin, "vmax": vmax}
     meta_path.write_text(_json.dumps(meta))
-    logger.info(f"Global DEM cache saved: {w2}×{h2} px → {png_path}")
+    logger.info(f"Global DEM cache saved: {w2}x{h2} px -> {png_path}")
     return True
-
 
 
 @app.get("/api/global_dem_overview")
