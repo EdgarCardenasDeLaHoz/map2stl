@@ -1,7 +1,10 @@
 # TODO_ADVANCED — 3D Building Data Research
 
-> Research-phase notes. Nothing here is ready to implement — requires more investigation before any coding.
-> Primary goal: get **photogrammetry-accurate 3D building geometry** into the app for STL/3MF export.
+_Last updated: 2026-04-19_
+
+> Research-phase notes for advanced building geometry and print features.
+> Approach 1 (Google 3D Tiles via pure Python) has been **implemented** in `app/server/core/height/providers/google_3d.py`.
+> See `height-pipeline-plan.md` for the full implementation status.
 
 ---
 
@@ -21,9 +24,13 @@ The best sources of actual 3D building geometry:
 
 ---
 
-## Approach 1 — Pure Python: py3dtiles + trimesh pipeline
+## Approach 1 — Pure Python: py3dtiles + trimesh pipeline — IMPLEMENTED
 
-> Documented by user research. No Blender required. Fully automatable server-side.
+> ✅ **Implemented** as `app/server/core/height/providers/google_3d.py`.
+> ECEF→ENU transform, tileset traversal, ray-casting DSM, MAX_TILES=200 guard.
+> 20 unit + integration tests pass. See `height-pipeline-plan.md` Phase 1a.2.
+
+The original research notes below are preserved for reference.
 
 ### Pipeline
 
@@ -202,8 +209,11 @@ Ties directly into the existing puzzle export feature.
 
 ---
 
-### P6. Elevation band export for multi-material
-Split the terrain into N elevation-range meshes, each exported as a separate body in the 3MF.
+### P6. Elevation band export for multi-material — DENIED
+
+> Denied per `proposals.md` F-P6 — multi-material band export adds complexity with limited demand. Standard STL/3MF export covers the use case.
+
+<details><summary>Original notes (archived)</summary>
 - User defines band breakpoints (e.g. <0m water, 0–500m lowland, 500–2000m highland, >2000m alpine)
 - Each band gets a separate mesh + material in the 3MF container
 - Pairs with colour swatch UI in the Extrude tab
@@ -211,3 +221,5 @@ Split the terrain into N elevation-range meshes, each exported as a separate bod
 **Decisions needed before implementing:**
 - Single or multi-material printer? (Bambu AMS, Prusa MMU)
 - Is ocean/bathymetry printed with a flat sea surface, or as pure underwater terrain?
+
+</details>

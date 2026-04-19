@@ -26,7 +26,7 @@ const _isArrayLike = (v) => Array.isArray(v) || ArrayBuffer.isView(v);
 
 // Delegate to shared helpers from ui-helpers.js (loaded before this module).
 const _getBboxCoords = (...a) => window.getBboxCoords(...a);
-const _showErr       = (...a) => window.showErrInEl(...a);
+const _showErr = (...a) => window.showErrInEl(...a);
 
 // ---------------------------------------------------------------------------
 // _applyDemResult — post-fetch DEM rendering pipeline
@@ -561,7 +561,7 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
     }
     const { north, south, east, west } = coords;
     const resolution = document.getElementById('waterResolution')?.value || '200';
-    const dataset    = document.getElementById('waterDataset')?.value   || 'esa';
+    const dataset = document.getElementById('waterDataset')?.value || 'esa';
 
     const params = new URLSearchParams({
         north, south, east, west,
@@ -633,9 +633,10 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
         document.getElementById('satImgResolution')?.value ||
         document.getElementById('paramDim')?.value || 400
     );
-    const params = new URLSearchParams({ north, south, east, west, dim,
+    const params = new URLSearchParams({
+        north, south, east, west, dim,
         projection: document.getElementById('paramProjection')?.value || 'none',
-        clip_nans:  document.getElementById('paramClipNans')?.checked ?? true,
+        clip_nans: document.getElementById('paramClipNans')?.checked ?? true,
     });
 
     window.showToast?.('Loading satellite imagery...', 'info');

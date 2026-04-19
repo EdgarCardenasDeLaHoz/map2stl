@@ -1,12 +1,38 @@
 # SDK Workflow Map — strm2stl
 
+_Last updated: 2026-04-19_
+
 Use this document when you need to connect the notebooks, the Python session client, and the backend routes without tracing everything manually.
 
 ## Primary Notebook Path
 
+```mermaid
+flowchart LR
+    NB["Notebook<br/>API_Terrain.ipynb"] --> TS["TerrainSession"]
+    TS --> R["routers/"]
+    R --> C["core/"]
+```
+
 `../notebooks/API_Terrain.ipynb` is the shortest end-to-end workflow example.
 
 It follows this sequence:
+
+```mermaid
+sequenceDiagram
+    participant NB as Notebook
+    participant S as TerrainSession
+    participant API as FastAPI
+
+    NB->>S: start()
+    S->>API: Server boots
+    NB->>S: regions() / select()
+    S->>API: GET /api/regions
+    NB->>S: fetch_dem()
+    S->>API: POST /api/terrain/dem
+    NB->>S: export_stl()
+    S->>API: POST /api/export/stl
+    NB->>S: stop()
+```
 
 1. Start the server via `TerrainSession.start()`.
 2. Inspect or choose regions via `TerrainSession.regions()` and `TerrainSession.select()`.
@@ -38,6 +64,15 @@ It follows this sequence:
 | Cache inspection | cache helpers | `/api/cache*` | `app/server/routers/cache.py` |
 
 ## Trace A Notebook Step Quickly
+
+```mermaid
+flowchart TD
+    A["Find method in<br/>terrain_session.py"] --> B["Check route in<br/>api.md"]
+    B --> C["Open router in<br/>routers/"]
+    C --> D{"Logic in<br/>router?"}
+    D -->|Yes| E["Done"]
+    D -->|No| F["Continue into<br/>core/"]
+```
 
 When a notebook cell changes pipeline behavior, use this order:
 

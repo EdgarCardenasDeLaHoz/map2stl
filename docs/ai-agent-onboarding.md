@@ -1,5 +1,7 @@
 # AI Agent Onboarding — strm2stl
 
+_Last updated: 2026-04-19_
+
 Use this document when you need a fast, correct mental model of the repository before making changes.
 
 ## Start Here

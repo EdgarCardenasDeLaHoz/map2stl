@@ -1,5 +1,7 @@
 # Function Index — strm2stl Frontend
 
+_Last updated: 2026-04-19_
+
 One-liner index. Search by function name — line numbers are omitted because they go stale.
 Modules live in `app/client/static/js/modules/` (subdirs). Use grep: `grep -rn "function functionName"`.
 

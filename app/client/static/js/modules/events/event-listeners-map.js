@@ -13,7 +13,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     function activateDrawTool() {
         const dc = window.getDrawControl?.();
         if (dc && dc._toolbars?.draw) {
-            try { dc._toolbars.draw._modes.rectangle.handler.enable(); } catch(e) {}
+            try { dc._toolbars.draw._modes.rectangle.handler.enable(); } catch (e) { }
         }
         const btn = document.getElementById('floatingDrawBtn');
         if (btn) btn.classList.add('drawing');
@@ -61,10 +61,10 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     const projSelect = document.getElementById('paramProjection');
     if (projSelect) {
         const projDescriptions = {
-            'none':       'No correction — raw lat/lon grid displayed as-is.',
-            'cosine':     'Horizontal scaling by cos(latitude). Correct east-west distances.',
-            'mercator':   'Web Mercator — vertical stretching increases towards poles.',
-            'lambert':    'Lambert Cylindrical Equal-Area — preserves area at the cost of shape.',
+            'none': 'No correction — raw lat/lon grid displayed as-is.',
+            'cosine': 'Horizontal scaling by cos(latitude). Correct east-west distances.',
+            'mercator': 'Web Mercator — vertical stretching increases towards poles.',
+            'lambert': 'Lambert Cylindrical Equal-Area — preserves area at the cost of shape.',
             'sinusoidal': 'Sinusoidal — each row scaled by cos(lat), centred on meridian.',
         };
         let _projChangeTimer = null;
@@ -89,8 +89,8 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
                 const tasks = [];
                 if (window.appState.lastWaterMaskData) tasks.push(window.loadWaterMask?.());
                 if (window.appState.layerBboxes?.landCover) tasks.push(window.loadEsaLandCover?.());
-                if (window.appState.satImgSourceCanvas)  tasks.push(window.loadSatelliteRGBImage?.());
-                if (window.appState.osmCityData)          tasks.push(window.loadCityData?.());
+                if (window.appState.satImgSourceCanvas) tasks.push(window.loadSatelliteRGBImage?.());
+                if (window.appState.osmCityData) tasks.push(window.loadCityData?.());
                 if (window.appState.hydrologySourceCanvas) tasks.push(window.loadHydrology?.());
                 if (tasks.length) await Promise.all(tasks);
 
@@ -179,11 +179,13 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     });
 
     document.getElementById('floatingGlobeToggle')?.addEventListener('click', () => {
-        const gc  = document.getElementById('globeContainer');
+        const gc = document.getElementById('globeContainer');
         const btn = document.getElementById('floatingGlobeToggle');
         if (gc.classList.contains('hidden')) {
-            Object.assign(gc.style, { position: 'absolute', top: '0', left: '0',
-                                       width: '100%', height: '100%', zIndex: '500' });
+            Object.assign(gc.style, {
+                position: 'absolute', top: '0', left: '0',
+                width: '100%', height: '100%', zIndex: '500'
+            });
             gc.classList.remove('hidden');
             btn?.classList.add('active');
             window.initGlobe?.();
@@ -195,7 +197,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     });
 
     const floatingRegionsBtn = document.getElementById('floatingRegionsToggle');
-    const regionsPanel       = document.getElementById('regionsPanel');
+    const regionsPanel = document.getElementById('regionsPanel');
     floatingRegionsBtn?.addEventListener('click', () => {
         regionsPanel?.classList.toggle('hidden');
         floatingRegionsBtn.classList.toggle('active', !regionsPanel?.classList.contains('hidden'));
@@ -206,7 +208,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         floatingRegionsBtn?.classList.remove('active');
     });
 
-    const mapSettingsBtn   = document.getElementById('floatingMapSettingsBtn');
+    const mapSettingsBtn = document.getElementById('floatingMapSettingsBtn');
     const mapSettingsPanel = document.getElementById('mapSettingsPanel');
     mapSettingsBtn?.addEventListener('click', () => {
         mapSettingsPanel?.classList.toggle('hidden');
@@ -218,7 +220,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     });
 
     const mapTileLayerExplore = document.getElementById('mapTileLayerExplore');
-    const mapTileLayerEdit    = document.getElementById('mapTileLayer');
+    const mapTileLayerEdit = document.getElementById('mapTileLayer');
     mapTileLayerExplore?.addEventListener('change', () => {
         window.setTileLayer?.(mapTileLayerExplore.value);
         if (mapTileLayerEdit) mapTileLayerEdit.value = mapTileLayerExplore.value;
@@ -227,9 +229,9 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         if (mapTileLayerExplore) mapTileLayerExplore.value = mapTileLayerEdit.value;
     });
 
-    const terrainCheckboxExplore     = document.getElementById('showTerrainOverlayExplore');
-    const terrainRowExplore          = document.getElementById('terrainOpacityRowExplore');
-    const terrainOpacityExplore      = document.getElementById('terrainOverlayOpacityExplore');
+    const terrainCheckboxExplore = document.getElementById('showTerrainOverlayExplore');
+    const terrainRowExplore = document.getElementById('terrainOpacityRowExplore');
+    const terrainOpacityExplore = document.getElementById('terrainOverlayOpacityExplore');
     const terrainOpacityLabelExplore = document.getElementById('terrainOpacityValueExplore');
     terrainCheckboxExplore?.addEventListener('change', () => {
         const on = terrainCheckboxExplore.checked;
@@ -261,7 +263,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         window.closeRegionsPanel?.();
         const dc = window.getDrawControl?.();
         if (dc && dc._toolbars?.draw) {
-            try { dc._toolbars.draw._modes.rectangle.handler.enable(); } catch(e) {}
+            try { dc._toolbars.draw._modes.rectangle.handler.enable(); } catch (e) { }
         }
         window.showToast?.('Draw a rectangle on the map to create a new region', 'info');
     });
@@ -295,12 +297,12 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
 
     document.getElementById('paramDim')?.addEventListener('input', () => {
         const val = parseInt(document.getElementById('paramDim').value);
-        const w   = document.getElementById('demResWarning');
+        const w = document.getElementById('demResWarning');
         if (w) w.style.display = val > 500 ? 'block' : 'none';
     });
     document.getElementById('waterResolution')?.addEventListener('change', () => {
         const val = parseInt(document.getElementById('waterResolution').value);
-        const w   = document.getElementById('waterResWarning');
+        const w = document.getElementById('waterResWarning');
         if (w) w.style.display = val >= 500 ? 'block' : 'none';
         window.loadWaterMask?.();
     });
@@ -324,15 +326,15 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     // Sync the quick-load bar labels with the actual resolution controls in fetch sections.
     function _updateQuickLoadLabels() {
         const map = {
-            qlResDem:   { src: 'paramDim',        suffix: ' px' },
-            qlResWater: { src: 'waterResolution',  suffix: ' m/px' },
-            qlResSat:   { src: 'satImgResolution', suffix: ' px' },
-            qlResEsa:   { src: 'esaResolution',    suffix: ' m/px' },
-            qlResHydro: { src: 'hydroDim',         suffix: ' px' },
+            qlResDem: { src: 'paramDim', suffix: ' px' },
+            qlResWater: { src: 'waterResolution', suffix: ' m/px' },
+            qlResSat: { src: 'satImgResolution', suffix: ' px' },
+            qlResEsa: { src: 'esaResolution', suffix: ' m/px' },
+            qlResHydro: { src: 'hydroDim', suffix: ' px' },
         };
         for (const [labelId, cfg] of Object.entries(map)) {
             const label = document.getElementById(labelId);
-            const src   = document.getElementById(cfg.src);
+            const src = document.getElementById(cfg.src);
             if (label && src) label.textContent = src.value + cfg.suffix;
         }
     }
@@ -356,10 +358,10 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     });
 
     // Quick-load bar buttons (LayerViewSection)
-    _asyncBtn('qlLoadDem',   () => window.loadDEM?.());
+    _asyncBtn('qlLoadDem', () => window.loadDEM?.());
     _asyncBtn('qlLoadWater', () => window.loadWaterMask?.());
-    _asyncBtn('qlLoadSat',   () => window.loadSatelliteRGBImage?.());
-    _asyncBtn('qlLoadEsa',   () => window.loadEsaLandCover?.());
+    _asyncBtn('qlLoadSat', () => window.loadSatelliteRGBImage?.());
+    _asyncBtn('qlLoadEsa', () => window.loadEsaLandCover?.());
     _asyncBtn('qlLoadHydro', () => window.loadHydrology?.());
 };
 
@@ -380,15 +382,15 @@ window._setupBboxListeners = function _setupBboxListeners() {
         if (isNaN(n) || isNaN(s) || isNaN(e) || isNaN(w)) {
             window.showToast?.('Invalid coordinates', 'error'); return;
         }
-        const nc = Math.max(-90,  Math.min(90,  n));
-        const sc = Math.max(-90,  Math.min(90,  s));
+        const nc = Math.max(-90, Math.min(90, n));
+        const sc = Math.max(-90, Math.min(90, s));
         const ec = Math.max(-180, Math.min(180, e));
         const wc = Math.max(-180, Math.min(180, w));
         window.setBboxInputValues?.(nc, sc, ec, wc);
         let selectedRegion = window.appState.selectedRegion;
         if (!selectedRegion) selectedRegion = { name: null };
         selectedRegion.north = nc; selectedRegion.south = sc;
-        selectedRegion.east  = ec; selectedRegion.west  = wc;
+        selectedRegion.east = ec; selectedRegion.west = wc;
         window.setSelectedRegion?.(selectedRegion);
         window.appState.selectedRegion = selectedRegion;
         window.appState.currentDemBbox = { north: nc, south: sc, east: ec, west: wc };
@@ -416,7 +418,7 @@ window._setupBboxListeners = function _setupBboxListeners() {
             if (isNaN(n) || isNaN(s) || isNaN(e) || isNaN(w)) return;
             if (n <= s || e <= w) return;  // invalid — skip until values are consistent
             const _map = window.getMap?.();
-            const _bb  = window.getBoundingBox?.();
+            const _bb = window.getBoundingBox?.();
             if (!_map) return;
             if (_bb) {
                 // Update existing rectangle in-place (no layer churn)
@@ -445,13 +447,13 @@ window._setupBboxListeners = function _setupBboxListeners() {
         }
         try {
             const { error } = await window.api.regions.update(selectedRegion.name, {
-                name:  selectedRegion.name,
+                name: selectedRegion.name,
                 label: selectedRegion.label || '',
                 north: n, south: s, east: e, west: w,
             });
             if (error) throw new Error(error);
             selectedRegion.north = n; selectedRegion.south = s;
-            selectedRegion.east  = e; selectedRegion.west  = w;
+            selectedRegion.east = e; selectedRegion.west = w;
             window.showToast?.('Bbox saved', 'success');
             await window.loadCoordinates?.();
         } catch (err) {
@@ -465,10 +467,10 @@ window._setupBboxListeners = function _setupBboxListeners() {
         const label = document.getElementById('regionLabelEdit')?.value.trim() ?? '';
         try {
             const { error } = await window.api.regions.update(selectedRegion.name, {
-                name:  selectedRegion.name,
+                name: selectedRegion.name,
                 label,
                 north: selectedRegion.north, south: selectedRegion.south,
-                east:  selectedRegion.east,  west:  selectedRegion.west,
+                east: selectedRegion.east, west: selectedRegion.west,
             });
             if (error) throw new Error(error);
             selectedRegion.label = label;

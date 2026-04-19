@@ -1,5 +1,7 @@
 # Composite DEM Layer — Design Document
 
+_Last updated: 2026-04-19_
+
 > **Purpose**: Define a new "Composite DEM" layer that appears in the stacked layers view and predicts/adjusts elevation by combining contributions from every loaded data source. Each source contributes an adjustable offset (in metres) to the base DEM. The architecture is designed so that a neural network can later replace the per-layer scalers with learned weights.
 >
 > **Status**: Phase 1 complete — all contribution functions, UI controls, layer integration, and feature array storage implemented.
@@ -22,6 +24,16 @@ The **Composite DEM** layer is different:
 | Future | Static blend modes | Per-pixel neural network prediction |
 
 ### Core formula (current phase)
+
+```mermaid
+flowchart LR
+    BASE["base_dem"] --> ADD(("+"))
+    W["water Δ × w"] --> ADD
+    C["city Δ × w"] --> ADD
+    L["landcover Δ × w"] --> ADD
+    S["satellite Δ × w"] --> ADD
+    ADD --> OUT["composite_dem"]
+```
 
 ```
 composite_dem[x,y] = base_dem[x,y]

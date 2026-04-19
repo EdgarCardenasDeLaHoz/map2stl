@@ -1,15 +1,22 @@
 # Known Issues & Status — strm2stl
 
+_Last updated: 2026-04-19_
+
 ## Active Technical Debt
 
-### 1. app.js DOMContentLoaded Closure
-`renderDEMCanvas` and `window.loadDEM` stay in app.js because they write closure vars (`lastDemData`, `originalDemValues`) and call closure functions (`addCurvePoint`, `drawCurve`). Extracting requires either fully mirroring those vars to appState or restructuring the closure.
+### 1. `<script>` vs Module Boundary
+HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `addEventListener` in event-listeners.js). One intentional inline `onclick=` remains on the dev-only debug error overlay dismiss button. Converting app.js itself to a full ES module is not planned — keep public functions on `window.*`.
 
-### 2. ~20 Closure-Only State Vars Not on appState
-`boundingBox`, `drawnItems`, `coordinatesData`, `stackedLayerData`, `compareData`, etc. Not yet needed by any module so not mirrored. If a new module needs them, mirror via `window.appState` first.
+## Resolved Technical Debt
 
-### 3. `<script>` vs Module Boundary
-HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `addEventListener` in event-listeners.js). One intentional inline `onclick=` remains on the dev-only debug error overlay dismiss button. The last non-intentional inline handler (`onclick="goToEdit()"` in regions.js divIcon) was replaced with a Leaflet `.on('click')` listener. Converting app.js itself to a full ES module is not planned — keep public functions on `window.*`.
+### ~~app.js DOMContentLoaded Closure~~ ✅
+`renderDEMCanvas` and `window.loadDEM` were extracted to `dem-main.js`. Closure vars (`lastDemData`, `originalDemValues`) moved to `window.appState`.
+
+### ~~Closure-Only State Vars Not on appState~~ ✅
+All ~20 closure-only vars (`boundingBox`, `drawnItems`, `coordinatesData`, `map`, `globeScene`, `sidebarState`, `waterOpacity`, `layerBboxes`, `layerStatus`, etc.) migrated to `window.appState`. Legacy `window.get*/set*` aliases kept for backward compat. Modules can now subscribe to changes via `window.appState.on('key', fn)`.
+
+### ~~Inline onclick/onchange handlers~~ ✅
+All non-intentional inline handlers removed. Last remaining: dev-only debug overlay dismiss button (intentional).
 
 ## Feature Status
 
@@ -20,7 +27,7 @@ HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `a
 | P3 | Contour lines in STL | ✅ Done |
 | P4 | Base label engraving | ✅ Done |
 | P5 | STL mesh repair (trimesh) | ✅ Done |
-| P6 | Elevation band export (multi-material STL) | ⏳ Pending |
+| P6 | Elevation band export (multi-material STL) | ❌ Denied (see [proposals.md](proposals.md) F-P6) |
 | P7 | Cross-section OBJ export | ✅ Done |
 | P8 | Flat water surface cap | ✅ Done |
 | P9 | Region label editor | ✅ Done |
@@ -28,15 +35,29 @@ HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `a
 | P11 | Region thumbnails | ✅ Done |
 | P12 | Map quick-preview tooltips | ✅ Done |
 
-## Open Tasks (see TODO.md)
+## Open Tasks
+
+For the full proposal list and accept/deny workflow, see [proposals.md](proposals.md).
 
 | ID | Task | Status |
 |----|------|--------|
-| P6 | Elevation band export (multi-material STL) | ⏳ Pending |
 | EXP-1 | Export progress indicator | ⏳ Pending |
-| PERF6B Part B | City worker OffscreenCanvas | ⏳ Pending |
 | CLEAN-1 | Replace remaining inline styles with CSS classes | ⏳ Pending |
 | UX-M | Lazy-allocate hidden layer canvases | ⏳ Pending |
+
+## Library Integration Debt
+
+`app/server/core/` should be a thin wrapper over `geo2stl` and `numpy2stl`.
+Several modules reimplement library functions or bypass the `core/` layer.
+See [libraries.md](libraries.md) for the full import map and [proposals.md](proposals.md#library-integration-debt) for the B-LIB proposal items.
+
+| ID | Summary | Severity |
+|----|---------|----------|
+| B-LIB1 | `cities_3d._terrain_mesh` reimplements `numpy2stl.array_to_mesh` (~90 lines) | High |
+| B-LIB2 | `cities_3d._extrude_ring`/`_ear_clip` reimplements `numpy2stl.polygon` functions | High |
+| B-LIB3 | `dem.py` uses legacy `proj_map_geo_to_2D` instead of `core/projection` | Medium |
+| B-LIB4 | `sat.py` manually computes tile scale instead of using `geo2stl` helper | Medium |
+| B-LIB5 | `terrain.py` router imports `make_dem_image` bypassing `core/dem` | Small |
 
 ## Completed Refactoring Milestones
 
@@ -56,9 +77,10 @@ HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `a
 - Backend DEAD-2/4 ✅ — removed unused dim param and local import math from terrain.py
 - Frontend CLEAN-1–5 ✅ — regions.js: inline onclick, haversineDiagKm bug, AUTO_SCALE constants, globe marker colors, selectCoordinate JSDoc
 - Frontend DEM-CLEAN-1–3 ✅ — dem-main.js: extracted _applyDemResult, moved progress bar/cancel/sat-unavailable inline styles to CSS
+- CLOSURE-MIGRATE ✅ — All ~20 closure-only vars migrated to window.appState; legacy get*/set* aliases kept; no closure vars remain in app.js
 - ARCH5 ✅ — Vitest 4.x installed; 58 JS unit tests across 5 test files (interpolateCurve, mapElevationToColor, detectContinent, haversineDiagKm, nicePixelInterval, niceGeoInterval); helpers in tests/js/helpers/; config in vite.config.js test block
 
-Full history: `docs/functionality_doc.md`
+Full history: `docs/archive/functionality_doc.md`
 
 ## Completed Python / Session Milestones
 

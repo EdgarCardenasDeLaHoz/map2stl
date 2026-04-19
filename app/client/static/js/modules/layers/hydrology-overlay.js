@@ -41,27 +41,27 @@ function renderHydrology(data) {
     if (!values || !dims) return;
 
     const [h, w] = dims;
-    canvas.width  = w;
+    canvas.width = w;
     canvas.height = h;
 
-    const ctx   = canvas.getContext('2d');
-    const img   = ctx.createImageData(w, h);
-    const px    = img.data;
-    const minD  = data.depression_m || -5.0;   // most-negative value → full opacity
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(w, h);
+    const px = img.data;
+    const minD = data.depression_m || -5.0;   // most-negative value → full opacity
 
     for (let i = 0; i < values.length; i++) {
         const v = values[i];
         const base = i * 4;
         if (v === 0) {
             // Transparent — no river
-            px[base]     = 0;
+            px[base] = 0;
             px[base + 1] = 0;
             px[base + 2] = 0;
             px[base + 3] = 0;
         } else {
             // Blue tint; opacity scales with depth
-            const t   = Math.min(1, Math.max(0, v / minD));   // 0 (shallow) → 1 (deep)
-            px[base]     = 30;
+            const t = Math.min(1, Math.max(0, v / minD));   // 0 (shallow) → 1 (deep)
+            px[base] = 30;
             px[base + 1] = 100;
             px[base + 2] = 200;
             px[base + 3] = Math.round(60 + t * 160);           // 60–220 alpha
@@ -88,7 +88,7 @@ window.loadHydrology = async function loadHydrology() {
     _hydroAbortController = new AbortController();
     const signal = _hydroAbortController.signal;
 
-    const boundingBox    = window.getBoundingBox?.();
+    const boundingBox = window.getBoundingBox?.();
     const selectedRegion = window.appState?.selectedRegion;
 
     const coords = window.getBboxCoords(boundingBox, selectedRegion);
@@ -98,17 +98,17 @@ window.loadHydrology = async function loadHydrology() {
     }
     const { north, south, east, west } = coords;
 
-    const source      = document.getElementById('hydroSource')?.value      ?? 'hydrorivers';
-    const dim         = parseInt(document.getElementById('hydroDim')?.value ?? '300');
+    const source = document.getElementById('hydroSource')?.value ?? 'hydrorivers';
+    const dim = parseInt(document.getElementById('hydroDim')?.value ?? '300');
     const depressionM = parseFloat(document.getElementById('hydroDepressionM')?.value ?? '-5.0');
-    const minOrder    = parseInt(document.getElementById('hydroMinOrder')?.value     ?? '3');
-    const orderExp    = parseFloat(document.getElementById('hydroOrderExponent')?.value ?? '1.5');
+    const minOrder = parseInt(document.getElementById('hydroMinOrder')?.value ?? '3');
+    const orderExp = parseFloat(document.getElementById('hydroOrderExponent')?.value ?? '1.5');
 
     window.setLayerStatus?.('hydrology', 'loading');
 
     const paramObj = { north, south, east, west, dim, depression_m: depressionM, source };
     if (source === 'hydrorivers') {
-        paramObj.min_order      = minOrder;
+        paramObj.min_order = minOrder;
         paramObj.order_exponent = orderExp;
     }
     const projection = document.getElementById('paramProjection')?.value || 'none';

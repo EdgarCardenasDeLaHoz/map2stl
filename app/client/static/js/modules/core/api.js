@@ -162,8 +162,8 @@ window.api = (() => {
     // -------------------------------------------------------------------------
     const settings = {
         projections: () => _fetch('/api/settings/projections'),
-        colormaps:   () => _fetch('/api/settings/colormaps'),
-        datasets:    () => _fetch('/api/settings/datasets'),
+        colormaps: () => _fetch('/api/settings/colormaps'),
+        datasets: () => _fetch('/api/settings/datasets'),
     };
 
     // -------------------------------------------------------------------------

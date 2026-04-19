@@ -44,16 +44,16 @@
  */
 const AUTO_SCALE = {
     satScale: [
-        { maxKm: 10,       scale: 10   },
-        { maxKm: 30,       scale: 30   },
-        { maxKm: 100,      scale: 100  },
-        { maxKm: 500,      scale: 500  },
+        { maxKm: 10, scale: 10 },
+        { maxKm: 30, scale: 30 },
+        { maxKm: 100, scale: 100 },
+        { maxKm: 500, scale: 500 },
         { maxKm: Infinity, scale: 1000 },
     ],
     dim: [
-        { maxKm: 10,       dim: 600 },
-        { maxKm: 50,       dim: 500 },
-        { maxKm: 200,      dim: 300 },
+        { maxKm: 10, dim: 600 },
+        { maxKm: 50, dim: 500 },
+        { maxKm: 200, dim: 300 },
         { maxKm: Infinity, dim: 200 },
     ],
 };
@@ -86,7 +86,7 @@ async function loadCoordinates() {
 
         const coordinatesData = window.getCoordinatesData?.() || [];
 
-        const preloadedLayer   = window.getPreloadedLayer?.();
+        const preloadedLayer = window.getPreloadedLayer?.();
         const editMarkersLayer = window.getEditMarkersLayer?.();
 
         // Draw rectangles on map - sorted by size (largest first) so smaller ones are clickable
@@ -142,14 +142,14 @@ async function loadCoordinates() {
                 if (editMarkersLayer) editMarkersLayer.addLayer(editMarker);
 
                 // Hover: show tooltip + reveal Edit button
-                rect.on('mouseover', function(e) {
+                rect.on('mouseover', function (e) {
                     const label = region.label || region.name;
                     rect.unbindTooltip();
                     rect.bindTooltip(label, { sticky: false, direction: 'top', offset: [0, -4] });
                     rect.openTooltip(e.latlng);
                     editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.add('visible');
                 });
-                rect.on('mouseout', function() {
+                rect.on('mouseout', function () {
                     // Delay hiding so the user can move to the edit button
                     setTimeout(() => {
                         const icon = editMarker.getElement()?.querySelector('.bbox-edit-icon');
@@ -157,10 +157,10 @@ async function loadCoordinates() {
                     }, 300);
                 });
                 // Keep edit button visible while hovering it directly
-                editMarker.on('mouseover', function() {
+                editMarker.on('mouseover', function () {
                     editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.add('visible');
                 });
-                editMarker.on('mouseout', function() {
+                editMarker.on('mouseout', function () {
                     editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.remove('visible');
                 });
 
@@ -290,19 +290,19 @@ async function selectCoordinate(index) {
         const _setEl = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
         const _setChk = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.checked = Boolean(v); };
         _setEl('paramDim', rp.dim || 100);
-        _setEl('paramDepthScale',  rp.depth_scale    ?? 0.5);
-        _setEl('paramWaterScale',  rp.water_scale    ?? 0.05);
+        _setEl('paramDepthScale', rp.depth_scale ?? 0.5);
+        _setEl('paramWaterScale', rp.water_scale ?? 0.05);
         _setChk('paramSubtractWater', rp.subtract_water !== false);
-        _setEl('waterResolution',  rp.sat_scale      ?? 500);
-        _setEl('exportModelHeight', rp.height         ?? 10);
-        _setEl('exportBaseHeight',  rp.base           ?? 2);
+        _setEl('waterResolution', rp.sat_scale ?? 500);
+        _setEl('exportModelHeight', rp.height ?? 10);
+        _setEl('exportBaseHeight', rp.base ?? 2);
         if (window.appState?.demParams) {
-            window.appState.demParams.depthScale    = rp.depth_scale    ?? 0.5;
-            window.appState.demParams.waterScale    = rp.water_scale    ?? 0.05;
+            window.appState.demParams.depthScale = rp.depth_scale ?? 0.5;
+            window.appState.demParams.waterScale = rp.water_scale ?? 0.05;
             window.appState.demParams.subtractWater = rp.subtract_water !== false;
-            window.appState.demParams.satScale      = rp.sat_scale      ?? 500;
-            window.appState.demParams.height        = rp.height         ?? 10;
-            window.appState.demParams.base          = rp.base           ?? 2;
+            window.appState.demParams.satScale = rp.sat_scale ?? 500;
+            window.appState.demParams.height = rp.height ?? 10;
+            window.appState.demParams.base = rp.base ?? 2;
         }
     }
 
@@ -374,7 +374,7 @@ async function selectCoordinate(index) {
     if (map) {
         const bounds = [[selectedRegion.south, selectedRegion.west],
         [selectedRegion.north, selectedRegion.east]];
-        try { map.fitBounds(bounds, { padding: [20, 20] }); } catch(e) {}
+        try { map.fitBounds(bounds, { padding: [20, 20] }); } catch (e) { }
     }
 
     // NOTE: Do NOT auto-load layers here. selectCoordinate() only updates selection
@@ -426,9 +426,9 @@ async function goToEdit(index) {
         const toggleBtn = document.getElementById('sidebarToggleBtn');
         sidebar?.classList.remove('collapsed', 'expanded');
         openBtn?.classList.add('hidden');
-        const icon  = toggleBtn?.querySelector('.state-icon');
+        const icon = toggleBtn?.querySelector('.state-icon');
         const label = toggleBtn?.querySelector('.state-label');
-        if (icon)  icon.textContent  = '⇔';
+        if (icon) icon.textContent = '⇔';
         if (label) label.textContent = 'Expand';
         window.setSidebarState?.('normal');
     }

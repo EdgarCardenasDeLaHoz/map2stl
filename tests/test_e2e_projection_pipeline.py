@@ -26,7 +26,8 @@ import pytest
 
 _BBOX_QS = "north=40.0&south=39.9&east=-75.1&west=-75.2"
 _BBOX = (40.0, 39.9, -75.1, -75.2)  # north, south, east, west
-_VALID_PROJECTIONS = ["cosine", "mercator", "equidistant", "lambert", "sinusoidal"]
+_VALID_PROJECTIONS = ["cosine", "mercator",
+                      "equidistant", "lambert", "sinusoidal"]
 
 
 # ===================================================================
@@ -72,7 +73,8 @@ class TestCoreProjectionModule:
                               categorical=True)
         valid = result[~np.isnan(result)]
         unique = set(valid.astype(int))
-        assert unique <= {0, *classes}, f"Unexpected values: {unique - {0, *classes}}"
+        assert unique <= {
+            0, *classes}, f"Unexpected values: {unique - {0, *classes}}"
 
     @pytest.mark.parametrize("projection", _VALID_PROJECTIONS)
     def test_project_water_arrays_alignment(self, projection):
@@ -80,9 +82,10 @@ class TestCoreProjectionModule:
         from app.server.core.projection import project_water_arrays
         h, w = 80, 100
         water = np.random.choice([0.0, 1.0], size=(h, w)).astype(np.float32)
-        esa = np.random.choice([10, 20, 30, 50, 80], size=(h, w)).astype(np.float32)
+        esa = np.random.choice([10, 20, 30, 50, 80],
+                               size=(h, w)).astype(np.float32)
         wm, ep = project_water_arrays(water, esa, *_BBOX, projection,
-                                       clip_nans=True)
+                                      clip_nans=True)
         assert wm.shape == ep.shape, (
             f"{projection}: water {wm.shape} != esa {ep.shape}")
 
@@ -94,7 +97,7 @@ class TestCoreProjectionModule:
         water = np.random.choice([0.0, 1.0], size=(h, w)).astype(np.float32)
         esa = np.zeros((h, w), dtype=np.float32)
         wm, _ = project_water_arrays(water, esa, *_BBOX, projection,
-                                      clip_nans=False)
+                                     clip_nans=False)
         unique = set(np.unique(wm))
         assert unique <= {0.0, 1.0}, f"Water mask not binary: {unique}"
 
@@ -360,14 +363,16 @@ class TestCrossLayerAlignment:
         """DEM and hydrology with same dim should have matching dimensions."""
         r_dem = client.get(f"/api/terrain/dem?{_BBOX_QS}&dim=40")
         r_hyd = client.get(f"/api/terrain/hydrology?{_BBOX_QS}&dim=40")
-        assert r_dem.json()["dimensions"] == r_hyd.json()["river_grid_dimensions"]
+        assert r_dem.json()["dimensions"] == r_hyd.json()[
+            "river_grid_dimensions"]
 
     def test_dem_and_hydrology_same_dims_with_projection(self, client):
         """DEM and hydrology with same dim + projection should match."""
         qs = f"{_BBOX_QS}&dim=40&projection=cosine&clip_nans=true"
         r_dem = client.get(f"/api/terrain/dem?{qs}")
         r_hyd = client.get(f"/api/terrain/hydrology?{qs}")
-        assert r_dem.json()["dimensions"] == r_hyd.json()["river_grid_dimensions"]
+        assert r_dem.json()["dimensions"] == r_hyd.json()[
+            "river_grid_dimensions"]
 
     def test_dem_b64_decodable_to_correct_shape(self, client):
         """DEM b64 decodes to dimensions[0] * dimensions[1] float32 values."""
@@ -527,7 +532,8 @@ class TestResponseFormatConsistency:
         data = r.json()
         # Currently uses "values" (tolist) — not "values_b64"
         assert "values" in data, "Expected 'values' key (tolist format)"
-        assert isinstance(data["values"], list), "values should be a list (tolist)"
+        assert isinstance(
+            data["values"], list), "values should be a list (tolist)"
 
     def test_satellite_response_has_image_and_bbox(self, client):
         r = client.get(f"/api/terrain/satellite?{_BBOX_QS}&dim=10")

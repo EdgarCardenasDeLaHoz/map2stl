@@ -70,12 +70,15 @@ class TestTerrainDemValidation:
         assert r.status_code == 400
 
     def test_north_less_than_south_returns_400(self, client):
-        r = client.get("/api/terrain/dem?north=39.0&south=40.0&east=-75.1&west=-75.2&dim=10")
+        r = client.get(
+            "/api/terrain/dem?north=39.0&south=40.0&east=-75.1&west=-75.2&dim=10")
         assert r.status_code == 400
-        assert "north" in r.json()["error"].lower() or "south" in r.json()["error"].lower()
+        assert "north" in r.json()["error"].lower(
+        ) or "south" in r.json()["error"].lower()
 
     def test_east_less_than_west_returns_400(self, client):
-        r = client.get("/api/terrain/dem?north=40.0&south=39.9&east=-76.0&west=-75.0&dim=10")
+        r = client.get(
+            "/api/terrain/dem?north=40.0&south=39.9&east=-76.0&west=-75.0&dim=10")
         assert r.status_code == 400
 
     def test_dim_too_large_returns_400(self, client):

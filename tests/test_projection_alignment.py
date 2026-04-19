@@ -57,7 +57,8 @@ class TestProjectionDimensionConsistency:
         when clip_nans=True and same input shape."""
         h, w = 100, 120
         dem = np.linspace(0, 500, h * w, dtype=np.float32).reshape(h, w)
-        esa = np.random.choice([10, 20, 30, 50, 80], size=(h, w)).astype(np.float32)
+        esa = np.random.choice([10, 20, 30, 50, 80],
+                               size=(h, w)).astype(np.float32)
 
         dem_proj = _project_grid(dem, projection, clip_nans=True)
         esa_proj = _project_grid(esa, projection, categorical=True)
@@ -75,7 +76,8 @@ class TestProjectionDimensionConsistency:
         from strm2stl.app.server.routers.terrain import _project_water_arrays
         h, w = 100, 120
         water = np.random.choice([0.0, 1.0], size=(h, w)).astype(np.float32)
-        esa = np.random.choice([10, 20, 30, 50, 80], size=(h, w)).astype(np.float32)
+        esa = np.random.choice([10, 20, 30, 50, 80],
+                               size=(h, w)).astype(np.float32)
 
         wm_out, esa_out = _project_water_arrays(
             water, esa, *_BBOX, projection, clip_nans=True)
@@ -107,7 +109,8 @@ class TestB64RoundTrip:
 
         data = {
             "vals_b64": b64_str,
-            "vals": [10.0, 20.0, 30.0, 40.0],  # wrong values (should be ignored)
+            # wrong values (should be ignored)
+            "vals": [10.0, 20.0, 30.0, 40.0],
         }
         s = TerrainSession.__new__(TerrainSession)
         result = s._decode_grid_response(data, "vals_b64", "vals", 2, 2)

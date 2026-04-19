@@ -1,6 +1,6 @@
 # 3D Maps — Web Application Reference
 
-_Last updated: 2026-04-09_
+_Last updated: 2026-04-19_
 
 For first-pass repository orientation, do not start here.
 
@@ -12,7 +12,9 @@ Use these documents first:
 
 Return to this document when you need a deeper reference for the browser application specifically.
 
-This document is the single reference for the state of the FastAPI web application, covering architecture, implemented features, known gaps, and developer notes.
+> **Detailed feature inventory and session changelog:** see [`functionality_doc.md`](functionality_doc.md).
+
+This document is the single reference for the current state of the FastAPI web application, covering architecture, implemented features, known gaps, and developer notes.
 
 ---
 
@@ -22,7 +24,7 @@ This document is the single reference for the state of the FastAPI web applicati
 |-------|----------|-------|
 | HTTP server | `server.py` | FastAPI entry point, port 9000 |
 | Routers | `app/routers/` | 7 router modules (cache, cities, composite, export, regions, settings, terrain) |
-| Business logic | `app/core/` | cache.py, db.py, dem.py, export.py, osm.py, cities_3d.py |
+| Business logic | `app/core/` | cache.py, db.py, dem.py, export.py, osm.py, cities_3d.py, height/ |
 | Config / schemas | `config.py`, `schemas.py` | Pydantic models, path constants |
 | HTML shell | `templates/index.html` | ~1 448 lines |
 | CSS | `static/css/app.css` | ~3 180 lines |
@@ -148,7 +150,7 @@ Cache directories are `.gitignore`d. Delete them freely — they regenerate on n
 python -m pytest tests/ -v
 ```
 
-108 tests across 7 files. The pre-commit hook runs them automatically — all must pass before a commit is accepted.
+108+ tests across multiple files. The pre-commit hook runs them automatically — all must pass before a commit is accepted.
 
 ---
 

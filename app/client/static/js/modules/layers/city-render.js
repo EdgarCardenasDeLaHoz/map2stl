@@ -68,12 +68,12 @@ function _serialiseLayer(geojson, propKey) {
         const px = feat._px;
         if (!px?.buf) continue;
         features.push({
-            buf:          px.buf,         // Float32Array — transferred, not copied
-            counts:       px.counts,      // Uint16Array  — transferred
+            buf: px.buf,         // Float32Array — transferred, not copied
+            counts: px.counts,      // Uint16Array  — transferred
             x0: px.x0, y0: px.y0,
             x1: px.x1, y1: px.y1,
-            type:         feat.geometry?.type || '',
-            [propKey]:    feat.properties?.[propKey] || 0,
+            type: feat.geometry?.type || '',
+            [propKey]: feat.properties?.[propKey] || 0,
         });
     }
     return features.length ? { features } : null;
@@ -89,7 +89,7 @@ function _collectTransferables(layers) {
     for (const layer of Object.values(layers)) {
         if (!layer) continue;
         for (const feat of layer.features) {
-            if (feat.buf?.buffer)    list.push(feat.buf.buffer);
+            if (feat.buf?.buffer) list.push(feat.buf.buffer);
             if (feat.counts?.buffer) list.push(feat.counts.buffer);
         }
     }
@@ -113,7 +113,7 @@ function _collectTransferables(layers) {
  */
 function _renderRasterCanvas(values, width, height, colormap, vmin, vmax) {
     const canvas = document.createElement('canvas');
-    canvas.width  = width;
+    canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
     const img = ctx.createImageData(width, height);
@@ -132,7 +132,7 @@ function _renderRasterCanvas(values, width, height, colormap, vmin, vmax) {
             data[idx] = data[idx + 1] = data[idx + 2] = data[idx + 3] = 0;
         } else {
             const t = Math.max(0, Math.min(1023, ((v - vmin) * invRange * 1023) | 0));
-            data[idx]     = lut[t * 3];
+            data[idx] = lut[t * 3];
             data[idx + 1] = lut[t * 3 + 1];
             data[idx + 2] = lut[t * 3 + 2];
             data[idx + 3] = 255;
@@ -147,12 +147,12 @@ function _renderRasterCanvas(values, width, height, colormap, vmin, vmax) {
 // Debounce tokens — only used by render functions defined in this file.
 // ---------------------------------------------------------------------------
 let _stackRafId = null;
-let _demRafId   = null;
+let _demRafId = null;
 
 /** Cancel any in-flight RAF renders.  Called by city-overlay.js clearCityOverlay(). */
 window._cancelCityRenders = function () {
     if (_stackRafId) { cancelAnimationFrame(_stackRafId); _stackRafId = null; }
-    if (_demRafId)   { cancelAnimationFrame(_demRafId);   _demRafId   = null; }
+    if (_demRafId) { cancelAnimationFrame(_demRafId); _demRafId = null; }
     // Bump generation so any in-flight worker reply is discarded
     _cityWorkerGen++;
 };
@@ -203,12 +203,12 @@ function _doRenderCityOverlay() {
 
     // Size the overlay to match the stack's full pixel dimensions
     const stackRect = stack.getBoundingClientRect();
-    const W = Math.round(stackRect.width)  || 600;
+    const W = Math.round(stackRect.width) || 600;
     const H = Math.round(stackRect.height) || 400;
 
     // Letterbox target rect matching updateStackedLayers
-    const latMid     = (north + south) / 2;
-    const latCos     = Math.cos(latMid * Math.PI / 180);
+    const latMid = (north + south) / 2;
+    const latCos = Math.cos(latMid * Math.PI / 180);
     const bboxAspect = ((east - west) * latCos) / latRange;
     const stackAspect = W / H;
     let tX = 0, tY = 0, tW = W, tH = H;
@@ -219,13 +219,13 @@ function _doRenderCityOverlay() {
     }
 
     const stackZoom = window.appState?.stackZoom || { scale: 1, offsetX: 0, offsetY: 0 };
-    const invZ      = 1 / (stackZoom.scale || 1);
-    const bboxLonM  = (east - west) * latCos * window.GEO_M_PER_DEG_LON;
-    const bboxKey   = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
+    const invZ = 1 / (stackZoom.scale || 1);
+    const bboxLonM = (east - west) * latCos * window.GEO_M_PER_DEG_LON;
+    const bboxKey = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
     // PERF2: invZ excluded from cache key — CSS transform covers intermediate zoom frames
-    const cacheKey  = window._makeCacheKey(window._cityRenderState.cityDataVersion, W, H, bboxKey);
+    const cacheKey = window._makeCacheKey(window._cityRenderState.cityDataVersion, W, H, bboxKey);
 
-    overlay.width  = W;
+    overlay.width = W;
     overlay.height = H;
     const ctx = overlay.getContext('2d');
 
@@ -236,9 +236,9 @@ function _doRenderCityOverlay() {
     }
 
     // Common setup used by all render paths
-    const geoToPx  = window._buildGeoToPx(north, south, east, west, tX, tY, tW, tH);
+    const geoToPx = window._buildGeoToPx(north, south, east, west, tX, tY, tW, tH);
     const clipRect = { x0: tX, y0: tY, x1: tX + tW, y1: tY + tH };
-    const bakKey   = `stack|${W}|${H}|${bboxKey}|${document.getElementById('paramProjection')?.value || 'none'}`;
+    const bakKey = `stack|${W}|${H}|${bboxKey}|${document.getElementById('paramProjection')?.value || 'none'}`;
 
     const rs = window._cityRenderState;
 
@@ -251,14 +251,14 @@ function _doRenderCityOverlay() {
     // Collect DOM style values now — worker cannot access the DOM
     const styles = {
         buildingsColor: document.getElementById('layerBuildingsColor')?.value || '#c8b89a',
-        roadsColor:     document.getElementById('layerRoadsColor')?.value     || '#cc8844',
+        roadsColor: document.getElementById('layerRoadsColor')?.value || '#cc8844',
         waterwaysColor: document.getElementById('layerWaterwaysColor')?.value || '#4488cc',
-        roadBaseWidth:  1.5, // canvas road display width (fixed default; road_depression_m controls 3D export)
+        roadBaseWidth: 1.5, // canvas road display width (fixed default; road_depression_m controls 3D export)
         bboxLonM,
     };
     const toggles = {
         buildings: !!document.getElementById(rs.LAYER_TOGGLES.buildings)?.checked,
-        roads:     !!document.getElementById(rs.LAYER_TOGGLES.roads)?.checked,
+        roads: !!document.getElementById(rs.LAYER_TOGGLES.roads)?.checked,
         waterways: !!document.getElementById(rs.LAYER_TOGGLES.waterways)?.checked,
     };
 
@@ -284,9 +284,9 @@ function _doRenderCityOverlay() {
             const gen = ++_cityWorkerGen;
             const layers = {
                 buildings: _serialiseLayer(osmCityData.buildings, 'height_m'),
-                roads:     _serialiseLayer(osmCityData.roads,     'road_width_m'),
+                roads: _serialiseLayer(osmCityData.roads, 'road_width_m'),
                 waterways: _serialiseLayer(osmCityData.waterways, 'height_m'),
-                walls:     _serialiseLayer(osmCityData.walls,     'height_m'),
+                walls: _serialiseLayer(osmCityData.walls, 'height_m'),
             };
             const transferables = _collectTransferables(layers);
 
@@ -344,7 +344,7 @@ function _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM
         window._drawCityCanvas(octx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, layer);
         octx.restore();
         rs.stackLayer[layer].canvas = offscreen;
-        rs.stackLayer[layer].key    = cacheKey;
+        rs.stackLayer[layer].key = cacheKey;
     }
     ctx.clearRect(0, 0, W, H);
     for (const layer of rs.LAYER_NAMES) {
@@ -391,23 +391,23 @@ function _doRenderCityOnDEM() {
         overlay.style.cssText = 'position:absolute;pointer-events:none;z-index:5;';
         demContainer.appendChild(overlay);
     }
-    overlay.width  = W;
+    overlay.width = W;
     overlay.height = H;
 
     // Position overlay to match the DEM canvas's actual CSS rect within #demImage
     // (#demImage uses flexbox centering, so the canvas may not start at top:0)
     const demCSSRect = demCanvas.getBoundingClientRect();
     const containerCSSRect = demContainer.getBoundingClientRect();
-    overlay.style.left   = (demCSSRect.left - containerCSSRect.left) + 'px';
-    overlay.style.top    = (demCSSRect.top  - containerCSSRect.top)  + 'px';
-    overlay.style.width  = demCSSRect.width  + 'px';
+    overlay.style.left = (demCSSRect.left - containerCSSRect.left) + 'px';
+    overlay.style.top = (demCSSRect.top - containerCSSRect.top) + 'px';
+    overlay.style.width = demCSSRect.width + 'px';
     overlay.style.height = demCSSRect.height + 'px';
 
     const { north, south, east, west } = bbox;
     const lonRange = east - west;
-    const latMid   = (north + south) / 2;
+    const latMid = (north + south) / 2;
     const bboxLonM = lonRange * Math.cos(latMid * Math.PI / 180) * window.GEO_M_PER_DEG_LON;
-    const bboxKey  = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
+    const bboxKey = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
     // PERF2: invZ (=1 for DEM view) excluded for consistency; cacheKey only needs data+layout
     const cacheKey = window._makeCacheKey(window._cityRenderState.cityDataVersion, W, H, bboxKey);
 
@@ -420,7 +420,7 @@ function _doRenderCityOnDEM() {
         catch (_) { window._cityRenderState.offscreenOk = false; }
     }
 
-    const geoToPx  = window._buildGeoToPx(north, south, east, west, 0, 0, W, H);
+    const geoToPx = window._buildGeoToPx(north, south, east, west, 0, 0, W, H);
     const clipRect = { x0: 0, y0: 0, x1: W, y1: H };
 
     // PERF4: pre-bake pixel coords (DEM view has different geoToPx than stack view)
@@ -439,7 +439,7 @@ function _doRenderCityOnDEM() {
             const octx = offscreen.getContext('2d');
             window._drawCityCanvas(octx, geoToPx, 1, osmCityData, W, W, bboxLonM, clipRect, layer);
             rs.demLayer[layer].canvas = offscreen;
-            rs.demLayer[layer].key    = cacheKey;
+            rs.demLayer[layer].key = cacheKey;
         }
         ctx.clearRect(0, 0, W, H);
         for (const layer of rs.LAYER_NAMES) {
@@ -458,7 +458,7 @@ function _doRenderCityOnDEM() {
 // ---------------------------------------------------------------------------
 
 /** Called by app.js clearLayerCache() when the region changes. */
-window._clearCityRasterCache = function() { _lastCityRasterData = null; };
+window._clearCityRasterCache = function () { _lastCityRasterData = null; };
 
 /**
  * Show or hide the "Load Cities" button based on region diagonal (max 10 km).
@@ -470,11 +470,11 @@ window._updateCitiesLoadButton = function _updateCitiesLoadButton(region) {
     if (!loadBtn || !region) return;
     const haversineDiagKm = window.appState?.haversineDiagKm;
     if (!haversineDiagKm) return;
-    const diagKm   = haversineDiagKm(region.north, region.south, region.east, region.west);
+    const diagKm = haversineDiagKm(region.north, region.south, region.east, region.west);
     const available = diagKm <= 10;
-    loadBtn.disabled     = !available;
+    loadBtn.disabled = !available;
     loadBtn.style.opacity = available ? '' : '0.4';
-    loadBtn.style.cursor  = available ? '' : 'not-allowed';
+    loadBtn.style.cursor = available ? '' : 'not-allowed';
     loadBtn.title = available
         ? `Fetch OSM data for this region (${diagKm.toFixed(1)} km)`
         : `Region too large (${diagKm.toFixed(1)} km — max 10 km)`;
@@ -491,27 +491,27 @@ window._updateCitiesLoadButton = function _updateCitiesLoadButton(region) {
  */
 window.loadCityRaster = async function loadCityRaster() {
     const cityData = window.appState?.osmCityData;
-    const bbox     = window.appState?.currentDemBbox || window.appState?.selectedRegion;
+    const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion;
     if (!cityData || !bbox) return;
 
-    const dim           = parseInt(document.getElementById('paramDim')?.value) || 200;
+    const dim = parseInt(document.getElementById('paramDim')?.value) || 200;
     const buildingScale = parseFloat(document.getElementById('cityBuildingScale')?.value) || 1.0;
-    const waterOffset   = parseFloat(document.getElementById('cityWaterOffset')?.value) ?? -2.0;
+    const waterOffset = parseFloat(document.getElementById('cityWaterOffset')?.value) ?? -2.0;
 
     window.setLayerStatus('cityRaster', 'loading');
     try {
         const { data, error: rasterErr } = await window.api.cities.raster({
             north: bbox.north, south: bbox.south,
-            east:  bbox.east,  west:  bbox.west,
+            east: bbox.east, west: bbox.west,
             dim,
-            buildings:  cityData.buildings  || { type: 'FeatureCollection', features: [] },
-            roads:      cityData.roads       || { type: 'FeatureCollection', features: [] },
-            waterways:  cityData.waterways   || { type: 'FeatureCollection', features: [] },
-            building_scale:     buildingScale,
-            road_depression_m:  0,
+            buildings: cityData.buildings || { type: 'FeatureCollection', features: [] },
+            roads: cityData.roads || { type: 'FeatureCollection', features: [] },
+            waterways: cityData.waterways || { type: 'FeatureCollection', features: [] },
+            building_scale: buildingScale,
+            road_depression_m: 0,
             water_depression_m: waterOffset,
             projection: document.getElementById('paramProjection')?.value || 'none',
-            clip_nans:  document.getElementById('paramClipNans')?.checked ?? true,
+            clip_nans: document.getElementById('paramClipNans')?.checked ?? true,
         });
         if (rasterErr) throw new Error(rasterErr);
         _lastCityRasterData = data;
@@ -549,10 +549,10 @@ window._reprojectCityRaster = function _reprojectCityRaster() {
 
 /** Wire the City Heights visibility toggle and opacity slider. */
 window._setupCityRasterLayer = function _setupCityRasterLayer() {
-    const toggle  = document.getElementById('layerCityRasterVisible');
+    const toggle = document.getElementById('layerCityRasterVisible');
     const opacity = document.getElementById('layerCityRasterOpacity');
-    const label   = document.getElementById('layerCityRasterOpacityLabel');
-    const canvas  = document.getElementById('layerCityRasterCanvas');
+    const label = document.getElementById('layerCityRasterOpacityLabel');
+    const canvas = document.getElementById('layerCityRasterCanvas');
     if (!toggle || !canvas) return;
 
     toggle.addEventListener('change', () => {
@@ -567,7 +567,7 @@ window._setupCityRasterLayer = function _setupCityRasterLayer() {
 
     if (opacity && label) {
         opacity.addEventListener('input', () => {
-            label.textContent  = opacity.value + '%';
+            label.textContent = opacity.value + '%';
             canvas.style.opacity = opacity.value / 100;
         });
     }
@@ -578,7 +578,7 @@ window._setupCityRasterLayer = function _setupCityRasterLayer() {
             if (badge) {
                 if (data) {
                     const nb = data.buildings?.features?.length || 0;
-                    const nr = data.roads?.features?.length     || 0;
+                    const nr = data.roads?.features?.length || 0;
                     badge.textContent = `${nb} buildings · ${nr} roads`;
                     badge.style.color = '#4a9';
                 } else {

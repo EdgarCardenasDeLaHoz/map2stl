@@ -50,8 +50,10 @@ async def _clear_cache():
                     deleted += 1
                 except Exception:
                     pass
-            cleared.append({"path": str(cache_dir), "files_deleted": deleted, "total_files": len(cache_files)})
-            logger.info(f"Cleared cache: {cache_dir} ({deleted}/{len(cache_files)} files)")
+            cleared.append({"path": str(
+                cache_dir), "files_deleted": deleted, "total_files": len(cache_files)})
+            logger.info(
+                f"Cleared cache: {cache_dir} ({deleted}/{len(cache_files)} files)")
     _last_cache_clear = time.time()
     return JSONResponse(content={"status": "success", "cleared": cleared})
 
@@ -66,7 +68,8 @@ async def _get_cache_status():
             dir_size = sum(f.stat().st_size for f in cache_files if f.exists())
             total_files += len(cache_files)
             total_size += dir_size
-            recent = sorted(cache_files, key=lambda f: f.stat().st_mtime, reverse=True)[:5]
+            recent = sorted(
+                cache_files, key=lambda f: f.stat().st_mtime, reverse=True)[:5]
             recent_info = [
                 {"name": f.name, "size_kb": round(f.stat().st_size / 1024, 1),
                  "age_minutes": round((time.time() - f.stat().st_mtime) / 60, 1)}
@@ -117,7 +120,8 @@ async def clear_region_cache(request: Request):
         west = float(params["west"])
     except (KeyError, ValueError):
         return JSONResponse(
-            content={"error": "Missing or invalid bbox parameters (north, south, east, west)"},
+            content={
+                "error": "Missing or invalid bbox parameters (north, south, east, west)"},
             status_code=400)
 
     results = clear_bbox_cache(north, south, east, west)

@@ -1,6 +1,8 @@
 # Bounding Box Editing — Improvement Options
 
-Audited 2026-03-15. Four options identified for improving the Edit view bbox experience.
+_Last updated: 2026-03-15_
+
+Four options identified for improving the Edit view bbox experience.
 
 **Option A — Inline mini-map (IMPLEMENTED)**
 Embed a small Leaflet map directly below the bbox coordinate inputs. The current region's

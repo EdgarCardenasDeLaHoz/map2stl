@@ -1,5 +1,7 @@
 # Task Routing — strm2stl
 
+_Last updated: 2026-04-19_
+
 Use this document to choose the right files before editing.
 
 ## First Decision

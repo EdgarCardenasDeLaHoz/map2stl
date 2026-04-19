@@ -1,5 +1,9 @@
 # Per-Layer Resolution Implementation Plan
 
+_Last updated: 2026-04-19_
+
+> **Status:** ✅ Fully implemented. Kept for historical reference.
+
 ## Overview
 
 This plan covers splitting the water mask and ESA land cover fetch into two independent, separately-cached operations, each driven by its own resolution dropdown, so that water data can be fetched at fine resolution (e.g. 10m for rivers) while land cover remains at a coarser resolution (e.g. 200m), or vice versa. It also removes the `target_width/target_height` override that currently forces both outputs to match the DEM pixel count regardless of the chosen resolution.
@@ -38,7 +42,7 @@ Both layers are fetched at the same scale: the finest of the two dropdowns. Chan
 
 ---
 
-## 2. Current State Summary
+## 2. State Before Implementation
 
 ### Data flow (before this change)
 
@@ -55,7 +59,23 @@ User changes #waterResolution or #landCoverResolution
       → updateStackedLayers()    → ctx.drawImage scales both to letterbox rect
 ```
 
-### What is already correct (no changes needed)
+### Data flow (after implementation — current)
+
+```
+User changes #waterResolution
+  → loadWaterMask()
+      → GET /api/terrain/water-mask?sat_scale=X
+      → renderWaterMask(data) → canvas at native water_mask_dimensions
+
+User changes #esaResolution
+  → loadEsaLandCover()
+      → GET /api/terrain/esa-land-cover?esa_scale=X
+      → renderEsaLandCover(data) → canvas at native esa_dimensions
+
+Both → updateStackedLayers() → ctx.drawImage scales each to letterbox rect
+```
+
+### Design invariants preserved
 
 - `renderWaterMask` and `renderEsaLandCover` each read their own `_dimensions` field — they already support differently-sized inputs.
 - `updateStackedLayers` in `stacked-layers.js` uses `ctx.drawImage(source, 0,0,srcW,srcH, targetX,targetY,targetW,targetH)` — the destination rect is derived from the bbox aspect ratio, not the source pixel count. Canvases of any size are already scaled correctly.
@@ -65,15 +85,15 @@ User changes #waterResolution or #landCoverResolution
 
 ## 3. Chosen Approach: Split Endpoints
 
-Two separate backend endpoints, one per layer, each with its own `scale` parameter and own disk cache. The frontend splits `loadWaterMask()` into `loadWaterMask()` + `loadLandCover()`. Each has its own abort controller, cache, status field, and resolution dropdown listener.
+Two separate backend endpoints, one per layer, each with its own `scale` parameter and own disk cache. The frontend splits `loadWaterMask()` into `loadWaterMask()` + `loadEsaLandCover()`. Each has its own abort controller, cache, status field, and resolution dropdown listener.
 
-Step 1 (remove `target_width/target_height`) is a fast precondition fix that immediately makes the resolution dropdowns work and can be shipped alone.
+Step 1 (remove `target_width/target_height`) was a fast precondition fix that immediately made the resolution dropdowns work.
 
 ---
 
-## 4. Implementation Steps
+## 4. Implementation Steps (all complete)
 
-### Step 1 — Remove `target_width/target_height` from the water-mask fetch (precondition fix)
+### Step 1 — Remove `target_width/target_height` from the water-mask fetch (precondition fix) ✅
 
 **File:** `ui/static/js/modules/layers/water-mask.js`
 
@@ -97,7 +117,7 @@ Step 1 (remove `target_width/target_height`) is a fast precondition fix that imm
 
 ---
 
-### Step 2 — Fix `renderCombinedView` / `previewWaterSubtract` / `applyWaterSubtract` for mismatched dimensions
+### Step 2 — Fix `renderCombinedView` / `previewWaterSubtract` / `applyWaterSubtract` for mismatched dimensions ✅
 
 **File:** `ui/static/js/modules/layers/water-mask.js`
 
@@ -135,7 +155,7 @@ Also remove the dimension-mismatch guard at line ~296–300 that re-calls `loadW
 
 ---
 
-### Step 3 — Backend: New `/api/terrain/land-cover` endpoint
+### Step 3 — Backend: New `/api/terrain/esa-land-cover` endpoint ✅
 
 **File:** `ui/routers/terrain.py`
 
@@ -174,7 +194,7 @@ Extract a `fetch_esa_image(north, south, east, west, scale)` helper — a thin w
 
 ---
 
-### Step 4 — Frontend: Add `window.landCoverCache`
+### Step 4 — Frontend: Add `window.landCoverCache` ✅
 
 **File:** `ui/static/js/modules/core/cache.js`
 
@@ -190,7 +210,7 @@ Update `waterMaskCache.generateKey` to drop the stale `demWidth/demHeight` suffi
 
 ---
 
-### Step 5 — Frontend: Add `window.api.dem.landCover`
+### Step 5 — Frontend: Add `window.api.dem.esaLandCover` ✅
 
 **File:** `ui/static/js/modules/core/api.js`
 
@@ -202,7 +222,7 @@ landCover: (params, signal) => _fetch(`/api/terrain/land-cover?${params}`, signa
 
 ---
 
-### Step 6 — Frontend: Split `loadWaterMask()` / add `loadLandCover()`
+### Step 6 — Frontend: Split `loadWaterMask()` / add `loadEsaLandCover()` ✅
 
 **File:** `ui/static/js/modules/layers/water-mask.js`
 
@@ -242,7 +262,7 @@ window.loadLandCover = loadLandCover;
 
 ---
 
-### Step 7 — HTML: Add separate load button for land cover
+### Step 7 — HTML: Add separate load button for land cover ✅
 
 **File:** `ui/templates/index.html`
 
@@ -261,7 +281,7 @@ The existing `#loadWaterMaskBtn` (line ~871) continues to load water mask only. 
 
 ---
 
-### Step 8 — appState and state.md
+### Step 8 — appState and state.md ✅
 
 **File:** `ui/static/js/app.js`
 
@@ -281,7 +301,7 @@ Add new entry:
 
 ---
 
-### Step 9 — Per-layer pixel size label
+### Step 9 — Per-layer pixel size label ✅
 
 **File:** `ui/static/js/modules/layers/stacked-layers.js`, `setGridPixelMode` (line 27)
 
@@ -300,7 +320,7 @@ sizeLabel.textContent = parts.length ? parts.join('  |  ') : '—';
 
 ---
 
-### Step 10 — Tests
+### Step 10 — Tests ✅
 
 **File:** `tests/test_terrain.py` (or new `tests/test_land_cover.py`)
 
@@ -318,26 +338,27 @@ Follow the project pattern: use `TEST_MODE` flag, patch at short module path (e.
 
 | File | Change |
 |---|---|
-| `ui/routers/terrain.py` | Remove `target_width/target_height` from water-mask handler; add `/api/terrain/land-cover` endpoint |
-| `ui/core/dem.py` | Remove `target_width/target_height` from `fetch_water_mask_images`; extract `fetch_esa_image` helper |
-| `ui/static/js/modules/layers/water-mask.js` | Split `loadWaterMask` / add `loadLandCover`; add `_resampleToSize`; fix combined-view mismatch; update listeners |
-| `ui/static/js/modules/core/api.js` | Add `window.api.dem.landCover` |
-| `ui/static/js/modules/core/cache.js` | Add `window.landCoverCache`; fix `waterMaskCache.generateKey` |
-| `ui/static/js/modules/layers/stacked-layers.js` | Update `setGridPixelMode` for per-layer dimensions |
-| `ui/templates/index.html` | Add `#loadLandCoverBtn`; update `#loadWaterMaskBtn` label |
-| `ui/static/js/app.js` | Add `lastLandCoverData: null` to appState init |
-| `docs/state.md` | Add `lastLandCoverData` entry |
-| `tests/test_terrain.py` | Add tests for new endpoint and step 1 behaviour |
+| `app/server/routers/terrain.py` | Removed `target_width/target_height` from water-mask handler; added `/api/terrain/esa-land-cover` endpoint |
+| `app/server/core/dem.py` | Removed `target_width/target_height` from `fetch_water_mask_images`; extracted `fetch_esa_image` helper |
+| `app/client/static/js/modules/layers/water-mask.js` | Split `loadWaterMask` / added `loadEsaLandCover`; independent abort controllers and caches |
+| `app/client/static/js/modules/core/api.js` | Added `window.api.dem.esaLandCover` |
+| `app/client/static/js/modules/core/cache.js` | Added land cover cache; fixed `waterMaskCache.generateKey` |
+| `app/client/static/js/modules/layers/stacked-layers.js` | Updated `setGridPixelMode` for per-layer dimensions |
+| `app/client/templates/index.html` (now Vue components) | Added separate ESA land cover load button |
+| `app/client/static/js/app.js` | Added `layerBboxes.landCover`, `layerStatus.landCover` to appState init |
+| `docs/state.md` | Updated layer key entries |
 
 ---
 
-## 6. Execution Order
+## 6. Execution Order (completed)
 
-1. **Step 1** — Remove `target_width/target_height`. Ship alone. Verify resolution dropdowns visibly affect output pixel count.
-2. **Step 2** — Add `_resampleToSize`, fix `renderCombinedView` / `previewWaterSubtract` / `applyWaterSubtract`. Must precede step 6 (which introduces mismatched dims).
-3. **Steps 3 + 4 + 5** — Add backend endpoint, frontend cache, and API method. Pure additions; verify backend via curl before wiring frontend.
-4. **Step 6** — Split `loadWaterMask` / add `loadLandCover` in water-mask.js.
-5. **Step 7** — Add `#loadLandCoverBtn` to HTML and wire it.
+All steps were implemented in order:
+
+1. **Step 1** — Removed `target_width/target_height`. Resolution dropdowns now visibly affect output pixel count.
+2. **Step 2** — Fixed combined-view dimension mismatches.
+3. **Steps 3 + 4 + 5** — Added backend endpoint `/api/terrain/esa-land-cover`, frontend cache, and API method.
+4. **Step 6** — Split `loadWaterMask` / added `loadEsaLandCover` in water-mask.js.
+5. **Step 7** — Added separate ESA land cover load button in UI.
 6. **Steps 8 + 9** — appState additions and pixel-mode label update.
 7. **Step 10** — Tests.
 

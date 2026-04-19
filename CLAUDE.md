@@ -14,7 +14,7 @@
 ```bash
 cd strm2stl && source ../.venv/bin/activate
 python -m uvicorn app.server.server:app --port 9000 --reload   # starts FastAPI
-python -m pytest tests/ -v                                     # run all tests (108, 7 files)
+python -m pytest tests/ -v                                     # run all tests (327 pass, 16 test files)
 ```
 
 ## Recommended Read Order
@@ -43,6 +43,7 @@ python -m pytest tests/ -v                                     # run all tests (
 | Data flow debugging | `docs/arch.md` (Data Flow section) |
 | Function lookup | `docs/functions.md` |
 | Known bugs / tech debt | `docs/issues.md` |
+| Library integration / geo2stl / numpy2stl | `docs/libraries.md` |
 | JS module map | `docs/modules.md` |
 | Writing tests | `tests/conftest.py` + relevant test file |
 | Approving / denying AI proposals | `docs/proposals.md` |
@@ -58,8 +59,11 @@ strm2stl/
 │   │   ├── server.py      ← FastAPI app + lifespan  (entry: uvicorn app.server.server:app)
 │   │   ├── config.py      ← constants, OPENTOPO_DATASETS, API keys
 │   │   ├── schemas.py     ← all Pydantic models
-│   │   ├── core/          ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py, hydrorivers.py
-│   │   └── routers/       ← terrain.py, regions.py, export.py, cities.py, cache.py, settings.py
+│   │   ├── core/          ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py,
+│   │   │                    hydrorivers.py, hydrology.py, sat.py, projection.py,
+│   │   │                    validation.py, responses.py, height/ subpackage
+│   │   └── routers/       ← terrain.py, regions.py, export.py, cities.py, cache.py,
+│   │                        settings.py, composite.py, height.py
 │   ├── client/            ← browser client (HTML/CSS/JS)
 │   │   ├── static/js/     ← main.js, modules/ (30 ES modules in 8 subdirs)
 │   │   ├── static/css/    ← app.css
@@ -73,7 +77,7 @@ strm2stl/
 ├── city2stl/              ← OSM/building to 3D mesh helpers
 │
 │  ── project tooling ────────────────────────────────────────────────────
-├── tests/                 ← pytest suite (conftest.py + 7 test files)
+├── tests/                 ← pytest suite (conftest.py + 16 test files)
 ├── notebooks/             ← Jupyter notebooks + helpers (API_Terrain, Session_API_Reference, …)
 ├── tools/                 ← utility scripts + slicer_configs/
 ├── docs/                  ← all reference docs (api, arch, state, modules, proposals, …)

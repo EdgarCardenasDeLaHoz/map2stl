@@ -163,7 +163,7 @@ _DEFAULT_SETTINGS: dict = {
     "hydrology": {
         "source":         "natural_earth",
         "scale_m":        10,
-        "depression_m":   -5.0,
+        "depression_m": -5.0,
         "min_order":      3,
         "order_exponent": 1.5,
     },
@@ -263,6 +263,8 @@ class TerrainSession:
         self.satellite: Optional[str] = None
         self.city_data: Optional[dict] = None
         self.city_raster: Optional[dict] = None
+        # Merged building height raster (HeightResult dataclass)
+        self.building_heights = None
         # Natural Earth hydrology (rivers, lakes, coastlines)
         self.hydrology: Optional[dict] = None
 
@@ -701,7 +703,8 @@ class TerrainSession:
             return self
 
         self._kill_stale_server()
-        self._server_proc = self._launch_server_process(reload=reload, visible=visible)
+        self._server_proc = self._launch_server_process(
+            reload=reload, visible=visible)
         python_exe = str(
             _VENV_PYTHON) if _VENV_PYTHON.exists() else sys.executable
         if self._wait_for_server_ready():
@@ -1124,12 +1127,12 @@ class TerrainSession:
 
     def _project_rgb_channels(self, img: np.ndarray) -> np.ndarray:
         """Apply projection to each RGB channel independently, then stack.
-        
+
         Parameters
         ----------
         img : np.ndarray
             RGB image (H, W, 3) in float32
-            
+
         Returns
         -------
         np.ndarray
@@ -1485,7 +1488,8 @@ class TerrainSession:
         #   d) zero-mean / unit-std normalisation so amplitudes match
         import cv2 as _cv2
 
-        edges = {name: self._compute_edge_map(arr) for name, arr in padded.items()}
+        edges = {name: self._compute_edge_map(
+            arr) for name, arr in padded.items()}
 
         # ── 6. Run phase_cross_correlation pairwise vs DEM ───────────────────
         results: dict = {}
@@ -1987,10 +1991,10 @@ class TerrainSession:
         self._ensure_available_for_fetch("hydrology")
 
         hydr = self.settings["hydrology"]
-        source         = hydr.get("source", "natural_earth")
-        depression_m   = hydr.get("depression_m", -5.0)
-        scale_m        = hydr.get("scale_m", 10)
-        min_order      = hydr.get("min_order", 3)
+        source = hydr.get("source", "natural_earth")
+        depression_m = hydr.get("depression_m", -5.0)
+        scale_m = hydr.get("scale_m", 10)
+        min_order = hydr.get("min_order", 3)
         order_exponent = hydr.get("order_exponent", 1.5)
 
         import time as _time
@@ -1998,7 +2002,8 @@ class TerrainSession:
         if source == "hydrorivers":
             print(f"Fetching HydroRIVERS hydrology "
                   f"(min_order={min_order}, depression={depression_m} m)...")
-            print("  First call per region: downloads shapefile (~200 MB) + builds parquet")
+            print(
+                "  First call per region: downloads shapefile (~200 MB) + builds parquet")
             print("  Subsequent calls: parquet bbox read (<1 sec) + rasterize")
         else:
             print(f"Fetching Natural Earth hydrology (scale_m={scale_m})...")
@@ -2293,6 +2298,7 @@ class TerrainSession:
         Result stored on self.city_raster.
 
         width/height default to settings['dem']['dim'] if not specified.
+        Projection is applied server-side when settings['projection']['projection'] != 'none'.
         """
         if not self.bbox:
             raise RuntimeError("Call select() before composite_city_raster()")
@@ -2303,10 +2309,13 @@ class TerrainSession:
             print(msg)
             return self
         dim = self.settings["dem"]["dim"]
+        proj = self.settings["projection"]
         payload = {
             **self.bbox,
-            "width":  width or dim,
-            "height": height or dim,
+            "width":      width or dim,
+            "height":     height or dim,
+            "projection": proj["projection"],
+            "clip_nans":  proj["clip_nans"],
         }
         r = requests.post(f"{self._base}/api/composite/city-raster",
                           json=payload, timeout=60)
@@ -2314,24 +2323,204 @@ class TerrainSession:
             print(f"ERROR {r.status_code}: {r.text}")
         r.raise_for_status()
         self.city_raster = r.json()
+        proj_label = f" (projected: {proj['projection']})" if proj["projection"] != "none" else ""
         print(f"City raster: {self.city_raster['width']}×{self.city_raster['height']} px, "
-              f"layers: buildings, roads, waterways, walls")
+              f"layers: buildings, roads, waterways, walls{proj_label}")
+        return self
 
-        # Apply projection so city layers align with the projected DEM
-        if self.settings["projection"]["projection"] != "none":
-            layer_names = ["buildings", "roads", "waterways", "walls"]
-            h = self.city_raster["height"]
-            w = self.city_raster["width"]
-            for name in layer_names:
-                if name not in self.city_raster:
-                    continue
-                arr = np.array(
-                    self.city_raster[name], dtype=np.float32).reshape(h, w)
-                arr = self._apply_projection(arr)
-                self.city_raster[name] = arr.ravel().tolist()
-            self.city_raster["height"] = arr.shape[0]
-            self.city_raster["width"] = arr.shape[1]
-            print(f"  → projected to {arr.shape[1]}×{arr.shape[0]} px")
+    def check_city_cache(self) -> bool:
+        """GET /api/cities/cached — check whether OSM data is already cached for the bbox.
+
+        Returns True if a cache entry exists, False otherwise.
+        """
+        self._require_attribute("bbox", "check_city_cache")
+        c = self.settings["city"]
+        params = {
+            **self.bbox,
+            "simplify_tolerance": c["simplify_tolerance"],
+            "min_area":           c["min_area"],
+        }
+        r = requests.get(f"{self._base}/api/cities/cached",
+                         params=params, timeout=10)
+        r.raise_for_status()
+        cached = r.json().get("cached", False)
+        print(f"City cache: {'hit ✓' if cached else 'miss'}")
+        return cached
+
+    def rasterize_city(self) -> "TerrainSession":
+        """POST /api/cities/raster — burn OSM features onto a height-delta grid.
+
+        Unlike composite_city_raster() which returns separate per-layer arrays,
+        this produces a single merged height map compatible with merge_dem().
+        Result stored on self.city_raster.
+        """
+        self._require_attribute("bbox", "rasterize_city")
+        if self.city_data is None:
+            print("Skipping rasterize_city() — call fetch_cities() first.")
+            return self
+        c = self.settings["city"]
+        proj = self.settings["projection"]
+        payload = {
+            **self.bbox,
+            "dim":                c.get("dim", self.settings["dem"]["dim"]),
+            "buildings":          True,
+            "roads":              True,
+            "waterways":          True,
+            "building_scale":     c["building_scale"],
+            "road_depression_m":  c["road_depression_m"],
+            "water_depression_m": c["water_depression_m"],
+            "projection":         proj["projection"],
+            "clip_nans":          proj["clip_nans"],
+        }
+        r = requests.post(f"{self._base}/api/cities/raster",
+                          json=payload, timeout=60)
+        if not r.ok:
+            print(f"ERROR {r.status_code}: {r.text}")
+        r.raise_for_status()
+        self.city_raster = r.json()
+        w, h = self.city_raster["width"], self.city_raster["height"]
+        vmin = self.city_raster.get("vmin", 0)
+        vmax = self.city_raster.get("vmax", 0)
+        print(
+            f"City raster: {w}×{h} px, elevation range [{vmin:.1f}, {vmax:.1f}] m")
+        return self
+
+    def export_city_3mf(self, name: Optional[str] = None) -> bytes:
+        """POST /api/cities/export3mf — export terrain + extruded buildings as 3MF.
+
+        Requires fetch_dem() and fetch_cities() to have been called first.
+        Returns raw 3MF bytes.
+        """
+        self._require_attribute("dem", "export_city_3mf")
+        if self.city_data is None:
+            raise RuntimeError("Call fetch_cities() before export_city_3mf()")
+        c = self.settings["city"]
+        e = self.settings["export"]
+        payload = {
+            **self.bbox,
+            "dem_values":        self.dem["values"],
+            "dem_width":         self.dem["dimensions"][1],
+            "dem_height":        self.dem["dimensions"][0],
+            "buildings":         self.city_data.get("buildings", {"type": "FeatureCollection", "features": []}),
+            "model_height_mm":   e["model_height"],
+            "base_mm":           e["base_height"],
+            "building_z_scale":  c["building_scale"],
+            "simplify_terrain":  c.get("simplify_terrain", True),
+            "name":              name or self.region_name or "city",
+        }
+        print(f"Exporting city 3MF for {payload['name']}…")
+        r = requests.post(f"{self._base}/api/cities/export3mf",
+                          json=payload, timeout=120)
+        if not r.ok:
+            print(f"ERROR {r.status_code}: {r.text}")
+        r.raise_for_status()
+        data = r.content
+        print(f"✓ 3MF exported ({len(data):,} bytes)")
+        return data
+
+    # ── Building height estimation ────────────────────────────────────
+
+    def fetch_building_heights(
+        self,
+        providers: list[str] | None = None,
+    ) -> "TerrainSession":
+        """Fetch building heights from multiple data sources and merge.
+
+        Runs locally (no server round-trip) — each provider downloads its
+        own data and caches it under ``cache/<namespace>/``.
+
+        Parameters
+        ----------
+        providers : list of provider names to query, in **ascending** priority.
+            Defaults to ``["wsf3d", "google3d"]``.
+            Available providers:
+            ``"wsf3d"``      — DLR World Settlement Footprint 3D (~90 m, global)
+            ``"ndsm"``       — GLO-30 minus FABDEM (~30 m, global)
+            ``"copernicus"`` — JRC GHSL building height (~10 m EU, 100 m global)
+            ``"lidar_3dep"`` — USGS 3DEP LiDAR nDSM (~1 m, US only)
+            ``"google3d"``   — Google Photorealistic 3D Tiles (~1 m, API key)
+
+        After this call ``self.building_heights`` holds a ``HeightResult``
+        with the merged raster.
+
+        Returns self for chaining.
+        """
+        self._ensure_bbox()
+
+        if providers is None:
+            providers = ["wsf3d", "google3d"]
+
+        from app.server.core.height import HeightResult, merge_height_rasters
+        from app.server.core.height.providers.wsf3d import WSF3DProvider
+        from app.server.core.height.providers.google_3d import Google3DProvider
+        from app.server.core.height.providers.ndsm import NDSMProvider
+        from app.server.core.height.providers.copernicus import CopernicusProvider
+        from app.server.core.height.providers.lidar_3dep import LiDAR3DEPProvider
+
+        north = self.bbox["north"]
+        south = self.bbox["south"]
+        east = self.bbox["east"]
+        west = self.bbox["west"]
+        bbox = (north, south, east, west)
+
+        # Target raster dimensions — match DEM if available, else default
+        if self.dem is not None:
+            dim_h, dim_w = self.dem["dimensions"]
+        else:
+            dim_side = self.settings["dem"]["dim"]
+            dim_h = dim_w = dim_side
+        dim = (dim_h, dim_w)
+
+        # Build DEM array for DSM→height subtraction (google3d needs it)
+        dem_arr = None
+        if self.dem is not None:
+            dem_arr = np.array(self.dem["values"],
+                               dtype=np.float32).reshape(dim_h, dim_w)
+
+        # Registry of available providers
+        _registry = {
+            "wsf3d": lambda: WSF3DProvider(),
+            "ndsm": lambda: NDSMProvider(),
+            "copernicus": lambda: CopernicusProvider(),
+            "lidar_3dep": lambda: LiDAR3DEPProvider(),
+            "google3d": lambda: Google3DProvider(),
+        }
+
+        results: list[HeightResult] = []
+        for name in providers:
+            factory = _registry.get(name)
+            if factory is None:
+                print(f"⚠️  Unknown height provider: {name}")
+                continue
+            provider = factory()
+            if not provider.covers(bbox):
+                print(f"  {name}: no coverage for this bbox, skipping")
+                continue
+            print(f"  {name}: fetching…", end=" ", flush=True)
+            try:
+                if name == "google3d" and dem_arr is not None:
+                    hr = provider.fetch_heights(bbox, dim, dem=dem_arr)
+                else:
+                    hr = provider.fetch_heights(bbox, dim)
+                n_valid = int(np.sum(~np.isnan(hr.raster)))
+                total = hr.raster.size
+                pct = 100 * n_valid / total if total else 0
+                print(f"✓ {n_valid}/{total} pixels ({pct:.0f}%)")
+                results.append(hr)
+            except Exception as exc:
+                print(f"⚠️ {exc}")
+
+        if results:
+            merged = merge_height_rasters(results, target_shape=dim)
+            n_valid = int(np.sum(~np.isnan(merged.raster)))
+            total = merged.raster.size
+            pct = 100 * n_valid / total if total else 0
+            print(f"✓ Merged building heights: {n_valid}/{total} pixels "
+                  f"({pct:.0f}%) from {len(results)} source(s)")
+            self.building_heights = merged
+        else:
+            print("⚠️  No building height data available")
+            self.building_heights = None
 
         return self
 

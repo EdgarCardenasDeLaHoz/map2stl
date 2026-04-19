@@ -21,7 +21,8 @@ try:
             raise ValueError("north must be greater than south")
         return v
 
-    _north_validator = classmethod(_fv("north", mode="after")(_north_validator_fn))
+    _north_validator = classmethod(
+        _fv("north", mode="after")(_north_validator_fn))
 except Exception:
     from pydantic import validator as _v  # type: ignore
 
@@ -30,7 +31,8 @@ except Exception:
             raise ValueError("north must be greater than south")
         return v
 
-    _north_validator = classmethod(_v("north")(_north_validator_fn))  # type: ignore
+    _north_validator = classmethod(
+        _v("north")(_north_validator_fn))  # type: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -39,10 +41,14 @@ except Exception:
 
 class BoundingBox(BaseModel):
     """Geographic bounding box using cardinal directions."""
-    north: float = Field(..., ge=-90, le=90, description="Northern latitude bound")
-    south: float = Field(..., ge=-90, le=90, description="Southern latitude bound")
-    east:  float = Field(..., ge=-180, le=180, description="Eastern longitude bound")
-    west:  float = Field(..., ge=-180, le=180, description="Western longitude bound")
+    north: float = Field(..., ge=-90, le=90,
+                         description="Northern latitude bound")
+    south: float = Field(..., ge=-90, le=90,
+                         description="Southern latitude bound")
+    east:  float = Field(..., ge=-180, le=180,
+                         description="Eastern longitude bound")
+    west:  float = Field(..., ge=-180, le=180,
+                         description="Western longitude bound")
 
     north_gt_south = _north_validator
 
@@ -61,20 +67,27 @@ class BoundingBoxLegacy(BaseModel):
 
 class RegionParameters(BaseModel):
     """Rendering and export parameters stored with a saved region."""
-    dim: int = Field(200, ge=1, le=2000, description="Grid resolution (pixels per side)")
-    depth_scale: float = Field(0.5, ge=0.0, le=10.0, description="Depth scaling for ocean floor")
-    water_scale: float = Field(0.05, ge=0.0, le=1.0, description="Water subtraction strength")
+    dim: int = Field(200, ge=1, le=2000,
+                     description="Grid resolution (pixels per side)")
+    depth_scale: float = Field(
+        0.5, ge=0.0, le=10.0, description="Depth scaling for ocean floor")
+    water_scale: float = Field(
+        0.05, ge=0.0, le=1.0, description="Water subtraction strength")
     height: float = Field(10.0, ge=0.0, description="Model height in mm")
     base: float = Field(2.0, ge=0.0, description="Base thickness in mm")
-    subtract_water: bool = Field(True, description="Whether to subtract water bodies from terrain")
-    sat_scale: int = Field(500, ge=10, description="Earth Engine scale in metres/pixel for satellite data")
+    subtract_water: bool = Field(
+        True, description="Whether to subtract water bodies from terrain")
+    sat_scale: int = Field(
+        500, ge=10, description="Earth Engine scale in metres/pixel for satellite data")
 
 
 class RegionCreate(BoundingBox):
     """Request body for creating or updating a saved region."""
-    name: str = Field(..., min_length=1, max_length=128, description="Unique region name")
+    name: str = Field(..., min_length=1, max_length=128,
+                      description="Unique region name")
     description: Optional[str] = Field(None, max_length=512)
-    label: Optional[str] = Field(None, max_length=64, description="Group/continent label for sidebar grouping")
+    label: Optional[str] = Field(
+        None, max_length=64, description="Group/continent label for sidebar grouping")
     parameters: Optional[RegionParameters] = None
 
 
@@ -129,8 +142,10 @@ class CityRequest(BoundingBox):
         default=["buildings", "roads", "waterways"],
         description="Which OSM layers to fetch"
     )
-    simplify_tolerance: float = Field(default=0.5, description="Polygon simplification tolerance in metres")
-    min_area: float = Field(default=5.0, description="Minimum building area in square metres to keep")
+    simplify_tolerance: float = Field(
+        default=0.5, description="Polygon simplification tolerance in metres")
+    min_area: float = Field(
+        default=5.0, description="Minimum building area in square metres to keep")
 
 
 class CityRasterRequest(BaseModel):
@@ -139,15 +154,24 @@ class CityRasterRequest(BaseModel):
     south: float
     east: float
     west: float
-    dim: int = Field(200, ge=10, le=2000, description="Output grid dimension (dim × dim pixels)")
-    buildings: Dict[str, Any] = Field(default_factory=dict, description="GeoJSON FeatureCollection")
-    roads: Dict[str, Any] = Field(default_factory=dict, description="GeoJSON FeatureCollection")
-    waterways: Dict[str, Any] = Field(default_factory=dict, description="GeoJSON FeatureCollection")
-    building_scale: float = Field(1.0, ge=0.0, description="Multiplier applied to height_m when burning buildings")
-    road_depression_m: float = Field(0.0, description="Road surface height relative to 0 (negative = depressed)")
-    water_depression_m: float = Field(-2.0, description="Waterway surface height relative to 0")
-    projection: str = Field("none", description="Map projection to apply after rasterisation ('none', 'cosine', 'mercator', etc.)")
-    clip_nans: bool = Field(True, description="Strip all-NaN border rows/columns created by projection")
+    dim: int = Field(200, ge=10, le=2000,
+                     description="Output grid dimension (dim × dim pixels)")
+    buildings: Dict[str, Any] = Field(
+        default_factory=dict, description="GeoJSON FeatureCollection")
+    roads: Dict[str, Any] = Field(
+        default_factory=dict, description="GeoJSON FeatureCollection")
+    waterways: Dict[str, Any] = Field(
+        default_factory=dict, description="GeoJSON FeatureCollection")
+    building_scale: float = Field(
+        1.0, ge=0.0, description="Multiplier applied to height_m when burning buildings")
+    road_depression_m: float = Field(
+        0.0, description="Road surface height relative to 0 (negative = depressed)")
+    water_depression_m: float = Field(-2.0,
+                                      description="Waterway surface height relative to 0")
+    projection: str = Field(
+        "none", description="Map projection to apply after rasterisation ('none', 'cosine', 'mercator', etc.)")
+    clip_nans: bool = Field(
+        True, description="Strip all-NaN border rows/columns created by projection")
 
 
 # ---------------------------------------------------------------------------
@@ -162,13 +186,16 @@ class DEMRequest(BoundingBox):
     height: float = Field(10.0, ge=0.0)
     base: float = Field(2.0, ge=0.0)
     subtract_water: bool = True
-    dataset: str = Field("esa", description="Elevation dataset: 'esa', 'copernicus', 'nasadem', 'usgs', 'gebco'")
-    colormap: str = Field("terrain", description="Matplotlib colormap name for client-side rendering")
+    dataset: str = Field(
+        "esa", description="Elevation dataset: 'esa', 'copernicus', 'nasadem', 'usgs', 'gebco'")
+    colormap: str = Field(
+        "terrain", description="Matplotlib colormap name for client-side rendering")
 
 
 class DEMResponse(BaseModel):
     """Raw elevation data returned for client-side rendering."""
-    dem_values: List[float] = Field(..., description="Flat row-major array of elevation values (metres)")
+    dem_values: List[float] = Field(
+        ..., description="Flat row-major array of elevation values (metres)")
     dimensions: List[int] = Field(..., description="[height_px, width_px]")
     min_elevation: float
     max_elevation: float
@@ -186,26 +213,33 @@ class RawDEMResponse(BaseModel):
     min_elevation: float
     max_elevation: float
     mean_elevation: float
-    ptp: float = Field(..., description="Peak-to-peak range for client-side water scale calculation")
+    ptp: float = Field(...,
+                       description="Peak-to-peak range for client-side water scale calculation")
     bbox: List[float]
 
 
 class WaterMaskRequest(BoundingBox):
     """Parameters for fetching a water / land-cover mask."""
-    sat_scale: int = Field(500, ge=10, description="Earth Engine resolution in metres/pixel")
+    sat_scale: int = Field(
+        500, ge=10, description="Earth Engine resolution in metres/pixel")
     dim: int = Field(200, ge=1, le=2000)
-    target_width: Optional[int] = Field(None, description="Resize output to match DEM pixel width")
-    target_height: Optional[int] = Field(None, description="Resize output to match DEM pixel height")
+    target_width: Optional[int] = Field(
+        None, description="Resize output to match DEM pixel width")
+    target_height: Optional[int] = Field(
+        None, description="Resize output to match DEM pixel height")
 
 
 class WaterMaskResponse(BaseModel):
     """Binary water mask and ESA land-cover data for the requested bbox."""
-    water_mask_values: List[float] = Field(..., description="Flat binary array: 1 = water, 0 = land")
-    water_mask_dimensions: List[int] = Field(..., description="[height_px, width_px]")
+    water_mask_values: List[float] = Field(
+        ..., description="Flat binary array: 1 = water, 0 = land")
+    water_mask_dimensions: List[int] = Field(...,
+                                             description="[height_px, width_px]")
     water_pixels: int
     total_pixels: int
     water_percentage: float
-    esa_values: Optional[List[float]] = Field(None, description="Raw ESA WorldCover class values")
+    esa_values: Optional[List[float]] = Field(
+        None, description="Raw ESA WorldCover class values")
     esa_dimensions: Optional[List[int]] = None
 
 
@@ -213,7 +247,8 @@ class SatelliteRequest(BoundingBox):
     """Parameters for fetching satellite / land-cover imagery."""
     dataset: str = Field("esa", description="'esa', 'copernicus', 'jrc'")
     dim: int = Field(200, ge=1, le=2000)
-    scale: Optional[int] = Field(None, description="Earth Engine resolution in metres/pixel")
+    scale: Optional[int] = Field(
+        None, description="Earth Engine resolution in metres/pixel")
 
 
 class SatelliteResponse(BaseModel):
@@ -230,13 +265,18 @@ class SatelliteResponse(BaseModel):
 
 class ExportRequest(BoundingBox):
     """Parameters for generating a 3D model file."""
-    dem_values: List[float] = Field(..., description="Flat row-major elevation array from /api/terrain/dem")
+    dem_values: List[float] = Field(
+        ..., description="Flat row-major elevation array from /api/terrain/dem")
     height: int = Field(0, description="Grid height in pixels")
     width: int = Field(0, description="Grid width in pixels")
-    model_height: float = Field(20.0, ge=0.1, description="Physical model height in mm")
-    base_height: float = Field(5.0, ge=0.0, description="Base plate thickness in mm")
-    exaggeration: float = Field(1.0, ge=0.0, description="Vertical exaggeration multiplier")
-    name: str = Field("terrain", max_length=64, description="Output file base name")
+    model_height: float = Field(
+        20.0, ge=0.1, description="Physical model height in mm")
+    base_height: float = Field(
+        5.0, ge=0.0, description="Base plate thickness in mm")
+    exaggeration: float = Field(
+        1.0, ge=0.0, description="Vertical exaggeration multiplier")
+    name: str = Field("terrain", max_length=64,
+                      description="Output file base name")
 
 
 class ExportResponse(BaseModel):
@@ -330,7 +370,8 @@ class MergeLayerSpec(BaseModel):
     """One layer in the merge stack."""
     source: str = "local"
     dim: int = Field(300, ge=50, le=2000)
-    blend_mode: Literal["base", "replace", "blend", "rivers", "max", "min"] = "base"
+    blend_mode: Literal["base", "replace",
+                        "blend", "rivers", "max", "min"] = "base"
     weight: float = Field(1.0, ge=0.0, le=10.0)
     processing: ProcessingSpec = Field(default_factory=ProcessingSpec)
     label: Optional[str] = None

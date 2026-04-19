@@ -1,5 +1,7 @@
 # Map Projections
 
+_Last updated: 2026-04-19_
+
 All projections are implemented in `geo2stl/projections.py`.
 The active entry point is `project_coordinates(mat, bbox, projection=..., ...)`.
 

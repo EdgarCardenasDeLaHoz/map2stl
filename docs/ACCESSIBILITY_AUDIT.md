@@ -1,5 +1,7 @@
 # Accessibility Color Contrast Audit — strm2stl
 
+_Last updated: 2026-04-19_
+
 > WCAG 2.1 AA/AAA compliance check for color contrast ratios.
 > Current Status: **Failing** (~40% compliance). Target: 75%+ within Phase 1.
 

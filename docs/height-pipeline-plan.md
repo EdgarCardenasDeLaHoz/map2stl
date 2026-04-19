@@ -1,10 +1,10 @@
 # Plan: Building Height Estimation — Detailed Implementation
 
-> **Status:** Approved — implementation not yet started
+> **Status:** Phase 1a complete — 5 providers implemented and tested (121 tests pass). Phase 1b+2+3 not started.
 > **Scope:** Backend only, session API. No frontend changes.
 > **Target cities:** Granada, Barcelona (test examples; tool is generic)
 > **Target resolution:** ~5m/pixel
-> **Last updated:** 2026-04-18
+> **Last updated:** 2026-04-19
 
 ## TL;DR
 
@@ -67,6 +67,42 @@ Add more only after these are working and tested. Microsoft + LiDAR + shadow bec
 
 ## Architecture
 
+### Pipeline Overview
+
+**Phase 1a: Provider → Merge (implemented)**
+
+```mermaid
+flowchart LR
+    WSF["WSF3D<br/>conf 0.5"] --> M["merge_height_rasters"]
+    NDSM["nDSM<br/>conf 0.8"] --> M
+    COP["Copernicus<br/>conf 0.7"] --> M
+    G3D["Google 3D<br/>conf 0.9"] --> M
+    LIDAR["3DEP LiDAR<br/>conf 0.95"] --> M
+    M --> FBH["fetch_building_heights"]
+```
+
+**Future phases (not started)**
+
+```mermaid
+flowchart LR
+    CNN["CNN Predict<br/>Phase 2"] -.-> MERGE["merge"]
+    STL["STL Import<br/>Phase 3"] -.-> INFILL["Infill"] -.-> MERGE
+```
+
+### Provider Priority Merge
+
+Providers fill pixels in ascending confidence order. Higher-confidence data overwrites lower.
+
+```mermaid
+flowchart TD
+    A["Empty NaN grid"] --> B["WSF3D (0.5)"]
+    B --> C["Copernicus (0.7)"]
+    C --> D["nDSM (0.8)"]
+    D --> E["Google 3D (0.9)"]
+    E --> F["3DEP LiDAR (0.95)"]
+    F --> G["HeightResult"]
+```
+
 ### Core Design: HeightProvider Protocol
 
 Instead of a monolithic cascade, use a **provider pattern** matching the existing dispatcher in `dem.py`:
@@ -95,17 +131,19 @@ Each source becomes a HeightProvider. The cascade module tries providers in prio
 
 ```
 app/server/core/
-├── height/                    # NEW package
-│   ├── __init__.py            # HeightProvider protocol, merge_height_rasters()
+├── height/                    # Height estimation package
+│   ├── __init__.py            # HeightResult, HeightProvider protocol, merge_height_rasters()
 │   ├── providers/
 │   │   ├── __init__.py
-│   │   ├── copernicus.py      # EU Building Height 10m raster
-│   │   ├── google_3d.py       # Google 3D Tiles → per-footprint heights
-│   │   └── msft_footprints.py # Microsoft Building Footprints (Phase 1b)
-│   ├── predict.py             # CNN inference (Phase 2)
-│   ├── train.py               # CNN training pipeline (Phase 2)
-│   ├── stl_import.py          # STL → heightmap (Phase 3)
-│   └── infill.py              # Heightmap inpainting (Phase 3)
+│   │   ├── copernicus.py      # ✅ JRC GHSL ~10m EU / 100m global, confidence 0.7
+│   │   ├── google_3d.py       # ✅ Google 3D Tiles ~1m, API key, confidence 0.9
+│   │   ├── lidar_3dep.py      # ✅ USGS 3DEP LiDAR ~1m US-only, confidence 0.95
+│   │   ├── ndsm.py            # ✅ GLO-30 minus FABDEM ~30m global, confidence 0.8
+│   │   └── wsf3d.py           # ✅ DLR WSF3D ~90m global, confidence 0.5
+│   ├── predict.py             # Phase 2 — CNN inference (not started)
+│   ├── train.py               # Phase 2 — CNN training pipeline (not started)
+│   ├── stl_import.py          # Phase 3 — STL → heightmap (not started)
+│   └── infill.py              # Phase 3 — Heightmap inpainting (not started)
 ├── osm.py                     # existing, minimal changes
 └── ...
 ```
@@ -116,11 +154,14 @@ app/server/core/
 
 Follow existing pattern in `cache.py`:
 
-| Namespace | TTL | Format | Notes |
-|-----------|-----|--------|-------|
-| `copernicus` | 90 days | .npz + .json | Raster tiles, large, rarely change |
-| `google3d` | 30 days | .npz + .json | Expensive API calls, cache aggressively |
-| `height_merged` | 7 days | .npz + .json | Composite of all providers for a bbox |
+| Namespace | TTL | Format | Status | Notes |
+|-----------|-----|--------|--------|-------|
+| `copernicus` | 90 days | .npz + .json | ✅ Implemented | Raster tiles, large, rarely change |
+| `google3d` | 30 days | .npz + .json | ✅ Implemented | Expensive API calls, cache aggressively |
+| `wsf3d` | 90 days | .npz + .json | ✅ Implemented | DLR 1°×1° tiles |
+| `ndsm` | 90 days | .npz + .json | ✅ Implemented | GLO-30 minus FABDEM |
+| `lidar_3dep` | 90 days | .npz + .json | ✅ Implemented | USGS 3DEP tiles |
+| `height_merged` | 7 days | .npz + .json | Not yet | Composite of all providers for a bbox |
 
 Key generation follows existing `make_cache_key(namespace, N, S, E, W, extra)`.
 
@@ -170,9 +211,9 @@ with TerrainSession().start() as s:
 
 ---
 
-## Phase 1a.0: Height Package Scaffolding
+## Phase 1a.0: Height Package Scaffolding — COMPLETE
 
-**Goal:** Create the `height/` package with `HeightResult` dataclass, `HeightProvider` protocol, and `merge_height_rasters()` function. No external dependencies.
+> ✅ **Implemented.** 20 merge tests pass.
 
 **Files:**
 - `app/server/core/height/__init__.py` — HeightResult, HeightProvider, merge_height_rasters()
@@ -190,16 +231,9 @@ with TerrainSession().start() as s:
 
 ---
 
-## Phase 1a.1: Copernicus Building Height Provider
+## Phase 1a.1: Copernicus Building Height Provider — COMPLETE
 
-**Module:** `app/server/core/height/providers/copernicus.py`
-
-**Data source:** Copernicus Land Monitoring Service — Urban Atlas Building Height 2012
-- Format: GeoTIFF raster, 10m resolution
-- Coverage: 800+ European cities including Barcelona, Granada
-- Access: Direct HTTPS download, no API key
-- Challenge: Data is organized by "Functional Urban Areas" not by arbitrary bbox. Need to map bbox → FUA code → download URL.
-- Alternative: WCS (Web Coverage Service) endpoint allows bbox-based queries directly (simpler).
+> ✅ **Implemented.** `copernicus.py` — JRC GHSL WCS endpoint, Europe-only coverage, ~10m resolution, confidence 0.7. 15 tests pass (9 unit + 6 integration mock).
 
 **Implementation steps:**
 1. Query WCS GetCapabilities to find available layers for bbox
@@ -227,9 +261,9 @@ with TerrainSession().start() as s:
 
 ---
 
-## Phase 1a.2: Google 3D Tiles Provider
+## Phase 1a.2: Google 3D Tiles Provider — COMPLETE
 
-**Module:** `app/server/core/height/providers/google_3d.py`
+> ✅ **Implemented.** `google_3d.py` — ECEF transforms, tileset traversal, ray-casting DSM. API key from env or config.json. MAX_TILES=200 guard. 20 tests pass.
 
 **Data source:** Google Map Tiles API — 3D Tiles (Photorealistic)
 - Format: Cesium 3D Tiles (tileset.json → .glb tiles with Draco compression)
@@ -270,9 +304,9 @@ with TerrainSession().start() as s:
 
 ---
 
-## Phase 1a.3: Height Merge + Session Integration
+## Phase 1a.3: Height Merge + Session Integration — COMPLETE
 
-**Module:** `app/server/core/height/__init__.py` (merge logic already scaffolded in 1a.0)
+> ✅ **Implemented.** `fetch_building_heights()` added to `TerrainSession`. All 5 providers registered. 22 E2E session tests pass.
 
 **Core function:**
 ```
@@ -438,48 +472,43 @@ def infill_satellite(heightmap, mask, satellite_rgb, model_path) → np.ndarray:
 
 ## Implementation Order & Dependencies
 
-```
-Phase 1a.0: height/ package scaffolding + HeightResult type + merge logic
-  ↓ (no external deps, pure Python)
-Phase 1a.1: Copernicus provider (simplest, validates architecture)
-  ↓ (needs: rasterio or manual GeoTIFF parsing)
-Phase 1a.2: Google 3D Tiles provider (most complex, best quality)
-  ↓ (needs: trimesh glTF support, coordinate transforms)
-Phase 1a.3: Session API integration (fetch_building_heights)
-  ↓ (needs: Phase 1a.0-1a.2 working)
-Phase 2.0: CNN model architecture + dataset class
-  ↓ (needs: torch, torchvision)
-Phase 2.1: Training data generation from Phase 1 ground truth
-  ↓ (needs: Phase 1a.3 working for Barcelona/Granada)
-Phase 2.2: Training pipeline + pretrained DSM super-res
-  ↓ (needs: Phase 2.0-2.1 + GPU)
-Phase 2.3: Session API integration (predict_heights)
-  ↓
-Phase 3.0: STL import module
-  ↓ (needs: trimesh, already available)
-Phase 3.1: IDW infill (deterministic, no ML)
-  ↓ (needs: scipy, already available)
-Phase 3.2: PConv infill (needs trained model from Phase 2)
-  ↓
-Phase 3.3: Session API integration (load_stl, infill_heights)
+### Phase 1a (complete)
+
+```mermaid
+flowchart TD
+    P0["1a.0: scaffolding ✅"] --> P1["1a.1: Copernicus ✅"]
+    P0 --> P1W["1a.1+: WSF3D ✅"]
+    P0 --> P1N["1a.1+: nDSM ✅"]
+    P0 --> P1L["1a.1+: LiDAR 3DEP ✅"]
+    P0 --> P2G["1a.2: Google 3D ✅"]
+    P1 & P1W & P1N & P1L & P2G --> P3["1a.3: Session integration ✅"]
 ```
 
-Phases 1a.1 and 1a.2 can run in parallel.
-Phases 3.0 and 3.1 can start anytime (no dependency on Phase 1 or 2).
+### Phases 2–3 (not started)
+
+```mermaid
+flowchart TD
+    CNN0["2.0: CNN model arch"] --> CNN2["2.2: Training pipeline"]
+    CNN1["2.1: Training data gen"] --> CNN2
+    CNN2 --> CNN3["2.3: Session predict_heights"]
+    STL0["3.0: STL import"] --> S3["3.3: Session load_stl/infill"]
+    IDW["3.1: IDW infill"] --> S3
+    CNN2 --> PCONV["3.2: PConv infill"] --> S3
+```
 
 ---
 
 ## New Dependencies
 
-| Package | Purpose | Phase | Size |
-|---------|---------|-------|------|
-| `rasterio` | GeoTIFF parsing for Copernicus | 1a.1 | ~15MB |
-| `torch` | CNN inference + training | 2.0 | ~2GB (CUDA) |
-| `torchvision` | EfficientNet encoder | 2.0 | ~30MB |
-| `timm` | Model zoo (EfficientNet variants) | 2.0 | ~5MB |
-| `laspy` | LiDAR point clouds (Phase 1b) | 1b | ~2MB |
-
-Note: `trimesh` (4.6.8) already installed. Verify glTF/Draco support: `pip install trimesh[easy]`.
+| Package | Purpose | Phase | Size | Status |
+|---------|---------|-------|------|--------|
+| `rasterio` | GeoTIFF parsing for Copernicus, nDSM, LiDAR | 1a.1 | ~15MB | ✅ Installed |
+| `pyproj` | CRS transforms | 1a.1 | ~10MB | ✅ Installed |
+| `trimesh` | glTF mesh parsing for Google 3D | 1a.2 | ~5MB | ✅ Installed (4.6.8) |
+| `torch` | CNN inference + training | 2.0 | ~2GB (CUDA) | Not yet |
+| `torchvision` | EfficientNet encoder | 2.0 | ~30MB | Not yet |
+| `timm` | Model zoo (EfficientNet variants) | 2.0 | ~5MB | Not yet |
+| `laspy` | LiDAR point clouds (Phase 1b) | 1b | ~2MB | Not yet |
 
 ---
 

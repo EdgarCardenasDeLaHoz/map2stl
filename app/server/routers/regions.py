@@ -6,6 +6,7 @@ Step 12: reads/writes SQLite via core/db.py.
 """
 
 from __future__ import annotations
+from app.server.core.db import get_db, init_db
 
 import json
 import logging
@@ -18,7 +19,6 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["regions"])
 
-from app.server.core.db import get_db, init_db
 
 # ---------------------------------------------------------------------------
 # Schema imports — try schemas.py first, inline fallback
@@ -79,7 +79,8 @@ except ImportError:
 # SQLite helpers
 # ---------------------------------------------------------------------------
 
-_PARAM_FIELDS = ("dim", "depth_scale", "water_scale", "height", "base", "subtract_water", "sat_scale")
+_PARAM_FIELDS = ("dim", "depth_scale", "water_scale",
+                 "height", "base", "subtract_water", "sat_scale")
 
 
 def _dump(model, **kw):
@@ -210,7 +211,8 @@ async def get_region_settings(name: str):
         _ensure_db()
         with get_db() as conn:
             row = conn.execute(
-                "SELECT settings_json FROM region_settings WHERE region_name=?", (name,)
+                "SELECT settings_json FROM region_settings WHERE region_name=?", (
+                    name,)
             ).fetchone()
         if row is None:
             return JSONResponse(content={"name": name, "settings": {}})
@@ -241,7 +243,8 @@ async def save_region_settings_route(name: str, request: Request):
                 (name, settings_json),
             )
             conn.commit()
-        logger.info(f"Settings saved for region '{name}' ({len(payload)} top-level keys)")
+        logger.info(
+            f"Settings saved for region '{name}' ({len(payload)} top-level keys)")
         return JSONResponse(content={"status": "saved", "name": name, "settings": payload})
     except Exception as e:
         logger.error(f"Error saving region settings: {e}")

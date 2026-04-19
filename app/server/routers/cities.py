@@ -6,6 +6,9 @@ Delegates OSM fetching to core/osm.py and caching to core/cache.py.
 """
 
 from __future__ import annotations
+from app.server.schemas import CityRequest, CityRasterRequest
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel
 
 import asyncio
 import json
@@ -41,6 +44,7 @@ try:
 except ImportError:
     def _fetch_osm_data(*a, **kw):
         raise RuntimeError("core.osm not available")
+
     def _rasterize_city_data(*a, **kw):
         raise RuntimeError("core.osm not available")
 
@@ -53,10 +57,6 @@ try:
 except ImportError:
     _CITIES_3D_AVAILABLE = False
     generate_city_3mf = None  # type: ignore
-
-from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
-from app.server.schemas import CityRequest, CityRasterRequest
 
 
 class CityExportRequest(BaseModel):
@@ -72,8 +72,8 @@ class CityExportRequest(BaseModel):
     model_height_mm:  float = 20.0
     base_mm:          float = 5.0
     building_z_scale: float = 0.5        # mm per real metre for building heights
-    simplify_terrain: bool  = True       # Cities 14: reduce terrain triangle count
-    name:             str   = "city"
+    simplify_terrain: bool = True       # Cities 14: reduce terrain triangle count
+    name:             str = "city"
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ async def get_city_data(city_req: CityRequest):
         return diag_err
 
     cache_key = osm_cache_key(north, south, east, west,
-                               city_req.simplify_tolerance, city_req.min_area)
+                              city_req.simplify_tolerance, city_req.min_area)
 
     # Cache check
     if _CACHE_AVAILABLE:
@@ -127,7 +127,8 @@ async def get_city_data(city_req: CityRequest):
                 logger.info(f"Serving OSM data from legacy cache: {cache_key}")
                 return JSONResponse(content=cached_data)
             except Exception as cache_read_err:
-                logger.debug(f"Legacy OSM cache read failed, re-fetching: {cache_read_err}")
+                logger.debug(
+                    f"Legacy OSM cache read failed, re-fetching: {cache_read_err}")
 
     try:
         result = await run_sync(
@@ -140,14 +141,16 @@ async def get_city_data(city_req: CityRequest):
 
     result["cache_key"] = cache_key
     result["diagonal_km"] = round(diag_km, 2)
-    has_error = any("error" in v for v in result.values() if isinstance(v, dict))
+    has_error = any("error" in v for v in result.values()
+                    if isinstance(v, dict))
     if not has_error:
         if _CACHE_AVAILABLE:
             write_osm_cache(cache_key, result)
         else:
             OSM_CACHE_PATH.mkdir(parents=True, exist_ok=True)
             try:
-                (OSM_CACHE_PATH / f"{cache_key}.json").write_text(json.dumps(result))
+                (OSM_CACHE_PATH /
+                 f"{cache_key}.json").write_text(json.dumps(result))
             except Exception as ce:
                 logger.warning(f"OSM cache write failed: {ce}")
 
@@ -253,7 +256,8 @@ async def export_city_3mf(req: CityExportRequest):
     if not _CITIES_3D_AVAILABLE:
         return error_response("core.cities_3d not available", 501)
     try:
-        bbox = {"north": req.north, "south": req.south, "east": req.east, "west": req.west}
+        bbox = {"north": req.north, "south": req.south,
+                "east": req.east, "west": req.west}
         three_mf_bytes = await run_sync(
             generate_city_3mf,
             buildings_geojson=req.buildings,

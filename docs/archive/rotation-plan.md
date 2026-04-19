@@ -1,5 +1,7 @@
 # Rotation Support Plan
 
+_Last updated: 2026-04-19_
+
 ## Overview
 
 A `rotation` angle (degrees clockwise) is already stored per region in `region_settings.settings_json` for imported CoOrLists regions (e.g. `{"rotation": 35.0}`). This plan promotes rotation to a first-class field throughout the stack: database column, API, frontend state, UI controls, and rendering.

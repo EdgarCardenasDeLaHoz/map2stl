@@ -107,7 +107,8 @@ def project_rgb_image(img_arr, north, south, east, west, projection, clip_nans):
         col_has_data = ~np.all(nan_mask, axis=0)
         if col_has_data.any():
             result = result[:, col_has_data, :]
-        row_has_data = ~np.all(nan_mask[:, col_has_data] if col_has_data.any() else nan_mask, axis=1)
+        row_has_data = ~np.all(
+            nan_mask[:, col_has_data] if col_has_data.any() else nan_mask, axis=1)
         if row_has_data.any():
             result = result[row_has_data, :, :]
 

@@ -74,7 +74,7 @@ window.toggleCollapsible = function toggleCollapsible(header) {
                 if (cc) {
                     const container = cc.parentElement;
                     if (container.clientWidth > 0 && container.clientHeight > 0) {
-                        cc.width  = container.clientWidth;
+                        cc.width = container.clientWidth;
                         cc.height = container.clientHeight;
                         window.drawCurve?.();
                     }
@@ -248,8 +248,10 @@ window.getBboxCoords = function getBboxCoords(boundingBox, selectedRegion) {
         return { north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() };
     }
     if (selectedRegion) {
-        return { north: selectedRegion.north, south: selectedRegion.south,
-                 east:  selectedRegion.east,  west:  selectedRegion.west };
+        return {
+            north: selectedRegion.north, south: selectedRegion.south,
+            east: selectedRegion.east, west: selectedRegion.west
+        };
     }
     return null;
 };
@@ -350,7 +352,7 @@ window.buildColorLUT = function buildColorLUT(colormap, size = 1024) {
     for (let i = 0; i < size; i++) {
         const t = i / maxIdx;
         const [r, g, b] = window.mapElevationToColor?.(t, colormap) || [0, 0, 0];
-        lut[i * 3]     = Math.round((r || 0) * 255);
+        lut[i * 3] = Math.round((r || 0) * 255);
         lut[i * 3 + 1] = Math.round((g || 0) * 255);
         lut[i * 3 + 2] = Math.round((b || 0) * 255);
     }

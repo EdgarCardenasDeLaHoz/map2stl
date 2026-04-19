@@ -1,5 +1,7 @@
 # Docs Index — strm2stl
 
+_Last updated: 2026-04-19_
+
 Start here if you opened the `docs/` folder directly and need the preferred reading path.
 
 ## Preferred Order

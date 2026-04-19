@@ -130,19 +130,24 @@ def project_coordinates(
         return mat.copy(), metadata
 
     elif projection == 'cosine':
-        result, metadata = _project_cosine(mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
+        result, metadata = _project_cosine(
+            mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
 
     elif projection == 'mercator':
-        result, metadata = _project_mercator(mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
+        result, metadata = _project_mercator(
+            mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
 
     elif projection == 'equidistant':
-        result, metadata = _project_equidistant(mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
+        result, metadata = _project_equidistant(
+            mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
 
     elif projection == 'lambert':
-        result, metadata = _project_lambert(mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
+        result, metadata = _project_lambert(
+            mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
 
     elif projection == 'sinusoidal':
-        result, metadata = _project_sinusoidal(mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
+        result, metadata = _project_sinusoidal(
+            mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
 
     else:
         raise ValueError(f"Unknown projection: {projection}")
@@ -207,7 +212,8 @@ def _project_cosine(
             x_new = np.linspace(0, 1, new_width)
             if order == 0:
                 # Nearest-neighbour: pick closest source pixel
-                indices = np.clip(np.round(x_new * (n - 1)).astype(int), 0, n - 1)
+                indices = np.clip(
+                    np.round(x_new * (n - 1)).astype(int), 0, n - 1)
                 row_resampled = row[indices]
             else:
                 row_resampled = np.interp(x_new, x_old, row)

@@ -36,7 +36,16 @@ markdown_extensions:
       permalink: true
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra_javascript:
+  - https://unpkg.com/mermaid@11/dist/mermaid.min.js
 
 nav:
   - Home: README.md
@@ -47,7 +56,7 @@ nav:
       - Overview: arch.md
       - JS Modules: modules.md
       - Frontend State: state.md
-      - Function Index: functions.md
+      - Library Integration: libraries.md
       - Map Projections: projections.md
   - API Reference:
       - Endpoints: api.md
@@ -55,12 +64,9 @@ nav:
   - Layer System:
       - Layer Analysis: layer_system_analysis.md
       - Composite DEM: composite_dem_design.md
-      - Per-Layer Resolution: per-layer-resolution-plan.md
+      - Height Pipeline: height-pipeline-plan.md
   - Features:
-      - Functionality: functionality_doc.md
-      - Web App Analysis: web_app_analysis.md
       - BBox Editing: bbox_editing_options.md
-      - Rotation Plan: rotation-plan.md
       - PrusaSlicer Settings: prusaslicer_terrain_settings.md
   - UX & Accessibility:
       - UX Audit: ux-audit.md
@@ -68,5 +74,3 @@ nav:
   - Project Management:
       - Proposals: proposals.md
       - Known Issues: issues.md
-      - Advanced TODOs: todo_advanced.md
-      - Frontend Refactoring: frontend_refactoring.md

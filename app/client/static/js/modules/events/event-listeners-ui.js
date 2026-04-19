@@ -11,16 +11,16 @@
 
 window._setupResizablePanel = function _setupResizablePanel() {
     const resizeHandle = document.getElementById('settingsPanelResizeHandle');
-    const rightPanel   = document.getElementById('demRightPanel');
+    const rightPanel = document.getElementById('demRightPanel');
     if (!resizeHandle || !rightPanel) return;
 
     let resizing = false, startX, startW, rafPending = false;
     resizeHandle.addEventListener('mousedown', e => {
         resizing = true;
-        startX   = e.clientX;
-        startW   = rightPanel.offsetWidth;
+        startX = e.clientX;
+        startW = rightPanel.offsetWidth;
         resizeHandle.classList.add('dragging');
-        document.body.style.cursor     = 'col-resize';
+        document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
         e.preventDefault();
     });
@@ -41,15 +41,15 @@ window._setupResizablePanel = function _setupResizablePanel() {
         if (!resizing) return;
         resizing = false;
         resizeHandle.classList.remove('dragging');
-        document.body.style.cursor     = '';
+        document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        try { localStorage.setItem('strm2stl_settingsPanelWidth', rightPanel.offsetWidth); } catch (_) {}
+        try { localStorage.setItem('strm2stl_settingsPanelWidth', rightPanel.offsetWidth); } catch (_) { }
         window.emitStackUpdate();
     });
     try {
         const savedW = localStorage.getItem('strm2stl_settingsPanelWidth');
         if (savedW) rightPanel.style.width = parseInt(savedW) + 'px';
-    } catch (_) {}
+    } catch (_) { }
 
     let _raf = null;
     new ResizeObserver(() => {
@@ -60,7 +60,7 @@ window._setupResizablePanel = function _setupResizablePanel() {
             if (cc) {
                 const cont = cc.parentElement;
                 if (cont.clientWidth > 0 && cont.clientHeight > 0) {
-                    cc.width  = cont.clientWidth;
+                    cc.width = cont.clientWidth;
                     cc.height = cont.clientHeight;
                     window.drawCurve?.();
                 }
@@ -98,10 +98,10 @@ window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {
         }
     });
 
-    const jsonToggleBtn    = document.getElementById('jsonViewToggleBtn');
-    const jsonView         = document.getElementById('settingsJsonView');
+    const jsonToggleBtn = document.getElementById('jsonViewToggleBtn');
+    const jsonView = document.getElementById('settingsJsonView');
     const demControlsInner = document.getElementById('demControlsInner');
-    const settingsSaveRow  = document.getElementById('settingsSaveRow');
+    const settingsSaveRow = document.getElementById('settingsSaveRow');
 
     if (jsonToggleBtn && jsonView) {
         let jsonViewOpen = false;
@@ -124,7 +124,7 @@ window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {
     }
 
     document.getElementById('applyJsonSettingsBtn')?.addEventListener('click', () => {
-        const editor  = document.getElementById('settingsJsonEditor');
+        const editor = document.getElementById('settingsJsonEditor');
         const errorEl = document.getElementById('settingsJsonError');
         try {
             window.applyAllSettings?.(JSON.parse(editor.value));
@@ -155,7 +155,7 @@ window._setupSidebarEditView = function _setupSidebarEditView() {
         const w = document.getElementById('sbWest')?.value;
         if (n != null) window.setBboxInputValues?.(n, s, e, w);
         const nf = parseFloat(n), sf = parseFloat(s),
-              ef = parseFloat(e), wf = parseFloat(w);
+            ef = parseFloat(e), wf = parseFloat(w);
         if (!isNaN(nf) && !isNaN(sf) && !isNaN(ef) && !isNaN(wf)) {
             const _map = window.getMap?.();
             const _bb = window.getBoundingBox?.();

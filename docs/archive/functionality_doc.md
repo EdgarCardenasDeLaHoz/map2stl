@@ -1,21 +1,22 @@
 # UI Functionality Reference
 
-_Last updated: 2026-03-18_
+_Last updated: 2026-04-19_
 
-This is a detailed feature inventory, not the best onboarding entrypoint.
+This document is a **feature inventory and changelog**, not the best starting point.
 
-Use these first when orienting to the repo:
-
-- `ai-agent-onboarding.md` for the shortest project map
-- `task-routing.md` to choose the owning frontend or backend area
-- `arch.md` and `modules.md` for current runtime structure and module ownership
-
-This document is a high-level map of all implemented features in `strm2stl/ui/templates/index.html`.
-Line numbers are approximate — the file grows over time.
+> **Current-state reference** for the web app (architecture, endpoints, UI overview):
+> see [`web_app_analysis.md`](web_app_analysis.md).
+>
+> For repo orientation: [`ai-agent-onboarding.md`](ai-agent-onboarding.md)
+> For edit routing: [`task-routing.md`](task-routing.md)
+> For architecture: [`arch.md`](arch.md)
 
 ---
 
 ## Implemented Features
+
+The tables below are a detailed inventory of every implemented UI feature.
+For a shorter overview, see [`web_app_analysis.md`](web_app_analysis.md).
 
 ### Navigation & Views
 | Feature | JS Function | Notes |
@@ -99,13 +100,7 @@ Line numbers are approximate — the file grows over time.
 
 ## Architecture Notes
 
-- **Split-file SPA:** HTML/CSS/JS are separate files (`templates/index.html` ~1 151 lines, `static/css/app.css` ~2 879 lines, `static/js/app.js` ~8 183 lines). Refactored from original 9 700-line single `index.html` in 2026-03-17 session.
-- **Three bbox state variables:** `boundingBox` (Leaflet draw bounds), `selectedRegion` (saved region object), `currentDemBbox` (plain object after DEM loads). All three are updated together in `_onBboxMiniMouseUp()` and the Reload handler.
-- **Layer cache:** `lastDemData`, `lastWaterMaskData`, `lastRawDemData` are nulled by `clearLayerCache()` on any bbox change.
-- **Projection:** `applyProjection(srcCanvas, bbox)` is called after every render. Adding a new projection = one `if` branch here + one `<option>` in `#paramProjection`.
-- **API routes:** Backend uses both legacy routes (`/api/preview_dem`, `/api/water_mask`) and new typed routes (`/api/terrain/dem`, `/api/terrain/water-mask`). app.js primarily calls the new routes.
-- **Extracted modules:** `city-overlay.js` and `stacked-layers.js` live in `static/js/modules/`, loaded as plain `<script>` tags before `app.js`. Functions exposed on `window`; shared state via `window.appState`.
-- **CSS variables:** All colours and the panel width are defined as `--bg-dark`, `--bg-mid`, `--bg-light`, `--border`, `--border-light`, `--text-dim`, `--text-muted`, `--panel-width` in the `:root` block in `app.css`.
+> Moved to [`arch.md`](arch.md). See also [`web_app_analysis.md`](web_app_analysis.md) for a compact summary.
 
 ---
 

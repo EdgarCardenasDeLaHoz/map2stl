@@ -1,5 +1,7 @@
 # Backend API Routes — strm2stl
 
+_Last updated: 2026-04-19_
+
 For notebook and Python SDK tracing, pair this document with `sdk-workflow.md` and `../notebooks/Session_API_Reference.ipynb`.
 
 Use `../notebooks/API_Terrain.ipynb` when you want the end-to-end workflow instead of route-by-route examples.
@@ -16,9 +18,7 @@ Primary `TerrainSession` touchpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/` | Serve index.html |
-| GET | `/api/coordinates` | Legacy: list regions from coordinates.json |
-| POST | `/api/save_coordinate` | Legacy: save new region (used by app.js) |
+| GET | `/` | Serve index.html (`server.py`) |
 | GET | `/api/regions` | List all regions |
 | POST | `/api/regions` | Create region (body: `RegionCreate`), 201 |
 | PUT | `/api/regions/{name}` | Update region bbox + metadata |
@@ -41,8 +41,11 @@ Primary `TerrainSession` touchpoints:
 | GET/POST | `/api/terrain/dem` | Fetch processed DEM |
 | GET/POST | `/api/terrain/dem/raw` | Fetch unprocessed DEM array |
 | GET/POST | `/api/terrain/water-mask` | Fetch water mask + ESA land cover |
-| GET/POST | `/api/terrain/satellite` | Fetch satellite imagery |
+| GET/POST | `/api/terrain/esa-land-cover` | Fetch ESA WorldCover classification raster |
+| GET | `/api/terrain/satellite` | Fetch satellite imagery (ESRI tiles) |
 | GET | `/api/terrain/sources` | List DEM data sources |
+| GET | `/api/terrain/hydrology` | Fetch HydroRIVERS depression grid for bbox |
+| POST | `/api/terrain/hydrology/merge` | Merge hydrology depression into DEM array |
 | POST | `/api/dem/merge` | Merge multiple DEM layers (`MergeRequest`) |
 | POST | `/api/export/preview` | DEM values for Three.js preview (no STL) |
 
@@ -60,6 +63,8 @@ Primary `TerrainSession` touchpoints:
 | POST | `/api/export/stl` | Generate + download STL |
 | POST | `/api/export/obj` | Generate + download OBJ |
 | POST | `/api/export/3mf` | Generate + download 3MF |
+| POST | `/api/export/crosssection` | Generate cross-section OBJ |
+| POST | `/api/export/preview` | DEM values for Three.js preview (no mesh file) |
 
 `Session_API_Reference.ipynb` also covers the broader export family used by the session client, including split export, OBJ inspection, verification, and slicer endpoints.
 
@@ -91,7 +96,7 @@ Primary `TerrainSession` touchpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/composite/city-raster` | Rasterize OSM features to height-delta arrays (PIL, ~50× faster than JS) — used by `composite-dem.js` |
+| POST | `/api/composite/city-raster` | Rasterize OSM features to height-delta arrays (PIL, ~50× faster than JS). Supports `projection` and `clip_nans` for uniform pipeline alignment — used by `composite-dem.js` |
 
 ## Cache & Settings (`routers/cache.py`, `settings.py`)
 
@@ -103,14 +108,26 @@ Primary `TerrainSession` touchpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/settings` | Full server-authoritative settings payload |
 | GET | `/api/cache` | Cache statistics |
 | DELETE | `/api/cache` | Clear server cache |
+| DELETE | `/api/cache/region` | Clear cache for a specific region bbox |
 | GET | `/api/cache/check` | Check if specific bbox is cached |
 | GET | `/api/settings/projections` | Available projections |
 | GET | `/api/settings/colormaps` | Available colormaps |
 | GET | `/api/settings/datasets` | Available DEM datasets |
-| GET | `/api/global_dem_overview` | Cached global DEM PNG |
+| GET | `/api/global_dem_overview` | Cached global DEM PNG (served by `server.py`) |
+
+## Height Routes (`routers/height.py`)
+
+Building height estimation from multiple data sources. Router uses prefix `/api/height`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/height/sources` | List available height data sources for a bbox |
+| POST | `/api/height/fetch` | Fetch building height raster from specified provider(s) |
+
+See [libraries.md](libraries.md) for the height provider architecture and
+[height-pipeline-plan.md](height-pipeline-plan.md) for implementation status.
 
 ## Key Pydantic Models (`schemas.py`)
 
