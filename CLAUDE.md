@@ -17,12 +17,22 @@ python -m uvicorn app.server.server:app --port 9000 --reload   # starts FastAPI
 python -m pytest tests/ -v                                     # run all tests (108, 7 files)
 ```
 
+## Recommended Read Order
+
+1. `docs/ai-agent-onboarding.md` for the shortest correct project map
+2. `docs/README.md` for the preferred docs index inside `docs/`
+3. `docs/sdk-workflow.md` for notebook and `TerrainSession` tracing
+4. `docs/task-routing.md` to choose the right files before editing
+5. Subsystem docs such as `docs/api.md`, `docs/modules.md`, `docs/state.md`, or `docs/arch.md`
+
 ## When to Read What
 
 | Working on | Files to read |
 |---|---|
+| First-pass project orientation | `docs/ai-agent-onboarding.md` + `docs/task-routing.md` |
 | Backend endpoint | `docs/api.md` + relevant router file |
-| Session client (Python API) | `app/session/terrain_session.py` + `notebooks/Session_API_Reference.ipynb` |
+| Session client (Python API) | `docs/sdk-workflow.md` + `app/session/terrain_session.py` + `notebooks/Session_API_Reference.ipynb` |
+| Notebook-driven terrain workflow | `docs/sdk-workflow.md` + `notebooks/API_Terrain.ipynb` |
 | Cache / storage | `app/server/core/cache.py` header + `docs/api.md` |
 | DEM rendering / colormaps | `docs/modules.md` + `app/client/static/js/modules/dem/dem-loader.js:1-30` |
 | City / OSM features | `docs/modules.md` + `app/client/static/js/modules/layers/city-overlay.js:1-40` |
@@ -48,14 +58,14 @@ strm2stl/
 │   │   ├── server.py      ← FastAPI app + lifespan  (entry: uvicorn app.server.server:app)
 │   │   ├── config.py      ← constants, OPENTOPO_DATASETS, API keys
 │   │   ├── schemas.py     ← all Pydantic models
-│   │   ├── core/          ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py
+│   │   ├── core/          ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py, hydrorivers.py
 │   │   └── routers/       ← terrain.py, regions.py, export.py, cities.py, cache.py, settings.py
 │   ├── client/            ← browser client (HTML/CSS/JS)
 │   │   ├── static/js/     ← main.js, modules/ (30 ES modules in 8 subdirs)
 │   │   ├── static/css/    ← app.css
 │   │   └── templates/     ← index.html
 │   └── session/           ← Python SDK client (talks to server over HTTP)
-│       ├── terrain_session.py
+│       ├── terrain_session.py  ← ~1656 lines (refactored: 7 helpers, 5 properties)
 │       └── viz.py
 │
 │  ── geo/mesh libraries ─────────────────────────────────────────────────
@@ -98,6 +108,10 @@ strm2stl/
 
 | Topic | File |
 |---|---|
+| Preferred docs index | `docs/README.md` |
+| AI agent onboarding | `docs/ai-agent-onboarding.md` |
+| Notebook and SDK route map | `docs/sdk-workflow.md` |
+| Task-to-file routing | `docs/task-routing.md` |
 | Architecture + data flows | `docs/arch.md` |
 | Global state variables | `docs/state.md` |
 | Function index | `docs/functions.md` |

@@ -199,8 +199,8 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
             area_delta_pct = (area_after - area_before) / area_before * 100 if area_before else 0
             logger.info(
                 f"[buildings] geometry simplify (tol={simplify_tolerance} m): "
-                f"vertices {verts_before} → {verts_after} ({verts_after/verts_before*100:.1f}%)  |  "
-                f"area {area_before/1e4:.2f} → {area_after/1e4:.2f} ha  (Δ {area_delta_pct:+.2f}%)"
+                f"vertices {verts_before} -> {verts_after} ({verts_after/verts_before*100:.1f}%)  |  "
+                f"area {area_before/1e4:.2f} -> {area_after/1e4:.2f} ha  (d {area_delta_pct:+.2f}%)"
             )
         gdf = _fill_heights(gdf, default_m=10.0, lo=3.0, hi=300.0, levels_col='building:levels')
         n_pre_dissolve = len(gdf)
@@ -211,8 +211,8 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
         area_post_dissolve = float(gdf_m_post_d.geometry.area.sum())
         area_dissolve_delta_pct = (area_post_dissolve - area_pre_dissolve) / area_pre_dissolve * 100 if area_pre_dissolve else 0
         logger.info(
-            f"[buildings] dissolve: {n_pre_dissolve} → {len(gdf)} features  |  "
-            f"area {area_pre_dissolve/1e4:.2f} → {area_post_dissolve/1e4:.2f} ha  (Δ {area_dissolve_delta_pct:+.2f}%)"
+            f"[buildings] dissolve: {n_pre_dissolve} -> {len(gdf)} features  |  "
+            f"area {area_pre_dissolve/1e4:.2f} -> {area_post_dissolve/1e4:.2f} ha  (d {area_dissolve_delta_pct:+.2f}%)"
         )
         keep = ["geometry", "height_m"]
         gdf = gdf[[c for c in keep if c in gdf.columns]]
@@ -264,8 +264,8 @@ def _fetch_waterways(ox, bbox, tol_deg: float, simplify_tolerance: float) -> dic
             area_delta_pct = (area_after - area_before) / area_before * 100 if area_before else 0
             logger.info(
                 f"[waterways] geometry simplify (tol={simplify_tolerance} m): "
-                f"vertices {verts_before} → {verts_after} ({verts_after/verts_before*100:.1f}% of original)  |  "
-                f"polygon area {area_before/1e4:.2f} → {area_after/1e4:.2f} ha  (Δ {area_delta_pct:+.2f}%)"
+                f"vertices {verts_before} -> {verts_after} ({verts_after/verts_before*100:.1f}% of original)  |  "
+                f"polygon area {area_before/1e4:.2f} -> {area_after/1e4:.2f} ha  (d {area_delta_pct:+.2f}%)"
             )
         else:
             gdf["geometry"] = gdf.geometry.make_valid()
@@ -423,6 +423,7 @@ def rasterize_city_data(
     """
     import numpy as np
     from rasterio.transform import from_bounds
+    from rasterio.enums import MergeAlg
     from rasterio.features import rasterize as _rasterize
     from shapely.geometry import shape, mapping
 
@@ -448,7 +449,7 @@ def rasterize_city_data(
     if water_shapes:
         try:
             _rasterize(water_shapes, out=grid, transform=transform,
-                       merge_alg="replace", dtype="float32")
+                       merge_alg=MergeAlg.replace, dtype="float32")
         except Exception as e:
             logger.warning(f"rasterize waterways failed: {e}")
 
@@ -473,7 +474,7 @@ def rasterize_city_data(
     if road_shapes:
         try:
             _rasterize(road_shapes, out=grid, transform=transform,
-                       merge_alg="replace", dtype="float32")
+                       merge_alg=MergeAlg.replace, dtype="float32")
         except Exception as e:
             logger.warning(f"rasterize roads failed: {e}")
 
@@ -495,7 +496,7 @@ def rasterize_city_data(
             # Rasterize all at once using max merge_alg (rasterio ≥ 1.2)
             building_grid = _rasterize(
                 building_shapes, out_shape=(dim, dim), transform=transform,
-                fill=0, dtype="float32", merge_alg="add",
+                fill=0, dtype="float32", merge_alg=MergeAlg.add,
             )
             # Use np.maximum so building heights always win over road/water values
             np.maximum(grid, building_grid, out=grid)

@@ -292,8 +292,8 @@ async function previewModelIn3D() {
     if (!modelRenderer) initModelViewer();
 
     try {
-        const exaggeration = parseFloat(document.getElementById('modelExaggeration')?.value) || 1.5;
-        const baseHeight   = parseFloat(document.getElementById('modelBaseHeight')?.value)  || 5;
+        const exaggeration = parseFloat(document.getElementById('exportExaggeration')?.value) || 1.0;
+        const baseHeight   = parseFloat(document.getElementById('exportBaseHeight')?.value)  || 5;
 
         const { data, error: previewErr } = await window.api.export.preview({
             dem_values:   ldd.values,
@@ -302,7 +302,7 @@ async function previewModelIn3D() {
             model_height: window.appState.demParams.height || 20,
             base_height:  baseHeight,
             exaggeration,
-            sea_level_cap: document.getElementById('modelSeaLevelCap')?.checked || false,
+            sea_level_cap: document.getElementById('exportSeaLevelCap')?.checked || false,
         });
         if (previewErr) throw new Error(previewErr);
 
@@ -475,8 +475,8 @@ function updatePuzzlePreview() {
     if (old) modelScene.remove(old);
     if (!document.getElementById('puzzleEnabled')?.checked) { needsRender = true; return; }
 
-    const pX = parseInt(document.getElementById('puzzlePiecesX')?.value) || 3;
-    const pY = parseInt(document.getElementById('puzzlePiecesY')?.value) || 3;
+    const pX = parseInt(document.getElementById('splitCols')?.value) || 3;
+    const pY = parseInt(document.getElementById('splitRows')?.value) || 3;
     const w = 100, h = 100;
     const verts = [];
     for (let i = 1; i < pX; i++) { const x = (i / pX) * w - w / 2; verts.push(x, 0, -h / 2, x, 0, h / 2); }
@@ -494,8 +494,8 @@ function updatePuzzlePreview() {
 async function exportPuzzle3MF() {
     const region = window.appState?.selectedRegion;
     if (!region) { window.showToast('Select a region first', 'warning'); return; }
-    const pX = parseInt(document.getElementById('puzzlePiecesX')?.value) || 3;
-    const pY = parseInt(document.getElementById('puzzlePiecesY')?.value) || 3;
+    const pX = parseInt(document.getElementById('splitCols')?.value) || 3;
+    const pY = parseInt(document.getElementById('splitRows')?.value) || 3;
     if (pX * pY > 64) { window.showToast('Too many pieces (max 64 total)', 'warning'); return; }
     window.showToast('Puzzle 3MF export: backend implementation pending', 'warning');
 }

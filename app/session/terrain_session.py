@@ -24,19 +24,28 @@ Usage:
 
 from __future__ import annotations
 
+import base64
 import copy
 import math
 import os
 import subprocess
 import sys
 import time
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
+import matplotlib.cm as cm
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import requests
 from IPython.display import display
+from PIL import Image
+
+from app.server.config import LUMINANCE_R, LUMINANCE_G, LUMINANCE_B
+from app.server.core.validation import METRES_PER_DEGREE
 
 # Paths relative to this file (app/session/ → app/ → strm2stl/)
 _STRM2STL_DIR = Path(__file__).parent.parent.parent   # strm2stl/
@@ -139,6 +148,25 @@ _DEFAULT_SETTINGS: dict = {
         "elevation_curve":        None,    # named remap curve
         "elevation_curve_points": None,    # [[x, y], ...] custom curve points
     },
+    # ── Hydrology ─────────────────────────────────────────────────────────
+    # source: "natural_earth" — global, 3 detail tiers, no download needed
+    #         "hydrorivers"   — HydroRIVERS ~500 m detail, regional shapefile
+    #                           downloaded on first use (~30–100 MB, cached permanently)
+    # depression_m:    max river depression in metres (negative, e.g. -5.0)
+    #
+    # natural_earth only:
+    #   scale_m:       10 (finest), 50, or 110 (coarsest)
+    #
+    # hydrorivers only:
+    #   min_order:     minimum Strahler order to include (1=all streams … 9=Amazon only)
+    #   order_exponent: how steeply depression scales with order (default 1.5)
+    "hydrology": {
+        "source":         "natural_earth",
+        "scale_m":        10,
+        "depression_m":   -5.0,
+        "min_order":      3,
+        "order_exponent": 1.5,
+    },
 }
 
 _VALID_PROJECTIONS = frozenset({
@@ -153,6 +181,49 @@ _KNOWN_COLORMAPS = frozenset({
     "terrain", "viridis", "plasma", "magma", "inferno",
     "cividis", "gray", "ocean", "hot", "RdBu",
 })
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ESA WorldCover land-cover class colorization
+# ─────────────────────────────────────────────────────────────────────────────
+_ESA_CLASS_COLORS = {
+    0:   (0,   50,  150),    # no data/ocean → dark blue
+    10:  (34,  139, 34),   # tree cover → forest green
+    20:  (107, 142, 35),   # shrubland → olive
+    30:  (144, 238, 144),  # grassland → light green
+    40:  (210, 180, 140),  # cropland → tan/wheat
+    50:  (128, 128, 128),  # built-up → grey
+    60:  (205, 175, 130),  # bare/sparse → sandy light brown
+    70:  (240, 248, 255),  # snow/ice → alice blue-white
+    80:  (30,  144, 255),  # water → bright dodge blue
+    90:  (0,   206, 209),  # wetland → dark turquoise
+    95:  (0,   100, 0),    # mangroves → dark green
+    100: (188, 214, 182),  # moss → pale green
+}
+
+_ESA_CLASS_LABELS = {
+    0:   ("Ocean/No data",  (0,   50,  150)),
+    10: ("Tree cover",      (34,  139, 34)),
+    20: ("Shrubland",       (107, 142, 35)),
+    30: ("Grassland",       (144, 238, 144)),
+    40: ("Cropland",        (210, 180, 140)),
+    50: ("Built-up",        (128, 128, 128)),
+    60: ("Bare/sparse",     (205, 175, 130)),
+    70: ("Snow/ice",        (240, 248, 255)),
+    80: ("Water",           (30,  144, 255)),
+    90: ("Wetland",         (0,   206, 209)),
+    95: ("Mangroves",       (0,   100, 0)),
+    100: ("Moss/lichen",    (188, 214, 182)),
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# City layer visualization colors
+# ─────────────────────────────────────────────────────────────────────────────
+_CITY_LAYER_COLORS = {
+    "waterways": (30,  144, 255),   # dodger blue
+    "roads":     (180, 180, 180),   # light grey
+    "walls":     (160,  80, 200),   # purple
+    "buildings": (220,  80,  40),   # red-orange
+}
 
 
 def _kill_tree(proc) -> None:
@@ -169,9 +240,13 @@ def _kill_tree(proc) -> None:
 
 
 class TerrainSession:
-    """Wraps the strm2stl HTTP API as a single Python object."""
+    """Wrap the strm2stl HTTP API as a single Python object.
 
-    def __init__(self, port: int = 9000):
+    This is the main Python SDK used by the notebooks. For a faster map of how
+    these methods relate to the server, see docs/sdk-workflow.md and docs/api.md.
+    """
+
+    def __init__(self, port: int = 9090):
         self._port = port
         self._base = f"http://127.0.0.1:{port}"
         self._server_proc: Optional[subprocess.Popen] = None
@@ -188,51 +263,469 @@ class TerrainSession:
         self.satellite: Optional[str] = None
         self.city_data: Optional[dict] = None
         self.city_raster: Optional[dict] = None
+        # Natural Earth hydrology (rivers, lakes, coastlines)
+        self.hydrology: Optional[dict] = None
 
-    # ------------------------------------------------------------------ #
-    # Server lifecycle                                                      #
-    # ------------------------------------------------------------------ #
+    # Settings convenience properties for reduced verbosity
+    @property
+    def dem_settings(self) -> dict:
+        """Quick access to self.settings['dem']."""
+        return self.settings["dem"]
 
-    def start(self) -> "TerrainSession":
-        """Launch the uvicorn server and wait until it responds.
+    @property
+    def view_settings(self) -> dict:
+        """Quick access to self.settings['view']."""
+        return self.settings["view"]
 
-        Kills any existing process already bound to the port before starting,
-        so stale servers from previous sessions don't intercept requests.
+    @property
+    def export_settings(self) -> dict:
+        """Quick access to self.settings['export']."""
+        return self.settings["export"]
+
+    @property
+    def city_settings(self) -> dict:
+        """Quick access to self.settings['city']."""
+        return self.settings["city"]
+
+    @property
+    def water_settings(self) -> dict:
+        """Quick access to self.settings['water']."""
+        return self.settings["water"]
+
+    # ================================================================== #
+    # ─────────────────────── Helper Methods ─────────────────────────── #
+    # ================================================================== #
+
+    def _api_request(self, method: str, endpoint: str, **kwargs) -> dict:
+        """Unified HTTP request with error handling.
+
+        Parameters
+        ----------
+        method : str
+            HTTP method: 'get', 'post', 'put', 'delete'
+        endpoint : str
+            API endpoint path (e.g., '/api/regions')
+        **kwargs
+            Additional arguments passed to requests (params, json, timeout, etc.)
+
+        Returns
+        -------
+        dict
+            Parsed JSON response
+
+        Raises
+        ------
+        HTTPError
+            If response status is not OK
         """
+        url = f"{self._base}{endpoint}"
+        r = getattr(requests, method)(url, **kwargs)
+        if not r.ok:
+            print(f"ERROR {r.status_code}: {r.text}")
+        r.raise_for_status()
+        return r.json()
+
+    def _ensure_bbox(self) -> None:
+        """Raise if region not selected."""
+        required = {"north", "south", "east", "west"}
+        if not self.bbox or not required.issubset(self.bbox):
+            raise RuntimeError(
+                "Region bbox is not available. Run s.select(...) successfully before this operation. "
+                "If the selection step failed, verify the API server is running on the expected port."
+            )
+
+    def _get_extent(self) -> list:
+        """Return geographic extent as [west, east, south, north] for matplotlib."""
+        return [self.bbox["west"], self.bbox["east"],
+                self.bbox["south"], self.bbox["north"]]
+
+    def _require_attribute(self, attr_name: str, method_name: str) -> None:
+        """Raise RuntimeError if attribute is None."""
+        if getattr(self, attr_name) is None:
+            raise RuntimeError(f"Call {method_name}() first")
+
+    def _extract_flat_settings(self) -> dict:
+        """Return the full grouped settings dict for API persistence.
+
+        Returns a deep copy of self.settings with None values stripped
+        so the stored JSON stays clean.  The structure mirrors
+        _DEFAULT_SETTINGS exactly (dem, projection, view, water,
+        satellite, city, export, split, hydrology).
+        """
+        import copy
+
+        def _strip_none(obj):
+            if isinstance(obj, dict):
+                return {k: _strip_none(v) for k, v in obj.items() if v is not None}
+            if isinstance(obj, list):
+                return [_strip_none(i) for i in obj]
+            return obj
+
+        return _strip_none(copy.deepcopy(self.settings))
+
+    def _build_region_payload(self,
+                              name: Optional[str] = None,
+                              north: Optional[float] = None,
+                              south: Optional[float] = None,
+                              east: Optional[float] = None,
+                              west: Optional[float] = None,
+                              **metadata) -> dict:
+        """Build region creation/update payload.
+
+        Fills in bbox from current selection if not provided.
+        Metadata keys are passed through as-is (description, continent, source).
+        """
+        return {
+            "name":        name or self.region_name,
+            "north":       north if north is not None else self.bbox.get("north"),
+            "south":       south if south is not None else self.bbox.get("south"),
+            "east":        east if east is not None else self.bbox.get("east"),
+            "west":        west if west is not None else self.bbox.get("west"),
+            **{k: v for k, v in metadata.items() if v is not None}
+        }
+
+    def _decode_satellite_image(self, b64_string: str) -> np.ndarray:
+        """Decode base64 satellite image to RGB array."""
+        img_bytes = base64.b64decode(b64_string)
+        return np.array(Image.open(BytesIO(img_bytes)).convert("RGB"), dtype=np.float32)
+
+    def _encode_satellite_image(self, arr: np.ndarray, quality: int = 85) -> str:
+        """Encode RGB array to base64 JPEG."""
+        buf = BytesIO()
+        Image.fromarray(arr.clip(0, 255).astype(np.uint8)).save(
+            buf, format="JPEG", quality=quality)
+        return base64.b64encode(buf.getvalue()).decode()
+
+    def _plot_geo_image(self,
+                        arr: np.ndarray,
+                        title: str,
+                        cmap: Optional[str] = None,
+                        vmin: Optional[float] = None,
+                        vmax: Optional[float] = None,
+                        legend_handles: Optional[list] = None,
+                        figsize: tuple = (8, 8),
+                        **imshow_kwargs) -> None:
+        """Generic geographic extent image plotter with optional legend.
+
+        Parameters
+        ----------
+        arr : ndarray
+            Image array (2-D grayscale or 3-D RGB)
+        title : str
+            Plot title
+        cmap : str, optional
+            Matplotlib colormap (only used for 2-D arrays)
+        vmin, vmax : float, optional
+            Value range for colormap scaling
+        legend_handles : list, optional
+            List of matplotlib patches for legend
+        figsize : tuple, optional
+            Figure size (default (8, 8))
+        **imshow_kwargs : dict
+            Additional arguments passed to ax.imshow()
+        """
+        fig, ax = plt.subplots(figsize=figsize)
+        extent = self._get_extent()
+
+        ax.imshow(arr, origin="upper", extent=extent, aspect="equal",
+                  cmap=cmap, vmin=vmin, vmax=vmax, **imshow_kwargs)
+        ax.set_title(title)
+        ax.axis("off")
+        if legend_handles:
+            ax.legend(handles=legend_handles, loc="lower right", fontsize=7,
+                      framealpha=0.8, ncol=2)
+        plt.tight_layout()
+        plt.show()
+
+    def _compute_edge_map(self, arr: np.ndarray) -> np.ndarray:
+        """Convert RGB or grayscale to normalized Sobel edge map.
+
+        Used by check_alignment() for cross-correlation registration.
+        Returns zero-mean, unit-variance gradient magnitude for stable registration.
+        """
+        import cv2 as _cv2
+
+        # Perceptual luminance
+        if arr.ndim == 3:
+            luma = (arr[:, :, 0] * LUMINANCE_R +
+                    arr[:, :, 1] * LUMINANCE_G +
+                    arr[:, :, 2] * LUMINANCE_B)
+        else:
+            luma = arr.astype(np.float32)
+
+        # Normalise to [0, 255] so Sobel scale is consistent
+        lo, hi = luma.min(), luma.max()
+        if hi > lo:
+            luma = (luma - lo) / (hi - lo) * 255.0
+
+        luma8 = luma.astype(np.float32)
+        # Sobel in x and y
+        sx = _cv2.Sobel(luma8, _cv2.CV_32F, 1, 0, ksize=3)
+        sy = _cv2.Sobel(luma8, _cv2.CV_32F, 0, 1, ksize=3)
+        mag = np.sqrt(sx ** 2 + sy ** 2)
+
+        # Mild Gaussian blur to suppress 1-px noise
+        mag = _cv2.GaussianBlur(mag, (5, 5), sigmaX=1.0)
+
+        # Zero-mean / unit-std
+        std = mag.std()
+        if std > 0:
+            mag = (mag - mag.mean()) / std
+        else:
+            mag = mag - mag.mean()
+
+        return mag.astype(np.float32)
+
+    def _kill_stale_server(self) -> None:
+        """Find and kill any existing server on our port."""
         try:
             import psutil
+        except ImportError:
+            print("Warning: psutil not installed, cannot kill stale server")
+            return
+        killed = False
+        try:
             for conn in psutil.net_connections():
                 if conn.laddr.port == self._port and conn.status == "LISTEN":
-                    stale = psutil.Process(conn.pid)
-                    print(
-                        f"Killing stale server on port {self._port} (PID {conn.pid}, {stale.exe()})")
+                    try:
+                        stale = psutil.Process(conn.pid)
+                        pid_info = stale.exe()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                    print(f"Killing server on port {self._port} "
+                          f"(PID {conn.pid}, {pid_info})")
                     _kill_tree(stale)
-                    time.sleep(0.5)
-        except Exception:
-            pass
+                    killed = True
+        except psutil.AccessDenied:
+            print(f"Warning: access denied scanning ports (try running as admin)")
+        if killed:
+            time.sleep(0.5)
 
+    def _launch_server_process(self, reload: bool = False,
+                               visible: bool = False) -> subprocess.Popen:
+        """Start uvicorn server subprocess.
+
+        Auto-reload is disabled by default because notebook-driven workflows do
+        not need a file watcher, and the extra reloader process is less stable on
+        Windows/Jupyter.
+
+        Parameters
+        ----------
+        visible : bool
+            If True, open the server in a new console window so you can
+            watch its log output.  On Windows this uses ``CREATE_NEW_CONSOLE``;
+            on other platforms ``start_new_session`` is used instead.
+        """
         python_exe = str(
             _VENV_PYTHON) if _VENV_PYTHON.exists() else sys.executable
-        self._server_proc = subprocess.Popen(
-            [python_exe, "-m", "uvicorn", "app.server.server:app",
-             "--host", "127.0.0.1", "--port", str(self._port)],
+        cmd = [python_exe, "-m", "uvicorn", "app.server.server:app",
+               "--host", "127.0.0.1", "--port", str(self._port)]
+        if reload:
+            cmd.append("--reload")
+
+        if visible:
+            # Let output flow to a new console window
+            kwargs: dict = {"cwd": str(_STRM2STL_DIR)}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+            else:
+                kwargs["start_new_session"] = True
+            return subprocess.Popen(cmd, **kwargs)
+
+        return subprocess.Popen(
+            cmd,
             cwd=str(_STRM2STL_DIR),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        for _ in range(20):
+
+    def _wait_for_server_ready(self, max_attempts: int = 60) -> bool:
+        """Poll server until responsive."""
+        for _ in range(max_attempts):
             try:
                 requests.get(f"{self._base}/api/regions", timeout=1)
-                print(
-                    f"Server running (PID {self._server_proc.pid}, python: {python_exe})")
-                return self
+                return True
             except Exception:
                 time.sleep(0.5)
-        print("Warning: server may not be ready yet")
+        return False
+
+    def _validate_enum_settings(self, errors: list) -> None:
+        """Validate enum setting values."""
+        p = self.settings["projection"]
+        d = self.settings["dem"]
+        w = self.settings["water"]
+        e = self.settings["export"]
+
+        def _check_enum(val, key, valid_set, label):
+            if val is not None and val not in valid_set:
+                errors.append(
+                    f"  settings['{key}'] = {val!r} is not recognised.\n"
+                    f"    {label}: {sorted(valid_set)}"
+                )
+
+        _check_enum(p.get("projection"),    "projection.projection",
+                    _VALID_PROJECTIONS,  "valid projections")
+        _check_enum(d.get("dem_source"),    "dem.dem_source",
+                    _VALID_DEM_SOURCES,  "valid dem_source values")
+        _check_enum(w.get("dataset"),       "water.dataset",     {
+                    "esa", "jrc"},       "valid dataset values")
+        _check_enum(e.get("contour_style"), "export.contour_style", {
+                    "engraved", "embossed"}, "valid contour_style values")
+
+    def _validate_numeric_ranges(self, errors: list) -> None:
+        """Validate numeric setting ranges."""
+        d = self.settings["dem"]
+        e = self.settings["export"]
+        sp = self.settings["split"]
+        sat = self.settings["satellite"]
+        c = self.settings["city"]
+        w = self.settings["water"]
+
+        # satellite.dim range
+        sat_dim = sat.get("dim")
+        if (sat_dim is not None and isinstance(sat_dim, (int, float))
+                and not (1 <= sat_dim <= 4000)):
+            errors.append(
+                f"  settings['satellite']['dim'] = {sat_dim!r} must be between 1 and 4000")
+
+        # Positive float constraints
+        for group_key, pairs in (
+            ("dem",    [("dim", d), ("depth_scale", d)]),
+            ("export", [("model_height", e), ("base_height", e), ("exaggeration", e),
+                        ("contour_interval", e)]),
+            ("split",  [("puzzle_m", sp), ("puzzle_base_n", sp),
+                        ("border_height", sp), ("border_offset", sp)]),
+            ("city",   [("simplify_tolerance", c),
+             ("min_area", c), ("building_scale", c)]),
+        ):
+            for key, src in pairs:
+                val = src.get(key)
+                if val is not None and (not isinstance(val, (int, float)) or val <= 0):
+                    errors.append(
+                        f"  settings['{group_key}']['{key}'] = {val!r} must be a positive number")
+
+        # dim range
+        dim = d.get("dim")
+        if dim is not None and isinstance(dim, (int, float)) and not (1 <= dim <= 2000):
+            errors.append(
+                f"  settings['dem']['dim'] = {dim!r} must be between 1 and 2000")
+
+        # Non-negative floats
+        for key, src, group_key in (
+            ("water_scale", d, "dem"),
+            ("floor_val",   e, "export"),
+        ):
+            val = src.get(key)
+            if val is not None and (not isinstance(val, (int, float)) or val < 0):
+                errors.append(
+                    f"  settings['{group_key}']['{key}'] = {val!r} must be a non-negative number")
+
+        # sat_scale: integer ≥ 10
+        ss = w.get("sat_scale")
+        if ss is not None and (not isinstance(ss, int) or ss < 10):
+            errors.append(
+                f"  settings['water']['sat_scale'] = {ss!r} must be an integer ≥ 10")
+
+        # Integer constraints
+        for key in ("split_rows", "split_cols"):
+            val = sp.get(key)
+            if val is not None and (not isinstance(val, int) or val < 1):
+                errors.append(
+                    f"  settings['split']['{key}'] = {val!r} must be an integer ≥ 1")
+
+    def _validate_bool_flags(self, errors: list) -> None:
+        """Validate boolean setting flags."""
+        p = self.settings["projection"]
+        d = self.settings["dem"]
+        e = self.settings["export"]
+        sp = self.settings["split"]
+        c = self.settings["city"]
+
+        for key, src, group_key in (
+            ("maintain_dimensions", p,  "projection"),
+            ("clip_nans",          p,  "projection"),
+            ("subtract_water",     d,  "dem"),
+            ("show_sat",           d,  "dem"),
+            ("sea_level_cap",      e,  "export"),
+            ("engrave_label",      e,  "export"),
+            ("contours",           e,  "export"),
+            ("include_border",     sp, "split"),
+            ("simplify_terrain",   c,  "city"),
+        ):
+            val = src.get(key)
+            if val is not None and not isinstance(val, bool):
+                errors.append(
+                    f"  settings['{group_key}']['{key}'] = {val!r} must be True or False")
+
+    def _validate_list_layers(self, errors: list) -> None:
+        """Validate city layers list."""
+        c = self.settings["city"]
+        layers = c.get("layers")
+        _valid_layers = {"buildings", "roads", "waterways"}
+
+        if layers is not None:
+            if not isinstance(layers, list):
+                errors.append(
+                    f"  settings['city']['layers'] = {layers!r} must be a list")
+            else:
+                bad = [x for x in layers if x not in _valid_layers]
+                if bad:
+                    errors.append(f"  settings['city']['layers'] contains unknown layers: {bad}. "
+                                  f"Valid: {sorted(_valid_layers)}")
+
+    # ================================================================== #
+    # ─────────────────────── Server lifecycle ─────────────────────── #
+    # ================================================================== #
+
+    def start(self, force_restart: bool = False, reload: bool = False,
+              visible: bool = False) -> "TerrainSession":
+        """Launch the uvicorn server and wait until it responds.
+
+        Parameters
+        ----------
+        force_restart : bool
+            If True, kill any existing server on the port and start fresh.
+            Use this when you've edited server code and want to guarantee
+            the new code is loaded.
+        reload : bool
+            If True, enable uvicorn's file-watching reloader. Leave this False
+            for notebook use; it is mainly useful during active server-side
+            development outside Jupyter.
+        visible : bool
+            If True, open the server in its own console window so you can
+            watch the uvicorn log output live.
+        """
+        if not force_restart and self._wait_for_server_ready(max_attempts=1):
+            print(f"Server already running at {self._base}")
+            print("  (use s.start(force_restart=True) or s.restart() to force reload)")
+            return self
+
+        self._kill_stale_server()
+        self._server_proc = self._launch_server_process(reload=reload, visible=visible)
+        python_exe = str(
+            _VENV_PYTHON) if _VENV_PYTHON.exists() else sys.executable
+        if self._wait_for_server_ready():
+            print(
+                f"Server running (PID {self._server_proc.pid}, python: {python_exe}, reload={reload})")
+        else:
+            print("Warning: server may not be ready yet")
         return self
 
+    def restart(self, reload: bool = False,
+                visible: bool = False) -> "TerrainSession":
+        """Kill any server on the port and start a fresh one.
+
+        Shorthand for ``s.start(force_restart=True, ...)``.
+        Use after editing server-side code to guarantee the new code is loaded.
+        """
+        return self.start(force_restart=True, reload=reload, visible=visible)
+
     def stop(self) -> None:
-        """Kill the server process and all its children."""
+        """Kill the server process and all its children.
+
+        Also kills any server listening on the port even if it wasn't
+        started by this session (e.g. leftover from a previous notebook run).
+        """
         if self._server_proc is not None:
             _kill_tree(self._server_proc)
             try:
@@ -241,6 +734,11 @@ class TerrainSession:
                 pass
             self._server_proc = None
             print("Server stopped.")
+        else:
+            # No _server_proc — but there may be a server we adopted on start().
+            # Kill whatever is on the port.
+            self._kill_stale_server()
+            print("Server stopped (external process).")
 
     def __enter__(self) -> "TerrainSession":
         return self
@@ -258,9 +756,7 @@ class TerrainSession:
         Includes available projections, DEM sources, water datasets,
         slicer config files, and valid numeric ranges for DEM parameters.
         """
-        r = requests.get(f"{self._base}/api/settings", timeout=10)
-        r.raise_for_status()
-        data = r.json()
+        data = self._api_request("get", "/api/settings", timeout=10)
         print(
             f"Projections  : {[p['id'] for p in data.get('projections', [])]}")
         print(
@@ -272,10 +768,12 @@ class TerrainSession:
 
     def regions(self, filter_col: Optional[str] = None,
                 filter_val: Optional[str] = None) -> pd.DataFrame:
-        """List all saved regions as a DataFrame. Optionally filter by column value."""
-        resp = requests.get(f"{self._base}/api/regions")
-        resp.raise_for_status()
-        raw = resp.json()["regions"]
+        """GET /api/regions — list saved regions as a DataFrame.
+
+        Use this before select() when the notebook needs to discover available
+        region names or filter the catalog by metadata.
+        """
+        raw = self._api_request("get", "/api/regions")["regions"]
         df = pd.DataFrame([{
             "name":      r["name"],
             "continent": r.get("continent"),
@@ -291,10 +789,12 @@ class TerrainSession:
         return df
 
     def select(self, name: str) -> "TerrainSession":
-        """Select a region by name. Loads bbox and merges saved settings with defaults."""
-        resp = requests.get(f"{self._base}/api/regions")
-        resp.raise_for_status()
-        raw = resp.json()["regions"]
+        """Select a region by name and hydrate bbox plus saved settings.
+
+        Reads the region list from GET /api/regions and then loads persisted
+        panel settings from GET /api/regions/{name}/settings.
+        """
+        raw = self._api_request("get", "/api/regions")["regions"]
         region = next((r for r in raw if r["name"] == name), None)
         if region is None:
             raise ValueError(f"Region '{name}' not found")
@@ -302,17 +802,31 @@ class TerrainSession:
         self.region_name = name
         self.bbox = {k: region[k] for k in ("north", "south", "east", "west")}
 
-        saved_resp = requests.get(f"{self._base}/api/regions/{name}/settings")
-        saved = saved_resp.json().get("settings", {}) if saved_resp.ok else {}
+        try:
+            saved_resp = self._api_request(
+                "get", f"/api/regions/{name}/settings")
+            saved = saved_resp.get("settings", {})
+        except Exception:
+            saved = {}
 
         self.settings = copy.deepcopy(_DEFAULT_SETTINGS)
-        # Overlay saved region settings into the correct nested group.
-        # API uses flat keys (e.g. "dem_source", "model_height") — find the group by key name.
-        for api_key, val in saved.items():
-            for group in ("dem", "export", "split", "slicer", "water", "satellite", "city", "view"):
-                if api_key in self.settings[group]:
-                    self.settings[group][api_key] = val
-                    break
+        # Overlay saved region settings.
+        # Supports both the new grouped dict ({"dem": {...}, "view": {...}, ...})
+        # and the legacy flat dict ({"dim": 800, "colormap": "terrain", ...}).
+        if saved:
+            first_val = next(iter(saved.values()), None)
+            if isinstance(first_val, dict):
+                # Grouped format — merge each group into self.settings
+                for group, group_vals in saved.items():
+                    if group in self.settings and isinstance(group_vals, dict):
+                        self.settings[group].update(group_vals)
+            else:
+                # Legacy flat format — find the group by key name
+                for api_key, val in saved.items():
+                    for group in self.settings:
+                        if api_key in self.settings[group]:
+                            self.settings[group][api_key] = val
+                            break
 
         print(f"Region : {name}")
         print(f"BBox   : {self.bbox}")
@@ -327,21 +841,15 @@ class TerrainSession:
 
         Also selects the new region (sets self.region_name and self.bbox).
         """
-        payload = {
-            "name": name,
-            "north": north, "south": south,
-            "east": east,   "west": west,
-            "description": description,
-            "continent":   continent,
-            "source":      source,
-        }
-        r = requests.post(f"{self._base}/api/regions", json=payload)
-        if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
-        r.raise_for_status()
         self.region_name = name
         self.bbox = {"north": north, "south": south,
                      "east": east, "west": west}
+
+        payload = self._build_region_payload(name, north, south, east, west,
+                                             description=description,
+                                             continent=continent,
+                                             source=source)
+        self._api_request("post", "/api/regions", json=payload)
         print(f"Created region: {name}")
         return self
 
@@ -356,22 +864,15 @@ class TerrainSession:
         """
         if not self.region_name:
             raise RuntimeError("Call select() or create_region() first")
-        payload = {
-            "name":        self.region_name,
-            "north":       north if north is not None else self.bbox["north"],
-            "south":       south if south is not None else self.bbox["south"],
-            "east":        east if east is not None else self.bbox["east"],
-            "west":        west if west is not None else self.bbox["west"],
-            "description": description,
-            "continent":   continent,
-            "source":      source,
-        }
-        r = requests.put(
-            f"{self._base}/api/regions/{self.region_name}", json=payload)
-        if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
-        r.raise_for_status()
-        # Reflect any bbox changes locally
+
+        payload = self._build_region_payload(None, north, south, east, west,
+                                             description=description,
+                                             continent=continent,
+                                             source=source)
+        self._api_request(
+            "put", f"/api/regions/{self.region_name}", json=payload)
+
+        # Reflect bbox changes locally
         self.bbox = {
             "north": payload["north"], "south": payload["south"],
             "east":  payload["east"],  "west":  payload["west"],
@@ -388,10 +889,7 @@ class TerrainSession:
         target = name or self.region_name
         if not target:
             raise RuntimeError("Provide a region name or call select() first")
-        r = requests.delete(f"{self._base}/api/regions/{target}")
-        if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
-        r.raise_for_status()
+        self._api_request("delete", f"/api/regions/{target}")
         print(f"Deleted region: {target}")
         if target == self.region_name:
             self.region_name = None
@@ -401,40 +899,16 @@ class TerrainSession:
     def save_settings(self) -> "TerrainSession":
         """PUT /api/regions/{name}/settings — persist current settings to the database.
 
-        The saved keys are the flat DEM and view settings that the web UI
-        understands (dim, depth_scale, water_scale, subtract_water, dem_source,
-        projection, colormap, sat_scale).  Export/split/slicer/city settings are
-        session-only and are not persisted here.
+        Sends the full grouped settings dict (dem, projection, view, water,
+        satellite, city, export, split, hydrology) as a JSON blob.  On next
+        select() the same grouped dict is read back and merged into self.settings.
         """
         if not self.region_name:
             raise RuntimeError("Call select() or create_region() first")
-        d = self.settings["dem"]
-        p = self.settings["projection"]
-        v = self.settings["view"]
-        w = self.settings["water"]
-        payload = {
-            "dim":            d.get("dim"),
-            "depth_scale":    d.get("depth_scale"),
-            "water_scale":    d.get("water_scale"),
-            "subtract_water": d.get("subtract_water"),
-            "dem_source":     d.get("dem_source"),
-            "projection":     p.get("projection"),
-            "colormap":       v.get("colormap"),
-            "sat_scale":      w.get("sat_scale"),
-            "rescale_min":    v.get("rescale_min"),
-            "rescale_max":    v.get("rescale_max"),
-            "gridlines_show": v.get("gridlines_show"),
-            "gridlines_count": v.get("gridlines_count"),
-            "elevation_curve": v.get("elevation_curve"),
-            "elevation_curve_points": v.get("elevation_curve_points"),
-        }
-        # Strip None values — server treats absent keys as "unchanged"
-        payload = {k: v for k, v in payload.items() if v is not None}
-        r = requests.put(f"{self._base}/api/regions/{self.region_name}/settings",
-                         json=payload)
-        if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
-        r.raise_for_status()
+
+        payload = self._extract_flat_settings()
+        self._api_request(
+            "put", f"/api/regions/{self.region_name}/settings", json=payload)
         print(f"Settings saved for: {self.region_name}")
         return self
 
@@ -457,40 +931,16 @@ class TerrainSession:
     def _validate_settings(self) -> None:
         """Raise ValueError for invalid settings; print warnings for soft issues."""
         import warnings
-        p = self.settings["projection"]
-        d = self.settings["dem"]
-        e = self.settings["export"]
-        sp = self.settings["split"]
-        w = self.settings["water"]
-        sat = self.settings["satellite"]
-        c = self.settings["city"]
         v = self.settings["view"]
         errors = []
 
-        # ── Enum constraints (hard errors) ──────────────────────────────────
-        def _check_enum(val, key, valid_set, label):
-            if val is not None and val not in valid_set:
-                errors.append(
-                    f"  settings['{key}'] = {val!r} is not recognised.\n"
-                    f"    {label}: {sorted(valid_set)}"
-                )
+        # Delegate to focused validation methods
+        self._validate_enum_settings(errors)
+        self._validate_numeric_ranges(errors)
+        self._validate_bool_flags(errors)
+        self._validate_list_layers(errors)
 
-        _check_enum(p.get("projection"),    "projection.projection",
-                    _VALID_PROJECTIONS,  "valid projections")
-        _check_enum(d.get("dem_source"),    "dem.dem_source",
-                    _VALID_DEM_SOURCES,  "valid dem_source values")
-        _check_enum(w.get("dataset"),       "water.dataset",     {
-                    "esa", "jrc"},       "valid dataset values")
-        _check_enum(e.get("contour_style"), "export.contour_style", {
-                    "engraved", "embossed"}, "valid contour_style values")
-
-        # ── satellite.dim range ──────────────────────────────────────────────
-        sat_dim = sat.get("dim")
-        if sat_dim is not None and isinstance(sat_dim, (int, float)) and not (1 <= sat_dim <= 4000):
-            errors.append(
-                f"  settings['satellite']['dim'] = {sat_dim!r} must be between 1 and 4000")
-
-        # ── Colormap (soft warning — any matplotlib name is technically valid) ──
+        # Colormap (soft warning — any matplotlib name is technically valid)
         cm = v.get("colormap")
         if cm is not None and cm not in _KNOWN_COLORMAPS:
             warnings.warn(
@@ -499,81 +949,6 @@ class TerrainSession:
                 f"matplotlib colormap name, but may not render correctly in the UI.",
                 stacklevel=3,
             )
-
-        # ── Positive float constraints ───────────────────────────────────────
-        for group_key, pairs in (
-            ("dem",    [("dim", d), ("depth_scale", d)]),
-            ("export", [("model_height", e), ("base_height", e), ("exaggeration", e),
-                        ("contour_interval", e)]),
-            ("split",  [("puzzle_m", sp), ("puzzle_base_n", sp),
-                        ("border_height", sp), ("border_offset", sp)]),
-            ("city",   [("simplify_tolerance", c),
-             ("min_area", c), ("building_scale", c)]),
-        ):
-            for key, src in pairs:
-                val = src.get(key)
-                if val is not None and (not isinstance(val, (int, float)) or val <= 0):
-                    errors.append(
-                        f"  settings['{group_key}']['{key}'] = {val!r} must be a positive number")
-
-        # ── dim range ────────────────────────────────────────────────────────
-        dim = d.get("dim")
-        if dim is not None and isinstance(dim, (int, float)) and not (1 <= dim <= 2000):
-            errors.append(
-                f"  settings['dem']['dim'] = {dim!r} must be between 1 and 2000")
-
-        # ── Non-negative floats ──────────────────────────────────────────────
-        for key, src, group_key in (
-            ("water_scale", d, "dem"),
-            ("floor_val",   e, "export"),
-        ):
-            val = src.get(key)
-            if val is not None and (not isinstance(val, (int, float)) or val < 0):
-                errors.append(
-                    f"  settings['{group_key}']['{key}'] = {val!r} must be a non-negative number")
-
-        # ── sat_scale: integer ≥ 10 ──────────────────────────────────────────
-        ss = w.get("sat_scale")
-        if ss is not None and (not isinstance(ss, int) or ss < 10):
-            errors.append(
-                f"  settings['water']['sat_scale'] = {ss!r} must be an integer ≥ 10")
-
-        # ── Integer constraints ──────────────────────────────────────────────
-        for key in ("split_rows", "split_cols"):
-            val = sp.get(key)
-            if val is not None and (not isinstance(val, int) or val < 1):
-                errors.append(
-                    f"  settings['split']['{key}'] = {val!r} must be an integer ≥ 1")
-
-        # ── Bool constraints ─────────────────────────────────────────────────
-        for key, src, group_key in (
-            ("maintain_dimensions", p,  "projection"),
-            ("clip_nans",          p,  "projection"),
-            ("subtract_water",     d,  "dem"),
-            ("show_sat",           d,  "dem"),
-            ("sea_level_cap",      e,  "export"),
-            ("engrave_label",      e,  "export"),
-            ("contours",           e,  "export"),
-            ("include_border",     sp, "split"),
-            ("simplify_terrain",   c,  "city"),
-        ):
-            val = src.get(key)
-            if val is not None and not isinstance(val, bool):
-                errors.append(
-                    f"  settings['{group_key}']['{key}'] = {val!r} must be True or False")
-
-        # ── city layers: list of known strings ───────────────────────────────
-        layers = c.get("layers")
-        _valid_layers = {"buildings", "roads", "waterways"}
-        if layers is not None:
-            if not isinstance(layers, list):
-                errors.append(
-                    f"  settings['city']['layers'] = {layers!r} must be a list")
-            else:
-                bad = [x for x in layers if x not in _valid_layers]
-                if bad:
-                    errors.append(f"  settings['city']['layers'] contains unknown layers: {bad}. "
-                                  f"Valid: {sorted(_valid_layers)}")
 
         if errors:
             raise ValueError("Invalid settings:\n" + "\n".join(errors))
@@ -621,7 +996,6 @@ class TerrainSession:
         Below sea level (< 0): remapped to blue shades (deep = dark blue).
         Returns shape (H, W, 3) uint8.
         """
-        import matplotlib.cm as cm
         h, w = arr.shape
         out = np.zeros((h, w, 3), dtype=np.uint8)
 
@@ -662,37 +1036,23 @@ class TerrainSession:
           50 = Built-up          → grey
           60 = Bare/sparse veg   → tan/brown
           70 = Snow/ice          → white
-          80 = Permanent water   → blue
+          80 = Permanent water   → bright blue
           90 = Herbaceous wetland→ teal
           95 = Mangroves         → dark green
          100 = Moss/lichen       → pale green
-           0 = No data           → black
+           0 = No data/ocean     → dark blue
 
         Returns shape (H, W, 3) uint8.
         """
-        CLASS_COLORS = {
-            0:   (0,   0,   0),      # no data → black
-            10:  (34,  139, 34),   # tree cover → forest green
-            20:  (107, 142, 35),   # shrubland → olive
-            30:  (144, 238, 144),  # grassland → light green
-            40:  (210, 180, 140),  # cropland → tan/wheat
-            50:  (128, 128, 128),  # built-up → grey
-            60:  (205, 175, 130),  # bare/sparse → sandy light brown
-            70:  (240, 248, 255),  # snow/ice → alice blue-white
-            80:  (30,  144, 255),  # water → dodger blue
-            90:  (0,   206, 209),  # wetland → dark turquoise
-            95:  (0,   100, 0),    # mangroves → dark green
-            100: (188, 214, 182),  # moss → pale green
-        }
         h, w = arr.shape
         out = np.zeros((h, w, 3), dtype=np.uint8)
-        for cls, rgb in CLASS_COLORS.items():
+        for cls, rgb in _ESA_CLASS_COLORS.items():
             mask = (arr == cls)
             if mask.any():
                 out[mask] = rgb
         # Any unmapped class → purple as a flag
         mapped = np.zeros((h, w), dtype=bool)
-        for cls in CLASS_COLORS:
+        for cls in _ESA_CLASS_COLORS:
             mapped |= (arr == cls)
         out[~mapped] = (180, 0, 180)
         return out
@@ -730,24 +1090,80 @@ class TerrainSession:
         return _cv2.resize(arr.astype(np.float32), (target_w, target_h),
                            interpolation=interp)
 
-    def fetch_dem(self) -> "TerrainSession":
-        """POST /api/terrain/dem — fetch and store the processed DEM."""
-        if not self.bbox:
-            raise RuntimeError("Call select() before fetch_dem()")
+    def _ensure_available_for_fetch(self, name: str) -> None:
+        """Standardized check for fetch_* methods: bbox exists, settings valid."""
+        self._ensure_bbox()
         self._validate_settings()
+        print(f"Fetching {name}…")
+
+    def _handle_api_response(self, response) -> None:
+        """Check HTTP response status and raise on error."""
+        if not response.ok:
+            print(f"ERROR {response.status_code}: {response.text}")
+        response.raise_for_status()
+
+    def _prepare_array_response(
+        self, values: list, h: int, w: int, dtype=np.float32
+    ) -> np.ndarray:
+        """Reshape flat array to (h, w) grid."""
+        return np.array(values, dtype=dtype).reshape(h, w)
+
+    @staticmethod
+    def _decode_b64_grid(b64_str: str, h: int, w: int) -> np.ndarray:
+        """Decode a base64-encoded little-endian float32 grid to (h, w) array."""
+        raw = base64.b64decode(b64_str)
+        return np.frombuffer(raw, dtype=np.float32).reshape(h, w)
+
+    def _decode_grid_response(
+        self, data: dict, b64_key: str, arr_key: str, h: int, w: int
+    ) -> np.ndarray:
+        """Decode a grid from a server response, preferring b64 over plain array."""
+        if b64_key in data:
+            return self._decode_b64_grid(data[b64_key], h, w)
+        return self._prepare_array_response(data[arr_key], h, w)
+
+    def _project_rgb_channels(self, img: np.ndarray) -> np.ndarray:
+        """Apply projection to each RGB channel independently, then stack.
+        
+        Parameters
+        ----------
+        img : np.ndarray
+            RGB image (H, W, 3) in float32
+            
+        Returns
+        -------
+        np.ndarray
+            Projected RGB image with NaN→black conversion
+        """
+        r_ch = self._apply_projection(img[:, :, 0])
+        g_ch = self._apply_projection(img[:, :, 1])
+        b_ch = self._apply_projection(img[:, :, 2])
+        projected = np.stack([r_ch, g_ch, b_ch], axis=2)
+        # NaN fills from projection → black (0)
+        return np.nan_to_num(projected, nan=0.0).clip(0, 255).astype(np.uint8)
+
+    def _print_grid_info(self, name: str, w: int, h: int, extra: str = "") -> None:
+        """Print standardized grid dimension info."""
+        msg = f"{name}: {w}×{h} px"
+        if extra:
+            msg += f"  {extra}"
+        print(msg)
+
+    def fetch_dem(self) -> "TerrainSession":
+        """POST /api/terrain/dem — fetch and store the processed DEM.
+
+        Request parameters come primarily from settings['dem'] plus
+        settings['projection'] and water.dataset.
+        """
+        self._ensure_available_for_fetch("DEM")
         payload = {
             **self.bbox,
             **self.settings["dem"],
             **self.settings["projection"],
             "water_dataset": self.settings["water"]["dataset"],
         }
-        print("Fetching DEM…")
-        r = requests.post(f"{self._base}/api/terrain/dem",
-                          json=payload, timeout=120)
-        if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
-        r.raise_for_status()
-        self.dem = r.json()
+        self.dem = self._api_request(
+            "post", "/api/terrain/dem", params=payload, timeout=120)
         d = self.dem
         print(f"min={d['min_elevation']:.1f} m  max={d['max_elevation']:.1f} m  "
               f"mean={d['mean_elevation']:.1f} m  shape={d['dimensions']}")
@@ -762,15 +1178,20 @@ class TerrainSession:
         pixels, so profile heights in viz.plot_data are correctly proportioned
         relative to the image dimensions.
         """
-        if self.dem is None:
-            raise RuntimeError("Call fetch_dem() first")
+        self._require_attribute("dem", "fetch_dem")
         from app.session.viz import plot_data
+        import base64
         H, W = self.dem["dimensions"]
-        grid = np.array(self.dem["dem_values"]).reshape(
-            H, W)  # server returns north-up (row 0 = north)
+        # Server returns dem_values_b64 (base64-encoded float32 data)
+        if "dem_values_b64" in self.dem:
+            b64_data = self.dem["dem_values_b64"]
+            decoded = base64.b64decode(b64_data)
+            grid = np.frombuffer(decoded, dtype=np.float32).reshape(H, W)
+        else:
+            # Fallback for older API that returned dem_values directly
+            grid = np.array(self.dem["dem_values"]).reshape(H, W)
 
         # Compute metres-per-pixel from the bbox geographic extent.
-        # Use the mean latitude for the longitude→metre conversion.
         lat_c = (self.bbox["north"] + self.bbox["south"]) / 2.0
         metres_per_deg_lat = 111_320.0
         metres_per_deg_lon = 111_320.0 * np.cos(np.radians(lat_c))
@@ -778,42 +1199,28 @@ class TerrainSession:
                          self.bbox["south"]) * metres_per_deg_lat
         lon_span_m = abs(self.bbox["east"] -
                          self.bbox["west"]) * metres_per_deg_lon
-        # Use the longer axis so the scale matches the larger image dimension
-        m_per_px = max(lat_span_m, lon_span_m) / self.settings["dem"]["dim"]
+        m_per_px = max(lat_span_m, lon_span_m) / self.dem_settings["dim"]
 
-        # Convert elevation metres → pixels
         if m_per_px > 0:
             grid = grid / m_per_px
 
-        bbox_list = [self.bbox["west"], self.bbox["south"],
-                     self.bbox["east"], self.bbox["north"]]
-        plot_data(grid, name=self.region_name, bbox=bbox_list,
-                  colormap=self.settings["view"]["colormap"])
+        plot_data(grid, name=self.region_name, bbox=self._get_extent(),
+                  colormap=self.view_settings["colormap"])
 
     def show_water_mask(self) -> None:
         """Display the binary water mask as a matplotlib figure.
 
         Call fetch_water_mask() first.
         """
-        if self.water_mask is None:
-            raise RuntimeError("Call fetch_water_mask() first")
-        import matplotlib.pyplot as plt
-
+        self._require_attribute("water_mask", "fetch_water_mask")
         h, w = self.water_mask["water_mask_dimensions"]
         mask = np.array(
             self.water_mask["water_mask_values"], dtype=np.float32).reshape(h, w)
         pct = self.water_mask.get("water_percentage", 0)
-        ext = [self.bbox["west"], self.bbox["east"],
-               self.bbox["south"], self.bbox["north"]]
-
-        fig, ax = plt.subplots(figsize=(8, 8))
-        ax.imshow(mask, cmap="Blues", vmin=0, vmax=1,
-                  origin="upper", extent=ext, aspect="equal")
-        ax.set_title(
-            f"{self.region_name} — Water mask ({pct:.1f}% water)  {w}x{h} px")
-        ax.axis("off")
-        plt.tight_layout()
-        plt.show()
+        self._plot_geo_image(
+            mask,
+            f"{self.region_name} — Water mask ({pct:.1f}% water)  {w}x{h} px",
+            cmap="Blues", vmin=0, vmax=1)
 
     def show_esa_landcover(self) -> None:
         """Display the ESA WorldCover land-cover classification raster with semantic colors.
@@ -821,73 +1228,33 @@ class TerrainSession:
         Call fetch_esa_landcover() first (or fetch_water_mask(), which also populates
         self.esa_landcover since both come from the same endpoint).
         """
-        if self.esa_landcover is None:
-            raise RuntimeError("Call fetch_esa_landcover() first")
-        import matplotlib.pyplot as plt
-        import matplotlib.patches as mpatches
-
+        self._require_attribute("esa_landcover", "fetch_esa_landcover")
         h, w = self.esa_landcover["esa_dimensions"]
         esa_raw = np.array(
             self.esa_landcover["esa_values"], dtype=np.float32).reshape(h, w)
         rgb = self._colorize_esa(esa_raw)
-        ext = [self.bbox["west"], self.bbox["east"],
-               self.bbox["south"], self.bbox["north"]]
-
-        CLASS_LABELS = {
-            10: ("Tree cover",      (34,  139, 34)),
-            20: ("Shrubland",       (107, 142, 35)),
-            30: ("Grassland",       (144, 238, 144)),
-            40: ("Cropland",        (210, 180, 140)),
-            50: ("Built-up",        (128, 128, 128)),
-            60: ("Bare/sparse",     (205, 175, 130)),
-            70: ("Snow/ice",        (240, 248, 255)),
-            80: ("Water",           (30,  144, 255)),
-            90: ("Wetland",         (0,   206, 209)),
-            95: ("Mangroves",       (0,   100, 0)),
-            100: ("Moss/lichen",    (188, 214, 182)),
-        }
         present = sorted({int(v) for v in np.unique(
-            esa_raw) if int(v) in CLASS_LABELS})
+            esa_raw) if int(v) in _ESA_CLASS_LABELS})
         patches = [
             mpatches.Patch(color=np.array(
-                CLASS_LABELS[c][1]) / 255.0, label=CLASS_LABELS[c][0])
+                _ESA_CLASS_LABELS[c][1]) / 255.0, label=_ESA_CLASS_LABELS[c][0])
             for c in present
         ]
-
-        fig, ax = plt.subplots(figsize=(9, 8))
-        ax.imshow(rgb, origin="upper", extent=ext, aspect="equal")
-        ax.set_title(f"{self.region_name} — ESA land-cover  {w}×{h} px")
-        ax.axis("off")
-        if patches:
-            ax.legend(handles=patches, loc="lower right", fontsize=7,
-                      framealpha=0.8, ncol=2)
-        plt.tight_layout()
-        plt.show()
+        self._plot_geo_image(
+            rgb,
+            f"{self.region_name} — ESA land-cover  {w}×{h} px",
+            legend_handles=patches if patches else None,
+            figsize=(9, 8))
 
     def show_satellite(self) -> None:
         """Display the satellite imagery as a matplotlib figure.
 
         Call fetch_satellite() first.
         """
-        if self.satellite is None:
-            raise RuntimeError("Call fetch_satellite() first")
-        import base64
-        import matplotlib.pyplot as plt
-        from PIL import Image
-        from io import BytesIO
-
+        self._require_attribute("satellite", "fetch_satellite")
         img_bytes = base64.b64decode(self.satellite)
         img = Image.open(BytesIO(img_bytes))
-        ext = [self.bbox["west"], self.bbox["east"],
-               self.bbox["south"], self.bbox["north"]]
-
-        fig, ax = plt.subplots(figsize=(8, 8))
-        # Satellite tiles are stitched north-to-south: row 0 = north — no flip needed
-        ax.imshow(img, origin="upper", extent=ext, aspect="equal")
-        ax.set_title(f"{self.region_name} — Satellite")
-        ax.axis("off")
-        plt.tight_layout()
-        plt.show()
+        self._plot_geo_image(img, f"{self.region_name} — Satellite")
 
     def show_city(self) -> None:
         """Display the city raster layers as a single composite RGB image.
@@ -897,53 +1264,34 @@ class TerrainSession:
         Call fetch_cities() then composite_city_raster() first.
         """
         if self.city_raster is None:
-            print(
-                "No city raster available — skipping show_city() (bbox too large or fetch_cities() not called).")
+            msg = (
+                "No city raster available — "
+                "skipping show_city() (bbox too large or fetch_cities() not called).")
+            print(msg)
             return
-        import matplotlib.pyplot as plt
 
         h = self.city_raster["height"]
         w = self.city_raster["width"]
-
-        # Layer draw order (back→front) and their RGB colours (0-255)
-        LAYER_COLORS = {
-            "waterways": (30,  144, 255),   # dodger blue
-            "roads":     (180, 180, 180),   # light grey
-            "walls":     (160,  80, 200),   # purple
-            "buildings": (220,  80,  40),   # red-orange
-        }
-
-        # Start with a dark background
         composite = np.zeros((h, w, 3), dtype=np.float32)
         legend_patches = []
 
-        for lname, color in LAYER_COLORS.items():
+        for lname, color in _CITY_LAYER_COLORS.items():
             if lname not in self.city_raster:
                 continue
             mask = np.array(
                 self.city_raster[lname], dtype=np.float32).reshape(h, w)
-            # Alpha-composite: where mask > 0, blend colour over existing pixels
             alpha = np.clip(mask, 0, 1)[:, :, np.newaxis]
             layer_rgb = np.array(color, dtype=np.float32)[
                 np.newaxis, np.newaxis, :]
             composite = composite * (1 - alpha) + layer_rgb * alpha
-
-            import matplotlib.patches as mpatches
             legend_patches.append(
                 mpatches.Patch(color=tuple(c / 255 for c in color), label=lname.capitalize()))
 
-        ext = [self.bbox["west"], self.bbox["east"],
-               self.bbox["south"], self.bbox["north"]]
-        fig, ax = plt.subplots(figsize=(7, 7))
-        ax.imshow((composite / 255.0).clip(0, 1),
-                  origin="upper", extent=ext, aspect="equal")
-        ax.set_title(f"{self.region_name} — City layers")
-        if legend_patches:
-            ax.legend(handles=legend_patches, loc="lower right", fontsize=8,
-                      framealpha=0.8)
-        ax.axis("off")
-        plt.tight_layout()
-        plt.show()
+        self._plot_geo_image(
+            (composite / 255.0).clip(0, 1),
+            f"{self.region_name} — City layers",
+            legend_handles=legend_patches if legend_patches else None,
+            figsize=(7, 7))
 
     def check_alignment(
         self,
@@ -987,10 +1335,6 @@ class TerrainSession:
               "phasediff":    float,
             }
         """
-        import base64
-        from io import BytesIO
-        import matplotlib.pyplot as plt
-        from PIL import Image
         from skimage.registration import phase_cross_correlation
         from skimage.transform import resize as sk_resize
 
@@ -1047,14 +1391,8 @@ class TerrainSession:
             h = self.city_raster["height"]
             w = self.city_raster["width"]
             # Same semantic colours as show_city, blended back→front
-            LAYER_COLORS = {
-                "waterways": (30,  144, 255),
-                "roads":     (180, 180, 180),
-                "walls":     (160,  80, 200),
-                "buildings": (220,  80,  40),
-            }
             rgb = np.zeros((h, w, 3), dtype=np.float32)
-            for lname, color in LAYER_COLORS.items():
+            for lname, color in _CITY_LAYER_COLORS.items():
                 if lname not in self.city_raster:
                     continue
                 mask = np.array(self.city_raster[lname],
@@ -1147,35 +1485,7 @@ class TerrainSession:
         #   d) zero-mean / unit-std normalisation so amplitudes match
         import cv2 as _cv2
 
-        def _to_edge_map(arr: np.ndarray) -> np.ndarray:
-            """RGB (H,W,3) float → normalised Sobel edge magnitude (H,W) float32."""
-            if arr.ndim == 3:
-                # Perceptual luminance
-                luma = (arr[:, :, 0] * 0.299 +
-                        arr[:, :, 1] * 0.587 +
-                        arr[:, :, 2] * 0.114)
-            else:
-                luma = arr.astype(np.float32)
-            # Normalise to [0, 255] so Sobel scale is consistent across layers
-            lo, hi = luma.min(), luma.max()
-            if hi > lo:
-                luma = (luma - lo) / (hi - lo) * 255.0
-            luma8 = luma.astype(np.float32)
-            # Sobel in x and y
-            sx = _cv2.Sobel(luma8, _cv2.CV_32F, 1, 0, ksize=3)
-            sy = _cv2.Sobel(luma8, _cv2.CV_32F, 0, 1, ksize=3)
-            mag = np.sqrt(sx ** 2 + sy ** 2)
-            # Mild Gaussian blur to suppress 1-px noise
-            mag = _cv2.GaussianBlur(mag, (5, 5), sigmaX=1.0)
-            # Zero-mean / unit-std
-            std = mag.std()
-            if std > 0:
-                mag = (mag - mag.mean()) / std
-            else:
-                mag = mag - mag.mean()
-            return mag.astype(np.float32)
-
-        edges = {name: _to_edge_map(arr) for name, arr in padded.items()}
+        edges = {name: self._compute_edge_map(arr) for name, arr in padded.items()}
 
         # ── 6. Run phase_cross_correlation pairwise vs DEM ───────────────────
         results: dict = {}
@@ -1329,8 +1639,10 @@ class TerrainSession:
         plt.tight_layout()
         plt.show()
 
-        print(
-            f"\nAlignment results  (shift via DEM edges, NCC vs {ncc_ref_name}, min_shift={min_shift_px}px):")
+        header = (
+            f"\nAlignment results  "
+            f"(shift via DEM edges, NCC vs {ncc_ref_name}, min_shift={min_shift_px}px):")
+        print(header)
         print(f"  {'layer':12s}  {'shift(dy,dx)':>14s}  {'mag':>5s}  {'applied':>7s}  "
               f"{'ncc_before':>10s}  {'ncc_after':>9s}  {'gain':>6s}  {'note'}")
         for name, r in results.items():
@@ -1361,9 +1673,9 @@ class TerrainSession:
         east = self.bbox["east"]
         west = self.bbox["west"]
         mid_lat = (north + south) / 2.0
-        bbox_w_m = abs(east - west) * 111000.0 * \
+        bbox_w_m = abs(east - west) * METRES_PER_DEGREE * \
             math.cos(math.radians(mid_lat))
-        bbox_h_m = abs(north - south) * 111000.0
+        bbox_h_m = abs(north - south) * METRES_PER_DEGREE
         longer_m = max(bbox_w_m, bbox_h_m)
         dim = self.settings["dem"]["dim"]
         # m/px to hit dim pixels on longer axis; floor at 10 (ESA native resolution)
@@ -1393,8 +1705,7 @@ class TerrainSession:
             The server may return very high-res masks for large regions; this keeps
             memory and display time reasonable.
         """
-        if not self.bbox:
-            raise RuntimeError("Call select() before fetch_water_mask()")
+        self._require_attribute("bbox", "fetch_water_mask")
         print("Fetching water mask…")
         data = self._fetch_water_endpoint()
 
@@ -1402,8 +1713,8 @@ class TerrainSession:
 
         # ── Binary mask ──────────────────────────────────────────────────
         h, w = data["water_mask_dimensions"]
-        mask_arr = np.array(data["water_mask_values"],
-                            dtype=np.float32).reshape(h, w)
+        mask_arr = self._decode_grid_response(
+            data, "water_mask_values_b64", "water_mask_values", h, w)
 
         if self.settings["projection"]["projection"] != "none":
             mask_arr = self._apply_projection(mask_arr)
@@ -1423,14 +1734,17 @@ class TerrainSession:
         }
 
         # ── ESA land-cover (stash raw; rescaled on fetch_esa_landcover) ─
+        esa_h, esa_w = data["esa_dimensions"]
+        esa_raw = self._decode_grid_response(
+            data, "esa_values_b64", "esa_values", esa_h, esa_w)
         self.esa_landcover = {
-            "esa_values":     data["esa_values"],
-            "esa_dimensions": data["esa_dimensions"],
+            "esa_values":     esa_raw.ravel().tolist(),
+            "esa_dimensions": [esa_h, esa_w],
             "from_cache":     data.get("from_cache", False),
             "_rescaled":      False,
         }
 
-        print(f"Water coverage: {pct:.1f}%  |  grid: {w}×{h} px")
+        self._print_grid_info("Water coverage", w, h, f"{pct:.1f}%")
         return self
 
     def fetch_esa_landcover(self, max_display_dim: int = 1000) -> "TerrainSession":
@@ -1449,23 +1763,25 @@ class TerrainSession:
         max_display_dim : int
             Cap the stored array's longer axis to this many pixels (default 1000).
         """
-        if not self.bbox:
-            raise RuntimeError("Call select() before fetch_esa_landcover()")
+        self._require_attribute("bbox", "fetch_esa_landcover")
 
         if self.esa_landcover is None:
             print("Fetching ESA land-cover…")
             data = self._fetch_water_endpoint()
+            esa_h, esa_w = data["esa_dimensions"]
+            esa_raw = self._decode_grid_response(
+                data, "esa_values_b64", "esa_values", esa_h, esa_w)
             self.esa_landcover = {
-                "esa_values":     data["esa_values"],
-                "esa_dimensions": data["esa_dimensions"],
+                "esa_values":     esa_raw.ravel().tolist(),
+                "esa_dimensions": [esa_h, esa_w],
                 "from_cache":     data.get("from_cache", False),
                 "_rescaled":      False,
             }
             # Also populate water_mask if not yet done
             if self.water_mask is None:
                 h0, w0 = data["water_mask_dimensions"]
-                m0 = np.array(data["water_mask_values"],
-                              dtype=np.float32).reshape(h0, w0)
+                m0 = self._decode_grid_response(
+                    data, "water_mask_values_b64", "water_mask_values", h0, w0)
                 m0 = self._rescale_layer(m0, max_display_dim)
                 h0, w0 = m0.shape
                 self.water_mask = {
@@ -1480,8 +1796,8 @@ class TerrainSession:
         # Apply projection + rescale if not yet done
         if not self.esa_landcover.get("_rescaled", False):
             h, w = self.esa_landcover["esa_dimensions"]
-            esa_arr = np.array(
-                self.esa_landcover["esa_values"], dtype=np.float32).reshape(h, w)
+            esa_arr = self._prepare_array_response(
+                self.esa_landcover["esa_values"], h, w)
 
             if self.settings["projection"]["projection"] != "none":
                 esa_arr = self._apply_projection(esa_arr)
@@ -1496,43 +1812,33 @@ class TerrainSession:
             self.esa_landcover["_rescaled"] = True
 
         h, w = self.esa_landcover["esa_dimensions"]
-        print(f"ESA land-cover: {w}×{h} px")
+        self._print_grid_info("ESA land-cover", w, h)
         return self
 
     def fetch_satellite(self) -> "TerrainSession":
-        """GET /api/terrain/satellite — fetch base64-encoded JPEG satellite image for bbox.
+        """Fetch base64-encoded JPEG satellite image for bbox.
 
-        Result stored on self.satellite (base64 string). Uses settings['dem']['dim'] for resolution.
+        GET /api/terrain/satellite fetches the image and stores it on
+        self.satellite as a base64 string. Uses settings['satellite']['dim'] for
+        resolution and settings['projection'] for optional alignment with the DEM.
         """
-        if not self.bbox:
-            raise RuntimeError("Call select() before fetch_satellite()")
+        self._require_attribute("bbox", "fetch_satellite")
         params = {**self.bbox, "dim": self.settings["satellite"]["dim"]}
         print("Fetching satellite image…")
         r = requests.get(f"{self._base}/api/terrain/satellite",
                          params=params, timeout=300)
-        if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
-        r.raise_for_status()
+        self._handle_api_response(r)
         self.satellite = r.json()["image"]
         print(
             f"Satellite image received ({len(self.satellite) // 1024} KB base64)")
 
         # Apply projection per-channel so satellite aligns with the projected DEM
         if self.settings["projection"]["projection"] != "none":
-            import base64
-            from PIL import Image
-            from io import BytesIO
             img_bytes = base64.b64decode(self.satellite)
             img = np.array(Image.open(BytesIO(img_bytes)).convert(
                 "RGB"), dtype=np.float32)
             # Project each RGB channel independently
-            r_ch = self._apply_projection(img[:, :, 0])
-            g_ch = self._apply_projection(img[:, :, 1])
-            b_ch = self._apply_projection(img[:, :, 2])
-            projected = np.stack([r_ch, g_ch, b_ch], axis=2)
-            # NaN fills from projection → black (0)
-            projected = np.nan_to_num(projected, nan=0.0).clip(
-                0, 255).astype(np.uint8)
+            projected = self._project_rgb_channels(img)
             buf = BytesIO()
             Image.fromarray(projected).save(buf, format="JPEG", quality=85)
             self.satellite = base64.b64encode(buf.getvalue()).decode()
@@ -1587,38 +1893,275 @@ class TerrainSession:
         """POST /api/cities — fetch OSM building/road/waterway data for bbox.
 
         Result stored on self.city_data. Configure via settings['city'].
+        OSM data is only available for small regions (≤15 km diagonal).
         """
-        if not self.bbox:
-            raise RuntimeError("Call select() before fetch_cities()")
+        self._require_attribute("bbox", "fetch_cities")
+
+        # Pre-check bbox size to provide better error message
+        north, south = self.bbox["north"], self.bbox["south"]
+        east, west = self.bbox["east"], self.bbox["west"]
+        mid_lat = (north + south) / 2.0
+        R = 6371.0  # Earth radius in km
+        dLat = (north - south) * math.pi / 180
+        dLon = (east - west) * math.pi * \
+            math.cos(mid_lat * math.pi / 180) / 180
+        diag_km = math.sqrt((R * dLat) ** 2 + (R * dLon) ** 2)
+
+        if diag_km > 15:
+            msg1 = f"⚠️  OSM city data requires bbox ≤15 km diagonal (current: {diag_km:.1f} km)"
+            msg2 = f"   Current region: {diag_km:.0f} km × {diag_km:.0f} km (too large)"
+            print(msg1)
+            print(msg2)
+            print(f"   💡 Tip: Select a city-scale region or draw a smaller bounding box")
+            self.city_data = None
+            return self
+
         payload = {
             **self.bbox,
             "layers":             self.settings["city"]["layers"],
             "simplify_tolerance": self.settings["city"]["simplify_tolerance"],
             "min_area":           self.settings["city"]["min_area"],
         }
-        print("Fetching OSM city data…")
-        r = requests.post(f"{self._base}/api/cities",
-                          json=payload, timeout=120)
-        if r.status_code == 400:
-            try:
-                msg = r.json().get("error", r.text)
-            except Exception:
-                msg = r.text
-            print(f"WARNING: {msg}")
+        print(f"Fetching OSM city data (bbox: {diag_km:.1f} km diagonal)…")
+        try:
+            r = requests.post(f"{self._base}/api/cities",
+                              json=payload, timeout=120)
+
+            # Handle oversized bbox (422) or other errors gracefully
+            if r.status_code == 422:
+                try:
+                    error_msg = r.json().get("error", r.text)
+                except Exception:
+                    error_msg = "Bounding box too large"
+                print(f"⚠️  {error_msg}")
+                print(f"   💡 Use a smaller region (≤10 km diagonal for best results)")
+                self.city_data = None
+                return self
+            elif r.status_code == 400:
+                try:
+                    error_msg = r.json().get("error", r.text)
+                except Exception:
+                    error_msg = r.text
+                print(f"⚠️  Invalid request: {error_msg}")
+                self.city_data = None
+                return self
+
+            r.raise_for_status()
+            self.city_data = r.json()
+            n_buildings = len(self.city_data.get(
+                "buildings", {}).get("features", []))
+            n_roads = len(self.city_data.get("roads", {}).get("features", []))
+            n_waterways = len(self.city_data.get(
+                "waterways", {}).get("features", []))
             print(
-                "city_data not populated — use a city-scale region (≤10 km diagonal) to fetch OSM features.")
+                f"✓ Fetched {n_buildings} buildings, {n_roads} roads, {n_waterways} waterways")
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️  Network error: {e}")
+            print(f"   Make sure the server is running on {self._base}")
             self.city_data = None
-            return self
-        r.raise_for_status()
-        self.city_data = r.json()
-        n_buildings = len(self.city_data.get(
-            "buildings", {}).get("features", []))
-        n_roads = len(self.city_data.get("roads",     {}).get("features", []))
-        n_waterways = len(self.city_data.get(
-            "waterways", {}).get("features", []))
-        print(
-            f"Fetched {n_buildings} buildings, {n_roads} roads, {n_waterways} waterways")
+
         return self
+
+    def fetch_hydrology(self, max_display_dim: int = 1000) -> "TerrainSession":
+        """GET /api/terrain/hydrology — fetch river hydrology as a depression grid.
+
+        Source is controlled by ``settings['hydrology']['source']``:
+
+        * ``'natural_earth'`` — global Natural Earth dataset (3 tiers, no download).
+          Uses ``scale_m`` (10 / 50 / 110).
+        * ``'hydrorivers'`` — HydroRIVERS ~500 m detail. Regional shapefiles are
+          downloaded on first use (~30–100 MB each) and cached permanently under
+          ``cache/hydrorivers/``.  Uses ``min_order`` and ``order_exponent``.
+
+        The resulting grid can be merged with the DEM via ``merge_hydrology_with_dem()``.
+
+        Parameters
+        ----------
+        max_display_dim : int
+            Cap the stored array's longer axis (default 1000).
+
+        Returns
+        -------
+        self
+        """
+        self._ensure_available_for_fetch("hydrology")
+
+        hydr = self.settings["hydrology"]
+        source         = hydr.get("source", "natural_earth")
+        depression_m   = hydr.get("depression_m", -5.0)
+        scale_m        = hydr.get("scale_m", 10)
+        min_order      = hydr.get("min_order", 3)
+        order_exponent = hydr.get("order_exponent", 1.5)
+
+        import time as _time
+
+        if source == "hydrorivers":
+            print(f"Fetching HydroRIVERS hydrology "
+                  f"(min_order={min_order}, depression={depression_m} m)...")
+            print("  First call per region: downloads shapefile (~200 MB) + builds parquet")
+            print("  Subsequent calls: parquet bbox read (<1 sec) + rasterize")
+        else:
+            print(f"Fetching Natural Earth hydrology (scale_m={scale_m})...")
+
+        params = {
+            "north":          self.bbox["north"],
+            "south":          self.bbox["south"],
+            "east":           self.bbox["east"],
+            "west":           self.bbox["west"],
+            "dim":            self.settings["dem"]["dim"],
+            "source":         source,
+            "depression_m":   depression_m,
+            "scale_m":        scale_m,
+            "min_order":      min_order,
+            "order_exponent": order_exponent,
+        }
+
+        t0 = _time.perf_counter()
+        try:
+            resp = self._api_request(
+                "get", "/api/terrain/hydrology", params=params, timeout=600)
+        except Exception as e:
+            dt = _time.perf_counter() - t0
+            print(f"  Hydrology API request failed after {dt:.1f}s: {e}")
+            self.hydrology = None
+            return self
+        dt_api = _time.perf_counter() - t0
+        print(f"  API response in {dt_api:.1f}s")
+
+        if "error" in resp:
+            print(f"  {resp['error']}")
+            self.hydrology = None
+            return self
+
+        feature_count = resp.get("feature_count", 0)
+        if feature_count == 0:
+            print(f"  No rivers found in region")
+            self.hydrology = None
+            return self
+
+        print(f"  {feature_count} river features found")
+
+        t_post = _time.perf_counter()
+        h, w = resp["river_grid_dimensions"]
+        river_grid = self._decode_grid_response(
+            resp, "river_grid_values_b64", "river_grid_values", h, w)
+        river_grid = self._rescale_layer(river_grid, max_display_dim)
+
+        # Match DEM dimensions exactly if already fetched
+        if self.dem and "dimensions" in self.dem:
+            dem_h, dem_w = self.dem["dimensions"]
+            try:
+                from scipy.ndimage import zoom
+                z_h = dem_h / river_grid.shape[0]
+                z_w = dem_w / river_grid.shape[1]
+                river_grid = zoom(river_grid, (z_h, z_w), order=1)
+                print(f"  Resized hydrology to match DEM: {dem_w}x{dem_h}")
+            except ImportError:
+                print("  Warning: scipy not available, skipping DEM dimension match")
+
+        h, w = river_grid.shape
+        self.hydrology = {
+            "river_grid_values":      river_grid.ravel().tolist(),
+            "river_grid_dimensions":  [h, w],
+            "feature_count":          feature_count,
+            "source":                 resp.get("source", source),
+            "depression_m":           depression_m,
+        }
+
+        dt_post = _time.perf_counter() - t_post
+        dt_total = _time.perf_counter() - t0
+        print(f"  Post-processing: {dt_post:.1f}s (prepare array + rescale)")
+        print(f"  Hydrology complete: {w}x{h} px, {dt_total:.1f}s total "
+              f"(API={dt_api:.1f}s, post={dt_post:.1f}s)")
+        return self
+
+    def merge_hydrology_with_dem(self) -> "TerrainSession":
+        """Merge hydrology depressions with DEM elevation values.
+
+        Applies self.hydrology as a depression layer to self.dem using element-wise minimum.
+        This should be called AFTER fetch_dem() and fetch_hydrology().
+        Internally posts both arrays to /api/terrain/hydrology/merge.
+
+        Returns
+        -------
+        self
+        """
+        if self.dem is None:
+            raise RuntimeError("Call fetch_dem() first")
+        if self.hydrology is None:
+            print("⚠️  No hydrology data available (call fetch_hydrology() first)")
+            return self
+
+        h_dem, w_dem = self.dem["dimensions"]
+        if "dem_values_b64" in self.dem:
+            import base64 as _b64
+            dem_arr = np.frombuffer(
+                _b64.b64decode(self.dem["dem_values_b64"]),
+                dtype=np.float32).reshape(h_dem, w_dem)
+        else:
+            dem_arr = self._prepare_array_response(
+                self.dem["dem_values"], h_dem, w_dem)
+
+        h_riv, w_riv = self.hydrology["river_grid_dimensions"]
+        river_arr = self._prepare_array_response(
+            self.hydrology["river_grid_values"], h_riv, w_riv)
+
+        if dem_arr.shape != river_arr.shape:
+            print(
+                f"⚠️  DEM shape {dem_arr.shape} ≠ hydrology shape {river_arr.shape}")
+            print("   Skipping merge (resample hydrology or re-fetch DEM)")
+            return self
+
+        # Merge via HTTP API
+        payload = {
+            "dem_values": dem_arr.ravel().tolist(),
+            "dem_dimensions": [h_dem, w_dem],
+            "river_grid_values": river_arr.ravel().tolist(),
+            "river_grid_dimensions": [h_riv, w_riv],
+        }
+
+        try:
+            endpoint = "/api/terrain/hydrology/merge"
+            resp = self._api_request(
+                "post", endpoint, json=payload, timeout=300)
+        except Exception as e:
+            print(f"⚠️  Hydrology merge API request failed: {e}")
+            return self
+
+        # Update DEM with merged values (store as b64 for show_dem compat)
+        try:
+            merged_dem_values = resp.get("merged_dem_values", [])
+            merged_arr = np.array(merged_dem_values, dtype=np.float32)
+            import base64 as _b64
+            self.dem["dem_values_b64"] = _b64.b64encode(
+                merged_arr.tobytes()).decode("ascii")
+            self.dem.pop("dem_values", None)
+            self.dem["min_elevation"] = float(merged_arr.min())
+            self.dem["max_elevation"] = float(merged_arr.max())
+            self.dem["mean_elevation"] = float(merged_arr.mean())
+            print(f"Merged hydrology depressions into DEM")
+        except Exception as e:
+            print(f"Failed to apply merged DEM: {e}")
+
+        return self
+
+    def show_hydrology(self) -> None:
+        """Display the river/hydrology grid as a matplotlib figure.
+
+        Call fetch_hydrology() first.
+        """
+        self._require_attribute("hydrology", "fetch_hydrology")
+        h, w = self.hydrology["river_grid_dimensions"]
+        river_grid = np.array(self.hydrology["river_grid_values"],
+                              dtype=np.float32).reshape(h, w)
+        src = self.hydrology.get("source", "natural_earth")
+        src_label = "HydroRIVERS" if src == "hydrorivers" else "Natural Earth"
+        self._plot_geo_image(
+            river_grid,
+            f"{self.region_name} — {src_label} hydrology  {w}×{h} px",
+            cmap="Blues_r",
+            vmin=self.hydrology["depression_m"],
+            vmax=0)
 
     def _export_payload(self, fmt: str) -> dict:
         """Build the unified /api/export request body."""
@@ -1639,6 +2182,8 @@ class TerrainSession:
 
         fetch_dem() is no longer required before this call — the export endpoint
         derives the DEM from settings, using the disk cache if available.
+        Request body is assembled from settings['dem'], settings['export'], and
+        settings['split'].
         """
         payload = self._export_payload("obj_split")
         rows, cols = self.settings["split"]["split_rows"], self.settings["split"]["split_cols"]
@@ -1663,7 +2208,10 @@ class TerrainSession:
         return self
 
     def verify(self) -> dict:
-        """GET /api/export/obj/verify — run mesh health checks and print a table."""
+        """GET /api/export/obj/verify — run mesh health checks and print a table.
+
+        This inspects the last exported OBJ for the selected region name.
+        """
         if not self.region_name:
             raise RuntimeError("Call select() first")
         r = requests.get(f"{self._base}/api/export/obj/verify",
@@ -1749,8 +2297,10 @@ class TerrainSession:
         if not self.bbox:
             raise RuntimeError("Call select() before composite_city_raster()")
         if self.city_data is None:
-            print(
-                "Skipping composite_city_raster() — no city data (bbox too large or fetch_cities() not called).")
+            msg = (
+                "Skipping composite_city_raster() — no city data "
+                "(bbox too large or fetch_cities() not called).")
+            print(msg)
             return self
         dim = self.settings["dem"]["dim"]
         payload = {
@@ -1789,6 +2339,7 @@ class TerrainSession:
         """POST /api/export/slice — slice all terrain+base pairs with PrusaSlicer.
 
         Configure via settings['slicer']['slicer_config'] and settings['slicer']['output_subdir'].
+        This operates on the selected region's exported puzzle pieces.
         """
         if not self.region_name:
             raise RuntimeError("Call select() first")

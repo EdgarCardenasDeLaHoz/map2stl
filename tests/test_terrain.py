@@ -99,7 +99,7 @@ class TestTerrainDemRaw:
     def test_response_structure(self, client):
         r = client.get(f"/api/terrain/dem/raw?{_BBOX_QS}&dim=10")
         data = r.json()
-        assert "dem_values" in data
+        assert "dem_values_b64" in data
         assert "dimensions" in data
         assert "bbox" in data
 

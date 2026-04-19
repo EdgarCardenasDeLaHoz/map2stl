@@ -21,8 +21,8 @@
 | F-REG2 | Region import/export — download all as `regions.json`; import via file picker | `regions/regions.js`, `regions/region-ui.js` | Small | pending |
 | F-REG3 | Region settings inheritance — "use global defaults" override per region | `regions/regions.js`, `app/server/routers/regions.py` | Medium | pending |
 | F-UX1 | Consolidate region creation — keep only `floatingDrawBtn`; add empty-state hint to panel | `map/`, `index.html`, `events/event-listeners.js` | Small | pending |
-| F-UX2 | Text labels on floating map buttons — visible `<span>` labels below each icon | `index.html`, `app.css` | Small | pending |
-| F-UX3 | Clarify sidebar 3-state toggle — use "Expand / Collapse / Hide" instead of "Hide/Show" | `index.html`, `ui/view-management.js` | Small | pending |
+| F-UX2 | Text labels on floating map buttons — visible `<span>` labels below each icon | `index.html`, `app.css` | Small | done |
+| F-UX3 | Clarify sidebar 3-state toggle — use "Expand / Collapse / Hide" instead of "Hide/Show" | `index.html`, `ui/view-management.js` | Small | done |
 | F-UX-M | Lazy-allocate hidden layer canvases — create/destroy canvas elements on show/hide | `layers/stacked-layers.js`, `index.html` | Medium | pending |
 | F-FEAT | Preset undo — snapshot slider values before loading a preset; expose `window.revertPreset()` | `ui/presets.js` | Small | pending |
 
@@ -34,7 +34,7 @@
 |----|-------------|---------|--------|--------|
 | P-PERF6B | Web Worker for city polygon rendering (Part A — Float32Array buffers — done; Part B — OffscreenCanvas) | `layers/city-render.js`, new `workers/city-worker.js` | Large | pending |
 | P-PLANB-DEM | Off-thread DEM pixel loop — post `{values, lut}` to Worker, receive `ImageBitmap` | `dem/dem-main.js`, new `workers/dem-render-worker.js` | Medium | pending |
-| P-RAF | RAF-gate `applyCurveTodemSilent` if it ever moves back into mousemove | `ui/curve-editor.js` (now `app/client/static/js/modules/ui/curve-editor.js`) | Small | pending |
+| P-RAF | RAF-gate `applyCurveTodemSilent` if it ever moves back into mousemove | `ui/curve-editor.js` (now `app/client/static/js/modules/ui/curve-editor.js`) | Small | done |
 
 ---
 
@@ -42,7 +42,7 @@
 
 | ID | Description | File(s) | Effort | Status |
 |----|-------------|---------|--------|--------|
-| R-MAP2 | Bbox drag handle keyboard accessibility — `tabindex` + arrow-key nudge (0.1°) | `map/bbox-panel.js` | Small | pending |
+| R-MAP2 | Bbox drag handle keyboard accessibility — `tabindex` + arrow-key nudge (0.1°) | `map/bbox-panel.js` | Small | done |
 | R-CLEAN1 | Replace remaining inline styles with CSS utility classes (index.html, misc JS) | `index.html`, `app.css`, various | Medium | pending |
 | R-LAYERS | LayerBuffer class — unified canvas allocate/resize/dirty-track across all layer canvases | `layers/stacked-layers.js` | Large | pending |
 | R-EVENTS-A | Event bus consolidation — add `EV.DEM_LOADED`, `EV.REGION_SELECTED`; replace direct `window.fn()` calls | `events/`, all modules | Large | pending |
@@ -55,8 +55,8 @@
 
 | ID | Description | File(s) | Effort | Status |
 |----|-------------|---------|--------|--------|
-| A-ARCH4 | Vite bundler — `npm install` (config already at `vite.config.js`); HMR dev server on port 5173 | `package.json`, `index.html` | Medium | pending |
-| A-ARCH5 | Vitest unit tests for pure functions (requires A-ARCH4) — `interpolateCurve`, `mapElevationToColor`, `detectContinent`, `haversineDiagKm`, `niceGeoInterval` | `tests/` (new) | Medium | pending |
+| A-ARCH4 | Vite bundler — `npm install` (config already at `vite.config.js`); HMR dev server on port 5173 | `package.json`, `index.html` | Medium | done |
+| A-ARCH5 | Vitest unit tests for pure functions (requires A-ARCH4) — `interpolateCurve`, `mapElevationToColor`, `detectContinent`, `haversineDiagKm`, `niceGeoInterval` | `tests/` (new) | Medium | done |
 | A-SW | Service worker for API response caching — stale-while-revalidate for `/api/terrain/dem` and `/api/terrain/satellite` | new `sw.js` | Medium | pending |
 | A-OBJ-TEX | OBJ cross-section export with UV map + PNG texture from current colormap | `app/server/core/export.py`, `export/export-handlers.js` | Large | pending |
 

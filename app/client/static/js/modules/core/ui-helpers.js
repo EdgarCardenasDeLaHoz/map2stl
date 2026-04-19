@@ -306,12 +306,55 @@ window.decodeEsaValues = function decodeEsaValues(data) {
     return _decodeGrid(data.esa_values_b64, data.esa_values);
 };
 
+window.decodeHydrologyValues = function decodeHydrologyValues(data) {
+    return _decodeGrid(data.river_grid_values_b64, data.river_grid_values);
+};
+
 /**
  * Schedule a STACKED_UPDATE event on the next animation frame.
  * Centralises the repeated `requestAnimationFrame(() => window.events?.emit(...))` pattern.
  */
 window.emitStackUpdate = function emitStackUpdate() {
     requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+};
+
+// ============================================================
+// SHARED CONSTANTS
+// ============================================================
+
+/** Metres per degree of longitude at the equator. */
+window.GEO_M_PER_DEG_LON = 111320;
+/** Metres per degree of latitude (roughly constant). */
+window.GEO_M_PER_DEG_LAT = 110540;
+
+/**
+ * CSS selector for the primary DEM canvas inside #demImage.
+ * Excludes overlay canvases (gridlines, city, water, sat).
+ */
+window.DEM_CANVAS_SELECTOR = 'canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)';
+
+// ============================================================
+// COLOR LUT BUILDER
+// ============================================================
+
+/**
+ * Build a colour lookup table for a given colormap.
+ * Returns a Uint8Array of length size*3 (RGB triplets).
+ * @param {string} colormap - Colormap name (e.g. 'terrain', 'viridis')
+ * @param {number} [size=1024] - Number of LUT entries
+ * @returns {Uint8Array}
+ */
+window.buildColorLUT = function buildColorLUT(colormap, size = 1024) {
+    const lut = new Uint8Array(size * 3);
+    const maxIdx = size - 1;
+    for (let i = 0; i < size; i++) {
+        const t = i / maxIdx;
+        const [r, g, b] = window.mapElevationToColor?.(t, colormap) || [0, 0, 0];
+        lut[i * 3]     = Math.round((r || 0) * 255);
+        lut[i * 3 + 1] = Math.round((g || 0) * 255);
+        lut[i * 3 + 2] = Math.round((b || 0) * 255);
+    }
+    return lut;
 };
 
 // Listen for STATUS_UPDATE events (replaces scattered direct calls)

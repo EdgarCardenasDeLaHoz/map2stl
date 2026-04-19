@@ -71,7 +71,7 @@ window.initBboxMiniMap = function initBboxMiniMap() {
 
     // Use current bbox or fall back to world view
     const currentDemBbox = window.appState.currentDemBbox;
-    const selectedRegion  = window.appState.selectedRegion;
+    const selectedRegion = window.appState.selectedRegion;
     const bbox = currentDemBbox || (selectedRegion ? {
         north: selectedRegion.north, south: selectedRegion.south,
         east: selectedRegion.east, west: selectedRegion.west
@@ -154,7 +154,7 @@ window._onBboxMiniMouseUp = function _onBboxMiniMouseUp() {
 window.syncBboxMiniMap = function syncBboxMiniMap() {
     if (!_bboxMiniMapInited || !_bboxMiniMapInstance) return;
     const currentDemBbox = window.appState.currentDemBbox;
-    const selectedRegion  = window.appState.selectedRegion;
+    const selectedRegion = window.appState.selectedRegion;
     const bbox = currentDemBbox || (selectedRegion ? {
         north: selectedRegion.north, south: selectedRegion.south,
         east: selectedRegion.east, west: selectedRegion.west
@@ -226,11 +226,75 @@ window.setupGridToggle = function setupGridToggle() {
         gridlineCount.addEventListener('change', redrawAllGridlines);
     }
 
-    // Redraw gridlines on window resize
+    // Redraw gridlines on window resize (debounced)
+    let _resizeTimer;
     window.addEventListener('resize', () => {
-        if (window.appState.currentDemBbox) {
-            requestAnimationFrame(redrawAllGridlines);
-        }
+        clearTimeout(_resizeTimer);
+        _resizeTimer = setTimeout(() => {
+            if (window.appState.currentDemBbox) redrawAllGridlines();
+        }, 200);
+    });
+};
+
+// ─── setupBboxKeyboardNav ────────────────────────────────────────────────────
+
+/**
+ * Wire keyboard navigation to N/S/E/W bbox coordinate inputs.
+ * Arrow keys (±) adjust by 0.01 degrees (~1 km at equator).
+ * Enter confirms the change and reloads DEM.
+ * Escape cancels (reverts to previous value).
+ */
+window.setupBboxKeyboardNav = function setupBboxKeyboardNav() {
+    const bboxInputs = [
+        { el: document.getElementById('bboxNorth'), key: 'north', isLat: true },
+        { el: document.getElementById('bboxSouth'), key: 'south', isLat: true },
+        { el: document.getElementById('bboxEast'), key: 'east', isLat: false },
+        { el: document.getElementById('bboxWest'), key: 'west', isLat: false }
+    ];
+
+    bboxInputs.forEach(({ el, key, isLat }) => {
+        if (!el) return;
+
+        el.addEventListener('keydown', (e) => {
+            const step = 0.01;  // ~1 km at equator
+            let newValue = parseFloat(el.value);
+
+            if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                el.value = (newValue + step).toFixed(5);
+            } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+                e.preventDefault();
+                el.value = (newValue - step).toFixed(5);
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                const n = parseFloat(document.getElementById('bboxNorth')?.value || 0);
+                const s = parseFloat(document.getElementById('bboxSouth')?.value || 0);
+                const e_val = parseFloat(document.getElementById('bboxEast')?.value || 0);
+                const w = parseFloat(document.getElementById('bboxWest')?.value || 0);
+
+                let selectedRegion = window.appState.selectedRegion;
+                if (!selectedRegion) selectedRegion = {};
+                selectedRegion.north = n; selectedRegion.south = s;
+                selectedRegion.east = e_val; selectedRegion.west = w;
+                window.appState.selectedRegion = selectedRegion;
+                window.setSelectedRegion?.(selectedRegion);
+
+                const currentDemBbox = { north: n, south: s, east: e_val, west: w };
+                window.appState.currentDemBbox = currentDemBbox;
+
+                window.clearLayerCache?.();
+                window.loadDEM?.().then(() => {
+                    window.loadWaterMask?.();
+                    window.loadSatelliteImage?.();
+                });
+
+                el.blur();
+                window.showToast?.('Bbox updated', 'info');
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                el.blur();
+            }
+        });
     });
 };
 
@@ -246,7 +310,7 @@ window.populateRegionsPanelTable = function populateRegionsPanelTable() {
     const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
 
     const coordinatesData = window.getCoordinatesData?.() ?? [];
-    const selectedRegion  = window.appState.selectedRegion;
+    const selectedRegion = window.appState.selectedRegion;
 
     if (!container || !coordinatesData) return;
     container.innerHTML = '';

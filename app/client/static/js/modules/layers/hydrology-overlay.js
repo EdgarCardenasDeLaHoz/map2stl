@@ -21,7 +21,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 let _hydroAbortController = null;
-let lastHydrologyData = null;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Render
@@ -37,7 +36,8 @@ function renderHydrology(data) {
     const canvas = document.getElementById('layerHydroCanvas');
     if (!canvas) return;
 
-    const { river_grid_values: values, river_grid_dimensions: dims } = data;
+    const values = window.decodeHydrologyValues(data);
+    const dims = data.river_grid_dimensions;
     if (!values || !dims) return;
 
     const [h, w] = dims;
@@ -47,7 +47,7 @@ function renderHydrology(data) {
     const ctx   = canvas.getContext('2d');
     const img   = ctx.createImageData(w, h);
     const px    = img.data;
-    const minD  = data.depression_m ?? -5.0;   // most-negative value → full opacity
+    const minD  = data.depression_m || -5.0;   // most-negative value → full opacity
 
     for (let i = 0; i < values.length; i++) {
         const v = values[i];
@@ -104,10 +104,18 @@ window.loadHydrology = async function loadHydrology() {
     const minOrder    = parseInt(document.getElementById('hydroMinOrder')?.value     ?? '3');
     const orderExp    = parseFloat(document.getElementById('hydroOrderExponent')?.value ?? '1.5');
 
+    window.setLayerStatus?.('hydrology', 'loading');
+
     const paramObj = { north, south, east, west, dim, depression_m: depressionM, source };
     if (source === 'hydrorivers') {
         paramObj.min_order      = minOrder;
         paramObj.order_exponent = orderExp;
+    }
+    const projection = document.getElementById('paramProjection')?.value || 'none';
+    const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
+    if (projection !== 'none') {
+        paramObj.projection = projection;
+        paramObj.clip_nans = clipNans;
     }
     const params = new URLSearchParams(paramObj);
 
@@ -124,17 +132,19 @@ window.loadHydrology = async function loadHydrology() {
         const msg = (data?.error) || error || 'Unknown error';
         if (statusEl) statusEl.textContent = `⚠ ${msg}`;
         window.showToast?.(`Hydrology failed: ${msg}`, 'error');
-        lastHydrologyData = null;
+        window.setLayerStatus?.('hydrology', 'error');
         return;
     }
 
-    lastHydrologyData = data;
     renderHydrology(data);
 
     const fc = data.feature_count ?? 0;
     if (statusEl) statusEl.textContent =
         `${fc} river feature${fc !== 1 ? 's' : ''} · ${source === 'hydrorivers' ? 'HydroRIVERS' : 'Natural Earth'}`;
 
+    window.setLayerStatus?.('hydrology', 'loaded');
+    // Auto-activate Hydrology layer in the stacked view if not already on
+    window.setStackMode?.('Hydrology');
     window.emitStackUpdate();
     window.showToast?.(`Hydrology loaded (${fc} features)`, 'success');
 };
@@ -147,8 +157,8 @@ window.loadHydrology = async function loadHydrology() {
  * Clear the hydrology layer canvas and remove it from the stacked view.
  */
 window.clearHydrology = function clearHydrology() {
-    lastHydrologyData = null;
     if (window.appState) window.appState.hydrologySourceCanvas = null;
+    window.setLayerStatus?.('hydrology', 'empty');
 
     const canvas = document.getElementById('layerHydroCanvas');
     if (canvas) {

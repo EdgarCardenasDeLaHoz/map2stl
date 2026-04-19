@@ -40,8 +40,10 @@ window.setGridPixelMode = function setGridPixelMode(on) {
     window.drawLayerGrid?.();
 };
 
-// All layer canvas IDs — kept as hidden source buffers for other modules to write to
-const LAYER_STACK = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem', 'Hydrology'];
+// All layer canvas IDs — render order (first = bottom, last = top).
+// Mutable so users can reorder via the UI.
+let _layerOrder = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem', 'Hydrology'];
+const LAYER_STACK = _layerOrder;  // alias kept for backward compat
 
 // Multi-layer state: set of active layer keys + per-layer opacity (0–1)
 let _activeLayers  = new Set(['Dem']);
@@ -62,6 +64,11 @@ window.setStackMode = function setStackMode(mode) {
         // Auto-load satellite imagery if switching to SatImg with no data yet
         if (mode === 'SatImg' && !window.appState?.satImgSourceCanvas) {
             window.loadSatelliteRGBImage?.().then(() => window.updateStackedLayers?.());
+            return;
+        }
+        // Auto-load hydrology if switching to Hydrology with no data yet
+        if (mode === 'Hydrology' && !window.appState?.hydrologySourceCanvas) {
+            window.loadHydrology?.();
             return;
         }
     }
@@ -85,28 +92,77 @@ window.setLayerOpacity = function setLayerOpacity(mode, value) {
     window.updateStackedLayers?.();
 };
 
-/** Rebuild the per-layer opacity slider rows below the mode buttons. */
+/** Return a copy of the current layer render order (bottom → top). */
+window.getLayerOrder = function getLayerOrder() {
+    return [..._layerOrder];
+};
+
+/**
+ * Move a layer up or down in the render order.
+ * Performs adjacent swaps until the layer passes the next active (visible) layer,
+ * so reorder arrows feel intuitive among the visible subset.
+ * @param {string} mode  — layer key (e.g. 'Hydrology')
+ * @param {number} delta — direction: -1 = move toward bottom, +1 = move toward top
+ */
+window.moveLayer = function moveLayer(mode, delta) {
+    let idx = _layerOrder.indexOf(mode);
+    if (idx < 0) return;
+    let swapped = false;
+    // Keep swapping in direction until we've passed at least one active layer
+    while (true) {
+        const next = idx + delta;
+        if (next < 0 || next >= _layerOrder.length) break;
+        const neighbor = _layerOrder[next];
+        [_layerOrder[idx], _layerOrder[next]] = [_layerOrder[next], _layerOrder[idx]];
+        idx = next;
+        if (_activeLayers.has(neighbor)) { swapped = true; break; }
+    }
+    if (!swapped) return;  // couldn't move past any active layer
+    _updateLayerOpacitySliders();
+    window.updateStackedLayers?.();
+};
+
+/** Rebuild the per-layer opacity slider rows below the mode buttons.
+ *  Shows active layers in render order (bottom → top) with reorder arrows. */
 function _updateLayerOpacitySliders() {
     const container = document.getElementById('layerOpacitySliders');
     if (!container) return;
     container.innerHTML = '';
-    // Draw in compositing order so the UI matches render order
-    const order = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem'];
     const labels = { Dem: '🏔 DEM', Water: '💧 Water', Sat: '🌿 ESA', SatImg: '🛰 Sat', CityRaster: '🏙 City', CompositeDem: '★ Composite', Hydrology: '🌊 Hydro' };
-    order.filter(m => _activeLayers.has(m)).forEach(mode => {
+    // Show active layers in current render order (bottom first, top last)
+    const visible = _layerOrder.filter(m => _activeLayers.has(m));
+    visible.forEach((mode, vi) => {
         const pct = Math.round((_layerOpacities[mode] ?? 1) * 100);
+        const isFirst = vi === 0;
+        const isLast  = vi === visible.length - 1;
         const row = document.createElement('div');
-        row.style.cssText = 'display:grid;grid-template-columns:70px 1fr 28px;gap:2px 4px;align-items:center;margin-top:3px;';
+        row.style.cssText = 'display:grid;grid-template-columns:20px 66px 1fr 28px;gap:0 4px;align-items:center;margin-top:3px;';
         row.innerHTML = `
-            <span style="font-size:10px;color:#aaa;white-space:nowrap;">${labels[mode]}</span>
+            <span class="layer-reorder-arrows" style="display:flex;flex-direction:column;line-height:1;font-size:9px;gap:0;">
+                <button class="layer-arrow-btn" data-layer="${mode}" data-dir="1"
+                    style="background:none;border:none;color:${isLast ? '#333' : '#888'};cursor:${isLast ? 'default' : 'pointer'};padding:0;font-size:9px;line-height:1;"
+                    title="Move up (render later / on top)" ${isLast ? 'disabled' : ''}>▲</button>
+                <button class="layer-arrow-btn" data-layer="${mode}" data-dir="-1"
+                    style="background:none;border:none;color:${isFirst ? '#333' : '#888'};cursor:${isFirst ? 'default' : 'pointer'};padding:0;font-size:9px;line-height:1;"
+                    title="Move down (render earlier / behind)" ${isFirst ? 'disabled' : ''}>▼</button>
+            </span>
+            <span style="font-size:10px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${labels[mode]}</span>
             <input type="range" min="0" max="100" value="${pct}" data-layer="${mode}"
                 style="width:100%;" title="${labels[mode]} opacity">
             <span style="font-size:10px;color:#888;text-align:right;">${pct}%</span>`;
-        const slider = row.querySelector('input');
+        // Wire opacity slider
+        const slider = row.querySelector('input[type="range"]');
         const label  = row.querySelector('span:last-child');
         slider.addEventListener('input', () => {
             label.textContent = slider.value + '%';
             window.setLayerOpacity(mode, slider.value / 100);
+        });
+        // Wire reorder arrows
+        row.querySelectorAll('.layer-arrow-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const dir = parseInt(btn.dataset.dir);
+                window.moveLayer(btn.dataset.layer, dir);
+            });
         });
         container.appendChild(row);
     });
@@ -194,7 +250,7 @@ function formatCoord(val, isLat, interval) {
  * Calls applyStackedTransform, drawLayerGrid, and renderCityOverlay.
  */
 window.updateStackedLayers = function updateStackedLayers() {
-    const demCanvas   = document.querySelector('#demImage canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)');
+    const demCanvas   = document.querySelector(`#demImage ${window.DEM_CANVAS_SELECTOR}`);
     const waterCanvas = document.querySelector('#waterMaskImage canvas');
     const satCanvas   = document.querySelector('#satelliteImage canvas');
 
@@ -414,13 +470,50 @@ window.drawLayerGrid = function drawLayerGrid() {
         // ── Lat/lon coordinate mode (default) ───────────────────────────────
         const lonRange = bbox.east  - bbox.west;
         const latRange = bbox.north - bbox.south;
-        const pxPerLon = (cw * scale) / lonRange;
-        const pxPerLat = (ch * scale) / latRange;
 
-        /** @param {number} lon @returns {number} Canvas x pixel */
-        function lonToX(lon) { return (lon - bbox.west) / lonRange * cw * scale + offsetX; }
+        // Projection-aware coordinate transforms
+        const projection = document.getElementById('paramProjection')?.value || 'none';
+        const toRad = d => d * Math.PI / 180;
+
+        // Mercator helpers
+        const _mercY = l => Math.log(Math.tan(Math.PI / 4 + toRad(Math.max(-85, Math.min(85, l))) / 2));
+        const mercN = _mercY(Math.min(85, bbox.north));
+        const mercS = _mercY(Math.max(-85, bbox.south));
+        const mercRange = mercN - mercS;
+
+        // Cosine/Lambert helpers
+        const midLat = (bbox.north + bbox.south) / 2;
+        const cosMiddle = Math.cos(toRad(midLat));
+        const contentW = (projection === 'cosine' || projection === 'lambert')
+            ? Math.max(1, cw * cosMiddle) : cw;
+        const xOff = (cw - contentW) / 2;
+
+        // Sinusoidal: midLon for centering
+        const midLon = (bbox.east + bbox.west) / 2;
+
+        /** @param {number} lon @param {number} [lat] - needed for sinusoidal @returns {number} Canvas x */
+        function lonToX(lon, lat) {
+            if (projection === 'sinusoidal') {
+                const cosLat = Math.cos(toRad(lat ?? midLat));
+                const xFrac = 0.5 + (lon - midLon) / lonRange * cosLat;
+                return xFrac * cw * scale + offsetX;
+            }
+            if (projection === 'cosine' || projection === 'lambert') {
+                return (xOff + (lon - bbox.west) / lonRange * contentW) * scale + offsetX;
+            }
+            return (lon - bbox.west) / lonRange * cw * scale + offsetX;
+        }
+
         /** @param {number} lat @returns {number} Canvas y pixel */
-        function latToY(lat) { return (bbox.north - lat) / latRange * ch * scale + offsetY; }
+        function latToY(lat) {
+            if (projection === 'mercator') {
+                return (mercN - _mercY(lat)) / mercRange * ch * scale + offsetY;
+            }
+            return (bbox.north - lat) / latRange * ch * scale + offsetY;
+        }
+
+        const pxPerLon = (contentW * scale) / lonRange;
+        const pxPerLat = (ch * scale) / latRange;
 
         const targetLines = Math.max(2, Math.round(densityCheck / 2));
         const lonInterval = niceGeoInterval(gw, pxPerLon, targetLines);
@@ -428,34 +521,61 @@ window.drawLayerGrid = function drawLayerGrid() {
 
         // Longitude (vertical) grid lines — batch label insertions via DocumentFragment
         const xFrag = xAxis ? document.createDocumentFragment() : null;
-        // Pre-compute visible lon range from viewport edges to skip off-screen iterations
         const visLonWest = bbox.west  + (-2 - offsetX) / (cw * scale) * lonRange;
         const visLonEast = bbox.west  + (gw + 2 - offsetX) / (cw * scale) * lonRange;
         const lonStart = Math.ceil((Math.max(bbox.west, visLonWest) - 1e-9) / lonInterval) * lonInterval;
         const lonEnd   = Math.min(bbox.east, visLonEast) + 1e-9;
         for (let lon = lonStart; lon <= lonEnd; lon = Math.round((lon + lonInterval) * 1e8) / 1e8) {
-            const x = lonToX(lon);
-            if (x < -2 || x > gw + 2) continue;
-            if (showGrid) {
-                ctx.strokeStyle = gridColor;
-                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, gh); ctx.stroke();
-            }
-            ctx.strokeStyle = tickColor;
-            ctx.beginPath(); ctx.moveTo(x, 0);  ctx.lineTo(x, 6);      ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x, gh); ctx.lineTo(x, gh - 6); ctx.stroke();
-            if (xFrag) {
-                const span = document.createElement('span');
-                span.className = 'axis-tick';
-                span.style.left = x + 'px';
-                span.textContent = formatCoord(lon, false, lonInterval);
-                xFrag.appendChild(span);
+            if (projection === 'sinusoidal') {
+                // Sinusoidal: vertical gridlines are curves — draw as polyline
+                if (showGrid) {
+                    ctx.strokeStyle = gridColor;
+                    ctx.beginPath();
+                    let first = true;
+                    for (let sy = 0; sy <= gh; sy += 3) {
+                        const lat = bbox.north - ((sy - offsetY) / (ch * scale)) * latRange;
+                        const x = lonToX(lon, lat);
+                        if (first) { ctx.moveTo(x, sy); first = false; }
+                        else ctx.lineTo(x, sy);
+                    }
+                    ctx.stroke();
+                }
+                // Tick + label at midpoint latitude
+                const xMid = lonToX(lon, midLat);
+                ctx.strokeStyle = tickColor;
+                ctx.beginPath(); ctx.moveTo(xMid, 0);  ctx.lineTo(xMid, 6);      ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(xMid, gh); ctx.lineTo(xMid, gh - 6); ctx.stroke();
+                if (xFrag) {
+                    const span = document.createElement('span');
+                    span.className = 'axis-tick';
+                    span.style.left = xMid + 'px';
+                    span.textContent = formatCoord(lon, false, lonInterval);
+                    xFrag.appendChild(span);
+                }
+            } else {
+                // Non-sinusoidal: straight vertical lines
+                const x = lonToX(lon);
+                if (x < -2 || x > gw + 2) continue;
+                if (showGrid) {
+                    ctx.strokeStyle = gridColor;
+                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, gh); ctx.stroke();
+                }
+                ctx.strokeStyle = tickColor;
+                ctx.beginPath(); ctx.moveTo(x, 0);  ctx.lineTo(x, 6);      ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(x, gh); ctx.lineTo(x, gh - 6); ctx.stroke();
+                if (xFrag) {
+                    const span = document.createElement('span');
+                    span.className = 'axis-tick';
+                    span.style.left = x + 'px';
+                    span.textContent = formatCoord(lon, false, lonInterval);
+                    xFrag.appendChild(span);
+                }
             }
         }
         if (xAxis && xFrag) xAxis.appendChild(xFrag);
 
         // Latitude (horizontal) grid lines — batch label insertions via DocumentFragment
         const yFrag = yAxis ? document.createDocumentFragment() : null;
-        // Pre-compute visible lat range from viewport edges to skip off-screen iterations
         const visLatNorth = bbox.north - (-2 - offsetY) / (ch * scale) * latRange;
         const visLatSouth = bbox.north - (gh + 2 - offsetY) / (ch * scale) * latRange;
         const latStart = Math.ceil((Math.max(bbox.south, visLatSouth) - 1e-9) / latInterval) * latInterval;

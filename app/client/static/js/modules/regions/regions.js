@@ -287,7 +287,15 @@ async function selectCoordinate(index) {
     const hasSaved = await window.loadAndApplyRegionSettings?.(selectedRegion.name);
     if (!hasSaved && selectedRegion.parameters) {
         const rp = selectedRegion.parameters;
-        document.getElementById('paramDim').value = rp.dim || 100;
+        const _setEl = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+        const _setChk = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.checked = Boolean(v); };
+        _setEl('paramDim', rp.dim || 100);
+        _setEl('paramDepthScale',  rp.depth_scale    ?? 0.5);
+        _setEl('paramWaterScale',  rp.water_scale    ?? 0.05);
+        _setChk('paramSubtractWater', rp.subtract_water !== false);
+        _setEl('waterResolution',  rp.sat_scale      ?? 500);
+        _setEl('exportModelHeight', rp.height         ?? 10);
+        _setEl('exportBaseHeight',  rp.base           ?? 2);
         if (window.appState?.demParams) {
             window.appState.demParams.depthScale    = rp.depth_scale    ?? 0.5;
             window.appState.demParams.waterScale    = rp.water_scale    ?? 0.05;
@@ -323,9 +331,9 @@ async function selectCoordinate(index) {
         // sat_scale: ESA fetch resolution (m/px) — lower = finer, more pixels
         const autoSatScale = AUTO_SCALE.satScale.find(t => diagKm <= t.maxKm)?.scale ?? 1000;
         const waterResEl = document.getElementById('waterResolution');
-        const landResEl  = document.getElementById('landCoverResolution');
         if (waterResEl) waterResEl.value = String(autoSatScale);
-        if (landResEl)  landResEl.value  = String(autoSatScale);
+        const esaResEl = document.getElementById('esaResolution');
+        if (esaResEl) esaResEl.value = String(autoSatScale);
 
         // dim: DEM output pixel count — raise for city scale so the server-side
         // alignment target (target_width/height) is large enough to hold ESA 10m data.
@@ -336,8 +344,24 @@ async function selectCoordinate(index) {
             const autoDim = AUTO_SCALE.dim.find(t => diagKm <= t.maxKm)?.dim ?? 200;
             // Raise dim if it is lower than what the region size warrants.
             // Never lower the user's explicit choice.
-            if (autoDim > currentDim) dimEl.value = String(autoDim);
+            // Skip if saved settings were loaded — respect the persisted dim.
+            if (!hasSaved && autoDim > currentDim) dimEl.value = String(autoDim);
         }
+
+        // Sync layer-view per-layer resolution selects from the persisted/auto-set values.
+        // These are independent controls in LayerViewSection for one-shot loads at a
+        // specific resolution, initialized to match the persisted settings on region change.
+        // If the value doesn't match an option exactly, snap to the nearest valid option.
+        const _snapSelectToNearest = (selectEl, val) => {
+            if (!selectEl) return;
+            const options = Array.from(selectEl.options).map(o => parseInt(o.value));
+            if (!options.length) return;
+            const num = parseInt(val) || options[0];
+            const nearest = options.reduce((prev, curr) =>
+                Math.abs(curr - num) < Math.abs(prev - num) ? curr : prev
+            );
+            selectEl.value = String(nearest);
+        };
     }
 
     // Update region params table if sidebar is expanded
@@ -353,25 +377,10 @@ async function selectCoordinate(index) {
         try { map.fitBounds(bounds, { padding: [20, 20] }); } catch(e) {}
     }
 
-    // If Edit view is currently active, load all layers for the new region
-    const demContainer = document.getElementById('demContainer');
-    if (demContainer && !demContainer.classList.contains('hidden')) {
-        window.loadDEM?.().then(() => {
-            // Load secondary layers in parallel (no dependency between them)
-            const tasks = [
-                window.loadWaterMask?.(),
-                window.loadSatelliteImage?.(),
-            ];
-            const diagKm = window.haversineDiagKm?.(
-                selectedRegion.north, selectedRegion.south,
-                selectedRegion.east, selectedRegion.west
-            );
-            if (diagKm && diagKm <= 15 && window.loadCityData) {
-                tasks.push(window.loadCityData());
-            }
-            return Promise.all(tasks);
-        });
-    }
+    // NOTE: Do NOT auto-load layers here. selectCoordinate() only updates selection
+    // state. Layer loading is the caller's responsibility (goToEdit, loadAllLayers, etc.)
+    // Loading here causes duplicate requests when goToEdit() calls selectCoordinate()
+    // and then loadDEM() itself.
 
     window.appState._updateWorkflowStepper?.();
 }
@@ -384,8 +393,8 @@ window.selectCoordinate = selectCoordinate;
  * triggering a full layer load (DEM + water mask + satellite).
  * @param {number} index - Index into `coordinatesData`
  */
-function goToEdit(index) {
-    window.selectCoordinate(index);
+async function goToEdit(index) {
+    await window.selectCoordinate(index);
     switchView('dem');
 
     // Populate the compact sidebar edit panel
@@ -435,6 +444,9 @@ function goToEdit(index) {
             tasks.push(window.loadCityData());
         }
         return Promise.all(tasks);
+    }).catch(err => {
+        console.error('Error loading layers in goToEdit:', err);
+        window.showToast?.('Error loading layers: ' + (err?.message || err), 'error');
     });
 }
 window.goToEdit = goToEdit;

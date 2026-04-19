@@ -1,0 +1,72 @@
+site_name: "3D Maps — strm2stl Documentation"
+site_description: "Terrain-to-3D pipeline: DEM, overlays, projections, and 3D export"
+docs_dir: docs
+site_dir: docs_site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - tables
+  - fenced_code
+  - codehilite
+  - toc:
+      permalink: true
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+
+nav:
+  - Home: README.md
+  - Getting Started:
+      - Project Onboarding: ai-agent-onboarding.md
+      - Task Routing: task-routing.md
+  - Architecture:
+      - Overview: arch.md
+      - JS Modules: modules.md
+      - Frontend State: state.md
+      - Function Index: functions.md
+      - Map Projections: projections.md
+  - API Reference:
+      - Endpoints: api.md
+      - SDK Workflow: sdk-workflow.md
+  - Layer System:
+      - Layer Analysis: layer_system_analysis.md
+      - Composite DEM: composite_dem_design.md
+      - Per-Layer Resolution: per-layer-resolution-plan.md
+  - Features:
+      - Functionality: functionality_doc.md
+      - Web App Analysis: web_app_analysis.md
+      - BBox Editing: bbox_editing_options.md
+      - Rotation Plan: rotation-plan.md
+      - PrusaSlicer Settings: prusaslicer_terrain_settings.md
+  - UX & Accessibility:
+      - UX Audit: ux-audit.md
+      - Accessibility Audit: ACCESSIBILITY_AUDIT.md
+  - Project Management:
+      - Proposals: proposals.md
+      - Known Issues: issues.md
+      - Advanced TODOs: todo_advanced.md
+      - Frontend Refactoring: frontend_refactoring.md

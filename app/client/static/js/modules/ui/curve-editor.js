@@ -32,22 +32,23 @@
 // Module-scope state
 // ─────────────────────────────────────────────────────────────────────────────
 
-let curvePoints    = [{ x: 0, y: 0 }, { x: 1, y: 1 }];
-let curveCanvas    = null;
-let curveCtx       = null;
+let curvePoints = [{ x: 0, y: 0 }, { x: 1, y: 1 }];
+let curveCanvas = null;
+let curveCtx = null;
 let activeCurvePreset = 'linear';
-let _curveLUT      = null;
-let _dragStartX    = null;
+let _curveLUT = null;
+let _dragStartX = null;
+let _curveRafPending = false;  // RAF-gate for DEM recolor during drag
 
 const _CURVE_HISTORY_MAX = 30;
-let _curveHistory    = [];
+let _curveHistory = [];
 let _curveHistoryIdx = -1;
 
 const curvePresets = {
-    'linear':          [[0, 0], [1, 1]],
-    'enhance-peaks':   [[0, 0], [0.3, 0.2], [0.5, 0.4], [0.7, 0.7], [0.85, 0.9], [1, 1]],
+    'linear': [[0, 0], [1, 1]],
+    'enhance-peaks': [[0, 0], [0.3, 0.2], [0.5, 0.4], [0.7, 0.7], [0.85, 0.9], [1, 1]],
     'compress-depths': [[0, 0.2], [0.2, 0.3], [0.4, 0.45], [0.6, 0.6], [0.8, 0.8], [1, 1]],
-    's-curve':         [[0, 0], [0.25, 0.1], [0.5, 0.5], [0.75, 0.9], [1, 1]]
+    's-curve': [[0, 0], [0.25, 0.1], [0.5, 0.5], [0.75, 0.9], [1, 1]]
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,6 +61,40 @@ function _fmtElev(v) {
 
 function _syncCurvePoints() {
     window.appState.curvePoints = curvePoints;
+}
+
+/**
+ * Rescale curve points so that their absolute elevation positions are
+ * preserved when the DEM vmin/vmax range changes.  Each point's x is
+ * converted from old-normalised → absolute elevation → new-normalised.
+ * Endpoints at x=0 and x=1 are always kept.
+ */
+function _rescaleCurvePoints(oldMin, oldMax, newMin, newMax) {
+    const oldRange = oldMax - oldMin;
+    const newRange = newMax - newMin;
+    if (!oldRange || !newRange) return;
+
+    for (let i = 0; i < curvePoints.length; i++) {
+        const pt = curvePoints[i];
+        // Convert normalised x to absolute elevation, then to new normalised
+        const absElev = pt.x * oldRange + oldMin;
+        pt.x = Math.max(0, Math.min(1, (absElev - newMin) / newRange));
+    }
+    // Ensure endpoints exist at 0 and 1
+    if (curvePoints[0].x !== 0) curvePoints[0].x = 0;
+    if (curvePoints[curvePoints.length - 1].x !== 1) curvePoints[curvePoints.length - 1].x = 1;
+
+    // Remove duplicate x-positions (can happen when range narrows)
+    const seen = new Set();
+    curvePoints = curvePoints.filter(pt => {
+        const key = pt.x.toFixed(6);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+
+    _syncCurvePoints();
+    _curveLUT = null;  // invalidate cached LUT
 }
 
 function _pushCurveHistory() {
@@ -88,9 +123,9 @@ function initCurveEditor() {
     curveCtx = curveCanvas.getContext('2d');
 
     const container = curveCanvas.parentElement;
-    const containerWidth  = container.clientWidth  || 200;
+    const containerWidth = container.clientWidth || 200;
     const containerHeight = container.clientHeight || 150;
-    curveCanvas.width  = Math.max(containerWidth,  150);
+    curveCanvas.width = Math.max(containerWidth, 150);
     curveCanvas.height = Math.max(containerHeight, 100);
 
     setCurvePreset('linear');
@@ -101,7 +136,14 @@ function initCurveEditor() {
     // Re-register _onDemLoaded so drawCurve gets updated vmin/vmax on each DEM load.
     // Called before renderDEMCanvas writes curveDataVmin/Vmax to appState, so we
     // propagate the new values ourselves before redrawing.
-    window.appState._onDemLoaded = function(vmin, vmax) {
+    // If the elevation range changed, rescale curve points so that absolute
+    // elevation anchors (e.g. sea level at 0 m) stay in the same position.
+    window.appState._onDemLoaded = function (vmin, vmax) {
+        const oldVmin = window.appState.curveDataVmin;
+        const oldVmax = window.appState.curveDataVmax;
+        if (oldVmin != null && oldVmax != null && (oldVmin !== vmin || oldVmax !== vmax)) {
+            _rescaleCurvePoints(oldVmin, oldVmax, vmin, vmax);
+        }
         window.appState.curveDataVmin = vmin;
         window.appState.curveDataVmax = vmax;
         drawCurve();
@@ -110,7 +152,7 @@ function initCurveEditor() {
     let _curveResizeRaf = null;
     const _applyCurveResize = () => {
         if (container.clientWidth > 0 && container.clientHeight > 0) {
-            curveCanvas.width  = container.clientWidth;
+            curveCanvas.width = container.clientWidth;
             curveCanvas.height = container.clientHeight;
             drawCurve();
         }
@@ -188,9 +230,9 @@ function _setupCurveEventListeners() {
         const rawX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
         const rawY = Math.max(0, Math.min(1, 1 - (e.clientY - rect.top) / rect.height));
 
-        const idx     = curvePoints.indexOf(draggingPoint);
+        const idx = curvePoints.indexOf(draggingPoint);
         const isFirst = idx === 0;
-        const isLast  = idx === curvePoints.length - 1;
+        const isLast = idx === curvePoints.length - 1;
 
         let newX = rawX;
         if (isFirst) newX = 0;
@@ -198,8 +240,8 @@ function _setupCurveEventListeners() {
         else newX = _dragStartX ?? draggingPoint.x;
 
         const prevY = isFirst ? 0 : curvePoints[idx - 1].y;
-        const nextY = isLast  ? 1 : curvePoints[idx + 1].y;
-        const newY  = Math.max(prevY, Math.min(nextY, rawY));
+        const nextY = isLast ? 1 : curvePoints[idx + 1].y;
+        const newY = Math.max(prevY, Math.min(nextY, rawY));
 
         draggingPoint.x = newX;
         draggingPoint.y = newY;
@@ -207,10 +249,28 @@ function _setupCurveEventListeners() {
     });
 
     curveCanvas.addEventListener('mouseup', () => {
-        if (draggingPoint) { draggingPoint = null; applyCurveTodemSilent(); }
+        if (draggingPoint) {
+            draggingPoint = null;
+            if (!_curveRafPending) {
+                _curveRafPending = true;
+                requestAnimationFrame(() => {
+                    _curveRafPending = false;
+                    applyCurveTodemSilent();
+                });
+            }
+        }
     });
     curveCanvas.addEventListener('mouseleave', () => {
-        if (draggingPoint) { draggingPoint = null; applyCurveTodemSilent(); }
+        if (draggingPoint) {
+            draggingPoint = null;
+            if (!_curveRafPending) {
+                _curveRafPending = true;
+                requestAnimationFrame(() => {
+                    _curveRafPending = false;
+                    applyCurveTodemSilent();
+                });
+            }
+        }
     });
 
     const applyBtn = document.getElementById('applyCurveBtn');
@@ -240,7 +300,7 @@ function _setupCurveEventListeners() {
                 return;
             }
             _pushCurveHistory();
-            const slX       = Math.max(0.01, Math.min(0.98, (0 - vmin) / ((vmax - vmin) || 1)));
+            const slX = Math.max(0.01, Math.min(0.98, (0 - vmin) / ((vmax - vmin) || 1)));
             const depthScale = 0.3;
 
             curvePoints = curvePoints.filter(p =>
@@ -253,8 +313,8 @@ function _setupCurveEventListeners() {
 
             const shelfY = slX * depthScale;
             curvePoints.push({ x: slX - 0.005, y: shelfY });
-            curvePoints.push({ x: slX,          y: shelfY + 0.015 });
-            curvePoints.push({ x: slX + 0.02,   y: shelfY + 0.04 });
+            curvePoints.push({ x: slX, y: shelfY + 0.015 });
+            curvePoints.push({ x: slX + 0.02, y: shelfY + 0.04 });
 
             curvePoints.sort((a, b) => a.x - b.x);
             for (let i = 1; i < curvePoints.length; i++) {
@@ -273,6 +333,11 @@ function _setupCurveEventListeners() {
 // Curve operations
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Load a named curve preset (linear, enhance-peaks, etc.).
+ * Updates curvePoints, appState, and redraws the canvas.
+ * @param {string} presetName - One of: 'linear', 'enhance-peaks', 'compress-depths', 's-curve'
+ */
 function setCurvePreset(presetName) {
     activeCurvePreset = presetName;
     window.appState.activeCurvePreset = presetName;
@@ -283,6 +348,13 @@ function setCurvePreset(presetName) {
     drawCurve();
 }
 
+/**
+ * Add a new control point to the curve at (x, y) ∈ [0,1]×[0,1].
+ * Snaps to existing points within threshold to avoid duplicates.
+ * Clamps Y between neighbors' Y values to ensure monotonic sections.
+ * @param {number} x - Normalized X coordinate [0, 1] (input elevation)
+ * @param {number} y - Normalized Y coordinate [0, 1] (output elevation)
+ */
 function addCurvePoint(x, y) {
     const threshold = 0.08;
     for (const p of curvePoints) {
@@ -302,6 +374,12 @@ function addCurvePoint(x, y) {
     drawCurve();
 }
 
+/**
+ * Remove a control point near (x, y) ∈ [0,1]×[0,1] if found within threshold.
+ * Cannot remove endpoint points (index 0 or last).
+ * @param {number} x - Normalized X coordinate
+ * @param {number} y - Normalized Y coordinate
+ */
 function removeCurvePointNear(x, y) {
     const threshold = 0.12;
     const index = curvePoints.findIndex(p =>
@@ -315,6 +393,13 @@ function removeCurvePointNear(x, y) {
     }
 }
 
+/**
+ * Find a control point near (x, y) ∈ [0,1]×[0,1] within threshold distance.
+ * Returns the matching point object or undefined.
+ * @param {number} x - Normalized X coordinate
+ * @param {number} y - Normalized Y coordinate
+ * @returns {Object|undefined} Control point {x, y} if found, else undefined
+ */
 function findCurvePointNear(x, y) {
     const threshold = 0.12;
     return curvePoints.find(p =>
@@ -436,13 +521,20 @@ function drawCurve() {
     curveCtx.textAlign = 'left';
 }
 
+/**
+ * Evaluate the curve at a normalized input value x ∈ [0, 1].
+ * Uses linear interpolation between adjacent control points.
+ * Returns the normalized output value y ∈ [0, 1].
+ * @param {number} x - Input coordinate [0, 1]
+ * @returns {number} Output coordinate via Catmull-Rom-like interpolation
+ */
 function interpolateCurve(x) {
     if (curvePoints.length < 2) return x;
-    let left  = curvePoints[0];
+    let left = curvePoints[0];
     let right = curvePoints[curvePoints.length - 1];
     for (let i = 0; i < curvePoints.length - 1; i++) {
         if (curvePoints[i].x <= x && curvePoints[i + 1].x >= x) {
-            left  = curvePoints[i];
+            left = curvePoints[i];
             right = curvePoints[i + 1];
             break;
         }
@@ -459,8 +551,8 @@ function _buildLUT() {
 }
 
 function _applyCurrentCurve() {
-    const lastDemData     = window.appState.lastDemData;
-    let   originalDemVals = window.appState.originalDemValues;
+    const lastDemData = window.appState.lastDemData;
+    let originalDemVals = window.appState.originalDemValues;
 
     if (!originalDemVals) {
         originalDemVals = [...lastDemData.values];
@@ -468,17 +560,25 @@ function _applyCurrentCurve() {
     }
 
     const values = [...originalDemVals];
-    const vmin   = window.appState.curveDataVmin  ?? (() => { let m = Infinity;  for (const v of values) if (v < m) m = v; return m; })();
-    const vmax   = window.appState.curveDataVmax  ?? (() => { let m = -Infinity; for (const v of values) if (v > m) m = v; return m; })();
-    const range  = vmax - vmin || 1;
+    const vmin = window.appState.curveDataVmin ?? (() => { let m = Infinity; for (const v of values) if (v < m) m = v; return m; })();
+    const vmax = window.appState.curveDataVmax ?? (() => { let m = -Infinity; for (const v of values) if (v > m) m = v; return m; })();
+    const range = vmax - vmin || 1;
 
-    _buildLUT();
-    return { remapped: values.map(v => {
-        const t = Math.max(0, Math.min(1, (v - vmin) / range));
-        return vmin + _curveLUT[Math.round(t * 1023)] * range;
-    }), vmin, vmax };
+    // Apply curve to values: map each value to curve output
+    const remapped = values.map(v => {
+        const t = (v - vmin) / range;
+        const curved_t = interpolateCurve(Math.max(0, Math.min(1, t)));
+        return vmin + curved_t * range;
+    });
+
+    return { remapped, vmin, vmax };
 }
 
+/**
+ * Apply the current curve to the DEM with toast notification and auto-rescale.
+ * Requires a loaded DEM in appState.lastDemData.
+ * Shows error toast if no DEM is loaded.
+ */
 function applyCurveTodem() {
     const lastDemData = window.appState.lastDemData;
     if (!lastDemData || !lastDemData.values || curvePoints.length < 2) {
@@ -506,6 +606,11 @@ function applyCurveTodem() {
     window.showToast('Elevation curve applied!', 'success');
 }
 
+/**
+ * Apply the current curve to the DEM silently (no toast, no UI update).
+ * Used during drag operations and continuous updates.
+ * Requires a loaded DEM in appState.lastDemData.
+ */
 function applyCurveTodemSilent() {
     const lastDemData = window.appState.lastDemData;
     if (!lastDemData || !lastDemData.values || curvePoints.length < 2) return;
@@ -522,6 +627,11 @@ function applyCurveTodemSilent() {
     window.recolorDEM?.();
 }
 
+/**
+ * Step backward in the curve edit history.
+ * Updates curvePoints, redraws, and re-applies curve to DEM.
+ * Disabled at history start.
+ */
 function undoCurve() {
     if (_curveHistoryIdx <= 0) return;
     _curveHistoryIdx--;
@@ -532,6 +642,11 @@ function undoCurve() {
     _updateCurveUndoRedoBtns();
 }
 
+/**
+ * Step forward in the curve edit history.
+ * Updates curvePoints, redraws, and re-applies curve to DEM.
+ * Disabled at history end.
+ */
 function redoCurve() {
     if (_curveHistoryIdx >= _curveHistory.length - 1) return;
     _curveHistoryIdx++;
@@ -542,8 +657,12 @@ function redoCurve() {
     _updateCurveUndoRedoBtns();
 }
 
+/**
+ * Restore the DEM to its original pre-curve values.
+ * Requires originalDemValues to exist in appState (saved on first curve application).
+ */
 function resetDemToOriginal() {
-    const lastDemData     = window.appState.lastDemData;
+    const lastDemData = window.appState.lastDemData;
     const originalDemVals = window.appState.originalDemValues;
     if (originalDemVals && lastDemData) {
         lastDemData.values = [...originalDemVals];
@@ -571,11 +690,11 @@ function applyCurveSettings(points, presetName) {
 // Expose on window
 // ─────────────────────────────────────────────────────────────────────────────
 
-window.initCurveEditor        = initCurveEditor;
-window.setCurvePreset         = setCurvePreset;
-window.drawCurve              = drawCurve;
-window.applyCurveTodem        = applyCurveTodem;
-window.applyCurveSettings     = applyCurveSettings;
-window.undoCurve              = undoCurve;
-window.redoCurve              = redoCurve;
-window.curvePresets           = curvePresets;
+window.initCurveEditor = initCurveEditor;
+window.setCurvePreset = setCurvePreset;
+window.drawCurve = drawCurve;
+window.applyCurveTodem = applyCurveTodem;
+window.applyCurveSettings = applyCurveSettings;
+window.undoCurve = undoCurve;
+window.redoCurve = redoCurve;
+window.curvePresets = curvePresets;

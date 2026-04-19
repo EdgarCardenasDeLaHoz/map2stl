@@ -87,6 +87,9 @@ window.api = (() => {
         /** GET /api/terrain/water-mask?{params} */
         waterMask: (params, signal) => _fetch(`/api/terrain/water-mask?${params}`, signal ? { signal } : {}),
 
+        /** GET /api/terrain/esa-land-cover?{params} */
+        esaLandCover: (params, signal) => _fetch(`/api/terrain/esa-land-cover?${params}`, signal ? { signal } : {}),
+
         /** GET /api/terrain/hydrology?{params} */
         hydrology: (params, signal) => _fetch(`/api/terrain/hydrology?${params}`, signal ? { signal } : {}),
 
@@ -143,6 +146,12 @@ window.api = (() => {
 
         /** DELETE /api/cache */
         clear: () => _fetch('/api/cache', { method: 'DELETE' }),
+
+        /** DELETE /api/cache/region?north=...&south=...&east=...&west=... */
+        clearRegion: (bbox) => _fetch(
+            `/api/cache/region?north=${bbox.north}&south=${bbox.south}&east=${bbox.east}&west=${bbox.west}`,
+            { method: 'DELETE' }
+        ),
 
         /** GET /api/cache/check?{params} */
         check: (params) => _fetch(`/api/cache/check?${params}`),

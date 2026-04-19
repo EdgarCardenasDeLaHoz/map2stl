@@ -32,7 +32,11 @@ HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `a
 
 | ID | Task | Status |
 |----|------|--------|
-| ARCH5 | Vitest unit tests for pure functions (requires ARCH4) | ⏳ Open |
+| P6 | Elevation band export (multi-material STL) | ⏳ Pending |
+| EXP-1 | Export progress indicator | ⏳ Pending |
+| PERF6B Part B | City worker OffscreenCanvas | ⏳ Pending |
+| CLEAN-1 | Replace remaining inline styles with CSS classes | ⏳ Pending |
+| UX-M | Lazy-allocate hidden layer canvases | ⏳ Pending |
 
 ## Completed Refactoring Milestones
 
@@ -52,5 +56,22 @@ HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `a
 - Backend DEAD-2/4 ✅ — removed unused dim param and local import math from terrain.py
 - Frontend CLEAN-1–5 ✅ — regions.js: inline onclick, haversineDiagKm bug, AUTO_SCALE constants, globe marker colors, selectCoordinate JSDoc
 - Frontend DEM-CLEAN-1–3 ✅ — dem-main.js: extracted _applyDemResult, moved progress bar/cancel/sat-unavailable inline styles to CSS
+- ARCH5 ✅ — Vitest 4.x installed; 58 JS unit tests across 5 test files (interpolateCurve, mapElevationToColor, detectContinent, haversineDiagKm, nicePixelInterval, niceGeoInterval); helpers in tests/js/helpers/; config in vite.config.js test block
 
 Full history: `docs/functionality_doc.md`
+
+## Completed Python / Session Milestones
+
+- Session PEP8 ✅ — 51 PEP 8 violations fixed in terrain_session.py
+- Session REFACTOR ✅ — 7 helper methods + 5 settings properties; ~150 lines removed (~8.3%); matplotlib consolidation; fetch method consolidation
+- HYDRO-OPT ✅ — HydroRIVERS geometry simplification pipeline (collinear point reduction + shapely simplify + simplified cache)
+- HYDRO-REGION ✅ — Region bounding box coverage fix (SA north to +15°N, NA south to -10°S); eliminated Central America gap
+- HYDRO-CACHE ✅ — Simplified shapefile validation probe before trusting cached files
+- SRV-LIFECYCLE ✅ — start() reuses healthy server; _ensure_bbox() validates 4 keys; server wait timeout 60 attempts
+- Bbox validation ✅ — Frontend rejects satellite/water requests for areas > 20°×20°
+- PERF-RAF ✅ — RAF-gated curve drag in curve-editor.js
+- MAP-2 ✅ — Keyboard accessibility for bbox drag handles
+- UX-2 ✅ — Text labels on floating map buttons
+- UX-3 ✅ — Clarified sidebar 3-state toggle
+- ARCH4 ✅ — Vite bundler installed
+- ARCH5 ✅ — Vitest 4.x installed; 58 JS unit tests across 5 test files

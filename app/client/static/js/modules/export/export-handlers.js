@@ -81,12 +81,12 @@ function _exportParams() {
         model_height:     md.resolution,
         base_height:      md.baseHeight,
         exaggeration:     md.exaggeration,
-        sea_level_cap:    document.getElementById('modelSeaLevelCap')?.checked   || false,
-        engrave_label:    document.getElementById('modelEngraveLabel')?.checked  || false,
-        label_text:       window.appState?.selectedRegion?.name || _regionName(),
-        contours:         document.getElementById('modelContours')?.checked      || false,
-        contour_interval: parseInt(document.getElementById('modelContourInterval')?.value) || 100,
-        contour_style:    document.getElementById('modelContourStyle')?.value    || 'engraved',
+        sea_level_cap:    document.getElementById('exportSeaLevelCap')?.checked   || false,
+        engrave_label:    document.getElementById('exportEngraveLabel')?.checked  || false,
+        label_text:       document.getElementById('exportLabelText')?.value || window.appState?.selectedRegion?.name || _regionName(),
+        contours:         document.getElementById('exportContours')?.checked      || false,
+        contour_interval: parseInt(document.getElementById('exportContourInterval')?.value) || 100,
+        contour_style:    document.getElementById('exportContourStyle')?.value    || 'engraved',
         name:             _regionName()
     };
 }
@@ -103,8 +103,8 @@ function generateModelFromTab() {
     }
 
     const resolution  = parseInt(document.getElementById('modelResolution').value);
-    const exaggeration = parseFloat(document.getElementById('modelExaggeration').value);
-    const baseHeight   = parseFloat(document.getElementById('modelBaseHeight').value);
+    const exaggeration = parseFloat(document.getElementById('exportExaggeration')?.value) || 1.0;
+    const baseHeight   = parseFloat(document.getElementById('exportBaseHeight')?.value) || 0;
 
     if (!resolution || resolution < 1 || resolution > 2000) {
         window.showToast('Resolution must be between 1 and 2000.', 'warning'); return;

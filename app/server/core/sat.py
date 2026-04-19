@@ -19,6 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
+from app.server.core.validation import METRES_PER_DEGREE
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +33,76 @@ _SAT_TILE_URL: str = (
     "/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 )
 _SAT_TILE_SIZE: int = 256  # pixels per tile side (standard WMTS)
+# Maximum tiles in one dimension before capping zoom (avoids 4000+ tiles for huge bboxes)
+_MAX_SAT_TILES: int = 64
+_MIN_SAT_ZOOM: int = 6  # Minimum zoom level (world overview)
+_MAX_SAT_ZOOM: int = 18  # Maximum zoom level (highest detail available)
+
+
+def _calculate_optimal_zoom(
+    north: float, south: float, east: float, west: float,
+    requested_dim: int, target_m_per_px: float = None
+) -> int:
+    """
+    Calculate optimal zoom level for satellite tiles based on geographic scale and requested resolution.
+
+    Strategy:
+      1. Calculate bounding box dimensions in meters at the given latitude
+      2. Determine target m/pixel based on bbox size (larger regions → coarser resolution)
+      3. Clamp zoom to avoid fetching excessive tiles (>64 tiles per dimension)
+      4. Return zoom level that achieves ~requested_dim pixels output without tile explosion
+
+    Args:
+        north, south, east, west: Bounding box in degrees
+        requested_dim: Target output dimension (pixels)
+        target_m_per_px: Optional fixed m/pixel target; if None, auto-calculate
+
+    Returns:
+        Zoom level (6-18) optimized for the bbox scale and requested resolution
+    """
+    # Calculate bbox dimensions in meters
+    mid_lat = (north + south) / 2.0
+    m_per_deg_lon = METRES_PER_DEGREE * math.cos(math.radians(mid_lat))
+    m_per_deg_lat = METRES_PER_DEGREE
+
+    bbox_w_m = abs(east - west) * m_per_deg_lon
+    bbox_h_m = abs(north - south) * m_per_deg_lat
+    bbox_diag_m = math.sqrt(bbox_w_m**2 + bbox_h_m**2)
+
+    # If no fixed target, auto-calculate based on bbox size vs. requested output resolution
+    if target_m_per_px is None:
+        # Heuristic: for a bbox_diag_m distance, aim for requested_dim pixels
+        # This ensures large regions don't pull unnecessarily hi-res tiles
+        target_m_per_px = max(1, bbox_diag_m / (requested_dim * math.sqrt(2)))
+
+    # Zoom 0 = 40075 km / 256 px = ~156.5 km/px
+    # Zoom z = 40075 km / (256 * 2^z) px
+    # Solve: 40075000 m / (256 * 2^z) ~= target_m_per_px
+    # => 2^z ~= 40075000 / (256 * target_m_per_px)
+    # => z ~= log2(40075000 / (256 * target_m_per_px))
+    earth_circumference_m = 40075000.0
+    tiles_per_side_needed = earth_circumference_m / (256.0 * target_m_per_px)
+    zoom = max(_MIN_SAT_ZOOM, min(_MAX_SAT_ZOOM,
+               math.log2(tiles_per_side_needed)))
+    zoom = int(round(zoom))
+
+    # Secondary check: clamp zoom if it would request too many tiles
+    n = 2 ** zoom
+    max_tiles_per_dim = max(
+        abs(_wm_lon_to_tile(east, n) - _wm_lon_to_tile(west, n)) + 1,
+        abs(_wm_lat_to_tile(north, n) - _wm_lat_to_tile(south, n)) + 1
+    )
+    while max_tiles_per_dim > _MAX_SAT_TILES and zoom > _MIN_SAT_ZOOM:
+        zoom -= 1
+        n = 2 ** zoom
+        max_tiles_per_dim = max(
+            abs(_wm_lon_to_tile(east, n) - _wm_lon_to_tile(west, n)) + 1,
+            abs(_wm_lat_to_tile(north, n) - _wm_lat_to_tile(south, n)) + 1
+        )
+
+    logger.debug(f"Satellite zoom: bbox={bbox_diag_m:.0f}m, target={target_m_per_px:.0f}m/px, "
+                 f"zoom={zoom}, max_tiles_per_dim={max_tiles_per_dim}")
+    return zoom
 
 
 def _wm_lon_to_tile(lon: float, n: int) -> int:
@@ -54,9 +126,15 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
     """
     Stitch ESRI World Imagery WMTS tiles into a bbox-cropped JPEG and return as base64.
 
-    Automatically selects a zoom level so the output is at least *dim* pixels in the
-    larger dimension.  No API key required — ESRI World Imagery tiles are publicly
-    accessible for reasonable use.
+    Uses dynamic zoom level selection based on geographic scale and requested resolution:
+      - Small regions (<100km): Requests high-res tiles (zoom 14-18)
+      - Large regions (1000km+): Uses coarser tiles (zoom 8-12) to avoid fetching thousands of tiles
+      - Medium regions: Intermediate zoom levels
+
+    Automatically limits to max 64 tiles per dimension to prevent excessive network requests
+    (e.g., Amazon region would fail with naive zoom, but succeeds with adaptive selection).
+
+    No API key required — ESRI World Imagery tiles are publicly accessible for reasonable use.
 
     Returns a base64-encoded JPEG string, or raises on failure.
     """
@@ -65,16 +143,8 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
     from PIL import Image
     from io import BytesIO
 
-    lon_range = east - west
-    lat_range = north - south
-    deg_span  = max(lon_range, lat_range)
-    zoom = 12  # fallback
-    for z in range(10, 20):
-        n = 2 ** z
-        px_per_deg = _SAT_TILE_SIZE * n / 360.0
-        if deg_span * px_per_deg >= dim:
-            zoom = z
-            break
+    # Use intelligent zoom calculation instead of fixed loop
+    zoom = _calculate_optimal_zoom(north, south, east, west, dim)
 
     n = 2 ** zoom
 
@@ -97,7 +167,7 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
     session.headers["User-Agent"] = "strm2stl/1.0"
 
     tiles_loaded = 0
-    tiles_total  = (tx_max - tx_min + 1) * (ty_max - ty_min + 1)
+    tiles_total = (tx_max - tx_min + 1) * (ty_max - ty_min + 1)
     last_tile_err = None
 
     for tx in range(tx_min, tx_max + 1):
@@ -107,11 +177,13 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
                 resp = session.get(url, timeout=8)
                 resp.raise_for_status()
                 tile = Image.open(BytesIO(resp.content)).convert("RGB")
-                composite.paste(tile, ((tx - tx_min) * _SAT_TILE_SIZE, (ty - ty_min) * _SAT_TILE_SIZE))
+                composite.paste(
+                    tile, ((tx - tx_min) * _SAT_TILE_SIZE, (ty - ty_min) * _SAT_TILE_SIZE))
                 tiles_loaded += 1
             except Exception as tile_err:
                 last_tile_err = tile_err
-                logger.debug(f"Satellite tile {zoom}/{ty}/{tx} failed: {tile_err}")
+                logger.debug(
+                    f"Satellite tile {zoom}/{ty}/{tx} failed: {tile_err}")
 
     if tiles_loaded == 0:
         raise RuntimeError(
@@ -119,7 +191,8 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
             f"Last error: {last_tile_err}. "
             "Check network access to server.arcgisonline.com."
         )
-    logger.info(f"Satellite tiles: {tiles_loaded}/{tiles_total} loaded at zoom {zoom}")
+    logger.info(
+        f"Satellite tiles: {tiles_loaded}/{tiles_total} loaded at zoom {zoom}")
 
     def _lon2px(lon):
         return int((lon + 180.0) / 360.0 * n * _SAT_TILE_SIZE) - tx_min * _SAT_TILE_SIZE
@@ -151,15 +224,25 @@ def fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset):
     Returns (img, jrc_img_or_None, elevation_raw_or_None) at native sat_scale resolution.
     """
     from geo2stl.sat2stl import fetch_bbox_image
-    img = fetch_bbox_image(north, south, east, west,
-                           scale=sat_scale, dataset="esa", use_cache=True)
+    logger.info(f"fetch_water_mask_images: fetching ESA WorldCover layer "
+                f"(bbox {abs(east-west):.1f}°×{abs(north-south):.1f}°, scale={sat_scale}m/px)")
+    try:
+        img = fetch_bbox_image(north, south, east, west,
+                               scale=sat_scale, dataset="esa", use_cache=True)
+    except Exception as e:
+        logger.error(f"fetch_water_mask_images: ESA WorldCover layer failed "
+                     f"(scale={sat_scale}m/px, bbox {abs(east-west):.1f}°×{abs(north-south):.1f}°): {e}")
+        img = None
     jrc_img = None
     if water_dataset == "jrc":
+        logger.info(f"fetch_water_mask_images: fetching JRC Global Surface Water layer "
+                    f"(scale={sat_scale}m/px)")
         try:
             jrc_img = fetch_bbox_image(north, south, east, west,
                                        scale=sat_scale, dataset="jrc", use_cache=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                f"fetch_water_mask_images: JRC layer failed (scale={sat_scale}m/px): {e}")
     elevation_raw = None
     try:
         from geo2stl.geo2stl import stitch_tiles_no_rasterio as _stitch
@@ -177,8 +260,9 @@ def fetch_water_mask(
 ) -> tuple:
     """Fetch and build a binary water mask for a bounding box.
 
-    Auto-scales *sat_scale* upward if the estimated pixel count would exceed
-    Earth Engine's 5 Mpx limit.
+    Auto-scales *sat_scale* upward to satisfy both Earth Engine limits:
+      - 50 MB request size limit (~2 bytes/px GeoTIFF → ~25M pixel budget)
+      - 32768px max grid dimension on either axis
 
     Returns:
         (water_mask, esa_img, sat_scale_used)
@@ -188,18 +272,37 @@ def fetch_water_mask(
     """
     import cv2 as _cv2
 
-    # Auto-scale sat_scale to avoid Earth Engine pixel limits
     bbox_w = abs(east - west)
     bbox_h = abs(north - south)
     mid_lat = (north + south) / 2.0
-    m_per_deg_lon = 111000.0 * math.cos(math.radians(mid_lat))
-    m_per_deg_lat = 111000.0
-    est_px = (bbox_w * m_per_deg_lon / sat_scale) * (bbox_h * m_per_deg_lat / sat_scale)
-    if est_px > 5_000_000:
-        sat_scale = max(sat_scale, int(sat_scale * math.sqrt(est_px / 5_000_000)))
-        logger.info(f"fetch_water_mask: auto-scaled sat_scale to {sat_scale}")
+    m_per_deg_lon = METRES_PER_DEGREE * math.cos(math.radians(mid_lat))
+    m_per_deg_lat = METRES_PER_DEGREE
 
-    img, jrc_img, elevation_raw = fetch_water_mask_images(north, south, east, west, sat_scale, dataset)
+    bbox_w_m = bbox_w * m_per_deg_lon
+    bbox_h_m = bbox_h * m_per_deg_lat
+
+    # Constraint 1: 50 MB request size — GeoTIFF is ~2 bytes/px for uint8.
+    # Keep pixel count ≤ 25M to stay within the 50 331 648-byte EE limit.
+    _MAX_ESA_PX = 50_331_648 // 2
+    est_px = (bbox_w_m / sat_scale) * (bbox_h_m / sat_scale)
+    if est_px > _MAX_ESA_PX:
+        sat_scale = max(sat_scale, int(
+            math.ceil(math.sqrt(bbox_w_m * bbox_h_m / _MAX_ESA_PX))))
+        logger.info(f"fetch_water_mask (ESA/water layer): pixel limit clamp → sat_scale={sat_scale} "
+                    f"(bbox {bbox_w:.1f}°×{bbox_h:.1f}°, est {est_px/1e6:.1f}M px)")
+
+    # Constraint 2: 32768px max grid dimension on either axis.
+    max_dim_px = 32768
+    min_scale_w = math.ceil(bbox_w_m / max_dim_px)
+    min_scale_h = math.ceil(bbox_h_m / max_dim_px)
+    min_safe_dim = max(int(min_scale_w), int(min_scale_h), 1)
+    if sat_scale < min_safe_dim:
+        logger.info(f"fetch_water_mask (ESA/water layer): dimension limit clamp → sat_scale={min_safe_dim} "
+                    f"(was {sat_scale}, bbox {bbox_w:.1f}°×{bbox_h:.1f}°)")
+        sat_scale = min_safe_dim
+
+    img, jrc_img, elevation_raw = fetch_water_mask_images(
+        north, south, east, west, sat_scale, dataset)
 
     if img is None:
         raise RuntimeError("Failed to fetch ESA land cover data")
@@ -212,7 +315,7 @@ def fetch_water_mask(
             jrc_img = jrc_img[:, :, 0]
         if jrc_img.shape != (h, w):
             jrc_img = _cv2.resize(jrc_img.astype(np.float32), (w, h),
-                                   interpolation=_cv2.INTER_LINEAR)
+                                  interpolation=_cv2.INTER_LINEAR)
         water_mask = (jrc_img > 50).astype(np.float32)
     else:
         water_mask = (img == 80).astype(np.float32)
@@ -224,7 +327,7 @@ def fetch_water_mask(
     ) / 1000.0
     if elevation_raw is not None and elevation_raw.size > 0 and bbox_diag_km > 30:
         elev_r = _cv2.resize(elevation_raw.astype(np.float32), (w, h),
-                              interpolation=_cv2.INTER_LINEAR)
+                             interpolation=_cv2.INTER_LINEAR)
         water_mask = np.maximum(water_mask, (elev_r < -2).astype(np.float32))
 
     return water_mask, img, sat_scale
@@ -235,7 +338,27 @@ def fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, di
     import cv2 as _cv2
     import numpy as _np
     from geo2stl.sat2stl import fetch_bbox_image
-    sat = fetch_bbox_image(north, south, east, west, scale=30, dataset=dataset)
+
+    mid_lat = (north + south) / 2.0
+    m_per_deg_lon = METRES_PER_DEGREE * math.cos(math.radians(mid_lat))
+    m_per_deg_lat = METRES_PER_DEGREE
+    bbox_w_m = abs(east - west) * m_per_deg_lon
+    bbox_h_m = abs(north - south) * m_per_deg_lat
+
+    # Constraint 1: 50 MB EE request limit (~2 bytes/px for GeoTIFF uint8)
+    _EE_MAX_PX = 50_331_648 // 2  # ~25 M pixels
+    min_scale_px = int(math.ceil(math.sqrt(bbox_w_m * bbox_h_m / _EE_MAX_PX)))
+
+    # Constraint 2: 32768px max grid dimension on either axis
+    min_scale_dim = max(int(math.ceil(bbox_w_m / 32768)),
+                        int(math.ceil(bbox_h_m / 32768)))
+
+    sat_scale = max(30, min_scale_px, min_scale_dim)
+    logger.info(f"fetch_sat_overlay ({dataset}): scale={sat_scale}m/px "
+                f"(bbox {abs(east-west):.1f}°×{abs(north-south):.1f}°, "
+                f"pixel_min={min_scale_px}, dim_min={min_scale_dim})")
+    sat = fetch_bbox_image(north, south, east, west,
+                           scale=sat_scale, dataset=dataset)
     if sat is None:
         return None
     sat_arr = _np.array(sat)
@@ -243,5 +366,6 @@ def fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, di
         return None
     sat_tw = max(width_px, dim or width_px)
     sat_th = max(height_px, dim or height_px)
-    sat_arr = _cv2.resize(sat_arr, (sat_tw, sat_th), interpolation=_cv2.INTER_LINEAR)
+    sat_arr = _cv2.resize(sat_arr, (sat_tw, sat_th),
+                          interpolation=_cv2.INTER_LINEAR)
     return (sat_arr.ravel().tolist(), sat_arr.shape[1], sat_arr.shape[0])

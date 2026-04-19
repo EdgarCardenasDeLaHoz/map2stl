@@ -8,7 +8,7 @@
 `loadDEM` is 242 lines. The success block starting at line 142 (`if (data.dem_values && data.dimensions)`)
 is 115 lines that:
 - Flattens nested dem arrays
-- Calls `renderDEMCanvas`, `applyProjection`, appends canvas
+- Calls `renderDEMCanvas`, appends canvas
 - Updates overlays (axes, colorbar, histogram, gridlines)
 - Updates stacked layers, bbox inputs, elev range display
 - Handles sat_values landuse panel

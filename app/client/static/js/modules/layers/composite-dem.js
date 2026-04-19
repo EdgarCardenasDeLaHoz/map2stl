@@ -89,9 +89,10 @@ function _unitSuffix(elemId) {
  */
 function _waterContribution(demW, demH) {
     const wm = window.appState?.lastWaterMaskData;
-    if (!wm?.water_mask_values?.length) return null;
+    if (!wm) return null;
 
-    const wmVals = wm.water_mask_values;
+    const wmVals = window.decodeWaterMask?.(wm);
+    if (!wmVals?.length) return null;
     const dims = wm.water_mask_dimensions;
     if (!dims || dims.length < 2) return null;
     const wmH = dims[0], wmW = dims[1];
@@ -176,11 +177,13 @@ function _cityContributionFromRaster(raster) {
  * Land cover contribution: map ESA class → height offset.
  */
 function _landcoverContribution(demW, demH) {
+    const esa = window.appState?.lastEsaData;
     const wm = window.appState?.lastWaterMaskData;
-    if (!wm?.esa_values?.length) return null;
+    const src = esa?.esa_values?.length ? esa : wm;
+    if (!src?.esa_values?.length) return null;
 
-    const esaVals = wm.esa_values;
-    const esaDims = wm.esa_dimensions || wm.water_mask_dimensions;
+    const esaVals = src.esa_values;
+    const esaDims = src.esa_dimensions || src.water_mask_dimensions;
     if (!esaDims || esaDims.length < 2) return null;
     const esaH = esaDims[0], esaW = esaDims[1];
     if (!esaW || !esaH) return null;
@@ -348,10 +351,7 @@ window.computeCompositeDem = async function computeCompositeDem() {
     rawCanvas.height = H;
     _renderCompositeCanvas(rawCanvas, composite, W, H, cMin, cMax);
 
-    // Apply projection to match DEM/water/satellite canvases (prevents overlay misalignment)
-    const bbox = window.appState?.currentDemBbox;
-    const projCanvas = (bbox && window.applyProjection) ? window.applyProjection(rawCanvas, bbox) : rawCanvas;
-    if (window.appState) window.appState.compositeDemSourceCanvas = projCanvas;
+    if (window.appState) window.appState.compositeDemSourceCanvas = rawCanvas;
 
     // Update stats display
     const statsEl = document.getElementById('compositeStats');
@@ -376,15 +376,7 @@ function _renderCompositeCanvas(canvas, values, width, height, vmin, vmax) {
 
     // LUT cached by colormap — only rebuilt when colormap changes
     if (!_lutCache[colormap]) {
-        const lut = new Uint8Array(1024 * 3);
-        for (let i = 0; i < 1024; i++) {
-            const t = i / 1023;
-            const rgb = window.mapElevationToColor?.(t, colormap) || [t, t, t];
-            lut[i * 3]     = Math.round(rgb[0] * 255);
-            lut[i * 3 + 1] = Math.round(rgb[1] * 255);
-            lut[i * 3 + 2] = Math.round(rgb[2] * 255);
-        }
-        _lutCache[colormap] = lut;
+        _lutCache[colormap] = window.buildColorLUT(colormap);
     }
     const lut = _lutCache[colormap];
 
@@ -429,6 +421,52 @@ window.applyCompositeToDem = function applyCompositeToDem() {
     window.recolorDEM?.();
     window.showToast?.('Composite applied as DEM', 'success');
 };
+
+// ─── Preview & thumbnail ─────────────────────────────────────────────────────
+
+/**
+ * Preview the composite layer — switch view mode and trigger recompute.
+ */
+window.previewComposite = async function previewComposite() {
+    const enableCb = document.getElementById('compositeEnabled');
+    if (enableCb && !enableCb.checked) {
+        enableCb.checked = true;
+    }
+    window.setStackMode?.('CompositeDem');
+    await window.computeCompositeDem();
+    window.updateStackedLayers?.();
+    _updatePreviewThumb();
+    _updateContribStatus();
+    window.showToast?.('Composite preview updated', 'info');
+};
+
+/**
+ * Render a scaled-down preview of the composite into the thumbnail canvas.
+ */
+function _updatePreviewThumb() {
+    const thumbCanvas = document.getElementById('compositePreviewThumb');
+    const src = window.appState?.compositeDemSourceCanvas;
+    if (!thumbCanvas || !src || !src.width || !src.height) return;
+
+    const ctx = thumbCanvas.getContext('2d');
+    ctx.clearRect(0, 0, thumbCanvas.width, thumbCanvas.height);
+    ctx.drawImage(src, 0, 0, thumbCanvas.width, thumbCanvas.height);
+}
+
+/**
+ * Update the contribution status text showing which layers are active.
+ */
+function _updateContribStatus() {
+    const el = document.getElementById('compositeContribStatus');
+    if (!el) return;
+
+    const parts = ['DEM'];
+    if (params.waterWeight > 0) parts.push(`− Water (${params.waterDepth.toFixed(1)}m, ${params.waterWeight.toFixed(1)}×)`);
+    if (params.cityWeight > 0)  parts.push(`+ City (${params.cityWeight.toFixed(1)}×)`);
+    if (params.landcoverWeight > 0) parts.push(`+ LC (${params.landcoverWeight.toFixed(1)}×)`);
+    if (params.satWeight > 0)   parts.push(`+ Veg (${params.satWeight.toFixed(1)}×)`);
+    el.textContent = parts.join(' ');
+}
 
 // ─── UI wiring ───────────────────────────────────────────────────────────────
 
@@ -475,6 +513,11 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
         });
     }
 
+    // Preview button
+    document.getElementById('previewCompositeBtn')?.addEventListener('click', () => {
+        window.previewComposite();
+    });
+
     // Apply button
     document.getElementById('applyCompositeToDemBtn')?.addEventListener('click', () => {
         window.applyCompositeToDem();
@@ -488,6 +531,8 @@ function _scheduleRecompute() {
     _recomputeTimer = setTimeout(async () => {
         await window.computeCompositeDem();
         window.updateStackedLayers?.();
+        _updatePreviewThumb();
+        _updateContribStatus();
     }, 80);
 }
 

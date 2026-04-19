@@ -12,7 +12,7 @@ import logging
 import sqlite3
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,9 @@ except ImportError:
         subtract_water: bool = Field(True)
         sat_scale: int = Field(500)
 
+        def model_dump(self, **kw):
+            return self.dict(**kw)
+
     class RegionCreate(BaseModel):
         name: str
         north: float
@@ -46,6 +49,9 @@ except ImportError:
         description: Optional[str] = None
         label: Optional[str] = None
         parameters: Optional[RegionParameters] = None
+
+        def model_dump(self, **kw):
+            return self.dict(**kw)
 
     class RegionSettings(BaseModel):
         dim: Optional[int] = None
@@ -74,6 +80,11 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 _PARAM_FIELDS = ("dim", "depth_scale", "water_scale", "height", "base", "subtract_water", "sat_scale")
+
+
+def _dump(model, **kw):
+    """Pydantic v1/v2 compatible model serialisation."""
+    return model.model_dump(**kw) if hasattr(model, "model_dump") else model.dict(**kw)
 
 
 def _row_to_region(row) -> dict:
@@ -135,9 +146,9 @@ async def create_region(region: RegionCreate):
                 ),
             )
             conn.commit()
-        payload = region.model_dump()
+        payload = _dump(region)
         if payload.get("parameters") is None:
-            payload["parameters"] = RegionParameters().model_dump()
+            payload["parameters"] = _dump(RegionParameters())
         return JSONResponse(content=payload, status_code=201)
     except sqlite3.IntegrityError as e:
         return JSONResponse(content={"error": str(e)}, status_code=400)
@@ -170,7 +181,7 @@ async def update_region(name: str, region: RegionCreate):
             conn.commit()
             if cur.rowcount == 0:
                 return JSONResponse(content={"error": f"Region '{name}' not found"}, status_code=404)
-        return JSONResponse(content=region.model_dump())
+        return JSONResponse(content=_dump(region))
     except Exception as e:
         logger.error(f"Error updating region: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
@@ -211,11 +222,18 @@ async def get_region_settings(name: str):
 
 
 @router.put("/api/regions/{name}/settings")
-async def save_region_settings_route(name: str, settings: RegionSettings):
-    """Save or update all panel settings for a region."""
+async def save_region_settings_route(name: str, request: Request):
+    """Save or update all panel settings for a region.
+
+    Accepts a free-form JSON body — either the grouped structure
+    (dem, projection, view, water, satellite, city, export, split, hydrology)
+    or the legacy flat structure.  The blob is stored verbatim.
+    """
     try:
         _ensure_db()
-        payload = {k: v for k, v in settings.model_dump().items() if v is not None}
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            return JSONResponse(content={"error": "Body must be a JSON object"}, status_code=400)
         settings_json = json.dumps(payload)
         with get_db() as conn:
             conn.execute(
@@ -223,6 +241,7 @@ async def save_region_settings_route(name: str, settings: RegionSettings):
                 (name, settings_json),
             )
             conn.commit()
+        logger.info(f"Settings saved for region '{name}' ({len(payload)} top-level keys)")
         return JSONResponse(content={"status": "saved", "name": name, "settings": payload})
     except Exception as e:
         logger.error(f"Error saving region settings: {e}")

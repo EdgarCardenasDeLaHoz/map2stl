@@ -91,7 +91,16 @@ class RegionsListResponse(BaseModel):
 
 
 class RegionSettings(BaseModel):
-    """All editable panel settings saved per region, separate from geometry."""
+    """
+    All editable panel settings saved per region, stored as a free-form JSON blob.
+    Structure mirrors terrain_session.py _DEFAULT_SETTINGS: grouped by dem, projection,
+    view, water, satellite, city, export, split, hydrology.
+    Also accepts the legacy flat shape for backwards compatibility.
+    """
+    model_config = {"extra": "allow"}
+
+    # Accept any field — the full grouped blob is stored verbatim as JSON.
+    # Typed fields below are kept for backwards-compat with old flat saves.
     dim: Optional[int] = None
     depth_scale: Optional[float] = None
     water_scale: Optional[float] = None
@@ -137,6 +146,8 @@ class CityRasterRequest(BaseModel):
     building_scale: float = Field(1.0, ge=0.0, description="Multiplier applied to height_m when burning buildings")
     road_depression_m: float = Field(0.0, description="Road surface height relative to 0 (negative = depressed)")
     water_depression_m: float = Field(-2.0, description="Waterway surface height relative to 0")
+    projection: str = Field("none", description="Map projection to apply after rasterisation ('none', 'cosine', 'mercator', etc.)")
+    clip_nans: bool = Field(True, description="Strip all-NaN border rows/columns created by projection")
 
 
 # ---------------------------------------------------------------------------

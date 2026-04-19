@@ -5,6 +5,7 @@
  *
  * Public API (all on window):
  *   loadWaterMask()           — fetch water mask + ESA land cover
+ *   loadEsaLandCover()       — fetch ESA land cover independently
  *   renderWaterMask(data)     — render water mask canvas
  *   renderEsaLandCover(data)  — render ESA land cover canvas
  *   renderCombinedView()      — composite DEM + water overlay
@@ -25,7 +26,6 @@
  *   window.appState.lastWaterMaskData   — mirrored here; also set on appState
  *   window.appState.landCoverConfig     — ESA class colour/elevation map
  *   window.appState.landCoverConfigDefaults — deep-copy of defaults
- *   window.applyProjection(canvas, bbox)       — global from dem-loader.js
  *   window.enableZoomAndPan(canvas)            — global from dem-loader.js
  *   window.mapElevationToColor(t, cmap)        — global from dem-loader.js
  *   recolorDEM()                        — global from dem-loader.js
@@ -67,35 +67,33 @@ async function loadWaterMask() {
     }
     const { north, south, east, west } = bbox;
 
-    // waterLayerResolution is the per-layer load control; waterResolution is the persisted setting.
-    // The load button reads from waterLayerResolution; they are synced on region select.
+    // waterResolution is the authoritative control in the Water section.
     const satScale = parseInt(
-        document.getElementById('waterLayerResolution')?.value ||
         document.getElementById('waterResolution')?.value || '200'
     );
 
     const waterDataset = document.getElementById('waterDataset')?.value || 'esa';
-    const cacheKey = { ...bbox, sat_scale: satScale, dataset: waterDataset };
+    const projection = document.getElementById('paramProjection')?.value || 'none';
+    const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
+    const cacheKey = { ...bbox, sat_scale: satScale, dataset: waterDataset, projection, clip_nans: clipNans };
 
     const cachedData = window.waterMaskCache.get(cacheKey);
     if (cachedData) {
         _setLastWaterMaskData(cachedData);
         window.appState.layerBboxes.water = bbox;
-        window.appState.layerBboxes.landCover = bbox;
-        window.setLayerStatus(['water', 'landCover'], 'loaded');
-        updateCacheStatusUI();
+        window.setLayerStatus('water', 'loaded');
+        window.updateCacheStatusUI?.();
         renderWaterMask(cachedData);
-        renderEsaLandCover(cachedData);
         window.emitStackUpdate();
         document.getElementById('waterMaskStats').innerHTML =
             `Water pixels: ${cachedData.water_pixels} / ${cachedData.total_pixels} (${cachedData.water_percentage.toFixed(1)}%) <span style="color:#4CAF50;font-size:10px;">[CACHED]</span>`;
-        window.showToast('Water & land cover loaded from cache', 'success');
+        window.showToast('Water mask loaded from cache', 'success');
         return;
     }
 
-    const params = new URLSearchParams({ north, south, east, west, sat_scale: satScale, dataset: waterDataset });
+    const params = new URLSearchParams({ north, south, east, west, sat_scale: satScale, dataset: waterDataset, projection, clip_nans: clipNans });
 
-    window.setLayerStatus(['water', 'landCover'], 'loading');
+    window.setLayerStatus('water', 'loading');
 
     document.getElementById('waterMaskImage').innerHTML = '<div class="loading"><span class="spinner"></span>Loading water mask from Earth Engine...</div>';
     window.showToast('Loading water mask from Earth Engine...', 'info');
@@ -104,39 +102,95 @@ async function loadWaterMask() {
         const { data, error: wmErr } = await window.api.dem.waterMask(params, signal);
         if (wmErr) {
             window.showErrInEl('waterMaskImage', wmErr);
-            window.setLayerStatus(['water', 'landCover'], 'error');
+            window.setLayerStatus('water', 'error');
             window.showToast('Failed to load water mask: ' + wmErr, 'error');
             return;
         }
         if (data.error) {
             window.showErrInEl('waterMaskImage', data.error);
-            window.setLayerStatus(['water', 'landCover'], 'error');
+            window.setLayerStatus('water', 'error');
             window.showToast('Failed to load water mask: ' + data.error, 'error');
             return;
         }
 
         window.waterMaskCache.set(cacheKey, data);
-        updateCacheStatusUI();
+        window.updateCacheStatusUI?.();
         _setLastWaterMaskData(data);
 
         window.appState.layerBboxes.water = bbox;
-        window.appState.layerBboxes.landCover = bbox;
-        window.setLayerStatus(['water', 'landCover'], 'loaded');
+        window.setLayerStatus('water', 'loaded');
 
         renderWaterMask(data);
-        renderEsaLandCover(data);
         window.emitStackUpdate();
 
         document.getElementById('waterMaskStats').innerHTML =
             `Water pixels: ${data.water_pixels} / ${data.total_pixels} (${data.water_percentage.toFixed(1)}%)`;
-        window.showToast('Water & land cover loaded', 'success');
+        window.showToast('Water mask loaded', 'success');
 
     } catch (error) {
         if (error.name === 'AbortError') return;
         console.error('Error loading water mask:', error);
         window.showErrInEl('waterMaskImage', error.message);
-        window.setLayerStatus(['water', 'landCover'], 'error');
+        window.setLayerStatus('water', 'error');
         window.showToast('Failed to load water mask', 'error');
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Standalone ESA land cover fetch
+// ─────────────────────────────────────────────────────────────────────────────
+
+let _esaAbortController = null;
+
+/**
+ * Fetch ESA WorldCover land-cover data independently from the water mask.
+ * Calls `/api/terrain/esa-land-cover` and renders to `#satelliteImage`.
+ */
+async function loadEsaLandCover() {
+    if (_esaAbortController) _esaAbortController.abort();
+    _esaAbortController = new AbortController();
+    const signal = _esaAbortController.signal;
+
+    const boundingBox = window.getBoundingBox?.();
+    const selectedRegion = window.appState.selectedRegion;
+    const bbox = window.getBboxCoords(boundingBox, selectedRegion);
+    if (!bbox) {
+        window.showToast?.('Please select a region first.', 'warning');
+        return;
+    }
+    const { north, south, east, west } = bbox;
+
+    const satScale = parseInt(
+        document.getElementById('esaResolution')?.value || '200'
+    );
+    const projection = document.getElementById('paramProjection')?.value || 'none';
+    const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
+
+    const params = new URLSearchParams({ north, south, east, west, sat_scale: satScale, projection, clip_nans: clipNans });
+
+    window.setLayerStatus?.('landCover', 'loading');
+    window.showToast('Loading ESA land cover...', 'info');
+
+    try {
+        const { data, error: esaErr } = await window.api.dem.esaLandCover(params, signal);
+        if (esaErr) {
+            window.setLayerStatus?.('landCover', 'error');
+            window.showToast('Failed to load ESA land cover: ' + esaErr, 'error');
+            return;
+        }
+
+        window.appState.layerBboxes.landCover = bbox;
+        window.appState.lastEsaData = data;
+        window.setLayerStatus?.('landCover', 'loaded');
+
+        renderEsaLandCover(data);
+        window.emitStackUpdate();
+        window.showToast('ESA land cover loaded', 'success');
+    } catch (error) {
+        if (error.name === 'AbortError') return;
+        console.error('Error loading ESA land cover:', error);
+        window.setLayerStatus?.('landCover', 'error');
+        window.showToast('Failed to load ESA land cover', 'error');
     }
 }
 
@@ -179,12 +233,10 @@ function renderWaterMask(data) {
     }
 
     ctx.putImageData(imgData, 0, 0);
-    const currentDemBbox = window.appState.currentDemBbox;
-    const projectedCanvas = currentDemBbox ? window.applyProjection(canvas, currentDemBbox) : canvas;
     container.innerHTML = '';
-    container.appendChild(projectedCanvas);
-    projectedCanvas.style.width = '100%';
-    projectedCanvas.style.height = 'auto';
+    container.appendChild(canvas);
+    canvas.style.width = '100%';
+    canvas.style.height = 'auto';
     window.emitStackUpdate();
 }
 
@@ -218,12 +270,13 @@ function renderEsaLandCover(data) {
     }
 
     ctx.putImageData(imgData, 0, 0);
-    const currentDemBbox = window.appState.currentDemBbox;
-    const projLandCanvas = currentDemBbox ? window.applyProjection(canvas, currentDemBbox) : canvas;
     container.innerHTML = '';
-    container.appendChild(projLandCanvas);
-    projLandCanvas.style.width = '100%';
-    projLandCanvas.style.height = 'auto';
+    container.appendChild(canvas);
+    canvas.style.width = '100%';
+    canvas.style.height = 'auto';
+
+    // Persist ESA data so recoloring works even after clearLayerCache nulls lastWaterMaskData
+    window.appState._lastEsaRenderData = data;
 
     window.emitStackUpdate();
 }
@@ -309,10 +362,7 @@ function renderLandCoverLegend() {
     const landCoverConfig = window.appState.landCoverConfig;
     const sortedKeys = Object.keys(landCoverConfig).map(Number).sort((a, b) => a - b);
 
-    let html = '<div style="display:grid;grid-template-columns:28px 1fr 52px;gap:3px 6px;align-items:center;">';
-    html += '<div style="font-size:9px;color:#666;grid-column:1">Color</div>';
-    html += '<div style="font-size:9px;color:#666;">Type</div>';
-    html += '<div style="font-size:9px;color:#666;">Elev</div>';
+    let html = '<div style="display:grid;grid-template-columns:28px 1fr 48px 28px 1fr 48px;gap:3px 6px;align-items:center;">';
 
     for (const val of sortedKeys) {
         const config = landCoverConfig[val];
@@ -350,8 +400,9 @@ function setupLandCoverEditor() {
     renderLandCoverLegend();
 
     document.getElementById('applyLandCoverMapping')?.addEventListener('click', () => {
-        if (lastWaterMaskData?.esa_values) {
-            renderEsaLandCover(lastWaterMaskData);
+        const esaData = window.appState.lastEsaData || lastWaterMaskData || window.appState._lastEsaRenderData;
+        if (esaData?.esa_values) {
+            renderEsaLandCover(esaData);
             window.showToast('Land cover colors applied', 'success');
         } else {
             window.showToast('No land cover data loaded', 'warning');
@@ -365,7 +416,8 @@ function setupLandCoverEditor() {
             landCoverConfig[key] = JSON.parse(JSON.stringify(landCoverDefaults[key]));
         }
         renderLandCoverLegend();
-        if (lastWaterMaskData?.esa_values) renderEsaLandCover(lastWaterMaskData);
+        const esaData = window.appState.lastEsaData || lastWaterMaskData || window.appState._lastEsaRenderData;
+        if (esaData?.esa_values) renderEsaLandCover(esaData);
         window.showToast('Land cover colors reset to defaults', 'info');
     });
 
@@ -417,6 +469,7 @@ function _setLastWaterMaskData(data) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 window.loadWaterMask = loadWaterMask;
+window.loadEsaLandCover = loadEsaLandCover;
 window.renderWaterMask = renderWaterMask;
 window.renderEsaLandCover = renderEsaLandCover;
 window.renderCombinedView = renderCombinedView;

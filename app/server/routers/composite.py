@@ -39,6 +39,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.server.core.cache import make_cache_key, osm_cache_key, read_array_cache, write_array_cache, read_osm_cache
+from app.server.core.validation import run_sync, METRES_PER_DEGREE
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["composite"])
@@ -192,7 +193,7 @@ def _rasterize_city(req: CityRasterRequest) -> dict:
         return _empty_result()
 
     lat_mid  = (N + S) / 2
-    m_per_px = (lon_span * np.cos(np.radians(lat_mid)) * 111320) / PW
+    m_per_px = (lon_span * np.cos(np.radians(lat_mid)) * METRES_PER_DEGREE) / PW
 
     _, coords_to_px = _make_geo_to_px(N, S, E, W, PW, PH)
 
@@ -252,8 +253,7 @@ async def get_city_raster(req: CityRasterRequest):
             "height":     int(meta.get("height", req.height)),
         })
 
-    loop   = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, partial(_rasterize_city, req))
+    result = await run_sync(_rasterize_city, req)
 
     # Write to disk cache (30-day TTL via "composite" namespace)
     PW, PH = result["width"], result["height"]

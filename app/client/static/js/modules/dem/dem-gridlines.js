@@ -16,7 +16,6 @@
  * Key external dependencies:
  *   window.renderDEMCanvas  — defined in app.js (writes closure lastDemData), exposed on window
  *   window.appState         — shared state proxy (currentDemBbox, lastDemData)
- *   window.applyProjection()       — global from dem-loader.js
  *   window.drawColorbar()          — global from dem-loader.js
  *   window.drawHistogram()         — global from dem-loader.js
  *   window.enableZoomAndPan()      — global from dem-loader.js
@@ -41,7 +40,7 @@ function drawGridlinesOverlay(containerId = 'demImage') {
     const container = document.getElementById(containerId);
     if (!container || !currentDemBbox) return;
 
-    const canvas = container.querySelector('canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)');
+    const canvas = container.querySelector(window.DEM_CANVAS_SELECTOR);
     if (!canvas) return;
 
     const showGridlines = document.getElementById('showGridlines');

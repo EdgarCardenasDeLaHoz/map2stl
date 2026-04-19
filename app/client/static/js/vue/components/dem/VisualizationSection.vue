@@ -40,8 +40,8 @@
         <select id="gridlineCount" title="Grid line density"
                 style="width:100%;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;">
           <option value="3">Sparse (3)</option>
-          <option value="5" selected>Normal (5)</option>
-          <option value="10">Dense (10)</option>
+          <option value="5">Normal (5)</option>
+          <option value="10" selected>Dense (10)</option>
           <option value="20">Very Dense (20)</option>
         </select>
         <button id="gridPixelModeBtn" title="Toggle pixel coordinates"

@@ -21,19 +21,12 @@ window._invalidateLutCache = (colormap) => {
     else _lutCache.clear();
 };
 
-// Reusable ImageData — avoids re-allocating Uint8ClampedArray on every render.
-let _demImageData = null;
-
 /** True for both plain Array and typed arrays (Float32Array, etc.) */
 const _isArrayLike = (v) => Array.isArray(v) || ArrayBuffer.isView(v);
 
 // Delegate to shared helpers from ui-helpers.js (loaded before this module).
 const _getBboxCoords = (...a) => window.getBboxCoords(...a);
 const _showErr       = (...a) => window.showErrInEl(...a);
-
-// Geographic scale factors (WGS-84 approximation)
-const GEO_M_PER_DEG_LON = 111320;  // metres per degree longitude at equator
-const GEO_M_PER_DEG_LAT = 110540;  // metres per degree latitude
 
 // ---------------------------------------------------------------------------
 // _applyDemResult — post-fetch DEM rendering pipeline
@@ -193,6 +186,7 @@ window.loadDEM = async function loadDEM(highRes = false) {
         dem_source: demSource,
         projection: document.getElementById('paramProjection')?.value || 'none',
         maintain_dimensions: true,
+        clip_nans: document.getElementById('paramClipNans')?.checked ?? true,
     });
 
     // Clear DEM cache before loading new DEM
@@ -306,11 +300,7 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
-    // Always create a fresh ImageData — never reuse across renders.
-    // Reusing _demImageData when dim changes causes putImageData to write a
-    // mismatched buffer onto the new canvas, corrupting the display.
     const img = new ImageData(width, height);
-    _demImageData = img;
 
     const data = img.data;
     const flat = _isArrayLike(values) ? values : [];
@@ -335,15 +325,7 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
 
     // Pre-compute colour lookup table (cached by colormap name)
     if (!_lutCache.has(colormap)) {
-        const lut = new Uint8Array(1024 * 3);
-        for (let i = 0; i < 1024; i++) {
-            const t = i / 1023;
-            const [r, g, b] = window.mapElevationToColor?.(t, colormap) || [0, 0, 0];
-            lut[i * 3] = Math.round((r || 0) * 255);
-            lut[i * 3 + 1] = Math.round((g || 0) * 255);
-            lut[i * 3 + 2] = Math.round((b || 0) * 255);
-        }
-        _lutCache.set(colormap, lut);
+        _lutCache.set(colormap, window.buildColorLUT(colormap));
     }
     const colorLUT = _lutCache.get(colormap);
 
@@ -371,17 +353,6 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
 
     return canvas;
 };
-
-// Resize handler: ensure canvas scales to container
-window.addEventListener('resize', () => {
-    const container = document.getElementById('demImage');
-    if (!container) return;
-    const canvas = container.querySelector('canvas');
-    if (canvas) {
-        canvas.style.width = '100%';
-        canvas.style.height = '100%';
-    }
-});
 
 // ---------------------------------------------------------------------------
 // _setDemEmptyState
@@ -455,7 +426,7 @@ window.updatePrintDimensions = function updatePrintDimensions() {
     }
 
     // Use projected canvas dimensions — projection can change aspect ratio (e.g. lambert)
-    const demCanvas = document.querySelector('#demImage canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)');
+    const demCanvas = document.querySelector(`#demImage ${window.DEM_CANVAS_SELECTOR}`);
     const gridW = demCanvas?.width || lastDemData.width;
     const gridH = demCanvas?.height || lastDemData.height;
     const modelH = parseFloat(document.getElementById('modelResolution').value) || 200;
@@ -474,8 +445,8 @@ window.updatePrintDimensions = function updatePrintDimensions() {
     if (bbox) {
         const midLat = (bbox.north + bbox.south) / 2;
         const latCos = Math.cos(midLat * Math.PI / 180);
-        const realW_m = Math.abs(bbox.east - bbox.west) * GEO_M_PER_DEG_LON * latCos;
-        const realH_m = Math.abs(bbox.north - bbox.south) * GEO_M_PER_DEG_LAT;
+        const realW_m = Math.abs(bbox.east - bbox.west) * window.GEO_M_PER_DEG_LON * latCos;
+        const realH_m = Math.abs(bbox.north - bbox.south) * window.GEO_M_PER_DEG_LAT;
         const realW_km = realW_m / 1000;
         const realH_km = realH_m / 1000;
 
@@ -536,8 +507,8 @@ window._updateBedOptimizer = function _updateBedOptimizer(bbox) {
 
     const midLat = (bbox.north + bbox.south) / 2;
     const latCos = Math.cos(midLat * Math.PI / 180);
-    const realW_m = Math.abs(bbox.east - bbox.west) * 111320 * latCos;
-    const realH_m = Math.abs(bbox.north - bbox.south) * 110540;
+    const realW_m = Math.abs(bbox.east - bbox.west) * window.GEO_M_PER_DEG_LON * latCos;
+    const realH_m = Math.abs(bbox.north - bbox.south) * window.GEO_M_PER_DEG_LAT;
 
     const aspectRatio = realW_m / realH_m;
     let printW, printH;
@@ -589,8 +560,7 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
         return;
     }
     const { north, south, east, west } = coords;
-    const resolution = document.getElementById('waterLayerResolution')?.value ||
-                       document.getElementById('waterResolution')?.value || '200';
+    const resolution = document.getElementById('waterResolution')?.value || '200';
     const dataset    = document.getElementById('waterDataset')?.value   || 'esa';
 
     const params = new URLSearchParams({
@@ -663,7 +633,10 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
         document.getElementById('satImgResolution')?.value ||
         document.getElementById('paramDim')?.value || 400
     );
-    const params = new URLSearchParams({ north, south, east, west, dim });
+    const params = new URLSearchParams({ north, south, east, west, dim,
+        projection: document.getElementById('paramProjection')?.value || 'none',
+        clip_nans:  document.getElementById('paramClipNans')?.checked ?? true,
+    });
 
     window.showToast?.('Loading satellite imagery...', 'info');
 
@@ -680,12 +653,9 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
                 raw.width = img.naturalWidth;
                 raw.height = img.naturalHeight;
                 raw.getContext('2d').drawImage(img, 0, 0);
-                // Store raw canvas for re-projection when projection setting changes
                 window.appState._satImgRawCanvas = raw;
                 window.appState._satImgBbox = bbox;
-                // Apply the same projection as DEM/water canvases so layers align
-                const proj = window.applyProjection ? window.applyProjection(raw, bbox) : raw;
-                window.appState.satImgSourceCanvas = proj;
+                window.appState.satImgSourceCanvas = raw;
                 resolve();
             };
             img.onerror = reject;
@@ -695,7 +665,7 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
         window.events?.emit(window.EV?.STACKED_UPDATE);
         window.showToast?.('Satellite imagery loaded', 'success');
     } catch (err) {
-        if (err.name === 'AbortError') return;
+        if (err.name === 'AbortError' || signal.aborted) return;
         console.error('loadSatelliteRGBImage error:', err);
         window.showToast?.(`Satellite load failed: ${err.message}`, 'error');
     }
@@ -707,10 +677,8 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
  */
 window._reprojectSatelliteImage = function _reprojectSatelliteImage() {
     const raw = window.appState?._satImgRawCanvas;
-    const bbox = window.appState?._satImgBbox;
-    if (!raw || !bbox) return;
-    const proj = window.applyProjection ? window.applyProjection(raw, bbox) : raw;
-    window.appState.satImgSourceCanvas = proj;
+    if (!raw) return;
+    window.appState.satImgSourceCanvas = raw;
 };
 
 // ---------------------------------------------------------------------------

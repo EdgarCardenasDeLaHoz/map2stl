@@ -659,7 +659,7 @@ function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipR
     // ── Roads — batched by lineWidth ───────────────────────────────────────
     if (_shouldDraw('roads') && osmCityData.roads?.features?.length) {
         const c         = document.getElementById('layerRoadsColor')?.value || '#cc8844';
-        const baseWidth = parseFloat(document.getElementById('cityRoadWidth')?.value) || 1.5;
+        const baseWidth = 1.5; // canvas road display width (fixed default; road_depression_m controls 3D export)
         ctx.strokeStyle = c;
         ctx.globalAlpha = 0.75;
 

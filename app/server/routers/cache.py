@@ -101,6 +101,34 @@ async def clear_cache_endpoint():
     return await _clear_cache()
 
 
+@router.delete("/api/cache/region")
+async def clear_region_cache(request: Request):
+    """Clear all namespace caches (DEM, water, satellite, etc.) for a region.
+
+    Expects bbox query params: north, south, east, west.
+    """
+    from app.server.core.cache import clear_bbox_cache
+
+    params = request.query_params
+    try:
+        north = float(params["north"])
+        south = float(params["south"])
+        east = float(params["east"])
+        west = float(params["west"])
+    except (KeyError, ValueError):
+        return JSONResponse(
+            content={"error": "Missing or invalid bbox parameters (north, south, east, west)"},
+            status_code=400)
+
+    results = clear_bbox_cache(north, south, east, west)
+    total = sum(results.values())
+    return JSONResponse(content={
+        "status": "success",
+        "files_deleted": total,
+        "by_namespace": results,
+    })
+
+
 @router.get("/api/cache/check")
 async def check_cache(request: Request):
     """Check whether a specific region is already cached server-side."""

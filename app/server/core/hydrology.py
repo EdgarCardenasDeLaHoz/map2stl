@@ -144,8 +144,8 @@ def rasterize_rivers_with_buffering(
 
     # Calculate pixel size in metres (approximate)
     mid_lat = (north + south) / 2.0
-    pixel_size_lon_m = (east - west) * 111_000.0 / dim
-    pixel_size_lat_m = (north - south) * 111_000.0 / dim
+    pixel_size_lon_m = (east - west) * 111_320.0 / dim
+    pixel_size_lat_m = (north - south) * 111_320.0 / dim
     pixel_size_m = (pixel_size_lon_m + pixel_size_lat_m) / 2.0
 
     # Rivers must be at least 2 pixels wide to avoid aliasing
@@ -155,7 +155,7 @@ def rasterize_rivers_with_buffering(
         f"Rasterizing rivers: pixel size {pixel_size_m:.0f} m, min buffer {min_buffer_m:.0f} m")
 
     # Convert to degrees for buffering (approximate; best approach is UTM reprojection)
-    min_buffer_deg = min_buffer_m / 111_000.0
+    min_buffer_deg = min_buffer_m / 111_320.0
 
     shapes = []
     for feature in geojson.get('features', []):

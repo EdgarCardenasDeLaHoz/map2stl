@@ -86,6 +86,22 @@ app/
 - `region_settings` has `ON DELETE CASCADE` from `regions`
 - JSON fallback active when `core.db` unavailable (used in tests)
 
+## Python SDK
+
+`app/session/terrain_session.py` is the Python client that drives the same server used by the browser app.
+
+Use it when the workflow is notebook-driven or when a script needs to reproduce the terrain pipeline without using the UI.
+
+The shortest example path is:
+
+`notebooks/API_Terrain.ipynb` → `app/session/terrain_session.py` → router in `app/server/routers/` → processing in `app/server/core/`
+
+Use these companion docs:
+
+- `sdk-workflow.md` for notebook-to-method-to-route tracing
+- `api.md` for the route index
+- `task-routing.md` for deciding which layer to edit
+
 ---
 
 ## HTML Structure

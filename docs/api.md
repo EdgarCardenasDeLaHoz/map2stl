@@ -1,6 +1,18 @@
 # Backend API Routes — strm2stl
 
+For notebook and Python SDK tracing, pair this document with `sdk-workflow.md` and `../notebooks/Session_API_Reference.ipynb`.
+
+Use `../notebooks/API_Terrain.ipynb` when you want the end-to-end workflow instead of route-by-route examples.
+
+If you opened the docs folder directly, `README.md` is the preferred docs index.
+
 ## Region Routes (`routers/regions.py`)
+
+Primary `TerrainSession` touchpoints:
+
+- `regions()` reads `GET /api/regions`
+- `select()` reads `GET /api/regions` and `GET /api/regions/{name}/settings`
+- region save/update helpers should be traced through the same route family
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -16,6 +28,14 @@
 
 ## DEM / Terrain Routes (`routers/terrain.py`)
 
+Primary `TerrainSession` touchpoints:
+
+- `fetch_dem()` uses `/api/terrain/dem`
+- `fetch_water_mask()` and `fetch_esa_landcover()` both use `/api/terrain/water-mask`
+- `fetch_satellite()` uses `/api/terrain/satellite`
+- `fetch_hydrology()` and `merge_hydrology_with_dem()` should be traced through the terrain route family in the router file
+- merge helpers such as `merge_dem()` use `/api/dem/merge`
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET/POST | `/api/terrain/dem` | Fetch processed DEM |
@@ -28,13 +48,27 @@
 
 ## Export Routes (`routers/export.py`)
 
+Primary `TerrainSession` touchpoints:
+
+- `export_obj()` posts to the export route family
+- `verify()` reads the OBJ verification route
+- `slice()` posts to the slicer route
+- other export helpers should be traced through the same router module
+
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/export/stl` | Generate + download STL |
 | POST | `/api/export/obj` | Generate + download OBJ |
 | POST | `/api/export/3mf` | Generate + download 3MF |
 
+`Session_API_Reference.ipynb` also covers the broader export family used by the session client, including split export, OBJ inspection, verification, and slicer endpoints.
+
 ## City Routes (`routers/cities.py`)
+
+Primary `TerrainSession` touchpoints:
+
+- `fetch_cities()` uses `/api/cities`
+- city raster and export helpers should be traced through this router module
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -51,14 +85,25 @@
 
 ## Composite Routes (`routers/composite.py`)
 
+Primary `TerrainSession` touchpoints:
+
+- `composite_city_raster()` uses `/api/composite/city-raster`
+
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/composite/city-raster` | Rasterize OSM features to height-delta arrays (PIL, ~50× faster than JS) — used by `composite-dem.js` |
 
 ## Cache & Settings (`routers/cache.py`, `settings.py`)
 
+Primary `TerrainSession` touchpoints:
+
+- `server_settings()` reads the settings route family
+- `cache_status()` uses `/api/cache`
+- `clear_cache()` uses `DELETE /api/cache`
+
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/api/settings` | Full server-authoritative settings payload |
 | GET | `/api/cache` | Cache statistics |
 | DELETE | `/api/cache` | Clear server cache |
 | GET | `/api/cache/check` | Check if specific bbox is cached |

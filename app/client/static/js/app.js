@@ -72,13 +72,13 @@ window.appState.layerStatus = layerStatus;
 
 // DEM + export parameters — single source of truth, replaces hidden DOM inputs.
 window.appState.demParams = {
-    dim:           200,
-    depthScale:    0.5,
-    waterScale:    0.05,
+    dim: 200,
+    depthScale: 0.5,
+    waterScale: 0.05,
     subtractWater: true,
-    satScale:      500,
-    height:        10,
-    base:          2,
+    satScale: 500,
+    height: 10,
+    base: 2,
 };
 
 // (lastAppliedPresetName moved to modules/presets.js)
@@ -146,7 +146,10 @@ function clearLayerDisplays() {
 function getCurrentBboxObject() {
     let bounds;
     if (boundingBox) {
-        bounds = boundingBox;
+        // boundingBox is a Leaflet layer (L.rectangle) — extract its LatLngBounds
+        bounds = typeof boundingBox.getBounds === 'function'
+            ? boundingBox.getBounds()
+            : boundingBox;
     } else if (selectedRegion) {
         return {
             north: selectedRegion.north,
@@ -228,6 +231,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     window.setupDemSubtabs?.();
     window.setupWaterMaskListeners?.();
     window.setupGridToggle?.();
+    window.setupBboxKeyboardNav?.();
     window.setupCacheManagement?.();
 
     // Start in expanded sidebar state by default
@@ -249,6 +253,8 @@ document.addEventListener('DOMContentLoaded', async function () {
     // Initialize merge panel
     window.setupMergePanel?.();
 
+    // Activate default tab (map) so tab button gets .active class
+    window.switchView?.('map');
 
     console.log('App initialization complete');
 });

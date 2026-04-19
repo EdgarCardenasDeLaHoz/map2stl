@@ -50,6 +50,12 @@ NAMESPACE_TTL = {
 MAX_FILES_PER_NAMESPACE = 200
 
 
+def _is_stale(cached_at: float, namespace: str) -> bool:
+    """Return True if a cache entry's timestamp exceeds its namespace TTL."""
+    ttl = NAMESPACE_TTL.get(namespace, 7 * 86400)
+    return time.time() - cached_at > ttl
+
+
 # ---------------------------------------------------------------------------
 # Cache key generation
 # ---------------------------------------------------------------------------
@@ -121,9 +127,7 @@ def read_array_cache(namespace: str, key: str) -> tuple[dict[str, np.ndarray], d
     try:
         meta: dict = json.loads(json_path.read_text()) if json_path.exists() else {}
         # TTL check
-        cached_at = meta.get("_cached_at", 0)
-        ttl = NAMESPACE_TTL.get(namespace, 7 * 86400)
-        if time.time() - cached_at > ttl:
+        if _is_stale(meta.get("_cached_at", 0), namespace):
             logger.debug(f"Array cache stale: {namespace}/{key}")
             return None
         loaded = np.load(str(npz_path))
@@ -166,9 +170,7 @@ def read_osm_cache(key: str) -> dict | None:
     if not path.exists():
         return None
     try:
-        ttl = NAMESPACE_TTL.get("osm", 7 * 86400)
-        age = time.time() - path.stat().st_mtime
-        if age > ttl:
+        if _is_stale(path.stat().st_mtime, "osm"):
             logger.debug(f"OSM cache stale: {key}")
             return None
         data = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
@@ -231,6 +233,49 @@ def prune_all_caches() -> dict[str, int]:
     results: dict[str, int] = {}
     for ns in list(NAMESPACE_TTL.keys()):
         results[ns] = prune_cache(ns)
+    return results
+
+
+def clear_bbox_cache(north: float, south: float,
+                     east: float, west: float) -> dict[str, int]:
+    """Delete all cached entries across all namespaces.
+
+    Cache keys are MD5 hashes that embed the bbox, so we cannot selectively
+    filter without recomputing every possible parameter combination.  Instead,
+    delete all files in every namespace directory — this is safe because the
+    data will be re-fetched on the next request.
+
+    Returns ``{namespace: deleted_count}``.
+    """
+    results: dict[str, int] = {}
+
+    for ns in list(NAMESPACE_TTL.keys()):
+        d = CACHE_ROOT / ns
+        if not d.exists():
+            continue
+        deleted = 0
+        for f in list(d.iterdir()):
+            try:
+                f.unlink()
+                deleted += 1
+            except Exception:
+                pass
+        results[ns] = deleted
+
+    # Also clear the legacy EE cache directory
+    ee_dir = CACHE_ROOT / "ee"
+    if ee_dir.exists():
+        deleted = 0
+        for f in list(ee_dir.iterdir()):
+            try:
+                f.unlink()
+                deleted += 1
+            except Exception:
+                pass
+        results["ee"] = deleted
+
+    if any(results.values()):
+        logger.info(f"clear_bbox_cache: deleted {results}")
     return results
 
 

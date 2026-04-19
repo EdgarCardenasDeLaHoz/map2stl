@@ -13,7 +13,9 @@ import logging
 import os
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+from typing import List
 
 from starlette.background import BackgroundTask
 
@@ -26,6 +28,41 @@ _STRM2STL_DIR = Path(__file__).parent.parent.parent.parent
 # Ensure local packages (numpy2stl, geo2stl) are importable without os.chdir.
 if str(_STRM2STL_DIR) not in sys.path:
     sys.path.insert(0, str(_STRM2STL_DIR))
+
+
+# ---------------------------------------------------------------------------
+# Export parameter container
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ExportContext:
+    """Typed container for parsed export parameters.
+
+    Replaces the raw dict returned by _parse_export_params, giving IDE
+    autocompletion and catching typos at attribute-access time.
+    """
+    dem_values: List[float]
+    height: int
+    width: int
+    model_height: float = 20.0
+    base_height: float = 5.0
+    exaggeration: float = 1.0
+    sea_level_cap: bool = False
+    name: str = "terrain"
+
+    @classmethod
+    def from_request(cls, data: dict) -> "ExportContext":
+        """Construct from an incoming request dict (the old _parse_export_params)."""
+        return cls(
+            dem_values=data.get("dem_values", []),
+            height=data.get("height", 0),
+            width=data.get("width", 0),
+            model_height=float(data.get("model_height", 20)),
+            base_height=float(data.get("base_height", 5)),
+            exaggeration=float(data.get("exaggeration", 1.0)),
+            sea_level_cap=bool(data.get("sea_level_cap", False)),
+            name=data.get("name", "terrain"),
+        )
 
 
 def _prepare_dem_array(
@@ -76,18 +113,9 @@ def _repair_and_export(vertices, faces, suffix: str) -> str:
     return path, mesh
 
 
-def _parse_export_params(data: dict) -> dict:
+def _parse_export_params(data: dict) -> ExportContext:
     """Extract and type-cast the common export parameters from a request dict."""
-    return {
-        "dem_values":   data.get("dem_values", []),
-        "height":       data.get("height", 0),
-        "width":        data.get("width", 0),
-        "model_height": float(data.get("model_height", 20)),
-        "base_height":  float(data.get("base_height", 5)),
-        "exaggeration": float(data.get("exaggeration", 1.0)),
-        "sea_level_cap": bool(data.get("sea_level_cap", False)),
-        "name":         data.get("name", "terrain"),
-    }
+    return ExportContext.from_request(data)
 
 
 def _apply_label_engraving(im: np.ndarray, label_text: str, base_height: float) -> np.ndarray:
@@ -160,25 +188,25 @@ def generate_stl(data: dict):
 
     p = _parse_export_params(data)
     engrave_label   = bool(data.get("engrave_label", False))
-    label_text      = data.get("label_text", p["name"])
+    label_text      = data.get("label_text", p.name)
     contours        = bool(data.get("contours", False))
     contour_interval = float(data.get("contour_interval", 100))
     contour_style   = data.get("contour_style", "engraved")
 
-    if not p["dem_values"] or not p["height"] or not p["width"]:
+    if not p.dem_values or not p.height or not p.width:
         return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
 
     im, im_min, im_max = _prepare_dem_array(
-        p["dem_values"], p["height"], p["width"],
-        p["model_height"], p["base_height"], p["exaggeration"], p["sea_level_cap"],
+        p.dem_values, p.height, p.width,
+        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
     )
 
     if engrave_label and label_text:
-        im = _apply_label_engraving(im, label_text, p["base_height"])
+        im = _apply_label_engraving(im, label_text, p.base_height)
 
     if contours and contour_interval > 0:
-        im = _apply_contour_lines(im, im_min, im_max, p["model_height"],
-                                  p["base_height"], contour_interval, contour_style)
+        im = _apply_contour_lines(im, im_min, im_max, p.model_height,
+                                  p.base_height, contour_interval, contour_style)
 
     vertices, faces = _numpy2stl_mesh(im)
     temp_path, mesh = _repair_and_export(vertices, faces, ".stl")
@@ -188,11 +216,11 @@ def generate_stl(data: dict):
 
     return FileResponse(
         temp_path,
-        filename=f"{p['name']}.stl",
+        filename=f"{p.name}.stl",
         media_type="application/octet-stream",
         background=BackgroundTask(os.unlink, temp_path),
         headers={
-            "Content-Disposition": f"attachment; filename={p['name']}.stl",
+            "Content-Disposition": f"attachment; filename={p.name}.stl",
             "X-Watertight": str(is_watertight).lower(),
             "X-Face-Count": str(face_count),
             "Access-Control-Expose-Headers": "X-Watertight, X-Face-Count",
@@ -207,27 +235,27 @@ def generate_obj(data: dict):
     from numpy2stl import writeOBJ
 
     p = _parse_export_params(data)
-    if not p["dem_values"] or not p["height"] or not p["width"]:
+    if not p.dem_values or not p.height or not p.width:
         return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
 
     im, _, _ = _prepare_dem_array(
-        p["dem_values"], p["height"], p["width"],
-        p["model_height"], p["base_height"], p["exaggeration"], p["sea_level_cap"],
+        p.dem_values, p.height, p.width,
+        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
     )
     vertices, faces = array_to_mesh(im)
 
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".obj")
     temp_path = tf.name
     tf.close()
-    writeOBJ(temp_path, {p["name"]: (vertices, faces)})
+    writeOBJ(temp_path, {p.name: (vertices, faces)})
     logger.info(f"OBJ generated: {len(vertices)} vertices, {len(faces)} faces")
 
     return FileResponse(
         temp_path,
-        filename=f"{p['name']}.obj",
+        filename=f"{p.name}.obj",
         media_type="application/octet-stream",
         background=BackgroundTask(os.unlink, temp_path),
-        headers={"Content-Disposition": f"attachment; filename={p['name']}.obj"},
+        headers={"Content-Disposition": f"attachment; filename={p.name}.obj"},
     )
 
 
@@ -238,27 +266,27 @@ def generate_3mf(data: dict):
     from numpy2stl import write3MF
 
     p = _parse_export_params(data)
-    if not p["dem_values"] or not p["height"] or not p["width"]:
+    if not p.dem_values or not p.height or not p.width:
         return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
 
     im, _, _ = _prepare_dem_array(
-        p["dem_values"], p["height"], p["width"],
-        p["model_height"], p["base_height"], p["exaggeration"], p["sea_level_cap"],
+        p.dem_values, p.height, p.width,
+        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
     )
     vertices, faces = array_to_mesh(im)
 
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".3mf")
     temp_path = tf.name
     tf.close()
-    write3MF(temp_path, {p["name"]: (vertices, faces)})
+    write3MF(temp_path, {p.name: (vertices, faces)})
     logger.info(f"3MF generated: {len(vertices)} vertices, {len(faces)} faces")
 
     return FileResponse(
         temp_path,
-        filename=f"{p['name']}.3mf",
+        filename=f"{p.name}.3mf",
         media_type="application/octet-stream",
         background=BackgroundTask(os.unlink, temp_path),
-        headers={"Content-Disposition": f"attachment; filename={p['name']}.3mf"},
+        headers={"Content-Disposition": f"attachment; filename={p.name}.3mf"},
     )
 
 
@@ -272,12 +300,12 @@ def generate_mesh_preview(data: dict):
     from numpy2stl import array_to_mesh
 
     p = _parse_export_params(data)
-    if not p["dem_values"] or not p["height"] or not p["width"]:
+    if not p.dem_values or not p.height or not p.width:
         return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
 
     im, im_min, im_max = _prepare_dem_array(
-        p["dem_values"], p["height"], p["width"],
-        p["model_height"], p["base_height"], p["exaggeration"], p["sea_level_cap"],
+        p.dem_values, p.height, p.width,
+        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
     )
 
     vertices, faces = array_to_mesh(im, solid=False)
@@ -292,12 +320,12 @@ def generate_mesh_preview(data: dict):
         "vertices":     v_rounded.tolist(),
         "faces":        faces.tolist(),
         "face_count":   int(len(faces)),
-        "model_height": p["model_height"],
-        "base_height":  p["base_height"],
+        "model_height": p.model_height,
+        "base_height":  p.base_height,
         "z_min":        round(float(im.min()), 2),
         "z_max":        round(float(im.max()), 2),
-        "cols":         int(p["width"]),
-        "rows":         int(p["height"]),
+        "cols":         int(p.width),
+        "rows":         int(p.height),
     })
 
 

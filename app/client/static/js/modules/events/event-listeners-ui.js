@@ -73,6 +73,31 @@ window._setupResizablePanel = function _setupResizablePanel() {
 window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {
     document.getElementById('saveRegionSettingsBtn')?.addEventListener('click', () => window.saveRegionSettings?.());
 
+    document.getElementById('clearRegionCacheBtn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('clearRegionCacheBtn');
+        const bbox = window.appState?.bbox;
+        if (!bbox || !bbox.north) {
+            window.showToast?.('No region loaded', 'warning');
+            return;
+        }
+        btn.disabled = true;
+        btn.textContent = '⏳ Clearing…';
+        try {
+            const { data, error } = await window.api.cache.clearRegion(bbox);
+            if (error) {
+                window.showToast?.(`Cache clear failed: ${error}`, 'error');
+            } else {
+                const n = data?.files_deleted ?? 0;
+                window.showToast?.(`Cleared ${n} cached files`, 'success');
+            }
+        } catch (e) {
+            window.showToast?.(`Cache clear error: ${e.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🗑️ Clear Cache';
+        }
+    });
+
     const jsonToggleBtn    = document.getElementById('jsonViewToggleBtn');
     const jsonView         = document.getElementById('settingsJsonView');
     const demControlsInner = document.getElementById('demControlsInner');

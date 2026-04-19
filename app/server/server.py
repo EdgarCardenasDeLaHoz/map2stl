@@ -81,14 +81,154 @@ async def _lifespan(app):
     yield  # server runs here
 
 
+# ---------------------------------------------------------------------------
+# OpenAPI metadata — populates Swagger UI (/docs) and ReDoc (/redoc)
+# ---------------------------------------------------------------------------
+_API_DESCRIPTION = """\
+# 3D Maps — Terrain-to-3D Pipeline API
+
+**strm2stl** is a terrain-to-3D pipeline with three main surfaces:
+
+- **FastAPI backend** (`app/server/`) — this API
+- **Browser client** (`app/client/`) — interactive web UI
+- **Python SDK** (`app/session/terrain_session.py`) — notebook-driven workflows
+
+## Workflow
+
+1. **Select or save** a geographic region (bounding box).
+2. **Fetch terrain** (DEM) and optional overlays (water mask, ESA land cover, satellite, city/OSM, hydrology).
+3. **Inspect or merge** layers with projection alignment.
+4. **Export** STL, OBJ, or 3MF assets for 3D printing.
+
+## Architecture
+
+### Data Flow
+
+```
+Region (bbox) → Fetch layers (Plate Carrée) → Rasterize → Project → Client render
+```
+
+All raster layers follow a uniform projection pipeline:
+1. Fetch raw data in **Plate Carrée** (WGS84 / EPSG:4326)
+2. Rasterize to a 2D grid using the layer-specific engine
+3. Apply map projection via `project_coordinates()` from `geo2stl`
+4. Return the projected grid to the client
+
+### Projections
+
+Supported projections: `none` (Plate Carrée), `cosine`, `mercator`, \
+`equidistant`, `lambert`, `sinusoidal`.
+
+- **Continuous data** (DEM, water mask, hydrology): bilinear interpolation, `fill_value=NaN`
+- **Categorical data** (ESA land cover class IDs): nearest-neighbour interpolation, `fill_value=0`
+- **`clip_nans`** strips all-NaN border rows/columns created by the projection
+
+### Caching
+
+Server-side disk cache stores fetched/projected arrays as `.npz` files:
+- Namespaces: `dem/`, `water/`, `satellite/`, `osm/`, `opentopo/`
+- Cache keys: MD5 of `namespace:bbox:extra_params`
+- Cache can be cleared per-region or globally
+
+### SDK / Notebooks
+
+The Python SDK (`TerrainSession`) wraps every API endpoint for use in Jupyter notebooks.
+See `notebooks/API_Terrain.ipynb` for the end-to-end workflow.
+
+---
+
+*For full project documentation, visit `/project-docs/`. \
+For Python API reference, visit `/api-reference/`.*
+"""
+
+_OPENAPI_TAGS = [
+    {
+        "name": "terrain",
+        "description": (
+            "Digital Elevation Model (DEM) fetching, water masks, ESA land cover, "
+            "satellite imagery, hydrology, layer merging, and export previews. "
+            "All raster endpoints accept `projection` and `clip_nans` parameters "
+            "for server-side map projection."
+        ),
+    },
+    {
+        "name": "regions",
+        "description": (
+            "CRUD operations for saved geographic regions (bounding boxes). "
+            "Each region can store rendering/export settings as a JSON blob."
+        ),
+    },
+    {
+        "name": "cities",
+        "description": (
+            "OpenStreetMap building, road, and waterway data. Includes raw GeoJSON "
+            "fetching, rasterization to height-map grids, and 3MF export with "
+            "extruded building prisms."
+        ),
+    },
+    {
+        "name": "export",
+        "description": (
+            "Generate downloadable 3D model files (STL, OBJ, 3MF) from DEM data. "
+            "Includes cross-section exports and Three.js preview meshes."
+        ),
+    },
+    {
+        "name": "cache",
+        "description": (
+            "Server-side disk cache management. Check status, clear by region "
+            "or globally. Namespaces: dem, water, satellite, osm, opentopo."
+        ),
+    },
+    {
+        "name": "settings",
+        "description": (
+            "Application configuration: available map projections, colormaps "
+            "for DEM rendering, and elevation/land-cover dataset metadata."
+        ),
+    },
+    {
+        "name": "composite",
+        "description": (
+            "Composite DEM operations: rasterize OSM features to height-delta "
+            "grids using PIL for blending with the primary DEM."
+        ),
+    },
+]
+
 # FastAPI initialization
-app = FastAPI(lifespan=_lifespan)
+app = FastAPI(
+    title="3D Maps — strm2stl API",
+    version="1.0.0",
+    description=_API_DESCRIPTION,
+    openapi_tags=_OPENAPI_TAGS,
+    lifespan=_lifespan,
+)
 
 # Template path using absolute path
 templates_path = os.path.join(os.path.dirname(
-    os.path.abspath(__file__)), "..", "..", "client", "templates")
+    os.path.abspath(__file__)), "..", "client", "templates")
 logger.info(f"Templates path: {templates_path}")
 templates = Jinja2Templates(directory=templates_path)
+
+# ---------------------------------------------------------------------------
+# Mount built documentation sites (MkDocs + Sphinx) if they exist
+# ---------------------------------------------------------------------------
+_strm2stl_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+_docs_site_path = os.path.join(_strm2stl_root, "docs_site")
+_sphinx_site_path = os.path.join(_strm2stl_root, "sphinx_site")
+
+if os.path.isdir(_docs_site_path):
+    app.mount("/project-docs", StaticFiles(directory=_docs_site_path, html=True), name="project-docs")
+    logger.info(f"Mounted /project-docs → {_docs_site_path}")
+else:
+    logger.info("MkDocs site not built yet — run 'mkdocs build' in strm2stl/ to enable /project-docs")
+
+if os.path.isdir(_sphinx_site_path):
+    app.mount("/api-reference", StaticFiles(directory=_sphinx_site_path, html=True), name="api-reference")
+    logger.info(f"Mounted /api-reference → {_sphinx_site_path}")
+else:
+    logger.info("Sphinx site not built yet — run 'sphinx-build sphinx/ sphinx_site/' in strm2stl/ to enable /api-reference")
 
 # Mount static files (JS/CSS)
 # Serve via a custom route so we can add no-cache headers for .js/.css
@@ -97,14 +237,24 @@ from fastapi.responses import FileResponse as _FileResponse
 import mimetypes as _mimetypes
 
 static_path = os.path.join(os.path.dirname(
-    os.path.abspath(__file__)), "..", "..", "client", "static")
+    os.path.abspath(__file__)), "..", "client", "static")
+
+# Vite build output — checked as fallback when file not found in static_path.
+# Maps /static/js/vue-main.js → dist/js/vue-main.js etc.
+dist_path = os.path.join(os.path.dirname(
+    os.path.abspath(__file__)), "..", "..", "dist")
 
 @app.get("/static/{file_path:path}")
 async def serve_static(file_path: str):
     full_path = os.path.join(static_path, file_path)
     if not os.path.isfile(full_path):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404)
+        # Fallback: check Vite dist/ for built bundles (e.g. vue-main.js)
+        dist_full = os.path.join(dist_path, file_path)
+        if os.path.isfile(dist_full):
+            full_path = dist_full
+        else:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404)
     mime, _ = _mimetypes.guess_type(full_path)
     headers = {}
     if full_path.endswith((".js", ".css")):
@@ -209,7 +359,7 @@ def _build_global_dem_cache(force: bool = False) -> bool:
     import cv2 as _cv2
     from PIL import Image as _PILImage
 
-    static_dir = Path(__file__).parent.parent.parent / "client" / "static"
+    static_dir = Path(__file__).parent.parent / "client" / "static"
     static_dir.mkdir(exist_ok=True)
     png_path = static_dir / "global_dem.png"
     meta_path = static_dir / "global_dem_meta.json"
@@ -284,7 +434,7 @@ async def get_global_dem_overview(regen: bool = False):
     from fastapi.responses import FileResponse as _FR
     import json as _json
 
-    static_dir = Path(__file__).parent.parent.parent / "client" / "static"
+    static_dir = Path(__file__).parent.parent / "client" / "static"
     png_path = static_dir / "global_dem.png"
     meta_path = static_dir / "global_dem_meta.json"
 

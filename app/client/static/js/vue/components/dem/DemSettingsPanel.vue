@@ -23,24 +23,37 @@
     <!-- Main scrollable settings area -->
     <div class="dem-controls" id="demControls">
       <div class="dem-controls-inner" id="demControlsInner">
-        <LayerViewSection />
-        <DemSourceSection />
-        <ProjectionSection />
-        <!-- IMPORTANT: VisualizationSection contains #curveCanvas — never use v-if here, only v-show -->
-        <VisualizationSection />
-        <WaterLandCoverSection />
-        <HydrologySection />
-        <CitiesSection />
-        <CompositeDemSection />
-        <PresetsSection />
-
-        <!-- Save Settings row — always visible at bottom -->
-        <div id="settingsSaveRow" class="row-gap6" style="padding:10px 0 4px;border-top:1px solid #333;margin-top:6px;">
+        <!-- Save Settings row — pinned at top for quick access -->
+        <div id="settingsSaveRow" class="row-gap6" style="padding:4px 0 8px;border-bottom:1px solid #333;margin-bottom:6px;">
           <button id="saveRegionSettingsBtn" class="btn btn-primary"
                   style="flex:1;padding:6px 0;font-size:12px;"
                   title="Save all current panel settings for the selected region">💾 Save Settings</button>
+          <button id="clearRegionCacheBtn" class="btn btn-secondary"
+                  style="padding:6px 8px;font-size:12px;"
+                  title="Clear all cached data (DEM, water, satellite, etc.) and re-fetch">🗑️ Clear Cache</button>
+          <label class="check-label" style="font-size:11px;color:#aaa;white-space:nowrap;" title="Auto-save settings after changes">
+            <input type="checkbox" id="autoSaveEnabled"> Auto
+          </label>
           <span id="saveSettingsStatus" style="font-size:10px;color:#888;min-width:60px;text-align:right;"></span>
         </div>
+
+        <!-- ═══ Block 1: View ═══ -->
+        <!-- IMPORTANT: VisualizationSection contains #curveCanvas — never use v-if here, only v-show -->
+        <VisualizationSection />
+        <LayerViewSection />
+
+        <!-- ═══ Block 2: Fetch ═══ -->
+        <ProjectionSection />
+        <DemSourceSection />
+        <WaterSection />
+        <EsaLandCoverSection />
+        <SatelliteSection />
+        <HydrologySection />
+        <CitiesSection />
+
+        <!-- ═══ Block 3: Compose ═══ -->
+        <CompositeDemSection />
+        <PresetsSection />
       </div><!-- /dem-controls-inner -->
 
       <!-- JSON settings editor (hidden by default, toggled by { } JSON button) -->
@@ -84,11 +97,13 @@
   <button id="settingsCollapsedTab" class="settings-collapsed-tab" title="Open settings panel">⚙ Settings</button>
 </template>
 <script setup lang="ts">
+import VisualizationSection  from './VisualizationSection.vue';
 import LayerViewSection      from './LayerViewSection.vue';
 import DemSourceSection      from './DemSourceSection.vue';
 import ProjectionSection     from './ProjectionSection.vue';
-import VisualizationSection  from './VisualizationSection.vue';
-import WaterLandCoverSection from './WaterLandCoverSection.vue';
+import WaterSection          from './WaterSection.vue';
+import EsaLandCoverSection   from './EsaLandCoverSection.vue';
+import SatelliteSection      from './SatelliteSection.vue';
 import HydrologySection      from './HydrologySection.vue';
 import CitiesSection         from './CitiesSection.vue';
 import CompositeDemSection   from './CompositeDemSection.vue';

@@ -47,12 +47,24 @@ A Python toolkit for converting geographic and elevation data (e.g., SRTM, GEBCO
 
 ## Usage
 
+### Start Here For Docs
+
+- For the fastest project overview, read `CLAUDE.md` first.
+- For the preferred docs index inside `docs/`, read `docs/README.md`.
+- For AI-agent and contributor onboarding, read `docs/ai-agent-onboarding.md`.
+- For notebook-to-SDK-to-endpoint tracing, read `docs/sdk-workflow.md`.
+- For file ownership and where to edit, read `docs/task-routing.md`.
+
 ### Via Notebooks
 Explore the `notebooks/` folder for Jupyter notebooks demonstrating various features:
+- `API_Terrain.ipynb`: End-to-end `TerrainSession` workflow from region selection through export.
+- `Session_API_Reference.ipynb`: `TerrainSession` method coverage mapped to server endpoints.
 - `Cities.ipynb`: Generate city models with buildings and roads.
 - `Oceans.ipynb`: Create ocean floor models.
 - `Rivers.ipynb`: Model river systems.
 - `Buildings.ipynb`: Focus on building extraction.
+
+If you are starting with the Python SDK, begin with `notebooks/API_Terrain.ipynb` and keep `docs/sdk-workflow.md` open beside it.
 
 Run a notebook:
 ```bash
@@ -102,7 +114,7 @@ Saved regions are stored in `strm2stl/coordinates.json`:
 }
 ```
 
-Use the **💾 Save bbox** button in the Edit view to persist a modified bounding box back to this file. See `docs/WEB_APP_ANALYSIS.md` for full API and feature reference.
+Use the **💾 Save bbox** button in the Edit view to persist a modified bounding box back to this file. See `docs/web_app_analysis.md` for full API and feature reference.
 
 ### CLI
 Use the command-line interface for batch processing of geographic regions:
@@ -158,11 +170,16 @@ See `requirements.txt` for full list.
 
 ```
 strm2stl/
+├── app/
+│   ├── server/         # FastAPI backend (routers, core, schemas)
+│   ├── client/         # Browser frontend (HTML/CSS/JS modules)
+│   └── session/        # Python SDK client (TerrainSession)
 ├── city2stl/          # City/building models
 ├── geo2stl/           # Geographic data processing
-├── numpy2stl/         # NumPy to STL conversion
-├── ui/                # Web interface
+├── tests/             # pytest + Vitest suites
 ├── notebooks/         # Jupyter examples
+├── docs/              # Architecture, API, and module reference
+├── tools/             # Utility scripts + slicer configs
 ├── config.json        # Configuration
 ├── requirements.txt   # Dependencies
 └── readme.md          # This file
@@ -174,6 +191,8 @@ strm2stl/
 2. Create a feature branch.
 3. Add tests for new code.
 4. Submit a pull request.
+
+For repository navigation before implementation, prefer `CLAUDE.md`, `docs/ai-agent-onboarding.md`, and `docs/task-routing.md` over broad repo scanning.
 
 ## License
 
@@ -205,7 +224,7 @@ See `notebooks/Oceans.ipynb` for full example.
 
 - [x] CLI interface (`strm2stl-ui` entry point)
 - [x] More data sources (ESA, Copernicus, NASADEM, USGS, GEBCO)
-- [x] Web API (FastAPI, see `docs/WEB_APP_ANALYSIS.md`)
+- [x] Web API (FastAPI, see `docs/web_app_analysis.md`)
 - [x] Unit tests (pytest suite in `tests/`)
 - [ ] Docker container
 - [ ] Elevation profile / cross-section endpoint

@@ -10,14 +10,11 @@ integration testing; use http://localhost:5173 for JS HMR during frontend-only w
 
 ---
 
-### [ ] ARCH5 — Vitest unit tests for pure functions (requires ARCH4)
-
-Priority test targets:
-- `interpolateCurve(x)` — curve-editor.js
-- `mapElevationToColor(t, cmap)` — dem-loader.js
-- `detectContinent(lat, lon)` — region-ui.js
-- `haversineDiagKm()` — model-viewer.js
-- `niceGeoInterval()`, `nicePixelInterval()` — stacked-layers.js
+### [x] ARCH5 — Vitest unit tests for pure functions (requires ARCH4)
+Vitest 4.x; `npm test` runs 58 tests across 5 files in `tests/js/`.
+Helper shims in `tests/js/helpers/` export each pure function as an ES module.
+Functions tested: `interpolateCurve`, `mapElevationToColor`, `detectContinent`,
+`haversineDiagKm`, `nicePixelInterval`, `niceGeoInterval`.
 
 ---
 

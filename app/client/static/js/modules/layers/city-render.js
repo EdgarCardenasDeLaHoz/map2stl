@@ -122,14 +122,7 @@ function _renderRasterCanvas(values, width, height, colormap, vmin, vmax) {
     const invRange = 1 / range;
 
     // Build colour LUT
-    const lut = new Uint8Array(1024 * 3);
-    for (let i = 0; i < 1024; i++) {
-        const t = i / 1023;
-        const [r, g, b] = window.mapElevationToColor?.(t, colormap) || [0, 0, 0];
-        lut[i * 3]     = Math.round((r || 0) * 255);
-        lut[i * 3 + 1] = Math.round((g || 0) * 255);
-        lut[i * 3 + 2] = Math.round((b || 0) * 255);
-    }
+    const lut = window.buildColorLUT(colormap);
 
     for (let i = 0; i < values.length; i++) {
         const v = values[i];
@@ -227,7 +220,7 @@ function _doRenderCityOverlay() {
 
     const stackZoom = window.appState?.stackZoom || { scale: 1, offsetX: 0, offsetY: 0 };
     const invZ      = 1 / (stackZoom.scale || 1);
-    const bboxLonM  = (east - west) * latCos * 111_000;
+    const bboxLonM  = (east - west) * latCos * window.GEO_M_PER_DEG_LON;
     const bboxKey   = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
     // PERF2: invZ excluded from cache key — CSS transform covers intermediate zoom frames
     const cacheKey  = window._makeCacheKey(window._cityRenderState.cityDataVersion, W, H, bboxKey);
@@ -260,7 +253,7 @@ function _doRenderCityOverlay() {
         buildingsColor: document.getElementById('layerBuildingsColor')?.value || '#c8b89a',
         roadsColor:     document.getElementById('layerRoadsColor')?.value     || '#cc8844',
         waterwaysColor: document.getElementById('layerWaterwaysColor')?.value || '#4488cc',
-        roadBaseWidth:  parseFloat(document.getElementById('cityRoadWidth')?.value) || 1.5,
+        roadBaseWidth:  1.5, // canvas road display width (fixed default; road_depression_m controls 3D export)
         bboxLonM,
     };
     const toggles = {
@@ -385,9 +378,7 @@ function _doRenderCityOnDEM() {
     if (!demContainer) return;
 
     // Match the DEM canvas pixel resolution (exclude gridline/overlay canvases)
-    const demCanvas = demContainer.querySelector(
-        'canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)'
-    );
+    const demCanvas = demContainer.querySelector(window.DEM_CANVAS_SELECTOR);
     if (!demCanvas) return;
     const W = demCanvas.width;
     const H = demCanvas.height;
@@ -415,7 +406,7 @@ function _doRenderCityOnDEM() {
     const { north, south, east, west } = bbox;
     const lonRange = east - west;
     const latMid   = (north + south) / 2;
-    const bboxLonM = lonRange * Math.cos(latMid * Math.PI / 180) * 111_000;
+    const bboxLonM = lonRange * Math.cos(latMid * Math.PI / 180) * window.GEO_M_PER_DEG_LON;
     const bboxKey  = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
     // PERF2: invZ (=1 for DEM view) excluded for consistency; cacheKey only needs data+layout
     const cacheKey = window._makeCacheKey(window._cityRenderState.cityDataVersion, W, H, bboxKey);
@@ -507,9 +498,9 @@ window.loadCityRaster = async function loadCityRaster() {
     const buildingScale = parseFloat(document.getElementById('cityBuildingScale')?.value) || 1.0;
     const waterOffset   = parseFloat(document.getElementById('cityWaterOffset')?.value) ?? -2.0;
 
-    setLayerStatus('cityRaster', 'loading');
+    window.setLayerStatus('cityRaster', 'loading');
     try {
-        const { data, error: rasterErr } = await api.cities.raster({
+        const { data, error: rasterErr } = await window.api.cities.raster({
             north: bbox.north, south: bbox.south,
             east:  bbox.east,  west:  bbox.west,
             dim,
@@ -519,6 +510,8 @@ window.loadCityRaster = async function loadCityRaster() {
             building_scale:     buildingScale,
             road_depression_m:  0,
             water_depression_m: waterOffset,
+            projection: document.getElementById('paramProjection')?.value || 'none',
+            clip_nans:  document.getElementById('paramClipNans')?.checked ?? true,
         });
         if (rasterErr) throw new Error(rasterErr);
         _lastCityRasterData = data;
@@ -530,19 +523,16 @@ window.loadCityRaster = async function loadCityRaster() {
             data.values, data.width, data.height, colormap, data.vmin, data.vmax
         );
         if (canvas) {
-            // Store raw (unprojected) canvas + bbox so we can re-project on demand
             if (window.appState) {
                 window.appState._cityRasterRawCanvas = canvas;
                 window.appState._cityRasterBbox = bbox;
+                window.appState.cityRasterSourceCanvas = canvas;
             }
-            // Apply projection to match the DEM canvas
-            const projCanvas = window.applyProjection?.(canvas, bbox) || canvas;
-            if (window.appState) window.appState.cityRasterSourceCanvas = projCanvas;
         }
-        setLayerStatus('cityRaster', 'ready');
+        window.setLayerStatus('cityRaster', 'loaded');
         window.events?.emit(window.EV?.STACKED_UPDATE);
     } catch (e) {
-        setLayerStatus('cityRaster', 'error');
+        window.setLayerStatus('cityRaster', 'error');
         window.showToast('City raster failed: ' + e.message, 'error');
     }
 };
@@ -552,11 +542,9 @@ window.loadCityRaster = async function loadCityRaster() {
  * Called when the projection dropdown changes.
  */
 window._reprojectCityRaster = function _reprojectCityRaster() {
-    const raw  = window.appState?._cityRasterRawCanvas;
-    const bbox = window.appState?._cityRasterBbox;
-    if (!raw || !bbox) return;
-    const projCanvas = window.applyProjection?.(raw, bbox) || raw;
-    if (window.appState) window.appState.cityRasterSourceCanvas = projCanvas;
+    const raw = window.appState?._cityRasterRawCanvas;
+    if (!raw) return;
+    if (window.appState) window.appState.cityRasterSourceCanvas = raw;
 };
 
 /** Wire the City Heights visibility toggle and opacity slider. */

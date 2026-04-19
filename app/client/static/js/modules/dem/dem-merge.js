@@ -6,7 +6,6 @@
  * Public API (all on window):
  *   _initDemSources()      — fetch DEM sources from server, populate dropdown
  *   setupMergePanel()      — wire merge panel button events
- *   _refreshPipelinePanel() — sync pipeline quick-settings from hidden param inputs
  *
  * External dependencies:
  *   window.api                       — from modules/api.js
@@ -15,7 +14,6 @@
  *   window.appState.originalDemValues — DEM values before edits
  *   window.appState.lastWaterMaskData — water mask data (for _syncMergeFromCurrentLayers)
  *   window.renderDEMCanvas(...)       — from app.js
- *   window.applyProjection(canvas, bbox)    — global from dem-loader.js
  *   window.drawColorbar(vmin, vmax, cm)     — global from dem-loader.js
  *   window.drawHistogram(values)            — global from dem-loader.js
  *   window.drawGridlinesOverlay(id)         — global from dem-loader.js
@@ -275,10 +273,6 @@ function _syncMergeFromCurrentLayers() {
     renderMergePanel();
 }
 
-function _refreshPipelinePanel() {
-    // Pipeline quick-settings panel removed — params live in DemSourceSection now.
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Setup
 // ─────────────────────────────────────────────────────────────────────────────
@@ -305,5 +299,4 @@ function setupMergePanel() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 window._initDemSources = _initDemSources;
-window._refreshPipelinePanel = _refreshPipelinePanel;
 window.setupMergePanel = setupMergePanel;

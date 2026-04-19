@@ -26,3 +26,6 @@ server.log
 # Node / Vite
 node_modules/
 package-lock.json
+# Built documentation sites
+docs_site/
+sphinx_site/

@@ -16,18 +16,12 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, Response
 
+from app.server.config import OSM_CACHE_PATH, MAX_BBOX_DIAGONAL_KM
+from app.server.core.validation import validate_bbox_diagonal, run_sync
+from app.server.core.responses import error_response
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cities"])
-
-# ---------------------------------------------------------------------------
-# Config imports
-# ---------------------------------------------------------------------------
-try:
-    from app.server.config import OSM_CACHE_PATH, MAX_BBOX_DIAGONAL_KM
-except ImportError:
-    _UI_DIR = Path(__file__).parent.parent
-    OSM_CACHE_PATH = _UI_DIR.parent / "osm_raw_cache"
-    MAX_BBOX_DIAGONAL_KM = 15.0
 
 # ---------------------------------------------------------------------------
 # Cache helpers
@@ -111,15 +105,9 @@ async def get_city_data(city_req: CityRequest):
     layers = city_req.layers or ["buildings", "roads", "waterways"]
 
     # Server-side size guard
-    R = 6371.0
-    dLat = (north - south) * math.pi / 180
-    dLon = (east - west) * math.pi * math.cos(((north + south) / 2) * math.pi / 180) / 180
-    diag_km = math.sqrt((R * dLat) ** 2 + (R * dLon) ** 2)
-    if diag_km > MAX_BBOX_DIAGONAL_KM:
-        return JSONResponse(
-            content={"error": f"Bounding box too large ({diag_km:.1f} km diagonal, max {MAX_BBOX_DIAGONAL_KM:.0f} km)"},
-            status_code=422,
-        )
+    diag_km, diag_err = validate_bbox_diagonal(north, south, east, west)
+    if diag_err:
+        return diag_err
 
     cache_key = osm_cache_key(north, south, east, west,
                                city_req.simplify_tolerance, city_req.min_area)
@@ -141,15 +129,14 @@ async def get_city_data(city_req: CityRequest):
             except Exception as cache_read_err:
                 logger.debug(f"Legacy OSM cache read failed, re-fetching: {cache_read_err}")
 
-    loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(
-            None, _fetch_osm_data, north, south, east, west, layers,
+        result = await run_sync(
+            _fetch_osm_data, north, south, east, west, layers,
             city_req.simplify_tolerance, city_req.min_area,
         )
     except Exception as e:
         logger.error(f"OSM fetch error: {e}")
-        return JSONResponse(content={"error": f"OSM fetch failed: {str(e)}"}, status_code=500)
+        return error_response(f"OSM fetch failed: {str(e)}")
 
     result["cache_key"] = cache_key
     result["diagonal_km"] = round(diag_km, 2)
@@ -179,7 +166,8 @@ async def get_city_raster(req: CityRasterRequest):
 
     cache_key = hashlib.md5(
         f"cityRaster|{req.north:.4f}_{req.south:.4f}_{req.east:.4f}_{req.west:.4f}"
-        f"_dim{req.dim}_bs{req.building_scale}_rd{req.road_depression_m}_wd{req.water_depression_m}".encode()
+        f"_dim{req.dim}_bs{req.building_scale}_rd{req.road_depression_m}_wd{req.water_depression_m}"
+        f"_proj{req.projection}_cn{req.clip_nans}".encode()
     ).hexdigest()
 
     # Cache check
@@ -202,19 +190,36 @@ async def get_city_raster(req: CityRasterRequest):
             except Exception as e:
                 logger.debug(f"City raster cache read failed: {e}")
 
-    loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(
-            None,
-            lambda: _rasterize_city_data(
-                req.north, req.south, req.east, req.west, req.dim,
-                req.buildings, req.roads, req.waterways,
-                req.building_scale, req.road_depression_m, req.water_depression_m,
-            ),
+        result = await run_sync(
+            _rasterize_city_data,
+            req.north, req.south, req.east, req.west, req.dim,
+            req.buildings, req.roads, req.waterways,
+            req.building_scale, req.road_depression_m, req.water_depression_m,
         )
     except Exception as e:
         logger.error(f"City raster error: {e}", exc_info=True)
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return error_response(str(e))
+
+    # Apply map projection (all raster layers use the same pipeline)
+    if req.projection != "none":
+        import numpy as np
+        from app.server.core.projection import project_grid
+
+        grid = np.array(result["values"], dtype=np.float32).reshape(
+            result["height"], result["width"])
+        grid = project_grid(grid, req.north, req.south, req.east, req.west,
+                            req.projection, req.clip_nans, categorical=False)
+        h, w = grid.shape
+        result = {
+            "values": grid.flatten().tolist(),
+            "width": w,
+            "height": h,
+            "vmin": float(np.nanmin(grid)),
+            "vmax": float(np.nanmax(grid)),
+            "bbox": {"north": req.north, "south": req.south,
+                     "east": req.east, "west": req.west},
+        }
 
     # Cache result
     if _CACHE_AVAILABLE and CACHE_ROOT is not None:
@@ -246,26 +251,21 @@ async def export_city_3mf(req: CityExportRequest):
     FeatureCollection (from /api/cities) with height_m and terrain_z properties.
     """
     if not _CITIES_3D_AVAILABLE:
-        return JSONResponse(
-            content={"error": "core.cities_3d not available"},
-            status_code=501,
-        )
+        return error_response("core.cities_3d not available", 501)
     try:
         bbox = {"north": req.north, "south": req.south, "east": req.east, "west": req.west}
-        three_mf_bytes = await asyncio.get_running_loop().run_in_executor(
-            None,
-            lambda: generate_city_3mf(
-                buildings_geojson=req.buildings,
-                dem_values=req.dem_values,
-                dem_width=req.dem_width,
-                dem_height=req.dem_height,
-                bbox=bbox,
-                model_height_mm=req.model_height_mm,
-                base_mm=req.base_mm,
-                building_z_scale=req.building_z_scale,
-                simplify_terrain=req.simplify_terrain,
-                name=req.name,
-            ),
+        three_mf_bytes = await run_sync(
+            generate_city_3mf,
+            buildings_geojson=req.buildings,
+            dem_values=req.dem_values,
+            dem_width=req.dem_width,
+            dem_height=req.dem_height,
+            bbox=bbox,
+            model_height_mm=req.model_height_mm,
+            base_mm=req.base_mm,
+            building_z_scale=req.building_z_scale,
+            simplify_terrain=req.simplify_terrain,
+            name=req.name,
         )
         filename = f"{req.name}_city.3mf"
         return Response(
@@ -275,4 +275,4 @@ async def export_city_3mf(req: CityExportRequest):
         )
     except Exception as e:
         logger.error(f"City 3MF export error: {e}", exc_info=True)
-        return JSONResponse(content={"error": "3MF export failed"}, status_code=500)
+        return error_response("3MF export failed")

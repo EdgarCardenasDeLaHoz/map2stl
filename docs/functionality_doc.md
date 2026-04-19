@@ -2,6 +2,14 @@
 
 _Last updated: 2026-03-18_
 
+This is a detailed feature inventory, not the best onboarding entrypoint.
+
+Use these first when orienting to the repo:
+
+- `ai-agent-onboarding.md` for the shortest project map
+- `task-routing.md` to choose the owning frontend or backend area
+- `arch.md` and `modules.md` for current runtime structure and module ownership
+
 This document is a high-level map of all implemented features in `strm2stl/ui/templates/index.html`.
 Line numbers are approximate — the file grows over time.
 

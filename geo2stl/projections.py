@@ -72,7 +72,9 @@ def project_coordinates(
     bbox: Tuple[float, float, float, float],
     projection: ProjectionType = 'cosine',
     maintain_dimensions: bool = True,
-    fill_value: float = np.nan
+    fill_value: float = np.nan,
+    clip_nans: bool = False,
+    order: int = 1,
 ) -> Tuple[np.ndarray, dict]:
     """
     Project a geographic raster to a 2D planar coordinate system.
@@ -90,6 +92,13 @@ def project_coordinates(
         If False, dimensions may change based on projection.
     fill_value : float
         Value to use for areas outside the valid projection domain
+    clip_nans : bool
+        If True, strip leading/trailing columns and rows that are entirely NaN
+        after projection (removes the padding added by cosine/mercator projections).
+    order : int
+        Interpolation order: 0 = nearest-neighbour (best for categorical /
+        class-label data — preserves integer IDs), 1 = bilinear (default,
+        best for continuous data like elevation).
 
     Returns
     -------
@@ -121,22 +130,35 @@ def project_coordinates(
         return mat.copy(), metadata
 
     elif projection == 'cosine':
-        return _project_cosine(mat, bbox, maintain_dimensions, fill_value, metadata)
+        result, metadata = _project_cosine(mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
 
     elif projection == 'mercator':
-        return _project_mercator(mat, bbox, maintain_dimensions, fill_value, metadata)
+        result, metadata = _project_mercator(mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
 
     elif projection == 'equidistant':
-        return _project_equidistant(mat, bbox, maintain_dimensions, fill_value, metadata)
+        result, metadata = _project_equidistant(mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
 
     elif projection == 'lambert':
-        return _project_lambert(mat, bbox, maintain_dimensions, fill_value, metadata)
+        result, metadata = _project_lambert(mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
 
     elif projection == 'sinusoidal':
-        return _project_sinusoidal(mat, bbox, maintain_dimensions, fill_value, metadata)
+        result, metadata = _project_sinusoidal(mat, bbox, maintain_dimensions, fill_value, metadata, order=order)
 
     else:
         raise ValueError(f"Unknown projection: {projection}")
+
+    if clip_nans and result.ndim == 2:
+        # Strip columns where every value is NaN
+        col_has_data = ~np.all(np.isnan(result), axis=0)
+        if col_has_data.any():
+            result = result[:, col_has_data]
+        # Strip rows where every value is NaN
+        row_has_data = ~np.all(np.isnan(result), axis=1)
+        if row_has_data.any():
+            result = result[row_has_data, :]
+        metadata['output_shape'] = result.shape
+
+    return result, metadata
 
 
 def _project_cosine(
@@ -144,7 +166,8 @@ def _project_cosine(
     bbox: Tuple[float, float, float, float],
     maintain_dimensions: bool,
     fill_value: float,
-    metadata: dict
+    metadata: dict,
+    order: int = 1,
 ) -> Tuple[np.ndarray, dict]:
     """
     Original cosine latitude correction.
@@ -182,7 +205,12 @@ def _project_cosine(
             # Resample the row
             x_old = np.linspace(0, 1, n)
             x_new = np.linspace(0, 1, new_width)
-            row_resampled = np.interp(x_new, x_old, row)
+            if order == 0:
+                # Nearest-neighbour: pick closest source pixel
+                indices = np.clip(np.round(x_new * (n - 1)).astype(int), 0, n - 1)
+                row_resampled = row[indices]
+            else:
+                row_resampled = np.interp(x_new, x_old, row)
 
             # Center the resampled row
             start = (n - new_width) // 2
@@ -238,7 +266,8 @@ def _project_mercator(
     bbox: Tuple[float, float, float, float],
     maintain_dimensions: bool,
     fill_value: float,
-    metadata: dict
+    metadata: dict,
+    order: int = 1,
 ) -> Tuple[np.ndarray, dict]:
     """
     Web Mercator projection.
@@ -295,7 +324,7 @@ def _project_mercator(
     result = ndimage.map_coordinates(
         mat.astype(np.float64),
         [lat_grid.ravel(), lon_grid.ravel()],
-        order=1,
+        order=order,
         mode='constant',
         cval=fill_value
     ).reshape(out_m, out_n)
@@ -315,7 +344,8 @@ def _project_equidistant(
     bbox: Tuple[float, float, float, float],
     maintain_dimensions: bool,
     fill_value: float,
-    metadata: dict
+    metadata: dict,
+    order: int = 1,
 ) -> Tuple[np.ndarray, dict]:
     """
     Equidistant Cylindrical projection.
@@ -341,11 +371,12 @@ def _project_equidistant(
     # For equidistant, we just need to adjust horizontal scale
     # This is essentially the same as cosine correction with maintain_dimensions
     if maintain_dimensions:
-        return _project_cosine(mat, bbox, True, fill_value, metadata)
+        return _project_cosine(mat, bbox, True, fill_value, metadata, order=order)
 
     # Resample to correct aspect ratio
+    interp = cv2.INTER_NEAREST if order == 0 else cv2.INTER_LINEAR
     result = cv2.resize(mat.astype(np.float32), (out_n, out_m),
-                        interpolation=cv2.INTER_LINEAR)
+                        interpolation=interp)
 
     metadata['output_shape'] = (out_m, out_n)
     metadata['standard_parallel'] = center_lat
@@ -360,7 +391,8 @@ def _project_lambert(
     bbox: Tuple[float, float, float, float],
     maintain_dimensions: bool,
     fill_value: float,
-    metadata: dict
+    metadata: dict,
+    order: int = 1,
 ) -> Tuple[np.ndarray, dict]:
     """
     Lambert Cylindrical Equal-Area projection.
@@ -409,7 +441,7 @@ def _project_lambert(
     result = ndimage.map_coordinates(
         mat.astype(np.float64),
         [lat_grid.ravel(), lon_grid.ravel()],
-        order=1,
+        order=order,
         mode='constant',
         cval=fill_value
     ).reshape(out_m, out_n)
@@ -425,7 +457,8 @@ def _project_sinusoidal(
     bbox: Tuple[float, float, float, float],
     maintain_dimensions: bool,
     fill_value: float,
-    metadata: dict
+    metadata: dict,
+    order: int = 1,
 ) -> Tuple[np.ndarray, dict]:
     """
     Sinusoidal (Sanson-Flamsteed) projection.
@@ -480,7 +513,7 @@ def _project_sinusoidal(
         sampled = ndimage.map_coordinates(
             mat.astype(np.float64),
             [lat_px_arr, lon_px],
-            order=1,
+            order=order,
             mode='constant',
             cval=fill_value
         )

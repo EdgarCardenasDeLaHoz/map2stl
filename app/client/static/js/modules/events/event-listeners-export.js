@@ -15,7 +15,7 @@ window._setupModelExportListeners = function _setupModelExportListeners() {
     document.getElementById('download3MFBtn')?.addEventListener('click', () => window.downloadModel?.('3mf'));
     document.getElementById('previewModelBtn')?.addEventListener('click', () => window.previewModelIn3D?.());
 
-    ['modelResolution', 'modelBaseHeight'].forEach(id => {
+    ['modelResolution', 'exportBaseHeight'].forEach(id => {
         document.getElementById(id)?.addEventListener('change', () => window.updatePrintDimensions?.());
     });
     const bedSel = document.getElementById('bedSizeSelect');
@@ -30,13 +30,8 @@ window._setupModelExportListeners = function _setupModelExportListeners() {
         document.getElementById(id)?.addEventListener('input', () => window.updatePrintDimensions?.());
     });
 
-    const contoursChk = document.getElementById('modelContours');
-    if (contoursChk) {
-        contoursChk.addEventListener('change', () => {
-            const p = document.getElementById('modelContoursParams');
-            if (p) p.style.display = contoursChk.checked ? 'block' : 'none';
-        });
-    }
+    // Contours and engrave-label toggle handlers are now wired in event-listeners-map.js
+    // alongside the other exportContours/exportEngraveLabel listeners
 
     const _setMidVal = () => {
         const axis = document.getElementById('crossSectionAxis')?.value || 'lat';
@@ -73,8 +68,7 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
             window.renderCityOverlay?.();
         });
     });
-    document.getElementById('cityRoadWidth')
-        ?.addEventListener('input', () => window.renderCityOverlay?.());
+    // cityRoadWidth removed — road canvas width is now a fixed default; road_depression_m is for 3D export
 
     document.getElementById('exportCityBtn')?.addEventListener('click', async () => {
         const buildings = window.appState?.osmCityData?.buildings;
@@ -98,9 +92,9 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
                 dem_width:   demData.width,
                 dem_height:  demData.height,
                 buildings:   buildings,
-                model_height_mm: parseFloat(document.getElementById('modelHeight')?.value) || 20,
-                base_mm:         parseFloat(document.getElementById('baseHeight')?.value)  || 5,
-                building_z_scale: parseFloat(document.getElementById('buildingZScale')?.value) || 0.5,
+                model_height_mm: parseFloat(document.getElementById('exportModelHeight')?.value) || 20,
+                base_mm:         parseFloat(document.getElementById('exportBaseHeight')?.value)  || 5,
+                building_z_scale: parseFloat(document.getElementById('cityBuildingScale')?.value) || 0.5,
                 simplify_terrain: document.getElementById('citySimplifyMesh')?.checked ?? true,
                 name: (window.appState.selectedRegion?.name || 'city').replace(/[^a-z0-9_-]/gi, '_'),
             };
@@ -131,7 +125,7 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
             window.updatePuzzlePreview?.();
         });
     }
-    ['puzzlePiecesX', 'puzzlePiecesY', 'puzzleNotchDepth', 'puzzleMargin'].forEach(id => {
+    ['splitCols', 'splitRows', 'splitPuzzleM', 'splitBorderHeight'].forEach(id => {
         document.getElementById(id)?.addEventListener('input', () => window.updatePuzzlePreview?.());
     });
 

@@ -167,6 +167,30 @@ def fetch_bbox_image(N, S, E, W, scale=None, dataset="copernicus", use_cache=Tru
         else:
             # Default to 500 pixel target
             scale = calculate_scale_for_dimensions(N, S, E, W, 500)
+
+    # --- EE request-size safety clamp ---
+    # Earth Engine enforces a hard 50 331 648-byte (~48 MiB) download limit.
+    # GeoTIFF overhead is ~2 bytes/pixel for uint8 datasets (ESA, JRC) and
+    # ~2-4 bytes/pixel for int16 elevation.  Use 2 bytes/pixel as the
+    # conservative estimate so we never exceed the limit.
+    import math as _math
+    _EE_MAX_BYTES = 50_331_648
+    _BYTES_PER_PX = 2
+    _ee_max_px = _EE_MAX_BYTES // _BYTES_PER_PX  # ~25 M pixels
+
+    lat_center = (N + S) / 2.0
+    _bbox_w_m = abs(E - W) * 111_320 * _math.cos(_math.radians(lat_center))
+    _bbox_h_m = abs(N - S) * 111_320
+    _est_px = (_bbox_w_m / scale) * (_bbox_h_m / scale)
+
+    if _est_px > _ee_max_px:
+        min_scale = int(_math.ceil(_math.sqrt(_bbox_w_m * _bbox_h_m / _ee_max_px)))
+        logger.warning(
+            f"Requested scale={scale} would produce ~{_est_px/1e6:.1f}M px "
+            f"(~{_est_px * _BYTES_PER_PX / 1e6:.0f} MB), exceeding EE's "
+            f"{_EE_MAX_BYTES / 1e6:.0f} MB limit. Clamping to scale={min_scale}.")
+        scale = min_scale
+
     logger.debug(f"Calculated scale: {scale}")
 
     # Test-mode: allow deterministic, network-free responses for tests

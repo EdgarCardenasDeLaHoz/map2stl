@@ -30,6 +30,21 @@ from app.server.core.dem import (
     compute_raw_dem as _compute_raw_dem,
 )
 from app.server.core.cache import make_cache_key, write_array_cache, read_array_cache
+from app.server.core.validation import (
+    parse_float as _parse_float,
+    parse_int as _parse_int,
+    parse_bool as _parse_bool,
+    b64_encode as _b64,
+    validate_bbox as _validate_bbox,
+    validate_dim as _validate_dim,
+    run_sync,
+)
+from app.server.core.projection import (
+    project_grid as _project_grid_impl,
+    project_water_arrays as _project_water_arrays_impl,
+    project_rgb_image as _project_rgb_image,
+)
+from app.server.core.responses import error_response
 from app.server.config import (
     TEST_MODE,
     OPENTOPO_DATASETS,
@@ -60,75 +75,47 @@ router = APIRouter(tags=["terrain"])
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _parse_float(params, key, default=None):
-    val = params.get(key)
-    if val is None or val == '':
-        return default
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return default
-
-
-def _parse_int(params, key, default=None):
-    val = params.get(key)
-    if val is None or val == '':
-        return default
-    try:
-        return int(float(val))
-    except (ValueError, TypeError):
-        return default
-
-
-def _parse_bool(params, key, default=False):
-    val = params.get(key)
-    if val is None or val == '':
-        return default
-    return val.lower() in ('true', '1', 'yes', 'on')
-
-
-def _b64(arr: "np.ndarray") -> str:
-    """Encode a numpy array as base64 little-endian float32 for binary transport."""
-    import base64 as _b64m
-    return _b64m.b64encode(arr.ravel().astype(np.float32).tobytes()).decode("ascii")
-
-
-def _validate_bbox(north, south, east, west):
-    """Return a JSONResponse error if bbox is missing or incoherent, else None."""
-    if any(v is None for v in (north, south, east, west)):
-        return JSONResponse(content={"error": "north, south, east, west are all required"}, status_code=400)
-    if north <= south:
-        return JSONResponse(content={"error": "north must be greater than south"}, status_code=400)
-    if east <= west:
-        return JSONResponse(content={"error": "east must be greater than west"}, status_code=400)
-    return None
-
-
-def _validate_dim(dim, max_dim=MAX_DIM):
-    """Return a JSONResponse error if dim is out of range, else None."""
-    if dim is not None and not (1 <= dim <= max_dim):
-        return JSONResponse(content={"error": f"dim must be between 1 and {max_dim}"}, status_code=400)
-    return None
-
-
-# ---------------------------------------------------------------------------
 # Sync compute helpers (called via run_in_executor to avoid blocking the loop)
 # ---------------------------------------------------------------------------
 
+
+def _project_grid(arr, north, south, east, west, projection, clip_nans,
+                  categorical=False):
+    """Apply geo2stl projection to a 2-D array. Sync helper.
+
+    Delegates to core.projection.project_grid — kept as a thin wrapper
+    so existing call-sites in this module do not change.
+    """
+    return _project_grid_impl(arr, north, south, east, west, projection,
+                              clip_nans, categorical=categorical)
+
+
+def _project_water_arrays(water_mask, esa_img, north, south, east, west,
+                          projection, clip_nans):
+    """Project both water mask and ESA arrays to keep them aligned.
+
+    Delegates to core.projection.project_water_arrays.
+    """
+    return _project_water_arrays_impl(water_mask, esa_img, north, south,
+                                      east, west, projection, clip_nans)
+
+
 def _make_local_dem(north, south, east, west, dim, depth_scale, water_scale,
-                    subtract_water, projection, maintain_dimensions):
-    """Run make_dem_image synchronously. Called from run_in_executor."""
+                    subtract_water, projection, maintain_dimensions, clip_nans):
+    """Run make_dem_image synchronously. Called from run_in_executor.
+
+    Always fetches in Plate Carrée (projection='none') so the server can
+    apply projection externally, consistent with OpenTopo/H5 sources.
+    """
     from numpy2stl.oceans import make_dem_image
     target_bbox = (north, south, east, west)
     try:
         return make_dem_image(
             target_bbox, dim=dim, depth_scale=depth_scale,
             water_scale=water_scale,
-            subtract_water=subtract_water, projection=projection,
-            maintain_dimensions=maintain_dimensions)
+            subtract_water=subtract_water, projection='none',
+            maintain_dimensions=maintain_dimensions,
+            clip_nans=False)
     except TypeError:
         return make_dem_image(
             target_bbox, dim=dim, depth_scale=depth_scale,
@@ -139,7 +126,8 @@ def _make_local_dem(north, south, east, west, dim, depth_scale, water_scale,
 
 def _fetch_dem_array(dem_source, north, south, east, west, dim,
                      depth_scale, water_scale,
-                     subtract_water, projection, maintain_dimensions):
+                     subtract_water, projection, maintain_dimensions,
+                     clip_nans):
     """
     Fetch a DEM array from the specified source. Sync — call via run_in_executor.
 
@@ -153,7 +141,7 @@ def _fetch_dem_array(dem_source, north, south, east, west, dim,
     try:
         return _make_local_dem(north, south, east, west, dim, depth_scale,
                                water_scale, subtract_water,
-                               projection, maintain_dimensions)
+                               projection, maintain_dimensions, clip_nans)
     except Exception as dem_err:
         logger.warning(f"Local DEM failed: {dem_err}, returning zeros")
         lat_r = abs(north - south)
@@ -189,6 +177,7 @@ async def get_terrain_dem(request: Request):
     dataset = params.get("dataset", "esa")
     projection = params.get("projection", "cosine")
     maintain_dimensions = _parse_bool(params, "maintain_dimensions", True)
+    clip_nans = _parse_bool(params, "clip_nans", False)
     dem_source = params.get("dem_source", "local")
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
@@ -204,7 +193,7 @@ async def get_terrain_dem(request: Request):
         "dim": dim, "src": dem_source, "proj": projection,
         "ds": depth_scale, "ws": water_scale,
         "sw": subtract_water, "md": maintain_dimensions,
-        "sat": show_sat,
+        "cn": clip_nans, "sat": show_sat,
     })
     _cached = read_array_cache("dem", _dem_cache_key)
     if _cached is not None and _cached[0].get("dem") is not None:
@@ -218,6 +207,13 @@ async def get_terrain_dem(request: Request):
     if TEST_MODE:
         im = np.linspace(0, 100, num=(dim * dim),
                          dtype=float).reshape((dim, dim))
+        # Apply projection even in TEST_MODE so tests exercise the full pipeline
+        if projection != "none":
+            im = _project_grid(
+                im.astype(np.float32), north or 0.0, south or 0.0,
+                east or 0.0, west or 0.0,
+                projection, clip_nans, categorical=False,
+            )
         payload = _make_dem_payload(im, west or 0.0, south or 0.0,
                                     east or 0.0, north or 0.0, show_sat=False)
         payload["sat_available"] = False
@@ -230,14 +226,21 @@ async def get_terrain_dem(request: Request):
         west, east = -0.01, 0.01
 
     try:
-        loop = asyncio.get_running_loop()
-
-        im = await loop.run_in_executor(
-            None, partial(_fetch_dem_array, dem_source,
-                          north, south, east, west, dim,
-                          depth_scale, water_scale,
-                          subtract_water, projection, maintain_dimensions))
+        im = await run_sync(_fetch_dem_array, dem_source,
+                            north, south, east, west, dim,
+                            depth_scale, water_scale,
+                            subtract_water, projection, maintain_dimensions,
+                            clip_nans)
         im = _upsample_dem(im, dim)
+
+        # Apply projection uniformly for ALL sources.
+        # All fetch functions now return Plate Carrée data;
+        # projection is applied here as a single external step.
+        if projection != "none":
+            im = _project_grid(
+                im.astype(np.float32), north, south, east, west,
+                projection, clip_nans, categorical=False,
+            )
 
         response_content = _make_dem_payload(
             im, west, south, east, north, show_sat)
@@ -246,9 +249,9 @@ async def get_terrain_dem(request: Request):
         # Optional satellite/land-use overlay
         if show_sat:
             try:
-                sat_result = await loop.run_in_executor(
-                    None, partial(_fetch_sat_overlay, north, south, east, west,
-                                  dataset, width_px, height_px, dim))
+                sat_result = await run_sync(
+                    _fetch_sat_overlay, north, south, east, west,
+                    dataset, width_px, height_px, dim)
                 if sat_result is not None:
                     sat_values, sat_width, sat_height = sat_result
                     response_content["sat_available"] = True
@@ -260,8 +263,11 @@ async def get_terrain_dem(request: Request):
 
         # Write DEM disk cache (skip when satellite overlay is embedded)
         if not show_sat:
-            im_clean = np.array(response_content["dem_values"], dtype=np.float32).reshape(
-                height_px, width_px)
+            im_clean = np.nan_to_num(im, nan=0.0).astype(np.float32)
+            if im_clean.shape != (height_px, width_px):
+                import cv2 as _cv2
+                im_clean = _cv2.resize(im_clean, (width_px, height_px),
+                                       interpolation=_cv2.INTER_LINEAR)
             write_array_cache(
                 "dem", _dem_cache_key,
                 {"dem": im_clean},
@@ -275,7 +281,7 @@ async def get_terrain_dem(request: Request):
 
     except Exception as e:
         logger.error(f"Error in get_terrain_dem: {e}", exc_info=True)
-        return JSONResponse(content={"error": "DEM processing failed"}, status_code=500)
+        return error_response("DEM processing failed")
 
 
 @router.api_route("/api/terrain/dem/raw", methods=["GET", "POST"], tags=["terrain"])
@@ -302,19 +308,19 @@ async def get_terrain_dem_raw(request: Request):
             im = np.linspace(-50, 150, num=(dim * dim),
                              dtype=float).reshape((dim, dim))
             return JSONResponse(content={
-                "dem_values": np.nan_to_num(im).ravel().tolist(),
+                "dem_values_b64": _b64(np.nan_to_num(im)),
                 "dimensions": [dim, dim],
                 "min_elevation": float(np.nanmin(im)),
                 "max_elevation": float(np.nanmax(im)),
                 "bbox": [west, south, east, north],
             })
 
-        im_r = await asyncio.get_running_loop().run_in_executor(
-            None, partial(_compute_raw_dem, north, south, east, west, dim, depth_scale))
+        im_r = await run_sync(
+            _compute_raw_dem, north, south, east, west, dim, depth_scale)
         new_h, new_w = im_r.shape
 
         return JSONResponse(content={
-            "dem_values": im_r.ravel().tolist(),
+            "dem_values_b64": _b64(im_r),
             "dimensions": [new_h, new_w],
             "min_elevation": float(np.nanmin(im_r)),
             "max_elevation": float(np.nanmax(im_r)),
@@ -325,7 +331,7 @@ async def get_terrain_dem_raw(request: Request):
 
     except Exception as e:
         logger.error(f"Error in get_terrain_dem_raw: {e}", exc_info=True)
-        return JSONResponse(content={"error": "DEM processing failed"}, status_code=500)
+        return error_response("DEM processing failed")
 
 
 @router.api_route("/api/terrain/water-mask", methods=["GET", "POST"], tags=["terrain"])
@@ -343,6 +349,8 @@ async def get_terrain_water_mask(request: Request):
         water_dataset = params.get("dataset", "esa")
         if water_dataset not in ("esa", "jrc"):
             water_dataset = "esa"
+        projection = params.get("projection", "none")
+        clip_nans = _parse_bool(params, "clip_nans", False)
 
         err = _validate_bbox(north, south, east, west)
         if err:
@@ -353,7 +361,8 @@ async def get_terrain_water_mask(request: Request):
 
         # --- Water mask disk cache check ---
         _water_cache_key = make_cache_key("water", north, south, east, west, {
-            "ss": sat_scale, "ds": water_dataset})
+            "ss": sat_scale, "ds": water_dataset,
+            "proj": projection, "cn": clip_nans})
         _wc = read_array_cache("water", _water_cache_key)
         if _wc is not None:
             _warr, _wmeta = _wc
@@ -379,7 +388,14 @@ async def get_terrain_water_mask(request: Request):
             h, w = 50, 50
             water_arr = np.zeros((h, w), dtype=float)
             water_arr[h // 4:h // 2, w // 4:w // 2] = 1.0
-            wp = int(np.sum(water_arr))
+            esa_arr = water_arr.copy()
+            # Apply projection even in TEST_MODE
+            if projection != "none":
+                water_arr, esa_arr = _project_water_arrays(
+                    water_arr.astype(np.float32), esa_arr.astype(np.float32),
+                    north, south, east, west, projection, clip_nans)
+                h, w = water_arr.shape
+            wp = int(np.sum(water_arr > 0.5))
             tp = h * w
             return JSONResponse(content={
                 "water_mask_values_b64": _b64(water_arr),
@@ -387,20 +403,28 @@ async def get_terrain_water_mask(request: Request):
                 "water_pixels": wp,
                 "total_pixels": tp,
                 "water_percentage": 100.0 * wp / tp,
-                "esa_values_b64": _b64(water_arr),
+                "esa_values_b64": _b64(esa_arr),
                 "esa_dimensions": [h, w],
             })
 
         try:
-            water_mask, img, sat_scale = await asyncio.get_running_loop().run_in_executor(
-                None, partial(_fetch_water_mask, north, south, east, west,
-                              sat_scale, water_dataset))
+            water_mask, img, sat_scale = await run_sync(
+                _fetch_water_mask, north, south, east, west,
+                sat_scale, water_dataset)
         except RuntimeError as fetch_err:
-            return JSONResponse(content={"error": str(fetch_err)}, status_code=500)
+            return error_response(str(fetch_err))
 
         h, w = water_mask.shape
         water_pixels = int(np.sum(water_mask))
         total_pixels = h * w
+
+        # Apply projection if requested
+        if projection != "none":
+            water_mask, img = _project_water_arrays(
+                water_mask, img, north, south, east, west, projection, clip_nans)
+            h, w = water_mask.shape
+            water_pixels = int(np.sum(water_mask > 0.5))
+            total_pixels = h * w
 
         write_array_cache("water", _water_cache_key,
                           {"water_mask": water_mask.astype(np.float32),
@@ -418,10 +442,88 @@ async def get_terrain_water_mask(request: Request):
         })
 
     except ValueError as ve:
-        return JSONResponse(content={"error": str(ve)}, status_code=400)
+        return error_response(str(ve), 400)
     except Exception as e:
         logger.error(f"Unhandled error in get_terrain_water_mask: {e}")
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return error_response(str(e))
+
+
+@router.api_route("/api/terrain/esa-land-cover", methods=["GET", "POST"], tags=["terrain"])
+async def get_terrain_esa_land_cover(request: Request):
+    """Fetch ESA WorldCover land-cover class data independently of the water mask."""
+    logger.info("Received request for /api/terrain/esa-land-cover")
+    try:
+        params = request.query_params
+        north = _parse_float(params, "north")
+        south = _parse_float(params, "south")
+        east = _parse_float(params, "east")
+        west = _parse_float(params, "west")
+        sat_scale = _parse_int(params, "sat_scale", 500)
+        projection = params.get("projection", "none")
+        clip_nans = _parse_bool(params, "clip_nans", False)
+
+        err = _validate_bbox(north, south, east, west)
+        if err:
+            return err
+
+        _esa_cache_key = make_cache_key("esa_lc", north, south, east, west, {
+            "ss": sat_scale, "proj": projection, "cn": clip_nans})
+        _ec = read_array_cache("esa_lc", _esa_cache_key)
+        if _ec is not None:
+            _earr, _emeta = _ec
+            _esa = _earr.get("esa")
+            if _esa is not None:
+                logger.info(f"ESA land cover cache hit: {_esa_cache_key[:8]}…")
+                _h, _w = _esa.shape
+                return JSONResponse(content={
+                    "esa_values_b64": _b64(_esa),
+                    "esa_dimensions": [_h, _w],
+                    "from_cache": True,
+                })
+
+        if TEST_MODE:
+            h, w = 50, 50
+            esa_arr = np.full((h, w), 10, dtype=np.float32)
+            # Apply projection even in TEST_MODE
+            if projection != "none":
+                esa_arr = _project_grid(
+                    esa_arr, north, south, east, west,
+                    projection, clip_nans, categorical=True)
+                h, w = esa_arr.shape
+            return JSONResponse(content={
+                "esa_values_b64": _b64(esa_arr),
+                "esa_dimensions": [h, w],
+            })
+
+        # Fetch ESA image via the shared helper (dataset=esa always for land cover)
+        try:
+            _wm, img, sat_scale = await run_sync(
+                _fetch_water_mask, north, south, east, west,
+                sat_scale, "esa")
+        except RuntimeError as fetch_err:
+            return error_response(str(fetch_err))
+
+        # Apply projection if requested
+        if projection != "none":
+            img = _project_grid(img.astype(np.float32), north, south, east, west,
+                                projection, clip_nans, categorical=True)
+
+        h, w = img.shape
+
+        write_array_cache("esa_lc", _esa_cache_key,
+                          {"esa": img.astype(np.float32)},
+                          {"shape": [h, w]})
+
+        return JSONResponse(content={
+            "esa_values_b64": _b64(img),
+            "esa_dimensions": [h, w],
+        })
+
+    except ValueError as ve:
+        return error_response(str(ve), 400)
+    except Exception as e:
+        logger.error(f"Unhandled error in get_terrain_esa_land_cover: {e}")
+        return error_response(str(e))
 
 
 @router.get("/api/terrain/satellite", tags=["terrain"])
@@ -429,6 +531,9 @@ async def get_terrain_satellite(request: Request):
     """
     Fetch real satellite imagery (ESRI World Imagery WMTS tiles) for a bounding box.
     Returns a base64-encoded JPEG string.
+
+    Supports map projection via ``projection`` and ``clip_nans`` query params,
+    consistent with all other raster endpoints.
     """
     params = request.query_params
     north = _parse_float(params, "north")
@@ -436,6 +541,8 @@ async def get_terrain_satellite(request: Request):
     east = _parse_float(params, "east")
     west = _parse_float(params, "west")
     dim = _parse_int(params, "dim", 400)
+    projection = params.get("projection", "none")
+    clip_nans = _parse_bool(params, "clip_nans", True)
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
     if err:
@@ -446,19 +553,44 @@ async def get_terrain_satellite(request: Request):
         from PIL import Image
         from io import BytesIO
         img = Image.new("RGB", (dim, dim), color=(80, 120, 60))
+        # Apply projection even in TEST_MODE
+        if projection != "none":
+            img_arr = np.array(img)
+            projected = _project_rgb_image(
+                img_arr, north, south, east, west, projection, clip_nans)
+            img = Image.fromarray(projected)
         buf = BytesIO()
         img.save(buf, format="JPEG", quality=80)
         b64 = base64.b64encode(buf.getvalue()).decode()
         return JSONResponse(content={"image": b64, "bbox": [west, south, east, north]})
 
     try:
-        loop = asyncio.get_running_loop()
-        b64 = await loop.run_in_executor(
-            None, partial(_fetch_satellite_tiles, north, south, east, west, dim))
+        b64 = await run_sync(
+            _fetch_satellite_tiles, north, south, east, west, dim)
+
+        # Apply map projection to the satellite image (channel-by-channel)
+        if projection != "none":
+            import base64 as _b64mod
+            from io import BytesIO as _BytesIO
+            from PIL import Image as _Image
+
+            raw_bytes = _b64mod.b64decode(b64)
+            img_pil = _Image.open(_BytesIO(raw_bytes)).convert("RGB")
+            img_arr = np.array(img_pil)
+
+            projected = await run_sync(
+                _project_rgb_image, img_arr,
+                north, south, east, west, projection, clip_nans)
+
+            out_img = _Image.fromarray(projected)
+            buf = _BytesIO()
+            out_img.save(buf, format="JPEG", quality=85)
+            b64 = _b64mod.b64encode(buf.getvalue()).decode()
+
         return JSONResponse(content={"image": b64, "bbox": [west, south, east, north]})
     except Exception as e:
         logger.error(f"Error fetching satellite tiles: {e}", exc_info=True)
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return error_response(str(e))
 
 
 @router.get("/api/terrain/sources", tags=["terrain"])
@@ -513,7 +645,7 @@ async def merge_dem_layers(request: Request):
         h = w = req.dim
         im = np.linspace(0, 100, h * w, dtype=np.float64).reshape(h, w)
         return JSONResponse(content={
-            "dem_values": im.ravel().tolist(),
+            "dem_values_b64": _b64(im),
             "dimensions": [h, w],
             "min_elevation": 0.0, "max_elevation": 100.0, "mean_elevation": 50.0,
             "bbox": [west, south, east, north],
@@ -522,13 +654,12 @@ async def merge_dem_layers(request: Request):
 
     try:
         composite = None
-        loop = asyncio.get_running_loop()
 
         for spec in req.layers:
-            raw = await loop.run_in_executor(
-                None, partial(_fetch_layer_data, spec.source, north, south, east, west, spec.dim))
-            processed = await loop.run_in_executor(
-                None, partial(_apply_layer_processing, raw, spec.processing))
+            raw = await run_sync(
+                _fetch_layer_data, spec.source, north, south, east, west, spec.dim)
+            processed = await run_sync(
+                _apply_layer_processing, raw, spec.processing)
 
             if composite is None:
                 import cv2 as _cv2
@@ -554,7 +685,7 @@ async def merge_dem_layers(request: Request):
                                   neginf=np.finfo(np.float32).min)
         h, w = composite.shape
         return JSONResponse(content={
-            "dem_values": composite.ravel().tolist(),
+            "dem_values_b64": _b64(composite),
             "dimensions": [h, w],
             "min_elevation": float(np.nanmin(composite)),
             "max_elevation": float(np.nanmax(composite)),
@@ -565,7 +696,7 @@ async def merge_dem_layers(request: Request):
 
     except Exception as e:
         logger.error(f"DEM merge failed: {e}", exc_info=True)
-        return JSONResponse(content={"error": "DEM merge failed"}, status_code=500)
+        return error_response("DEM merge failed")
 
 
 # ---------------------------------------------------------------------------
@@ -581,18 +712,29 @@ def _fetch_and_rasterize_hydrology(north, south, east, west, dim, scale_m, depre
     source='hydrorivers':   HydroRIVERS dataset (regional shapefiles, ~500 m detail,
                             downloaded on first use and cached permanently)
     """
+    import time as _time
+    t0 = _time.perf_counter()
     try:
         if source == "hydrorivers":
+            t_fetch = _time.perf_counter()
             geojson = _fetch_hydrorivers(north, south, east, west, min_order=min_order)
+            dt_fetch = _time.perf_counter() - t_fetch
             if geojson is None:
-                logger.info("HydroRIVERS: no features in region")
+                logger.info(f"HydroRIVERS: no features in region (fetch took {dt_fetch:.2f}s)")
                 return None
             n_features = len(geojson.get("features", []))
+            logger.info(f"HydroRIVERS fetch: {n_features} features in {dt_fetch:.2f}s")
+
+            t_rast = _time.perf_counter()
             river_grid = _rasterize_hydrorivers(
                 geojson, north, south, east, west, dim,
                 depression_base=depression_m,
                 order_exponent=order_exponent,
             )
+            dt_rast = _time.perf_counter() - t_rast
+            dt_total = _time.perf_counter() - t0
+            logger.info(f"HydroRIVERS total: {dt_total:.2f}s "
+                        f"(fetch={dt_fetch:.2f}s, rasterize={dt_rast:.2f}s)")
             return {"river_grid": river_grid, "feature_count": n_features, "source": "hydrorivers"}
 
         # Default: Natural Earth
@@ -608,6 +750,8 @@ def _fetch_and_rasterize_hydrology(north, south, east, west, dim, scale_m, depre
             return None
         river_grid = _rasterize_rivers_with_buffering(
             geojson_filtered, bbox_tuple, dim, depression_m=depression_m)
+        dt_total = _time.perf_counter() - t0
+        logger.info(f"Natural Earth hydrology total: {dt_total:.2f}s, {n_features} features")
         return {"river_grid": river_grid, "feature_count": n_features, "source": "natural_earth"}
 
     except Exception as e:
@@ -657,6 +801,9 @@ async def get_terrain_hydrology(request: Request):
     min_order = max(1, min(9, min_order))
     order_exponent = _parse_float(params, "order_exponent", 1.5)
 
+    projection = params.get("projection", "none")
+    clip_nans = _parse_bool(params, "clip_nans", False)
+
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
     if err:
         return err
@@ -668,8 +815,15 @@ async def get_terrain_hydrology(request: Request):
         h, w = dim, dim
         river_arr = np.zeros((h, w), dtype=np.float32)
         river_arr[h//4:h//3, w//4:3*w//4] = depression_m
+        # Apply projection even in TEST_MODE
+        if projection != "none":
+            river_arr = _project_grid(
+                river_arr, north, south, east, west,
+                projection, clip_nans, categorical=False)
+            river_arr = np.nan_to_num(river_arr, nan=0.0)
+            h, w = river_arr.shape
         return JSONResponse(content={
-            "river_grid_values": river_arr.ravel().tolist(),
+            "river_grid_values_b64": _b64(river_arr),
             "river_grid_dimensions": [h, w],
             "feature_count": 5,
             "source": source,
@@ -677,12 +831,11 @@ async def get_terrain_hydrology(request: Request):
         })
 
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None, partial(_fetch_and_rasterize_hydrology,
-                          north, south, east, west, dim,
-                          scale_m, depression_m,
-                          source, min_order, order_exponent))
+        result = await run_sync(
+            _fetch_and_rasterize_hydrology,
+            north, south, east, west, dim,
+            scale_m, depression_m,
+            source, min_order, order_exponent)
 
         if result is None:
             return JSONResponse(content={
@@ -695,10 +848,20 @@ async def get_terrain_hydrology(request: Request):
             }, status_code=200)
 
         river_grid = result["river_grid"]
+
+        # Apply projection if requested
+        if projection != "none":
+            river_grid = _project_grid(
+                river_grid, north, south, east, west, projection, clip_nans,
+                categorical=False)
+            # Replace NaN fill (from projection) with 0 (= no river) so JSON
+            # serialisation produces 0.0 instead of null.
+            river_grid = np.nan_to_num(river_grid, nan=0.0)
+
         h, w = river_grid.shape
 
         return JSONResponse(content={
-            "river_grid_values": river_grid.ravel().tolist(),
+            "river_grid_values_b64": _b64(river_grid),
             "river_grid_dimensions": [h, w],
             "feature_count": result["feature_count"],
             "source": result.get("source", source),
@@ -707,7 +870,7 @@ async def get_terrain_hydrology(request: Request):
 
     except Exception as e:
         logger.error(f"Error in get_terrain_hydrology: {e}", exc_info=True)
-        return JSONResponse(content={"error": "Hydrology fetch failed"}, status_code=500)
+        return error_response("Hydrology fetch failed")
 
 
 def _merge_hydrology_into_dem(dem_arr, river_arr):
@@ -776,9 +939,7 @@ async def merge_terrain_hydrology(request: Request):
         })
 
     try:
-        loop = asyncio.get_running_loop()
-        merged = await loop.run_in_executor(
-            None, partial(_merge_hydrology_into_dem, dem_arr, river_arr))
+        merged = await run_sync(_merge_hydrology_into_dem, dem_arr, river_arr)
 
         if merged is None:
             return JSONResponse(content={"error": "Merge operation failed"}, status_code=500)
@@ -790,7 +951,7 @@ async def merge_terrain_hydrology(request: Request):
 
     except Exception as e:
         logger.error(f"Error in merge_terrain_hydrology: {e}", exc_info=True)
-        return JSONResponse(content={"error": "Hydrology merge failed"}, status_code=500)
+        return error_response("Hydrology merge failed")
 
 
 @router.post("/api/export/preview", tags=["terrain"])

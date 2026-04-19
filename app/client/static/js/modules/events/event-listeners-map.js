@@ -80,20 +80,33 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
             _projChangeTimer = setTimeout(async () => {
                 if (!window.appState.lastDemData) return;  // nothing loaded yet
 
+                window.showToast?.('Projection changed — re-fetching layers…', 'info');
+
                 // Re-fetch DEM with new projection param (includes water if subtract_water)
                 await window.loadDEM?.();
 
                 // Re-fetch other layers that were already loaded
                 const tasks = [];
                 if (window.appState.lastWaterMaskData) tasks.push(window.loadWaterMask?.());
+                if (window.appState.layerBboxes?.landCover) tasks.push(window.loadEsaLandCover?.());
                 if (window.appState.satImgSourceCanvas)  tasks.push(window.loadSatelliteRGBImage?.());
                 if (window.appState.osmCityData)          tasks.push(window.loadCityData?.());
+                if (window.appState.hydrologySourceCanvas) tasks.push(window.loadHydrology?.());
                 if (tasks.length) await Promise.all(tasks);
 
                 requestAnimationFrame(() => window.updatePrintDimensions?.());
             }, 80);
         });
     }
+
+    // Clip-edges checkbox also triggers refetch (projection-related param)
+    let _clipNansTimer = null;
+    document.getElementById('paramClipNans')?.addEventListener('change', () => {
+        clearTimeout(_clipNansTimer);
+        _clipNansTimer = setTimeout(() => {
+            document.getElementById('paramProjection')?.dispatchEvent(new Event('change'));
+        }, 80);
+    });
 
     document.getElementById('applyRescaleBtn')?.addEventListener('click', () => {
         const minVal = parseFloat(document.getElementById('rescaleMin').value);
@@ -291,11 +304,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         if (w) w.style.display = val >= 500 ? 'block' : 'none';
         window.loadWaterMask?.();
     });
-    document.getElementById('waterLayerResolution')?.addEventListener('change', () => {
-        const val = parseInt(document.getElementById('waterLayerResolution').value);
-        const w   = document.getElementById('waterLayerResWarning');
-        if (w) w.style.display = val >= 500 ? 'block' : 'none';
-    });
     /**
      * Wire a load button to an async action with disable-while-loading guard.
      * @param {string} btnId  - Element ID of the button
@@ -312,18 +320,47 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         });
     }
 
+    // --- Quick-load resolution labels ---
+    // Sync the quick-load bar labels with the actual resolution controls in fetch sections.
+    function _updateQuickLoadLabels() {
+        const map = {
+            qlResDem:   { src: 'paramDim',        suffix: ' px' },
+            qlResWater: { src: 'waterResolution',  suffix: ' m/px' },
+            qlResSat:   { src: 'satImgResolution', suffix: ' px' },
+            qlResEsa:   { src: 'esaResolution',    suffix: ' m/px' },
+            qlResHydro: { src: 'hydroDim',         suffix: ' px' },
+        };
+        for (const [labelId, cfg] of Object.entries(map)) {
+            const label = document.getElementById(labelId);
+            const src   = document.getElementById(cfg.src);
+            if (label && src) label.textContent = src.value + cfg.suffix;
+        }
+    }
+    // Update on init and whenever a resolution control changes
+    _updateQuickLoadLabels();
+    for (const id of ['paramDim', 'waterResolution', 'satImgResolution', 'esaResolution', 'hydroDim']) {
+        document.getElementById(id)?.addEventListener('change', _updateQuickLoadLabels);
+    }
+
+    // Fetch section load buttons
+    // loadHydrologyBtn wired in event-listeners.js
+    // loadSatImgBtn wired in app-setup.js (also switches to SatImg mode)
     _asyncBtn('loadWaterMaskBtn', () => window.loadWaterMask?.());
-    _asyncBtn('loadDemLayerBtn', () => window.loadDEM?.(), () => {
-        // Override paramDim with the layer-view resolution for this load
-        const dimEl = document.getElementById('demLayerResolution');
-        const paramDimEl = document.getElementById('paramDim');
-        if (dimEl && paramDimEl) paramDimEl.value = dimEl.value;
+    _asyncBtn('loadEsaBtn', () => window.loadEsaLandCover?.());
+    // Satellite clear button
+    document.getElementById('clearSatImgBtn')?.addEventListener('click', () => {
+        window.appState.satImgSourceCanvas = null;
+        window.appState._satImgRawCanvas = null;
+        window.events?.emit(window.EV?.STACKED_UPDATE);
+        window.showToast?.('Satellite layer cleared', 'info');
     });
-    // loadWaterLayerBtn — layer-view per-resolution load (reads #waterLayerResolution)
-    // Distinct from #loadWaterMaskBtn in WaterLandCoverSection (reads persisted #waterResolution)
-    _asyncBtn('loadWaterLayerBtn', () => window.loadWaterMask?.());
-    _asyncBtn('loadSatImgBtn', () => window.loadSatelliteRGBImage?.());
-    _asyncBtn('loadSatBtn', () => window.loadSatelliteImage?.());
+
+    // Quick-load bar buttons (LayerViewSection)
+    _asyncBtn('qlLoadDem',   () => window.loadDEM?.());
+    _asyncBtn('qlLoadWater', () => window.loadWaterMask?.());
+    _asyncBtn('qlLoadSat',   () => window.loadSatelliteRGBImage?.());
+    _asyncBtn('qlLoadEsa',   () => window.loadEsaLandCover?.());
+    _asyncBtn('qlLoadHydro', () => window.loadHydrology?.());
 };
 
 window._setupBboxListeners = function _setupBboxListeners() {
@@ -349,7 +386,7 @@ window._setupBboxListeners = function _setupBboxListeners() {
         const wc = Math.max(-180, Math.min(180, w));
         window.setBboxInputValues?.(nc, sc, ec, wc);
         let selectedRegion = window.appState.selectedRegion;
-        if (!selectedRegion) selectedRegion = {};
+        if (!selectedRegion) selectedRegion = { name: null };
         selectedRegion.north = nc; selectedRegion.south = sc;
         selectedRegion.east  = ec; selectedRegion.west  = wc;
         window.setSelectedRegion?.(selectedRegion);

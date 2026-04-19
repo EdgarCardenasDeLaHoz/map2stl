@@ -78,13 +78,9 @@ window.switchView = function switchView(view) {
         if (selectedRegion) {
             window.setBboxInputValues?.(selectedRegion.north, selectedRegion.south, selectedRegion.east, selectedRegion.west);
         }
-        // Auto-load DEM if a region is selected but no DEM data is loaded yet
-        if (selectedRegion && !window.appState.lastDemData) {
-            window.loadDEM?.().then(() => {
-                window.loadWaterMask?.();
-                window.loadSatelliteImage?.();
-            });
-        }
+        // NOTE: Do NOT auto-load layers here. Layer loading is triggered by goToEdit()
+        // or explicit user action. Auto-loading here causes duplicate requests when
+        // goToEdit() calls switchView() and then loadDEM() itself.
     } else if (view === 'model') {
         if (modelContainer) {
             modelContainer.classList.remove('hidden');
@@ -323,7 +319,9 @@ window.saveCurrentRegion = async function saveCurrentRegion() {
         return;
     }
 
-    const bounds          = boundingBox;
+    const bounds = typeof boundingBox.getBounds === 'function'
+        ? boundingBox.getBounds()
+        : boundingBox;
     const regionLabelInput = document.getElementById('regionLabel');
     const regionData      = {
         name:        regionName,
@@ -467,7 +465,6 @@ window.switchDemSubtab = function switchDemSubtab(subtab) {
         case 'merge':
             document.getElementById('mergePanel')?.classList.remove('hidden');
             document.getElementById('demControlsInner')?.classList.add('hidden');
-            window._refreshPipelinePanel?.();
             break;
         default:
             // Default: show layers stack

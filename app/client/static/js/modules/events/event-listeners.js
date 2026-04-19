@@ -82,4 +82,6 @@ window.setupEventListeners = function setupEventListeners() {
         const controls = document.getElementById('hydroRiversControls');
         if (controls) controls.style.display = e.target.value === 'hydrorivers' ? '' : 'none';
     });
+
+    // qlLoadHydro (quick-load) wired in event-listeners-map.js via _asyncBtn
 };

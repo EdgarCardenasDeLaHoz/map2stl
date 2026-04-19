@@ -109,3 +109,11 @@ CACHE_MAX_FILES = 100        # trigger a sweep when this many files exist
 
 MAX_DIM: int = 2000            # maximum grid resolution accepted by all endpoints
 MAX_BBOX_DIAGONAL_KM: float = 15.0  # cities endpoint bounding-box size cap
+
+# ---------------------------------------------------------------------------
+# Luminance / colour constants (ITU-R BT.601 perceptual weights)
+# ---------------------------------------------------------------------------
+
+LUMINANCE_R: float = 0.299
+LUMINANCE_G: float = 0.587
+LUMINANCE_B: float = 0.114

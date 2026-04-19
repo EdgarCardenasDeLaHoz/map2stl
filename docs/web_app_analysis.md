@@ -2,6 +2,16 @@
 
 _Last updated: 2026-04-09_
 
+For first-pass repository orientation, do not start here.
+
+Use these documents first:
+
+- `ai-agent-onboarding.md` for the shortest project map
+- `task-routing.md` to decide where to edit
+- `sdk-workflow.md` if the task starts from a notebook or `TerrainSession`
+
+Return to this document when you need a deeper reference for the browser application specifically.
+
 This document is the single reference for the state of the FastAPI web application, covering architecture, implemented features, known gaps, and developer notes.
 
 ---

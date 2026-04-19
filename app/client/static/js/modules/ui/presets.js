@@ -70,6 +70,7 @@ function initPresetProfiles() {
         }
     }
     _setupPresetEventListeners();
+    setupAutoSave();
 }
 
 function _setupPresetEventListeners() {
@@ -221,22 +222,26 @@ function collectAllSettings() {
             show_sat:       false,
         },
         projection: {
-            projection:          _str('paramProjection', 'none'),
-            maintain_dimensions: _chk('paramMaintainDimensions', false),
-            clip_nans:           true,
+            projection: _str('paramProjection', 'none'),
+            clip_nans:  _chk('paramClipNans', true),
         },
         view: {
             colormap:               _str('demColormap', 'terrain'),
             rescale_min:            rescaleMin && rescaleMin !== '' ? parseFloat(rescaleMin) : null,
             rescale_max:            rescaleMax && rescaleMax !== '' ? parseFloat(rescaleMax) : null,
-            gridlines_show:         _chk('showGridlines', false),
-            gridlines_count:        _int('gridlineCount', 5),
+            gridlines_show:         _chk('showGridlines', true),
+            gridlines_count:        _int('gridlineCount', 10),
             elevation_curve:        window.appState.activeCurvePreset || null,
             elevation_curve_points: (window.appState.curvePoints || []).map(pt => [pt.x, pt.y]),
+            elevation_curve_vmin:   window.appState.curveDataVmin ?? null,
+            elevation_curve_vmax:   window.appState.curveDataVmax ?? null,
         },
         water: {
             sat_scale: _int('waterResolution', 500),
             dataset:   _str('waterDataset', 'esa'),
+        },
+        esa: {
+            sat_scale: _int('esaResolution', 200),
         },
         satellite: {
             dim: _int('paramDim', 800),
@@ -274,7 +279,7 @@ function collectAllSettings() {
         },
         hydrology: {
             source:         _str('hydroSource', 'hydrorivers'),
-            scale_m:        _int('hydroDim', 300),
+            dim:            _int('hydroDim', 300),
             depression_m:   _flt('hydroDepressionM', -5.0),
             min_order:      _int('hydroMinOrder', 3),
             order_exponent: _flt('hydroOrderExponent', 1.5),
@@ -324,7 +329,7 @@ function applyAllSettings(s) {
             projDesc.textContent = descs[projVal] || '';
         }
     }
-    if (proj.maintain_dimensions != null) setChk('paramMaintainDimensions', proj.maintain_dimensions);
+    if (proj.clip_nans != null) setChk('paramClipNans', proj.clip_nans);
 
     // view group — gridlines now use #showGridlines (VisualizationSection)
     if (view.colormap    != null) set('demColormap', view.colormap);
@@ -334,6 +339,23 @@ function applyAllSettings(s) {
     if (view.gridlines_count != null) set('gridlineCount',    view.gridlines_count);
     if (view.elevation_curve_points && Array.isArray(view.elevation_curve_points) && view.elevation_curve_points.length >= 2) {
         const points = view.elevation_curve_points.map(pt => ({ x: pt[0], y: pt[1] }));
+        // If the saved curve was created with a different elevation range,
+        // rescale points so absolute elevation anchors are preserved.
+        const savedVmin = view.elevation_curve_vmin;
+        const savedVmax = view.elevation_curve_vmax;
+        const curVmin = window.appState.curveDataVmin;
+        const curVmax = window.appState.curveDataVmax;
+        if (savedVmin != null && savedVmax != null && curVmin != null && curVmax != null
+            && (savedVmin !== curVmin || savedVmax !== curVmax)) {
+            const oldRange = savedVmax - savedVmin;
+            const newRange = curVmax - curVmin;
+            if (oldRange && newRange) {
+                for (const pt of points) {
+                    const absElev = pt.x * oldRange + savedVmin;
+                    pt.x = Math.max(0, Math.min(1, (absElev - curVmin) / newRange));
+                }
+            }
+        }
         window.appState._applyCurveSettings?.(points, view.elevation_curve || 'custom');
     }
 
@@ -341,6 +363,10 @@ function applyAllSettings(s) {
     const satScaleVal = wat.sat_scale ?? s.sat_scale;
     if (satScaleVal != null) set('waterResolution', satScaleVal);
     if (wat.dataset != null) set('waterDataset', wat.dataset);
+
+    // esa group — independent ESA land cover resolution
+    const esa = s.esa || {};
+    if (esa.sat_scale != null) set('esaResolution', esa.sat_scale);
 
     // export group — new IDs: exportModelHeight, exportBaseHeight, exportExaggeration, etc.
     if (exp.model_height     != null) set('exportModelHeight',    exp.model_height);
@@ -374,6 +400,14 @@ function applyAllSettings(s) {
         setChk('cityLayerRoads',      city.layers.includes('roads'));
         setChk('cityLayerWaterways',  city.layers.includes('waterways'));
     }
+
+    // hydrology group
+    const hydro = s.hydrology || {};
+    if (hydro.source         != null) set('hydroSource',        hydro.source);
+    if (hydro.dim            != null) set('hydroDim',           hydro.dim);
+    if (hydro.depression_m   != null) set('hydroDepressionM',   hydro.depression_m);
+    if (hydro.min_order      != null) set('hydroMinOrder',      hydro.min_order);
+    if (hydro.order_exponent != null) set('hydroOrderExponent',  hydro.order_exponent);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -456,6 +490,61 @@ function deleteSelectedPreset() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Auto-save
+// ─────────────────────────────────────────────────────────────────────────────
+
+let _autoSaveTimer = null;
+
+function setupAutoSave() {
+    // Restore preference from localStorage
+    const chk = document.getElementById('autoSaveEnabled');
+    if (!chk) return;
+    try {
+        chk.checked = localStorage.getItem('strm2stl_autoSave') === 'true';
+    } catch (_) {}
+
+    chk.addEventListener('change', () => {
+        try { localStorage.setItem('strm2stl_autoSave', chk.checked); } catch (_) {}
+    });
+
+    // Delegated listener on the settings container
+    const container = document.getElementById('demControlsInner');
+    if (!container) return;
+
+    container.addEventListener('change', _scheduleAutoSave);
+    container.addEventListener('input', _scheduleAutoSave);
+}
+
+function _scheduleAutoSave(e) {
+    const chk = document.getElementById('autoSaveEnabled');
+    if (!chk?.checked) return;
+    // Don't auto-save when there's no region selected
+    if (!window.appState?.selectedRegion) return;
+    // Ignore the auto-save checkbox itself
+    if (e?.target?.id === 'autoSaveEnabled') return;
+
+    clearTimeout(_autoSaveTimer);
+    _autoSaveTimer = setTimeout(async () => {
+        const status = document.getElementById('saveSettingsStatus');
+        try {
+            await saveRegionSettings();
+            if (status) {
+                status.textContent = 'Auto-saved ✓';
+                status.style.color = '#4CAF50';
+                setTimeout(() => { status.textContent = ''; }, 2000);
+            }
+        } catch (err) {
+            console.warn('Auto-save failed:', err);
+            if (status) {
+                status.textContent = 'Auto-save failed';
+                status.style.color = '#f44';
+                setTimeout(() => { status.textContent = ''; }, 3000);
+            }
+        }
+    }, 3000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Expose on window
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -464,3 +553,4 @@ window.collectAllSettings          = collectAllSettings;
 window.applyAllSettings            = applyAllSettings;
 window.saveRegionSettings          = saveRegionSettings;
 window.loadAndApplyRegionSettings  = loadAndApplyRegionSettings;
+window.setupAutoSave               = setupAutoSave;

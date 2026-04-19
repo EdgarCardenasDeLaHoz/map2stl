@@ -12,8 +12,6 @@
  *     updateAxesOverlay(north, south, east, west)
  *     drawColorbar(min, max, colormap)
  *     drawHistogram(values)
- *   Projection:
- *     applyProjection(srcCanvas, bbox)
  *   Zoom / pan:
  *     enableZoomAndPan(canvas)
  *
@@ -141,14 +139,7 @@ function renderSatelliteCanvas(values, width, height) {
     const range = (vmax - vmin) || 1;
     const invRange = 1 / range;
 
-    const colorLUT = new Uint8Array(256 * 3);
-    for (let i = 0; i < 256; i++) {
-        const t = i / 255;
-        const [r, g, b] = mapElevationToColor(t, 'viridis');
-        colorLUT[i * 3]     = Math.round(r * 255);
-        colorLUT[i * 3 + 1] = Math.round(g * 255);
-        colorLUT[i * 3 + 2] = Math.round(b * 255);
-    }
+    const colorLUT = window.buildColorLUT('viridis', 256);
 
     const total = width * height;
     for (let i = 0; i < total; i++) {
@@ -384,20 +375,6 @@ function drawHistogram(values) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Canvas projection — PASSTHROUGH
-// Projection is now applied server-side (projection param sent with every DEM
-// fetch). This function is kept as a no-op so existing call sites in
-// recolorDEM, water-mask.js, composite-dem.js, city-render.js etc. don't break.
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * No-op passthrough — projection is applied server-side.
- * @param {HTMLCanvasElement} srcCanvas
- * @returns {HTMLCanvasElement}
- */
-function applyProjection(srcCanvas) {
-    return srcCanvas;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Zoom / pan
 // ─────────────────────────────────────────────────────────────────────────────
@@ -479,5 +456,4 @@ window.renderSatelliteCanvas = renderSatelliteCanvas;
 window.updateAxesOverlay = updateAxesOverlay;
 window.drawColorbar = drawColorbar;
 window.drawHistogram = drawHistogram;
-window.applyProjection = applyProjection;
 window.enableZoomAndPan = enableZoomAndPan;

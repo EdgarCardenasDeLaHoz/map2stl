@@ -52,7 +52,7 @@ function renderCompareLayer(side) {
     if (!select || !canvas) return;
 
     const sourceSelectors = {
-        dem:      '#demImage canvas:not(.dem-gridlines-overlay):not(.city-dem-overlay):not(.water-dem-overlay):not(.sat-dem-overlay)',
+        dem:      `#demImage ${window.DEM_CANVAS_SELECTOR}`,
         water:    '#waterMaskImage canvas',
         sat:      '#satelliteImage canvas',
         combined: '#combinedImage canvas',
