@@ -26,6 +26,19 @@ try:
 except ImportError:
     _WRITE3MF_AVAILABLE = False
 
+try:
+    from numpy2stl import array_to_mesh as _array_to_mesh
+    _ARRAY_TO_MESH_AVAILABLE = True
+except ImportError:
+    _ARRAY_TO_MESH_AVAILABLE = False
+
+try:
+    from numpy2stl.generate import polygon_to_prism as _polygon_to_prism
+    from numpy2stl.solid import vertices_to_index as _vertices_to_index
+    _POLYGON_TO_PRISM_AVAILABLE = True
+except ImportError:
+    _POLYGON_TO_PRISM_AVAILABLE = False
+
 
 # ---------------------------------------------------------------------------
 # 2-D polygon triangulation (ear-clipping, pure numpy)
@@ -113,6 +126,9 @@ def _extrude_ring(
     """
     Extrude one GeoJSON exterior ring into a closed 3-D prism.
 
+    Delegates to ``numpy2stl.generate.polygon_to_prism`` when available,
+    falling back to the manual ear-clip implementation.
+
     Args:
         ring:     list of [lon, lat] pairs (closing duplicate may be present)
         z0:       base elevation in mm (bottom of building)
@@ -130,7 +146,16 @@ def _extrude_ring(
     if n < 3:
         return None, None
 
-    # Roof and floor vertex arrays
+    if _POLYGON_TO_PRISM_AVAILABLE:
+        try:
+            verts_3d = np.column_stack([pts_mm, np.full(n, z1)])
+            raw_tris = _polygon_to_prism(verts_3d, perimeters=[np.arange(n)], base_val=z0)
+            verts, faces = _vertices_to_index(raw_tris)
+            return verts.astype(np.float32), faces.astype(np.int32)
+        except Exception as _e:
+            logger.debug("polygon_to_prism failed (%s), using fallback ear-clip", _e)
+
+    # ── Fallback: manual ear-clip implementation ─────────────────────────────
     roof   = np.column_stack([pts_mm, np.full(n, z1)])
     floor_ = np.column_stack([pts_mm, np.full(n, z0)])
     verts  = np.vstack([roof, floor_]).astype(np.float32)  # [0..n-1]=roof, [n..2n-1]=floor
@@ -239,21 +264,46 @@ def _terrain_mesh(
     """
     Convert a 2-D DEM array [rows, cols] into a closed, printable terrain mesh.
 
-    Surface: grid of triangles (DEM elevation mapped to [base_mm, base_mm+model_height_mm]).
-    Bottom: flat rectangle at z=0.
-    Walls: triangle strips connecting terrain edges to z=0.
+    Delegates to ``numpy2stl.array_to_mesh(solid=True)`` when available.
+    Pre-scales DEM values into [base_mm, base_mm+model_height_mm], then
+    rescales the returned (col_idx, row_idx) coordinates to physical mm space.
 
     Returns (vertices Nx3 float32, faces Mx3 int32).
     """
     rows, cols = dem_arr.shape
     z_min = float(dem_arr.min())
-    z_max = float(dem_arr.max())
-    z_range = (z_max - z_min) or 1.0
+    z_range = (float(dem_arr.max()) - z_min) or 1.0
 
+    # Scale DEM to desired physical z range
+    scaled = base_mm + (dem_arr - z_min) / z_range * model_height_mm
+
+    if _ARRAY_TO_MESH_AVAILABLE:
+        import io, sys
+        _devnull = io.StringIO()
+        _old_stdout, sys.stdout = sys.stdout, _devnull
+        try:
+            verts, faces = _array_to_mesh(scaled, floor_val=0.0, solid=True)
+        finally:
+            sys.stdout = _old_stdout
+
+        if verts is None or len(verts) == 0:
+            return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.int32)
+
+        verts = verts.astype(np.float32).copy()
+        # x: col_idx [0, cols-1] → [0, W_mm]
+        # y: row_idx [0, rows-1] → [H_mm, 0]  (row 0 = north, inverted)
+        col_scale = W_mm / max(cols - 1, 1)
+        row_scale = H_mm / max(rows - 1, 1)
+        verts[:, 0] = verts[:, 0] * col_scale
+        verts[:, 1] = H_mm - verts[:, 1] * row_scale
+
+        return verts, faces.astype(np.int32)
+
+    # ── Fallback: manual implementation ─────────────────────────────────────
     xs = np.linspace(0.0, W_mm, cols)
     ys = np.linspace(H_mm, 0.0, rows)   # row 0 → north (H_mm), last row → south (0)
     xx, yy = np.meshgrid(xs, ys)
-    zz = base_mm + (dem_arr - z_min) / z_range * model_height_mm
+    zz = scaled
 
     # ── Top surface vertices ─────────────────────────────────────────────────
     top_v = np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()])
@@ -264,7 +314,6 @@ def _terrain_mesh(
     for r in range(rows - 1):
         for c in range(cols - 1):
             tl, tr_, bl, br = ti(r, c), ti(r, c + 1), ti(r + 1, c), ti(r + 1, c + 1)
-            # CCW winding viewed from above → outward normal points UP (+Z)
             faces.extend([[tl, bl, tr_], [tr_, bl, br]])
 
     # ── Skirt vertices at z=0 ────────────────────────────────────────────────
@@ -274,42 +323,37 @@ def _terrain_mesh(
     front_skirt = np.column_stack([np.linspace(0, W_mm, cols), np.zeros(cols),           np.zeros(cols)])
 
     n_top = len(top_v)
-    li = n_top;            n_top += rows    # left  skirt index start
-    ri = n_top;            n_top += rows    # right skirt index start
-    bi = n_top;            n_top += cols    # back  skirt index start
-    fi = n_top;            n_top += cols    # front skirt index start
+    li = n_top;            n_top += rows
+    ri = n_top;            n_top += rows
+    bi = n_top;            n_top += cols
+    fi = n_top;            n_top += cols
 
     all_v = np.vstack([top_v, left_skirt, right_skirt, back_skirt, front_skirt])
 
-    # ── Side walls ───────────────────────────────────────────────────────────
     for r in range(rows - 1):
         t0 = ti(r, 0);        t1 = ti(r + 1, 0)
         s0 = li + r;          s1 = li + r + 1
-        faces.extend([[t0, s0, t1], [s0, s1, t1]])          # left
+        faces.extend([[t0, s0, t1], [s0, s1, t1]])
 
     for r in range(rows - 1):
         t0 = ti(r, cols - 1); t1 = ti(r + 1, cols - 1)
         s0 = ri + r;          s1 = ri + r + 1
-        faces.extend([[t0, t1, s0], [s0, t1, s1]])           # right
+        faces.extend([[t0, t1, s0], [s0, t1, s1]])
 
     for c in range(cols - 1):
         t0 = ti(0, c);        t1 = ti(0, c + 1)
         s0 = bi + c;          s1 = bi + c + 1
-        faces.extend([[t0, t1, s0], [s0, t1, s1]])           # back (north)
+        faces.extend([[t0, t1, s0], [s0, t1, s1]])
 
     for c in range(cols - 1):
         t0 = ti(rows - 1, c); t1 = ti(rows - 1, c + 1)
         s0 = fi + c;          s1 = fi + c + 1
-        faces.extend([[t0, s0, t1], [s0, s1, t1]])           # front (south)
+        faces.extend([[t0, s0, t1], [s0, s1, t1]])
 
-    # ── Bottom plate ─────────────────────────────────────────────────────────
-    # Corners reuse skirt vertices: li+rows-1=(0,0,0), ri+rows-1=(W,0,0),
-    #                                ri+0=(W,H,0),       li+0=(0,H,0)
     bl_c = li + rows - 1
     br_c = ri + rows - 1
     tr_c = ri + 0
     tl_c = li + 0
-    # CCW winding viewed from below → outward normal points DOWN (-Z)
     faces.extend([[bl_c, tr_c, br_c], [bl_c, tl_c, tr_c]])
 
     return all_v.astype(np.float32), np.array(faces, dtype=np.int32)

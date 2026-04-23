@@ -90,7 +90,11 @@ function renderCoordinatesList() {
 
     const coordinatesData = window.getCoordinatesData?.() || [];
     if (coordinatesData.length === 0) {
-        list.innerHTML = '<div class="loading">No regions found. Draw a bbox on the map to create one.</div>';
+        list.innerHTML = '<div class="loading" style="display:flex;flex-direction:column;align-items:center;gap:8px;">' +
+            '<span style="font-size:28px;">🗺️</span>' +
+            '<span style="font-weight:600;color:#ccc;">Draw a region on the map to begin</span>' +
+            '<span style="font-size:11px;color:#888;">Use the ✏️ draw button on the map to select an area</span>' +
+            '</div>';
         return;
     }
 
@@ -169,6 +173,10 @@ function renderCoordinatesList() {
 // Regions table view
 // ─────────────────────────────────────────────────────────────────────────────
 
+const TABLE_PAGE_SIZE = 20;
+let _tablePage = 0;
+let _tableSearch = '';
+
 function populateRegionsTable() {
     const tbody = document.getElementById('regionsTableBody');
     if (!tbody) return;
@@ -177,11 +185,26 @@ function populateRegionsTable() {
     const coordinatesData = window.getCoordinatesData?.() || [];
     if (coordinatesData.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;">No regions loaded</td></tr>';
+        _renderTablePagination(0, 0);
         return;
     }
 
+    const q = _tableSearch.toLowerCase();
+    const filtered = q
+        ? coordinatesData.filter((r, i) => r.name.toLowerCase().includes(q))
+        : coordinatesData;
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / TABLE_PAGE_SIZE));
+    if (_tablePage >= totalPages) _tablePage = totalPages - 1;
+
+    const start = _tablePage * TABLE_PAGE_SIZE;
+    const pageData = filtered.slice(start, start + TABLE_PAGE_SIZE);
+
     const selected = window.appState?.selectedRegion;
-    coordinatesData.forEach((region, index) => {
+    const indexByName = new Map(coordinatesData.map((r, i) => [r.name, i]));
+
+    pageData.forEach((region) => {
+        const index = indexByName.get(region.name) ?? -1;
         const tr = document.createElement('tr');
         tr.dataset.regionIndex = index;
         if (selected && selected.name === region.name) tr.classList.add('selected');
@@ -198,6 +221,26 @@ function populateRegionsTable() {
         `;
         tbody.appendChild(tr);
     });
+
+    _renderTablePagination(filtered.length, totalPages);
+}
+
+function _renderTablePagination(total, totalPages) {
+    const el = document.getElementById('regionsPagination');
+    if (!el) return;
+    if (total <= TABLE_PAGE_SIZE) {
+        el.innerHTML = '';
+        return;
+    }
+    const start = _tablePage * TABLE_PAGE_SIZE + 1;
+    const end   = Math.min((_tablePage + 1) * TABLE_PAGE_SIZE, total);
+    el.innerHTML = `
+        <button id="regPagePrev" ${_tablePage === 0 ? 'disabled' : ''}>&#8249; Prev</button>
+        <span>${start}–${end} of ${total}</span>
+        <button id="regPageNext" ${_tablePage >= totalPages - 1 ? 'disabled' : ''}>Next &#8250;</button>
+    `;
+    el.querySelector('#regPagePrev')?.addEventListener('click', () => { _tablePage--; populateRegionsTable(); });
+    el.querySelector('#regPageNext')?.addEventListener('click', () => { _tablePage++; populateRegionsTable(); });
 }
 
 function loadRegionFromTable(index) {
@@ -217,10 +260,9 @@ function setupRegionsTable() {
     const searchInput = document.getElementById('regionsSearch');
     if (searchInput) {
         searchInput.addEventListener('input', (e) => {
-            const query = e.target.value.toLowerCase();
-            document.querySelectorAll('#regionsTableBody tr').forEach(row => {
-                row.style.display = row.textContent.toLowerCase().includes(query) ? '' : 'none';
-            });
+            _tableSearch = e.target.value;
+            _tablePage = 0;
+            populateRegionsTable();
         });
     }
 

@@ -107,16 +107,3 @@ def init_db(path: Optional[Path] = None) -> None:
         conn.execute(_CREATE_REGION_SETTINGS)
         conn.commit()
     logger.info(f"Database initialised at {p}")
-
-
-def db_exists(path: Optional[Path] = None) -> bool:
-    """Return True if the SQLite database file exists and has been initialised."""
-    p = path or DB_PATH
-    if not p.exists():
-        return False
-    try:
-        with get_db(p) as conn:
-            conn.execute("SELECT 1 FROM regions LIMIT 1")
-        return True
-    except sqlite3.OperationalError:
-        return False

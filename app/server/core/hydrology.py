@@ -10,7 +10,6 @@ from __future__ import annotations
 import io
 import json
 import logging
-import math
 import zipfile
 from typing import Dict, List, Optional, Tuple
 
@@ -203,6 +202,76 @@ def rasterize_rivers_with_buffering(
     except Exception as e:
         logger.error(f"Rasterization failed: {e}")
         return np.zeros((dim, dim), dtype=np.float32)
+
+
+def fetch_and_rasterize_hydrology(
+    north, south, east, west, dim, scale_m, depression_m,
+    source="natural_earth", min_order=3, order_exponent=1.5,
+):
+    """Fetch rivers and rasterize to a depression grid. Sync — call via run_in_executor.
+
+    source='natural_earth': Natural Earth dataset (global, 3 tiers, coarse)
+    source='hydrorivers':   HydroRIVERS dataset (regional shapefiles, ~500 m detail,
+                            downloaded on first use and cached permanently)
+
+    Returns dict with keys ``river_grid``, ``feature_count``, ``source``
+    or None if no features were found.
+    """
+    from app.server.core.hydrorivers import (
+        fetch_hydrorivers,
+        rasterize_hydrorivers,
+    )
+    import time as _time
+
+    t0 = _time.perf_counter()
+    try:
+        if source == "hydrorivers":
+            t_fetch = _time.perf_counter()
+            geojson = fetch_hydrorivers(
+                north, south, east, west, min_order=min_order)
+            dt_fetch = _time.perf_counter() - t_fetch
+            if geojson is None:
+                logger.info(
+                    f"HydroRIVERS: no features in region (fetch took {dt_fetch:.2f}s)")
+                return None
+            n_features = len(geojson.get("features", []))
+            logger.info(
+                f"HydroRIVERS fetch: {n_features} features in {dt_fetch:.2f}s")
+
+            t_rast = _time.perf_counter()
+            river_grid = rasterize_hydrorivers(
+                geojson, north, south, east, west, dim,
+                depression_base=depression_m,
+                order_exponent=order_exponent,
+            )
+            dt_rast = _time.perf_counter() - t_rast
+            dt_total = _time.perf_counter() - t0
+            logger.info(f"HydroRIVERS total: {dt_total:.2f}s "
+                        f"(fetch={dt_fetch:.2f}s, rasterize={dt_rast:.2f}s)")
+            return {"river_grid": river_grid, "feature_count": n_features, "source": "hydrorivers"}
+
+        # Default: Natural Earth
+        geojson = fetch_natural_earth_rivers(scale_m=scale_m)
+        if geojson is None:
+            logger.warning(
+                "Natural Earth hydrology fetch failed (geopandas/requests unavailable?)")
+            return None
+        bbox_tuple = (west, south, east, north)
+        geojson_filtered = filter_rivers_by_bbox(geojson, bbox_tuple)
+        n_features = len(geojson_filtered.get("features", []))
+        if n_features == 0:
+            logger.info("No rivers found in region")
+            return None
+        river_grid = rasterize_rivers_with_buffering(
+            geojson_filtered, bbox_tuple, dim, depression_m=depression_m)
+        dt_total = _time.perf_counter() - t0
+        logger.info(
+            f"Natural Earth hydrology total: {dt_total:.2f}s, {n_features} features")
+        return {"river_grid": river_grid, "feature_count": n_features, "source": "natural_earth"}
+
+    except Exception as e:
+        logger.error(f"Hydrology fetch/rasterize failed: {e}", exc_info=True)
+        return None
 
 
 def merge_rivers_with_dem(dem: np.ndarray, rivers: np.ndarray) -> np.ndarray:

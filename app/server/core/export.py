@@ -13,15 +13,215 @@ import logging
 import os
 import sys
 import tempfile
-from dataclasses import dataclass
+import threading
+import time
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Optional
 
 from starlette.background import BackgroundTask
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Export task tracking
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ExportTask:
+    """Tracks the state of an async export job."""
+    task_id: str
+    status: str = "running"          # running | complete | error
+    progress: int = 0                # 0-100
+    message: str = "Starting..."
+    result_path: Optional[str] = None
+    filename: Optional[str] = None
+    media_type: str = "application/octet-stream"
+    headers: Dict[str, str] = field(default_factory=dict)
+    created: float = field(default_factory=time.time)
+
+    def update(self, progress: int, message: str) -> None:
+        self.progress = progress
+        self.message = message
+
+    def complete(self, result_path: str, filename: str, headers: dict = None) -> None:
+        self.status = "complete"
+        self.progress = 100
+        self.message = "Complete"
+        self.result_path = result_path
+        self.filename = filename
+        if headers:
+            self.headers = headers
+
+    def fail(self, message: str) -> None:
+        self.status = "error"
+        self.message = message
+
+
+_export_tasks: Dict[str, ExportTask] = {}
+_export_tasks_lock = threading.Lock()
+_TASK_TTL = 300  # seconds before stale tasks are cleaned up
+
+
+def _cleanup_stale_tasks() -> None:
+    """Remove tasks older than _TASK_TTL seconds."""
+    cutoff = time.time() - _TASK_TTL
+    with _export_tasks_lock:
+        stale = [tid for tid, t in _export_tasks.items() if t.created < cutoff]
+    for tid in stale:
+        with _export_tasks_lock:
+            task = _export_tasks.pop(tid, None)
+        if task and task.result_path and os.path.exists(task.result_path):
+            try:
+                os.unlink(task.result_path)
+            except OSError:
+                pass
+
+
+def get_task_status(task_id: str) -> Optional[dict]:
+    """Return progress info for a task, or None if not found."""
+    with _export_tasks_lock:
+        task = _export_tasks.get(task_id)
+    if task is None:
+        return None
+    return {
+        "task_id": task.task_id,
+        "status": task.status,
+        "progress": task.progress,
+        "message": task.message,
+    }
+
+
+def get_task_file(task_id: str):
+    """Return a FileResponse for a completed task, or None."""
+    from fastapi.responses import FileResponse
+    with _export_tasks_lock:
+        task = _export_tasks.get(task_id)
+    if not task or task.status != "complete" or not task.result_path:
+        return None
+
+    def _cleanup():
+        try:
+            os.unlink(task.result_path)
+        except OSError:
+            pass
+        with _export_tasks_lock:
+            _export_tasks.pop(task_id, None)
+
+    return FileResponse(
+        task.result_path,
+        filename=task.filename,
+        media_type=task.media_type,
+        background=BackgroundTask(_cleanup),
+        headers=task.headers,
+    )
+
+
+def start_export_task(data: dict, fmt: str) -> str:
+    """Start an export in a background thread. Returns task_id."""
+    _cleanup_stale_tasks()
+
+    task_id = uuid.uuid4().hex[:12]
+    task = ExportTask(task_id=task_id)
+    with _export_tasks_lock:
+        _export_tasks[task_id] = task
+
+    def _run():
+        try:
+            if fmt == "puzzle":
+                generate_puzzle_3mf(data, task=task)
+            else:
+                _run_export_pipeline(data, fmt, task)
+        except Exception as exc:
+            logger.exception("Export task %s failed", task_id)
+            task.fail(str(exc))
+
+    thread = threading.Thread(target=_run, daemon=True, name=f"export-{task_id}")
+    thread.start()
+    return task_id
+
+
+def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
+    """Execute the full export pipeline with progress updates."""
+    p = _parse_export_params(data)
+    engrave_label = bool(data.get("engrave_label", False))
+    label_text = data.get("label_text", p.name)
+    contours = bool(data.get("contours", False))
+    contour_interval = float(data.get("contour_interval", 100))
+    contour_style = data.get("contour_style", "engraved")
+
+    if not p.dem_values or not p.height or not p.width:
+        task.fail("Missing DEM data")
+        return
+
+    # Step 1: Prepare DEM
+    task.update(10, "Preparing DEM array...")
+    im, im_min, im_max = _prepare_dem_array(
+        p.dem_values, p.height, p.width,
+        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
+    )
+
+    # Step 2: Optional label engraving
+    if engrave_label and label_text:
+        task.update(25, "Engraving label...")
+        im = _apply_label_engraving(im, label_text, p.base_height)
+
+    # Step 3: Optional contours
+    if contours and contour_interval > 0:
+        task.update(35, "Generating contours...")
+        im = _apply_contour_lines(im, im_min, im_max, p.model_height,
+                                  p.base_height, contour_interval, contour_style)
+
+    # Step 4: Mesh generation (heaviest step)
+    task.update(45, "Generating mesh...")
+    if fmt == "obj":
+        from numpy2stl import array_to_mesh, writeOBJ
+        vertices, faces = array_to_mesh(im)
+    elif fmt == "3mf":
+        from numpy2stl import array_to_mesh, write3MF
+        vertices, faces = array_to_mesh(im)
+    else:
+        vertices, faces = _numpy2stl_mesh(im)
+
+    task.update(70, "Repairing mesh...")
+
+    # Step 5: Export to file
+    suffix = f".{fmt}"
+    if fmt in ("stl",):
+        temp_path, mesh = _repair_and_export(vertices, faces, suffix)
+        is_watertight = bool(mesh.is_watertight)
+        face_count = len(mesh.faces)
+        headers = {
+            "Content-Disposition": f"attachment; filename={p.name}.stl",
+            "X-Watertight": str(is_watertight).lower(),
+            "X-Face-Count": str(face_count),
+            "Access-Control-Expose-Headers": "X-Watertight, X-Face-Count",
+        }
+        logger.info("STL generated: %d faces, watertight=%s", face_count, is_watertight)
+    elif fmt == "obj":
+        tf = tempfile.NamedTemporaryFile(delete=False, suffix=".obj")
+        temp_path = tf.name
+        tf.close()
+        writeOBJ(temp_path, {p.name: (vertices, faces)})
+        headers = {"Content-Disposition": f"attachment; filename={p.name}.obj"}
+        logger.info("OBJ generated: %d vertices, %d faces", len(vertices), len(faces))
+    elif fmt == "3mf":
+        tf = tempfile.NamedTemporaryFile(delete=False, suffix=".3mf")
+        temp_path = tf.name
+        tf.close()
+        write3MF(temp_path, {p.name: (vertices, faces)})
+        headers = {"Content-Disposition": f"attachment; filename={p.name}.3mf"}
+        logger.info("3MF generated: %d vertices, %d faces", len(vertices), len(faces))
+    else:
+        task.fail(f"Unknown format: {fmt}")
+        return
+
+    task.update(95, "Finalizing...")
+    task.complete(temp_path, f"{p.name}.{fmt}", headers)
 
 # strm2stl root dir (app/server/core/export.py → core → server → app → strm2stl)
 _STRM2STL_DIR = Path(__file__).parent.parent.parent.parent
@@ -327,6 +527,224 @@ def generate_mesh_preview(data: dict):
         "cols":         int(p.width),
         "rows":         int(p.height),
     })
+
+
+def generate_puzzle_3mf(data: dict, task: ExportTask | None = None):
+    """Split a DEM into N×M pieces with alignment tabs and export as 3MF.
+
+    Each piece is a watertight solid mesh. Adjacent pieces have interlocking
+    tab/slot connectors on their shared edges so the printed tiles snap
+    together.  All pieces are packed into a single 3MF file as separate
+    named objects.
+
+    Parameters (in *data* dict)
+    ---------------------------
+    dem_values, height, width, model_height, base_height, exaggeration,
+    sea_level_cap, name — same as other export functions.
+    split_cols : int   — columns in the puzzle grid (X).
+    split_rows : int   — rows in the puzzle grid (Y).
+    connector_size_mm : float — width of each tab/slot connector (mm).
+    connectors_per_edge : int — number of connectors per shared edge.
+    border_height_mm : float — raised lip height around each piece base.
+    border_offset_mm : float — inset of lip from piece edge.
+    include_border : bool — whether to add the raised lip.
+    """
+    from fastapi.responses import FileResponse, JSONResponse
+    from numpy2stl import array_to_mesh
+    from numpy2stl.save import write3MF
+
+    def _progress(pct, msg):
+        if task:
+            task.update(pct, msg)
+
+    p = _parse_export_params(data)
+    if not p.dem_values or not p.height or not p.width:
+        if task:
+            task.fail("Missing DEM data")
+            return None
+        return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
+
+    split_cols = int(data.get("split_cols", 3))
+    split_rows = int(data.get("split_rows", 3))
+    connector_mm = float(data.get("connector_size_mm", 50))
+    connectors_n = int(data.get("connectors_per_edge", 10))
+    border_h = float(data.get("border_height_mm", 1.0))
+    border_off = float(data.get("border_offset_mm", 5.0))
+    include_border = bool(data.get("include_border", True))
+
+    if split_cols < 1 or split_rows < 1:
+        msg = "split_cols and split_rows must be >= 1"
+        if task:
+            task.fail(msg)
+            return None
+        return JSONResponse(content={"error": msg}, status_code=400)
+    if split_cols * split_rows > 64:
+        msg = "Maximum 64 pieces (cols * rows <= 64)"
+        if task:
+            task.fail(msg)
+            return None
+        return JSONResponse(content={"error": msg}, status_code=400)
+
+    _progress(5, "Preparing DEM array...")
+    im, _, _ = _prepare_dem_array(
+        p.dem_values, p.height, p.width,
+        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
+    )
+
+    H, W = im.shape
+    # Tab geometry in pixel space
+    tab_depth_px = max(2, int(round(connectors_n * 0.5)))
+    tab_width_px = max(3, int(round(connector_mm / max(1, W / split_cols) * (W / split_cols) * 0.15)))
+
+    models = {}
+    total = split_cols * split_rows
+    for row in range(split_rows):
+        for col in range(split_cols):
+            idx = row * split_cols + col
+            _progress(10 + int(80 * idx / total),
+                      f"Generating piece {idx + 1}/{total}...")
+
+            # Slice boundaries
+            r0 = int(round(row * H / split_rows))
+            r1 = int(round((row + 1) * H / split_rows))
+            c0 = int(round(col * W / split_cols))
+            c1 = int(round((col + 1) * W / split_cols))
+
+            piece = im[r0:r1, c0:c1].copy()
+            ph, pw = piece.shape
+
+            # --- Alignment tabs ---
+            # Add tabs (protrusions) on right/bottom edges of even-index
+            # pieces, and matching slots (indentations) on left/top edges
+            # of odd-index neighbours.
+            piece = _add_alignment_features(
+                piece, row, col, split_rows, split_cols,
+                tab_depth_px, p.base_height, border_h if include_border else 0,
+            )
+
+            vertices, faces = array_to_mesh(piece)
+
+            # Offset vertices to world position so pieces don't overlap
+            # when loaded in a slicer
+            if len(vertices) > 0:
+                vertices[:, 0] += c0  # X offset
+                vertices[:, 1] += r0  # Y offset
+
+            import trimesh as tm
+            mesh = tm.Trimesh(vertices=vertices, faces=faces, process=False)
+            tm.repair.fill_holes(mesh)
+            tm.repair.fix_normals(mesh)
+
+            piece_name = f"{p.name}_r{row}c{col}"
+            models[piece_name] = (mesh.vertices, mesh.faces)
+            logger.info("Piece %s: %d verts, %d faces",
+                        piece_name, len(mesh.vertices), len(mesh.faces))
+
+    _progress(92, "Writing 3MF...")
+    tf = tempfile.NamedTemporaryFile(delete=False, suffix=".3mf")
+    temp_path = tf.name
+    tf.close()
+    write3MF(temp_path, models)
+
+    total_faces = sum(len(f) for _, f in models.values())
+    logger.info("Puzzle 3MF: %d pieces, %d total faces", len(models), total_faces)
+
+    headers = {
+        "Content-Disposition": f"attachment; filename={p.name}_puzzle.3mf",
+        "X-Piece-Count": str(len(models)),
+        "X-Total-Faces": str(total_faces),
+        "Access-Control-Expose-Headers": "X-Piece-Count, X-Total-Faces",
+    }
+
+    if task:
+        task.complete(temp_path, f"{p.name}_puzzle.3mf", headers)
+        return None
+
+    return FileResponse(
+        temp_path,
+        filename=f"{p.name}_puzzle.3mf",
+        media_type="application/octet-stream",
+        background=BackgroundTask(os.unlink, temp_path),
+        headers=headers,
+    )
+
+
+def _add_alignment_features(
+    piece: np.ndarray,
+    row: int, col: int,
+    n_rows: int, n_cols: int,
+    tab_depth_px: int,
+    base_height: float,
+    border_height: float,
+) -> np.ndarray:
+    """Add tab protrusions and slot indentations to piece edges.
+
+    Convention: even-index edges get tabs (raised), odd-index edges get
+    slots (lowered).  Exterior edges are left flat.
+    """
+    ph, pw = piece.shape
+    tab_h = base_height * 0.4  # tab protrusion height (mm)
+    slot_depth = base_height * 0.35  # slot depth (mm) — slightly less for clearance
+
+    # Determine number and size of tabs along each edge
+    def _apply_edge_tabs(arr_slice, is_tab):
+        """Modify a 2D slice in-place: raise for tabs, lower for slots."""
+        h, w = arr_slice.shape
+        n_tabs = max(1, min(3, w // 8))  # 1-3 tabs depending on edge length
+        tab_w = max(2, w // (n_tabs * 3))  # each tab is ~1/3 of spacing
+        spacing = w // (n_tabs + 1)
+        for t in range(n_tabs):
+            cx = spacing * (t + 1)
+            x0 = max(0, cx - tab_w // 2)
+            x1 = min(w, cx + tab_w // 2)
+            if is_tab:
+                arr_slice[:, x0:x1] += tab_h
+            else:
+                arr_slice[:, x0:x1] = np.maximum(
+                    arr_slice[:, x0:x1] - slot_depth, 0.1)
+
+    depth = min(tab_depth_px, max(2, ph // 10), max(2, pw // 10))
+
+    # Right edge: tab if col is even, slot if col is odd (skip last column)
+    if col < n_cols - 1:
+        edge = piece[:, -depth:]
+        _apply_edge_tabs(edge, is_tab=(col % 2 == 0))
+
+    # Left edge: match right edge of left neighbour
+    if col > 0:
+        edge = piece[:, :depth]
+        _apply_edge_tabs(edge, is_tab=(col % 2 != 0))
+
+    # Bottom edge: tab if row is even, slot if row is odd (skip last row)
+    if row < n_rows - 1:
+        edge = piece[-depth:, :]
+        _apply_edge_tabs_v(edge, is_tab=(row % 2 == 0),
+                           tab_h=tab_h, slot_depth=slot_depth)
+
+    # Top edge: match bottom edge of upper neighbour
+    if row > 0:
+        edge = piece[:depth, :]
+        _apply_edge_tabs_v(edge, is_tab=(row % 2 != 0),
+                           tab_h=tab_h, slot_depth=slot_depth)
+
+    return piece
+
+
+def _apply_edge_tabs_v(arr_slice, is_tab, tab_h, slot_depth):
+    """Vertical (row) edge tabs — tabs run along columns."""
+    h, w = arr_slice.shape
+    n_tabs = max(1, min(3, w // 8))
+    tab_w = max(2, w // (n_tabs * 3))
+    spacing = w // (n_tabs + 1)
+    for t in range(n_tabs):
+        cx = spacing * (t + 1)
+        x0 = max(0, cx - tab_w // 2)
+        x1 = min(w, cx + tab_w // 2)
+        if is_tab:
+            arr_slice[:, x0:x1] += tab_h
+        else:
+            arr_slice[:, x0:x1] = np.maximum(
+                arr_slice[:, x0:x1] - slot_depth, 0.1)
 
 
 def generate_crosssection(data: dict):

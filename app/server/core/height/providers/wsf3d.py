@@ -16,13 +16,11 @@ from __future__ import annotations
 import io
 import logging
 from math import floor, ceil
-from pathlib import Path
 from typing import Tuple
 
 import numpy as np
 import requests
 import rasterio
-from rasterio.windows import from_bounds
 
 from app.server.core.height import BBox, HeightProvider, HeightResult, _resample
 from app.server.core.cache import (

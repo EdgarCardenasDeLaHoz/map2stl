@@ -60,11 +60,17 @@ Primary `TerrainSession` touchpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/export/stl` | Generate + download STL |
-| POST | `/api/export/obj` | Generate + download OBJ |
-| POST | `/api/export/3mf` | Generate + download 3MF |
+| POST | `/api/export/stl` | Generate + download STL (sync) |
+| POST | `/api/export/obj` | Generate + download OBJ (sync) |
+| POST | `/api/export/3mf` | Generate + download 3MF (sync) |
 | POST | `/api/export/crosssection` | Generate cross-section OBJ |
 | POST | `/api/export/preview` | DEM values for Three.js preview (no mesh file) |
+| POST | `/api/export/puzzle` | Start async puzzle 3MF export → `{task_id}` |
+| POST | `/api/export/start` | Start async export (any format) → `{task_id}`; body must include `"format"` field |
+| GET | `/api/export/status/{task_id}` | Poll async task → `{status, progress, message}` |
+| GET | `/api/export/download/{task_id}` | Download result of completed async task (file auto-deleted after send) |
+
+> **Sync vs async export:** Sync endpoints (`/stl`, `/obj`, `/3mf`) block until the file is ready and stream it directly. Async endpoints (`/start`, `/puzzle`) start a background thread and return a `task_id` for polling. The async path is preferred for large DEMs and puzzle exports. Tasks expire after 300 s.
 
 `Session_API_Reference.ipynb` also covers the broader export family used by the session client, including split export, OBJ inspection, verification, and slicer endpoints.
 

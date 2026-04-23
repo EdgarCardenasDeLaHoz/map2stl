@@ -442,10 +442,14 @@ async function goToEdit(index) {
         const tasks = [
             window.loadWaterMask?.(),
             window.loadSatelliteImage?.(),
+            window.loadEsaLandCover?.(),
+            window.loadSatelliteRGBImage?.(),
+            window.loadHydrology?.(),
         ];
         const diagKm = window.appState?.haversineDiagKm?.();
-        if (diagKm && diagKm <= 15 && window.loadCityData) {
-            tasks.push(window.loadCityData());
+        if (diagKm && diagKm <= 15) {
+            if (window.loadCityRaster) tasks.push(window.loadCityRaster());
+            else if (window.loadCityData) tasks.push(window.loadCityData());
         }
         return Promise.all(tasks);
     }).catch(err => {

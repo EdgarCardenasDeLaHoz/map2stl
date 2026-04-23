@@ -4,6 +4,8 @@ Tests for /api/export/* endpoints (export.py + core/export.py).
 Uses a small 5×5 synthetic DEM to avoid heavy computation.
 """
 
+import time
+
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -107,3 +109,43 @@ class TestExport3MF:
     def test_missing_dem_values_returns_400(self, client):
         r = client.post("/api/export/3mf", json={"height": 5, "width": 5})
         assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Async export progress flow
+# ---------------------------------------------------------------------------
+
+class TestAsyncExportFlow:
+    def test_start_status_download_stl(self, client):
+        start = client.post("/api/export/start", json={**_EXPORT_BODY, "format": "stl"})
+        assert start.status_code == 200
+
+        task_id = start.json()["task_id"]
+        assert task_id
+
+        status_payload = None
+        for _ in range(40):
+            status = client.get(f"/api/export/status/{task_id}")
+            assert status.status_code == 200
+            status_payload = status.json()
+            if status_payload["status"] == "complete":
+                break
+            assert status_payload["status"] == "running"
+            time.sleep(0.05)
+
+        assert status_payload is not None
+        assert status_payload["status"] == "complete"
+        assert status_payload["progress"] == 100
+
+        download = client.get(f"/api/export/download/{task_id}")
+        assert download.status_code == 200
+        assert len(download.content) > 0
+        assert ".stl" in download.headers.get("content-disposition", "")
+
+    def test_invalid_format_returns_400(self, client):
+        r = client.post("/api/export/start", json={**_EXPORT_BODY, "format": "zip"})
+        assert r.status_code == 400
+
+    def test_unknown_task_returns_404(self, client):
+        r = client.get("/api/export/status/not-a-task")
+        assert r.status_code == 404

@@ -52,6 +52,16 @@
       <input type="number" id="cityWaterOffset" value="-2.0" min="-20" max="0" step="0.5" class="ctrl-input-sm">
     </div>
 
+    <!-- Height Enhancement (Google 3D) -->
+    <div id="enhanceHeightsSection" style="border-top:1px solid #333;padding-top:6px;margin-top:6px;display:none;">
+      <div style="font-size:10px;color:#aaa;margin-bottom:4px;">Height Enhancement</div>
+      <button id="enhanceHeightsBtn" class="btn btn-secondary" style="width:100%;font-size:11px;" disabled
+              title="Fetch Google 3D Tiles photogrammetric heights for loaded buildings">
+        Enhance Heights (Google 3D)
+      </button>
+      <div id="enhanceHeightsStatus" style="font-size:10px;color:#888;margin-top:4px;"></div>
+    </div>
+
   </CollapsibleSection>
 </template>
 <script setup lang="ts">

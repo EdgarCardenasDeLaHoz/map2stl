@@ -24,7 +24,6 @@ import os
 import asyncio
 from typing import Optional, List, Dict, Any
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, validator, Field
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
 from app.server.config import OSM_CACHE_PATH
@@ -294,53 +293,21 @@ logger.info(
     "Routers loaded: regions, terrain, cities, export, cache, settings, composite, height")
 
 
-# ============================================================
-# Pydantic Schemas — imported from schemas.py (backend refactor step 2)
-# ============================================================
-try:
-    from app.server.schemas import (
-        BoundingBox, BoundingBoxLegacy,
-        RegionParameters, RegionCreate, RegionResponse, RegionsListResponse,
-        RegionSettings, CityRequest,
-        DEMRequest, DEMResponse, RawDEMResponse,
-        WaterMaskRequest, WaterMaskResponse,
-        SatelliteRequest, SatelliteResponse,
-        ExportRequest, ExportResponse,
-        CacheDirInfo, CacheStatusResponse, CacheClearResponse,
-        ProjectionInfo, ProjectionsResponse,
-        ColormapInfo, ColormapsResponse,
-        DatasetInfo, DatasetsResponse,
-        Region,
-        ProcessingSpec, MergeLayerSpec, MergeRequest,
-    )
-except ImportError:
-    # Fallback: inline definitions for environments where schemas.py is not on path
-    # --- Shared base ---
-
-    class BoundingBox(BaseModel):
-        """Geographic bounding box using cardinal directions."""
-        north: float = Field(..., ge=-90, le=90,
-                             description="Northern latitude bound")
-        south: float = Field(..., ge=-90, le=90,
-                             description="Southern latitude bound")
-        east: float = Field(..., ge=-180, le=180,
-                            description="Eastern longitude bound")
-        west: float = Field(..., ge=-180, le=180,
-                            description="Western longitude bound")
-
-        @validator("north")
-        def north_gt_south(cls, v, values):
-            if "south" in values and v <= values["south"]:
-                raise ValueError("north must be greater than south")
-            return v
-
-    # Legacy alias kept for backward-compatibility with older frontend code
-
-    class BoundingBoxLegacy(BaseModel):
-        southWestLat: float
-        southWestLng: float
-        northEastLat: float
-        northEastLng: float
+from app.server.schemas import (
+    BoundingBox,
+    RegionParameters, RegionCreate, RegionResponse, RegionsListResponse,
+    RegionSettings, CityRequest,
+    DEMRequest, DEMResponse, RawDEMResponse,
+    WaterMaskRequest, WaterMaskResponse,
+    SatelliteRequest, SatelliteResponse,
+    ExportRequest, ExportResponse,
+    CacheDirInfo, CacheStatusResponse, CacheClearResponse,
+    ProjectionInfo, ProjectionsResponse,
+    ColormapInfo, ColormapsResponse,
+    DatasetInfo, DatasetsResponse,
+    Region,
+    ProcessingSpec, MergeLayerSpec, MergeRequest,
+)
 
 
 @app.get("/", response_class=HTMLResponse)

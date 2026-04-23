@@ -80,6 +80,21 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
             _projChangeTimer = setTimeout(async () => {
                 if (!window.appState.lastDemData) return;  // nothing loaded yet
 
+                // Snapshot which layers were loaded BEFORE loadDEM runs, because
+                // loadDEM calls clearLayerCache() which nulls lastWaterMaskData,
+                // satImgSourceCanvas, and layerBboxes — making the conditions below
+                // evaluate to false if checked after the await.
+                const hadWater = !!window.appState.lastWaterMaskData;
+                const hadLandCover = !!window.appState.layerBboxes?.landCover;
+                const hadSat = !!window.appState.satImgSourceCanvas;
+                // satEsaLoaded tracks the GEE/ESA overlay from loadSatelliteImage
+                // (auto-loaded on region select). Cleared by clearLayerCache.
+                const hadSatEsa = !!window.appState.satEsaLoaded;
+                // Check cityRasterSourceCanvas (cleared by clearLayerCache) rather than
+                // osmCityData (not cleared) so we only re-fetch when the raster was loaded.
+                const hadCity = !!window.appState.cityRasterSourceCanvas;
+                const hadHydro = !!window.appState.hydrologySourceCanvas;
+
                 window.showToast?.('Projection changed — re-fetching layers…', 'info');
 
                 // Re-fetch DEM with new projection param (includes water if subtract_water)
@@ -87,11 +102,12 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
 
                 // Re-fetch other layers that were already loaded
                 const tasks = [];
-                if (window.appState.lastWaterMaskData) tasks.push(window.loadWaterMask?.());
-                if (window.appState.layerBboxes?.landCover) tasks.push(window.loadEsaLandCover?.());
-                if (window.appState.satImgSourceCanvas) tasks.push(window.loadSatelliteRGBImage?.());
-                if (window.appState.osmCityData) tasks.push(window.loadCityData?.());
-                if (window.appState.hydrologySourceCanvas) tasks.push(window.loadHydrology?.());
+                if (hadWater) tasks.push(window.loadWaterMask?.());
+                if (hadLandCover) tasks.push(window.loadEsaLandCover?.());
+                if (hadSat) tasks.push(window.loadSatelliteRGBImage?.());
+                if (hadSatEsa) tasks.push(window.loadSatelliteImage?.());
+                if (hadCity) tasks.push(window.loadCityRaster?.());
+                if (hadHydro) tasks.push(window.loadHydrology?.());
                 if (tasks.length) await Promise.all(tasks);
 
                 requestAnimationFrame(() => window.updatePrintDimensions?.());

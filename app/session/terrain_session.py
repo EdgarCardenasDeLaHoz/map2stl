@@ -386,18 +386,6 @@ class TerrainSession:
             **{k: v for k, v in metadata.items() if v is not None}
         }
 
-    def _decode_satellite_image(self, b64_string: str) -> np.ndarray:
-        """Decode base64 satellite image to RGB array."""
-        img_bytes = base64.b64decode(b64_string)
-        return np.array(Image.open(BytesIO(img_bytes)).convert("RGB"), dtype=np.float32)
-
-    def _encode_satellite_image(self, arr: np.ndarray, quality: int = 85) -> str:
-        """Encode RGB array to base64 JPEG."""
-        buf = BytesIO()
-        Image.fromarray(arr.clip(0, 255).astype(np.uint8)).save(
-            buf, format="JPEG", quality=quality)
-        return base64.b64encode(buf.getvalue()).decode()
-
     def _plot_geo_image(self,
                         arr: np.ndarray,
                         title: str,
@@ -756,17 +744,17 @@ class TerrainSession:
     def server_settings(self) -> dict:
         """GET /api/settings — return server-authoritative configuration.
 
-        Includes available projections, DEM sources, water datasets,
-        slicer config files, and valid numeric ranges for DEM parameters.
+        Fetches all available configuration at once: projections, colormaps, and datasets.
+        This is the convenience endpoint for SDK initialization; fine-grained clients
+        can use the individual endpoints (/api/settings/projections, etc.) instead.
         """
         data = self._api_request("get", "/api/settings", timeout=10)
         print(
             f"Projections  : {[p['id'] for p in data.get('projections', [])]}")
         print(
-            f"DEM sources  : {[s['id'] for s in data.get('dem_sources', [])]}")
+            f"Colormaps    : {[c['id'] for c in data.get('colormaps', [])]}")
         print(
-            f"Water datasets: {[w['id'] for w in data.get('water_datasets', [])]}")
-        print(f"Slicer configs: {data.get('slicer_configs', [])}")
+            f"Datasets     : {[d['id'] for d in data.get('datasets', [])]}")
         return data
 
     def regions(self, filter_col: Optional[str] = None,
@@ -1852,7 +1840,7 @@ class TerrainSession:
         return self
 
     def merge_dem(self, layers: list) -> "TerrainSession":
-        """POST /api/dem/merge — composite multiple elevation/mask layers into one DEM.
+        """POST /api/composite/dem-merge — composite multiple elevation/mask layers into one DEM.
 
         Each layer is a dict matching MergeLayerSpec:
           {
@@ -1881,7 +1869,7 @@ class TerrainSession:
             "layers": layers,
         }
         print(f"Merging {len(layers)} DEM layer(s)…")
-        r = requests.post(f"{self._base}/api/dem/merge",
+        r = requests.post(f"{self._base}/api/composite/dem-merge",
                           json=payload, timeout=300)
         if not r.ok:
             print(f"ERROR {r.status_code}: {r.text}")
@@ -2126,20 +2114,27 @@ class TerrainSession:
         }
 
         try:
-            endpoint = "/api/terrain/hydrology/merge"
+            endpoint = "/api/composite/hydrology-merge"
             resp = self._api_request(
                 "post", endpoint, json=payload, timeout=300)
         except Exception as e:
             print(f"⚠️  Hydrology merge API request failed: {e}")
             return self
 
-        # Update DEM with merged values (store as b64 for show_dem compat)
+        # Update DEM with merged values (response is b64-encoded float32)
         try:
-            merged_dem_values = resp.get("merged_dem_values", [])
-            merged_arr = np.array(merged_dem_values, dtype=np.float32)
             import base64 as _b64
-            self.dem["dem_values_b64"] = _b64.b64encode(
-                merged_arr.tobytes()).decode("ascii")
+            merged_b64 = resp.get("merged_dem_b64", "")
+            if merged_b64:
+                merged_arr = np.frombuffer(
+                    _b64.b64decode(merged_b64), dtype=np.float32)
+                self.dem["dem_values_b64"] = merged_b64
+            else:
+                # Fallback for raw list response (backwards compat)
+                merged_arr = np.array(
+                    resp.get("merged_dem_values", []), dtype=np.float32)
+                self.dem["dem_values_b64"] = _b64.b64encode(
+                    merged_arr.tobytes()).decode("ascii")
             self.dem.pop("dem_values", None)
             self.dem["min_elevation"] = float(merged_arr.min())
             self.dem["max_elevation"] = float(merged_arr.max())

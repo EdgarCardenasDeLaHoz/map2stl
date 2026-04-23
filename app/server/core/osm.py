@@ -12,6 +12,8 @@ import json
 import logging
 from typing import List
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,6 +92,10 @@ def _fill_heights(
 ):
     """Fill height_m for OSM features from the ``height`` tag.
 
+    Also sets ``height_source`` to one of ``"osm_tag"``, ``"osm_levels"``,
+    or ``"default"`` so downstream code can identify buildings that only
+    have a fallback height (candidates for raster enhancement).
+
     Args:
         default_m:  Fallback height when tag is absent or unparseable.
         lo, hi:     Clip bounds in metres.
@@ -101,20 +107,28 @@ def _fill_heights(
     except ImportError:
         gdf = gdf.copy()
         gdf['height_m'] = float(default_m)
+        gdf['height_source'] = 'default'
         return gdf
+
+    n = len(gdf)
+    source = pd.Series('default', index=gdf.index)
 
     # Levels-based estimate (buildings only)
     if levels_col and levels_col in gdf.columns:
-        levels = pd.to_numeric(gdf[levels_col], errors='coerce').fillna(3.0)
-        height_from_levels = levels * 4.0
+        levels = pd.to_numeric(gdf[levels_col], errors='coerce')
+        has_levels = levels.notna()
+        height_from_levels = levels.fillna(3.0) * 4.0
+        source = source.where(~has_levels, 'osm_levels')
     else:
-        height_from_levels = float(default_m)
+        height_from_levels = pd.Series(float(default_m), index=gdf.index)
 
     # Explicit OSM height tag (strip trailing unit strings like " m" or "ft")
     if 'height' in gdf.columns:
         raw = gdf['height'].astype(str).str.extract(r'([\d.]+)', expand=False)
         explicit = pd.to_numeric(raw, errors='coerce')
+        has_tag = explicit.notna()
         height_m = explicit.fillna(height_from_levels)
+        source = source.where(~has_tag, 'osm_tag')
     else:
         height_m = height_from_levels
 
@@ -126,7 +140,110 @@ def _fill_heights(
     )
     gdf = gdf.copy()
     gdf['height_m'] = height_m
+    gdf['height_source'] = source
     return gdf
+
+
+def enhance_buildings_with_raster(
+    buildings_geojson: dict,
+    raster: np.ndarray,
+    bbox: tuple,
+    confidence_raster: np.ndarray | None = None,
+    min_confidence: float = 0.3,
+) -> dict:
+    """Enhance building heights by sampling a height raster at each centroid.
+
+    Only overwrites buildings whose ``height_source`` is ``"default"`` (i.e.
+    those that fell through to the 10 m fallback because OSM had no tag).
+
+    Args:
+        buildings_geojson: GeoJSON FeatureCollection with ``height_m`` and
+            ``height_source`` in each feature's properties.
+        raster: (H, W) float32 array of building heights in metres above
+            ground.  NaN means no data.
+        bbox: (north, south, east, west) geographic bounds matching *raster*.
+        confidence_raster: Optional (H, W) float32 [0, 1] array.
+        min_confidence: Minimum confidence to accept a raster sample.
+
+    Returns:
+        ``{"buildings": <modified GeoJSON>, "stats": {...}}``
+    """
+    north, south, east, west = bbox
+    h, w = raster.shape
+
+    features = buildings_geojson.get("features", [])
+    total = len(features)
+    enhanced = 0
+    no_data = 0
+    unchanged = 0
+
+    for feat in features:
+        props = feat.get("properties") or {}
+        if props.get("height_source") != "default":
+            unchanged += 1
+            continue
+
+        # Compute centroid from exterior ring
+        geom = feat.get("geometry", {})
+        coords = geom.get("coordinates")
+        if not coords:
+            unchanged += 1
+            continue
+
+        # Get the exterior ring (first ring of first polygon)
+        ring = coords
+        gtype = geom.get("type", "")
+        if gtype == "MultiPolygon":
+            ring = coords[0][0] if coords and coords[0] else None
+        elif gtype == "Polygon":
+            ring = coords[0] if coords else None
+        else:
+            unchanged += 1
+            continue
+
+        if not ring or len(ring) < 3:
+            unchanged += 1
+            continue
+
+        # Mean of exterior ring as centroid approximation
+        cx = sum(p[0] for p in ring) / len(ring)  # longitude
+        cy = sum(p[1] for p in ring) / len(ring)  # latitude
+
+        # Map to raster pixel
+        col = int((cx - west) / (east - west) * w)
+        row = int((north - cy) / (north - south) * h)
+
+        if row < 0 or row >= h or col < 0 or col >= w:
+            no_data += 1
+            continue
+
+        val = float(raster[row, col])
+        if np.isnan(val) or val <= 0:
+            no_data += 1
+            continue
+
+        if confidence_raster is not None:
+            conf = float(confidence_raster[row, col])
+            if conf < min_confidence:
+                no_data += 1
+                continue
+
+        # Clamp to reasonable range
+        val = max(3.0, min(300.0, round(val, 1)))
+        props["height_m"] = val
+        props["height_source"] = "google3d"
+        enhanced += 1
+
+    stats = {
+        "total": total,
+        "enhanced": enhanced,
+        "unchanged": unchanged,
+        "no_data": no_data,
+    }
+    logger.info(f"[enhance] {enhanced}/{total} buildings enhanced with raster heights "
+                f"({unchanged} had OSM data, {no_data} no raster coverage)")
+
+    return {"buildings": buildings_geojson, "stats": stats}
 
 
 # Road half-widths in metres (used to add road_width_m property to each road feature).
@@ -214,7 +331,7 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
             f"[buildings] dissolve: {n_pre_dissolve} -> {len(gdf)} features  |  "
             f"area {area_pre_dissolve/1e4:.2f} -> {area_post_dissolve/1e4:.2f} ha  (d {area_dissolve_delta_pct:+.2f}%)"
         )
-        keep = ["geometry", "height_m"]
+        keep = ["geometry", "height_m", "height_source"]
         gdf = gdf[[c for c in keep if c in gdf.columns]]
         return json.loads(gdf.to_json())
     except Exception as e:
@@ -308,7 +425,7 @@ def _fetch_polygon_layer(
             gdf.geometry.geom_type.isin({"Polygon", "MultiPolygon", "LineString", "MultiLineString"})
         ].reset_index(drop=True)
         gdf = _fill_heights(gdf, default_m=height_default, lo=height_lo, hi=height_hi)
-        keep = ["geometry", "height_m"] + keep_cols
+        keep = ["geometry", "height_m", "height_source"] + keep_cols
         gdf = gdf[[c for c in keep if c in gdf.columns]]
         result = json.loads(gdf.to_json())
         logger.info(f"[{label}] fetched {len(gdf)} features")

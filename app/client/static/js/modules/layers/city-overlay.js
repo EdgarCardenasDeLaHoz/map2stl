@@ -328,6 +328,7 @@ window.loadCityData = async function loadCityData() {
         window.renderCityOverlay?.();
         if (statusEl) statusEl.textContent = `Loaded (${data.diagonal_km?.toFixed(1) ?? '?'} km)`;
         window.showToast?.('City data loaded', 'success');
+        _updateEnhanceButton();
     } catch (e) {
         console.error('loadCityData error:', e);
         window.showToast?.('City data error: ' + e.message, 'error');
@@ -474,6 +475,9 @@ window.clearCityOverlay = function clearCityOverlay() {
     });
     const cd = document.getElementById('stripDotCities');
     if (cd) cd.classList.remove('loaded', 'loading', 'error');
+    _updateEnhanceButton();
+    const enhStatus = document.getElementById('enhanceHeightsStatus');
+    if (enhStatus) enhStatus.textContent = '';
 };
 
 // ---------------------------------------------------------------------------
@@ -726,12 +730,98 @@ function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipR
 window._drawCityCanvas = _drawCityCanvas;
 
 // ---------------------------------------------------------------------------
+// Google 3D height enhancement
+// ---------------------------------------------------------------------------
+
+/** Whether the Google 3D API key is configured (checked once at startup). */
+let _google3dAvailable = false;
+
+/** Check API key availability and show/hide the enhance section. */
+async function _checkGoogle3dAvailable() {
+    try {
+        const { data } = await window.api.cities.google3dAvailable();
+        _google3dAvailable = !!(data?.available);
+    } catch (_) {
+        _google3dAvailable = false;
+    }
+    const section = document.getElementById('enhanceHeightsSection');
+    if (section) section.style.display = _google3dAvailable ? '' : 'none';
+}
+
+/** Enable/disable the enhance button based on city data state. */
+function _updateEnhanceButton() {
+    const btn = document.getElementById('enhanceHeightsBtn');
+    if (!btn) return;
+    const hasCities = !!(window.appState?.osmCityData?.buildings?.features?.length);
+    btn.disabled = !hasCities || !_google3dAvailable;
+}
+
+/**
+ * Enhance loaded building heights using Google 3D photogrammetric tiles.
+ * Posts the current buildings GeoJSON + bbox to the backend, which fetches
+ * a height raster and samples it at each building centroid.
+ */
+window.enhanceBuildingHeights = async function enhanceBuildingHeights() {
+    const cityData = window.appState?.osmCityData;
+    if (!cityData?.buildings?.features?.length) {
+        window.showToast?.('Load city data first', 'warning');
+        return;
+    }
+    const region = window.appState?.selectedRegion;
+    if (!region) {
+        window.showToast?.('Select a region first', 'warning');
+        return;
+    }
+
+    const btn = document.getElementById('enhanceHeightsBtn');
+    const statusEl = document.getElementById('enhanceHeightsStatus');
+    if (btn) btn.disabled = true;
+    if (statusEl) statusEl.textContent = 'Fetching Google 3D heights...';
+
+    try {
+        const body = {
+            north: region.north,
+            south: region.south,
+            east: region.east,
+            west: region.west,
+            buildings: cityData.buildings,
+            dim: 512,
+        };
+
+        const { data, error } = await window.api.cities.enhanceHeights(body);
+        if (error) throw new Error(error);
+
+        // Replace buildings with enhanced data
+        cityData.buildings = data.buildings;
+        const stats = data.stats || {};
+
+        // Invalidate render caches and re-render
+        window._invalidateCityCache?.();
+        window.renderCityOverlay?.();
+        window.renderCityOnDEM?.();
+
+        const msg = `Enhanced ${stats.enhanced || 0}/${stats.total || 0} buildings`;
+        if (statusEl) statusEl.textContent = msg;
+        window.showToast?.(msg, 'success', 4000);
+    } catch (e) {
+        console.error('enhanceBuildingHeights error:', e);
+        if (statusEl) statusEl.textContent = 'Enhancement failed';
+        window.showToast?.('Height enhancement failed: ' + e.message, 'error');
+    } finally {
+        _updateEnhanceButton();
+    }
+};
+
+// ---------------------------------------------------------------------------
 // Reactive subscriptions via appState (ARCH1)
 // Re-render overlays automatically when data or bbox changes.
 // ---------------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
     // Wire city heights raster layer controls
     window._setupCityRasterLayer?.();
+
+    // Check Google 3D API key availability (non-blocking)
+    _checkGoogle3dAvailable();
 
     if (!window.appState?.on) return;   // state.js not loaded
 

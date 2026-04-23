@@ -145,6 +145,68 @@ function generateModelFromTab() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Async export helper (start → poll → download)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function _asyncExport(format) {
+    const pr   = _progressEl();
+    const name = _regionName();
+    pr.set(0, `Starting ${format.toUpperCase()} export...`);
+
+    try {
+        // 1. Start the export task
+        const startResp = await fetch('/api/export/start', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ format, ..._exportParams() })
+        });
+        if (!startResp.ok) {
+            const err = await startResp.json();
+            throw new Error(err.error || 'Failed to start export');
+        }
+        const { task_id } = await startResp.json();
+
+        // 2. Poll for progress
+        let status = { status: 'running', progress: 0, message: 'Starting...' };
+        while (status.status === 'running') {
+            await new Promise(r => setTimeout(r, 250));
+            const pollResp = await fetch(`/api/export/status/${encodeURIComponent(task_id)}`);
+            if (!pollResp.ok) throw new Error('Lost connection to export task');
+            status = await pollResp.json();
+            pr.set(status.progress, status.message);
+        }
+
+        if (status.status === 'error') {
+            throw new Error(status.message || 'Export failed');
+        }
+
+        // 3. Download the result
+        pr.set(98, `Downloading ${format.toUpperCase()}...`);
+        const dlResp = await fetch(`/api/export/download/${encodeURIComponent(task_id)}`);
+        if (!dlResp.ok) throw new Error('Download failed');
+
+        const blob = await dlResp.blob();
+        // Grab extra headers for STL quality info
+        const isWatertight = dlResp.headers.get('X-Watertight') === 'true';
+        const faceCount    = dlResp.headers.get('X-Face-Count');
+
+        _triggerDownload(blob, `${name}.${format}`);
+
+        if (format === 'stl' && faceCount) {
+            const faces   = `${parseInt(faceCount).toLocaleString()} faces`;
+            const quality = isWatertight ? 'watertight' : 'not watertight';
+            window.showToast(`STL ready - ${faces} ${quality}`, isWatertight ? 'success' : 'info', 4000);
+        } else {
+            window.showToast(`${format.toUpperCase()} ready`, 'success');
+        }
+        pr.done('Complete!');
+    } catch (e) {
+        console.error(`${format} export error:`, e);
+        pr.error('Error: ' + e.message);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Downloads
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -152,52 +214,14 @@ function downloadSTL() {
     if (!window.appState?.generatedModelData) {
         window.showToast('Please generate a model first.', 'warning'); return;
     }
-    const pr   = _progressEl();
-    const name = _regionName();
-    pr.set(20, 'Preparing STL export...');
-
-    fetch('/api/export/stl', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(_exportParams())
-    })
-        .then(response => {
-            pr.set(80, 'Downloading STL...');
-            if (!response.ok) return response.json().then(e => { throw new Error(e.error || 'STL generation failed'); });
-            const isWatertight = response.headers.get('X-Watertight') === 'true';
-            const faceCount    = response.headers.get('X-Face-Count');
-            return response.blob().then(blob => ({ blob, isWatertight, faceCount }));
-        })
-        .then(({ blob, isWatertight, faceCount }) => {
-            _triggerDownload(blob, `${name}.stl`);
-            const faces   = faceCount ? `${parseInt(faceCount).toLocaleString()} faces` : '';
-            const quality = isWatertight ? '✓ watertight' : '⚠ not watertight';
-            window.showToast(`STL ready — ${faces} ${quality}`, isWatertight ? 'success' : 'info', 4000);
-            pr.done('Complete!');
-        })
-        .catch(e => { console.error('STL download error:', e); pr.error('Error: ' + e.message); });
+    _asyncExport('stl');
 }
 
 function downloadModel(format) {
     if (!window.appState?.generatedModelData) {
         window.showToast('Please generate a model first.', 'warning'); return;
     }
-    const pr   = _progressEl();
-    const name = _regionName();
-    pr.set(20, `Preparing ${format.toUpperCase()} export...`);
-
-    fetch(`/api/export/${format}`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(_exportParams())
-    })
-        .then(response => {
-            pr.set(80, `Downloading ${format.toUpperCase()}...`);
-            if (!response.ok) return response.json().then(e => { throw new Error(e.error || `${format.toUpperCase()} generation failed`); });
-            return response.blob();
-        })
-        .then(blob => { _triggerDownload(blob, `${name}.${format}`); pr.done('Complete!'); })
-        .catch(e => { console.error(`${format} download error:`, e); pr.error('Error: ' + e.message); });
+    _asyncExport(format);
 }
 
 function downloadCrossSection() {

@@ -6,14 +6,7 @@ HTTP adapter that parses requests, delegates, and formats responses.
 """
 
 from app.server.core.hydrology import (
-    fetch_natural_earth_rivers as _fetch_natural_earth_rivers,
-    filter_rivers_by_bbox as _filter_rivers_by_bbox,
-    rasterize_rivers_with_buffering as _rasterize_rivers_with_buffering,
-    merge_rivers_with_dem as _merge_rivers_with_dem,
-)
-from app.server.core.hydrorivers import (
-    fetch_hydrorivers as _fetch_hydrorivers,
-    rasterize_hydrorivers as _rasterize_hydrorivers,
+    fetch_and_rasterize_hydrology as _fetch_and_rasterize_hydrology,
 )
 from app.server.core.sat import (
     fetch_water_mask as _fetch_water_mask,
@@ -24,11 +17,8 @@ from app.server.core.sat import (
 from app.server.core.dem import (
     fetch_layer_data as _fetch_layer_data,
     fetch_local_dem as _fetch_local_dem,
-    apply_layer_processing as _apply_layer_processing,
-    blend_layers as _blend_layers,
     upsample_dem as _upsample_dem,
     make_dem_payload as _make_dem_payload,
-    compute_raw_dem as _compute_raw_dem,
 )
 from app.server.core.cache import make_cache_key, write_array_cache, read_array_cache
 from app.server.core.validation import (
@@ -53,23 +43,12 @@ from app.server.config import (
     H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
     MAX_DIM,
 )
+from typing import Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, Request, Query
 import numpy as np
 import math
-import os
-import sys
-import asyncio
 import logging
-from functools import partial
-from pathlib import Path
-
-# Ensure local packages (numpy2stl, geo2stl) are importable without os.chdir.
-# app/server/routers → routers → server → app → strm2stl
-_STRM2STL_DIR = str(Path(__file__).parent.parent.parent.parent)
-if _STRM2STL_DIR not in sys.path:
-    sys.path.insert(0, _STRM2STL_DIR)
-
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["terrain"])
@@ -151,7 +130,23 @@ def _fetch_dem_array(dem_source, north, south, east, west, dim,
 # ---------------------------------------------------------------------------
 
 @router.api_route("/api/terrain/dem", methods=["GET", "POST"], tags=["terrain"])
-async def get_terrain_dem(request: Request):
+async def get_terrain_dem(
+    request: Request,
+    north: Optional[float] = Query(None, description="Northern latitude bound (degrees)"),
+    south: Optional[float] = Query(None, description="Southern latitude bound (degrees)"),
+    east: Optional[float] = Query(None, description="Eastern longitude bound (degrees)"),
+    west: Optional[float] = Query(None, description="Western longitude bound (degrees)"),
+    dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
+    depth_scale: Optional[float] = Query(None, description="Depth scaling factor for ocean/bathymetry"),
+    water_scale: Optional[float] = Query(None, description="Water subtraction strength"),
+    subtract_water: Optional[bool] = Query(None, description="Subtract water bodies from terrain"),
+    show_sat: Optional[bool] = Query(None, description="Include ESA land-use overlay in response"),
+    dataset: Optional[str] = Query(None, description="Land-use dataset: 'esa' or 'jrc'"),
+    projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+    maintain_dimensions: Optional[bool] = Query(None, description="Maintain output dimensions after projection"),
+    clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
+    dem_source: Optional[str] = Query(None, description="DEM source: 'local', 'h5_local', or OpenTopography key"),
+):
     """
     Fetch a Digital Elevation Model preview for a bounding box.
     Returns raw elevation values for client-side colormap rendering.
@@ -247,6 +242,15 @@ async def get_terrain_dem(request: Request):
                     dataset, width_px, height_px, dim)
                 if sat_result is not None:
                     sat_values, sat_width, sat_height = sat_result
+                    # Project the ESA overlay to align with the projected DEM geometry
+                    if projection != "none":
+                        sat_arr = np.array(sat_values, dtype=np.float32).reshape(
+                            sat_height, sat_width)
+                        sat_arr = _project_grid(
+                            sat_arr, north, south, east, west,
+                            projection, clip_nans, categorical=True)
+                        sat_height, sat_width = sat_arr.shape
+                        sat_values = sat_arr.ravel().tolist()
                     response_content["sat_available"] = True
                     response_content["sat_values"] = sat_values
                     response_content["sat_dimensions"] = [
@@ -277,58 +281,18 @@ async def get_terrain_dem(request: Request):
         return error_response("DEM processing failed")
 
 
-@router.api_route("/api/terrain/dem/raw", methods=["GET", "POST"], tags=["terrain"])
-async def get_terrain_dem_raw(request: Request):
-    """Fetch unprocessed SRTM/GEBCO elevation data before water subtraction."""
-    params = request.query_params
-
-    north = _parse_float(params, "north")
-    south = _parse_float(params, "south")
-    east = _parse_float(params, "east")
-    west = _parse_float(params, "west")
-    dim = _parse_int(params, "dim", 200)
-    depth_scale = _parse_float(params, "depth_scale", 0.5)
-
-    err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
-    if err:
-        return err
-
-    logger.debug(
-        f"GET /api/terrain/dem/raw bbox=({north},{south},{east},{west}) dim={dim}")
-
-    try:
-        if TEST_MODE:
-            im = np.linspace(-50, 150, num=(dim * dim),
-                             dtype=float).reshape((dim, dim))
-            return JSONResponse(content={
-                "dem_values_b64": _b64(np.nan_to_num(im)),
-                "dimensions": [dim, dim],
-                "min_elevation": float(np.nanmin(im)),
-                "max_elevation": float(np.nanmax(im)),
-                "bbox": [west, south, east, north],
-            })
-
-        im_r = await run_sync(
-            _compute_raw_dem, north, south, east, west, dim, depth_scale)
-        new_h, new_w = im_r.shape
-
-        return JSONResponse(content={
-            "dem_values_b64": _b64(im_r),
-            "dimensions": [new_h, new_w],
-            "min_elevation": float(np.nanmin(im_r)),
-            "max_elevation": float(np.nanmax(im_r)),
-            "mean_elevation": float(np.nanmean(im_r)),
-            "ptp": float(np.ptp(im_r)),
-            "bbox": [west, south, east, north],
-        })
-
-    except Exception as e:
-        logger.error(f"Error in get_terrain_dem_raw: {e}", exc_info=True)
-        return error_response("DEM processing failed")
-
-
 @router.api_route("/api/terrain/water-mask", methods=["GET", "POST"], tags=["terrain"])
-async def get_terrain_water_mask(request: Request):
+async def get_terrain_water_mask(
+    request: Request,
+    north: Optional[float] = Query(None, description="Northern latitude bound (degrees)"),
+    south: Optional[float] = Query(None, description="Southern latitude bound (degrees)"),
+    east: Optional[float] = Query(None, description="Eastern longitude bound (degrees)"),
+    west: Optional[float] = Query(None, description="Western longitude bound (degrees)"),
+    sat_scale: Optional[int] = Query(None, description="Earth Engine fetch resolution (metres/pixel)"),
+    dataset: Optional[str] = Query(None, description="Water dataset: 'esa' or 'jrc'"),
+    projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+    clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
+):
     """Fetch a binary water mask and ESA WorldCover land-cover data."""
     logger.info("Received request for /api/terrain/water-mask")
     try:
@@ -442,7 +406,16 @@ async def get_terrain_water_mask(request: Request):
 
 
 @router.api_route("/api/terrain/esa-land-cover", methods=["GET", "POST"], tags=["terrain"])
-async def get_terrain_esa_land_cover(request: Request):
+async def get_terrain_esa_land_cover(
+    request: Request,
+    north: Optional[float] = Query(None, description="Northern latitude bound (degrees)"),
+    south: Optional[float] = Query(None, description="Southern latitude bound (degrees)"),
+    east: Optional[float] = Query(None, description="Eastern longitude bound (degrees)"),
+    west: Optional[float] = Query(None, description="Western longitude bound (degrees)"),
+    sat_scale: Optional[int] = Query(None, description="Earth Engine fetch resolution (metres/pixel)"),
+    projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+    clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
+):
     """Fetch ESA WorldCover land-cover class data independently of the water mask."""
     logger.info("Received request for /api/terrain/esa-land-cover")
     try:
@@ -488,13 +461,36 @@ async def get_terrain_esa_land_cover(request: Request):
                 "esa_dimensions": [h, w],
             })
 
-        # Fetch ESA image via the shared helper (dataset=esa always for land cover)
+        # Fetch ESA image directly — skip the water mask pipeline
+        # (fetch_water_mask would also download SRTM tiles for bathymetry,
+        # build a water mask, and apply JRC logic — all discarded here).
+        # Apply the same scale-clamping guards as fetch_water_mask.
+        bbox_w = abs(east - west)
+        bbox_h = abs(north - south)
+        mid_lat = (north + south) / 2.0
+        m_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
+        bbox_w_m = bbox_w * m_per_deg_lon
+        bbox_h_m = bbox_h * 111_320.0
+        _MAX_ESA_PX = 50_331_648 // 2
+        est_px = (bbox_w_m / sat_scale) * (bbox_h_m / sat_scale)
+        if est_px > _MAX_ESA_PX:
+            sat_scale = max(sat_scale, int(
+                math.ceil(math.sqrt(bbox_w_m * bbox_h_m / _MAX_ESA_PX))))
+        min_safe_dim = max(
+            int(math.ceil(bbox_w_m / 32768)),
+            int(math.ceil(bbox_h_m / 32768)), 1)
+        if sat_scale < min_safe_dim:
+            sat_scale = min_safe_dim
+
         try:
-            _wm, img, sat_scale = await run_sync(
-                _fetch_water_mask, north, south, east, west,
+            img, _jrc, _elev = await run_sync(
+                _fetch_water_mask_images, north, south, east, west,
                 sat_scale, "esa")
         except RuntimeError as fetch_err:
             return error_response(str(fetch_err))
+
+        if img is None:
+            return error_response("Failed to fetch ESA land cover data")
 
         # Apply projection if requested
         if projection != "none":
@@ -520,7 +516,16 @@ async def get_terrain_esa_land_cover(request: Request):
 
 
 @router.get("/api/terrain/satellite", tags=["terrain"])
-async def get_terrain_satellite(request: Request):
+async def get_terrain_satellite(
+    request: Request,
+    north: Optional[float] = Query(None, description="Northern latitude bound (degrees)"),
+    south: Optional[float] = Query(None, description="Southern latitude bound (degrees)"),
+    east: Optional[float] = Query(None, description="Eastern longitude bound (degrees)"),
+    west: Optional[float] = Query(None, description="Western longitude bound (degrees)"),
+    dim: Optional[int] = Query(None, description="Output image resolution (pixels per side)"),
+    projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+    clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
+):
     """
     Fetch real satellite imagery (ESRI World Imagery WMTS tiles) for a bounding box.
     Returns a base64-encoded JPEG string.
@@ -611,154 +616,26 @@ async def get_terrain_sources():
     })
 
 
-@router.post("/api/dem/merge", tags=["terrain"])
-async def merge_dem_layers(request: Request):
-    """
-    Merge multiple elevation/mask layers into one composite DEM.
-    Each layer specifies a source, resolution, per-layer processing, and a blend mode.
-    """
-    from app.server.schemas import MergeRequest
-    try:
-        body = await request.json()
-        req = MergeRequest(**body)
-    except Exception as e:
-        return JSONResponse(content={"error": f"Invalid request: {e}"}, status_code=422)
-
-    if not req.layers:
-        return JSONResponse(content={"error": "At least one layer required"}, status_code=422)
-
-    north = req.bbox.get("north")
-    south = req.bbox.get("south")
-    east = req.bbox.get("east")
-    west = req.bbox.get("west")
-    if None in (north, south, east, west):
-        return JSONResponse(content={"error": "bbox must contain north/south/east/west"}, status_code=422)
-
-    if TEST_MODE:
-        h = w = req.dim
-        im = np.linspace(0, 100, h * w, dtype=np.float64).reshape(h, w)
-        return JSONResponse(content={
-            "dem_values_b64": _b64(im),
-            "dimensions": [h, w],
-            "min_elevation": 0.0, "max_elevation": 100.0, "mean_elevation": 50.0,
-            "bbox": [west, south, east, north],
-            "source": "merge", "layer_count": len(req.layers),
-        })
-
-    try:
-        composite = None
-
-        for spec in req.layers:
-            raw = await run_sync(
-                _fetch_layer_data, spec.source, north, south, east, west, spec.dim)
-            processed = await run_sync(
-                _apply_layer_processing, raw, spec.processing)
-
-            if composite is None:
-                import cv2 as _cv2
-                h, w = processed.shape
-                if h >= w:
-                    out_h, out_w = req.dim, max(1, int(req.dim * w / h))
-                else:
-                    out_w, out_h = req.dim, max(1, int(req.dim * h / w))
-                composite = _cv2.resize(
-                    processed.astype(np.float32), (out_w, out_h),
-                    interpolation=_cv2.INTER_LINEAR).astype(np.float64)
-            else:
-                composite = _blend_layers(
-                    base=composite, layer=processed,
-                    blend_mode=spec.blend_mode, weight=spec.weight,
-                    output_shape=composite.shape)
-
-        if composite is None:
-            return JSONResponse(content={"error": "No layers produced output"}, status_code=500)
-
-        composite = np.nan_to_num(composite, nan=0.0,
-                                  posinf=np.finfo(np.float32).max,
-                                  neginf=np.finfo(np.float32).min)
-        h, w = composite.shape
-        return JSONResponse(content={
-            "dem_values_b64": _b64(composite),
-            "dimensions": [h, w],
-            "min_elevation": float(np.nanmin(composite)),
-            "max_elevation": float(np.nanmax(composite)),
-            "mean_elevation": float(np.nanmean(composite)),
-            "bbox": [west, south, east, north],
-            "source": "merge", "layer_count": len(req.layers),
-        })
-
-    except Exception as e:
-        logger.error(f"DEM merge failed: {e}", exc_info=True)
-        return error_response("DEM merge failed")
-
-
 # ---------------------------------------------------------------------------
 # Hydrology endpoints
 # ---------------------------------------------------------------------------
 
-def _fetch_and_rasterize_hydrology(north, south, east, west, dim, scale_m, depression_m,
-                                   source="natural_earth", min_order=3,
-                                   order_exponent=1.5):
-    """Fetch rivers and rasterize to grid. Sync — call via run_in_executor.
-
-    source='natural_earth': Natural Earth dataset (global, 3 tiers, coarse)
-    source='hydrorivers':   HydroRIVERS dataset (regional shapefiles, ~500 m detail,
-                            downloaded on first use and cached permanently)
-    """
-    import time as _time
-    t0 = _time.perf_counter()
-    try:
-        if source == "hydrorivers":
-            t_fetch = _time.perf_counter()
-            geojson = _fetch_hydrorivers(
-                north, south, east, west, min_order=min_order)
-            dt_fetch = _time.perf_counter() - t_fetch
-            if geojson is None:
-                logger.info(
-                    f"HydroRIVERS: no features in region (fetch took {dt_fetch:.2f}s)")
-                return None
-            n_features = len(geojson.get("features", []))
-            logger.info(
-                f"HydroRIVERS fetch: {n_features} features in {dt_fetch:.2f}s")
-
-            t_rast = _time.perf_counter()
-            river_grid = _rasterize_hydrorivers(
-                geojson, north, south, east, west, dim,
-                depression_base=depression_m,
-                order_exponent=order_exponent,
-            )
-            dt_rast = _time.perf_counter() - t_rast
-            dt_total = _time.perf_counter() - t0
-            logger.info(f"HydroRIVERS total: {dt_total:.2f}s "
-                        f"(fetch={dt_fetch:.2f}s, rasterize={dt_rast:.2f}s)")
-            return {"river_grid": river_grid, "feature_count": n_features, "source": "hydrorivers"}
-
-        # Default: Natural Earth
-        geojson = _fetch_natural_earth_rivers(scale_m=scale_m)
-        if geojson is None:
-            logger.warning(
-                "Natural Earth hydrology fetch failed (geopandas/requests unavailable?)")
-            return None
-        bbox_tuple = (west, south, east, north)
-        geojson_filtered = _filter_rivers_by_bbox(geojson, bbox_tuple)
-        n_features = len(geojson_filtered.get("features", []))
-        if n_features == 0:
-            logger.info("No rivers found in region")
-            return None
-        river_grid = _rasterize_rivers_with_buffering(
-            geojson_filtered, bbox_tuple, dim, depression_m=depression_m)
-        dt_total = _time.perf_counter() - t0
-        logger.info(
-            f"Natural Earth hydrology total: {dt_total:.2f}s, {n_features} features")
-        return {"river_grid": river_grid, "feature_count": n_features, "source": "natural_earth"}
-
-    except Exception as e:
-        logger.error(f"Hydrology fetch/rasterize failed: {e}", exc_info=True)
-        return None
-
-
 @router.get("/api/terrain/hydrology", tags=["terrain"])
-async def get_terrain_hydrology(request: Request):
+async def get_terrain_hydrology(
+    request: Request,
+    north: Optional[float] = Query(None, description="Northern latitude bound (degrees)"),
+    south: Optional[float] = Query(None, description="Southern latitude bound (degrees)"),
+    east: Optional[float] = Query(None, description="Eastern longitude bound (degrees)"),
+    west: Optional[float] = Query(None, description="Western longitude bound (degrees)"),
+    dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
+    depression_m: Optional[float] = Query(None, description="Max river depression in metres (negative, default -5.0)"),
+    source: Optional[str] = Query(None, description="River data source: 'natural_earth' or 'hydrorivers'"),
+    scale_m: Optional[int] = Query(None, description="Natural Earth dataset tier: 10 (finest), 50, or 110"),
+    min_order: Optional[int] = Query(None, description="HydroRIVERS minimum Strahler order 1-9 (1=all, 9=major only)"),
+    order_exponent: Optional[float] = Query(None, description="HydroRIVERS depression scaling exponent"),
+    projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+    clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
+):
     """
     Fetch river hydrology and rasterize as an elevation depression grid.
 
@@ -871,88 +748,5 @@ async def get_terrain_hydrology(request: Request):
         return error_response("Hydrology fetch failed")
 
 
-def _merge_hydrology_into_dem(dem_arr, river_arr):
-    """Merge river depressions with DEM. Sync — call via run_in_executor."""
-    try:
-        merged = _merge_rivers_with_dem(dem_arr, river_arr)
-        return merged
-    except Exception as e:
-        logger.error(f"Hydrology merge failed: {e}", exc_info=True)
-        return None
 
 
-@router.post("/api/terrain/hydrology/merge", tags=["terrain"])
-async def merge_terrain_hydrology(request: Request):
-    """
-    Merge hydrology depressions with a DEM elevation grid.
-
-    JSON body:
-        dem_values: list of float elevation values (flattened from H×W grid)
-        dem_dimensions: [height, width]
-        river_grid_values: list of float river depression values
-        river_grid_dimensions: [height, width]
-    """
-    try:
-        body = await request.json()
-    except Exception as e:
-        return JSONResponse(content={"error": f"Invalid JSON: {e}"}, status_code=400)
-
-    # Extract and validate DEM
-    dem_values = body.get("dem_values", [])
-    dem_dims = body.get("dem_dimensions", [])
-    if not dem_values or len(dem_dims) != 2:
-        return JSONResponse(content={"error": "dem_values and dem_dimensions required"},
-                            status_code=400)
-
-    # Extract and validate river grid
-    river_values = body.get("river_grid_values", [])
-    river_dims = body.get("river_grid_dimensions", [])
-    if not river_values or len(river_dims) != 2:
-        return JSONResponse(content={"error": "river_grid_values and river_grid_dimensions required"},
-                            status_code=400)
-
-    dem_h, dem_w = dem_dims
-    river_h, river_w = river_dims
-
-    # Reshape grids
-    try:
-        dem_arr = np.array(dem_values, dtype=np.float32).reshape(dem_h, dem_w)
-        river_arr = np.array(
-            river_values, dtype=np.float32).reshape(river_h, river_w)
-    except Exception as e:
-        return JSONResponse(content={"error": f"Failed to reshape arrays: {e}"}, status_code=400)
-
-    # Check dimensions match
-    if dem_arr.shape != river_arr.shape:
-        return JSONResponse(
-            content={
-                "error": f"DEM shape {dem_arr.shape} != river shape {river_arr.shape}"},
-            status_code=400)
-
-    if TEST_MODE:
-        # In test mode, just return DEM unchanged
-        return JSONResponse(content={
-            "merged_dem_values": dem_arr.ravel().tolist(),
-            "merged_dimensions": [dem_h, dem_w],
-        })
-
-    try:
-        merged = await run_sync(_merge_hydrology_into_dem, dem_arr, river_arr)
-
-        if merged is None:
-            return JSONResponse(content={"error": "Merge operation failed"}, status_code=500)
-
-        return JSONResponse(content={
-            "merged_dem_values": merged.ravel().tolist(),
-            "merged_dimensions": [merged.shape[0], merged.shape[1]],
-        })
-
-    except Exception as e:
-        logger.error(f"Error in merge_terrain_hydrology: {e}", exc_info=True)
-        return error_response("Hydrology merge failed")
-
-
-@router.post("/api/export/preview", tags=["terrain"])
-async def export_preview(request: Request):
-    """Return DEM values for a Three.js PlaneGeometry heightmap. Delegates to get_terrain_dem."""
-    return await get_terrain_dem(request)

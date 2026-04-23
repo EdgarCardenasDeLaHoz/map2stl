@@ -562,12 +562,16 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
     const { north, south, east, west } = coords;
     const resolution = document.getElementById('waterResolution')?.value || '200';
     const dataset = document.getElementById('waterDataset')?.value || 'esa';
+    const projection = document.getElementById('paramProjection')?.value || 'none';
+    const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
 
     const params = new URLSearchParams({
         north, south, east, west,
         dim: resolution,
         show_sat: true,
-        dataset
+        dataset,
+        projection,
+        clip_nans: clipNans,
     });
 
     document.getElementById('satelliteImage').innerHTML = '<p class="loading">Loading satellite data...</p>';
@@ -592,8 +596,10 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
             canvas.style.height = 'auto';
             document.getElementById('satelliteImage').innerHTML = '';
             document.getElementById('satelliteImage').appendChild(canvas);
+            window.appState.satEsaLoaded = true;
             window.emitStackUpdate();
         } else {
+            window.appState.satEsaLoaded = false;
             document.getElementById('satelliteImage').innerHTML =
                 '<div class="sat-unavailable"><p>Satellite data not available</p><p>Earth Engine module required</p></div>';
         }
@@ -670,16 +676,6 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
         console.error('loadSatelliteRGBImage error:', err);
         window.showToast?.(`Satellite load failed: ${err.message}`, 'error');
     }
-};
-
-/**
- * Re-project the satellite RGB canvas using the current projection setting.
- * Called when the projection dropdown changes (matches _reprojectCityRaster pattern).
- */
-window._reprojectSatelliteImage = function _reprojectSatelliteImage() {
-    const raw = window.appState?._satImgRawCanvas;
-    if (!raw) return;
-    window.appState.satImgSourceCanvas = raw;
 };
 
 // ---------------------------------------------------------------------------

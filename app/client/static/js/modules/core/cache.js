@@ -22,13 +22,17 @@ window.waterMaskCache = {
     maxSize: 50,
     stats:   { hits: 0, misses: 0, preloaded: 0 },
 
-    // Generate cache key from bbox and sat_scale (ESA fetch resolution in m/px)
+    // Generate cache key from bbox, sat_scale, projection, and dataset.
     generateKey(bbox) {
-        // sat_scale controls ESA data quality; demWidth/demHeight ensure alignment
+        // sat_scale controls ESA data quality; demWidth/demHeight ensure alignment.
+        // projection and dataset are included so that changing either param causes a
+        // cache miss and forces a fresh server fetch.
         const sc   = bbox.sat_scale || bbox.resolution || 0;
         const demW = bbox.demWidth  || 0;
         const demH = bbox.demHeight || 0;
-        return `${bbox.north.toFixed(4)}_${bbox.south.toFixed(4)}_${bbox.east.toFixed(4)}_${bbox.west.toFixed(4)}_sc${sc}_${demW}x${demH}`;
+        const proj = bbox.projection || 'none';
+        const ds   = bbox.dataset   || '';
+        return `${bbox.north.toFixed(4)}_${bbox.south.toFixed(4)}_${bbox.east.toFixed(4)}_${bbox.west.toFixed(4)}_sc${sc}_${demW}x${demH}_${proj}_${ds}`;
     },
 
     get(bbox) {

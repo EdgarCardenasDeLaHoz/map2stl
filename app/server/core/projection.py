@@ -12,10 +12,12 @@ def project_grid(arr, north, south, east, west, projection, clip_nans,
                  categorical=False):
     """Apply geo2stl projection to a 2-D array.
 
-    For categorical arrays (ESA class IDs) uses nearest-neighbour interpolation
-    with fill_value=0 (preserves integer class IDs, clip_nans disabled).
-    For continuous arrays (DEM, water mask, hydrology) uses bilinear with
-    fill_value=NaN so that clip_nans can detect and strip projected edges.
+    All arrays are projected with fill_value=NaN so that clip_nans can
+    detect and strip projected edges uniformly across layers.
+    For categorical arrays (ESA class IDs) uses nearest-neighbour
+    interpolation (order=0) to preserve integer class IDs; NaN fill is
+    replaced with 0 after clipping.
+    For continuous arrays (DEM, water mask, hydrology) uses bilinear.
     """
     from geo2stl.projections import project_coordinates
 
@@ -23,13 +25,16 @@ def project_grid(arr, north, south, east, west, projection, clip_nans,
         arr, (north, south, east, west),
         projection=projection,
         maintain_dimensions=True,
-        fill_value=0 if categorical else np.nan,
-        clip_nans=clip_nans if not categorical else False,
+        fill_value=np.nan,
+        clip_nans=clip_nans,
         # Nearest-neighbour for categorical data (ESA class IDs) preserves
         # integer values.  Bilinear would blend adjacent class IDs (e.g.
         # class 10 + class 20 → 15), producing meaningless intermediate values.
         order=0 if categorical else 1,
     )
+    # Replace NaN fill with 0 for categorical arrays (class 0 = "No data")
+    if categorical:
+        projected = np.nan_to_num(projected, nan=0.0)
     return projected
 
 

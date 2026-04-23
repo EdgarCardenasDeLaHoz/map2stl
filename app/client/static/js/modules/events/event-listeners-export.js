@@ -55,6 +55,7 @@ window._setupModelExportListeners = function _setupModelExportListeners() {
 window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
     document.getElementById('loadCityDataBtn')?.addEventListener('click', () => window.loadCityData?.());
     document.getElementById('clearCityDataBtn')?.addEventListener('click', () => window.clearCityOverlay?.());
+    document.getElementById('enhanceHeightsBtn')?.addEventListener('click', () => window.enhanceBuildingHeights?.());
 
     ['Buildings', 'Roads', 'Waterways', 'Walls', 'Towers', 'Churches', 'Forts', 'Pois'].forEach(layer => {
         const toggle = document.getElementById(`layer${layer}Toggle`);

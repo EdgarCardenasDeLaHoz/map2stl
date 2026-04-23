@@ -133,36 +133,6 @@ class TestCitiesPostCaching:
 
 
 # ---------------------------------------------------------------------------
-# POST /api/export/preview
-# ---------------------------------------------------------------------------
-
-class TestExportPreview:
-    """Preview endpoint should delegate to DEM and return elevation values."""
-
-    def test_returns_dem_values_in_test_mode(self, client):
-        resp = client.post("/api/export/preview", params={
-            "north": 40.0, "south": 39.9, "east": -75.1, "west": -75.2,
-            "dim": 10
-        })
-        import base64
-        assert resp.status_code == 200
-        body = resp.json()
-        assert "dem_values_b64" in body
-        assert "dimensions" in body
-        n_floats = len(base64.b64decode(body["dem_values_b64"])) // 4
-        assert n_floats == 100  # 10×10 grid in TEST_MODE
-
-    def test_response_has_bbox_field(self, client):
-        resp = client.post("/api/export/preview", params={
-            "north": 40.0, "south": 39.9, "east": -75.1, "west": -75.2,
-            "dim": 5
-        })
-        body = resp.json()
-        assert "bbox" in body
-        assert len(body["bbox"]) == 4
-
-
-# ---------------------------------------------------------------------------
 # POST /api/cities/raster
 # ---------------------------------------------------------------------------
 

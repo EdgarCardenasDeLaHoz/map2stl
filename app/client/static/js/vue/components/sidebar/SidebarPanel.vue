@@ -8,6 +8,16 @@
     <div class="sidebar-header">
       <div class="sidebar-title">Region Selection</div>
       <div class="row-gap6">
+      <button class="sidebar-header-action-btn"
+        title="Export saved regions to JSON"
+        @click="exportRegions">
+        Export
+      </button>
+      <button class="sidebar-header-action-btn"
+        title="Import regions from JSON"
+        @click="openImportPicker">
+        Import
+      </button>
         <button class="sidebar-vis-btn" id="bboxVisToggleBtn"
                 title="Show/hide region boxes on map">👁</button>
         <button class="sidebar-toggle-btn" id="sidebarToggleBtn"
@@ -18,6 +28,13 @@
           <span class="state-label">{{ stateLabel }}</span>
         </button>
       </div>
+      <input
+        ref="regionImportInput"
+        class="hidden"
+        type="file"
+        accept="application/json,.json"
+        @change="handleRegionImport"
+      />
     </div>
 
     <!-- Content ─────────────────────────────────────────────────────────────── -->
@@ -61,6 +78,7 @@ const store = useAppStore();
 // Mirror Pinia sidebarMode → local ref for immediate reactivity
 const mode       = computed(() => store.sidebarMode);
 const editViewOpen = ref(false);
+const regionImportInput = ref<HTMLInputElement | null>(null);
 
 const sidebarClass = computed(() => ({
   expanded: mode.value === 'expanded',
@@ -86,6 +104,21 @@ function cycleSidebar() {
   // Keep app.js closure in sync until Stage 7
   window.setSidebarState?.(newMode);
   window._setSidebarViews?.(newMode);
+}
+
+function exportRegions() {
+  (window as any).exportRegionsJson?.();
+}
+
+function openImportPicker() {
+  regionImportInput.value?.click();
+}
+
+async function handleRegionImport(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  await (window as any).importRegionsJsonFile?.(file);
+  input.value = '';
 }
 
 onMounted(() => {

@@ -122,6 +122,64 @@ def _wm_lat_to_tile(lat: float, n: int) -> int:
     )
 
 
+def _mercator_to_plate_carree(img, north: float, south: float):
+    """Resample a Web Mercator image to Plate Carrée (equirectangular).
+
+    In Web Mercator, pixel rows are spaced uniformly in Mercator-y, not in
+    geographic latitude.  This function builds a row-mapping from uniform
+    latitude spacing (Plate Carrée) back to Mercator-y pixel positions and
+    resamples using bilinear interpolation.
+
+    Parameters
+    ----------
+    img : PIL.Image
+        Cropped Mercator image covering *north* to *south*.
+    north, south : float
+        Geographic latitude bounds (degrees) of the image.
+
+    Returns
+    -------
+    PIL.Image
+        Same width, same height, resampled to uniform latitude spacing.
+    """
+    from PIL import Image
+    cw, ch = img.size
+    if ch < 2 or cw < 1:
+        return img
+
+    # Mercator-y for the bbox edges (used to normalise)
+    def _lat_to_merc_y(lat):
+        lat_r = math.radians(max(-85.05, min(85.05, lat)))
+        return math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r))
+
+    merc_north = _lat_to_merc_y(north)
+    merc_south = _lat_to_merc_y(south)
+    merc_span = merc_north - merc_south
+    if abs(merc_span) < 1e-12:
+        return img
+
+    img_arr = np.array(img)  # (ch, cw, 3) uint8
+
+    # For each output row (uniform lat), find the fractional source row (Mercator)
+    out_lats = np.linspace(north, south, ch)  # row 0 = north
+    merc_ys = np.array([_lat_to_merc_y(lat) for lat in out_lats])
+    # Normalise to [0, ch-1] pixel range: merc_north → row 0, merc_south → row ch-1
+    src_rows = (merc_north - merc_ys) / merc_span * (ch - 1)
+    src_rows = np.clip(src_rows, 0, ch - 1)
+
+    # Bilinear interpolation along the y-axis
+    row_floor = np.floor(src_rows).astype(int)
+    row_ceil = np.minimum(row_floor + 1, ch - 1)
+    frac = (src_rows - row_floor).reshape(-1, 1)  # broadcast over width (and channels)
+    if img_arr.ndim == 3:
+        frac = frac[:, :, np.newaxis]
+
+    result = (img_arr[row_floor] * (1.0 - frac) + img_arr[row_ceil] * frac)
+    result = np.clip(result, 0, 255).astype(np.uint8)
+
+    return Image.fromarray(result)
+
+
 def fetch_satellite_tiles(north: float, south: float, east: float, west: float, dim: int = 400) -> str:
     """
     Stitch ESRI World Imagery WMTS tiles into a bbox-cropped JPEG and return as base64.
@@ -207,6 +265,13 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
         min(img_w, _lon2px(east)),
         min(img_h, _lat2py(south)),
     ))
+
+    # ── De-project from Web Mercator to Plate Carrée (equirectangular) ──
+    # The cropped image has non-uniform latitude spacing per pixel row
+    # (Mercator stretches high latitudes). Resample to uniform geographic
+    # latitude spacing so that downstream map projections work correctly.
+    crop = _mercator_to_plate_carree(crop, north, south)
+
     cw, ch = crop.size
     if cw >= ch:
         out_w, out_h = dim, max(1, round(dim * ch / cw))
@@ -337,26 +402,12 @@ def fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, di
     """Fetch + resize satellite overlay. Returns (values_list, w, h) or None."""
     import cv2 as _cv2
     import numpy as _np
-    from geo2stl.sat2stl import fetch_bbox_image
+    from geo2stl.sat2stl import fetch_bbox_image, calculate_scale_for_dimensions
 
-    mid_lat = (north + south) / 2.0
-    m_per_deg_lon = METRES_PER_DEGREE * math.cos(math.radians(mid_lat))
-    m_per_deg_lat = METRES_PER_DEGREE
-    bbox_w_m = abs(east - west) * m_per_deg_lon
-    bbox_h_m = abs(north - south) * m_per_deg_lat
-
-    # Constraint 1: 50 MB EE request limit (~2 bytes/px for GeoTIFF uint8)
-    _EE_MAX_PX = 50_331_648 // 2  # ~25 M pixels
-    min_scale_px = int(math.ceil(math.sqrt(bbox_w_m * bbox_h_m / _EE_MAX_PX)))
-
-    # Constraint 2: 32768px max grid dimension on either axis
-    min_scale_dim = max(int(math.ceil(bbox_w_m / 32768)),
-                        int(math.ceil(bbox_h_m / 32768)))
-
-    sat_scale = max(30, min_scale_px, min_scale_dim)
+    target_dim = max(width_px, dim or width_px)
+    sat_scale = max(30, calculate_scale_for_dimensions(north, south, east, west, target_dim))
     logger.info(f"fetch_sat_overlay ({dataset}): scale={sat_scale}m/px "
-                f"(bbox {abs(east-west):.1f}deg x {abs(north-south):.1f}deg, "
-                f"pixel_min={min_scale_px}, dim_min={min_scale_dim})")
+                f"(bbox {abs(east-west):.1f}deg x {abs(north-south):.1f}deg, target_dim={target_dim})")
     sat = fetch_bbox_image(north, south, east, west,
                            scale=sat_scale, dataset=dataset)
     if sat is None:

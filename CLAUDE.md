@@ -31,6 +31,7 @@ python -m pytest tests/ -v                                     # run all tests (
 |---|---|
 | First-pass project orientation | `docs/ai-agent-onboarding.md` + `docs/task-routing.md` |
 | Backend endpoint | `docs/api.md` + relevant router file |
+| Terrain API call stacks | `docs/terrain-api-audit.md` |
 | Session client (Python API) | `docs/sdk-workflow.md` + `app/session/terrain_session.py` + `notebooks/Session_API_Reference.ipynb` |
 | Notebook-driven terrain workflow | `docs/sdk-workflow.md` + `notebooks/API_Terrain.ipynb` |
 | Cache / storage | `app/server/core/cache.py` header + `docs/api.md` |

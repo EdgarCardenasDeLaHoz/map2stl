@@ -16,7 +16,6 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.server.core.responses import error_response
-from app.server.core.validation import run_sync
 from app.server.schemas import BoundingBox
 
 logger = logging.getLogger(__name__)
@@ -67,22 +66,31 @@ from app.server.core.height.providers.ndsm import NDSMProvider
 from app.server.core.height.providers.wsf3d import WSF3DProvider
 from app.server.core.height.providers.copernicus import CopernicusProvider
 from app.server.core.height.providers.lidar_3dep import LiDAR3DEPProvider
+from app.server.core.height.providers.ghsl import GHSLProvider
+from app.server.core.height.providers.open_buildings import OpenBuildingsProvider
+from app.server.core.height.providers.shadow_height import ShadowHeightProvider
 
 # Ordered by priority (highest confidence first)
 _ALL_PROVIDERS = [
-    LiDAR3DEPProvider(),   # 0.95 — US only, sub-metre
-    CopernicusProvider(),  # 0.70 — EU only, 10m
-    NDSMProvider(),        # 0.80 — global, 30m
-    WSF3DProvider(),       # 0.50 — global, 90m
+    LiDAR3DEPProvider(),      # 0.95 — US only, sub-metre
+    NDSMProvider(),            # 0.80 — global, 30m
+    CopernicusProvider(),      # 0.70 — EU only, 10m
+    OpenBuildingsProvider(),   # 0.60 — developing regions, per-building
+    WSF3DProvider(),           # 0.50 — global, 90m
+    GHSLProvider(),            # 0.40 — global, 100m
+    ShadowHeightProvider(),    # 0.30 — global, placeholder
 ]
 
 _PROVIDER_MAP = {p.name: p for p in _ALL_PROVIDERS}
 
 _PROVIDER_META = {
-    "lidar_3dep": {"confidence": 0.95, "resolution_m": 1.0},
-    "copernicus": {"confidence": 0.70, "resolution_m": 10.0},
-    "ndsm":       {"confidence": 0.80, "resolution_m": 30.0},
-    "wsf3d":      {"confidence": 0.50, "resolution_m": 90.0},
+    "lidar_3dep":    {"confidence": 0.95, "resolution_m": 1.0},
+    "ndsm":          {"confidence": 0.80, "resolution_m": 30.0},
+    "copernicus":    {"confidence": 0.70, "resolution_m": 10.0},
+    "open_buildings": {"confidence": 0.60, "resolution_m": 5.0},
+    "wsf3d":          {"confidence": 0.50, "resolution_m": 90.0},
+    "ghsl":           {"confidence": 0.40, "resolution_m": 100.0},
+    "shadow_height":  {"confidence": 0.30, "resolution_m": 5.0},
 }
 
 

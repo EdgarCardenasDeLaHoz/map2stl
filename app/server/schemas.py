@@ -148,6 +148,14 @@ class CityRequest(BoundingBox):
         default=5.0, description="Minimum building area in square metres to keep")
 
 
+class EnhanceHeightsRequest(BoundingBox):
+    """Request body for POST /api/cities/enhance-heights."""
+    buildings: Dict[str, Any] = Field(
+        ..., description="GeoJSON FeatureCollection of buildings with height_m, height_source")
+    dim: int = Field(512, ge=64, le=2048,
+                     description="Height raster resolution (dim x dim)")
+
+
 class CityRasterRequest(BaseModel):
     """Request body for POST /api/cities/raster — burns OSM features onto a height-map grid."""
     north: float
@@ -378,7 +386,15 @@ class MergeLayerSpec(BaseModel):
 
 
 class MergeRequest(BaseModel):
-    """Request body for POST /api/dem/merge."""
+    """Request body for POST /api/composite/dem-merge."""
     bbox: Dict[str, float]
     dim: int = Field(300, ge=50, le=2000)
     layers: List[MergeLayerSpec]
+
+
+class HydrologyMergeRequest(BaseModel):
+    """Request body for POST /api/composite/hydrology-merge."""
+    dem_values: List[float]
+    dem_dimensions: List[int] = Field(..., min_length=2, max_length=2)
+    river_grid_values: List[float]
+    river_grid_dimensions: List[int] = Field(..., min_length=2, max_length=2)

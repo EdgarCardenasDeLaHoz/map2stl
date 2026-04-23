@@ -26,6 +26,7 @@ import './modules/export/export-handlers.js';
 import './modules/export/model-viewer.js';
 import './modules/map/compare-view.js';
 import './modules/regions/region-ui.js';
+import './modules/regions/regions-import-export.js';
 import './modules/dem/dem-merge.js';
 import './modules/layers/water-mask.js';
 import './modules/layers/hydrology-overlay.js';

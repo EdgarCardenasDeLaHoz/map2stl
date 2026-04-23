@@ -28,6 +28,8 @@
 // State
 // ─────────────────────────────────────────────────────────────────────────────
 
+const PRESET_VERSION = 1;
+
 const builtInPresets = {
     'default': {
         dim: 200, depthScale: 0.5, waterScale: 0.05,
@@ -53,6 +55,7 @@ const builtInPresets = {
 
 let _userPresets = {};
 let _lastAppliedPresetName = null;
+let _presetSnapshot = null;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Init
@@ -63,7 +66,11 @@ function initPresetProfiles() {
     try { saved = localStorage.getItem('strm2stl_userPresets'); } catch (_) { }
     if (saved) {
         try {
-            _userPresets = JSON.parse(saved);
+            const raw = JSON.parse(saved);
+            _userPresets = {};
+            for (const [name, preset] of Object.entries(raw)) {
+                _userPresets[name] = _migratePreset(preset);
+            }
             updatePresetSelect();
         } catch (e) {
             console.warn('Failed to load user presets:', e);
@@ -77,6 +84,7 @@ function _setupPresetEventListeners() {
     const loadBtn = document.getElementById('loadPresetBtn');
     const saveBtn = document.getElementById('savePresetBtn');
     const deleteBtn = document.getElementById('deletePresetBtn');
+    const revertBtn = document.getElementById('revertPresetBtn');
     const confirmBtn = document.getElementById('confirmSavePresetBtn');
     const cancelBtn = document.getElementById('cancelSavePresetBtn');
     const presetSelect = document.getElementById('presetSelect');
@@ -84,6 +92,7 @@ function _setupPresetEventListeners() {
     if (loadBtn) loadBtn.addEventListener('click', loadSelectedPreset);
     if (saveBtn) saveBtn.addEventListener('click', showSavePresetDialog);
     if (deleteBtn) deleteBtn.addEventListener('click', deleteSelectedPreset);
+    if (revertBtn) revertBtn.addEventListener('click', revertPreset);
     if (confirmBtn) confirmBtn.addEventListener('click', saveNewPreset);
     if (cancelBtn) cancelBtn.addEventListener('click', hideSavePresetDialog);
     if (presetSelect) presetSelect.addEventListener('dblclick', loadSelectedPreset);
@@ -130,8 +139,39 @@ function loadSelectedPreset() {
 
     if (!preset) { window.showToast('Preset not found', 'error'); return; }
 
+    // Snapshot current settings so the user can revert
+    _presetSnapshot = collectAllSettings();
+    const revertBtn = document.getElementById('revertPresetBtn');
+    if (revertBtn) revertBtn.style.display = '';
+
     applyPreset(preset);
     window.showToast('Preset loaded!', 'success');
+}
+
+/**
+ * Revert to the settings snapshot taken before the last preset load.
+ * Exposed on window so external callers (buttons, console) can trigger it.
+ */
+function revertPreset() {
+    if (!_presetSnapshot) { window.showToast('Nothing to revert', 'info'); return; }
+    applyAllSettings(_presetSnapshot);
+    _presetSnapshot = null;
+    const revertBtn = document.getElementById('revertPresetBtn');
+    if (revertBtn) revertBtn.style.display = 'none';
+    window.showToast('Preset reverted', 'info');
+}
+
+/**
+ * Migrate an older user preset to the current schema, filling in missing
+ * keys with built-in defaults. Adds a `_version` field to the stored object.
+ * @param {Object} preset
+ * @returns {Object}
+ */
+function _migratePreset(preset) {
+    if (!preset || typeof preset !== 'object') return preset;
+    const defaults = builtInPresets['default'];
+    const migrated = Object.assign({}, defaults, preset, { _version: PRESET_VERSION });
+    return migrated;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -463,7 +503,7 @@ function saveNewPreset() {
     if (!name) { window.showToast('Enter a preset name', 'warning'); return; }
     if (builtInPresets[name.toLowerCase()]) { window.showToast('Cannot overwrite built-in preset', 'error'); return; }
 
-    _userPresets[name] = getCurrentSettings();
+    _userPresets[name] = Object.assign(getCurrentSettings(), { _version: PRESET_VERSION });
     try { localStorage.setItem('strm2stl_userPresets', JSON.stringify(_userPresets)); }
     catch (_) { window.showToast('Could not save preset — storage full or unavailable', 'warning'); }
 
@@ -554,3 +594,4 @@ window.applyAllSettings = applyAllSettings;
 window.saveRegionSettings = saveRegionSettings;
 window.loadAndApplyRegionSettings = loadAndApplyRegionSettings;
 window.setupAutoSave = setupAutoSave;
+window.revertPreset = revertPreset;

@@ -45,6 +45,57 @@ window.setGridPixelMode = function setGridPixelMode(on) {
 let _layerOrder = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem', 'Hydrology'];
 const LAYER_STACK = _layerOrder;  // alias kept for backward compat
 
+/**
+ * Maps each layer mode key to its DOM canvas element ID.
+ * Kept separate from mode names so the HTML IDs can differ (e.g. Hydrology → layerHydroCanvas).
+ */
+const LAYER_CANVAS_IDS = {
+    Dem:          'layerDemCanvas',
+    Water:        'layerWaterCanvas',
+    Sat:          'layerSatCanvas',
+    SatImg:       'layerSatImgCanvas',
+    CityRaster:   'layerCityRasterCanvas',
+    CompositeDem: 'layerCompositeDemCanvas',
+    Hydrology:    'layerHydroCanvas',
+};
+
+/** Return the layer buffer canvas for the given mode, or null if not found. */
+function _getLayerBuffer(mode) {
+    const id = LAYER_CANVAS_IDS[mode];
+    return id ? document.getElementById(id) : null;
+}
+
+/**
+ * Release GPU backing store for a layer buffer by zeroing its dimensions.
+ * The canvas element remains in the DOM and will be resized again on next render.
+ */
+function _freeLayerBuffer(mode) {
+    const buf = _getLayerBuffer(mode);
+    if (buf && (buf.width > 0 || buf.height > 0)) {
+        buf.width = 0;
+        buf.height = 0;
+    }
+}
+
+/**
+ * Free ALL layer buffer canvases and clear the display canvas.
+ * Called on region change to prevent stale layer content from the previous region
+ * bleeding into the new render.
+ */
+window.clearAllLayerBuffers = function clearAllLayerBuffers() {
+    for (const mode of LAYER_STACK) {
+        _freeLayerBuffer(mode);
+    }
+    const display = document.getElementById('stackViewCanvas');
+    if (display && (display.width > 0 || display.height > 0)) {
+        const ctx = display.getContext('2d');
+        ctx.clearRect(0, 0, display.width, display.height);
+    }
+    // Reset zoom/pan so the new region starts at default view
+    stackZoom = { scale: 1, offsetX: 0, offsetY: 0 };
+    _gridCacheKey = null;
+};
+
 // Multi-layer state: set of active layer keys + per-layer opacity (0–1)
 let _activeLayers  = new Set(['Dem']);
 let _layerOpacities = { Dem: 1, Water: 0.7, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CompositeDem: 1, Hydrology: 0.8 };
@@ -58,6 +109,8 @@ window.setStackMode = function setStackMode(mode) {
 
     if (_activeLayers.has(mode) && _activeLayers.size > 1) {
         _activeLayers.delete(mode);
+        // Free GPU backing store for this buffer — it will be re-allocated on next render
+        _freeLayerBuffer(mode);
     } else {
         _activeLayers.add(mode);
         _activeMode = mode;
@@ -326,7 +379,7 @@ window.updateStackedLayers = function updateStackedLayers() {
     LAYER_STACK.forEach(mode => {
         if (!_activeLayers.has(mode)) return;
         const src    = sourceMap[mode]?.();
-        const buffer = document.getElementById(`layer${mode}Canvas`);
+        const buffer = _getLayerBuffer(mode);
         if (src && buffer) drawLayerToTarget(buffer, src);
     });
 
@@ -340,7 +393,7 @@ window.updateStackedLayers = function updateStackedLayers() {
         const masterOpacity = (document.getElementById('activeLayerOpacity')?.value ?? 100) / 100;
         LAYER_STACK.forEach(mode => {
             if (!_activeLayers.has(mode)) return;
-            const buffer = document.getElementById(`layer${mode}Canvas`);
+            const buffer = _getLayerBuffer(mode);
             if (!buffer || buffer.width === 0 || buffer.height === 0) return;
             dCtx.globalAlpha = masterOpacity * (_layerOpacities[mode] ?? 1);
             dCtx.drawImage(buffer, 0, 0);

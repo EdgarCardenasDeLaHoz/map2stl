@@ -141,11 +141,6 @@ class TestEndpointB64Keys:
         assert "dem_values_b64" in data
         assert "dem_values" not in data
 
-    def test_dem_raw_returns_b64(self, client):
-        r = client.get(f"/api/terrain/dem/raw?{self._QS}&dim=10")
-        data = r.json()
-        assert "dem_values_b64" in data
-
     def test_water_mask_returns_b64(self, client):
         r = client.get(f"/api/terrain/water-mask?{self._QS}&sat_scale=100")
         data = r.json()

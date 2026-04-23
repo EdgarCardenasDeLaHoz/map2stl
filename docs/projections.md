@@ -150,3 +150,52 @@ project_coordinates(
 ```python
 im = im[:, ~np.any(np.isnan(im), axis=0)]
 ```
+
+---
+
+## Technical facts & gotchas
+
+These implementation details are essential for correct layer alignment and projection behavior.
+
+### Data source coordinate systems
+
+| Source | Native CRS | Notes |
+|--------|------------|-------|
+| ESRI World Imagery (WMTS tiles) | **Web Mercator (EPSG:3857)** | Pixel rows are NOT uniformly spaced in latitude. At 60° N, Mercator stretches vertically by ~2×. Must convert to Plate Carrée before applying map projections. |
+| Earth Engine (ESA WorldCover, JRC Water) | Geographic (EPSG:4326 / Plate Carrée) | Pixels are uniform in lat/lon — no Mercator conversion needed. |
+| OpenTopography DEM tiles | Geographic (EPSG:4326) | Standard geographic grid. |
+| OSM / Overpass API | Geographic (EPSG:4326) | Vector data in lat/lon. |
+
+### Satellite Mercator→Plate Carrée conversion
+
+`core/sat.py → _mercator_to_plate_carree(img, north, south)` resamples ESRI satellite imagery from Web Mercator to Plate Carrée by computing per-row latitude→Mercator-y mapping and applying bilinear interpolation along the y-axis. This is called in `fetch_satellite_tiles()` after the bbox crop and before the final resize. Without this step, satellite tiles at high latitudes (e.g., Norway ~60° N) appear shifted south.
+
+### ESA land cover — categorical data
+
+ESA WorldCover uses integer class IDs (10=Tree cover, 20=Shrubland, 30=Grassland, 40=Cropland, 50=Built-up, 60=Bare, 70=Snow/ice, 80=Water, 90=Wetland, 95=Mangroves, 100=Moss/lichen). These are **categorical**, not continuous — interpolation between classes is meaningless (e.g., averaging "Tree cover" and "Water" produces "Cropland").
+
+- Always use **nearest-neighbour interpolation** (`order=0`) when resampling ESA data.
+- In `project_grid()`, categorical arrays use `fill_value=np.nan` (same as continuous) so that `clip_nans` works identically for all layer types. After clipping, NaN pixels are replaced with `0` via `np.nan_to_num()`.
+- Previously, categorical data used `fill_value=0` with `clip_nans=False`, which caused dimension mismatches between ESA and DEM layers.
+
+### Projection pipeline uniformity
+
+All raster endpoints pass data through `core/projection.py`. Key rules:
+
+- `maintain_dimensions=True` is used uniformly — output shape matches input shape.
+- `clip_nans` must use `fill_value=np.nan` for ALL data types (categorical and continuous) so that NaN-border clipping produces consistent dimensions across layers.
+- `project_water_arrays()` handles water mask + ESA as a paired operation, clipping both arrays identically from the water mask's NaN pattern.
+- `project_rgb_image()` projects RGB channel-by-channel with bilinear interpolation.
+- Cache keys include `projection` and `dataset` to avoid serving stale projected data.
+
+### Cosine projection geometry
+
+Cosine projection squishes each row horizontally by `cos(lat)`. At 60° N, `cos(60°) = 0.5`, so the row is half its original width. With `maintain_dimensions=True`, the output is resampled back to the original width via `np.interp`, preserving shape but stretching the content.
+
+### Layer compositing
+
+`stacked-layers.js` uses a shared letterboxed rectangle based on bbox aspect ratio. All layers are stretched to the same target rect via `drawImage` 9-arg form, regardless of native pixel dimensions. This means layers can have different resolutions and still align correctly as long as they cover the same geographic bbox.
+
+### City data constraints
+
+OSM building queries via Overpass API require bbox diagonal < 15 km. The server validates this with `validate_bbox_diagonal()`. For larger regions, city data should not be fetched.

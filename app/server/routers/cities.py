@@ -6,20 +6,17 @@ Delegates OSM fetching to core/osm.py and caching to core/cache.py.
 """
 
 from __future__ import annotations
-from app.server.schemas import CityRequest, CityRasterRequest
+from app.server.schemas import CityRequest, CityRasterRequest, EnhanceHeightsRequest
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
-import asyncio
 import json
 import logging
-import math
-from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, Response
 
-from app.server.config import OSM_CACHE_PATH, MAX_BBOX_DIAGONAL_KM
+from app.server.config import OSM_CACHE_PATH
 from app.server.core.validation import validate_bbox_diagonal, run_sync
 from app.server.core.responses import error_response
 
@@ -280,3 +277,80 @@ async def export_city_3mf(req: CityExportRequest):
     except Exception as e:
         logger.error(f"City 3MF export error: {e}", exc_info=True)
         return error_response("3MF export failed")
+
+
+# ---------------------------------------------------------------------------
+# Google 3D height enhancement
+# ---------------------------------------------------------------------------
+
+@router.get("/api/cities/google3d-available")
+async def google3d_available():
+    """Check if Google 3D Tiles API key is configured."""
+    from app.server.core.height.providers.google_3d import _get_api_key
+    return JSONResponse(content={"available": _get_api_key() is not None})
+
+
+@router.post("/api/cities/enhance-heights")
+async def enhance_heights(req: EnhanceHeightsRequest):
+    """Enhance building heights using Google 3D photogrammetric tiles.
+
+    Fetches a height raster from Google 3D Tiles, then samples it at
+    each building centroid to replace default (10 m) heights with real
+    photogrammetric measurements.
+    """
+    from app.server.core.height.providers.google_3d import Google3DProvider, _get_api_key
+    from app.server.core.osm import enhance_buildings_with_raster
+    import numpy as np
+
+    if not _get_api_key():
+        return error_response(
+            "Google Maps API key not configured. "
+            "Set GOOGLE_MAPS_API_KEY env var or add google_maps_api_key to config.json.",
+            400,
+        )
+
+    diag_km, diag_err = validate_bbox_diagonal(
+        req.north, req.south, req.east, req.west
+    )
+    if diag_err:
+        return diag_err
+
+    bbox = (req.north, req.south, req.east, req.west)
+    dim = (req.dim, req.dim)
+
+    try:
+        # Fetch terrain DEM for ground subtraction (DSM - DEM = building height)
+        from app.server.core.dem import compute_raw_dem
+        dem_result = await run_sync(
+            compute_raw_dem, req.north, req.south, req.east, req.west,
+            req.dim, 1,  # depth_scale=1 (no bathymetry scaling)
+        )
+        dem_array = None
+        if dem_result is not None:
+            dem_array = np.asarray(dem_result, dtype=np.float32)
+
+        # Fetch Google 3D height raster
+        provider = Google3DProvider()
+        height_result = await run_sync(
+            provider.fetch_heights, bbox, dim, dem_array
+        )
+
+        valid_px = int(np.count_nonzero(~np.isnan(height_result.raster)))
+        logger.info(
+            f"Google 3D raster: {valid_px}/{height_result.raster.size} valid pixels "
+            f"({valid_px / height_result.raster.size * 100:.1f}% coverage)"
+        )
+
+        # Enhance buildings
+        result = enhance_buildings_with_raster(
+            req.buildings,
+            height_result.raster,
+            bbox,
+            confidence_raster=height_result.confidence,
+        )
+
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.error(f"Height enhancement error: {e}", exc_info=True)
+        return error_response(f"Height enhancement failed: {str(e)}")

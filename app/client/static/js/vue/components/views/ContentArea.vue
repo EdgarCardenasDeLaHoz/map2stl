@@ -33,6 +33,7 @@
             <!-- Populated by JavaScript -->
           </tbody>
         </table>
+        <div id="regionsPagination" class="regions-pagination"></div>
       </div>
     </div>
 

@@ -75,7 +75,7 @@ window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {
 
     document.getElementById('clearRegionCacheBtn')?.addEventListener('click', async () => {
         const btn = document.getElementById('clearRegionCacheBtn');
-        const bbox = window.appState?.bbox;
+        const bbox = window.getCurrentBboxObject?.();
         if (!bbox || !bbox.north) {
             window.showToast?.('No region loaded', 'warning');
             return;

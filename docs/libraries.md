@@ -51,10 +51,14 @@ flowchart LR
 | `dem.py` | `geo2stl.projections` | `proj_map_geo_to_2D` | Legacy projection path |
 | `projection.py` | `geo2stl.projections` | `project_coordinates` | CRS grid/image transform |
 | `sat.py` | `geo2stl.sat2stl` | `fetch_bbox_image` | Satellite imagery fetch |
+| `sat.py` | `geo2stl.sat2stl` | `calculate_scale_for_dimensions` | Compute tile zoom for bbox (B-LIB4) |
 | `sat.py` | `geo2stl.geo2stl` | `stitch_tiles_no_rasterio` | Satellite tile merge |
 | `export.py` | `numpy2stl` | `array_to_mesh` | DEM → 3D mesh |
 | `export.py` | `numpy2stl` | `writeOBJ`, `write3MF` | Mesh file writers |
 | `cities_3d.py` | `numpy2stl.save` | `write3MF` | City model export |
+| `cities_3d.py` | `numpy2stl` | `array_to_mesh` | DEM → solid terrain mesh (B-LIB1, with fallback) |
+| `cities_3d.py` | `numpy2stl.generate` | `polygon_to_prism` | Building ring extrusion (B-LIB2, with fallback) |
+| `cities_3d.py` | `numpy2stl.solid` | `vertices_to_index` | Triangle indexing for extruded rings (B-LIB2, with fallback) |
 | `cities_3d.py` | `numpy2stl.simplify` | `simplify_mesh_surfaces` | Mesh simplification |
 
 ### `routers/` → Libraries (bypass — should go through core)
@@ -120,20 +124,63 @@ consumed only by its own internal modules and notebooks.
 |---|---|---|
 | `core/projection.py` | ✅ Clean | Three functions wrapping `project_coordinates` with app-specific defaults |
 | `core/export.py` | ✅ Clean | Uses `array_to_mesh` / `write3MF` / `writeOBJ` directly; DEM prep is app-layer |
-| `core/sat.py` | ✅ Clean | Direct delegation to `fetch_bbox_image` + `stitch_tiles_no_rasterio` |
-| `core/dem.py` | ⚠️ Mostly clean | One concern: uses legacy `proj_map_geo_to_2D` instead of `core/projection.project_grid` |
+| `core/sat.py` | ✅ Clean | Direct delegation to `fetch_bbox_image` + `stitch_tiles_no_rasterio`; uses `calculate_scale_for_dimensions` for tile scale (B-LIB4 resolved) |
+| `core/dem.py` | ✅ Clean | Projection path now routes through `core/projection.project_grid` (B-LIB3 resolved) |
+| `core/cities_3d.py` | ✅ Clean | Delegates to `array_to_mesh(solid=True)` and `polygon_to_prism` + `vertices_to_index` with availability guards and fallbacks (B-LIB1, B-LIB2 resolved) |
 
-### Violations
+### Remaining watch items
 
 | Module | Issue | Severity |
 |---|---|---|
-| `core/cities_3d.py` | Reimplements `_ear_clip()` polygon triangulation — `numpy2stl.polygon.triangulate_polygon` already does this | 🔴 High |
-| `core/cities_3d.py` | Reimplements `_extrude_ring()` extrusion — `numpy2stl.generate.polygon_to_prism` already does this | 🔴 High |
-| `core/cities_3d.py` | Reimplements `_terrain_mesh()` DEM→solid (~90 lines) — `numpy2stl.array_to_mesh(solid=True)` does this | 🔴 High |
-| `core/dem.py` | Uses legacy `geo2stl.geo2stl.proj_map_geo_to_2D` while rest of app uses `project_coordinates` | ⚠️ Medium |
-| `routers/terrain.py` | Imports `numpy2stl.oceans.make_dem_image` directly, bypassing `core/dem` | ⚠️ Medium |
+| `routers/terrain.py` | Imports `numpy2stl.oceans.make_dem_image` directly, bypassing `core/dem` | ⚠️ Medium (B-LIB5 resolved — routed through core) |
 
-See [proposals.md](proposals.md) B-LIB1–B-LIB3 for recommended refactors.
+### numpy2stl Delegation Pattern
+
+`cities_3d.py` uses availability guards so the app works even if the `triangle` / `shapely` dependency is missing:
+
+```python
+_ARRAY_TO_MESH_AVAILABLE = False
+try:
+    from numpy2stl import array_to_mesh as _array_to_mesh
+    _ARRAY_TO_MESH_AVAILABLE = True
+except ImportError:
+    pass
+
+_POLYGON_TO_PRISM_AVAILABLE = False
+try:
+    from numpy2stl.generate import polygon_to_prism as _polygon_to_prism
+    from numpy2stl.solid import vertices_to_index as _vertices_to_index
+    _POLYGON_TO_PRISM_AVAILABLE = True
+except ImportError:
+    pass
+```
+
+When calling `array_to_mesh`, stdout is temporarily redirected to suppress progress messages printed by the library:
+
+```python
+import io, sys
+_buf = io.StringIO()
+sys.stdout, _saved = _buf, sys.stdout
+try:
+    result = _array_to_mesh(scaled, floor_val=0.0, solid=True)
+finally:
+    sys.stdout = _saved
+```
+
+See [arch.md § numpy2stl Delegation Pattern](arch.md#numpy2stl-delegation-pattern) for the full flow diagram.
+
+### Satellite Scale Calculation (B-LIB4)
+
+`core/sat.py` now uses `geo2stl.sat2stl.calculate_scale_for_dimensions` instead of manually computing tile scale:
+
+```python
+from geo2stl.sat2stl import fetch_bbox_image, calculate_scale_for_dimensions
+
+target_dim = max(width_px, dim or width_px)
+scale = max(30, calculate_scale_for_dimensions(north, south, east, west, target_dim))
+```
+
+This ensures satellite tiles are fetched at the correct zoom level for the given bounding box size, avoiding over- or under-resolution imagery.
 
 ---
 
@@ -143,15 +190,15 @@ Functions available in libraries but not consumed by the app:
 
 | Library | Unused | Notes |
 |---|---|---|
-| `geo2stl.sat2stl` | `calculate_scale_for_dimensions` | `core/sat.py` reimplements this inline |
 | `geo2stl.sat2stl` | `get_aquatic_regions` | Higher-level water mask wrapper |
 | `geo2stl.write` | All functions | App uses `numpy2stl` writers instead |
-| `numpy2stl` | `polygon_to_prism`, `perimeter_to_walls` | Reimplemented in `cities_3d.py` |
 | `numpy2stl` | `writeSTL` | App uses trimesh for STL instead |
 | `numpy2stl` | `boolean`, `puzzle`, `view`, `verify` | Notebook/offline use only |
 | `city2stl` | All modules | Notebook-only; not used by server |
 
-These are legitimate library features for notebooks — not dead code per se —
-but the app only uses: `array_to_mesh`, `write3MF`, `writeOBJ`,
-`simplify_mesh_surfaces`, `make_dem_image`, `fetch_bbox_image`,
-`stitch_tiles_no_rasterio`, `project_coordinates`, `get_projection_info`.
+Previously unused but now integrated:
+- `geo2stl.sat2stl.calculate_scale_for_dimensions` — now used in `core/sat.py` (B-LIB4)
+- `numpy2stl.polygon_to_prism`, `numpy2stl.solid.vertices_to_index` — now used in `core/cities_3d.py` with availability guards (B-LIB2)
+- `numpy2stl.array_to_mesh(solid=True)` for terrain — now used in `core/cities_3d.py` with availability guard (B-LIB1)
+
+The app uses these library functions: `array_to_mesh`, `write3MF`, `writeOBJ`, `simplify_mesh_surfaces`, `make_dem_image`, `fetch_bbox_image`, `calculate_scale_for_dimensions`, `stitch_tiles_no_rasterio`, `project_coordinates`, `get_projection_info`, `polygon_to_prism`, `vertices_to_index`.

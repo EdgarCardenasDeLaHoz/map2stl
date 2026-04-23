@@ -494,10 +494,89 @@ function updatePuzzlePreview() {
 async function exportPuzzle3MF() {
     const region = window.appState?.selectedRegion;
     if (!region) { window.showToast('Select a region first', 'warning'); return; }
+    const md = window.appState?.generatedModelData;
+    if (!md) { window.showToast('Please generate a model first', 'warning'); return; }
+
     const pX = parseInt(document.getElementById('splitCols')?.value) || 3;
     const pY = parseInt(document.getElementById('splitRows')?.value) || 3;
     if (pX * pY > 64) { window.showToast('Too many pieces (max 64 total)', 'warning'); return; }
-    window.showToast('Puzzle 3MF export: backend implementation pending', 'warning');
+
+    const connectorMm = parseFloat(document.getElementById('splitPuzzleM')?.value) || 50;
+    const connectorsN = parseInt(document.getElementById('splitPuzzleBaseN')?.value) || 10;
+    const borderH = parseFloat(document.getElementById('splitBorderHeight')?.value) || 1.0;
+    const borderOff = parseFloat(document.getElementById('splitBorderOffset')?.value) || 5.0;
+    const includeBorder = document.getElementById('splitIncludeBorder')?.checked ?? true;
+
+    const statusEl = document.getElementById('modelStatus');
+    const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
+
+    try {
+        setStatus(`Starting puzzle export (${pX}×${pY})...`);
+
+        const body = {
+            dem_values: md.values,
+            height: md.height,
+            width: md.width,
+            model_height: md.resolution,
+            base_height: md.baseHeight,
+            exaggeration: md.exaggeration,
+            sea_level_cap: document.getElementById('exportSeaLevelCap')?.checked || false,
+            name: region.name || 'terrain',
+            split_cols: pX,
+            split_rows: pY,
+            connector_size_mm: connectorMm,
+            connectors_per_edge: connectorsN,
+            border_height_mm: borderH,
+            border_offset_mm: borderOff,
+            include_border: includeBorder,
+        };
+
+        // Start the async task
+        const startResp = await fetch('/api/export/puzzle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!startResp.ok) {
+            const err = await startResp.json();
+            throw new Error(err.error || 'Failed to start puzzle export');
+        }
+        const { task_id } = await startResp.json();
+
+        // Poll for progress
+        let status = { status: 'running', progress: 0 };
+        while (status.status === 'running') {
+            await new Promise(r => setTimeout(r, 300));
+            const pollResp = await fetch(`/api/export/status/${encodeURIComponent(task_id)}`);
+            if (!pollResp.ok) throw new Error('Lost connection to export task');
+            status = await pollResp.json();
+            setStatus(`Puzzle: ${status.message} (${status.progress}%)`);
+        }
+
+        if (status.status === 'error') throw new Error(status.message || 'Puzzle export failed');
+
+        // Download
+        setStatus('Downloading puzzle 3MF...');
+        const dlResp = await fetch(`/api/export/download/${encodeURIComponent(task_id)}`);
+        if (!dlResp.ok) throw new Error('Download failed');
+        const blob = await dlResp.blob();
+
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${region.name || 'terrain'}_puzzle.3mf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+
+        const pieces = dlResp.headers.get('X-Piece-Count') || (pX * pY);
+        window.showToast(`Puzzle 3MF ready - ${pieces} pieces`, 'success', 4000);
+        setStatus(`Puzzle export complete (${pieces} pieces)`);
+    } catch (e) {
+        console.error('Puzzle export error:', e);
+        window.showToast('Puzzle export failed: ' + e.message, 'error');
+        setStatus('Puzzle export failed');
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

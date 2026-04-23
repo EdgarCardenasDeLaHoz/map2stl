@@ -3,6 +3,7 @@
 > See `docs/` for architecture reference. Completed items: see `docs/functionality_doc.md` and `docs/issues.md`.
 > Per-module TODOs and improvement plans are in each module's `TODO.md`.
 > **AI-proposed features live in [`docs/proposals.md`](docs/proposals.md) — set status to `approved` there to queue implementation.**
+> **Current 19-item working list with detail links:** [`docs/todo-linked-index.md`](docs/todo-linked-index.md)
 
 ---
 
@@ -63,11 +64,20 @@
 - **P6** (`export/`) — Elevation band multi-material STL export
 - **EXP-1** (`export/`) — Progress indicator during STL generation
 - **REG-1** (`regions/`) — Region list pagination (virtual scroll or 20-per-page)
-- **REG-2** (`regions/`) — Region import/export as JSON
+- ~~**REG-2** (`regions/`) — Region import/export as JSON~~
 - **UX-1** (`map/`) — Consolidate region creation to single entry point
 - ~~**UX-2** (`map/`) — Add text labels to floating map buttons~~
 - ~~**UX-3** (`map/`) — Clarify sidebar 3-state toggle~~
 - **UX-M** (`layers/`) — Lazy-allocate hidden layer canvases (GPU memory)
+
+---
+
+## Height Pipeline
+
+- ~~**Phase 1a** — Core height package + 4 providers (nDSM, WSF3D, Copernicus, 3DEP LiDAR) + router + merge~~
+- ~~**Phase 1b** — Supplementary sources (GHSL, Open Buildings, shadow estimation)~~
+- **Phase 2** — CNN height prediction (DSM super-resolution, custom U-Net)
+- **Phase 3** — STL import + AI infill
 
 ---
 

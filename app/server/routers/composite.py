@@ -1,10 +1,10 @@
 """
-Composite DEM routes — fast city raster contribution endpoint.
+Composite DEM routes — composition operations that combine data layers.
 
 POST /api/composite/city-raster
   Reads OSM buildings/roads/waterways from the disk cache (written by
   /api/cities) and rasterizes them into per-pixel height-delta arrays using
-  PIL/Pillow.  This is ~50× faster than the equivalent JS scanline fill.
+  PIL/Pillow.  This is ~50x faster than the equivalent JS scanline fill.
 
   Weights / scales are NOT applied server-side — the client multiplies these
   normalized arrays by the slider values.  This means only a bbox or dimension
@@ -13,38 +13,36 @@ POST /api/composite/city-raster
 
   Input:  { north, south, east, west, width, height }
   Output: { buildings, roads, waterways, walls, width, height }
-            each is a flat float32 list at (width × height) pixels.
+            each is a flat float32 list at (width x height) pixels.
               buildings  — per-pixel building height in metres  (scale=1)
-              roads      — binary road mask (0 or 1)
+              roads      ��� binary road mask (0 or 1)
               waterways  — binary waterway mask (0 or 1)
               walls      — per-pixel wall height in metres  (scale=1)
 
   Cached under namespace "composite" by (bbox, width, height).
+
+POST /api/composite/dem-merge
+  Merge multiple elevation/mask layers into one composite DEM with
+  per-layer processing (clip, smooth, sharpen, normalize) and blend modes.
+
+POST /api/composite/hydrology-merge
+  Merge river depression values into a DEM elevation grid.
 """
 
 from app.server.core.validation import run_sync, METRES_PER_DEGREE
 from app.server.core.cache import make_cache_key, osm_cache_key, read_array_cache, write_array_cache, read_osm_cache
+from app.server.schemas import HydrologyMergeRequest, MergeRequest
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
 import numpy as np
-import asyncio
 import logging
-from functools import partial
-from pathlib import Path
-import sys
-
-# app/server/routers → routers → server → app → strm2stl
-_STRM2STL_DIR = str(Path(__file__).parent.parent.parent.parent)
-if _STRM2STL_DIR not in sys.path:
-    sys.path.insert(0, _STRM2STL_DIR)
-
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["composite"])
 
 
-class CityRasterRequest(BaseModel):
+class CompositeCityRasterRequest(BaseModel):
     north:  float
     south:  float
     east:   float
@@ -177,7 +175,7 @@ def _rasterize_walls(features, coords_to_px, PW, PH, m_per_px):
 # Coordinator
 # ---------------------------------------------------------------------------
 
-def _rasterize_city(req: CityRasterRequest) -> dict:
+def _rasterize_city(req: CompositeCityRasterRequest) -> dict:
     """Synchronous rasterization — called via run_in_executor."""
     N, S, E, W = req.north, req.south, req.east, req.west
     PW, PH = req.width, req.height
@@ -233,7 +231,7 @@ def _rasterize_city(req: CityRasterRequest) -> dict:
 
 
 @router.post("/api/composite/city-raster")
-async def get_city_raster(req: CityRasterRequest):
+async def get_city_raster(req: CompositeCityRasterRequest):
     """
     Rasterize OSM features to height-delta grids using PIL.
     Returns normalized arrays (scale=1); client applies slider weights.
@@ -287,3 +285,136 @@ async def get_city_raster(req: CityRasterRequest):
         result["height"], result["width"] = arr.shape
 
     return JSONResponse(content=result)
+
+
+# ---------------------------------------------------------------------------
+# DEM layer merge — composite multiple elevation/mask layers
+# ---------------------------------------------------------------------------
+
+@router.post("/api/composite/dem-merge")
+async def merge_dem_layers(req: MergeRequest):
+    """
+    Merge multiple elevation/mask layers into one composite DEM.
+    Each layer specifies a source, resolution, per-layer processing, and a blend mode.
+    """
+    from app.server.core.dem import (
+        fetch_layer_data, apply_layer_processing, blend_layers,
+    )
+    from app.server.core.validation import b64_encode
+    from app.server.config import TEST_MODE
+
+    if not req.layers:
+        return JSONResponse(content={"error": "At least one layer required"}, status_code=422)
+
+    north = req.bbox.get("north")
+    south = req.bbox.get("south")
+    east = req.bbox.get("east")
+    west = req.bbox.get("west")
+    if None in (north, south, east, west):
+        return JSONResponse(content={"error": "bbox must contain north/south/east/west"}, status_code=422)
+
+    if TEST_MODE:
+        h = w = req.dim
+        im = np.linspace(0, 100, h * w, dtype=np.float64).reshape(h, w)
+        return JSONResponse(content={
+            "dem_values_b64": b64_encode(im),
+            "dimensions": [h, w],
+            "min_elevation": 0.0, "max_elevation": 100.0, "mean_elevation": 50.0,
+            "bbox": [west, south, east, north],
+            "source": "merge", "layer_count": len(req.layers),
+        })
+
+    try:
+        import cv2 as _cv2
+        composite = None
+
+        for spec in req.layers:
+            raw = await run_sync(
+                fetch_layer_data, spec.source, north, south, east, west, spec.dim)
+            processed = await run_sync(
+                apply_layer_processing, raw, spec.processing)
+
+            if composite is None:
+                h, w = processed.shape
+                if h >= w:
+                    out_h, out_w = req.dim, max(1, int(req.dim * w / h))
+                else:
+                    out_w, out_h = req.dim, max(1, int(req.dim * h / w))
+                composite = _cv2.resize(
+                    processed.astype(np.float32), (out_w, out_h),
+                    interpolation=_cv2.INTER_LINEAR).astype(np.float64)
+            else:
+                composite = blend_layers(
+                    base=composite, layer=processed,
+                    blend_mode=spec.blend_mode, weight=spec.weight,
+                    output_shape=composite.shape)
+
+        if composite is None:
+            return JSONResponse(content={"error": "No layers produced output"}, status_code=500)
+
+        composite = np.nan_to_num(composite, nan=0.0,
+                                  posinf=np.finfo(np.float32).max,
+                                  neginf=np.finfo(np.float32).min)
+        h, w = composite.shape
+        return JSONResponse(content={
+            "dem_values_b64": b64_encode(composite),
+            "dimensions": [h, w],
+            "min_elevation": float(np.nanmin(composite)),
+            "max_elevation": float(np.nanmax(composite)),
+            "mean_elevation": float(np.nanmean(composite)),
+            "bbox": [west, south, east, north],
+            "source": "merge", "layer_count": len(req.layers),
+        })
+
+    except Exception as e:
+        logger.error(f"DEM merge failed: {e}", exc_info=True)
+        return JSONResponse(content={"error": "DEM merge failed"}, status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# Hydrology merge — combine river depressions with a DEM grid
+# ---------------------------------------------------------------------------
+
+@router.post("/api/composite/hydrology-merge")
+async def merge_hydrology(req: HydrologyMergeRequest):
+    """
+    Merge hydrology depression values into a DEM elevation grid.
+
+    Both arrays must have identical dimensions. River depression values
+    (negative) are added to the DEM via element-wise minimum.
+    """
+    from app.server.core.hydrology import merge_rivers_with_dem
+    from app.server.core.validation import b64_encode
+    from app.server.config import TEST_MODE
+
+    dem_h, dem_w = req.dem_dimensions
+    river_h, river_w = req.river_grid_dimensions
+
+    try:
+        dem_arr = np.array(req.dem_values, dtype=np.float32).reshape(dem_h, dem_w)
+        river_arr = np.array(req.river_grid_values, dtype=np.float32).reshape(river_h, river_w)
+    except Exception as e:
+        return JSONResponse(content={"error": f"Failed to reshape arrays: {e}"}, status_code=400)
+
+    if dem_arr.shape != river_arr.shape:
+        return JSONResponse(
+            content={"error": f"DEM shape {dem_arr.shape} != river shape {river_arr.shape}"},
+            status_code=400)
+
+    if TEST_MODE:
+        return JSONResponse(content={
+            "merged_dem_b64": b64_encode(dem_arr),
+            "merged_dimensions": [dem_h, dem_w],
+        })
+
+    try:
+        merged = await run_sync(merge_rivers_with_dem, dem_arr, river_arr)
+        if merged is None:
+            return JSONResponse(content={"error": "Merge operation failed"}, status_code=500)
+        return JSONResponse(content={
+            "merged_dem_b64": b64_encode(merged),
+            "merged_dimensions": [merged.shape[0], merged.shape[1]],
+        })
+    except Exception as e:
+        logger.error(f"Hydrology merge failed: {e}", exc_info=True)
+        return JSONResponse(content={"error": "Hydrology merge failed"}, status_code=500)

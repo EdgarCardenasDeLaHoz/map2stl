@@ -535,16 +535,6 @@ window.loadCityRaster = async function loadCityRaster() {
     }
 };
 
-/**
- * Re-project the city raster canvas using the current projection setting.
- * Called when the projection dropdown changes.
- */
-window._reprojectCityRaster = function _reprojectCityRaster() {
-    const raw = window.appState?._cityRasterRawCanvas;
-    if (!raw) return;
-    if (window.appState) window.appState.cityRasterSourceCanvas = raw;
-};
-
 /** Wire the City Heights visibility toggle and opacity slider. */
 window._setupCityRasterLayer = function _setupCityRasterLayer() {
     const toggle = document.getElementById('layerCityRasterVisible');

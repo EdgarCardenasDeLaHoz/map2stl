@@ -15,6 +15,7 @@
       </div>
       <div class="preset-buttons">
         <button id="loadPresetBtn"   class="btn btn-primary"   style="flex:1;"><span class="btn-icon">📂</span> Load</button>
+        <button id="revertPresetBtn" class="btn btn-secondary" style="flex:0;padding:6px 12px;display:none;" title="Undo last preset load"><span class="btn-icon">↩</span></button>
         <button id="savePresetBtn"   class="btn btn-secondary" style="flex:1;"><span class="btn-icon">💾</span> Save</button>
         <button id="deletePresetBtn" class="btn btn-danger"    style="flex:0;padding:6px 12px;"><span class="btn-icon">🗑️</span></button>
       </div>

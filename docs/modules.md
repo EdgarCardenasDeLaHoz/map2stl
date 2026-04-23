@@ -42,7 +42,7 @@ flowchart LR
 ### `layers/` — Layer composition & city overlays
 | File | Key exports | Purpose |
 |------|-------------|---------|
-| `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `applyStackedTransform` | Single-canvas stacked view, zoom/pan |
+| `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `applyStackedTransform`, `moveLayer`, `setLayerOpacity`, `getLayerOrder` | Single-canvas stacked view, zoom/pan; uses `LAYER_CANVAS_IDS` registry + `_getLayerBuffer`/`_freeLayerBuffer` for GPU memory management |
 | `composite-dem.js` | `computeCompositeDem`, `setupCompositeDemControls` | Additive height contributions + ML feature arrays |
 | `water-mask.js` | `loadWaterMask`, `renderWaterMask`, `renderEsaLandCover` | Water mask + ESA land cover |
 | `city-overlay.js` | `loadCityData`, `renderCityOverlay`, `window.renderCityOnDEM` | OSM building/road/waterway overlay |
@@ -60,12 +60,12 @@ flowchart LR
 | File | Key exports | Purpose |
 |------|-------------|---------|
 | `regions.js` | `loadCoordinates`, `selectCoordinate`, `goToEdit` | Region CRUD, sidebar list, selection |
-| `region-ui.js` | `renderCoordinatesList`, `populateRegionsTable`, `groupRegionsByContinent` | Sidebar views, notes, groups |
+| `region-ui.js` | `renderCoordinatesList`, `populateRegionsTable`, `groupRegionsByContinent`, `setupRegionsTable` | Sidebar views, notes, groups; paginated table (20/page, search filter via `_tablePage`/`_tableSearch`) |
 
 ### `export/` — 3D export
 | File | Key exports | Purpose |
 |------|-------------|---------|
-| `model-viewer.js` | `initModelViewer`, `previewModelIn3D`, `haversineDiagKm`, `exportPuzzle3MF` | Three.js terrain preview + puzzle export |
+| `model-viewer.js` | `initModelViewer`, `previewModelIn3D`, `haversineDiagKm`, `exportPuzzle3MF`, `resetViewerCamera`, `rebuildViewerColors`, `setViewerNormals`, `setViewerAutoRotate` | Three.js terrain preview; orbit/pan/zoom + pinch-zoom; puzzle cut preview; async puzzle export with progress polling |
 | `export-handlers.js` | `downloadSTL`, `downloadModel`, `downloadCrossSection` | STL/OBJ/3MF/cross-section downloads |
 
 ### `ui/` — UI management
@@ -73,7 +73,7 @@ flowchart LR
 |------|-------------|---------|
 | `view-management.js` | `switchView`, `switchDemSubtab`, `cycleSidebarState` | Tab switching + sidebar state machine |
 | `app-setup.js` | `setupOpacityControls`, `loadAllLayers`, `saveCurrentRegion` | App init wiring helpers |
-| `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings` | Preset save/load/apply |
+| `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset` | Preset save/load/apply; `PRESET_VERSION` migration; `_presetSnapshot` revert; `_migratePreset()` fills missing keys from built-in defaults |
 | `curve-editor.js` | `initCurveEditor`, `applyCurveTodem`, `interpolateCurve`, `undoCurve` | Elevation curve editor (spline + undo/redo) |
 | `keyboard-shortcuts.js` | (no named exports) | Keyboard shortcut event listeners |
 
@@ -104,6 +104,39 @@ ui/view-management → dem/dem-main → app.js
 - `app.js` is loaded as plain `<script>`, **after** all modules. It is the only non-module file.
 - CDN globals (`window.L`, `window.THREE`, `window.Plotly`) are loaded as `<script>` tags before `main.js`.
 - Colormaps: `terrain`, `viridis`, `jet`, `rainbow`, `hot`, `gray` — must match `COLORMAPS` in `mapElevationToColor()`.
+
+## Layer Canvas Lifecycle
+
+```mermaid
+flowchart TD
+    INIT["Page Load"] --> REG["LAYER_CANVAS_IDS registered<br/>(stacked-layers.js init)"]
+    REG --> IDLE["All layers inactive"]
+    IDLE --> ACT["setStackMode('Dem')"]
+    ACT --> GET["_getLayerBuffer('Dem')<br/>→ getElementById('layerDemCanvas')"]
+    GET --> RENDER["updateStackedLayers()<br/>→ drawImage to stackViewCanvas"]
+    RENDER --> SWITCH{"Mode switch?"}
+    SWITCH -->|Yes| FREE["_freeLayerBuffer(old)<br/>canvas.width = canvas.height = 0<br/>(releases GPU backing store)"]
+    FREE --> ACT
+    SWITCH -->|No| RENDER
+```
+
+## Preset Lifecycle
+
+```mermaid
+flowchart LR
+    INIT2["initPresetProfiles()"] --> LOAD["Load from localStorage"]
+    LOAD --> MIG["_migratePreset(preset)<br/>merge with builtInPresets.default<br/>add _version: PRESET_VERSION"]
+    MIG --> READY["Presets ready"]
+    READY --> SELECT["loadSelectedPreset()"]
+    SELECT --> SNAP["_presetSnapshot = collectAllSettings()"]
+    SNAP --> APPLY["applyAllSettings(preset)"]
+    APPLY --> SHOW["Show #revertPresetBtn"]
+    SHOW --> REVERT{"User reverts?"}
+    REVERT -->|Yes| RESTORE["applyAllSettings(_presetSnapshot)"]
+    RESTORE --> HIDE["Hide button, clear snapshot"]
+    REVERT -->|No| SAVE["saveNewPreset()"]
+    SAVE --> LS["localStorage ← {settings, _version}"]
+```
 
 ---
 

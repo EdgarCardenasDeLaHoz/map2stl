@@ -37,6 +37,7 @@ window.appState.currentDemBbox = null;
 window.appState.osmCityData = null;
 window.appState.lastDemData = null;
 window.appState.lastWaterMaskData = null;
+window.appState.satEsaLoaded = false;
 
 // Shared helpers (set later by modules)
 window.appState.showToast = null;
@@ -110,6 +111,11 @@ function clearLayerCache() {
     window.appState.satImgSourceCanvas = null;
     window.appState._satImgRawCanvas = null;
     window.appState._satImgBbox = null;
+    window.appState.satEsaLoaded = false;
+    window.appState.hydrologySourceCanvas = null;
+
+    // Free all DOM layer buffer canvases and reset the stacked view
+    window.clearAllLayerBuffers?.();
 
     // Update status indicators
     window['events']?.emit(window.EV?.STATUS_UPDATE);
@@ -185,6 +191,7 @@ function isLayerCurrent(layerName) {
         Math.abs(currentBbox.east - layerBbox.east) < epsilon &&
         Math.abs(currentBbox.west - layerBbox.west) < epsilon;
 }
+window.getCurrentBboxObject = getCurrentBboxObject;
 
 // BBOX_COLORS and currentBboxColorIndex defined in modules/map-globe.js
 // and exposed as window.BBOX_COLORS / window.resetBboxColorIndex there.
@@ -282,6 +289,7 @@ window.setSidebarState = (s) => { window.appState.sidebarState = s; };
 
 window.clearLayerDisplays = clearLayerDisplays;
 window.clearLayerCache = clearLayerCache;
+window.isLayerCurrent = isLayerCurrent;
 
 // Appearance
 window.appState.waterOpacity = 0.7;

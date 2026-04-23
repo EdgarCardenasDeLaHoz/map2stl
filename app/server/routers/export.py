@@ -21,6 +21,10 @@ from app.server.core.export import (
     generate_3mf,
     generate_crosssection,
     generate_mesh_preview,
+    generate_puzzle_3mf,
+    start_export_task,
+    get_task_status,
+    get_task_file,
 )
 
 
@@ -59,3 +63,44 @@ async def export_crosssection(request: Request):
     """Generate a cross-section STL along a chosen latitude or longitude line."""
     data = await request.json()
     return generate_crosssection(data)
+
+
+@router.post("/api/export/puzzle")
+async def export_puzzle(request: Request):
+    """Start an async puzzle 3MF export. Returns {task_id} for polling."""
+    data = await request.json()
+    task_id = start_export_task(data, "puzzle")
+    return JSONResponse(content={"task_id": task_id})
+
+
+# ---------------------------------------------------------------------------
+# Async export with progress polling
+# ---------------------------------------------------------------------------
+
+@router.post("/api/export/start")
+async def export_start(request: Request):
+    """Start an async export task. Returns {task_id} for polling."""
+    data = await request.json()
+    fmt = data.pop("format", "stl")
+    if fmt not in ("stl", "obj", "3mf", "puzzle"):
+        return JSONResponse(content={"error": f"Unsupported format: {fmt}"}, status_code=400)
+    task_id = start_export_task(data, fmt)
+    return JSONResponse(content={"task_id": task_id})
+
+
+@router.get("/api/export/status/{task_id}")
+async def export_status(task_id: str):
+    """Poll progress of an async export task."""
+    status = get_task_status(task_id)
+    if status is None:
+        return JSONResponse(content={"error": "Task not found"}, status_code=404)
+    return JSONResponse(content=status)
+
+
+@router.get("/api/export/download/{task_id}")
+async def export_download(task_id: str):
+    """Download the result file of a completed export task."""
+    response = get_task_file(task_id)
+    if response is None:
+        return JSONResponse(content={"error": "Task not found or not complete"}, status_code=404)
+    return response

@@ -101,9 +101,67 @@ Within "Edit", DEM sub-tabs (managed by `switchDemSubtab()`):
 
 `cycleSidebarState()` → `'normal'` → `'list'` → `'table'` → `'normal'`
 
-### Stacked Layers View
+### Preset Versioning & Revert
 
-All 6 layer canvases (`layerDemCanvas`, `layerWaterCanvas`, etc.) are hidden offscreen buffers. `stackViewCanvas` is the only visible canvas. `updateStackedLayers()` copies the active mode buffer to `stackViewCanvas`. `setStackMode(mode)` switches active mode.
+Presets are stored in `localStorage` as JSON objects. `PRESET_VERSION` (currently `1`) guards against stale preset shapes. When a preset is loaded, `_migratePreset(preset)` merges it with `builtInPresets['default']` so that any new settings keys are populated with defaults.
+
+**Revert flow:**
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant P as presets.js
+    participant LS as localStorage
+
+    U->>P: loadSelectedPreset()
+    P->>P: _presetSnapshot = collectAllSettings()
+    P->>P: applyAllSettings(preset)
+    P->>P: show #revertPresetBtn
+    U->>P: click "↩ Revert"
+    P->>P: revertPreset()
+    P->>P: applyAllSettings(_presetSnapshot)
+    P->>P: hide #revertPresetBtn, clear _presetSnapshot
+```
+
+When the user saves a new preset, `{ ...getCurrentSettings(), _version: PRESET_VERSION }` is written to `localStorage`. On next load, `_migratePreset()` merges any missing keys from the built-in default.
+
+### Region List Pagination
+
+The regions table in the sidebar supports search and 20-row pagination managed entirely in `region-ui.js`:
+
+- `TABLE_PAGE_SIZE = 20` (module constant)
+- `_tablePage` and `_tableSearch` hold current pagination state
+- `populateRegionsTable()` filters by search string, slices to current page, and re-renders
+- `_renderTablePagination(total, totalPages)` writes Prev/Next buttons into `#regionsPagination`; the div is hidden when total ≤ 20
+
+An `indexByName` Map preserves original region indices (for settings lookups) across filtered/paginated views.
+
+
+
+All 7 layer canvases are hidden offscreen buffers. `stackViewCanvas` is the only visible canvas. `updateStackedLayers()` composites the active mode buffers onto `stackViewCanvas`. `setStackMode(mode)` switches active mode.
+
+**Layer canvas registry (`LAYER_CANVAS_IDS`)** in `stacked-layers.js` maps each layer mode key to its DOM canvas ID:
+
+| Mode key | Canvas ID |
+|----------|-----------|
+| `Dem` | `layerDemCanvas` |
+| `Water` | `layerWaterCanvas` |
+| `Sat` | `layerSatCanvas` |
+| `SatImg` | `layerSatImgCanvas` |
+| `CityRaster` | `layerCityRasterCanvas` |
+| `CompositeDem` | `layerCompositeDemCanvas` |
+| `Hydrology` | `layerHydroCanvas` |
+
+**Canvas lifecycle:** `_getLayerBuffer(mode)` retrieves the canvas by registry lookup. `_freeLayerBuffer(mode)` zeros `width` and `height` to release the GPU backing store when a layer is deactivated. This prevents accumulation of GPU memory for layers not currently in use.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Inactive
+    Inactive --> Active : setStackMode(mode)
+    Active --> Composited : updateStackedLayers()
+    Active --> Inactive : setStackMode(other) → _freeLayerBuffer()
+    Composited --> Active : next frame
+```
 
 ---
 
@@ -162,6 +220,69 @@ app/
 - Never use `os.chdir()` in handlers — process-global, causes data races
 - See [CLAUDE.md § Editing Rules](../CLAUDE.md#editing-rules) for async/executor constraints and full editing guidelines
 <!-- Note: CLAUDE.md lives outside docs/; this link works on GitHub but not MkDocs -->
+
+### numpy2stl Delegation Pattern
+
+`core/cities_3d.py` and `core/export.py` delegate to `numpy2stl` with availability guards — the library is tried first and a manual fallback runs if unavailable.
+
+```mermaid
+flowchart TD
+    CALL["Core function called"] --> TRY["Try numpy2stl import"]
+    TRY --> AVAIL{"Available?"}
+    AVAIL -->|Yes| NUMPY["Call numpy2stl function<br/>(array_to_mesh, polygon_to_prism, etc.)"]
+    AVAIL -->|No| FALLBACK["Run built-in fallback<br/>(ear-clip, manual mesh)"]
+    NUMPY --> SUPPRESS["Suppress stdout<br/>(progress messages)"]
+    SUPPRESS --> RESULT["Return result"]
+    FALLBACK --> RESULT
+```
+
+Key guard pattern:
+```python
+_ARRAY_TO_MESH_AVAILABLE = False
+try:
+    from numpy2stl import array_to_mesh as _array_to_mesh
+    _ARRAY_TO_MESH_AVAILABLE = True
+except ImportError:
+    pass
+
+# In function body:
+if _ARRAY_TO_MESH_AVAILABLE:
+    import io, sys
+    _buf = io.StringIO()
+    sys.stdout, _saved = _buf, sys.stdout
+    try:
+        result = _array_to_mesh(scaled, floor_val=0.0, solid=True)
+    finally:
+        sys.stdout = _saved
+else:
+    result = _manual_fallback(...)
+```
+
+### Async Export Pipeline
+
+Long-running exports (puzzle 3MF, large STL) use a background-thread task system:
+
+```mermaid
+sequenceDiagram
+    participant FE as Browser
+    participant BE as FastAPI
+    participant BG as Background Thread
+    participant FS as Filesystem
+
+    FE->>BE: POST /api/export/start {format, dem_values, ...}
+    BE->>BG: threading.Thread(target=_run_export_pipeline)
+    BE-->>FE: {task_id}
+    loop Poll every 300ms
+        FE->>BE: GET /api/export/status/{task_id}
+        BE-->>FE: {status, progress, message}
+    end
+    BG->>FS: Write temp file
+    BG->>BE: task.complete(path, filename)
+    FE->>BE: GET /api/export/download/{task_id}
+    BE-->>FE: FileResponse (temp file deleted after send)
+```
+
+Tasks expire after 300 seconds. The temp file is deleted by a `BackgroundTask` after the download response is sent. Direct sync endpoints (`POST /api/export/stl`, etc.) still exist for non-interactive callers.
 
 ### Cache
 - DEM: `.npz` (float32) + `.json` sidecar under `cache/dem/`
@@ -311,3 +432,55 @@ Zoom/pan → applyStackedTransform()
   → CSS transform on all canvases + .osm-overlay
   → scale change >15%: immediate re-render; else: 300ms debounced
 ```
+
+### Async Export (Puzzle / Large Formats)
+
+```mermaid
+sequenceDiagram
+    participant FE as Browser
+    participant BE as FastAPI
+    participant BG as Background Thread
+
+    FE->>BE: POST /api/export/start {format, dem_values, ...}
+    BE->>BG: Start _run_export_pipeline in thread
+    BE-->>FE: {task_id}
+    loop Poll until complete
+        FE->>BE: GET /api/export/status/{task_id}
+        BE-->>FE: {status, progress 0-100, message}
+    end
+    FE->>BE: GET /api/export/download/{task_id}
+    BE-->>FE: File download (temp file auto-deleted)
+```
+
+Sync endpoints (`POST /api/export/stl`, `/api/export/obj`, `/api/export/3mf`) still work for non-interactive callers.
+
+### 3D Preview (Extrude tab)
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant FE as Browser
+    participant BE as FastAPI
+
+    U->>FE: Click "Preview 3D"
+    FE->>BE: POST /api/export/preview {dem_values, exaggeration, ...}
+    BE-->>FE: {vertices, faces, z_min, z_max, face_count}
+    FE->>FE: _buildMeshFromPreview() → THREE.BufferGeometry
+    FE->>FE: _replaceMesh() → modelScene.add()
+    FE->>FE: _fitCameraToMesh() → _updateHud()
+```
+
+Vertex layout from numpy2stl: `[col, row, z_mm]`. In Three.js space: `x=col`, `y=z_mm` (elevation up), `z=row`. Colormap is applied per-vertex with `window.mapElevationToColor(t, cmap)` from `dem-loader.js`. No server round-trip is needed to change colormap — `rebuildViewerColors(cmap)` recomputes all vertex colors from the already-loaded geometry.
+
+### Satellite Scale Calculation
+
+```
+fetch_sat_overlay(N, S, E, W, dim, width_px):
+  target_dim = max(width_px, dim or width_px)
+  scale = max(30, calculate_scale_for_dimensions(N, S, E, W, target_dim))
+    ↳ geo2stl.sat2stl.calculate_scale_for_dimensions()
+  → fetch_bbox_image(bbox, scale)
+```
+
+`calculate_scale_for_dimensions` computes the appropriate tile zoom level for the bbox diagonal, eliminating the manual scale estimation that previously caused under- or over-resolution satellite tiles.
+

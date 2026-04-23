@@ -91,27 +91,6 @@ class TestTerrainDemValidation:
 
 
 # ---------------------------------------------------------------------------
-# GET /api/terrain/dem/raw
-# ---------------------------------------------------------------------------
-
-class TestTerrainDemRaw:
-    def test_returns_200(self, client):
-        r = client.get(f"/api/terrain/dem/raw?{_BBOX_QS}&dim=10")
-        assert r.status_code == 200
-
-    def test_response_structure(self, client):
-        r = client.get(f"/api/terrain/dem/raw?{_BBOX_QS}&dim=10")
-        data = r.json()
-        assert "dem_values_b64" in data
-        assert "dimensions" in data
-        assert "bbox" in data
-
-    def test_missing_bbox_returns_400(self, client):
-        r = client.get("/api/terrain/dem/raw?dim=10")
-        assert r.status_code == 400
-
-
-# ---------------------------------------------------------------------------
 # GET /api/terrain/sources
 # ---------------------------------------------------------------------------
 

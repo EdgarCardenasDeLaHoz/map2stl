@@ -22,17 +22,26 @@ Start here if you opened the `docs/` folder directly and need the preferred read
 | Inspect backend routes | `api.md` |
 | Inspect runtime structure | `arch.md` |
 | Inspect frontend module ownership | `modules.md` and `state.md` |
+| Understand layer canvases / GPU memory | `layer-system.md` |
+| Understand library delegation patterns | `libraries.md` |
 
 ## Detailed References
 
 These are useful after orientation, but they are not the best first stop:
 
+- `terrain-api-audit.md` — full call-stack audit of all `/api/terrain/` endpoints with quality analysis
+- `layer-system.md` — complete reference for the 7-layer canvas pipeline, GPU memory management, and per-layer data flows
+- `libraries.md` — support library import map and thin-wrapper assessment
 - `web_app_analysis.md`
 - `functionality_doc.md`
 - `issues.md`
 - `functions.md`
 - `ux-audit.md`
 - design and proposal documents tied to a specific subsystem
+
+## Proposals & Tracking
+
+- `proposals.md` — AI-proposed features and tasks. Approved items are queued for implementation.
 
 ## Short Rule
 
