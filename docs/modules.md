@@ -183,7 +183,7 @@ Use grep: `grep -rn "function functionName" app/client/static/js/`.
 | Function | Purpose |
 |----------|---------|
 | `setupMergePanel()` | Wire merge panel events |
-| `runMerge(apply)` | POST /api/dem/merge, optionally apply |
+| `runMerge(apply)` | POST /api/composite/dem-merge, optionally apply |
 
 ### layers/water-mask.js
 

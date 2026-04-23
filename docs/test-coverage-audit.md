@@ -32,7 +32,7 @@
 | Bbox guard (`_ensure_bbox`) | ✅ 3 tests | raises/passes |
 | Multi-step pipelines | ✅ 4 tests | create→dem, save→reload→dem, list, delete |
 | `/api/settings/*` sub-endpoints | ✅ 4 tests | projections, colormaps, datasets |
-| `server_settings()` broken endpoint | ✅ 1 test | documents that GET /api/settings returns 404 |
+| `server_settings()` combined endpoint | ✅ 1 test | verifies SDK bootstrap through `GET /api/settings` |
 
 ---
 
@@ -58,7 +58,7 @@
 
 | Method | Risk | Why not covered |
 |---|---|---|
-| `server_settings()` | **Bug** | Calls `GET /api/settings` which does not exist; always raises 404. Should call `/api/settings/projections` etc. or be updated to a combined endpoint |
+| `server_settings()` | Low | Covered via the combined settings endpoint; remaining risk is response-shape drift if sub-endpoints change independently |
 | `fetch_water_mask()` | Medium | Calls `_fetch_water_endpoint()` which uses `requests.get` directly; requires TEST_MODE override for EE |
 | `fetch_esa_landcover()` | Low | Same as above |
 | `fetch_satellite()` | Medium | Calls `requests.get` directly; WMTS tile needs mock |

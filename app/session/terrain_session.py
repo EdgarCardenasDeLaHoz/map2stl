@@ -47,6 +47,8 @@ from PIL import Image
 from app.server.config import LUMINANCE_R, LUMINANCE_G, LUMINANCE_B
 from app.server.core.validation import METRES_PER_DEGREE
 
+_ALLOWED_HTTP_METHODS = {"get", "post", "put", "delete", "patch"}
+
 # Paths relative to this file (app/session/ → app/ → strm2stl/)
 _STRM2STL_DIR = Path(__file__).parent.parent.parent   # strm2stl/
 _VENV_PYTHON = _STRM2STL_DIR.parent / ".venv" / "Scripts" / "python.exe"
@@ -298,6 +300,20 @@ class TerrainSession:
     # ─────────────────────── Helper Methods ─────────────────────────── #
     # ================================================================== #
 
+    def _send_request(self, method: str, endpoint: str, **kwargs):
+        """Dispatch an HTTP request after validating the method name."""
+        method_lc = method.strip().lower()
+        if method_lc not in _ALLOWED_HTTP_METHODS:
+            raise ValueError(
+                f"Unsupported HTTP method '{method}'. "
+                f"Allowed methods: {sorted(_ALLOWED_HTTP_METHODS)}"
+            )
+
+        url = f"{self._base}{endpoint}"
+        request_fn = getattr(requests, method_lc)
+        response = request_fn(url, **kwargs)
+        return method_lc, response
+
     def _api_request(self, method: str, endpoint: str, **kwargs) -> dict:
         """Unified HTTP request with error handling.
 
@@ -320,12 +336,28 @@ class TerrainSession:
         HTTPError
             If response status is not OK
         """
-        url = f"{self._base}{endpoint}"
-        r = getattr(requests, method)(url, **kwargs)
+        method_lc, r = self._send_request(method, endpoint, **kwargs)
         if not r.ok:
             print(f"ERROR {r.status_code}: {r.text}")
         r.raise_for_status()
-        return r.json()
+        try:
+            return r.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Non-JSON response for {method_lc.upper()} {endpoint}"
+            ) from exc
+
+    def _api_request_raw(self, method: str, endpoint: str, **kwargs):
+        """Unified HTTP request that returns the raw response object.
+
+        Use this for endpoints that return binary data or when callers need
+        direct access to headers/content or want to inspect specific status
+        codes before raising.
+        """
+        _, response = self._send_request(method, endpoint, **kwargs)
+        if not response.ok:
+            print(f"ERROR {response.status_code}: {response.text}")
+        return response
 
     def _ensure_bbox(self) -> None:
         """Raise if region not selected."""
@@ -1087,12 +1119,6 @@ class TerrainSession:
         self._validate_settings()
         print(f"Fetching {name}…")
 
-    def _handle_api_response(self, response) -> None:
-        """Check HTTP response status and raise on error."""
-        if not response.ok:
-            print(f"ERROR {response.status_code}: {response.text}")
-        response.raise_for_status()
-
     def _prepare_array_response(
         self, values: list, h: int, w: int, dtype=np.float32
     ) -> np.ndarray:
@@ -1676,12 +1702,9 @@ class TerrainSession:
         sat_scale = min(scale_for_dim, self.settings["water"]["sat_scale"])
         params = {**self.bbox, "sat_scale": sat_scale,
                   "dataset": self.settings["water"]["dataset"]}
-        r = requests.get(f"{self._base}/api/terrain/water-mask",
-                         params=params, timeout=120)
-        if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
-        r.raise_for_status()
-        return r.json()
+        return self._api_request(
+            "get", "/api/terrain/water-mask", params=params, timeout=120
+        )
 
     def fetch_water_mask(self, max_display_dim: int = 1000) -> "TerrainSession":
         """GET /api/terrain/water-mask — fetch binary water mask (0 = land, 1 = water).
@@ -1817,10 +1840,10 @@ class TerrainSession:
         self._require_attribute("bbox", "fetch_satellite")
         params = {**self.bbox, "dim": self.settings["satellite"]["dim"]}
         print("Fetching satellite image…")
-        r = requests.get(f"{self._base}/api/terrain/satellite",
-                         params=params, timeout=300)
-        self._handle_api_response(r)
-        self.satellite = r.json()["image"]
+        data = self._api_request(
+            "get", "/api/terrain/satellite", params=params, timeout=300
+        )
+        self.satellite = data["image"]
         print(
             f"Satellite image received ({len(self.satellite) // 1024} KB base64)")
 
@@ -1869,12 +1892,9 @@ class TerrainSession:
             "layers": layers,
         }
         print(f"Merging {len(layers)} DEM layer(s)…")
-        r = requests.post(f"{self._base}/api/composite/dem-merge",
-                          json=payload, timeout=300)
-        if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
-        r.raise_for_status()
-        self.dem = r.json()
+        self.dem = self._api_request(
+            "post", "/api/composite/dem-merge", json=payload, timeout=300
+        )
         d = self.dem
         print(f"min={d['min_elevation']:.1f} m  max={d['max_elevation']:.1f} m  "
               f"mean={d['mean_elevation']:.1f} m  shape={d['dimensions']}  "
@@ -1916,8 +1936,9 @@ class TerrainSession:
         }
         print(f"Fetching OSM city data (bbox: {diag_km:.1f} km diagonal)…")
         try:
-            r = requests.post(f"{self._base}/api/cities",
-                              json=payload, timeout=120)
+            r = self._api_request_raw(
+                "post", "/api/cities", json=payload, timeout=120
+            )
 
             # Handle oversized bbox (422) or other errors gracefully
             if r.status_code == 422:
@@ -2188,10 +2209,9 @@ class TerrainSession:
         payload = self._export_payload("obj_split")
         rows, cols = self.settings["split"]["split_rows"], self.settings["split"]["split_cols"]
         print(f"Generating {rows}x{cols} puzzle split OBJ…")
-        r = requests.post(f"{self._base}/api/export",
-                          json=payload, timeout=300)
-        if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
+        r = self._api_request_raw(
+            "post", "/api/export", json=payload, timeout=300
+        )
         r.raise_for_status()
 
         output_dir = _STRM2STL_DIR / "output"
@@ -2214,10 +2234,9 @@ class TerrainSession:
         """
         if not self.region_name:
             raise RuntimeError("Call select() first")
-        r = requests.get(f"{self._base}/api/export/obj/verify",
-                         params={"name": self.region_name})
-        r.raise_for_status()
-        info = r.json()
+        info = self._api_request(
+            "get", "/api/export/obj/verify", params={"name": self.region_name}
+        )
 
         terrain_pieces = [p for p in info["pieces"]
                           if not p["name"].startswith("Base")]
@@ -2255,28 +2274,23 @@ class TerrainSession:
         """
         if not self.region_name:
             raise RuntimeError("Call select() first")
-        r = requests.get(f"{self._base}/api/export/obj/inspect",
-                         params={"name": self.region_name})
-        r.raise_for_status()
-        info = r.json()
+        info = self._api_request(
+            "get", "/api/export/obj/inspect", params={"name": self.region_name}
+        )
         print(f"Total objects: {info['total']}  "
               f"({info['terrain_count']} terrain + {info['base_count']} base)")
         return info
 
     def cache_status(self) -> dict:
         """GET /api/cache — return cache stats (file count, size, recent files)."""
-        r = requests.get(f"{self._base}/api/cache", timeout=10)
-        r.raise_for_status()
-        data = r.json()
+        data = self._api_request("get", "/api/cache", timeout=10)
         print(
             f"Cache: {data['total_cached_files']} files, {data['total_size_mb']:.1f} MB")
         return data
 
     def clear_cache(self) -> dict:
         """DELETE /api/cache — clear all cached files from the server disk cache."""
-        r = requests.delete(f"{self._base}/api/cache", timeout=30)
-        r.raise_for_status()
-        data = r.json()
+        data = self._api_request("delete", "/api/cache", timeout=30)
         total = sum(c.get("files_deleted", 0) for c in data.get("cleared", []))
         print(f"Cache cleared: {total} files deleted")
         return data
@@ -2312,12 +2326,9 @@ class TerrainSession:
             "projection": proj["projection"],
             "clip_nans":  proj["clip_nans"],
         }
-        r = requests.post(f"{self._base}/api/composite/city-raster",
-                          json=payload, timeout=60)
-        if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
-        r.raise_for_status()
-        self.city_raster = r.json()
+        self.city_raster = self._api_request(
+            "post", "/api/composite/city-raster", json=payload, timeout=60
+        )
         proj_label = f" (projected: {proj['projection']})" if proj["projection"] != "none" else ""
         print(f"City raster: {self.city_raster['width']}×{self.city_raster['height']} px, "
               f"layers: buildings, roads, waterways, walls{proj_label}")
@@ -2335,10 +2346,10 @@ class TerrainSession:
             "simplify_tolerance": c["simplify_tolerance"],
             "min_area":           c["min_area"],
         }
-        r = requests.get(f"{self._base}/api/cities/cached",
-                         params=params, timeout=10)
-        r.raise_for_status()
-        cached = r.json().get("cached", False)
+        data = self._api_request(
+            "get", "/api/cities/cached", params=params, timeout=10
+        )
+        cached = data.get("cached", False)
         print(f"City cache: {'hit ✓' if cached else 'miss'}")
         return cached
 
@@ -2367,12 +2378,9 @@ class TerrainSession:
             "projection":         proj["projection"],
             "clip_nans":          proj["clip_nans"],
         }
-        r = requests.post(f"{self._base}/api/cities/raster",
-                          json=payload, timeout=60)
-        if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
-        r.raise_for_status()
-        self.city_raster = r.json()
+        self.city_raster = self._api_request(
+            "post", "/api/cities/raster", json=payload, timeout=60
+        )
         w, h = self.city_raster["width"], self.city_raster["height"]
         vmin = self.city_raster.get("vmin", 0)
         vmax = self.city_raster.get("vmax", 0)
@@ -2404,10 +2412,9 @@ class TerrainSession:
             "name":              name or self.region_name or "city",
         }
         print(f"Exporting city 3MF for {payload['name']}…")
-        r = requests.post(f"{self._base}/api/cities/export3mf",
-                          json=payload, timeout=120)
-        if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
+        r = self._api_request_raw(
+            "post", "/api/cities/export3mf", json=payload, timeout=120
+        )
         r.raise_for_status()
         data = r.content
         print(f"✓ 3MF exported ({len(data):,} bytes)")
@@ -2536,8 +2543,9 @@ class TerrainSession:
             "slicer_config": slicer_config,
             "output_subdir": self.settings["slicer"]["output_subdir"],
         }
-        r = requests.post(f"{self._base}/api/export/slice",
-                          json=payload, timeout=600)
+        r = self._api_request_raw(
+            "post", "/api/export/slice", json=payload, timeout=600
+        )
         r.raise_for_status()
         result = r.json()
 

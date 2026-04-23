@@ -32,7 +32,7 @@ except Exception:
         return v
 
     _north_validator = classmethod(
-        _v("north")(_north_validator_fn))  # type: ignore
+        _v("north", allow_reuse=True)(_north_validator_fn))  # type: ignore
 
 
 # ---------------------------------------------------------------------------

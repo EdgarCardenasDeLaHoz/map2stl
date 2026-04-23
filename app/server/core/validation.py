@@ -11,10 +11,12 @@ from __future__ import annotations
 import asyncio
 import base64 as _b64m
 import math
+from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
 import numpy as np
+from fastapi import Query, Request
 from fastapi.responses import JSONResponse
 
 from app.server.config import MAX_DIM, MAX_BBOX_DIAGONAL_KM
@@ -25,6 +27,14 @@ from app.server.config import MAX_DIM, MAX_BBOX_DIAGONAL_KM
 
 METRES_PER_DEGREE: float = 111_320.0
 EARTH_RADIUS_KM: float = 6371.0
+
+
+@dataclass(frozen=True, slots=True)
+class BboxQueryParams:
+    north: float | None
+    south: float | None
+    east: float | None
+    west: float | None
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +69,28 @@ def parse_bool(params: Any, key: str, default: bool = False) -> bool:
     if val is None or val == '':
         return default
     return val.lower() in ('true', '1', 'yes', 'on')
+
+
+def parse_bbox_query(
+    request: Request,
+    north: float | None = Query(None, description="Northern latitude bound (degrees)"),
+    south: float | None = Query(None, description="Southern latitude bound (degrees)"),
+    east: float | None = Query(None, description="Eastern longitude bound (degrees)"),
+    west: float | None = Query(None, description="Western longitude bound (degrees)"),
+) -> BboxQueryParams:
+    """Parse bbox values from request query params with existing fallback semantics.
+
+    Keeps the current terrain-router behavior where malformed values become
+    ``None`` and are later translated into the existing 400 error response
+    shape by ``validate_bbox()``.
+    """
+    params = request.query_params
+    return BboxQueryParams(
+        north=parse_float(params, "north"),
+        south=parse_float(params, "south"),
+        east=parse_float(params, "east"),
+        west=parse_float(params, "west"),
+    )
 
 
 # ---------------------------------------------------------------------------

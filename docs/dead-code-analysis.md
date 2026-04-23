@@ -189,7 +189,7 @@ Plus in `dem.py`, `sat.py`, and multiple `height/providers/` files:
 make_cache_key(_NAMESPACE, north, south, east, west, {...})
 ```
 
-**Action**: Create a `BboxParams` FastAPI `Depends` class in `core/validation.py` that handles the four bbox params plus `_validate_bbox()` call in one place. Reduces each endpoint's parameter list by 4 lines and centralizes bbox validation. See [proposals.md](proposals.md) for a proposal slot.
+**Action**: ~~Create a `BboxParams` FastAPI `Depends` class in `core/validation.py` that handles the four bbox params plus `_validate_bbox()` call in one place.~~ Completed via `core/validation.parse_bbox_query()` + `BboxQueryParams`, now reused across the terrain router. Validation remains explicit in the endpoints so existing 400 response payloads stay stable.
 
 ---
 
@@ -215,7 +215,7 @@ Files with the most repetition:
 | `event-listeners-map.js` | — | 24 |
 | `presets.js` | — | 18 |
 
-**Action (medium-term)**: A shared `loadLayer(name, fetchFn, options)` wrapper in `ui-helpers.js` could handle status transitions and error toasts once. However this requires refactoring 5+ files and risks breaking subtle per-layer logic — document as a proposal before implementing.
+**Action (medium-term)**: A shared `loadLayer(name, fetchFn, options)` wrapper in `ui-helpers.js` could handle status transitions and error toasts once. However this still requires refactoring 5+ files and risks breaking subtle per-layer logic. Recommendation: keep it as a proposal until the UI layer state machine is stabilized further; the current duplication is cheaper than a broad regression here.
 
 ---
 
@@ -234,17 +234,19 @@ Most of these are intentional — different UI flows trigger the same endpoint. 
 
 ---
 
-## 5. Library Reimplementation Debt
+## 5. Library Reimplementation Debt ✅ ALL RESOLVED
 
-Already tracked in [issues.md](issues.md#library-integration-debt) under B-LIB1–B-LIB5. Summarized here for completeness:
+All five items tracked in [issues.md](issues.md#library-integration-debt) and [proposals.md](proposals.md) are now complete. `app/server/core/` is a thin wrapper over `geo2stl` and `numpy2stl` as intended.
 
-| ID | Description | Severity |
-|---|---|---|
-| B-LIB1 | `cities_3d._terrain_mesh` (~90 lines) reimplements `numpy2stl.array_to_mesh` | High |
-| B-LIB2 | `cities_3d._extrude_ring` / `_ear_clip` reimplements `numpy2stl.polygon` functions | High |
-| B-LIB3 | `dem.py` uses legacy `proj_map_geo_to_2D` instead of `core/projection` | Medium |
-| B-LIB4 | `sat.py` manually computes tile scale instead of using a `geo2stl` helper | Medium |
-| B-LIB5 | `terrain.py` router imports `make_dem_image` bypassing `core/dem` | Small |
+| ID | Description | Severity | Status |
+|---|---|---|---|
+| B-LIB1 | `cities_3d._terrain_mesh` (~90 lines) reimplements `numpy2stl.array_to_mesh` | High | ✅ Done — delegates to `numpy2stl.array_to_mesh(solid=True)` with graceful fallback |
+| B-LIB2 | `cities_3d._extrude_ring` / `_ear_clip` reimplements `numpy2stl.polygon` functions | High | ✅ Done — delegates to `numpy2stl.generate.polygon_to_prism` + `numpy2stl.solid.vertices_to_index` |
+| B-LIB3 | `dem.py` uses legacy `proj_map_geo_to_2D` instead of `core/projection` | Medium | ✅ Done — `proj_map_geo_to_2D` no longer present in `dem.py` |
+| B-LIB4 | `sat.py` manually computes tile scale instead of using a `geo2stl` helper | Medium | ✅ Done — `sat.py` imports and uses `geo2stl.sat2stl.calculate_scale_for_dimensions` |
+| B-LIB5 | `terrain.py` router imports `make_dem_image` bypassing `core/dem` | Small | ✅ Done — `make_dem_image` no longer imported in `terrain.py` |
+
+**Note on fallbacks in `cities_3d.py`:** B-LIB1 and B-LIB2 use defensive `try/except ImportError` guards because `numpy2stl` is a workspace-sibling package (not a pip-installed dependency listed in `requirements.txt`). The fallback implementations remain as resilience code for out-of-tree test or import contexts. Since `server.py` bootstraps the `_CODE_ROOT` onto `sys.path` at startup, `numpy2stl` is always importable in production. The fallbacks are low-maintenance dead code in normal operation.
 
 ---
 
@@ -278,9 +280,9 @@ Already tracked in [issues.md](issues.md#library-integration-debt) under B-LIB1�
 | 6 | Remove `window._reprojectSatelliteImage` / `window._reprojectCityRaster` | 10 min | Low | ✅ Done |
 | 7 | Remove sys-path injection from routers | 5 min | Low | ✅ Done |
 | 8 | Remove `server.py` `ImportError` fallback | 10 min | Low | ✅ Done |
-| 9 | `BboxParams` `Depends` helper for bbox params | 2–4 hrs | Medium | Not started |
-| 10 | `loadLayer()` JS wrapper for status/toast boilerplate | 4–8 hrs | Medium | Not started |
-| 11 | Split `terrain_session.py` | 4–8 hrs | Medium | Not started |
+| 9 | `BboxParams` `Depends` helper for bbox params | 2–4 hrs | Medium | ✅ Done — centralized as `parse_bbox_query()` + `BboxQueryParams` |
+| 10 | `loadLayer()` JS wrapper for status/toast boilerplate | 4–8 hrs | Medium | Deferred — needs an approved proposal and a UI regression plan |
+| 11 | Split `terrain_session.py` | 4–8 hrs | Medium | Deferred — request-layer duplication is already reduced; structural split is now lower ROI than router/core debt |
 
 ---
 

@@ -45,19 +45,19 @@ For the full proposal list and accept/deny workflow, see [proposals.md](proposal
 | CLEAN-1 | Replace remaining inline styles with CSS classes | ⏳ Pending |
 | UX-M | Lazy-allocate hidden layer canvases | ⏳ Pending |
 
-## Library Integration Debt
+## Library Integration Debt ✅ ALL RESOLVED
 
-`app/server/core/` should be a thin wrapper over `geo2stl` and `numpy2stl`.
-Several modules reimplement library functions or bypass the `core/` layer.
-See [libraries.md](libraries.md) for the full import map and [proposals.md](proposals.md#library-integration-debt) for the B-LIB proposal items.
+`app/server/core/` is now a thin wrapper over `geo2stl` and `numpy2stl` as intended.
+All five B-LIB items from [proposals.md](proposals.md#library-integration-debt) are complete.
+See [libraries.md](libraries.md) for the current import map.
 
-| ID | Summary | Severity |
-|----|---------|----------|
-| B-LIB1 | `cities_3d._terrain_mesh` reimplements `numpy2stl.array_to_mesh` (~90 lines) | High |
-| B-LIB2 | `cities_3d._extrude_ring`/`_ear_clip` reimplements `numpy2stl.polygon` functions | High |
-| B-LIB3 | `dem.py` uses legacy `proj_map_geo_to_2D` instead of `core/projection` | Medium |
-| B-LIB4 | `sat.py` manually computes tile scale instead of using `geo2stl` helper | Medium |
-| B-LIB5 | `terrain.py` router imports `make_dem_image` bypassing `core/dem` | Small |
+| ID | Summary | Severity | Status |
+|----|---------|----------|--------|
+| B-LIB1 | `cities_3d._terrain_mesh` → delegates to `numpy2stl.array_to_mesh` | High | ✅ Done |
+| B-LIB2 | `cities_3d._extrude_ring`/`_ear_clip` → delegates to `numpy2stl.polygon_to_prism` | High | ✅ Done |
+| B-LIB3 | `dem.py` legacy `proj_map_geo_to_2D` removed | Medium | ✅ Done |
+| B-LIB4 | `sat.py` uses `geo2stl.sat2stl.calculate_scale_for_dimensions` | Medium | ✅ Done |
+| B-LIB5 | `terrain.py` no longer imports `make_dem_image` directly | Small | ✅ Done |
 
 ## Completed Refactoring Milestones
 

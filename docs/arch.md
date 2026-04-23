@@ -198,13 +198,13 @@ app/
 │   │       ├── __init__.py     — HeightResult, HeightProvider, merge_height_rasters()
 │   │       └── providers/      — wsf3d, google_3d, copernicus, ndsm, lidar_3dep
 │   └── routers/
-│       ├── terrain.py    — /api/terrain/* + /api/dem/merge
+│       ├── terrain.py    — /api/terrain/*
 │       ├── regions.py    — /api/regions/* (SQLite-first, JSON fallback)
 │       ├── export.py     — /api/export/*
 │       ├── cities.py     — /api/cities/*
-│       ├── composite.py  — /api/composite/*
+│       ├── composite.py  — /api/composite/* (city-raster, dem-merge, hydrology-merge)
 │       ├── cache.py      — /api/cache/*
-│       ├── settings.py   — /api/settings/*
+│       ├── settings.py   — /api/settings/* + combined /api/settings
 │       └── height.py     — /api/height/* (prefix: /api/height)
 ├── client/                    — browser client (HTML/CSS/JS)
 │   ├── static/js/   — main.js, modules/ (30 ES modules in 8 subdirs)

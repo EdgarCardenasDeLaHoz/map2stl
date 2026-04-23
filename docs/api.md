@@ -34,7 +34,11 @@ Primary `TerrainSession` touchpoints:
 - `fetch_water_mask()` and `fetch_esa_landcover()` both use `/api/terrain/water-mask`
 - `fetch_satellite()` uses `/api/terrain/satellite`
 - `fetch_hydrology()` and `merge_hydrology_with_dem()` should be traced through the terrain route family in the router file
-- merge helpers such as `merge_dem()` use `/api/dem/merge`
+- merge helpers such as `merge_dem()` use `/api/composite/dem-merge`
+
+Terrain bbox parsing is now centralized in `core/validation.parse_bbox_query()`, so
+the terrain router keeps the existing query-string semantics and 400 error shapes
+without repeating the four bbox parsers in every endpoint.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -45,8 +49,8 @@ Primary `TerrainSession` touchpoints:
 | GET | `/api/terrain/satellite` | Fetch satellite imagery (ESRI tiles) |
 | GET | `/api/terrain/sources` | List DEM data sources |
 | GET | `/api/terrain/hydrology` | Fetch HydroRIVERS depression grid for bbox |
-| POST | `/api/terrain/hydrology/merge` | Merge hydrology depression into DEM array |
-| POST | `/api/dem/merge` | Merge multiple DEM layers (`MergeRequest`) |
+| POST | `/api/composite/hydrology-merge` | Merge hydrology depression into DEM array |
+| POST | `/api/composite/dem-merge` | Merge multiple DEM layers (`MergeRequest`) |
 | POST | `/api/export/preview` | DEM values for Three.js preview (no STL) |
 
 ## Export Routes (`routers/export.py`)
@@ -121,6 +125,7 @@ Primary `TerrainSession` touchpoints:
 | GET | `/api/settings/projections` | Available projections |
 | GET | `/api/settings/colormaps` | Available colormaps |
 | GET | `/api/settings/datasets` | Available DEM datasets |
+| GET | `/api/settings` | Combined settings payload for SDK/bootstrap clients |
 | GET | `/api/global_dem_overview` | Cached global DEM PNG (served by `server.py`) |
 
 ## Height Routes (`routers/height.py`)

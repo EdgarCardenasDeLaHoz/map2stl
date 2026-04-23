@@ -126,13 +126,10 @@ def session(client, monkeypatch):
 # ---------------------------------------------------------------------------
 
 class TestSessionServerSettings:
-    """Tests for the /api/settings/* endpoints.
+    """Tests for settings endpoints used by TerrainSession.
 
-    NOTE: TerrainSession.server_settings() calls GET /api/settings which does
-    not exist (the real routes are /api/settings/projections, /api/settings/
-    colormaps, /api/settings/datasets).  That SDK method is broken and is
-    documented as a gap in the coverage audit.  These tests call the real
-    sub-endpoints directly through _api_request.
+    Includes both the combined SDK endpoint (/api/settings) and the
+    fine-grained settings endpoints.
     """
 
     def test_projections_endpoint_returns_list(self, session):
@@ -168,6 +165,22 @@ class TestSessionServerSettings:
         assert len(data["projections"]) > 0
         assert len(data["colormaps"]) > 0
         assert len(data["datasets"]) > 0
+
+
+class TestSessionApiRequestValidation:
+    def test_api_request_allows_uppercase_method(self, session):
+        data = session._api_request("GET", "/api/settings/projections")
+        assert "projections" in data
+
+    def test_api_request_rejects_unknown_method(self, session):
+        with pytest.raises(ValueError, match="Unsupported HTTP method"):
+            session._api_request("TRACE", "/api/settings/projections")
+
+    def test_api_request_raw_returns_response_wrapper(self, session):
+        response = session._api_request_raw("GET", "/api/cache", timeout=10)
+        assert response.ok
+        assert response.status_code == 200
+        assert isinstance(response.json(), dict)
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +399,54 @@ class TestSessionCacheOperations:
         assert data["total_cached_files"] == 0
 
 
+class TestSessionLayerFetches:
+    def test_fetch_water_mask_populates_session_state(self, session):
+        session.select("TestRegion")
+        session.settings["dem"]["dim"] = 64
+        session.fetch_water_mask()
+
+        assert session.water_mask is not None
+        assert session.esa_landcover is not None
+        assert "water_mask_dimensions" in session.water_mask
+        assert "esa_dimensions" in session.esa_landcover
+
+    def test_fetch_satellite_populates_base64_image(self, session):
+        session.select("TestRegion")
+        session.settings["satellite"]["dim"] = 64
+        session.fetch_satellite()
+
+        assert session.satellite is not None
+        assert isinstance(session.satellite, str)
+        assert len(session.satellite) > 0
+
+
+class TestSessionCityFlows:
+    def test_fetch_cities_populates_city_data_for_small_region(self, session):
+        session.create_region(
+            "SmallFetchedCityRegion", north=40.000, south=39.995, east=-75.100, west=-75.105
+        )
+        session.fetch_cities()
+        assert session.city_data is not None
+
+    def test_check_city_cache_returns_boolean(self, session):
+        session.create_region(
+            "SmallCityRegion", north=40.000, south=39.995, east=-75.100, west=-75.105
+        )
+        cached = session.check_city_cache()
+        assert isinstance(cached, bool)
+
+    def test_composite_city_raster_populates_session_state(self, session):
+        session.create_region(
+            "SmallCityRasterRegion", north=40.000, south=39.995, east=-75.100, west=-75.105
+        )
+        session.fetch_cities()
+        session.composite_city_raster(width=64, height=64)
+
+        assert session.city_raster is not None
+        assert "width" in session.city_raster
+        assert "height" in session.city_raster
+
+
 # ---------------------------------------------------------------------------
 # Bbox guard (_ensure_bbox)
 # ---------------------------------------------------------------------------
@@ -545,6 +606,25 @@ class TestSessionCompositeDeMMerge:
         assert "dimensions" in result or "error" in result
         if "dimensions" in result:
             assert "dem_values_b64" in result
+
+    def test_merge_dem_sdk_method_updates_session_dem(self, session):
+        """TerrainSession.merge_dem should populate self.dem through _api_request."""
+        session.select("TestRegion")
+        session.settings["dem"]["dim"] = 64
+
+        layers = [{
+            "source": "local",
+            "dim": 64,
+            "blend_mode": "base",
+            "weight": 1.0,
+            "processing": {},
+            "label": "base",
+        }]
+
+        session.merge_dem(layers)
+        assert session.dem is not None
+        assert "dimensions" in session.dem
+        assert "dem_values_b64" in session.dem
 
 
 class TestSessionHydrologySmoke:

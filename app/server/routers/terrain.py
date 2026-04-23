@@ -22,9 +22,11 @@ from app.server.core.dem import (
 )
 from app.server.core.cache import make_cache_key, write_array_cache, read_array_cache
 from app.server.core.validation import (
+    BboxQueryParams,
     parse_float as _parse_float,
     parse_int as _parse_int,
     parse_bool as _parse_bool,
+    parse_bbox_query as _parse_bbox_query,
     b64_encode as _b64,
     validate_bbox as _validate_bbox,
     validate_dim as _validate_dim,
@@ -45,7 +47,7 @@ from app.server.config import (
 )
 from typing import Optional
 from fastapi.responses import JSONResponse
-from fastapi import APIRouter, Request, Query
+from fastapi import APIRouter, Request, Query, Depends
 import numpy as np
 import math
 import logging
@@ -132,10 +134,7 @@ def _fetch_dem_array(dem_source, north, south, east, west, dim,
 @router.api_route("/api/terrain/dem", methods=["GET", "POST"], tags=["terrain"])
 async def get_terrain_dem(
     request: Request,
-    north: Optional[float] = Query(None, description="Northern latitude bound (degrees)"),
-    south: Optional[float] = Query(None, description="Southern latitude bound (degrees)"),
-    east: Optional[float] = Query(None, description="Eastern longitude bound (degrees)"),
-    west: Optional[float] = Query(None, description="Western longitude bound (degrees)"),
+    bbox: BboxQueryParams = Depends(_parse_bbox_query),
     dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
     depth_scale: Optional[float] = Query(None, description="Depth scaling factor for ocean/bathymetry"),
     water_scale: Optional[float] = Query(None, description="Water subtraction strength"),
@@ -153,10 +152,7 @@ async def get_terrain_dem(
     """
     params = request.query_params
 
-    north = _parse_float(params, "north")
-    south = _parse_float(params, "south")
-    east = _parse_float(params, "east")
-    west = _parse_float(params, "west")
+    north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
     dim = _parse_int(params, "dim", 100)
     depth_scale = _parse_float(params, "depth_scale", 0.5)
     water_scale = _parse_float(params, "water_scale", 0.05)
@@ -284,10 +280,7 @@ async def get_terrain_dem(
 @router.api_route("/api/terrain/water-mask", methods=["GET", "POST"], tags=["terrain"])
 async def get_terrain_water_mask(
     request: Request,
-    north: Optional[float] = Query(None, description="Northern latitude bound (degrees)"),
-    south: Optional[float] = Query(None, description="Southern latitude bound (degrees)"),
-    east: Optional[float] = Query(None, description="Eastern longitude bound (degrees)"),
-    west: Optional[float] = Query(None, description="Western longitude bound (degrees)"),
+    bbox: BboxQueryParams = Depends(_parse_bbox_query),
     sat_scale: Optional[int] = Query(None, description="Earth Engine fetch resolution (metres/pixel)"),
     dataset: Optional[str] = Query(None, description="Water dataset: 'esa' or 'jrc'"),
     projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
@@ -298,10 +291,7 @@ async def get_terrain_water_mask(
     try:
         params = request.query_params
 
-        north = _parse_float(params, "north")
-        south = _parse_float(params, "south")
-        east = _parse_float(params, "east")
-        west = _parse_float(params, "west")
+        north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
         sat_scale = _parse_int(params, "sat_scale", 500)
         water_dataset = params.get("dataset", "esa")
         if water_dataset not in ("esa", "jrc"):
@@ -408,10 +398,7 @@ async def get_terrain_water_mask(
 @router.api_route("/api/terrain/esa-land-cover", methods=["GET", "POST"], tags=["terrain"])
 async def get_terrain_esa_land_cover(
     request: Request,
-    north: Optional[float] = Query(None, description="Northern latitude bound (degrees)"),
-    south: Optional[float] = Query(None, description="Southern latitude bound (degrees)"),
-    east: Optional[float] = Query(None, description="Eastern longitude bound (degrees)"),
-    west: Optional[float] = Query(None, description="Western longitude bound (degrees)"),
+    bbox: BboxQueryParams = Depends(_parse_bbox_query),
     sat_scale: Optional[int] = Query(None, description="Earth Engine fetch resolution (metres/pixel)"),
     projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
     clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
@@ -420,10 +407,7 @@ async def get_terrain_esa_land_cover(
     logger.info("Received request for /api/terrain/esa-land-cover")
     try:
         params = request.query_params
-        north = _parse_float(params, "north")
-        south = _parse_float(params, "south")
-        east = _parse_float(params, "east")
-        west = _parse_float(params, "west")
+        north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
         sat_scale = _parse_int(params, "sat_scale", 500)
         projection = params.get("projection", "none")
         clip_nans = _parse_bool(params, "clip_nans", False)
@@ -518,10 +502,7 @@ async def get_terrain_esa_land_cover(
 @router.get("/api/terrain/satellite", tags=["terrain"])
 async def get_terrain_satellite(
     request: Request,
-    north: Optional[float] = Query(None, description="Northern latitude bound (degrees)"),
-    south: Optional[float] = Query(None, description="Southern latitude bound (degrees)"),
-    east: Optional[float] = Query(None, description="Eastern longitude bound (degrees)"),
-    west: Optional[float] = Query(None, description="Western longitude bound (degrees)"),
+    bbox: BboxQueryParams = Depends(_parse_bbox_query),
     dim: Optional[int] = Query(None, description="Output image resolution (pixels per side)"),
     projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
     clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
@@ -534,10 +515,7 @@ async def get_terrain_satellite(
     consistent with all other raster endpoints.
     """
     params = request.query_params
-    north = _parse_float(params, "north")
-    south = _parse_float(params, "south")
-    east = _parse_float(params, "east")
-    west = _parse_float(params, "west")
+    north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
     dim = _parse_int(params, "dim", 400)
     projection = params.get("projection", "none")
     clip_nans = _parse_bool(params, "clip_nans", True)
@@ -623,10 +601,7 @@ async def get_terrain_sources():
 @router.get("/api/terrain/hydrology", tags=["terrain"])
 async def get_terrain_hydrology(
     request: Request,
-    north: Optional[float] = Query(None, description="Northern latitude bound (degrees)"),
-    south: Optional[float] = Query(None, description="Southern latitude bound (degrees)"),
-    east: Optional[float] = Query(None, description="Eastern longitude bound (degrees)"),
-    west: Optional[float] = Query(None, description="Western longitude bound (degrees)"),
+    bbox: BboxQueryParams = Depends(_parse_bbox_query),
     dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
     depression_m: Optional[float] = Query(None, description="Max river depression in metres (negative, default -5.0)"),
     source: Optional[str] = Query(None, description="River data source: 'natural_earth' or 'hydrorivers'"),
@@ -656,10 +631,7 @@ async def get_terrain_hydrology(
     """
     params = request.query_params
 
-    north = _parse_float(params, "north")
-    south = _parse_float(params, "south")
-    east = _parse_float(params, "east")
-    west = _parse_float(params, "west")
+    north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
     dim = _parse_int(params, "dim", 300)
     depression_m = _parse_float(params, "depression_m", -5.0)
     source = params.get("source", "natural_earth")

@@ -43,6 +43,7 @@ _Last updated: 2026-04-19_
 | ID | Description | File(s) | Effort | Status |
 |----|-------------|---------|--------|--------|
 | R-CLEAN1 | Replace remaining inline styles with CSS utility classes (index.html, misc JS) | `index.html`, `app.css`, various | Medium | pending |
+| R-LAYER-LOAD | Shared `loadLayer(name, fetchFn, options)` wrapper in `ui-helpers.js` — consolidates `setLayerStatus` calls, error-toast handling, `isLayerCurrent()` guards, and stale canvas ref clearing. **Regression plan required before any code movement**: add explicit Vitest tests covering each layer's loading-state transitions (idle → loading → loaded / error) for `dem-main.js`, `water-mask.js`, `city-overlay.js`, `hydrology-overlay.js` before refactoring. | `app/client/static/js/modules/ui/ui-helpers.js`, `dem/dem-main.js`, `layers/water-mask.js`, `layers/city-overlay.js`, `layers/hydrology-overlay.js` | Large | pending |
 | R-LAYERS | LayerBuffer class — unified canvas allocate/resize/dirty-track across all layer canvases | `layers/stacked-layers.js` | Large | pending |
 | R-EVENTS-A | Event bus consolidation — add `EV.DEM_LOADED`, `EV.REGION_SELECTED`; replace direct `window.fn()` calls | `events/`, all modules | Large | pending |
 | R-EVENTS-B | Keyboard shortcut registry — replace `keydown` switch with `window.registerShortcut(key, label, fn)` | `events/keyboard-shortcuts.js` | Small | pending |

@@ -10,7 +10,7 @@ _Last updated: 2026-04-19_
 
 ## 1. Concept
 
-Today the merge panel (`dem-merge.js`) is a separate tab that produces a one-shot blended DEM array via `/api/dem/merge`. The user must manually configure layers, preview, and "Apply as DEM." This is powerful but disconnected from the live layer stack.
+Today the merge panel (`dem-merge.js`) is a separate tab that produces a one-shot blended DEM array via `/api/composite/dem-merge`. The user must manually configure layers, preview, and "Apply as DEM." This is powerful but disconnected from the live layer stack.
 
 The **Composite DEM** layer is different:
 
@@ -228,7 +228,7 @@ Responsibilities:
 
 The current "Merge" tab button in the `dem-strip` is removed. The merge panel's layer-stacking functionality is subsumed by the composite DEM layer.
 
-The existing `/api/dem/merge` endpoint and `dem-merge.js` module are **kept** as internal infrastructure — they can still be used programmatically or re-exposed later.
+The existing `/api/composite/dem-merge` endpoint and `dem-merge.js` module are **kept** as internal infrastructure — they can still be used programmatically or re-exposed later.
 
 ### 4.2 Composite DEM Controls
 
@@ -398,4 +398,4 @@ The UI sliders become "prior weights" that initialize or constrain the network. 
 
 5. **Reuse existing data**: No new fetches. Water mask, OSM data, ESA classes, and satellite imagery are already loaded by other tabs. The composite layer just reinterprets them as height contributions.
 
-6. **Keep merge infrastructure**: `dem-merge.js` and `/api/dem/merge` remain available internally. The composite DEM layer is a higher-level abstraction built on top.
+6. **Keep merge infrastructure**: `dem-merge.js` and `/api/composite/dem-merge` remain available internally. The composite DEM layer is a higher-level abstraction built on top.

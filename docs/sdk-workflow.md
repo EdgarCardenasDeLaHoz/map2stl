@@ -58,7 +58,7 @@ sequenceDiagram
 | Server startup and settings | `start()`, `server_settings()` | settings and source discovery endpoints | `app/server/server.py`, `app/server/routers/settings.py`, `app/server/routers/terrain.py` |
 | Region management | `regions()`, `select()`, `save_region()`, settings persistence helpers | `/api/regions*` | `app/server/routers/regions.py` |
 | DEM and overlays | `fetch_dem()`, `fetch_water_mask()`, `fetch_satellite()` | `/api/terrain/dem`, `/api/terrain/water-mask`, `/api/terrain/satellite` | `app/server/routers/terrain.py` |
-| DEM blending and hydrology | merge-related helpers | `/api/dem/merge` | `app/server/routers/terrain.py` |
+| DEM blending and hydrology | merge-related helpers | `/api/composite/dem-merge`, `/api/composite/hydrology-merge` | `app/server/routers/composite.py` |
 | City and OSM features | city fetch and raster helpers | `/api/cities*`, `/api/composite/city-raster` | `app/server/routers/cities.py`, `app/server/routers/composite.py` |
 | Export and print pipeline | `export_stl()`, `export_obj()`, split and slicer helpers, verify/slice helpers | `/api/export*` | `app/server/routers/export.py` |
 | Cache inspection | cache helpers | `/api/cache*` | `app/server/routers/cache.py` |

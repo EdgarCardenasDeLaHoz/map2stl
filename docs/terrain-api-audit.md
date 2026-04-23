@@ -357,7 +357,7 @@ The terrain router's alias was shadowing the real `generate_mesh_preview()` hand
 
 2. **`/api/terrain/sources`** (#6) — Pure config read. No computation, no I/O, no shared patterns.
 
-3. **`/api/terrain/hydrology/merge`** (#9) — Manual JSON validation (no Pydantic), returns raw list (not b64), no projection, no caching. The only endpoint that receives pre-computed arrays from the frontend and merges them server-side.
+3. **`/api/composite/hydrology-merge`** (#9) — Pydantic-backed composite endpoint that receives pre-computed arrays from the frontend and merges them server-side. It still stands apart from the fetch-style terrain routes because it operates on already-fetched grids rather than pulling source data itself.
 
 ### Endpoints That Share the Most
 
