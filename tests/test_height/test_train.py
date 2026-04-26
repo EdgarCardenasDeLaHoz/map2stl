@@ -20,6 +20,7 @@ import pytest
 
 def _make_npz(path: Path, tile_size: int = 8) -> Path:
     """Write a minimal synthetic tile .npz file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(42)
     rgb = rng.random((3, tile_size, tile_size), dtype="float32")
     height = rng.uniform(5.0, 30.0, (1, tile_size, tile_size)).astype("float32")

@@ -127,11 +127,11 @@ class TestResBlock:
         assert _has_groupnorm(block), "ResBlock should contain at least one GroupNorm"
 
     def test_odd_input_size(self):
-        # Stride=2 on odd dim → floor division
+        # Conv2d(k=3, s=2, p=1) on odd dim yields ceil(n/2)
         block = ResBlock(4, 8)
         x = _rand(1, 4, 15, 15)
         out = block(x)
-        assert out.shape[2] == 7 and out.shape[3] == 7
+        assert out.shape[2] == 8 and out.shape[3] == 8
 
     def test_different_in_out_channels(self):
         for in_ch, out_ch in [(3, 32), (64, 64), (32, 128)]:

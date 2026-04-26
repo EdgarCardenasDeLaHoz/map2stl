@@ -16,18 +16,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
 
 
+def _model_to_dict(model) -> dict:
+    """Return a plain dict for Pydantic v1/v2 model instances."""
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
 def _default_projections() -> list[dict]:
     return [
-        ProjectionInfo(
+        _model_to_dict(ProjectionInfo(
             id="none",
             name="None",
             description="No projection applied",
-        ).model_dump(),
-        ProjectionInfo(
+        )),
+        _model_to_dict(ProjectionInfo(
             id="cosine",
             name="Cosine",
             description="Cosine latitude correction",
-        ).model_dump(),
+        )),
     ]
 
 
@@ -46,11 +53,11 @@ def _load_projections() -> list[dict]:
 
         info = get_projection_info()
         return [
-            ProjectionInfo(
+            _model_to_dict(ProjectionInfo(
                 id=projection_id,
                 name=projection_meta.get("name", projection_id),
                 description=projection_meta.get("description", ""),
-            ).model_dump()
+            ))
             for projection_id, projection_meta in info.items()
         ]
     except Exception:
@@ -71,7 +78,7 @@ def _list_colormaps() -> list[dict]:
         ColormapInfo(id="hot",      description="Black-red-yellow-white"),
         ColormapInfo(id="RdBu",     description="Diverging red-blue for anomaly maps"),
     ]
-    return [c.model_dump() for c in colormaps]
+    return [_model_to_dict(c) for c in colormaps]
 
 
 def _list_datasets() -> list[dict]:
@@ -83,7 +90,7 @@ def _list_datasets() -> list[dict]:
         DatasetInfo(id="gebco",     name="GEBCO 2022",                 description="450 m global ocean bathymetry + land",source="Local GEBCO GeoTIFFs",             requires_auth=False),
         DatasetInfo(id="jrc",       name="JRC Global Surface Water",   description="Water occurrence 1984–2021",          source="JRC/GSW1_4/GlobalSurfaceWater",    requires_auth=True),
     ]
-    return [d.model_dump() for d in datasets]
+    return [_model_to_dict(d) for d in datasets]
 
 # ---------------------------------------------------------------------------
 # Schema imports
