@@ -68,14 +68,14 @@ async function loadWaterMask() {
     const { north, south, east, west } = bbox;
 
     // waterResolution is the authoritative control in the Water section.
-    const satScale = parseInt(
-        document.getElementById('waterResolution')?.value || '200'
+    const dim = parseInt(
+        document.getElementById('waterResolution')?.value || '600'
     );
 
     const waterDataset = document.getElementById('waterDataset')?.value || 'esa';
     const projection = document.getElementById('paramProjection')?.value || 'none';
     const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
-    const cacheKey = { ...bbox, sat_scale: satScale, dataset: waterDataset, projection, clip_nans: clipNans };
+    const cacheKey = { ...bbox, dim, dataset: waterDataset, projection, clip_nans: clipNans };
 
     const cachedData = window.waterMaskCache.get(cacheKey);
     if (cachedData) {
@@ -91,7 +91,7 @@ async function loadWaterMask() {
         return;
     }
 
-    const params = new URLSearchParams({ north, south, east, west, sat_scale: satScale, dataset: waterDataset, projection, clip_nans: clipNans });
+    const params = new URLSearchParams({ north, south, east, west, dim, dataset: waterDataset, projection, clip_nans: clipNans });
 
     window.setLayerStatus('water', 'loading');
 
@@ -160,13 +160,13 @@ async function loadEsaLandCover() {
     }
     const { north, south, east, west } = bbox;
 
-    const satScale = parseInt(
-        document.getElementById('esaResolution')?.value || '200'
+    const dim = parseInt(
+        document.getElementById('esaResolution')?.value || '600'
     );
     const projection = document.getElementById('paramProjection')?.value || 'none';
     const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
 
-    const params = new URLSearchParams({ north, south, east, west, sat_scale: satScale, projection, clip_nans: clipNans });
+    const params = new URLSearchParams({ north, south, east, west, dim, projection, clip_nans: clipNans });
 
     window.setLayerStatus?.('landCover', 'loading');
     window.showToast('Loading ESA land cover...', 'info');

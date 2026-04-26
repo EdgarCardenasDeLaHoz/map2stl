@@ -38,23 +38,16 @@
 // ── Auto-scale thresholds ────────────────────────────────────────────────────
 
 /**
- * Breakpoint tables used by selectCoordinate to auto-set sat_scale and DEM dim
- * based on the selected region's diagonal distance.
- * Each entry applies when diagKm <= maxKm.
+ * Breakpoint tables used by selectCoordinate to auto-set DEM dim (and
+ * water/ESA output resolution, also in pixels) based on the selected
+ * region's diagonal distance. Each entry applies when diagKm <= maxKm.
  */
 const AUTO_SCALE = {
-    satScale: [
-        { maxKm: 10, scale: 10 },
-        { maxKm: 30, scale: 30 },
-        { maxKm: 100, scale: 100 },
-        { maxKm: 500, scale: 500 },
-        { maxKm: Infinity, scale: 1000 },
-    ],
     dim: [
         { maxKm: 10, dim: 600 },
         { maxKm: 50, dim: 500 },
         { maxKm: 200, dim: 300 },
-        { maxKm: Infinity, dim: 200 },
+        { maxKm: Infinity, dim: 600 },
     ],
 };
 
@@ -293,18 +286,18 @@ async function selectCoordinate(index) {
         const rp = selectedRegion.parameters;
         const _setEl = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
         const _setChk = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.checked = Boolean(v); };
-        _setEl('paramDim', rp.dim || 100);
+        _setEl('paramDim', rp.dim || 600);
         _setEl('paramDepthScale', rp.depth_scale ?? 0.5);
         _setEl('paramWaterScale', rp.water_scale ?? 0.05);
         _setChk('paramSubtractWater', rp.subtract_water !== false);
-        _setEl('waterResolution', rp.sat_scale ?? 500);
+        _setEl('waterResolution', rp.dim ?? 600);
         _setEl('exportModelHeight', rp.height ?? 10);
         _setEl('exportBaseHeight', rp.base ?? 2);
         if (window.appState?.demParams) {
             window.appState.demParams.depthScale = rp.depth_scale ?? 0.5;
             window.appState.demParams.waterScale = rp.water_scale ?? 0.05;
             window.appState.demParams.subtractWater = rp.subtract_water !== false;
-            window.appState.demParams.satScale = rp.sat_scale ?? 500;
+            window.appState.demParams.dim = rp.dim ?? 600;
             window.appState.demParams.height = rp.height ?? 10;
             window.appState.demParams.base = rp.base ?? 2;
         }
@@ -332,20 +325,19 @@ async function selectCoordinate(index) {
             selectedRegion.north, selectedRegion.south,
             selectedRegion.east, selectedRegion.west
         );
-        // sat_scale: ESA fetch resolution (m/px) — lower = finer, more pixels
-        const autoSatScale = AUTO_SCALE.satScale.find(t => diagKm <= t.maxKm)?.scale ?? 1000;
+        // dim: output resolution in pixels — applies to DEM, water mask, and ESA land cover.
+        // Use the same breakpoint table to auto-set waterResolution and esaResolution
+        // (both now hold pixel counts, not m/px).
+        const autoDim = AUTO_SCALE.dim.find(t => diagKm <= t.maxKm)?.dim ?? 600;
         const waterResEl = document.getElementById('waterResolution');
-        if (waterResEl) waterResEl.value = String(autoSatScale);
+        if (waterResEl) waterResEl.value = String(autoDim);
         const esaResEl = document.getElementById('esaResolution');
-        if (esaResEl) esaResEl.value = String(autoSatScale);
+        if (esaResEl) esaResEl.value = String(autoDim);
 
-        // dim: DEM output pixel count — raise for city scale so the server-side
-        // alignment target (target_width/height) is large enough to hold ESA 10m data.
-        // Only auto-set if no settings were loaded from the DB (first-time or reset).
+        // DEM dim: only raise if lower than the auto value and no saved settings loaded.
         const dimEl = document.getElementById('paramDim');
         if (dimEl) {
-            const currentDim = parseInt(dimEl.value) || 200;
-            const autoDim = AUTO_SCALE.dim.find(t => diagKm <= t.maxKm)?.dim ?? 200;
+            const currentDim = parseInt(dimEl.value) || 600;
             // Raise dim if it is lower than what the region size warrants.
             // Never lower the user's explicit choice.
             // Skip if saved settings were loaded — respect the persisted dim.
@@ -387,6 +379,10 @@ async function selectCoordinate(index) {
     // and then loadDEM() itself.
 
     window.appState._updateWorkflowStepper?.();
+
+    // Emit on the event bus so any module can react to region selection
+    // without needing a direct function reference.
+    window.events?.emit(window.EV?.REGION_SELECTED, index, selectedRegion);
 }
 window.selectCoordinate = selectCoordinate;
 

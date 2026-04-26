@@ -228,12 +228,12 @@ function applyPreset(preset) {
  */
 function getCurrentSettings() {
     return {
-        dim: _int('paramDim', 200),
+        dim: _int('paramDim', 600),
         depthScale: _flt('paramDepthScale', 0.5),
         waterScale: _flt('paramWaterScale', 0.05),
         colormap: _str('demColormap', 'terrain'),
         subtractWater: _chk('paramSubtractWater', true),
-        satScale: _int('waterResolution', 500),
+        satScale: _int('waterResolution', 600),
         elevationCurve: window.appState.activeCurvePreset || 'linear',
     };
 }
@@ -254,7 +254,7 @@ function collectAllSettings() {
     const rescaleMax = _get('rescaleMax')?.value;
     return {
         dem: {
-            dim: _int('paramDim', 200),
+            dim: _int('paramDim', 600),
             depth_scale: _flt('paramDepthScale', 0.5),
             water_scale: _flt('paramWaterScale', 0.05),
             subtract_water: _chk('paramSubtractWater', true),
@@ -277,14 +277,14 @@ function collectAllSettings() {
             elevation_curve_vmax: window.appState.curveDataVmax ?? null,
         },
         water: {
-            sat_scale: _int('waterResolution', 500),
+            dim: _int('waterResolution', 600),
             dataset: _str('waterDataset', 'esa'),
         },
         esa: {
-            sat_scale: _int('esaResolution', 200),
+            dim: _int('esaResolution', 600),
         },
         satellite: {
-            dim: _int('paramDim', 800),
+            dim: _int('satImgResolution', 600),
         },
         export: {
             model_height: _flt('exportModelHeight', 30.0),
@@ -400,13 +400,14 @@ function applyAllSettings(s) {
     }
 
     // water group
-    const satScaleVal = wat.sat_scale ?? s.sat_scale;
-    if (satScaleVal != null) set('waterResolution', satScaleVal);
+    const waterDimVal = wat.dim ?? wat.sat_scale ?? s.dim ?? s.sat_scale;
+    if (waterDimVal != null) set('waterResolution', waterDimVal);
     if (wat.dataset != null) set('waterDataset', wat.dataset);
 
     // esa group — independent ESA land cover resolution
     const esa = s.esa || {};
-    if (esa.sat_scale != null) set('esaResolution', esa.sat_scale);
+    const esaDimVal = esa.dim ?? esa.sat_scale;
+    if (esaDimVal != null) set('esaResolution', esaDimVal);
 
     // export group — new IDs: exportModelHeight, exportBaseHeight, exportExaggeration, etc.
     if (exp.model_height != null) set('exportModelHeight', exp.model_height);

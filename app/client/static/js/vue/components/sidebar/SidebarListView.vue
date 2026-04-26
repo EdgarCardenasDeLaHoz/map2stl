@@ -1,16 +1,15 @@
 <template>
   <div id="sidebarListView" :class="{ 'hidden': !visible }"
-       style="display:flex;flex-direction:column;height:100%;">
-    <input type="text" id="coordSearch" class="search-input"
+       class="sidebar-list-view">
+    <input type="text" id="coordSearch" class="search-input sidebar-search-input"
            v-model="searchQuery"
-           placeholder="Search regions..."
-           style="margin:4px 6px;width:calc(100% - 12px);flex-shrink:0;box-sizing:border-box;margin-bottom:4px;">
+           placeholder="Search regions...">
     <!-- region-ui.js / regions.js populate this div via innerHTML.
          Do NOT place Vue-managed children here — innerHTML replaces them and
          breaks Vue's virtual-DOM references (causes insertBefore-on-null).
          Once region-ui.js is fully migrated to composables, render from
          store.coordinatesData instead. -->
-    <div id="coordinatesList" class="coordinates-list" style="flex:1;overflow-y:auto;"></div>
+    <div id="coordinatesList" class="coordinates-list sidebar-coord-list"></div>
   </div>
 </template>
 

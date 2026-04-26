@@ -74,19 +74,102 @@ def _is_in_coverage(bbox: BBox) -> bool:
 
 
 def _fetch_buildings_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | None:
-    """Fetch building heights from Open Buildings and rasterize to grid.
+    """Fetch building heights from Overture Maps GeoParquet on S3 and rasterize.
 
-    This is a placeholder that returns None until the Overture/STAC
-    integration is implemented. The provider structure is ready for when
-    the data access is wired up.
+    Uses pyarrow.dataset with an anonymous S3FileSystem to scan the Overture
+    Maps buildings parquet files for the given bounding box.  PyArrow 14+
+    pushes the bbox filter expression down to parquet row-group statistics,
+    so only matching files and row-groups are read.
+
+    Requires the optional dependencies: pyarrow[s3] (includes s3fs/fsspec).
+    Returns None gracefully when the dependencies are absent or the fetch fails.
     """
-    # TODO: Implement Overture Maps or direct GCS access
-    # Steps:
-    # 1. Query Overture Buildings parquet files for bbox
-    # 2. Extract height column from matching buildings
-    # 3. Rasterize building polygons with heights into (H, W) grid
-    logger.debug("Open Buildings fetch not yet implemented - returning None")
-    return None
+    try:
+        import pyarrow.dataset as ds
+        import pyarrow.compute as pc
+        from pyarrow.fs import S3FileSystem
+        from shapely import wkb as shapely_wkb
+    except ImportError as exc:
+        logger.debug("pyarrow[s3] not installed - skipping Open Buildings: %s", exc)
+        return None
+
+    north, south, east, west = bbox
+    h, w = dim
+
+    try:
+        fs = S3FileSystem(anonymous=True, region="us-west-2")
+        s3_path = (
+            "overturemaps-us-west-2/release/2024-07-22.0/"
+            "theme=buildings/type=building/"
+        )
+        dataset = ds.dataset(s3_path, filesystem=fs, format="parquet")
+
+        # Build a filter expression using pyarrow.compute struct field access.
+        # Overture Maps 2024 buildings parquet stores bbox as a struct column
+        # with subfields minx/miny/maxx/maxy.  PyArrow 14+ supports predicate
+        # pushdown for struct subfields when row-group statistics are available.
+        bbox_field = ds.field("bbox")
+        filt = pc.and_(
+            pc.and_(
+                pc.less_equal(pc.struct_field(bbox_field, "minx"), float(east)),
+                pc.greater_equal(pc.struct_field(bbox_field, "maxx"), float(west)),
+            ),
+            pc.and_(
+                pc.less_equal(pc.struct_field(bbox_field, "miny"), float(north)),
+                pc.greater_equal(pc.struct_field(bbox_field, "maxy"), float(south)),
+            ),
+        )
+
+        table = dataset.to_table(
+            columns=["geometry", "height", "num_floors"],
+            filter=filt,
+        )
+
+        if len(table) == 0:
+            logger.debug("No buildings found in bbox %s", bbox)
+            return None
+
+        grid = np.full((h, w), np.nan, dtype=np.float32)
+        lon_step = (east - west) / max(w, 1)
+        lat_step = (north - south) / max(h, 1)
+
+        geom_col   = table.column("geometry").to_pylist()
+        height_col = table.column("height").to_pylist()
+        floors_col = table.column("num_floors").to_pylist()
+
+        for geom_bytes, bld_height, bld_floors in zip(geom_col, height_col, floors_col):
+            if geom_bytes is None:
+                continue
+            bld_h = (
+                float(bld_height) if bld_height is not None
+                else (float(bld_floors) * 3.0 if bld_floors else None)
+            )
+            if bld_h is None:
+                continue
+            try:
+                geom = shapely_wkb.loads(bytes(geom_bytes))
+            except Exception:
+                continue
+
+            gx0, gy0, gx1, gy1 = geom.bounds
+            c0 = max(0, int((gx0 - west) / lon_step))
+            c1 = min(w, int((gx1 - west) / lon_step) + 1)
+            r0 = max(0, int((north - gy1) / lat_step))
+            r1 = min(h, int((north - gy0) / lat_step) + 1)
+            if c0 >= c1 or r0 >= r1:
+                continue
+            patch = grid[r0:r1, c0:c1]
+            grid[r0:r1, c0:c1] = np.where(
+                np.isnan(patch), bld_h, np.maximum(patch, bld_h)
+            )
+
+        if np.all(np.isnan(grid)):
+            return None
+        return grid
+
+    except Exception as exc:
+        logger.warning("Open Buildings S3 fetch failed: %s", exc)
+        return None
 
 
 class OpenBuildingsProvider:

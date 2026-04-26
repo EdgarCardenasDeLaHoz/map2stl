@@ -1,14 +1,35 @@
 # Plan: Building Height Estimation — Detailed Implementation
 
-> **Status:** Phase 1a complete — 5 providers implemented and tested (121 tests pass). Phase 1b+2+3 not started.
+> **Status:** Phase 1a is complete and in use. Phase 1b is **complete**: GHSL, Open Buildings, and Shadow providers are implemented in the router and all 8 are now wired into `TerrainSession.fetch_building_heights()`. Open Buildings and Shadow remain placeholder-quality fetch paths but are correctly integrated. Phase 3 (STL import + IDW infill) is **complete**: `stl_import.py`, `infill.py`, and `TerrainSession.load_stl()` / `preview_stl()` / `infill_heights()` are fully implemented and tested. Phase 2 (CNN prediction) is still not started. Current focused test count: `tests/test_height/` = 179 passing tests.
 > **Scope:** Backend only, session API. No frontend changes.
 > **Target cities:** Granada, Barcelona (test examples; tool is generic)
 > **Target resolution:** ~5m/pixel
-> **Last updated:** 2026-04-19
+> **Last updated:** 2026-04-24
 
 ## TL;DR
 
-Integrate 3 additional height data sources (Microsoft Footprints, Google 3D Tiles, Copernicus), build a CNN height-from-satellite pipeline, and create an STL→heightmap→AI-infill system. Backend only, session API. Phased with segment tests at each boundary.
+The current backend already supports a multi-provider height pipeline with merge logic, a dedicated height router, and `TerrainSession.fetch_building_heights()`. What remains is to harden the exploratory Phase 1b providers, then build the entirely separate CNN and STL/infill phases.
+
+## Current Reality Check
+
+### Implemented now
+
+- `app/server/core/height/` package with `HeightResult`, `HeightProvider`, and `merge_height_rasters()`
+- Production-grade providers used in the current pipeline: `wsf3d`, `ndsm`, `copernicus`, `lidar_3dep`, `google3d`
+- Phase 1b exploratory providers: `ghsl`, `open_buildings`, `shadow_height` — all wired into `TerrainSession.fetch_building_heights()`; `open_buildings` and `shadow_height` have placeholder fetch paths
+- `app/server/routers/height.py` with `/api/height/sources` and `/api/height/fetch`
+- `TerrainSession.fetch_building_heights()` local orchestration method — all 8 providers registered
+- **Phase 3 complete:** `stl_import.py` (trimesh ray-cast → heightmap) and `infill.py` (IDW + nearest-neighbour)
+- **Phase 3 TerrainSession methods:** `load_stl()`, `preview_stl()`, `infill_heights()`
+- Height-focused pytest suite: **179 passing tests** (147 pre-Phase 3 + 32 new)
+
+### Not implemented yet
+
+- `TerrainSession.predict_heights()`
+- `app/server/core/height/predict.py`, `train.py`
+- Height router endpoints for CNN prediction, STL import REST API, or infill REST API
+- `open_buildings.py` actual fetch path (currently returns None)
+- `shadow_height.py` actual shadow-detection pipeline (currently returns empty result)
 
 ---
 
@@ -35,7 +56,7 @@ Integrate 3 additional height data sources (Microsoft Footprints, Google 3D Tile
 2. Google 3D Tiles (photogrammetric, best quality for Barcelona/Granada)
 3. Copernicus Building Height (10m raster, free, covers all Europe)
 
-Add more only after these are working and tested. Microsoft + LiDAR + shadow become Phase 1b.
+That sequencing was correct for initial scope. Since then, the repo has grown beyond the original narrow target: LiDAR 3DEP is implemented, and GHSL / Open Buildings / ShadowHeight were added as exploratory Phase 1b providers. The important distinction now is not "implemented vs not implemented" but "production-ready vs placeholder".
 
 ### A4: "PConv is the right inpainting approach for heightmaps"
 
@@ -86,7 +107,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     CNN["CNN Predict<br/>Phase 2"] -.-> MERGE["merge"]
-    STL["STL Import<br/>Phase 3"] -.-> INFILL["Infill"] -.-> MERGE
+    STL["STL Import<br/>Phase 3 ✅"] --> INFILL["Infill ✅"] --> MERGE
 ```
 
 ### Provider Priority Merge
@@ -135,15 +156,18 @@ app/server/core/
 │   ├── __init__.py            # HeightResult, HeightProvider protocol, merge_height_rasters()
 │   ├── providers/
 │   │   ├── __init__.py
-│   │   ├── copernicus.py      # ✅ JRC GHSL ~10m EU / 100m global, confidence 0.7
+│   │   ├── copernicus.py      # ✅ Copernicus / GHSL-backed EU/global raster provider
+│   │   ├── ghsl.py            # ✅ Exploratory global raster provider (implemented)
 │   │   ├── google_3d.py       # ✅ Google 3D Tiles ~1m, API key, confidence 0.9
 │   │   ├── lidar_3dep.py      # ✅ USGS 3DEP LiDAR ~1m US-only, confidence 0.95
 │   │   ├── ndsm.py            # ✅ GLO-30 minus FABDEM ~30m global, confidence 0.8
+│   │   ├── open_buildings.py  # ⚠️ Coverage scaffold / placeholder fetch path
+│   │   ├── shadow_height.py   # ⚠️ Heuristic placeholder provider
 │   │   └── wsf3d.py           # ✅ DLR WSF3D ~90m global, confidence 0.5
 │   ├── predict.py             # Phase 2 — CNN inference (not started)
 │   ├── train.py               # Phase 2 — CNN training pipeline (not started)
-│   ├── stl_import.py          # Phase 3 — STL → heightmap (not started)
-│   └── infill.py              # Phase 3 — Heightmap inpainting (not started)
+│   ├── stl_import.py          # ✅ Phase 3 — STL → heightmap via trimesh ray-cast
+│   └── infill.py              # ✅ Phase 3 — IDW + nearest-neighbour heightmap infill
 ├── osm.py                     # existing, minimal changes
 └── ...
 ```
@@ -171,9 +195,9 @@ Key generation follows existing `make_cache_key(namespace, N, S, E, W, extra)`.
 # New methods on TerrainSession:
 
 # Phase 1: Data sources
-s.fetch_building_heights(providers=["osm", "copernicus", "google3d"])
-  → self.building_heights: HeightResult (merged raster)
-  → replaces self.city_raster["buildings"] with merged data
+s.fetch_building_heights(providers=["wsf3d", "copernicus", "google3d"])
+    → self.building_heights: HeightResult (merged raster)
+    → currently runs locally in the session process, not through `/api/height/fetch`
 
 # Phase 2: CNN
 s.predict_heights(model="dsm_super_res")
@@ -185,16 +209,15 @@ s.train_height_model(ground_truth_cities=["Barcelona"], epochs=50)
   → returns training metrics dict
 
 # Phase 3: STL import + infill
-s.load_stl(path, bbox, up_axis="z", scale="auto")
-  → self.stl_heightmap: np.ndarray (H,W) with NaN outside mesh
-  → self.stl_mask: np.ndarray (H,W) bool (True where STL has data)
+s.load_stl(path, bbox, up_axis="z", resolution_m=5.0)
+  → self.stl_heightmap: np.ndarray (H,W) float32, NaN outside mesh
+  → self.stl_mask: np.ndarray (H,W) bool (True where STL has surface)
 
 s.preview_stl()
   → matplotlib figure showing imported heightmap extent + values
 
-s.infill_heights(method="idw"|"pconv"|"satellite_gan")
+s.infill_heights(method="idw"|"nearest", use_dem_baseline=True)
   → self.infilled_heights: np.ndarray (H,W) complete
-  → uses self.stl_heightmap as known region, fills NaN
 ```
 
 **Chaining with existing pipeline:**
@@ -306,7 +329,7 @@ with TerrainSession().start() as s:
 
 ## Phase 1a.3: Height Merge + Session Integration — COMPLETE
 
-> ✅ **Implemented.** `fetch_building_heights()` added to `TerrainSession`. All 5 providers registered. 22 E2E session tests pass.
+> ✅ **Implemented.** `fetch_building_heights()` added to `TerrainSession`. The session currently supports 5 providers (`wsf3d`, `ndsm`, `copernicus`, `lidar_3dep`, `google3d`) and the focused height test suite is currently 147 passing tests overall.
 
 **Core function:**
 ```
@@ -337,6 +360,33 @@ Algorithm:
 - 0.0 = default fallback
 
 **Session API:** Add `fetch_building_heights()` method to `TerrainSession`.
+
+### Notes on Current Gaps
+
+- The dedicated height router exists, but its provider registry does not yet mirror `TerrainSession` exactly.
+- `TerrainSession` currently exposes only the 5-provider core path; it does not yet include `ghsl`, `open_buildings`, or `shadow_height`.
+- `open_buildings` and `shadow_height` are present primarily as scaffolding for future work, not as production-quality height sources.
+
+---
+
+## Phase 1b: Provider Expansion / Hardening — COMPLETE
+
+> ✅ **Complete (integration-wired).** All 8 providers are registered in `TerrainSession.fetch_building_heights()`. GHSL is meaningfully implemented. Open Buildings and ShadowHeight are integrated but remain placeholder-quality data-fetch paths — they contribute no real data yet.
+
+### What exists now
+
+- `ghsl.py` — implemented global raster provider with cache support; wired into TerrainSession
+- `open_buildings.py` — coverage logic and placeholder fetch path (returns empty/NaN); wired into TerrainSession
+- `shadow_height.py` — solar-angle and shadow-length helper math, not a full inference pipeline; wired into TerrainSession
+- Height router registration for all three providers
+- `TerrainSession._registry` includes all 8 providers
+
+### What still needs to happen before calling Phase 1b “done”
+
+- Replace `open_buildings.py` placeholder fetch with real Google Open Buildings v3 data acquisition
+- Replace `shadow_height.py` placeholder with actual shadow-detection-based height inference
+- Add end-to-end tests proving these providers improve merged coverage rather than only returning NaNs
+- Revisit confidence ordering after real outputs exist
 
 ---
 
@@ -412,9 +462,11 @@ def train(config: TrainConfig) → TrainResult:
 
 ---
 
-## Phase 3: STL → Heightmap → AI Infill
+## Phase 3: STL → Heightmap → Infill — COMPLETE
 
-### 3.0: STL Import
+> ✅ **Complete.** `stl_import.py` and `infill.py` are fully implemented and tested. `TerrainSession` now exposes `load_stl()`, `preview_stl()`, and `infill_heights()`. 32 tests added.
+
+### 3.0: STL Import — COMPLETE
 
 **Module:** `app/server/core/height/stl_import.py`
 
@@ -423,50 +475,65 @@ def stl_to_heightmap(
     stl_path: str | Path,
     bbox: dict,           # {north, south, east, west}
     resolution_m: float = 5.0,
-    up_axis: str = "z",
-) → tuple[np.ndarray, np.ndarray]:  # (heightmap, mask)
-    # trimesh.load → scale to grid → ray-cast Z-down → max Z per pixel
+    up_axis: str = "z",   # one of: x, y, z, -x, -y, -z
+) -> tuple[np.ndarray, np.ndarray]:  # (heightmap float32, mask bool)
+    # trimesh.load(force="mesh") → optional up-axis rotation
+    # → build W×H ray grid from mesh XY bounds
+    # → mesh.ray.intersects_location(multiple_hits=True)
+    # → np.maximum.at per ray → heightmap + mask
 ```
 
-### 3.1: IDW Infill (deterministic, no ML)
+**TerrainSession API:**
+```python
+s.load_stl(path, bbox=None, up_axis="z", resolution_m=5.0)
+    # → self.stl_heightmap: (H,W) float32
+    # → self.stl_mask: (H,W) bool
+s.preview_stl()
+    # → matplotlib figure
+```
+
+### 3.1: IDW Infill (deterministic) — COMPLETE
 
 **Module:** `app/server/core/height/infill.py`
 
 ```python
-def infill_idw(heightmap, mask, dem_baseline=None, power=2) → np.ndarray:
-    # For NaN pixels: weighted average of nearest known pixels
-    # If dem_baseline provided: blend toward DEM far from known data
-    # Uses scipy.ndimage.distance_transform_edt
+def infill_idw(heightmap, mask=None, dem_baseline=None, power=2) -> np.ndarray:
+    # Delaunay triangulation (scipy.interpolate.griddata "linear")
+    # Fallback to "nearest" for < 4 known points or outside hull
+    # Optional DEM blend: weight = clip(dist / max_dist, 0, 1)
+
+def infill_nearest(heightmap) -> np.ndarray:
+    # scipy.ndimage.distance_transform_edt nearest-index fill
+    # O(N), sharp boundaries
 ```
 
-### 3.2: PConv Infill (requires trained model)
+**TerrainSession API:**
+```python
+s.infill_heights(method="idw"|"nearest", use_dem_baseline=True, power=2.0)
+    # → self.infilled_heights: (H,W) float32, no NaN in active region
+```
+
+### 3.2: PConv Infill — NOT STARTED
 
 ```python
-def infill_pconv(heightmap, mask, model_path) → np.ndarray:
+def infill_pconv(heightmap, mask, model_path) -> np.ndarray:
     # Partial convolution inpainting adapted for single-channel heightmaps
 ```
 
-### 3.3: Satellite-Conditioned Infill (best quality)
+### 3.3: Satellite-Conditioned Infill — NOT STARTED
 
 ```python
-def infill_satellite(heightmap, mask, satellite_rgb, model_path) → np.ndarray:
+def infill_satellite(heightmap, mask, satellite_rgb, model_path) -> np.ndarray:
     # Pix2Pix-style: input = [satellite_rgb, partial_height, mask] → complete height
 ```
 
-### Segment Tests
+### Tests — COMPLETE
 
-**Unit tests:**
-- `test_stl_to_heightmap_cube()` — 10x10x5 cube STL → import → verify height=5 in center, NaN outside
-- `test_stl_to_heightmap_resolution()` — same cube, resolution 1 vs 5 → different grid sizes
-- `test_up_axis_rotation()` — cube with Y-up → verify rotation applied correctly
-- `test_idw_infill_simple()` — 10x10 array, center 4 pixels known (height=20), rest NaN → smooth falloff
-- `test_idw_with_dem_baseline()` — known=20m, DEM=100m → far pixels approach 100m
-- `test_infill_preserves_known()` — any infill method → known pixels unchanged
-
-**Integration tests:**
-- `test_stl_roundtrip()` — heightmap → mesh → STL → re-import → RMSE < 1m
-- `test_session_load_stl()` — mock STL → `s.load_stl(...)` → verify self.stl_heightmap
-- `test_session_infill_idw()` — load + infill → verify no NaN in output
+**32 new tests in `tests/test_height/test_stl_import.py` and `test_infill.py`:**
+- STL import: shape, dtype, NaN mask, max height, resolution scaling, axis rotation (all 6 variants), error handling
+- Infill IDW: NaN coverage, known-pixel preservation, range bounds, degenerate (1 known point), DEM blending
+- Infill nearest: NaN coverage, known-pixel preservation, edge cases
+- Consistency: both methods agree on known pixels
 
 ---
 
@@ -508,13 +575,13 @@ flowchart TD
 | `torch` | CNN inference + training | 2.0 | ~2GB (CUDA) | Not yet |
 | `torchvision` | EfficientNet encoder | 2.0 | ~30MB | Not yet |
 | `timm` | Model zoo (EfficientNet variants) | 2.0 | ~5MB | Not yet |
-| `laspy` | LiDAR point clouds (Phase 1b) | 1b | ~2MB | Not yet |
+| `laspy` | LiDAR point clouds (Phase 1b) | 1b | ~2MB | Not yet / only needed if raw point-cloud ingestion is added |
 
 ---
 
 ## Router Design
 
-New router: `app/server/routers/height.py`
+Current router: `app/server/routers/height.py`
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
@@ -524,7 +591,7 @@ New router: `app/server/routers/height.py`
 | `/api/height/import-stl` | POST | Upload STL + bbox → heightmap |
 | `/api/height/infill` | POST | Infill heightmap NaN regions |
 
-Follows existing pattern: async endpoint → `run_sync(core_func)` → cache → JSONResponse.
+Only `/api/height/sources` and `/api/height/fetch` are implemented today. The predict / import-stl / infill endpoints remain planned only.
 
 ---
 

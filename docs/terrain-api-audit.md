@@ -1,6 +1,6 @@
 # Terrain API Call Stack Audit
 
-_Last updated: 2026-04-21_
+_Last updated: 2026-04-24_
 
 Audit of every endpoint in the terrain and composite routers, tracing each call stack from HTTP handler through core modules to external library functions.
 
@@ -92,6 +92,8 @@ Dropped: inferior duplicate of `/api/terrain/dem` with hardcoded projection, no 
 
 **Handler**: `get_terrain_water_mask()` (line 364)
 
+**Scale parameter (updated):** Query accepts `dim` (int, pixels per side, default 600) — **not** `sat_scale`. The handler computes `sat_scale = max(10, ceil(longer_bbox_m / dim))` using the midpoint-latitude formula, then passes it to `sat.fetch_water_mask`. The cache key uses the `"dim"` field. The response includes `resolution_m: sat_scale` in all paths (cache hit, TEST_MODE, live).
+
 ```
 get_terrain_water_mask()
 ├── validation.parse_float/parse_int/parse_bool()
@@ -126,6 +128,8 @@ Libraries: geo2stl.sat2stl, geo2stl.geo2stl, geo2stl.projections, cv2
 ## 4. `/api/terrain/esa-land-cover` — ESA WorldCover Only
 
 **Handler**: `get_terrain_esa_land_cover()` (line 488)
+
+**Scale parameter (updated):** Same as water-mask — query accepts `dim` (pixels per side), handler computes `sat_scale` from bbox + dim. Response includes `resolution_m`.
 
 ```
 get_terrain_esa_land_cover()

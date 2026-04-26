@@ -37,6 +37,12 @@ const _evConstants = {
     STATUS_UPDATE: 'status:update',
     /** Fired when the stacked layers view should re-render. */
     STACKED_UPDATE: 'stacked:update',
+    /** Fired when DEM data is loaded; payload: (vmin, vmax). */
+    DEM_LOADED: 'dem:loaded',
+    /** Fired when the active colormap selection changes. */
+    COLORMAP_CHANGE: 'colormap:change',
+    /** Fired when the user selects a region; payload: (index). */
+    REGION_SELECTED: 'region:selected',
 };
 
 // Proxy warns on access to unknown event names — catches typos at runtime.

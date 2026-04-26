@@ -1,16 +1,15 @@
 <template>
   <CollapsibleSection title="🌿 ESA Land Cover">
 
-    <!-- esa.sat_scale — independent resolution for ESA land cover -->
+    <!-- esa.dim — independent resolution for ESA land cover -->
     <div class="param-group">
-      <label for="esaResolution" title="Earth Engine fetch resolution in metres/pixel for ESA WorldCover.">Resolution:</label>
+      <label for="esaResolution" title="Output resolution in pixels per side for ESA WorldCover. The backend computes the Earth Engine scale from your bbox and this value.">Resolution (px):</label>
       <select id="esaResolution" class="ctrl-select">
-        <option value="10">10 m/px — ESA Native (city)</option>
-        <option value="30">30 m/px — High Detail</option>
-        <option value="100">100 m/px — Medium</option>
-        <option value="200" selected>200 m/px — Default</option>
-        <option value="500">500 m/px — Fast</option>
-        <option value="1000">1000 m/px — Very Fast</option>
+        <option value="100">100 px — Very Fast</option>
+        <option value="200">200 px — Fast</option>
+        <option value="400">400 px — Medium</option>
+        <option value="600" selected>600 px — Default</option>
+        <option value="1200">1200 px — High Detail</option>
       </select>
     </div>
 

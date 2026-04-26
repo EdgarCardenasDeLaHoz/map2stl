@@ -14,7 +14,7 @@
 ```bash
 cd strm2stl && source ../.venv/bin/activate
 python -m uvicorn app.server.server:app --port 9000 --reload   # starts FastAPI
-python -m pytest tests/ -v                                     # run all tests (327 pass, 16 test files)
+python -m pytest tests/ -v                                     # run all tests (532 pass, 16 test files)
 ```
 
 ## Recommended Read Order

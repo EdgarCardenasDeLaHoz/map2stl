@@ -7,8 +7,41 @@ from shapely.geometry import Polygon, MultiPolygon
 import pandas as pd
 import osmnx as ox
 
-from . import create
-from numpy2stl import numpy2stl as n2s
+# Legacy imports -- only loaded at call time to avoid breaking the module
+# when descartes (required by city2stl.buildings) is not installed.
+# _HIGHWAY_WIDTHS and get_road_width_m above do NOT require these imports.
+# from . import create   <-- moved inside get_z_values()
+# from numpy2stl import numpy2stl as n2s  <-- moved inside functions that use it
+
+
+# ---------------------------------------------------------------------------
+# Canonical highway widths (half-width in metres).
+# This is the authoritative source used by the server (app.server.core.osm
+# re-exports from here, and city2stl.fetch imports from here).
+#
+# NOTE: ROAD_WIDTHS inside get_road_model() below is a legacy 7-entry subset
+# kept for backward compatibility with the old notebook pipeline.
+# ---------------------------------------------------------------------------
+
+_HIGHWAY_WIDTHS: dict = {
+    'motorway': 12,       'motorway_link': 6,
+    'trunk': 10,          'trunk_link': 5,
+    'primary': 8,         'primary_link': 4,
+    'secondary': 7,       'secondary_link': 3.5,
+    'tertiary': 6,        'tertiary_link': 3,
+    'residential': 4,     'living_street': 3,
+    'service': 2,         'track': 2,
+    'footway': 1.5,       'path': 1.5,       'cycleway': 1.5,
+    'steps': 1,           'pedestrian': 3,
+    'unclassified': 4,
+}
+
+
+def get_road_width_m(highway) -> float:
+    """Return the approximate total road width in metres for the given highway tag."""
+    if isinstance(highway, list):
+        highway = highway[0] if highway else 'unclassified'
+    return float(_HIGHWAY_WIDTHS.get(str(highway), 3.0))
 
 
 def get_road_model(gdf_roads, scale):
@@ -61,6 +94,7 @@ def geom_to_points(geom):
 
 
 def get_z_values(polygon_list, im, bounds_NW):
+    from . import create  # lazy: avoid descartes import at module load time
 
     im_lims = np.array([(0,im.shape[0]),(0,im.shape[1])])
 
@@ -84,6 +118,7 @@ def get_z_values(polygon_list, im, bounds_NW):
 
 
 def polygon_to_vertices(polygon_list):
+    from numpy2stl import numpy2stl as n2s  # lazy import
 
     triangles = []
     for poly in polygon_list:
@@ -100,6 +135,7 @@ def polygon_to_vertices(polygon_list):
     return vertices, faces
 
 def render_vertices(gdf):
+    from numpy2stl import numpy2stl as n2s  # lazy import
     
     triangles = []
     

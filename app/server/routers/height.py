@@ -15,6 +15,7 @@ from typing import List, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.server.core.projection import project_grid as _project_grid
 from app.server.core.responses import error_response
 from app.server.schemas import BoundingBox
 
@@ -48,6 +49,14 @@ class HeightFetchRequest(BoundingBox):
     providers: Optional[List[str]] = Field(
         None,
         description="Provider names to use. None = all available."
+    )
+    projection: str = Field(
+        "none",
+        description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"
+    )
+    clip_nans: bool = Field(
+        True,
+        description="Clip NaN-only border rows/cols from projected output"
     )
 
 
@@ -158,34 +167,44 @@ async def height_fetch(req: HeightFetchRequest):
     # Merge
     merged = merge_height_rasters(results, target_shape=dim)
 
-    # Stats
-    valid = ~np.isnan(merged.raster)
-    total = merged.raster.size
+    # Apply projection (same pattern as terrain endpoints)
+    raster = merged.raster
+    if req.projection != "none":
+        raster = _project_grid(
+            raster, req.north, req.south, req.east, req.west,
+            req.projection, req.clip_nans, categorical=False,
+        )
+
+    # Stats (computed on the post-projection raster)
+    valid = ~np.isnan(raster)
+    total = raster.size
     n_valid = int(np.count_nonzero(valid))
+    out_h, out_w = raster.shape
     coverage = n_valid / total * 100 if total > 0 else 0
 
     stats = {
         "providers_used": [r.source_name for r in results],
         "providers_failed": errors,
-        "min_m": float(np.nanmin(merged.raster)) if n_valid > 0 else None,
-        "max_m": float(np.nanmax(merged.raster)) if n_valid > 0 else None,
-        "mean_m": float(np.nanmean(merged.raster)) if n_valid > 0 else None,
+        "min_m": float(np.nanmin(raster)) if n_valid > 0 else None,
+        "max_m": float(np.nanmax(raster)) if n_valid > 0 else None,
+        "mean_m": float(np.nanmean(raster)) if n_valid > 0 else None,
         "valid_pixels": n_valid,
         "total_pixels": total,
     }
 
     # Encode raster as base64 for transport
     import base64
-    raster_bytes = merged.raster.tobytes()
+    raster_bytes = raster.tobytes()
     raster_b64 = base64.b64encode(raster_bytes).decode("ascii")
 
     return {
-        "width": dim[1],
-        "height": dim[0],
+        "width": out_w,
+        "height": out_h,
         "source_name": merged.source_name,
         "resolution_m": merged.resolution_m,
         "coverage_pct": round(coverage, 1),
         "stats": stats,
         "raster_b64": raster_b64,
         "dtype": "float32",
+        "projection": req.projection,
     }

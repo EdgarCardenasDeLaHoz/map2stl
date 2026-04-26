@@ -57,15 +57,23 @@ except ImportError:
 
 
 class CityExportRequest(BaseModel):
-    """Request body for POST /api/cities/export3mf."""
+    """Request body for POST /api/cities/export3mf.
+
+    DEM and buildings data are resolved from the server-side disk cache.
+    Legacy callers may still pass dem_values/buildings directly — the
+    endpoint accepts both forms.
+    """
     north: float
     south: float
     east: float
     west: float
-    dem_values:   List[float]
-    dem_width:    int
-    dem_height:   int
-    buildings:    Dict[str, Any]          # GeoJSON FeatureCollection
+    dem_values:   Optional[List[float]] = None
+    dem_width:    Optional[int] = None
+    dem_height:   Optional[int] = None
+    buildings:    Optional[Dict[str, Any]] = None   # GeoJSON FeatureCollection
+    # DEM cache lookup settings (used when dem_values is not provided)
+    bbox:         Optional[Dict[str, float]] = None
+    dem:          Optional[Dict[str, Any]] = None
     model_height_mm:  float = 20.0
     base_mm:          float = 5.0
     building_z_scale: float = 0.5        # mm per real metre for building heights
@@ -163,6 +171,37 @@ async def get_city_raster(req: CityRasterRequest):
     Cached as .npz alongside other DEM rasters.
     """
     import hashlib
+    import numpy as np
+
+    def _sanitize_raster_result(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize raster payload so JSON serialization never sees NaN/Inf."""
+        grid = np.array(payload["values"], dtype=np.float32).reshape(
+            int(payload["height"]), int(payload["width"]) 
+        )
+
+        finite = np.isfinite(grid)
+        if not finite.all():
+            bad_count = int(grid.size - np.count_nonzero(finite))
+            logger.warning(f"City raster contained {bad_count} non-finite values; replacing with 0.0")
+            grid = np.nan_to_num(grid, nan=0.0, posinf=0.0, neginf=0.0)
+            finite = np.isfinite(grid)
+
+        finite_vals = grid[finite]
+        if finite_vals.size == 0:
+            vmin = 0.0
+            vmax = 0.0
+        else:
+            vmin = float(finite_vals.min())
+            vmax = float(finite_vals.max())
+
+        return {
+            "values": grid.flatten().tolist(),
+            "width": int(payload["width"]),
+            "height": int(payload["height"]),
+            "vmin": vmin,
+            "vmax": vmax,
+            "bbox": payload["bbox"],
+        }
 
     cache_key = hashlib.md5(
         f"cityRaster|{req.north:.4f}_{req.south:.4f}_{req.east:.4f}_{req.west:.4f}"
@@ -172,14 +211,12 @@ async def get_city_raster(req: CityRasterRequest):
 
     # Cache check
     if _CACHE_AVAILABLE and CACHE_ROOT is not None:
-        import numpy as np
         cache_path = CACHE_ROOT / "dem" / f"{cache_key}.npz"
         if cache_path.exists():
             try:
                 arr = np.load(cache_path)
-                values = arr["values"].flatten().tolist()
-                return JSONResponse(content={
-                    "values": values,
+                cached_result = _sanitize_raster_result({
+                    "values": arr["values"].flatten().tolist(),
                     "width": int(arr["width"]),
                     "height": int(arr["height"]),
                     "vmin": float(arr["vmin"]),
@@ -187,14 +224,31 @@ async def get_city_raster(req: CityRasterRequest):
                     "bbox": {"north": req.north, "south": req.south,
                              "east": req.east, "west": req.west},
                 })
+                return JSONResponse(content=cached_result)
             except Exception as e:
                 logger.debug(f"City raster cache read failed: {e}")
+
+    # Resolve GeoJSON from OSM cache when not provided in request body
+    buildings = req.buildings
+    roads = req.roads
+    waterways = req.waterways
+    _from_cache = False
+    if (not buildings.get("features") and not roads.get("features")
+            and not waterways.get("features") and _CACHE_AVAILABLE):
+        osm_key = osm_cache_key(req.north, req.south, req.east, req.west)
+        osm_data = read_osm_cache(osm_key)
+        if osm_data:
+            buildings = osm_data.get("buildings", buildings)
+            roads = osm_data.get("roads", roads)
+            waterways = osm_data.get("waterways", waterways)
+            _from_cache = True
+            logger.debug("City raster: resolved GeoJSON from OSM cache (%s)", osm_key[:8])
 
     try:
         result = await run_sync(
             _rasterize_city_data,
             req.north, req.south, req.east, req.west, req.dim,
-            req.buildings, req.roads, req.waterways,
+            buildings, roads, waterways,
             req.building_scale, req.road_depression_m, req.water_depression_m,
         )
     except Exception as e:
@@ -203,7 +257,6 @@ async def get_city_raster(req: CityRasterRequest):
 
     # Apply map projection (all raster layers use the same pipeline)
     if req.projection != "none":
-        import numpy as np
         from app.server.core.projection import project_grid
 
         grid = np.array(result["values"], dtype=np.float32).reshape(
@@ -220,6 +273,8 @@ async def get_city_raster(req: CityRasterRequest):
             "bbox": {"north": req.north, "south": req.south,
                      "east": req.east, "west": req.west},
         }
+
+    result = _sanitize_raster_result(result)
 
     # Cache result
     if _CACHE_AVAILABLE and CACHE_ROOT is not None:
@@ -252,15 +307,40 @@ async def export_city_3mf(req: CityExportRequest):
     """
     if not _CITIES_3D_AVAILABLE:
         return error_response("core.cities_3d not available", 501)
+
+    # Resolve DEM from cache when not provided
+    dem_values = req.dem_values
+    dem_width = req.dem_width
+    dem_height = req.dem_height
+    if not dem_values:
+        from app.server.core.export import resolve_dem_from_cache
+        req_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+        resolved = resolve_dem_from_cache(req_dict)
+        if resolved:
+            dem_values, dem_height, dem_width = resolved
+        else:
+            return error_response("DEM not found in cache — load DEM first", 400)
+
+    # Resolve buildings from OSM cache when not provided
+    buildings = req.buildings
+    if (not buildings or not buildings.get("features")) and _CACHE_AVAILABLE:
+        osm_key = osm_cache_key(req.north, req.south, req.east, req.west)
+        osm_data = read_osm_cache(osm_key)
+        if osm_data and osm_data.get("buildings"):
+            buildings = osm_data["buildings"]
+            logger.debug("City export: resolved buildings from OSM cache (%s)", osm_key[:8])
+        else:
+            return error_response("Buildings not found in cache — load city data first", 400)
+
     try:
         bbox = {"north": req.north, "south": req.south,
                 "east": req.east, "west": req.west}
         three_mf_bytes = await run_sync(
             generate_city_3mf,
-            buildings_geojson=req.buildings,
-            dem_values=req.dem_values,
-            dem_width=req.dem_width,
-            dem_height=req.dem_height,
+            buildings_geojson=buildings,
+            dem_values=dem_values,
+            dem_width=dem_width,
+            dem_height=dem_height,
             bbox=bbox,
             model_height_mm=req.model_height_mm,
             base_mm=req.base_mm,
@@ -315,6 +395,17 @@ async def enhance_heights(req: EnhanceHeightsRequest):
     if diag_err:
         return diag_err
 
+    # Resolve buildings from OSM cache when not provided
+    buildings = req.buildings
+    if (not buildings or not buildings.get("features")) and _CACHE_AVAILABLE:
+        osm_key = osm_cache_key(req.north, req.south, req.east, req.west)
+        osm_data = read_osm_cache(osm_key)
+        if osm_data and osm_data.get("buildings"):
+            buildings = osm_data["buildings"]
+            logger.debug("Enhance heights: resolved buildings from OSM cache (%s)", osm_key[:8])
+        else:
+            return error_response("Buildings not found in cache — load city data first", 400)
+
     bbox = (req.north, req.south, req.east, req.west)
     dim = (req.dim, req.dim)
 
@@ -343,10 +434,11 @@ async def enhance_heights(req: EnhanceHeightsRequest):
 
         # Enhance buildings
         result = enhance_buildings_with_raster(
-            req.buildings,
+            buildings,
             height_result.raster,
             bbox,
             confidence_raster=height_result.confidence,
+            source_name="google3d",
         )
 
         return JSONResponse(content=result)

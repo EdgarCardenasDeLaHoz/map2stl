@@ -17,6 +17,7 @@ import './modules/core/state.js';
 import './modules/dem/dem-loader.js';
 import './modules/dem/dem-gridlines.js';
 import './modules/ui/presets.js';
+import './modules/ui/curve-editor-state.js';
 import './modules/ui/curve-editor.js';
 import './modules/layers/city-overlay.js';
 import './modules/layers/city-render.js';

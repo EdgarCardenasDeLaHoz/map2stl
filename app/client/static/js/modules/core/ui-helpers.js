@@ -218,12 +218,10 @@ window.setupCoordinateSearch = function setupCoordinateSearch() {
     if (!searchInput || searchInput._searchWired) return;
     searchInput._searchWired = true;
 
+    // Trigger a full re-render so the pagination in region-ui.js resets and
+    // filters correctly (simple show/hide would break page boundaries).
     searchInput.addEventListener('input', function () {
-        const query = this.value.toLowerCase();
-        document.querySelectorAll('.coordinate-item').forEach(item => {
-            const name = item.textContent.toLowerCase();
-            item.style.display = name.includes(query) ? '' : 'none';
-        });
+        window.renderCoordinatesList?.();
     });
 };
 

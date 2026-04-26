@@ -147,7 +147,7 @@ class TestEnhanceBuildingsWithRaster:
 
         for feat in result["buildings"]["features"]:
             assert feat["properties"]["height_m"] == 30.0
-            assert feat["properties"]["height_source"] == "google3d"
+            assert feat["properties"]["height_source"] == "raster"
 
     def test_preserves_osm_tagged_buildings(self):
         """Buildings with OSM tag heights are NOT overwritten."""
@@ -164,7 +164,7 @@ class TestEnhanceBuildingsWithRaster:
         assert feats[0]["properties"]["height_m"] == 25.0  # original
         assert feats[0]["properties"]["height_source"] == "osm_tag"
         assert feats[1]["properties"]["height_m"] == 50.0  # enhanced
-        assert feats[1]["properties"]["height_source"] == "google3d"
+        assert feats[1]["properties"]["height_source"] == "raster"
 
     def test_nan_raster_not_enhanced(self):
         """NaN raster values should not overwrite defaults."""
@@ -265,6 +265,123 @@ class TestEnhanceBuildingsWithRaster:
 # ---------------------------------------------------------------------------
 # Router tests
 # ---------------------------------------------------------------------------
+
+class TestSourceName:
+    """source_name parameter is written to height_source for enhanced buildings."""
+
+    def test_custom_source_name(self):
+        """source_name is stored in height_source for enhanced buildings."""
+        geojson = _make_buildings_geojson(3)
+        raster, bbox = _make_raster(fill=20.0)
+        result = enhance_buildings_with_raster(geojson, raster, bbox, source_name="ndsm")
+        for feat in result["buildings"]["features"]:
+            assert feat["properties"]["height_source"] == "ndsm"
+
+    def test_default_source_name_is_raster(self):
+        """Default source_name is 'raster'."""
+        geojson = _make_buildings_geojson(2)
+        raster, bbox = _make_raster(fill=15.0)
+        result = enhance_buildings_with_raster(geojson, raster, bbox)
+        for feat in result["buildings"]["features"]:
+            assert feat["properties"]["height_source"] == "raster"
+
+    def test_google3d_source_name(self):
+        """Explicit source_name='google3d' is honoured (mirrors cities.py caller)."""
+        geojson = _make_buildings_geojson(2)
+        raster, bbox = _make_raster(fill=22.0)
+        result = enhance_buildings_with_raster(
+            geojson, raster, bbox, source_name="google3d"
+        )
+        for feat in result["buildings"]["features"]:
+            assert feat["properties"]["height_source"] == "google3d"
+
+    def test_osm_tagged_buildings_unaffected_by_source_name(self):
+        """OSM-tagged buildings keep their original height_source regardless of source_name."""
+        geojson = _make_buildings_geojson(4, with_osm_heights=[0, 1])
+        raster, bbox = _make_raster(fill=25.0)
+        result = enhance_buildings_with_raster(
+            geojson, raster, bbox, source_name="ghsl"
+        )
+        feats = result["buildings"]["features"]
+        assert feats[0]["properties"]["height_source"] == "osm_tag"
+        assert feats[1]["properties"]["height_source"] == "osm_tag"
+        assert feats[2]["properties"]["height_source"] == "ghsl"
+        assert feats[3]["properties"]["height_source"] == "ghsl"
+
+
+class TestReduceBuildingsRoofTags:
+    """_reduce_buildings preserves roof tags and height_source through dissolve."""
+
+    def _make_gdf(self, with_roof_tags: bool = True):
+        """Create a small GeoDataFrame with touching buildings."""
+        import geopandas as gpd
+        from shapely.geometry import box
+
+        # Two touching buildings with same height so they dissolve together
+        gdf = gpd.GeoDataFrame(
+            {
+                "geometry": [box(0, 0, 1, 1), box(1, 0, 2, 1)],
+                "height_m": [10.0, 10.0],
+                "height_source": ["osm_tag", "default"],
+            },
+            crs="EPSG:4326",
+        )
+        if with_roof_tags:
+            gdf["roof:shape"] = ["gabled", "flat"]
+            gdf["roof:height"] = ["2.5", None]
+        return gdf
+
+    def test_height_source_preserved(self):
+        """height_source is preserved through dissolve."""
+        from city2stl.heights import _reduce_buildings
+        gdf = self._make_gdf()
+        result = _reduce_buildings(gdf)
+        assert "height_source" in result.columns
+        # At least one row should have height_source set (not all NaN)
+        assert result["height_source"].notna().any()
+
+    def test_roof_shape_preserved(self):
+        """roof:shape tag is present in the output when it was in the input."""
+        from city2stl.heights import _reduce_buildings
+        gdf = self._make_gdf(with_roof_tags=True)
+        result = _reduce_buildings(gdf)
+        assert "roof:shape" in result.columns
+        # The merged building should have one of the original shapes
+        shapes = set(result["roof:shape"].dropna().unique())
+        assert shapes.issubset({"gabled", "flat"})
+
+    def test_no_roof_tags_in_input(self):
+        """If input has no roof tag columns, output still has geometry and height_m."""
+        from city2stl.heights import _reduce_buildings
+        gdf = self._make_gdf(with_roof_tags=False)
+        result = _reduce_buildings(gdf)
+        assert "geometry" in result.columns
+        assert "height_m" in result.columns
+        for col in ["roof:shape", "roof:height"]:
+            assert col not in result.columns
+
+    def test_largest_area_wins_roof_tag(self):
+        """For merged groups, roof tags from the largest-area building win."""
+        import geopandas as gpd
+        from shapely.geometry import box
+        from city2stl.heights import _reduce_buildings
+
+        # Big building (area=4) tagged 'pyramidal'; small (area=1) tagged 'flat'
+        gdf = gpd.GeoDataFrame(
+            {
+                "geometry": [box(0, 0, 2, 2), box(2, 0, 3, 1)],
+                "height_m": [10.0, 10.0],
+                "height_source": ["osm_tag", "default"],
+                "roof:shape": ["pyramidal", "flat"],
+            },
+            crs="EPSG:4326",
+        )
+        result = _reduce_buildings(gdf)
+        assert "roof:shape" in result.columns
+        # The bigger building's tag should win
+        shapes = list(result["roof:shape"].dropna())
+        assert any(s == "pyramidal" for s in shapes)
+
 
 class TestEnhanceHeightsRouter:
     @pytest.fixture

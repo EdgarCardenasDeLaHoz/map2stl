@@ -1,3 +1,19 @@
+# ---------------------------------------------------------------------------
+# LEGACY FILE -- research/notebook-era code, NOT imported by the server.
+#
+# Modern replacements (in order of usage):
+#   get_roads_osmnx()     -> city2stl.fetch._fetch_roads
+#   get_rivers()          -> city2stl.fetch._fetch_waterways
+#   perimeter_to_walls()  -> city2stl.mesh._extrude_ring
+#
+# Unique functionality with NO modern server equivalent (kept for notebooks):
+#   get_pistes_osmnx()    -- ski piste fetch; no server equivalent
+#   get_boundries_osmnx() -- geocoded boundary polygon; no server equivalent
+#   Line class + draw()   -- matplotlib line visualisation; no server equivalent
+#
+# Note: `descartes` is unmaintained and may not be installable on modern Python.
+# ---------------------------------------------------------------------------
+
 import numpy as np
 from shapely.geometry import Polygon,MultiPolygon
 from descartes import PolygonPatch

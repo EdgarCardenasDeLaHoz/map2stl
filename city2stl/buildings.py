@@ -1,5 +1,21 @@
+# ---------------------------------------------------------------------------
+# LEGACY FILE -- research/notebook-era code, NOT imported by the server.
+#
+# Modern replacements (in order of usage):
+#   building_heights()    -> city2stl.heights._fill_heights
+#   triangulate_prism()   -> city2stl.mesh._extrude_ring
+#
+# Unique functionality with NO modern server equivalent (kept for notebooks):
+#   draw_building_patches(), building_to_patches(), draw_patches()
+#     -- matplotlib visualisation helpers, not needed in the 3MF pipeline.
+#
+# Broken APIs that cannot be fixed without a major rewrite:
+#   ox.footprints_from_polygon  -- removed in osmnx 2.x
+#   descartes.PolygonPatch      -- unmaintained, removed from ecosystems
+#   pd.to_numeric(..., np.float)-- np.float removed in numpy 1.24
+# ---------------------------------------------------------------------------
 
-import numpy as np 
+import numpy as np
 import osmnx as ox
 import pandas as pd
 

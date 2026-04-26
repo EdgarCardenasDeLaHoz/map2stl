@@ -23,6 +23,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     let _colormapTimer = null;
     document.getElementById('demColormap')?.addEventListener('change', () => {
         window._invalidateLutCache?.();
+        window.events?.emit(window.EV?.COLORMAP_CHANGE);
         clearTimeout(_colormapTimer);
         _colormapTimer = setTimeout(() => window.recolorDEM?.(), 50);
     });

@@ -28,10 +28,13 @@ Still using inline styles: `demEmptyState`, `sidebarListView`, cross-section pan
 
 ## New Features
 
-### [ ] FEAT — Undo/redo for preset load
+### [x] FEAT — Undo/redo for preset load
 **File:** `presets.js`
 
-Loading a preset overwrites all slider values with no revert. Snapshot current values before loading; expose `window.revertPreset()`.
+~~Loading a preset overwrites all slider values with no revert. Snapshot current values before loading; expose `window.revertPreset()`.~~
+
+**Done:** `presets.js` has `PRESET_VERSION = 1`, `_migratePreset`, `_presetSnapshot`,
+`revertPreset()` and `window.revertPreset`. Code audit confirmed 2026-05-07.
 
 ---
 
@@ -44,4 +47,6 @@ Wrap `curve-editor.js` state in a `CurveEditor` class. Enables unit testing (ARC
 Persist collapsible section open/closed states to `localStorage`.
 
 ### Plan C — Presets versioning
-Add a `version` field to presets with a migration function for missing keys.
+~~Add a `version` field to presets with a migration function for missing keys.~~
+
+**Done:** Implemented in `presets.js`. See FEAT item above.

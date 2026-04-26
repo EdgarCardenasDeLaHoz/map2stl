@@ -1,6 +1,18 @@
 """
 city2stl/create.py — High-level mesh assembly helpers.
 
+LEGACY FILE -- research/notebook-era code, NOT imported by the server.
+
+Modern replacements:
+  get_building_model()  -> city2stl.mesh._build_building_meshes + generate_city_3mf
+  get_landspace_model() -> city2stl.mesh._terrain_mesh + generate_city_3mf
+  _triangulate_prism(), _perimeter_to_walls() -> city2stl.mesh._extrude_ring
+
+Unique functionality with NO modern server equivalent (kept for notebooks):
+  get_bounds_model()  -- bounding-box prism mesh; no direct equivalent in server
+  get_bbox()          -- coordinate utility
+
+Original description:
 Provides functions to convert OSM building GeoDataFrames, DEM arrays,
 and bounding-box metadata into vertex/face arrays suitable for STL export.
 

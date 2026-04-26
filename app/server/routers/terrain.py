@@ -153,7 +153,7 @@ async def get_terrain_dem(
     params = request.query_params
 
     north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
-    dim = _parse_int(params, "dim", 100)
+    dim = _parse_int(params, "dim", 600)
     depth_scale = _parse_float(params, "depth_scale", 0.5)
     water_scale = _parse_float(params, "water_scale", 0.05)
     subtract_water = _parse_bool(params, "subtract_water", True)
@@ -281,7 +281,7 @@ async def get_terrain_dem(
 async def get_terrain_water_mask(
     request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
-    sat_scale: Optional[int] = Query(None, description="Earth Engine fetch resolution (metres/pixel)"),
+    dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
     dataset: Optional[str] = Query(None, description="Water dataset: 'esa' or 'jrc'"),
     projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
     clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
@@ -292,7 +292,7 @@ async def get_terrain_water_mask(
         params = request.query_params
 
         north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
-        sat_scale = _parse_int(params, "sat_scale", 500)
+        dim = _parse_int(params, "dim", 600)
         water_dataset = params.get("dataset", "esa")
         if water_dataset not in ("esa", "jrc"):
             water_dataset = "esa"
@@ -303,12 +303,18 @@ async def get_terrain_water_mask(
         if err:
             return err
 
-        # Scale clamping is handled inside fetch_water_mask (both 50MB request-size
-        # limit and 32768px grid-dimension limit), so no pre-clamp needed here.
+        # Derive sat_scale (m/px) from requested dim and bbox size.
+        # Scale clamping (50 MB / 32768 px limits) is handled inside fetch_water_mask.
+        mid_lat = ((north or 0.0) + (south or 0.0)) / 2.0
+        _m_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
+        _bbox_w_m = abs((east or 0.0) - (west or 0.0)) * _m_per_deg_lon
+        _bbox_h_m = abs((north or 0.0) - (south or 0.0)) * 111_320.0
+        _longer_m = max(_bbox_w_m, _bbox_h_m, 1.0)
+        sat_scale = max(10, int(math.ceil(_longer_m / dim)))
 
         # --- Water mask disk cache check ---
         _water_cache_key = make_cache_key("water", north, south, east, west, {
-            "ss": sat_scale, "ds": water_dataset,
+            "dim": dim, "ds": water_dataset,
             "proj": projection, "cn": clip_nans})
         _wc = read_array_cache("water", _water_cache_key)
         if _wc is not None:
@@ -352,6 +358,7 @@ async def get_terrain_water_mask(
                 "water_percentage": 100.0 * wp / tp,
                 "esa_values_b64": _b64(esa_arr),
                 "esa_dimensions": [h, w],
+                "resolution_m": sat_scale,
             })
 
         try:
@@ -386,6 +393,7 @@ async def get_terrain_water_mask(
             "water_percentage": 100.0 * water_pixels / total_pixels if total_pixels > 0 else 0.0,
             "esa_values_b64": _b64(img),
             "esa_dimensions": [h, w],
+            "resolution_m": sat_scale,
         })
 
     except ValueError as ve:
@@ -399,7 +407,7 @@ async def get_terrain_water_mask(
 async def get_terrain_esa_land_cover(
     request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
-    sat_scale: Optional[int] = Query(None, description="Earth Engine fetch resolution (metres/pixel)"),
+    dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
     projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
     clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
 ):
@@ -408,7 +416,7 @@ async def get_terrain_esa_land_cover(
     try:
         params = request.query_params
         north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
-        sat_scale = _parse_int(params, "sat_scale", 500)
+        dim = _parse_int(params, "dim", 600)
         projection = params.get("projection", "none")
         clip_nans = _parse_bool(params, "clip_nans", False)
 
@@ -416,8 +424,16 @@ async def get_terrain_esa_land_cover(
         if err:
             return err
 
+        # Derive sat_scale from requested dim and bbox size.
+        mid_lat = ((north or 0.0) + (south or 0.0)) / 2.0
+        _m_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
+        _bbox_w_m = abs((east or 0.0) - (west or 0.0)) * _m_per_deg_lon
+        _bbox_h_m = abs((north or 0.0) - (south or 0.0)) * 111_320.0
+        _longer_m = max(_bbox_w_m, _bbox_h_m, 1.0)
+        sat_scale = max(10, int(math.ceil(_longer_m / dim)))
+
         _esa_cache_key = make_cache_key("esa_lc", north, south, east, west, {
-            "ss": sat_scale, "proj": projection, "cn": clip_nans})
+            "dim": dim, "proj": projection, "cn": clip_nans})
         _ec = read_array_cache("esa_lc", _esa_cache_key)
         if _ec is not None:
             _earr, _emeta = _ec
@@ -428,6 +444,7 @@ async def get_terrain_esa_land_cover(
                 return JSONResponse(content={
                     "esa_values_b64": _b64(_esa),
                     "esa_dimensions": [_h, _w],
+                    "resolution_m": sat_scale,
                     "from_cache": True,
                 })
 
@@ -443,6 +460,7 @@ async def get_terrain_esa_land_cover(
             return JSONResponse(content={
                 "esa_values_b64": _b64(esa_arr),
                 "esa_dimensions": [h, w],
+                "resolution_m": sat_scale,
             })
 
         # Fetch ESA image directly — skip the water mask pipeline
@@ -490,6 +508,7 @@ async def get_terrain_esa_land_cover(
         return JSONResponse(content={
             "esa_values_b64": _b64(img),
             "esa_dimensions": [h, w],
+            "resolution_m": sat_scale,
         })
 
     except ValueError as ve:
@@ -516,7 +535,7 @@ async def get_terrain_satellite(
     """
     params = request.query_params
     north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
-    dim = _parse_int(params, "dim", 400)
+    dim = _parse_int(params, "dim", 600)
     projection = params.get("projection", "none")
     clip_nans = _parse_bool(params, "clip_nans", True)
 

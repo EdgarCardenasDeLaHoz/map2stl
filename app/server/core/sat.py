@@ -180,7 +180,7 @@ def _mercator_to_plate_carree(img, north: float, south: float):
     return Image.fromarray(result)
 
 
-def fetch_satellite_tiles(north: float, south: float, east: float, west: float, dim: int = 400) -> str:
+def fetch_satellite_tiles(north: float, south: float, east: float, west: float, dim: int = 600) -> str:
     """
     Stitch ESRI World Imagery WMTS tiles into a bbox-cropped JPEG and return as base64.
 

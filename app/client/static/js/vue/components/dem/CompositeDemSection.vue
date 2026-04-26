@@ -1,11 +1,11 @@
 <template>
   <CollapsibleSection title="📊 Composite DEM — Output" :start-open="true"
                       header-title="Final height map that feeds into Extrude. Adjust per-layer contributions below.">
-    <div style="font-size:10px;color:#777;margin-bottom:8px;padding:4px 6px;background:#2a2a2a;border-radius:3px;border-left:2px solid #4a9eff;">
-      Pipeline: DEM → <span style="color:#4a9eff;">− water</span> → <span style="color:#cc8844;">+ city</span> → <span style="color:#66aa66;">+ land cover</span> → <span style="color:#88aacc;">+ vegetation</span> → <strong style="color:#fff;">Composite ➜ Extrude</strong>
+    <div class="composite-info-box">
+      Pipeline: DEM → <span class="composite-pipe-water">− water</span> → <span class="composite-pipe-city">+ city</span> → <span class="composite-pipe-landcover">+ land cover</span> → <span class="composite-pipe-veg">+ vegetation</span> → <strong class="composite-pipe-output">Composite → Extrude</strong>
     </div>
-    <div style="margin-bottom:8px;">
-      <label class="check-label" style="font-size:12px;">
+    <div class="composite-enable-row">
+      <label class="check-label composite-enable-label">
         <input type="checkbox" id="compositeEnabled" checked> Enable composite layer
       </label>
     </div>
@@ -57,22 +57,20 @@
     </div>
 
     <!-- Preview thumbnail -->
-    <div style="margin-top:8px;text-align:center;">
+    <div class="composite-preview-area">
       <canvas id="compositePreviewThumb" width="160" height="100"
-              style="border:1px solid #444;border-radius:3px;background:#1a1a1a;max-width:100%;"></canvas>
-      <div id="compositeContribStatus" style="font-size:10px;color:#888;margin-top:2px;"></div>
+              class="composite-preview-canvas"></canvas>
+      <div id="compositeContribStatus" class="composite-contrib-status"></div>
     </div>
 
-    <div class="row-gap6" style="margin-top:8px;">
-      <button id="previewCompositeBtn" class="btn btn-secondary"
-              style="flex:1;padding:5px 0;font-size:11px;"
+    <div class="row-gap6 composite-actions">
+      <button id="previewCompositeBtn" class="btn btn-secondary composite-action-btn"
               title="Preview composite in the layer view">👁 Preview</button>
-      <button id="applyCompositeToDemBtn" class="btn btn-primary"
-              style="flex:1;padding:5px 0;font-size:11px;"
+      <button id="applyCompositeToDemBtn" class="btn btn-primary composite-action-btn"
               title="Replace current DEM with composite values">✓ Apply to DEM</button>
     </div>
-    <span id="compositeStats" style="font-size:10px;color:#aaa;display:block;margin-top:4px;"></span>
-    <div style="font-size:10px;color:#666;margin-top:2px;">Preview shows the composite; Apply replaces base DEM for STL export</div>
+    <span id="compositeStats" class="composite-stats"></span>
+    <div class="composite-footer-hint">Preview shows the composite; Apply replaces base DEM for STL export</div>
   </CollapsibleSection>
 </template>
 <script setup lang="ts">

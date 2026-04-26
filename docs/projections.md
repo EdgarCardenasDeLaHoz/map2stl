@@ -199,3 +199,83 @@ Cosine projection squishes each row horizontally by `cos(lat)`. At 60° N, `cos(
 ### City data constraints
 
 OSM building queries via Overpass API require bbox diagonal < 15 km. The server validates this with `validate_bbox_diagonal()`. For larger regions, city data should not be fetched.
+
+---
+
+## Caching model and projection performance
+
+### Current model: cache-keyed-by-projection
+
+Every raster endpoint (terrain DEM, water mask, ESA land cover, height fetch) computes the
+cache key **after** projection parameters are known. Both `projection` and `clip_nans` are
+included in `make_cache_key(...)`. The flow is:
+
+```
+request (bbox + projection) → cache miss → fetch (Plate Carrée) → project → write cache → return
+                                cache hit  →  skip fetch + project entirely  →  return
+```
+
+**Consequence:** the same bbox requested with different projections produces separate cache
+entries. A cosine cache hit still serves the pre-projected result with zero recomputation.
+
+**Endpoints using this model:**
+- `GET /api/terrain/dem` — `proj`, `cn` in key; `_project_grid` applied after fetch
+- `GET /api/terrain/water-mask` — `proj`, `cn` in key; `_project_water_arrays` applied after fetch
+- `GET /api/terrain/esa-land-cover` — `proj`, `cn` in key; `_project_grid` (categorical) applied after fetch
+- `GET /api/terrain/satellite` — no disk cache; `_project_rgb_image` applied on every request
+- `POST /api/height/fetch` — `projection`/`clip_nans` **not yet in key** (see below)
+
+### Known gap: `/api/height/fetch` projection not in cache key
+
+The height providers cache their raw Plate Carrée rasters internally (inside each provider via
+`write_array_cache`). The `/api/height/fetch` endpoint then applies `project_grid` *after*
+reading from the provider cache. However, the endpoint does **not** maintain its own disk cache,
+so projection is re-run on every request even when the underlying raster is cache-hot.
+
+This is correct for correctness (no stale projected data) but wasteful for repeated requests
+with the same `(bbox, providers, projection)` triple. If `/api/height/fetch` gains an endpoint-
+level disk cache, `projection` and `clip_nans` must be included in the key — matching the
+terrain endpoint pattern exactly.
+
+### Performance characteristics of projection
+
+`project_coordinates` in `geo2stl/projections.py` is pure NumPy with `scipy.ndimage.map_coordinates`
+for bilinear resampling. For a typical 256×256 raster:
+
+| Projection | Dominant cost | Approx. time |
+|---|---|---|
+| `none` | Zero | <0.1 ms |
+| `cosine` (maintain_dimensions=True) | `np.interp` per row | ~1–3 ms |
+| `mercator` / `sinusoidal` / `lambert` | `map_coordinates` | ~5–15 ms |
+| `equidistant` | `cv2.resize` | ~1–2 ms |
+
+For 512×512 rasters costs scale approximately 4× (area).
+
+Projection is fast enough to re-run on every cache miss without concern. The main cost
+saving from caching is avoiding the **data fetch** (network or disk I/O), not the projection
+itself. This is why the terrain endpoints cache the post-projection result by default —
+it avoids both costs — rather than storing Plate Carrée and re-projecting per request.
+
+### Alternative model: cache Plate Carrée, project on request
+
+Storing raw Plate Carrée in the cache and projecting on every request is a valid alternative
+with different trade-offs:
+
+| | Current (cache post-projection) | Alternative (cache Plate Carrée) |
+|---|---|---|
+| Cache entries per bbox | One per `(bbox, projection)` combination | One per `(bbox, params)` — projection-agnostic |
+| Cache size | Larger (N projections × M bboxes) | Smaller |
+| Repeated same projection | O(1) — cache hit, no projection | O(projection) — re-project every time |
+| Switching projection on same bbox | Cache miss, full fetch + project | Cache hit, project only |
+| Alignment risk | None — each layer independently projected | Low — all layers must use same projection call |
+
+If projection switching per-request becomes a common use case (e.g., a UI dropdown that
+switches projection without re-fetching data), the Plate Carrée cache model would be
+preferable. The current model is optimal for the existing use case where projection is
+fixed per session/request.
+
+To move to the Plate Carrée model:
+1. Remove `proj` and `cn` from all `make_cache_key(...)` calls.
+2. Read the raw array from cache.
+3. Apply `project_grid` at the endpoint before returning.
+4. Accept that repeated requests with the same projection re-run the projection step.

@@ -14,7 +14,8 @@ from app.server.core.height.providers.open_buildings import (
 )
 from app.server.core.height.providers.shadow_height import (
     ShadowHeightProvider, _estimate_sun_elevation,
-    _shadow_length_to_height, _CONFIDENCE as SHADOW_CONF,
+    _shadow_length_to_height, _infer_from_rgb, _downsample_height,
+    _CONFIDENCE as SHADOW_CONF,
 )
 
 
@@ -137,9 +138,67 @@ class TestShadowHeight:
         assert h == pytest.approx(17.32, abs=0.1)
 
     @patch("app.server.core.height.providers.shadow_height.read_array_cache", return_value=None)
-    def test_fetch_returns_nan_placeholder(self, mock_read):
-        """Currently unimplemented — returns NaN."""
+    @patch("app.server.core.height.providers.shadow_height._fetch_rgb_for_bbox", return_value=None)
+    def test_fetch_returns_nan_when_no_satellite(self, mock_rgb, mock_read):
+        """Falls back to all-NaN when satellite imagery is unavailable."""
         p = ShadowHeightProvider()
         result = p.fetch_heights((10.5, 10.3, -75.4, -75.6), (20, 20))
         assert np.all(np.isnan(result.raster))
         assert result.source_name == "shadow_height"
+
+    def test_infer_realistic_shadow(self):
+        """A 15-pixel shadow at ~1 m/pixel gives a realistic building height."""
+        # Small bbox: ~556 m span, 500px → ~1.1 m/pixel
+        bbox = (41.400, 41.395, 2.205, 2.200)
+        rgb = np.full((500, 500, 3), 180, dtype=np.uint8)
+        # 15-pixel-tall dark shadow region
+        rgb[200:215, 250:260, :] = 30
+        result = _infer_from_rgb(rgb, bbox, dim=(50, 50))
+        non_nan = ~np.isnan(result.raster)
+        assert non_nan.sum() >= 1
+        heights = result.raster[non_nan]
+        # Should produce a reasonable building height (10–60 m)
+        assert all(5 < h < 80 for h in heights)
+        assert result.raster.shape == (50, 50)
+
+    def test_infer_filters_huge_shadows(self):
+        """Terrain-scale shadows (> 1% of image) are filtered out."""
+        bbox = (41.400, 41.395, 2.205, 2.200)
+        rgb = np.full((200, 200, 3), 180, dtype=np.uint8)
+        # Paint a giant dark area (> 1% of image = > 400 px)
+        rgb[0:100, 0:100, :] = 30  # 10000 px >> 400 px limit
+        result = _infer_from_rgb(rgb, bbox, dim=(50, 50))
+        # Should produce no height estimates (giant shadow filtered)
+        assert np.all(np.isnan(result.raster))
+
+    def test_infer_filters_unrealistic_heights(self):
+        """Heights below 1m or above 500m are filtered out."""
+        bbox = (41.400, 41.395, 2.205, 2.200)
+        rgb = np.full((500, 500, 3), 180, dtype=np.uint8)
+        # 1-pixel shadow at ~1.1 m/px → very short shadow → < 1m height
+        rgb[300, 400, :] = 30  # single pixel
+        result = _infer_from_rgb(rgb, bbox, dim=(50, 50))
+        non_nan = ~np.isnan(result.raster)
+        # Either no estimates (filtered) or all within bounds
+        if non_nan.sum() > 0:
+            assert all(1 <= h <= 500 for h in result.raster[non_nan])
+
+    def test_downsample_height_preserves_max(self):
+        """Downsampling uses max-pooling for sparse height data."""
+        hr = np.full((100, 100), np.nan, dtype=np.float32)
+        hr[10, 20] = 15.0
+        hr[50, 80] = 30.0
+        out = _downsample_height(hr, (10, 10))
+        assert out.shape == (10, 10)
+        valid = out[~np.isnan(out)]
+        assert len(valid) >= 2
+        assert 15.0 in valid
+        assert 30.0 in valid
+
+    def test_downsample_same_size_noop(self):
+        """When rgb and dim match, no downsampling occurs."""
+        bbox = (41.400, 41.395, 2.205, 2.200)
+        rgb = np.full((50, 50, 3), 180, dtype=np.uint8)
+        rgb[20:25, 30:35, :] = 30
+        result = _infer_from_rgb(rgb, bbox, dim=(50, 50))
+        assert result.raster.shape == (50, 50)

@@ -784,7 +784,6 @@ window.enhanceBuildingHeights = async function enhanceBuildingHeights() {
             south: region.south,
             east: region.east,
             west: region.west,
-            buildings: cityData.buildings,
             dim: 512,
         };
 

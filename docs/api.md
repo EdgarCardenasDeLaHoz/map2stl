@@ -44,8 +44,8 @@ without repeating the four bbox parsers in every endpoint.
 |--------|------|-------------|
 | GET/POST | `/api/terrain/dem` | Fetch processed DEM |
 | GET/POST | `/api/terrain/dem/raw` | Fetch unprocessed DEM array |
-| GET/POST | `/api/terrain/water-mask` | Fetch water mask + ESA land cover |
-| GET/POST | `/api/terrain/esa-land-cover` | Fetch ESA WorldCover classification raster |
+| GET/POST | `/api/terrain/water-mask` | Fetch water mask + ESA land cover. **Scale param:** `dim` (int, pixels per side, default 600) — server computes resolution and returns `resolution_m` in response. |
+| GET/POST | `/api/terrain/esa-land-cover` | Fetch ESA WorldCover classification raster. **Scale param:** `dim` (pixels per side, default 600) — same server-side resolution computation; returns `resolution_m`. |
 | GET | `/api/terrain/satellite` | Fetch satellite imagery (ESRI tiles) |
 | GET | `/api/terrain/sources` | List DEM data sources |
 | GET | `/api/terrain/hydrology` | Fetch HydroRIVERS depression grid for bbox |

@@ -72,12 +72,36 @@ function _regionName() {
     return r?.name ? r.name.replace(/[^a-zA-Z0-9]/g, '_') : 'terrain';
 }
 
+/**
+ * Return bbox + DEM settings so the server can look up the cached DEM
+ * instead of receiving the full array over the wire.
+ */
+function _demSettings() {
+    const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion || {};
+    const p = window.appState?.demParams || {};
+    return {
+        bbox: {
+            north: bbox.north, south: bbox.south,
+            east:  bbox.east,  west:  bbox.west,
+        },
+        dem: {
+            dim:          parseInt(document.getElementById('paramDim')?.value) || 200,
+            dem_source:   document.getElementById('paramDemSource')?.value || 'local',
+            projection:   document.getElementById('paramProjection')?.value || 'cosine',
+            depth_scale:  p.depthScale ?? 0.5,
+            water_scale:  p.waterScale ?? 0.05,
+            subtract_water:      p.subtractWater ?? true,
+            maintain_dimensions: true,
+            clip_nans:    document.getElementById('paramClipNans')?.checked ?? false,
+            show_sat:     false,
+        },
+    };
+}
+
 function _exportParams() {
     const md = window.appState?.generatedModelData;
     return {
-        dem_values:       md.values,
-        height:           md.height,
-        width:            md.width,
+        ..._demSettings(),
         model_height:     md.resolution,
         base_height:      md.baseHeight,
         exaggeration:     md.exaggeration,
@@ -239,15 +263,14 @@ function downloadCrossSection() {
     const name = _regionName();
     const md   = window.appState.generatedModelData;
 
+    const ds = _demSettings();
     fetch('/api/export/crosssection', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-            dem_values:   md.values,
-            height:       md.height,
-            width:        md.width,
-            north:        r.north ?? 0, south: r.south ?? 0,
-            east:         r.east  ?? 0, west:  r.west  ?? 0,
+            ...ds,
+            north:        ds.bbox.north, south: ds.bbox.south,
+            east:         ds.bbox.east,  west:  ds.bbox.west,
             cut_axis:     cutAxis,
             cut_value:    cutValue,
             model_height: md.resolution,
@@ -279,6 +302,7 @@ function downloadCrossSection() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 window._setExportButtonsEnabled = _setExportButtonsEnabled;
+window._demSettings             = _demSettings;
 window.generateModelFromTab     = generateModelFromTab;
 window.downloadSTL              = downloadSTL;
 window.downloadModel            = downloadModel;

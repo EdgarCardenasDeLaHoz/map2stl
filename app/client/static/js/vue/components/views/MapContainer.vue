@@ -37,8 +37,8 @@
         </div>
         <div class="map-settings-row" id="terrainOpacityRowExplore" style="display:none;">
           <label>Opacity</label>
-          <input type="range" id="terrainOverlayOpacityExplore" min="0" max="100" value="70" style="flex:1;">
-          <span id="terrainOpacityValueExplore" style="font-size:10px;color:#aaa;min-width:28px;text-align:right;">70%</span>
+          <input type="range" id="terrainOverlayOpacityExplore" min="0" max="100" value="70" class="map-settings-terrain-opacity">
+          <span id="terrainOpacityValueExplore" class="map-settings-opacity-value">70%</span>
         </div>
         <div class="map-settings-row">
           <label><input type="checkbox" id="showGridlinesExplore"> Grid Lines</label>
@@ -60,7 +60,7 @@
       </div>
       <div class="regions-panel-toolbar">
         <input type="text" id="regionsPanelSearch" placeholder="Search regions..." class="regions-panel-search">
-        <button id="regionsPanelNewBtn" class="regions-panel-new-btn" title="Draw a new region on the map">+ New</button>
+        <button id="regionsPanelNewBtn" class="regions-panel-new-btn" style="display:none;" title="Draw a new region on the map">+ New</button>
       </div>
       <div id="regionsPanelList" class="regions-panel-list"></div>
     </div>

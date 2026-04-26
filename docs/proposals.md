@@ -35,6 +35,7 @@ _Last updated: 2026-04-19_
 |----|-------------|---------|--------|--------|
 | P-PERF6B | Web Worker for city polygon rendering (Part A — Float32Array buffers; Part B — OffscreenCanvas) | `layers/city-render.js`, `workers/city-worker.js` | Large | done |
 | P-PLANB-DEM | Off-thread DEM pixel loop — post `{values, lut}` to Worker, receive `ImageBitmap` | `dem/dem-main.js`, new `workers/dem-render-worker.js` | Medium | pending |
+| P-PROJ-CACHE | Plate Carrée cache refactor — store raw (unprojected) raster for all layers (DEM, water, ESA, satellite, height); apply `project_grid` at response time rather than at write time. Removes `proj`/`cn` from all cache keys so one fetch serves every projection. See `docs/projections.md` for trade-off analysis. Target: 600×600 rasters. | `routers/terrain.py`, `routers/height.py`, `routers/composite.py`, `core/cache.py` | Large | pending |
 
 ---
 
@@ -66,7 +67,7 @@ _Last updated: 2026-04-19_
 |----|-------------|---------|--------|--------|
 | B-STREAM | Streaming STL generation — Python generators + `StreamingResponse` to reduce peak RAM | `app/server/core/export.py`, `app/server/routers/export.py` | Medium | pending |
 | B-MULTI | Print-bed multi-piece export — auto-tile large DEMs into N×M pieces with alignment tabs | `app/server/core/export.py`, `export/export-handlers.js` | Large | done |
-| B-OPENAPI | OpenAPI schema validation in dev — auto-generate JSON Schema from `/openapi.json`; validate in `api.js` | `core/api.js` | Small | approved |
+| B-OPENAPI | OpenAPI schema validation in dev — auto-generate JSON Schema from `/openapi.json`; validate in `api.js` | `core/api.js` | Small | done |
 
 ---
 

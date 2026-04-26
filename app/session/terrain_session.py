@@ -33,7 +33,7 @@ import sys
 import time
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import matplotlib.cm as cm
 import matplotlib.patches as mpatches
@@ -115,17 +115,17 @@ _DEFAULT_SETTINGS: dict = {
     },
     # ── Water mask ────────────────────────────────────────────────────────
     # Sent to /api/terrain/water-mask
-    # sat_scale: Earth Engine resolution in metres/pixel (≥10, higher = faster/coarser)
+    # dim: pixel resolution; the server computes sat_scale from dim and bbox geometry
     # dataset also controls the ESA/JRC land-cover overlay in /api/terrain/dem (show_sat=True)
     "water": {
-        "sat_scale": 500,
-        "dataset":   "esa",    # "esa" | "jrc"
+        "dim":     600,
+        "dataset": "esa",    # "esa" | "jrc"
     },
     # ── Satellite imagery ────────────────────────────────────────────────
     # Sent to /api/terrain/satellite (ESRI WMTS real photo tiles)
     # dim: pixel resolution of the returned JPEG; independent from dem.dim
     "satellite": {
-        "dim": 800,
+        "dim": 600,
     },
     # ── City / OSM features ───────────────────────────────────────────────
     # Sent to /api/cities, /api/cities/raster, /api/cities/export3mf
@@ -267,6 +267,11 @@ class TerrainSession:
         self.city_raster: Optional[dict] = None
         # Merged building height raster (HeightResult dataclass)
         self.building_heights = None
+        # STL-imported heightmap + mask (set by load_stl())
+        self.stl_heightmap: Optional[np.ndarray] = None
+        self.stl_mask: Optional[np.ndarray] = None
+        # IDW/nearest-infilled complete heightmap (set by infill_heights())
+        self.infilled_heights: Optional[np.ndarray] = None
         # Natural Earth hydrology (rivers, lakes, coastlines)
         self.hydrology: Optional[dict] = None
 
@@ -642,11 +647,11 @@ class TerrainSession:
                 errors.append(
                     f"  settings['{group_key}']['{key}'] = {val!r} must be a non-negative number")
 
-        # sat_scale: integer ≥ 10
-        ss = w.get("sat_scale")
-        if ss is not None and (not isinstance(ss, int) or ss < 10):
+        # dim: integer ≥1
+        dd = w.get("dim")
+        if dd is not None and (not isinstance(dd, int) or dd < 1):
             errors.append(
-                f"  settings['water']['sat_scale'] = {ss!r} must be an integer ≥ 10")
+                f"  settings['water']['dim'] = {dd!r} must be an integer ≥ 1")
 
         # Integer constraints
         for key in ("split_rows", "split_cols"):
@@ -1681,26 +1686,11 @@ class TerrainSession:
         Shared by fetch_water_mask() and fetch_esa_landcover(). Second call
         hits the server-side cache so both methods can be called cheaply.
 
-        sat_scale is computed dynamically to target approximately dem.dim pixels
-        on the longer axis of the bbox, then clamped to the user's sat_scale
-        setting (never coarser than requested) and ESA's 10 m/px native floor.
+        The server computes sat_scale from dim and bbox geometry, then reports
+        back the actual scale used in the response as ``resolution_m``.
         """
-        # Compute the m/px needed to land approximately at dem.dim resolution
-        north = self.bbox["north"]
-        south = self.bbox["south"]
-        east = self.bbox["east"]
-        west = self.bbox["west"]
-        mid_lat = (north + south) / 2.0
-        bbox_w_m = abs(east - west) * METRES_PER_DEGREE * \
-            math.cos(math.radians(mid_lat))
-        bbox_h_m = abs(north - south) * METRES_PER_DEGREE
-        longer_m = max(bbox_w_m, bbox_h_m)
-        dim = self.settings["dem"]["dim"]
-        # m/px to hit dim pixels on longer axis; floor at 10 (ESA native resolution)
-        scale_for_dim = max(10, int(longer_m / dim))
-        # Never go coarser than the user's sat_scale setting
-        sat_scale = min(scale_for_dim, self.settings["water"]["sat_scale"])
-        params = {**self.bbox, "sat_scale": sat_scale,
+        dim = self.settings["water"]["dim"]
+        params = {**self.bbox, "dim": dim,
                   "dataset": self.settings["water"]["dataset"]}
         return self._api_request(
             "get", "/api/terrain/water-mask", params=params, timeout=120
@@ -1711,7 +1701,7 @@ class TerrainSession:
 
         Result stored on self.water_mask. Also populates self.esa_landcover since
         both come from the same endpoint (second call is free from cache).
-        Configure via settings['water'] (sat_scale, dataset).
+        Configure via settings['water'] (dim, dataset).
 
         Parameters
         ----------
@@ -1771,7 +1761,7 @@ class TerrainSession:
 
         If fetch_water_mask() was already called the raw data is already cached on
         self.esa_landcover — this method just applies projection + rescaling.
-        Configure via settings['water'] (sat_scale, dataset).
+        Configure via settings['water'] (dim, dataset).
 
         Parameters
         ----------
@@ -2106,32 +2096,22 @@ class TerrainSession:
             print("⚠️  No hydrology data available (call fetch_hydrology() first)")
             return self
 
-        h_dem, w_dem = self.dem["dimensions"]
-        if "dem_values_b64" in self.dem:
-            import base64 as _b64
-            dem_arr = np.frombuffer(
-                _b64.b64decode(self.dem["dem_values_b64"]),
-                dtype=np.float32).reshape(h_dem, w_dem)
-        else:
-            dem_arr = self._prepare_array_response(
-                self.dem["dem_values"], h_dem, w_dem)
-
-        h_riv, w_riv = self.hydrology["river_grid_dimensions"]
-        river_arr = self._prepare_array_response(
-            self.hydrology["river_grid_values"], h_riv, w_riv)
-
-        if dem_arr.shape != river_arr.shape:
-            print(
-                f"⚠️  DEM shape {dem_arr.shape} ≠ hydrology shape {river_arr.shape}")
-            print("   Skipping merge (resample hydrology or re-fetch DEM)")
-            return self
-
-        # Merge via HTTP API
+        # Send bbox + DEM settings so the server resolves both arrays from
+        # its disk cache — avoids re-transmitting multi-MB arrays.
+        s = self.settings["dem"]
         payload = {
-            "dem_values": dem_arr.ravel().tolist(),
-            "dem_dimensions": [h_dem, w_dem],
-            "river_grid_values": river_arr.ravel().tolist(),
-            "river_grid_dimensions": [h_riv, w_riv],
+            "bbox": self.bbox,
+            "dem": {
+                "dim":          s.get("dim", 200),
+                "dem_source":   s.get("dem_source", "local"),
+                "projection":   s.get("projection", "cosine"),
+                "depth_scale":  s.get("depth_scale", 0.5),
+                "water_scale":  s.get("water_scale", 0.05),
+                "subtract_water":      s.get("subtract_water", True),
+                "maintain_dimensions": s.get("maintain_dimensions", True),
+                "clip_nans":    s.get("clip_nans", False),
+                "show_sat":     False,
+            },
         }
 
         try:
@@ -2399,12 +2379,22 @@ class TerrainSession:
             raise RuntimeError("Call fetch_cities() before export_city_3mf()")
         c = self.settings["city"]
         e = self.settings["export"]
+        s = self.settings["dem"]
+        # Send bbox + DEM settings — server resolves arrays from disk cache
         payload = {
             **self.bbox,
-            "dem_values":        self.dem["values"],
-            "dem_width":         self.dem["dimensions"][1],
-            "dem_height":        self.dem["dimensions"][0],
-            "buildings":         self.city_data.get("buildings", {"type": "FeatureCollection", "features": []}),
+            "bbox": self.bbox,
+            "dem": {
+                "dim":          s.get("dim", 200),
+                "dem_source":   s.get("dem_source", "local"),
+                "projection":   s.get("projection", "cosine"),
+                "depth_scale":  s.get("depth_scale", 0.5),
+                "water_scale":  s.get("water_scale", 0.05),
+                "subtract_water":      s.get("subtract_water", True),
+                "maintain_dimensions": s.get("maintain_dimensions", True),
+                "clip_nans":    s.get("clip_nans", False),
+                "show_sat":     False,
+            },
             "model_height_mm":   e["model_height"],
             "base_mm":           e["base_height"],
             "building_z_scale":  c["building_scale"],
@@ -2436,11 +2426,14 @@ class TerrainSession:
         providers : list of provider names to query, in **ascending** priority.
             Defaults to ``["wsf3d", "google3d"]``.
             Available providers:
-            ``"wsf3d"``      — DLR World Settlement Footprint 3D (~90 m, global)
-            ``"ndsm"``       — GLO-30 minus FABDEM (~30 m, global)
-            ``"copernicus"`` — JRC GHSL building height (~10 m EU, 100 m global)
-            ``"lidar_3dep"`` — USGS 3DEP LiDAR nDSM (~1 m, US only)
-            ``"google3d"``   — Google Photorealistic 3D Tiles (~1 m, API key)
+            ``"wsf3d"``          — DLR World Settlement Footprint 3D (~90 m, global)
+            ``"ghsl"``           — JRC GHS-BUILT-H global (~100 m, global, Phase 1b)
+            ``"open_buildings"`` — Google Open Buildings (~5 m, developing regions, Phase 1b)
+            ``"ndsm"``           — GLO-30 minus FABDEM (~30 m, global)
+            ``"copernicus"``     — JRC GHSL building height (~10 m EU, 100 m global)
+            ``"lidar_3dep"``     — USGS 3DEP LiDAR nDSM (~1 m, US only)
+            ``"shadow_height"``  — Shadow-based estimation (~5 m, global, Phase 1b placeholder)
+            ``"google3d"``       — Google Photorealistic 3D Tiles (~1 m, API key)
 
         After this call ``self.building_heights`` holds a ``HeightResult``
         with the merged raster.
@@ -2458,6 +2451,9 @@ class TerrainSession:
         from app.server.core.height.providers.ndsm import NDSMProvider
         from app.server.core.height.providers.copernicus import CopernicusProvider
         from app.server.core.height.providers.lidar_3dep import LiDAR3DEPProvider
+        from app.server.core.height.providers.ghsl import GHSLProvider
+        from app.server.core.height.providers.open_buildings import OpenBuildingsProvider
+        from app.server.core.height.providers.shadow_height import ShadowHeightProvider
 
         north = self.bbox["north"]
         south = self.bbox["south"]
@@ -2485,6 +2481,9 @@ class TerrainSession:
             "ndsm": lambda: NDSMProvider(),
             "copernicus": lambda: CopernicusProvider(),
             "lidar_3dep": lambda: LiDAR3DEPProvider(),
+            "ghsl": lambda: GHSLProvider(),
+            "open_buildings": lambda: OpenBuildingsProvider(),
+            "shadow_height": lambda: ShadowHeightProvider(),
             "google3d": lambda: Google3DProvider(),
         }
 
@@ -2524,6 +2523,532 @@ class TerrainSession:
             print("⚠️  No building height data available")
             self.building_heights = None
 
+        return self
+
+    def enrich_buildings_with_heights(
+        self,
+        providers: list[str] | None = None,
+        source_name: str | None = None,
+    ) -> "TerrainSession":
+        """Apply inferred building heights to the cached OSM building GeoJSON.
+
+        Convenience wrapper that:
+        1. Calls ``fetch_building_heights(providers)`` if not already done.
+        2. Calls ``enhance_buildings_with_raster()`` on ``self.city_data["buildings"]``
+           using the merged raster from ``self.building_heights``.
+        3. Updates ``self.city_data["buildings"]`` in-place so downstream
+           ``export_city_3mf()`` sees the enriched heights.
+
+        Only buildings whose ``height_source`` is ``"default"`` are modified —
+        those with an explicit OSM ``height`` or ``building:levels`` tag are left
+        unchanged.
+
+        Parameters
+        ----------
+        providers : passed to ``fetch_building_heights()`` when heights haven't
+            been fetched yet.  Defaults to ``["wsf3d", "google3d"]``.
+        source_name : label written to ``height_source`` for enhanced buildings.
+            Defaults to the provider list joined by ``"+"`` (e.g. ``"wsf3d+google3d"``).
+
+        Returns self for chaining.
+        """
+        if self.city_data is None:
+            raise RuntimeError("Call fetch_cities() before enrich_buildings_with_heights()")
+
+        # Fetch heights if not already available
+        if getattr(self, "building_heights", None) is None:
+            self.fetch_building_heights(providers)
+
+        if self.building_heights is None:
+            print("⚠️  No building heights available — skipping enrichment")
+            return self
+
+        from city2stl.heights import enhance_buildings_with_raster
+
+        north = self.bbox["north"]
+        south = self.bbox["south"]
+        east = self.bbox["east"]
+        west = self.bbox["west"]
+        bbox = (north, south, east, west)
+
+        effective_source = source_name or (
+            "+".join(providers) if providers else "height_raster"
+        )
+
+        result = enhance_buildings_with_raster(
+            self.city_data["buildings"],
+            self.building_heights.raster,
+            bbox,
+            confidence_raster=self.building_heights.confidence,
+            source_name=effective_source,
+        )
+        self.city_data["buildings"] = result["buildings"]
+        stats = result["stats"]
+        print(
+            f"Building enrichment: {stats['enhanced']}/{stats['total']} updated "
+            f"({stats['unchanged']} had OSM data, {stats['no_data']} no raster coverage)"
+        )
+        return self
+
+    # ------------------------------------------------------------------ #
+    # Roof shape classification (ROOF-2)                                    #
+    # ------------------------------------------------------------------ #
+
+    def classify_roof_shapes(
+        self,
+        satellite_rgb: "np.ndarray | list[np.ndarray] | None" = None,
+        height_raster: "np.ndarray | None" = None,
+        estimate_roof_heights: bool = False,
+        overwrite: bool = False,
+        acquisition_months: "list[int] | None" = None,
+        acquisition_hours: "list[int] | None" = None,
+        cnn_model: "str | object | None" = None,
+    ) -> "TerrainSession":
+        """Classify ``roof:shape`` (and optionally ``roof:height``) for buildings.
+
+        Calls :func:`city2stl.roof_classifier.classify_roof_shapes` on
+        ``self.city_data["buildings"]`` and updates the GeoJSON in-place.
+
+        Only buildings without an existing ``roof:shape`` tag are updated
+        unless *overwrite* is ``True``.
+
+        Parameters
+        ----------
+        satellite_rgb : ndarray or list of ndarray, optional
+            H×W×3 uint8 satellite image(s) aligned to the current bbox.
+            Defaults to ``self.satellite`` (if already fetched).
+            Pass a list of N images for multi-temporal pseudo-stereo analysis.
+        height_raster : ndarray, optional
+            H×W float32 DEM / nDSM aligned to the current bbox.  Defaults to
+            ``self.building_heights.raster`` when available.
+        estimate_roof_heights : bool
+            If True, also fill ``roof:height`` from the elevation profile.
+        overwrite : bool
+            Replace existing ``roof:shape`` tags.  Default False.
+        acquisition_months : list of int, optional
+            Month (1–12) for each image in the temporal stack.
+        acquisition_hours : list of int, optional
+            Hour of day (0–23 local solar) for each image in the stack.
+        cnn_model : str or RoofNet instance, optional
+            Torchvision model name string or a ``RoofNet`` instance loaded
+            via :meth:`load_roof_model`.  When ``None`` (default) the session
+            uses a pre-loaded ``RoofNet`` if one was set via
+            ``load_roof_model()``, otherwise falls back to
+            ``"mobilenet_v3_small"``.
+
+        Returns self for chaining.
+        """
+        if self.city_data is None:
+            raise RuntimeError("Call fetch_cities() before classify_roof_shapes()")
+
+        # ── Resolve satellite image ────────────────────────────────────
+        if satellite_rgb is None:
+            satellite_rgb = getattr(self, "satellite", None)
+        if satellite_rgb is None:
+            print("⚠️  No satellite image available — call fetch_satellite() first")
+            return self
+
+        # ── Resolve height raster ──────────────────────────────────────
+        if height_raster is None:
+            bh = getattr(self, "building_heights", None)
+            if bh is not None:
+                height_raster = getattr(bh, "raster", None)
+
+        # ── Resolve CNN model ──────────────────────────────────────────
+        if cnn_model is None:
+            cnn_model = getattr(self, "_roof_model", None) or "mobilenet_v3_small"
+
+        # ── Build bbox tuple ───────────────────────────────────────────
+        north = self.bbox["north"]
+        south = self.bbox["south"]
+        east = self.bbox["east"]
+        west = self.bbox["west"]
+        bbox = (north, south, east, west)
+
+        from city2stl.roof_classifier import classify_roof_shapes as _classify
+
+        result = _classify(
+            self.city_data["buildings"],
+            satellite_rgb,
+            bbox,
+            height_raster=height_raster,
+            estimate_roof_heights=estimate_roof_heights,
+            overwrite=overwrite,
+            acquisition_months=acquisition_months,
+            acquisition_hours=acquisition_hours,
+            cnn_model=cnn_model,
+        )
+
+        self.city_data["buildings"] = result
+        stats = result.get("_stats", {})
+        print(
+            f"Roof classification: {stats.get('classified', 0)}/{stats.get('total', 0)} classified "
+            f"({stats.get('unchanged', 0)} already tagged, {stats.get('skipped', 0)} skipped)"
+        )
+        return self
+
+    # ------------------------------------------------------------------ #
+    # RoofNet checkpoint loading                                            #
+    # ------------------------------------------------------------------ #
+
+    def load_roof_model(self, checkpoint_path: str) -> "TerrainSession":
+        """Load a ``RoofNet`` checkpoint and register it for use in
+        :meth:`classify_roof_shapes`.
+
+        The checkpoint is expected to be a ``torch.save``'d ``RoofNet``
+        instance (full model, not state_dict).  After loading the model is
+        switched to evaluation mode and stored on ``self._roof_model``.
+
+        Parameters
+        ----------
+        checkpoint_path : str or path-like
+            Path to the ``.pt`` file produced by ``RoofNet.saveto()``.
+
+        Returns self for chaining.
+        """
+        try:
+            import torch
+        except ImportError:
+            raise RuntimeError(
+                "PyTorch is required to load a RoofNet checkpoint. "
+                "Install it with: pip install torch"
+            )
+
+        model = torch.load(
+            checkpoint_path, map_location="cpu", weights_only=False
+        )
+        model.eval()
+        self._roof_model = model
+        print(f"RoofNet loaded: {checkpoint_path}")
+        return self
+
+    # ------------------------------------------------------------------ #
+    # CNN height prediction (Phase 2)                                       #
+    # ------------------------------------------------------------------ #
+
+    def predict_heights(
+        self,
+        model: str = "pretrained",
+        checkpoint: Optional[Union[str, "Path"]] = None,
+        device: str = "cpu",
+    ) -> "TerrainSession":
+        """Predict building heights from satellite imagery using a CNN.
+
+        Requires ``self.satellite`` to be populated (call ``fetch_satellite()``
+        first).  Uses OSM / Phase-1 heights in ``self.building_heights`` as
+        calibration data when available.
+
+        Parameters
+        ----------
+        model : str
+            ``"pretrained"`` — Depth Anything V2 Small (HuggingFace, zero-shot,
+            calibrated to metres using known OSM heights in the tile).
+            ``"unet"``       — Trained U-Net checkpoint (see
+            ``train_height_model()``).  Requires ``checkpoint`` path.
+        checkpoint : str or Path, optional
+            Path to a U-Net .pt checkpoint.  Defaults to
+            ``models/height_unet.pt`` in the project root.
+        device : str
+            ``"cpu"`` or ``"cuda"``.
+
+        After this call:
+            ``self.predicted_heights`` : HeightResult with (H, W) float32
+            raster in metres and per-pixel confidence.
+
+        Returns self for chaining.
+        """
+        from app.server.core.height.predict import predict as _predict
+
+        if getattr(self, "satellite", None) is None:
+            raise RuntimeError("Call fetch_satellite() before predict_heights().")
+
+        # Decode satellite RGB
+        import base64 as _b64
+        sat_b64 = self.satellite.get("image_b64") or self.satellite.get("data")
+        if sat_b64 is None:
+            raise RuntimeError(
+                "Satellite data not found in self.satellite.  "
+                "Expected 'image_b64' or 'data' key."
+            )
+        sat_bytes = _b64.b64decode(sat_b64)
+        sat_rgb = np.array(Image.open(BytesIO(sat_bytes)).convert("RGB"))
+
+        # Known heights for calibration
+        known_heights = None
+        if getattr(self, "building_heights", None) is not None:
+            known_heights = self.building_heights.raster
+
+        north = self.bbox["north"]
+        south = self.bbox["south"]
+        east = self.bbox["east"]
+        west = self.bbox["west"]
+        bbox = (north, south, east, west)
+
+        ckpt = Path(checkpoint) if checkpoint else None
+
+        print(f"Running height prediction (model={model!r})…")
+        result = _predict(
+            sat_rgb,
+            known_heights,
+            bbox,
+            model=model,
+            checkpoint=ckpt,
+            device=device,
+        )
+        n_valid = int(np.sum(~np.isnan(result.raster)))
+        total = result.raster.size
+        print(
+            f"✓ Predicted heights: {n_valid}/{total} pixels  "
+            f"range=[{float(np.nanmin(result.raster)):.1f}, "
+            f"{float(np.nanmax(result.raster)):.1f}] m  "
+            f"source={result.source_name}"
+        )
+        self.predicted_heights = result
+        return self
+
+    def train_height_model(
+        self,
+        cities: Optional[list] = None,
+        epochs: int = 50,
+        batch_size: int = 8,
+        lr: float = 1e-4,
+        device: str = "cpu",
+        output: Optional[Union[str, "Path"]] = None,
+        tiles_per_city: int = 100,
+        providers: Optional[list] = None,
+    ) -> dict:
+        """Collect training tiles and train the U-Net height predictor.
+
+        Phase 2.2 of 3D_plan1.md.
+
+        Parameters
+        ----------
+        cities : list of city names to collect tiles from.
+            Available: ``"Barcelona"``, ``"Granada"``, ``"Cartagena"``.
+            Defaults to ``["Barcelona"]``.
+        epochs : number of training epochs (default 50).
+        batch_size : mini-batch size (default 8).
+        lr : learning rate (default 1e-4).
+        device : ``"cpu"`` or ``"cuda"``.
+        output : Path to save checkpoint.  Defaults to
+            ``<project_root>/models/height_unet.pt``.
+        tiles_per_city : max tiles to collect per city (default 100).
+        providers : height provider names for tile collection.
+            Defaults to ``["ndsm", "wsf3d", "google3d"]``.
+
+        Returns
+        -------
+        dict with ``best_val_loss``, ``epochs_trained``, ``n_train``,
+        ``n_val``, ``checkpoint``.
+        """
+        from app.server.core.height.train import (
+            TrainConfig,
+            collect_tiles,
+            train as _train,
+            _DEFAULT_CITIES,
+        )
+
+        cities = cities or ["Barcelona"]
+        providers = providers or ["ndsm", "wsf3d"]
+
+        # Validate city names
+        unknown = [c for c in cities if c not in _DEFAULT_CITIES]
+        if unknown:
+            raise ValueError(
+                f"Unknown cities: {unknown}.  "
+                f"Available: {list(_DEFAULT_CITIES)}"
+            )
+
+        project_root = Path(__file__).resolve().parents[3]
+        tile_dir = project_root / "cache" / "height_tiles"
+        default_output = project_root / "models" / "height_unet.pt"
+        output_path = Path(output) if output else default_output
+
+        print(f"Collecting tiles for {cities} from providers {providers}…")
+        tile_paths = collect_tiles(
+            cities,
+            tile_dir=tile_dir,
+            providers=providers,
+            tiles_per_city=tiles_per_city,
+        )
+        print(f"Collected {len(tile_paths)} tiles total")
+
+        if not tile_paths:
+            raise RuntimeError(
+                "No tiles collected.  Check provider availability or city coverage."
+            )
+
+        cfg = TrainConfig(
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            device=device,
+        )
+
+        print(f"Training U-Net ({cfg.epochs} epochs, device={device})…")
+        result = _train(tile_paths, output_path, cfg)
+        print(
+            f"✓ Training complete  best_val_loss={result['best_val_loss']:.4f}  "
+            f"checkpoint={result['checkpoint']}"
+        )
+        return result
+
+    # ------------------------------------------------------------------ #
+    # STL import + infill                                                   #
+    # ------------------------------------------------------------------ #
+
+    def load_stl(
+        self,
+        path: Union[str, "Path"],
+        bbox: Optional[dict] = None,
+        up_axis: str = "z",
+        resolution_m: float = 5.0,
+    ) -> "TerrainSession":
+        """Import an STL (or any trimesh-supported mesh) and rasterize to a heightmap.
+
+        The mesh's XY extent is mapped to the geographic bbox so the result
+        can be overlaid on terrain and city data.  No unit conversion is
+        applied — the mesh Z values are stored as-is in ``self.stl_heightmap``.
+
+        Parameters
+        ----------
+        path : str or Path
+            Path to the mesh file (STL, OBJ, glTF, PLY, …).
+        bbox : dict, optional
+            Geographic extent ``{"north", "south", "east", "west"}``.
+            Defaults to the currently selected region's bbox.
+        up_axis : str
+            Mesh axis that represents "up" (one of "x", "y", "z", "-x", "-y", "-z").
+            Default "z".
+        resolution_m : float
+            Target grid resolution in metres per pixel (default 5 m).
+
+        After this call:
+            ``self.stl_heightmap`` : (H, W) float32 — height values in mesh units.
+            ``self.stl_mask``      : (H, W) bool    — True where surface found.
+        """
+        from app.server.core.height.stl_import import stl_to_heightmap
+
+        target_bbox = bbox or self.bbox
+        if not target_bbox:
+            raise RuntimeError("Provide a bbox or call select() first.")
+
+        print(f"Loading STL: {path}")
+        heightmap, mask = stl_to_heightmap(
+            path,
+            bbox=target_bbox,
+            resolution_m=resolution_m,
+            up_axis=up_axis,
+        )
+        n_valid = int(mask.sum())
+        total = mask.size
+        pct = 100 * n_valid / total if total else 0
+        print(
+            f"✓ Imported {Path(path).name}: {heightmap.shape[1]}×{heightmap.shape[0]} px, "
+            f"{n_valid}/{total} surface pixels ({pct:.0f}%)  "
+            f"Z-range [{np.nanmin(heightmap):.2f}, {np.nanmax(heightmap):.2f}]"
+        )
+        self.stl_heightmap: Optional[np.ndarray] = heightmap
+        self.stl_mask: Optional[np.ndarray] = mask
+        return self
+
+    def preview_stl(self) -> None:
+        """Display the imported STL heightmap as a matplotlib figure.
+
+        Call ``load_stl()`` first.
+        """
+        if getattr(self, "stl_heightmap", None) is None:
+            raise RuntimeError("Call load_stl() first.")
+
+        hm = self.stl_heightmap
+        mask = getattr(self, "stl_mask", None)
+        h, w = hm.shape
+        display_name = getattr(self, "region_name", "STL import") or "STL import"
+
+        # Mask NaN for display
+        display = np.where(mask, hm, np.nan) if mask is not None else hm
+        vmin, vmax = float(np.nanmin(display)), float(np.nanmax(display))
+
+        self._plot_geo_image(
+            display,
+            f"{display_name} — STL heightmap  {w}×{h} px  "
+            f"Z=[{vmin:.2f}, {vmax:.2f}]",
+            cmap="terrain",
+            vmin=vmin,
+            vmax=vmax,
+        )
+
+    def infill_heights(
+        self,
+        method: str = "idw",
+        use_dem_baseline: bool = True,
+        power: float = 2.0,
+    ) -> "TerrainSession":
+        """Fill NaN gaps in ``self.stl_heightmap`` using deterministic infill.
+
+        Parameters
+        ----------
+        method : str
+            ``"idw"``     — Inverse Distance Weighting via Delaunay triangulation
+                            (smooth, recommended).
+            ``"nearest"`` — Pure nearest-neighbour (fast, sharp boundaries).
+        use_dem_baseline : bool
+            If True and DEM is available, blend fill values toward the DEM
+            surface far from known data (default True).
+        power : float
+            IDW distance-weighting exponent (only used when method="idw",
+            default 2).
+
+        After this call:
+            ``self.infilled_heights`` : (H, W) float32 — complete heightmap,
+            no NaN within the mask region.
+        """
+        if getattr(self, "stl_heightmap", None) is None:
+            raise RuntimeError("Call load_stl() first.")
+
+        from app.server.core.height.infill import infill_idw, infill_nearest
+
+        hm = self.stl_heightmap
+        mask = getattr(self, "stl_mask", None)
+
+        # Optionally get DEM array for blending
+        dem_arr = None
+        if use_dem_baseline and self.dem is not None:
+            dim_h, dim_w = self.dem["dimensions"]
+            if "dem_values_b64" in self.dem:
+                import base64 as _b64
+                dem_raw = np.frombuffer(
+                    _b64.b64decode(self.dem["dem_values_b64"]),
+                    dtype=np.float32
+                ).reshape(dim_h, dim_w)
+            else:
+                dem_raw = np.array(
+                    self.dem["dem_values"], dtype=np.float32
+                ).reshape(dim_h, dim_w)
+
+            # Resize DEM baseline to match STL heightmap if needed
+            if dem_raw.shape != hm.shape:
+                import cv2 as _cv2
+                dem_arr = _cv2.resize(
+                    dem_raw, (hm.shape[1], hm.shape[0]),
+                    interpolation=_cv2.INTER_LINEAR
+                )
+            else:
+                dem_arr = dem_raw
+
+        print(f"Infilling heights ({method})…")
+        if method == "nearest":
+            filled = infill_nearest(hm)
+        else:
+            filled = infill_idw(hm, mask=mask, dem_baseline=dem_arr, power=power)
+
+        nan_before = int(np.isnan(hm).sum())
+        nan_after = int(np.isnan(filled).sum())
+        print(
+            f"✓ Infill complete: {nan_before} NaN → {nan_after} NaN  "
+            f"Z-range [{float(np.nanmin(filled)):.2f}, {float(np.nanmax(filled)):.2f}]"
+        )
+        self.infilled_heights: Optional[np.ndarray] = filled
         return self
 
     def slice(self) -> dict:

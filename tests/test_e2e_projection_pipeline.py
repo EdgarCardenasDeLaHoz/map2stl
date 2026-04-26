@@ -339,11 +339,8 @@ class TestCityRasterNaNBug:
         # If we get here, the bug is fixed (or this projection didn't produce NaN)
         assert r.status_code == 200
 
-    @pytest.mark.xfail(reason="BUG: NaN from projection not JSON-serializable",
-                       raises=Exception, strict=True)
     def test_city_cache_key_includes_projection(self, client):
-        """Different projections should NOT return cached results from each other.
-        Currently blocked by NaN serialization bug."""
+        """Different projections should NOT return cached results from each other."""
         body_none = self._make_body("none")
         body_cos = self._make_body("cosine", clip_nans=False)
         r1 = client.post("/api/cities/raster", json=body_none)

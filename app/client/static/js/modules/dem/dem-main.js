@@ -29,6 +29,50 @@ const _getBboxCoords = (...a) => window.getBboxCoords(...a);
 const _showErr = (...a) => window.showErrInEl(...a);
 
 // ---------------------------------------------------------------------------
+// Off-thread DEM rendering worker (Plan A)
+// ---------------------------------------------------------------------------
+
+// Lazy-initialised singleton. null = not yet created; false = unavailable.
+let _demWorker = null;
+let _demWorkerOk = null;   // null = untested, true = ok, false = failed
+let _demWorkerGen = 0;     // incremented each call; stale responses are discarded
+
+/** Map from gen → { canvas, ctx } for pending worker renders. */
+const _demWorkerPending = new Map();
+
+function _getDemWorker() {
+    if (_demWorkerOk === false) return null;
+    if (_demWorker) return _demWorker;
+    try {
+        _demWorker = new Worker('../workers/dem-render-worker.js');
+        _demWorker.onmessage = _onDemWorkerMessage;
+        _demWorker.onerror = () => { _demWorkerOk = false; _demWorker = null; };
+        _demWorkerOk = true;
+    } catch (_e) {
+        _demWorkerOk = false;
+        _demWorker = null;
+    }
+    return _demWorker;
+}
+
+function _onDemWorkerMessage({ data }) {
+    const { type, gen, pixels, width, height, message } = data;
+    const pending = _demWorkerPending.get(gen);
+    _demWorkerPending.delete(gen);
+    if (!pending) return;  // stale — discard
+
+    if (type === 'error') {
+        console.warn('[dem-render-worker] error:', message);
+        return;
+    }
+
+    const { canvas, ctx, onReady } = pending;
+    const img = new ImageData(pixels, width, height);
+    ctx.putImageData(img, 0, 0);
+    onReady?.(canvas);
+}
+
+// ---------------------------------------------------------------------------
 // _applyDemResult — post-fetch DEM rendering pipeline
 // ---------------------------------------------------------------------------
 
@@ -151,7 +195,7 @@ function _applyDemResult(data, north, south, east, west) {
  * renders to canvas with colormap and projection, draws histogram and colorbar,
  * stores result in appState.lastDemData, and updates stacked layers.
  * Exposed as window.loadDEM for HTML onclick access.
- * @param {boolean} [highRes=false] - Use 400px dim instead of the form value
+ * @param {boolean} [highRes=false] - Use 600px dim instead of the form value
  * @returns {Promise<void>}
  */
 window.loadDEM = async function loadDEM(highRes = false) {
@@ -178,7 +222,7 @@ window.loadDEM = async function loadDEM(highRes = false) {
 
     const params = new URLSearchParams({
         north, south, east, west,
-        dim: highRes ? 400 : document.getElementById('paramDim').value,
+        dim: highRes ? 600 : document.getElementById('paramDim').value,
         depth_scale: p.depthScale,
         water_scale: p.waterScale,
         subtract_water: p.subtractWater,
@@ -284,8 +328,8 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
     window._setDemEmptyState?.(false);
     window._updateWorkflowStepper?.();
 
-    // Let curve-editor.js re-normalize control points and insert sea-level marker.
-    window.appState._onDemLoaded?.(vmin, vmax);
+    // Notify curve-editor.js (and any other listeners) that a new DEM is loaded.
+    window.events?.emit(window.EV?.DEM_LOADED, vmin, vmax);
     window.appState.curveDataVmin = vmin;
     window.appState.curveDataVmax = vmax;
 
@@ -299,10 +343,11 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
+    canvas.style.maxWidth = '100%';
+    canvas.style.height = 'auto';
+    canvas.style.display = 'block';
     const ctx = canvas.getContext('2d');
-    const img = new ImageData(width, height);
 
-    const data = img.data;
     const flat = _isArrayLike(values) ? values : [];
     const len = flat.length;
 
@@ -329,6 +374,31 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
     }
     const colorLUT = _lutCache.get(colormap);
 
+    // Attempt off-thread rendering via dem-render-worker.js
+    const worker = _getDemWorker();
+    if (worker) {
+        const gen = ++_demWorkerGen;
+        // Clone the LUT before transferring so the cache entry remains valid.
+        const lutCopy = colorLUT.slice();
+        // Always copy values to a fresh Float32Array before transferring its
+        // buffer — the original `flat` may alias lastDemData.values.
+        const flatValues = new Float32Array(flat);
+        _demWorkerPending.set(gen, {
+            canvas,
+            ctx,
+            onReady: (c) => window._onDemCanvasReady?.(c),
+        });
+        worker.postMessage(
+            { gen, values: flatValues, width, height, lut: lutCopy, vmin: min, vmax: max },
+            [flatValues.buffer, lutCopy.buffer],
+        );
+        // Return the canvas immediately — pixels are filled asynchronously.
+        return canvas;
+    }
+
+    // Sync fallback — runs when Worker API is unavailable.
+    const img = new ImageData(width, height);
+    const data = img.data;
     const total = width * height;
     for (let i = 0; i < total; i++) {
         const val = (i < len) ? flat[i] : NaN;
@@ -347,9 +417,6 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
         }
     }
     ctx.putImageData(img, 0, 0);
-    canvas.style.maxWidth = '100%';
-    canvas.style.height = 'auto';
-    canvas.style.display = 'block';
 
     return canvas;
 };
@@ -560,7 +627,7 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
         return;
     }
     const { north, south, east, west } = coords;
-    const resolution = document.getElementById('waterResolution')?.value || '200';
+    const resolution = document.getElementById('waterResolution')?.value || '600';
     const dataset = document.getElementById('waterDataset')?.value || 'esa';
     const projection = document.getElementById('paramProjection')?.value || 'none';
     const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
@@ -637,7 +704,7 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
 
     const dim = parseInt(
         document.getElementById('satImgResolution')?.value ||
-        document.getElementById('paramDim')?.value || 400
+        document.getElementById('paramDim')?.value || 600
     );
     const params = new URLSearchParams({
         north, south, east, west, dim,

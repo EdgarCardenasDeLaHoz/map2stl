@@ -295,10 +295,9 @@ async function previewModelIn3D() {
         const exaggeration = parseFloat(document.getElementById('exportExaggeration')?.value) || 1.0;
         const baseHeight   = parseFloat(document.getElementById('exportBaseHeight')?.value)  || 5;
 
+        const ds = window._demSettings ? window._demSettings() : {};
         const { data, error: previewErr } = await window.api.export.preview({
-            dem_values:   ldd.values,
-            height:       ldd.height,
-            width:        ldd.width,
+            ...ds,
             model_height: window.appState.demParams.height || 20,
             base_height:  baseHeight,
             exaggeration,
@@ -513,10 +512,9 @@ async function exportPuzzle3MF() {
     try {
         setStatus(`Starting puzzle export (${pX}×${pY})...`);
 
+        const ds = window._demSettings ? window._demSettings() : {};
         const body = {
-            dem_values: md.values,
-            height: md.height,
-            width: md.width,
+            ...ds,
             model_height: md.resolution,
             base_height: md.baseHeight,
             exaggeration: md.exaggeration,

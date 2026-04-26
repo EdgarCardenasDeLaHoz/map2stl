@@ -387,12 +387,46 @@ async def merge_hydrology(req: HydrologyMergeRequest):
     from app.server.core.validation import b64_encode
     from app.server.config import TEST_MODE
 
-    dem_h, dem_w = req.dem_dimensions
-    river_h, river_w = req.river_grid_dimensions
+    dem_values = req.dem_values
+    dem_dims = req.dem_dimensions
+    river_values = req.river_grid_values
+    river_dims = req.river_grid_dimensions
+
+    # Settings-only mode: resolve DEM from cache
+    if not dem_values and req.bbox:
+        from app.server.core.export import resolve_dem_from_cache
+        req_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+        resolved = resolve_dem_from_cache(req_dict)
+        if resolved:
+            dem_values_list, h, w = resolved
+            dem_values = dem_values_list
+            dem_dims = [h, w]
+        else:
+            return JSONResponse(content={"error": "DEM not in cache — load DEM first"}, status_code=400)
+
+    # Resolve hydrology from cache
+    if not river_values and req.bbox:
+        from app.server.core.cache import make_cache_key, read_array_cache
+        bbox = req.bbox
+        hydro_key = make_cache_key("hydrology", bbox["north"], bbox["south"],
+                                   bbox["east"], bbox["west"])
+        cached = read_array_cache("hydrology", hydro_key)
+        if cached and cached[0].get("river_grid") is not None:
+            rg = cached[0]["river_grid"]
+            river_values = rg.ravel().tolist()
+            river_dims = list(rg.shape)
+        else:
+            return JSONResponse(content={"error": "Hydrology not in cache — load hydrology first"}, status_code=400)
+
+    if not dem_values or not dem_dims or not river_values or not river_dims:
+        return JSONResponse(content={"error": "Missing DEM or river data"}, status_code=400)
+
+    dem_h, dem_w = dem_dims
+    river_h, river_w = river_dims
 
     try:
-        dem_arr = np.array(req.dem_values, dtype=np.float32).reshape(dem_h, dem_w)
-        river_arr = np.array(req.river_grid_values, dtype=np.float32).reshape(river_h, river_w)
+        dem_arr = np.array(dem_values, dtype=np.float32).reshape(dem_h, dem_w)
+        river_arr = np.array(river_values, dtype=np.float32).reshape(river_h, river_w)
     except Exception as e:
         return JSONResponse(content={"error": f"Failed to reshape arrays: {e}"}, status_code=400)
 

@@ -86,13 +86,9 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
         const btn = document.getElementById('exportCityBtn');
         if (btn) { btn.disabled = true; btn.textContent = '⏳ Exporting…'; }
         try {
+            const ds = window._demSettings ? window._demSettings() : {};
             const payload = {
-                north: bbox.north, south: bbox.south,
-                east:  bbox.east,  west:  bbox.west,
-                dem_values:  Array.from(demData.values),
-                dem_width:   demData.width,
-                dem_height:  demData.height,
-                buildings:   buildings,
+                ...ds,
                 model_height_mm: parseFloat(document.getElementById('exportModelHeight')?.value) || 20,
                 base_mm:         parseFloat(document.getElementById('exportBaseHeight')?.value)  || 5,
                 building_z_scale: parseFloat(document.getElementById('cityBuildingScale')?.value) || 0.5,

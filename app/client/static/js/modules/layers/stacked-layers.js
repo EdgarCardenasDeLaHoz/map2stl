@@ -61,9 +61,34 @@ const LAYER_CANVAS_IDS = {
 
 /** Return the layer buffer canvas for the given mode, or null if not found. */
 function _getLayerBuffer(mode) {
-    const id = LAYER_CANVAS_IDS[mode];
-    return id ? document.getElementById(id) : null;
+    return getOrCreateCanvas(mode);
 }
+
+/**
+ * Return (or lazily create) the hidden source canvas for a given layer mode.
+ * Checks the in-memory registry first; falls back to the existing static DOM
+ * element (kept in DemContainer.vue for backward compat); creates a new canvas
+ * and appends it to #layersStack if neither exists.
+ *
+ * @param {string} layerName - One of the LAYER_CANVAS_IDS keys
+ * @returns {HTMLCanvasElement|null}
+ */
+function getOrCreateCanvas(layerName) {
+    if (_canvasRegistry.has(layerName)) return _canvasRegistry.get(layerName);
+    const id = LAYER_CANVAS_IDS[layerName];
+    let c = id ? document.getElementById(id) : null;
+    if (!c) {
+        c = document.createElement('canvas');
+        if (id) c.id = id;
+        c.className = 'layer-canvas';
+        c.style.display = 'none';
+        document.getElementById('layersStack')?.appendChild(c);
+    }
+    _canvasRegistry.set(layerName, c);
+    return c;
+}
+
+const _canvasRegistry = new Map();
 
 /**
  * Release GPU backing store for a layer buffer by zeroing its dimensions.

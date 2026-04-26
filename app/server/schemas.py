@@ -7,7 +7,7 @@ Import from here; location_picker.py re-exports everything for backward compat.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -149,9 +149,13 @@ class CityRequest(BoundingBox):
 
 
 class EnhanceHeightsRequest(BoundingBox):
-    """Request body for POST /api/cities/enhance-heights."""
-    buildings: Dict[str, Any] = Field(
-        ..., description="GeoJSON FeatureCollection of buildings with height_m, height_source")
+    """Request body for POST /api/cities/enhance-heights.
+
+    Buildings GeoJSON can be omitted — the endpoint reads from the OSM
+    disk cache populated by a prior ``POST /api/cities`` call.
+    """
+    buildings: Optional[Dict[str, Any]] = Field(
+        None, description="GeoJSON FeatureCollection of buildings (resolved from OSM cache if omitted)")
     dim: int = Field(512, ge=64, le=2048,
                      description="Height raster resolution (dim x dim)")
 
@@ -272,11 +276,19 @@ class SatelliteResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ExportRequest(BoundingBox):
-    """Parameters for generating a 3D model file."""
-    dem_values: List[float] = Field(
-        ..., description="Flat row-major elevation array from /api/terrain/dem")
+    """Parameters for generating a 3D model file.
+
+    DEM data is resolved from the server-side disk cache using bbox + dem
+    settings.  Legacy callers may still pass ``dem_values`` directly.
+    """
+    dem_values: Optional[List[float]] = Field(
+        None, description="Flat row-major elevation array (omit to resolve from server cache)")
     height: int = Field(0, description="Grid height in pixels")
     width: int = Field(0, description="Grid width in pixels")
+    bbox: Optional[Dict[str, float]] = Field(
+        None, description="Bounding box for DEM cache lookup")
+    dem: Optional[Dict[str, Any]] = Field(
+        None, description="DEM settings for cache lookup (dim, projection, etc.)")
     model_height: float = Field(
         20.0, ge=0.1, description="Physical model height in mm")
     base_height: float = Field(
@@ -393,8 +405,16 @@ class MergeRequest(BaseModel):
 
 
 class HydrologyMergeRequest(BaseModel):
-    """Request body for POST /api/composite/hydrology-merge."""
-    dem_values: List[float]
-    dem_dimensions: List[int] = Field(..., min_length=2, max_length=2)
-    river_grid_values: List[float]
-    river_grid_dimensions: List[int] = Field(..., min_length=2, max_length=2)
+    """Request body for POST /api/composite/hydrology-merge.
+
+    Both arrays can be omitted — the endpoint resolves them from the
+    server-side DEM and hydrology caches when bbox + dem settings are
+    provided instead.
+    """
+    dem_values: Optional[List[float]] = None
+    dem_dimensions: Optional[Annotated[List[int], Field(min_length=2, max_length=2)]] = None
+    river_grid_values: Optional[List[float]] = None
+    river_grid_dimensions: Optional[Annotated[List[int], Field(min_length=2, max_length=2)]] = None
+    # Settings-only mode fields
+    bbox: Optional[Dict[str, float]] = None
+    dem: Optional[Dict[str, Any]] = None

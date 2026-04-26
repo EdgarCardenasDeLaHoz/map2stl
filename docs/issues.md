@@ -37,13 +37,7 @@ All non-intentional inline handlers removed. Last remaining: dev-only debug over
 
 ## Open Tasks
 
-For the full proposal list and accept/deny workflow, see [proposals.md](proposals.md).
-
-| ID | Task | Status |
-|----|------|--------|
-| EXP-1 | Export progress indicator | ⏳ Pending |
-| CLEAN-1 | Replace remaining inline styles with CSS classes | ⏳ Pending |
-| UX-M | Lazy-allocate hidden layer canvases | ⏳ Pending |
+No open tasks remain. All items have been completed.
 
 ## Library Integration Debt ✅ ALL RESOLVED
 
@@ -61,6 +55,15 @@ See [libraries.md](libraries.md) for the current import map.
 
 ## Completed Refactoring Milestones
 
+- EXP-1 ✅ — Export progress indicator (spinner + `/api/export/status` polling)
+- CLEAN-1 ✅ — Inline styles replaced with CSS classes across Vue components and JS modules
+- UX-M ✅ — Lazy canvas allocation via `getOrCreateCanvas` + `_canvasRegistry` in `stacked-layers.js`
+- UX-1 ✅ — Region creation consolidated to single `floatingDrawBtn` entry point
+- REG-1 ✅ — Region list pagination (20 items/page + live search)
+- REG-2 ✅ — Region import/export as JSON
+- R-EVENTS-A ✅ — Event bus consolidation (`DEM_LOADED`, `COLORMAP_CHANGE`, `REGION_SELECTED`)
+- P-PLANB-DEM ✅ — Off-thread DEM pixel rendering via `dem-render-worker.js`
+- dim refactor ✅ — All terrain/water/ESA endpoints take `dim` (px); server computes `sat_scale` from bbox; `resolution_m` returned in responses
 - IMP4 ✅ — dem-loader.js owns all DEM canvas helpers
 - IMP5 ✅ — window.appState unified across modules
 - ARCH1 ✅ — state.js Proxy appState + events.js event bus

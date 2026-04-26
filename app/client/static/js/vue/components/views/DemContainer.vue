@@ -4,10 +4,10 @@
     <div class="dem-image-section">
 
       <!-- Empty state when no DEM loaded -->
-      <div id="demEmptyState" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:300px;color:#555;font-size:14px;gap:10px;">
-        <span style="font-size:36px;">🏔️</span>
+      <div id="demEmptyState" class="dem-empty-state">
+        <span class="dem-empty-state-icon">🏔️</span>
         <span>Select a region, then load terrain data to begin</span>
-        <button id="emptyStateLoadBtn" class="btn btn-primary" style="margin-top:6px;padding:10px 28px;font-size:15px;" title="Load terrain elevation data for the selected region">
+        <button id="emptyStateLoadBtn" class="btn btn-primary empty-state-load-btn" title="Load terrain elevation data for the selected region">
           ↺ Load DEM
         </button>
       </div>
@@ -30,8 +30,7 @@
                 <!-- Single display canvas — shows the active view mode -->
                 <canvas class="layer-canvas" id="stackViewCanvas"></canvas>
                 <!-- Grid overlay — always on top, exempt from zoom transform -->
-                <canvas class="layer-canvas" id="layerGridCanvas"
-                  style="pointer-events:none; transform:none !important;"></canvas>
+                <canvas class="layer-canvas layer-grid-overlay" id="layerGridCanvas"></canvas>
               </div>
               <div class="layers-x-axis" id="layersXAxis"></div>
             </div>
@@ -44,7 +43,7 @@
         <div class="compare-inline-panels">
           <div class="compare-inline-panel">
             <div class="compare-inline-header">
-              <select id="compareInlineLeft" style="flex:1;background:#3a3a3a;color:#ccc;border:1px solid #555;padding:4px;border-radius:3px;">
+              <select id="compareInlineLeft" class="compare-inline-select">
                 <option value="dem">DEM (Elevation)</option>
                 <option value="water">Water Mask</option>
                 <option value="sat">Satellite / Land Cover</option>
@@ -55,7 +54,7 @@
           </div>
           <div class="compare-inline-panel">
             <div class="compare-inline-header">
-              <select id="compareInlineRight" style="flex:1;background:#3a3a3a;color:#ccc;border:1px solid #555;padding:4px;border-radius:3px;">
+              <select id="compareInlineRight" class="compare-inline-select">
                 <option value="dem">DEM (Elevation)</option>
                 <option value="water">Water Mask</option>
                 <option value="sat" selected>Satellite / Land Cover</option>
@@ -73,7 +72,7 @@
       </div>
       <div class="water-mask-container hidden" id="waterMaskContainer">
         <div id="waterMaskImage"></div>
-        <div id="waterMaskStats" style="padding:10px;font-size:12px;color:#aaa;"></div>
+        <div id="waterMaskStats" class="water-mask-stats"></div>
       </div>
       <div class="satellite-container hidden" id="satelliteContainer">
         <div id="satelliteImage"></div>

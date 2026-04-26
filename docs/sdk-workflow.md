@@ -1,6 +1,6 @@
 # SDK Workflow Map — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-04-24_
 
 Use this document when you need to connect the notebooks, the Python session client, and the backend routes without tracing everything manually.
 
@@ -60,6 +60,8 @@ sequenceDiagram
 | DEM and overlays | `fetch_dem()`, `fetch_water_mask()`, `fetch_satellite()` | `/api/terrain/dem`, `/api/terrain/water-mask`, `/api/terrain/satellite` | `app/server/routers/terrain.py` |
 | DEM blending and hydrology | merge-related helpers | `/api/composite/dem-merge`, `/api/composite/hydrology-merge` | `app/server/routers/composite.py` |
 | City and OSM features | city fetch and raster helpers | `/api/cities*`, `/api/composite/city-raster` | `app/server/routers/cities.py`, `app/server/routers/composite.py` |
+| Building heights | `fetch_building_heights(provider=...)` | `/api/height/` | `app/server/routers/height.py`, `app/server/core/height/` |
+| STL import + infill (session-local) | `load_stl(path, bbox, up_axis, resolution_m)`, `preview_stl()`, `infill_heights(method, use_dem_baseline, power)` | _(no backend round-trip — runs locally in the Python process)_ | `app/server/core/height/stl_import.py`, `app/server/core/height/infill.py` |
 | Export and print pipeline | `export_stl()`, `export_obj()`, split and slicer helpers, verify/slice helpers | `/api/export*` | `app/server/routers/export.py` |
 | Cache inspection | cache helpers | `/api/cache*` | `app/server/routers/cache.py` |
 

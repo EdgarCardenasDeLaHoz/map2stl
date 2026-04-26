@@ -11,8 +11,8 @@
       <select id="satImgResolution" class="ctrl-select">
         <option value="200">200 px</option>
         <option value="400">400 px</option>
-        <option value="600">600 px</option>
-        <option value="800" selected>800 px</option>
+        <option value="600" selected>600 px</option>
+        <option value="800">800 px</option>
         <option value="1200">1200 px</option>
       </select>
     </div>

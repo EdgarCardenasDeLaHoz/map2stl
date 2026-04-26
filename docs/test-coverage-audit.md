@@ -1,8 +1,7 @@
 # Test Coverage Audit
 
-**Date:** Current session (post dead-code cleanup)
-**Suite baseline:** 440 Python + 93 JS tests passing
-**After E2E additions:** 481 Python tests passing
+**Date:** 2026-04-24
+**Suite baseline:** 532 Python + 93 JS tests passing
 
 ---
 
@@ -13,14 +12,14 @@
 | Router | File | Covered? | Notes |
 |---|---|---|---|
 | Regions CRUD | `test_regions.py` | ✅ Good | create/select/update/delete, 404s, validation |
-| Terrain DEM | `test_terrain.py` | ⚠️ Partial | `POST /api/terrain/dem` covered; water-mask, satellite, hydrology **NOT** covered |
+| Terrain DEM | `test_terrain.py`, `test_session_e2e.py` | ✅ Good | DEM, water-mask, satellite, hydrology all covered (router + E2E paths) |
 | Export STL/OBJ | `test_export.py` | ⚠️ Partial | STL and OBJ export covered; split/puzzle export, slice, verify, inspect **NOT** covered |
 | Cache | `test_cache.py` | ✅ Good | status, clear, region-clear all tested |
 | Cities | `test_cities.py` | ⚠️ Partial | `POST /api/cities` covered; `/api/cities/raster` and `/api/cities/export3mf` **NOT** covered |
-| Composite | `test_composite.py` | ⚠️ Partial | city-raster covered; dem-merge, hydrology-merge **NOT** covered |
-| Settings | `test_settings.py` (if any) | ❌ None found | `/api/settings/projections`, `/api/settings/colormaps`, `/api/settings/datasets` not directly tested (covered by new E2E class) |
+| Composite | `test_composite.py`, `test_session_e2e.py` | ✅ Good | city-raster, dem-merge, hydrology-merge all covered |
+| Settings | `test_session_e2e.py` | ✅ Good | `/api/settings/projections`, `/api/settings/colormaps`, `/api/settings/datasets` covered by E2E class |
 
-### 1.2 TerrainSession SDK (new — `test_session_e2e.py`)
+### 1.2 TerrainSession SDK (`test_session_e2e.py`)
 
 | Feature | Tests Added | Notes |
 |---|---|---|
@@ -42,10 +41,10 @@
 
 | Endpoint | Router | Risk | Suggested action |
 |---|---|---|---|
-| `GET /api/terrain/water-mask` | terrain | Medium | Add to `test_terrain.py`; needs mock for EE calls or TEST_MODE override |
-| `GET /api/terrain/satellite` | terrain | Medium | Add to `test_terrain.py`; needs WMTS tile mock |
-| `GET /api/terrain/hydrology` | terrain | Medium | Natural Earth path works offline; add smoke test |
-| `POST /api/composite/dem-merge` | composite | Medium | Add layer-merge smoke test |
+| `GET /api/terrain/water-mask` | terrain | Low | Covered by `test_session_e2e.py` via TestClient + TEST_MODE |
+| `GET /api/terrain/satellite` | terrain | Low | Covered by `test_session_e2e.py` via TestClient + TEST_MODE |
+| `GET /api/terrain/hydrology` | terrain | Low | Covered by `test_session_e2e.py::TestSessionHydrologySmoke` |
+| `POST /api/composite/dem-merge` | composite | Low | Covered by `test_session_e2e.py::TestSessionCompositeDeMMerge` |
 | `POST /api/composite/hydrology-merge` | composite | Low | Tested implicitly by `merge_hydrology_with_dem()` in notebooks |
 | `GET /api/export/obj/verify` | export | Low | Mesh health-check; depends on a previously exported OBJ |
 | `GET /api/export/obj/inspect` | export | Low | Same dependency |
@@ -59,10 +58,10 @@
 | Method | Risk | Why not covered |
 |---|---|---|
 | `server_settings()` | Low | Covered via the combined settings endpoint; remaining risk is response-shape drift if sub-endpoints change independently |
-| `fetch_water_mask()` | Medium | Calls `_fetch_water_endpoint()` which uses `requests.get` directly; requires TEST_MODE override for EE |
-| `fetch_esa_landcover()` | Low | Same as above |
-| `fetch_satellite()` | Medium | Calls `requests.get` directly; WMTS tile needs mock |
-| `merge_dem()` | Medium | Calls `requests.post` directly; needs layers fixture |
+| fetch_water_mask() | Low | Covered by `test_session_e2e.py::TestSessionLayerFetches` |
+| fetch_esa_landcover() | Low | Covered implicitly via shared water-mask endpoint (second call is a cache hit) |
+| fetch_satellite() | Low | Covered by `test_session_e2e.py::TestSessionLayerFetches` |
+| merge_dem() | Low | Covered by `test_session_e2e.py::TestSessionCompositeDeMMerge` |
 | `fetch_cities()` | Low | Calls `requests.post` directly; too large bbox guard tested elsewhere |
 | `export_obj()` | Medium | Returns binary ZIP; calls `requests.post` directly |
 | `verify()` | Low | Depends on prior export |

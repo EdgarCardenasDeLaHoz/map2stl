@@ -21,7 +21,7 @@
     <!-- dem.dim -->
     <div class="param-group" style="margin-top:6px;">
       <label for="paramDim" title="Number of grid points per side fetched from the DEM source.">Resolution:</label>
-      <input type="number" id="paramDim" value="200" min="50" max="2000" step="50"
+      <input type="number" id="paramDim" value="600" min="50" max="2000" step="50"
              title="Grid resolution: pixels per side (50–2000).">
       <div id="demResWarning" style="font-size:10px;color:#f90;display:none;">⚠️ High resolution may be slow</div>
     </div>

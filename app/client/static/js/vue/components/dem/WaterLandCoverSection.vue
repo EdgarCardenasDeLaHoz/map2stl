@@ -10,16 +10,15 @@
       </select>
     </div>
 
-    <!-- water.sat_scale -->
+    <!-- water.dim -->
     <div class="param-group" style="margin-top:6px;">
-      <label for="waterResolution" title="Earth Engine fetch resolution in metres/pixel. Lower = finer, slower.">Resolution:</label>
+      <label for="waterResolution" title="Output resolution in pixels per side. The backend computes the Earth Engine scale from your bbox and this value.">Resolution (px):</label>
       <select id="waterResolution" class="ctrl-select">
-        <option value="10">10 m/px — ESA Native (city)</option>
-        <option value="30">30 m/px — High Detail</option>
-        <option value="100">100 m/px — Medium</option>
-        <option value="200" selected>200 m/px — Default</option>
-        <option value="500">500 m/px — Fast</option>
-        <option value="1000">1000 m/px — Very Fast</option>
+        <option value="100">100 px — Very Fast</option>
+        <option value="200">200 px — Fast</option>
+        <option value="400">400 px — Medium</option>
+        <option value="600" selected>600 px — Default</option>
+        <option value="1200">1200 px — High Detail</option>
       </select>
       <div id="waterResWarning" style="font-size:10px;color:#f90;display:none;">⚠️ May require tiling for large areas</div>
     </div>

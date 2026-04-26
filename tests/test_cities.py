@@ -8,6 +8,7 @@ POST /api/cities/raster — rasterize OSM features to a DEM-format height map
 import gzip
 import json
 import pytest
+import numpy as np
 from unittest.mock import patch
 
 
@@ -202,3 +203,24 @@ class TestCityRaster:
         r1 = client.post("/api/cities/raster", json=payload).json()
         r2 = client.post("/api/cities/raster", json=payload).json()
         assert r1["values"] == r2["values"]
+
+    def test_projection_non_finite_values_are_sanitized(self, client, tmp_data_dir):
+        """Projected raster with NaN/Inf should be JSON-safe and return 200."""
+        payload = self._payload(dim=10)
+        payload["projection"] = "cosine"
+        payload["clip_nans"] = False
+
+        bad_grid = np.arange(100, dtype=np.float32).reshape(10, 10)
+        bad_grid[0, 1] = np.nan
+        bad_grid[3, 7] = np.inf
+        bad_grid[5, 2] = -np.inf
+
+        with patch("app.server.core.projection.project_grid", return_value=bad_grid):
+            resp = client.post("/api/cities/raster", json=payload)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["values"]) == 100
+        assert all(np.isfinite(v) for v in body["values"])
+        assert np.isfinite(body["vmin"])
+        assert np.isfinite(body["vmax"])

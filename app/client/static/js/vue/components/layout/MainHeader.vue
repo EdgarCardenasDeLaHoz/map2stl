@@ -15,19 +15,15 @@
         <span class="tab-step" id="tabStep3">3</span> Extrude
       </button>
     </div>
-    <div class="docs-menu" style="position:relative;margin-left:auto;">
-      <button class="btn btn-secondary" id="docsMenuBtn"
-              style="padding:4px 10px;font-size:12px;"
+    <div class="docs-menu">
+      <button class="btn btn-secondary docs-menu-btn" id="docsMenuBtn"
               @click="docsOpen = !docsOpen">
         📖 Docs
       </button>
-      <div v-if="docsOpen" class="docs-dropdown"
-           style="position:absolute;right:0;top:100%;margin-top:4px;background:#1e1e1e;border:1px solid #444;border-radius:6px;z-index:9999;min-width:190px;box-shadow:0 4px 12px rgba(0,0,0,.4);">
+      <div v-if="docsOpen" class="docs-dropdown">
         <a v-for="link in docsLinks" :key="link.href"
            :href="link.href" target="_blank" rel="noopener"
-           style="display:block;padding:8px 14px;color:#ddd;text-decoration:none;font-size:12px;white-space:nowrap;"
-           @mouseenter="$event.target.style.background='#333'"
-           @mouseleave="$event.target.style.background='transparent'">
+           class="docs-dropdown-link">
           {{ link.label }}
         </a>
       </div>

@@ -372,8 +372,8 @@ class TestSessionSettingsValidation:
         with pytest.raises(ValueError, match="unknown layers"):
             session._validate_settings()
 
-    def test_sat_scale_below_10_raises(self, session):
-        session.settings["water"]["sat_scale"] = 5
+    def test_water_dim_below_1_raises(self, session):
+        session.settings["water"]["dim"] = 0
         with pytest.raises(ValueError, match="integer"):
             session._validate_settings()
 

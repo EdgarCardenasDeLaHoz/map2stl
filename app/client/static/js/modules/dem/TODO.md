@@ -62,15 +62,15 @@ simple static string. The inline `style=` attrs should move to a `.sat-unavailab
 
 ## Improvement Plans
 
-### Plan A — Off-thread pixel rendering
-The `renderDEMCanvas` pixel loop (~40k–160k iterations at 200–400px) runs synchronously on the main thread, blocking the UI.
+### [x] Plan A — Off-thread pixel rendering — **DONE (2026-04-23)**
 
-**Approach:**
-1. Create `workers/dem-render-worker.js` receiving `{values, width, height, lut}` via Transferable ArrayBuffers
-2. Worker builds `Uint8ClampedArray` pixels and posts back `ImageBitmap`
-3. Main thread: `ctx.drawImage(imageBitmap, 0, 0)`
+`workers/dem-render-worker.js` created. `renderDEMCanvas` in `dem-main.js` updated to dispatch
+work via `_getDemWorker()` → `postMessage({gen, values: Float32Array, lut: Uint8Array, ...})`
+with zero-copy buffer transfers. Worker posts back `{type:'rendered', pixels: Uint8ClampedArray}`;
+main thread calls `ctx.putImageData(new ImageData(pixels, w, h), 0, 0)`. Generation counter
+`_demWorkerGen` discards stale responses. Sync fallback preserved when Worker API is absent.
 
-**Dependencies:** All PERF items already done (PERF8 ImageData reuse, PERF9-dep Float32Array, PERF11 LUT cache).
+See `open-todo-plans.md` §9 for full protocol.
 
 ### Plan B — Streaming histogram
 Merge the min/max pass and histogram pass into a single typed-array scan (currently two separate passes in `renderDEMCanvas` and `loadDEM`).

@@ -41,6 +41,11 @@ let regionThumbnails = {};
 let regionNotes = {};
 let currentNotesRegion = null;
 
+// ── Sidebar list pagination ───────────────────────────────────────────────────
+const LIST_PAGE_SIZE = 20;
+let _listPage = 0;
+let _lastListSearch = '';  // used to reset the page when search changes
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Continent detection + grouping
 // ─────────────────────────────────────────────────────────────────────────────
@@ -90,20 +95,34 @@ function renderCoordinatesList() {
 
     const coordinatesData = window.getCoordinatesData?.() || [];
     if (coordinatesData.length === 0) {
-        list.innerHTML = '<div class="loading" style="display:flex;flex-direction:column;align-items:center;gap:8px;">' +
-            '<span style="font-size:28px;">🗺️</span>' +
-            '<span style="font-weight:600;color:#ccc;">Draw a region on the map to begin</span>' +
-            '<span style="font-size:11px;color:#888;">Use the ✏️ draw button on the map to select an area</span>' +
+        list.innerHTML = '<div class="loading sidebar-empty-state">' +
+            '<span class="sidebar-empty-state-icon">🗺️</span>' +
+            '<span class="sidebar-empty-state-title">Draw a region on the map to begin</span>' +
+            '<span class="sidebar-empty-state-hint">Use the ✏️ draw button on the map to select an area</span>' +
             '</div>';
         return;
     }
 
     const searchVal = (document.getElementById('coordSearch')?.value || '').toLowerCase();
+
+    // Reset to page 0 whenever the search term changes.
+    if (searchVal !== _lastListSearch) {
+        _listPage = 0;
+        _lastListSearch = searchVal;
+    }
+
     const filtered  = searchVal
         ? coordinatesData.filter(r => r.name.toLowerCase().includes(searchVal))
         : coordinatesData;
 
-    const groups     = groupRegionsByContinent(filtered);
+    // ── Pagination ──────────────────────────────────────────────────────────
+    const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+    if (_listPage >= totalPages) _listPage = totalPages - 1;
+    const pageStart  = _listPage * LIST_PAGE_SIZE;
+    const paginated  = filtered.slice(pageStart, pageStart + LIST_PAGE_SIZE);
+    // ────────────────────────────────────────────────────────────────────────
+
+    const groups     = groupRegionsByContinent(paginated);
     const outerFrag  = document.createDocumentFragment();
     const selected   = window.appState?.selectedRegion;
     const indexByName = new Map(coordinatesData.map((r, i) => [r.name, i]));
@@ -167,6 +186,29 @@ function renderCoordinatesList() {
     });
 
     list.appendChild(outerFrag);
+
+    // ── Pagination controls ─────────────────────────────────────────────────
+    if (totalPages > 1) {
+        const pag = document.createElement('div');
+        pag.className = 'list-pagination';
+        const start = pageStart + 1;
+        const end   = Math.min(pageStart + LIST_PAGE_SIZE, filtered.length);
+        pag.innerHTML = `
+            <button id="listPagePrev" ${_listPage === 0 ? 'disabled' : ''}>&#8249; Prev</button>
+            <span>${start}–${end} of ${filtered.length}</span>
+            <button id="listPageNext" ${_listPage >= totalPages - 1 ? 'disabled' : ''}>Next &#8250;</button>
+        `;
+        pag.querySelector('#listPagePrev')?.addEventListener('click', () => {
+            _listPage--;
+            renderCoordinatesList();
+        });
+        pag.querySelector('#listPageNext')?.addEventListener('click', () => {
+            _listPage++;
+            renderCoordinatesList();
+        });
+        list.appendChild(pag);
+    }
+    // ────────────────────────────────────────────────────────────────────────
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

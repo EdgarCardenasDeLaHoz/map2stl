@@ -548,8 +548,10 @@ document.addEventListener('DOMContentLoaded', () => {
         window.appState.on('osmCityData', () => _scheduleRecompute());
     }
 
-    // Invalidate LUT cache when colormap changes so colours stay correct
-    document.getElementById('demColormap')?.addEventListener('change', () => {
+    // Invalidate LUT cache when colormap changes so colours stay correct.
+    // Listens on the event bus (emitted by event-listeners-map.js) to avoid
+    // a second direct DOM listener on the same element.
+    window.events?.on(window.EV?.COLORMAP_CHANGE, () => {
         for (const k of Object.keys(_lutCache)) delete _lutCache[k];
         _scheduleRecompute();
     });

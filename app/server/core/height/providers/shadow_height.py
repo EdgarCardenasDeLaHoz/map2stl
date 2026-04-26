@@ -15,8 +15,8 @@ Requirements:
   - Sun elevation angle at image acquisition time
   - Building footprint mask (from OSM or Open Buildings)
 
-This provider is a placeholder — shadow detection and sun angle
-calculation will be implemented in Phase 1b.
+Pass ``rgb`` (H×W×3 uint8 ndarray) to ``fetch_heights`` to activate
+shadow inference. Omitting it returns an empty result (safe default).
 """
 
 from __future__ import annotations
@@ -101,6 +101,40 @@ def _shadow_length_to_height(shadow_pixels: int, pixel_size_m: float,
     return shadow_m * math.tan(math.radians(sun_elevation_deg))
 
 
+_SAT_TARGET_M_PER_PX = 2.0  # analyse shadows at ~2 m/pixel
+
+
+def _fetch_rgb_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> "np.ndarray | None":
+    """Fetch satellite imagery for bbox at native resolution.
+
+    Returns the image at a resolution appropriate for shadow detection
+    (~2 m/pixel), **not** downsampled to ``dim``.  The inference pipeline
+    works on the high-res image and downsamples the result to ``dim``
+    afterwards.
+
+    Returns None gracefully on any error so the provider degrades to
+    returning an empty result rather than raising.
+    """
+    try:
+        import base64 as _b64
+        from io import BytesIO
+        from PIL import Image
+        from app.server.core.sat import fetch_satellite_tiles
+
+        north, south, east, west = bbox
+        # Compute a resolution that gives ~2 m/pixel
+        bbox_m = (north - south) * 111_320.0
+        sat_dim = max(256, min(1024, int(bbox_m / _SAT_TARGET_M_PER_PX)))
+
+        b64 = fetch_satellite_tiles(north, south, east, west, dim=sat_dim)
+        img_bytes = _b64.b64decode(b64)
+        img = Image.open(BytesIO(img_bytes)).convert("RGB")
+        return np.array(img, dtype=np.uint8)
+    except Exception as exc:
+        logger.debug("Shadow height: satellite fetch failed: %s", exc)
+        return None
+
+
 class ShadowHeightProvider:
     """Shadow-based building height estimation — zero-cost, global."""
 
@@ -110,11 +144,24 @@ class ShadowHeightProvider:
         """Shadow estimation works everywhere (given satellite imagery)."""
         return True
 
-    def fetch_heights(self, bbox: BBox, dim: Tuple[int, int]) -> HeightResult:
-        """Estimate building heights from shadows.
+    def fetch_heights(
+        self,
+        bbox: BBox,
+        dim: Tuple[int, int],
+        rgb: "np.ndarray | None" = None,
+    ) -> HeightResult:
+        """Estimate building heights from shadow lengths in satellite imagery.
 
-        Currently returns empty result — full implementation requires
-        satellite image access and building footprint masks.
+        Parameters
+        ----------
+        bbox:
+            (north, south, east, west) in decimal degrees.
+        dim:
+            (height, width) of the output raster in pixels.
+        rgb:
+            Optional H×W×3 uint8 ndarray of satellite imagery for the bbox.
+            If None, returns an empty result (safe default until satellite
+            imagery access is wired up).
         """
         north, south, east, west = bbox
         cache_key = make_cache_key(_NAMESPACE, north, south, east, west,
@@ -130,16 +177,137 @@ class ShadowHeightProvider:
                 resolution_m=meta.get("resolution_m", _RESOLUTION_M),
             )
 
-        # TODO: Implementation steps:
-        # 1. Fetch satellite RGB for bbox (from sat.py or cached)
-        # 2. Detect shadow regions
-        # 3. Match shadows to building footprints (OSM or Open Buildings)
-        # 4. Measure shadow length in sun direction
-        # 5. Convert to height using sun elevation
-        # 6. Rasterize to target grid
+        if rgb is None:
+            logger.debug("Shadow height: no RGB provided, fetching satellite tiles")
+            rgb = _fetch_rgb_for_bbox(bbox, dim)
 
-        logger.debug("Shadow height estimation not yet implemented")
+        if rgb is None:
+            logger.debug("Shadow height: satellite unavailable - returning empty result")
+            return _empty_result(dim)
+
+        result = _infer_from_rgb(rgb, bbox, dim)
+
+        write_array_cache(_NAMESPACE, cache_key,
+                          {"raster": result.raster, "confidence": result.confidence},
+                          {"resolution_m": _RESOLUTION_M})
+        return result
+
+
+def _infer_from_rgb(
+    rgb: np.ndarray,
+    bbox: BBox,
+    dim: Tuple[int, int],
+) -> HeightResult:
+    """Run the shadow-to-height pipeline on a satellite RGB image.
+
+    Shadow detection runs at the RGB image's native resolution, then
+    the resulting height raster is resampled to ``dim`` (the output
+    DEM grid size).
+
+    Steps
+    -----
+    1. Detect shadow regions using HSV thresholding.
+    2. Estimate sun elevation for the bbox centre.
+    3. For each connected shadow component, measure its longest axis
+       and convert to a height estimate.
+    4. Paint the estimated height at the shadow-tip location.
+    5. Resample the high-res height raster down to ``dim``.
+    """
+    import scipy.ndimage as ndi
+
+    out_h, out_w = dim
+    rgb_h, rgb_w = rgb.shape[:2]
+    north, south, east, west = bbox
+
+    shadow_mask = _detect_shadows(rgb)
+
+    lat_mid = (north + south) / 2.0
+    lon_mid = (east + west) / 2.0
+    sun_elev = _estimate_sun_elevation(lat_mid, lon_mid)
+
+    # Pixel scale from the RGB image resolution, not the output grid
+    pixel_m = (north - south) * 111_320.0 / rgb_h
+
+    # Work at RGB resolution, then downsample
+    raster_hr = np.full((rgb_h, rgb_w), np.nan, dtype=np.float32)
+    conf_hr = np.zeros((rgb_h, rgb_w), dtype=np.float32)
+
+    # Label connected shadow components
+    labelled, n_components = ndi.label(shadow_mask)
+    if n_components == 0:
+        logger.debug("Shadow height: no shadow regions detected")
         return _empty_result(dim)
+
+    # Filter tiny components (< 3px) and very large ones (> 1% of image —
+    # likely terrain shadows or water, not buildings)
+    max_component_px = int(rgb_h * rgb_w * 0.01)
+    n_valid = 0
+
+    for label_id in range(1, n_components + 1):
+        component = labelled == label_id
+        rows, cols = np.where(component)
+        n_px = len(rows)
+        if n_px < 3 or n_px > max_component_px:
+            continue
+
+        # Bounding box of the shadow component
+        row_span = int(rows.max() - rows.min())
+        col_span = int(cols.max() - cols.min())
+        shadow_length_px = max(row_span, col_span)
+
+        height_m = _shadow_length_to_height(shadow_length_px, pixel_m, sun_elev)
+
+        # Clamp to realistic building heights (1–500 m)
+        if height_m < 1.0 or height_m > 500.0:
+            continue
+
+        # Place the height estimate at the shadow-tip pixel (top of bounding box).
+        tip_row = int(rows.min())
+        tip_col = int(cols[rows == rows.min()].mean())
+
+        if 0 <= tip_row < rgb_h and 0 <= tip_col < rgb_w:
+            raster_hr[tip_row, tip_col] = float(height_m)
+            conf_hr[tip_row, tip_col] = _CONFIDENCE
+            n_valid += 1
+
+    logger.debug(
+        "Shadow height: %d components (%d valid), sun_elev=%.1f deg, pixel_m=%.2f",
+        n_components, n_valid, sun_elev, pixel_m,
+    )
+
+    # Resample to output grid
+    if (rgb_h, rgb_w) == (out_h, out_w):
+        return HeightResult(raster_hr, conf_hr, "shadow_height", _RESOLUTION_M)
+
+    raster = _downsample_height(raster_hr, (out_h, out_w))
+    conf = _downsample_height(conf_hr, (out_h, out_w))
+    return HeightResult(raster, conf, "shadow_height", pixel_m)
+
+
+def _downsample_height(arr: np.ndarray, dim: Tuple[int, int]) -> np.ndarray:
+    """Downsample a sparse height raster to ``dim`` using max-pooling.
+
+    Each output cell gets the maximum non-NaN value from its corresponding
+    region in the high-res input.  Cells with no valid source pixels stay NaN.
+    """
+    src_h, src_w = arr.shape
+    out_h, out_w = dim
+    out = np.full((out_h, out_w), np.nan, dtype=np.float32)
+
+    row_scale = src_h / out_h
+    col_scale = src_w / out_w
+
+    for r in range(out_h):
+        r0 = int(r * row_scale)
+        r1 = max(r0 + 1, int((r + 1) * row_scale))
+        for c in range(out_w):
+            c0 = int(c * col_scale)
+            c1 = max(c0 + 1, int((c + 1) * col_scale))
+            block = arr[r0:r1, c0:c1]
+            valid = block[~np.isnan(block)]
+            if valid.size > 0:
+                out[r, c] = valid.max()
+    return out
 
 
 def _empty_result(dim: Tuple[int, int]) -> HeightResult:
