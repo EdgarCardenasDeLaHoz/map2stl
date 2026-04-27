@@ -86,10 +86,24 @@ class TrainConfig:
     # Multi-task loss weights (for task="both")
     shape_loss_weight: float = 1.0
     height_loss_weight: float = 1.0
-    # Gradient loss weight for height regression
-    grad_loss_weight: float = 0.5
+    # Gradient loss weight for height regression (edge regularizer)
+    grad_loss_weight: float = 0.2
+    # Extra pixelwise L2 weight blended with weighted L1 (encourages sharp pixel fit)
+    pixel_l2_weight: float = 0.25
+    # Pixel regression objective: "l1", "rmse", or "hybrid"
+    pixel_loss_mode: str = "hybrid"
+    # Building-pixel upweighting factor for sparse height supervision
+    bldg_loss_weight: float = 5.0
     # Checkpoint frequency
     save_every: int = 10
+    # If True, run backward/step for each image (sample-level SGD updates)
+    per_image_backprop: bool = True
+    # Metric used for selecting best checkpoints: "loss", "mae", or "rmse"
+    selection_metric: str = "rmse"
+    # Resume from latest checkpoint (or resume_from if provided)
+    resume: bool = False
+    # Optional explicit checkpoint path to resume from
+    resume_from: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +145,19 @@ def _resolve_device(device_str: str) -> "torch.device":
     return torch.device(device_str)
 
 
-def _train_epoch_shape(model, loader, criterion, optimizer, device):
+def _load_history(history_path: Path) -> list[dict]:
+    if not history_path.exists():
+        return []
+    try:
+        with open(history_path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        hist = payload.get("history", [])
+        return hist if isinstance(hist, list) else []
+    except Exception:
+        return []
+
+
+def _train_epoch_shape(model, loader, criterion, optimizer, device, per_image_backprop: bool = True):
     """One epoch of shape-only training."""
     model.train()
     total_loss = 0.0
@@ -139,15 +165,29 @@ def _train_epoch_shape(model, loader, criterion, optimizer, device):
     n = 0
     for imgs, labels in loader:
         imgs, labels = imgs.to(device), labels.to(device)
-        optimizer.zero_grad()
-        _, shape_logits = model(imgs)
-        loss = criterion(shape_logits, labels)
-        loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-        optimizer.step()
-        total_loss += loss.item() * len(labels)
-        correct += (shape_logits.argmax(1) == labels).sum().item()
-        n += len(labels)
+        if per_image_backprop:
+            for i in range(imgs.size(0)):
+                x = imgs[i:i + 1]
+                y = labels[i:i + 1]
+                optimizer.zero_grad()
+                _, shape_logits = model(x)
+                loss = criterion(shape_logits, y)
+                loss.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+                optimizer.step()
+                total_loss += loss.item()
+                correct += (shape_logits.argmax(1) == y).sum().item()
+                n += 1
+        else:
+            optimizer.zero_grad()
+            _, shape_logits = model(imgs)
+            loss = criterion(shape_logits, labels)
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            optimizer.step()
+            total_loss += loss.item() * len(labels)
+            correct += (shape_logits.argmax(1) == labels).sum().item()
+            n += len(labels)
     return total_loss / max(n, 1), correct / max(n, 1)
 
 
@@ -168,7 +208,14 @@ def _eval_epoch_shape(model, loader, criterion, device):
     return total_loss / max(n, 1), correct / max(n, 1)
 
 
-def _height_loss(pred, target, grad_weight: float, bldg_weight: float = 5.0):
+def _height_loss(
+    pred,
+    target,
+    grad_weight: float,
+    bldg_weight: float = 5.0,
+    pixel_l2_weight: float = 0.25,
+    pixel_loss_mode: str = "hybrid",
+):
     """Per-pixel weighted L1 + Sobel gradient loss for sparse height maps.
 
     Background pixels (target == 0) make up ~70% of urban tiles. A naive L1
@@ -179,9 +226,22 @@ def _height_loss(pred, target, grad_weight: float, bldg_weight: float = 5.0):
     import torch.nn.functional as F
     bldg_mask = (target > 0).float()
     weight = 1.0 + bldg_weight * bldg_mask
-    l1 = (weight * (pred - target).abs()).sum() / weight.sum().clamp(min=1.0)
+    diff = pred - target
+    l1 = (weight * diff.abs()).sum() / weight.sum().clamp(min=1.0)
+    mse = (weight * (diff * diff)).sum() / weight.sum().clamp(min=1.0)
+    rmse = torch.sqrt(mse + 1e-8)
+
+    mode = (pixel_loss_mode or "hybrid").lower()
+    if mode == "l1":
+        pixel = l1
+    elif mode == "rmse":
+        pixel = rmse
+    else:
+        # Hybrid keeps MAE robustness while adding stronger penalty to large errors.
+        pixel = l1 + pixel_l2_weight * rmse
+
     gl = _gradient_loss(pred, target)
-    return l1 + grad_weight * gl
+    return pixel + grad_weight * gl
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +283,8 @@ def _v3_loss(
     mask_logits, height_pred, target_height,
     grad_weight: float = 0.5,
     bldg_weight: float = 5.0,
+    pixel_l2_weight: float = 0.25,
+    pixel_loss_mode: str = "hybrid",
     bce_weight: float = 1.0,
     dice_weight: float = 1.0,
     height_dice_weight: float = 0.5,
@@ -238,7 +300,19 @@ def _v3_loss(
 
     # Height regression: weighted L1 + Sobel gradient + continuous Dice
     weight = 1.0 + bldg_weight * target_mask
-    l1 = (weight * (height_pred - target_height).abs()).sum() / weight.sum().clamp(min=1.0)
+    diff = height_pred - target_height
+    l1 = (weight * diff.abs()).sum() / weight.sum().clamp(min=1.0)
+    mse = (weight * (diff * diff)).sum() / weight.sum().clamp(min=1.0)
+    rmse = torch.sqrt(mse + 1e-8)
+
+    mode = (pixel_loss_mode or "hybrid").lower()
+    if mode == "l1":
+        pixel = l1
+    elif mode == "rmse":
+        pixel = rmse
+    else:
+        pixel = l1 + pixel_l2_weight * rmse
+
     gl = _gradient_loss(height_pred, target_height)
     h_dice = _dice_loss_continuous(height_pred, target_height)
 
@@ -246,47 +320,117 @@ def _v3_loss(
     bce = F.binary_cross_entropy_with_logits(mask_logits, target_mask)
     m_dice = _dice_loss_binary(mask_logits, target_mask)
 
-    return l1 + grad_weight * gl + bce_weight * bce + dice_weight * m_dice + height_dice_weight * h_dice
+    return pixel + grad_weight * gl + bce_weight * bce + dice_weight * m_dice + height_dice_weight * h_dice
 
 
-def _train_epoch_height(model, loader, optimizer, device, grad_weight: float):
+def _train_epoch_height(
+    model,
+    loader,
+    optimizer,
+    device,
+    grad_weight: float,
+    bldg_weight: float,
+    pixel_l2_weight: float,
+    pixel_loss_mode: str,
+    per_image_backprop: bool = True,
+):
     """One epoch of height-only training."""
     model.train()
     total_loss = 0.0
     n = 0
     for rgb, height in loader:
         rgb, height = rgb.to(device), height.to(device)
-        optimizer.zero_grad()
-        height_pred, _ = model(rgb)
-        loss = _height_loss(height_pred, height, grad_weight)
-        loss.backward()
-        #nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-        optimizer.step()
-        total_loss += loss.item() * rgb.size(0)
-        n += rgb.size(0)
+        if per_image_backprop:
+            for i in range(rgb.size(0)):
+                x = rgb[i:i + 1]
+                y = height[i:i + 1]
+                optimizer.zero_grad()
+                height_pred, _ = model(x)
+                loss = _height_loss(
+                    height_pred,
+                    y,
+                    grad_weight,
+                    bldg_weight=bldg_weight,
+                    pixel_l2_weight=pixel_l2_weight,
+                    pixel_loss_mode=pixel_loss_mode,
+                )
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
+                n += 1
+        else:
+            optimizer.zero_grad()
+            height_pred, _ = model(rgb)
+            loss = _height_loss(
+                height_pred,
+                height,
+                grad_weight,
+                bldg_weight=bldg_weight,
+                pixel_l2_weight=pixel_l2_weight,
+                pixel_loss_mode=pixel_loss_mode,
+            )
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item() * rgb.size(0)
+            n += rgb.size(0)
     return total_loss / max(n, 1)
 
 
 @torch.no_grad()
-def _eval_epoch_height(model, loader, device, grad_weight: float):
+def _eval_epoch_height(
+    model,
+    loader,
+    device,
+    grad_weight: float,
+    bldg_weight: float,
+    pixel_l2_weight: float,
+    pixel_loss_mode: str,
+):
     """One epoch of height-only evaluation."""
     model.eval()
     total_loss = 0.0
+    total_abs = 0.0
+    total_sq = 0.0
+    total_px = 0
     n = 0
     for rgb, height in loader:
         rgb, height = rgb.to(device), height.to(device)
         height_pred, _ = model(rgb)
-        loss = _height_loss(height_pred, height, grad_weight)
+        loss = _height_loss(
+            height_pred,
+            height,
+            grad_weight,
+            bldg_weight=bldg_weight,
+            pixel_l2_weight=pixel_l2_weight,
+            pixel_loss_mode=pixel_loss_mode,
+        )
         total_loss += loss.item() * rgb.size(0)
+        diff = (height_pred - height)
+        total_abs += float(diff.abs().sum().item())
+        total_sq += float((diff * diff).sum().item())
+        total_px += int(diff.numel())
         n += rgb.size(0)
-    return total_loss / max(n, 1)
+    mae = total_abs / max(total_px, 1)
+    rmse = float(np.sqrt(total_sq / max(total_px, 1)))
+    return total_loss / max(n, 1), mae, rmse
 
 
 # ---------------------------------------------------------------------------
 # RoofNetV3 train / eval (iterative refinement, mask + height heads)
 # ---------------------------------------------------------------------------
 
-def _train_epoch_v3(model, loader, optimizer, device, n_iters: int, grad_weight: float):
+def _train_epoch_v3(
+    model,
+    loader,
+    optimizer,
+    device,
+    n_iters: int,
+    grad_weight: float,
+    bldg_weight: float,
+    pixel_l2_weight: float,
+    pixel_loss_mode: str,
+    per_image_backprop: bool = True,
+):
     """One epoch of RoofNetV3 training with deep supervision across iters."""
     model.train()
     total_loss = 0.0
@@ -294,33 +438,85 @@ def _train_epoch_v3(model, loader, optimizer, device, n_iters: int, grad_weight:
     n = 0
     for rgb, height in loader:
         rgb, height = rgb.to(device), height.to(device)
-        optimizer.zero_grad()
+        if per_image_backprop:
+            for i in range(rgb.size(0)):
+                x = rgb[i:i + 1]
+                y = height[i:i + 1]
+                optimizer.zero_grad()
 
-        outs = model(rgb, n_iters=n_iters, return_all=True)
-        # Deep supervision: weight later iterations more heavily
-        loss = 0.0
-        for it, (mask_logits, height_pred, _) in enumerate(outs):
-            w = (it + 1) / len(outs)  # 0.5, 1.0 for n_iters=2
-            loss = loss + w * _v3_loss(mask_logits, height_pred, height, grad_weight)
+                outs = model(x, n_iters=n_iters, return_all=True)
+                # Deep supervision: weight later iterations more heavily
+                loss = 0.0
+                for it, (mask_logits, height_pred, _) in enumerate(outs):
+                    w = (it + 1) / len(outs)  # 0.5, 1.0 for n_iters=2
+                    loss = loss + w * _v3_loss(
+                        mask_logits,
+                        height_pred,
+                        y,
+                        grad_weight,
+                        bldg_weight=bldg_weight,
+                        pixel_l2_weight=pixel_l2_weight,
+                        pixel_loss_mode=pixel_loss_mode,
+                    )
 
-        # Final-iteration MAE on building pixels for monitoring
-        mask_logits, height_pred, _ = outs[-1]
-        mask_prob = torch.sigmoid(mask_logits)
-        gated = torch.clamp(height_pred, min=0.0) * (mask_prob > 0.3).float()
-        bldg = (height > 0).float()
-        mae = (bldg * (gated - height).abs()).sum() / bldg.sum().clamp(min=1.0)
+                # Final-iteration MAE on building pixels for monitoring
+                mask_logits, height_pred, _ = outs[-1]
+                mask_prob = torch.sigmoid(mask_logits)
+                gated = torch.clamp(height_pred, min=0.0) * (mask_prob > 0.3).float()
+                bldg = (y > 0).float()
+                mae = (bldg * (gated - y).abs()).sum() / bldg.sum().clamp(min=1.0)
 
-        loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-        optimizer.step()
-        total_loss += loss.item() * rgb.size(0)
-        total_mae += mae.item() * rgb.size(0)
-        n += rgb.size(0)
+                loss.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+                optimizer.step()
+                total_loss += loss.item()
+                total_mae += mae.item()
+                n += 1
+        else:
+            optimizer.zero_grad()
+
+            outs = model(rgb, n_iters=n_iters, return_all=True)
+            # Deep supervision: weight later iterations more heavily
+            loss = 0.0
+            for it, (mask_logits, height_pred, _) in enumerate(outs):
+                w = (it + 1) / len(outs)  # 0.5, 1.0 for n_iters=2
+                loss = loss + w * _v3_loss(
+                    mask_logits,
+                    height_pred,
+                    height,
+                    grad_weight,
+                    bldg_weight=bldg_weight,
+                    pixel_l2_weight=pixel_l2_weight,
+                    pixel_loss_mode=pixel_loss_mode,
+                )
+
+            # Final-iteration MAE on building pixels for monitoring
+            mask_logits, height_pred, _ = outs[-1]
+            mask_prob = torch.sigmoid(mask_logits)
+            gated = torch.clamp(height_pred, min=0.0) * (mask_prob > 0.3).float()
+            bldg = (height > 0).float()
+            mae = (bldg * (gated - height).abs()).sum() / bldg.sum().clamp(min=1.0)
+
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            optimizer.step()
+            total_loss += loss.item() * rgb.size(0)
+            total_mae += mae.item() * rgb.size(0)
+            n += rgb.size(0)
     return total_loss / max(n, 1), total_mae / max(n, 1)
 
 
 @torch.no_grad()
-def _eval_epoch_v3(model, loader, device, n_iters: int, grad_weight: float):
+def _eval_epoch_v3(
+    model,
+    loader,
+    device,
+    n_iters: int,
+    grad_weight: float,
+    bldg_weight: float,
+    pixel_l2_weight: float,
+    pixel_loss_mode: str,
+):
     model.eval()
     total_loss = 0.0
     total_mae = 0.0
@@ -328,7 +524,15 @@ def _eval_epoch_v3(model, loader, device, n_iters: int, grad_weight: float):
     for rgb, height in loader:
         rgb, height = rgb.to(device), height.to(device)
         mask_logits, height_pred, _ = model(rgb, n_iters=n_iters)
-        loss = _v3_loss(mask_logits, height_pred, height, grad_weight)
+        loss = _v3_loss(
+            mask_logits,
+            height_pred,
+            height,
+            grad_weight,
+            bldg_weight=bldg_weight,
+            pixel_l2_weight=pixel_l2_weight,
+            pixel_loss_mode=pixel_loss_mode,
+        )
 
         mask_prob = torch.sigmoid(mask_logits)
         gated = torch.clamp(height_pred, min=0.0) * (mask_prob > 0.3).float()
@@ -378,6 +582,7 @@ def train_v3(
     if not out_path.is_absolute():
         out_path = strm2stl / output_model
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    latest_path = out_path.with_suffix(".latest.pt")
 
     train_loader, val_loader, split = make_height_loaders(
         tile_paths,
@@ -407,12 +612,55 @@ def train_v3(
         optimizer, T_max=cfg.epochs, eta_min=cfg.lr * 0.01,
     )
 
-    history = []
+    history_path = out_path.parent / (out_path.stem + "_history.json")
+    history = _load_history(history_path)
     best_val = float("inf")
     best_epoch = 0
     patience_counter = 0
+    start_epoch = 1
 
-    for epoch in range(1, cfg.epochs + 1):
+    resume_ckpt: Path | None = None
+    if cfg.resume_from:
+        candidate = Path(cfg.resume_from)
+        if not candidate.is_absolute():
+            candidate = strm2stl / candidate
+        if candidate.exists():
+            resume_ckpt = candidate
+    elif cfg.resume:
+        if latest_path.exists():
+            resume_ckpt = latest_path
+        elif out_path.exists():
+            resume_ckpt = out_path
+
+    if resume_ckpt is not None:
+        state = torch.load(str(resume_ckpt), map_location=device, weights_only=False)
+        if isinstance(state, dict) and "model_state_dict" in state:
+            model.load_state_dict(state["model_state_dict"])
+        elif isinstance(state, dict):
+            model.load_state_dict(state)
+
+        if isinstance(state, dict) and "optimizer_state_dict" in state:
+            try:
+                optimizer.load_state_dict(state["optimizer_state_dict"])
+            except Exception:
+                pass
+        if isinstance(state, dict) and "scheduler_state_dict" in state:
+            try:
+                scheduler.load_state_dict(state["scheduler_state_dict"])
+            except Exception:
+                pass
+
+        if isinstance(state, dict):
+            prev_epoch = int(state.get("epoch", 0) or 0)
+            start_epoch = prev_epoch + 1
+            best_val = float(state.get("best_val_loss", state.get("val_loss", best_val)))
+            best_epoch = int(state.get("best_epoch", prev_epoch if prev_epoch > 0 else 0))
+
+        if verbose:
+            print(f"Resuming from {resume_ckpt} (start epoch {start_epoch})")
+
+    end_epoch = start_epoch + cfg.epochs - 1
+    for epoch in range(start_epoch, end_epoch + 1):
         # Unfreeze backbone after warmup (v3s: backbone frozen initially)
         if is_small and epoch == cfg.freeze_backbone_epochs + 1:
             if hasattr(model, "unfreeze_backbone"):
@@ -433,10 +681,26 @@ def train_v3(
 
         t0 = time.perf_counter()
         train_loss, train_mae = _train_epoch_v3(
-            model, train_loader, optimizer, device, n_iters, cfg.grad_loss_weight,
+            model,
+            train_loader,
+            optimizer,
+            device,
+            n_iters,
+            cfg.grad_loss_weight,
+            cfg.bldg_loss_weight,
+            cfg.pixel_l2_weight,
+            cfg.pixel_loss_mode,
+            cfg.per_image_backprop,
         )
         val_loss, val_mae = _eval_epoch_v3(
-            model, val_loader, device, n_iters, cfg.grad_loss_weight,
+            model,
+            val_loader,
+            device,
+            n_iters,
+            cfg.grad_loss_weight,
+            cfg.bldg_loss_weight,
+            cfg.pixel_l2_weight,
+            cfg.pixel_loss_mode,
         )
         scheduler.step()
         dt = time.perf_counter() - t0
@@ -449,25 +713,35 @@ def train_v3(
         })
 
         is_best = val_loss < best_val
+        latest_state = {
+            "epoch": epoch,
+            "arch": arch,
+            "n_iters": n_iters,
+            "model_state_dict": model.state_dict(),
+            "val_loss": val_loss,
+            "val_mae": val_mae,
+            "best_val_loss": best_val,
+            "best_epoch": best_epoch,
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "config": cfg.__dict__,
+        }
+        torch.save(latest_state, str(latest_path))
+
         if is_best:
             best_val = val_loss
             best_epoch = epoch
             patience_counter = 0
-            torch.save({
-                "epoch": epoch,
-                "arch": arch,
-                "n_iters": n_iters,
-                "model_state_dict": model.state_dict(),
-                "val_loss": val_loss, "val_mae": val_mae,
-                "config": cfg.__dict__,
-            }, str(out_path))
+            latest_state["best_val_loss"] = best_val
+            latest_state["best_epoch"] = best_epoch
+            torch.save(latest_state, str(out_path))
         else:
             patience_counter += 1
 
         if verbose:
             marker = "* best" if is_best else ""
             print(
-                f"  Epoch {epoch:3d}/{cfg.epochs}  "
+                f"  Epoch {epoch:3d}/{end_epoch}  "
                 f"train_loss={train_loss:.3f} train_mae={train_mae:.2f}m  "
                 f"val_loss={val_loss:.3f} val_mae={val_mae:.2f}m  "
                 f"{marker:7}  ({dt:.1f}s)"
@@ -478,7 +752,6 @@ def train_v3(
                 print(f"  Early stopping at epoch {epoch}")
             break
 
-    history_path = out_path.parent / (out_path.stem + "_history.json")
     with open(history_path, "w", encoding="utf-8") as fh:
         json.dump({
             "history": history,
@@ -549,6 +822,7 @@ def train_shape(
     if not out_path.is_absolute():
         out_path = strm2stl / output_model
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    latest_path = out_path.with_suffix(".latest.pt")
 
     # Data
     train_loader, val_loader, test_loader, split_info = make_roof_loaders(
@@ -584,12 +858,55 @@ def train_shape(
     criterion = nn.CrossEntropyLoss()
 
     # Training loop
-    history: list[dict] = []
+    history_path = out_path.parent / (out_path.stem + "_history.json")
+    history: list[dict] = _load_history(history_path)
     best_val_acc = 0.0
     best_epoch = 0
     patience_counter = 0
+    start_epoch = 1
 
-    for epoch in range(1, cfg.epochs + 1):
+    resume_ckpt: Path | None = None
+    if cfg.resume_from:
+        candidate = Path(cfg.resume_from)
+        if not candidate.is_absolute():
+            candidate = strm2stl / candidate
+        if candidate.exists():
+            resume_ckpt = candidate
+    elif cfg.resume:
+        if latest_path.exists():
+            resume_ckpt = latest_path
+        elif out_path.exists():
+            resume_ckpt = out_path
+
+    if resume_ckpt is not None:
+        state = torch.load(str(resume_ckpt), map_location=device, weights_only=False)
+        if isinstance(state, dict) and "model_state_dict" in state:
+            model.load_state_dict(state["model_state_dict"])
+        elif isinstance(state, dict):
+            model.load_state_dict(state)
+
+        if isinstance(state, dict) and "optimizer_state_dict" in state:
+            try:
+                optimizer.load_state_dict(state["optimizer_state_dict"])
+            except Exception:
+                pass
+        if isinstance(state, dict) and "scheduler_state_dict" in state:
+            try:
+                scheduler.load_state_dict(state["scheduler_state_dict"])
+            except Exception:
+                pass
+
+        if isinstance(state, dict):
+            prev_epoch = int(state.get("epoch", 0) or 0)
+            start_epoch = prev_epoch + 1
+            best_val_acc = float(state.get("best_val_acc", state.get("val_acc", best_val_acc)))
+            best_epoch = int(state.get("best_epoch", prev_epoch if prev_epoch > 0 else 0))
+
+        if verbose:
+            print(f"Resuming from {resume_ckpt} (start epoch {start_epoch})")
+
+    end_epoch = start_epoch + cfg.epochs - 1
+    for epoch in range(start_epoch, end_epoch + 1):
         # Unfreeze backbone after warmup
         if epoch == cfg.freeze_backbone_epochs + 1:
             model.unfreeze_backbone()
@@ -606,7 +923,14 @@ def train_shape(
                 print(f"  Epoch {epoch}: unfreezing backbone ({model.trainable_params():,} trainable)")
 
         t0 = time.perf_counter()
-        train_loss, train_acc = _train_epoch_shape(model, train_loader, criterion, optimizer, device)
+        train_loss, train_acc = _train_epoch_shape(
+            model,
+            train_loader,
+            criterion,
+            optimizer,
+            device,
+            cfg.per_image_backprop,
+        )
         val_loss, val_acc = _eval_epoch_shape(model, val_loader, criterion, device)
         scheduler.step()
         dt = time.perf_counter() - t0
@@ -621,25 +945,33 @@ def train_shape(
         })
 
         is_best = val_acc > best_val_acc
+        latest_state = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "val_acc": val_acc,
+            "val_loss": val_loss,
+            "best_val_acc": best_val_acc,
+            "best_epoch": best_epoch,
+            "config": cfg.__dict__,
+        }
+        torch.save(latest_state, str(latest_path))
+
         if is_best:
             best_val_acc = val_acc
             best_epoch = epoch
             patience_counter = 0
-            torch.save({
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "val_acc": val_acc,
-                "val_loss": val_loss,
-                "config": cfg.__dict__,
-            }, str(out_path))
+            latest_state["best_val_acc"] = best_val_acc
+            latest_state["best_epoch"] = best_epoch
+            torch.save(latest_state, str(out_path))
         else:
             patience_counter += 1
 
         if verbose:
             marker = "* best" if is_best else ""
             print(
-                f"  Epoch {epoch:3d}/{cfg.epochs}  "
+                f"  Epoch {epoch:3d}/{end_epoch}  "
                 f"train_loss={train_loss:.4f}  train_acc={train_acc:.3f}  "
                 f"val_loss={val_loss:.4f}  val_acc={val_acc:.3f}  "
                 f"{marker:7}  ({dt:.1f}s)"
@@ -669,7 +1001,6 @@ def train_shape(
                 print(f"    {lbl:<12} {acc:.3f}")
 
     # Save history
-    history_path = out_path.parent / (out_path.stem + "_history.json")
     with open(history_path, "w", encoding="utf-8") as fh:
         json.dump({
             "history": history,
@@ -741,6 +1072,7 @@ def train_height(
     if not out_path.is_absolute():
         out_path = strm2stl / output_model
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    latest_path = out_path.with_suffix(".latest.pt")
 
     train_loader, val_loader, split_info = make_height_loaders(
         tile_paths,
@@ -761,15 +1093,84 @@ def train_height(
         optimizer, T_max=cfg.epochs, eta_min=cfg.lr * 0.01
     )
 
-    history: list[dict] = []
+    history_path = out_path.parent / (out_path.stem + "_history.json")
+    history: list[dict] = _load_history(history_path)
     best_val_loss = float("inf")
+    best_selection_value = float("inf")
     best_epoch = 0
     patience_counter = 0
+    start_epoch = 1
 
-    for epoch in range(1, cfg.epochs + 1):
+    resume_ckpt: Path | None = None
+    if cfg.resume_from:
+        candidate = Path(cfg.resume_from)
+        if not candidate.is_absolute():
+            candidate = strm2stl / candidate
+        if candidate.exists():
+            resume_ckpt = candidate
+    elif cfg.resume:
+        if latest_path.exists():
+            resume_ckpt = latest_path
+        elif out_path.exists():
+            resume_ckpt = out_path
+
+    if resume_ckpt is not None:
+        state = torch.load(str(resume_ckpt), map_location=device, weights_only=False)
+        model_state = state.get("model_state_dict") if isinstance(state, dict) else None
+        if model_state is not None:
+            model.load_state_dict(model_state)
+        elif isinstance(state, dict):
+            model.load_state_dict(state)
+
+        if isinstance(state, dict) and "optimizer_state_dict" in state:
+            try:
+                optimizer.load_state_dict(state["optimizer_state_dict"])
+            except Exception:
+                pass
+        if isinstance(state, dict) and "scheduler_state_dict" in state:
+            try:
+                scheduler.load_state_dict(state["scheduler_state_dict"])
+            except Exception:
+                pass
+
+        if isinstance(state, dict):
+            prev_epoch = int(state.get("epoch", 0) or 0)
+            start_epoch = prev_epoch + 1
+            best_val_loss = float(state.get("best_val_loss", state.get("val_loss", best_val_loss)))
+            best_selection_value = float(
+                state.get(
+                    "best_selection_value",
+                    state.get("best_val_rmse", state.get("best_val_loss", best_selection_value)),
+                )
+            )
+            best_epoch = int(state.get("best_epoch", prev_epoch if prev_epoch > 0 else 0))
+
+        if verbose:
+            print(f"Resuming from {resume_ckpt} (start epoch {start_epoch})")
+
+    end_epoch = start_epoch + cfg.epochs - 1
+    for epoch in range(start_epoch, end_epoch + 1):
         t0 = time.perf_counter()
-        train_loss = _train_epoch_height(model, train_loader, optimizer, device, cfg.grad_loss_weight)
-        val_loss = _eval_epoch_height(model, val_loader, device, cfg.grad_loss_weight)
+        train_loss = _train_epoch_height(
+            model,
+            train_loader,
+            optimizer,
+            device,
+            cfg.grad_loss_weight,
+            cfg.bldg_loss_weight,
+            cfg.pixel_l2_weight,
+            cfg.pixel_loss_mode,
+            cfg.per_image_backprop,
+        )
+        val_loss, val_mae, val_rmse = _eval_epoch_height(
+            model,
+            val_loader,
+            device,
+            cfg.grad_loss_weight,
+            cfg.bldg_loss_weight,
+            cfg.pixel_l2_weight,
+            cfg.pixel_loss_mode,
+        )
         scheduler.step()
         dt = time.perf_counter() - t0
 
@@ -777,28 +1178,54 @@ def train_height(
             "epoch": epoch,
             "train_loss": train_loss,
             "val_loss": val_loss,
+            "val_mae": val_mae,
+            "val_rmse": val_rmse,
             "lr": scheduler.get_last_lr()[0],
         })
 
-        is_best = val_loss < best_val_loss
+        metric = (cfg.selection_metric or "rmse").lower()
+        if metric == "mae":
+            selection_value = val_mae
+        elif metric == "loss":
+            selection_value = val_loss
+        else:
+            selection_value = val_rmse
+
+        is_best = selection_value < best_selection_value
+        latest_state = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "val_loss": val_loss,
+            "val_mae": val_mae,
+            "val_rmse": val_rmse,
+            "best_val_loss": best_val_loss,
+            "best_selection_value": best_selection_value,
+            "selection_metric": metric,
+            "best_epoch": best_epoch,
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "config": cfg.__dict__,
+        }
+        torch.save(latest_state, str(latest_path))
+
         if is_best:
             best_val_loss = val_loss
+            best_selection_value = selection_value
             best_epoch = epoch
             patience_counter = 0
-            torch.save({
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "val_loss": val_loss,
-                "config": cfg.__dict__,
-            }, str(out_path))
+            latest_state["best_val_loss"] = best_val_loss
+            latest_state["best_selection_value"] = best_selection_value
+            latest_state["best_epoch"] = best_epoch
+            torch.save(latest_state, str(out_path))
         else:
             patience_counter += 1
 
         if verbose:
             marker = "* best" if is_best else ""
             print(
-                f"  Epoch {epoch:3d}/{cfg.epochs}  "
+                f"  Epoch {epoch:3d}/{end_epoch}  "
                 f"train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
+                f"val_mae={val_mae:.4f}  val_rmse={val_rmse:.4f}  "
                 f"{marker:7}  ({dt:.1f}s)"
             )
 
@@ -807,11 +1234,12 @@ def train_height(
                 print(f"  Early stopping at epoch {epoch}")
             break
 
-    history_path = out_path.parent / (out_path.stem + "_history.json")
     with open(history_path, "w", encoding="utf-8") as fh:
         json.dump({
             "history": history,
             "best_val_loss": best_val_loss,
+            "best_selection_value": best_selection_value,
+            "selection_metric": (cfg.selection_metric or "rmse").lower(),
             "best_epoch": best_epoch,
         }, fh, indent=2)
 
@@ -868,9 +1296,28 @@ def main():
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--lr", type=float, default=DEFAULT_LR)
+    parser.add_argument("--grad-loss-weight", type=float, default=0.2,
+                        help="Edge (Sobel gradient) regularization weight for height loss.")
+    parser.add_argument("--pixel-l2-weight", type=float, default=0.25,
+                        help="Extra pixelwise L2 term weight added to weighted L1.")
+    parser.add_argument("--pixel-loss", choices=["l1", "rmse", "hybrid"], default="hybrid",
+                        help="Pixel regression objective.")
+    parser.add_argument("--selection-metric", choices=["loss", "mae", "rmse"], default="rmse",
+                        help="Metric used to decide/save best checkpoint.")
+    parser.add_argument("--bldg-loss-weight", type=float, default=5.0,
+                        help="Building-pixel upweight factor for sparse height targets.")
     parser.add_argument("--crop-size", type=int, default=DEFAULT_CROP_SIZE)
     parser.add_argument("--patience", type=int, default=EARLY_STOP_PATIENCE)
     parser.add_argument("--freeze-backbone-epochs", type=int, default=5)
+    parser.add_argument("--resume", action="store_true",
+                        help="Resume training from existing output checkpoint.")
+    parser.add_argument("--resume-from", default=None,
+                        help="Explicit checkpoint path to resume from.")
+    parser.add_argument(
+        "--batch-backprop",
+        action="store_true",
+        help="Use one backward/step per batch instead of per image.",
+    )
     parser.add_argument("--device", default="auto")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
@@ -880,9 +1327,17 @@ def main():
         epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
+        grad_loss_weight=args.grad_loss_weight,
+        pixel_l2_weight=args.pixel_l2_weight,
+        pixel_loss_mode=args.pixel_loss,
+        selection_metric=args.selection_metric,
+        bldg_loss_weight=args.bldg_loss_weight,
         crop_size=args.crop_size,
         patience=args.patience,
         freeze_backbone_epochs=args.freeze_backbone_epochs,
+        per_image_backprop=not args.batch_backprop,
+        resume=args.resume,
+        resume_from=args.resume_from,
         device=args.device,
     )
 

@@ -121,13 +121,50 @@ result = train_v3(
         device="cpu",                         # or "cuda" / "mps"
         num_workers=0,
         freeze_backbone_epochs=6,             # warm-up: backbone stays frozen
-        grad_loss_weight=0.5,                 # weight of Sobel edge loss term
+        grad_loss_weight=0.2,                 # weight of Sobel edge loss term
+        pixel_loss_mode="hybrid",             # "l1", "rmse", or "hybrid" (l1 + rmse)
+        bldg_loss_weight=5.0,                 # building-pixel upweight vs background
+        per_image_backprop=True,              # one backward per image (better for small batches)
+        selection_metric="rmse",              # checkpoint selection: "loss", "mae", or "rmse"
     ),
     n_iters=2,       # refinement iterations per forward pass
     arch="v3s",      # "v3s" | "v3" | "v3.1"
 )
 print(result)
 ```
+
+To resume a previous run:
+
+```python
+result = train_v3(
+    ...,
+    config=TrainConfig(..., resume=True),                       # auto-resumes from output_model
+    # or:
+    config=TrainConfig(..., resume_from="models/checkpoint.pt"),  # explicit path
+)
+```
+
+### TrainConfig reference
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `task` | `"shape"` | `"shape"`, `"height"`, or `"both"` |
+| `epochs` | `60` | Maximum training epochs |
+| `batch_size` | `16` | Mini-batch size |
+| `lr` | `3e-4` | Initial learning rate (cosine-annealed to `lr * 0.01`) |
+| `weight_decay` | `1e-4` | AdamW weight decay |
+| `patience` | `12` | Early-stop epochs without improvement |
+| `tile_size` | `256` | Tile resolution in pixels |
+| `device` | `"auto"` | `"cpu"`, `"cuda"`, `"mps"`, or `"auto"` |
+| `freeze_backbone_epochs` | `5` | Epochs with backbone frozen before full fine-tune |
+| `grad_loss_weight` | `0.2` | Sobel edge loss coefficient |
+| `pixel_loss_mode` | `"hybrid"` | Pixel regression objective: `"l1"`, `"rmse"`, or `"hybrid"` |
+| `pixel_l2_weight` | `0.25` | RMSE blend weight when `pixel_loss_mode="hybrid"` |
+| `bldg_loss_weight` | `5.0` | Building-pixel upweight factor (counters sparse labels) |
+| `per_image_backprop` | `True` | One backward pass per image — more stable on small datasets |
+| `selection_metric` | `"rmse"` | Metric for best-checkpoint selection: `"loss"`, `"mae"`, `"rmse"` |
+| `resume` | `False` | Resume from the output checkpoint if it exists |
+| `resume_from` | `None` | Explicit checkpoint path to resume from |
 
 ### Hyperparameter guidance
 
@@ -138,6 +175,7 @@ print(result)
 | `batch_size` | `8` | `16` |
 | `freeze_backbone_epochs` | `6` | `3` |
 | `epochs` | `30` | `60` |
+| `per_image_backprop` | `True` | `False` |
 
 **Do not use `lr > 1e-3`** — gradient explosion occurs above this threshold with the v3 composite loss.
 
@@ -198,12 +236,20 @@ See [Height_Prediction.ipynb](../notebooks/Height_Prediction.ipynb) for the full
 The v3 family trains with a composite loss applied at each iteration (deep supervision):
 
 ```
-L = weighted_L1(height)              # building pixels weighted 5× over background
-  + 0.5 × Sobel(height)             # edge sharpness via gradient matching
-  + BCE(mask, target > 0)           # building/background segmentation
-  + Dice(mask, target > 0)          # overlap for sparse positives
-  + 0.5 × ContinuousDice(height)    # energy localisation
+pixel_loss = weighted_L1(height)              # building pixels weighted bldg_loss_weight× over background
+           + pixel_l2_weight × weighted_RMSE  # (only when pixel_loss_mode="hybrid")
+
+L = pixel_loss
+  + grad_loss_weight × Sobel(height)          # edge sharpness via gradient matching
+  + BCE(mask, target > 0)                     # building/background segmentation
+  + Dice(mask, target > 0)                    # overlap for sparse positives
+  + 0.5 × ContinuousDice(height)             # energy localisation
 ```
+
+**`pixel_loss_mode`** controls the pixel regression objective:
+- `"l1"` — robust to outliers, may be slow to drive large errors down
+- `"rmse"` — penalises large errors more strongly, can be noisy early on
+- `"hybrid"` *(default)* — L1 + `pixel_l2_weight × RMSE`: robustness of L1 with stronger large-error pressure
 
 Later iterations are weighted more heavily: `w = (iter + 1) / n_iters` — so pass 2 of 2 contributes twice as much as pass 1.
 
