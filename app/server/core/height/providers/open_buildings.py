@@ -19,10 +19,12 @@ other providers (3DEP, Copernicus, nDSM) are more appropriate.
 
 from __future__ import annotations
 
+import functools
 import logging
 from typing import Tuple
 
 import numpy as np
+import requests
 
 from app.server.core.height import BBox, HeightResult, _resample
 from app.server.core.cache import (
@@ -38,15 +40,9 @@ _CONFIDENCE = 0.6  # ML-derived heights, reasonable but not survey-grade
 _RESOLUTION_M = 5.0  # effective per-building resolution
 _NAMESPACE = "open_buildings"
 _DOWNLOAD_TIMEOUT = 120
-
-# Open Buildings V3 is distributed as country-level CSV files on GCS.
-# For bbox-based access, the community Overture Maps GERS or
-# Microsoft Planetary Computer STAC endpoint is simpler.
-# We use Overture Maps S3 distribution which includes Open Buildings data.
-_OVERTURE_BASE = (
-    "https://overturemaps-us-west-2.s3.us-west-2.amazonaws.com/"
-    "release/2024-07-22.0/theme=buildings/type=building/"
-)
+_STAC_CATALOG = "https://stac.overturemaps.org/catalog.json"
+_STAC_BUILDING_COLLECTION = "https://stac.overturemaps.org/{release}/buildings/building/collection.json"
+_DEFAULT_RELEASE = "2026-04-15.0"
 
 # Coverage regions (approximate bboxes where Open Buildings has data)
 _COVERAGE_REGIONS = [
@@ -73,6 +69,72 @@ def _is_in_coverage(bbox: BBox) -> bool:
     return False
 
 
+@functools.lru_cache(maxsize=1)
+def _latest_overture_release() -> str:
+    """Resolve the latest Overture release from STAC with a stable fallback."""
+    try:
+        response = requests.get(_STAC_CATALOG, timeout=30)
+        response.raise_for_status()
+        payload = response.json()
+        latest = str(payload.get("latest") or "").strip()
+        if latest:
+            return latest
+    except Exception as exc:
+        logger.debug("Open Buildings STAC latest release lookup failed: %s", exc)
+    return _DEFAULT_RELEASE
+
+
+@functools.lru_cache(maxsize=4)
+def _overture_building_partitions(release: str) -> tuple[dict, ...]:
+    """Load Overture STAC building partitions and cache their bbox + asset path."""
+    collection_url = _STAC_BUILDING_COLLECTION.format(release=release)
+    response = requests.get(collection_url, timeout=60)
+    response.raise_for_status()
+    collection = response.json()
+
+    partitions: list[dict] = []
+    session = requests.Session()
+    base_url = collection_url.rsplit("/", 1)[0] + "/"
+    for link in collection.get("links") or []:
+        if link.get("rel") != "item":
+            continue
+        href = str(link.get("href") or "")
+        if not href:
+            continue
+        item_url = href if href.startswith("http") else base_url + href.replace("./", "")
+        item_resp = session.get(item_url, timeout=60)
+        item_resp.raise_for_status()
+        item = item_resp.json()
+        bbox = item.get("bbox") or []
+        if len(bbox) != 4:
+            continue
+        west, south, east, north = [float(v) for v in bbox]
+        assets = item.get("assets") or {}
+        aws_asset = assets.get("aws") or {}
+        s3_alt = ((aws_asset.get("alternate") or {}).get("s3") or {}).get("href")
+        s3_href = str(s3_alt or "")
+        if not s3_href.startswith("s3://"):
+            continue
+        partitions.append({
+            "west": west,
+            "south": south,
+            "east": east,
+            "north": north,
+            "s3_path": s3_href.replace("s3://", "", 1),
+        })
+    return tuple(partitions)
+
+
+def _intersecting_partitions(bbox: BBox) -> tuple[dict, ...]:
+    north, south, east, west = bbox
+    release = _latest_overture_release()
+    matches = []
+    for part in _overture_building_partitions(release):
+        if south < part["north"] and north > part["south"] and west < part["east"] and east > part["west"]:
+            matches.append(part)
+    return tuple(matches)
+
+
 def _fetch_buildings_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | None:
     """Fetch building heights from Overture Maps GeoParquet on S3 and rasterize.
 
@@ -86,7 +148,6 @@ def _fetch_buildings_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | 
     """
     try:
         import pyarrow.dataset as ds
-        import pyarrow.compute as pc
         from pyarrow.fs import S3FileSystem
         from shapely import wkb as shapely_wkb
     except ImportError as exc:
@@ -98,70 +159,60 @@ def _fetch_buildings_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | 
 
     try:
         fs = S3FileSystem(anonymous=True, region="us-west-2")
-        s3_path = (
-            "overturemaps-us-west-2/release/2024-07-22.0/"
-            "theme=buildings/type=building/"
-        )
-        dataset = ds.dataset(s3_path, filesystem=fs, format="parquet")
-
-        # Build a filter expression using pyarrow.compute struct field access.
-        # Overture Maps 2024 buildings parquet stores bbox as a struct column
-        # with subfields minx/miny/maxx/maxy.  PyArrow 14+ supports predicate
-        # pushdown for struct subfields when row-group statistics are available.
-        bbox_field = ds.field("bbox")
-        filt = pc.and_(
-            pc.and_(
-                pc.less_equal(pc.struct_field(bbox_field, "minx"), float(east)),
-                pc.greater_equal(pc.struct_field(bbox_field, "maxx"), float(west)),
-            ),
-            pc.and_(
-                pc.less_equal(pc.struct_field(bbox_field, "miny"), float(north)),
-                pc.greater_equal(pc.struct_field(bbox_field, "maxy"), float(south)),
-            ),
-        )
-
-        table = dataset.to_table(
-            columns=["geometry", "height", "num_floors"],
-            filter=filt,
-        )
-
-        if len(table) == 0:
-            logger.debug("No buildings found in bbox %s", bbox)
+        partitions = _intersecting_partitions(bbox)
+        if not partitions:
+            logger.debug("Open Buildings STAC has no intersecting partitions for bbox %s", bbox)
             return None
 
         grid = np.full((h, w), np.nan, dtype=np.float32)
         lon_step = (east - west) / max(w, 1)
         lat_step = (north - south) / max(h, 1)
 
-        geom_col   = table.column("geometry").to_pylist()
-        height_col = table.column("height").to_pylist()
-        floors_col = table.column("num_floors").to_pylist()
-
-        for geom_bytes, bld_height, bld_floors in zip(geom_col, height_col, floors_col):
-            if geom_bytes is None:
-                continue
-            bld_h = (
-                float(bld_height) if bld_height is not None
-                else (float(bld_floors) * 3.0 if bld_floors else None)
+        for part in partitions:
+            dataset = ds.dataset(part["s3_path"], filesystem=fs, format="parquet")
+            filt = (
+                (ds.field(("bbox", "xmin")) <= float(east))
+                & (ds.field(("bbox", "xmax")) >= float(west))
+                & (ds.field(("bbox", "ymin")) <= float(north))
+                & (ds.field(("bbox", "ymax")) >= float(south))
             )
-            if bld_h is None:
-                continue
-            try:
-                geom = shapely_wkb.loads(bytes(geom_bytes))
-            except Exception:
+            table = dataset.to_table(
+                columns=["geometry", "height", "num_floors"],
+                filter=filt,
+            )
+
+            if len(table) == 0:
                 continue
 
-            gx0, gy0, gx1, gy1 = geom.bounds
-            c0 = max(0, int((gx0 - west) / lon_step))
-            c1 = min(w, int((gx1 - west) / lon_step) + 1)
-            r0 = max(0, int((north - gy1) / lat_step))
-            r1 = min(h, int((north - gy0) / lat_step) + 1)
-            if c0 >= c1 or r0 >= r1:
-                continue
-            patch = grid[r0:r1, c0:c1]
-            grid[r0:r1, c0:c1] = np.where(
-                np.isnan(patch), bld_h, np.maximum(patch, bld_h)
-            )
+            geom_col = table.column("geometry").to_pylist()
+            height_col = table.column("height").to_pylist()
+            floors_col = table.column("num_floors").to_pylist()
+
+            for geom_bytes, bld_height, bld_floors in zip(geom_col, height_col, floors_col):
+                if geom_bytes is None:
+                    continue
+                bld_h = (
+                    float(bld_height) if bld_height is not None
+                    else (float(bld_floors) * 3.0 if bld_floors else None)
+                )
+                if bld_h is None or bld_h <= 0:
+                    continue
+                try:
+                    geom = shapely_wkb.loads(bytes(geom_bytes))
+                except Exception:
+                    continue
+
+                gx0, gy0, gx1, gy1 = geom.bounds
+                c0 = max(0, int((gx0 - west) / lon_step))
+                c1 = min(w, int((gx1 - west) / lon_step) + 1)
+                r0 = max(0, int((north - gy1) / lat_step))
+                r1 = min(h, int((north - gy0) / lat_step) + 1)
+                if c0 >= c1 or r0 >= r1:
+                    continue
+                patch = grid[r0:r1, c0:c1]
+                grid[r0:r1, c0:c1] = np.where(
+                    np.isnan(patch), bld_h, np.maximum(patch, bld_h)
+                )
 
         if np.all(np.isnan(grid)):
             return None

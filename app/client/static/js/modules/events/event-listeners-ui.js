@@ -52,6 +52,8 @@ window._setupResizablePanel = function _setupResizablePanel() {
     } catch (_) { }
 
     let _raf = null;
+    let _lastCurveCanvasWidth = 0;
+    let _lastCurveCanvasHeight = 0;
     new ResizeObserver(() => {
         if (_raf) return;
         _raf = requestAnimationFrame(() => {
@@ -60,14 +62,56 @@ window._setupResizablePanel = function _setupResizablePanel() {
             if (cc) {
                 const cont = cc.parentElement;
                 if (cont.clientWidth > 0 && cont.clientHeight > 0) {
-                    cc.width = cont.clientWidth;
-                    cc.height = cont.clientHeight;
-                    window.drawCurve?.();
+                    const nextWidth = cont.clientWidth;
+                    const nextHeight = cont.clientHeight;
+                    if (nextWidth !== _lastCurveCanvasWidth || nextHeight !== _lastCurveCanvasHeight) {
+                        _lastCurveCanvasWidth = nextWidth;
+                        _lastCurveCanvasHeight = nextHeight;
+                        cc.width = nextWidth;
+                        cc.height = nextHeight;
+                        window.drawCurve?.();
+                    }
                 }
             }
-            if (window.appState.lastDemData?.values?.length) window.recolorDEM?.();
+            if (window.appState.lastDemData?.values?.length) {
+                requestAnimationFrame(() => window.recolorDEM?.());
+            }
         });
     }).observe(rightPanel);
+};
+
+window._setupModelResizablePanel = function _setupModelResizablePanel() {
+    const resizeHandle = document.getElementById('modelSidebarResizeHandle');
+    const panel = document.getElementById('modelRightPanel');
+    if (!resizeHandle || !panel) return;
+
+    let resizing = false, startX, startW;
+    resizeHandle.addEventListener('mousedown', e => {
+        resizing = true;
+        startX = e.clientX;
+        startW = panel.offsetWidth;
+        resizeHandle.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+    document.addEventListener('mousemove', e => {
+        if (!resizing) return;
+        const newW = Math.max(240, Math.min(600, startW + (startX - e.clientX)));
+        panel.style.width = newW + 'px';
+    });
+    document.addEventListener('mouseup', () => {
+        if (!resizing) return;
+        resizing = false;
+        resizeHandle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        try { localStorage.setItem('strm2stl_modelPanelWidth', panel.offsetWidth); } catch (_) { }
+    });
+    try {
+        const savedW = localStorage.getItem('strm2stl_modelPanelWidth');
+        if (savedW) panel.style.width = parseInt(savedW) + 'px';
+    } catch (_) { }
 };
 
 window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {

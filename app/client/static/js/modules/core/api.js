@@ -252,13 +252,13 @@ window.api = (() => {
     // -------------------------------------------------------------------------
     const cities = {
         /** POST /api/cities */
-        fetch: (body) => _fetch('/api/cities', _json(body)),
+        fetch: (body, signal) => _fetch('/api/cities', signal ? { ..._json(body), signal } : _json(body)),
 
         /** GET /api/cities/cached?{params} */
         cached: (params) => _fetch(`/api/cities/cached?${params}`),
 
         /** POST /api/cities/raster */
-        raster: (body) => _fetch('/api/cities/raster', _json(body)),
+        raster: (body, signal) => _fetch('/api/cities/raster', signal ? { ..._json(body), signal } : _json(body)),
 
         /** POST /api/cities/export3mf → blob */
         export3mf: (body) => _fetch('/api/cities/export3mf', _json(body)),
@@ -276,6 +276,9 @@ window.api = (() => {
     const cache = {
         /** GET /api/cache */
         status: () => _fetch('/api/cache'),
+
+        /** GET /api/cache/inventory */
+        inventory: () => _fetch('/api/cache/inventory'),
 
         /** DELETE /api/cache */
         clear: () => _fetch('/api/cache', { method: 'DELETE' }),

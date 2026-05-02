@@ -36,15 +36,51 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CONTINENT_HIDDEN = new Set();
+const REGION_TABLE_FILTER_STORAGE_KEY = 'strm2stl_filterRegionsToViewport';
 
 let regionThumbnails = {};
 let regionNotes = {};
 let currentNotesRegion = null;
+let _filterRegionsToViewport = false;
 
 // ── Sidebar list pagination ───────────────────────────────────────────────────
 const LIST_PAGE_SIZE = 20;
 let _listPage = 0;
 let _lastListSearch = '';  // used to reset the page when search changes
+
+try {
+    _filterRegionsToViewport = localStorage.getItem(REGION_TABLE_FILTER_STORAGE_KEY) === 'true';
+} catch (_) {}
+
+function _regionIntersectsBounds(region, bounds) {
+    if (!bounds || !region) return true;
+    return !(
+        region.east < bounds.getWest() ||
+        region.west > bounds.getEast() ||
+        region.north < bounds.getSouth() ||
+        region.south > bounds.getNorth()
+    );
+}
+
+window.getFilterRegionsToViewport = function getFilterRegionsToViewport() {
+    return _filterRegionsToViewport;
+};
+
+window.setFilterRegionsToViewport = function setFilterRegionsToViewport(enabled) {
+    _filterRegionsToViewport = Boolean(enabled);
+    try {
+        localStorage.setItem(REGION_TABLE_FILTER_STORAGE_KEY, String(_filterRegionsToViewport));
+    } catch (_) {}
+    window.renderSidebarTable?.();
+    window.populateRegionsTable?.();
+};
+
+window.filterRegionsForMapViewport = function filterRegionsForMapViewport(regions) {
+    if (!_filterRegionsToViewport) return regions;
+    const bounds = window.getMap?.()?.getBounds?.();
+    if (!bounds) return regions;
+    return regions.filter(region => _regionIntersectsBounds(region, bounds));
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Continent detection + grouping
@@ -219,6 +255,57 @@ const TABLE_PAGE_SIZE = 20;
 let _tablePage = 0;
 let _tableSearch = '';
 
+/** Render tag chips for display. */
+function _renderTagChips(tagsStr) {
+    if (!tagsStr) return '<span class="tag-empty">—</span>';
+    return tagsStr.split(',')
+        .map(t => t.trim()).filter(Boolean)
+        .map(t => `<span class="region-tag-chip">${t}</span>`)
+        .join('');
+}
+
+/** Inline tag editor — replaces chips cell with an input; saves on blur/Enter. */
+function _startTagEdit(td, region, index) {
+    const current = (region.tags || '').trim();
+    td.innerHTML = '';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = current;
+    inp.className = 'tag-edit-input';
+    inp.placeholder = 'comma-separated tags';
+    td.appendChild(inp);
+    inp.focus();
+    inp.select();
+
+    const save = async () => {
+        const newTags = inp.value.split(',').map(t => t.trim()).filter(Boolean).join(', ');
+        region.tags = newTags;
+        td.innerHTML = _renderTagChips(newTags);
+        td.classList.add('tag-cell');
+        _bindTagCellClick(td, region, index);
+        // Persist to server
+        try {
+            await window.api.regions.update(region.name, {
+                name: region.name, north: region.north, south: region.south,
+                east: region.east, west: region.west,
+                label: region.label, description: region.description,
+                tags: newTags,
+            });
+        } catch (e) {
+            window.showToast?.('Failed to save tags', 'error');
+        }
+    };
+    inp.addEventListener('blur', save);
+    inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+        if (e.key === 'Escape') { td.innerHTML = _renderTagChips(current); td.classList.add('tag-cell'); _bindTagCellClick(td, region, index); }
+    });
+}
+
+function _bindTagCellClick(td, region, index) {
+    td.addEventListener('click', () => _startTagEdit(td, region, index), { once: true });
+}
+
 function populateRegionsTable() {
     const tbody = document.getElementById('regionsTableBody');
     if (!tbody) return;
@@ -226,15 +313,18 @@ function populateRegionsTable() {
 
     const coordinatesData = window.getCoordinatesData?.() || [];
     if (coordinatesData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;">No regions loaded</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#888;">No regions loaded</td></tr>';
         _renderTablePagination(0, 0);
         return;
     }
 
     const q = _tableSearch.toLowerCase();
-    const filtered = q
-        ? coordinatesData.filter((r, i) => r.name.toLowerCase().includes(q))
+    const filteredBySearch = q
+        ? coordinatesData.filter((r, i) =>
+            r.name.toLowerCase().includes(q) ||
+            (r.tags || '').toLowerCase().includes(q))
         : coordinatesData;
+    const filtered = window.filterRegionsForMapViewport?.(filteredBySearch) || filteredBySearch;
 
     const totalPages = Math.max(1, Math.ceil(filtered.length / TABLE_PAGE_SIZE));
     if (_tablePage >= totalPages) _tablePage = totalPages - 1;
@@ -250,17 +340,36 @@ function populateRegionsTable() {
         const tr = document.createElement('tr');
         tr.dataset.regionIndex = index;
         if (selected && selected.name === region.name) tr.classList.add('selected');
+
+        // Static columns
         tr.innerHTML = `
             <td>${region.name}</td>
             <td>${region.north?.toFixed(5) || ''}</td>
             <td>${region.south?.toFixed(5) || ''}</td>
             <td>${region.east?.toFixed(5) || ''}</td>
             <td>${region.west?.toFixed(5) || ''}</td>
-            <td class="actions-cell">
-                <button class="action-btn load" onclick="loadRegionFromTable(${index})">Load</button>
-                <button class="action-btn" onclick="viewRegionOnMap(${index})">📍 Map</button>
-            </td>
         `;
+
+        // Tags cell (interactive — built in JS to avoid XSS in chip HTML)
+        const tagsTd = document.createElement('td');
+        tagsTd.className = 'tag-cell';
+        tagsTd.title = 'Click to edit tags';
+        tagsTd.innerHTML = _renderTagChips(region.tags);
+        _bindTagCellClick(tagsTd, region, index);
+        tr.appendChild(tagsTd);
+
+        // Actions cell
+        const actTd = document.createElement('td');
+        actTd.className = 'actions-cell';
+        actTd.innerHTML = `
+            <button class="action-btn load" onclick="loadRegionFromTable(${index})">Load</button>
+            <button class="action-btn" onclick="viewRegionOnMap(${index})">📍 Map</button>
+            <button class="action-btn" onclick="toggleRegionBboxHidden('${region.name.replace(/'/g, "\\'")}')">${window.isRegionBboxHidden?.(region.name) ? 'Show' : 'Hide'}</button>
+            <button class="action-btn" onclick="_clearRegionCache(${index})" title="Clear cached DEM/water/satellite data for this region">♻ Cache</button>
+            <button class="action-btn danger" onclick="_deleteRegionFromTable(${index})">🗑</button>
+        `;
+        tr.appendChild(actTd);
+
         tbody.appendChild(tr);
     });
 
@@ -298,6 +407,42 @@ function viewRegionOnMap(index) {
     }
 }
 
+async function _deleteRegionFromTable(index) {
+    const coordinatesData = window.getCoordinatesData?.() || [];
+    if (index < 0 || index >= coordinatesData.length) return;
+    const region = coordinatesData[index];
+    const confirmed = window.confirm(`Delete region "${region.name}"?\nThis cannot be undone.`);
+    if (!confirmed) return;
+    try {
+        await window.api.regions.delete(region.name);
+        await window.loadCoordinates?.();
+        populateRegionsTable();
+        window.renderCoordinatesList?.();
+        window.showToast?.(`Deleted "${region.name}"`, 'success');
+    } catch (e) {
+        window.showToast?.('Delete failed: ' + (e?.message || e), 'error');
+    }
+}
+window._deleteRegionFromTable = _deleteRegionFromTable;
+
+async function _clearRegionCache(index) {
+    const coordinatesData = window.getCoordinatesData?.() || [];
+    if (index < 0 || index >= coordinatesData.length) return;
+    const region = coordinatesData[index];
+    try {
+        const result = await window.api.cache.clearRegion({
+            north: region.north, south: region.south,
+            east: region.east, west: region.west,
+        });
+        const n = result?.files_deleted ?? '?';
+        window.showToast?.(`Cache cleared for "${region.name}" (${n} files removed)`, 'success');
+        window._clearDemResponseCache?.();
+    } catch (e) {
+        window.showToast?.('Cache clear failed: ' + (e?.message || e), 'error');
+    }
+}
+window._clearRegionCache = _clearRegionCache;
+
 function setupRegionsTable() {
     const searchInput = document.getElementById('regionsSearch');
     if (searchInput) {
@@ -313,6 +458,20 @@ function setupRegionsTable() {
         populateRegionsTable();
         window.showToast('Regions refreshed', 'success');
     });
+
+    const vpBtn = document.getElementById('viewportFilterBtn');
+    if (vpBtn) {
+        const _updateVpBtn = () => {
+            const active = window.getFilterRegionsToViewport?.();
+            vpBtn.classList.toggle('active', Boolean(active));
+            vpBtn.title = active ? 'Showing only regions visible on map (click to show all)' : 'Show only regions visible on map';
+        };
+        _updateVpBtn();
+        vpBtn.addEventListener('click', () => {
+            window.setFilterRegionsToViewport?.(!window.getFilterRegionsToViewport?.());
+            _updateVpBtn();
+        });
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

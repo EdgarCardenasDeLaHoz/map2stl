@@ -180,12 +180,12 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
     task.update(45, "Generating mesh...")
     if fmt == "obj":
         from numpy2stl import array_to_mesh, writeOBJ
-        vertices, faces = array_to_mesh(im)
+        vertices, faces = array_to_mesh(im, floor_val=0, walls=p.walls, floor=p.floor)
     elif fmt == "3mf":
         from numpy2stl import array_to_mesh, write3MF
-        vertices, faces = array_to_mesh(im)
+        vertices, faces = array_to_mesh(im, floor_val=0, walls=p.walls, floor=p.floor)
     else:
-        vertices, faces = _numpy2stl_mesh(im)
+        vertices, faces = _numpy2stl_mesh(im, walls=p.walls, floor=p.floor)
 
     task.update(70, "Repairing mesh...")
 
@@ -299,6 +299,8 @@ class ExportContext:
     base_height: float = 5.0
     exaggeration: float = 1.0
     sea_level_cap: bool = False
+    walls: bool = True
+    floor: bool = True
     name: str = "terrain"
 
     @classmethod
@@ -329,6 +331,8 @@ class ExportContext:
             base_height=float(data.get("base_height", 5)),
             exaggeration=float(data.get("exaggeration", 1.0)),
             sea_level_cap=bool(data.get("sea_level_cap", False)),
+            walls=bool(data.get("walls", True)),
+            floor=bool(data.get("floor", True)),
             name=data.get("name", "terrain"),
         )
 
@@ -362,10 +366,10 @@ def _prepare_dem_array(
     return im, im_min, im_max
 
 
-def _numpy2stl_mesh(im: np.ndarray) -> tuple:
+def _numpy2stl_mesh(im: np.ndarray, walls: bool = True, floor: bool = True) -> tuple:
     """Convert a DEM array to a (vertices, faces) mesh."""
     from numpy2stl import array_to_mesh
-    return array_to_mesh(im)
+    return array_to_mesh(im, floor_val=0, walls=walls, floor=floor)
 
 
 def _repair_and_export(vertices, faces, suffix: str) -> str:
@@ -476,7 +480,7 @@ def generate_stl(data: dict):
         im = _apply_contour_lines(im, im_min, im_max, p.model_height,
                                   p.base_height, contour_interval, contour_style)
 
-    vertices, faces = _numpy2stl_mesh(im)
+    vertices, faces = _numpy2stl_mesh(im, walls=p.walls, floor=p.floor)
     temp_path, mesh = _repair_and_export(vertices, faces, ".stl")
     is_watertight = bool(mesh.is_watertight)
     face_count = len(mesh.faces)
@@ -510,7 +514,7 @@ def generate_obj(data: dict):
         p.dem_values, p.height, p.width,
         p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
     )
-    vertices, faces = array_to_mesh(im)
+    vertices, faces = array_to_mesh(im, floor_val=0, walls=p.walls, floor=p.floor)
 
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".obj")
     temp_path = tf.name
@@ -541,7 +545,7 @@ def generate_3mf(data: dict):
         p.dem_values, p.height, p.width,
         p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
     )
-    vertices, faces = array_to_mesh(im)
+    vertices, faces = array_to_mesh(im, floor_val=0, walls=p.walls, floor=p.floor)
 
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".3mf")
     temp_path = tf.name
@@ -576,7 +580,7 @@ def generate_mesh_preview(data: dict):
         p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
     )
 
-    vertices, faces = array_to_mesh(im, solid=False)
+    vertices, faces = array_to_mesh(im, floor_val=0, walls=p.walls, floor=p.floor)
     logger.info(f"Preview mesh: {len(vertices)} vertices, {len(faces)} faces")
 
     # Round col/row to integers and z to 2 dp — sufficient for display, halves JSON size.
@@ -594,6 +598,7 @@ def generate_mesh_preview(data: dict):
         "z_max":        round(float(im.max()), 2),
         "cols":         int(p.width),
         "rows":         int(p.height),
+        "dim":          int(data.get("dim", 600)),
     })
 
 

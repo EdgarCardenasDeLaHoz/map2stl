@@ -20,25 +20,10 @@
         </div>
       </div>
       <div class="cache-actions">
-        <button id="preloadRegionsBtn" class="btn btn-secondary"
-                style="margin-bottom:8px;width:100%;">
-          <span class="btn-icon">⚡</span> Preload All Regions
+        <button id="openCacheInventoryBtn" class="btn btn-secondary"
+                style="width:100%;">
+          <span class="btn-icon">🗂️</span> View Cache
         </button>
-        <button id="clearClientCacheBtn" class="btn btn-secondary"
-                style="margin-bottom:8px;width:100%;">
-          <span class="btn-icon">🧹</span> Clear Client Cache
-        </button>
-        <button id="clearServerCacheBtn" class="btn btn-secondary" style="width:100%;">
-          <span class="btn-icon">🗑️</span> Clear Server Cache
-        </button>
-        <div style="height:1px;background:#333;margin:4px 0;"></div>
-        <div class="row-gap6">
-          <button id="genGlobalDemBtn" class="btn btn-secondary" style="flex:1;font-size:11px;"
-                  title="Pre-generate a low-resolution global terrain overview PNG cached on disk.">
-            <span class="btn-icon">🗺️</span> Build Terrain Cache
-          </button>
-          <span id="genGlobalDemStatus" style="font-size:10px;color:#888;"></span>
-        </div>
       </div>
       <div id="preloadProgress" class="preload-progress hidden">
         <div class="progress-bar">

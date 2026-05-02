@@ -14,8 +14,7 @@
         <h3>📋 All Regions</h3>
         <div class="regions-actions">
           <input type="text" id="regionsSearch" placeholder="Search regions..." class="regions-search">
-          <button id="refreshRegionsBtn" class="btn btn-secondary" title="Refresh list">🔄</button>
-        </div>
+          <button id="refreshRegionsBtn" class="btn btn-secondary" title="Refresh list">🔄</button>          <button id="viewportFilterBtn" class="btn btn-secondary" title="Show only regions visible on map">🗺 In View</button>        </div>
       </div>
       <div class="regions-table-wrapper">
         <table class="regions-table" id="regionsTable">
@@ -26,6 +25,7 @@
               <th>South</th>
               <th>East</th>
               <th>West</th>
+              <th>Tags</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -33,6 +33,10 @@
             <!-- Populated by JavaScript -->
           </tbody>
         </table>
+        <div id="regionsEmptyState" class="regions-empty-state" style="display:none;text-align:center;color:#888;padding:24px;">
+          <span style="font-size:32px;">📭</span>
+          <div>No regions found.<br>Add a region using the map or import a region file.</div>
+        </div>
         <div id="regionsPagination" class="regions-pagination"></div>
       </div>
     </div>
@@ -102,6 +106,63 @@
 
     <!-- 3D Model generation view -->
     <ModelContainer />
+
+    <!-- Cache inventory view -->
+    <div id="cacheInventoryContainer" class="cache-inventory-container hidden">
+      <div class="cache-inventory-header">
+        <div>
+          <h3>Cache Inventory</h3>
+          <p id="cacheInventorySummary" class="cache-inventory-summary">Loading cache inventory...</p>
+          <p id="cacheInventoryLegend" class="cache-inventory-legend"></p>
+        </div>
+        <div class="cache-inventory-toolbar">
+          <label class="cache-filter-label" for="cacheInventoryRegionFilter">Region</label>
+          <select id="cacheInventoryRegionFilter" class="cache-filter-select">
+            <option value="__all__">All Regions</option>
+          </select>
+          <button id="cacheInventoryRefreshBtn" class="btn btn-secondary">Refresh</button>
+          <button id="preloadRegionsBtn" class="btn btn-secondary" title="Preload all regions into cache">⚡ Preload All</button>
+          <button id="clearClientCacheBtn" class="btn btn-secondary" title="Clear in-memory client cache">🧹 Clear Client</button>
+          <button id="clearServerCacheBtn" class="btn btn-secondary" title="Clear server-side cache files">🗑️ Clear Server</button>
+          <button id="genGlobalDemBtn" class="btn btn-secondary" title="Pre-generate a low-resolution global terrain overview PNG cached on disk.">🗺️ Build Terrain</button>
+          <span id="genGlobalDemStatus" style="font-size:10px;color:#888;"></span>
+        </div>
+      </div>
+
+      <div class="cache-inventory-layout">
+        <section class="cache-card">
+          <h4>Treemap</h4>
+          <div id="cacheTreemap" class="cache-treemap"></div>
+          <div id="cacheTreemapEmpty" class="cache-empty-state" style="display:none;text-align:center;color:#888;padding:18px;">
+            <span style="font-size:28px;">🗂️</span>
+            <div>No cache data available.<br>Load a region to populate the cache.</div>
+          </div>
+        </section>
+
+        <section class="cache-card">
+          <h4>Files</h4>
+          <div class="cache-table-wrap">
+            <table class="cache-table" id="cacheInventoryTable">
+              <thead>
+                <tr>
+                  <th><button type="button" class="cache-sort-btn" data-sort-key="region_group">Region</button></th>
+                  <th><button type="button" class="cache-sort-btn" data-sort-key="namespace">Layer</button></th>
+                  <th><button type="button" class="cache-sort-btn" data-sort-key="root">Root</button></th>
+                  <th><button type="button" class="cache-sort-btn" data-sort-key="relative_path">Path</button></th>
+                  <th><button type="button" class="cache-sort-btn" data-sort-key="size_bytes">Size</button></th>
+                  <th><button type="button" class="cache-sort-btn" data-sort-key="mtime">Modified</button></th>
+                </tr>
+              </thead>
+              <tbody id="cacheInventoryTableBody"></tbody>
+            </table>
+            <div id="cacheTableEmptyState" class="cache-empty-state" style="display:none;text-align:center;color:#888;padding:18px;">
+              <span style="font-size:28px;">📦</span>
+              <div>No cached files found.<br>Export or load data to see files here.</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
   </div>
 </template>
 <script setup lang="ts">

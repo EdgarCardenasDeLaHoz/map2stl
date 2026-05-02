@@ -100,3 +100,8 @@ Full history: `docs/archive/functionality_doc.md`
 - UX-3 ✅ — Clarified sidebar 3-state toggle
 - ARCH4 ✅ — Vite bundler installed
 - ARCH5 ✅ — Vitest 4.x installed; 58 JS unit tests across 5 test files
+- CITY-HEIGHT-1 ✅ — `m_per_level` parameter (floor-to-floor height, default 3.5 m) added to `CityRequest`, all OSM cache keys, composite city-raster endpoint, and all secondary endpoints (raster, export, enhance-heights). Changing `m_per_level` produces a separate cache entry. UI input in CitiesSection with 0.05 step.
+- CITY-HEIGHT-2 ✅ — Shadow height artefacts fixed: aspect ratio filter (>8:1 rejected), max component size tightened (1%→0.3% of image), height cap lowered (500m→50m). `enhance_buildings_with_raster` cap lowered (80m→30m no-OSM fallback, 150m hard ceiling). OSM-derived cap: `max(30, min(150, local_osm_max * 1.2))`.
+- CITY-HEIGHT-3 ✅ — Raster `MergeAlg.add` bug fixed (→ `MergeAlg.replace` with ascending sort); raster cache versioned to `v2`.
+- CITY-AUTOFETCH ✅ — `loadCityData` added to `loadAllLayers` so city OSM data auto-fetches alongside DEM/water/satellite on region select. `#stripDotCities` status dot added to the dem-strip bar.
+- CITY-COMPOSITE ✅ — Composite city-raster endpoint and client `_fetchCityRaster` now pass `m_per_level`, `simplify_tolerance`, `min_area` for correct OSM cache lookup. Client cache key includes `m_per_level`.

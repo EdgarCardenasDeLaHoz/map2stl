@@ -67,7 +67,7 @@ class BoundingBoxLegacy(BaseModel):
 
 class RegionParameters(BaseModel):
     """Rendering and export parameters stored with a saved region."""
-    dim: int = Field(200, ge=1, le=2000,
+    dim: int = Field(600, ge=1, le=2000,
                      description="Grid resolution (pixels per side)")
     depth_scale: float = Field(
         0.5, ge=0.0, le=10.0, description="Depth scaling for ocean floor")
@@ -88,6 +88,8 @@ class RegionCreate(BoundingBox):
     description: Optional[str] = Field(None, max_length=512)
     label: Optional[str] = Field(
         None, max_length=64, description="Group/continent label for sidebar grouping")
+    tags: Optional[str] = Field(
+        None, max_length=512, description="Comma-separated user-defined tags")
     parameters: Optional[RegionParameters] = None
 
 
@@ -96,6 +98,7 @@ class RegionResponse(BoundingBox):
     name: str
     description: Optional[str] = None
     label: Optional[str] = None
+    tags: Optional[str] = None
     parameters: Optional[RegionParameters] = None
 
 
@@ -143,9 +146,13 @@ class CityRequest(BoundingBox):
         description="Which OSM layers to fetch"
     )
     simplify_tolerance: float = Field(
-        default=0.5, description="Polygon simplification tolerance in metres")
+        default=3.0, description="Polygon simplification tolerance in metres (3 m is sharp at typical DEM resolution)")
     min_area: float = Field(
         default=5.0, description="Minimum building area in square metres to keep")
+    m_per_level: float = Field(
+        default=3.5, ge=2.0, le=6.0,
+        description="Floor-to-floor height in metres used when OSM has building:levels but no height tag. "
+                    "Use 3.0–3.5 for Southern Europe (e.g. 3.4 for Granada), 3.5–4.0 for Northern Europe/US.")
 
 
 class EnhanceHeightsRequest(BoundingBox):
@@ -158,6 +165,9 @@ class EnhanceHeightsRequest(BoundingBox):
         None, description="GeoJSON FeatureCollection of buildings (resolved from OSM cache if omitted)")
     dim: int = Field(512, ge=64, le=2048,
                      description="Height raster resolution (dim x dim)")
+    simplify_tolerance: float = Field(3.0, ge=0.0, description="OSM cache lookup: simplification tolerance")
+    min_area: float = Field(5.0, ge=0.0, description="OSM cache lookup: minimum building area")
+    m_per_level: float = Field(3.5, ge=2.0, le=6.0, description="OSM cache lookup: floor height used when fetching")
 
 
 class CityRasterRequest(BaseModel):
@@ -184,6 +194,10 @@ class CityRasterRequest(BaseModel):
         "none", description="Map projection to apply after rasterisation ('none', 'cosine', 'mercator', etc.)")
     clip_nans: bool = Field(
         True, description="Strip all-NaN border rows/columns created by projection")
+    simplify_tolerance: float = Field(3.0, ge=0.0, description="OSM cache lookup: simplification tolerance")
+    min_area: float = Field(5.0, ge=0.0, description="OSM cache lookup: minimum building area")
+    m_per_level: float = Field(3.5, ge=2.0, le=6.0, description="OSM cache lookup: floor height used when fetching")
+    roof_shapes: bool = Field(False, description="Burn slanted roof surfaces (gabled/hipped/pyramidal/skillion/dome) using OSM roof:shape tags. Slower but more detailed.")
 
 
 # ---------------------------------------------------------------------------

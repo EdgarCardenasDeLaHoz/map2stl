@@ -354,6 +354,14 @@ function initMap() {
     }
     _map.on('zoomend', _updateEditMarkerVisibility);
     _map.on('moveend', _updateEditMarkerVisibility);
+    const _refreshRegionTablesForViewport = () => {
+        if (!window.getFilterRegionsToViewport?.()) return;
+        window.renderSidebarTable?.();
+        window.populateRegionsTable?.();
+        window.populateRegionsPanelTable?.();
+    };
+    _map.on('zoomend', _refreshRegionTablesForViewport);
+    _map.on('moveend', _refreshRegionTablesForViewport);
 
     // Get next color for drawn rectangles
     /**

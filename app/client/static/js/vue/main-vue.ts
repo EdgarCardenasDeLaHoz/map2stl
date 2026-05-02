@@ -54,6 +54,8 @@ app.mount('#vue-app');
 // After this point every window.appState.foo read/write goes to Pinia.
 
 const ALL_KEYS = [
+    'map', 'globeScene', 'globeCamera', 'globeRenderer', 'globe',
+    'drawnItems', 'preloadedLayer', 'editMarkersLayer', 'boundingBox',
     'selectedRegion', 'coordinatesData',
     'lastDemData', 'currentDemBbox', 'lastWaterMaskData',
     'layerBboxes', 'layerStatus', 'demParams',
@@ -71,6 +73,8 @@ const ALL_KEYS = [
 
 // Canvas / function keys that must not be made reactive by Pinia
 const RAW_KEYS = new Set([
+    'map', 'globeScene', 'globeCamera', 'globeRenderer', 'globe',
+    'drawnItems', 'preloadedLayer', 'editMarkersLayer', 'boundingBox',
     'cityRasterSourceCanvas', 'compositeDemSourceCanvas',
     'satImgSourceCanvas', '_satImgRawCanvas',
     'terrainMesh', 'viewerScene',
@@ -164,7 +168,9 @@ function installAppStateBridge(): void {
 // DOMContentLoaded fires after all deferred <script type="module"> module-level
 // code has executed, so this handler runs after state.js has created window.appState.
 document.addEventListener('DOMContentLoaded', () => {
-    // Use setTimeout(0) to run after app.js's DOMContentLoaded handler has also
-    // finished setting the initial appState values (selectedRegion, layerStatus etc.)
-    setTimeout(installAppStateBridge, 0);
+    // Install the bridge immediately (no setTimeout) so that subsequent
+    // DOMContentLoaded handlers in app.js, composite-dem.js, city-overlay.js etc.
+    // register their appState.on(...) listeners against the Pinia-backed bridge.
+    // app.js will set its initial values through the bridge (into Pinia) afterward.
+    installAppStateBridge();
 });

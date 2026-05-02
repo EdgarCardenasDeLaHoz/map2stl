@@ -46,6 +46,14 @@
         <div class="map-settings-row">
           <label><input type="checkbox" id="showLabelsExplore"> Map Labels</label>
         </div>
+        <div class="map-settings-row">
+          <label><input type="checkbox" id="filterRegionsToViewportExplore"> Filter table to current map view</label>
+        </div>
+        <div class="map-settings-row">
+          <label for="bboxOpacityExplore">Bounding Box Opacity</label>
+          <input type="range" id="bboxOpacityExplore" min="0" max="100" value="15" class="map-settings-terrain-opacity">
+          <span id="bboxOpacityValueExplore" class="map-settings-opacity-value">15%</span>
+        </div>
       </div>
     </div>
 
@@ -60,7 +68,7 @@
       </div>
       <div class="regions-panel-toolbar">
         <input type="text" id="regionsPanelSearch" placeholder="Search regions..." class="regions-panel-search">
-        <button id="regionsPanelNewBtn" class="regions-panel-new-btn" style="display:none;" title="Draw a new region on the map">+ New</button>
+        <!-- Removed redundant '+ New' button; use floatingDrawBtn as the single entry point for region creation. -->
       </div>
       <div id="regionsPanelList" class="regions-panel-list"></div>
     </div>

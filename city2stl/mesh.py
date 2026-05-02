@@ -252,77 +252,112 @@ def _extrude_ring_with_roof(
     if n < 3:
         return None, None
 
-    # Compute per-vertex roof heights above z1 ----------------------------
-    apex: Optional[np.ndarray] = None
-    has_apex = False
+    # PCA: principal axis via covariance of vertex positions (used by most shapes)
+    ctr = pts_mm.mean(axis=0)
+    rel = pts_mm - ctr
+    cov = (rel.T @ rel) / max(n, 1)
+    _, eigvecs = np.linalg.eigh(cov)  # eigenvalues ascending
+    along_axis = eigvecs[:, 1]        # longest footprint axis (ridge runs along this)
 
+    # -----------------------------------------------------------------------
+    # Pyramidal / dome: flat eave ring + single apex at centroid
+    # -----------------------------------------------------------------------
     if shape == "pyramidal":
-        roof_z = np.full(n, z1)
-        cx, cy = pts_mm.mean(axis=0)
-        apex = np.array([cx, cy, z1 + roof_height_mm], dtype=np.float64)
-        has_apex = True
-    else:
-        # PCA: principal axis via covariance of vertex positions
-        ctr = pts_mm.mean(axis=0)
-        rel = pts_mm - ctr
-        cov = (rel.T @ rel) / max(n, 1)
-        _, eigvecs = np.linalg.eigh(cov)  # eigenvalues ascending
-        perp_axis = eigvecs[:, 0]         # shortest axis (perpendicular to ridge)
-        along_axis = eigvecs[:, 1]        # longest axis (along ridge)
-
-        if shape in ("gabled", "hipped"):
-            # Height drops linearly with distance from the ridge axis
-            d_perp = rel @ perp_axis
-            max_d = max(float(np.abs(d_perp).max()), 1e-6)
-            roof_z = z1 + roof_height_mm * np.maximum(0.0, 1.0 - np.abs(d_perp) / max_d)
-        else:  # skillion
-            # Height increases linearly from one side to the other
-            d_along = rel @ along_axis
-            d_min, d_max = float(d_along.min()), float(d_along.max())
-            span = max(d_max - d_min, 1e-6)
-            t = (d_along - d_min) / span  # [0, 1]
-            roof_z = z1 + roof_height_mm * t
-
-    # Build vertex arrays -------------------------------------------------
-    # [0 .. n-1]    : roof ring vertices with per-vertex z
-    # [n .. 2n-1]   : floor ring vertices all at z0
-    # [2n]          : apex (pyramidal only)
-    roof_ring = np.column_stack([pts_mm, roof_z]).astype(np.float32)
-    floor_ring = np.column_stack([pts_mm, np.full(n, z0)]).astype(np.float32)
-
-    if has_apex and apex is not None:
-        verts = np.vstack([roof_ring, floor_ring, apex.reshape(1, 3).astype(np.float32)])
+        cx, cy = float(ctr[0]), float(ctr[1])
+        apex_pt = np.array([[cx, cy, z1 + roof_height_mm]], dtype=np.float32)
+        eave_ring = np.column_stack([pts_mm, np.full(n, z1)]).astype(np.float32)
+        floor_ring = np.column_stack([pts_mm, np.full(n, z0)]).astype(np.float32)
+        # vertex layout: [0..n-1]=eave, [n..2n-1]=floor, [2n]=apex
+        verts = np.vstack([eave_ring, floor_ring, apex_pt])
         apex_idx = 2 * n
-    else:
-        verts = np.vstack([roof_ring, floor_ring])
-        apex_idx = -1  # unused
+        faces: List[List[int]] = []
+        for a, b, c in _ear_clip(pts_mm):
+            faces.append([n + c, n + b, n + a])          # floor (normal down)
+        for i in range(n):
+            j = (i + 1) % n
+            faces.append([i, j, n + j])                  # wall quad (2 tris)
+            faces.append([i, n + j, n + i])
+        for i in range(n):
+            j = (i + 1) % n
+            faces.append([j, i, apex_idx])               # roof fan
+        return verts, np.array(faces, dtype=np.int32)
 
-    faces: List[List[int]] = []
+    # -----------------------------------------------------------------------
+    # Skillion: flat eave ring, one side higher than the other
+    # -----------------------------------------------------------------------
+    if shape == "skillion":
+        d_along = rel @ along_axis
+        d_min, d_max = float(d_along.min()), float(d_along.max())
+        span = max(d_max - d_min, 1e-6)
+        t = (d_along - d_min) / span          # 0 at low side, 1 at high side
+        roof_z = z1 + roof_height_mm * t
+        eave_ring = np.column_stack([pts_mm, roof_z]).astype(np.float32)
+        floor_ring = np.column_stack([pts_mm, np.full(n, z0)]).astype(np.float32)
+        verts = np.vstack([eave_ring, floor_ring])
+        faces = []
+        for a, b, c in _ear_clip(pts_mm):
+            faces.append([n + c, n + b, n + a])
+        for i in range(n):
+            j = (i + 1) % n
+            faces.append([i, j, n + j])
+            faces.append([i, n + j, n + i])
+        for a, b, c in _ear_clip(pts_mm):
+            faces.append([a, b, c])
+        return verts, np.array(faces, dtype=np.int32)
 
-    # Floor (flat bottom, winding reversed so normal points down) ---------
+    # -----------------------------------------------------------------------
+    # Gabled / hipped: eave ring at z1 + two ridge vertices above centre
+    #
+    # Ridge endpoints are the projections of the footprint's two extreme
+    # along-axis extents onto the centroid row (d_perp = 0), elevated to
+    # z1 + roof_height_mm.  This produces the correct A-frame silhouette.
+    # -----------------------------------------------------------------------
+    # along-axis extents of the footprint
+    d_along = rel @ along_axis
+    along_min, along_max = float(d_along.min()), float(d_along.max())
+    # ridge endpoint coordinates (projected back to mm space)
+    ridge_a = ctr + along_min * along_axis   # near end
+    ridge_b = ctr + along_max * along_axis   # far end
+    ridge_z = z1 + roof_height_mm
+
+    eave_ring  = np.column_stack([pts_mm, np.full(n, z1)]).astype(np.float32)
+    floor_ring = np.column_stack([pts_mm, np.full(n, z0)]).astype(np.float32)
+    ridge_verts = np.array(
+        [[ridge_a[0], ridge_a[1], ridge_z],
+         [ridge_b[0], ridge_b[1], ridge_z]],
+        dtype=np.float32,
+    )
+    # vertex layout: [0..n-1]=eave, [n..2n-1]=floor, [2n]=ridge_a, [2n+1]=ridge_b
+    verts = np.vstack([eave_ring, floor_ring, ridge_verts])
+    ra, rb = 2 * n, 2 * n + 1   # ridge vertex indices
+
+    faces = []
+    # floor
     for a, b, c in _ear_clip(pts_mm):
         faces.append([n + c, n + b, n + a])
 
-    # Walls: one quad per edge of the ring --------------------------------
+    # walls: eave ring → floor ring
     for i in range(n):
         j = (i + 1) % n
-        ri, rj = i, j          # roof-level ring indices
-        fi, fj = n + i, n + j  # floor-level ring indices
-        faces.append([ri, rj, fj])
-        faces.append([ri, fj, fi])
+        faces.append([i, j, n + j])
+        faces.append([i, n + j, n + i])
 
-    # Roof -----------------------------------------------------------------
-    if has_apex:
-        # Pyramidal: fan from apex to each ring edge
-        for i in range(n):
-            j = (i + 1) % n
-            # CCW order when viewed from outside: ring edge goes i→j,
-            # apex is above → order [j, i, apex] gives outward normal
-            faces.append([j, i, apex_idx])
-    else:
-        # Non-flat shapes: ear-clip the 2-D projection, apply to roof ring
-        for a, b, c in _ear_clip(pts_mm):
-            faces.append([a, b, c])
+    # roof: for each eave vertex pick the nearer ridge endpoint, then tri
+    # to the other — gives a faceted gable surface.
+    d_along_eave = rel @ along_axis   # n values, signed along-axis distance from centre
+    for i in range(n):
+        j = (i + 1) % n
+        # assign each eave vertex to the ridge endpoint on its side
+        ri_ridge = rb if d_along_eave[i] >= 0 else ra
+        rj_ridge = rb if d_along_eave[j] >= 0 else ra
+        if ri_ridge == rj_ridge:
+            # both on same side — one triangle
+            faces.append([i, j, ri_ridge])
+        else:
+            # straddles the ridge midpoint — two triangles via the midpoint
+            # approximate by connecting both ridge endpoints
+            faces.append([i, j, ra])
+            faces.append([i, rb, j])
 
     if not faces:
         return None, None

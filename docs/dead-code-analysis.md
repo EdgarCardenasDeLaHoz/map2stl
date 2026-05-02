@@ -1,7 +1,9 @@
 # Dead Code, Repetitive Workflows & Bloat Analysis
 
-_Generated: 2026-05-08. Analysis scope: `app/server/`, `app/session/`, `app/client/static/js/`._  
-_Updated: 2026-05-09. Items 1–8 in the priority table are **COMPLETED** and all 440 Python + 93 JS tests pass._
+_Generated: 2026-04. Analysis scope: `app/server/`, `app/session/`, `app/client/static/js/`._
+_Updated: 2026-04-30. Items 1–9 in the priority table are **COMPLETED**. Open items: shadow_height private helpers (1.4) and `window.getLayerOrder` (2.3, intentionally kept). Test counts: 532 backend + 93 JS pass._
+
+> **ML/training code dead-code audit (2026-04-30):** Following Retna_V1 adoption, the RoofNetV3-era code (`tools/ml/train.py`, `models.py`, `data.py`, `eval.py`, `gradient_analysis.py`, `simulate_data.py`, `predict_demo.py`) is unused by the active pipeline but kept on disk because two notebooks still import from it (`notebooks/train_height_cnn.py`, `notebooks/height_training_inspector.py`). Plan: update those notebooks to use `tools/ml/pipeline.py`, then delete ~5 kLOC of legacy ML code.
 
 ---
 

@@ -1,6 +1,6 @@
 # Docs Index — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-04-30_
 
 Start here if you opened the `docs/` folder directly and need the preferred reading path.
 
@@ -24,6 +24,8 @@ Start here if you opened the `docs/` folder directly and need the preferred read
 | Inspect frontend module ownership | `modules.md` and `state.md` |
 | Understand layer canvases / GPU memory | `layer-system.md` |
 | Understand library delegation patterns | `libraries.md` |
+| Building-height ML pipeline | `ml-pipeline.md` and `plans/height-training-status.md` |
+| Open ML training work | `height-pipeline-improvement-plan.md` |
 
 ## Detailed References
 

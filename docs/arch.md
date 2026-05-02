@@ -1,6 +1,23 @@
 # Architecture — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-04-30_
+
+## Single-Page Architecture
+
+strm2stl is intentionally a **single-page application** (SPA). The three top-level views (`Explore`, `Edit`, `Extrude`) are workflow steps, not destinations — a user picks a region on the map, refines it in the DEM editor, then exports. All three steps share the same in-memory state.
+
+### Why SPA and not multi-page
+
+| Concern | Multi-page cost | SPA status quo |
+|---------|----------------|----------------|
+| Shared live data | Would require serialising ~3-4 MB of canvas/array state (DEM values, water mask, city raster, satellite image) between page loads | State lives in `window.appState` — all views consume it directly |
+| Workflow continuity | Users move Explore → Edit → Extrude in sequence; page transitions would feel like a form wizard | `switchView()` transitions in <16 ms; no network round-trip |
+| Canvas and WebGL contexts | Three.js globe + Leaflet map + model viewer share one document; recreating GL contexts is expensive | Canvases are always present; inactive ones are hidden and their GPU backing freed via `_freeLayerBuffer()` |
+| Region table / cache inspector | These are panel-level concerns, not page-level | Sidebar state machine cycles: `normal → list → table → normal` |
+
+**Multi-page is only worth considering if** the app ever needs to serve regions or terrain data to external consumers (share-a-link to a specific region's DEM). In that case the correct scope is a **shareable URL via `location.hash`** that deep-links into a pre-selected region + view — not a separate HTML page. This would require no architectural changes beyond wiring `switchView()` and `selectCoordinate()` to read `location.hash` on load. See `proposals.md → A-HASH`.
+
+---
 
 ## System Overview
 

@@ -128,6 +128,10 @@ def build_height_transforms(tile_size: int, augment: bool = False):
                 mean_c = rgb.mean(axis=(1, 2), keepdims=True)
                 rgb = np.clip(mean_c + (rgb - mean_c) * contrast, 0.0, 1.0)
                 rgb = rgb.astype(np.float32)
+            # Gaussian noise (simulates sensor variation and compression)
+            if np.random.random() > 0.5:
+                sigma = np.random.uniform(0.005, 0.025)
+                rgb = np.clip(rgb + np.random.normal(0, sigma, rgb.shape).astype(np.float32), 0.0, 1.0)
 
         rgb_t = torch.from_numpy(rgb)
         # Apply ImageNet normalisation: (x - mean) / std
@@ -345,6 +349,30 @@ def make_roof_loaders(
     return train_loader, val_loader, test_loader, split_info
 
 
+def _filter_uniform_tiles(
+    tile_paths: "list[Path]",
+    min_unique_heights: int = 3,
+) -> "list[Path]":
+    """Remove tiles where all building pixels share <= min_unique_heights distinct
+    height values (rounded to 1 decimal).  Such tiles are dominated by OSM
+    default-height fallbacks (e.g. all 10.0 m) and provide only noise labels.
+    """
+    import numpy as np
+    kept = []
+    for tp in tile_paths:
+        try:
+            data = np.load(tp)
+            h = data["height"].ravel()
+            bldg = h[h > 0]
+            if len(bldg) == 0:
+                continue
+            if len(np.unique(np.round(bldg, 1))) >= min_unique_heights:
+                kept.append(tp)
+        except Exception:
+            pass
+    return kept
+
+
 def make_height_loaders(
     tile_paths: list[Path],
     tile_size: int = DEFAULT_TILE_SIZE,
@@ -352,27 +380,45 @@ def make_height_loaders(
     val_split: float = 0.15,
     seed: int = 42,
     num_workers: int = 0,
+    filter_uniform: bool = True,
 ) -> "tuple[DataLoader, DataLoader, dict]":
     """Build train/val DataLoaders for height regression.
+
+    Parameters
+    ----------
+    filter_uniform : bool
+        If True (default), drop tiles where all building pixels share ≤2
+        distinct height values — these are OSM default-height tiles that add
+        only label noise.
 
     Returns
     -------
     (train_loader, val_loader, split_info)
     """
     _require_torch()
-    from torch.utils.data import random_split
+
+    if filter_uniform:
+        tile_paths = _filter_uniform_tiles(tile_paths)
 
     train_tf = build_height_transforms(tile_size, augment=True)
     eval_tf = build_height_transforms(tile_size, augment=False)
 
-    full_ds = HeightTileDataset(tile_paths, transform=train_tf)
-    n_val = max(1, int(len(full_ds) * val_split))
-    n_train = len(full_ds) - n_val
+    n_total = len(tile_paths)
+    n_val = max(1, int(n_total * val_split))
+    n_train = n_total - n_val
 
-    train_ds, val_ds = random_split(
-        full_ds, [n_train, n_val],
-        generator=torch.Generator().manual_seed(seed),
-    )
+    # Match torch random_split-style deterministic shuffling while keeping
+    # separate datasets so validation remains non-augmented.
+    gen = torch.Generator().manual_seed(seed)
+    perm = torch.randperm(n_total, generator=gen).tolist()
+    train_idx = perm[:n_train]
+    val_idx = perm[n_train:]
+
+    train_paths = [tile_paths[i] for i in train_idx]
+    val_paths = [tile_paths[i] for i in val_idx]
+
+    train_ds = HeightTileDataset(train_paths, transform=train_tf)
+    val_ds = HeightTileDataset(val_paths, transform=eval_tf)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
                               num_workers=num_workers, pin_memory=True)

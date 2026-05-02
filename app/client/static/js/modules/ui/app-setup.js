@@ -160,6 +160,7 @@ window.loadAllLayers = async function loadAllLayers() {
         await Promise.all([
             window.loadWaterMask?.(),
             window.loadSatelliteImage?.(),
+            window.loadCityData?.(),
         ]);
 
         // Render combined view automatically

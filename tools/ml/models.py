@@ -203,10 +203,11 @@ class RoofNetV2(nn.Module):
 
         self.fpn = _FPN(backbone_ch, fpn_channels)
 
-        # Height head: dense per-pixel regression
+        # Height head: dense per-pixel regression + dropout for regularization
         self.height_head = nn.Sequential(
             nn.Conv2d(fpn_channels, fpn_channels // 2, 3, padding=1),
             nn.ReLU(inplace=True),
+            nn.Dropout2d(0.2),
             nn.Conv2d(fpn_channels // 2, 1, 1),
         )
 
@@ -887,6 +888,127 @@ class RoofNetV3_S(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# HeightUNet  — simple U-Net baseline for height regression
+# ---------------------------------------------------------------------------
+
+class _UNetDecBlock(nn.Module):
+    """Upsample + concat skip + 2× conv."""
+
+    def __init__(self, in_ch: int, skip_ch: int, out_ch: int):
+        super().__init__()
+        self.up = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+        )
+        self.conv = nn.Sequential(
+            nn.Conv2d(out_ch + skip_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x, skip):
+        x = self.up(x)
+        x = F.interpolate(x, size=skip.shape[2:], mode="bilinear", align_corners=False)
+        x = torch.cat([x, skip], dim=1)
+        return self.conv(x)
+
+
+class HeightUNet(nn.Module):
+    """U-Net for height regression with a shared decoder and two output heads.
+
+    Architecture:
+      MobileNetV3-Small encoder (pretrained) with skip connections at s2/s8/s16/s32
+      → shared U-Net decoder (dec_ch wide)
+      → mask_head : (B,1,H,W) building/non-building logits  (BCE + Dice)
+      → height_head: (B,1,H,W) raw height in metres         (weighted L1 + Sobel)
+
+    The mask head provides a strong, easy segmentation signal — "is this a
+    building pixel?" — that the network can learn from even when height labels
+    are noisy.  At inference the height output is gated by the predicted mask
+    (pixels where mask_prob < threshold → height 0).
+
+    With <500 tiles keep dec_ch small (24–32) to avoid overfitting.
+    Backbone is frozen by default for the first few epochs.
+    """
+
+    SKIP_CH: tuple[int, ...] = (16, 24, 40, 576)  # MobileNetV3-Small at s2/s8/s16/s32
+
+    def __init__(
+        self,
+        pretrained: bool = True,
+        freeze_backbone: bool = True,
+        dropout: float = 0.25,
+        dec_ch: int = 24,
+    ) -> None:
+        _require_torch()
+        super().__init__()
+
+        self.backbone = _MobileNetSkipBackbone(pretrained=pretrained)
+        if freeze_backbone:
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+
+        ch = dec_ch
+        sk = self.SKIP_CH
+        # Shared decoder: s32(576) → s16(40) → s8(24) → s2(16) → full res
+        self.dec32_16 = _UNetDecBlock(sk[3], sk[2], ch * 4)
+        self.dec16_8  = _UNetDecBlock(ch * 4, sk[1], ch * 2)
+        self.dec8_2   = _UNetDecBlock(ch * 2, sk[0], ch)
+        self.final_up = nn.Sequential(
+            nn.Conv2d(ch, ch, 3, padding=1),
+            nn.BatchNorm2d(ch),
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(dropout),
+        )
+        # Separate 1×1 heads — mask logits (raw) and height (activated by ReLU)
+        self.mask_head   = nn.Conv2d(ch, 1, 1)
+        self.height_head = nn.Conv2d(ch, 1, 1)
+
+    def _decode(self, rgb: "torch.Tensor") -> "torch.Tensor":
+        skips = self.backbone(rgb)
+        x = self.dec32_16(skips["s32"], skips["s16"])
+        x = self.dec16_8(x, skips["s8"])
+        x = self.dec8_2(x, skips["s2"])
+        x = F.interpolate(x, size=rgb.shape[2:], mode="bilinear", align_corners=False)
+        return self.final_up(x)
+
+    def forward(self, rgb: "torch.Tensor") -> "tuple[torch.Tensor, torch.Tensor]":
+        """Return (mask_logits, height_map) — both (B, 1, H, W).
+
+        mask_logits : raw (pre-sigmoid) building probability
+        height_map  : non-negative height in metres (ReLU applied)
+        """
+        feat = self._decode(rgb)
+        mask_logits = self.mask_head(feat)
+        height_map  = F.relu(self.height_head(feat))
+        return mask_logits, height_map
+
+    def predict(
+        self,
+        rgb: "torch.Tensor",
+        mask_threshold: float = 0.3,
+    ) -> "tuple[torch.Tensor, torch.Tensor]":
+        """Inference: return (mask_prob, gated_height)."""
+        with torch.no_grad():
+            mask_logits, height_map = self.forward(rgb)
+            mask_prob = torch.sigmoid(mask_logits)
+            height = height_map * (mask_prob > mask_threshold).float()
+        return mask_prob, height
+
+    def unfreeze_backbone(self):
+        for p in self.backbone.parameters():
+            p.requires_grad = True
+
+    def freeze_backbone(self):
+        for p in self.backbone.parameters():
+            p.requires_grad = False
+
+
+# ---------------------------------------------------------------------------
 # Model factory
 # ---------------------------------------------------------------------------
 
@@ -925,7 +1047,13 @@ def build_model(
     """
     _require_torch()
 
-    if arch in ("v3.1", "v31"):
+    if arch in ("unet", "height_unet"):
+        model = HeightUNet(
+            pretrained=pretrained,
+            freeze_backbone=freeze_backbone if freeze_backbone else True,
+            dec_ch=24,
+        )
+    elif arch in ("v3.1", "v31"):
         model = RoofNetV3_1(
             n_classes=n_classes,
             pretrained=pretrained,
@@ -955,11 +1083,27 @@ def build_model(
         ckpt_path = Path(checkpoint)
         if ckpt_path.exists():
             state = torch.load(ckpt_path, map_location=device, weights_only=False)
+            sd = state["model_state_dict"] if "model_state_dict" in state else state
+            # Migrate old checkpoints: height_head.2.* -> height_head.3.*
+            # (Dropout2d was inserted at index 2 in RoofNetV2/V3 height_head,
+            #  shifting the final 1x1 conv from index 2 to index 3.)
+            migrated = {}
+            for k, v in sd.items():
+                if k.startswith("height_head.2."):
+                    new_key = "height_head.3." + k[len("height_head.2."):]
+                    migrated[new_key] = v
+                else:
+                    migrated[k] = v
+            sd = migrated
+            missing, unexpected = model.load_state_dict(sd, strict=False)
+            if missing or unexpected:
+                logger.debug(
+                    "load_state_dict: missing=%d unexpected=%d",
+                    len(missing), len(unexpected),
+                )
             if "model_state_dict" in state:
-                model.load_state_dict(state["model_state_dict"])
                 logger.info("Loaded checkpoint from %s (epoch %d)", checkpoint, state.get("epoch", -1))
             else:
-                model.load_state_dict(state)
                 logger.info("Loaded raw state_dict from %s", checkpoint)
 
     return model.to(torch.device(device))

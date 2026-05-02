@@ -20,7 +20,6 @@ let _gridCacheKey = null;
 let _gridPixelMode = false;
 
 // Cached DOM references (populated lazily on first use)
-let _layerModeBtns = null;
 let _cachedDemCanvas = null;
 
 /** Toggle grid labels between lat/lon coordinates and pixel indices. */
@@ -42,7 +41,7 @@ window.setGridPixelMode = function setGridPixelMode(on) {
 
 // All layer canvas IDs — render order (first = bottom, last = top).
 // Mutable so users can reorder via the UI.
-let _layerOrder = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem', 'Hydrology'];
+let _layerOrder = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'CompositeDem', 'Hydrology'];
 const LAYER_STACK = _layerOrder;  // alias kept for backward compat
 
 /**
@@ -55,8 +54,26 @@ const LAYER_CANVAS_IDS = {
     Sat:          'layerSatCanvas',
     SatImg:       'layerSatImgCanvas',
     CityRaster:   'layerCityRasterCanvas',
+    CityOverlay:  'layerCityOverlayCanvas',
     CompositeDem: 'layerCompositeDemCanvas',
     Hydrology:    'layerHydroCanvas',
+};
+
+/**
+ * Per-layer metadata used by the Layers UI to build rows generically.
+ * loadFn: window function name to call when the Load button is clicked.
+ * resInputId: DOM element ID whose value shows the current resolution.
+ * hasLoad: whether this layer has a load button.
+ */
+window.LAYER_REGISTRY = {
+    Dem:          { label: '🏔 DEM',         loadFn: 'loadDEM',           resInputId: 'paramDim',         hasLoad: true  },
+    Water:        { label: '💧 Water',       loadFn: 'loadWaterMask',     resInputId: 'waterResolution',  hasLoad: true  },
+    Sat:          { label: '🌿 ESA',         loadFn: 'loadEsaData',       resInputId: 'esaResolution',    hasLoad: true  },
+    SatImg:       { label: '🛰 Sat Img',     loadFn: 'loadSatelliteImage',resInputId: 'satImgResolution', hasLoad: true  },
+    CityRaster:   { label: '🏙 City Raster', loadFn: 'loadCityRaster',    resInputId: 'cityRasterDim',    hasLoad: true  },
+    CityOverlay:  { label: '🏙 City Vector', loadFn: 'loadCityData',      resInputId: null,               hasLoad: true  },
+    Hydrology:    { label: '🌊 Hydro',       loadFn: 'loadHydrology',     resInputId: 'hydroDim',         hasLoad: true  },
+    CompositeDem: { label: '★ Composite',   loadFn: null,                resInputId: null,               hasLoad: false },
 };
 
 /** Return the layer buffer canvas for the given mode, or null if not found. */
@@ -73,6 +90,7 @@ function _getLayerBuffer(mode) {
  * @param {string} layerName - One of the LAYER_CANVAS_IDS keys
  * @returns {HTMLCanvasElement|null}
  */
+window.getOrCreateCanvas = getOrCreateCanvas;
 function getOrCreateCanvas(layerName) {
     if (_canvasRegistry.has(layerName)) return _canvasRegistry.get(layerName);
     const id = LAYER_CANVAS_IDS[layerName];
@@ -112,9 +130,14 @@ window.clearAllLayerBuffers = function clearAllLayerBuffers() {
         _freeLayerBuffer(mode);
     }
     const display = document.getElementById('stackViewCanvas');
-    if (display && (display.width > 0 || display.height > 0)) {
-        const ctx = display.getContext('2d');
-        ctx.clearRect(0, 0, display.width, display.height);
+    if (display) {
+        // Reset dimensions to 0 so the canvas is cleanly resized on the next
+        // updateStackedLayers call after the container is visible.  Doing only
+        // clearRect would leave stale dimensions that can cause stretched /
+        // scan-line banding if an intermediate update fires while the container
+        // is hidden (getBoundingClientRect returns 0 → 600×400 fallback).
+        display.width  = 0;
+        display.height = 0;
     }
     // Reset zoom/pan so the new region starts at default view
     stackZoom = { scale: 1, offsetX: 0, offsetY: 0 };
@@ -123,7 +146,7 @@ window.clearAllLayerBuffers = function clearAllLayerBuffers() {
 
 // Multi-layer state: set of active layer keys + per-layer opacity (0–1)
 let _activeLayers  = new Set(['Dem']);
-let _layerOpacities = { Dem: 1, Water: 0.7, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CompositeDem: 1, Hydrology: 0.8 };
+let _layerOpacities = { Dem: 1, Water: 0.7, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CityOverlay: 0.85, CompositeDem: 1, Hydrology: 0.8 };
 
 // Kept for getStackMode() backward compat — last-toggled-on layer
 let _activeMode = 'Dem';
@@ -149,11 +172,17 @@ window.setStackMode = function setStackMode(mode) {
             window.loadHydrology?.();
             return;
         }
+        // Auto-load city overlay if switching to CityOverlay with no data yet
+        if (mode === 'CityOverlay' && !window.appState?.osmCityData) {
+            window.loadCityData?.();
+            return;
+        }
     }
 
-    // Update button active states
-    if (!_layerModeBtns) _layerModeBtns = document.querySelectorAll('#layerModeSelector .layer-mode-btn');
-    _layerModeBtns.forEach(btn => {
+    // Update button active states (support both old #layerModeSelector and new #layerRows)
+    const modeSelector = document.getElementById('layerModeSelector') || document.getElementById('layerRows');
+    const modeBtns = modeSelector ? modeSelector.querySelectorAll('.layer-mode-btn') : [];
+    modeBtns.forEach(btn => {
         btn.classList.toggle('active', _activeLayers.has(btn.dataset.mode));
     });
 
@@ -206,7 +235,7 @@ function _updateLayerOpacitySliders() {
     const container = document.getElementById('layerOpacitySliders');
     if (!container) return;
     container.innerHTML = '';
-    const labels = { Dem: '🏔 DEM', Water: '💧 Water', Sat: '🌿 ESA', SatImg: '🛰 Sat', CityRaster: '🏙 City', CompositeDem: '★ Composite', Hydrology: '🌊 Hydro' };
+    const labels = Object.fromEntries(Object.entries(window.LAYER_REGISTRY).map(([k, v]) => [k, v.label]));
     // Show active layers in current render order (bottom first, top last)
     const visible = _layerOrder.filter(m => _activeLayers.has(m));
     visible.forEach((mode, vi) => {
@@ -250,12 +279,10 @@ function _updateLayerOpacitySliders() {
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Apply a CSS transform string to the display canvas and OSM overlay. */
+/** Apply a CSS transform string to the display canvas. */
 function _applyTransformCSS(xfm) {
     const displayCanvas = document.getElementById('stackViewCanvas');
     if (displayCanvas) { displayCanvas.style.transformOrigin = '0 0'; displayCanvas.style.transform = xfm; }
-    const osmOverlay = document.querySelector('#layersStack .osm-overlay');
-    if (osmOverlay) { osmOverlay.style.transformOrigin = '0 0'; osmOverlay.style.transform = xfm; }
     if (window.appState) window.appState.stackZoom = stackZoom;
 }
 
@@ -396,6 +423,7 @@ window.updateStackedLayers = function updateStackedLayers() {
         Sat:          () => satCanvas,
         SatImg:       () => window.appState?.satImgSourceCanvas || null,
         CityRaster:   () => window.appState?.cityRasterSourceCanvas || null,
+        CityOverlay:  () => window.appState?.cityOverlaySourceCanvas || null,
         CompositeDem: () => window.appState?.compositeDemSourceCanvas || null,
         Hydrology:    () => window.appState?.hydrologySourceCanvas || null,
     };
@@ -415,12 +443,16 @@ window.updateStackedLayers = function updateStackedLayers() {
         if (displayCanvas.height !== stackHeight) displayCanvas.height = stackHeight;
         const dCtx = displayCanvas.getContext('2d');
         dCtx.clearRect(0, 0, stackWidth, stackHeight);
-        const masterOpacity = (document.getElementById('activeLayerOpacity')?.value ?? 100) / 100;
         LAYER_STACK.forEach(mode => {
             if (!_activeLayers.has(mode)) return;
             const buffer = _getLayerBuffer(mode);
             if (!buffer || buffer.width === 0 || buffer.height === 0) return;
-            dCtx.globalAlpha = masterOpacity * (_layerOpacities[mode] ?? 1);
+            // Sync opacity from inline slider if present (LayerViewSection per-layer sliders)
+            const opacitySlider = document.getElementById(`layerOpacity_${mode}`);
+            if (opacitySlider) {
+                _layerOpacities[mode] = Number(opacitySlider.value) / 100;
+            }
+            dCtx.globalAlpha = _layerOpacities[mode] ?? 1;
             dCtx.drawImage(buffer, 0, 0);
         });
         dCtx.globalAlpha = 1;
@@ -430,7 +462,13 @@ window.updateStackedLayers = function updateStackedLayers() {
 
     applyStackedTransform();
 
-    if (window.appState?.osmCityData) renderCityOverlay();
+    // City overlay now composites into its own layer canvas (CityOverlay).
+    // renderCityOverlay() writes to appState.cityOverlaySourceCanvas, then
+    // updateStackedLayers composites it on the next call — trigger it here
+    // so the overlay stays in sync when other layers change.
+    if (window.appState?.osmCityData && _activeLayers.has('CityOverlay')) {
+        window.renderCityOverlay?.();
+    }
 };
 
 /**
@@ -454,7 +492,7 @@ window.drawLayerGrid = function drawLayerGrid() {
     if (!bbox || !demCanvas || demCanvas.width === 0 || demCanvas.height === 0) return;
 
     const { scale, offsetX, offsetY } = stackZoom;
-    const densityCheck = 10;  // fixed default — no UI control for graticule density
+    const densityCheck = 20;  // fixed default — no UI control for graticule density
     const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${_gridPixelMode}`;
     if (newKey === _gridCacheKey) return;
     _gridCacheKey = newKey;

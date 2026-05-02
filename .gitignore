@@ -3,29 +3,42 @@ dist
 *.egg-info
 __pycache__
 .ipynb_checkpoints
+.pytest_cache
+
+# Local generated rasters / images (not source of truth)
 cache
 *.tif
 *.tiff
-*.png
-
-osm_raw_cache
-ee_cache/*
 
 # Local config — may contain API keys; do not commit
 config.json
 *.gcode
-output/*
 *.curaprofile
 *.ini
 
 # Runtime / generated
 data.db
+data.db-shm
+data.db-wal
 server.log
-# ui/ was removed (leftover JSON cache — deleted 2026-04-09)
+osm_raw_cache
+ee_cache/*
 
 # Node / Vite
 node_modules/
 package-lock.json
-# Built documentation sites
+
+# Built docs sites
 docs_site/
 sphinx_site/
+
+# Runtime training logs and metric snapshots (kept locally)
+logs/*.log
+*_history.json
+
+# Output: generated PDFs, PNGs are large binaries — don't commit
+output/*
+
+# Trained model checkpoints — large, regenerable from training scripts
+models/*.pt
+models/*_inspect.pdf/*.png

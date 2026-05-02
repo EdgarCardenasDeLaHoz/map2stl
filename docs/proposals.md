@@ -26,6 +26,7 @@ _Last updated: 2026-04-19_
 | F-UX1 | Consolidate region creation — keep only `floatingDrawBtn`; add empty-state hint to panel | `map/`, `index.html`, `events/event-listeners.js` | Small | done |
 | F-UX-M | Lazy-allocate hidden layer canvases — create/destroy canvas elements on show/hide | `layers/stacked-layers.js`, `index.html` | Medium | done |
 | F-FEAT | Preset undo — snapshot slider values before loading a preset; expose `window.revertPreset()` | `ui/presets.js` | Small | done |
+| F-ROOF1 | Slanted/pitched roofs in city heights raster — burn `roof:shape` (gabled / pyramidal / skillion / hipped / dome) into the per-building heightmap instead of flat tops. OSM tags already preserved end-to-end; mesh path already supports shapes. Plug-in point is `city2stl/rasterize.py:_rasterize_buildings`. See `docs/plans/roof-shapes-in-raster.md`. | `city2stl/rasterize.py`, `city2stl/heights.py`, `app/server/routers/cities.py` (raster endpoint), `app/client/static/js/vue/components/dem/FetchLayersSection.vue` (toggle) | Medium | done |
 
 ---
 
@@ -58,6 +59,7 @@ _Last updated: 2026-04-19_
 |----|-------------|---------|--------|--------|
 | A-SW | Service worker for API response caching — stale-while-revalidate for `/api/terrain/dem` and `/api/terrain/satellite` | new `sw.js` | Medium | pending |
 | A-OBJ-TEX | OBJ cross-section export with UV map + PNG texture from current colormap | `app/server/core/export.py`, `export/export-handlers.js` | Large | denied |
+| A-HASH | Hash-based deep-linking — read/write `location.hash` in `switchView()` and `selectCoordinate()` so `#map/Granada` opens the map with Granada selected and `#dem` opens the DEM editor directly. Avoids multi-page complexity while enabling shareable URLs. On page load, parse hash before first render. | `modules/ui/view-management.js`, `modules/regions/regions.js`, `app.js` | Small | pending |
 
 ---
 

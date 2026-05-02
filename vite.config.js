@@ -28,7 +28,12 @@ export default defineConfig({
         // Stable names so the FastAPI template can reference them with fixed paths.
         entryFileNames: 'js/[name].js',
         chunkFileNames: 'js/[name]-[hash].js',
-        assetFileNames: '[ext]/[name]-[hash][extname]',
+        // Stable name for CSS so index.html can reference it without a manifest lookup.
+        assetFileNames: (info) => {
+          const name = info.name || '';
+          if (name.endsWith('.css')) return 'css/[name][extname]';
+          return '[ext]/[name]-[hash][extname]';
+        },
       },
     },
   },

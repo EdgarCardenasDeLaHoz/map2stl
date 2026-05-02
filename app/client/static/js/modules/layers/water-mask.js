@@ -475,3 +475,9 @@ window.renderEsaLandCover = renderEsaLandCover;
 window.renderCombinedView = renderCombinedView;
 window.setupWaterMaskListeners = setupWaterMaskListeners;
 window.clearLastWaterMaskData = () => { lastWaterMaskData = null; window.appState.lastWaterMaskData = null; };
+
+/** Abort any in-flight water mask / ESA land-cover requests. */
+window.cancelWaterLoads = function cancelWaterLoads() {
+    if (_waterMaskAbortController) _waterMaskAbortController.abort();
+    if (_esaAbortController) _esaAbortController.abort();
+};

@@ -9,6 +9,10 @@
  *   window._setupBboxListeners()
  */
 
+// ─── Threshold constants ─────────────────────────────────────────────────────
+const DEM_RES_WARNING_THRESHOLD   = 500;  // pixels — warn above this DEM dim value
+const WATER_RES_WARNING_THRESHOLD = 500;  // px — warn above this water resolution
+
 window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     function activateDrawTool() {
         const dc = window.getDrawControl?.();
@@ -273,6 +277,27 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         window.toggleMapGrid?.(e.target.checked);
     });
 
+    const filterRegionsToViewportExplore = document.getElementById('filterRegionsToViewportExplore');
+    if (filterRegionsToViewportExplore) {
+        filterRegionsToViewportExplore.checked = !!window.getFilterRegionsToViewport?.();
+        filterRegionsToViewportExplore.addEventListener('change', () => {
+            window.setFilterRegionsToViewport?.(filterRegionsToViewportExplore.checked);
+        });
+    }
+
+    const bboxOpacityExplore = document.getElementById('bboxOpacityExplore');
+    const bboxOpacityValueExplore = document.getElementById('bboxOpacityValueExplore');
+    if (bboxOpacityExplore) {
+        const currentOpacity = Math.round((window.getRegionBboxOpacity?.() ?? 0.15) * 100);
+        bboxOpacityExplore.value = String(currentOpacity);
+        if (bboxOpacityValueExplore) bboxOpacityValueExplore.textContent = `${currentOpacity}%`;
+        bboxOpacityExplore.addEventListener('input', () => {
+            const val = parseInt(bboxOpacityExplore.value, 10);
+            window.setRegionBboxOpacity?.(val / 100);
+            if (bboxOpacityValueExplore) bboxOpacityValueExplore.textContent = `${val}%`;
+        });
+    }
+
     document.getElementById('regionsPanelSearch')
         ?.addEventListener('input', () => window.populateRegionsPanelTable?.());
 
@@ -315,12 +340,12 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     document.getElementById('paramDim')?.addEventListener('input', () => {
         const val = parseInt(document.getElementById('paramDim').value);
         const w = document.getElementById('demResWarning');
-        if (w) w.style.display = val > 500 ? 'block' : 'none';
+        if (w) w.style.display = val > DEM_RES_WARNING_THRESHOLD ? 'block' : 'none';
     });
     document.getElementById('waterResolution')?.addEventListener('change', () => {
         const val = parseInt(document.getElementById('waterResolution').value);
         const w = document.getElementById('waterResWarning');
-        if (w) w.style.display = val >= 500 ? 'block' : 'none';
+        if (w) w.style.display = val >= WATER_RES_WARNING_THRESHOLD ? 'block' : 'none';
         window.loadWaterMask?.();
     });
     /**

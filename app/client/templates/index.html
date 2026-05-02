@@ -8,6 +8,8 @@
     <link rel="stylesheet" href="/static/vendor/leaflet.css" />
     <link rel="stylesheet" href="/static/vendor/leaflet-draw.css" />
     <link rel="stylesheet" href="/static/css/app.css" />
+    <!-- Vite-built CSS for Vue components (scoped styles). Path is stable via vite.config.js asset name. -->
+    <link rel="stylesheet" href="/static/css/vue-main.css" />
     <!-- PrimeVue icons (loaded from dist; no global CSS needed for Aura unstyled theme) -->
     <link rel="stylesheet" href="/static/vendor/primeicons.css" />
 </head>
@@ -53,7 +55,7 @@
         display:none; position:fixed; bottom:0; left:0; right:0; max-height:200px;
         overflow-y:auto; background:rgba(180,0,0,0.92); color:#fff; font:11px/1.4 monospace;
         padding:8px 12px; z-index:99999; white-space:pre-wrap; border-top:2px solid #ff4444;">
-        <button onclick="this.parentElement.style.display='none'"
+        <button id="devErrorOverlayCloseBtn"
             style="float:right;background:#ff4444;border:none;color:#fff;cursor:pointer;padding:2px 6px;border-radius:3px;">✕</button>
         <strong>JS Errors:</strong>
         <div id="devErrorList"></div>
@@ -62,7 +64,18 @@
         (function() {
             const overlay = document.getElementById('devErrorOverlay');
             const list = document.getElementById('devErrorList');
+            const closeBtn = document.getElementById('devErrorOverlayCloseBtn');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    overlay.style.display = 'none';
+                });
+            }
+            const _SUPPRESS = [
+                'ResizeObserver loop completed with undelivered notifications',
+                'ResizeObserver loop limit exceeded',
+            ];
             function addErr(msg) {
+                if (_SUPPRESS.some(s => String(msg).includes(s))) return;
                 overlay.style.display = 'block';
                 const d = document.createElement('div');
                 d.textContent = '• ' + msg;

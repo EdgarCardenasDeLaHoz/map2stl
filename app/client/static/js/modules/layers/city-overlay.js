@@ -57,6 +57,7 @@ function _makeLayerCache() {
 }
 
 let _cityDataVersion = 0;   // incremented every time osmCityData changes
+let _cityDataAbortController = null;  // abort controller for loadCityData
 const _stackLayer    = _makeLayerCache();  // per-layer offscreen cache for stacked view
 const _demLayer      = _makeLayerCache();  // per-layer offscreen cache for DEM view
 
@@ -236,6 +237,11 @@ window.loadCityData = async function loadCityData() {
         return;
     }
 
+    // Abort any in-flight city data request for the previous region.
+    if (_cityDataAbortController) _cityDataAbortController.abort();
+    _cityDataAbortController = new AbortController();
+    const signal = _cityDataAbortController.signal;
+
     const statusEl = document.getElementById('cityDataStatus');
     const loadBtn  = document.getElementById('loadCityDataBtn');
     if (statusEl) statusEl.textContent = 'Checking cache…';
@@ -251,17 +257,20 @@ window.loadCityData = async function loadCityData() {
         if (document.getElementById('layerRoadsToggle')?.checked)      layers.push('roads');
         if (document.getElementById('layerWaterwaysToggle')?.checked)  layers.push('waterways');
 
-        const simplifyTol = parseFloat(document.getElementById('citySimplifyTolerance')?.value) || 0.5;
+        const simplifyTol = parseFloat(document.getElementById('citySimplifyTolerance')?.value) || 3.0;
         const minArea     = parseFloat(document.getElementById('cityMinArea')?.value) || 5.0;
+        const mPerLevel   = parseFloat(document.getElementById('cityMPerLevel')?.value) || 3.5;
 
         // Check cache using the same key params as the actual data endpoint
         if (window.api.cities.cached) {
             const cacheParams = new URLSearchParams({
                 north: selectedRegion.north, south: selectedRegion.south,
                 east: selectedRegion.east, west: selectedRegion.west,
-                simplify_tolerance: simplifyTol, min_area: minArea
+                simplify_tolerance: simplifyTol, min_area: minArea,
+                m_per_level: mPerLevel,
             });
             const { data: cacheInfo } = await window.api.cities.cached(cacheParams);
+            if (signal.aborted) return;
             if (statusEl) statusEl.textContent = cacheInfo?.cached ? 'Loading from cache…' : 'Fetching from OpenStreetMap…';
         } else {
             if (statusEl) statusEl.textContent = 'Fetching from OpenStreetMap…';
@@ -272,8 +281,10 @@ window.loadCityData = async function loadCityData() {
             east:  selectedRegion.east,  west:  selectedRegion.west,
             layers,
             simplify_tolerance: simplifyTol,
-            min_area: minArea
-        });
+            min_area: minArea,
+            m_per_level: mPerLevel,
+        }, signal);
+        if (signal.aborted) return;
 
         if (cityErr) {
             window.showToast?.('OSM error: ' + cityErr, 'error');
@@ -330,6 +341,7 @@ window.loadCityData = async function loadCityData() {
         window.showToast?.('City data loaded', 'success');
         _updateEnhanceButton();
     } catch (e) {
+        if (e.name === 'AbortError') return;
         console.error('loadCityData error:', e);
         window.showToast?.('City data error: ' + e.message, 'error');
         if (statusEl) statusEl.textContent = 'Error.';
@@ -338,6 +350,11 @@ window.loadCityData = async function loadCityData() {
     } finally {
         if (loadBtn) loadBtn.disabled = false;
     }
+};
+
+/** Abort any in-flight city data request. */
+window.cancelCityLoad = function cancelCityLoad() {
+    if (_cityDataAbortController) _cityDataAbortController.abort();
 };
 
 // ---------------------------------------------------------------------------

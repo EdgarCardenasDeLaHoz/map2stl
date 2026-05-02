@@ -33,8 +33,9 @@ from city2stl.height import BBox, HeightResult
 logger = logging.getLogger(__name__)
 
 # Default checkpoint paths -- override by passing checkpoint= to predict()
-_MODELS_DIR = Path(__file__).resolve().parents[3] / "models"
+_MODELS_DIR = Path(__file__).resolve().parents[2] / "models"
 _UNET_DEFAULT_CKPT = _MODELS_DIR / "height_unet.pt"
+_HEIGHT_UNET_DEFAULT_CKPT = _MODELS_DIR / "roofnet_unet_iou_v2.pt"
 _DA2_CACHE_DIR = _MODELS_DIR / "depth_anything_v2"
 
 # ------------------------------------------------------------------------------
@@ -351,6 +352,112 @@ def _unet_inference(
 
 
 # ------------------------------------------------------------------------------
+# HeightUNet helpers (tools.ml.models.HeightUNet — MobileNetV3 dual-head)
+# ------------------------------------------------------------------------------
+
+_height_unet_singleton: "tuple[object, str] | None" = None  # (model, device)
+
+
+def _load_height_unet(checkpoint: Path, device: str = "cpu"):
+    """Load HeightUNet from a checkpoint.  Cached as a module-level singleton."""
+    global _height_unet_singleton
+    if _height_unet_singleton is not None:
+        model, loaded_device = _height_unet_singleton
+        if loaded_device == device:
+            return model
+
+    if not checkpoint.exists():
+        raise FileNotFoundError(
+            f"HeightUNet checkpoint not found: {checkpoint}  "
+            "Train with: python -m tools.ml.train --arch unet"
+        )
+
+    try:
+        import torch
+    except ImportError as exc:
+        raise ImportError("torch is required for model='height_unet'") from exc
+
+    import sys
+    _strm2stl = Path(__file__).resolve().parents[3]
+    if str(_strm2stl) not in sys.path:
+        sys.path.insert(0, str(_strm2stl))
+
+    from tools.ml.models import HeightUNet
+
+    state = torch.load(str(checkpoint), map_location=device, weights_only=False)
+    sd = state.get("model_state_dict", state) if isinstance(state, dict) else state
+    model = HeightUNet(pretrained=False).to(device)
+    model.load_state_dict(sd)
+    model.eval()
+    _height_unet_singleton = (model, device)
+    logger.info("HeightUNet loaded from %s", checkpoint)
+    return model
+
+
+def _height_unet_inference(
+    sat_rgb: np.ndarray,
+    checkpoint: Path,
+    device: str = "cpu",
+    tile_size: int = 256,
+    overlap: int = 32,
+    mask_threshold: float = 0.3,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Run HeightUNet on *sat_rgb* with sliding-window tiling.
+
+    Returns
+    -------
+    height_map : (H, W) float32 predicted heights in metres (0 = background).
+    mask_prob  : (H, W) float32 building probability [0, 1].
+    """
+    try:
+        import torch
+    except ImportError as exc:
+        raise ImportError("torch is required for model='height_unet'") from exc
+
+    model = _load_height_unet(checkpoint, device)
+
+    H, W = sat_rgb.shape[:2]
+    rgb = sat_rgb.astype(np.float32) / 255.0  # (H, W, 3)
+
+    height_out = np.zeros((H, W), dtype=np.float32)
+    mask_out   = np.zeros((H, W), dtype=np.float32)
+    weight     = np.zeros((H, W), dtype=np.float32)
+    step = tile_size - overlap
+
+    ys = list(range(0, max(1, H - tile_size + 1), step))
+    xs = list(range(0, max(1, W - tile_size + 1), step))
+    if not ys or ys[-1] + tile_size < H:
+        ys.append(max(0, H - tile_size))
+    if not xs or xs[-1] + tile_size < W:
+        xs.append(max(0, W - tile_size))
+
+    with torch.no_grad():
+        for y in ys:
+            for x in xs:
+                y2 = min(y + tile_size, H)
+                x2 = min(x + tile_size, W)
+                tile = rgb[y:y2, x:x2]
+                ph = tile_size - tile.shape[0]
+                pw = tile_size - tile.shape[1]
+                if ph > 0 or pw > 0:
+                    tile = np.pad(tile, ((0, ph), (0, pw), (0, 0)), mode="reflect")
+                t = torch.from_numpy(tile.transpose(2, 0, 1)[np.newaxis]).to(device)
+                mask_logits, h_pred = model(t)
+                m = torch.sigmoid(mask_logits).squeeze().cpu().numpy()[:y2-y, :x2-x]
+                h = h_pred.squeeze().cpu().numpy()[:y2-y, :x2-x]
+                height_out[y:y2, x:x2] += h
+                mask_out[y:y2, x:x2]   += m
+                weight[y:y2, x:x2]     += 1.0
+
+    weight = np.maximum(weight, 1.0)
+    height_map = (height_out / weight).astype(np.float32)
+    mask_prob  = (mask_out  / weight).astype(np.float32)
+    # Zero out background predictions
+    height_map *= (mask_prob > mask_threshold).astype(np.float32)
+    return height_map, mask_prob
+
+
+# ------------------------------------------------------------------------------
 # Public API
 # ------------------------------------------------------------------------------
 
@@ -362,6 +469,7 @@ def predict(
     checkpoint: Optional[Path] = None,
     device: str = "cpu",
     tile_size: int = 256,
+    mask_threshold: float = 0.3,
 ) -> HeightResult:
     """Predict building heights from a satellite RGB image.
 
@@ -414,8 +522,18 @@ def predict(
         confidence = np.full((H, W), 0.7, dtype=np.float32)
         source_name = "unet"
 
+    elif model == "height_unet":
+        ckpt = checkpoint or _HEIGHT_UNET_DEFAULT_CKPT
+        logger.info("Running HeightUNet (MobileNetV3 dual-head) inference from %s", ckpt)
+        height_abs, mask_prob = _height_unet_inference(
+            sat_rgb, ckpt, device=device, tile_size=tile_size, mask_threshold=mask_threshold
+        )
+        # Confidence derived from mask probability
+        confidence = mask_prob.astype(np.float32)
+        source_name = "height_unet"
+
     else:
-        raise ValueError(f"Unknown model: {model!r}.  Use 'pretrained' or 'unet'.")
+        raise ValueError(f"Unknown model: {model!r}.  Use 'pretrained', 'unet', or 'height_unet'.")
 
     return HeightResult(
         raster=height_abs,

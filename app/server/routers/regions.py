@@ -29,7 +29,7 @@ except ImportError:
     from pydantic import BaseModel, Field
 
     class RegionParameters(BaseModel):
-        dim: int = Field(200)
+        dim: int = Field(600)
         depth_scale: float = Field(0.5)
         water_scale: float = Field(0.05)
         height: float = Field(10.0)
@@ -48,6 +48,7 @@ except ImportError:
         west: float
         description: Optional[str] = None
         label: Optional[str] = None
+        tags: Optional[str] = None
         parameters: Optional[RegionParameters] = None
 
         def model_dump(self, **kw):
@@ -96,6 +97,7 @@ def _row_to_region(row) -> dict:
     if "subtract_water" in params:
         params["subtract_water"] = bool(params["subtract_water"])
     r["parameters"] = params
+    r.setdefault("tags", "")
     return r
 
 
@@ -116,7 +118,7 @@ async def list_regions():
         with get_db() as conn:
             rows = conn.execute(
                 "SELECT name, label, description, north, south, east, west, "
-                "dim, depth_scale, water_scale, height, base, subtract_water, sat_scale "
+                "dim, depth_scale, water_scale, height, base, subtract_water, sat_scale, tags "
                 "FROM regions ORDER BY name"
             ).fetchall()
         regions = [_row_to_region(r) for r in rows]
@@ -136,14 +138,15 @@ async def create_region(region: RegionCreate):
             conn.execute(
                 "INSERT OR REPLACE INTO regions "
                 "(name, label, description, north, south, east, west, "
-                " dim, depth_scale, water_scale, height, base, subtract_water, sat_scale) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " dim, depth_scale, water_scale, height, base, subtract_water, sat_scale, tags) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     region.name, region.label, region.description,
                     region.north, region.south, region.east, region.west,
                     params.dim, params.depth_scale, params.water_scale,
                     params.height, params.base,
                     int(params.subtract_water), params.sat_scale,
+                    region.tags or '',
                 ),
             )
             conn.commit()
@@ -168,7 +171,7 @@ async def update_region(name: str, region: RegionCreate):
             cur = conn.execute(
                 "UPDATE regions SET "
                 "label=?, description=?, north=?, south=?, east=?, west=?, "
-                "dim=?, depth_scale=?, water_scale=?, height=?, base=?, subtract_water=?, sat_scale=? "
+                "dim=?, depth_scale=?, water_scale=?, height=?, base=?, subtract_water=?, sat_scale=?, tags=? "
                 "WHERE name=?",
                 (
                     region.label, region.description,
@@ -176,6 +179,7 @@ async def update_region(name: str, region: RegionCreate):
                     params.dim, params.depth_scale, params.water_scale,
                     params.height, params.base,
                     int(params.subtract_water), params.sat_scale,
+                    region.tags or '',
                     name,
                 ),
             )

@@ -51,6 +51,9 @@ class CompositeCityRasterRequest(BaseModel):
     height: int = 512
     projection: str = "none"
     clip_nans: bool = True
+    simplify_tolerance: float = 0.5
+    min_area: float = 5.0
+    m_per_level: float = 3.5
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +199,9 @@ def _rasterize_city(req: CompositeCityRasterRequest) -> dict:
 
     _, coords_to_px = _make_geo_to_px(N, S, E, W, PW, PH)
 
-    osm_key = osm_cache_key(N, S, E, W)
+    osm_key = osm_cache_key(N, S, E, W,
+                            req.simplify_tolerance, req.min_area,
+                            req.m_per_level)
     osm_data = read_osm_cache(osm_key)
     if not osm_data:
         logger.debug(
@@ -242,7 +247,8 @@ async def get_city_raster(req: CompositeCityRasterRequest):
     comp_key = make_cache_key(
         "composite", req.north, req.south, req.east, req.west,
         {"w": req.width, "h": req.height,
-         "proj": req.projection, "cn": req.clip_nans}
+         "proj": req.projection, "cn": req.clip_nans,
+         "mpl": req.m_per_level, "tol": req.simplify_tolerance}
     )
     cached = read_array_cache("composite", comp_key)
     if cached:

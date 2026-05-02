@@ -33,12 +33,25 @@
       <span id="cityWaterwayCount"  class="city-layer-count"></span>
     </div>
 
-    <!-- city.simplify_tolerance / city.min_area -->
-    <div class="param-grid" style="border-top:1px solid #333;padding-top:8px;margin-top:4px;">
-      <label for="citySimplifyTolerance" title="Polygon simplification tolerance in metres.">Tolerance (m)</label>
-      <input type="number" id="citySimplifyTolerance" value="0.5" min="0" max="50" step="0.5" class="ctrl-input-sm">
+    <!-- city.raster_dim -->
+    <div class="param-group" style="border-top:1px solid #333;padding-top:8px;margin-top:4px;">
+      <label for="cityRasterDim" title="Resolution of the city heights raster (pixels per side). Higher = more detail but slower.">Raster res (px):</label>
+      <select id="cityRasterDim" class="ctrl-select">
+        <option value="100">100 px — Fast</option>
+        <option value="200" selected>200 px — Default</option>
+        <option value="400">400 px — Detail</option>
+        <option value="600">600 px — High</option>
+      </select>
+    </div>
+
+    <!-- city.simplify_tolerance / city.min_area / city.m_per_level -->
+    <div class="param-grid" style="padding-top:8px;margin-top:4px;">
+      <label for="citySimplifyTolerance" title="Polygon simplification tolerance in metres. Higher = fewer vertices, faster rendering. 3m is sharp at typical DEM resolution.">Tolerance (m)</label>
+      <input type="number" id="citySimplifyTolerance" value="3" min="0" max="50" step="0.5" class="ctrl-input-sm">
       <label for="cityMinArea" title="Minimum building footprint in m².">Min area (m²)</label>
       <input type="number" id="cityMinArea" value="5" min="0" max="5000" step="5" class="ctrl-input-sm">
+      <label for="cityMPerLevel" title="Floor-to-floor height in metres (used when OSM has levels but no height tag). 3.0–3.5 for Southern Europe (e.g. 3.4 for Granada), 3.5–4.0 for Northern Europe/US.">m / floor</label>
+      <input type="number" id="cityMPerLevel" value="3.5" min="2.0" max="6.0" step="0.05" class="ctrl-input-sm">
     </div>
 
     <!-- city.building_scale / city.road_depression_m / city.water_depression_m -->

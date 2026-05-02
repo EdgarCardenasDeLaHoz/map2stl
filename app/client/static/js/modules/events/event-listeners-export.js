@@ -144,6 +144,15 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
     document.getElementById('viewerNormals')?.addEventListener('change', e => {
         window.setViewerNormals?.(e.target.checked);
     });
+    document.getElementById('viewerSurfaceGroups')?.addEventListener('change', e => {
+        window.applySurfaceGroups?.(e.target.checked);
+    });
+    document.getElementById('viewerSimplify')?.addEventListener('change', () => {
+        window.applySimplification?.();
+    });
+    document.getElementById('viewerSimplifyRatio')?.addEventListener('input', () => {
+        if (document.getElementById('viewerSimplify')?.checked) window.applySimplification?.();
+    });
 
     document.getElementById('exportPuzzle3MFBtn')
         ?.addEventListener('click', () => window.exportPuzzle3MF?.());

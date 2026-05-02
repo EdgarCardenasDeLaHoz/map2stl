@@ -1,7 +1,7 @@
 # Plan: Building Height & Roof Geometry Pipeline
 
-_Last updated: 2026-04-25_
-_Status: ROOF-1 ✅ DONE | ROOF-2 ✅ DONE | ROOF-3 ✅ DONE_
+_Last updated: 2026-04-30_
+_Status: ROOF-1 done | ROOF-2 done | ROOF-3 done | F-ROOF1 (slanted roofs in raster) done. See [`docs/plans/height-training-status.md`](plans/height-training-status.md) for current ML model state._
 
 ## Context
 

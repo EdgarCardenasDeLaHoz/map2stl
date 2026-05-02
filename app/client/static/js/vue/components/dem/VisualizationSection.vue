@@ -66,15 +66,15 @@
         </div>
       </div>
       <div id="histogram" style="margin-top:8px;"></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:6px;">
-        <div style="display:flex;gap:4px;">
-          <button id="undoCurveBtn" class="btn btn-secondary" style="padding:6px 10px;font-size:12px;" title="Undo (Ctrl+Z)" disabled>⟵ Undo</button>
-          <button id="redoCurveBtn" class="btn btn-secondary" style="padding:6px 10px;font-size:12px;" title="Redo (Ctrl+Y)" disabled>Redo ⟶</button>
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;margin-top:8px;gap:4px;">
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+          <button id="undoCurveBtn" class="btn btn-secondary" style="padding:4px 8px;font-size:12px;" title="Undo (Ctrl+Z)" disabled>⟵ Undo</button>
+          <button id="redoCurveBtn" class="btn btn-secondary" style="padding:4px 8px;font-size:12px;" title="Redo (Ctrl+Y)" disabled>Redo ⟶</button>
         </div>
-        <div style="display:flex;gap:4px;">
-          <button id="applyCurveBtn"     class="btn btn-primary"   style="padding:6px 12px;font-size:12px;" title="Apply the elevation curve">✓ Apply</button>
-          <button id="resetCurveBtn"     class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" title="Reset to linear">↺ Reset</button>
-          <button id="seaLevelBufferBtn" class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" title="Insert sea-level shelf">🌊 Sea Level</button>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+          <button id="applyCurveBtn"     class="btn btn-primary"   style="padding:4px 8px;font-size:12px;" title="Apply the elevation curve">✓ Apply</button>
+          <button id="resetCurveBtn"     class="btn btn-secondary" style="padding:4px 8px;font-size:12px;" title="Reset to linear">↺ Reset</button>
+          <button id="seaLevelBufferBtn" class="btn btn-secondary" style="padding:4px 8px;font-size:12px;" title="Insert sea-level shelf">🌊 Sea</button>
         </div>
       </div>
     </div>

@@ -24,6 +24,17 @@ const DEFAULT_LAND_COVER: LandCoverConfig = {
 
 export const useAppStore = defineStore('app', {
     state: () => ({
+        // ── Map & globe instances ───────────────────────────────────────────
+        map:                null as unknown,
+        globeScene:         null as unknown,
+        globeCamera:        null as unknown,
+        globeRenderer:      null as unknown,
+        globe:              null as unknown,
+        drawnItems:         null as unknown,
+        preloadedLayer:     null as unknown,
+        editMarkersLayer:   null as unknown,
+        boundingBox:        null as unknown,
+
         // ── Region ────────────────────────────────────────────────────────────
         selectedRegion:     null as Region | null,
         coordinatesData:    [] as Region[],
@@ -37,7 +48,7 @@ export const useAppStore = defineStore('app', {
 
         // ── DEM parameters ────────────────────────────────────────────────────
         demParams: {
-            dim:           200,
+            dim:           600,
             depthScale:    0.5,
             waterScale:    0.05,
             subtractWater: true,
@@ -72,7 +83,7 @@ export const useAppStore = defineStore('app', {
         viewerScene:         null as unknown,
 
         // ── UI state ──────────────────────────────────────────────────────────
-        activeView:   'map'      as 'map' | 'dem' | 'model',
+        activeView:   'map'      as 'map' | 'dem' | 'model' | 'cache',
         sidebarMode:  'expanded' as 'expanded' | 'normal' | 'hidden',
         regionThumbnails: {} as Record<string, string>,
 

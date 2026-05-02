@@ -672,9 +672,9 @@ def _roofnet_classify_patch(
     The model returns a ``(height_map, shape_logits)`` tuple.  This
     helper extracts the *shape_logits* and converts them to a class label.
 
-    Supports both:
-    - Legacy RoofNet (tools.networks): 64x64, no ImageNet normalisation
-    - RoofNetV2 (tools.ml.models): 128x128, ImageNet normalisation
+    Historical: this helper supported a legacy `RoofNet` model in `tools/networks.py`
+    (64x64, no ImageNet normalisation), removed 2026-04. Modern path uses
+    `RoofNetV2` (`tools.ml.models`): 128x128, ImageNet normalisation.
 
     Parameters
     ----------

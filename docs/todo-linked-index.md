@@ -1,8 +1,8 @@
 # Linked Todo Index
 
-_Last updated: 2026-04-25_
+_Last updated: 2026-04-30_
 
-This file captures the completed working todo list. All items are now marked done.
+Completed and open work items linked to their detail docs.
 
 | Status | Todo | Detail Links |
 |---|---|---|
@@ -33,7 +33,15 @@ This file captures the completed working todo list. All items are now marked don
 | done | Preserve OSM roof tags + write inferred heights back (ROOF-1) | [building-roof-pipeline-plan.md](building-roof-pipeline-plan.md#phase-1-preserve-osm-roof-tags--write-heights-back-roof-1) |
 | done | Roof shape detection from satellite imagery (ROOF-2) | [building-roof-pipeline-plan.md](building-roof-pipeline-plan.md#phase-2-roof-shape-detection----satellite-inference-roof-2), [roof-ml-architecture.md](roof-ml-architecture.md) (detailed ML plan) |
 | done | Non-flat roof mesh generation (ROOF-3) | [building-roof-pipeline-plan.md](building-roof-pipeline-plan.md#phase-3-non-flat-roof-mesh-generation-roof-3) |
-| open | Open Buildings v3 real fetch path | [open-todo-plans.md](open-todo-plans.md#11-open-buildings-v3-real-fetch-path) |
+| done | Open Buildings v3 real fetch path | [open-todo-plans.md](open-todo-plans.md#11-open-buildings-v3-real-fetch-path) |
+| done | Shadow height inference pipeline | [open-todo-plans.md](open-todo-plans.md#12-shadow-height-actual-inference-pipeline) |
+| done | Plate Carree cache refactor (P-PROJ-CACHE) | [open-todo-plans.md](open-todo-plans.md#13-plate-carree-cache-refactor-p-proj-cache) |
+| done | Slanted roofs in city heights raster (F-ROOF1) | [building-roof-pipeline-plan.md](building-roof-pipeline-plan.md) |
+| done | First-principles height model (Retna_V1) replaces RoofNetV3 | [plans/height-training-status.md](plans/height-training-status.md) |
+| done | ML pipeline cleanup (3 active checkpoints; 50+ failed deleted) | [plans/height-training-status.md](plans/height-training-status.md) |
+| done | Unified ML CLI driver (`tools/ml/pipeline.py`) | [ml-pipeline.md](ml-pipeline.md) |
+| open | Wire Retna provider into height-fetch pool | [height-pipeline-improvement-plan.md](height-pipeline-improvement-plan.md) |
+| open | Close tall-building MAE gap (currently 13–16m on skyscrapers) | [plans/height-training-status.md](plans/height-training-status.md) |
 
 ## Notes By Item
 

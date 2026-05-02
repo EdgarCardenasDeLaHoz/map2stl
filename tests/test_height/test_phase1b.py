@@ -92,8 +92,9 @@ class TestOpenBuildings:
         assert _is_in_coverage((14.0, 13.0, 101.0, 100.0))  # Bangkok
 
     @patch("app.server.core.height.providers.open_buildings.read_array_cache", return_value=None)
-    def test_fetch_returns_nan_placeholder(self, mock_read):
-        """Currently unimplemented — returns NaN."""
+    @patch("app.server.core.height.providers.open_buildings._fetch_buildings_for_bbox", return_value=None)
+    def test_fetch_returns_nan_when_no_partition_data(self, mock_fetch, mock_read):
+        """No intersecting parquet rows returns an empty Open Buildings result."""
         p = OpenBuildingsProvider()
         result = p.fetch_heights((10.5, 10.3, -75.4, -75.6), (20, 20))
         assert np.all(np.isnan(result.raster))

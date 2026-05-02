@@ -10,6 +10,8 @@ from city2stl.height import (  # noqa: F401
     HeightResult,
     HeightProvider,
     merge_height_rasters,
+    provider_stats,
     _resample,
+    _filter_outliers,
 )
 

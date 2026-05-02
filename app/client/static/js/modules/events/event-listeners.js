@@ -38,7 +38,7 @@ window.setupEventListeners = function setupEventListeners() {
 
     window._setupBboxListeners?.();
 
-    document.getElementById('sidebarToggleBtn')?.addEventListener('click', () => window.cycleSidebarState?.());
+    // sidebarToggleBtn is handled by the Vue SidebarPanel component's @click="cycleSidebar"
     document.getElementById('bboxVisToggleBtn')?.addEventListener('click', () => window.toggleBboxLayerVisibility?.());
 
     document.getElementById('sidebarTableSearch')?.addEventListener('input', e => window.renderSidebarTable?.(e.target.value));
@@ -64,6 +64,7 @@ window.setupEventListeners = function setupEventListeners() {
     }
 
     window._setupResizablePanel?.();
+    window._setupModelResizablePanel?.();
 
     window.initCurveEditor?.();
     window.initPresetProfiles?.();

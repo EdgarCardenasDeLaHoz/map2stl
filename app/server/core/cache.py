@@ -38,6 +38,19 @@ logger = logging.getLogger(__name__)
 _STRM2STL_DIR = Path(__file__).parent.parent.parent.parent
 CACHE_ROOT = _STRM2STL_DIR / "cache"
 
+# osmnx defaults its raw-Overpass response cache to ./cache (the project root
+# CWD), which dumps thousands of opaque sha1.json files alongside our
+# namespaced subdirs and makes the cache inventory page unreadable. Pin it
+# to a dedicated subdir so the inventory shows a single bucket for it.
+try:
+    import osmnx as _ox
+    _OSMNX_RAW = CACHE_ROOT / "osmnx_raw"
+    _OSMNX_RAW.mkdir(parents=True, exist_ok=True)
+    _ox.settings.cache_folder = str(_OSMNX_RAW)
+    _ox.settings.use_cache = True
+except Exception:  # noqa: BLE001 — osmnx may not be installed in some envs
+    pass
+
 # Per-namespace TTLs in seconds
 NAMESPACE_TTL = {
     "dem":        30 * 86400,   # 30 days
@@ -70,14 +83,15 @@ def make_cache_key(namespace: str, north: float, south: float,
 
 
 def osm_cache_key(north: float, south: float, east: float, west: float,
-                  tol: float = 0.5, min_area: float = 5.0) -> str:
+                  tol: float = 0.5, min_area: float = 5.0,
+                  m_per_level: float = 3.5) -> str:
     """Return the MD5 key used by the OSM cache for a given bbox + simplification params.
 
     Matches the key written by routers/cities.py so other routers can read OSM
     data without re-fetching it.
     """
     return hashlib.md5(
-        f"{north:.4f}_{south:.4f}_{east:.4f}_{west:.4f}_t{tol}_a{min_area}".encode()
+        f"{north:.4f}_{south:.4f}_{east:.4f}_{west:.4f}_t{tol}_a{min_area}_mpl{m_per_level:.2f}".encode()
     ).hexdigest()
 
 
@@ -240,15 +254,23 @@ def prune_all_caches() -> dict[str, int]:
     return results
 
 
+def _bbox_intersects(sidecar_bbox, north: float, south: float,
+                     east: float, west: float) -> bool:
+    """Return True if the sidecar bbox overlaps [west,south,east,north] or [west,south,east,north]."""
+    try:
+        # sidecar stores [west, south, east, north]
+        sb_west, sb_south, sb_east, sb_north = (float(v) for v in sidecar_bbox)
+    except Exception:
+        return True  # if we can't parse, err on the side of deleting
+    return not (sb_east < west or sb_west > east or sb_north < south or sb_south > north)
+
+
 def clear_bbox_cache(north: float, south: float,
                      east: float, west: float) -> dict[str, int]:
-    """Delete all cached entries across all namespaces.
+    """Delete cached entries whose bbox overlaps the given bounding box.
 
-    Cache keys are MD5 hashes that embed the bbox, so we cannot selectively
-    filter without recomputing every possible parameter combination.  Instead,
-    delete all files in every namespace directory — this is safe because the
-    data will be re-fetched on the next request.
-
+    Reads each .json sidecar to check the stored bbox.  Entries without a
+    bbox in their sidecar (e.g. legacy EE tiles) are also deleted to be safe.
     Returns ``{namespace: deleted_count}``.
     """
     results: dict[str, int] = {}
@@ -258,15 +280,27 @@ def clear_bbox_cache(north: float, south: float,
         if not d.exists():
             continue
         deleted = 0
-        for f in list(d.iterdir()):
+        # Iterate over .npz files; check paired .json sidecar for bbox
+        for npz_path in list(d.glob("*.npz")):
+            json_path = npz_path.with_suffix(".json")
             try:
-                f.unlink()
-                deleted += 1
+                if json_path.exists():
+                    meta = json.loads(json_path.read_text())
+                    sidecar_bbox = meta.get("bbox")
+                    if sidecar_bbox and not _bbox_intersects(sidecar_bbox, north, south, east, west):
+                        continue  # this entry is outside the requested bbox — leave it alone
+                # Delete both .npz and .json
+                for p in (npz_path, json_path):
+                    try:
+                        p.unlink(missing_ok=True)
+                        deleted += 1
+                    except Exception:
+                        pass
             except Exception:
                 pass
         results[ns] = deleted
 
-    # Also clear the legacy EE cache directory
+    # Also clear legacy EE cache directory (no sidecars, delete everything)
     ee_dir = CACHE_ROOT / "ee"
     if ee_dir.exists():
         deleted = 0

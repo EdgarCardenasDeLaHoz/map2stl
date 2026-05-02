@@ -7,76 +7,72 @@
         <div id="modelEmptyState" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#444;font-size:14px;gap:10px;pointer-events:none;">
           <span style="font-size:40px;">🗺️</span>
           <span>Generate a model to preview it here</span>
+          <span style="font-size:13px;color:#888;">(Load a DEM and click <b>Generate Model</b> to enable export)</span>
         </div>
         <div class="model-overlay">
           <span id="modelStatus">No model generated</span>
         </div>
       </div>
-      <div class="model-sidebar">
+      <div id="modelSidebarResizeHandle" class="settings-resize-handle" title="Drag to resize panel"></div>
+      <div id="modelRightPanel" class="model-sidebar">
         <h3>🏔️ 3D Model Generation</h3>
 
         <!-- ── Export Settings (export group) ─────────────────────────── -->
         <CollapsibleSection title="📐 Export Settings" :start-open="true" wrap-style="margin-bottom:10px;">
 
-          <!-- export.model_height -->
-          <div class="param-group">
-            <label for="exportModelHeight" title="Physical height of the tallest terrain point in mm.">Model Height (mm):</label>
-            <input type="number" id="exportModelHeight" value="30" min="1" max="200" step="1">
+          <!-- Numeric params — compact grid -->
+          <div class="param-grid">
+            <label for="exportModelHeight" title="Physical height of the tallest terrain point in mm.">Height (mm)</label>
+            <input type="number" id="exportModelHeight" value="30" min="1" max="200" step="1" class="ctrl-input-sm">
+
+            <label for="exportBaseHeight" title="Solid base plate thickness in mm.">Base (mm)</label>
+            <input type="number" id="exportBaseHeight" value="10" min="0" max="50" step="0.5" class="ctrl-input-sm">
+
+            <label for="exportExaggeration" title="Vertical exaggeration multiplier applied to the mesh.">Exaggeration</label>
+            <input type="number" id="exportExaggeration" value="1.0" step="0.1" min="0.1" max="10" class="ctrl-input-sm">
           </div>
 
-          <!-- export.base_height -->
-          <div class="param-group">
-            <label for="exportBaseHeight" title="Solid base plate thickness in mm.">Base Height (mm):</label>
-            <input type="number" id="exportBaseHeight" value="10" min="0" max="50" step="0.5">
+          <!-- Toggle checkboxes — inline compact row -->
+          <div style="display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0 4px;font-size:11px;">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Clamp all ocean surfaces to z=0 (prevents deep-trench artefacts).">
+              <input type="checkbox" id="exportSeaLevelCap"> Sea cap
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Add side walls to produce a watertight solid.">
+              <input type="checkbox" id="exportWalls" checked> Walls
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Add bottom face to produce a watertight solid.">
+              <input type="checkbox" id="exportFloor" checked> Floor
+            </label>
           </div>
 
-          <!-- export.exaggeration -->
-          <div class="param-group">
-            <label for="exportExaggeration" title="Vertical exaggeration multiplier applied to the mesh.">Exaggeration:</label>
-            <input type="number" id="exportExaggeration" value="1.0" step="0.1" min="0.1" max="10">
+          <!-- Label & contour toggles -->
+          <div style="display:flex;flex-wrap:wrap;gap:6px 14px;margin:4px 0;font-size:11px;">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Engrave region name into the base.">
+              <input type="checkbox" id="exportEngraveLabel"> Engrave label
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Add topo contour lines engraved into model.">
+              <input type="checkbox" id="exportContours"> Contours
+            </label>
           </div>
 
-          <!-- export.sea_level_cap -->
-          <div class="param-group">
-            <label for="exportSeaLevelCap" title="Clamp all ocean surfaces to z=0 (prevents deep-trench artefacts).">Sea Level Cap:</label>
-            <input type="checkbox" id="exportSeaLevelCap">
+          <!-- Label text (shown when engrave checked) -->
+          <div id="exportLabelTextRow" style="display:none;margin-top:4px;">
+            <input type="text" id="exportLabelText" placeholder="Label text (blank = region name)" class="ctrl-input" style="width:100%;box-sizing:border-box;">
           </div>
 
-          <!-- export.floor_val -->
-          <div class="param-group">
-            <label for="exportFloorVal" title="Minimum elevation value (metres) after normalisation. 0 = natural minimum.">Floor Value (m):</label>
-            <input type="number" id="exportFloorVal" value="0" step="1" min="-500" max="500" style="width:80px;">
-          </div>
-
-          <!-- export.engrave_label -->
-          <div class="param-group">
-            <label for="exportEngraveLabel" title="Engrave region name into the base.">Engrave Label:</label>
-            <input type="checkbox" id="exportEngraveLabel">
-          </div>
-          <div class="param-group" id="exportLabelTextRow" style="display:none;">
-            <label for="exportLabelText" title="Label text (leave blank to use region name).">Label Text:</label>
-            <input type="text" id="exportLabelText" placeholder="(region name)" class="ctrl-input">
-          </div>
-
-          <!-- export.contours -->
-          <div class="param-group">
-            <label for="exportContours" title="Add topo contour lines engraved into model.">Contour Lines:</label>
-            <input type="checkbox" id="exportContours">
-          </div>
-          <div id="exportContoursParams" style="display:none;">
-            <div class="param-group">
-              <label for="exportContourInterval" title="Contour interval in metres.">Interval (m):</label>
-              <select id="exportContourInterval">
+          <!-- Contour params (shown when contours checked) -->
+          <div id="exportContoursParams" style="display:none;margin-top:4px;">
+            <div class="param-grid">
+              <label for="exportContourInterval" title="Contour interval in metres.">Interval (m)</label>
+              <select id="exportContourInterval" class="ctrl-input-sm" style="width:auto;">
                 <option value="50">50 m</option>
                 <option value="100" selected>100 m</option>
                 <option value="250">250 m</option>
                 <option value="500">500 m</option>
                 <option value="1000">1000 m</option>
               </select>
-            </div>
-            <div class="param-group">
-              <label for="exportContourStyle" title="Raised or engraved contours.">Style:</label>
-              <select id="exportContourStyle">
+              <label for="exportContourStyle" title="Raised or engraved contours.">Style</label>
+              <select id="exportContourStyle" class="ctrl-input-sm" style="width:auto;">
                 <option value="engraved" selected>Engraved</option>
                 <option value="raised">Raised</option>
               </select>
@@ -179,7 +175,7 @@
         </CollapsibleSection>
 
         <!-- Progress bar -->
-        <div id="modelProgress" class="model-progress">
+        <div id="modelProgress" class="model-progress hidden">
           <div class="progress-bar-container">
             <div id="modelProgressBar" class="progress-bar"></div>
           </div>
@@ -243,34 +239,54 @@
         </CollapsibleSection>
 
         <!-- ── 3D Viewer Controls ──────────────────────────────────────── -->
-        <CollapsibleSection title="🎮 Viewer" wrap-style="margin-top:10px;">
-          <div class="param-group">
-            <label>Wireframe:</label>
-            <input type="checkbox" id="viewerWireframe">
-          </div>
-          <div class="param-group">
-            <label>Normals:</label>
-            <input type="checkbox" id="viewerNormals">
-          </div>
-          <div class="param-group">
-            <label>Colormap:</label>
-            <select id="viewerColormap">
+        <CollapsibleSection title="� Viewer" wrap-style="margin-top:10px;">
+
+          <!-- Colormap -->
+          <div class="param-grid">
+            <label for="viewerColormap">Colormap</label>
+            <select id="viewerColormap" class="ctrl-input-sm" style="width:auto;">
               <option value="terrain" selected>Terrain</option>
               <option value="viridis">Viridis</option>
               <option value="gray">Gray</option>
               <option value="none">None (flat)</option>
             </select>
           </div>
-          <div class="param-group">
-            <label>Auto-rotate:</label>
-            <input type="checkbox" id="viewerAutoRotate">
+
+          <!-- Display toggles -->
+          <div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin:6px 0 4px;font-size:11px;">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Overlay mesh wireframe">
+              <input type="checkbox" id="viewerWireframe"> Wireframe
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Show vertex normals debug material">
+              <input type="checkbox" id="viewerNormals"> Normals
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+              <input type="checkbox" id="viewerAutoRotate"> Auto-rotate
+            </label>
           </div>
-          <div class="param-group">
-            <button id="viewerResetCamera" class="btn btn-secondary btn-sm">Reset Camera</button>
+
+          <!-- Analysis toggles -->
+          <div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin:4px 0;font-size:11px;">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Color each connected mesh patch a distinct random hue">
+              <input type="checkbox" id="viewerSurfaceGroups"> Surface groups
+            </label>
           </div>
+
+          <!-- Simplification -->
+          <div style="display:flex;align-items:center;gap:6px;margin:4px 0;font-size:11px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Subsample the grid client-side — no re-fetch. Use with Wireframe to inspect mesh density.">
+              <input type="checkbox" id="viewerSimplify"> Simplify
+            </label>
+            <input type="number" id="viewerSimplifyRatio" value="0.25" min="0.05" max="0.95" step="0.05"
+              class="ctrl-input-sm" style="width:48px;" title="Keep fraction (0.05 = very coarse, 0.95 = near-full)">
+            <span style="color:#888;font-size:10px;">keep</span>
+          </div>
+
+          <button id="viewerResetCamera" class="btn btn-secondary btn-sm" style="width:100%;margin-top:6px;">Reset Camera</button>
+
         </CollapsibleSection>
 
-      </div><!-- /model-sidebar -->
+      </div><!-- /modelRightPanel -->
     </div><!-- /model-layout -->
   </div><!-- /modelContainer -->
 </template>

@@ -13,6 +13,7 @@
           <span class="strip-dot" id="stripDotDem"></span>
           <span class="strip-dot" id="stripDotWater"></span>
           <span class="strip-dot" id="stripDotLandCover"></span>
+          <span class="strip-dot" id="stripDotCities"></span>
         </span>
       </button>
       <button class="dem-strip-btn" id="compareStripBtn" data-subtab="compare" title="Switch to Compare view">⚖ Compare</button>
@@ -26,11 +27,11 @@
         <!-- Save Settings row — pinned at top for quick access -->
         <div id="settingsSaveRow" class="row-gap6" style="padding:4px 0 8px;border-bottom:1px solid #333;margin-bottom:6px;">
           <button id="saveRegionSettingsBtn" class="btn btn-primary"
-                  style="flex:1;padding:6px 0;font-size:12px;"
-                  title="Save all current panel settings for the selected region">💾 Save Settings</button>
+                  style="flex:1;padding:6px 0;font-size:14px;"
+                  title="Save all current panel settings for the selected region">💾</button>
           <button id="clearRegionCacheBtn" class="btn btn-secondary"
-                  style="padding:6px 8px;font-size:12px;"
-                  title="Clear all cached data (DEM, water, satellite, etc.) and re-fetch">🗑️ Clear Cache</button>
+                  style="padding:6px 8px;font-size:14px;"
+                  title="Clear all cached data (DEM, water, satellite, etc.) and re-fetch">🗑️</button>
           <label class="check-label" style="font-size:11px;color:#aaa;white-space:nowrap;" title="Auto-save settings after changes">
             <input type="checkbox" id="autoSaveEnabled"> Auto
           </label>
@@ -44,12 +45,7 @@
 
         <!-- ═══ Block 2: Fetch ═══ -->
         <ProjectionSection />
-        <DemSourceSection />
-        <WaterSection />
-        <EsaLandCoverSection />
-        <SatelliteSection />
-        <HydrologySection />
-        <CitiesSection />
+        <FetchLayersSection />
 
         <!-- ═══ Block 3: Compose ═══ -->
         <CompositeDemSection />
@@ -99,13 +95,8 @@
 <script setup lang="ts">
 import VisualizationSection  from './VisualizationSection.vue';
 import LayerViewSection      from './LayerViewSection.vue';
-import DemSourceSection      from './DemSourceSection.vue';
 import ProjectionSection     from './ProjectionSection.vue';
-import WaterSection          from './WaterSection.vue';
-import EsaLandCoverSection   from './EsaLandCoverSection.vue';
-import SatelliteSection      from './SatelliteSection.vue';
-import HydrologySection      from './HydrologySection.vue';
-import CitiesSection         from './CitiesSection.vue';
+import FetchLayersSection    from './FetchLayersSection.vue';
 import CompositeDemSection   from './CompositeDemSection.vue';
 import PresetsSection        from './PresetsSection.vue';
 </script>

@@ -171,3 +171,8 @@ window.clearHydrology = function clearHydrology() {
 
     window.emitStackUpdate();
 };
+
+/** Abort any in-flight hydrology request. */
+window.cancelHydroLoad = function cancelHydroLoad() {
+    if (_hydroAbortController) _hydroAbortController.abort();
+};

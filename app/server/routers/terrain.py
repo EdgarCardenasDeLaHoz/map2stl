@@ -48,12 +48,19 @@ from app.server.config import (
 from typing import Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, Request, Query, Depends
+from collections import OrderedDict
 import numpy as np
 import math
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["terrain"])
+
+# In-memory LRU cache for fully-serialised DEM response dicts.
+# Sits in front of the disk cache so that repeated hot requests skip both
+# the .npz read and the base64 encode step.
+_DEM_MEM_CACHE_MAX = 30
+_dem_mem_cache: OrderedDict = OrderedDict()
 
 
 # ---------------------------------------------------------------------------
@@ -172,19 +179,29 @@ async def get_terrain_dem(
         f"GET /api/terrain/dem north={north} south={south} east={east} "
         f"west={west} dim={dim} show_sat={show_sat}")
 
-    # --- DEM disk cache check ---
+    # --- DEM in-memory cache check (fastest path) ---
     _dem_cache_key = make_cache_key("dem", north, south, east, west, {
         "dim": dim, "src": dem_source, "proj": projection,
         "ds": depth_scale, "ws": water_scale,
         "sw": subtract_water, "md": maintain_dimensions,
         "cn": clip_nans, "sat": show_sat,
     })
-    _cached = read_array_cache("dem", _dem_cache_key)
-    if _cached is not None and _cached[0].get("dem") is not None:
-        logger.info(f"DEM cache hit: {_dem_cache_key[:8]}...")
-        payload = _make_dem_payload(_cached[0]["dem"], west, south, east, north,
+    if _dem_cache_key in _dem_mem_cache:
+        logger.info(f"DEM mem-cache hit: {_dem_cache_key[:8]}...")
+        _dem_mem_cache.move_to_end(_dem_cache_key)  # LRU: mark as recently used
+        return JSONResponse(content=_dem_mem_cache[_dem_cache_key])
+
+    # --- DEM disk cache check ---
+    _disk_cached = read_array_cache("dem", _dem_cache_key)
+    if _disk_cached is not None and _disk_cached[0].get("dem") is not None:
+        logger.info(f"DEM disk-cache hit: {_dem_cache_key[:8]}...")
+        payload = _make_dem_payload(_disk_cached[0]["dem"], west, south, east, north,
                                     show_sat, upscale_dim=dim)
         payload["from_cache"] = True
+        # Promote to in-memory cache
+        if len(_dem_mem_cache) >= _DEM_MEM_CACHE_MAX:
+            _dem_mem_cache.popitem(last=False)
+        _dem_mem_cache[_dem_cache_key] = payload
         return JSONResponse(content=payload)
 
     # TEST_MODE: return deterministic gradient without network I/O
@@ -269,6 +286,11 @@ async def get_terrain_dem(
                  "mean_elevation": response_content["mean_elevation"],
                  "bbox": [west, south, east, north],
                  "shape": [height_px, width_px]})
+
+        # Promote to in-memory cache for subsequent requests in this server session
+        if len(_dem_mem_cache) >= _DEM_MEM_CACHE_MAX:
+            _dem_mem_cache.popitem(last=False)
+        _dem_mem_cache[_dem_cache_key] = response_content
 
         return JSONResponse(content=response_content)
 

@@ -92,6 +92,8 @@ class TrainConfig:
     pixel_l2_weight: float = 0.25
     # Pixel regression objective: "l1", "rmse", or "hybrid"
     pixel_loss_mode: str = "hybrid"
+    # Max gradient norm for clipping (0 = disabled)
+    grad_clip_norm: float = 1.0
     # Building-pixel upweighting factor for sparse height supervision
     bldg_loss_weight: float = 5.0
     # Checkpoint frequency
@@ -104,6 +106,8 @@ class TrainConfig:
     resume: bool = False
     # Optional explicit checkpoint path to resume from
     resume_from: Optional[str] = None
+    # If True, also load scheduler state when resuming
+    resume_scheduler: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +177,7 @@ def _train_epoch_shape(model, loader, criterion, optimizer, device, per_image_ba
                 _, shape_logits = model(x)
                 loss = criterion(shape_logits, y)
                 loss.backward()
-                nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
                 total_loss += loss.item()
                 correct += (shape_logits.argmax(1) == y).sum().item()
@@ -183,7 +187,7 @@ def _train_epoch_shape(model, loader, criterion, optimizer, device, per_image_ba
             _, shape_logits = model(imgs)
             loss = criterion(shape_logits, labels)
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             total_loss += loss.item() * len(labels)
             correct += (shape_logits.argmax(1) == labels).sum().item()
@@ -279,6 +283,31 @@ def _dice_loss_continuous(pred, target, smooth: float = 1.0):
     return (1.0 - dice).mean()
 
 
+def _height_iou_loss(pred, target, smooth: float = 1.0):
+    """Height-overlap IoU loss for regression.
+
+    Treats height values as 1-D intervals rooted at 0.  For each pixel pair
+    (p, t) both ≥ 0, IoU = min(p,t) / max(p,t).  Summing over building
+    pixels encourages the model to simultaneously predict the correct
+    locations AND magnitudes, without requiring exact pixel accuracy.
+
+    This is complementary to L1 (which only penalises magnitude error):
+    if the model predicts 20m where the truth is 10m, L1 = 10 but
+    IoU-loss captures that the overlap is only 50%.
+
+    Returns 1 - mean_IoU so that 0 = perfect and 1 = no overlap.
+    """
+    bldg = (target > 0)
+    if not bldg.any():
+        return pred.sum() * 0.0  # differentiable zero
+    p = pred[bldg].clamp(min=0.0)
+    t = target[bldg].clamp(min=0.0)
+    inter = torch.minimum(p, t)
+    union = torch.maximum(p, t)
+    iou = (inter.sum() + smooth) / (union.sum() + smooth)
+    return 1.0 - iou
+
+
 def _v3_loss(
     mask_logits, height_pred, target_height,
     grad_weight: float = 0.5,
@@ -333,6 +362,7 @@ def _train_epoch_height(
     pixel_l2_weight: float,
     pixel_loss_mode: str,
     per_image_backprop: bool = True,
+    grad_clip_norm: float = 1.0,
 ):
     """One epoch of height-only training."""
     model.train()
@@ -355,6 +385,8 @@ def _train_epoch_height(
                     pixel_loss_mode=pixel_loss_mode,
                 )
                 loss.backward()
+                if grad_clip_norm > 0:
+                    nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
                 optimizer.step()
                 total_loss += loss.item()
                 n += 1
@@ -370,6 +402,8 @@ def _train_epoch_height(
                 pixel_loss_mode=pixel_loss_mode,
             )
             loss.backward()
+            if grad_clip_norm > 0:
+                nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
             optimizer.step()
             total_loss += loss.item() * rgb.size(0)
             n += rgb.size(0)
@@ -430,6 +464,7 @@ def _train_epoch_v3(
     pixel_l2_weight: float,
     pixel_loss_mode: str,
     per_image_backprop: bool = True,
+    grad_clip_norm: float = 1.0,
 ):
     """One epoch of RoofNetV3 training with deep supervision across iters."""
     model.train()
@@ -467,7 +502,8 @@ def _train_epoch_v3(
                 mae = (bldg * (gated - y).abs()).sum() / bldg.sum().clamp(min=1.0)
 
                 loss.backward()
-                nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+                if grad_clip_norm > 0:
+                    nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
                 optimizer.step()
                 total_loss += loss.item()
                 total_mae += mae.item()
@@ -498,7 +534,8 @@ def _train_epoch_v3(
             mae = (bldg * (gated - height).abs()).sum() / bldg.sum().clamp(min=1.0)
 
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            if grad_clip_norm > 0:
+                nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
             optimizer.step()
             total_loss += loss.item() * rgb.size(0)
             total_mae += mae.item() * rgb.size(0)
@@ -517,9 +554,19 @@ def _eval_epoch_v3(
     pixel_l2_weight: float,
     pixel_loss_mode: str,
 ):
+    """Return (loss, mae_metres, mask_iou, mask_acc, rmse_metres).
+
+    All metrics computed on the mask-gated prediction so they reflect what an
+    inference user would see.
+    """
     model.eval()
     total_loss = 0.0
     total_mae = 0.0
+    total_sq = 0.0
+    total_iou_num = 0.0
+    total_iou_den = 0.0
+    total_correct = 0
+    total_pixels = 0
     n = 0
     for rgb, height in loader:
         rgb, height = rgb.to(device), height.to(device)
@@ -535,14 +582,312 @@ def _eval_epoch_v3(
         )
 
         mask_prob = torch.sigmoid(mask_logits)
+        pred_mask = (mask_prob > 0.5).float()
         gated = torch.clamp(height_pred, min=0.0) * (mask_prob > 0.3).float()
-        bldg = (height > 0).float()
-        mae = (bldg * (gated - height).abs()).sum() / bldg.sum().clamp(min=1.0)
+        target_mask = (height > 0).float()
+        bldg_pixels = target_mask.sum().clamp(min=1.0)
 
-        total_loss += loss.item() * rgb.size(0)
-        total_mae += mae.item() * rgb.size(0)
-        n += rgb.size(0)
-    return total_loss / max(n, 1), total_mae / max(n, 1)
+        mae_pixels = (target_mask * (gated - height).abs()).sum()
+        sq_pixels = (target_mask * (gated - height).pow(2)).sum()
+
+        # Per-pixel mask IoU (numerator/denominator accumulated across batch)
+        intersection = (pred_mask * target_mask).sum()
+        union = ((pred_mask + target_mask).clamp(max=1.0)).sum()
+
+        # Per-pixel mask accuracy
+        correct = (pred_mask == target_mask).sum()
+
+        bs = rgb.size(0)
+        total_loss += loss.item() * bs
+        total_mae += (mae_pixels / bldg_pixels).item() * bs
+        total_sq += (sq_pixels / bldg_pixels).item() * bs
+        total_iou_num += intersection.item()
+        total_iou_den += union.item()
+        total_correct += correct.item()
+        total_pixels += pred_mask.numel()
+        n += bs
+
+    nn = max(n, 1)
+    iou = total_iou_num / max(total_iou_den, 1.0)
+    mask_acc = total_correct / max(total_pixels, 1)
+    rmse = (total_sq / nn) ** 0.5
+    return total_loss / nn, total_mae / nn, iou, mask_acc, rmse
+
+
+def _unet_loss(
+    mask_logits, height_pred, target_height,
+    grad_weight: float = 0.2,
+    bldg_weight: float = 5.0,
+    pixel_l2_weight: float = 0.25,
+    pixel_loss_mode: str = "hybrid",
+    mask_weight: float = 1.0,
+    iou_weight: float = 0.5,
+):
+    """Combined loss for HeightUNet dual-head output.
+
+    mask_weight * (BCE + Dice) on the segmentation head
+    + _height_loss on the height head (weighted L1 + Sobel gradient)
+    + iou_weight * _height_iou_loss (height-overlap IoU encourages correct
+      location AND magnitude simultaneously)
+
+    Segmentation is an easier task than height regression — the mask head
+    converges in the first few epochs and provides a clean building/background
+    signal that bootstraps the height head's learning.
+    """
+    target_mask = (target_height > 0).float()
+    h_loss = _height_loss(height_pred, target_height, grad_weight, bldg_weight,
+                          pixel_l2_weight, pixel_loss_mode)
+    iou_l  = _height_iou_loss(height_pred, target_height)
+    bce    = torch.nn.functional.binary_cross_entropy_with_logits(mask_logits, target_mask)
+    m_dice = _dice_loss_binary(mask_logits, target_mask)
+    return h_loss + iou_weight * iou_l + mask_weight * (bce + m_dice)
+
+
+def train_unet(
+    tile_dir: str = "cache/height_tiles_osm",
+    output_model: str = "models/roofnet_unet.pt",
+    config: "TrainConfig | None" = None,
+    verbose: bool = True,
+) -> dict:
+    """Train HeightUNet — U-Net with shared decoder, mask head + height head.
+
+    The mask head (building/non-building segmentation) provides a strong,
+    easy-to-learn signal from the start, even on tiles with noisy height labels.
+    The height head is supervised only on building pixels (bldg_weight upweighting).
+    At inference the height output is gated by the predicted mask.
+
+    Returns the same result dict as ``train_v3``.
+    """
+    _require_torch()
+    from tools.ml.models import HeightUNet
+    from tools.ml.data import make_height_loaders
+
+    cfg = config or TrainConfig()
+    device = torch.device(
+        "cuda" if cfg.device == "auto" and torch.cuda.is_available()
+        else ("cpu" if cfg.device == "auto" else cfg.device)
+    )
+
+    strm2stl = Path(__file__).resolve().parents[2]
+    tile_path = Path(tile_dir) if Path(tile_dir).is_absolute() else strm2stl / tile_dir
+    out_path  = Path(output_model) if Path(output_model).is_absolute() else strm2stl / output_model
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    latest_path = out_path.with_suffix(".latest.pt")
+
+    tile_paths = sorted(tile_path.glob("*.npz"))
+    if not tile_paths:
+        raise FileNotFoundError(f"No .npz tiles found in {tile_path}")
+
+    torch.manual_seed(cfg.seed)
+    train_loader, val_loader, split = make_height_loaders(
+        tile_paths, tile_size=cfg.tile_size,
+        batch_size=cfg.batch_size, num_workers=cfg.num_workers,
+    )
+
+    model = HeightUNet(pretrained=True, freeze_backbone=True).to(device)
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total     = sum(p.numel() for p in model.parameters())
+    if verbose:
+        print(f"HeightUNet: {total:,} total params ({trainable:,} trainable)")
+        print(f"Tiles: {split['n_train']} train / {split['n_val']} val")
+
+    backbone_ids = set(id(p) for p in model.backbone.parameters())
+    dec_params = [p for p in model.parameters() if id(p) not in backbone_ids]
+    bb_params  = [p for p in model.backbone.parameters()]
+    optimizer = torch.optim.AdamW(
+        [{"params": dec_params, "lr": cfg.lr},
+         {"params": bb_params,  "lr": cfg.lr * 0.1}],
+        lr=cfg.lr, weight_decay=cfg.weight_decay,
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=cfg.epochs, eta_min=cfg.lr * 0.01,
+    )
+
+    history_path = out_path.parent / (out_path.stem + "_history.json")
+    history = _load_history(history_path)
+    best_val = float("inf")
+    best_selection = float("inf")
+    best_epoch = 0
+    patience_counter = 0
+    start_epoch = 1
+
+    resume_ckpt: Path | None = None
+    if cfg.resume_from:
+        candidate = Path(cfg.resume_from)
+        if not candidate.is_absolute():
+            candidate = strm2stl / candidate
+        if candidate.exists():
+            resume_ckpt = candidate
+    elif cfg.resume and latest_path.exists():
+        resume_ckpt = latest_path
+
+    if resume_ckpt is not None:
+        state = torch.load(str(resume_ckpt), map_location=device, weights_only=False)
+        sd = state.get("model_state_dict", state) if isinstance(state, dict) else state
+        model.load_state_dict(sd, strict=False)
+        if isinstance(state, dict):
+            try: optimizer.load_state_dict(state["optimizer_state_dict"])
+            except Exception: pass
+            if cfg.resume_scheduler:
+                try: scheduler.load_state_dict(state["scheduler_state_dict"])
+                except Exception: pass
+            prev_epoch = int(state.get("epoch", 0) or 0)
+            start_epoch = prev_epoch + 1
+            best_val = float(state.get("best_val_loss", best_val))
+            best_epoch = int(state.get("best_epoch", prev_epoch))
+        if verbose:
+            print(f"Resuming from {resume_ckpt} (start epoch {start_epoch})")
+
+    backbone_unfrozen = False
+    end_epoch = start_epoch + cfg.epochs - 1
+
+    for epoch in range(start_epoch, end_epoch + 1):
+        if not backbone_unfrozen and epoch > cfg.freeze_backbone_epochs:
+            model.unfreeze_backbone()
+            backbone_unfrozen = True
+            if verbose:
+                print(f"  [epoch {epoch}] Backbone unfrozen")
+
+        model.train()
+        t0 = time.perf_counter()
+        total_loss, total_mae, n = 0.0, 0.0, 0
+
+        for rgb, height in train_loader:
+            rgb, height = rgb.to(device), height.to(device)
+            optimizer.zero_grad()
+            mask_logits, height_pred = model(rgb)
+            loss = _unet_loss(mask_logits, height_pred, height,
+                              cfg.grad_loss_weight, cfg.bldg_loss_weight,
+                              cfg.pixel_l2_weight, cfg.pixel_loss_mode)
+            loss.backward()
+            if cfg.grad_clip_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip_norm)
+            optimizer.step()
+            with torch.no_grad():
+                bldg = (height > 0)
+                mae = (height_pred - height).abs()[bldg].mean() if bldg.any() else torch.tensor(0.0)
+            total_loss += loss.item() * rgb.size(0)
+            total_mae  += mae.item() * rgb.size(0)
+            n += rgb.size(0)
+
+        train_loss = total_loss / max(n, 1)
+        train_mae  = total_mae  / max(n, 1)
+
+        # Validation
+        model.eval()
+        val_loss, val_mae_sum, val_sq_sum, val_n = 0.0, 0.0, 0.0, 0
+        with torch.no_grad():
+            for rgb, height in val_loader:
+                rgb, height = rgb.to(device), height.to(device)
+                mask_logits, height_pred = model(rgb)
+                loss = _unet_loss(mask_logits, height_pred, height,
+                                  cfg.grad_loss_weight, cfg.bldg_loss_weight,
+                                  cfg.pixel_l2_weight, cfg.pixel_loss_mode)
+                bldg = (height > 0)
+                if bldg.any():
+                    errs = (height_pred - height).abs()[bldg]
+                    val_mae_sum += errs.sum().item()
+                    val_sq_sum  += (errs ** 2).sum().item()
+                    val_n       += bldg.sum().item()
+                val_loss += loss.item() * rgb.size(0)
+            val_loss /= max(len(val_loader.dataset), 1)
+
+        val_mae  = val_mae_sum  / max(val_n, 1)
+        val_rmse = (val_sq_sum  / max(val_n, 1)) ** 0.5
+
+        scheduler.step()
+        dt = time.perf_counter() - t0
+
+        metric = cfg.selection_metric.lower()
+        sel_val = val_rmse if metric == "rmse" else (val_mae if metric == "mae" else val_loss)
+
+        history.append({
+            "epoch": epoch, "arch": "unet",
+            "train_loss": train_loss, "train_mae": train_mae,
+            "val_loss": val_loss, "val_mae": val_mae, "val_rmse": val_rmse,
+            "lr": scheduler.get_last_lr()[0],
+        })
+
+        is_best = sel_val < best_selection
+        latest_state = {
+            "epoch": epoch, "arch": "unet",
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "val_loss": val_loss, "val_mae": val_mae, "val_rmse": val_rmse,
+            "best_val_loss": best_val, "best_epoch": best_epoch,
+            "config": cfg.__dict__,
+        }
+        torch.save(latest_state, str(latest_path))
+
+        if is_best:
+            best_val = val_loss
+            best_selection = sel_val
+            best_epoch = epoch
+            patience_counter = 0
+            latest_state.update({"best_val_loss": best_val, "best_epoch": best_epoch})
+            torch.save(latest_state, str(out_path))
+        else:
+            patience_counter += 1
+
+        with open(history_path, "w", encoding="utf-8") as fh:
+            json.dump({
+                "history": history,
+                "best_val_loss": best_val,
+                "best_selection_value": best_selection,
+                "selection_metric": cfg.selection_metric,
+                "best_epoch": best_epoch,
+            }, fh, indent=2)
+
+        if verbose:
+            marker = "* best" if is_best else ""
+            print(f"  Epoch {epoch:3d}/{end_epoch}  "
+                  f"train={train_loss:.3f} mae={train_mae:.2f}m  "
+                  f"val={val_loss:.3f} mae={val_mae:.2f}m rmse={val_rmse:.2f}m  "
+                  f"{marker:7}  ({dt:.1f}s)")
+
+        if patience_counter >= cfg.patience:
+            if verbose:
+                print(f"  Early stopping at epoch {epoch}")
+            break
+
+    return {
+        "best_val_loss": best_val,
+        "best_epoch": best_epoch,
+        "model_path": str(out_path),
+        "history": history,
+        "arch": "unet",
+    }
+
+
+def _make_v3_optimizer(model, lr: float, weight_decay: float, backbone_frozen: bool = False):
+    """AdamW with per-group LRs: FPN 3×, heads 5×, backbone 0.1× (or excluded when frozen)."""
+    decoder_ids = set()
+    for name in ("fpn", "mask_head", "height_head", "scratchpad"):
+        mod = getattr(model, name, None)
+        if mod is not None:
+            decoder_ids.update(id(p) for p in mod.parameters())
+
+    fpn_params, head_params, backbone_params = [], [], []
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        if id(p) in decoder_ids:
+            if "fpn" in name:
+                fpn_params.append(p)
+            else:
+                head_params.append(p)
+        else:
+            backbone_params.append(p)
+
+    groups = [
+        {"params": fpn_params,      "lr": lr * 3.0},
+        {"params": head_params,     "lr": lr * 5.0},
+    ]
+    if backbone_params and not backbone_frozen:
+        groups.append({"params": backbone_params, "lr": lr * 0.1})
+
+    return torch.optim.AdamW(groups, lr=lr, weight_decay=weight_decay)
 
 
 def train_v3(
@@ -604,10 +949,7 @@ def train_v3(
         print(f"{arch.upper()}: {total:,} total params ({trainable:,} trainable), "
               f"{n_iters} iter(s) per forward")
 
-    optimizer = torch.optim.AdamW(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=cfg.lr, weight_decay=cfg.weight_decay,
-    )
+    optimizer = _make_v3_optimizer(model, cfg.lr, cfg.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=cfg.epochs, eta_min=cfg.lr * 0.01,
     )
@@ -644,7 +986,7 @@ def train_v3(
                 optimizer.load_state_dict(state["optimizer_state_dict"])
             except Exception:
                 pass
-        if isinstance(state, dict) and "scheduler_state_dict" in state:
+        if cfg.resume_scheduler and isinstance(state, dict) and "scheduler_state_dict" in state:
             try:
                 scheduler.load_state_dict(state["scheduler_state_dict"])
             except Exception:
@@ -665,11 +1007,9 @@ def train_v3(
         if is_small and epoch == cfg.freeze_backbone_epochs + 1:
             if hasattr(model, "unfreeze_backbone"):
                 model.unfreeze_backbone()
-                # Rebuild optimizer to include newly unfrozen backbone params
-                optimizer = torch.optim.AdamW(
-                    model.parameters(),
-                    lr=cfg.lr * 0.1,  # lower LR for fine-tuning backbone
-                    weight_decay=cfg.weight_decay,
+                # Rebuild optimizer with per-group LRs; backbone at 0.1× base
+                optimizer = _make_v3_optimizer(
+                    model, cfg.lr * 0.1, cfg.weight_decay, backbone_frozen=False
                 )
                 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                     optimizer,
@@ -677,7 +1017,10 @@ def train_v3(
                     eta_min=cfg.lr * 0.001,
                 )
                 if verbose:
-                    print(f"  [epoch {epoch}] Backbone unfrozen, lr={cfg.lr * 0.1:.1e}")
+                    print(f"  [epoch {epoch}] Backbone unfrozen, "
+                          f"backbone lr={cfg.lr * 0.01:.1e}, "
+                          f"fpn lr={cfg.lr * 0.3:.1e}, "
+                          f"heads lr={cfg.lr * 0.5:.1e}")
 
         t0 = time.perf_counter()
         train_loss, train_mae = _train_epoch_v3(
@@ -691,8 +1034,9 @@ def train_v3(
             cfg.pixel_l2_weight,
             cfg.pixel_loss_mode,
             cfg.per_image_backprop,
+            cfg.grad_clip_norm,
         )
-        val_loss, val_mae = _eval_epoch_v3(
+        val_loss, val_mae, val_iou, val_mask_acc, val_rmse = _eval_epoch_v3(
             model,
             val_loader,
             device,
@@ -709,6 +1053,9 @@ def train_v3(
             "epoch": epoch,
             "train_loss": train_loss, "train_mae": train_mae,
             "val_loss": val_loss, "val_mae": val_mae,
+            "val_rmse": val_rmse,
+            "val_mask_iou": val_iou,
+            "val_mask_acc": val_mask_acc,
             "lr": scheduler.get_last_lr()[0],
         })
 
@@ -720,6 +1067,9 @@ def train_v3(
             "model_state_dict": model.state_dict(),
             "val_loss": val_loss,
             "val_mae": val_mae,
+            "val_rmse": val_rmse,
+            "val_mask_iou": val_iou,
+            "val_mask_acc": val_mask_acc,
             "best_val_loss": best_val,
             "best_epoch": best_epoch,
             "optimizer_state_dict": optimizer.state_dict(),
@@ -743,7 +1093,8 @@ def train_v3(
             print(
                 f"  Epoch {epoch:3d}/{end_epoch}  "
                 f"train_loss={train_loss:.3f} train_mae={train_mae:.2f}m  "
-                f"val_loss={val_loss:.3f} val_mae={val_mae:.2f}m  "
+                f"val_loss={val_loss:.3f} val_mae={val_mae:.2f}m "
+                f"rmse={val_rmse:.2f}m iou={val_iou:.3f}  "
                 f"{marker:7}  ({dt:.1f}s)"
             )
 
@@ -760,6 +1111,34 @@ def train_v3(
             "n_iters": n_iters,
             "arch": arch,
         }, fh, indent=2)
+
+    # Record run on the unified scoreboard so we can compare across architectures.
+    try:
+        from tools.ml.scoreboard import record_run
+        # Pull best epoch's full metric set from history
+        best_entry = next(
+            (h for h in reversed(history) if h.get("epoch") == best_epoch),
+            history[-1] if history else {},
+        )
+        record_run(
+            model_path=str(out_path),
+            arch=arch or "roofnet_v3",
+            task="height",
+            best_metrics={
+                "val_loss": best_entry.get("val_loss"),
+                "val_mae": best_entry.get("val_mae"),
+                "val_rmse": best_entry.get("val_rmse"),
+                "val_mask_iou": best_entry.get("val_mask_iou"),
+                "val_mask_acc": best_entry.get("val_mask_acc"),
+            },
+            n_train=int(split.get("n_train", 0) if isinstance(split, dict) else 0),
+            n_val=int(split.get("n_val", 0) if isinstance(split, dict) else 0),
+            epochs=int(best_epoch),
+            config={k: v for k, v in cfg.__dict__.items() if not callable(v)},
+            notes=f"tile_dir={Path(tile_dir).name}",
+        )
+    except Exception as e:
+        logger.warning(f"scoreboard record failed: {e}")
 
     if verbose:
         print(f"\n  Best val loss: {best_val:.4f} (epoch {best_epoch})")
@@ -1117,10 +1496,17 @@ def train_height(
     if resume_ckpt is not None:
         state = torch.load(str(resume_ckpt), map_location=device, weights_only=False)
         model_state = state.get("model_state_dict") if isinstance(state, dict) else None
+        if model_state is None and isinstance(state, dict):
+            model_state = state
         if model_state is not None:
-            model.load_state_dict(model_state)
-        elif isinstance(state, dict):
-            model.load_state_dict(state)
+            # Migrate old checkpoints: height_head.2.* -> height_head.3.*
+            migrated = {}
+            for k, v in model_state.items():
+                if k.startswith("height_head.2."):
+                    migrated["height_head.3." + k[len("height_head.2."):]] = v
+                else:
+                    migrated[k] = v
+            model.load_state_dict(migrated, strict=False)
 
         if isinstance(state, dict) and "optimizer_state_dict" in state:
             try:
@@ -1161,6 +1547,7 @@ def train_height(
             cfg.pixel_l2_weight,
             cfg.pixel_loss_mode,
             cfg.per_image_backprop,
+            cfg.grad_clip_norm,
         )
         val_loss, val_mae, val_rmse = _eval_epoch_height(
             model,
@@ -1216,6 +1603,8 @@ def train_height(
             latest_state["best_val_loss"] = best_val_loss
             latest_state["best_selection_value"] = best_selection_value
             latest_state["best_epoch"] = best_epoch
+            # Keep latest checkpoint metadata aligned with the newly promoted best.
+            torch.save(latest_state, str(latest_path))
             torch.save(latest_state, str(out_path))
         else:
             patience_counter += 1
@@ -1243,12 +1632,18 @@ def train_height(
             "best_epoch": best_epoch,
         }, fh, indent=2)
 
+    final_metric = (cfg.selection_metric or "rmse").lower()
     if verbose:
-        print(f"\n  Best val loss: {best_val_loss:.4f} (epoch {best_epoch})")
+        print(
+            f"\n  Best {final_metric}: {best_selection_value:.4f} "
+            f"(epoch {best_epoch}); corresponding val_loss={best_val_loss:.4f}"
+        )
         print(f"  Model: {out_path}")
 
     return {
         "best_val_loss": best_val_loss,
+        "best_selection_value": best_selection_value,
+        "selection_metric": final_metric,
         "best_epoch": best_epoch,
         "model_path": str(out_path),
         "history": history,
@@ -1296,6 +1691,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--lr", type=float, default=DEFAULT_LR)
+    parser.add_argument("--weight-decay", type=float, default=DEFAULT_WEIGHT_DECAY,
+                        help="AdamW weight-decay regularization.")
     parser.add_argument("--grad-loss-weight", type=float, default=0.2,
                         help="Edge (Sobel gradient) regularization weight for height loss.")
     parser.add_argument("--pixel-l2-weight", type=float, default=0.25,
@@ -1313,6 +1710,8 @@ def main():
                         help="Resume training from existing output checkpoint.")
     parser.add_argument("--resume-from", default=None,
                         help="Explicit checkpoint path to resume from.")
+    parser.add_argument("--resume-scheduler", action="store_true",
+                        help="Also restore scheduler state when resuming.")
     parser.add_argument(
         "--batch-backprop",
         action="store_true",
@@ -1327,6 +1726,7 @@ def main():
         epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
+        weight_decay=args.weight_decay,
         grad_loss_weight=args.grad_loss_weight,
         pixel_l2_weight=args.pixel_l2_weight,
         pixel_loss_mode=args.pixel_loss,
@@ -1338,6 +1738,7 @@ def main():
         per_image_backprop=not args.batch_backprop,
         resume=args.resume,
         resume_from=args.resume_from,
+        resume_scheduler=args.resume_scheduler,
         device=args.device,
     )
 

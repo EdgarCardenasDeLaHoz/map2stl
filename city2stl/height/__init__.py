@@ -124,9 +124,61 @@ def _resample(arr: np.ndarray, target_shape: Tuple[int, int]) -> np.ndarray:
     return out.astype(np.float32)
 
 
+def _filter_outliers(
+    raster: np.ndarray,
+    iqr_scale: float = 3.0,
+    absolute_max_m: float = 600.0,
+) -> np.ndarray:
+    """Clamp extreme height outliers using IQR-based filtering.
+
+    Pixels above Q3 + iqr_scale * IQR or below 0 are set to NaN.
+    The absolute_max_m hard cap handles terrain-shadow or nodata artefacts
+    that exceed any realistic building height.
+
+    Returns a copy; does not modify the input.
+    """
+    out = raster.copy()
+    valid = out[~np.isnan(out)]
+    if valid.size < 10:
+        return out  # too few data points to compute statistics reliably
+
+    q1 = float(np.percentile(valid, 25))
+    q3 = float(np.percentile(valid, 75))
+    iqr = q3 - q1
+    upper = q3 + iqr_scale * iqr
+    upper = min(upper, absolute_max_m)
+
+    # Clamp below 0 (below-ground artefacts) and above the IQR upper fence
+    out[(~np.isnan(out)) & (out < 0.0)] = np.nan
+    out[(~np.isnan(out)) & (out > upper)] = np.nan
+    return out
+
+
+def provider_stats(hr: HeightResult) -> dict:
+    """Return a summary statistics dict for a single HeightResult.
+
+    Useful for diagnostics endpoints and logging.
+    """
+    valid = hr.raster[~np.isnan(hr.raster)]
+    n_valid = int(valid.size)
+    n_total = int(hr.raster.size)
+    return {
+        "source": hr.source_name,
+        "resolution_m": hr.resolution_m,
+        "coverage_pct": round(n_valid / n_total * 100, 1) if n_total > 0 else 0.0,
+        "valid_pixels": n_valid,
+        "total_pixels": n_total,
+        "min_m": float(np.nanmin(hr.raster)) if n_valid > 0 else None,
+        "max_m": float(np.nanmax(hr.raster)) if n_valid > 0 else None,
+        "mean_m": float(np.nanmean(hr.raster)) if n_valid > 0 else None,
+        "p95_m": float(np.percentile(valid, 95)) if n_valid >= 10 else None,
+    }
+
+
 def merge_height_rasters(
     results: Sequence[HeightResult],
     target_shape: Tuple[int, int] | None = None,
+    filter_outliers: bool = True,
 ) -> HeightResult:
     """Merge multiple HeightResults by confidence-weighted priority.
 
@@ -135,6 +187,9 @@ def merge_height_rasters(
 
     Each result is resampled to *target_shape* (H, W) before merging.
     If *target_shape* is None the shape of the first result is used.
+
+    When *filter_outliers* is True (default), each provider's raster is
+    IQR-clamped before merging to remove terrain-shadow and nodata artefacts.
 
     Returns a single HeightResult with source_name="merged".
     """
@@ -150,7 +205,11 @@ def merge_height_rasters(
 
     for hr in results:
         raster = _resample(hr.raster, target_shape)
+        if filter_outliers:
+            raster = _filter_outliers(raster)
         conf = _resample(hr.confidence, target_shape)
+        # Zero out confidence where raster was NaN'd by outlier filter
+        conf = np.where(np.isnan(raster), 0.0, conf).astype(np.float32)
 
         # Pixels where this source has data AND higher confidence
         has_data = ~np.isnan(raster)

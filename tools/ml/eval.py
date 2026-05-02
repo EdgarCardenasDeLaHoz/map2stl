@@ -41,6 +41,39 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
+# Architecture detection
+# ---------------------------------------------------------------------------
+
+def detect_arch(checkpoint_path: str | Path) -> str | None:
+    """Infer model architecture from a checkpoint's state-dict keys.
+
+    Returns "v3", "v2", or None if the file is missing or unrecognised.
+    Used by evaluation and inspection tools to auto-select the right
+    build_model() call without requiring the caller to track arch metadata.
+    """
+    if not _TORCH_AVAILABLE:
+        return None
+    path = Path(checkpoint_path)
+    if not path.exists():
+        return None
+    state = torch.load(str(path), map_location="cpu", weights_only=False)
+    sd = state.get("model_state_dict", state) if isinstance(state, dict) else {}
+    if not isinstance(sd, dict):
+        return None
+    # Stored arch field is authoritative (set by train_v3 / train_unet)
+    if isinstance(state, dict) and "arch" in state:
+        return state["arch"]
+    # Fall back to key-based heuristics
+    if any(k.startswith("mask_head.") for k in sd):
+        return "v3"
+    if any(k.startswith("dec32_16.") for k in sd):
+        return "unet"
+    if any(k.startswith("backbone.") for k in sd):
+        return "v2"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Shape evaluation
 # ---------------------------------------------------------------------------
 
@@ -170,7 +203,8 @@ def evaluate_height_model(
 
     _, val_loader, split_info = make_height_loaders(tile_paths, batch_size=batch_size)
 
-    model = build_model(task="height", checkpoint=model_path, device=str(dev))
+    arch = detect_arch(model_path) or "v2"
+    model = build_model(arch=arch, task="height", checkpoint=model_path, device=str(dev))
     model.eval()
 
     all_preds = []

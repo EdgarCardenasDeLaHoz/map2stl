@@ -34,7 +34,43 @@ from .rasterize import _count_verts, _empty_fc
 # Per-layer fetch helpers
 # ---------------------------------------------------------------------------
 
-def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_area: float) -> dict:
+def _fetch_building_parts(ox, bbox, tol_deg: float, min_area: float, m_per_level: float = 3.5) -> "GeoDataFrame | None":
+    """Fetch building:part features and fill heights. Returns a GeoDataFrame or None on failure.
+
+    building:part elements provide per-section 3D detail for complex structures
+    (cathedrals, castles, towers) that OSM mappers have modelled in detail.
+    They are intentionally NOT dissolved — each part keeps its own height so
+    that, for example, a cathedral nave (low) and its bell-tower (tall) render
+    at different heights when overlaid onto the parent building footprint.
+    """
+    try:
+        gdf = ox.features_from_bbox(bbox, tags={"building:part": True})
+        gdf = gdf[gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])].reset_index(drop=True)
+        if len(gdf) == 0:
+            return None
+        if min_area > 0:
+            gdf_m = gdf.to_crs(epsg=3857)
+            gdf = gdf[gdf_m.geometry.area >= min_area].reset_index(drop=True)
+        if tol_deg > 0 and len(gdf):
+            gdf["geometry"] = gdf["geometry"].simplify(tol_deg, preserve_topology=True)
+            gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].reset_index(drop=True)
+        gdf = _fill_heights(gdf, default_m=10.0, lo=3.0, hi=300.0, levels_col='building:levels', m_per_level=m_per_level)
+        keep = [
+            "geometry", "height_m", "height_source", "roof_height_m",
+            "roof:shape", "roof:height", "roof:levels",
+            "roof:direction", "roof:orientation",
+            "roof:colour", "roof:material",
+            "building:levels", "min_height",
+        ]
+        gdf = gdf[[c for c in keep if c in gdf.columns]]
+        logger.info(f"[building:parts] fetched {len(gdf)} features")
+        return gdf
+    except Exception as e:
+        logger.warning(f"OSM building:parts fetch failed: {e}", exc_info=True)
+        return None
+
+
+def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_area: float, m_per_level: float = 3.5) -> dict:
     try:
         gdf = ox.features_from_bbox(bbox, tags={"building": True})
         gdf = gdf[gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])].reset_index(drop=True)
@@ -60,7 +96,7 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
                 f"vertices {verts_before} -> {verts_after} ({verts_after/verts_before*100:.1f}%)  |  "
                 f"area {area_before/1e4:.2f} -> {area_after/1e4:.2f} ha  (d {area_delta_pct:+.2f}%)"
             )
-        gdf = _fill_heights(gdf, default_m=10.0, lo=3.0, hi=300.0, levels_col='building:levels')
+        gdf = _fill_heights(gdf, default_m=10.0, lo=3.0, hi=300.0, levels_col='building:levels', m_per_level=m_per_level)
         n_pre_dissolve = len(gdf)
         gdf_m_pre_d = gdf.to_crs(epsg=3857)
         area_pre_dissolve = float(gdf_m_pre_d.geometry.area.sum())
@@ -75,13 +111,35 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
         # Keep roof geometry tags so mesh generation can produce shaped roofs.
         # building:levels and min_height are also passed through for completeness.
         keep = [
-            "geometry", "height_m", "height_source",
+            "geometry", "height_m", "height_source", "roof_height_m",
             "roof:shape", "roof:height", "roof:levels",
             "roof:direction", "roof:orientation",
             "roof:colour", "roof:material",
             "building:levels", "min_height",
         ]
         gdf = gdf[[c for c in keep if c in gdf.columns]]
+
+        # Append building:part features — they provide per-section height detail
+        # for complex structures (cathedrals, castles, towers). They come last so
+        # that in the rasterizer the taller parts win over the flat parent footprint.
+        parts_gdf = _fetch_building_parts(ox, bbox, tol_deg, min_area, m_per_level)
+        if parts_gdf is not None and len(parts_gdf) > 0:
+            try:
+                import pandas as pd
+                import geopandas as gpd
+                combined = gpd.GeoDataFrame(
+                    pd.concat([gdf, parts_gdf], ignore_index=True),
+                    crs=gdf.crs,
+                )
+                combined = combined[[c for c in keep if c in combined.columns]]
+                logger.info(
+                    f"[buildings] after merging building:parts: "
+                    f"{len(gdf)} buildings + {len(parts_gdf)} parts = {len(combined)} total"
+                )
+                return json.loads(combined.to_json())
+            except Exception as merge_exc:
+                logger.warning(f"building:parts merge failed, using buildings only: {merge_exc}")
+
         return json.loads(gdf.to_json())
     except Exception as e:
         logger.warning(f"OSM buildings fetch failed: {e}", exc_info=True)
@@ -193,6 +251,7 @@ def fetch_osm_data(
     layers: List[str],
     simplify_tolerance: float = 0.5,
     min_area: float = 5.0,
+    m_per_level: float = 3.5,
 ) -> dict:
     """
     Fetch OSM building, road, waterway, and POI data for a bounding box.
@@ -218,7 +277,7 @@ def fetch_osm_data(
     result: dict = {}
 
     if "buildings" in layers:
-        result["buildings"] = _fetch_buildings(ox, bbox, tol_deg, simplify_tolerance, min_area)
+        result["buildings"] = _fetch_buildings(ox, bbox, tol_deg, simplify_tolerance, min_area, m_per_level)
 
     if "roads" in layers:
         result["roads"] = _fetch_roads(ox, bbox)
@@ -232,7 +291,8 @@ def fetch_osm_data(
     if "walls" in layers:
         result["walls"] = _fetch_polygon_layer(
             ox, bbox,
-            tags={"historic": "city_wall", "barrier": "city_wall"},
+            tags={"historic": ["city_wall", "citywalls", "city_gate"],
+                  "barrier": "city_wall"},
             height_default=8.0, height_lo=2.0, height_hi=30.0,
             keep_cols=["name"], label="walls",
         )
@@ -240,7 +300,7 @@ def fetch_osm_data(
     if "towers" in layers:
         result["towers"] = _fetch_polygon_layer(
             ox, bbox,
-            tags={"historic": ["tower", "watchtower", "fortification"],
+            tags={"historic": ["tower", "watchtower", "fortification", "castle_walls"],
                   "man_made": ["defensive_works"],
                   "tower:type": ["defensive", "watchtower", "bell_tower", "minaret"]},
             height_default=20.0, height_lo=5.0, height_hi=200.0,
@@ -258,8 +318,9 @@ def fetch_osm_data(
     if "fortifications" in layers:
         result["fortifications"] = _fetch_polygon_layer(
             ox, bbox,
-            tags={"historic": ["fort", "castle", "fortress", "fortification"]},
-            height_default=12.0, height_lo=3.0, height_hi=60.0,
+            tags={"historic": ["fort", "castle", "fortress", "fortification",
+                               "palace", "manor", "monastery", "ruins"]},
+            height_default=15.0, height_lo=3.0, height_hi=80.0,
             keep_cols=["name", "historic"], label="fortifications",
         )
 

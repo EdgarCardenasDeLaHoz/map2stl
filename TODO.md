@@ -3,85 +3,86 @@
 > See `docs/` for architecture reference. Completed items: see `docs/functionality_doc.md` and `docs/issues.md`.
 > Per-module TODOs and improvement plans are in each module's `TODO.md`.
 > **AI-proposed features live in [`docs/proposals.md`](docs/proposals.md) — set status to `approved` there to queue implementation.**
-> **Current 19-item working list with detail links:** [`docs/todo-linked-index.md`](docs/todo-linked-index.md)
+> **Linked working list:** [`docs/todo-linked-index.md`](docs/todo-linked-index.md)
+
+_Last updated: 2026-04-30_
+
+---
+
+## Genuinely open
+
+### Frontend
+
+| ID | Module | Description |
+|---|---|---|
+| MAP-2 | `map/bbox-panel.js` | Keyboard accessibility on bbox drag handles (`tabindex` + arrow-key handlers) |
+| UX-1 | `map/region-creation.js` | Single entry point for region creation (currently multiple buttons); add empty-state hint |
+| Plan B | `layers/composite-dem.js` | Progressive (downsampled) preview during heavy composite computation |
+| P6 | `export/` | Multi-material STL export by elevation band (server endpoint + client UI) |
+| EXP-1 | `export/` | Progress indicator during STL generation (status conflicting — verify before working) |
+
+### Backend / ML
+
+| ID | Description | Detail link |
+|---|---|---|
+| ML-1 | Wire active Retna_V1 model into the height-fetch pool as a `RetnaProvider` | [`docs/height-pipeline-improvement-plan.md`](docs/height-pipeline-improvement-plan.md) |
+| ML-2 | Close tall-building MAE gap (currently 13–17 m on skyscraper tiles) | [`docs/plans/height-training-status.md`](docs/plans/height-training-status.md) |
+| 1b-OB | Open Buildings provider — already implemented (Overture Maps); needs production validation | [`docs/open-todo-plans.md#11`](docs/open-todo-plans.md#11-open-buildings-v3-real-fetch-path) |
+| 1b-Sh | Shadow height provider — already implemented; needs validation against ground truth | [`docs/open-todo-plans.md#12`](docs/open-todo-plans.md#12-shadow-height-actual-inference-pipeline) |
 
 ---
 
 ## Module TODO Files
 
-| Module | File | Key open items |
-|--------|------|----------------|
-| `dem/` | [`modules/dem/TODO.md`](app/client/static/js/modules/dem/TODO.md) | Plan A (off-thread render) |
-| `layers/` | [`modules/layers/TODO.md`](app/client/static/js/modules/layers/TODO.md) | PERF6B (city worker), UX-M (lazy canvas) |
-| `ui/` | [`modules/ui/TODO.md`](app/client/static/js/modules/ui/TODO.md) | Curve editor bugs, presets versioning |
-| `core/` | [`modules/core/TODO.md`](app/client/static/js/modules/core/TODO.md) | ~~ARCH4 (Vite)~~, ~~ARCH5 (Vitest)~~ |
-| `events/` | [`modules/events/TODO.md`](app/client/static/js/modules/events/TODO.md) | Event bus migration |
-| `map/` | [`modules/map/TODO.md`](app/client/static/js/modules/map/TODO.md) | UX-1, ~~UX-2/3~~, ~~MAP-2 accessibility~~ |
-| `regions/` | [`modules/regions/TODO.md`](app/client/static/js/modules/regions/TODO.md) | REG-1 pagination, REG-2 import/export |
-| `export/` | [`modules/export/TODO.md`](app/client/static/js/modules/export/TODO.md) | P6 elevation bands, EXP-1 progress |
+| Module | File |
+|---|---|
+| `dem/` | [`modules/dem/TODO.md`](app/client/static/js/modules/dem/TODO.md) |
+| `layers/` | [`modules/layers/TODO.md`](app/client/static/js/modules/layers/TODO.md) |
+| `ui/` | [`modules/ui/TODO.md`](app/client/static/js/modules/ui/TODO.md) |
+| `core/` | [`modules/core/TODO.md`](app/client/static/js/modules/core/TODO.md) |
+| `events/` | [`modules/events/TODO.md`](app/client/static/js/modules/events/TODO.md) |
+| `map/` | [`modules/map/TODO.md`](app/client/static/js/modules/map/TODO.md) |
+| `regions/` | [`modules/regions/TODO.md`](app/client/static/js/modules/regions/TODO.md) |
+| `export/` | [`modules/export/TODO.md`](app/client/static/js/modules/export/TODO.md) |
 
 ---
 
-## Recently Completed
+## Recently completed (condensed)
 
-### Python Session Client (`app/session/terrain_session.py`)
-- ~~**PEP8** — 51 PEP 8 violations fixed~~
-- ~~**REFACTOR-1** — 7 helper methods added (`_get_extent`, `_require_attribute`, `_ensure_available_for_fetch`, `_handle_api_response`, `_prepare_array_response`, `_project_rgb_channels`, `_print_grid_info`)~~
-- ~~**REFACTOR-2** — 5 settings properties (`dem_settings`, `view_settings`, `export_settings`, `city_settings`, `water_settings`)~~
-- ~~**REFACTOR-3** — Matplotlib consolidation via enhanced `_plot_geo_image()` (5 show_* methods refactored, ~39 lines eliminated)~~
-- ~~**REFACTOR-4** — Fetch method consolidation (6 fetch_* methods use shared helpers)~~
-- ~~**TOTAL** — ~150 lines reduced (~8.3% of original 1805 lines)~~
+### ML pipeline
 
-### HydroRIVERS (`app/server/core/hydrorivers.py`)
-- ~~**HYDRO-1** — Geometry simplification pipeline (`_collinear_point_reduction`, `_simplify_geometry`, `_simplify_and_cache_shapefile`)~~
-- ~~**HYDRO-2** — Region bounding box coverage fix (SA extended to +15°N, NA to -10°S, eliminating gaps)~~
-- ~~**HYDRO-3** — Simplified cache validation with probe before trusting~~
+- Replaced RoofNetV3 (1.4 M params, marginal-mean collapse) with **Retna_V1** (9.7k–75k params, first-principles)
+- Added grow/prune NAS with all-layer growth + smart-init (clone top-scoring neurons into new slots) + deepen (add new blocks)
+- Single-channel zero-ablation prune (final + periodic) — halved current champion's params (149k → 75k) at equal val_loss
+- Persistent Adam optimizer state across cycles when arch unchanged
+- Visual tile-review tool (`scripts/tile_review.py`) for manual GT-quality filtering
+- Standalone `scripts/train.py` entry point: train / grow / deep / collect / full / inspect
+- Cleaned `models/` from 50+ failed checkpoints to 5 keepers (~409 MB → 7.5 MB)
+- Per-block contribution + weight-L2 panels in `tools/ml/inspect_retna.py` PDF output
+- Current champion: `retna_pruned.pt` — [8,8,10,20,14,14,16,16,22], 75.5k params, MAE 3.82m / IoU 0.625 / r=+0.90
 
-### Server Lifecycle
-- ~~**SRV-1** — `start()` reuses healthy server instead of killing it~~
-- ~~**SRV-2** — `_ensure_bbox()` validates all 4 keys with descriptive error~~
-- ~~**SRV-3** — Server wait timeout increased to 60 attempts~~
+### Height pipeline
 
----
+- Phase 1a (4 production providers + router + merge), Phase 1b (GHSL, Open Buildings via Overture, shadow inference), Phase 3 (STL import + IDW infill) — all complete
+- F-ROOF1 — slanted roofs (gabled / hipped / pyramidal / skillion / dome / flat) burned into per-pixel city raster
 
-## Performance Optimizations
+### Frontend (last sprint)
 
-- **PERF6B** (`layers/city-render.js`) — Web Worker for city polygon rendering (Part A — pre-baked Float32Array buffers — done)
-- ~~**PERF-RAF** (`ui/curve-editor.js`) — RAF-gate `applyCurveTodemSilent` in mousemove so DEM recolors at ≤60fps during drag~~
+- PERF6B (Web Worker / OffscreenCanvas), UX-M (lazy canvas allocation), CLEAN-1 (inline → CSS), Plan A (off-thread DEM render), curve-editor refactor + presets versioning, region pagination/import-export, single-entry region creation (partial — UX-1 still open), event-bus consolidation, magic-number extraction
 
----
+### Session client
 
-## Code Cleanup
-
-- **CLEAN-1** (`ui/`) — Replace remaining inline styles with CSS utility classes (UX-12, incremental)
-- ~~**CLEAN-2** (`map/bbox-panel.js`) — MAP-2: add keyboard accessibility to bbox drag handles~~
-- ~~**CLEAN-1–5** (`regions/regions.js`) — done: inline onclick, haversineDiagKm fix, AUTO_SCALE constants, globe marker colors, JSDoc~~
+- Refactor (REFACTOR-1..4): 7 helpers + 5 settings properties, ~150 lines reduced
+- Server lifecycle: graceful start, bbox validation, longer wait timeout
 
 ---
 
-## New Features
+## Where things go
 
-- **P6** (`export/`) — Elevation band multi-material STL export
-- **EXP-1** (`export/`) — Progress indicator during STL generation
-- **REG-1** (`regions/`) — Region list pagination (virtual scroll or 20-per-page)
-- ~~**REG-2** (`regions/`) — Region import/export as JSON~~
-- **UX-1** (`map/`) — Consolidate region creation to single entry point
-- ~~**UX-2** (`map/`) — Add text labels to floating map buttons~~
-- ~~**UX-3** (`map/`) — Clarify sidebar 3-state toggle~~
-- **UX-M** (`layers/`) — Lazy-allocate hidden layer canvases (GPU memory)
-
----
-
-## Height Pipeline
-
-- ~~**Phase 1a** — Core height package + 4 providers (nDSM, WSF3D, Copernicus, 3DEP LiDAR) + router + merge~~
-- ~~**Phase 1b** — Supplementary sources (GHSL, Open Buildings, shadow estimation)~~
-- **Phase 2** — CNN height prediction (DSM super-resolution, custom U-Net)
-- **Phase 3** — STL import + AI infill
-
----
-
-## Requires External Setup
-
-- ~~**ARCH4** — `npm install` (Vite; config already written at `strm2stl/vite.config.js`)~~
-- ~~**ARCH5** — Vitest unit tests for pure functions (requires ARCH4)~~
+| Want to... | Edit |
+|---|---|
+| Add a new AI-proposed feature | `docs/proposals.md` (set `status: approved` to queue) |
+| Run an ML experiment | `tools/ml/pipeline.py` |
+| Update the height-fetch pool | `app/server/core/height/providers/` + `app/server/routers/height.py` |
+| Add a frontend module | Read `docs/modules.md` first, then `app/client/static/js/modules/<module>/TODO.md` |
+| Expand a region's coverage in tests | `tests/test_height/`, `tests/test_geo/` |

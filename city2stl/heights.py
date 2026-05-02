@@ -29,6 +29,7 @@ _ROOF_COLS = [
     "roof:direction", "roof:orientation",
     "roof:colour", "roof:material",
     "building:levels", "min_height",
+    "roof_height_m",  # set by _fill_heights; needed by rasterizer
 ]
 
 
@@ -139,6 +140,7 @@ def _fill_heights(
     lo: float = 2.0,
     hi: float = 300.0,
     levels_col: str | None = None,
+    m_per_level: float = 3.5,
 ):
     """Fill height_m for OSM features from the ``height`` tag.
 
@@ -147,10 +149,13 @@ def _fill_heights(
     have a fallback height (candidates for raster enhancement).
 
     Args:
-        default_m:  Fallback height when tag is absent or unparseable.
-        lo, hi:     Clip bounds in metres.
-        levels_col: If set, use ``gdf[levels_col] * 4.0`` as a secondary
-                    fallback before *default_m* (buildings only).
+        default_m:   Fallback height when tag is absent or unparseable.
+        lo, hi:      Clip bounds in metres.
+        levels_col:  If set, use ``gdf[levels_col] * m_per_level`` as a secondary
+                     fallback before *default_m* (buildings only).
+        m_per_level: Floor-to-floor height in metres. Defaults to 3.5.
+                     Use 3.0–3.5 for Southern Europe (e.g. 3.4 for Granada),
+                     3.5–4.0 for Northern Europe/US.
     """
     try:
         import pandas as pd
@@ -167,7 +172,7 @@ def _fill_heights(
     if levels_col and levels_col in gdf.columns:
         levels = pd.to_numeric(gdf[levels_col], errors='coerce')
         has_levels = levels.notna()
-        height_from_levels = levels.fillna(3.0) * 4.0
+        height_from_levels = levels.fillna(3.0) * m_per_level
         source = source.where(~has_levels, 'osm_levels')
     else:
         height_from_levels = pd.Series(float(default_m), index=gdf.index)
@@ -191,6 +196,35 @@ def _fill_heights(
     gdf = gdf.copy()
     gdf['height_m'] = height_m
     gdf['height_source'] = source
+
+    # Compute roof_height_m for the rasterizer / mesh extruder.
+    # Priority: explicit OSM 'roof:height' tag → roof:levels × m_per_level
+    #           → default 30% of height_m, capped at 50% of height_m, min 2 m.
+    # The rasterizer (city2stl/rasterize.py:_paint_building_roof) reads this
+    # to determine ridge height for gabled / hipped / skillion / dome roofs.
+    if 'roof:height' in gdf.columns:
+        roof_raw = gdf['roof:height'].astype(str).str.extract(r'([\d.]+)', expand=False)
+        roof_explicit = pd.to_numeric(roof_raw, errors='coerce')
+    else:
+        roof_explicit = pd.Series(np.nan, index=gdf.index, dtype='float64')
+
+    if 'roof:levels' in gdf.columns:
+        roof_levels = pd.to_numeric(gdf['roof:levels'], errors='coerce')
+        roof_from_levels = roof_levels * m_per_level
+    else:
+        roof_from_levels = pd.Series(np.nan, index=gdf.index, dtype='float64')
+
+    # 30% of building height, with floor of 2 m. Cap at 50% of height_m so the
+    # eaves don't go negative.
+    roof_default = (0.30 * height_m).clip(lower=2.0)
+    roof_height_m = (
+        roof_explicit
+        .fillna(roof_from_levels)
+        .fillna(roof_default)
+        .clip(lower=0.0)
+    )
+    roof_height_m = np.minimum(roof_height_m.values, 0.5 * height_m.values)
+    gdf['roof_height_m'] = pd.Series(roof_height_m, index=gdf.index).round(2)
     return gdf
 
 
@@ -201,8 +235,9 @@ def enhance_buildings_with_raster(
     confidence_raster: np.ndarray | None = None,
     min_confidence: float = 0.3,
     source_name: str = "raster",
+    footprint_percentile: float = 90.0,
 ) -> dict:
-    """Enhance building heights by sampling a height raster at each centroid.
+    """Enhance building heights by sampling a height raster across each footprint.
 
     Only overwrites buildings whose ``height_source`` is ``"default"`` (i.e.
     those that fell through to the 10 m fallback because OSM had no tag).
@@ -219,6 +254,8 @@ def enhance_buildings_with_raster(
             Defaults to ``"raster"``; callers should pass the provider name
             (e.g. ``"google3d"``, ``"ghsl"``, ``"shadow"``) so the origin of
             each height value is traceable.
+        footprint_percentile: Percentile of valid footprint samples to use when
+            multiple raster pixels overlap a building footprint.
 
     Returns:
         ``{"buildings": <modified GeoJSON>, "stats": {...}}``
@@ -232,59 +269,48 @@ def enhance_buildings_with_raster(
     no_data = 0
     unchanged = 0
 
+    # Derive a local height cap from OSM-sourced buildings in this collection.
+    # Raster-derived heights (e.g. from shadow estimation) can include terrain
+    # artefacts; capping at local_osm_max * 1.2 prevents wild outliers.
+    _osm_sources = {"osm_tag", "osm_levels", "osm_parts"}
+    osm_heights = [
+        (feat.get("properties") or {}).get("height_m") or 0
+        for feat in features
+        if (feat.get("properties") or {}).get("height_source") in _osm_sources
+    ]
+    local_osm_max = max(osm_heights) if osm_heights else 0.0
+    # Hard cap: at least 30 m (covers ~8-floor buildings in low-rise cities),
+    # never more than 150 m even if OSM has tall spires/towers.
+    # Shadow-based providers are additionally capped at 50 m in the provider
+    # itself, so the 150 m ceiling only matters for LiDAR/photogrammetry sources.
+    height_cap = max(30.0, min(150.0, local_osm_max * 1.2)) if local_osm_max > 0 else 30.0
+
     for feat in features:
         props = feat.get("properties") or {}
         if props.get("height_source") != "default":
             unchanged += 1
             continue
 
-        # Compute centroid from exterior ring
         geom = feat.get("geometry", {})
-        coords = geom.get("coordinates")
-        if not coords:
+        if not geom:
             unchanged += 1
             continue
 
-        # Get the exterior ring (first ring of first polygon)
-        ring = coords
-        gtype = geom.get("type", "")
-        if gtype == "MultiPolygon":
-            ring = coords[0][0] if coords and coords[0] else None
-        elif gtype == "Polygon":
-            ring = coords[0] if coords else None
-        else:
-            unchanged += 1
-            continue
-
-        if not ring or len(ring) < 3:
-            unchanged += 1
-            continue
-
-        # Mean of exterior ring as centroid approximation
-        cx = sum(p[0] for p in ring) / len(ring)  # longitude
-        cy = sum(p[1] for p in ring) / len(ring)  # latitude
-
-        # Map to raster pixel
-        col = int((cx - west) / (east - west) * w)
-        row = int((north - cy) / (north - south) * h)
-
-        if row < 0 or row >= h or col < 0 or col >= w:
+        val = _sample_raster_value_for_geometry(
+            geom,
+            raster,
+            bbox,
+            confidence_raster=confidence_raster,
+            min_confidence=min_confidence,
+            footprint_percentile=footprint_percentile,
+        )
+        if val is None or np.isnan(val) or val <= 0:
             no_data += 1
             continue
 
-        val = float(raster[row, col])
-        if np.isnan(val) or val <= 0:
-            no_data += 1
-            continue
-
-        if confidence_raster is not None:
-            conf = float(confidence_raster[row, col])
-            if conf < min_confidence:
-                no_data += 1
-                continue
-
-        # Clamp to reasonable range
-        val = max(3.0, min(300.0, round(val, 1)))
+        # Clamp to reasonable range — use local OSM-derived cap to prevent
+        # terrain/shadow artefacts from inflating heights in hilly cities.
+        val = max(3.0, min(height_cap, round(val, 1)))
         props["height_m"] = val
         props["height_source"] = source_name
         enhanced += 1
@@ -296,6 +322,90 @@ def enhance_buildings_with_raster(
         "no_data": no_data,
     }
     logger.info(f"[enhance] {enhanced}/{total} buildings enhanced with raster heights "
-                f"({unchanged} had OSM data, {no_data} no raster coverage)")
+                f"({unchanged} had OSM data, {no_data} no raster coverage, cap={height_cap:.0f}m)")
 
     return {"buildings": buildings_geojson, "stats": stats}
+
+
+def _sample_raster_value_for_geometry(
+    geom: dict,
+    raster: np.ndarray,
+    bbox: tuple,
+    confidence_raster: np.ndarray | None = None,
+    min_confidence: float = 0.3,
+    footprint_percentile: float = 90.0,
+) -> float | None:
+    """Sample a footprint-aware raster height for a Polygon or MultiPolygon."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return None
+
+    north, south, east, west = bbox
+    h, w = raster.shape
+    lon_span = east - west
+    lat_span = north - south
+    if lon_span <= 0 or lat_span <= 0 or h <= 0 or w <= 0:
+        return None
+
+    def _to_px(lon: float, lat: float) -> tuple[float, float]:
+        x = (lon - west) / lon_span * w
+        y = (north - lat) / lat_span * h
+        return x, y
+
+    gtype = geom.get("type", "")
+    coords = geom.get("coordinates")
+    if not coords or gtype not in {"Polygon", "MultiPolygon"}:
+        return None
+
+    polygons = coords if gtype == "MultiPolygon" else [coords]
+    all_points: list[tuple[float, float]] = []
+    for poly in polygons:
+        for ring in poly or []:
+            all_points.extend(_to_px(float(lon), float(lat)) for lon, lat in ring)
+    if not all_points:
+        return None
+
+    xs = [pt[0] for pt in all_points]
+    ys = [pt[1] for pt in all_points]
+    c0 = max(0, int(np.floor(min(xs))))
+    c1 = min(w, int(np.ceil(max(xs))) + 1)
+    r0 = max(0, int(np.floor(min(ys))))
+    r1 = min(h, int(np.ceil(max(ys))) + 1)
+    if c0 >= c1 or r0 >= r1:
+        return None
+
+    mask_img = Image.new("1", (c1 - c0, r1 - r0), 0)
+    draw = ImageDraw.Draw(mask_img)
+    for poly in polygons:
+        if not poly:
+            continue
+        outer = poly[0] if poly[0] else None
+        if not outer:
+            continue
+        outer_px = [(x - c0, y - r0) for x, y in (_to_px(float(lon), float(lat)) for lon, lat in outer)]
+        draw.polygon(outer_px, fill=1)
+        for hole in poly[1:]:
+            if not hole:
+                continue
+            hole_px = [(x - c0, y - r0) for x, y in (_to_px(float(lon), float(lat)) for lon, lat in hole)]
+            draw.polygon(hole_px, fill=0)
+
+    footprint_mask = np.array(mask_img, dtype=bool)
+    if not np.any(footprint_mask):
+        return None
+
+    patch = raster[r0:r1, c0:c1]
+    valid_mask = footprint_mask & np.isfinite(patch) & (patch > 0)
+    if confidence_raster is not None:
+        conf_patch = confidence_raster[r0:r1, c0:c1]
+        valid_mask &= np.isfinite(conf_patch) & (conf_patch >= min_confidence)
+
+    if not np.any(valid_mask):
+        return None
+
+    values = patch[valid_mask]
+    if values.size <= 4:
+        return float(np.nanmax(values))
+    percentile = float(np.clip(footprint_percentile, 50.0, 100.0))
+    return float(np.nanpercentile(values, percentile))

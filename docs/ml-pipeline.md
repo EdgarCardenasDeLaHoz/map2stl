@@ -1,19 +1,24 @@
-# ML Pipeline: Building Height & Roof Shape
+# ML Pipeline: Building Heights
 
-Satellite-image CNN pipeline for predicting per-pixel building heights and roof shapes, used downstream by the 3D STL export.
+Satellite-image CNN pipeline for predicting per-pixel building heights, used downstream by the 3D STL export.
+
+For the latest training results, model lineage, and open issues, see [`docs/plans/height-training-status.md`](plans/height-training-status.md).
 
 ---
 
-## Overview
+## Active model: Retna_V1
 
-Two tasks share a common backbone and training infrastructure:
+A **first-principles** tiny network that replaced the much larger RoofNetV3 after the latter was diagnosed with marginal-mean collapse (predicting a constant ~7m blob).
 
-| Task | Model | Output | Ground truth |
-|------|-------|--------|--------------|
-| **Height regression** | RoofNetV3_S / V3 / V3_1 | Height map (metres/pixel) | OSM building heights rasterized |
-| **Roof shape classification** | RoofNetV2 | 6-class logit | OSM `roof:shape` tags |
+| Metric | Value |
+|---|---|
+| Parameter count | 9.7k base; ~70k after iterative grow |
+| Architecture | 4 stride-2 conv blocks with raw RGB re-injected at every block; output bounded ∈ [0, 1] then ×HEIGHT_NORM_M |
+| Loss | `dice_l2` (Dice + λ·MSE) or `dice_l3` (Dice + λ·E[|res|³]) |
+| HEIGHT_NORM_M | 200 m (covers skyscrapers) |
+| Training time | ~2 s/epoch, CPU |
 
-Both tasks use a **MobileNetV3-Small** ImageNet backbone (1.5 M params), which stays frozen during warm-up then fine-tunes at a reduced LR.
+Definition lives in [`tools/example/networks.py`](../tools/example/networks.py).
 
 ---
 
@@ -21,271 +26,142 @@ Both tasks use a **MobileNetV3-Small** ImageNet backbone (1.5 M params), which s
 
 ```
 strm2stl/
-├── tools/ml/
-│   ├── config.py            # city bboxes, label sets, training defaults
-│   ├── models.py            # RoofNetV2, RoofNetV3, RoofNetV3_S, RoofNetV3_1
-│   ├── train.py             # train_v3(), train_shape(), train_height()
-│   ├── data.py              # datasets, transforms (ImageNet norm, augmentation)
-│   ├── collect_osm_tiles.py # harvest (RGB, height) tiles from OSM + ESRI
-│   ├── predict_demo.py      # quick visual check of a checkpoint
-│   └── eval.py              # evaluation utilities
+├── tools/
+│   ├── example/
+│   │   └── networks.py           # Retna_V1 definition (active model)
+│   │
+│   └── ml/
+│       ├── pipeline.py           # one-CLI driver: collect → train → inspect
+│       ├── config.py             # city bboxes, label sets, training defaults
+│       ├── train_retna.py        # plain trainer (dice / dice_l2 / dice_l3)
+│       ├── grow_prune.py         # iterative NAS: grow + prune from scoring
+│       ├── inspect_retna.py      # visual inspector (RGB / GT / Pred / Error)
+│       ├── collect_osm_tiles.py  # harvest (RGB, height) tiles from OSM or providers
+│       ├── scoreboard.py         # JSON registry of every training run
+│       ├── analyze.py            # diagnostic: pearson, activation stats, layer norms
+│       ├── baselines.py          # zero-param sanity baselines
+│       │
+│       └── (deprecated, RoofNetV3-era — kept for legacy notebooks only)
+│           ├── train.py models.py data.py eval.py
+│           ├── gradient_analysis.py simulate_data.py predict_demo.py
 │
-├── models/                  # saved checkpoints (.pt)
-│   ├── roofnet_v3s.pt       # recommended: small/fast (best for < 500 tiles)
-│   ├── roofnet_v3.pt        # v3 standard (1.4 M params)
-│   ├── roofnet_v3_1.pt      # v3.1 experimental (2.8 M params, skip connections)
-│   └── roofnet_shape_v1.pt  # roof shape classifier (needs retraining)
+├── models/
+│   ├── retna_pruned.pt           # CURRENT CHAMPION: 75k params, val=0.269, MAE=3.82m
+│   ├── retna_deepgrow2.pt        # 9-block, 149k params (pre-prune)
+│   ├── retna_deepgrow.pt         # 7-block intermediate
+│   ├── retna_grow4.pt            # 10-cycle widening reference
+│   ├── retna_grow3_long.pt       # original 4-block baseline
+│   └── scoreboard.json           # registry of every recorded run
 │
 ├── cache/
-│   ├── height_tiles_osm/    # 280 tiles @ 256 px (OSM heights + ESRI RGB)
-│   └── height_tiles_hr/     # 102 tiles @ 512 px (high-res, optional)
+│   ├── height_tiles_combined/    # 100 EU tiles @ 128px (Cartagena moved to _bad/)
+│   ├── height_tiles_eu11/        # 660 tiles, 11 EU cities @ 128px
+│   └── height_tiles_us/          # US cities w/ LiDAR_3DEP labels
 │
-└── notebooks/
-    ├── Height_Training_Inspector.ipynb  # visual evaluation of height models
-    ├── Height_Prediction.ipynb          # run inference on a new region
-    └── Train_Height_CNN.ipynb           # notebook-driven training
+├── scripts/
+│   ├── train.py                  # main entry: train / grow / deep / collect / inspect
+│   ├── tile_review.py            # manual review PDF + drop-by-index
+│   └── README.md                 # usage
+│
+└── notebooks/                    # legacy RoofNet-era; not used by Retna pipeline
 ```
 
 ---
 
-## Models
-
-### RoofNetV3_S  *(recommended for < 500 tiles)*
-
-- ~983 K total params, **56 K trainable** during warm-up (backbone frozen)
-- Iterative refinement: 2 forward passes, each feeding previous mask + height back as extra input channels
-- Narrow 32-channel FPN, Dropout2d(0.35) in prediction heads
-- Backbone unfreezes after `freeze_backbone_epochs` at 10× lower LR
-
-### RoofNetV3  *(standard)*
-
-- 1.4 M params, all trainable from the start
-- Same iterative structure, 128-channel FPN
-- Better ceiling than V3_S but needs > 500 tiles to avoid overfitting
-
-### RoofNetV3_1  *(experimental, high-data)*
-
-- 2.8 M params
-- Skip connections from MobileNetV3 stages 0/2/6/12 + Retna-style multi-scale fusion
-- 4 scratchpad channels passed between iterations for learned inter-iteration state
-- Full backprop through all iterations (no detach)
-- Designed for 512 px tiles and > 1000 training samples
-
-### RoofNetV2  *(shape classification)*
-
-- MobileNetV3 + FPN + dual heads: height regression + 6-class shape classifier
-- Used for roof:shape prediction; height head is lower quality than V3 family
-
----
-
-## Step 1: Collect training tiles
-
-Tiles are `(RGB, height)` pairs stored as `.npz` files.  
-The collector fetches OSM building footprints + heights and pairs them with ESRI satellite imagery. No API keys required.
+## End-to-end run (single command)
 
 ```bash
-# Collect 80 tiles per city for all default training cities (Berlin, Vienna, Barcelona, Paris, Amsterdam, Prague, Rotterdam)
-python -m tools.ml.collect_osm_tiles --tiles-per-city 80
-
-# Custom: Berlin only, high-res 512 px tiles
-python -m tools.ml.collect_osm_tiles \
-    --cities Berlin \
-    --tiles-per-city 120 \
-    --tile-size 512 \
-    --target-res-m 1.0 \
-    --out-dir cache/height_tiles_hr
+python -m tools.ml.pipeline run \
+    --cities Amsterdam Barcelona \
+    --tiles-per-city 60 --tile-size 512 \
+    --tile-dir cache/tiles_new \
+    --output models/retna_new.pt \
+    --epochs 60 --loss dice_l3 --hidden-channels 11 11 17 34
 ```
 
-Each tile is ~600 KB (256 px) or ~2.4 MB (512 px).  
-Current tile counts: **280 tiles @ 256 px**, 102 @ 512 px.
+This chains:
+1. **Collect** — `tools/ml/collect_osm_tiles.py` fetches per-city OSM building polygons + ESRI satellite RGB, rasterizes heights, writes `<City>_<r>_<c>.npz` files.
+2. **Train** — `tools/ml/train_retna.py` runs Adam + ReduceLROnPlateau on the tile dir, recording every run on the scoreboard.
+3. **Inspect** — `tools/ml/inspect_retna.py` saves RGB / GT / Pred / Error sample renders.
+
+Use `--grow` to switch step 2 to the iterative grow/prune NAS (`tools/ml/grow_prune.py`).
+
+Use `--skip-collect` to reuse an existing tile dir.
 
 ---
 
-## Step 2: Train
+## Data sources
 
-### Python API (recommended)
+### Tile collection
 
-```python
-from tools.ml.train import train_v3, TrainConfig
+The collector takes city bbox grids and writes `(rgb, height)` pairs per cell:
+- `rgb`: `(3, dim, dim)` float32 — ESRI World Imagery, dynamic zoom (currently 16–17 for 200m bboxes at 512px).
+- `height`: `(1, dim, dim)` float32 — heights in metres, NaN where no source.
 
-result = train_v3(
-    tile_dir="cache/height_tiles_osm",       # or height_tiles_hr for 512 px
-    output_model="models/roofnet_v3s.pt",
-    config=TrainConfig(
-        task="height",
-        epochs=30,
-        batch_size=8,
-        lr=3e-4,
-        patience=8,
-        tile_size=256,                        # 512 for high-res tiles
-        device="cpu",                         # or "cuda" / "mps"
-        num_workers=0,
-        freeze_backbone_epochs=6,             # warm-up: backbone stays frozen
-        grad_loss_weight=0.2,                 # weight of Sobel edge loss term
-        pixel_loss_mode="hybrid",             # "l1", "rmse", or "hybrid" (l1 + rmse)
-        bldg_loss_weight=5.0,                 # building-pixel upweight vs background
-        per_image_backprop=True,              # one backward per image (better for small batches)
-        selection_metric="rmse",              # checkpoint selection: "loss", "mae", or "rmse"
-    ),
-    n_iters=2,       # refinement iterations per forward pass
-    arch="v3s",      # "v3s" | "v3" | "v3.1"
-)
-print(result)
-```
+Two label paths:
 
-To resume a previous run:
+| `--label-source` | What it does | Best for |
+|---|---|---|
+| `osm` (default) | Rasterize OSM `building:height` / `building:levels` | Europe (good tag coverage) |
+| `providers` | Merge external rasters (nDSM, GHSL, OpenBuildings, WSF3D, Copernicus, 3DEP-LiDAR) via `merge_height_rasters` | Sparse-OSM regions (Cartagena, US suburbs) |
 
-```python
-result = train_v3(
-    ...,
-    config=TrainConfig(..., resume=True),                       # auto-resumes from output_model
-    # or:
-    config=TrainConfig(..., resume_from="models/checkpoint.pt"),  # explicit path
-)
-```
+OSM tag coverage drops sharply outside Europe — `--label-source providers` is the workaround. See [`docs/plans/height-data-sources.md`](plans/height-data-sources.md) for the merge strategy.
 
-### TrainConfig reference
+### Cache
 
-| Field | Default | Description |
-|-------|---------|-------------|
-| `task` | `"shape"` | `"shape"`, `"height"`, or `"both"` |
-| `epochs` | `60` | Maximum training epochs |
-| `batch_size` | `16` | Mini-batch size |
-| `lr` | `3e-4` | Initial learning rate (cosine-annealed to `lr * 0.01`) |
-| `weight_decay` | `1e-4` | AdamW weight decay |
-| `patience` | `12` | Early-stop epochs without improvement |
-| `tile_size` | `256` | Tile resolution in pixels |
-| `device` | `"auto"` | `"cpu"`, `"cuda"`, `"mps"`, or `"auto"` |
-| `freeze_backbone_epochs` | `5` | Epochs with backbone frozen before full fine-tune |
-| `grad_loss_weight` | `0.2` | Sobel edge loss coefficient |
-| `pixel_loss_mode` | `"hybrid"` | Pixel regression objective: `"l1"`, `"rmse"`, or `"hybrid"` |
-| `pixel_l2_weight` | `0.25` | RMSE blend weight when `pixel_loss_mode="hybrid"` |
-| `bldg_loss_weight` | `5.0` | Building-pixel upweight factor (counters sparse labels) |
-| `per_image_backprop` | `True` | One backward pass per image — more stable on small datasets |
-| `selection_metric` | `"rmse"` | Metric for best-checkpoint selection: `"loss"`, `"mae"`, `"rmse"` |
-| `resume` | `False` | Resume from the output checkpoint if it exists |
-| `resume_from` | `None` | Explicit checkpoint path to resume from |
-
-### Hyperparameter guidance
-
-| Setting | Small dataset (< 400 tiles) | Larger dataset (> 800 tiles) |
-|---------|-----------------------------|------------------------------|
-| `arch` | `"v3s"` | `"v3"` or `"v3.1"` |
-| `lr` | `3e-4` | `1e-3` |
-| `batch_size` | `8` | `16` |
-| `freeze_backbone_epochs` | `6` | `3` |
-| `epochs` | `30` | `60` |
-| `per_image_backprop` | `True` | `False` |
-
-**Do not use `lr > 1e-3`** — gradient explosion occurs above this threshold with the v3 composite loss.
-
-### Notebook
-
-Open [Train_Height_CNN.ipynb](../notebooks/Train_Height_CNN.ipynb) for a cell-by-cell walkthrough.
-
----
-
-## Step 3: Evaluate
-
-### Inspect predictions (notebook)
-
-Open [Height_Training_Inspector.ipynb](../notebooks/Height_Training_Inspector.ipynb) and set:
-
-```python
-CHECKPOINT = "../models/roofnet_v3s.pt"
-TILE_DIR   = "../cache/height_tiles_osm"
-```
-
-Cells show:
-- Overall val MAE (all pixels vs building pixels only)
-- Per-tile 5-panel view: **RGB | GT height | Predicted mask | Predicted height | Error**
-- Arch is auto-detected from the checkpoint's state dict keys
-
-### Quick demo script
-
-```bash
-python -m tools.ml.predict_demo --checkpoint models/roofnet_v3s.pt --city Berlin
-```
-
----
-
-## Step 4: Run inference in the app
-
-```python
-from app.session.terrain_session import TerrainSession
-
-s = TerrainSession(port=9000)
-s.start()
-s.create_region("MyRegion", north=52.53, south=52.51, east=13.41, west=13.38)
-s.fetch_satellite()
-s.predict_heights(
-    model="unet",
-    checkpoint="models/roofnet_v3s.pt",
-    device="cpu",
-)
-result = s.predicted_heights
-print(f"Height range: {result.raster.min():.1f} – {result.raster.max():.1f} m")
-```
-
-See [Height_Prediction.ipynb](../notebooks/Height_Prediction.ipynb) for the full end-to-end notebook including visualisation and comparison with Phase-1 heights.
+The tile collector skips re-fetching tiles already on disk. It also skips:
+- low building coverage (< 5% of pixels) — degenerate
+- failed satellite fetches (intermittent ESRI 5xx)
 
 ---
 
 ## Loss functions
 
-The v3 family trains with a composite loss applied at each iteration (deep supervision):
-
 ```
-pixel_loss = weighted_L1(height)              # building pixels weighted bldg_loss_weight× over background
-           + pixel_l2_weight × weighted_RMSE  # (only when pixel_loss_mode="hybrid")
-
-L = pixel_loss
-  + grad_loss_weight × Sobel(height)          # edge sharpness via gradient matching
-  + BCE(mask, target > 0)                     # building/background segmentation
-  + Dice(mask, target > 0)                    # overlap for sparse positives
-  + 0.5 × ContinuousDice(height)             # energy localisation
+dice    = 1 - 2·|p ∩ t| / (|p| + |t|)
+dice_l2 = dice + λ · E[(p − t)²]
+dice_l3 = dice + λ · E[|p − t|³]
 ```
 
-**`pixel_loss_mode`** controls the pixel regression objective:
-- `"l1"` — robust to outliers, may be slow to drive large errors down
-- `"rmse"` — penalises large errors more strongly, can be noisy early on
-- `"hybrid"` *(default)* — L1 + `pixel_l2_weight × RMSE`: robustness of L1 with stronger large-error pressure
+Targets are normalized by `HEIGHT_NORM_M = 200` to bring them into [0,1] for Dice. The L2/L3 term penalizes magnitude error — needed because pure Dice rewards overlap shape and is satisfied by predicting marginal-mean heights with the right footprint.
 
-Later iterations are weighted more heavily: `w = (iter + 1) / n_iters` — so pass 2 of 2 contributes twice as much as pass 1.
+`dice_l3` weights tall-building errors more aggressively. Trade-off: less stable training at high λ.
 
 ---
 
-## Known issues and lessons learned
+## Grow/prune mode
 
-| Issue | Cause | Fix applied |
-|-------|-------|-------------|
-| All-zero height predictions | Naive L1 on 70 % background tiles | Weighted L1: building pixels ×5 |
-| Blurry predictions | Single 32× bilinear FPN upsample | V3_1 adds skip connections; V3_S uses sharp loss terms |
-| Overfitting on 280 tiles | 1.4 M+ trainable params | Use `arch="v3s"` (56 K trainable during warm-up) |
-| Gradient explosion | `lr` too high (e.g. `lr=0.3`) | Keep `lr ≤ 1e-3`; default is `3e-4` |
-| Backbone input mismatch | Missing ImageNet normalisation | Fixed in `data.py` — `(x − mean) / std` now applied before backbone |
-| WSF3D / GHSL provider 404 | External height APIs unavailable for European cities | Use `collect_osm_tiles.py` (OSM + ESRI, no keys needed) |
+Iterative neural architecture search:
+
+1. Train current arch for N inner-epochs (with ReduceLROnPlateau).
+2. Score each block by `mean(|activation|) × mean(|gradient|)` over a few val batches.
+3. **If overfit detected** (`stale_epochs ≥ N AND train_dropped_since_best`): prune 25% per block, min 4 channels.
+4. **Else**: grow every block by +1 channel, plus the highest-scoring block by `--grow-channels`.
+5. Reload weights via `shape_aware_load` (copy where shapes match, leave new channels random).
+6. Repeat for `--cycles` cycles.
+
+Each cycle records a scoreboard row. The CLI prints per-cycle Δloss/ΔMAE/ΔIoU so you can see whether added capacity helped.
 
 ---
 
-## Configuration reference
+## Provider integration
 
-[tools/ml/config.py](../tools/ml/config.py) is the single source of truth for cities, label sets, and defaults.
+Once trained, a Retna_V1 checkpoint can be exposed to the height pipeline by writing a thin provider that:
+1. Fetches an ESRI RGB tile for the bbox.
+2. Runs the model on `RGB / 255 → [0,1]`.
+3. Returns `pred × HEIGHT_NORM_M` as a `HeightResult` raster.
 
-```python
-from tools.ml.config import TRAIN_CITIES, EVAL_CITIES, SHAPE_LABELS
+The legacy `app/server/core/height/providers/roofnet.py` is currently auto-disabled (no compatible RoofNetV3 checkpoint exists). A Retna provider has not yet been wired in.
+
+---
+
+## Reproducibility
+
+Every training run gets one row on `models/scoreboard.json`:
+- `arch`, `task`, `model_path`, `best_metrics` (val_loss / val_mae / val_iou / val_rmse)
+- `n_train`, `n_val`, `epochs`, `config_hash`, `notes`, `ts`
+
+```bash
+python -m tools.ml.scoreboard show           # all runs sorted by MAE/loss
+python -m tools.ml.scoreboard show --task height
 ```
-
-**Training cities:** Berlin, Vienna, Barcelona, Paris, Amsterdam, Prague, Rotterdam  
-**Eval cities:** non-overlapping sub-regions of the same cities
-
-**Roof shape classes** (index order is fixed — do not reorder):
-
-| Index | Label |
-|-------|-------|
-| 0 | flat |
-| 1 | gabled |
-| 2 | hipped |
-| 3 | pyramidal |
-| 4 | skillion |
-| 5 | dome |

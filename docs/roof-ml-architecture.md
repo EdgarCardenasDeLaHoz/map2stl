@@ -1,8 +1,14 @@
-# ROOF-2: ML Architecture Plan
-_Last updated: 2025-06-18_
+# ROOF-2: ML Architecture Plan (HISTORICAL)
+_Last updated: 2025-06-18 · superseded 2026-04-30_
 
-This document supersedes the "Phase 2: Roof Shape Detection" section of
-`building-roof-pipeline-plan.md` and introduces the models in `tools/networks.py`
+> **HISTORICAL.** This document captures the original ROOF-2 architecture analysis (UNet vs RoofNetV3 etc.). The production direction has since changed: roof-shape ML is no longer pursued because OSM tag coverage + the F-ROOF1 raster path is sufficient. Building heights are now handled by Retna_V1 — see [`docs/plans/height-training-status.md`](plans/height-training-status.md).
+>
+> Kept for reference because the model trade-offs analysis is still useful when designing new architectures.
+
+---
+
+This document originally superseded the "Phase 2: Roof Shape Detection" section of
+`building-roof-pipeline-plan.md` and introduced the models in `tools/networks.py`
 into the pipeline architecture.
 
 ---

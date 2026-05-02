@@ -87,9 +87,9 @@ Primary `TerrainSession` touchpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/cities/cached` | Check if OSM bbox is cached |
-| POST | `/api/cities` | Fetch OSM data (rejects >15 km diagonal); cached as `.json.gz` |
-| POST | `/api/cities/raster` | Rasterize OSM buildings/roads/waterways to a DEM-format height map (`values`, `width`, `height`, `vmin`, `vmax`) — used by `loadCityRaster()` in `city-render.js` |
+| GET | `/api/cities/cached` | Check if OSM bbox is cached; accepts `m_per_level`, `simplify_tolerance`, `min_area` to match the correct cache entry |
+| POST | `/api/cities` | Fetch OSM data (rejects >15 km diagonal); cached as `.json.gz`. Key params: `m_per_level` (floor height, default 3.5 m), `simplify_tolerance`, `min_area` — all included in cache key |
+| POST | `/api/cities/raster` | Rasterize OSM buildings/roads/waterways to a DEM-format height map (`values`, `width`, `height`, `vmin`, `vmax`) — used by `loadCityRaster()` in `city-render.js`. Accepts `m_per_level` for OSM cache lookup |
 | POST | `/api/cities/export3mf` | Generate 3MF with terrain + building prisms |
 
 > **Two city rasterization endpoints exist:**
@@ -97,6 +97,9 @@ Primary `TerrainSession` touchpoints:
 > - `/api/composite/city-raster` — returns per-feature height-delta arrays used by the composite DEM pipeline
 >
 > They serve different consumers: the first is for the CityRaster layer view; the second feeds `composite-dem.js`.
+> Both endpoints accept `m_per_level`, `simplify_tolerance`, and `min_area` to resolve the correct OSM cache entry.
+
+> **`m_per_level` (floor-to-floor height):** Default is 3.5 m. Use 3.0–3.5 for Southern Europe (3.4 for Granada), 3.5–4.0 for Northern Europe/US. This parameter is part of the OSM cache key — changing it produces a separate cache entry with correctly scaled `osm_levels`-derived heights.
 
 ## Composite Routes (`routers/composite.py`)
 
@@ -106,7 +109,7 @@ Primary `TerrainSession` touchpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/composite/city-raster` | Rasterize OSM features to height-delta arrays (PIL, ~50× faster than JS). Supports `projection` and `clip_nans` for uniform pipeline alignment — used by `composite-dem.js` |
+| POST | `/api/composite/city-raster` | Rasterize OSM features to height-delta arrays (PIL, ~50× faster than JS). Accepts `m_per_level`, `simplify_tolerance`, `min_area` for OSM cache lookup. Supports `projection` and `clip_nans` for uniform pipeline alignment — used by `composite-dem.js` |
 
 ## Cache & Settings (`routers/cache.py`, `settings.py`)
 

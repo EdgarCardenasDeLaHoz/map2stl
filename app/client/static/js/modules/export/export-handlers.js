@@ -23,6 +23,14 @@
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── Export validation bounds ────────────────────────────────────────────────
+const EXPORT_RESOLUTION_MIN    = 1;
+const EXPORT_RESOLUTION_MAX    = 2000;
+const EXPORT_EXAGGERATION_MIN  = 0;
+const EXPORT_EXAGGERATION_MAX  = 100;
+const EXPORT_BASE_HEIGHT_MIN   = 0;
+const EXPORT_BASE_HEIGHT_MAX   = 100;   // mm
+
 function _setExportButtonsEnabled(enabled) {
     const ids = ['downloadSTLBtn', 'downloadOBJBtn', 'download3MFBtn',
                  'exportCityBtn', 'exportCrossSectionBtn', 'exportPuzzleBtn'];
@@ -51,17 +59,17 @@ function _progressEl() {
         bar:   document.getElementById('modelProgressBar'),
         text:  document.getElementById('modelProgressText'),
         set(pct, msg) {
-            if (this.wrap) this.wrap.style.display = 'block';
+            if (this.wrap) this.wrap.classList.remove('hidden');
             if (this.bar)  this.bar.style.width    = pct + '%';
             if (this.text) this.text.textContent   = msg;
         },
-        done(msg) { this.set(100, msg); setTimeout(() => { if (this.wrap) this.wrap.style.display = 'none'; }, 1000); },
+        done(msg) { this.set(100, msg); setTimeout(() => { if (this.wrap) this.wrap.classList.add('hidden'); }, 1000); },
         error(msg) {
-            if (this.text) this.text.textContent     = msg;
-            if (this.bar)  this.bar.style.backgroundColor = '#e74c3c';
+            if (this.text) this.text.textContent = msg;
+            if (this.bar)  this.bar.classList.add('progress-bar--error');
             setTimeout(() => {
-                if (this.wrap) this.wrap.style.display = 'none';
-                if (this.bar)  this.bar.style.backgroundColor = '';
+                if (this.wrap) this.wrap.classList.add('hidden');
+                if (this.bar)  this.bar.classList.remove('progress-bar--error');
             }, 2000);
         }
     };
@@ -102,9 +110,11 @@ function _exportParams() {
     const md = window.appState?.generatedModelData;
     return {
         ..._demSettings(),
-        model_height:     md.resolution,
+        model_height:     md.modelHeight,
         base_height:      md.baseHeight,
         exaggeration:     md.exaggeration,
+        walls:            document.getElementById('exportWalls')?.checked  ?? true,
+        floor:            document.getElementById('exportFloor')?.checked  ?? true,
         sea_level_cap:    document.getElementById('exportSeaLevelCap')?.checked   || false,
         engrave_label:    document.getElementById('exportEngraveLabel')?.checked  || false,
         label_text:       document.getElementById('exportLabelText')?.value || window.appState?.selectedRegion?.name || _regionName(),
@@ -127,17 +137,18 @@ function generateModelFromTab() {
     }
 
     const resolution  = parseInt(document.getElementById('modelResolution').value);
+    const modelHeight  = parseFloat(document.getElementById('exportModelHeight')?.value) || 30;
     const exaggeration = parseFloat(document.getElementById('exportExaggeration')?.value) || 1.0;
     const baseHeight   = parseFloat(document.getElementById('exportBaseHeight')?.value) || 0;
 
-    if (!resolution || resolution < 1 || resolution > 2000) {
-        window.showToast('Resolution must be between 1 and 2000.', 'warning'); return;
+    if (!resolution || resolution < EXPORT_RESOLUTION_MIN || resolution > EXPORT_RESOLUTION_MAX) {
+        window.showToast(`Resolution must be between ${EXPORT_RESOLUTION_MIN} and ${EXPORT_RESOLUTION_MAX}.`, 'warning'); return;
     }
-    if (!exaggeration || exaggeration <= 0 || exaggeration > 100) {
-        window.showToast('Exaggeration must be between 0 and 100.', 'warning'); return;
+    if (!exaggeration || exaggeration <= EXPORT_EXAGGERATION_MIN || exaggeration > EXPORT_EXAGGERATION_MAX) {
+        window.showToast(`Exaggeration must be between ${EXPORT_EXAGGERATION_MIN} and ${EXPORT_EXAGGERATION_MAX}.`, 'warning'); return;
     }
-    if (isNaN(baseHeight) || baseHeight < 0 || baseHeight > 100) {
-        window.showToast('Base height must be between 0 and 100 mm.', 'warning'); return;
+    if (isNaN(baseHeight) || baseHeight < EXPORT_BASE_HEIGHT_MIN || baseHeight > EXPORT_BASE_HEIGHT_MAX) {
+        window.showToast(`Base height must be between ${EXPORT_BASE_HEIGHT_MIN} and ${EXPORT_BASE_HEIGHT_MAX} mm.`, 'warning'); return;
     }
 
     const pr = _progressEl();
@@ -154,8 +165,11 @@ function generateModelFromTab() {
             width:       lastDemData.width,
             height:      lastDemData.height,
             resolution,
+            modelHeight,
             exaggeration,
             baseHeight,
+            walls:       document.getElementById('exportWalls')?.checked ?? true,
+            floor:       document.getElementById('exportFloor')?.checked ?? true,
             vmin:        lastDemData.vmin,
             vmax:        lastDemData.vmax
         };
@@ -257,6 +271,8 @@ function downloadCrossSection() {
     if (isNaN(cutValue)) { window.showToast('Enter a cut coordinate first', 'warning'); return; }
     const thickness  = parseFloat(document.getElementById('crossSectionThickness')?.value) || 5;
     const statusEl   = document.getElementById('crossSectionStatus');
+    const pr = _progressEl();
+    pr.set(0, 'Starting cross-section…');
     if (statusEl) statusEl.textContent = 'Generating…';
 
     const r    = window.appState?.selectedRegion || {};
@@ -264,6 +280,7 @@ function downloadCrossSection() {
     const md   = window.appState.generatedModelData;
 
     const ds = _demSettings();
+    pr.set(20, 'Sending request…');
     fetch('/api/export/crosssection', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -273,7 +290,7 @@ function downloadCrossSection() {
             east:         ds.bbox.east,  west:  ds.bbox.west,
             cut_axis:     cutAxis,
             cut_value:    cutValue,
-            model_height: md.resolution,
+            model_height: md.modelHeight || 30,
             base_height:  md.baseHeight,
             exaggeration: md.exaggeration,
             thickness_mm: thickness,
@@ -282,17 +299,20 @@ function downloadCrossSection() {
     })
         .then(response => {
             if (!response.ok) return response.json().then(e => { throw new Error(e.error || 'Cross-section failed'); });
+            pr.set(80, 'Downloading…');
             return response.blob();
         })
         .then(blob => {
             const axis     = cutAxis === 'lat' ? `lat${cutValue.toFixed(4)}` : `lon${cutValue.toFixed(4)}`;
             _triggerDownload(blob, `${name}_cross_${axis}.stl`);
             if (statusEl) statusEl.textContent = 'Downloaded.';
+            pr.done('Complete!');
             window.showToast('Cross-section STL ready', 'success');
         })
         .catch(e => {
             console.error('Cross-section error:', e);
             if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+            pr.error('Error: ' + e.message);
             window.showToast('Cross-section error: ' + e.message, 'error');
         });
 }

@@ -92,6 +92,67 @@ TRAIN_CITIES: dict[str, CitySpec] = {
         description="Modern flat roofs + experimental architecture",
         roof_tag_pct=5.6,
     ),
+    "Cologne": CitySpec(
+        "Cologne", 50.945, 50.920, 6.980, 6.940,
+        description="Cathedral + Gothic churches, high roof:shape density near Altstadt",
+        roof_tag_pct=12.0,
+    ),
+    "Bruges": CitySpec(
+        "Bruges", 51.215, 51.195, 3.240, 3.210,
+        description="Dense medieval centre — varied gabled/hipped roofs on narrow plots",
+        roof_tag_pct=15.0,
+    ),
+    "Florence": CitySpec(
+        "Florence", 43.785, 43.755, 11.275, 11.235,
+        description="Renaissance domes + hipped tile roofs, good multi-height buildings",
+        roof_tag_pct=8.0,
+    ),
+    "Munich": CitySpec(
+        "Munich", 48.145, 48.120, 11.590, 11.540,
+        description="Bavarian churches + Altstadt — mix of gabled/hipped roofs",
+        roof_tag_pct=18.0,
+    ),
+    # ── Non-European: extends domain coverage to combat the European-bias
+    # observed during the first training run (val_mae correlated +0.91
+    # with target-mean-height; small dataset was 100% European mid-rise).
+    "Cartagena": CitySpec(
+        "Cartagena", 10.430, 10.380, -75.510, -75.560,
+        description="Colombia — Caribbean walled city + colonial low-rise; OSM coverage moderate",
+        roof_tag_pct=0.5,
+    ),
+    "Manhattan": CitySpec(
+        "Manhattan", 40.770, 40.745, -73.965, -73.995,
+        description="High-rise dense grid — adds very tall building distribution",
+        roof_tag_pct=0.3,
+    ),
+    "Tokyo": CitySpec(
+        "Tokyo", 35.685, 35.665, 139.770, 139.740,
+        description="Mixed mid-rise + tower; non-European urban form",
+        roof_tag_pct=0.8,
+    ),
+    # US cities — within LiDAR_3DEP coverage. Provider labels return real
+    # per-pixel heights from public LiDAR DSMs, fixing the OSM-default-10m
+    # bias and giving the model real high-rise training signal.
+    "Philadelphia": CitySpec(
+        "Philadelphia", 39.965, 39.935, -75.150, -75.180,
+        description="Philadelphia center city — mid/high-rise mix incl. Comcast Tower (297m)",
+        roof_tag_pct=0.4,
+    ),
+    "Chicago": CitySpec(
+        "Chicago", 41.890, 41.870, -87.620, -87.650,
+        description="Chicago Loop — dense skyscraper district incl. Willis Tower (442m)",
+        roof_tag_pct=0.3,
+    ),
+    "NYC": CitySpec(
+        "NYC", 40.760, 40.740, -73.985, -74.015,
+        description="Midtown Manhattan extended — Empire State, Hudson Yards",
+        roof_tag_pct=0.3,
+    ),
+    "Boston": CitySpec(
+        "Boston", 42.365, 42.340, -71.045, -71.075,
+        description="Boston Back Bay + Financial — tall buildings + brownstone mix",
+        roof_tag_pct=0.4,
+    ),
 }
 
 # Evaluation cities — smaller regions for quick eval, non-overlapping with train

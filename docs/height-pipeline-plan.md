@@ -1,10 +1,17 @@
 # Plan: Building Height Estimation — Detailed Implementation
 
-> **Status:** Phase 1a is complete and in use. Phase 1b is **complete**: GHSL, Open Buildings, and Shadow providers are implemented in the router and all 8 are now wired into `TerrainSession.fetch_building_heights()`. Open Buildings and Shadow remain placeholder-quality fetch paths but are correctly integrated. Phase 3 (STL import + IDW infill) is **complete**: `stl_import.py`, `infill.py`, and `TerrainSession.load_stl()` / `preview_stl()` / `infill_heights()` are fully implemented and tested. Phase 2 (CNN prediction) is still not started. Current focused test count: `tests/test_height/` = 179 passing tests.
+> **For current ML/training state, see [`docs/plans/height-training-status.md`](plans/height-training-status.md).**
+> This file is the original Phase 1–3 design plan. The CNN section (Phase 2) has been superseded by the Retna_V1 line of work documented in the status file above.
+>
+> **Status (2026-04-30):**
+> - Phase 1a: complete (production providers wired)
+> - Phase 1b: complete (GHSL, Open Buildings, Shadow integrated; last two are placeholder fetch quality)
+> - Phase 2 (CNN): replaced by Retna_V1 — see status doc. RoofNetV3 deprecated due to marginal-mean collapse.
+> - Phase 3 (STL import + IDW infill): complete
+>
 > **Scope:** Backend only, session API. No frontend changes.
-> **Target cities:** Granada, Barcelona (test examples; tool is generic)
-> **Target resolution:** ~5m/pixel
-> **Last updated:** 2026-04-24
+> **Target resolution:** ~5m/pixel.
+> **Last updated:** 2026-04-30
 
 ## TL;DR
 
@@ -373,13 +380,14 @@ Algorithm:
 
 > ✅ **Complete (integration-wired).** All 8 providers are registered in `TerrainSession.fetch_building_heights()`. GHSL is meaningfully implemented. Open Buildings and ShadowHeight are integrated but remain placeholder-quality data-fetch paths — they contribute no real data yet.
 
+
 ### What exists now
 
 - `ghsl.py` — implemented global raster provider with cache support; wired into TerrainSession
 - `open_buildings.py` — coverage logic and placeholder fetch path (returns empty/NaN); wired into TerrainSession
-- `shadow_height.py` — solar-angle and shadow-length helper math, not a full inference pipeline; wired into TerrainSession
-- Height router registration for all three providers
-- `TerrainSession._registry` includes all 8 providers
+- `shadow_height.py` — **DEPRECATED**: shadow-based provider is no longer used by default due to high error rate and outlier risk. Only available for research or explicit opt-in.
+- Height router registration for all three providers (shadow_height is now commented out by default)
+- `TerrainSession._registry` includes 7 production providers; shadow_height is excluded by default
 
 ### What still needs to happen before calling Phase 1b “done”
 
