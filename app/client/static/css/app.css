@@ -53,7 +53,7 @@
             border: 1px solid #555;
             padding: 4px;
             border-radius: 3px;
-            font-size: 11px;
+            font-size: 12px;
         }
 
         .ctrl-input-sm {
@@ -63,7 +63,7 @@
             border: 1px solid #555;
             padding: 2px 4px;
             border-radius: 3px;
-            font-size: 11px;
+            font-size: 12px;
         }
 
         /* ─────────────────────────────────────────────────────────── */
@@ -903,14 +903,14 @@
         }
 
         .model-sidebar {
-            flex: 1;
-            min-width: 280px;
+            width: 320px;
+            flex-shrink: 0;
+            min-width: 240px;
             /* LP1: prevent label wrapping at narrow viewport sizes */
             background: #2d2d2d;
             padding: 20px;
             border-radius: 8px;
             overflow-y: auto;
-            max-width: var(--panel-width);
         }
 
         .model-sidebar h3 {
@@ -1209,6 +1209,53 @@
             background: #005fa3;
         }
 
+        .regions-table .action-btn.danger {
+            background: #6e2020;
+        }
+
+        .regions-table .action-btn.danger:hover {
+            background: #e74c3c;
+        }
+
+        /* Tag chips */
+        .tag-cell {
+            cursor: pointer;
+            min-width: 80px;
+        }
+
+        .region-tag-chip {
+            display: inline-block;
+            background: #2c4a2c;
+            color: #7ec87e;
+            border-radius: 10px;
+            padding: 1px 7px;
+            font-size: 11px;
+            margin: 1px 2px 1px 0;
+            white-space: nowrap;
+        }
+
+        .tag-empty {
+            color: #555;
+            font-size: 12px;
+        }
+
+        .tag-edit-input {
+            width: 100%;
+            background: #1e1e1e;
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #fff;
+            padding: 2px 6px;
+            font-size: 12px;
+        }
+
+        /* Viewport filter button active state */
+        #viewportFilterBtn.active {
+            background: #1a4a1a;
+            border-color: #4a8c4a;
+            color: #7ec87e;
+        }
+
         #map,
         #globe {
             width: 100%;
@@ -1456,15 +1503,23 @@
         /* Strip button status dots */
         .strip-status-dots {
             display: inline-flex;
+            align-items: center;
             gap: 2px;
             margin-left: 2px;
             vertical-align: middle;
+            line-height: 1;
+            font-size: 0;
         }
 
         .strip-dot {
             display: inline-block;
-            width: 6px;
-            height: 6px;
+            width: 5px;
+            height: 5px;
+            min-width: 5px;
+            min-height: 5px;
+            max-width: 5px;
+            max-height: 5px;
+            flex: 0 0 5px;
             border-radius: 50%;
             background: #555;
             vertical-align: middle;
@@ -1569,7 +1624,7 @@
         /* Row 1: 2-column grid for N/S/E/W coordinate inputs */
         .bbox-coords-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(4, 1fr);
             gap: 3px;
             margin-bottom: 4px;
         }
@@ -1765,7 +1820,7 @@
 
         /* Parameter Groups */
         .param-group {
-            margin: 15px 0;
+            margin: 8px 0;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1774,6 +1829,7 @@
         .param-group label {
             flex: 1;
             font-weight: 500;
+            font-size: 12px;
         }
 
         .param-group input {
@@ -1797,11 +1853,11 @@
             grid-template-columns: 1fr auto;
             align-items: center;
             gap: 4px 8px;
-            font-size: 11px;
+            font-size: 12px;
         }
 
         .param-grid-header {
-            font-size: 10px;
+            font-size: 11px;
             color: #aaa;
             grid-column: 1 / -1;
             margin-bottom: 2px;
@@ -2205,14 +2261,14 @@
 
         /* Collapsible Sections */
         .collapsible-section {
-            margin-bottom: 15px;
+            margin-bottom: 8px;
             border: 1px solid #404040;
-            border-radius: 8px;
+            border-radius: 6px;
             overflow: hidden;
         }
 
         .collapsible-header {
-            padding: 12px 15px;
+            padding: 8px 10px;
             background: linear-gradient(180deg, #3a3a3a 0%, var(--bg-light)100%);
             cursor: pointer;
             display: flex;
@@ -2228,7 +2284,7 @@
 
         .collapsible-header h4 {
             margin: 0;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             color: #e0e0e0;
             display: flex;
@@ -2247,18 +2303,18 @@
         }
 
         .collapsible-content {
-            padding: 15px;
+            padding: 8px 10px;
             background: #2d2d2d;
             transition: max-height 0.3s ease;
         }
 
         /* Tighter collapsible styles inside the left sidebar */
         .sidebar .collapsible-content {
-            padding: 8px 10px;
+            padding: 6px 8px;
         }
 
         .sidebar .collapsible-header {
-            padding: 8px 12px;
+            padding: 6px 10px;
         }
 
         .sidebar .collapsible-header h4 {
@@ -2292,6 +2348,27 @@
 
         .search-input::placeholder {
             color: var(--text-dim);
+        }
+
+        .label-chip {
+            padding: 1px 6px;
+            font-size: 10px;
+            border-radius: 10px;
+            border: 1px solid #555;
+            background: #333;
+            color: #aaa;
+            cursor: pointer;
+            line-height: 1.5;
+        }
+        .label-chip:hover {
+            background: #444;
+            border-color: #888;
+            color: #ccc;
+        }
+        .label-chip.active {
+            background: #2a6496;
+            border-color: #4a84b6;
+            color: #fff;
         }
 
         /* Progress Bar */

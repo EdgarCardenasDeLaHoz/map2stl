@@ -19,7 +19,7 @@
 /**
  * Switch the main view to the specified tab.
  * Hides all containers then shows the selected one.
- * @param {'map'|'globe'|'dem'|'model'|'regions'|'compare'} view
+ * @param {'map'|'globe'|'dem'|'model'|'regions'|'compare'|'cache'} view
  */
 window.switchView = function switchView(view) {
     const mapContainer     = document.getElementById('mapContainer');
@@ -28,6 +28,7 @@ window.switchView = function switchView(view) {
     const modelContainer   = document.getElementById('modelContainer');
     const compareContainer = document.getElementById('compareContainer');
     const regionsContainer = document.getElementById('regionsContainer');
+    const cacheContainer   = document.getElementById('cacheInventoryContainer');
     const newRegionSection = document.getElementById('newRegionSection');
     const tabs             = document.querySelectorAll('.tab');
 
@@ -49,6 +50,9 @@ window.switchView = function switchView(view) {
     if (regionsContainer) {
         regionsContainer.classList.add('hidden');
     }
+    if (cacheContainer) {
+        cacheContainer.classList.add('hidden');
+    }
 
     // Show/hide new region section (only visible in 2D Map view)
     if (newRegionSection) {
@@ -62,6 +66,8 @@ window.switchView = function switchView(view) {
     if (view === 'map') {
         mapContainer.classList.remove('hidden');
         document.querySelector('[data-view="map"]').classList.add('active');
+        // Force Leaflet to recalculate size after container becomes visible
+        requestAnimationFrame(() => { window._globalMap?.invalidateSize?.(); });
     } else if (view === 'globe') {
         globeContainer.classList.remove('hidden');
         document.querySelector('[data-view="globe"]').classList.add('active');
@@ -86,7 +92,7 @@ window.switchView = function switchView(view) {
             modelContainer.classList.remove('hidden');
             modelContainer.style.display = 'flex';
         }
-        document.querySelector('[data-view="model"]').classList.add('active');
+        document.querySelector('[data-view="model"]')?.classList.add('active');
         // Auto-collapse sidebar so the 3D viewport gets full width
         const sidebarEl = document.querySelector('.sidebar');
         if (sidebarEl) sidebarEl.style.display = 'none';
@@ -95,13 +101,21 @@ window.switchView = function switchView(view) {
             regionsContainer.classList.remove('hidden');
             window.populateRegionsTable?.();
         }
-        document.querySelector('[data-view="regions"]').classList.add('active');
+        document.querySelector('[data-view="regions"]')?.classList.add('active');
     } else if (view === 'compare') {
         if (compareContainer) {
             compareContainer.classList.remove('hidden');
             window.initCompareMode?.();
         }
-        document.querySelector('[data-view="compare"]').classList.add('active');
+        document.querySelector('[data-view="compare"]')?.classList.add('active');
+    } else if (view === 'cache') {
+        if (cacheContainer) {
+            cacheContainer.classList.remove('hidden');
+            window.loadCacheInventory?.();
+        }
+        const sidebarEl = document.querySelector('.sidebar');
+        if (sidebarEl) sidebarEl.style.display = 'none';
+        document.querySelector('[data-view="cache"]')?.classList.add('active');
     }
 };
 
@@ -153,21 +167,21 @@ window.cycleSidebarState = function cycleSidebarState() {
         sidebar.classList.remove('collapsed');
         sidebar.classList.add('expanded');
         openBtn.classList.add('hidden');
-        icon.textContent  = '⇐';
-        label.textContent = 'Hide';
+           icon.textContent  = '⇐';
+           label.textContent = 'Collapse';
     } else if (sidebarState === 'expanded') {
         sidebarState = 'hidden';
         sidebar.classList.remove('expanded');
         sidebar.classList.add('collapsed');
         openBtn.classList.remove('hidden');
-        icon.textContent  = '▶';
-        label.textContent = 'Show';
+           icon.textContent  = '✖';
+           label.textContent = 'Hide';
     } else {
         sidebarState = 'normal';
         sidebar.classList.remove('collapsed', 'expanded');
         openBtn.classList.add('hidden');
-        icon.textContent  = '⇔';
-        label.textContent = 'Expand';
+           icon.textContent  = '⇔';
+           label.textContent = 'Expand';
     }
 
     window.setSidebarState?.(sidebarState);
@@ -188,7 +202,8 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
     tbody.innerHTML = '';
     const q            = (filter || document.getElementById('sidebarTableSearch')?.value || '').toLowerCase();
     const coordinatesData = window.getCoordinatesData?.() || [];
-    const list         = q ? coordinatesData.filter(r => r.name.toLowerCase().includes(q)) : coordinatesData;
+    const filteredBySearch = q ? coordinatesData.filter(r => r.name.toLowerCase().includes(q)) : coordinatesData;
+    const list         = window.filterRegionsForMapViewport?.(filteredBySearch) || filteredBySearch;
     const groups       = window.groupRegionsByContinent?.(list) || [];
     const selectedRegion = window.appState.selectedRegion;
 
@@ -210,11 +225,27 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
         tbody.appendChild(headerTr);
 
         groupRegions.forEach(region => {
-            const originalIndex = coordinatesData.findIndex(r => r.name === region.name);
+            let originalIndex = coordinatesData.indexOf(region);
+            if (originalIndex < 0) {
+                // Fallback for non-identical object refs: match full bbox first,
+                // then fall back to name-only as a last resort.
+                originalIndex = coordinatesData.findIndex(r =>
+                    r.name === region.name
+                    && Number(r.north) === Number(region.north)
+                    && Number(r.south) === Number(region.south)
+                    && Number(r.east) === Number(region.east)
+                    && Number(r.west) === Number(region.west)
+                );
+            }
+            if (originalIndex < 0) {
+                originalIndex = coordinatesData.findIndex(r => r.name === region.name);
+            }
             const p   = region.parameters || {};
             const dim = p.dim || '—';
+            const escapedName = region.name.replace(/'/g, "\\'");
             const tr  = document.createElement('tr');
             if (selectedRegion && selectedRegion.name === region.name) tr.classList.add('selected');
+            tr.dataset.label = region.label || '';
             tr.innerHTML = `
                 <td class="tbl-name" title="${region.name}">${region.name}</td>
                 <td class="tbl-coord">${region.north?.toFixed(2) ?? ''}</td>
@@ -224,6 +255,7 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
                 <td class="tbl-coord">${dim}</td>
                 <td class="tbl-actions">
                     <button class="tbl-btn edit" onclick="goToEdit(${originalIndex})" title="Open in Edit view">✏ Edit</button>
+                    <button class="tbl-btn" onclick="toggleRegionBboxHidden('${escapedName}')" title="Hide or show this bounding box">${window.isRegionBboxHidden?.(region.name) ? '👁 Show' : '🙈 Hide'}</button>
                     <button class="tbl-btn" onclick="selectCoordinate(${originalIndex});switchView('map')" title="Fly to on map">📍</button>
                 </td>
             `;
@@ -236,6 +268,8 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
             tbody.appendChild(tr);
         });
     });
+    // Re-apply label filter if any active (set by Vue RegionListTable component)
+    window._applyRegionLabelFilter?.();
 };
 
 // ---------------------------------------------------------------------------
@@ -244,6 +278,9 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
 
 // Module-scoped visibility state (mirrors the old closure var in app.js)
 let _bboxLayersVisible = true;
+window.getBboxLayersVisible = function getBboxLayersVisible() {
+    return _bboxLayersVisible;
+};
 
 /**
  * Toggle visibility of the preloaded-region and edit-marker Leaflet layers.
@@ -251,17 +288,12 @@ let _bboxLayersVisible = true;
 window.toggleBboxLayerVisibility = function toggleBboxLayerVisibility() {
     _bboxLayersVisible = !_bboxLayersVisible;
     const btn             = document.getElementById('bboxVisToggleBtn');
-    const map             = window.getMap?.();
-    const preloadedLayer  = window.getPreloadedLayer?.();
-    const editMarkersLayer = window.getEditMarkersLayer?.();
 
     if (_bboxLayersVisible) {
-        if (preloadedLayer  && map) preloadedLayer.addTo(map);
-        if (editMarkersLayer && map) editMarkersLayer.addTo(map);
+        window.syncRegionBboxVisibility?.();
         if (btn) { btn.textContent = '👁'; btn.classList.remove('hidden-state'); btn.title = 'Hide region boxes on map'; }
     } else {
-        if (preloadedLayer  && map) preloadedLayer.remove();
-        if (editMarkersLayer && map) editMarkersLayer.remove();
+        window.syncRegionBboxVisibility?.();
         if (btn) { btn.textContent = '🙈'; btn.classList.add('hidden-state'); btn.title = 'Show region boxes on map'; }
     }
 };

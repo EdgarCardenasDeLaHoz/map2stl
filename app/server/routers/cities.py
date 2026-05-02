@@ -23,6 +23,149 @@ from app.server.core.responses import error_response
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cities"])
 
+
+def _building_features(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    buildings = payload.get("buildings") or {}
+    features = buildings.get("features") or []
+    return features if isinstance(features, list) else []
+
+
+def _city_cache_missing_height_source(payload: Dict[str, Any]) -> bool:
+    """Detect older cached city payloads created before height_source existed."""
+    features = _building_features(payload)
+    if not features:
+        return False
+    return any("height_source" not in ((feat.get("properties") or {})) for feat in features)
+
+
+def _city_cache_missing_building_parts(payload: Dict[str, Any]) -> bool:
+    """Detect cached payloads written before building:parts and extended layers were added.
+
+    When towers/churches/fortifications keys are absent the data was cached before
+    the _fetch_building_parts merge was introduced — a fresh fetch is needed.
+    """
+    return "towers" not in payload and "churches" not in payload
+
+
+def _city_cache_needs_enrichment(payload: Dict[str, Any]) -> bool:
+    """Return True when default-height buildings still need raster enhancement."""
+    if _city_cache_missing_height_source(payload):
+        return True
+
+    features = _building_features(payload)
+    if not features:
+        return False
+
+    enhancement = payload.get("height_enhancement") or {}
+    if enhancement.get("source_name") == "merged":
+        return False
+
+    return any((feat.get("properties") or {}).get("height_source") == "default" for feat in features)
+
+
+def _enhance_city_data(
+    payload: Dict[str, Any],
+    north: float,
+    south: float,
+    east: float,
+    west: float,
+    dim: int = 512,
+) -> Dict[str, Any]:
+    """Fill default OSM building heights from the merged global height stack."""
+    from app.server.core.height import merge_height_rasters
+    from app.server.core.height.providers.ndsm import NDSMProvider
+    from app.server.core.height.providers.wsf3d import WSF3DProvider
+    from app.server.core.height.providers.copernicus import CopernicusProvider
+    from app.server.core.height.providers.ghsl import GHSLProvider
+    from app.server.core.height.providers.open_buildings import OpenBuildingsProvider
+    from app.server.core.height.providers.shadow_height import ShadowHeightProvider
+    from app.server.core.osm import enhance_buildings_with_raster
+
+    features = _building_features(payload)
+    if not features:
+        return payload
+
+    # Keep US regions OSM-driven (height / building:levels + default fallback)
+    # instead of applying raster enhancement.
+    center_lat = (north + south) * 0.5
+    center_lon = (east + west) * 0.5
+    in_conus = 24.0 <= center_lat <= 50.0 and -125.0 <= center_lon <= -66.0
+    in_alaska = 51.0 <= center_lat <= 72.0 and -170.0 <= center_lon <= -129.0
+    in_hawaii = 18.0 <= center_lat <= 23.5 and -161.0 <= center_lon <= -154.0
+    in_us = in_conus or in_alaska or in_hawaii
+    if in_us:
+        payload["height_enhancement"] = {
+            "source_name": "osm_only_us",
+            "providers_used": [],
+            "resolution_m": 0.0,
+            "stats": {
+                "skipped": True,
+                "reason": "US bbox uses OSM heights only",
+            },
+        }
+        return payload
+
+    default_count = sum(
+        1 for feat in features
+        if (feat.get("properties") or {}).get("height_source") == "default"
+    )
+    if default_count == 0:
+        return payload
+
+    bbox = (north, south, east, west)
+    providers = [
+        provider for provider in (
+            NDSMProvider(),
+            CopernicusProvider(),
+            OpenBuildingsProvider(),
+            WSF3DProvider(),
+            GHSLProvider(),
+            ShadowHeightProvider(),
+        )
+        if provider.covers(bbox)
+    ]
+
+    results = []
+    for provider in providers:
+        try:
+            result = provider.fetch_heights(bbox, (dim, dim))
+        except Exception as exc:
+            logger.warning("City height enhancement provider '%s' failed: %s", provider.name, exc)
+            continue
+
+        if result.raster.size == 0:
+            continue
+
+        try:
+            import numpy as np
+
+            valid_pixels = int(np.count_nonzero(~np.isnan(result.raster)))
+        except Exception:
+            valid_pixels = 0
+        if valid_pixels <= 0:
+            continue
+        results.append(result)
+
+    if not results:
+        return payload
+
+    merged = merge_height_rasters(results, target_shape=(dim, dim))
+    enhanced = enhance_buildings_with_raster(
+        payload["buildings"],
+        merged.raster,
+        bbox,
+        confidence_raster=merged.confidence,
+        source_name=merged.source_name,
+    )
+    payload["buildings"] = enhanced["buildings"]
+    payload["height_enhancement"] = {
+        "source_name": merged.source_name,
+        "providers_used": [item.source_name for item in results],
+        "resolution_m": float(merged.resolution_m),
+        "stats": enhanced.get("stats") or {},
+    }
+    return payload
+
 # ---------------------------------------------------------------------------
 # Cache helpers
 # ---------------------------------------------------------------------------
@@ -88,10 +231,11 @@ class CityExportRequest(BaseModel):
 @router.get("/api/cities/cached")
 async def check_city_cache(
     north: float, south: float, east: float, west: float,
-    simplify_tolerance: float = 2.0, min_area: float = 20.0,
+    simplify_tolerance: float = 3.0, min_area: float = 5.0,
+    m_per_level: float = 3.5,
 ):
     """Check whether OSM city data for this bbox is already cached locally."""
-    key = osm_cache_key(north, south, east, west, simplify_tolerance, min_area)
+    key = osm_cache_key(north, south, east, west, simplify_tolerance, min_area, m_per_level)
     if _CACHE_AVAILABLE:
         cached = (CACHE_ROOT / "osm" / f"{key}.json.gz").exists()
     else:
@@ -115,22 +259,57 @@ async def get_city_data(city_req: CityRequest):
         return diag_err
 
     cache_key = osm_cache_key(north, south, east, west,
-                              city_req.simplify_tolerance, city_req.min_area)
+                              city_req.simplify_tolerance, city_req.min_area,
+                              city_req.m_per_level)
 
     # Cache check
     if _CACHE_AVAILABLE:
         cached_data = read_osm_cache(cache_key)
         if cached_data is not None:
-            logger.info(f"Serving OSM data from .json.gz cache: {cache_key}")
-            return JSONResponse(content=cached_data)
+            if _city_cache_missing_height_source(cached_data):
+                logger.info("Ignoring stale OSM city cache missing height_source: %s", cache_key)
+            elif _city_cache_missing_building_parts(cached_data):
+                logger.info("Ignoring stale OSM cache missing building:parts support: %s", cache_key)
+            else:
+                if _city_cache_needs_enrichment(cached_data):
+                    try:
+                        cached_data = await run_sync(
+                            _enhance_city_data,
+                            cached_data,
+                            north,
+                            south,
+                            east,
+                            west,
+                        )
+                        write_osm_cache(cache_key, cached_data)
+                    except Exception as exc:
+                        logger.warning("Cached city height enhancement failed: %s", exc)
+                logger.info(f"Serving OSM data from .json.gz cache: {cache_key}")
+                return JSONResponse(content=cached_data)
     else:
         OSM_CACHE_PATH.mkdir(parents=True, exist_ok=True)
         cache_file = OSM_CACHE_PATH / f"{cache_key}.json"
         if cache_file.exists():
             try:
                 cached_data = json.loads(cache_file.read_text())
-                logger.info(f"Serving OSM data from legacy cache: {cache_key}")
-                return JSONResponse(content=cached_data)
+                if _city_cache_missing_height_source(cached_data):
+                    logger.info("Ignoring stale legacy OSM city cache missing height_source: %s", cache_key)
+                else:
+                    if _city_cache_needs_enrichment(cached_data):
+                        try:
+                            cached_data = await run_sync(
+                                _enhance_city_data,
+                                cached_data,
+                                north,
+                                south,
+                                east,
+                                west,
+                            )
+                            cache_file.write_text(json.dumps(cached_data))
+                        except Exception as exc:
+                            logger.warning("Legacy cached city height enhancement failed: %s", exc)
+                    logger.info(f"Serving OSM data from legacy cache: {cache_key}")
+                    return JSONResponse(content=cached_data)
             except Exception as cache_read_err:
                 logger.debug(
                     f"Legacy OSM cache read failed, re-fetching: {cache_read_err}")
@@ -139,10 +318,23 @@ async def get_city_data(city_req: CityRequest):
         result = await run_sync(
             _fetch_osm_data, north, south, east, west, layers,
             city_req.simplify_tolerance, city_req.min_area,
+            city_req.m_per_level,
         )
     except Exception as e:
         logger.error(f"OSM fetch error: {e}")
         return error_response(f"OSM fetch failed: {str(e)}")
+
+    try:
+        result = await run_sync(
+            _enhance_city_data,
+            result,
+            north,
+            south,
+            east,
+            west,
+        )
+    except Exception as exc:
+        logger.warning("City height enhancement failed: %s", exc)
 
     result["cache_key"] = cache_key
     result["diagonal_km"] = round(diag_km, 2)
@@ -203,10 +395,14 @@ async def get_city_raster(req: CityRasterRequest):
             "bbox": payload["bbox"],
         }
 
+    # v3: roof_shapes flag added (F-ROOF1)
+    _RASTER_CACHE_VERSION = "v3"
     cache_key = hashlib.md5(
-        f"cityRaster|{req.north:.4f}_{req.south:.4f}_{req.east:.4f}_{req.west:.4f}"
+        f"cityRaster|{_RASTER_CACHE_VERSION}|{req.north:.4f}_{req.south:.4f}_{req.east:.4f}_{req.west:.4f}"
         f"_dim{req.dim}_bs{req.building_scale}_rd{req.road_depression_m}_wd{req.water_depression_m}"
-        f"_proj{req.projection}_cn{req.clip_nans}".encode()
+        f"_proj{req.projection}_cn{req.clip_nans}"
+        f"_tol{req.simplify_tolerance}_a{req.min_area}_mpl{req.m_per_level:.2f}"
+        f"_roof{int(bool(req.roof_shapes))}".encode()
     ).hexdigest()
 
     # Cache check
@@ -235,7 +431,10 @@ async def get_city_raster(req: CityRasterRequest):
     _from_cache = False
     if (not buildings.get("features") and not roads.get("features")
             and not waterways.get("features") and _CACHE_AVAILABLE):
-        osm_key = osm_cache_key(req.north, req.south, req.east, req.west)
+        osm_key = osm_cache_key(req.north, req.south, req.east, req.west,
+                                getattr(req, "simplify_tolerance", 3.0),
+                                getattr(req, "min_area", 5.0),
+                                getattr(req, "m_per_level", 3.5))
         osm_data = read_osm_cache(osm_key)
         if osm_data:
             buildings = osm_data.get("buildings", buildings)
@@ -250,6 +449,7 @@ async def get_city_raster(req: CityRasterRequest):
             req.north, req.south, req.east, req.west, req.dim,
             buildings, roads, waterways,
             req.building_scale, req.road_depression_m, req.water_depression_m,
+            req.roof_shapes,
         )
     except Exception as e:
         logger.error(f"City raster error: {e}", exc_info=True)
@@ -324,7 +524,10 @@ async def export_city_3mf(req: CityExportRequest):
     # Resolve buildings from OSM cache when not provided
     buildings = req.buildings
     if (not buildings or not buildings.get("features")) and _CACHE_AVAILABLE:
-        osm_key = osm_cache_key(req.north, req.south, req.east, req.west)
+        osm_key = osm_cache_key(req.north, req.south, req.east, req.west,
+                                getattr(req, "simplify_tolerance", 3.0),
+                                getattr(req, "min_area", 5.0),
+                                getattr(req, "m_per_level", 3.5))
         osm_data = read_osm_cache(osm_key)
         if osm_data and osm_data.get("buildings"):
             buildings = osm_data["buildings"]
@@ -398,7 +601,10 @@ async def enhance_heights(req: EnhanceHeightsRequest):
     # Resolve buildings from OSM cache when not provided
     buildings = req.buildings
     if (not buildings or not buildings.get("features")) and _CACHE_AVAILABLE:
-        osm_key = osm_cache_key(req.north, req.south, req.east, req.west)
+        osm_key = osm_cache_key(req.north, req.south, req.east, req.west,
+                                getattr(req, "simplify_tolerance", 3.0),
+                                getattr(req, "min_area", 5.0),
+                                getattr(req, "m_per_level", 3.5))
         osm_data = read_osm_cache(osm_key)
         if osm_data and osm_data.get("buildings"):
             buildings = osm_data["buildings"]

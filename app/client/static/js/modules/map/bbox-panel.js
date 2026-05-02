@@ -1,3 +1,24 @@
+// Keyboard accessibility for bbox inputs: arrow keys nudge by 0.1°
+// === Constants ===
+const BBOX_KEYBOARD_NUDGE_STEP = 0.1;
+
+['bboxNorth', 'bboxSouth', 'bboxEast', 'bboxWest'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+        el.addEventListener('keydown', (e) => {
+            let step = BBOX_KEYBOARD_NUDGE_STEP;
+            if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+                el.value = (parseFloat(el.value) + step).toFixed(2);
+                el.dispatchEvent(new Event('change'));
+                e.preventDefault();
+            } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+                el.value = (parseFloat(el.value) - step).toFixed(2);
+                el.dispatchEvent(new Event('change'));
+                e.preventDefault();
+            }
+        });
+    }
+});
 /**
  * modules/bbox-panel.js
  *
@@ -349,7 +370,19 @@ window.populateRegionsPanelTable = function populateRegionsPanelTable() {
         body.className = 'continent-body';
 
         groupRegions.forEach(region => {
-            const originalIndex = coordinatesData.findIndex(r => r.name === region.name);
+            let originalIndex = coordinatesData.indexOf(region);
+            if (originalIndex < 0) {
+                originalIndex = coordinatesData.findIndex(r =>
+                    r.name === region.name
+                    && Number(r.north) === Number(region.north)
+                    && Number(r.south) === Number(region.south)
+                    && Number(r.east) === Number(region.east)
+                    && Number(r.west) === Number(region.west)
+                );
+            }
+            if (originalIndex < 0) {
+                originalIndex = coordinatesData.findIndex(r => r.name === region.name);
+            }
             const row = document.createElement('div');
             row.className = 'panel-region-row';
             if (selectedRegion && selectedRegion.name === region.name) row.classList.add('selected');
