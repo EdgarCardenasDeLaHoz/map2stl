@@ -39,9 +39,10 @@ from app.server.config import (
     OPENTOPO_DATASETS,
     TEST_MODE,
 )
+from geo2stl.raster import clamp_esa_scale, derive_sat_scale
+
 from app.server.core.cache import make_cache_key, read_array_cache, write_array_cache
 from app.server.core.responses import error_response
-from app.server.core.terrain_raster import clamp_esa_scale, derive_sat_scale
 from app.server.core.validation import (
     BboxQueryParams,
     b64_encode as _b64,

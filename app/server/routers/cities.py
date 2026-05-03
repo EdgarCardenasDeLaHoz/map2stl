@@ -17,15 +17,15 @@ from fastapi.responses import JSONResponse, Response
 from geo2stl.projections import project_city_raster
 
 from app.server.config import OSM_CACHE_PATH
-from app.server.core.validation import model_to_dict, run_sync, validate_bbox_diagonal
-from app.server.core.responses import error_response
-from app.server.core.height.service import enhance_city_data as _enhance_city_data_impl
-from app.server.core.osm_cache_policy import (
-    building_features as _building_features,
+from city2stl.cache_policy import (
     city_cache_missing_height_source as _city_cache_missing_height_source,
     city_cache_missing_building_parts as _city_cache_missing_building_parts,
     city_cache_needs_enrichment as _city_cache_needs_enrichment,
 )
+
+from app.server.core.validation import model_to_dict, run_sync, validate_bbox_diagonal
+from app.server.core.responses import error_response
+from app.server.core.height.service import enhance_city_data as _enhance_city_data_impl
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cities"])
