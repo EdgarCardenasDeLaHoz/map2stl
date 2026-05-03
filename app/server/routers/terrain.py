@@ -5,34 +5,45 @@ All heavy lifting is in core.dem and core.cache; this module is a thin
 HTTP adapter that parses requests, delegates, and formats responses.
 """
 
-from geo2stl.hydrology import HYDROLOGY_LAYER
-from geo2stl.sat2stl import SAT_LAYER
+import logging
+from typing import Optional
+
+import numpy as np
+from cachetools import LRUCache
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse
+
 from geo2stl.dem import (
     fetch_layer_data as _fetch_layer_data,
     fetch_local_dem as _fetch_local_dem,
-    upsample_dem as _upsample_dem,
     make_dem_payload as _make_dem_payload,
+    upsample_dem as _upsample_dem,
 )
-from app.server.core.cache import make_cache_key, write_array_cache, read_array_cache
-from app.server.core.validation import (
-    BboxQueryParams,
-    parse_float as _parse_float,
-    parse_int as _parse_int,
-    parse_bool as _parse_bool,
-    parse_bbox_query as _parse_bbox_query,
-    b64_encode as _b64,
-    validate_bbox as _validate_bbox,
-    validate_dim as _validate_dim,
-    run_sync,
-)
-from app.server.core.terrain_raster import (
-    clamp_esa_scale,
-    derive_sat_scale,
-)
+from geo2stl.hydrology import HYDROLOGY_LAYER
 from geo2stl.projections import (
     project_grid as _geo_project_grid,
-    project_water_arrays as project_water_layers,
     project_rgb_image,
+    project_water_arrays as project_water_layers,
+)
+from geo2stl.sat2stl import SAT_LAYER
+
+from app.server.config import (
+    H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
+    MAX_DIM,
+    OPENTOPO_API_KEY as _OPENTOPO_API_KEY,
+    OPENTOPO_DATASETS,
+    TEST_MODE,
+)
+from app.server.core.cache import make_cache_key, read_array_cache, write_array_cache
+from app.server.core.responses import error_response
+from app.server.core.terrain_raster import clamp_esa_scale, derive_sat_scale
+from app.server.core.validation import (
+    BboxQueryParams,
+    b64_encode as _b64,
+    parse_bbox_query as _parse_bbox_query,
+    run_sync,
+    validate_bbox as _validate_bbox,
+    validate_dim as _validate_dim,
 )
 
 
@@ -42,20 +53,6 @@ def project_scalar_grid(arr, north, south, east, west, projection, clip_nans):
 
 def project_categorical_grid(arr, north, south, east, west, projection, clip_nans):
     return _geo_project_grid(arr, north, south, east, west, projection, clip_nans, categorical=True)
-from app.server.core.responses import error_response
-from app.server.config import (
-    TEST_MODE,
-    OPENTOPO_DATASETS,
-    OPENTOPO_API_KEY as _OPENTOPO_API_KEY,
-    H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
-    MAX_DIM,
-)
-from typing import Optional
-from fastapi.responses import JSONResponse
-from fastapi import APIRouter, Request, Query, Depends
-from cachetools import LRUCache
-import numpy as np
-import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["terrain"])
@@ -608,7 +605,6 @@ async def get_terrain_sources():
 
 @router.get("/api/terrain/hydrology", tags=["terrain"])
 async def get_terrain_hydrology(
-    request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
     dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
     depression_m: Optional[float] = Query(None, description="Max river depression in metres (negative, default -5.0)"),
@@ -637,31 +633,25 @@ async def get_terrain_hydrology(
                         5=major rivers only, 9=Amazon/Nile/Congo only)
         order_exponent: how steeply depression scales with order (default 1.5)
     """
-    params = request.query_params
-
     north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
-    dim = _parse_int(params, "dim", 300)
-    depression_m = _parse_float(params, "depression_m", -5.0)
-    source = params.get("source", "natural_earth")
+    source = source or "natural_earth"
     if source not in ("natural_earth", "hydrorivers"):
         source = "natural_earth"
-
-    # natural_earth params
-    scale_m = _parse_int(params, "scale_m", 10)
+    scale_m = scale_m if scale_m is not None else 10
     if scale_m not in (10, 50, 110):
         scale_m = 10
-
-    # hydrorivers params
-    min_order = _parse_int(params, "min_order", 3)
+    min_order = min_order if min_order is not None else 3
     min_order = max(1, min(9, min_order))
-    order_exponent = _parse_float(params, "order_exponent", 1.5)
-
-    projection = params.get("projection", "none")
-    clip_nans = _parse_bool(params, "clip_nans", False)
+    order_exponent = order_exponent if order_exponent is not None else 1.5
+    projection = projection or "none"
+    clip_nans = clip_nans if clip_nans is not None else False
+    depression_m = depression_m if depression_m is not None else -5.0
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
     if err:
         return err
+
+    dim = dim if dim is not None else 300
 
     logger.debug(f"GET /api/terrain/hydrology bbox=({north},{south},{east},{west}) "
                  f"dim={dim} source={source} depression={depression_m}")

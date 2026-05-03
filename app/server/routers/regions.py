@@ -11,7 +11,6 @@ from app.server.core.db import get_db, init_db
 import json
 import logging
 import sqlite3
-from typing import List, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -21,59 +20,9 @@ router = APIRouter(tags=["regions"])
 
 
 # ---------------------------------------------------------------------------
-# Schema imports — try schemas.py first, inline fallback
+# Schema imports
 # ---------------------------------------------------------------------------
-try:
-    from app.server.schemas import RegionCreate, RegionParameters, RegionSettings
-except ImportError:
-    from pydantic import BaseModel, Field
-
-    class RegionParameters(BaseModel):
-        dim: int = Field(600)
-        depth_scale: float = Field(0.5)
-        water_scale: float = Field(0.05)
-        height: float = Field(10.0)
-        base: float = Field(2.0)
-        subtract_water: bool = Field(True)
-        sat_scale: int = Field(500)
-
-        def model_dump(self, **kw):
-            return self.dict(**kw)
-
-    class RegionCreate(BaseModel):
-        name: str
-        north: float
-        south: float
-        east: float
-        west: float
-        description: Optional[str] = None
-        label: Optional[str] = None
-        tags: Optional[str] = None
-        parameters: Optional[RegionParameters] = None
-
-        def model_dump(self, **kw):
-            return self.dict(**kw)
-
-    class RegionSettings(BaseModel):
-        dim: Optional[int] = None
-        depth_scale: Optional[float] = None
-        water_scale: Optional[float] = None
-        height: Optional[float] = None
-        base: Optional[float] = None
-        subtract_water: Optional[bool] = None
-        sat_scale: Optional[int] = None
-        colormap: Optional[str] = None
-        projection: Optional[str] = None
-        rescale_min: Optional[float] = None
-        rescale_max: Optional[float] = None
-        gridlines_show: Optional[bool] = None
-        gridlines_count: Optional[int] = None
-        elevation_curve: Optional[str] = None
-        elevation_curve_points: Optional[List] = None
-        dem_source: Optional[str] = None
-
-        def model_dump(self, **kw):
-            return self.dict(**kw)
+from app.server.schemas import RegionCreate, RegionParameters, RegionSettings
 
 
 # ---------------------------------------------------------------------------

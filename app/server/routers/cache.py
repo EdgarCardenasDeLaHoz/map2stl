@@ -6,7 +6,6 @@ Extracted from location_picker.py (backend refactor, step 6).
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 from pathlib import Path
@@ -22,7 +21,7 @@ from app.server.core.cache_inspector import (
     flatten_files as _flatten_files,
 )
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -162,24 +161,17 @@ async def clear_cache_endpoint():
 
 
 @router.delete("/api/cache/region")
-async def clear_region_cache(request: Request):
+async def clear_region_cache(
+    north: float = Query(..., description="Bounding box north"),
+    south: float = Query(..., description="Bounding box south"),
+    east: float = Query(..., description="Bounding box east"),
+    west: float = Query(..., description="Bounding box west"),
+):
     """Clear all namespace caches (DEM, water, satellite, etc.) for a region.
 
     Expects bbox query params: north, south, east, west.
     """
     from app.server.core.cache import clear_bbox_cache
-
-    params = request.query_params
-    try:
-        north = float(params["north"])
-        south = float(params["south"])
-        east = float(params["east"])
-        west = float(params["west"])
-    except (KeyError, ValueError):
-        return JSONResponse(
-            content={
-                "error": "Missing or invalid bbox parameters (north, south, east, west)"},
-            status_code=400)
 
     results = clear_bbox_cache(north, south, east, west)
     total = sum(results.values())
@@ -191,19 +183,16 @@ async def clear_region_cache(request: Request):
 
 
 @router.get("/api/cache/check")
-async def check_cache(request: Request):
+async def check_cache(
+    north: float = Query(..., description="Bounding box north"),
+    south: float = Query(..., description="Bounding box south"),
+    east: float = Query(0.0, description="Bounding box east"),
+    west: float = Query(0.0, description="Bounding box west"),
+    scale: str = Query("500", description="Earth Engine scale"),
+    dataset: str = Query("esa", description="Dataset identifier"),
+):
     """Check whether a specific region is already cached server-side."""
-    params = request.query_params
-    north = params.get("north")
-    south = params.get("south")
-    east = params.get("east", "0")
-    west = params.get("west", "0")
-    scale = params.get("scale", "500")
-    dataset = params.get("dataset", "esa")
-
-    if north is None or south is None:
-        return JSONResponse(content={"error": "Missing north/south bbox parameters"}, status_code=400)
-
+    import hashlib
     cache_key = hashlib.md5(
         f"{float(north):.4f}_{float(south):.4f}_{float(east):.4f}_{float(west):.4f}_{dataset}".encode()
     ).hexdigest()

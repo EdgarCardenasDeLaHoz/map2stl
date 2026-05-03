@@ -197,7 +197,6 @@ async def get_city_raster(req: CityRasterRequest):
     Returns a DEM-compatible response: { values, width, height, vmin, vmax, bbox }.
     Cached as .npz alongside other DEM rasters.
     """
-    import hashlib
     import numpy as np
 
     def _sanitize_raster_result(payload: Dict[str, Any]) -> Dict[str, Any]:
