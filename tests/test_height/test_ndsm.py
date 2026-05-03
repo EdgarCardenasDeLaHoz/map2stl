@@ -1,11 +1,11 @@
-"""Unit tests for the nDSM provider — no network calls."""
+﻿"""Unit tests for the nDSM provider — no network calls."""
 
 import numpy as np
 import pytest
 from unittest.mock import patch, MagicMock
 
 from app.server.core.height import HeightResult
-from app.server.core.height.providers.ndsm import (
+from city2stl.height.providers.ndsm import (
     NDSMProvider,
     _tile_name_glo30,
     _tile_url_glo30,
@@ -127,9 +127,9 @@ class TestNDSMFetch:
             return None
         return fake
 
-    @patch("app.server.core.height.providers.ndsm.read_array_cache", return_value=None)
-    @patch("app.server.core.height.providers.ndsm.write_array_cache")
-    @patch("app.server.core.height.providers.ndsm._get_tile")
+    @patch("city2stl.height.providers.ndsm.read_array_cache", return_value=None)
+    @patch("city2stl.height.providers.ndsm.write_array_cache")
+    @patch("city2stl.height.providers.ndsm._get_tile")
     def test_basic_subtraction(self, mock_tile, mock_write, mock_read):
         """DSM=150m, DTM=130m → nDSM=20m building height."""
         mock_tile.side_effect = self._mock_get_tile(150.0, 130.0)
@@ -142,9 +142,9 @@ class TestNDSMFetch:
         np.testing.assert_allclose(result.raster, 20.0, atol=0.5)
         np.testing.assert_allclose(result.confidence, NDSM_CONFIDENCE)
 
-    @patch("app.server.core.height.providers.ndsm.read_array_cache", return_value=None)
-    @patch("app.server.core.height.providers.ndsm.write_array_cache")
-    @patch("app.server.core.height.providers.ndsm._get_tile")
+    @patch("city2stl.height.providers.ndsm.read_array_cache", return_value=None)
+    @patch("city2stl.height.providers.ndsm.write_array_cache")
+    @patch("city2stl.height.providers.ndsm._get_tile")
     def test_negative_clamped_to_zero(self, mock_tile, mock_write, mock_read):
         """DTM > DSM (artefact) → clamped to 0, not negative."""
         mock_tile.side_effect = self._mock_get_tile(100.0, 105.0)
@@ -152,9 +152,9 @@ class TestNDSMFetch:
         result = p.fetch_heights((41.5, 41.3, 2.3, 2.1), (20, 20))
         assert np.all(result.raster >= 0)
 
-    @patch("app.server.core.height.providers.ndsm.read_array_cache", return_value=None)
-    @patch("app.server.core.height.providers.ndsm.write_array_cache")
-    @patch("app.server.core.height.providers.ndsm._get_tile")
+    @patch("city2stl.height.providers.ndsm.read_array_cache", return_value=None)
+    @patch("city2stl.height.providers.ndsm.write_array_cache")
+    @patch("city2stl.height.providers.ndsm._get_tile")
     def test_no_dsm_returns_nan(self, mock_tile, mock_write, mock_read):
         """No DSM tiles available → all NaN."""
         mock_tile.return_value = None
@@ -162,9 +162,9 @@ class TestNDSMFetch:
         result = p.fetch_heights((41.5, 41.3, 2.3, 2.1), (20, 20))
         assert np.all(np.isnan(result.raster))
 
-    @patch("app.server.core.height.providers.ndsm.read_array_cache", return_value=None)
-    @patch("app.server.core.height.providers.ndsm.write_array_cache")
-    @patch("app.server.core.height.providers.ndsm._get_tile")
+    @patch("city2stl.height.providers.ndsm.read_array_cache", return_value=None)
+    @patch("city2stl.height.providers.ndsm.write_array_cache")
+    @patch("city2stl.height.providers.ndsm._get_tile")
     def test_no_fabdem_returns_nan(self, mock_tile, mock_write, mock_read):
         """DSM available but no FABDEM → nDSM is NaN (can't subtract)."""
         def fake(source, lat, lon):
@@ -176,7 +176,7 @@ class TestNDSMFetch:
         result = p.fetch_heights((41.5, 41.3, 2.3, 2.1), (20, 20))
         assert np.all(np.isnan(result.raster))
 
-    @patch("app.server.core.height.providers.ndsm.read_array_cache")
+    @patch("city2stl.height.providers.ndsm.read_array_cache")
     def test_cache_hit(self, mock_read):
         """Cached result is returned without downloading."""
         raster = np.full((30, 30), 15.0, dtype=np.float32)

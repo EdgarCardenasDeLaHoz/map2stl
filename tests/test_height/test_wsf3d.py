@@ -1,4 +1,4 @@
-"""Tests for the WSF3D building height provider.
+﻿"""Tests for the WSF3D building height provider.
 
 Unit tests use synthetic data — no network required.
 """
@@ -16,7 +16,7 @@ for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from app.server.core.height.providers.wsf3d import (
+from city2stl.height.providers.wsf3d import (
     WSF3DProvider,
     tile_name,
     tiles_for_bbox,
@@ -115,7 +115,7 @@ class TestWSF3DProvider:
         class MockResp:
             status_code = 404
             content = b""
-        monkeypatch.setattr("app.server.core.height.providers.wsf3d.requests.get",
+        monkeypatch.setattr("city2stl.height.providers.wsf3d.requests.get",
                             lambda *a, **kw: MockResp())
 
         p = WSF3DProvider()
@@ -150,7 +150,7 @@ class TestWSF3DProvider:
             def raise_for_status(self):
                 pass
 
-        monkeypatch.setattr("app.server.core.height.providers.wsf3d.requests.get",
+        monkeypatch.setattr("city2stl.height.providers.wsf3d.requests.get",
                             lambda *a, **kw: MockResp())
 
         p = WSF3DProvider()
@@ -198,7 +198,7 @@ class TestWSF3DProvider:
             call_count += 1
             return MockResp()
 
-        monkeypatch.setattr("app.server.core.height.providers.wsf3d.requests.get",
+        monkeypatch.setattr("city2stl.height.providers.wsf3d.requests.get",
                             mock_get)
 
         p = WSF3DProvider()

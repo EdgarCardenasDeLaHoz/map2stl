@@ -184,11 +184,11 @@ stateDiagram-v2
 
 ## Backend
 
-The backend (`app/server/`) is a thin layer over two support libraries: `geo2stl` (map projections, tile stitching) and `numpy2stl` (mesh generation). See [libraries.md](libraries.md) for the full import map and integration assessment.
+The backend (`app/server/`) is a thin layer over two support libraries: `geo2stl` (map projections, tile stitching) and `numpy2stl` (mesh generation). See [reference/libraries.md](reference/libraries.md) for the full import map and integration assessment.
 
 ### Structure
 
-See [CLAUDE.md § Project Structure](../CLAUDE.md#project-structure--key-paths) for the complete project layout.
+See `../CLAUDE.md` for the complete project layout.
 <!-- Note: CLAUDE.md lives outside docs/; this link works on GitHub but not MkDocs -->
 Backend detail:
 
@@ -235,7 +235,7 @@ app/
 ### Key Backend Rules
 - Business logic in `core/`, request handling in `routers/`
 - Never use `os.chdir()` in handlers — process-global, causes data races
-- See [CLAUDE.md § Editing Rules](../CLAUDE.md#editing-rules) for async/executor constraints and full editing guidelines
+- See `../CLAUDE.md` for async/executor constraints and full editing guidelines
 <!-- Note: CLAUDE.md lives outside docs/; this link works on GitHub but not MkDocs -->
 
 ### numpy2stl Delegation Pattern

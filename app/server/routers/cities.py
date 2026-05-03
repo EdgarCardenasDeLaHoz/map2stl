@@ -79,7 +79,7 @@ def _enhance_city_data(
     from app.server.core.height.providers.ghsl import GHSLProvider
     from app.server.core.height.providers.open_buildings import OpenBuildingsProvider
     from app.server.core.height.providers.shadow_height import ShadowHeightProvider
-    from app.server.core.osm import enhance_buildings_with_raster
+    from city2stl.heights import enhance_buildings_with_raster
 
     features = _building_features(payload)
     if not features:
@@ -180,19 +180,20 @@ except ImportError:
 # OSM fetch helper
 # ---------------------------------------------------------------------------
 try:
-    from app.server.core.osm import fetch_osm_data as _fetch_osm_data, rasterize_city_data as _rasterize_city_data
+    from city2stl.fetch import fetch_osm_data as _fetch_osm_data
+    from city2stl.rasterize import rasterize_city_data as _rasterize_city_data
 except ImportError:
     def _fetch_osm_data(*a, **kw):
-        raise RuntimeError("core.osm not available")
+        raise RuntimeError("city2stl not available")
 
     def _rasterize_city_data(*a, **kw):
-        raise RuntimeError("core.osm not available")
+        raise RuntimeError("city2stl not available")
 
 # ---------------------------------------------------------------------------
 # 3D export helper
 # ---------------------------------------------------------------------------
 try:
-    from app.server.core.cities_3d import generate_city_3mf
+    from city2stl.mesh import generate_city_3mf
     _CITIES_3D_AVAILABLE = True
 except ImportError:
     _CITIES_3D_AVAILABLE = False
@@ -582,7 +583,7 @@ async def enhance_heights(req: EnhanceHeightsRequest):
     photogrammetric measurements.
     """
     from app.server.core.height.providers.google_3d import Google3DProvider, _get_api_key
-    from app.server.core.osm import enhance_buildings_with_raster
+    from city2stl.heights import enhance_buildings_with_raster
     import numpy as np
 
     if not _get_api_key():

@@ -171,6 +171,12 @@
           <label class="check-label"><input type="checkbox" id="cityLayerRoads" checked> 🛣 Roads</label>
           <label class="check-label"><input type="checkbox" id="cityLayerWaterways" checked> 💧 Waterways</label>
         </div>
+        <!-- Color swatches used by city-overlay.js / city-render.js for canvas rendering -->
+        <div style="display:none;">
+          <input type="color" id="layerBuildingsColor"  value="#c8b89a" class="city-color-swatch">
+          <input type="color" id="layerRoadsColor"      value="#cc8844" class="city-color-swatch">
+          <input type="color" id="layerWaterwaysColor"  value="#4488cc" class="city-color-swatch">
+        </div>
 
         <div class="param-group">
           <label for="cityRasterDim" title="Resolution of the city heights raster (pixels per side).">Raster res</label>

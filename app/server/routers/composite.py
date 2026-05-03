@@ -389,7 +389,7 @@ async def merge_hydrology(req: HydrologyMergeRequest):
     Both arrays must have identical dimensions. River depression values
     (negative) are added to the DEM via element-wise minimum.
     """
-    from app.server.core.hydrology import merge_rivers_with_dem
+    from geo2stl.hydrology import merge_rivers_with_dem
     from app.server.core.validation import b64_encode
     from app.server.config import TEST_MODE
 

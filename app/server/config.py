@@ -85,7 +85,7 @@ OPENTOPO_DATASETS: dict[str, dict] = {
 #
 # Future: if the h5 file is absent, fall back to OpenTopography SRTMGL3 API
 # (same 90m SRTM3 data) or Google Earth Engine (SRTM/NASADEM, higher resolution
-# possible).  See TODO.md "SRTM h5 web fallback" for the roadmap.
+# possible).  See docs/todos/README.md for the current roadmap location.
 H5_SRTM_ROOT: Optional[str] = os.environ.get(
     "STRM_H5_ROOT",
     r"C:\Users\eac84\Desktop\Desktop\FILES",

@@ -182,7 +182,7 @@ function _applyDemResult(data, north, south, east, west) {
     if (window.appState?.osmCityData) requestAnimationFrame(() => window.renderCityOnDEM?.());
 
     // Auto-load city data if any city layer toggle is enabled and region is small enough
-    const _anyLayerOn = ['layerBuildingsToggle', 'layerRoadsToggle', 'layerWaterwaysToggle']
+    const _anyLayerOn = ['cityLayerBuildings', 'cityLayerRoads', 'cityLayerWaterways']
         .some(id => document.getElementById(id)?.checked);
     if (_anyLayerOn && !window.appState?.osmCityData && typeof window.loadCityData === 'function') {
         window.loadCityData?.();

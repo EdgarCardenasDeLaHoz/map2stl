@@ -6,8 +6,7 @@ site_dir: docs_site
 theme:
   name: material
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
+    - scheme: default
       primary: teal
       accent: amber
       toggle:
@@ -29,13 +28,11 @@ theme:
     - content.code.copy
 
 markdown_extensions:
-  - tables
   - fenced_code
   - codehilite
   - toc:
       permalink: true
   - admonition
-  - pymdownx.details
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -49,28 +46,56 @@ extra_javascript:
 
 nav:
   - Home: README.md
-  - Getting Started:
+  - Start Here:
       - Project Onboarding: ai-agent-onboarding.md
       - Task Routing: task-routing.md
-  - Architecture:
+  - Guides:
       - Overview: arch.md
+      - API Endpoints: api.md
+      - SDK Workflow: sdk-workflow.md
       - JS Modules: modules.md
       - Frontend State: state.md
-      - Library Integration: libraries.md
-      - Map Projections: projections.md
-  - API Reference:
-      - Endpoints: api.md
-      - SDK Workflow: sdk-workflow.md
-  - Layer System:
-      - Layer Analysis: layer_system_analysis.md
-      - Composite DEM: composite_dem_design.md
-      - Height Pipeline: height-pipeline-plan.md
-  - Features:
-      - BBox Editing: bbox_editing_options.md
-      - PrusaSlicer Settings: prusaslicer_terrain_settings.md
-  - UX & Accessibility:
-      - UX Audit: ux-audit.md
-      - Accessibility Audit: ACCESSIBILITY_AUDIT.md
-  - Project Management:
+  - Reference:
+      - Reference Index: reference/README.md
+      - Layer System: reference/layer-system.md
+      - Library Integration: reference/libraries.md
+      - Map Projections: reference/projections.md
+      - Function Index: reference/functions.md
+      - Terrain API Audit: reference/terrain-api-audit.md
+      - ML Pipeline: reference/ml-pipeline.md
+  - In Progress:
+      - Active Todos: todos/README.md
+      - Height Pipeline Improvement Plan: todos/height-pipeline-improvement-plan.md
+      - Height Training Status: plans/height-training-status.md
+      - Height Data Sources: plans/height-data-sources.md
       - Proposals: proposals.md
       - Known Issues: issues.md
+  - Design:
+      - Design Index: design/README.md
+      - Composite DEM: design/composite-dem-design.md
+      - BBox Editing: design/bbox-editing-options.md
+      - PrusaSlicer Settings: design/prusaslicer-terrain-settings.md
+      - Roof ML Architecture: design/roof-ml-architecture.md
+  - Reviews:
+      - Audit Index: audits/README.md
+      - UX Audit: audits/ux-audit.md
+      - Accessibility Audit: audits/accessibility-audit.md
+      - Dead Code Analysis: audits/dead-code-analysis.md
+      - Test Coverage Audit: audits/test-coverage-audit.md
+  - Past Work:
+      - Completed Index: completed/README.md
+      - Completed History: completed/todo-history.md
+      - Height Pipeline Plan: completed/height-pipeline-plan.md
+      - Building Roof Pipeline Plan: completed/building-roof-pipeline-plan.md
+      - Roof Shapes In Raster Plan: completed/roof-shapes-in-raster.md
+      - Height Model Comparison: completed/height-model-comparison.md
+      - Frontend UI UX Plan: completed/frontend-ui-ux-plan.md
+      - Open Todo Plans: completed/open-todo-plans.md
+      - Functionality History: completed/functionality-history.md
+  - Older Notes:
+      - Legacy App Analysis: archive/web_app_analysis.md
+      - Archived Frontend Refactoring: archive/frontend_refactoring.md
+      - Archived Layer System Analysis: archive/layer-system-analysis.md
+      - Archived Per-Layer Resolution Plan: archive/per-layer-resolution-plan.md
+      - Archived Rotation Plan: archive/rotation-plan.md
+      - Archived Advanced Todo Notes: archive/todo_advanced.md

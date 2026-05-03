@@ -4,7 +4,7 @@ _Last updated: 2026-04-19_
 
 > Research-phase notes for advanced building geometry and print features.
 > Approach 1 (Google 3D Tiles via pure Python) has been **implemented** in `app/server/core/height/providers/google_3d.py`.
-> See `height-pipeline-plan.md` for the full implementation status.
+> See `../completed/height-pipeline-plan.md` for the full implementation status.
 
 ---
 
@@ -28,7 +28,7 @@ The best sources of actual 3D building geometry:
 
 > ✅ **Implemented** as `app/server/core/height/providers/google_3d.py`.
 > ECEF→ENU transform, tileset traversal, ray-casting DSM, MAX_TILES=200 guard.
-> 20 unit + integration tests pass. See `height-pipeline-plan.md` Phase 1a.2.
+> 20 unit + integration tests pass. See `../completed/height-pipeline-plan.md` Phase 1a.2.
 
 The original research notes below are preserved for reference.
 

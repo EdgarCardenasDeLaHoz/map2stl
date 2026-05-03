@@ -140,8 +140,9 @@ Building height estimation from multiple data sources. Router uses prefix `/api/
 | POST | `/api/height/sources` | List available height data sources for a bbox |
 | POST | `/api/height/fetch` | Fetch building height raster from specified provider(s) |
 
-See [libraries.md](libraries.md) for the height provider architecture and
-[height-pipeline-plan.md](height-pipeline-plan.md) for implementation status.
+See [reference/libraries.md](reference/libraries.md) for the height provider architecture,
+[todos/height-pipeline-improvement-plan.md](todos/height-pipeline-improvement-plan.md) for current open work,
+and [completed/height-pipeline-plan.md](completed/height-pipeline-plan.md) for the historical implementation plan.
 
 ## Key Pydantic Models (`schemas.py`)
 

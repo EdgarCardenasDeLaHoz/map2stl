@@ -6,6 +6,7 @@ for single-array and dual-array (water+ESA alignment) projection.
 """
 
 import numpy as np
+from geo2stl.projections import project_coordinates
 
 
 def project_grid(arr, north, south, east, west, projection, clip_nans,
@@ -19,8 +20,6 @@ def project_grid(arr, north, south, east, west, projection, clip_nans,
     replaced with 0 after clipping.
     For continuous arrays (DEM, water mask, hydrology) uses bilinear.
     """
-    from geo2stl.projections import project_coordinates
-
     projected, _meta = project_coordinates(
         arr, (north, south, east, west),
         projection=projection,
@@ -46,8 +45,6 @@ def project_water_arrays(water_mask, esa_img, north, south, east, west,
     from the water-mask projection is used to clip both arrays identically.
     This guarantees they always have the same output dimensions.
     """
-    from geo2stl.projections import project_coordinates
-
     # Project water mask (continuous → NaN fill, no clip yet)
     wm_proj, _wm_meta = project_coordinates(
         water_mask, (north, south, east, west),
@@ -86,8 +83,6 @@ def project_rgb_image(img_arr, north, south, east, west, projection, clip_nans):
     NaN-filled border pixels are set to 0 (black) in the output.
     Returns the projected image as uint8.
     """
-    from geo2stl.projections import project_coordinates
-
     h, w = img_arr.shape[:2]
     channels = []
     nan_mask = None

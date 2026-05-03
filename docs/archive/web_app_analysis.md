@@ -12,7 +12,7 @@ Use these documents first:
 
 Return to this document when you need a deeper reference for the browser application specifically.
 
-> **Detailed feature inventory and session changelog:** see [`functionality_doc.md`](functionality_doc.md).
+> **Detailed feature inventory and session changelog:** see [`../completed/functionality-history.md`](../completed/functionality-history.md).
 
 This document is the single reference for the current state of the FastAPI web application, covering architecture, implemented features, known gaps, and developer notes.
 

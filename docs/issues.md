@@ -37,13 +37,13 @@ All non-intentional inline handlers removed. Last remaining: dev-only debug over
 
 ## Open Tasks
 
-No open tasks remain. All items have been completed.
+No feature-status items are currently open in this file. Ongoing cleanup, testing, and audit-derived follow-up now live in `todos/README.md` or `proposals.md` instead of being restated here.
 
 ## Library Integration Debt ✅ ALL RESOLVED
 
 `app/server/core/` is now a thin wrapper over `geo2stl` and `numpy2stl` as intended.
 All five B-LIB items from [proposals.md](proposals.md#library-integration-debt) are complete.
-See [libraries.md](libraries.md) for the current import map.
+See [reference/libraries.md](reference/libraries.md) for the current import map.
 
 | ID | Summary | Severity | Status |
 |----|---------|----------|--------|

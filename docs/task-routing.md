@@ -1,6 +1,6 @@
 # Task Routing — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-05-02_
 
 Use this document to choose the right files before editing.
 
@@ -110,4 +110,4 @@ Only start in these when the change is below the application layer.
 
 1. Read `../CLAUDE.md` for project rules.
 2. Read only the docs for the subsystem you are touching.
-3. Check `issues.md` and `../TODO.md` if the task looks related to existing debt.
+3. Check `issues.md` and `todos/README.md` if the task looks related to existing debt.

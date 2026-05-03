@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from app.server.core.osm import _fill_heights, enhance_buildings_with_raster
+from city2stl.heights import _fill_heights, enhance_buildings_with_raster
 
 
 # ---------------------------------------------------------------------------

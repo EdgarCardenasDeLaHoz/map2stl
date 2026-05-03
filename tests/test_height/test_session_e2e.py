@@ -1,4 +1,4 @@
-"""End-to-end tests for the building-height pipeline via TerrainSession.
+﻿"""End-to-end tests for the building-height pipeline via TerrainSession.
 
 All network calls are mocked.  Tests exercise the full path from
 session.fetch_building_heights() through provider selection, fetch,
@@ -71,7 +71,7 @@ class TestSessionPlumbing:
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         # Mock wsf3d to avoid network
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             return_value=_synthetic_height_result((10, 10), 15.0, 0.5, "wsf3d"),
         ):
             s.fetch_building_heights(providers=["bogus_provider", "wsf3d"])
@@ -84,7 +84,7 @@ class TestSessionPlumbing:
         """fetch_building_heights returns self."""
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             return_value=_synthetic_height_result((800, 800), 10.0, 0.5, "wsf3d"),
         ):
             result = s.fetch_building_heights(providers=["wsf3d"])
@@ -95,7 +95,7 @@ class TestSessionPlumbing:
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         # google3d with no API key → skipped; no other provider
         with patch(
-            "app.server.core.height.providers.google_3d._get_api_key",
+            "city2stl.height.providers.google_3d._get_api_key",
             return_value=None,
         ):
             s.fetch_building_heights(providers=["google3d"])
@@ -113,7 +113,7 @@ class TestSingleProvider:
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         fake = _synthetic_height_result((800, 800), 12.0, 0.5, "wsf3d")
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             return_value=fake,
         ):
             s.fetch_building_heights(providers=["wsf3d"])
@@ -125,10 +125,10 @@ class TestSingleProvider:
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         fake = _synthetic_height_result((800, 800), 25.0, 0.9, "google3d", 1.0)
         with patch(
-            "app.server.core.height.providers.google_3d.Google3DProvider.covers",
+            "city2stl.height.providers.google_3d.Google3DProvider.covers",
             return_value=True,
         ), patch(
-            "app.server.core.height.providers.google_3d.Google3DProvider.fetch_heights",
+            "city2stl.height.providers.google_3d.Google3DProvider.fetch_heights",
             return_value=fake,
         ):
             s.fetch_building_heights(providers=["google3d"])
@@ -139,7 +139,7 @@ class TestSingleProvider:
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         fake = _synthetic_height_result((800, 800), 18.0, 0.7, "copernicus", 10.0)
         with patch(
-            "app.server.core.height.providers.copernicus.CopernicusProvider.fetch_heights",
+            "city2stl.height.providers.copernicus.CopernicusProvider.fetch_heights",
             return_value=fake,
         ):
             s.fetch_building_heights(providers=["copernicus"])
@@ -150,7 +150,7 @@ class TestSingleProvider:
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         fake = _synthetic_height_result((800, 800), 20.0, 0.8, "ndsm", 30.0)
         with patch(
-            "app.server.core.height.providers.ndsm.NDSMProvider.fetch_heights",
+            "city2stl.height.providers.ndsm.NDSMProvider.fetch_heights",
             return_value=fake,
         ):
             s.fetch_building_heights(providers=["ndsm"])
@@ -163,7 +163,7 @@ class TestSingleProvider:
         s = _make_session(bbox=us_bbox, monkeypatch=monkeypatch, tmp_path=tmp_path)
         fake = _synthetic_height_result((800, 800), 30.0, 0.95, "lidar_3dep", 1.0)
         with patch(
-            "app.server.core.height.providers.lidar_3dep.LiDAR3DEPProvider.fetch_heights",
+            "city2stl.height.providers.lidar_3dep.LiDAR3DEPProvider.fetch_heights",
             return_value=fake,
         ):
             s.fetch_building_heights(providers=["lidar_3dep"])
@@ -197,13 +197,13 @@ class TestMultiProviderMerge:
                            "google3d", 1.0)
 
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             return_value=wsf,
         ), patch(
-            "app.server.core.height.providers.google_3d.Google3DProvider.covers",
+            "city2stl.height.providers.google_3d.Google3DProvider.covers",
             return_value=True,
         ), patch(
-            "app.server.core.height.providers.google_3d.Google3DProvider.fetch_heights",
+            "city2stl.height.providers.google_3d.Google3DProvider.fetch_heights",
             return_value=g3d,
         ):
             s.fetch_building_heights(providers=["wsf3d", "google3d"])
@@ -230,13 +230,13 @@ class TestMultiProviderMerge:
         g3d = HeightResult(g3d_raster, g3d_conf, "google3d", 1.0)
 
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             return_value=wsf,
         ), patch(
-            "app.server.core.height.providers.google_3d.Google3DProvider.covers",
+            "city2stl.height.providers.google_3d.Google3DProvider.covers",
             return_value=True,
         ), patch(
-            "app.server.core.height.providers.google_3d.Google3DProvider.fetch_heights",
+            "city2stl.height.providers.google_3d.Google3DProvider.fetch_heights",
             return_value=g3d,
         ):
             s.fetch_building_heights(providers=["wsf3d", "google3d"])
@@ -261,16 +261,16 @@ class TestMultiProviderMerge:
         g3d = HeightResult(g3d_raster, g3d_conf, "google3d", 1.0)
 
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             return_value=wsf,
         ), patch(
-            "app.server.core.height.providers.ndsm.NDSMProvider.fetch_heights",
+            "city2stl.height.providers.ndsm.NDSMProvider.fetch_heights",
             return_value=ndsm,
         ), patch(
-            "app.server.core.height.providers.google_3d.Google3DProvider.covers",
+            "city2stl.height.providers.google_3d.Google3DProvider.covers",
             return_value=True,
         ), patch(
-            "app.server.core.height.providers.google_3d.Google3DProvider.fetch_heights",
+            "city2stl.height.providers.google_3d.Google3DProvider.fetch_heights",
             return_value=g3d,
         ):
             s.fetch_building_heights(providers=["wsf3d", "ndsm", "google3d"])
@@ -292,19 +292,19 @@ class TestMultiProviderMerge:
         lidar = _synthetic_height_result((10, 10), 20.0, 0.95, "lidar_3dep", 1.0)
 
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             return_value=wsf,
         ), patch(
-            "app.server.core.height.providers.ndsm.NDSMProvider.fetch_heights",
+            "city2stl.height.providers.ndsm.NDSMProvider.fetch_heights",
             return_value=ndsm,
         ), patch(
-            "app.server.core.height.providers.copernicus.CopernicusProvider.covers",
+            "city2stl.height.providers.copernicus.CopernicusProvider.covers",
             return_value=False,  # US bbox → not in Europe
         ), patch(
-            "app.server.core.height.providers.lidar_3dep.LiDAR3DEPProvider.fetch_heights",
+            "city2stl.height.providers.lidar_3dep.LiDAR3DEPProvider.fetch_heights",
             return_value=lidar,
         ), patch(
-            "app.server.core.height.providers.google_3d.Google3DProvider.covers",
+            "city2stl.height.providers.google_3d.Google3DProvider.covers",
             return_value=False,  # no API key
         ):
             s.fetch_building_heights(
@@ -334,7 +334,7 @@ class TestDEMInteraction:
 
         wsf = _synthetic_height_result((50, 50), 8.0, 0.5, "wsf3d")
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             return_value=wsf,
         ) as mock_fetch:
             s.fetch_building_heights(providers=["wsf3d"])
@@ -350,7 +350,7 @@ class TestDEMInteraction:
 
         wsf = _synthetic_height_result((300, 300), 8.0, 0.5, "wsf3d")
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             return_value=wsf,
         ) as mock_fetch:
             s.fetch_building_heights(providers=["wsf3d"])
@@ -372,10 +372,10 @@ class TestDEMInteraction:
         fake = _synthetic_height_result((10, 10), 50.0, 0.9, "google3d", 1.0)
 
         with patch(
-            "app.server.core.height.providers.google_3d.Google3DProvider.covers",
+            "city2stl.height.providers.google_3d.Google3DProvider.covers",
             return_value=True,
         ), patch(
-            "app.server.core.height.providers.google_3d.Google3DProvider.fetch_heights",
+            "city2stl.height.providers.google_3d.Google3DProvider.fetch_heights",
             return_value=fake,
         ) as mock_fetch:
             s.fetch_building_heights(providers=["google3d"])
@@ -400,10 +400,10 @@ class TestProviderErrors:
         wsf = _synthetic_height_result((800, 800), 10.0, 0.5, "wsf3d")
 
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             side_effect=RuntimeError("network down"),
         ), patch(
-            "app.server.core.height.providers.ndsm.NDSMProvider.fetch_heights",
+            "city2stl.height.providers.ndsm.NDSMProvider.fetch_heights",
             return_value=_synthetic_height_result((800, 800), 15.0, 0.8, "ndsm", 30.0),
         ):
             s.fetch_building_heights(providers=["wsf3d", "ndsm"])
@@ -420,7 +420,7 @@ class TestProviderErrors:
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
 
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             side_effect=RuntimeError("timeout"),
         ):
             s.fetch_building_heights(providers=["wsf3d"])
@@ -437,7 +437,7 @@ class TestResultIntegrity:
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         fake = _synthetic_height_result((800, 800), 10.0, 0.5, "wsf3d")
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             return_value=fake,
         ):
             s.fetch_building_heights(providers=["wsf3d"])
@@ -450,7 +450,7 @@ class TestResultIntegrity:
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         fake = _synthetic_height_result((10, 10), 10.0, 0.5, "wsf3d")
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             return_value=fake,
         ):
             s.fetch_building_heights(providers=["wsf3d"])
@@ -463,7 +463,7 @@ class TestResultIntegrity:
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         fake = _synthetic_height_result((800, 800), 10.0, 0.5, "wsf3d")
         with patch(
-            "app.server.core.height.providers.wsf3d.WSF3DProvider.fetch_heights",
+            "city2stl.height.providers.wsf3d.WSF3DProvider.fetch_heights",
             return_value=fake,
         ):
             s.fetch_building_heights(providers=["wsf3d"])

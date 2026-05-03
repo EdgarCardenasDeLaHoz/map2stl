@@ -56,13 +56,6 @@
       <span id="compositeSatWeightLabel" class="composite-slider-value">0.0</span>
     </div>
 
-    <!-- Preview thumbnail -->
-    <div class="composite-preview-area">
-      <canvas id="compositePreviewThumb" width="160" height="100"
-              class="composite-preview-canvas"></canvas>
-      <div id="compositeContribStatus" class="composite-contrib-status"></div>
-    </div>
-
     <div class="row-gap6 composite-actions">
       <button id="previewCompositeBtn" class="btn btn-secondary composite-action-btn"
               title="Preview composite in the layer view">👁 Preview</button>

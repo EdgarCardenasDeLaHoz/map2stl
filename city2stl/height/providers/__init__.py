@@ -1,1 +1,1 @@
-"""Height data providers -- server-backed implementations live in app.server.core.height.providers."""
+"""Height data providers — each module implements HeightProvider."""

@@ -1,18 +1,18 @@
-"""Unit tests for Phase 1b height providers — GHSL, Open Buildings, Shadow."""
+﻿"""Unit tests for Phase 1b height providers — GHSL, Open Buildings, Shadow."""
 
 import numpy as np
 import pytest
 from unittest.mock import patch
 
 from app.server.core.height import HeightResult
-from app.server.core.height.providers.ghsl import (
+from city2stl.height.providers.ghsl import (
     GHSLProvider, _CONFIDENCE as GHSL_CONF,
 )
-from app.server.core.height.providers.open_buildings import (
+from city2stl.height.providers.open_buildings import (
     OpenBuildingsProvider, _is_in_coverage,
     _CONFIDENCE as OB_CONF,
 )
-from app.server.core.height.providers.shadow_height import (
+from city2stl.height.providers.shadow_height import (
     ShadowHeightProvider, _estimate_sun_elevation,
     _shadow_length_to_height, _infer_from_rgb, _downsample_height,
     _CONFIDENCE as SHADOW_CONF,
@@ -31,9 +31,9 @@ class TestGHSL:
         assert p.covers((10.5, 10.3, -75.4, -75.6))  # Cartagena
         assert p.covers((40.1, 39.9, -75.0, -75.3))  # Philadelphia
 
-    @patch("app.server.core.height.providers.ghsl.read_array_cache", return_value=None)
-    @patch("app.server.core.height.providers.ghsl.write_array_cache")
-    @patch("app.server.core.height.providers.ghsl._fetch_ghsl_wms")
+    @patch("city2stl.height.providers.ghsl.read_array_cache", return_value=None)
+    @patch("city2stl.height.providers.ghsl.write_array_cache")
+    @patch("city2stl.height.providers.ghsl._fetch_ghsl_wms")
     def test_fetch_success(self, mock_wms, mock_write, mock_read):
         mock_wms.return_value = np.full((30, 30), 12.0, dtype=np.float32)
         p = GHSLProvider()
@@ -43,16 +43,16 @@ class TestGHSL:
         np.testing.assert_allclose(result.raster, 12.0)
         np.testing.assert_allclose(result.confidence, GHSL_CONF)
 
-    @patch("app.server.core.height.providers.ghsl.read_array_cache", return_value=None)
-    @patch("app.server.core.height.providers.ghsl.write_array_cache")
-    @patch("app.server.core.height.providers.ghsl._fetch_ghsl_wms")
+    @patch("city2stl.height.providers.ghsl.read_array_cache", return_value=None)
+    @patch("city2stl.height.providers.ghsl.write_array_cache")
+    @patch("city2stl.height.providers.ghsl._fetch_ghsl_wms")
     def test_fetch_failure_nan(self, mock_wms, mock_write, mock_read):
         mock_wms.return_value = None
         p = GHSLProvider()
         result = p.fetch_heights((41.5, 41.3, 2.3, 2.1), (20, 20))
         assert np.all(np.isnan(result.raster))
 
-    @patch("app.server.core.height.providers.ghsl.read_array_cache")
+    @patch("city2stl.height.providers.ghsl.read_array_cache")
     def test_cache_hit(self, mock_read):
         raster = np.full((20, 20), 8.0, dtype=np.float32)
         conf = np.full((20, 20), GHSL_CONF, dtype=np.float32)
@@ -91,8 +91,8 @@ class TestOpenBuildings:
         # Southeast Asia
         assert _is_in_coverage((14.0, 13.0, 101.0, 100.0))  # Bangkok
 
-    @patch("app.server.core.height.providers.open_buildings.read_array_cache", return_value=None)
-    @patch("app.server.core.height.providers.open_buildings._fetch_buildings_for_bbox", return_value=None)
+    @patch("city2stl.height.providers.open_buildings.read_array_cache", return_value=None)
+    @patch("city2stl.height.providers.open_buildings._fetch_buildings_for_bbox", return_value=None)
     def test_fetch_returns_nan_when_no_partition_data(self, mock_fetch, mock_read):
         """No intersecting parquet rows returns an empty Open Buildings result."""
         p = OpenBuildingsProvider()
@@ -138,8 +138,8 @@ class TestShadowHeight:
         h = _shadow_length_to_height(5, 2.0, 60.0)
         assert h == pytest.approx(17.32, abs=0.1)
 
-    @patch("app.server.core.height.providers.shadow_height.read_array_cache", return_value=None)
-    @patch("app.server.core.height.providers.shadow_height._fetch_rgb_for_bbox", return_value=None)
+    @patch("city2stl.height.providers.shadow_height.read_array_cache", return_value=None)
+    @patch("city2stl.height.providers.shadow_height._fetch_rgb_for_bbox", return_value=None)
     def test_fetch_returns_nan_when_no_satellite(self, mock_rgb, mock_read):
         """Falls back to all-NaN when satellite imagery is unavailable."""
         p = ShadowHeightProvider()

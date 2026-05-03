@@ -47,9 +47,9 @@ const _LAYER_NAMES = ['waterways', 'buildings', 'roads'];
 
 /** Maps layer name → the DOM toggle checkbox ID for that layer. */
 const _LAYER_TOGGLES = {
-    buildings:     'layerBuildingsToggle',
-    roads:         'layerRoadsToggle',
-    waterways:     'layerWaterwaysToggle',
+    buildings:     'cityLayerBuildings',
+    roads:         'cityLayerRoads',
+    waterways:     'cityLayerWaterways',
 };
 
 function _makeLayerCache() {
@@ -253,9 +253,9 @@ window.loadCityData = async function loadCityData() {
 
     try {
         const layers = [];
-        if (document.getElementById('layerBuildingsToggle')?.checked)  layers.push('buildings', 'walls', 'towers', 'churches', 'fortifications');
-        if (document.getElementById('layerRoadsToggle')?.checked)      layers.push('roads');
-        if (document.getElementById('layerWaterwaysToggle')?.checked)  layers.push('waterways');
+        if (document.getElementById('cityLayerBuildings')?.checked)  layers.push('buildings', 'walls', 'towers', 'churches', 'fortifications');
+        if (document.getElementById('cityLayerRoads')?.checked)        layers.push('roads');
+        if (document.getElementById('cityLayerWaterways')?.checked)    layers.push('waterways');
 
         const simplifyTol = parseFloat(document.getElementById('citySimplifyTolerance')?.value) || 3.0;
         const minArea     = parseFloat(document.getElementById('cityMinArea')?.value) || 5.0;

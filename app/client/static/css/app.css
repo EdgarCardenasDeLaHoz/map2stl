@@ -1524,6 +1524,9 @@
             background: #555;
             vertical-align: middle;
             transition: background 0.3s ease;
+            padding: 0;
+            box-shadow: none;
+            overflow: hidden;
         }
 
         .strip-dot.loaded {

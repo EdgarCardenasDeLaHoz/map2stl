@@ -569,3 +569,35 @@ def proj_map_geo_to_2D(
         fill_value=np.nan
     )
     return result
+
+
+def project_grid(arr: np.ndarray,
+                 north: float, south: float, east: float, west: float,
+                 projection: ProjectionType,
+                 clip_nans: bool,
+                 categorical: bool = False) -> np.ndarray:
+    """Apply a geo2stl projection to a 2-D array.
+
+    Convenience wrapper used by DEM/hydrology pipelines that need a single
+    projected output array without the metadata dict.
+
+    Parameters
+    ----------
+    arr :         2-D input raster (elevation, water mask, etc.)
+    north/south/east/west : geographic bounds in degrees
+    projection :  projection type string ('cosine', 'mercator', etc.)
+    clip_nans :   if True, strip all-NaN edge rows/columns after projecting
+    categorical : if True, use nearest-neighbour interpolation (order=0) to
+                  preserve integer class IDs; NaN fill is replaced with 0.
+    """
+    projected, _meta = project_coordinates(
+        arr, (north, south, east, west),
+        projection=projection,
+        maintain_dimensions=True,
+        fill_value=np.nan,
+        clip_nans=clip_nans,
+        order=0 if categorical else 1,
+    )
+    if categorical:
+        projected = np.nan_to_num(projected, nan=0.0)
+    return projected

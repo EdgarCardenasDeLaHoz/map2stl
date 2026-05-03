@@ -14,7 +14,7 @@
  *   window.applyCompositeToDem()       — replace lastDemData with composite
  *   window.setupCompositeDemControls() — wire UI event listeners
  *
- * See COMPOSITE_DEM_DESIGN.md for full design rationale.
+ * See docs/design/composite-dem-design.md for full design rationale.
  */
 
 // ─── Defaults ────────────────────────────────────────────────────────────────

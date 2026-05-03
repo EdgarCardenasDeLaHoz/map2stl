@@ -57,24 +57,7 @@
         <input type="range" class="layer-row-opacity" id="layerOpacity_CityOverlay" min="0" max="100" value="85" title="City vector opacity">
         <span class="layer-row-pct" id="layerOpacityPct_CityOverlay">85%</span>
       </div>
-      <!-- City vector sub-row: feature toggles -->
-      <div class="layer-subrow" id="cityOverlaySubrow">
-        <label class="check-label" style="font-size:10px;" title="Toggle building polygons">
-          <input type="checkbox" id="layerBuildingsToggle" checked> 🏠 Bldgs
-        </label>
-        <label class="check-label" style="font-size:10px;" title="Toggle road network">
-          <input type="checkbox" id="layerRoadsToggle" checked> 🛣 Roads
-        </label>
-        <label class="check-label" style="font-size:10px;" title="Toggle waterway lines">
-          <input type="checkbox" id="layerWaterwaysToggle" checked> 💧 Ways
-        </label>
-        <!-- Color swatches — referenced by city-overlay.js -->
-        <div style="display:none;">
-          <input type="color" id="layerBuildingsColor"  value="#c8b89a" class="city-color-swatch">
-          <input type="color" id="layerRoadsColor"      value="#cc8844" class="city-color-swatch">
-          <input type="color" id="layerWaterwaysColor"  value="#4488cc" class="city-color-swatch">
-        </div>
-      </div>
+
 
       <!-- Hydrology row -->
       <div class="layer-row">

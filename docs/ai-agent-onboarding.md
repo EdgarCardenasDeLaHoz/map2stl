@@ -1,6 +1,6 @@
 # AI Agent Onboarding — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-05-02_
 
 Use this document when you need a fast, correct mental model of the repository before making changes.
 
@@ -37,8 +37,8 @@ The clearest end-to-end example is `../notebooks/API_Terrain.ipynb`.
 | Change a backend endpoint | `api.md` | relevant file in `../app/server/routers/` and `../app/server/core/` |
 | Change frontend behavior | `task-routing.md` | `modules.md`, `state.md` |
 | Change session client behavior | `sdk-workflow.md` | `../app/session/terrain_session.py` |
-| Understand data flow bugs | `arch.md` | `functions.md`, relevant module or router |
-| Check current debt before editing | `issues.md` | `../TODO.md` and module TODO files |
+| Understand data flow bugs | `arch.md` | `reference/functions.md`, relevant module or router |
+| Check current debt before editing | `issues.md` | `todos/README.md` and module TODO files |
 
 ## Main Boundaries
 

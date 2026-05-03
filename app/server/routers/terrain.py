@@ -5,10 +5,10 @@ All heavy lifting is in core.dem and core.cache; this module is a thin
 HTTP adapter that parses requests, delegates, and formats responses.
 """
 
-from app.server.core.hydrology import (
+from geo2stl.hydrology import (
     fetch_and_rasterize_hydrology as _fetch_and_rasterize_hydrology,
 )
-from app.server.core.sat import (
+from geo2stl.sat import (
     fetch_water_mask as _fetch_water_mask,
     fetch_water_mask_images as _fetch_water_mask_images,
     fetch_sat_overlay as _fetch_sat_overlay,

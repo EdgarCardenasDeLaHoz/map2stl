@@ -25,13 +25,26 @@ python -m pytest tests/ -v                                     # run all tests (
 4. `docs/task-routing.md` to choose the right files before editing
 5. Subsystem docs such as `docs/api.md`, `docs/modules.md`, `docs/state.md`, or `docs/arch.md`
 
+## Docs Folder Map
+
+| Folder | Purpose | Start file |
+|---|---|---|
+| `docs/` | Current top-level onboarding and subsystem docs | `docs/README.md` |
+| `docs/reference/` | Current technical reference and indexes | `docs/reference/README.md` |
+| `docs/plans/` | Current ML and roadmap working plans | `docs/plans/height-training-status.md` |
+| `docs/todos/` | Verified active work only, including audit follow-through that is still open | `docs/todos/README.md` |
+| `docs/completed/` | Shipped plans and audit follow-through that is already verified complete | `docs/completed/README.md` |
+| `docs/audits/` | Evidence snapshots and deep analysis; do not treat this folder as the live backlog | `docs/audits/README.md` |
+| `docs/design/` | Stable design notes and implementation rationale after active audit work is folded back in | `docs/design/README.md` |
+| `docs/archive/` | Older historical material, not first-read docs | `docs/archive/` |
+
 ## When to Read What
 
 | Working on | Files to read |
 |---|---|
 | First-pass project orientation | `docs/ai-agent-onboarding.md` + `docs/task-routing.md` |
 | Backend endpoint | `docs/api.md` + relevant router file |
-| Terrain API call stacks | `docs/terrain-api-audit.md` |
+| Terrain API call stacks | `docs/reference/terrain-api-audit.md` |
 | Session client (Python API) | `docs/sdk-workflow.md` + `app/session/terrain_session.py` + `notebooks/Session_API_Reference.ipynb` |
 | Notebook-driven terrain workflow | `docs/sdk-workflow.md` + `notebooks/API_Terrain.ipynb` |
 | Cache / storage | `app/server/core/cache.py` header + `docs/api.md` |
@@ -42,9 +55,9 @@ python -m pytest tests/ -v                                     # run all tests (
 | Frontend state variables | `docs/state.md` |
 | View tabs / navigation | `docs/arch.md` |
 | Data flow debugging | `docs/arch.md` (Data Flow section) |
-| Function lookup | `docs/functions.md` |
+| Function lookup | `docs/reference/functions.md` |
 | Known bugs / tech debt | `docs/issues.md` |
-| Library integration / geo2stl / numpy2stl | `docs/libraries.md` |
+| Library integration / geo2stl / numpy2stl | `docs/reference/libraries.md` |
 | JS module map | `docs/modules.md` |
 | Writing tests | `tests/conftest.py` + relevant test file |
 | Approving / denying AI proposals | `docs/proposals.md` |
@@ -119,9 +132,9 @@ strm2stl/
 | Task-to-file routing | `docs/task-routing.md` |
 | Architecture + data flows | `docs/arch.md` |
 | Global state variables | `docs/state.md` |
-| Function index | `docs/functions.md` |
+| Function index | `docs/reference/functions.md` |
 | API routes + Pydantic models | `docs/api.md` |
 | JS module map | `docs/modules.md` |
 | Known issues + feature status | `docs/issues.md` |
-| Completed feature history | `docs/functionality_doc.md` |
+| Completed feature history | `docs/completed/functionality-history.md` |
 | AI-proposed features (approve/deny) | `docs/proposals.md` |
