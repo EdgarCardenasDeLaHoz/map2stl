@@ -41,6 +41,9 @@ TILE_DIR = REPO / "cache" / "height_tiles_combined"
 RESUME = REPO / "models" / "retna_grow_continue.pt"
 HIDDEN = [8, 8, 10, 20, 14, 14, 16, 16, 22]  # matches RESUME's architecture
 
+# Rebuild target — used by 'rebuild' mode; grow stops when val_loss hits this
+TARGET_VAL_LOSS = 0.37
+
 # Plain-train hyperparameters
 EPOCHS = 20
 BATCH_SIZE = 3
@@ -58,6 +61,9 @@ SMART_INIT = True
 SMART_JITTER = 0.0
 ALLOW_DEEPEN = True
 MAX_DEPTH = 8
+
+# Rebuild mode: unlimited grow cycles until TARGET_VAL_LOSS
+REBUILD_CYCLES = 30
 
 # Final-prune (ablation) settings
 FINAL_PRUNE = True
@@ -109,12 +115,14 @@ def _train(out_name: str = "retna_continue.pt") -> Path:
     return out
 
 
-def _grow(out_name: str, allow_deepen: bool) -> Path:
+def _grow(out_name: str, allow_deepen: bool, cycles: int | None = None,
+          target_val_loss: float | None = None) -> Path:
     out = REPO / "models" / out_name
+    _cycles = cycles if cycles is not None else CYCLES
     cmd = [
         sys.executable, "-u", "-m", "tools.ml.train.grow_prune",
         "--tiles", TILE_DIR, "--output", out,
-        "--cycles", CYCLES, "--inner-epochs", INNER_EPOCHS,
+        "--cycles", _cycles, "--inner-epochs", INNER_EPOCHS,
         "--grow-channels", GROW_CHANNELS,
         "--tile-size", TILE_SIZE, "--batch-size", BATCH_SIZE,
         "--lr", LR, "--lr-patience", LR_PATIENCE,
@@ -135,6 +143,8 @@ def _grow(out_name: str, allow_deepen: bool) -> Path:
         ]
     if PRUNE_EVERY > 0:
         cmd += ["--prune-every", PRUNE_EVERY]
+    if target_val_loss is not None:
+        cmd += ["--target-val-loss", target_val_loss]
     rc = _run(cmd, f"{out.stem}.log")
     if rc != 0:
         raise SystemExit(f"grow_prune failed (exit {rc})")
@@ -179,6 +189,18 @@ def main():
         _inspect(out)
     elif mode == "deep":
         out = _grow("retna_deep_continue.pt", allow_deepen=True)
+        _inspect(out)
+    elif mode == "rebuild":
+        # Cold-start train with the full 9-block architecture, then grow/prune
+        # with deepen enabled until TARGET_VAL_LOSS is achieved.
+        global RESUME
+        RESUME = None  # force cold start for the train phase
+        print(f"[rebuild] Phase 1: cold-start plain training with arch={HIDDEN}")
+        out = _train("retna_rebuild.pt")
+        RESUME = out   # hand the trained checkpoint to grow
+        print(f"[rebuild] Phase 2: grow/prune (target val_loss <= {TARGET_VAL_LOSS})")
+        out = _grow("retna_grow_continue.pt", allow_deepen=True,
+                    cycles=REBUILD_CYCLES, target_val_loss=TARGET_VAL_LOSS)
         _inspect(out)
     elif mode == "collect":
         _collect()

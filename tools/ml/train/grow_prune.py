@@ -864,6 +864,9 @@ def main():
                     help="If >0, replace every Nth grow cycle with an "
                          "ablation+compact pass (interleaved). 0 disables "
                          "periodic pruning (only --final-prune still runs).")
+    ap.add_argument("--target-val-loss", type=float, default=None,
+                    help="Stop NAS early when best val_loss reaches this "
+                         "threshold. Useful for goal-directed training loops.")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed); np.random.seed(args.seed)
@@ -982,6 +985,14 @@ def main():
         print(f"  Cycle {cycle} metrics: best_val={best_loss:.4f}  "
               f"mae={final['val_mae']:.2f}m  iou={final['val_mask_iou']:.3f}  "
               f"r={final['pearson_mae_height']:+.2f}{delta}")
+
+        # Early-stop if target val_loss reached
+        if args.target_val_loss is not None and best_loss <= args.target_val_loss:
+            print(f"  [TARGET REACHED] best_val={best_loss:.4f} <= "
+                  f"target={args.target_val_loss:.4f} — stopping NAS.")
+            cycle_record["decision"] = "target_reached"
+            cycles_log.append(cycle_record)
+            break
 
         if cycle == args.cycles:
             cycle_record["decision"] = "stop"
