@@ -495,3 +495,74 @@ def compute_raw_dem(north, south, east, west, dim, depth_scale):
         new_w, new_h = dim, max(1, int(dim * h / w))
     im_r = _cv2.resize(im, (new_w, new_h), interpolation=_cv2.INTER_LINEAR)
     return im_r
+
+
+# ---------------------------------------------------------------------------
+# Mesh generation — bbox → DEM → STL pipeline
+# ---------------------------------------------------------------------------
+
+def create_dem_model(
+    im: np.ndarray,
+    simplify: bool = False,
+    max_faces: int = 50_000,
+    **kwargs,
+) -> list:
+    """Convert a DEM array to a list of mesh dicts via numpy2stl.
+
+    Returns a list of dicts with keys ``vertices``, ``faces``, ``name``.
+    Pass ``simplify=True`` to reduce the face count (requires numpy2stl.simplify).
+    Extra *kwargs* are forwarded to :func:`numpy2stl.array_to_mesh`.
+    """
+    from numpy2stl import array_to_mesh  # lazy import — keeps geo2stl usable without numpy2stl
+
+    # array_to_mesh accepts kwargs like mask_val, solid, walls, floor, floor_val
+    mesh_kwargs = {k: v for k, v in kwargs.items()
+                   if k in ("mask_val", "solid", "floor_val", "walls", "floor")}
+    vertices, faces = array_to_mesh(im, **mesh_kwargs)
+    models = [{"vertices": vertices, "faces": faces, "name": "terrain"}]
+
+    if simplify:
+        try:
+            from numpy2stl.simplify import simplify_mesh
+            models[0]["vertices"], models[0]["faces"] = simplify_mesh(
+                vertices, faces, max_faces=max_faces
+            )
+        except ImportError:
+            logger.warning("numpy2stl.simplify unavailable; skipping mesh simplification")
+
+    return models
+
+
+def process_region(
+    name: str,
+    bbox: tuple,
+    output_dir,
+    **processing_kwargs,
+) -> str:
+    """End-to-end bbox → STL pipeline: fetch DEM, build mesh, write STL file.
+
+    Args:
+        name: Region name used as the output filename stem.
+        bbox: ``(north, south, east, west)`` bounding box.
+        output_dir: Directory where the STL is written (created if absent).
+        **processing_kwargs: Forwarded to :func:`make_dem_image` and
+            :func:`create_dem_model`.
+
+    Returns:
+        Absolute path of the written STL file.
+    """
+    from numpy2stl import triangles_to_facets, writeSTL
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    im = make_dem_image(bbox, **processing_kwargs)
+    models = create_dem_model(im, **processing_kwargs)
+
+    stl_path = output_dir / f"{name}.stl"
+    vertices = models[0]["vertices"]
+    faces = models[0]["faces"]
+    facets = triangles_to_facets(vertices[faces])
+    writeSTL(facets, str(stl_path))
+    logger.info("Saved terrain STL: %s", stl_path)
+    return str(stl_path)

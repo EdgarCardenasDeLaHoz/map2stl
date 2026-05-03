@@ -2,18 +2,13 @@ import math
 import os
 
 import numpy as np
-import cv2
 import matplotlib.pyplot as plt
 
-from skimage import filters
-
-from geo2stl.geo2stl import stitch_tiles_no_rasterio
-from geo2stl import sat2stl as s2s
+from geo2stl.dem import make_dem_image as _geo_make_dem_image
 
 from city2stl import create
-from city2stl.dem2stl import proj_map_geo_to_2D
 
-from numpy2stl import array_to_mesh, rescale, write3MF
+from numpy2stl import rescale, write3MF
 import numpy2stl.puzzle as puzzle
 import numpy2stl.boolean as boolean
 
@@ -64,32 +59,24 @@ def make_dem_image(target_bbox, dim=600,
                    depth_scale=1.0, water_scale=0.1, sat_scale=200,
                    height=30, base=5,
                    subtract_water=True):
+    """Fetch a print-ready DEM array for *target_bbox*.
 
-    (N, S, E, W) = target_bbox
-    im = stitch_tiles_no_rasterio(target_bbox) * 1.0
-    im[im < 0] = im[im < 0] * depth_scale
+    Delegates data fetching, water subtraction, and projection to
+    :func:`geo2stl.dem.make_dem_image`, then rescales to print height/base
+    and flips the array to match numpy2stl's expected row orientation.
+    """
+    im = _geo_make_dem_image(
+        target_bbox,
+        dim=dim,
+        depth_scale=depth_scale,
+        sat_scale=sat_scale,
+        water_scale=water_scale,
+        subtract_water=subtract_water,
+        projection="cosine",
+        clip_nans=True,
+    )
 
-    w, h = im.shape
-
-    if subtract_water:
-        sat = s2s.fetch_bbox_image(N, S, E, W, scale=sat_scale, dataset="esa")
-        sat = sat.clip(0, 100)
-        water = 1.0 * ((sat == 80) | (sat == 0))
-        water = filters.median(water, np.ones((3, 3)))
-        water = cv2.resize(water, (h, w), interpolation=cv2.INTER_LINEAR)
-        water = water * im.ptp() * water_scale
-        im = im - water
-
-        plt.figure()
-        plt.imshow(water)
-    else:
-        im[im > 0] = im[im > 0] + im.ptp() * water_scale
-
-    im = proj_map_geo_to_2D(im, np.array((N, S, E, W)))
-    im = im[:, ~np.any(np.isnan(im), axis=0)]
-
-    im = rescale(im, height=height, base=base, clip=[.01, 99.99], smooth=3)
+    im = rescale(im, height=height, base=base, clip=[0.01, 99.99], smooth=3)
     im = im.round(1)
     im = im[::-1]
-
     return im
