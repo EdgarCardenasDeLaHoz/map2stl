@@ -16,13 +16,9 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from geo2stl.layers import GeoLayerBase
+
 logger = logging.getLogger(__name__)
-
-
-class GeoLayerBase:
-    """Common base class for geo2stl layer services."""
-
-    name: str = "base"
 
 
 class HydrologyLayerBase(GeoLayerBase):

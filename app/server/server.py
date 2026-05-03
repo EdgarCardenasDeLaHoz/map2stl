@@ -345,7 +345,7 @@ def _build_global_dem_cache(force: bool = False) -> bool:
         return True
 
     logger.info("Building global DEM cache (full globe, 90/-90/180/-180) ...")
-    from geo2stl.geo2stl import stitch_tiles_no_rasterio, get_tile_files
+    from geo2stl.tiles import stitch_tiles_no_rasterio, get_tile_files
     if not get_tile_files():
         logger.warning("Global DEM cache: no elevation tiles found.")
         return False

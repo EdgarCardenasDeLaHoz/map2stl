@@ -44,7 +44,7 @@ import matplotlib.cm as cm
 from skimage.transform import resize
 
 import numpy2stl as np2stl
-from geo2stl.geo2stl import proj_map_geo_to_2D
+from geo2stl.projections import project_coordinates
 
 class DEM:
     def __init__(self, root=None, geo_bounds=None, data=None):
@@ -379,7 +379,14 @@ def DEM2STL(DEM, NSEW, rotation=0, n=1, fn=None):
     DEM.data = mat
 
     ####
-    mat_adj = proj_map_geo_to_2D(mat,NSEW)
+    mat_adj, _ = project_coordinates(
+        mat,
+        tuple(np.array(NSEW)),
+        projection='cosine',
+        maintain_dimensions=False,
+        fill_value=np.nan,
+        clip_nans=True,
+    )
     mat_adj= mat_adj.round(2)
     
     if rotation != 0:

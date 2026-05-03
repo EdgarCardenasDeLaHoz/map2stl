@@ -23,6 +23,8 @@ import time
 
 import numpy as np
 
+from geo2stl.layers import GeoLayerBase
+
 try:
     import joblib
 except ImportError:
@@ -318,7 +320,7 @@ def fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset):
                 f"fetch_water_mask_images: JRC layer failed (scale={sat_scale}m/px): {e}")
     elevation_raw = None
     try:
-        from geo2stl.geo2stl import stitch_tiles_no_rasterio as _stitch
+        from geo2stl.tiles import stitch_tiles_no_rasterio as _stitch
         elevation_raw = _stitch((north, south, east, west))
     except Exception:
         pass
@@ -628,13 +630,6 @@ def map_label_elevation(img, im, size=500):
     img_map2 = transform.resize(img_map2, outsize, anti_aliasing=True)
     img_map2 = img_map2.round(0).clip(0.1)
     return img_map2
-
-
-class GeoLayerBase:
-    """Common interface for geo2stl layers."""
-
-    name: str = "base"
-
 
 class SatelliteLayer(GeoLayerBase):
     """Unified satellite + Earth Engine data layer."""

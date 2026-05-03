@@ -33,7 +33,7 @@ import cv2 as _cv2
 import numpy as np
 import requests as _requests
 from geo2stl.sat2stl import fetch_bbox_image
-from geo2stl.geo2stl import stitch_tiles_no_rasterio
+from geo2stl.tiles import stitch_tiles_no_rasterio
 from geo2stl.projections import project_grid, project_coordinates
 from geo2stl.processing import apply_layer_processing, blend_layers, upsample_dem  # noqa: F401
 try:
