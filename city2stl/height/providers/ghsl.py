@@ -1,4 +1,4 @@
-﻿"""
+"""
 GHSL GHS-BUILT-H provider — JRC Global Human Settlement Layer building height.
 
 Data: GHS-BUILT-H R2023A

@@ -279,7 +279,7 @@ async def get_city_raster(req: CompositeCityRasterRequest):
 
     # Apply map projection (all raster layers share the same pipeline)
     if req.projection != "none":
-        from app.server.core.projection import project_grid
+        from geo2stl.projections import project_grid
         layer_names = ["buildings", "roads", "waterways", "walls"]
         PW, PH = result["width"], result["height"]
         for lname in layer_names:
@@ -303,7 +303,7 @@ async def merge_dem_layers(req: MergeRequest):
     Merge multiple elevation/mask layers into one composite DEM.
     Each layer specifies a source, resolution, per-layer processing, and a blend mode.
     """
-    from app.server.core.dem import (
+    from geo2stl.dem import (
         fetch_layer_data, apply_layer_processing, blend_layers,
     )
     from app.server.core.validation import b64_encode

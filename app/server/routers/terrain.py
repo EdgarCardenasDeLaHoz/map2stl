@@ -14,7 +14,7 @@ from geo2stl.sat import (
     fetch_sat_overlay as _fetch_sat_overlay,
     fetch_satellite_tiles as _fetch_satellite_tiles,
 )
-from app.server.core.dem import (
+from geo2stl.dem import (
     fetch_layer_data as _fetch_layer_data,
     fetch_local_dem as _fetch_local_dem,
     upsample_dem as _upsample_dem,
@@ -32,7 +32,7 @@ from app.server.core.validation import (
     validate_dim as _validate_dim,
     run_sync,
 )
-from app.server.core.projection import (
+from geo2stl.projections import (
     project_grid as _project_grid_impl,
     project_water_arrays as _project_water_arrays_impl,
     project_rgb_image as _project_rgb_image,
@@ -72,7 +72,7 @@ def _project_grid(arr, north, south, east, west, projection, clip_nans,
                   categorical=False):
     """Apply geo2stl projection to a 2-D array. Sync helper.
 
-    Delegates to core.projection.project_grid — kept as a thin wrapper
+    Delegates to geo2stl.projections.project_grid — kept as a thin wrapper
     so existing call-sites in this module do not change.
     """
     return _project_grid_impl(arr, north, south, east, west, projection,
@@ -83,7 +83,7 @@ def _project_water_arrays(water_mask, esa_img, north, south, east, west,
                           projection, clip_nans):
     """Project both water mask and ESA arrays to keep them aligned.
 
-    Delegates to core.projection.project_water_arrays.
+    Delegates to geo2stl.projections.project_water_arrays.
     """
     return _project_water_arrays_impl(water_mask, esa_img, north, south,
                                       east, west, projection, clip_nans)

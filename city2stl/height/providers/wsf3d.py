@@ -1,4 +1,4 @@
-﻿"""
+"""
 WSF3D Building Height provider — DLR World Settlement Footprint 3D.
 
 Data: GeoTIFF raster, ~90 m resolution, global coverage.

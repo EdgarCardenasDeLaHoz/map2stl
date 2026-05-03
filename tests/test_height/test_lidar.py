@@ -1,10 +1,10 @@
-﻿"""Unit tests for the USGS 3DEP LiDAR provider — no network."""
+"""Unit tests for the USGS 3DEP LiDAR provider — no network."""
 
 import numpy as np
 import pytest
 from unittest.mock import patch
 
-from app.server.core.height import HeightResult
+from city2stl.height import HeightResult
 from city2stl.height.providers.lidar_3dep import (
     LiDAR3DEPProvider,
     _is_in_us,

@@ -28,7 +28,7 @@ import numpy as np
 # Ensure project root is importable
 sys.path.insert(0, ".")
 
-from app.server.core.height.providers.shadow_height import (
+from city2stl.height.providers.shadow_height import (
     ShadowHeightProvider,
     _infer_from_rgb,
     _detect_shadows,

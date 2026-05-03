@@ -4,9 +4,9 @@ city2stl/dem2stl.py -- LEGACY FILE (research/notebook-era code).
 NOT imported by the server.
 
 Modern replacements:
-  get_dem_geo()          -> app.server.core.dem.fetch_h5_dem
-  geo_2_tile_pixel()     -> app.server.core.dem._geo_to_tile_pixel
-  tile_num_2_geo_coor()  -> app.server.core.dem._geo_to_tile_pixel (inverse)
+  get_dem_geo()          -> geo2stl.dem.fetch_h5_dem
+  geo_2_tile_pixel()     -> geo2stl.dem._geo_to_tile_pixel
+  tile_num_2_geo_coor()  -> geo2stl.dem._geo_to_tile_pixel (inverse)
 
 Unique functionality with NO modern server equivalent (kept for notebooks):
   DEM class              -- elevation visualisation; no server equivalent
@@ -15,7 +15,7 @@ Unique functionality with NO modern server equivalent (kept for notebooks):
   simplify_polygon()     -- polygon simplification utility
 
 Note: The tile coordinate math in geo_2_tile_pixel() is nearly identical to
-_geo_to_tile_pixel() in app.server.core.dem.
+_geo_to_tile_pixel() in geo2stl.dem.
 """
 from itertools import product
 

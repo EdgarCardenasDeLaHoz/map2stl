@@ -5,7 +5,7 @@ Validates the key architectural claim: ALL raster layers fetch in Plate Carrée
 first, then project externally through a single shared module.
 
 These tests exercise:
-  1. core.projection module directly (project_grid, project_water_arrays, project_rgb_image)
+  1. geo2stl.projections module directly (project_grid, project_water_arrays, project_rgb_image)
   2. FastAPI endpoints with projection params (DEM, water, ESA, satellite, hydrology, city raster)
   3. Cross-layer dimension alignment after projection
   4. Cache coherence (projection params in cache keys)
@@ -31,14 +31,14 @@ _VALID_PROJECTIONS = ["cosine", "mercator",
 
 
 # ===================================================================
-# Part 1: Direct tests of core.projection module
+# Part 1: Direct tests of geo2stl.projections module
 # ===================================================================
 
 class TestCoreProjectionModule:
     """Test the shared projection.py module that ALL endpoints should use."""
 
     def test_project_grid_returns_2d_array(self):
-        from app.server.core.projection import project_grid
+        from geo2stl.projections import project_grid
         arr = np.linspace(0, 100, 50 * 60, dtype=np.float32).reshape(50, 60)
         result = project_grid(arr, *_BBOX, "cosine", clip_nans=True)
         assert result.ndim == 2
@@ -46,7 +46,7 @@ class TestCoreProjectionModule:
         assert result.shape[1] > 0
 
     def test_project_grid_none_returns_identity(self):
-        from app.server.core.projection import project_grid
+        from geo2stl.projections import project_grid
         arr = np.linspace(0, 100, 50 * 60, dtype=np.float32).reshape(50, 60)
         result = project_grid(arr, *_BBOX, "none", clip_nans=True)
         np.testing.assert_array_equal(arr, result)
@@ -54,7 +54,7 @@ class TestCoreProjectionModule:
     @pytest.mark.parametrize("projection", _VALID_PROJECTIONS)
     def test_project_grid_same_shape_same_output(self, projection):
         """Two arrays with same shape + bbox → same projected shape."""
-        from app.server.core.projection import project_grid
+        from geo2stl.projections import project_grid
         h, w = 80, 100
         a = np.linspace(0, 500, h * w, dtype=np.float32).reshape(h, w)
         b = np.random.rand(h, w).astype(np.float32)
@@ -66,7 +66,7 @@ class TestCoreProjectionModule:
     def test_project_grid_categorical_preserves_integers(self, projection):
         """Categorical projection with fill_value=0 and order=0 (nearest-neighbour)
         should only contain original class IDs or the fill_value (0)."""
-        from app.server.core.projection import project_grid
+        from geo2stl.projections import project_grid
         classes = [10, 20, 30, 50, 80]
         arr = np.random.choice(classes, size=(80, 100)).astype(np.float32)
         result = project_grid(arr, *_BBOX, projection, clip_nans=False,
@@ -79,7 +79,7 @@ class TestCoreProjectionModule:
     @pytest.mark.parametrize("projection", _VALID_PROJECTIONS)
     def test_project_water_arrays_alignment(self, projection):
         """Water + ESA always aligned after paired projection."""
-        from app.server.core.projection import project_water_arrays
+        from geo2stl.projections import project_water_arrays
         h, w = 80, 100
         water = np.random.choice([0.0, 1.0], size=(h, w)).astype(np.float32)
         esa = np.random.choice([10, 20, 30, 50, 80],
@@ -92,7 +92,7 @@ class TestCoreProjectionModule:
     @pytest.mark.parametrize("projection", _VALID_PROJECTIONS)
     def test_project_water_arrays_binary_output(self, projection):
         """Water mask is re-binarized after bilinear interpolation."""
-        from app.server.core.projection import project_water_arrays
+        from geo2stl.projections import project_water_arrays
         h, w = 80, 100
         water = np.random.choice([0.0, 1.0], size=(h, w)).astype(np.float32)
         esa = np.zeros((h, w), dtype=np.float32)
@@ -103,7 +103,7 @@ class TestCoreProjectionModule:
 
     def test_project_rgb_image_shape(self):
         """RGB projection preserves 3 channels and returns uint8."""
-        from app.server.core.projection import project_rgb_image
+        from geo2stl.projections import project_rgb_image
         img = np.random.randint(0, 256, (80, 100, 3), dtype=np.uint8)
         result = project_rgb_image(img, *_BBOX, "cosine", clip_nans=False)
         assert result.ndim == 3
@@ -113,7 +113,7 @@ class TestCoreProjectionModule:
     @pytest.mark.parametrize("projection", _VALID_PROJECTIONS)
     def test_project_rgb_dims_match_grid(self, projection):
         """Projected RGB dimensions should match projected grid dimensions (no clip)."""
-        from app.server.core.projection import project_grid, project_rgb_image
+        from geo2stl.projections import project_grid, project_rgb_image
         h, w = 80, 100
         grid = np.linspace(0, 100, h * w, dtype=np.float32).reshape(h, w)
         img = np.random.randint(0, 256, (h, w, 3), dtype=np.uint8)
@@ -124,7 +124,7 @@ class TestCoreProjectionModule:
 
     def test_project_rgb_clip_nans_reduces_size(self):
         """clip_nans=True should produce smaller or equal output vs clip_nans=False."""
-        from app.server.core.projection import project_rgb_image
+        from geo2stl.projections import project_rgb_image
         img = np.random.randint(0, 256, (80, 100, 3), dtype=np.uint8)
         no_clip = project_rgb_image(img, *_BBOX, "cosine", clip_nans=False)
         clipped = project_rgb_image(img, *_BBOX, "cosine", clip_nans=True)
@@ -133,7 +133,7 @@ class TestCoreProjectionModule:
 
     def test_project_grid_rejects_unknown_projection(self):
         """Unknown projection name should raise ValueError."""
-        from app.server.core.projection import project_grid
+        from geo2stl.projections import project_grid
         arr = np.zeros((50, 60), dtype=np.float32)
         with pytest.raises(ValueError, match="Unknown projection"):
             project_grid(arr, *_BBOX, "azimuthal_equidistant", clip_nans=False)
@@ -424,18 +424,18 @@ class TestImportChain:
     """Verify that the new shared projection module is importable and
     that terrain.py delegates to it (not defining its own)."""
 
-    def test_core_projection_importable(self):
-        from app.server.core.projection import project_grid
-        from app.server.core.projection import project_water_arrays
-        from app.server.core.projection import project_rgb_image
+    def test_geo2stl_projection_importable(self):
+        from geo2stl.projections import project_grid
+        from geo2stl.projections import project_water_arrays
+        from geo2stl.projections import project_rgb_image
         assert callable(project_grid)
         assert callable(project_water_arrays)
         assert callable(project_rgb_image)
 
-    def test_terrain_router_delegates_to_core(self):
-        """terrain.py's _project_grid should delegate to core.projection."""
+    def test_terrain_router_delegates_to_geo2stl(self):
+        """terrain.py's _project_grid should delegate to geo2stl.projections."""
         from app.server.routers.terrain import _project_grid
-        from app.server.core.projection import project_grid
+        from geo2stl.projections import project_grid
         # The thin wrapper should exist and be callable
         assert callable(_project_grid)
         # Verify it's a wrapper, not a re-implementation
@@ -450,7 +450,7 @@ class TestImportChain:
 
     def test_terrain_water_arrays_delegates_to_core(self):
         from app.server.routers.terrain import _project_water_arrays
-        from app.server.core.projection import project_water_arrays
+        from geo2stl.projections import project_water_arrays
         h, w = 30, 40
         water = np.random.choice([0.0, 1.0], size=(h, w)).astype(np.float32)
         esa = np.random.choice([10, 20, 80], size=(h, w)).astype(np.float32)

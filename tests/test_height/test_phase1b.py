@@ -1,10 +1,10 @@
-﻿"""Unit tests for Phase 1b height providers — GHSL, Open Buildings, Shadow."""
+"""Unit tests for Phase 1b height providers — GHSL, Open Buildings, Shadow."""
 
 import numpy as np
 import pytest
 from unittest.mock import patch
 
-from app.server.core.height import HeightResult
+from city2stl.height import HeightResult
 from city2stl.height.providers.ghsl import (
     GHSLProvider, _CONFIDENCE as GHSL_CONF,
 )

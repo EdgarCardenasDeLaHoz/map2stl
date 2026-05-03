@@ -601,3 +601,79 @@ def project_grid(arr: np.ndarray,
     if categorical:
         projected = np.nan_to_num(projected, nan=0.0)
     return projected
+
+
+def project_water_arrays(water_mask: np.ndarray,
+                         esa_img: np.ndarray,
+                         north: float, south: float, east: float, west: float,
+                         projection: ProjectionType,
+                         clip_nans: bool) -> tuple[np.ndarray, np.ndarray]:
+    """Project water-mask and ESA class arrays while keeping exact alignment.
+
+    Both arrays are projected with clip_nans=False first, then clipped using
+    the NaN mask from the projected water raster so their output shapes always
+    match exactly.
+    """
+    wm_proj, _wm_meta = project_coordinates(
+        water_mask, (north, south, east, west),
+        projection=projection,
+        maintain_dimensions=True,
+        fill_value=np.nan,
+        clip_nans=False,
+    )
+    esa_proj, _esa_meta = project_coordinates(
+        esa_img.astype(np.float32), (north, south, east, west),
+        projection=projection,
+        maintain_dimensions=True,
+        fill_value=0,
+        clip_nans=False,
+        order=0,
+    )
+
+    if clip_nans and wm_proj.ndim == 2:
+        col_has_data = ~np.all(np.isnan(wm_proj), axis=0)
+        if col_has_data.any():
+            wm_proj = wm_proj[:, col_has_data]
+            esa_proj = esa_proj[:, col_has_data]
+        row_has_data = ~np.all(np.isnan(wm_proj), axis=1)
+        if row_has_data.any():
+            wm_proj = wm_proj[row_has_data, :]
+            esa_proj = esa_proj[row_has_data, :]
+
+    wm_proj = (wm_proj > 0.5).astype(np.float32)
+    return wm_proj, esa_proj
+
+
+def project_rgb_image(img_arr: np.ndarray,
+                      north: float, south: float, east: float, west: float,
+                      projection: ProjectionType,
+                      clip_nans: bool) -> np.ndarray:
+    """Project an RGB image channel-by-channel and return uint8 output."""
+    channels = []
+    nan_mask = None
+    for c in range(img_arr.shape[2]):
+        ch = img_arr[:, :, c].astype(np.float32)
+        projected, _meta = project_coordinates(
+            ch, (north, south, east, west),
+            projection=projection,
+            maintain_dimensions=True,
+            fill_value=np.nan,
+            clip_nans=False,
+        )
+        if nan_mask is None:
+            nan_mask = np.isnan(projected)
+        projected = np.nan_to_num(projected, nan=0.0)
+        channels.append(projected)
+
+    result = np.stack(channels, axis=-1)
+
+    if clip_nans and nan_mask is not None and nan_mask.ndim == 2:
+        col_has_data = ~np.all(nan_mask, axis=0)
+        if col_has_data.any():
+            result = result[:, col_has_data, :]
+        row_has_data = ~np.all(
+            nan_mask[:, col_has_data] if col_has_data.any() else nan_mask, axis=1)
+        if row_has_data.any():
+            result = result[row_has_data, :, :]
+
+    return np.clip(result, 0, 255).astype(np.uint8)

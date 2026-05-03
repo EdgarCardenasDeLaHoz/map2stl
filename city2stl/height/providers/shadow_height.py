@@ -1,4 +1,4 @@
-﻿"""
+"""
 DEPRECATED: Shadow-based building height estimation (do not use in production).
 
 This provider estimates building heights from shadow lengths in satellite imagery

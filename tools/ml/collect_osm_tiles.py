@@ -125,7 +125,7 @@ def _fetch_satellite(
     dim: int,
 ) -> np.ndarray:
     """Fetch ESRI WMTS RGB tiles, return (3, dim, dim) float32 in [0, 1]."""
-    from app.server.core.sat import fetch_satellite_tiles
+    from geo2stl.sat import fetch_satellite_tiles
     from PIL import Image
 
     sat_b64 = fetch_satellite_tiles(north, south, east, west, dim=dim)
@@ -157,13 +157,13 @@ def _fetch_provider_label(
                decide whether the tile is worth saving.
     """
     # Lazy imports — keeps this module importable on minimal environments
-    from app.server.core.height import HeightResult, merge_height_rasters
-    from app.server.core.height.providers.ndsm import NDSMProvider
-    from app.server.core.height.providers.wsf3d import WSF3DProvider
-    from app.server.core.height.providers.copernicus import CopernicusProvider
-    from app.server.core.height.providers.lidar_3dep import LiDAR3DEPProvider
-    from app.server.core.height.providers.ghsl import GHSLProvider
-    from app.server.core.height.providers.open_buildings import OpenBuildingsProvider
+    from city2stl.height import HeightResult, merge_height_rasters
+    from city2stl.height.providers.ndsm import NDSMProvider
+    from city2stl.height.providers.wsf3d import WSF3DProvider
+    from city2stl.height.providers.copernicus import CopernicusProvider
+    from city2stl.height.providers.lidar_3dep import LiDAR3DEPProvider
+    from city2stl.height.providers.ghsl import GHSLProvider
+    from city2stl.height.providers.open_buildings import OpenBuildingsProvider
 
     all_providers = {
         "lidar_3dep":     LiDAR3DEPProvider(),

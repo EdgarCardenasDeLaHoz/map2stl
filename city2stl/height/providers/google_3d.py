@@ -1,4 +1,4 @@
-﻿"""
+"""
 Google 3D Tiles height provider — photogrammetric building heights.
 
 Data: Cesium 3D Tiles (glTF/glb), sub-metre resolution.

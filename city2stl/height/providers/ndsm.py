@@ -1,4 +1,4 @@
-﻿"""
+"""
 nDSM provider — Normalized Digital Surface Model from GLO-30 minus FABDEM.
 
 GLO-30 (Copernicus DEM) = DSM including buildings + vegetation.

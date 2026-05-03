@@ -1,10 +1,10 @@
-﻿"""Unit tests for the Copernicus EU Building Height provider — no network."""
+"""Unit tests for the Copernicus EU Building Height provider — no network."""
 
 import numpy as np
 import pytest
 from unittest.mock import patch, MagicMock
 
-from app.server.core.height import HeightResult
+from city2stl.height import HeightResult
 from city2stl.height.providers.copernicus import (
     CopernicusProvider,
     _is_in_europe,

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Copernicus EU Building Height provider.
 
 Data: GHS-BUILT-H from the GHSL (Global Human Settlement Layer) project.

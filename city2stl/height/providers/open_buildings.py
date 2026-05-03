@@ -1,4 +1,4 @@
-﻿"""
+"""
 Google Open Buildings 2.5D provider.
 
 Data: Google Open Buildings — V3 with height attributes

@@ -297,7 +297,7 @@ class TestCityRaster:
         bad_grid[3, 7] = np.inf
         bad_grid[5, 2] = -np.inf
 
-        with patch("app.server.core.projection.project_grid", return_value=bad_grid):
+        with patch("geo2stl.projections.project_grid", return_value=bad_grid):
             resp = client.post("/api/cities/raster", json=payload)
 
         assert resp.status_code == 200

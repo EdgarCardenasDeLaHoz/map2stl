@@ -1,10 +1,10 @@
-﻿"""Unit tests for the nDSM provider — no network calls."""
+"""Unit tests for the nDSM provider — no network calls."""
 
 import numpy as np
 import pytest
 from unittest.mock import patch, MagicMock
 
-from app.server.core.height import HeightResult
+from city2stl.height import HeightResult
 from city2stl.height.providers.ndsm import (
     NDSMProvider,
     _tile_name_glo30,

@@ -17,7 +17,7 @@ from typing import List, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.server.core.projection import project_grid as _project_grid
+from geo2stl.projections import project_grid as _project_grid
 from app.server.core.responses import error_response
 from app.server.schemas import BoundingBox
 
@@ -53,7 +53,7 @@ def _read_provider_cache(name: str, bbox, dim):
         return None
     try:
         import numpy as np
-        from app.server.core.height import HeightResult
+        from city2stl.height import HeightResult
         path = _CACHE_ROOT / "height" / name / f"{_provider_cache_key(name, bbox, dim)}.npz"
         if not path.exists():
             return None
@@ -160,14 +160,14 @@ class HeightDiagnosticsResponse(BaseModel):
 
 # ── Provider registry ───────────────────────────────────────────
 
-from app.server.core.height.providers.ndsm import NDSMProvider
-from app.server.core.height.providers.wsf3d import WSF3DProvider
-from app.server.core.height.providers.copernicus import CopernicusProvider
-from app.server.core.height.providers.lidar_3dep import LiDAR3DEPProvider
-from app.server.core.height.providers.ghsl import GHSLProvider
-from app.server.core.height.providers.open_buildings import OpenBuildingsProvider
-from app.server.core.height.providers.shadow_height import ShadowHeightProvider
-from app.server.core.height.providers.roofnet import RoofNetProvider
+from city2stl.height.providers.ndsm import NDSMProvider
+from city2stl.height.providers.wsf3d import WSF3DProvider
+from city2stl.height.providers.copernicus import CopernicusProvider
+from city2stl.height.providers.lidar_3dep import LiDAR3DEPProvider
+from city2stl.height.providers.ghsl import GHSLProvider
+from city2stl.height.providers.open_buildings import OpenBuildingsProvider
+from city2stl.height.providers.shadow_height import ShadowHeightProvider
+from city2stl.height.providers.roofnet import RoofNetProvider
 
 
 # Ordered by priority (highest confidence first)
@@ -218,7 +218,7 @@ async def height_sources(req: HeightSourcesRequest):
 async def height_fetch(req: HeightFetchRequest):
     """Fetch and merge building heights from multiple providers."""
     import numpy as np
-    from app.server.core.height import HeightResult, merge_height_rasters
+    from city2stl.height import HeightResult, merge_height_rasters
 
     bbox = (req.north, req.south, req.east, req.west)
     dim = (req.height, req.width)
@@ -342,7 +342,7 @@ async def height_diagnostics(req: HeightDiagnosticsRequest):
     and quality across providers before choosing which to use.
     """
     import numpy as np
-    from app.server.core.height import _filter_outliers, provider_stats
+    from city2stl.height import _filter_outliers, provider_stats
 
     bbox = (req.north, req.south, req.east, req.west)
     dim = (req.height, req.width)

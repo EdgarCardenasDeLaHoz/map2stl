@@ -72,13 +72,13 @@ def _enhance_city_data(
     dim: int = 512,
 ) -> Dict[str, Any]:
     """Fill default OSM building heights from the merged global height stack."""
-    from app.server.core.height import merge_height_rasters
-    from app.server.core.height.providers.ndsm import NDSMProvider
-    from app.server.core.height.providers.wsf3d import WSF3DProvider
-    from app.server.core.height.providers.copernicus import CopernicusProvider
-    from app.server.core.height.providers.ghsl import GHSLProvider
-    from app.server.core.height.providers.open_buildings import OpenBuildingsProvider
-    from app.server.core.height.providers.shadow_height import ShadowHeightProvider
+    from city2stl.height import merge_height_rasters
+    from city2stl.height.providers.ndsm import NDSMProvider
+    from city2stl.height.providers.wsf3d import WSF3DProvider
+    from city2stl.height.providers.copernicus import CopernicusProvider
+    from city2stl.height.providers.ghsl import GHSLProvider
+    from city2stl.height.providers.open_buildings import OpenBuildingsProvider
+    from city2stl.height.providers.shadow_height import ShadowHeightProvider
     from city2stl.heights import enhance_buildings_with_raster
 
     features = _building_features(payload)
@@ -458,7 +458,7 @@ async def get_city_raster(req: CityRasterRequest):
 
     # Apply map projection (all raster layers use the same pipeline)
     if req.projection != "none":
-        from app.server.core.projection import project_grid
+        from geo2stl.projections import project_grid
 
         grid = np.array(result["values"], dtype=np.float32).reshape(
             result["height"], result["width"])
@@ -570,7 +570,7 @@ async def export_city_3mf(req: CityExportRequest):
 @router.get("/api/cities/google3d-available")
 async def google3d_available():
     """Check if Google 3D Tiles API key is configured."""
-    from app.server.core.height.providers.google_3d import _get_api_key
+    from city2stl.height.providers.google_3d import _get_api_key
     return JSONResponse(content={"available": _get_api_key() is not None})
 
 
@@ -582,7 +582,7 @@ async def enhance_heights(req: EnhanceHeightsRequest):
     each building centroid to replace default (10 m) heights with real
     photogrammetric measurements.
     """
-    from app.server.core.height.providers.google_3d import Google3DProvider, _get_api_key
+    from city2stl.height.providers.google_3d import Google3DProvider, _get_api_key
     from city2stl.heights import enhance_buildings_with_raster
     import numpy as np
 
@@ -618,7 +618,7 @@ async def enhance_heights(req: EnhanceHeightsRequest):
 
     try:
         # Fetch terrain DEM for ground subtraction (DSM - DEM = building height)
-        from app.server.core.dem import compute_raw_dem
+        from geo2stl.dem import compute_raw_dem
         dem_result = await run_sync(
             compute_raw_dem, req.north, req.south, req.east, req.west,
             req.dim, 1,  # depth_scale=1 (no bathymetry scaling)

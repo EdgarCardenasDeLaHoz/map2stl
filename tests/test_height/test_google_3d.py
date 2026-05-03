@@ -1,4 +1,4 @@
-﻿"""Tests for the Google 3D Tiles height provider.
+"""Tests for the Google 3D Tiles height provider.
 
 All tests use synthetic data — no network or API key required.
 """

@@ -1,4 +1,4 @@
-"""Tests for app.server.core.height.infill.
+"""Tests for city2stl.height.infill.
 
 All tests use synthetic numpy arrays — no external files or network needed.
 scipy is required (it's in requirements.txt).
@@ -12,7 +12,7 @@ import pytest
 # Skip entire module if scipy unavailable
 pytest.importorskip("scipy")
 
-from app.server.core.height.infill import infill_idw, infill_nearest
+from city2stl.height.infill import infill_idw, infill_nearest
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

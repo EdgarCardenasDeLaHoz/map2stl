@@ -1,4 +1,4 @@
-﻿"""Tests for the WSF3D building height provider.
+"""Tests for the WSF3D building height provider.
 
 Unit tests use synthetic data — no network required.
 """

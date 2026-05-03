@@ -1,4 +1,4 @@
-﻿"""End-to-end tests for the building-height pipeline via TerrainSession.
+"""End-to-end tests for the building-height pipeline via TerrainSession.
 
 All network calls are mocked.  Tests exercise the full path from
 session.fetch_building_heights() through provider selection, fetch,
@@ -17,7 +17,7 @@ for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from app.server.core.height import HeightResult
+from city2stl.height import HeightResult
 
 
 # ── helper to build a fake session ──────────────────────────────

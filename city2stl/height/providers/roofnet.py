@@ -1,4 +1,4 @@
-﻿"""RoofNet height provider — wraps a trained RoofNetV3 / HeightUNet checkpoint.
+"""RoofNet height provider — wraps a trained RoofNetV3 / HeightUNet checkpoint.
 
 Fetches an ESRI World Imagery RGB tile for the bbox, runs the model from
 `city2stl.height.predict` to produce a per-pixel height raster, and exposes
@@ -50,8 +50,8 @@ def _resolve_checkpoint() -> Path | None:
     candidates = [env] if env else []
     candidates.extend(_DEFAULT_CKPT_CANDIDATES)
 
-    # roofnet.py is at app/server/core/height/providers/roofnet.py — parents[5] = strm2stl
-    strm2stl = Path(__file__).resolve().parents[5]
+    # roofnet.py is at city2stl/height/providers/roofnet.py -- parents[3] = strm2stl
+    strm2stl = Path(__file__).resolve().parents[3]
     for c in candidates:
         if not c:
             continue

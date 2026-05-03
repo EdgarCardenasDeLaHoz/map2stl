@@ -1,4 +1,4 @@
-﻿"""
+"""
 USGS 3DEP LiDAR provider — sub-metre US building heights.
 
 Data: USGS 3D Elevation Program (3DEP)
