@@ -1,10 +1,12 @@
 # JS Module Map — strm2stl
 
-_Last updated: 2026-04-30_
+_Last updated: 2026-05-03_
 
 All modules in `app/client/static/js/modules/`, imported by `main.js` in dependency order.
 Modules expose functions via `window.*` — they do **not** import each other.
 See [arch.md § Module Boundary](arch.md#module-boundary) for detailed coordination rules and entry-point architecture.
+
+Backend note: the 2026-05 router/core/library refactor did not change frontend module boundaries or window-contract surfaces documented here.
 
 ### Module group overview
 
