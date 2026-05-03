@@ -14,6 +14,7 @@ import logging
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, Response
+from geo2stl.projections import project_city_raster
 
 from app.server.config import OSM_CACHE_PATH
 from app.server.core.validation import model_to_dict, run_sync, validate_bbox_diagonal
@@ -291,12 +292,17 @@ async def get_city_raster(req: CityRasterRequest):
 
     # Apply map projection (all raster layers use the same pipeline)
     if req.projection != "none":
-        from geo2stl.projections import project_grid
-
         grid = np.array(result["values"], dtype=np.float32).reshape(
             result["height"], result["width"])
-        grid = project_grid(grid, req.north, req.south, req.east, req.west,
-                            req.projection, req.clip_nans, categorical=False)
+        grid = project_city_raster(
+            grid,
+            req.north,
+            req.south,
+            req.east,
+            req.west,
+            req.projection,
+            req.clip_nans,
+        )
         h, w = grid.shape
         result = {
             "values": grid.flatten().tolist(),

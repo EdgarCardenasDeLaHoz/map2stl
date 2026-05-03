@@ -16,13 +16,13 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from geo2stl.layers import GeoLayerBase
-
 logger = logging.getLogger(__name__)
 
 
-class HydrologyLayerBase(GeoLayerBase):
+class HydrologyLayerBase:
     """Base interface for hydrology providers."""
+
+    name: str = "hydrology-provider"
 
     def fetch_and_rasterize(
         self,
@@ -798,7 +798,7 @@ class HydroRiversHydrologyLayer(HydrologyLayerBase):
         }
 
 
-class HydrologyService(GeoLayerBase):
+class HydrologyService:
     """Hydrology orchestrator choosing the requested provider."""
 
     name = "hydrology"

@@ -25,6 +25,31 @@ ProjectionType = Literal['none', 'cosine', 'mercator',
 EARTH_RADIUS = 6_371_000
 
 
+def _clip_nan_borders(arr: np.ndarray, nan_mask: np.ndarray) -> np.ndarray:
+    """Clip border rows/cols where all values are NaN according to *nan_mask*."""
+    if arr.ndim == 2:
+        col_has_data = ~np.all(nan_mask, axis=0)
+        if col_has_data.any():
+            arr = arr[:, col_has_data]
+            nan_mask = nan_mask[:, col_has_data]
+        row_has_data = ~np.all(nan_mask, axis=1)
+        if row_has_data.any():
+            arr = arr[row_has_data, :]
+        return arr
+
+    if arr.ndim == 3:
+        col_has_data = ~np.all(nan_mask, axis=0)
+        if col_has_data.any():
+            arr = arr[:, col_has_data, :]
+            nan_mask = nan_mask[:, col_has_data]
+        row_has_data = ~np.all(nan_mask, axis=1)
+        if row_has_data.any():
+            arr = arr[row_has_data, :, :]
+        return arr
+
+    return arr
+
+
 def get_projection_info() -> dict:
     """Return information about available projections."""
     return {
@@ -603,16 +628,52 @@ def project_grid(arr: np.ndarray,
     return projected
 
 
+def project_binary_mask(arr: np.ndarray,
+                        north: float, south: float, east: float, west: float,
+                        projection: ProjectionType,
+                        clip_nans: bool) -> np.ndarray:
+    """Project a binary mask independently and return a binarized float32 array."""
+    projected, _meta = project_coordinates(
+        arr.astype(np.float32), (north, south, east, west),
+        projection=projection,
+        maintain_dimensions=True,
+        fill_value=np.nan,
+        clip_nans=clip_nans,
+        order=1,
+    )
+    projected = np.nan_to_num(projected, nan=0.0)
+    return (projected > 0.5).astype(np.float32)
+
+
+def project_categorical_layer(arr: np.ndarray,
+                              north: float, south: float, east: float, west: float,
+                              projection: ProjectionType,
+                              clip_nans: bool) -> np.ndarray:
+    """Project a categorical raster independently using nearest-neighbour sampling."""
+    return project_grid(arr.astype(np.float32), north, south, east, west,
+                        projection, clip_nans, categorical=True)
+
+
+def project_city_raster(arr: np.ndarray,
+                        north: float, south: float, east: float, west: float,
+                        projection: ProjectionType,
+                        clip_nans: bool) -> np.ndarray:
+    """Project city raster (continuous height field) through the shared grid path."""
+    return project_grid(arr.astype(np.float32), north, south, east, west,
+                        projection, clip_nans, categorical=False)
+
+
 def project_water_arrays(water_mask: np.ndarray,
                          esa_img: np.ndarray,
                          north: float, south: float, east: float, west: float,
                          projection: ProjectionType,
-                         clip_nans: bool) -> tuple[np.ndarray, np.ndarray]:
-    """Project water-mask and ESA class arrays while keeping exact alignment.
+                         clip_nans: bool,
+                         align_streams: bool = True) -> tuple[np.ndarray, np.ndarray]:
+    """Project water and ESA arrays via common projection helpers.
 
-    Both arrays are projected with clip_nans=False first, then clipped using
-    the NaN mask from the projected water raster so their output shapes always
-    match exactly.
+    Each stream is projected independently through ``project_coordinates``.
+    If ``align_streams=True`` (default), a shared valid-data mask is used when
+    clipping NaN borders so both arrays keep identical output shapes.
     """
     wm_proj, _wm_meta = project_coordinates(
         water_mask, (north, south, east, west),
@@ -631,16 +692,18 @@ def project_water_arrays(water_mask: np.ndarray,
     )
 
     if clip_nans and wm_proj.ndim == 2:
-        col_has_data = ~np.all(np.isnan(wm_proj), axis=0)
-        if col_has_data.any():
-            wm_proj = wm_proj[:, col_has_data]
-            esa_proj = esa_proj[:, col_has_data]
-        row_has_data = ~np.all(np.isnan(wm_proj), axis=1)
-        if row_has_data.any():
-            wm_proj = wm_proj[row_has_data, :]
-            esa_proj = esa_proj[row_has_data, :]
+        wm_nan = np.isnan(wm_proj)
+        esa_nan = np.isnan(esa_proj)
+        if align_streams:
+            shared_nan = wm_nan | esa_nan
+            wm_proj = _clip_nan_borders(wm_proj, shared_nan)
+            esa_proj = _clip_nan_borders(esa_proj, shared_nan)
+        else:
+            wm_proj = _clip_nan_borders(wm_proj, wm_nan)
+            esa_proj = _clip_nan_borders(esa_proj, esa_nan)
 
     wm_proj = (wm_proj > 0.5).astype(np.float32)
+    esa_proj = np.nan_to_num(esa_proj, nan=0.0)
     return wm_proj, esa_proj
 
 
@@ -668,12 +731,6 @@ def project_rgb_image(img_arr: np.ndarray,
     result = np.stack(channels, axis=-1)
 
     if clip_nans and nan_mask is not None and nan_mask.ndim == 2:
-        col_has_data = ~np.all(nan_mask, axis=0)
-        if col_has_data.any():
-            result = result[:, col_has_data, :]
-        row_has_data = ~np.all(
-            nan_mask[:, col_has_data] if col_has_data.any() else nan_mask, axis=1)
-        if row_has_data.any():
-            result = result[row_has_data, :, :]
+        result = _clip_nan_borders(result, nan_mask)
 
     return np.clip(result, 0, 255).astype(np.uint8)
