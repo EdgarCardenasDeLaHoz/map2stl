@@ -19,9 +19,8 @@ _geo_to_tile_pixel() in geo2stl.dem.
 """
 from itertools import product
 
-import os 
+import os
 import numpy as np
-import pandas as pd
 
 from scipy import ndimage as ndi
 from scipy.ndimage import rotate
@@ -34,14 +33,8 @@ from PIL import Image
 
 import h5py
 
-from shapely.geometry import Polygon,MultiPolygon
-from descartes import PolygonPatch
-
 # Image and Visualization Tools
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-
-from skimage.transform import resize
 
 import numpy2stl as np2stl
 from geo2stl.projections import project_coordinates

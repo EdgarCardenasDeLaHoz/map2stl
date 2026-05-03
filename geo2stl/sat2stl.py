@@ -20,10 +20,9 @@ import math
 import os
 from pathlib import Path
 import time
+from types import SimpleNamespace
 
 import numpy as np
-
-from geo2stl.layers import GeoLayerBase
 
 try:
     import joblib
@@ -631,18 +630,16 @@ def map_label_elevation(img, im, size=500):
     img_map2 = img_map2.round(0).clip(0.1)
     return img_map2
 
-class SatelliteLayer(GeoLayerBase):
-    """Unified satellite + Earth Engine data layer."""
-
-    name = "satellite"
-    fetch_satellite_tiles = staticmethod(fetch_satellite_tiles)
-    fetch_water_mask_images = staticmethod(fetch_water_mask_images)
-    fetch_water_mask = staticmethod(fetch_water_mask)
-    fetch_sat_overlay = staticmethod(fetch_sat_overlay)
-    initialize_earth_engine = staticmethod(initialize_earth_engine)
-    calculate_scale_for_dimensions = staticmethod(calculate_scale_for_dimensions)
-    fetch_bbox_image = staticmethod(fetch_bbox_image)
-    get_aquatic_regions = staticmethod(get_aquatic_regions)
-
-
-SAT_LAYER = SatelliteLayer()
+# Legacy compatibility object for older call sites that still expect
+# SAT_LAYER.fetch_* attributes (e.g., notebooks/older adapters).
+SAT_LAYER = SimpleNamespace(
+    name="satellite",
+    fetch_satellite_tiles=fetch_satellite_tiles,
+    fetch_water_mask_images=fetch_water_mask_images,
+    fetch_water_mask=fetch_water_mask,
+    fetch_sat_overlay=fetch_sat_overlay,
+    initialize_earth_engine=initialize_earth_engine,
+    calculate_scale_for_dimensions=calculate_scale_for_dimensions,
+    fetch_bbox_image=fetch_bbox_image,
+    get_aquatic_regions=get_aquatic_regions,
+)

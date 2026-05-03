@@ -25,7 +25,12 @@ from geo2stl.projections import (
     project_rgb_image,
     project_water_arrays as project_water_layers,
 )
-from geo2stl.sat2stl import SAT_LAYER
+from geo2stl.sat2stl import (
+    fetch_sat_overlay as _fetch_sat_overlay,
+    fetch_satellite_tiles as _fetch_satellite_tiles,
+    fetch_water_mask as _fetch_water_mask,
+    fetch_water_mask_images as _fetch_water_mask_images,
+)
 
 from app.server.config import (
     H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
@@ -58,10 +63,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["terrain"])
 
 _fetch_and_rasterize_hydrology = HYDROLOGY_LAYER.fetch_and_rasterize
-_fetch_water_mask = SAT_LAYER.fetch_water_mask
-_fetch_water_mask_images = SAT_LAYER.fetch_water_mask_images
-_fetch_sat_overlay = SAT_LAYER.fetch_sat_overlay
-_fetch_satellite_tiles = SAT_LAYER.fetch_satellite_tiles
 
 # In-memory LRU cache for fully-serialised DEM response dicts.
 # Sits in front of the disk cache so that repeated hot requests skip both
