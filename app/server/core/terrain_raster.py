@@ -4,12 +4,6 @@ import math
 
 import numpy as np
 
-from geo2stl.projections import (
-    project_grid as _project_grid,
-    project_rgb_image as _project_rgb_image,
-    project_water_arrays as _project_water_arrays,
-)
-
 
 def bbox_longer_side_m(north: float, south: float, east: float, west: float) -> float:
     """Return the longer bbox side in metres, clamped to at least 1m."""
@@ -48,25 +42,3 @@ def clamp_esa_scale(north: float, south: float, east: float, west: float, sat_sc
         1,
     )
     return max(sat_scale, min_safe_dim)
-
-
-def project_scalar_grid(arr, north, south, east, west, projection, clip_nans):
-    return _project_grid(
-        arr, north, south, east, west, projection, clip_nans, categorical=False
-    )
-
-
-def project_categorical_grid(arr, north, south, east, west, projection, clip_nans):
-    return _project_grid(
-        arr, north, south, east, west, projection, clip_nans, categorical=True
-    )
-
-
-def project_water_layers(water_mask, esa_img, north, south, east, west, projection, clip_nans):
-    return _project_water_arrays(
-        water_mask, esa_img, north, south, east, west, projection, clip_nans
-    )
-
-
-def project_rgb_image(arr, north, south, east, west, projection, clip_nans):
-    return _project_rgb_image(arr, north, south, east, west, projection, clip_nans)

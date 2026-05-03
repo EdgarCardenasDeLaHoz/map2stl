@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
 import logging
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -13,11 +13,17 @@ from geo2stl.projections import project_grid as _project_grid
 logger = logging.getLogger(__name__)
 
 try:
-    from app.server.core.cache import CACHE_ROOT as _CACHE_ROOT
+    from app.server.core.cache import (
+        CACHE_ROOT as _CACHE_ROOT,
+        make_cache_key,
+        read_array_cache,
+        write_array_cache,
+    )
     _CACHE_AVAILABLE = _CACHE_ROOT is not None
 except Exception:
     _CACHE_ROOT = None
     _CACHE_AVAILABLE = False
+    make_cache_key = read_array_cache = write_array_cache = None  # type: ignore
 
 from city2stl.height import HeightResult, _filter_outliers, merge_height_rasters, provider_stats
 from city2stl.height.providers.copernicus import CopernicusProvider
@@ -31,93 +37,97 @@ from city2stl.height.providers.wsf3d import WSF3DProvider
 from city2stl.heights import enhance_buildings_with_raster
 
 
-_HEIGHT_CACHE_VERSION = "v1"
+_HEIGHT_CACHE_VERSION = "v2"  # bumped: cache format changed to shared npz+json
 
-_ALL_PROVIDERS = [
-    LiDAR3DEPProvider(),
-    NDSMProvider(),
-    CopernicusProvider(),
-    RoofNetProvider(),
-    OpenBuildingsProvider(),
-    WSF3DProvider(),
-    GHSLProvider(),
+
+@dataclass
+class RegisteredProvider:
+    """Single source of truth for a height provider and its metadata."""
+    instance: Any
+    confidence: float
+    resolution_m: float
+
+    @property
+    def name(self) -> str:
+        return self.instance.name
+
+
+_REGISTRY: list[RegisteredProvider] = [
+    RegisteredProvider(LiDAR3DEPProvider(),    confidence=0.95, resolution_m=1.0),
+    RegisteredProvider(NDSMProvider(),          confidence=0.80, resolution_m=30.0),
+    RegisteredProvider(CopernicusProvider(),    confidence=0.70, resolution_m=10.0),
+    RegisteredProvider(RoofNetProvider(),       confidence=0.65, resolution_m=5.0),
+    RegisteredProvider(OpenBuildingsProvider(), confidence=0.60, resolution_m=5.0),
+    RegisteredProvider(WSF3DProvider(),         confidence=0.50, resolution_m=90.0),
+    RegisteredProvider(GHSLProvider(),          confidence=0.40, resolution_m=100.0),
+    RegisteredProvider(ShadowHeightProvider(),  confidence=0.30, resolution_m=5.0),
 ]
 
-_PROVIDER_MAP = {p.name: p for p in _ALL_PROVIDERS}
-
-_PROVIDER_META = {
-    "lidar_3dep": {"confidence": 0.95, "resolution_m": 1.0},
-    "ndsm": {"confidence": 0.80, "resolution_m": 30.0},
-    "copernicus": {"confidence": 0.70, "resolution_m": 10.0},
-    "roofnet": {"confidence": 0.65, "resolution_m": 5.0},
-    "open_buildings": {"confidence": 0.60, "resolution_m": 5.0},
-    "wsf3d": {"confidence": 0.50, "resolution_m": 90.0},
-    "ghsl": {"confidence": 0.40, "resolution_m": 100.0},
-    "shadow_height": {"confidence": 0.30, "resolution_m": 5.0},
-}
+_ALL_PROVIDERS = [r.instance for r in _REGISTRY]
+_PROVIDER_MAP: dict[str, RegisteredProvider] = {r.name: r for r in _REGISTRY}
 
 
 def provider_infos(bbox):
     return [
         {
-            "name": p.name,
-            "covers": p.covers(bbox),
-            "confidence": _PROVIDER_META.get(p.name, {}).get("confidence", 0.5),
-            "resolution_m": _PROVIDER_META.get(p.name, {}).get("resolution_m", 100.0),
+            "name": r.name,
+            "covers": r.instance.covers(bbox),
+            "confidence": r.confidence,
+            "resolution_m": r.resolution_m,
         }
-        for p in _ALL_PROVIDERS
+        for r in _REGISTRY
     ]
 
 
 def _select_providers(bbox, requested: Optional[list[str]] = None):
     if requested:
-        providers = [_PROVIDER_MAP[name] for name in requested if name in _PROVIDER_MAP]
+        providers = [_PROVIDER_MAP[name].instance for name in requested if name in _PROVIDER_MAP]
         unknown = [name for name in requested if name not in _PROVIDER_MAP]
     else:
-        providers = [provider for provider in _ALL_PROVIDERS if provider.covers(bbox)]
+        providers = [r.instance for r in _REGISTRY if r.instance.covers(bbox)]
         unknown = []
     return providers, unknown
 
 
-def _provider_cache_key(name: str, bbox, dim) -> str:
+def _provider_cache_key(name: str, bbox: tuple, dim: tuple) -> str:
     north, south, east, west = bbox
     height, width = dim
-    return hashlib.md5(
-        f"{_HEIGHT_CACHE_VERSION}|{name}|{north:.5f}_{south:.5f}_{east:.5f}_{west:.5f}|{height}x{width}".encode()
-    ).hexdigest()
+    return make_cache_key(
+        f"height_{name}", north, south, east, west,
+        {"h": height, "w": width, "v": _HEIGHT_CACHE_VERSION},
+    )
 
 
-def _read_provider_cache(name: str, bbox, dim):
+def _read_provider_cache(name: str, bbox: tuple, dim: tuple) -> HeightResult | None:
     if not _CACHE_AVAILABLE:
         return None
     try:
-        path = _CACHE_ROOT / "height" / name / f"{_provider_cache_key(name, bbox, dim)}.npz"
-        if not path.exists():
+        key = _provider_cache_key(name, bbox, dim)
+        result = read_array_cache(f"height_{name}", key)
+        if result is None:
             return None
-        arr = np.load(path)
+        arrays, meta = result
         return HeightResult(
-            raster=arr["raster"],
-            confidence=arr["confidence"],
-            source_name=str(arr["source_name"]),
-            resolution_m=float(arr["resolution_m"]),
+            raster=arrays["raster"],
+            confidence=arrays["confidence"],
+            source_name=str(meta["source_name"]),
+            resolution_m=float(meta["resolution_m"]),
         )
     except Exception as exc:
         logger.debug("height cache read failed for %s: %s", name, exc)
         return None
 
 
-def _write_provider_cache(name: str, bbox, dim, hr) -> None:
+def _write_provider_cache(name: str, bbox: tuple, dim: tuple, hr: HeightResult) -> None:
     if not _CACHE_AVAILABLE:
         return
     try:
-        cache_dir = _CACHE_ROOT / "height" / name
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(
-            cache_dir / f"{_provider_cache_key(name, bbox, dim)}.npz",
-            raster=hr.raster.astype(np.float32),
-            confidence=hr.confidence.astype(np.float32),
-            source_name=hr.source_name,
-            resolution_m=hr.resolution_m,
+        key = _provider_cache_key(name, bbox, dim)
+        write_array_cache(
+            f"height_{name}", key,
+            {"raster": hr.raster.astype(np.float32),
+             "confidence": hr.confidence.astype(np.float32)},
+            {"source_name": hr.source_name, "resolution_m": hr.resolution_m},
         )
     except Exception as exc:
         logger.debug("height cache write failed for %s: %s", name, exc)
@@ -178,7 +188,8 @@ async def fetch_height_payload(north, south, east, west, width, height,
         {
             "name": result.source_name,
             "resolution_m": result.resolution_m,
-            "confidence": _PROVIDER_META.get(result.source_name, {}).get("confidence", 0.5),
+            "confidence": _PROVIDER_MAP[result.source_name].confidence
+            if result.source_name in _PROVIDER_MAP else 0.5,
         }
         for result in results
     ]
@@ -222,7 +233,6 @@ async def fetch_height_diagnostics(north, south, east, west, width, height, prov
     errors: list[str] = []
 
     async def _fetch_one(provider):
-        meta = _PROVIDER_META.get(provider.name, {})
         cached = _read_provider_cache(provider.name, bbox, dim)
         try:
             if cached is not None:
@@ -252,7 +262,8 @@ async def fetch_height_diagnostics(north, south, east, west, width, height, prov
                 "mean_m": stats["mean_m"],
                 "p95_m": stats["p95_m"],
                 "resolution_m": hr.resolution_m,
-                "confidence": meta.get("confidence", 0.5),
+                "confidence": _PROVIDER_MAP[provider.name].confidence
+                if provider.name in _PROVIDER_MAP else 0.5,
                 "outliers_removed": outliers_removed,
             }
         except Exception as exc:

@@ -10,10 +10,8 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
 
 from app.server.core.responses import error_response
 from app.server.core.height.service import (
@@ -21,88 +19,26 @@ from app.server.core.height.service import (
     fetch_height_payload as _fetch_height_payload,
     provider_infos as _provider_infos,
 )
-from app.server.schemas import BoundingBox
+from app.server.schemas import (
+    BoundingBox,
+    HeightDiagnosticsRequest,
+    HeightDiagnosticsResponse,
+    HeightFetchRequest,
+    HeightFetchResponse,
+    HeightSourcesResponse,
+    ProviderDiagnostics,
+    ProviderInfo,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/height", tags=["height"])
 
 
-# ── Request / response models ───────────────────────────────────
-
-class HeightSourcesRequest(BoundingBox):
-    """Check which height providers cover this bbox."""
-    pass
-
-
-class ProviderInfo(BaseModel):
-    name: str
-    covers: bool
-    confidence: float
-    resolution_m: float
-
-
-class HeightSourcesResponse(BaseModel):
-    providers: List[ProviderInfo]
-
-
-class HeightFetchRequest(BoundingBox):
-    """Fetch and merge building heights from specified providers."""
-    width: int = Field(256, ge=1, le=4096)
-    height: int = Field(256, ge=1, le=4096)
-    providers: Optional[List[str]] = Field(
-        None,
-        description="Provider names to use. None = all available."
-    )
-    projection: str = Field(
-        "none",
-        description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"
-    )
-    clip_nans: bool = Field(
-        True,
-        description="Clip NaN-only border rows/cols from projected output"
-    )
-
-
-class HeightFetchResponse(BaseModel):
-    width: int
-    height: int
-    source_name: str
-    resolution_m: float
-    coverage_pct: float = Field(description="% of pixels with data (non-NaN)")
-    stats: dict
-
-
-class HeightDiagnosticsRequest(BoundingBox):
-    """Run all providers and return per-provider stats (no merge)."""
-    width: int = Field(256, ge=1, le=4096)
-    height: int = Field(256, ge=1, le=4096)
-    providers: Optional[List[str]] = Field(None)
-
-
-class ProviderDiagnostics(BaseModel):
-    source: str
-    coverage_pct: float
-    valid_pixels: int
-    total_pixels: int
-    min_m: Optional[float]
-    max_m: Optional[float]
-    mean_m: Optional[float]
-    p95_m: Optional[float]
-    resolution_m: float
-    confidence: float
-    outliers_removed: int
-
-
-class HeightDiagnosticsResponse(BaseModel):
-    providers: List[ProviderDiagnostics]
-    errors: List[str]
-
-
 # ── Endpoints ────────────────────────────────────────────────────
 
 @router.post("/sources", response_model=HeightSourcesResponse)
-async def height_sources(req: HeightSourcesRequest):
+async def height_sources(req: BoundingBox):
     """List height providers and whether they cover the given bbox."""
     bbox = (req.north, req.south, req.east, req.west)
     providers = [ProviderInfo(**item) for item in _provider_infos(bbox)]

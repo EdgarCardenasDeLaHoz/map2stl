@@ -432,3 +432,119 @@ class HydrologyMergeRequest(BaseModel):
     # Settings-only mode fields
     bbox: Optional[Dict[str, float]] = None
     dem: Optional[Dict[str, Any]] = None
+
+
+# ---------------------------------------------------------------------------
+# Composite city raster
+# ---------------------------------------------------------------------------
+
+class CompositeCityRasterRequest(BaseModel):
+    """Request body for POST /api/composite/city-raster."""
+    north:  float
+    south:  float
+    east:   float
+    west:   float
+    width:  int = 512
+    height: int = 512
+    projection: str = "none"
+    clip_nans: bool = True
+    simplify_tolerance: float = 0.5
+    min_area: float = 5.0
+    m_per_level: float = 3.5
+
+
+# ---------------------------------------------------------------------------
+# City 3MF export
+# ---------------------------------------------------------------------------
+
+class CityExportRequest(BaseModel):
+    """Request body for POST /api/cities/export3mf.
+
+    DEM and buildings data are resolved from the server-side disk cache.
+    Legacy callers may still pass dem_values/buildings directly — the
+    endpoint accepts both forms.
+    """
+    north: float
+    south: float
+    east: float
+    west: float
+    dem_values:   Optional[List[float]] = None
+    dem_width:    Optional[int] = None
+    dem_height:   Optional[int] = None
+    buildings:    Optional[Dict[str, Any]] = None   # GeoJSON FeatureCollection
+    # DEM cache lookup settings (used when dem_values is not provided)
+    bbox:         Optional[Dict[str, float]] = None
+    dem:          Optional[Dict[str, Any]] = None
+    model_height_mm:  float = 20.0
+    base_mm:          float = 5.0
+    building_z_scale: float = 0.5        # mm per real metre for building heights
+    simplify_terrain: bool = True       # Cities 14: reduce terrain triangle count
+    name:             str = "city"
+
+
+# ---------------------------------------------------------------------------
+# Height providers
+# ---------------------------------------------------------------------------
+
+class ProviderInfo(BaseModel):
+    name: str
+    covers: bool
+    confidence: float
+    resolution_m: float
+
+
+class HeightSourcesResponse(BaseModel):
+    providers: List[ProviderInfo]
+
+
+class HeightFetchRequest(BoundingBox):
+    """Fetch and merge building heights from specified providers."""
+    width: int = Field(256, ge=1, le=4096)
+    height: int = Field(256, ge=1, le=4096)
+    providers: Optional[List[str]] = Field(
+        None,
+        description="Provider names to use. None = all available."
+    )
+    projection: str = Field(
+        "none",
+        description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"
+    )
+    clip_nans: bool = Field(
+        True,
+        description="Clip NaN-only border rows/cols from projected output"
+    )
+
+
+class HeightFetchResponse(BaseModel):
+    width: int
+    height: int
+    source_name: str
+    resolution_m: float
+    coverage_pct: float = Field(description="% of pixels with data (non-NaN)")
+    stats: dict
+
+
+class HeightDiagnosticsRequest(BoundingBox):
+    """Run all providers and return per-provider stats (no merge)."""
+    width: int = Field(256, ge=1, le=4096)
+    height: int = Field(256, ge=1, le=4096)
+    providers: Optional[List[str]] = Field(None)
+
+
+class ProviderDiagnostics(BaseModel):
+    source: str
+    coverage_pct: float
+    valid_pixels: int
+    total_pixels: int
+    min_m: Optional[float]
+    max_m: Optional[float]
+    mean_m: Optional[float]
+    p95_m: Optional[float]
+    resolution_m: float
+    confidence: float
+    outliers_removed: int
+
+
+class HeightDiagnosticsResponse(BaseModel):
+    providers: List[ProviderDiagnostics]
+    errors: List[str]

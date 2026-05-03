@@ -31,8 +31,7 @@ POST /api/composite/hydrology-merge
 
 from app.server.core.validation import run_sync
 from app.server.core.cache import make_cache_key, osm_cache_key, read_array_cache, write_array_cache, read_osm_cache
-from app.server.schemas import HydrologyMergeRequest, MergeRequest
-from pydantic import BaseModel
+from app.server.schemas import CompositeCityRasterRequest, HydrologyMergeRequest, MergeRequest
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
 import numpy as np
@@ -41,20 +40,6 @@ from city2stl.rasterize import rasterize_composite_layers
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["composite"])
-
-
-class CompositeCityRasterRequest(BaseModel):
-    north:  float
-    south:  float
-    east:   float
-    west:   float
-    width:  int = 512
-    height: int = 512
-    projection: str = "none"
-    clip_nans: bool = True
-    simplify_tolerance: float = 0.5
-    min_area: float = 5.0
-    m_per_level: float = 3.5
 
 
 def _rasterize_city(req: CompositeCityRasterRequest) -> dict:

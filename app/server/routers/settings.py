@@ -15,6 +15,31 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
 
+# ---------------------------------------------------------------------------
+# Schema imports
+# ---------------------------------------------------------------------------
+try:
+    from app.server.schemas import ColormapInfo, DatasetInfo, ProjectionInfo
+except ImportError:
+    from pydantic import BaseModel
+    from typing import Optional
+
+    class ColormapInfo(BaseModel):
+        id: str
+        description: Optional[str] = None
+
+    class DatasetInfo(BaseModel):
+        id: str
+        name: str
+        description: str
+        source: Optional[str] = None
+        requires_auth: bool = False
+
+    class ProjectionInfo(BaseModel):
+        id: str
+        name: str
+        description: str
+
 
 def _model_to_dict(model) -> dict:
     """Return a plain dict for Pydantic v1/v2 model instances."""
@@ -83,31 +108,6 @@ def _list_datasets() -> list[dict]:
         DatasetInfo(id="jrc",       name="JRC Global Surface Water",   description="Water occurrence 1984–2021",          source="JRC/GSW1_4/GlobalSurfaceWater",    requires_auth=True),
     ]
     return [_model_to_dict(d) for d in datasets]
-
-# ---------------------------------------------------------------------------
-# Schema imports
-# ---------------------------------------------------------------------------
-try:
-    from app.server.schemas import ColormapInfo, DatasetInfo, ProjectionInfo
-except ImportError:
-    from pydantic import BaseModel
-    from typing import Optional
-
-    class ColormapInfo(BaseModel):
-        id: str
-        description: Optional[str] = None
-
-    class DatasetInfo(BaseModel):
-        id: str
-        name: str
-        description: str
-        source: Optional[str] = None
-        requires_auth: bool = False
-
-    class ProjectionInfo(BaseModel):
-        id: str
-        name: str
-        description: str
 
 
 # ---------------------------------------------------------------------------

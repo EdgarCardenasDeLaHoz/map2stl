@@ -28,11 +28,20 @@ from app.server.core.validation import (
 from app.server.core.terrain_raster import (
     clamp_esa_scale,
     derive_sat_scale,
-    project_categorical_grid,
-    project_rgb_image,
-    project_scalar_grid,
-    project_water_layers,
 )
+from geo2stl.projections import (
+    project_grid as _geo_project_grid,
+    project_water_arrays as project_water_layers,
+    project_rgb_image,
+)
+
+
+def project_scalar_grid(arr, north, south, east, west, projection, clip_nans):
+    return _geo_project_grid(arr, north, south, east, west, projection, clip_nans, categorical=False)
+
+
+def project_categorical_grid(arr, north, south, east, west, projection, clip_nans):
+    return _geo_project_grid(arr, north, south, east, west, projection, clip_nans, categorical=True)
 from app.server.core.responses import error_response
 from app.server.config import (
     TEST_MODE,
@@ -44,7 +53,7 @@ from app.server.config import (
 from typing import Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, Request, Query, Depends
-from collections import OrderedDict
+from cachetools import LRUCache
 import numpy as np
 import logging
 
@@ -60,8 +69,7 @@ _fetch_satellite_tiles = SAT_LAYER.fetch_satellite_tiles
 # In-memory LRU cache for fully-serialised DEM response dicts.
 # Sits in front of the disk cache so that repeated hot requests skip both
 # the .npz read and the base64 encode step.
-_DEM_MEM_CACHE_MAX = 30
-_dem_mem_cache: OrderedDict = OrderedDict()
+_dem_mem_cache: LRUCache = LRUCache(maxsize=30)
 
 
 def _project_grid(arr, north, south, east, west, projection, clip_nans,
@@ -149,23 +157,22 @@ async def get_terrain_dem(
     Fetch a Digital Elevation Model preview for a bounding box.
     Returns raw elevation values for client-side colormap rendering.
     """
-    params = request.query_params
-
     north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
-    dim = _parse_int(params, "dim", 600)
-    depth_scale = _parse_float(params, "depth_scale", 0.5)
-    water_scale = _parse_float(params, "water_scale", 0.05)
-    subtract_water = _parse_bool(params, "subtract_water", True)
-    show_sat = _parse_bool(params, "show_sat", False)
-    dataset = params.get("dataset", "esa")
-    projection = params.get("projection", "cosine")
-    maintain_dimensions = _parse_bool(params, "maintain_dimensions", True)
-    clip_nans = _parse_bool(params, "clip_nans", False)
-    dem_source = params.get("dem_source", "local")
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
     if err:
         return err
+
+    dim = dim if dim is not None else 600
+    depth_scale = depth_scale if depth_scale is not None else 0.5
+    water_scale = water_scale if water_scale is not None else 0.05
+    subtract_water = subtract_water if subtract_water is not None else True
+    show_sat = show_sat if show_sat is not None else False
+    dataset = dataset or "esa"
+    projection = projection or "cosine"
+    maintain_dimensions = maintain_dimensions if maintain_dimensions is not None else True
+    clip_nans = clip_nans if clip_nans is not None else False
+    dem_source = dem_source or "local"
 
     logger.debug(
         f"GET /api/terrain/dem north={north} south={south} east={east} "
@@ -180,7 +187,6 @@ async def get_terrain_dem(
     })
     if _dem_cache_key in _dem_mem_cache:
         logger.info(f"DEM mem-cache hit: {_dem_cache_key[:8]}...")
-        _dem_mem_cache.move_to_end(_dem_cache_key)  # LRU: mark as recently used
         return JSONResponse(content=_dem_mem_cache[_dem_cache_key])
 
     # --- DEM disk cache check ---
@@ -191,8 +197,6 @@ async def get_terrain_dem(
                                     show_sat, upscale_dim=dim)
         payload["from_cache"] = True
         # Promote to in-memory cache
-        if len(_dem_mem_cache) >= _DEM_MEM_CACHE_MAX:
-            _dem_mem_cache.popitem(last=False)
         _dem_mem_cache[_dem_cache_key] = payload
         return JSONResponse(content=payload)
 
@@ -279,8 +283,6 @@ async def get_terrain_dem(
                  "shape": [height_px, width_px]})
 
         # Promote to in-memory cache for subsequent requests in this server session
-        if len(_dem_mem_cache) >= _DEM_MEM_CACHE_MAX:
-            _dem_mem_cache.popitem(last=False)
         _dem_mem_cache[_dem_cache_key] = response_content
 
         return JSONResponse(content=response_content)
@@ -302,19 +304,18 @@ async def get_terrain_water_mask(
     """Fetch a binary water mask and ESA WorldCover land-cover data."""
     logger.info("Received request for /api/terrain/water-mask")
     try:
-        params = request.query_params
-
         north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
-        dim = _parse_int(params, "dim", 600)
-        water_dataset = params.get("dataset", "esa")
+        water_dataset = dataset or "esa"
         if water_dataset not in ("esa", "jrc"):
             water_dataset = "esa"
-        projection = params.get("projection", "none")
-        clip_nans = _parse_bool(params, "clip_nans", False)
+        projection = projection or "none"
+        clip_nans = clip_nans if clip_nans is not None else False
 
         err = _validate_bbox(north, south, east, west)
         if err:
             return err
+
+        dim = dim if dim is not None else 600
 
         # Derive sat_scale (m/px) from requested dim and bbox size.
         # Scale clamping (50 MB / 32768 px limits) is handled inside fetch_water_mask.
@@ -422,15 +423,15 @@ async def get_terrain_esa_land_cover(
     """Fetch ESA WorldCover land-cover class data independently of the water mask."""
     logger.info("Received request for /api/terrain/esa-land-cover")
     try:
-        params = request.query_params
         north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
-        dim = _parse_int(params, "dim", 600)
-        projection = params.get("projection", "none")
-        clip_nans = _parse_bool(params, "clip_nans", False)
+        projection = projection or "none"
+        clip_nans = clip_nans if clip_nans is not None else False
 
         err = _validate_bbox(north, south, east, west)
         if err:
             return err
+
+        dim = dim if dim is not None else 600
 
         # Derive sat_scale from requested dim and bbox size.
         sat_scale = derive_sat_scale(north or 0.0, south or 0.0, east or 0.0, west or 0.0, dim)
@@ -521,15 +522,15 @@ async def get_terrain_satellite(
     Supports map projection via ``projection`` and ``clip_nans`` query params,
     consistent with all other raster endpoints.
     """
-    params = request.query_params
     north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
-    dim = _parse_int(params, "dim", 600)
-    projection = params.get("projection", "none")
-    clip_nans = _parse_bool(params, "clip_nans", True)
+    projection = projection or "none"
+    clip_nans = clip_nans if clip_nans is not None else True
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
     if err:
         return err
+
+    dim = dim if dim is not None else 600
 
     if TEST_MODE:
         import base64
