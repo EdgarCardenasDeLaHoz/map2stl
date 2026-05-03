@@ -9,7 +9,6 @@ from __future__ import annotations
 from app.server.schemas import CityExportRequest, CityRequest, CityRasterRequest, EnhanceHeightsRequest
 from typing import Any, Dict, List, Optional
 
-import json
 import logging
 
 from fastapi import APIRouter
@@ -45,16 +44,10 @@ def _enhance_city_data(
 # ---------------------------------------------------------------------------
 # Cache helpers
 # ---------------------------------------------------------------------------
-try:
-    from app.server.core.cache import (
-        read_osm_cache, write_osm_cache, osm_cache_key, CACHE_ROOT,
-        make_cache_key, read_array_cache, write_array_cache,
-    )
-    _CACHE_AVAILABLE = True
-except ImportError:
-    _CACHE_AVAILABLE = False
-    read_osm_cache = write_osm_cache = osm_cache_key = CACHE_ROOT = None  # type: ignore
-    make_cache_key = read_array_cache = write_array_cache = None  # type: ignore
+from app.server.core.cache import (
+    read_osm_cache, write_osm_cache, osm_cache_key, CACHE_ROOT,
+    make_cache_key, read_array_cache, write_array_cache,
+)
 
 # ---------------------------------------------------------------------------
 # OSM fetch helper
@@ -84,30 +77,8 @@ except ImportError:
 # Routes
 # ---------------------------------------------------------------------------
 
-def _load_osm_cache(cache_key: str) -> dict | None:
-    """Load OSM data from cache (new .json.gz or legacy .json). Returns None on miss/stale."""
-    if _CACHE_AVAILABLE:
-        return read_osm_cache(cache_key)
-    OSM_CACHE_PATH.mkdir(parents=True, exist_ok=True)
-    legacy_file = OSM_CACHE_PATH / f"{cache_key}.json"
-    if legacy_file.exists():
-        try:
-            return json.loads(legacy_file.read_text())
-        except Exception as e:
-            logger.debug("Legacy OSM cache read failed: %s", e)
-    return None
 
 
-def _save_osm_cache(cache_key: str, data: dict) -> None:
-    """Write OSM data to cache (new .json.gz or legacy .json)."""
-    if _CACHE_AVAILABLE:
-        write_osm_cache(cache_key, data)
-    else:
-        OSM_CACHE_PATH.mkdir(parents=True, exist_ok=True)
-        try:
-            (OSM_CACHE_PATH / f"{cache_key}.json").write_text(json.dumps(data))
-        except Exception as ce:
-            logger.warning("OSM cache write failed: %s", ce)
 
 @router.get("/api/cities/cached")
 async def check_city_cache(
@@ -117,11 +88,7 @@ async def check_city_cache(
 ):
     """Check whether OSM city data for this bbox is already cached locally."""
     key = osm_cache_key(north, south, east, west, simplify_tolerance, min_area, m_per_level)
-    if _CACHE_AVAILABLE:
-        cached = (CACHE_ROOT / "osm" / f"{key}.json.gz").exists()
-    else:
-        OSM_CACHE_PATH.mkdir(parents=True, exist_ok=True)
-        cached = (OSM_CACHE_PATH / f"{key}.json").exists()
+    cached = (CACHE_ROOT / "osm" / f"{key}.json.gz").exists()
     return JSONResponse(content={"cached": cached, "cache_key": key})
 
 
@@ -144,7 +111,7 @@ async def get_city_data(city_req: CityRequest):
                               city_req.m_per_level)
 
     # Cache check
-    cached_data = _load_osm_cache(cache_key)
+    cached_data = read_osm_cache(cache_key)
     if cached_data is not None:
         is_stale = (
             _city_cache_missing_height_source(cached_data)
@@ -158,7 +125,7 @@ async def get_city_data(city_req: CityRequest):
                     cached_data = await run_sync(
                         _enhance_city_data, cached_data, north, south, east, west,
                     )
-                    _save_osm_cache(cache_key, cached_data)
+                    write_osm_cache(cache_key, cached_data)
                 except Exception as exc:
                     logger.warning("Cached city height enhancement failed: %s", exc)
             logger.info("Serving OSM data from cache: %s", cache_key)
@@ -185,7 +152,7 @@ async def get_city_data(city_req: CityRequest):
     result["diagonal_km"] = round(diag_km, 2)
     has_error = any("error" in v for v in result.values() if isinstance(v, dict))
     if not has_error:
-        _save_osm_cache(cache_key, result)
+        write_osm_cache(cache_key, result)
 
     return JSONResponse(content=result)
 
@@ -238,10 +205,10 @@ async def get_city_raster(req: CityRasterRequest):
         "proj": req.projection, "cn": req.clip_nans,
         "tol": req.simplify_tolerance, "a": req.min_area, "mpl": req.m_per_level,
         "roof": int(bool(req.roof_shapes)),
-    }) if make_cache_key else None
+    })
 
     # Cache check
-    if cache_key and read_array_cache:
+    if cache_key:
         cached = read_array_cache("dem", cache_key)
         if cached is not None:
             try:
@@ -265,7 +232,7 @@ async def get_city_raster(req: CityRasterRequest):
     waterways = req.waterways
     _from_cache = False
     if (not buildings.get("features") and not roads.get("features")
-            and not waterways.get("features") and _CACHE_AVAILABLE):
+            and not waterways.get("features")):
         osm_key = osm_cache_key(req.north, req.south, req.east, req.west,
                                 getattr(req, "simplify_tolerance", 3.0),
                                 getattr(req, "min_area", 5.0),
@@ -317,7 +284,7 @@ async def get_city_raster(req: CityRasterRequest):
     result = _sanitize_raster_result(result)
 
     # Cache result
-    if cache_key and write_array_cache:
+    if cache_key:
         try:
             import numpy as np
             write_array_cache("dem", cache_key, {
@@ -360,7 +327,7 @@ async def export_city_3mf(req: CityExportRequest):
 
     # Resolve buildings from OSM cache when not provided
     buildings = req.buildings
-    if (not buildings or not buildings.get("features")) and _CACHE_AVAILABLE:
+    if (not buildings or not buildings.get("features")):
         osm_key = osm_cache_key(req.north, req.south, req.east, req.west,
                                 getattr(req, "simplify_tolerance", 3.0),
                                 getattr(req, "min_area", 5.0),
@@ -437,7 +404,7 @@ async def enhance_heights(req: EnhanceHeightsRequest):
 
     # Resolve buildings from OSM cache when not provided
     buildings = req.buildings
-    if (not buildings or not buildings.get("features")) and _CACHE_AVAILABLE:
+    if (not buildings or not buildings.get("features")):
         osm_key = osm_cache_key(req.north, req.south, req.east, req.west,
                                 getattr(req, "simplify_tolerance", 3.0),
                                 getattr(req, "min_area", 5.0),

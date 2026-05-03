@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
 from geo2stl.dem import (
-    fetch_layer_data as _fetch_layer_data,
+    fetch_dem_from_source as _fetch_dem_from_source,
     fetch_local_dem as _fetch_local_dem,
     make_dem_payload as _make_dem_payload,
     upsample_dem as _upsample_dem,
@@ -102,35 +102,6 @@ def _make_local_dem(north, south, east, west, dim, depth_scale, water_scale,
         subtract_water=subtract_water,
         maintain_dimensions=maintain_dimensions,
     )
-
-
-def _fetch_dem_array(dem_source, north, south, east, west, dim,
-                     depth_scale, water_scale,
-                     subtract_water, projection, maintain_dimensions,
-                     clip_nans):
-    """
-    Fetch a DEM array from the specified source. Sync â€” call via run_in_executor.
-
-    Routing:
-      h5_local or any OPENTOPO_DATASETS key â†’ _fetch_layer_data (handles h5â†’SRTMGL3 fallback)
-      "local" or unknown                    â†’ _make_local_dem (local SRTM tiles)
-    """
-    if dem_source in ("h5_local", *OPENTOPO_DATASETS):
-        return _fetch_layer_data(dem_source, north, south, east, west, dim)
-
-    try:
-        return _make_local_dem(north, south, east, west, dim, depth_scale,
-                               water_scale, subtract_water,
-                               projection, maintain_dimensions, clip_nans)
-    except Exception as dem_err:
-        logger.warning(f"Local DEM failed: {dem_err}, returning zeros")
-        lat_r = abs(north - south)
-        lon_r = abs(east - west)
-        if lat_r > lon_r:
-            mh, mw = dim, max(1, int(dim * lon_r / lat_r))
-        else:
-            mw, mh = dim, max(1, int(dim * lat_r / lon_r))
-        return np.zeros((mh, mw), dtype=float)
 
 
 # ---------------------------------------------------------------------------
@@ -221,11 +192,11 @@ async def get_terrain_dem(
         west, east = -0.01, 0.01
 
     try:
-        im = await run_sync(_fetch_dem_array, dem_source,
+        im = await run_sync(_fetch_dem_from_source, dem_source,
                             north, south, east, west, dim,
-                            depth_scale, water_scale,
-                            subtract_water, projection, maintain_dimensions,
-                            clip_nans)
+                            depth_scale=depth_scale, water_scale=water_scale,
+                            subtract_water=subtract_water,
+                            maintain_dimensions=maintain_dimensions)
         im = _upsample_dem(im, dim)
 
         # Apply projection uniformly for ALL sources.
