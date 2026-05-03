@@ -32,11 +32,18 @@ from typing import Optional
 import cv2 as _cv2
 import numpy as np
 import requests as _requests
-from numpy2stl.oceans import make_dem_image
 from geo2stl.sat2stl import fetch_bbox_image
 from geo2stl.geo2stl import stitch_tiles_no_rasterio
-from geo2stl.projections import project_grid
+from geo2stl.projections import project_grid, project_coordinates
 from geo2stl.processing import apply_layer_processing, blend_layers, upsample_dem  # noqa: F401
+try:
+    from skimage import filters as _ski_filters
+except ImportError:
+    _ski_filters = None
+try:
+    from geo2stl.sat2stl import get_aquatic_regions as _get_aquatic_regions
+except ImportError:
+    _get_aquatic_regions = None
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +131,95 @@ def fetch_layer_data(
         return fetch_local_dem(north, south, east, west, dim)
 
 
+def make_dem_image(
+    target_bbox,
+    dim=600,
+    depth_scale=0.5,
+    sat_scale=400,
+    water_scale=0.1,
+    base=0.1,
+    height=25,
+    subtract_water=True,
+    water_dataset="esa",
+    clip=None,
+    smooth=None,
+    projection="cosine",
+    maintain_dimensions=True,
+    clip_nans=False,
+):
+    """Create a processed DEM array from a geographic bounding box.
+
+    Stitches local SRTM tiles, optionally subtracts water bodies, applies a
+    map projection and resizes to *dim* pixels on the longest axis.
+
+    Migrated from numpy2stl/oceans.py — all dependencies are in geo2stl.
+    """
+    N, S, E, W = target_bbox
+    result = stitch_tiles_no_rasterio(target_bbox)
+    im = result.copy() * 1.0
+
+    # Scale sub-zero (ocean / below-sea-level) values
+    im[im < 0] = im[im < 0] * depth_scale
+
+    if subtract_water:
+        if water_dataset == "esa":
+            _ee_max_px = 50_331_648 // 2
+            mid_lat = (N + S) / 2.0
+            _w_m = abs(E - W) * 111_320 * math.cos(math.radians(mid_lat))
+            _h_m = abs(N - S) * 111_320
+            min_safe = int(math.ceil(math.sqrt(_w_m * _h_m / _ee_max_px)))
+            sat_scale = max(sat_scale, min_safe)
+            try:
+                sat = fetch_bbox_image(N, S, E, W, scale=sat_scale, dataset="esa")
+                if sat is not None:
+                    sat = np.array(sat).clip(0, 100)
+                    water = 1.0 * ((sat == 80) | (sat == 0))
+                    if _ski_filters is not None:
+                        water = _ski_filters.median(water, np.ones((3, 3)))
+                    h_im, w_im = im.shape
+                    water = _cv2.resize(water, (w_im, h_im), interpolation=_cv2.INTER_LINEAR)
+                    water = water * np.ptp(im.ravel()) * water_scale
+                    im = im - water
+            except Exception as exc:
+                logger.warning("Could not process ESA water data: %s", exc)
+        elif water_dataset == "jrc" and _get_aquatic_regions is not None:
+            try:
+                target_dim = min(max(im.shape[0], im.shape[1]), 500)
+                img = _get_aquatic_regions(N, S, E, W, dataset="jrc", scale=None, target_dim=target_dim)
+                if img is not None:
+                    img2 = img.copy().astype(np.uint8)
+                    if _ski_filters is not None:
+                        img2 = _ski_filters.median(img2, np.ones((3, 3)))
+                    img2 = _cv2.resize(img2, (im.shape[1], im.shape[0]),
+                                       interpolation=_cv2.INTER_LINEAR).astype(int)
+                    img2[im < 0] = 200
+                    img2[im > 500] = 0
+                    img2 = (img2 / 100).clip(0, 1)
+                    im = im - img2 * np.ptp(im.ravel()) * water_scale
+            except Exception as exc:
+                logger.warning("Could not process JRC water data: %s", exc)
+    else:
+        im[im > 0] = im[im > 0] + np.ptp(im.ravel()) * water_scale
+
+    if projection != "none":
+        im, _ = project_coordinates(
+            im,
+            (N, S, E, W),
+            projection=projection,
+            maintain_dimensions=maintain_dimensions,
+            fill_value=np.nan,
+            clip_nans=clip_nans,
+        )
+
+    if dim:
+        h, w = im.shape
+        scale = dim / max(h, w)
+        new_size = (int(w * scale), int(h * scale))
+        im = _cv2.resize(im, new_size, interpolation=_cv2.INTER_LINEAR)
+
+    return im
+
+
 def fetch_local_dem(
     north: float, south: float, east: float, west: float, dim: int,
     *,
@@ -138,25 +234,15 @@ def fetch_local_dem(
     elevation can ignore them (defaults match the old behaviour).
     """
     target_bbox = (north, south, east, west)
-    try:
-        im = make_dem_image(
-            target_bbox, dim=dim,
-            depth_scale=depth_scale,
-            water_scale=water_scale,
-            subtract_water=subtract_water,
-            projection="none",
-            maintain_dimensions=maintain_dimensions,
-            clip_nans=False,
-        )
-    except TypeError:
-        # Older numpy2stl without clip_nans kwarg
-        im = make_dem_image(
-            target_bbox, dim=dim,
-            depth_scale=depth_scale,
-            water_scale=water_scale,
-            subtract_water=subtract_water,
-            maintain_dimensions=maintain_dimensions,
-        )
+    im = make_dem_image(
+        target_bbox, dim=dim,
+        depth_scale=depth_scale,
+        water_scale=water_scale,
+        subtract_water=subtract_water,
+        projection="none",
+        maintain_dimensions=maintain_dimensions,
+        clip_nans=False,
+    )
     return np.nan_to_num(im, nan=0.0).astype(np.float64)
 
 
