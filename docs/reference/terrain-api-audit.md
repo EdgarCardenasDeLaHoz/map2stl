@@ -1,16 +1,21 @@
 # Terrain API Call Stack Audit
 
-_Last updated: 2026-04-24_
+_Last updated: 2026-05-03_
 
-Audit of every endpoint in the terrain and composite routers, tracing each call stack from HTTP handler through core modules to external library functions.
+Audit of every endpoint in the terrain and composite routers, tracing each call stack from HTTP handler through core modules and library functions to external data sources.
 
 **Post-audit changes applied:**
+**Post-audit changes (passes 2026-04 → 2026-05):**
 - `/api/terrain/dem/raw` — **removed** (inferior duplicate of `/api/terrain/dem`, unused by frontend)
 - `/api/export/preview` alias in terrain.py — **removed** (was shadowing the real handler in export.py; 3D viewer now works)
 - `/api/dem/merge` — **moved** to `/api/composite/dem-merge` (composite router)
 - `/api/terrain/hydrology/merge` — **moved** to `/api/composite/hydrology-merge` with Pydantic schema + b64 response
 - `/api/terrain/esa-land-cover` — **fixed** to call `fetch_water_mask_images()` directly (no longer fetches+discards SRTM/water mask)
-- `_fetch_and_rasterize_hydrology()` — **moved** from router to `core/hydrology.py`
+- `_fetch_and_rasterize_hydrology()` — **moved** from router to `geo2stl.hydrology`
+- `_fetch_dem_array()` — **removed** from terrain router; replaced by `geo2stl.dem.fetch_dem_from_source()` directly
+- `_CACHE_AVAILABLE` guard pattern — **removed** from cities router; cache always available, imported unconditionally
+- `_load_osm_cache()` / `_save_osm_cache()` wrappers — **removed** from cities router; direct `read_osm_cache()`/`write_osm_cache()` calls
+- `core/terrain_raster.py` + `core/osm_cache_policy.py` — converted to **deprecated compatibility wrappers**; implementations live in `geo2stl.raster` and `city2stl.cache_policy`
 
 ---
 
@@ -43,41 +48,38 @@ Audit of every endpoint in the terrain and composite routers, tracing each call 
 
 ```
 get_terrain_dem()
-├── validation.parse_float/parse_int/parse_bool()    — parse query params
-├── validation.validate_bbox() + validate_dim()      — bounds check
-├── cache.make_cache_key("dem", ...)                  — hash params
-├── cache.read_array_cache("dem", key)                — disk cache lookup (.npz)
-│   └── [HIT] → dem.make_dem_payload() → return
+├── validation.parse_bbox_query() + validate_bbox() + validate_dim()   — core.validation
+├── cache.make_cache_key("dem", ...)                                    — core.cache
+├── cache.read_array_cache("dem", key)                                  — core.cache
+│   └── [HIT] → geo2stl.dem.make_dem_payload() → return
 ├── [TEST_MODE] → np.linspace() gradient
-│   └── projection.project_grid()                     — geo2stl.projections.project_coordinates()
-│   └── dem.make_dem_payload()
-├── run_sync(_fetch_dem_array, ...)                   — thread pool
-│   ├── _fetch_dem_array()                            — router-level dispatcher
-│   │   ├── [h5_local / OPENTOPO key] → dem.fetch_layer_data()
-│   │   │   ├── "h5_local" → dem.fetch_h5_dem()      — h5py tile reader
-│   │   │   │   └── fallback → dem.fetch_opentopo_dem() — HTTP + rasterio
-│   │   │   ├── OPENTOPO key → dem.fetch_opentopo_dem()
-│   │   │   │   └── requests.get(portal.opentopography.org) + rasterio
-│   │   │   ├── "water_esa" → dem.fetch_esa_water_layer()
-│   │   │   │   └── geo2stl.sat2stl.fetch_bbox_image() + cv2.resize
-│   │   │   └── default → dem.fetch_local_dem()
-│   │   └── [local/unknown] → _make_local_dem()
-│   │       └── dem.fetch_local_dem()
-│   │           └── numpy2stl.oceans.make_dem_image() — SRTM tile stitching
-├── dem.upsample_dem()                                — cv2.resize if native < dim
-├── projection.project_grid()                         — geo2stl.projections.project_coordinates()
-├── dem.make_dem_payload()                            — b64 encode + stats
-├── [show_sat] → run_sync(sat.fetch_sat_overlay, ...)
-│   └── sat.fetch_sat_overlay()
-│       └── geo2stl.sat2stl.fetch_bbox_image()
-│       └── geo2stl.sat2stl.calculate_scale_for_dimensions()
-│       └── cv2.resize
-│   └── projection.project_grid(categorical=True)     — nearest-neighbour for class IDs
-└── cache.write_array_cache("dem", ...)               — persist to .npz
+│   └── geo2stl.projections.project_grid()
+│   └── geo2stl.dem.make_dem_payload()
+├── run_sync(geo2stl.dem.fetch_dem_from_source, ...)                    — thread pool
+│   └── fetch_dem_from_source(source, N,S,E,W, dim, **kw)
+│       ├── "h5_local" → geo2stl.dem.fetch_h5_dem()                    — h5py tile reader
+│       │   └── fallback → geo2stl.dem.fetch_opentopo_dem()             — HTTP + rasterio
+│       ├── OPENTOPO key → geo2stl.dem.fetch_opentopo_dem()
+│       │   └── requests.get(portal.opentopography.org) + rasterio
+│       ├── "water_esa" → geo2stl.dem.fetch_esa_water_layer()
+│       │   └── geo2stl.sat2stl.fetch_bbox_image() + cv2.resize
+│       ├── "local" → geo2stl.dem.fetch_local_dem()
+│       │   └── geo2stl.tiles.stitch_tiles_no_rasterio()               — SRTM tile stitch
+│       └── projection applied inside fetch_dem_from_source
+│           └── geo2stl.projections.project_grid()
+├── geo2stl.dem.upsample_dem()                                          — cv2.resize if native < dim
+├── geo2stl.dem.make_dem_payload()                                      — b64 encode + stats
+├── [show_sat] → run_sync(geo2stl.sat2stl.fetch_sat_overlay, ...)
+│   ├── geo2stl.raster.derive_sat_scale(bbox, dim)                     — scale math
+│   ├── geo2stl.sat2stl.fetch_sat_overlay()
+│   │   └── geo2stl.sat2stl.fetch_bbox_image()
+│   │   └── geo2stl.sat2stl.calculate_scale_for_dimensions()
+│   └── geo2stl.projections.project_rgb_image()
+└── cache.write_array_cache("dem", ...)                                 — core.cache
 
 Classes/objects: None (all free functions)
-Core modules: dem, sat, projection, cache, validation, config
-Libraries: numpy2stl.oceans, geo2stl.sat2stl, geo2stl.projections, h5py, rasterio, cv2, requests
+Modules: geo2stl.dem, geo2stl.sat2stl, geo2stl.projections, geo2stl.raster, geo2stl.tiles, core.cache, core.validation
+Libraries: h5py, rasterio, cv2, requests
 ```
 
 ---
@@ -96,31 +98,29 @@ Dropped: inferior duplicate of `/api/terrain/dem` with hardcoded projection, no 
 
 ```
 get_terrain_water_mask()
-├── validation.parse_float/parse_int/parse_bool()
-├── validation.validate_bbox()
-├── cache.make_cache_key("water", ...)
-├── cache.read_array_cache("water", key)
+├── core.validation.parse_bbox_query() + validate_bbox()
+├── geo2stl.raster.clamp_esa_scale(bbox, dim)           — scale math
+├── core.cache.make_cache_key("water", ...)
+├── core.cache.read_array_cache("water", key)
 │   └── [HIT] → b64 encode both arrays → return
 ├── [TEST_MODE] → synthetic water block
-│   └── projection.project_water_arrays()
-│       └── 2x geo2stl.projections.project_coordinates()
-├── run_sync(sat.fetch_water_mask, ...)
-│   └── sat.fetch_water_mask()
+│   └── geo2stl.projections.project_water_arrays()
+├── run_sync(geo2stl.sat2stl.fetch_water_mask, ...)
+│   └── fetch_water_mask()
 │       ├── scale auto-clamping (50MB + 32768px limits)
-│       ├── sat.fetch_water_mask_images()
-│       │   ├── geo2stl.sat2stl.fetch_bbox_image(dataset="esa")
-│       │   ├── [jrc] → geo2stl.sat2stl.fetch_bbox_image(dataset="jrc")
-│       │   └── geo2stl.geo2stl.stitch_tiles_no_rasterio() — SRTM for bathymetry
+│       ├── geo2stl.sat2stl.fetch_water_mask_images()
+│       │   ├── geo2stl.sat2stl.fetch_bbox_image(dataset="esa")  — Earth Engine
+│       │   ├── [jrc] → geo2stl.sat2stl.fetch_bbox_image(dataset="jrc") — Earth Engine
+│       │   └── geo2stl.tiles.stitch_tiles_no_rasterio()          — SRTM for bathymetry
 │       ├── [jrc] → JRC threshold (>50) → water_mask
 │       ├── [esa] → ESA class 80 → water_mask
 │       └── [bbox > 30km] → SRTM bathymetry augmentation (elev < -2)
-├── projection.project_water_arrays()                — dual-array aligned projection
-│   └── 2x geo2stl.projections.project_coordinates()
-└── cache.write_array_cache("water", ...)
+├── geo2stl.projections.project_water_arrays()       — dual-array aligned projection
+└── core.cache.write_array_cache("water", ...)
 
 Classes/objects: None
-Core modules: sat, projection, cache, validation
-Libraries: geo2stl.sat2stl, geo2stl.geo2stl, geo2stl.projections, cv2
+Modules: geo2stl.sat2stl, geo2stl.projections, geo2stl.raster, geo2stl.tiles, core.cache, core.validation
+Libraries: cv2, Earth Engine API
 ```
 
 ---
@@ -129,27 +129,27 @@ Libraries: geo2stl.sat2stl, geo2stl.geo2stl, geo2stl.projections, cv2
 
 **Handler**: `get_terrain_esa_land_cover()` (line 488)
 
-**Scale parameter (updated):** Same as water-mask — query accepts `dim` (pixels per side), handler computes `sat_scale` from bbox + dim. Response includes `resolution_m`.
+**Scale parameter:** Same as water-mask — query accepts `dim` (pixels per side), handler computes `sat_scale` from bbox + dim via `geo2stl.raster.clamp_esa_scale()`. Response includes `resolution_m`.
 
 ```
 get_terrain_esa_land_cover()
-├── validation.parse_float/parse_int/parse_bool()
-├── validation.validate_bbox()
-├── cache.make_cache_key("esa_lc", ...)
-├── cache.read_array_cache("esa_lc", key)
+├── core.validation.parse_bbox_query() + validate_bbox()
+├── geo2stl.raster.clamp_esa_scale(bbox, dim)
+├── core.cache.make_cache_key("esa_lc", ...)
+├── core.cache.read_array_cache("esa_lc", key)
 │   └── [HIT] → b64 encode → return
 ├── [TEST_MODE] → uniform class array
-│   └── projection.project_grid(categorical=True)
-├── run_sync(sat.fetch_water_mask, ..., "esa")        ← REUSES water mask fetch
-│   └── sat.fetch_water_mask()                         — discards water_mask (_wm), keeps img
-│       └── (same stack as #3 above)
-├── projection.project_grid(categorical=True)
+│   └── geo2stl.projections.project_grid(categorical=True)
+├── run_sync(geo2stl.sat2stl.fetch_water_mask, ..., "esa")  ← reuses water mask fetch path
+│   └── fetch_water_mask() — discards water_mask (_wm), keeps esa img
+│       └── (same stack as water-mask above)
+├── geo2stl.projections.project_grid(categorical=True)
 │   └── geo2stl.projections.project_coordinates(order=0)
-└── cache.write_array_cache("esa_lc", ...)
+└── core.cache.write_array_cache("esa_lc", ...)
 
 Classes/objects: None
-Core modules: sat, projection, cache, validation
-Libraries: geo2stl.sat2stl, geo2stl.geo2stl, geo2stl.projections
+Modules: geo2stl.sat2stl, geo2stl.projections, geo2stl.raster, core.cache, core.validation
+Libraries: Earth Engine API
 ```
 
 **Note**: Fixed — now calls `fetch_water_mask_images()` directly with scale-clamping guards, skipping the water mask + SRTM bathymetry pipeline entirely.

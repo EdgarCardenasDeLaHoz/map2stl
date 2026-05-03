@@ -6,6 +6,8 @@ The app server delegates heavy computation to support libraries. Core modules sh
 
 > Principle: app/server/core/ is an API adapter around geo2stl, city2stl, and numpy2stl.
 
+> **Current architecture (2026-05):** Routers import directly from `geo2stl` and `city2stl` for domain logic. `core/` handles server-side concerns only (cache, DB, export, validation, responses, building-height orchestration). Two deprecated compatibility wrappers (`core/terrain_raster.py`, `core/osm_cache_policy.py`) re-export from the library layer and will be removed.
+
 ---
 
 ## Library Overview
@@ -13,18 +15,18 @@ The app server delegates heavy computation to support libraries. Core modules sh
 ```mermaid
 flowchart LR
     subgraph Server ["app/server/core/"]
-        DEM["dem.py"]
+        CACHE["cache.py<br/>cache_inspector.py"]
         EXP["export.py"]
         HEIGHT["height/train.py"]
     end
 
     subgraph Libs ["Support Libraries"]
-        GEO["geo2stl/<br/>projections, tiles,<br/>DEM/sat/hydrology helpers"]
+        GEO["geo2stl/<br/>dem.py, projections.py, raster.py<br/>tiles.py, sat2stl.py, hydrology.py"]
         CITY["city2stl/<br/>height providers,<br/>OSM/city mesh"]
         NUMPY["numpy2stl/<br/>mesh generation"]
     end
 
-    DEM --> GEO
+    CACHE --> GEO
     HEIGHT --> CITY
     EXP --> NUMPY
 ```
@@ -37,18 +39,24 @@ flowchart LR
 
 | Core module | Library | Import | Purpose |
 |---|---|---|---|
-| dem.py | geo2stl.dem | fetch_layer_data, fetch_local_dem, ... | DEM/data layer fetch + processing via shim |
 | export.py | numpy2stl | array_to_mesh, writeOBJ, write3MF | Mesh generation and writers |
+| height/service.py | city2stl.height.* | merge_height_rasters, provider classes | Height provider orchestration |
 | height/train.py | city2stl.height.train | train helpers | Training shim + server-specific tile collector |
+| terrain_raster.py ⚠️ | geo2stl.raster | bbox_longer_side_m, clamp_esa_scale, derive_sat_scale | **Deprecated wrapper** — import from geo2stl.raster directly |
+| osm_cache_policy.py ⚠️ | city2stl.cache_policy | building_features, city_cache_* | **Deprecated wrapper** — import from city2stl.cache_policy directly |
 
 ### routers -> libraries (intentional direct use)
 
 | Router | Library | Import | Note |
 |---|---|---|---|
-| routers/terrain.py | geo2stl.hydrology | HYDROLOGY_LAYER | Uses class-based hydrology service object |
-| routers/terrain.py | geo2stl.sat | SAT_LAYER | Uses class-based satellite service object |
-| routers/terrain.py | geo2stl.projections | project_grid, project_water_arrays, project_rgb_image | Projection helpers now imported directly from geo2stl |
-| routers/cities.py | city2stl.fetch/rasterize/mesh/heights | fetch_osm_data, rasterize_city_data, generate_city_3mf, enhance_buildings_with_raster | City pipeline endpoints |
+| routers/terrain.py | geo2stl.dem | fetch_dem_from_source | Primary DEM dispatcher — was `_fetch_dem_array` in router, now library function |
+| routers/terrain.py | geo2stl.raster | clamp_esa_scale, derive_sat_scale | Scale math helpers |
+| routers/terrain.py | geo2stl.projections | project_grid, project_water_arrays, project_rgb_image | Projection helpers |
+| routers/terrain.py | geo2stl.hydrology | HYDROLOGY_LAYER | Hydrology service |
+| routers/terrain.py | geo2stl.sat2stl | fetch_water_mask, fetch_satellite_tiles | ESA/WMTS satellite data |
+| routers/cities.py | city2stl.cache_policy | read_osm_cache, write_osm_cache, osm_cache_key, ... | OSM cache I/O (imported directly, not via wrapper) |
+| routers/cities.py | city2stl.rasterize | rasterize_composite_layers | OSM rasterization |
+| routers/cities.py | geo2stl.projections | project_city_raster | City raster projection |
 | routers/settings.py | geo2stl.projections | get_projection_info | Projection metadata endpoint |
 
 ### session -> libraries
@@ -63,12 +71,13 @@ terrain_session.py is primarily an HTTP client. It also imports city2stl provide
 
 | Module | Key functions |
 |---|---|
-| dem.py | fetch_layer_data, fetch_local_dem, fetch_h5_dem, compute_raw_dem |
-| sat.py | SAT_LAYER, fetch_satellite_tiles, fetch_water_mask, fetch_sat_overlay, fetch_bbox_image |
-| sat2stl.py | compatibility shim -> geo2stl.sat |
-| projections.py | get_projection_info, project_coordinates, project_grid |
+| dem.py | fetch_dem_from_source, fetch_layer_data, fetch_local_dem, fetch_h5_dem, fetch_opentopo_dem, compute_raw_dem, upsample_dem, make_dem_payload |
+| raster.py | bbox_longer_side_m, clamp_esa_scale, derive_sat_scale |
+| projections.py | get_projection_info, project_coordinates, project_grid, project_water_arrays, project_rgb_image, project_city_raster |
+| sat2stl.py | fetch_bbox_image, fetch_sat_overlay, fetch_satellite_tiles, fetch_water_mask, fetch_water_mask_images, calculate_scale_for_dimensions |
 | hydrology.py | HYDROLOGY_LAYER, fetch_and_rasterize_hydrology, merge_rivers_with_dem |
 | hydrorivers.py | HydroRIVERS backend helpers used by hydrology service |
+| tiles.py | stitch_tiles_no_rasterio, tile coordinate helpers |
 | write.py | save_im, save_stl, savefile (mostly notebook/offline helpers) |
 
 ### numpy2stl/
@@ -94,11 +103,13 @@ terrain_session.py is primarily an HTTP client. It also imports city2stl provide
 
 | Module | Status | Notes |
 |---|---|---|
-| core/dem.py | Clean | Pure compatibility shim into geo2stl.dem |
+| core/terrain_raster.py | ⚠️ Deprecated | 9-line wrapper — re-exports from geo2stl.raster; import source directly |
+| core/osm_cache_policy.py | ⚠️ Deprecated | 19-line wrapper — re-exports from city2stl.cache_policy; import source directly |
+| core/height/service.py | Active | Height provider orchestration; server-side logic (cache, DB, task management) stays here |
 | core/height/train.py | Mixed | Re-exports training helpers + server-specific collect_tiles() |
-| core/export.py | Clean | Correctly remains in core due to HTTP concerns (task lifecycle, responses, headers, temp files); mesh ops delegated to numpy2stl |
-
-No active library-boundary debt is currently tracked here.
+| core/export.py | Active | HTTP concerns (task lifecycle, responses, headers, temp files); mesh ops delegated to numpy2stl |
+| core/cache.py | Active | Cache key generation, array cache I/O, SQLite; server-side concern |
+| core/cache_inspector.py | Active | Filesystem tree/metadata helpers extracted from routers/cache.py |
 
 ---
 

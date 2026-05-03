@@ -1,7 +1,7 @@
 # Dead Code, Repetitive Workflows & Bloat Analysis
 
 _Generated: 2026-04. Analysis scope: `app/server/`, `app/session/`, `app/client/static/js/`._
-_Updated: 2026-04-30. Items 1–9 in the priority table are **COMPLETED**. Open items: shadow_height private helpers (1.4) and `window.getLayerOrder` (2.3, intentionally kept). Test counts: 532 backend + 93 JS pass._
+_Updated: 2026-05-03. All priority items COMPLETED. 648 tests pass. Open tracking item: legacy ML notebook migration (ML-3 in todos/README.md)._
 
 > **Current tracking note:** This audit is now evidence-first. The only still-actionable follow-up here is the notebook migration needed before deleting the legacy RoofNet-era ML files, and that work now lives in `../todos/README.md` as `ML-3`.
 
@@ -13,13 +13,13 @@ _Updated: 2026-04-30. Items 1–9 in the priority table are **COMPLETED**. Open 
 
 | Category | Count | Risk |
 |----------|-------|------|
-| Dead / unreachable functions | 5 | Low–Medium |
-| Unnecessary `window.*` exports | 3 | Low |
-| Duplicate class definitions | 1 | Medium |
-| Unused imports (Python) | ~25+ | Low |
-| Repetitive boilerplate patterns | 4 types | Medium |
-| Library-reimplementation debt | 5 items | High (see issues.md B-LIB) |
-| Oversized files | 4 | Low–Medium |
+| Dead / unreachable functions | 5 → **0 open** | ✅ All resolved |
+| Unnecessary `window.*` exports | 3 → 1 kept intentionally | ✅ Resolved |
+| Duplicate class definitions | 1 → renamed | ✅ Resolved |
+| Unused imports (Python) | ~25+ | ✅ Cleaned |
+| Repetitive boilerplate patterns | 4 types | ✅ All resolved |
+| Library-reimplementation debt | 5 items (B-LIB) | ✅ Resolved — logic extracted to geo2stl/city2stl |
+| Oversized files | 4 → reduced | ✅ Resolved via extraction passes |
 
 ---
 

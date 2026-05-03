@@ -1,6 +1,6 @@
 # Architecture — strm2stl
 
-_Last updated: 2026-04-30_
+_Last updated: 2026-05-03_
 
 ## Single-Page Architecture
 
@@ -29,7 +29,9 @@ flowchart LR
     APP --> MAIN["main.js"]
     MAIN --> MODS["modules/<br/>30 ES modules"]
     MODS -->|"fetch /api/*"| ROUTERS["FastAPI<br/>routers/"]
-    ROUTERS --> CORE["core/<br/>business logic"]
+    ROUTERS --> CORE["core/<br/>cache · export · validation · height"]
+    ROUTERS --> GEO["geo2stl/<br/>dem · projections · raster · tiles · sat2stl"]
+    ROUTERS --> CITY["city2stl/<br/>cache_policy · rasterize · heights"]
     SESSION["TerrainSession"] -->|HTTP| ROUTERS
     NB["notebooks/"] --> SESSION
 ```
@@ -38,11 +40,11 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    CORE["core/"] --> OT["OpenTopography<br/>DEM tiles"]
-    CORE --> EE["Earth Engine<br/>ESA / JRC"]
-    CORE --> OSM["Overpass API<br/>OSM buildings"]
-    CORE --> G3D["Google 3D Tiles"]
-    CORE --> USGS["USGS 3DEP"]
+    GEO["geo2stl/"] --> OT["OpenTopography<br/>DEM tiles"]
+    GEO --> EE["Earth Engine<br/>ESA / JRC"]
+    CITY["city2stl/"] --> OSM["Overpass API<br/>OSM buildings"]
+    CITY --> G3D["Google 3D Tiles<br/>building heights"]
+    CITY --> USGS["USGS 3DEP<br/>LiDAR heights"]
 ```
 
 ### Frontend Module Groups
@@ -199,21 +201,17 @@ app/
 │   ├── schemas.py   — all ~30 Pydantic models
 │   ├── config.py    — paths, OPENTOPO_DATASETS, TEST_MODE, API keys
 │   ├── core/
-│   │   ├── dem.py        — fetch_layer_data, apply_layer_processing, blend_layers
-│   │   ├── export.py     — generate_stl/obj/3mf/crosssection
-│   │   ├── cache.py      — write/read_array_cache (.npz), write/read_osm_cache (.json.gz), prune
-│   │   ├── db.py         — get_db, init_db, WAL mode (SQLite)
-│   │   ├── osm.py        — fetch_osm_data, _fill_building_heights, _get_road_width_m
-│   │   ├── cities_3d.py  — generate_city_3mf, 3D building mesh
-│   │   ├── hydrorivers.py — HydroRIVERS shapefile loading + simplification
-│   │   ├── hydrology.py  — river depression grid rasterization
-│   │   ├── sat.py        — satellite imagery fetch (ESRI + Earth Engine)
-│   │   ├── projection.py — CRS transforms, coordinate utils
-│   │   ├── validation.py — input validation helpers
-│   │   ├── responses.py  — standardized API response builders
-│   │   └── height/       — building height estimation package
-│   │       ├── __init__.py     — HeightResult, HeightProvider, merge_height_rasters()
-│   │       └── providers/      — wsf3d, google_3d, copernicus, ndsm, lidar_3dep
+│   │   ├── cache.py          — make_cache_key, write/read_array_cache (.npz), write/read_osm_cache (.json.gz), prune
+│   │   ├── cache_inspector.py — build_tree_node, build_region_tree, flatten_files (cache UI helpers)
+│   │   ├── export.py         — generate_stl/obj/3mf/crosssection (delegates to numpy2stl)
+│   │   ├── db.py             — get_db, init_db, WAL mode (SQLite)
+│   │   ├── validation.py     — parse_bbox_query, validate_bbox/dim, run_sync, model_to_dict
+│   │   ├── responses.py      — error_response() builder
+│   │   ├── terrain_raster.py — [compat wrapper → geo2stl.raster]
+│   │   ├── osm_cache_policy.py — [compat wrapper → city2stl.cache_policy]
+│   │   └── height/           — building height orchestration
+│   │       ├── service.py    — RegisteredProvider, provider registry, cache I/O, enhance_city_data
+│   │       └── train.py      — training utilities
 │   └── routers/
 │       ├── terrain.py    — /api/terrain/*
 │       ├── regions.py    — /api/regions/* (SQLite-first, JSON fallback)
@@ -233,14 +231,30 @@ app/
 ```
 
 ### Key Backend Rules
-- Business logic in `core/`, request handling in `routers/`
+The backend is a three-layer stack:
+
+```mermaid
+flowchart TD
+    R["routers/ — HTTP adapters<br/>parse requests, call core/library, format responses"]
+    C["core/ — server-side coordination<br/>cache I/O, export generation, height service"]
+    L["geo2stl/ + city2stl/ — domain libraries<br/>DEM fetch, projection, rasterize, cache policy"]
+    R --> C
+    R --> L
+    C --> L
+```
+
+- Routers are **thin HTTP adapters**: validate input, delegate, format response
+- `core/` handles **server-side concerns** (disk cache, SQLite, export, height provider orchestration)
+- `geo2stl/` and `city2stl/` are **domain libraries** reusable without the server (notebooks, scripts)
+- Routers import from libraries **directly** where logic belongs in the library layer
+- `core/terrain_raster.py` and `core/osm_cache_policy.py` are **deprecated compatibility wrappers** — use `geo2stl.raster` and `city2stl.cache_policy` instead
 - Never use `os.chdir()` in handlers — process-global, causes data races
 - See `../CLAUDE.md` for async/executor constraints and full editing guidelines
 <!-- Note: CLAUDE.md lives outside docs/; this link works on GitHub but not MkDocs -->
 
 ### numpy2stl Delegation Pattern
 
-`core/cities_3d.py` and `core/export.py` delegate to `numpy2stl` with availability guards — the library is tried first and a manual fallback runs if unavailable.
+`core/export.py` delegates to `numpy2stl` with availability guards — the library is tried first and a manual fallback runs if unavailable.
 
 ```mermaid
 flowchart TD
@@ -321,7 +335,7 @@ Use it when the workflow is notebook-driven or when a script needs to reproduce 
 
 The shortest example path is:
 
-`notebooks/API_Terrain.ipynb` → `app/session/terrain_session.py` → router in `app/server/routers/` → processing in `app/server/core/`
+`notebooks/API_Terrain.ipynb` → `app/session/terrain_session.py` → router in `app/server/routers/` → `app/server/core/` or `geo2stl/` / `city2stl/`
 
 Use these companion docs:
 
@@ -500,4 +514,155 @@ fetch_sat_overlay(N, S, E, W, dim, width_px):
 ```
 
 `calculate_scale_for_dimensions` computes the appropriate tile zoom level for the bbox diagonal, eliminating the manual scale estimation that previously caused under- or over-resolution satellite tiles.
+
+---
+
+## Call Stack Audits
+
+The following diagrams trace the full call path for each major server request, from router to library. Updated after the 2026-05 refactoring passes.
+
+### DEM Fetch — `/api/terrain/dem`
+
+```mermaid
+flowchart TD
+    ROUTE["GET/POST /api/terrain/dem<br/>(routers/terrain.py)"]
+    ROUTE --> PARSE["parse_bbox_query() + validate_bbox() + validate_dim()<br/>(core/validation.py)"]
+    PARSE --> CACHE_R["read_array_cache('dem', key)<br/>(core/cache.py)"]
+    CACHE_R -->|hit| PAYLOAD["make_dem_payload()<br/>(geo2stl/dem.py)"]
+    CACHE_R -->|miss| FETCH["fetch_dem_from_source(source, N,S,E,W, dim, **kw)<br/>(geo2stl/dem.py)"]
+    FETCH --> LOCAL["fetch_local_dem() → stitch_tiles_no_rasterio()<br/>(geo2stl/tiles.py)"]
+    FETCH --> OT["fetch_opentopo_dem() → OpenTopography API"]
+    FETCH --> H5["fetch_h5_dem() → local .h5 SRTM"]
+    LOCAL --> PROJ["project_grid() → project_coordinates()<br/>(geo2stl/projections.py)"]
+    OT --> PROJ
+    H5 --> PROJ
+    PROJ --> CACHE_W["write_array_cache()<br/>(core/cache.py)"]
+    CACHE_W --> PAYLOAD
+    PAYLOAD --> RESP["JSONResponse {dem_array, dim, resolution_m, ...}"]
+```
+
+### Water Mask — `/api/terrain/water-mask`
+
+```mermaid
+flowchart TD
+    ROUTE["GET/POST /api/terrain/water-mask<br/>(routers/terrain.py)"]
+    ROUTE --> CACHE_R["read_array_cache('water', key)<br/>(core/cache.py)"]
+    CACHE_R -->|miss| WM["fetch_water_mask(N,S,E,W, scale)<br/>(geo2stl/sat2stl.py)"]
+    WM --> EE["Earth Engine — JRC Global Surface Water"]
+    WM --> EE2["Earth Engine — ESA WorldCover"]
+    EE --> PROJ["project_water_arrays(water, esa, ...)<br/>(geo2stl/projections.py)"]
+    EE2 --> PROJ
+    PROJ --> CLAMP["clamp_esa_scale(bbox, dim)<br/>(geo2stl/raster.py)"]
+    CLAMP --> CACHE_W["write_array_cache()<br/>(core/cache.py)"]
+    CACHE_W --> RESP["JSONResponse {water_mask, esa_land_cover, resolution_m}"]
+```
+
+### Satellite Overlay — `/api/terrain/satellite`
+
+```mermaid
+flowchart TD
+    ROUTE["GET /api/terrain/satellite<br/>(routers/terrain.py)"]
+    ROUTE --> CACHE_R["read_array_cache('satellite', key)<br/>(core/cache.py)"]
+    CACHE_R -->|miss| SCALE["derive_sat_scale(bbox, dim)<br/>(geo2stl/raster.py)"]
+    SCALE --> SAT["fetch_sat_overlay(N,S,E,W, scale)<br/>(geo2stl/sat2stl.py)"]
+    SAT --> TILES["fetch_satellite_tiles() → ESRI World Imagery"]
+    TILES --> PROJ["project_rgb_image()<br/>(geo2stl/projections.py)"]
+    PROJ --> CACHE_W["write_array_cache()<br/>(core/cache.py)"]
+    CACHE_W --> RESP["JSONResponse {satellite_image_b64}"]
+```
+
+### OSM City Fetch — `/api/cities` (POST)
+
+```mermaid
+flowchart TD
+    ROUTE["POST /api/cities<br/>(routers/cities.py)"]
+    ROUTE --> VALIDATE["validate_bbox_diagonal() ≤ 15 km<br/>(core/validation.py)"]
+    VALIDATE --> CKEY["osm_cache_key(N,S,E,W, tol, min_area, m_per_level)<br/>(core/cache.py)"]
+    CKEY --> CACHE_R["read_osm_cache(key)<br/>(core/cache.py)"]
+    CACHE_R -->|hit| STALE{"city_cache_missing_height_source()<br/>city_cache_missing_building_parts()<br/>(city2stl/cache_policy.py)"}
+    STALE -->|stale| FETCH
+    STALE -->|fresh| ENRICH{"city_cache_needs_enrichment()<br/>(city2stl/cache_policy.py)"}
+    ENRICH -->|needs heights| ENHANCE["enhance_city_data(payload, N,S,E,W)<br/>(core/height/service.py)"]
+    ENRICH -->|ok| RESP
+    ENHANCE --> RESP
+    CACHE_R -->|miss| FETCH["fetch_osm_data(N,S,E,W, layers, ...)<br/>(city2stl/fetch.py)"]
+    FETCH --> OVERPASS["Overpass API"]
+    OVERPASS --> ENHANCE2["enhance_city_data()<br/>(core/height/service.py)"]
+    ENHANCE2 --> CACHE_W["write_osm_cache(key, result)<br/>(core/cache.py)"]
+    CACHE_W --> RESP["JSONResponse {buildings, roads, waterways, ...}"]
+```
+
+### City Raster — `/api/cities/raster` or `/api/composite/city-raster`
+
+```mermaid
+flowchart TD
+    ROUTE["POST /api/cities/raster or /api/composite/city-raster<br/>(routers/cities.py or composite.py)"]
+    ROUTE --> CACHE_R["read_array_cache('city_raster', key)<br/>(core/cache.py)"]
+    CACHE_R -->|miss| OSM["GET /api/cities (or use in-request GeoJSON)"]
+    OSM --> RASTER["rasterize_composite_layers(buildings, roads, waterways, dim)<br/>(city2stl/rasterize.py)"]
+    RASTER --> PROJ["project_city_raster(arr, N,S,E,W, projection)<br/>(geo2stl/projections.py)"]
+    PROJ --> CACHE_W["write_array_cache()<br/>(core/cache.py)"]
+    CACHE_W --> RESP["JSONResponse {city_raster, dim}"]
+```
+
+### Building Height Fetch — `/api/height/fetch`
+
+```mermaid
+flowchart TD
+    ROUTE["POST /api/height/fetch<br/>(routers/height.py)"]
+    ROUTE --> CKEY["make_cache_key('height', bbox, provider_params)<br/>(core/cache.py)"]
+    CKEY --> CACHE_R["read_array_cache('height', key)<br/>(core/cache.py)"]
+    CACHE_R -->|miss| PROV["RegisteredProvider.instance.fetch(N,S,E,W, dim)<br/>(core/height/service.py)"]
+    PROV --> WSF["WSF3DProvider"]
+    PROV --> G3D["Google3DTilesProvider"]
+    PROV --> COP["CopernicusProvider"]
+    PROV --> NDSM["NDSMProvider"]
+    PROV --> LIDAR["LiDAR3DEPProvider"]
+    WSF --> MERGE["merge_height_rasters(results)<br/>(city2stl/height/__init__.py)"]
+    G3D --> MERGE
+    COP --> MERGE
+    NDSM --> MERGE
+    LIDAR --> MERGE
+    MERGE --> PROJ["project_grid(arr, N,S,E,W, projection)<br/>(geo2stl/projections.py)"]
+    PROJ --> CACHE_W["write_array_cache()<br/>(core/cache.py)"]
+    CACHE_W --> RESP["JSONResponse {height_raster, confidence, resolution_m}"]
+```
+
+### STL Export — `/api/export/stl`
+
+```mermaid
+flowchart TD
+    ROUTE["POST /api/export/stl<br/>(routers/export.py)"]
+    ROUTE --> VALID["validate_dim() + validate_bbox()<br/>(core/validation.py)"]
+    VALID --> GEN["generate_stl(dem_values, depth_scale, base, ...)<br/>(core/export.py)"]
+    GEN --> NUMPY["array_to_mesh(scaled, floor_val=0.0, solid=True)<br/>(numpy2stl)"]
+    NUMPY -->|unavailable| FALLBACK["_manual_ear_clip_fallback()"]
+    NUMPY --> RESP["FileResponse (binary STL)"]
+    FALLBACK --> RESP
+```
+
+### Library Layer Summary
+
+```mermaid
+flowchart LR
+    subgraph geo2stl ["geo2stl/ — terrain domain"]
+        DEM["dem.py<br/>fetch_dem_from_source<br/>fetch_local_dem<br/>make_dem_payload<br/>create_dem_model"]
+        PROJ["projections.py<br/>project_grid<br/>project_water_arrays<br/>project_city_raster<br/>project_rgb_image"]
+        RASTER["raster.py<br/>derive_sat_scale<br/>clamp_esa_scale<br/>bbox_longer_side_m"]
+        TILES["tiles.py<br/>stitch_tiles_no_rasterio<br/>get_tile_files"]
+        SAT["sat2stl.py<br/>fetch_sat_overlay<br/>fetch_water_mask<br/>fetch_satellite_tiles"]
+        HYDRO["hydrology.py<br/>fetch_and_rasterize_hydrology<br/>merge_rivers_with_dem"]
+    end
+    subgraph city2stl ["city2stl/ — city domain"]
+        POLICY["cache_policy.py<br/>city_cache_missing_height_source<br/>city_cache_needs_enrichment"]
+        RAST2["rasterize.py<br/>rasterize_composite_layers"]
+        HT["height/<br/>HeightResult, merge_height_rasters<br/>providers: WSF3D, Copernicus, etc."]
+    end
+    subgraph core ["core/ — server coordination"]
+        CACHE["cache.py<br/>make_cache_key<br/>read/write_array_cache<br/>read/write_osm_cache"]
+        EXPORT["export.py<br/>generate_stl/obj/3mf"]
+        HEIGHT_SVC["height/service.py<br/>RegisteredProvider<br/>enhance_city_data"]
+        VALID2["validation.py<br/>parse_bbox_query<br/>run_sync<br/>model_to_dict"]
+    end
+```
 

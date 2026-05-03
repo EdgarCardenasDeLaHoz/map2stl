@@ -14,7 +14,7 @@
 ```bash
 cd strm2stl && source ../.venv/bin/activate
 python -m uvicorn app.server.server:app --port 9000 --reload   # starts FastAPI
-python -m pytest tests/ -v                                     # run all tests (532 pass, 16 test files)
+python -m pytest tests/ -v                                     # run all tests (648 pass, 5 xpassed)
 ```
 
 ## Recommended Read Order
@@ -73,9 +73,9 @@ strm2stl/
 │   │   ├── server.py      ← FastAPI app + lifespan  (entry: uvicorn app.server.server:app)
 │   │   ├── config.py      ← constants, OPENTOPO_DATASETS, API keys
 │   │   ├── schemas.py     ← all Pydantic models
-│   │   ├── core/          ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py,
-│   │   │                    hydrorivers.py, hydrology.py, sat.py, projection.py,
-│   │   │                    validation.py, responses.py, height/ subpackage
+│   │   ├── core/          ← cache.py, cache_inspector.py, export.py, db.py,
+│   │   │                    validation.py, responses.py, height/service.py
+│   │   │                    + terrain_raster.py, osm_cache_policy.py [deprecated wrappers]
 │   │   └── routers/       ← terrain.py, regions.py, export.py, cities.py, cache.py,
 │   │                        settings.py, composite.py, height.py
 │   ├── client/            ← browser client (HTML/CSS/JS)
@@ -87,8 +87,11 @@ strm2stl/
 │       └── viz.py
 │
 │  ── geo/mesh libraries ─────────────────────────────────────────────────
-├── geo2stl/               ← map projections + tile stitching
-├── city2stl/              ← OSM/building to 3D mesh helpers
+├── geo2stl/               ← terrain domain: DEM fetch (dem.py), projection (projections.py),
+│                            tile stitch (tiles.py), raster scale (raster.py),
+│                            satellite (sat2stl.py), hydrology (hydrology.py), grid utils
+├── city2stl/              ← city domain: OSM rasterize (rasterize.py), cache policy (cache_policy.py),
+│                            building heights (height/), roof classification, mesh gen
 │
 │  ── project tooling ────────────────────────────────────────────────────
 ├── tests/                 ← pytest suite (conftest.py + 16 test files)

@@ -1,6 +1,6 @@
 # SDK Workflow Map — strm2stl
 
-_Last updated: 2026-04-24_
+_Last updated: 2026-05-03_
 
 Use this document when you need to connect the notebooks, the Python session client, and the backend routes without tracing everything manually.
 
@@ -10,7 +10,9 @@ Use this document when you need to connect the notebooks, the Python session cli
 flowchart LR
     NB["Notebook<br/>API_Terrain.ipynb"] --> TS["TerrainSession"]
     TS --> R["routers/"]
-    R --> C["core/"]
+    R --> C["core/<br/>cache · export · height"]
+    R --> GEO["geo2stl/<br/>dem · projections · raster"]
+    R --> CITY["city2stl/<br/>cache_policy · rasterize · heights"]
 ```
 
 `../notebooks/API_Terrain.ipynb` is the shortest end-to-end workflow example.
@@ -57,10 +59,10 @@ sequenceDiagram
 |---|---|---|---|
 | Server startup and settings | `start()`, `server_settings()` | settings and source discovery endpoints | `app/server/server.py`, `app/server/routers/settings.py`, `app/server/routers/terrain.py` |
 | Region management | `regions()`, `select()`, `save_region()`, settings persistence helpers | `/api/regions*` | `app/server/routers/regions.py` |
-| DEM and overlays | `fetch_dem()`, `fetch_water_mask()`, `fetch_satellite()` | `/api/terrain/dem`, `/api/terrain/water-mask`, `/api/terrain/satellite` | `app/server/routers/terrain.py` |
+| DEM and overlays | `fetch_dem()`, `fetch_water_mask()`, `fetch_satellite()` | `/api/terrain/dem`, `/api/terrain/water-mask`, `/api/terrain/satellite` | `app/server/routers/terrain.py` → `geo2stl/dem.py`, `geo2stl/sat2stl.py`, `geo2stl/projections.py` |
 | DEM blending and hydrology | merge-related helpers | `/api/composite/dem-merge`, `/api/composite/hydrology-merge` | `app/server/routers/composite.py` |
-| City and OSM features | city fetch and raster helpers | `/api/cities*`, `/api/composite/city-raster` | `app/server/routers/cities.py`, `app/server/routers/composite.py` |
-| Building heights | `fetch_building_heights(provider=...)` | `/api/height/` | `app/server/routers/height.py`, `app/server/core/height/` |
+| City and OSM features | city fetch and raster helpers | `/api/cities*`, `/api/composite/city-raster` | `app/server/routers/cities.py` → `city2stl/cache_policy.py`, `city2stl/rasterize.py`, `geo2stl/projections.py` |
+| Building heights | `fetch_building_heights(provider=...)` | `/api/height/` | `app/server/routers/height.py` → `app/server/core/height/service.py` → `city2stl/height/` |
 | STL import + infill (session-local) | `load_stl(path, bbox, up_axis, resolution_m)`, `preview_stl()`, `infill_heights(method, use_dem_baseline, power)` | _(no backend round-trip — runs locally in the Python process)_ | `app/server/core/height/stl_import.py`, `app/server/core/height/infill.py` |
 | Export and print pipeline | `export_stl()`, `export_obj()`, split and slicer helpers, verify/slice helpers | `/api/export*` | `app/server/routers/export.py` |
 | Cache inspection | cache helpers | `/api/cache*` | `app/server/routers/cache.py` |
@@ -73,7 +75,9 @@ flowchart TD
     B --> C["Open router in<br/>routers/"]
     C --> D{"Logic in<br/>router?"}
     D -->|Yes| E["Done"]
-    D -->|No| F["Continue into<br/>core/"]
+    D -->|No| F{"Server-side concern?<br/>(cache, DB, export)"}
+    F -->|Yes| G["core/"]
+    F -->|No| H["geo2stl/ or city2stl/<br/>(domain library)"]
 ```
 
 When a notebook cell changes pipeline behavior, use this order:
@@ -81,7 +85,7 @@ When a notebook cell changes pipeline behavior, use this order:
 1. Find the `TerrainSession` method or `s.settings[...]` key in `../app/session/terrain_session.py`.
 2. Check which route family it belongs to in `api.md`.
 3. Open the relevant router in `../app/server/routers/`.
-4. If the work is not in the router, continue into `../app/server/core/`.
+4. If the work is not in the router, check whether it is a server-side concern (cache, DB, export file) → `../app/server/core/`, or a domain concern (terrain math, projection, OSM rasterize) → `geo2stl/` or `city2stl/`.
 
 ## Settings Ownership
 
@@ -110,5 +114,5 @@ The session notebook mutates `s.settings`, but ownership is split by group:
 
 - “Which endpoint does this session action hit?”: `api.md` and `../notebooks/Session_API_Reference.ipynb`
 - “Which file owns this notebook behavior?”: `../app/session/terrain_session.py`
-- “Where does the real processing happen?”: matching router file, then `../app/server/core/`
+- "Where does the real processing happen?": matching router file → `app/server/core/` (server concerns) or `geo2stl/`/`city2stl/` (domain logic)
 - “What is the intended full workflow?”: `../notebooks/API_Terrain.ipynb`

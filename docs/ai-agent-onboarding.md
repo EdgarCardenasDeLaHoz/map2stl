@@ -1,6 +1,6 @@
 # AI Agent Onboarding — strm2stl
 
-_Last updated: 2026-05-02_
+_Last updated: 2026-05-03_
 
 Use this document when you need a fast, correct mental model of the repository before making changes.
 
@@ -18,6 +18,17 @@ Use this document when you need a fast, correct mental model of the repository b
 - FastAPI backend in `app/server/`
 - Browser client in `app/client/`
 - Python SDK in `app/session/terrain_session.py`
+
+**Backend is three layers:**
+
+```
+routers/   → HTTP adapters (parse, delegate, format)
+core/      → server-side state (cache, SQLite, export, height service)
+geo2stl/   → terrain domain library (DEM, projection, tiles, raster, hydrology, satellite)
+city2stl/  → city domain library (OSM rasterize, cache policy, building heights)
+```
+
+Routers import from both `core/` and `geo2stl/`/`city2stl/` directly — not everything goes through `core/`. Logic lives in the library layer when it is useful without the server (e.g. projection math, cache staleness predicates).
 
 The usual workflow is:
 
@@ -44,8 +55,11 @@ The clearest end-to-end example is `../notebooks/API_Terrain.ipynb`.
 
 ### Backend
 
-- Request handlers live in `app/server/routers/`.
-- Business logic lives in `app/server/core/`.
+- Request handlers live in `app/server/routers/`. These are thin HTTP adapters.
+- Server-side coordination (cache I/O, SQLite, export, height orchestration) lives in `app/server/core/`.
+- Terrain domain logic (DEM fetch, projection, tile stitch, raster scale) lives in `geo2stl/`.
+- City domain logic (OSM rasterize, cache staleness, building heights) lives in `city2stl/`.
+- `core/terrain_raster.py` and `core/osm_cache_policy.py` are **deprecated compatibility wrappers** — do not add new code there.
 - `api.md` is the route index.
 
 ### Frontend
@@ -68,6 +82,10 @@ The clearest end-to-end example is `../notebooks/API_Terrain.ipynb`.
 - Do not assume frontend modules import each other directly.
 - Do not duplicate authoritative reference material from `api.md`, `arch.md`, or `modules.md`; link to it.
 - Do not add significant features without checking `proposals.md` unless the user requested the work directly.
+- Do not add new logic to `core/terrain_raster.py` or `core/osm_cache_policy.py` — these are deprecated wrappers.
+- Do not assume "business logic belongs in `core/`" — terrain math and OSM logic belong in `geo2stl/` and `city2stl/` respectively.
+- Do not look for `_fetch_dem_array` in terrain.py — it was removed; use `geo2stl.dem.fetch_dem_from_source` instead.
+- Do not look for `_CACHE_AVAILABLE` in cities.py — it was removed; cache is always available and imported unconditionally.
 
 ## Next Document
 

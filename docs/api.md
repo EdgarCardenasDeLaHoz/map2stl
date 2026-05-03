@@ -1,6 +1,6 @@
 # Backend API Routes — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-05-03_
 
 For notebook and Python SDK tracing, pair this document with `sdk-workflow.md` and `../notebooks/Session_API_Reference.ipynb`.
 
@@ -28,17 +28,14 @@ Primary `TerrainSession` touchpoints:
 
 ## DEM / Terrain Routes (`routers/terrain.py`)
 
-Primary `TerrainSession` touchpoints:
+Primary `TerrainSession` touchpoints: `fetch_dem()`, `fetch_water_mask()`, `fetch_satellite()`, `fetch_hydrology()`.
 
-- `fetch_dem()` uses `/api/terrain/dem`
-- `fetch_water_mask()` and `fetch_esa_landcover()` both use `/api/terrain/water-mask`
-- `fetch_satellite()` uses `/api/terrain/satellite`
-- `fetch_hydrology()` and `merge_hydrology_with_dem()` should be traced through the terrain route family in the router file
-- merge helpers such as `merge_dem()` use `/api/composite/dem-merge`
-
-Terrain bbox parsing is now centralized in `core/validation.parse_bbox_query()`, so
-the terrain router keeps the existing query-string semantics and 400 error shapes
-without repeating the four bbox parsers in every endpoint.
+**Library dispatch (post-refactor):**
+- DEM fetch → `geo2stl.dem.fetch_dem_from_source()` (source-dispatching: local tiles, OpenTopography, H5)
+- Water mask → `geo2stl.sat2stl.fetch_water_mask()` → Earth Engine (JRC + ESA WorldCover)
+- Satellite → `geo2stl.sat2stl.fetch_sat_overlay()` → ESRI tile fetch, scale via `geo2stl.raster.derive_sat_scale()`
+- Projection (all types) → `geo2stl.projections.project_grid()` / `project_water_arrays()` / `project_rgb_image()`
+- Bbox parse → `core.validation.parse_bbox_query()` (centralized)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -80,10 +77,13 @@ Primary `TerrainSession` touchpoints:
 
 ## City Routes (`routers/cities.py`)
 
-Primary `TerrainSession` touchpoints:
+Primary `TerrainSession` touchpoints: `fetch_cities()`, city raster, export helpers.
 
-- `fetch_cities()` uses `/api/cities`
-- city raster and export helpers should be traced through this router module
+**Library dispatch (post-refactor):**
+- OSM cache staleness predicates → `city2stl.cache_policy` (directly imported, no wrapper)
+- City raster projection → `geo2stl.projections.project_city_raster()`
+- City height enhancement → `core.height.service.enhance_city_data()`
+- Cache read/write → `core.cache.read_osm_cache()` / `write_osm_cache()`
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -91,6 +91,8 @@ Primary `TerrainSession` touchpoints:
 | POST | `/api/cities` | Fetch OSM data (rejects >15 km diagonal); cached as `.json.gz`. Key params: `m_per_level` (floor height, default 3.5 m), `simplify_tolerance`, `min_area` — all included in cache key |
 | POST | `/api/cities/raster` | Rasterize OSM buildings/roads/waterways to a DEM-format height map (`values`, `width`, `height`, `vmin`, `vmax`) — used by `loadCityRaster()` in `city-render.js`. Accepts `m_per_level` for OSM cache lookup |
 | POST | `/api/cities/export3mf` | Generate 3MF with terrain + building prisms |
+| GET | `/api/cities/google3d-available` | Check if Google 3D Tiles API key is configured |
+| POST | `/api/cities/enhance-heights` | Re-run building height enrichment on existing OSM data |
 
 > **Two city rasterization endpoints exist:**
 > - `/api/cities/raster` — returns a flat height map in DEM format (direct canvas rendering via `city-render.js`)
@@ -103,9 +105,10 @@ Primary `TerrainSession` touchpoints:
 
 ## Composite Routes (`routers/composite.py`)
 
-Primary `TerrainSession` touchpoints:
+Primary `TerrainSession` touchpoints: `composite_city_raster()`.
 
-- `composite_city_raster()` uses `/api/composite/city-raster`
+**Library dispatch (post-refactor):**
+- City raster burn → `city2stl.rasterize.rasterize_composite_layers()` (extracted to library)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -113,11 +116,9 @@ Primary `TerrainSession` touchpoints:
 
 ## Cache & Settings (`routers/cache.py`, `settings.py`)
 
-Primary `TerrainSession` touchpoints:
+Primary `TerrainSession` touchpoints: `server_settings()`, `cache_status()`, `clear_cache()`.
 
-- `server_settings()` reads the settings route family
-- `cache_status()` uses `/api/cache`
-- `clear_cache()` uses `DELETE /api/cache`
+**Cache inspection** (tree building, region grouping, metadata read) is implemented in `core/cache_inspector.py`.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -125,6 +126,7 @@ Primary `TerrainSession` touchpoints:
 | DELETE | `/api/cache` | Clear server cache |
 | DELETE | `/api/cache/region` | Clear cache for a specific region bbox |
 | GET | `/api/cache/check` | Check if specific bbox is cached |
+| GET | `/api/cache/inventory` | Full filesystem inventory tree for the cache UI |
 | GET | `/api/settings/projections` | Available projections |
 | GET | `/api/settings/colormaps` | Available colormaps |
 | GET | `/api/settings/datasets` | Available DEM datasets |
