@@ -246,6 +246,49 @@ def fetch_local_dem(
     return np.nan_to_num(im, nan=0.0).astype(np.float64)
 
 
+def fetch_dem_from_source(
+    source: str,
+    north: float,
+    south: float,
+    east: float,
+    west: float,
+    dim: int,
+    *,
+    depth_scale: float = 0.5,
+    water_scale: float = 0.05,
+    subtract_water: bool = True,
+    maintain_dimensions: bool = True,
+) -> np.ndarray:
+    """Fetch DEM for any supported source with local failure fallback.
+
+    Returns a zero-filled array if local DEM fetch fails at runtime.
+    """
+    if source in ("h5_local", *OPENTOPO_DATASETS):
+        return fetch_layer_data(source, north, south, east, west, dim)
+
+    try:
+        return fetch_local_dem(
+            north,
+            south,
+            east,
+            west,
+            dim,
+            depth_scale=depth_scale,
+            water_scale=water_scale,
+            subtract_water=subtract_water,
+            maintain_dimensions=maintain_dimensions,
+        )
+    except Exception as dem_err:
+        logger.warning("Local DEM failed: %s, returning zeros", dem_err)
+        lat_r = abs(north - south)
+        lon_r = abs(east - west)
+        if lat_r > lon_r:
+            mh, mw = dim, max(1, int(dim * lon_r / lat_r))
+        else:
+            mw, mh = dim, max(1, int(dim * lat_r / lon_r))
+        return np.zeros((mh, mw), dtype=float)
+
+
 # ---------------------------------------------------------------------------
 # H5 tile constants (used by fetch_h5_dem and _geo_to_tile_pixel)
 # ---------------------------------------------------------------------------
