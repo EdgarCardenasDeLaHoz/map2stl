@@ -5,15 +5,8 @@ All heavy lifting is in core.dem and core.cache; this module is a thin
 HTTP adapter that parses requests, delegates, and formats responses.
 """
 
-from geo2stl.hydrology import (
-    fetch_and_rasterize_hydrology as _fetch_and_rasterize_hydrology,
-)
-from geo2stl.sat import (
-    fetch_water_mask as _fetch_water_mask,
-    fetch_water_mask_images as _fetch_water_mask_images,
-    fetch_sat_overlay as _fetch_sat_overlay,
-    fetch_satellite_tiles as _fetch_satellite_tiles,
-)
+from geo2stl.hydrology import HYDROLOGY_LAYER
+from geo2stl.sat import SAT_LAYER
 from geo2stl.dem import (
     fetch_layer_data as _fetch_layer_data,
     fetch_local_dem as _fetch_local_dem,
@@ -55,6 +48,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["terrain"])
+
+_fetch_and_rasterize_hydrology = HYDROLOGY_LAYER.fetch_and_rasterize
+_fetch_water_mask = SAT_LAYER.fetch_water_mask
+_fetch_water_mask_images = SAT_LAYER.fetch_water_mask_images
+_fetch_sat_overlay = SAT_LAYER.fetch_sat_overlay
+_fetch_satellite_tiles = SAT_LAYER.fetch_satellite_tiles
 
 # In-memory LRU cache for fully-serialised DEM response dicts.
 # Sits in front of the disk cache so that repeated hot requests skip both

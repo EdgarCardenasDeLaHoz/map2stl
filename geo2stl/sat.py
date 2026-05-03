@@ -13,11 +13,20 @@ can be called from route handlers via asyncio.run_in_executor.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import math
+import os
 from pathlib import Path
+import time
 
 import numpy as np
+
+try:
+    import joblib
+except ImportError:
+    joblib = None
 
 METRES_PER_DEGREE: float = 111_320.0
 
@@ -288,7 +297,6 @@ def fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset):
     """Fetch ESA/JRC images and optional elevation for bathymetry. Call via run_in_executor.
     Returns (img, jrc_img_or_None, elevation_raw_or_None) at native sat_scale resolution.
     """
-    from geo2stl.sat2stl import fetch_bbox_image
     logger.info(f"fetch_water_mask_images: fetching ESA WorldCover layer "
                 f"(bbox {abs(east-west):.1f}deg x {abs(north-south):.1f}deg, scale={sat_scale}m/px)")
     try:
@@ -402,7 +410,6 @@ def fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, di
     """Fetch + resize satellite overlay. Returns (values_list, w, h) or None."""
     import cv2 as _cv2
     import numpy as _np
-    from geo2stl.sat2stl import fetch_bbox_image, calculate_scale_for_dimensions
 
     target_dim = max(width_px, dim or width_px)
     sat_scale = max(30, calculate_scale_for_dimensions(north, south, east, west, target_dim))
@@ -420,3 +427,251 @@ def fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, di
     sat_arr = _cv2.resize(sat_arr, (sat_tw, sat_th),
                           interpolation=_cv2.INTER_LINEAR)
     return (sat_arr.ravel().tolist(), sat_arr.shape[1], sat_arr.shape[0])
+
+
+# ---------------------------------------------------------------------------
+# Earth Engine-backed raster helpers (migrated from sat2stl.py)
+# ---------------------------------------------------------------------------
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CACHE_DIR = _PROJECT_ROOT / "cache" / "ee"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+map_labels = [
+    [10, 5],
+    [20, 0],
+    [30, 0],
+    [40, 0],
+    [50, 10],
+    [60, 0],
+    [70, 0],
+    [80, -10],
+    [90, -5],
+]
+
+
+def initialize_earth_engine():
+    """Initialize Earth Engine lazily to avoid import-time hard dependency."""
+    try:
+        import ee
+        ee.Initialize()
+    except Exception as e:
+        logger.error("Earth Engine initialization failed: %s", e)
+        raise
+
+
+def calculate_scale_for_dimensions(N, S, E, W, target_dim=500):
+    """Calculate Earth Engine scale (m/px) for target output dimensions."""
+    EE_MAX_PIXELS = 32768
+    lat_center = (N + S) / 2
+    lat_range = abs(N - S)
+    lon_range = abs(E - W)
+
+    height_meters = lat_range * 111000
+    width_meters = lon_range * 111000 * math.cos(math.radians(lat_center))
+
+    max_meters = max(height_meters, width_meters)
+    target_scale = max_meters / target_dim
+
+    min_scale_for_height = height_meters / EE_MAX_PIXELS
+    min_scale_for_width = width_meters / EE_MAX_PIXELS
+    ee_limit_scale = max(min_scale_for_height, min_scale_for_width)
+
+    scale = max(target_scale, ee_limit_scale)
+    scale = max(10, min(10000, scale))
+    return int(scale)
+
+
+def fetch_bbox_image(N, S, E, W, scale=None, dataset="copernicus", use_cache=True, target_dim=None):
+    """Fetch Earth Engine raster for bbox and dataset."""
+    import requests
+    from PIL import Image
+    from io import BytesIO
+
+    if scale is None:
+        if target_dim is not None:
+            scale = calculate_scale_for_dimensions(N, S, E, W, target_dim)
+        else:
+            scale = calculate_scale_for_dimensions(N, S, E, W, 500)
+
+    ee_max_bytes = 50_331_648
+    bytes_per_px = 2
+    ee_max_px = ee_max_bytes // bytes_per_px
+    lat_center = (N + S) / 2.0
+    bbox_w_m = abs(E - W) * 111_320 * math.cos(math.radians(lat_center))
+    bbox_h_m = abs(N - S) * 111_320
+    est_px = (bbox_w_m / scale) * (bbox_h_m / scale)
+
+    if est_px > ee_max_px:
+        min_scale = int(math.ceil(math.sqrt(bbox_w_m * bbox_h_m / ee_max_px)))
+        logger.warning(
+            "Requested scale=%s exceeds EE limit (~%.1fM px). Clamping to scale=%s.",
+            scale,
+            est_px / 1e6,
+            min_scale,
+        )
+        scale = min_scale
+
+    if os.environ.get("STRM2STL_TEST_MODE", "0") == "1":
+        td = target_dim or 100
+        if dataset in ("esa", "jrc"):
+            return np.zeros((td, td), dtype=np.uint8)
+        return np.zeros((td, td), dtype=np.int16)
+
+    bbox_str = f"{N}_{S}_{E}_{W}_{scale}_{dataset}"
+    cache_hash = hashlib.md5(bbox_str.encode()).hexdigest()
+    cache_path = CACHE_DIR / f"{cache_hash}.jbl"
+    meta_path = CACHE_DIR / f"{cache_hash}.meta"
+
+    if use_cache and cache_path.exists() and meta_path.exists() and joblib is not None:
+        try:
+            meta = json.loads(meta_path.read_text())
+            cached_scale = meta.get("scale", float("inf"))
+            if cached_scale <= scale:
+                arr = joblib.load(cache_path)
+                if isinstance(arr, np.ndarray) and arr.size > 0:
+                    return arr
+        except Exception as e:
+            logger.warning("EE cache read failed, refetching: %s", e)
+
+    initialize_earth_engine()
+    import ee
+
+    crs = "EPSG:4326"
+    region = ee.Geometry.Rectangle([W, S, E, N], proj=crs, geodesic=False)
+
+    datasets = {
+        "esa": ("ESA/WorldCover/v100/2020", "Map"),
+        "jrc": ("JRC/GSW1_4/GlobalSurfaceWater", "occurrence"),
+        "copernicus": ("COPERNICUS/DEM/GLO30", "DEM"),
+        "nasadem": ("NASA/NASADEM_HGT/001", "elevation"),
+        "usgs": ("USGS/3DEP/10m", "elevation"),
+        "gebco": ("projects/sat-io/open-datasets/gebco/gebco_2023_grid", "elevation"),
+    }
+    if dataset not in datasets:
+        raise ValueError(f"Dataset not recognized. Choose from: {list(datasets.keys())}")
+
+    dataset_id, band = datasets[dataset]
+    if dataset == "copernicus":
+        img = ee.ImageCollection(dataset_id).mosaic().select(band)
+    else:
+        img = ee.Image(dataset_id).select(band)
+
+    if dataset in ["esa", "jrc"]:
+        image = img.toUint8().clip(region)
+    else:
+        image = img.toInt16().clip(region)
+
+    url = image.getThumbURL({
+        "scale": scale,
+        "region": region,
+        "format": "GEO_TIFF",
+        "crs": crs,
+    })
+
+    response = requests.get(url, timeout=30)
+    if response.status_code != 200:
+        logger.error("Earth Engine request failed: status=%s", response.status_code)
+        return None
+
+    img_array = np.array(Image.open(BytesIO(response.content)))
+
+    if use_cache and joblib is not None:
+        try:
+            joblib.dump(img_array, cache_path)
+            meta = {
+                "scale": scale,
+                "bbox": {"N": N, "S": S, "E": E, "W": W},
+                "dataset": dataset,
+                "shape": list(img_array.shape),
+                "timestamp": time.time(),
+            }
+            meta_path.write_text(json.dumps(meta))
+        except Exception as e:
+            logger.warning("Failed to cache EE raster: %s", e)
+
+    return img_array
+
+
+def get_aquatic_regions(N, S, E, W, dataset="esa", scale=None, use_cache=True, target_dim=500):
+    """Get aquatic regions from Earth Engine datasets."""
+    img = fetch_bbox_image(N, S, E, W, scale=scale,
+                           dataset=dataset, use_cache=use_cache, target_dim=target_dim)
+    if img is None:
+        return None
+
+    if dataset == "esa":
+        if img.ndim == 3:
+            img[img[:, :, 1] == 0, 0] = 0
+            img = img[:, :, 0]
+        img = img.copy()
+        img[img == 80] = 0
+
+    return img
+
+
+def map_label_elevation(img, im, size=500):
+    """Map categorical labels to elevation offsets and blend with DEM."""
+    from skimage import transform
+
+    if img is None:
+        return im * 0
+
+    img_map = img * 0.0
+    for x in map_labels:
+        img_map[img == x[0]] = x[1]
+
+    img_map2 = img_map * 1.0
+    img_map2 = img_map2 + transform.resize(im, img_map2.shape, anti_aliasing=True)
+    shape_out = img_map2.shape
+    outsize = np.array(shape_out) / max(shape_out) * size
+    img_map2 = transform.resize(img_map2, outsize, anti_aliasing=True)
+    img_map2 = img_map2.round(0).clip(0.1)
+    return img_map2
+
+
+class GeoLayerBase:
+    """Common interface for geo2stl layers."""
+
+    name: str = "base"
+
+
+class SatelliteLayer(GeoLayerBase):
+    """Unified satellite + Earth Engine data layer."""
+
+    name = "satellite"
+
+    @staticmethod
+    def fetch_satellite_tiles(north, south, east, west, dim=600):
+        return fetch_satellite_tiles(north, south, east, west, dim)
+
+    @staticmethod
+    def fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset):
+        return fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset)
+
+    @staticmethod
+    def fetch_water_mask(north, south, east, west, sat_scale, dataset):
+        return fetch_water_mask(north, south, east, west, sat_scale, dataset)
+
+    @staticmethod
+    def fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, dim):
+        return fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, dim)
+
+    @staticmethod
+    def initialize_earth_engine():
+        return initialize_earth_engine()
+
+    @staticmethod
+    def calculate_scale_for_dimensions(N, S, E, W, target_dim=500):
+        return calculate_scale_for_dimensions(N, S, E, W, target_dim)
+
+    @staticmethod
+    def fetch_bbox_image(N, S, E, W, scale=None, dataset="copernicus", use_cache=True, target_dim=None):
+        return fetch_bbox_image(N, S, E, W, scale=scale, dataset=dataset, use_cache=use_cache, target_dim=target_dim)
+
+    @staticmethod
+    def get_aquatic_regions(N, S, E, W, dataset="esa", scale=None, use_cache=True, target_dim=500):
+        return get_aquatic_regions(N, S, E, W, dataset=dataset, scale=scale, use_cache=use_cache, target_dim=target_dim)
+
+
+SAT_LAYER = SatelliteLayer()
