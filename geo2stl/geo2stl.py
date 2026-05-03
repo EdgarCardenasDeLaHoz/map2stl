@@ -1,5 +1,4 @@
 import numpy as np
-from PIL import Image
 import re
 import os
 
@@ -8,6 +7,8 @@ from skimage import io
 import json
 import glob
 import logging
+
+from geo2stl.projections import project_coordinates
 
 logger = logging.getLogger(__name__)
 
@@ -166,40 +167,22 @@ def proj_map_height(mat, NSEW):
 
 
 def proj_map_geo_to_2D(mat, NSEW, clip_out=True):
+    """Legacy compatibility wrapper for the original cosine projection.
 
-    NSEW = np.array(NSEW)
-
-    lat = NSEW[[0, 1]]
-    lon = NSEW[[2, 3]]
-
-    m, n = mat.shape
-    xv, yv = np.meshgrid(range(n), range(m))
-
-    xc = (n-1)/2
-    yc = (m-1)/2
-    xv_c = (xv - xc).astype(int)
-    yv_c = (yv - yc).astype(int)
-
-    lat_v = np.linspace(lat[0], lat[1], m)
-    lat_v = np.deg2rad(lat_v[:, None])
-    xv_adj = xv_c * np.cos(lat_v)
-
-    xv2 = (xv_adj + xc).astype(int)
-    yv2 = (yv_c + yc).astype(int)
-
-    mat_adj = mat*0.0
-    mat_adj[:] = np.nan
-    mat_adj[yv2, xv2] = mat[yv, xv]
-
-    y1, y2 = np.min(yv2), np.max(yv2)
-    x1, x2 = np.min(xv2), np.max(xv2)
-
-    mat_adj = mat_adj[y1:y2, x1:x2]
-
-    if clip_out:
-        mat_adj = mat_adj[:, ~np.any(np.isnan(mat_adj), axis=0)]
-
-    return mat_adj
+    Historically this module owned the cosine-only projection logic.  The
+    canonical implementation now lives in geo2stl.projections, but notebooks
+    and older modules still import proj_map_geo_to_2D from geo2stl.geo2stl.
+    Keep the name and behavior while delegating to the shared projection code.
+    """
+    result, _ = project_coordinates(
+        mat,
+        tuple(np.array(NSEW)),
+        projection='cosine',
+        maintain_dimensions=False,
+        fill_value=np.nan,
+        clip_nans=clip_out,
+    )
+    return result
 
 
 def mat2coor(limits, matsize, index):
