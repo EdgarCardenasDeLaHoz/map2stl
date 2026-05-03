@@ -23,7 +23,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from tools.ml.data import make_height_loaders, make_roof_loaders
+from tools.ml.data.datasets import make_height_loaders, make_roof_loaders
 from tools.ml.models import build_model
 
 

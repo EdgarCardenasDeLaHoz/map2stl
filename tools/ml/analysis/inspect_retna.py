@@ -26,8 +26,8 @@ for _p in (_STRM2STL, _STRM2STL.parent):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from tools.example.networks import Retna_V1  # noqa: E402
-from tools.ml.train_retna import (  # noqa: E402
+from tools.ml.models import Retna_V1  # noqa: E402
+from tools.ml.train.train_retna import (  # noqa: E402
     HeightTileDataset,
     HEIGHT_NORM_M,
     dice_loss,

@@ -166,7 +166,7 @@ def main():
 
     # Also record on the scoreboard for direct comparison with neural runs.
     try:
-        from tools.ml.scoreboard import record_run
+        from tools.ml.eval.scoreboard import record_run
         record_run(
             model_path=f"baseline://{args.baseline}",
             arch=f"baseline_{args.baseline}",

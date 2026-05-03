@@ -47,7 +47,7 @@ for _p in (_STRM2STL, _STRM2STL.parent):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from tools.example.networks import Retna_V1   # noqa: E402
+from tools.ml.models import Retna_V1  # noqa: E402
 
 HEIGHT_NORM_M = 200.0  # divisor that maps real metres → [0, 1]. 200m covers skyscrapers.
                        # Bumped from 50 → 100m after audit found ~3% of pixels
@@ -335,7 +335,7 @@ def main():
     print(f"Best   : val_loss={best_loss:.4f} at epoch {best_epoch}")
 
     try:
-        from tools.ml.scoreboard import record_run
+        from tools.ml.eval.scoreboard import record_run
         best_metrics = next(h for h in history if h["epoch"] == best_epoch)
         record_run(
             model_path=str(out_path),

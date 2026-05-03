@@ -159,7 +159,7 @@ def section_training_history(pdf: PdfPages) -> None:
 def section_model_evaluation(arch: str | None, tile_paths: list[Path], pdf: PdfPages) -> None:
     if MODEL_PATH.exists() and tile_paths:
         import torch
-        from tools.ml.data import make_height_loaders
+        from tools.ml.data.datasets import make_height_loaders
         from tools.ml.models import build_model
 
         model = build_model(arch=arch or "v2", task="height", checkpoint=str(MODEL_PATH), device="cpu")
@@ -227,7 +227,7 @@ def section_model_evaluation(arch: str | None, tile_paths: list[Path], pdf: PdfP
 def section_per_tile_predictions(arch: str | None, tile_paths: list[Path], pdf: PdfPages) -> None:
     if MODEL_PATH.exists() and tile_paths:
         import torch
-        from tools.ml.data import HeightTileDataset
+        from tools.ml.data.datasets import HeightTileDataset
         from tools.ml.models import build_model
 
         model = build_model(arch=arch or "v2", task="height", checkpoint=str(MODEL_PATH), device="cpu")

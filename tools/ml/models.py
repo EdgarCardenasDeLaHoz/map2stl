@@ -1107,3 +1107,268 @@ def build_model(
                 logger.info("Loaded raw state_dict from %s", checkpoint)
 
     return model.to(torch.device(device))
+
+
+# ---------------------------------------------------------------------------
+# Legacy / Baseline architectures  (migrated from tools/example/networks.py)
+# ---------------------------------------------------------------------------
+# These are the original prototype architectures used to establish baselines
+# before the production RoofNetV2/V3 family.  Retna_V1 is the 1k-parameter
+# baseline used by train_retna.py, grow_prune.py, and inspect_retna.py.
+# ---------------------------------------------------------------------------
+
+def double_conv(in_channels: int, out_channels: int) -> "nn.Module":
+    """Two 3×3 conv+LeakyReLU layers (UNet building block)."""
+    _require_torch()
+    return nn.Sequential(
+        nn.Conv2d(in_channels, in_channels + out_channels, 3, padding=1),
+        nn.LeakyReLU(inplace=True),
+        nn.Conv2d(in_channels + out_channels, out_channels, 3, padding=1),
+        nn.LeakyReLU(inplace=True),
+    )
+
+
+def res_conv(in_channels: int, out_channels: int) -> "nn.Module":
+    """Strided 3×3 conv pair that halves spatial resolution (Retna_V1 block)."""
+    _require_torch()
+    return nn.Sequential(
+        nn.Conv2d(in_channels, in_channels + out_channels, 3, padding=1, stride=1),
+        nn.LeakyReLU(inplace=True),
+        nn.Conv2d(in_channels + out_channels, out_channels, 3, padding=1, stride=2),
+        nn.LeakyReLU(inplace=True),
+    )
+
+
+class UNet(nn.Module):
+    """Lightweight U-Net (8-channel feature maps) for binary segmentation."""
+
+    def __init__(self, in_channels: int, out_classes: int) -> None:
+        _require_torch()
+        super().__init__()
+        num_chan = [8, 8, 8, 8]
+        self.dconv_down1 = double_conv(in_channels, num_chan[0])
+        self.dconv_down2 = double_conv(num_chan[0], num_chan[1])
+        self.dconv_down3 = double_conv(num_chan[1], num_chan[2])
+        self.dconv_down4 = double_conv(num_chan[2], num_chan[3])
+        self.maxpool = nn.MaxPool2d(2)
+        self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
+        self.dconv_up3 = double_conv(num_chan[2] + num_chan[3], num_chan[2])
+        self.dconv_up2 = double_conv(num_chan[1] + num_chan[2], num_chan[1])
+        self.dconv_up1 = double_conv(num_chan[0] + num_chan[1], num_chan[0])
+        self.conv_last = nn.Conv2d(num_chan[0], out_classes, 1)
+
+    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        conv1 = self.dconv_down1(x)
+        x = self.maxpool(conv1)
+        conv2 = self.dconv_down2(x)
+        x = self.maxpool(conv2)
+        conv3 = self.dconv_down3(x)
+        x = self.maxpool(conv3)
+        x = self.dconv_down4(x)
+        x = self.upsample(x)
+        x = torch.cat([x, conv3], dim=1)
+        x = self.dconv_up3(x)
+        x = self.upsample(x)
+        x = torch.cat([x, conv2], dim=1)
+        x = self.dconv_up2(x)
+        x = self.upsample(x)
+        x = torch.cat([x, conv1], dim=1)
+        x = self.dconv_up1(x)
+        return self.conv_last(x)
+
+
+class Retna_V1(nn.Module):
+    """Minimal ~1k-parameter iterative multi-scale network for height regression.
+
+    Used as the baseline model for grow/prune experiments.  Each block
+    downsamples spatially by 2×; all scale outputs are upsampled back to the
+    input resolution and concatenated before the final 1×1 conv.
+    The original input is re-injected at every scale.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_classes: int,
+        hidden_channels: "list[int] | None" = None,
+    ) -> None:
+        _require_torch()
+        super().__init__()
+        if hidden_channels is None:
+            hidden_channels = [8, 8, 8, 8]
+        hidden_channels = list(hidden_channels)
+        hidden_channels.insert(0, in_channels)
+        blocks = []
+        for i in range(len(hidden_channels) - 1):
+            in_ch = hidden_channels[i] if i == 0 else hidden_channels[i] + in_channels
+            blocks.append(res_conv(in_ch, hidden_channels[i + 1]))
+        self.blocks = nn.ModuleList(blocks)
+        self.conv_last = nn.Conv2d(sum(hidden_channels), out_classes, 1)
+
+    def forward(self, x_in: "torch.Tensor") -> "torch.Tensor":
+        x_next = x_in
+        out_list = [x_in]
+        for block in self.blocks:
+            x_next = block(x_next)
+            x_out = F.interpolate(x_next, size=x_in.shape[2:], mode="bilinear", align_corners=False)
+            x_in_down = F.interpolate(x_in, size=x_next.shape[2:], mode="bilinear", align_corners=False)
+            x_next = torch.cat([x_in_down, x_next], dim=1)
+            out_list.append(x_out)
+        x = torch.cat(out_list, dim=1)
+        out = self.conv_last(x)
+        if self.training:
+            out = F.leaky_relu(out)
+            out = 1 - F.leaky_relu(1 - out)
+        else:
+            out = torch.clamp(out, 0, 1)
+        return out
+
+
+def _valid_groups(channels: int, preferred: int = 8) -> int:
+    """Return the largest divisor of *channels* that is ≤ *preferred*."""
+    for g in range(min(preferred, channels), 0, -1):
+        if channels % g == 0:
+            return g
+    return 1
+
+
+def add_coord_channels(x: "torch.Tensor") -> "torch.Tensor":
+    """Append (y, x) coordinate grids normalised to [-1, 1] as extra channels."""
+    _require_torch()
+    B, _, H, W = x.shape
+    ys = torch.linspace(-1.0, 1.0, H, device=x.device).view(1, 1, H, 1).expand(B, 1, H, W)
+    xs = torch.linspace(-1.0, 1.0, W, device=x.device).view(1, 1, 1, W).expand(B, 1, H, W)
+    return torch.cat([x, ys, xs], dim=1)
+
+
+class ResBlock(nn.Module):
+    """Strided residual block with GroupNorm (Retna_V2 building block)."""
+
+    def __init__(self, in_ch: int, out_ch: int, groups: int = 8) -> None:
+        _require_torch()
+        super().__init__()
+        mid = in_ch + out_ch
+        g_mid = _valid_groups(mid, groups)
+        g_out = _valid_groups(out_ch, groups)
+        self.body = nn.Sequential(
+            nn.Conv2d(in_ch, mid, 3, padding=1),
+            nn.GroupNorm(g_mid, mid),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(mid, out_ch, 3, padding=1, stride=2),
+            nn.GroupNorm(g_out, out_ch),
+        )
+        self.shortcut = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 1, stride=2),
+            nn.GroupNorm(g_out, out_ch),
+        )
+
+    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        return F.leaky_relu(self.body(x) + self.shortcut(x), inplace=True)
+
+
+class Retna_V2(nn.Module):
+    """Improved multi-scale iterative aggregation network with GroupNorm + CoordConv."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_classes: int,
+        hidden_channels: "list[int] | None" = None,
+        coord_conv: bool = True,
+    ) -> None:
+        _require_torch()
+        super().__init__()
+        if hidden_channels is None:
+            hidden_channels = [32, 64, 128, 256]
+        self.coord_conv = coord_conv
+        effective_in = in_channels + 2 if coord_conv else in_channels
+        hidden = list(hidden_channels)
+        hidden.insert(0, effective_in)
+        self._effective_in = effective_in
+        self._hidden = hidden
+        blocks = []
+        for i in range(len(hidden) - 1):
+            in_ch = hidden[i] if i == 0 else hidden[i] + effective_in
+            blocks.append(ResBlock(in_ch, hidden[i + 1]))
+        self.blocks = nn.ModuleList(blocks)
+        self._sum_ch = sum(hidden)
+        self.conv_last = nn.Conv2d(self._sum_ch, out_classes, 1)
+
+    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        if self.coord_conv:
+            x = add_coord_channels(x)
+        x_in = x
+        x_next = x_in
+        out_list = [x_in]
+        for block in self.blocks:
+            x_next = block(x_next)
+            x_out = F.interpolate(x_next, size=x_in.shape[2:], mode="bilinear", align_corners=False)
+            x_in_down = F.interpolate(x_in, size=x_next.shape[2:], mode="bilinear", align_corners=False)
+            x_next = torch.cat([x_in_down, x_next], dim=1)
+            out_list.append(x_out)
+        return self.conv_last(torch.cat(out_list, dim=1))
+
+
+class RoofNet(nn.Module):
+    """Multi-task roof analysis network (Retna_V2 backbone, height + shape heads).
+
+    Legacy version superseded by RoofNetV2/V3.
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 3,
+        n_classes: int = 6,
+        hidden_channels: "list[int] | None" = None,
+        coord_conv: bool = True,
+    ) -> None:
+        _require_torch()
+        super().__init__()
+        if hidden_channels is None:
+            hidden_channels = [32, 64, 128, 256]
+        self.coord_conv = coord_conv
+        effective_in = in_channels + 2 if coord_conv else in_channels
+        hidden = list(hidden_channels)
+        hidden.insert(0, effective_in)
+        self._effective_in = effective_in
+        self._backbone_ch = sum(hidden)
+        blocks = []
+        for i in range(len(hidden) - 1):
+            in_ch = hidden[i] if i == 0 else hidden[i] + effective_in
+            blocks.append(ResBlock(in_ch, hidden[i + 1]))
+        self.blocks = nn.ModuleList(blocks)
+        self.height_head = nn.Conv2d(self._backbone_ch, 1, 1)
+        self.shape_head = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(self._backbone_ch, n_classes),
+        )
+
+    def _backbone_features(self, x: "torch.Tensor") -> "torch.Tensor":
+        if self.coord_conv:
+            x = add_coord_channels(x)
+        x_in = x
+        x_next = x_in
+        out_list = [x_in]
+        for block in self.blocks:
+            x_next = block(x_next)
+            x_out = F.interpolate(x_next, size=x_in.shape[2:], mode="bilinear", align_corners=False)
+            x_in_down = F.interpolate(x_in, size=x_next.shape[2:], mode="bilinear", align_corners=False)
+            x_next = torch.cat([x_in_down, x_next], dim=1)
+            out_list.append(x_out)
+        return torch.cat(out_list, dim=1)
+
+    def forward(
+        self,
+        x: "torch.Tensor",
+        mask: "torch.Tensor | None" = None,
+    ) -> "tuple[torch.Tensor, torch.Tensor]":
+        feat = self._backbone_features(x)
+        height_map = self.height_head(feat)
+        if mask is not None:
+            m = mask.float()
+            if m.dim() == 3:
+                m = m.unsqueeze(1)
+            feat = feat * m
+        shape_logits = self.shape_head(feat)
+        return height_map, shape_logits

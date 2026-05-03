@@ -1,4 +1,4 @@
-"""tools.ml.scoreboard — Aggregate training-run metrics into one JSON registry.
+"""tools.ml.eval.scoreboard — Aggregate training-run metrics into one JSON registry.
 
 Each call to ``record_run()`` appends an entry to ``models/scoreboard.json``
 with the checkpoint's best validation metrics, run timestamp, dataset size,
@@ -6,7 +6,7 @@ and config hash. This lets us compare RoofNetV3 vs HeightUNet vs cascade
 runs without grepping through scattered ``*_history.json`` files.
 
 Usage:
-    from tools.ml.scoreboard import record_run
+    from tools.ml.eval.scoreboard import record_run
     record_run(
         model_path="models/roofnet_v3.pt",
         arch="roofnet_v3",
@@ -18,8 +18,8 @@ Usage:
     )
 
 CLI:
-    python -m tools.ml.scoreboard show          # print sorted scoreboard
-    python -m tools.ml.scoreboard show --task height
+    python -m tools.ml.eval.scoreboard show          # print sorted scoreboard
+    python -m tools.ml.eval.scoreboard show --task height
 """
 
 from __future__ import annotations

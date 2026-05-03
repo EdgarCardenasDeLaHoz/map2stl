@@ -52,7 +52,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             print("error: --cities is required unless --skip-collect", file=sys.stderr)
             return 2
         cmd = [
-            sys.executable, "-u", "-m", "tools.ml.collect_osm_tiles",
+            sys.executable, "-u", "-m", "tools.ml.data.collect_osm_tiles",
             "--cities", *args.cities,
             "--tiles-per-city", str(args.tiles_per_city),
             "--tile-size", str(args.tile_size),
@@ -70,7 +70,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     if args.grow:
         cmd = [
-            sys.executable, "-u", "-m", "tools.ml.grow_prune",
+            sys.executable, "-u", "-m", "tools.ml.train.grow_prune",
             "--tiles", str(tile_dir),
             "--output", str(output),
             "--cycles", str(args.cycles),
@@ -85,7 +85,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             cmd += ["--start-checkpoint", args.resume]
     else:
         cmd = [
-            sys.executable, "-u", "-m", "tools.ml.train_retna",
+            sys.executable, "-u", "-m", "tools.ml.train.train_retna",
             "--tiles", str(tile_dir),
             "--output", str(output),
             "--epochs", str(args.epochs),
@@ -106,7 +106,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not args.skip_inspect:
         inspect_out = output.with_suffix("").name + "_inspect.pdf"
         cmd = [
-            sys.executable, "-m", "tools.ml.inspect_retna",
+            sys.executable, "-m", "tools.ml.analysis.inspect_retna",
             "--checkpoint", str(output),
             "--tiles", str(tile_dir),
             "--out", str(output.parent / inspect_out),

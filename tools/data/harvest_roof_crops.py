@@ -53,7 +53,7 @@ for _p in (_STRM2STL, _REPO_ROOT):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from tools.seed_eval_regions import EVAL_CITIES  # noqa: E402
+from tools.data.seed_eval_regions import EVAL_CITIES  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Shape label set (must match roof_classifier._SHAPE_LABELS and RoofNet order)

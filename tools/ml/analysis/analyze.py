@@ -1,4 +1,4 @@
-"""tools.ml.analyze — Inspect a trained checkpoint's behaviour.
+"""tools.ml.analyze â€” Inspect a trained checkpoint's behaviour.
 
 Reports four diagnostic signals so we can make grounded decisions about
 how to improve training:
@@ -10,7 +10,7 @@ how to improve training:
      height-IoU). Tells us which signal is and isn't moving.
 
   3. Layer-wise gradient norms after one validation backward pass.
-     A "dead" layer (≈0) signals frozen / collapsed weights;
+     A "dead" layer (â‰ˆ0) signals frozen / collapsed weights;
      an enormous norm signals instability.
 
   4. Activation statistics (mean / std / fraction-saturated) at each
@@ -131,7 +131,7 @@ def _loss_decomposition(model, loader, n_iters: int, grad_weight: float = 0.2) -
 
 
 def _layer_grad_norms(model, batch, n_iters: int, grad_weight: float = 0.2) -> dict[str, float]:
-    """Run one backward pass on a single batch; return ‖grad‖₂ per parameter group."""
+    """Run one backward pass on a single batch; return â€–gradâ€–â‚‚ per parameter group."""
     model.train()
     rgb, height = batch
     mask_logits, height_pred, _ = model(rgb, n_iters=n_iters)
@@ -188,7 +188,7 @@ def _render_examples(
         import matplotlib.pyplot as plt
         import matplotlib.cm as cm
     except Exception as e:
-        print(f"  (matplotlib not available — skipping render: {e})")
+        print(f"  (matplotlib not available â€” skipping render: {e})")
         return []
 
     # Pass 1: collect per-tile (rgb, target, mask_pred, h_pred, mae)
@@ -246,7 +246,7 @@ def _render_examples(
         axes[3].imshow(ph, cmap="viridis", vmin=0, vmax=vmax_h)
         axes[3].set_title(f"Pred height (max={ph.max():.1f}m)")
         im = axes[4].imshow(err, cmap="RdBu_r", vmin=-ev, vmax=ev)
-        axes[4].set_title(f"Pred − GT (MAE={s['mae']:.2f}m)")
+        axes[4].set_title(f"Pred âˆ’ GT (MAE={s['mae']:.2f}m)")
         for ax in axes:
             ax.set_xticks([]); ax.set_yticks([])
         fig.colorbar(im, ax=axes[4], shrink=0.7)
@@ -280,7 +280,7 @@ def _activation_stats(model, batch, n_iters: int) -> dict[str, dict[str, float]]
             }
         return _fn
 
-    # Hook all named submodules but skip the very leaves (params) — module-level only.
+    # Hook all named submodules but skip the very leaves (params) â€” module-level only.
     for name, module in model.named_modules():
         if name == "" or any(p is module for _, p in model.named_modules() if name and _.startswith(name + ".")):
             continue
@@ -322,7 +322,7 @@ def main():
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model: {args.arch}, {n_params:,} params")
 
-    from tools.ml.data import make_height_loaders
+    from tools.ml.data.datasets import make_height_loaders
     tile_paths = sorted(tdir.glob("*.npz"))
     if not tile_paths:
         raise SystemExit(f"no tiles in {tdir}")
@@ -332,7 +332,7 @@ def main():
     )
     print(f"Split: {split['n_train']} train / {split['n_val']} val")
 
-    print("\n[1/4] per-sample MAE on validation set …")
+    print("\n[1/4] per-sample MAE on validation set â€¦")
     maes, gt_means = _per_sample_mae(model, val_loader, args.n_iters)
     print(f"      n={maes.size}  mean MAE={maes.mean():.2f}m  median={np.median(maes):.2f}m")
     print(f"      worst 25%: {np.percentile(maes, 75):.2f}m  best 25%: {np.percentile(maes, 25):.2f}m")
@@ -342,7 +342,7 @@ def main():
             r = float(np.corrcoef(maes, gt_means)[0, 1])
             print(f"      pearson(MAE, target-mean-height) = {r:+.3f}")
 
-    print("\n[2/4] loss-component decomposition (mean over val set) …")
+    print("\n[2/4] loss-component decomposition (mean over val set) â€¦")
     parts = _loss_decomposition(model, val_loader, args.n_iters)
     total = sum(parts.values()) or 1.0
     for k, v in sorted(parts.items(), key=lambda kv: -kv[1]):
@@ -351,15 +351,15 @@ def main():
     # Pull one batch for grad-norm + activation-stats analysis
     one_batch = next(iter(val_loader))
 
-    print("\n[3/4] layer-wise gradient norms (single backward on val batch) …")
+    print("\n[3/4] layer-wise gradient norms (single backward on val batch) â€¦")
     norms = _layer_grad_norms(model, one_batch, args.n_iters)
     summary = _summarise_grad_norms(norms)
     for bucket, s in summary.items():
-        flag = " ⚠ DEAD" if s["max"] < 1e-6 else (" ⚠ HUGE" if s["max"] > 100 else "")
+        flag = " âš  DEAD" if s["max"] < 1e-6 else (" âš  HUGE" if s["max"] > 100 else "")
         print(f"      {bucket:<14s}  n={s['n_params']:<4d} zero={s['n_zero']:<3d} "
               f"p50={s['p50']:.2e} mean={s['mean']:.2e} max={s['max']:.2e}{flag}")
 
-    print("\n[4/4] activation statistics (forward pass on val batch) …")
+    print("\n[4/4] activation statistics (forward pass on val batch) â€¦")
     acts = _activation_stats(model, one_batch, args.n_iters)
     # Show only modules where we have something interesting
     interesting = [(n, s) for n, s in acts.items()
@@ -376,13 +376,13 @@ def main():
             print(f"        {n:<35s} mean={s['mean']:+.2f} std={s['std']:.2f} "
                   f"zero%={s['frac_zero']*100:.0f}{tag}")
     else:
-        print("      no obviously broken activation layers detected (depth ≤ 2)")
+        print("      no obviously broken activation layers detected (depth â‰¤ 2)")
 
     if args.render:
         out_dir = Path(args.render)
         if not out_dir.is_absolute():
             out_dir = Path(__file__).resolve().parents[2] / args.render
-        print(f"\n[5/5] rendering {args.n_samples} sample tiles → {out_dir} …")
+        print(f"\n[5/5] rendering {args.n_samples} sample tiles â†’ {out_dir} â€¦")
         saved = _render_examples(model, val_loader, args.n_iters, out_dir, args.n_samples)
         for p in saved:
             print(f"        {p}")

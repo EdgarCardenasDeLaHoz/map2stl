@@ -1,5 +1,5 @@
 """
-tools.ml.train — Unified training loop for building height + roof shape.
+tools.ml.train â€” Unified training loop for building height + roof shape.
 
 Supports three training modes:
   - "shape"  : train shape classification head only (CrossEntropy)
@@ -287,7 +287,7 @@ def _height_iou_loss(pred, target, smooth: float = 1.0):
     """Height-overlap IoU loss for regression.
 
     Treats height values as 1-D intervals rooted at 0.  For each pixel pair
-    (p, t) both ≥ 0, IoU = min(p,t) / max(p,t).  Summing over building
+    (p, t) both â‰¥ 0, IoU = min(p,t) / max(p,t).  Summing over building
     pixels encourages the model to simultaneously predict the correct
     locations AND magnitudes, without requiring exact pixel accuracy.
 
@@ -630,7 +630,7 @@ def _unet_loss(
     + iou_weight * _height_iou_loss (height-overlap IoU encourages correct
       location AND magnitude simultaneously)
 
-    Segmentation is an easier task than height regression — the mask head
+    Segmentation is an easier task than height regression â€” the mask head
     converges in the first few epochs and provides a clean building/background
     signal that bootstraps the height head's learning.
     """
@@ -649,7 +649,7 @@ def train_unet(
     config: "TrainConfig | None" = None,
     verbose: bool = True,
 ) -> dict:
-    """Train HeightUNet — U-Net with shared decoder, mask head + height head.
+    """Train HeightUNet â€” U-Net with shared decoder, mask head + height head.
 
     The mask head (building/non-building segmentation) provides a strong,
     easy-to-learn signal from the start, even on tiles with noisy height labels.
@@ -660,7 +660,7 @@ def train_unet(
     """
     _require_torch()
     from tools.ml.models import HeightUNet
-    from tools.ml.data import make_height_loaders
+    from tools.ml.data.datasets import make_height_loaders
 
     cfg = config or TrainConfig()
     device = torch.device(
@@ -861,7 +861,7 @@ def train_unet(
 
 
 def _make_v3_optimizer(model, lr: float, weight_decay: float, backbone_frozen: bool = False):
-    """AdamW with per-group LRs: FPN 3×, heads 5×, backbone 0.1× (or excluded when frozen)."""
+    """AdamW with per-group LRs: FPN 3Ã—, heads 5Ã—, backbone 0.1Ã— (or excluded when frozen)."""
     decoder_ids = set()
     for name in ("fpn", "mask_head", "height_head", "scratchpad"):
         mod = getattr(model, name, None)
@@ -909,7 +909,7 @@ def train_v3(
     """
     _require_torch()
     from tools.ml.models import build_model
-    from tools.ml.data import make_height_loaders
+    from tools.ml.data.datasets import make_height_loaders
 
     cfg = config or TrainConfig(task="height")
     device = _resolve_device(cfg.device)
@@ -1007,7 +1007,7 @@ def train_v3(
         if is_small and epoch == cfg.freeze_backbone_epochs + 1:
             if hasattr(model, "unfreeze_backbone"):
                 model.unfreeze_backbone()
-                # Rebuild optimizer with per-group LRs; backbone at 0.1× base
+                # Rebuild optimizer with per-group LRs; backbone at 0.1Ã— base
                 optimizer = _make_v3_optimizer(
                     model, cfg.lr * 0.1, cfg.weight_decay, backbone_frozen=False
                 )
@@ -1114,7 +1114,7 @@ def train_v3(
 
     # Record run on the unified scoreboard so we can compare across architectures.
     try:
-        from tools.ml.scoreboard import record_run
+        from tools.ml.eval.scoreboard import record_run
         # Pull best epoch's full metric set from history
         best_entry = next(
             (h for h in reversed(history) if h.get("epoch") == best_epoch),
@@ -1177,7 +1177,7 @@ def train_shape(
     """
     _require_torch()
     from tools.ml.models import build_model
-    from tools.ml.data import make_roof_loaders
+    from tools.ml.data.datasets import make_roof_loaders
 
     cfg = config or TrainConfig(task="shape")
     device = _resolve_device(cfg.device)
@@ -1216,7 +1216,7 @@ def train_shape(
         print(f"Split: {split_info['n_train']} train / {split_info['n_val']} val / {split_info['n_test']} test")
         print(f"Train distribution: {split_info['train_distribution']}")
 
-    # Model — start with frozen backbone
+    # Model â€” start with frozen backbone
     model = build_model(
         task="shape",
         pretrained=True,
@@ -1433,7 +1433,7 @@ def train_height(
     """
     _require_torch()
     from tools.ml.models import build_model
-    from tools.ml.data import make_height_loaders
+    from tools.ml.data.datasets import make_height_loaders
 
     cfg = config or TrainConfig(task="height")
     device = _resolve_device(cfg.device)

@@ -1,5 +1,5 @@
 """
-tools.ml.eval — Evaluation metrics, confusion matrices, and reporting.
+tools.ml.eval â€” Evaluation metrics, confusion matrices, and reporting.
 
 Provides both programmatic evaluation (for notebooks) and CLI evaluation
 (for automated runs).  All functions return plain dicts/arrays suitable
@@ -101,7 +101,7 @@ def evaluate_shape_model(
         raise ImportError("PyTorch required")
 
     from tools.ml.models import build_model
-    from tools.ml.data import make_roof_loaders
+    from tools.ml.data.datasets import make_roof_loaders
 
     if device == "auto":
         if torch.cuda.is_available():
@@ -185,7 +185,7 @@ def evaluate_height_model(
         raise ImportError("PyTorch required")
 
     from tools.ml.models import build_model
-    from tools.ml.data import make_height_loaders
+    from tools.ml.data.datasets import make_height_loaders
 
     if device == "auto":
         dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -390,7 +390,7 @@ def plot_sample_predictions(
         raise ImportError("PyTorch required")
     import matplotlib.pyplot as plt
     from tools.ml.models import build_model
-    from tools.ml.data import RoofCropDataset, build_transforms
+    from tools.ml.data.datasets import RoofCropDataset, build_transforms
 
     strm2stl = Path(__file__).resolve().parents[2]
     data_root = Path(data_dir)

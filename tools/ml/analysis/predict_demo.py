@@ -35,7 +35,7 @@ def predict_and_plot(
     import torch
     from PIL import Image
     from geo2stl.sat2stl import fetch_satellite_tiles
-    from tools.ml.collect_osm_tiles import _fetch_buildings_via_osmnx, _rasterize_buildings
+    from tools.ml.data.collect_osm_tiles import _fetch_buildings_via_osmnx, _rasterize_buildings
     from tools.ml.models import RoofNetV2
 
     # 1. Fetch satellite RGB

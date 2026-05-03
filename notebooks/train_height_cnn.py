@@ -114,7 +114,7 @@ def main() -> None:
     if CHECKPOINT.exists():
         import torch
         from tools.ml.models import build_model
-        from tools.ml.data import make_height_loaders
+        from tools.ml.data.datasets import make_height_loaders
 
         arch_detected = detect_arch(CHECKPOINT) or ARCH
         model = build_model(arch=arch_detected, task="both", pretrained=False, device=DEVICE)
