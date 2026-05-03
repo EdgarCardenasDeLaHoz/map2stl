@@ -49,8 +49,6 @@ def _reduce_buildings(gdf):
     Falls back to the original gdf on any error.
     """
     try:
-        import numpy as np  # noqa: F811 (local re-import for clarity)
-
         original_crs = gdf.crs
         gdf = gdf.copy().to_crs(epsg=3857)
         gdf['height_m'] = gdf['height_m'].round(0)

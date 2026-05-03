@@ -640,38 +640,14 @@ class SatelliteLayer(GeoLayerBase):
     """Unified satellite + Earth Engine data layer."""
 
     name = "satellite"
-
-    @staticmethod
-    def fetch_satellite_tiles(north, south, east, west, dim=600):
-        return fetch_satellite_tiles(north, south, east, west, dim)
-
-    @staticmethod
-    def fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset):
-        return fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset)
-
-    @staticmethod
-    def fetch_water_mask(north, south, east, west, sat_scale, dataset):
-        return fetch_water_mask(north, south, east, west, sat_scale, dataset)
-
-    @staticmethod
-    def fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, dim):
-        return fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, dim)
-
-    @staticmethod
-    def initialize_earth_engine():
-        return initialize_earth_engine()
-
-    @staticmethod
-    def calculate_scale_for_dimensions(N, S, E, W, target_dim=500):
-        return calculate_scale_for_dimensions(N, S, E, W, target_dim)
-
-    @staticmethod
-    def fetch_bbox_image(N, S, E, W, scale=None, dataset="copernicus", use_cache=True, target_dim=None):
-        return fetch_bbox_image(N, S, E, W, scale=scale, dataset=dataset, use_cache=use_cache, target_dim=target_dim)
-
-    @staticmethod
-    def get_aquatic_regions(N, S, E, W, dataset="esa", scale=None, use_cache=True, target_dim=500):
-        return get_aquatic_regions(N, S, E, W, dataset=dataset, scale=scale, use_cache=use_cache, target_dim=target_dim)
+    fetch_satellite_tiles = staticmethod(fetch_satellite_tiles)
+    fetch_water_mask_images = staticmethod(fetch_water_mask_images)
+    fetch_water_mask = staticmethod(fetch_water_mask)
+    fetch_sat_overlay = staticmethod(fetch_sat_overlay)
+    initialize_earth_engine = staticmethod(initialize_earth_engine)
+    calculate_scale_for_dimensions = staticmethod(calculate_scale_for_dimensions)
+    fetch_bbox_image = staticmethod(fetch_bbox_image)
+    get_aquatic_regions = staticmethod(get_aquatic_regions)
 
 
 SAT_LAYER = SatelliteLayer()
