@@ -17,6 +17,184 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def _make_geo_to_px(north, south, east, west, width, height):
+    """Return (geo_to_px, coords_to_px) closures for a bbox/canvas."""
+    lat_span = north - south
+    lon_span = east - west
+
+    def geo_to_px(lon, lat):
+        x = (lon - west) / lon_span * width
+        y = (north - lat) / lat_span * height
+        return (x, y)
+
+    def coords_to_px(coords):
+        return [geo_to_px(lon, lat) for lon, lat in coords]
+
+    return geo_to_px, coords_to_px
+
+
+def _rasterize_composite_buildings(features, coords_to_px, width, height):
+    """Return a float32 array with per-pixel building height in metres."""
+    from PIL import Image, ImageDraw
+
+    arr = np.zeros((height, width), dtype=np.float32)
+    for feat in features:
+        geom = feat.get("geometry") or {}
+        h_m = float((feat.get("properties") or {}).get("height_m") or 10)
+        rings = []
+        if geom.get("type") == "Polygon":
+            rings = [geom["coordinates"][0]]
+        elif geom.get("type") == "MultiPolygon":
+            rings = [poly[0] for poly in geom["coordinates"]]
+        for ring in rings:
+            if not ring:
+                continue
+            px = coords_to_px(ring)
+            mask = Image.new("1", (width, height), 0)
+            ImageDraw.Draw(mask).polygon(px, fill=1)
+            arr += np.array(mask, dtype=np.float32) * h_m
+    return arr
+
+
+def _rasterize_composite_roads(features, coords_to_px, width, height, m_per_px):
+    """Return a binary float32 array marking road pixels."""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("1", (width, height), 0)
+    draw = ImageDraw.Draw(img)
+    for feat in features:
+        geom = feat.get("geometry") or {}
+        w_m = float((feat.get("properties") or {}).get("road_width_m") or 6)
+        w_px = max(1, round(w_m / m_per_px))
+        lines = []
+        if geom.get("type") == "LineString":
+            lines = [geom["coordinates"]]
+        elif geom.get("type") == "MultiLineString":
+            lines = geom["coordinates"]
+        for line in lines:
+            px = coords_to_px(line)
+            if len(px) >= 2:
+                draw.line(px, fill=1, width=w_px)
+    return np.array(img, dtype=np.float32)
+
+
+def _rasterize_composite_waterways(features, coords_to_px, width, height, m_per_px):
+    """Return a binary float32 array marking waterway pixels."""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("1", (width, height), 0)
+    draw = ImageDraw.Draw(img)
+    w_px = max(2, round(4.0 / m_per_px))
+    for feat in features:
+        geom = feat.get("geometry") or {}
+        if geom.get("type") == "LineString":
+            px = coords_to_px(geom["coordinates"])
+            if len(px) >= 2:
+                draw.line(px, fill=1, width=w_px)
+        elif geom.get("type") == "MultiLineString":
+            for line in geom["coordinates"]:
+                px = coords_to_px(line)
+                if len(px) >= 2:
+                    draw.line(px, fill=1, width=w_px)
+        elif geom.get("type") == "Polygon":
+            px = coords_to_px(geom["coordinates"][0])
+            if px:
+                draw.polygon(px, fill=1)
+        elif geom.get("type") == "MultiPolygon":
+            for poly in geom["coordinates"]:
+                px = coords_to_px(poly[0])
+                if px:
+                    draw.polygon(px, fill=1)
+    return np.array(img, dtype=np.float32)
+
+
+def _rasterize_composite_walls(features, coords_to_px, width, height, m_per_px):
+    """Return a float32 array with per-pixel wall height in metres."""
+    from PIL import Image, ImageDraw
+
+    arr = np.zeros((height, width), dtype=np.float32)
+    for feat in features:
+        geom = feat.get("geometry") or {}
+        h_m = float((feat.get("properties") or {}).get("height_m") or 5)
+        w_px = max(1, round(2.0 / m_per_px))
+        lines = []
+        if geom.get("type") == "LineString":
+            lines = [geom["coordinates"]]
+        elif geom.get("type") == "MultiLineString":
+            lines = geom["coordinates"]
+        for line in lines:
+            px = coords_to_px(line)
+            if len(px) >= 2:
+                mask = Image.new("1", (width, height), 0)
+                ImageDraw.Draw(mask).line(px, fill=1, width=w_px)
+                arr += np.array(mask, dtype=np.float32) * h_m
+    return arr
+
+
+def rasterize_composite_layers(
+    north: float,
+    south: float,
+    east: float,
+    west: float,
+    width: int,
+    height: int,
+    osm_data: dict | None,
+) -> dict:
+    """Rasterize cached OSM layers into independent composite arrays.
+
+    Returns per-layer float32 arrays shaped for `/api/composite/city-raster`.
+    This is pure computation with no cache or HTTP dependencies.
+    """
+    lat_span = north - south
+    lon_span = east - west
+
+    def _empty_result():
+        zeros = [0.0] * (width * height)
+        return {
+            "buildings": zeros,
+            "roads": zeros,
+            "waterways": zeros,
+            "walls": zeros,
+            "width": width,
+            "height": height,
+        }
+
+    if lat_span <= 0 or lon_span <= 0:
+        return _empty_result()
+    if not osm_data:
+        return _empty_result()
+
+    lat_mid = (north + south) / 2
+    m_per_px = (lon_span * math.cos(math.radians(lat_mid)) * 111_320.0) / width
+    _, coords_to_px = _make_geo_to_px(north, south, east, west, width, height)
+
+    building_arr = _rasterize_composite_buildings(
+        (osm_data.get("buildings") or {}).get("features") or [],
+        coords_to_px, width, height,
+    )
+    road_arr = _rasterize_composite_roads(
+        (osm_data.get("roads") or {}).get("features") or [],
+        coords_to_px, width, height, m_per_px,
+    )
+    waterway_arr = _rasterize_composite_waterways(
+        (osm_data.get("waterways") or {}).get("features") or [],
+        coords_to_px, width, height, m_per_px,
+    )
+    wall_arr = _rasterize_composite_walls(
+        (osm_data.get("walls") or {}).get("features") or [],
+        coords_to_px, width, height, m_per_px,
+    )
+
+    return {
+        "buildings": building_arr.ravel().tolist(),
+        "roads": road_arr.ravel().tolist(),
+        "waterways": waterway_arr.ravel().tolist(),
+        "walls": wall_arr.ravel().tolist(),
+        "width": width,
+        "height": height,
+    }
+
+
 def _count_verts(g) -> int:
     """Count total exterior vertices in a geometry (for simplification logging)."""
     if g.geom_type == "LineString":

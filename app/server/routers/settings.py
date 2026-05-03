@@ -41,14 +41,6 @@ def _default_projections() -> list[dict]:
 def _load_projections() -> list[dict]:
     """Load projections from geo2stl; fall back to defaults on failure."""
     try:
-        import sys
-        from pathlib import Path as _Path
-
-        strm2stl_root = _Path(__file__).parent.parent.parent
-        root_str = str(strm2stl_root)
-        if root_str not in sys.path:
-            sys.path.append(root_str)
-
         from geo2stl.projections import get_projection_info
 
         info = get_projection_info()

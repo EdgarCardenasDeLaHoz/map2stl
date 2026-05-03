@@ -19,48 +19,16 @@ from fastapi.responses import JSONResponse, Response
 from app.server.config import OSM_CACHE_PATH
 from app.server.core.validation import validate_bbox_diagonal, run_sync
 from app.server.core.responses import error_response
+from app.server.core.height.service import enhance_city_data as _enhance_city_data_impl
+from app.server.core.osm_cache_policy import (
+    building_features as _building_features,
+    city_cache_missing_height_source as _city_cache_missing_height_source,
+    city_cache_missing_building_parts as _city_cache_missing_building_parts,
+    city_cache_needs_enrichment as _city_cache_needs_enrichment,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cities"])
-
-
-def _building_features(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-    buildings = payload.get("buildings") or {}
-    features = buildings.get("features") or []
-    return features if isinstance(features, list) else []
-
-
-def _city_cache_missing_height_source(payload: Dict[str, Any]) -> bool:
-    """Detect older cached city payloads created before height_source existed."""
-    features = _building_features(payload)
-    if not features:
-        return False
-    return any("height_source" not in ((feat.get("properties") or {})) for feat in features)
-
-
-def _city_cache_missing_building_parts(payload: Dict[str, Any]) -> bool:
-    """Detect cached payloads written before building:parts and extended layers were added.
-
-    When towers/churches/fortifications keys are absent the data was cached before
-    the _fetch_building_parts merge was introduced — a fresh fetch is needed.
-    """
-    return "towers" not in payload and "churches" not in payload
-
-
-def _city_cache_needs_enrichment(payload: Dict[str, Any]) -> bool:
-    """Return True when default-height buildings still need raster enhancement."""
-    if _city_cache_missing_height_source(payload):
-        return True
-
-    features = _building_features(payload)
-    if not features:
-        return False
-
-    enhancement = payload.get("height_enhancement") or {}
-    if enhancement.get("source_name") == "merged":
-        return False
-
-    return any((feat.get("properties") or {}).get("height_source") == "default" for feat in features)
 
 
 def _enhance_city_data(
@@ -71,100 +39,8 @@ def _enhance_city_data(
     west: float,
     dim: int = 512,
 ) -> Dict[str, Any]:
-    """Fill default OSM building heights from the merged global height stack."""
-    from city2stl.height import merge_height_rasters
-    from city2stl.height.providers.ndsm import NDSMProvider
-    from city2stl.height.providers.wsf3d import WSF3DProvider
-    from city2stl.height.providers.copernicus import CopernicusProvider
-    from city2stl.height.providers.ghsl import GHSLProvider
-    from city2stl.height.providers.open_buildings import OpenBuildingsProvider
-    from city2stl.height.providers.shadow_height import ShadowHeightProvider
-    from city2stl.heights import enhance_buildings_with_raster
-
-    features = _building_features(payload)
-    if not features:
-        return payload
-
-    # Keep US regions OSM-driven (height / building:levels + default fallback)
-    # instead of applying raster enhancement.
-    center_lat = (north + south) * 0.5
-    center_lon = (east + west) * 0.5
-    in_conus = 24.0 <= center_lat <= 50.0 and -125.0 <= center_lon <= -66.0
-    in_alaska = 51.0 <= center_lat <= 72.0 and -170.0 <= center_lon <= -129.0
-    in_hawaii = 18.0 <= center_lat <= 23.5 and -161.0 <= center_lon <= -154.0
-    in_us = in_conus or in_alaska or in_hawaii
-    if in_us:
-        payload["height_enhancement"] = {
-            "source_name": "osm_only_us",
-            "providers_used": [],
-            "resolution_m": 0.0,
-            "stats": {
-                "skipped": True,
-                "reason": "US bbox uses OSM heights only",
-            },
-        }
-        return payload
-
-    default_count = sum(
-        1 for feat in features
-        if (feat.get("properties") or {}).get("height_source") == "default"
-    )
-    if default_count == 0:
-        return payload
-
-    bbox = (north, south, east, west)
-    providers = [
-        provider for provider in (
-            NDSMProvider(),
-            CopernicusProvider(),
-            OpenBuildingsProvider(),
-            WSF3DProvider(),
-            GHSLProvider(),
-            ShadowHeightProvider(),
-        )
-        if provider.covers(bbox)
-    ]
-
-    results = []
-    for provider in providers:
-        try:
-            result = provider.fetch_heights(bbox, (dim, dim))
-        except Exception as exc:
-            logger.warning("City height enhancement provider '%s' failed: %s", provider.name, exc)
-            continue
-
-        if result.raster.size == 0:
-            continue
-
-        try:
-            import numpy as np
-
-            valid_pixels = int(np.count_nonzero(~np.isnan(result.raster)))
-        except Exception:
-            valid_pixels = 0
-        if valid_pixels <= 0:
-            continue
-        results.append(result)
-
-    if not results:
-        return payload
-
-    merged = merge_height_rasters(results, target_shape=(dim, dim))
-    enhanced = enhance_buildings_with_raster(
-        payload["buildings"],
-        merged.raster,
-        bbox,
-        confidence_raster=merged.confidence,
-        source_name=merged.source_name,
-    )
-    payload["buildings"] = enhanced["buildings"]
-    payload["height_enhancement"] = {
-        "source_name": merged.source_name,
-        "providers_used": [item.source_name for item in results],
-        "resolution_m": float(merged.resolution_m),
-        "stats": enhanced.get("stats") or {},
-    }
-    return payload
+    """Compatibility wrapper for city height enhancement used by tests."""
+    return _enhance_city_data_impl(payload, north, south, east, west, dim)
 
 # ---------------------------------------------------------------------------
 # Cache helpers

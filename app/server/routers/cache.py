@@ -7,11 +7,20 @@ Extracted from location_picker.py (backend refactor, step 6).
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import time
 from pathlib import Path
 from typing import Any
+
+from app.server.core.cache_inspector import (
+    build_tree_node as _build_tree_node,
+    read_json_metadata as _read_json_metadata,
+    bbox_from_metadata as _bbox_from_metadata,
+    match_region_name as _match_region_name,
+    infer_region_group as _infer_region_group,
+    build_region_tree as _build_region_tree,
+    flatten_files as _flatten_files,
+)
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -59,69 +68,6 @@ def _iter_cache_roots() -> list[Path]:
     return dedup
 
 
-def _build_tree_node(path: Path, root: Path) -> dict[str, Any] | None:
-    """Build a recursive folder/file tree node with size totals."""
-    try:
-        rel = path.relative_to(root)
-        rel_str = "." if str(rel) == "." else str(rel).replace("\\", "/")
-    except Exception:
-        rel_str = path.name
-
-    if path.is_file():
-        try:
-            size = int(path.stat().st_size)
-            mtime = float(path.stat().st_mtime)
-        except Exception:
-            return None
-        return {
-            "name": path.name,
-            "path": rel_str,
-            "is_dir": False,
-            "size_bytes": size,
-            "file_count": 1,
-            "mtime": mtime,
-            "children": [],
-        }
-
-    children: list[dict[str, Any]] = []
-    size_sum = 0
-    file_count = 0
-    try:
-        entries = sorted(path.iterdir(), key=lambda p: p.name.lower())
-    except Exception:
-        entries = []
-
-    for entry in entries:
-        node = _build_tree_node(entry, root)
-        if node is None:
-            continue
-        children.append(node)
-        size_sum += int(node["size_bytes"])
-        file_count += int(node["file_count"])
-
-    children.sort(key=lambda n: int(n.get("size_bytes", 0)), reverse=True)
-    return {
-        "name": path.name,
-        "path": rel_str,
-        "is_dir": True,
-        "size_bytes": size_sum,
-        "file_count": file_count,
-        "children": children,
-    }
-
-
-_HYDRORIVERS_REGION_NAMES = {
-    "af": "HydroRIVERS Africa",
-    "ar": "HydroRIVERS Arctic",
-    "as": "HydroRIVERS Asia",
-    "au": "HydroRIVERS Australia",
-    "eu": "HydroRIVERS Europe",
-    "na": "HydroRIVERS North America",
-    "sa": "HydroRIVERS South America",
-    "si": "HydroRIVERS Siberia",
-}
-
-
 def _load_regions() -> list[dict[str, Any]]:
     try:
         from app.server.core.db import get_db
@@ -144,176 +90,8 @@ def _load_regions() -> list[dict[str, Any]]:
     return regions
 
 
-def _read_json_metadata(path: Path) -> dict[str, Any] | None:
-    try:
-        if not path.exists() or path.stat().st_size > 256 * 1024:
-            return None
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else None
-    except Exception:
-        return None
-
-
-def _bbox_from_metadata(meta: dict[str, Any] | None) -> tuple[float, float, float, float] | None:
-    if not meta:
-        return None
-
-    bbox = meta.get("bbox")
-    if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
-        west, south, east, north = bbox
-        try:
-            return float(west), float(south), float(east), float(north)
-        except Exception:
-            return None
-
-    try:
-        return (
-            float(meta["west"]),
-            float(meta["south"]),
-            float(meta["east"]),
-            float(meta["north"]),
-        )
-    except Exception:
-        return None
-
-
-def _match_region_name(bbox: tuple[float, float, float, float] | None,
-                       regions: list[dict[str, Any]]) -> str | None:
-    if bbox is None:
-        return None
-
-    west, south, east, north = bbox
-    containing: list[dict[str, Any]] = []
-    intersecting: list[tuple[float, dict[str, Any]]] = []
-
-    for region in regions:
-        if west >= region["west"] and east <= region["east"] and south >= region["south"] and north <= region["north"]:
-            containing.append(region)
-            continue
-
-        overlap_west = max(west, region["west"])
-        overlap_south = max(south, region["south"])
-        overlap_east = min(east, region["east"])
-        overlap_north = min(north, region["north"])
-        if overlap_west < overlap_east and overlap_south < overlap_north:
-            overlap_area = (overlap_east - overlap_west) * (overlap_north - overlap_south)
-            intersecting.append((overlap_area, region))
-
-    if containing:
-        containing.sort(key=lambda region: (region.get("area", 0.0), region["name"]))
-        return str(containing[0]["name"])
-    if intersecting:
-        intersecting.sort(key=lambda item: (-item[0], item[1]["name"]))
-        return str(intersecting[0][1]["name"])
-    return None
-
-
-def _infer_region_group(abs_path: Path, relative_path: str, namespace: str,
-                        regions: list[dict[str, Any]]) -> str:
-    parts = [part for part in relative_path.replace("\\", "/").split("/") if part]
-    if namespace == "hydrorivers":
-        for part in parts:
-            if part.startswith("HydroRIVERS_v10_"):
-                code = part.split("_")[2][:2].lower()
-                return _HYDRORIVERS_REGION_NAMES.get(code, "HydroRIVERS Shared")
-        return "HydroRIVERS Shared"
-
-    meta: dict[str, Any] | None = None
-    if abs_path.suffix.lower() == ".json":
-        meta = _read_json_metadata(abs_path)
-    elif abs_path.suffix.lower() == ".npz":
-        meta = _read_json_metadata(abs_path.with_suffix(".json"))
-
-    region_name = _match_region_name(_bbox_from_metadata(meta), regions)
-    if region_name:
-        return region_name
-
-    if namespace in {"dem", "water", "esa_lc", "composite", "osm", "ghsl", "ndsm", "shadow_height", "wsf3d"}:
-        return "Shared / Unmatched"
-    if namespace.startswith("height_tiles"):
-        return "Training / ML"
-    return "Shared / Global"
-
-
-def _build_region_tree(files: list[dict[str, Any]]) -> dict[str, Any]:
-    root = {
-        "name": "cache",
-        "path": "cache",
-        "is_dir": True,
-        "size_bytes": sum(int(file.get("size_bytes", 0)) for file in files),
-        "file_count": len(files),
-        "children": [],
-    }
-
-    region_groups: dict[str, list[dict[str, Any]]] = {}
-    for file in files:
-        region_groups.setdefault(str(file.get("region_group") or "Shared / Global"), []).append(file)
-
-    for region_name in sorted(region_groups.keys(), key=lambda value: (value.startswith("Shared"), value.lower())):
-        region_files = region_groups[region_name]
-        region_node = {
-            "name": region_name,
-            "path": region_name,
-            "is_dir": True,
-            "size_bytes": sum(int(file.get("size_bytes", 0)) for file in region_files),
-            "file_count": len(region_files),
-            "children": [],
-        }
-
-        namespace_groups: dict[str, list[dict[str, Any]]] = {}
-        for file in region_files:
-            namespace_groups.setdefault(str(file.get("namespace") or file.get("root") or "cache"), []).append(file)
-
-        for namespace in sorted(namespace_groups.keys(), key=str.lower):
-            namespace_files = namespace_groups[namespace]
-            namespace_node = {
-                "name": namespace,
-                "path": f"{region_name}/{namespace}",
-                "is_dir": True,
-                "size_bytes": sum(int(file.get("size_bytes", 0)) for file in namespace_files),
-                "file_count": len(namespace_files),
-                "children": [],
-            }
-            for file in sorted(namespace_files, key=lambda item: int(item.get("size_bytes", 0)), reverse=True):
-                namespace_node["children"].append({
-                    "name": str(file.get("name") or ""),
-                    "path": str(file.get("relative_path") or file.get("name") or ""),
-                    "is_dir": False,
-                    "size_bytes": int(file.get("size_bytes", 0)),
-                    "file_count": 1,
-                    "mtime": float(file.get("mtime", 0.0)),
-                    "children": [],
-                })
-            region_node["children"].append(namespace_node)
-
-        root["children"].append(region_node)
-
-    return root
-
-
-def _flatten_files(node: dict[str, Any], root_name: str, root_path: Path,
-                   regions: list[dict[str, Any]], out: list[dict[str, Any]]) -> None:
-    """Flatten tree leaves into file records for table display."""
-    if not node.get("is_dir"):
-        rel = str(node.get("path", ""))
-        namespace = rel.replace("\\", "/").split("/", 1)[0] if rel else root_name
-        abs_path = root_path / rel if rel and rel != "." else root_path
-        out.append({
-            "root": root_name,
-            "namespace": namespace,
-            "region_group": _infer_region_group(abs_path, rel, namespace, regions),
-            "name": node.get("name", ""),
-            "relative_path": rel,
-            "size_bytes": int(node.get("size_bytes", 0)),
-            "mtime": float(node.get("mtime", 0.0)),
-        })
-        return
-    for child in node.get("children", []):
-        _flatten_files(child, root_name, root_path, regions, out)
-
-
 # ---------------------------------------------------------------------------
-# Internal helpers (kept here since they're only used by cache routes)
+# Route helpers
 # ---------------------------------------------------------------------------
 
 async def _clear_cache():

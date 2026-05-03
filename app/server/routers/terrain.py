@@ -25,10 +25,13 @@ from app.server.core.validation import (
     validate_dim as _validate_dim,
     run_sync,
 )
-from geo2stl.projections import (
-    project_grid as _project_grid_impl,
-    project_water_arrays as _project_water_arrays_impl,
-    project_rgb_image as _project_rgb_image,
+from app.server.core.terrain_raster import (
+    clamp_esa_scale,
+    derive_sat_scale,
+    project_categorical_grid,
+    project_rgb_image,
+    project_scalar_grid,
+    project_water_layers,
 )
 from app.server.core.responses import error_response
 from app.server.config import (
@@ -43,7 +46,6 @@ from fastapi.responses import JSONResponse
 from fastapi import APIRouter, Request, Query, Depends
 from collections import OrderedDict
 import numpy as np
-import math
 import logging
 
 logger = logging.getLogger(__name__)
@@ -62,30 +64,21 @@ _DEM_MEM_CACHE_MAX = 30
 _dem_mem_cache: OrderedDict = OrderedDict()
 
 
-# ---------------------------------------------------------------------------
-# Sync compute helpers (called via run_in_executor to avoid blocking the loop)
-# ---------------------------------------------------------------------------
-
-
 def _project_grid(arr, north, south, east, west, projection, clip_nans,
                   categorical=False):
-    """Apply geo2stl projection to a 2-D array. Sync helper.
-
-    Delegates to geo2stl.projections.project_grid â€” kept as a thin wrapper
-    so existing call-sites in this module do not change.
-    """
-    return _project_grid_impl(arr, north, south, east, west, projection,
-                              clip_nans, categorical=categorical)
+    """Compatibility wrapper kept for tests and local call sites."""
+    if categorical:
+        return project_categorical_grid(arr, north, south, east, west,
+                                        projection, clip_nans)
+    return project_scalar_grid(arr, north, south, east, west,
+                               projection, clip_nans)
 
 
 def _project_water_arrays(water_mask, esa_img, north, south, east, west,
                           projection, clip_nans):
-    """Project both water mask and ESA arrays to keep them aligned.
-
-    Delegates to geo2stl.projections.project_water_arrays.
-    """
-    return _project_water_arrays_impl(water_mask, esa_img, north, south,
-                                      east, west, projection, clip_nans)
+    """Compatibility wrapper kept for tests and local call sites."""
+    return project_water_layers(water_mask, esa_img, north, south,
+                                east, west, projection, clip_nans)
 
 
 def _make_local_dem(north, south, east, west, dim, depth_scale, water_scale,
@@ -209,10 +202,9 @@ async def get_terrain_dem(
                          dtype=float).reshape((dim, dim))
         # Apply projection even in TEST_MODE so tests exercise the full pipeline
         if projection != "none":
-            im = _project_grid(
+            im = project_scalar_grid(
                 im.astype(np.float32), north or 0.0, south or 0.0,
-                east or 0.0, west or 0.0,
-                projection, clip_nans, categorical=False,
+                east or 0.0, west or 0.0, projection, clip_nans,
             )
         payload = _make_dem_payload(im, west or 0.0, south or 0.0,
                                     east or 0.0, north or 0.0, show_sat=False)
@@ -237,9 +229,9 @@ async def get_terrain_dem(
         # All fetch functions now return Plate CarrÃ©e data;
         # projection is applied here as a single external step.
         if projection != "none":
-            im = _project_grid(
+            im = project_scalar_grid(
                 im.astype(np.float32), north, south, east, west,
-                projection, clip_nans, categorical=False,
+                projection, clip_nans,
             )
 
         response_content = _make_dem_payload(
@@ -258,9 +250,9 @@ async def get_terrain_dem(
                     if projection != "none":
                         sat_arr = np.array(sat_values, dtype=np.float32).reshape(
                             sat_height, sat_width)
-                        sat_arr = _project_grid(
+                        sat_arr = project_categorical_grid(
                             sat_arr, north, south, east, west,
-                            projection, clip_nans, categorical=True)
+                            projection, clip_nans)
                         sat_height, sat_width = sat_arr.shape
                         sat_values = sat_arr.ravel().tolist()
                     response_content["sat_available"] = True
@@ -326,12 +318,7 @@ async def get_terrain_water_mask(
 
         # Derive sat_scale (m/px) from requested dim and bbox size.
         # Scale clamping (50 MB / 32768 px limits) is handled inside fetch_water_mask.
-        mid_lat = ((north or 0.0) + (south or 0.0)) / 2.0
-        _m_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
-        _bbox_w_m = abs((east or 0.0) - (west or 0.0)) * _m_per_deg_lon
-        _bbox_h_m = abs((north or 0.0) - (south or 0.0)) * 111_320.0
-        _longer_m = max(_bbox_w_m, _bbox_h_m, 1.0)
-        sat_scale = max(10, int(math.ceil(_longer_m / dim)))
+        sat_scale = derive_sat_scale(north or 0.0, south or 0.0, east or 0.0, west or 0.0, dim)
 
         # --- Water mask disk cache check ---
         _water_cache_key = make_cache_key("water", north, south, east, west, {
@@ -365,7 +352,7 @@ async def get_terrain_water_mask(
             esa_arr = water_arr.copy()
             # Apply projection even in TEST_MODE
             if projection != "none":
-                water_arr, esa_arr = _project_water_arrays(
+                water_arr, esa_arr = project_water_layers(
                     water_arr.astype(np.float32), esa_arr.astype(np.float32),
                     north, south, east, west, projection, clip_nans)
                 h, w = water_arr.shape
@@ -395,7 +382,7 @@ async def get_terrain_water_mask(
 
         # Apply projection if requested
         if projection != "none":
-            water_mask, img = _project_water_arrays(
+            water_mask, img = project_water_layers(
                 water_mask, img, north, south, east, west, projection, clip_nans)
             h, w = water_mask.shape
             water_pixels = int(np.sum(water_mask > 0.5))
@@ -446,12 +433,7 @@ async def get_terrain_esa_land_cover(
             return err
 
         # Derive sat_scale from requested dim and bbox size.
-        mid_lat = ((north or 0.0) + (south or 0.0)) / 2.0
-        _m_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
-        _bbox_w_m = abs((east or 0.0) - (west or 0.0)) * _m_per_deg_lon
-        _bbox_h_m = abs((north or 0.0) - (south or 0.0)) * 111_320.0
-        _longer_m = max(_bbox_w_m, _bbox_h_m, 1.0)
-        sat_scale = max(10, int(math.ceil(_longer_m / dim)))
+        sat_scale = derive_sat_scale(north or 0.0, south or 0.0, east or 0.0, west or 0.0, dim)
 
         _esa_cache_key = make_cache_key("esa_lc", north, south, east, west, {
             "dim": dim, "proj": projection, "cn": clip_nans})
@@ -474,9 +456,8 @@ async def get_terrain_esa_land_cover(
             esa_arr = np.full((h, w), 10, dtype=np.float32)
             # Apply projection even in TEST_MODE
             if projection != "none":
-                esa_arr = _project_grid(
-                    esa_arr, north, south, east, west,
-                    projection, clip_nans, categorical=True)
+                esa_arr = project_categorical_grid(
+                    esa_arr, north, south, east, west, projection, clip_nans)
                 h, w = esa_arr.shape
             return JSONResponse(content={
                 "esa_values_b64": _b64(esa_arr),
@@ -488,22 +469,7 @@ async def get_terrain_esa_land_cover(
         # (fetch_water_mask would also download SRTM tiles for bathymetry,
         # build a water mask, and apply JRC logic â€” all discarded here).
         # Apply the same scale-clamping guards as fetch_water_mask.
-        bbox_w = abs(east - west)
-        bbox_h = abs(north - south)
-        mid_lat = (north + south) / 2.0
-        m_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
-        bbox_w_m = bbox_w * m_per_deg_lon
-        bbox_h_m = bbox_h * 111_320.0
-        _MAX_ESA_PX = 50_331_648 // 2
-        est_px = (bbox_w_m / sat_scale) * (bbox_h_m / sat_scale)
-        if est_px > _MAX_ESA_PX:
-            sat_scale = max(sat_scale, int(
-                math.ceil(math.sqrt(bbox_w_m * bbox_h_m / _MAX_ESA_PX))))
-        min_safe_dim = max(
-            int(math.ceil(bbox_w_m / 32768)),
-            int(math.ceil(bbox_h_m / 32768)), 1)
-        if sat_scale < min_safe_dim:
-            sat_scale = min_safe_dim
+        sat_scale = clamp_esa_scale(north, south, east, west, sat_scale)
 
         try:
             img, _jrc, _elev = await run_sync(
@@ -517,8 +483,9 @@ async def get_terrain_esa_land_cover(
 
         # Apply projection if requested
         if projection != "none":
-            img = _project_grid(img.astype(np.float32), north, south, east, west,
-                                projection, clip_nans, categorical=True)
+            img = project_categorical_grid(
+                img.astype(np.float32), north, south, east, west,
+                projection, clip_nans)
 
         h, w = img.shape
 
@@ -572,7 +539,7 @@ async def get_terrain_satellite(
         # Apply projection even in TEST_MODE
         if projection != "none":
             img_arr = np.array(img)
-            projected = _project_rgb_image(
+            projected = project_rgb_image(
                 img_arr, north, south, east, west, projection, clip_nans)
             img = Image.fromarray(projected)
         buf = BytesIO()
@@ -595,7 +562,7 @@ async def get_terrain_satellite(
             img_arr = np.array(img_pil)
 
             projected = await run_sync(
-                _project_rgb_image, img_arr,
+                project_rgb_image, img_arr,
                 north, south, east, west, projection, clip_nans)
 
             out_img = _Image.fromarray(projected)
@@ -704,9 +671,9 @@ async def get_terrain_hydrology(
         river_arr[h//4:h//3, w//4:3*w//4] = depression_m
         # Apply projection even in TEST_MODE
         if projection != "none":
-            river_arr = _project_grid(
+            river_arr = project_scalar_grid(
                 river_arr, north, south, east, west,
-                projection, clip_nans, categorical=False)
+                projection, clip_nans)
             river_arr = np.nan_to_num(river_arr, nan=0.0)
             h, w = river_arr.shape
         return JSONResponse(content={
@@ -738,9 +705,8 @@ async def get_terrain_hydrology(
 
         # Apply projection if requested
         if projection != "none":
-            river_grid = _project_grid(
-                river_grid, north, south, east, west, projection, clip_nans,
-                categorical=False)
+            river_grid = project_scalar_grid(
+                river_grid, north, south, east, west, projection, clip_nans)
             # Replace NaN fill (from projection) with 0 (= no river) so JSON
             # serialisation produces 0.0 instead of null.
             river_grid = np.nan_to_num(river_grid, nan=0.0)
