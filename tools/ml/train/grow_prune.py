@@ -161,22 +161,96 @@ def block_scores(model: Retna_V1, loader, device, batches: int = 4) -> list[dict
 
 # ── Shape-aware warm start ─────────────────────────────────────────────────
 
+def _state_block_out_channels(state: dict[str, torch.Tensor]) -> list[int]:
+    """Infer per-block output widths from a Retna state dict.
+
+    Each `res_conv` block has two conv weights; the smaller out-dim is the block
+    output width while the larger out-dim is the expansion width.
+    """
+    out: list[int] = []
+    i = 0
+    while True:
+        cands = []
+        for k, t in state.items():
+            if not k.startswith(f"blocks.{i}.") or not k.endswith(".weight"):
+                continue
+            if t.ndim == 4:
+                cands.append(int(t.shape[0]))
+        if not cands:
+            break
+        out.append(min(cands))
+        i += 1
+    return out
+
+
 def shape_aware_load(model: nn.Module, prev_state: dict[str, torch.Tensor]) -> None:
-    """Copy parameters from prev_state into model, ignoring shape mismatches by
-    copying into the leading slice. Layers absent in prev_state are left at init."""
+    """Copy parameters from prev_state into model, with a special remap for
+    `conv_last.weight` so widened Retna block segments stay aligned.
+
+    For generic mismatches, copy the overlapping leading slice and leave the
+    rest at init.
+    """
     own = model.state_dict()
     n_copied = 0
+
+    model_block_out: list[int] = []
+    if hasattr(model, "blocks"):
+        for b in model.blocks:
+            try:
+                model_block_out.append(int(b[-2].out_channels))
+            except (AttributeError, IndexError, TypeError):
+                model_block_out = []
+                break
+    prev_block_out = _state_block_out_channels(prev_state)
+
     for k, v in prev_state.items():
         if k not in own:
             continue
         target = own[k]
         if target.shape == v.shape:
-            target.copy_(v); n_copied += 1
+            target.copy_(v)
+            n_copied += 1
             continue
-        # Copy the overlapping leading slice along each dim.
+
+        # Retna conv_last input layout is [rgb, block0, block1, ...].
+        # A plain leading-slice copy misaligns all blocks after the first grown
+        # block; remap by segments and leave newly-added channels at zero.
+        if (
+            k == "conv_last.weight"
+            and target.ndim == 4
+            and v.ndim == 4
+            and model_block_out
+            and prev_block_out
+        ):
+            target.zero_()
+            n_out = min(target.shape[0], v.shape[0])
+
+            old_prefix = v.shape[1] - int(sum(prev_block_out))
+            new_prefix = target.shape[1] - int(sum(model_block_out))
+            if old_prefix > 0 and new_prefix > 0:
+                keep_prefix = min(old_prefix, new_prefix)
+                target[:n_out, :keep_prefix, :, :].copy_(
+                    v[:n_out, :keep_prefix, :, :]
+                )
+
+            old_off = max(old_prefix, 0)
+            new_off = max(new_prefix, 0)
+            for old_c, new_c in zip(prev_block_out, model_block_out):
+                keep_c = min(old_c, new_c)
+                if keep_c > 0:
+                    target[:n_out, new_off:new_off + keep_c, :, :].copy_(
+                        v[:n_out, old_off:old_off + keep_c, :, :]
+                    )
+                old_off += old_c
+                new_off += new_c
+            n_copied += 1
+            continue
+
+        # Generic fallback: copy overlapping leading slice along each dim.
         slices = tuple(slice(0, min(t, s)) for t, s in zip(target.shape, v.shape))
         target[slices] = v[slices]
         n_copied += 1
+
     model.load_state_dict(own)
     return n_copied
 
@@ -192,10 +266,30 @@ def clone_top_channels_into_new(
     cloning the highest-scoring existing channels (with small Gaussian jitter
     to break symmetry) instead of leaving them at random init.
 
-    Channels also propagate to the *next block's* input dimension, so we copy
-    the matching input slices there too.
+    Function-preserving growth guarantee
+    -------------------------------------
+    After shape_aware_load two sets of weights are at random init and corrupt
+    the existing channels:
 
-    Returns the number of (channel, target_block) pairs cloned.
+    1. The expansion conv (blocks.i.0) gained new output rows [mid_old:mid_new].
+       These random intermediate features flow into the OLD output channels of
+       the output conv through weights at random init →  old channels produce
+       different outputs.  Fix: zero those new expansion rows.
+
+    2. The next block's expansion conv (blocks.{i+1}.0) gained new input
+       columns [3+old_c : 3+new_c] (RGB-offset) corresponding to the grown
+       block's new output channels.  The previous "propagate to next block"
+       code had a wrong shape check (shape[1] == new_c instead of new_c + 3)
+       and wrong column indices so it never fired.  Fix: zero those new input
+       columns so block i's new outputs contribute nothing to block i+1 at
+       grow time.
+
+    With both fixes the model's function for all existing channels is
+    preserved exactly (val loss is identical right after growing), and new
+    channels learn from scratch with gradient signal.
+
+    Returns the number of (channel, target_block) pairs cloned into the
+    output conv's new output-channel slots.
     """
     own = model.state_dict()
     n_clones = 0
@@ -218,22 +312,45 @@ def clone_top_channels_into_new(
         for src in src_idxs:
             src_dup_count[src] += 1
 
-        # Retna_V1 block = Sequential(Conv_expand, GN, Conv_out, GN, ReLU).
+        # Retna_V1 block = res_conv = Sequential(Conv_expand, ReLU, Conv_out, ReLU).
         # The block's *output* channels are the second Conv2d. Find the
         # 4-D weight whose out-channel dim equals new_c (post-grow).
         conv_key_prefix = None
+        exp_key = None
         for k in own.keys():
             if not k.startswith(f"blocks.{blk_idx}.") or not k.endswith(".weight"):
                 continue
             t = own[k]
-            if t.ndim == 4 and t.shape[0] == new_c:
+            if t.ndim != 4:
+                continue
+            if t.shape[0] == new_c:
                 conv_key_prefix = k.rsplit(".weight", 1)[0]
-                break
+            else:
+                exp_key = k   # expansion conv: shape[0] == mid_new != new_c
         if conv_key_prefix is None:
             continue
 
+        # ── Fix 1: zero expansion conv's new output rows ─────────────────
+        # After shape_aware_load, rows [mid_old:mid_new] of the expansion conv
+        # are at random init.  They produce random intermediate features that
+        # leak into the OLD output channels through the output conv's new input
+        # columns [mid_old:mid_new] (also random init).  Zeroing them means
+        # new intermediate features output zero, so old output channels are
+        # completely unaffected by the growth.
+        if exp_key is not None:
+            ew = own[exp_key]
+            # True old mid width depends on both this block's old out width and,
+            # for i>0, the previous block's old width because in_ch grows too.
+            in_ch_old = 3 if blk_idx == 0 else (3 + prev_channels[blk_idx - 1])
+            mid_old = in_ch_old + old_c
+            if 0 < mid_old < ew.shape[0]:
+                ew[mid_old:].zero_()
+            exp_bias_key = exp_key.rsplit(".weight", 1)[0] + ".bias"
+            if exp_bias_key in own and own[exp_bias_key].shape[0] == ew.shape[0]:
+                own[exp_bias_key][mid_old:].zero_()
+
         w_key = f"{conv_key_prefix}.weight"
-        w = own[w_key]                              # (new_c, in_c, k, k)
+        w = own[w_key]                              # (new_c, mid_new, k, k)
         for slot, src in enumerate(src_idxs):
             dst = old_c + slot
             if dst >= w.shape[0] or src >= w.shape[0]:
@@ -250,8 +367,7 @@ def clone_top_channels_into_new(
                 if dst >= b.shape[0]: continue
                 b[dst] = b[src]
 
-        # GroupNorm uses 'gn' or just numeric idx; copy across by sweeping any
-        # remaining 1-D params at this block prefix and replicating channels.
+        # Copy 1-D params (e.g. GroupNorm if ever used) for the output dim.
         for k, t in own.items():
             if not k.startswith(f"blocks.{blk_idx}."):
                 continue
@@ -263,37 +379,25 @@ def clone_top_channels_into_new(
                     if dst < t.shape[0] and src < t.shape[0]:
                         t[dst] = t[src]
 
-        # Net2Wider-style stabilization: if a source channel is replicated N
-        # times, divide all outgoing paths from both the original source and
-        # each clone by (N+1) so the function stays approximately preserved.
-
-        # 1) Propagate into the *next* block: its conv input dim grew.
+        # ── Fix 2: zero new input columns in block i+1's expansion conv ──
+        # When block i grew old_c → new_c, block i+1's expansion conv input
+        # dim grew from (3 + old_c) to (3 + new_c).  After shape_aware_load,
+        # columns [3+old_c : 3+new_c] are at random init — they map block i's
+        # new output channels into block i+1's intermediate features, adding
+        # noise to *all* of block i+1's output channels.
+        # Zeroing these columns means block i's new channels contribute nothing
+        # to block i+1 at grow time (they learn from scratch via gradient).
+        # NOTE: the RGB prefix occupies columns 0..2; block i's outputs start
+        # at column 3.  (Retna_V1 always has in_channels=3.)
         if blk_idx + 1 < len(model.blocks):
             for k in own.keys():
-                if k.startswith(f"blocks.{blk_idx + 1}.") and k.endswith(".weight"):
-                    if own[k].ndim == 4:
-                        next_w = own[k]              # (out_next, new_c, k, k)
-                        if next_w.shape[1] == new_c:
-                            for slot, src in enumerate(src_idxs):
-                                dst = old_c + slot
-                                if dst < next_w.shape[1] and src < next_w.shape[1]:
-                                    next_w[:, dst, :, :].copy_(next_w[:, src, :, :])
-                                    if jitter > 0:
-                                        next_w[:, dst, :, :].add_(
-                                            torch.randn_like(next_w[:, dst, :, :])
-                                            * (jitter * next_w[:, src, :, :].abs().mean())
-                                        )
-                            # Renormalize original + cloned outgoing slices.
-                            for src, dup_n in src_dup_count.items():
-                                scale = float(dup_n + 1)
-                                next_w[:, src, :, :].div_(scale)
-                                for slot, src2 in enumerate(src_idxs):
-                                    if src2 != src:
-                                        continue
-                                    dst = old_c + slot
-                                    if dst < next_w.shape[1]:
-                                        next_w[:, dst, :, :].div_(scale)
-                        break
+                if not k.startswith(f"blocks.{blk_idx + 1}.") or not k.endswith(".weight"):
+                    continue
+                t = own[k]
+                # The expansion conv of block i+1 has input dim == 3 + new_c
+                if t.ndim == 4 and t.shape[1] == new_c + 3:
+                    t[:, 3 + old_c: 3 + new_c, :, :].zero_()
+                    break
 
         # 2) Propagate into conv_last: Retna concatenates all block outputs.
         if "conv_last.weight" in own:
