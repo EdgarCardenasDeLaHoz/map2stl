@@ -12,41 +12,11 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from app.server.core.validation import model_to_dict as _model_to_dict
+from app.server.schemas import ColormapInfo, DatasetInfo, ProjectionInfo
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
-
-# ---------------------------------------------------------------------------
-# Schema imports
-# ---------------------------------------------------------------------------
-try:
-    from app.server.schemas import ColormapInfo, DatasetInfo, ProjectionInfo
-except ImportError:
-    from pydantic import BaseModel
-    from typing import Optional
-
-    class ColormapInfo(BaseModel):
-        id: str
-        description: Optional[str] = None
-
-    class DatasetInfo(BaseModel):
-        id: str
-        name: str
-        description: str
-        source: Optional[str] = None
-        requires_auth: bool = False
-
-    class ProjectionInfo(BaseModel):
-        id: str
-        name: str
-        description: str
-
-
-def _model_to_dict(model) -> dict:
-    """Return a plain dict for Pydantic v1/v2 model instances."""
-    if hasattr(model, "model_dump"):
-        return model.model_dump()
-    return model.dict()
-
 
 def _default_projections() -> list[dict]:
     return [

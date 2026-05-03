@@ -7,6 +7,7 @@ Step 12: reads/writes SQLite via core/db.py.
 
 from __future__ import annotations
 from app.server.core.db import get_db, init_db
+from app.server.core.validation import model_to_dict
 
 import json
 import logging
@@ -31,11 +32,6 @@ from app.server.schemas import RegionCreate, RegionParameters, RegionSettings
 
 _PARAM_FIELDS = ("dim", "depth_scale", "water_scale",
                  "height", "base", "subtract_water", "sat_scale")
-
-
-def _dump(model, **kw):
-    """Pydantic v1/v2 compatible model serialisation."""
-    return model.model_dump(**kw) if hasattr(model, "model_dump") else model.dict(**kw)
 
 
 def _row_to_region(row) -> dict:
@@ -99,9 +95,9 @@ async def create_region(region: RegionCreate):
                 ),
             )
             conn.commit()
-        payload = _dump(region)
+        payload = model_to_dict(region)
         if payload.get("parameters") is None:
-            payload["parameters"] = _dump(RegionParameters())
+            payload["parameters"] = model_to_dict(RegionParameters())
         return JSONResponse(content=payload, status_code=201)
     except sqlite3.IntegrityError as e:
         return JSONResponse(content={"error": str(e)}, status_code=400)
@@ -135,7 +131,7 @@ async def update_region(name: str, region: RegionCreate):
             conn.commit()
             if cur.rowcount == 0:
                 return JSONResponse(content={"error": f"Region '{name}' not found"}, status_code=404)
-        return JSONResponse(content=_dump(region))
+        return JSONResponse(content=model_to_dict(region))
     except Exception as e:
         logger.error(f"Error updating region: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)

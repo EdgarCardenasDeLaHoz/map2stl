@@ -29,7 +29,7 @@ POST /api/composite/hydrology-merge
   Merge river depression values into a DEM elevation grid.
 """
 
-from app.server.core.validation import run_sync
+from app.server.core.validation import model_to_dict, run_sync
 from app.server.core.cache import make_cache_key, osm_cache_key, read_array_cache, write_array_cache, read_osm_cache
 from app.server.schemas import CompositeCityRasterRequest, HydrologyMergeRequest, MergeRequest
 from fastapi.responses import JSONResponse
@@ -228,7 +228,7 @@ async def merge_hydrology(req: HydrologyMergeRequest):
     # Settings-only mode: resolve DEM from cache
     if not dem_values and req.bbox:
         from app.server.core.export import resolve_dem_from_cache
-        req_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+        req_dict = model_to_dict(req)
         resolved = resolve_dem_from_cache(req_dict)
         if resolved:
             dem_values_list, h, w = resolved

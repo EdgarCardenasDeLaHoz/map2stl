@@ -102,6 +102,13 @@ def b64_encode(arr: np.ndarray) -> str:
     return _b64m.b64encode(arr.ravel().astype(np.float32).tobytes()).decode("ascii")
 
 
+def model_to_dict(model: Any, **kwargs) -> dict:
+    """Return a plain dict from a Pydantic model across v1/v2 APIs."""
+    if hasattr(model, "model_dump"):
+        return model.model_dump(**kwargs)
+    return model.dict(**kwargs)
+
+
 # ---------------------------------------------------------------------------
 # Bbox validation
 # ---------------------------------------------------------------------------

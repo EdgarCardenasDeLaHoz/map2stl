@@ -16,7 +16,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse, Response
 
 from app.server.config import OSM_CACHE_PATH
-from app.server.core.validation import validate_bbox_diagonal, run_sync
+from app.server.core.validation import model_to_dict, run_sync, validate_bbox_diagonal
 from app.server.core.responses import error_response
 from app.server.core.height.service import enhance_city_data as _enhance_city_data_impl
 from app.server.core.osm_cache_policy import (
@@ -345,7 +345,7 @@ async def export_city_3mf(req: CityExportRequest):
     dem_height = req.dem_height
     if not dem_values:
         from app.server.core.export import resolve_dem_from_cache
-        req_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+        req_dict = model_to_dict(req)
         resolved = resolve_dem_from_cache(req_dict)
         if resolved:
             dem_values, dem_height, dem_width = resolved
