@@ -97,7 +97,7 @@ window._setupModelResizablePanel = function _setupModelResizablePanel() {
     });
     document.addEventListener('mousemove', e => {
         if (!resizing) return;
-        const newW = Math.max(240, Math.min(600, startW + (startX - e.clientX)));
+        const newW = Math.max(280, Math.min(900, startW + (startX - e.clientX)));
         panel.style.width = newW + 'px';
     });
     document.addEventListener('mouseup', () => {
@@ -125,7 +125,8 @@ window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {
             return;
         }
         btn.disabled = true;
-        btn.textContent = '⏳ Clearing…';
+        btn.textContent = '⏳';
+        btn.title = 'Clearing cache…';
         try {
             const { data, error } = await window.api.cache.clearRegion(bbox);
             if (error) {
@@ -138,7 +139,8 @@ window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {
             window.showToast?.(`Cache clear error: ${e.message}`, 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = '🗑️ Clear Cache';
+            btn.textContent = '🗑️';
+            btn.title = 'Clear cached data for current region';
         }
     });
 

@@ -102,6 +102,7 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: var(--bg-dark);
             color: #e0e0e0;
+            font-size: 14px;
             height: 100vh;
             overflow: hidden;
         }
@@ -215,7 +216,7 @@
         }
 
         .main-title {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 600;
             color: var(--text-muted);
         }
@@ -296,14 +297,14 @@
         }
 
         .tab {
-            padding: 5px 12px;
+            padding: 4px 9px;
             background-color: #404040;
             border: none;
             color: #e0e0e0;
             cursor: pointer;
             border-radius: 4px 4px 0 0;
             transition: all 0.2s ease;
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 500;
         }
 
@@ -320,13 +321,13 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 16px;
-            height: 16px;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
             background: rgba(255, 255, 255, 0.15);
-            font-size: 10px;
+            font-size: 9px;
             font-weight: 700;
-            margin-right: 3px;
+            margin-right: 4px;
             vertical-align: middle;
             transition: background 0.25s, color 0.25s;
         }
@@ -903,9 +904,9 @@
         }
 
         .model-sidebar {
-            width: 320px;
+            width: 420px;
             flex-shrink: 0;
-            min-width: 240px;
+            min-width: 220px;
             /* LP1: prevent label wrapping at narrow viewport sizes */
             background: #2d2d2d;
             padding: 20px;
@@ -1625,10 +1626,11 @@
         }
 
         /* Row 1: 2-column grid for N/S/E/W coordinate inputs */
+        .bbox-coords-row,
         .bbox-coords-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 3px;
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 4px;
             margin-bottom: 4px;
         }
 
@@ -1636,6 +1638,8 @@
             display: flex;
             align-items: center;
             gap: 4px;
+            flex: 1 1 0;
+            min-width: 0;
         }
 
         .bbox-lbl {
@@ -1667,6 +1671,7 @@
             display: flex;
             align-items: center;
             gap: 3px;
+            flex-wrap: wrap;
         }
 
         .bbox-reload-btn {
@@ -1679,6 +1684,7 @@
             font-weight: 600;
             cursor: pointer;
             flex-shrink: 0;
+            min-height: 24px;
         }
 
         .bbox-reload-btn:hover {
@@ -1713,7 +1719,7 @@
         }
 
         .bbox-colorbar {
-            flex: 1;
+            flex: 1 1 140px;
             min-width: 30px;
             height: 14px;
             border-radius: 2px;
@@ -1759,12 +1765,12 @@
 
         /* Control Groups */
         .control-group {
-            margin-bottom: 20px;
+            margin-bottom: 14px;
         }
 
         .control-group label {
             display: block;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
             font-weight: 500;
             color: #e0e0e0;
         }
@@ -1772,7 +1778,7 @@
         .control-group input,
         .control-group select {
             width: 100%;
-            padding: 10px;
+            padding: 8px;
             background-color: #404040;
             border: 1px solid var(--border-light);
             border-radius: 4px;
@@ -2063,11 +2069,11 @@
 
         /* Improved Button Styles */
         .btn {
-            padding: 10px 16px;
+            padding: 8px 12px;
             border: none;
             border-radius: 6px;
             cursor: pointer;
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 500;
             transition: all 0.2s ease;
             display: inline-flex;

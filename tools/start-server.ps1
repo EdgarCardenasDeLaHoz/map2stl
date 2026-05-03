@@ -47,5 +47,6 @@ Write-Host "Starting server on http://127.0.0.1:$Port ..." -ForegroundColor Gree
 Write-Host "Press Ctrl+C or close this terminal to stop." -ForegroundColor DarkGray
 Write-Host ""
 
-Set-Location (Join-Path $PSScriptRoot '..')
-& $VenvPython -m uvicorn app.server.server:app --host 127.0.0.1 --port $Port --reload
+$RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+Set-Location $RepoRoot
+& $VenvPython -m uvicorn app.server.server:app --app-dir strm2stl --host 127.0.0.1 --port $Port --reload

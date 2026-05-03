@@ -52,11 +52,11 @@
       <!-- Region parameters (expanded mode) -->
       <RegionParamsSection :visible="mode === 'expanded'" />
 
+      <!-- Cache management (keep high in panel for quick access) -->
+      <CacheManagement />
+
       <!-- New region -->
       <NewRegionSection />
-
-      <!-- Cache management -->
-      <CacheManagement />
 
     </div>
   </div>
@@ -106,6 +106,13 @@ function cycleSidebar() {
   window._setSidebarViews?.(newMode);
 }
 
+// Bridge for legacy non-Vue handlers (openSidebarBtn in app.js, legacy modules).
+function setSidebarModeFromLegacy(modeFromLegacy: string) {
+  if (modeFromLegacy === 'expanded' || modeFromLegacy === 'normal' || modeFromLegacy === 'hidden') {
+    store.sidebarMode = modeFromLegacy;
+  }
+}
+
 function exportRegions() {
   (window as any).exportRegionsJson?.();
 }
@@ -124,5 +131,8 @@ async function handleRegionImport(event: Event) {
 onMounted(() => {
   // Start expanded — matches app.js DOMContentLoaded initialisation
   store.sidebarMode = 'expanded';
+  (window as any).__setSidebarModeFromLegacy = setSidebarModeFromLegacy;
+  const openBtn = document.getElementById('openSidebarBtn');
+  if (openBtn) openBtn.classList.add('hidden');
 });
 </script>

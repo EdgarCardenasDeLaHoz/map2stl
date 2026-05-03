@@ -32,7 +32,6 @@ from city2stl.height.providers.lidar_3dep import LiDAR3DEPProvider
 from city2stl.height.providers.ndsm import NDSMProvider
 from city2stl.height.providers.open_buildings import OpenBuildingsProvider
 from city2stl.height.providers.roofnet import RoofNetProvider
-from city2stl.height.providers.shadow_height import ShadowHeightProvider
 from city2stl.height.providers.wsf3d import WSF3DProvider
 from city2stl.heights import enhance_buildings_with_raster
 
@@ -60,7 +59,6 @@ _REGISTRY: list[RegisteredProvider] = [
     RegisteredProvider(OpenBuildingsProvider(), confidence=0.60, resolution_m=5.0),
     RegisteredProvider(WSF3DProvider(),         confidence=0.50, resolution_m=90.0),
     RegisteredProvider(GHSLProvider(),          confidence=0.40, resolution_m=100.0),
-    RegisteredProvider(ShadowHeightProvider(),  confidence=0.30, resolution_m=5.0),
 ]
 
 _ALL_PROVIDERS = [r.instance for r in _REGISTRY]
@@ -310,7 +308,6 @@ def enhance_city_data(payload: Dict[str, Any], north: float, south: float, east:
             OpenBuildingsProvider(),
             WSF3DProvider(),
             GHSLProvider(),
-            ShadowHeightProvider(),
         )
         if provider.covers(bbox)
     ]

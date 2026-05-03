@@ -57,13 +57,11 @@
     </div>
 
     <div class="row-gap6 composite-actions">
-      <button id="previewCompositeBtn" class="btn btn-secondary composite-action-btn"
-              title="Preview composite in the layer view">👁 Preview</button>
       <button id="applyCompositeToDemBtn" class="btn btn-primary composite-action-btn"
               title="Replace current DEM with composite values">✓ Apply to DEM</button>
     </div>
     <span id="compositeStats" class="composite-stats"></span>
-    <div class="composite-footer-hint">Preview shows the composite; Apply replaces base DEM for STL export</div>
+    <div class="composite-footer-hint">Apply replaces base DEM with the composite for export and 3D generation</div>
   </CollapsibleSection>
 </template>
 <script setup lang="ts">

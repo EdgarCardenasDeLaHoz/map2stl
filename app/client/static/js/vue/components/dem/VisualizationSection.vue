@@ -50,6 +50,20 @@
       <div id="demPixelSizeLabel" style="display:none;font-size:10px;color:#8af;margin-top:3px;text-align:right;"></div>
     </div>
 
+    <!-- Layer view toggles moved from Layers panel -->
+    <div class="viz-layer-mode-wrap">
+      <div class="viz-layer-mode-title">Active Layers</div>
+      <div id="layerModeSelector" class="viz-layer-mode-row">
+        <button class="layer-mode-btn active" data-mode="Dem" title="Base elevation">🏔 DEM</button>
+        <button class="layer-mode-btn" data-mode="Water" title="Water mask">💧 Water</button>
+        <button class="layer-mode-btn" data-mode="Sat" title="ESA land cover">🌿 ESA</button>
+        <button class="layer-mode-btn" data-mode="SatImg" title="Satellite imagery">🛰 Sat</button>
+        <button class="layer-mode-btn" data-mode="CityRaster" title="City heights raster">🏙 City</button>
+        <button class="layer-mode-btn" data-mode="Hydrology" title="River depression overlay">🌊 Hydro</button>
+        <button class="layer-mode-btn" data-mode="CompositeDem" title="Composite DEM">★ Composite</button>
+      </div>
+    </div>
+
     <!-- view.elevation_curve / elevation_curve_points — curve editor canvas -->
     <!-- IMPORTANT: #curveCanvas must never be unmounted — curve-editor.js holds a direct ref -->
     <div style="margin-top:10px;padding-top:8px;border-top:1px solid #333;">
@@ -84,3 +98,28 @@
 <script setup lang="ts">
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
 </script>
+<style scoped>
+.viz-layer-mode-wrap {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #333;
+}
+
+.viz-layer-mode-title {
+  font-size: 11px;
+  color: #aaa;
+  margin-bottom: 6px;
+}
+
+.viz-layer-mode-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.viz-layer-mode-row .layer-mode-btn {
+  padding: 3px 7px;
+  min-width: 78px;
+  font-size: 11px;
+}
+</style>

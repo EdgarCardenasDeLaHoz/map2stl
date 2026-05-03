@@ -6,7 +6,7 @@
 
       <!-- Dem row -->
       <div class="layer-row">
-        <button class="layer-mode-btn active" data-mode="Dem" title="Base elevation">🏔</button>
+        <span class="layer-row-icon" title="Base elevation">🏔</span>
         <span class="layer-row-label">DEM</span>
         <span class="layer-row-res" id="layerRes_Dem"></span>
         <input type="range" class="layer-row-opacity" id="layerOpacity_Dem" min="0" max="100" value="100" title="DEM opacity">
@@ -15,7 +15,7 @@
 
       <!-- Water row -->
       <div class="layer-row">
-        <button class="layer-mode-btn" data-mode="Water" title="Water mask">💧</button>
+        <span class="layer-row-icon" title="Water mask">💧</span>
         <span class="layer-row-label">Water</span>
         <span class="layer-row-res" id="layerRes_Water"></span>
         <input type="range" class="layer-row-opacity" id="layerOpacity_Water" min="0" max="100" value="70" title="Water opacity">
@@ -24,7 +24,7 @@
 
       <!-- ESA row -->
       <div class="layer-row">
-        <button class="layer-mode-btn" data-mode="Sat" title="ESA land cover">🌿</button>
+        <span class="layer-row-icon" title="ESA land cover">🌿</span>
         <span class="layer-row-label">ESA</span>
         <span class="layer-row-res" id="layerRes_Sat"></span>
         <input type="range" class="layer-row-opacity" id="layerOpacity_Sat" min="0" max="100" value="70" title="ESA opacity">
@@ -33,7 +33,7 @@
 
       <!-- Satellite imagery row -->
       <div class="layer-row">
-        <button class="layer-mode-btn" data-mode="SatImg" title="Satellite imagery">🛰</button>
+        <span class="layer-row-icon" title="Satellite imagery">🛰</span>
         <span class="layer-row-label">Sat Img</span>
         <span class="layer-row-res" id="layerRes_SatImg"></span>
         <input type="range" class="layer-row-opacity" id="layerOpacity_SatImg" min="0" max="100" value="80" title="Sat imagery opacity">
@@ -42,7 +42,7 @@
 
       <!-- City Raster row -->
       <div class="layer-row">
-        <button class="layer-mode-btn" data-mode="CityRaster" title="City heights raster">🏙</button>
+        <span class="layer-row-icon" title="City heights raster">🏙</span>
         <span class="layer-row-label">City ↑</span>
         <span class="layer-row-res" id="layerRes_CityRaster"></span>
         <input type="range" class="layer-row-opacity" id="layerOpacity_CityRaster" min="0" max="100" value="70" title="City raster opacity">
@@ -51,7 +51,7 @@
 
       <!-- City Vector overlay row -->
       <div class="layer-row">
-        <button class="layer-mode-btn" data-mode="CityOverlay" title="City vector overlay">🏙</button>
+        <span class="layer-row-icon" title="City vector overlay">🏙</span>
         <span class="layer-row-label">City ⬡</span>
         <span class="layer-row-res" id="layerRes_CityOverlay"></span>
         <input type="range" class="layer-row-opacity" id="layerOpacity_CityOverlay" min="0" max="100" value="85" title="City vector opacity">
@@ -61,7 +61,7 @@
 
       <!-- Hydrology row -->
       <div class="layer-row">
-        <button class="layer-mode-btn" data-mode="Hydrology" title="River depression overlay">🌊</button>
+        <span class="layer-row-icon" title="River depression overlay">🌊</span>
         <span class="layer-row-label">Hydro</span>
         <span class="layer-row-res" id="layerRes_Hydrology"></span>
         <input type="range" class="layer-row-opacity" id="layerOpacity_Hydrology" min="0" max="100" value="80" title="Hydrology opacity">
@@ -70,7 +70,7 @@
 
       <!-- Composite DEM row — no load button -->
       <div class="layer-row">
-        <button class="layer-mode-btn" data-mode="CompositeDem" title="Composite DEM">★</button>
+        <span class="layer-row-icon" title="Composite DEM">★</span>
         <span class="layer-row-label">Composite</span>
         <span class="layer-row-res" id="layerRes_CompositeDem"></span>
         <input type="range" class="layer-row-opacity" id="layerOpacity_CompositeDem" min="0" max="100" value="100" title="Composite DEM opacity">
@@ -102,19 +102,6 @@ onMounted(() => {
         }
     }
 
-    // Wire mode toggle buttons — clicking a row button calls setStackMode
-    document.querySelectorAll('#layerRows .layer-mode-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            window.setStackMode?.(btn.dataset.mode);
-            // Sync button active states after toggle
-            document.querySelectorAll('#layerRows .layer-mode-btn').forEach(b => {
-                // setStackMode manages active class via _layerModeBtns — but those now
-                // point to a different selector; update manually here too.
-                b.classList.toggle('active', b === btn ? true : b.classList.contains('active'));
-            });
-        });
-    });
-
     // Update res spans from linked inputs whenever values change
     function _syncResSpans() {
         const resMap: Record<string, string> = {
@@ -137,29 +124,16 @@ onMounted(() => {
 <style scoped>
 .layer-row {
     display: grid;
-    grid-template-columns: 30px 70px 46px minmax(80px, 1fr) 32px 30px;
+  grid-template-columns: 22px 70px 46px minmax(80px, 1fr) 32px;
     gap: 0 6px;
     align-items: center;
     min-height: 28px;
 }
-.layer-row .layer-mode-btn {
-    padding: 0 !important;
-    font-size: 13px;
-    width: 28px;
-    min-width: 28px;
-    max-width: 28px;
-    height: 24px;
-    border-radius: 4px;
-    border: 1px solid #444;
-    background: #2a2a2a;
-    color: #aaa;
-    cursor: pointer;
-    box-sizing: border-box;
-}
-.layer-row .layer-mode-btn.active {
-    background: #1a4a6a;
-    border-color: #4a9fd4;
-    color: #fff;
+.layer-row-icon {
+  font-size: 13px;
+  width: 20px;
+  text-align: center;
+  opacity: 0.9;
 }
 .layer-row-label {
     font-size: 10px;

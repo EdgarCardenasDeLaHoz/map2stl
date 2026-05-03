@@ -1,0 +1,56 @@
+{
+  "runs": [
+    {
+      "ts": "2026-05-03T17:08:30",
+      "arch": "retna_grow_8-6-8-12-9-9-10-10-14",
+      "task": "height",
+      "model_path": "C:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\models\\retna_grow_continue.pt",
+      "best_metrics": {
+        "val_loss": 0.3824,
+        "val_mae": 5.6509,
+        "val_mask_iou": 0.524,
+        "pearson_mae_height": 0.8779
+      },
+      "n_train": 85,
+      "n_val": 15,
+      "epochs": 150,
+      "config_hash": "5190d33e",
+      "notes": "grow/prune 5 cycles; final=[8, 6, 8, 12, 9, 9, 10, 10, 14]"
+    },
+    {
+      "ts": "2026-05-03T18:42:00",
+      "arch": "retna_grow_8-6-8-12-9-9-10-10-14",
+      "task": "height",
+      "model_path": "C:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\models\\retna_grow_continue.pt",
+      "best_metrics": {
+        "val_loss": 0.3834,
+        "val_mae": 5.6568,
+        "val_mask_iou": 0.523,
+        "pearson_mae_height": 0.88
+      },
+      "n_train": 85,
+      "n_val": 15,
+      "epochs": 150,
+      "config_hash": "5190d33e",
+      "notes": "grow/prune 5 cycles; final=[8, 6, 8, 12, 9, 9, 10, 10, 14]"
+    },
+    {
+      "ts": "2026-05-03T19:21:12",
+      "arch": "retna_grow_6-5-5-4",
+      "task": "height",
+      "model_path": "C:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\models\\retna_grow_continue.pt",
+      "best_metrics": {
+        "val_loss": 0.4504,
+        "val_mae": 5.6696,
+        "val_mask_iou": 0.4288,
+        "pearson_mae_height": 0.9467
+      },
+      "n_train": 85,
+      "n_val": 15,
+      "epochs": 300,
+      "config_hash": "46a5a534",
+      "notes": "grow/prune 10 cycles; final=[6, 5, 5, 4]"
+    }
+  ],
+  "version": 1
+}

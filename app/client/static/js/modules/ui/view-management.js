@@ -66,8 +66,13 @@ window.switchView = function switchView(view) {
     if (view === 'map') {
         mapContainer.classList.remove('hidden');
         document.querySelector('[data-view="map"]').classList.add('active');
-        // Force Leaflet to recalculate size after container becomes visible
+        // Force Leaflet to recalculate size after container becomes visible.
+        // Two passes are used because panel transitions can lag one frame.
         requestAnimationFrame(() => { window._globalMap?.invalidateSize?.(); });
+        setTimeout(() => {
+            window._globalMap?.invalidateSize?.();
+            window.syncRegionBboxVisibility?.();
+        }, 120);
     } else if (view === 'globe') {
         globeContainer.classList.remove('hidden');
         document.querySelector('[data-view="globe"]').classList.add('active');

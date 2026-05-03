@@ -215,7 +215,17 @@ async function loadCoordinates() {
                 rect._continentName = detectContinent(cLat, cLon);
 
                 // Click selects the region (stays on Explore)
-                rect.on('click', () => window.selectCoordinate(originalIndex));
+                rect.on('click', () => {
+                    const liveData = window.getCoordinatesData?.() || [];
+                    const liveIndex = liveData.findIndex(r =>
+                        r.name === region.name
+                        && Number(r.north) === Number(region.north)
+                        && Number(r.south) === Number(region.south)
+                        && Number(r.east) === Number(region.east)
+                        && Number(r.west) === Number(region.west)
+                    );
+                    if (liveIndex >= 0) window.selectCoordinate(liveIndex);
+                });
 
                 // Edit button pinned at the top-right corner of each bbox (hidden until hover)
                 const editIcon = L.divIcon({
@@ -230,7 +240,18 @@ async function loadCoordinates() {
                     keyboard: false,
                     zIndexOffset: 500
                 });
-                editMarker.on('click', () => window.goToEdit(originalIndex));
+                editMarker.on('click', (evt) => {
+                    try { L.DomEvent.stopPropagation(evt); } catch (_) {}
+                    const liveData = window.getCoordinatesData?.() || [];
+                    const liveIndex = liveData.findIndex(r =>
+                        r.name === region.name
+                        && Number(r.north) === Number(region.north)
+                        && Number(r.south) === Number(region.south)
+                        && Number(r.east) === Number(region.east)
+                        && Number(r.west) === Number(region.west)
+                    );
+                    if (liveIndex >= 0) window.goToEdit(liveIndex);
+                });
                 editMarker._regionBounds = L.latLngBounds(bounds[0], bounds[1]);
                 editMarker._regionName = region.name;
 
@@ -542,11 +563,15 @@ window.selectCoordinate = selectCoordinate;
  * @param {number} index - Index into `coordinatesData`
  */
 async function goToEdit(index) {
+    const coordinatesData = window.getCoordinatesData?.() || [];
+    if (index < 0 || index >= coordinatesData.length) {
+        window.showToast?.('Region no longer exists in the current list', 'warning');
+        return;
+    }
     await window.selectCoordinate(index, { skipAutoLoad: true });
     switchView('dem');
 
     // Populate the compact sidebar edit panel
-    const coordinatesData = window.getCoordinatesData?.() || [];
     const region = coordinatesData[index];
     if (region) {
         const nameEl = document.getElementById('sbRegionName');

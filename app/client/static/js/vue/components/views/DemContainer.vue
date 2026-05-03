@@ -87,8 +87,8 @@
       <!-- BBox editor + colorbar -->
       <div class="dem-info">
         <div class="bbox-editor" id="bboxEditor">
-          <!-- Row 1: 2×2 coordinate grid -->
-          <div class="bbox-coords-grid">
+          <!-- Row 1: single-row coordinate inputs -->
+          <div class="bbox-coords-row">
             <div class="bbox-coord-cell">
               <label class="bbox-lbl" for="bboxNorth">N</label>
               <input type="number" id="bboxNorth" class="bbox-input" step="0.01" min="-90" max="90" placeholder="North" title="Northern boundary" tabindex="0">

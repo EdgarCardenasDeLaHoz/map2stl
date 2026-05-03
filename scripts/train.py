@@ -38,7 +38,7 @@ TILE_SIZE = 128
 TILE_DIR = REPO / "cache" / "height_tiles_combined"
 
 # Resume from the current best baseline. Set to None for cold start.
-RESUME = REPO / "models" / "retna_pruned.pt"
+RESUME = REPO / "models" / "retna_grow_continue.pt"
 HIDDEN = [8, 8, 10, 20, 14, 14, 16, 16, 22]  # matches RESUME's architecture
 
 # Plain-train hyperparameters
@@ -51,11 +51,11 @@ L2_WEIGHT = 0.5
 
 # Grow/prune NAS hyperparameters
 CYCLES = 5
-INNER_EPOCHS = 20
+INNER_EPOCHS = 30
 GROW_CHANNELS = 0
 OVERFIT_STALE = 15
 SMART_INIT = True
-SMART_JITTER = 0.01
+SMART_JITTER = 0.0
 ALLOW_DEEPEN = True
 MAX_DEPTH = 8
 
@@ -63,7 +63,7 @@ MAX_DEPTH = 8
 FINAL_PRUNE = True
 FINAL_PRUNE_TOLERANCE = 0.005     # accept channel-zero if val_loss Δ < this
 FINAL_PRUNE_FLOOR_PCT = 25.0      # only test the bottom-N% by grad×act score
-FINAL_PRUNE_RETRAIN_EPOCHS = 10   # brief recovery training after pruning
+FINAL_PRUNE_RETRAIN_EPOCHS = 20   # recovery training after pruning
 PRUNE_EVERY = 3                   # 0 = off; N = ablate+compact every Nth cycle
 
 OUT_DIR = REPO / "output"
@@ -94,7 +94,7 @@ def _run(cmd: list, log_name: str) -> int:
 def _train(out_name: str = "retna_continue.pt") -> Path:
     out = REPO / "models" / out_name
     cmd = [
-        sys.executable, "-u", "-m", "tools.ml.train_retna",
+        sys.executable, "-u", "-m", "tools.ml.train.train_retna",
         "--tiles", TILE_DIR, "--output", out,
         "--hidden-channels", *map(str, HIDDEN),
         "--epochs", EPOCHS, "--tile-size", TILE_SIZE,
@@ -112,7 +112,7 @@ def _train(out_name: str = "retna_continue.pt") -> Path:
 def _grow(out_name: str, allow_deepen: bool) -> Path:
     out = REPO / "models" / out_name
     cmd = [
-        sys.executable, "-u", "-m", "tools.ml.grow_prune",
+        sys.executable, "-u", "-m", "tools.ml.train.grow_prune",
         "--tiles", TILE_DIR, "--output", out,
         "--cycles", CYCLES, "--inner-epochs", INNER_EPOCHS,
         "--grow-channels", GROW_CHANNELS,
@@ -143,7 +143,7 @@ def _grow(out_name: str, allow_deepen: bool) -> Path:
 
 def _collect():
     cmd = [
-        sys.executable, "-u", "-m", "tools.ml.collect_osm_tiles",
+        sys.executable, "-u", "-m", "tools.ml.data.collect_osm_tiles",
         "--cities", *CITIES,
         "--tiles-per-city", TILES_PER_CITY,
         "--tile-size", TILE_SIZE,
@@ -158,7 +158,7 @@ def _inspect(ckpt: Path):
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_pdf = OUT_DIR / f"{ckpt.stem}_inspect.pdf"
     cmd = [
-        sys.executable, "-m", "tools.ml.inspect_retna",
+        sys.executable, "-m", "tools.ml.analysis.inspect_retna",
         "--checkpoint", ckpt, "--tiles", TILE_DIR,
         "--out", out_pdf, "--tile-size", TILE_SIZE, "--n-samples", 20,
     ]

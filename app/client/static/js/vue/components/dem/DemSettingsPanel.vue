@@ -28,9 +28,11 @@
         <div id="settingsSaveRow" class="row-gap6" style="padding:4px 0 8px;border-bottom:1px solid #333;margin-bottom:6px;">
           <button id="saveRegionSettingsBtn" class="btn btn-primary"
                   style="flex:1;padding:6px 0;font-size:14px;"
+              aria-label="Save region settings"
                   title="Save all current panel settings for the selected region">💾</button>
           <button id="clearRegionCacheBtn" class="btn btn-secondary"
                   style="padding:6px 8px;font-size:14px;"
+              aria-label="Clear region cache"
                   title="Clear all cached data (DEM, water, satellite, etc.) and re-fetch">🗑️</button>
           <label class="check-label" style="font-size:11px;color:#aaa;white-space:nowrap;" title="Auto-save settings after changes">
             <input type="checkbox" id="autoSaveEnabled"> Auto

@@ -8,6 +8,12 @@
       <!-- Label filter chips -->
       <div v-if="availableLabels.length > 0" style="display:flex;flex-wrap:wrap;gap:3px;">
         <button
+          class="label-chip"
+          :class="{ active: activeLabels.size === 0 }"
+          @click="clearLabels"
+          title="Show all labels"
+        >All</button>
+        <button
           v-for="lbl in availableLabels"
           :key="lbl"
           class="label-chip"
@@ -68,21 +74,38 @@ function toggleLabel(lbl: string) {
   applyLabelFilter();
 }
 
+function clearLabels() {
+  activeLabels.value = new Set();
+  applyLabelFilter();
+}
+
 function applyLabelFilter() {
   const tbody = document.getElementById('sidebarRegionsTableBody');
   if (!tbody) return;
   const active = activeLabels.value;
-  if (active.size === 0) {
-    // Show all rows
     for (const row of tbody.querySelectorAll('tr:not(.tbl-group-header)')) {
-      (row as HTMLElement).style.display = '';
+      if (active.size === 0) {
+        (row as HTMLElement).style.display = '';
+      } else {
+        const label = (row as HTMLElement).dataset.label || '';
+        (row as HTMLElement).style.display = active.has(label) ? '' : 'none';
+      }
     }
-    return;
-  }
-  for (const row of tbody.querySelectorAll('tr:not(.tbl-group-header)')) {
-    const label = (row as HTMLElement).dataset.label || '';
-    (row as HTMLElement).style.display = active.has(label) ? '' : 'none';
-  }
+
+    // Hide continent headers when all their rows are filtered out.
+    const headers = Array.from(tbody.querySelectorAll('tr.tbl-group-header')) as HTMLElement[];
+    for (const header of headers) {
+      let sibling = header.nextElementSibling as HTMLElement | null;
+      let hasVisibleRows = false;
+      while (sibling && !sibling.classList.contains('tbl-group-header')) {
+        if (sibling.style.display !== 'none') {
+          hasVisibleRows = true;
+          break;
+        }
+        sibling = sibling.nextElementSibling as HTMLElement | null;
+      }
+      header.style.display = hasVisibleRows ? '' : 'none';
+    }
 }
 
 onMounted(() => {

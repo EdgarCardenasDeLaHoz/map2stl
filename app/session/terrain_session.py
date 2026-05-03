@@ -2165,32 +2165,53 @@ class TerrainSession:
             vmax=0)
 
     def _export_payload(self, fmt: str) -> dict:
-        """Build the unified /api/export request body."""
+        """Build a flat export body compatible with app.server.core.export."""
+        dem = self.settings["dem"]
+        proj = self.settings["projection"]
         exp = copy.copy(self.settings["export"])
         if not exp["label_text"]:
             exp["label_text"] = self.region_name or "terrain"
+
         return {
             **self.bbox,
             "format": fmt,
-            "name":   self.region_name,
-            "dem":    self.settings["dem"],
-            "export": exp,
-            "split":  self.settings["split"],
+            "name": self.region_name,
+            # DEM cache-resolution settings
+            "dim": dem["dim"],
+            "dem_source": dem["dem_source"],
+            "depth_scale": dem["depth_scale"],
+            "water_scale": dem["water_scale"],
+            "subtract_water": dem["subtract_water"],
+            "show_sat": dem["show_sat"],
+            "projection": proj["projection"],
+            "maintain_dimensions": proj["maintain_dimensions"],
+            "clip_nans": proj["clip_nans"],
+            # Export rendering knobs
+            "model_height": exp["model_height"],
+            "base_height": exp["base_height"],
+            "exaggeration": exp["exaggeration"],
+            "sea_level_cap": exp["sea_level_cap"],
+            "floor": True,
+            "walls": True,
+            "engrave_label": exp["engrave_label"],
+            "label_text": exp["label_text"],
+            "contours": exp["contours"],
+            "contour_interval": exp["contour_interval"],
+            "contour_style": exp["contour_style"],
         }
 
     def export_obj(self) -> "TerrainSession":
-        """POST /api/export (format=obj_split) — generate puzzle OBJ and save to output/.
+        """POST /api/export/obj — generate OBJ and save it to output/.
 
         fetch_dem() is no longer required before this call — the export endpoint
         derives the DEM from settings, using the disk cache if available.
         Request body is assembled from settings['dem'], settings['export'], and
         settings['split'].
         """
-        payload = self._export_payload("obj_split")
-        rows, cols = self.settings["split"]["split_rows"], self.settings["split"]["split_cols"]
-        print(f"Generating {rows}x{cols} puzzle split OBJ…")
+        payload = self._export_payload("obj")
+        print("Generating OBJ export…")
         r = self._api_request_raw(
-            "post", "/api/export", json=payload, timeout=300
+            "post", "/api/export/obj", json=payload, timeout=300
         )
         r.raise_for_status()
 
@@ -2201,62 +2222,82 @@ class TerrainSession:
         if "filename=" in cd:
             filename = cd.split("filename=")[-1].strip().strip('"')
         else:
-            filename = f"{self.region_name}_puzzle_{rows}x{cols}.obj"
+            filename = f"{self.region_name}.obj"
         self.obj_path = output_dir / filename
         self.obj_path.write_bytes(r.content)
         print(f"Saved: {self.obj_path}  ({len(r.content) / 1024:.1f} KB)")
         return self
 
-    def verify(self) -> dict:
-        """GET /api/export/obj/verify — run mesh health checks and print a table.
+    def _find_latest_export_obj(self) -> Optional[Path]:
+        """Return the best local OBJ candidate for the current region.
 
-        This inspects the last exported OBJ for the selected region name.
+        Preference order:
+        1) self.obj_path if it exists
+        2) newest output/*.obj matching region name prefix
+        3) None
+        """
+        if self.obj_path and Path(self.obj_path).exists():
+            return Path(self.obj_path)
+
+        if not self.region_name:
+            return None
+
+        output_dir = _STRM2STL_DIR / "output"
+        if not output_dir.exists():
+            return None
+
+        candidates = sorted(
+            output_dir.glob(f"{self.region_name}*.obj"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        return candidates[0] if candidates else None
+
+    def _inspect_local_obj(self) -> dict:
+        """Inspect the latest local OBJ and return object-count metadata."""
+        obj_path = self._find_latest_export_obj()
+        if not obj_path or not obj_path.exists():
+            raise RuntimeError("No local OBJ file found; run export_obj() first")
+
+        names = []
+        with obj_path.open("r", encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                if line.startswith("o "):
+                    names.append(line[2:].strip())
+
+        terrain_count = len([n for n in names if not n.startswith("Base")])
+        base_count = len([n for n in names if n.startswith("Base")])
+        return {
+            "total": len(names),
+            "terrain_count": terrain_count,
+            "base_count": base_count,
+            "objects": names,
+            "mode": "local",
+            "path": str(obj_path),
+            "size_bytes": int(obj_path.stat().st_size),
+        }
+
+    def verify(self) -> dict:
+        """Lightweight local OBJ verification for the selected region.
+
+        Returns file-presence and object-count metadata without server-side
+        mesh-health APIs.
         """
         if not self.region_name:
             raise RuntimeError("Call select() first")
-        info = self._api_request(
-            "get", "/api/export/obj/verify", params={"name": self.region_name}
-        )
-
-        terrain_pieces = [p for p in info["pieces"]
-                          if not p["name"].startswith("Base")]
-        base_pieces = [p for p in info["pieces"]
-                       if p["name"].startswith("Base")]
-
-        def _print_pieces(pieces):
-            for p in pieces:
-                wt = "watertight" if p["watertight"] else "HOLES"
-                vol = "valid_vol" if p["valid_volume"] else "INVALID_VOL"
-                wnd = "" if p["winding_consistent"] else " WINDING!"
-                z_ok = "" if abs(
-                    p["z_min"]) < 0.001 else f" FLOAT(z_min={p['z_min']})"
-                print(
-                    f"  {p['name']:<40}  "
-                    f"v={p['vertex_count']:>6} f={p['face_count']:>6}  "
-                    f"z=[{p['z_min']:.3f},{p['z_max']:.3f}]  "
-                    f"holes={p['holes']} nm={p['non_manifold']}  "
-                    f"{wt} {vol}{wnd}{z_ok}"
-                )
-
-        print(f"Total objects: {info['total']}\n")
-        print(
-            f"── Terrain pieces ({len(terrain_pieces)}) ──────────────────────────")
-        _print_pieces(terrain_pieces)
-        print(
-            f"\n── Base border pieces ({len(base_pieces)}) ─────────────────────────")
-        _print_pieces(base_pieces)
+        info = self._inspect_local_obj()
+        info["ok"] = bool(info["size_bytes"] > 0)
+        status = "ok" if info["ok"] else "missing"
+        print(f"OBJ file status: {status} ({info['path']})")
+        print(f"Total objects: {info['total']}  "
+              f"({info['terrain_count']} terrain + {info['base_count']} base)")
         return info
 
     def inspect_obj(self) -> dict:
-        """GET /api/export/obj/inspect — return object names and piece counts from saved OBJ.
-
-        Lighter than verify() — no mesh health checks, just a fast parse of object names.
-        """
+        """Return object names and piece counts from the latest local OBJ."""
         if not self.region_name:
             raise RuntimeError("Call select() first")
-        info = self._api_request(
-            "get", "/api/export/obj/inspect", params={"name": self.region_name}
-        )
+        info = self._inspect_local_obj()
         print(f"Total objects: {info['total']}  "
               f"({info['terrain_count']} terrain + {info['base_count']} base)")
         return info

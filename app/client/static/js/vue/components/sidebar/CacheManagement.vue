@@ -1,6 +1,12 @@
 <template>
   <div class="control-group">
     <CollapsibleSection title="💾 Cache Management" wrap-style="">
+      <div class="cache-actions" style="margin-bottom:6px;">
+        <button id="openCacheInventoryBtn" class="btn btn-secondary"
+                style="width:100%;">
+          <span class="btn-icon">🗂️</span> View Cache
+        </button>
+      </div>
       <div class="cache-status" id="cacheStatus">
         <div class="cache-stat">
           <span class="cache-stat-label">Memory Cache:</span>
@@ -18,12 +24,6 @@
           <span class="cache-stat-label">Preloaded:</span>
           <span class="cache-stat-value" id="preloadedCount">0 regions</span>
         </div>
-      </div>
-      <div class="cache-actions">
-        <button id="openCacheInventoryBtn" class="btn btn-secondary"
-                style="width:100%;">
-          <span class="btn-icon">🗂️</span> View Cache
-        </button>
       </div>
       <div id="preloadProgress" class="preload-progress hidden">
         <div class="progress-bar">

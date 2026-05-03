@@ -113,9 +113,17 @@ async def get_city_data(city_req: CityRequest):
     # Cache check
     cached_data = read_osm_cache(cache_key)
     if cached_data is not None:
+        center_lat = (north + south) * 0.5
+        center_lon = (east + west) * 0.5
+        in_conus = 24.0 <= center_lat <= 50.0 and -125.0 <= center_lon <= -66.0
+        in_alaska = 51.0 <= center_lat <= 72.0 and -170.0 <= center_lon <= -129.0
+        in_hawaii = 18.0 <= center_lat <= 23.5 and -161.0 <= center_lon <= -154.0
+        enhancement_source = str(((cached_data.get("height_enhancement") or {}).get("source_name") or "")).lower()
+        stale_shadow_us = (in_conus or in_alaska or in_hawaii) and "shadow" in enhancement_source
         is_stale = (
             _city_cache_missing_height_source(cached_data)
             or _city_cache_missing_building_parts(cached_data)
+            or stale_shadow_us
         )
         if is_stale:
             logger.info("Ignoring stale OSM city cache: %s", cache_key)
