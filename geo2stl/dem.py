@@ -1,17 +1,17 @@
 """
-geo2stl/dem.py — DEM fetch and layer-blend helpers.
+geo2stl/dem.py â€” DEM fetch and layer-blend helpers.
 
 Covers elevation data only:
-  - fetch_layer_data        — dispatcher for all DEM sources
-  - fetch_local_dem         — local SRTM tiles via numpy2stl
-  - fetch_h5_dem            — local SRTM HDF5 tile store
-  - fetch_esa_water_layer   — ESA WorldCover water band as float array
-  - fetch_opentopo_dem      — OpenTopography global DEM API (cached GeoTIFF)
-  - apply_layer_processing  — clip / smooth / sharpen / normalise pipeline
-  - blend_layers            — blend two arrays with a named mode
-  - upsample_dem            — cv2 upscale to display resolution
-  - make_dem_payload        — build standard DEM JSON response dict
-  - compute_raw_dem         — unprocessed DEM array (call via run_in_executor)
+  - fetch_layer_data        â€” dispatcher for all DEM sources
+  - fetch_local_dem         â€” local SRTM tiles via numpy2stl
+  - fetch_h5_dem            â€” local SRTM HDF5 tile store
+  - fetch_esa_water_layer   â€” ESA WorldCover water band as float array
+  - fetch_opentopo_dem      â€” OpenTopography global DEM API (cached GeoTIFF)
+  - apply_layer_processing  â€” clip / smooth / sharpen / normalise pipeline
+  - blend_layers            â€” blend two arrays with a named mode
+  - upsample_dem            â€” cv2 upscale to display resolution
+  - make_dem_payload        â€” build standard DEM JSON response dict
+  - compute_raw_dem         â€” unprocessed DEM array (call via run_in_executor)
 
 Satellite and water-mask imagery lives in geo2stl/sat.py.
 """
@@ -32,7 +32,7 @@ from typing import Optional
 import cv2 as _cv2
 import numpy as np
 import requests as _requests
-from geo2stl.sat import fetch_bbox_image
+from geo2stl.sat2stl import fetch_bbox_image
 from geo2stl.geo2stl import stitch_tiles_no_rasterio
 from geo2stl.projections import project_grid, project_coordinates
 from geo2stl.processing import apply_layer_processing, blend_layers, upsample_dem  # noqa: F401
@@ -41,18 +41,18 @@ try:
 except ImportError:
     _ski_filters = None
 try:
-    from geo2stl.sat import get_aquatic_regions as _get_aquatic_regions
+    from geo2stl.sat2stl import get_aquatic_regions as _get_aquatic_regions
 except ImportError:
     _get_aquatic_regions = None
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Config constants — inlined from app.server.config so this module can run
+# Config constants â€” inlined from app.server.config so this module can run
 # outside the FastAPI server (notebooks, SDK, etc.).
 # ---------------------------------------------------------------------------
 
-# strm2stl root dir (geo2stl/dem.py → geo2stl → strm2stl)
+# strm2stl root dir (geo2stl/dem.py â†’ geo2stl â†’ strm2stl)
 _STRM2STL_DIR = Path(__file__).parent.parent
 
 # OpenTopography GeoTIFF tile cache
@@ -105,9 +105,9 @@ def fetch_layer_data(
     Fetch a 2-D float64 numpy array for one merge layer.
 
     Sources:
-      "local"           – local SRTM elevation tiles (metres)
-      "water_esa"       – ESA WorldCover water mask  (0/1 float)
-      Any key in OPENTOPO_DATASETS – OpenTopography elevation (metres)
+      "local"           â€“ local SRTM elevation tiles (metres)
+      "water_esa"       â€“ ESA WorldCover water mask  (0/1 float)
+      Any key in OPENTOPO_DATASETS â€“ OpenTopography elevation (metres)
     """
     if source == "water_esa":
         return fetch_esa_water_layer(north, south, east, west, dim)
@@ -127,7 +127,7 @@ def fetch_layer_data(
                                   demtype=source,
                                   api_key=_OPENTOPO_API_KEY,
                                   dim=dim)
-    else:  # "local" or unknown → local SRTM
+    else:  # "local" or unknown â†’ local SRTM
         return fetch_local_dem(north, south, east, west, dim)
 
 
@@ -152,7 +152,7 @@ def make_dem_image(
     Stitches local SRTM tiles, optionally subtracts water bodies, applies a
     map projection and resizes to *dim* pixels on the longest axis.
 
-    Migrated from numpy2stl/oceans.py — all dependencies are in geo2stl.
+    Migrated from numpy2stl/oceans.py â€” all dependencies are in geo2stl.
     """
     N, S, E, W = target_bbox
     result = stitch_tiles_no_rasterio(target_bbox)
@@ -275,14 +275,14 @@ def fetch_h5_dem(
     """
     Read elevation from the local SRTM HDF5 tile store (strm_data.h5).
 
-    The h5 file stores SRTM3 tiles at 6000×6000 px per 5° tile (~90m/px).
+    The h5 file stores SRTM3 tiles at 6000Ã—6000 px per 5Â° tile (~90m/px).
     Returns a float64 array cropped to the requested bbox at native resolution.
     The caller is responsible for upsampling to the desired display resolution.
 
     Tile naming convention: srtm_{tilX:02d}_{tilY:02d}
       tilX = floor(lon / 5) + 37     (1-indexed, 36 tiles wide)
       tilY = floor(-lat / 5) + 13    (1-indexed, northward from equator)
-    Each tile is 6000×6000 pixels covering 5° × 5°.
+    Each tile is 6000Ã—6000 pixels covering 5Â° Ã— 5Â°.
 
     Future: if h5 file is absent, fall back to OpenTopography SRTMGL3 API
     (same 90m data, global) or Google Earth Engine SRTM/NASADEM (30m).

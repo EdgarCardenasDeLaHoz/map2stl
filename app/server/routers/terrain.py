@@ -6,7 +6,7 @@ HTTP adapter that parses requests, delegates, and formats responses.
 """
 
 from geo2stl.hydrology import HYDROLOGY_LAYER
-from geo2stl.sat import SAT_LAYER
+from geo2stl.sat2stl import SAT_LAYER
 from geo2stl.dem import (
     fetch_layer_data as _fetch_layer_data,
     fetch_local_dem as _fetch_local_dem,
@@ -71,7 +71,7 @@ def _project_grid(arr, north, south, east, west, projection, clip_nans,
                   categorical=False):
     """Apply geo2stl projection to a 2-D array. Sync helper.
 
-    Delegates to geo2stl.projections.project_grid — kept as a thin wrapper
+    Delegates to geo2stl.projections.project_grid â€” kept as a thin wrapper
     so existing call-sites in this module do not change.
     """
     return _project_grid_impl(arr, north, south, east, west, projection,
@@ -109,11 +109,11 @@ def _fetch_dem_array(dem_source, north, south, east, west, dim,
                      subtract_water, projection, maintain_dimensions,
                      clip_nans):
     """
-    Fetch a DEM array from the specified source. Sync — call via run_in_executor.
+    Fetch a DEM array from the specified source. Sync â€” call via run_in_executor.
 
     Routing:
-      h5_local or any OPENTOPO_DATASETS key → _fetch_layer_data (handles h5→SRTMGL3 fallback)
-      "local" or unknown                    → _make_local_dem (local SRTM tiles)
+      h5_local or any OPENTOPO_DATASETS key â†’ _fetch_layer_data (handles h5â†’SRTMGL3 fallback)
+      "local" or unknown                    â†’ _make_local_dem (local SRTM tiles)
     """
     if dem_source in ("h5_local", *OPENTOPO_DATASETS):
         return _fetch_layer_data(dem_source, north, south, east, west, dim)
@@ -234,7 +234,7 @@ async def get_terrain_dem(
         im = _upsample_dem(im, dim)
 
         # Apply projection uniformly for ALL sources.
-        # All fetch functions now return Plate Carrée data;
+        # All fetch functions now return Plate CarrÃ©e data;
         # projection is applied here as a single external step.
         if projection != "none":
             im = _project_grid(
@@ -484,9 +484,9 @@ async def get_terrain_esa_land_cover(
                 "resolution_m": sat_scale,
             })
 
-        # Fetch ESA image directly — skip the water mask pipeline
+        # Fetch ESA image directly â€” skip the water mask pipeline
         # (fetch_water_mask would also download SRTM tiles for bathymetry,
-        # build a water mask, and apply JRC logic — all discarded here).
+        # build a water mask, and apply JRC logic â€” all discarded here).
         # Apply the same scale-clamping guards as fetch_water_mask.
         bbox_w = abs(east - west)
         bbox_h = abs(north - south)
@@ -618,7 +618,7 @@ async def get_terrain_sources():
         {"id": "h5_local", "label": "Local SRTM H5 (City-scale, ~90m)",
          "provider": "local_h5", "resolution_m": 90,
          "requires_api_key": False, "available": _H5_SRTM_AVAILABLE,
-         "note": "High-fidelity SRTM3 from local strm_data.h5 — best for regions < 15 km."},
+         "note": "High-fidelity SRTM3 from local strm_data.h5 â€” best for regions < 15 km."},
     ]
     has_key = bool(_OPENTOPO_API_KEY)
     for demtype, info in OPENTOPO_DATASETS.items():
@@ -662,10 +662,10 @@ async def get_terrain_hydrology(
                         'hydrorivers'   (HydroRIVERS ~500 m detail, downloaded on first use)
 
     natural_earth-only:
-        scale_m:        Natural Earth dataset tier — 10, 50, or 110 (default 10 = finest)
+        scale_m:        Natural Earth dataset tier â€” 10, 50, or 110 (default 10 = finest)
 
     hydrorivers-only:
-        min_order:      minimum Strahler order to include, 1–9 (default 3; 1=all streams,
+        min_order:      minimum Strahler order to include, 1â€“9 (default 3; 1=all streams,
                         5=major rivers only, 9=Amazon/Nile/Congo only)
         order_exponent: how steeply depression scales with order (default 1.5)
     """

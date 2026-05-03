@@ -17,7 +17,7 @@ Requirements:
     - Sun elevation angle at image acquisition time
     - Building footprint mask (from OSM or Open Buildings)
 
-Pass ``rgb`` (H×W×3 uint8 ndarray) to ``fetch_heights`` to activate
+Pass ``rgb`` (HÃ—WÃ—3 uint8 ndarray) to ``fetch_heights`` to activate
 shadow inference. Omitting it returns an empty result (safe default).
 """
 
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 NAMESPACE_TTL.setdefault("shadow_height", 30 * 86400)
 
-_CONFIDENCE = 0.3  # low — shadow estimation has ±3-5m accuracy
+_CONFIDENCE = 0.3  # low â€” shadow estimation has Â±3-5m accuracy
 _RESOLUTION_M = 5.0  # depends on satellite image resolution
 _NAMESPACE = "shadow_height"
 
@@ -92,7 +92,7 @@ def _estimate_sun_elevation(lat: float, lon: float,
     sin_elev = (math.sin(lat_rad) * math.sin(dec_rad) +
                 math.cos(lat_rad) * math.cos(dec_rad) * math.cos(ha_rad))
     elevation = math.degrees(math.asin(max(-1, min(1, sin_elev))))
-    return max(5, elevation)  # clamp to minimum 5° to avoid division by ~0
+    return max(5, elevation)  # clamp to minimum 5Â° to avoid division by ~0
 
 
 def _shadow_length_to_height(shadow_pixels: int, pixel_size_m: float,
@@ -121,7 +121,7 @@ def _fetch_rgb_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> "np.ndarray | None"
         import base64 as _b64
         from io import BytesIO
         from PIL import Image
-        from geo2stl.sat import fetch_satellite_tiles
+        from geo2stl.sat2stl import fetch_satellite_tiles
 
         north, south, east, west = bbox
         # Compute a resolution that gives ~2 m/pixel
@@ -139,7 +139,7 @@ def _fetch_rgb_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> "np.ndarray | None"
 
 
 class ShadowHeightProvider:
-    """DEPRECATED: Shadow-based building height estimation — do not use in production.
+    """DEPRECATED: Shadow-based building height estimation â€” do not use in production.
 
     This provider is deprecated due to high error rate and outlier risk. See module docstring.
     """
@@ -167,7 +167,7 @@ class ShadowHeightProvider:
         dim:
             (height, width) of the output raster in pixels.
         rgb:
-            Optional H×W×3 uint8 ndarray of satellite imagery for the bbox.
+            Optional HÃ—WÃ—3 uint8 ndarray of satellite imagery for the bbox.
             If None, returns an empty result (safe default until satellite
             imagery access is wired up).
         """
@@ -246,7 +246,7 @@ def _infer_from_rgb(
         logger.debug("Shadow height: no shadow regions detected")
         return _empty_result(dim)
 
-    # Filter tiny components (< 3px) and very large ones (> 0.3% of image —
+    # Filter tiny components (< 3px) and very large ones (> 0.3% of image â€”
     # likely terrain shadows or water, not buildings)
     max_component_px = int(rgb_h * rgb_w * 0.003)
     n_valid = 0
@@ -262,7 +262,7 @@ def _infer_from_rgb(
         row_span = int(rows.max() - rows.min()) + 1
         col_span = int(cols.max() - cols.min()) + 1
 
-        # Reject highly elongated shadows — terrain shadows are long thin streaks
+        # Reject highly elongated shadows â€” terrain shadows are long thin streaks
         # (aspect ratio > 8:1). Building shadows are more compact.
         long_side = max(row_span, col_span)
         short_side = min(row_span, col_span)
@@ -273,8 +273,8 @@ def _infer_from_rgb(
 
         height_m = _shadow_length_to_height(shadow_length_px, pixel_m, sun_elev)
 
-        # Clamp to realistic urban building heights (1–50 m).
-        # 50 m ≈ 15 floors — covers virtually all non-skyscraper buildings.
+        # Clamp to realistic urban building heights (1â€“50 m).
+        # 50 m â‰ˆ 15 floors â€” covers virtually all non-skyscraper buildings.
         # Taller estimates almost always come from terrain shadows or image
         # artefacts, not actual buildings in the cities this pipeline targets.
         if height_m < 1.0 or height_m > 50.0:

@@ -1,4 +1,4 @@
-"""RoofNet height provider — wraps a trained RoofNetV3 / HeightUNet checkpoint.
+"""RoofNet height provider â€” wraps a trained RoofNetV3 / HeightUNet checkpoint.
 
 Fetches an ESRI World Imagery RGB tile for the bbox, runs the model from
 `city2stl.height.predict` to produce a per-pixel height raster, and exposes
@@ -6,7 +6,7 @@ it through the standard `HeightProvider` protocol so it joins the parallel
 fetch pool in `app.server.routers.height`.
 
 Coverage: global (anywhere ESRI satellite tiles exist).
-Confidence: 0.65 — between Copernicus (0.70) and OpenBuildings (0.60), since
+Confidence: 0.65 â€” between Copernicus (0.70) and OpenBuildings (0.60), since
 it is satellite-only with no external ground-truth pairing at runtime.
 
 The provider is gated by checkpoint availability: if no `*.pt` is found at
@@ -30,14 +30,14 @@ from city2stl.height import BBox, HeightResult
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CKPT_CANDIDATES = [
-    # RoofNetV3 / HeightUNet checkpoints — all deprecated (marginal-mean collapse).
+    # RoofNetV3 / HeightUNet checkpoints â€” all deprecated (marginal-mean collapse).
     # Provider auto-disables when no candidate exists. The current generation of
-    # height models (Retna_V1) needs a separate provider — this one stays here
+    # height models (Retna_V1) needs a separate provider â€” this one stays here
     # as a stub for backward compat.
     "models/roofnet_unet_iou_v2.pt",
     "models/roofnet_unet.pt",
 ]
-_RESOLUTION_M = 5.0  # nominal — actual depends on bbox size & sat tile zoom
+_RESOLUTION_M = 5.0  # nominal â€” actual depends on bbox size & sat tile zoom
 _CONFIDENCE = 0.65
 
 
@@ -68,7 +68,7 @@ def _fetch_rgb(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | None:
 
     Returns (H, W, 3) uint8 or None on failure.
     """
-    from geo2stl.sat import fetch_satellite_tiles
+    from geo2stl.sat2stl import fetch_satellite_tiles
     from PIL import Image
 
     h, w = dim

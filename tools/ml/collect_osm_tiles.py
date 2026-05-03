@@ -125,7 +125,7 @@ def _fetch_satellite(
     dim: int,
 ) -> np.ndarray:
     """Fetch ESRI WMTS RGB tiles, return (3, dim, dim) float32 in [0, 1]."""
-    from geo2stl.sat import fetch_satellite_tiles
+    from geo2stl.sat2stl import fetch_satellite_tiles
     from PIL import Image
 
     sat_b64 = fetch_satellite_tiles(north, south, east, west, dim=dim)
@@ -150,13 +150,13 @@ def _fetch_provider_label(
     Returns
     -------
     (label, stats)
-        label: (dim, dim) float32 — heights in metres. NaN where no provider
+        label: (dim, dim) float32 â€” heights in metres. NaN where no provider
                had data; converted to 0.0 by the caller before saving so the
                loss masks (target > 0) keep ignoring those pixels.
         stats: dict with per-provider coverage + max so the collector can
                decide whether the tile is worth saving.
     """
-    # Lazy imports — keeps this module importable on minimal environments
+    # Lazy imports â€” keeps this module importable on minimal environments
     from city2stl.height import HeightResult, merge_height_rasters
     from city2stl.height.providers.ndsm import NDSMProvider
     from city2stl.height.providers.wsf3d import WSF3DProvider
@@ -203,7 +203,7 @@ def _fetch_provider_label(
     if not results:
         return np.full((dim, dim), np.nan, dtype=np.float32), stats
 
-    # filter_outliers=False — for training labels we want to KEEP the
+    # filter_outliers=False â€” for training labels we want to KEEP the
     # tall buildings (high-rises in Cartagena, Manhattan, etc.). The
     # default IQR clip would prune them as anomalies relative to the
     # neighbourhood's median, which is the opposite of what we want.
@@ -322,7 +322,7 @@ def collect_osm_tiles(
                     logger.debug("provider fetch failed (%d,%d): %s", r, c, exc)
                     skipped_fetch_fail += 1
                     continue
-                # Replace NaN with 0 — the loss masks (target > 0) ignore zero pixels
+                # Replace NaN with 0 â€” the loss masks (target > 0) ignore zero pixels
                 height = np.where(np.isnan(height), 0.0, height).astype(np.float32)
             else:
                 raise ValueError(f"unknown label_source: {label_source!r}")
