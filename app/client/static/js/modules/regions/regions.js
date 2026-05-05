@@ -393,6 +393,10 @@ function createGlobeMarker(lat, lng, color = 0xff0000) {
 async function selectCoordinate(index, { skipAutoLoad = false } = {}) {
     const coordinatesData = window.getCoordinatesData?.() || [];
     const selectedRegion = coordinatesData[index];
+    if (!selectedRegion) {
+        window.showToast?.('That region is no longer available. Please refresh the list.', 'warning');
+        return;
+    }
     window.setSelectedRegion?.(selectedRegion);
     window.appState.selectedRegion = selectedRegion;
 
@@ -425,6 +429,10 @@ async function selectCoordinate(index, { skipAutoLoad = false } = {}) {
     // legacy coordinates.json parameters, then hard-coded defaults.
     // Await so settings are applied before DEM is loaded below.
     const hasSaved = await window.loadAndApplyRegionSettings?.(selectedRegion.name);
+    if (!hasSaved) {
+        const clipNansEl = document.getElementById('paramClipNans');
+        if (clipNansEl) clipNansEl.checked = true;
+    }
     if (!hasSaved && selectedRegion.parameters) {
         const rp = selectedRegion.parameters;
         const _setEl = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };

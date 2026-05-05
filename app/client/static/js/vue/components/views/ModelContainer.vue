@@ -114,17 +114,17 @@
             <!-- split.border_height / split.border_offset -->
             <div class="param-group">
               <label title="Raised lip height around each piece base (mm)">Border height (mm):</label>
-              <input type="number" id="splitBorderHeight" value="1.0" min="0" max="10" step="0.5">
+              <input type="number" id="splitBorderHeight" value="1.0" min="0" max="10" step="0.5" aria-label="Puzzle border height in millimetres">
             </div>
             <div class="param-group">
               <label title="Inset from piece edge for raised lip (mm)">Border offset (mm):</label>
-              <input type="number" id="splitBorderOffset" value="5.0" min="0" max="20" step="0.5">
+              <input type="number" id="splitBorderOffset" value="5.0" min="0" max="20" step="0.5" aria-label="Puzzle border offset in millimetres">
             </div>
 
             <!-- split.include_border -->
             <div class="param-group">
               <label title="Add a raised lip around each piece base">Include Border:</label>
-              <input type="checkbox" id="splitIncludeBorder" checked>
+              <input type="checkbox" id="splitIncludeBorder" checked aria-label="Include puzzle border">
             </div>
 
             <button id="exportPuzzle3MFBtn" class="btn btn-success" style="width:100%;margin-top:6px;font-size:11px;">
@@ -194,7 +194,7 @@
             <div class="dim-header" style="margin-bottom:6px;">🖨️ Bed Optimizer</div>
             <div class="dim-row" style="gap:4px;">
               <label class="dim-label" style="flex-shrink:0;">Bed:</label>
-              <select id="bedSizeSelect" style="flex:1;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;">
+              <select id="bedSizeSelect" style="flex:1;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;" aria-label="Printer bed size preset">
                 <option value="220x220">Ender 220×220</option>
                 <option value="235x235">Ender3 235×235</option>
                 <option value="250x210" selected>Prusa 250×210</option>
@@ -206,9 +206,9 @@
             </div>
             <div id="bedCustomRow" class="dim-row" style="gap:4px;display:none;">
               <label class="dim-label">W×H (mm):</label>
-              <input type="number" id="bedCustomW" value="220" min="50" max="1000" style="width:50px;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;">
+              <input type="number" id="bedCustomW" value="220" min="50" max="1000" style="width:50px;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;" aria-label="Custom printer bed width in millimetres">
               <span style="color:#888;">×</span>
-              <input type="number" id="bedCustomH" value="220" min="50" max="1000" style="width:50px;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;">
+              <input type="number" id="bedCustomH" value="220" min="50" max="1000" style="width:50px;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;" aria-label="Custom printer bed height in millimetres">
             </div>
             <div id="bedOptimizerResult" style="font-size:11px;color:#ccc;margin-top:6px;line-height:1.5;"></div>
           </div>
@@ -218,19 +218,19 @@
         <CollapsibleSection title="✂️ Cross-Section" wrap-style="margin-top:10px;" id="crossSectionSection">
           <div class="param-group">
             <label title="Cut along a latitude or longitude line">Cut along:</label>
-            <select id="crossSectionAxis">
+            <select id="crossSectionAxis" aria-label="Cross-section axis">
               <option value="lat">Latitude (horizontal)</option>
               <option value="lon">Longitude (vertical)</option>
             </select>
           </div>
           <div class="param-group">
             <label title="Exact coordinate value for the cut">Cut at:</label>
-            <input type="number" id="crossSectionValue" step="0.0001" placeholder="e.g. 40.7128" style="width:120px;">
+            <input type="number" id="crossSectionValue" step="0.0001" placeholder="e.g. 40.7128" style="width:120px;" aria-label="Cross-section coordinate value">
             <button id="crossSectionMidBtn" class="btn btn-xs" style="margin-left:4px;">Mid</button>
           </div>
           <div class="param-group">
             <label title="Thickness of the slab in mm">Slab depth (mm):</label>
-            <input type="number" id="crossSectionThickness" value="5" min="2" max="20" step="1" style="width:60px;">
+            <input type="number" id="crossSectionThickness" value="5" min="2" max="20" step="1" style="width:60px;" aria-label="Cross-section slab depth in millimetres">
           </div>
           <button id="downloadCrossSectionBtn" class="btn btn-success btn-sm" style="margin-top:6px;">
             <span class="btn-icon">✂️</span> Download Cross-Section STL
@@ -255,30 +255,30 @@
           <!-- Display toggles -->
           <div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin:6px 0 4px;font-size:11px;">
             <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Overlay mesh wireframe">
-              <input type="checkbox" id="viewerWireframe"> Wireframe
+              <input type="checkbox" id="viewerWireframe" aria-label="Show viewer wireframe"> Wireframe
             </label>
             <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Show vertex normals debug material">
-              <input type="checkbox" id="viewerNormals"> Normals
+              <input type="checkbox" id="viewerNormals" aria-label="Show viewer normals"> Normals
             </label>
             <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-              <input type="checkbox" id="viewerAutoRotate"> Auto-rotate
+              <input type="checkbox" id="viewerAutoRotate" aria-label="Enable viewer auto-rotate"> Auto-rotate
             </label>
           </div>
 
           <!-- Analysis toggles -->
           <div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin:4px 0;font-size:11px;">
             <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Color each connected mesh patch a distinct random hue">
-              <input type="checkbox" id="viewerSurfaceGroups"> Surface groups
+              <input type="checkbox" id="viewerSurfaceGroups" aria-label="Show viewer surface groups"> Surface groups
             </label>
           </div>
 
           <!-- Simplification -->
           <div style="display:flex;align-items:center;gap:6px;margin:4px 0;font-size:11px;flex-wrap:wrap;">
             <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Subsample the grid client-side — no re-fetch. Use with Wireframe to inspect mesh density.">
-              <input type="checkbox" id="viewerSimplify"> Simplify
+              <input type="checkbox" id="viewerSimplify" aria-label="Enable viewer mesh simplification"> Simplify
             </label>
             <input type="number" id="viewerSimplifyRatio" value="0.25" min="0.05" max="0.95" step="0.05"
-              class="ctrl-input-sm" style="width:48px;" title="Keep fraction (0.05 = very coarse, 0.95 = near-full)">
+              class="ctrl-input-sm" style="width:48px;" title="Keep fraction (0.05 = very coarse, 0.95 = near-full)" aria-label="Viewer simplify keep ratio">
             <span style="color:#888;font-size:10px;">keep</span>
           </div>
 

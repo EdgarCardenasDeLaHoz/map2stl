@@ -1,38 +1,27 @@
 <template>
   <div id="sidebarTableView" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
-    <div style="padding:4px 8px;border-bottom:1px solid #333;flex-shrink:0;display:flex;flex-direction:column;gap:4px;">
-      <input type="text" id="sidebarTableSearch" class="search-input"
+    <div class="sidebar-table-controls">
+      <input type="text" id="sidebarTableSearch" class="search-input" aria-label="Search regions table"
              v-model="tableSearch"
              placeholder="Search regions…"
              style="margin:0;">
-      <!-- Label filter chips -->
-      <div v-if="availableLabels.length > 0" style="display:flex;flex-wrap:wrap;gap:3px;">
-        <button
-          class="label-chip"
-          :class="{ active: activeLabels.size === 0 }"
-          @click="clearLabels"
-          title="Show all labels"
-        >All</button>
-        <button
-          v-for="lbl in availableLabels"
-          :key="lbl"
-          class="label-chip"
-          :class="{ active: activeLabels.has(lbl) }"
-          @click="toggleLabel(lbl)"
-          :title="`Filter by ${lbl}`"
-        >{{ lbl }}</button>
-      </div>
+      <select id="sidebarCategoryFilter" class="ctrl-select sidebar-category-select"
+              v-model="selectedCategory"
+              title="Filter by region category">
+        <option value="">All categories</option>
+        <option v-for="cat in availableCategories" :key="cat" :value="cat">{{ cat }}</option>
+      </select>
     </div>
     <div style="flex:1;overflow-y:auto;">
       <table class="sidebar-table-view" id="sidebarRegionsTable">
         <colgroup>
-          <col style="width:auto">
-          <col style="width:52px">
-          <col style="width:52px">
-          <col style="width:52px">
-          <col style="width:52px">
-          <col style="width:44px">
-          <col style="width:80px">
+          <col style="width:17%">
+          <col style="width:48px">
+          <col style="width:48px">
+          <col style="width:48px">
+          <col style="width:48px">
+          <col style="width:42px">
+          <col style="width:78px">
         </colgroup>
         <thead>
           <tr>
@@ -57,63 +46,63 @@
 import { ref, watch, onMounted } from 'vue';
 
 const tableSearch = ref('');
-const availableLabels = ref<string[]>([]);
-const activeLabels = ref<Set<string>>(new Set());
+const availableCategories = ref<string[]>([]);
+const selectedCategory = ref('');
 
-function refreshLabels() {
+function _categoryForRegion(region: any): string {
+  const label = (region?.label || '').trim();
+  if (label) return label;
+  const lat = (Number(region?.north) + Number(region?.south)) / 2;
+  const lon = (Number(region?.east) + Number(region?.west)) / 2;
+  return (window as any).detectContinent?.(lat, lon) || 'Other';
+}
+
+function refreshCategories() {
   const data: any[] = (window as any).getCoordinatesData?.() || [];
-  const labels = [...new Set(data.map((r: any) => r.label).filter(Boolean))].sort() as string[];
-  availableLabels.value = labels;
+  const categories = [...new Set(data.map((r: any) => _categoryForRegion(r)).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b)) as string[];
+  availableCategories.value = categories;
+  if (selectedCategory.value && !categories.includes(selectedCategory.value)) {
+    selectedCategory.value = '';
+  }
 }
 
-function toggleLabel(lbl: string) {
-  const s = new Set(activeLabels.value);
-  if (s.has(lbl)) s.delete(lbl);
-  else s.add(lbl);
-  activeLabels.value = s;
-  applyLabelFilter();
-}
-
-function clearLabels() {
-  activeLabels.value = new Set();
-  applyLabelFilter();
-}
-
-function applyLabelFilter() {
+function applyTableFilter() {
   const tbody = document.getElementById('sidebarRegionsTableBody');
   if (!tbody) return;
-  const active = activeLabels.value;
-    for (const row of tbody.querySelectorAll('tr:not(.tbl-group-header)')) {
-      if (active.size === 0) {
-        (row as HTMLElement).style.display = '';
-      } else {
-        const label = (row as HTMLElement).dataset.label || '';
-        (row as HTMLElement).style.display = active.has(label) ? '' : 'none';
-      }
+  refreshCategories();
+  const category = selectedCategory.value;
+  for (const row of tbody.querySelectorAll('tr:not(.tbl-group-header)')) {
+    if (!category) {
+      (row as HTMLElement).style.display = '';
+    } else {
+      const rowCategory = (row as HTMLElement).dataset.category || '';
+      (row as HTMLElement).style.display = rowCategory === category ? '' : 'none';
     }
+  }
 
-    // Hide continent headers when all their rows are filtered out.
-    const headers = Array.from(tbody.querySelectorAll('tr.tbl-group-header')) as HTMLElement[];
-    for (const header of headers) {
-      let sibling = header.nextElementSibling as HTMLElement | null;
-      let hasVisibleRows = false;
-      while (sibling && !sibling.classList.contains('tbl-group-header')) {
-        if (sibling.style.display !== 'none') {
-          hasVisibleRows = true;
-          break;
-        }
-        sibling = sibling.nextElementSibling as HTMLElement | null;
+  // Hide continent headers when all their rows are filtered out.
+  const headers = Array.from(tbody.querySelectorAll('tr.tbl-group-header')) as HTMLElement[];
+  for (const header of headers) {
+    let sibling = header.nextElementSibling as HTMLElement | null;
+    let hasVisibleRows = false;
+    while (sibling && !sibling.classList.contains('tbl-group-header')) {
+      if (sibling.style.display !== 'none') {
+        hasVisibleRows = true;
+        break;
       }
-      header.style.display = hasVisibleRows ? '' : 'none';
+      sibling = sibling.nextElementSibling as HTMLElement | null;
     }
+    header.style.display = hasVisibleRows ? '' : 'none';
+  }
 }
 
 onMounted(() => {
-  refreshLabels();
+  refreshCategories();
   // Expose for view-management.js to call after each re-render
-  (window as any)._applyRegionLabelFilter = applyLabelFilter;
-  // Re-read labels whenever region data changes
-  (window as any).events?.on?.((window as any).EV?.REGION_SELECTED, () => refreshLabels());
+  (window as any)._applyRegionLabelFilter = applyTableFilter;
+  // Re-read categories whenever region data changes
+  (window as any).events?.on?.((window as any).EV?.REGION_SELECTED, () => refreshCategories());
 });
 
 watch(tableSearch, (val) => {
@@ -123,7 +112,11 @@ watch(tableSearch, (val) => {
     el.value = val;
     el.dispatchEvent(new Event('input', { bubbles: true }));
   }
-  // Reapply label filter after search updates DOM
-  setTimeout(applyLabelFilter, 50);
+  // Reapply category filter after search updates DOM
+  setTimeout(applyTableFilter, 50);
+});
+
+watch(selectedCategory, () => {
+  setTimeout(applyTableFilter, 0);
 });
 </script>

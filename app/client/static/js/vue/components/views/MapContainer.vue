@@ -33,21 +33,21 @@
           </select>
         </div>
         <div class="map-settings-row">
-          <label><input type="checkbox" id="showTerrainOverlayExplore"> Terrain Overlay</label>
+          <label><input type="checkbox" id="showTerrainOverlayExplore" aria-label="Show terrain overlay"> Terrain Overlay</label>
         </div>
         <div class="map-settings-row" id="terrainOpacityRowExplore" style="display:none;">
           <label>Opacity</label>
-          <input type="range" id="terrainOverlayOpacityExplore" min="0" max="100" value="70" class="map-settings-terrain-opacity">
+          <input type="range" id="terrainOverlayOpacityExplore" min="0" max="100" value="70" class="map-settings-terrain-opacity" aria-label="Terrain overlay opacity">
           <span id="terrainOpacityValueExplore" class="map-settings-opacity-value">70%</span>
         </div>
         <div class="map-settings-row">
-          <label><input type="checkbox" id="showGridlinesExplore"> Grid Lines</label>
+          <label><input type="checkbox" id="showGridlinesExplore" aria-label="Show grid lines"> Grid Lines</label>
         </div>
         <div class="map-settings-row">
-          <label><input type="checkbox" id="showLabelsExplore"> Map Labels</label>
+          <label><input type="checkbox" id="showLabelsExplore" aria-label="Show map labels"> Map Labels</label>
         </div>
         <div class="map-settings-row">
-          <label><input type="checkbox" id="filterRegionsToViewportExplore"> Filter table to current map view</label>
+          <label><input type="checkbox" id="filterRegionsToViewportExplore" aria-label="Filter regions to current map view"> Filter table to current map view</label>
         </div>
         <div class="map-settings-row">
           <label for="bboxOpacityExplore">Bounding Box Opacity</label>
@@ -67,7 +67,7 @@
         <button id="closeRegionsPanel" class="regions-panel-close">✕</button>
       </div>
       <div class="regions-panel-toolbar">
-        <input type="text" id="regionsPanelSearch" placeholder="Search regions..." class="regions-panel-search">
+        <input type="text" id="regionsPanelSearch" placeholder="Search regions..." class="regions-panel-search" aria-label="Search regions">
         <!-- Removed redundant '+ New' button; use floatingDrawBtn as the single entry point for region creation. -->
       </div>
       <div id="regionsPanelList" class="regions-panel-list"></div>

@@ -29,7 +29,6 @@ window.switchView = function switchView(view) {
     const compareContainer = document.getElementById('compareContainer');
     const regionsContainer = document.getElementById('regionsContainer');
     const cacheContainer   = document.getElementById('cacheInventoryContainer');
-    const newRegionSection = document.getElementById('newRegionSection');
     const tabs             = document.querySelectorAll('.tab');
 
     // Restore sidebar visibility (may have been hidden in model view)
@@ -54,13 +53,9 @@ window.switchView = function switchView(view) {
         cacheContainer.classList.add('hidden');
     }
 
-    // Show/hide new region section (only visible in 2D Map view)
-    if (newRegionSection) {
-        newRegionSection.style.display = view === 'map' ? 'block' : 'none';
-    }
-
     // Remove active from tabs
     tabs.forEach(tab => tab.classList.remove('active'));
+    document.body.classList.toggle('dem-edit-mode', view === 'dem');
 
     // Show selected
     if (view === 'map') {
@@ -191,6 +186,17 @@ window.cycleSidebarState = function cycleSidebarState() {
 
     window.setSidebarState?.(sidebarState);
     window._setSidebarViews?.(sidebarState);
+
+    // Sidebar width changes require map/canvas relayout.
+    requestAnimationFrame(() => {
+        window._globalMap?.invalidateSize?.();
+        window.emitStackUpdate?.();
+        window.dispatchEvent(new Event('resize'));
+    });
+    setTimeout(() => {
+        window._globalMap?.invalidateSize?.();
+        window.emitStackUpdate?.();
+    }, 140);
 };
 
 // ---------------------------------------------------------------------------
@@ -245,12 +251,13 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
             if (originalIndex < 0) {
                 originalIndex = coordinatesData.findIndex(r => r.name === region.name);
             }
+            if (originalIndex < 0) return;
             const p   = region.parameters || {};
             const dim = p.dim || '—';
-            const escapedName = region.name.replace(/'/g, "\\'");
             const tr  = document.createElement('tr');
             if (selectedRegion && selectedRegion.name === region.name) tr.classList.add('selected');
             tr.dataset.label = region.label || '';
+            tr.dataset.category = (region.label && region.label.trim()) ? region.label.trim() : continent;
             tr.innerHTML = `
                 <td class="tbl-name" title="${region.name}">${region.name}</td>
                 <td class="tbl-coord">${region.north?.toFixed(2) ?? ''}</td>
@@ -260,8 +267,7 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
                 <td class="tbl-coord">${dim}</td>
                 <td class="tbl-actions">
                     <button class="tbl-btn edit" onclick="goToEdit(${originalIndex})" title="Open in Edit view">✏ Edit</button>
-                    <button class="tbl-btn" onclick="toggleRegionBboxHidden('${escapedName}')" title="Hide or show this bounding box">${window.isRegionBboxHidden?.(region.name) ? '👁 Show' : '🙈 Hide'}</button>
-                    <button class="tbl-btn" onclick="selectCoordinate(${originalIndex});switchView('map')" title="Fly to on map">📍</button>
+                    <button class="tbl-btn danger" onclick="_deleteRegionFromTable(${originalIndex})" title="Delete region">🗑</button>
                 </td>
             `;
             tr.onclick = (e) => {

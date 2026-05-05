@@ -9,8 +9,15 @@ The model recovers, but this initial shock suggests the new architecture is poor
 
 ## Root Cause Analysis
 
-### Hypothesis 1: Batch Norm Statistics Mismatch (HIGH CONFIDENCE)
-**Why it happens:**
+### Hypothesis 1: Batch Norm Statistics Mismatch (HIGH CONFIDENCE — NOT APPLICABLE TO Retna_V1)
+
+> ⚠️ **Applicability Note (updated 2026-05-03):** This hypothesis was written before confirming the active model's architecture.  
+> **Retna_V1 uses `res_conv` blocks (`Conv2d → LeakyReLU → Conv2d → LeakyReLU`)** with **no `nn.BatchNorm2d`** at any layer.  
+> BN statistics cannot be the cause of epoch-1 jumps in the current training run.  
+> See `strm2stl/tools/ml/models.py` — search for `res_conv` to verify.  
+> The actual root cause for Retna_V1 growth degradation was **gradient-flow bias toward deep blocks** (see Hypothesis 3 and the mitigation doc), resolved by the lowest-score-block growth warmup strategy in `grow_prune.py`.
+
+**Why it happens (for BN-based architectures):**
 - When architecture grows, batch norm running_mean/running_var are NOT adapted
 - They reflect statistics of the OLD architecture's intermediate features
 - New channels output random values; BN statistics are out-of-distribution

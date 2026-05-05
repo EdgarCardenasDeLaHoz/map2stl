@@ -153,29 +153,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
     });
 
-    const genGlobalDemBtn = document.getElementById('genGlobalDemBtn');
-    genGlobalDemBtn?.addEventListener('click', async () => {
-        const status = document.getElementById('genGlobalDemStatus');
-        genGlobalDemBtn.disabled = true;
-        if (status) status.textContent = 'Generating…';
-        window.showToast?.('Generating terrain cache — this runs once and may take a minute', 'info', 5000);
-        try {
-            const { error } = await window.api.misc.globalDemOverview(true);
-            if (!error) {
-                if (status) status.textContent = '✓ Done';
-                window.showToast?.('Terrain cache generated', 'success');
-            } else {
-                if (status) status.textContent = '✗ Failed';
-                window.showToast?.('Failed: ' + error, 'error');
-            }
-        } catch (e) {
-            if (status) status.textContent = '✗ Error';
-            window.showToast?.('Error generating cache', 'error');
-        } finally {
-            genGlobalDemBtn.disabled = false;
-        }
-    });
-
     function _setLabels(show) {
         window.toggleMapLabels?.(show);
         const btn = document.getElementById('floatingLabelsToggle');

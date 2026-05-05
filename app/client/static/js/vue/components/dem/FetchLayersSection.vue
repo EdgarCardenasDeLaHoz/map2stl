@@ -32,7 +32,7 @@
           <label for="paramWaterScale" title="How strongly to depress water areas (0–1).">Water</label>
           <input type="number" id="paramWaterScale" value="0.05" min="0" max="1" step="0.01" class="ctrl-input fetch-num-sm">
           <label class="check-label" title="Depress water-masked pixels.">
-            <input type="checkbox" id="paramSubtractWater" checked> Subtract
+            <input type="checkbox" id="paramSubtractWater" checked aria-label="Subtract water from DEM"> Subtract
           </label>
         </div>
 
@@ -167,15 +167,15 @@
         </div>
 
         <div class="fetch-checkbox-row">
-          <label class="check-label"><input type="checkbox" id="cityLayerBuildings" checked> 🏠 Buildings</label>
-          <label class="check-label"><input type="checkbox" id="cityLayerRoads" checked> 🛣 Roads</label>
-          <label class="check-label"><input type="checkbox" id="cityLayerWaterways" checked> 💧 Waterways</label>
+          <label class="check-label"><input type="checkbox" id="cityLayerBuildings" checked aria-label="Include city buildings layer"> 🏠 Buildings</label>
+          <label class="check-label"><input type="checkbox" id="cityLayerRoads" checked aria-label="Include city roads layer"> 🛣 Roads</label>
+          <label class="check-label"><input type="checkbox" id="cityLayerWaterways" checked aria-label="Include city waterways layer"> 💧 Waterways</label>
         </div>
         <!-- Color swatches used by city-overlay.js / city-render.js for canvas rendering -->
         <div style="display:none;">
-          <input type="color" id="layerBuildingsColor"  value="#c8b89a" class="city-color-swatch">
-          <input type="color" id="layerRoadsColor"      value="#cc8844" class="city-color-swatch">
-          <input type="color" id="layerWaterwaysColor"  value="#4488cc" class="city-color-swatch">
+          <input type="color" id="layerBuildingsColor"  value="#c8b89a" class="city-color-swatch" aria-label="Buildings layer color">
+          <input type="color" id="layerRoadsColor"      value="#cc8844" class="city-color-swatch" aria-label="Roads layer color">
+          <input type="color" id="layerWaterwaysColor"  value="#4488cc" class="city-color-swatch" aria-label="Waterways layer color">
         </div>
 
         <div class="param-group">
@@ -189,7 +189,7 @@
         </div>
 
         <label class="check-label" style="font-size:11px;margin:2px 0;" title="Burn slanted roof surfaces (gabled / hipped / pyramidal / skillion / dome) using OSM roof:shape tags. Visible at ≥400 px raster resolution. Slower than flat tops.">
-          <input type="checkbox" id="cityRoofShapes"> 🏠 Slanted roofs
+          <input type="checkbox" id="cityRoofShapes" aria-label="Enable slanted city roof shapes"> 🏠 Slanted roofs
         </label>
 
         <div class="param-grid">

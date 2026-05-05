@@ -35,7 +35,7 @@
               aria-label="Clear region cache"
                   title="Clear all cached data (DEM, water, satellite, etc.) and re-fetch">🗑️</button>
           <label class="check-label" style="font-size:11px;color:#aaa;white-space:nowrap;" title="Auto-save settings after changes">
-            <input type="checkbox" id="autoSaveEnabled"> Auto
+            <input type="checkbox" id="autoSaveEnabled" aria-label="Auto save region settings"> Auto
           </label>
           <span id="saveSettingsStatus" style="font-size:10px;color:#888;min-width:60px;text-align:right;"></span>
         </div>
@@ -57,7 +57,7 @@
       <!-- JSON settings editor (hidden by default, toggled by { } JSON button) -->
       <div id="settingsJsonView" class="settings-json-view hidden">
         <div style="font-size:10px;color:#888;margin-bottom:4px;">Edit settings as JSON. Click Apply to update the form.</div>
-        <textarea id="settingsJsonEditor" class="settings-json-editor" spellcheck="false"></textarea>
+        <textarea id="settingsJsonEditor" class="settings-json-editor" spellcheck="false" aria-label="Settings JSON editor"></textarea>
         <div id="settingsJsonError" class="settings-json-error hidden"></div>
         <div class="row-gap6" style="margin-top:6px;">
           <button id="applyJsonSettingsBtn" class="btn btn-primary" style="flex:1;font-size:11px;">✓ Apply</button>

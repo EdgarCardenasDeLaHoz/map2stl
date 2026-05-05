@@ -254,7 +254,7 @@ function _updateLayerOpacitySliders() {
                     title="Move down (render earlier / behind)" ${isFirst ? 'disabled' : ''}>▼</button>
             </span>
             <span style="font-size:10px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${labels[mode]}</span>
-            <input type="range" min="0" max="100" value="${pct}" data-layer="${mode}"
+            <input type="range" min="0" max="100" value="${pct}" data-layer="${mode}" aria-label="${labels[mode]} opacity"
                 style="width:100%;" title="${labels[mode]} opacity">
             <span style="font-size:10px;color:#888;text-align:right;">${pct}%</span>`;
         // Wire opacity slider

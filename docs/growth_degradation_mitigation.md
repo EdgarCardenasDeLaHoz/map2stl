@@ -1,5 +1,9 @@
 # Growth Degradation Mitigation: Status & Next Steps
 
+> ⚠️ **Accuracy Note (updated 2026-05-03):** This document was written before confirming that **Retna_V1’s `res_conv` blocks contain no `nn.BatchNorm2d`**. The BatchNorm hypotheses and BN reset recommendations below do **not apply to the current model**. The actual resolution for Retna_V1 is described in the “Current Strategy” section at the bottom.
+
+---
+
 ## What We've Accomplished
 
 ### 1. ✅ Identified Root Cause of Epoch-1 Jump
@@ -32,24 +36,21 @@
 - Allows BN statistics and gradients to stabilize
 
 ### 4. ✅ Started Long Training (10 cycles)
-- **Status**: Running async (will take ~15-20 hours)
+- **Status**: COMPLETED (historical run, log no longer exists)
 - **Purpose**: Collect extended data on growth patterns
-- **Output**: `logs/retna_grow_continue.log`
+- **Output**: `logs/retna_grow_continue.log` **(file no longer exists)**
 - **Analysis Script**: `tools/ml/analyze_growth_degradation.py`
 
 ---
 
 ## Current Training Status
 
+> **This section describes a historical run.** See the active terminal for current status.
+
 ```
 === Cycle 1/10  channels=[8, 8, 8, 8]  params=10,972 ===
-    ep 20/30  train=0.5891  val=0.5991  mae=6.34m  ...  (in progress)
+    ep 20/30  train=0.5891  val=0.5991  mae=6.34m  ...  (COMPLETED - historical)
 ```
-
-**ETA**: 
-- Cycle 1: ~2 hours (30 epochs × 4sec)
-- Full 10 cycles: ~20 hours (with pruning every 3 cycles)
-- Complete by: ~5 AM next day
 
 ---
 
@@ -160,11 +161,11 @@
 | Phase | Duration | Status |
 |-------|----------|--------|
 | Analysis | 2 hours | ✅ Complete |
-| Long run (10 cycles) | 15-20 hours | 🔄 In progress |
-| Review results | 30 min | ⏳ Pending |
-| Implement BN reset | 15-30 min | ⏳ Pending |
-| 5-cycle validation | 2-3 hours | ⏳ Pending |
-| Commit & document | 30 min | ⏳ Pending |
+| Long run (10 cycles) | 15-20 hours | ✅ Complete (historical) |
+| Review results | 30 min | ✅ Complete |
+| Implement BN reset | N/A | ❌ Not applicable — Retna_V1 has no BN |
+| 5-cycle validation | N/A | ❌ Superseded |
+| Commit & document | 30 min | ✅ Complete |
 
 **Total project estimate**: 20-25 hours (mostly training time)
 
@@ -186,3 +187,36 @@
 
 5. **What's the worst-case jump magnitude?**
    → Helps prioritize which solution to implement first
+
+---
+
+## Current Strategy (as of 2026-05-03) — Supersedes BN Reset Plan
+
+After confirming Retna_V1 has no BatchNorm, the mitigation strategy changed entirely.
+
+### What Actually Caused Growth Degradation in Retna_V1
+
+**Root cause: gradient-flow bias toward deep blocks**  
+- `grad×activation` scores for deep blocks are an order of magnitude higher than early blocks  
+- All capacity was being added to blocks 6-8, starving blocks 0-1  
+- Early layers underfit, acting as a bottleneck that limited the whole model
+
+### Current Mitigations (all live in `tools/ml/train/grow_prune.py`)
+
+| Technique | Arg | Effect |
+|-----------|-----|--------|
+| AdamW weight decay | `--weight-decay 1e-4` | Regularises large weights, narrowed train/val gap from ~0.03 to ~0.006 |
+| Lowest-score-block warmup | `--weak-grow-warmup-cycles 8` | First 8 cycles boost weakest block (+2 extra channels) instead of strongest |
+| Alternating growth | `--alternate-weak-best` | After warmup, alternates between weakest and strongest blocks |
+| Conservative pruning | `--prune-fraction 0.10 --prune-every 0` | Prune disabled; 10% fraction if enabled |
+| Overfit protection | `--overfit-stale-epochs 100` | Allows long plateau recovery before pruning triggers |
+
+### Observed Results (Cycle 1→2 transition, 2026-05-03)
+
+```
+Cycle 1 best val_loss:    0.4332
+Cycle 2 ep 1 val_loss:    0.4339   ← jump = +0.0007 (≈0.0%, basically zero regression)
+Cycle 2 best val_loss:    0.4244   ← improvement over Cycle 1 best (+0.0088)
+```
+
+The epoch-1 jump problem is effectively solved. The model is improving cycle-over-cycle without degradation.

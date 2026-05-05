@@ -318,6 +318,16 @@ document.getElementById('openSidebarBtn').addEventListener('click', () => {
     document.getElementById('openSidebarBtn').classList.add('hidden');
     icon.textContent = '⇔';
     label.textContent = 'Expand';
+
+    requestAnimationFrame(() => {
+        window._globalMap?.invalidateSize?.();
+        window.emitStackUpdate?.();
+        window.dispatchEvent(new Event('resize'));
+    });
+    setTimeout(() => {
+        window._globalMap?.invalidateSize?.();
+        window.emitStackUpdate?.();
+    }, 140);
 });
 
 // ============================================================

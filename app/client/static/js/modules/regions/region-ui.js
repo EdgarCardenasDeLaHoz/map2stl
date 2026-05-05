@@ -162,6 +162,8 @@ function renderCoordinatesList() {
     const outerFrag  = document.createDocumentFragment();
     const selected   = window.appState?.selectedRegion;
     const indexByName = new Map(coordinatesData.map((r, i) => [r.name, i]));
+    const demContainer = document.getElementById('demContainer');
+    const inEditMode = Boolean(demContainer && !demContainer.classList.contains('hidden'));
 
     groups.forEach(({ continent, regions: groupRegions }) => {
         const isHidden = CONTINENT_HIDDEN.has(continent);
@@ -192,6 +194,11 @@ function renderCoordinatesList() {
         groupRegions.forEach(region => {
             const originalIndex = indexByName.get(region.name) ?? -1;
             const hasNote = regionNotes[region.name] && regionNotes[region.name].trim() !== '';
+            const notesMarkup = inEditMode
+                ? ''
+                : `<span class="coordinate-item-notes ${hasNote ? 'has-note' : ''}"
+                      onclick="event.stopPropagation(); showNotesModal('${region.name.replace(/'/g, "\\'")}')"
+                      title="${hasNote ? 'View/edit notes' : 'Add notes'}">📝</span>`;
             const item = document.createElement('div');
             item.className = 'coordinate-item';
             item.dataset.regionName = region.name;
@@ -200,9 +207,7 @@ function renderCoordinatesList() {
                 <span class="coordinate-item-icon">📍</span>
                 <span class="coordinate-item-name">${region.name}</span>
                 <span class="coordinate-item-meta">${region.description || ''}</span>
-                <span class="coordinate-item-notes ${hasNote ? 'has-note' : ''}"
-                      onclick="event.stopPropagation(); showNotesModal('${region.name.replace(/'/g, "\\'")}')"
-                      title="${hasNote ? 'View/edit notes' : 'Add notes'}">📝</span>
+                ${notesMarkup}
             `;
             item.tabIndex = 0;
             item.setAttribute('role', 'option');

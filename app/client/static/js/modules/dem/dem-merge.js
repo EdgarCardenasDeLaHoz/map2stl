@@ -98,7 +98,7 @@ function renderMergeLayerCard(layer, idx) {
 <div class="merge-layer-card" data-layer-id="${layer.id}">
   <div class="merge-layer-header">
     <span class="merge-layer-num">${idx + 1}</span>
-    <select class="merge-src" title="Elevation or mask source">
+    <select class="merge-src" title="Elevation or mask source" aria-label="Merge layer source">
       ${state.mergeSources.map((s) => `<option value="${s.id}"${s.id === layer.source ? ' selected' : ''}>${s.label}</option>`).join('')}
     </select>
     <div class="merge-layer-actions">

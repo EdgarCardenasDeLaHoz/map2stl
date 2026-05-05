@@ -2,6 +2,7 @@ site_name: "3D Maps — strm2stl Documentation"
 site_description: "Terrain-to-3D pipeline: DEM, overlays, projections, and 3D export"
 docs_dir: docs
 site_dir: docs_site
+use_directory_urls: false
 
 theme:
   name: material

@@ -17,17 +17,17 @@
     <!-- view.rescale_min / rescale_max -->
     <div class="param-group row-gap6" style="flex-wrap:nowrap;margin-top:6px;">
       <label title="Elevation range (metres) mapped to the colormap" style="white-space:nowrap;font-size:12px;">Elev<br>Range:</label>
-      <input type="number" id="rescaleMin" placeholder="Min"
+      <input type="number" id="rescaleMin" placeholder="Min" aria-label="Minimum elevation for color range"
              style="width:55px;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;"
              title="Minimum elevation (m)">
       <span style="color:#888;font-size:11px;">to</span>
-      <input type="number" id="rescaleMax" placeholder="Max"
+      <input type="number" id="rescaleMax" placeholder="Max" aria-label="Maximum elevation for color range"
              style="width:55px;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;"
              title="Maximum elevation (m)">
       <button id="applyRescaleBtn" class="btn btn-secondary" style="padding:2px 6px;font-size:11px;" title="Apply min/max range">Apply</button>
       <button id="resetRescaleBtn" class="btn btn-secondary" style="padding:2px 6px;font-size:11px;" title="Auto-fit to data range">Auto</button>
       <label class="check-label" title="Auto-fit color range on each update" style="font-size:11px;color:#aaa;white-space:nowrap;">
-        <input type="checkbox" id="autoRescale" checked> Auto
+        <input type="checkbox" id="autoRescale" checked aria-label="Auto fit elevation range"> Auto
       </label>
     </div>
 
@@ -35,9 +35,9 @@
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333;">
       <div style="display:grid;grid-template-columns:auto 1fr 32px;gap:4px 6px;align-items:center;">
         <label class="check-label" style="white-space:nowrap;" title="Show lat/lon gridlines overlay">
-          <input type="checkbox" id="showGridlines" checked> 📐 Gridlines
+          <input type="checkbox" id="showGridlines" checked aria-label="Show DEM gridlines"> 📐 Gridlines
         </label>
-        <select id="gridlineCount" title="Grid line density"
+        <select id="gridlineCount" title="Grid line density" aria-label="Grid line density"
                 style="width:100%;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;">
           <option value="3">Sparse (3)</option>
           <option value="5">Normal (5)</option>
@@ -48,20 +48,6 @@
                 style="padding:2px 5px;font-size:10px;background:#404040;color:#aaa;border:1px solid #555;border-radius:3px;cursor:pointer;white-space:nowrap;">px</button>
       </div>
       <div id="demPixelSizeLabel" style="display:none;font-size:10px;color:#8af;margin-top:3px;text-align:right;"></div>
-    </div>
-
-    <!-- Layer view toggles moved from Layers panel -->
-    <div class="viz-layer-mode-wrap">
-      <div class="viz-layer-mode-title">Active Layers</div>
-      <div id="layerModeSelector" class="viz-layer-mode-row">
-        <button class="layer-mode-btn active" data-mode="Dem" title="Base elevation">🏔 DEM</button>
-        <button class="layer-mode-btn" data-mode="Water" title="Water mask">💧 Water</button>
-        <button class="layer-mode-btn" data-mode="Sat" title="ESA land cover">🌿 ESA</button>
-        <button class="layer-mode-btn" data-mode="SatImg" title="Satellite imagery">🛰 Sat</button>
-        <button class="layer-mode-btn" data-mode="CityRaster" title="City heights raster">🏙 City</button>
-        <button class="layer-mode-btn" data-mode="Hydrology" title="River depression overlay">🌊 Hydro</button>
-        <button class="layer-mode-btn" data-mode="CompositeDem" title="Composite DEM">★ Composite</button>
-      </div>
     </div>
 
     <!-- view.elevation_curve / elevation_curve_points — curve editor canvas -->
@@ -98,28 +84,3 @@
 <script setup lang="ts">
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
 </script>
-<style scoped>
-.viz-layer-mode-wrap {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid #333;
-}
-
-.viz-layer-mode-title {
-  font-size: 11px;
-  color: #aaa;
-  margin-bottom: 6px;
-}
-
-.viz-layer-mode-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.viz-layer-mode-row .layer-mode-btn {
-  padding: 3px 7px;
-  min-width: 78px;
-  font-size: 11px;
-}
-</style>

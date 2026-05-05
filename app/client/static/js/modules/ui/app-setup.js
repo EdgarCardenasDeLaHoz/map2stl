@@ -188,3 +188,75 @@ window.setupOpacityControls = function setupOpacityControls() {
         });
     }
 };
+
+// ─── ensureA11yLabels ────────────────────────────────────────────────────────
+
+/**
+ * Add aria-labels for controls that are rendered dynamically or hidden from
+ * normal label-for associations so automated audits can still resolve names.
+ */
+window.ensureA11yLabels = function ensureA11yLabels() {
+    const byId = {
+        cityLayerBuildings: 'Include city buildings layer',
+        cityLayerRoads: 'Include city roads layer',
+        cityLayerWaterways: 'Include city waterways layer',
+        layerBuildingsColor: 'Buildings layer color',
+        layerRoadsColor: 'Roads layer color',
+        layerWaterwaysColor: 'Waterways layer color',
+        cityRoofShapes: 'Enable slanted city roof shapes',
+        exportSeaLevelCap: 'Enable sea level cap',
+        exportWalls: 'Enable model side walls',
+        exportFloor: 'Enable model floor',
+        exportEngraveLabel: 'Enable engraved label',
+        exportContours: 'Enable contour lines',
+        exportLabelText: 'Export label text',
+        puzzleEnabled: 'Enable puzzle split mode',
+        splitCols: 'Puzzle split columns',
+        splitRows: 'Puzzle split rows',
+        splitPuzzleM: 'Puzzle connector size in millimetres',
+        splitPuzzleBaseN: 'Puzzle connectors per edge',
+        splitBorderHeight: 'Puzzle border height in millimetres',
+        splitBorderOffset: 'Puzzle border offset in millimetres',
+        splitIncludeBorder: 'Include puzzle border',
+        bedSizeSelect: 'Printer bed size preset',
+        bedCustomW: 'Custom printer bed width in millimetres',
+        bedCustomH: 'Custom printer bed height in millimetres',
+        crossSectionAxis: 'Cross-section axis',
+        crossSectionValue: 'Cross-section coordinate value',
+        crossSectionThickness: 'Cross-section slab depth in millimetres',
+        viewerWireframe: 'Show viewer wireframe',
+        viewerNormals: 'Show viewer normals',
+        viewerAutoRotate: 'Enable viewer auto-rotate',
+        viewerSurfaceGroups: 'Show viewer surface groups',
+        viewerSimplify: 'Enable viewer mesh simplification',
+        viewerSimplifyRatio: 'Viewer simplify keep ratio',
+    };
+
+    Object.entries(byId).forEach(([id, label]) => {
+        const el = document.getElementById(id);
+        if (el && !el.getAttribute('aria-label')) {
+            el.setAttribute('aria-label', label);
+        }
+    });
+
+    document.querySelectorAll('select.merge-src:not([aria-label])').forEach(el => {
+        el.setAttribute('aria-label', 'Merge layer source');
+    });
+    document.querySelectorAll('input.merge-dim:not([aria-label])').forEach(el => {
+        el.setAttribute('aria-label', 'Merge layer resolution');
+    });
+    document.querySelectorAll('select.merge-mode:not([aria-label])').forEach(el => {
+        el.setAttribute('aria-label', 'Merge layer blend mode');
+    });
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+    window.ensureA11yLabels?.();
+
+    const root = document.body;
+    if (!root) return;
+    const observer = new MutationObserver(() => window.ensureA11yLabels?.());
+    observer.observe(root, { childList: true, subtree: true });
+});
+
+window.ensureA11yLabels?.();

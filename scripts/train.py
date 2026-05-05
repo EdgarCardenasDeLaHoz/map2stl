@@ -38,8 +38,8 @@ TILE_SIZE = 128
 TILE_DIR = REPO / "cache" / "height_tiles_combined"
 
 # Resume from the current best baseline. Set to None for cold start.
-RESUME = REPO / "models" / "retna_grow_continue.pt"
-HIDDEN = [8, 8, 10, 20, 14, 14, 16, 16, 22]  # matches RESUME's architecture
+RESUME = REPO / "models" / "retna_rebuild.pt"
+HIDDEN = [8, 8, 10, 20, 14, 14, 16, 16, 22]  # 9-block baseline from rebuild
 
 # Rebuild target — used by 'rebuild' mode; grow stops when val_loss hits this
 TARGET_VAL_LOSS = 0.37
@@ -53,7 +53,7 @@ LOSS = "dice"  # or "dice_l3" for cubic residual
 L2_WEIGHT = 0.5
 
 # Grow/prune NAS hyperparameters
-CYCLES = 5
+CYCLES = 30
 INNER_EPOCHS = 30
 GROW_CHANNELS = 0
 OVERFIT_STALE = 15

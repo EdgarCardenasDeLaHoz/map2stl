@@ -13,7 +13,7 @@
       <div class="regions-header">
         <h3>📋 All Regions</h3>
         <div class="regions-actions">
-          <input type="text" id="regionsSearch" placeholder="Search regions..." class="regions-search">
+          <input type="text" id="regionsSearch" placeholder="Search regions..." class="regions-search" aria-label="Search regions">
           <button id="refreshRegionsBtn" class="btn btn-secondary" title="Refresh list">🔄</button>          <button id="viewportFilterBtn" class="btn btn-secondary" title="Show only regions visible on map">🗺 In View</button>        </div>
       </div>
       <div class="regions-table-wrapper">
@@ -47,17 +47,17 @@
         <div class="compare-panel-header">
           <span class="compare-panel-title">Left: <span id="compareLeftName">--</span></span>
           <div class="compare-panel-controls">
-            <select id="compareLeftRegion"><option value="">Select region...</option></select>
+            <select id="compareLeftRegion" aria-label="Left comparison region"><option value="">Select region...</option></select>
           </div>
         </div>
         <div class="compare-panel-body">
-          <img id="compareLeftImage" class="compare-dem-image" style="display:none;" />
+          <img id="compareLeftImage" class="compare-dem-image" style="display:none;" alt="">
           <div id="compareLeftEmpty" class="compare-empty">Select a region to compare</div>
         </div>
         <div class="compare-settings">
           <div class="compare-setting-group">
             <label>Colormap:</label>
-            <select id="compareLeftColormap">
+            <select id="compareLeftColormap" aria-label="Left colormap">
               <option value="terrain" selected>Terrain</option>
               <option value="viridis">Viridis</option>
               <option value="plasma">Plasma</option>
@@ -66,7 +66,7 @@
           </div>
           <div class="compare-setting-group">
             <label>Exag:</label>
-            <input type="range" id="compareLeftExag" min="0.5" max="5" step="0.1" value="1">
+            <input type="range" id="compareLeftExag" min="0.5" max="5" step="0.1" value="1" aria-label="Left exaggeration">
             <span id="compareLeftExagLabel">1.0x</span>
           </div>
         </div>
@@ -75,17 +75,17 @@
         <div class="compare-panel-header">
           <span class="compare-panel-title">Right: <span id="compareRightName">--</span></span>
           <div class="compare-panel-controls">
-            <select id="compareRightRegion"><option value="">Select region...</option></select>
+            <select id="compareRightRegion" aria-label="Right comparison region"><option value="">Select region...</option></select>
           </div>
         </div>
         <div class="compare-panel-body">
-          <img id="compareRightImage" class="compare-dem-image" style="display:none;" />
+          <img id="compareRightImage" class="compare-dem-image" style="display:none;" alt="">
           <div id="compareRightEmpty" class="compare-empty">Select a region to compare</div>
         </div>
         <div class="compare-settings">
           <div class="compare-setting-group">
             <label>Colormap:</label>
-            <select id="compareRightColormap">
+            <select id="compareRightColormap" aria-label="Right colormap">
               <option value="terrain" selected>Terrain</option>
               <option value="viridis">Viridis</option>
               <option value="plasma">Plasma</option>
@@ -94,7 +94,7 @@
           </div>
           <div class="compare-setting-group">
             <label>Exag:</label>
-            <input type="range" id="compareRightExag" min="0.5" max="5" step="0.1" value="1">
+            <input type="range" id="compareRightExag" min="0.5" max="5" step="0.1" value="1" aria-label="Right exaggeration">
             <span id="compareRightExagLabel">1.0x</span>
           </div>
         </div>
@@ -124,8 +124,7 @@
           <button id="preloadRegionsBtn" class="btn btn-secondary" title="Preload all regions into cache">⚡ Preload All</button>
           <button id="clearClientCacheBtn" class="btn btn-secondary" title="Clear in-memory client cache">🧹 Clear Client</button>
           <button id="clearServerCacheBtn" class="btn btn-secondary" title="Clear server-side cache files">🗑️ Clear Server</button>
-          <button id="genGlobalDemBtn" class="btn btn-secondary" title="Pre-generate a low-resolution global terrain overview PNG cached on disk.">🗺️ Build Terrain</button>
-          <span id="genGlobalDemStatus" style="font-size:10px;color:#888;"></span>
+
         </div>
       </div>
 

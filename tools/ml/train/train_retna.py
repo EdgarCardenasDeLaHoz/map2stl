@@ -57,7 +57,17 @@ HEIGHT_NORM_M = 200.0  # divisor that maps real metres → [0, 1]. 200m covers s
 
 
 class HeightTileDataset(Dataset):
-    """Loads (rgb, height) tiles. Heights are normalised to [0, 1]."""
+    """Loads (rgb, height) tiles. Heights are normalised to [0, 1].
+
+    Augmentation pipeline (when augment=True):
+      1. Random crop (if tile larger than tile_size)
+      2. Random horizontal flip (p=0.5)
+      3. Random vertical flip (p=0.5)
+      4. Random 90°/180°/270° rotation (p=0.75 of rotating; applied to both rgb and height)
+      5. Random brightness/contrast jitter on RGB only (±15%)
+      6. Optional Gaussian noise on RGB (σ≈0.01, p=0.3)
+    Items 4-6 roughly 4× effective dataset size on top of flips → ~16× total.
+    """
 
     def __init__(self, paths: list[Path], tile_size: int, augment: bool = True):
         self.paths = list(paths)
@@ -80,11 +90,30 @@ class HeightTileDataset(Dataset):
             height = height[off_y:off_y + ts, off_x:off_x + ts]
 
         if self.augment:
+            # Flips
             if np.random.rand() < 0.5:
                 rgb = rgb[:, :, ::-1].copy(); height = height[:, ::-1].copy()
             if np.random.rand() < 0.5:
                 rgb = rgb[:, ::-1, :].copy(); height = height[::-1, :].copy()
 
+            # Random 90°/180°/270° rotation (k=1,2,3; applied to both channels)
+            k = np.random.randint(0, 4)
+            if k > 0:
+                # np.rot90 on (C, H, W) rotates the H×W plane; axes=(1,2)
+                rgb    = np.rot90(rgb,    k, axes=(1, 2)).copy()
+                height = np.rot90(height, k, axes=(0, 1)).copy()
+
+            # Brightness/contrast jitter on RGB only (height must not change)
+            brightness = 1.0 + np.random.uniform(-0.15, 0.15)
+            contrast   = 1.0 + np.random.uniform(-0.15, 0.15)
+            mean = rgb.mean(axis=(1, 2), keepdims=True)
+            rgb  = np.clip((rgb - mean) * contrast + mean * brightness, 0.0, 1.0)
+
+            # Gaussian noise on RGB (small, σ≈0.01)
+            if np.random.rand() < 0.3:
+                rgb = np.clip(rgb + np.random.normal(0.0, 0.01, rgb.shape).astype(np.float32), 0.0, 1.0)
+
+        rgb = rgb.astype(np.float32)
         target = np.clip(height / HEIGHT_NORM_M, 0.0, 1.0).astype(np.float32)
         return torch.from_numpy(rgb), torch.from_numpy(target).unsqueeze(0)
 
@@ -121,8 +150,16 @@ def squared_residual_dice(pred, target, l2_weight: float = 1.0,
     return d + l2_weight * l2
 
 
-def evaluate(model, loader, device):
-    """Return dict of validation metrics in metres."""
+def evaluate(model, loader, device, loss_fn=None):
+    """Return dict of validation metrics in metres.
+
+    ``loss_fn`` — callable(pred, target) → scalar loss used for ``val_loss``.
+    Defaults to plain ``dice_loss`` for backward compatibility with historical
+    logs.  Pass the same loss used during training (e.g. ``squared_residual_dice``)
+    to align the LR-scheduler's signal with the optimisation objective.
+    """
+    if loss_fn is None:
+        loss_fn = dice_loss
     model.eval()
     total_loss = 0.0
     total_mae_m = 0.0
@@ -135,7 +172,7 @@ def evaluate(model, loader, device):
         for rgb, target in loader:
             rgb, target = rgb.to(device), target.to(device)
             pred = model(rgb)
-            loss = dice_loss(pred, target)
+            loss = loss_fn(pred, target)
 
             target_m = target * HEIGHT_NORM_M
             pred_m   = pred   * HEIGHT_NORM_M

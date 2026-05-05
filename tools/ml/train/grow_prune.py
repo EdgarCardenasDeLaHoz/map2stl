@@ -1,9 +1,9 @@
-"""Iterative grow/prune training loop for Retna_V1.
+﻿"""Iterative grow/prune training loop for Retna_V1.
 
 Algorithm:
     1. Train model for ``--inner-epochs`` epochs.
-    2. Run gradient × activation analysis to score each *block*.
-    3. If train_loss − val_loss > overfit_threshold (overfitting):
+    2. Run gradient x activation analysis to score each *block*.
+    3. If train_loss - val_loss > overfit_threshold (overfitting):
             prune the lowest-scoring channels in each block.
        Else (under-fitting; train loss still high):
             widen the highest-scoring block by ``--grow-channels``.
@@ -29,6 +29,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+
+# Ensure UTF-8 output on Windows consoles that default to cp1252.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -63,10 +69,10 @@ def _loss_fn(pred, target, l2_weight: float = 1.0):
     return squared_residual_dice(pred, target, l2_weight=l2_weight)
 
 
-# ── Block-level grad×activation analysis ─────────────────────────────────────
+# ── Block-level gradxactivation analysis ─────────────────────────────────────
 
 def block_scores(model: Retna_V1, loader, device, batches: int = 4) -> list[dict]:
-    """Score each block by mean(|activation| × |gradient|) over a few batches.
+    """Score each block by mean(|activation| x |gradient|) over a few batches.
 
     Returns
     -------
@@ -75,8 +81,8 @@ def block_scores(model: Retna_V1, loader, device, batches: int = 4) -> list[dict
         n_out            — current output channels
         act_l1           — mean |activation|
         grad_l1          — mean |gradient|
-        score            — act_l1 × grad_l1 (block contribution proxy)
-        per_channel_score — (n_out,) array of act × grad per channel
+        score            — act_l1 x grad_l1 (block contribution proxy)
+        per_channel_score — (n_out,) array of act x grad per channel
     """
     model.train()
     n_blocks = len(model.blocks)
@@ -456,7 +462,7 @@ def ablate_channels(model: Retna_V1, loader, device,
     independently-prunable channels turn out to be jointly important.
 
     Algorithm:
-      1. Compute per-channel grad×act scores; only consider the bottom
+      1. Compute per-channel gradxact scores; only consider the bottom
          `grad_act_floor_pct` percentile across all blocks as ablation
          candidates.
       2. Process candidates from lowest to highest score. For each:
@@ -722,7 +728,8 @@ def compact_pruned_channels(model: Retna_V1, pruned_per_block: dict) -> Retna_V1
 def train_cycle(model, train_loader, val_loader, device,
                 epochs: int, lr: float, accum_steps: int = 1,
                 lr_patience: int = 5,
-                optimizer_state: dict | None = None):
+                optimizer_state: dict | None = None,
+                weight_decay: float = 0.0):
     """Train for ``epochs`` epochs, accumulating gradients across
     ``accum_steps`` batches before each optimizer.step().
 
@@ -737,7 +744,8 @@ def train_cycle(model, train_loader, val_loader, device,
 
     Returns (model, history, best_loss, optimizer_state_dict).
     """
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr,
+                                   weight_decay=weight_decay)
     if optimizer_state is not None:
         try:
             optimizer.load_state_dict(optimizer_state)
@@ -779,7 +787,10 @@ def train_cycle(model, train_loader, val_loader, device,
             optimizer.step()
             optimizer.zero_grad()
         train_loss /= max(n_train, 1)
-        m = evaluate(model, val_loader, device)
+        # Pass the same loss function used in training so the LR scheduler's
+        # val_loss signal matches what is being optimised (avoids premature
+        # LR decay caused by the dice vs dice+L2 mismatch).
+        m = evaluate(model, val_loader, device, loss_fn=_loss_fn)
         scheduler.step(m["val_loss"])
         cur_lr = optimizer.param_groups[0]["lr"]
         m["train_loss"] = train_loss
@@ -819,12 +830,12 @@ def main():
     ap.add_argument("--prune-fraction", type=float, default=0.25,
                     help="When overfitting, drop this fraction of the lowest-score channels")
     ap.add_argument("--overfit-threshold", type=float, default=0.05,
-                    help="train_loss − val_loss < this triggers prune (val better than train means overfit on Dice)")
+                    help="train_loss - val_loss < this triggers prune (val better than train means overfit on Dice)")
     ap.add_argument("--tile-size", type=int, default=128)
     ap.add_argument("--batch-size", type=int, default=4)
     ap.add_argument("--accum-steps", type=int, default=1,
                     help="Number of batches to accumulate gradients over before "
-                         "calling optimizer.step(). Effective batch = batch-size × accum-steps.")
+                         "calling optimizer.step(). Effective batch = batch-size x accum-steps.")
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--lr-patience", type=int, default=5,
                     help="ReduceLROnPlateau patience inside each cycle")
@@ -848,7 +859,7 @@ def main():
                     help="Maximum number of blocks when --allow-deepen.")
     ap.add_argument("--final-prune", action="store_true",
                     help="After all cycles complete, run a single-channel "
-                         "ablation pass: zero each low-grad×act channel, "
+                         "ablation pass: zero each low-gradxact channel, "
                          "drop those whose val_loss delta is below tolerance.")
     ap.add_argument("--final-prune-tolerance", type=float, default=0.005,
                     help="Channel is prunable if its ablation increases "
@@ -856,7 +867,7 @@ def main():
                          "floor on 130-tile val set).")
     ap.add_argument("--final-prune-floor-pct", type=float, default=25.0,
                     help="Only consider the bottom-N percentile of channels "
-                         "by grad×act score for ablation testing (faster).")
+                         "by gradxact score for ablation testing (faster).")
     ap.add_argument("--final-prune-retrain-epochs", type=int, default=10,
                     help="Brief retrain after final pruning to recover any "
                          "small loss in accuracy. Set 0 to skip.")
@@ -867,6 +878,16 @@ def main():
     ap.add_argument("--target-val-loss", type=float, default=None,
                     help="Stop NAS early when best val_loss reaches this "
                          "threshold. Useful for goal-directed training loops.")
+    ap.add_argument("--weight-decay", type=float, default=0.0,
+                    help="L2 weight-decay for AdamW optimizer (default 0, "
+                         "no decay). Try 1e-4 to 1e-3 to reduce overfitting.")
+    ap.add_argument("--weak-grow-warmup-cycles", type=int, default=6,
+                    help="For the first N cycles, give extra growth to the "
+                        "lowest-scoring block (default 6).")
+    ap.add_argument("--alternate-weak-best", action=argparse.BooleanOptionalAction,
+                    default=True,
+                    help="After warmup, alternate extra growth between "
+                        "lowest-score and highest-score blocks.")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed); np.random.seed(args.seed)
@@ -932,6 +953,7 @@ def main():
             accum_steps=args.accum_steps,
             lr_patience=args.lr_patience,
             optimizer_state=optimizer_state,
+            weight_decay=args.weight_decay,
         )
 
         final = hist[-1]
@@ -1050,24 +1072,52 @@ def main():
             # Decide whether to deepen (add a block) or widen (add channels).
             # Deepen when the deepest block has the highest score AND we have
             # room under --max-depth AND --allow-deepen is set.
+            # Spatial-resolution guard: each stride-2 block halves resolution.
+            # A new block at depth D would compute at tile_size/2^D pixels.
+            # Avoid deepening below 2x2 resolution (pure 1x1 channel mixing
+            # adds no spatial inductive bias and wastes capacity).
+            import math
+            max_useful_depth = int(math.log2(args.tile_size))  # e.g. 7 for 128px
             best_idx = max(range(len(scores)), key=lambda i: scores[i]["score"])
+            worst_idx = min(range(len(scores)), key=lambda i: scores[i]["score"])
             can_deepen = (
                 getattr(args, "allow_deepen", False)
                 and len(channels) < args.max_depth
+                and len(channels) < max_useful_depth
                 and best_idx == len(channels) - 1
             )
+            if not can_deepen and getattr(args, "allow_deepen", False) and len(channels) >= max_useful_depth and best_idx == len(channels) - 1:
+                print(f"    [deepen blocked: depth {len(channels)} >= resolution floor "
+                      f"{max_useful_depth} for tile_size={args.tile_size}; widening instead]")
             if can_deepen:
                 # Append a new block matching the deepest block's width.
                 new_channels = list(channels) + [channels[-1]]
                 print(f"    [deepening: {channels} → {new_channels} (best block was deepest)]")
                 cycle_record["decision"] = f"deepen→{new_channels}"
             else:
-                # Grow every block by at least 1 channel; highest-scoring block
-                # gets the full --grow-channels boost on top of the +1.
+                # Grow every block by at least 1 channel.
+                # During early warmup, boost the lowest-scoring block to help
+                # front layers catch up. After warmup, optionally alternate
+                # weak/best boosts to avoid permanently starving late layers.
+                if cycle <= max(0, args.weak_grow_warmup_cycles):
+                    grow_idx = worst_idx
+                    grow_reason = "lowest-score warmup"
+                elif getattr(args, "alternate_weak_best", True):
+                    phase = (cycle - max(0, args.weak_grow_warmup_cycles)) % 2
+                    if phase == 1:
+                        grow_idx = worst_idx
+                        grow_reason = "lowest-score"
+                    else:
+                        grow_idx = best_idx
+                        grow_reason = "highest-score"
+                else:
+                    grow_idx = worst_idx
+                    grow_reason = "lowest-score"
+
                 new_channels = [c + 1 for c in channels]
-                new_channels[best_idx] = channels[best_idx] + max(1, args.grow_channels)
-                print(f"    [growing all blocks +1; block {best_idx} +{max(1, args.grow_channels)}: {channels} → {new_channels}]")
-                cycle_record["decision"] = f"grow_all+block_{best_idx}→{new_channels}"
+                new_channels[grow_idx] = channels[grow_idx] + max(1, args.grow_channels)
+                print(f"    [growing all blocks +1; block {grow_idx} ({grow_reason}) +{max(1, args.grow_channels)}: {channels} → {new_channels}]")
+                cycle_record["decision"] = f"grow_all+block_{grow_idx}_{grow_reason}→{new_channels}"
 
         # Rebuild model with new channels, copy what we can
         prev_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
@@ -1126,6 +1176,7 @@ def main():
                 model, train_loader, val_loader, device,
                 args.final_prune_retrain_epochs, args.lr * 0.5,
                 accum_steps=args.accum_steps, lr_patience=args.lr_patience,
+                weight_decay=args.weight_decay,
             )
 
     # Save final

@@ -11,7 +11,8 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "jsx": "preserve",
-    "jsxImportSource": "vue"
+    "jsxImportSource": "vue",
+    "types": ["geojson"]
   },
-  "include": ["./**/*.ts", "./**/*.vue"]
+  "include": ["./**/*.ts", "./**/*.vue", "./window.d.ts"]
 }

@@ -7,7 +7,7 @@
       <div id="demEmptyState" class="dem-empty-state">
         <span class="dem-empty-state-icon">🏔️</span>
         <span>Select a region, then load terrain data to begin</span>
-        <button id="emptyStateLoadBtn" class="btn btn-primary empty-state-load-btn" title="Load terrain elevation data for the selected region">
+        <button id="emptyStateLoadBtn" class="btn btn-secondary empty-state-load-btn" title="Load terrain elevation data for the selected region">
           ↺ Load DEM
         </button>
       </div>
@@ -43,7 +43,7 @@
         <div class="compare-inline-panels">
           <div class="compare-inline-panel">
             <div class="compare-inline-header">
-              <select id="compareInlineLeft" class="compare-inline-select">
+              <select id="compareInlineLeft" class="compare-inline-select" aria-label="Left inline comparison layer">
                 <option value="dem">DEM (Elevation)</option>
                 <option value="water">Water Mask</option>
                 <option value="sat">Satellite / Land Cover</option>
@@ -54,7 +54,7 @@
           </div>
           <div class="compare-inline-panel">
             <div class="compare-inline-header">
-              <select id="compareInlineRight" class="compare-inline-select">
+              <select id="compareInlineRight" class="compare-inline-select" aria-label="Right inline comparison layer">
                 <option value="dem">DEM (Elevation)</option>
                 <option value="water">Water Mask</option>
                 <option value="sat" selected>Satellite / Land Cover</option>
@@ -119,10 +119,6 @@
         </div>
         <!-- Inline mini-map for drag-editing the bounding box -->
         <div id="bboxMiniMap" class="bbox-mini-map hidden"></div>
-        <!-- Hidden elements kept for JS compatibility -->
-        <datalist id="regionLabelsList"></datalist>
-        <input type="hidden" id="regionLabelEdit">
-        <button id="saveRegionLabelBtn" style="display:none;"></button>
       </div>
     </div>
 

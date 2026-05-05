@@ -1,10 +1,27 @@
 # Extended Growth Analysis: Final Report
 
 ## Status
-✅ **Long training run (10 cycles) is in progress**
-- Currently at: Cycle 2, Epoch 8/30
-- ETA completion: 15-20 hours (training runs 24/7)
-- Log location: `logs/retna_grow_continue.log`
+📦 **ARCHIVED — this report documents an older test run (2025)**
+
+This report was written during a 10-cycle NAS test using the default `[8,8,8,8]` architecture.
+It is no longer the active training run. The current NAS campaign targets val_loss ≤ 0.37 using:
+- `models/retna_rebuild.pt` as the start checkpoint (9 blocks, `[8,8,10,20,14,14,16,16,22]`)
+- AdamW optimizer with `weight_decay=1e-4`
+- Lowest-score-block growth warmup (`--weak-grow-warmup-cycles 8 --alternate-weak-best`)
+- Output: `models/retna_target037.pt`
+
+**The log file `logs/retna_grow_continue.log` no longer exists** (the old run is done).
+
+For current training output, monitor the active terminal running `grow_prune.py`.
+
+---
+
+> _Historical record below, preserved for reference._
+
+## Original Status (historical)
+✅ **Long training run (10 cycles) — COMPLETED**
+- The run used `scripts/train.py` with CYCLES=5 (note: docs originally claimed 10; the script had 5 at the time of archiving)
+- Log location: `logs/retna_grow_continue.log` **(file no longer exists)**
 
 ---
 
@@ -77,7 +94,7 @@ Jump magnitude:            -0.0032 (IMPROVEMENT, not degradation)
   - Questions to answer from training data
 
 ### 4. **Modified Configuration**
-- `scripts/train.py`: Updated CYCLES from 5 → 10 for extended testing
+- `scripts/train.py`: Updated CYCLES from 5 → 10 for extended testing _(note: as of archiving, `scripts/train.py` has CYCLES=5; the 10-cycle claim was a planned change that was not committed)_
 
 ---
 
@@ -153,7 +170,7 @@ IF epoch-1 jumps are significant:
 ## Critical Files to Monitor
 
 ### Training Log
-`logs/retna_grow_continue.log`
+`logs/retna_grow_continue.log` **(no longer exists — this historical run is complete)**
 - Real-time updates as cycles complete
 - Size: grows ~1MB per cycle
 - Check every few hours for progress
