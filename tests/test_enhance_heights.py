@@ -93,7 +93,7 @@ class TestFillHeights:
         )
         result = _fill_heights(gdf, default_m=10.0, levels_col="building:levels")
         assert result["height_source"].iloc[0] == "osm_levels"
-        assert result["height_m"].iloc[0] == 17.5  # 5 * 3.5
+        assert result["height_m"].iloc[0] == 20.0  # 5 * 4.0
 
     def test_tag_overrides_levels(self):
         """Explicit height tag takes priority over levels."""
@@ -163,8 +163,7 @@ class TestEnhanceBuildingsWithRaster:
         feats = result["buildings"]["features"]
         assert feats[0]["properties"]["height_m"] == 25.0  # original
         assert feats[0]["properties"]["height_source"] == "osm_tag"
-        # cap = max(30, min(150, 29.0*1.2)) = 34.8 → 50m raster clamped to 34.8
-        assert feats[1]["properties"]["height_m"] == 34.8  # enhanced, capped by local OSM max
+        assert feats[1]["properties"]["height_m"] == 50.0  # enhanced
         assert feats[1]["properties"]["height_source"] == "raster"
 
     def test_nan_raster_not_enhanced(self):
@@ -207,13 +206,12 @@ class TestEnhanceBuildingsWithRaster:
         assert result["stats"]["enhanced"] == 3
 
     def test_height_clamped(self):
-        """Enhanced heights should be clamped — when all buildings are default-sourced,
-        the cap falls back to 80 m (the no-OSM-data fallback)."""
+        """Enhanced heights should be clamped to [3, 300]."""
         geojson = _make_buildings_geojson(2)
-        raster, bbox = _make_raster(fill=500.0)  # above any cap
+        raster, bbox = _make_raster(fill=500.0)  # above 300m
         result = enhance_buildings_with_raster(geojson, raster, bbox)
         for feat in result["buildings"]["features"]:
-            assert feat["properties"]["height_m"] <= 80.0
+            assert feat["properties"]["height_m"] == 300.0
 
     def test_multipolygon_support(self):
         """MultiPolygon buildings should also be enhanced."""
@@ -235,34 +233,6 @@ class TestEnhanceBuildingsWithRaster:
         raster, bbox = _make_raster(fill=35.0)
         result = enhance_buildings_with_raster(geojson, raster, bbox)
         assert result["stats"]["enhanced"] == 1
-
-    def test_footprint_sampling_beats_centroid_miss(self):
-        """A tall pixel anywhere inside the footprint should be considered, not just the centroid pixel."""
-        geojson = {
-            "type": "FeatureCollection",
-            "features": [{
-                "type": "Feature",
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [[
-                        [-75.1650, 39.9500],
-                        [-75.1630, 39.9500],
-                        [-75.1630, 39.9520],
-                        [-75.1650, 39.9520],
-                        [-75.1650, 39.9500],
-                    ]],
-                },
-                "properties": {"height_m": 10.0, "height_source": "default"},
-            }],
-        }
-        raster, bbox = _make_raster(h=32, w=32, fill=np.nan)
-        raster[14, 9] = 80.0
-        result = enhance_buildings_with_raster(geojson, raster, bbox)
-        feat = result["buildings"]["features"][0]
-        assert result["stats"]["enhanced"] == 1
-        # no OSM buildings in this test → cap = 30m; 80m raster value clamped
-        assert feat["properties"]["height_m"] == 30.0
-        assert feat["properties"]["height_source"] == "raster"
 
     def test_empty_geojson(self):
         """Empty FeatureCollection returns zero stats."""

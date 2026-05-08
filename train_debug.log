@@ -1,0 +1,27 @@
+[2026-05-07 20:49:36] ======================================================================
+[2026-05-07 20:49:36] PHASE H: ADAPTIVE TRAINING WITH FREQUENT OPTIMIZER RESETS
+[2026-05-07 20:49:36] ======================================================================
+[2026-05-07 20:49:36] Warmstart: C:\Users\eac84\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\models\retna_phase_g_global.pt
+[2026-05-07 20:49:36] Tiles: C:\Users\eac84\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\cache\height_tiles_global_hires
+[2026-05-07 20:49:36] Tile size: 512×512, Crop: 96×96
+[2026-05-07 20:49:36] Cycles: 30 × 8 epochs (always-fresh optimizer)
+[2026-05-07 20:49:36] LR: 6e-06 (cosine annealing to 6.000000000000001e-07)
+[2026-05-07 20:49:36] Grow trigger: plateau 2× with delta < 0.0015
+[2026-05-07 20:49:36] Target: <7.2m RMSE (5-10% improvement over Stage 4)
+[2026-05-07 20:49:36] 
+[2026-05-07 20:49:36] Loading checkpoint and building model...
+[2026-05-07 20:49:36] Loaded architecture: [6, 7, 6, 8, 7, 7, 7, 7, 9]
+[2026-05-07 20:49:36] Loading tiles with crop augmentation...
+[2026-05-07 20:49:36] Found 573 tiles
+[2026-05-07 20:49:36] Train: 7792 samples, Val: 86 samples
+[2026-05-07 20:49:36] 
+[2026-05-07 20:49:36] ======================================================================
+[2026-05-07 20:49:36] STARTING PHASE H TRAINING
+[2026-05-07 20:49:36] ======================================================================
+[2026-05-07 20:49:36] 
+[2026-05-07 20:49:36] 
+--- Cycle 1/30 ---
+[2026-05-07 20:49:36] Architecture: [6, 7, 6, 8, 7, 7, 7, 7, 9], Params: 22,184
+[2026-05-07 21:01:28]   Cycle ep  1/8  train=0.0146  val=0.0109  rmse=20.87m  iou=0.314  lr=5.8e-06 *
+[2026-05-07 21:18:21]   Cycle ep  2/8  train=0.0128  val=0.0105  rmse=20.47m  iou=0.313  lr=5.2e-06 *
+[2026-05-07 21:48:15]   Cycle ep  3/8  train=0.0130  val=0.0105  rmse=20.52m  iou=0.325  lr=4.3e-06 

@@ -1,4 +1,4 @@
-"""Tests for city2stl.height.stl_import.
+"""Tests for app.server.core.height.stl_import.
 
 All tests use synthetic numpy-generated meshes; no external files needed.
 trimesh is required.  Tests are skipped if not installed.
@@ -178,7 +178,7 @@ class TestErrorHandling:
         monkeypatch.setattr(builtins, "__import__", _blocked_import)
         # Must re-import the module so the patched import path is taken
         import importlib
-        import city2stl.height.stl_import as mod
+        import app.server.core.height.stl_import as mod
         importlib.reload(mod)
         try:
             with pytest.raises(ImportError, match="trimesh"):

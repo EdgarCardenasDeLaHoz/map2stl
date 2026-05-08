@@ -20,7 +20,6 @@ import pytest
 
 def _make_npz(path: Path, tile_size: int = 8) -> Path:
     """Write a minimal synthetic tile .npz file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(42)
     rgb = rng.random((3, tile_size, tile_size), dtype="float32")
     height = rng.uniform(5.0, 30.0, (1, tile_size, tile_size)).astype("float32")
@@ -178,7 +177,7 @@ class TestTrainSmoke:
         import torch
         import torch.nn as nn
         from app.server.core.height.train import TrainConfig, train
-        import city2stl.height.predict as _pm
+        from app.server.core.height import predict as _pm
 
         # Use a trivially small model so we don't need EfficientNet
         class _TinyUNet(nn.Module):
@@ -222,7 +221,7 @@ class TestCheckpointRoundtrip:
         import torch
         import torch.nn as nn
         from app.server.core.height.train import TrainConfig, train
-        import city2stl.height.predict as _pm
+        from app.server.core.height import predict as _pm
 
         class _TinyUNet(nn.Module):
             def __init__(self):
@@ -251,7 +250,7 @@ class TestCheckpointRoundtrip:
         import torch
         import torch.nn as nn
         from app.server.core.height.train import TrainConfig, train
-        import city2stl.height.predict as _pm
+        from app.server.core.height import predict as _pm
 
         class _TinyUNet(nn.Module):
             def __init__(self):

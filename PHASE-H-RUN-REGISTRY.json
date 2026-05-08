@@ -1,0 +1,63 @@
+{
+  "description": "Phase H training run registry — canonical source of truth for adaptive training runs",
+  "last_updated": "2026-05-06T09:24:25Z",
+  "runs": [
+    {
+      "run_id": "phase_h_001",
+      "script": "scripts/train_phase_h.py",
+      "status": "in_progress",
+      "start_time": "2026-05-06T09:24:25Z",
+      "end_time": null,
+      "dataset": {
+        "name": "height_tiles_global_hires",
+        "path": "cache/height_tiles_global_hires",
+        "tile_count": 573,
+        "tile_size": 512,
+        "crop_size": 96,
+        "split": {
+          "train": 7792,
+          "val": 86
+        }
+      },
+      "warmstart_checkpoint": "models/retna_phase_g_global.pt",
+      "warmstart_mae": 7.55,
+      "configuration": {
+        "cycles": 30,
+        "epochs_per_cycle": 8,
+        "lr": 6e-6,
+        "weight_decay": 1e-5,
+        "batch_size": 4,
+        "grow_channels": 3,
+        "plateau_threshold": 0.0015,
+        "plateau_patience": 2,
+        "prune_every": 6,
+        "gradient_freezing": true,
+        "gradient_freeze_after_growth": true
+      },
+      "strategy": [
+        "Always-fresh optimizer (CosineAnnealingLR within short cycles)",
+        "Crop augmentation (96x96 from 512x512, ~10x data multiplication)",
+        "Gradient freezing on old neurons after growth (force new neuron learning)",
+        "Frequent optimizer resets (8 epochs per cycle)",
+        "Ablation pruning every 6 cycles"
+      ],
+      "expected_metrics": {
+        "mae_target": "< 7.2m",
+        "improvement_pct": "5-10%",
+        "duration_hours": 8
+      },
+      "completion_contract": {
+        "status": null,
+        "final_mae": null,
+        "final_architecture": null,
+        "final_params": null,
+        "best_cycle": null,
+        "total_epochs": null,
+        "promotion_decision": null,
+        "promotion_rationale": null,
+        "log_file": "logs/phase_h_training.log",
+        "model_file": "models/retna_phase_h_final.pt"
+      }
+    }
+  ]
+}

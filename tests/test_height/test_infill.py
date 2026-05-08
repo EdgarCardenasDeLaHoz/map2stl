@@ -1,4 +1,4 @@
-"""Tests for city2stl.height.infill.
+"""Tests for app.server.core.height.infill.
 
 All tests use synthetic numpy arrays — no external files or network needed.
 scipy is required (it's in requirements.txt).
