@@ -13,136 +13,27 @@ import logging
 import os
 import sys
 import tempfile
-import threading
-import time
-import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List
 
 from starlette.background import BackgroundTask
 
 import numpy as np
 
+# Re-export from refactored modules for backward compatibility
+from app.server.core.export_tasks import (
+    ExportTask,
+    get_task_file,
+    get_task_status,
+    start_export_task,
+)
+from app.server.core.export_params import (
+    ExportContext,
+    resolve_dem_from_cache,
+    _parse_export_params,
+)
+
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Export task tracking
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ExportTask:
-    """Tracks the state of an async export job."""
-    task_id: str
-    status: str = "running"          # running | complete | error
-    progress: int = 0                # 0-100
-    message: str = "Starting..."
-    result_path: Optional[str] = None
-    filename: Optional[str] = None
-    media_type: str = "application/octet-stream"
-    headers: Dict[str, str] = field(default_factory=dict)
-    created: float = field(default_factory=time.time)
-
-    def update(self, progress: int, message: str) -> None:
-        self.progress = progress
-        self.message = message
-
-    def complete(self, result_path: str, filename: str, headers: dict = None) -> None:
-        self.status = "complete"
-        self.progress = 100
-        self.message = "Complete"
-        self.result_path = result_path
-        self.filename = filename
-        if headers:
-            self.headers = headers
-
-    def fail(self, message: str) -> None:
-        self.status = "error"
-        self.message = message
-
-
-_export_tasks: Dict[str, ExportTask] = {}
-_export_tasks_lock = threading.Lock()
-_TASK_TTL = 300  # seconds before stale tasks are cleaned up
-
-
-def _cleanup_stale_tasks() -> None:
-    """Remove tasks older than _TASK_TTL seconds."""
-    cutoff = time.time() - _TASK_TTL
-    with _export_tasks_lock:
-        stale = [tid for tid, t in _export_tasks.items() if t.created < cutoff]
-    for tid in stale:
-        with _export_tasks_lock:
-            task = _export_tasks.pop(tid, None)
-        if task and task.result_path and os.path.exists(task.result_path):
-            try:
-                os.unlink(task.result_path)
-            except OSError:
-                pass
-
-
-def get_task_status(task_id: str) -> Optional[dict]:
-    """Return progress info for a task, or None if not found."""
-    with _export_tasks_lock:
-        task = _export_tasks.get(task_id)
-    if task is None:
-        return None
-    return {
-        "task_id": task.task_id,
-        "status": task.status,
-        "progress": task.progress,
-        "message": task.message,
-    }
-
-
-def get_task_file(task_id: str):
-    """Return a FileResponse for a completed task, or None."""
-    from fastapi.responses import FileResponse
-    with _export_tasks_lock:
-        task = _export_tasks.get(task_id)
-    if not task or task.status != "complete" or not task.result_path:
-        return None
-
-    def _cleanup():
-        try:
-            os.unlink(task.result_path)
-        except OSError:
-            pass
-        with _export_tasks_lock:
-            _export_tasks.pop(task_id, None)
-
-    return FileResponse(
-        task.result_path,
-        filename=task.filename,
-        media_type=task.media_type,
-        background=BackgroundTask(_cleanup),
-        headers=task.headers,
-    )
-
-
-def start_export_task(data: dict, fmt: str) -> str:
-    """Start an export in a background thread. Returns task_id."""
-    _cleanup_stale_tasks()
-
-    task_id = uuid.uuid4().hex[:12]
-    task = ExportTask(task_id=task_id)
-    with _export_tasks_lock:
-        _export_tasks[task_id] = task
-
-    def _run():
-        try:
-            if fmt == "puzzle":
-                generate_puzzle_3mf(data, task=task)
-            else:
-                _run_export_pipeline(data, fmt, task)
-        except Exception as exc:
-            logger.exception("Export task %s failed", task_id)
-            task.fail(str(exc))
-
-    thread = threading.Thread(target=_run, daemon=True, name=f"export-{task_id}")
-    thread.start()
-    return task_id
 
 
 def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
@@ -230,108 +121,6 @@ if str(_STRM2STL_DIR) not in sys.path:
     sys.path.insert(0, str(_STRM2STL_DIR))
 
 
-# ---------------------------------------------------------------------------
-# Export parameter container
-# ---------------------------------------------------------------------------
-
-def resolve_dem_from_cache(data: dict) -> tuple[list, int, int] | None:
-    """Look up a cached DEM from bbox + DEM settings.
-
-    The DEM endpoint caches processed arrays under a key derived from
-    bbox + {dim, src, proj, ds, ws, sw, md, cn, sat}.  If the caller
-    provides these settings instead of raw ``dem_values``, we can
-    reconstruct the key and read from disk — eliminating the need to
-    retransmit the (potentially multi-MB) array.
-
-    Returns ``(dem_values_list, height, width)`` or ``None`` on cache miss.
-    """
-    from app.server.core.cache import make_cache_key, read_array_cache
-
-    bbox = data.get("bbox") or data
-    north = bbox.get("north")
-    south = bbox.get("south")
-    east  = bbox.get("east")
-    west  = bbox.get("west")
-    if None in (north, south, east, west):
-        return None
-
-    # DEM settings — match the key structure in terrain.py get_terrain_dem()
-    dem = data.get("dem") or data
-    dim         = int(dem.get("dim", 200))
-    dem_source  = dem.get("dem_source", "local")
-    projection  = dem.get("projection", "cosine")
-    depth_scale = float(dem.get("depth_scale", 0.5))
-    water_scale = float(dem.get("water_scale", 0.05))
-    subtract_water     = bool(dem.get("subtract_water", True))
-    maintain_dimensions = bool(dem.get("maintain_dimensions", True))
-    clip_nans   = bool(dem.get("clip_nans", False))
-    show_sat    = bool(dem.get("show_sat", False))
-
-    cache_key = make_cache_key("dem", north, south, east, west, {
-        "dim": dim, "src": dem_source, "proj": projection,
-        "ds": depth_scale, "ws": water_scale,
-        "sw": subtract_water, "md": maintain_dimensions,
-        "cn": clip_nans, "sat": show_sat,
-    })
-
-    cached = read_array_cache("dem", cache_key)
-    if cached is None or cached[0].get("dem") is None:
-        logger.debug("DEM cache miss for export (key %s)", cache_key[:8])
-        return None
-
-    dem_arr = cached[0]["dem"]  # np.ndarray (H, W)
-    h, w = dem_arr.shape
-    logger.info("DEM resolved from cache for export (key %s, %dx%d)", cache_key[:8], w, h)
-    return dem_arr.ravel().tolist(), h, w
-
-
-@dataclass
-class ExportContext:
-    """Typed container for parsed export parameters.
-
-    Replaces the raw dict returned by _parse_export_params, giving IDE
-    autocompletion and catching typos at attribute-access time.
-    """
-    dem_values: List[float]
-    height: int
-    width: int
-    model_height: float = 20.0
-    base_height: float = 5.0
-    exaggeration: float = 1.0
-    sea_level_cap: bool = False
-    name: str = "terrain"
-
-    @classmethod
-    def from_request(cls, data: dict) -> "ExportContext":
-        """Construct from an incoming request dict.
-
-        Supports two modes:
-        - **Legacy (array):** ``dem_values``, ``height``, ``width`` in the dict.
-        - **Settings-only:** ``bbox`` + ``dem`` settings — DEM is read from
-          the server-side disk cache (populated when the user loaded the DEM
-          in the browser).  This avoids retransmitting multi-MB arrays.
-        """
-        dem_values = data.get("dem_values", [])
-        height = data.get("height", 0)
-        width = data.get("width", 0)
-
-        # Settings-only mode: resolve DEM from cache
-        if not dem_values:
-            resolved = resolve_dem_from_cache(data)
-            if resolved is not None:
-                dem_values, height, width = resolved
-
-        return cls(
-            dem_values=dem_values,
-            height=height,
-            width=width,
-            model_height=float(data.get("model_height", 20)),
-            base_height=float(data.get("base_height", 5)),
-            exaggeration=float(data.get("exaggeration", 1.0)),
-            sea_level_cap=bool(data.get("sea_level_cap", False)),
-            name=data.get("name", "terrain"),
-        )
-
 
 def _prepare_dem_array(
     dem_values: list,
@@ -380,10 +169,6 @@ def _repair_and_export(vertices, faces, suffix: str) -> str:
     mesh.export(path, file_type=suffix.lstrip('.'))
     return path, mesh
 
-
-def _parse_export_params(data: dict) -> ExportContext:
-    """Extract and type-cast the common export parameters from a request dict."""
-    return ExportContext.from_request(data)
 
 
 def _apply_label_engraving(im: np.ndarray, label_text: str, base_height: float) -> np.ndarray:
