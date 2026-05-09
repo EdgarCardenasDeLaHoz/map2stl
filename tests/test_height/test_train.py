@@ -278,7 +278,7 @@ class TestCheckpointRoundtrip:
 
 class TestCollectTiles:
     def test_unknown_city_is_skipped(self, tmp_path, capsys):
-        from city2stl.height.train import collect_tiles
+        from app.server.core.height.train import collect_tiles
 
         result = collect_tiles(["UnknownCityXYZ"], tile_dir=tmp_path)
         assert result == []
@@ -287,7 +287,7 @@ class TestCollectTiles:
 
     def test_returns_list(self, tmp_path):
         """At minimum, the function returns a list (may be empty without network)."""
-        from city2stl.height.train import collect_tiles
+        from app.server.core.height.train import collect_tiles
 
         result = collect_tiles(["Barcelona"], tile_dir=tmp_path, tiles_per_city=1)
         assert isinstance(result, list)
