@@ -177,7 +177,7 @@ class TestTrainSmoke:
         import torch
         import torch.nn as nn
         from city2stl.height.train import TrainConfig, train
-        from city2stl.height.predict import predict as _pm
+        import city2stl.height.predict as _pm
 
         # Use a trivially small model so we don't need EfficientNet
         class _TinyUNet(nn.Module):
@@ -221,7 +221,7 @@ class TestCheckpointRoundtrip:
         import torch
         import torch.nn as nn
         from city2stl.height.train import TrainConfig, train
-        from city2stl.height.predict import predict as _pm
+        import city2stl.height.predict as _pm
 
         class _TinyUNet(nn.Module):
             def __init__(self):
@@ -250,7 +250,7 @@ class TestCheckpointRoundtrip:
         import torch
         import torch.nn as nn
         from city2stl.height.train import TrainConfig, train
-        from city2stl.height.predict import predict as _pm
+        import city2stl.height.predict as _pm
 
         class _TinyUNet(nn.Module):
             def __init__(self):
