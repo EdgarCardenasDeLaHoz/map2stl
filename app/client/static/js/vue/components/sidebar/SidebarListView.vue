@@ -1,7 +1,7 @@
 <template>
   <div id="sidebarListView" :class="{ 'hidden': !visible }"
        class="sidebar-list-view">
-    <input type="text" id="coordSearch" class="search-input sidebar-search-input" aria-label="Search regions"
+    <input type="text" id="coordSearch" class="search-input sidebar-search-input"
            v-model="searchQuery"
            placeholder="Search regions...">
     <!-- region-ui.js / regions.js populate this div via innerHTML.

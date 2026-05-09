@@ -14,7 +14,7 @@
  *   window.applyCompositeToDem()       — replace lastDemData with composite
  *   window.setupCompositeDemControls() — wire UI event listeners
  *
- * See docs/design/composite-dem-design.md for full design rationale.
+ * See COMPOSITE_DEM_DESIGN.md for full design rationale.
  */
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
@@ -122,12 +122,8 @@ async function _fetchCityRaster(demW, demH) {
     const bbox = window.appState?.currentDemBbox;
     if (!bbox) return null;
 
-    const simplifyTol = parseFloat(document.getElementById('citySimplifyTolerance')?.value) || 3.0;
-    const minArea     = parseFloat(document.getElementById('cityMinArea')?.value) || 5.0;
-    const mPerLevel   = parseFloat(document.getElementById('cityMPerLevel')?.value) || 3.5;
-
-    // Client-side cache keyed by bbox + dims + m_per_level so re-fetching only happens on change
-    const cacheKey = `${bbox.north.toFixed(4)}_${bbox.south.toFixed(4)}_${bbox.east.toFixed(4)}_${bbox.west.toFixed(4)}_${demW}x${demH}_mpl${mPerLevel}`;
+    // Client-side cache keyed by bbox + dims so re-fetching only happens on change
+    const cacheKey = `${bbox.north.toFixed(4)}_${bbox.south.toFixed(4)}_${bbox.east.toFixed(4)}_${bbox.west.toFixed(4)}_${demW}x${demH}`;
     const cached = window.appState.compositeCityRaster;
     if (cached?.cacheKey === cacheKey) return cached;
 
@@ -135,9 +131,6 @@ async function _fetchCityRaster(demW, demH) {
         north: bbox.north, south: bbox.south,
         east:  bbox.east,  west:  bbox.west,
         width: demW, height: demH,
-        simplify_tolerance: simplifyTol,
-        min_area: minArea,
-        m_per_level: mPerLevel,
     }) ?? Promise.resolve({ data: null, error: 'api not ready' }));
 
     if (error || !data) {

@@ -14,7 +14,7 @@
 ```bash
 cd strm2stl && source ../.venv/bin/activate
 python -m uvicorn app.server.server:app --port 9000 --reload   # starts FastAPI
-python -m pytest tests/ -v                                     # run all tests (648 pass, 5 xpassed)
+python -m pytest tests/ -v                                     # run all tests (532 pass, 16 test files)
 ```
 
 ## Recommended Read Order
@@ -25,26 +25,13 @@ python -m pytest tests/ -v                                     # run all tests (
 4. `docs/task-routing.md` to choose the right files before editing
 5. Subsystem docs such as `docs/api.md`, `docs/modules.md`, `docs/state.md`, or `docs/arch.md`
 
-## Docs Folder Map
-
-| Folder | Purpose | Start file |
-|---|---|---|
-| `docs/` | Current top-level onboarding and subsystem docs | `docs/README.md` |
-| `docs/reference/` | Current technical reference and indexes | `docs/reference/README.md` |
-| `docs/plans/` | Current ML and roadmap working plans | `docs/plans/height-training-status.md` |
-| `docs/todos/` | Verified active work only, including audit follow-through that is still open | `docs/todos/README.md` |
-| `docs/completed/` | Shipped plans and audit follow-through that is already verified complete | `docs/completed/README.md` |
-| `docs/audits/` | Evidence snapshots and deep analysis; do not treat this folder as the live backlog | `docs/audits/README.md` |
-| `docs/design/` | Stable design notes and implementation rationale after active audit work is folded back in | `docs/design/README.md` |
-| `docs/archive/` | Older historical material, not first-read docs | `docs/archive/` |
-
 ## When to Read What
 
 | Working on | Files to read |
 |---|---|
 | First-pass project orientation | `docs/ai-agent-onboarding.md` + `docs/task-routing.md` |
 | Backend endpoint | `docs/api.md` + relevant router file |
-| Terrain API call stacks | `docs/reference/terrain-api-audit.md` |
+| Terrain API call stacks | `docs/terrain-api-audit.md` |
 | Session client (Python API) | `docs/sdk-workflow.md` + `app/session/terrain_session.py` + `notebooks/Session_API_Reference.ipynb` |
 | Notebook-driven terrain workflow | `docs/sdk-workflow.md` + `notebooks/API_Terrain.ipynb` |
 | Cache / storage | `app/server/core/cache.py` header + `docs/api.md` |
@@ -55,9 +42,9 @@ python -m pytest tests/ -v                                     # run all tests (
 | Frontend state variables | `docs/state.md` |
 | View tabs / navigation | `docs/arch.md` |
 | Data flow debugging | `docs/arch.md` (Data Flow section) |
-| Function lookup | `docs/reference/functions.md` |
+| Function lookup | `docs/functions.md` |
 | Known bugs / tech debt | `docs/issues.md` |
-| Library integration / geo2stl / numpy2stl | `docs/reference/libraries.md` |
+| Library integration / geo2stl / numpy2stl | `docs/libraries.md` |
 | JS module map | `docs/modules.md` |
 | Writing tests | `tests/conftest.py` + relevant test file |
 | Approving / denying AI proposals | `docs/proposals.md` |
@@ -73,9 +60,9 @@ strm2stl/
 │   │   ├── server.py      ← FastAPI app + lifespan  (entry: uvicorn app.server.server:app)
 │   │   ├── config.py      ← constants, OPENTOPO_DATASETS, API keys
 │   │   ├── schemas.py     ← all Pydantic models
-│   │   ├── core/          ← cache.py, cache_inspector.py, export.py, db.py,
-│   │   │                    validation.py, responses.py, height/service.py
-│   │   │                    + terrain_raster.py, osm_cache_policy.py [deprecated wrappers]
+│   │   ├── core/          ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py,
+│   │   │                    hydrorivers.py, hydrology.py, sat.py, projection.py,
+│   │   │                    validation.py, responses.py, height/ subpackage
 │   │   └── routers/       ← terrain.py, regions.py, export.py, cities.py, cache.py,
 │   │                        settings.py, composite.py, height.py
 │   ├── client/            ← browser client (HTML/CSS/JS)
@@ -87,11 +74,8 @@ strm2stl/
 │       └── viz.py
 │
 │  ── geo/mesh libraries ─────────────────────────────────────────────────
-├── geo2stl/               ← terrain domain: DEM fetch (dem.py), projection (projections.py),
-│                            tile stitch (tiles.py), raster scale (raster.py),
-│                            satellite (sat2stl.py), hydrology (hydrology.py), grid utils
-├── city2stl/              ← city domain: OSM rasterize (rasterize.py), cache policy (cache_policy.py),
-│                            building heights (height/), roof classification, mesh gen
+├── geo2stl/               ← map projections + tile stitching
+├── city2stl/              ← OSM/building to 3D mesh helpers
 │
 │  ── project tooling ────────────────────────────────────────────────────
 ├── tests/                 ← pytest suite (conftest.py + 16 test files)
@@ -135,9 +119,9 @@ strm2stl/
 | Task-to-file routing | `docs/task-routing.md` |
 | Architecture + data flows | `docs/arch.md` |
 | Global state variables | `docs/state.md` |
-| Function index | `docs/reference/functions.md` |
+| Function index | `docs/functions.md` |
 | API routes + Pydantic models | `docs/api.md` |
 | JS module map | `docs/modules.md` |
 | Known issues + feature status | `docs/issues.md` |
-| Completed feature history | `docs/completed/functionality-history.md` |
+| Completed feature history | `docs/functionality_doc.md` |
 | AI-proposed features (approve/deny) | `docs/proposals.md` |

@@ -12,39 +12,45 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from app.server.core.validation import model_to_dict as _model_to_dict
-from app.server.schemas import ColormapInfo, DatasetInfo, ProjectionInfo
-
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
 
+
 def _default_projections() -> list[dict]:
     return [
-        _model_to_dict(ProjectionInfo(
+        ProjectionInfo(
             id="none",
             name="None",
             description="No projection applied",
-        )),
-        _model_to_dict(ProjectionInfo(
+        ).model_dump(),
+        ProjectionInfo(
             id="cosine",
             name="Cosine",
             description="Cosine latitude correction",
-        )),
+        ).model_dump(),
     ]
 
 
 def _load_projections() -> list[dict]:
     """Load projections from geo2stl; fall back to defaults on failure."""
     try:
+        import sys
+        from pathlib import Path as _Path
+
+        strm2stl_root = _Path(__file__).parent.parent.parent
+        root_str = str(strm2stl_root)
+        if root_str not in sys.path:
+            sys.path.append(root_str)
+
         from geo2stl.projections import get_projection_info
 
         info = get_projection_info()
         return [
-            _model_to_dict(ProjectionInfo(
+            ProjectionInfo(
                 id=projection_id,
                 name=projection_meta.get("name", projection_id),
                 description=projection_meta.get("description", ""),
-            ))
+            ).model_dump()
             for projection_id, projection_meta in info.items()
         ]
     except Exception:
@@ -65,7 +71,7 @@ def _list_colormaps() -> list[dict]:
         ColormapInfo(id="hot",      description="Black-red-yellow-white"),
         ColormapInfo(id="RdBu",     description="Diverging red-blue for anomaly maps"),
     ]
-    return [_model_to_dict(c) for c in colormaps]
+    return [c.model_dump() for c in colormaps]
 
 
 def _list_datasets() -> list[dict]:
@@ -77,7 +83,32 @@ def _list_datasets() -> list[dict]:
         DatasetInfo(id="gebco",     name="GEBCO 2022",                 description="450 m global ocean bathymetry + land",source="Local GEBCO GeoTIFFs",             requires_auth=False),
         DatasetInfo(id="jrc",       name="JRC Global Surface Water",   description="Water occurrence 1984–2021",          source="JRC/GSW1_4/GlobalSurfaceWater",    requires_auth=True),
     ]
-    return [_model_to_dict(d) for d in datasets]
+    return [d.model_dump() for d in datasets]
+
+# ---------------------------------------------------------------------------
+# Schema imports
+# ---------------------------------------------------------------------------
+try:
+    from app.server.schemas import ColormapInfo, DatasetInfo, ProjectionInfo
+except ImportError:
+    from pydantic import BaseModel
+    from typing import Optional
+
+    class ColormapInfo(BaseModel):
+        id: str
+        description: Optional[str] = None
+
+    class DatasetInfo(BaseModel):
+        id: str
+        name: str
+        description: str
+        source: Optional[str] = None
+        requires_auth: bool = False
+
+    class ProjectionInfo(BaseModel):
+        id: str
+        name: str
+        description: str
 
 
 # ---------------------------------------------------------------------------

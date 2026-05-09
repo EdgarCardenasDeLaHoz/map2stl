@@ -4,9 +4,9 @@ city2stl/dem2stl.py -- LEGACY FILE (research/notebook-era code).
 NOT imported by the server.
 
 Modern replacements:
-  get_dem_geo()          -> geo2stl.dem.fetch_h5_dem
-  geo_2_tile_pixel()     -> geo2stl.dem._geo_to_tile_pixel
-  tile_num_2_geo_coor()  -> geo2stl.dem._geo_to_tile_pixel (inverse)
+  get_dem_geo()          -> app.server.core.dem.fetch_h5_dem
+  geo_2_tile_pixel()     -> app.server.core.dem._geo_to_tile_pixel
+  tile_num_2_geo_coor()  -> app.server.core.dem._geo_to_tile_pixel (inverse)
 
 Unique functionality with NO modern server equivalent (kept for notebooks):
   DEM class              -- elevation visualisation; no server equivalent
@@ -15,12 +15,13 @@ Unique functionality with NO modern server equivalent (kept for notebooks):
   simplify_polygon()     -- polygon simplification utility
 
 Note: The tile coordinate math in geo_2_tile_pixel() is nearly identical to
-_geo_to_tile_pixel() in geo2stl.dem.
+_geo_to_tile_pixel() in app.server.core.dem.
 """
 from itertools import product
 
-import os
+import os 
 import numpy as np
+import pandas as pd
 
 from scipy import ndimage as ndi
 from scipy.ndimage import rotate
@@ -33,11 +34,17 @@ from PIL import Image
 
 import h5py
 
+from shapely.geometry import Polygon,MultiPolygon
+from descartes import PolygonPatch
+
 # Image and Visualization Tools
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+
+from skimage.transform import resize
 
 import numpy2stl as np2stl
-from geo2stl.projections import project_coordinates
+from geo2stl.geo2stl import proj_map_geo_to_2D
 
 class DEM:
     def __init__(self, root=None, geo_bounds=None, data=None):
@@ -372,14 +379,7 @@ def DEM2STL(DEM, NSEW, rotation=0, n=1, fn=None):
     DEM.data = mat
 
     ####
-    mat_adj, _ = project_coordinates(
-        mat,
-        tuple(np.array(NSEW)),
-        projection='cosine',
-        maintain_dimensions=False,
-        fill_value=np.nan,
-        clip_nans=True,
-    )
+    mat_adj = proj_map_geo_to_2D(mat,NSEW)
     mat_adj= mat_adj.round(2)
     
     if rotation != 0:

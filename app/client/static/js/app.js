@@ -300,7 +300,7 @@ window.setWaterOpacity = (v) => { window.appState.waterOpacity = v; };
 // SIDEBAR
 // ============================================================
 
-window.appState.sidebarState = 'expanded'; // 'normal', 'expanded', 'hidden'
+window.appState.sidebarState = 'normal'; // 'normal', 'expanded', 'hidden'
 window.getSidebarState = () => window.appState.sidebarState;
 
 // Open sidebar from floating button (goes to normal state)
@@ -311,23 +311,11 @@ document.getElementById('openSidebarBtn').addEventListener('click', () => {
     const label = toggleBtn.querySelector('.state-label');
 
     window.appState.sidebarState = 'normal';
-    window.__setSidebarModeFromLegacy?.('normal');
-    window._setSidebarViews?.('normal');
     sidebar.classList.remove('collapsed', 'expanded');
     document.getElementById('regionParamsSection').classList.add('hidden');
     document.getElementById('openSidebarBtn').classList.add('hidden');
     icon.textContent = '⇔';
     label.textContent = 'Expand';
-
-    requestAnimationFrame(() => {
-        window._globalMap?.invalidateSize?.();
-        window.emitStackUpdate?.();
-        window.dispatchEvent(new Event('resize'));
-    });
-    setTimeout(() => {
-        window._globalMap?.invalidateSize?.();
-        window.emitStackUpdate?.();
-    }, 140);
 });
 
 // ============================================================

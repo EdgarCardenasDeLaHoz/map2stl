@@ -15,14 +15,6 @@
 // Colormap LUT cache — keyed by colormap name; rebuilt only on first use per colormap.
 const _lutCache = new Map();
 
-// Client-side DEM response cache — avoids repeat HTTP round-trips for unchanged params.
-// Key: URLSearchParams.toString() for the exact request. Max entries bounded to limit RAM.
-const _DEM_CLIENT_CACHE_MAX = 5;
-const _demResponseCache = new Map();
-
-/** Discard all cached DEM responses (e.g. after a server-side cache flush). */
-window._clearDemResponseCache = () => _demResponseCache.clear();
-
 /** Invalidate LUT cache entries. Pass a colormap name to drop one entry, or omit to clear all. */
 window._invalidateLutCache = (colormap) => {
     if (colormap) _lutCache.delete(colormap);
@@ -182,7 +174,7 @@ function _applyDemResult(data, north, south, east, west) {
     if (window.appState?.osmCityData) requestAnimationFrame(() => window.renderCityOnDEM?.());
 
     // Auto-load city data if any city layer toggle is enabled and region is small enough
-    const _anyLayerOn = ['cityLayerBuildings', 'cityLayerRoads', 'cityLayerWaterways']
+    const _anyLayerOn = ['layerBuildingsToggle', 'layerRoadsToggle', 'layerWaterwaysToggle']
         .some(id => document.getElementById(id)?.checked);
     if (_anyLayerOn && !window.appState?.osmCityData && typeof window.loadCityData === 'function') {
         window.loadCityData?.();
@@ -240,18 +232,9 @@ window.loadDEM = async function loadDEM(highRes = false) {
         maintain_dimensions: true,
         clip_nans: document.getElementById('paramClipNans')?.checked ?? true,
     });
-    const _cacheKey = params.toString();
 
     // Clear DEM cache before loading new DEM
     window.clearLayerCache?.();
-
-    // Client-side cache hit: serve immediately without a network round-trip
-    const _cached = _demResponseCache.get(_cacheKey);
-    if (_cached) {
-        window.setLayerStatus('dem', 'loaded');
-        _applyDemResult(_cached, north, south, east, west);
-        return;
-    }
 
     // Update layer status
     window.setLayerStatus('dem', 'loading');
@@ -262,29 +245,13 @@ window.loadDEM = async function loadDEM(highRes = false) {
 
     // Show loading indicator and clear old DEM
     const demImageContainer = document.getElementById('demImage');
-    const loadingDiv = document.createElement('div');
-    loadingDiv.className = 'loading';
-    const spinner = document.createElement('span');
-    spinner.className = 'spinner';
-    loadingDiv.appendChild(spinner);
-    loadingDiv.append('Loading DEM... ');
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'dem-cancel-btn';
-    cancelBtn.textContent = '✕ Cancel';
-    cancelBtn.addEventListener('click', () => {
-        window.loadDEM._controller && window.loadDEM._controller.abort();
-    });
-    loadingDiv.appendChild(cancelBtn);
-    demImageContainer.innerHTML = '';
-    demImageContainer.appendChild(loadingDiv);
+    demImageContainer.innerHTML = `<div class="loading"><span class="spinner"></span>Loading DEM... <button onclick="window.loadDEM._controller&&window.loadDEM._controller.abort()" class="dem-cancel-btn">✕ Cancel</button></div>`;
     window.showToast?.('Loading DEM data...', 'info');
 
     // Optionally, show a progress bar
     let progressBar = document.createElement('div');
     progressBar.className = 'dem-progress-bar';
-    const progressFill = document.createElement('div');
-    progressFill.id = 'demProgress';
-    progressBar.appendChild(progressFill);
+    progressBar.innerHTML = '<div style="width:0%" id="demProgress"></div>';
     demImageContainer.appendChild(progressBar);
 
     try {
@@ -315,11 +282,6 @@ window.loadDEM = async function loadDEM(highRes = false) {
 
         // Client-side rendering of DEM data
         if ((data.dem_values || data.dem_values_b64) && data.dimensions) {
-            // Store in client-side cache before rendering
-            if (_demResponseCache.size >= _DEM_CLIENT_CACHE_MAX) {
-                _demResponseCache.delete(_demResponseCache.keys().next().value);
-            }
-            _demResponseCache.set(_cacheKey, data);
             _applyDemResult(data, north, south, east, west);
         } else {
             document.getElementById('demImage').innerHTML = '<p>No DEM data available</p>';
@@ -781,29 +743,6 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
         console.error('loadSatelliteRGBImage error:', err);
         window.showToast?.(`Satellite load failed: ${err.message}`, 'error');
     }
-};
-
-// ---------------------------------------------------------------------------
-// Cancel helpers — abort any in-flight DEM / satellite requests.
-// Called by selectCoordinate() when the region changes, to prevent stale
-// responses from rendering into the new region's view.
-// ---------------------------------------------------------------------------
-
-window.cancelDemLoads = function cancelDemLoads() {
-    if (window.loadDEM?._controller) window.loadDEM._controller.abort();
-    if (_satelliteAbortController) _satelliteAbortController.abort();
-    if (_satelliteRGBAbortController) _satelliteRGBAbortController.abort();
-};
-
-// ---------------------------------------------------------------------------
-// _onDemCanvasReady — called by the DEM render worker when pixels are ready.
-// The canvas is returned immediately (empty) while the worker renders async.
-// This callback fires once the worker has filled the canvas with pixel data,
-// so we re-trigger the stacked-layers update to pick up the populated canvas.
-// ---------------------------------------------------------------------------
-
-window._onDemCanvasReady = function _onDemCanvasReady(_canvas) {
-    window.emitStackUpdate?.();
 };
 
 // ---------------------------------------------------------------------------

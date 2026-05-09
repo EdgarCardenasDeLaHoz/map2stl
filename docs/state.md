@@ -1,10 +1,8 @@
 # Global State Reference — strm2stl
 
-_Last updated: 2026-05-03_
+_Last updated: 2026-04-19_
 
 All variables live on the `window.appState` reactive Proxy (from `modules/core/state.js`). Modules can subscribe via `window.appState.on('key', fn)`. Legacy `window.get*/set*` aliases are kept for backward compatibility.
-
-Backend note: the 2026-05 backend refactor (routers/core/library boundaries) did not change these frontend state keys or ownership contracts.
 
 ### State ownership overview
 

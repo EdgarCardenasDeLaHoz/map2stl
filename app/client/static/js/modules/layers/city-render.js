@@ -161,7 +161,6 @@ window._cancelCityRenders = function () {
 // City raster state — only used by raster functions in this file.
 // ---------------------------------------------------------------------------
 let _lastCityRasterData = null;
-let _cityRasterAbortController = null;
 
 // ---------------------------------------------------------------------------
 // Public render functions — both debounced via requestAnimationFrame
@@ -192,13 +191,14 @@ function _doRenderCityOverlay() {
     const { north, south, east, west } = bbox;
     const latRange = north - south;
 
-    // Use the registered layer canvas so the overlay composites through updateStackedLayers
-    // like every other layer (opacity, layer order, letterboxing all handled centrally).
-    const overlay = window.getOrCreateCanvas?.('CityOverlay') || (() => {
-        let c = stack.querySelector('.osm-overlay');
-        if (!c) { c = document.createElement('canvas'); c.className = 'osm-overlay layer-canvas'; stack.appendChild(c); }
-        return c;
-    })();
+    // Get or create overlay canvas inside the stack
+    let overlay = stack.querySelector('.osm-overlay');
+    if (!overlay) {
+        overlay = document.createElement('canvas');
+        overlay.className = 'osm-overlay layer-canvas';
+        overlay.classList.add('overlay-z10');
+        stack.appendChild(overlay);
+    }
 
     // Size the overlay to match the stack's full pixel dimensions
     const stackRect = stack.getBoundingClientRect();
@@ -319,13 +319,10 @@ function _doRenderCityOverlay() {
         ctx.restore();
     }
 
-    // Store as source canvas so updateStackedLayers composites it into the layer stack
-    // (letterboxing, opacity, and zoom transform all handled centrally there).
-    if (window.appState) window.appState.cityOverlaySourceCanvas = overlay;
-
-    // Trigger a layer composite to pick up the freshly rendered overlay.
-    // Use setTimeout(0) to avoid re-entering updateStackedLayers synchronously.
-    setTimeout(() => window.updateStackedLayers?.(), 0);
+    // Re-apply the current stackZoom CSS transform so this canvas stays aligned
+    // with the DEM/Water/Sat layer canvases (which always carry the zoom transform).
+    overlay.style.transformOrigin = '0 0';
+    overlay.style.transform = `translate(${stackZoom.offsetX}px, ${stackZoom.offsetY}px) scale(${stackZoom.scale})`;
 
     // Also update the DEM canvas overlay (Cities 8) — scheduled, not inline.
     window.renderCityOnDEM?.();
@@ -495,19 +492,9 @@ window.loadCityRaster = async function loadCityRaster() {
     const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion;
     if (!cityData || !bbox) return;
 
-    // Abort any in-flight raster request for the previous region.
-    if (_cityRasterAbortController) _cityRasterAbortController.abort();
-    _cityRasterAbortController = new AbortController();
-    const signal = _cityRasterAbortController.signal;
-
-    const dim = parseInt(document.getElementById('cityRasterDim')?.value) || 200;
+    const dim = parseInt(document.getElementById('paramDim')?.value) || 200;
     const buildingScale = parseFloat(document.getElementById('cityBuildingScale')?.value) || 1.0;
     const waterOffset = parseFloat(document.getElementById('cityWaterOffset')?.value) ?? -2.0;
-
-    const simplifyTol = parseFloat(document.getElementById('citySimplifyTolerance')?.value) || 3.0;
-    const minArea     = parseFloat(document.getElementById('cityMinArea')?.value) || 5.0;
-    const mPerLevel   = parseFloat(document.getElementById('cityMPerLevel')?.value) || 3.5;
-    const roofShapes  = document.getElementById('cityRoofShapes')?.checked || false;
 
     window.setLayerStatus('cityRaster', 'loading');
     try {
@@ -520,12 +507,7 @@ window.loadCityRaster = async function loadCityRaster() {
             water_depression_m: waterOffset,
             projection: document.getElementById('paramProjection')?.value || 'none',
             clip_nans: document.getElementById('paramClipNans')?.checked ?? true,
-            simplify_tolerance: simplifyTol,
-            min_area: minArea,
-            m_per_level: mPerLevel,
-            roof_shapes: roofShapes,
-        }, signal);
-        if (signal.aborted) return;
+        });
         if (rasterErr) throw new Error(rasterErr);
         _lastCityRasterData = data;
 
@@ -545,15 +527,9 @@ window.loadCityRaster = async function loadCityRaster() {
         window.setLayerStatus('cityRaster', 'loaded');
         window.events?.emit(window.EV?.STACKED_UPDATE);
     } catch (e) {
-        if (e.name === 'AbortError') return;
         window.setLayerStatus('cityRaster', 'error');
         window.showToast('City raster failed: ' + e.message, 'error');
     }
-};
-
-/** Abort any in-flight city raster request. */
-window.cancelCityRasterLoad = function cancelCityRasterLoad() {
-    if (_cityRasterAbortController) _cityRasterAbortController.abort();
 };
 
 /** Wire the City Heights visibility toggle and opacity slider. */

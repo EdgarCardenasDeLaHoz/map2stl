@@ -17,184 +17,6 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-def _make_geo_to_px(north, south, east, west, width, height):
-    """Return (geo_to_px, coords_to_px) closures for a bbox/canvas."""
-    lat_span = north - south
-    lon_span = east - west
-
-    def geo_to_px(lon, lat):
-        x = (lon - west) / lon_span * width
-        y = (north - lat) / lat_span * height
-        return (x, y)
-
-    def coords_to_px(coords):
-        return [geo_to_px(lon, lat) for lon, lat in coords]
-
-    return geo_to_px, coords_to_px
-
-
-def _rasterize_composite_buildings(features, coords_to_px, width, height):
-    """Return a float32 array with per-pixel building height in metres."""
-    from PIL import Image, ImageDraw
-
-    arr = np.zeros((height, width), dtype=np.float32)
-    for feat in features:
-        geom = feat.get("geometry") or {}
-        h_m = float((feat.get("properties") or {}).get("height_m") or 10)
-        rings = []
-        if geom.get("type") == "Polygon":
-            rings = [geom["coordinates"][0]]
-        elif geom.get("type") == "MultiPolygon":
-            rings = [poly[0] for poly in geom["coordinates"]]
-        for ring in rings:
-            if not ring:
-                continue
-            px = coords_to_px(ring)
-            mask = Image.new("1", (width, height), 0)
-            ImageDraw.Draw(mask).polygon(px, fill=1)
-            arr += np.array(mask, dtype=np.float32) * h_m
-    return arr
-
-
-def _rasterize_composite_roads(features, coords_to_px, width, height, m_per_px):
-    """Return a binary float32 array marking road pixels."""
-    from PIL import Image, ImageDraw
-
-    img = Image.new("1", (width, height), 0)
-    draw = ImageDraw.Draw(img)
-    for feat in features:
-        geom = feat.get("geometry") or {}
-        w_m = float((feat.get("properties") or {}).get("road_width_m") or 6)
-        w_px = max(1, round(w_m / m_per_px))
-        lines = []
-        if geom.get("type") == "LineString":
-            lines = [geom["coordinates"]]
-        elif geom.get("type") == "MultiLineString":
-            lines = geom["coordinates"]
-        for line in lines:
-            px = coords_to_px(line)
-            if len(px) >= 2:
-                draw.line(px, fill=1, width=w_px)
-    return np.array(img, dtype=np.float32)
-
-
-def _rasterize_composite_waterways(features, coords_to_px, width, height, m_per_px):
-    """Return a binary float32 array marking waterway pixels."""
-    from PIL import Image, ImageDraw
-
-    img = Image.new("1", (width, height), 0)
-    draw = ImageDraw.Draw(img)
-    w_px = max(2, round(4.0 / m_per_px))
-    for feat in features:
-        geom = feat.get("geometry") or {}
-        if geom.get("type") == "LineString":
-            px = coords_to_px(geom["coordinates"])
-            if len(px) >= 2:
-                draw.line(px, fill=1, width=w_px)
-        elif geom.get("type") == "MultiLineString":
-            for line in geom["coordinates"]:
-                px = coords_to_px(line)
-                if len(px) >= 2:
-                    draw.line(px, fill=1, width=w_px)
-        elif geom.get("type") == "Polygon":
-            px = coords_to_px(geom["coordinates"][0])
-            if px:
-                draw.polygon(px, fill=1)
-        elif geom.get("type") == "MultiPolygon":
-            for poly in geom["coordinates"]:
-                px = coords_to_px(poly[0])
-                if px:
-                    draw.polygon(px, fill=1)
-    return np.array(img, dtype=np.float32)
-
-
-def _rasterize_composite_walls(features, coords_to_px, width, height, m_per_px):
-    """Return a float32 array with per-pixel wall height in metres."""
-    from PIL import Image, ImageDraw
-
-    arr = np.zeros((height, width), dtype=np.float32)
-    for feat in features:
-        geom = feat.get("geometry") or {}
-        h_m = float((feat.get("properties") or {}).get("height_m") or 5)
-        w_px = max(1, round(2.0 / m_per_px))
-        lines = []
-        if geom.get("type") == "LineString":
-            lines = [geom["coordinates"]]
-        elif geom.get("type") == "MultiLineString":
-            lines = geom["coordinates"]
-        for line in lines:
-            px = coords_to_px(line)
-            if len(px) >= 2:
-                mask = Image.new("1", (width, height), 0)
-                ImageDraw.Draw(mask).line(px, fill=1, width=w_px)
-                arr += np.array(mask, dtype=np.float32) * h_m
-    return arr
-
-
-def rasterize_composite_layers(
-    north: float,
-    south: float,
-    east: float,
-    west: float,
-    width: int,
-    height: int,
-    osm_data: dict | None,
-) -> dict:
-    """Rasterize cached OSM layers into independent composite arrays.
-
-    Returns per-layer float32 arrays shaped for `/api/composite/city-raster`.
-    This is pure computation with no cache or HTTP dependencies.
-    """
-    lat_span = north - south
-    lon_span = east - west
-
-    def _empty_result():
-        zeros = [0.0] * (width * height)
-        return {
-            "buildings": zeros,
-            "roads": zeros,
-            "waterways": zeros,
-            "walls": zeros,
-            "width": width,
-            "height": height,
-        }
-
-    if lat_span <= 0 or lon_span <= 0:
-        return _empty_result()
-    if not osm_data:
-        return _empty_result()
-
-    lat_mid = (north + south) / 2
-    m_per_px = (lon_span * math.cos(math.radians(lat_mid)) * 111_320.0) / width
-    _, coords_to_px = _make_geo_to_px(north, south, east, west, width, height)
-
-    building_arr = _rasterize_composite_buildings(
-        (osm_data.get("buildings") or {}).get("features") or [],
-        coords_to_px, width, height,
-    )
-    road_arr = _rasterize_composite_roads(
-        (osm_data.get("roads") or {}).get("features") or [],
-        coords_to_px, width, height, m_per_px,
-    )
-    waterway_arr = _rasterize_composite_waterways(
-        (osm_data.get("waterways") or {}).get("features") or [],
-        coords_to_px, width, height, m_per_px,
-    )
-    wall_arr = _rasterize_composite_walls(
-        (osm_data.get("walls") or {}).get("features") or [],
-        coords_to_px, width, height, m_per_px,
-    )
-
-    return {
-        "buildings": building_arr.ravel().tolist(),
-        "roads": road_arr.ravel().tolist(),
-        "waterways": waterway_arr.ravel().tolist(),
-        "walls": wall_arr.ravel().tolist(),
-        "width": width,
-        "height": height,
-    }
-
-
 def _count_verts(g) -> int:
     """Count total exterior vertices in a geometry (for simplification logging)."""
     if g.geom_type == "LineString":
@@ -215,225 +37,6 @@ def _empty_fc(error: str = "") -> dict:
     return fc
 
 
-# ─── Roof painters ────────────────────────────────────────────────────────────
-#
-# Each painter takes a boolean footprint mask in raster space and the
-# eaves/ridge heights, and returns a float32 height array shaped like the
-# mask. NaN where the mask is False; finite metres where True.
-#
-# The shapes follow the same definitions used by city2stl/mesh.py's
-# _extrude_ring_with_roof, so the 2D heightmap and the 3D extrusion agree.
-
-_MIN_ROOF_PIXELS = 9  # mask.sum() below this falls back to a flat top
-
-
-def _principal_axis_deg(mask: np.ndarray) -> float:
-    """PCA principal axis (degrees CCW from +x) of the True pixels in mask."""
-    ys, xs = np.nonzero(mask)
-    if xs.size < 2:
-        return 0.0
-    pts = np.column_stack([xs.astype(np.float32), ys.astype(np.float32)])
-    pts -= pts.mean(axis=0)
-    cov = np.cov(pts, rowvar=False)
-    try:
-        evals, evecs = np.linalg.eigh(cov)
-    except np.linalg.LinAlgError:
-        return 0.0
-    v = evecs[:, np.argmax(evals)]
-    return float(np.degrees(np.arctan2(v[1], v[0])))
-
-
-def _direction_tag_to_deg(value) -> float | None:
-    """Parse OSM ``roof:direction`` tag (compass: '90', 'N', 'NNE', ...) into deg CCW from +x."""
-    if value is None:
-        return None
-    s = str(value).strip().upper()
-    if not s:
-        return None
-    # Numeric compass bearing (clockwise from N)
-    try:
-        bearing = float(s)
-    except ValueError:
-        cardinals = {
-            "N": 0, "NNE": 22.5, "NE": 45, "ENE": 67.5,
-            "E": 90, "ESE": 112.5, "SE": 135, "SSE": 157.5,
-            "S": 180, "SSW": 202.5, "SW": 225, "WSW": 247.5,
-            "W": 270, "WNW": 292.5, "NW": 315, "NNW": 337.5,
-        }
-        if s not in cardinals:
-            return None
-        bearing = cardinals[s]
-    # Compass bearing → math angle (CCW from +x). Image y is flipped vs. north.
-    # roof:direction points "up the slope" toward the ridge for skillion;
-    # we treat it as the eaves-to-ridge direction in raster pixel coords.
-    angle = 90.0 - bearing  # bearing=0 (N, up) → 90° (raster -y in image)
-    return angle
-
-
-def _flat_surface(mask: np.ndarray, eaves_h: float, roof_h: float) -> np.ndarray:
-    out = np.full(mask.shape, np.nan, dtype=np.float32)
-    out[mask] = eaves_h + roof_h
-    return out
-
-
-def _gabled_surface(mask: np.ndarray, eaves_h: float, roof_h: float,
-                    axis_deg: float) -> np.ndarray:
-    """Symmetric gable: ridge along axis_deg, eaves at the perpendicular extremes."""
-    ys, xs = np.nonzero(mask)
-    if xs.size == 0:
-        return np.full(mask.shape, np.nan, dtype=np.float32)
-
-    cx = float(xs.mean())
-    cy = float(ys.mean())
-    # Perpendicular to ridge: rotate axis by 90° → (-sin, cos)
-    theta = math.radians(axis_deg)
-    nx = -math.sin(theta)
-    ny = math.cos(theta)
-
-    # Project pixel offset onto perpendicular axis
-    dx = xs.astype(np.float32) - cx
-    dy = ys.astype(np.float32) - cy
-    perp = dx * nx + dy * ny
-    max_abs = float(np.max(np.abs(perp))) or 1.0
-    # 1.0 at eaves edge, 0.0 at ridge
-    d_norm = np.abs(perp) / max_abs
-    z = eaves_h + roof_h * (1.0 - d_norm)
-
-    out = np.full(mask.shape, np.nan, dtype=np.float32)
-    out[ys, xs] = z.astype(np.float32)
-    return out
-
-
-def _pyramidal_surface(mask: np.ndarray, eaves_h: float, roof_h: float) -> np.ndarray:
-    """Pyramid / square hip: peak at centroid, linear falloff to footprint edge."""
-    ys, xs = np.nonzero(mask)
-    if xs.size == 0:
-        return np.full(mask.shape, np.nan, dtype=np.float32)
-    cx = float(xs.mean())
-    cy = float(ys.mean())
-    dx = xs.astype(np.float32) - cx
-    dy = ys.astype(np.float32) - cy
-    r = np.sqrt(dx * dx + dy * dy)
-    rmax = float(r.max()) or 1.0
-    z = eaves_h + roof_h * (1.0 - r / rmax)
-    out = np.full(mask.shape, np.nan, dtype=np.float32)
-    out[ys, xs] = z.astype(np.float32)
-    return out
-
-
-def _skillion_surface(mask: np.ndarray, eaves_h: float, roof_h: float,
-                      axis_deg: float) -> np.ndarray:
-    """Single-pitch ramp from eaves on one side to peak on the opposite side."""
-    ys, xs = np.nonzero(mask)
-    if xs.size == 0:
-        return np.full(mask.shape, np.nan, dtype=np.float32)
-    cx = float(xs.mean())
-    cy = float(ys.mean())
-    theta = math.radians(axis_deg)
-    ux = math.cos(theta)
-    uy = math.sin(theta)
-    dx = xs.astype(np.float32) - cx
-    dy = ys.astype(np.float32) - cy
-    proj = dx * ux + dy * uy
-    pmin = float(proj.min())
-    pmax = float(proj.max())
-    span = max(pmax - pmin, 1.0)
-    t = (proj - pmin) / span  # 0..1, low side = eaves, high side = peak
-    z = eaves_h + roof_h * t
-    out = np.full(mask.shape, np.nan, dtype=np.float32)
-    out[ys, xs] = z.astype(np.float32)
-    return out
-
-
-def _hipped_surface(mask: np.ndarray, eaves_h: float, roof_h: float) -> np.ndarray:
-    """Hipped roof via distance-transform: ridge runs along the medial axis.
-
-    Result naturally produces hip lines at the corners. Falls back to gabled-like
-    when the polygon is highly elongated (medial axis collapses to a line).
-    """
-    try:
-        from scipy.ndimage import distance_transform_edt
-    except Exception:
-        # No scipy → emulate with simple distance-to-boundary using gabled fallback
-        return _gabled_surface(mask, eaves_h, roof_h, _principal_axis_deg(mask))
-    dt = distance_transform_edt(mask).astype(np.float32)
-    if not np.any(mask):
-        return np.full(mask.shape, np.nan, dtype=np.float32)
-    dmax = float(dt[mask].max()) or 1.0
-    # Normalised: 0 at eaves edge, 1 at ridge spine
-    norm = np.clip(dt / dmax, 0.0, 1.0)
-    z = eaves_h + roof_h * norm
-    out = np.full(mask.shape, np.nan, dtype=np.float32)
-    out[mask] = z[mask]
-    return out
-
-
-def _dome_surface(mask: np.ndarray, eaves_h: float, roof_h: float) -> np.ndarray:
-    """Spherical-cap dome over footprint."""
-    ys, xs = np.nonzero(mask)
-    if xs.size == 0:
-        return np.full(mask.shape, np.nan, dtype=np.float32)
-    cx = float(xs.mean())
-    cy = float(ys.mean())
-    dx = xs.astype(np.float32) - cx
-    dy = ys.astype(np.float32) - cy
-    r = np.sqrt(dx * dx + dy * dy)
-    rmax = float(r.max()) or 1.0
-    rn = r / rmax
-    z = eaves_h + roof_h * np.sqrt(np.clip(1.0 - rn * rn, 0.0, 1.0))
-    out = np.full(mask.shape, np.nan, dtype=np.float32)
-    out[ys, xs] = z.astype(np.float32)
-    return out
-
-
-def _paint_building_roof(
-    mask: np.ndarray,
-    eaves_h: float,
-    roof_h: float,
-    shape: str,
-    axis_deg: float | None = None,
-) -> np.ndarray:
-    """Return a per-pixel height surface for a building footprint.
-
-    Args:
-        mask:     (H, W) boolean — True inside the building footprint.
-        eaves_h:  Height (metres) at the eaves edge.
-        roof_h:   Additional rise (metres) from eaves to ridge. May be 0.
-        shape:    One of 'flat', 'gabled', 'hipped', 'pyramidal', 'skillion', 'dome'.
-        axis_deg: Optional ridge-direction in degrees CCW from +x. None → PCA principal axis.
-
-    Returns:
-        (H, W) float32 array. NaN outside the footprint, finite metres inside.
-        Buildings smaller than _MIN_ROOF_PIXELS pixels always fall back to flat.
-    """
-    if not np.any(mask):
-        return np.full(mask.shape, np.nan, dtype=np.float32)
-    if mask.sum() < _MIN_ROOF_PIXELS or roof_h <= 0:
-        return _flat_surface(mask, eaves_h, roof_h)
-
-    s = (shape or "flat").strip().lower()
-    if s in ("flat", "skeleton", "raised", ""):
-        return _flat_surface(mask, eaves_h, roof_h)
-    if s == "pyramidal" or s == "pyramid":
-        return _pyramidal_surface(mask, eaves_h, roof_h)
-    if s == "dome":
-        return _dome_surface(mask, eaves_h, roof_h)
-    if s == "hipped" or s == "half-hipped":
-        return _hipped_surface(mask, eaves_h, roof_h)
-
-    # Gabled, skillion, mansard, gambrel — all benefit from a ridge axis
-    if axis_deg is None:
-        axis_deg = _principal_axis_deg(mask)
-
-    if s == "skillion" or s == "mono-pitched" or s == "shed":
-        return _skillion_surface(mask, eaves_h, roof_h, axis_deg)
-    if s in ("gabled", "gable", "saltbox", "mansard", "gambrel", "round"):
-        return _gabled_surface(mask, eaves_h, roof_h, axis_deg)
-
-    # Unknown shape → flat
-    return _flat_surface(mask, eaves_h, roof_h)
-
-
 def rasterize_city_data(
     north: float, south: float, east: float, west: float,
     dim: int,
@@ -443,7 +46,6 @@ def rasterize_city_data(
     building_scale: float = 1.0,
     road_depression_m: float = 0.0,
     water_depression_m: float = -2.0,
-    roof_shapes: bool = False,
 ) -> dict:
     """
     Burn OSM vector features onto a dim x dim float32 height-map grid.
@@ -514,93 +116,36 @@ def rasterize_city_data(
     # -- Buildings --------------------------------------------------------
     # Burn each building separately and take the maximum so tall buildings
     # win over adjacent shorter ones (can't batch because each has a different value).
-    if not roof_shapes:
-        # Original flat-top fast path: collect all (geom, height) pairs and
-        # batch-rasterize, then merge with the existing grid via np.maximum.
-        building_shapes = []
-        for feat in (buildings_geojson.get("features") or []):
-            geom = feat.get("geometry")
-            if not geom:
-                continue
-            try:
-                h = float((feat.get("properties") or {}).get("height_m", 10.0)) * building_scale
-                building_shapes.append((mapping(shape(geom)), h))
-            except Exception:
-                continue
-        if building_shapes:
-            building_shapes.sort(key=lambda x: x[1])
-            try:
-                building_grid = _rasterize(
-                    building_shapes, out_shape=(dim, dim), transform=transform,
-                    fill=0, dtype="float32", merge_alg=MergeAlg.replace,
-                )
-                np.maximum(grid, building_grid, out=grid)
-            except Exception:
-                for feat_shape, h in building_shapes:
-                    try:
-                        tmp = _rasterize(
-                            [(feat_shape, h)], out_shape=(dim, dim),
-                            transform=transform, fill=0, dtype="float32",
-                        )
-                        np.maximum(grid, tmp, out=grid)
-                    except Exception:
-                        continue
-    else:
-        # Roof-shaped path: per-building rasterize footprint mask, then paint a
-        # roof-shaped surface into it using OSM tags. ~Nx slower for N buildings
-        # since we can't batch — each surface is per-building.
-        n_painted = 0
-        n_flat = 0
-        for feat in (buildings_geojson.get("features") or []):
-            geom = feat.get("geometry")
-            if not geom:
-                continue
-            props = feat.get("properties") or {}
-            try:
-                height_m = float(props.get("height_m", 10.0)) * building_scale
-            except Exception:
-                continue
-            roof_h_tag = props.get("roof_height_m")
-            try:
-                roof_h = float(roof_h_tag) if roof_h_tag is not None else max(2.0, 0.3 * height_m)
-            except Exception:
-                roof_h = max(2.0, 0.3 * height_m)
-            roof_h = min(roof_h, 0.5 * height_m)  # cap so eaves don't go below ground
-            roof_h *= building_scale
-            eaves_h = max(0.0, height_m - roof_h)
-            shape_tag = (props.get("roof:shape") or props.get("roof_shape") or "flat")
-            axis_deg = _direction_tag_to_deg(
-                props.get("roof:direction") or props.get("roof_direction")
-                or props.get("roof:orientation") or props.get("roof_orientation")
+    building_shapes = []
+    for feat in (buildings_geojson.get("features") or []):
+        geom = feat.get("geometry")
+        if not geom:
+            continue
+        try:
+            h = float((feat.get("properties") or {}).get("height_m", 10.0)) * building_scale
+            building_shapes.append((mapping(shape(geom)), h))
+        except Exception:
+            continue
+    if building_shapes:
+        try:
+            # Rasterize all at once using add merge_alg (rasterio >= 1.2)
+            building_grid = _rasterize(
+                building_shapes, out_shape=(dim, dim), transform=transform,
+                fill=0, dtype="float32", merge_alg=MergeAlg.add,
             )
-
-            try:
-                feat_shape = mapping(shape(geom))
-                # Footprint mask = 1 inside, 0 outside
-                mask = _rasterize(
-                    [(feat_shape, 1)], out_shape=(dim, dim), transform=transform,
-                    fill=0, dtype="uint8",
-                ).astype(bool)
-                if not mask.any():
+            # Use np.maximum so building heights always win over road/water values
+            np.maximum(grid, building_grid, out=grid)
+        except Exception:
+            # Fallback: rasterize one by one
+            for feat_shape, h in building_shapes:
+                try:
+                    tmp = _rasterize(
+                        [(feat_shape, h)], out_shape=(dim, dim),
+                        transform=transform, fill=0, dtype="float32",
+                    )
+                    np.maximum(grid, tmp, out=grid)
+                except Exception:
                     continue
-                surface = _paint_building_roof(
-                    mask, eaves_h, roof_h, shape_tag, axis_deg,
-                )
-                # Combine: take max with existing grid, ignoring NaN
-                surface_filled = np.where(np.isnan(surface), -np.inf, surface)
-                np.maximum(grid, surface_filled, out=grid)
-                if shape_tag and shape_tag.lower() not in ("flat", "", "skeleton", "raised"):
-                    n_painted += 1
-                else:
-                    n_flat += 1
-            except Exception as e:
-                logger.debug(f"roof-shape rasterize failed for one building: {e}")
-                continue
-        # Replace any -inf (artefact of np.maximum on NaN-bridged arrays) with 0
-        np.maximum(grid, 0.0, out=grid)
-        logger.info(
-            f"[rasterize] roof_shapes ON: {n_painted} shaped + {n_flat} flat buildings"
-        )
 
     vmin = float(grid.min())
     vmax = float(grid.max())

@@ -221,13 +221,7 @@ function drawColorbar(min, max, colormap) {
     canvas.width  = Math.max(64, bar.clientWidth || 256);
     canvas.height = 18;
     const ctx = canvas.getContext('2d');
-    // Always render the gradient at 256 pixels then scale to canvas width so
-    // the colorbar fills its full container regardless of clientWidth.
-    const tmp = document.createElement('canvas');
-    tmp.width  = 256;
-    tmp.height = 18;
-    const tmpCtx = tmp.getContext('2d');
-    const img = tmpCtx.createImageData(256, 18);
+    const img = ctx.createImageData(256, 18);
     for (let x = 0; x < 256; x++) {
         const t = x / 255;
         const [r, g, b] = mapElevationToColor(t, colormap);
@@ -239,8 +233,7 @@ function drawColorbar(min, max, colormap) {
             img.data[idx + 3] = 255;
         }
     }
-    tmpCtx.putImageData(img, 0, 0);
-    ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height);
+    ctx.putImageData(img, 0, 0);
     canvas.classList.add('canvas-histogram');
     bar.title = `Colorbar: ${Math.round(min)} m (left) → ${Math.round(max)} m (right) — ${colormap}`;
     bar.appendChild(canvas);

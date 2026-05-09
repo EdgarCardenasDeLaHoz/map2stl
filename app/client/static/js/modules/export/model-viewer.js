@@ -37,8 +37,6 @@ let viewerAutoRotate = false;
 let needsRender   = true;
 let _normalsActive = false;     // true when MeshNormalMaterial is active
 let _resizeHandler = null;      // reference for cleanup on re-init
-let _rawPreviewData = null;     // last server preview response (for simplification)
-let _fullGeometry   = null;     // saved geometry when simplification is active
 
 // Orbit drag state
 let _isDragging   = false;
@@ -296,12 +294,11 @@ async function previewModelIn3D() {
     try {
         const exaggeration = parseFloat(document.getElementById('exportExaggeration')?.value) || 1.0;
         const baseHeight   = parseFloat(document.getElementById('exportBaseHeight')?.value)  || 5;
-        const modelHeight  = parseFloat(document.getElementById('exportModelHeight')?.value) || 30;
 
         const ds = window._demSettings ? window._demSettings() : {};
         const { data, error: previewErr } = await window.api.export.preview({
             ...ds,
-            model_height: modelHeight,
+            model_height: window.appState.demParams.height || 20,
             base_height:  baseHeight,
             exaggeration,
             sea_level_cap: document.getElementById('exportSeaLevelCap')?.checked || false,
@@ -309,22 +306,14 @@ async function previewModelIn3D() {
         if (previewErr) throw new Error(previewErr);
 
         const cmap = document.getElementById('viewerColormap')?.value || 'terrain';
-        _rawPreviewData = data;
-        if (_fullGeometry) { _fullGeometry.dispose(); _fullGeometry = null; }
         _replaceMesh(_buildMeshFromPreview(data, cmap));
         _fitCameraToMesh(terrainMesh);
         _updateHud(data);
-        _updateSceneOverlays(data);
-        // Re-apply active visualization modes to the new mesh
-        if (document.getElementById('viewerSimplify')?.checked) applySimplification();
-        if (document.getElementById('viewerSurfaceGroups')?.checked) _applySurfaceGroups(true);
 
         window.appState.generatedModelData = {
             values: ldd.values, width: ldd.width, height: ldd.height,
             resolution: window.appState.demParams.height || 20,
-            modelHeight, exaggeration, baseHeight,
-            walls: document.getElementById('exportWalls')?.checked ?? true,
-            floor: document.getElementById('exportFloor')?.checked ?? true,
+            exaggeration, baseHeight,
             vmin: ldd.vmin, vmax: ldd.vmax,
         };
         window._setExportButtonsEnabled?.(true);
@@ -342,28 +331,19 @@ async function previewModelIn3D() {
 function _buildMeshFromPreview(data, cmap) {
     // numpy2stl vertex layout: [col, row, z_mm]
     // Three.js layout: x=col (→right), y=z_mm (→up), z=row (→back)
-    // Footprint uses correct aspect ratio; height is normalized to 30 units so terrain
-    // features remain visible regardless of model_height. Actual mm printed dimensions
-    // are shown in the HUD.
     const rawVerts = data.vertices;
     const rawFaces = data.faces;
     const zMin = data.z_min, zRange = Math.max(data.z_max - data.z_min, 1);
     const cRange = Math.max(data.cols - 1, 1);
     const rRange = Math.max(data.rows - 1, 1);
 
-    // Correct footprint aspect ratio (was always 100×100 = square)
-    const viewW = 100;
-    const viewD = (data.rows / Math.max(data.cols, 1)) * viewW;
-    // Scale height proportionally: viewW units = data.dim mm → 1 mm = viewW/dim units
-    const heightScale = viewW / (data.dim || 600);
-
     const positions = new Float32Array(rawVerts.length * 3);
     const colors    = new Float32Array(rawVerts.length * 3);
     for (let i = 0; i < rawVerts.length; i++) {
         const [c, r, z] = rawVerts[i];
-        positions[i * 3]     = c / cRange * viewW - viewW / 2;    // x
-        positions[i * 3 + 1] = (z - zMin) * heightScale;          // y proportional to real mm
-        positions[i * 3 + 2] = r / rRange * viewD - viewD / 2;    // z (proportional)
+        positions[i * 3]     = c / cRange * 100 - 50;    // x
+        positions[i * 3 + 1] = (z - zMin) / zRange * 30; // y (elevation)
+        positions[i * 3 + 2] = r / rRange * 100 - 50;    // z
 
         const rgb = _elevColor((z - zMin) / zRange, cmap);
         colors[i * 3] = rgb[0]; colors[i * 3 + 1] = rgb[1]; colors[i * 3 + 2] = rgb[2];
@@ -478,165 +458,10 @@ function setViewerNormals(active) {
 function _updateHud(data) {
     const hud = document.getElementById('viewerHud');
     if (!hud) return;
-
-    const dim        = data.dim || 600;
-    const depthMm    = Math.round(dim * data.rows / Math.max(data.cols, 1));
-    const heightMm   = Math.round(data.model_height + data.base_height);
-    const lines = [
-        `${data.face_count.toLocaleString()} faces  |  ${data.cols}×${data.rows} pts`,
-        `Print size: ${dim} × ${depthMm} × ${heightMm} mm  (H: ${data.model_height} mm + Base: ${data.base_height} mm)`,
-    ];
+    const lines = [`${data.face_count.toLocaleString()} faces  |  ${data.cols}×${data.rows} pts`];
     const r = window.appState?.selectedRegion;
     if (r) lines.push(`~${haversineDiagKm(r.north, r.south, r.east, r.west).toFixed(1)} km diagonal`);
     hud.textContent = lines.join('\n');
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Scene overlays — grid, axes, scale bar
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Create a canvas-texture sprite with a single text label.
- * Returns a THREE.Sprite; caller sets its .position and adds to scene.
- */
-function _makeTextSprite(text, { fontSize = 22, color = '#dddddd', bg = 'rgba(0,0,0,0.45)', pad = 3 } = {}) {
-    const canvas = document.createElement('canvas');
-    const ctx    = canvas.getContext('2d');
-    ctx.font = `${fontSize}px monospace`;
-    const tw = ctx.measureText(text).width;
-    canvas.width  = Math.ceil(tw + pad * 2 + 2);
-    canvas.height = Math.ceil(fontSize + pad * 2);
-    ctx.font = `${fontSize}px monospace`;
-    if (bg) { ctx.fillStyle = bg; ctx.fillRect(0, 0, canvas.width, canvas.height); }
-    ctx.fillStyle = color;
-    ctx.fillText(text, pad + 1, fontSize + pad - 2);
-    const tex = new THREE.Texture(canvas);
-    tex.needsUpdate = true;
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-    // scale: sprite is sized in scene units; 1 unit ≈ 1mm-equivalent at viewW=100
-    const aspect = canvas.width / canvas.height;
-    sprite.scale.set(aspect * 5.5, 5.5, 1);
-    return sprite;
-}
-
-/** Pick a nice tick interval (mm) for a given total range. */
-function _niceInterval(rangeMm) {
-    const raw = rangeMm / 6;
-    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-    for (const mult of [1, 2, 2.5, 5, 10]) {
-        if (mult * mag >= raw) return mult * mag;
-    }
-    return mag * 10;
-}
-
-function _updateSceneOverlays(data) {
-    if (!modelScene) return;
-
-    // Remove any previous overlay objects (including label sprites group)
-    ['groundGrid', 'axesHelper', 'scaleLabels', 'vertScale'].forEach(name => {
-        const old = modelScene.getObjectByName(name);
-        if (old) {
-            old.traverse(c => { c.geometry?.dispose(); c.material?.map?.dispose(); c.material?.dispose(); });
-            modelScene.remove(old);
-        }
-    });
-
-    const viewW       = 100;
-    const viewD       = (data.rows / Math.max(data.cols, 1)) * viewW;
-    const heightScale = viewW / (data.dim || 600);   // display units per mm
-    const mmPerUnit   = (data.dim || 600) / viewW;   // mm per display unit
-    const depthMm     = (data.dim || 600) * data.rows / Math.max(data.cols, 1);
-
-    // ── Ground grid ─────────────────────────────────────────────────────────
-    const gridDivs   = 10;
-    const gridSize   = Math.max(viewW, viewD) * 1.1;
-    const gridHelper = new THREE.GridHelper(gridSize, gridDivs, 0x555555, 0x303030);
-    gridHelper.name  = 'groundGrid';
-    gridHelper.position.y = 0;
-    modelScene.add(gridHelper);
-
-    // ── Axes helper ─────────────────────────────────────────────────────────
-    const axisLen    = Math.max(viewW, viewD) * 0.18;
-    const axesHelper = new THREE.AxesHelper(axisLen);
-    axesHelper.name  = 'axesHelper';
-    axesHelper.position.set(-viewW / 2, 0, viewD / 2);
-    modelScene.add(axesHelper);
-
-    // ── Scale label sprites ──────────────────────────────────────────────────
-    const labelGroup = new THREE.Group();
-    labelGroup.name  = 'scaleLabels';
-
-    // X-axis labels (along front edge, Z = viewD/2 + small offset)
-    const xIntervalMm = _niceInterval((data.dim || 600));
-    const xIntervalU  = xIntervalMm / mmPerUnit;
-    const xLabelY     = -1.5;   // just below grid plane
-    const xLabelZ     = viewD / 2 + 6;
-    const xStart      = -viewW / 2;
-    for (let xU = 0; xU <= viewW + 0.01; xU += xIntervalU) {
-        const xMm   = Math.round(xU * mmPerUnit);
-        const label = _makeTextSprite(`${xMm}`, { fontSize: 20 });
-        label.position.set(xStart + xU, xLabelY, xLabelZ);
-        labelGroup.add(label);
-    }
-    // X-axis unit label
-    const xUnitLabel = _makeTextSprite('mm →', { fontSize: 18, color: '#ff9966' });
-    xUnitLabel.position.set(viewW / 2 + 10, xLabelY, xLabelZ);
-    labelGroup.add(xUnitLabel);
-
-    // Z-axis labels (along left edge, X = -viewW/2 - small offset)
-    const zIntervalMm = _niceInterval(depthMm);
-    const zIntervalU  = zIntervalMm / (depthMm / viewD);
-    const zLabelY     = -1.5;
-    const zLabelX     = -viewW / 2 - 8;
-    const zStart      = -viewD / 2;
-    for (let zU = 0; zU <= viewD + 0.01; zU += zIntervalU) {
-        const zMm   = Math.round(zU * (depthMm / viewD));
-        const label = _makeTextSprite(`${zMm}`, { fontSize: 20 });
-        label.position.set(zLabelX, zLabelY, zStart + zU);
-        labelGroup.add(label);
-    }
-
-    modelScene.add(labelGroup);
-
-    // ── Vertical scale bar (back-right corner) ────────────────────────────
-    const totalHeightMm = (data.model_height || 0) + (data.base_height || 0);
-    const totalHeightU  = totalHeightMm * heightScale;
-
-    const vertGroup = new THREE.Group();
-    vertGroup.name  = 'vertScale';
-
-    // Vertical line
-    const linePts = [
-        new THREE.Vector3(0, 0, 0),
-        new THREE.Vector3(0, totalHeightU, 0),
-    ];
-    const lineGeo = new THREE.BufferGeometry().setFromPoints(linePts);
-    const lineMat = new THREE.LineBasicMaterial({ color: 0xaaaaaa, depthTest: false });
-    const line    = new THREE.Line(lineGeo, lineMat);
-    vertGroup.add(line);
-
-    // Tick marks + labels
-    const vIntervalMm = _niceInterval(totalHeightMm);
-    const tickHalfLen = 2;
-    for (let h = 0; h <= totalHeightMm + 0.01; h += vIntervalMm) {
-        const yU = h * heightScale;
-        // Tick mark
-        const tickGeo = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(-tickHalfLen, yU, 0),
-            new THREE.Vector3(tickHalfLen,  yU, 0),
-        ]);
-        vertGroup.add(new THREE.Line(tickGeo, lineMat));
-        // Label
-        const label = _makeTextSprite(`${Math.round(h)} mm`, { fontSize: 19, color: '#bbddff' });
-        label.position.set(tickHalfLen + 8, yU, 0);
-        vertGroup.add(label);
-    }
-
-    // Position at back-right corner
-    vertGroup.position.set(viewW / 2 + 6, 0, -viewD / 2);
-    modelScene.add(vertGroup);
-
-    needsRender = true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -651,10 +476,7 @@ function updatePuzzlePreview() {
 
     const pX = parseInt(document.getElementById('splitCols')?.value) || 3;
     const pY = parseInt(document.getElementById('splitRows')?.value) || 3;
-    // Match the proportional footprint used in _buildMeshFromPreview
-    const md2 = window.appState?.generatedModelData;
-    const aspect = md2 ? md2.height / Math.max(md2.width, 1) : 1;
-    const w = 100, h = aspect * 100;
+    const w = 100, h = 100;
     const verts = [];
     for (let i = 1; i < pX; i++) { const x = (i / pX) * w - w / 2; verts.push(x, 0, -h / 2, x, 0, h / 2); }
     for (let j = 1; j < pY; j++) { const z = (j / pY) * h - h / 2; verts.push(-w / 2, 0, z, w / 2, 0, z); }
@@ -693,7 +515,7 @@ async function exportPuzzle3MF() {
         const ds = window._demSettings ? window._demSettings() : {};
         const body = {
             ...ds,
-            model_height: md.modelHeight || 30,
+            model_height: md.resolution,
             base_height: md.baseHeight,
             exaggeration: md.exaggeration,
             sea_level_cap: document.getElementById('exportSeaLevelCap')?.checked || false,
@@ -774,181 +596,6 @@ function setViewerAutoRotate(val) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Surface group coloring — BFS on face adjacency, random hue per component
-// ─────────────────────────────────────────────────────────────────────────────
-
-function _hslToRgb(h, s, l) {
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    const f = t => { if (t < 0) t += 1; if (t > 1) t -= 1;
-        if (t < 1/6) return p + (q - p) * 6 * t;
-        if (t < 1/2) return q;
-        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-        return p; };
-    return [f(h + 1/3), f(h), f(h - 1/3)];
-}
-
-function _buildSurfaceGroupColors(geometry) {
-    const idx = geometry.index.array;
-    const nFaces = idx.length / 3;
-    const nVerts = geometry.attributes.position.count;
-
-    // Edge → face list (integer key: min * nVerts + max)
-    const edgeFaces = new Map();
-    for (let f = 0; f < nFaces; f++) {
-        const a = idx[f*3], b = idx[f*3+1], c = idx[f*3+2];
-        for (const [u, v] of [[a,b],[b,c],[a,c]]) {
-            const k = u < v ? u * nVerts + v : v * nVerts + u;
-            const list = edgeFaces.get(k); if (list) list.push(f); else edgeFaces.set(k, [f]);
-        }
-    }
-
-    // BFS connected components
-    const comp = new Int32Array(nFaces).fill(-1);
-    let numComp = 0;
-    for (let start = 0; start < nFaces; start++) {
-        if (comp[start] !== -1) continue;
-        const queue = [start]; comp[start] = numComp;
-        for (let qi = 0; qi < queue.length; qi++) {
-            const f = queue[qi];
-            const a = idx[f*3], b = idx[f*3+1], c = idx[f*3+2];
-            for (const [u, v] of [[a,b],[b,c],[a,c]]) {
-                const k = u < v ? u * nVerts + v : v * nVerts + u;
-                for (const nb of (edgeFaces.get(k) || [])) {
-                    if (comp[nb] === -1) { comp[nb] = numComp; queue.push(nb); }
-                }
-            }
-        }
-        numComp++;
-    }
-
-    // Assign hues evenly spaced (golden angle) — visually distinct
-    const compRgb = Array.from({ length: numComp }, (_, i) =>
-        _hslToRgb(((i * 137.508) % 360) / 360, 0.75, 0.55));
-
-    // Per-vertex color from first-seen face component
-    const vComp = new Int32Array(nVerts).fill(-1);
-    for (let f = 0; f < nFaces; f++) {
-        for (const v of [idx[f*3], idx[f*3+1], idx[f*3+2]])
-            if (vComp[v] === -1) vComp[v] = comp[f];
-    }
-
-    const colors = new Float32Array(nVerts * 3);
-    for (let v = 0; v < nVerts; v++) {
-        const ci = vComp[v] >= 0 ? vComp[v] : 0;
-        colors[v*3] = compRgb[ci][0]; colors[v*3+1] = compRgb[ci][1]; colors[v*3+2] = compRgb[ci][2];
-    }
-    return { colors, numComp };
-}
-
-function _applySurfaceGroups(active) {
-    if (!terrainMesh) return;
-    if (active) {
-        const geo = terrainMesh.geometry;
-        const { colors, numComp } = _buildSurfaceGroupColors(geo);
-        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        geo.attributes.color.needsUpdate = true;
-        terrainMesh.material.vertexColors = true;
-        terrainMesh.material.color.set(0xffffff);
-        terrainMesh.material.needsUpdate = true;
-        needsRender = true;
-        window.showToast?.(`${numComp} surface group${numComp !== 1 ? 's' : ''} found`, 'info');
-    } else {
-        _rebuildColors(document.getElementById('viewerColormap')?.value || 'terrain');
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Mesh simplification — client-side grid subsampling (top surface, no re-fetch)
-// ─────────────────────────────────────────────────────────────────────────────
-
-function _buildSimplifiedTopSurface(step) {
-    if (!_rawPreviewData) return null;
-    const data = _rawPreviewData;
-    const { vertices: rawVerts, cols, rows } = data;
-    const viewW = 100;
-    const viewD = (rows / Math.max(cols, 1)) * viewW;
-    const cRange = Math.max(cols - 1, 1);
-    const rRange = Math.max(rows - 1, 1);
-    const heightScale = viewW / (data.dim || 600);
-    const zMin = data.z_min;
-    const zRange = Math.max(data.z_max - data.z_min, 1);
-    const cmap = document.getElementById('viewerColormap')?.value || 'terrain';
-
-    // Build z-grid from top surface vertices (those with integer col/row in grid bounds)
-    const zGrid = new Float32Array(cols * rows).fill(zMin);
-    for (const [c, r, z] of rawVerts) {
-        const ci = Math.round(c), ri = Math.round(r);
-        if (ci >= 0 && ci < cols && ri >= 0 && ri < rows) zGrid[ri * cols + ci] = z;
-    }
-
-    // Subsampled column and row indices (always include last)
-    const sC = [], sR = [];
-    for (let c = 0; c < cols; c += step) sC.push(c);
-    if (sC.at(-1) !== cols - 1) sC.push(cols - 1);
-    for (let r = 0; r < rows; r += step) sR.push(r);
-    if (sR.at(-1) !== rows - 1) sR.push(rows - 1);
-
-    const nV = sC.length * sR.length;
-    const positions = new Float32Array(nV * 3);
-    const colors    = new Float32Array(nV * 3);
-    for (let ri = 0; ri < sR.length; ri++) {
-        for (let ci = 0; ci < sC.length; ci++) {
-            const vi = ri * sC.length + ci;
-            const c = sC[ci], r = sR[ri], z = zGrid[r * cols + c];
-            positions[vi*3]   = c / cRange * viewW - viewW / 2;
-            positions[vi*3+1] = (z - zMin) * heightScale;
-            positions[vi*3+2] = r / rRange * viewD - viewD / 2;
-            const rgb = _elevColor((z - zMin) / zRange, cmap);
-            colors[vi*3] = rgb[0]; colors[vi*3+1] = rgb[1]; colors[vi*3+2] = rgb[2];
-        }
-    }
-
-    const nF = (sC.length - 1) * (sR.length - 1) * 2;
-    const indices = new Uint32Array(nF * 3);
-    let fi = 0;
-    for (let ri = 0; ri < sR.length - 1; ri++) {
-        for (let ci = 0; ci < sC.length - 1; ci++) {
-            const tl = ri * sC.length + ci, tr = tl + 1;
-            const bl = tl + sC.length,     br = bl + 1;
-            indices[fi*3] = tl; indices[fi*3+1] = bl; indices[fi*3+2] = tr; fi++;
-            indices[fi*3] = tr; indices[fi*3+1] = bl; indices[fi*3+2] = br; fi++;
-        }
-    }
-
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
-    geo.setIndex(new THREE.BufferAttribute(indices, 1));
-    geo.computeVertexNormals();
-    return geo;
-}
-
-function applySimplification() {
-    if (!terrainMesh || !_rawPreviewData) return;
-    const enabled = document.getElementById('viewerSimplify')?.checked;
-    const ratio = Math.max(0.01, Math.min(1, parseFloat(document.getElementById('viewerSimplifyRatio')?.value) || 0.25));
-    const step  = Math.max(2, Math.round(1 / ratio));
-
-    if (enabled) {
-        const simGeo = _buildSimplifiedTopSurface(step);
-        if (!simGeo) return;
-        if (!_fullGeometry) _fullGeometry = terrainMesh.geometry;
-        else terrainMesh.geometry.dispose();
-        terrainMesh.geometry = simGeo;
-    } else {
-        if (_fullGeometry) {
-            terrainMesh.geometry.dispose();
-            terrainMesh.geometry = _fullGeometry;
-            _fullGeometry = null;
-        }
-    }
-    // Re-apply surface groups if active
-    if (document.getElementById('viewerSurfaceGroups')?.checked) _applySurfaceGroups(true);
-    needsRender = true;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Expose on window
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -960,5 +607,3 @@ window.setViewerAutoRotate  = setViewerAutoRotate;
 window.resetViewerCamera    = resetViewerCamera;
 window.rebuildViewerColors  = _rebuildColors;
 window.setViewerNormals     = setViewerNormals;
-window.applySurfaceGroups   = _applySurfaceGroups;
-window.applySimplification  = applySimplification;

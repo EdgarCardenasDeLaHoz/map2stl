@@ -278,6 +278,176 @@
       "epochs": 30,
       "config_hash": "10037d2e",
       "notes": "grow/prune 1 cycles; final=[4, 4, 4, 4, 4, 4, 4, 4, 4]"
+    },
+    {
+      "ts": "2026-05-05T18:02:20",
+      "arch": "retna_grow_8-8-8-8",
+      "task": "height",
+      "model_path": "C:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\tools\\models\\retna_test_quick.pt",
+      "best_metrics": {
+        "val_loss": 0.9827,
+        "val_mae": 11.8707,
+        "val_mask_iou": 0.0,
+        "pearson_mae_height": 1.0
+      },
+      "n_train": 85,
+      "n_val": 15,
+      "epochs": 2,
+      "config_hash": "a42ba314",
+      "notes": "grow/prune 1 cycles; final=[8, 8, 8, 8]"
+    },
+    {
+      "ts": "2026-05-05T18:03:38",
+      "arch": "retna_grow_8-8-10-20-14-14-16-16-22",
+      "task": "height",
+      "model_path": "C:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\models\\retna_phase_g_test.pt",
+      "best_metrics": {
+        "val_loss": 0.3765,
+        "val_mae": 5.3836,
+        "val_mask_iou": 0.5014,
+        "pearson_mae_height": 0.905
+      },
+      "n_train": 85,
+      "n_val": 15,
+      "epochs": 10,
+      "config_hash": "aafd8c0f",
+      "notes": "grow/prune 1 cycles; final=[8, 8, 10, 20, 14, 14, 16, 16, 22]"
+    },
+    {
+      "ts": "2026-05-05T18:06:46",
+      "arch": "retna_grow_8-8-10-20-14-14-16-16-22",
+      "task": "height",
+      "model_path": "c:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\models\\retna_phase_g_final_1cycle.pt",
+      "best_metrics": {
+        "val_loss": 0.3787,
+        "val_mae": 5.1628,
+        "val_mask_iou": 0.4912,
+        "pearson_mae_height": 0.9071
+      },
+      "n_train": 85,
+      "n_val": 15,
+      "epochs": 5,
+      "config_hash": "554fca7b",
+      "notes": "grow/prune 1 cycles; final=[8, 8, 10, 20, 14, 14, 16, 16, 22]"
+    },
+    {
+      "ts": "2026-05-05T23:56:24",
+      "arch": "retna_grow_4-6-5-8-6-6-6-6-9",
+      "task": "height",
+      "model_path": "C:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\models\\retna_phase_g_osm.pt",
+      "best_metrics": {
+        "val_loss": 0.3997,
+        "val_mae": 5.436,
+        "val_mask_iou": 0.4208,
+        "pearson_mae_height": 0.8572
+      },
+      "n_train": 437,
+      "n_val": 77,
+      "epochs": 200,
+      "config_hash": "a41fa81d",
+      "notes": "grow/prune 10 cycles; final=[4, 6, 5, 8, 6, 6, 6, 6, 9]"
+    },
+    {
+      "ts": "2026-05-05T23:56:50",
+      "arch": "retna_grow_4-6-5-8-6-6-6-6-9",
+      "task": "height",
+      "model_path": "C:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\models\\retna_phase_g_osm.pt",
+      "best_metrics": {
+        "val_loss": 0.3997,
+        "val_mae": 5.436,
+        "val_mask_iou": 0.4208,
+        "pearson_mae_height": 0.8572
+      },
+      "n_train": 437,
+      "n_val": 77,
+      "epochs": 200,
+      "config_hash": "a41fa81d",
+      "notes": "grow/prune 10 cycles; final=[4, 6, 5, 8, 6, 6, 6, 6, 9]"
+    },
+    {
+      "ts": "2026-05-06T02:34:59",
+      "arch": "retna_grow_6-7-6-8-7-7-7-7-9",
+      "task": "height",
+      "model_path": "C:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\models\\retna_phase_g_global.pt",
+      "best_metrics": {
+        "val_loss": 0.4208,
+        "val_mae": 7.6019,
+        "val_mask_iou": 0.4195,
+        "pearson_mae_height": 0.9808
+      },
+      "n_train": 532,
+      "n_val": 93,
+      "epochs": 375,
+      "config_hash": "f4a2902f",
+      "notes": "grow/prune 15 cycles; final=[6, 7, 6, 8, 7, 7, 7, 7, 9]"
+    },
+    {
+      "ts": "2026-05-06T04:44:56",
+      "arch": "retna_grow_4-4-4-4-4-4-4-4-4",
+      "task": "height",
+      "model_path": "C:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\models\\retna_phase_g_final.pt",
+      "best_metrics": {
+        "val_loss": 0.3979,
+        "val_mae": 5.6443,
+        "val_mask_iou": 0.4927,
+        "pearson_mae_height": 0.8595
+      },
+      "n_train": 85,
+      "n_val": 15,
+      "epochs": 4000,
+      "config_hash": "dac969fa",
+      "notes": "grow/prune 40 cycles; final=[4, 4, 4, 4, 4, 4, 4, 4, 4]"
+    },
+    {
+      "ts": "2026-05-06T04:49:45",
+      "arch": "retna_grow_4-4-4-4-4-4-4-4-4",
+      "task": "height",
+      "model_path": "C:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\models\\retna_phase_g_final.pt",
+      "best_metrics": {
+        "val_loss": 0.3979,
+        "val_mae": 5.6443,
+        "val_mask_iou": 0.4927,
+        "pearson_mae_height": 0.8595
+      },
+      "n_train": 85,
+      "n_val": 15,
+      "epochs": 4000,
+      "config_hash": "dac969fa",
+      "notes": "grow/prune 40 cycles; final=[4, 4, 4, 4, 4, 4, 4, 4, 4]"
+    },
+    {
+      "ts": "2026-05-06T09:06:23",
+      "arch": "retna_grow_4-7-5-8-6-6-6-6-9",
+      "task": "height",
+      "model_path": "C:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\models\\retna_phase_g_hires.pt",
+      "best_metrics": {
+        "val_loss": 0.4106,
+        "val_mae": 8.1534,
+        "val_mask_iou": 0.4514,
+        "pearson_mae_height": 0.9706
+      },
+      "n_train": 488,
+      "n_val": 85,
+      "epochs": 350,
+      "config_hash": "b68d3da0",
+      "notes": "grow/prune 10 cycles; final=[4, 7, 5, 8, 6, 6, 6, 6, 9]"
+    },
+    {
+      "ts": "2026-05-06T18:46:35",
+      "arch": "retna_grow_4-6-4-4-4-4-4-4-4",
+      "task": "height",
+      "model_path": "C:\\Users\\eac84\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl\\models\\retna_phase_g_final.pt",
+      "best_metrics": {
+        "val_loss": 0.3868,
+        "val_mae": 6.0271,
+        "val_mask_iou": 0.4397,
+        "pearson_mae_height": 0.8397
+      },
+      "n_train": 437,
+      "n_val": 77,
+      "epochs": 4000,
+      "config_hash": "15492ef3",
+      "notes": "grow/prune 40 cycles; final=[4, 6, 4, 4, 4, 4, 4, 4, 4]"
     }
   ],
   "version": 1

@@ -310,9 +310,8 @@ function collectAllSettings() {
         },
         city: {
             layers: cityLayers.length ? cityLayers : ['buildings', 'roads', 'waterways'],
-            simplify_tolerance: _flt('citySimplifyTolerance', 3.0),
+            simplify_tolerance: _flt('citySimplifyTolerance', 0.5),
             min_area: _flt('cityMinArea', 5.0),
-            m_per_level: _flt('cityMPerLevel', 3.5),
             building_scale: _flt('cityBuildingScale', 0.5),
             road_depression_m: _flt('cityRoadDepression', 0.0),
             water_depression_m: _flt('cityWaterOffset', -2.0),
@@ -434,7 +433,6 @@ function applyAllSettings(s) {
     // city group — road_depression_m → #cityRoadDepression
     if (city.simplify_tolerance != null) set('citySimplifyTolerance', city.simplify_tolerance);
     if (city.min_area != null) set('cityMinArea', city.min_area);
-    if (city.m_per_level != null) set('cityMPerLevel', city.m_per_level);
     if (city.building_scale != null) set('cityBuildingScale', city.building_scale);
     if (city.road_depression_m != null) set('cityRoadDepression', city.road_depression_m);
     if (city.water_depression_m != null) set('cityWaterOffset', city.water_depression_m);

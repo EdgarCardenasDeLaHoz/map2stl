@@ -7,7 +7,7 @@
       <div id="demEmptyState" class="dem-empty-state">
         <span class="dem-empty-state-icon">🏔️</span>
         <span>Select a region, then load terrain data to begin</span>
-        <button id="emptyStateLoadBtn" class="btn btn-secondary empty-state-load-btn" title="Load terrain elevation data for the selected region">
+        <button id="emptyStateLoadBtn" class="btn btn-primary empty-state-load-btn" title="Load terrain elevation data for the selected region">
           ↺ Load DEM
         </button>
       </div>
@@ -43,7 +43,7 @@
         <div class="compare-inline-panels">
           <div class="compare-inline-panel">
             <div class="compare-inline-header">
-              <select id="compareInlineLeft" class="compare-inline-select" aria-label="Left inline comparison layer">
+              <select id="compareInlineLeft" class="compare-inline-select">
                 <option value="dem">DEM (Elevation)</option>
                 <option value="water">Water Mask</option>
                 <option value="sat">Satellite / Land Cover</option>
@@ -54,7 +54,7 @@
           </div>
           <div class="compare-inline-panel">
             <div class="compare-inline-header">
-              <select id="compareInlineRight" class="compare-inline-select" aria-label="Right inline comparison layer">
+              <select id="compareInlineRight" class="compare-inline-select">
                 <option value="dem">DEM (Elevation)</option>
                 <option value="water">Water Mask</option>
                 <option value="sat" selected>Satellite / Land Cover</option>
@@ -87,23 +87,23 @@
       <!-- BBox editor + colorbar -->
       <div class="dem-info">
         <div class="bbox-editor" id="bboxEditor">
-          <!-- Row 1: single-row coordinate inputs -->
-          <div class="bbox-coords-row">
+          <!-- Row 1: 2×2 coordinate grid -->
+          <div class="bbox-coords-grid">
             <div class="bbox-coord-cell">
               <label class="bbox-lbl" for="bboxNorth">N</label>
-              <input type="number" id="bboxNorth" class="bbox-input" step="0.01" min="-90" max="90" placeholder="North" title="Northern boundary" tabindex="0">
+              <input type="number" id="bboxNorth" class="bbox-input" step="0.01" min="-90" max="90" placeholder="North" title="Northern boundary">
             </div>
             <div class="bbox-coord-cell">
               <label class="bbox-lbl" for="bboxSouth">S</label>
-              <input type="number" id="bboxSouth" class="bbox-input" step="0.01" min="-90" max="90" placeholder="South" title="Southern boundary" tabindex="0">
+              <input type="number" id="bboxSouth" class="bbox-input" step="0.01" min="-90" max="90" placeholder="South" title="Southern boundary">
             </div>
             <div class="bbox-coord-cell">
               <label class="bbox-lbl" for="bboxEast">E</label>
-              <input type="number" id="bboxEast" class="bbox-input" step="0.01" min="-180" max="180" placeholder="East" title="Eastern boundary" tabindex="0">
+              <input type="number" id="bboxEast" class="bbox-input" step="0.01" min="-180" max="180" placeholder="East" title="Eastern boundary">
             </div>
             <div class="bbox-coord-cell">
               <label class="bbox-lbl" for="bboxWest">W</label>
-              <input type="number" id="bboxWest" class="bbox-input" step="0.01" min="-180" max="180" placeholder="West" title="Western boundary" tabindex="0">
+              <input type="number" id="bboxWest" class="bbox-input" step="0.01" min="-180" max="180" placeholder="West" title="Western boundary">
             </div>
           </div>
           <!-- Row 2: action buttons + colorbar -->
@@ -119,6 +119,10 @@
         </div>
         <!-- Inline mini-map for drag-editing the bounding box -->
         <div id="bboxMiniMap" class="bbox-mini-map hidden"></div>
+        <!-- Hidden elements kept for JS compatibility -->
+        <datalist id="regionLabelsList"></datalist>
+        <input type="hidden" id="regionLabelEdit">
+        <button id="saveRegionLabelBtn" style="display:none;"></button>
       </div>
     </div>
 

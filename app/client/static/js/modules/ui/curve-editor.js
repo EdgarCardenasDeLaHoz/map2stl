@@ -110,19 +110,11 @@ function initCurveEditor() {
     });
 
     let _curveResizeRaf = null;
-    let _lastCurveWidth = 0;
-    let _lastCurveHeight = 0;
     const _applyCurveResize = () => {
         if (container.clientWidth > 0 && container.clientHeight > 0) {
-            const nextWidth = container.clientWidth;
-            const nextHeight = container.clientHeight;
-            if (nextWidth !== _lastCurveWidth || nextHeight !== _lastCurveHeight) {
-                _lastCurveWidth = nextWidth;
-                _lastCurveHeight = nextHeight;
-                curveCanvas.width = nextWidth;
-                curveCanvas.height = nextHeight;
-                drawCurve();
-            }
+            curveCanvas.width = container.clientWidth;
+            curveCanvas.height = container.clientHeight;
+            drawCurve();
         }
     };
     const resizeObserver = new ResizeObserver(() => {

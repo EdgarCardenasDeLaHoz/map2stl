@@ -234,27 +234,105 @@ class HeightTileDataset(Dataset):
     Each sample is stored as a .npz file with:
       rgb   : (3, H, W) float32 in [0, 1]
       height: (1, H, W) float32 in metres
+
+    Supports optional random crops for multi-scale training and data augmentation.
     """
 
     def __init__(
         self,
         tile_paths: list[Path],
+        tile_size: int = 128,
         transform=None,
         max_height: float = MAX_HEIGHT_M,
+        crop_size: int | None = None,
+        augment: bool = False,
     ) -> None:
+        """
+        Parameters
+        ----------
+        tile_paths : list of .npz file paths
+        tile_size : expected size of tiles in .npz files (e.g., 256)
+        transform : optional transform function for (rgb, height) tuples
+        max_height : clip height values to this maximum (metres)
+        crop_size : if set, extract random crops of this size during training
+                    (e.g., 96 for 96x96 crops from 256x256 tiles)
+        augment : if True and crop_size is set, enable random crops + flips
+        """
         _require_torch()
         self.tile_paths = tile_paths
+        self.tile_size = tile_size
         self.transform = transform
         self.max_height = max_height
+        self.crop_size = crop_size if crop_size else tile_size
+        self.augment = augment
+
+        # Validate crop_size
+        if self.crop_size > self.tile_size:
+            raise ValueError(f"crop_size ({self.crop_size}) > tile_size ({self.tile_size})")
 
     def __len__(self) -> int:
+        # If using crops during training, multiply effective sample count
+        if self.augment and self.crop_size < self.tile_size:
+            n_crops_per_tile = ((self.tile_size - self.crop_size) // (self.crop_size // 2)) ** 2
+            return len(self.tile_paths) * max(1, n_crops_per_tile // 4)
         return len(self.tile_paths)
 
     def __getitem__(self, idx: int):
-        data = np.load(self.tile_paths[idx])
+        tile_idx = idx % len(self.tile_paths)
+        data = np.load(self.tile_paths[tile_idx])
         rgb = data["rgb"].astype(np.float32)
         height = data["height"].astype(np.float32)
         height = np.clip(height, 0, self.max_height)
+        # Normalize height to 0-1 range (model expects normalized values)
+        height = height / self.max_height
+
+        # Ensure consistent tile size
+        actual_h, actual_w = rgb.shape[1], rgb.shape[2]
+        if actual_h < self.tile_size or actual_w < self.tile_size:
+            # Pad to tile_size (handle smaller tiles)
+            pad_h = max(0, self.tile_size - actual_h)
+            pad_w = max(0, self.tile_size - actual_w)
+            rgb = np.pad(rgb, ((0, 0), (0, pad_h), (0, pad_w)), mode='constant', constant_values=0)
+            height = np.pad(height, ((0, 0), (0, pad_h), (0, pad_w)), mode='constant', constant_values=0)
+        elif actual_h > self.tile_size or actual_w > self.tile_size:
+            # Crop center (handle larger tiles)
+            start_h = (actual_h - self.tile_size) // 2
+            start_w = (actual_w - self.tile_size) // 2
+            rgb = rgb[:, start_h:start_h + self.tile_size, start_w:start_w + self.tile_size]
+            height = height[:, start_h:start_h + self.tile_size, start_w:start_w + self.tile_size]
+
+        # Random crop if enabled and crop_size < tile_size
+        if self.augment and self.crop_size < self.tile_size:
+            h, w = rgb.shape[1], rgb.shape[2]
+            # h and w should now both equal tile_size
+            max_y = h - self.crop_size
+            max_x = w - self.crop_size
+
+            if max_y > 0 and max_x > 0:
+                y = np.random.randint(0, max_y + 1)
+                x = np.random.randint(0, max_x + 1)
+                rgb = rgb[:, y:y+self.crop_size, x:x+self.crop_size]
+                height = height[:, y:y+self.crop_size, x:x+self.crop_size]
+
+            # Random flip
+            if np.random.random() > 0.5:
+                rgb = rgb[:, :, ::-1].copy()
+                height = height[:, :, ::-1].copy()
+            if np.random.random() > 0.5:
+                rgb = rgb[:, ::-1, :].copy()
+                height = height[:, ::-1, :].copy()
+
+        # Ensure output size matches crop_size (if cropping disabled, this is tile_size)
+        expected_h, expected_w = (self.crop_size if self.augment and self.crop_size < self.tile_size else self.tile_size), \
+                                  (self.crop_size if self.augment and self.crop_size < self.tile_size else self.tile_size)
+        actual_h, actual_w = rgb.shape[1], rgb.shape[2]
+        if actual_h != expected_h or actual_w != expected_w:
+            # Shouldn't happen, but handle anyway
+            if actual_h < expected_h or actual_w < expected_w:
+                pad_h = max(0, expected_h - actual_h)
+                pad_w = max(0, expected_w - actual_w)
+                rgb = np.pad(rgb, ((0, 0), (0, pad_h), (0, pad_w)), mode='constant', constant_values=0)
+                height = np.pad(height, ((0, 0), (0, pad_h), (0, pad_w)), mode='constant', constant_values=0)
 
         if self.transform:
             rgb, height = self.transform(rgb, height)

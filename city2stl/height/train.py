@@ -27,7 +27,6 @@ Usage (session):
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -284,9 +283,7 @@ def train(
                     "model_state_dict": model.state_dict(),
                     "optimiser_state_dict": optimiser.state_dict(),
                     "val_loss": val_loss,
-                    # Store a plain dict so torch.load(weights_only=True) works
-                    # without needing custom safe_globals allowlists.
-                    "config": asdict(cfg),
+                    "config": cfg,
                 },
                 output_path,
             )

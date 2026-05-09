@@ -16,7 +16,7 @@ from unittest.mock import patch
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _osm_key(bbox, tol=3.0, min_area=5.0):
+def _osm_key(bbox, tol=2.0, min_area=20.0):
     """Return the expected cache key for the given bbox and defaults."""
     from app.server.core.cache import osm_cache_key
     return osm_cache_key(
@@ -69,7 +69,7 @@ class TestCitiesPostSizeGuard:
     def test_accepts_small_bbox(self, client, tmp_data_dir):
         """A ~2 km bbox should not be rejected by the size guard."""
         empty_fc = {"type": "FeatureCollection", "features": []}
-        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc, "towers": empty_fc, "churches": empty_fc}
+        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
         with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result):
             resp = client.post("/api/cities", json={
@@ -89,7 +89,7 @@ class TestCitiesPostCaching:
 
     def test_result_is_cached_after_first_request(self, client, tmp_data_dir):
         empty_fc = {"type": "FeatureCollection", "features": []}
-        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc, "towers": empty_fc, "churches": empty_fc}
+        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
         with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
             client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
@@ -101,7 +101,7 @@ class TestCitiesPostCaching:
 
     def test_response_includes_cache_key_and_diagonal(self, client, tmp_data_dir):
         empty_fc = {"type": "FeatureCollection", "features": []}
-        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc, "towers": empty_fc, "churches": empty_fc}
+        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
         with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result):
             resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
@@ -113,7 +113,7 @@ class TestCitiesPostCaching:
 
     def test_response_structure_has_expected_geojson_layers(self, client, tmp_data_dir):
         empty_fc = {"type": "FeatureCollection", "features": []}
-        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc, "towers": empty_fc, "churches": empty_fc}
+        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
         with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result):
             resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
@@ -131,88 +131,6 @@ class TestCitiesPostCaching:
             resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
         assert resp.status_code == 500
         assert "OSM fetch failed" in resp.json()["error"]
-
-    def test_stale_cached_city_missing_height_source_is_refetched(self, client, tmp_data_dir):
-        stale_cached = {
-            "buildings": {
-                "type": "FeatureCollection",
-                "features": [{
-                    "type": "Feature",
-                    "geometry": {"type": "Polygon", "coordinates": []},
-                    "properties": {"height_m": 10.0},
-                }],
-            },
-            "roads": EMPTY_FC,
-            "waterways": EMPTY_FC,
-        }
-        fresh = {
-            "buildings": {
-                "type": "FeatureCollection",
-                "features": [{
-                    "type": "Feature",
-                    "geometry": {"type": "Polygon", "coordinates": []},
-                    "properties": {"height_m": 10.0, "height_source": "default"},
-                }],
-            },
-            "roads": EMPTY_FC,
-            "waterways": EMPTY_FC,
-        }
-
-        with patch("app.server.routers.cities.read_osm_cache", return_value=stale_cached), \
-             patch("app.server.routers.cities._fetch_osm_data", return_value=fresh) as mock_fetch, \
-             patch("app.server.routers.cities._enhance_city_data", side_effect=lambda payload, *_: payload):
-            resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
-
-        assert resp.status_code == 200
-        assert mock_fetch.call_count == 1
-        assert resp.json()["buildings"]["features"][0]["properties"]["height_source"] == "default"
-
-    def test_cached_city_defaults_are_auto_enhanced(self, client, tmp_data_dir):
-        cached = {
-            "buildings": {
-                "type": "FeatureCollection",
-                "features": [{
-                    "type": "Feature",
-                    "geometry": {"type": "Polygon", "coordinates": []},
-                    "properties": {"height_m": 10.0, "height_source": "default"},
-                }],
-            },
-            "roads": EMPTY_FC,
-            "waterways": EMPTY_FC,
-            "towers": EMPTY_FC,
-            "churches": EMPTY_FC,
-        }
-        enhanced = {
-            "buildings": {
-                "type": "FeatureCollection",
-                "features": [{
-                    "type": "Feature",
-                    "geometry": {"type": "Polygon", "coordinates": []},
-                    "properties": {"height_m": 48.0, "height_source": "merged"},
-                }],
-            },
-            "roads": EMPTY_FC,
-            "waterways": EMPTY_FC,
-            "height_enhancement": {
-                "source_name": "merged",
-                "providers_used": ["ndsm", "ghsl"],
-                "stats": {"enhanced": 1},
-            },
-        }
-
-        with patch("app.server.routers.cities.read_osm_cache", return_value=cached), \
-             patch("app.server.routers.cities._enhance_city_data", return_value=enhanced) as mock_enhance, \
-             patch("app.server.routers.cities.write_osm_cache") as mock_write, \
-             patch("app.server.routers.cities._fetch_osm_data") as mock_fetch:
-            resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
-
-        assert resp.status_code == 200
-        assert mock_enhance.call_count == 1
-        assert mock_write.call_count == 1
-        assert mock_fetch.call_count == 0
-        body = resp.json()
-        assert body["buildings"]["features"][0]["properties"]["height_source"] == "merged"
-        assert body["height_enhancement"]["stats"]["enhanced"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +215,7 @@ class TestCityRaster:
         bad_grid[3, 7] = np.inf
         bad_grid[5, 2] = -np.inf
 
-        with patch("geo2stl.projections.project_grid", return_value=bad_grid):
+        with patch("app.server.core.projection.project_grid", return_value=bad_grid):
             resp = client.post("/api/cities/raster", json=payload)
 
         assert resp.status_code == 200

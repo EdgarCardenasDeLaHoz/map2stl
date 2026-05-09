@@ -75,6 +75,8 @@ async def _lifespan(app):
     """FastAPI lifespan: run startup tasks, then yield control to the server."""
     import asyncio
     loop = asyncio.get_running_loop()
+    # Generate global DEM overview in background
+    loop.run_in_executor(None, _build_global_dem_cache, False)
     # Cache maintenance
     if _CACHE_AVAILABLE:
         def _startup_cache_maintenance():
@@ -268,23 +270,10 @@ async def serve_static(file_path: str):
             from fastapi import HTTPException
             raise HTTPException(status_code=404)
     mime, _ = _mimetypes.guess_type(full_path)
-    media_type = mime or "application/octet-stream"
-
-    # Ensure browser decodes JS/CSS/text assets as UTF-8 so emoji/symbol
-    # literals in UI templates and scripts are not mojibake on Windows.
-    if media_type.startswith("text/") or media_type in {
-        "application/javascript",
-        "text/javascript",
-        "application/json",
-        "application/xml",
-        "image/svg+xml",
-    }:
-        media_type = f"{media_type}; charset=utf-8"
-
     headers = {}
     if full_path.endswith((".js", ".css")):
         headers["Cache-Control"] = "no-store"
-    return _FileResponse(full_path, media_type=media_type, headers=headers)
+    return _FileResponse(full_path, media_type=mime or "application/octet-stream", headers=headers)
 
 if not os.path.isdir(static_path):
     logger.warning(f"Static path not found: {static_path}")
@@ -334,6 +323,103 @@ def run_server():
     uvicorn.run(app, host="127.0.0.1", port=port)
 
 # Function to detect Jupyter notebook environment
+
+
+def _build_global_dem_cache(force: bool = False) -> bool:
+    """
+    Stitch all elevation tiles for the full globe, downsample to ≤1200 px wide,
+    apply a terrain colormap, and save to ui/static/global_dem.png + meta JSON.
+    Returns True on success.  Safe to call from a background thread.
+    """
+    import json as _json
+    import cv2 as _cv2
+    from PIL import Image as _PILImage
+
+    static_dir = Path(__file__).parent.parent / "client" / "static"
+    static_dir.mkdir(exist_ok=True)
+    png_path = static_dir / "global_dem.png"
+    meta_path = static_dir / "global_dem_meta.json"
+
+    if png_path.exists() and meta_path.exists() and not force:
+        logger.info("Global DEM cache already exists -- skipping generation.")
+        return True
+
+    logger.info("Building global DEM cache (full globe, 90/-90/180/-180) ...")
+    from geo2stl.geo2stl import stitch_tiles_no_rasterio, get_tile_files
+    if not get_tile_files():
+        logger.warning("Global DEM cache: no elevation tiles found.")
+        return False
+
+    img_arr = stitch_tiles_no_rasterio((90.0, -90.0, 180.0, -180.0))
+
+    if img_arr is None or img_arr.size == 0:
+        logger.error("Global DEM cache: stitching returned empty array.")
+        return False
+
+    # Downsample to max 1200 px wide
+    h_orig, w_orig = img_arr.shape[:2]
+    max_w = 1200
+    if w_orig > max_w:
+        new_h = max(1, int(h_orig * max_w / w_orig))
+        img_arr = _cv2.resize(img_arr.astype(np.float32), (max_w, new_h),
+                              interpolation=_cv2.INTER_AREA)
+
+    vmin = float(np.nanmin(img_arr))
+    vmax = float(np.nanmax(img_arr))
+    norm = ((img_arr - vmin) / ((vmax - vmin) or 1.0)).clip(0, 1)
+
+    # 5-stop terrain colormap
+    _stops = [
+        (0.00, (0.10, 0.22, 0.50)),
+        (0.30, (0.20, 0.50, 0.85)),
+        (0.45, (0.20, 0.70, 0.30)),
+        (0.60, (0.75, 0.70, 0.35)),
+        (0.80, (0.55, 0.35, 0.20)),
+        (1.00, (1.00, 1.00, 1.00)),
+    ]
+
+    def _tc(t):
+        for i in range(len(_stops) - 1):
+            t0, c0 = _stops[i]
+            t1, c1 = _stops[i + 1]
+            if t0 <= t <= t1:
+                f = (t - t0) / (t1 - t0)
+                return tuple(c0[j] + f * (c1[j] - c0[j]) for j in range(3))
+        return _stops[-1][1]
+
+    h2, w2 = norm.shape
+    rgba = np.zeros((h2, w2, 4), dtype=np.uint8)
+    flat = norm.ravel()
+    for idx, t in enumerate(flat):
+        r, g, b = _tc(float(t))
+        row, col = divmod(idx, w2)
+        rgba[row, col] = (int(r * 255), int(g * 255), int(b * 255), 220)
+
+    _PILImage.fromarray(rgba, 'RGBA').save(str(png_path), 'PNG')
+    meta = {"north": 90.0, "south": -90.0, "east": 180.0, "west": -180.0,
+            "vmin": vmin, "vmax": vmax}
+    meta_path.write_text(_json.dumps(meta))
+    logger.info(f"Global DEM cache saved: {w2}x{h2} px -> {png_path}")
+    return True
+
+
+@app.get("/api/global_dem_overview")
+async def get_global_dem_overview(regen: bool = False):
+    """Serve the cached global DEM PNG (regenerate if regen=true or file missing)."""
+    from fastapi.responses import FileResponse as _FR
+    import json as _json
+
+    static_dir = Path(__file__).parent.parent / "client" / "static"
+    png_path = static_dir / "global_dem.png"
+    meta_path = static_dir / "global_dem_meta.json"
+
+    if regen or not png_path.exists() or not meta_path.exists():
+        ok = _build_global_dem_cache(force=regen)
+        if not ok:
+            return JSONResponse(content={"error": "Could not build global DEM cache"}, status_code=500)
+
+    return _FR(str(png_path), media_type="image/png",
+               headers={"X-DEM-Meta": meta_path.read_text()})
 
 
 def in_notebook():

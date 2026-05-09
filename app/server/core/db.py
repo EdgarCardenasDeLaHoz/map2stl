@@ -65,7 +65,6 @@ CREATE TABLE IF NOT EXISTS regions (
     base           REAL    DEFAULT 5.0,
     subtract_water INTEGER DEFAULT 1,
     sat_scale      INTEGER DEFAULT 500,
-    tags           TEXT    DEFAULT '',
     CHECK (north > south)
 );
 """
@@ -101,20 +100,10 @@ def init_db(path: Optional[Path] = None) -> None:
     """
     Create the database schema if it does not already exist.
     Safe to call multiple times (all statements use IF NOT EXISTS).
-    Runs lightweight migrations for columns added after initial release.
     """
     p = path or DB_PATH
     with get_db(p) as conn:
         conn.execute(_CREATE_REGIONS)
         conn.execute(_CREATE_REGION_SETTINGS)
-        # Migration: add tags column if it doesn't exist yet
-        try:
-            conn.execute("ALTER TABLE regions ADD COLUMN tags TEXT DEFAULT ''")
-        except sqlite3.OperationalError:
-            pass  # column already exists
-        # Seed: tag Granada as training data city if it exists and has no tags yet
-        conn.execute(
-            "UPDATE regions SET tags='training_city' WHERE name='Granada' AND (tags IS NULL OR tags='')"
-        )
         conn.commit()
     logger.info(f"Database initialised at {p}")

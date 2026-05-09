@@ -1,14 +1,14 @@
 """
 geo2stl/processing.py — Pure raster processing operations for DEM/layer pipelines.
 
-No HTTP, cache, or server dependencies.  Used by geo2stl.dem which
+No HTTP, cache, or server dependencies.  Used by app.server.core.dem which
 re-imports and re-exports these three functions directly (no separate shim file).
 
 -- Relationship to dem.py --
-The three functions here were extracted from geo2stl.dem.  After the
+The three functions here were extracted from app.server.core.dem.  After the
 migration, dem.py replaces its function bodies with:
     from geo2stl.processing import apply_layer_processing, blend_layers, upsample_dem
-Those names are still importable at geo2stl.dem.* so routers keep working.
+Those names are still importable at app.server.core.dem.* so routers keep working.
 """
 
 from __future__ import annotations

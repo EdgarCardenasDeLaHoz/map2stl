@@ -1,12 +1,10 @@
 # JS Module Map — strm2stl
 
-_Last updated: 2026-05-03_
+_Last updated: 2026-04-19_
 
 All modules in `app/client/static/js/modules/`, imported by `main.js` in dependency order.
 Modules expose functions via `window.*` — they do **not** import each other.
 See [arch.md § Module Boundary](arch.md#module-boundary) for detailed coordination rules and entry-point architecture.
-
-Backend note: the 2026-05 router/core/library refactor did not change frontend module boundaries or window-contract surfaces documented here.
 
 ### Module group overview
 
@@ -45,10 +43,10 @@ flowchart LR
 | File | Key exports | Purpose |
 |------|-------------|---------|
 | `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `applyStackedTransform`, `moveLayer`, `setLayerOpacity`, `getLayerOrder` | Single-canvas stacked view, zoom/pan; uses `LAYER_CANVAS_IDS` registry + `_getLayerBuffer`/`_freeLayerBuffer` for GPU memory management |
-| `composite-dem.js` | `computeCompositeDem`, `setupCompositeDemControls` | Additive height contributions + ML feature arrays. City contribution uses `m_per_level` from `#cityMPerLevel` to resolve the correct OSM cache |
+| `composite-dem.js` | `computeCompositeDem`, `setupCompositeDemControls` | Additive height contributions + ML feature arrays |
 | `water-mask.js` | `loadWaterMask`, `renderWaterMask`, `renderEsaLandCover` | Water mask + ESA land cover |
-| `city-overlay.js` | `loadCityData`, `renderCityOverlay`, `window.renderCityOnDEM` | OSM building/road/waterway overlay. Auto-fetched by `loadAllLayers` on region select; status shown in `#stripDotCities` |
-| `city-render.js` | `loadCityRaster`, `_clearCityRasterCache` | City height raster via `/api/cities/raster`. Passes `m_per_level`, `simplify_tolerance`, `min_area` for correct OSM cache lookup |
+| `city-overlay.js` | `loadCityData`, `renderCityOverlay`, `window.renderCityOnDEM` | OSM building/road/waterway overlay |
+| `city-render.js` | `loadCityRaster`, `_clearCityRasterCache` | City rasterization via /api/composite/city-raster |
 | `hydrology-overlay.js` | `window.loadHydrology`, `window.clearHydrology` | HydroRIVERS depression grid fetch + canvas render |
 
 ### `map/` — Map, globe, bbox
@@ -62,7 +60,7 @@ flowchart LR
 | File | Key exports | Purpose |
 |------|-------------|---------|
 | `regions.js` | `loadCoordinates`, `selectCoordinate`, `goToEdit` | Region CRUD, sidebar list, selection |
-| `region-ui.js` | `renderCoordinatesList`, `populateRegionsTable`, `groupRegionsByContinent`, `setupRegionsTable`, `_deleteRegionFromTable`, `_clearRegionCache` | Sidebar views, notes, groups; paginated table (20/page, search + tag filter); inline tag chip editor; delete with confirm; per-region cache clear button; viewport filter toggle (`🗺 In View`) |
+| `region-ui.js` | `renderCoordinatesList`, `populateRegionsTable`, `groupRegionsByContinent`, `setupRegionsTable` | Sidebar views, notes, groups; paginated table (20/page, search filter via `_tablePage`/`_tableSearch`) |
 
 ### `export/` — 3D export
 | File | Key exports | Purpose |
@@ -74,7 +72,7 @@ flowchart LR
 | File | Key exports | Purpose |
 |------|-------------|---------|
 | `view-management.js` | `switchView`, `switchDemSubtab`, `cycleSidebarState` | Tab switching + sidebar state machine |
-| `app-setup.js` | `setupOpacityControls`, `loadAllLayers`, `saveCurrentRegion` | App init wiring helpers. `loadAllLayers` loads DEM, water, satellite, and city data in parallel on region select |
+| `app-setup.js` | `setupOpacityControls`, `loadAllLayers`, `saveCurrentRegion` | App init wiring helpers |
 | `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset` | Preset save/load/apply; `PRESET_VERSION` migration; `_presetSnapshot` revert; `_migratePreset()` fills missing keys from built-in defaults |
 | `curve-editor.js` | `initCurveEditor`, `applyCurveTodem`, `interpolateCurve`, `undoCurve` | Elevation curve editor (spline + undo/redo) |
 | `keyboard-shortcuts.js` | (no named exports) | Keyboard shortcut event listeners |

@@ -32,7 +32,6 @@
         ref="regionImportInput"
         class="hidden"
         type="file"
-        aria-label="Import regions JSON file"
         accept="application/json,.json"
         @change="handleRegionImport"
       />
@@ -53,7 +52,10 @@
       <!-- Region parameters (expanded mode) -->
       <RegionParamsSection :visible="mode === 'expanded'" />
 
-      <!-- Cache management (keep high in panel for quick access) -->
+      <!-- New region -->
+      <NewRegionSection />
+
+      <!-- Cache management -->
       <CacheManagement />
 
     </div>
@@ -68,6 +70,7 @@ import SidebarListView      from './SidebarListView.vue';
 import SidebarEditView      from './SidebarEditView.vue';
 import RegionListTable      from './RegionListTable.vue';
 import RegionParamsSection  from './RegionParamsSection.vue';
+import NewRegionSection     from './NewRegionSection.vue';
 import CacheManagement      from './CacheManagement.vue';
 
 const store = useAppStore();
@@ -101,29 +104,6 @@ function cycleSidebar() {
   // Keep app.js closure in sync until Stage 7
   window.setSidebarState?.(newMode);
   window._setSidebarViews?.(newMode);
-
-  const openBtn = document.getElementById('openSidebarBtn');
-  if (openBtn) openBtn.classList.toggle('hidden', newMode !== 'hidden');
-
-  // Sidebar width changes affect map + DEM stack canvas layout.
-  requestAnimationFrame(() => {
-    window._globalMap?.invalidateSize?.();
-    window.emitStackUpdate?.();
-    window.dispatchEvent(new Event('resize'));
-  });
-  setTimeout(() => {
-    window._globalMap?.invalidateSize?.();
-    window.emitStackUpdate?.();
-  }, 140);
-}
-
-// Bridge for legacy non-Vue handlers (openSidebarBtn in app.js, legacy modules).
-function setSidebarModeFromLegacy(modeFromLegacy: string) {
-  if (modeFromLegacy === 'expanded' || modeFromLegacy === 'normal' || modeFromLegacy === 'hidden') {
-    store.sidebarMode = modeFromLegacy;
-    const openBtn = document.getElementById('openSidebarBtn');
-    if (openBtn) openBtn.classList.toggle('hidden', modeFromLegacy !== 'hidden');
-  }
 }
 
 function exportRegions() {
@@ -144,8 +124,5 @@ async function handleRegionImport(event: Event) {
 onMounted(() => {
   // Start expanded — matches app.js DOMContentLoaded initialisation
   store.sidebarMode = 'expanded';
-  (window as any).__setSidebarModeFromLegacy = setSidebarModeFromLegacy;
-  const openBtn = document.getElementById('openSidebarBtn');
-  if (openBtn) openBtn.classList.add('hidden');
 });
 </script>

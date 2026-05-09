@@ -368,11 +368,9 @@ function renderLandCoverLegend() {
         const config = landCoverConfig[val];
         const colorHex = '#' + config.color.map(c => c.toString(16).padStart(2, '0')).join('');
         html += `<input type="color" value="${colorHex}" data-lc-color="${val}"
-            aria-label="${config.name} color"
             title="${config.name}" style="width:26px;height:22px;border:1px solid #555;padding:1px;cursor:pointer;border-radius:3px;background:none;">`;
         html += `<span style="font-size:11px;color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${config.name}">${config.name}</span>`;
         html += `<input type="number" value="${config.elevation}" data-lc-elev="${val}"
-            aria-label="${config.name} elevation offset"
             step="0.01" min="-1" max="1"
             style="width:100%;background:#3a3a3a;color:#ccc;border:1px solid #444;padding:2px;border-radius:3px;font-size:10px;">`;
     }
@@ -477,9 +475,3 @@ window.renderEsaLandCover = renderEsaLandCover;
 window.renderCombinedView = renderCombinedView;
 window.setupWaterMaskListeners = setupWaterMaskListeners;
 window.clearLastWaterMaskData = () => { lastWaterMaskData = null; window.appState.lastWaterMaskData = null; };
-
-/** Abort any in-flight water mask / ESA land-cover requests. */
-window.cancelWaterLoads = function cancelWaterLoads() {
-    if (_waterMaskAbortController) _waterMaskAbortController.abort();
-    if (_esaAbortController) _esaAbortController.abort();
-};

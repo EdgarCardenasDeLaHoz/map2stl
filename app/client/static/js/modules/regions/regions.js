@@ -35,119 +35,21 @@
  *   switchView(view)                (global function in app.js)
  */
 
+// ── Auto-scale thresholds ────────────────────────────────────────────────────
 
-// === Constants ===
-const DEM_DIM_SMALL_KM = 10;
-const DEM_DIM_MEDIUM_KM = 50;
-const DEM_DIM_LARGE_KM = 200;
-const DEM_DIM_SMALL = 600;
-const DEM_DIM_MEDIUM = 500;
-const DEM_DIM_LARGE = 300;
-const DEM_DIM_DEFAULT = 600;
-const REGION_BBOX_OPACITY_DEFAULT = 0.15;
-const REGION_BBOX_HIDDEN_STORAGE_KEY = 'strm2stl_hiddenRegionBboxes';
-const REGION_BBOX_OPACITY_STORAGE_KEY = 'strm2stl_regionBboxOpacity';
-
-// Breakpoint tables used by selectCoordinate to auto-set DEM dim (and water/ESA output resolution)
+/**
+ * Breakpoint tables used by selectCoordinate to auto-set DEM dim (and
+ * water/ESA output resolution, also in pixels) based on the selected
+ * region's diagonal distance. Each entry applies when diagKm <= maxKm.
+ */
 const AUTO_SCALE = {
     dim: [
-        { maxKm: DEM_DIM_SMALL_KM, dim: DEM_DIM_SMALL },
-        { maxKm: DEM_DIM_MEDIUM_KM, dim: DEM_DIM_MEDIUM },
-        { maxKm: DEM_DIM_LARGE_KM, dim: DEM_DIM_LARGE },
-        { maxKm: Infinity, dim: DEM_DIM_DEFAULT },
+        { maxKm: 10, dim: 600 },
+        { maxKm: 50, dim: 500 },
+        { maxKm: 200, dim: 300 },
+        { maxKm: Infinity, dim: 600 },
     ],
 };
-
-let _hiddenRegionBboxes = new Set();
-let _regionBboxOpacity = REGION_BBOX_OPACITY_DEFAULT;
-let _regionLayerIndex = new Map();
-
-function _loadRegionBboxPrefs() {
-    try {
-        const hiddenRaw = localStorage.getItem(REGION_BBOX_HIDDEN_STORAGE_KEY);
-        if (hiddenRaw) {
-            const parsed = JSON.parse(hiddenRaw);
-            if (Array.isArray(parsed)) _hiddenRegionBboxes = new Set(parsed.filter(Boolean));
-        }
-    } catch (_) {}
-
-    try {
-        const opacityRaw = parseFloat(localStorage.getItem(REGION_BBOX_OPACITY_STORAGE_KEY) || '');
-        if (Number.isFinite(opacityRaw)) {
-            _regionBboxOpacity = Math.max(0, Math.min(1, opacityRaw));
-        }
-    } catch (_) {}
-}
-
-function _saveHiddenRegionBboxes() {
-    try {
-        localStorage.setItem(REGION_BBOX_HIDDEN_STORAGE_KEY, JSON.stringify([..._hiddenRegionBboxes]));
-    } catch (_) {}
-}
-
-function _saveRegionBboxOpacity() {
-    try {
-        localStorage.setItem(REGION_BBOX_OPACITY_STORAGE_KEY, String(_regionBboxOpacity));
-    } catch (_) {}
-}
-
-function _applyRegionBboxStyle(entry) {
-    if (!entry?.rect) return;
-    entry.rect.setStyle({
-        color: entry.color,
-        fillColor: entry.color,
-        opacity: 1,
-        fillOpacity: _regionBboxOpacity,
-    });
-}
-
-function _shouldShowRegionBbox(name) {
-    return (window.getBboxLayersVisible?.() ?? true) && !_hiddenRegionBboxes.has(name);
-}
-
-function syncRegionBboxVisibility() {
-    const preloadedLayer = window.getPreloadedLayer?.();
-    const editMarkersLayer = window.getEditMarkersLayer?.();
-    if (!preloadedLayer) return;
-
-    preloadedLayer.clearLayers();
-    if (editMarkersLayer) editMarkersLayer.clearLayers();
-
-    for (const [name, entry] of _regionLayerIndex.entries()) {
-        _applyRegionBboxStyle(entry);
-        if (!_shouldShowRegionBbox(name)) continue;
-        preloadedLayer.addLayer(entry.rect);
-        if (editMarkersLayer && entry.editMarker) editMarkersLayer.addLayer(entry.editMarker);
-    }
-}
-
-window.syncRegionBboxVisibility = syncRegionBboxVisibility;
-window.isRegionBboxHidden = function isRegionBboxHidden(name) {
-    return _hiddenRegionBboxes.has(name);
-};
-window.setRegionBboxHidden = function setRegionBboxHidden(name, hidden) {
-    if (!name) return;
-    if (hidden) _hiddenRegionBboxes.add(name);
-    else _hiddenRegionBboxes.delete(name);
-    _saveHiddenRegionBboxes();
-    syncRegionBboxVisibility();
-    window.renderSidebarTable?.();
-    window.populateRegionsTable?.();
-};
-window.toggleRegionBboxHidden = function toggleRegionBboxHidden(name) {
-    window.setRegionBboxHidden?.(name, !_hiddenRegionBboxes.has(name));
-};
-window.getRegionBboxOpacity = function getRegionBboxOpacity() {
-    return _regionBboxOpacity;
-};
-window.setRegionBboxOpacity = function setRegionBboxOpacity(opacity) {
-    const next = Math.max(0, Math.min(1, Number(opacity)));
-    _regionBboxOpacity = Number.isFinite(next) ? next : _regionBboxOpacity;
-    _saveRegionBboxOpacity();
-    for (const entry of _regionLayerIndex.values()) _applyRegionBboxStyle(entry);
-};
-
-_loadRegionBboxPrefs();
 
 // ── loadCoordinates ─────────────────────────────────────────────────────────
 
@@ -184,7 +86,6 @@ async function loadCoordinates() {
         if (preloadedLayer) {
             preloadedLayer.clearLayers();
             if (editMarkersLayer) editMarkersLayer.clearLayers();
-            _regionLayerIndex = new Map();
 
             // Calculate area for each region and sort by size descending
             const sortedRegions = coordinatesData.map((region, originalIndex) => {
@@ -205,9 +106,8 @@ async function loadCoordinates() {
                     weight: 2,
                     fill: true,
                     fillColor: colorObj.color,
-                    fillOpacity: _regionBboxOpacity
+                    fillOpacity: 0.15
                 });
-                rect._regionName = region.name;
 
                 // Tag rectangle with continent for visibility toggling
                 const cLat = (region.north + region.south) / 2;
@@ -215,17 +115,7 @@ async function loadCoordinates() {
                 rect._continentName = detectContinent(cLat, cLon);
 
                 // Click selects the region (stays on Explore)
-                rect.on('click', () => {
-                    const liveData = window.getCoordinatesData?.() || [];
-                    const liveIndex = liveData.findIndex(r =>
-                        r.name === region.name
-                        && Number(r.north) === Number(region.north)
-                        && Number(r.south) === Number(region.south)
-                        && Number(r.east) === Number(region.east)
-                        && Number(r.west) === Number(region.west)
-                    );
-                    if (liveIndex >= 0) window.selectCoordinate(liveIndex);
-                });
+                rect.on('click', () => window.selectCoordinate(originalIndex));
 
                 // Edit button pinned at the top-right corner of each bbox (hidden until hover)
                 const editIcon = L.divIcon({
@@ -240,27 +130,13 @@ async function loadCoordinates() {
                     keyboard: false,
                     zIndexOffset: 500
                 });
-                editMarker.on('click', (evt) => {
-                    try { L.DomEvent.stopPropagation(evt); } catch (_) {}
-                    const liveData = window.getCoordinatesData?.() || [];
-                    const liveIndex = liveData.findIndex(r =>
-                        r.name === region.name
-                        && Number(r.north) === Number(region.north)
-                        && Number(r.south) === Number(region.south)
-                        && Number(r.east) === Number(region.east)
-                        && Number(r.west) === Number(region.west)
-                    );
-                    if (liveIndex >= 0) window.goToEdit(liveIndex);
-                });
+                editMarker.on('click', () => window.goToEdit(originalIndex));
                 editMarker._regionBounds = L.latLngBounds(bounds[0], bounds[1]);
-                editMarker._regionName = region.name;
+                if (editMarkersLayer) editMarkersLayer.addLayer(editMarker);
 
                 // Hover: show tooltip + reveal Edit button
                 rect.on('mouseover', function (e) {
-                    const rawLabel = (region.label || '').trim();
-                    const label = (rawLabel && rawLabel.toLowerCase() !== 'coorlist')
-                        ? rawLabel
-                        : region.name;
+                    const label = region.label || region.name;
                     rect.unbindTooltip();
                     rect.bindTooltip(label, { sticky: false, direction: 'top', offset: [0, -4] });
                     rect.openTooltip(e.latlng);
@@ -281,14 +157,8 @@ async function loadCoordinates() {
                     editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.remove('visible');
                 });
 
-                _regionLayerIndex.set(region.name, {
-                    rect,
-                    editMarker,
-                    color: colorObj.color,
-                });
+                preloadedLayer.addLayer(rect);
             });
-
-            syncRegionBboxVisibility();
         }
 
         // Add markers to globe
@@ -379,24 +249,16 @@ function createGlobeMarker(lat, lng, color = 0xff0000) {
  *     breakpoints; never lowers a user's explicit dim choice.
  *  6. Calls `window.updateRegionParamsTable` if the sidebar is expanded.
  *  7. Calls `map.fitBounds` (wrapped in try/catch — fails silently if map is hidden).
- *  8. If the Edit (DEM) view is visible and `skipAutoLoad` is false: fires `loadDEM`
- *     → then `loadWaterMask`, `loadSatelliteImage`, `loadEsaLandCover`, `loadSatelliteRGBImage`,
- *     `loadHydrology` in parallel, and `loadCityRaster` / `loadCityData` if diagKm ≤ 10.
- *     goToEdit() passes `{ skipAutoLoad: true }` to prevent double loading.
+ *  8. If the Edit (DEM) view is visible: fires `loadDEM` → then `loadWaterMask`,
+ *     `loadSatelliteImage`, and optionally `loadCityData` (only if diagKm ≤ 15) in parallel.
  *  9. Calls `window.appState._updateWorkflowStepper`.
  *
  * @param {number} index - Index into `coordinatesData` (from `window.getCoordinatesData()`)
- * @param {{ skipAutoLoad?: boolean }} [opts] - `skipAutoLoad`: skip the DEM-view auto-reload.
- *   Pass `true` when the caller will load layers itself (e.g. goToEdit).
  * @returns {Promise<void>}
  */
-async function selectCoordinate(index, { skipAutoLoad = false } = {}) {
+async function selectCoordinate(index) {
     const coordinatesData = window.getCoordinatesData?.() || [];
     const selectedRegion = coordinatesData[index];
-    if (!selectedRegion) {
-        window.showToast?.('That region is no longer available. Please refresh the list.', 'warning');
-        return;
-    }
     window.setSelectedRegion?.(selectedRegion);
     window.appState.selectedRegion = selectedRegion;
 
@@ -404,16 +266,7 @@ async function selectCoordinate(index, { skipAutoLoad = false } = {}) {
     window.setBboxInputValues?.(selectedRegion.north, selectedRegion.south,
         selectedRegion.east, selectedRegion.west);
 
-    // CRITICAL: Abort any in-flight layer loads from the previous region before
-    // clearing state, to prevent stale responses from rendering into the new region's
-    // view after clearLayerDisplays() has already shown placeholder content.
-    window.cancelDemLoads?.();
-    window.cancelWaterLoads?.();
-    window.cancelHydroLoad?.();
-    window.cancelCityRasterLoad?.();
-    window.cancelCityLoad?.();
-
-    // Clear cached layer data and clear visual displays when region changes
+    // CRITICAL: Clear cached layer data and clear visual displays when region changes
     // Prevents stale water mask / land cover / DEM from showing with new region
     clearLayerCache();
     clearLayerDisplays();
@@ -429,10 +282,6 @@ async function selectCoordinate(index, { skipAutoLoad = false } = {}) {
     // legacy coordinates.json parameters, then hard-coded defaults.
     // Await so settings are applied before DEM is loaded below.
     const hasSaved = await window.loadAndApplyRegionSettings?.(selectedRegion.name);
-    if (!hasSaved) {
-        const clipNansEl = document.getElementById('paramClipNans');
-        if (clipNansEl) clipNansEl.checked = true;
-    }
     if (!hasSaved && selectedRegion.parameters) {
         const rp = selectedRegion.parameters;
         const _setEl = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
@@ -524,42 +373,16 @@ async function selectCoordinate(index, { skipAutoLoad = false } = {}) {
         try { map.fitBounds(bounds, { padding: [20, 20] }); } catch (e) { }
     }
 
+    // NOTE: Do NOT auto-load layers here. selectCoordinate() only updates selection
+    // state. Layer loading is the caller's responsibility (goToEdit, loadAllLayers, etc.)
+    // Loading here causes duplicate requests when goToEdit() calls selectCoordinate()
+    // and then loadDEM() itself.
+
     window.appState._updateWorkflowStepper?.();
 
     // Emit on the event bus so any module can react to region selection
     // without needing a direct function reference.
     window.events?.emit(window.EV?.REGION_SELECTED, index, selectedRegion);
-
-    // If the DEM view is already open and the caller is not about to load layers
-    // itself (e.g. goToEdit passes skipAutoLoad:true), reload all layers now so
-    // the user sees the new region without having to press Load DEM manually.
-    if (!skipAutoLoad) {
-        const demContainer = document.getElementById('demContainer');
-        if (demContainer && !demContainer.classList.contains('hidden')) {
-            const r = selectedRegion;
-            window.loadDEM?.().then(() => {
-                const tasks = [
-                    window.loadWaterMask?.(),
-                    window.loadSatelliteImage?.(),
-                    window.loadEsaLandCover?.(),
-                    window.loadSatelliteRGBImage?.(),
-                    window.loadHydrology?.(),
-                ];
-                const diagKm = (r && window.haversineDiagKm)
-                    ? window.haversineDiagKm(r.north, r.south, r.east, r.west)
-                    : 0;
-                if (diagKm > 0 && diagKm <= 10) {
-                    const bldgToggle = document.getElementById('layerBuildingsToggle');
-                    if (bldgToggle && !bldgToggle.checked) bldgToggle.checked = true;
-                    if (window.loadCityRaster) tasks.push(window.loadCityRaster());
-                    else if (window.loadCityData) tasks.push(window.loadCityData());
-                }
-                return Promise.all(tasks);
-            }).catch(err => {
-                console.error('Auto-reload error on region switch:', err);
-            });
-        }
-    }
 }
 window.selectCoordinate = selectCoordinate;
 
@@ -571,15 +394,11 @@ window.selectCoordinate = selectCoordinate;
  * @param {number} index - Index into `coordinatesData`
  */
 async function goToEdit(index) {
-    const coordinatesData = window.getCoordinatesData?.() || [];
-    if (index < 0 || index >= coordinatesData.length) {
-        window.showToast?.('Region no longer exists in the current list', 'warning');
-        return;
-    }
-    await window.selectCoordinate(index, { skipAutoLoad: true });
+    await window.selectCoordinate(index);
     switchView('dem');
 
     // Populate the compact sidebar edit panel
+    const coordinatesData = window.getCoordinatesData?.() || [];
     const region = coordinatesData[index];
     if (region) {
         const nameEl = document.getElementById('sbRegionName');
@@ -623,14 +442,8 @@ async function goToEdit(index) {
             window.loadSatelliteRGBImage?.(),
             window.loadHydrology?.(),
         ];
-        const r = region || window.appState?.selectedRegion;
-        const diagKm = (r && window.haversineDiagKm)
-            ? window.haversineDiagKm(r.north, r.south, r.east, r.west)
-            : 0;
-        if (diagKm > 0 && diagKm <= 10) {
-            // Ensure buildings toggle is on so loadCityData fetches polygon layers
-            const bldgToggle = document.getElementById('layerBuildingsToggle');
-            if (bldgToggle && !bldgToggle.checked) bldgToggle.checked = true;
+        const diagKm = window.appState?.haversineDiagKm?.();
+        if (diagKm && diagKm <= 15) {
             if (window.loadCityRaster) tasks.push(window.loadCityRaster());
             else if (window.loadCityData) tasks.push(window.loadCityData());
         }

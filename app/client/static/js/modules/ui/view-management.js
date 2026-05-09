@@ -29,6 +29,7 @@ window.switchView = function switchView(view) {
     const compareContainer = document.getElementById('compareContainer');
     const regionsContainer = document.getElementById('regionsContainer');
     const cacheContainer   = document.getElementById('cacheInventoryContainer');
+    const newRegionSection = document.getElementById('newRegionSection');
     const tabs             = document.querySelectorAll('.tab');
 
     // Restore sidebar visibility (may have been hidden in model view)
@@ -51,6 +52,11 @@ window.switchView = function switchView(view) {
     }
     if (cacheContainer) {
         cacheContainer.classList.add('hidden');
+    }
+
+    // Show/hide new region section (only visible in 2D Map view)
+    if (newRegionSection) {
+        newRegionSection.style.display = view === 'map' ? 'block' : 'none';
     }
 
     // Remove active from tabs

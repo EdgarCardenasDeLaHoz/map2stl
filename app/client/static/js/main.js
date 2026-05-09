@@ -35,7 +35,6 @@ import './modules/map/map-globe.js';
 import './modules/regions/regions.js';
 import './modules/map/bbox-panel.js';
 import './modules/ui/app-setup.js';
-import './modules/ui/cache-inventory.js';
 import './modules/ui/keyboard-shortcuts.js';
 import './modules/events/event-listeners-map.js';
 import './modules/events/event-listeners-export.js';
@@ -44,10 +43,3 @@ import './modules/events/event-listeners.js';
 import './modules/ui/view-management.js';
 import './modules/dem/dem-main.js';
 import './app.js';
-
-window.addEventListener('error', (event) => {
-	const message = String(event?.message || '');
-	if (!message.includes('ResizeObserver loop completed with undelivered notifications')) return;
-	event.preventDefault?.();
-	event.stopImmediatePropagation?.();
-});

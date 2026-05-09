@@ -29,37 +29,205 @@ POST /api/composite/hydrology-merge
   Merge river depression values into a DEM elevation grid.
 """
 
-from app.server.core.validation import model_to_dict, run_sync
+from app.server.core.validation import run_sync, METRES_PER_DEGREE
 from app.server.core.cache import make_cache_key, osm_cache_key, read_array_cache, write_array_cache, read_osm_cache
-from app.server.schemas import CompositeCityRasterRequest, HydrologyMergeRequest, MergeRequest
+from app.server.schemas import HydrologyMergeRequest, MergeRequest
+from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter
 import numpy as np
 import logging
-from city2stl.rasterize import rasterize_composite_layers
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["composite"])
 
 
+class CompositeCityRasterRequest(BaseModel):
+    north:  float
+    south:  float
+    east:   float
+    west:   float
+    width:  int = 512
+    height: int = 512
+    projection: str = "none"
+    clip_nans: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Coordinate helpers
+# ---------------------------------------------------------------------------
+
+def _make_geo_to_px(N, S, E, W, PW, PH):
+    """Return (geo_to_px, coords_to_px) closures for this bbox/canvas."""
+    lat_span = N - S
+    lon_span = E - W
+
+    def geo_to_px(lon, lat):
+        x = (lon - W) / lon_span * PW
+        y = (N - lat) / lat_span * PH
+        return (x, y)
+
+    def coords_to_px(coords):
+        return [geo_to_px(lon, lat) for lon, lat in coords]
+
+    return geo_to_px, coords_to_px
+
+
+# ---------------------------------------------------------------------------
+# Per-layer rasterizers
+# ---------------------------------------------------------------------------
+
+def _rasterize_buildings(features, coords_to_px, PW, PH):
+    """Return a float32 array (PH×PW) with per-pixel building height in metres."""
+    from PIL import Image, ImageDraw
+    arr = np.zeros((PH, PW), dtype=np.float32)
+    for feat in features:
+        geom = feat.get("geometry") or {}
+        h_m = float((feat.get("properties") or {}).get("height_m") or 10)
+        rings = []
+        if geom.get("type") == "Polygon":
+            rings = [geom["coordinates"][0]]
+        elif geom.get("type") == "MultiPolygon":
+            rings = [p[0] for p in geom["coordinates"]]
+        for ring in rings:
+            if not ring:
+                continue
+            px = coords_to_px(ring)
+            mask = Image.new("1", (PW, PH), 0)
+            ImageDraw.Draw(mask).polygon(px, fill=1)
+            arr += np.array(mask, dtype=np.float32) * h_m
+    return arr
+
+
+def _rasterize_roads(features, coords_to_px, PW, PH, m_per_px):
+    """Return a binary float32 array (PH×PW) marking road pixels."""
+    from PIL import Image, ImageDraw
+    img = Image.new("1", (PW, PH), 0)
+    draw = ImageDraw.Draw(img)
+    for feat in features:
+        geom = feat.get("geometry") or {}
+        w_m = float((feat.get("properties") or {}).get("road_width_m") or 6)
+        w_px = max(1, round(w_m / m_per_px))
+        lines = []
+        if geom.get("type") == "LineString":
+            lines = [geom["coordinates"]]
+        elif geom.get("type") == "MultiLineString":
+            lines = geom["coordinates"]
+        for line in lines:
+            px = coords_to_px(line)
+            if len(px) >= 2:
+                draw.line(px, fill=1, width=w_px)
+    return np.array(img, dtype=np.float32)
+
+
+def _rasterize_waterways(features, coords_to_px, PW, PH, m_per_px):
+    """Return a binary float32 array (PH×PW) marking waterway pixels."""
+    from PIL import Image, ImageDraw
+    img = Image.new("1", (PW, PH), 0)
+    draw = ImageDraw.Draw(img)
+    w_px = max(2, round(4.0 / m_per_px))
+    for feat in features:
+        geom = feat.get("geometry") or {}
+        if geom.get("type") == "LineString":
+            px = coords_to_px(geom["coordinates"])
+            if len(px) >= 2:
+                draw.line(px, fill=1, width=w_px)
+        elif geom.get("type") == "MultiLineString":
+            for line in geom["coordinates"]:
+                px = coords_to_px(line)
+                if len(px) >= 2:
+                    draw.line(px, fill=1, width=w_px)
+        elif geom.get("type") == "Polygon":
+            px = coords_to_px(geom["coordinates"][0])
+            if px:
+                draw.polygon(px, fill=1)
+        elif geom.get("type") == "MultiPolygon":
+            for poly in geom["coordinates"]:
+                px = coords_to_px(poly[0])
+                if px:
+                    draw.polygon(px, fill=1)
+    return np.array(img, dtype=np.float32)
+
+
+def _rasterize_walls(features, coords_to_px, PW, PH, m_per_px):
+    """Return a float32 array (PH×PW) with per-pixel wall height in metres."""
+    from PIL import Image, ImageDraw
+    arr = np.zeros((PH, PW), dtype=np.float32)
+    for feat in features:
+        geom = feat.get("geometry") or {}
+        h_m = float((feat.get("properties") or {}).get("height_m") or 5)
+        w_px = max(1, round(2.0 / m_per_px))
+        lines = []
+        if geom.get("type") == "LineString":
+            lines = [geom["coordinates"]]
+        elif geom.get("type") == "MultiLineString":
+            lines = geom["coordinates"]
+        for line in lines:
+            px = coords_to_px(line)
+            if len(px) >= 2:
+                mask = Image.new("1", (PW, PH), 0)
+                ImageDraw.Draw(mask).line(px, fill=1, width=w_px)
+                arr += np.array(mask, dtype=np.float32) * h_m
+    return arr
+
+
+# ---------------------------------------------------------------------------
+# Coordinator
+# ---------------------------------------------------------------------------
+
 def _rasterize_city(req: CompositeCityRasterRequest) -> dict:
-    """Synchronous rasterization wrapper — called via run_in_executor."""
-    osm_key = osm_cache_key(req.north, req.south, req.east, req.west,
-                            req.simplify_tolerance, req.min_area,
-                            req.m_per_level)
+    """Synchronous rasterization — called via run_in_executor."""
+    N, S, E, W = req.north, req.south, req.east, req.west
+    PW, PH = req.width, req.height
+    lat_span = N - S
+    lon_span = E - W
+
+    def _empty_result():
+        z = [0.0] * (PW * PH)
+        return {"buildings": z, "roads": z, "waterways": z, "walls": z,
+                "width": PW, "height": PH}
+
+    if lat_span <= 0 or lon_span <= 0:
+        return _empty_result()
+
+    lat_mid = (N + S) / 2
+    m_per_px = (lon_span * np.cos(np.radians(lat_mid))
+                * METRES_PER_DEGREE) / PW
+
+    _, coords_to_px = _make_geo_to_px(N, S, E, W, PW, PH)
+
+    osm_key = osm_cache_key(N, S, E, W)
     osm_data = read_osm_cache(osm_key)
     if not osm_data:
         logger.debug(
             f"No OSM cache for composite city-raster ({osm_key[:8]}...)")
-    return rasterize_composite_layers(
-        north=req.north,
-        south=req.south,
-        east=req.east,
-        west=req.west,
-        width=req.width,
-        height=req.height,
-        osm_data=osm_data,
+        return _empty_result()
+
+    building_arr = _rasterize_buildings(
+        (osm_data.get("buildings") or {}).get("features") or [],
+        coords_to_px, PW, PH,
     )
+    road_arr = _rasterize_roads(
+        (osm_data.get("roads") or {}).get("features") or [],
+        coords_to_px, PW, PH, m_per_px,
+    )
+    ww_arr = _rasterize_waterways(
+        (osm_data.get("waterways") or {}).get("features") or [],
+        coords_to_px, PW, PH, m_per_px,
+    )
+    wall_arr = _rasterize_walls(
+        (osm_data.get("walls") or {}).get("features") or [],
+        coords_to_px, PW, PH, m_per_px,
+    )
+
+    return {
+        "buildings":  building_arr.ravel().tolist(),
+        "roads":      road_arr.ravel().tolist(),
+        "waterways":  ww_arr.ravel().tolist(),
+        "walls":      wall_arr.ravel().tolist(),
+        "width":      PW,
+        "height":     PH,
+    }
 
 
 @router.post("/api/composite/city-raster")
@@ -74,8 +242,7 @@ async def get_city_raster(req: CompositeCityRasterRequest):
     comp_key = make_cache_key(
         "composite", req.north, req.south, req.east, req.west,
         {"w": req.width, "h": req.height,
-         "proj": req.projection, "cn": req.clip_nans,
-         "mpl": req.m_per_level, "tol": req.simplify_tolerance}
+         "proj": req.projection, "cn": req.clip_nans}
     )
     cached = read_array_cache("composite", comp_key)
     if cached:
@@ -130,7 +297,7 @@ async def merge_dem_layers(req: MergeRequest):
     Merge multiple elevation/mask layers into one composite DEM.
     Each layer specifies a source, resolution, per-layer processing, and a blend mode.
     """
-    from geo2stl.dem import (
+    from app.server.core.dem import (
         fetch_layer_data, apply_layer_processing, blend_layers,
     )
     from app.server.core.validation import b64_encode
@@ -216,7 +383,7 @@ async def merge_hydrology(req: HydrologyMergeRequest):
     Both arrays must have identical dimensions. River depression values
     (negative) are added to the DEM via element-wise minimum.
     """
-    from geo2stl.hydrology import merge_rivers_with_dem
+    from app.server.core.hydrology import merge_rivers_with_dem
     from app.server.core.validation import b64_encode
     from app.server.config import TEST_MODE
 
@@ -228,7 +395,7 @@ async def merge_hydrology(req: HydrologyMergeRequest):
     # Settings-only mode: resolve DEM from cache
     if not dem_values and req.bbox:
         from app.server.core.export import resolve_dem_from_cache
-        req_dict = model_to_dict(req)
+        req_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
         resolved = resolve_dem_from_cache(req_dict)
         if resolved:
             dem_values_list, h, w = resolved
