@@ -112,7 +112,7 @@ class TestDepthAnythingInference:
         return pipe
 
     def test_output_shape_matches_input(self):
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         rgb = _make_rgb(64, 64)
         with patch.object(_pm, "_load_da2", return_value=self._mock_pipeline(64, 64)):
@@ -120,7 +120,7 @@ class TestDepthAnythingInference:
         assert result.shape == (64, 64)
 
     def test_output_float32(self):
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         rgb = _make_rgb(32, 32)
         with patch.object(_pm, "_load_da2", return_value=self._mock_pipeline(32, 32)):
@@ -128,7 +128,7 @@ class TestDepthAnythingInference:
         assert result.dtype == np.float32
 
     def test_output_normalised_0_1(self):
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         rgb = _make_rgb(32, 32)
         with patch.object(_pm, "_load_da2", return_value=self._mock_pipeline(32, 32)):
@@ -138,7 +138,7 @@ class TestDepthAnythingInference:
 
     def test_resize_applied_when_model_output_differs(self):
         """Pipeline returns (8, 8) depth; should be resized to (32, 32) input."""
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         rgb = _make_rgb(32, 32)
         small_depth = {"predicted_depth": np.full((8, 8), 0.5, dtype=np.float32)}
@@ -160,7 +160,7 @@ class TestPredictPretrained:
         return MagicMock(return_value=mock_result)
 
     def test_returns_height_result(self):
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         h, w = 32, 32
         rgb = _make_rgb(h, w)
@@ -170,7 +170,7 @@ class TestPredictPretrained:
         assert isinstance(result, HeightResult)
 
     def test_raster_shape_matches_input(self):
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         h, w = 48, 64
         rgb = _make_rgb(h, w)
@@ -181,7 +181,7 @@ class TestPredictPretrained:
         assert result.confidence.shape == (h, w)
 
     def test_source_name_is_depth_anything_v2(self):
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         h, w = 16, 16
         rgb = _make_rgb(h, w)
@@ -190,7 +190,7 @@ class TestPredictPretrained:
         assert result.source_name == "depth_anything_v2"
 
     def test_no_known_heights_still_produces_result(self):
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         h, w = 16, 16
         rgb = _make_rgb(h, w)
@@ -199,7 +199,7 @@ class TestPredictPretrained:
         assert not np.any(np.isnan(result.raster))
 
     def test_confidence_non_negative(self):
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         h, w = 16, 16
         rgb = _make_rgb(h, w)
@@ -210,7 +210,7 @@ class TestPredictPretrained:
         assert float(result.confidence.max()) <= 1.0
 
     def test_resolution_m_positive(self):
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         h, w = 16, 16
         rgb = _make_rgb(h, w)
@@ -219,7 +219,7 @@ class TestPredictPretrained:
         assert result.resolution_m > 0.0
 
     def test_raster_no_nan_after_calibration(self):
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         h, w = 32, 32
         rgb = _make_rgb(h, w)
@@ -260,7 +260,7 @@ class TestPredictUNet:
         return ckpt
 
     def test_unet_returns_height_result(self, tmp_path):
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         ckpt = self._make_fake_checkpoint(tmp_path)
         h, w = 32, 32
@@ -312,7 +312,7 @@ class TestMissingDependencies:
     def test_load_da2_raises_helpful_error_without_transformers(self):
         import sys
         from importlib import import_module
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         # Remove _da2_model singleton so the function tries to import
         _pm._da2_model = None
@@ -323,7 +323,7 @@ class TestMissingDependencies:
 
     def test_build_unet_raises_without_torch(self):
         import sys
-        from app.server.core.height import predict as _pm
+        from city2stl.height.predict import predict as _pm
 
         with patch.dict(sys.modules, {"torch": None, "timm": None,
                                        "segmentation_models_pytorch": None}):

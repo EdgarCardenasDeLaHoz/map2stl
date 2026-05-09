@@ -50,7 +50,7 @@ class TestGradientLoss:
     @torch_required
     def test_perfect_prediction_gives_zero_gradient_loss(self):
         import torch
-        from app.server.core.height.train import gradient_loss
+        from city2stl.height.train import gradient_loss
 
         t = torch.ones(2, 1, 16, 16)
         loss = gradient_loss(t, t)
@@ -59,7 +59,7 @@ class TestGradientLoss:
     @torch_required
     def test_loss_positive_for_different_tensors(self):
         import torch
-        from app.server.core.height.train import gradient_loss
+        from city2stl.height.train import gradient_loss
 
         rng = torch.manual_seed(0)
         pred = torch.rand(2, 1, 16, 16)
@@ -70,7 +70,7 @@ class TestGradientLoss:
     @torch_required
     def test_loss_is_scalar(self):
         import torch
-        from app.server.core.height.train import gradient_loss
+        from city2stl.height.train import gradient_loss
 
         pred = torch.zeros(1, 1, 8, 8)
         target = torch.ones(1, 1, 8, 8)
@@ -86,7 +86,7 @@ class TestCombinedLoss:
     @torch_required
     def test_combined_loss_zero_for_perfect_prediction(self):
         import torch
-        from app.server.core.height.train import combined_loss
+        from city2stl.height.train import combined_loss
 
         t = torch.full((2, 1, 8, 8), 10.0)
         loss = combined_loss(t, t)
@@ -97,7 +97,7 @@ class TestCombinedLoss:
         """With grad_weight > 0 and different tensors, combined > pure L1."""
         import torch
         import torch.nn.functional as F
-        from app.server.core.height.train import combined_loss
+        from city2stl.height.train import combined_loss
 
         torch.manual_seed(0)
         pred = torch.rand(1, 1, 8, 8)
@@ -114,7 +114,7 @@ class TestCombinedLoss:
 class TestTileDataset:
     @torch_required
     def test_length(self, tmp_path):
-        from app.server.core.height.train import TileDataset
+        from city2stl.height.train import TileDataset
 
         paths = _make_tiles(tmp_path, n=5)
         ds = TileDataset(paths, augment=False)
@@ -122,7 +122,7 @@ class TestTileDataset:
 
     @torch_required
     def test_getitem_shapes(self, tmp_path):
-        from app.server.core.height.train import TileDataset
+        from city2stl.height.train import TileDataset
 
         tile_size = 8
         paths = _make_tiles(tmp_path, n=2, tile_size=tile_size)
@@ -134,7 +134,7 @@ class TestTileDataset:
     @torch_required
     def test_getitem_dtype_float32(self, tmp_path):
         import torch
-        from app.server.core.height.train import TileDataset
+        from city2stl.height.train import TileDataset
 
         paths = _make_tiles(tmp_path, n=1)
         ds = TileDataset(paths, augment=False)
@@ -146,7 +146,7 @@ class TestTileDataset:
     def test_augmentation_changes_output(self, tmp_path):
         """Augmentation should sometimes change the tensor values."""
         import torch
-        from app.server.core.height.train import TileDataset
+        from city2stl.height.train import TileDataset
 
         paths = _make_tiles(tmp_path, n=1, tile_size=8)
         ds_no_aug = TileDataset(paths, augment=False)
@@ -176,8 +176,8 @@ class TestTrainSmoke:
     def test_one_epoch_completes_and_saves_checkpoint(self, tmp_path):
         import torch
         import torch.nn as nn
-        from app.server.core.height.train import TrainConfig, train
-        from app.server.core.height import predict as _pm
+        from city2stl.height.train import TrainConfig, train
+        from city2stl.height.predict import predict as _pm
 
         # Use a trivially small model so we don't need EfficientNet
         class _TinyUNet(nn.Module):
@@ -202,7 +202,7 @@ class TestTrainSmoke:
 
     @torch_required
     def test_empty_tile_paths_raises(self, tmp_path):
-        from app.server.core.height.train import TrainConfig, train
+        from city2stl.height.train import TrainConfig, train
 
         ckpt = tmp_path / "model.pt"
         cfg = TrainConfig(epochs=1, batch_size=2)
@@ -220,8 +220,8 @@ class TestCheckpointRoundtrip:
         """Checkpoint saved by train() can be loaded by _unet_inference."""
         import torch
         import torch.nn as nn
-        from app.server.core.height.train import TrainConfig, train
-        from app.server.core.height import predict as _pm
+        from city2stl.height.train import TrainConfig, train
+        from city2stl.height.predict import predict as _pm
 
         class _TinyUNet(nn.Module):
             def __init__(self):
@@ -249,8 +249,8 @@ class TestCheckpointRoundtrip:
         """State dict from saved checkpoint loads without errors."""
         import torch
         import torch.nn as nn
-        from app.server.core.height.train import TrainConfig, train
-        from app.server.core.height import predict as _pm
+        from city2stl.height.train import TrainConfig, train
+        from city2stl.height.predict import predict as _pm
 
         class _TinyUNet(nn.Module):
             def __init__(self):
@@ -278,7 +278,7 @@ class TestCheckpointRoundtrip:
 
 class TestCollectTiles:
     def test_unknown_city_is_skipped(self, tmp_path, capsys):
-        from app.server.core.height.train import collect_tiles
+        from city2stl.height.train import collect_tiles
 
         result = collect_tiles(["UnknownCityXYZ"], tile_dir=tmp_path)
         assert result == []
@@ -287,7 +287,7 @@ class TestCollectTiles:
 
     def test_returns_list(self, tmp_path):
         """At minimum, the function returns a list (may be empty without network)."""
-        from app.server.core.height.train import collect_tiles
+        from city2stl.height.train import collect_tiles
 
         result = collect_tiles(["Barcelona"], tile_dir=tmp_path, tiles_per_city=1)
         assert isinstance(result, list)
