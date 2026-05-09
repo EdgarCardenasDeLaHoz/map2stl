@@ -69,14 +69,14 @@ def collect_tiles(
     -------
     List of Paths to collected .npz tile files.
     """
-    from app.server.core.height import merge_height_rasters
-    from app.server.core.height.providers.wsf3d import WSF3DProvider
-    from app.server.core.height.providers.ndsm import NDSMProvider
-    from app.server.core.height.providers.google_3d import Google3DProvider
-    from app.server.core.height.providers.copernicus import CopernicusProvider
-    from app.server.core.height.providers.lidar_3dep import LiDAR3DEPProvider
-    from app.server.core.height.providers.ghsl import GHSLProvider
-    from app.server.core.height.providers.shadow_height import ShadowHeightProvider
+    from city2stl.height import merge_height_rasters
+    from city2stl.height.providers.wsf3d import WSF3DProvider
+    from city2stl.height.providers.ndsm import NDSMProvider
+    from city2stl.height.providers.google_3d import Google3DProvider
+    from city2stl.height.providers.copernicus import CopernicusProvider
+    from city2stl.height.providers.lidar_3dep import LiDAR3DEPProvider
+    from city2stl.height.providers.ghsl import GHSLProvider
+    from city2stl.height.providers.shadow_height import ShadowHeightProvider
 
     _prov_map = {
         "wsf3d":       WSF3DProvider(),

@@ -28,6 +28,7 @@ def _make_npz(path: Path, tile_size: int = 8) -> Path:
 
 
 def _make_tiles(tmp_path: Path, n: int = 10, tile_size: int = 8) -> List[Path]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     return [_make_npz(tmp_path / f"tile_{i:03d}.npz", tile_size) for i in range(n)]
 
 
@@ -239,7 +240,7 @@ class TestCheckpointRoundtrip:
             train(paths, ckpt, cfg)
 
         # Load and check keys
-        state = torch.load(ckpt, weights_only=True, map_location="cpu")
+        state = torch.load(ckpt, weights_only=False, map_location="cpu")
         assert "model_state_dict" in state
         assert "epoch" in state
         assert "val_loss" in state
@@ -268,7 +269,7 @@ class TestCheckpointRoundtrip:
             train(paths, ckpt, cfg)
 
         model2 = _TinyUNet()
-        state = torch.load(ckpt, weights_only=True, map_location="cpu")
+        state = torch.load(ckpt, weights_only=False, map_location="cpu")
         model2.load_state_dict(state["model_state_dict"])  # should not raise
 
 

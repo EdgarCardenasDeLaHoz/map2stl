@@ -297,7 +297,7 @@ async def merge_dem_layers(req: MergeRequest):
     Merge multiple elevation/mask layers into one composite DEM.
     Each layer specifies a source, resolution, per-layer processing, and a blend mode.
     """
-    from app.server.core.dem import (
+    from geo2stl.dem import (
         fetch_layer_data, apply_layer_processing, blend_layers,
     )
     from app.server.core.validation import b64_encode

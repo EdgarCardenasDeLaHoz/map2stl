@@ -367,7 +367,7 @@ async def export_city_3mf(req: CityExportRequest):
 @router.get("/api/cities/google3d-available")
 async def google3d_available():
     """Check if Google 3D Tiles API key is configured."""
-    from app.server.core.height.providers.google_3d import _get_api_key
+    from city2stl.height.providers.google_3d import _get_api_key
     return JSONResponse(content={"available": _get_api_key() is not None})
 
 
@@ -412,7 +412,7 @@ async def enhance_heights(req: EnhanceHeightsRequest):
 
     try:
         # Fetch terrain DEM for ground subtraction (DSM - DEM = building height)
-        from app.server.core.dem import compute_raw_dem
+        from geo2stl.dem import compute_raw_dem
         dem_result = await run_sync(
             compute_raw_dem, req.north, req.south, req.east, req.west,
             req.dim, 1,  # depth_scale=1 (no bathymetry scaling)

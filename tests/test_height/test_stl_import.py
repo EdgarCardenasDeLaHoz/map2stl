@@ -178,7 +178,7 @@ class TestErrorHandling:
         monkeypatch.setattr(builtins, "__import__", _blocked_import)
         # Must re-import the module so the patched import path is taken
         import importlib
-        import app.server.core.height.stl_import as mod
+        import city2stl.height.stl_import as mod
         importlib.reload(mod)
         try:
             with pytest.raises(ImportError, match="trimesh"):

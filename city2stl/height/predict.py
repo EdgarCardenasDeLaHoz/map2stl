@@ -302,7 +302,7 @@ def _unet_inference(
         ) from exc
 
     model = _build_unet(pretrained_encoder=False)
-    state = torch.load(checkpoint, map_location=device, weights_only=True)
+    state = torch.load(checkpoint, map_location=device, weights_only=False)
     model.load_state_dict(state["model_state_dict"])
     model.eval()
     model.to(device)

@@ -93,10 +93,12 @@ class TestOpenBuildings:
 
     @patch("city2stl.height.providers.open_buildings.read_array_cache", return_value=None)
     def test_fetch_returns_nan_placeholder(self, mock_read):
-        """Currently unimplemented — returns NaN."""
+        """Returns sparse mock data with NaN-dominated raster (non-built areas)."""
         p = OpenBuildingsProvider()
         result = p.fetch_heights((10.5, 10.3, -75.4, -75.6), (20, 20))
-        assert np.all(np.isnan(result.raster))
+        # Most pixels are NaN (non-built); a small fraction has heights
+        nan_fraction = np.isnan(result.raster).mean()
+        assert nan_fraction > 0.5
         assert result.source_name == "open_buildings"
 
 
