@@ -175,7 +175,13 @@ window._buildGeoToPx = _buildGeoToPx;
  */
 function _prebakeFeatures(features, geoToPx, bakKey) {
     for (const feat of features) {
-        if (feat._px?.key === bakKey) continue;   // already baked for this config
+        const hasValidPx = !!(
+            feat._px &&
+            feat._px.key === bakKey &&
+            feat._px.buf?.buffer?.byteLength > 0 &&
+            feat._px.counts?.buffer?.byteLength > 0
+        );
+        if (hasValidPx) continue;   // already baked for this config and buffers are usable
 
         const geom = feat.geometry;
         if (!geom?.coordinates) { feat._px = null; continue; }
@@ -252,10 +258,8 @@ window.loadCityData = async function loadCityData() {
     if (citiesDot) { citiesDot.classList.remove('loaded', 'error'); citiesDot.classList.add('loading'); }
 
     try {
-        const layers = [];
-        if (document.getElementById('cityLayerBuildings')?.checked)  layers.push('buildings', 'walls', 'towers', 'churches', 'fortifications');
-        if (document.getElementById('cityLayerRoads')?.checked)        layers.push('roads');
-        if (document.getElementById('cityLayerWaterways')?.checked)    layers.push('waterways');
+        // Always fetch all city feature types; visibility is controlled in the View tab.
+        const layers = ['buildings', 'walls', 'towers', 'churches', 'fortifications', 'roads', 'waterways'];
 
         const simplifyTol = parseFloat(document.getElementById('citySimplifyTolerance')?.value) || 3.0;
         const minArea     = parseFloat(document.getElementById('cityMinArea')?.value) || 5.0;
@@ -313,7 +317,12 @@ window.loadCityData = async function loadCityData() {
         _computeTerrainZ(data.buildings, demData);
         _computeTerrainZ(data.roads,     demData);
         _computeTerrainZ(data.walls,     demData);
-        window.appState.osmCityData = data;
+        if (data.buildings?.features) {
+            data.buildings.features.forEach((feat, idx) => { feat._cityIndex = idx; });
+        }
+        window.appState.set('osmCityData', data);
+        window.syncCityBuildingsTable?.();
+        window.appState.selectedCityBuildingIndex = null;
         window._invalidateCityCache();   // new data → force full re-render
         window.loadCityRaster?.();       // auto-load raster view (fast, server-side)
 
@@ -404,6 +413,94 @@ function _computeGeomBbox(geom) {
 }
 
 /**
+ * Return the centroid of a baked feature in canvas pixel space.
+ */
+function _featurePxCentroid(feat) {
+    const px = feat?._px;
+    if (!px?.buf?.length) return null;
+    let sumX = 0;
+    let sumY = 0;
+    let count = 0;
+    for (let i = 0; i < px.buf.length; i += 2) {
+        sumX += px.buf[i];
+        sumY += px.buf[i + 1];
+        count++;
+    }
+    return count ? { x: sumX / count, y: sumY / count } : null;
+}
+
+/**
+ * Even-odd point-in-polygon test against a baked pixel buffer.
+ */
+function _pointInFeaturePx(x, y, feat) {
+    const geomType = feat?.geometry?.type;
+    if (geomType !== 'Polygon' && geomType !== 'MultiPolygon') return false;
+    const px = feat?._px;
+    if (!px?.buf?.length || !px.counts?.length) return false;
+    if (x < px.x0 || x > px.x1 || y < px.y0 || y > px.y1) return false;
+
+    let inside = false;
+    let offset = 0;
+    for (const count of px.counts) {
+        let j = offset + (count - 1) * 2;
+        for (let i = 0; i < count; i++) {
+            const xi = px.buf[offset + i * 2];
+            const yi = px.buf[offset + i * 2 + 1];
+            const xj = px.buf[j];
+            const yj = px.buf[j + 1];
+            const intersects = ((yi > y) !== (yj > y)) &&
+                (x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-9) + xi);
+            if (intersects) inside = !inside;
+            j = offset + i * 2;
+        }
+        offset += count * 2;
+    }
+    return inside;
+}
+
+/**
+ * Return the building feature index under a canvas point, or the nearest
+ * centroid if the pointer lands just outside a simplified polygon edge.
+ */
+function _pickCityBuildingAtPx(x, y) {
+    const features = window.appState?.osmCityData?.buildings?.features || [];
+    let nearestIndex = -1;
+    let nearestDist2 = Infinity;
+
+    for (let i = 0; i < features.length; i++) {
+        const feat = features[i];
+        if (_pointInFeaturePx(x, y, feat)) return i;
+        const ctr = _featurePxCentroid(feat);
+        if (!ctr) continue;
+        const dx = ctr.x - x;
+        const dy = ctr.y - y;
+        const dist2 = dx * dx + dy * dy;
+        if (dist2 < nearestDist2) {
+            nearestDist2 = dist2;
+            nearestIndex = i;
+        }
+    }
+
+    return nearestIndex;
+}
+
+/**
+ * Set the active city building and re-render city overlays.
+ */
+window.selectCityBuilding = function selectCityBuilding(index) {
+    const features = window.appState?.osmCityData?.buildings?.features || [];
+    if (!Number.isInteger(index) || index < 0 || index >= features.length) {
+        window.appState.selectedCityBuildingIndex = null;
+        window.syncSelectedCityBuilding?.(null);
+        return;
+    }
+    window.appState.selectedCityBuildingIndex = index;
+    window.syncSelectedCityBuilding?.(index);
+    window.renderCityOverlay?.();
+    window.renderCityOnDEM?.();
+};
+
+/**
  * Annotate each feature in a FeatureCollection with:
  *  - `terrain_z` property: DEM elevation sampled at the feature centroid (Cities 7)
  *  - `_bbox`: geo bounding box {minLon, maxLon, minLat, maxLat} for sub-pixel culling
@@ -477,7 +574,9 @@ const _updateCityLayerCount = window._updateCityLayerCount;
  * Clear osmCityData and remove the OSM overlay canvas from the stacked-layers view.
  */
 window.clearCityOverlay = function clearCityOverlay() {
-    if (window.appState) window.appState.osmCityData = null;
+    if (window.appState) window.appState.set('osmCityData', null);
+    window.syncCityBuildingsTable?.();
+    if (window.appState) window.appState.selectedCityBuildingIndex = null;
     // Cancel pending renders (RAF IDs live in city-render.js)
     window._cancelCityRenders?.();
     // Remove stacked-layers OSM overlay
@@ -528,6 +627,7 @@ window.clearCityOverlay = function clearCityOverlay() {
 function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, onlyLayer) {
     const drawW      = tW != null ? tW : W;
     const metrePerPx = bboxLonM / drawW;
+    const selectedIndex = window.appState?.selectedCityBuildingIndex;
 
     /**
      * PERF6: Return true if this layer should be drawn in the current call.
@@ -645,7 +745,12 @@ function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipR
         ctx.fillStyle   = baseC;
 
         const buckets = Array.from({ length: ALPHA_BUCKETS }, () => []);
+        let selectedFeat = null;
         for (const feat of osmCityData.buildings.features) {
+            if (feat._cityIndex === selectedIndex) {
+                selectedFeat = feat;
+                continue;
+            }
             // PERF5: sub-pixel + viewport cull using pre-baked pixel bbox
             const px = feat._px;
             if (px) {
@@ -673,6 +778,19 @@ function _drawCityCanvas(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipR
             }
             ctx.fill();
             ctx.stroke();
+        }
+
+        if (selectedFeat) {
+            ctx.save();
+            ctx.globalAlpha = 0.95;
+            ctx.lineWidth = 2.5 * invZ;
+            ctx.strokeStyle = '#ffffff';
+            ctx.fillStyle = '#ffd24d66';
+            ctx.beginPath();
+            _drawFeatPath(selectedFeat, true);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
         }
         ctx.globalAlpha = 1;
     }
@@ -840,6 +958,19 @@ document.addEventListener('DOMContentLoaded', () => {
     _checkGoogle3dAvailable();
 
     if (!window.appState?.on) return;   // state.js not loaded
+
+    document.addEventListener('click', (e) => {
+        const canvas = e.target?.closest?.('canvas.city-dem-overlay, canvas.osm-overlay');
+        if (!canvas) return;
+        const city = window.appState?.osmCityData;
+        if (!city?.buildings?.features?.length) return;
+        const rect = canvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+        const picked = _pickCityBuildingAtPx(x, y);
+        if (picked >= 0) window.selectCityBuilding(picked);
+    });
 
     // When DEM data changes, re-compute terrain Z for existing city features and re-render
     window.appState.on('lastDemData', (demData) => {

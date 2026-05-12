@@ -70,7 +70,7 @@ function _culled(feat, x0, y0, x1, y1) {
 }
 
 function _renderLayer(ctx, msg, onlyLayer) {
-    const { tX, tY, tW, tH, invZ, layers, styles, toggles } = msg;
+    const { tX, tY, tW, tH, invZ, layers, styles, toggles, selectedBuildingIndex } = msg;
     const { bboxLonM } = styles;
     const drawW = tW;
     const metrePerPx = bboxLonM / drawW;
@@ -122,7 +122,12 @@ function _renderLayer(ctx, msg, onlyLayer) {
         ctx.fillStyle   = baseC;
 
         const buckets = Array.from({ length: ALPHA_BUCKETS }, () => []);
+        let selectedFeat = null;
         for (const feat of layers.buildings.features) {
+            if (feat.srcIndex === selectedBuildingIndex) {
+                selectedFeat = feat;
+                continue;
+            }
             if (feat.x1 - feat.x0 < 0.5 && feat.y1 - feat.y0 < 0.5) continue; // sub-pixel
             if (_culled(feat, clipX0, clipY0, clipX1, clipY1)) continue;
             const h  = feat.height_m || 10;
@@ -138,6 +143,19 @@ function _renderLayer(ctx, msg, onlyLayer) {
             for (const feat of buckets[bi]) _drawFeatPath(ctx, feat, true);
             ctx.fill();
             ctx.stroke();
+        }
+
+        if (selectedFeat) {
+            ctx.save();
+            ctx.globalAlpha = 0.95;
+            ctx.lineWidth = 2.5 * invZ;
+            ctx.strokeStyle = '#ffffff';
+            ctx.fillStyle = '#ffd24d66';
+            ctx.beginPath();
+            _drawFeatPath(ctx, selectedFeat, true);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
         }
         ctx.globalAlpha = 1;
     }

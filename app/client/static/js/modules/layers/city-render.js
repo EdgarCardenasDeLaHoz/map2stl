@@ -64,7 +64,8 @@ function _getCityWorker() {
 function _serialiseLayer(geojson, propKey) {
     if (!geojson?.features?.length) return null;
     const features = [];
-    for (const feat of geojson.features) {
+    for (let i = 0; i < geojson.features.length; i++) {
+        const feat = geojson.features[i];
         const px = feat._px;
         if (!px?.buf) continue;
         features.push({
@@ -73,6 +74,7 @@ function _serialiseLayer(geojson, propKey) {
             x0: px.x0, y0: px.y0,
             x1: px.x1, y1: px.y1,
             type: feat.geometry?.type || '',
+            srcIndex: feat._cityIndex ?? i,
             [propKey]: feat.properties?.[propKey] || 0,
         });
     }
@@ -86,11 +88,20 @@ function _serialiseLayer(geojson, propKey) {
  */
 function _collectTransferables(layers) {
     const list = [];
+    const seen = new Set();
     for (const layer of Object.values(layers)) {
         if (!layer) continue;
         for (const feat of layer.features) {
-            if (feat.buf?.buffer) list.push(feat.buf.buffer);
-            if (feat.counts?.buffer) list.push(feat.counts.buffer);
+            const b0 = feat.buf?.buffer;
+            const b1 = feat.counts?.buffer;
+            if (b0 && b0.byteLength > 0 && !seen.has(b0)) {
+                seen.add(b0);
+                list.push(b0);
+            }
+            if (b1 && b1.byteLength > 0 && !seen.has(b1)) {
+                seen.add(b1);
+                list.push(b1);
+            }
         }
     }
     return list;
@@ -149,6 +160,14 @@ function _renderRasterCanvas(values, width, height, colormap, vmin, vmax) {
 let _stackRafId = null;
 let _demRafId = null;
 
+if (window.appState?.on) {
+    window.appState.on('selectedCityBuildingIndex', () => {
+        window._invalidateCityCache?.();
+        window.renderCityOverlay?.();
+        window.renderCityOnDEM?.();
+    });
+}
+
 /** Cancel any in-flight RAF renders.  Called by city-overlay.js clearCityOverlay(). */
 window._cancelCityRenders = function () {
     if (_stackRafId) { cancelAnimationFrame(_stackRafId); _stackRafId = null; }
@@ -181,6 +200,7 @@ window.renderCityOverlay = function renderCityOverlay() {
 function _doRenderCityOverlay() {
     const osmCityData = window.appState?.osmCityData;
     if (!osmCityData) return;
+    const selectedBuildingIndex = window.appState?.selectedCityBuildingIndex ?? null;
 
     const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion;
     if (!bbox) return;
@@ -222,7 +242,12 @@ function _doRenderCityOverlay() {
     const bboxLonM = (east - west) * latCos * window.GEO_M_PER_DEG_LON;
     const bboxKey = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
     // PERF2: invZ excluded from cache key — CSS transform covers intermediate zoom frames
-    const cacheKey = window._makeCacheKey(window._cityRenderState.cityDataVersion, W, H, bboxKey);
+    const cacheKey = window._makeCacheKey(
+        window._cityRenderState.cityDataVersion,
+        W,
+        H,
+        `${bboxKey}|sel:${selectedBuildingIndex ?? -1}`
+    );
 
     overlay.width = W;
     overlay.height = H;
@@ -305,11 +330,17 @@ function _doRenderCityOverlay() {
                 }
             };
 
-            worker.postMessage({ type: 'render', gen, W, H, tX, tY, tW, tH, invZ, layers, styles, toggles }, transferables);
+            try {
+                worker.postMessage({ type: 'render', gen, W, H, tX, tY, tW, tH, invZ, layers, styles, toggles, selectedBuildingIndex }, transferables);
+            } catch (err) {
+                // If a stale detached buffer slips through, fall back to sync rendering for this frame.
+                console.warn('city-worker postMessage failed, using sync fallback:', err?.message || err);
+                _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs, selectedBuildingIndex);
+            }
         }
     } else if (rs.offscreenOk) {
         // PERF6 Part A: per-layer OffscreenCanvas on main thread (no worker)
-        _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs);
+        _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs, selectedBuildingIndex);
     } else {
         // Fallback: draw all visible layers in one pass directly to visible canvas
         ctx.clearRect(0, 0, W, H);
@@ -332,7 +363,7 @@ function _doRenderCityOverlay() {
  * Synchronous per-layer OffscreenCanvas render (PERF6 Part A).
  * Used when workers are unavailable or as a fallback after worker error.
  */
-function _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs) {
+function _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs, selectedBuildingIndex) {
     const H = ctx.canvas.height;
     for (const layer of rs.LAYER_NAMES) {
         if (rs.stackLayer[layer].key === cacheKey && rs.stackLayer[layer].canvas) continue;
@@ -369,6 +400,7 @@ window.renderCityOnDEM = function renderCityOnDEM() {
 function _doRenderCityOnDEM() {
     const osmCityData = window.appState?.osmCityData;
     if (!osmCityData) return;
+    const selectedBuildingIndex = window.appState?.selectedCityBuildingIndex ?? null;
 
     const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion;
     if (!bbox) return;
@@ -407,7 +439,12 @@ function _doRenderCityOnDEM() {
     const bboxLonM = lonRange * Math.cos(latMid * Math.PI / 180) * window.GEO_M_PER_DEG_LON;
     const bboxKey = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
     // PERF2: invZ (=1 for DEM view) excluded for consistency; cacheKey only needs data+layout
-    const cacheKey = window._makeCacheKey(window._cityRenderState.cityDataVersion, W, H, bboxKey);
+    const cacheKey = window._makeCacheKey(
+        window._cityRenderState.cityDataVersion,
+        W,
+        H,
+        `${bboxKey}|sel:${selectedBuildingIndex ?? -1}`
+    );
 
     const ctx = overlay.getContext('2d');
 
@@ -502,11 +539,16 @@ window.loadCityRaster = async function loadCityRaster() {
             north: bbox.north, south: bbox.south,
             east: bbox.east, west: bbox.west,
             dim,
+            // Always pass current fetched city features so backend rasterization uses
+            // the latest geometry flow (including MultiPolygon footprints).
+            buildings: cityData.buildings || { type: 'FeatureCollection', features: [] },
+            roads: cityData.roads || { type: 'FeatureCollection', features: [] },
+            waterways: cityData.waterways || { type: 'FeatureCollection', features: [] },
             building_scale: buildingScale,
             road_depression_m: 0,
             water_depression_m: waterOffset,
             projection: document.getElementById('paramProjection')?.value || 'none',
-            clip_nans: document.getElementById('paramClipNans')?.checked ?? true,
+            clip_valid_region: document.getElementById('paramClipNans')?.checked ?? true,
         });
         if (rasterErr) throw new Error(rasterErr);
         _lastCityRasterData = data;

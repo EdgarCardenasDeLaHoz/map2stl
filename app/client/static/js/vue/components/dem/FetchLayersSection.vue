@@ -36,12 +36,16 @@
           </label>
         </div>
 
+        <div class="fetch-action-row">
+          <button id="loadDemBtn" class="btn btn-primary">🏔 Load DEM</button>
+        </div>
+
       </div>
     </details>
 
-    <!-- ═══ Water & Hydrology ═══ -->
+    <!-- ═══ Hydrology ═══ -->
     <details>
-      <summary class="fetch-section-header">💧 Water &amp; Hydrology</summary>
+      <summary class="fetch-section-header">🌊 Hydrology</summary>
       <div class="fetch-section-body">
 
         <div class="fetch-subsection-header">Water Mask</div>
@@ -63,10 +67,6 @@
           </select>
           <div id="waterResWarning" style="font-size:10px;color:#f90;display:none;">⚠️ May require tiling for large areas</div>
         </div>
-        <div class="fetch-action-row">
-          <button id="loadWaterMaskBtn" class="btn btn-secondary">💧 Load Water Mask</button>
-        </div>
-        <div id="waterMaskStats" class="fetch-status"></div>
 
         <div class="fetch-subsection-header" style="margin-top:8px;">Hydrology</div>
         <div class="param-group">
@@ -78,7 +78,7 @@
         </div>
         <div class="fetch-inline-row">
           <label for="hydroDim" title="Grid resolution in pixels per side.">Res</label>
-          <input type="number" id="hydroDim" class="ctrl-input fetch-num-sm" value="300" min="50" max="2000" step="50">
+          <input type="number" id="hydroDim" class="ctrl-input fetch-num-sm" value="600" min="50" max="2000" step="50">
           <label for="hydroDepressionM" title="Maximum river depression depth (m).">Dep&nbsp;(m)</label>
           <input type="number" id="hydroDepressionM" class="ctrl-input fetch-num-sm" value="-5.0" min="-100" max="0" step="0.5">
         </div>
@@ -88,13 +88,18 @@
             <input type="number" id="hydroMinOrder" class="ctrl-input fetch-num-sm" value="3" min="1" max="9" step="1">
             <label for="hydroOrderExponent" title="Depth exponent for smaller rivers.">Exp</label>
             <input type="number" id="hydroOrderExponent" class="ctrl-input fetch-num-sm" value="1.5" min="0.5" max="3.0" step="0.1">
+            <label for="hydroWidthFactor" title="Multiplier on rendered river width (1.0=default, 2.0=double).">Width</label>
+            <input type="number" id="hydroWidthFactor" class="ctrl-input fetch-num-sm" value="0.5" min="0.1" max="20" step="0.1">
           </div>
         </div>
+        
+        <!-- Unified Hydrology Load Button -->
         <div class="fetch-action-row">
-          <button id="loadHydrologyBtn"  class="btn btn-secondary">🌊 Load</button>
-          <button id="clearHydrologyBtn" class="btn btn-secondary btn-clear">✕</button>
+          <button id="loadWaterHydrologyBtn" class="btn btn-primary" style="flex:1;">🌊 Load Hydrology</button>
+          <button id="clearWaterHydrologyBtn" class="btn btn-secondary btn-clear">✕</button>
         </div>
-        <div id="hydroStatus" class="fetch-status"></div>
+        <div id="waterHydrologyStatus" class="fetch-status"></div>
+
 
       </div>
     </details>
@@ -117,17 +122,6 @@
         <div class="fetch-action-row">
           <button id="loadEsaBtn" class="btn btn-secondary">🌿 Load ESA Land Cover</button>
         </div>
-
-        <details class="nested-details">
-          <summary class="nested-summary">Land Cover Classes</summary>
-          <div>
-            <div id="landCoverLegend" style="overflow-y:auto;max-height:200px;"></div>
-            <div class="fetch-action-row">
-              <button id="applyLandCoverMapping" class="btn btn-secondary">Apply Colors</button>
-              <button id="resetLandCoverMapping" class="btn btn-secondary">Reset</button>
-            </div>
-          </div>
-        </details>
 
       </div>
     </details>
@@ -166,18 +160,6 @@
           OSM buildings, roads, water (≤ 10 km regions).
         </div>
 
-        <div class="fetch-checkbox-row">
-          <label class="check-label"><input type="checkbox" id="cityLayerBuildings" checked aria-label="Include city buildings layer"> 🏠 Buildings</label>
-          <label class="check-label"><input type="checkbox" id="cityLayerRoads" checked aria-label="Include city roads layer"> 🛣 Roads</label>
-          <label class="check-label"><input type="checkbox" id="cityLayerWaterways" checked aria-label="Include city waterways layer"> 💧 Waterways</label>
-        </div>
-        <!-- Color swatches used by city-overlay.js / city-render.js for canvas rendering -->
-        <div style="display:none;">
-          <input type="color" id="layerBuildingsColor"  value="#c8b89a" class="city-color-swatch" aria-label="Buildings layer color">
-          <input type="color" id="layerRoadsColor"      value="#cc8844" class="city-color-swatch" aria-label="Roads layer color">
-          <input type="color" id="layerWaterwaysColor"  value="#4488cc" class="city-color-swatch" aria-label="Waterways layer color">
-        </div>
-
         <div class="param-group">
           <label for="cityRasterDim" title="Resolution of the city heights raster (pixels per side).">Raster res</label>
           <select id="cityRasterDim" class="ctrl-select">
@@ -212,6 +194,61 @@
           <span id="cityWaterwayCount"  class="city-layer-count"></span>
         </div>
 
+        <details class="nested-details city-table-details" open>
+          <summary class="nested-summary">Buildings Table</summary>
+          <div class="city-table-toolbar">
+            <input
+              v-model="searchText"
+              type="text"
+              class="search-input city-table-search"
+              placeholder="Search buildings..."
+              aria-label="Search buildings"
+            >
+            <div class="city-table-meta">{{ filteredRows.length }} buildings</div>
+          </div>
+          <div class="city-table-wrapper">
+            <table class="city-table-view" id="cityBuildingsTable">
+              <thead>
+                <tr>
+                  <th>Building</th>
+                  <th>H</th>
+                  <th>Levels</th>
+                  <th>Source</th>
+                  <th>Type</th>
+                  <th>Centroid</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="pagedRows.length === 0">
+                  <td colspan="6" class="city-table-empty">No buildings match this filter.</td>
+                </tr>
+                <tr
+                  v-for="row in pagedRows"
+                  :key="row.index"
+                  :data-building-index="row.index"
+                  :class="{ selected: selectedIndex === row.index }"
+                  @click="selectBuilding(row.index)"
+                >
+                  <td>
+                    <div class="city-building-name">{{ row.label }}</div>
+                    <div class="city-building-sub">#{{ row.index + 1 }}</div>
+                  </td>
+                  <td>{{ row.heightText }}</td>
+                  <td>{{ row.levelsText }}</td>
+                  <td>{{ row.sourceText }}</td>
+                  <td>{{ row.geometryText }}</td>
+                  <td>{{ row.centroidText }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="city-table-pagination">
+            <button class="btn btn-secondary city-table-page-btn" :disabled="currentPage === 0" @click="currentPage = Math.max(0, currentPage - 1)">Prev</button>
+            <span class="city-table-page-label">{{ pageLabel }}</span>
+            <button class="btn btn-secondary city-table-page-btn" :disabled="currentPage >= totalPages - 1" @click="currentPage = Math.min(totalPages - 1, currentPage + 1)">Next</button>
+          </div>
+        </details>
+
         <details class="nested-details">
           <summary class="nested-summary">3D Heights</summary>
           <div class="param-grid">
@@ -240,7 +277,145 @@
   </CollapsibleSection>
 </template>
 <script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
+
+type BuildingRow = {
+  index: number;
+  label: string;
+  heightText: string;
+  levelsText: string;
+  sourceText: string;
+  geometryText: string;
+  centroidText: string;
+};
+
+const searchText = ref('');
+const currentPage = ref(0);
+const selectedIndex = ref<number | null>(null);
+const pageSize = 20;
+const buildingRows = ref<BuildingRow[]>([]);
+
+function _toFiniteNumber(val: unknown): number | null {
+  const num = typeof val === 'number' ? val : Number(val);
+  return Number.isFinite(num) ? num : null;
+}
+
+function _geomCentroid(geom: any): [number, number] | null {
+  const coords: number[][] = [];
+  function collect(node: any) {
+    if (!Array.isArray(node)) return;
+    if (typeof node[0] === 'number' && typeof node[1] === 'number') {
+      coords.push(node as number[]);
+      return;
+    }
+    for (const child of node) collect(child);
+  }
+  collect(geom?.coordinates);
+  if (!coords.length) return null;
+  const lon = coords.reduce((sum, coord) => sum + coord[0], 0) / coords.length;
+  const lat = coords.reduce((sum, coord) => sum + coord[1], 0) / coords.length;
+  return [lon, lat];
+}
+
+function _buildRows() {
+  const features = (window as any).appState?.osmCityData?.buildings?.features || [];
+  buildingRows.value = features.map((feat: any, index: number) => {
+    const props = feat?.properties || {};
+    const centroid = _geomCentroid(feat?.geometry);
+    const height = _toFiniteNumber(props.height_m);
+    const label = String(props.name || props.building || props['roof:shape'] || `Building ${index + 1}`);
+    return {
+      index,
+      label,
+      heightText: height != null ? `${height.toFixed(1)} m` : '—',
+      levelsText: props['building:levels'] != null ? String(props['building:levels']) : '—',
+      sourceText: String(props.height_source || '—'),
+      geometryText: String(feat?.geometry?.type || '—'),
+      centroidText: centroid ? `${centroid[1].toFixed(5)}, ${centroid[0].toFixed(5)}` : '—',
+    };
+  });
+}
+
+const filteredRows = computed(() => {
+  const q = searchText.value.trim().toLowerCase();
+  if (!q) return buildingRows.value;
+  return buildingRows.value.filter((row) =>
+    [row.label, row.heightText, row.levelsText, row.sourceText, row.geometryText, row.centroidText]
+      .join(' ')
+      .toLowerCase()
+      .includes(q)
+  );
+});
+
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredRows.value.length / pageSize)));
+const pagedRows = computed(() => {
+  const safePage = Math.min(Math.max(currentPage.value, 0), totalPages.value - 1);
+  const start = safePage * pageSize;
+  return filteredRows.value.slice(start, start + pageSize);
+});
+const pageLabel = computed(() => {
+  if (!filteredRows.value.length) return '0 of 0';
+  const start = Math.min(currentPage.value * pageSize + 1, filteredRows.value.length);
+  const end = Math.min((currentPage.value + 1) * pageSize, filteredRows.value.length);
+  return `${start}–${end} of ${filteredRows.value.length}`;
+});
+
+function _syncRowsFromState() {
+  _buildRows();
+  if (currentPage.value >= totalPages.value) currentPage.value = totalPages.value - 1;
+}
+
+async function _syncSelectedRow(index: number | null) {
+  selectedIndex.value = typeof index === 'number' ? index : null;
+  if (selectedIndex.value == null) return;
+  const position = filteredRows.value.findIndex((row) => row.index === selectedIndex.value);
+  if (position < 0) return;
+  currentPage.value = Math.floor(position / pageSize);
+  await nextTick();
+  const row = document.querySelector<HTMLElement>(`[data-building-index="${selectedIndex.value}"]`);
+  row?.scrollIntoView({ block: 'nearest' });
+}
+
+function selectBuilding(index: number) {
+  (window as any).selectCityBuilding?.(index);
+}
+
+watch(
+  () => (window as any).appState?.osmCityData,
+  () => _syncRowsFromState(),
+  { immediate: true }
+);
+
+watch(
+  () => (window as any).appState?.selectedCityBuildingIndex,
+  (index) => { void _syncSelectedRow(typeof index === 'number' ? index : null); },
+  { immediate: true }
+);
+
+onMounted(() => {
+  (window as any).syncCityBuildingsTable = () => _syncRowsFromState();
+  (window as any).syncSelectedCityBuilding = (index: number | null) => { void _syncSelectedRow(index); };
+  void _syncRowsFromState();
+  void _syncSelectedRow((window as any).appState?.selectedCityBuildingIndex ?? null);
+});
+
+onBeforeUnmount(() => {
+  if ((window as any).syncCityBuildingsTable === _syncRowsFromState) {
+    delete (window as any).syncCityBuildingsTable;
+  }
+  if ((window as any).syncSelectedCityBuilding === _syncSelectedRow) {
+    delete (window as any).syncSelectedCityBuilding;
+  }
+});
+
+watch(searchText, () => {
+  currentPage.value = 0;
+});
+
+watch(filteredRows, () => {
+  if (currentPage.value >= totalPages.value) currentPage.value = totalPages.value - 1;
+});
 </script>
 <style scoped>
 /* Outer collapsible <details> sub-section header (e.g. "🏔 DEM Source") */
@@ -396,6 +571,109 @@ details[open] > .fetch-section-header::before { transform: rotate(90deg); }
     font-size: 11px;
     color: #bbb;
     margin: 0;
+}
+
+.city-table-details {
+  border-top: 1px solid #2b2b2b;
+  padding-top: 4px;
+}
+
+.city-table-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 4px;
+}
+
+.city-table-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.city-table-meta {
+  font-size: 10px;
+  color: #888;
+  white-space: nowrap;
+}
+
+.city-table-wrapper {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+}
+
+.city-table-view {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.city-table-view thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #1d1d1d;
+  color: #aaa;
+  text-align: left;
+  padding: 5px 6px;
+  border-bottom: 1px solid #2b2b2b;
+  font-weight: 600;
+}
+
+.city-table-view tbody td {
+  padding: 5px 6px;
+  border-bottom: 1px solid #242424;
+  color: #d5d5d5;
+  vertical-align: top;
+}
+
+.city-table-view tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.city-table-view tbody tr.selected {
+  background: rgba(255, 210, 77, 0.14);
+  box-shadow: inset 2px 0 0 #ffd24d;
+}
+
+.city-table-empty {
+  text-align: center;
+  color: #777;
+  padding: 12px 6px;
+}
+
+.city-building-name {
+  font-size: 10px;
+  font-weight: 600;
+  color: #eee;
+  line-height: 1.2;
+}
+
+.city-building-sub {
+  font-size: 9px;
+  color: #7a7a7a;
+  line-height: 1.2;
+}
+
+.city-table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.city-table-page-btn {
+  flex: 0 0 auto !important;
+  min-width: 56px;
+}
+
+.city-table-page-label {
+  font-size: 10px;
+  color: #888;
+  white-space: nowrap;
 }
 
 /* Help / hint text under section header */

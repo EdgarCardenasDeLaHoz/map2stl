@@ -9,19 +9,19 @@
  *          so that all existing JS modules can finish their own init first.
  */
 import { createApp, markRaw, watch } from 'vue';
-import { createPinia }               from 'pinia';
-import PrimeVue                      from 'primevue/config';
-import Aura                          from '@primevue/themes/aura';
-import ToastService                  from 'primevue/toastservice';
-import ConfirmationService           from 'primevue/confirmationservice';
+import { createPinia } from 'pinia';
+import PrimeVue from 'primevue/config';
+import Aura from '@primevue/themes/aura';
+import ToastService from 'primevue/toastservice';
+import ConfirmationService from 'primevue/confirmationservice';
 
-import App              from './App.vue';
-import { useAppStore }  from './stores/app';
+import App from './App.vue';
+import { useAppStore } from './stores/app';
 
 // ─── 1. Bootstrap Vue ────────────────────────────────────────────────────────
 
 const pinia = createPinia();
-const app   = createApp(App);
+const app = createApp(App);
 
 app.use(pinia);
 app.use(PrimeVue, {

@@ -35,6 +35,7 @@ window.appState.selectedRegion = null;
 // DEM / layer data
 window.appState.currentDemBbox = null;
 window.appState.osmCityData = null;
+window.appState.selectedCityBuildingIndex = null;
 window.appState.lastDemData = null;
 window.appState.lastWaterMaskData = null;
 window.appState.satEsaLoaded = false;
@@ -95,6 +96,7 @@ function clearLayerCache() {
     window.appState.lastDemData = null;
     window.clearLastWaterMaskData?.();
     window.appState.currentDemBbox = null;
+    window.appState.selectedCityBuildingIndex = null;
     window._setDemEmptyState?.(true);
     window.appState.originalDemValues = null;  // Reset so next Apply uses new region's data
     window.appState.curveDataVmin = null;  // Reset stable curve coordinate system
@@ -112,6 +114,12 @@ function clearLayerCache() {
     window.appState._satImgRawCanvas = null;
     window.appState._satImgBbox = null;
     window.appState.satEsaLoaded = false;
+
+    // Hydrology can be in flight while the user switches regions; cancel it
+    // and clear the visible layer immediately so old river rasters cannot bleed
+    // into the new region while the fresh fetch is loading.
+    window.cancelHydroLoad?.();
+    window.clearHydrology?.();
     window.appState.hydrologySourceCanvas = null;
 
     // Free all DOM layer buffer canvases and reset the stacked view
