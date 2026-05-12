@@ -960,7 +960,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!window.appState?.on) return;   // state.js not loaded
 
     document.addEventListener('click', (e) => {
-        const canvas = e.target?.closest?.('canvas.city-dem-overlay, canvas.osm-overlay');
+        const canvas = e.target?.closest?.('canvas.city-dem-overlay, canvas.osm-overlay, #stackViewCanvas, #layerCityRasterCanvas');
         if (!canvas) return;
         const city = window.appState?.osmCityData;
         if (!city?.buildings?.features?.length) return;
