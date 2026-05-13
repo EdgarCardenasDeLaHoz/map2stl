@@ -48,3 +48,10 @@ models/*_inspect.pdf/*.png
 # regenerable from city2stl/skyline_cv/scripts/08_region_skyline_pdf.py
 city2stl/skyline_cv/runs/
 runs/*
+
+# Local ad-hoc diagnostics artifacts
+run_out.txt
+server2.log
+test_pano_direct.png
+test_seed1_h0.png
+tests/hydrology-render-test.png
