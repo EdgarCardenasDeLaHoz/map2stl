@@ -12,6 +12,8 @@ cache
 
 # Local config — may contain API keys; do not commit
 config.json
+.env
+.env.*
 *.gcode
 *.curaprofile
 *.ini
@@ -42,3 +44,7 @@ output/*
 # Trained model checkpoints — large, regenerable from training scripts
 models/*.pt
 models/*_inspect.pdf/*.png
+# skyline_cv generated output (PDFs, PNG page dumps, image cache) —
+# regenerable from city2stl/skyline_cv/scripts/08_region_skyline_pdf.py
+city2stl/skyline_cv/runs/
+runs/*
