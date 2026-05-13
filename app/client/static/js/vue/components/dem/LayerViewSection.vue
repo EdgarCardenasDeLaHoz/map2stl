@@ -1,15 +1,15 @@
 <template>
-  <CollapsibleSection title="🗺️ Layers" :start-open="true" wrap-style="">
+  <CollapsibleSection title="🗺️ Layers" :start-open="false" wrap-style="">
 
     <div class="layer-mode-wrap">
       <div class="layer-mode-title">Active Layers</div>
       <div id="layerModeSelector" class="layer-mode-row">
         <button class="layer-mode-btn active" data-mode="Dem" title="Base elevation">🏔 DEM</button>
-        <button class="layer-mode-btn" data-mode="Water" title="Water mask">💧 Water</button>
+        <button class="layer-mode-btn" data-mode="WaterHydrology" title="Merged hydrology overlay">🌊 Hydrology</button>
         <button class="layer-mode-btn" data-mode="Sat" title="ESA land cover">🌿 ESA</button>
         <button class="layer-mode-btn" data-mode="SatImg" title="Satellite imagery">🛰 Sat</button>
         <button class="layer-mode-btn" data-mode="CityRaster" title="City heights raster">🏙 City</button>
-        <button class="layer-mode-btn" data-mode="Hydrology" title="River depression overlay">🌊 Hydro</button>
+        <button class="layer-mode-btn" data-mode="CityOverlay" title="City vector polygons">⬡ City Poly</button>
         <button class="layer-mode-btn" data-mode="CompositeDem" title="Composite DEM">★ Composite</button>
       </div>
     </div>
@@ -26,13 +26,13 @@
         <span class="layer-row-pct" id="layerOpacityPct_Dem">100%</span>
       </div>
 
-      <!-- Water row -->
+      <!-- Hydrology merged row -->
       <div class="layer-row">
-        <span class="layer-row-icon" title="Water mask">💧</span>
-        <span class="layer-row-label">Water</span>
-        <span class="layer-row-res" id="layerRes_Water"></span>
-        <input type="range" class="layer-row-opacity" id="layerOpacity_Water" min="0" max="100" value="70" title="Water opacity" aria-label="Water opacity">
-        <span class="layer-row-pct" id="layerOpacityPct_Water">70%</span>
+        <span class="layer-row-icon" title="Merged hydrology overlay">🌊</span>
+        <span class="layer-row-label">Hydrology</span>
+        <span class="layer-row-res" id="layerRes_WaterHydrology"></span>
+        <input type="range" class="layer-row-opacity" id="layerOpacity_WaterHydrology" min="0" max="100" value="75" title="Hydrology opacity" aria-label="Hydrology opacity">
+        <span class="layer-row-pct" id="layerOpacityPct_WaterHydrology">75%</span>
       </div>
 
       <!-- ESA row -->
@@ -70,17 +70,6 @@
         <input type="range" class="layer-row-opacity" id="layerOpacity_CityOverlay" min="0" max="100" value="85" title="City vector opacity" aria-label="City vector opacity">
         <span class="layer-row-pct" id="layerOpacityPct_CityOverlay">85%</span>
       </div>
-
-
-      <!-- Hydrology row -->
-      <div class="layer-row">
-        <span class="layer-row-icon" title="River depression overlay">🌊</span>
-        <span class="layer-row-label">Hydro</span>
-        <span class="layer-row-res" id="layerRes_Hydrology"></span>
-        <input type="range" class="layer-row-opacity" id="layerOpacity_Hydrology" min="0" max="100" value="80" title="Hydrology opacity" aria-label="Hydrology opacity">
-        <span class="layer-row-pct" id="layerOpacityPct_Hydrology">80%</span>
-      </div>
-
       <!-- Composite DEM row — no load button -->
       <div class="layer-row">
         <span class="layer-row-icon" title="Composite DEM">★</span>
@@ -92,6 +81,23 @@
 
     </div><!-- /layerRows -->
 
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333;">
+      <div style="font-size:11px;color:#aaa;margin-bottom:6px;">City Polygon Display</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
+        <label class="check-label"><input type="checkbox" id="cityLayerBuildings" checked aria-label="Show city buildings polygons"> 🏠 Buildings</label>
+        <label class="check-label"><input type="checkbox" id="cityLayerRoads" checked aria-label="Show city roads polylines"> 🛣 Roads</label>
+        <label class="check-label"><input type="checkbox" id="cityLayerWaterways" checked aria-label="Show city waterways"> 💧 Waterways</label>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Buildings <input type="color" id="layerBuildingsColor" value="#c8b89a" class="city-color-swatch" aria-label="Buildings polygon color"></label>
+        <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Roads <input type="color" id="layerRoadsColor" value="#cc8844" class="city-color-swatch" aria-label="Roads polyline color"></label>
+        <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Water <input type="color" id="layerWaterwaysColor" value="#4488cc" class="city-color-swatch" aria-label="Waterways color"></label>
+      </div>
+      <div style="margin-top:6px;">
+        <button id="viewOpenCityTablePanelBtn" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" @click="openCityTablePanel">📋 Open Buildings Table Panel</button>
+      </div>
+    </div>
+
     <!-- Hidden legacy div — kept so _updateLayerOpacitySliders() doesn't error -->
     <div id="layerOpacitySliders" style="display:none;"></div>
 
@@ -101,9 +107,13 @@
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
 import { onMounted } from 'vue';
 
+function openCityTablePanel() {
+  (window as any).openCityBuildingsPanel?.();
+}
+
 onMounted(() => {
     // Wire per-layer opacity sliders to window.setLayerOpacity
-    const layers = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'CompositeDem', 'Hydrology'];
+  const layers = ['Dem', 'WaterHydrology', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'CompositeDem'];
     for (const mode of layers) {
         const slider = document.getElementById(`layerOpacity_${mode}`) as HTMLInputElement | null;
         const pct    = document.getElementById(`layerOpacityPct_${mode}`);
@@ -118,8 +128,8 @@ onMounted(() => {
     // Update res spans from linked inputs whenever values change
     function _syncResSpans() {
         const resMap: Record<string, string> = {
-            Dem: 'paramDim', Water: 'waterResolution', Sat: 'esaResolution',
-            SatImg: 'satImgResolution', CityRaster: 'cityRasterDim', Hydrology: 'hydroDim',
+        Dem: 'paramDim', WaterHydrology: 'waterResolution', Sat: 'esaResolution',
+        SatImg: 'satImgResolution', CityRaster: 'cityRasterDim',
         };
         for (const [mode, inputId] of Object.entries(resMap)) {
             const inp = document.getElementById(inputId) as HTMLInputElement | null;
@@ -209,4 +219,5 @@ onMounted(() => {
     padding: 2px 0 4px 32px;
     border-bottom: 1px solid #2a2a2a;
 }
+
 </style>

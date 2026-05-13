@@ -126,11 +126,15 @@
       </div>
     </div>
 
+    <!-- City Buildings panel (left of settings panel) -->
+    <CityBuildingsPanel />
+
     <!-- Stage 4: DEM Settings Panel rendered directly (not teleported — avoids timing issues) -->
     <DemSettingsPanel />
   </div>
 </template>
 <script setup lang="ts">
 import DemSettingsPanel from '../dem/DemSettingsPanel.vue';
+import CityBuildingsPanel from '../dem/CityBuildingsPanel.vue';
 // All canvas elements are never conditionally unmounted — JS modules hold direct refs
 </script>
