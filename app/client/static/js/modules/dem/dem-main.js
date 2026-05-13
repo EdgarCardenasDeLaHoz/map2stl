@@ -44,7 +44,7 @@ function _getDemWorker() {
     if (_demWorkerOk === false) return null;
     if (_demWorker) return _demWorker;
     try {
-        _demWorker = new Worker('../workers/dem-render-worker.js');
+        _demWorker = new Worker('/static/js/workers/dem-render-worker.js');
         _demWorker.onmessage = _onDemWorkerMessage;
         _demWorker.onerror = () => { _demWorkerOk = false; _demWorker = null; };
         _demWorkerOk = true;
@@ -174,7 +174,7 @@ function _applyDemResult(data, north, south, east, west) {
     if (window.appState?.osmCityData) requestAnimationFrame(() => window.renderCityOnDEM?.());
 
     // Auto-load city data if any city layer toggle is enabled and region is small enough
-    const _anyLayerOn = ['layerBuildingsToggle', 'layerRoadsToggle', 'layerWaterwaysToggle']
+    const _anyLayerOn = ['cityLayerBuildings', 'cityLayerRoads', 'cityLayerWaterways']
         .some(id => document.getElementById(id)?.checked);
     if (_anyLayerOn && !window.appState?.osmCityData && typeof window.loadCityData === 'function') {
         window.loadCityData?.();
@@ -183,7 +183,12 @@ function _applyDemResult(data, north, south, east, west) {
     // Update print dimensions panel (Extrude tab)
     window.updatePrintDimensions?.();
 
-    window.showToast?.(`DEM loaded (${vmin.toFixed(0)}m - ${vmax.toFixed(0)}m)`, 'success');
+    const clipOn = document.getElementById('paramClipNans')?.checked ? 'on' : 'off';
+    const dimsText = `${h}x${w}`;
+    window.showToast?.(
+        `DEM loaded (${vmin.toFixed(0)}m - ${vmax.toFixed(0)}m, ${dimsText}, clip:${clipOn})`,
+        'success',
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +235,7 @@ window.loadDEM = async function loadDEM(highRes = false) {
         dem_source: demSource,
         projection: document.getElementById('paramProjection')?.value || 'none',
         maintain_dimensions: true,
-        clip_nans: document.getElementById('paramClipNans')?.checked ?? true,
+        clip_valid_region: document.getElementById('paramClipNans')?.checked ?? true,
     });
 
     // Clear DEM cache before loading new DEM
@@ -330,6 +335,8 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
 
     // Notify curve-editor.js (and any other listeners) that a new DEM is loaded.
     window.events?.emit(window.EV?.DEM_LOADED, vmin, vmax);
+    // Auto-rebuild the 3D model if the Extrude view is currently open.
+    window._modelViewerAutoRebuild?.();
     window.appState.curveDataVmin = vmin;
     window.appState.curveDataVmax = vmax;
 
@@ -496,11 +503,14 @@ window.updatePrintDimensions = function updatePrintDimensions() {
     const demCanvas = document.querySelector(`#demImage ${window.DEM_CANVAS_SELECTOR}`);
     const gridW = demCanvas?.width || lastDemData.width;
     const gridH = demCanvas?.height || lastDemData.height;
-    const modelH = parseFloat(document.getElementById('modelResolution').value) || 200;
-    const baseH = parseFloat(document.getElementById('exportBaseHeight')?.value) || 0;
-    const totalH = modelH + baseH;
+    const mmPerPx = parseFloat(document.getElementById('mmPerPixel')?.value) || 1.0;
+    const modelH  = parseFloat(document.getElementById('exportModelHeight')?.value) || 30;
+    const baseH   = parseFloat(document.getElementById('exportBaseHeight')?.value)  || 0;
+    const totalH  = modelH + baseH;
+    const footW   = Math.round(gridW * mmPerPx);
+    const footH   = Math.round(gridH * mmPerPx);
 
-    document.getElementById('dimFootprint').textContent = `${gridW} × ${gridH} mm`;
+    document.getElementById('dimFootprint').textContent = `${footW} × ${footH} mm`;
     document.getElementById('dimHeight').textContent = `${totalH} mm (${modelH} terrain + ${baseH} base)`;
 
     const selectedRegion = window.appState.selectedRegion;
@@ -614,6 +624,13 @@ let _satelliteRGBAbortController = null;
  * @returns {Promise<void>}
  */
 window.loadSatelliteImage = async function loadSatelliteImage() {
+    // Keep legacy callers functional, but route through the dedicated ESA loader
+    // so initial auto-load and manual "Load ESA Land Cover" use identical settings
+    // (resolution, projection, rendering) and cannot race/overwrite each other.
+    if (typeof window.loadEsaLandCover === 'function') {
+        return await window.loadEsaLandCover();
+    }
+
     if (_satelliteAbortController) _satelliteAbortController.abort();
     _satelliteAbortController = new AbortController();
     const signal = _satelliteAbortController.signal;
@@ -638,7 +655,7 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
         show_sat: true,
         dataset,
         projection,
-        clip_nans: clipNans,
+        clip_valid_region: clipNans,
     });
 
     document.getElementById('satelliteImage').innerHTML = '<p class="loading">Loading satellite data...</p>';
@@ -656,13 +673,23 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
         }
 
         if (data.sat_values && data.sat_dimensions && data.sat_available) {
-            const sat_h = data.sat_dimensions[0];
-            const sat_w = data.sat_dimensions[1];
-            const canvas = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
-            canvas.style.width = '100%';
-            canvas.style.height = 'auto';
-            document.getElementById('satelliteImage').innerHTML = '';
-            document.getElementById('satelliteImage').appendChild(canvas);
+            if (dataset === 'esa' && typeof window.renderEsaLandCover === 'function') {
+                // ESA values are categorical class IDs; render with class palette,
+                // not a continuous viridis gradient.
+                window.renderEsaLandCover({
+                    esa_values: data.sat_values,
+                    esa_values_b64: data.sat_values_b64,
+                    esa_dimensions: data.sat_dimensions,
+                });
+            } else {
+                const sat_h = data.sat_dimensions[0];
+                const sat_w = data.sat_dimensions[1];
+                const canvas = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
+                canvas.style.width = '100%';
+                canvas.style.height = 'auto';
+                document.getElementById('satelliteImage').innerHTML = '';
+                document.getElementById('satelliteImage').appendChild(canvas);
+            }
             window.appState.satEsaLoaded = true;
             window.emitStackUpdate();
         } else {
@@ -709,7 +736,7 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
     const params = new URLSearchParams({
         north, south, east, west, dim,
         projection: document.getElementById('paramProjection')?.value || 'none',
-        clip_nans: document.getElementById('paramClipNans')?.checked ?? true,
+        clip_valid_region: document.getElementById('paramClipNans')?.checked ?? true,
     });
 
     window.showToast?.('Loading satellite imagery...', 'info');
