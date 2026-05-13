@@ -63,7 +63,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onBeforeUnmount, onMounted } from 'vue';
 import { useAppStore } from '../../stores/app';
 
 import SidebarListView      from './SidebarListView.vue';
@@ -99,12 +99,32 @@ function cycleSidebar() {
     hidden:   'normal',
     normal:   'expanded',
   };
-  const newMode = next[mode.value];
+  setSidebarMode(next[mode.value]);
+}
+
+function setSidebarMode(newMode: 'expanded' | 'normal' | 'hidden') {
   store.sidebarMode = newMode;
   // Keep app.js closure in sync until Stage 7
   window.setSidebarState?.(newMode);
   window._setSidebarViews?.(newMode);
+
+  const openBtn = document.getElementById('openSidebarBtn');
+  if (openBtn) {
+    openBtn.classList.toggle('hidden', newMode !== 'hidden');
+  }
+
+  requestAnimationFrame(() => {
+    (window as any)._globalMap?.invalidateSize?.();
+    window.emitStackUpdate?.();
+    window.dispatchEvent(new Event('resize'));
+  });
 }
+
+function handleOpenSidebarClick() {
+  setSidebarMode('normal');
+}
+
+let _openSidebarButton: HTMLElement | null = null;
 
 function exportRegions() {
   (window as any).exportRegionsJson?.();
@@ -122,7 +142,15 @@ async function handleRegionImport(event: Event) {
 }
 
 onMounted(() => {
-  // Start expanded — matches app.js DOMContentLoaded initialisation
-  store.sidebarMode = 'expanded';
+  // Start expanded — matches app.js DOMContentLoaded initialisation.
+  setSidebarMode('expanded');
+
+  _openSidebarButton = document.getElementById('openSidebarBtn');
+  _openSidebarButton?.addEventListener('click', handleOpenSidebarClick);
+});
+
+onBeforeUnmount(() => {
+  _openSidebarButton?.removeEventListener('click', handleOpenSidebarClick);
+  _openSidebarButton = null;
 });
 </script>

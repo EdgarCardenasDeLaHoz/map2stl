@@ -195,7 +195,7 @@
         </div>
 
         <div class="fetch-action-row" style="margin-top:2px;">
-          <button id="openCityTablePanelBtn" class="btn btn-secondary" @click="openCityTablePanel">📋 Open Buildings Table Panel</button>
+           <button id="openCityTablePanelBtn" class="btn btn-secondary" @click="toggleCityTablePanel">📋 Toggle Buildings Table Panel</button>
         </div>
 
         <details class="nested-details">
@@ -228,8 +228,8 @@
 <script setup lang="ts">
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
 
-function openCityTablePanel() {
-  (window as any).openCityBuildingsPanel?.();
+function toggleCityTablePanel() {
+  (window as any).toggleCityBuildingsPanel?.();
 }
 </script>
 <style scoped>

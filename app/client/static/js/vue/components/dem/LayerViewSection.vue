@@ -94,7 +94,7 @@
         <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Water <input type="color" id="layerWaterwaysColor" value="#4488cc" class="city-color-swatch" aria-label="Waterways color"></label>
       </div>
       <div style="margin-top:6px;">
-        <button id="viewOpenCityTablePanelBtn" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" @click="openCityTablePanel">📋 Open Buildings Table Panel</button>
+        <button id="viewOpenCityTablePanelBtn" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" @click="toggleCityTablePanel">📋 {{ cityTableToggleLabel }}</button>
       </div>
     </div>
 
@@ -105,11 +105,21 @@
 </template>
 <script setup lang="ts">
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
-import { onMounted } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 
-function openCityTablePanel() {
-  (window as any).openCityBuildingsPanel?.();
+const cityTableToggleLabel = ref('Show Buildings Table');
+
+function _syncCityTableToggleLabel() {
+  const collapsed = (window as any).isCityBuildingsPanelCollapsed?.();
+  cityTableToggleLabel.value = collapsed ? 'Show Buildings Table' : 'Hide Buildings Table';
 }
+
+function toggleCityTablePanel() {
+  (window as any).toggleCityBuildingsPanel?.();
+  _syncCityTableToggleLabel();
+}
+
+let _onCityPanelState: ((evt: Event) => void) | null = null;
 
 onMounted(() => {
     // Wire per-layer opacity sliders to window.setLayerOpacity
@@ -142,6 +152,17 @@ onMounted(() => {
     }
     // Defer slightly so fetch section inputs are mounted
     setTimeout(_syncResSpans, 200);
+
+    _onCityPanelState = () => _syncCityTableToggleLabel();
+    window.addEventListener('city-buildings-panel-state', _onCityPanelState);
+    _syncCityTableToggleLabel();
+});
+
+onBeforeUnmount(() => {
+  if (_onCityPanelState) {
+    window.removeEventListener('city-buildings-panel-state', _onCityPanelState);
+    _onCityPanelState = null;
+  }
 });
 </script>
 <style scoped>

@@ -234,6 +234,10 @@ function startResize(e: MouseEvent) {
   e.preventDefault();
 }
 
+function _emitPanelState() {
+  window.dispatchEvent(new CustomEvent('city-buildings-panel-state', { detail: { collapsed: collapsed.value } }));
+}
+
 watch(
   () => (window as any).appState?.osmCityData,
   () => _syncRowsFromState(),
@@ -252,6 +256,10 @@ watch(searchText, () => {
 
 watch(filteredRows, () => {
   if (currentPage.value >= totalPages.value) currentPage.value = totalPages.value - 1;
+});
+
+watch(collapsed, () => {
+  _emitPanelState();
 });
 
 onMounted(() => {
@@ -281,10 +289,20 @@ onMounted(() => {
     const panel = document.getElementById('cityTablePanel');
     panel?.scrollIntoView({ block: 'nearest' });
   };
+  (window as any).toggleCityBuildingsPanel = () => {
+    collapsed.value = !collapsed.value;
+    if (!collapsed.value) {
+      const panel = document.getElementById('cityTablePanel');
+      panel?.scrollIntoView({ block: 'nearest' });
+    }
+    return collapsed.value;
+  };
+  (window as any).isCityBuildingsPanelCollapsed = () => collapsed.value;
   (window as any).syncCityBuildingsTable = () => _syncRowsFromState();
   (window as any).syncSelectedCityBuilding = (index: number | null) => { void _syncSelectedRow(index); };
   void _syncRowsFromState();
   void _syncSelectedRow((window as any).appState?.selectedCityBuildingIndex ?? null);
+  _emitPanelState();
 });
 
 onBeforeUnmount(() => {
@@ -299,6 +317,12 @@ onBeforeUnmount(() => {
   }
   if ((window as any).openCityBuildingsPanel) {
     delete (window as any).openCityBuildingsPanel;
+  }
+  if ((window as any).toggleCityBuildingsPanel) {
+    delete (window as any).toggleCityBuildingsPanel;
+  }
+  if ((window as any).isCityBuildingsPanelCollapsed) {
+    delete (window as any).isCityBuildingsPanelCollapsed;
   }
   if ((window as any).syncCityBuildingsTable === _syncRowsFromState) {
     delete (window as any).syncCityBuildingsTable;
