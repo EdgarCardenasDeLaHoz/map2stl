@@ -1,4 +1,11 @@
 <template>
+  <div
+    id="cityTablePanelResizeHandle"
+    :class="['city-table-resize-handle', resizing && 'dragging', collapsed && 'hidden']"
+    title="Drag to resize buildings table panel"
+    @mousedown="startResize"
+  ></div>
+
   <div :class="['city-table-panel', collapsed && 'city-table-panel-collapsed']" id="cityTablePanel">
     <div class="city-table-panel-header">
       <div class="city-table-panel-title">🏙 Buildings Table</div>
@@ -88,11 +95,23 @@ type BuildingRow = {
 };
 
 const collapsed = ref(false);
+const resizing = ref(false);
 const searchText = ref('');
 const currentPage = ref(0);
 const selectedIndex = ref<number | null>(null);
 const pageSize = 20;
 const buildingRows = ref<BuildingRow[]>([]);
+const panelWidth = ref(420);
+
+const PANEL_MIN_WIDTH = 260;
+const PANEL_MAX_WIDTH = 900;
+const PANEL_WIDTH_STORAGE_KEY = 'strm2stl_cityTablePanelWidth';
+
+let _resizeStartX = 0;
+let _resizeStartW = panelWidth.value;
+let _rafPending = false;
+let _onResizeMove: ((e: MouseEvent) => void) | null = null;
+let _onResizeUp: (() => void) | null = null;
 
 function _toFiniteNumber(val: unknown): number | null {
   const num = typeof val === 'number' ? val : Number(val);
@@ -180,6 +199,41 @@ function selectBuilding(index: number) {
   (window as any).selectCityBuilding?.(index);
 }
 
+function _emitPanelResizeEffects() {
+  if (_rafPending) return;
+  _rafPending = true;
+  requestAnimationFrame(() => {
+    (window as any).events?.emit?.((window as any).EV?.STACKED_UPDATE);
+    if ((window as any).appState?.lastDemData?.values?.length) {
+      (window as any).recolorDEM?.();
+    }
+    _rafPending = false;
+  });
+}
+
+function stopResize() {
+  if (!resizing.value) return;
+  resizing.value = false;
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  try {
+    localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(panelWidth.value));
+  } catch (_) {
+    // Ignore storage failures (private mode, quota, etc.)
+  }
+  _emitPanelResizeEffects();
+}
+
+function startResize(e: MouseEvent) {
+  if (collapsed.value) return;
+  _resizeStartX = e.clientX;
+  _resizeStartW = panelWidth.value;
+  resizing.value = true;
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  e.preventDefault();
+}
+
 watch(
   () => (window as any).appState?.osmCityData,
   () => _syncRowsFromState(),
@@ -201,6 +255,27 @@ watch(filteredRows, () => {
 });
 
 onMounted(() => {
+  try {
+    const savedWidth = localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
+    if (savedWidth) {
+      const parsedWidth = parseInt(savedWidth, 10);
+      if (Number.isFinite(parsedWidth)) {
+        panelWidth.value = Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, parsedWidth));
+      }
+    }
+  } catch (_) {
+    // Ignore storage failures.
+  }
+
+  _onResizeMove = (e: MouseEvent) => {
+    if (!resizing.value) return;
+    panelWidth.value = Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, _resizeStartW + (_resizeStartX - e.clientX)));
+    _emitPanelResizeEffects();
+  };
+  _onResizeUp = () => stopResize();
+  document.addEventListener('mousemove', _onResizeMove);
+  document.addEventListener('mouseup', _onResizeUp);
+
   (window as any).openCityBuildingsPanel = () => {
     collapsed.value = false;
     const panel = document.getElementById('cityTablePanel');
@@ -213,6 +288,15 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  stopResize();
+  if (_onResizeMove) {
+    document.removeEventListener('mousemove', _onResizeMove);
+    _onResizeMove = null;
+  }
+  if (_onResizeUp) {
+    document.removeEventListener('mouseup', _onResizeUp);
+    _onResizeUp = null;
+  }
   if ((window as any).openCityBuildingsPanel) {
     delete (window as any).openCityBuildingsPanel;
   }
@@ -226,6 +310,27 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.city-table-resize-handle {
+  width: 5px;
+  height: 100%;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.city-table-resize-handle:hover,
+.city-table-resize-handle.dragging {
+  background: rgba(100, 160, 255, 0.25);
+}
+
+.city-table-resize-handle.hidden {
+  width: 0;
+  pointer-events: none;
+}
+
 .city-table-panel {
   display: flex;
   flex-direction: column;
@@ -233,7 +338,7 @@ onBeforeUnmount(() => {
   flex-shrink: 1;
   overflow: hidden;
   border-left: 1px solid var(--bg-light);
-  width: 420px;
+  width: v-bind('panelWidth + "px"');
   min-width: 260px;
   background: #1f1f1f;
 }
