@@ -204,6 +204,47 @@ class TestCityRaster:
         r2 = client.post("/api/cities/raster", json=payload).json()
         assert r1["values"] == r2["values"]
 
+    def test_multipolygon_building_rasterizes_all_parts(self, client, tmp_data_dir):
+        """A MultiPolygon footprint should burn all constituent polygons into the raster."""
+        building_fc = {
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "geometry": {
+                    "type": "MultiPolygon",
+                    "coordinates": [
+                        [[
+                            [-75.1695, 39.9505],
+                            [-75.1665, 39.9505],
+                            [-75.1665, 39.9535],
+                            [-75.1695, 39.9535],
+                            [-75.1695, 39.9505],
+                        ]],
+                        [[
+                            [-75.1435, 39.9565],
+                            [-75.1405, 39.9565],
+                            [-75.1405, 39.9595],
+                            [-75.1435, 39.9595],
+                            [-75.1435, 39.9565],
+                        ]],
+                    ],
+                },
+                "properties": {"height_m": 8.0},
+            }],
+        }
+
+        dim = 40
+        resp = client.post("/api/cities/raster", json=self._payload(dim=dim, buildings=building_fc))
+        assert resp.status_code == 200
+        body = resp.json()
+        arr = np.array(body["values"], dtype=np.float32).reshape(dim, dim)
+
+        # One polygon in SW-ish area and one in NE-ish area should both appear as raised cells.
+        sw_nonzero = np.count_nonzero(arr[22:39, 0:18] > 0)
+        ne_nonzero = np.count_nonzero(arr[0:18, 22:39] > 0)
+        assert sw_nonzero > 0
+        assert ne_nonzero > 0
+
     def test_projection_non_finite_values_are_sanitized(self, client, tmp_data_dir):
         """Projected raster with NaN/Inf should be JSON-safe and return 200."""
         payload = self._payload(dim=10)

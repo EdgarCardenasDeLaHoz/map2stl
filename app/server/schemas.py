@@ -182,8 +182,14 @@ class CityRasterRequest(BaseModel):
                                       description="Waterway surface height relative to 0")
     projection: str = Field(
         "none", description="Map projection to apply after rasterisation ('none', 'cosine', 'mercator', etc.)")
+    clip_valid_region: Optional[bool] = Field(
+        True,
+        description="Clip projection padding to the valid data extent.",
+    )
     clip_nans: bool = Field(
-        True, description="Strip all-NaN border rows/columns created by projection")
+        True,
+        description="Deprecated alias for clip_valid_region.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +395,7 @@ class ProcessingSpec(BaseModel):
 class MergeLayerSpec(BaseModel):
     """One layer in the merge stack."""
     source: str = "local"
-    dim: int = Field(300, ge=50, le=2000)
+    dim: int = Field(600, ge=50, le=2000)
     blend_mode: Literal["base", "replace",
                         "blend", "rivers", "max", "min"] = "base"
     weight: float = Field(1.0, ge=0.0, le=10.0)
@@ -400,7 +406,7 @@ class MergeLayerSpec(BaseModel):
 class MergeRequest(BaseModel):
     """Request body for POST /api/composite/dem-merge."""
     bbox: Dict[str, float]
-    dim: int = Field(300, ge=50, le=2000)
+    dim: int = Field(600, ge=50, le=2000)
     layers: List[MergeLayerSpec]
 
 

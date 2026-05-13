@@ -46,6 +46,7 @@ NAMESPACE_TTL = {
     "osm":         7 * 86400,  # 7 days
     "composite":  30 * 86400,   # 30 days (city rasters tied to OSM data)
     "opentopo":   90 * 86400,   # 90 days (raw GeoTIFFs rarely change)
+    "hydrology":  30 * 86400,   # 30 days (river network rarely changes)
 }
 MAX_FILES_PER_NAMESPACE = 200
 

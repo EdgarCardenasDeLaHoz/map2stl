@@ -57,6 +57,12 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["terrain"])
 
+# In-flight request dedupe: maps cache_key -> asyncio.Future of the JSONResponse
+# payload dict. When a duplicate request arrives while one is running, it awaits
+# the same Future instead of starting a fresh pipeline. Cleared on completion.
+import asyncio
+_HYDRO_INFLIGHT: dict[str, "asyncio.Future"] = {}
+
 
 # ---------------------------------------------------------------------------
 # Sync compute helpers (called via run_in_executor to avoid blocking the loop)
@@ -82,6 +88,19 @@ def _project_water_arrays(water_mask, esa_img, north, south, east, west,
     """
     return _project_water_arrays_impl(water_mask, esa_img, north, south,
                                       east, west, projection, clip_nans)
+
+
+def _parse_clip_valid_region(params, default: bool = True) -> bool:
+    """Parse projection-edge clipping flag with backward compatibility.
+
+    Preferred query key is ``clip_valid_region``.
+    Legacy ``clip_nans`` remains accepted for existing clients.
+    """
+    if "clip_valid_region" in params:
+        return _parse_bool(params, "clip_valid_region", default)
+    if "clip_nans" in params:
+        return _parse_bool(params, "clip_nans", default)
+    return default
 
 
 def _make_local_dem(north, south, east, west, dim, depth_scale, water_scale,
@@ -145,7 +164,15 @@ async def get_terrain_dem(
     dataset: Optional[str] = Query(None, description="Land-use dataset: 'esa' or 'jrc'"),
     projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
     maintain_dimensions: Optional[bool] = Query(None, description="Maintain output dimensions after projection"),
-    clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
+    clip_valid_region: Optional[bool] = Query(
+        None,
+        description="Clip projection padding to valid data extent (recommended).",
+    ),
+    clip_nans: Optional[bool] = Query(
+        None,
+        description="Deprecated alias for clip_valid_region.",
+        deprecated=True,
+    ),
     dem_source: Optional[str] = Query(None, description="DEM source: 'local', 'h5_local', or OpenTopography key"),
 ):
     """
@@ -163,7 +190,7 @@ async def get_terrain_dem(
     dataset = params.get("dataset", "esa")
     projection = params.get("projection", "cosine")
     maintain_dimensions = _parse_bool(params, "maintain_dimensions", True)
-    clip_nans = _parse_bool(params, "clip_nans", False)
+    clip_valid_region = _parse_clip_valid_region(params, default=True)
     dem_source = params.get("dem_source", "local")
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
@@ -175,11 +202,13 @@ async def get_terrain_dem(
         f"west={west} dim={dim} show_sat={show_sat}")
 
     # --- DEM disk cache check ---
+    # Note: Cache key does NOT include projection or clip_valid_region.
+    # Raw data is cached once per bbox; projection/clipping applied on fetch.
     _dem_cache_key = make_cache_key("dem", north, south, east, west, {
-        "dim": dim, "src": dem_source, "proj": projection,
+        "dim": dim, "src": dem_source,
         "ds": depth_scale, "ws": water_scale,
         "sw": subtract_water, "md": maintain_dimensions,
-        "cn": clip_nans, "sat": show_sat,
+        "sat": show_sat,
     })
     _cached = read_array_cache("dem", _dem_cache_key)
     if _cached is not None and _cached[0].get("dem") is not None:
@@ -198,7 +227,7 @@ async def get_terrain_dem(
             im = _project_grid(
                 im.astype(np.float32), north or 0.0, south or 0.0,
                 east or 0.0, west or 0.0,
-                projection, clip_nans, categorical=False,
+                projection, clip_valid_region, categorical=False,
             )
         payload = _make_dem_payload(im, west or 0.0, south or 0.0,
                                     east or 0.0, north or 0.0, show_sat=False)
@@ -216,7 +245,7 @@ async def get_terrain_dem(
                             north, south, east, west, dim,
                             depth_scale, water_scale,
                             subtract_water, projection, maintain_dimensions,
-                            clip_nans)
+                            clip_valid_region)
         im = _upsample_dem(im, dim)
 
         # Apply projection uniformly for ALL sources.
@@ -225,7 +254,7 @@ async def get_terrain_dem(
         if projection != "none":
             im = _project_grid(
                 im.astype(np.float32), north, south, east, west,
-                projection, clip_nans, categorical=False,
+                projection, clip_valid_region, categorical=False,
             )
 
         response_content = _make_dem_payload(
@@ -246,7 +275,7 @@ async def get_terrain_dem(
                             sat_height, sat_width)
                         sat_arr = _project_grid(
                             sat_arr, north, south, east, west,
-                            projection, clip_nans, categorical=True)
+                            projection, clip_valid_region, categorical=True)
                         sat_height, sat_width = sat_arr.shape
                         sat_values = sat_arr.ravel().tolist()
                     response_content["sat_available"] = True
@@ -286,7 +315,15 @@ async def get_terrain_water_mask(
     dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
     dataset: Optional[str] = Query(None, description="Water dataset: 'esa' or 'jrc'"),
     projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
-    clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
+    clip_valid_region: Optional[bool] = Query(
+        None,
+        description="Clip projection padding to valid data extent (recommended).",
+    ),
+    clip_nans: Optional[bool] = Query(
+        None,
+        description="Deprecated alias for clip_valid_region.",
+        deprecated=True,
+    ),
 ):
     """Fetch a binary water mask and ESA WorldCover land-cover data."""
     logger.info("Received request for /api/terrain/water-mask")
@@ -299,7 +336,7 @@ async def get_terrain_water_mask(
         if water_dataset not in ("esa", "jrc"):
             water_dataset = "esa"
         projection = params.get("projection", "none")
-        clip_nans = _parse_bool(params, "clip_nans", False)
+        clip_valid_region = _parse_clip_valid_region(params, default=True)
 
         err = _validate_bbox(north, south, east, west)
         if err:
@@ -315,9 +352,10 @@ async def get_terrain_water_mask(
         sat_scale = max(10, int(math.ceil(_longer_m / dim)))
 
         # --- Water mask disk cache check ---
+        # Note: Cache key does NOT include projection or clip_valid_region.
+        # Raw data is cached once per bbox; projection/clipping applied on fetch.
         _water_cache_key = make_cache_key("water", north, south, east, west, {
-            "dim": dim, "ds": water_dataset,
-            "proj": projection, "cn": clip_nans})
+            "dim": dim, "ds": water_dataset})
         _wc = read_array_cache("water", _water_cache_key)
         if _wc is not None:
             _warr, _wmeta = _wc
@@ -348,7 +386,7 @@ async def get_terrain_water_mask(
             if projection != "none":
                 water_arr, esa_arr = _project_water_arrays(
                     water_arr.astype(np.float32), esa_arr.astype(np.float32),
-                    north, south, east, west, projection, clip_nans)
+                    north, south, east, west, projection, clip_valid_region)
                 h, w = water_arr.shape
             wp = int(np.sum(water_arr > 0.5))
             tp = h * w
@@ -377,7 +415,7 @@ async def get_terrain_water_mask(
         # Apply projection if requested
         if projection != "none":
             water_mask, img = _project_water_arrays(
-                water_mask, img, north, south, east, west, projection, clip_nans)
+                water_mask, img, north, south, east, west, projection, clip_valid_region)
             h, w = water_mask.shape
             water_pixels = int(np.sum(water_mask > 0.5))
             total_pixels = h * w
@@ -411,7 +449,15 @@ async def get_terrain_esa_land_cover(
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
     dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
     projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
-    clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
+    clip_valid_region: Optional[bool] = Query(
+        None,
+        description="Clip projection padding to valid data extent (recommended).",
+    ),
+    clip_nans: Optional[bool] = Query(
+        None,
+        description="Deprecated alias for clip_valid_region.",
+        deprecated=True,
+    ),
 ):
     """Fetch ESA WorldCover land-cover class data independently of the water mask."""
     logger.info("Received request for /api/terrain/esa-land-cover")
@@ -420,7 +466,7 @@ async def get_terrain_esa_land_cover(
         north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
         dim = _parse_int(params, "dim", 600)
         projection = params.get("projection", "none")
-        clip_nans = _parse_bool(params, "clip_nans", False)
+        clip_valid_region = _parse_clip_valid_region(params, default=True)
 
         err = _validate_bbox(north, south, east, west)
         if err:
@@ -434,8 +480,10 @@ async def get_terrain_esa_land_cover(
         _longer_m = max(_bbox_w_m, _bbox_h_m, 1.0)
         sat_scale = max(10, int(math.ceil(_longer_m / dim)))
 
+        # Note: Cache key does NOT include projection or clip_valid_region.
+        # Raw data is cached once per bbox; projection/clipping applied on fetch.
         _esa_cache_key = make_cache_key("esa_lc", north, south, east, west, {
-            "dim": dim, "proj": projection, "cn": clip_nans})
+            "dim": dim})
         _ec = read_array_cache("esa_lc", _esa_cache_key)
         if _ec is not None:
             _earr, _emeta = _ec
@@ -457,7 +505,7 @@ async def get_terrain_esa_land_cover(
             if projection != "none":
                 esa_arr = _project_grid(
                     esa_arr, north, south, east, west,
-                    projection, clip_nans, categorical=True)
+                    projection, clip_valid_region, categorical=True)
                 h, w = esa_arr.shape
             return JSONResponse(content={
                 "esa_values_b64": _b64(esa_arr),
@@ -499,7 +547,7 @@ async def get_terrain_esa_land_cover(
         # Apply projection if requested
         if projection != "none":
             img = _project_grid(img.astype(np.float32), north, south, east, west,
-                                projection, clip_nans, categorical=True)
+                                projection, clip_valid_region, categorical=True)
 
         h, w = img.shape
 
@@ -526,20 +574,28 @@ async def get_terrain_satellite(
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
     dim: Optional[int] = Query(None, description="Output image resolution (pixels per side)"),
     projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
-    clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
+    clip_valid_region: Optional[bool] = Query(
+        None,
+        description="Clip projection padding to valid data extent (recommended).",
+    ),
+    clip_nans: Optional[bool] = Query(
+        None,
+        description="Deprecated alias for clip_valid_region.",
+        deprecated=True,
+    ),
 ):
     """
     Fetch real satellite imagery (ESRI World Imagery WMTS tiles) for a bounding box.
     Returns a base64-encoded JPEG string.
 
-    Supports map projection via ``projection`` and ``clip_nans`` query params,
+    Supports map projection via ``projection`` and ``clip_valid_region`` query params,
     consistent with all other raster endpoints.
     """
     params = request.query_params
     north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
     dim = _parse_int(params, "dim", 600)
     projection = params.get("projection", "none")
-    clip_nans = _parse_bool(params, "clip_nans", True)
+    clip_valid_region = _parse_clip_valid_region(params, default=True)
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
     if err:
@@ -554,7 +610,7 @@ async def get_terrain_satellite(
         if projection != "none":
             img_arr = np.array(img)
             projected = _project_rgb_image(
-                img_arr, north, south, east, west, projection, clip_nans)
+                img_arr, north, south, east, west, projection, clip_valid_region)
             img = Image.fromarray(projected)
         buf = BytesIO()
         img.save(buf, format="JPEG", quality=80)
@@ -577,7 +633,7 @@ async def get_terrain_satellite(
 
             projected = await run_sync(
                 _project_rgb_image, img_arr,
-                north, south, east, west, projection, clip_nans)
+                north, south, east, west, projection, clip_valid_region)
 
             out_img = _Image.fromarray(projected)
             buf = _BytesIO()
@@ -629,15 +685,24 @@ async def get_terrain_hydrology(
     scale_m: Optional[int] = Query(None, description="Natural Earth dataset tier: 10 (finest), 50, or 110"),
     min_order: Optional[int] = Query(None, description="HydroRIVERS minimum Strahler order 1-9 (1=all, 9=major only)"),
     order_exponent: Optional[float] = Query(None, description="HydroRIVERS depression scaling exponent"),
+    width_factor: Optional[float] = Query(None, description="HydroRIVERS line width multiplier (default 1.0; higher = thicker rivers)"),
     projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
-    clip_nans: Optional[bool] = Query(None, description="Clip NaN-only border rows/cols from projected output"),
+    clip_valid_region: Optional[bool] = Query(
+        None,
+        description="Clip projection padding to valid data extent (recommended).",
+    ),
+    clip_nans: Optional[bool] = Query(
+        None,
+        description="Deprecated alias for clip_valid_region.",
+        deprecated=True,
+    ),
 ):
     """
     Fetch river hydrology and rasterize as an elevation depression grid.
 
     Query parameters:
         north, south, east, west: bounding box
-        dim:            output grid resolution (pixels per side, default 300)
+        dim:            output grid resolution (pixels per side, default 600)
         depression_m:   max river depression in metres, negative (default -5.0)
         source:         'natural_earth' (default, global, coarse) or
                         'hydrorivers'   (HydroRIVERS ~500 m detail, downloaded on first use)
@@ -653,7 +718,7 @@ async def get_terrain_hydrology(
     params = request.query_params
 
     north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
-    dim = _parse_int(params, "dim", 300)
+    dim = _parse_int(params, "dim", 600)
     depression_m = _parse_float(params, "depression_m", -5.0)
     source = params.get("source", "natural_earth")
     if source not in ("natural_earth", "hydrorivers"):
@@ -668,9 +733,11 @@ async def get_terrain_hydrology(
     min_order = _parse_int(params, "min_order", 3)
     min_order = max(1, min(9, min_order))
     order_exponent = _parse_float(params, "order_exponent", 1.5)
+    width_factor = _parse_float(params, "width_factor", 1.0)
+    width_factor = max(0.1, min(20.0, width_factor))
 
     projection = params.get("projection", "none")
-    clip_nans = _parse_bool(params, "clip_nans", False)
+    clip_valid_region = _parse_clip_valid_region(params, default=True)
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
     if err:
@@ -678,6 +745,38 @@ async def get_terrain_hydrology(
 
     logger.debug(f"GET /api/terrain/hydrology bbox=({north},{south},{east},{west}) "
                  f"dim={dim} source={source} depression={depression_m}")
+
+    # Cache key covers every parameter that affects the rasterized output.
+    # Note: Cache key does NOT include projection or clip_valid_region.
+    # Raw data is cached once per bbox; projection/clipping applied on fetch.
+    cache_extra = {
+        "dim": dim, "src": source, "dep": depression_m,
+        "scl": scale_m, "mo": min_order, "oe": order_exponent,
+        "wf": width_factor,
+    }
+    cache_key = make_cache_key("hydrology", north, south, east, west, cache_extra)
+    cached = read_array_cache("hydrology", cache_key)
+    if cached is not None:
+        arrs, meta = cached
+        river_grid = arrs.get("river_grid")
+        if river_grid is not None:
+            h, w = river_grid.shape
+            logger.info("Hydrology cache hit: %s (%dx%d)", cache_key[:8], w, h)
+            return JSONResponse(content={
+                "river_grid_values_b64": _b64(river_grid),
+                "river_grid_dimensions": [h, w],
+                "feature_count": int(meta.get("feature_count", 0)),
+                "source": meta.get("source", source),
+                "depression_m": depression_m,
+            })
+
+    # In-flight dedupe: if an identical request is already running, await its result
+    # instead of starting a duplicate ~150-second pipeline.
+    inflight = _HYDRO_INFLIGHT.get(cache_key)
+    if inflight is not None:
+        logger.info("Hydrology in-flight join: %s", cache_key[:8])
+        payload = await inflight
+        return JSONResponse(content=payload)
 
     if TEST_MODE:
         h, w = dim, dim
@@ -687,7 +786,7 @@ async def get_terrain_hydrology(
         if projection != "none":
             river_arr = _project_grid(
                 river_arr, north, south, east, west,
-                projection, clip_nans, categorical=False)
+                projection, clip_valid_region, categorical=False)
             river_arr = np.nan_to_num(river_arr, nan=0.0)
             h, w = river_arr.shape
         return JSONResponse(content={
@@ -698,29 +797,37 @@ async def get_terrain_hydrology(
             "depression_m": depression_m,
         })
 
+    # No cache, no in-flight: register a Future so concurrent duplicates can join.
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future = loop.create_future()
+    _HYDRO_INFLIGHT[cache_key] = fut
+
     try:
         result = await run_sync(
             _fetch_and_rasterize_hydrology,
             north, south, east, west, dim,
             scale_m, depression_m,
-            source, min_order, order_exponent)
+            source, min_order, order_exponent, width_factor)
 
         if result is None:
-            return JSONResponse(content={
+            payload = {
                 "river_grid_values": [],
                 "river_grid_dimensions": [dim, dim],
                 "feature_count": 0,
                 "source": source,
                 "depression_m": depression_m,
                 "error": "No rivers found in region",
-            }, status_code=200)
+            }
+            if not fut.done():
+                fut.set_result(payload)
+            return JSONResponse(content=payload, status_code=200)
 
         river_grid = result["river_grid"]
 
         # Apply projection if requested
         if projection != "none":
             river_grid = _project_grid(
-                river_grid, north, south, east, west, projection, clip_nans,
+                river_grid, north, south, east, west, projection, clip_valid_region,
                 categorical=False)
             # Replace NaN fill (from projection) with 0 (= no river) so JSON
             # serialisation produces 0.0 instead of null.
@@ -728,17 +835,32 @@ async def get_terrain_hydrology(
 
         h, w = river_grid.shape
 
-        return JSONResponse(content={
+        write_array_cache(
+            "hydrology", cache_key,
+            {"river_grid": river_grid},
+            {"feature_count": int(result["feature_count"]),
+             "source": result.get("source", source)},
+        )
+
+        payload = {
             "river_grid_values_b64": _b64(river_grid),
             "river_grid_dimensions": [h, w],
             "feature_count": result["feature_count"],
             "source": result.get("source", source),
             "depression_m": depression_m,
-        })
+        }
+        if not fut.done():
+            fut.set_result(payload)
+        return JSONResponse(content=payload)
 
     except Exception as e:
         logger.error(f"Error in get_terrain_hydrology: {e}", exc_info=True)
+        if not fut.done():
+            fut.set_exception(e)
         return error_response("Hydrology fetch failed")
+    finally:
+        # Always clear the in-flight slot so retries can start a fresh pipeline.
+        _HYDRO_INFLIGHT.pop(cache_key, None)
 
 
 

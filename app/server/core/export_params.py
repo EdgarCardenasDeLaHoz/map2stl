@@ -80,6 +80,15 @@ class ExportContext:
     exaggeration: float = 1.0
     sea_level_cap: bool = False
     name: str = "terrain"
+    # Horizontal scale: 1 DEM pixel → mm_per_pixel mm in the printed model.
+    # Default 1.0 means "1 px = 1 mm" — i.e. an N×M DEM produces an N×M mm STL.
+    mm_per_pixel: float = 1.0
+    # Optional composite layer spec — when present the server runs the merge
+    # pipeline before scaling/extrusion so the 3D model matches what the user
+    # configured in the Composite tab.
+    composite_layers: Optional[list] = None
+    composite_dim: Optional[int] = None
+    bbox: Optional[dict] = None
 
     @classmethod
     def from_request(cls, data: dict) -> "ExportContext":
@@ -94,6 +103,21 @@ class ExportContext:
         dem_values = data.get("dem_values", [])
         height = data.get("height", 0)
         width = data.get("width", 0)
+
+        # Composite mode (highest priority): rebuild the DEM from the merge spec
+        # so the 3D output reflects the user's Composite-tab configuration.
+        composite_layers = data.get("composite_layers") or None
+        if composite_layers and data.get("bbox"):
+            try:
+                # Lazy import — avoids circular deps with the composite router.
+                from app.server.routers.composite import compute_composite_dem
+                dim = int(data.get("composite_dim") or data.get("dem", {}).get("dim") or 600)
+                composite = compute_composite_dem(
+                    data["bbox"], dim, composite_layers)
+                dem_values = composite.flatten().tolist()
+                height, width = composite.shape
+            except Exception as exc:
+                logger.exception("Composite resolve failed; falling back: %s", exc)
 
         # Settings-only mode: resolve DEM from cache
         if not dem_values:
@@ -110,6 +134,10 @@ class ExportContext:
             exaggeration=float(data.get("exaggeration", 1.0)),
             sea_level_cap=bool(data.get("sea_level_cap", False)),
             name=data.get("name", "terrain"),
+            mm_per_pixel=float(data.get("mm_per_pixel", 1.0)),
+            composite_layers=data.get("composite_layers") or None,
+            composite_dim=int(data["composite_dim"]) if data.get("composite_dim") else None,
+            bbox=data.get("bbox") or None,
         )
 
 

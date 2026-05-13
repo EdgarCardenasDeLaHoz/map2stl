@@ -82,6 +82,14 @@ class CityExportRequest(BaseModel):
     name:             str = "city"
 
 
+def _city_clip_valid_region(req) -> bool:
+    """Return the preferred clip setting while accepting the legacy alias."""
+    clip_valid_region = getattr(req, "clip_valid_region", None)
+    if clip_valid_region is not None:
+        return bool(clip_valid_region)
+    return bool(getattr(req, "clip_nans", True))
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -204,10 +212,13 @@ async def get_city_raster(req: CityRasterRequest):
             "bbox": payload["bbox"],
         }
 
+    clip_valid_region = _city_clip_valid_region(req)
+
+    # Note: Cache key does NOT include projection or clip_valid_region.
+    # Raw city raster is cached once per bbox; projection/clipping applied on fetch.
     cache_key = hashlib.md5(
         f"cityRaster|{req.north:.4f}_{req.south:.4f}_{req.east:.4f}_{req.west:.4f}"
-        f"_dim{req.dim}_bs{req.building_scale}_rd{req.road_depression_m}_wd{req.water_depression_m}"
-        f"_proj{req.projection}_cn{req.clip_nans}".encode()
+        f"_dim{req.dim}_bs{req.building_scale}_rd{req.road_depression_m}_wd{req.water_depression_m}".encode()
     ).hexdigest()
 
     # Cache check
@@ -216,12 +227,25 @@ async def get_city_raster(req: CityRasterRequest):
         if cache_path.exists():
             try:
                 arr = np.load(cache_path)
+                raw_h = int(arr["height"])
+                raw_w = int(arr["width"])
+                grid = np.array(arr["values"], dtype=np.float32).reshape(raw_h, raw_w)
+
+                # Projection/clipping is always applied fresh from raw cached raster.
+                if req.projection != "none":
+                    from geo2stl.projections import project_grid
+                    grid = project_grid(
+                        grid,
+                        req.north, req.south, req.east, req.west,
+                        req.projection, clip_valid_region, categorical=False,
+                    )
+
                 cached_result = _sanitize_raster_result({
-                    "values": arr["values"].flatten().tolist(),
-                    "width": int(arr["width"]),
-                    "height": int(arr["height"]),
-                    "vmin": float(arr["vmin"]),
-                    "vmax": float(arr["vmax"]),
+                    "values": grid.flatten().tolist(),
+                    "width": int(grid.shape[1]),
+                    "height": int(grid.shape[0]),
+                    "vmin": float(np.nanmin(grid)),
+                    "vmax": float(np.nanmax(grid)),
                     "bbox": {"north": req.north, "south": req.south,
                              "east": req.east, "west": req.west},
                 })
@@ -256,6 +280,23 @@ async def get_city_raster(req: CityRasterRequest):
         logger.error(f"City raster error: {e}", exc_info=True)
         return error_response(str(e))
 
+    # Cache raw unprojected result (cache key has NO projection/clip params).
+    raw_result = _sanitize_raster_result(result)
+    if _CACHE_AVAILABLE and CACHE_ROOT is not None:
+        try:
+            cache_path = CACHE_ROOT / "dem" / f"{cache_key}.npz"
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(
+                cache_path,
+                values=np.array(raw_result["values"], dtype=np.float32),
+                width=np.array(raw_result["width"]),
+                height=np.array(raw_result["height"]),
+                vmin=np.array(raw_result["vmin"]),
+                vmax=np.array(raw_result["vmax"]),
+            )
+        except Exception as e:
+            logger.debug(f"City raster cache write failed: {e}")
+
     # Apply map projection (all raster layers use the same pipeline)
     if req.projection != "none":
         from geo2stl.projections import project_grid
@@ -263,7 +304,7 @@ async def get_city_raster(req: CityRasterRequest):
         grid = np.array(result["values"], dtype=np.float32).reshape(
             result["height"], result["width"])
         grid = project_grid(grid, req.north, req.south, req.east, req.west,
-                            req.projection, req.clip_nans, categorical=False)
+                            req.projection, clip_valid_region, categorical=False)
         h, w = grid.shape
         result = {
             "values": grid.flatten().tolist(),
@@ -276,23 +317,6 @@ async def get_city_raster(req: CityRasterRequest):
         }
 
     result = _sanitize_raster_result(result)
-
-    # Cache result
-    if _CACHE_AVAILABLE and CACHE_ROOT is not None:
-        try:
-            import numpy as np
-            cache_path = CACHE_ROOT / "dem" / f"{cache_key}.npz"
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            np.savez_compressed(
-                cache_path,
-                values=np.array(result["values"], dtype=np.float32),
-                width=np.array(result["width"]),
-                height=np.array(result["height"]),
-                vmin=np.array(result["vmin"]),
-                vmax=np.array(result["vmax"]),
-            )
-        except Exception as e:
-            logger.debug(f"City raster cache write failed: {e}")
 
     return JSONResponse(content=result)
 

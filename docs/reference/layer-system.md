@@ -148,6 +148,16 @@ sequenceDiagram
     FE->>FE: updateStackedLayers()
 ```
 
+**Source choice — `hydrorivers` is the default; do not re-litigate.**
+The endpoint accepts `source=natural_earth | hydrorivers` but HydroRIVERS wins at every zoom level for two structural reasons:
+
+1. **Thin-feature survival** — the HydroRIVERS rasterizer in [`geo2stl/hydrology.py`](../../geo2stl/hydrology.py) applies `min_buf_deg = pixel_deg * 0.6` so river lines are buffered to at least one pixel wide before rasterization. Without this, tributaries alias away during downsampling. The Natural Earth path has no such buffering, which is why tributaries vanish at continent zoom on NE.
+2. **Strahler-weighted depth** — HydroRIVERS carries Strahler order 1–9. Depression depth is computed as `base * (order/9)**exponent`, so major rivers carve deep while small tributaries still register at any printed scale. Natural Earth has no order field, so every river gets the same depth (or none).
+
+Use Natural Earth only as a fallback when (a) the HydroRIVERS regional shapefile hasn't been downloaded yet, or (b) the bbox covers a region HydroRIVERS does not include (e.g. Antarctica).
+
+**Server cache.** Rasterized `river_grid` is cached under `cache/hydrology/{key}.npz` keyed on `(bbox, dim, source, depression_m, scale_m, min_order, order_exponent, projection, clip_nans)` with a 30-day TTL. First Amazon-bbox call ≈200 s; repeats <50 ms. See [`app/server/routers/terrain.py`](../../app/server/routers/terrain.py) `get_terrain_hydrology` and [`app/server/core/cache.py`](../../app/server/core/cache.py).
+
 ### City Raster Layer
 
 Uses two separate rasterization endpoints serving different consumers:

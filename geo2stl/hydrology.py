@@ -3,6 +3,12 @@
 Provides Natural Earth rivers, lakes, and coastlines for multi-scale hydrology rendering,
 and HydroRIVERS-based high-detail regional river rasterization.
 Includes adaptive buffering to prevent thin-feature aliasing during downsampling.
+
+Source choice (do not re-litigate — see docs/reference/layer-system.md "Hydrology Layer"):
+HydroRIVERS is the default. It (1) buffers thin features to ≥1 pixel before rasterization
+so tributaries survive downsampling, and (2) carries Strahler order so depression depth
+scales with river size. Natural Earth has neither and is only a fallback for regions
+HydroRIVERS does not cover or before the regional shapefile has been downloaded.
 """
 
 from __future__ import annotations
@@ -587,8 +593,8 @@ def _ensure_region_parquet(region: str) -> Optional[Path]:
 def fetch_hydrorivers(
     north: float, south: float, east: float, west: float,
     min_order: int = 3,
-) -> Optional[dict]:
-    """Fetch HydroRIVERS features intersecting the bbox as a GeoJSON FeatureCollection.
+):
+    """Fetch HydroRIVERS features intersecting the bbox as a GeoDataFrame.
 
     Uses a three-tier cache:
     1. Regional shapefiles (simplified with collinear point reduction) — permanent
@@ -600,8 +606,9 @@ def fetch_hydrorivers(
         min_order: minimum Strahler order (1=all, 3=medium+, 5=major only).
 
     Returns:
-        GeoJSON FeatureCollection with properties ``ORD_STRA`` and ``DIS_AV_CMS``,
-        or None on failure.
+        GeoDataFrame with columns ``ORD_STRA``, ``DIS_AV_CMS``, ``geometry``, or
+        None on failure.  Returned directly (no GeoJSON serialization) so the
+        rasterizer can operate on shapely geometries without a round-trip.
     """
     try:
         import geopandas as gpd
@@ -644,31 +651,56 @@ def fetch_hydrorivers(
     import pandas as pd
     combined = pd.concat(gdfs, ignore_index=True)
 
+    effective_min_order = max(1, min_order)
     if "ORD_STRA" in combined.columns and min_order > 1:
         combined = combined[combined["ORD_STRA"] >= min_order].reset_index(drop=True)
 
-    logger.info("HydroRIVERS: %d features after order-%d+ filter", len(combined), min_order)
+    # For very large extents, cap feature volume before GeoJSON serialization.
+    # This keeps continent-scale calls responsive while preserving all detail
+    # for small/medium bboxes.
+    bbox_area_deg2 = max(0.0, (east - west)) * max(0.0, (north - south))
+    if "ORD_STRA" in combined.columns and len(combined) > 180000 and bbox_area_deg2 >= 100:
+        counts_by_order = {
+            order: int((combined["ORD_STRA"] >= order).sum())
+            for order in range(1, 10)
+        }
+        adaptive_cutoff = min_order
+        target_features = 120000
+        for candidate in range(max(min_order, 1), 10):
+            if counts_by_order[candidate] <= target_features:
+                adaptive_cutoff = candidate
+                break
+
+        if adaptive_cutoff > min_order:
+            before = len(combined)
+            combined = combined[combined["ORD_STRA"] >= adaptive_cutoff].reset_index(drop=True)
+            effective_min_order = adaptive_cutoff
+            logger.info(
+                "HydroRIVERS adaptive thinning: bbox_area=%.1f deg^2, "
+                "min_order %d -> %d, features %d -> %d",
+                bbox_area_deg2, min_order, adaptive_cutoff, before, len(combined),
+            )
+
+    logger.info("HydroRIVERS: %d features after order-%d+ filter", len(combined), effective_min_order)
 
     if len(combined) == 0:
         return None
 
-    import json as _json
-    t_json = _time.perf_counter()
-    result = _json.loads(combined.to_json())
     dt_total = _time.perf_counter() - t0
-    logger.info("HydroRIVERS fetch total: %.2fs (to_json: %.2fs, %d features)",
-                dt_total, _time.perf_counter() - t_json, len(combined))
-    return result
+    logger.info("HydroRIVERS fetch total: %.2fs (%d features, no JSON round-trip)",
+                dt_total, len(combined))
+    return combined
 
 
 def rasterize_hydrorivers(
-    geojson: dict,
+    gdf,
     north: float, south: float, east: float, west: float,
     dim: int,
     depression_base: float = -5.0,
     order_exponent: float = 1.5,
+    width_factor: float = 1.0,
 ) -> np.ndarray:
-    """Rasterize HydroRIVERS GeoJSON to a (dim×dim) float32 depression grid.
+    """Rasterize a HydroRIVERS GeoDataFrame to a (dim×dim) float32 depression grid.
 
     Depression depth is scaled by Strahler order::
 
@@ -677,19 +709,27 @@ def rasterize_hydrorivers(
     So order-9 Amazon = ``depression_base``, order-1 stream ≈ 0.
 
     Args:
-        geojson: FeatureCollection from fetch_hydrorivers()
+        gdf: GeoDataFrame with ``geometry`` and ``ORD_STRA`` columns
         depression_base: depth (metres, negative) for the largest rivers
         order_exponent: controls how steeply smaller rivers are cut
+        width_factor: multiplier on per-line buffer width (default 1.0).
+            Higher values produce visibly thicker rivers in the rasterized output.
 
     Returns:
         float32 array shape (dim, dim), 0 where no river, negative where river.
+
+    Implementation notes:
+        - Vectorized simplify + buffer via GeoPandas (C-level shapely 2.0 ops),
+          replacing a per-feature Python loop that dominated cold load times.
+        - ``rasterize(..., all_touched=True)`` paints a pixel if any part of the
+          line crosses it, so single-pixel-wide rivers stay visible without
+          requiring extra width.
     """
     try:
-        from shapely.geometry import shape, mapping
         from rasterio.features import rasterize as _rasterize
         from rasterio.transform import from_bounds
     except ImportError:
-        logger.error("shapely/rasterio not installed; returning zero grid")
+        logger.error("rasterio not installed; returning zero grid")
         return np.zeros((dim, dim), dtype=np.float32)
 
     import time as _time
@@ -697,57 +737,75 @@ def rasterize_hydrorivers(
 
     transform = from_bounds(west, south, east, north, dim, dim)
     pixel_deg = (north - south) / dim
-    min_buf_deg = pixel_deg * 0.6  # at least 1 pixel width for thin streams
+    min_buf_deg = pixel_deg * 0.6 * float(width_factor)  # ≥1 px wide × user factor
 
     grid = np.zeros((dim, dim), dtype=np.float32)
-    features = geojson.get("features", [])
-    max_order = 9  # HydroRIVERS Strahler max
-    logger.info("rasterize_hydrorivers: %d features, dim=%d, pixel_deg=%.5f",
-                len(features), dim, pixel_deg)
+    if gdf is None or len(gdf) == 0:
+        logger.info("rasterize_hydrorivers: empty input")
+        return grid
 
-    # Group features by order so we rasterize each order in one pass
+    # Adaptive thinning: cap features at ~2 * dim^2 for low-resolution outputs.
+    target_features = max(30000, min(180000, int(dim * dim * 2)))
+    if "ORD_STRA" in gdf.columns and len(gdf) > target_features:
+        # Find smallest cutoff such that count(order >= cutoff) <= target.
+        counts = (
+            gdf["ORD_STRA"].clip(lower=1, upper=9).astype(int).value_counts().sort_index()
+        )
+        # cumulative count of order >= k, walked from 9 downward
+        running, cutoff = 0, 9
+        for order in range(9, 0, -1):
+            running += int(counts.get(order, 0))
+            if running > target_features:
+                cutoff = order + 1
+                break
+            cutoff = order
+        if cutoff > 1:
+            before = len(gdf)
+            gdf = gdf[gdf["ORD_STRA"] >= cutoff]
+            logger.info(
+                "rasterize_hydrorivers: adaptive thinning dim=%d, %d -> %d features, min_order=%d+",
+                dim, before, len(gdf), cutoff,
+            )
+
+    n = len(gdf)
+    logger.info("rasterize_hydrorivers: %d features, dim=%d, pixel_deg=%.5f, width_factor=%.2f",
+                n, dim, pixel_deg, width_factor)
+
+    # Vectorized prep — simplify all geometries, then per-row buffer based on order.
     t_prep = _time.perf_counter()
-    from collections import defaultdict
-    by_order: dict[int, list] = defaultdict(list)
-    skipped_empty = 0
-    for feat in features:
-        props = feat.get("properties") or {}
-        order = int(props.get("ORD_STRA") or 1)
-        geom = feat.get("geometry")
-        if not geom:
-            continue
-        try:
-            s = shape(geom)
-            if s.geom_type in ("LineString", "MultiLineString"):
-                s = s.simplify(pixel_deg, preserve_topology=False)
-                if s.is_empty:
-                    skipped_empty += 1
-                    continue
-                buf = max(min_buf_deg, min_buf_deg * order / 3)
-                s = s.buffer(buf)
-            if not s.is_empty:
-                by_order[order].append(mapping(s))
-        except Exception:
-            continue
+    if "ORD_STRA" in gdf.columns:
+        order_arr = gdf["ORD_STRA"].clip(lower=1, upper=9).astype(int).to_numpy()
+    else:
+        order_arr = np.ones(n, dtype=int)
+    # Buffer width: same formula as the legacy code (max(min_buf, min_buf * order / 3)).
+    buffers = np.maximum(min_buf_deg, min_buf_deg * order_arr / 3.0)
+    geoms = gdf.geometry.simplify(pixel_deg, preserve_topology=False)
+    buffered = geoms.buffer(buffers)
+    keep = ~buffered.is_empty
+    buffered = buffered[keep]
+    order_arr = order_arr[keep.to_numpy()]
     dt_prep = _time.perf_counter() - t_prep
-    total_shapes = sum(len(v) for v in by_order.values())
-    logger.info("  simplify+buffer: %.2fs, %d shapes (%d skipped), %d order groups",
-                dt_prep, total_shapes, skipped_empty, len(by_order))
+    logger.info("  vectorized simplify+buffer: %.2fs, %d shapes",
+                dt_prep, len(buffered))
 
-    # Rasterize lowest order first so higher-order rivers overwrite
+    # Rasterize lowest order first so higher-order rivers overwrite (deeper carve).
     t_rast = _time.perf_counter()
-    for order in sorted(by_order.keys()):
-        depth = depression_base * (order / max_order) ** order_exponent
-        shapes = [(geom, depth) for geom in by_order[order]]
-        if not shapes:
+    max_order = 9
+    geoms_arr = buffered.to_numpy()  # for boolean indexing
+    for o in sorted(set(int(x) for x in order_arr)):
+        depth = depression_base * (o / max_order) ** order_exponent
+        mask = order_arr == o
+        if not mask.any():
             continue
+        shapes = [(g, float(depth)) for g in geoms_arr[mask]]
         try:
             layer = np.zeros((dim, dim), dtype=np.float32)
-            _rasterize(shapes, out=layer, transform=transform, dtype="float32")
-            mask = layer != 0.0
-            grid[mask] = np.minimum(grid[mask], layer[mask])
+            _rasterize(shapes, out=layer, transform=transform, dtype="float32",
+                       all_touched=True)
+            layer_mask = layer != 0.0
+            grid[layer_mask] = np.minimum(grid[layer_mask], layer[layer_mask])
         except Exception as e:
-            logger.warning("HydroRIVERS rasterize order %d: %s", order, e)
+            logger.warning("HydroRIVERS rasterize order %d: %s", o, e)
     dt_rast = _time.perf_counter() - t_rast
 
     n_river = int(np.sum(grid != 0))
@@ -774,15 +832,16 @@ class HydroRiversHydrologyLayer(HydrologyLayerBase):
         depression_m,
         min_order=3,
         order_exponent=1.5,
+        width_factor=1.0,
     ):
-        geojson = fetch_hydrorivers(north, south, east, west, min_order=min_order)
-        if geojson is None:
+        gdf = fetch_hydrorivers(north, south, east, west, min_order=min_order)
+        if gdf is None:
             logger.info("HydroRIVERS: no features in region")
             return None
 
-        n_features = len(geojson.get("features", []))
+        n_features = len(gdf)
         river_grid = rasterize_hydrorivers(
-            geojson,
+            gdf,
             north,
             south,
             east,
@@ -790,6 +849,7 @@ class HydroRiversHydrologyLayer(HydrologyLayerBase):
             dim,
             depression_base=depression_m,
             order_exponent=order_exponent,
+            width_factor=width_factor,
         )
         return {
             "river_grid": river_grid,
@@ -821,18 +881,17 @@ class HydrologyService:
         source="natural_earth",
         min_order=3,
         order_exponent=1.5,
+        width_factor=1.0,
     ):
         provider = self.providers.get(source) or self.providers["natural_earth"]
+        # Natural Earth provider doesn't accept width_factor; pass only when supported.
+        kwargs = dict(
+            min_order=min_order, order_exponent=order_exponent,
+        )
+        if isinstance(provider, HydroRiversHydrologyLayer):
+            kwargs["width_factor"] = width_factor
         return provider.fetch_and_rasterize(
-            north,
-            south,
-            east,
-            west,
-            dim,
-            scale_m,
-            depression_m,
-            min_order=min_order,
-            order_exponent=order_exponent,
+            north, south, east, west, dim, scale_m, depression_m, **kwargs,
         )
 
 
@@ -842,6 +901,7 @@ HYDROLOGY_LAYER = HydrologyService()
 def fetch_and_rasterize_hydrology(
     north, south, east, west, dim, scale_m, depression_m,
     source="natural_earth", min_order=3, order_exponent=1.5,
+    width_factor=1.0,
 ):
     """Fetch rivers and rasterize to a depression grid. Sync — call via run_in_executor.
 
@@ -867,6 +927,7 @@ def fetch_and_rasterize_hydrology(
             source=source,
             min_order=min_order,
             order_exponent=order_exponent,
+            width_factor=width_factor,
         )
         if result is None:
             return None

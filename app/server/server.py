@@ -132,7 +132,7 @@ Supported projections: `none` (Plate Carrée), `cosine`, `mercator`, \
 
 - **Continuous data** (DEM, water mask, hydrology): bilinear interpolation, `fill_value=NaN`
 - **Categorical data** (ESA land cover class IDs): nearest-neighbour interpolation, `fill_value=0`
-- **`clip_nans`** strips all-NaN border rows/columns created by the projection
+- **`clip_valid_region`** strips projection padding (all-NaN border rows/columns)
 
 ### Caching
 
@@ -158,7 +158,7 @@ _OPENAPI_TAGS = [
         "description": (
             "Digital Elevation Model (DEM) fetching, water masks, ESA land cover, "
             "satellite imagery, hydrology, layer merging, and export previews. "
-            "All raster endpoints accept `projection` and `clip_nans` parameters "
+            "All raster endpoints accept `projection` and `clip_valid_region` parameters "
             "for server-side map projection."
         ),
     },

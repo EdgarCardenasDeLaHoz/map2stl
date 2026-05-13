@@ -50,6 +50,7 @@ class CompositeCityRasterRequest(BaseModel):
     width:  int = 512
     height: int = 512
     projection: str = "none"
+    clip_valid_region: bool | None = None
     clip_nans: bool = True
 
 
@@ -236,42 +237,70 @@ async def get_city_raster(req: CompositeCityRasterRequest):
     Rasterize OSM features to height-delta grids using PIL.
     Returns normalized arrays (scale=1); client applies slider weights.
 
-    Supports ``projection`` and ``clip_nans`` for uniform pipeline alignment
+    Supports ``projection`` and ``clip_valid_region`` for uniform pipeline alignment
     with all other raster layers (DEM, water, hydrology, satellite, city).
     """
+    def _json_safe_flat(arr: np.ndarray) -> list[float]:
+        safe = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+        return safe.ravel().tolist()
+
+    clip_valid_region = req.clip_valid_region if req.clip_valid_region is not None else req.clip_nans
+    # Note: Cache key does NOT include projection or clip_valid_region.
+    # Raw city raster is cached once per bbox; projection/clipping applied on fetch.
     comp_key = make_cache_key(
         "composite", req.north, req.south, req.east, req.west,
-        {"w": req.width, "h": req.height,
-         "proj": req.projection, "cn": req.clip_nans}
+        {"w": req.width, "h": req.height}
     )
     cached = read_array_cache("composite", comp_key)
     if cached:
         arrays, meta = cached
         logger.debug(f"Composite city-raster cache hit: {comp_key[:8]}...")
+        h = int(meta.get("height", req.height))
+        w = int(meta.get("width", req.width))
+        out = {
+            "buildings": np.array(arrays["buildings"], dtype=np.float32).reshape(h, w),
+            "roads": np.array(arrays["roads"], dtype=np.float32).reshape(h, w),
+            "waterways": np.array(arrays["waterways"], dtype=np.float32).reshape(h, w),
+            "walls": np.array(arrays["walls"], dtype=np.float32).reshape(h, w),
+        }
+
+        # Projection/clipping is always applied fresh from raw cached arrays.
+        if req.projection != "none":
+            from geo2stl.projections import project_grid
+            for lname in ["buildings", "roads", "waterways", "walls"]:
+                out[lname] = project_grid(
+                    out[lname],
+                    req.north, req.south, req.east, req.west,
+                    req.projection, clip_valid_region, categorical=False,
+                )
+
+        ph, pw = out["buildings"].shape
         return JSONResponse(content={
-            "buildings":  arrays["buildings"].ravel().tolist(),
-            "roads":      arrays["roads"].ravel().tolist(),
-            "waterways":  arrays["waterways"].ravel().tolist(),
-            "walls":      arrays["walls"].ravel().tolist(),
-            "width":      int(meta.get("width",  req.width)),
-            "height":     int(meta.get("height", req.height)),
+            "buildings":  _json_safe_flat(out["buildings"]),
+            "roads":      _json_safe_flat(out["roads"]),
+            "waterways":  _json_safe_flat(out["waterways"]),
+            "walls":      _json_safe_flat(out["walls"]),
+            "width":      pw,
+            "height":     ph,
         })
 
     result = await run_sync(_rasterize_city, req)
 
-    # Write to disk cache (30-day TTL via "composite" namespace)
+    # Cache raw unprojected result (cache key has NO projection/clip params)
+    # Projection and clipping are applied fresh on every request
     PW, PH = result["width"], result["height"]
     try:
         write_array_cache("composite", comp_key, {
             "buildings":  np.array(result["buildings"], dtype=np.float32).reshape(PH, PW),
-            "roads":      np.array(result["roads"],     dtype=np.float32).reshape(PH, PW),
+            "roads":      np.array(result["roads"], dtype=np.float32).reshape(PH, PW),
             "waterways":  np.array(result["waterways"], dtype=np.float32).reshape(PH, PW),
-            "walls":      np.array(result["walls"],     dtype=np.float32).reshape(PH, PW),
+            "walls":      np.array(result["walls"], dtype=np.float32).reshape(PH, PW),
         }, {"width": PW, "height": PH})
     except Exception as e:
         logger.warning(f"Failed to cache composite city-raster: {e}")
 
     # Apply map projection (all raster layers share the same pipeline)
+    # This is applied FRESH on every request, not cached
     if req.projection != "none":
         from geo2stl.projections import project_grid
         layer_names = ["buildings", "roads", "waterways", "walls"]
@@ -279,8 +308,8 @@ async def get_city_raster(req: CompositeCityRasterRequest):
         for lname in layer_names:
             arr = np.array(result[lname], dtype=np.float32).reshape(PH, PW)
             arr = project_grid(arr, req.north, req.south, req.east, req.west,
-                               req.projection, req.clip_nans, categorical=False)
-            result[lname] = arr.ravel().tolist()
+                               req.projection, clip_valid_region, categorical=False)
+            result[lname] = _json_safe_flat(arr)
         # Update dimensions to projected output size
         result["height"], result["width"] = arr.shape
 
@@ -291,70 +320,114 @@ async def get_city_raster(req: CompositeCityRasterRequest):
 # DEM layer merge — composite multiple elevation/mask layers
 # ---------------------------------------------------------------------------
 
-@router.post("/api/composite/dem-merge")
-async def merge_dem_layers(req: MergeRequest):
-    """
-    Merge multiple elevation/mask layers into one composite DEM.
-    Each layer specifies a source, resolution, per-layer processing, and a blend mode.
+def _composite_cache_key(north: float, south: float, east: float, west: float,
+                          dim: int, layers: list) -> str:
+    """Stable hash of (bbox, dim, layer specs). Used as cache key."""
+    from app.server.core.cache import make_cache_key
+    # Render each spec to a JSON-serializable form for stable hashing
+    spec_dicts = []
+    for spec in layers:
+        if hasattr(spec, "model_dump"):
+            spec_dicts.append(spec.model_dump())
+        elif hasattr(spec, "dict"):
+            spec_dicts.append(spec.dict())
+        elif isinstance(spec, dict):
+            spec_dicts.append(spec)
+        else:
+            spec_dicts.append(dict(spec))
+    return make_cache_key("composite", north, south, east, west,
+                          {"dim": dim, "layers": spec_dicts})
+
+
+def compute_composite_dem(bbox: dict, dim: int, layers: list) -> "np.ndarray":
+    """Run the dem-merge pipeline and return a numpy array.
+
+    Used both by the HTTP endpoint and inline by the export pipeline so the
+    3D model is rendered from the same composite the user configured.
+    Caches results on disk under the ``composite`` namespace keyed by
+    (bbox, dim, layers) so the same spec hits cache on subsequent requests.
     """
     from geo2stl.dem import (
         fetch_layer_data, apply_layer_processing, blend_layers,
     )
-    from app.server.core.validation import b64_encode
+    from app.server.core.cache import read_array_cache, write_array_cache
     from app.server.config import TEST_MODE
+    import cv2 as _cv2
 
-    if not req.layers:
-        return JSONResponse(content={"error": "At least one layer required"}, status_code=422)
-
-    north = req.bbox.get("north")
-    south = req.bbox.get("south")
-    east = req.bbox.get("east")
-    west = req.bbox.get("west")
+    north = bbox.get("north")
+    south = bbox.get("south")
+    east = bbox.get("east")
+    west = bbox.get("west")
     if None in (north, south, east, west):
-        return JSONResponse(content={"error": "bbox must contain north/south/east/west"}, status_code=422)
+        raise ValueError("bbox must contain north/south/east/west")
+
+    cache_key = _composite_cache_key(north, south, east, west, dim, layers)
+    cached = read_array_cache("composite", cache_key)
+    if cached is not None and cached[0].get("composite") is not None:
+        logger.debug("Composite cache hit (%s)", cache_key[:8])
+        return cached[0]["composite"]
 
     if TEST_MODE:
-        h = w = req.dim
-        im = np.linspace(0, 100, h * w, dtype=np.float64).reshape(h, w)
-        return JSONResponse(content={
-            "dem_values_b64": b64_encode(im),
-            "dimensions": [h, w],
-            "min_elevation": 0.0, "max_elevation": 100.0, "mean_elevation": 50.0,
-            "bbox": [west, south, east, north],
-            "source": "merge", "layer_count": len(req.layers),
-        })
-
-    try:
-        import cv2 as _cv2
+        h = w = dim
+        composite = np.linspace(0, 100, h * w, dtype=np.float64).reshape(h, w)
+    else:
         composite = None
+        for spec in layers:
+            source = getattr(spec, "source", None) or spec["source"]
+            spec_dim = getattr(spec, "dim", None) or spec["dim"]
+            blend_mode = getattr(spec, "blend_mode", None) or spec.get("blend_mode", "blend")
+            weight = getattr(spec, "weight", None) if hasattr(spec, "weight") else spec.get("weight", 1.0)
+            processing = getattr(spec, "processing", None) or spec.get("processing")
 
-        for spec in req.layers:
-            raw = await run_sync(
-                fetch_layer_data, spec.source, north, south, east, west, spec.dim)
-            processed = await run_sync(
-                apply_layer_processing, raw, spec.processing)
+            raw = fetch_layer_data(source, north, south, east, west, spec_dim)
+            processed = apply_layer_processing(raw, processing)
 
             if composite is None:
                 h, w = processed.shape
                 if h >= w:
-                    out_h, out_w = req.dim, max(1, int(req.dim * w / h))
+                    out_h, out_w = dim, max(1, int(dim * w / h))
                 else:
-                    out_w, out_h = req.dim, max(1, int(req.dim * h / w))
+                    out_w, out_h = dim, max(1, int(dim * h / w))
                 composite = _cv2.resize(
                     processed.astype(np.float32), (out_w, out_h),
                     interpolation=_cv2.INTER_LINEAR).astype(np.float64)
             else:
                 composite = blend_layers(
                     base=composite, layer=processed,
-                    blend_mode=spec.blend_mode, weight=spec.weight,
+                    blend_mode=blend_mode, weight=weight,
                     output_shape=composite.shape)
 
         if composite is None:
-            return JSONResponse(content={"error": "No layers produced output"}, status_code=500)
+            raise RuntimeError("No layers produced output")
 
         composite = np.nan_to_num(composite, nan=0.0,
                                   posinf=np.finfo(np.float32).max,
                                   neginf=np.finfo(np.float32).min)
+
+    write_array_cache("composite", cache_key, {"composite": composite})
+    logger.info("Composite cached (%s, %s)", cache_key[:8], composite.shape)
+    return composite
+
+
+@router.post("/api/composite/dem-merge")
+async def merge_dem_layers(req: MergeRequest):
+    """
+    Merge multiple elevation/mask layers into one composite DEM.
+    Each layer specifies a source, resolution, per-layer processing, and a blend mode.
+    Result is cached server-side; the same spec is reused inline by the
+    3D preview / export endpoints when ``composite_layers`` is included
+    in those requests.
+    """
+    from app.server.core.validation import b64_encode
+
+    if not req.layers:
+        return JSONResponse(content={"error": "At least one layer required"}, status_code=422)
+    if any(req.bbox.get(k) is None for k in ("north", "south", "east", "west")):
+        return JSONResponse(content={"error": "bbox must contain north/south/east/west"}, status_code=422)
+
+    try:
+        composite = await run_sync(compute_composite_dem,
+                                   req.bbox, req.dim, list(req.layers))
         h, w = composite.shape
         return JSONResponse(content={
             "dem_values_b64": b64_encode(composite),
@@ -362,10 +435,10 @@ async def merge_dem_layers(req: MergeRequest):
             "min_elevation": float(np.nanmin(composite)),
             "max_elevation": float(np.nanmax(composite)),
             "mean_elevation": float(np.nanmean(composite)),
-            "bbox": [west, south, east, north],
+            "bbox": [req.bbox["west"], req.bbox["south"],
+                     req.bbox["east"], req.bbox["north"]],
             "source": "merge", "layer_count": len(req.layers),
         })
-
     except Exception as e:
         logger.error(f"DEM merge failed: {e}", exc_info=True)
         return JSONResponse(content={"error": "DEM merge failed"}, status_code=500)

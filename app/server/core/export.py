@@ -72,11 +72,13 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
     if fmt == "obj":
         from numpy2stl import array_to_mesh, writeOBJ
         vertices, faces = array_to_mesh(im)
+        vertices = _scale_xy(vertices, p.mm_per_pixel)
     elif fmt == "3mf":
         from numpy2stl import array_to_mesh, write3MF
         vertices, faces = array_to_mesh(im)
+        vertices = _scale_xy(vertices, p.mm_per_pixel)
     else:
-        vertices, faces = _numpy2stl_mesh(im)
+        vertices, faces = _numpy2stl_mesh(im, mm_per_pixel=p.mm_per_pixel)
 
     task.update(70, "Repairing mesh...")
 
@@ -151,10 +153,24 @@ def _prepare_dem_array(
     return im, im_min, im_max
 
 
-def _numpy2stl_mesh(im: np.ndarray) -> tuple:
-    """Convert a DEM array to a (vertices, faces) mesh."""
+def _scale_xy(vertices: np.ndarray, mm_per_pixel: float) -> np.ndarray:
+    """Scale x/y vertex columns from pixel-grid units to millimetres.
+
+    numpy2stl returns x/y in pixel-index space and z in mm. To make a printed
+    model where 1 DEM pixel maps to ``mm_per_pixel`` mm, we multiply x/y here.
+    Returns the same array (mutated) for chaining.
+    """
+    if mm_per_pixel != 1.0:
+        vertices[:, 0] = vertices[:, 0] * mm_per_pixel
+        vertices[:, 1] = vertices[:, 1] * mm_per_pixel
+    return vertices
+
+
+def _numpy2stl_mesh(im: np.ndarray, mm_per_pixel: float = 1.0) -> tuple:
+    """Convert a DEM array to a (vertices, faces) mesh, scaled to mm."""
     from numpy2stl import array_to_mesh
-    return array_to_mesh(im)
+    vertices, faces = array_to_mesh(im)
+    return _scale_xy(vertices, mm_per_pixel), faces
 
 
 def _repair_and_export(vertices, faces, suffix: str) -> str:
@@ -261,7 +277,7 @@ def generate_stl(data: dict):
         im = _apply_contour_lines(im, im_min, im_max, p.model_height,
                                   p.base_height, contour_interval, contour_style)
 
-    vertices, faces = _numpy2stl_mesh(im)
+    vertices, faces = _numpy2stl_mesh(im, mm_per_pixel=p.mm_per_pixel)
     temp_path, mesh = _repair_and_export(vertices, faces, ".stl")
     is_watertight = bool(mesh.is_watertight)
     face_count = len(mesh.faces)
@@ -296,6 +312,7 @@ def generate_obj(data: dict):
         p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
     )
     vertices, faces = array_to_mesh(im)
+    vertices = _scale_xy(vertices, p.mm_per_pixel)
 
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".obj")
     temp_path = tf.name
@@ -327,6 +344,7 @@ def generate_3mf(data: dict):
         p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
     )
     vertices, faces = array_to_mesh(im)
+    vertices = _scale_xy(vertices, p.mm_per_pixel)
 
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".3mf")
     temp_path = tf.name
@@ -346,8 +364,9 @@ def generate_3mf(data: dict):
 def generate_mesh_preview(data: dict):
     """
     Run the numpy2stl pipeline and return vertices + faces as JSON for the
-    in-browser 3-D viewer.  Uses solid=False (top surface only) to keep the
-    payload small; the full solid is built only when the user exports.
+    in-browser 3-D viewer.  Defaults to solid=False (top surface only) for a
+    light payload; client can request the full solid (walls + floor) by
+    passing ``solid: true`` — matches what export will produce.
     """
     from fastapi.responses import JSONResponse
     from numpy2stl import array_to_mesh
@@ -361,10 +380,12 @@ def generate_mesh_preview(data: dict):
         p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
     )
 
-    vertices, faces = array_to_mesh(im, solid=False)
+    solid = bool(data.get("solid", False))
+    vertices, faces = array_to_mesh(im, solid=solid)
     logger.info(f"Preview mesh: {len(vertices)} vertices, {len(faces)} faces")
 
-    # Round col/row to integers and z to 2 dp — sufficient for display, halves JSON size.
+    # Vertices come back in pixel-grid units; client multiplies by mm_per_pixel
+    # to display real mm. Keep payload integer-rounded for compactness.
     v_rounded = vertices.copy()
     v_rounded[:, :2] = np.round(v_rounded[:, :2]).astype(np.int32)
     v_rounded[:, 2]  = np.round(v_rounded[:, 2], 2)
@@ -379,6 +400,7 @@ def generate_mesh_preview(data: dict):
         "z_max":        round(float(im.max()), 2),
         "cols":         int(p.width),
         "rows":         int(p.height),
+        "mm_per_pixel": p.mm_per_pixel,
     })
 
 
@@ -480,8 +502,9 @@ def generate_puzzle_3mf(data: dict, task: ExportTask | None = None):
             # Offset vertices to world position so pieces don't overlap
             # when loaded in a slicer
             if len(vertices) > 0:
-                vertices[:, 0] += c0  # X offset
+                vertices[:, 0] += c0  # X offset (still pixel units)
                 vertices[:, 1] += r0  # Y offset
+                vertices = _scale_xy(vertices, p.mm_per_pixel)
 
             import trimesh as tm
             mesh = tm.Trimesh(vertices=vertices, faces=faces, process=False)
@@ -624,6 +647,7 @@ def generate_crosssection(data: dict):
     base_height = float(data.get('base_height', 3))
     exaggeration = float(data.get('exaggeration', 1.0))
     thickness_mm = float(data.get('thickness_mm', 5))
+    mm_per_pixel = float(data.get('mm_per_pixel', 1.0))
     name = data.get('name', 'crosssection')
 
     if not dem_values or not height or not width:
@@ -649,7 +673,7 @@ def generate_crosssection(data: dict):
     thickness_px = max(3, int(round(thickness_mm)))
     im_cross = np.tile(profile, (thickness_px, 1)).astype(np.float32)
 
-    vertices, faces = _numpy2stl_mesh(im_cross)
+    vertices, faces = _numpy2stl_mesh(im_cross, mm_per_pixel=mm_per_pixel)
     temp_path, _ = _repair_and_export(vertices, faces, '.stl')
 
     fname = f"{name}_cross_{label_axis}.stl"

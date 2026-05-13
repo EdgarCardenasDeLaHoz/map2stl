@@ -508,9 +508,12 @@ def make_dem_payload(im: np.ndarray, west, south, east, north,
     """
     if upscale_dim:
         im = upsample_dem(im, upscale_dim)
-    im_clean = np.nan_to_num(im, nan=0.0,
-                              posinf=np.finfo(np.float32).max,
-                              neginf=np.finfo(np.float32).min).astype(np.float32)
+    # Preserve NaN padding in the binary payload so projected invalid regions
+    # remain distinguishable on the client (transparent in renderer) and the
+    # clip-valid toggle has a visible effect. Only clamp infinities.
+    im_clean = im.astype(np.float32, copy=True)
+    im_clean[np.isposinf(im_clean)] = np.finfo(np.float32).max
+    im_clean[np.isneginf(im_clean)] = np.finfo(np.float32).min
     h_px, w_px = im_clean.shape
     return {
         "dem_values_b64": base64.b64encode(im_clean.ravel().tobytes()).decode("ascii"),

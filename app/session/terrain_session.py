@@ -163,7 +163,8 @@ _DEFAULT_SETTINGS: dict = {
     #   min_order:     minimum Strahler order to include (1=all streams … 9=Amazon only)
     #   order_exponent: how steeply depression scales with order (default 1.5)
     "hydrology": {
-        "source":         "natural_earth",
+        "source":         "hydrorivers",
+        "width_factor":   1.0,   # multiplier on rendered river line width
         "scale_m":        10,
         "depression_m": -5.0,
         "min_order":      3,
@@ -1990,11 +1991,12 @@ class TerrainSession:
         self._ensure_available_for_fetch("hydrology")
 
         hydr = self.settings["hydrology"]
-        source = hydr.get("source", "natural_earth")
+        source = hydr.get("source", "hydrorivers")
         depression_m = hydr.get("depression_m", -5.0)
         scale_m = hydr.get("scale_m", 10)
         min_order = hydr.get("min_order", 3)
         order_exponent = hydr.get("order_exponent", 1.5)
+        width_factor = hydr.get("width_factor", 1.0)
 
         import time as _time
 
@@ -2018,6 +2020,7 @@ class TerrainSession:
             "scale_m":        scale_m,
             "min_order":      min_order,
             "order_exponent": order_exponent,
+            "width_factor":   width_factor,
         }
 
         t0 = _time.perf_counter()
