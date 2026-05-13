@@ -136,16 +136,30 @@
 
         .open-sidebar {
             position: fixed;
-            left: 6px;
+            left: 0;
             top: 50%;
             transform: translateY(-50%);
             z-index: 2000;
-            background: #2b2b2b;
+            display: flex;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 16px 10px;
+            background: #0f6f82;
             color: #fff;
             border: none;
-            padding: 6px 8px;
-            border-radius: 4px;
+            border-right: 1px solid var(--bg-light);
             cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            transition: background 0.15s;
+        }
+
+        .open-sidebar:hover {
+            background: #1287a0;
         }
 
         /* Sidebar Styles */
