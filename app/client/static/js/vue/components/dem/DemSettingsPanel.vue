@@ -16,6 +16,7 @@
               @click="activeTab='composite'"
               title="Composite DEM and saved presets">⊕ Composite</button>
       <div style="flex:1"></div>
+            <button class="dem-strip-btn" id="settingsHideBtn" title="Hide settings panel">◀ Hide</button>
       <button class="dem-strip-btn" id="jsonViewToggleBtn" title="Toggle between form and JSON editor">{ } JSON</button>
     </div>
 

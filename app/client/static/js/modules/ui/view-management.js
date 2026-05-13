@@ -440,10 +440,13 @@ window.setupDemSubtabs = function setupDemSubtabs() {
     /**
      * Collapse or expand the right settings panel and restore the terrain canvas.
      */
-    function toggleSettingsPanel() {
+    function toggleSettingsPanel(forceCollapsed = null) {
         const wrapper = document.getElementById('demRightPanel');
         if (!wrapper) return;
-        const collapsed = wrapper.classList.toggle('settings-collapsed');
+        const collapsed = (typeof forceCollapsed === 'boolean')
+            ? forceCollapsed
+            : !wrapper.classList.contains('settings-collapsed');
+        wrapper.classList.toggle('settings-collapsed', collapsed);
         const stripBtn = document.getElementById('settingsStripBtn');
         if (stripBtn) stripBtn.classList.toggle('active', !collapsed);
         document.getElementById('layersContainer')?.classList.remove('hidden');
@@ -453,12 +456,19 @@ window.setupDemSubtabs = function setupDemSubtabs() {
         document.getElementById('combinedContainer')?.classList.add('hidden');
         document.getElementById('demControlsInner')?.classList.remove('hidden');
         window.events?.emit(window.EV?.STACKED_UPDATE);
+        window.emitStackUpdate?.();
+        window._globalMap?.invalidateSize?.();
+        window.dispatchEvent(new Event('resize'));
     }
+
+    window.toggleDemSettingsPanel = toggleSettingsPanel;
 
     const settingsBtn = document.getElementById('settingsStripBtn');
     if (settingsBtn) settingsBtn.addEventListener('click', toggleSettingsPanel);
     const settingsExtBtn = document.getElementById('settingsExternalBtn');
     if (settingsExtBtn) settingsExtBtn.addEventListener('click', toggleSettingsPanel);
+    const settingsHideBtn = document.getElementById('settingsHideBtn');
+    if (settingsHideBtn) settingsHideBtn.addEventListener('click', () => toggleSettingsPanel(true));
     const settingsCollapsedTab = document.getElementById('settingsCollapsedTab');
     if (settingsCollapsedTab) settingsCollapsedTab.addEventListener('click', toggleSettingsPanel);
 };

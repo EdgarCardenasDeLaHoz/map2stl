@@ -9,7 +9,7 @@
   <div :class="['city-table-panel', collapsed && 'city-table-panel-collapsed']" id="cityTablePanel">
     <div class="city-table-panel-header">
       <div class="city-table-panel-title">🏙 Buildings Table</div>
-      <button class="city-table-panel-toggle" type="button" @click="collapsed = true" title="Hide buildings table panel">◀</button>
+      <button class="city-table-panel-toggle" type="button" @click="hidePanel" title="Hide buildings table panel">◀</button>
     </div>
 
     <div class="city-table-panel-body">
@@ -75,7 +75,7 @@
     type="button"
     :class="{ visible: collapsed }"
     title="Open buildings table panel"
-    @click="collapsed = false"
+    @click="showPanel"
   >
     📋 Buildings
   </button>
@@ -204,11 +204,22 @@ function _emitPanelResizeEffects() {
   _rafPending = true;
   requestAnimationFrame(() => {
     (window as any).events?.emit?.((window as any).EV?.STACKED_UPDATE);
+    (window as any).emitStackUpdate?.();
+    (window as any)._globalMap?.invalidateSize?.();
+    window.dispatchEvent(new Event('resize'));
     if ((window as any).appState?.lastDemData?.values?.length) {
       (window as any).recolorDEM?.();
     }
     _rafPending = false;
   });
+}
+
+function hidePanel() {
+  collapsed.value = true;
+}
+
+function showPanel() {
+  collapsed.value = false;
 }
 
 function stopResize() {
@@ -260,6 +271,7 @@ watch(filteredRows, () => {
 
 watch(collapsed, () => {
   _emitPanelState();
+  _emitPanelResizeEffects();
 });
 
 onMounted(() => {
@@ -285,7 +297,7 @@ onMounted(() => {
   document.addEventListener('mouseup', _onResizeUp);
 
   (window as any).openCityBuildingsPanel = () => {
-    collapsed.value = false;
+    showPanel();
     const panel = document.getElementById('cityTablePanel');
     panel?.scrollIntoView({ block: 'nearest' });
   };
@@ -384,18 +396,18 @@ onBeforeUnmount(() => {
   text-orientation: mixed;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 16px 10px;
+  gap: 4px;
+  padding: 10px 6px;
   background: #0f6f82;
   border: none;
   border-left: 1px solid var(--bg-light);
   color: #fff;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
   flex-shrink: 0;
   transition: background 0.15s;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
 }
 
 .city-table-collapsed-tab.visible {
