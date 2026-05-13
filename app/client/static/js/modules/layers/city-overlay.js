@@ -485,6 +485,49 @@ function _pickCityBuildingAtPx(x, y) {
 }
 
 /**
+ * Ensure building features are baked in pixel space for the active canvas before pick-hit tests.
+ */
+function _ensurePickBuffers(canvas) {
+    const city = window.appState?.osmCityData;
+    const features = city?.buildings?.features;
+    if (!features?.length || !canvas) return;
+
+    const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion;
+    if (!bbox) return;
+
+    const W = canvas.width || Math.round(canvas.getBoundingClientRect().width) || 600;
+    const H = canvas.height || Math.round(canvas.getBoundingClientRect().height) || 400;
+    const { north, south, east, west } = bbox;
+
+    let tX = 0, tY = 0, tW = W, tH = H;
+    const isStackLike = canvas.id === 'stackViewCanvas' || canvas.classList?.contains('osm-overlay');
+    if (isStackLike) {
+        const latRange = north - south;
+        if (latRange > 0) {
+            const latMid = (north + south) / 2;
+            const latCos = Math.cos(latMid * Math.PI / 180);
+            const bboxAspect = ((east - west) * latCos) / latRange;
+            const stackAspect = W / H;
+            if (bboxAspect > stackAspect) {
+                tW = W;
+                tH = W / bboxAspect;
+                tY = (H - tH) / 2;
+            } else {
+                tH = H;
+                tW = H * bboxAspect;
+                tX = (W - tW) / 2;
+            }
+        }
+    }
+
+    const geoToPx = window._buildGeoToPx(north, south, east, west, tX, tY, tW, tH);
+    const projection = document.getElementById('paramProjection')?.value || 'none';
+    const bboxKey = `${north.toFixed(4)},${south.toFixed(4)},${east.toFixed(4)},${west.toFixed(4)}`;
+    const bakKey = `pick|${W}|${H}|${bboxKey}|${projection}|${isStackLike ? 'stack' : 'plain'}`;
+    window._prebakeFeatures(features, geoToPx, bakKey);
+}
+
+/**
  * Set the active city building and re-render city overlays.
  */
 window.selectCityBuilding = function selectCityBuilding(index) {
@@ -950,7 +993,7 @@ window.enhanceBuildingHeights = async function enhanceBuildingHeights() {
 // Reactive subscriptions via appState (ARCH1)
 // Re-render overlays automatically when data or bbox changes.
 // ---------------------------------------------------------------------------
-document.addEventListener('DOMContentLoaded', () => {
+function _initCityOverlaySubscriptions() {
     // Wire city heights raster layer controls
     window._setupCityRasterLayer?.();
 
@@ -964,6 +1007,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!canvas) return;
         const city = window.appState?.osmCityData;
         if (!city?.buildings?.features?.length) return;
+        _ensurePickBuffers(canvas);
         const rect = canvas.getBoundingClientRect();
         if (!rect.width || !rect.height) return;
         const x = (e.clientX - rect.left) * (canvas.width / rect.width);
@@ -991,4 +1035,11 @@ document.addEventListener('DOMContentLoaded', () => {
         window.renderCityOverlay?.();
         window.renderCityOnDEM?.();
     });
-});
+}
+
+// Module scripts run after DOMContentLoaded in browsers; guard against both cases.
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _initCityOverlaySubscriptions);
+} else {
+    _initCityOverlaySubscriptions();
+}
