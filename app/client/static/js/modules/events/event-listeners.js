@@ -76,9 +76,9 @@ window.setupEventListeners = function setupEventListeners() {
     window._setupCityAndExportListeners?.();
     window._setupSidebarEditView?.();
 
-    // Hydrology section
-    document.getElementById('loadHydrologyBtn')?.addEventListener('click', () => window.loadHydrology?.());
-    document.getElementById('clearHydrologyBtn')?.addEventListener('click', () => window.clearHydrology?.());
+    // Combined Water + Hydrology section
+    document.getElementById('loadWaterHydrologyBtn')?.addEventListener('click', () => window.loadWaterHydrology?.());
+    document.getElementById('clearWaterHydrologyBtn')?.addEventListener('click', () => window.clearWaterHydrology?.());
     document.getElementById('hydroSource')?.addEventListener('change', e => {
         const controls = document.getElementById('hydroRiversControls');
         if (controls) controls.style.display = e.target.value === 'hydrorivers' ? '' : 'none';

@@ -37,6 +37,8 @@ let viewerAutoRotate = false;
 let needsRender   = true;
 let _normalsActive = false;     // true when MeshNormalMaterial is active
 let _resizeHandler = null;      // reference for cleanup on re-init
+// Latest mesh scale info, set by _buildMeshFromPreview, read by _updateSceneOverlays
+let geometry_scale_for_overlays = { scale: 1, cols: 0, rows: 0, totalHeightMm: 0 };
 
 // Orbit drag state
 let _isDragging   = false;
@@ -275,6 +277,148 @@ function resetViewerCamera() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Scene overlays — grid, axes, vertical scale bar
+// ─────────────────────────────────────────────────────────────────────────────
+
+function _makeTextSprite(text, { fontSize = 22, color = '#dddddd', bg = 'rgba(0,0,0,0.45)', pad = 3 } = {}) {
+    const canvas = document.createElement('canvas');
+    const ctx    = canvas.getContext('2d');
+    ctx.font = `${fontSize}px monospace`;
+    const tw = ctx.measureText(text).width;
+    canvas.width  = Math.ceil(tw + pad * 2 + 2);
+    canvas.height = Math.ceil(fontSize + pad * 2);
+    ctx.font = `${fontSize}px monospace`;
+    if (bg) { ctx.fillStyle = bg; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    ctx.fillStyle = color;
+    ctx.fillText(text, pad + 1, fontSize + pad - 2);
+    const tex = new THREE.Texture(canvas);
+    tex.needsUpdate = true;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+    const aspect = canvas.width / canvas.height;
+    sprite.scale.set(aspect * 5.5, 5.5, 1);
+    return sprite;
+}
+
+function _niceInterval(range) {
+    const raw = range / 6;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    for (const mult of [1, 2, 2.5, 5, 10]) {
+        if (mult * mag >= raw) return mult * mag;
+    }
+    return mag * 10;
+}
+
+/**
+ * Add/refresh ground grid, axes helper, and vertical scale bar.
+ * Mesh is normalized to x∈[-50,+50], z∈[-50,+50], y∈[0,30] in display units;
+ * physical scale is read from data.model_height + data.base_height.
+ */
+function _updateSceneOverlays(data) {
+    if (!modelScene) return;
+
+    // Remove previous overlays so this is idempotent on re-preview
+    ['groundGrid', 'axesHelper', 'vertScale', 'horizScale'].forEach(name => {
+        const old = modelScene.getObjectByName(name);
+        if (old) {
+            old.traverse(c => { c.geometry?.dispose(); c.material?.map?.dispose(); c.material?.dispose(); });
+            modelScene.remove(old);
+        }
+    });
+
+    // Use the same scale factor _buildMeshFromPreview applied — preserves real
+    // physical proportions (e.g. 600×800×20 mm renders as 75×100×2.5 display u).
+    const SCALE = geometry_scale_for_overlays.scale || 1;
+    const mmPerPx = data.mm_per_pixel ?? 1.0;
+    const widthMm = geometry_scale_for_overlays.widthMm
+        ?? (data.cols || 0) * mmPerPx;
+    const depthMm = geometry_scale_for_overlays.depthMm
+        ?? (data.rows || 0) * mmPerPx;
+    const totalHeightMm = geometry_scale_for_overlays.totalHeightMm
+        || (data.model_height || 0) + (data.base_height || 0);
+
+    const viewW = widthMm * SCALE;         // physical width in display units (mm × SCALE)
+    const viewD = depthMm * SCALE;         // physical depth
+    const heightScale = SCALE;             // display units per mm — same for all axes
+
+    // Ground grid — cell size is a "nice" mm value covering the model footprint
+    const cellMm     = _niceInterval(Math.max(widthMm, depthMm));
+    const gridCellsW = Math.max(1, Math.ceil(widthMm / cellMm));
+    const gridCellsD = Math.max(1, Math.ceil(depthMm / cellMm));
+    const gridDivs   = Math.max(gridCellsW, gridCellsD);
+    const gridSize   = gridDivs * cellMm * SCALE;
+    const gridHelper = new THREE.GridHelper(gridSize, gridDivs, 0x555555, 0x303030);
+    gridHelper.name  = 'groundGrid';
+    modelScene.add(gridHelper);
+
+    // Axes helper at front-left corner
+    const axisLen    = Math.max(viewW, viewD) * 0.18;
+    const axesHelper = new THREE.AxesHelper(axisLen);
+    axesHelper.name  = 'axesHelper';
+    axesHelper.position.set(-viewW / 2, 0, viewD / 2);
+    modelScene.add(axesHelper);
+
+    // Vertical scale bar (back-right corner) — min and max only
+    if (totalHeightMm > 0) {
+        const vertGroup = new THREE.Group();
+        vertGroup.name  = 'vertScale';
+        const totalU    = totalHeightMm * heightScale;
+        const lineMat   = new THREE.LineBasicMaterial({ color: 0xaaaaaa, depthTest: false });
+
+        // Vertical line + end ticks
+        const lineGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, totalU, 0),
+        ]);
+        vertGroup.add(new THREE.Line(lineGeo, lineMat));
+        for (const yU of [0, totalU]) {
+            const tickGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(-2, yU, 0),
+                new THREE.Vector3( 2, yU, 0),
+            ]);
+            vertGroup.add(new THREE.Line(tickGeo, lineMat));
+        }
+        // Min (0 mm) and max (totalHeightMm) labels only
+        const minLabel = _makeTextSprite(`0 mm`, { fontSize: 19, color: '#bbddff' });
+        minLabel.position.set(10, 0, 0);
+        vertGroup.add(minLabel);
+        const maxLabel = _makeTextSprite(`${Math.round(totalHeightMm)} mm`, { fontSize: 19, color: '#ff9966' });
+        maxLabel.position.set(10, totalU, 0);
+        vertGroup.add(maxLabel);
+
+        vertGroup.position.set(viewW / 2 + 6, 0, -viewD / 2);
+        modelScene.add(vertGroup);
+    }
+
+    // Horizontal callouts: footprint limits + grid cell size + (optional) km diagonal
+    const horizGroup = new THREE.Group();
+    horizGroup.name = 'horizScale';
+    if (widthMm > 0) {
+        const xLabel = _makeTextSprite(`W ${Math.round(widthMm)} mm`, { fontSize: 18, color: '#ff9966' });
+        xLabel.position.set(0, -1, viewD / 2 + 5);
+        horizGroup.add(xLabel);
+    }
+    if (depthMm > 0) {
+        const zLabel = _makeTextSprite(`D ${Math.round(depthMm)} mm`, { fontSize: 18, color: '#9fdb9f' });
+        zLabel.position.set(-viewW / 2 - 5, -1, 0);
+        horizGroup.add(zLabel);
+    }
+    const cellLabel = _makeTextSprite(`grid ${Math.round(cellMm)} mm`, { fontSize: 16, color: '#cccccc' });
+    cellLabel.position.set(viewW / 2 - 8, -1, -viewD / 2 - 6);
+    horizGroup.add(cellLabel);
+
+    const r = window.appState?.currentRegion;
+    if (r && typeof haversineDiagKm === 'function') {
+        const diagKm = haversineDiagKm(r.north, r.south, r.east, r.west);
+        const label = _makeTextSprite(`${diagKm.toFixed(1)} km diag`, { fontSize: 16, color: '#cccccc' });
+        label.position.set(viewW / 2 - 12, -1, viewD / 2 + 10);
+        horizGroup.add(label);
+    }
+    if (horizGroup.children.length > 0) modelScene.add(horizGroup);
+
+    needsRender = true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Preview
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -292,16 +436,23 @@ async function previewModelIn3D() {
     if (!modelRenderer) initModelViewer();
 
     try {
-        const exaggeration = parseFloat(document.getElementById('exportExaggeration')?.value) || 1.0;
+        // Read all build params directly from the DOM — single source of truth.
+        // (appState.demParams.height is only synced on manual `change` events,
+        //  so it can lag the input when auto-rebuild fires.)
+        const modelHeight  = parseFloat(document.getElementById('exportModelHeight')?.value) || 30;
         const baseHeight   = parseFloat(document.getElementById('exportBaseHeight')?.value)  || 5;
+        const exaggeration = parseFloat(document.getElementById('exportExaggeration')?.value) || 1.0;
+        const mmPerPixel   = parseFloat(document.getElementById('mmPerPixel')?.value) || 1.0;
 
         const ds = window._demSettings ? window._demSettings() : {};
         const { data, error: previewErr } = await window.api.export.preview({
             ...ds,
-            model_height: window.appState.demParams.height || 20,
+            model_height: modelHeight,
             base_height:  baseHeight,
             exaggeration,
+            mm_per_pixel:  mmPerPixel,
             sea_level_cap: document.getElementById('exportSeaLevelCap')?.checked || false,
+            solid:         document.getElementById('viewerSolidPreview')?.checked || false,
         });
         if (previewErr) throw new Error(previewErr);
 
@@ -309,10 +460,12 @@ async function previewModelIn3D() {
         _replaceMesh(_buildMeshFromPreview(data, cmap));
         _fitCameraToMesh(terrainMesh);
         _updateHud(data);
+        _updateSceneOverlays(data);
 
         window.appState.generatedModelData = {
             values: ldd.values, width: ldd.width, height: ldd.height,
-            resolution: window.appState.demParams.height || 20,
+            mmPerPixel,
+            modelHeight,
             exaggeration, baseHeight,
             vmin: ldd.vmin, vmax: ldd.vmax,
         };
@@ -329,25 +482,46 @@ async function previewModelIn3D() {
 }
 
 function _buildMeshFromPreview(data, cmap) {
-    // numpy2stl vertex layout: [col, row, z_mm]
-    // Three.js layout: x=col (→right), y=z_mm (→up), z=row (→back)
+    // numpy2stl vertex layout: [col, row, z_mm] — x and y are PIXEL indices
+    // (server keeps them as ints to halve JSON payload), z is in mm.
+    // Multiply pixel coords by mm_per_pixel here so the viewer renders the
+    // real physical dimensions (1 px → mm_per_pixel mm).
+    // Three.js layout: x=col (→right), y=z_mm (→up), z=row (→back).
+    //
+    // Then scale all three axes by the SAME factor so the viewer preserves
+    // the real aspect ratio.
     const rawVerts = data.vertices;
     const rawFaces = data.faces;
-    const zMin = data.z_min, zRange = Math.max(data.z_max - data.z_min, 1);
-    const cRange = Math.max(data.cols - 1, 1);
-    const rRange = Math.max(data.rows - 1, 1);
+    const mmPerPx  = data.mm_per_pixel ?? 1.0;
+    const widthMm  = Math.max(data.cols * mmPerPx, 1);
+    const depthMm  = Math.max(data.rows * mmPerPx, 1);
+    const totalHeightMm = (data.model_height || 0) + (data.base_height || 0);
+    // Longest physical dimension maps to 100 display units; others scale equally.
+    const longest = Math.max(widthMm, depthMm, totalHeightMm, 1);
+    const SCALE = 100 / longest;
+
+    const xOffset = (widthMm * SCALE) / 2;
+    const zOffset = (depthMm * SCALE) / 2;
+    const zMin    = data.z_min;
+    const zRange  = Math.max(data.z_max - data.z_min, 1);
 
     const positions = new Float32Array(rawVerts.length * 3);
     const colors    = new Float32Array(rawVerts.length * 3);
     for (let i = 0; i < rawVerts.length; i++) {
         const [c, r, z] = rawVerts[i];
-        positions[i * 3]     = c / cRange * 100 - 50;    // x
-        positions[i * 3 + 1] = (z - zMin) / zRange * 30; // y (elevation)
-        positions[i * 3 + 2] = r / rRange * 100 - 50;    // z
+        positions[i * 3]     = c * mmPerPx * SCALE - xOffset; // x (mm in display units)
+        positions[i * 3 + 1] = z * SCALE;                     // y (z is already mm)
+        positions[i * 3 + 2] = r * mmPerPx * SCALE - zOffset; // z (mm in display units)
 
         const rgb = _elevColor((z - zMin) / zRange, cmap);
         colors[i * 3] = rgb[0]; colors[i * 3 + 1] = rgb[1]; colors[i * 3 + 2] = rgb[2];
     }
+
+    // Stash physical dims (mm) and the display-scale factor for overlay code.
+    geometry_scale_for_overlays = {
+        scale: SCALE,
+        widthMm, depthMm, totalHeightMm,
+    };
 
     const indices = new Uint32Array(rawFaces.length * 3);
     for (let i = 0; i < rawFaces.length; i++) {
@@ -607,3 +781,57 @@ window.setViewerAutoRotate  = setViewerAutoRotate;
 window.resetViewerCamera    = resetViewerCamera;
 window.rebuildViewerColors  = _rebuildColors;
 window.setViewerNormals     = setViewerNormals;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-rebuild wiring
+// ─────────────────────────────────────────────────────────────────────────────
+// Replaces the manual Generate/Preview buttons. The mesh is rebuilt:
+//   1. when any Fetch-tab input changes (debounced),
+//   2. when the model container becomes visible (entering the Extrude view),
+//   3. when a fresh DEM is loaded while the Extrude view is already open.
+// All triggers funnel into _scheduleRebuild() which guards on (DEM available)
+// AND (model container visible) before firing previewModelIn3D().
+
+const _FETCH_INPUT_IDS = [
+    'mmPerPixel', 'exportModelHeight', 'exportBaseHeight',
+    'exportExaggeration', 'exportSeaLevelCap', 'viewerSolidPreview',
+];
+
+let _rebuildTimer = null;
+
+function _scheduleRebuild() {
+    if (_rebuildTimer) clearTimeout(_rebuildTimer);
+    _rebuildTimer = setTimeout(_doAutoRebuild, 200);
+}
+
+function _doAutoRebuild() {
+    _rebuildTimer = null;
+    const ldd = window.appState?.lastDemData;
+    if (!ldd?.values?.length) return;            // no DEM yet — silent skip
+    const mc = document.getElementById('modelContainer');
+    if (!mc) return;
+    if (mc.classList.contains('hidden')) return; // not visible — silent skip
+    if (mc.style.display === 'none') return;
+    previewModelIn3D();
+}
+
+function _attachAutoRebuildListeners() {
+    for (const id of _FETCH_INPUT_IDS) {
+        document.getElementById(id)?.addEventListener('change', _scheduleRebuild);
+    }
+    // First build when the user switches into the Extrude view.
+    const mc = document.getElementById('modelContainer');
+    if (mc) {
+        new MutationObserver(_scheduleRebuild)
+            .observe(mc, { attributes: true, attributeFilter: ['class', 'style'] });
+    }
+}
+
+window._modelViewerAutoRebuild = _scheduleRebuild;
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _attachAutoRebuildListeners);
+} else {
+    // Defer one tick so the Vue components have mounted their inputs.
+    setTimeout(_attachAutoRebuildListeners, 0);
+}

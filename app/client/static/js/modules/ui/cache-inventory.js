@@ -219,21 +219,21 @@ function _renderTable() {
 // app.css. Internal nodes (directories) use a neutral grey so the leaves
 // stand out as the data-bearing items.
 const _EXT_COLORS = {
-    json:    '#f4b400',
-    npz:     '#4a9fd4',
-    tif:     '#b85c5c',
-    tiff:    '#b85c5c',
-    png:     '#6cbf6c',
+    json: '#f4b400',
+    npz: '#4a9fd4',
+    tif: '#b85c5c',
+    tiff: '#b85c5c',
+    png: '#6cbf6c',
     geojson: '#a070d0',
-    pkl:     '#d08a4a',
+    pkl: '#d08a4a',
     parquet: '#50c4b8',
-    shp:     '#888a30',  // shapefile leftover, helps spot raw downloads
-    dbf:     '#888a30',
-    shx:     '#888a30',
-    prj:     '#888a30',
-    cpg:     '#888a30',
-    pdf:     '#a35c80',
-    zip:     '#506070',
+    shp: '#888a30',  // shapefile leftover, helps spot raw downloads
+    dbf: '#888a30',
+    shx: '#888a30',
+    prj: '#888a30',
+    cpg: '#888a30',
+    pdf: '#a35c80',
+    zip: '#506070',
 };
 const _DIR_COLOR = '#3a3a3a';
 const _UNKNOWN_COLOR = '#666';

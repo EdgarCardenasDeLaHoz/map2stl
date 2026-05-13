@@ -20,15 +20,31 @@
         }
 
         /* ── Flex layout utilities ─────────────────────────────────── */
-        .row, .row-gap4, .row-gap6, .row-gap8, .row-wrap {
+        .row,
+        .row-gap4,
+        .row-gap6,
+        .row-gap8,
+        .row-wrap {
             display: flex;
             align-items: center;
         }
 
-        .row-gap4  { gap: 4px; }
-        .row-gap6  { gap: 6px; }
-        .row-gap8  { gap: 8px; }
-        .row-wrap  { flex-wrap: wrap; gap: 4px 10px; }
+        .row-gap4 {
+            gap: 4px;
+        }
+
+        .row-gap6 {
+            gap: 6px;
+        }
+
+        .row-gap8 {
+            gap: 8px;
+        }
+
+        .row-wrap {
+            flex-wrap: wrap;
+            gap: 4px 10px;
+        }
 
         .col {
             display: flex;
@@ -2212,7 +2228,7 @@
         }
 
         .collapsible-header {
-            padding: 12px 15px;
+            padding: 6px 8px;
             background: linear-gradient(180deg, #3a3a3a 0%, var(--bg-light)100%);
             cursor: pointer;
             display: flex;
@@ -2228,7 +2244,7 @@
 
         .collapsible-header h4 {
             margin: 0;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             color: #e0e0e0;
             display: flex;
@@ -2247,7 +2263,7 @@
         }
 
         .collapsible-content {
-            padding: 15px;
+            padding: 8px 10px;
             background: #2d2d2d;
             transition: max-height 0.3s ease;
         }
@@ -2923,6 +2939,9 @@
         }
 
         /* Responsive */
+        /* ──── RESPONSIVE BREAKPOINTS ──── */
+
+        /* Tablet: 768px to 1200px */
         @media (max-width: 1200px) {
             .sidebar {
                 width: 280px;
@@ -2930,6 +2949,128 @@
 
             .sidebar.collapsed {
                 width: 40px;
+            }
+        }
+
+        /* Small Tablet: 480px to 768px */
+        @media (max-width: 768px) {
+            :root {
+                --panel-width: 220px;
+            }
+
+            .app-container {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100vw;
+                max-width: 100vw;
+                height: auto;
+                max-height: 45vh;
+                border-right: none;
+                border-bottom: 1px solid #404040;
+                transition: max-height 0.3s ease;
+            }
+
+            .sidebar.collapsed {
+                width: 100vw;
+                max-width: 100vw;
+                height: 50px;
+                max-height: 50px;
+            }
+
+            .sidebar-content {
+                max-height: calc(45vh - 50px);
+            }
+
+            .main-content {
+                flex: 1;
+                width: 100vw;
+                max-width: 100vw;
+            }
+
+            .open-sidebar {
+                display: none;
+            }
+        }
+
+        /* Mobile: under 480px */
+        @media (max-width: 480px) {
+            :root {
+                --panel-width: 100vw;
+            }
+
+            .app-container {
+                flex-direction: column;
+            }
+
+            body {
+                font-size: 12px;
+            }
+
+            .sidebar {
+                width: 100vw;
+                max-width: 100vw;
+                height: auto;
+                max-height: 40vh;
+                border-right: none;
+                border-bottom: 1px solid #404040;
+            }
+
+            .sidebar.collapsed {
+                width: 100vw;
+                max-width: 100vw;
+                height: 45px;
+                max-height: 45px;
+            }
+
+            .sidebar-header {
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+
+            .sidebar-title {
+                font-size: 12px;
+            }
+
+            .sidebar-content {
+                max-height: calc(40vh - 45px);
+                font-size: 11px;
+            }
+
+            .main-content {
+                flex: 1;
+                width: 100vw;
+                max-width: 100vw;
+                min-height: 60vh;
+            }
+
+            .open-sidebar {
+                display: none;
+            }
+
+            /* Reduce button sizes */
+            button {
+                padding: 4px 8px;
+                font-size: 11px;
+            }
+
+            /* Stack controls better */
+            .row,
+            .row-gap4,
+            .row-gap6,
+            .row-gap8 {
+                flex-wrap: wrap;
+            }
+
+            /* Make inputs more touch-friendly */
+            input[type="text"],
+            input[type="number"],
+            select,
+            .ctrl-select,
+            .ctrl-input {
+                min-height: 32px;
+                font-size: 14px;
             }
         }
 
@@ -3128,20 +3269,62 @@
         /* ====================================================
            Utility classes — replace inline styles (CLEAN-1)
            ==================================================== */
-                .canvas-max-responsive { max-width: 100%; height: auto; }
-        .canvas-responsive { width: 100%; height: auto; }
-        .canvas-histogram  { width: 100%; height: 18px; }
-        .pos-relative      { position: relative; }
-        .overlay-abs       { position: absolute; pointer-events: none; }
-        .overlay-z10       { z-index: 10; }
-        .overlay-abs-z10   { position: absolute; pointer-events: none; z-index: 10; }
-        .overlay-abs-z5    { position: absolute; pointer-events: none; z-index: 5; }
-        .hud-overlay {
-            position: absolute; bottom: 8px; left: 8px;
-            color: #ccc; font: 11px/1.4 monospace;
-            pointer-events: none; user-select: none; z-index: 2;
+        .canvas-max-responsive {
+            max-width: 100%;
+            height: auto;
         }
-        .badge-sm { margin-left: 4px; font-size: 10px; }
+
+        .canvas-responsive {
+            width: 100%;
+            height: auto;
+        }
+
+        .canvas-histogram {
+            width: 100%;
+            height: 18px;
+        }
+
+        .pos-relative {
+            position: relative;
+        }
+
+        .overlay-abs {
+            position: absolute;
+            pointer-events: none;
+        }
+
+        .overlay-z10 {
+            z-index: 10;
+        }
+
+        .overlay-abs-z10 {
+            position: absolute;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .overlay-abs-z5 {
+            position: absolute;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .hud-overlay {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            color: #ccc;
+            font: 11px/1.4 monospace;
+            pointer-events: none;
+            user-select: none;
+            z-index: 2;
+        }
+
+        .badge-sm {
+            margin-left: 4px;
+            font-size: 10px;
+        }
+
         .viewer-unavailable {
             padding: 20px;
             color: #888;
@@ -3352,11 +3535,25 @@
         }
 
         /* Composite DEM pipeline color tokens */
-        .composite-pipe-water    { color: #4a9eff; }
-        .composite-pipe-city     { color: #cc8844; }
-        .composite-pipe-landcover{ color: #66aa66; }
-        .composite-pipe-veg      { color: #88aacc; }
-        .composite-pipe-output   { color: #fff; }
+        .composite-pipe-water {
+            color: #4a9eff;
+        }
+
+        .composite-pipe-city {
+            color: #cc8844;
+        }
+
+        .composite-pipe-landcover {
+            color: #66aa66;
+        }
+
+        .composite-pipe-veg {
+            color: #88aacc;
+        }
+
+        .composite-pipe-output {
+            color: #fff;
+        }
 
         .composite-enable-row {
             margin-bottom: 8px;

@@ -79,7 +79,7 @@ function _regionName() {
 function _demSettings() {
     const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion || {};
     const p = window.appState?.demParams || {};
-    return {
+    const settings = {
         bbox: {
             north: bbox.north, south: bbox.south,
             east:  bbox.east,  west:  bbox.west,
@@ -96,15 +96,25 @@ function _demSettings() {
             show_sat:     false,
         },
     };
+    // If the user has configured + applied a composite, send the spec so the
+    // server rebuilds the same merged DEM for the 3D output.
+    const compositeSpec = window.getActiveCompositeSpec?.();
+    if (compositeSpec) {
+        settings.composite_layers = compositeSpec;
+        settings.composite_dim = settings.dem.dim;
+    }
+    return settings;
 }
 
 function _exportParams() {
     const md = window.appState?.generatedModelData;
     return {
         ..._demSettings(),
-        model_height:     md.resolution,
+        // model_height is the physical height in mm from #exportModelHeight.
+        model_height:     md.modelHeight,
         base_height:      md.baseHeight,
         exaggeration:     md.exaggeration,
+        mm_per_pixel:     md.mmPerPixel,
         sea_level_cap:    document.getElementById('exportSeaLevelCap')?.checked   || false,
         engrave_label:    document.getElementById('exportEngraveLabel')?.checked  || false,
         label_text:       document.getElementById('exportLabelText')?.value || window.appState?.selectedRegion?.name || _regionName(),
@@ -126,12 +136,16 @@ function generateModelFromTab() {
         return;
     }
 
-    const resolution  = parseInt(document.getElementById('modelResolution').value);
+    const resolution   = parseInt(document.getElementById('modelResolution').value);
+    const modelHeight  = parseFloat(document.getElementById('exportModelHeight')?.value) || 30;
     const exaggeration = parseFloat(document.getElementById('exportExaggeration')?.value) || 1.0;
     const baseHeight   = parseFloat(document.getElementById('exportBaseHeight')?.value) || 0;
 
     if (!resolution || resolution < 1 || resolution > 2000) {
         window.showToast('Resolution must be between 1 and 2000.', 'warning'); return;
+    }
+    if (!modelHeight || modelHeight <= 0 || modelHeight > 500) {
+        window.showToast('Model height must be between 0 and 500 mm.', 'warning'); return;
     }
     if (!exaggeration || exaggeration <= 0 || exaggeration > 100) {
         window.showToast('Exaggeration must be between 0 and 100.', 'warning'); return;
@@ -154,6 +168,7 @@ function generateModelFromTab() {
             width:       lastDemData.width,
             height:      lastDemData.height,
             resolution,
+            modelHeight,
             exaggeration,
             baseHeight,
             vmin:        lastDemData.vmin,

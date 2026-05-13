@@ -40,7 +40,7 @@ function createMergeLayer(overrides = {}) {
     return {
         id: ++state.mergeLayerSeq,
         source: 'local',
-        dim: 300,
+        dim: 600,
         blend_mode: 'base',
         weight: 1.0,
         smooth_sigma: 0,
@@ -76,7 +76,7 @@ function attachLayerEventListeners(card, layer) {
         renderMergePanel();
     });
     card.querySelector('.merge-dim').addEventListener('change', (e) => {
-        layer.dim = parseInt(e.target.value) || 300;
+        layer.dim = parseInt(e.target.value) || 600;
     });
     // ... Attach other event listeners as needed
 }
@@ -189,7 +189,7 @@ async function runMerge(apply = false) {
         east: selectedRegion.east, west: selectedRegion.west,
     };
 
-    const outDim = parseInt(document.getElementById('paramDim')?.value) || 300;
+    const outDim = parseInt(document.getElementById('paramDim')?.value) || 600;
 
     const status = document.getElementById('mergeStatus');
     if (status) status.textContent = '⏳ Merging…';
@@ -246,6 +246,11 @@ async function runMerge(apply = false) {
             window.appState.originalDemValues = [...demVals];
             document.getElementById('rescaleMin').value = Math.floor(vmin);
             document.getElementById('rescaleMax').value = Math.ceil(vmax);
+            // Mark composite as the active DEM source — preview/export will now
+            // include composite_layers so the 3D model is rendered from the
+            // same server-side merge.
+            window.setCompositeActive?.(true);
+            window._modelViewerAutoRebuild?.();
             window.showToast('Merged DEM applied', 'success');
         } else {
             window.showToast('Merge preview rendered', 'info');
@@ -265,7 +270,7 @@ async function runMerge(apply = false) {
 
 function _syncMergeFromCurrentLayers() {
     const source = document.getElementById('paramDemSource')?.value || 'local';
-    const dim = parseInt(document.getElementById('paramDim')?.value) || 300;
+    const dim = parseInt(document.getElementById('paramDim')?.value) || 600;
     state.mergeLayers = [createMergeLayer({ source, dim, blend_mode: 'base' })];
     if (window.appState.lastWaterMaskData) {
         state.mergeLayers.push(createMergeLayer({ source: 'water_esa', dim, blend_mode: 'rivers' }));
@@ -300,3 +305,19 @@ function setupMergePanel() {
 
 window._initDemSources = _initDemSources;
 window.setupMergePanel = setupMergePanel;
+
+/** Get the current merge spec (array of layer specs) — used by export-handlers
+ *  to send composite_layers to the preview/export endpoints. Returns null when
+ *  composite mode is not enabled (no layers configured). */
+window.getActiveCompositeSpec = function getActiveCompositeSpec() {
+    if (!state.mergeLayers || state.mergeLayers.length === 0) return null;
+    if (!window.appState?._compositeActive) return null;
+    return state.mergeLayers.map(_mergeLayerToSpec);
+};
+
+/** Mark composite mode active or inactive. When active, _demSettings() will
+ *  include composite_layers in preview/export requests so the 3D model is
+ *  built from the merged DEM rather than the raw DEM cache. */
+window.setCompositeActive = function setCompositeActive(active) {
+    if (window.appState) window.appState._compositeActive = !!active;
+};

@@ -75,7 +75,7 @@ async function loadWaterMask() {
     const waterDataset = document.getElementById('waterDataset')?.value || 'esa';
     const projection = document.getElementById('paramProjection')?.value || 'none';
     const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
-    const cacheKey = { ...bbox, dim, dataset: waterDataset, projection, clip_nans: clipNans };
+    const cacheKey = { ...bbox, dim, dataset: waterDataset, projection, clip_valid_region: clipNans };
 
     const cachedData = window.waterMaskCache.get(cacheKey);
     if (cachedData) {
@@ -91,7 +91,7 @@ async function loadWaterMask() {
         return;
     }
 
-    const params = new URLSearchParams({ north, south, east, west, dim, dataset: waterDataset, projection, clip_nans: clipNans });
+    const params = new URLSearchParams({ north, south, east, west, dim, dataset: waterDataset, projection, clip_valid_region: clipNans });
 
     window.setLayerStatus('water', 'loading');
 
@@ -166,7 +166,7 @@ async function loadEsaLandCover() {
     const projection = document.getElementById('paramProjection')?.value || 'none';
     const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
 
-    const params = new URLSearchParams({ north, south, east, west, dim, projection, clip_nans: clipNans });
+    const params = new URLSearchParams({ north, south, east, west, dim, projection, clip_valid_region: clipNans });
 
     window.setLayerStatus?.('landCover', 'loading');
     window.showToast('Loading ESA land cover...', 'info');
@@ -421,7 +421,12 @@ function setupLandCoverEditor() {
         window.showToast('Land cover colors reset to defaults', 'info');
     });
 
-    document.getElementById('waterResolution')?.addEventListener('change', () => loadWaterMask());
+    // In merged mode, water resolution changes should be applied by the combined
+    // loader button, not by legacy standalone water-mask auto-fetch.
+    const hasCombinedLoader = !!document.getElementById('loadWaterHydrologyBtn');
+    if (!hasCombinedLoader) {
+        document.getElementById('waterResolution')?.addEventListener('change', () => loadWaterMask());
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

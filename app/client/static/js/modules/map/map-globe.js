@@ -38,22 +38,22 @@
 
 // ── Module-scope state ──────────────────────────────────────────────────────
 
-let _map             = null;
-let _preloadedLayer  = null;
+let _map = null;
+let _preloadedLayer = null;
 let _editMarkersLayer = null;
-let _drawnItems      = null;
-let _globeScene      = null;
-let _globeCamera     = null;
-let _globeRenderer   = null;
-let _globe           = null;
+let _drawnItems = null;
+let _globeScene = null;
+let _globeCamera = null;
+let _globeRenderer = null;
+let _globe = null;
 
-let currentTileLayer     = null;
-let demOverlayLayer      = null;
-let demOverlayLoading    = false;
-let terrainOverlayLayer  = null;
-let mapGridLayer         = null;
-let mapGridEnabled       = false;
-let _drawControl         = null;
+let currentTileLayer = null;
+let demOverlayLayer = null;
+let demOverlayLoading = false;
+let terrainOverlayLayer = null;
+let mapGridLayer = null;
+let mapGridEnabled = false;
+let _drawControl = null;
 
 // Color palette for different bounding boxes (distinct, easy to tell apart)
 const BBOX_COLORS = [
@@ -184,7 +184,7 @@ async function toggleDemOverlay(show) {
                     window.showToast('Terrain overlay loaded', 'success');
                     usedGlobal = true;
                 }
-            } catch (_) {}
+            } catch (_) { }
 
             // ── Strategy 2: generate on demand via preview_dem ─────────
             if (!usedGlobal) {
@@ -213,8 +213,8 @@ async function toggleDemOverlay(show) {
                         let t = (demVals[i] - vmin) / ((vmax - vmin) || 1);
                         t = Math.max(0, Math.min(1, t));
                         const [r, g, b] = window.mapElevationToColor(t, colormap);
-                        imgData.data[i*4]=Math.round(r*255); imgData.data[i*4+1]=Math.round(g*255);
-                        imgData.data[i*4+2]=Math.round(b*255); imgData.data[i*4+3]=200;
+                        imgData.data[i * 4] = Math.round(r * 255); imgData.data[i * 4 + 1] = Math.round(g * 255);
+                        imgData.data[i * 4 + 2] = Math.round(b * 255); imgData.data[i * 4 + 3] = 200;
                     }
                     ctx.putImageData(imgData, 0, 0);
                     // Re-project to Web Mercator so the canvas aligns correctly with map tiles
@@ -222,7 +222,7 @@ async function toggleDemOverlay(show) {
                     const _bN = ob ? ob[3] : north, _bS = ob ? ob[1] : south;
                     const _bE = ob ? ob[2] : east, _bW = ob ? ob[0] : west;
                     const _toRad = d => d * Math.PI / 180;
-                    const _mercY = l => Math.log(Math.tan(Math.PI/4 + _toRad(Math.max(-85,Math.min(85,l)))/2));
+                    const _mercY = l => Math.log(Math.tan(Math.PI / 4 + _toRad(Math.max(-85, Math.min(85, l))) / 2));
                     const _mN = _mercY(_bN), _mS = _mercY(_bS), _mRange = _mN - _mS;
                     const _latRange = _bN - _bS;
                     const projCanvas = document.createElement('canvas');
@@ -332,9 +332,9 @@ function initMap() {
     // Use tile layer system
     setTileLayer('osm');
 
-    _preloadedLayer   = new L.FeatureGroup().addTo(_map);
+    _preloadedLayer = new L.FeatureGroup().addTo(_map);
     _editMarkersLayer = new L.FeatureGroup().addTo(_map);
-    _drawnItems       = new L.FeatureGroup().addTo(_map);
+    _drawnItems = new L.FeatureGroup().addTo(_map);
 
     window.setPreloadedLayer?.(_preloadedLayer);
     window.setEditMarkersLayer?.(_editMarkersLayer);
@@ -563,8 +563,8 @@ function initGlobe() {
             return; // Globe tab not yet visible — init deferred until first activation
         }
 
-        _globeScene    = new THREE.Scene();
-        _globeCamera   = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+        _globeScene = new THREE.Scene();
+        _globeCamera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
         _globeRenderer = new THREE.WebGLRenderer({ antialias: true });
         _globeRenderer.setSize(container.clientWidth, container.clientHeight);
         container.appendChild(_globeRenderer.domElement);
@@ -627,6 +627,6 @@ window.BBOX_COLORS = BBOX_COLORS;
 
 // ── Expose drawControl and mapGridEnabled accessors ─────────────────────────
 
-window.getDrawControl    = () => _drawControl;
+window.getDrawControl = () => _drawControl;
 window.getMapGridEnabled = () => mapGridEnabled;
 window.setMapGridEnabled = (v) => { mapGridEnabled = v; };

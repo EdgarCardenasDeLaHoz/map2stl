@@ -21,6 +21,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 let _hydroAbortController = null;
+// In-flight dedupe: when a request is already running, additional callers
+// receive the same promise instead of starting a duplicate fetch.
+let _hydroInflightPromise = null;
+let _hydroInflightKey = null;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Render
@@ -33,18 +37,19 @@ let _hydroAbortController = null;
  * @param {object} data  — response from /api/terrain/hydrology
  */
 function renderHydrology(data) {
-    const canvas = document.getElementById('layerHydroCanvas');
-    if (!canvas) return;
-
     const values = window.decodeHydrologyValues(data);
     const dims = data.river_grid_dimensions;
     if (!values || !dims) return;
 
     const [h, w] = dims;
-    canvas.width = w;
-    canvas.height = h;
+    // Build an offscreen source canvas for stacked compositing.
+    // Using #layerHydroCanvas directly here causes self-copy clearing in
+    // updateStackedLayers() because that DOM canvas is also the destination buffer.
+    const sourceCanvas = document.createElement('canvas');
+    sourceCanvas.width = w;
+    sourceCanvas.height = h;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = sourceCanvas.getContext('2d');
     const img = ctx.createImageData(w, h);
     const px = img.data;
     const minD = data.depression_m || -5.0;   // most-negative value → full opacity
@@ -71,7 +76,7 @@ function renderHydrology(data) {
     ctx.putImageData(img, 0, 0);
 
     // Mirror to appState so updateStackedLayers() can composite it
-    if (window.appState) window.appState.hydrologySourceCanvas = canvas;
+    if (window.appState) window.appState.hydrologySourceCanvas = sourceCanvas;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,10 +89,6 @@ function renderHydrology(data) {
  * #hydroMinOrder, #hydroOrderExponent.
  */
 window.loadHydrology = async function loadHydrology() {
-    if (_hydroAbortController) _hydroAbortController.abort();
-    _hydroAbortController = new AbortController();
-    const signal = _hydroAbortController.signal;
-
     const boundingBox = window.getBoundingBox?.();
     const selectedRegion = window.appState?.selectedRegion;
 
@@ -99,54 +100,88 @@ window.loadHydrology = async function loadHydrology() {
     const { north, south, east, west } = coords;
 
     const source = document.getElementById('hydroSource')?.value ?? 'hydrorivers';
-    const dim = parseInt(document.getElementById('hydroDim')?.value ?? '300');
+    const dim = parseInt(
+        document.getElementById('hydroDim')?.value
+        ?? document.getElementById('paramDim')?.value
+        ?? '600'
+    );
     const depressionM = parseFloat(document.getElementById('hydroDepressionM')?.value ?? '-5.0');
     const minOrder = parseInt(document.getElementById('hydroMinOrder')?.value ?? '3');
     const orderExp = parseFloat(document.getElementById('hydroOrderExponent')?.value ?? '1.5');
+    const widthFactor = parseFloat(document.getElementById('hydroWidthFactor')?.value ?? '0.5');
+    const projection = document.getElementById('paramProjection')?.value || 'none';
+    const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
 
-    window.setLayerStatus?.('hydrology', 'loading');
+    // Build a stable param key for in-flight dedupe.
+    const inflightKey = JSON.stringify({
+        n: north, s: south, e: east, w: west, dim, source,
+        dep: depressionM, mo: minOrder, oe: orderExp, wf: widthFactor,
+        proj: projection, cn: clipNans,
+    });
+    if (_hydroInflightPromise && _hydroInflightKey === inflightKey) {
+        return _hydroInflightPromise;
+    }
+    if (_hydroAbortController) _hydroAbortController.abort();
+    _hydroAbortController = new AbortController();
+    const signal = _hydroAbortController.signal;
 
     const paramObj = { north, south, east, west, dim, depression_m: depressionM, source };
     if (source === 'hydrorivers') {
         paramObj.min_order = minOrder;
         paramObj.order_exponent = orderExp;
+        paramObj.width_factor = widthFactor;
     }
-    const projection = document.getElementById('paramProjection')?.value || 'none';
-    const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
     if (projection !== 'none') {
         paramObj.projection = projection;
-        paramObj.clip_nans = clipNans;
+        paramObj.clip_valid_region = clipNans;
     }
     const params = new URLSearchParams(paramObj);
 
     const statusEl = document.getElementById('hydroStatus');
+    const loadBtn = document.getElementById('loadHydrologyBtn');
     if (statusEl) statusEl.textContent = source === 'hydrorivers'
-        ? 'Fetching HydroRIVERS… (first call downloads ~100 MB)'
+        ? 'Fetching HydroRIVERS…'
         : 'Fetching Natural Earth rivers…';
-
-    const { data, error } = await window.api.dem.hydrology(params, signal);
-
-    if (signal.aborted) return;
-
-    if (error || !data || data.error) {
-        const msg = (data?.error) || error || 'Unknown error';
-        if (statusEl) statusEl.textContent = `⚠ ${msg}`;
-        window.showToast?.(`Hydrology failed: ${msg}`, 'error');
-        window.setLayerStatus?.('hydrology', 'error');
-        return;
+    if (loadBtn) {
+        loadBtn.disabled = true;
+        loadBtn.dataset.origText = loadBtn.textContent;
+        loadBtn.textContent = '⏳ Loading…';
     }
+    window.setLayerStatus?.('hydrology', 'loading');
 
-    renderHydrology(data);
+    const promise = (async () => {
+        try {
+            const { data, error } = await window.api.dem.hydrology(params, signal);
+            if (signal.aborted) return;
+            if (error || !data || data.error) {
+                const msg = (data?.error) || error || 'Unknown error';
+                if (statusEl) statusEl.textContent = `⚠ ${msg}`;
+                window.showToast?.(`Hydrology failed: ${msg}`, 'error');
+                window.setLayerStatus?.('hydrology', 'error');
+                return;
+            }
+            renderHydrology(data);
+            const fc = data.feature_count ?? 0;
+            if (statusEl) statusEl.textContent =
+                `${fc} river feature${fc !== 1 ? 's' : ''} · ${source === 'hydrorivers' ? 'HydroRIVERS' : 'Natural Earth'}`;
+            window.setLayerStatus?.('hydrology', 'loaded');
+            const hydroBtn = document.querySelector('#layerModeSelector .layer-mode-btn[data-mode="Hydrology"]');
+            if (hydroBtn && !hydroBtn.classList.contains('active')) hydroBtn.click();
+            window.emitStackUpdate();
+            window.showToast?.(`Hydrology loaded (${fc} features)`, 'success');
+        } finally {
+            if (loadBtn) {
+                loadBtn.disabled = false;
+                if (loadBtn.dataset.origText) loadBtn.textContent = loadBtn.dataset.origText;
+            }
+            _hydroInflightPromise = null;
+            _hydroInflightKey = null;
+        }
+    })();
 
-    const fc = data.feature_count ?? 0;
-    if (statusEl) statusEl.textContent =
-        `${fc} river feature${fc !== 1 ? 's' : ''} · ${source === 'hydrorivers' ? 'HydroRIVERS' : 'Natural Earth'}`;
-
-    window.setLayerStatus?.('hydrology', 'loaded');
-    // Auto-activate Hydrology layer in the stacked view if not already on
-    window.setStackMode?.('Hydrology');
-    window.emitStackUpdate();
-    window.showToast?.(`Hydrology loaded (${fc} features)`, 'success');
+    _hydroInflightPromise = promise;
+    _hydroInflightKey = inflightKey;
+    return promise;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

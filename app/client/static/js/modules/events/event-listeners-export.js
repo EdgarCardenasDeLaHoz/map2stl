@@ -9,13 +9,13 @@
  */
 
 window._setupModelExportListeners = function _setupModelExportListeners() {
-    document.getElementById('generateModelBtn2')?.addEventListener('click', () => window.generateModelFromTab?.());
+    // Generate / Preview buttons removed — model auto-rebuilds via
+    // _modelViewerAutoRebuild() (see model-viewer.js).
     document.getElementById('downloadSTLBtn')?.addEventListener('click', () => window.downloadSTL?.());
     document.getElementById('downloadOBJBtn')?.addEventListener('click', () => window.downloadModel?.('obj'));
     document.getElementById('download3MFBtn')?.addEventListener('click', () => window.downloadModel?.('3mf'));
-    document.getElementById('previewModelBtn')?.addEventListener('click', () => window.previewModelIn3D?.());
 
-    ['modelResolution', 'exportBaseHeight'].forEach(id => {
+    ['mmPerPixel', 'exportModelHeight', 'exportBaseHeight'].forEach(id => {
         document.getElementById(id)?.addEventListener('change', () => window.updatePrintDimensions?.());
     });
     const bedSel = document.getElementById('bedSizeSelect');
@@ -57,16 +57,20 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
     document.getElementById('clearCityDataBtn')?.addEventListener('click', () => window.clearCityOverlay?.());
     document.getElementById('enhanceHeightsBtn')?.addEventListener('click', () => window.enhanceBuildingHeights?.());
 
-    ['Buildings', 'Roads', 'Waterways', 'Walls', 'Towers', 'Churches', 'Forts', 'Pois'].forEach(layer => {
-        const toggle = document.getElementById(`layer${layer}Toggle`);
-        const swatch = document.getElementById(`layer${layer}Color`);
+    ['cityLayerBuildings', 'cityLayerRoads', 'cityLayerWaterways'].forEach(id => {
+        const toggle = document.getElementById(id);
         if (toggle) toggle.addEventListener('change', () => {
             window._invalidateCityCache?.();
             window.renderCityOverlay?.();
+            window.renderCityOnDEM?.();
         });
+    });
+    ['layerBuildingsColor', 'layerRoadsColor', 'layerWaterwaysColor'].forEach(id => {
+        const swatch = document.getElementById(id);
         if (swatch) swatch.addEventListener('input', () => {
             window._invalidateCityCache?.();
             window.renderCityOverlay?.();
+            window.renderCityOnDEM?.();
         });
     });
     // cityRoadWidth removed — road canvas width is now a fixed default; road_depression_m is for 3D export

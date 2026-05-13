@@ -22,15 +22,15 @@
  * @param {'map'|'globe'|'dem'|'model'|'regions'|'compare'|'cache'} view
  */
 window.switchView = function switchView(view) {
-    const mapContainer     = document.getElementById('mapContainer');
-    const globeContainer   = document.getElementById('globeContainer');
-    const demContainer     = document.getElementById('demContainer');
-    const modelContainer   = document.getElementById('modelContainer');
+    const mapContainer = document.getElementById('mapContainer');
+    const globeContainer = document.getElementById('globeContainer');
+    const demContainer = document.getElementById('demContainer');
+    const modelContainer = document.getElementById('modelContainer');
     const compareContainer = document.getElementById('compareContainer');
     const regionsContainer = document.getElementById('regionsContainer');
-    const cacheContainer   = document.getElementById('cacheInventoryContainer');
+    const cacheContainer = document.getElementById('cacheInventoryContainer');
     const newRegionSection = document.getElementById('newRegionSection');
-    const tabs             = document.querySelectorAll('.tab');
+    const tabs = document.querySelectorAll('.tab');
 
     // Restore sidebar visibility (may have been hidden in model view)
     const sidebar = document.querySelector('.sidebar');
@@ -134,9 +134,9 @@ window.switchView = function switchView(view) {
  * @param {'normal'|'expanded'|'hidden'} state
  */
 window._setSidebarViews = function _setSidebarViews(state) {
-    const listView      = document.getElementById('sidebarListView');
-    const tableView     = document.getElementById('sidebarTableView');
-    const editView      = document.getElementById('sidebarEditView');
+    const listView = document.getElementById('sidebarListView');
+    const tableView = document.getElementById('sidebarTableView');
+    const editView = document.getElementById('sidebarEditView');
     const paramsSection = document.getElementById('regionParamsSection');
     editView?.classList.add('hidden');
     if (state === 'expanded') {
@@ -160,11 +160,11 @@ window._setSidebarViews = function _setSidebarViews(state) {
  * Updates button icon/label and calls _setSidebarViews.
  */
 window.cycleSidebarState = function cycleSidebarState() {
-    const sidebar   = document.getElementById('sidebar');
+    const sidebar = document.getElementById('sidebar');
     const toggleBtn = document.getElementById('sidebarToggleBtn');
-    const openBtn   = document.getElementById('openSidebarBtn');
-    const icon      = toggleBtn.querySelector('.state-icon');
-    const label     = toggleBtn.querySelector('.state-label');
+    const openBtn = document.getElementById('openSidebarBtn');
+    const icon = toggleBtn.querySelector('.state-icon');
+    const label = toggleBtn.querySelector('.state-label');
 
     let sidebarState = window.getSidebarState?.() || 'normal';
 
@@ -173,21 +173,21 @@ window.cycleSidebarState = function cycleSidebarState() {
         sidebar.classList.remove('collapsed');
         sidebar.classList.add('expanded');
         openBtn.classList.add('hidden');
-           icon.textContent  = '⇐';
-           label.textContent = 'Collapse';
+        icon.textContent = '⇐';
+        label.textContent = 'Collapse';
     } else if (sidebarState === 'expanded') {
         sidebarState = 'hidden';
         sidebar.classList.remove('expanded');
         sidebar.classList.add('collapsed');
         openBtn.classList.remove('hidden');
-           icon.textContent  = '✖';
-           label.textContent = 'Hide';
+        icon.textContent = '✖';
+        label.textContent = 'Hide';
     } else {
         sidebarState = 'normal';
         sidebar.classList.remove('collapsed', 'expanded');
         openBtn.classList.add('hidden');
-           icon.textContent  = '⇔';
-           label.textContent = 'Expand';
+        icon.textContent = '⇔';
+        label.textContent = 'Expand';
     }
 
     window.setSidebarState?.(sidebarState);
@@ -217,20 +217,20 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
     const tbody = document.getElementById('sidebarRegionsTableBody');
     if (!tbody) return;
     tbody.innerHTML = '';
-    const q            = (filter || document.getElementById('sidebarTableSearch')?.value || '').toLowerCase();
+    const q = (filter || document.getElementById('sidebarTableSearch')?.value || '').toLowerCase();
     const coordinatesData = window.getCoordinatesData?.() || [];
     const filteredBySearch = q ? coordinatesData.filter(r => r.name.toLowerCase().includes(q)) : coordinatesData;
-    const list         = window.filterRegionsForMapViewport?.(filteredBySearch) || filteredBySearch;
-    const groups       = window.groupRegionsByContinent?.(list) || [];
+    const list = window.filterRegionsForMapViewport?.(filteredBySearch) || filteredBySearch;
+    const groups = window.groupRegionsByContinent?.(list) || [];
     const selectedRegion = window.appState.selectedRegion;
 
     groups.forEach(({ continent, regions: groupRegions }) => {
         // Group header row
-        const headerTr        = document.createElement('tr');
-        headerTr.className    = 'tbl-group-header';
-        headerTr.innerHTML    = `<td colspan="7" class="tbl-group-label">${continent} <span class="tbl-group-count">${groupRegions.length}</span></td>`;
-        let groupCollapsed    = false;
-        headerTr.onclick      = () => {
+        const headerTr = document.createElement('tr');
+        headerTr.className = 'tbl-group-header';
+        headerTr.innerHTML = `<td colspan="7" class="tbl-group-label">${continent} <span class="tbl-group-count">${groupRegions.length}</span></td>`;
+        let groupCollapsed = false;
+        headerTr.onclick = () => {
             groupCollapsed = !groupCollapsed;
             headerTr.classList.toggle('collapsed', groupCollapsed);
             let sibling = headerTr.nextElementSibling;
@@ -258,9 +258,9 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
                 originalIndex = coordinatesData.findIndex(r => r.name === region.name);
             }
             if (originalIndex < 0) return;
-            const p   = region.parameters || {};
+            const p = region.parameters || {};
             const dim = p.dim || '—';
-            const tr  = document.createElement('tr');
+            const tr = document.createElement('tr');
             if (selectedRegion && selectedRegion.name === region.name) tr.classList.add('selected');
             tr.dataset.label = region.label || '';
             tr.dataset.category = (region.label && region.label.trim()) ? region.label.trim() : continent;
@@ -304,7 +304,7 @@ window.getBboxLayersVisible = function getBboxLayersVisible() {
  */
 window.toggleBboxLayerVisibility = function toggleBboxLayerVisibility() {
     _bboxLayersVisible = !_bboxLayersVisible;
-    const btn             = document.getElementById('bboxVisToggleBtn');
+    const btn = document.getElementById('bboxVisToggleBtn');
 
     if (_bboxLayersVisible) {
         window.syncRegionBboxVisibility?.();
@@ -324,7 +324,7 @@ window.toggleBboxLayerVisibility = function toggleBboxLayerVisibility() {
  */
 window.toggleStatusPanel = function toggleStatusPanel() {
     const panel = document.getElementById('statusPanel');
-    const btn   = document.getElementById('statusToggleBtn');
+    const btn = document.getElementById('statusToggleBtn');
     if (!panel) return;
     const collapsed = panel.classList.toggle('collapsed');
     panel.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
@@ -372,20 +372,20 @@ window.saveCurrentRegion = async function saveCurrentRegion() {
         ? boundingBox.getBounds()
         : boundingBox;
     const regionLabelInput = document.getElementById('regionLabel');
-    const regionData      = {
-        name:        regionName,
-        label:       (regionLabelInput?.value || '').trim() || undefined,
-        north:       bounds.getNorth(),
-        south:       bounds.getSouth(),
-        east:        bounds.getEast(),
-        west:        bounds.getWest(),
+    const regionData = {
+        name: regionName,
+        label: (regionLabelInput?.value || '').trim() || undefined,
+        north: bounds.getNorth(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        west: bounds.getWest(),
         description: `Custom region: ${regionName}`,
-        parameters:  {
-            dim:            parseInt(document.getElementById('paramDim').value),
-            depth_scale:    window.appState.demParams.depthScale,
-            water_scale:    window.appState.demParams.waterScale,
-            height:         window.appState.demParams.height,
-            base:           window.appState.demParams.base,
+        parameters: {
+            dim: parseInt(document.getElementById('paramDim').value),
+            depth_scale: window.appState.demParams.depthScale,
+            water_scale: window.appState.demParams.waterScale,
+            height: window.appState.demParams.height,
+            base: window.appState.demParams.base,
             subtract_water: window.appState.demParams.subtractWater
         }
     };
@@ -433,7 +433,7 @@ window.submitBoundingBox = function submitBoundingBox() {
  * Also handles the settings panel collapse/expand toggle.
  */
 window.setupDemSubtabs = function setupDemSubtabs() {
-    document.querySelectorAll('#demStrip [data-subtab]').forEach(btn => {
+    document.querySelectorAll('#demRightPanel [data-subtab]').forEach(btn => {
         btn.addEventListener('click', () => { if (!btn.disabled) window.switchDemSubtab?.(btn.dataset.subtab); });
     });
 
@@ -444,7 +444,7 @@ window.setupDemSubtabs = function setupDemSubtabs() {
         const wrapper = document.getElementById('demRightPanel');
         if (!wrapper) return;
         const collapsed = wrapper.classList.toggle('settings-collapsed');
-        const stripBtn  = document.getElementById('settingsStripBtn');
+        const stripBtn = document.getElementById('settingsStripBtn');
         if (stripBtn) stripBtn.classList.toggle('active', !collapsed);
         document.getElementById('layersContainer')?.classList.remove('hidden');
         document.getElementById('citiesPanel')?.classList.add('hidden');
@@ -455,10 +455,10 @@ window.setupDemSubtabs = function setupDemSubtabs() {
         window.events?.emit(window.EV?.STACKED_UPDATE);
     }
 
-    const settingsBtn        = document.getElementById('settingsStripBtn');
-    if (settingsBtn)        settingsBtn.addEventListener('click', toggleSettingsPanel);
-    const settingsExtBtn     = document.getElementById('settingsExternalBtn');
-    if (settingsExtBtn)     settingsExtBtn.addEventListener('click', toggleSettingsPanel);
+    const settingsBtn = document.getElementById('settingsStripBtn');
+    if (settingsBtn) settingsBtn.addEventListener('click', toggleSettingsPanel);
+    const settingsExtBtn = document.getElementById('settingsExternalBtn');
+    if (settingsExtBtn) settingsExtBtn.addEventListener('click', toggleSettingsPanel);
     const settingsCollapsedTab = document.getElementById('settingsCollapsedTab');
     if (settingsCollapsedTab) settingsCollapsedTab.addEventListener('click', toggleSettingsPanel);
 };
@@ -479,7 +479,7 @@ window.switchDemSubtab = function switchDemSubtab(subtab) {
     }
 
     // Update active state on strip buttons
-    document.querySelectorAll('#demStrip [data-subtab]').forEach(t => {
+    document.querySelectorAll('#demRightPanel [data-subtab]').forEach(t => {
         t.classList.toggle('active', t.dataset.subtab === subtab);
     });
 

@@ -48,7 +48,7 @@ const builtInPresets = {
         colormap: 'terrain', subtractWater: false, satScale: 500, elevationCurve: 'enhance-peaks'
     },
     'coastal': {
-        dim: 300, depthScale: 0.7, waterScale: 0.15,
+        dim: 600, depthScale: 0.7, waterScale: 0.15,
         colormap: 'viridis', subtractWater: true, satScale: 300, elevationCurve: 'compress-depths'
     }
 };
@@ -319,10 +319,11 @@ function collectAllSettings() {
         },
         hydrology: {
             source: _str('hydroSource', 'hydrorivers'),
-            dim: _int('hydroDim', 300),
+            dim: _int('hydroDim', _int('paramDim', 600)),
             depression_m: _flt('hydroDepressionM', -5.0),
             min_order: _int('hydroMinOrder', 3),
             order_exponent: _flt('hydroOrderExponent', 1.5),
+            width_factor: _flt('hydroWidthFactor', 0.5),
         },
     };
 }
@@ -446,9 +447,11 @@ function applyAllSettings(s) {
     const hydro = s.hydrology || {};
     if (hydro.source != null) set('hydroSource', hydro.source);
     if (hydro.dim != null) set('hydroDim', hydro.dim);
+    else if (dem.dim != null) set('hydroDim', dem.dim);
     if (hydro.depression_m != null) set('hydroDepressionM', hydro.depression_m);
     if (hydro.min_order != null) set('hydroMinOrder', hydro.min_order);
     if (hydro.order_exponent != null) set('hydroOrderExponent', hydro.order_exponent);
+    if (hydro.width_factor != null) set('hydroWidthFactor', hydro.width_factor);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

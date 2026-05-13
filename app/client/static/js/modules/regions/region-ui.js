@@ -67,7 +67,7 @@ function detectContinent(lat, lon) {
 
 function groupRegionsByContinent(regions) {
     const groups = {};
-    const ORDER = ['North America','South America','Europe','Africa','Asia','Oceania','Antarctica','Other'];
+    const ORDER = ['North America', 'South America', 'Europe', 'Africa', 'Asia', 'Oceania', 'Antarctica', 'Other'];
     regions.forEach(region => {
         const lat = (region.north + region.south) / 2;
         const lon = (region.east + region.west) / 2;
@@ -76,7 +76,7 @@ function groupRegionsByContinent(regions) {
         groups[continent].push(region);
     });
     Object.values(groups).forEach(g => g.sort((a, b) => a.name.localeCompare(b.name)));
-    const known  = ORDER.filter(c => groups[c]).map(c => ({ continent: c, regions: groups[c] }));
+    const known = ORDER.filter(c => groups[c]).map(c => ({ continent: c, regions: groups[c] }));
     const custom = Object.keys(groups).filter(c => !ORDER.includes(c)).sort()
         .map(c => ({ continent: c, regions: groups[c] }));
     return [...known, ...custom];
@@ -111,20 +111,20 @@ function renderCoordinatesList() {
         _lastListSearch = searchVal;
     }
 
-    const filtered  = searchVal
+    const filtered = searchVal
         ? coordinatesData.filter(r => r.name.toLowerCase().includes(searchVal))
         : coordinatesData;
 
     // ── Pagination ──────────────────────────────────────────────────────────
     const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
     if (_listPage >= totalPages) _listPage = totalPages - 1;
-    const pageStart  = _listPage * LIST_PAGE_SIZE;
-    const paginated  = filtered.slice(pageStart, pageStart + LIST_PAGE_SIZE);
+    const pageStart = _listPage * LIST_PAGE_SIZE;
+    const paginated = filtered.slice(pageStart, pageStart + LIST_PAGE_SIZE);
     // ────────────────────────────────────────────────────────────────────────
 
-    const groups     = groupRegionsByContinent(paginated);
-    const outerFrag  = document.createDocumentFragment();
-    const selected   = window.appState?.selectedRegion;
+    const groups = groupRegionsByContinent(paginated);
+    const outerFrag = document.createDocumentFragment();
+    const selected = window.appState?.selectedRegion;
     const indexByName = new Map(coordinatesData.map((r, i) => [r.name, i]));
 
     groups.forEach(({ continent, regions: groupRegions }) => {
@@ -192,7 +192,7 @@ function renderCoordinatesList() {
         const pag = document.createElement('div');
         pag.className = 'list-pagination';
         const start = pageStart + 1;
-        const end   = Math.min(pageStart + LIST_PAGE_SIZE, filtered.length);
+        const end = Math.min(pageStart + LIST_PAGE_SIZE, filtered.length);
         pag.innerHTML = `
             <button id="listPagePrev" ${_listPage === 0 ? 'disabled' : ''}>&#8249; Prev</button>
             <span>${start}–${end} of ${filtered.length}</span>
@@ -275,7 +275,7 @@ function _renderTablePagination(total, totalPages) {
         return;
     }
     const start = _tablePage * TABLE_PAGE_SIZE + 1;
-    const end   = Math.min((_tablePage + 1) * TABLE_PAGE_SIZE, total);
+    const end = Math.min((_tablePage + 1) * TABLE_PAGE_SIZE, total);
     el.innerHTML = `
         <button id="regPagePrev" ${_tablePage === 0 ? 'disabled' : ''}>&#8249; Prev</button>
         <span>${start}–${end} of ${total}</span>
@@ -323,13 +323,13 @@ function initRegionThumbnails() {
     try {
         const saved = localStorage.getItem('strm2stl_thumbs');
         if (saved) regionThumbnails = JSON.parse(saved);
-    } catch (_) {}
+    } catch (_) { }
     window.appState.regionThumbnails = regionThumbnails;
 }
 
 function saveRegionThumbnail(name, dataURL) {
     regionThumbnails[name] = dataURL;
-    try { localStorage.setItem('strm2stl_thumbs', JSON.stringify(regionThumbnails)); } catch (_) {}
+    try { localStorage.setItem('strm2stl_thumbs', JSON.stringify(regionThumbnails)); } catch (_) { }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -358,7 +358,7 @@ function initRegionNotes() {
 
 function showNotesModal(regionName) {
     currentNotesRegion = regionName;
-    const modal    = document.getElementById('regionNotesModal');
+    const modal = document.getElementById('regionNotesModal');
     const nameSpan = document.getElementById('notesRegionName');
     const textarea = document.getElementById('notesTextarea');
 
@@ -394,17 +394,17 @@ function saveRegionNotes() {
 // Expose on window
 // ─────────────────────────────────────────────────────────────────────────────
 
-window.CONTINENT_HIDDEN        = CONTINENT_HIDDEN;
-window.detectContinent          = detectContinent;
-window.groupRegionsByContinent  = groupRegionsByContinent;
-window.renderCoordinatesList    = renderCoordinatesList;
-window.populateRegionsTable     = populateRegionsTable;
-window.loadRegionFromTable      = loadRegionFromTable;
-window.viewRegionOnMap          = viewRegionOnMap;
-window.setupRegionsTable        = setupRegionsTable;
-window.initRegionThumbnails     = initRegionThumbnails;
-window.saveRegionThumbnail      = saveRegionThumbnail;
-window.initRegionNotes          = initRegionNotes;
-window.showNotesModal           = showNotesModal;
-window.hideNotesModal           = hideNotesModal;
-window.saveRegionNotes          = saveRegionNotes;
+window.CONTINENT_HIDDEN = CONTINENT_HIDDEN;
+window.detectContinent = detectContinent;
+window.groupRegionsByContinent = groupRegionsByContinent;
+window.renderCoordinatesList = renderCoordinatesList;
+window.populateRegionsTable = populateRegionsTable;
+window.loadRegionFromTable = loadRegionFromTable;
+window.viewRegionOnMap = viewRegionOnMap;
+window.setupRegionsTable = setupRegionsTable;
+window.initRegionThumbnails = initRegionThumbnails;
+window.saveRegionThumbnail = saveRegionThumbnail;
+window.initRegionNotes = initRegionNotes;
+window.showNotesModal = showNotesModal;
+window.hideNotesModal = hideNotesModal;
+window.saveRegionNotes = saveRegionNotes;

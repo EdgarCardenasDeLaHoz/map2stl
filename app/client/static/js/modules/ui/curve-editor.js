@@ -126,11 +126,11 @@ function initCurveEditor() {
 
     // Expose a CurveEditor-like instance on window for programmatic access
     window.curveEditor = {
-        getPoints()         { return _state.getPoints(); },
-        setPoints(pts)      { applyCurveSettings(pts, 'custom'); },
-        redraw()            { drawCurve(); },
-        serialize()         { return _state.serialize(); },
-        deserialize(data)   { if (data?.points) applyCurveSettings(data.points, data.preset ?? 'custom'); },
+        getPoints() { return _state.getPoints(); },
+        setPoints(pts) { applyCurveSettings(pts, 'custom'); },
+        redraw() { drawCurve(); },
+        serialize() { return _state.serialize(); },
+        deserialize(data) { if (data?.points) applyCurveSettings(data.points, data.preset ?? 'custom'); },
     };
 }
 

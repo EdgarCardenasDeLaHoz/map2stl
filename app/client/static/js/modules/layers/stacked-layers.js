@@ -42,7 +42,8 @@ window.setGridPixelMode = function setGridPixelMode(on) {
 
 // All layer canvas IDs — render order (first = bottom, last = top).
 // Mutable so users can reorder via the UI.
-let _layerOrder = ['Dem', 'Water', 'Sat', 'SatImg', 'CityRaster', 'CompositeDem', 'Hydrology'];
+// NOTE: Water and Hydrology are combined into WaterHydrology for unified rendering
+let _layerOrder = ['Dem', 'WaterHydrology', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'CompositeDem'];
 const LAYER_STACK = _layerOrder;  // alias kept for backward compat
 
 /**
@@ -51,12 +52,11 @@ const LAYER_STACK = _layerOrder;  // alias kept for backward compat
  */
 const LAYER_CANVAS_IDS = {
     Dem:          'layerDemCanvas',
-    Water:        'layerWaterCanvas',
+    WaterHydrology: 'layerWaterHydrologyCanvas',
     Sat:          'layerSatCanvas',
     SatImg:       'layerSatImgCanvas',
     CityRaster:   'layerCityRasterCanvas',
     CompositeDem: 'layerCompositeDemCanvas',
-    Hydrology:    'layerHydroCanvas',
 };
 
 /** Return the layer buffer canvas for the given mode, or null if not found. */
@@ -122,8 +122,8 @@ window.clearAllLayerBuffers = function clearAllLayerBuffers() {
 };
 
 // Multi-layer state: set of active layer keys + per-layer opacity (0–1)
-let _activeLayers  = new Set(['Dem']);
-let _layerOpacities = { Dem: 1, Water: 0.7, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CompositeDem: 1, Hydrology: 0.8 };
+let _activeLayers  = new Set(['Dem', 'CityOverlay']);
+let _layerOpacities = { Dem: 1, WaterHydrology: 0.75, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CityOverlay: 0.85, CompositeDem: 1 };
 
 // Kept for getStackMode() backward compat — last-toggled-on layer
 let _activeMode = 'Dem';
@@ -144,9 +144,9 @@ window.setStackMode = function setStackMode(mode) {
             window.loadSatelliteRGBImage?.().then(() => window.updateStackedLayers?.());
             return;
         }
-        // Auto-load hydrology if switching to Hydrology with no data yet
-        if (mode === 'Hydrology' && !window.appState?.hydrologySourceCanvas) {
-            window.loadHydrology?.();
+        // Auto-load water+hydrology combined if switching to WaterHydrology with no data yet
+        if (mode === 'WaterHydrology' && !window.appState?.waterHydrologyCanvas) {
+            window.loadWaterHydrology?.();
             return;
         }
     }
@@ -158,6 +158,7 @@ window.setStackMode = function setStackMode(mode) {
     });
 
     _updateLayerOpacitySliders();
+    _syncCityOverlayLayerState();
     window.updateStackedLayers?.();
 };
 
@@ -167,6 +168,7 @@ window.getStackMode = function getStackMode() { return _activeMode; };
 /** Set per-layer opacity (0–1) and refresh. */
 window.setLayerOpacity = function setLayerOpacity(mode, value) {
     _layerOpacities[mode] = Math.max(0, Math.min(1, value));
+    if (mode === 'CityOverlay') _syncCityOverlayLayerState();
     window.updateStackedLayers?.();
 };
 
@@ -206,7 +208,7 @@ function _updateLayerOpacitySliders() {
     const container = document.getElementById('layerOpacitySliders');
     if (!container) return;
     container.innerHTML = '';
-    const labels = { Dem: '🏔 DEM', Water: '💧 Water', Sat: '🌿 ESA', SatImg: '🛰 Sat', CityRaster: '🏙 City', CompositeDem: '★ Composite', Hydrology: '🌊 Hydro' };
+    const labels = { Dem: '🏔 DEM', Water: '💧 Water', Sat: '🌿 ESA', SatImg: '🛰 Sat', CityRaster: '🏙 City Raster', CityOverlay: '🏙 City Polygons', CompositeDem: '★ Composite', Hydrology: '🌊 Hydro' };
     // Show active layers in current render order (bottom first, top last)
     const visible = _layerOrder.filter(m => _activeLayers.has(m));
     visible.forEach((mode, vi) => {
@@ -244,6 +246,15 @@ function _updateLayerOpacitySliders() {
         });
         container.appendChild(row);
     });
+}
+
+function _syncCityOverlayLayerState() {
+    const overlay = document.querySelector('#layersStack .osm-overlay');
+    if (!overlay) return;
+    const visible = _activeLayers.has('CityOverlay');
+    const masterOpacity = (document.getElementById('activeLayerOpacity')?.value ?? 100) / 100;
+    overlay.style.display = visible ? '' : 'none';
+    overlay.style.opacity = String(masterOpacity * (_layerOpacities.CityOverlay ?? 1));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -392,17 +403,17 @@ window.updateStackedLayers = function updateStackedLayers() {
     // Source canvas for each layer mode
     const sourceMap = {
         Dem:          () => demCanvas,
-        Water:        () => waterCanvas,
+        WaterHydrology: () => window.appState?.waterHydrologyCanvas || null,
         Sat:          () => satCanvas,
         SatImg:       () => window.appState?.satImgSourceCanvas || null,
         CityRaster:   () => window.appState?.cityRasterSourceCanvas || null,
         CompositeDem: () => window.appState?.compositeDemSourceCanvas || null,
-        Hydrology:    () => window.appState?.hydrologySourceCanvas || null,
     };
 
     // Draw each active layer into its own buffer
     LAYER_STACK.forEach(mode => {
         if (!_activeLayers.has(mode)) return;
+        if (mode === 'CityOverlay') return;
         const src    = sourceMap[mode]?.();
         const buffer = _getLayerBuffer(mode);
         if (src && buffer) drawLayerToTarget(buffer, src);
@@ -418,6 +429,7 @@ window.updateStackedLayers = function updateStackedLayers() {
         const masterOpacity = (document.getElementById('activeLayerOpacity')?.value ?? 100) / 100;
         LAYER_STACK.forEach(mode => {
             if (!_activeLayers.has(mode)) return;
+            if (mode === 'CityOverlay') return;
             const buffer = _getLayerBuffer(mode);
             if (!buffer || buffer.width === 0 || buffer.height === 0) return;
             dCtx.globalAlpha = masterOpacity * (_layerOpacities[mode] ?? 1);
@@ -426,11 +438,18 @@ window.updateStackedLayers = function updateStackedLayers() {
         dCtx.globalAlpha = 1;
     }
 
+    _syncCityOverlayLayerState();
+
     drawLayerGrid();
 
     applyStackedTransform();
 
-    if (window.appState?.osmCityData) renderCityOverlay();
+    if (window.appState?.osmCityData && _activeLayers.has('CityOverlay')) {
+        renderCityOverlay();
+    } else {
+        window._cancelCityRenders?.();
+        document.querySelector('#layersStack .osm-overlay')?.remove();
+    }
 };
 
 /**
@@ -454,7 +473,7 @@ window.drawLayerGrid = function drawLayerGrid() {
     if (!bbox || !demCanvas || demCanvas.width === 0 || demCanvas.height === 0) return;
 
     const { scale, offsetX, offsetY } = stackZoom;
-    const densityCheck = 10;  // fixed default — no UI control for graticule density
+    const densityCheck = Math.max(2, parseInt(document.getElementById('gridlineCount')?.value || '10', 10));
     const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${_gridPixelMode}`;
     if (newKey === _gridCacheKey) return;
     _gridCacheKey = newKey;
@@ -702,7 +721,7 @@ window.applyStackedTransform = function applyStackedTransform() {
     drawLayerGrid();
 
     // Schedule city re-render only when needed
-    if (window.appState?.osmCityData && typeof window.renderCityOverlay === 'function') {
+    if (window.appState?.osmCityData && _activeLayers.has('CityOverlay') && typeof window.renderCityOverlay === 'function') {
         const scaleChange = Math.abs(stackZoom.scale - _cityOverlayLastScale) / _cityOverlayLastScale;
         if (scaleChange > 0.15) {
             // Significant zoom jump (LOD change) — render immediately

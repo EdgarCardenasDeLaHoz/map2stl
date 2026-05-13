@@ -60,6 +60,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     });
 
     const projSelect = document.getElementById('paramProjection');
+    const clipChk = document.getElementById('paramClipNans');
     if (projSelect) {
         const projDescriptions = {
             'none': 'No correction — raw lat/lon grid displayed as-is.',
@@ -68,11 +69,23 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
             'lambert': 'Lambert Cylindrical Equal-Area — preserves area at the cost of shape.',
             'sinusoidal': 'Sinusoidal — each row scaled by cos(lat), centred on meridian.',
         };
+        const _syncClipToggleState = () => {
+            if (!clipChk) return;
+            const noProjection = projSelect.value === 'none';
+            clipChk.disabled = noProjection;
+            clipChk.closest('label')?.classList.toggle('disabled', noProjection);
+            clipChk.title = noProjection
+                ? 'Clip edges has no effect when projection is None.'
+                : 'Strip all-NaN border rows/columns introduced by projection warping.';
+        };
+        _syncClipToggleState();
+
         let _projChangeTimer = null;
         projSelect.addEventListener('change', () => {
             // Update description immediately — zero cost
             const desc = document.getElementById('projectionDescription');
             if (desc) desc.textContent = projDescriptions[projSelect.value] || '';
+            _syncClipToggleState();
 
             // Debounce 80ms so rapid clicks don't fire multiple fetches.
             // Projection is now applied server-side: re-fetch every loaded layer
@@ -94,6 +107,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
                 // Check cityRasterSourceCanvas (cleared by clearLayerCache) rather than
                 // osmCityData (not cleared) so we only re-fetch when the raster was loaded.
                 const hadCity = !!window.appState.cityRasterSourceCanvas;
+                const hadCityPolygons = !!window.appState.osmCityData;
                 const hadHydro = !!window.appState.hydrologySourceCanvas;
 
                 window.showToast?.('Projection changed — re-fetching layers…', 'info');
@@ -111,6 +125,14 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
                 if (hadHydro) tasks.push(window.loadHydrology?.());
                 if (tasks.length) await Promise.all(tasks);
 
+                // City polygon overlays are frontend-rendered; force cache invalidation + redraw
+                // so projection changes are reflected immediately even without refetch.
+                if (hadCityPolygons) {
+                    window._invalidateCityCache?.();
+                    window.renderCityOverlay?.();
+                    window.renderCityOnDEM?.();
+                }
+
                 requestAnimationFrame(() => window.updatePrintDimensions?.());
             }, 80);
         });
@@ -119,6 +141,11 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     // Clip-edges checkbox also triggers refetch (projection-related param)
     let _clipNansTimer = null;
     document.getElementById('paramClipNans')?.addEventListener('change', () => {
+        const proj = document.getElementById('paramProjection')?.value || 'none';
+        if (proj === 'none') {
+            window.showToast?.('Clip edges only applies when a projection is enabled.', 'info');
+            return;
+        }
         clearTimeout(_clipNansTimer);
         _clipNansTimer = setTimeout(() => {
             document.getElementById('paramProjection')?.dispatchEvent(new Event('change'));
@@ -306,6 +333,16 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         window.setGridPixelMode?.(!!on);
     });
 
+    // Gridline controls in View -> Canvas should update overlays immediately.
+    const _refreshGridlines = () => {
+        window.drawGridlinesOverlay?.('demImage');
+        window.drawGridlinesOverlay?.('inlineLayersCanvas');
+        window.drawLayerGrid?.();
+        window.events?.emit(window.EV?.STACKED_UPDATE);
+    };
+    document.getElementById('gridlineCount')?.addEventListener('change', _refreshGridlines);
+    document.getElementById('showGridlines')?.addEventListener('change', _refreshGridlines);
+
     document.getElementById('terrainOverlayOpacity')?.addEventListener('input', e => {
         const val = e.target.value;
         document.getElementById('terrainOpacityValue').textContent = `${val}%`;
@@ -321,7 +358,11 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         const val = parseInt(document.getElementById('waterResolution').value);
         const w = document.getElementById('waterResWarning');
         if (w) w.style.display = val >= 500 ? 'block' : 'none';
-        window.loadWaterMask?.();
+        // In merged mode, only the combined button should trigger network loads.
+        const hasCombinedLoader = !!document.getElementById('loadWaterHydrologyBtn');
+        if (!hasCombinedLoader) {
+            window.loadWaterMask?.();
+        }
     });
     /**
      * Wire a load button to an async action with disable-while-loading guard.
@@ -362,8 +403,10 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     }
 
     // Fetch section load buttons
-    // loadHydrologyBtn wired in event-listeners.js
+    // loadWaterHydrologyBtn and related wired in event-listeners.js
     // loadSatImgBtn wired in app-setup.js (also switches to SatImg mode)
+    // (legacy button support - most users will use loadWaterHydrologyBtn)
+    _asyncBtn('loadDemBtn', () => window.loadDEM?.());
     _asyncBtn('loadWaterMaskBtn', () => window.loadWaterMask?.());
     _asyncBtn('loadEsaBtn', () => window.loadEsaLandCover?.());
     // Satellite clear button

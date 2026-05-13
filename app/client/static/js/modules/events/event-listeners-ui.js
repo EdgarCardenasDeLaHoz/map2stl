@@ -94,7 +94,7 @@ window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {
             window.showToast?.(`Cache clear error: ${e.message}`, 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = '🗑️ Clear Cache';
+            btn.textContent = '🗑️';
         }
     });
 
@@ -113,11 +113,9 @@ window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {
                 if (editor) editor.value = JSON.stringify(window.collectAllSettings?.() ?? {}, null, 2);
                 jsonView.classList.remove('hidden');
                 if (demControlsInner) demControlsInner.classList.add('hidden');
-                if (settingsSaveRow) settingsSaveRow.style.display = 'none';
             } else {
                 jsonView.classList.add('hidden');
                 if (demControlsInner) demControlsInner.classList.remove('hidden');
-                if (settingsSaveRow) settingsSaveRow.style.display = '';
                 document.getElementById('settingsJsonError')?.classList.add('hidden');
             }
         });

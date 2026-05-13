@@ -131,6 +131,7 @@ async function _fetchCityRaster(demW, demH) {
         north: bbox.north, south: bbox.south,
         east:  bbox.east,  west:  bbox.west,
         width: demW, height: demH,
+        clip_valid_region: document.getElementById('paramClipNans')?.checked ?? true,
     }) ?? Promise.resolve({ data: null, error: 'api not ready' }));
 
     if (error || !data) {
