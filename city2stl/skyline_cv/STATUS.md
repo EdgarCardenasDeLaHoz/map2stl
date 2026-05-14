@@ -196,7 +196,8 @@ clear "no segmentation possible" banner.
    tagged tower (e.g. b0389 tag=146 → pred=32) and walk: which view
    sees it, what segment captures it, what y_px the mask returns, what
    `forward_m` projects, whether the closest-in-bin gate killed a
-   higher prediction.
+   higher prediction. Concrete plan with trace points and Phase-2
+   monocular-depth gating: [docs/glass-roof-height-fix-plan.md](docs/glass-roof-height-fix-plan.md).
 2. **Fix the `iou=0.00` display bug** in `register_view_to_osm`.
 3. **Fix the over-sized FOV cone** — scale `cone_len` to the auto-zoom
    axis span.
@@ -324,15 +325,166 @@ If metrics improve but a specific failure remains, capture one concrete
 segment/building mismatch with its score breakdown and adjust only the
 responsible phase (avoid broad parameter churn).
 
+### Depth integration plan (where it helps, and rollout order)
+
+Depth should be integrated as a **ranking and QA signal first**, not as a
+hard replacement for the geometric pipeline. The best near-term value is
+resolving foreground/background confusion in matching.
+
+#### Target use points in the current pipeline
+
+1. **Segment-to-building matching** (`pipeline.py::match_segments_to_buildings`)
+  - Add a depth-derived foreground score per segment region.
+  - Use it to down-rank projected buildings that are farther than the
+    dominant segment depth when x-overlap is similar.
+  - This directly addresses "background matched, foreground ignored".
+
+2. **Segment splitting / instance separation** (`pipeline.py::detect_buildings_from_mask`)
+  - Use depth discontinuities as another split cue (alongside contour,
+    mask-height, and vertical gradients).
+  - Helpful when adjacent towers have similar color/roofline but different
+    depth planes.
+
+3. **Height plausibility checks** (post-estimation, before aggregation)
+  - Use relative depth consistency to flag implausible height outcomes:
+    if a predicted-tall segment is consistently farther and lower in image
+    support than its neighbors, mark for low confidence.
+  - Keep this as a soft confidence modifier, not a hard reject in v1.
+
+4. **PDF diagnostics** (`region_pdf.py`)
+  - Add optional per-segment depth summary in the legend (e.g. median inverse
+    depth percentile) so failure cases can be audited quickly.
+
+#### Rollout stages
+
+1. **Stage 0: offline ablation (no pipeline behavior change)**
+  - Run depth model on cached seed views and stitched panos.
+  - Save per-segment depth stats; compare against known bad matches.
+  - Decide whether depth signal is stable enough for ranking.
+
+#### Stage 0 data schema (implementation-ready)
+
+Persist one JSON artifact per region run, e.g.
+`runs/depth_ablation/<region>_depth_ablation.json`.
+
+Top-level shape:
+
+```json
+{
+  "meta": {
+    "region": "Cartagena",
+    "run_id": "2026-05-14T22-15-00Z",
+    "depth_model": "<model-id>",
+    "image_count": 0,
+    "notes": "offline ablation, no ranking changes"
+  },
+  "views": [],
+  "segments": [],
+  "candidates": [],
+  "cases": []
+}
+```
+
+Required arrays and fields:
+
+1. `views[]` (one row per processed image: per-view + stitched pano)
+  - `seed_name`, `view_name`, `kind` (`seed_view` | `stitched_pano`)
+  - `heading_deg`, `fov_deg`, `image_w`, `image_h`
+  - `depth_min`, `depth_p10`, `depth_p50`, `depth_p90`, `depth_max`
+  - `depth_valid_frac` (non-NaN/non-zero fraction)
+  - `inference_ms`
+
+2. `segments[]` (one row per detected segment)
+  - `seed_name`, `view_name`, `segment_id`
+  - `x_left`, `x_right`, `top_y`, `base_y`, `peak_x`
+  - `seg_depth_p25`, `seg_depth_p50`, `seg_depth_p75`
+  - `seg_inv_depth_p25`, `seg_inv_depth_p50`, `seg_inv_depth_p75`
+  - `seg_depth_iqr`
+  - `depth_edge_strength` (median gradient magnitude on segment borders)
+  - `matched_feature_id_baseline` (current matcher output, unchanged)
+
+3. `candidates[]` (one row per segment-building candidate used by matcher)
+  - `seed_name`, `view_name`, `segment_id`, `feature_id`
+  - `interval_iou`, `width_score`, `distance_m`
+  - `depth_consistency_score` (0..1, higher = candidate depth aligns with segment)
+  - `occlusion_penalty_depth` (0..1, higher = likely behind foreground)
+  - `rank_baseline` (existing matcher rank)
+  - `rank_with_depth_shadow` (simulated rank in Stage 0, not applied)
+
+4. `cases[]` (manually flagged failures for focused review)
+  - `case_id` (e.g. `seed5_h227_bg_match`)
+  - `seed_name`, `view_name`, `segment_id`
+  - `expected_behavior` (`foreground_should_win` etc.)
+  - `baseline_feature_id`, `depth_shadow_feature_id`
+  - `improved` (boolean)
+  - `comment`
+
+#### Stage 0 scoring protocol
+
+Run baseline matcher unchanged, then compute a **shadow rank** using depth
+terms (no production behavior change). Compare:
+
+1. Case-level win rate on flagged failures (`cases[].improved`).
+2. Candidate-rank deltas where depth flips winner among near-IoU candidates.
+3. Stability: fraction of segments where depth is low-confidence
+   (`seg_depth_iqr` too large or `depth_valid_frac` too low).
+4. Runtime overhead per image (`inference_ms`).
+
+Promotion gate to Stage 1/2:
+
+- Flagged-case win rate improves materially.
+- No broad instability (low-confidence depth does not dominate).
+- Runtime overhead remains acceptable for full regional runs.
+
+2. **Stage 1: passive diagnostics (log-only)**
+  - Integrate depth inference behind a feature flag.
+  - Attach depth diagnostics to segment objects; do not alter ranking.
+  - Validate runtime/memory impact and failure modes.
+
+3. **Stage 2: matching prior (active, low risk)**
+  - Blend depth prior into candidate score when IoU is close.
+  - Constrain impact with caps so IoU geometry remains primary.
+  - Expected gain: fewer far-building false matches.
+
+4. **Stage 3: split refinement (active, medium risk)**
+  - Use depth edges to refine inter-tower split boundaries.
+  - Guard against over-splitting with minimum width/prominence rules.
+
+5. **Stage 4: optional height support (experimental)**
+  - Explore depth-assisted roof localization for glass towers.
+  - Keep separate from default height equation until validated on tagged
+    buildings and cross-seed consistency.
+
+#### Model and operational constraints
+
+- Prefer a lightweight monocular depth model for throughput (12 views/seed +
+  pano pages).
+- Cache depth outputs alongside segmentation cache to avoid repeated inference.
+- Keep a strict fallback path: if depth fails/unavailable, behavior must match
+  current baseline exactly.
+- Depth is relative-scale by default; do not treat it as absolute metric depth
+  without calibration.
+
+#### Success criteria for enabling depth by default
+
+1. Measurable reduction in known bad background matches on Cartagena failure
+  pages (including seed_5 heading~227 family).
+2. No significant drop in distinct matched buildings.
+3. Runtime increase remains acceptable for current report workflow.
+4. Cross-seed disagreement does not worsen.
+
 ## What's deliberately not on the list
 
 - Sliding-window SegFormer on stitched RGB — tried, removed in favour
   of mask-stitching (faster and seam-free).
 - Per-view escape hatch around the joint anchor — tried, removed
   because it broke spin-view consistency.
-- Monocular depth (MiDaS/DPT) integration — would help on glass-roof
-  under-reach, but only worth doing after the above height trace
-  rules out simpler causes.
+- Monocular depth as a **default hard dependency** — defer until the staged
+  rollout above shows clear matching gains with acceptable runtime.
+- Monocular depth (MiDaS/DPT) for the glass-roof roof-y fix is **planned but
+  gated** on the Priority 1 height trace ruling out the simpler causes (mask
+  under-reach vs. closest-in-bin gate vs. pinhole math). Full plan and
+  acceptance gate: [docs/glass-roof-height-fix-plan.md](docs/glass-roof-height-fix-plan.md).
 
 ## Per-region configuration cheat sheet
 

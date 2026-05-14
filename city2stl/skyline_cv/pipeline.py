@@ -692,7 +692,8 @@ def stitch_pano_views(
     for c, m in zip(crops, means):
         if m > 1.0:
             scale = ref / m
-            norm.append(np.clip(c.astype(np.float32) * scale, 0, 255).astype(np.uint8))
+            norm.append(np.clip(c.astype(np.float32) *
+                        scale, 0, 255).astype(np.uint8))
         else:
             norm.append(c)
 
@@ -2070,6 +2071,45 @@ def register_view_to_osm(
     # Report reg_score as the pixel residual (interpretable, comparable across
     # views) but the offset selection uses the combined objective.
     best_score = best_resid
+
+    # Compute a per-view "display IoU" — raw placement (hit ÷ pred_cols)
+    # without the joint-optimization miss penalty. The miss penalty makes
+    # sense at the joint anchor where we want to cover the full observed
+    # skyline, but it over-clips at the per-view level: a view that
+    # successfully matches half its buildings can still get
+    # best_iou=0.0 because the other half isn't covered, which doesn't
+    # reflect that the per-view registration is working. The display
+    # value answers "how much of the projected OSM ink lands on
+    # actual mask-building columns?" — meaningful per-view.
+    if has_mask and best_projections:
+        try:
+            bmask = np.asarray(building_mask_neural)
+            wmask = (
+                np.asarray(water_mask_neural)
+                if water_mask_neural is not None else None
+            )
+            w = bmask.shape[1]
+            x_min, x_max = _projected_building_x_ranges(
+                buildings, captured.viewpoint, best_offset, w)
+            if x_min.size > 0:
+                build_per_col = bmask.sum(axis=0)
+                water_per_col = (
+                    wmask.sum(axis=0) if wmask is not None
+                    else np.zeros(w, dtype=np.int64)
+                )
+                is_b_col = (build_per_col > water_per_col) & (build_per_col > 5)
+                hit = 0
+                pred = 0
+                for xL, xR in zip(x_min.tolist(), x_max.tolist()):
+                    width = xR - xL + 1
+                    if width <= 0:
+                        continue
+                    pred += width
+                    hit += int(np.count_nonzero(is_b_col[xL : xR + 1]))
+                if pred > 0:
+                    best_iou = float(hit) / float(pred)
+        except Exception:
+            pass  # leave best_iou as found by the optimizer
 
     matched_projections: list[dict] = []
     if best_matches:

@@ -1881,7 +1881,8 @@ def _seed_multiview_registration(
         # means they don't generate a pano page, which keeps the report clean
         # and avoids wasting SegFormer inference + building-matching time on
         # scenes that will never yield useful annotations.
-        is_negative_seed_for_pano = bool(negative_seeds and seed.name in negative_seeds)
+        is_negative_seed_for_pano = bool(
+            negative_seeds and seed.name in negative_seeds)
         if is_negative_seed_for_pano:
             continue
 
@@ -2123,29 +2124,11 @@ def _draw_view_minimap(
             zorder=6,
         )
 
-    # ── Camera marker + FOV cone ──────────────────────────────────────────
+    # Camera marker drawn now; the FOV cone is drawn AFTER auto-zoom so
+    # we can scale it to the actual axis span (it previously used the
+    # default radius_m=1500 which overshot tight auto-zoomed panels by
+    # 5×, dominating the visual).
     ax.scatter([seed_lon], [seed_lat], c="red", s=80, marker="*", zorder=5)
-    cone_len = radius_m * 0.95
-    # Only draw the cone+arrow for proper per-view FOVs. Pano callers pass
-    # fov_deg=360 to mean "no single direction" — there's no meaningful arrow.
-    if 0.0 < fov_deg < 180.0:
-        half = math.radians(fov_deg * 0.5)
-        theta = math.radians(heading_deg)
-        for sign in (-1.0, 1.0):
-            angle = theta + sign * half
-            dx = cone_len * math.sin(angle) / mlon
-            dy = cone_len * math.cos(angle) / mlat
-            ax.plot(
-                [seed_lon, seed_lon + dx], [seed_lat, seed_lat + dy],
-                "r-", linewidth=0.8, alpha=0.6,
-            )
-        arrow_dx = cone_len * 0.5 * math.sin(theta) / mlon
-        arrow_dy = cone_len * 0.5 * math.cos(theta) / mlat
-        ax.arrow(
-            seed_lon, seed_lat, arrow_dx, arrow_dy,
-            head_width=dlon * 0.04, head_length=dlat * 0.05,
-            length_includes_head=True, color="red", alpha=0.8, zorder=4,
-        )
 
     # Auto-zoom: prefer the bbox of matched-footprint polygons + the seed
     # position, expanded by a 100 m margin. Falls back to the fixed ±radius_m
@@ -2217,6 +2200,47 @@ def _draw_view_minimap(
     ax.set_ylabel("Latitude")
     ax.grid(alpha=0.2)
     ax.set_title(f"Footprints in view ({radius_label})")
+
+    # Draw FOV cone AFTER axes are set so we can size it to the actual
+    # axis span (max half-span in metres × 0.7 so the cone reaches but
+    # doesn't escape the panel). Pano callers pass fov_deg=360 to mean
+    # "no single direction" — skip the cone there.
+    if 0.0 < fov_deg < 180.0:
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        half_span_m = max(
+            (xlim[1] - xlim[0]) * mlon,
+            (ylim[1] - ylim[0]) * mlat,
+        ) * 0.5
+        cone_len = max(50.0, half_span_m * 0.7)
+        half = math.radians(fov_deg * 0.5)
+        theta = math.radians(heading_deg)
+        for sign in (-1.0, 1.0):
+            angle = theta + sign * half
+            dx = cone_len * math.sin(angle) / mlon
+            dy = cone_len * math.cos(angle) / mlat
+            ax.plot(
+                [seed_lon, seed_lon + dx], [seed_lat, seed_lat + dy],
+                "r-", linewidth=0.8, alpha=0.6,
+            )
+        arrow_dx = cone_len * 0.5 * math.sin(theta) / mlon
+        arrow_dy = cone_len * 0.5 * math.cos(theta) / mlat
+        # Arrow head + body sized off the actual axis span. The default
+        # `width` in matplotlib's ax.arrow is 0.001 (in DATA UNITS) which
+        # at this lat/lon is ~100 m — produced a huge red bar across the
+        # minimap. We size everything relative to the actual axis span.
+        head_w = (xlim[1] - xlim[0]) * 0.025
+        head_h = (ylim[1] - ylim[0]) * 0.03
+        body_w = (xlim[1] - xlim[0]) * 0.005  # thin body, ~half the head
+        ax.arrow(
+            seed_lon, seed_lat, arrow_dx, arrow_dy,
+            width=body_w,
+            head_width=head_w, head_length=head_h,
+            length_includes_head=True, color="red", alpha=0.7, zorder=4,
+        )
+        # Restore the axis limits — arrow drawing can expand them.
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
 
 
 def _render_stitched_pano_page(
@@ -2960,6 +2984,35 @@ def _render_pdf(
 
             pdf.savefig(fig, bbox_inches="tight")
             plt.close(fig)
+
+    # Post-process: stamp "Page X / N" on every page. Done after PdfPages
+    # closes the file so the total count is exact. PyMuPDF is the only
+    # cleanly-available editor in this stack; falls back silently if not
+    # installed.
+    try:
+        import fitz  # noqa: PLC0415
+    except Exception:
+        return
+    try:
+        doc = fitz.open(out_pdf)
+        total = doc.page_count
+        for i, page in enumerate(doc, start=1):
+            rect = page.rect
+            text = f"Page {i} / {total}"
+            # Bottom-right corner, small monospace, with a thin white
+            # background box so it's legible over any underlying plot.
+            page.insert_text(
+                fitz.Point(rect.width - 80, rect.height - 12),
+                text,
+                fontsize=8, fontname="helv",
+                color=(0.25, 0.25, 0.25),
+                render_mode=0,
+            )
+        doc.saveIncr()
+        doc.close()
+    except Exception:
+        # Page numbering is cosmetic; never let it break the report.
+        pass
 
 
 def run_region_pdf_report(
