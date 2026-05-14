@@ -1429,17 +1429,25 @@ def match_segments_to_buildings(
 ) -> list[dict]:
     """For each skyline segment, pick the best-matching projected building.
 
-    Ranking uses interval-IoU between the segment's x-range and the building's
-    projected footprint x-range — width-aware, unlike the previous point-in-
-    rect test. A building whose projected footprint covers most of the segment
-    outranks one that merely has its centroid grazing the segment edge.
+    Scoring (Phase B):
+      base       = interval-IoU (geometric overlap, width-aware)
+      width      = log-symmetric width-ratio score (0..1)
+      occlusion  = penalty when a much-farther candidate's x-range is
+                   contained in a much-nearer candidate's x-range — the
+                   farther one is occluded and shouldn't win
+      combined   = 0.55 * base + 0.30 * width + 0.15 * (1 - occlusion)
 
-    Tie-breaking (within the same IoU bucket):
-      - Nearest building wins (smallest forward_m). The closest building owns
-        the skyline at that column unless...
-      - ...the nearest candidate is very short (height_proxy < 5 m) AND a much
-        taller building (>2× height_proxy) sits within 1.5× the nearest
-        distance. Then prefer the taller one (kiosk-in-front-of-tower case).
+    Width penalty is now disqualifying when ratio > 4× (combined ×0.3)
+    to prevent a long warehouse winning over a tower on weak IoU alone.
+
+    Each output segment gets a `match_diagnostics` list with the top-3
+    scored candidates so the user can audit flagged failures by reading
+    one match against the alternatives the matcher considered.
+
+    Tie-breaking (within the close-combined bucket):
+      - Nearest building wins (smallest forward_m).
+      - Kiosk-in-front-of-tower exception preserved: nearest < 5 m proxy
+        + a tower within 1.5× the nearest distance → prefer the tower.
     """
     def _seg_width(seg: dict) -> float:
         return max(1.0, float(seg["x_right"]) - float(seg["x_left"]))
@@ -1449,53 +1457,88 @@ def match_segments_to_buildings(
         pR = float(proj.get("x_right_px", proj["x_px"] + 10.0))
         return max(1.0, abs(pR - pL))
 
+    def _proj_range(proj: dict) -> tuple[float, float]:
+        pL = float(proj.get("x_left_px", proj["x_px"] - 10.0))
+        pR = float(proj.get("x_right_px", proj["x_px"] + 10.0))
+        return (pL, pR) if pL <= pR else (pR, pL)
+
     def _interval_iou(seg: dict, proj: dict) -> float:
         sL = float(seg["x_left"])
         sR = float(seg["x_right"])
-        pL = float(proj.get("x_left_px", proj["x_px"] - 10.0))
-        pR = float(proj.get("x_right_px", proj["x_px"] + 10.0))
-        if pL > pR:
-            pL, pR = pR, pL
+        pL, pR = _proj_range(proj)
         inter = max(0.0, min(sR, pR) - max(sL, pL))
         union = max(sR, pR) - min(sL, pL)
         return (inter / union) if union > 0 else 0.0
 
     def _width_ratio_score(seg: dict, proj: dict) -> float:
-        """Score 0..1 for "is this building's projected width plausible for
-        this image segment's width?" 1.0 when widths match, falling off as
-        the ratio moves away from 1. The matched segment should visually
-        cover roughly the building's projected footprint width — a 3× too-
-        wide projected building isn't the right match even if x ranges
-        nominally overlap (e.g. a long warehouse projected onto a single
-        tower segment)."""
         ratio = _proj_width(proj) / _seg_width(seg)
         if ratio <= 0:
             return 0.0
-        # log-symmetric falloff: ratio=1 → 1.0, ratio=2 or 0.5 → ~0.5,
-        # ratio=4 or 0.25 → ~0.0
         log_r = abs(math.log2(ratio))
         return max(0.0, 1.0 - 0.5 * log_r)
 
+    def _occlusion_penalty(cand: dict, all_projs: list[dict]) -> float:
+        """Return 0..1 penalty: how much of cand's x-range is covered by
+        a MUCH-NEARER candidate. 0 = no occlusion (foreground or no closer
+        building). 1 = fully occluded by something dramatically closer.
+        """
+        cL, cR = _proj_range(cand)
+        cw = max(1.0, cR - cL)
+        cand_fwd = float(cand.get("forward_m", 1e9))
+        # "Much nearer" = at least 1.5× closer than this candidate. Avoids
+        # penalizing similar-distance siblings (would over-cull dense rows
+        # where all towers have similar forward_m).
+        threshold = cand_fwd / 1.5
+        max_overlap = 0.0
+        for o in all_projs:
+            if o is cand:
+                continue
+            o_fwd = float(o.get("forward_m", 1e9))
+            if o_fwd >= threshold:
+                continue
+            oL, oR = _proj_range(o)
+            inter = max(0.0, min(cR, oR) - max(cL, oL))
+            cov = inter / cw
+            if cov > max_overlap:
+                max_overlap = cov
+        return min(1.0, max_overlap)
+
     out: list[dict] = []
     for seg in segments:
-        scored = []
+        scored: list[tuple] = []  # (combined, iou, w_score, occ, proj)
         for p in projections:
             iou = _interval_iou(seg, p)
-            if iou >= min_interval_iou:
-                # Combine geometric overlap with width-plausibility. IoU is
-                # weighted 0.7 (it's the stronger signal); width-ratio is 0.3
-                # (a tiebreaker that prevents wildly-wrong-width matches
-                # within a high-IoU pool — the Box 5 / b0739 failure mode
-                # where the actually-narrow tower segment gets matched to a
-                # wide warehouse footprint behind it).
-                w_score = _width_ratio_score(seg, p)
-                combined = 0.7 * iou + 0.3 * w_score
-                scored.append((combined, iou, p))
+            if iou < min_interval_iou:
+                continue
+            w_score = _width_ratio_score(seg, p)
+            occ = _occlusion_penalty(p, projections)
+            combined = 0.55 * iou + 0.30 * w_score + 0.15 * (1.0 - occ)
+            # Hard width disqualifier: a building projected 4× wider or
+            # narrower than the segment is implausible as a match.
+            ratio = _proj_width(p) / _seg_width(seg)
+            if ratio > 4.0 or ratio < 0.25:
+                combined *= 0.3
+            scored.append((combined, iou, w_score, occ, p))
+
         match: dict | None = None
+        diagnostics: list[dict] = []
         if scored:
             scored.sort(key=lambda t: t[0], reverse=True)
+            # Capture top-3 diagnostics for the audit field.
+            for c, iou, ws, occ, p in scored[:3]:
+                diagnostics.append({
+                    "feature_id": p["feature_id"],
+                    "combined": round(c, 3),
+                    "iou": round(iou, 3),
+                    "width_score": round(ws, 3),
+                    "occlusion": round(occ, 3),
+                    "forward_m": round(float(p.get("forward_m", 0.0)), 1),
+                })
             best_combined = scored[0][0]
-            bucket = [p for c, _iou, p in scored if c >= best_combined - 0.10]
+            bucket = [
+                p for c, _iou, _w, _occ, p in scored
+                if c >= best_combined - 0.10
+            ]
             bucket.sort(key=lambda p: float(p.get("forward_m", 1e9)))
             nearest = bucket[0]
             nearest_fwd = float(nearest.get("forward_m", 1e9))
@@ -1512,7 +1555,11 @@ def match_segments_to_buildings(
                     if h > nearest_h * 2.0:
                         match = cand
                         break
-        out.append({**seg, "matched_projection": match})
+        out.append({
+            **seg,
+            "matched_projection": match,
+            "match_diagnostics": diagnostics,
+        })
     return out
 
 
