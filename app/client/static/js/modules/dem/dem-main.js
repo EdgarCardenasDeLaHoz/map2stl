@@ -504,11 +504,11 @@ window.updatePrintDimensions = function updatePrintDimensions() {
     const gridW = demCanvas?.width || lastDemData.width;
     const gridH = demCanvas?.height || lastDemData.height;
     const mmPerPx = parseFloat(document.getElementById('mmPerPixel')?.value) || 1.0;
-    const modelH  = parseFloat(document.getElementById('exportModelHeight')?.value) || 30;
-    const baseH   = parseFloat(document.getElementById('exportBaseHeight')?.value)  || 0;
-    const totalH  = modelH + baseH;
-    const footW   = Math.round(gridW * mmPerPx);
-    const footH   = Math.round(gridH * mmPerPx);
+    const modelH = parseFloat(document.getElementById('exportModelHeight')?.value) || 30;
+    const baseH = parseFloat(document.getElementById('exportBaseHeight')?.value) || 0;
+    const totalH = modelH + baseH;
+    const footW = Math.round(gridW * mmPerPx);
+    const footH = Math.round(gridH * mmPerPx);
 
     document.getElementById('dimFootprint').textContent = `${footW} × ${footH} mm`;
     document.getElementById('dimHeight').textContent = `${totalH} mm (${modelH} terrain + ${baseH} base)`;

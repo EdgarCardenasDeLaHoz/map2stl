@@ -1,6 +1,6 @@
 # Known Issues & Status — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-05-14_
 
 ## Active Technical Debt
 
@@ -8,6 +8,14 @@ _Last updated: 2026-04-19_
 HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `addEventListener` in event-listeners.js). One intentional inline `onclick=` remains on the dev-only debug error overlay dismiss button. Converting app.js itself to a full ES module is not planned — keep public functions on `window.*`.
 
 ## Resolved Technical Debt
+
+### ~~skyline_cv script sprawl~~ ✅
+Scripts `00`–`07` (individual-step runners) removed; single orchestration
+entry point is now `scripts/08_region_skyline_pdf.py`. `review.py` removed
+(logic merged into `region_pdf.py`). `pipeline.py` and `region_pdf.py` have
+expanded module-level docstrings. `STATUS.md` added to capture current
+accuracy numbers and known weaknesses. Two-file architecture: `pipeline.py`
+(pure math, unit-tested) + `region_pdf.py` (I/O + rendering).
 
 ### ~~app.js DOMContentLoaded Closure~~ ✅
 `renderDEMCanvas` and `window.loadDEM` were extracted to `dem-main.js`. Closure vars (`lastDemData`, `originalDemValues`) moved to `window.appState`.

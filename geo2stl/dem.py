@@ -170,14 +170,16 @@ def make_dem_image(
             min_safe = int(math.ceil(math.sqrt(_w_m * _h_m / _ee_max_px)))
             sat_scale = max(sat_scale, min_safe)
             try:
-                sat = fetch_bbox_image(N, S, E, W, scale=sat_scale, dataset="esa")
+                sat = fetch_bbox_image(
+                    N, S, E, W, scale=sat_scale, dataset="esa")
                 if sat is not None:
                     sat = np.array(sat).clip(0, 100)
                     water = 1.0 * ((sat == 80) | (sat == 0))
                     if _ski_filters is not None:
                         water = _ski_filters.median(water, np.ones((3, 3)))
                     h_im, w_im = im.shape
-                    water = _cv2.resize(water, (w_im, h_im), interpolation=_cv2.INTER_LINEAR)
+                    water = _cv2.resize(water, (w_im, h_im),
+                                        interpolation=_cv2.INTER_LINEAR)
                     water = water * np.ptp(im.ravel()) * water_scale
                     im = im - water
             except Exception as exc:
@@ -185,7 +187,8 @@ def make_dem_image(
         elif water_dataset == "jrc" and _get_aquatic_regions is not None:
             try:
                 target_dim = min(max(im.shape[0], im.shape[1]), 500)
-                img = _get_aquatic_regions(N, S, E, W, dataset="jrc", scale=None, target_dim=target_dim)
+                img = _get_aquatic_regions(
+                    N, S, E, W, dataset="jrc", scale=None, target_dim=target_dim)
                 if img is not None:
                     img2 = img.copy().astype(np.uint8)
                     if _ski_filters is not None:
@@ -338,7 +341,8 @@ def fetch_h5_dem(
     try:
         import h5py
     except ImportError as exc:
-        raise ImportError("h5py is required for h5_local DEM source: pip install h5py") from exc
+        raise ImportError(
+            "h5py is required for h5_local DEM source: pip install h5py") from exc
 
     tx1, ty1, px1, py1 = _geo_to_tile_pixel(north, west)
     tx2, ty2, px2, py2 = _geo_to_tile_pixel(south, east)
@@ -378,8 +382,10 @@ def fetch_h5_dem(
 
     # Transpose to match row=lat, col=lon orientation and crop
     mosaic = mosaic.T
-    x1i = max(0, x1i); y1i = max(0, y1i)
-    x2i = min(mosaic.shape[1], x2i); y2i = min(mosaic.shape[0], y2i)
+    x1i = max(0, x1i)
+    y1i = max(0, y1i)
+    x2i = min(mosaic.shape[1], x2i)
+    y2i = min(mosaic.shape[0], y2i)
     cropped = mosaic[y1i:y2i, x1i:x2i].astype(np.float64)
 
     # Clamp ocean floor noise and normalise like the notebook pipeline:
@@ -399,7 +405,8 @@ def fetch_esa_water_layer(
     Fetch ESA WorldCover water mask (class 80) at the requested resolution.
     Returns a float64 array: 0 = land, 1 = water.
     """
-    img = fetch_bbox_image(north, south, east, west, scale=30, dataset="esa", use_cache=True)
+    img = fetch_bbox_image(north, south, east, west,
+                           scale=30, dataset="esa", use_cache=True)
 
     if img is None:
         return np.zeros((dim, dim), dtype=np.float64)
@@ -412,7 +419,8 @@ def fetch_esa_water_layer(
         out_h, out_w = dim, max(1, int(dim * src_w / src_h))
     else:
         out_h, out_w = max(1, int(dim * src_h / src_w)), dim
-    img_r = _cv2.resize(img.astype(np.float32), (out_w, out_h), interpolation=_cv2.INTER_NEAREST)
+    img_r = _cv2.resize(img.astype(np.float32), (out_w, out_h),
+                        interpolation=_cv2.INTER_NEAREST)
     return (img_r == 80).astype(np.float64)
 
 
@@ -452,7 +460,8 @@ def fetch_opentopo_dem(
         if api_key:
             params["API_Key"] = api_key
 
-        logger.info(f"Fetching OpenTopography DEM: {demtype} bbox=({north},{south},{east},{west})")
+        logger.info(
+            f"Fetching OpenTopography DEM: {demtype} bbox=({north},{south},{east},{west})")
         resp = _requests.get(url, params=params, timeout=120)
 
         if resp.status_code != 200:
@@ -460,7 +469,8 @@ def fetch_opentopo_dem(
                 err_text = resp.text[:500]
             except Exception:
                 err_text = f"HTTP {resp.status_code}"
-            raise RuntimeError(f"OpenTopography API error ({resp.status_code}): {err_text}")
+            raise RuntimeError(
+                f"OpenTopography API error ({resp.status_code}): {err_text}")
 
         cache_file.write_bytes(resp.content)
         logger.info(f"Cached OpenTopography response to {cache_file}")
@@ -468,7 +478,8 @@ def fetch_opentopo_dem(
     with rasterio.open(str(cache_file)) as src:
         src_h, src_w = src.height, src.width
         if src_h == 0 or src_w == 0:
-            raise RuntimeError("OpenTopography returned an empty raster for this bbox.")
+            raise RuntimeError(
+                "OpenTopography returned an empty raster for this bbox.")
 
         if src_h >= src_w:
             out_h = dim
@@ -574,7 +585,8 @@ def create_dem_model(
                 vertices, faces, max_faces=max_faces
             )
         except ImportError:
-            logger.warning("numpy2stl.simplify unavailable; skipping mesh simplification")
+            logger.warning(
+                "numpy2stl.simplify unavailable; skipping mesh simplification")
 
     return models
 

@@ -1,7 +1,51 @@
-"""Region-driven skyline screening and PDF report generation.
+"""Region-driven skyline screening and PDF report generation — the
+orchestration layer of skyline_cv. Calls into pipeline.py for the
+math; this module handles I/O, seed selection, multi-pass registration,
+and rendering.
 
-This workflow binds to saved project regions (SQLite), uses OSM cache first,
-screens seed + auto-proposed viewpoints, and exports one PDF report.
+Entry point
+-----------
+``run_region_pdf_report(region_name, output_pdf, seed_urls, ...)``
+is invoked by ``scripts/08_region_skyline_pdf.py``. It produces one
+PDF that doubles as the primary debug artefact for inspection.
+
+Flow per region
+---------------
+1. Load region bbox from the strm2stl SQLite ``regions`` table.
+2. Fetch OSM buildings + waterways via Overpass (cached if available).
+3. Build ``BuildingRecord`` list with tagged heights, area, and DEM
+   terrain elevation (open-meteo).
+4. Resolve user-provided + auto-proposed seed locations:
+   - ``_parse_streetview_url`` parses the URL's pano_id / lat / lon /
+     heading / pitch / FOV
+   - ``_propose_standoff_locations`` adds 8 dirs × 3 standoff radii
+     positions weighted toward water-adjacent placements
+5. Screen each candidate with a 1-image probe + a sky/contour quality
+   gate (``_screen_score_from_image``).
+6. ``_seed_multiview_registration`` is the core per-seed loop:
+   - Resolve pano (pano_id-bound or location-fallback)
+   - Capture 12-view spin (every 30°), SegFormer mask each one
+   - Joint optimize the pano-to-geographic offset across all 12 views
+     (3° coarse + 0.5° fine, view-weighted by observed-building cols)
+   - Per-view register with ±8° around the seed anchor
+   - ``estimate_heights_from_registration`` per view
+   - Stitch per-view masks for the 360° pano-level result
+7. ``aggregate_building_heights`` (in pipeline.py) groups by feature_id
+   with outlier-seed downweighting.
+8. ``_render_pdf`` writes the multi-page report.
+
+Key state structures
+--------------------
+- ``RegionBBox``         — region polygon (N/S/E/W)
+- ``SkylinePoint``       — candidate camera position + heading + source tag
+- ``SeedViewRegistration`` — one frozen result per spin view (image overlay,
+  registration metadata, matched-segment list, vertical band crop)
+- ``StitchedPanoResult`` — one frozen result per seed for the pano pipeline
+
+Hard dependencies beyond pipeline.py: ``requests`` (Street View Static API
++ Overpass + open-meteo elevations), ``matplotlib`` (PDF rendering),
+``app.server.core.cache`` / ``app.server.core.db`` (OSM cache + region
+table — production strm2stl integration points).
 """
 
 from __future__ import annotations
@@ -71,7 +115,8 @@ class SkylinePoint:
     score: float
     fov: float = 80.0
     pitch: float = 0.0
-    pano_id: str | None = None  # if set, requests target this exact pano (no snapping)
+    # if set, requests target this exact pano (no snapping)
+    pano_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +133,10 @@ class StitchedPanoResult:
     n_matched: int
     n_buildings_in_view: int
     anchor_offset_deg: float = 0.0  # joint-optimized pano-to-geo offset
+    # Per-column compass heading (matches pano_image.shape[1]). Used by the
+    # PDF page to overlay yellow heading ticks so the user can verify the
+    # column-to-heading mapping visually.
+    headings_per_col: "np.ndarray | None" = None
 
 
 @dataclass(frozen=True)
@@ -113,9 +162,11 @@ class SeedViewRegistration:
 
 def _resolve_api_key(explicit_key: str | None = None) -> str:
     _load_env_file_if_present()
-    key = explicit_key or os.environ.get("GOOGLE_MAPS_API_KEY") or os.environ.get("GOOGLE_STREETVIEW_API_KEY")
+    key = explicit_key or os.environ.get(
+        "GOOGLE_MAPS_API_KEY") or os.environ.get("GOOGLE_STREETVIEW_API_KEY")
     if not key:
-        raise RuntimeError("Google Maps API key not found. Set GOOGLE_MAPS_API_KEY or pass --api-key")
+        raise RuntimeError(
+            "Google Maps API key not found. Set GOOGLE_MAPS_API_KEY or pass --api-key")
     return key
 
 
@@ -143,7 +194,8 @@ def _load_region_bbox(region_name: str) -> RegionBBox:
 
     # Fallback: load bbox from sites/<region_name>.json if it exists.
     site_json = (
-        Path(__file__).resolve().parent / "sites" / f"{region_name.lower()}.json"
+        Path(__file__).resolve().parent /
+        "sites" / f"{region_name.lower()}.json"
     )
     if site_json.exists():
         try:
@@ -174,7 +226,8 @@ def _load_osm_for_region(bbox: RegionBBox) -> tuple[dict, str]:
         (2.0, 5.0),
     ]
     for tol, min_area in key_params:
-        key = osm_cache_key(bbox.north, bbox.south, bbox.east, bbox.west, tol, min_area)
+        key = osm_cache_key(bbox.north, bbox.south,
+                            bbox.east, bbox.west, tol, min_area)
         cached = read_osm_cache(key)
         if cached and (cached.get("buildings", {}).get("features") or []):
             return cached, f"cache:{key[:8]} tol={tol} area={min_area}"
@@ -202,7 +255,8 @@ def _parse_height(props: dict) -> float:
     raw_h = props.get("height")
     if raw_h is not None:
         try:
-            digits = "".join(ch for ch in str(raw_h) if ch.isdigit() or ch == ".")
+            digits = "".join(ch for ch in str(
+                raw_h) if ch.isdigit() or ch == ".")
             if digits:
                 return float(digits)
         except Exception:
@@ -443,7 +497,7 @@ def _fetch_elevations(points: list[tuple[float, float]], chunk_size: int = 80) -
         return []
     out: list[float] = []
     for start in range(0, len(points), chunk_size):
-        chunk = points[start : start + chunk_size]
+        chunk = points[start: start + chunk_size]
         try:
             lats = ",".join(f"{p[0]:.6f}" for p in chunk)
             lons = ",".join(f"{p[1]:.6f}" for p in chunk)
@@ -488,7 +542,8 @@ def _attach_building_terrain(buildings: list[BuildingRecord]) -> list[BuildingRe
 
 
 def _load_site_seed_urls(region_name: str) -> list[str]:
-    cfg = Path(__file__).resolve().parent / "sites" / f"{region_name.lower()}.json"
+    cfg = Path(__file__).resolve().parent / \
+        "sites" / f"{region_name.lower()}.json"
     if not cfg.exists():
         return []
     try:
@@ -499,6 +554,41 @@ def _load_site_seed_urls(region_name: str) -> list[str]:
     if not isinstance(raw, list):
         return []
     return [str(x).strip() for x in raw if str(x).strip()]
+
+
+def _load_site_anchor_overrides(region_name: str) -> dict[str, float]:
+    """Load optional manual anchor-offset overrides keyed by seed name
+    (e.g. "seed_4"). When present, the joint IoU optimization is skipped
+    and the override is used directly. Lets a user fix orientations the
+    algorithm gets wrong.
+
+    File format in sites/<region>.json:
+        {
+          ...
+          "anchor_offsets_deg": {
+            "seed_4": -180.0,
+            "seed_5": 320.0
+          }
+        }
+    """
+    cfg = Path(__file__).resolve().parent / \
+        "sites" / f"{region_name.lower()}.json"
+    if not cfg.exists():
+        return {}
+    try:
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    raw = data.get("anchor_offsets_deg")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, float] = {}
+    for k, v in raw.items():
+        try:
+            out[str(k)] = float(v)
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def _streetview_metadata(
@@ -537,7 +627,8 @@ def _streetview_metadata(
             return meta
         # fall through to location-based lookup
 
-    params = {**base, "location": f"{lat},{lon}", "radius": radius_m, "source": "outdoor"}
+    params = {**base, "location": f"{lat},{lon}",
+              "radius": radius_m, "source": "outdoor"}
     r = requests.get(STREETVIEW_METADATA_URL, params=params, timeout=30)
     r.raise_for_status()
     return r.json()
@@ -642,7 +733,8 @@ def _streetview_image(
             return None
         # Otherwise try progressively larger location-based radii.
     for r in (radius_m, max(radius_m, 500), max(radius_m, 1500)):
-        img = _do_get({**base, "location": f"{lat},{lon}", "radius": r, "source": "outdoor"})
+        img = _do_get({**base, "location": f"{lat},{lon}",
+                      "radius": r, "source": "outdoor"})
         if img is not None:
             return img
     return None
@@ -856,27 +948,28 @@ def _screen_score_from_image(image: np.ndarray, pitch: float = 0.0) -> tuple[flo
         else 0.0
     )
 
-    if sky_frac_top < 0.35 or contour_range_frac < 0.05:
+    # Loosened thresholds — the previous gates rejected legitimate
+    # building views where the camera was up-close to a tall facade.
+    # Gate A: top 20 % needs at least 20 % sky (was 35 %).
+    # Gate B: contour must span >= 3 % of frame (was 5 %).
+    if sky_frac_top < 0.20 or contour_range_frac < 0.03:
         return 0.0, "rejected", is_aerial, False
 
-    # Gate C / D / E  — require a real distant skyline, not a wall / tree
-    # canopy / enclosed space.  All three use the already-cached neural masks
-    # so there is no extra inference cost.
+    # Gate C / D / E — distant-skyline checks against the SegFormer masks.
     _, building_mask_bool = _neural_sky_and_building_masks(image)
     if building_mask_bool is not None:
         building_frac = float(building_mask_bool.sum()) / max(h * w, 1)
         sky_frac_total = float(sky_mask.sum()) / max(h * w, 1)
-        # Gate C: close-up facade — building fills most of the frame.
-        if building_frac > 0.60:
+        # Gate C: full close-up facade — building fills 80%+ of frame
+        # (was 60%, which rejected legitimate close-range tower views).
+        if building_frac > 0.80:
             return 0.0, "rejected", is_aerial, False
-        # Gate E: enclosed space / underpass — almost no sky visible at all.
-        if sky_frac_total < 0.12:
+        # Gate E: enclosed space / underpass — almost no sky visible.
+        if sky_frac_total < 0.08:  # was 0.12
             return 0.0, "rejected", is_aerial, False
-    # Gate D: skyline must reach the upper half of the frame. Tree-lined
-    # streets and low obstructions push the contour toward mid-frame
-    # (high y values) whereas a real distant skyline has tall buildings
-    # with their tops in the upper 50 % of the image.
-    if contour_valid.size > 0 and float(np.nanmedian(contour_valid)) / h > 0.50:
+    # Gate D: skyline must reach the upper 60 % of the frame.
+    # (was upper 50 %; raised cap lets close-up tower views pass.)
+    if contour_valid.size > 0 and float(np.nanmedian(contour_valid)) / h > 0.60:
         return 0.0, "rejected", is_aerial, False
 
     # Top-clipping detection: if the highest point of the skyline contour is
@@ -897,7 +990,8 @@ def _screen_score_from_image(image: np.ndarray, pitch: float = 0.0) -> tuple[flo
     #   "good"   was 0.45 → 0.30  (~same building density, smoother contour)
     #   "medium" was 0.25 → 0.15
     score = float(np.clip((0.6 * var + 0.4 * span) / 80.0, 0.0, 1.0))
-    label = "good" if score >= 0.30 else ("medium" if score >= 0.15 else "weak")
+    label = "good" if score >= 0.30 else (
+        "medium" if score >= 0.15 else "weak")
     return score, label, is_aerial, top_clipped
 
 
@@ -961,7 +1055,8 @@ def _screen_locations(
         # match where the camera actually is.
         snap = _meta_location(meta)
         snap_dist_m = (
-            _distance_m(point.lat, point.lon, snap[0], snap[1]) if snap else 0.0
+            _distance_m(point.lat, point.lon,
+                        snap[0], snap[1]) if snap else 0.0
         )
         effective_point = point
         if snap is not None:
@@ -974,7 +1069,8 @@ def _screen_locations(
                 score=point.score,
                 fov=point.fov,
                 pitch=point.pitch,
-                pano_id=point.pano_id or str(meta.get("pano_id") or "") or None,
+                pano_id=point.pano_id or str(
+                    meta.get("pano_id") or "") or None,
             )
 
         # Drop autos that snapped too far — the captured image won't match the
@@ -1012,7 +1108,8 @@ def _screen_locations(
             })
             continue
 
-        score, label, is_aerial, top_clipped = _screen_score_from_image(image, pitch=effective_point.pitch)
+        score, label, is_aerial, top_clipped = _screen_score_from_image(
+            image, pitch=effective_point.pitch)
 
         # Pitch correction: if building tops are clipped and we're not already
         # looking steeply upward, re-request the same pano with +12° pitch.
@@ -1031,7 +1128,8 @@ def _screen_locations(
                 pano_only=effective_point.pano_id is not None,
             )
             if corrected_image is not None:
-                c_score, c_label, c_aerial, _ = _screen_score_from_image(corrected_image, pitch=corrected_pitch)
+                c_score, c_label, c_aerial, _ = _screen_score_from_image(
+                    corrected_image, pitch=corrected_pitch)
                 if c_label != "rejected":
                     image = corrected_image
                     score, label, is_aerial = c_score, c_label, c_aerial
@@ -1046,6 +1144,45 @@ def _screen_locations(
                         pitch=corrected_pitch,
                         pano_id=effective_point.pano_id,
                     )
+
+        # Heading-rotation retry: the URL-provided heading often points the
+        # camera at trees / walls / open water rather than the actual skyline.
+        # When the initial heading is rejected, try ±90° and 180° offsets to
+        # find an orientation that captures buildings. This is purely a
+        # screening-recovery — the full 360° spin pass later doesn't depend
+        # on this and runs every view regardless.
+        if label == "rejected" and point.source == "seed" and not is_aerial:
+            for offset_deg in (-90.0, 90.0, 180.0):
+                retry_heading = (effective_point.heading + offset_deg) % 360.0
+                retry_image = _streetview_image(
+                    api_key,
+                    effective_point.lat,
+                    effective_point.lon,
+                    retry_heading,
+                    fov=effective_point.fov,
+                    pitch=effective_point.pitch,
+                    pano_id=effective_point.pano_id,
+                    pano_only=effective_point.pano_id is not None,
+                )
+                if retry_image is None:
+                    continue
+                r_score, r_label, r_aerial, _ = _screen_score_from_image(
+                    retry_image, pitch=effective_point.pitch)
+                if r_label != "rejected":
+                    image = retry_image
+                    score, label, is_aerial = r_score, r_label, r_aerial
+                    effective_point = SkylinePoint(
+                        name=effective_point.name,
+                        lat=effective_point.lat,
+                        lon=effective_point.lon,
+                        heading=retry_heading,
+                        source=effective_point.source,
+                        score=effective_point.score,
+                        fov=effective_point.fov,
+                        pitch=effective_point.pitch,
+                        pano_id=effective_point.pano_id,
+                    )
+                    break
 
         elev_m = float(elev_lookup[idx]) if idx < len(elev_lookup) else 0.0
         screened.append(
@@ -1095,7 +1232,8 @@ def _draw_location_map(ax, bbox: RegionBBox, screened: list[dict], osm_data: dic
 
     for row in screened:
         p: SkylinePoint = row["point"]
-        color = "tab:green" if row["coverage"] == "good" else ("tab:orange" if row["coverage"] == "medium" else "tab:red")
+        color = "tab:green" if row["coverage"] == "good" else (
+            "tab:orange" if row["coverage"] == "medium" else "tab:red")
         marker = "*" if p.source == "seed" else "o"
         size = 140 if p.source == "seed" else 60
         ax.scatter([p.lon], [p.lat], c=color, s=size, marker=marker, alpha=0.9)
@@ -1159,14 +1297,17 @@ def _registration_overlay(
             badge_x = xL + 2
             badge_y = max(18, top_y + 2)
             cv2.circle(out, (badge_x + 9, badge_y + 7), 11, color, -1)
-            cv2.circle(out, (badge_x + 9, badge_y + 7), 11, (0, 0, 0), 1, cv2.LINE_AA)
+            cv2.circle(out, (badge_x + 9, badge_y + 7),
+                       11, (0, 0, 0), 1, cv2.LINE_AA)
             cv2.putText(
-                out, str(i + 1), (badge_x + (3 if i + 1 < 10 else 0), badge_y + 12),
+                out, str(i + 1), (badge_x + (3 if i +
+                                             1 < 10 else 0), badge_y + 12),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA,
             )
             label = seg.get("matched_projection")
             if label:
-                txt = str(label.get("name") or label.get("feature_id") or "")[:14]
+                txt = str(label.get("name") or label.get(
+                    "feature_id") or "")[:14]
                 cv2.putText(
                     out,
                     txt,
@@ -1210,44 +1351,82 @@ def _seed_multiview_registration(
     # placeholder for them — we have to verify by actually fetching one image.
     # We probe a 0° image with progressively larger radii until we find a
     # pano that returns real pixels, then bind the seed to that pano's lat/lon.
+    # Per-region cache of resolved seed positions to keep results
+    # reproducible across runs. The Static API's location-based snap
+    # routinely returns DIFFERENT panos on different runs (50–500 m drift)
+    # because the metadata endpoint walks the visible-pano list slightly
+    # differently each time it's called. Without caching, the user sees
+    # the report change every run even when the seed_urls input is fixed.
+    _resolve_cache_path = (
+        Path(__file__).parent / "runs" / "seed_resolution_cache.json"
+    )
+    _resolve_cache: dict = {}
+    if _resolve_cache_path.exists():
+        try:
+            _resolve_cache = json.loads(
+                _resolve_cache_path.read_text(encoding="utf-8"))
+        except Exception:
+            _resolve_cache = {}
+
+    def _cache_save() -> None:
+        try:
+            _resolve_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            _resolve_cache_path.write_text(
+                json.dumps(_resolve_cache, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _seed_cache_key(s: SkylinePoint) -> str:
+        # Key by the URL-derived identity: name + lat/lon (to 6 dp) +
+        # pano_id. Changes only when the user edits sites/<region>.json.
+        return f"{s.name}|{s.lat:.6f}|{s.lon:.6f}|{s.pano_id or ''}"
+
     resolved: list[tuple[SkylinePoint, float, bool]] = []
     seed_elevs = _fetch_elevations([(s.lat, s.lon) for s in seeds])
     for seed, seed_elev in zip(seeds, seed_elevs):
         bound: SkylinePoint | None = None
-        # First try the URL's pano_id directly.
-        # Use pano_only=True so we only accept the result if that exact pano
-        # actually renders.  Without this flag _streetview_image silently falls
-        # back to a nearby road pano, making dead CIHM panos appear live and
-        # causing is_photosphere to be set True incorrectly, which corrupts all
-        # heading calculations for that seed.
-        if seed.pano_id:
+        cache_key = _seed_cache_key(seed)
+
+        # 1. Try the cached resolved pano first.
+        cached = _resolve_cache.get(cache_key)
+        if cached is not None:
+            try:
+                cached_pano = cached.get("pano_id") or None
+                cached_lat = float(cached["lat"])
+                cached_lon = float(cached["lon"])
+                probe = _streetview_image(
+                    api_key, cached_lat, cached_lon, 0.0,
+                    fov=seed.fov, pitch=seed.pitch,
+                    pano_id=cached_pano, radius_m=50,
+                    pano_only=cached_pano is not None,
+                )
+                if probe is not None:
+                    bound = SkylinePoint(
+                        name=seed.name, lat=cached_lat, lon=cached_lon,
+                        heading=seed.heading, source=seed.source,
+                        score=seed.score, fov=seed.fov,
+                        pitch=seed.pitch, pano_id=cached_pano,
+                    )
+            except Exception:
+                pass  # cache miss → fall through to fresh resolve
+
+        # 2. If no cache hit, try the URL's pano_id directly.
+        if bound is None and seed.pano_id:
             probe = _streetview_image(
-                api_key,
-                seed.lat,
-                seed.lon,
-                0.0,
-                fov=seed.fov,
-                pitch=seed.pitch,
-                pano_id=seed.pano_id,
-                radius_m=200,
-                pano_only=True,
+                api_key, seed.lat, seed.lon, 0.0,
+                fov=seed.fov, pitch=seed.pitch,
+                pano_id=seed.pano_id, radius_m=200, pano_only=True,
             )
             if probe is not None:
-                bound = seed  # pano is live, keep as-is
-        # Fall back to progressively larger location-based radii to find a
-        # real road pano near the seed.
+                bound = seed
+        # 3. Fall back to progressively larger location-based radii.
         if bound is None:
             for r in (200, 500, 1500, 3000):
                 try:
                     meta = _streetview_metadata(
-                        api_key,
-                        seed.lat,
-                        seed.lon,
-                        0.0,
-                        fov=seed.fov,
-                        pitch=seed.pitch,
-                        pano_id=None,  # force location-based lookup
-                        radius_m=r,
+                        api_key, seed.lat, seed.lon, 0.0,
+                        fov=seed.fov, pitch=seed.pitch,
+                        pano_id=None, radius_m=r,
                     )
                 except Exception:
                     continue
@@ -1257,31 +1436,30 @@ def _seed_multiview_registration(
                 snap_pano = str(meta.get("pano_id") or "") or None
                 if snap is None:
                     continue
-                # Verify the snapped pano actually renders (skip placeholders)
                 probe = _streetview_image(
-                    api_key,
-                    snap[0],
-                    snap[1],
-                    0.0,
-                    fov=seed.fov,
-                    pitch=seed.pitch,
-                    pano_id=snap_pano,
-                    radius_m=50,
+                    api_key, snap[0], snap[1], 0.0,
+                    fov=seed.fov, pitch=seed.pitch,
+                    pano_id=snap_pano, radius_m=50,
                 )
                 if probe is None:
                     continue
                 bound = SkylinePoint(
-                    name=seed.name,
-                    lat=snap[0],
-                    lon=snap[1],
-                    heading=seed.heading,
-                    source=seed.source,
-                    score=seed.score,
-                    fov=seed.fov,
-                    pitch=seed.pitch,
-                    pano_id=snap_pano,
+                    name=seed.name, lat=snap[0], lon=snap[1],
+                    heading=seed.heading, source=seed.source,
+                    score=seed.score, fov=seed.fov,
+                    pitch=seed.pitch, pano_id=snap_pano,
                 )
                 break
+
+        # Persist this seed's resolved position so subsequent runs hit the
+        # same pano. Only cache successful resolutions.
+        if bound is not None and cache_key not in _resolve_cache:
+            _resolve_cache[cache_key] = {
+                "lat": float(bound.lat),
+                "lon": float(bound.lon),
+                "pano_id": bound.pano_id,
+            }
+            _cache_save()
         if bound is None:
             # No usable imagery anywhere near this seed — skip it entirely.
             continue
@@ -1290,10 +1468,12 @@ def _seed_multiview_registration(
         # (not geographic north), so the API heading must be pano-relative.
         # For road panos found by location-based fallback the heading IS
         # geographic and no offset is needed.
-        is_photosphere = (seed.pano_id is not None and bound.pano_id == seed.pano_id)
+        is_photosphere = (
+            seed.pano_id is not None and bound.pano_id == seed.pano_id)
         resolved.append((bound, float(seed_elev), is_photosphere))
 
-    spin_headings = tuple(float(h) for h in np.arange(0.0, 360.0, spin_step_deg))
+    spin_headings = tuple(float(h)
+                          for h in np.arange(0.0, 360.0, spin_step_deg))
     view_rows: list[SeedViewRegistration] = []
     pano_results: list[StitchedPanoResult] = []
     estimates = []
@@ -1343,7 +1523,8 @@ def _seed_multiview_registration(
             )
             if image is None:
                 continue
-            sv_score, sv_label, _, _tc = _screen_score_from_image(image, pitch=seed.pitch)
+            sv_score, sv_label, _, _tc = _screen_score_from_image(
+                image, pitch=seed.pitch)
             if sv_label == "rejected":
                 continue
             # Pitch correction: if the camera is pointing too far down (pitch
@@ -1445,10 +1626,30 @@ def _seed_multiview_registration(
                     total += s * wt
                 return total / total_weight
 
-            # Stage 1: coarse 3° sweep over full circle
+            # Initial-guess strategy: seed URLs carry an `h=X°` token that's
+            # the compass heading the original Street View viewer pointed at.
+            # For api_heading=0 to render the same world content, the
+            # pano-to-geographic offset should be ≈ h. We use this as the
+            # initial guess and search ±25° around it. Falls back to a full-
+            # circle sweep when no h-token is available (i.e. the seed was
+            # auto-proposed without a URL).
+            #
+            # This eliminates 180°-symmetric local maxima — the wrong-by-180°
+            # offset would score reasonably on per-building IoU because OSM
+            # building columns happen to land near the predicted columns, but
+            # the depicted scene then points the wrong way and the user sees
+            # geographically nonsensical orientations (e.g. seed_5 with
+            # anchor=+101° showed Bocagrande towers at "effective_heading=65°
+            # ENE" when the scene clearly depicts NORTH up the peninsula).
+            # Full 360° coarse sweep at 3° resolution. The h-token-constrained
+            # search was tried but produced edge-of-range optima (true value
+            # outside the constraint), so we go global. The stronger
+            # miss-penalty in _score_offset_semantic_iou (0.6 instead of
+            # 0.3) is what excludes 180°-symmetric local maxima.
             coarse_offsets = np.arange(-180.0, 180.0, 3.0)
+            h_token = float(seed.heading) if seed.heading is not None else None
             coarse_best = -float("inf")
-            coarse_best_offset = 0.0
+            coarse_best_offset = h_token if h_token is not None else 0.0
             for cand in coarse_offsets:
                 s = _joint_score(float(cand))
                 if s > coarse_best:
@@ -1483,25 +1684,16 @@ def _seed_multiview_registration(
             score = float(reg.get("best_score", float("inf")))
             n_matches = int(reg.get("n_matches", 0))
             if not math.isfinite(score) or n_matches < 3:
-                # Forced anchor produced too few matches — fall back to a
-                # wide search. (We do NOT escape-hatch on low IoU: all spin
-                # views of one seed must share the same pano-to-geographic
-                # offset, so letting individual views drift breaks the
-                # cross-view consistency the joint optimization buys us.
-                # Improvements should land on the joint anchor, not on
-                # per-view overrides.)
-                wide_reg = register_view_to_osm(
-                    cap, seed_buildings,
-                    heading_search_deg=15.0, heading_step_deg=1.0,
-                    coarse_search_deg=180.0 if seed.pano_id is not None else None,
-                    coarse_step_deg=10.0,
-                )
-                wide_score = float(wide_reg.get("best_score", float("inf")))
-                reg = wide_reg
-                score = wide_score
-                n_matches = int(reg.get("n_matches", 0))
-                if not math.isfinite(score) or n_matches < 3:
-                    continue
+                # Forced anchor failed — DROP this view. The previous wide-
+                # search fallback let individual views adopt completely
+                # different offsets (e.g. seed_1 had three views with
+                # offsets +37.5°, -80°, +42.5° — geometrically impossible
+                # for a single rigid pano). All 12 spin views of one Photo
+                # Sphere MUST share the same pano-to-geographic offset; the
+                # joint optimizer's anchor is the right value for all of
+                # them or none. Per-view escape breaks that invariant and
+                # produces misleading minimaps.
+                continue
 
             # Aerial detection: use the *effective* pitch stored in the
             # Viewpoint, not seed.pitch. If pitch correction fired in the
@@ -1529,13 +1721,15 @@ def _seed_multiview_registration(
             #  - contour-peak (good for distinct spires with sky valleys)
             #  - mask-component (catches buildings the contour merges or
             #    misses, e.g. mid-rise rows or near-flat skylines)
-            contour_segs = detect_building_silhouettes(reg.get("contour"), image)
+            contour_segs = detect_building_silhouettes(
+                reg.get("contour"), image)
             _, _bmask = _neural_sky_and_building_masks(image)
             mask_segs = detect_buildings_from_mask(
                 _bmask, contour=reg.get("contour")
             )
             segments = _merge_silhouette_sources(contour_segs, mask_segs)
-            all_proj_list = reg.get("all_projections") or reg.get("projections", [])
+            all_proj_list = reg.get(
+                "all_projections") or reg.get("projections", [])
             matched_segments = match_segments_to_buildings(
                 segments, all_proj_list, buildings_by_id
             )
@@ -1545,10 +1739,12 @@ def _seed_multiview_registration(
             # height from the sampled contour pixel, and whether the match is the
             # closest projected building in its column bin (a far building credited
             # for a closer roof is the dominant failure mode).
-            effective_heading = (geo_heading + float(reg.get("best_offset", 0.0))) % 360.0
+            effective_heading = (
+                geo_heading + float(reg.get("best_offset", 0.0))) % 360.0
             half_fov = seed.fov * 0.5
             contour_arr = np.asarray(reg.get("contour", []), dtype=np.float32)
-            f_px = 0.5 * image.shape[1] / math.tan(math.radians(seed.fov) * 0.5)
+            f_px = 0.5 * image.shape[1] / \
+                math.tan(math.radians(seed.fov) * 0.5)
             cy = image.shape[0] * 0.5
             pitch_rad = math.radians(cap.viewpoint.pitch)
             cam_z = float(seed_elev) + 1.7
@@ -1563,7 +1759,8 @@ def _seed_multiview_registration(
                     seed.lat, seed.lon, b.centroid_lat, b.centroid_lon)
                 true_dist = _distance_m(
                     seed.lat, seed.lon, b.centroid_lat, b.centroid_lon)
-                delta = (true_bearing - effective_heading + 540.0) % 360.0 - 180.0
+                delta = (true_bearing - effective_heading +
+                         540.0) % 360.0 - 180.0
                 # Height proxy: tagged > area-based fallback
                 from .pipeline import _height_proxy as _hp
                 proxy_h = float(_hp(b))
@@ -1576,7 +1773,8 @@ def _seed_multiview_registration(
                         ang = math.atan((cy - y_px) / f_px) + pitch_rad
                         pred_h = max(
                             0.0,
-                            cam_z + float(m.get("forward_m", 0.0)) * math.tan(ang)
+                            cam_z + float(m.get("forward_m", 0.0)
+                                          ) * math.tan(ang)
                             - float(getattr(b, "terrain_elev_m", 0.0))
                         )
                 # Closest-building flag: among matched projections within ±15 px,
@@ -1597,7 +1795,8 @@ def _seed_multiview_registration(
                 seg["is_closest_in_bin"] = is_closest
                 seg["height_tag_m"] = (
                     float(b.height_tag_m) if b.height_tag_m is not None else None)
-            overlay = _registration_overlay(image, reg, matched_segments=matched_segments)
+            overlay = _registration_overlay(
+                image, reg, matched_segments=matched_segments)
             # Compute building band on the original image's mask for display
             # cropping. compute_building_band returns None if too little of
             # the frame is building (e.g. ocean view) — then we render full
@@ -1694,6 +1893,7 @@ def _seed_multiview_registration(
                     n_matched=n_matched,
                     n_buildings_in_view=len(pano_projs),
                     anchor_offset_deg=float(anchor_offset),
+                    headings_per_col=pano_headings,
                 ))
         except Exception as e:
             # Pano path is supplementary — failure should never break the
@@ -1782,7 +1982,8 @@ def _draw_view_minimap(
                 xs, ys = geom.exterior.xy
             except Exception:
                 continue
-            color = tuple(c / 255.0 for c in _SEGMENT_PALETTE[seg_idx % len(_SEGMENT_PALETTE)])
+            color = tuple(
+                c / 255.0 for c in _SEGMENT_PALETTE[seg_idx % len(_SEGMENT_PALETTE)])
             poly = mpatches.Polygon(
                 np.column_stack([list(xs), list(ys)]),
                 closed=True,
@@ -1854,7 +2055,8 @@ def _draw_view_minimap(
             fontweight="bold",
             ha="center",
             va="center",
-            bbox=dict(boxstyle="circle,pad=0.15", facecolor=color, edgecolor="black", linewidth=0.6, alpha=0.95),
+            bbox=dict(boxstyle="circle,pad=0.15", facecolor=color,
+                      edgecolor="black", linewidth=0.6, alpha=0.95),
             zorder=6,
         )
 
@@ -2016,9 +2218,34 @@ def _render_stitched_pano_page(
 
     ax_pano = fig.add_axes([0.03, 0.50, 0.94, 0.38])
     ax_pano.imshow(overlay)
+    # Heading-tick overlay along the bottom: every 30° draw a vertical
+    # marker + compass label so we can verify visually that the stitching's
+    # column-to-heading map matches the depicted scene. (If e.g. column
+    # marked "180°" doesn't show buildings the user expects in the south
+    # direction, that pinpoints a heading-mapping bug.)
+    headings_per_col = getattr(pr, "headings_per_col", None)
+    if headings_per_col is not None and headings_per_col.size > 0:
+        h_img = overlay.shape[0]
+        labeled_cardinals = [
+            (0.0, "N"), (45.0, "NE"), (90.0, "E"), (135.0, "SE"),
+            (180.0, "S"), (225.0, "SW"), (270.0, "W"), (315.0, "NW"),
+        ]
+        for hdg, name in labeled_cardinals:
+            # Find the column closest to this compass heading
+            diffs = np.abs(((headings_per_col - hdg + 180.0) % 360.0) - 180.0)
+            if diffs.min() > 8.0:
+                continue
+            col = int(np.argmin(diffs))
+            ax_pano.axvline(col, color="yellow", linewidth=0.5, alpha=0.7)
+            ax_pano.text(
+                col, h_img * 0.97, f"{name} {hdg:.0f}°",
+                color="black", fontsize=8, ha="center", va="bottom",
+                bbox=dict(boxstyle="round,pad=0.15", fc="yellow",
+                          ec="black", alpha=0.85, lw=0.5),
+            )
     ax_pano.axis("off")
     ax_pano.set_title(
-        "Stitched pano (segments from unified mask, sliding-window SegFormer)",
+        "Stitched pano — mask-stitched per-view masks (yellow ticks = compass headings)",
         fontsize=10,
     )
 
@@ -2096,10 +2323,16 @@ def _render_seed_view_page(
 ) -> None:
     fig = plt.figure(figsize=(14, 8.5))
     aerial_tag = "  [AERIAL — height skipped]" if sv.is_aerial else ""
+    # Show EFFECTIVE geographic heading (api_heading + offset) in the title
+    # so the user can match the depicted scene to a compass direction. The
+    # raw `heading` field is the API parameter, which for Photo Spheres is
+    # the pano's internal frame, not compass.
+    effective_heading = (sv.heading + sv.best_offset) % 360.0
     fig.suptitle(
-        f"Seed view — {sv.seed_name}  heading={sv.heading:.1f}°  "
+        f"Seed view — {sv.seed_name}  "
+        f"effective_heading={effective_heading:.1f}°  "
+        f"(api={sv.heading:.0f}° + offset={sv.best_offset:+.1f}°)  "
         f"reg_score={sv.registration_score:.2f}px  iou={sv.iou:.2f}  "
-        f"offset={sv.best_offset:+.1f}°  "
         f"segments={len(sv.matched_segments)}  "
         f"estimates={sv.estimates_count}"
         f"{aerial_tag}",
@@ -2182,8 +2415,10 @@ def _render_seed_view_page(
             n_not_closest += 1
         if implausible:
             n_implausible += 1
-        tag_str = f"tag={tag_h:5.1f}" if isinstance(tag_h, (int, float)) and tag_h else "tag=  -- "
-        pred_str = f"{pred_h:5.1f}" if isinstance(pred_h, float) and np.isfinite(pred_h) else "  nan"
+        tag_str = f"tag={tag_h:5.1f}" if isinstance(
+            tag_h, (int, float)) and tag_h else "tag=  -- "
+        pred_str = f"{pred_h:5.1f}" if isinstance(
+            pred_h, float) and np.isfinite(pred_h) else "  nan"
         legend_lines.append(
             f"{i+1:>2}.[{flags}] {name:<10}  Δhdg={delta:+5.1f}°  "
             f"d={true_dist:4.0f}m  proxy={proxy_h:5.1f}  pred={pred_str}  {tag_str}"
@@ -2195,7 +2430,8 @@ def _render_seed_view_page(
         f"flags F=outside_FOV  B=not_closest  P=implausible_vs_proxy  "
         f"({n_fov_fail}F / {n_not_closest}B / {n_implausible}P of {n_total})"
     )
-    legend_text = header + "\n" + ("\n".join(legend_lines) if legend_lines else "(no segments)")
+    legend_text = header + "\n" + \
+        ("\n".join(legend_lines) if legend_lines else "(no segments)")
     fig.text(
         0.03,
         0.07,
@@ -2224,7 +2460,8 @@ def _load_known_heights(
     Returns a list of dicts with keys:
       name, ctbuh_m, floors, lat, lon, matched_id, matched_dist_m.
     """
-    cfg = Path(__file__).resolve().parent / "sites" / f"{region_name.lower()}.json"
+    cfg = Path(__file__).resolve().parent / \
+        "sites" / f"{region_name.lower()}.json"
     if not cfg.exists():
         return []
     try:
@@ -2283,7 +2520,8 @@ def _render_pdf(
     with PdfPages(out_pdf) as pdf:
         # Page 1: summary
         fig = plt.figure(figsize=(11, 8.5))
-        fig.suptitle(f"Skyline Region Report — {bbox.name}", fontsize=18, fontweight="bold")
+        fig.suptitle(
+            f"Skyline Region Report — {bbox.name}", fontsize=18, fontweight="bold")
         ax = fig.add_subplot(111)
         ax.axis("off")
         n_aerial_views = sum(1 for sv in seed_views if sv.is_aerial)
@@ -2313,7 +2551,8 @@ def _render_pdf(
                 f"- {p.name} ({p.source})  lat={p.lat:.6f}, lon={p.lon:.6f}, heading={p.heading:.1f}  "
                 f"score={row['screen_score']:.2f}  coverage={row['coverage']}"
             )
-        ax.text(0.03, 0.96, "\n".join(lines), va="top", ha="left", family="monospace", fontsize=10)
+        ax.text(0.03, 0.96, "\n".join(lines), va="top",
+                ha="left", family="monospace", fontsize=10)
         pdf.savefig(fig, bbox_inches="tight")
         plt.close(fig)
 
@@ -2334,7 +2573,7 @@ def _render_pdf(
         if ok_rows:
             tiles_per_page = 6  # 2 rows × 3 cols
             for page_start in range(0, len(ok_rows), tiles_per_page):
-                page_rows = ok_rows[page_start : page_start + tiles_per_page]
+                page_rows = ok_rows[page_start: page_start + tiles_per_page]
                 fig = plt.figure(figsize=(11, 8.5))
                 fig.suptitle(
                     f"Screened locations  "
@@ -2362,7 +2601,8 @@ def _render_pdf(
         # polygons in the segment colours (rather than just bearing rays).
         buildings_by_id = {b.feature_id: b for b in building_records}
         for sv in seed_views:
-            _render_seed_view_page(pdf, sv, osm_data, buildings_by_id=buildings_by_id)
+            _render_seed_view_page(
+                pdf, sv, osm_data, buildings_by_id=buildings_by_id)
 
         # Stitched-pano comparison pages — one per seed that produced a
         # stitched result. Lets you compare the 360° pano-level segmentation
@@ -2375,7 +2615,8 @@ def _render_pdf(
 
         # Extracted heights summary page
         fig = plt.figure(figsize=(11, 8.5))
-        fig.suptitle("Seed-Derived Building Heights", fontsize=16, fontweight="bold")
+        fig.suptitle("Seed-Derived Building Heights",
+                     fontsize=16, fontweight="bold")
         ax = fig.add_subplot(111)
         ax.axis("off")
         cross_seed = [r for r in building_heights if r.get("n_seeds", 1) >= 2]
@@ -2416,7 +2657,8 @@ def _render_pdf(
         # Sort cross-seed buildings by disagreement (best matches first)
         cross_seed_sorted = sorted(
             cross_seed,
-            key=lambda r: (r.get("seed_disagreement_m", 0.0), -r.get("n_seeds", 0)),
+            key=lambda r: (r.get("seed_disagreement_m",
+                           0.0), -r.get("n_seeds", 0)),
         )
         for row in cross_seed_sorted[:30]:
             per_seed = row.get("per_seed_median_m", {})
@@ -2456,7 +2698,8 @@ def _render_pdf(
             )
 
         fig = plt.figure(figsize=(11, 8.5))
-        fig.suptitle("Validation: Predicted vs OSM-tagged Heights", fontsize=16, fontweight="bold")
+        fig.suptitle("Validation: Predicted vs OSM-tagged Heights",
+                     fontsize=16, fontweight="bold")
         if pairs:
             tagged_h = np.array([p[1] for p in pairs], dtype=np.float32)
             pred_h = np.array([p[2] for p in pairs], dtype=np.float32)
@@ -2470,12 +2713,14 @@ def _render_pdf(
             colors = np.where(n_seeds_arr >= 2, "tab:blue", "tab:orange")
             ax_scatter.scatter(tagged_h, pred_h, c=colors, alpha=0.7, s=24)
             lim = float(max(tagged_h.max(), pred_h.max()) * 1.05)
-            ax_scatter.plot([0, lim], [0, lim], "k--", linewidth=0.8, alpha=0.5)
+            ax_scatter.plot([0, lim], [0, lim], "k--",
+                            linewidth=0.8, alpha=0.5)
             ax_scatter.set_xlabel("OSM-tagged height (m)")
             ax_scatter.set_ylabel("Predicted weighted height (m)")
             ax_scatter.set_xlim(0, lim)
             ax_scatter.set_ylim(0, lim)
-            ax_scatter.set_title(f"n={len(pairs)} tagged buildings (blue=cross-seed, orange=single-seed)")
+            ax_scatter.set_title(
+                f"n={len(pairs)} tagged buildings (blue=cross-seed, orange=single-seed)")
             ax_scatter.grid(alpha=0.25)
 
             ax_hist = fig.add_axes([0.70, 0.42, 0.25, 0.45])
@@ -2553,8 +2798,10 @@ def _render_pdf(
                 fontsize=16, fontweight="bold",
             )
 
-            matched = [kh for kh in known_heights if kh["matched_id"] is not None]
-            unmatched = [kh for kh in known_heights if kh["matched_id"] is None]
+            matched = [
+                kh for kh in known_heights if kh["matched_id"] is not None]
+            unmatched = [
+                kh for kh in known_heights if kh["matched_id"] is None]
 
             hdr = (
                 f"{'Building':<32} {'Survey m':>9} {'Floors':>7} "
@@ -2568,7 +2815,8 @@ def _render_pdf(
                 hdr,
                 sep,
             ]
-            pairs: list[tuple[float, float, str]] = []  # (ctbuh_m, pred_m, name)
+            # (ctbuh_m, pred_m, name)
+            pairs: list[tuple[float, float, str]] = []
             for kh in known_heights:
                 fid = kh["matched_id"]
                 ctbuh_m = kh["ctbuh_m"]
@@ -2607,7 +2855,8 @@ def _render_pdf(
                 bias = float(np.median(pred_arr - ctbuh_arr))
 
                 ax_s = fig.add_axes([0.06, 0.05, 0.46, 0.32])
-                ax_s.scatter(ctbuh_arr, pred_arr, c="tab:blue", s=60, alpha=0.85, zorder=3)
+                ax_s.scatter(ctbuh_arr, pred_arr, c="tab:blue",
+                             s=60, alpha=0.85, zorder=3)
                 lim = float(max(ctbuh_arr.max(), pred_arr.max()) * 1.10)
                 ax_s.plot([0, lim], [0, lim], "k--", linewidth=0.8, alpha=0.5)
                 for (ct, pr, bname) in pairs:

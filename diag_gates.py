@@ -1,7 +1,10 @@
-import sys, pathlib, glob
-sys.path.insert(0, '.')
-import cv2, numpy as np
+import numpy as np
+import cv2
 from city2stl.skyline_cv.pipeline import detect_skyline_contour
+import sys
+import pathlib
+import glob
+sys.path.insert(0, '.')
 
 img_files = sorted(glob.glob('city2stl/skyline_cv/runs/image_cache/*.png'))
 print(f'Testing {len(img_files)} images...')
@@ -32,7 +35,7 @@ for f, sf, cr, gb in sorted(results, key=lambda x: x[2]):
 print()
 print('Range distribution (all):')
 ranges = sorted(r[2] for r in results)
-buckets = [(0,0.05),(0.05,0.10),(0.10,0.15),(0.15,0.20),(0.20,1.0)]
+buckets = [(0, 0.05), (0.05, 0.10), (0.10, 0.15), (0.15, 0.20), (0.20, 1.0)]
 for lo, hi in buckets:
     n = sum(1 for r in ranges if lo <= r < hi)
     print(f'  [{lo:.2f},{hi:.2f}): {n}')

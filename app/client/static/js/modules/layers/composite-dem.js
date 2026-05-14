@@ -20,30 +20,30 @@
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
 const DEFAULTS = {
-    waterDepth:       5.0,   // metres to subtract where water detected
-    waterWeight:      1.0,
-    buildingScale:    1.0,   // multiplier on OSM building heights
-    roadCut:          0.5,   // metres to subtract for roads
-    riverDepth:       3.0,   // metres to subtract for waterway LineStrings
-    cityWeight:       1.0,
-    treeHeight:       8.0,   // metres to add for tree-cover pixels
-    landcoverWeight:  0.0,   // off by default — speculative
-    vegHeight:        5.0,   // max metres for satellite-derived vegetation
-    satWeight:        0.0,   // off by default — weakest signal
+    waterDepth: 5.0,   // metres to subtract where water detected
+    waterWeight: 1.0,
+    buildingScale: 1.0,   // multiplier on OSM building heights
+    roadCut: 0.5,   // metres to subtract for roads
+    riverDepth: 3.0,   // metres to subtract for waterway LineStrings
+    cityWeight: 1.0,
+    treeHeight: 8.0,   // metres to add for tree-cover pixels
+    landcoverWeight: 0.0,   // off by default — speculative
+    vegHeight: 5.0,   // max metres for satellite-derived vegetation
+    satWeight: 0.0,   // off by default — weakest signal
 };
 
 // ESA WorldCover class → height offset (metres)
 const ESA_HEIGHT_TABLE = {
-    10:  8.0,   // Tree cover
-    20:  1.5,   // Shrubland
-    30:  0.3,   // Grassland
-    40:  0.8,   // Cropland
-    50:  6.0,   // Built-up
-    60:  0.0,   // Bare / sparse
-    70:  0.0,   // Snow and ice
-    80:  0.0,   // Water bodies (handled by water layer)
+    10: 8.0,   // Tree cover
+    20: 1.5,   // Shrubland
+    30: 0.3,   // Grassland
+    40: 0.8,   // Cropland
+    50: 6.0,   // Built-up
+    60: 0.0,   // Bare / sparse
+    70: 0.0,   // Snow and ice
+    80: 0.0,   // Water bodies (handled by water layer)
     90: -0.5,   // Herbaceous wetland
-    95:  3.0,   // Mangroves
+    95: 3.0,   // Mangroves
     100: 0.0,   // Moss and lichen
 };
 
@@ -57,10 +57,10 @@ const _lutCache = {};
 
 /** Last computed composite Float32Array (same dims as DEM). */
 let _compositeValues = null;
-let _compositeWidth  = 0;
+let _compositeWidth = 0;
 let _compositeHeight = 0;
-let _compositeMin    = 0;
-let _compositeMax    = 0;
+let _compositeMin = 0;
+let _compositeMax = 0;
 
 /** Cached satellite pixel data to avoid repeated getImageData() calls. */
 let _satPixelCache = null;  // { canvas, width, height, data }
@@ -130,7 +130,7 @@ async function _fetchCityRaster(demW, demH) {
 
     const { data, error } = await (window.api?.composite?.cityRaster({
         north: bbox.north, south: bbox.south,
-        east:  bbox.east,  west:  bbox.west,
+        east: bbox.east, west: bbox.west,
         width: demW, height: demH,
         projection,
         clip_valid_region: document.getElementById('paramClipNans')?.checked ?? true,
@@ -144,12 +144,12 @@ async function _fetchCityRaster(demW, demH) {
     // Store normalized component arrays for slider-driven recombination
     const raster = {
         cacheKey,
-        buildings:  new Float32Array(data.buildings),
-        roads:      new Float32Array(data.roads),
-        waterways:  new Float32Array(data.waterways),
-        walls:      new Float32Array(data.walls),
-        width:      data.width,
-        height:     data.height,
+        buildings: new Float32Array(data.buildings),
+        roads: new Float32Array(data.roads),
+        waterways: new Float32Array(data.waterways),
+        walls: new Float32Array(data.walls),
+        width: data.width,
+        height: data.height,
     };
     if (window.appState) window.appState.compositeCityRaster = raster;
     return raster;
@@ -164,14 +164,14 @@ function _cityContributionFromRaster(raster) {
     const { buildings, roads, waterways, walls } = raster;
     const n = buildings.length;
     const out = new Float32Array(n);
-    const bScale  = params.buildingScale;
-    const rCut    = params.roadCut;
-    const rDepth  = params.riverDepth;
+    const bScale = params.buildingScale;
+    const rCut = params.roadCut;
+    const rDepth = params.riverDepth;
     for (let i = 0; i < n; i++) {
         out[i] = bScale * buildings[i]
-               - rCut   * roads[i]
-               - rDepth * waterways[i]
-               + bScale * walls[i];
+            - rCut * roads[i]
+            - rDepth * waterways[i]
+            + bScale * walls[i];
     }
     return out;
 }
@@ -327,9 +327,9 @@ window.computeCompositeDem = async function computeCompositeDem() {
 
     // Add weighted contributions
     _addWeightedFeature(composite, waterFeat, params.waterWeight);
-    _addWeightedFeature(composite, cityFeat,  params.cityWeight);
-    _addWeightedFeature(composite, lcFeat,    params.landcoverWeight);
-    _addWeightedFeature(composite, satFeat,   params.satWeight);
+    _addWeightedFeature(composite, cityFeat, params.cityWeight);
+    _addWeightedFeature(composite, lcFeat, params.landcoverWeight);
+    _addWeightedFeature(composite, satFeat, params.satWeight);
 
     await _yieldToMain(); if (gen !== _computeGen) return;
 
@@ -341,16 +341,16 @@ window.computeCompositeDem = async function computeCompositeDem() {
         if (v > cMax) cMax = v;
     }
     _compositeValues = composite;
-    _compositeWidth  = W;
+    _compositeWidth = W;
     _compositeHeight = H;
-    _compositeMin    = cMin;
-    _compositeMax    = cMax;
+    _compositeMin = cMin;
+    _compositeMax = cMax;
 
     await _yieldToMain(); if (gen !== _computeGen) return;
 
     // Render to a hidden source canvas (stacked-layers.js copies it to the DOM layer canvas)
     const rawCanvas = document.createElement('canvas');
-    rawCanvas.width  = W;
+    rawCanvas.width = W;
     rawCanvas.height = H;
     _renderCompositeCanvas(rawCanvas, composite, W, H, cMin, cMax);
 
@@ -367,7 +367,7 @@ window.computeCompositeDem = async function computeCompositeDem() {
  * Render composite values to a canvas using the DEM colormap.
  */
 function _renderCompositeCanvas(canvas, values, width, height, vmin, vmax) {
-    canvas.width  = width;
+    canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
     const img = ctx.createImageData(width, height);
@@ -388,7 +388,7 @@ function _renderCompositeCanvas(canvas, values, width, height, vmin, vmax) {
         const t = Math.max(0, Math.min(1, (v - vmin) * invRange));
         const li = Math.round(t * 1023) * 3;
         const di = i * 4;
-        data[di]     = lut[li];
+        data[di] = lut[li];
         data[di + 1] = lut[li + 1];
         data[di + 2] = lut[li + 2];
         data[di + 3] = 255;
@@ -465,9 +465,9 @@ function _updateContribStatus() {
 
     const parts = ['DEM'];
     if (params.waterWeight > 0) parts.push(`− Water (${params.waterDepth.toFixed(1)}m, ${params.waterWeight.toFixed(1)}×)`);
-    if (params.cityWeight > 0)  parts.push(`+ City (${params.cityWeight.toFixed(1)}×)`);
+    if (params.cityWeight > 0) parts.push(`+ City (${params.cityWeight.toFixed(1)}×)`);
     if (params.landcoverWeight > 0) parts.push(`+ LC (${params.landcoverWeight.toFixed(1)}×)`);
-    if (params.satWeight > 0)   parts.push(`+ Veg (${params.satWeight.toFixed(1)}×)`);
+    if (params.satWeight > 0) parts.push(`+ Veg (${params.satWeight.toFixed(1)}×)`);
     el.textContent = parts.join(' ');
 }
 
@@ -489,16 +489,16 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
 
     // Wire all sliders
     const sliderMap = {
-        compositeWaterDepth:      'waterDepth',
-        compositeWaterWeight:     'waterWeight',
-        compositeBuildingScale:   'buildingScale',
-        compositeRoadCut:         'roadCut',
-        compositeRiverDepth:      'riverDepth',
-        compositeCityWeight:      'cityWeight',
-        compositeTreeHeight:      'treeHeight',
+        compositeWaterDepth: 'waterDepth',
+        compositeWaterWeight: 'waterWeight',
+        compositeBuildingScale: 'buildingScale',
+        compositeRoadCut: 'roadCut',
+        compositeRiverDepth: 'riverDepth',
+        compositeCityWeight: 'cityWeight',
+        compositeTreeHeight: 'treeHeight',
         compositeLandcoverWeight: 'landcoverWeight',
-        compositeVegHeight:       'vegHeight',
-        compositeSatWeight:       'satWeight',
+        compositeVegHeight: 'vegHeight',
+        compositeSatWeight: 'satWeight',
     };
 
     for (const [elemId, paramKey] of Object.entries(sliderMap)) {

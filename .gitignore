@@ -17,6 +17,7 @@ config.json
 *.gcode
 *.curaprofile
 *.ini
+!pytest.ini
 
 # Runtime / generated
 data.db
@@ -55,3 +56,6 @@ server2.log
 test_pano_direct.png
 test_seed1_h0.png
 tests/hydrology-render-test.png
+test_city_raster_dims.py
+test_projection_audit.py
+test_projection_audit_simple.py

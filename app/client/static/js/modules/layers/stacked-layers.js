@@ -51,11 +51,11 @@ const LAYER_STACK = _layerOrder;  // alias kept for backward compat
  * Kept separate from mode names so the HTML IDs can differ (e.g. Hydrology → layerHydroCanvas).
  */
 const LAYER_CANVAS_IDS = {
-    Dem:          'layerDemCanvas',
+    Dem: 'layerDemCanvas',
     WaterHydrology: 'layerWaterHydrologyCanvas',
-    Sat:          'layerSatCanvas',
-    SatImg:       'layerSatImgCanvas',
-    CityRaster:   'layerCityRasterCanvas',
+    Sat: 'layerSatCanvas',
+    SatImg: 'layerSatImgCanvas',
+    CityRaster: 'layerCityRasterCanvas',
     CompositeDem: 'layerCompositeDemCanvas',
 };
 
@@ -122,7 +122,7 @@ window.clearAllLayerBuffers = function clearAllLayerBuffers() {
 };
 
 // Multi-layer state: set of active layer keys + per-layer opacity (0–1)
-let _activeLayers  = new Set(['Dem', 'CityOverlay']);
+let _activeLayers = new Set(['Dem', 'CityOverlay']);
 let _layerOpacities = { Dem: 1, WaterHydrology: 0.75, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CityOverlay: 0.85, CompositeDem: 1 };
 
 // Kept for getStackMode() backward compat — last-toggled-on layer
@@ -214,7 +214,7 @@ function _updateLayerOpacitySliders() {
     visible.forEach((mode, vi) => {
         const pct = Math.round((_layerOpacities[mode] ?? 1) * 100);
         const isFirst = vi === 0;
-        const isLast  = vi === visible.length - 1;
+        const isLast = vi === visible.length - 1;
         const row = document.createElement('div');
         row.style.cssText = 'display:grid;grid-template-columns:20px 66px 1fr 28px;gap:0 4px;align-items:center;margin-top:3px;';
         row.innerHTML = `
@@ -232,7 +232,7 @@ function _updateLayerOpacitySliders() {
             <span style="font-size:10px;color:#888;text-align:right;">${pct}%</span>`;
         // Wire opacity slider
         const slider = row.querySelector('input[type="range"]');
-        const label  = row.querySelector('span:last-child');
+        const label = row.querySelector('span:last-child');
         slider.addEventListener('input', () => {
             label.textContent = slider.value + '%';
             window.setLayerOpacity(mode, slider.value / 100);
@@ -315,11 +315,11 @@ function formatCoord(val, isLat, interval) {
     // interval undefined → fall back to magnitude-based heuristic.
     let dp;
     if (interval !== undefined) {
-        if      (interval >= 5)    dp = 0;
-        else if (interval >= 1)    dp = 1;
-        else if (interval >= 0.1)  dp = 2;
+        if (interval >= 5) dp = 0;
+        else if (interval >= 1) dp = 1;
+        else if (interval >= 0.1) dp = 2;
         else if (interval >= 0.01) dp = 3;
-        else                       dp = 4;
+        else dp = 4;
     } else {
         const abs = Math.abs(val);
         dp = abs >= 10 ? 1 : abs >= 1 ? 2 : 3;
@@ -339,41 +339,41 @@ function formatCoord(val, isLat, interval) {
  * Calls applyStackedTransform, drawLayerGrid, and renderCityOverlay.
  */
 window.updateStackedLayers = function updateStackedLayers() {
-    const demCanvas   = document.querySelector(`#demImage ${window.DEM_CANVAS_SELECTOR}`);
+    const demCanvas = document.querySelector(`#demImage ${window.DEM_CANVAS_SELECTOR}`);
     const waterCanvas = document.querySelector('#waterMaskImage canvas');
-    const satCanvas   = document.querySelector('#satelliteImage canvas');
+    const satCanvas = document.querySelector('#satelliteImage canvas');
 
     const stack = document.getElementById('layersStack');
     if (!stack) return;
 
-    const stackRect  = stack.getBoundingClientRect();
-    const stackWidth  = stackRect.width  || 600;
+    const stackRect = stack.getBoundingClientRect();
+    const stackWidth = stackRect.width || 600;
     const stackHeight = stackRect.height || 400;
 
     const bbox = window.appState?.currentDemBbox ||
         (window.appState?.selectedRegion ? { ...window.appState.selectedRegion } : null);
 
-    let targetWidth  = stackWidth;
+    let targetWidth = stackWidth;
     let targetHeight = stackHeight;
     let targetX = 0;
     let targetY = 0;
 
     if (bbox) {
-        const latMid        = (bbox.north + bbox.south) / 2;
+        const latMid = (bbox.north + bbox.south) / 2;
         const latCorrection = Math.cos(latMid * Math.PI / 180);
-        const bboxWidth     = (bbox.east - bbox.west) * latCorrection;
-        const bboxHeight    = bbox.north - bbox.south;
-        const bboxAspect    = bboxWidth / bboxHeight;
-        const stackAspect   = stackWidth / stackHeight;
+        const bboxWidth = (bbox.east - bbox.west) * latCorrection;
+        const bboxHeight = bbox.north - bbox.south;
+        const bboxAspect = bboxWidth / bboxHeight;
+        const stackAspect = stackWidth / stackHeight;
 
         if (bboxAspect > stackAspect) {
-            targetWidth  = stackWidth;
+            targetWidth = stackWidth;
             targetHeight = stackWidth / bboxAspect;
-            targetY      = (stackHeight - targetHeight) / 2;
+            targetY = (stackHeight - targetHeight) / 2;
         } else {
             targetHeight = stackHeight;
-            targetWidth  = stackHeight * bboxAspect;
-            targetX      = (stackWidth - targetWidth) / 2;
+            targetWidth = stackHeight * bboxAspect;
+            targetX = (stackWidth - targetWidth) / 2;
         }
     }
 
@@ -391,7 +391,7 @@ window.updateStackedLayers = function updateStackedLayers() {
     function drawLayerToTarget(destCanvas, sourceCanvas) {
         if (!destCanvas || !sourceCanvas) return;
         // Only reset dimensions when they actually change (avoids GPU flush)
-        if (destCanvas.width !== stackWidth)  destCanvas.width  = stackWidth;
+        if (destCanvas.width !== stackWidth) destCanvas.width = stackWidth;
         if (destCanvas.height !== stackHeight) destCanvas.height = stackHeight;
         const ctx = destCanvas.getContext('2d');
         ctx.clearRect(0, 0, stackWidth, stackHeight);
@@ -402,11 +402,11 @@ window.updateStackedLayers = function updateStackedLayers() {
 
     // Source canvas for each layer mode
     const sourceMap = {
-        Dem:          () => demCanvas,
+        Dem: () => demCanvas,
         WaterHydrology: () => window.appState?.waterHydrologyCanvas || null,
-        Sat:          () => satCanvas,
-        SatImg:       () => window.appState?.satImgSourceCanvas || null,
-        CityRaster:   () => window.appState?.cityRasterSourceCanvas || null,
+        Sat: () => satCanvas,
+        SatImg: () => window.appState?.satImgSourceCanvas || null,
+        CityRaster: () => window.appState?.cityRasterSourceCanvas || null,
         CompositeDem: () => window.appState?.compositeDemSourceCanvas || null,
     };
 
@@ -414,7 +414,7 @@ window.updateStackedLayers = function updateStackedLayers() {
     LAYER_STACK.forEach(mode => {
         if (!_activeLayers.has(mode)) return;
         if (mode === 'CityOverlay') return;
-        const src    = sourceMap[mode]?.();
+        const src = sourceMap[mode]?.();
         const buffer = _getLayerBuffer(mode);
         if (src && buffer) drawLayerToTarget(buffer, src);
     });
@@ -422,7 +422,7 @@ window.updateStackedLayers = function updateStackedLayers() {
     // Composite all active layers onto the display canvas in render order
     const displayCanvas = document.getElementById('stackViewCanvas');
     if (displayCanvas) {
-        if (displayCanvas.width !== stackWidth)  displayCanvas.width  = stackWidth;
+        if (displayCanvas.width !== stackWidth) displayCanvas.width = stackWidth;
         if (displayCanvas.height !== stackHeight) displayCanvas.height = stackHeight;
         const dCtx = displayCanvas.getContext('2d');
         dCtx.clearRect(0, 0, stackWidth, stackHeight);
@@ -457,11 +457,11 @@ window.updateStackedLayers = function updateStackedLayers() {
  * Rendered in screen space (not subject to CSS zoom/pan transform).
  */
 window.drawLayerGrid = function drawLayerGrid() {
-    const gridCanvas  = document.getElementById('layerGridCanvas');
-    const demCanvas   = _cachedDemCanvas || document.getElementById('layerDemCanvas');
-    const stack       = document.getElementById('layersStack');
-    const yAxis       = document.getElementById('layersYAxis');
-    const xAxis       = document.getElementById('layersXAxis');
+    const gridCanvas = document.getElementById('layerGridCanvas');
+    const demCanvas = _cachedDemCanvas || document.getElementById('layerDemCanvas');
+    const stack = document.getElementById('layersStack');
+    const yAxis = document.getElementById('layersYAxis');
+    const xAxis = document.getElementById('layersXAxis');
     if (!gridCanvas || !stack) return;
 
     const rect = stack.getBoundingClientRect();
@@ -478,7 +478,7 @@ window.drawLayerGrid = function drawLayerGrid() {
     if (newKey === _gridCacheKey) return;
     _gridCacheKey = newKey;
 
-    gridCanvas.width  = gw;
+    gridCanvas.width = gw;
     gridCanvas.height = gh;
 
     const ctx = gridCanvas.getContext('2d');
@@ -489,36 +489,36 @@ window.drawLayerGrid = function drawLayerGrid() {
     const cw = demCanvas.width;
     const ch = demCanvas.height;
 
-    const showGrid  = document.getElementById('showGridlines')?.checked ?? true;
+    const showGrid = document.getElementById('showGridlines')?.checked ?? true;
     const gridColor = 'rgba(255, 255, 255, 0.2)';
     const tickColor = 'rgba(255, 255, 255, 0.5)';
     ctx.lineWidth = 1;
-    ctx.font      = '9px monospace';
+    ctx.font = '9px monospace';
 
     if (_gridPixelMode) {
         // ── Pixel index mode ────────────────────────────────────────────────
         // Axes show DEM pixel indices (0 … width/height) instead of lat/lon.
         // The DEM is letterboxed inside the stack container at demLayout.{x,y,w,h}.
-        const demData    = demDataRef;
-        const demWidth   = demData?.width  || cw;
-        const demHeight  = demData?.height || ch;
-        const layout     = demLayoutRef || { x: 0, y: 0, w: cw, h: ch };
+        const demData = demDataRef;
+        const demWidth = demData?.width || cw;
+        const demHeight = demData?.height || ch;
+        const layout = demLayoutRef || { x: 0, y: 0, w: cw, h: ch };
 
         // pixel p maps to: letterbox origin + fraction-of-image * letterbox size,
         // then scaled/panned by the current zoom transform.
         /** @param {number} px @returns {number} Screen x for pixel column px */
-        function pixToScreenX(px) { return (layout.x + px / demWidth  * layout.w) * scale + offsetX; }
+        function pixToScreenX(px) { return (layout.x + px / demWidth * layout.w) * scale + offsetX; }
         /** @param {number} py @returns {number} Screen y for pixel row py */
         function pixToScreenY(py) { return (layout.y + py / demHeight * layout.h) * scale + offsetY; }
 
         const targetLines = Math.max(2, Math.round(densityCheck / 2));
-        const xInterval = nicePixelInterval(demWidth,  targetLines);
+        const xInterval = nicePixelInterval(demWidth, targetLines);
         const yInterval = nicePixelInterval(demHeight, targetLines);
 
         // Vertical grid lines (pixel columns) — pre-compute visible pixel range
         const xFrag = xAxis ? document.createDocumentFragment() : null;
         const visPxStart = Math.max(0, Math.floor(((-2 - offsetX) / scale - layout.x) / layout.w * demWidth / xInterval) * xInterval);
-        const visPxEnd   = Math.min(demWidth, Math.ceil(((gw + 2 - offsetX) / scale - layout.x) / layout.w * demWidth));
+        const visPxEnd = Math.min(demWidth, Math.ceil(((gw + 2 - offsetX) / scale - layout.x) / layout.w * demWidth));
         for (let px = visPxStart; px <= visPxEnd; px += xInterval) {
             const x = pixToScreenX(px);
             if (x < -2 || x > gw + 2) continue;
@@ -527,7 +527,7 @@ window.drawLayerGrid = function drawLayerGrid() {
                 ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, gh); ctx.stroke();
             }
             ctx.strokeStyle = tickColor;
-            ctx.beginPath(); ctx.moveTo(x, 0);  ctx.lineTo(x, 6);      ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 6); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(x, gh); ctx.lineTo(x, gh - 6); ctx.stroke();
             if (xFrag) {
                 const span = document.createElement('span');
@@ -542,7 +542,7 @@ window.drawLayerGrid = function drawLayerGrid() {
         // Horizontal grid lines (pixel rows) — pre-compute visible pixel range
         const yFrag = yAxis ? document.createDocumentFragment() : null;
         const visPyStart = Math.max(0, Math.floor(((-2 - offsetY) / scale - layout.y) / layout.h * demHeight / yInterval) * yInterval);
-        const visPyEnd   = Math.min(demHeight, Math.ceil(((gh + 2 - offsetY) / scale - layout.y) / layout.h * demHeight));
+        const visPyEnd = Math.min(demHeight, Math.ceil(((gh + 2 - offsetY) / scale - layout.y) / layout.h * demHeight));
         for (let py = visPyStart; py <= visPyEnd; py += yInterval) {
             const y = pixToScreenY(py);
             if (y < -2 || y > gh + 2) continue;
@@ -551,7 +551,7 @@ window.drawLayerGrid = function drawLayerGrid() {
                 ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(gw, y); ctx.stroke();
             }
             ctx.strokeStyle = tickColor;
-            ctx.beginPath(); ctx.moveTo(0,  y); ctx.lineTo(6,      y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(6, y); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(gw, y); ctx.lineTo(gw - 6, y); ctx.stroke();
             if (yFrag) {
                 const span = document.createElement('span');
@@ -565,7 +565,7 @@ window.drawLayerGrid = function drawLayerGrid() {
 
     } else {
         // ── Lat/lon coordinate mode (default) ───────────────────────────────
-        const lonRange = bbox.east  - bbox.west;
+        const lonRange = bbox.east - bbox.west;
         const latRange = bbox.north - bbox.south;
 
         // Projection-aware coordinate transforms
@@ -618,10 +618,10 @@ window.drawLayerGrid = function drawLayerGrid() {
 
         // Longitude (vertical) grid lines — batch label insertions via DocumentFragment
         const xFrag = xAxis ? document.createDocumentFragment() : null;
-        const visLonWest = bbox.west  + (-2 - offsetX) / (cw * scale) * lonRange;
-        const visLonEast = bbox.west  + (gw + 2 - offsetX) / (cw * scale) * lonRange;
+        const visLonWest = bbox.west + (-2 - offsetX) / (cw * scale) * lonRange;
+        const visLonEast = bbox.west + (gw + 2 - offsetX) / (cw * scale) * lonRange;
         const lonStart = Math.ceil((Math.max(bbox.west, visLonWest) - 1e-9) / lonInterval) * lonInterval;
-        const lonEnd   = Math.min(bbox.east, visLonEast) + 1e-9;
+        const lonEnd = Math.min(bbox.east, visLonEast) + 1e-9;
         for (let lon = lonStart; lon <= lonEnd; lon = Math.round((lon + lonInterval) * 1e8) / 1e8) {
             if (projection === 'sinusoidal') {
                 // Sinusoidal: vertical gridlines are curves — draw as polyline
@@ -640,7 +640,7 @@ window.drawLayerGrid = function drawLayerGrid() {
                 // Tick + label at midpoint latitude
                 const xMid = lonToX(lon, midLat);
                 ctx.strokeStyle = tickColor;
-                ctx.beginPath(); ctx.moveTo(xMid, 0);  ctx.lineTo(xMid, 6);      ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(xMid, 0); ctx.lineTo(xMid, 6); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(xMid, gh); ctx.lineTo(xMid, gh - 6); ctx.stroke();
                 if (xFrag) {
                     const span = document.createElement('span');
@@ -658,7 +658,7 @@ window.drawLayerGrid = function drawLayerGrid() {
                     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, gh); ctx.stroke();
                 }
                 ctx.strokeStyle = tickColor;
-                ctx.beginPath(); ctx.moveTo(x, 0);  ctx.lineTo(x, 6);      ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 6); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(x, gh); ctx.lineTo(x, gh - 6); ctx.stroke();
                 if (xFrag) {
                     const span = document.createElement('span');
@@ -676,7 +676,7 @@ window.drawLayerGrid = function drawLayerGrid() {
         const visLatNorth = bbox.north - (-2 - offsetY) / (ch * scale) * latRange;
         const visLatSouth = bbox.north - (gh + 2 - offsetY) / (ch * scale) * latRange;
         const latStart = Math.ceil((Math.max(bbox.south, visLatSouth) - 1e-9) / latInterval) * latInterval;
-        const latEnd   = Math.min(bbox.north, visLatNorth) + 1e-9;
+        const latEnd = Math.min(bbox.north, visLatNorth) + 1e-9;
         for (let lat = latStart; lat <= latEnd; lat = Math.round((lat + latInterval) * 1e8) / 1e8) {
             const y = latToY(lat);
             if (y < -2 || y > gh + 2) continue;
@@ -685,7 +685,7 @@ window.drawLayerGrid = function drawLayerGrid() {
                 ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(gw, y); ctx.stroke();
             }
             ctx.strokeStyle = tickColor;
-            ctx.beginPath(); ctx.moveTo(0,  y); ctx.lineTo(6,      y); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(6, y); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(gw, y); ctx.lineTo(gw - 6, y); ctx.stroke();
             if (yFrag) {
                 const span = document.createElement('span');
@@ -753,7 +753,7 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
     let isPanning = false;
     let startX, startY;
 
-    stack.style.cursor   = 'grab';
+    stack.style.cursor = 'grab';
     stack.style.overflow = 'hidden';
 
     // Tooltip for pixel elevation / coordinates
@@ -788,20 +788,20 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
             return;
         }
 
-        const rect      = stack.getBoundingClientRect();
+        const rect = stack.getBoundingClientRect();
         const demCanvas = _cachedDemCanvas;
         const { lastDemData, demLayout, currentDemBbox } = window.appState || {};
         if (!demCanvas || !lastDemData) { stackTooltip.style.display = 'none'; return; }
 
-        const mouseX  = e.clientX - rect.left;
-        const mouseY  = e.clientY - rect.top;
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
         // Undo zoom/pan to get position in unscaled container space
         const canvasX = (mouseX - stackZoom.offsetX) / stackZoom.scale;
         const canvasY = (mouseY - stackZoom.offsetY) / stackZoom.scale;
         // Normalize relative to the letterboxed DEM rect, not the full container
-        const layout  = demLayout || { x: 0, y: 0, w: demCanvas.width, h: demCanvas.height };
-        const normX   = (canvasX - layout.x) / layout.w;
-        const normY   = (canvasY - layout.y) / layout.h;
+        const layout = demLayout || { x: 0, y: 0, w: demCanvas.width, h: demCanvas.height };
+        const normX = (canvasX - layout.x) / layout.w;
+        const normY = (canvasY - layout.y) / layout.h;
 
         if (normX < 0 || normX > 1 || normY < 0 || normY > 1) {
             stackTooltip.style.display = 'none';
@@ -809,9 +809,9 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
         }
 
         const { width, height, values } = lastDemData;
-        const pixelX = Math.min(Math.floor(normX * width),  width  - 1);
+        const pixelX = Math.min(Math.floor(normX * width), width - 1);
         const pixelY = Math.min(Math.floor(normY * height), height - 1);
-        const idx    = pixelY * width + pixelX;
+        const idx = pixelY * width + pixelX;
 
         if (idx >= 0 && idx < values.length) {
             const elevation = values[idx];
@@ -819,7 +819,7 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
             const bbox = currentDemBbox;
             if (bbox) {
                 lat = (bbox.north - normY * (bbox.north - bbox.south)).toFixed(4);
-                lon = (bbox.west  + normX * (bbox.east  - bbox.west )).toFixed(4);
+                lon = (bbox.west + normX * (bbox.east - bbox.west)).toFixed(4);
             }
             stackTooltip.innerHTML = `
                 <b>Elevation:</b> ${elevation.toFixed(1)}m<br>
@@ -827,8 +827,8 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
                 ${lat ? `<b>Lat:</b> ${lat}° <b>Lon:</b> ${lon}°` : ''}
             `;
             stackTooltip.style.display = 'block';
-            stackTooltip.style.left    = (e.clientX + 15) + 'px';
-            stackTooltip.style.top     = (e.clientY + 15) + 'px';
+            stackTooltip.style.left = (e.clientX + 15) + 'px';
+            stackTooltip.style.top = (e.clientY + 15) + 'px';
         } else {
             stackTooltip.style.display = 'none';
         }
@@ -866,15 +866,15 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
 
     stack.addEventListener('wheel', (e) => {
         e.preventDefault();
-        const rect       = stack.getBoundingClientRect();
-        const mouseX     = e.clientX - rect.left;
-        const mouseY     = e.clientY - rect.top;
+        const rect = stack.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
         const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-        const newScale   = Math.max(0.5, Math.min(5, stackZoom.scale * zoomFactor));
+        const newScale = Math.max(0.5, Math.min(5, stackZoom.scale * zoomFactor));
         const scaleChange = newScale / stackZoom.scale;
         stackZoom.offsetX = mouseX - (mouseX - stackZoom.offsetX) * scaleChange;
         stackZoom.offsetY = mouseY - (mouseY - stackZoom.offsetY) * scaleChange;
-        stackZoom.scale   = newScale;
+        stackZoom.scale = newScale;
         applyStackedTransform();
     });
 };

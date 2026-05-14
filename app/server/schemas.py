@@ -418,9 +418,11 @@ class HydrologyMergeRequest(BaseModel):
     provided instead.
     """
     dem_values: Optional[List[float]] = None
-    dem_dimensions: Optional[Annotated[List[int], Field(min_length=2, max_length=2)]] = None
+    dem_dimensions: Optional[Annotated[List[int],
+                                       Field(min_length=2, max_length=2)]] = None
     river_grid_values: Optional[List[float]] = None
-    river_grid_dimensions: Optional[Annotated[List[int], Field(min_length=2, max_length=2)]] = None
+    river_grid_dimensions: Optional[Annotated[List[int], Field(
+        min_length=2, max_length=2)]] = None
     # Settings-only mode fields
     bbox: Optional[Dict[str, float]] = None
     dem: Optional[Dict[str, Any]] = None

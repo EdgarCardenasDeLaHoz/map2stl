@@ -7,6 +7,8 @@ combination creates a separate cache entry. After refactoring, all combinations
 should share a single cache entry for the same raw bbox data.
 """
 
+import numpy as np
+import requests
 import os
 import sys
 import json
@@ -17,9 +19,6 @@ from pathlib import Path
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import requests
-import numpy as np
 
 
 BASE_URL = "http://127.0.0.1:9000"
@@ -59,7 +58,8 @@ def clear_cache():
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
             print("✓ Cache cleared")
         except PermissionError:
-            print("⚠ Cache directory in use (server has lock), attempting to clear individual files...")
+            print(
+                "⚠ Cache directory in use (server has lock), attempting to clear individual files...")
             # Remove files individually, skip locked directories
             try:
                 for item in CACHE_DIR.rglob("*"):
@@ -88,22 +88,24 @@ def fetch_dem(combo: dict) -> dict:
         **TEST_BBOX,
         **{k: v for k, v in combo.items() if k != "name"},
     }
-    print(f"\n  Fetching: projection={params['projection']}, clip_valid_region={params['clip_valid_region']}")
-    
+    print(
+        f"\n  Fetching: projection={params['projection']}, clip_valid_region={params['clip_valid_region']}")
+
     start = time.time()
     resp = requests.get(f"{BASE_URL}/api/terrain/dem", params=params)
     elapsed = time.time() - start
-    
+
     if resp.status_code != 200:
         print(f"    ✗ HTTP {resp.status_code}")
         return None
-    
+
     data = resp.json()
     dims = data.get("dimensions")
     min_elev = data.get("min_elevation")
     max_elev = data.get("max_elevation")
-    
-    print(f"    ✓ OK ({elapsed:.2f}s) dims={dims} elev=[{min_elev}, {max_elev}]")
+
+    print(
+        f"    ✓ OK ({elapsed:.2f}s) dims={dims} elev=[{min_elev}, {max_elev}]")
     return {
         "combo": combo,
         "response": data,
@@ -118,13 +120,13 @@ def main():
     print("=" * 80)
     print("CACHE SEMANTICS TEST")
     print("=" * 80)
-    
+
     # Verify server is running
     print("\n[1] Checking server connectivity...")
     try:
-        resp = requests.get(f"{BASE_URL}/api/terrain/dem", 
-                           params={**TEST_BBOX, "projection": "none"}, 
-                           timeout=5)
+        resp = requests.get(f"{BASE_URL}/api/terrain/dem",
+                            params={**TEST_BBOX, "projection": "none"},
+                            timeout=5)
         if resp.status_code == 200:
             print("✓ Server is running")
         else:
@@ -134,12 +136,12 @@ def main():
         print(f"✗ Cannot connect to {BASE_URL}: {e}")
         print("  Make sure the server is running on port 9000")
         return
-    
+
     # Clear cache
     print("\n[2] Clearing cache...")
     clear_cache()
     show_cache_state("Initial cache state:")
-    
+
     # Fetch with different projection/clip combos
     print("\n[3] Fetching DEM with different projection/clip combinations...")
     results = []
@@ -147,48 +149,52 @@ def main():
         result = fetch_dem(combo)
         if result:
             results.append(result)
-    
+
     # Show cache state after fetches
     cache_after = show_cache_state("\nCache state after fetches:")
-    
+
     # Analyze results
     print("\n[4] Analysis:")
     print(f"  Requests made: {len(results)}")
     print(f"  Cache files created: {len(cache_after)}")
-    
+
     print("\n  Dimensions by combo:")
     for r in results:
         print(f"    {r['combo']['name']:10s}: {r['dimensions']}")
-    
+
     # Check for dimension differences
     dims_set = set(str(r['dimensions']) for r in results)
     if len(dims_set) > 1:
-        print(f"\n  ✓ Dimensions vary ({len(dims_set)} unique) - projection/clip is being applied")
+        print(
+            f"\n  ✓ Dimensions vary ({len(dims_set)} unique) - projection/clip is being applied")
     else:
         print(f"\n  ✗ All dimensions identical - projection/clip NOT being applied!")
-    
+
     # Key insight
     print("\n[5] Key Observations:")
-    
+
     if len(cache_after) > 1:
-        print(f"  ⚠ BUGGY: Created {len(cache_after)} cache files for same bbox")
+        print(
+            f"  ⚠ BUGGY: Created {len(cache_after)} cache files for same bbox")
         print("    Expected: 1 cache file (all requests should share raw data)")
-        print("    Current behavior: Each projection/clip combo creates separate cache entry")
+        print(
+            "    Current behavior: Each projection/clip combo creates separate cache entry")
         print("\n    This is inefficient and multiplies cache size unnecessarily.")
     else:
         print(f"  ✓ CORRECT: All {len(results)} requests used 1 cache file")
         print("    Projection/clipping applied post-cache (correct architecture)")
-    
+
     print("\n  Request latencies:")
     for r in results:
         print(f"    {r['combo']['name']:10s}: {r['elapsed']*1000:6.1f} ms")
-    
+
     first_latency = results[0]['elapsed'] if results else 0
     others_latency = [r['elapsed'] for r in results[1:]]
     if others_latency:
-        speedup = first_latency / np.mean(others_latency) if np.mean(others_latency) > 0 else 1
+        speedup = first_latency / \
+            np.mean(others_latency) if np.mean(others_latency) > 0 else 1
         print(f"    (Cache hit speedup vs first request: {speedup:.1f}x)")
-    
+
     # Summary
     print("\n" + "=" * 80)
     if len(cache_after) > 1:

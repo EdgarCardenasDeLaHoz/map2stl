@@ -1,6 +1,21 @@
 # ── sys.path bootstrap ────────────────────────────────────────────────────────
 # Ensure strm2stl/ (config, routers, core) and Code/ (numpy2stl peer) are
 # importable whether this file is run as a script or imported as a module.
+from app.server.schemas import (
+    BoundingBox,
+    RegionParameters, RegionCreate, RegionResponse, RegionsListResponse,
+    RegionSettings, CityRequest,
+    DEMRequest, DEMResponse, RawDEMResponse,
+    WaterMaskRequest, WaterMaskResponse,
+    SatelliteRequest, SatelliteResponse,
+    ExportRequest, ExportResponse,
+    CacheDirInfo, CacheStatusResponse, CacheClearResponse,
+    ProjectionInfo, ProjectionsResponse,
+    ColormapInfo, ColormapsResponse,
+    DatasetInfo, DatasetsResponse,
+    Region,
+    ProcessingSpec, MergeLayerSpec, MergeRequest,
+)
 from app.server.routers.height import router as _height_router
 from app.server.routers.composite import router as _composite_router
 from app.server.routers.settings import router as _settings_router
@@ -291,23 +306,6 @@ app.include_router(_composite_router)
 app.include_router(_height_router)
 logger.info(
     "Routers loaded: regions, terrain, cities, export, cache, settings, composite, height")
-
-
-from app.server.schemas import (
-    BoundingBox,
-    RegionParameters, RegionCreate, RegionResponse, RegionsListResponse,
-    RegionSettings, CityRequest,
-    DEMRequest, DEMResponse, RawDEMResponse,
-    WaterMaskRequest, WaterMaskResponse,
-    SatelliteRequest, SatelliteResponse,
-    ExportRequest, ExportResponse,
-    CacheDirInfo, CacheStatusResponse, CacheClearResponse,
-    ProjectionInfo, ProjectionsResponse,
-    ColormapInfo, ColormapsResponse,
-    DatasetInfo, DatasetsResponse,
-    Region,
-    ProcessingSpec, MergeLayerSpec, MergeRequest,
-)
 
 
 @app.get("/", response_class=HTMLResponse)

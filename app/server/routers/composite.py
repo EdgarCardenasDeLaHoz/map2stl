@@ -241,7 +241,8 @@ async def get_city_raster(req: CompositeCityRasterRequest):
     with all other raster layers (DEM, water, hydrology, satellite, city).
     """
     def _json_safe_flat(arr: np.ndarray) -> list[float]:
-        safe = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+        safe = np.nan_to_num(arr, nan=0.0, posinf=0.0,
+                             neginf=0.0).astype(np.float32)
         return safe.ravel().tolist()
 
     clip_valid_region = req.clip_valid_region if req.clip_valid_region is not None else req.clip_nans
@@ -321,7 +322,7 @@ async def get_city_raster(req: CompositeCityRasterRequest):
 # ---------------------------------------------------------------------------
 
 def _composite_cache_key(north: float, south: float, east: float, west: float,
-                          dim: int, layers: list) -> str:
+                         dim: int, layers: list) -> str:
     """Stable hash of (bbox, dim, layer specs). Used as cache key."""
     from app.server.core.cache import make_cache_key
     # Render each spec to a JSON-serializable form for stable hashing
@@ -375,9 +376,12 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list) -> "np.ndarray":
         for spec in layers:
             source = getattr(spec, "source", None) or spec["source"]
             spec_dim = getattr(spec, "dim", None) or spec["dim"]
-            blend_mode = getattr(spec, "blend_mode", None) or spec.get("blend_mode", "blend")
-            weight = getattr(spec, "weight", None) if hasattr(spec, "weight") else spec.get("weight", 1.0)
-            processing = getattr(spec, "processing", None) or spec.get("processing")
+            blend_mode = getattr(spec, "blend_mode", None) or spec.get(
+                "blend_mode", "blend")
+            weight = getattr(spec, "weight", None) if hasattr(
+                spec, "weight") else spec.get("weight", 1.0)
+            processing = getattr(spec, "processing",
+                                 None) or spec.get("processing")
 
             raw = fetch_layer_data(source, north, south, east, west, spec_dim)
             processed = apply_layer_processing(raw, processing)
@@ -499,13 +503,15 @@ async def merge_hydrology(req: HydrologyMergeRequest):
 
     try:
         dem_arr = np.array(dem_values, dtype=np.float32).reshape(dem_h, dem_w)
-        river_arr = np.array(river_values, dtype=np.float32).reshape(river_h, river_w)
+        river_arr = np.array(
+            river_values, dtype=np.float32).reshape(river_h, river_w)
     except Exception as e:
         return JSONResponse(content={"error": f"Failed to reshape arrays: {e}"}, status_code=400)
 
     if dem_arr.shape != river_arr.shape:
         return JSONResponse(
-            content={"error": f"DEM shape {dem_arr.shape} != river shape {river_arr.shape}"},
+            content={
+                "error": f"DEM shape {dem_arr.shape} != river shape {river_arr.shape}"},
             status_code=400)
 
     if TEST_MODE:

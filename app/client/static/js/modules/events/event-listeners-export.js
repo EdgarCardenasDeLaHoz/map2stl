@@ -77,7 +77,7 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
 
     document.getElementById('exportCityBtn')?.addEventListener('click', async () => {
         const buildings = window.appState?.osmCityData?.buildings;
-        const demData   = window.appState.lastDemData;
+        const demData = window.appState.lastDemData;
         if (!buildings?.features?.length) {
             window.showToast?.('Load city data first', 'warning'); return;
         }
@@ -94,16 +94,16 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
             const payload = {
                 ...ds,
                 model_height_mm: parseFloat(document.getElementById('exportModelHeight')?.value) || 20,
-                base_mm:         parseFloat(document.getElementById('exportBaseHeight')?.value)  || 5,
+                base_mm: parseFloat(document.getElementById('exportBaseHeight')?.value) || 5,
                 building_z_scale: parseFloat(document.getElementById('cityBuildingScale')?.value) || 0.5,
                 simplify_terrain: document.getElementById('citySimplifyMesh')?.checked ?? true,
                 name: (window.appState.selectedRegion?.name || 'city').replace(/[^a-z0-9_-]/gi, '_'),
             };
             const { data: blob, error: exportErr } = await window.api.cities.export3mf(payload);
             if (exportErr) throw new Error(exportErr);
-            const url  = URL.createObjectURL(blob);
-            const a    = document.createElement('a');
-            a.href     = url;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
             a.download = payload.name + '_city.3mf';
             a.click();
             URL.revokeObjectURL(url);

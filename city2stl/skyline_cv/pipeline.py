@@ -1,15 +1,58 @@
-"""Skyline-based building height estimation — core CV and math primitives.
+"""Skyline-based building-height estimation — pure CV / geometry primitives.
 
-Public surface used by region_pdf.py:
-  Dataclasses  : Viewpoint, BuildingRecord, CapturedView, RegisteredBuildingEstimate
-  Functions    : detect_skyline_contour, detect_building_silhouettes,
-                 match_segments_to_buildings, register_view_to_osm,
-                 estimate_heights_from_registration, aggregate_building_heights
-  Helpers      : _building_height_from_tags, _polygon_area_m2,
-                 _load_env_file_if_present
+This module is the "math layer" of skyline_cv. It is intentionally free of
+HTTP I/O, matplotlib, and Street View concerns so its functions can be
+unit-tested without API keys. The orchestration that ties these primitives
+to a real region run lives in ``region_pdf.py``.
+
+Public surface (in dependency order):
+
+  Dataclasses
+    Viewpoint                       — camera pose (lat/lon/heading/pitch/fov)
+    BuildingRecord                  — OSM building + tagged/derived height proxy
+    CapturedView                    — RGB image + Viewpoint
+    RegisteredBuildingEstimate      — per-view per-building height estimate
+
+  SegFormer integration
+    _neural_sky_and_building_masks  — anchored-LRU-cached forward pass
+    _neural_water_mask              — water-class accessor (same cache)
+
+  Skyline detection
+    detect_skyline_contour          — top-of-non-sky row per column
+    detect_building_silhouettes     — contour-peak silhouettes (per-tower)
+    detect_buildings_from_mask      — connected-component silhouettes from mask
+    compute_building_band           — vertical band where buildings exist
+    _merge_silhouette_sources       — IoU-based de-dup of two silhouette lists
+
+  OSM projection + registration
+    _project_building               — single-building rectilinear projection
+    _project_all_buildings_vectorized — batched numpy projection (the perf win)
+    _projected_building_x_ranges    — per-building (x_min, x_max) for IoU scoring
+    register_view_to_osm            — find pano-to-geo heading offset per view
+    _score_offset_semantic_iou      — the offset objective
+                                       (per-building IoU − water − miss penalty)
+
+  Matching + culling
+    _cull_occluded_projections      — keep only the closest-per-bin building
+    match_segments_to_buildings     — interval-IoU + width-ratio scorer
+
+  Pano helpers
+    stitch_pano_views               — stitch RGB strip from spin views
+    stitch_pano_masks               — stitch per-view masks (faster, seam-free)
+    project_buildings_to_pano       — bearing-to-column projection for pano
+
+  Height extraction
+    estimate_heights_from_registration — per-view pinhole-y → height_m
+    aggregate_building_heights      — per-building median + outlier downweighting
+
+See STATUS.md for what currently works and what doesn't. Hard dependency on
+SegFormer-b0 (ADE20K) via the `transformers` library — the registration
+objective and per-building mask sampling both rely on it; no fallback path
+is intended to be functional without the model.
 """
 
 from __future__ import annotations
+from collections import OrderedDict as _OrderedDict
 
 import math
 import os
@@ -44,7 +87,6 @@ _segformer_model = None
 # detect_skyline_contour, detect_building_silhouettes, register_view_to_osm,
 # and the joint optimizer all want the same image's masks. Capacity sized
 # for one seed's spin views (12) + a few headroom slots.
-from collections import OrderedDict as _OrderedDict
 _NEURAL_CACHE_CAPACITY = 16
 _neural_cache: "_OrderedDict[int, dict]" = _OrderedDict()
 
@@ -314,8 +356,10 @@ def _ensure_segformer() -> bool:
             SegformerForSemanticSegmentation,
             SegformerImageProcessor,
         )
-        _segformer_processor = SegformerImageProcessor.from_pretrained(_SEGFORMER_MODEL_ID)
-        _segformer_model = SegformerForSemanticSegmentation.from_pretrained(_SEGFORMER_MODEL_ID)
+        _segformer_processor = SegformerImageProcessor.from_pretrained(
+            _SEGFORMER_MODEL_ID)
+        _segformer_model = SegformerForSemanticSegmentation.from_pretrained(
+            _SEGFORMER_MODEL_ID)
         _segformer_model.eval()  # type: ignore[union-attr]
         _SEGFORMER_OK = True
     except Exception:
@@ -379,7 +423,8 @@ def _neural_sky_and_building_masks(
 
         h, w = image_rgb.shape[:2]
         pil = PILImage.fromarray(image_rgb)
-        inputs = _segformer_processor(images=pil, return_tensors="pt")  # type: ignore[misc]
+        inputs = _segformer_processor(
+            images=pil, return_tensors="pt")  # type: ignore[misc]
         with torch.no_grad():
             outputs = _segformer_model(**inputs)  # type: ignore[misc]
         # logits: (1, num_classes, H/4, W/4) → upsample to original resolution
@@ -641,99 +686,11 @@ def stitch_pano_views(
     return stitched, headings_per_col
 
 
-def segformer_sliding_window(
-    image_rgb: np.ndarray,
-    window: int = 512,
-    stride: int = 256,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    """Run SegFormer over a wide image using overlapping windows.
-
-    Returns ``(sky_mask, building_mask, water_mask)`` boolean (H, W) arrays,
-    or None if SegFormer is unavailable. Window logits are averaged in
-    overlapping regions for smooth class boundaries at seams.
-
-    This is the substrate for processing stitched panoramic strips that
-    don't fit in a single SegFormer-b0 forward pass.
-    """
-    if not _ensure_segformer():
-        return None
-    try:
-        import torch  # noqa: PLC0415
-        import torch.nn.functional as F  # noqa: PLC0415
-        from PIL import Image as PILImage  # noqa: PLC0415
-
-        h, w = image_rgb.shape[:2]
-        if w <= window:
-            # Just one window — defer to the single-image path for parity.
-            sky, building = _neural_sky_and_building_masks(image_rgb)
-            water = _neural_water_mask(image_rgb)
-            if sky is None or building is None or water is None:
-                return None
-            return sky, building, water
-
-        # Determine window start positions covering [0, w].
-        starts = list(range(0, max(1, w - window + 1), stride))
-        if starts[-1] + window < w:
-            starts.append(w - window)
-
-        # Run one window to discover num_classes.
-        first_crop = image_rgb[:, : window, :]
-        pil = PILImage.fromarray(first_crop)
-        inputs = _segformer_processor(images=pil, return_tensors="pt")  # type: ignore[misc]
-        with torch.no_grad():
-            outputs = _segformer_model(**inputs)  # type: ignore[misc]
-        n_classes = int(outputs.logits.shape[1])
-
-        # Accumulator at native image resolution.
-        accum = np.zeros((n_classes, h, w), dtype=np.float32)
-        counts = np.zeros((h, w), dtype=np.int32)
-        # Triangular column weight to taper window edges (reduces seam
-        # visibility in the merged label map).
-        col_weights = np.minimum(
-            np.arange(1, window + 1, dtype=np.float32),
-            np.arange(window, 0, -1, dtype=np.float32),
-        )
-        col_weights = col_weights / float(col_weights.max())
-
-        for x0 in starts:
-            x1 = min(x0 + window, w)
-            crop = image_rgb[:, x0:x1, :]
-            if crop.shape[1] < window:
-                pad = np.zeros(
-                    (h, window - crop.shape[1], 3), dtype=image_rgb.dtype)
-                crop_in = np.concatenate([crop, pad], axis=1)
-            else:
-                crop_in = crop
-            pil = PILImage.fromarray(crop_in)
-            inputs = _segformer_processor(images=pil, return_tensors="pt")  # type: ignore[misc]
-            with torch.no_grad():
-                outputs = _segformer_model(**inputs)  # type: ignore[misc]
-            upsampled = F.interpolate(
-                outputs.logits, size=(h, window),
-                mode="bilinear", align_corners=False,
-            )
-            logits_np = upsampled.squeeze(0).numpy()  # (C, h, window)
-            actual_w = x1 - x0
-            weight_slice = col_weights[:actual_w][None, None, :]
-            accum[:, :, x0:x1] += logits_np[:, :, :actual_w] * weight_slice
-            counts[:, x0:x1] += int(weight_slice.shape[2] > 0)
-            # counts tracks number of windows contributing — used only for
-            # tracking; column weight already handles intensity scaling.
-
-        # Argmax over class dimension to produce label map.
-        label_map = accum.argmax(axis=0)
-        sky_mask = label_map == _ADE20K_SKY
-        building_mask = label_map == _ADE20K_BUILDING
-        water_mask = np.isin(label_map, _ADE20K_WATER_CLASSES)
-        return sky_mask, building_mask, water_mask
-    except Exception:
-        return None
-
-
 def _make_sky_mask_from_bool(sky_bool: np.ndarray, h: int, w: int) -> np.ndarray:
     """Convert a boolean sky mask to uint8, keeping only pixels connected to top border."""
     raw = (sky_bool.astype(np.uint8)) * 255
-    n_labels, labels, _stats, _centroids = cv2.connectedComponentsWithStats(raw, connectivity=8)
+    n_labels, labels, _stats, _centroids = cv2.connectedComponentsWithStats(
+        raw, connectivity=8)
     top_labels = {int(v) for v in labels[0, :] if int(v) != 0}
     connected = np.zeros((h, w), dtype=np.uint8)
     for lab in top_labels:
@@ -744,45 +701,22 @@ def _make_sky_mask_from_bool(sky_bool: np.ndarray, h: int, w: int) -> np.ndarray
 def detect_skyline_contour(image_rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Return a top-down skyline contour and a binary sky mask.
 
-    Attempts SegFormer-b0 neural segmentation first; falls back to HSV
-    colour-threshold heuristics when the model is unavailable.
+    SegFormer-b0 (ADE20K) sky segmentation is a hard dependency. The
+    downstream mIoU registration objective relies on the building/water
+    masks from the same model, so a colour-threshold fallback wouldn't be
+    enough to keep the pipeline functional.
     """
     h, w = image_rgb.shape[:2]
 
-    # ── Neural sky segmentation (preferred) ──────────────────────────────────
     sky_neural, _ = _neural_sky_and_building_masks(image_rgb)
-    if sky_neural is not None:
-        sky_mask = _make_sky_mask_from_bool(sky_neural, h, w)
-    else:
-        # ── Colour-threshold fallback ─────────────────────────────────────────
-        hsv = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2HSV)
-        rgb = image_rgb.astype(np.float32)
-        r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
+    if sky_neural is None:
+        raise RuntimeError(
+            "SegFormer-b0 unavailable — required for sky/building segmentation. "
+            "Ensure `transformers` + `torch` are installed and the model "
+            "weights can be downloaded from HuggingFace.")
+    sky_mask = _make_sky_mask_from_bool(sky_neural, h, w)
 
-        sample_rows = max(24, h // 6)
-        top = hsv[:sample_rows]
-        v_thr = max(130, int(np.percentile(top[:, :, 2], 55)))
-        s_thr = min(170, int(np.percentile(top[:, :, 1], 70) + 25))
-
-        bright_low_sat = (hsv[:, :, 2] >= v_thr) & (hsv[:, :, 1] <= s_thr)
-        blue_dominant = (b >= g * 0.96) & (b >= r * 1.03) & (hsv[:, :, 2] >= 70)
-        coarse_sky = (bright_low_sat | blue_dominant).astype(np.uint8) * 255
-
-        kernel = np.ones((3, 3), np.uint8)
-        coarse_sky = cv2.morphologyEx(coarse_sky, cv2.MORPH_OPEN, kernel)
-        coarse_sky = cv2.morphologyEx(coarse_sky, cv2.MORPH_CLOSE, kernel)
-
-        n_labels, labels, _stats, _centroids = cv2.connectedComponentsWithStats(
-            coarse_sky, connectivity=8)
-        top_labels = {int(v) for v in labels[0, :] if int(v) != 0}
-        sky_mask = np.zeros_like(coarse_sky, dtype=np.uint8)
-        for lab in top_labels:
-            sky_mask[labels == lab] = 255
-
-        if not np.any(sky_mask):
-            sky_mask = coarse_sky.copy()
-
-    # ── Contour extraction (shared path) ─────────────────────────────────────
+    # ── Contour extraction ───────────────────────────────────────────────────
     contour = np.full(w, np.nan, dtype=np.float32)
     for x in range(w):
         column = sky_mask[:, x] > 0
@@ -793,7 +727,8 @@ def detect_skyline_contour(image_rgb: np.ndarray) -> tuple[np.ndarray, np.ndarra
     # Reject implausible boundaries too close to image top/bottom.
     y_min = float(h * 0.06)
     y_max = float(h * 0.90)
-    contour = np.where((contour >= y_min) & (contour <= y_max), contour, np.nan)
+    contour = np.where((contour >= y_min) & (
+        contour <= y_max), contour, np.nan)
 
     if np.all(np.isnan(contour)):
         contour[:] = float(h * 0.5)
@@ -810,7 +745,8 @@ def detect_skyline_contour(image_rgb: np.ndarray) -> tuple[np.ndarray, np.ndarra
         else:
             fill = np.nanmedian(contour)
             contour = np.where(np.isnan(contour), fill, contour)
-        contour = median_filter(contour, size=9, mode="nearest").astype(np.float32)
+        contour = median_filter(
+            contour, size=9, mode="nearest").astype(np.float32)
 
     return contour, sky_mask > 0
 
@@ -826,22 +762,18 @@ def _segment_has_structure(
 ) -> bool:
     """Return True if the image region plausibly contains a building facade.
 
-    When *building_mask* (a boolean (H, W) array from SegFormer) is provided it
-    is used as the primary signal. We test two cuts:
+    Tests two cuts against the SegFormer building mask:
+      1. Bounding-box fraction (≥ 10 % accept). Wide boxes around slim glass
+         towers contain a lot of sky and easily fall below this even though
+         the tower itself is obviously a building, so we also test...
+      2. Peak-column fraction (≥ 25 % accept). A tight ±4 px column around
+         ``peak_x`` restricted to the lower 60 % of the segment captures the
+         facade core where the tower lives.
 
-    1. Bounding-box fraction: ≥ 10 % accept, < 5 % reject when also weak at
-       the peak column. Wide boxes around slim glass towers contain a lot of
-       sky and easily fall below 10 % even though the tower itself is
-       obviously a building.
-    2. Peak-column fraction: a tight ±4 px column at ``peak_x`` (or the box
-       midpoint) restricted to the lower 60 % of the box. This captures the
-       facade core where buildings have ≥ 25 % mask coverage even when the
-       wide bounding box is mostly sky.
-
-    Colour/texture fallback rejects:
-    - Blue-dominant regions (open water, sky bleed)
-    - Regions with predominantly horizontal texture (water surface)
-    - Structureless regions (open sky, flat beach sand)
+    A region passing either cut is kept. A region failing BOTH (bfrac < 5 %
+    AND col_frac < 10 %) is rejected. Ambiguous middle band is accepted —
+    the colour/texture heuristics that previously broke ties were removed
+    because they almost never disagreed with the mask in practice.
     """
     h, w = image.shape[:2]
     y0 = max(0, top_y)
@@ -851,53 +783,25 @@ def _segment_has_structure(
     if y1 <= y0 or x1 <= x0:
         return True  # degenerate region: don't reject
 
-    region = image[y0:y1, x0:x1].astype(np.float32)
-    if region.size < 100:
+    if building_mask is None:
+        # Without a mask we can't make an informed call; accept and let
+        # downstream stages filter. SegFormer is a hard dependency in
+        # production runs, so this branch should never fire.
         return True
 
-    # ── Neural building mask (authoritative when available) ──────────────────
-    if building_mask is not None:
-        bfrac = float(building_mask[y0:y1, x0:x1].mean())
-        # Tight-column probe: ±4 px around the peak, lower 60 % of segment.
-        # This is where a slim glass tower lives even when the bounding box
-        # is wide and full of sky.
-        px = int(peak_x) if peak_x is not None else (x0 + x1) // 2
-        cx0 = max(0, px - 4)
-        cx1 = min(w, px + 5)
-        # Lower 60 % of segment vertically — the building "trunk", not the roof line
-        trunk_top = y0 + (y1 - y0) * 2 // 5
-        col_frac = float(building_mask[trunk_top:y1, cx0:cx1].mean()) if cx1 > cx0 else 0.0
-
-        if bfrac >= 0.10 or col_frac >= 0.25:
-            return True   # clearly a building facade
-        if bfrac < 0.05 and col_frac < 0.10:
-            return False  # no building pixels — water / sky / open ground
-        # ambiguous mid-band: fall through to heuristics
-
-    # ── Colour / texture heuristics ──────────────────────────────────────────
-    r_mean = float(np.mean(region[:, :, 0]))
-    g_mean = float(np.mean(region[:, :, 1]))
-    b_mean = float(np.mean(region[:, :, 2]))
-
-    # Reject: blue-dominant (water / sky)
-    if b_mean > r_mean * 1.15 and b_mean > 100 and b_mean > g_mean * 1.05:
+    bfrac = float(building_mask[y0:y1, x0:x1].mean())
+    px = int(peak_x) if peak_x is not None else (x0 + x1) // 2
+    cx0 = max(0, px - 4)
+    cx1 = min(w, px + 5)
+    trunk_top = y0 + (y1 - y0) * 2 // 5
+    col_frac = (
+        float(building_mask[trunk_top:y1, cx0:cx1].mean())
+        if cx1 > cx0 else 0.0
+    )
+    if bfrac >= 0.10 or col_frac >= 0.25:
+        return True
+    if bfrac < 0.05 and col_frac < 0.10:
         return False
-
-    gray = cv2.cvtColor(region.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
-    sobel_v = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3))  # vertical edges
-    sobel_h = np.abs(cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3))  # horizontal edges
-
-    mean_v = float(np.mean(sobel_v))
-    mean_h = float(np.mean(sobel_h))
-
-    # Reject: water surface (dominated by horizontal ripple texture)
-    if mean_h > mean_v * 2.5 and mean_h > 4.0:
-        return False
-
-    # Reject: no structure at all (featureless sky/sand)
-    if mean_v < 1.5 and mean_h < 1.5:
-        return False
-
     return True
 
 
@@ -929,7 +833,7 @@ def _footprint_roof_y_from_mask(
     x1 = min(w - 1, x_right)
     if x1 < x0:
         return None, 0.0
-    slab = building_mask[:, x0 : x1 + 1].astype(np.uint8)
+    slab = building_mask[:, x0: x1 + 1].astype(np.uint8)
     if slab.size == 0:
         return None, 0.0
     cols = x1 - x0 + 1
@@ -996,50 +900,19 @@ def _estimate_building_base(
     h: int,
     building_mask: "np.ndarray | None" = None,
 ) -> int:
-    """Estimate where the building base meets the ground/water below the rooftop.
+    """Estimate the row where a building's base meets the ground/water.
 
-    Strategy in order of preference:
-    1. **Building mask** (preferred when available): walk the SegFormer mask
-       down from top_y at this column and return the bottom of the building
-       region. This is robust to cloud edges, balcony bands, and reflections
-       that confuse the Sobel-based heuristic.
-    2. Strong horizontal Sobel edge — building/ground color boundary.
-    3. Brightness jump relative to the facade — original heuristic.
-
-    Falls back to 75% frame height if nothing clear is found.
+    Walks the SegFormer building mask down from top_y at peak_x. The Sobel/
+    brightness fallback was removed — it was only invoked when the mask was
+    unavailable, which doesn't happen in practice (SegFormer is a hard
+    dependency on the rest of the pipeline). Falls back to 75% frame height
+    when no building pixels extend at least 10 rows below the rooftop
+    (truncated building, weird mask).
     """
-    # Mask-based path first
     if building_mask is not None:
         mask_base = _building_base_y_from_mask(building_mask, peak_x, top_y)
         if mask_base is not None and mask_base > top_y + 10:
             return min(h - 1, mask_base)
-
-    x0 = max(0, peak_x - 8)
-    x1 = min(image.shape[1], peak_x + 9)
-    strip = image[top_y:, x0:x1]
-
-    if strip.shape[0] < 12:
-        return h - 1
-
-    gray_strip = cv2.cvtColor(strip, cv2.COLOR_RGB2GRAY).astype(np.float32)
-    # Horizontal Sobel captures horizontal edges (building bottom against water/ground)
-    sobel_h = np.abs(cv2.Sobel(gray_strip, cv2.CV_32F, 0, 1, ksize=3))
-    edge_row = sobel_h.mean(axis=1)  # mean edge strength per row
-
-    col_bright = np.mean(strip.astype(np.float32), axis=(1, 2))
-    facade_ref = float(np.mean(col_bright[:10]))
-
-    edge_thr = max(8.0, float(np.mean(edge_row[5:])) + float(np.std(edge_row[5:])) * 1.5)
-
-    for i in range(8, strip.shape[0]):
-        # Strong horizontal edge → likely building bottom
-        if edge_row[i] >= edge_thr:
-            return min(h - 1, top_y + i)
-        # Significant brightness jump → likely open water/sky below
-        if col_bright[i] > facade_ref * 1.25:
-            return min(h - 1, top_y + i)
-
-    # Conservative fallback: clip at 75% of frame height
     return min(h - 1, int(h * 0.75))
 
 
@@ -1112,12 +985,15 @@ def detect_building_silhouettes(
     )
 
     # 2. Vertical Sobel edges in sky-building transition zone
-    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) if image.ndim == 3 else image.astype(np.uint8)
-    sobel_x = np.abs(cv2.Sobel(gray.astype(np.float32), cv2.CV_32F, 1, 0, ksize=3))
+    gray = cv2.cvtColor(
+        image, cv2.COLOR_RGB2GRAY) if image.ndim == 3 else image.astype(np.uint8)
+    sobel_x = np.abs(cv2.Sobel(gray.astype(
+        np.float32), cv2.CV_32F, 1, 0, ksize=3))
     zone_top = max(0, int(global_min) - 15)
     zone_bot = min(h, int(global_median) + 30)
     if zone_bot > zone_top:
-        edge_col = sobel_x[zone_top:zone_bot, :].mean(axis=0).astype(np.float32)
+        edge_col = sobel_x[zone_top:zone_bot, :].mean(
+            axis=0).astype(np.float32)
         edge_smooth = gaussian_filter1d(edge_col, sigma=2.0)
         edge_thr = float(edge_smooth.mean()) + float(edge_smooth.std()) * 0.8
         edge_bounds, _ = find_peaks(edge_smooth, distance=12, height=edge_thr)
@@ -1135,7 +1011,8 @@ def detect_building_silhouettes(
     _, _building_mask = _neural_sky_and_building_masks(image)
     raw: list[dict] = []
     for peak_x in peaks:
-        top_y_raw = float(c[peak_x]) if np.isfinite(c[peak_x]) else float(smooth[peak_x])
+        top_y_raw = float(c[peak_x]) if np.isfinite(
+            c[peak_x]) else float(smooth[peak_x])
 
         if global_median - top_y_raw < min_prominence_px:
             continue
@@ -1270,9 +1147,10 @@ def detect_buildings_from_mask(
         if y_top > 0:
             mask[:y_top, :] = 0
         if y_bot < h - 1:
-            mask[y_bot + 1 :, :] = 0
+            mask[y_bot + 1:, :] = 0
 
-    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        mask, connectivity=8)
     out: list[dict] = []
     for i in range(1, n_labels):
         x = int(stats[i, cv2.CC_STAT_LEFT])
@@ -1281,7 +1159,7 @@ def detect_buildings_from_mask(
         ch = int(stats[i, cv2.CC_STAT_HEIGHT])
         if cw < min_width_px or ch < min_height_px:
             continue
-        component = labels[y : y + ch, x : x + cw] == i
+        component = labels[y: y + ch, x: x + cw] == i
         # Per-column "building height in pixels" — the silhouette of this blob.
         col_counts = component.sum(axis=0).astype(np.float32)
         if col_counts.size == 0:
@@ -1312,10 +1190,12 @@ def detect_buildings_from_mask(
             #      still in the sky, not "between" anything).
             signals: list[np.ndarray] = []
             if contour is not None and contour.size >= x + cw:
-                contour_slice = np.asarray(contour[x : x + cw], dtype=np.float32)
+                contour_slice = np.asarray(
+                    contour[x: x + cw], dtype=np.float32)
                 if np.any(~np.isfinite(contour_slice)):
                     fill = float(np.nanmedian(contour_slice))
-                    contour_slice = np.where(np.isfinite(contour_slice), contour_slice, fill)
+                    contour_slice = np.where(np.isfinite(
+                        contour_slice), contour_slice, fill)
                 signals.append(-contour_slice)
             signals.append(col_counts.astype(np.float32))
 
@@ -1353,7 +1233,7 @@ def detect_buildings_from_mask(
                 a, b = int(peaks[j]), int(peaks[j + 1])
                 if a >= b:
                     continue
-                v = int(np.argmin(col_counts[a : b + 1])) + a
+                v = int(np.argmin(col_counts[a: b + 1])) + a
                 valleys.append(v)
             valleys.append(cw - 1)
             edge_frac = 0.4
@@ -1421,9 +1301,11 @@ def detect_buildings_from_mask(
                 xR_off = k
                 k += 1
             peak_x = x + peak_col_off
-            top_off = int(top_rows[peak_col_off]) if top_rows[peak_col_off] >= 0 else 0
+            top_off = int(top_rows[peak_col_off]
+                          ) if top_rows[peak_col_off] >= 0 else 0
             top_y = int(y + top_off)
-            base_walked = _building_base_y_from_mask(building_mask, peak_x, top_y)
+            base_walked = _building_base_y_from_mask(
+                building_mask, peak_x, top_y)
             if base_walked is not None and base_walked > top_y + 5:
                 base_y = int(min(h - 1, base_walked))
             else:
@@ -1498,7 +1380,8 @@ def match_segments_to_buildings(
         return max(1.0, abs(pR - pL))
 
     def _interval_iou(seg: dict, proj: dict) -> float:
-        sL = float(seg["x_left"]); sR = float(seg["x_right"])
+        sL = float(seg["x_left"])
+        sR = float(seg["x_right"])
         pL = float(proj.get("x_left_px", proj["x_px"] - 10.0))
         pR = float(proj.get("x_right_px", proj["x_px"] + 10.0))
         if pL > pR:
@@ -1613,7 +1496,8 @@ def _cull_occluded_projections(
         if len(items) == 1:
             kept[items[0]["feature_id"]] = items[0]
             continue
-        items_sorted = sorted(items, key=lambda p: float(p.get("forward_m", 1e9)))
+        items_sorted = sorted(
+            items, key=lambda p: float(p.get("forward_m", 1e9)))
         front = items_sorted[0]
         kept[front["feature_id"]] = front
         front_angle = _angle(front)
@@ -1917,7 +1801,8 @@ def _projected_building_x_ranges(
     lateral = dx * cos_t - dy * sin_t
     bearing = np.arctan2(lateral, np.maximum(forward, 1e-3))
     distance = np.hypot(forward, lateral)
-    in_frustum = (forward > 5.0) & (distance <= 4000.0) & (np.abs(bearing) <= half_fov_rad)
+    in_frustum = (forward > 5.0) & (distance <= 4000.0) & (
+        np.abs(bearing) <= half_fov_rad)
     if not np.any(in_frustum):
         return empty
 
@@ -1948,7 +1833,7 @@ def _projected_building_column_mask(
     x_min, x_max = _projected_building_x_ranges(
         buildings, viewpoint, offset_deg, image_width)
     for xL, xR in zip(x_min.tolist(), x_max.tolist()):
-        predicted[xL : xR + 1] = True
+        predicted[xL: xR + 1] = True
     return predicted
 
 
@@ -1996,7 +1881,8 @@ def _score_offset_semantic_iou(
     bmask = np.asarray(building_mask)
     h_img, w = bmask.shape[:2]
 
-    x_min, x_max = _projected_building_x_ranges(buildings, viewpoint, offset_deg, w)
+    x_min, x_max = _projected_building_x_ranges(
+        buildings, viewpoint, offset_deg, w)
     if x_min.size == 0:
         return 0.0
 
@@ -2019,11 +1905,11 @@ def _score_offset_semantic_iou(
         if width <= 0:
             continue
         pred_cols += width
-        seg_b = is_building_col[xL : xR + 1]
-        seg_w = is_water_col[xL : xR + 1]
+        seg_b = is_building_col[xL: xR + 1]
+        seg_w = is_water_col[xL: xR + 1]
         hit_cols += int(np.count_nonzero(seg_b))
         water_cols += int(np.count_nonzero(seg_w))
-        predicted[xL : xR + 1] = True
+        predicted[xL: xR + 1] = True
 
     if pred_cols == 0:
         return 0.0
@@ -2036,12 +1922,19 @@ def _score_offset_semantic_iou(
     # view (≥ 5% of frame width).
     n_observed = int(np.count_nonzero(is_building_col))
     if n_observed >= max(20, int(0.05 * w)):
-        unmatched_observed = int(np.count_nonzero(is_building_col & ~predicted))
+        unmatched_observed = int(
+            np.count_nonzero(is_building_col & ~predicted))
         miss = unmatched_observed / float(n_observed)
     else:
         miss = 0.0
 
-    score = placement - 0.3 * miss
+    # Miss-penalty raised 0.3 → 0.6 to better discriminate 180°-symmetric
+    # local maxima. At a wrong-by-180° offset, predicted buildings often
+    # still land in some real mask-building columns (because there ARE
+    # buildings in both directions from many seeds), so `placement` alone
+    # gives a misleadingly-positive score. The miss term captures that
+    # the wrong offset leaves most of the OBSERVED skyline unexplained.
+    score = placement - 0.6 * miss
     return max(0.0, min(1.0, score))
 
 
@@ -2072,7 +1965,8 @@ def register_view_to_osm(
     """
     contour, sky_mask = detect_skyline_contour(captured.image)
     # Extract peaks inline (median-filtered inverted contour → local minima = rooftops)
-    _c_inv = -median_filter(np.asarray(contour, dtype=np.float32), size=7, mode="nearest")
+    _c_inv = -median_filter(np.asarray(contour,
+                            dtype=np.float32), size=7, mode="nearest")
     observed_peaks, _ = find_peaks(
         _c_inv, distance=18, prominence=max(3.0, float(np.std(_c_inv)) * 0.15)
     )
@@ -2176,11 +2070,13 @@ def register_view_to_osm(
         "sky_mask": sky_mask,
         "observed_peaks": observed_peaks,
         "best_offset": best_offset,
-        "best_score": best_score,           # mean pixel residual (legacy display)
+        # mean pixel residual (legacy display)
+        "best_score": best_score,
         "best_iou": best_iou,                # semantic mIoU at best offset
         "best_combined_score": best_combined,
         "projections": matched_projections,
-        "all_projections": best_projections,  # all culled-visible buildings at best offset
+        # all culled-visible buildings at best offset
+        "all_projections": best_projections,
         "n_matches": len(matched_projections),
     }
 
@@ -2236,7 +2132,8 @@ def estimate_heights_from_registration(
     best_offset = float(registration["best_offset"])
     best_score = float(registration.get("best_score", float("inf")))
     # Use all culled-visible projections (not just peak-matched) to maximise yield.
-    all_proj_list = registration.get("all_projections") or registration["projections"]
+    all_proj_list = registration.get(
+        "all_projections") or registration["projections"]
     projections = {item["feature_id"]: item for item in all_proj_list}
     # Track which buildings were peak-matched for confidence scoring.
     matched_ids = {item["feature_id"] for item in registration["projections"]}
@@ -2262,8 +2159,10 @@ def estimate_heights_from_registration(
     # rooftop pixel belongs to the *closest* one — crediting a far building for
     # that pixel is the failure mode that produces b0151 143m→284m (tag→pred).
     if all_proj_list:
-        _all_x = np.asarray([p["x_px"] for p in all_proj_list], dtype=np.float32)
-        _all_fwd = np.asarray([p["forward_m"] for p in all_proj_list], dtype=np.float32)
+        _all_x = np.asarray([p["x_px"]
+                            for p in all_proj_list], dtype=np.float32)
+        _all_fwd = np.asarray([p["forward_m"]
+                              for p in all_proj_list], dtype=np.float32)
     else:
         _all_x = np.empty(0, dtype=np.float32)
         _all_fwd = np.empty(0, dtype=np.float32)
@@ -2337,7 +2236,7 @@ def estimate_heights_from_registration(
                 cxL = max(0, int(xL))
                 cxR = min(contour.size - 1, int(xR))
                 if cxR >= cxL:
-                    contour_slice = contour[cxL : cxR + 1]
+                    contour_slice = contour[cxL: cxR + 1]
                     finite = contour_slice[np.isfinite(contour_slice)]
                     if finite.size > 0:
                         # Use a representative high point — the 20th percentile
@@ -2354,7 +2253,8 @@ def estimate_heights_from_registration(
                             pitch_rad = math.radians(captured.viewpoint.pitch)
                             angle_at_contour = math.atan(
                                 (cy - contour_top_y) / f_px) + pitch_rad
-                            top_at_contour = forward * math.tan(angle_at_contour)
+                            top_at_contour = forward * \
+                                math.tan(angle_at_contour)
                             implied_h = cam_z + top_at_contour - float(
                                 building.terrain_elev_m)
                             if 0.0 <= implied_h <= 300.0:
@@ -2551,4 +2451,3 @@ def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) 
     output.sort(
         key=lambda row: (-row["n_seeds"], -row["n_views"], -row["median_height_m"]))
     return output
-

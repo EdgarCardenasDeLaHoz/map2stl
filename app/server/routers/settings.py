@@ -16,18 +16,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
 
 
+def _model_to_dict(model) -> dict:
+    """Serialize Pydantic model instances for both v1 and v2."""
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
 def _default_projections() -> list[dict]:
     return [
-        ProjectionInfo(
-            id="none",
-            name="None",
-            description="No projection applied",
-        ).model_dump(),
-        ProjectionInfo(
-            id="cosine",
-            name="Cosine",
-            description="Cosine latitude correction",
-        ).model_dump(),
+        _model_to_dict(
+            ProjectionInfo(
+                id="none",
+                name="None",
+                description="No projection applied",
+            )
+        ),
+        _model_to_dict(
+            ProjectionInfo(
+                id="cosine",
+                name="Cosine",
+                description="Cosine latitude correction",
+            )
+        ),
     ]
 
 
@@ -46,11 +57,13 @@ def _load_projections() -> list[dict]:
 
         info = get_projection_info()
         return [
-            ProjectionInfo(
-                id=projection_id,
-                name=projection_meta.get("name", projection_id),
-                description=projection_meta.get("description", ""),
-            ).model_dump()
+            _model_to_dict(
+                ProjectionInfo(
+                    id=projection_id,
+                    name=projection_meta.get("name", projection_id),
+                    description=projection_meta.get("description", ""),
+                )
+            )
             for projection_id, projection_meta in info.items()
         ]
     except Exception:
@@ -60,30 +73,42 @@ def _load_projections() -> list[dict]:
 
 def _list_colormaps() -> list[dict]:
     colormaps = [
-        ColormapInfo(id="terrain",  description="Classic green-brown-white terrain"),
-        ColormapInfo(id="viridis",  description="Perceptually uniform, colorblind-safe"),
+        ColormapInfo(
+            id="terrain",  description="Classic green-brown-white terrain"),
+        ColormapInfo(
+            id="viridis",  description="Perceptually uniform, colorblind-safe"),
         ColormapInfo(id="plasma",   description="High-contrast warm gradient"),
-        ColormapInfo(id="magma",    description="Dark background, bright peaks"),
-        ColormapInfo(id="inferno",  description="Black-to-yellow fire gradient"),
+        ColormapInfo(
+            id="magma",    description="Dark background, bright peaks"),
+        ColormapInfo(
+            id="inferno",  description="Black-to-yellow fire gradient"),
         ColormapInfo(id="cividis",  description="Colorblind-safe blue-yellow"),
         ColormapInfo(id="gray",     description="Grayscale hillshade"),
         ColormapInfo(id="ocean",    description="Blue depth gradient"),
         ColormapInfo(id="hot",      description="Black-red-yellow-white"),
-        ColormapInfo(id="RdBu",     description="Diverging red-blue for anomaly maps"),
+        ColormapInfo(
+            id="RdBu",     description="Diverging red-blue for anomaly maps"),
     ]
-    return [c.model_dump() for c in colormaps]
+    return [_model_to_dict(c) for c in colormaps]
 
 
 def _list_datasets() -> list[dict]:
     datasets = [
-        DatasetInfo(id="esa",       name="ESA WorldCover 2020",       description="10 m land cover classification",      source="ESA/WorldCover/v100/2020",          requires_auth=True),
-        DatasetInfo(id="copernicus",name="Copernicus DEM GLO-30",     description="30 m global elevation model",         source="COPERNICUS/DEM/GLO30",              requires_auth=True),
-        DatasetInfo(id="nasadem",   name="NASA SRTM / NASADEM",       description="30 m void-filled SRTM elevation",     source="NASA/NASADEM_HGT/001",             requires_auth=True),
-        DatasetInfo(id="usgs",      name="USGS 3DEP 10 m",            description="10 m elevation (CONUS only)",         source="USGS/3DEP/10m",                    requires_auth=True),
-        DatasetInfo(id="gebco",     name="GEBCO 2022",                 description="450 m global ocean bathymetry + land",source="Local GEBCO GeoTIFFs",             requires_auth=False),
-        DatasetInfo(id="jrc",       name="JRC Global Surface Water",   description="Water occurrence 1984–2021",          source="JRC/GSW1_4/GlobalSurfaceWater",    requires_auth=True),
+        DatasetInfo(id="esa",       name="ESA WorldCover 2020",       description="10 m land cover classification",
+                    source="ESA/WorldCover/v100/2020",          requires_auth=True),
+        DatasetInfo(id="copernicus", name="Copernicus DEM GLO-30",     description="30 m global elevation model",
+                    source="COPERNICUS/DEM/GLO30",              requires_auth=True),
+        DatasetInfo(id="nasadem",   name="NASA SRTM / NASADEM",       description="30 m void-filled SRTM elevation",
+                    source="NASA/NASADEM_HGT/001",             requires_auth=True),
+        DatasetInfo(id="usgs",      name="USGS 3DEP 10 m",            description="10 m elevation (CONUS only)",
+                    source="USGS/3DEP/10m",                    requires_auth=True),
+        DatasetInfo(id="gebco",     name="GEBCO 2022",                 description="450 m global ocean bathymetry + land",
+                    source="Local GEBCO GeoTIFFs",             requires_auth=False),
+        DatasetInfo(id="jrc",       name="JRC Global Surface Water",   description="Water occurrence 1984–2021",
+                    source="JRC/GSW1_4/GlobalSurfaceWater",    requires_auth=True),
     ]
-    return [d.model_dump() for d in datasets]
+    return [_model_to_dict(d) for d in datasets]
+
 
 # ---------------------------------------------------------------------------
 # Schema imports

@@ -19,17 +19,18 @@ async def main():
     debug_port = 9222
     debug_url = f"http://127.0.0.1:{debug_port}"
     app_url = "http://127.0.0.1:9001"
-    
+
     print(f"\n{'='*60}")
     print(f"Playwright Standalone Browser Connector")
     print(f"{'='*60}")
     print(f"Debug URL: {debug_url}")
     print(f"App URL: {app_url}\n")
-    
+
     async with async_playwright() as playwright:
         try:
             # Connect to the running Chrome instance (with retry for startup races)
-            print(f"Connecting to Chrome on debug port {debug_port}...", end=" ", flush=True)
+            print(
+                f"Connecting to Chrome on debug port {debug_port}...", end=" ", flush=True)
             browser = None
             last_error = None
             for _ in range(20):
@@ -41,14 +42,15 @@ async def main():
                     await asyncio.sleep(0.5)
 
             if browser is None:
-                raise RuntimeError(f"Unable to connect to {debug_url}: {last_error}")
+                raise RuntimeError(
+                    f"Unable to connect to {debug_url}: {last_error}")
 
             print("✓ Connected!\n")
-            
+
             # Get all pages/tabs
             contexts = browser.contexts
             print(f"Found {len(contexts)} context(s)")
-            
+
             if not contexts:
                 print("Creating new page...")
                 context = await browser.new_context()
@@ -60,19 +62,19 @@ async def main():
                     page = await context.new_page()
                 else:
                     page = pages[0]
-            
+
             print(f"Using page: {page.url if page.url else '(blank)'}\n")
-            
+
             # Navigate to app
             print(f"Navigating to {app_url}...")
             await page.goto(app_url, wait_until="networkidle")
             print("✓ Page loaded!\n")
-            
+
             # Example interaction: search for Amazon
             print("="*60)
             print("EXAMPLE: Testing hydrology layer on Amazon region")
             print("="*60)
-            
+
             # Find and fill region search
             print("\n1. Searching for 'Amazon'...")
             await page.evaluate("""
@@ -99,12 +101,12 @@ async def main():
             if clicked_amazon:
                 print("2. Clicking Amazon option...")
                 await page.wait_for_timeout(500)
-            
+
             # Click Edit tab
             print("3. Switching to Edit view...")
             await page.locator('#tabEdit').click()
             await page.wait_for_timeout(1000)
-            
+
             # Activate the hydrology layer so it auto-loads and draws into the stack.
             print("4. Activating Hydrology layer...")
             await page.evaluate("""
@@ -120,13 +122,14 @@ async def main():
             await page.wait_for_timeout(1000)
 
             # Take screenshot
-            screenshot_path = Path(r"c:\Users\eac84\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\tests\hydrology-render-test.png")
+            screenshot_path = Path(
+                r"c:\Users\eac84\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\tests\hydrology-render-test.png")
             screenshot_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             print("5. Taking screenshot...")
             await page.screenshot(path=str(screenshot_path), full_page=False)
             print(f"✓ Screenshot saved: {screenshot_path}\n")
-            
+
             # Sample canvas content
             print("6. Sampling canvas content...")
             canvas_stats = await page.evaluate("""
@@ -157,7 +160,7 @@ async def main():
                     return stats;
                 }
             """)
-            
+
             print("\nCanvas Content:")
             for name, stat in canvas_stats.items():
                 if stat:
@@ -165,20 +168,24 @@ async def main():
                     print(f"    Size: {stat['width']} × {stat['height']}")
                     print(f"    Alpha pixels: {stat['alphaPixels']:,}")
 
-            stack_alpha = (canvas_stats.get('stackCanvas') or {}).get('alphaPixels', 0)
-            source_alpha = (canvas_stats.get('hydroSourceCanvas') or {}).get('alphaPixels', 0)
+            stack_alpha = (canvas_stats.get('stackCanvas')
+                           or {}).get('alphaPixels', 0)
+            source_alpha = (canvas_stats.get('hydroSourceCanvas')
+                            or {}).get('alphaPixels', 0)
             if source_alpha <= 0 and stack_alpha <= 0:
-                raise RuntimeError('Hydrology appears blank: both source and stack canvases have zero alpha pixels')
-            
+                raise RuntimeError(
+                    'Hydrology appears blank: both source and stack canvases have zero alpha pixels')
+
             print("\n" + "="*60)
             print("✓ Test completed successfully!")
             print("="*60)
-            print("\nLeaving Chrome open for manual exploration and further Playwright runs.")
+            print(
+                "\nLeaving Chrome open for manual exploration and further Playwright runs.")
             print("Press Ctrl+C in this terminal when you are done.\n")
 
             while True:
                 await asyncio.sleep(1)
-            
+
         except Exception as e:
             print(f"\n✗ Error: {e}")
             import traceback

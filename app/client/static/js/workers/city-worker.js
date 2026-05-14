@@ -87,9 +87,9 @@ function _renderLayer(ctx, msg, onlyLayer) {
         ctx.globalAlpha = 0.65;
 
         // Polygons (lakes, ponds)
-        ctx.fillStyle   = c + '88';
+        ctx.fillStyle = c + '88';
         ctx.strokeStyle = c;
-        ctx.lineWidth   = 1 * invZ;
+        ctx.lineWidth = 1 * invZ;
         for (const feat of layers.waterways.features) {
             if (_culled(feat, clipX0, clipY0, clipX1, clipY1)) continue;
             if (feat.type === 'Polygon' || feat.type === 'MultiPolygon') {
@@ -102,7 +102,7 @@ function _renderLayer(ctx, msg, onlyLayer) {
 
         // LineStrings (rivers, streams)
         ctx.strokeStyle = c;
-        ctx.lineWidth   = 2 * invZ;
+        ctx.lineWidth = 2 * invZ;
         ctx.beginPath();
         for (const feat of layers.waterways.features) {
             if (_culled(feat, clipX0, clipY0, clipX1, clipY1)) continue;
@@ -118,8 +118,8 @@ function _renderLayer(ctx, msg, onlyLayer) {
     if (_shouldDraw('buildings') && layers.buildings?.features?.length) {
         const baseC = styles.buildingsColor;
         ctx.strokeStyle = baseC;
-        ctx.lineWidth   = 0.5 * invZ;
-        ctx.fillStyle   = baseC;
+        ctx.lineWidth = 0.5 * invZ;
+        ctx.fillStyle = baseC;
 
         const buckets = Array.from({ length: ALPHA_BUCKETS }, () => []);
         let selectedFeat = null;
@@ -130,8 +130,8 @@ function _renderLayer(ctx, msg, onlyLayer) {
             }
             if (feat.x1 - feat.x0 < 0.5 && feat.y1 - feat.y0 < 0.5) continue; // sub-pixel
             if (_culled(feat, clipX0, clipY0, clipX1, clipY1)) continue;
-            const h  = feat.height_m || 10;
-            const t  = Math.min(1, Math.max(0, (h - 3) / 77));
+            const h = feat.height_m || 10;
+            const t = Math.min(1, Math.max(0, (h - 3) / 77));
             const bi = Math.min(ALPHA_BUCKETS - 1, Math.floor(t * ALPHA_BUCKETS));
             buckets[bi].push(feat);
         }
@@ -169,9 +169,9 @@ function _renderLayer(ctx, msg, onlyLayer) {
         const groups = new Map();
         for (const feat of layers.roads.features) {
             if (_culled(feat, clipX0, clipY0, clipX1, clipY1)) continue;
-            const widthM  = feat.road_width_m || styles.roadBaseWidth;
+            const widthM = feat.road_width_m || styles.roadBaseWidth;
             const widthPx = Math.max(0.5, (widthM / metrePerPx) * invZ);
-            const key     = Math.round(widthPx * 2) / 2;
+            const key = Math.round(widthPx * 2) / 2;
             if (!groups.has(key)) groups.set(key, []);
             groups.get(key).push(feat);
         }
@@ -189,10 +189,10 @@ function _renderLayer(ctx, msg, onlyLayer) {
     if (_shouldDraw('buildings') && layers.walls?.features?.length) {
         const c = styles.buildingsColor;
         ctx.strokeStyle = c;
-        ctx.lineWidth   = 3 * invZ;
+        ctx.lineWidth = 3 * invZ;
         ctx.globalAlpha = 0.85;
-        ctx.lineJoin    = 'round';
-        ctx.lineCap     = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
 
         for (const feat of layers.walls.features) {
             if (_culled(feat, clipX0, clipY0, clipX1, clipY1)) continue;
@@ -212,8 +212,8 @@ function _renderLayer(ctx, msg, onlyLayer) {
         }
         ctx.stroke();
         ctx.globalAlpha = 1;
-        ctx.lineJoin    = 'miter';
-        ctx.lineCap     = 'butt';
+        ctx.lineJoin = 'miter';
+        ctx.lineCap = 'butt';
     }
 }
 
@@ -229,7 +229,7 @@ self.onmessage = function (e) {
 
     try {
         const canvas = new OffscreenCanvas(W, H);
-        const ctx    = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d');
 
         ctx.save();
         ctx.beginPath();

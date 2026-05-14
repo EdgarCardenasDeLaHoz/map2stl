@@ -46,7 +46,8 @@ class TestCitiesCached:
         osm_dir.mkdir(parents=True, exist_ok=True)
         cache_file = osm_dir / f"{key}.json.gz"
         cache_file.write_bytes(
-            gzip.compress(json.dumps({"buildings": {"type": "FeatureCollection", "features": []}}).encode())
+            gzip.compress(json.dumps(
+                {"buildings": {"type": "FeatureCollection", "features": []}}).encode())
         )
 
         resp = client.get("/api/cities/cached", params=self.BBOX)
@@ -69,7 +70,8 @@ class TestCitiesPostSizeGuard:
     def test_accepts_small_bbox(self, client, tmp_data_dir):
         """A ~2 km bbox should not be rejected by the size guard."""
         empty_fc = {"type": "FeatureCollection", "features": []}
-        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
+        mock_result = {"buildings": empty_fc,
+                       "roads": empty_fc, "waterways": empty_fc}
 
         with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result):
             resp = client.post("/api/cities", json={
@@ -84,27 +86,33 @@ class TestCitiesPostSizeGuard:
 # ---------------------------------------------------------------------------
 
 class TestCitiesPostCaching:
-    SMALL_BBOX = {"north": 39.960, "south": 39.950, "east": -75.140, "west": -75.170}
+    SMALL_BBOX = {"north": 39.960, "south": 39.950,
+                  "east": -75.140, "west": -75.170}
     LAYERS = ["buildings", "roads", "waterways"]
 
     def test_result_is_cached_after_first_request(self, client, tmp_data_dir):
         empty_fc = {"type": "FeatureCollection", "features": []}
-        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
+        mock_result = {"buildings": empty_fc,
+                       "roads": empty_fc, "waterways": empty_fc}
 
         with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
-            client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
+            client.post("/api/cities",
+                        json={**self.SMALL_BBOX, "layers": self.LAYERS})
             assert mock_fn.call_count == 1
 
             # Second request should be served from cache — _fetch_osm_data NOT called again
-            client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
+            client.post("/api/cities",
+                        json={**self.SMALL_BBOX, "layers": self.LAYERS})
             assert mock_fn.call_count == 1  # Still 1
 
     def test_response_includes_cache_key_and_diagonal(self, client, tmp_data_dir):
         empty_fc = {"type": "FeatureCollection", "features": []}
-        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
+        mock_result = {"buildings": empty_fc,
+                       "roads": empty_fc, "waterways": empty_fc}
 
         with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result):
-            resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
+            resp = client.post(
+                "/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
 
         body = resp.json()
         assert "cache_key" in body
@@ -113,10 +121,12 @@ class TestCitiesPostCaching:
 
     def test_response_structure_has_expected_geojson_layers(self, client, tmp_data_dir):
         empty_fc = {"type": "FeatureCollection", "features": []}
-        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
+        mock_result = {"buildings": empty_fc,
+                       "roads": empty_fc, "waterways": empty_fc}
 
         with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result):
-            resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
+            resp = client.post(
+                "/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
 
         body = resp.json()
         for layer in self.LAYERS:
@@ -128,7 +138,8 @@ class TestCitiesPostCaching:
             raise RuntimeError("osmnx is not installed")
 
         with patch("app.server.routers.cities._fetch_osm_data", side_effect=raise_runtime):
-            resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
+            resp = client.post(
+                "/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
         assert resp.status_code == 500
         assert "OSM fetch failed" in resp.json()["error"]
 
@@ -138,7 +149,8 @@ class TestCitiesPostCaching:
 # ---------------------------------------------------------------------------
 
 EMPTY_FC = {"type": "FeatureCollection", "features": []}
-SMALL_BBOX = {"north": 39.960, "south": 39.950, "east": -75.140, "west": -75.170}
+SMALL_BBOX = {"north": 39.960, "south": 39.950,
+              "east": -75.140, "west": -75.170}
 
 
 class TestCityRaster:
@@ -148,9 +160,9 @@ class TestCityRaster:
         return {
             **SMALL_BBOX,
             "dim": dim,
-            "buildings":  buildings  or EMPTY_FC,
-            "roads":      roads      or EMPTY_FC,
-            "waterways":  waterways  or EMPTY_FC,
+            "buildings":  buildings or EMPTY_FC,
+            "roads":      roads or EMPTY_FC,
+            "waterways":  waterways or EMPTY_FC,
         }
 
     def test_returns_200_with_empty_features(self, client, tmp_data_dir):
@@ -193,7 +205,8 @@ class TestCityRaster:
                 "properties": {"height_m": 10.0}
             }]
         }
-        resp = client.post("/api/cities/raster", json=self._payload(dim=10, buildings=building_fc))
+        resp = client.post("/api/cities/raster",
+                           json=self._payload(dim=10, buildings=building_fc))
         body = resp.json()
         assert any(v > 0 for v in body["values"])
 
@@ -234,7 +247,8 @@ class TestCityRaster:
         }
 
         dim = 40
-        resp = client.post("/api/cities/raster", json=self._payload(dim=dim, buildings=building_fc))
+        resp = client.post("/api/cities/raster",
+                           json=self._payload(dim=dim, buildings=building_fc))
         assert resp.status_code == 200
         body = resp.json()
         arr = np.array(body["values"], dtype=np.float32).reshape(dim, dim)

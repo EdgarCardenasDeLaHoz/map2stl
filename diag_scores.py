@@ -1,10 +1,13 @@
 """Quick diagnostic: score distribution of cached images after neural sky."""
-import sys, json, os, base64
+from city2stl.skyline_cv.pipeline import detect_skyline_contour
+import sys
+import json
+import os
+import base64
 import numpy as np
 import cv2
 
 sys.path.insert(0, ".")
-from city2stl.skyline_cv.pipeline import detect_skyline_contour
 
 cache_dir = "city2stl/skyline_cv/runs/image_cache"
 files = [f for f in os.listdir(cache_dir) if f.endswith(".png")]
@@ -42,8 +45,10 @@ print(f"Min: {min(all_scores):.4f}  Max: {max(all_scores):.4f}  Median: {float(n
 
 print("\nBottom 15 scores (lowest quality that still pass both gates):")
 for score, rng, var, span, fn in scores[:15]:
-    print(f"  score={score:.4f}  range={rng:.4f}  std={var:.1f}  span={span:.1f}  {fn}")
+    print(
+        f"  score={score:.4f}  range={rng:.4f}  std={var:.1f}  span={span:.1f}  {fn}")
 
 print("\nTop 10 scores:")
 for score, rng, var, span, fn in scores[-10:]:
-    print(f"  score={score:.4f}  range={rng:.4f}  std={var:.1f}  span={span:.1f}  {fn}")
+    print(
+        f"  score={score:.4f}  range={rng:.4f}  std={var:.1f}  span={span:.1f}  {fn}")

@@ -309,7 +309,8 @@ def _collinear_point_reduction(coords: list, tolerance: float = 1e-4) -> list:
         p2 = coords[i + 1]
 
         # Cross product to determine collinearity; ≈ 0 means collinear.
-        cross = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0])
+        cross = (p1[0] - p0[0]) * (p2[1] - p0[1]) - \
+            (p1[1] - p0[1]) * (p2[0] - p0[0])
 
         if abs(cross) > tolerance:
             simplified.append(p1)
@@ -362,8 +363,10 @@ _REGION_URLS: dict[str, str] = {
     "as": "https://data.hydrosheds.org/file/HydroRIVERS/HydroRIVERS_v10_as_shp.zip",   # Asia
     "au": "https://data.hydrosheds.org/file/HydroRIVERS/HydroRIVERS_v10_au_shp.zip",   # Australia
     "eu": "https://data.hydrosheds.org/file/HydroRIVERS/HydroRIVERS_v10_eu_shp.zip",   # Europe
-    "na": "https://data.hydrosheds.org/file/HydroRIVERS/HydroRIVERS_v10_na_shp.zip",   # North America
-    "sa": "https://data.hydrosheds.org/file/HydroRIVERS/HydroRIVERS_v10_sa_shp.zip",   # South America
+    # North America
+    "na": "https://data.hydrosheds.org/file/HydroRIVERS/HydroRIVERS_v10_na_shp.zip",
+    # South America
+    "sa": "https://data.hydrosheds.org/file/HydroRIVERS/HydroRIVERS_v10_sa_shp.zip",
     "si": "https://data.hydrosheds.org/file/HydroRIVERS/HydroRIVERS_v10_si_shp.zip",   # Siberia
 }
 
@@ -372,12 +375,12 @@ _REGION_URLS: dict[str, str] = {
 _REGION_BBOX: dict[str, Tuple[float, float, float, float]] = {
     "af": (-20,  -35,  55,  38),
     "ar": (-180,  60, 180,  90),
-    "as": (  57,  -5, 180,  60),
-    "au": ( 112, -48, 180,  -5),
+    "as": (57,  -5, 180,  60),
+    "au": (112, -48, 180,  -5),
     "eu": (-25,   35,  65,  72),
     "na": (-170, -10, -35,  85),
     "sa": (-82,  -56, -28,  15),
-    "si": (  50,  47, 180,  75),
+    "si": (50,  47, 180,  75),
 }
 
 
@@ -411,16 +414,19 @@ def _ensure_region_shapefile(region: str) -> Optional[Path]:
     """
     cache = _cache_dir()
 
-    simplified_glob = list(cache.glob(f"HydroRIVERS_v10_{region}_simplified/*.shp"))
+    simplified_glob = list(cache.glob(
+        f"HydroRIVERS_v10_{region}_simplified/*.shp"))
     if simplified_glob:
         simplified_shp = simplified_glob[0]
         try:
             import geopandas as gpd
             probe = gpd.read_file(str(simplified_shp), rows=1)
             if len(probe) > 0:
-                logger.debug("HydroRIVERS '%s': using cached simplified shapefile", region)
+                logger.debug(
+                    "HydroRIVERS '%s': using cached simplified shapefile", region)
                 return simplified_shp
-            logger.warning("HydroRIVERS '%s': simplified shapefile is empty; regenerating", region)
+            logger.warning(
+                "HydroRIVERS '%s': simplified shapefile is empty; regenerating", region)
         except Exception as exc:
             logger.warning("HydroRIVERS '%s': simplified shapefile invalid: %s; regenerating",
                            region, exc)
@@ -470,7 +476,8 @@ def _ensure_region_shapefile(region: str) -> Optional[Path]:
             return simplified_shp
         return original_shp
     except Exception as e:
-        logger.error("HydroRIVERS download failed for region '%s': %s", region, e)
+        logger.error(
+            "HydroRIVERS download failed for region '%s': %s", region, e)
         return None
 
 
@@ -484,7 +491,8 @@ def _simplify_and_cache_shapefile(shp_path: Path, region: str) -> Optional[Path]
     try:
         import geopandas as gpd
     except ImportError:
-        logger.warning("geopandas not available; skipping shapefile simplification")
+        logger.warning(
+            "geopandas not available; skipping shapefile simplification")
         return None
 
     try:
@@ -493,14 +501,17 @@ def _simplify_and_cache_shapefile(shp_path: Path, region: str) -> Optional[Path]
         dest_dir.mkdir(exist_ok=True)
 
         orig_size = shp_path.stat().st_size
-        logger.debug("HydroRIVERS '%s': reading original %.1f MB...", region, orig_size / 1e6)
+        logger.debug("HydroRIVERS '%s': reading original %.1f MB...",
+                     region, orig_size / 1e6)
         gdf = gpd.read_file(str(shp_path))
 
         if len(gdf) == 0:
-            logger.warning("HydroRIVERS '%s': original shapefile is empty", region)
+            logger.warning(
+                "HydroRIVERS '%s': original shapefile is empty", region)
             return None
 
-        logger.debug("HydroRIVERS '%s': simplifying %d features...", region, len(gdf))
+        logger.debug(
+            "HydroRIVERS '%s': simplifying %d features...", region, len(gdf))
         gdf["geometry"] = gdf["geometry"].apply(_simplify_geometry)
 
         dest_shp = dest_dir / shp_path.name
@@ -512,7 +523,8 @@ def _simplify_and_cache_shapefile(shp_path: Path, region: str) -> Optional[Path]
         return dest_shp
 
     except Exception as e:
-        logger.error("HydroRIVERS simplification failed for '%s': %s", region, e)
+        logger.error(
+            "HydroRIVERS simplification failed for '%s': %s", region, e)
         return None
 
 
@@ -564,7 +576,8 @@ def _ensure_region_parquet(region: str) -> Optional[Path]:
 
     try:
         import geopandas as gpd
-        logger.info("HydroRIVERS '%s': building parquet(s) from shapefile...", region)
+        logger.info(
+            "HydroRIVERS '%s': building parquet(s) from shapefile...", region)
         gdf = gpd.read_file(str(shp), engine="pyogrio")
         if len(gdf) == 0:
             logger.warning("HydroRIVERS '%s': shapefile is empty", region)
@@ -577,7 +590,8 @@ def _ensure_region_parquet(region: str) -> Optional[Path]:
 
         if not _parquet_is_valid(pq_o3):
             if "ORD_STRA" in gdf.columns:
-                gdf_o3 = gdf[gdf["ORD_STRA"] >= _ORDER3PLUS_THRESHOLD].reset_index(drop=True)
+                gdf_o3 = gdf[gdf["ORD_STRA"] >=
+                             _ORDER3PLUS_THRESHOLD].reset_index(drop=True)
             else:
                 gdf_o3 = gdf
             gdf_o3.to_parquet(pq_o3, write_covering_bbox=True)
@@ -642,7 +656,8 @@ def fetch_hydrorivers(
                 logger.info("  %s: %d features (%s parquet bbox read, %.2fs, %.1f MB)",
                             region, len(gdf), tag, dt_read, pq.stat().st_size / 1e6)
         except Exception as e:
-            logger.error("HydroRIVERS parquet read failed for '%s': %s", region, e)
+            logger.error(
+                "HydroRIVERS parquet read failed for '%s': %s", region, e)
 
     if not gdfs:
         logger.info("HydroRIVERS: no features found in bbox")
@@ -653,7 +668,8 @@ def fetch_hydrorivers(
 
     effective_min_order = max(1, min_order)
     if "ORD_STRA" in combined.columns and min_order > 1:
-        combined = combined[combined["ORD_STRA"] >= min_order].reset_index(drop=True)
+        combined = combined[combined["ORD_STRA"]
+                            >= min_order].reset_index(drop=True)
 
     # For very large extents, cap feature volume before GeoJSON serialization.
     # This keeps continent-scale calls responsive while preserving all detail
@@ -673,15 +689,18 @@ def fetch_hydrorivers(
 
         if adaptive_cutoff > min_order:
             before = len(combined)
-            combined = combined[combined["ORD_STRA"] >= adaptive_cutoff].reset_index(drop=True)
+            combined = combined[combined["ORD_STRA"] >=
+                                adaptive_cutoff].reset_index(drop=True)
             effective_min_order = adaptive_cutoff
             logger.info(
                 "HydroRIVERS adaptive thinning: bbox_area=%.1f deg^2, "
                 "min_order %d -> %d, features %d -> %d",
-                bbox_area_deg2, min_order, adaptive_cutoff, before, len(combined),
+                bbox_area_deg2, min_order, adaptive_cutoff, before, len(
+                    combined),
             )
 
-    logger.info("HydroRIVERS: %d features after order-%d+ filter", len(combined), effective_min_order)
+    logger.info("HydroRIVERS: %d features after order-%d+ filter",
+                len(combined), effective_min_order)
 
     if len(combined) == 0:
         return None
@@ -737,7 +756,8 @@ def rasterize_hydrorivers(
 
     transform = from_bounds(west, south, east, north, dim, dim)
     pixel_deg = (north - south) / dim
-    min_buf_deg = pixel_deg * 0.6 * float(width_factor)  # ≥1 px wide × user factor
+    min_buf_deg = pixel_deg * 0.6 * \
+        float(width_factor)  # ≥1 px wide × user factor
 
     grid = np.zeros((dim, dim), dtype=np.float32)
     if gdf is None or len(gdf) == 0:
@@ -749,7 +769,8 @@ def rasterize_hydrorivers(
     if "ORD_STRA" in gdf.columns and len(gdf) > target_features:
         # Find smallest cutoff such that count(order >= cutoff) <= target.
         counts = (
-            gdf["ORD_STRA"].clip(lower=1, upper=9).astype(int).value_counts().sort_index()
+            gdf["ORD_STRA"].clip(lower=1, upper=9).astype(
+                int).value_counts().sort_index()
         )
         # cumulative count of order >= k, walked from 9 downward
         running, cutoff = 0, 9
@@ -774,7 +795,8 @@ def rasterize_hydrorivers(
     # Vectorized prep — simplify all geometries, then per-row buffer based on order.
     t_prep = _time.perf_counter()
     if "ORD_STRA" in gdf.columns:
-        order_arr = gdf["ORD_STRA"].clip(lower=1, upper=9).astype(int).to_numpy()
+        order_arr = gdf["ORD_STRA"].clip(
+            lower=1, upper=9).astype(int).to_numpy()
     else:
         order_arr = np.ones(n, dtype=int)
     # Buffer width: same formula as the legacy code (max(min_buf, min_buf * order / 3)).
@@ -883,7 +905,8 @@ class HydrologyService:
         order_exponent=1.5,
         width_factor=1.0,
     ):
-        provider = self.providers.get(source) or self.providers["natural_earth"]
+        provider = self.providers.get(
+            source) or self.providers["natural_earth"]
         # Natural Earth provider doesn't accept width_factor; pass only when supported.
         kwargs = dict(
             min_order=min_order, order_exponent=order_exponent,

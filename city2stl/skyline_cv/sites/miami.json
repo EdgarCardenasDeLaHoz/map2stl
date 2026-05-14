@@ -19,14 +19,54 @@
   ],
   "known_heights_m": {
     "_note": "OSM + CTBUH verified heights for validation — compare pipeline estimates against these.",
-    "Panorama Tower": { "lat": 25.7639, "lon": -80.1929, "height_m": 249, "floors": 85 },
-    "1000 Museum": { "lat": 25.7793, "lon": -80.1927, "height_m": 216, "floors": 62 },
-    "Marquis Miami": { "lat": 25.7763, "lon": -80.1887, "height_m": 271, "floors": 67 },
-    "Four Seasons Miami": { "lat": 25.7685, "lon": -80.1916, "height_m": 240, "floors": 64 },
-    "Brickell World Plaza": { "lat": 25.7699, "lon": -80.1947, "height_m": 138, "floors": 40 },
-    "Brickell City Centre (East)": { "lat": 25.7650, "lon": -80.1942, "height_m": 150, "floors": 42 },
-    "SLS Lux Brickell": { "lat": 25.7638, "lon": -80.1938, "height_m": 196, "floors": 57 },
-    "Santa Maria": { "lat": 25.7628, "lon": -80.1960, "height_m": 175, "floors": 50 }
+    "Panorama Tower": {
+      "lat": 25.7639,
+      "lon": -80.1929,
+      "height_m": 249,
+      "floors": 85
+    },
+    "1000 Museum": {
+      "lat": 25.7793,
+      "lon": -80.1927,
+      "height_m": 216,
+      "floors": 62
+    },
+    "Marquis Miami": {
+      "lat": 25.7763,
+      "lon": -80.1887,
+      "height_m": 271,
+      "floors": 67
+    },
+    "Four Seasons Miami": {
+      "lat": 25.7685,
+      "lon": -80.1916,
+      "height_m": 240,
+      "floors": 64
+    },
+    "Brickell World Plaza": {
+      "lat": 25.7699,
+      "lon": -80.1947,
+      "height_m": 138,
+      "floors": 40
+    },
+    "Brickell City Centre (East)": {
+      "lat": 25.7650,
+      "lon": -80.1942,
+      "height_m": 150,
+      "floors": 42
+    },
+    "SLS Lux Brickell": {
+      "lat": 25.7638,
+      "lon": -80.1938,
+      "height_m": 196,
+      "floors": 57
+    },
+    "Santa Maria": {
+      "lat": 25.7628,
+      "lon": -80.1960,
+      "height_m": 175,
+      "floors": 50
+    }
   },
   "viewpoints": [
     {

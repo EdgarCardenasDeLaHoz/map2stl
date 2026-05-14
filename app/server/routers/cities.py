@@ -41,10 +41,12 @@ try:
     from city2stl.rasterize import rasterize_city_data as _rasterize_city_data
 except ImportError:
     def _fetch_osm_data(*a, **kw):
-        raise RuntimeError("city2stl.fetch or city2stl.rasterize not available")
+        raise RuntimeError(
+            "city2stl.fetch or city2stl.rasterize not available")
 
     def _rasterize_city_data(*a, **kw):
-        raise RuntimeError("city2stl.fetch or city2stl.rasterize not available")
+        raise RuntimeError(
+            "city2stl.fetch or city2stl.rasterize not available")
 
 # ---------------------------------------------------------------------------
 # 3D export helper
@@ -185,13 +187,14 @@ async def get_city_raster(req: CityRasterRequest):
     def _sanitize_raster_result(payload: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize raster payload so JSON serialization never sees NaN/Inf."""
         grid = np.array(payload["values"], dtype=np.float32).reshape(
-            int(payload["height"]), int(payload["width"]) 
+            int(payload["height"]), int(payload["width"])
         )
 
         finite = np.isfinite(grid)
         if not finite.all():
             bad_count = int(grid.size - np.count_nonzero(finite))
-            logger.warning(f"City raster contained {bad_count} non-finite values; replacing with 0.0")
+            logger.warning(
+                f"City raster contained {bad_count} non-finite values; replacing with 0.0")
             grid = np.nan_to_num(grid, nan=0.0, posinf=0.0, neginf=0.0)
             finite = np.isfinite(grid)
 
@@ -229,7 +232,8 @@ async def get_city_raster(req: CityRasterRequest):
                 arr = np.load(cache_path)
                 raw_h = int(arr["height"])
                 raw_w = int(arr["width"])
-                grid = np.array(arr["values"], dtype=np.float32).reshape(raw_h, raw_w)
+                grid = np.array(arr["values"], dtype=np.float32).reshape(
+                    raw_h, raw_w)
 
                 # Projection/clipping is always applied fresh from raw cached raster.
                 if req.projection != "none":
@@ -267,7 +271,8 @@ async def get_city_raster(req: CityRasterRequest):
             roads = osm_data.get("roads", roads)
             waterways = osm_data.get("waterways", waterways)
             _from_cache = True
-            logger.debug("City raster: resolved GeoJSON from OSM cache (%s)", osm_key[:8])
+            logger.debug(
+                "City raster: resolved GeoJSON from OSM cache (%s)", osm_key[:8])
 
     try:
         result = await run_sync(
@@ -353,7 +358,8 @@ async def export_city_3mf(req: CityExportRequest):
         osm_data = read_osm_cache(osm_key)
         if osm_data and osm_data.get("buildings"):
             buildings = osm_data["buildings"]
-            logger.debug("City export: resolved buildings from OSM cache (%s)", osm_key[:8])
+            logger.debug(
+                "City export: resolved buildings from OSM cache (%s)", osm_key[:8])
         else:
             return error_response("Buildings not found in cache — load city data first", 400)
 
@@ -427,7 +433,8 @@ async def enhance_heights(req: EnhanceHeightsRequest):
         osm_data = read_osm_cache(osm_key)
         if osm_data and osm_data.get("buildings"):
             buildings = osm_data["buildings"]
-            logger.debug("Enhance heights: resolved buildings from OSM cache (%s)", osm_key[:8])
+            logger.debug(
+                "Enhance heights: resolved buildings from OSM cache (%s)", osm_key[:8])
         else:
             return error_response("Buildings not found in cache — load city data first", 400)
 

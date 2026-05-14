@@ -5,6 +5,7 @@ All heavy lifting is in core.dem and core.cache; this module is a thin
 HTTP adapter that parses requests, delegates, and formats responses.
 """
 
+import asyncio
 from geo2stl.hydrology import (
     fetch_and_rasterize_hydrology as _fetch_and_rasterize_hydrology,
 )
@@ -60,7 +61,6 @@ router = APIRouter(tags=["terrain"])
 # In-flight request dedupe: maps cache_key -> asyncio.Future of the JSONResponse
 # payload dict. When a duplicate request arrives while one is running, it awaits
 # the same Future instead of starting a fresh pipeline. Cleared on completion.
-import asyncio
 _HYDRO_INFLIGHT: dict[str, "asyncio.Future"] = {}
 
 
@@ -156,14 +156,22 @@ def _fetch_dem_array(dem_source, north, south, east, west, dim,
 async def get_terrain_dem(
     request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
-    dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
-    depth_scale: Optional[float] = Query(None, description="Depth scaling factor for ocean/bathymetry"),
-    water_scale: Optional[float] = Query(None, description="Water subtraction strength"),
-    subtract_water: Optional[bool] = Query(None, description="Subtract water bodies from terrain"),
-    show_sat: Optional[bool] = Query(None, description="Include ESA land-use overlay in response"),
-    dataset: Optional[str] = Query(None, description="Land-use dataset: 'esa' or 'jrc'"),
-    projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
-    maintain_dimensions: Optional[bool] = Query(None, description="Maintain output dimensions after projection"),
+    dim: Optional[int] = Query(
+        None, description="Output grid resolution (pixels per side)"),
+    depth_scale: Optional[float] = Query(
+        None, description="Depth scaling factor for ocean/bathymetry"),
+    water_scale: Optional[float] = Query(
+        None, description="Water subtraction strength"),
+    subtract_water: Optional[bool] = Query(
+        None, description="Subtract water bodies from terrain"),
+    show_sat: Optional[bool] = Query(
+        None, description="Include ESA land-use overlay in response"),
+    dataset: Optional[str] = Query(
+        None, description="Land-use dataset: 'esa' or 'jrc'"),
+    projection: Optional[str] = Query(
+        None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+    maintain_dimensions: Optional[bool] = Query(
+        None, description="Maintain output dimensions after projection"),
     clip_valid_region: Optional[bool] = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
@@ -173,7 +181,8 @@ async def get_terrain_dem(
         description="Deprecated alias for clip_valid_region.",
         deprecated=True,
     ),
-    dem_source: Optional[str] = Query(None, description="DEM source: 'local', 'h5_local', or OpenTopography key"),
+    dem_source: Optional[str] = Query(
+        None, description="DEM source: 'local', 'h5_local', or OpenTopography key"),
 ):
     """
     Fetch a Digital Elevation Model preview for a bounding box.
@@ -312,9 +321,12 @@ async def get_terrain_dem(
 async def get_terrain_water_mask(
     request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
-    dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
-    dataset: Optional[str] = Query(None, description="Water dataset: 'esa' or 'jrc'"),
-    projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+    dim: Optional[int] = Query(
+        None, description="Output grid resolution (pixels per side)"),
+    dataset: Optional[str] = Query(
+        None, description="Water dataset: 'esa' or 'jrc'"),
+    projection: Optional[str] = Query(
+        None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
     clip_valid_region: Optional[bool] = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
@@ -447,8 +459,10 @@ async def get_terrain_water_mask(
 async def get_terrain_esa_land_cover(
     request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
-    dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
-    projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+    dim: Optional[int] = Query(
+        None, description="Output grid resolution (pixels per side)"),
+    projection: Optional[str] = Query(
+        None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
     clip_valid_region: Optional[bool] = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
@@ -489,7 +503,8 @@ async def get_terrain_esa_land_cover(
             _earr, _emeta = _ec
             _esa = _earr.get("esa")
             if _esa is not None:
-                logger.info(f"ESA land cover cache hit: {_esa_cache_key[:8]}...")
+                logger.info(
+                    f"ESA land cover cache hit: {_esa_cache_key[:8]}...")
                 _h, _w = _esa.shape
                 return JSONResponse(content={
                     "esa_values_b64": _b64(_esa),
@@ -572,8 +587,10 @@ async def get_terrain_esa_land_cover(
 async def get_terrain_satellite(
     request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
-    dim: Optional[int] = Query(None, description="Output image resolution (pixels per side)"),
-    projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+    dim: Optional[int] = Query(
+        None, description="Output image resolution (pixels per side)"),
+    projection: Optional[str] = Query(
+        None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
     clip_valid_region: Optional[bool] = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
@@ -679,14 +696,22 @@ async def get_terrain_sources():
 async def get_terrain_hydrology(
     request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
-    dim: Optional[int] = Query(None, description="Output grid resolution (pixels per side)"),
-    depression_m: Optional[float] = Query(None, description="Max river depression in metres (negative, default -5.0)"),
-    source: Optional[str] = Query(None, description="River data source: 'natural_earth' or 'hydrorivers'"),
-    scale_m: Optional[int] = Query(None, description="Natural Earth dataset tier: 10 (finest), 50, or 110"),
-    min_order: Optional[int] = Query(None, description="HydroRIVERS minimum Strahler order 1-9 (1=all, 9=major only)"),
-    order_exponent: Optional[float] = Query(None, description="HydroRIVERS depression scaling exponent"),
-    width_factor: Optional[float] = Query(None, description="HydroRIVERS line width multiplier (default 1.0; higher = thicker rivers)"),
-    projection: Optional[str] = Query(None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+    dim: Optional[int] = Query(
+        None, description="Output grid resolution (pixels per side)"),
+    depression_m: Optional[float] = Query(
+        None, description="Max river depression in metres (negative, default -5.0)"),
+    source: Optional[str] = Query(
+        None, description="River data source: 'natural_earth' or 'hydrorivers'"),
+    scale_m: Optional[int] = Query(
+        None, description="Natural Earth dataset tier: 10 (finest), 50, or 110"),
+    min_order: Optional[int] = Query(
+        None, description="HydroRIVERS minimum Strahler order 1-9 (1=all, 9=major only)"),
+    order_exponent: Optional[float] = Query(
+        None, description="HydroRIVERS depression scaling exponent"),
+    width_factor: Optional[float] = Query(
+        None, description="HydroRIVERS line width multiplier (default 1.0; higher = thicker rivers)"),
+    projection: Optional[str] = Query(
+        None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
     clip_valid_region: Optional[bool] = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
@@ -754,7 +779,8 @@ async def get_terrain_hydrology(
         "scl": scale_m, "mo": min_order, "oe": order_exponent,
         "wf": width_factor,
     }
-    cache_key = make_cache_key("hydrology", north, south, east, west, cache_extra)
+    cache_key = make_cache_key(
+        "hydrology", north, south, east, west, cache_extra)
     cached = read_array_cache("hydrology", cache_key)
     if cached is not None:
         arrs, meta = cached
@@ -861,7 +887,3 @@ async def get_terrain_hydrology(
     finally:
         # Always clear the in-flight slot so retries can start a fresh pipeline.
         _HYDRO_INFLIGHT.pop(cache_key, None)
-
-
-
-

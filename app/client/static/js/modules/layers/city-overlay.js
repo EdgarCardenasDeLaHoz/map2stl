@@ -120,7 +120,22 @@ function _buildGeoToPx(north, south, east, west, canvasX, canvasY, canvasW, canv
     const toRad      = d => d * Math.PI / 180;
     const mercYfn    = l => Math.log(Math.tan(Math.PI / 4 + toRad(Math.max(-85, Math.min(85, l))) / 2));
     const mercN      = mercYfn(north), mercS = mercYfn(south), mercRange = mercN - mercS;
-    const midCos     = Math.cos(toRad((north + south) / 2));
+    // Match backend maintain_dimensions projection math used by geo2stl/projections.py.
+    // For cosine/equidistant, backend scales each output row by cos(lat)/avg_cos.
+    const avgCos     = (() => {
+        const rows = Math.max(2, Math.round(canvasH));
+        let sum = 0;
+        for (let i = 0; i < rows; i++) {
+            const t = i / (rows - 1);
+            const lat = north - t * latRange;
+            sum += Math.cos(toRad(lat));
+        }
+        return sum / rows;
+    })();
+    const sinNorth   = Math.sin(toRad(north));
+    const sinSouth   = Math.sin(toRad(south));
+    const sinRange   = sinNorth - sinSouth;
+    const centerLon  = (east + west) / 2;
 
     return function geoToPx(lat, lon) {
         const xLin = (lon - west) / lonRange;
@@ -132,13 +147,22 @@ function _buildGeoToPx(north, south, east, west, canvasX, canvasY, canvasW, canv
                 yFrac = mercRange > 1e-10 ? (mercN - mercYfn(lat)) / mercRange : yLin;
                 break;
             case 'cosine':
-            case 'lambert':
-                xFrac = (1 - midCos) / 2 + xLin * midCos;
+            case 'equidistant': {
+                const rowCos = Math.cos(toRad(lat));
+                const scale = avgCos > 1e-10 ? (rowCos / avgCos) : 1;
+                xFrac = (1 - scale) / 2 + xLin * scale;
                 yFrac = yLin;
                 break;
+            }
+            case 'lambert': {
+                xFrac = xLin;
+                const sinLat = Math.sin(toRad(lat));
+                yFrac = Math.abs(sinRange) > 1e-10 ? (sinNorth - sinLat) / sinRange : yLin;
+                break;
+            }
             case 'sinusoidal': {
                 const rowCos = Math.cos(toRad(lat));
-                xFrac = (1 - rowCos) / 2 + xLin * rowCos;
+                xFrac = 0.5 + ((lon - centerLon) / lonRange) * rowCos;
                 yFrac = yLin;
                 break;
             }
@@ -146,6 +170,8 @@ function _buildGeoToPx(north, south, east, west, canvasX, canvasY, canvasW, canv
                 xFrac = xLin;
                 yFrac = yLin;
         }
+        xFrac = Math.max(0, Math.min(1, xFrac));
+        yFrac = Math.max(0, Math.min(1, yFrac));
         // PERF1: write into shared object, no allocation
         _pt.x = canvasX + xFrac * canvasW;
         _pt.y = canvasY + yFrac * canvasH;
