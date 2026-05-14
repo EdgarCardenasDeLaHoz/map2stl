@@ -1,6 +1,6 @@
 # Backend API Routes — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-05-14_
 
 For notebook and Python SDK tracing, pair this document with `sdk-workflow.md` and `../notebooks/Session_API_Reference.ipynb`.
 
@@ -43,7 +43,6 @@ without repeating the four bbox parsers in every endpoint.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET/POST | `/api/terrain/dem` | Fetch processed DEM |
-| GET/POST | `/api/terrain/dem/raw` | Fetch unprocessed DEM array |
 | GET/POST | `/api/terrain/water-mask` | Fetch water mask + ESA land cover. **Scale param:** `dim` (int, pixels per side, default 600) — server computes resolution and returns `resolution_m` in response. |
 | GET/POST | `/api/terrain/esa-land-cover` | Fetch ESA WorldCover classification raster. **Scale param:** `dim` (pixels per side, default 600) — same server-side resolution computation; returns `resolution_m`. |
 | GET | `/api/terrain/satellite` | Fetch satellite imagery (ESRI tiles) |
@@ -91,6 +90,8 @@ Primary `TerrainSession` touchpoints:
 | POST | `/api/cities` | Fetch OSM data (rejects >15 km diagonal); cached as `.json.gz` |
 | POST | `/api/cities/raster` | Rasterize OSM buildings/roads/waterways to a DEM-format height map (`values`, `width`, `height`, `vmin`, `vmax`) — used by `loadCityRaster()` in `city-render.js` |
 | POST | `/api/cities/export3mf` | Generate 3MF with terrain + building prisms |
+| GET | `/api/cities/google3d-available` | Check if Google 3D Tiles are available for the current bbox |
+| POST | `/api/cities/enhance-heights` | Refine building heights using an alternative height provider (e.g. Google 3D Tiles) |
 
 > **Two city rasterization endpoints exist:**
 > - `/api/cities/raster` — returns a flat height map in DEM format (direct canvas rendering via `city-render.js`)
@@ -137,7 +138,7 @@ Building height estimation from multiple data sources. Router uses prefix `/api/
 | POST | `/api/height/sources` | List available height data sources for a bbox |
 | POST | `/api/height/fetch` | Fetch building height raster from specified provider(s) |
 
-See [libraries.md](libraries.md) for the height provider architecture and
+See [arch.md](arch.md) for the height provider architecture and
 [height-pipeline-plan.md](height-pipeline-plan.md) for implementation status.
 
 ## Key Pydantic Models (`schemas.py`)

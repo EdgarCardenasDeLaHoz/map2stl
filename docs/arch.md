@@ -167,7 +167,7 @@ stateDiagram-v2
 
 ## Backend
 
-The backend (`app/server/`) is a thin layer over two support libraries: `geo2stl` (map projections, tile stitching) and `numpy2stl` (mesh generation). See [libraries.md](libraries.md) for the full import map and integration assessment.
+The backend (`app/server/`) is a thin layer over two support libraries: `geo2stl` (map projections, tile stitching) and `numpy2stl` (mesh generation). See below (Library Delegation section) for the full import map and integration assessment.
 
 ### Structure
 

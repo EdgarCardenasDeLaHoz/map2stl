@@ -1,6 +1,6 @@
 # JS Module Map — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-05-14_
 
 All modules in `app/client/static/js/modules/`, imported by `main.js` in dependency order.
 Modules expose functions via `window.*` — they do **not** import each other.
@@ -46,8 +46,9 @@ flowchart LR
 | `composite-dem.js` | `computeCompositeDem`, `setupCompositeDemControls` | Additive height contributions + ML feature arrays |
 | `water-mask.js` | `loadWaterMask`, `renderWaterMask`, `renderEsaLandCover` | Water mask + ESA land cover |
 | `city-overlay.js` | `loadCityData`, `renderCityOverlay`, `window.renderCityOnDEM` | OSM building/road/waterway overlay |
-| `city-render.js` | `loadCityRaster`, `_clearCityRasterCache` | City rasterization via /api/composite/city-raster |
-| `hydrology-overlay.js` | `window.loadHydrology`, `window.clearHydrology` | HydroRIVERS depression grid fetch + canvas render |
+| `city-render.js` | `loadCityRaster`, `_clearCityRasterCache` | City rasterization via `/api/cities/raster` |
+| `hydrology-overlay.js` | `window.loadHydrology`, `window.clearHydrology`, `window.cancelHydroLoad` | HydroRIVERS depression grid fetch + canvas render |
+| `water-hydrology-combined.js` | `loadWaterHydrology`, `clearWaterHydrology` | Unified water + hydrology combined layer; sets `appState.waterHydrologyCanvas` |
 
 ### `map/` — Map, globe, bbox
 | File | Key exports | Purpose |
@@ -61,6 +62,7 @@ flowchart LR
 |------|-------------|---------|
 | `regions.js` | `loadCoordinates`, `selectCoordinate`, `goToEdit` | Region CRUD, sidebar list, selection |
 | `region-ui.js` | `renderCoordinatesList`, `populateRegionsTable`, `groupRegionsByContinent`, `setupRegionsTable` | Sidebar views, notes, groups; paginated table (20/page, search filter via `_tablePage`/`_tableSearch`) |
+| `regions-import-export.js` | `exportRegionsJson`, `importRegionsJsonFile` | Bulk JSON export/import of saved regions + settings |
 
 ### `export/` — 3D export
 | File | Key exports | Purpose |
@@ -73,7 +75,9 @@ flowchart LR
 |------|-------------|---------|
 | `view-management.js` | `switchView`, `switchDemSubtab`, `cycleSidebarState` | Tab switching + sidebar state machine |
 | `app-setup.js` | `setupOpacityControls`, `loadAllLayers`, `saveCurrentRegion` | App init wiring helpers |
+| `cache-inventory.js` | `loadCacheInventory`, `setupCacheInventoryView` | Cache stats browser (Plotly chart + region table) |
 | `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset` | Preset save/load/apply; `PRESET_VERSION` migration; `_presetSnapshot` revert; `_migratePreset()` fills missing keys from built-in defaults |
+| `curve-editor-state.js` | `CurveEditorState`, `CURVE_PRESETS` | Curve editor state class + named preset definitions (shared by curve-editor.js and tests) |
 | `curve-editor.js` | `initCurveEditor`, `applyCurveTodem`, `interpolateCurve`, `undoCurve` | Elevation curve editor (spline + undo/redo) |
 | `keyboard-shortcuts.js` | (no named exports) | Keyboard shortcut event listeners |
 
@@ -90,12 +94,13 @@ flowchart LR
 The current order in `main.js` (must be preserved — foundation before dependents):
 ```
 core/events → core/api → core/cache → core/ui-helpers → core/state
-dem/dem-loader → dem/dem-gridlines → ui/presets → ui/curve-editor
+dem/dem-loader → dem/dem-gridlines → ui/presets → ui/curve-editor-state → ui/curve-editor
 layers/city-overlay → layers/city-render → layers/stacked-layers → layers/composite-dem
 export/export-handlers → export/model-viewer → map/compare-view
-regions/region-ui → dem/dem-merge → layers/water-mask
+regions/region-ui → regions/regions-import-export → dem/dem-merge → layers/water-mask
+layers/hydrology-overlay → layers/water-hydrology-combined
 map/map-globe → regions/regions → map/bbox-panel
-ui/app-setup → ui/keyboard-shortcuts
+ui/cache-inventory → ui/app-setup → ui/keyboard-shortcuts
 events/event-listeners-map → events/event-listeners-export → events/event-listeners-ui → events/event-listeners
 ui/view-management → dem/dem-main → app.js
 ```
@@ -210,6 +215,14 @@ Use grep: `grep -rn "function functionName" app/client/static/js/`.
 |----------|---------|
 | `loadHydrology()` | Fetch /api/terrain/hydrology, render depression grid |
 | `clearHydrology()` | Clear canvas + state + emit update |
+| `cancelHydroLoad()` | Abort any in-flight hydrology request |
+
+### layers/water-hydrology-combined.js
+
+| Function | Purpose |
+|----------|---------|
+| `loadWaterHydrology()` | Fetch water mask + hydrology in parallel, composite + render combined canvas |
+| `clearWaterHydrology()` | Clear combined canvas + `appState.waterHydrologyCanvas` |
 
 ### layers/stacked-layers.js
 
@@ -257,6 +270,13 @@ Use grep: `grep -rn "function functionName" app/client/static/js/`.
 | `renderCoordinatesList()` | Sidebar list view |
 | `groupRegionsByContinent(regions)` | Group by heuristic continent |
 | `initRegionNotes()` | Load notes from localStorage |
+
+### regions/regions-import-export.js
+
+| Function | Purpose |
+|----------|---------|
+| `exportRegionsJson()` | Download all saved regions + settings as JSON file |
+| `importRegionsJsonFile(file)` | Import regions from a JSON file blob, creating missing regions via POST |
 
 ### ui/presets.js
 

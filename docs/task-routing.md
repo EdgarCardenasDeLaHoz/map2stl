@@ -1,6 +1,6 @@
 # Task Routing — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-05-14_
 
 Use this document to choose the right files before editing.
 
@@ -76,6 +76,7 @@ Typical tasks:
 | Composite city raster | `app/server/routers/composite.py` |
 | Cache | `app/server/routers/cache.py` |
 | UI settings and metadata | `app/server/routers/settings.py` |
+| Building height estimation | `app/server/routers/height.py` |
 
 ## Session Client Routing
 

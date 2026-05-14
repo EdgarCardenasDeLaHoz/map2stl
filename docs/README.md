@@ -1,6 +1,6 @@
 # Docs Index — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-05-14_
 
 Start here if you opened the `docs/` folder directly and need the preferred reading path.
 
@@ -23,7 +23,7 @@ Start here if you opened the `docs/` folder directly and need the preferred read
 | Inspect runtime structure | `arch.md` |
 | Inspect frontend module ownership | `modules.md` and `state.md` |
 | Understand layer canvases / GPU memory | `layer-system.md` |
-| Understand library delegation patterns | `libraries.md` |
+| Understand library delegation patterns | `arch.md` (Library Delegation section) |
 
 ## Detailed References
 
@@ -31,7 +31,6 @@ These are useful after orientation, but they are not the best first stop:
 
 - `terrain-api-audit.md` — full call-stack audit of all `/api/terrain/` endpoints with quality analysis
 - `layer-system.md` — complete reference for the 7-layer canvas pipeline, GPU memory management, and per-layer data flows
-- `libraries.md` — support library import map and thin-wrapper assessment
 - `issues.md`
 - `ux-audit.md`
 - design and proposal documents tied to a specific subsystem

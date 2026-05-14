@@ -73,7 +73,7 @@ _Last updated: 2026-04-19_
 
 ## Library Integration Debt
 
-See [libraries.md](libraries.md) for the full import map and thin-wrapper assessment.
+See [arch.md](arch.md) for the full import map and thin-wrapper assessment.
 
 | ID | Description | File(s) | Effort | Status |
 |----|-------------|---------|--------|--------|

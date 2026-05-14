@@ -1,6 +1,6 @@
 # Global State Reference — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-05-14_
 
 All variables live on the `window.appState` reactive Proxy (from `modules/core/state.js`). Modules can subscribe via `window.appState.on('key', fn)`. Legacy `window.get*/set*` aliases are kept for backward compatibility.
 
@@ -88,6 +88,7 @@ flowchart TD
 | `osmCityData` | Object\|null | `{buildings, roads, waterways, walls}` GeoJSON. Features have `height_m`, `road_width_m` (server), `terrain_z` (client), `_bbox` (pre-computed). |
 | `window.renderCityOnDEM` | Function | Set by city-overlay.js; paints `.city-dem-overlay` on DEM canvas |
 | `hydrologySourceCanvas` | HTMLCanvasElement\|null | Offscreen canvas with rendered river depression grid (set by hydrology-overlay.js) |
+| `waterHydrologyCanvas` | HTMLCanvasElement\|null | Offscreen canvas with the combined water + hydrology layer (set by water-hydrology-combined.js); read by stacked-layers.js |
 | `lastLandCoverData` | Object\|null | ESA WorldCover classification response |
 
 ## 3D Viewer

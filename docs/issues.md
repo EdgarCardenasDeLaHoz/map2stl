@@ -51,7 +51,7 @@ No open tasks remain. All items have been completed.
 
 `app/server/core/` is now a thin wrapper over `geo2stl` and `numpy2stl` as intended.
 All five B-LIB items from [proposals.md](proposals.md#library-integration-debt) are complete.
-See [libraries.md](libraries.md) for the current import map.
+See [arch.md](arch.md) for the current import map.
 
 | ID | Summary | Severity | Status |
 |----|---------|----------|--------|

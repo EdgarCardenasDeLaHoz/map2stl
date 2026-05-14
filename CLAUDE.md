@@ -14,7 +14,7 @@
 ```bash
 cd strm2stl && source ../.venv/bin/activate
 python -m uvicorn app.server.server:app --port 9000 --reload   # starts FastAPI
-python -m pytest tests/ -v                                     # run all tests (532 pass, 16 test files)
+python -m pytest tests/ -v                                     # run all tests (651 pass; tests/e2e/ requires playwright — excluded via pytest.ini)
 ```
 
 ## Recommended Read Order
@@ -42,9 +42,9 @@ python -m pytest tests/ -v                                     # run all tests (
 | Frontend state variables | `docs/state.md` |
 | View tabs / navigation | `docs/arch.md` |
 | Data flow debugging | `docs/arch.md` (Data Flow section) |
-| Function lookup | `docs/functions.md` |
+| Function lookup | `docs/modules.md` (Function Index section) |
 | Known bugs / tech debt | `docs/issues.md` |
-| Library integration / geo2stl / numpy2stl | `docs/libraries.md` |
+| Library integration / geo2stl / numpy2stl | `docs/arch.md` (Library Delegation section) |
 | JS module map | `docs/modules.md` |
 | Writing tests | `tests/conftest.py` + relevant test file |
 | Approving / denying AI proposals | `docs/proposals.md` |
@@ -60,17 +60,18 @@ strm2stl/
 │   │   ├── server.py      ← FastAPI app + lifespan  (entry: uvicorn app.server.server:app)
 │   │   ├── config.py      ← constants, OPENTOPO_DATASETS, API keys
 │   │   ├── schemas.py     ← all Pydantic models
-│   │   ├── core/          ← dem.py, export.py, cache.py, db.py, osm.py, cities_3d.py,
-│   │   │                    hydrorivers.py, hydrology.py, sat.py, projection.py,
-│   │   │                    validation.py, responses.py, height/ subpackage
+│   │   ├── core/          ← cache.py, cache_inspector.py, db.py, export.py,
+│   │   │                    export_params.py, export_tasks.py, osm_cache_policy.py,
+│   │   │                    responses.py, terrain_raster.py, validation.py,
+│   │   │                    height/ subpackage (service.py, train.py)
 │   │   └── routers/       ← terrain.py, regions.py, export.py, cities.py, cache.py,
 │   │                        settings.py, composite.py, height.py
 │   ├── client/            ← browser client (HTML/CSS/JS)
-│   │   ├── static/js/     ← main.js, modules/ (30 ES modules in 8 subdirs)
+│   │   ├── static/js/     ← main.js, modules/ (35 ES modules in 8 subdirs)
 │   │   ├── static/css/    ← app.css
 │   │   └── templates/     ← index.html
 │   └── session/           ← Python SDK client (talks to server over HTTP)
-│       ├── terrain_session.py  ← ~1656 lines (refactored: 7 helpers, 5 properties)
+│       ├── terrain_session.py  ← ~3100 lines (Python SDK client)
 │       └── viz.py
 │
 │  ── geo/mesh libraries ─────────────────────────────────────────────────
@@ -78,7 +79,7 @@ strm2stl/
 ├── city2stl/              ← OSM/building to 3D mesh helpers
 │
 │  ── project tooling ────────────────────────────────────────────────────
-├── tests/                 ← pytest suite (conftest.py + 16 test files)
+├── tests/                 ← pytest suite (conftest.py + 32 test files; e2e/ requires playwright)
 ├── notebooks/             ← Jupyter notebooks + helpers (API_Terrain, Session_API_Reference, …)
 ├── tools/                 ← utility scripts + slicer_configs/
 ├── docs/                  ← all reference docs (api, arch, state, modules, proposals, …)
@@ -119,7 +120,7 @@ strm2stl/
 | Task-to-file routing | `docs/task-routing.md` |
 | Architecture + data flows | `docs/arch.md` |
 | Global state variables | `docs/state.md` |
-| Function index | `docs/functions.md` |
+| Function index | `docs/modules.md` (Function Index section) |
 | API routes + Pydantic models | `docs/api.md` |
 | JS module map | `docs/modules.md` |
 | Known issues + feature status | `docs/issues.md` |
