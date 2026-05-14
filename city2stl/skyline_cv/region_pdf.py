@@ -1777,7 +1777,7 @@ def _seed_multiview_registration(
                 reg.get("contour"), image)
             _, _bmask = _neural_sky_and_building_masks(image)
             mask_segs = detect_buildings_from_mask(
-                _bmask, contour=reg.get("contour")
+                _bmask, contour=reg.get("contour"), image=image,
             )
             segments = _merge_silhouette_sources(contour_segs, mask_segs)
             all_proj_list = reg.get(

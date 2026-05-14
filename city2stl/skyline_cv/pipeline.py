@@ -1118,6 +1118,8 @@ def detect_buildings_from_mask(
     min_height_px: int = 25,
     split_wide_components: bool = True,
     contour: "np.ndarray | None" = None,
+    image: "np.ndarray | None" = None,
+    max_splits_per_component: int = 12,
 ) -> list[dict]:
     """Identify individual buildings as connected components of the SegFormer
     building mask.
@@ -1147,6 +1149,31 @@ def detect_buildings_from_mask(
     if not mask.any():
         return []
     h, w = mask.shape[:2]
+
+    # Pre-compute a per-column vertical-gradient signal across the full
+    # frame (Phase A — Plan, STATUS.md). Captures facade edges between
+    # adjacent towers that share a roofline. Computed once here, sliced
+    # per-component in the peak loop below. Only used when an image is
+    # supplied; if not, the existing contour + col-counts signals carry
+    # the work.
+    grad_col_signal: "np.ndarray | None" = None
+    if image is not None and image.ndim == 3:
+        try:
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY).astype(np.float32)
+            sx = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3))
+            # Integrate vertical edges within the BUILDING band only. Rows
+            # outside the band would add noise from water/sky textures.
+            band_for_grad = compute_building_band(building_mask, slack_px=8)
+            if band_for_grad is not None:
+                y0g, y1g = band_for_grad
+                grad_col_signal = sx[y0g : y1g + 1].sum(axis=0)
+            else:
+                grad_col_signal = sx.sum(axis=0)
+            # Mild smoothing — facade edges are thin but noise is thinner.
+            grad_col_signal = gaussian_filter1d(
+                grad_col_signal, sigma=1.5).astype(np.float32)
+        except Exception:
+            grad_col_signal = None
 
     # Pre-crop to the building band: zero out mask rows above/below the band
     # where building pixels actually exist. Stops connected components from
@@ -1198,12 +1225,16 @@ def detect_buildings_from_mask(
         peaks: np.ndarray = np.empty(0, dtype=np.int64)
         if split_wide_components and cw >= int(1.5 * min_width_px):
             from scipy.signal import find_peaks  # scipy already a project dep
-            # Union peaks from two signals to cover both failure modes:
+            # Union peaks from up to three signals to cover all failure modes:
             #   1. Contour-based — finds rooftop peaks even when adjacent
             #      towers share base pixels in the mask.
             #   2. Mask col-counts — finds tall thin spires that don't carve
-            #      a deep valley in the contour (because the spire's top is
-            #      still in the sky, not "between" anything).
+            #      a deep valley in the contour (the spire's top is still in
+            #      the sky, not "between" anything).
+            #   3. Vertical-gradient (Phase A) — facade edges between
+            #      adjacent towers with similar rooflines that neither (1)
+            #      nor (2) resolve. Most useful in long row-of-towers cases
+            #      (Bocagrande from across the bay, Chicago Loop).
             signals: list[np.ndarray] = []
             if contour is not None and contour.size >= x + cw:
                 contour_slice = np.asarray(
@@ -1214,17 +1245,16 @@ def detect_buildings_from_mask(
                         contour_slice), contour_slice, fill)
                 signals.append(-contour_slice)
             signals.append(col_counts.astype(np.float32))
+            if grad_col_signal is not None:
+                signals.append(grad_col_signal[x : x + cw].astype(np.float32))
 
             all_peaks: list[int] = []
             for signal in signals:
                 sig_std = float(np.std(signal))
-                # Aggressively low prominence — adjacent towers on a panorama
-                # often have similar roof heights, so the contour valleys
-                # between them are shallow. We require only a small
-                # prominence relative to the signal variance.
                 prom = max(1.5, sig_std * 0.15)
                 p, _ = find_peaks(signal, distance=8, prominence=prom)
                 all_peaks.extend(int(v) for v in p.tolist())
+
             # Dedup with a 10-px tolerance — peaks within that window from
             # different signals are the same tower.
             if all_peaks:
@@ -1233,6 +1263,30 @@ def detect_buildings_from_mask(
                 for p in all_peaks[1:]:
                     if p - dedup[-1] >= 10:
                         dedup.append(p)
+                # Anti-over-split guard: require mask-height support for
+                # each peak. Gradient signal can fire on shadows / window
+                # rows / sign edges that aren't actual building boundaries;
+                # the mask-height filter says "only keep peaks that ALSO
+                # have substantial mask-building support at this column."
+                col_peak_h = float(col_counts.max())
+                support_threshold = max(8.0, col_peak_h * 0.35)
+                supported = [
+                    p for p in dedup
+                    if col_counts[p] >= support_threshold
+                ]
+                if supported:
+                    dedup = supported
+                # Cap the number of splits to avoid degenerate over-segmentation
+                # of very wide components (a 1500-px-wide row of identical
+                # towers shouldn't produce 30+ tiny segments).
+                if len(dedup) > max_splits_per_component:
+                    # Keep the top-N by col-height (tallest support wins).
+                    dedup = sorted(
+                        dedup,
+                        key=lambda p: float(col_counts[p]),
+                        reverse=True,
+                    )[:max_splits_per_component]
+                    dedup.sort()
                 peaks = np.asarray(dedup, dtype=np.int64)
 
         if peaks.size >= 2:
