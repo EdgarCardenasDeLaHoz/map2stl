@@ -1225,17 +1225,48 @@ def detect_buildings_from_mask(
         peaks: np.ndarray = np.empty(0, dtype=np.int64)
         if split_wide_components and cw >= int(1.5 * min_width_px):
             from scipy.signal import find_peaks  # scipy already a project dep
-            # Union peaks from up to three signals to cover all failure modes:
-            #   1. Contour-based — finds rooftop peaks even when adjacent
-            #      towers share base pixels in the mask.
-            #   2. Mask col-counts — finds tall thin spires that don't carve
-            #      a deep valley in the contour (the spire's top is still in
-            #      the sky, not "between" anything).
-            #   3. Vertical-gradient (Phase A) — facade edges between
-            #      adjacent towers with similar rooflines that neither (1)
-            #      nor (2) resolve. Most useful in long row-of-towers cases
-            #      (Bocagrande from across the bay, Chicago Loop).
-            signals: list[np.ndarray] = []
+            # Phase A rework: gradient peaks are facade BOUNDARIES (between
+            # towers), not building centers. Previously we unioned them with
+            # contour and col-counts peaks, then applied a mask-height
+            # support threshold — which rejected the gradient peaks because
+            # facade gaps have LOW mask coverage, not high. The result was
+            # zero gradient contribution on the exact case it's needed for:
+            # rows of similar-height towers with flat col_counts.
+            #
+            # New approach:
+            #   1. Find gradient peaks → use them as BOUNDARIES that
+            #      subdivide the component's column range.
+            #   2. Within each subrange, pick ONE peak (col_counts argmax)
+            #      as that subdivision's building center.
+            #   3. Union with contour peaks (still useful for spires).
+            #
+            # This lets the gradient drive splitting even when col_counts
+            # is flat — exactly the merged-row-of-towers case.
+            grad_boundaries: list[int] = []
+            if grad_col_signal is not None:
+                grad_slice = grad_col_signal[x : x + cw].astype(np.float32)
+                grad_std = float(np.std(grad_slice))
+                grad_prom = max(1.5, grad_std * 0.20)
+                gp, _ = find_peaks(
+                    grad_slice, distance=10, prominence=grad_prom)
+                grad_boundaries = [int(v) for v in gp.tolist()]
+
+            # Build the subrange list using gradient boundaries.
+            subrange_edges = [0, *sorted(grad_boundaries), cw - 1]
+            # Per subrange, pick the col_counts argmax as the candidate
+            # building center. Skip degenerate (too-narrow) subranges.
+            grad_derived_peaks: list[int] = []
+            for a, b in zip(subrange_edges[:-1], subrange_edges[1:]):
+                if b - a < 6:
+                    continue
+                sub = col_counts[a : b + 1]
+                if sub.size == 0 or sub.max() < 6:
+                    continue
+                grad_derived_peaks.append(int(np.argmax(sub)) + a)
+
+            # Also find contour peaks (rooftop spires) — these still help
+            # when towers have distinctive rooflines even within a flat row.
+            contour_peaks: list[int] = []
             if contour is not None and contour.size >= x + cw:
                 contour_slice = np.asarray(
                     contour[x: x + cw], dtype=np.float32)
@@ -1243,17 +1274,21 @@ def detect_buildings_from_mask(
                     fill = float(np.nanmedian(contour_slice))
                     contour_slice = np.where(np.isfinite(
                         contour_slice), contour_slice, fill)
-                signals.append(-contour_slice)
-            signals.append(col_counts.astype(np.float32))
-            if grad_col_signal is not None:
-                signals.append(grad_col_signal[x : x + cw].astype(np.float32))
+                c_std = float(np.std(contour_slice))
+                c_prom = max(1.5, c_std * 0.15)
+                cp, _ = find_peaks(-contour_slice, distance=8, prominence=c_prom)
+                contour_peaks = [int(v) for v in cp.tolist()]
 
-            all_peaks: list[int] = []
-            for signal in signals:
-                sig_std = float(np.std(signal))
-                prom = max(1.5, sig_std * 0.15)
-                p, _ = find_peaks(signal, distance=8, prominence=prom)
-                all_peaks.extend(int(v) for v in p.tolist())
+            # And col_counts peaks (the original signal) — these catch
+            # narrow spires that don't show up in the gradient subdivision
+            # because they're entirely within one gap-bounded subrange.
+            col_std = float(np.std(col_counts))
+            col_prom = max(1.5, col_std * 0.15)
+            cc_p, _ = find_peaks(col_counts, distance=8, prominence=col_prom)
+            col_peaks = [int(v) for v in cc_p.tolist()]
+
+            # Union all three sources.
+            all_peaks = grad_derived_peaks + contour_peaks + col_peaks
 
             # Dedup with a 10-px tolerance — peaks within that window from
             # different signals are the same tower.
@@ -1264,12 +1299,13 @@ def detect_buildings_from_mask(
                     if p - dedup[-1] >= 10:
                         dedup.append(p)
                 # Anti-over-split guard: require mask-height support for
-                # each peak. Gradient signal can fire on shadows / window
-                # rows / sign edges that aren't actual building boundaries;
-                # the mask-height filter says "only keep peaks that ALSO
-                # have substantial mask-building support at this column."
+                # each peak. With gradient now used to subdivide (not as a
+                # peak source), the support threshold is purely a noise
+                # filter on contour/col peaks. The gradient-derived peaks
+                # already passed through the col_counts argmax, so they
+                # implicitly have support.
                 col_peak_h = float(col_counts.max())
-                support_threshold = max(8.0, col_peak_h * 0.35)
+                support_threshold = max(6.0, col_peak_h * 0.25)
                 supported = [
                     p for p in dedup
                     if col_counts[p] >= support_threshold
@@ -2283,7 +2319,12 @@ def estimate_heights_from_registration(
     buildings: Sequence[BuildingRecord],
     camera_height_m: float,
     camera_elev_m: float = 0.0,
+    *,
+    trace=None,
 ) -> list[RegisteredBuildingEstimate]:
+    # Optional `trace` (HeightTraceRecorder from height_trace.py): when set, the
+    # function emits a row at every gate / decision point. Behaviour-neutral —
+    # see docs/glass-roof-height-fix-plan.md Phase 1.
     contour = np.asarray(registration["contour"], dtype=np.float32)
     best_offset = float(registration["best_offset"])
     best_score = float(registration.get("best_score", float("inf")))
@@ -2324,13 +2365,35 @@ def estimate_heights_from_registration(
         _all_fwd = np.empty(0, dtype=np.float32)
 
     estimates: list[RegisteredBuildingEstimate] = []
+    view_name = captured.viewpoint.name
     for building in buildings:
-        proj = projections.get(building.feature_id)
+        fid = building.feature_id
+        if trace is not None:
+            trace(
+                "building_start",
+                view_name=view_name,
+                feature_id=fid,
+                name=building.name,
+                tag_h=building.height_tag_m,
+                area_m2=building.area_m2,
+                terrain_elev_m=float(building.terrain_elev_m),
+            )
+        proj = projections.get(fid)
         if not proj:
+            if trace is not None:
+                trace("drop_no_projection", view_name=view_name, feature_id=fid)
             continue
 
         x_px = int(round(proj["x_px"]))
         if x_px < 0 or x_px >= contour.size:
+            if trace is not None:
+                trace(
+                    "drop_x_out_of_bounds",
+                    view_name=view_name,
+                    feature_id=fid,
+                    x_px=int(x_px),
+                    contour_size=int(contour.size),
+                )
             continue
 
         # Closest-in-column-bin gate: if another projection within ±15 px of
@@ -2342,12 +2405,38 @@ def estimate_heights_from_registration(
         # near tall roof" pattern.
         forward = float(proj["forward_m"])
         if forward <= 1.0:
+            if trace is not None:
+                trace(
+                    "drop_forward_too_close",
+                    view_name=view_name,
+                    feature_id=fid,
+                    forward_m=forward,
+                )
             continue
         if _all_x.size:
             nearby = np.abs(_all_x - float(proj["x_px"])) <= 15.0
             if nearby.any():
                 closest_in_bin = float(_all_fwd[nearby].min())
+                if trace is not None:
+                    trace(
+                        "closest_in_bin",
+                        view_name=view_name,
+                        feature_id=fid,
+                        x_px=float(proj["x_px"]),
+                        forward_m=forward,
+                        closest_in_bin_m=closest_in_bin,
+                        rivals_in_bin=int(nearby.sum()),
+                    )
                 if forward > closest_in_bin + 200.0:
+                    if trace is not None:
+                        trace(
+                            "drop_closest_in_bin",
+                            view_name=view_name,
+                            feature_id=fid,
+                            forward_m=forward,
+                            closest_in_bin_m=closest_in_bin,
+                            margin_m=forward - closest_in_bin,
+                        )
                     continue
 
         # Footprint-driven roof sampling: use the FULL projected x-range of
@@ -2378,6 +2467,17 @@ def estimate_heights_from_registration(
                 pass  # fall through to contour-y as above
             coverage = 0.0
 
+        if trace is not None:
+            trace(
+                "roof_y_from_mask",
+                view_name=view_name,
+                feature_id=fid,
+                x_range=list(x_range) if x_range is not None else None,
+                roof_y_mask=float(roof_y_mask) if roof_y_mask is not None else None,
+                coverage=float(coverage) if coverage is not None else None,
+                mask_available=bool(building_mask is not None),
+            )
+
         if roof_y_mask is not None:
             y_px = float(roof_y_mask)
             # Glass-facade override: SegFormer's building class often stops
@@ -2401,6 +2501,8 @@ def estimate_heights_from_registration(
                         # above the spire).
                         contour_top_y = float(np.percentile(finite, 20))
                         gap = y_px - contour_top_y
+                        override_fired = False
+                        implied_h_val: float | None = None
                         if gap > 15.0:
                             # Sanity-check the gap: it should be plausible as
                             # additional tower height at this distance. A
@@ -2413,11 +2515,31 @@ def estimate_heights_from_registration(
                                 math.tan(angle_at_contour)
                             implied_h = cam_z + top_at_contour - float(
                                 building.terrain_elev_m)
+                            implied_h_val = float(implied_h)
                             if 0.0 <= implied_h <= 300.0:
                                 y_px = contour_top_y
+                                override_fired = True
+                        if trace is not None:
+                            trace(
+                                "contour_override",
+                                view_name=view_name,
+                                feature_id=fid,
+                                mask_roof_y=float(roof_y_mask),
+                                contour_top_y=contour_top_y,
+                                gap_px=float(gap),
+                                implied_h_m=implied_h_val,
+                                fired=override_fired,
+                            )
         else:
             y_px = float(contour[x_px])
             if not np.isfinite(y_px):
+                if trace is not None:
+                    trace(
+                        "drop_contour_nan",
+                        view_name=view_name,
+                        feature_id=fid,
+                        x_px=int(x_px),
+                    )
                 continue
 
         pitch_rad = math.radians(captured.viewpoint.pitch)
@@ -2426,7 +2548,30 @@ def estimate_heights_from_registration(
         # Height of the building above its own base (ground at footprint):
         # top_z = cam_z + forward*tan(angle); height_above_base = top_z - bld_terrain_z
         height_m = cam_z + top_above_camera - float(building.terrain_elev_m)
+        if trace is not None:
+            trace(
+                "pinhole_math",
+                view_name=view_name,
+                feature_id=fid,
+                y_px=float(y_px),
+                cy=float(cy),
+                f_px=float(f_px),
+                pitch_rad=float(pitch_rad),
+                angle_rad=float(angle_rad),
+                forward_m=float(forward),
+                top_above_camera_m=float(top_above_camera),
+                cam_z_m=float(cam_z),
+                terrain_elev_m=float(building.terrain_elev_m),
+                height_m=float(height_m),
+            )
         if not np.isfinite(height_m):
+            if trace is not None:
+                trace(
+                    "drop_height_nan",
+                    view_name=view_name,
+                    feature_id=fid,
+                    height_m=float(height_m) if math.isfinite(height_m) else None,
+                )
             continue
 
         # Geometric y-consistency gate: even before invoking the per-building
@@ -2449,8 +2594,26 @@ def estimate_heights_from_registration(
         # Convert angle bounds back to y_px bounds (inverted: smaller y = higher).
         min_y_for_building = cy - f_px * math.tan(max_top_angle - pitch_rad)
         max_y_for_building = cy - f_px * math.tan(min_top_angle - pitch_rad)
+        if trace is not None:
+            trace(
+                "geometric_y_gate",
+                view_name=view_name,
+                feature_id=fid,
+                y_px=float(y_px),
+                min_y_for_building=float(min_y_for_building),
+                max_y_for_building=float(max_y_for_building),
+            )
         # Allow ±5 px slack for rounding and mask quantisation.
         if y_px < min_y_for_building - 5 or y_px > max_y_for_building + 5:
+            if trace is not None:
+                trace(
+                    "drop_geometric_gate",
+                    view_name=view_name,
+                    feature_id=fid,
+                    y_px=float(y_px),
+                    min_y_for_building=float(min_y_for_building),
+                    max_y_for_building=float(max_y_for_building),
+                )
             continue
 
         # Plausibility cap: only enforce the strict 5× window when we have a
@@ -2464,12 +2627,28 @@ def estimate_heights_from_registration(
         if building.height_tag_m is not None:
             tag_h = float(building.height_tag_m)
             if tag_h >= 3.0 and (pred_capped > tag_h * 5.0 or pred_capped < tag_h * 0.20):
+                if trace is not None:
+                    trace(
+                        "drop_plausibility_tag",
+                        view_name=view_name,
+                        feature_id=fid,
+                        tag_h=tag_h,
+                        pred_h=float(pred_capped),
+                    )
                 continue
         else:
             # Loose check: predictions under ~3 m for a >50 m² footprint
             # almost always indicate roof_y was sampled in water/sky rather
             # than on the building.
             if building.area_m2 > 50.0 and pred_capped < 3.0:
+                if trace is not None:
+                    trace(
+                        "drop_plausibility_area",
+                        view_name=view_name,
+                        feature_id=fid,
+                        area_m2=float(building.area_m2),
+                        pred_h=float(pred_capped),
+                    )
                 continue
 
         # Unmatched buildings (not locked to a skyline peak): assign a
@@ -2486,19 +2665,31 @@ def estimate_heights_from_registration(
         confidence = float(np.clip(score_norm * x_err_score *
                            tag_score * forward_score, 0.05, 1.0))
 
-        estimates.append(
-            RegisteredBuildingEstimate(
-                feature_id=building.feature_id,
-                name=building.name,
-                view_name=captured.viewpoint.name,
-                heading_offset_deg=best_offset,
-                x_px=float(proj["x_px"]),
-                y_px=y_px,
-                forward_m=forward,
-                estimated_height_m=float(max(0.0, height_m)),
-                confidence=confidence,
-            )
+        estimate = RegisteredBuildingEstimate(
+            feature_id=building.feature_id,
+            name=building.name,
+            view_name=captured.viewpoint.name,
+            heading_offset_deg=best_offset,
+            x_px=float(proj["x_px"]),
+            y_px=y_px,
+            forward_m=forward,
+            estimated_height_m=float(max(0.0, height_m)),
+            confidence=confidence,
         )
+        if trace is not None:
+            trace(
+                "emit",
+                view_name=view_name,
+                feature_id=fid,
+                x_px=estimate.x_px,
+                y_px=estimate.y_px,
+                forward_m=estimate.forward_m,
+                height_m=estimate.estimated_height_m,
+                confidence=estimate.confidence,
+                tag_h=building.height_tag_m,
+                heading_offset_deg=float(best_offset),
+            )
+        estimates.append(estimate)
 
     return estimates
 
