@@ -158,6 +158,10 @@ class SeedViewRegistration:
     # with lots of water/sky don't waste page area. None = no crop, show
     # full frame.
     band_y: tuple[int, int] | None = None
+    # True for seeds declared in sites/<region>.json `negative_seeds`. The
+    # view is still rendered (so the user can verify the pipeline isn't
+    # producing spurious estimates) but no heights are aggregated.
+    is_negative: bool = False
 
 
 def _resolve_api_key(explicit_key: str | None = None) -> str:
@@ -554,6 +558,33 @@ def _load_site_seed_urls(region_name: str) -> list[str]:
     if not isinstance(raw, list):
         return []
     return [str(x).strip() for x in raw if str(x).strip()]
+
+
+def _load_site_negative_seeds(region_name: str) -> set[str]:
+    """Load optional negative-example seed names from
+    ``sites/<region>.json``.
+
+    A seed listed in ``negative_seeds`` is processed normally (its spin
+    views are captured, segmented, and rendered) but its per-view height
+    estimates are NOT contributed to the aggregate. Use this for camera
+    positions that aren't actually skyline viewpoints (gas stations,
+    under-bridge parking, building interiors). The negative examples are
+    a manually-curated regression suite — the pipeline should produce
+    zero useful height contributions from them; if it ever starts
+    producing estimates, that signals a screening / matching defect.
+    """
+    cfg = Path(__file__).resolve().parent / \
+        "sites" / f"{region_name.lower()}.json"
+    if not cfg.exists():
+        return set()
+    try:
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    raw = data.get("negative_seeds")
+    if not isinstance(raw, list):
+        return set()
+    return {str(x) for x in raw}
 
 
 def _load_site_anchor_overrides(region_name: str) -> dict[str, float]:
@@ -1332,6 +1363,8 @@ def _seed_multiview_registration(
     buildings: list[BuildingRecord],
     api_key: str,
     spin_step_deg: float = 30.0,
+    anchor_overrides: dict[str, float] | None = None,
+    negative_seeds: set[str] | None = None,
 ) -> tuple[list[SeedViewRegistration], list[dict], list["StitchedPanoResult"]]:
     """Capture a full 360° spin (every spin_step_deg) at each seed location.
 
@@ -1613,7 +1646,16 @@ def _seed_multiview_registration(
 
         weights = [_view_weight(b) for (b, _w, _v) in masks_per_view]
         total_weight = float(sum(weights))
-        if total_weight <= 0:
+        # Manual override: if sites/<region>.json provides an
+        # `anchor_offsets_deg` entry for this seed, skip the IoU
+        # optimization entirely. This gives the user a deterministic
+        # escape hatch when the algorithm picks a wrong local maximum
+        # (degenerate score landscape for seeds with buildings in
+        # multiple directions).
+        override = (anchor_overrides or {}).get(seed.name)
+        if override is not None:
+            anchor_offset = float(override)
+        elif total_weight <= 0:
             anchor_offset = 0.0
         else:
             def _joint_score(cand: float) -> float:
@@ -1702,11 +1744,21 @@ def _seed_multiview_registration(
             is_aerial = cap.viewpoint.pitch < -8.0
 
             est_for_view: list = []
+            is_negative_seed = bool(
+                negative_seeds and seed.name in negative_seeds)
             # Only "good" and "medium" views contribute height estimates.
             # "weak" views pass the flat-horizon gate but have low skyline
             # structure — their estimates are unreliable (e.g. ocean horizon
             # with minimal buildings). They still appear in the PDF for review.
-            if not is_aerial and sv_label not in ("weak", "rejected"):
+            # Negative-example seeds (declared in sites/<region>.json as
+            # ``negative_seeds``) are processed end-to-end so the PDF can
+            # show their views, but contribute NO height estimates to the
+            # aggregate. They serve as a regression suite for screening +
+            # matching quality: the pipeline should reject these as non-
+            # skyline; any time it doesn't, that's a defect to fix.
+            if (not is_aerial
+                    and sv_label not in ("weak", "rejected")
+                    and not is_negative_seed):
                 est_for_view = estimate_heights_from_registration(
                     cap,
                     reg,
@@ -1818,10 +1870,21 @@ def _seed_multiview_registration(
                     is_aerial=is_aerial,
                     iou=float(reg.get("best_iou", 0.0)),
                     band_y=band,
+                    is_negative=is_negative_seed,
                 )
             )
 
         # ── Pass 3 (per seed): stitched-pano detection ───────────────────────
+        # Negative seeds (declared in sites/<region>.json as ``negative_seeds``)
+        # are non-skyline locations used as regression examples.  They already
+        # contributed no height estimates in Pass 2.  Skipping Pass 3 entirely
+        # means they don't generate a pano page, which keeps the report clean
+        # and avoids wasting SegFormer inference + building-matching time on
+        # scenes that will never yield useful annotations.
+        is_negative_seed_for_pano = bool(negative_seeds and seed.name in negative_seeds)
+        if is_negative_seed_for_pano:
+            continue
+
         # Stitch per-view masks (already computed during Pass 2) into one
         # 360° strip. Building silhouettes are then detected on the unified
         # mask, projected OSM footprints are mapped to stitched columns by
@@ -2323,6 +2386,8 @@ def _render_seed_view_page(
 ) -> None:
     fig = plt.figure(figsize=(14, 8.5))
     aerial_tag = "  [AERIAL — height skipped]" if sv.is_aerial else ""
+    if getattr(sv, "is_negative", False):
+        aerial_tag += "  [NEGATIVE EXAMPLE — estimates excluded]"
     # Show EFFECTIVE geographic heading (api_heading + offset) in the title
     # so the user can match the depicted scene to a compass direction. The
     # raw `heading` field is the API parameter, which for Photo Spheres is
@@ -2959,8 +3024,17 @@ def run_region_pdf_report(
     # Screen seeds + auto-proposals together so the PDF map shows all candidates.
     all_points = seeds + auto_points
     screened = _screen_locations(all_points, api_key)
+    anchor_overrides = _load_site_anchor_overrides(region_name)
+    negative_seeds = _load_site_negative_seeds(region_name)
+    if anchor_overrides:
+        print(f"[anchor_overrides] {anchor_overrides}")
+    if negative_seeds:
+        print(f"[negative_seeds] {sorted(negative_seeds)}")
     seed_views, building_heights, pano_results = _seed_multiview_registration(
-        seeds, building_records, api_key)
+        seeds, building_records, api_key,
+        anchor_overrides=anchor_overrides,
+        negative_seeds=negative_seeds,
+    )
 
     # Load surveyed ground-truth heights from sites/<region>.json if present.
     known_heights = _load_known_heights(region_name, building_records)

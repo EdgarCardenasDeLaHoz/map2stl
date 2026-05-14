@@ -11,6 +11,12 @@
     "https://www.google.com/maps/@10.4020262,-75.5456527,3a,75y,99.65h,84.31t/data=!3m8!1e1!3m6!1sCIHM0ogKEICAgICasP6XhAE!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf5245Jm7AGMdbWLGRDkarL-kk1D3rUx5AgE7zg-IEbo-zZc3xRBDAvdaKiogr5u0ye5XTJzjNHbnI1RYFY4wMLX1LciVWtCLjPbMZ7W_88OuGeTkUZJ3qNw5Ee8GAQXuvMNuS4GN0g%3Dw900-h600-k-no-pi5.687463615550669-ya99.65165633202638-ro0-fo100!7i4096!8i2048?entry=ttu&g_ep=EgoyMDI2MDUwNi4wIKXMDSoASAFQAw%3D%3D",
     "https://www.google.com/maps/place/Bahia+de+Castillo+Grande/@10.3967483,-75.5492917,3a,75y,320.28h,82.71t/data=!3m8!1e1!3m6!1sCIHM0ogKEICAgIC08ef0jwE!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf50q3OEcIbxu781EV6TdnT3F6P4UxYRDiDCLUzfjNqbi3iSxjfOV48w42Fi4cNG4pZFSxw7voZbVLpqkP2IhuuwNvMFJjCoXJ6Yg493rnPZphqnMW_oA7XnzjcBPo9lZ6CTPTMKGOg%3Dw900-h600-k-no-pi7.293251704163509-ya320.2824419843646-ro0-fo100!7i8192!8i4096!4m9!1m2!2m1!1smaps!3m5!1s0x8ef62f0e9444bb25:0x91f0e229648a028f!8m2!3d10.3964469!4d-75.5525571!16s%2Fg%2F11fj44ms1n?entry=ttu&g_ep=EgoyMDI2MDUwNi4wIKXMDSoASAFQAw%3D%3D"
   ],
+  "anchor_offsets_deg": {
+    "seed_1": 135.0,
+    "seed_4": -180.0,
+    "seed_5": 320.0
+  },
+  "negative_seeds": ["seed_3"],
   "viewpoints": [
     {
       "name": "baluarte_santo_domingo",

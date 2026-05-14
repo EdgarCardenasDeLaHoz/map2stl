@@ -102,8 +102,9 @@ from city2stl.skyline_cv.region_pdf import run_region_pdf_report
 
 ## Site configuration
 
-`sites/<region>.json` holds the bbox and optional pre-vetted seed URLs.
-Cartagena is the active baseline; Miami is a stub for the next test region.
+`sites/<region>.json` holds the bbox, seed URLs, and optional per-seed
+overrides. Cartagena is the active baseline; Miami is a stub for the
+next test region.
 
 ```json
 {
@@ -113,12 +114,45 @@ Cartagena is the active baseline; Miami is a stub for the next test region.
   "seed_urls": [
     "https://www.google.com/maps/place/.../@10.4020,-75.5457,3a,75y,88h,86t/...",
     ...
-  ]
+  ],
+  "anchor_offsets_deg": {
+    "seed_1": 135.0
+  },
+  "negative_seeds": ["seed_3"]
 }
 ```
 
-Auto-proposed seeds supplement user-provided URLs to give the joint
-optimizer more views; expect 5–11 total locations screened per run.
+- **`seed_urls`** — Google Street View URLs; each becomes `seed_<N>`.
+- **`anchor_offsets_deg`** (optional, per-seed) — manual pano-to-
+  geographic heading offset in degrees. When present, the joint IoU
+  optimization is **skipped** for that seed and this value is used
+  directly. Use it when you can visually identify the correct compass
+  direction from a seed's views but the algorithm finds a wrong local
+  maximum of the IoU objective (common for seeds with buildings in
+  many directions). See STATUS.md for the diagnosis.
+- **`negative_seeds`** (optional) — seed names whose per-view height
+  estimates are **excluded** from the aggregate. The views are still
+  captured and rendered in the PDF (with a `[NEGATIVE EXAMPLE]` banner)
+  so you can verify the pipeline correctly rejects them. Use this for
+  camera positions that aren't skyline viewpoints (gas stations,
+  under-bridge parking, building interiors). They serve as a regression
+  fixture — the pipeline should produce ~zero useful contributions
+  from them.
+
+Auto-proposed seeds supplement user-provided URLs; expect 5–11 total
+locations screened per run.
+
+## Caches
+
+Two on-disk caches under `runs/` keep runs reproducible and fast:
+
+- **`runs/seed_resolution_cache.json`** — per-seed-URL resolved pano
+  (lat, lon, pano_id). Pins the first successful resolution so the
+  Static API's location-snap doesn't drift between runs. Delete to
+  force re-resolution.
+- **`runs/image_cache/*.png`** — Street View image cache keyed by
+  request hash (excluding API key). Delete to force fresh fetches
+  (e.g. when a seed's snapped pano returns a placeholder image).
 
 ## Tests
 

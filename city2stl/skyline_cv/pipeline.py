@@ -681,7 +681,22 @@ def stitch_pano_views(
 
     if not crops:
         return None
-    stitched = np.concatenate(crops, axis=1)
+
+    # Normalise per-panel luminance so independently auto-exposed Street View
+    # tiles blend smoothly.  Each crop is scaled to the median mean-luminance
+    # across all crops.  We work in float32 to avoid clipping artefacts during
+    # the scale, then round back to uint8.
+    means = [float(c.astype(np.float32).mean()) for c in crops]
+    ref = float(np.median(means))
+    norm: list[np.ndarray] = []
+    for c, m in zip(crops, means):
+        if m > 1.0:
+            scale = ref / m
+            norm.append(np.clip(c.astype(np.float32) * scale, 0, 255).astype(np.uint8))
+        else:
+            norm.append(c)
+
+    stitched = np.concatenate(norm, axis=1)
     headings_per_col = np.concatenate(headings_chunks)
     return stitched, headings_per_col
 

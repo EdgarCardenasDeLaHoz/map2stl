@@ -1,0 +1,97 @@
+{
+  "name": "chicago",
+  "north": 41.910,
+  "south": 41.862,
+  "east": -87.600,
+  "west": -87.645,
+  "seed_urls": [
+    "https://www.google.com/maps/@41.8917,-87.6032,3a,75y,270h,87t/",
+    "https://www.google.com/maps/@41.8640,-87.6133,3a,75y,332h,87t/",
+    "https://www.google.com/maps/@41.9015,-87.6229,3a,75y,197h,87t/"
+  ],
+  "_seed_url_notes": [
+    "seed_1: Navy Pier approach, heading 270° (west) toward downtown Loop — synthetic",
+    "seed_2: Museum Campus north end, heading 332° (NNW) toward Grant Park and South Loop — synthetic",
+    "seed_3: North lakefront near Ohio Street Beach, heading 197° (SSW) toward Magnificent Mile / Hancock — synthetic"
+  ],
+  "known_heights_m": {
+    "_note": "CTBUH verified heights for validation — compare pipeline estimates against these.",
+    "Willis Tower": {
+      "lat": 41.8789,
+      "lon": -87.6359,
+      "height_m": 442,
+      "floors": 110
+    },
+    "Trump International Hotel & Tower": {
+      "lat": 41.8891,
+      "lon": -87.6282,
+      "height_m": 423,
+      "floors": 92
+    },
+    "Aon Center": {
+      "lat": 41.8855,
+      "lon": -87.6219,
+      "height_m": 346,
+      "floors": 83
+    },
+    "875 North Michigan Avenue": {
+      "lat": 41.8988,
+      "lon": -87.6234,
+      "height_m": 344,
+      "floors": 100
+    },
+    "AT&T Corporate Center": {
+      "lat": 41.8808,
+      "lon": -87.6372,
+      "height_m": 307,
+      "floors": 60
+    },
+    "Two Prudential Plaza": {
+      "lat": 41.8830,
+      "lon": -87.6244,
+      "height_m": 303,
+      "floors": 64
+    },
+    "311 South Wacker Drive": {
+      "lat": 41.8770,
+      "lon": -87.6360,
+      "height_m": 293,
+      "floors": 65
+    },
+    "Aqua Tower": {
+      "lat": 41.8854,
+      "lon": -87.6219,
+      "height_m": 262,
+      "floors": 82
+    }
+  },
+  "viewpoints": [
+    {
+      "name": "navy_pier_west",
+      "query": "Navy Pier, Chicago, Illinois, USA",
+      "heading": 270.0,
+      "pitch": 0.0,
+      "fov": 80.0,
+      "image_width": 1280,
+      "image_height": 720
+    },
+    {
+      "name": "museum_campus_north",
+      "query": "Museum Campus, Chicago, Illinois, USA",
+      "heading": 332.0,
+      "pitch": 0.0,
+      "fov": 80.0,
+      "image_width": 1280,
+      "image_height": 720
+    },
+    {
+      "name": "lakefront_north_south",
+      "query": "Ohio Street Beach, Chicago, Illinois, USA",
+      "heading": 197.0,
+      "pitch": 0.0,
+      "fov": 75.0,
+      "image_width": 1280,
+      "image_height": 720
+    }
+  ]
+}
