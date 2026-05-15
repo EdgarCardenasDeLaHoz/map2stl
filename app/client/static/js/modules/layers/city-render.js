@@ -518,6 +518,17 @@ window._updateCitiesLoadButton = function _updateCitiesLoadButton(region) {
             ? `Region diagonal: ${diagKm.toFixed(1)} km — OSM data available.`
             : `Region too large (${diagKm.toFixed(1)} km). Max 10 km for city data.`;
     }
+
+    // Keep the buildings table and selection feature disabled when city data is unavailable.
+    window.setCityBuildingsTableAvailable?.(available);
+    if (!available) {
+        window.hideCityBuildingsPanel?.();
+        window.appState.selectedCityBuildingIndex = null;
+        window.syncSelectedCityBuilding?.(null);
+        if (window.appState?.osmCityData) {
+            window.clearCityOverlay?.();
+        }
+    }
 };
 
 /**

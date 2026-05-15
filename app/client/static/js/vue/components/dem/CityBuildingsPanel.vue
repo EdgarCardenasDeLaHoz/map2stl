@@ -73,7 +73,7 @@
     id="cityTableCollapsedTab"
     class="city-table-collapsed-tab"
     type="button"
-    :class="{ visible: collapsed }"
+    :class="{ visible: collapsed && tableAvailable }"
     title="Open buildings table panel"
     @click="showPanel"
   >
@@ -94,8 +94,9 @@ type BuildingRow = {
   centroidText: string;
 };
 
-const collapsed = ref(false);
+const collapsed = ref(true);
 const resizing = ref(false);
+const tableAvailable = ref(true);
 const searchText = ref('');
 const currentPage = ref(0);
 const selectedIndex = ref<number | null>(null);
@@ -219,7 +220,22 @@ function hidePanel() {
 }
 
 function showPanel() {
+  if (!_isTableOpenAllowed()) {
+    collapsed.value = true;
+    return;
+  }
   collapsed.value = false;
+}
+
+function _isTableOpenAllowed() {
+  if (!tableAvailable.value) return false;
+  const region = (window as any).appState?.selectedRegion;
+  const haversine = (window as any).appState?.haversineDiagKm;
+  if (region && typeof haversine === 'function') {
+    const diagKm = haversine(region.north, region.south, region.east, region.west);
+    if (diagKm > 10) return false;
+  }
+  return true;
 }
 
 function stopResize() {
@@ -246,7 +262,9 @@ function startResize(e: MouseEvent) {
 }
 
 function _emitPanelState() {
-  window.dispatchEvent(new CustomEvent('city-buildings-panel-state', { detail: { collapsed: collapsed.value } }));
+  window.dispatchEvent(new CustomEvent('city-buildings-panel-state', {
+    detail: { collapsed: collapsed.value, available: tableAvailable.value },
+  }));
 }
 
 watch(
@@ -298,10 +316,15 @@ onMounted(() => {
 
   (window as any).openCityBuildingsPanel = () => {
     showPanel();
+    if (collapsed.value) return;
     const panel = document.getElementById('cityTablePanel');
     panel?.scrollIntoView({ block: 'nearest' });
   };
   (window as any).toggleCityBuildingsPanel = () => {
+    if (!_isTableOpenAllowed()) {
+      collapsed.value = true;
+      return true;
+    }
     collapsed.value = !collapsed.value;
     if (!collapsed.value) {
       const panel = document.getElementById('cityTablePanel');
@@ -309,7 +332,16 @@ onMounted(() => {
     }
     return collapsed.value;
   };
+  (window as any).hideCityBuildingsPanel = () => {
+    collapsed.value = true;
+  };
+  (window as any).setCityBuildingsTableAvailable = (available: boolean) => {
+    tableAvailable.value = !!available;
+    if (!tableAvailable.value) collapsed.value = true;
+    _emitPanelState();
+  };
   (window as any).isCityBuildingsPanelCollapsed = () => collapsed.value;
+  (window as any).isCityBuildingsPanelVisible = () => !collapsed.value && tableAvailable.value;
   (window as any).syncCityBuildingsTable = () => _syncRowsFromState();
   (window as any).syncSelectedCityBuilding = (index: number | null) => { void _syncSelectedRow(index); };
   void _syncRowsFromState();
@@ -333,8 +365,17 @@ onBeforeUnmount(() => {
   if ((window as any).toggleCityBuildingsPanel) {
     delete (window as any).toggleCityBuildingsPanel;
   }
+  if ((window as any).hideCityBuildingsPanel) {
+    delete (window as any).hideCityBuildingsPanel;
+  }
+  if ((window as any).setCityBuildingsTableAvailable) {
+    delete (window as any).setCityBuildingsTableAvailable;
+  }
   if ((window as any).isCityBuildingsPanelCollapsed) {
     delete (window as any).isCityBuildingsPanelCollapsed;
+  }
+  if ((window as any).isCityBuildingsPanelVisible) {
+    delete (window as any).isCityBuildingsPanelVisible;
   }
   if ((window as any).syncCityBuildingsTable === _syncRowsFromState) {
     delete (window as any).syncCityBuildingsTable;

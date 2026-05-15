@@ -60,6 +60,11 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
     ['cityLayerBuildings', 'cityLayerRoads', 'cityLayerWaterways'].forEach(id => {
         const toggle = document.getElementById(id);
         if (toggle) toggle.addEventListener('change', () => {
+            if (id === 'cityLayerBuildings' && !toggle.checked) {
+                window.hideCityBuildingsPanel?.();
+                window.appState.selectedCityBuildingIndex = null;
+                window.syncSelectedCityBuilding?.(null);
+            }
             window._invalidateCityCache?.();
             window.renderCityOverlay?.();
             window.renderCityOnDEM?.();

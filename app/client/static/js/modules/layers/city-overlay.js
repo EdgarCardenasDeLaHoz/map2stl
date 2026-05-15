@@ -1031,6 +1031,8 @@ function _initCityOverlaySubscriptions() {
     document.addEventListener('click', (e) => {
         const canvas = e.target?.closest?.('canvas.city-dem-overlay, canvas.osm-overlay, #stackViewCanvas, #layerCityRasterCanvas');
         if (!canvas) return;
+        if (!window.isCityBuildingsPanelVisible?.()) return;
+        if (!document.getElementById('cityLayerBuildings')?.checked) return;
         const city = window.appState?.osmCityData;
         if (!city?.buildings?.features?.length) return;
         _ensurePickBuffers(canvas);
