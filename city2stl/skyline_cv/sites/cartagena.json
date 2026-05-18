@@ -6,6 +6,7 @@
   "west": -75.59,
   "max_plausible_height_m": 200,
   "use_satellite_footprints": true,
+  "use_cross_view_scoring": true,
   "use_pano_coastline_recovery": true,
   "drive_pano_recovery_anchor": true,
   "seed_urls": [
