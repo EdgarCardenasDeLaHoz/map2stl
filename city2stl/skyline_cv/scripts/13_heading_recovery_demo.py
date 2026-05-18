@@ -446,7 +446,10 @@ def _render_signatures_page(pdf, sat_sigs, pano_sigs, best_offset,
         ax = fig.add_axes([0.06, 0.92 - (i + 1) * (0.85 / n_ch),
                            0.90, 0.85 / n_ch - 0.05])
         a = sat_sigs[ch]
-        b = np.roll(pano_sigs[ch], -shift)
+        # +shift maps pano_bearing → world_bearing.
+        # (world = pano + offset, so pano value plotted at world index i
+        # should come from pano_sig[(i - offset) mod N] = np.roll(arr, +shift)[i].)
+        b = np.roll(pano_sigs[ch], +shift)
         ax.plot(bearings, a, color="#0040c0", linewidth=1.2,
                 label=f"sat {ch}")
         ax.plot(bearings, b, color="#d04020", linewidth=1.2, alpha=0.85,
