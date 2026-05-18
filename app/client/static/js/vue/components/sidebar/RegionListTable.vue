@@ -15,13 +15,12 @@
     <div style="flex:1;overflow-y:auto;">
       <table class="sidebar-table-view" id="sidebarRegionsTable">
         <colgroup>
-          <col style="width:17%">
+          <col style="width:20%">
           <col style="width:48px">
           <col style="width:48px">
           <col style="width:48px">
           <col style="width:48px">
-          <col style="width:42px">
-          <col style="width:78px">
+          <col style="width:92px">
         </colgroup>
         <thead>
           <tr>
@@ -30,7 +29,6 @@
             <th title="South">S</th>
             <th title="East">E</th>
             <th title="West">W</th>
-            <th title="Grid dimension">Dim</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -99,6 +97,12 @@ function applyTableFilter() {
 
 onMounted(() => {
   refreshCategories();
+  // Region table rows are still rendered by legacy JS into #sidebarRegionsTableBody.
+  // Trigger a render after this Vue block is mounted so expanded mode is never blank.
+  requestAnimationFrame(() => {
+    (window as any).renderSidebarTable?.();
+    applyTableFilter();
+  });
   // Expose for view-management.js to call after each re-render
   (window as any)._applyRegionLabelFilter = applyTableFilter;
   // Re-read categories whenever region data changes

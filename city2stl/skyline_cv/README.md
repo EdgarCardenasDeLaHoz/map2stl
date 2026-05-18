@@ -72,6 +72,121 @@ End-to-end flow:
 6. Render the PDF
 ```
 
+### OSM-anchored silhouette splitting (F-SKY2)
+
+SegFormer routinely merges adjacent towers in a dense skyline into a
+single mask blob, producing one wide silhouette segment for what OSM
+knows is three buildings. After registration succeeds (≥ 3 matches), we
+re-split such segments at OSM-projected building gaps via
+`osm_anchor_silhouettes`. The split column is snapped to the
+building-mask coverage minimum inside the gap when available (the
+actual visible inter-tower separator), not just the OSM midpoint.
+
+The matcher (`match_segments_to_buildings`) accepts candidates either
+via interval-IoU (≥ 0.10) or via containment (≥ 50 % of the projection
+inside the segment). The containment fallback lets narrow projections
+inside wide multi-building silhouettes still qualify for matching even
+when their IoU is small (denominator dominated by segment width) —
+needed for cases where SegFormer over-merged and anchored splitting
+hasn't fully separated the towers.
+
+See [docs/plans/F-SKY2-osm-anchored-segments.md](../../docs/plans/F-SKY2-osm-anchored-segments.md).
+
+### Satellite-derived building footprints (F-SKY8)
+
+Microsoft Global ML Building Footprints (open data, ODbL) as a second
+polygon source for regions where OSM is sparse. Cartagena's Bocagrande
+waterfront is the canonical example: SegFormer sees the towers, OSM
+doesn't have polygons for them, and the matcher has nothing to assign.
+The satellite data covers them.
+
+Opt in per region via `"use_satellite_footprints": true` in
+`sites/<region>.json`. First run downloads ~12 MB / quadkey tile to
+`runs/satellite_footprints_cache/` (gitignored); subsequent runs use
+the cache. Polygons are de-duped against OSM by area-IoU (≥ 0.5);
+OSM wins (it has height tags and stable IDs). Satellite-sourced
+polygons inherit `height_tag_m=None, height_source="ms_buildings"` and
+fall back to the existing sqrt-area `_height_proxy`.
+
+See [docs/plans/F-SKY8-satellite-footprints.md](../../docs/plans/F-SKY8-satellite-footprints.md).
+
+### Local-maxima peak detection (F-SKY7)
+
+`detect_building_silhouettes` originally only split the contour at
+sky valleys between towers. When SegFormer's building mask spans a
+row of glass towers without sky valleys between them — common in
+dense skylines like Cartagena's Bocagrande row seen across the bay —
+the contour stays high (low y) everywhere and the global-prominence
+filter rejects per-tower bumps. F-SKY7 adds a second-pass peak
+detector that finds local maxima relative to a 40 px smoothed
+baseline (≈ 6° of FOV at W=640) with a 6 px absolute prominence
+floor, so monotone-but-bumpy rooflines still produce one peak per
+tower. The new peaks merge with the existing sky-valley peaks via
+the same de-dup step. See
+[docs/plans/F-SKY7-local-max-peaks-and-layout.md](../../docs/plans/F-SKY7-local-max-peaks-and-layout.md).
+
+### 1:1 dedup + considered-but-lost overlay (F-SKY6)
+
+The matcher post-pass enforces one-to-one segment ↔ OSM building
+uniqueness: if two segments both claim the same building, the one
+with the lower combined score becomes unmatched (the loser still
+keeps its `match_diagnostics` so the audit page shows what it
+considered). The per-view minimap also gained an "orange dots" layer
+showing OSM projections that the matcher scored as a top-3 candidate
+for some segment but didn't win. Together these let you tell apart
+three failure modes for an unmatched stretch of skyline: (i) no
+orange dots → OSM data gap (nothing to match); (ii) orange dots
+present but no segments → silhouette detector didn't carve peaks in
+the central mask (next target); (iii) orange dots AND segments
+present → matcher rejection (currently rare after F-SKY2.1). See
+[docs/plans/F-SKY6-one-to-one-matching.md](../../docs/plans/F-SKY6-one-to-one-matching.md).
+
+### SegFormer mask + page layout (F-SKY4 + F-SKY7)
+
+Each per-view PDF page has three panels:
+- **Top-left**: Street View image with skyline-segment overlays.
+- **Bottom-left**: SegFormer building mask on its own (faint photo
+  background + cyan mask) — direct side-by-side comparison with the
+  segment panel above. Cyan present + no segment above = silhouette
+  detector missed the peak; no cyan = SegFormer missed the building.
+- **Right (full height)**: minimap with matched footprints, OSM context
+  in grey, and orange "considered but lost" candidates (F-SKY6).
+
+F-SKY7 replaced F-SKY4's cyan-overlaid-on-photo with the dedicated
+bottom-left panel and removed the unused diagnostic legend table. The
+mask is persisted on `SeedViewRegistration.building_mask` so the
+renderer doesn't depend on the bounded LRU neural cache that would
+miss by PDF-render time on multi-seed runs.
+See [docs/plans/F-SKY4-mask-overlay.md](../../docs/plans/F-SKY4-mask-overlay.md)
+and [docs/plans/F-SKY7-local-max-peaks-and-layout.md](../../docs/plans/F-SKY7-local-max-peaks-and-layout.md).
+
+### OSM-marker Voronoi instance indexing (F-SKY3, disabled)
+
+SegFormer-b0 is semantic-only — no instance head, no separation between
+adjacent buildings of the same class. F-SKY2 splits at clear mask gaps;
+F-SKY3 fills the remaining hole: when a segment contains ≥ 2 OSM markers
+but the mask has no visible valley between them (tightly packed
+waterfront row, or a single contiguous SegFormer blob), partition the
+segment by 1-D Voronoi over the OSM marker x_px values. Each marker gets
+its own column strip and a per-strip silhouette is emitted, giving the
+matcher one segment per OSM building. This is the cheap stand-in for
+what a SAM-style instance segmenter would do with OSM centroids as
+point prompts. Runs after `osm_anchor_silhouettes` so gap-based splits
+(more precise) take precedence. See
+[docs/plans/F-SKY3-osm-marker-instances.md](../../docs/plans/F-SKY3-osm-marker-instances.md).
+
+### Floor-period diagnostic (F-SKY1, optional)
+
+For each per-view building estimate, `_floor_period_for_building` looks
+for the horizontal banding floors produce on a facade and reports the
+dominant pixel period. Given the pinhole focal length and an assumed
+3.2 m floor height, that gives an **OSM-independent distance + height
+estimate**. Useful as a sanity check on the geometric path: a
+disagreement between `forward_m` (from OSM) and `inferred_distance_m`
+(from the period) means either the OSM footprint is wrong or the
+period detection has latched onto a non-floor texture. See
+[docs/plans/F-SKY1-floor-periodicity.md](../../docs/plans/F-SKY1-floor-periodicity.md).
+
 ## Module surface
 
 The public symbols you'd build against:
@@ -138,9 +253,26 @@ next test region.
   under-bridge parking, building interiors). They serve as a regression
   fixture — the pipeline should produce ~zero useful contributions
   from them.
+- **`max_plausible_height_m`** (optional, default 300) — regional
+  building-height ceiling. Bounds both the glass-facade contour-override
+  sanity check AND the per-building geometric y-consistency gate. Set
+  this just above the region's tallest expected tower: Cartagena uses
+  200 (Torre del Reloj ≈ 206 m), Chicago should keep 300+ (Willis ≈
+  442 m, most are ≤ 200 m), Miami's 300 default covers Marquis (271 m).
+  Lower caps reject implausible per-view estimates earlier; higher caps
+  accept more candidate roof pixels at the cost of more noise.
 
 Auto-proposed seeds supplement user-provided URLs; expect 5–11 total
 locations screened per run.
+
+## Environment variables
+
+| Var | Purpose | Default |
+|---|---|---|
+| `GOOGLE_MAPS_API_KEY` | Street View Static API key (required) | — |
+| `GOOGLE_MAPS_SIGN_SECRET` | URL-signing secret for paid Static API. When set, requests are HMAC-SHA1 signed and the default spin-view fetch size bumps to 1280×720. Unsigned requests are silently clamped by Google to 640×640 regardless of size, so this is the only way to get higher-resolution imagery. Find the secret in Google Cloud Console → APIs & Services → Credentials → URL signing secret. | unset (unsigned, 960×540 requested / 640×540 delivered) |
+| `SKYLINE_CV_SEGFORMER_SIZE` | SegFormer model variant — `b0` (fastest, ~3 min on Cartagena), `b1`, `b2`, `b3` (default, ~5–6 min on Cartagena), `b4`, `b5` (most accurate, ~10× slower). b3 was promoted to default 2026-05-16 after measurement: on Cartagena it doubled the matched-tagged-building count (n=8 → 17), dropped MAE 22.13 → 13.73 m, and collapsed the cross-seed bias from +20.30 m to +0.87 m. Smaller variants are still useful for fast iteration. First run at a new size downloads ~190 MB (b3) / ~80 MB (b0) to the HF cache. | `b3` |
+| `OPENTOPO_API_KEY` | Optional, enables DEM-based terrain elevation for building bases. | unset |
 
 ## Caches
 

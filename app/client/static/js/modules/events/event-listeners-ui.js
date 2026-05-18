@@ -26,7 +26,7 @@ window._setupResizablePanel = function _setupResizablePanel() {
     });
     document.addEventListener('mousemove', e => {
         if (!resizing) return;
-        const newW = Math.max(280, Math.min(900, startW + (startX - e.clientX)));
+        const newW = Math.max(200, Math.min(900, startW + (startX - e.clientX)));
         rightPanel.style.width = newW + 'px';
         if (!rafPending) {
             rafPending = true;
@@ -48,7 +48,22 @@ window._setupResizablePanel = function _setupResizablePanel() {
     });
     try {
         const savedW = localStorage.getItem('strm2stl_settingsPanelWidth');
-        if (savedW) rightPanel.style.width = parseInt(savedW) + 'px';
+        if (savedW) {
+            rightPanel.style.width = parseInt(savedW) + 'px';
+        } else {
+            requestAnimationFrame(() => {
+                const controlsInner = document.getElementById('demControlsInner');
+                const strip = document.getElementById('demStrip');
+                const contentW = Math.max(
+                    controlsInner?.scrollWidth || 0,
+                    strip?.scrollWidth || 0,
+                    260
+                );
+                const compactW = Math.max(260, Math.min(460, Math.ceil(contentW + 24)));
+                rightPanel.style.width = compactW + 'px';
+                window._ensureDemViewportSpace?.();
+            });
+        }
     } catch (_) { }
 
     let _raf = null;

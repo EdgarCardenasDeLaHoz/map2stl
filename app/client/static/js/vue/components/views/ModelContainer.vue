@@ -4,7 +4,7 @@
     <div class="model-layout">
       <div class="model-viewport">
         <div id="modelViewer"></div>
-        <div id="modelEmptyState" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#444;font-size:14px;gap:10px;pointer-events:none;">
+        <div id="modelEmptyState" class="model-empty-state">
           <span style="font-size:40px;">🗺️</span>
           <span>Load a DEM in the Edit tab to render the 3D model</span>
         </div>
@@ -243,7 +243,7 @@
 
               <!-- Print Dimensions + Bed Optimizer -->
               <CollapsibleSection title="🖨 Printer" wrap-style="margin-bottom:10px;">
-                <div id="printDimensions" class="print-dimensions-panel" style="display:block;">
+                <div id="printDimensions" class="print-dimensions-panel hidden">
                   <div class="dim-row"><span class="dim-label">Real area:</span><span id="dimRealArea">—</span></div>
                   <div class="dim-row"><span class="dim-label">Footprint:</span><span id="dimFootprint">—</span></div>
                   <div class="dim-row"><span class="dim-label">Scale:</span><span id="dimScale">—</span></div>

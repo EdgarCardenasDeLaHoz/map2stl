@@ -253,8 +253,8 @@ async function toggleDemOverlay(show) {
         }
 
         // Show opacity control
-        document.getElementById('terrainOpacityGroup').style.display = 'flex';
-        document.getElementById('terrainOpacityLabel').style.display = '';
+        document.getElementById('terrainOpacityGroup')?.classList.remove('hidden');
+        document.getElementById('terrainOpacityLabel')?.classList.remove('hidden');
         return true;
     } else {
         if (demOverlayLayer) {
@@ -262,8 +262,8 @@ async function toggleDemOverlay(show) {
             demOverlayLayer = null;
         }
         // Hide opacity control
-        document.getElementById('terrainOpacityGroup').style.display = 'none';
-        document.getElementById('terrainOpacityLabel').style.display = 'none';
+        document.getElementById('terrainOpacityGroup')?.classList.add('hidden');
+        document.getElementById('terrainOpacityLabel')?.classList.add('hidden');
         return false;
     }
 }
@@ -604,7 +604,7 @@ function initGlobe() {
         // Hide globe toggle if WebGL is unavailable
         const globeToggle = document.getElementById('floatingGlobeToggle');
         if (globeToggle) {
-            globeToggle.style.display = 'none';
+            globeToggle.classList.add('hidden');
             globeToggle.title = 'Globe unavailable (WebGL not supported)';
         }
     }

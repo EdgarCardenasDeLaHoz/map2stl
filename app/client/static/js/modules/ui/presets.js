@@ -479,10 +479,35 @@ async function saveRegionSettings() {
     }
 }
 
+function _mergeSettings(base, overlay) {
+    const result = Array.isArray(base) ? [...base] : { ...(base || {}) };
+    if (!overlay || typeof overlay !== 'object') return result;
+    for (const [key, value] of Object.entries(overlay)) {
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+            result[key] = _mergeSettings(result[key], value);
+        } else {
+            result[key] = value;
+        }
+    }
+    return result;
+}
+
 async function loadAndApplyRegionSettings(regionName) {
     try {
-        const { data, error } = await window.api.regions.getSettings(regionName);
-        if (!error && data) { applyAllSettings(data.settings); return true; }
+        const [{ data: defaultsData, error: defaultsError }, { data, error }] = await Promise.all([
+            window.api.settings.default(),
+            window.api.regions.getSettings(regionName),
+        ]);
+        const defaults = !defaultsError && defaultsData?.settings ? defaultsData.settings : null;
+        if (!error && data) {
+            const merged = defaults ? _mergeSettings(defaults, data.settings || {}) : (data.settings || {});
+            applyAllSettings(merged);
+            return true;
+        }
+        if (defaults) {
+            applyAllSettings(defaults);
+            return false;
+        }
     } catch (_) { /* network error — use defaults */ }
     return false;
 }

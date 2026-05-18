@@ -218,14 +218,15 @@ function drawColorbar(min, max, colormap) {
     if (!bar) return;
     bar.innerHTML = '';
     const canvas = document.createElement('canvas');
-    canvas.width  = Math.max(64, bar.clientWidth || 256);
-    canvas.height = 18;
+    const barHeight = Math.max(12, bar.clientHeight || 14);
+    canvas.width = Math.max(64, bar.clientWidth || 256);
+    canvas.height = barHeight;
     const ctx = canvas.getContext('2d');
-    const img = ctx.createImageData(256, 18);
+    const img = ctx.createImageData(256, barHeight);
     for (let x = 0; x < 256; x++) {
         const t = x / 255;
         const [r, g, b] = mapElevationToColor(t, colormap);
-        for (let y = 0; y < 18; y++) {
+        for (let y = 0; y < barHeight; y++) {
             const idx = (y * 256 + x) * 4;
             img.data[idx]     = Math.round(r * 255);
             img.data[idx + 1] = Math.round(g * 255);
@@ -234,7 +235,9 @@ function drawColorbar(min, max, colormap) {
         }
     }
     ctx.putImageData(img, 0, 0);
-    canvas.classList.add('canvas-histogram');
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.display = 'block';
     bar.title = `Colorbar: ${Math.round(min)} m (left) → ${Math.round(max)} m (right) — ${colormap}`;
     bar.appendChild(canvas);
 }
@@ -388,11 +391,22 @@ function enableZoomAndPan(canvas) {
 
     let scale = 1, tx = 0, ty = 0;
     let dragging = false, lastX = 0, lastY = 0;
+    let gridRafPending = false;
+
+    function scheduleGridRefresh() {
+        if (gridRafPending) return;
+        gridRafPending = true;
+        requestAnimationFrame(() => {
+            gridRafPending = false;
+            window.drawGridlinesOverlay?.('demImage');
+        });
+    }
 
     function applyTransform() {
         canvas.style.transformOrigin = '0 0';
         canvas.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
         canvas.style.cursor = dragging ? 'grabbing' : (scale > 1 ? 'grab' : 'default');
+        scheduleGridRefresh();
     }
 
     canvas.addEventListener('wheel', e => {

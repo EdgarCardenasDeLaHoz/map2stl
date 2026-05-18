@@ -91,12 +91,46 @@ strm2stl/
 └── cache/, output/, data.db, server.log
 ```
 
-## Proposals Rule
+## Proposal + Plan + Edit Workflow
 
-**Before implementing any new feature or significant refactor not explicitly requested in the current conversation:**
-1. Add it to `docs/proposals.md` with status `pending`.
-2. Do **not** implement it until the user sets its status to `approved`.
-3. On session start, read `docs/proposals.md` and only work on `approved` items (plus any direct user requests).
+The point of this workflow is **persistence**. Long sessions, compactions, and
+multi-turn scope creep all destroy in-conversation context; the proposal +
+plan files survive that. They are written so a future session can pick the
+work up cold.
+
+**For new features or significant refactors not already requested in the
+current conversation**, the AI must follow steps 1–3 *before* writing
+implementation code. The user does **not** need to pre-approve — capturing
+the proposal and plan is the gate, not awaiting approval. The AI then
+proceeds to implement immediately.
+
+1. **Add a proposal entry** to `docs/proposals.md` (status `pending`) with a
+   short description, target file(s), and an effort estimate. The entry's
+   ID becomes the durable handle.
+2. **Write a plan** in `docs/plans/<ID>-<slug>.md` before touching code. The
+   plan should cover: goal, approach in 3–6 bullets, target files, success
+   criteria, and any known risks. The proposal entry **must link to this
+   plan file** (so the plan is not orphaned by a future renumbering).
+3. **Implement** — the proposal and plan exist for posterity; the AI continues
+   directly into code.
+
+For items that the user explicitly requests in conversation ("fix X", "add
+Y"), skip steps 1–2 unless the scope grows large enough to warrant
+durable tracking.
+
+### Edit hygiene (apply after every code edit, while the region is in context)
+
+- **Update the code's docs in the same turn.** Module docstrings, README
+  references, line-number citations in `docs/modules.md`, and the issues
+  list in `docs/issues.md` decay fast if updates are deferred. They are
+  cheapest to fix while the file is open and the change is fresh.
+- **Audit the surrounding region for bloat.** Look for dead branches,
+  unused parameters, comments that no longer reflect the code, redundant
+  guards, or two functions that have converged to the same shape. Edit
+  context is the cheapest review context.
+- **Audit for opportunities while the area is loaded.** Note (or fix) any
+  obvious follow-ups that became visible while editing — they are far
+  cheaper to address now than after the file leaves context.
 
 ---
 

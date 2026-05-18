@@ -1,7 +1,71 @@
 <template>
-  <CollapsibleSection title="🎨 Rendering" :start-open="false">
+  <CollapsibleSection title="🖼 Canvas" :start-open="false" wrap-style="margin-top:0;">
+    <div class="row-gap6" style="margin-bottom:10px;">
+      <button id="layersStripBtn" class="dem-strip-btn active" data-subtab="layers"
+              style="flex:1;font-size:11px;padding:5px 8px;"
+              title="Switch the canvas to the stacked layers view">
+        📚 Layers
+        <span class="strip-status-dots">
+          <span class="strip-dot" id="stripDotDem"></span>
+          <span class="strip-dot" id="stripDotWater"></span>
+          <span class="strip-dot" id="stripDotLandCover"></span>
+          <span class="strip-dot" id="stripDotCities"></span>
+        </span>
+      </button>
+      <button id="compareStripBtn" class="dem-strip-btn" data-subtab="compare"
+              style="flex:1;font-size:11px;padding:5px 8px;"
+              title="Switch the canvas to the compare panes view">⚖ Compare</button>
+    </div>
 
-    <CollapsibleSection title="📊 Histogram" :start-open="false" wrap-style="margin-top:0;">
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333;">
+      <div style="display:grid;grid-template-columns:auto 1fr 32px;gap:4px 6px;align-items:center;">
+        <label class="check-label" style="white-space:nowrap;" title="Show lat/lon gridlines overlay">
+          <input type="checkbox" id="showGridlines" checked aria-label="Show DEM gridlines"> 📐 Gridlines
+        </label>
+        <select id="gridlineCount" title="Grid line density" aria-label="Grid line density"
+                style="width:100%;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;">
+          <option value="3">Sparse (3)</option>
+          <option value="5">Normal (5)</option>
+          <option value="10" selected>Dense (10)</option>
+          <option value="20">Very Dense (20)</option>
+        </select>
+        <button id="gridPixelModeBtn" title="Toggle pixel coordinates"
+                style="padding:2px 5px;font-size:10px;background:#404040;color:#aaa;border:1px solid #555;border-radius:3px;cursor:pointer;white-space:nowrap;">px</button>
+      </div>
+      <div id="demPixelSizeLabel" class="hidden" style="font-size:10px;color:#8af;margin-top:3px;text-align:right;"></div>
+    </div>
+  </CollapsibleSection>
+
+  <CollapsibleSection title="🏔 DEM" :start-open="false">
+    <div class="param-group">
+      <label for="demColormap" title="Colour scheme applied to elevation data.">Colormap:</label>
+      <select id="demColormap">
+        <option value="rainbow" selected>Rainbow</option>
+        <option value="terrain">Terrain</option>
+        <option value="viridis">Viridis</option>
+        <option value="jet">Jet</option>
+        <option value="hot">Hot</option>
+        <option value="gray">Gray</option>
+      </select>
+    </div>
+
+    <div class="param-group row-gap6" style="flex-wrap:nowrap;margin-top:6px;">
+      <label title="Elevation range (metres) mapped to the colormap" style="white-space:nowrap;font-size:12px;">Elev<br>Range:</label>
+      <input type="number" id="rescaleMin" placeholder="Min" aria-label="Minimum elevation for color range"
+             style="width:55px;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;"
+             title="Minimum elevation (m)">
+      <span style="color:#888;font-size:11px;">to</span>
+      <input type="number" id="rescaleMax" placeholder="Max" aria-label="Maximum elevation for color range"
+             style="width:55px;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;"
+             title="Maximum elevation (m)">
+      <button id="applyRescaleBtn" class="btn btn-secondary" style="padding:2px 6px;font-size:11px;" title="Apply min/max range">Apply</button>
+      <button id="resetRescaleBtn" class="btn btn-secondary" style="padding:2px 6px;font-size:11px;" title="Auto-fit to data range">Auto</button>
+      <label class="check-label" title="Auto-fit color range on each update" style="font-size:11px;color:#aaa;white-space:nowrap;">
+        <input type="checkbox" id="autoRescale" checked aria-label="Auto fit elevation range"> Auto
+      </label>
+    </div>
+
+    <CollapsibleSection title="📊 Histogram" :start-open="false">
       <div id="histogram"></div>
     </CollapsibleSection>
 
@@ -30,73 +94,6 @@
         </div>
       </div>
     </CollapsibleSection>
-
-    <CollapsibleSection title="🖼 Canvas" :start-open="false">
-      <div class="row-gap6" style="margin-bottom:10px;">
-        <button id="layersStripBtn" class="dem-strip-btn active" data-subtab="layers"
-                style="flex:1;font-size:11px;padding:5px 8px;"
-                title="Switch the canvas to the stacked layers view">
-          📚 Layers
-          <span class="strip-status-dots">
-            <span class="strip-dot" id="stripDotDem"></span>
-            <span class="strip-dot" id="stripDotWater"></span>
-            <span class="strip-dot" id="stripDotLandCover"></span>
-            <span class="strip-dot" id="stripDotCities"></span>
-          </span>
-        </button>
-        <button id="compareStripBtn" class="dem-strip-btn" data-subtab="compare"
-                style="flex:1;font-size:11px;padding:5px 8px;"
-                title="Switch the canvas to the compare panes view">⚖ Compare</button>
-      </div>
-
-      <div class="param-group">
-        <label for="demColormap" title="Colour scheme applied to elevation data.">Colormap:</label>
-        <select id="demColormap">
-          <option value="rainbow" selected>Rainbow</option>
-          <option value="terrain">Terrain</option>
-          <option value="viridis">Viridis</option>
-          <option value="jet">Jet</option>
-          <option value="hot">Hot</option>
-          <option value="gray">Gray</option>
-        </select>
-      </div>
-
-      <div class="param-group row-gap6" style="flex-wrap:nowrap;margin-top:6px;">
-        <label title="Elevation range (metres) mapped to the colormap" style="white-space:nowrap;font-size:12px;">Elev<br>Range:</label>
-        <input type="number" id="rescaleMin" placeholder="Min" aria-label="Minimum elevation for color range"
-               style="width:55px;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;"
-               title="Minimum elevation (m)">
-        <span style="color:#888;font-size:11px;">to</span>
-        <input type="number" id="rescaleMax" placeholder="Max" aria-label="Maximum elevation for color range"
-               style="width:55px;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;"
-               title="Maximum elevation (m)">
-        <button id="applyRescaleBtn" class="btn btn-secondary" style="padding:2px 6px;font-size:11px;" title="Apply min/max range">Apply</button>
-        <button id="resetRescaleBtn" class="btn btn-secondary" style="padding:2px 6px;font-size:11px;" title="Auto-fit to data range">Auto</button>
-        <label class="check-label" title="Auto-fit color range on each update" style="font-size:11px;color:#aaa;white-space:nowrap;">
-          <input type="checkbox" id="autoRescale" checked aria-label="Auto fit elevation range"> Auto
-        </label>
-      </div>
-
-      <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333;">
-        <div style="display:grid;grid-template-columns:auto 1fr 32px;gap:4px 6px;align-items:center;">
-          <label class="check-label" style="white-space:nowrap;" title="Show lat/lon gridlines overlay">
-            <input type="checkbox" id="showGridlines" checked aria-label="Show DEM gridlines"> 📐 Gridlines
-          </label>
-          <select id="gridlineCount" title="Grid line density" aria-label="Grid line density"
-                  style="width:100%;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;">
-            <option value="3">Sparse (3)</option>
-            <option value="5">Normal (5)</option>
-            <option value="10" selected>Dense (10)</option>
-            <option value="20">Very Dense (20)</option>
-          </select>
-          <button id="gridPixelModeBtn" title="Toggle pixel coordinates"
-                  style="padding:2px 5px;font-size:10px;background:#404040;color:#aaa;border:1px solid #555;border-radius:3px;cursor:pointer;white-space:nowrap;">px</button>
-        </div>
-        <div id="demPixelSizeLabel" style="display:none;font-size:10px;color:#8af;margin-top:3px;text-align:right;"></div>
-      </div>
-
-    </CollapsibleSection>
-
   </CollapsibleSection>
 
   <CollapsibleSection title="🎨 Land Use Cover" :start-open="false">

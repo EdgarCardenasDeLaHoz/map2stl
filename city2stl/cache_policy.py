@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 
+CITY_PIPELINE_VERSION = 2
+
+
 def building_features(payload: dict[str, Any]) -> list[dict[str, Any]]:
     buildings = payload.get("buildings") or {}
     features = buildings.get("features") or []
@@ -20,8 +23,12 @@ def city_cache_missing_height_source(payload: dict[str, Any]) -> bool:
 
 
 def city_cache_missing_building_parts(payload: dict[str, Any]) -> bool:
-    """Detect cached payloads written before building:parts and extended layers were added."""
-    return "towers" not in payload and "churches" not in payload
+    """Detect cached payloads written before building-part reconstruction was enabled."""
+    version = int(payload.get("city_pipeline_version") or 0)
+    if version < CITY_PIPELINE_VERSION:
+        return True
+    # Versioned payloads are authoritative.
+    return False
 
 
 def city_cache_needs_enrichment(payload: dict[str, Any]) -> bool:

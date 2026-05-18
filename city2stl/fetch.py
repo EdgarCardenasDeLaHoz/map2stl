@@ -36,7 +36,19 @@ from .rasterize import _count_verts, _empty_fc
 
 def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_area: float) -> dict:
     try:
-        gdf = ox.features_from_bbox(bbox, tags={"building": True})
+        import pandas as pd
+
+        base_gdf = ox.features_from_bbox(bbox, tags={"building": True})
+        part_gdf = ox.features_from_bbox(bbox, tags={"building:part": True})
+        if len(base_gdf) and len(part_gdf):
+            # Keep first occurrence for duplicated OSM ids returned by both queries.
+            gdf = pd.concat([part_gdf, base_gdf], axis=0, copy=False)
+            gdf = gdf.reset_index().drop_duplicates(subset=["element", "id"], keep="first")
+            gdf = gdf.set_index(["element", "id"])
+        elif len(base_gdf):
+            gdf = base_gdf
+        else:
+            gdf = part_gdf
         gdf = gdf[gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])].reset_index(drop=True)
         n_raw = len(gdf)
         if min_area > 0 and len(gdf):
@@ -79,7 +91,7 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
             "roof:shape", "roof:height", "roof:levels",
             "roof:direction", "roof:orientation",
             "roof:colour", "roof:material",
-            "building:levels", "min_height",
+            "building:levels", "min_height", "building:part",
         ]
         gdf = gdf[[c for c in keep if c in gdf.columns]]
         return json.loads(gdf.to_json())
@@ -262,5 +274,7 @@ def fetch_osm_data(
             height_default=12.0, height_lo=3.0, height_hi=60.0,
             keep_cols=["name", "historic"], label="fortifications",
         )
+
+    result["city_pipeline_version"] = 2
 
     return result

@@ -27,7 +27,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 let compareData = {
-    left:  { region: null, image: null },
+    left: { region: null, image: null },
     right: { region: null, image: null }
 };
 
@@ -36,25 +36,25 @@ let compareData = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function initCompareMode() {
-    const leftSel  = document.getElementById('compareInlineLeft');
+    const leftSel = document.getElementById('compareInlineLeft');
     const rightSel = document.getElementById('compareInlineRight');
     if (leftSel && !leftSel._wired) {
         leftSel._wired = true;
-        leftSel.addEventListener('change',  () => renderCompareLayer('left'));
+        leftSel.addEventListener('change', () => renderCompareLayer('left'));
         rightSel.addEventListener('change', () => renderCompareLayer('right'));
     }
 }
 
 function renderCompareLayer(side) {
-    const cap    = side.charAt(0).toUpperCase() + side.slice(1);
+    const cap = side.charAt(0).toUpperCase() + side.slice(1);
     const select = document.getElementById(`compareInline${cap}`);
     const canvas = document.getElementById(`compareInline${cap}Canvas`);
     if (!select || !canvas) return;
 
     const sourceSelectors = {
-        dem:      `#demImage ${window.DEM_CANVAS_SELECTOR}`,
-        water:    '#waterMaskImage canvas',
-        sat:      '#satelliteImage canvas',
+        dem: `#demImage ${window.DEM_CANVAS_SELECTOR}`,
+        water: '#waterMaskImage canvas',
+        sat: '#satelliteImage canvas',
         combined: '#combinedImage canvas',
     };
     const srcCanvas = document.querySelector(sourceSelectors[select.value]);
@@ -67,7 +67,7 @@ function renderCompareLayer(side) {
         ctx.fillText('Load this layer first', 150, 80);
         return;
     }
-    canvas.width  = srcCanvas.width;
+    canvas.width = srcCanvas.width;
     canvas.height = srcCanvas.height;
     ctx.drawImage(srcCanvas, 0, 0);
 }
@@ -83,16 +83,16 @@ function updateCompareCanvases() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function loadCompareRegion(side) {
-    const cap      = side.charAt(0).toUpperCase() + side.slice(1);
-    const select   = document.getElementById(`compare${cap}Region`);
+    const cap = side.charAt(0).toUpperCase() + side.slice(1);
+    const select = document.getElementById(`compare${cap}Region`);
     const nameSpan = document.getElementById(`compare${cap}Name`);
-    const imageEl  = document.getElementById(`compare${cap}Image`);
-    const empty    = document.getElementById(`compare${cap}Empty`);
+    const imageEl = document.getElementById(`compare${cap}Image`);
+    const empty = document.getElementById(`compare${cap}Empty`);
 
     if (!select || !select.value) {
         if (nameSpan) nameSpan.textContent = '--';
-        if (imageEl)  imageEl.style.display = 'none';
-        if (empty)  { empty.textContent = 'Select a region to compare'; empty.style.display = 'block'; }
+        if (imageEl) imageEl.classList.add('hidden');
+        if (empty) { empty.textContent = 'Select a region to compare'; empty.classList.remove('hidden'); }
         compareData[side].region = null;
         return;
     }
@@ -102,12 +102,12 @@ async function loadCompareRegion(side) {
     if (!region) return;
 
     if (nameSpan) nameSpan.textContent = region.name;
-    if (empty)  { empty.textContent = 'Loading…'; empty.style.display = 'block'; }
-    if (imageEl)  imageEl.style.display = 'none';
+    if (empty) { empty.textContent = 'Loading…'; empty.classList.remove('hidden'); }
+    if (imageEl) imageEl.classList.add('hidden');
 
     try {
         const colormap = document.getElementById(`compare${cap}Colormap`)?.value || 'terrain';
-        const params   = new URLSearchParams({ north: region.north, south: region.south, east: region.east, west: region.west, dim: 200 });
+        const params = new URLSearchParams({ north: region.north, south: region.south, east: region.east, west: region.west, dim: 200 });
         const { data, error: demErr } = await api.dem.load(params);
         if (demErr) throw new Error(demErr);
         if (!(data.dem_values || data.dem_values_b64) || !data.dimensions) throw new Error(data.error || 'No DEM data returned');
@@ -117,39 +117,39 @@ async function loadCompareRegion(side) {
         let w = Number(data.dimensions[1]);
         if (Array.isArray(demVals) && Array.isArray(demVals[0])) { h = demVals.length; w = demVals[0].length; demVals = demVals.flat(); }
 
-        const vmin  = data.min_elevation ?? demVals.filter(Number.isFinite).reduce((a, b) => a < b ? a : b, Infinity);
-        const vmax  = data.max_elevation ?? demVals.filter(Number.isFinite).reduce((a, b) => a > b ? a : b, -Infinity);
+        const vmin = data.min_elevation ?? demVals.filter(Number.isFinite).reduce((a, b) => a < b ? a : b, Infinity);
+        const vmax = data.max_elevation ?? demVals.filter(Number.isFinite).reduce((a, b) => a > b ? a : b, -Infinity);
         const range = (vmax - vmin) || 1;
 
         const off = document.createElement('canvas');
         off.width = w; off.height = h;
-        const ctx     = off.getContext('2d');
+        const ctx = off.getContext('2d');
         const imgData = ctx.createImageData(w, h);
         for (let i = 0; i < w * h; i++) {
             const t = Math.max(0, Math.min(1, (demVals[i] - vmin) / range));
             const [r, g, b] = window.mapElevationToColor(t, colormap);
-            imgData.data[i * 4]     = Math.round((r || 0) * 255);
+            imgData.data[i * 4] = Math.round((r || 0) * 255);
             imgData.data[i * 4 + 1] = Math.round((g || 0) * 255);
             imgData.data[i * 4 + 2] = Math.round((b || 0) * 255);
             imgData.data[i * 4 + 3] = 255;
         }
         ctx.putImageData(imgData, 0, 0);
 
-        if (imageEl) { imageEl.src = off.toDataURL(); imageEl.style.display = 'block'; }
-        if (empty)   empty.style.display = 'none';
+        if (imageEl) { imageEl.src = off.toDataURL(); imageEl.classList.remove('hidden'); }
+        if (empty) empty.classList.add('hidden');
         compareData[side].region = region;
-        compareData[side].image  = data;
+        compareData[side].image = data;
     } catch (e) {
         console.error('Compare load error:', e);
-        if (empty)  { empty.textContent = 'Error: ' + e.message; empty.style.display = 'block'; }
-        if (imageEl)  imageEl.style.display = 'none';
+        if (empty) { empty.textContent = 'Error: ' + e.message; empty.classList.remove('hidden'); }
+        if (imageEl) imageEl.classList.add('hidden');
     }
 }
 
 function applyCompareColormap(side) { loadCompareRegion(side); }
 
 function updateCompareExagLabel(side) {
-    const cap      = side.charAt(0).toUpperCase() + side.slice(1);
+    const cap = side.charAt(0).toUpperCase() + side.slice(1);
     const exagInput = document.getElementById(`compare${cap}Exag`);
     const exagLabel = document.getElementById(`compare${cap}ExagLabel`);
     if (exagLabel && exagInput) exagLabel.textContent = parseFloat(exagInput.value).toFixed(1) + 'x';
@@ -168,15 +168,15 @@ function updateRegionParamsTable(region) {
         return;
     }
     const params = [
-        { key: 'name',       label: 'Name',             value: region.name || '',                                           type: 'text',   readonly: true },
-        { key: 'north',      label: 'North',            value: region.north || '',                                          type: 'number', step: '0.0001' },
-        { key: 'south',      label: 'South',            value: region.south || '',                                          type: 'number', step: '0.0001' },
-        { key: 'east',       label: 'East',             value: region.east  || '',                                          type: 'number', step: '0.0001' },
-        { key: 'west',       label: 'West',             value: region.west  || '',                                          type: 'number', step: '0.0001' },
-        { key: 'dim',        label: 'Dimension',        value: document.getElementById('paramDim')?.value || 200,           type: 'number', min: 50, max: 1000 },
-        { key: 'depth_scale',label: 'Depth Scale',      value: window.appState.demParams.depthScale,                       type: 'number', step: '0.1' },
-        { key: 'water_scale',label: 'Water Scale',      value: window.appState.demParams.waterScale,                       type: 'number', step: '0.01' },
-        { key: 'sat_scale',  label: 'Satellite Scale',  value: window.appState.demParams.satScale,                         type: 'number', min: 100, max: 5000 }
+        { key: 'name', label: 'Name', value: region.name || '', type: 'text', readonly: true },
+        { key: 'north', label: 'North', value: region.north || '', type: 'number', step: '0.0001' },
+        { key: 'south', label: 'South', value: region.south || '', type: 'number', step: '0.0001' },
+        { key: 'east', label: 'East', value: region.east || '', type: 'number', step: '0.0001' },
+        { key: 'west', label: 'West', value: region.west || '', type: 'number', step: '0.0001' },
+        { key: 'dim', label: 'Dimension', value: document.getElementById('paramDim')?.value || 200, type: 'number', min: 50, max: 1000 },
+        { key: 'depth_scale', label: 'Depth Scale', value: window.appState.demParams.depthScale, type: 'number', step: '0.1' },
+        { key: 'water_scale', label: 'Water Scale', value: window.appState.demParams.waterScale, type: 'number', step: '0.01' },
+        { key: 'sat_scale', label: 'Satellite Scale', value: window.appState.demParams.satScale, type: 'number', min: 100, max: 5000 }
     ];
     tbody.innerHTML = params.map(p => `
         <tr>
@@ -185,15 +185,15 @@ function updateRegionParamsTable(region) {
                 <input type="${p.type}" data-param="${p.key}" value="${p.value}"
                        ${p.readonly ? 'readonly' : ''}
                        ${p.step ? `step="${p.step}"` : ''}
-                       ${p.min  !== undefined ? `min="${p.min}"` : ''}
-                       ${p.max  !== undefined ? `max="${p.max}"` : ''}
+                       ${p.min !== undefined ? `min="${p.min}"` : ''}
+                       ${p.max !== undefined ? `max="${p.max}"` : ''}
                        style="width:100%;background:#404040;color:#fff;border:1px solid #555;padding:4px;border-radius:3px;">
             </td>
         </tr>`).join('');
 }
 
 function applyRegionParams() {
-    const tbody  = document.getElementById('regionParamsBody');
+    const tbody = document.getElementById('regionParamsBody');
     if (!tbody) return;
     const inputs = tbody.querySelectorAll('input[data-param]');
     const region = window.appState?.selectedRegion;
@@ -202,10 +202,10 @@ function applyRegionParams() {
         const p = input.dataset.param;
         const v = input.value;
         switch (p) {
-            case 'dim':         { const el = document.getElementById('paramDim'); if (el) el.value = v; } break;
+            case 'dim': { const el = document.getElementById('paramDim'); if (el) el.value = v; } break;
             case 'depth_scale': window.appState.demParams.depthScale = parseFloat(v); break;
             case 'water_scale': window.appState.demParams.waterScale = parseFloat(v); break;
-            case 'sat_scale':   window.appState.demParams.satScale   = parseInt(v);   break;
+            case 'sat_scale': window.appState.demParams.satScale = parseInt(v); break;
             case 'north': case 'south': case 'east': case 'west':
                 if (region) region[p] = parseFloat(v);
                 break;
@@ -220,10 +220,10 @@ function applyRegionParams() {
 // Expose on window
 // ─────────────────────────────────────────────────────────────────────────────
 
-window.initCompareMode          = initCompareMode;
-window.updateCompareCanvases    = updateCompareCanvases;
-window.loadCompareRegion        = loadCompareRegion;
-window.applyCompareColormap     = applyCompareColormap;
-window.updateCompareExagLabel   = updateCompareExagLabel;
-window.updateRegionParamsTable  = updateRegionParamsTable;
-window.applyRegionParams        = applyRegionParams;
+window.initCompareMode = initCompareMode;
+window.updateCompareCanvases = updateCompareCanvases;
+window.loadCompareRegion = loadCompareRegion;
+window.applyCompareColormap = applyCompareColormap;
+window.updateCompareExagLabel = updateCompareExagLabel;
+window.updateRegionParamsTable = updateRegionParamsTable;
+window.applyRegionParams = applyRegionParams;

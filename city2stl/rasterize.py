@@ -127,25 +127,15 @@ def rasterize_city_data(
         except Exception:
             continue
     if building_shapes:
-        try:
-            # Rasterize all at once using add merge_alg (rasterio >= 1.2)
-            building_grid = _rasterize(
-                building_shapes, out_shape=(dim, dim), transform=transform,
-                fill=0, dtype="float32", merge_alg=MergeAlg.add,
-            )
-            # Use np.maximum so building heights always win over road/water values
-            np.maximum(grid, building_grid, out=grid)
-        except Exception:
-            # Fallback: rasterize one by one
-            for feat_shape, h in building_shapes:
-                try:
-                    tmp = _rasterize(
-                        [(feat_shape, h)], out_shape=(dim, dim),
-                        transform=transform, fill=0, dtype="float32",
-                    )
-                    np.maximum(grid, tmp, out=grid)
-                except Exception:
-                    continue
+        for feat_shape, h in building_shapes:
+            try:
+                tmp = _rasterize(
+                    [(feat_shape, h)], out_shape=(dim, dim),
+                    transform=transform, fill=0, dtype="float32",
+                )
+                np.maximum(grid, tmp, out=grid)
+            except Exception:
+                continue
 
     vmin = float(grid.min())
     vmax = float(grid.max())

@@ -9,7 +9,7 @@
   <div :class="['city-table-panel', collapsed && 'city-table-panel-collapsed']" id="cityTablePanel">
     <div class="city-table-panel-header">
       <div class="city-table-panel-title">🏙 Buildings Table</div>
-      <button class="city-table-panel-toggle" type="button" @click="hidePanel" title="Hide buildings table panel">◀</button>
+      <button class="city-table-panel-toggle" type="button" @click="hidePanel" title="Hide buildings table panel">◀ Hide</button>
     </div>
 
     <div class="city-table-panel-body">
@@ -437,18 +437,18 @@ onBeforeUnmount(() => {
   text-orientation: mixed;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 10px 6px;
-  background: #0f6f82;
+  gap: 6px;
+  padding: 16px 10px;
+  background: #007acc;
   border: none;
   border-left: 1px solid var(--bg-light);
   color: #fff;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   flex-shrink: 0;
   transition: background 0.15s;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
 }
 
 .city-table-collapsed-tab.visible {
@@ -456,7 +456,7 @@ onBeforeUnmount(() => {
 }
 
 .city-table-collapsed-tab:hover {
-  background: #1287a0;
+  background: #0088e0;
 }
 
 .city-table-panel-header {
@@ -475,13 +475,23 @@ onBeforeUnmount(() => {
 }
 
 .city-table-panel-toggle {
-  border: 1px solid #3a3a3a;
-  background: #2b2b2b;
-  color: #bbb;
+  border: 1px solid transparent;
+  background: none;
+  color: #aaa;
   border-radius: 4px;
-  font-size: 11px;
-  padding: 2px 6px;
+  font-size: 12px;
+  height: 26px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   cursor: pointer;
+}
+
+.city-table-panel-toggle:hover {
+  color: #ccc;
+  background: #383838;
+  border-color: #555;
 }
 
 .city-table-panel-body {

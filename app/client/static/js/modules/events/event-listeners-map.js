@@ -240,17 +240,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         }
     });
 
-    const floatingRegionsBtn = document.getElementById('floatingRegionsToggle');
-    const regionsPanel = document.getElementById('regionsPanel');
-    floatingRegionsBtn?.addEventListener('click', () => {
-        regionsPanel?.classList.toggle('hidden');
-        floatingRegionsBtn.classList.toggle('active', !regionsPanel?.classList.contains('hidden'));
-        if (!regionsPanel?.classList.contains('hidden')) window.populateRegionsPanelTable?.();
-    });
-    document.getElementById('closeRegionsPanel')?.addEventListener('click', () => {
-        regionsPanel?.classList.add('hidden');
-        floatingRegionsBtn?.classList.remove('active');
-    });
+    window.closeRegionsPanel = function closeRegionsPanel() {};
 
     const mapSettingsBtn = document.getElementById('floatingMapSettingsBtn');
     const mapSettingsPanel = document.getElementById('mapSettingsPanel');
@@ -298,18 +288,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     document.getElementById('showGridlinesExplore')?.addEventListener('change', e => {
         window.setMapGridEnabled?.(e.target.checked);
         window.toggleMapGrid?.(e.target.checked);
-    });
-
-    document.getElementById('regionsPanelSearch')
-        ?.addEventListener('input', () => window.populateRegionsPanelTable?.());
-
-    document.getElementById('regionsPanelNewBtn')?.addEventListener('click', () => {
-        window.closeRegionsPanel?.();
-        const dc = window.getDrawControl?.();
-        if (dc && dc._toolbars?.draw) {
-            try { dc._toolbars.draw._modes.rectangle.handler.enable(); } catch (e) { }
-        }
-        window.showToast?.('Draw a rectangle on the map to create a new region', 'info');
     });
 
     document.getElementById('floatingDrawBtn')?.addEventListener('click', activateDrawTool);

@@ -16,6 +16,84 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
 
 
+def _default_region_settings() -> dict:
+    """Return the browser client default grouped settings payload."""
+    return {
+        "dem": {
+            "dim": 600,
+            "depth_scale": 0.5,
+            "water_scale": 0.05,
+            "subtract_water": True,
+            "dem_source": "local",
+            "show_sat": False,
+        },
+        "projection": {
+            "projection": "none",
+            "clip_nans": True,
+        },
+        "view": {
+            "colormap": "terrain",
+            "rescale_min": None,
+            "rescale_max": None,
+            "gridlines_show": True,
+            "gridlines_count": 10,
+            "elevation_curve": None,
+            "elevation_curve_points": [],
+            "elevation_curve_vmin": None,
+            "elevation_curve_vmax": None,
+        },
+        "water": {
+            "dim": 600,
+            "dataset": "esa",
+        },
+        "esa": {
+            "dim": 600,
+        },
+        "satellite": {
+            "dim": 600,
+        },
+        "export": {
+            "model_height": 30.0,
+            "base_height": 10.0,
+            "exaggeration": 1.0,
+            "sea_level_cap": False,
+            "floor_val": 0.0,
+            "engrave_label": False,
+            "label_text": "",
+            "contours": False,
+            "contour_interval": 100.0,
+            "contour_style": "engraved",
+            "puzzle_z": None,
+        },
+        "split": {
+            "split_rows": 4,
+            "split_cols": 4,
+            "puzzle_m": 50,
+            "puzzle_base_n": 10,
+            "border_height": 1.0,
+            "border_offset": 5.0,
+            "include_border": True,
+        },
+        "city": {
+            "layers": ["buildings", "roads", "waterways"],
+            "simplify_tolerance": 0.5,
+            "min_area": 5.0,
+            "building_scale": 0.5,
+            "road_depression_m": 0.0,
+            "water_depression_m": -2.0,
+            "simplify_terrain": True,
+        },
+        "hydrology": {
+            "source": "hydrorivers",
+            "width_factor": 0.5,
+            "scale_m": 10,
+            "depression_m": -5.0,
+            "min_order": 3,
+            "order_exponent": 1.5,
+        },
+    }
+
+
 def _model_to_dict(model) -> dict:
     """Serialize Pydantic model instances for both v1 and v2."""
     if hasattr(model, "model_dump"):
@@ -156,6 +234,12 @@ async def list_colormaps():
 async def list_datasets():
     """Return available elevation and land-cover datasets."""
     return JSONResponse(content={"datasets": _list_datasets()})
+
+
+@router.get("/api/settings/default")
+async def get_default_settings():
+    """Return the canonical grouped browser-client settings defaults."""
+    return JSONResponse(content={"settings": _default_region_settings()})
 
 
 @router.get("/api/settings")

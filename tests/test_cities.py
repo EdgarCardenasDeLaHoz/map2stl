@@ -143,6 +143,74 @@ class TestCitiesPostCaching:
         assert resp.status_code == 500
         assert "OSM fetch failed" in resp.json()["error"]
 
+    def test_stale_cached_payload_is_ignored_and_refetched(self, client, tmp_data_dir):
+        key = _osm_key(self.SMALL_BBOX, tol=0.5, min_area=5.0)
+        osm_dir = tmp_data_dir["cache_root"] / "osm"
+        osm_dir.mkdir(parents=True, exist_ok=True)
+
+        stale_payload = {
+            "buildings": {
+                "type": "FeatureCollection",
+                "features": [{
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [-75.170, 39.950],
+                            [-75.168, 39.950],
+                            [-75.168, 39.952],
+                            [-75.170, 39.952],
+                            [-75.170, 39.950],
+                        ]],
+                    },
+                    "properties": {"height_m": 10.0},
+                }],
+            },
+            "roads": {"type": "FeatureCollection", "features": []},
+            "waterways": {"type": "FeatureCollection", "features": []},
+            "cache_key": key,
+            "diagonal_km": 1.2,
+        }
+        cache_file = osm_dir / f"{key}.json.gz"
+        cache_file.write_bytes(gzip.compress(json.dumps(stale_payload).encode()))
+
+        fresh_payload = {
+            "buildings": {
+                "type": "FeatureCollection",
+                "features": [{
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [-75.170, 39.950],
+                            [-75.168, 39.950],
+                            [-75.168, 39.952],
+                            [-75.170, 39.952],
+                            [-75.170, 39.950],
+                        ]],
+                    },
+                    "properties": {
+                        "height_m": 12.0,
+                        "height_source": "default",
+                        "building:part": "yes",
+                    },
+                }],
+            },
+            "roads": {"type": "FeatureCollection", "features": []},
+            "waterways": {"type": "FeatureCollection", "features": []},
+            "city_pipeline_version": 2,
+        }
+
+        with patch("app.server.routers.cities._fetch_osm_data", return_value=fresh_payload) as mock_fn:
+            resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
+
+        assert resp.status_code == 200
+        assert mock_fn.call_count == 1
+        body = resp.json()
+        props = body["buildings"]["features"][0]["properties"]
+        assert props["height_source"] == "default"
+        assert props["building:part"] == "yes"
+
 
 # ---------------------------------------------------------------------------
 # POST /api/cities/raster

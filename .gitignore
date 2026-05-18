@@ -44,7 +44,8 @@ output/*
 
 # Trained model checkpoints — large, regenerable from training scripts
 models/*.pt
-models/*_inspect.pdf/*.png
+models/*_inspect.pdf
+models/*_inspect.png
 # skyline_cv generated output (PDFs, PNG page dumps, image cache) —
 # regenerable from city2stl/skyline_cv/scripts/08_region_skyline_pdf.py
 city2stl/skyline_cv/runs/
@@ -56,6 +57,4 @@ server2.log
 test_pano_direct.png
 test_seed1_h0.png
 tests/hydrology-render-test.png
-test_city_raster_dims.py
-test_projection_audit.py
-test_projection_audit_simple.py
+

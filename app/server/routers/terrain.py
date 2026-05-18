@@ -214,18 +214,19 @@ async def get_terrain_dem(
     # Note: Cache key does NOT include projection or clip_valid_region.
     # Raw data is cached once per bbox; projection/clipping applied on fetch.
     _dem_cache_key = make_cache_key("dem", north, south, east, west, {
+        "v": 2,
         "dim": dim, "src": dem_source,
         "ds": depth_scale, "ws": water_scale,
         "sw": subtract_water, "md": maintain_dimensions,
         "sat": show_sat,
     })
     _cached = read_array_cache("dem", _dem_cache_key)
+    im_raw = None
+    from_cache = False
     if _cached is not None and _cached[0].get("dem") is not None:
         logger.info(f"DEM cache hit: {_dem_cache_key[:8]}...")
-        payload = _make_dem_payload(_cached[0]["dem"], west, south, east, north,
-                                    show_sat, upscale_dim=dim)
-        payload["from_cache"] = True
-        return JSONResponse(content=payload)
+        im_raw = _cached[0]["dem"].astype(np.float32, copy=False)
+        from_cache = True
 
     # TEST_MODE: return deterministic gradient without network I/O
     if TEST_MODE:
@@ -250,19 +251,21 @@ async def get_terrain_dem(
         west, east = -0.01, 0.01
 
     try:
-        im = await run_sync(_fetch_dem_array, dem_source,
-                            north, south, east, west, dim,
-                            depth_scale, water_scale,
-                            subtract_water, projection, maintain_dimensions,
-                            clip_valid_region)
-        im = _upsample_dem(im, dim)
+        if im_raw is None:
+            im_raw = await run_sync(_fetch_dem_array, dem_source,
+                                    north, south, east, west, dim,
+                                    depth_scale, water_scale,
+                                    subtract_water, projection, maintain_dimensions,
+                                    clip_valid_region)
+            im_raw = _upsample_dem(im_raw, dim)
 
         # Apply projection uniformly for ALL sources.
         # All fetch functions now return Plate Carrée data;
         # projection is applied here as a single external step.
+        im = im_raw
         if projection != "none":
             im = _project_grid(
-                im.astype(np.float32), north, south, east, west,
+                im_raw.astype(np.float32), north, south, east, west,
                 projection, clip_valid_region, categorical=False,
             )
 
@@ -294,21 +297,21 @@ async def get_terrain_dem(
             except Exception as sat_err:
                 logger.warning(f"Satellite fetch failed: {sat_err}")
 
+        if from_cache:
+            response_content["from_cache"] = True
+
         # Write DEM disk cache (skip when satellite overlay is embedded)
-        if not show_sat:
-            im_clean = np.nan_to_num(im, nan=0.0).astype(np.float32)
-            if im_clean.shape != (height_px, width_px):
-                import cv2 as _cv2
-                im_clean = _cv2.resize(im_clean, (width_px, height_px),
-                                       interpolation=_cv2.INTER_LINEAR)
+        # Cache raw (unprojected) DEM so projection/clip toggles are honored per request.
+        if not show_sat and not from_cache:
+            im_clean = im_raw.astype(np.float32, copy=False)
             write_array_cache(
                 "dem", _dem_cache_key,
                 {"dem": im_clean},
-                {"min_elevation": response_content["min_elevation"],
-                 "max_elevation": response_content["max_elevation"],
-                 "mean_elevation": response_content["mean_elevation"],
+                {"min_elevation": float(np.nanmin(im_raw)),
+                 "max_elevation": float(np.nanmax(im_raw)),
+                 "mean_elevation": float(np.nanmean(im_raw)),
                  "bbox": [west, south, east, north],
-                 "shape": [height_px, width_px]})
+                 "shape": list(im_clean.shape)})
 
         return JSONResponse(content=response_content)
 
@@ -365,7 +368,7 @@ async def get_terrain_water_mask(
 
         # --- Water mask disk cache check ---
         # Note: Cache key does NOT include projection or clip_valid_region.
-        # Raw data is cached once per bbox; projection/clipping applied on fetch.
+        # Raw data is cached once per bbox; projection/clipping applied per request.
         _water_cache_key = make_cache_key("water", north, south, east, west, {
             "dim": dim, "ds": water_dataset})
         _wc = read_array_cache("water", _water_cache_key)
@@ -375,6 +378,10 @@ async def get_terrain_water_mask(
             _esa = _warr.get("esa")
             if _wm is not None and _esa is not None:
                 logger.info(f"Water mask cache hit: {_water_cache_key[:8]}...")
+                if projection != "none":
+                    _wm, _esa = _project_water_arrays(
+                        _wm.astype(np.float32), _esa.astype(np.float32),
+                        north, south, east, west, projection, clip_valid_region)
                 _h, _w = _wm.shape
                 _wp = int(np.sum(_wm > 0.5))
                 _tp = _h * _w
@@ -424,6 +431,11 @@ async def get_terrain_water_mask(
         water_pixels = int(np.sum(water_mask))
         total_pixels = h * w
 
+        write_array_cache("water", _water_cache_key,
+                          {"water_mask": water_mask.astype(np.float32),
+                           "esa": img.astype(np.float32)},
+                          {"shape": [h, w]})
+
         # Apply projection if requested
         if projection != "none":
             water_mask, img = _project_water_arrays(
@@ -431,11 +443,6 @@ async def get_terrain_water_mask(
             h, w = water_mask.shape
             water_pixels = int(np.sum(water_mask > 0.5))
             total_pixels = h * w
-
-        write_array_cache("water", _water_cache_key,
-                          {"water_mask": water_mask.astype(np.float32),
-                           "esa": img.astype(np.float32)},
-                          {"shape": [h, w]})
 
         return JSONResponse(content={
             "water_mask_values_b64": _b64(water_mask),

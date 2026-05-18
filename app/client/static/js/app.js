@@ -95,6 +95,7 @@ window.appState.demParams = {
 function clearLayerCache() {
     window.appState.lastDemData = null;
     window.clearLastWaterMaskData?.();
+    window.clearWaterHydrology?.();
     window.appState.currentDemBbox = null;
     window.appState.selectedCityBuildingIndex = null;
     window._setDemEmptyState?.(true);
@@ -114,6 +115,7 @@ function clearLayerCache() {
     window.appState._satImgRawCanvas = null;
     window.appState._satImgBbox = null;
     window.appState.satEsaLoaded = false;
+    window.appState.waterHydrologyCanvas = null;
 
     // Hydrology can be in flight while the user switches regions; cancel it
     // and clear the visible layer immediately so old river rasters cannot bleed
@@ -247,18 +249,18 @@ document.addEventListener('DOMContentLoaded', async function () {
     window.setupBboxKeyboardNav?.();
     window.setupCacheManagement?.();
 
-    // Start in expanded sidebar state by default
-    window.appState.sidebarState = 'expanded';
+    // Start in normal sidebar state by default to keep region selection compact.
+    window.appState.sidebarState = 'normal';
     const _sidebar = document.getElementById('sidebar');
-    if (_sidebar) { _sidebar.classList.remove('collapsed'); _sidebar.classList.add('expanded'); }
+    if (_sidebar) { _sidebar.classList.remove('collapsed', 'expanded'); }
     const _toggleBtn = document.getElementById('sidebarToggleBtn');
     if (_toggleBtn) {
         const _icon = _toggleBtn.querySelector('.state-icon');
         const _lbl = _toggleBtn.querySelector('.state-label');
-        if (_icon) _icon.textContent = '⇐';
-        if (_lbl) _lbl.textContent = 'Hide';
+        if (_icon) _icon.textContent = '⇔';
+        if (_lbl) _lbl.textContent = 'Expand';
     }
-    window._setSidebarViews?.('expanded');
+    window._setSidebarViews?.('normal');
 
     // Load available DEM sources and show API key warning if needed
     window._initDemSources?.();
@@ -312,19 +314,22 @@ window.appState.sidebarState = 'normal'; // 'normal', 'expanded', 'hidden'
 window.getSidebarState = () => window.appState.sidebarState;
 
 // Open sidebar from floating button (goes to normal state)
-document.getElementById('openSidebarBtn').addEventListener('click', () => {
-    const sidebar = document.getElementById('sidebar');
-    const toggleBtn = document.getElementById('sidebarToggleBtn');
-    const icon = toggleBtn.querySelector('.state-icon');
-    const label = toggleBtn.querySelector('.state-label');
+const _openSidebarBtn = document.getElementById('openSidebarBtn');
+if (_openSidebarBtn) {
+    _openSidebarBtn.addEventListener('click', () => {
+        const sidebar = document.getElementById('sidebar');
+        const toggleBtn = document.getElementById('sidebarToggleBtn');
+        const icon = toggleBtn?.querySelector('.state-icon');
+        const label = toggleBtn?.querySelector('.state-label');
 
-    window.appState.sidebarState = 'normal';
-    sidebar.classList.remove('collapsed', 'expanded');
-    document.getElementById('regionParamsSection').classList.add('hidden');
-    document.getElementById('openSidebarBtn').classList.add('hidden');
-    icon.textContent = '⇔';
-    label.textContent = 'Expand';
-});
+        window.appState.sidebarState = 'normal';
+        sidebar?.classList.remove('collapsed', 'expanded');
+        document.getElementById('regionParamsSection')?.classList.add('hidden');
+        _openSidebarBtn.classList.add('hidden');
+        if (icon) icon.textContent = '⇔';
+        if (label) label.textContent = 'Expand';
+    });
+}
 
 // ============================================================
 // 3D MODEL VIEWER & EXPORT

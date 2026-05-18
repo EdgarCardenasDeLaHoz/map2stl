@@ -17,6 +17,8 @@
     <!-- Per-layer rows — one row per entry in _layerOrder -->
     <div id="layerRows" style="display:flex;flex-direction:column;gap:2px;">
 
+      <div class="layer-class-label">Terrain</div>
+
       <!-- Dem row -->
       <div class="layer-row">
         <span class="layer-row-icon" title="Base elevation">🏔</span>
@@ -34,6 +36,8 @@
         <input type="range" class="layer-row-opacity" id="layerOpacity_WaterHydrology" min="0" max="100" value="75" title="Hydrology opacity" aria-label="Hydrology opacity">
         <span class="layer-row-pct" id="layerOpacityPct_WaterHydrology">75%</span>
       </div>
+
+      <div class="layer-class-label">Imagery</div>
 
       <!-- ESA row -->
       <div class="layer-row">
@@ -53,6 +57,8 @@
         <span class="layer-row-pct" id="layerOpacityPct_SatImg">80%</span>
       </div>
 
+      <div class="layer-class-label">City</div>
+
       <!-- City Raster row -->
       <div class="layer-row">
         <span class="layer-row-icon" title="City heights raster">🏙</span>
@@ -70,6 +76,8 @@
         <input type="range" class="layer-row-opacity" id="layerOpacity_CityOverlay" min="0" max="100" value="85" title="City vector opacity" aria-label="City vector opacity">
         <span class="layer-row-pct" id="layerOpacityPct_CityOverlay">85%</span>
       </div>
+
+      <div class="layer-class-label">Composite</div>
       <!-- Composite DEM row — no load button -->
       <div class="layer-row">
         <span class="layer-row-icon" title="Composite DEM">★</span>
@@ -81,26 +89,25 @@
 
     </div><!-- /layerRows -->
 
-    <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333;">
-      <div style="font-size:11px;color:#aaa;margin-bottom:6px;">City Polygon Display</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-        <label class="check-label"><input type="checkbox" id="cityLayerBuildings" checked aria-label="Show city buildings polygons"> 🏠 Buildings</label>
-        <label class="check-label"><input type="checkbox" id="cityLayerRoads" checked aria-label="Show city roads polylines"> 🛣 Roads</label>
-        <label class="check-label"><input type="checkbox" id="cityLayerWaterways" checked aria-label="Show city waterways"> 💧 Waterways</label>
-      </div>
-      <div style="display:flex;gap:10px;align-items:center;">
-        <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Buildings <input type="color" id="layerBuildingsColor" value="#c8b89a" class="city-color-swatch" aria-label="Buildings polygon color"></label>
-        <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Roads <input type="color" id="layerRoadsColor" value="#cc8844" class="city-color-swatch" aria-label="Roads polyline color"></label>
-        <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Water <input type="color" id="layerWaterwaysColor" value="#4488cc" class="city-color-swatch" aria-label="Waterways color"></label>
-      </div>
-      <div style="margin-top:6px;">
-        <button id="viewOpenCityTablePanelBtn" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" @click="toggleCityTablePanel">📋 {{ cityTableToggleLabel }}</button>
-      </div>
-    </div>
-
     <!-- Hidden legacy div — kept so _updateLayerOpacitySliders() doesn't error -->
     <div id="layerOpacitySliders" style="display:none;"></div>
 
+  </CollapsibleSection>
+
+  <CollapsibleSection title="🏙 City Polygon Display" :start-open="false">
+    <div style="display:flex;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
+      <label class="check-label"><input type="checkbox" id="cityLayerBuildings" checked aria-label="Show city buildings polygons"> 🏠 Buildings</label>
+      <label class="check-label"><input type="checkbox" id="cityLayerRoads" checked aria-label="Show city roads polylines"> 🛣 Roads</label>
+      <label class="check-label"><input type="checkbox" id="cityLayerWaterways" checked aria-label="Show city waterways"> 💧 Waterways</label>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Buildings <input type="color" id="layerBuildingsColor" value="#c8b89a" class="city-color-swatch" aria-label="Buildings polygon color"></label>
+      <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Roads <input type="color" id="layerRoadsColor" value="#cc8844" class="city-color-swatch" aria-label="Roads polyline color"></label>
+      <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Water <input type="color" id="layerWaterwaysColor" value="#4488cc" class="city-color-swatch" aria-label="Waterways color"></label>
+    </div>
+    <div style="margin-top:6px;">
+      <button id="viewOpenCityTablePanelBtn" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" @click="toggleCityTablePanel">📋 {{ cityTableToggleLabel }}</button>
+    </div>
   </CollapsibleSection>
 </template>
 <script setup lang="ts">
@@ -191,11 +198,21 @@ onBeforeUnmount(() => {
 }
 
 .layer-row {
-    display: grid;
-  grid-template-columns: 22px 70px 46px minmax(80px, 1fr) 32px;
-    gap: 0 6px;
-    align-items: center;
-    min-height: 28px;
+  display: grid;
+  grid-template-columns: 20px minmax(52px, 0.9fr) 44px minmax(72px, 1.4fr) 32px;
+  gap: 0 6px;
+  align-items: center;
+  min-height: 28px;
+}
+
+.layer-class-label {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #2f2f2f;
+  font-size: 10px;
+  color: #8ea6bf;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .layer-row-icon {
   font-size: 13px;

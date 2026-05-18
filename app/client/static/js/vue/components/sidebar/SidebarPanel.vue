@@ -13,7 +13,7 @@
         @click="exportRegions">
         Export
       </button>
-      <button class="sidebar-header-action-btn"
+      <button v-show="mode !== 'hidden'" class="sidebar-header-action-btn"
         title="Import regions from JSON"
         @click="openImportPicker">
         Import
@@ -49,14 +49,8 @@
       <!-- Expanded table (expanded mode) -->
       <RegionListTable v-if="mode === 'expanded'" />
 
-      <!-- Region parameters (expanded mode) -->
-      <RegionParamsSection :visible="mode === 'expanded'" />
-
       <!-- New region -->
       <NewRegionSection />
-
-      <!-- Cache management -->
-      <CacheManagement />
 
     </div>
   </div>
@@ -69,9 +63,7 @@ import { useAppStore } from '../../stores/app';
 import SidebarListView      from './SidebarListView.vue';
 import SidebarEditView      from './SidebarEditView.vue';
 import RegionListTable      from './RegionListTable.vue';
-import RegionParamsSection  from './RegionParamsSection.vue';
 import NewRegionSection     from './NewRegionSection.vue';
-import CacheManagement      from './CacheManagement.vue';
 
 const store = useAppStore();
 
@@ -142,8 +134,8 @@ async function handleRegionImport(event: Event) {
 }
 
 onMounted(() => {
-  // Start expanded — matches app.js DOMContentLoaded initialisation.
-  setSidebarMode('expanded');
+  // Start in normal mode so region selection stays compact by default.
+  setSidebarMode('normal');
 
   _openSidebarButton = document.getElementById('openSidebarBtn');
   _openSidebarButton?.addEventListener('click', handleOpenSidebarClick);

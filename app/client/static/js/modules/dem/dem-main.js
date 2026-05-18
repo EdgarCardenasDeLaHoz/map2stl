@@ -110,10 +110,8 @@ function _applyDemResult(data, north, south, east, west) {
     const container = document.getElementById('demImage');
     container.innerHTML = '';
     container.appendChild(canvas);
-    // Fill container width, preserve aspect ratio
-    canvas.style.width = '100%';
-    canvas.style.height = 'auto';
-    container.style.position = 'relative';
+    canvas.classList.add('dem-canvas-responsive');
+    container.classList.add('dem-container-relative');
 
     // Update overlays
     window.updateAxesOverlay?.(window.appState.currentDemBbox);
@@ -240,6 +238,8 @@ window.loadDEM = async function loadDEM(highRes = false) {
 
     // Clear DEM cache before loading new DEM
     window.clearLayerCache?.();
+    // While loading, show spinner/canvas area and hide the empty-state message.
+    window._setDemEmptyState?.(false);
 
     // Update layer status
     window.setLayerStatus('dem', 'loading');
@@ -351,8 +351,7 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
     canvas.width = width;
     canvas.height = height;
     canvas.style.maxWidth = '100%';
-    canvas.style.height = 'auto';
-    canvas.style.display = 'block';
+    canvas.classList.add('dem-canvas-responsive');
     const ctx = canvas.getContext('2d');
 
     const flat = _isArrayLike(values) ? values : [];
@@ -439,8 +438,28 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
 window._setDemEmptyState = function _setDemEmptyState(isEmpty) {
     const emptyEl = document.getElementById('demEmptyState');
     const layersEl = document.getElementById('layersContainer');
-    if (emptyEl) emptyEl.style.display = isEmpty ? 'flex' : 'none';
-    if (layersEl) layersEl.style.display = isEmpty ? 'none' : '';
+
+    // Never show the empty-state message if a DEM canvas is already present.
+    const hasDemCanvas = !!document.querySelector(`#demImage ${window.DEM_CANVAS_SELECTOR}`)
+        || ((document.getElementById('layerDemCanvas')?.width || 0) > 0);
+    if (isEmpty && hasDemCanvas) {
+        if (emptyEl) emptyEl.classList.add('hidden');
+        return;
+    }
+
+    if (emptyEl) emptyEl.classList.toggle('hidden', !isEmpty);
+    if (layersEl) layersEl.classList.toggle('hidden', isEmpty);
+
+    // Guard against a broken subtab state where every render pane is hidden.
+    if (!isEmpty) {
+        const layersHidden = document.getElementById('layersContainer')?.classList.contains('hidden') ?? true;
+        const compareHidden = document.getElementById('compareInlineContainer')?.classList.contains('hidden') ?? true;
+        const combinedHidden = document.getElementById('combinedContainer')?.classList.contains('hidden') ?? true;
+        const mergeHidden = document.getElementById('mergePanel')?.classList.contains('hidden') ?? true;
+        if (layersHidden && compareHidden && combinedHidden && mergeHidden) {
+            window.switchDemSubtab?.(window.appState?.activeDemSubtab || 'layers');
+        }
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -495,7 +514,7 @@ window.updatePrintDimensions = function updatePrintDimensions() {
     const panel = document.getElementById('printDimensions');
     const lastDemData = window.appState.lastDemData;
     if (!lastDemData || !lastDemData.width || !lastDemData.height) {
-        panel.style.display = 'none';
+        panel.classList.add('hidden');
         return;
     }
 
@@ -544,10 +563,12 @@ window.updatePrintDimensions = function updatePrintDimensions() {
         const fitText = document.getElementById('dimBedFitText');
         if (fitting.length > 0) {
             fitText.textContent = '✓ ' + fitting.map(b => b.name).join(', ');
-            fitRow.style.color = '#52b788';
+            fitRow.classList.add('fit-row-ok');
+            fitRow.classList.remove('fit-row-warn');
         } else {
             fitText.textContent = '⚠ exceeds standard beds';
-            fitRow.style.color = '#e67e22';
+            fitRow.classList.add('fit-row-warn');
+            fitRow.classList.remove('fit-row-ok');
         }
     } else {
         document.getElementById('dimRealArea').textContent = '—';
@@ -555,7 +576,7 @@ window.updatePrintDimensions = function updatePrintDimensions() {
         document.getElementById('dimBedFitText').textContent = '—';
     }
 
-    panel.style.display = 'block';
+    panel.classList.remove('hidden');
 
     // Bed optimizer
     window._updateBedOptimizer?.(bbox);
@@ -685,8 +706,7 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
                 const sat_h = data.sat_dimensions[0];
                 const sat_w = data.sat_dimensions[1];
                 const canvas = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
-                canvas.style.width = '100%';
-                canvas.style.height = 'auto';
+                canvas.classList.add('dem-canvas-responsive');
                 document.getElementById('satelliteImage').innerHTML = '';
                 document.getElementById('satelliteImage').appendChild(canvas);
             }

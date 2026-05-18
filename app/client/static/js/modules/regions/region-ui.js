@@ -45,6 +45,53 @@ let currentNotesRegion = null;
 const LIST_PAGE_SIZE = 20;
 let _listPage = 0;
 let _lastListSearch = '';  // used to reset the page when search changes
+let _lastContinentFilter = 'all';
+
+const KNOWN_CONTINENTS = ['North America', 'South America', 'Europe', 'Africa', 'Asia', 'Oceania', 'Antarctica', 'Other'];
+
+function _normalizeContinentLabel(label) {
+    const raw = String(label || '').trim();
+    if (!raw) return '';
+    const key = raw.toLowerCase();
+    const alias = {
+        'north america': 'North America',
+        'south america': 'South America',
+        'europe': 'Europe',
+        'africa': 'Africa',
+        'asia': 'Asia',
+        'oceania': 'Oceania',
+        'antarctica': 'Antarctica',
+        'other': 'Other',
+    };
+    return alias[key] || '';
+}
+
+function _resolveRegionContinent(region) {
+    const normalized = _normalizeContinentLabel(region.label);
+    if (normalized) return normalized;
+    const lat = (region.north + region.south) / 2;
+    const lon = (region.east + region.west) / 2;
+    return detectContinent(lat, lon);
+}
+
+function _syncContinentFilterOptions(coordinatesData) {
+    const select = document.getElementById('coordContinentFilter');
+    if (!select) return;
+
+    const selected = select.value || 'all';
+    const values = new Set();
+    coordinatesData.forEach((r) => values.add(_resolveRegionContinent(r)));
+
+    const known = KNOWN_CONTINENTS.filter((c) => values.has(c));
+    const options = ['all', ...known];
+
+    select.innerHTML = options.map((c) => {
+        const label = c === 'all' ? 'All Continents' : c;
+        return `<option value="${c}">${label}</option>`;
+    }).join('');
+
+    select.value = options.includes(selected) ? selected : 'all';
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Continent detection + grouping
@@ -68,10 +115,25 @@ function detectContinent(lat, lon) {
 function groupRegionsByContinent(regions) {
     const groups = {};
     const ORDER = ['North America', 'South America', 'Europe', 'Africa', 'Asia', 'Oceania', 'Antarctica', 'Other'];
+    const normalize = (label) => {
+        const key = String(label || '').trim().toLowerCase();
+        const alias = {
+            'north america': 'North America',
+            'south america': 'South America',
+            'europe': 'Europe',
+            'africa': 'Africa',
+            'asia': 'Asia',
+            'oceania': 'Oceania',
+            'antarctica': 'Antarctica',
+            'other': 'Other',
+        };
+        return alias[key] || '';
+    };
     regions.forEach(region => {
         const lat = (region.north + region.south) / 2;
         const lon = (region.east + region.west) / 2;
-        const continent = (region.label && region.label.trim()) ? region.label.trim() : detectContinent(lat, lon);
+        const labelContinent = normalize(region.label);
+        const continent = labelContinent || detectContinent(lat, lon);
         if (!groups[continent]) groups[continent] = [];
         groups[continent].push(region);
     });
@@ -104,6 +166,8 @@ function renderCoordinatesList() {
     }
 
     const searchVal = (document.getElementById('coordSearch')?.value || '').toLowerCase();
+    _syncContinentFilterOptions(coordinatesData);
+    const continentFilter = document.getElementById('coordContinentFilter')?.value || 'all';
 
     // Reset to page 0 whenever the search term changes.
     if (searchVal !== _lastListSearch) {
@@ -111,9 +175,17 @@ function renderCoordinatesList() {
         _lastListSearch = searchVal;
     }
 
-    const filtered = searchVal
-        ? coordinatesData.filter(r => r.name.toLowerCase().includes(searchVal))
-        : coordinatesData;
+    if (continentFilter !== _lastContinentFilter) {
+        _listPage = 0;
+        _lastContinentFilter = continentFilter;
+    }
+
+    const filtered = coordinatesData.filter((r) => {
+        const matchesSearch = !searchVal || r.name.toLowerCase().includes(searchVal);
+        if (!matchesSearch) return false;
+        if (continentFilter === 'all') return true;
+        return _resolveRegionContinent(r) === continentFilter;
+    });
 
     // ── Pagination ──────────────────────────────────────────────────────────
     const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
@@ -313,6 +385,17 @@ function setupRegionsTable() {
         populateRegionsTable();
         window.showToast('Regions refreshed', 'success');
     });
+
+    if (!window.__coordContinentFilterDelegated) {
+        document.addEventListener('change', (e) => {
+            const target = e.target;
+            if (!(target instanceof HTMLElement)) return;
+            if (target.id !== 'coordContinentFilter') return;
+            _listPage = 0;
+            renderCoordinatesList();
+        });
+        window.__coordContinentFilterDelegated = true;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

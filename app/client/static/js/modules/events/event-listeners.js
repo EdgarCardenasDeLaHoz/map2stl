@@ -81,7 +81,7 @@ window.setupEventListeners = function setupEventListeners() {
     document.getElementById('clearWaterHydrologyBtn')?.addEventListener('click', () => window.clearWaterHydrology?.());
     document.getElementById('hydroSource')?.addEventListener('change', e => {
         const controls = document.getElementById('hydroRiversControls');
-        if (controls) controls.style.display = e.target.value === 'hydrorivers' ? '' : 'none';
+        if (controls) controls.classList.toggle('hidden', e.target.value !== 'hydrorivers');
     });
 
     // qlLoadHydro (quick-load) wired in event-listeners-map.js via _asyncBtn

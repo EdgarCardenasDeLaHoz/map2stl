@@ -1,9 +1,14 @@
 <template>
   <div id="sidebarListView" :class="{ 'hidden': !visible }"
        class="sidebar-list-view">
-    <input type="text" id="coordSearch" class="search-input sidebar-search-input"
-           v-model="searchQuery"
-           placeholder="Search regions...">
+    <div class="sidebar-list-filters">
+      <input type="text" id="coordSearch" class="search-input sidebar-search-input"
+             v-model="searchQuery"
+             placeholder="Search regions...">
+      <select id="coordContinentFilter" class="sidebar-continent-filter" aria-label="Filter regions by continent">
+        <option value="all" selected>All Continents</option>
+      </select>
+    </div>
     <!-- region-ui.js / regions.js populate this div via innerHTML.
          Do NOT place Vue-managed children here — innerHTML replaces them and
          breaks Vue's virtual-DOM references (causes insertBefore-on-null).

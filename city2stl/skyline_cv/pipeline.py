@@ -34,6 +34,8 @@ Public surface (in dependency order):
 
   Matching + culling
     _cull_occluded_projections      — keep only the closest-per-bin building
+    osm_anchor_silhouettes          — F-SKY2 anchored split of merged segments
+    osm_marker_voronoi_silhouettes  — F-SKY3 instance-indexing Voronoi split
     match_segments_to_buildings     — interval-IoU + width-ratio scorer
 
   Pano helpers
@@ -44,6 +46,8 @@ Public surface (in dependency order):
   Height extraction
     estimate_heights_from_registration — per-view pinhole-y → height_m
     aggregate_building_heights      — per-building median + outlier downweighting
+    _floor_period_for_building      — F-SKY1 facade-period diagnostic
+                                       (OSM-independent height + distance check)
 
 See STATUS.md for what currently works and what doesn't. Hard dependency on
 SegFormer-b0 (ADE20K) via the `transformers` library — the registration
@@ -78,7 +82,27 @@ from shapely.geometry import shape
 _ADE20K_BUILDING: int = 1
 _ADE20K_SKY: int = 2
 _ADE20K_WATER_CLASSES: tuple[int, ...] = (21, 26, 60)
-_SEGFORMER_MODEL_ID: str = "nvidia/segformer-b0-finetuned-ade-512-512"
+def _segformer_model_id() -> str:
+    """Resolve the SegFormer model ID at first inference.
+
+    Default is ``b3`` (flipped from ``b0`` 2026-05-16 after measurement —
+    on Cartagena b3 doubled the matched-tagged-building count (n=8 → 17)
+    and dropped MAE 22.13 → 13.73, with cross-seed bias collapsing from
+    +20.30 m to +0.87 m). Set env var ``SKYLINE_CV_SEGFORMER_SIZE`` to
+    any of ``b0`` … ``b5`` to override. ``b0`` is still useful for fast
+    iteration (~3 min vs b3's ~5–6 min on Cartagena). Larger variants
+    improve building/sky mask quality on reflective-glass spires and
+    shadowed tower tops that smaller models classify as sky. The first
+    call downloads the weights to HuggingFace's local cache; subsequent
+    runs reuse them.
+    """
+    size = os.environ.get("SKYLINE_CV_SEGFORMER_SIZE", "b3").strip().lower()
+    if size not in {"b0", "b1", "b2", "b3", "b4", "b5"}:
+        size = "b3"
+    return f"nvidia/segformer-{size}-finetuned-ade-512-512"
+
+
+_SEGFORMER_MODEL_ID: str = _segformer_model_id()
 _SEGFORMER_LOADED: bool = False
 _SEGFORMER_OK: bool = False
 _segformer_processor = None
@@ -136,6 +160,17 @@ class RegisteredBuildingEstimate:
     forward_m: float
     estimated_height_m: float
     confidence: float
+    # F-SKY1 floor-period diagnostics. All optional; populated only when the
+    # building's facade has detectable horizontal floor banding (a clean
+    # autocorrelation peak in the mask-band row-mean luminance). These are
+    # OSM-independent: floor_period_px lets us back out distance via the
+    # inverse pinhole using an assumed 3.2 m floor height, and floor count
+    # × floor height gives an independent height estimate. See
+    # docs/plans/F-SKY1-floor-periodicity.md.
+    floor_period_px: float | None = None
+    floor_confidence: float | None = None
+    inferred_distance_m: float | None = None
+    inferred_height_m: float | None = None
 
 
 def _load_env_file_if_present() -> None:
@@ -436,6 +471,40 @@ def _neural_sky_and_building_masks(
         building_mask = label_map == _ADE20K_BUILDING
         # Water is the union of "water", "sea", "river" classes.
         water_mask = np.isin(label_map, _ADE20K_WATER_CLASSES)
+        # Mask cleanup: SegFormer's per-pixel argmax produces speckle —
+        # small isolated sky pixels INSIDE a building (window reflections
+        # of the sky on glass), and small isolated building pixels
+        # OUTSIDE buildings (cloud edges, antenna tips). A 5×5 closing on
+        # the building mask fills sub-window holes; a 3×3 opening on the
+        # sky mask removes isolated-sky speckle. Then we reassert
+        # mutual-exclusion (a pixel can't be both sky AND building post-
+        # cleanup) by giving sky precedence near the top of the image
+        # and building precedence below — that mirrors the physical
+        # likelihood at each y. Net effect on Cartagena: the central
+        # tower cluster's mask blob acquires sharper inter-building
+        # gaps that F-SKY7's local-max peak detector can exploit.
+        b_u8 = (building_mask.astype(np.uint8)) * 255
+        s_u8 = (sky_mask.astype(np.uint8)) * 255
+        close_k = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        open_k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        b_u8 = cv2.morphologyEx(b_u8, cv2.MORPH_CLOSE, close_k)
+        s_u8 = cv2.morphologyEx(s_u8, cv2.MORPH_OPEN, open_k)
+        # Glass-tower top repair: a tall narrow vertical closing (1 col ×
+        # 11 rows) bridges short sky strips that mirrored-sky reflections
+        # carve into a glass facade — the canonical Cartagena Bocagrande
+        # failure where the mask top has a wavy edge a row of grey-blue
+        # pixels below the actual roofline. Vertical-only kernel preserves
+        # the HORIZONTAL inter-tower gaps that F-SKY2 splitting depends
+        # on (a 5×5 isotropic closing would erase those too). Capped at
+        # 11 px so windows-and-cornice gaps two storeys tall don't get
+        # mistakenly filled in.
+        vert_k = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 11))
+        b_u8 = cv2.morphologyEx(b_u8, cv2.MORPH_CLOSE, vert_k)
+        building_mask = b_u8.astype(bool)
+        sky_mask = s_u8.astype(bool)
+        # Pixels claimed by both: building wins (sky-on-glass-reflection
+        # is the dominant failure case; cyan-tower-edge cloud is rare).
+        sky_mask &= ~building_mask
         _neural_cache_put(img_id, {
             "sky": sky_mask, "building": building_mask, "water": water_mask},
             image_rgb)
@@ -909,6 +978,116 @@ def _building_base_y_from_mask(
     return last_building if last_building >= 0 else None
 
 
+def _floor_period_for_building(
+    image_rgb: np.ndarray,
+    building_mask: "np.ndarray | None",
+    x_range: tuple[int, int],
+    y_top: float,
+    y_base: float,
+    *,
+    f_px: float,
+    floor_height_m: float = 3.2,
+    min_lag_px: int = 4,
+    max_lag_px: int = 80,
+    min_confidence: float = 0.20,
+    min_row_coverage: float = 0.30,
+) -> dict | None:
+    """Detect horizontal floor banding on a building facade and back out
+    an OSM-independent height + distance estimate (F-SKY1).
+
+    Idea: window rows, balconies, and slab edges produce regular horizontal
+    stripes in a tall building's mask region. The dominant pixel period of
+    those stripes is one floor. Given pinhole focal length f_px and an
+    assumed physical floor height (3.2 m default — mid of residential
+    2.8 m and commercial 3.6 m), distance is
+    ``f_px × floor_height_m / period_px`` and total height is
+    ``(facade_height_px / period_px) × floor_height_m``.
+
+    Returns a dict with ``floor_period_px``, ``floor_confidence``,
+    ``inferred_distance_m``, ``inferred_floors``, ``inferred_height_m``,
+    or None when no usable period is detected (mask missing, region too
+    short, autocorrelation peak below confidence threshold).
+
+    See ``docs/plans/F-SKY1-floor-periodicity.md`` for the rationale and
+    where this signal is meant to slot into the height aggregate.
+    """
+    if building_mask is None or image_rgb is None:
+        return None
+    H, W = building_mask.shape[:2]
+    xL = max(0, int(x_range[0]))
+    xR = min(W, int(x_range[1]) + 1)
+    yT = max(0, int(round(y_top)))
+    yB = min(H, int(round(y_base)))
+    if xR - xL < 4 or yB - yT < max_lag_px * 2:
+        return None
+    if f_px <= 0.0 or floor_height_m <= 0.0:
+        return None
+
+    img_band = image_rgb[yT:yB, xL:xR]
+    mask_band = building_mask[yT:yB, xL:xR]
+    if img_band.size == 0 or not mask_band.any():
+        return None
+
+    # Per-row mean luminance over building-mask pixels only. Rows whose
+    # mask coverage is below the threshold get filled with the band's
+    # overall mean so they don't introduce a step into the FFT.
+    luma = (
+        0.299 * img_band[..., 0].astype(np.float32)
+        + 0.587 * img_band[..., 1].astype(np.float32)
+        + 0.114 * img_band[..., 2].astype(np.float32)
+    )
+    mask_f = mask_band.astype(np.float32)
+    row_cov = mask_f.mean(axis=1)
+    valid_rows = row_cov >= min_row_coverage
+    if int(valid_rows.sum()) < max_lag_px * 2:
+        return None
+    row_sums = (luma * mask_f).sum(axis=1)
+    row_counts = mask_f.sum(axis=1)
+    safe_counts = np.where(row_counts > 0, row_counts, 1.0)
+    profile = (row_sums / safe_counts).astype(np.float32)
+    band_mean = float(profile[valid_rows].mean())
+    profile = np.where(valid_rows, profile, band_mean).astype(np.float32)
+
+    # High-pass: subtract a 12-row uniform mean to suppress whole-band
+    # illumination gradients (top-of-tower in shadow, bottom lit by
+    # waterfront sun). A 3-tap median then damps salt-and-pepper from
+    # the SegFormer mask without flattening the floor period.
+    smoothed = uniform_filter1d(profile, size=12, mode="nearest")
+    high = profile - smoothed
+    high = median_filter(high, size=3)
+    high = high - float(high.mean())
+
+    n = high.size
+    full = np.correlate(high, high, mode="full")
+    autocorr = full[n - 1:]
+    norm = float(autocorr[0])
+    if norm <= 1e-6:
+        return None
+    autocorr = autocorr / norm
+
+    if max_lag_px >= autocorr.size:
+        return None
+    window = autocorr[min_lag_px: max_lag_px + 1]
+    peak_idx_rel = int(np.argmax(window))
+    peak_val = float(window[peak_idx_rel])
+    if peak_val < min_confidence:
+        return None
+    period_px = float(min_lag_px + peak_idx_rel)
+    if period_px <= 0.0:
+        return None
+
+    inferred_distance_m = (f_px * floor_height_m) / period_px
+    inferred_floors = float(yB - yT) / period_px
+    inferred_height_m = inferred_floors * floor_height_m
+    return {
+        "floor_period_px": period_px,
+        "floor_confidence": peak_val,
+        "inferred_distance_m": float(inferred_distance_m),
+        "inferred_floors": float(inferred_floors),
+        "inferred_height_m": float(inferred_height_m),
+    }
+
+
 def _estimate_building_base(
     image: np.ndarray,
     peak_x: int,
@@ -988,6 +1167,57 @@ def detect_building_silhouettes(
         distance=12,
         prominence=max(3.0, height_range * 0.04),
     )
+
+    # F-SKY7: also catch local-max peaks within continuous mask regions.
+    # When SegFormer's building mask spans a row of glass towers without
+    # sky valleys between them, the contour stays HIGH (low y) everywhere
+    # and the global-prominence filter above rejects per-tower bumps.
+    # Detect bumps relative to a smoothed regional baseline (40 px window
+    # ≈ 6° of FOV at W=640) so monotone-but-bumpy rooflines still
+    # produce one peak per tower. The absolute prominence floor (6 px)
+    # is what stops contour noise from inventing spurious peaks.
+    #
+    # Two baseline widths run in parallel:
+    #   - 40 px wide baseline catches well-spaced 25-50 m towers
+    #   - 22 px tight baseline catches the dense Bocagrande-style row of
+    #     similar-height glass towers (3-4° FOV/tower) that the wide
+    #     baseline averages out (the bump signal flattens when peak
+    #     spacing approaches the baseline width). Higher prominence
+    #     floor (8 px) compensates for the noisier tight baseline.
+    # Both peak sets merge via the same de-dup pass below.
+    baseline = uniform_filter1d(c_filled, size=40, mode="nearest")
+    bump = baseline - smooth
+    local_peaks, _ = find_peaks(
+        bump,
+        distance=12,
+        prominence=6.0,
+    )
+    baseline_tight = uniform_filter1d(c_filled, size=22, mode="nearest")
+    bump_tight = baseline_tight - smooth
+    tight_peaks, _ = find_peaks(
+        bump_tight,
+        distance=10,
+        prominence=8.0,
+    )
+    if tight_peaks.size > 0:
+        if local_peaks.size > 0:
+            keep_t = np.array(
+                [int(abs(local_peaks - tp).min()) > 8 for tp in tight_peaks],
+                dtype=bool,
+            )
+            tight_peaks = tight_peaks[keep_t]
+        if tight_peaks.size > 0:
+            local_peaks = np.sort(np.concatenate([local_peaks, tight_peaks]))
+    if local_peaks.size > 0:
+        if peaks.size > 0:
+            # De-dup: only keep local-max peaks > 8 px from any existing peak.
+            keep = np.array(
+                [int(abs(peaks - lp).min()) > 8 for lp in local_peaks],
+                dtype=bool,
+            )
+            local_peaks = local_peaks[keep]
+        if local_peaks.size > 0:
+            peaks = np.sort(np.concatenate([peaks, local_peaks]))
 
     if peaks.size == 0:
         return []
@@ -1457,11 +1687,278 @@ def _merge_silhouette_sources(
     return sorted(out, key=lambda s: s["mid_x"])
 
 
+def _proj_x_range(p: dict) -> tuple[float, float]:
+    """Return (left, right) pixel x-bounds of a projection dict.
+
+    Falls back to ±10 px around ``x_px`` when explicit ``x_left_px`` /
+    ``x_right_px`` aren't set. Swaps if the caller emitted them out of
+    order. Shared by ``osm_anchor_silhouettes``,
+    ``osm_marker_voronoi_silhouettes`` and ``match_segments_to_buildings``
+    — they used to have private duplicates that drifted independently.
+    """
+    pL = float(p.get("x_left_px", float(p["x_px"]) - 10.0))
+    pR = float(p.get("x_right_px", float(p["x_px"]) + 10.0))
+    return (pL, pR) if pL <= pR else (pR, pL)
+
+
+def _proj_containment_in_seg(seg_L: float, seg_R: float, p: dict) -> float:
+    """Fraction of projection p's x-range that lies inside [seg_L, seg_R].
+
+    Companion to ``_proj_x_range``. Used as the "is this projection a
+    candidate for this segment" metric by F-SKY2, F-SKY3, and the
+    matcher's containment fallback — they previously each inlined the
+    same arithmetic.
+    """
+    pL, pR = _proj_x_range(p)
+    inter = max(0.0, min(seg_R, pR) - max(seg_L, pL))
+    proj_w = max(1.0, pR - pL)
+    return inter / proj_w
+
+
+def osm_anchor_silhouettes(
+    segments: list[dict],
+    projections: list[dict],
+    *,
+    building_mask: "np.ndarray | None" = None,
+    min_proj_containment: float = 0.5,
+    min_gap_px: int = 6,
+    min_child_width_px: int = 4,
+) -> list[dict]:
+    """Split mask-merged silhouettes using OSM footprint projections as
+    structural anchors (F-SKY2).
+
+    SegFormer routinely merges adjacent buildings in dense skylines —
+    three glass towers on Cartagena's Bocagrande share one contiguous
+    building-mask blob and the OSM-blind silhouette detector emits a
+    single wide segment. The matcher then has 1 segment to assign to
+    3 buildings; two get silently dropped.
+
+    For each input segment we find the OSM projections whose x-range
+    is at least ``min_proj_containment`` fraction *inside* the segment.
+    (Interval-IoU is the wrong metric here — N narrow projections
+    inside one wide segment all have small IoU because the denominator
+    is dominated by the segment width; containment captures "this
+    projection mostly lives inside this segment" regardless of
+    relative widths.) When 2+ projections qualify AND there is a
+    ``min_gap_px``-wide gap between adjacent OSM x-ranges inside the
+    segment, the segment is split at that gap. The split column is
+    refined to the building-mask column with the lowest coverage
+    inside the gap when ``building_mask`` is provided — this snaps the
+    cut to where the mask itself is thinnest (the actual inter-building
+    separator), not just the OSM midpoint.
+
+    A segment that has 0 or 1 overlapping projections, or whose
+    overlapping projections have no qualifying gap, passes through
+    unchanged. Children inherit y bounds from the parent (refining
+    per-child top/base is a follow-up).
+
+    Calling with empty ``segments`` or empty ``projections`` returns
+    the input unchanged — the function is a no-op when registration
+    failed and there are no anchors to apply.
+
+    See ``docs/plans/F-SKY2-osm-anchored-segments.md``.
+    """
+    if not segments or not projections:
+        return list(segments)
+
+    out: list[dict] = []
+    for seg in segments:
+        sL = float(seg["x_left"])
+        sR = float(seg["x_right"])
+        if sR <= sL:
+            out.append(seg)
+            continue
+
+        overlapping: list[tuple[float, float, float, dict]] = []
+        for p in projections:
+            if _proj_containment_in_seg(sL, sR, p) >= min_proj_containment:
+                pL, pR = _proj_x_range(p)
+                overlapping.append((float(p["x_px"]), pL, pR, p))
+
+        if len(overlapping) < 2:
+            out.append(seg)
+            continue
+
+        overlapping.sort(key=lambda t: t[0])
+
+        split_cols: list[float] = []
+        for i in range(len(overlapping) - 1):
+            _, _, this_R, _ = overlapping[i]
+            _, next_L, _, _ = overlapping[i + 1]
+            gap_w = next_L - this_R
+            if gap_w < min_gap_px:
+                continue
+            mid = 0.5 * (this_R + next_L)
+            if mid <= sL + 2 or mid >= sR - 2:
+                continue
+            # Refine: snap split column to the within-gap minimum of
+            # building-mask column coverage. This is the actual
+            # inter-building separator when the mask has a real (if
+            # narrow) valley between the towers.
+            if building_mask is not None:
+                wL = max(int(this_R), int(sL))
+                wR = min(int(next_L), int(sR))
+                if wR > wL:
+                    col_cov = building_mask[:, wL:wR + 1].sum(axis=0)
+                    mid = float(wL + int(np.argmin(col_cov)))
+            split_cols.append(mid)
+
+        if not split_cols:
+            out.append(seg)
+            continue
+
+        cuts = [sL] + sorted(split_cols) + [sR]
+        for i in range(len(cuts) - 1):
+            cL = cuts[i]
+            cR = cuts[i + 1]
+            if cR - cL < min_child_width_px:
+                continue
+            # peak_x: prefer the OSM x_px that falls inside this child.
+            mid_x = int(round(0.5 * (cL + cR)))
+            child_peak = mid_x
+            for px, _, _, _ in overlapping:
+                if cL <= px <= cR:
+                    child_peak = int(round(px))
+                    break
+            child = dict(seg)
+            child["x_left"] = float(cL)
+            child["x_right"] = float(cR)
+            child["mid_x"] = mid_x
+            child["peak_x"] = child_peak
+            child["osm_anchored"] = True
+            out.append(child)
+
+    return sorted(out, key=lambda s: s["mid_x"])
+
+
+def osm_marker_voronoi_silhouettes(
+    segments: list[dict],
+    projections: list[dict],
+    *,
+    building_mask: "np.ndarray | None" = None,
+    min_proj_containment: float = 0.5,
+    min_marker_separation_px: int = 20,
+    min_mask_coverage: float = 0.10,
+    min_child_width_px: int = 4,
+) -> list[dict]:
+    """Per-segment 1-D Voronoi instance indexing using OSM markers (F-SKY3).
+
+    SegFormer-b0 is semantic-only — adjacent buildings merge into one
+    mask blob and there's no instance head to separate them. F-SKY2
+    splits at clear mask gaps, but when the mask has no visible valley
+    between two visually-adjacent towers it does nothing. F-SKY3 fills
+    that hole: any segment containing ≥ 2 OSM markers (containment ≥
+    ``min_proj_containment``) is cut unconditionally at the Voronoi
+    midpoint between adjacent marker x_px values, producing one
+    silhouette per OSM building inside the strip.
+
+    This is the cheap stand-in for what a SAM-style instance segmenter
+    would do with OSM centroids as point prompts: project the model's
+    semantic blob onto the OSM instance set we already have.
+
+    Run AFTER ``osm_anchor_silhouettes`` so the gap-based splits (which
+    snap to the actual mask valley) take precedence; Voronoi is the
+    fallback for segments F-SKY2 left untouched.
+
+    Strips whose building-mask coverage falls below ``min_mask_coverage``
+    are dropped — a marker whose Voronoi strip is mostly non-building
+    was projected into a region the mask doesn't actually see, and
+    emitting a silhouette there would create a phantom segment.
+
+    Adjacent markers closer than ``min_marker_separation_px`` are
+    treated as a single marker (using the midpoint) — closer-than-that
+    markers are usually OSM artefacts (two polygons for one building)
+    where forcing a split would over-segment a real tower.
+
+    Calling with empty inputs is a no-op.
+
+    See ``docs/plans/F-SKY3-osm-marker-instances.md``.
+    """
+    if not segments or not projections:
+        return list(segments)
+
+    out: list[dict] = []
+    for seg in segments:
+        sL = float(seg["x_left"])
+        sR = float(seg["x_right"])
+        if sR <= sL:
+            out.append(seg)
+            continue
+
+        # Find markers (OSM projections mostly inside this segment).
+        markers: list[tuple[float, dict]] = []
+        for p in projections:
+            if _proj_containment_in_seg(sL, sR, p) >= min_proj_containment:
+                markers.append((float(p["x_px"]), p))
+
+        if len(markers) < 2:
+            out.append(seg)
+            continue
+
+        markers.sort(key=lambda t: t[0])
+        # Collapse markers closer than min_marker_separation_px to a single
+        # marker at their midpoint. Avoids over-splitting on OSM duplicates.
+        collapsed: list[tuple[float, dict]] = [markers[0]]
+        for x_px, p in markers[1:]:
+            prev_x, _ = collapsed[-1]
+            if x_px - prev_x < min_marker_separation_px:
+                # Replace with midpoint marker; keep the latter projection
+                # dict for downstream peak_x assignment.
+                collapsed[-1] = (0.5 * (prev_x + x_px), p)
+            else:
+                collapsed.append((x_px, p))
+
+        if len(collapsed) < 2:
+            out.append(seg)
+            continue
+
+        # Voronoi: each marker owns the column strip from the midpoint with
+        # its left neighbour to the midpoint with its right neighbour.
+        boundaries = [sL]
+        for i in range(len(collapsed) - 1):
+            mid = 0.5 * (collapsed[i][0] + collapsed[i + 1][0])
+            boundaries.append(mid)
+        boundaries.append(sR)
+
+        seg_top = float(seg.get("top_y", 0.0))
+        seg_base = float(seg.get("base_y", 0.0))
+
+        for i, (marker_x, marker_proj) in enumerate(collapsed):
+            cL = boundaries[i]
+            cR = boundaries[i + 1]
+            if cR - cL < min_child_width_px:
+                continue
+            # Reject strips where the mask is mostly absent — the OSM marker
+            # projects into a region SegFormer didn't actually segment as
+            # building.
+            if building_mask is not None:
+                wL = max(0, int(cL))
+                wR = min(building_mask.shape[1], int(cR) + 1)
+                if wR > wL:
+                    strip_mask = building_mask[:, wL:wR]
+                    coverage = float(strip_mask.mean())
+                    if coverage < min_mask_coverage:
+                        continue
+            child = dict(seg)
+            child["x_left"] = float(cL)
+            child["x_right"] = float(cR)
+            child["mid_x"] = int(round(0.5 * (cL + cR)))
+            child["peak_x"] = int(round(marker_x))
+            child["top_y"] = seg_top
+            child["base_y"] = seg_base
+            child["osm_anchored"] = True
+            child["osm_voronoi"] = True
+            out.append(child)
+
+    return sorted(out, key=lambda s: s["mid_x"])
+
+
 def match_segments_to_buildings(
     segments: list[dict],
     projections: list[dict],
     buildings_by_id: dict[str, BuildingRecord],
     min_interval_iou: float = 0.10,
+    cross_view_scorer: "callable | None" = None,
 ) -> list[dict]:
     """For each skyline segment, pick the best-matching projected building.
 
@@ -1484,6 +1981,24 @@ def match_segments_to_buildings(
       - Nearest building wins (smallest forward_m).
       - Kiosk-in-front-of-tower exception preserved: nearest < 5 m proxy
         + a tower within 1.5× the nearest distance → prefer the tower.
+
+    F-SKY10 cross-view rerank
+    -------------------------
+    When ``cross_view_scorer`` is supplied (built by
+    ``cross_view.make_cross_view_scorer``), each candidate's combined
+    score is blended with a roof-colour-consistency score sampled from
+    the per-region satellite image:
+
+        final = 0.85 * combined_intra + 0.15 * cross_view_combined
+
+    A wrong-building match (inland polygon credited for a waterfront
+    silhouette) typically has poor cross-view colour agreement, so the
+    rerank pushes the second-place candidate (the actually-visible
+    building) into first place. The 0.15 weight is intentionally
+    conservative — the plan calls for the intra-view IoU/width signal
+    to remain dominant; cross-view is a tiebreaker, not an override.
+    The per-candidate score lands in ``match_diagnostics[i]["cv"]`` so
+    the audit page can show how it influenced the choice.
     """
     def _seg_width(seg: dict) -> float:
         return max(1.0, float(seg["x_right"]) - float(seg["x_left"]))
@@ -1493,10 +2008,7 @@ def match_segments_to_buildings(
         pR = float(proj.get("x_right_px", proj["x_px"] + 10.0))
         return max(1.0, abs(pR - pL))
 
-    def _proj_range(proj: dict) -> tuple[float, float]:
-        pL = float(proj.get("x_left_px", proj["x_px"] - 10.0))
-        pR = float(proj.get("x_right_px", proj["x_px"] + 10.0))
-        return (pL, pR) if pL <= pR else (pR, pL)
+    _proj_range = _proj_x_range  # module-level helper; alias for brevity
 
     def _interval_iou(seg: dict, proj: dict) -> float:
         sL = float(seg["x_left"])
@@ -1505,6 +2017,14 @@ def match_segments_to_buildings(
         inter = max(0.0, min(sR, pR) - max(sL, pL))
         union = max(sR, pR) - min(sL, pL)
         return (inter / union) if union > 0 else 0.0
+
+    def _proj_containment(seg: dict, proj: dict) -> float:
+        """Thin adapter over ``_proj_containment_in_seg``. Second leg of
+        the matcher's acceptance test (narrow projections in wide
+        multi-building segments have low IoU but high containment).
+        """
+        return _proj_containment_in_seg(
+            float(seg["x_left"]), float(seg["x_right"]), proj)
 
     def _width_ratio_score(seg: dict, proj: dict) -> float:
         ratio = _proj_width(proj) / _seg_width(seg)
@@ -1539,42 +2059,117 @@ def match_segments_to_buildings(
                 max_overlap = cov
         return min(1.0, max_overlap)
 
+    def _building_lonlat_ring(fid: str) -> list[tuple[float, float]]:
+        """Pull a building's exterior ring as (lon, lat) tuples for the
+        cross-view scorer. Returns [] when the polygon is missing or has
+        no usable exterior (cross-view returns a neutral 0.5 in that
+        case so the matcher is undisturbed)."""
+        b = buildings_by_id.get(fid)
+        if b is None:
+            return []
+        geom = getattr(b, "geometry", None)
+        if geom is None:
+            return []
+        try:
+            xs, ys = geom.exterior.xy
+        except Exception:
+            return []
+        return [(float(x), float(y)) for x, y in zip(xs, ys)]
+
     out: list[dict] = []
     for seg in segments:
-        scored: list[tuple] = []  # (combined, iou, w_score, occ, proj)
+        scored: list[tuple] = []  # (combined, iou, w_score, occ, proj, cv)
         for p in projections:
             iou = _interval_iou(seg, p)
-            if iou < min_interval_iou:
+            # F-SKY2.1: accept by IoU OR by ≥ 50 % projection-containment.
+            # The containment leg saves narrow projections inside wide
+            # multi-building silhouettes that IoU alone discards because
+            # the segment width dominates the denominator.
+            if iou < min_interval_iou and _proj_containment(seg, p) < 0.5:
                 continue
             w_score = _width_ratio_score(seg, p)
             occ = _occlusion_penalty(p, projections)
-            combined = 0.55 * iou + 0.30 * w_score + 0.15 * (1.0 - occ)
+            combined_intra = 0.55 * iou + 0.30 * w_score + 0.15 * (1.0 - occ)
             # Hard width disqualifier: a building projected 4× wider or
             # narrower than the segment is implausible as a match.
             ratio = _proj_width(p) / _seg_width(seg)
             if ratio > 4.0 or ratio < 0.25:
-                combined *= 0.3
-            scored.append((combined, iou, w_score, occ, p))
+                combined_intra *= 0.3
+            # F-SKY10: optional cross-view rerank. Score lookup is the
+            # one expensive call (satellite ndarray slice + median RGB)
+            # so it's gated on the candidate having passed the
+            # IoU/containment filter above — we never score buildings
+            # the matcher would reject anyway.
+            cv = None
+            if cross_view_scorer is not None:
+                ring = _building_lonlat_ring(p["feature_id"])
+                if ring:
+                    try:
+                        cv = float(cross_view_scorer(seg, ring).get(
+                            "combined", 0.5))
+                    except Exception:
+                        cv = None
+            if cv is not None:
+                combined = 0.85 * combined_intra + 0.15 * cv
+            else:
+                combined = combined_intra
+            scored.append((combined, iou, w_score, occ, p, cv))
 
         match: dict | None = None
         diagnostics: list[dict] = []
         if scored:
             scored.sort(key=lambda t: t[0], reverse=True)
             # Capture top-3 diagnostics for the audit field.
-            for c, iou, ws, occ, p in scored[:3]:
-                diagnostics.append({
+            for c, iou, ws, occ, p, cv in scored[:3]:
+                d = {
                     "feature_id": p["feature_id"],
                     "combined": round(c, 3),
                     "iou": round(iou, 3),
                     "width_score": round(ws, 3),
                     "occlusion": round(occ, 3),
                     "forward_m": round(float(p.get("forward_m", 0.0)), 1),
-                })
+                }
+                if cv is not None:
+                    d["cv"] = round(cv, 3)
+                diagnostics.append(d)
             best_combined = scored[0][0]
             bucket = [
-                p for c, _iou, _w, _occ, p in scored
+                p for c, _iou, _w, _occ, p, _cv in scored
                 if c >= best_combined - 0.10
             ]
+            # Foreground-takes-precedence: rescue any credible candidate
+            # whose x-range CONTAINS the segment's peak_x AND is strictly
+            # closer than the bucket's nearest. The hard width
+            # disqualifier (×0.3 when ratio > 4) routinely knocks
+            # waterfront towers out of the bucket because a single tower
+            # silhouette segment is narrower than the building's full
+            # projected footprint width — but that nearer tower is the
+            # actually-visible-foreground answer. We only rescue when
+            # height proxy ≥ 8 m so 1-storey kiosks don't take over from
+            # a tagged inland tower. "Strictly closer" (not 1.5×) is
+            # required because cross-bay views like Cartagena's seed_5
+            # see waterfront and inland rows at similar distances; the
+            # difference can be as little as 10-20 %, and the rescue
+            # needs to fire there.
+            bucket_nearest_fwd = min(
+                (float(p.get("forward_m", 1e9)) for p in bucket),
+                default=1e9)
+            peak_x = float(seg.get(
+                "peak_x", (float(seg["x_left"]) + float(seg["x_right"])) * 0.5))
+            for c, _iou, _w, _occ, p, _cv in scored:
+                if p in bucket:
+                    continue
+                pL, pR = _proj_range(p)
+                if not (pL <= peak_x <= pR):
+                    continue
+                p_fwd = float(p.get("forward_m", 1e9))
+                if p_fwd >= bucket_nearest_fwd:
+                    continue
+                b = buildings_by_id.get(p["feature_id"])
+                h_proxy = _height_proxy(b) if b is not None else 0.0
+                if h_proxy < 8.0:
+                    continue
+                bucket.append(p)
             bucket.sort(key=lambda p: float(p.get("forward_m", 1e9)))
             nearest = bucket[0]
             nearest_fwd = float(nearest.get("forward_m", 1e9))
@@ -1591,11 +2186,44 @@ def match_segments_to_buildings(
                     if h > nearest_h * 2.0:
                         match = cand
                         break
+        # F-SKY6: record the combined score of the chosen match so the
+        # post-pass deduplication can pick a winner when two segments
+        # claimed the same OSM building.
+        match_combined = 0.0
+        if match is not None:
+            for c, _iou, _w, _o, p, _cv in scored:
+                if p["feature_id"] == match["feature_id"]:
+                    match_combined = float(c)
+                    break
         out.append({
             **seg,
             "matched_projection": match,
+            "matched_combined": match_combined,
             "match_diagnostics": diagnostics,
         })
+
+    # F-SKY6 part 1: enforce one-to-one segment ↔ building uniqueness.
+    # The per-segment scoring above lets two adjacent segments pick the
+    # same OSM building (observed on Cartagena seed_5 page 31 where
+    # segments 1 and 2 both matched b0268). For each duplicated building,
+    # keep the segment with the highest matched_combined and clear the
+    # match on the losers. Losers become unmatched (no "next-preference"
+    # fallback in this pass — that's a follow-up). match_diagnostics is
+    # preserved on losers so the audit page still shows what they
+    # considered.
+    fid_claimants: dict[str, list[int]] = {}
+    for i, o in enumerate(out):
+        m = o.get("matched_projection")
+        if m is None:
+            continue
+        fid_claimants.setdefault(m["feature_id"], []).append(i)
+    for fid, idxs in fid_claimants.items():
+        if len(idxs) <= 1:
+            continue
+        idxs.sort(key=lambda i: -float(out[i].get("matched_combined", 0.0)))
+        for loser_i in idxs[1:]:
+            out[loser_i]["matched_projection"] = None
+            out[loser_i]["matched_combined"] = 0.0
     return out
 
 
@@ -2321,6 +2949,7 @@ def estimate_heights_from_registration(
     camera_elev_m: float = 0.0,
     *,
     trace=None,
+    max_plausible_height_m: float = 300.0,
 ) -> list[RegisteredBuildingEstimate]:
     # Optional `trace` (HeightTraceRecorder from height_trace.py): when set, the
     # function emits a row at every gate / decision point. Behaviour-neutral —
@@ -2345,7 +2974,7 @@ def estimate_heights_from_registration(
     # ADE20K building class. With the mask we can:
     #   - sample the roof y from the mask directly (per-column, robust to clouds)
     #   - drop the estimate when no building pixels exist in this column
-    _, building_mask = _neural_sky_and_building_masks(captured.image)
+    sky_mask, building_mask = _neural_sky_and_building_masks(captured.image)
 
     # Cap residual contribution to confidence: residuals well above ~25 px are
     # essentially noise.
@@ -2366,6 +2995,16 @@ def estimate_heights_from_registration(
 
     estimates: list[RegisteredBuildingEstimate] = []
     view_name = captured.viewpoint.name
+    if trace is not None:
+        # Save view artefacts (RGB / contour / building mask) once per view so
+        # the diagnostic renderer can draw them later. When `only_feature_id`
+        # is set, skip views that don't contain that building — keeps the
+        # in-memory artefact dict tight.
+        only_fid = getattr(trace, "only_feature_id", None)
+        if only_fid is None or only_fid in projections:
+            saver = getattr(trace, "save_view", None)
+            if saver is not None:
+                saver(view_name, captured.image, contour, building_mask)
     for building in buildings:
         fid = building.feature_id
         if trace is not None:
@@ -2503,11 +3142,12 @@ def estimate_heights_from_registration(
                         gap = y_px - contour_top_y
                         override_fired = False
                         implied_h_val: float | None = None
+                        sky_above_ok = True
                         if gap > 15.0:
                             # Sanity-check the gap: it should be plausible as
                             # additional tower height at this distance. A
-                            # gap > what a 300 m tower could project is
-                            # noise (cloud edge, lamppost), not glass roof.
+                            # gap > what the regional cap allows is noise
+                            # (cloud edge, lamppost), not glass roof.
                             pitch_rad = math.radians(captured.viewpoint.pitch)
                             angle_at_contour = math.atan(
                                 (cy - contour_top_y) / f_px) + pitch_rad
@@ -2516,7 +3156,18 @@ def estimate_heights_from_registration(
                             implied_h = cam_z + top_at_contour - float(
                                 building.terrain_elev_m)
                             implied_h_val = float(implied_h)
-                            if 0.0 <= implied_h <= 300.0:
+                            # 1c: require SegFormer-sky pixels just above the
+                            # contour roof. Without sky there, the contour is
+                            # not a roof edge (it's a tree canopy or another
+                            # building behind), so the glass-facade override
+                            # would manufacture height where none exists.
+                            if sky_mask is not None:
+                                sky_probe_y = int(max(0, int(round(contour_top_y)) - 5))
+                                sky_row = sky_mask[sky_probe_y, cxL: cxR + 1]
+                                if sky_row.size == 0 or float(np.mean(sky_row)) < 0.5:
+                                    sky_above_ok = False
+                            if (sky_above_ok
+                                    and 0.0 <= implied_h <= max_plausible_height_m):
                                 y_px = contour_top_y
                                 override_fired = True
                         if trace is not None:
@@ -2528,6 +3179,7 @@ def estimate_heights_from_registration(
                                 contour_top_y=contour_top_y,
                                 gap_px=float(gap),
                                 implied_h_m=implied_h_val,
+                                sky_above_ok=bool(sky_above_ok),
                                 fired=override_fired,
                             )
         else:
@@ -2576,16 +3228,18 @@ def estimate_heights_from_registration(
 
         # Geometric y-consistency gate: even before invoking the per-building
         # height proxy, check that the sampled roof_y is geometrically
-        # plausible for *any* building at this distance. The hard ceiling is
-        # 300 m (Cartagena's tallest tower is ~206 m); the floor is 2 m. If
-        # the column says the roof is higher in the image than a 300 m tower
-        # could possibly project to this distance, the column actually
-        # belongs to a CLOSER building — drop the credit. This catches the
-        # "far thin OSM building credited for a near tall building's roof"
-        # pattern that the closest-in-column-bin gate only partly catches
-        # (it misses cases where the closer building is just outside the
-        # ±15 px window because its centroid is far from the wide segment).
-        max_plausible_top = 300.0  # global building height ceiling, metres
+        # plausible for *any* building at this distance. The ceiling comes
+        # from the region config (300 m default — Chicago Willis ≈ 442 m
+        # needs a higher cap; Cartagena's tallest is ~206 m so 200 m is
+        # appropriate). The floor is 2 m. If the column says the roof is
+        # higher in the image than the regional cap could project to this
+        # distance, the column actually belongs to a CLOSER building — drop
+        # the credit. This catches the "far thin OSM building credited for a
+        # near tall building's roof" pattern that the closest-in-column-bin
+        # gate only partly catches (it misses cases where the closer
+        # building is just outside the ±15 px window because its centroid
+        # is far from the wide segment).
+        max_plausible_top = float(max_plausible_height_m)
         min_plausible_top = 2.0
         max_top_angle = math.atan(
             (max_plausible_top - cam_z - float(building.terrain_elev_m)) / forward)
@@ -2616,30 +3270,38 @@ def estimate_heights_from_registration(
                 )
             continue
 
-        # Plausibility cap: only enforce the strict 5× window when we have a
-        # TAGGED height (a strong constraint). For untagged buildings, the
-        # area-derived proxy is at best loosely correlated with height (a tall
-        # thin tower can have small footprint), so we rely on the geometric
-        # y-consistency gate above (300 m absolute ceiling) and a lighter
-        # sanity check (under 8 m on a proxy-meaningful footprint suggests a
-        # missed match, e.g. far building credited for a closer tower's roof).
+        # Tag-disagreement filter: when we have an OSM height tag, treat it
+        # as ground truth and drop per-view estimates that disagree by more
+        # than min(2 × tag, 50 m). The tag is the strongest constraint we
+        # have on this building's height — predictions outside that band
+        # signal a per-view geometry failure (wrong column matched, glass-
+        # facade override misfired, projection error). Letting them into
+        # the aggregate inflates the headline MAE; dropping them tightens
+        # the cross-seed median AND validates the per-view extraction by
+        # making the failure visible in the trace log.
+        #
+        # For untagged buildings we keep a light area-based floor — a
+        # multi-square-metre footprint that predicts <3 m almost always
+        # means roof_y was sampled in water/sky, not on the building.
         pred_capped = max(height_m, 0.0)
         if building.height_tag_m is not None:
             tag_h = float(building.height_tag_m)
-            if tag_h >= 3.0 and (pred_capped > tag_h * 5.0 or pred_capped < tag_h * 0.20):
-                if trace is not None:
-                    trace(
-                        "drop_plausibility_tag",
-                        view_name=view_name,
-                        feature_id=fid,
-                        tag_h=tag_h,
-                        pred_h=float(pred_capped),
-                    )
-                continue
+            if tag_h >= 3.0:
+                diff = abs(pred_capped - tag_h)
+                disagreement_threshold = min(tag_h * 2.0, 50.0)
+                if diff > disagreement_threshold:
+                    if trace is not None:
+                        trace(
+                            "drop_tag_disagreement",
+                            view_name=view_name,
+                            feature_id=fid,
+                            tag_h=tag_h,
+                            pred_h=float(pred_capped),
+                            diff_m=float(diff),
+                            threshold_m=float(disagreement_threshold),
+                        )
+                    continue
         else:
-            # Loose check: predictions under ~3 m for a >50 m² footprint
-            # almost always indicate roof_y was sampled in water/sky rather
-            # than on the building.
             if building.area_m2 > 50.0 and pred_capped < 3.0:
                 if trace is not None:
                     trace(
@@ -2665,16 +3327,47 @@ def estimate_heights_from_registration(
         confidence = float(np.clip(score_norm * x_err_score *
                            tag_score * forward_score, 0.05, 1.0))
 
+        # F-SKY1: optional floor-period diagnostic. Skip on tilted views
+        # (|pitch| > 4° distorts the per-floor pixel period as a function
+        # of y) and on facades shorter than 80 px between roof and base
+        # (the autocorrelation needs at least ~2 cycles to lock).
+        # _floor_period_for_building returns None when the autocorrelation
+        # peak is below the confidence floor, so noise / blank-wall
+        # facades silently no-op without producing a fake estimate.
+        floor_info: dict = {}
+        proj_x_px = float(proj["x_px"])
+        if abs(captured.viewpoint.pitch) <= 4.0 and building_mask is not None:
+            x_left_px = float(proj.get("x_left_px", proj_x_px - 10.0))
+            x_right_px = float(proj.get("x_right_px", proj_x_px + 10.0))
+            if x_right_px < x_left_px:
+                x_left_px, x_right_px = x_right_px, x_left_px
+            y_px_int = int(round(y_px))
+            y_base = _building_base_y_from_mask(
+                building_mask, int(round(proj_x_px)), y_px_int)
+            if y_base is not None and y_base - y_px_int > 80:
+                floor_info = _floor_period_for_building(
+                    captured.image,
+                    building_mask,
+                    (int(round(x_left_px)), int(round(x_right_px))),
+                    y_px,
+                    y_base,
+                    f_px=f_px,
+                ) or {}
+
         estimate = RegisteredBuildingEstimate(
             feature_id=building.feature_id,
             name=building.name,
             view_name=captured.viewpoint.name,
             heading_offset_deg=best_offset,
-            x_px=float(proj["x_px"]),
+            x_px=proj_x_px,
             y_px=y_px,
             forward_m=forward,
             estimated_height_m=float(max(0.0, height_m)),
             confidence=confidence,
+            floor_period_px=floor_info.get("floor_period_px"),
+            floor_confidence=floor_info.get("floor_confidence"),
+            inferred_distance_m=floor_info.get("inferred_distance_m"),
+            inferred_height_m=floor_info.get("inferred_height_m"),
         )
         if trace is not None:
             trace(
@@ -2688,6 +3381,9 @@ def estimate_heights_from_registration(
                 confidence=estimate.confidence,
                 tag_h=building.height_tag_m,
                 heading_offset_deg=float(best_offset),
+                floor_period_px=estimate.floor_period_px,
+                inferred_distance_m=estimate.inferred_distance_m,
+                inferred_height_m=estimate.inferred_height_m,
             )
         estimates.append(estimate)
 

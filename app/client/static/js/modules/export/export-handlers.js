@@ -25,21 +25,21 @@
 
 function _setExportButtonsEnabled(enabled) {
     const ids = ['downloadSTLBtn', 'downloadOBJBtn', 'download3MFBtn',
-                 'exportCityBtn', 'exportCrossSectionBtn', 'exportPuzzleBtn'];
+        'exportCityBtn', 'exportCrossSectionBtn', 'exportPuzzleBtn'];
     for (const id of ids) {
         const el = document.getElementById(id);
         if (!el) continue;
-        el.disabled      = !enabled;
+        el.disabled = !enabled;
         el.style.opacity = enabled ? '' : '0.4';
-        el.style.cursor  = enabled ? '' : 'not-allowed';
+        el.style.cursor = enabled ? '' : 'not-allowed';
     }
     const emptyEl = document.getElementById('modelEmptyState');
-    if (emptyEl) emptyEl.style.display = enabled ? 'none' : 'flex';
+    if (emptyEl) emptyEl.classList.toggle('hidden', enabled);
 }
 
 function _triggerDownload(blob, filename) {
     const url = window.URL.createObjectURL(blob);
-    const a   = document.createElement('a');
+    const a = document.createElement('a');
     a.href = url; a.download = filename;
     document.body.appendChild(a); a.click();
     window.URL.revokeObjectURL(url); a.remove();
@@ -47,21 +47,21 @@ function _triggerDownload(blob, filename) {
 
 function _progressEl() {
     return {
-        wrap:  document.getElementById('modelProgress'),
-        bar:   document.getElementById('modelProgressBar'),
-        text:  document.getElementById('modelProgressText'),
+        wrap: document.getElementById('modelProgress'),
+        bar: document.getElementById('modelProgressBar'),
+        text: document.getElementById('modelProgressText'),
         set(pct, msg) {
-            if (this.wrap) this.wrap.style.display = 'block';
-            if (this.bar)  this.bar.style.width    = pct + '%';
-            if (this.text) this.text.textContent   = msg;
+            if (this.wrap) this.wrap.classList.remove('hidden');
+            if (this.bar) this.bar.style.width = pct + '%';
+            if (this.text) this.text.textContent = msg;
         },
-        done(msg) { this.set(100, msg); setTimeout(() => { if (this.wrap) this.wrap.style.display = 'none'; }, 1000); },
+        done(msg) { this.set(100, msg); setTimeout(() => { if (this.wrap) this.wrap.classList.add('hidden'); }, 1000); },
         error(msg) {
-            if (this.text) this.text.textContent     = msg;
-            if (this.bar)  this.bar.style.backgroundColor = '#e74c3c';
+            if (this.text) this.text.textContent = msg;
+            if (this.bar) this.bar.style.backgroundColor = '#e74c3c';
             setTimeout(() => {
-                if (this.wrap) this.wrap.style.display = 'none';
-                if (this.bar)  this.bar.style.backgroundColor = '';
+                if (this.wrap) this.wrap.classList.add('hidden');
+                if (this.bar) this.bar.style.backgroundColor = '';
             }, 2000);
         }
     };
@@ -82,18 +82,18 @@ function _demSettings() {
     const settings = {
         bbox: {
             north: bbox.north, south: bbox.south,
-            east:  bbox.east,  west:  bbox.west,
+            east: bbox.east, west: bbox.west,
         },
         dem: {
-            dim:          parseInt(document.getElementById('paramDim')?.value) || 200,
-            dem_source:   document.getElementById('paramDemSource')?.value || 'local',
-            projection:   document.getElementById('paramProjection')?.value || 'cosine',
-            depth_scale:  p.depthScale ?? 0.5,
-            water_scale:  p.waterScale ?? 0.05,
-            subtract_water:      p.subtractWater ?? true,
+            dim: parseInt(document.getElementById('paramDim')?.value) || 200,
+            dem_source: document.getElementById('paramDemSource')?.value || 'local',
+            projection: document.getElementById('paramProjection')?.value || 'cosine',
+            depth_scale: p.depthScale ?? 0.5,
+            water_scale: p.waterScale ?? 0.05,
+            subtract_water: p.subtractWater ?? true,
             maintain_dimensions: true,
-            clip_nans:    document.getElementById('paramClipNans')?.checked ?? false,
-            show_sat:     false,
+            clip_nans: document.getElementById('paramClipNans')?.checked ?? false,
+            show_sat: false,
         },
     };
     // If the user has configured + applied a composite, send the spec so the
@@ -111,17 +111,17 @@ function _exportParams() {
     return {
         ..._demSettings(),
         // model_height is the physical height in mm from #exportModelHeight.
-        model_height:     md.modelHeight,
-        base_height:      md.baseHeight,
-        exaggeration:     md.exaggeration,
-        mm_per_pixel:     md.mmPerPixel,
-        sea_level_cap:    document.getElementById('exportSeaLevelCap')?.checked   || false,
-        engrave_label:    document.getElementById('exportEngraveLabel')?.checked  || false,
-        label_text:       document.getElementById('exportLabelText')?.value || window.appState?.selectedRegion?.name || _regionName(),
-        contours:         document.getElementById('exportContours')?.checked      || false,
+        model_height: md.modelHeight,
+        base_height: md.baseHeight,
+        exaggeration: md.exaggeration,
+        mm_per_pixel: md.mmPerPixel,
+        sea_level_cap: document.getElementById('exportSeaLevelCap')?.checked || false,
+        engrave_label: document.getElementById('exportEngraveLabel')?.checked || false,
+        label_text: document.getElementById('exportLabelText')?.value || window.appState?.selectedRegion?.name || _regionName(),
+        contours: document.getElementById('exportContours')?.checked || false,
         contour_interval: parseInt(document.getElementById('exportContourInterval')?.value) || 100,
-        contour_style:    document.getElementById('exportContourStyle')?.value    || 'engraved',
-        name:             _regionName()
+        contour_style: document.getElementById('exportContourStyle')?.value || 'engraved',
+        name: _regionName()
     };
 }
 
@@ -136,10 +136,10 @@ function generateModelFromTab() {
         return;
     }
 
-    const resolution   = parseInt(document.getElementById('modelResolution').value);
-    const modelHeight  = parseFloat(document.getElementById('exportModelHeight')?.value) || 30;
+    const resolution = parseInt(document.getElementById('modelResolution').value);
+    const modelHeight = parseFloat(document.getElementById('exportModelHeight')?.value) || 30;
     const exaggeration = parseFloat(document.getElementById('exportExaggeration')?.value) || 1.0;
-    const baseHeight   = parseFloat(document.getElementById('exportBaseHeight')?.value) || 0;
+    const baseHeight = parseFloat(document.getElementById('exportBaseHeight')?.value) || 0;
 
     if (!resolution || resolution < 1 || resolution > 2000) {
         window.showToast('Resolution must be between 1 and 2000.', 'warning'); return;
@@ -164,15 +164,15 @@ function generateModelFromTab() {
     setTimeout(() => pr.set(70, 'Applying parameters...'), 500);
     setTimeout(() => {
         window.appState.generatedModelData = {
-            values:      lastDemData.values,
-            width:       lastDemData.width,
-            height:      lastDemData.height,
+            values: lastDemData.values,
+            width: lastDemData.width,
+            height: lastDemData.height,
             resolution,
             modelHeight,
             exaggeration,
             baseHeight,
-            vmin:        lastDemData.vmin,
-            vmax:        lastDemData.vmax
+            vmin: lastDemData.vmin,
+            vmax: lastDemData.vmax
         };
         _setExportButtonsEnabled(true);
         window.appState._updateWorkflowStepper?.();
@@ -188,16 +188,16 @@ function generateModelFromTab() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function _asyncExport(format) {
-    const pr   = _progressEl();
+    const pr = _progressEl();
     const name = _regionName();
     pr.set(0, `Starting ${format.toUpperCase()} export...`);
 
     try {
         // 1. Start the export task
         const startResp = await fetch('/api/export/start', {
-            method:  'POST',
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ format, ..._exportParams() })
+            body: JSON.stringify({ format, ..._exportParams() })
         });
         if (!startResp.ok) {
             const err = await startResp.json();
@@ -227,12 +227,12 @@ async function _asyncExport(format) {
         const blob = await dlResp.blob();
         // Grab extra headers for STL quality info
         const isWatertight = dlResp.headers.get('X-Watertight') === 'true';
-        const faceCount    = dlResp.headers.get('X-Face-Count');
+        const faceCount = dlResp.headers.get('X-Face-Count');
 
         _triggerDownload(blob, `${name}.${format}`);
 
         if (format === 'stl' && faceCount) {
-            const faces   = `${parseInt(faceCount).toLocaleString()} faces`;
+            const faces = `${parseInt(faceCount).toLocaleString()} faces`;
             const quality = isWatertight ? 'watertight' : 'not watertight';
             window.showToast(`STL ready - ${faces} ${quality}`, isWatertight ? 'success' : 'info', 4000);
         } else {
@@ -267,29 +267,29 @@ function downloadCrossSection() {
     if (!window.appState?.generatedModelData) {
         window.showToast('Please generate a model first.', 'warning'); return;
     }
-    const cutAxis    = document.getElementById('crossSectionAxis')?.value || 'lat';
-    const cutValue   = parseFloat(document.getElementById('crossSectionValue')?.value);
+    const cutAxis = document.getElementById('crossSectionAxis')?.value || 'lat';
+    const cutValue = parseFloat(document.getElementById('crossSectionValue')?.value);
     if (isNaN(cutValue)) { window.showToast('Enter a cut coordinate first', 'warning'); return; }
-    const thickness  = parseFloat(document.getElementById('crossSectionThickness')?.value) || 5;
-    const statusEl   = document.getElementById('crossSectionStatus');
+    const thickness = parseFloat(document.getElementById('crossSectionThickness')?.value) || 5;
+    const statusEl = document.getElementById('crossSectionStatus');
     if (statusEl) statusEl.textContent = 'Generating…';
 
-    const r    = window.appState?.selectedRegion || {};
+    const r = window.appState?.selectedRegion || {};
     const name = _regionName();
-    const md   = window.appState.generatedModelData;
+    const md = window.appState.generatedModelData;
 
     const ds = _demSettings();
     fetch('/api/export/crosssection', {
-        method:  'POST',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
+        body: JSON.stringify({
             ...ds,
-            north:        ds.bbox.north, south: ds.bbox.south,
-            east:         ds.bbox.east,  west:  ds.bbox.west,
-            cut_axis:     cutAxis,
-            cut_value:    cutValue,
+            north: ds.bbox.north, south: ds.bbox.south,
+            east: ds.bbox.east, west: ds.bbox.west,
+            cut_axis: cutAxis,
+            cut_value: cutValue,
             model_height: md.resolution,
-            base_height:  md.baseHeight,
+            base_height: md.baseHeight,
             exaggeration: md.exaggeration,
             thickness_mm: thickness,
             name
@@ -300,7 +300,7 @@ function downloadCrossSection() {
             return response.blob();
         })
         .then(blob => {
-            const axis     = cutAxis === 'lat' ? `lat${cutValue.toFixed(4)}` : `lon${cutValue.toFixed(4)}`;
+            const axis = cutAxis === 'lat' ? `lat${cutValue.toFixed(4)}` : `lon${cutValue.toFixed(4)}`;
             _triggerDownload(blob, `${name}_cross_${axis}.stl`);
             if (statusEl) statusEl.textContent = 'Downloaded.';
             window.showToast('Cross-section STL ready', 'success');
@@ -317,8 +317,8 @@ function downloadCrossSection() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 window._setExportButtonsEnabled = _setExportButtonsEnabled;
-window._demSettings             = _demSettings;
-window.generateModelFromTab     = generateModelFromTab;
-window.downloadSTL              = downloadSTL;
-window.downloadModel            = downloadModel;
-window.downloadCrossSection     = downloadCrossSection;
+window._demSettings = _demSettings;
+window.generateModelFromTab = generateModelFromTab;
+window.downloadSTL = downloadSTL;
+window.downloadModel = downloadModel;
+window.downloadCrossSection = downloadCrossSection;

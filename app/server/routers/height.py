@@ -77,17 +77,17 @@ from city2stl.height.providers.copernicus import CopernicusProvider
 from city2stl.height.providers.lidar_3dep import LiDAR3DEPProvider
 from city2stl.height.providers.ghsl import GHSLProvider
 from city2stl.height.providers.open_buildings import OpenBuildingsProvider
-from city2stl.height.providers.shadow_height import ShadowHeightProvider
+from city2stl.height.providers.roofnet import RoofNetProvider
 
 # Ordered by priority (highest confidence first)
 _ALL_PROVIDERS = [
     LiDAR3DEPProvider(),      # 0.95 — US only, sub-metre
     NDSMProvider(),            # 0.80 — global, 30m
     CopernicusProvider(),      # 0.70 — EU only, 10m
+    RoofNetProvider(),         # 0.65 — learned raster estimate
     OpenBuildingsProvider(),   # 0.60 — developing regions, per-building
     WSF3DProvider(),           # 0.50 — global, 90m
     GHSLProvider(),            # 0.40 — global, 100m
-    ShadowHeightProvider(),    # 0.30 — global, placeholder
 ]
 
 _PROVIDER_MAP = {p.name: p for p in _ALL_PROVIDERS}
@@ -96,10 +96,10 @@ _PROVIDER_META = {
     "lidar_3dep":    {"confidence": 0.95, "resolution_m": 1.0},
     "ndsm":          {"confidence": 0.80, "resolution_m": 30.0},
     "copernicus":    {"confidence": 0.70, "resolution_m": 10.0},
+    "roofnet":        {"confidence": 0.65, "resolution_m": 5.0},
     "open_buildings": {"confidence": 0.60, "resolution_m": 5.0},
     "wsf3d":          {"confidence": 0.50, "resolution_m": 90.0},
     "ghsl":           {"confidence": 0.40, "resolution_m": 100.0},
-    "shadow_height":  {"confidence": 0.30, "resolution_m": 5.0},
 }
 
 

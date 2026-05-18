@@ -32,9 +32,9 @@ window.setGridPixelMode = function setGridPixelMode(on) {
         if (on) {
             const d = window.appState?.lastDemData;
             sizeLabel.textContent = d ? `DEM: ${d.width} × ${d.height} px` : 'DEM: — px';
-            sizeLabel.style.display = 'block';
+            sizeLabel.classList.remove('hidden');
         } else {
-            sizeLabel.style.display = 'none';
+            sizeLabel.classList.add('hidden');
         }
     }
     window.drawLayerGrid?.();
@@ -80,8 +80,7 @@ function getOrCreateCanvas(layerName) {
     if (!c) {
         c = document.createElement('canvas');
         if (id) c.id = id;
-        c.className = 'layer-canvas';
-        c.style.display = 'none';
+        c.className = 'layer-canvas hidden';
         document.getElementById('layersStack')?.appendChild(c);
     }
     _canvasRegistry.set(layerName, c);
@@ -216,7 +215,7 @@ function _updateLayerOpacitySliders() {
         const isFirst = vi === 0;
         const isLast = vi === visible.length - 1;
         const row = document.createElement('div');
-        row.style.cssText = 'display:grid;grid-template-columns:20px 66px 1fr 28px;gap:0 4px;align-items:center;margin-top:3px;';
+        row.className = 'layer-stack-row';
         row.innerHTML = `
             <span class="layer-reorder-arrows" style="display:flex;flex-direction:column;line-height:1;font-size:9px;gap:0;">
                 <button class="layer-arrow-btn" data-layer="${mode}" data-dir="1"
@@ -474,7 +473,8 @@ window.drawLayerGrid = function drawLayerGrid() {
 
     const { scale, offsetX, offsetY } = stackZoom;
     const densityCheck = Math.max(2, parseInt(document.getElementById('gridlineCount')?.value || '10', 10));
-    const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${_gridPixelMode}`;
+    const showGrid = document.getElementById('showGridlines')?.checked ?? true;
+    const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${_gridPixelMode}|${showGrid}`;
     if (newKey === _gridCacheKey) return;
     _gridCacheKey = newKey;
 
@@ -489,7 +489,9 @@ window.drawLayerGrid = function drawLayerGrid() {
     const cw = demCanvas.width;
     const ch = demCanvas.height;
 
-    const showGrid = document.getElementById('showGridlines')?.checked ?? true;
+    if (!showGrid) {
+        return;
+    }
     const gridColor = 'rgba(255, 255, 255, 0.2)';
     const tickColor = 'rgba(255, 255, 255, 0.5)';
     ctx.lineWidth = 1;
@@ -511,7 +513,7 @@ window.drawLayerGrid = function drawLayerGrid() {
         /** @param {number} py @returns {number} Screen y for pixel row py */
         function pixToScreenY(py) { return (layout.y + py / demHeight * layout.h) * scale + offsetY; }
 
-        const targetLines = Math.max(2, Math.round(densityCheck / 2));
+        const targetLines = Math.max(2, densityCheck);
         const xInterval = nicePixelInterval(demWidth, targetLines);
         const yInterval = nicePixelInterval(demHeight, targetLines);
 
@@ -612,7 +614,7 @@ window.drawLayerGrid = function drawLayerGrid() {
         const pxPerLon = (contentW * scale) / lonRange;
         const pxPerLat = (ch * scale) / latRange;
 
-        const targetLines = Math.max(2, Math.round(densityCheck / 2));
+        const targetLines = Math.max(2, densityCheck);
         const lonInterval = niceGeoInterval(gw, pxPerLon, targetLines);
         const latInterval = niceGeoInterval(gh, pxPerLat, targetLines);
 
@@ -753,24 +755,12 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
     let isPanning = false;
     let startX, startY;
 
-    stack.style.cursor = 'grab';
-    stack.style.overflow = 'hidden';
+    stack.classList.add('stack-cursor-grab', 'stack-overflow-hidden');
 
     // Tooltip for pixel elevation / coordinates
     let stackTooltip = document.createElement('div');
     stackTooltip.id = 'stackTooltip';
-    stackTooltip.style.cssText = `
-        position: fixed;
-        background: rgba(0,0,0,0.85);
-        color: #fff;
-        padding: 6px 10px;
-        border-radius: 4px;
-        font-size: 11px;
-        pointer-events: none;
-        z-index: 10000;
-        display: none;
-        white-space: nowrap;
-    `;
+    stackTooltip.className = 'stack-tooltip hidden';
     document.body.appendChild(stackTooltip);
 
     // Lightweight CSS-only pan — no grid redraw (called on every mousemove tick)
@@ -784,14 +774,14 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
             stackZoom.offsetX = e.clientX - startX;
             stackZoom.offsetY = e.clientY - startY;
             _applyCSSTransformOnly();  // CSS only — grid redraws on mouseup
-            stackTooltip.style.display = 'none';
+            stackTooltip.classList.add('hidden');
             return;
         }
 
         const rect = stack.getBoundingClientRect();
         const demCanvas = _cachedDemCanvas;
         const { lastDemData, demLayout, currentDemBbox } = window.appState || {};
-        if (!demCanvas || !lastDemData) { stackTooltip.style.display = 'none'; return; }
+        if (!demCanvas || !lastDemData) { stackTooltip.classList.add('hidden'); return; }
 
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
@@ -804,7 +794,7 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
         const normY = (canvasY - layout.y) / layout.h;
 
         if (normX < 0 || normX > 1 || normY < 0 || normY > 1) {
-            stackTooltip.style.display = 'none';
+            stackTooltip.classList.add('hidden');
             return;
         }
 
@@ -826,24 +816,26 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
                 <b>Pixel:</b> (${pixelX}, ${pixelY})<br>
                 ${lat ? `<b>Lat:</b> ${lat}° <b>Lon:</b> ${lon}°` : ''}
             `;
-            stackTooltip.style.display = 'block';
+            stackTooltip.classList.remove('hidden');
             stackTooltip.style.left = (e.clientX + 15) + 'px';
             stackTooltip.style.top = (e.clientY + 15) + 'px';
         } else {
-            stackTooltip.style.display = 'none';
+            stackTooltip.classList.add('hidden');
         }
     });
 
     stack.addEventListener('mouseleave', () => {
         isPanning = false;
-        stack.style.cursor = 'grab';
-        stackTooltip.style.display = 'none';
+        stack.classList.remove('stack-cursor-grabbing');
+        stack.classList.add('stack-cursor-grab');
+        stackTooltip.classList.add('hidden');
     });
 
     stack.addEventListener('dblclick', () => {
         stackZoom = { scale: 1, offsetX: 0, offsetY: 0 };
         applyStackedTransform();
-        stack.style.cursor = 'grab';
+        stack.classList.remove('stack-cursor-grabbing');
+        stack.classList.add('stack-cursor-grab');
     });
 
     stack.addEventListener('mousedown', (e) => {
@@ -851,8 +843,9 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
             isPanning = true;
             startX = e.clientX - stackZoom.offsetX;
             startY = e.clientY - stackZoom.offsetY;
-            stack.style.cursor = 'grabbing';
-            stackTooltip.style.display = 'none';
+            stack.classList.remove('stack-cursor-grab');
+            stack.classList.add('stack-cursor-grabbing');
+            stackTooltip.classList.add('hidden');
         }
     });
 
@@ -861,7 +854,8 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
             isPanning = false;
             applyStackedTransform();  // Full redraw (grid + city overlay) once pan ends
         }
-        stack.style.cursor = 'grab';
+        stack.classList.remove('stack-cursor-grabbing');
+        stack.classList.add('stack-cursor-grab');
     });
 
     stack.addEventListener('wheel', (e) => {

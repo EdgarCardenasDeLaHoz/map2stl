@@ -300,6 +300,7 @@ window.api = (() => {
         projections: () => _fetch('/api/settings/projections'),
         colormaps: () => _fetch('/api/settings/colormaps'),
         datasets: () => _fetch('/api/settings/datasets'),
+        default: () => _fetch('/api/settings/default'),
     };
 
     // -------------------------------------------------------------------------

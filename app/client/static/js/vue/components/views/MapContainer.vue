@@ -8,7 +8,6 @@
       <button id="floatingTerrainToggle" class="map-floating-btn" title="Load terrain DEM for current map view" aria-label="Load terrain">🏔️ <span class="btn-label">Terrain</span></button>
       <button id="floatingGridToggle"    class="map-floating-btn" title="Toggle grid lines" aria-label="Toggle grid lines">📐 <span class="btn-label">Grid</span></button>
       <button id="floatingGlobeToggle"   class="map-floating-btn" title="Switch to 3D Globe view" aria-label="Switch to 3D Globe">🌍 <span class="btn-label">Globe</span></button>
-      <button id="floatingRegionsToggle" class="map-floating-btn" title="Toggle regions panel" aria-label="Toggle regions panel">📋 <span class="btn-label">Regions</span></button>
       <button id="floatingLabelsToggle"  class="map-floating-btn" title="Toggle map labels" aria-label="Toggle map labels">🏷️ <span class="btn-label">Labels</span></button>
       <button id="floatingMapSettingsBtn" class="map-floating-btn" title="Map display settings" aria-label="Map display settings">⚙️ <span class="btn-label">Settings</span></button>
     </div>
@@ -52,18 +51,6 @@
     <!-- "Create Region" button -->
     <button id="floatingDrawBtn" class="map-draw-region-btn" title="Draw a new region on the map">+ New Region</button>
 
-    <!-- Regions Panel (hideable right panel) -->
-    <div id="regionsPanel" class="regions-panel hidden">
-      <div class="regions-panel-header">
-        <span class="regions-panel-title">Regions</span>
-        <button id="closeRegionsPanel" class="regions-panel-close">✕</button>
-      </div>
-      <div class="regions-panel-toolbar">
-        <input type="text" id="regionsPanelSearch" placeholder="Search regions..." class="regions-panel-search">
-        <button id="regionsPanelNewBtn" class="regions-panel-new-btn" style="display:none;" title="Draw a new region on the map">+ New</button>
-      </div>
-      <div id="regionsPanelList" class="regions-panel-list"></div>
-    </div>
   </div>
 </template>
 <script setup lang="ts">

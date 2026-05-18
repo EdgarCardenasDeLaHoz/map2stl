@@ -157,15 +157,27 @@ window.loadAllLayers = async function loadAllLayers() {
         await window.loadDEM?.();
 
         // Load secondary layers in parallel
-        await Promise.all([
+        const tasks = [
             window.loadWaterMask?.(),
+            window.loadWaterHydrology?.(),
             window.loadSatelliteImage?.(),
-            window.loadCityData?.(),
-        ]);
+            window.loadEsaLandCover?.(),
+            window.loadSatelliteRGBImage?.(),
+            window.loadHydrology?.(),
+        ];
 
-        // Render combined view automatically
-        window.switchDemSubtab?.('combined');
+        const diagKm = window.appState?.haversineDiagKm?.();
+        if (diagKm && diagKm <= 15) {
+            if (window.loadCityRaster) tasks.push(window.loadCityRaster());
+            else if (window.loadCityData) tasks.push(window.loadCityData());
+        }
+
+        await Promise.all(tasks);
+
+        // Precompute combined output, but keep the visible canvas on Layers
+        // so the user always lands on a non-empty default rendering pane.
         window.renderCombinedView?.();
+        window.switchDemSubtab?.('layers');
 
     } catch (error) {
         console.error('Error loading layers:', error);

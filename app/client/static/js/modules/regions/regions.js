@@ -254,9 +254,10 @@ function createGlobeMarker(lat, lng, color = 0xff0000) {
  *  9. Calls `window.appState._updateWorkflowStepper`.
  *
  * @param {number} index - Index into `coordinatesData` (from `window.getCoordinatesData()`)
+ * @param {{skipEditReload?: boolean}} [opts]
  * @returns {Promise<void>}
  */
-async function selectCoordinate(index) {
+async function selectCoordinate(index, opts = {}) {
     const coordinatesData = window.getCoordinatesData?.() || [];
     const selectedRegion = coordinatesData[index];
     window.setSelectedRegion?.(selectedRegion);
@@ -380,10 +381,12 @@ async function selectCoordinate(index) {
         try { map.fitBounds(bounds, { padding: [20, 20] }); } catch (e) { }
     }
 
-    // NOTE: Do NOT auto-load layers here. selectCoordinate() only updates selection
-    // state. Layer loading is the caller's responsibility (goToEdit, loadAllLayers, etc.)
-    // Loading here causes duplicate requests when goToEdit() calls selectCoordinate()
-    // and then loadDEM() itself.
+    // If the user is already in Edit/DEM view, region selection should immediately
+    // refresh the loaded layers for the new bbox.
+    const demContainerVisible = !document.getElementById('demContainer')?.classList.contains('hidden');
+    if (!opts.skipEditReload && demContainerVisible) {
+        await window.loadAllLayers?.();
+    }
 
     window.appState._updateWorkflowStepper?.();
 
@@ -401,7 +404,7 @@ window.selectCoordinate = selectCoordinate;
  * @param {number} index - Index into `coordinatesData`
  */
 async function goToEdit(index) {
-    await window.selectCoordinate(index);
+    await window.selectCoordinate(index, { skipEditReload: true });
     switchView('dem');
 
     // Populate the compact sidebar edit panel
@@ -440,22 +443,7 @@ async function goToEdit(index) {
         window.setSidebarState?.('normal');
     }
 
-    window.loadDEM?.().then(() => {
-        // Load secondary layers in parallel
-        const tasks = [
-            window.loadWaterMask?.(),
-            window.loadSatelliteImage?.(),
-            window.loadEsaLandCover?.(),
-            window.loadSatelliteRGBImage?.(),
-            window.loadHydrology?.(),
-        ];
-        const diagKm = window.appState?.haversineDiagKm?.();
-        if (diagKm && diagKm <= 15) {
-            if (window.loadCityRaster) tasks.push(window.loadCityRaster());
-            else if (window.loadCityData) tasks.push(window.loadCityData());
-        }
-        return Promise.all(tasks);
-    }).catch(err => {
+    window.loadAllLayers?.().catch(err => {
         console.error('Error loading layers in goToEdit:', err);
         window.showToast?.('Error loading layers: ' + (err?.message || err), 'error');
     });

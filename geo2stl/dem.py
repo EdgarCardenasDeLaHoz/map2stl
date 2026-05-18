@@ -246,7 +246,7 @@ def fetch_local_dem(
         maintain_dimensions=maintain_dimensions,
         clip_nans=False,
     )
-    return np.nan_to_num(im, nan=0.0).astype(np.float64)
+    return im.astype(np.float64, copy=False)
 
 
 def fetch_dem_from_source(

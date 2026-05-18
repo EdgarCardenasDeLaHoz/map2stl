@@ -13,20 +13,20 @@
       </div>
 
       <!-- Stacked Layers View (napari-style) with axis labels -->
-      <div class="layers-container" id="layersContainer" style="display:none;">
+      <div class="layers-container hidden" id="layersContainer">
         <div class="layers-main">
           <div class="layers-with-axes">
             <div class="layers-y-axis" id="layersYAxis"></div>
             <div class="layers-stack-wrapper">
               <div class="layers-stack" id="layersStack">
                 <!-- Hidden source buffers — written to by layer renderers, never displayed directly -->
-                <canvas class="layer-canvas" id="layerDemCanvas"          style="display:none;"></canvas>
-                <canvas class="layer-canvas" id="layerWaterCanvas"        style="display:none;"></canvas>
-                <canvas class="layer-canvas" id="layerSatCanvas"          style="display:none;"></canvas>
-                <canvas class="layer-canvas" id="layerSatImgCanvas"       style="display:none;"></canvas>
-                <canvas class="layer-canvas" id="layerCityRasterCanvas"   style="display:none;"></canvas>
-                <canvas class="layer-canvas" id="layerCompositeDemCanvas" style="display:none;"></canvas>
-                <canvas class="layer-canvas" id="layerHydroCanvas"       style="display:none;"></canvas>
+                <canvas class="layer-canvas hidden" id="layerDemCanvas"></canvas>
+                <canvas class="layer-canvas hidden" id="layerWaterCanvas"></canvas>
+                <canvas class="layer-canvas hidden" id="layerSatCanvas"></canvas>
+                <canvas class="layer-canvas hidden" id="layerSatImgCanvas"></canvas>
+                <canvas class="layer-canvas hidden" id="layerCityRasterCanvas"></canvas>
+                <canvas class="layer-canvas hidden" id="layerCompositeDemCanvas"></canvas>
+                <canvas class="layer-canvas hidden" id="layerHydroCanvas"></canvas>
                 <!-- Single display canvas — shows the active view mode -->
                 <canvas class="layer-canvas" id="stackViewCanvas"></canvas>
                 <!-- Grid overlay — always on top, exempt from zoom transform -->

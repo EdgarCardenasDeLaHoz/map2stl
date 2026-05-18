@@ -39,6 +39,10 @@ except ImportError:
 try:
     from city2stl.fetch import fetch_osm_data as _fetch_osm_data
     from city2stl.rasterize import rasterize_city_data as _rasterize_city_data
+    from city2stl.cache_policy import (
+        city_cache_missing_building_parts,
+        city_cache_missing_height_source,
+    )
 except ImportError:
     def _fetch_osm_data(*a, **kw):
         raise RuntimeError(
@@ -47,6 +51,12 @@ except ImportError:
     def _rasterize_city_data(*a, **kw):
         raise RuntimeError(
             "city2stl.fetch or city2stl.rasterize not available")
+
+    def city_cache_missing_building_parts(*a, **kw):
+        return False
+
+    def city_cache_missing_height_source(*a, **kw):
+        return False
 
 # ---------------------------------------------------------------------------
 # 3D export helper
@@ -57,6 +67,11 @@ try:
 except ImportError:
     _CITIES_3D_AVAILABLE = False
     generate_city_3mf = None  # type: ignore
+
+try:
+    from app.server.core.height.service import enhance_city_data as _enhance_city_data
+except ImportError:
+    _enhance_city_data = None  # type: ignore
 
 
 class CityExportRequest(BaseModel):
@@ -132,16 +147,25 @@ async def get_city_data(city_req: CityRequest):
     if _CACHE_AVAILABLE:
         cached_data = read_osm_cache(cache_key)
         if cached_data is not None:
-            logger.info(f"Serving OSM data from .json.gz cache: {cache_key}")
-            return JSONResponse(content=cached_data)
+            if city_cache_missing_height_source(cached_data) or city_cache_missing_building_parts(cached_data):
+                logger.info("Ignoring stale OSM cache payload: %s", cache_key)
+            else:
+                logger.info(
+                    f"Serving OSM data from .json.gz cache: {cache_key}")
+                return JSONResponse(content=cached_data)
     else:
         OSM_CACHE_PATH.mkdir(parents=True, exist_ok=True)
         cache_file = OSM_CACHE_PATH / f"{cache_key}.json"
         if cache_file.exists():
             try:
                 cached_data = json.loads(cache_file.read_text())
-                logger.info(f"Serving OSM data from legacy cache: {cache_key}")
-                return JSONResponse(content=cached_data)
+                if city_cache_missing_height_source(cached_data) or city_cache_missing_building_parts(cached_data):
+                    logger.info(
+                        "Ignoring stale legacy OSM cache payload: %s", cache_key)
+                else:
+                    logger.info(
+                        f"Serving OSM data from legacy cache: {cache_key}")
+                    return JSONResponse(content=cached_data)
             except Exception as cache_read_err:
                 logger.debug(
                     f"Legacy OSM cache read failed, re-fetching: {cache_read_err}")
@@ -154,6 +178,22 @@ async def get_city_data(city_req: CityRequest):
     except Exception as e:
         logger.error(f"OSM fetch error: {e}")
         return error_response(f"OSM fetch failed: {str(e)}")
+
+    if _enhance_city_data is not None:
+        try:
+            result = await run_sync(
+                _enhance_city_data,
+                result,
+                north,
+                south,
+                east,
+                west,
+            )
+        except Exception as enhance_err:
+            logger.warning(
+                "City height auto-enhancement skipped: %s", enhance_err)
+
+    result.setdefault("city_pipeline_version", 2)
 
     result["cache_key"] = cache_key
     result["diagonal_km"] = round(diag_km, 2)

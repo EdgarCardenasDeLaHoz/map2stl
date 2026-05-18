@@ -80,6 +80,8 @@ window.switchView = function switchView(view) {
     } else if (view === 'dem') {
         demContainer.classList.remove('hidden');
         document.querySelector('[data-view="dem"]').classList.add('active');
+        // Re-bind DEM subtab handlers in case Vue components mounted after initial setup.
+        window.setupDemSubtabs?.();
         // Ensure sidebar shows the region list so the user can switch regions
         document.getElementById('sidebarListView')?.classList.remove('hidden');
         document.getElementById('sidebarTableView')?.classList.add('hidden');
@@ -258,8 +260,6 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
                 originalIndex = coordinatesData.findIndex(r => r.name === region.name);
             }
             if (originalIndex < 0) return;
-            const p = region.parameters || {};
-            const dim = p.dim || '—';
             const tr = document.createElement('tr');
             if (selectedRegion && selectedRegion.name === region.name) tr.classList.add('selected');
             tr.dataset.label = region.label || '';
@@ -270,7 +270,6 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
                 <td class="tbl-coord">${region.south?.toFixed(2) ?? ''}</td>
                 <td class="tbl-coord">${region.east?.toFixed(2) ?? ''}</td>
                 <td class="tbl-coord">${region.west?.toFixed(2) ?? ''}</td>
-                <td class="tbl-coord">${dim}</td>
                 <td class="tbl-actions">
                     <button class="tbl-btn edit" onclick="goToEdit(${originalIndex})" title="Open in Edit view">✏ Edit</button>
                     <button class="tbl-btn danger" onclick="_deleteRegionFromTable(${originalIndex})" title="Delete region">🗑</button>
@@ -433,9 +432,16 @@ window.submitBoundingBox = function submitBoundingBox() {
  * Also handles the settings panel collapse/expand toggle.
  */
 window.setupDemSubtabs = function setupDemSubtabs() {
-    document.querySelectorAll('#demRightPanel [data-subtab]').forEach(btn => {
-        btn.addEventListener('click', () => { if (!btn.disabled) window.switchDemSubtab?.(btn.dataset.subtab); });
-    });
+    const rightPanel = document.getElementById('demRightPanel');
+    // Delegate subtab clicks so late-mounted Vue children still work.
+    if (rightPanel && rightPanel.dataset.subtabBound !== '1') {
+        rightPanel.addEventListener('click', (event) => {
+            const btn = event.target.closest?.('[data-subtab]');
+            if (!btn || btn.disabled) return;
+            window.switchDemSubtab?.(btn.dataset.subtab);
+        });
+        rightPanel.dataset.subtabBound = '1';
+    }
 
     /**
      * Collapse or expand the right settings panel and restore the terrain canvas.
@@ -459,6 +465,7 @@ window.setupDemSubtabs = function setupDemSubtabs() {
         window.emitStackUpdate?.();
         window._globalMap?.invalidateSize?.();
         window.dispatchEvent(new Event('resize'));
+        requestAnimationFrame(() => window._ensureDemViewportSpace?.());
     }
 
     window.toggleDemSettingsPanel = toggleSettingsPanel;
@@ -471,6 +478,58 @@ window.setupDemSubtabs = function setupDemSubtabs() {
     if (settingsHideBtn) settingsHideBtn.addEventListener('click', () => toggleSettingsPanel(true));
     const settingsCollapsedTab = document.getElementById('settingsCollapsedTab');
     if (settingsCollapsedTab) settingsCollapsedTab.addEventListener('click', toggleSettingsPanel);
+
+    // Keep DEM viewport usable when side panels consume too much width.
+    window._ensureDemViewportSpace = function _ensureDemViewportSpace() {
+        const demContainer = document.getElementById('demContainer');
+        const center = document.querySelector('.dem-image-section');
+        if (!demContainer || !center) return;
+        if (demContainer.classList.contains('hidden')) return;
+
+        const minCenter = window.innerWidth <= 1200 ? 180 : 280;
+        const centerW = center.getBoundingClientRect().width;
+        if (centerW >= minCenter) return;
+
+        // First recovery step: collapse the city buildings table if it is open.
+        const cityCollapsed = window.isCityBuildingsPanelCollapsed?.() ?? true;
+        if (!cityCollapsed && typeof window.toggleCityBuildingsPanel === 'function') {
+            window.toggleCityBuildingsPanel();
+        }
+
+        const centerW2 = center.getBoundingClientRect().width;
+        if (centerW2 >= minCenter) return;
+
+        // Second recovery step: clamp settings width so center gets breathing room.
+        const right = document.getElementById('demRightPanel');
+        if (!right || right.classList.contains('settings-collapsed')) return;
+
+        const cityCollapsedTabW = document.getElementById('cityTableCollapsedTab')?.getBoundingClientRect().width || 0;
+        const settingsHandleW = document.getElementById('settingsPanelResizeHandle')?.getBoundingClientRect().width || 0;
+        const targetMax = Math.max(220, demContainer.clientWidth - minCenter - cityCollapsedTabW - settingsHandleW);
+        const currentW = right.getBoundingClientRect().width;
+        right.style.width = `${Math.max(220, Math.min(currentW, targetMax))}px`;
+
+        if (center.getBoundingClientRect().width < (minCenter - 20)) {
+            window.toggleDemSettingsPanel?.(true);
+        }
+    };
+
+    if (!window.appState._demViewportGuardBound) {
+        window.addEventListener('resize', () => window._ensureDemViewportSpace?.());
+        window.appState._demViewportGuardBound = true;
+    }
+
+    // Recovery guard: if all render panes are hidden, force a safe default subtab.
+    requestAnimationFrame(() => {
+        const layersHidden = document.getElementById('layersContainer')?.classList.contains('hidden') ?? true;
+        const compareHidden = document.getElementById('compareInlineContainer')?.classList.contains('hidden') ?? true;
+        const combinedHidden = document.getElementById('combinedContainer')?.classList.contains('hidden') ?? true;
+        const mergeHidden = document.getElementById('mergePanel')?.classList.contains('hidden') ?? true;
+        if (layersHidden && compareHidden && combinedHidden && mergeHidden) {
+            window.switchDemSubtab?.(window.appState?.activeDemSubtab || 'layers');
+        }
+        window._ensureDemViewportSpace?.();
+    });
 };
 
 // ---------------------------------------------------------------------------
@@ -482,6 +541,8 @@ window.setupDemSubtabs = function setupDemSubtabs() {
  * @param {'dem'|'water'|'landcover'|'combined'|'satellite'|'cities'|'merge'|'compare'} subtab
  */
 window.switchDemSubtab = function switchDemSubtab(subtab) {
+    window.appState.activeDemSubtab = subtab;
+
     // For merge the right panel IS the content — expand it if collapsed
     if (subtab === 'merge') {
         const rightPanel = document.getElementById('demRightPanel');
@@ -531,4 +592,6 @@ window.switchDemSubtab = function switchDemSubtab(subtab) {
             window.events?.emit(window.EV?.STACKED_UPDATE);
             break;
     }
+
+    requestAnimationFrame(() => window._ensureDemViewportSpace?.());
 };
