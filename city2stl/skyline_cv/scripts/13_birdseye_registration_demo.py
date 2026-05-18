@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Pano -> bird's-eye -> rotation registration demo (F-SKY11.2).
+"""Pano -> bird's-eye -> rotation registration demo (feature-based).
 
-Replaces the per-bearing horizon scoring (F-SKY11.1 / script 12) with
-inverse perspective mapping: render the pano's water mask as a
-top-down canvas centred on the seed in the same projection as the
-satellite, then sweep a 1-D rotation to find the heading offset that
-matches their water shapes.
+Inverse perspective mapping: render the pano as a top-down canvas
+centred on the seed in the same projection as the satellite, then sweep
+a 1-D rotation to find the heading offset that best matches building features.
+
+Supports both water-mask IoU (original, limited depth reach) and building-mask
+IoU (alternative approach). Use --use-building-mask to test building feature matching.
 
 PDF (4 pages):
   1. Satellite reference (water mask + seed + range rings)
-  2. Bird's-eye-rendered water mask alone (sample-coverage shown)
-  3. Side-by-side at recovered rotation:
-       satellite water mask vs rotated bird's-eye water mask + IoU
-  4. Rotation-search score curve
+  2. Bird's-eye-rendered mask alone (sample-coverage shown)
+  3. Side-by-side at recovered rotation: satellite vs rotated BE mask + IoU
+  4. Rotation-search IoU curve
 
 Usage:
     PYTHONPATH=. python city2stl/skyline_cv/scripts/13_birdseye_registration_demo.py \\
@@ -44,16 +44,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed-index", type=int, default=5)
     p.add_argument("--out", default=None)
     p.add_argument("--api-key", default=None)
-    # Default canvas: 30 m radius, 0.1 m/px.
-    # Empirical finding (see plan F-SKY11.2 post-mortem): monocular
-    # SegFormer water reliably classifies the foreground bay (pano
-    # rows 350+) but loses it past ~5-7 m of camera-distance because
-    # distant water compresses into a near-horizon strip the model
-    # can't label. A 30 m canvas at 0.1 m/px (601×601 px) shows the
-    # actual reachable signal honestly instead of burying it in a
-    # mostly-empty 1001×1001 canvas at 500 m radius.
-    p.add_argument("--canvas-radius-m", type=float, default=30.0)
-    p.add_argument("--m-per-px", type=float, default=0.1)
+    # Default canvas: 50 m radius, 0.2 m/px.
+    # Balances radial distortion (IPM artifact) against useful context.
+    # At 50m, distortion is moderate; buildings remain recognizable.
+    # At 0.2 m/px, 501x501 canvas captures key alignment features
+    # without extreme computational cost or distortion artifacts.
+    p.add_argument("--canvas-radius-m", type=float, default=50.0)
+    p.add_argument("--m-per-px", type=float, default=0.2)
     p.add_argument("--camera-h-m", type=float, default=1.7)
     p.add_argument("--spin-step-deg", type=float, default=30.0)
     p.add_argument("--fov-deg", type=float, default=75.0)
@@ -179,138 +176,102 @@ def _render_satellite_page(pdf, sat_image, sat_water, sat_project,
     plt.close(fig)
 
 
-def _render_birdseye_page(pdf, birdseye_mask, birdseye_valid, canvas_radius_m,
-                          m_per_px, region, seed_index):
-    S = birdseye_mask.shape[0]
-    centre = S // 2
-    water_frac = float(birdseye_mask.mean())
-    fig = plt.figure(figsize=(11, 10))
+def _render_pano_page(pdf, pano_image, region, seed_index):
+    """Render the panorama."""
+    fig = plt.figure(figsize=(14, 3))
     fig.suptitle(
-        f"Pano -> bird's-eye water mask  "
-        f"({region} seed_{seed_index}, radius {canvas_radius_m:.0f} m, "
-        f"{m_per_px:.2f} m/px)",
-        fontsize=11,
-    )
-    # Honest caption at the top: monocular IPM has limited depth reach
-    # and this PDF is a faithful rendering of that reach.
-    fig.text(
-        0.5, 0.945,
-        "Monocular IPM: SegFormer-reliable water = foreground bay surface only.  "
-        f"This bird's-eye renders {water_frac:.1%} water pixels — most distant water in the satellite is "
-        "compressed into a near-horizon strip the model can't classify.  "
-        "See plan F-SKY11.2 post-mortem.",
-        ha="center", va="top", fontsize=8, color="0.30",
-    )
-    ax = fig.add_axes([0.06, 0.06, 0.88, 0.84])
-    # Show valid-sampled region in faint grey; water mask in cyan.
-    background = np.zeros((S, S, 4), dtype=np.float32)
-    background[..., 0:3] = 0.92
-    background[..., 3] = np.where(birdseye_valid, 1.0, 0.0)
-    ax.imshow(background)
-    cyan = np.zeros((S, S, 4), dtype=np.float32)
-    cyan[..., 1] = 0.85
-    cyan[..., 2] = 1.0
-    cyan[..., 3] = np.where(birdseye_mask, 0.70, 0.0)
-    ax.imshow(cyan)
-    ax.scatter([centre], [centre], c="red", marker="*", s=160, zorder=5,
-               edgecolor="white")
-    for r_m in (100, 200, 300, 400, 500):
-        r_px = r_m / m_per_px
-        if r_px > S / 2:
-            break
-        ax.add_patch(mpatches.Circle(
-            (centre, centre), r_px, fill=False,
-            edgecolor=(0.5, 0.5, 0.5, 0.6), linewidth=0.6,
-            linestyle="--"))
-        ax.text(centre + r_px + 4, centre, f"{r_m}m",
-                fontsize=7, color=(0.4, 0.4, 0.4))
-    _draw_compass(ax, (centre, centre), S * 0.42)
-    ax.set_xlim(0, S - 1)
-    ax.set_ylim(S - 1, 0)
-    ax.set_title(
-        f"Cyan = water (inverse-perspective projected from pano)  "
-        f"({float(birdseye_valid.mean()):.0%} of canvas sampled).  "
-        "The bird's-eye is in the PANO's heading frame; rotation in "
-        "page 4 recovers the offset to true geographic north.",
-        fontsize=9,
-    )
+        f"Panorama source  ({region} seed_{seed_index})",
+        fontsize=11)
+    ax = fig.add_axes([0.05, 0.05, 0.90, 0.90])
+    ax.imshow(pano_image)
+    ax.set_title("360° stitched panorama", fontsize=10)
     ax.axis("off")
     pdf.savefig(fig)
     plt.close(fig)
 
 
-def _render_sidebyside_page(pdf, birdseye_mask, sat_canvas_mask,
-                            best_offset_deg, peak_score, m_per_px,
-                            region, seed_index):
-    from scipy.ndimage import rotate as _rot
-    S = birdseye_mask.shape[0]
+def _render_birdseye_page(pdf, pano_be_image, sat_be_image, pano_be_valid, sat_be_valid,
+                          canvas_radius_m, m_per_px, region, seed_index):
+    S = pano_be_image.shape[0]
     centre = S // 2
-    rotated = _rot(
-        birdseye_mask.astype(np.uint8),
-        -float(best_offset_deg), order=0, reshape=False,
-        mode="constant", cval=0,
-    ) > 0
-
-    fig = plt.figure(figsize=(15, 8))
+    fig = plt.figure(figsize=(15, 7))
     fig.suptitle(
-        f"Side-by-side at recovered rotation = {best_offset_deg:.1f} deg  "
-        f"IoU = {peak_score:.3f}  ({region} seed_{seed_index})",
-        fontsize=12,
+        f"Bird's-eye projections ({region} seed_{seed_index}, "
+        f"radius {canvas_radius_m:.0f} m, {m_per_px:.2f} m/px)",
+        fontsize=11,
     )
-    # Left: satellite canvas water
-    ax_l = fig.add_axes([0.04, 0.08, 0.30, 0.78])
-    bg = np.full((S, S, 3), 0.92, dtype=np.float32)
-    ax_l.imshow(bg)
-    cyan = np.zeros((S, S, 4), dtype=np.float32)
-    cyan[..., 1] = 0.85
-    cyan[..., 2] = 1.0
-    cyan[..., 3] = np.where(sat_canvas_mask, 0.70, 0.0)
-    ax_l.imshow(cyan)
-    ax_l.scatter([centre], [centre], c="red", marker="*", s=120,
-                 edgecolor="white", zorder=5)
+
+    # Left: pano bird's-eye
+    ax_l = fig.add_axes([0.04, 0.08, 0.45, 0.88])
+    pano_display = np.where(pano_be_valid[..., None], pano_be_image, 0)
+    ax_l.imshow(pano_display)
+    ax_l.scatter([centre], [centre], c="red", marker="*", s=120, zorder=5, edgecolor="white")
     _draw_compass(ax_l, (centre, centre), S * 0.42)
-    ax_l.set_title("Satellite water mask (canvas-cropped)", fontsize=10)
+    ax_l.set_title("Pano bird's-eye (pano frame)", fontsize=10)
     ax_l.axis("off")
 
-    # Middle: rotated birdseye
-    ax_m = fig.add_axes([0.36, 0.08, 0.30, 0.78])
-    bg = np.full((S, S, 3), 0.92, dtype=np.float32)
-    ax_m.imshow(bg)
-    orange = np.zeros((S, S, 4), dtype=np.float32)
-    orange[..., 0] = 1.0
-    orange[..., 1] = 0.55
-    orange[..., 3] = np.where(rotated, 0.65, 0.0)
-    ax_m.imshow(orange)
-    ax_m.scatter([centre], [centre], c="red", marker="*", s=120,
+    # Right: satellite bird's-eye
+    ax_r = fig.add_axes([0.51, 0.08, 0.45, 0.88])
+    sat_display = sat_be_image.astype(np.uint8)
+    ax_r.imshow(sat_display)
+    ax_r.scatter([centre], [centre], c="red", marker="*", s=120, zorder=5, edgecolor="white")
+    _draw_compass(ax_r, (centre, centre), S * 0.42)
+    ax_r.set_title("Satellite bird's-eye (geographic frame)", fontsize=10)
+    ax_r.axis("off")
+
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def _render_sidebyside_page(pdf, pano_be_image, sat_be_image,
+                            best_offset_deg, peak_score,
+                            region, seed_index):
+    from scipy.ndimage import rotate as _rot
+    S = pano_be_image.shape[0]
+    centre = S // 2
+
+    # Rotate pano image to best alignment
+    rotated = np.zeros_like(pano_be_image)
+    for c in range(3):
+        rotated[..., c] = _rot(
+            pano_be_image[..., c].astype(np.float32),
+            -float(best_offset_deg), order=1, reshape=False,
+            mode="constant", cval=0.0
+        )
+
+    fig = plt.figure(figsize=(15, 5))
+    fig.suptitle(
+        f"At recovered rotation = {best_offset_deg:.1f} deg  "
+        f"correlation = {peak_score:.3f}  ({region} seed_{seed_index})",
+        fontsize=12,
+    )
+
+    # Left: satellite
+    ax_l = fig.add_axes([0.04, 0.08, 0.30, 0.80])
+    ax_l.imshow(sat_be_image.astype(np.uint8))
+    ax_l.scatter([centre], [centre], c="red", marker="*", s=100,
+                 edgecolor="white", zorder=5)
+    _draw_compass(ax_l, (centre, centre), S * 0.42)
+    ax_l.set_title("Satellite (geographic)", fontsize=10)
+    ax_l.axis("off")
+
+    # Middle: rotated pano
+    ax_m = fig.add_axes([0.36, 0.08, 0.30, 0.80])
+    ax_m.imshow(np.clip(rotated, 0, 255).astype(np.uint8))
+    ax_m.scatter([centre], [centre], c="red", marker="*", s=100,
                  edgecolor="white", zorder=5)
     _draw_compass(ax_m, (centre, centre), S * 0.42)
-    ax_m.set_title("Bird's-eye water mask, rotated to best", fontsize=10)
+    ax_m.set_title("Pano rotated to best", fontsize=10)
     ax_m.axis("off")
 
-    # Right: overlay (intersection green, sat-only cyan, be-only orange)
-    ax_r = fig.add_axes([0.68, 0.08, 0.30, 0.78])
-    bg = np.full((S, S, 3), 0.92, dtype=np.float32)
-    ax_r.imshow(bg)
-    cyan_alpha = np.where(sat_canvas_mask & ~rotated, 0.55, 0.0)
-    orange_alpha = np.where(rotated & ~sat_canvas_mask, 0.55, 0.0)
-    green_alpha = np.where(sat_canvas_mask & rotated, 0.80, 0.0)
-    sat_layer = np.zeros((S, S, 4), dtype=np.float32)
-    sat_layer[..., 1] = 0.85; sat_layer[..., 2] = 1.0
-    sat_layer[..., 3] = cyan_alpha
-    be_layer = np.zeros((S, S, 4), dtype=np.float32)
-    be_layer[..., 0] = 1.0; be_layer[..., 1] = 0.55
-    be_layer[..., 3] = orange_alpha
-    overlap_layer = np.zeros((S, S, 4), dtype=np.float32)
-    overlap_layer[..., 1] = 0.80
-    overlap_layer[..., 3] = green_alpha
-    ax_r.imshow(sat_layer)
-    ax_r.imshow(be_layer)
-    ax_r.imshow(overlap_layer)
-    ax_r.scatter([centre], [centre], c="red", marker="*", s=120,
+    # Right: blend
+    ax_r = fig.add_axes([0.68, 0.08, 0.30, 0.80])
+    blend = (sat_be_image.astype(np.float32) + np.clip(rotated, 0, 255)) / 2.0
+    ax_r.imshow(blend.astype(np.uint8))
+    ax_r.scatter([centre], [centre], c="red", marker="*", s=100,
                  edgecolor="white", zorder=5)
     _draw_compass(ax_r, (centre, centre), S * 0.42)
-    ax_r.set_title("Overlay: green=both, cyan=sat-only, orange=BE-only",
-                   fontsize=10)
+    ax_r.set_title("Blended (should look consistent)", fontsize=10)
     ax_r.axis("off")
 
     pdf.savefig(fig)
@@ -321,19 +282,18 @@ def _render_score_curve_page(pdf, cand_deg, scores, best_offset_deg,
                              region, seed_index):
     fig = plt.figure(figsize=(14, 5.5))
     fig.suptitle(
-        f"Rotation-search IoU curve  ({region} seed_{seed_index})",
+        f"Image correlation curve  ({region} seed_{seed_index})",
         fontsize=12)
     ax = fig.add_axes([0.07, 0.18, 0.88, 0.65])
     ax.plot(cand_deg, scores, color=(0.10, 0.30, 0.55, 0.95), linewidth=1.4)
     ax.axvline(best_offset_deg, color="green", linestyle="-", linewidth=1.4,
                label=f"recovered offset = {best_offset_deg:.1f} deg")
     ax.set_xlabel("candidate rotation (deg)", fontsize=10)
-    ax.set_ylabel("IoU(sat water, rotated BE water)", fontsize=10)
+    ax.set_ylabel("Cross-correlation (mean across RGB)", fontsize=10)
     ax.set_title(
-        f"Peak IoU = {scores.max():.3f}  "
+        f"Peak correlation = {scores.max():.3f}  "
         f"sigma = {scores.std():.3f}  "
-        "Sharp single peak => confident; flat / multi-modal => coastline "
-        "signal too weak.",
+        "Sharp single peak => confident; flat / multi-modal => poor alignment.",
         fontsize=9)
     ax.legend(loc="best", fontsize=9)
     ax.grid(alpha=0.25)
@@ -361,7 +321,8 @@ def main() -> int:
     from city2stl.skyline_cv.satellite_image import fetch_region_satellite
     from city2stl.skyline_cv.coastline_registration import detect_sat_water_mask
     from city2stl.skyline_cv.pano_birdseye import (
-        pano_to_birdseye, crop_sat_to_seed_canvas, register_by_rotation,
+        pano_image_to_birdseye, satellite_image_to_birdseye,
+        register_by_image_correlation, pano_to_birdseye,
     )
 
     api_key = _resolve_api_key(args.api_key)
@@ -436,11 +397,9 @@ def main() -> int:
           f"used_pitch={used_pitch:+.1f}")
 
     view_width_px = captured[0]["image"].shape[1]
-    src_mask = pano_building if args.use_building_mask else pano_water
-    print(f"[demo13] IPM using {'BUILDING' if args.use_building_mask else 'WATER'} mask  "
-          f"view_width_px={view_width_px}")
-    birdseye_mask, birdseye_valid = pano_to_birdseye(
-        src_mask, headings_per_col,
+    print(f"[demo13] IPM pano and satellite to bird's-eye view...")
+    pano_be_image, pano_be_valid = pano_image_to_birdseye(
+        pano_image, headings_per_col,
         fov_deg_for_x=args.fov_deg,
         view_width_px=view_width_px,
         pitch_deg=used_pitch,
@@ -448,29 +407,23 @@ def main() -> int:
         canvas_radius_m=args.canvas_radius_m,
         m_per_px=args.m_per_px,
     )
-    print(f"[demo13] birdseye: shape={birdseye_mask.shape}  "
-          f"valid_frac={float(birdseye_valid.mean()):.3f}  "
-          f"water_frac={float(birdseye_mask.mean()):.3f}")
+    print(f"[demo13] pano bird's-eye: shape={pano_be_image.shape}  "
+          f"valid_frac={float(pano_be_valid.mean()):.3f}")
 
-    sat_canvas, sat_canvas_valid = crop_sat_to_seed_canvas(
-        sat_water, sat_project, lat, lon,
+    sat_be_image, sat_be_valid = satellite_image_to_birdseye(
+        sat_image, sat_project, lat, lon,
         canvas_radius_m=args.canvas_radius_m,
         m_per_px=args.m_per_px,
     )
-    if args.use_building_mask:
-        # Match BE-building against sat-LAND (1 - sat_water) within the
-        # crop. The sat doesn't have explicit "building" pixels at this
-        # zoom — land vs water is the most direct comparison.
-        sat_canvas = (~sat_canvas) & sat_canvas_valid
-    print(f"[demo13] sat canvas: target_frac={float(sat_canvas.mean()):.3f}  "
-          f"valid_frac={float(sat_canvas_valid.mean()):.3f}")
+    print(f"[demo13] sat bird's-eye: shape={sat_be_image.shape}  "
+          f"valid_frac={float(sat_be_valid.mean()):.3f}")
 
-    best, cand_deg, scores = register_by_rotation(
-        birdseye_mask, birdseye_valid, sat_canvas, sat_canvas_valid,
+    best, cand_deg, scores = register_by_image_correlation(
+        pano_be_image, pano_be_valid, sat_be_image, sat_be_valid,
         step_deg=1.0,
     )
     print(f"[demo13] recovered offset = {best:.1f} deg  "
-          f"peak IoU = {scores.max():.3f}  sigma = {scores.std():.3f}")
+          f"peak correlation = {scores.max():.3f}  sigma = {scores.std():.3f}")
 
     out_pdf = Path(args.out) if args.out else (
         ROOT / "city2stl" / "skyline_cv" / "runs" / "birdseye_demo"
@@ -481,11 +434,13 @@ def main() -> int:
         _render_satellite_page(pdf, sat_image, sat_water, sat_project,
                                lat, lon, args.region, args.seed_index,
                                canvas_radius_m=args.canvas_radius_m)
-        _render_birdseye_page(pdf, birdseye_mask, birdseye_valid,
+        _render_pano_page(pdf, pano_image, args.region, args.seed_index)
+        _render_birdseye_page(pdf, pano_be_image, sat_be_image,
+                              pano_be_valid, sat_be_valid,
                               args.canvas_radius_m, args.m_per_px,
                               args.region, args.seed_index)
-        _render_sidebyside_page(pdf, birdseye_mask, sat_canvas, best,
-                                float(scores.max()), args.m_per_px,
+        _render_sidebyside_page(pdf, pano_be_image, sat_be_image, best,
+                                float(scores.max()),
                                 args.region, args.seed_index)
         _render_score_curve_page(pdf, cand_deg, scores, best,
                                  args.region, args.seed_index)
