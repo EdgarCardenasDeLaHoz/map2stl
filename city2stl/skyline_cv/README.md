@@ -53,13 +53,15 @@ Core pipeline features enabled by default:
 - **F-SKY6**: One-to-one segment-to-building assignment
 - **F-SKY7**: Local-maxima peak detection
 - **F-SKY8**: Satellite-derived building footprints
+- **F-SKY10**: Cross-view colour/geometry verification (opt-in per region)
 
 Pending integration:
 - **F-SKY11.1 Phase B**: Pano-level coastline heading correction (Phase A demo complete)
-- **F-SKY5**, **F-SKY10**: Pending evaluation
+- **F-SKY5**: MobileSAM instance segmentation (pending evaluation)
 
 Disabled (measured regression):
 - **F-SKY3**: Voronoi splitting (use F-SKY5 instead)
+- **F-SKY11.2**: Bird's-eye registration (attempted but not viable; see failure analysis)
 
 ## How it works
 
@@ -76,10 +78,10 @@ Disabled (measured regression):
 |---|---|---|
 | [height_trace.py](height_trace.py) | Floor-strip detection via 1D FFT / autocorrelation. | F-SKY1 |
 | [satellite_footprints.py](satellite_footprints.py) | Microsoft Global ML Building Footprints fetch + deduplication. | F-SKY8 |
-| [satellite_image.py](satellite_image.py) | Satellite image fetch and preprocessing. | F-SKY8, F-SKY10 (prep) |
-| [cross_view.py](cross_view.py) | Cross-view geometric + appearance verification. | F-SKY10 (in progress) |
+| [satellite_image.py](satellite_image.py) | Satellite image fetch and preprocessing. | F-SKY8, F-SKY10 |
+| [cross_view.py](cross_view.py) | Cross-view geometric + appearance verification (roof colour, width, edges). | F-SKY10 |
 | [coastline_registration.py](coastline_registration.py) | Water-mask based heading recovery via radial signatures. | F-SKY11, F-SKY11.1 |
-| [pano_birdseye.py](pano_birdseye.py) | Bird's-eye registration via satellite + shape matching. | F-SKY11.2 (planned) |
+| [pano_birdseye.py](pano_birdseye.py) | Bird's-eye registration via satellite + shape matching. | F-SKY11.2 (abandoned) |
 
 End-to-end flow:
 
@@ -187,6 +189,47 @@ bottom-left panel and removed the unused diagnostic legend table. The
 mask is persisted on `SeedViewRegistration.building_mask` so the
 renderer doesn't depend on the bounded LRU neural cache that would
 miss by PDF-render time on multi-seed runs.
+
+### Cross-view colour/geometry verification (F-SKY10)
+
+When a segment is correctly matched to an OSM building, the building's
+roof colour should agree across views: red clay tiles look red from
+above (satellite) and red from the side (Street View). When the matcher
+picks a wrong building (the classic waterfront failure on Cartagena
+seed_5: matcher selects an inland tower for what is actually a waterfront
+building visible at that bearing), the colours disagree — the visible
+building has a different roof colour than the (wrong) OSM polygon.
+
+F-SKY10 adds three independent cross-view signals that score each
+segment-to-building match by colour and geometric consistency:
+
+1. **Roof colour consistency (50%)**: Median RGB of the Street View
+   segment's roof-strip pixels vs the satellite crop of the matched
+   building's roof. Score = 1 - euclidean_distance(RGB_sv, RGB_sat) / 441.67.
+
+2. **Geometric width consistency (30%)**: Segment aspect ratio heuristic.
+   Very narrow (needle-like) segments and very wide (flat) segments are
+   suspicious. Score peaks at 1:2–1:3 width-to-height ratio (typical
+   facade seen in Street View).
+
+3. **Vertical edge consistency (20%)**: Edge density in the segment
+   region via Canny detection + Hough line filtering. A well-defined
+   building facade has strong vertical edges (corners, wall seams).
+   Foliage and noise have diffuse edges.
+
+Combined score blends the three signals with weights [0.5, 0.3, 0.2]
+and contributes a 15% nudge to the final matcher score (conservatively,
+so intra-view IoU remains authoritative). When enabled, the cross-view
+scorer runs after the base matcher and can rerank disputed candidates.
+
+Opt in per region via `"use_cross_view_scoring": true` in
+`sites/<region>.json`. First run downloads satellite imagery for the
+bbox; subsequent runs use the cached satellite image. The scorer runs
+per-view, so cost is minimal (no additional Street View fetches).
+
+See [docs/plans/F-SKY10-F-SKY11.2-IMPLEMENTATION-2026-05-17.md](../../docs/plans/F-SKY10-F-SKY11.2-IMPLEMENTATION-2026-05-17.md).
+The demo script (`scripts/10_cross_view_demo.py`) renders a per-seed
+PDF showing individual signal contributions for each matched segment.
 See [docs/plans/F-SKY4-mask-overlay.md](../../docs/plans/F-SKY4-mask-overlay.md)
 and [docs/plans/F-SKY7-local-max-peaks-and-layout.md](../../docs/plans/F-SKY7-local-max-peaks-and-layout.md).
 
