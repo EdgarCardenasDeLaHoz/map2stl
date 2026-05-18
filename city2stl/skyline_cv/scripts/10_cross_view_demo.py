@@ -178,16 +178,22 @@ def _render_match_row(fig, row_y, row_h, sv_image, seg, sat_image,
         [x_cursor, row_y, 0.99 - x_cursor, row_h])
     ax.axis("off")
     lines = [
-        f"forward_m = {seg.get('matched_projection', {}).get('forward_m', float('nan')):.0f}",
-        f"intra_iou  = {score_dict.get('intra_iou', float('nan')):.3f}",
-        f"w_score    = {score_dict.get('w_score',  float('nan')):.3f}",
-        f"occlusion  = {score_dict.get('occlusion', float('nan')):.3f}",
-        f"cv_color   = {score_dict.get('cv',       float('nan')):.3f}",
-        f"intra-only = {score_dict.get('combined_intra', float('nan')):.3f}",
-        f"final      = {score_dict.get('combined',       float('nan')):.3f}",
+        f"forward_m      = {seg.get('matched_projection', {}).get('forward_m', float('nan')):.0f}",
+        f"",
+        f"intra_iou      = {score_dict.get('intra_iou', float('nan')):.3f}",
+        f"w_score        = {score_dict.get('w_score',  float('nan')):.3f}",
+        f"occlusion      = {score_dict.get('occlusion', float('nan')):.3f}",
+        f"intra-only     = {score_dict.get('combined_intra', float('nan')):.3f}",
+        f"",
+        f"cv_color       = {score_dict.get('cv_color', float('nan')):.3f}",
+        f"cv_width       = {score_dict.get('cv_width', float('nan')):.3f}",
+        f"cv_edges       = {score_dict.get('cv_edges', float('nan')):.3f}",
+        f"cv_combined    = {score_dict.get('cv_combined', float('nan')):.3f}",
+        f"",
+        f"final          = {score_dict.get('combined',       float('nan')):.3f}",
     ]
     ax.text(0.0, 1.0, "\n".join(lines), va="top", ha="left",
-            family="monospace", fontsize=8)
+            family="monospace", fontsize=7.5)
 
 
 def main() -> int:
@@ -400,19 +406,24 @@ def main() -> int:
                         sat_image, sat_project, poly)
                     sat_rgb = _median_rgb(sat_crop)
                     diag = (seg.get("match_diagnostics") or [{}])[0]
+                    # Call scorer to get individual signal values.
+                    cv_scores = scorer(seg, poly)
                     score_dict = {
                         "sv_rgb": sv_rgb,
                         "sat_rgb": sat_rgb,
                         "intra_iou": diag.get("iou", float("nan")),
                         "w_score":   diag.get("width_score", float("nan")),
                         "occlusion": diag.get("occlusion", float("nan")),
-                        "cv":        diag.get("cv", float("nan")),
+                        "cv_color": cv_scores.get("color", float("nan")),
+                        "cv_width": cv_scores.get("width", float("nan")),
+                        "cv_edges": cv_scores.get("edges", float("nan")),
+                        "cv_combined": cv_scores.get("combined", float("nan")),
                         "combined":  diag.get("combined", float("nan")),
-                        # combined_intra ≈ (final - 0.15·cv) / 0.85 when cv present
+                        # combined_intra ≈ (final - 0.15·cv_combined) / 0.85 when cv present
                         "combined_intra": (
                             (diag.get("combined", 0.0)
-                             - 0.15 * float(diag.get("cv", 0.5))) / 0.85
-                            if "cv" in diag else diag.get("combined", float("nan"))
+                             - 0.15 * float(cv_scores.get("combined", 0.5))) / 0.85
+                            if "combined" in cv_scores else diag.get("combined", float("nan"))
                         ),
                     }
                     _render_match_row(
