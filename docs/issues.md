@@ -1,6 +1,6 @@
 # Known Issues & Status — strm2stl
 
-_Last updated: 2026-05-14_
+_Last updated: 2026-05-17_
 
 ## Active Technical Debt
 
@@ -8,6 +8,9 @@ _Last updated: 2026-05-14_
 HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `addEventListener` in event-listeners.js). One intentional inline `onclick=` remains on the dev-only debug error overlay dismiss button. Converting app.js itself to a full ES module is not planned — keep public functions on `window.*`.
 
 ## Resolved Technical Debt
+
+### ~~F-SKY11.1 Phase A (pano-level coastline alignment)~~ ✅ (2026-05-17)
+Pano heading-offset recovery from stitched 360° pano + water mask vs coastline keypoints. Demo script `scripts/12_pano_coastline_demo.py` demonstrates approach; Cartagena seed_5 recovers 310° vs manual 320°. Phase B (integration into region_pdf.py) pending.
 
 ### ~~skyline_cv script sprawl~~ ✅
 Scripts `00`–`07` (individual-step runners) removed; single orchestration

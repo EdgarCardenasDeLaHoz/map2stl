@@ -1,6 +1,6 @@
 # AI-Proposed Features & Tasks — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-05-17_
 
 > Completed and denied items are archived at the bottom of this file.
 

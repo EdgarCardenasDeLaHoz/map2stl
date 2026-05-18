@@ -4,10 +4,10 @@
 
 ## Context Management (read first)
 
-- `/compact` is **user-triggered** — Claude cannot run it. After each commit Claude will output: `--- Task complete. Run /compact before continuing. ---`
+- `/compact` is **user-triggered** — Claude cannot run it. After each commit Claude will output a signal. When you see: `--- Task complete. Run /compact before continuing. ---` at the end of a response, run `/compact` to compress context.
 - Run `/compact` when you see that signal, or when context exceeds ~60%
-- Load at most 1–2 `docs/` files per session
-- Keep sessions focused on one module at a time
+- Load at most 1–2 `docs/` files per session. See "When to Read What" table below for guidance.
+- Keep sessions focused on one module at a time. If scope creeps, ask the user before editing additional modules.
 
 ## Quick Start
 
@@ -117,6 +117,19 @@ proceeds to implement immediately.
 For items that the user explicitly requests in conversation ("fix X", "add
 Y"), skip steps 1–2 unless the scope grows large enough to warrant
 durable tracking.
+
+When multiple proposals are approved and ready, ask the user which to work on first.
+
+### Documentation Update Checklist (apply after every code edit)
+
+After you edit code, before committing:
+- [ ] Updated module docstrings (if the file has one)?
+- [ ] Updated `docs/modules.md` function index (if adding/removing/renaming functions)?
+- [ ] Updated `docs/issues.md` status (if fixing a known issue)?
+- [ ] Updated `docs/proposals.md` if this implements a proposal?
+- [ ] Audited surrounding code for dead branches, unused parameters, or stale comments?
+
+"Done" means the next session's reader can find the change referenced in the docs.
 
 ### Edit hygiene (apply after every code edit, while the region is in context)
 
