@@ -147,6 +147,7 @@ def build_pano_signatures(
     fov_deg: float, view_width_px: int,
     near_range_m: tuple[float, float] = (10.0, 80.0),
     far_range_m: tuple[float, float] = (100.0, 400.0),
+    pano_image: np.ndarray | None = None,
 ) -> dict:
     """Multi-channel per-bearing pano signature.
 
@@ -181,12 +182,34 @@ def build_pano_signatures(
                                         n_bearings, yt_far, yb_far)
     skyline = _pano_skyline_height(pano_building, headings_per_col,
                                     n_bearings, horizon_y=y_mid)
+
+    # Pano-RGB brightness in the FAR band (just below horizon), per bearing.
+    # This pairs with the satellite-RGB brightness channel; both sample
+    # *imagery*, not masks, so they break the water-symmetry that confuses
+    # the mask-derived channels on peninsula seeds.
+    rgb = np.zeros(n_bearings, dtype=np.float32)
+    if pano_image is not None and pano_image.shape[:2] == pano_water.shape:
+        gray_band = pano_image[yt_far:yb_far, :, :].astype(np.float32).mean(axis=2)
+        gray_band /= 255.0
+        bearings = np.linspace(0.0, 360.0, n_bearings, endpoint=False)
+        bin_w = 360.0 / n_bearings
+        h_mod = np.asarray(headings_per_col, dtype=np.float32) % 360.0
+        per_col = gray_band.mean(axis=0) if gray_band.size else np.zeros(
+            pano_water.shape[1], dtype=np.float32)
+        for i, t in enumerate(bearings):
+            d = np.abs(((h_mod - t + 180.0) % 360.0) - 180.0)
+            m = d <= (bin_w * 0.5 + 1e-3)
+            rgb[i] = per_col[m].mean() if m.any() else per_col[int(np.argmin(d))]
+
     d_water = np.roll(water, -1) - np.roll(water, 1)
     d_water_far = np.roll(water_far, -1) - np.roll(water_far, 1)
     d_skyline = np.roll(skyline, -1) - np.roll(skyline, 1)
+    d_rgb = np.roll(rgb, -1) - np.roll(rgb, 1)
     return {
         "water": water, "water_far": water_far, "skyline": skyline,
-        "d_water": d_water, "d_water_far": d_water_far, "d_skyline": d_skyline,
+        "rgb": rgb,
+        "d_water": d_water, "d_water_far": d_water_far,
+        "d_skyline": d_skyline, "d_rgb": d_rgb,
         "y_top_near": yt_near, "y_bot_near": yb_near,
         "y_top_far": yt_far, "y_bot_far": yb_far,
         "y_top": min(yt_far, yt_near), "y_bot": max(yb_near, yb_far),
@@ -222,6 +245,8 @@ def build_sat_signatures(
     sat_water: np.ndarray, sat_project, seed_lat: float, seed_lon: float,
     *, n_bearings: int, near_range_m: tuple[float, float], step_m: float = 5.0,
     far_water_range_m: tuple[float, float] = (100.0, 400.0),
+    sat_rgb: np.ndarray | None = None,
+    rgb_range_m: tuple[float, float] = (50.0, 600.0),
 ) -> dict:
     """Multi-channel per-bearing satellite signature.
 
@@ -273,12 +298,37 @@ def build_sat_signatures(
         )
         skyline[ai] = max(0.0, 1.0 - dist / skyline_range_m)
 
+    # Build "rgb" signal: average satellite-RGB brightness along each bearing.
+    # This is the only channel that's *fundamentally not* water-derived. For
+    # peninsula seeds like Cartagena's seed_5, water-only signals have a
+    # ~180° ambiguity (water on both sides of the peninsula). Open ocean is
+    # high-brightness/low-saturation uniform; urban directions have varied
+    # textures. Cross-correlating raw brightness breaks the ambiguity.
+    rgb = np.zeros(n_bearings, dtype=np.float32)
+    if sat_rgb is not None:
+        rgb_dists = np.arange(rgb_range_m[0], rgb_range_m[1] + 1, 10.0)
+        for ai, theta in enumerate(bearings):
+            br = math.radians(float(theta))
+            sin_b, cos_b = math.sin(br), math.cos(br)
+            samples = []
+            for d in rgb_dists:
+                lon = seed_lon + d * sin_b / mlon
+                lat = seed_lat + d * cos_b / mlat
+                px, py = sat_project(float(lon), float(lat))
+                ix, iy = int(px), int(py)
+                if 0 <= ix < w and 0 <= iy < h:
+                    # Convert to grayscale (brightness).
+                    samples.append(sat_rgb[iy, ix].astype(np.float32).mean() / 255.0)
+            rgb[ai] = float(np.mean(samples)) if samples else 0.0
+
     d_water = np.roll(water, -1) - np.roll(water, 1)
     d_water_far = np.roll(water_far, -1) - np.roll(water_far, 1)
     d_skyline = np.roll(skyline, -1) - np.roll(skyline, 1)
+    d_rgb = np.roll(rgb, -1) - np.roll(rgb, 1)
     return {"water": water, "water_far": water_far, "skyline": skyline,
+            "rgb": rgb,
             "d_water": d_water, "d_water_far": d_water_far,
-            "d_skyline": d_skyline}
+            "d_skyline": d_skyline, "d_rgb": d_rgb}
 
 
 # ---------------------------------------------------------------------------
@@ -301,8 +351,8 @@ def _circular_pearson_corr(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 def correlate_all_channels(
     pano_sigs: dict, sat_sigs: dict,
     *, channels: tuple[str, ...] = (
-        "water", "water_far", "skyline",
-        "d_water", "d_water_far", "d_skyline",
+        "water", "water_far", "skyline", "rgb",
+        "d_water", "d_water_far", "d_skyline", "d_rgb",
     ),
     weights: dict | None = None,
 ) -> dict:
@@ -316,8 +366,16 @@ def correlate_all_channels(
     inland seeds, where water has nothing to say.
     """
     if weights is None:
-        weights = {"water": 1.0, "water_far": 1.0, "skyline": 1.0,
-                   "d_water": 0.6, "d_water_far": 0.6, "d_skyline": 0.6}
+        # rgb / d_rgb are the only channels that are NOT water-mask-derived.
+        # Peninsula seeds (like Cartagena seed_5) have water on both sides
+        # of the peninsula, giving water signals a 180° ambiguity that
+        # only asymmetric image-brightness can break. Verified empirically:
+        # on seed_5, rgb found 233° (truth ~247°) while every water-derived
+        # channel found ~97° (truth + 180°). Weight rgb heavily to outvote.
+        weights = {"water": 0.4, "water_far": 0.4, "skyline": 0.4,
+                   "rgb": 4.0,
+                   "d_water": 0.3, "d_water_far": 0.3, "d_skyline": 0.3,
+                   "d_rgb": 2.5}
     n = pano_sigs[channels[0]].size
     per_channel = {}
     active = []
@@ -593,17 +651,19 @@ def main() -> int:
         pano_water, pano_building, headings_per_col,
         n_bearings=args.n_bearings, camera_h_m=1.7,
         pitch_deg=used_pitch, fov_deg=args.fov_deg, view_width_px=view_width_px,
+        pano_image=pano_image,
     )
     near_range = tuple(float(x) for x in args.near_range.split(","))
     sat_sigs = build_sat_signatures(
         sat_water, sat_project, lat, lon,
         n_bearings=args.n_bearings, near_range_m=near_range,
         far_water_range_m=(100.0, 400.0),
+        sat_rgb=sat_image,
     )
 
     # Per-channel diagnostic.
-    channels = ("water", "water_far", "skyline",
-                "d_water", "d_water_far", "d_skyline")
+    channels = ("water", "water_far", "skyline", "rgb",
+                "d_water", "d_water_far", "d_skyline", "d_rgb")
     for ch in channels:
         ps, ss = pano_sigs[ch], sat_sigs[ch]
         print(f"[demo] {ch:12s}  pano(mean={ps.mean():+.3f} std={ps.std():.3f})  "
