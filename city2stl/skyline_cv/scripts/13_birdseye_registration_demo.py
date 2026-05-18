@@ -44,12 +44,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed-index", type=int, default=5)
     p.add_argument("--out", default=None)
     p.add_argument("--api-key", default=None)
-    # Default canvas: 50 m radius, 0.2 m/px.
-    # Balances radial distortion (IPM artifact) against useful context.
-    # At 50m, distortion is moderate; buildings remain recognizable.
-    # At 0.2 m/px, 501x501 canvas captures key alignment features
-    # without extreme computational cost or distortion artifacts.
-    p.add_argument("--canvas-radius-m", type=float, default=50.0)
+    # Pano canvas: 50 m radius (limits IPM radial distortion).
+    # Satellite canvas: 250 m radius (wide enough to show building context).
+    # The satellite is rendered wider for visualization and context, but the
+    # correlation is computed on the inner overlap where pano has valid data.
+    p.add_argument("--canvas-radius-m", type=float, default=50.0,
+                   help="Pano bird's-eye radius (kept small to limit IPM distortion)")
+    p.add_argument("--sat-canvas-radius-m", type=float, default=250.0,
+                   help="Satellite bird's-eye radius (wider for building context)")
     p.add_argument("--m-per-px", type=float, default=0.2)
     p.add_argument("--camera-h-m", type=float, default=1.7)
     p.add_argument("--spin-step-deg", type=float, default=30.0)
@@ -190,14 +192,18 @@ def _render_pano_page(pdf, pano_image, region, seed_index):
     plt.close(fig)
 
 
-def _render_birdseye_page(pdf, pano_be_image, sat_be_image, pano_be_valid, sat_be_valid,
-                          canvas_radius_m, m_per_px, region, seed_index):
-    S = pano_be_image.shape[0]
-    centre = S // 2
+def _render_birdseye_page(pdf, pano_be_image, sat_be_image_wide, pano_be_valid,
+                          sat_be_valid_wide, pano_canvas_radius_m,
+                          sat_canvas_radius_m, m_per_px, region, seed_index):
+    S_pano = pano_be_image.shape[0]
+    S_sat = sat_be_image_wide.shape[0]
+    centre_pano = S_pano // 2
+    centre_sat = S_sat // 2
     fig = plt.figure(figsize=(15, 7))
     fig.suptitle(
         f"Bird's-eye projections ({region} seed_{seed_index}, "
-        f"radius {canvas_radius_m:.0f} m, {m_per_px:.2f} m/px)",
+        f"pano radius={pano_canvas_radius_m:.0f}m, sat radius={sat_canvas_radius_m:.0f}m, "
+        f"{m_per_px:.2f} m/px)",
         fontsize=11,
     )
 
@@ -205,18 +211,28 @@ def _render_birdseye_page(pdf, pano_be_image, sat_be_image, pano_be_valid, sat_b
     ax_l = fig.add_axes([0.04, 0.08, 0.45, 0.88])
     pano_display = np.where(pano_be_valid[..., None], pano_be_image, 0)
     ax_l.imshow(pano_display)
-    ax_l.scatter([centre], [centre], c="red", marker="*", s=120, zorder=5, edgecolor="white")
-    _draw_compass(ax_l, (centre, centre), S * 0.42)
-    ax_l.set_title("Pano bird's-eye (pano frame)", fontsize=10)
+    ax_l.scatter([centre_pano], [centre_pano], c="red", marker="*", s=120,
+                 zorder=5, edgecolor="white")
+    _draw_compass(ax_l, (centre_pano, centre_pano), S_pano * 0.42)
+    ax_l.set_title(f"Pano bird's-eye (pano frame, ±{pano_canvas_radius_m:.0f}m)",
+                   fontsize=10)
     ax_l.axis("off")
 
-    # Right: satellite bird's-eye
+    # Right: WIDE satellite bird's-eye with pano-canvas box overlay
     ax_r = fig.add_axes([0.51, 0.08, 0.45, 0.88])
-    sat_display = sat_be_image.astype(np.uint8)
-    ax_r.imshow(sat_display)
-    ax_r.scatter([centre], [centre], c="red", marker="*", s=120, zorder=5, edgecolor="white")
-    _draw_compass(ax_r, (centre, centre), S * 0.42)
-    ax_r.set_title("Satellite bird's-eye (geographic frame)", fontsize=10)
+    ax_r.imshow(sat_be_image_wide.astype(np.uint8))
+    ax_r.scatter([centre_sat], [centre_sat], c="red", marker="*", s=120,
+                 zorder=5, edgecolor="white")
+    _draw_compass(ax_r, (centre_sat, centre_sat), S_sat * 0.42)
+    # Draw pano-canvas box for context
+    pano_half_px = pano_canvas_radius_m / m_per_px
+    ax_r.add_patch(mpatches.Rectangle(
+        (centre_sat - pano_half_px, centre_sat - pano_half_px),
+        2 * pano_half_px, 2 * pano_half_px,
+        fill=False, edgecolor="yellow", linewidth=1.5, linestyle="--"))
+    ax_r.set_title(f"Satellite bird's-eye (±{sat_canvas_radius_m:.0f}m).  "
+                   f"Yellow box = pano canvas overlap (±{pano_canvas_radius_m:.0f}m)",
+                   fontsize=10)
     ax_r.axis("off")
 
     pdf.savefig(fig)
@@ -410,13 +426,30 @@ def main() -> int:
     print(f"[demo13] pano bird's-eye: shape={pano_be_image.shape}  "
           f"valid_frac={float(pano_be_valid.mean()):.3f}")
 
-    sat_be_image, sat_be_valid = satellite_image_to_birdseye(
+    # Render satellite at LARGER radius for context (buildings further out)
+    sat_be_image_wide, sat_be_valid_wide = satellite_image_to_birdseye(
         sat_image, sat_project, lat, lon,
-        canvas_radius_m=args.canvas_radius_m,
+        canvas_radius_m=args.sat_canvas_radius_m,
         m_per_px=args.m_per_px,
     )
-    print(f"[demo13] sat bird's-eye: shape={sat_be_image.shape}  "
-          f"valid_frac={float(sat_be_valid.mean()):.3f}")
+    print(f"[demo13] sat bird's-eye (wide): shape={sat_be_image_wide.shape}  "
+          f"valid_frac={float(sat_be_valid_wide.mean()):.3f}  "
+          f"radius={args.sat_canvas_radius_m}m")
+
+    # For correlation, crop satellite to match pano canvas size (same center)
+    pano_S = pano_be_image.shape[0]
+    sat_S = sat_be_image_wide.shape[0]
+    sat_centre = sat_S // 2
+    half = pano_S // 2
+    sat_be_image = sat_be_image_wide[
+        sat_centre - half : sat_centre + half + 1,
+        sat_centre - half : sat_centre + half + 1,
+    ]
+    sat_be_valid = sat_be_valid_wide[
+        sat_centre - half : sat_centre + half + 1,
+        sat_centre - half : sat_centre + half + 1,
+    ]
+    print(f"[demo13] sat bird's-eye (correlation crop): shape={sat_be_image.shape}")
 
     best, cand_deg, scores = register_by_image_correlation(
         pano_be_image, pano_be_valid, sat_be_image, sat_be_valid,
@@ -435,10 +468,10 @@ def main() -> int:
                                lat, lon, args.region, args.seed_index,
                                canvas_radius_m=args.canvas_radius_m)
         _render_pano_page(pdf, pano_image, args.region, args.seed_index)
-        _render_birdseye_page(pdf, pano_be_image, sat_be_image,
-                              pano_be_valid, sat_be_valid,
-                              args.canvas_radius_m, args.m_per_px,
-                              args.region, args.seed_index)
+        _render_birdseye_page(pdf, pano_be_image, sat_be_image_wide,
+                              pano_be_valid, sat_be_valid_wide,
+                              args.canvas_radius_m, args.sat_canvas_radius_m,
+                              args.m_per_px, args.region, args.seed_index)
         _render_sidebyside_page(pdf, pano_be_image, sat_be_image, best,
                                 float(scores.max()),
                                 args.region, args.seed_index)
