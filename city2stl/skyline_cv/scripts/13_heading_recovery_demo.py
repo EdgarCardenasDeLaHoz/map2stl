@@ -105,6 +105,41 @@ def _pano_per_bearing_mean(
     return out
 
 
+def _pano_skyline_height(
+    pano_building: np.ndarray, headings_per_col: np.ndarray,
+    n_bearings: int, horizon_y: float,
+) -> np.ndarray:
+    """Per-bearing angular height of buildings above the horizon.
+
+    For each pano column, find the topmost row of the building mask.
+    `(horizon_y - top_y)` is the building's angular height in pixels
+    (positive = above horizon). Average across columns in each bearing
+    bin. Higher values = taller / nearer buildings.
+    """
+    H, W = pano_building.shape
+    # Argmax of the *first* True from the top: searchsorted-style.
+    # build a per-column top_y by scanning from y=0 downward.
+    top_y = np.full(W, H, dtype=np.float32)
+    for x in range(W):
+        ys = np.where(pano_building[:, x])[0]
+        if ys.size:
+            top_y[x] = float(ys[0])
+    angular_height = np.clip(horizon_y - top_y, 0.0, horizon_y).astype(np.float32)
+
+    bearings = np.linspace(0.0, 360.0, n_bearings, endpoint=False)
+    bin_w = 360.0 / n_bearings
+    out = np.zeros(n_bearings, dtype=np.float32)
+    h_mod = np.asarray(headings_per_col, dtype=np.float32) % 360.0
+    for i, t in enumerate(bearings):
+        d = np.abs(((h_mod - t + 180.0) % 360.0) - 180.0)
+        m = d <= (bin_w * 0.5 + 1e-3)
+        out[i] = angular_height[m].mean() if m.any() else angular_height[int(np.argmin(d))]
+    # Normalize to [0, 1] for cross-channel weighting comparability.
+    if out.max() > 0:
+        out = out / out.max()
+    return out
+
+
 def build_pano_signatures(
     pano_water: np.ndarray, pano_building: np.ndarray,
     headings_per_col: np.ndarray,
@@ -144,14 +179,16 @@ def build_pano_signatures(
                                     n_bearings, yt_near, yb_near)
     water_far = _pano_per_bearing_mean(pano_water, headings_per_col,
                                         n_bearings, yt_far, yb_far)
+    skyline = _pano_skyline_height(pano_building, headings_per_col,
+                                    n_bearings, horizon_y=y_mid)
     d_water = np.roll(water, -1) - np.roll(water, 1)
     d_water_far = np.roll(water_far, -1) - np.roll(water_far, 1)
+    d_skyline = np.roll(skyline, -1) - np.roll(skyline, 1)
     return {
-        "water": water, "water_far": water_far,
-        "d_water": d_water, "d_water_far": d_water_far,
+        "water": water, "water_far": water_far, "skyline": skyline,
+        "d_water": d_water, "d_water_far": d_water_far, "d_skyline": d_skyline,
         "y_top_near": yt_near, "y_bot_near": yb_near,
         "y_top_far": yt_far, "y_bot_far": yb_far,
-        # Keep legacy keys for the renderer that draws band lines.
         "y_top": min(yt_far, yt_near), "y_bot": max(yb_near, yb_far),
     }
 
@@ -224,10 +261,24 @@ def build_sat_signatures(
                         hits += 1
             out[ai] = hits / valid if valid > 0 else 0.0
 
+    # Build "skyline proxy": for each bearing, inverse distance to first
+    # land. Closer land = potentially-taller-looking buildings in the
+    # pano. This is the satellite-side counterpart to pano_skyline.
+    skyline = np.zeros(n_bearings, dtype=np.float32)
+    skyline_range_m = 400.0
+    for ai, theta in enumerate(bearings):
+        dist = _ray_walk_first(
+            sat_water, sat_project, seed_lat, seed_lon,
+            float(theta), skyline_range_m, step_m=5.0, want_value=False,
+        )
+        skyline[ai] = max(0.0, 1.0 - dist / skyline_range_m)
+
     d_water = np.roll(water, -1) - np.roll(water, 1)
     d_water_far = np.roll(water_far, -1) - np.roll(water_far, 1)
-    return {"water": water, "water_far": water_far,
-            "d_water": d_water, "d_water_far": d_water_far}
+    d_skyline = np.roll(skyline, -1) - np.roll(skyline, 1)
+    return {"water": water, "water_far": water_far, "skyline": skyline,
+            "d_water": d_water, "d_water_far": d_water_far,
+            "d_skyline": d_skyline}
 
 
 # ---------------------------------------------------------------------------
@@ -249,31 +300,44 @@ def _circular_pearson_corr(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 def correlate_all_channels(
     pano_sigs: dict, sat_sigs: dict,
-    *, channels: tuple[str, ...] = ("water", "water_far", "d_water", "d_water_far"),
+    *, channels: tuple[str, ...] = (
+        "water", "water_far", "skyline",
+        "d_water", "d_water_far", "d_skyline",
+    ),
     weights: dict | None = None,
 ) -> dict:
     """Per-channel circular correlation + weighted-mean combined curve.
 
-    Each channel's correlation is averaged with given weights. Smooth
-    channels (water, water_far) give broad peaks; derivative channels
-    (d_water, d_water_far) give sharp peaks at the SAME location IF the
-    underlying transitions match. Combining them produces a peak with
-    both robustness (smooth) and sharpness (derivative).
+    Smooth channels (water, water_far, skyline) give broad peaks;
+    derivative channels (d_*) give sharp peaks at the SAME location IF
+    the underlying transitions match. Combining them produces a peak
+    with both robustness (smooth) and sharpness (derivative). The
+    `skyline` channel is the only one with a chance of working for
+    inland seeds, where water has nothing to say.
     """
     if weights is None:
-        weights = {"water": 1.0, "water_far": 1.0,
-                   "d_water": 0.6, "d_water_far": 0.6}
+        weights = {"water": 1.0, "water_far": 1.0, "skyline": 1.0,
+                   "d_water": 0.6, "d_water_far": 0.6, "d_skyline": 0.6}
     n = pano_sigs[channels[0]].size
     per_channel = {}
+    active = []
     for ch in channels:
-        per_channel[ch] = _circular_pearson_corr(pano_sigs[ch], sat_sigs[ch])
-    w = np.array([weights.get(ch, 1.0) for ch in channels], dtype=np.float32)
-    w_sum = float(w.sum()) if w.sum() > 0 else 1.0
-    stack = np.stack([per_channel[ch] for ch in channels], axis=0)
-    combined = (stack * w[:, None]).sum(axis=0) / w_sum
+        c = _circular_pearson_corr(pano_sigs[ch], sat_sigs[ch])
+        per_channel[ch] = c
+        # A channel contributes only if both sides have non-trivial variance.
+        if pano_sigs[ch].std() > 1e-5 and sat_sigs[ch].std() > 1e-5:
+            active.append(ch)
+    if not active:
+        combined = np.zeros(n, dtype=np.float32)
+    else:
+        w = np.array([weights.get(ch, 1.0) for ch in active], dtype=np.float32)
+        w_sum = float(w.sum()) if w.sum() > 0 else 1.0
+        stack = np.stack([per_channel[ch] for ch in active], axis=0)
+        combined = (stack * w[:, None]).sum(axis=0) / w_sum
     bearings = np.arange(n, dtype=np.float32) * (360.0 / n)
     return {"per_channel": per_channel, "combined": combined,
-            "bearings": bearings, "channels": channels, "weights": weights}
+            "bearings": bearings, "channels": channels, "weights": weights,
+            "active": active}
 
 
 def find_peak_with_subpixel(corr: np.ndarray, bearings: np.ndarray,
@@ -535,7 +599,8 @@ def main() -> int:
     )
 
     # Per-channel diagnostic.
-    channels = ("water", "water_far", "d_water", "d_water_far")
+    channels = ("water", "water_far", "skyline",
+                "d_water", "d_water_far", "d_skyline")
     for ch in channels:
         ps, ss = pano_sigs[ch], sat_sigs[ch]
         print(f"[demo] {ch:12s}  pano(mean={ps.mean():+.3f} std={ps.std():.3f})  "
