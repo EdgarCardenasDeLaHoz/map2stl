@@ -50,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     # correlation is computed on the inner overlap where pano has valid data.
     p.add_argument("--canvas-radius-m", type=float, default=50.0,
                    help="Pano bird's-eye radius (kept small to limit IPM distortion)")
-    p.add_argument("--sat-canvas-radius-m", type=float, default=250.0,
+    p.add_argument("--sat-canvas-radius-m", type=float, default=600.0,
                    help="Satellite bird's-eye radius (wider for building context)")
     p.add_argument("--m-per-px", type=float, default=0.2)
     p.add_argument("--camera-h-m", type=float, default=1.7)
@@ -413,9 +413,23 @@ def main() -> int:
           f"used_pitch={used_pitch:+.1f}")
 
     view_width_px = captured[0]["image"].shape[1]
+
+    # Mask sky in pano BEFORE IPM. The IPM assumes flat ground at sea level,
+    # so it samples pano rows BELOW the horizon. But buildings are tall and
+    # stick ABOVE the horizon — and rays "between" buildings (over the bay,
+    # past the city skyline) sample sky pixels. Setting non-content pixels
+    # to 0 removes the starburst sky pattern in the bird's-eye and focuses
+    # correlation on actual ground/building/water content.
+    content_mask = pano_building | pano_water
+    pano_image_masked = pano_image.copy()
+    pano_image_masked[~content_mask] = 0
+    sky_frac_pano = 1.0 - float(content_mask.mean())
+    print(f"[demo13] pano content: {float(content_mask.mean()):.1%} "
+          f"(sky/other masked: {sky_frac_pano:.1%})")
+
     print(f"[demo13] IPM pano and satellite to bird's-eye view...")
     pano_be_image, pano_be_valid = pano_image_to_birdseye(
-        pano_image, headings_per_col,
+        pano_image_masked, headings_per_col,
         fov_deg_for_x=args.fov_deg,
         view_width_px=view_width_px,
         pitch_deg=used_pitch,
@@ -423,8 +437,21 @@ def main() -> int:
         canvas_radius_m=args.canvas_radius_m,
         m_per_px=args.m_per_px,
     )
+    # Also IPM the content mask so we know where the pano has actual data
+    pano_be_content, _ = pano_to_birdseye(
+        content_mask, headings_per_col,
+        fov_deg_for_x=args.fov_deg,
+        view_width_px=view_width_px,
+        pitch_deg=used_pitch,
+        camera_h_m=args.camera_h_m,
+        canvas_radius_m=args.canvas_radius_m,
+        m_per_px=args.m_per_px,
+    )
+    # Restrict the "valid" canvas to where pano has actual content
+    pano_be_valid_content = pano_be_valid & pano_be_content
     print(f"[demo13] pano bird's-eye: shape={pano_be_image.shape}  "
-          f"valid_frac={float(pano_be_valid.mean()):.3f}")
+          f"valid_frac={float(pano_be_valid.mean()):.3f}  "
+          f"content_frac={float(pano_be_valid_content.mean()):.3f}")
 
     # Render satellite at LARGER radius for context (buildings further out)
     sat_be_image_wide, sat_be_valid_wide = satellite_image_to_birdseye(
@@ -452,7 +479,7 @@ def main() -> int:
     print(f"[demo13] sat bird's-eye (correlation crop): shape={sat_be_image.shape}")
 
     best, cand_deg, scores = register_by_image_correlation(
-        pano_be_image, pano_be_valid, sat_be_image, sat_be_valid,
+        pano_be_image, pano_be_valid_content, sat_be_image, sat_be_valid,
         step_deg=1.0,
     )
     print(f"[demo13] recovered offset = {best:.1f} deg  "
@@ -469,7 +496,7 @@ def main() -> int:
                                canvas_radius_m=args.canvas_radius_m)
         _render_pano_page(pdf, pano_image, args.region, args.seed_index)
         _render_birdseye_page(pdf, pano_be_image, sat_be_image_wide,
-                              pano_be_valid, sat_be_valid_wide,
+                              pano_be_valid_content, sat_be_valid_wide,
                               args.canvas_radius_m, args.sat_canvas_radius_m,
                               args.m_per_px, args.region, args.seed_index)
         _render_sidebyside_page(pdf, pano_be_image, sat_be_image, best,

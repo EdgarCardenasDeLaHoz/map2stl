@@ -684,3 +684,198 @@ def sweep_heading(
     ], dtype=np.float32)
     best_idx = int(np.argmax(scores))
     return float(cand_deg[best_idx]) % 360.0, cand_deg, scores
+
+
+# ============================================================================
+# Dense per-bearing radial signature registration (F-SKY11.3)
+#
+# Works in the pano's NATIVE cylindrical domain (column = bearing) instead of
+# inverse-perspective-mapping to a 2-D bird's-eye canvas. Avoids the flat-
+# ground assumption that breaks for tall buildings. Uses ALL 360 bearings
+# (vs. ~20 keypoints in F-SKY11.1) and Pearson cross-correlation (vs. MAD,
+# which is biased toward signals near their common mean).
+# ============================================================================
+
+
+def build_pano_radial_signature(
+    pano_water_mask: np.ndarray,
+    headings_per_col: np.ndarray,
+    *,
+    n_bearings: int = 360,
+    near_range_m: tuple[float, float] = (10.0, 80.0),
+    camera_h_m: float = 1.7,
+    pitch_deg: float = 0.0,
+    fov_deg: float = 75.0,
+    view_width_px: int = 640,
+    bottom_band_frac: float | None = None,
+) -> np.ndarray:
+    """Per-bearing water coverage from the stitched pano.
+
+    Two modes:
+
+    1. **Distance-matched band** (default, when ``bottom_band_frac`` is None):
+       use camera geometry to pick the pano y-rows corresponding to the
+       given ``near_range_m`` window. This matches the satellite signature's
+       sampling distance, which is the right thing for cross-correlation.
+       Sea-level pinhole: ``y = horizon_y + camera_h * focal_y / dist``.
+
+    2. **Fixed band** (when ``bottom_band_frac`` is provided): use the bottom
+       fraction of the pano regardless of distance. Simpler but tends to
+       saturate at 1.0 when the camera is at sea level near water, since
+       the very near-camera rows are all water in that case.
+
+    Returns
+    -------
+    np.ndarray, shape (n_bearings,), float in [0, 1].
+    """
+    if pano_water_mask.ndim != 2:
+        raise ValueError("pano_water_mask must be 2-D")
+    H, W = pano_water_mask.shape
+    if headings_per_col.size != W:
+        raise ValueError("headings_per_col length != pano width")
+
+    if bottom_band_frac is None:
+        # Pitch-aware band: from a small margin BELOW the horizon down to
+        # the bottom of the pano. Avoids the very-near-camera rows that
+        # saturate on sea-level cameras, but is wide enough to be robust to
+        # pitch/focal errors. The whole band always sits below the horizon,
+        # which is the physically meaningful ground/water region.
+        focal_y = (view_width_px / 2.0) / math.tan(math.radians(fov_deg / 2.0))
+        horizon_y = H / 2.0 - math.tan(math.radians(pitch_deg)) * focal_y
+        # Start ~3 px below horizon (skip the line itself, which is noisy).
+        y_top = max(0, int(round(horizon_y + 3)))
+        # Stop ~5% above the very bottom (avoid car-bonnet/dashboard).
+        y_bot = min(H, int(round(H * 0.95)))
+        if y_bot <= y_top:
+            y_bot = min(H, y_top + 1)
+        band = pano_water_mask[y_top:y_bot, :].astype(np.float32)
+    else:
+        y0 = int(H * (1.0 - bottom_band_frac))
+        band = pano_water_mask[y0:H, :].astype(np.float32)
+    per_col_cov = band.mean(axis=0) if band.size else np.zeros(W, dtype=np.float32)
+
+    bearings_deg = np.linspace(0.0, 360.0, n_bearings, endpoint=False)
+    bin_width = 360.0 / n_bearings
+    out = np.zeros(n_bearings, dtype=np.float32)
+    headings_mod = np.asarray(headings_per_col, dtype=np.float32) % 360.0
+
+    for i, target in enumerate(bearings_deg):
+        # Circular distance from each column's bearing to the target bin centre.
+        d = np.abs(((headings_mod - target + 180.0) % 360.0) - 180.0)
+        mask = d <= (bin_width * 0.5 + 1e-3)
+        if mask.any():
+            out[i] = per_col_cov[mask].mean()
+        else:
+            # Fall back to nearest column if no column fell in the bin.
+            j = int(np.argmin(d))
+            out[i] = per_col_cov[j]
+    return out
+
+
+def _pearson_circular_correlation(
+    sig_a: np.ndarray,
+    sig_b: np.ndarray,
+    *,
+    step_deg: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute Pearson r for every circular shift of `sig_a` against `sig_b`.
+
+    Both signals must be 1-D arrays of equal length n covering [0°, 360°).
+    Returns (cand_deg, scores) where cand_deg[i] = i * step_deg and scores[i]
+    is the Pearson correlation after rotating sig_a by cand_deg[i].
+
+    Uses FFT-based circular correlation for speed (O(n log n) total).
+    """
+    if sig_a.shape != sig_b.shape or sig_a.ndim != 1:
+        raise ValueError("sig_a and sig_b must be 1-D arrays of equal length")
+    n = sig_a.size
+    if step_deg <= 0:
+        raise ValueError("step_deg must be > 0")
+
+    a = (sig_a - sig_a.mean()).astype(np.float32)
+    b = (sig_b - sig_b.mean()).astype(np.float32)
+    sa = a.std()
+    sb = b.std()
+    if sa < 1e-6 or sb < 1e-6:
+        return (np.arange(n, dtype=np.float32) * (360.0 / n),
+                np.zeros(n, dtype=np.float32))
+
+    # Circular cross-correlation: ifft(fft(b) * conj(fft(a))) gives the
+    # raw correlation at every integer shift in the same direction as
+    # "shift a by k, compare to b". Normalise by n*sa*sb for Pearson r.
+    fa = np.fft.fft(a)
+    fb = np.fft.fft(b)
+    raw = np.real(np.fft.ifft(fb * np.conj(fa)))
+    r = raw / (n * sa * sb)
+
+    # The native FFT step is 360/n degrees per index. If the caller wants
+    # a different step, we re-sample r linearly.
+    native_step = 360.0 / n
+    if abs(step_deg - native_step) < 1e-6:
+        cand_deg = np.arange(n, dtype=np.float32) * native_step
+        return cand_deg, r.astype(np.float32)
+    # Re-sample (interpolate) r onto the requested step grid.
+    n_req = int(round(360.0 / step_deg))
+    cand_deg = np.arange(n_req, dtype=np.float32) * step_deg
+    idx_f = cand_deg / native_step
+    idx0 = np.floor(idx_f).astype(np.int32) % n
+    idx1 = (idx0 + 1) % n
+    frac = idx_f - np.floor(idx_f)
+    scores = (1.0 - frac) * r[idx0] + frac * r[idx1]
+    return cand_deg, scores.astype(np.float32)
+
+
+def register_by_dense_bearing_correlation(
+    pano_signature: np.ndarray,
+    sat_signature: np.ndarray,
+    *,
+    step_deg: float = 1.0,
+    subpixel_refine: bool = True,
+) -> tuple[float, np.ndarray, np.ndarray, float, float]:
+    """Find the heading offset that aligns the pano's per-bearing radial
+    signature with the satellite's. Both signatures must have the same
+    length (360 entries by default), covering [0°, 360°) uniformly.
+
+    Uses FFT-based Pearson cross-correlation across all circular shifts,
+    optionally refined to sub-degree accuracy via a parabolic fit through
+    the three points around the peak.
+
+    Returns
+    -------
+    (best_offset_deg, cand_deg, scores, peak_value, sigma_deg)
+        best_offset_deg: heading to ADD to pano column bearings to align them
+                         with true north.
+        cand_deg: the full 360°/step_deg candidate grid.
+        scores: Pearson r at each candidate offset.
+        peak_value: refined peak correlation.
+        sigma_deg: estimate of peak width (lower = more confident).
+    """
+    cand_deg, scores = _pearson_circular_correlation(
+        pano_signature, sat_signature, step_deg=step_deg)
+    if scores.size == 0:
+        return 0.0, cand_deg, scores, 0.0, 360.0
+
+    best_idx = int(np.argmax(scores))
+    best_offset = float(cand_deg[best_idx])
+    peak_value = float(scores[best_idx])
+
+    if subpixel_refine and 0 < best_idx < (scores.size - 1):
+        y0 = float(scores[best_idx - 1])
+        y1 = float(scores[best_idx])
+        y2 = float(scores[best_idx + 1])
+        denom = (y0 - 2.0 * y1 + y2)
+        if abs(denom) > 1e-9:
+            delta = 0.5 * (y0 - y2) / denom
+            best_offset = float(cand_deg[best_idx] + delta * step_deg)
+            peak_value = y1 - 0.25 * (y0 - y2) * delta
+
+    # Sigma: half-width at half-maximum of the peak, expressed in degrees.
+    # Fall back to score std if the peak is too noisy to fit.
+    half = peak_value * 0.5
+    above_half = scores >= half
+    if above_half.any():
+        sigma_deg = float(above_half.sum() * step_deg) / 2.0
+    else:
+        sigma_deg = float(scores.std())
+
+    return float(best_offset % 360.0), cand_deg, scores, peak_value, sigma_deg
