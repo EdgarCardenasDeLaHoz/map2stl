@@ -11,6 +11,8 @@ from city2stl.skyline_cv.cross_view import (
     _median_rgb,
     _street_view_roof_strip,
     score_roof_color_consistency,
+    score_geometric_width_consistency,
+    score_vertical_edge_consistency,
     make_cross_view_scorer,
 )
 
@@ -164,6 +166,89 @@ class TestRoofColorConsistency(unittest.TestCase):
         self.assertLessEqual(score, 1.0)
 
 
+class TestGeometricWidthConsistency(unittest.TestCase):
+    """Test score_geometric_width_consistency (Signal 2)."""
+
+    def test_moderate_width_height_ratio(self):
+        """Segment with balanced width-to-height returns reasonable score."""
+        sv_image = np.ones((200, 100, 3), dtype=np.uint8) * 128
+        seg = {"x_left": 25, "x_right": 75, "top_y": 50}  # width:height ≈ 50:150
+        score = score_geometric_width_consistency(sv_image, seg, [])
+        self.assertGreater(score, 0.1)  # Should be better than very skewed ratios
+        self.assertLess(score, 0.8)  # But not perfect due to aspect ratio
+
+    def test_very_narrow_segment(self):
+        """Very narrow segment (needle-like) returns low score."""
+        sv_image = np.ones((200, 200, 3), dtype=np.uint8) * 128
+        seg = {"x_left": 99, "x_right": 101, "top_y": 0}  # width:height ≈ 2:200
+        score = score_geometric_width_consistency(sv_image, seg, [])
+        self.assertLess(score, 0.5)  # Suspicious aspect ratio
+
+    def test_very_wide_segment(self):
+        """Very wide segment (flat) returns low score."""
+        sv_image = np.ones((50, 200, 3), dtype=np.uint8) * 128
+        seg = {"x_left": 0, "x_right": 200, "top_y": 0}  # width:height ≈ 200:50
+        score = score_geometric_width_consistency(sv_image, seg, [])
+        self.assertLess(score, 0.5)  # Suspicious aspect ratio
+
+    def test_invalid_segment_returns_neutral(self):
+        """Invalid segment returns neutral 0.5."""
+        sv_image = np.ones((100, 100, 3), dtype=np.uint8) * 128
+        seg = {}  # Missing keys
+        score = score_geometric_width_consistency(sv_image, seg, [])
+        self.assertEqual(score, 0.5)
+
+    def test_score_in_valid_range(self):
+        """All scores are in [0, 1] range."""
+        sv_image = np.random.randint(0, 256, (200, 200, 3), dtype=np.uint8)
+        seg = {"x_left": 50, "x_right": 150, "top_y": 20}
+        score = score_geometric_width_consistency(sv_image, seg, [])
+        self.assertGreaterEqual(score, 0.0)
+        self.assertLessEqual(score, 1.0)
+
+
+class TestVerticalEdgeConsistency(unittest.TestCase):
+    """Test score_vertical_edge_consistency (Signal 3)."""
+
+    def test_structured_edges_high_score(self):
+        """Image with strong vertical edges returns higher score."""
+        # Create image with vertical edge pattern.
+        sv_image = np.ones((100, 100, 3), dtype=np.uint8) * 200
+        sv_image[20:80, 45:55] = 50  # Vertical stripe = vertical edge
+        seg = {"x_left": 30, "x_right": 70, "top_y": 10}
+        score = score_vertical_edge_consistency(sv_image, seg)
+        self.assertGreater(score, 0.3)  # Should detect vertical structure
+
+    def test_uniform_region_low_score(self):
+        """Uniform image (no edges) returns low score."""
+        sv_image = np.ones((100, 100, 3), dtype=np.uint8) * 128
+        seg = {"x_left": 30, "x_right": 70, "top_y": 10}
+        score = score_vertical_edge_consistency(sv_image, seg)
+        self.assertLess(score, 0.3)  # No edges in uniform region
+
+    def test_invalid_segment_returns_neutral(self):
+        """Invalid segment returns neutral 0.5."""
+        sv_image = np.ones((100, 100, 3), dtype=np.uint8) * 128
+        seg = {}  # Missing keys
+        score = score_vertical_edge_consistency(sv_image, seg)
+        self.assertEqual(score, 0.5)
+
+    def test_very_small_segment_returns_neutral(self):
+        """Segment too small to analyze returns neutral."""
+        sv_image = np.ones((100, 100, 3), dtype=np.uint8) * 128
+        seg = {"x_left": 49, "x_right": 51, "top_y": 99}  # 2×1 pixels
+        score = score_vertical_edge_consistency(sv_image, seg)
+        self.assertEqual(score, 0.5)
+
+    def test_score_in_valid_range(self):
+        """All scores are in [0, 1] range."""
+        sv_image = np.random.randint(0, 256, (100, 100, 3), dtype=np.uint8)
+        seg = {"x_left": 20, "x_right": 80, "top_y": 10}
+        score = score_vertical_edge_consistency(sv_image, seg)
+        self.assertGreaterEqual(score, 0.0)
+        self.assertLessEqual(score, 1.0)
+
+
 class TestMakeCrossViewScorer(unittest.TestCase):
     """Test make_cross_view_scorer factory."""
 
@@ -179,8 +264,8 @@ class TestMakeCrossViewScorer(unittest.TestCase):
         self.assertIsNotNone(scorer)
         self.assertTrue(callable(scorer))
 
-    def test_scorer_returns_dict_with_combined(self):
-        """Scorer returns dict with 'combined' key."""
+    def test_scorer_returns_dict_with_all_signals(self):
+        """Scorer returns dict with all signal keys."""
         sv_image = np.ones((100, 100, 3), dtype=np.uint8) * 128
         sat_image = np.ones((200, 200, 3), dtype=np.uint8) * 130
 
@@ -193,8 +278,16 @@ class TestMakeCrossViewScorer(unittest.TestCase):
         result = scorer(seg, building_polygon)
 
         self.assertIsInstance(result, dict)
-        self.assertIn("combined", result)
         self.assertIn("color", result)
+        self.assertIn("width", result)
+        self.assertIn("edges", result)
+        self.assertIn("combined", result)
+        self.assertGreaterEqual(result["color"], 0.0)
+        self.assertLessEqual(result["color"], 1.0)
+        self.assertGreaterEqual(result["width"], 0.0)
+        self.assertLessEqual(result["width"], 1.0)
+        self.assertGreaterEqual(result["edges"], 0.0)
+        self.assertLessEqual(result["edges"], 1.0)
         self.assertGreaterEqual(result["combined"], 0.0)
         self.assertLessEqual(result["combined"], 1.0)
 
@@ -211,7 +304,10 @@ class TestMakeCrossViewScorer(unittest.TestCase):
         building_polygon = [(0, 0), (0.001, 0), (0.001, 0.001), (0, 0.001)]
         result = scorer(seg, building_polygon)
 
-        # Should return neutral score, not crash
+        # All signals should return neutral, so combined should too.
+        self.assertEqual(result["color"], 0.5)
+        self.assertEqual(result["width"], 0.5)
+        self.assertEqual(result["edges"], 0.5)
         self.assertEqual(result["combined"], 0.5)
 
 
