@@ -1,9 +1,11 @@
-# skyline_cv
+# skyline_cv — F-SKY Series
 
 Computer-vision pipeline that estimates per-building heights for a city
 region by registering Google Street View imagery against OpenStreetMap
-building footprints. Research branch — not part of the production height
-stack in `city2stl/height/`.
+building footprints (+ satellite footprints). Research branch — not part of the production height
+stack in `city2stl/height/`. Implements F-SKY series of features (F-SKY1–F-SKY11.2).
+
+**Status**: Phase A features active and tested; Phase B in progress. See [docs/F-SKY-INTEGRATION.md](../../docs/F-SKY-INTEGRATION.md) for consolidated status, measurement results, and integration roadmap.
 
 ## Quick start
 
@@ -32,8 +34,9 @@ handful of screening images).
 
 ## Status
 
-See [STATUS.md](STATUS.md) for the current honest picture of what works,
-what's flaky, and what's broken. Short version:
+**See [docs/F-SKY-INTEGRATION.md](../../docs/F-SKY-INTEGRATION.md)** for the consolidated F-SKY feature status, measurement results, and integration roadmap. That document is the single source of truth for what's active, disabled, or pending.
+
+Quick summary from [STATUS.md](STATUS.md):
 
 - Heading registration is reliable when seeds are placed across water
   from a tall-building cluster (Bocagrande from across the bay).
@@ -42,14 +45,41 @@ what's flaky, and what's broken. Short version:
 - Cross-seed coverage (the only honest validation signal) is currently
   ~3 buildings per run, which makes the height MAE numbers noisy.
 
+### Active F-SKY Features (2026-05-17)
+
+Core pipeline features enabled by default:
+- **F-SKY2**: OSM-anchored silhouette splitting
+- **F-SKY4**: SegFormer mask overlay (diagnostic)
+- **F-SKY6**: One-to-one segment-to-building assignment
+- **F-SKY7**: Local-maxima peak detection
+- **F-SKY8**: Satellite-derived building footprints
+
+Pending integration:
+- **F-SKY11.1 Phase B**: Pano-level coastline heading correction (Phase A demo complete)
+- **F-SKY5**, **F-SKY10**: Pending evaluation
+
+Disabled (measured regression):
+- **F-SKY3**: Voronoi splitting (use F-SKY5 instead)
+
 ## How it works
 
-The pipeline is in two files:
+### Core Files
 
-| File | Role | Lines |
+| File | Role | Lines | F-SKY Features |
+|---|---|---|---|
+| [pipeline.py](pipeline.py) | CV primitives: SegFormer integration, projection, registration, height extraction, aggregation. Pure functions, unit-tested. | ~2400 | F-SKY1, F-SKY2, F-SKY6, F-SKY7 |
+| [region_pdf.py](region_pdf.py) | Orchestration + Street View I/O + seed selection + PDF rendering. Stateful; harder to test in isolation. | ~2750 | F-SKY4, F-SKY8, integration layer |
+
+### Helper Modules (F-SKY Implementation)
+
+| File | Role | F-SKY Features |
 |---|---|---|
-| [pipeline.py](pipeline.py) | CV primitives: SegFormer integration, projection, registration, height extraction, aggregation. Pure functions, easy to test. | ~2400 |
-| [region_pdf.py](region_pdf.py) | Orchestration + Street View I/O + seed selection + PDF rendering. Stateful; harder to test in isolation. | ~2750 |
+| [height_trace.py](height_trace.py) | Floor-strip detection via 1D FFT / autocorrelation. | F-SKY1 |
+| [satellite_footprints.py](satellite_footprints.py) | Microsoft Global ML Building Footprints fetch + deduplication. | F-SKY8 |
+| [satellite_image.py](satellite_image.py) | Satellite image fetch and preprocessing. | F-SKY8, F-SKY10 (prep) |
+| [cross_view.py](cross_view.py) | Cross-view geometric + appearance verification. | F-SKY10 (in progress) |
+| [coastline_registration.py](coastline_registration.py) | Water-mask based heading recovery via radial signatures. | F-SKY11, F-SKY11.1 |
+| [pano_birdseye.py](pano_birdseye.py) | Bird's-eye registration via satellite + shape matching. | F-SKY11.2 (planned) |
 
 End-to-end flow:
 

@@ -1,6 +1,6 @@
 # Architecture — strm2stl
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-05-17_
 
 ## System Overview
 
