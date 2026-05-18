@@ -217,13 +217,14 @@ def generate_region_report(region_name):
 - **Effort**: Large
 - **Priority**: Lower; F-SKY2/F-SKY6/F-SKY8 may solve most problems
 
-#### **F-SKY11.2: Pano Bird's-Eye Registration (Planned)**
-- **Status**: Designed, not started
-- **Location**: Plan in `docs/plans/F-SKY11.2-pano-birdseye-registration.md`
-- **Purpose**: Bird's-eye view registration as complementary signal to street view
-- **Method**: Satellite image + projected polygons + shape matching
-- **Effort**: Medium
-- **Priority**: After F-SKY11.1 Phase B
+#### **F-SKY11.2: Pano Bird's-Eye Registration (Attempted — Not Viable)**
+- **Status**: Implemented but failed; not integrated
+- **Location**: 
+  - Code: `city2stl/skyline_cv/pano_birdseye.py` (complete, no bugs)
+  - Failure analysis: `docs/plans/F-SKY11.2-FAILURE-ANALYSIS.md`
+- **Why it failed**: Monocular SegFormer water detection has insufficient depth reach (~5–7m) vs bay scale (1km+). IoU rotation search produces flat signal across all headings, with spurious peaks indistinguishable from noise.
+- **Recommendation**: Continue with F-SKY11.1 (per-bearing horizon scoring), which works reliably and has no depth limitations.
+- **Code status**: Retained for educational/reference; not for production use.
 
 #### **F-SKY-PIPELINE Consolidation**
 - **Status**: Pending official consolidation
