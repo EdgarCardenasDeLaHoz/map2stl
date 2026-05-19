@@ -35,8 +35,9 @@ Public surface (in dependency order):
   Matching + culling
     _cull_occluded_projections      — keep only the closest-per-bin building
     osm_anchor_silhouettes          — F-SKY2 anchored split of merged segments
-    osm_marker_voronoi_silhouettes  — F-SKY3 instance-indexing Voronoi split
     match_segments_to_buildings     — interval-IoU + width-ratio scorer
+    (F-SKY3 / osm_marker_voronoi_silhouettes removed 2026-05-18 after a
+     measured MAE regression; see docs/plans/F-SKY3-osm-marker-instances.md)
 
   Pano helpers
     stitch_pano_views               — stitch RGB strip from spin views
@@ -771,18 +772,6 @@ def stitch_pano_views(
     return stitched, headings_per_col
 
 
-def _make_sky_mask_from_bool(sky_bool: np.ndarray, h: int, w: int) -> np.ndarray:
-    """Convert a boolean sky mask to uint8, keeping only pixels connected to top border."""
-    raw = (sky_bool.astype(np.uint8)) * 255
-    n_labels, labels, _stats, _centroids = cv2.connectedComponentsWithStats(
-        raw, connectivity=8)
-    top_labels = {int(v) for v in labels[0, :] if int(v) != 0}
-    connected = np.zeros((h, w), dtype=np.uint8)
-    for lab in top_labels:
-        connected[labels == lab] = 255
-    return connected if np.any(connected) else raw
-
-
 def detect_skyline_contour(image_rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Return a top-down skyline contour and a binary sky mask.
 
@@ -799,7 +788,17 @@ def detect_skyline_contour(image_rgb: np.ndarray) -> tuple[np.ndarray, np.ndarra
             "SegFormer-b0 unavailable — required for sky/building segmentation. "
             "Ensure `transformers` + `torch` are installed and the model "
             "weights can be downloaded from HuggingFace.")
-    sky_mask = _make_sky_mask_from_bool(sky_neural, h, w)
+    # Keep only sky pixels connected to the top border (drop interior
+    # "sky" holes that aren't actually sky).
+    raw_sky = (sky_neural.astype(np.uint8)) * 255
+    _n_labels, labels, _stats, _centroids = cv2.connectedComponentsWithStats(
+        raw_sky, connectivity=8)
+    top_labels = {int(v) for v in labels[0, :] if int(v) != 0}
+    sky_mask = np.zeros((h, w), dtype=np.uint8)
+    for lab in top_labels:
+        sky_mask[labels == lab] = 255
+    if not np.any(sky_mask):
+        sky_mask = raw_sky
 
     # ── Contour extraction ───────────────────────────────────────────────────
     contour = np.full(w, np.nan, dtype=np.float32)
@@ -1692,9 +1691,9 @@ def _proj_x_range(p: dict) -> tuple[float, float]:
 
     Falls back to ±10 px around ``x_px`` when explicit ``x_left_px`` /
     ``x_right_px`` aren't set. Swaps if the caller emitted them out of
-    order. Shared by ``osm_anchor_silhouettes``,
-    ``osm_marker_voronoi_silhouettes`` and ``match_segments_to_buildings``
-    — they used to have private duplicates that drifted independently.
+    order. Shared by ``osm_anchor_silhouettes`` and
+    ``match_segments_to_buildings`` — they used to have private duplicates
+    that drifted independently.
     """
     pL = float(p.get("x_left_px", float(p["x_px"]) - 10.0))
     pR = float(p.get("x_right_px", float(p["x_px"]) + 10.0))
@@ -1826,128 +1825,6 @@ def osm_anchor_silhouettes(
             child["mid_x"] = mid_x
             child["peak_x"] = child_peak
             child["osm_anchored"] = True
-            out.append(child)
-
-    return sorted(out, key=lambda s: s["mid_x"])
-
-
-def osm_marker_voronoi_silhouettes(
-    segments: list[dict],
-    projections: list[dict],
-    *,
-    building_mask: "np.ndarray | None" = None,
-    min_proj_containment: float = 0.5,
-    min_marker_separation_px: int = 20,
-    min_mask_coverage: float = 0.10,
-    min_child_width_px: int = 4,
-) -> list[dict]:
-    """Per-segment 1-D Voronoi instance indexing using OSM markers (F-SKY3).
-
-    SegFormer-b0 is semantic-only — adjacent buildings merge into one
-    mask blob and there's no instance head to separate them. F-SKY2
-    splits at clear mask gaps, but when the mask has no visible valley
-    between two visually-adjacent towers it does nothing. F-SKY3 fills
-    that hole: any segment containing ≥ 2 OSM markers (containment ≥
-    ``min_proj_containment``) is cut unconditionally at the Voronoi
-    midpoint between adjacent marker x_px values, producing one
-    silhouette per OSM building inside the strip.
-
-    This is the cheap stand-in for what a SAM-style instance segmenter
-    would do with OSM centroids as point prompts: project the model's
-    semantic blob onto the OSM instance set we already have.
-
-    Run AFTER ``osm_anchor_silhouettes`` so the gap-based splits (which
-    snap to the actual mask valley) take precedence; Voronoi is the
-    fallback for segments F-SKY2 left untouched.
-
-    Strips whose building-mask coverage falls below ``min_mask_coverage``
-    are dropped — a marker whose Voronoi strip is mostly non-building
-    was projected into a region the mask doesn't actually see, and
-    emitting a silhouette there would create a phantom segment.
-
-    Adjacent markers closer than ``min_marker_separation_px`` are
-    treated as a single marker (using the midpoint) — closer-than-that
-    markers are usually OSM artefacts (two polygons for one building)
-    where forcing a split would over-segment a real tower.
-
-    Calling with empty inputs is a no-op.
-
-    See ``docs/plans/F-SKY3-osm-marker-instances.md``.
-    """
-    if not segments or not projections:
-        return list(segments)
-
-    out: list[dict] = []
-    for seg in segments:
-        sL = float(seg["x_left"])
-        sR = float(seg["x_right"])
-        if sR <= sL:
-            out.append(seg)
-            continue
-
-        # Find markers (OSM projections mostly inside this segment).
-        markers: list[tuple[float, dict]] = []
-        for p in projections:
-            if _proj_containment_in_seg(sL, sR, p) >= min_proj_containment:
-                markers.append((float(p["x_px"]), p))
-
-        if len(markers) < 2:
-            out.append(seg)
-            continue
-
-        markers.sort(key=lambda t: t[0])
-        # Collapse markers closer than min_marker_separation_px to a single
-        # marker at their midpoint. Avoids over-splitting on OSM duplicates.
-        collapsed: list[tuple[float, dict]] = [markers[0]]
-        for x_px, p in markers[1:]:
-            prev_x, _ = collapsed[-1]
-            if x_px - prev_x < min_marker_separation_px:
-                # Replace with midpoint marker; keep the latter projection
-                # dict for downstream peak_x assignment.
-                collapsed[-1] = (0.5 * (prev_x + x_px), p)
-            else:
-                collapsed.append((x_px, p))
-
-        if len(collapsed) < 2:
-            out.append(seg)
-            continue
-
-        # Voronoi: each marker owns the column strip from the midpoint with
-        # its left neighbour to the midpoint with its right neighbour.
-        boundaries = [sL]
-        for i in range(len(collapsed) - 1):
-            mid = 0.5 * (collapsed[i][0] + collapsed[i + 1][0])
-            boundaries.append(mid)
-        boundaries.append(sR)
-
-        seg_top = float(seg.get("top_y", 0.0))
-        seg_base = float(seg.get("base_y", 0.0))
-
-        for i, (marker_x, marker_proj) in enumerate(collapsed):
-            cL = boundaries[i]
-            cR = boundaries[i + 1]
-            if cR - cL < min_child_width_px:
-                continue
-            # Reject strips where the mask is mostly absent — the OSM marker
-            # projects into a region SegFormer didn't actually segment as
-            # building.
-            if building_mask is not None:
-                wL = max(0, int(cL))
-                wR = min(building_mask.shape[1], int(cR) + 1)
-                if wR > wL:
-                    strip_mask = building_mask[:, wL:wR]
-                    coverage = float(strip_mask.mean())
-                    if coverage < min_mask_coverage:
-                        continue
-            child = dict(seg)
-            child["x_left"] = float(cL)
-            child["x_right"] = float(cR)
-            child["mid_x"] = int(round(0.5 * (cL + cR)))
-            child["peak_x"] = int(round(marker_x))
-            child["top_y"] = seg_top
-            child["base_y"] = seg_base
-            child["osm_anchored"] = True
-            child["osm_voronoi"] = True
             out.append(child)
 
     return sorted(out, key=lambda s: s["mid_x"])

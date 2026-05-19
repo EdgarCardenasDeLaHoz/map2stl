@@ -88,7 +88,6 @@ from .pipeline import (
     estimate_heights_from_registration,
     match_segments_to_buildings,
     osm_anchor_silhouettes,
-    osm_marker_voronoi_silhouettes,  # F-SKY3, call site disabled
     register_view_to_osm,
 )
 
@@ -2252,17 +2251,11 @@ def _seed_multiview_registration(
                 # projections (snaps to actual mask valley).
                 segments = osm_anchor_silhouettes(
                     segments, all_proj_list, building_mask=_bmask)
-                # F-SKY3 (DISABLED 2026-05-16): unconditional Voronoi
-                # splitting regressed Cartagena MAE 17.28 → 22.13 and
-                # tagged-building count 13 → 8 — the aggressive split
-                # produces tiny child segments that confuse the matcher
-                # more than they help. Function is kept on the module
-                # surface for opt-in experimentation; turn back on by
-                # uncommenting the call. The right fix is a dedicated
-                # small instance-segmentation model (see proposals
-                # F-SKY3.1 / future work), not heuristic Voronoi.
-                # segments = osm_marker_voronoi_silhouettes(
-                #     segments, all_proj_list, building_mask=_bmask)
+                # F-SKY3 (Voronoi marker splitting) was removed 2026-05-18.
+                # Regressed Cartagena MAE 17.28 → 22.13 / tagged-building
+                # count 13 → 8. See docs/plans/F-SKY3-osm-marker-instances.md
+                # for the post-mortem; the right fix is a small instance-
+                # segmentation model, not heuristic Voronoi.
             # Negative seeds (sites/<region>.json `negative_seeds`) are
             # known-bad camera positions — gas stations, parking lots,
             # under-bridge views with no actual skyline. Their per-view
