@@ -18,16 +18,16 @@ the behaviour changes materially.
 
 ## Active per-seed overrides (Cartagena)
 
-`sites/cartagena.json` ships with the following hand-verified anchor
-offsets (joint IoU optimization found wrong local maxima for these — see
-"What doesn't work" below):
+`sites/cartagena.json` previously shipped with hand-verified anchor
+offsets for seed_1/4/5; these were REMOVED on 2026-05-17 so the pano
+recovery (F-SKY11.1) determines headings freely. The new ground-truth
+for seed_5 (closest land is at WSW per visual inspection) showed the
+unaided water-only correlation locking onto the symmetry-twin 180° away;
+see `scripts/13_heading_recovery_demo.py` for the multi-channel approach
+that adds an asymmetric RGB channel to break the tie.
 
 ```json
-"anchor_offsets_deg": {
-    "seed_1": 135.0,
-    "seed_4": -180.0,
-    "seed_5": 320.0
-},
+"anchor_offsets_deg": {},   // intentionally empty
 "negative_seeds": ["seed_3"]
 ```
 

@@ -3,7 +3,7 @@
 Computer-vision pipeline that estimates per-building heights for a city
 region by registering Google Street View imagery against OpenStreetMap
 building footprints (+ satellite footprints). Research branch — not part of the production height
-stack in `city2stl/height/`. Implements F-SKY series of features (F-SKY1–F-SKY11.2).
+stack in `city2stl/height/`. Implements F-SKY series of features (F-SKY1, F-SKY2, F-SKY4–F-SKY8, F-SKY10, F-SKY11, F-SKY11.1).
 
 **Status**: Phase A features active and tested; Phase B in progress. See [docs/F-SKY-INTEGRATION.md](../../docs/F-SKY-INTEGRATION.md) for consolidated status, measurement results, and integration roadmap.
 
@@ -61,7 +61,10 @@ Pending integration:
 
 Disabled (measured regression):
 - **F-SKY3**: Voronoi splitting (use F-SKY5 instead)
-- **F-SKY11.2**: Bird's-eye registration (attempted but not viable; see failure analysis)
+- **F-SKY11.2**: Bird's-eye registration — code deleted; see archived plan
+  `docs/plans/archive/F-SKY11.2-FAILURE-ANALYSIS.md`. IPM assumes flat
+  ground which fails for tall buildings; correlation on the resulting
+  bird's-eye canvas never beat the simpler keypoint method.
 
 ## How it works
 
@@ -80,8 +83,7 @@ Disabled (measured regression):
 | [satellite_footprints.py](satellite_footprints.py) | Microsoft Global ML Building Footprints fetch + deduplication. | F-SKY8 |
 | [satellite_image.py](satellite_image.py) | Satellite image fetch and preprocessing. | F-SKY8, F-SKY10 |
 | [cross_view.py](cross_view.py) | Cross-view geometric + appearance verification (roof colour, width, edges). | F-SKY10 |
-| [coastline_registration.py](coastline_registration.py) | Water-mask based heading recovery via radial signatures. | F-SKY11, F-SKY11.1 |
-| [pano_birdseye.py](pano_birdseye.py) | Bird's-eye registration via satellite + shape matching. | F-SKY11.2 (abandoned) |
+| [coastline_registration.py](coastline_registration.py) | Water-mask based heading recovery via per-bearing keypoints. | F-SKY11, F-SKY11.1 |
 
 End-to-end flow:
 
@@ -227,9 +229,10 @@ Opt in per region via `"use_cross_view_scoring": true` in
 bbox; subsequent runs use the cached satellite image. The scorer runs
 per-view, so cost is minimal (no additional Street View fetches).
 
-See [docs/plans/F-SKY10-F-SKY11.2-IMPLEMENTATION-2026-05-17.md](../../docs/plans/F-SKY10-F-SKY11.2-IMPLEMENTATION-2026-05-17.md).
-The demo script (`scripts/10_cross_view_demo.py`) renders a per-seed
-PDF showing individual signal contributions for each matched segment.
+See [docs/plans/F-SKY10-F-SKY11.2-IMPLEMENTATION-2026-05-17.md](../../docs/plans/F-SKY10-F-SKY11.2-IMPLEMENTATION-2026-05-17.md)
+for the F-SKY10 portion (the F-SKY11.2 portion is archived as failed).
+The standalone F-SKY10 demo script has been removed; the F-SKY10 signal
+is now exercised inside the main production pipeline.
 See [docs/plans/F-SKY4-mask-overlay.md](../../docs/plans/F-SKY4-mask-overlay.md)
 and [docs/plans/F-SKY7-local-max-peaks-and-layout.md](../../docs/plans/F-SKY7-local-max-peaks-and-layout.md).
 
@@ -387,15 +390,25 @@ skyline_cv/
 ├── README.md
 ├── STATUS.md              ← what works / doesn't / next steps
 ├── __init__.py
-├── pipeline.py            ← CV primitives + math
-├── region_pdf.py          ← orchestration + rendering
-├── docs/
-│   ├── cartagena-audit-2026-05.md     ← session audit
-│   └── implementation-plan.md         ← historical plan
+├── config.py              ← shared config
+├── pipeline.py            ← CV primitives + math (F-SKY1/2/6/7)
+├── region_pdf.py          ← orchestration + rendering, production entry
+├── coastline_registration.py  ← F-SKY11/11.1 keypoint heading recovery
+├── cross_view.py          ← F-SKY10 cross-view colour/width/edges
+├── satellite_footprints.py    ← F-SKY8 Microsoft Building Footprints
+├── satellite_image.py     ← ESRI satellite mosaic fetch
+├── height_trace.py        ← F-SKY1 floor-strip detection
+├── height_trace_render.py ← F-SKY1 diagnostic rendering
 ├── scripts/
-│   └── 08_region_skyline_pdf.py       ← only entry point
+│   ├── 08_region_skyline_pdf.py        ← production entry
+│   ├── 09_height_trace.py              ← F-SKY1 diagnostic
+│   └── 13_heading_recovery_demo.py     ← multi-channel heading research
 ├── sites/
 │   ├── cartagena.json
+│   ├── chicago.json
 │   └── miami.json
 └── runs/                  ← gitignored output (PDFs, image cache)
+    ├── region_reports/    ← production PDFs
+    ├── heading_recovery/  ← demo 13 output
+    ├── image_cache/, satellite_*/, seed_resolution_cache.json
 ```
