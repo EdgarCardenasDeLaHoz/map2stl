@@ -613,21 +613,92 @@ def project_pano_boundaries_to_birdseye(
     }
 
 
+def _ipm_distance(camera_h_m: float, focal_y: float, y: float,
+                  horizon_y: float) -> float | None:
+    """IPM distance for a pano y-pixel that's a ground-level point."""
+    if y <= horizon_y + 1:
+        return None
+    return camera_h_m * focal_y / (y - horizon_y)
+
+
+def _project_one(ax, pano_boundaries: dict, offset_deg: float,
+                 seed_x: float, seed_y: float,
+                 m_per_px_x: float, m_per_px_y: float,
+                 *, scatter_size: float = 4.0,
+                 zorder: int = 8) -> tuple[np.ndarray, np.ndarray]:
+    """Plot pano-derived water-edge (cyan) and building-base (orange) at a
+    given offset. Returns the per-bearing water (x,y) for match scoring."""
+    bearings = pano_boundaries["bearings_deg"]
+    water_pts = np.full((bearings.size, 2), np.nan, dtype=np.float32)
+    for arr, color, lbl in [
+        (pano_boundaries["water_dist"], "#00b8ff", "pano water-edge"),
+        (pano_boundaries["building_dist"], "#ff7f0e", "pano building-base"),
+    ]:
+        xs, ys = [], []
+        for c, d in enumerate(arr):
+            if not np.isfinite(d):
+                continue
+            br = math.radians(float((bearings[c] + offset_deg) % 360.0))
+            x_px = seed_x + (d * math.sin(br)) / m_per_px_x
+            y_px = seed_y - (d * math.cos(br)) / m_per_px_y
+            xs.append(x_px); ys.append(y_px)
+            if arr is pano_boundaries["water_dist"]:
+                water_pts[c, 0] = x_px
+                water_pts[c, 1] = y_px
+        ax.scatter(xs, ys, c=color, s=scatter_size, alpha=0.7, zorder=zorder,
+                   label=lbl)
+    return water_pts
+
+
+def _score_match(water_pts: np.ndarray, water_crop: np.ndarray) -> dict:
+    """For each finite pano water-edge point, look up the satellite water
+    mask at that pixel. A "good" pano water-edge point lands near a sat
+    water/land boundary (one of its 8-neighbours has the other label).
+
+    Returns dict of {n_total, n_on_boundary, frac_on_boundary}.
+    """
+    if water_crop.size == 0:
+        return {"n_total": 0, "n_on_boundary": 0, "frac_on_boundary": 0.0}
+    H, W = water_crop.shape
+    n_total = 0
+    n_on_boundary = 0
+    for i in range(water_pts.shape[0]):
+        x, y = water_pts[i]
+        if not (np.isfinite(x) and np.isfinite(y)):
+            continue
+        ix, iy = int(round(x)), int(round(y))
+        if not (1 <= ix < W - 1 and 1 <= iy < H - 1):
+            continue
+        n_total += 1
+        patch = water_crop[iy - 1: iy + 2, ix - 1: ix + 2]
+        if patch.min() != patch.max():  # mixed → at a boundary
+            n_on_boundary += 1
+    frac = (n_on_boundary / n_total) if n_total else 0.0
+    return {"n_total": n_total, "n_on_boundary": n_on_boundary,
+            "frac_on_boundary": float(frac)}
+
+
 def _render_birdseye_page(pdf, sat_image, sat_water, sat_project,
                           seed_lat, seed_lon,
                           pano_boundaries: dict, best_offset_deg: float,
                           region: str, seed_index: int,
                           canvas_radius_m: float = 300.0):
-    """Top-down view: satellite cropped to a `canvas_radius_m` square
-    around the seed, with the pano-derived coastline (cyan) and building
-    footprint (orange) overlaid. The pano boundaries are rotated by the
-    recovered heading offset to land in world bearings.
+    """Top-down comparison page showing 3 candidate offsets side-by-side
+    so the matching is visible:
+      LEFT:   pano projected at recovered offset (what we chose)
+      MIDDLE: pano projected at recovered offset + 180° (the symmetry twin)
+      RIGHT:  pano projected with NO rotation (raw pano frame, for sanity)
+
+    Each panel shows the same satellite crop with the pano boundary points
+    overlaid. The title for each panel reports the % of pano water-edge
+    points that land on a satellite water-LAND boundary (1-pixel
+    neighbourhood) — high % = good fit; low % = points scattered into
+    pure water or pure land regions.
     """
     mlat = 110_540.0
     mlon = 111_320.0 * math.cos(math.radians(seed_lat))
     d_lon = canvas_radius_m / mlon
     d_lat = canvas_radius_m / mlat
-    # Compute crop bounds in pixel coords.
     x0, _ = sat_project(seed_lon - d_lon, seed_lat)
     x1, _ = sat_project(seed_lon + d_lon, seed_lat)
     _, y0 = sat_project(seed_lon, seed_lat + d_lat)
@@ -640,80 +711,58 @@ def _render_birdseye_page(pdf, sat_image, sat_water, sat_project,
     py0, py1 = max(0, py0), min(H, py1)
     crop = sat_image[py0:py1, px0:px1]
     water_crop = sat_water[py0:py1, px0:px1]
-
-    fig = plt.figure(figsize=(11, 11))
-    fig.suptitle(
-        f"Top-down view from pano boundaries  "
-        f"({region} seed_{seed_index}, ±{canvas_radius_m:.0f} m, "
-        f"offset = {best_offset_deg:.2f}°)",
-        fontsize=11,
-    )
-    ax = fig.add_axes([0.04, 0.05, 0.92, 0.88])
-    ax.imshow(crop)
-    cyan_sat = np.zeros((*water_crop.shape, 4), dtype=np.float32)
-    cyan_sat[..., 1] = 0.85
-    cyan_sat[..., 2] = 1.0
-    cyan_sat[..., 3] = np.where(water_crop, 0.30, 0.0)
-    ax.imshow(cyan_sat)
-
-    # Seed position in crop pixel coords.
+    crop_w_px = max(1, px1 - px0)
+    crop_h_px = max(1, py1 - py0)
+    m_per_px_x = (2.0 * canvas_radius_m) / float(crop_w_px)
+    m_per_px_y = (2.0 * canvas_radius_m) / float(crop_h_px)
     seed_x = cx - px0
     seed_y = cy - py0
-    ax.scatter([seed_x], [seed_y], c="red", marker="*", s=200, zorder=10,
-               edgecolor="white")
 
-    # For each pano column, project boundary distance to world (x, y)
-    # in metres relative to seed, then convert to pixel coords in the crop.
-    # World bearing for column c = headings_per_col[c] + best_offset_deg.
-    bearings = pano_boundaries["bearings_deg"]
-    # Pixel scale: convert metres to pixels using the seed-crop frame.
-    # We use the satellite projection at the seed to derive metres-per-pixel
-    # for the crop. The simplest stable approach: (px1 - px0) px == 2*canvas_radius_m.
-    crop_w_px = px1 - px0
-    if crop_w_px > 0:
-        m_per_px_x = (2.0 * canvas_radius_m) / float(crop_w_px)
-    else:
-        m_per_px_x = 1.0
-    crop_h_px = py1 - py0
-    if crop_h_px > 0:
-        m_per_px_y = (2.0 * canvas_radius_m) / float(crop_h_px)
-    else:
-        m_per_px_y = 1.0
+    fig = plt.figure(figsize=(18, 7.2))
+    fig.suptitle(
+        f"Top-down comparison at three candidate offsets  "
+        f"({region} seed_{seed_index}, crop ±{canvas_radius_m:.0f} m).  "
+        "Best match = highest 'on boundary' % (pano water-edge dots land on "
+        "the sat water/land boundary).",
+        fontsize=11)
 
-    for arr, color, label in [
-        (pano_boundaries["water_dist"], "#00b8ff", "pano water-edge"),
-        (pano_boundaries["building_dist"], "#ff7f0e", "pano building-base"),
-    ]:
-        xs, ys = [], []
-        for c, d in enumerate(arr):
-            if not np.isfinite(d):
+    panels = [
+        (best_offset_deg, f"recovered = {best_offset_deg:.1f}°"),
+        ((best_offset_deg + 180.0) % 360.0,
+         f"recovered + 180° = {(best_offset_deg + 180.0) % 360.0:.1f}°"),
+        (0.0, "raw pano frame (no rotation)"),
+    ]
+
+    for i, (off, label) in enumerate(panels):
+        ax = fig.add_axes([0.03 + i * 0.325, 0.05, 0.30, 0.83])
+        ax.imshow(crop)
+        cyan_sat = np.zeros((*water_crop.shape, 4), dtype=np.float32)
+        cyan_sat[..., 1] = 0.85; cyan_sat[..., 2] = 1.0
+        cyan_sat[..., 3] = np.where(water_crop, 0.30, 0.0)
+        ax.imshow(cyan_sat)
+        # Range rings.
+        for r_m in (50, 100, 200):
+            r_px = r_m / m_per_px_x
+            if r_px > crop_w_px / 2.0:
                 continue
-            world_bearing = (bearings[c] + best_offset_deg) % 360.0
-            br = math.radians(float(world_bearing))
-            dx_m = d * math.sin(br)
-            dy_m = d * math.cos(br)
-            xs.append(seed_x + dx_m / m_per_px_x)
-            ys.append(seed_y - dy_m / m_per_px_y)  # north up = y decreasing
-        ax.scatter(xs, ys, c=color, s=4, alpha=0.8, label=label, zorder=8)
+            ax.add_patch(mpatches.Circle(
+                (seed_x, seed_y), r_px, fill=False,
+                edgecolor=(0.6, 0.6, 0.6, 0.5),
+                linewidth=0.5, linestyle="--"))
+        water_pts = _project_one(ax, pano_boundaries, off,
+                                  seed_x, seed_y, m_per_px_x, m_per_px_y)
+        ax.scatter([seed_x], [seed_y], c="red", marker="*", s=160,
+                   zorder=10, edgecolor="white")
+        score = _score_match(water_pts, water_crop)
+        ax.set_title(
+            f"{label}\n"
+            f"on-boundary: {score['n_on_boundary']} / {score['n_total']}  "
+            f"({100 * score['frac_on_boundary']:.1f}%)",
+            fontsize=9)
+        if i == 0:
+            ax.legend(loc="lower left", fontsize=7)
+        ax.axis("off")
 
-    # Range rings.
-    for r_m in (50, 100, 200, 300):
-        r_px = r_m / m_per_px_x
-        if r_px > crop_w_px / 2.0:
-            continue
-        ax.add_patch(mpatches.Circle((seed_x, seed_y), r_px, fill=False,
-                                      edgecolor=(0.6, 0.6, 0.6, 0.5),
-                                      linewidth=0.6, linestyle="--"))
-        ax.text(seed_x + r_px + 4, seed_y, f"{r_m}m", fontsize=7,
-                color=(0.4, 0.4, 0.4))
-
-    ax.legend(loc="upper right", fontsize=9)
-    ax.set_title(
-        "Cyan = sat water mask.  red * = seed.  Blue dots = pano-derived "
-        "coastline points.  Orange dots = pano-derived building bases.  "
-        "If the offset is right, the dots should align with the satellite features.",
-        fontsize=8)
-    ax.axis("off")
     pdf.savefig(fig)
     plt.close(fig)
 
