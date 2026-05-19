@@ -553,160 +553,94 @@ def _attach_building_terrain(buildings: list[BuildingRecord]) -> list[BuildingRe
     return out
 
 
-def _load_site_seed_urls(region_name: str) -> list[str]:
-    cfg = Path(__file__).resolve().parent / \
-        "sites" / f"{region_name.lower()}.json"
+def _read_site_config(region_name: str) -> dict:
+    """Load and parse sites/<region>.json. Returns {} if missing/invalid.
+    All other `_load_site_*` helpers below pull keys from this dict; the
+    file itself is read once per call here. (For a hot path you'd want a
+    per-region memo; the loaders are only hit once per run.)
+    """
+    cfg = (
+        Path(__file__).resolve().parent
+        / "sites" / f"{region_name.strip().lower()}.json"
+    )
     if not cfg.exists():
-        return []
+        return {}
     try:
-        data = json.loads(cfg.read_text(encoding="utf-8"))
+        return json.loads(cfg.read_text(encoding="utf-8"))
     except Exception:
-        return []
-    raw = data.get("seed_urls")
+        return {}
+
+
+def _load_site_seed_urls(region_name: str) -> list[str]:
+    raw = _read_site_config(region_name).get("seed_urls")
     if not isinstance(raw, list):
         return []
     return [str(x).strip() for x in raw if str(x).strip()]
 
 
 def _load_site_negative_seeds(region_name: str) -> set[str]:
-    """Load optional negative-example seed names from
-    ``sites/<region>.json``.
-
-    A seed listed in ``negative_seeds`` is processed normally (its spin
-    views are captured, segmented, and rendered) but its per-view height
-    estimates are NOT contributed to the aggregate. Use this for camera
-    positions that aren't actually skyline viewpoints (gas stations,
-    under-bridge parking, building interiors). The negative examples are
-    a manually-curated regression suite — the pipeline should produce
-    zero useful height contributions from them; if it ever starts
-    producing estimates, that signals a screening / matching defect.
+    """Seed names listed in ``negative_seeds`` are still processed (PDF page
+    + per-view diagnostics) but their per-view height estimates are NOT
+    contributed to the aggregate. Curated regression-suite of known-bad
+    camera positions (gas stations, parking lots, under-bridge views).
+    If the pipeline ever produces useful estimates from a negative seed,
+    that signals a screening / matching defect.
     """
-    cfg = Path(__file__).resolve().parent / \
-        "sites" / f"{region_name.lower()}.json"
-    if not cfg.exists():
-        return set()
-    try:
-        data = json.loads(cfg.read_text(encoding="utf-8"))
-    except Exception:
-        return set()
-    raw = data.get("negative_seeds")
-    if not isinstance(raw, list):
-        return set()
-    return {str(x) for x in raw}
+    raw = _read_site_config(region_name).get("negative_seeds")
+    return {str(x) for x in raw} if isinstance(raw, list) else set()
 
 
 def _load_site_drive_pano_recovery_anchor(region_name: str) -> bool:
     """Second-stage opt-in: even with ``use_pano_coastline_recovery``
-    enabled, the recovered offset only LOGS by default. Setting
-    ``drive_pano_recovery_anchor`` to True ALSO lets a sharp recovery
-    replace the joint-anchor coarse sweep for seeds without a manual
-    ``anchor_offsets_deg``. Calibrated against Cartagena measurements
-    where some seeds recovered correctly and others didn't — this
-    flag is the deliberate "I've validated my region, take the win"
-    switch.
+    enabled, the recovered offset only LOGS by default. Set this True
+    to ALSO use a sharp recovery as the seed anchor when no manual
+    ``anchor_offsets_deg`` override is present.
     """
-    cfg = (
-        Path(__file__).parent / "sites" / f"{region_name.strip().lower()}.json"
-    )
-    if not cfg.exists():
-        return False
-    try:
-        data = json.loads(cfg.read_text(encoding="utf-8"))
-    except Exception:
-        return False
-    return bool(data.get("drive_pano_recovery_anchor", False))
+    return bool(_read_site_config(region_name).get(
+        "drive_pano_recovery_anchor", False))
 
 
 def _load_site_use_pano_coastline_recovery(region_name: str) -> bool:
-    """Per-region opt-in for F-SKY11.1 / Path B pano-coastline heading recovery.
-
-    True → during ``_seed_multiview_registration`` each seed stitches a
-    raw (API-heading) pano water mask, runs the F-SKY11.1 pano-keypoint
-    offset sweep against the region's pre-detected coastline keypoints,
-    and uses the recovered offset as the seed for the joint anchor
-    optimizer's fine refine when the peak is sharp AND no manual
-    ``anchor_offsets_deg`` is set. Falls back to today's full coarse
-    sweep otherwise. The recovered value is ALWAYS logged so the user
-    can compare it to the manual override and decide whether to drop
-    the override.
+    """Per-region opt-in for F-SKY11.1 / Path B pano-coastline heading
+    recovery. True → during ``_seed_multiview_registration`` each seed
+    stitches a raw (API-heading) pano water mask, runs the F-SKY11.1
+    pano-keypoint offset sweep, and LOGS the recovered offset for the
+    user to compare against any manual override. Set
+    ``drive_pano_recovery_anchor`` to also USE the recovery as the seed.
     """
-    cfg = (
-        Path(__file__).parent / "sites" / f"{region_name.strip().lower()}.json"
-    )
-    if not cfg.exists():
-        return False
-    try:
-        data = json.loads(cfg.read_text(encoding="utf-8"))
-    except Exception:
-        return False
-    return bool(data.get("use_pano_coastline_recovery", False))
+    return bool(_read_site_config(region_name).get(
+        "use_pano_coastline_recovery", False))
 
 
 def _load_site_use_cross_view_scoring(region_name: str) -> bool:
-    """Per-region opt-in for F-SKY10 cross-view colour reranking.
-
-    True → the run fetches an ESRI satellite composite for the bbox and
-    passes a roof-colour-consistency scorer into ``match_segments_to_buildings``.
-    First run on a region downloads up to ~50 ESRI WMTS tiles
-    (~10–20 MB total, cached under ``runs/satellite_image_cache/``);
-    subsequent runs read from the cache. Off by default — the scorer is
-    a tie-breaker, not a fix for all matching failures, so opting in is
-    a deliberate measurement experiment.
+    """Per-region opt-in for F-SKY10 cross-view colour reranking. True →
+    the run fetches an ESRI satellite composite for the bbox and passes
+    a roof-colour-consistency scorer into ``match_segments_to_buildings``.
+    First run on a region downloads ~10–20 MB of ESRI WMTS tiles
+    (cached under ``runs/satellite_image_cache/``).
     """
-    cfg = (
-        Path(__file__).parent / "sites" / f"{region_name.strip().lower()}.json"
-    )
-    if not cfg.exists():
-        return False
-    try:
-        data = json.loads(cfg.read_text(encoding="utf-8"))
-    except Exception:
-        return False
-    return bool(data.get("use_cross_view_scoring", False))
+    return bool(_read_site_config(region_name).get(
+        "use_cross_view_scoring", False))
 
 
 def _load_site_use_satellite_footprints(region_name: str) -> bool:
-    """Read the per-region opt-in flag for Microsoft Buildings polygons.
-
-    True → ``fetch_microsoft_buildings_for_bbox`` is called and the
-    surviving (de-duped) satellite polygons are added to the
-    ``BuildingRecord`` list before per-seed matching. False (default) →
-    OSM-only, no satellite fetch. See F-SKY8 plan.
+    """Per-region opt-in for Microsoft Buildings polygons. True →
+    ``fetch_microsoft_buildings_for_bbox`` runs and the de-duped
+    satellite polygons are added to the BuildingRecord list. False
+    (default) → OSM-only. See F-SKY8 plan.
     """
-    cfg = Path(__file__).resolve().parent / \
-        "sites" / f"{region_name.lower()}.json"
-    if not cfg.exists():
-        return False
-    try:
-        data = json.loads(cfg.read_text(encoding="utf-8"))
-    except Exception:
-        return False
-    return bool(data.get("use_satellite_footprints", False))
+    return bool(_read_site_config(region_name).get(
+        "use_satellite_footprints", False))
 
 
 def _load_site_max_plausible_height_m(region_name: str) -> float:
-    """Read the per-region building-height ceiling from ``sites/<region>.json``.
-
-    Default 300 m suits Chicago (Willis Tower ≈ 442 m is the exception, but
-    most non-supertall analysis fits under 300 m). Cartagena's tallest
-    surveyed tower is ~206 m, so its site config sets 200 m to tighten
-    the geometric y-consistency gate. Miami's high-rises peak around 240 m
-    — 250 m is the appropriate cap there.
-
-    The value bounds the contour-override glass-facade implied-height
-    sanity check AND the per-building geometric y gate. Higher values
-    accept more candidate roof pixels (more recall, more noise); lower
-    values reject implausible per-view estimates earlier.
+    """Per-region building-height ceiling. Defaults to 300 m. Cartagena's
+    tallest tower is ~206 m so its site sets 200 m to tighten the
+    geometric y-consistency gate; Miami's peaks are ~240 m → 250 m.
+    Bounds both the contour-override glass-facade implied-height sanity
+    check and the per-building geometric y gate.
     """
-    cfg = Path(__file__).resolve().parent / \
-        "sites" / f"{region_name.lower()}.json"
-    if not cfg.exists():
-        return 300.0
-    try:
-        data = json.loads(cfg.read_text(encoding="utf-8"))
-    except Exception:
-        return 300.0
-    raw = data.get("max_plausible_height_m")
+    raw = _read_site_config(region_name).get("max_plausible_height_m")
     try:
         v = float(raw) if raw is not None else 300.0
     except (TypeError, ValueError):
@@ -717,29 +651,12 @@ def _load_site_max_plausible_height_m(region_name: str) -> float:
 
 
 def _load_site_anchor_overrides(region_name: str) -> dict[str, float]:
-    """Load optional manual anchor-offset overrides keyed by seed name
-    (e.g. "seed_4"). When present, the joint IoU optimization is skipped
-    and the override is used directly. Lets a user fix orientations the
-    algorithm gets wrong.
-
-    File format in sites/<region>.json:
-        {
-          ...
-          "anchor_offsets_deg": {
-            "seed_4": -180.0,
-            "seed_5": 320.0
-          }
-        }
+    """Optional manual anchor-offset overrides keyed by seed name (e.g.
+    ``"seed_4": -180.0``). When present, the joint IoU optimization is
+    skipped and the override is used directly. Lets a user fix
+    orientations the algorithm gets wrong.
     """
-    cfg = Path(__file__).resolve().parent / \
-        "sites" / f"{region_name.lower()}.json"
-    if not cfg.exists():
-        return {}
-    try:
-        data = json.loads(cfg.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    raw = data.get("anchor_offsets_deg")
+    raw = _read_site_config(region_name).get("anchor_offsets_deg")
     if not isinstance(raw, dict):
         return {}
     out: dict[str, float] = {}

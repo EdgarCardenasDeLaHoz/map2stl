@@ -2827,10 +2827,17 @@ def estimate_heights_from_registration(
     *,
     trace=None,
     max_plausible_height_m: float = 300.0,
+    compute_floor_period: bool = False,
 ) -> list[RegisteredBuildingEstimate]:
     # Optional `trace` (HeightTraceRecorder from height_trace.py): when set, the
     # function emits a row at every gate / decision point. Behaviour-neutral —
     # see docs/glass-roof-height-fix-plan.md Phase 1.
+    #
+    # `compute_floor_period` runs the F-SKY1 facade autocorrelation diagnostic
+    # that fills the floor_period_px / floor_confidence / inferred_distance_m
+    # / inferred_height_m fields on each estimate. Default OFF: the fields
+    # are not rendered in the PDF and the cost (one autocorrelation per
+    # building per view) is significant. Set True only for diagnostics.
     contour = np.asarray(registration["contour"], dtype=np.float32)
     best_offset = float(registration["best_offset"])
     best_score = float(registration.get("best_score", float("inf")))
@@ -3213,7 +3220,9 @@ def estimate_heights_from_registration(
         # facades silently no-op without producing a fake estimate.
         floor_info: dict = {}
         proj_x_px = float(proj["x_px"])
-        if abs(captured.viewpoint.pitch) <= 4.0 and building_mask is not None:
+        if (compute_floor_period
+                and abs(captured.viewpoint.pitch) <= 4.0
+                and building_mask is not None):
             x_left_px = float(proj.get("x_left_px", proj_x_px - 10.0))
             x_right_px = float(proj.get("x_right_px", proj_x_px + 10.0))
             if x_right_px < x_left_px:
