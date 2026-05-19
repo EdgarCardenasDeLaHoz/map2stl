@@ -41,6 +41,7 @@ from pathlib import Path
 
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -556,6 +557,167 @@ def _render_corr_page(pdf, corr_result, best_offset, peak_value, hwhm,
     plt.close(fig)
 
 
+def project_pano_boundaries_to_birdseye(
+    pano_water: np.ndarray, pano_building: np.ndarray,
+    headings_per_col: np.ndarray,
+    *, camera_h_m: float, pitch_deg: float,
+    fov_deg: float, view_width_px: int,
+    max_range_m: float = 400.0,
+    min_range_m: float = 3.0,
+) -> dict:
+    """Project the per-column water-top and building-base EDGES to a
+    pano-frame bird's-eye polar list. Avoids the IPM starburst issue
+    because we project only ground-level boundary points (where the
+    flat-ground assumption is exactly correct), not every pixel.
+
+    For each pano column c (bearing = headings_per_col[c]):
+      water_dist[c]   = IPM distance to the top of the water mask
+                        (where water ends going UP). This IS the
+                        water-line distance to the coastline.
+      building_dist[c] = IPM distance to the bottom of the building
+                        mask (where buildings meet the ground).
+
+    Returns dict of {water_dist, building_dist, bearings_deg}. Values are
+    in metres; NaN where the boundary is missing or out of range.
+    """
+    H, W = pano_water.shape
+    focal_y = (view_width_px / 2.0) / math.tan(math.radians(fov_deg / 2.0))
+    horizon_y = H / 2.0 - math.tan(math.radians(pitch_deg)) * focal_y
+
+    water_dist = np.full(W, np.nan, dtype=np.float32)
+    building_dist = np.full(W, np.nan, dtype=np.float32)
+
+    for c in range(W):
+        # Top of water (water ends going up from the bottom).
+        ws = np.where(pano_water[:, c])[0]
+        if ws.size:
+            y_top = float(ws.min())
+            if y_top > horizon_y + 1:
+                d = camera_h_m * focal_y / (y_top - horizon_y)
+                if min_range_m <= d <= max_range_m:
+                    water_dist[c] = d
+        # Bottom of building (building ends going down). For a sea-level
+        # camera, the building's base is at sea level. So:
+        bs = np.where(pano_building[:, c])[0]
+        if bs.size:
+            y_bot = float(bs.max())
+            if y_bot > horizon_y + 1:
+                d = camera_h_m * focal_y / (y_bot - horizon_y)
+                if min_range_m <= d <= max_range_m:
+                    building_dist[c] = d
+
+    return {
+        "water_dist": water_dist,
+        "building_dist": building_dist,
+        "bearings_deg": np.asarray(headings_per_col, dtype=np.float32),
+    }
+
+
+def _render_birdseye_page(pdf, sat_image, sat_water, sat_project,
+                          seed_lat, seed_lon,
+                          pano_boundaries: dict, best_offset_deg: float,
+                          region: str, seed_index: int,
+                          canvas_radius_m: float = 300.0):
+    """Top-down view: satellite cropped to a `canvas_radius_m` square
+    around the seed, with the pano-derived coastline (cyan) and building
+    footprint (orange) overlaid. The pano boundaries are rotated by the
+    recovered heading offset to land in world bearings.
+    """
+    mlat = 110_540.0
+    mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+    d_lon = canvas_radius_m / mlon
+    d_lat = canvas_radius_m / mlat
+    # Compute crop bounds in pixel coords.
+    x0, _ = sat_project(seed_lon - d_lon, seed_lat)
+    x1, _ = sat_project(seed_lon + d_lon, seed_lat)
+    _, y0 = sat_project(seed_lon, seed_lat + d_lat)
+    _, y1 = sat_project(seed_lon, seed_lat - d_lat)
+    cx, cy = sat_project(seed_lon, seed_lat)
+    px0, px1 = int(min(x0, x1)), int(max(x0, x1))
+    py0, py1 = int(min(y0, y1)), int(max(y0, y1))
+    H, W = sat_image.shape[:2]
+    px0, px1 = max(0, px0), min(W, px1)
+    py0, py1 = max(0, py0), min(H, py1)
+    crop = sat_image[py0:py1, px0:px1]
+    water_crop = sat_water[py0:py1, px0:px1]
+
+    fig = plt.figure(figsize=(11, 11))
+    fig.suptitle(
+        f"Top-down view from pano boundaries  "
+        f"({region} seed_{seed_index}, ±{canvas_radius_m:.0f} m, "
+        f"offset = {best_offset_deg:.2f}°)",
+        fontsize=11,
+    )
+    ax = fig.add_axes([0.04, 0.05, 0.92, 0.88])
+    ax.imshow(crop)
+    cyan_sat = np.zeros((*water_crop.shape, 4), dtype=np.float32)
+    cyan_sat[..., 1] = 0.85
+    cyan_sat[..., 2] = 1.0
+    cyan_sat[..., 3] = np.where(water_crop, 0.30, 0.0)
+    ax.imshow(cyan_sat)
+
+    # Seed position in crop pixel coords.
+    seed_x = cx - px0
+    seed_y = cy - py0
+    ax.scatter([seed_x], [seed_y], c="red", marker="*", s=200, zorder=10,
+               edgecolor="white")
+
+    # For each pano column, project boundary distance to world (x, y)
+    # in metres relative to seed, then convert to pixel coords in the crop.
+    # World bearing for column c = headings_per_col[c] + best_offset_deg.
+    bearings = pano_boundaries["bearings_deg"]
+    # Pixel scale: convert metres to pixels using the seed-crop frame.
+    # We use the satellite projection at the seed to derive metres-per-pixel
+    # for the crop. The simplest stable approach: (px1 - px0) px == 2*canvas_radius_m.
+    crop_w_px = px1 - px0
+    if crop_w_px > 0:
+        m_per_px_x = (2.0 * canvas_radius_m) / float(crop_w_px)
+    else:
+        m_per_px_x = 1.0
+    crop_h_px = py1 - py0
+    if crop_h_px > 0:
+        m_per_px_y = (2.0 * canvas_radius_m) / float(crop_h_px)
+    else:
+        m_per_px_y = 1.0
+
+    for arr, color, label in [
+        (pano_boundaries["water_dist"], "#00b8ff", "pano water-edge"),
+        (pano_boundaries["building_dist"], "#ff7f0e", "pano building-base"),
+    ]:
+        xs, ys = [], []
+        for c, d in enumerate(arr):
+            if not np.isfinite(d):
+                continue
+            world_bearing = (bearings[c] + best_offset_deg) % 360.0
+            br = math.radians(float(world_bearing))
+            dx_m = d * math.sin(br)
+            dy_m = d * math.cos(br)
+            xs.append(seed_x + dx_m / m_per_px_x)
+            ys.append(seed_y - dy_m / m_per_px_y)  # north up = y decreasing
+        ax.scatter(xs, ys, c=color, s=4, alpha=0.8, label=label, zorder=8)
+
+    # Range rings.
+    for r_m in (50, 100, 200, 300):
+        r_px = r_m / m_per_px_x
+        if r_px > crop_w_px / 2.0:
+            continue
+        ax.add_patch(mpatches.Circle((seed_x, seed_y), r_px, fill=False,
+                                      edgecolor=(0.6, 0.6, 0.6, 0.5),
+                                      linewidth=0.6, linestyle="--"))
+        ax.text(seed_x + r_px + 4, seed_y, f"{r_m}m", fontsize=7,
+                color=(0.4, 0.4, 0.4))
+
+    ax.legend(loc="upper right", fontsize=9)
+    ax.set_title(
+        "Cyan = sat water mask.  red * = seed.  Blue dots = pano-derived "
+        "coastline points.  Orange dots = pano-derived building bases.  "
+        "If the offset is right, the dots should align with the satellite features.",
+        fontsize=8)
+    ax.axis("off")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -687,6 +849,17 @@ def main() -> int:
         / f"{args.region}_seed{args.seed_index}.pdf"
     )
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    pano_boundaries = project_pano_boundaries_to_birdseye(
+        pano_water, pano_building, headings_per_col,
+        camera_h_m=1.7, pitch_deg=used_pitch,
+        fov_deg=args.fov_deg, view_width_px=view_width_px,
+        max_range_m=400.0, min_range_m=3.0,
+    )
+    water_n = int(np.isfinite(pano_boundaries["water_dist"]).sum())
+    building_n = int(np.isfinite(pano_boundaries["building_dist"]).sum())
+    print(f"[demo] pano boundaries: water-edge points={water_n}, "
+          f"building-base points={building_n}")
+
     with PdfPages(out_pdf) as pdf:
         _render_satellite_page(pdf, sat_image, sat_water, sat_project,
                                lat, lon, args.region, args.seed_index,
@@ -695,6 +868,11 @@ def main() -> int:
                           headings_per_col, best_offset,
                           args.region, args.seed_index,
                           pano_sigs["y_top"], pano_sigs["y_bot"])
+        _render_birdseye_page(pdf, sat_image, sat_water, sat_project,
+                              lat, lon,
+                              pano_boundaries, best_offset,
+                              args.region, args.seed_index,
+                              canvas_radius_m=300.0)
         _render_signatures_page(pdf, sat_sigs, pano_sigs, best_offset,
                                 args.n_bearings, args.region, args.seed_index,
                                 channels)
