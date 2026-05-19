@@ -29,7 +29,7 @@ For new work, write the plan in [`../proposals.md`](../proposals.md) and link fr
 
 | Topic | File |
 |---|---|
-| Building-height ML model | [`../plans/height-training-status.md`](../plans/height-training-status.md) |
+| Building-height ML model | [`../plans/height_training/height-training-status.md`](../plans/height_training/height-training-status.md) |
 | Height pipeline improvements still open | [`../todos/height-pipeline-improvement-plan.md`](../todos/height-pipeline-improvement-plan.md) |
 | New AI-generated proposals | [`../proposals.md`](../proposals.md) |
 | Active issues / tech debt | [`../issues.md`](../issues.md) |

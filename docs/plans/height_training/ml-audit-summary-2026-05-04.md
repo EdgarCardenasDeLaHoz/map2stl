@@ -203,9 +203,9 @@ python scripts/train.py inspect models/retna_phase2_regression.pt
 | `scripts/train_two_phase.py` | Two-phase training entry point |
 | `scripts/explore_losses.py` | Loss function quick-test harness |
 | `scripts/compare_models.py` | Tall-building comparison tool |
-| `docs/plans/two-phase-height-strategy.md` | Two-phase rationale & design |
-| `docs/plans/current-training-status.md` | Status snapshot |
-| `docs/plans/ml-audit-summary-2026-05-04.md` | This file |
+| `docs/plans/height_training/two-phase-height-strategy.md` | Two-phase rationale & design |
+| `docs/plans/height_training/current-training-status.md` | Status snapshot |
+| `docs/plans/height_training/ml-audit-summary-2026-05-04.md` | This file |
 
 ---
 

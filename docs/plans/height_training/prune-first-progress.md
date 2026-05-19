@@ -138,9 +138,9 @@ python scripts/tile_review.py drop 5 12 13 ...  # indices from PDF
 | File | Purpose | Status |
 |---|---|---|
 | `scripts/train_prune_first.py` | Prune-first automation | ✓ |
-| `docs/plans/prune-first-strategy.md` | Full design doc | ✓ |
-| `docs/plans/prune-first-phase-a-results.md` | Phase A analysis | ✓ |
-| `docs/plans/prune-first-progress.md` | This file | ✓ |
+| `docs/plans/height_training/prune-first-strategy.md` | Full design doc | ✓ |
+| `docs/plans/height_training/prune-first-phase-a-results.md` | Phase A analysis | ✓ |
+| `docs/plans/height_training/prune-first-progress.md` | This file | ✓ |
 | `output/tile_review.pdf` | Tile inspection (100 tiles) | ✓ |
 | `models/retna_pruned_first.pt` | Pruned baseline (47.9k) | ✓ |
 | `models/retna_pruned_and_grown.pt` | Final (growing) | 🔄 |

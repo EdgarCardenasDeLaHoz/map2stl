@@ -30,7 +30,7 @@ Three concurrent experiments running to improve building height prediction:
 
 ### 3. Two-Phase Training (Preparation)
 - **Status**: Implemented, awaiting loss exploration results
-- **Files**: `scripts/train_two_phase.py`, `docs/plans/two-phase-height-strategy.md`
+- **Files**: `scripts/train_two_phase.py`, `docs/plans/height_training/two-phase-height-strategy.md`
 - **Phase 1**: Segmentation (Dice loss on binary mask, 20 epochs)
 - **Phase 2**: Regression (MSE on height, 15 epochs, frozen segmentation)
 - **Rationale**: Decompose to avoid marginal-mean collapse on tall buildings

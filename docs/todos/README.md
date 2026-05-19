@@ -11,7 +11,7 @@ Audit docs do not own tasks directly. If an audit still has live findings, they 
 | ID | Area | Status | Primary doc |
 |---|---|---|---|
 | ML-1 | Height provider wiring | Open | [height-pipeline-improvement-plan.md](height-pipeline-improvement-plan.md) |
-| ML-2 | Tall-building accuracy gap | Open | [../plans/height-training-status.md](../plans/height-training-status.md) |
+| ML-2 | Tall-building accuracy gap | Open | [../plans/height_training/height-training-status.md](../plans/height_training/height-training-status.md) |
 | ML-3 | Remove legacy RoofNet-era training code after notebook migration | Open | [../audits/dead-code-analysis.md](../audits/dead-code-analysis.md) |
 | TEST-1 | Add coverage for remaining export and cities endpoints | Open | [../audits/test-coverage-audit.md](../audits/test-coverage-audit.md) |
 | A11Y-1 | Normalize sidebar and settings contrast tokens before revisiting accessibility audit | Open | [../audits/accessibility-audit.md](../audits/accessibility-audit.md) |

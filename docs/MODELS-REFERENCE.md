@@ -94,10 +94,10 @@ python -m tools.ml.train.grow_prune \
 
 ## Documentation
 
-- **Full report**: `docs/plans/ml-training-final-report-2026-05-04.md`
-- **Phase C details**: `docs/plans/phase-c-completion-and-final-decision.md`
-- **Phase B details**: `docs/plans/phase-b-completion-summary.md`
-- **Strategy design**: `docs/plans/prune-first-strategy.md`
+- **Full report**: `docs/plans/height_training/ml-training-final-report-2026-05-04.md`
+- **Phase C details**: `docs/plans/height_training/phase-c-completion-and-final-decision.md`
+- **Phase B details**: `docs/plans/height_training/phase-b-completion-summary.md`
+- **Strategy design**: `docs/plans/height_training/prune-first-strategy.md`
 
 ---
 

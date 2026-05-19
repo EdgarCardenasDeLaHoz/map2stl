@@ -1,7 +1,7 @@
 # Plan: Height Model Comparison — RoofNetV3 (joint) vs Cascade
 
 _Created: 2026-04-28._
-_Status: **archived**. Session 1 infrastructure (scoreboard, metrics extension, provider integration) shipped. Session 2 cascade architecture was never built — the RoofNetV3 line was abandoned and replaced by Retna_V1. See [plans/height-training-status.md](../plans/height-training-status.md) for the current model lineage._
+_Status: **archived**. Session 1 infrastructure (scoreboard, metrics extension, provider integration) shipped. Session 2 cascade architecture was never built — the RoofNetV3 line was abandoned and replaced by Retna_V1. See [plans/height-training-status.md](../plans/height_training/height-training-status.md) for the current model lineage._
 
 ## Why this exists
 

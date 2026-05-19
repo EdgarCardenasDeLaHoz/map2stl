@@ -268,11 +268,11 @@ Phase C (9.3k params):   ~0.5 ms/tile ← 24x faster than Phase 2
 | retna_wider_early_inspect_wider_early.pdf | C | 30 | 43 |
 
 ### Documentation
-- `docs/plans/prune-first-strategy.md` — Strategy design & rationale
-- `docs/plans/prune-first-phase-a-results.md` — Phase A detailed analysis
-- `docs/plans/phase-b-completion-summary.md` — Phase B results & architecture evolution
-- `docs/plans/phase-c-completion-and-final-decision.md` — Phase C results & decision framework
-- `docs/plans/ml-training-final-report-2026-05-04.md` — This file
+- `docs/plans/height_training/prune-first-strategy.md` — Strategy design & rationale
+- `docs/plans/height_training/prune-first-phase-a-results.md` — Phase A detailed analysis
+- `docs/plans/height_training/phase-b-completion-summary.md` — Phase B results & architecture evolution
+- `docs/plans/height_training/phase-c-completion-and-final-decision.md` — Phase C results & decision framework
+- `docs/plans/height_training/ml-training-final-report-2026-05-04.md` — This file
 
 ---
 

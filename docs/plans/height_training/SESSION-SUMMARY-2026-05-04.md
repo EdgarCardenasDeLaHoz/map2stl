@@ -110,11 +110,11 @@ Three concurrent experiments to compare strategies:
 | `scripts/train_two_phase.py` | Script | Two-phase training entry point |
 | `scripts/explore_losses.py` | Script | Loss exploration harness |
 | `scripts/compare_models.py` | Script | Tall-building comparison tool |
-| `docs/plans/two-phase-height-strategy.md` | Plan | Two-phase rationale & design |
-| `docs/plans/two-phase-training-results.md` | Results | Full two-phase analysis & findings |
-| `docs/plans/nas-progress-summary.md` | Status | Live NAS tracking (updated as cycles complete) |
-| `docs/plans/ml-audit-summary-2026-05-04.md` | Overview | Comprehensive audit summary |
-| `docs/plans/current-training-status.md` | Status | Session checkpoint snapshot |
+| `docs/plans/height_training/two-phase-height-strategy.md` | Plan | Two-phase rationale & design |
+| `docs/plans/height_training/two-phase-training-results.md` | Results | Full two-phase analysis & findings |
+| `docs/plans/height_training/nas-progress-summary.md` | Status | Live NAS tracking (updated as cycles complete) |
+| `docs/plans/height_training/ml-audit-summary-2026-05-04.md` | Overview | Comprehensive audit summary |
+| `docs/plans/height_training/current-training-status.md` | Status | Session checkpoint snapshot |
 
 ---
 

@@ -41,7 +41,7 @@ Each open item should ship with:
 
 ## Decisions
 
-- Scope strictly frontend / browser client (backend ML work tracked separately in `../plans/height-training-status.md`)
+- Scope strictly frontend / browser client (backend ML work tracked separately in `../plans/height_training/height-training-status.md`)
 - Playwright is the primary UI test harness
 - All changes reflected in both code and the matching module's `TODO.md`
 
@@ -56,6 +56,6 @@ Each open item should ship with:
 
 ## Decisions
 
-- Scope strictly frontend / browser client (backend ML work tracked separately in `../plans/height-training-status.md`)
+- Scope strictly frontend / browser client (backend ML work tracked separately in `../plans/height_training/height-training-status.md`)
 - Playwright is the primary UI test harness
 - All changes reflected in both code and the matching module's `TODO.md`

@@ -13,35 +13,38 @@ The F-SKY series is a set of 11+ computer-vision improvements to the skyline_cv 
 **Current production**: `retna_pruned.pt` (0.2691 loss, 3.82m MAE)  
 **Target improvement**: Cartagena building height accuracy via cross-view registration
 
-**Active features**: F-SKY1, F-SKY2, F-SKY4, F-SKY6, F-SKY7, F-SKY8, F-SKY11.1 (Phase A)  
-**Disabled**: F-SKY3 (measured regression)  
-**Pending**: F-SKY5, F-SKY10, F-SKY11.1 (Phase B)
+**Active features**: F-SKY2, F-SKY4, F-SKY6, F-SKY7, F-SKY8, F-SKY10 (opt-in per region), F-SKY11.1
+**Default-off / diagnostic**: F-SKY1 (gated behind compute_floor_period=False as of 2026-05-18; fields are computed only when explicitly requested for diagnostics)
+**Removed**: F-SKY3 (measured regression; code deleted 2026-05-18), F-SKY11.2 (IPM bird's-eye dead-end; code deleted 2026-05-17)
+**Pending**: F-SKY5 (MobileSAM instance head — gating decision pending)
 
 ---
 
 ## Pipeline Architecture
 
-The skyline_cv pipeline lives in two files (intentional simplicity for testing):
+The skyline_cv pipeline lives in two core files plus thin helpers:
 
 ```
 city2stl/skyline_cv/
-├── pipeline.py          (~2400 lines, pure math, unit-tested)
-├── region_pdf.py        (~2750 lines, orchestration + I/O)
+├── pipeline.py          (~3370 lines, pure math, unit-tested)
+├── region_pdf.py        (~3900 lines, orchestration + I/O + PDF rendering)
 ├── scripts/
-│   ├── 08_region_skyline_pdf.py  (entry point)
-│   ├── 09_height_trace.py         (F-SKY1 demo)
-│   ├── 10_cross_view_demo.py      (F-SKY10 prep)
-│   ├── 11_coastline_demo.py       (F-SKY11 demo)
-│   ├── 12_pano_coastline_demo.py  (F-SKY11.1 Phase A demo)
-│   ├── 13_birdseye_registration_demo.py (F-SKY11.2 prep)
+│   ├── 08_region_skyline_pdf.py  (production entry point)
+│   ├── 09_height_trace.py        (F-SKY1 diagnostic)
+│   └── 13_heading_recovery_demo.py  (multi-channel heading research)
 └── [helper modules]
     ├── height_trace.py            (F-SKY1)
+    ├── height_trace_render.py     (F-SKY1 PDF)
     ├── satellite_footprints.py    (F-SKY8)
-    ├── satellite_image.py         (F-SKY8)
+    ├── satellite_image.py         (F-SKY8 + cross-view)
     ├── cross_view.py              (F-SKY10)
-    ├── coastline_registration.py  (F-SKY11, F-SKY11.1)
-    └── pano_birdseye.py           (F-SKY11.2)
+    └── coastline_registration.py  (F-SKY11, F-SKY11.1 — keypoint approach)
 ```
+
+Deleted as of 2026-05-18: ``pano_birdseye.py``, ``config.py``, scripts
+10/11/12. Old demos were superseded by ``13_heading_recovery_demo.py``;
+``pano_birdseye`` is the F-SKY11.2 IPM bird's-eye dead-end (see archived
+post-mortem in ``docs/plans/archive/``).
 
 ### Core Flow (region_pdf.py, simplified)
 

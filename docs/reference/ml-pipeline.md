@@ -2,7 +2,7 @@
 
 Satellite-image CNN pipeline for predicting per-pixel building heights, used downstream by the 3D STL export.
 
-For the latest training results, model lineage, and open issues, see [`../plans/height-training-status.md`](../plans/height-training-status.md).
+For the latest training results, model lineage, and open issues, see [`../plans/height_training/height-training-status.md`](../plans/height_training/height-training-status.md).
 
 ---
 

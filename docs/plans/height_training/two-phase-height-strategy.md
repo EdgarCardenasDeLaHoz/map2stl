@@ -134,7 +134,7 @@ Before committing to two-phase, quick exploration of loss functions on current d
 |---|---|
 | `scripts/train_two_phase.py` | Entry point: `phase1`, `phase2`, or `both` |
 | `scripts/explore_losses.py` | Quick loss comparison (5 epochs each) |
-| `docs/plans/two-phase-height-strategy.md` | This doc |
+| `docs/plans/height_training/two-phase-height-strategy.md` | This doc |
 
 ## Next Steps
 

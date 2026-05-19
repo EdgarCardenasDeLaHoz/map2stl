@@ -211,10 +211,10 @@ Phase E (ultra):       0.4108  (90.1%)  ✅ TARGET & BEST
 - `logs/phase_e_ultra.log` (Phase E transcript, Cycles 1–50+)
 
 ### Documentation
-- `docs/plans/CONTINUOUS-TRAINING-PROGRESS.md` (Original plan)
-- `docs/plans/PHASE-D-PROGRESS-UPDATE.md` (Phase D analysis)
-- `docs/plans/PHASE-E-FINAL-BREAKTHROUGH.md` (Phase E update)
-- `docs/plans/ALL-PHASES-FINAL-COMPARISON.md` (This file)
+- `docs/plans/height_training/CONTINUOUS-TRAINING-PROGRESS.md` (Original plan)
+- `docs/plans/height_training/PHASE-D-PROGRESS-UPDATE.md` (Phase D analysis)
+- `docs/plans/height_training/PHASE-E-FINAL-BREAKTHROUGH.md` (Phase E update)
+- `docs/plans/height_training/ALL-PHASES-FINAL-COMPARISON.md` (This file)
 
 ### Inspection PDFs (TBD after Phase E)
 - `output/retna_extended_inspect_extended.pdf` (Phase D, 40 samples, seed=44) — To generate

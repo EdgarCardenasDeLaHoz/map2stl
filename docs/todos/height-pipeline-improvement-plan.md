@@ -8,7 +8,7 @@ _Last updated: 2026-05-02_
 |---|---|
 | Multi-provider parallel fetch + merge | Done (production) |
 | Phase 1b providers (GHSL, Open Buildings, Shadow) | All wired with real fetch paths (Overture Maps for OpenBuildings, shadow detection for Shadow) |
-| ML-based height inference | **Active** — Retna_V1 in iterative training. See [`../plans/height-training-status.md`](../plans/height-training-status.md) |
+| ML-based height inference | **Active** — Retna_V1 in iterative training. See [`../plans/height_training/height-training-status.md`](../plans/height_training/height-training-status.md) |
 | Roof geometry from OSM tags | F-ROOF1 done (slanted roofs in city raster); flat-only fallback when shapes unset |
 | STL import + IDW infill (Phase 3) | Done |
 | Performance | Per-provider parallelism done; bandwidth/COG streaming not done |

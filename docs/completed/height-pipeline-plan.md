@@ -1,6 +1,6 @@
 # Plan: Building Height Estimation — Detailed Implementation
 
-> **For current ML/training state, see [`../plans/height-training-status.md`](../plans/height-training-status.md).**
+> **For current ML/training state, see [`../plans/height_training/height-training-status.md`](../plans/height_training/height-training-status.md).**
 > This file is the original Phase 1–3 design plan. The CNN section (Phase 2) has been superseded by the Retna_V1 line of work documented in the status file above.
 >
 > **Status (2026-04-30):**
