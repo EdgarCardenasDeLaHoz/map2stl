@@ -613,6 +613,103 @@ def project_pano_boundaries_to_birdseye(
     }
 
 
+def sweep_offset_by_onboundary(
+    pano_boundaries: dict, sat_water: np.ndarray, sat_project,
+    seed_lat: float, seed_lon: float,
+    *, canvas_radius_m: float = 300.0,
+    coarse_step_deg: float = 5.0, fine_step_deg: float = 1.0,
+    fine_window_deg: float = 10.0,
+    near_radius_m: float = 15.0,
+) -> tuple[float, np.ndarray, np.ndarray]:
+    """Brute-force sweep heading offset by GEOMETRIC alignment: how close
+    the pano-derived water-edge points fall to the satellite water/land
+    boundary. Doesn't share the 180° symmetry of water cross-correlation.
+
+    Uses a distance transform of the satellite water/land boundary, so each
+    pano point's "score" is exp(-d_to_boundary / `near_radius_m`); ~1 when
+    close, ~0 when far. Tolerates SegFormer/IPM noise of several metres
+    without losing signal entirely.
+
+    Returns (best_offset_deg, cand_deg, scores) with scores in [0, 1].
+    """
+    from scipy.ndimage import distance_transform_edt, binary_erosion, binary_dilation
+    mlat = 110_540.0
+    mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+    d_lon = canvas_radius_m / mlon
+    d_lat = canvas_radius_m / mlat
+    x0, _ = sat_project(seed_lon - d_lon, seed_lat)
+    x1, _ = sat_project(seed_lon + d_lon, seed_lat)
+    _, y0 = sat_project(seed_lon, seed_lat + d_lat)
+    _, y1 = sat_project(seed_lon, seed_lat - d_lat)
+    cx, cy = sat_project(seed_lon, seed_lat)
+    px0, px1 = int(min(x0, x1)), int(max(x0, x1))
+    py0, py1 = int(min(y0, y1)), int(max(y0, y1))
+    H, W = sat_water.shape[:2]
+    px0, px1 = max(0, px0), min(W, px1)
+    py0, py1 = max(0, py0), min(H, py1)
+    water_crop = sat_water[py0:py1, px0:px1].astype(bool)
+    crop_w_px = max(1, px1 - px0)
+    crop_h_px = max(1, py1 - py0)
+    m_per_px_x = (2.0 * canvas_radius_m) / float(crop_w_px)
+    m_per_px_y = (2.0 * canvas_radius_m) / float(crop_h_px)
+    seed_x = cx - px0
+    seed_y = cy - py0
+
+    # Build a "is boundary" mask (1 where water meets land), then distance
+    # transform: for every crop pixel, distance to the nearest boundary in
+    # metres.
+    if water_crop.size == 0 or water_crop.all() or not water_crop.any():
+        # No boundary in crop → can't score; return zero.
+        return 0.0, np.zeros(1, dtype=np.float32), np.zeros(1, dtype=np.float32)
+    eroded = binary_erosion(water_crop)
+    dilated = binary_dilation(water_crop)
+    boundary = (water_crop & ~eroded) | (~water_crop & dilated)
+    # distance_transform_edt(arr) = distance to nearest True; we want
+    # distance to nearest boundary, so input ~boundary.
+    dist_pixels = distance_transform_edt(~boundary)
+    # Convert to metres using the avg of x and y per-pixel scale.
+    m_per_px = 0.5 * (m_per_px_x + m_per_px_y)
+    dist_metres = dist_pixels * m_per_px
+
+    # Pre-filter valid pano-water-edge points to (bearing, distance) pairs.
+    bearings = pano_boundaries["bearings_deg"]
+    dists = pano_boundaries["water_dist"]
+    finite = np.isfinite(dists)
+    pano_bearings = bearings[finite].astype(np.float32)
+    pano_dists = dists[finite].astype(np.float32)
+    if pano_bearings.size == 0:
+        return 0.0, np.zeros(1, dtype=np.float32), np.zeros(1, dtype=np.float32)
+
+    def _score_at(offset_deg: float) -> float:
+        world_bearings = np.radians((pano_bearings + offset_deg) % 360.0)
+        x_px = seed_x + (pano_dists * np.sin(world_bearings)) / m_per_px_x
+        y_px = seed_y - (pano_dists * np.cos(world_bearings)) / m_per_px_y
+        ix = np.round(x_px).astype(np.int32)
+        iy = np.round(y_px).astype(np.int32)
+        valid = (ix >= 0) & (ix < crop_w_px) & (iy >= 0) & (iy < crop_h_px)
+        if not np.any(valid):
+            return 0.0
+        d_at_points = dist_metres[iy[valid], ix[valid]]
+        # Soft score: exp(-d / near_radius). 1 at distance 0, ~0 at far.
+        return float(np.exp(-d_at_points / near_radius_m).mean())
+
+    coarse_cand = np.arange(0.0, 360.0, coarse_step_deg, dtype=np.float32)
+    coarse_scores = np.array([_score_at(float(o)) for o in coarse_cand],
+                             dtype=np.float32)
+    best_coarse_idx = int(np.argmax(coarse_scores))
+    best_coarse = float(coarse_cand[best_coarse_idx])
+
+    fine_lo = best_coarse - fine_window_deg
+    fine_hi = best_coarse + fine_window_deg
+    fine_cand = np.arange(fine_lo, fine_hi + 0.5 * fine_step_deg, fine_step_deg,
+                          dtype=np.float32)
+    fine_scores = np.array([_score_at(float(o)) for o in fine_cand],
+                           dtype=np.float32)
+    best_fine_idx = int(np.argmax(fine_scores))
+    best = float(fine_cand[best_fine_idx]) % 360.0
+    return best, coarse_cand, coarse_scores
+
+
 def _ipm_distance(camera_h_m: float, focal_y: float, y: float,
                   horizon_y: float) -> float | None:
     """IPM distance for a pano y-pixel that's a ground-level point."""
@@ -676,6 +773,42 @@ def _score_match(water_pts: np.ndarray, water_crop: np.ndarray) -> dict:
     frac = (n_on_boundary / n_total) if n_total else 0.0
     return {"n_total": n_total, "n_on_boundary": n_on_boundary,
             "frac_on_boundary": float(frac)}
+
+
+def _render_onboundary_sweep_page(
+    pdf, ob_cand: np.ndarray, ob_scores: np.ndarray, corr_offset: float,
+    onboundary_peak_offset: float, region: str, seed_index: int,
+):
+    """Plot the geometric on-boundary score vs offset.
+
+    Compare to the correlation-derived offset (green dashed) to see where
+    the correlation answer falls on the geometric curve.
+    """
+    fig = plt.figure(figsize=(14, 5))
+    fig.suptitle(
+        f"On-boundary geometric score vs offset  ({region} seed_{seed_index})",
+        fontsize=11)
+    ax = fig.add_axes([0.07, 0.20, 0.88, 0.65])
+    ax.plot(ob_cand, ob_scores, color="#1f77b4", linewidth=1.4,
+            label="on-boundary score (mean exp(-d/15m))")
+    ax.axvline(corr_offset, color="green", linestyle="--", linewidth=1.4,
+               label=f"correlation answer = {corr_offset:.1f}°")
+    ax.axvline(onboundary_peak_offset, color="red", linestyle=":", linewidth=1.4,
+               label=f"on-boundary peak = {onboundary_peak_offset:.1f}°")
+    ax.set_xlim(0, 360)
+    ax.set_xlabel("Candidate offset (deg)", fontsize=10)
+    ax.set_ylabel("Score (higher = pano points closer to sat coastline)",
+                  fontsize=10)
+    ax.set_title(
+        "For peninsula seeds with water on both sides, this curve has two "
+        "peaks ~180° apart — the geometric metric alone cannot break the "
+        "ambiguity. The asymmetric RGB channel is what pulls the "
+        "correlation answer toward the correct half.",
+        fontsize=9)
+    ax.legend(loc="best", fontsize=9)
+    ax.grid(alpha=0.25)
+    pdf.savefig(fig)
+    plt.close(fig)
 
 
 def _render_birdseye_page(pdf, sat_image, sat_water, sat_project,
@@ -909,6 +1042,20 @@ def main() -> int:
     print(f"[demo] pano boundaries: water-edge points={water_n}, "
           f"building-base points={building_n}")
 
+    # Diagnostic: compute the geometric on-boundary score across a coarse
+    # offset sweep. For peninsula seeds (water on both sides) this curve
+    # has TWO peaks ~180° apart, same as the water cross-correlation —
+    # the geometric metric doesn't disambiguate. So we DON'T override the
+    # correlation answer; we just report the sweep for diagnosis.
+    onboundary_offset, ob_cand, ob_scores = sweep_offset_by_onboundary(
+        pano_boundaries, sat_water, sat_project, lat, lon,
+        canvas_radius_m=300.0, coarse_step_deg=5.0, fine_step_deg=1.0,
+        fine_window_deg=10.0,
+    )
+    print(f"[demo] correlation-based offset = {best_offset:.2f}°")
+    print(f"[demo] on-boundary diagnostic: peak={onboundary_offset:.2f}° "
+          f"score={ob_scores.max():.3f}; peak+180°={(onboundary_offset+180)%360:.2f}°")
+
     with PdfPages(out_pdf) as pdf:
         _render_satellite_page(pdf, sat_image, sat_water, sat_project,
                                lat, lon, args.region, args.seed_index,
@@ -922,6 +1069,9 @@ def main() -> int:
                               pano_boundaries, best_offset,
                               args.region, args.seed_index,
                               canvas_radius_m=300.0)
+        _render_onboundary_sweep_page(pdf, ob_cand, ob_scores, best_offset,
+                                       onboundary_offset,
+                                       args.region, args.seed_index)
         _render_signatures_page(pdf, sat_sigs, pano_sigs, best_offset,
                                 args.n_bearings, args.region, args.seed_index,
                                 channels)
