@@ -2410,6 +2410,87 @@ def _seed_multiview_registration(
                     f"[cross_verify] {cap.viewpoint.name}: "
                     f"corrected {n_swapped} match(es) via post-hoc rescue"
                 )
+
+            # ----------------------------------------------------------------
+            # View-level cross-checks (2026-05-19): two consensus signals
+            # that surface failures the per-match rescue can't catch.
+            #
+            # (1) Heading-consistency: each match has a `bearing_delta_deg`
+            #     (matched building's true bearing minus the camera's
+            #     effective heading). If the camera heading was right, the
+            #     deltas would cluster around segment offsets (each segment
+            #     sits at some α inside the FOV, so its bearing_delta is α).
+            #     The MEDIAN delta across all matches measures the *common*
+            #     bias — a clean centred view should have median ≈ 0. A
+            #     non-trivial median means every match is shifted in the
+            #     same direction, which is the fingerprint of a wrong
+            #     heading offset (or wrong projection).
+            #
+            # (2) Multi-building segment: a segment that's much wider than
+            #     its matched building's projected width is masking several
+            #     buildings as one. Flag width_ratio = seg_width / proj_width
+            #     and also count how many *other* projections fall inside
+            #     the segment's x-range — the user's "segment 7 is 5
+            #     buildings" case.
+            # ----------------------------------------------------------------
+            deltas: list[float] = []
+            wide_segs: list[dict] = []
+            for seg in matched_segments:
+                m = seg.get("matched_projection")
+                if m is None:
+                    continue
+                bd = seg.get("bearing_delta_deg")
+                if bd is not None and np.isfinite(bd):
+                    deltas.append(float(bd))
+                seg_w = float(seg["x_right"]) - float(seg["x_left"])
+                proj_w = max(1.0,
+                             float(m.get("x_right_px", m.get("x_px", 0))) -
+                             float(m.get("x_left_px", m.get("x_px", 0))))
+                width_ratio = seg_w / proj_w
+                # Count OTHER projections whose centre x_px falls inside
+                # this segment — these are candidate sibling buildings the
+                # segment is masking.
+                others = []
+                for p in all_proj_list:
+                    if str(p.get("feature_id", "")) == str(m.get("feature_id", "")):
+                        continue
+                    px = float(p.get("x_px", -1))
+                    if float(seg["x_left"]) <= px <= float(seg["x_right"]):
+                        others.append(p)
+                seg["seg_width_px"] = seg_w
+                seg["proj_width_px"] = proj_w
+                seg["width_ratio"] = width_ratio
+                seg["covered_other_projs"] = len(others)
+                if width_ratio >= 2.5 or len(others) >= 2:
+                    seg["multi_building_candidate"] = True
+                    wide_segs.append(seg)
+            if len(deltas) >= 3:
+                med = float(np.median(deltas))
+                # Match-residuals around the consensus: how spread out are
+                # they? Tight cluster around `med` means heading-offset bias
+                # is the dominant story (and `med` is the bias). Broad
+                # spread means matches are individually noisy too.
+                res = [abs(d - med) for d in deltas]
+                mad = float(np.median(res))
+                # Side-channel print: don't alter behaviour, just surface
+                # the diagnostic where a session log can spot it.
+                if abs(med) > 5.0 or mad > 15.0:
+                    print(
+                        f"[heading_consistency] {cap.viewpoint.name}: "
+                        f"median bearing_delta={med:+.1f}° "
+                        f"MAD={mad:.1f}° n={len(deltas)} "
+                        f"— {'heading offset may be biased' if abs(med) > 5.0 else 'matches scattered'}"
+                    )
+            if wide_segs:
+                ratios = [f"{int(s.get('width_ratio', 0))}×" for s in wide_segs]
+                covered = [str(s.get('covered_other_projs', 0)) for s in wide_segs]
+                print(
+                    f"[multi_building] {cap.viewpoint.name}: "
+                    f"{len(wide_segs)} wide segment(s) "
+                    f"(width_ratios={','.join(ratios)} "
+                    f"others_inside={','.join(covered)})"
+                )
+
             overlay = _registration_overlay(
                 image, reg, matched_segments=matched_segments)
             # Compute building band on the original image's mask for display
