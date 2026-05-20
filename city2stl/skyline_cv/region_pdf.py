@@ -2222,23 +2222,28 @@ def _seed_multiview_registration(
             cy = image.shape[0] * 0.5
             pitch_rad = math.radians(cap.viewpoint.pitch)
             cam_z = float(seed_elev) + 1.7
-            for seg in matched_segments:
+            from .pipeline import _height_proxy as _hp
+
+            def _annotate_match_diagnostics(seg: dict) -> None:
+                """Populate seg with bearing / distance / predicted-height /
+                closest-in-bin diagnostics derived from `matched_projection`.
+                Called twice: once after the matcher, and again after any
+                post-match correction so the displayed flags reflect the
+                final choice.
+                """
                 m = seg.get("matched_projection")
                 if not m:
-                    continue
+                    return
                 b = buildings_by_id.get(m["feature_id"])
                 if b is None:
-                    continue
+                    return
                 true_bearing = _bearing_deg(
                     seed.lat, seed.lon, b.centroid_lat, b.centroid_lon)
                 true_dist = _distance_m(
                     seed.lat, seed.lon, b.centroid_lat, b.centroid_lon)
                 delta = (true_bearing - effective_heading +
                          540.0) % 360.0 - 180.0
-                # Height proxy: tagged > area-based fallback
-                from .pipeline import _height_proxy as _hp
                 proxy_h = float(_hp(b))
-                # Implied predicted height at this projection's column
                 x_px = int(round(float(m.get("x_px", 0))))
                 pred_h = float("nan")
                 if 0 <= x_px < contour_arr.size:
@@ -2251,8 +2256,6 @@ def _seed_multiview_registration(
                                           ) * math.tan(ang)
                             - float(getattr(b, "terrain_elev_m", 0.0))
                         )
-                # Closest-building flag: among matched projections within ±15 px,
-                # is this one the closest by forward_m?
                 near = [
                     p for p in all_proj_list
                     if abs(float(p.get("x_px", 0)) - float(m.get("x_px", 0))) <= 15.0
@@ -2269,6 +2272,144 @@ def _seed_multiview_registration(
                 seg["is_closest_in_bin"] = is_closest
                 seg["height_tag_m"] = (
                     float(b.height_tag_m) if b.height_tag_m is not None else None)
+
+            for seg in matched_segments:
+                _annotate_match_diagnostics(seg)
+
+            # ----------------------------------------------------------------
+            # Post-match cross-verification (2026-05-19): re-rank when the
+            # diagnostic flags reveal the matcher picked a worse candidate.
+            # The original matcher already tries "nearest in bucket wins",
+            # but its bucket is gated to candidates whose combined score is
+            # within 0.10 of the best — a closer-but-lower-IoU candidate
+            # can fall outside that band and lose. We catch that here.
+            #
+            # Inputs already computed above:
+            #   seg.is_closest_in_bin  — False ⇒ a closer projection exists
+            #     in the same column bin
+            #   seg.bearing_in_fov     — False ⇒ matched building's true
+            #     bearing is outside the view's FOV (geometry says it
+            #     can't be visible)
+            #   seg.predicted_height_m — implied height from contour-y
+            #     under the matched building's distance
+            #   seg.height_proxy_m     — OSM tagged height or area-based
+            #     fallback
+            #   seg.match_diagnostics  — top-3 candidates from the matcher
+            #
+            # Swap rule: if (B-flag fired OR predicted_height_m is wildly
+            # implausible OR bearing_in_fov is False) AND the top-3
+            # diagnostics contain a candidate that is closer, plausible
+            # height (≥ 5 m), and within FOV, swap to it. Re-annotate so
+            # downstream rendering / height extraction see the corrected
+            # match.
+            #
+            # Conservative thresholds chosen so the swap can only IMPROVE
+            # geometry consistency; a closer candidate with worse IoU is
+            # still rejected if its bearing is out of FOV.
+            # ----------------------------------------------------------------
+            n_swapped = 0
+            for seg in matched_segments:
+                m = seg.get("matched_projection")
+                if m is None:
+                    continue
+                diags = seg.get("match_diagnostics") or []
+                if len(diags) < 2:
+                    continue
+                cur_fwd = float(m.get("forward_m", 1e9))
+                cur_pred_h = float(seg.get("predicted_height_m", float("nan")))
+                cur_in_fov = bool(seg.get("bearing_in_fov", True))
+                cur_is_closest = bool(seg.get("is_closest_in_bin", True))
+                cur_height_implausible = (
+                    not np.isfinite(cur_pred_h)
+                    or cur_pred_h > max_plausible_height_m * 1.25
+                    or cur_pred_h < 1.5
+                )
+                # Trigger the rescue search whenever ANY geometric red flag
+                # fires. The quality bar on the swap TARGET below decides
+                # whether the swap actually happens — a B flag without a
+                # better alternative still leaves the current match alone.
+                needs_swap = (
+                    (not cur_in_fov)
+                    or cur_height_implausible
+                    or (not cur_is_closest)
+                )
+                if not needs_swap:
+                    continue
+                # Best alternative: search the seg's top-3 diagnostics and
+                # the full all_proj_list for a closer-and-plausible match.
+                cur_fid = str(m.get("feature_id", ""))
+                best_alt = None
+                best_alt_fid: str | None = None
+                for d in diags:
+                    alt_fid = str(d.get("feature_id", ""))
+                    if alt_fid == cur_fid:
+                        continue
+                    alt_p = next(
+                        (p for p in all_proj_list
+                         if str(p.get("feature_id", "")) == alt_fid),
+                        None,
+                    )
+                    if alt_p is None:
+                        continue
+                    alt_fwd = float(alt_p.get("forward_m", 1e9))
+                    if alt_fwd >= cur_fwd - 1.0:
+                        continue  # not actually closer
+                    alt_b = buildings_by_id.get(alt_fid)
+                    if alt_b is None:
+                        continue
+                    alt_proxy_h = float(_hp(alt_b))
+                    if alt_proxy_h < 5.0:
+                        continue  # ignore kiosks as rescue candidates
+                    # Bearing-in-FOV check for the alternative
+                    alt_true_bearing = _bearing_deg(
+                        seed.lat, seed.lon,
+                        alt_b.centroid_lat, alt_b.centroid_lon)
+                    alt_delta = (alt_true_bearing - effective_heading +
+                                 540.0) % 360.0 - 180.0
+                    if abs(alt_delta) > half_fov:
+                        continue
+                    # Implied height under alternative's forward_m must be
+                    # plausible (otherwise no improvement over the current).
+                    alt_x_px = int(round(float(alt_p.get("x_px", 0))))
+                    alt_pred_h = float("nan")
+                    if 0 <= alt_x_px < contour_arr.size:
+                        y_px = float(contour_arr[alt_x_px])
+                        if np.isfinite(y_px):
+                            ang = math.atan((cy - y_px) / f_px) + pitch_rad
+                            alt_pred_h = max(
+                                0.0,
+                                cam_z + alt_fwd * math.tan(ang)
+                                - float(getattr(alt_b, "terrain_elev_m", 0.0))
+                            )
+                    if (not np.isfinite(alt_pred_h)
+                            or alt_pred_h > max_plausible_height_m
+                            or alt_pred_h < 1.5):
+                        continue
+                    if best_alt is None or alt_fwd < float(
+                            best_alt.get("forward_m", 1e9)):
+                        best_alt = alt_p
+                        best_alt_fid = alt_fid
+                if best_alt is not None and best_alt_fid != cur_fid:
+                    # Honour F-SKY6 1:1 constraint: don't steal a building
+                    # already claimed by a higher-scoring sibling segment.
+                    already_claimed = any(
+                        s is not seg
+                        and s.get("matched_projection") is not None
+                        and str(s["matched_projection"].get(
+                            "feature_id", "")) == best_alt_fid
+                        for s in matched_segments
+                    )
+                    if not already_claimed:
+                        seg["matched_projection_pre_correction"] = m
+                        seg["matched_projection"] = best_alt
+                        seg["match_corrected"] = True
+                        _annotate_match_diagnostics(seg)
+                        n_swapped += 1
+            if n_swapped:
+                print(
+                    f"[cross_verify] {cap.viewpoint.name}: "
+                    f"corrected {n_swapped} match(es) via post-hoc rescue"
+                )
             overlay = _registration_overlay(
                 image, reg, matched_segments=matched_segments)
             # Compute building band on the original image's mask for display
