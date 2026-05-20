@@ -3179,6 +3179,31 @@ def _render_seed_view_page(
         f"  flags={n_fov_fail}F/{n_not_closest}B/{n_implausible}P of {n_total}"
         if n_total else ""
     )
+    # View-level cross-checks (set by _seed_multiview_registration):
+    #   bearing_delta_deg per match → median + MAD across the view
+    #   multi_building_candidate per match → count of wide/cluster segments
+    deltas = [
+        float(s["bearing_delta_deg"]) for s in sv.matched_segments
+        if s.get("matched_projection") is not None
+        and s.get("bearing_delta_deg") is not None
+        and np.isfinite(s.get("bearing_delta_deg", float("nan")))
+    ]
+    heading_str = ""
+    if len(deltas) >= 3:
+        med = float(np.median(deltas))
+        mad = float(np.median([abs(d - med) for d in deltas]))
+        heading_str = f"  Δh̃={med:+.1f}°(MAD={mad:.0f}°)"
+    n_wide = sum(
+        1 for s in sv.matched_segments
+        if s.get("matched_projection") is not None
+        and s.get("multi_building_candidate")
+    )
+    wide_str = f"  multi-bldg={n_wide}" if n_wide else ""
+    n_corrected = sum(
+        1 for s in sv.matched_segments
+        if s.get("match_corrected")
+    )
+    corr_str = f"  ✎{n_corrected}" if n_corrected else ""
     fig.suptitle(
         f"Seed view — {sv.seed_name}  "
         f"effective_heading={effective_heading:.1f}°  "
@@ -3186,19 +3211,25 @@ def _render_seed_view_page(
         f"reg_score={sv.registration_score:.2f}px  iou={sv.iou:.2f}  "
         f"segments={n_total}  "
         f"estimates={sv.estimates_count}"
-        f"{flags_str}"
+        f"{flags_str}{heading_str}{wide_str}{corr_str}"
         f"{aerial_tag}",
         fontsize=11,
     )
-    # Decoder for the F/B/P shorthand in the title. Only printed when at
-    # least one flag fired — otherwise the line is noise.
-    if n_total and (n_fov_fail or n_not_closest or n_implausible):
+    # Decoder for the F/B/P + new diagnostics shorthand in the title.
+    if n_total and (
+        n_fov_fail or n_not_closest or n_implausible
+        or len(deltas) >= 3 or n_wide or n_corrected
+    ):
         fig.text(
             0.5, 0.955,
             "F = matched bearing outside FOV   "
             "B = matched building not closest in column bin   "
-            "P = predicted height implausible vs sqrt-area proxy",
-            ha="center", va="top", fontsize=8, color="0.35",
+            "P = predicted height implausible vs sqrt-area proxy   "
+            "Δh̃ = median(true-bearing − effective-heading) across matches  "
+            "(non-zero ⇒ heading bias)   "
+            "multi-bldg = wide segment that spans multiple OSM polygons   "
+            "✎N = N matches corrected by post-hoc rescue",
+            ha="center", va="top", fontsize=7, color="0.35",
         )
 
     # ── Crop the displayed image to the building band ────────────────────
