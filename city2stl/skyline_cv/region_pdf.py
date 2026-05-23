@@ -80,6 +80,7 @@ from .pipeline import (
     _load_env_file_if_present,
     _polygon_area_m2,
     aggregate_building_heights,
+    augment_estimates_with_depth,
     _merge_silhouette_sources,
     _neural_sky_and_building_masks,
     detect_building_silhouettes,
@@ -90,6 +91,28 @@ from .pipeline import (
     osm_anchor_silhouettes,
     register_view_to_osm,
 )
+
+# F-SKY12: enable Depth Anything V2 verifier on each view. Off by default
+# while Phase A is validated. Set env var SKYLINE_CV_F_SKY12=1 to turn on.
+_F_SKY12_ENABLED = os.environ.get("SKYLINE_CV_F_SKY12", "0").strip().lower() in (
+    "1", "true", "yes", "on"
+)
+
+# F-SKY13: draw OSM coastline + 1 km consideration window on per-view minimap.
+# OSM is the primary coastline ground truth (see feedback memory
+# feedback_satellite_coastline_hsv_unreliable). Default ON; set
+# SKYLINE_CV_F_SKY13=0 to disable the overlay.
+_F_SKY13_ENABLED = os.environ.get("SKYLINE_CV_F_SKY13", "1").strip().lower() in (
+    "1", "true", "yes", "on"
+)
+_F_SKY13_RADIUS_M = 1000.0
+# Optional: also render the ESRI satellite image as the minimap background.
+# Costs one network fetch per seed on first run (then disk-cached). Off by
+# default; enable with SKYLINE_CV_F_SKY13_SAT_BG=1. Independent of the
+# F-SKY11.1 satellite HSV path — purely visual, no algorithmic role.
+_F_SKY13_SAT_BG_ENABLED = os.environ.get(
+    "SKYLINE_CV_F_SKY13_SAT_BG", "0"
+).strip().lower() in ("1", "true", "yes", "on")
 
 STREETVIEW_METADATA_URL = "https://maps.googleapis.com/maps/api/streetview/metadata"
 STREETVIEW_IMAGE_URL = "https://maps.googleapis.com/maps/api/streetview"
@@ -2137,6 +2160,14 @@ def _seed_multiview_registration(
                     trace=trace,
                     max_plausible_height_m=max_plausible_height_m,
                 )
+                # F-SKY12: augment estimates with depth-derived heights as
+                # an independent verifier. Pure diagnostic in Phase A — does
+                # not alter ``estimated_height_m``. Off unless
+                # SKYLINE_CV_F_SKY12=1 because DA2 inference is ~1–2 s/view.
+                if _F_SKY12_ENABLED and est_for_view:
+                    est_for_view = augment_estimates_with_depth(
+                        image, est_for_view, cap.viewpoint, camera_height_m=1.7,
+                    )
                 estimates.extend(est_for_view)
 
             buildings_by_id = {b.feature_id: b for b in seed_buildings}
@@ -2615,6 +2646,167 @@ def _seed_multiview_registration(
     return view_rows, agg, pano_results
 
 
+def _draw_osm_coastline_overlay(
+    ax,
+    seed_lon: float,
+    seed_lat: float,
+    mlon: float,
+    mlat: float,
+    osm_data: dict,
+    radius_m: float = 1000.0,
+    *,
+    satellite_bg: bool = False,
+) -> None:
+    """F-SKY13: draw OSM coastline + 1 km consideration window on a minimap.
+
+    OSM ``natural=coastline`` linestrings within ``radius_m`` of the seed are
+    drawn as a solid blue line (the primary coastline ground truth). A dashed
+    grey circle marks the consideration window. Optional water polygons (bay/
+    ocean/sea) get a faint blue fill so the user can immediately see which
+    side of the coastline is wet.
+
+    When ``satellite_bg=True`` an ESRI satellite tile covering the 1 km
+    window is fetched (or loaded from the on-disk cache populated by
+    ``city2stl.skyline_cv.satellite_image.fetch_region_satellite``) and
+    rendered as a faint underlay so the OSM features sit on top of real
+    imagery. Reuses the existing satellite-tile primitive — does not add a
+    second fetch path. Network failures degrade gracefully (no background
+    drawn).
+
+    No-op when the OSM ``waterways`` layer is empty or contains no features
+    within the radius — keeps inland seeds clean.
+    """
+    try:
+        from city2stl.skyline_cv.osm_water import (  # noqa: PLC0415
+            clip_to_radius,
+            extract_coastline_features,
+            extract_water_features,
+        )
+    except ImportError as exc:
+        logger.warning("F-SKY13 osm_water module unavailable: %s", exc)
+        return
+
+    # ── Optional satellite-image background (under everything) ─────────────
+    # Computed before the no-op short-circuit so the background shows even
+    # on inland seeds (where there's no coastline but the imagery is still
+    # informative).
+    if satellite_bg:
+        try:
+            from city2stl.skyline_cv.satellite_image import (  # noqa: PLC0415
+                fetch_region_satellite,
+            )
+            # Build a 1 km bbox around the seed. mlon/mlat are lon/lat→m
+            # scale factors; invert to get degrees per metre.
+            dlon = radius_m / mlon
+            dlat = radius_m / mlat
+            sat_bbox = (
+                seed_lat - dlat,  # south
+                seed_lon - dlon,  # west
+                seed_lat + dlat,  # north
+                seed_lon + dlon,  # east
+            )
+            sat_img, _proj, _meta = fetch_region_satellite(
+                sat_bbox, target_m_per_px=2.0,
+            )
+            ax.imshow(
+                sat_img,
+                extent=(sat_bbox[1], sat_bbox[3], sat_bbox[0], sat_bbox[2]),
+                origin="upper",
+                alpha=0.55,
+                zorder=0,
+                interpolation="bilinear",
+            )
+        except Exception as exc:
+            logger.info(
+                "F-SKY13 satellite background unavailable: %s", exc
+            )
+
+    seed_lonlat = (seed_lon, seed_lat)
+    coastline = clip_to_radius(
+        extract_coastline_features(osm_data), seed_lonlat, radius_m
+    )
+    water = clip_to_radius(
+        extract_water_features(osm_data), seed_lonlat, radius_m
+    )
+
+    if not coastline and not water:
+        return  # inland seed — nothing to draw
+
+    # ── Water-area fill (faint blue, sits between grey footprints and coastline)
+    if water:
+        from matplotlib.collections import PatchCollection  # noqa: PLC0415
+        water_polys: list[mpatches.Polygon] = []
+        for feat in water:
+            geom = feat.get("geometry") or {}
+            coords = geom.get("coordinates") or []
+            if geom.get("type") == "Polygon":
+                rings = [coords[0]] if coords else []
+            elif geom.get("type") == "MultiPolygon":
+                rings = [poly[0] for poly in coords if poly]
+            else:
+                rings = []
+            for ring in rings:
+                if len(ring) < 3:
+                    continue
+                xs = [float(p[0]) for p in ring]
+                ys = [float(p[1]) for p in ring]
+                water_polys.append(mpatches.Polygon(
+                    np.column_stack([xs, ys]), closed=True))
+        if water_polys:
+            ax.add_collection(PatchCollection(
+                water_polys,
+                facecolor=(0.45, 0.65, 0.85, 0.18),
+                edgecolor=(0.20, 0.40, 0.65, 0.30),
+                linewidths=0.4,
+                zorder=1.5,
+                match_original=False,
+            ))
+
+    # ── Coastline linestrings — solid blue, the trusted reference
+    for feat in coastline:
+        geom = feat.get("geometry") or {}
+        gtype = geom.get("type")
+        coords = geom.get("coordinates") or []
+        if gtype == "LineString":
+            lines = [coords]
+        elif gtype == "MultiLineString":
+            lines = coords
+        else:
+            continue
+        for line in lines:
+            if len(line) < 2:
+                continue
+            xs = [float(p[0]) for p in line]
+            ys = [float(p[1]) for p in line]
+            ax.plot(
+                xs, ys,
+                color=(0.10, 0.30, 0.70),
+                linewidth=1.6,
+                alpha=0.85,
+                zorder=3.0,
+                label="OSM coastline" if "_osm_coastline_label" not in ax.__dict__ else None,
+            )
+            ax.__dict__["_osm_coastline_label"] = True
+
+    # ── 1 km consideration window (dashed grey circle around the seed) ──
+    # Convert metres to degree offsets via the cached lat-scaled factors.
+    # 100-point polyline closes the loop visually without using matplotlib's
+    # Circle patch (which doesn't respect equal-aspect well at these scales).
+    n_pts = 100
+    angles = np.linspace(0.0, 2.0 * math.pi, n_pts, dtype=np.float64)
+    radius_lon = radius_m / mlon
+    radius_lat = radius_m / mlat
+    circle_x = seed_lon + radius_lon * np.cos(angles)
+    circle_y = seed_lat + radius_lat * np.sin(angles)
+    ax.plot(
+        circle_x, circle_y,
+        color=(0.35, 0.35, 0.35, 0.65),
+        linewidth=0.9,
+        linestyle="--",
+        zorder=2.5,
+    )
+
+
 def _draw_view_minimap(
     ax,
     seed_lat: float,
@@ -2835,6 +3027,23 @@ def _draw_view_minimap(
             bbox=dict(boxstyle="circle,pad=0.15", facecolor=color,
                       edgecolor="black", linewidth=0.6, alpha=0.95),
             zorder=6,
+        )
+
+    # F-SKY13: OSM-coastline + 1 km consideration window overlay. OSM is the
+    # primary coastline ground truth (the satellite HSV detector in
+    # coastline_registration.py is unreliable — see feedback memory). Drawn
+    # underneath the camera marker but on top of the building polygons, so
+    # the user can verify pano↔OSM coastline agreement visually.
+    if _F_SKY13_ENABLED:
+        _draw_osm_coastline_overlay(
+            ax,
+            seed_lon=seed_lon,
+            seed_lat=seed_lat,
+            mlon=mlon,
+            mlat=mlat,
+            osm_data=osm_data,
+            radius_m=_F_SKY13_RADIUS_M,
+            satellite_bg=_F_SKY13_SAT_BG_ENABLED,
         )
 
     # Camera marker drawn now; the FOV cone is drawn AFTER auto-zoom so

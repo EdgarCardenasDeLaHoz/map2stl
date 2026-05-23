@@ -157,6 +157,29 @@ After you edit code, before committing:
 6. **Patch at the correct module path in tests** — e.g. `app.server.routers.cities._fetch_osm_data`, not `app.routers.cities._fetch_osm_data`.
 7. **Backend**: blocking ops go in `run_in_executor`; `asyncio.get_running_loop()` not `get_event_loop()`.
 
+## Training & ML Status
+
+**Current production model:** `retna_pruned.pt` (0.2691 loss, 3.82m MAE) — used for building height estimation.
+
+### Phase G (May 5-6, 2026) — Baseline established
+- MAE 7.55m on 573 high-res tiles (512×512 @ 1.0 m/pixel)
+- Architecture [6,7,6,8,7,7,7,7,9] (22,184 params)
+- Deliverable: `models/retna_phase_g_global.pt` (Phase H warmstart)
+- See: `PHASE-G-README.md`
+
+### Phase H (May 7-8, 2026) — Validation complete
+- RMSE 17.75m (3-cycle test + 10-epoch retraining)
+- Promotion eligible; metric switched MAE → RMSE
+- Deliverable: `models/retna_phase_h_final.pt`
+- See: `PHASE-H-LAUNCH-SUMMARY.md`, `PHASE-H-BENCHMARK-TIERS.md`
+
+### F-SKY (Current focus, May 2026) — Skyline CV pipeline
+Computer-vision improvements to `city2stl/skyline_cv/` for cross-view building height estimation.
+- **Active:** F-SKY2, 4, 6, 7, 8, 10 (opt-in), 11.1
+- **Removed:** F-SKY3 (regression), F-SKY11.2 (dead-end)
+- **Pending:** F-SKY5 (MobileSAM instance head)
+- See: `docs/F-SKY-INTEGRATION.md`
+
 ## Full Details
 
 | Topic | File |
@@ -173,3 +196,8 @@ After you edit code, before committing:
 | Known issues + feature status | `docs/issues.md` |
 | Completed feature history | `docs/functionality_doc.md` |
 | AI-proposed features (approve/deny) | `docs/proposals.md` |
+| Model training strategy | `docs/MODEL-STRATEGY.md` |
+| Model reference guide | `docs/MODELS-REFERENCE.md` |
+| Tile analysis guide | `docs/TILE-ANALYSIS-GUIDE.md` |
+| F-SKY integration & status | `docs/F-SKY-INTEGRATION.md` |
+| Building height model summary | `docs/BUILDING-HEIGHT-MODEL-SUMMARY.md` |

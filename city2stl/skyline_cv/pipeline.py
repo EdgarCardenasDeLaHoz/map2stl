@@ -61,7 +61,7 @@ from collections import OrderedDict as _OrderedDict
 
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Sequence
 
@@ -172,6 +172,92 @@ class RegisteredBuildingEstimate:
     floor_confidence: float | None = None
     inferred_distance_m: float | None = None
     inferred_height_m: float | None = None
+    # F-SKY12 depth-from-pano diagnostics. Populated when
+    # ``augment_estimates_with_depth`` is called on a view's estimates.
+    # ``depth_height_m`` is an independent height estimate from Depth
+    # Anything V2 at the silhouette-top pixel, calibrated to metres using
+    # the matched OSM building distances as anchors. ``depth_disagreement``
+    # is True when |estimated_height_m - depth_height_m| / max(...) > 0.4.
+    # Phase A: pure diagnostic, no impact on aggregated heights. See
+    # docs/plans/F-SKY12-depth-from-panos.md.
+    depth_height_m: float | None = None
+    depth_disagreement: bool | None = None
+
+
+def augment_estimates_with_depth(
+    image_rgb: np.ndarray,
+    estimates: list[RegisteredBuildingEstimate],
+    viewpoint: "Viewpoint",
+    camera_height_m: float = 1.7,
+) -> list[RegisteredBuildingEstimate]:
+    """F-SKY12: augment per-view estimates with depth-derived heights.
+
+    Runs Depth Anything V2 once on the view image, calibrates relative
+    depth to metres using each estimate's ``forward_m`` as an anchor at
+    its ``(x_px, y_px)``, and computes a second height estimate at the
+    silhouette-top pixel via pinhole geometry. Sets ``depth_height_m``
+    and ``depth_disagreement`` on each returned estimate.
+
+    Heavy: DA2 inference is ~1–2 s on CPU. Callers should only invoke
+    this when the per-view PDF page needs the diagnostic. Returns a new
+    list (RegisteredBuildingEstimate is frozen); on failure returns the
+    input unchanged so the rest of the pipeline is untouched.
+    """
+    if not estimates:
+        return estimates
+
+    try:
+        from city2stl.skyline_cv.depth_estimation import (  # noqa: PLC0415
+            calibrate_pano_depth,
+            compare_heights,
+            depth_height_from_segment,
+            predict_pano_depth,
+        )
+    except ImportError as exc:
+        logger.warning("F-SKY12 depth module unavailable: %s", exc)
+        return estimates
+
+    try:
+        depth_rel = predict_pano_depth(image_rgb)
+    except Exception as exc:
+        logger.warning("F-SKY12 DA2 inference failed: %s", exc)
+        return estimates
+
+    # Build anchors from the estimates: (row, col, distance_m). Use the
+    # silhouette-top pixel as the sample location and forward_m as the
+    # known distance to the matched building.
+    anchors: list[tuple[int, int, float]] = []
+    for est in estimates:
+        if est.forward_m > 0.0 and 0.0 <= est.y_px and 0.0 <= est.x_px:
+            anchors.append(
+                (int(round(est.y_px)), int(round(est.x_px)), float(est.forward_m))
+            )
+    if not anchors:
+        return estimates
+
+    try:
+        depth_m = calibrate_pano_depth(depth_rel, anchors)
+    except ValueError as exc:
+        logger.warning("F-SKY12 depth calibration failed: %s", exc)
+        return estimates
+
+    fy = _focal_length_px(viewpoint)
+    cy = float(viewpoint.image_height) / 2.0
+
+    out: list[RegisteredBuildingEstimate] = []
+    for est in estimates:
+        h_depth = depth_height_from_segment(
+            depth_m,
+            (int(round(est.x_px)), int(round(est.y_px))),
+            fy=fy,
+            cy=cy,
+            camera_height_m=camera_height_m,
+        )
+        disagree = compare_heights(est.estimated_height_m, h_depth)
+        out.append(
+            replace(est, depth_height_m=float(h_depth), depth_disagreement=bool(disagree))
+        )
+    return out
 
 
 def _load_env_file_if_present() -> None:
@@ -243,6 +329,13 @@ def _lonlat_to_local_m(lon: float, lat: float, lon0: float, lat0: float) -> tupl
     dx = (lon - lon0) * meters_per_deg_lon
     dy = (lat - lat0) * meters_per_deg_lat
     return dx, dy
+
+
+# Public alias for the equirectangular local-metres projection. Equirectangular
+# is exact enough for ≤ a few km from the origin and is used uniformly across
+# skyline_cv (minimap rendering, registration sweeps, OSM coastline clipping).
+# Prefer this over reimplementing the projection in new modules.
+lonlat_to_local_m = _lonlat_to_local_m
 
 
 def _focal_length_px(viewpoint: Viewpoint) -> float:

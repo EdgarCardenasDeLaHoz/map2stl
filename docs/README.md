@@ -1,6 +1,6 @@
 # Docs Index — strm2stl
 
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-23_
 
 Start here if you opened the `docs/` folder directly and need the preferred reading path.
 
@@ -34,6 +34,19 @@ These are useful after orientation, but they are not the best first stop:
 - `issues.md`
 - `ux-audit.md`
 - design and proposal documents tied to a specific subsystem
+
+## ML & Height-Training Docs
+
+- `F-SKY-INTEGRATION.md` — current focus: skyline_cv computer-vision pipeline status & roadmap
+- `BUILDING-HEIGHT-MODEL-SUMMARY.md` — building height estimation overview (nDSM/GHSL/WSF3D/3DEP)
+- `MODEL-STRATEGY.md` — training strategy across Phase G/H/F-SKY
+- `MODELS-REFERENCE.md` — checkpoint reference (which model lives where, what was its loss)
+- `TILE-ANALYSIS-GUIDE.md` — guide to evaluating model performance per tile
+- `GROWTH_EXTENDED_TEST_REPORT.md` — Phase G/H architecture growth experiments
+- `growth_degradation_analysis.md` / `growth_degradation_mitigation.md` — gradient freezing investigations
+- `ml_pipeline_audit_v1.md` — pipeline audit reference
+- `design/roof-ml-architecture.md` — roof-prediction ML architecture
+- `PHASE-G-ARCHIVE-SUMMARY.md` — archive of Phase G artifacts
 
 ## Proposals & Tracking
 
