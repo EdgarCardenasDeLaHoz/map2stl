@@ -224,6 +224,75 @@ def project_lonlat_to_view(
 
 
 
+def pano_water_top_to_lonlat(
+    pano_water_mask: "np.ndarray",
+    headings_per_col: "np.ndarray",
+    seed_lat: float,
+    seed_lon: float,
+    *,
+    column_stride: int = 8,
+    pitch_deg: float = 0.0,
+    camera_elev_m: float = 1.7,
+    max_distance_m: float = 1500.0,
+) -> list[tuple[float, float]]:
+    """Invert the pinhole projection used by ``project_lonlat_to_view``
+    to recover sea-level ``(lon, lat)`` points for the top of the water
+    band in each pano column.
+
+    For each column with water present we take the topmost water row
+    (the apparent water/land boundary at that bearing) and solve for the
+    sea-level distance under the same camera-height + pitch model the
+    forward projection uses. Distance ``d = h * focal / (y - cy -
+    tan(pitch) * focal)``. Bearings come from ``headings_per_col``
+    (which already encodes the per-column compass heading after pano
+    stitching). Sampling every ``column_stride`` columns keeps the
+    output light enough for matplotlib without losing visual detail.
+
+    Returned points are in geographic order along the seed's horizon,
+    suitable for drawing a polyline on the minimap. Points beyond
+    ``max_distance_m`` (typically the 1 km consideration window times
+    a safety factor) are dropped so degenerate near-horizon rows don't
+    extend the polyline across the whole panel.
+    """
+    if pano_water_mask is None or pano_water_mask.size == 0:
+        return []
+    H, W = pano_water_mask.shape[:2]
+    if headings_per_col.size != W:
+        return []
+    # 75°-FOV-equivalent focal at the pano image height — matches the
+    # vertical focal used by ``score_pano_offset_keypoints`` so this
+    # inverse stays self-consistent with the forward scoring.
+    focal_y = H / (2.0 * math.tan(math.radians(37.5)))
+    cy = H / 2.0
+    p_rad = math.radians(pitch_deg)
+    horizon_shift = math.tan(p_rad) * focal_y
+
+    mlat = _METRES_PER_DEG_LAT
+    mlon = _metres_per_deg_lon(seed_lat)
+
+    out: list[tuple[float, float]] = []
+    for col in range(0, W, max(1, column_stride)):
+        column = pano_water_mask[:, col]
+        water_rows = np.where(column)[0]
+        if water_rows.size == 0:
+            continue
+        y_top = float(water_rows.min())
+        # Solve for distance to sea-level top-of-water at this column.
+        denom = y_top - cy - horizon_shift
+        if denom <= 1.0:
+            continue  # at or above horizon — degenerate
+        distance_m = camera_elev_m * focal_y / denom
+        if not (0.0 < distance_m <= max_distance_m):
+            continue
+        bearing_rad = math.radians(float(headings_per_col[col]))
+        dx_m = distance_m * math.sin(bearing_rad)
+        dy_m = distance_m * math.cos(bearing_rad)
+        lon = seed_lon + dx_m / mlon
+        lat = seed_lat + dy_m / mlat
+        out.append((lon, lat))
+    return out
+
+
 def score_pano_offset_keypoints(
     keypoints: list[dict],
     pano_water_mask: np.ndarray,

@@ -239,23 +239,37 @@ Phase A is successful if:
   No modification to the scoring function — it was already
   source-agnostic by design.
 
-## Phase B (future, not this round)
+## Phase B — landed
 
-- **Pano-projected OSM coastline overlay** — dashed orange
-  polyline on the minimap, showing where the pano-side
-  water boundary maps to after applying the recovered
-  heading offset. Needs the recovered `anchor_offset_deg`
-  threaded through to `_draw_view_minimap`; currently only
-  per-view `heading_deg` is available there.
-- **Pano↔OSM IoU summary text block** — single-line
-  diagnostic on the minimap. Depends on the pano-projected
-  coastline above + the per-seed pano water mask. Both
-  need upstream plumbing.
-- Make OSM the **only** coastline target after Phase A
+- ✅ **Pano-projected coastline overlay** — `pano_water_top_to_lonlat`
+  in `coastline_registration.py` inverts the forward pinhole
+  projection, returning sea-level (lon, lat) points for the top
+  of the water band in each pano column. Rendered as scattered
+  orange dots on the minimap (scatter rather than polyline so
+  piers / discontinuous near-far transitions don't zig-zag).
+  Computed in the existing pano_recovery block (no separate
+  fetch path) and threaded through `SeedViewRegistration.pano_projected_coastline`.
+- ✅ **Pano↔OSM IoU summary text block** — uses
+  `osm_keypoints_for_scoring` to feed OSM keypoints into the
+  existing `score_pano_offset_keypoints` at the recovered
+  heading offset. Threaded through `SeedViewRegistration.pano_osm_iou`
+  + `pano_osm_n_keypoints`; rendered as a blue annotation in
+  the top-left of the minimap.
+- ✅ Both diagnostics activate only when pano-recovery is
+  enabled for the region (existing site config flag). For
+  seeds without pano-recovery, the minimap falls back to
+  Phase A behaviour (just the OSM coastline + 1 km circle).
+
+## Phase C (future, not this round)
+
+- Make OSM the **only** coastline target after Phase B
   validates that pano↔OSM registration works reliably on
   coastal seeds. At that point `detect_sat_water_mask`
   becomes truly dead code and can be deleted (or kept only
   as the training-data input for F-SKY14).
+- Decouple pano-recovery state from the satellite path so
+  OSM-driven recovery can run on regions where the satellite
+  HSV detector is skipped entirely.
 - Extend the 1 km window to a configurable per-region
   parameter for very large or very small seeds.
 - See F-SKY14 (separate proposal, filed) for a

@@ -193,6 +193,18 @@ class SeedViewRegistration:
     # the bounded in-memory neural cache (which evicts after 16 entries and
     # otherwise misses by PDF-render time on multi-seed runs).
     building_mask: "np.ndarray | None" = None
+    # F-SKY13 Phase B: pano↔OSM-coastline registration score at the
+    # recovered (or manually overridden) heading offset. Per-seed, not
+    # per-view — populated only when pano-recovery is enabled and the
+    # seed has OSM coastline within the 1 km window. None elsewhere.
+    pano_osm_iou: float | None = None
+    pano_osm_n_keypoints: int | None = None
+    # F-SKY13 Phase B: pano-derived coastline projected back to lon/lat
+    # (one point per pano column where water was detected, sampled at a
+    # coarse stride). Drawn as a dashed orange polyline on the minimap so
+    # the user can see where the pano "thinks" the coast is. None when
+    # pano-recovery is disabled or there's no water in the pano.
+    pano_projected_coastline: "list[tuple[float, float]] | None" = None
 
 
 def _resolve_api_key(explicit_key: str | None = None) -> str:
@@ -1898,6 +1910,11 @@ def _seed_multiview_registration(
         pano_recovered_offset: float | None = None
         pano_recovered_sigma: float | None = None
         pano_recovered_peak: float | None = None
+        # F-SKY13 Phase B diagnostics — populated alongside pano-recovery
+        # when OSM coastline is available within 1 km of the seed.
+        pano_osm_iou: float | None = None
+        pano_osm_n_keypoints: int | None = None
+        pano_projected_coastline: list[tuple[float, float]] | None = None
         if pano_recovery_state is not None:
             try:
                 from .pipeline import (
@@ -1977,6 +1994,66 @@ def _seed_multiview_registration(
                             f"peak={pano_recovered_peak:.3f}  "
                             f"sigma={pano_recovered_sigma:.3f}"
                         )
+
+                        # F-SKY13 Phase B: also score against OSM coastline
+                        # (the trusted ground truth — see feedback memory).
+                        # Reuses the same scoring function via the
+                        # osm_keypoints_for_scoring adapter; no new scoring
+                        # path. Also invert the pano water-top to lon/lat
+                        # so the minimap can draw what the pano "sees" as
+                        # the coastline.
+                        try:
+                            from .osm_water import (  # noqa: PLC0415
+                                clip_to_radius,
+                                extract_coastline_features,
+                                osm_keypoints_for_scoring,
+                            )
+                            from .coastline_registration import (  # noqa: PLC0415
+                                pano_water_top_to_lonlat,
+                                score_pano_offset_keypoints,
+                            )
+                            _osm_coast = clip_to_radius(
+                                extract_coastline_features(osm_data),
+                                (seed.lon, seed.lat),
+                                radius_m=1000.0,
+                            )
+                            _osm_kps = osm_keypoints_for_scoring(
+                                _osm_coast, (seed.lon, seed.lat),
+                                spacing_m=20.0,
+                            )
+                            if _osm_kps:
+                                pano_osm_iou = float(
+                                    score_pano_offset_keypoints(
+                                        _osm_kps, _pw, _headings_per_col,
+                                        seed.lat, seed.lon,
+                                        candidate_offset_deg=pano_recovered_offset,
+                                        pitch_deg=effective_pitch,
+                                        tolerance_px=25,
+                                    )
+                                )
+                                pano_osm_n_keypoints = len(_osm_kps)
+                            # Project pano water-top back to lon/lat for the
+                            # dashed-orange minimap overlay. Independent of
+                            # whether OSM coastline data was found.
+                            pano_projected_coastline = (
+                                pano_water_top_to_lonlat(
+                                    _pw, _headings_per_col,
+                                    seed.lat, seed.lon,
+                                    column_stride=8,
+                                    pitch_deg=effective_pitch,
+                                )
+                            )
+                            print(
+                                f"[pano_recovery] seed={seed.name}  "
+                                f"osm_kp={pano_osm_n_keypoints}  "
+                                f"osm_iou={pano_osm_iou}  "
+                                f"projected_pts={len(pano_projected_coastline) if pano_projected_coastline else 0}"
+                            )
+                        except Exception as _e_osm:
+                            print(
+                                f"[pano_recovery] seed={seed.name} "
+                                f"OSM diagnostic failed: {_e_osm}"
+                            )
                     else:
                         print(f"[pano_recovery] seed={seed.name}  "
                               f"keypoints={len(keypoints)} — no recovery "
@@ -2547,6 +2624,9 @@ def _seed_multiview_registration(
                     band_y=band,
                     is_negative=is_negative_seed,
                     building_mask=_bmask,
+                    pano_osm_iou=pano_osm_iou,
+                    pano_osm_n_keypoints=pano_osm_n_keypoints,
+                    pano_projected_coastline=pano_projected_coastline,
                 )
             )
 
@@ -2656,6 +2736,9 @@ def _draw_osm_coastline_overlay(
     radius_m: float = 1000.0,
     *,
     satellite_bg: bool = False,
+    pano_projected_coastline: "list[tuple[float, float]] | None" = None,
+    pano_osm_iou: float | None = None,
+    pano_osm_n_keypoints: int | None = None,
 ) -> None:
     """F-SKY13: draw OSM coastline + 1 km consideration window on a minimap.
 
@@ -2806,6 +2889,47 @@ def _draw_osm_coastline_overlay(
         zorder=2.5,
     )
 
+    # ── F-SKY13 Phase B: pano-projected coastline (where the pano "sees"
+    # water meeting land, projected back to lon/lat). Each entry is a
+    # discrete sea-level point at the apparent water-top of one pano column.
+    # Drawn as scattered dots rather than a connected polyline because
+    # adjacent columns may sample different distances (e.g. when a pier
+    # juts out into the bay) and a polyline would zig-zag awkwardly.
+    if pano_projected_coastline:
+        xs = [p[0] for p in pano_projected_coastline]
+        ys = [p[1] for p in pano_projected_coastline]
+        ax.scatter(
+            xs, ys,
+            s=6,
+            color=(0.95, 0.55, 0.10),
+            alpha=0.85,
+            zorder=3.5,
+            edgecolors="none",
+            label="pano-projected coastline",
+        )
+
+    # ── F-SKY13 Phase B: pano↔OSM IoU score as a small annotation in the
+    # top-left corner of the minimap. Lets the user see the registration
+    # confidence number alongside the visual coastline agreement check.
+    if pano_osm_iou is not None:
+        n_kp = pano_osm_n_keypoints or 0
+        score_txt = f"pano↔OSM IoU: {pano_osm_iou:.2f}   ({n_kp} keypoints)"
+        ax.text(
+            0.02, 0.98, score_txt,
+            transform=ax.transAxes,
+            fontsize=8,
+            fontweight="bold",
+            verticalalignment="top",
+            color=(0.10, 0.30, 0.70),
+            bbox=dict(
+                boxstyle="round,pad=0.3",
+                facecolor=(1.0, 1.0, 1.0, 0.85),
+                edgecolor=(0.10, 0.30, 0.70, 0.6),
+                linewidth=0.6,
+            ),
+            zorder=10,
+        )
+
 
 def _draw_view_minimap(
     ax,
@@ -2818,6 +2942,10 @@ def _draw_view_minimap(
     buildings_by_id: dict | None = None,
     image_width: int = 960,
     radius_m: float = 1500.0,
+    *,
+    pano_osm_iou: float | None = None,
+    pano_osm_n_keypoints: int | None = None,
+    pano_projected_coastline: "list[tuple[float, float]] | None" = None,
 ) -> None:
     """Draw an OSM-footprint mini-map centered on the seed, with matched
     buildings colored to match their skyline segment.
@@ -3044,6 +3172,9 @@ def _draw_view_minimap(
             osm_data=osm_data,
             radius_m=_F_SKY13_RADIUS_M,
             satellite_bg=_F_SKY13_SAT_BG_ENABLED,
+            pano_projected_coastline=pano_projected_coastline,
+            pano_osm_iou=pano_osm_iou,
+            pano_osm_n_keypoints=pano_osm_n_keypoints,
         )
 
     # Camera marker drawn now; the FOV cone is drawn AFTER auto-zoom so
@@ -3550,6 +3681,9 @@ def _render_seed_view_page(
         sv.matched_segments,
         buildings_by_id=buildings_by_id,
         image_width=sv.image.shape[1],
+        pano_osm_iou=sv.pano_osm_iou,
+        pano_osm_n_keypoints=sv.pano_osm_n_keypoints,
+        pano_projected_coastline=sv.pano_projected_coastline,
     )
 
     pdf.savefig(fig, bbox_inches="tight")
