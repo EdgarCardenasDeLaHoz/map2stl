@@ -4475,6 +4475,28 @@ def run_region_pdf_report(
             pano_results=pano_results,
         )
 
+    # F-SKY15: parallel HTML diagnostic report. Default ON because the
+    # cost is small (one PNG per seed via the existing minimap renderer);
+    # set SKYLINE_CV_HTML_REPORT=0 to disable. Failures are swallowed
+    # rather than allowed to break the PDF path — HTML is a diagnostic
+    # tool, not the canonical output.
+    if os.environ.get("SKYLINE_CV_HTML_REPORT", "1").strip().lower() in (
+        "1", "true", "yes", "on"
+    ):
+        try:
+            from .html_report import write_region_report  # noqa: PLC0415
+            html_out_dir = output_pdf.parent / output_pdf.stem
+            write_region_report(
+                html_out_dir,
+                region_name=bbox.name,
+                seed_views=seed_views,
+                osm_data=osm_data,
+                buildings_by_id={b.feature_id: b for b in building_records},
+                building_heights=building_heights,
+            )
+        except Exception as _html_e:
+            print(f"[F-SKY15] HTML report failed: {_html_e}")
+
     good = len([r for r in screened if r["coverage"] == "good"])
     medium = len([r for r in screened if r["coverage"] == "medium"])
     weak = len([r for r in screened if r["coverage"] == "weak"])
