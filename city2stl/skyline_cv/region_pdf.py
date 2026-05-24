@@ -205,6 +205,11 @@ class SeedViewRegistration:
     # the user can see where the pano "thinks" the coast is. None when
     # pano-recovery is disabled or there's no water in the pano.
     pano_projected_coastline: "list[tuple[float, float]] | None" = None
+    # F-SKY15: per-view list of ``RegisteredBuildingEstimate`` records
+    # (with F-SKY12 depth fields when SKYLINE_CV_F_SKY12=1). Persisted so
+    # the HTML diagnostic report can render the depth diagnostics today
+    # without waiting for the PDF rendering path. None elsewhere.
+    view_estimates: "list | None" = None
 
 
 def _resolve_api_key(explicit_key: str | None = None) -> str:
@@ -2627,6 +2632,7 @@ def _seed_multiview_registration(
                     pano_osm_iou=pano_osm_iou,
                     pano_osm_n_keypoints=pano_osm_n_keypoints,
                     pano_projected_coastline=pano_projected_coastline,
+                    view_estimates=list(est_for_view) if est_for_view else None,
                 )
             )
 

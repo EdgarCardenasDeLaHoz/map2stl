@@ -146,6 +146,55 @@ class TestRenderSeedPage:
         assert "&lt;script&gt;" in html
 
 
+class TestPerViewGallery:
+    """F-SKY15 Phase B: per-view image gallery on the seed page."""
+
+    def test_no_views_omits_section(self, fake_sv):
+        html = render_seed_page(fake_sv, "cartagena", None)
+        assert "Per-view registration overlays" not in html
+
+    def test_renders_one_details_per_view(self, fake_sv):
+        from types import SimpleNamespace
+        # Three views with distinct headings
+        views = [
+            SimpleNamespace(**{**vars(fake_sv), "heading": 0.0, "best_offset": 0.0,
+                              "matched_segments": [{}] * 3, "registration_score": 0.5}),
+            SimpleNamespace(**{**vars(fake_sv), "heading": 90.0, "best_offset": -2.0,
+                              "matched_segments": [{}] * 5, "registration_score": 0.8}),
+            SimpleNamespace(**{**vars(fake_sv), "heading": 180.0, "best_offset": 1.0,
+                              "matched_segments": [], "registration_score": 0.1}),
+        ]
+        rels = ["assets/views/5_view_0.png", "assets/views/5_view_1.png", None]
+        html = render_seed_page(
+            fake_sv, "cartagena", None,
+            views=views, view_image_rel_paths=rels,
+        )
+        # One <details> per view
+        assert html.count("<details>") == 3
+        # Heading values appear in summaries
+        assert "heading 0.0°" in html
+        assert "heading 88.0°" in html  # 90 - 2
+        assert "heading 181.0°" in html
+        # Img tag for the two views with valid PNGs
+        assert html.count('<img src="assets/views/') == 2
+        # The third (no PNG) shows the placeholder
+        assert "View image unavailable" in html
+
+    def test_segment_count_singular_plural(self, fake_sv):
+        from types import SimpleNamespace
+        views = [
+            SimpleNamespace(**{**vars(fake_sv), "matched_segments": [{}]}),
+            SimpleNamespace(**{**vars(fake_sv), "matched_segments": [{}] * 5}),
+        ]
+        rels = [None, None]
+        html = render_seed_page(
+            fake_sv, "cartagena", None,
+            views=views, view_image_rel_paths=rels,
+        )
+        assert "1 matched segment " in html or "1 matched segment·" in html
+        assert "5 matched segments" in html
+
+
 class TestRenderRegionIndex:
     def test_lists_each_seed(self, fake_sv):
         from types import SimpleNamespace
@@ -211,3 +260,34 @@ class TestWriteRegionReport:
         # No seed_*.html files
         seed_files = list(tmp_path.glob("seed_*.html"))
         assert seed_files == []
+
+    def test_auto_collects_view_estimates(self, fake_sv, tmp_path):
+        """F-SKY15 wiring: if SeedViewRegistration has view_estimates
+        populated (set by the pipeline when F-SKY12 runs), the HTML
+        report picks them up without needing estimates_by_seed
+        explicitly. This is the path the depth diagnostics flow through.
+        """
+        from types import SimpleNamespace
+        from city2stl.skyline_cv.html_report import write_region_report
+
+        est = SimpleNamespace(
+            feature_id="b0999",
+            name="AutoCollected Tower",
+            view_name="v1",
+            forward_m=100.0,
+            estimated_height_m=42.0,
+            depth_height_m=40.0,
+            depth_disagreement=False,
+            confidence=0.85,
+        )
+        fake_sv.view_estimates = [est]
+
+        write_region_report(
+            tmp_path, region_name="auto",
+            seed_views=[fake_sv], osm_data={},
+        )
+        page = (tmp_path / "seed_5.html").read_text(encoding="utf-8")
+        # The estimate should appear in the page even though we never
+        # passed estimates_by_seed explicitly
+        assert "AutoCollected Tower" in page
+        assert "b0999" in page
