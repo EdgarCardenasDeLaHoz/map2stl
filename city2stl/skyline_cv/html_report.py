@@ -365,9 +365,10 @@ def render_region_index(
         if sv.seed_name in seen:
             continue
         seen.add(sv.seed_name)
+        slug = sv.seed_name[5:] if sv.seed_name.startswith("seed_") else sv.seed_name
         seed_rows.append(
             f"      <tr>"
-            f"<td><a href=\"seed_{html.escape(sv.seed_name)}.html\">{html.escape(sv.seed_name)}</a></td>"
+            f"<td><a href=\"seed_{html.escape(slug)}.html\">{html.escape(sv.seed_name)}</a></td>"
             f"<td>{sv.seed_lat:.5f}, {sv.seed_lon:.5f}</td>"
             f"<td>{_fmt_optional_float(sv.pano_osm_iou, precision=2)}</td>"
             f"<td>{sv.pano_osm_n_keypoints or '—'}</td>"
@@ -497,17 +498,21 @@ def write_region_report(
 
     for seed_name, sv_list in views_by_seed.items():
         primary = sv_list[0]
+        # Strip a "seed_" prefix if the name already includes it so the
+        # output filename doesn't double up (seed_seed_5.html → seed_5.html).
+        slug = seed_name[5:] if seed_name.startswith("seed_") else seed_name
+
         # Minimap PNG (uses primary view for heading + minimap diagnostics)
-        png_path = minimap_dir / f"{seed_name}.png"
+        png_path = minimap_dir / f"{slug}.png"
         ok = _render_seed_minimap_png(png_path, primary, osm_data, buildings_by_id)
-        minimap_rel = f"assets/minimap/{seed_name}.png" if ok else None
+        minimap_rel = f"assets/minimap/{slug}.png" if ok else None
 
         # Per-view image PNGs (one per view in the seed)
         view_image_rels: list[str | None] = []
         for i, vsv in enumerate(sv_list):
-            view_png = views_dir / f"{seed_name}_view_{i}.png"
+            view_png = views_dir / f"{slug}_view_{i}.png"
             if _save_view_image_png(view_png, vsv):
-                view_image_rels.append(f"assets/views/{seed_name}_view_{i}.png")
+                view_image_rels.append(f"assets/views/{slug}_view_{i}.png")
             else:
                 view_image_rels.append(None)
 
@@ -517,7 +522,7 @@ def write_region_report(
             views=sv_list,
             view_image_rel_paths=view_image_rels,
         )
-        (out_dir / f"seed_{seed_name}.html").write_text(page_html, encoding="utf-8")
+        (out_dir / f"seed_{slug}.html").write_text(page_html, encoding="utf-8")
 
     index_html = render_region_index(region_name, seed_views, building_heights)
     (out_dir / "index.html").write_text(index_html, encoding="utf-8")

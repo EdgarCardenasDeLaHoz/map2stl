@@ -212,6 +212,17 @@ class TestRenderRegionIndex:
         # Count of href occurrences for this seed
         assert html.count('href="seed_5.html"') == 1
 
+    def test_seed_name_with_seed_prefix_strips_in_url(self, fake_sv):
+        # seed_name="seed_3" should produce href="seed_3.html", not "seed_seed_3.html"
+        from types import SimpleNamespace
+        sv = SimpleNamespace(**vars(fake_sv))
+        sv.seed_name = "seed_3"
+        html = render_region_index("cartagena", [sv])
+        assert 'href="seed_3.html"' in html
+        assert 'href="seed_seed_3.html"' not in html
+        # The visible label keeps the full seed_name
+        assert ">seed_3<" in html
+
     def test_building_count_in_header(self, fake_sv):
         html = render_region_index(
             "cartagena", [fake_sv],
@@ -243,6 +254,7 @@ class TestWriteRegionReport:
         )
 
         assert (tmp_path / "index.html").exists()
+        # fake_sv.seed_name is "5" so the file is seed_5.html (no double prefix)
         assert (tmp_path / "seed_5.html").exists()
         assert (tmp_path / "seed_6.html").exists()
         # PNGs may or may not exist depending on matplotlib; the HTML

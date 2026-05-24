@@ -663,6 +663,20 @@ def _load_site_use_cross_view_scoring(region_name: str) -> bool:
         "use_cross_view_scoring", False))
 
 
+def _load_site_pano_only_pdf(region_name: str) -> bool:
+    """Per-region rendering flag. True → the PDF report skips the per-spin-
+    view registration pages (one per heading × seed, dominant page-count
+    contribution) and only renders the per-seed 360° stitched pano page
+    plus the summary / aggregate / validation pages.
+
+    Set this on regions where the per-view pages have become noise and you
+    just want a compact orientation/QA artefact. Cuts PDF size dramatically
+    on Cartagena-scale runs (26 per-view pages × ~1 MB each → drops to
+    just the few-seed pano summary + aggregate pages).
+    """
+    return bool(_read_site_config(region_name).get("pano_only_pdf", False))
+
+
 def _load_site_use_satellite_footprints(region_name: str) -> bool:
     """Per-region opt-in for Microsoft Buildings polygons. True →
     ``fetch_microsoft_buildings_for_bbox`` runs and the de-duped
@@ -2010,15 +2024,17 @@ def _seed_multiview_registration(
                         try:
                             from .osm_water import (  # noqa: PLC0415
                                 clip_to_radius,
-                                extract_coastline_features,
                                 osm_keypoints_for_scoring,
                             )
                             from .coastline_registration import (  # noqa: PLC0415
                                 pano_water_top_to_lonlat,
                                 score_pano_offset_keypoints,
                             )
+                            # OSM coastline features are pre-extracted at
+                            # region scope and stashed in pano_recovery_state
+                            # (osm_data isn't in this function's scope).
                             _osm_coast = clip_to_radius(
-                                extract_coastline_features(osm_data),
+                                pano_recovery_state.get("osm_coastline_features") or [],
                                 (seed.lon, seed.lat),
                                 radius_m=1000.0,
                             )
@@ -2121,16 +2137,20 @@ def _seed_multiview_registration(
             #                      still have sigma=0)
             #   - opt-in `use_pano_recovery_to_drive_anchor` site flag
             #
-            # On Cartagena the gating was calibrated against measured
-            # results: seed_1 recovered 136° vs manual 135° (correct),
-            # while seeds 4/5 recovered values 76-85° wrong with peaks
-            # that LOOK sharp (sigma 0.023/0.130, peak 0.313/0.558).
-            # Manual overrides for those seeds catch the failures, but
-            # a seed with no manual override + a confidently-wrong
-            # recovery would regress its registration. Until we have a
-            # better confidence model, default the policy to log-only.
+            # Calibration (2026-05-24, Cartagena 5-seed run):
+            #   seed_1 peak=0.417 sigma=0.041 → correct  (Δ≈+1°)
+            #   seed_4 peak=0.350 sigma=0.023 → wrong by 76°
+            #   seed_5 peak=0.328 sigma=0.056 → wrong by 34°
+            # Sigma alone can't discriminate (seed_4 has the SHARPEST
+            # sigma but the worst answer). Peak does: the correct
+            # recovery sits notably above the wrong ones. A 0.40 floor
+            # passes seed_1 and rejects seeds 4/5, restoring 8/2/1
+            # coverage when the manual overrides are also restored.
+            # The previous 0.15 floor passed every recovery and dropped
+            # coverage to 2/1/7 because drive_anchor sent seed_4/5 to
+            # the wrong basins.
             _PANO_RECOVERY_SHARP_SIGMA = 0.10
-            _PANO_RECOVERY_MIN_PEAK = 0.15
+            _PANO_RECOVERY_MIN_PEAK = 0.40
             allow_drive = bool(
                 (pano_recovery_state or {}).get("drive_anchor", False))
             use_pano_seed = (
@@ -3550,6 +3570,27 @@ def _render_seed_view_page(
         if s.get("match_corrected")
     )
     corr_str = f"  ✎{n_corrected}" if n_corrected else ""
+    # F-CLEAN5: surface the F-SKY10 cross-view score in the per-view header.
+    # Each matched segment's `match_diagnostics[0]` carries the per-candidate
+    # scoring breakdown including `cv` when the cross-view scorer ran.
+    # We aggregate as mean+min across matched segments — the mean gives a
+    # whole-view "how well does the cross-view signal AGREE with this match
+    # set" indicator; the min surfaces single suspect matches without
+    # forcing the user to dig into per-segment metadata.
+    cv_vals = []
+    for _s in sv.matched_segments:
+        if _s.get("matched_projection") is None:
+            continue
+        _d = (_s.get("match_diagnostics") or [{}])[0]
+        if "cv" in _d:
+            try:
+                cv_vals.append(float(_d["cv"]))
+            except (TypeError, ValueError):
+                continue
+    cv_str = (
+        f"  cv̄={float(np.mean(cv_vals)):.2f}/min={float(np.min(cv_vals)):.2f}"
+        if cv_vals else ""
+    )
     fig.suptitle(
         f"Seed view — {sv.seed_name}  "
         f"effective_heading={effective_heading:.1f}°  "
@@ -3557,7 +3598,7 @@ def _render_seed_view_page(
         f"reg_score={sv.registration_score:.2f}px  iou={sv.iou:.2f}  "
         f"segments={n_total}  "
         f"estimates={sv.estimates_count}"
-        f"{flags_str}{heading_str}{wide_str}{corr_str}"
+        f"{flags_str}{heading_str}{wide_str}{corr_str}{cv_str}"
         f"{aerial_tag}",
         fontsize=11,
     )
@@ -3574,7 +3615,8 @@ def _render_seed_view_page(
             "Δh̃ = median(true-bearing − effective-heading) across matches  "
             "(non-zero ⇒ heading bias)   "
             "multi-bldg = wide segment that spans multiple OSM polygons   "
-            "✎N = N matches corrected by post-hoc rescue",
+            "✎N = N matches corrected by post-hoc rescue   "
+            "cv̄/min = mean/min F-SKY10 cross-view score across matched segments",
             ha="center", va="top", fontsize=7, color="0.35",
         )
 
@@ -3766,6 +3808,7 @@ def _render_pdf(
     building_records: list[BuildingRecord],
     known_heights: list[dict] | None = None,
     pano_results: list["StitchedPanoResult"] | None = None,
+    pano_only: bool = False,
 ) -> None:
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     with PdfPages(out_pdf) as pdf:
@@ -3850,10 +3893,15 @@ def _render_pdf(
         # Seed registration pages: image with segments + matched-footprint mini-map
         # buildings_by_id lets the mini-map draw the actual matched footprint
         # polygons in the segment colours (rather than just bearing rays).
+        # Skipped entirely under `pano_only_pdf` — these are the dominant
+        # contributor to PDF file size (~26 pages × ~1 MB each on Cartagena),
+        # and the per-seed stitched pano page below carries the same info
+        # at lower fidelity for compact-orientation reviews.
         buildings_by_id = {b.feature_id: b for b in building_records}
-        for sv in seed_views:
-            _render_seed_view_page(
-                pdf, sv, osm_data, buildings_by_id=buildings_by_id)
+        if not pano_only:
+            for sv in seed_views:
+                _render_seed_view_page(
+                    pdf, sv, osm_data, buildings_by_id=buildings_by_id)
 
         # Stitched-pano comparison pages — one per seed that produced a
         # stitched result. Lets you compare the 360° pano-level segmentation
@@ -3869,7 +3917,10 @@ def _render_pdf(
                     pdf, pr, osm_data, buildings_by_id=buildings_by_id,
                     seed_views=seed_views)
 
-        # Extracted heights summary page
+        # Extracted heights summary page — text-only per-building dump.
+        # Skipped under `pano_only`: the same data lives in the HTML
+        # report (html_report.py) where tables are first-class; the PDF
+        # is the orientation / visual artefact, not the data store.
         fig = plt.figure(figsize=(11, 8.5))
         fig.suptitle("Seed-Derived Building Heights",
                      fontsize=16, fontweight="bold")
@@ -3930,7 +3981,8 @@ def _render_pdf(
             )
         ax.text(0.03, 0.96, "\n".join(lines), va="top",
                 ha="left", family="monospace", fontsize=8)
-        pdf.savefig(fig, bbox_inches="tight")
+        if not pano_only:
+            pdf.savefig(fig, bbox_inches="tight")
         plt.close(fig)
 
         # Residuals page: predicted vs OSM-tagged height
@@ -4012,13 +4064,16 @@ def _render_pdf(
                 stats_lines.append(
                     f"Single-seed   n={ss[3]:3d}  MAE={ss[0]:6.2f}m  RMSE={ss[1]:6.2f}m  bias={ss[2]:+6.2f}m   (unreliable)"
                 )
-            stats_lines += ["", "Worst residuals:"]
-            order = np.argsort(-np.abs(resid))[:10]
-            for i in order:
-                name, t, p, ns, nv, _ = pairs[int(i)]
-                stats_lines.append(
-                    f"  {name[:24]:<24}  tag={t:5.1f}  pred={p:5.1f}  Δ={p-t:+5.1f}  seeds={ns}"
-                )
+            if not pano_only:
+                # Per-building "worst residuals" listing — table content
+                # belongs in the HTML report, not the orientation PDF.
+                stats_lines += ["", "Worst residuals:"]
+                order = np.argsort(-np.abs(resid))[:10]
+                for i in order:
+                    name, t, p, ns, nv, _ = pairs[int(i)]
+                    stats_lines.append(
+                        f"  {name[:24]:<24}  tag={t:5.1f}  pred={p:5.1f}  Δ={p-t:+5.1f}  seeds={ns}"
+                    )
             fig.text(
                 0.08,
                 0.34,
@@ -4206,12 +4261,16 @@ def _render_pdf(
                     f"{osm_h_s:>8} {pred_s:>8} {delta_s:>8} {dist_m:>8.0f}{no_match}"
                 )
 
-            ax_t = fig.add_axes([0.03, 0.40, 0.94, 0.52])
-            ax_t.axis("off")
-            ax_t.text(
-                0.0, 1.0, "\n".join(lines),
-                va="top", ha="left", family="monospace", fontsize=8.5,
-            )
+            if not pano_only:
+                # Per-building survey-vs-pred table — dropped under
+                # pano_only since the same info is rendered as a sortable
+                # HTML table by html_report.py.
+                ax_t = fig.add_axes([0.03, 0.40, 0.94, 0.52])
+                ax_t.axis("off")
+                ax_t.text(
+                    0.0, 1.0, "\n".join(lines),
+                    va="top", ha="left", family="monospace", fontsize=8.5,
+                )
 
             if len(pairs) >= 2:
                 ctbuh_arr = np.array([p[0] for p in pairs])
@@ -4376,10 +4435,27 @@ def run_region_pdf_report(
                 # Per-seed keypoints get computed inside the seed loop
                 # since each seed has its own lat/lon centre. Stash the
                 # raw sat-water + project closure here.
+                # F-SKY13 Phase B: extract OSM coastline + water polygons
+                # once per region. The seed loop doesn't have osm_data in
+                # scope, so we stash the extracted features here. Each
+                # seed clips to its own 1 km window inside the loop.
+                try:
+                    from .osm_water import (  # noqa: PLC0415
+                        extract_coastline_features,
+                        extract_water_features,
+                    )
+                    osm_coastline_features = extract_coastline_features(osm_data)
+                    osm_water_features = extract_water_features(osm_data)
+                except Exception as _e_osm_extract:
+                    print(f"[pano_recovery] OSM extraction failed: {_e_osm_extract}")
+                    osm_coastline_features = []
+                    osm_water_features = []
                 pano_recovery_state = {
                     "sat_water": sat_water,
                     "sat_project": sat_project,
                     "water_frac": water_frac,
+                    "osm_coastline_features": osm_coastline_features,
+                    "osm_water_features": osm_water_features,
                     # Optional sub-flag: when True, a sharp recovery
                     # can REPLACE the joint-anchor coarse sweep for
                     # seeds with no manual override. Default False —
@@ -4479,6 +4555,7 @@ def run_region_pdf_report(
             building_records=building_records,
             known_heights=known_heights or None,
             pano_results=pano_results,
+            pano_only=_load_site_pano_only_pdf(region_name),
         )
 
     # F-SKY15: parallel HTML diagnostic report. Default ON because the
