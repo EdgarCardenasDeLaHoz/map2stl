@@ -106,6 +106,14 @@ _F_SKY13_ENABLED = os.environ.get("SKYLINE_CV_F_SKY13", "1").strip().lower() in 
     "1", "true", "yes", "on"
 )
 _F_SKY13_RADIUS_M = 1000.0
+
+# F-SKY13 Phase C: OSM-primary registration — make OSM the source for the
+# heading-sweep keypoints (was satellite HSV). The sweep's peak then IS the
+# pano↔OSM IoU directly, no separate Phase B verifier step needed. Default
+# OFF until validated on Cartagena; opt in with SKYLINE_CV_PHASE_C=1.
+_PHASE_C_ENABLED = os.environ.get("SKYLINE_CV_PHASE_C", "0").strip().lower() in (
+    "1", "true", "yes", "on"
+)
 # Optional: also render the ESRI satellite image as the minimap background.
 # Costs one network fetch per seed on first run (then disk-cached). Off by
 # default; enable with SKYLINE_CV_F_SKY13_SAT_BG=1. Independent of the
@@ -1995,16 +2003,47 @@ def _seed_multiview_registration(
                 if _rgb_stitched is not None and _stitched is not None:
                     _pano_img_unused, _headings_per_col = _rgb_stitched
                     _pb, _pw = _stitched
-                    # Compute keypoints per-seed (they are inherently
-                    # seed-centric — each seed sees the surrounding
-                    # coastline at its own bearings/distances).
-                    keypoints = detect_coastline_keypoints(
-                        pano_recovery_state["sat_water"],
-                        pano_recovery_state["sat_project"],
-                        seed.lat, seed.lon,
-                        n_bearings=24, max_range_m=2500.0,
-                        step_m=5.0, min_distance_m=30.0,
-                    )
+
+                    # F-SKY13 Phase C: source keypoints from OSM directly
+                    # (the trusted ground truth) instead of the heuristic
+                    # satellite HSV mask. When primary_source == "osm",
+                    # the sweep's peak IS the pano↔OSM IoU — no separate
+                    # Phase B verifier compute needed.
+                    _primary = pano_recovery_state.get("primary_source", "satellite")
+                    keypoints: list[dict]
+                    _keypoint_source: str
+                    if _primary == "osm":
+                        try:
+                            from .osm_water import (  # noqa: PLC0415
+                                clip_to_radius,
+                                osm_keypoints_for_scoring,
+                            )
+                            _osm_coast = clip_to_radius(
+                                pano_recovery_state.get("osm_coastline_features") or [],
+                                (seed.lon, seed.lat),
+                                radius_m=1000.0,
+                            )
+                            keypoints = osm_keypoints_for_scoring(
+                                _osm_coast, (seed.lon, seed.lat),
+                                spacing_m=20.0,
+                            )
+                            _keypoint_source = "osm"
+                        except Exception as _e_kp:
+                            print(f"[pano_recovery] seed={seed.name} "
+                                  f"OSM keypoint extraction failed: {_e_kp}")
+                            keypoints = []
+                            _keypoint_source = "osm-failed"
+                    else:
+                        # Legacy / Phase B: satellite HSV keypoints.
+                        keypoints = detect_coastline_keypoints(
+                            pano_recovery_state["sat_water"],
+                            pano_recovery_state["sat_project"],
+                            seed.lat, seed.lon,
+                            n_bearings=24, max_range_m=2500.0,
+                            step_m=5.0, min_distance_m=30.0,
+                        )
+                        _keypoint_source = "satellite"
+
                     if keypoints and _pw is not None:
                         best, _cand, _scores = sweep_pano_heading_offset(
                             keypoints, _pw, _headings_per_col,
@@ -2018,6 +2057,7 @@ def _seed_multiview_registration(
                         pano_water_frac = float(_pw.mean())
                         print(
                             f"[pano_recovery] seed={seed.name}  "
+                            f"source={_keypoint_source}  "
                             f"keypoints={len(keypoints)}  "
                             f"pano_views={len(_spin_views_raw)}/12  "
                             f"pano_water_frac={pano_water_frac:.3f}  "
@@ -2026,48 +2066,14 @@ def _seed_multiview_registration(
                             f"sigma={pano_recovered_sigma:.3f}"
                         )
 
-                        # F-SKY13 Phase B: also score against OSM coastline
-                        # (the trusted ground truth — see feedback memory).
-                        # Reuses the same scoring function via the
-                        # osm_keypoints_for_scoring adapter; no new scoring
-                        # path. Also invert the pano water-top to lon/lat
-                        # so the minimap can draw what the pano "sees" as
-                        # the coastline.
+                        # Pano-projected coastline is always useful for the
+                        # minimap diagnostic (independent of which keypoint
+                        # source drove the sweep). Cheap inverse projection,
+                        # no extra inference.
                         try:
-                            from .osm_water import (  # noqa: PLC0415
-                                clip_to_radius,
-                                osm_keypoints_for_scoring,
-                            )
                             from .coastline_registration import (  # noqa: PLC0415
                                 pano_water_top_to_lonlat,
-                                score_pano_offset_keypoints,
                             )
-                            # OSM coastline features are pre-extracted at
-                            # region scope and stashed in pano_recovery_state
-                            # (osm_data isn't in this function's scope).
-                            _osm_coast = clip_to_radius(
-                                pano_recovery_state.get("osm_coastline_features") or [],
-                                (seed.lon, seed.lat),
-                                radius_m=1000.0,
-                            )
-                            _osm_kps = osm_keypoints_for_scoring(
-                                _osm_coast, (seed.lon, seed.lat),
-                                spacing_m=20.0,
-                            )
-                            if _osm_kps:
-                                pano_osm_iou = float(
-                                    score_pano_offset_keypoints(
-                                        _osm_kps, _pw, _headings_per_col,
-                                        seed.lat, seed.lon,
-                                        candidate_offset_deg=pano_recovered_offset,
-                                        pitch_deg=effective_pitch,
-                                        tolerance_px=25,
-                                    )
-                                )
-                                pano_osm_n_keypoints = len(_osm_kps)
-                            # Project pano water-top back to lon/lat for the
-                            # dashed-orange minimap overlay. Independent of
-                            # whether OSM coastline data was found.
                             pano_projected_coastline = (
                                 pano_water_top_to_lonlat(
                                     _pw, _headings_per_col,
@@ -2076,17 +2082,65 @@ def _seed_multiview_registration(
                                     pitch_deg=effective_pitch,
                                 )
                             )
+                        except Exception as _e_proj:
+                            print(f"[pano_recovery] seed={seed.name} "
+                                  f"pano-projection failed: {_e_proj}")
+
+                        # IoU compute: in Phase C the sweep peak IS the
+                        # pano↔OSM IoU (since the sweep already used OSM
+                        # keypoints). In the legacy path we re-score OSM
+                        # at the satellite-recovered offset.
+                        if _primary == "osm":
+                            pano_osm_iou = pano_recovered_peak
+                            pano_osm_n_keypoints = len(keypoints)
                             print(
                                 f"[pano_recovery] seed={seed.name}  "
                                 f"osm_kp={pano_osm_n_keypoints}  "
-                                f"osm_iou={pano_osm_iou}  "
+                                f"osm_iou={pano_osm_iou:.3f}  (peak=IoU)  "
                                 f"projected_pts={len(pano_projected_coastline) if pano_projected_coastline else 0}"
                             )
-                        except Exception as _e_osm:
-                            print(
-                                f"[pano_recovery] seed={seed.name} "
-                                f"OSM diagnostic failed: {_e_osm}"
-                            )
+                        else:
+                            # Legacy Phase B verifier: score OSM at the
+                            # satellite-recovered offset.
+                            try:
+                                from .osm_water import (  # noqa: PLC0415
+                                    clip_to_radius as _clip,
+                                    osm_keypoints_for_scoring as _osm_kps_fn,
+                                )
+                                from .coastline_registration import (  # noqa: PLC0415
+                                    score_pano_offset_keypoints,
+                                )
+                                _osm_coast = _clip(
+                                    pano_recovery_state.get("osm_coastline_features") or [],
+                                    (seed.lon, seed.lat),
+                                    radius_m=1000.0,
+                                )
+                                _osm_kps = _osm_kps_fn(
+                                    _osm_coast, (seed.lon, seed.lat),
+                                    spacing_m=20.0,
+                                )
+                                if _osm_kps:
+                                    pano_osm_iou = float(
+                                        score_pano_offset_keypoints(
+                                            _osm_kps, _pw, _headings_per_col,
+                                            seed.lat, seed.lon,
+                                            candidate_offset_deg=pano_recovered_offset,
+                                            pitch_deg=effective_pitch,
+                                            tolerance_px=25,
+                                        )
+                                    )
+                                    pano_osm_n_keypoints = len(_osm_kps)
+                                print(
+                                    f"[pano_recovery] seed={seed.name}  "
+                                    f"osm_kp={pano_osm_n_keypoints}  "
+                                    f"osm_iou={pano_osm_iou}  "
+                                    f"projected_pts={len(pano_projected_coastline) if pano_projected_coastline else 0}"
+                                )
+                            except Exception as _e_osm:
+                                print(
+                                    f"[pano_recovery] seed={seed.name} "
+                                    f"OSM diagnostic failed: {_e_osm}"
+                                )
                     else:
                         print(f"[pano_recovery] seed={seed.name}  "
                               f"keypoints={len(keypoints)} — no recovery "
@@ -4430,61 +4484,77 @@ def run_region_pdf_report(
     pano_recovery_state: dict | None = None
     if _load_site_use_pano_coastline_recovery(region_name):
         try:
-            from .satellite_image import fetch_region_satellite
-            from .coastline_registration import (
-                detect_sat_water_mask, detect_coastline_keypoints,
-            )
-            if cross_view_state is not None:
-                sat_image = cross_view_state["sat_image"]
-                sat_project = cross_view_state["sat_project"]
-            else:
-                sat_image, sat_project, _meta = fetch_region_satellite(
-                    (bbox.south, bbox.west, bbox.north, bbox.east),
-                    target_m_per_px=2.0,
+            # OSM coastline + water polygons — extracted at region scope
+            # for both Phase B (verifier) and Phase C (primary).
+            try:
+                from .osm_water import (  # noqa: PLC0415
+                    extract_coastline_features,
+                    extract_water_features,
                 )
-            sat_water = detect_sat_water_mask(sat_image)
-            water_frac = float(sat_water.mean())
-            if water_frac < 0.02:
-                print(f"[pano_recovery] region has <2% water "
-                      f"({water_frac:.1%}) — coastline recovery skipped")
+                osm_coastline_features = extract_coastline_features(osm_data)
+                osm_water_features = extract_water_features(osm_data)
+            except Exception as _e_osm_extract:
+                print(f"[pano_recovery] OSM extraction failed: {_e_osm_extract}")
+                osm_coastline_features = []
+                osm_water_features = []
+
+            # F-SKY13 Phase C: skip the satellite HSV path entirely.
+            # OSM is the trusted keypoint source; the satellite mask
+            # provides no information we need when Phase C is on.
+            if _PHASE_C_ENABLED:
+                if not osm_coastline_features:
+                    print("[pano_recovery] Phase C: no OSM coastline "
+                          "for this region — recovery skipped")
+                else:
+                    pano_recovery_state = {
+                        "primary_source": "osm",
+                        # Satellite fields are None in Phase C; legacy
+                        # code paths must read them via .get() and
+                        # tolerate absence.
+                        "sat_water": None,
+                        "sat_project": None,
+                        "water_frac": None,
+                        "osm_coastline_features": osm_coastline_features,
+                        "osm_water_features": osm_water_features,
+                        "drive_anchor": bool(
+                            _load_site_drive_pano_recovery_anchor(region_name)),
+                    }
+                    print(f"[pano_recovery] Phase C ACTIVE  "
+                          f"osm_coastline_features={len(osm_coastline_features)} "
+                          "(OSM-primary, satellite HSV skipped)")
             else:
-                # Per-seed keypoints get computed inside the seed loop
-                # since each seed has its own lat/lon centre. Stash the
-                # raw sat-water + project closure here.
-                # F-SKY13 Phase B: extract OSM coastline + water polygons
-                # once per region. The seed loop doesn't have osm_data in
-                # scope, so we stash the extracted features here. Each
-                # seed clips to its own 1 km window inside the loop.
-                try:
-                    from .osm_water import (  # noqa: PLC0415
-                        extract_coastline_features,
-                        extract_water_features,
+                # Legacy / Phase B path: satellite HSV drives recovery.
+                from .satellite_image import fetch_region_satellite
+                from .coastline_registration import (
+                    detect_sat_water_mask, detect_coastline_keypoints,
+                )
+                if cross_view_state is not None:
+                    sat_image = cross_view_state["sat_image"]
+                    sat_project = cross_view_state["sat_project"]
+                else:
+                    sat_image, sat_project, _meta = fetch_region_satellite(
+                        (bbox.south, bbox.west, bbox.north, bbox.east),
+                        target_m_per_px=2.0,
                     )
-                    osm_coastline_features = extract_coastline_features(osm_data)
-                    osm_water_features = extract_water_features(osm_data)
-                except Exception as _e_osm_extract:
-                    print(f"[pano_recovery] OSM extraction failed: {_e_osm_extract}")
-                    osm_coastline_features = []
-                    osm_water_features = []
-                pano_recovery_state = {
-                    "sat_water": sat_water,
-                    "sat_project": sat_project,
-                    "water_frac": water_frac,
-                    "osm_coastline_features": osm_coastline_features,
-                    "osm_water_features": osm_water_features,
-                    # Optional sub-flag: when True, a sharp recovery
-                    # can REPLACE the joint-anchor coarse sweep for
-                    # seeds with no manual override. Default False —
-                    # the feature ships as a measurement tool only,
-                    # since on Cartagena the recovery is dead-on for
-                    # some seeds and wildly wrong for others with no
-                    # automatic way to tell them apart.
-                    "drive_anchor": bool(
-                        _load_site_drive_pano_recovery_anchor(region_name)),
-                }
-                print(f"[pano_recovery] region satellite water "
-                      f"{water_frac:.1%} — keypoints will be computed "
-                      "per-seed inside _seed_multiview_registration")
+                sat_water = detect_sat_water_mask(sat_image)
+                water_frac = float(sat_water.mean())
+                if water_frac < 0.02:
+                    print(f"[pano_recovery] region has <2% water "
+                          f"({water_frac:.1%}) — coastline recovery skipped")
+                else:
+                    pano_recovery_state = {
+                        "primary_source": "satellite",
+                        "sat_water": sat_water,
+                        "sat_project": sat_project,
+                        "water_frac": water_frac,
+                        "osm_coastline_features": osm_coastline_features,
+                        "osm_water_features": osm_water_features,
+                        "drive_anchor": bool(
+                            _load_site_drive_pano_recovery_anchor(region_name)),
+                    }
+                    print(f"[pano_recovery] region satellite water "
+                          f"{water_frac:.1%} — keypoints will be computed "
+                          "per-seed inside _seed_multiview_registration")
         except Exception as e:
             print(f"[pano_recovery] region precomputation failed: {e}")
             pano_recovery_state = None

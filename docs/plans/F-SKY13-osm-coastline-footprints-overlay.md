@@ -260,17 +260,74 @@ Phase A is successful if:
   seeds without pano-recovery, the minimap falls back to
   Phase A behaviour (just the OSM coastline + 1 km circle).
 
-## Phase C (future, not this round)
+## Phase C — OSM-primary registration (in progress)
 
-- Make OSM the **only** coastline target after Phase B
-  validates that pano↔OSM registration works reliably on
-  coastal seeds. At that point `detect_sat_water_mask`
-  becomes truly dead code and can be deleted (or kept only
-  as the training-data input for F-SKY14).
-- Decouple pano-recovery state from the satellite path so
-  OSM-driven recovery can run on regions where the satellite
-  HSV detector is skipped entirely.
-- Extend the 1 km window to a configurable per-region
-  parameter for very large or very small seeds.
-- See F-SKY14 (separate proposal, filed) for a
-  trained satellite coastline detector supervised by OSM.
+Inverts the keypoint source: instead of running the
+heading-recovery sweep against satellite-derived keypoints
+(``detect_coastline_keypoints`` on the HSV water mask) and
+then scoring OSM agreement as a separate diagnostic, the
+sweep itself consumes OSM keypoints directly via
+``osm_keypoints_for_scoring``. The peak of the score curve
+becomes the pano↔OSM IoU — no separate compute step.
+
+### Why
+
+After Phase B Cartagena validation:
+- seed_1 sat-driven recovery picks 220° (peak 0.59, σ 0.16),
+  pano↔OSM IoU at that offset = 0.29
+- seed_4 sat recovery picks 122° (peak 0.41, σ 0.07),
+  pano↔OSM IoU = 0.37 ← OSM agreement is *higher than* the
+  satellite peak
+
+Both signals are useful but they disagree on which offset is
+"correct." OSM is the trusted source (feedback memory). The
+right architecture: drive recovery off OSM, treat satellite as
+optional ablation.
+
+### Activation
+
+Behind ``SKYLINE_CV_PHASE_C=1`` env flag for the first runs.
+Default OFF so existing behaviour is untouched. Once
+validated, the satellite path becomes opt-in for ablation
+(``SKYLINE_CV_PHASE_C_KEEP_SAT=1``), and the heuristic HSV
+detector can be deleted in favour of F-SKY14.
+
+### Implementation
+
+1. ``pano_recovery_state`` no longer requires the
+   ``sat_water`` mask. When Phase C is on, the state is
+   populated from OSM features alone (extraction was already
+   done in Phase B to feed the seed-loop verifier — just stop
+   gating the precompute on the satellite path's success).
+2. The seed-loop branches on ``primary_source``:
+   - ``"osm"`` (Phase C): keypoints come from
+     ``osm_keypoints_for_scoring(clip_to_radius(features,
+     seed, 1000.0))``. The sweep result's peak IS the IoU.
+   - ``"satellite"`` (legacy): keypoints from
+     ``detect_coastline_keypoints``; OSM IoU computed
+     separately as in Phase B.
+3. ``pano_osm_iou`` is set from ``_scores.max()`` directly
+   in the Phase C branch. No second sweep / score compute.
+4. Existing Phase B verifier code (separate OSM scoring at
+   the recovered offset) becomes redundant when Phase C is
+   on; it stays put for the legacy path.
+
+### Open questions for after the first Phase C run
+
+- **Peak floor**: the ``_PANO_RECOVERY_MIN_PEAK=0.40`` floor
+  was calibrated against satellite peaks; OSM peaks may have
+  different magnitudes. May need separate floor per source.
+- **Inland seeds**: OSM coastline within 1 km may be absent
+  for some regions. Currently those would skip recovery
+  entirely (which is fine — there's nothing to align
+  against). Worth surfacing a per-seed "no OSM coastline in
+  window" diagnostic.
+- **Extend the 1 km window** to configurable per-region — once
+  Phase C is validated, sites that need a 2 km consideration
+  window (e.g., wide bays) get a config knob.
+
+## Phase D (further future)
+
+- See F-SKY14 (separate proposal, filed) for a trained
+  satellite coastline detector supervised by OSM, used when
+  OSM coverage is sparse.
