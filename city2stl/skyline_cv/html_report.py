@@ -197,6 +197,32 @@ def render_seed_page(
             "Pano-projected coastline pts",
             str(len(sv.pano_projected_coastline)),
         ))
+    # F-SKY11.1 pano-coastline recovery diagnostics. peak is the score at
+    # the recovered heading (higher = sharper match); sigma is the spread
+    # of the score curve (lower = the recovery is more confidently picking
+    # a single offset). water_frac is the fraction of pano pixels classified
+    # as water — low values explain low IoU scores ("no water visible from
+    # this seed, nothing for OSM coastline to align against").
+    if getattr(sv, "pano_recovered_offset_deg", None) is not None:
+        summary_rows.append((
+            "Pano recovery offset",
+            f"{sv.pano_recovered_offset_deg:.1f}°",
+        ))
+    if getattr(sv, "pano_recovered_peak", None) is not None:
+        summary_rows.append((
+            "Pano recovery peak",
+            f"{sv.pano_recovered_peak:.3f} (sharper = better match)",
+        ))
+    if getattr(sv, "pano_recovered_sigma", None) is not None:
+        summary_rows.append((
+            "Pano recovery sigma",
+            f"{sv.pano_recovered_sigma:.3f} (lower = more confident)",
+        ))
+    if getattr(sv, "pano_water_frac", None) is not None:
+        summary_rows.append((
+            "Pano water fraction",
+            f"{sv.pano_water_frac:.1%}",
+        ))
 
     summary_html = "\n".join(
         f"    <tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>"
@@ -366,12 +392,25 @@ def render_region_index(
             continue
         seen.add(sv.seed_name)
         slug = sv.seed_name[5:] if sv.seed_name.startswith("seed_") else sv.seed_name
+        # Format pano-recovery peak/sigma compactly — these are the key
+        # "is the registration confident" signals.
+        recov_peak = getattr(sv, "pano_recovered_peak", None)
+        recov_sigma = getattr(sv, "pano_recovered_sigma", None)
+        recov_offset = getattr(sv, "pano_recovered_offset_deg", None)
+        water = getattr(sv, "pano_water_frac", None)
+        recov_cell = (
+            f"{recov_offset:.0f}° (peak {recov_peak:.2f} / σ {recov_sigma:.2f})"
+            if recov_offset is not None and recov_peak is not None and recov_sigma is not None
+            else "—"
+        )
         seed_rows.append(
             f"      <tr>"
             f"<td><a href=\"seed_{html.escape(slug)}.html\">{html.escape(sv.seed_name)}</a></td>"
             f"<td>{sv.seed_lat:.5f}, {sv.seed_lon:.5f}</td>"
             f"<td>{_fmt_optional_float(sv.pano_osm_iou, precision=2)}</td>"
             f"<td>{sv.pano_osm_n_keypoints or '—'}</td>"
+            f"<td>{_fmt_optional_float(water, suffix='', precision=2) if water is not None else '—'}</td>"
+            f"<td>{html.escape(recov_cell)}</td>"
             f"<td>{_fmt_optional_bool(sv.is_negative)}</td>"
             f"</tr>"
         )
@@ -412,7 +451,10 @@ def render_region_index(
   <thead>
     <tr>
       <th>seed</th><th>lat, lon</th>
-      <th>pano↔OSM IoU</th><th>OSM keypoints</th><th>negative</th>
+      <th>pano↔OSM IoU</th><th>OSM kp</th>
+      <th title="Fraction of pano pixels classified as water by SegFormer">water frac</th>
+      <th title="Recovered heading offset, peak score, and score-curve sigma (lower = sharper recovery)">pano recovery</th>
+      <th>negative</th>
     </tr>
   </thead>
   <tbody>

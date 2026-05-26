@@ -46,6 +46,10 @@ def fake_sv():
         pano_osm_iou=0.78,
         pano_osm_n_keypoints=42,
         pano_projected_coastline=[(-75.555, 10.4068)] * 12,
+        pano_recovered_offset_deg=309.0,
+        pano_recovered_peak=0.491,
+        pano_recovered_sigma=0.113,
+        pano_water_frac=0.259,
         image=np.zeros((720, 1280, 3), dtype=np.uint8),
     )
 
@@ -71,6 +75,23 @@ class TestRenderSeedPage:
         html = render_seed_page(fake_sv, "cartagena", minimap_rel_path=None)
         # Row label should not appear when the diagnostic is unavailable
         assert "pano↔OSM IoU" not in html
+
+    def test_pano_recovery_diagnostics_visible(self, fake_sv):
+        html = render_seed_page(fake_sv, "cartagena", minimap_rel_path=None)
+        assert "Pano recovery offset" in html
+        assert "309.0°" in html
+        assert "0.491" in html  # peak
+        assert "0.113" in html  # sigma
+        assert "25.9%" in html  # water_frac formatted as percent
+
+    def test_recovery_rows_omitted_when_unavailable(self, fake_sv):
+        fake_sv.pano_recovered_offset_deg = None
+        fake_sv.pano_recovered_peak = None
+        fake_sv.pano_recovered_sigma = None
+        fake_sv.pano_water_frac = None
+        html = render_seed_page(fake_sv, "cartagena", minimap_rel_path=None)
+        assert "Pano recovery offset" not in html
+        assert "Pano water fraction" not in html
 
     def test_minimap_link_renders_when_provided(self, fake_sv):
         html = render_seed_page(
@@ -205,6 +226,14 @@ class TestRenderRegionIndex:
         # Each seed has its own row + link
         assert "seed_5.html" in html
         assert "seed_6.html" in html
+
+    def test_index_shows_recovery_diagnostics(self, fake_sv):
+        html = render_region_index("cartagena", [fake_sv])
+        # peak and sigma both appear in the compact recovery cell
+        assert "peak 0.49" in html
+        assert "σ 0.11" in html
+        # water_frac as decimal (precision=2)
+        assert "0.26" in html
 
     def test_dedupes_views_to_seeds(self, fake_sv):
         # Three views of the same seed → one row

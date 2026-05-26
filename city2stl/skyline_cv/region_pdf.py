@@ -199,6 +199,16 @@ class SeedViewRegistration:
     # seed has OSM coastline within the 1 km window. None elsewhere.
     pano_osm_iou: float | None = None
     pano_osm_n_keypoints: int | None = None
+    # F-SKY11.1 pano-coastline heading recovery diagnostics. The sweep
+    # over candidate heading offsets returns the argmax (recovered_offset),
+    # the peak score at that offset, and the score-curve sigma (a
+    # confidence proxy — flat curves get high sigma). These already drive
+    # the drive_anchor decision; surfacing them lets the HTML reader see
+    # WHY a seed's registration succeeded or failed.
+    pano_recovered_offset_deg: float | None = None
+    pano_recovered_peak: float | None = None
+    pano_recovered_sigma: float | None = None
+    pano_water_frac: float | None = None
     # F-SKY13 Phase B: pano-derived coastline projected back to lon/lat
     # (one point per pano column where water was detected, sampled at a
     # coarse stride). Drawn as a dashed orange polyline on the minimap so
@@ -1929,6 +1939,7 @@ def _seed_multiview_registration(
         pano_recovered_offset: float | None = None
         pano_recovered_sigma: float | None = None
         pano_recovered_peak: float | None = None
+        pano_water_frac: float | None = None
         # F-SKY13 Phase B diagnostics — populated alongside pano-recovery
         # when OSM coastline is available within 1 km of the seed.
         pano_osm_iou: float | None = None
@@ -2004,11 +2015,12 @@ def _seed_multiview_registration(
                         pano_recovered_offset = float(best)
                         pano_recovered_peak = float(_scores.max())
                         pano_recovered_sigma = float(_scores.std())
+                        pano_water_frac = float(_pw.mean())
                         print(
                             f"[pano_recovery] seed={seed.name}  "
                             f"keypoints={len(keypoints)}  "
                             f"pano_views={len(_spin_views_raw)}/12  "
-                            f"pano_water_frac={float(_pw.mean()):.3f}  "
+                            f"pano_water_frac={pano_water_frac:.3f}  "
                             f"recovered={pano_recovered_offset:.1f}deg  "
                             f"peak={pano_recovered_peak:.3f}  "
                             f"sigma={pano_recovered_sigma:.3f}"
@@ -2651,6 +2663,10 @@ def _seed_multiview_registration(
                     building_mask=_bmask,
                     pano_osm_iou=pano_osm_iou,
                     pano_osm_n_keypoints=pano_osm_n_keypoints,
+                    pano_recovered_offset_deg=pano_recovered_offset,
+                    pano_recovered_peak=pano_recovered_peak,
+                    pano_recovered_sigma=pano_recovered_sigma,
+                    pano_water_frac=pano_water_frac,
                     pano_projected_coastline=pano_projected_coastline,
                     view_estimates=list(est_for_view) if est_for_view else None,
                 )
