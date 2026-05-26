@@ -1,4 +1,4 @@
-"""Region-driven skyline screening and PDF report generation — the
+﻿"""Region-driven skyline screening and PDF report generation — the
 orchestration layer of skyline_cv. Calls into pipeline.py for the
 math; this module handles I/O, seed selection, multi-pass registration,
 and rendering.
@@ -1553,6 +1553,866 @@ def _registration_overlay(
     return out
 
 
+# ---------------------------------------------------------------------------
+# F-CLEAN8 named helpers — split from _seed_multiview_registration.
+# Each helper owns one responsibility; the orchestrator calls them in order.
+# All existing logic is preserved verbatim — pure refactor, no behaviour change.
+# ---------------------------------------------------------------------------
+
+
+def _capture_pano_views(
+    seed: "SkylinePoint",
+    api_key: str,
+    spin_headings: tuple[float, ...],
+    is_photosphere: bool,
+) -> tuple[list[dict], float, list[dict]]:
+    """Pass 1: fetch every spin-view image, apply pitch correction if needed.
+
+    Returns
+    -------
+    prefetch       : raw list of ``{"geo_heading", "image", ...}`` dicts for
+                     ALL headings (including rejected views — pano-recovery needs
+                     them). ``image`` is None when the fetch failed.
+    effective_pitch: the pitch all views were captured at (may differ from
+                     ``seed.pitch`` if pitch correction fired).
+    cached_views   : subset of ``prefetch`` with images that passed the
+                     per-view screening gate and are suitable for registration.
+    """
+    # Pass 1a: fetch at original pitch and screen.
+    prefetch: list[dict] = []
+    any_needs_pitch_correction = False
+    for geo_heading in spin_headings:
+        image = _streetview_image(
+            api_key,
+            seed.lat,
+            seed.lon,
+            geo_heading,
+            fov=seed.fov,
+            pitch=seed.pitch,
+            pano_id=seed.pano_id,
+            pano_only=is_photosphere,
+        )
+        if image is None:
+            prefetch.append({"geo_heading": geo_heading, "image": None})
+            continue
+        sv_score, sv_label, _, _tc = _screen_score_from_image(
+            image, pitch=seed.pitch)
+        if sv_label == "rejected":
+            prefetch.append({
+                "geo_heading": geo_heading,
+                "image": image,
+                "sv_score": 0.0,
+                "sv_label": "rejected",
+            })
+            continue
+        if seed.pitch < 8.0 and (seed.pitch < -8.0 or _tc):
+            any_needs_pitch_correction = True
+        prefetch.append({
+            "geo_heading": geo_heading,
+            "image": image,
+            "sv_score": sv_score,
+            "sv_label": sv_label,
+        })
+
+    # Pass 1b: pitch correction — re-fetch all views at corrected pitch.
+    effective_pitch = seed.pitch
+    n_original = sum(1 for e in prefetch if e["image"] is not None)
+    if any_needs_pitch_correction and n_original > 0:
+        corrected_pitch = min(seed.pitch + 12.0, 15.0)
+        corrected_prefetch: list[dict] = []
+        n_kept = 0
+        for entry in prefetch:
+            gh = entry["geo_heading"]
+            if entry["image"] is None:
+                corrected_prefetch.append({"geo_heading": gh, "image": None})
+                continue
+            c_image = _streetview_image(
+                api_key, seed.lat, seed.lon, gh,
+                fov=seed.fov, pitch=corrected_pitch,
+                pano_id=seed.pano_id, pano_only=is_photosphere,
+            )
+            if c_image is None:
+                corrected_prefetch.append({"geo_heading": gh, "image": None})
+                continue
+            c_score, c_label, _, _ = _screen_score_from_image(
+                c_image, pitch=corrected_pitch)
+            if c_label == "rejected":
+                corrected_prefetch.append({
+                    "geo_heading": gh,
+                    "image": c_image,
+                    "sv_score": 0.0,
+                    "sv_label": "rejected",
+                })
+                continue
+            corrected_prefetch.append({
+                "geo_heading": gh,
+                "image": c_image,
+                "sv_score": c_score,
+                "sv_label": c_label,
+            })
+            n_kept += 1
+        if n_kept >= max(1, (n_original + 1) // 2):
+            prefetch = corrected_prefetch
+            effective_pitch = corrected_pitch
+            print(
+                f"[pano pitch] {seed.name} corrected to {effective_pitch:+.1f}° "
+                f"({n_kept}/{n_original} views retained)")
+        else:
+            print(
+                f"[pano pitch] {seed.name} keeping original {seed.pitch:+.1f}° "
+                f"(corrected pitch retained only {n_kept}/{n_original})")
+
+    # Build cached_views (screened views only) with Viewpoint + CapturedView.
+    cached_views: list[dict] = []
+    for entry in prefetch:
+        image = entry["image"]
+        if image is None:
+            continue
+        if entry.get("sv_label") == "rejected":
+            continue
+        geo_heading = entry["geo_heading"]
+        vp = Viewpoint(
+            name=f"{seed.name}_{int(round(geo_heading))%360:03d}",
+            query=seed.name,
+            lat=seed.lat,
+            lon=seed.lon,
+            heading=geo_heading,
+            pitch=effective_pitch,
+            fov=seed.fov,
+            image_width=image.shape[1],
+            image_height=image.shape[0],
+        )
+        cap = CapturedView(
+            viewpoint=vp, image_path=Path("."),
+            metadata_path=Path("."), image=image,
+        )
+        cached_views.append({
+            "geo_heading": geo_heading,
+            "image": image,
+            "cap": cap,
+            "sv_score": entry["sv_score"],
+            "sv_label": entry["sv_label"],
+            "wide_reg": None,
+            "wide_score": float("inf"),
+        })
+    return prefetch, effective_pitch, cached_views
+
+
+def _recover_pano_heading(
+    seed: "SkylinePoint",
+    prefetch: list[dict],
+    cached_views: list[dict],
+    effective_pitch: float,
+    spin_step_deg: float,
+    pano_recovery_state: "dict | None",
+) -> tuple[
+    "float | None", "float | None", "float | None", "float | None",
+    "float | None", "int | None", "list | None",
+]:
+    """F-SKY11.1 pano-coastline heading recovery.
+
+    Stitches a 360° water mask from ALL prefetch views (including rejected
+    ones) and sweeps keypoints (OSM in Phase C, satellite otherwise) to
+    recover the pano-to-geographic heading offset.
+
+    Returns
+    -------
+    (pano_recovered_offset, pano_recovered_peak, pano_recovered_sigma,
+     pano_water_frac, pano_osm_iou, pano_osm_n_keypoints,
+     pano_projected_coastline)
+
+    All values are None when pano_recovery_state is None or recovery fails.
+    """
+    pano_recovered_offset: "float | None" = None
+    pano_recovered_sigma: "float | None" = None
+    pano_recovered_peak: "float | None" = None
+    pano_water_frac: "float | None" = None
+    pano_osm_iou: "float | None" = None
+    pano_osm_n_keypoints: "int | None" = None
+    pano_projected_coastline: "list | None" = None
+
+    if pano_recovery_state is None:
+        return (
+            pano_recovered_offset, pano_recovered_peak,
+            pano_recovered_sigma, pano_water_frac,
+            pano_osm_iou, pano_osm_n_keypoints,
+            pano_projected_coastline,
+        )
+
+    try:
+        from .pipeline import (
+            stitch_pano_masks as _stitch_masks,
+            stitch_pano_views as _stitch_rgb,
+        )
+        from .coastline_registration import (
+            detect_coastline_keypoints, sweep_pano_heading_offset,
+        )
+        # Build a set of image IDs for cached (screened) views so we can
+        # use id() to avoid double-inference on the same ndarray objects.
+        _cached_ids = {id(cv["image"]): cv for cv in cached_views}
+        _spin_views_raw = []
+        for entry in prefetch:
+            _img = entry.get("image")
+            if _img is None:
+                continue
+            # If this image is already in cached_views we can reuse the
+            # SegFormer masks (the LRU cache in pipeline.py handles this
+            # transparently, but being explicit avoids the eviction risk on
+            # large spins).
+            from .pipeline import _neural_sky_and_building_masks, _neural_water_mask
+            _, _bm = _neural_sky_and_building_masks(_img)
+            _wm = _neural_water_mask(_img)
+            _spin_views_raw.append({
+                "image": _img,
+                "geo_heading": float(entry["geo_heading"]),
+                "building_mask": _bm,
+                "water_mask": _wm,
+            })
+        _rgb_stitched = _stitch_rgb(_spin_views_raw, seed.fov, spin_step_deg)
+        _stitched = _stitch_masks(_spin_views_raw, seed.fov, spin_step_deg)
+        if _rgb_stitched is not None and _stitched is not None:
+            _pano_img_unused, _headings_per_col = _rgb_stitched
+            _pb, _pw = _stitched
+
+            _primary = pano_recovery_state.get("primary_source", "satellite")
+            keypoints: list[dict]
+            _keypoint_source: str
+            if _primary == "osm":
+                try:
+                    from .osm_water import (  # noqa: PLC0415
+                        clip_to_radius,
+                        osm_keypoints_for_scoring,
+                    )
+                    _osm_coast = clip_to_radius(
+                        pano_recovery_state.get("osm_coastline_features") or [],
+                        (seed.lon, seed.lat),
+                        radius_m=1000.0,
+                    )
+                    keypoints = osm_keypoints_for_scoring(
+                        _osm_coast, (seed.lon, seed.lat),
+                        spacing_m=20.0,
+                    )
+                    _keypoint_source = "osm"
+                except Exception as _e_kp:
+                    print(f"[pano_recovery] seed={seed.name} "
+                          f"OSM keypoint extraction failed: {_e_kp}")
+                    keypoints = []
+                    _keypoint_source = "osm-failed"
+            else:
+                keypoints = detect_coastline_keypoints(
+                    pano_recovery_state["sat_water"],
+                    pano_recovery_state["sat_project"],
+                    seed.lat, seed.lon,
+                    n_bearings=24, max_range_m=2500.0,
+                    step_m=5.0, min_distance_m=30.0,
+                )
+                _keypoint_source = "satellite"
+
+            if keypoints and _pw is not None:
+                best, _cand, _scores = sweep_pano_heading_offset(
+                    keypoints, _pw, _headings_per_col,
+                    seed.lat, seed.lon,
+                    pitch_deg=effective_pitch, step_deg=1.0,
+                    tolerance_px=25,
+                )
+                pano_recovered_offset = float(best)
+                pano_recovered_peak = float(_scores.max())
+                pano_recovered_sigma = float(_scores.std())
+                pano_water_frac = float(_pw.mean())
+                print(
+                    f"[pano_recovery] seed={seed.name}  "
+                    f"source={_keypoint_source}  "
+                    f"keypoints={len(keypoints)}  "
+                    f"pano_views={len(_spin_views_raw)}/12  "
+                    f"pano_water_frac={pano_water_frac:.3f}  "
+                    f"recovered={pano_recovered_offset:.1f}deg  "
+                    f"peak={pano_recovered_peak:.3f}  "
+                    f"sigma={pano_recovered_sigma:.3f}"
+                )
+
+                try:
+                    from .coastline_registration import (  # noqa: PLC0415
+                        pano_water_top_to_lonlat,
+                    )
+                    pano_projected_coastline = pano_water_top_to_lonlat(
+                        _pw, _headings_per_col,
+                        seed.lat, seed.lon,
+                        column_stride=8,
+                        pitch_deg=effective_pitch,
+                    )
+                except Exception as _e_proj:
+                    print(f"[pano_recovery] seed={seed.name} "
+                          f"pano-projection failed: {_e_proj}")
+
+                if _primary == "osm":
+                    pano_osm_iou = pano_recovered_peak
+                    pano_osm_n_keypoints = len(keypoints)
+                    print(
+                        f"[pano_recovery] seed={seed.name}  "
+                        f"osm_kp={pano_osm_n_keypoints}  "
+                        f"osm_iou={pano_osm_iou:.3f}  (peak=IoU)  "
+                        f"projected_pts={len(pano_projected_coastline) if pano_projected_coastline else 0}"
+                    )
+                else:
+                    try:
+                        from .osm_water import (  # noqa: PLC0415
+                            clip_to_radius as _clip,
+                            osm_keypoints_for_scoring as _osm_kps_fn,
+                        )
+                        from .coastline_registration import (  # noqa: PLC0415
+                            score_pano_offset_keypoints,
+                        )
+                        _osm_coast = _clip(
+                            pano_recovery_state.get("osm_coastline_features") or [],
+                            (seed.lon, seed.lat),
+                            radius_m=1000.0,
+                        )
+                        _osm_kps = _osm_kps_fn(
+                            _osm_coast, (seed.lon, seed.lat),
+                            spacing_m=20.0,
+                        )
+                        if _osm_kps:
+                            pano_osm_iou = float(
+                                score_pano_offset_keypoints(
+                                    _osm_kps, _pw, _headings_per_col,
+                                    seed.lat, seed.lon,
+                                    candidate_offset_deg=pano_recovered_offset,
+                                    pitch_deg=effective_pitch,
+                                    tolerance_px=25,
+                                )
+                            )
+                            pano_osm_n_keypoints = len(_osm_kps)
+                        print(
+                            f"[pano_recovery] seed={seed.name}  "
+                            f"osm_kp={pano_osm_n_keypoints}  "
+                            f"osm_iou={pano_osm_iou}  "
+                            f"projected_pts={len(pano_projected_coastline) if pano_projected_coastline else 0}"
+                        )
+                    except Exception as _e_osm:
+                        print(
+                            f"[pano_recovery] seed={seed.name} "
+                            f"OSM diagnostic failed: {_e_osm}"
+                        )
+            else:
+                print(f"[pano_recovery] seed={seed.name}  "
+                      f"keypoints={len(keypoints)} — no recovery attempted")
+    except Exception as _e:
+        print(f"[pano_recovery] seed={seed.name} failed: {_e}")
+
+    return (
+        pano_recovered_offset, pano_recovered_peak,
+        pano_recovered_sigma, pano_water_frac,
+        pano_osm_iou, pano_osm_n_keypoints,
+        pano_projected_coastline,
+    )
+
+
+def _recover_anchor_offset(
+    seed: "SkylinePoint",
+    cached_views: list[dict],
+    seed_buildings: list["BuildingRecord"],
+    pano_recovered_offset: "float | None",
+    pano_recovered_peak: "float | None",
+    pano_recovered_sigma: "float | None",
+    pano_recovery_state: "dict | None",
+    anchor_overrides: "dict[str, float] | None",
+) -> float:
+    """Joint-optimize the pano-to-geographic heading offset across all views.
+
+    Returns the anchor offset in degrees to be applied to every view's
+    registration search centre.
+    """
+    from .pipeline import (  # noqa: PLC0415
+        _score_offset_semantic_iou,
+        _neural_sky_and_building_masks,
+        _neural_water_mask,
+    )
+    masks_per_view: list[tuple] = []
+    for cv in cached_views:
+        _, bmask = _neural_sky_and_building_masks(cv["image"])
+        wmask = _neural_water_mask(cv["image"])
+        masks_per_view.append((bmask, wmask, cv["cap"].viewpoint))
+
+    def _view_weight(bmask):
+        if bmask is None:
+            return 0.0
+        obs = np.asarray(bmask).sum(axis=0)
+        return float(np.count_nonzero(obs > 5))
+
+    weights = [_view_weight(b) for (b, _w, _v) in masks_per_view]
+    total_weight = float(sum(weights))
+
+    override = (anchor_overrides or {}).get(seed.name)
+    if override is not None:
+        anchor_offset = float(override)
+        if pano_recovered_offset is not None:
+            _delta = (pano_recovered_offset - anchor_offset + 540.0) % 360.0 - 180.0
+            print(f"[pano_recovery] seed={seed.name}  "
+                  f"manual={anchor_offset:.1f}deg  "
+                  f"delta_to_recovered={_delta:+.1f}deg")
+        return anchor_offset
+
+    if total_weight <= 0:
+        return 0.0
+
+    def _joint_score(cand: float) -> float:
+        total = 0.0
+        for (bmask, wmask, vp), wt in zip(masks_per_view, weights):
+            if bmask is None or wt <= 0:
+                continue
+            s = _score_offset_semantic_iou(seed_buildings, vp, cand, bmask, wmask)
+            total += s * wt
+        return total / total_weight
+
+    _PANO_RECOVERY_SHARP_SIGMA = 0.10
+    _PANO_RECOVERY_MIN_PEAK = 0.40
+    allow_drive = bool((pano_recovery_state or {}).get("drive_anchor", False))
+    use_pano_seed = (
+        allow_drive
+        and pano_recovered_offset is not None
+        and pano_recovered_sigma is not None
+        and pano_recovered_peak is not None
+        and pano_recovered_sigma <= _PANO_RECOVERY_SHARP_SIGMA
+        and pano_recovered_peak > _PANO_RECOVERY_MIN_PEAK
+    )
+    if use_pano_seed:
+        recovered = pano_recovered_offset
+        if recovered > 180.0:
+            recovered -= 360.0
+        fine_offsets = np.arange(recovered - 15.0, recovered + 15.0 + 0.001, 1.0)
+        best_anchor_offset = recovered
+        best_sum_iou = _joint_score(float(recovered))
+        for cand in fine_offsets:
+            s = _joint_score(float(cand))
+            if s > best_sum_iou:
+                best_sum_iou = s
+                best_anchor_offset = float(cand)
+        anchor_offset = best_anchor_offset
+        print(f"[pano_recovery] seed={seed.name}  "
+              f"USED pano seed -> anchor={anchor_offset:.1f}deg  "
+              f"(joint_iou={best_sum_iou:.3f})")
+    else:
+        coarse_offsets = np.arange(-180.0, 180.0, 3.0)
+        h_token = float(seed.heading) if seed.heading is not None else None
+        coarse_best = -float("inf")
+        coarse_best_offset = h_token if h_token is not None else 0.0
+        for cand in coarse_offsets:
+            s = _joint_score(float(cand))
+            if s > coarse_best:
+                coarse_best = s
+                coarse_best_offset = float(cand)
+        fine_offsets = np.arange(
+            coarse_best_offset - 5.0, coarse_best_offset + 5.0 + 0.001, 0.5)
+        best_anchor_offset = coarse_best_offset
+        best_sum_iou = coarse_best
+        for cand in fine_offsets:
+            s = _joint_score(float(cand))
+            if s > best_sum_iou:
+                best_sum_iou = s
+                best_anchor_offset = float(cand)
+        anchor_offset = best_anchor_offset
+
+    return anchor_offset
+
+
+def _register_views(
+    seed: "SkylinePoint",
+    seed_elev: float,
+    cached_views: list[dict],
+    seed_buildings: list["BuildingRecord"],
+    anchor_offset: float,
+    cross_view_state: "dict | None",
+    negative_seeds: "set[str] | None",
+    max_plausible_height_m: float,
+    pano_osm_iou: "float | None",
+    pano_osm_n_keypoints: "int | None",
+    pano_projected_coastline: "list | None",
+    pano_recovered_offset: "float | None",
+    pano_recovered_peak: "float | None",
+    pano_recovered_sigma: "float | None",
+    pano_water_frac: "float | None",
+    trace=None,
+) -> tuple[list["SeedViewRegistration"], list]:
+    """Pass 2: per-view registration, height extraction, and diagnostics.
+
+    Returns (view_rows_for_seed, estimates_for_seed).
+    """
+    from .pipeline import (  # noqa: PLC0415
+        _neural_sky_and_building_masks,
+        _height_proxy as _hp,
+        compute_building_band,
+    )
+    view_rows: list[SeedViewRegistration] = []
+    estimates: list = []
+    buildings_by_id = {b.feature_id: b for b in seed_buildings}
+    is_negative_seed = bool(negative_seeds and seed.name in negative_seeds)
+
+    for cv in cached_views:
+        geo_heading = cv["geo_heading"]
+        image = cv["image"]
+        cap = cv["cap"]
+        sv_label = cv["sv_label"]
+        reg = register_view_to_osm(
+            cap, seed_buildings,
+            heading_search_deg=8.0, heading_step_deg=1.0,
+            forced_center_deg=anchor_offset,
+        )
+        score = float(reg.get("best_score", float("inf")))
+        n_matches = int(reg.get("n_matches", 0))
+        if not math.isfinite(score) or n_matches < 3:
+            continue
+
+        is_aerial = cap.viewpoint.pitch < -8.0
+        est_for_view: list = []
+        if (not is_aerial
+                and sv_label not in ("weak", "rejected")
+                and not is_negative_seed):
+            est_for_view = estimate_heights_from_registration(
+                cap,
+                reg,
+                seed_buildings,
+                camera_height_m=1.7,
+                camera_elev_m=float(seed_elev),
+                trace=trace,
+                max_plausible_height_m=max_plausible_height_m,
+            )
+            if _F_SKY12_ENABLED and est_for_view:
+                est_for_view = augment_estimates_with_depth(
+                    image, est_for_view, cap.viewpoint, camera_height_m=1.7,
+                )
+            estimates.extend(est_for_view)
+
+        contour_segs = detect_building_silhouettes(
+            reg.get("contour"), image)
+        _, _bmask = _neural_sky_and_building_masks(image)
+        mask_segs = detect_buildings_from_mask(
+            _bmask, contour=reg.get("contour"), image=image,
+        )
+        segments = _merge_silhouette_sources(contour_segs, mask_segs)
+        all_proj_list = reg.get("all_projections") or reg.get("projections", [])
+        if int(reg.get("n_matches", 0)) >= 3:
+            segments = osm_anchor_silhouettes(
+                segments, all_proj_list, building_mask=_bmask)
+
+        if is_negative_seed:
+            matched_segments = []
+        else:
+            _cv_scorer = None
+            if cross_view_state is not None:
+                try:
+                    from .cross_view import make_cross_view_scorer
+                    _cv_scorer = make_cross_view_scorer(
+                        cross_view_state["sat_image"],
+                        cross_view_state["sat_project"],
+                        image,
+                    )
+                except Exception as _e:
+                    print(f"[cross_view] scorer build failed: {_e}")
+                    _cv_scorer = None
+            matched_segments = match_segments_to_buildings(
+                segments, all_proj_list, buildings_by_id,
+                cross_view_scorer=_cv_scorer,
+            )
+
+        effective_heading = (geo_heading + float(reg.get("best_offset", 0.0))) % 360.0
+        half_fov = seed.fov * 0.5
+        contour_arr = np.asarray(reg.get("contour", []), dtype=np.float32)
+        f_px = 0.5 * image.shape[1] / math.tan(math.radians(seed.fov) * 0.5)
+        cy = image.shape[0] * 0.5
+        pitch_rad = math.radians(cap.viewpoint.pitch)
+        cam_z = float(seed_elev) + 1.7
+
+        def _annotate_match_diagnostics(seg: dict) -> None:
+            m = seg.get("matched_projection")
+            if not m:
+                return
+            b = buildings_by_id.get(m["feature_id"])
+            if b is None:
+                return
+            true_bearing = _bearing_deg(
+                seed.lat, seed.lon, b.centroid_lat, b.centroid_lon)
+            true_dist = _distance_m(
+                seed.lat, seed.lon, b.centroid_lat, b.centroid_lon)
+            delta = (true_bearing - effective_heading + 540.0) % 360.0 - 180.0
+            proxy_h = float(_hp(b))
+            x_px = int(round(float(m.get("x_px", 0))))
+            pred_h = float("nan")
+            if 0 <= x_px < contour_arr.size:
+                y_px = float(contour_arr[x_px])
+                if np.isfinite(y_px):
+                    ang = math.atan((cy - y_px) / f_px) + pitch_rad
+                    pred_h = max(
+                        0.0,
+                        cam_z + float(m.get("forward_m", 0.0)) * math.tan(ang)
+                        - float(getattr(b, "terrain_elev_m", 0.0))
+                    )
+            near = [
+                p for p in all_proj_list
+                if abs(float(p.get("x_px", 0)) - float(m.get("x_px", 0))) <= 15.0
+            ]
+            is_closest = bool(near) and min(
+                float(p.get("forward_m", 1e9)) for p in near
+            ) >= float(m.get("forward_m", 0.0)) - 1.0
+            seg["true_bearing_deg"] = true_bearing
+            seg["true_distance_m"] = true_dist
+            seg["bearing_delta_deg"] = delta
+            seg["bearing_in_fov"] = abs(delta) <= half_fov
+            seg["height_proxy_m"] = proxy_h
+            seg["predicted_height_m"] = pred_h
+            seg["is_closest_in_bin"] = is_closest
+            seg["height_tag_m"] = (
+                float(b.height_tag_m) if b.height_tag_m is not None else None)
+
+        for seg in matched_segments:
+            _annotate_match_diagnostics(seg)
+
+        # Post-match cross-verification rescue
+        n_swapped = 0
+        for seg in matched_segments:
+            m = seg.get("matched_projection")
+            if m is None:
+                continue
+            diags = seg.get("match_diagnostics") or []
+            if len(diags) < 2:
+                continue
+            cur_fwd = float(m.get("forward_m", 1e9))
+            cur_pred_h = float(seg.get("predicted_height_m", float("nan")))
+            cur_in_fov = bool(seg.get("bearing_in_fov", True))
+            cur_is_closest = bool(seg.get("is_closest_in_bin", True))
+            cur_height_implausible = (
+                not np.isfinite(cur_pred_h)
+                or cur_pred_h > max_plausible_height_m * 1.25
+                or cur_pred_h < 1.5
+            )
+            needs_swap = (
+                (not cur_in_fov)
+                or cur_height_implausible
+                or (not cur_is_closest)
+            )
+            if not needs_swap:
+                continue
+            cur_fid = str(m.get("feature_id", ""))
+            best_alt = None
+            best_alt_fid: "str | None" = None
+            for d in diags:
+                alt_fid = str(d.get("feature_id", ""))
+                if alt_fid == cur_fid:
+                    continue
+                alt_p = next(
+                    (p for p in all_proj_list
+                     if str(p.get("feature_id", "")) == alt_fid),
+                    None,
+                )
+                if alt_p is None:
+                    continue
+                alt_fwd = float(alt_p.get("forward_m", 1e9))
+                if alt_fwd >= cur_fwd - 1.0:
+                    continue
+                alt_b = buildings_by_id.get(alt_fid)
+                if alt_b is None:
+                    continue
+                alt_proxy_h = float(_hp(alt_b))
+                if alt_proxy_h < 5.0:
+                    continue
+                alt_true_bearing = _bearing_deg(
+                    seed.lat, seed.lon,
+                    alt_b.centroid_lat, alt_b.centroid_lon)
+                alt_delta = (alt_true_bearing - effective_heading + 540.0) % 360.0 - 180.0
+                if abs(alt_delta) > half_fov:
+                    continue
+                alt_x_px = int(round(float(alt_p.get("x_px", 0))))
+                alt_pred_h = float("nan")
+                if 0 <= alt_x_px < contour_arr.size:
+                    y_px = float(contour_arr[alt_x_px])
+                    if np.isfinite(y_px):
+                        ang = math.atan((cy - y_px) / f_px) + pitch_rad
+                        alt_pred_h = max(
+                            0.0,
+                            cam_z + alt_fwd * math.tan(ang)
+                            - float(getattr(alt_b, "terrain_elev_m", 0.0))
+                        )
+                if (not np.isfinite(alt_pred_h)
+                        or alt_pred_h > max_plausible_height_m
+                        or alt_pred_h < 1.5):
+                    continue
+                if best_alt is None or alt_fwd < float(best_alt.get("forward_m", 1e9)):
+                    best_alt = alt_p
+                    best_alt_fid = alt_fid
+            if best_alt is not None and best_alt_fid != cur_fid:
+                already_claimed = any(
+                    s is not seg
+                    and s.get("matched_projection") is not None
+                    and str(s["matched_projection"].get("feature_id", "")) == best_alt_fid
+                    for s in matched_segments
+                )
+                if not already_claimed:
+                    seg["matched_projection_pre_correction"] = m
+                    seg["matched_projection"] = best_alt
+                    seg["match_corrected"] = True
+                    _annotate_match_diagnostics(seg)
+                    n_swapped += 1
+        if n_swapped:
+            print(
+                f"[cross_verify] {cap.viewpoint.name}: "
+                f"corrected {n_swapped} match(es) via post-hoc rescue"
+            )
+
+        # View-level cross-checks (heading consistency + multi-building)
+        deltas: list[float] = []
+        wide_segs: list[dict] = []
+        for seg in matched_segments:
+            m = seg.get("matched_projection")
+            if m is None:
+                continue
+            bd = seg.get("bearing_delta_deg")
+            if bd is not None and np.isfinite(bd):
+                deltas.append(float(bd))
+            seg_w = float(seg["x_right"]) - float(seg["x_left"])
+            proj_w = max(1.0,
+                         float(m.get("x_right_px", m.get("x_px", 0))) -
+                         float(m.get("x_left_px", m.get("x_px", 0))))
+            width_ratio = seg_w / proj_w
+            others = []
+            for p in all_proj_list:
+                if str(p.get("feature_id", "")) == str(m.get("feature_id", "")):
+                    continue
+                px = float(p.get("x_px", -1))
+                if float(seg["x_left"]) <= px <= float(seg["x_right"]):
+                    others.append(p)
+            seg["seg_width_px"] = seg_w
+            seg["proj_width_px"] = proj_w
+            seg["width_ratio"] = width_ratio
+            seg["covered_other_projs"] = len(others)
+            if width_ratio >= 2.5 or len(others) >= 2:
+                seg["multi_building_candidate"] = True
+                wide_segs.append(seg)
+        if len(deltas) >= 3:
+            med = float(np.median(deltas))
+            res = [abs(d - med) for d in deltas]
+            mad = float(np.median(res))
+            if abs(med) > 5.0 or mad > 15.0:
+                print(
+                    f"[heading_consistency] {cap.viewpoint.name}: "
+                    f"median bearing_delta={med:+.1f}° "
+                    f"MAD={mad:.1f}° n={len(deltas)} "
+                    f"— {'heading offset may be biased' if abs(med) > 5.0 else 'matches scattered'}"
+                )
+        if wide_segs:
+            ratios = [f"{int(s.get('width_ratio', 0))}×" for s in wide_segs]
+            covered = [str(s.get('covered_other_projs', 0)) for s in wide_segs]
+            print(
+                f"[multi_building] {cap.viewpoint.name}: "
+                f"{len(wide_segs)} wide segment(s) "
+                f"(width_ratios={','.join(ratios)} "
+                f"others_inside={','.join(covered)})"
+            )
+
+        overlay = _registration_overlay(image, reg, matched_segments=matched_segments)
+        band = compute_building_band(_bmask, slack_px=20)
+        view_rows.append(
+            SeedViewRegistration(
+                seed_name=seed.name,
+                seed_lat=seed.lat,
+                seed_lon=seed.lon,
+                heading=geo_heading,
+                fov=seed.fov,
+                registration_score=score,
+                best_offset=float(reg.get("best_offset", 0.0)),
+                estimates_count=len(est_for_view),
+                matched_segments=matched_segments,
+                image=overlay,
+                is_aerial=is_aerial,
+                iou=float(reg.get("best_iou", 0.0)),
+                band_y=band,
+                is_negative=is_negative_seed,
+                building_mask=_bmask,
+                pano_osm_iou=pano_osm_iou,
+                pano_osm_n_keypoints=pano_osm_n_keypoints,
+                pano_recovered_offset_deg=pano_recovered_offset,
+                pano_recovered_peak=pano_recovered_peak,
+                pano_recovered_sigma=pano_recovered_sigma,
+                pano_water_frac=pano_water_frac,
+                pano_projected_coastline=pano_projected_coastline,
+                view_estimates=list(est_for_view) if est_for_view else None,
+            )
+        )
+
+    return view_rows, estimates
+
+
+def _stitch_pano_composite(
+    seed: "SkylinePoint",
+    cached_views: list[dict],
+    seed_buildings: list["BuildingRecord"],
+    anchor_offset: float,
+    spin_step_deg: float,
+) -> "StitchedPanoResult | None":
+    """Pass 3: stitch all spin views into a 360° pano and run pano-level matching.
+
+    Returns a ``StitchedPanoResult`` on success, ``None`` on failure (the pano
+    path is supplementary — failure must not break the per-view results).
+    """
+    try:
+        from .pipeline import (  # noqa: PLC0415
+            stitch_pano_views,
+            stitch_pano_masks,
+            project_buildings_to_pano,
+            detect_buildings_from_mask as _det_pano,
+            match_segments_to_buildings as _match_pano,
+            compute_building_band as _cbb,
+            _neural_sky_and_building_masks,
+            _neural_water_mask,
+        )
+        spin_views_for_pano: list[dict] = []
+        for cv in cached_views:
+            _sky, bmask = _neural_sky_and_building_masks(cv["image"])
+            wmask = _neural_water_mask(cv["image"])
+            spin_views_for_pano.append({
+                "image": cv["image"],
+                "geo_heading": (cv["geo_heading"] + anchor_offset) % 360.0,
+                "building_mask": bmask,
+                "water_mask": wmask,
+            })
+        stitch_out = stitch_pano_views(spin_views_for_pano, seed.fov, spin_step_deg)
+        mask_out = stitch_pano_masks(spin_views_for_pano, seed.fov, spin_step_deg)
+        if stitch_out is None or mask_out is None:
+            return None
+        pano_img, pano_headings = stitch_out
+        pano_bmask, pano_wmask = mask_out
+        if pano_bmask.shape[1] != pano_img.shape[1]:
+            raise ValueError(
+                f"pano image/mask width mismatch: "
+                f"img={pano_img.shape[1]} mask={pano_bmask.shape[1]}")
+        pano_band = _cbb(pano_bmask, slack_px=20)
+        pano_segs = _det_pano(pano_bmask)
+        pano_projs = project_buildings_to_pano(
+            seed_buildings, seed.lat, seed.lon, pano_headings)
+        bbid = {b.feature_id: b for b in seed_buildings}
+        pano_matched = _match_pano(pano_segs, pano_projs, bbid)
+        for seg in pano_matched:
+            px = int(seg.get("peak_x", seg.get("mid_x", 0)))
+            px = max(0, min(pano_headings.size - 1, px))
+            seg["true_bearing_deg"] = float(pano_headings[px])
+        n_matched = sum(1 for s in pano_matched if s.get("matched_projection"))
+        return StitchedPanoResult(
+            seed_name=seed.name,
+            seed_lat=seed.lat,
+            seed_lon=seed.lon,
+            pano_image=pano_img,
+            band_y=pano_band,
+            matched_segments=pano_matched,
+            n_segments=len(pano_segs),
+            n_matched=n_matched,
+            n_buildings_in_view=len(pano_projs),
+            anchor_offset_deg=float(anchor_offset),
+            headings_per_col=pano_headings,
+        )
+    except Exception as e:
+        import sys as _sys
+        print(f"[pano] seed={seed.name} failed: {e}", file=_sys.stderr)
+        return None
+
+
 def _seed_multiview_registration(
     seeds: list[SkylinePoint],
     buildings: list[BuildingRecord],
@@ -1576,19 +2436,18 @@ def _seed_multiview_registration(
     Without pano_id, we resolve the snapped pano via metadata once per seed
     and rebind lat/lon/pano_id so projections, mini-map, and the image all
     agree on a single camera position.
+
+    F-CLEAN8: this function is now a thin orchestrator. The five named
+    helpers implement each phase:
+      _capture_pano_views        — Pass 1: fetch + pitch-correct spin views
+      _recover_pano_heading      — F-SKY11.1 pano-coastline heading recovery
+      _recover_anchor_offset     — joint IoU optimization across all views
+      _register_views            — Pass 2: per-view registration + heights
+      _stitch_pano_composite     — Pass 3: 360° pano stitch + matching
     """
-    # Resolve each seed to a concrete pano whose IMAGE actually renders (not
-    # just metadata-OK). User-contributed Photo Sphere panos resolve in
-    # metadata but the Static IMAGE API returns its gray "no imagery"
-    # placeholder for them — we have to verify by actually fetching one image.
-    # We probe a 0° image with progressively larger radii until we find a
-    # pano that returns real pixels, then bind the seed to that pano's lat/lon.
-    # Per-region cache of resolved seed positions to keep results
-    # reproducible across runs. The Static API's location-based snap
-    # routinely returns DIFFERENT panos on different runs (50–500 m drift)
-    # because the metadata endpoint walks the visible-pano list slightly
-    # differently each time it's called. Without caching, the user sees
-    # the report change every run even when the seed_urls input is fixed.
+    # ── Step 1: resolve every seed to a renderable pano position. ──────────
+    # Cached to keep multi-run results reproducible (the Static API's
+    # location-based snap returns different panos on different calls).
     _resolve_cache_path = (
         Path(__file__).parent / "runs" / "seed_resolution_cache.json"
     )
@@ -1609,8 +2468,6 @@ def _seed_multiview_registration(
             pass
 
     def _seed_cache_key(s: SkylinePoint) -> str:
-        # Key by the URL-derived identity: name + lat/lon (to 6 dp) +
-        # pano_id. Changes only when the user edits sites/<region>.json.
         return f"{s.name}|{s.lat:.6f}|{s.lon:.6f}|{s.pano_id or ''}"
 
     resolved: list[tuple[SkylinePoint, float, bool]] = []
@@ -1619,7 +2476,6 @@ def _seed_multiview_registration(
         bound: SkylinePoint | None = None
         cache_key = _seed_cache_key(seed)
 
-        # 1. Try the cached resolved pano first.
         cached = _resolve_cache.get(cache_key)
         if cached is not None:
             try:
@@ -1640,9 +2496,8 @@ def _seed_multiview_registration(
                         pitch=seed.pitch, pano_id=cached_pano,
                     )
             except Exception:
-                pass  # cache miss → fall through to fresh resolve
+                pass
 
-        # 2. If no cache hit, try the URL's pano_id directly.
         if bound is None and seed.pano_id:
             probe = _streetview_image(
                 api_key, seed.lat, seed.lon, 0.0,
@@ -1651,7 +2506,7 @@ def _seed_multiview_registration(
             )
             if probe is not None:
                 bound = seed
-        # 3. Fall back to progressively larger location-based radii.
+
         if bound is None:
             for r in (200, 500, 1500, 3000):
                 try:
@@ -1683,8 +2538,6 @@ def _seed_multiview_registration(
                 )
                 break
 
-        # Persist this seed's resolved position so subsequent runs hit the
-        # same pano. Only cache successful resolutions.
         if bound is not None and cache_key not in _resolve_cache:
             _resolve_cache[cache_key] = {
                 "lat": float(bound.lat),
@@ -1693,28 +2546,18 @@ def _seed_multiview_registration(
             }
             _cache_save()
         if bound is None:
-            # No usable imagery anywhere near this seed — skip it entirely.
             continue
-        # is_photosphere: True when the bound is the URL's Photo Sphere pano.
-        # Photo Sphere panos treat heading=0 as the native capture direction
-        # (not geographic north), so the API heading must be pano-relative.
-        # For road panos found by location-based fallback the heading IS
-        # geographic and no offset is needed.
         is_photosphere = (
             seed.pano_id is not None and bound.pano_id == seed.pano_id)
         resolved.append((bound, float(seed_elev), is_photosphere))
 
+    # ── Step 2: per-seed orchestration via named helpers. ───────────────────
     spin_headings = tuple(float(h)
                           for h in np.arange(0.0, 360.0, spin_step_deg))
     view_rows: list[SeedViewRegistration] = []
     pano_results: list[StitchedPanoResult] = []
-    estimates = []
+    all_estimates: list = []
 
-    # Spatial prefilter: only buildings within max_view_radius_m of the seed
-    # can be in any of its 12 spin views (max_distance_m=4000 m inside the
-    # projection plus a safety margin → 4500 m). Cuts ~3000 buildings to ~400
-    # per seed for projection and IoU work, multiplies the speedup from
-    # vectorisation by another ~7×.
     def _buildings_near_seed(seed_lat: float, seed_lon: float, radius_m: float = 4500.0):
         mlat = 110_540.0
         mlon = 111_320.0 * math.cos(math.radians(seed_lat))
@@ -1728,1098 +2571,61 @@ def _seed_multiview_registration(
         return out
 
     for seed, seed_elev, is_photosphere in resolved:
-        # Per-seed building subset (recomputed each seed; cheap O(N) sweep).
         seed_buildings = _buildings_near_seed(seed.lat, seed.lon)
-        # ── Pass 1: capture all spin images and screen them. We do NOT run
-        # per-view registration here — the joint anchor optimization across
-        # all views (next block) is authoritative. The per-view wide search
-        # is run lazily in Pass 2 only as a fallback when the forced anchor
-        # leaves a specific view with too few matches.
-        #
-        # This skip alone saves ~120 s of work per run: previously every
-        # spin view ran register_view_to_osm with a coarse 180°/10° sweep
-        # plus a fine ±15°/1° refinement, and the result was discarded by
-        # the joint optimizer that ran right after.
-        # Pass 1a: fetch every spin view at seed.pitch and screen it. We
-        # defer building the CapturedViews until we know what *seed-level*
-        # pitch the whole spin will commit to — splitting some views to the
-        # original pitch and others to a corrected pitch produces visible
-        # vertical seams in the stitched 360° pano because adjacent strips
-        # then have different horizon y. The pano stitcher hstacks central
-        # 30° crops assuming a uniform vertical center.
-        prefetch: list[dict] = []
-        any_needs_pitch_correction = False
-        for geo_heading in spin_headings:
-            image = _streetview_image(
-                api_key,
-                seed.lat,
-                seed.lon,
-                geo_heading,
-                fov=seed.fov,
-                pitch=seed.pitch,
-                pano_id=seed.pano_id,
-                pano_only=is_photosphere,
-            )
-            if image is None:
-                prefetch.append({"geo_heading": geo_heading, "image": None})
-                continue
-            sv_score, sv_label, _, _tc = _screen_score_from_image(
-                image, pitch=seed.pitch)
-            if sv_label == "rejected":
-                # Keep the image — it's still useful for pano-coastline
-                # recovery, which needs ALL 12 directions to register
-                # against the satellite (the open-water directions that
-                # the screening rejects are exactly the ones the
-                # coastline alignment depends on). cached_views filters
-                # rejected entries below; only the pano-recovery block
-                # reads through the screening.
-                prefetch.append({
-                    "geo_heading": geo_heading,
-                    "image": image,
-                    "sv_score": 0.0,
-                    "sv_label": "rejected",
-                })
-                continue
-            # Flag the SEED for pitch correction if ANY view's tops are
-            # clipped or the seed itself is tilted noticeably down. The
-            # decision is made once per seed, not per view.
-            if seed.pitch < 8.0 and (seed.pitch < -8.0 or _tc):
-                any_needs_pitch_correction = True
-            prefetch.append({
-                "geo_heading": geo_heading,
-                "image": image,
-                "sv_score": sv_score,
-                "sv_label": sv_label,
-            })
-
-        # Pass 1b: if any view in the spin asked for pitch correction,
-        # re-fetch ALL views at the same corrected pitch and use those
-        # uniformly. This keeps the stitched pano horizon continuous and
-        # lets height extraction benefit from the corrected pitch for
-        # views that wouldn't have triggered the per-view rule on their
-        # own. If a corrected fetch fails for some heading, that single
-        # view is dropped (rather than mixed in at the wrong pitch).
-        #
-        # Fallback: if the corrected pitch retains noticeably fewer views
-        # than the original pitch (more than half lost), the corrected
-        # angle isn't physically renderable at most headings for this
-        # pano. Accept the seam and keep the original-pitch versions —
-        # more buildings extracted from a seamed pano beats few buildings
-        # from a clean pano.
-        effective_pitch = seed.pitch
-        n_original = sum(1 for e in prefetch if e["image"] is not None)
-        if any_needs_pitch_correction and n_original > 0:
-            corrected_pitch = min(seed.pitch + 12.0, 15.0)
-            corrected_prefetch: list[dict] = []
-            n_kept = 0
-            for entry in prefetch:
-                gh = entry["geo_heading"]
-                if entry["image"] is None:
-                    corrected_prefetch.append(
-                        {"geo_heading": gh, "image": None})
-                    continue
-                c_image = _streetview_image(
-                    api_key, seed.lat, seed.lon, gh,
-                    fov=seed.fov, pitch=corrected_pitch,
-                    pano_id=seed.pano_id, pano_only=is_photosphere,
-                )
-                if c_image is None:
-                    corrected_prefetch.append(
-                        {"geo_heading": gh, "image": None})
-                    continue
-                c_score, c_label, _, _ = _screen_score_from_image(
-                    c_image, pitch=corrected_pitch)
-                if c_label == "rejected":
-                    # Same logic as Pass 1a: retain the image for
-                    # pano-coastline recovery even when the screening
-                    # rejects the view as a per-view registration source.
-                    corrected_prefetch.append({
-                        "geo_heading": gh,
-                        "image": c_image,
-                        "sv_score": 0.0,
-                        "sv_label": "rejected",
-                    })
-                    continue
-                corrected_prefetch.append({
-                    "geo_heading": gh,
-                    "image": c_image,
-                    "sv_score": c_score,
-                    "sv_label": c_label,
-                })
-                n_kept += 1
-            # Retain corrected only if it doesn't cost us more than half
-            # the views the original pitch already had.
-            if n_kept >= max(1, (n_original + 1) // 2):
-                prefetch = corrected_prefetch
-                effective_pitch = corrected_pitch
-                print(
-                    f"[pano pitch] {seed.name} corrected to {effective_pitch:+.1f}° "
-                    f"({n_kept}/{n_original} views retained)")
-            else:
-                print(
-                    f"[pano pitch] {seed.name} keeping original {seed.pitch:+.1f}° "
-                    f"(corrected pitch retained only {n_kept}/{n_original})")
-
-        cached_views: list[dict] = []
-        for entry in prefetch:
-            image = entry["image"]
-            if image is None:
-                continue
-            # Rejected entries are kept in prefetch for pano-coastline
-            # recovery only; per-view registration must still skip them
-            # so today's matcher behavior is unchanged.
-            if entry.get("sv_label") == "rejected":
-                continue
-            geo_heading = entry["geo_heading"]
-            vp = Viewpoint(
-                name=f"{seed.name}_{int(round(geo_heading))%360:03d}",
-                query=seed.name,
-                lat=seed.lat,
-                lon=seed.lon,
-                heading=geo_heading,
-                pitch=effective_pitch,
-                fov=seed.fov,
-                image_width=image.shape[1],
-                image_height=image.shape[0],
-            )
-            cap = CapturedView(
-                viewpoint=vp, image_path=Path("."),
-                metadata_path=Path("."), image=image,
-            )
-            cached_views.append({
-                "geo_heading": geo_heading,
-                "image": image,
-                "cap": cap,
-                "sv_score": entry["sv_score"],
-                "sv_label": entry["sv_label"],
-                "wide_reg": None,        # lazily computed in Pass 2 fallback
-                "wide_score": float("inf"),
-            })
-
-        if not cached_views:
+        # Pass 1: fetch + pitch-correct all spin views.
+        prefetch, effective_pitch, cached_views_for_seed = _capture_pano_views(
+            seed, api_key, spin_headings, is_photosphere,
+        )
+        if not cached_views_for_seed:
             continue
 
-        # ── Anchor selection: JOINT optimization across all views.
-        # A Photo Sphere is a single rigid pano with one intrinsic rotation
-        # vs. geographic compass. The correct offset is the one that aligns
-        # ALL 12 views with their respective masks simultaneously. Picking
-        # by single best view's mIoU is unreliable when several views have
-        # ambiguous local optima.
-        # We sweep a coarse grid of candidate offsets and pick the one that
-        # maximizes the SUM of mIoU across all views. This is the standard
-        # SOTA approach (bundle-adjustment-lite for pose estimation).
-        from .pipeline import _score_offset_semantic_iou, _neural_sky_and_building_masks, _neural_water_mask
-        # Pre-compute mask references per view (cached by SegFormer).
-        masks_per_view: list[tuple] = []
-        for cv in cached_views:
-            _, bmask = _neural_sky_and_building_masks(cv["image"])
-            wmask = _neural_water_mask(cv["image"])
-            masks_per_view.append((bmask, wmask, cv["cap"].viewpoint))
+        # Retrieve the effective pitch from the helper's output.
+        effective_pitch = cached_views_for_seed[0]["cap"].viewpoint.pitch if cached_views_for_seed else seed.pitch
 
-        # Two-stage coarse-to-fine joint search. Stage 1 sweeps 360° at 3°
-        # steps (denser than the previous 5° step — at FOV=75° the right
-        # anchor can sit between 5° gridpoints and miss a sharp local optimum)
-        # to find the right ballpark; stage 2 refines ±5° at 0.5° steps around
-        # the ballpark.
-        #
-        # Per-view weighting: a view that sees a busy skyline discriminates
-        # offsets far better than a view pointed at open water (which scores
-        # near zero at EVERY offset). We weight each view's contribution by
-        # the count of observed-building columns in its mask, so non-
-        # informative views can't dilute the right anchor.
-        def _view_weight(bmask):
-            if bmask is None:
-                return 0.0
-            obs = np.asarray(bmask).sum(axis=0)
-            # observed building cols ≥ 5 rows (same gate as the score itself)
-            return float(np.count_nonzero(obs > 5))
+        # Pano-coastline heading recovery (F-SKY11.1 / F-SKY13 Phase C).
+        (
+            pano_recovered_offset, pano_recovered_peak,
+            pano_recovered_sigma, pano_water_frac,
+            pano_osm_iou, pano_osm_n_keypoints,
+            pano_projected_coastline,
+        ) = _recover_pano_heading(
+            seed, prefetch, cached_views_for_seed,
+            effective_pitch, spin_step_deg, pano_recovery_state,
+        )
 
-        weights = [_view_weight(b) for (b, _w, _v) in masks_per_view]
-        total_weight = float(sum(weights))
+        # Joint anchor optimization across all views.
+        anchor_offset = _recover_anchor_offset(
+            seed, cached_views_for_seed, seed_buildings,
+            pano_recovered_offset, pano_recovered_peak, pano_recovered_sigma,
+            pano_recovery_state, anchor_overrides,
+        )
 
-        # ── F-SKY11.1 Path B: pano-coastline heading recovery ──────────────
-        # Stitch a pano water mask in API-heading frame (NOT yet rotated
-        # by anchor_offset) and run the F-SKY11.1 keypoint sweep. The
-        # recovered value is always logged so it can be compared to a
-        # manual override; whether it gets used to seed the joint
-        # optimizer is governed by the sharpness gate + the absence of a
-        # manual override (manual always wins).
-        pano_recovered_offset: float | None = None
-        pano_recovered_sigma: float | None = None
-        pano_recovered_peak: float | None = None
-        pano_water_frac: float | None = None
-        # F-SKY13 Phase B diagnostics — populated alongside pano-recovery
-        # when OSM coastline is available within 1 km of the seed.
-        pano_osm_iou: float | None = None
-        pano_osm_n_keypoints: int | None = None
-        pano_projected_coastline: list[tuple[float, float]] | None = None
-        if pano_recovery_state is not None:
-            try:
-                from .pipeline import (
-                    stitch_pano_masks as _stitch_masks,
-                    stitch_pano_views as _stitch_rgb,
-                )
-                from .coastline_registration import (
-                    detect_coastline_keypoints, sweep_pano_heading_offset,
-                )
-                # Build the pano from EVERY successfully-fetched view
-                # in prefetch, including the ones the per-view screening
-                # rejected. The water-mask geometry the recovery needs
-                # is preserved across all directions even when the view
-                # contains no skyline structure (the rejection reason).
-                _spin_views_raw = []
-                for entry in prefetch:
-                    _img = entry.get("image")
-                    if _img is None:
-                        continue
-                    _bm = None
-                    _wm = None
-                    # Reuse the cached_views mask when available (avoids
-                    # a redundant SegFormer forward pass for unrejected
-                    # views), otherwise run SegFormer on the rejected
-                    # view's image now.
-                    for cv_i, cv in enumerate(cached_views):
-                        if abs(cv["geo_heading"]
-                               - entry["geo_heading"]) < 0.5:
-                            _bm = masks_per_view[cv_i][0]
-                            _wm = masks_per_view[cv_i][1]
-                            break
-                    if _wm is None:
-                        from .pipeline import _neural_water_mask
-                        _wm = _neural_water_mask(_img)
-                    if _bm is None:
-                        from .pipeline import _neural_sky_and_building_masks
-                        _, _bm = _neural_sky_and_building_masks(_img)
-                    _spin_views_raw.append({
-                        "image": _img,
-                        "geo_heading": float(entry["geo_heading"]),
-                        "building_mask": _bm,
-                        "water_mask": _wm,
-                    })
-                _rgb_stitched = _stitch_rgb(
-                    _spin_views_raw, seed.fov, spin_step_deg)
-                _stitched = _stitch_masks(
-                    _spin_views_raw, seed.fov, spin_step_deg)
-                if _rgb_stitched is not None and _stitched is not None:
-                    _pano_img_unused, _headings_per_col = _rgb_stitched
-                    _pb, _pw = _stitched
+        # Pass 2: per-view registration + height extraction.
+        seed_view_rows, seed_estimates = _register_views(
+            seed, seed_elev, cached_views_for_seed, seed_buildings,
+            anchor_offset, cross_view_state, negative_seeds,
+            max_plausible_height_m,
+            pano_osm_iou, pano_osm_n_keypoints, pano_projected_coastline,
+            pano_recovered_offset, pano_recovered_peak,
+            pano_recovered_sigma, pano_water_frac,
+            trace=trace,
+        )
+        view_rows.extend(seed_view_rows)
+        all_estimates.extend(seed_estimates)
 
-                    # F-SKY13 Phase C: source keypoints from OSM directly
-                    # (the trusted ground truth) instead of the heuristic
-                    # satellite HSV mask. When primary_source == "osm",
-                    # the sweep's peak IS the pano↔OSM IoU — no separate
-                    # Phase B verifier compute needed.
-                    _primary = pano_recovery_state.get("primary_source", "satellite")
-                    keypoints: list[dict]
-                    _keypoint_source: str
-                    if _primary == "osm":
-                        try:
-                            from .osm_water import (  # noqa: PLC0415
-                                clip_to_radius,
-                                osm_keypoints_for_scoring,
-                            )
-                            _osm_coast = clip_to_radius(
-                                pano_recovery_state.get("osm_coastline_features") or [],
-                                (seed.lon, seed.lat),
-                                radius_m=1000.0,
-                            )
-                            keypoints = osm_keypoints_for_scoring(
-                                _osm_coast, (seed.lon, seed.lat),
-                                spacing_m=20.0,
-                            )
-                            _keypoint_source = "osm"
-                        except Exception as _e_kp:
-                            print(f"[pano_recovery] seed={seed.name} "
-                                  f"OSM keypoint extraction failed: {_e_kp}")
-                            keypoints = []
-                            _keypoint_source = "osm-failed"
-                    else:
-                        # Legacy / Phase B: satellite HSV keypoints.
-                        keypoints = detect_coastline_keypoints(
-                            pano_recovery_state["sat_water"],
-                            pano_recovery_state["sat_project"],
-                            seed.lat, seed.lon,
-                            n_bearings=24, max_range_m=2500.0,
-                            step_m=5.0, min_distance_m=30.0,
-                        )
-                        _keypoint_source = "satellite"
-
-                    if keypoints and _pw is not None:
-                        best, _cand, _scores = sweep_pano_heading_offset(
-                            keypoints, _pw, _headings_per_col,
-                            seed.lat, seed.lon,
-                            pitch_deg=effective_pitch, step_deg=1.0,
-                            tolerance_px=25,
-                        )
-                        pano_recovered_offset = float(best)
-                        pano_recovered_peak = float(_scores.max())
-                        pano_recovered_sigma = float(_scores.std())
-                        pano_water_frac = float(_pw.mean())
-                        print(
-                            f"[pano_recovery] seed={seed.name}  "
-                            f"source={_keypoint_source}  "
-                            f"keypoints={len(keypoints)}  "
-                            f"pano_views={len(_spin_views_raw)}/12  "
-                            f"pano_water_frac={pano_water_frac:.3f}  "
-                            f"recovered={pano_recovered_offset:.1f}deg  "
-                            f"peak={pano_recovered_peak:.3f}  "
-                            f"sigma={pano_recovered_sigma:.3f}"
-                        )
-
-                        # Pano-projected coastline is always useful for the
-                        # minimap diagnostic (independent of which keypoint
-                        # source drove the sweep). Cheap inverse projection,
-                        # no extra inference.
-                        try:
-                            from .coastline_registration import (  # noqa: PLC0415
-                                pano_water_top_to_lonlat,
-                            )
-                            pano_projected_coastline = (
-                                pano_water_top_to_lonlat(
-                                    _pw, _headings_per_col,
-                                    seed.lat, seed.lon,
-                                    column_stride=8,
-                                    pitch_deg=effective_pitch,
-                                )
-                            )
-                        except Exception as _e_proj:
-                            print(f"[pano_recovery] seed={seed.name} "
-                                  f"pano-projection failed: {_e_proj}")
-
-                        # IoU compute: in Phase C the sweep peak IS the
-                        # pano↔OSM IoU (since the sweep already used OSM
-                        # keypoints). In the legacy path we re-score OSM
-                        # at the satellite-recovered offset.
-                        if _primary == "osm":
-                            pano_osm_iou = pano_recovered_peak
-                            pano_osm_n_keypoints = len(keypoints)
-                            print(
-                                f"[pano_recovery] seed={seed.name}  "
-                                f"osm_kp={pano_osm_n_keypoints}  "
-                                f"osm_iou={pano_osm_iou:.3f}  (peak=IoU)  "
-                                f"projected_pts={len(pano_projected_coastline) if pano_projected_coastline else 0}"
-                            )
-                        else:
-                            # Legacy Phase B verifier: score OSM at the
-                            # satellite-recovered offset.
-                            try:
-                                from .osm_water import (  # noqa: PLC0415
-                                    clip_to_radius as _clip,
-                                    osm_keypoints_for_scoring as _osm_kps_fn,
-                                )
-                                from .coastline_registration import (  # noqa: PLC0415
-                                    score_pano_offset_keypoints,
-                                )
-                                _osm_coast = _clip(
-                                    pano_recovery_state.get("osm_coastline_features") or [],
-                                    (seed.lon, seed.lat),
-                                    radius_m=1000.0,
-                                )
-                                _osm_kps = _osm_kps_fn(
-                                    _osm_coast, (seed.lon, seed.lat),
-                                    spacing_m=20.0,
-                                )
-                                if _osm_kps:
-                                    pano_osm_iou = float(
-                                        score_pano_offset_keypoints(
-                                            _osm_kps, _pw, _headings_per_col,
-                                            seed.lat, seed.lon,
-                                            candidate_offset_deg=pano_recovered_offset,
-                                            pitch_deg=effective_pitch,
-                                            tolerance_px=25,
-                                        )
-                                    )
-                                    pano_osm_n_keypoints = len(_osm_kps)
-                                print(
-                                    f"[pano_recovery] seed={seed.name}  "
-                                    f"osm_kp={pano_osm_n_keypoints}  "
-                                    f"osm_iou={pano_osm_iou}  "
-                                    f"projected_pts={len(pano_projected_coastline) if pano_projected_coastline else 0}"
-                                )
-                            except Exception as _e_osm:
-                                print(
-                                    f"[pano_recovery] seed={seed.name} "
-                                    f"OSM diagnostic failed: {_e_osm}"
-                                )
-                    else:
-                        print(f"[pano_recovery] seed={seed.name}  "
-                              f"keypoints={len(keypoints)} — no recovery "
-                              "attempted")
-            except Exception as _e:
-                print(f"[pano_recovery] seed={seed.name} failed: {_e}")
-
-        # Manual override: if sites/<region>.json provides an
-        # `anchor_offsets_deg` entry for this seed, skip the IoU
-        # optimization entirely. This gives the user a deterministic
-        # escape hatch when the algorithm picks a wrong local maximum
-        # (degenerate score landscape for seeds with buildings in
-        # multiple directions).
-        override = (anchor_overrides or {}).get(seed.name)
-        if override is not None:
-            anchor_offset = float(override)
-            if pano_recovered_offset is not None:
-                _delta = (pano_recovered_offset - anchor_offset + 540.0) % 360.0 - 180.0
-                print(f"[pano_recovery] seed={seed.name}  "
-                      f"manual={anchor_offset:.1f}deg  "
-                      f"delta_to_recovered={_delta:+.1f}deg")
-        elif total_weight <= 0:
-            anchor_offset = 0.0
-        else:
-            def _joint_score(cand: float) -> float:
-                total = 0.0
-                for (bmask, wmask, vp), wt in zip(masks_per_view, weights):
-                    if bmask is None or wt <= 0:
-                        continue
-                    s = _score_offset_semantic_iou(
-                        seed_buildings, vp, cand, bmask, wmask)
-                    total += s * wt
-                return total / total_weight
-
-            # Initial-guess strategy: seed URLs carry an `h=X°` token that's
-            # the compass heading the original Street View viewer pointed at.
-            # For api_heading=0 to render the same world content, the
-            # pano-to-geographic offset should be ≈ h. We use this as the
-            # initial guess and search ±25° around it. Falls back to a full-
-            # circle sweep when no h-token is available (i.e. the seed was
-            # auto-proposed without a URL).
-            #
-            # This eliminates 180°-symmetric local maxima — the wrong-by-180°
-            # offset would score reasonably on per-building IoU because OSM
-            # building columns happen to land near the predicted columns, but
-            # the depicted scene then points the wrong way and the user sees
-            # geographically nonsensical orientations (e.g. seed_5 with
-            # anchor=+101° showed Bocagrande towers at "effective_heading=65°
-            # ENE" when the scene clearly depicts NORTH up the peninsula).
-            # Full 360° coarse sweep at 3° resolution. The h-token-constrained
-            # search was tried but produced edge-of-range optima (true value
-            # outside the constraint), so we go global. The stronger
-            # miss-penalty in _score_offset_semantic_iou (0.6 instead of
-            # 0.3) is what excludes 180°-symmetric local maxima.
-            # F-SKY11.1 Path B: skip the 360° coarse sweep and refine
-            # directly around the pano-recovered offset only when ALL
-            # gates clear:
-            #   - sigma  <= 0.10  (sharp peak)
-            #   - peak   >  0.15  (real signal — pure-zero curves can
-            #                      still have sigma=0)
-            #   - opt-in `use_pano_recovery_to_drive_anchor` site flag
-            #
-            # Calibration (2026-05-24, Cartagena 5-seed run):
-            #   seed_1 peak=0.417 sigma=0.041 → correct  (Δ≈+1°)
-            #   seed_4 peak=0.350 sigma=0.023 → wrong by 76°
-            #   seed_5 peak=0.328 sigma=0.056 → wrong by 34°
-            # Sigma alone can't discriminate (seed_4 has the SHARPEST
-            # sigma but the worst answer). Peak does: the correct
-            # recovery sits notably above the wrong ones. A 0.40 floor
-            # passes seed_1 and rejects seeds 4/5, restoring 8/2/1
-            # coverage when the manual overrides are also restored.
-            # The previous 0.15 floor passed every recovery and dropped
-            # coverage to 2/1/7 because drive_anchor sent seed_4/5 to
-            # the wrong basins.
-            _PANO_RECOVERY_SHARP_SIGMA = 0.10
-            _PANO_RECOVERY_MIN_PEAK = 0.40
-            allow_drive = bool(
-                (pano_recovery_state or {}).get("drive_anchor", False))
-            use_pano_seed = (
-                allow_drive
-                and pano_recovered_offset is not None
-                and pano_recovered_sigma is not None
-                and pano_recovered_peak is not None
-                and pano_recovered_sigma <= _PANO_RECOVERY_SHARP_SIGMA
-                and pano_recovered_peak > _PANO_RECOVERY_MIN_PEAK
+        # Pass 3: stitched-pano detection (supplementary, non-fatal).
+        is_negative_seed_for_pano = bool(negative_seeds and seed.name in negative_seeds)
+        if not is_negative_seed_for_pano:
+            pano_result = _stitch_pano_composite(
+                seed, cached_views_for_seed, seed_buildings,
+                anchor_offset, spin_step_deg,
             )
-            if use_pano_seed:
-                # Recovered offset is in [0, 360); normalise to the
-                # same [-180, 180) range the coarse sweep uses so the
-                # fine step's centre is consistent.
-                recovered = pano_recovered_offset
-                if recovered > 180.0:
-                    recovered -= 360.0
-                fine_offsets = np.arange(
-                    recovered - 15.0, recovered + 15.0 + 0.001, 1.0)
-                best_anchor_offset = recovered
-                best_sum_iou = _joint_score(float(recovered))
-                for cand in fine_offsets:
-                    s = _joint_score(float(cand))
-                    if s > best_sum_iou:
-                        best_sum_iou = s
-                        best_anchor_offset = float(cand)
-                anchor_offset = best_anchor_offset
-                print(f"[pano_recovery] seed={seed.name}  "
-                      f"USED pano seed -> anchor={anchor_offset:.1f}deg  "
-                      f"(joint_iou={best_sum_iou:.3f})")
-            else:
-                coarse_offsets = np.arange(-180.0, 180.0, 3.0)
-                h_token = float(seed.heading) if seed.heading is not None else None
-                coarse_best = -float("inf")
-                coarse_best_offset = h_token if h_token is not None else 0.0
-                for cand in coarse_offsets:
-                    s = _joint_score(float(cand))
-                    if s > coarse_best:
-                        coarse_best = s
-                        coarse_best_offset = float(cand)
-                # Stage 2: fine 0.5° sweep within ±5° of coarse best
-                fine_offsets = np.arange(
-                    coarse_best_offset - 5.0, coarse_best_offset + 5.0 + 0.001, 0.5)
-                best_anchor_offset = coarse_best_offset
-                best_sum_iou = coarse_best
-                for cand in fine_offsets:
-                    s = _joint_score(float(cand))
-                    if s > best_sum_iou:
-                        best_sum_iou = s
-                        best_anchor_offset = float(cand)
-                anchor_offset = best_anchor_offset
+            if pano_result is not None:
+                pano_results.append(pano_result)
 
-        # ── Pass 2: re-register each view with a tight search around the
-        # seed-level anchor. Allow ±8° local adjustment to absorb small
-        # per-view noise without letting any single view jump to a wildly
-        # different offset.
-        for cv in cached_views:
-            geo_heading = cv["geo_heading"]
-            image = cv["image"]
-            cap = cv["cap"]
-            sv_label = cv["sv_label"]
-            reg = register_view_to_osm(
-                cap, seed_buildings,
-                heading_search_deg=8.0, heading_step_deg=1.0,
-                forced_center_deg=anchor_offset,
-            )
-            score = float(reg.get("best_score", float("inf")))
-            n_matches = int(reg.get("n_matches", 0))
-            if not math.isfinite(score) or n_matches < 3:
-                # Forced anchor failed — DROP this view. The previous wide-
-                # search fallback let individual views adopt completely
-                # different offsets (e.g. seed_1 had three views with
-                # offsets +37.5°, -80°, +42.5° — geometrically impossible
-                # for a single rigid pano). All 12 spin views of one Photo
-                # Sphere MUST share the same pano-to-geographic offset; the
-                # joint optimizer's anchor is the right value for all of
-                # them or none. Per-view escape breaks that invariant and
-                # produces misleading minimaps.
-                continue
-
-            # Aerial detection: use the *effective* pitch stored in the
-            # Viewpoint, not seed.pitch. If pitch correction fired in the
-            # fetch loop above, cap.viewpoint.pitch reflects the corrected
-            # angle and the aerial flag should be cleared.
-            is_aerial = cap.viewpoint.pitch < -8.0
-
-            est_for_view: list = []
-            is_negative_seed = bool(
-                negative_seeds and seed.name in negative_seeds)
-            # Only "good" and "medium" views contribute height estimates.
-            # "weak" views pass the flat-horizon gate but have low skyline
-            # structure — their estimates are unreliable (e.g. ocean horizon
-            # with minimal buildings). They still appear in the PDF for review.
-            # Negative-example seeds (declared in sites/<region>.json as
-            # ``negative_seeds``) are processed end-to-end so the PDF can
-            # show their views, but contribute NO height estimates to the
-            # aggregate. They serve as a regression suite for screening +
-            # matching quality: the pipeline should reject these as non-
-            # skyline; any time it doesn't, that's a defect to fix.
-            if (not is_aerial
-                    and sv_label not in ("weak", "rejected")
-                    and not is_negative_seed):
-                est_for_view = estimate_heights_from_registration(
-                    cap,
-                    reg,
-                    seed_buildings,
-                    camera_height_m=1.7,
-                    camera_elev_m=float(seed_elev),
-                    trace=trace,
-                    max_plausible_height_m=max_plausible_height_m,
-                )
-                # F-SKY12: augment estimates with depth-derived heights as
-                # an independent verifier. Pure diagnostic in Phase A — does
-                # not alter ``estimated_height_m``. Off unless
-                # SKYLINE_CV_F_SKY12=1 because DA2 inference is ~1–2 s/view.
-                if _F_SKY12_ENABLED and est_for_view:
-                    est_for_view = augment_estimates_with_depth(
-                        image, est_for_view, cap.viewpoint, camera_height_m=1.7,
-                    )
-                estimates.extend(est_for_view)
-
-            buildings_by_id = {b.feature_id: b for b in seed_buildings}
-            # Two complementary segmentation sources:
-            #  - contour-peak (good for distinct spires with sky valleys)
-            #  - mask-component (catches buildings the contour merges or
-            #    misses, e.g. mid-rise rows or near-flat skylines)
-            contour_segs = detect_building_silhouettes(
-                reg.get("contour"), image)
-            _, _bmask = _neural_sky_and_building_masks(image)
-            mask_segs = detect_buildings_from_mask(
-                _bmask, contour=reg.get("contour"), image=image,
-            )
-            segments = _merge_silhouette_sources(contour_segs, mask_segs)
-            all_proj_list = reg.get(
-                "all_projections") or reg.get("projections", [])
-            # F-SKY2: when registration is confident (≥ 3 OSM matches in the
-            # primary peak), use the OSM projections as structural anchors
-            # to split silhouettes that SegFormer merged across adjacent
-            # towers. Skipped when registration is weak — applying anchors
-            # from a wrong-offset registration would split correct segments
-            # at wrong places. Originally gated at ≥ 5 but lowered to ≥ 3
-            # (F-SKY2.1) after observing that the high gate excluded the
-            # exact failure case it was meant to fix: merged-mask views
-            # naturally produce fewer peaks → fewer matches → blocked from
-            # the anchored splitting that would recover the missing peaks.
-            if int(reg.get("n_matches", 0)) >= 3:
-                # F-SKY2: split at clear mask gaps between adjacent OSM
-                # projections (snaps to actual mask valley).
-                segments = osm_anchor_silhouettes(
-                    segments, all_proj_list, building_mask=_bmask)
-                # F-SKY3 (Voronoi marker splitting) was removed 2026-05-18.
-                # Regressed Cartagena MAE 17.28 → 22.13 / tagged-building
-                # count 13 → 8. See docs/plans/F-SKY3-osm-marker-instances.md
-                # for the post-mortem; the right fix is a small instance-
-                # segmentation model, not heuristic Voronoi.
-            # Negative seeds (sites/<region>.json `negative_seeds`) are
-            # known-bad camera positions — gas stations, parking lots,
-            # under-bridge views with no actual skyline. Their per-view
-            # estimates were already excluded from the aggregate; ALSO
-            # skip the matcher so the PDF page doesn't paint numbered
-            # overlays and minimap footprint dots that imply legitimate
-            # matches when none should exist. The page still shows the
-            # photo, SegFormer mask overlay, and the [NEGATIVE EXAMPLE]
-            # banner — that's the audit signal we want without spurious
-            # match annotations.
-            if is_negative_seed:
-                matched_segments = []
-            else:
-                # F-SKY10: build a per-view cross-view scorer when the
-                # region opted in. The satellite image + projection were
-                # fetched once at the top of run_region_pdf_report; per-
-                # view cost is the closure setup + per-candidate ndarray
-                # crop inside the matcher.
-                _cv_scorer = None
-                if cross_view_state is not None:
-                    try:
-                        from .cross_view import make_cross_view_scorer
-                        _cv_scorer = make_cross_view_scorer(
-                            cross_view_state["sat_image"],
-                            cross_view_state["sat_project"],
-                            image,
-                        )
-                    except Exception as _e:
-                        print(f"[cross_view] scorer build failed: {_e}")
-                        _cv_scorer = None
-                matched_segments = match_segments_to_buildings(
-                    segments, all_proj_list, buildings_by_id,
-                    cross_view_scorer=_cv_scorer,
-                )
-            # Diagnostic: annotate each matched segment with the matched building's
-            # true bearing/distance from the seed camera, FOV-cone flag, the
-            # height_proxy (tagged height or area-derived), the implied predicted
-            # height from the sampled contour pixel, and whether the match is the
-            # closest projected building in its column bin (a far building credited
-            # for a closer roof is the dominant failure mode).
-            effective_heading = (
-                geo_heading + float(reg.get("best_offset", 0.0))) % 360.0
-            half_fov = seed.fov * 0.5
-            contour_arr = np.asarray(reg.get("contour", []), dtype=np.float32)
-            f_px = 0.5 * image.shape[1] / \
-                math.tan(math.radians(seed.fov) * 0.5)
-            cy = image.shape[0] * 0.5
-            pitch_rad = math.radians(cap.viewpoint.pitch)
-            cam_z = float(seed_elev) + 1.7
-            from .pipeline import _height_proxy as _hp
-
-            def _annotate_match_diagnostics(seg: dict) -> None:
-                """Populate seg with bearing / distance / predicted-height /
-                closest-in-bin diagnostics derived from `matched_projection`.
-                Called twice: once after the matcher, and again after any
-                post-match correction so the displayed flags reflect the
-                final choice.
-                """
-                m = seg.get("matched_projection")
-                if not m:
-                    return
-                b = buildings_by_id.get(m["feature_id"])
-                if b is None:
-                    return
-                true_bearing = _bearing_deg(
-                    seed.lat, seed.lon, b.centroid_lat, b.centroid_lon)
-                true_dist = _distance_m(
-                    seed.lat, seed.lon, b.centroid_lat, b.centroid_lon)
-                delta = (true_bearing - effective_heading +
-                         540.0) % 360.0 - 180.0
-                proxy_h = float(_hp(b))
-                x_px = int(round(float(m.get("x_px", 0))))
-                pred_h = float("nan")
-                if 0 <= x_px < contour_arr.size:
-                    y_px = float(contour_arr[x_px])
-                    if np.isfinite(y_px):
-                        ang = math.atan((cy - y_px) / f_px) + pitch_rad
-                        pred_h = max(
-                            0.0,
-                            cam_z + float(m.get("forward_m", 0.0)
-                                          ) * math.tan(ang)
-                            - float(getattr(b, "terrain_elev_m", 0.0))
-                        )
-                near = [
-                    p for p in all_proj_list
-                    if abs(float(p.get("x_px", 0)) - float(m.get("x_px", 0))) <= 15.0
-                ]
-                is_closest = bool(near) and min(
-                    float(p.get("forward_m", 1e9)) for p in near
-                ) >= float(m.get("forward_m", 0.0)) - 1.0
-                seg["true_bearing_deg"] = true_bearing
-                seg["true_distance_m"] = true_dist
-                seg["bearing_delta_deg"] = delta
-                seg["bearing_in_fov"] = abs(delta) <= half_fov
-                seg["height_proxy_m"] = proxy_h
-                seg["predicted_height_m"] = pred_h
-                seg["is_closest_in_bin"] = is_closest
-                seg["height_tag_m"] = (
-                    float(b.height_tag_m) if b.height_tag_m is not None else None)
-
-            for seg in matched_segments:
-                _annotate_match_diagnostics(seg)
-
-            # ----------------------------------------------------------------
-            # Post-match cross-verification (2026-05-19): re-rank when the
-            # diagnostic flags reveal the matcher picked a worse candidate.
-            # The original matcher already tries "nearest in bucket wins",
-            # but its bucket is gated to candidates whose combined score is
-            # within 0.10 of the best — a closer-but-lower-IoU candidate
-            # can fall outside that band and lose. We catch that here.
-            #
-            # Inputs already computed above:
-            #   seg.is_closest_in_bin  — False ⇒ a closer projection exists
-            #     in the same column bin
-            #   seg.bearing_in_fov     — False ⇒ matched building's true
-            #     bearing is outside the view's FOV (geometry says it
-            #     can't be visible)
-            #   seg.predicted_height_m — implied height from contour-y
-            #     under the matched building's distance
-            #   seg.height_proxy_m     — OSM tagged height or area-based
-            #     fallback
-            #   seg.match_diagnostics  — top-3 candidates from the matcher
-            #
-            # Swap rule: if (B-flag fired OR predicted_height_m is wildly
-            # implausible OR bearing_in_fov is False) AND the top-3
-            # diagnostics contain a candidate that is closer, plausible
-            # height (≥ 5 m), and within FOV, swap to it. Re-annotate so
-            # downstream rendering / height extraction see the corrected
-            # match.
-            #
-            # Conservative thresholds chosen so the swap can only IMPROVE
-            # geometry consistency; a closer candidate with worse IoU is
-            # still rejected if its bearing is out of FOV.
-            # ----------------------------------------------------------------
-            n_swapped = 0
-            for seg in matched_segments:
-                m = seg.get("matched_projection")
-                if m is None:
-                    continue
-                diags = seg.get("match_diagnostics") or []
-                if len(diags) < 2:
-                    continue
-                cur_fwd = float(m.get("forward_m", 1e9))
-                cur_pred_h = float(seg.get("predicted_height_m", float("nan")))
-                cur_in_fov = bool(seg.get("bearing_in_fov", True))
-                cur_is_closest = bool(seg.get("is_closest_in_bin", True))
-                cur_height_implausible = (
-                    not np.isfinite(cur_pred_h)
-                    or cur_pred_h > max_plausible_height_m * 1.25
-                    or cur_pred_h < 1.5
-                )
-                # Trigger the rescue search whenever ANY geometric red flag
-                # fires. The quality bar on the swap TARGET below decides
-                # whether the swap actually happens — a B flag without a
-                # better alternative still leaves the current match alone.
-                needs_swap = (
-                    (not cur_in_fov)
-                    or cur_height_implausible
-                    or (not cur_is_closest)
-                )
-                if not needs_swap:
-                    continue
-                # Best alternative: search the seg's top-3 diagnostics and
-                # the full all_proj_list for a closer-and-plausible match.
-                cur_fid = str(m.get("feature_id", ""))
-                best_alt = None
-                best_alt_fid: str | None = None
-                for d in diags:
-                    alt_fid = str(d.get("feature_id", ""))
-                    if alt_fid == cur_fid:
-                        continue
-                    alt_p = next(
-                        (p for p in all_proj_list
-                         if str(p.get("feature_id", "")) == alt_fid),
-                        None,
-                    )
-                    if alt_p is None:
-                        continue
-                    alt_fwd = float(alt_p.get("forward_m", 1e9))
-                    if alt_fwd >= cur_fwd - 1.0:
-                        continue  # not actually closer
-                    alt_b = buildings_by_id.get(alt_fid)
-                    if alt_b is None:
-                        continue
-                    alt_proxy_h = float(_hp(alt_b))
-                    if alt_proxy_h < 5.0:
-                        continue  # ignore kiosks as rescue candidates
-                    # Bearing-in-FOV check for the alternative
-                    alt_true_bearing = _bearing_deg(
-                        seed.lat, seed.lon,
-                        alt_b.centroid_lat, alt_b.centroid_lon)
-                    alt_delta = (alt_true_bearing - effective_heading +
-                                 540.0) % 360.0 - 180.0
-                    if abs(alt_delta) > half_fov:
-                        continue
-                    # Implied height under alternative's forward_m must be
-                    # plausible (otherwise no improvement over the current).
-                    alt_x_px = int(round(float(alt_p.get("x_px", 0))))
-                    alt_pred_h = float("nan")
-                    if 0 <= alt_x_px < contour_arr.size:
-                        y_px = float(contour_arr[alt_x_px])
-                        if np.isfinite(y_px):
-                            ang = math.atan((cy - y_px) / f_px) + pitch_rad
-                            alt_pred_h = max(
-                                0.0,
-                                cam_z + alt_fwd * math.tan(ang)
-                                - float(getattr(alt_b, "terrain_elev_m", 0.0))
-                            )
-                    if (not np.isfinite(alt_pred_h)
-                            or alt_pred_h > max_plausible_height_m
-                            or alt_pred_h < 1.5):
-                        continue
-                    if best_alt is None or alt_fwd < float(
-                            best_alt.get("forward_m", 1e9)):
-                        best_alt = alt_p
-                        best_alt_fid = alt_fid
-                if best_alt is not None and best_alt_fid != cur_fid:
-                    # Honour F-SKY6 1:1 constraint: don't steal a building
-                    # already claimed by a higher-scoring sibling segment.
-                    already_claimed = any(
-                        s is not seg
-                        and s.get("matched_projection") is not None
-                        and str(s["matched_projection"].get(
-                            "feature_id", "")) == best_alt_fid
-                        for s in matched_segments
-                    )
-                    if not already_claimed:
-                        seg["matched_projection_pre_correction"] = m
-                        seg["matched_projection"] = best_alt
-                        seg["match_corrected"] = True
-                        _annotate_match_diagnostics(seg)
-                        n_swapped += 1
-            if n_swapped:
-                print(
-                    f"[cross_verify] {cap.viewpoint.name}: "
-                    f"corrected {n_swapped} match(es) via post-hoc rescue"
-                )
-
-            # ----------------------------------------------------------------
-            # View-level cross-checks (2026-05-19): two consensus signals
-            # that surface failures the per-match rescue can't catch.
-            #
-            # (1) Heading-consistency: each match has a `bearing_delta_deg`
-            #     (matched building's true bearing minus the camera's
-            #     effective heading). If the camera heading was right, the
-            #     deltas would cluster around segment offsets (each segment
-            #     sits at some α inside the FOV, so its bearing_delta is α).
-            #     The MEDIAN delta across all matches measures the *common*
-            #     bias — a clean centred view should have median ≈ 0. A
-            #     non-trivial median means every match is shifted in the
-            #     same direction, which is the fingerprint of a wrong
-            #     heading offset (or wrong projection).
-            #
-            # (2) Multi-building segment: a segment that's much wider than
-            #     its matched building's projected width is masking several
-            #     buildings as one. Flag width_ratio = seg_width / proj_width
-            #     and also count how many *other* projections fall inside
-            #     the segment's x-range — the user's "segment 7 is 5
-            #     buildings" case.
-            # ----------------------------------------------------------------
-            deltas: list[float] = []
-            wide_segs: list[dict] = []
-            for seg in matched_segments:
-                m = seg.get("matched_projection")
-                if m is None:
-                    continue
-                bd = seg.get("bearing_delta_deg")
-                if bd is not None and np.isfinite(bd):
-                    deltas.append(float(bd))
-                seg_w = float(seg["x_right"]) - float(seg["x_left"])
-                proj_w = max(1.0,
-                             float(m.get("x_right_px", m.get("x_px", 0))) -
-                             float(m.get("x_left_px", m.get("x_px", 0))))
-                width_ratio = seg_w / proj_w
-                # Count OTHER projections whose centre x_px falls inside
-                # this segment — these are candidate sibling buildings the
-                # segment is masking.
-                others = []
-                for p in all_proj_list:
-                    if str(p.get("feature_id", "")) == str(m.get("feature_id", "")):
-                        continue
-                    px = float(p.get("x_px", -1))
-                    if float(seg["x_left"]) <= px <= float(seg["x_right"]):
-                        others.append(p)
-                seg["seg_width_px"] = seg_w
-                seg["proj_width_px"] = proj_w
-                seg["width_ratio"] = width_ratio
-                seg["covered_other_projs"] = len(others)
-                if width_ratio >= 2.5 or len(others) >= 2:
-                    seg["multi_building_candidate"] = True
-                    wide_segs.append(seg)
-            if len(deltas) >= 3:
-                med = float(np.median(deltas))
-                # Match-residuals around the consensus: how spread out are
-                # they? Tight cluster around `med` means heading-offset bias
-                # is the dominant story (and `med` is the bias). Broad
-                # spread means matches are individually noisy too.
-                res = [abs(d - med) for d in deltas]
-                mad = float(np.median(res))
-                # Side-channel print: don't alter behaviour, just surface
-                # the diagnostic where a session log can spot it.
-                if abs(med) > 5.0 or mad > 15.0:
-                    print(
-                        f"[heading_consistency] {cap.viewpoint.name}: "
-                        f"median bearing_delta={med:+.1f}° "
-                        f"MAD={mad:.1f}° n={len(deltas)} "
-                        f"— {'heading offset may be biased' if abs(med) > 5.0 else 'matches scattered'}"
-                    )
-            if wide_segs:
-                ratios = [f"{int(s.get('width_ratio', 0))}×" for s in wide_segs]
-                covered = [str(s.get('covered_other_projs', 0)) for s in wide_segs]
-                print(
-                    f"[multi_building] {cap.viewpoint.name}: "
-                    f"{len(wide_segs)} wide segment(s) "
-                    f"(width_ratios={','.join(ratios)} "
-                    f"others_inside={','.join(covered)})"
-                )
-
-            overlay = _registration_overlay(
-                image, reg, matched_segments=matched_segments)
-            # Compute building band on the original image's mask for display
-            # cropping. compute_building_band returns None if too little of
-            # the frame is building (e.g. ocean view) — then we render full
-            # frame as a fallback.
-            from .pipeline import compute_building_band  # noqa: PLC0415
-            band = compute_building_band(_bmask, slack_px=20)
-            view_rows.append(
-                SeedViewRegistration(
-                    seed_name=seed.name,
-                    seed_lat=seed.lat,
-                    seed_lon=seed.lon,
-                    heading=geo_heading,
-                    fov=seed.fov,
-                    registration_score=score,
-                    best_offset=float(reg.get("best_offset", 0.0)),
-                    estimates_count=len(est_for_view),
-                    matched_segments=matched_segments,
-                    image=overlay,
-                    is_aerial=is_aerial,
-                    iou=float(reg.get("best_iou", 0.0)),
-                    band_y=band,
-                    is_negative=is_negative_seed,
-                    building_mask=_bmask,
-                    pano_osm_iou=pano_osm_iou,
-                    pano_osm_n_keypoints=pano_osm_n_keypoints,
-                    pano_recovered_offset_deg=pano_recovered_offset,
-                    pano_recovered_peak=pano_recovered_peak,
-                    pano_recovered_sigma=pano_recovered_sigma,
-                    pano_water_frac=pano_water_frac,
-                    pano_projected_coastline=pano_projected_coastline,
-                    view_estimates=list(est_for_view) if est_for_view else None,
-                )
-            )
-
-        # ── Pass 3 (per seed): stitched-pano detection ───────────────────────
-        # Negative seeds (declared in sites/<region>.json as ``negative_seeds``)
-        # are non-skyline locations used as regression examples.  They already
-        # contributed no height estimates in Pass 2.  Skipping Pass 3 entirely
-        # means they don't generate a pano page, which keeps the report clean
-        # and avoids wasting SegFormer inference + building-matching time on
-        # scenes that will never yield useful annotations.
-        is_negative_seed_for_pano = bool(
-            negative_seeds and seed.name in negative_seeds)
-        if is_negative_seed_for_pano:
-            continue
-
-        # Stitch per-view masks (already computed during Pass 2) into one
-        # 360° strip. Building silhouettes are then detected on the unified
-        # mask, projected OSM footprints are mapped to stitched columns by
-        # bearing lookup, and segments are matched to buildings.
-        #
-        # Previously this re-ran SegFormer with a sliding window on the
-        # stitched RGB strip. That introduced seam artefacts (each window
-        # had a non-square aspect that didn't match SegFormer's training
-        # distribution) and re-paid 5+ inferences per seed for no quality
-        # benefit. The model already saw each tile at native size during
-        # Pass 2; stitching the resulting masks with the same geometry as
-        # the RGB stitcher is strictly higher quality AND faster.
-        try:
-            from .pipeline import (  # noqa: PLC0415
-                stitch_pano_views,
-                stitch_pano_masks,
-                project_buildings_to_pano,
-                detect_buildings_from_mask as _det_pano,
-                match_segments_to_buildings as _match_pano,
-                compute_building_band as _cbb,
-                _neural_sky_and_building_masks,
-                _neural_water_mask,
-            )
-            spin_views_for_pano: list[dict] = []
-            for cv in cached_views:
-                _sky, bmask = _neural_sky_and_building_masks(cv["image"])
-                wmask = _neural_water_mask(cv["image"])
-                spin_views_for_pano.append({
-                    "image": cv["image"],
-                    "geo_heading": (cv["geo_heading"] + anchor_offset) % 360.0,
-                    "building_mask": bmask,
-                    "water_mask": wmask,
-                })
-            stitch_out = stitch_pano_views(
-                spin_views_for_pano, seed.fov, spin_step_deg)
-            mask_out = stitch_pano_masks(
-                spin_views_for_pano, seed.fov, spin_step_deg)
-            if stitch_out is not None and mask_out is not None:
-                pano_img, pano_headings = stitch_out
-                pano_bmask, pano_wmask = mask_out
-                if pano_bmask.shape[1] != pano_img.shape[1]:
-                    raise ValueError(
-                        f"pano image/mask width mismatch: "
-                        f"img={pano_img.shape[1]} mask={pano_bmask.shape[1]}")
-                pano_band = _cbb(pano_bmask, slack_px=20)
-                pano_segs = _det_pano(pano_bmask)
-                pano_projs = project_buildings_to_pano(
-                    seed_buildings, seed.lat, seed.lon, pano_headings)
-                bbid = {b.feature_id: b for b in seed_buildings}
-                pano_matched = _match_pano(pano_segs, pano_projs, bbid)
-                # Stamp each matched segment with its geographic bearing so
-                # the minimap can draw an accurate dashed ray. The bearing
-                # is looked up from headings_per_col at the segment's peak
-                # column (or midpoint as fallback).
-                for seg in pano_matched:
-                    px = int(seg.get("peak_x", seg.get("mid_x", 0)))
-                    px = max(0, min(pano_headings.size - 1, px))
-                    seg["true_bearing_deg"] = float(pano_headings[px])
-                n_matched = sum(
-                    1 for s in pano_matched if s.get("matched_projection"))
-                pano_results.append(StitchedPanoResult(
-                    seed_name=seed.name,
-                    seed_lat=seed.lat,
-                    seed_lon=seed.lon,
-                    pano_image=pano_img,
-                    band_y=pano_band,
-                    matched_segments=pano_matched,
-                    n_segments=len(pano_segs),
-                    n_matched=n_matched,
-                    n_buildings_in_view=len(pano_projs),
-                    anchor_offset_deg=float(anchor_offset),
-                    headings_per_col=pano_headings,
-                ))
-        except Exception as e:
-            # Pano path is supplementary — failure should never break the
-            # primary per-view pipeline. Log to stderr only.
-            import sys as _sys
-            print(f"[pano] seed={seed.name} failed: {e}",
-                  file=_sys.stderr)
-
-    agg = aggregate_building_heights(estimates) if estimates else []
+    agg = aggregate_building_heights(all_estimates) if all_estimates else []
     return view_rows, agg, pano_results
+
 
 
 def _draw_osm_coastline_overlay(

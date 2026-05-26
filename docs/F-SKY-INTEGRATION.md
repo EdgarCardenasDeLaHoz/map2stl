@@ -1,6 +1,6 @@
 # F-SKY Series — Integration Status & Consolidation
 
-**Last Updated**: 2026-05-17  
+**Last Updated**: 2026-05-26  
 **Author**: Claude (consolidation pass)  
 **Purpose**: Single source of truth for F-SKY feature activation, status, and pipeline integration
 
@@ -13,10 +13,10 @@ The F-SKY series is a set of 11+ computer-vision improvements to the skyline_cv 
 **Current production**: `retna_pruned.pt` (0.2691 loss, 3.82m MAE)  
 **Target improvement**: Cartagena building height accuracy via cross-view registration
 
-**Active features**: F-SKY2, F-SKY4, F-SKY6, F-SKY7, F-SKY8, F-SKY10 (opt-in per region), F-SKY11.1
+**Active features**: F-SKY2, F-SKY4, F-SKY6, F-SKY7, F-SKY8, F-SKY10 (opt-in, diagnostic-only), F-SKY11.1, F-SKY12 (Phase A verifier, done 2026-05-26), F-SKY13 (Phases A/A.2/B/C all done 2026-05-26), F-SKY15 (HTML report, done 2026-05-26)
 **Default-off / diagnostic**: F-SKY1 (gated behind compute_floor_period=False as of 2026-05-18; fields are computed only when explicitly requested for diagnostics)
-**Removed**: F-SKY3 (measured regression; code deleted 2026-05-18), F-SKY11.2 (IPM bird's-eye dead-end; code deleted 2026-05-17)
-**Pending**: F-SKY5 (MobileSAM instance head — gating decision pending)
+**Removed**: F-SKY3 (measured regression; function deleted 2026-05-18 via F-CLEAN2), F-SKY11.2 (IPM bird's-eye dead-end; code deleted 2026-05-24 via F-CLEAN6)
+**Pending**: F-SKY5 (MobileSAM instance head — gating decision pending), F-SKY14 (trained satellite coastline detector)
 
 ---
 
@@ -38,13 +38,14 @@ city2stl/skyline_cv/
     ├── satellite_footprints.py    (F-SKY8)
     ├── satellite_image.py         (F-SKY8 + cross-view)
     ├── cross_view.py              (F-SKY10)
-    └── coastline_registration.py  (F-SKY11, F-SKY11.1 — keypoint approach)
+    ├── coastline_registration.py  (F-SKY11, F-SKY11.1, F-SKY13)
+    ├── osm_water.py               (F-SKY13 — OSM coastline fetch + keypoints)
+    ├── depth_estimation.py        (F-SKY12 — Depth Anything V2 verifier)
+    └── html_report.py             (F-SKY15 — HTML diagnostic report)
 ```
 
-Deleted as of 2026-05-18: ``pano_birdseye.py``, ``config.py``, scripts
-10/11/12. Old demos were superseded by ``13_heading_recovery_demo.py``;
-``pano_birdseye`` is the F-SKY11.2 IPM bird's-eye dead-end (see archived
-post-mortem in ``docs/plans/archive/``).
+Deleted: ``pano_birdseye.py`` + script 13 (F-CLEAN6, 2026-05-24), ``config.py``
+(F-CLEAN1, 2026-05-24). Post-mortem for F-SKY11.2 in ``docs/plans/archive/``.
 
 ### Core Flow (region_pdf.py, simplified)
 
@@ -186,18 +187,44 @@ def generate_region_report(region_name):
 ### 🟡 Disabled (Measured Regression, Remains Available)
 
 #### **F-SKY3: OSM-Marker Column Voronoi**
-- **Status**: Disabled after measurement ❌
-- **Location**: `pipeline.py:osm_marker_voronoi_silhouettes()` (remains on surface for A/B)
+- **Status**: Removed ❌ (2026-05-18, F-CLEAN2)
+- **Location**: Function `osm_marker_voronoi_silhouettes` deleted from `pipeline.py`; plan preserved at `docs/plans/F-SKY3-osm-marker-instances.md`
 - **Purpose**: Use Voronoi over OSM marker x_px to split merged masks
-- **Why disabled**: Measured regression on Cartagena
+- **Why removed**: Measured regression on Cartagena
   - MAE: 17.28m → 22.13m (↑ 4.85m)
   - Tagged count: 13 → 8 buildings (↓ 5)
   - Unconditional splitting was too aggressive
 - **Replacement direction**: Dedicated instance-segmentation model (MobileSAM or TinySAM) — see F-SKY5
-- **Call site**: `region_pdf.py` (commented out, documented)
-- **Future**: Uncomment only if F-SKY5 blocks; otherwise superseded by F-SKY5
 
 ---
+
+### 🟡 Landed / Diagnostic-Only
+
+#### **F-SKY10: Non-ML Cross-View Registration**
+- **Status**: Landed, demoted to diagnostic-only
+- **Location**: `city2stl/skyline_cv/cross_view.py`; opt-in via `use_cross_view_scoring`
+- **What landed**: All 3 signals (colour/width/edges) implemented; blended into matcher at 0.85/0.15 weights; `cv̄=X.XX/min=Y.YY` shown in per-view PDF header (F-CLEAN5, 2026-05-24)
+- **Why demoted**: Per-building colour was empirically fragile; F-SKY11.1 supersedes the cross-view registration intent. The scorer stays on disk and is wired behind the opt-in flag; it does NOT drive production heights.
+- **Phase B** (production reranking): still pending — measure first whether F-SKY2/6/8 coverage is sufficient
+
+#### **F-SKY12: Depth Anything V2 on Street View Panos**
+- **Status**: Phase A landed (verifier only)
+- **Location**: `city2stl/skyline_cv/depth_estimation.py`; emits `depth_height_m` + `depth_disagreement` per match
+- **Activation**: Does NOT influence aggregated heights; Phase B (confidence weighting/rescue) pending
+- **Plan**: `docs/plans/F-SKY12-depth-from-panos.md`
+
+#### **F-SKY13: OSM-Coastline Registration + Footprints Overlay**
+- **Status**: Phases A, A.2, B all landed; Phase C in progress
+- **Location**: `city2stl/skyline_cv/osm_water.py`, `coastline_registration.py`, `region_pdf.py`
+- **Landed**: OSM fetch + 1 km clip + keypoints (`osm_water.py`); minimap OSM coastline + 1 km circle; satellite-image background (opt-in, `SKYLINE_CV_F_SKY13_SAT_BG=1`); pano-projected coastline dots; pano↔OSM IoU annotation
+- **Phase C** (`SKYLINE_CV_PHASE_C=1`): OSM-primary sweep replacing satellite-HSV as keypoint source — in progress
+- **Plan**: `docs/plans/F-SKY13-osm-coastline-footprints-overlay.md`
+
+#### **F-SKY15: HTML Diagnostic Report**
+- **Status**: Landed
+- **Location**: `city2stl/skyline_cv/html_report.py`; call site in `region_pdf.py`
+- **What it does**: Renders `index.html` + per-seed HTML pages with embedded minimap PNGs; all tabular data lives here (PDF became compact archival artefact via `pano_only_pdf: true`)
+- **Plan**: `docs/plans/F-SKY15-html-diagnostic-report.md`
 
 ### 🔴 Pending (Not Yet Integrated)
 
@@ -211,31 +238,22 @@ def generate_region_report(region_name):
 - **Effort**: Large (model integration + inference optimization)
 - **Priority**: Pending alignment with F-SKY2/F-SKY6/F-SKY8 effectiveness; may not be needed
 
-#### **F-SKY10: Non-ML Cross-View Registration**
-- **Status**: Designed, demo in progress
-- **Location**: Plan in `docs/plans/F-SKY10-non-ml-cross-view-registration.md`, demo script in progress
-- **Purpose**: Geometric + appearance verification (street view ↔ satellite)
-- **Method**: Classical CV — roof colour/texture matching + facade width consistency
-- **Use**: Acts as independent reranking signal alongside IoU/containment matcher
-- **Effort**: Large
-- **Priority**: Lower; F-SKY2/F-SKY6/F-SKY8 may solve most problems
+#### **F-SKY14: Trained Satellite Coastline Detector**
+- **Status**: Proposed, not yet planned
+- **Purpose**: Replace heuristic HSV `detect_sat_water_mask` with a small CNN trained on OSM `natural=coastline` linestrings
+- **Constraint**: Any satellite-side detector MUST be trained against OSM ground truth, not heuristic (see feedback memory)
+- **Priority**: Defer until OSM-sparse regions are encountered in practice; F-SKY13 covers all current coastal seeds
 
 #### **F-SKY11.2: Pano Bird's-Eye Registration (Attempted — Not Viable)**
-- **Status**: Implemented but failed; not integrated
-- **Location**: 
-  - Code: `city2stl/skyline_cv/pano_birdseye.py` (complete, no bugs)
-  - Failure analysis: `docs/plans/F-SKY11.2-FAILURE-ANALYSIS.md`
+- **Status**: Experiment failed; code deleted 2026-05-24 (F-CLEAN6)
+- **Location**: Code removed; failure analysis: `docs/plans/F-SKY11.2-pano-birdseye-registration.md`
 - **Why it failed**: Monocular SegFormer water detection has insufficient depth reach (~5–7m) vs bay scale (1km+). IoU rotation search produces flat signal across all headings, with spurious peaks indistinguishable from noise.
-- **Recommendation**: Continue with F-SKY11.1 (per-bearing horizon scoring), which works reliably and has no depth limitations.
-- **Code status**: Retained for educational/reference; not for production use.
 
 #### **F-SKY-PIPELINE Consolidation**
-- **Status**: Pending official consolidation
+- **Status**: Phases 0–2 complete; Phase 3 (second region scaffolding) pending
 - **Location**: Plan in `docs/plans/F-SKY-PIPELINE-CONSOLIDATION.md`
-- **Purpose**: Classify each signal as core/opt-in/diagnostic-only; unify config
-- **Scope**: Update `region_pdf.py` to officially enable/disable all F-SKY features via single config dict
-- **Effort**: Medium (mostly documentation + config refactor)
-- **Timeline**: Should happen as Phase B + pending features land
+- **Completed**: All active signals classified; config flags documented; module deletions done; HTML report wired
+- **Remaining**: Phase 3 (Miami + Chicago end-to-end with new flags), Phase 4 unit tests for sweep_pano_heading_offset and F-SKY13 edge cases
 
 ---
 
@@ -289,28 +307,32 @@ config = {
 - [ ] **F-SKY11.1 Phase B**: Integrate heading correction into height aggregation
 - [ ] **F-SKY-PIPELINE consolidation**: Unify all config flags, document in README
 - [ ] **F-SKY5 decision**: Measure F-SKY2/6/8 effectiveness first; if insufficient, implement
-- [ ] **F-SKY10 integration**: Complete non-ML cross-view scorer, gate behind config
-- [ ] **modules.md update**: Document all new helper modules (height_trace, satellite_*, etc.)
-- [ ] **test_skyline_cv_*.py**: Expand test coverage for F-SKY features (currently only height_trace tested)
+- [x] **F-SKY10 integration**: Landed as diagnostic-only; `use_cross_view_scoring` opt-in; `cv̄` shown in PDF header
+- [ ] **modules.md update**: Document all new helper modules (osm_water, depth_estimation, html_report, etc.)
+- [ ] **test_skyline_cv_*.py**: Unit test for `sweep_pano_heading_offset` on synthetic input; unit test for F-SKY13 OSM coastline extraction edge cases
 - [ ] **Documentation**: Update `city2stl/skyline_cv/README.md` with consolidated feature list and current state
+- [ ] **F-SKY-PIPELINE Phase 3**: Wire Miami + Chicago to new flags; capture per-seed recovery accuracy in STATUS.md
 
 ---
 
 ## Files & Resources
 
 ### Core Implementation
-- `pipeline.py` — All F-SKY1-8, F-SKY11 logic (2400 lines)
-- `region_pdf.py` — Orchestration + I/O (2750 lines)
-- Helper modules: `height_trace.py`, `satellite_footprints.py`, `satellite_image.py`, `cross_view.py`, `coastline_registration.py`, `pano_birdseye.py`
+- `pipeline.py` — F-SKY1-8, F-SKY10, F-SKY11/11.1 logic
+- `region_pdf.py` — Orchestration + I/O + PDF + HTML call sites
+- Helper modules: `height_trace.py` (F-SKY1), `satellite_footprints.py` (F-SKY8), `satellite_image.py`, `cross_view.py` (F-SKY10), `coastline_registration.py` (F-SKY11/11.1/13), `osm_water.py` (F-SKY13), `depth_estimation.py` (F-SKY12), `html_report.py` (F-SKY15)
+- Deleted: `pano_birdseye.py` (F-CLEAN6), `config.py` (F-CLEAN1)
 
 ### Test & Demo
-- `tests/test_skyline_cv_height_trace.py` (266 lines, F-SKY1 tests)
+- `tests/test_skyline_cv_height_trace.py` (F-SKY1 tests)
+- `tests/test_skyline_cv_osm_water.py` (F-SKY13 tests)
 - `scripts/08_region_skyline_pdf.py` (entry point; uses activated features from config)
 - `scripts/09_height_trace.py` (F-SKY1 demo)
 - `scripts/10_cross_view_demo.py` (F-SKY10 prep)
 - `scripts/11_coastline_demo.py` (F-SKY11 demo)
-- `scripts/12_pano_coastline_demo.py` (F-SKY11.1 Phase A demo)
-- `scripts/13_birdseye_registration_demo.py` (F-SKY11.2 prep)
+- `scripts/12_pano_coastline_demo.py` (F-SKY11.1 demo)
+- `scripts/13_heading_recovery_demo.py` (multi-channel heading research; replaced former script 13)
+- Deleted: `scripts/13_birdseye_registration_demo.py` (F-CLEAN6)
 
 ### Documentation & Plans
 - `docs/plans/F-SKY*.md` (13 feature plans)
@@ -327,10 +349,10 @@ config = {
 
 ## Recommendation for Next Session
 
-1. **Phase B integration**: Implement F-SKY11.1 Phase B (heading correction into aggregation)
-2. **Consolidation**: Run F-SKY-PIPELINE consolidation (unify config, document)
-3. **Measurement**: Re-measure Cartagena with all active features; quantify improvement
-4. **Decision**: Based on metrics, prioritize F-SKY5 vs F-SKY10 vs halt
-5. **Documentation**: Update modules.md, test coverage, city2stl/skyline_cv/README.md
+1. **F-SKY13 Phase C**: Validate OSM-primary sweep (`SKYLINE_CV_PHASE_C=1`) on Cartagena; calibrate peak floor vs satellite path; drop HSV detector if OSM-primary is consistent
+2. **F-SKY-PIPELINE Phase 3**: Wire Miami + Chicago to active flags (`use_satellite_footprints`, `use_pano_coastline_recovery`, `pano_only_pdf`); capture recovered headings + coverage in STATUS.md
+3. **F-CLEAN8**: Split `_seed_multiview_registration` (1211 LOC) into 5 named helpers
+4. **Tests**: Add unit tests for `sweep_pano_heading_offset` and F-SKY13 OSM edge cases
+5. **Decision**: Once Phase 3 coverage measured, decide whether F-SKY5 (MobileSAM) or continued tuning of F-SKY2/6/7 is the better path
 
-**Current Status**: All Phase A features implemented; system is coherent and measurement-ready.
+**Current Status**: Phases 0–2 complete; F-SKY13 Phase C is the active front; system is coherent with HTML report + all active flags wired.
