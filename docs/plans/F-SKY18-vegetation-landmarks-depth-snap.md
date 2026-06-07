@@ -38,10 +38,10 @@ Status: **Phase 1 + 2 implemented (2026-05-28)**.
 - **Phase 3**: E (bearing-landmarks into registration), measure heading vs manual ground truth.
 
 ## Target files
-- `city2stl/skyline_cv/coastline_registration.py` — snap fn, vegetation projection.
-- `city2stl/skyline_cv/pipeline.py` — vegetation mask.
-- `city2stl/skyline_cv/osm_water.py` — green extraction/sampling.
-- `city2stl/skyline_cv/region_pdf.py` — stitch vegetation mask, overlay, registration wiring.
+- `city2stl/skyline/coastline_registration.py` — snap fn, vegetation projection.
+- `city2stl/skyline/pipeline.py` — vegetation mask.
+- `city2stl/skyline/osm_water.py` — green extraction/sampling.
+- `city2stl/skyline/region_pdf.py` — stitch vegetation mask, overlay, registration wiring.
 
 ## Success criteria
 - Phase 1: blue coastline dots visibly land on the OSM coastline polyline.

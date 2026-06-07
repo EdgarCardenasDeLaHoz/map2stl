@@ -42,7 +42,7 @@ on the minimap.
 
 ### Step 1 — OSM coastline accessor
 
-New module `city2stl/skyline_cv/osm_water.py` (kept separate
+New module `city2stl/skyline/osm_water.py` (kept separate
 from `coastline_registration.py` because the OSM fetch path
 and the keypoint sweep are independent concerns):
 
@@ -144,27 +144,27 @@ only reported behind the debug flag.
 
 ## Target files
 
-- `city2stl/skyline_cv/osm_water.py` (NEW) — feature
+- `city2stl/skyline/osm_water.py` (NEW) — feature
   extraction (`extract_coastline_features`,
   `extract_water_features`), 1 km clipping (`clip_to_radius`),
   keypoint sampling (`sample_coastline_points`).
   **Reuses** `pipeline.lonlat_to_local_m` (promoted from
   private `_lonlat_to_local_m` in this work) for distance
-  metric so the projection matches the rest of skyline_cv.
-- `city2stl/skyline_cv/pipeline.py` — promote
+  metric so the projection matches the rest of skyline.
+- `city2stl/skyline/pipeline.py` — promote
   `_lonlat_to_local_m` to public `lonlat_to_local_m` (new
-  alias) so other skyline_cv modules can reuse it instead of
+  alias) so other skyline modules can reuse it instead of
   duplicating the equirectangular formula.
-- `city2stl/skyline_cv/coastline_registration.py` — add
+- `city2stl/skyline/coastline_registration.py` — add
   `score_osm_pano_offset` (mirrors the existing satellite
   score function but takes OSM keypoints). **Phase A.2.**
-- `city2stl/skyline_cv/region_pdf.py` — added
+- `city2stl/skyline/region_pdf.py` — added
   `_draw_osm_coastline_overlay` helper + call site in
   `_draw_view_minimap`. Gated by `SKYLINE_CV_F_SKY13` env
   var (default ON). Phase A.2 will add the satellite-image
   background, the pano-projected coastline overlay, and the
   pano↔OSM IoU summary text block.
-- `tests/test_skyline_cv_osm_water.py` (NEW) — unit tests on
+- `tests/test_skyline_osm_water.py` (NEW) — unit tests on
   the fetch-result extraction + 1 km clip + keypoint
   sampling, plus matplotlib smoke tests for the minimap
   overlay.

@@ -1,5 +1,5 @@
 """Quick diagnostic: score distribution of cached images after neural sky."""
-from city2stl.skyline_cv.pipeline import detect_skyline_contour
+from city2stl.skyline.pipeline import detect_skyline_contour
 import sys
 import json
 import os
@@ -9,7 +9,7 @@ import cv2
 
 sys.path.insert(0, ".")
 
-cache_dir = "city2stl/skyline_cv/runs/image_cache"
+cache_dir = "city2stl/skyline/runs/image_cache"
 files = [f for f in os.listdir(cache_dir) if f.endswith(".png")]
 
 print(f"Found {len(files)} cached PNGs. Loading model + scoring...")

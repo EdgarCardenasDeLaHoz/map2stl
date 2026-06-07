@@ -37,7 +37,7 @@ Smallest practical change:
 
 ## Target files
 
-- `city2stl/skyline_cv/region_pdf.py` — `_render_seed_view_page` only.
+- `city2stl/skyline/region_pdf.py` — `_render_seed_view_page` only.
 
 ## Success criteria
 

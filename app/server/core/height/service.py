@@ -25,14 +25,14 @@ except Exception:
     _CACHE_AVAILABLE = False
     make_cache_key = read_array_cache = write_array_cache = None  # type: ignore
 
-from city2stl.skyline_cv.height import HeightResult, _filter_outliers, merge_height_rasters, provider_stats
-from city2stl.skyline_cv.height.providers.copernicus import CopernicusProvider
-from city2stl.skyline_cv.height.providers.ghsl import GHSLProvider
-from city2stl.skyline_cv.height.providers.lidar_3dep import LiDAR3DEPProvider
-from city2stl.skyline_cv.height.providers.ndsm import NDSMProvider
-from city2stl.skyline_cv.height.providers.open_buildings import OpenBuildingsProvider
-from city2stl.skyline_cv.height.providers.roofnet import RoofNetProvider
-from city2stl.skyline_cv.height.providers.wsf3d import WSF3DProvider
+from city2stl.skyline.height import HeightResult, _filter_outliers, merge_height_rasters, provider_stats
+from city2stl.skyline.height.providers.copernicus import CopernicusProvider
+from city2stl.skyline.height.providers.ghsl import GHSLProvider
+from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
+from city2stl.skyline.height.providers.ndsm import NDSMProvider
+from city2stl.skyline.height.providers.open_buildings import OpenBuildingsProvider
+from city2stl.skyline.height.providers.roofnet import RoofNetProvider
+from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
 from city2stl.heights import enhance_buildings_with_raster
 
 

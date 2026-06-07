@@ -106,12 +106,12 @@ fetching satellite imagery for each region is the big-cost part**:
 
 1. **Satellite tile fetcher** — the strm2stl backend already pulls
    satellite imagery (`app/server/routers/terrain.py` mentions
-   satellite endpoints). The skyline_cv module would need to call
+   satellite endpoints). The skyline module would need to call
    into that or fetch tiles directly.
 2. **Pixel-level alignment** — converting OSM lat/lon polygons to
    satellite pixel coordinates needs a proper geographic projection.
    We have the pieces (the `geo2stl/` package has Web Mercator
-   helpers) but they need to be wired into the skyline_cv flow.
+   helpers) but they need to be wired into the skyline flow.
 3. **Per-region cache** — satellite images are static for a given
    region/zoom; fetch once and reuse. Same pattern as the existing
    Street View image cache.
@@ -123,14 +123,14 @@ cache / projection plumbing; 40% is the actual scoring logic.
 
 ## Target files (when implementation begins)
 
-- `city2stl/skyline_cv/satellite_image.py` (new) — tile fetcher,
+- `city2stl/skyline/satellite_image.py` (new) — tile fetcher,
   cache, lat/lon → pixel projection.
-- `city2stl/skyline_cv/cross_view.py` (new) — `score_cross_view`
+- `city2stl/skyline/cross_view.py` (new) — `score_cross_view`
   with the three signals.
-- `city2stl/skyline_cv/pipeline.py` —
+- `city2stl/skyline/pipeline.py` —
   `match_segments_to_buildings` accepts an optional callback for
   the cross-view scorer; matcher folds the score into `combined`.
-- `city2stl/skyline_cv/region_pdf.py` — wire up the satellite image
+- `city2stl/skyline/region_pdf.py` — wire up the satellite image
   fetch once per region, pass into per-view matcher calls.
 
 ## Success criteria (when implementation begins)

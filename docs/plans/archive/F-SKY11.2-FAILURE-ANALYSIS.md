@@ -21,7 +21,7 @@
 
 **Intuition**: If the pano's water shape matches the satellite bay's water shape at the correct rotation, we've found the right heading.
 
-**Code**: `city2stl/skyline_cv/pano_birdseye.py` — fully implemented, no syntax errors.
+**Code**: `city2stl/skyline/pano_birdseye.py` — fully implemented, no syntax errors.
 
 ---
 
@@ -156,7 +156,7 @@ Many buildings already have height + OSM heading annotations. Could we triangula
 
 ## Code Status
 
-- **`city2stl/skyline_cv/pano_birdseye.py`**: Fully implemented, tested, no bugs
+- **`city2stl/skyline/pano_birdseye.py`**: Fully implemented, tested, no bugs
   - Functions: `pano_to_birdseye()`, `crop_sat_to_seed_canvas()`, `register_by_rotation()`
   - Works as designed; failure is algorithmic, not implementation
 
@@ -202,6 +202,6 @@ No files modified. Code remains in repository for:
 
 ## References
 
-- Existing work: `city2stl/skyline_cv/pano_birdseye.py`, `scripts/13_birdseye_registration_demo.py`
-- F-SKY11.1 (alternative): `city2stl/skyline_cv/pano_coastline.py`
-- Test cases: `tests/test_skyline_cv_height_trace.py`
+- Existing work: `city2stl/skyline/pano_birdseye.py`, `scripts/13_birdseye_registration_demo.py`
+- F-SKY11.1 (alternative): `city2stl/skyline/pano_coastline.py`
+- Test cases: `tests/test_skyline_height_trace.py`

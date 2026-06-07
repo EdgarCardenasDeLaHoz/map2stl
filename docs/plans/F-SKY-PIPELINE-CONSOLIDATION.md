@@ -311,7 +311,7 @@ is the open issue, not the integration.
 ## What this plan does NOT touch
 
 - **City2stl height/production stack** (`city2stl/height/*`) is
-  unrelated to the skyline_cv research branch.
+  unrelated to the skyline research branch.
 - **Composite DEM** (project_composite_dem) and similar terrain work.
 - **MobileSAM (F-SKY5)** stays pending — it would replace F-SKY7's
   silhouette detector if pursued, but is out of scope for this
@@ -325,7 +325,7 @@ is the open issue, not the integration.
 
 End state in two sentences:
 
-> The skyline_cv pipeline takes a region + seeds, recovers each
+> The skyline pipeline takes a region + seeds, recovers each
 > seed's true heading from the satellite coastline (pano-level), uses
 > that heading to register OSM + MS Building polygons against
 > SegFormer's per-view silhouettes (with F-SKY2 splitting + F-SKY6

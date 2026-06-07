@@ -37,7 +37,7 @@ These are useful after orientation, but they are not the best first stop:
 
 ## ML & Height-Training Docs
 
-- `F-SKY-INTEGRATION.md` — current focus: skyline_cv computer-vision pipeline status & roadmap
+- `F-SKY-INTEGRATION.md` — current focus: skyline computer-vision pipeline status & roadmap
 - `BUILDING-HEIGHT-MODEL-SUMMARY.md` — building height estimation overview (nDSM/GHSL/WSF3D/3DEP)
 - `MODEL-STRATEGY.md` — training strategy across Phase G/H/F-SKY
 - `MODELS-REFERENCE.md` — checkpoint reference (which model lives where, what was its loss)

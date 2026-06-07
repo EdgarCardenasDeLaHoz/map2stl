@@ -22,7 +22,7 @@ Complete implementation and integration of two complementary registration featur
 - Per-site configuration UI — currently gated by `_load_site_use_cross_view_scoring()`  only checks if explicitly set
 - Tests — no unit tests for cross_view module or integration
 - Demo script completion — visualization of colour/geometry signals
-- Documentation — needs section in city2stl/skyline_cv/README.md
+- Documentation — needs section in city2stl/skyline/README.md
 
 **Effort Estimate**:
 - Enable F-SKY10 Signal 1 on Cartagena: **1 hour** (set config, test, measure)
@@ -67,11 +67,11 @@ Complete implementation and integration of two complementary registration featur
 
 **Tasks**:
 1. **Enable per-site config** — Update Cartagena's region config to set `use_cross_view_scoring: true`
-   - File: `city2stl/skyline_cv/sites/cartagena.json`
+   - File: `city2stl/skyline/sites/cartagena.json`
    - Add: `"use_cross_view_scoring": true`
 
 2. **Verify integration** — Run a single-seed report with cross-view enabled
-   - Command: `PYTHONPATH=. python city2stl/skyline_cv/scripts/08_region_skyline_pdf.py --region Cartagena --max-seeds 1`
+   - Command: `PYTHONPATH=. python city2stl/skyline/scripts/08_region_skyline_pdf.py --region Cartagena --max-seeds 1`
    - Verify: No errors, cross-view scorer builds, PDF includes diagnostic data
 
 3. **Add diagnostic output** — Update region_pdf.py to log cross-view scores
@@ -197,7 +197,7 @@ For each matched segment:
 **Unit Tests** (1 hour):
 
 ```python
-# tests/test_skyline_cv_cross_view.py (new file)
+# tests/test_skyline_cross_view.py (new file)
 
 def test_median_rgb_valid_patch():
     """Median RGB of valid patch returns float tuple."""
@@ -226,7 +226,7 @@ def test_make_cross_view_scorer_integration():
 
 **Documentation** (1 hour):
 
-1. **city2stl/skyline_cv/README.md** — Add section:
+1. **city2stl/skyline/README.md** — Add section:
    ```
    ### F-SKY10: Cross-View Non-ML Registration
    
@@ -342,21 +342,21 @@ def test_make_cross_view_scorer_integration():
 ## Files Modified
 
 ### New Files
-- `tests/test_skyline_cv_cross_view.py`
+- `tests/test_skyline_cross_view.py`
 - `docs/plans/F-SKY11.2-FAILURE-ANALYSIS.md`
 
 ### Updated Files
-- `city2stl/skyline_cv/cross_view.py` — Add Signals 2, 3
-- `city2stl/skyline_cv/scripts/10_cross_view_demo.py` — Expand visualization
-- `city2stl/skyline_cv/sites/cartagena.json` — Enable use_cross_view_scoring
-- `city2stl/skyline_cv/README.md` — Document F-SKY10
+- `city2stl/skyline/cross_view.py` — Add Signals 2, 3
+- `city2stl/skyline/scripts/10_cross_view_demo.py` — Expand visualization
+- `city2stl/skyline/sites/cartagena.json` — Enable use_cross_view_scoring
+- `city2stl/skyline/README.md` — Document F-SKY10
 - `docs/F-SKY-INTEGRATION.md` — Update F-SKY11.2 status
 - `docs/proposals.md` — Mark F-SKY11.2 as denied/attempted
 
 ### No Changes Needed
-- `city2stl/skyline_cv/pipeline.py` — Integration already complete
-- `city2stl/skyline_cv/region_pdf.py` — Infrastructure already complete
-- `city2stl/skyline_cv/pano_birdseye.py` — Fully implemented (no integration)
+- `city2stl/skyline/pipeline.py` — Integration already complete
+- `city2stl/skyline/region_pdf.py` — Infrastructure already complete
+- `city2stl/skyline/pano_birdseye.py` — Fully implemented (no integration)
 
 ---
 

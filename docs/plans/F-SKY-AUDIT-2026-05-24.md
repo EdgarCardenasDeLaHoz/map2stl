@@ -1,4 +1,4 @@
-# skyline_cv audit — 2026-05-24 refresh
+# skyline audit — 2026-05-24 refresh
 
 Status: **audit + state-of-the-module snapshot**. Supersedes
 [F-SKY-AUDIT-2026-05-17.md](F-SKY-AUDIT-2026-05-17.md) (kept as the
@@ -18,7 +18,7 @@ intervening week and what remains.
 
 | | 2026-05-17 audit | 2026-05-24 refresh |
 |---|---|---|
-| Module LOC (skyline_cv only, excl. runs/) | ~10000 | ~9000 (down ~1000) |
+| Module LOC (skyline only, excl. runs/) | ~10000 | ~9000 (down ~1000) |
 | Largest function | `_seed_multiview_registration` 918 LOC | **1211 LOC** (grew with pano-recovery + diagnostics) |
 | Source files | 11 | 11 (config + pano_birdseye out, depth_estimation + html_report + osm_water in) |
 | Scripts | 6 | 3 (`08`, `09`, `13_heading_recovery_demo`) |

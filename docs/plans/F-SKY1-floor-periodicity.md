@@ -52,15 +52,15 @@ unreliable.
 
 ## Target files
 
-- `city2stl/skyline_cv/pipeline.py`
+- `city2stl/skyline/pipeline.py`
   - New `_floor_period_for_building(image, building_mask, x_range, y_top, y_base) → dict | None`
   - Wire into `estimate_heights_from_registration` so each emitted
     `RegisteredBuildingEstimate` carries the optional floor-period fields.
   - Extend `RegisteredBuildingEstimate` with the four new optional fields.
-- `city2stl/skyline_cv/region_pdf.py`
+- `city2stl/skyline/region_pdf.py`
   - Render the per-view diagnostic table to surface `inferred_distance_m`
     next to the OSM `forward_m`.
-- `city2stl/skyline_cv/README.md` — add a section under "How it works".
+- `city2stl/skyline/README.md` — add a section under "How it works".
 
 ## Success criteria
 

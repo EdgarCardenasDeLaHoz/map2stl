@@ -78,9 +78,9 @@ buildings should align with the mask's coloured regions. Discrepancies
 
 ## Target files
 
-- `city2stl/skyline_cv/pipeline.py`
+- `city2stl/skyline/pipeline.py`
   - Augment `detect_building_silhouettes` with the local-max pass.
-- `city2stl/skyline_cv/region_pdf.py`
+- `city2stl/skyline/region_pdf.py`
   - Rework `_render_seed_view_page` axes layout.
   - Remove the bottom legend text.
   - Move flag counters into the figure title.

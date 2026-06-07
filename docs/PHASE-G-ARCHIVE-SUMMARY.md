@@ -30,7 +30,7 @@ Architecture is **dataset-specific**: retna_pruned learned its shape for the ori
 Use retna_pruned.pt and close the thread. If future work needs larger-dataset training:
 - Fix grow_prune multi-cycle hang (debug `tools.ml.train` module)
 - Or train fresh architecture on OSM-only dataset from scratch
-- Or iterate on skyline_cv height sources (F-SKY series) which is more productive
+- Or iterate on skyline height sources (F-SKY series) which is more productive
 
 ## Files Generated
 

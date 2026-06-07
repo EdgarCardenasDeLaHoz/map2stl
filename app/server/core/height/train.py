@@ -1,7 +1,7 @@
 """
 core/height/train -- Server-side training orchestration.
 
-Pure training code lives in city2stl.skyline_cv.height.train.  This module re-exports
+Pure training code lives in city2stl.skyline.height.train.  This module re-exports
 all of those symbols for backward compatibility and retains collect_tiles()
 which requires the server's height data providers (cache-backed).
 
@@ -24,7 +24,7 @@ from typing import List, Optional, Sequence
 
 import numpy as np
 
-from city2stl.skyline_cv.height.train import (  # noqa: F401
+from city2stl.skyline.height.train import (  # noqa: F401
     TILE_SIZE,
     TARGET_RES_M,
     MAX_NAN_FRAC,
@@ -69,14 +69,14 @@ def collect_tiles(
     -------
     List of Paths to collected .npz tile files.
     """
-    from city2stl.skyline_cv.height import merge_height_rasters
-    from city2stl.skyline_cv.height.providers.wsf3d import WSF3DProvider
-    from city2stl.skyline_cv.height.providers.ndsm import NDSMProvider
-    from city2stl.skyline_cv.height.providers.google_3d import Google3DProvider
-    from city2stl.skyline_cv.height.providers.copernicus import CopernicusProvider
-    from city2stl.skyline_cv.height.providers.lidar_3dep import LiDAR3DEPProvider
-    from city2stl.skyline_cv.height.providers.ghsl import GHSLProvider
-    from city2stl.skyline_cv.height.providers.shadow_height import ShadowHeightProvider
+    from city2stl.skyline.height import merge_height_rasters
+    from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
+    from city2stl.skyline.height.providers.ndsm import NDSMProvider
+    from city2stl.skyline.height.providers.google_3d import Google3DProvider
+    from city2stl.skyline.height.providers.copernicus import CopernicusProvider
+    from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
+    from city2stl.skyline.height.providers.ghsl import GHSLProvider
+    from city2stl.skyline.height.providers.shadow_height import ShadowHeightProvider
 
     _prov_map = {
         "wsf3d":       WSF3DProvider(),

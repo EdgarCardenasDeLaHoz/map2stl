@@ -95,11 +95,11 @@ specific failure mode).
 
 ## Target files
 
-- `city2stl/skyline_cv/pipeline.py` — `osm_sam_instance_silhouettes`,
+- `city2stl/skyline/pipeline.py` — `osm_sam_instance_silhouettes`,
   `_ensure_mobilesam`, `_mobilesam_predict`.
-- `city2stl/skyline_cv/region_pdf.py` — gated call site, import the
+- `city2stl/skyline/region_pdf.py` — gated call site, import the
   new function.
-- `city2stl/skyline_cv/README.md` — new "Optional SAM instance head"
+- `city2stl/skyline/README.md` — new "Optional SAM instance head"
   section + checkpoint download instructions.
 - `requirements-optional.txt` (or similar) — `mobile_sam` git URL.
 

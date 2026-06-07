@@ -46,9 +46,9 @@ output/*
 models/*.pt
 models/*_inspect.pdf
 models/*_inspect.png
-# skyline_cv generated output (PDFs, PNG page dumps, image cache) —
-# regenerable from city2stl/skyline_cv/scripts/08_region_skyline_pdf.py
-city2stl/skyline_cv/runs/
+# skyline generated output (PDFs, PNG page dumps, image cache) —
+# regenerable from city2stl/skyline/scripts/08_region_skyline_pdf.py
+city2stl/skyline/runs/
 runs/*
 
 # Local ad-hoc diagnostics artifacts

@@ -1,12 +1,12 @@
 import numpy as np
 import cv2
-from city2stl.skyline_cv.pipeline import detect_skyline_contour
+from city2stl.skyline.pipeline import detect_skyline_contour
 import sys
 import pathlib
 import glob
 sys.path.insert(0, '.')
 
-img_files = sorted(glob.glob('city2stl/skyline_cv/runs/image_cache/*.png'))
+img_files = sorted(glob.glob('city2stl/skyline/runs/image_cache/*.png'))
 print(f'Testing {len(img_files)} images...')
 results = []
 for f in img_files:

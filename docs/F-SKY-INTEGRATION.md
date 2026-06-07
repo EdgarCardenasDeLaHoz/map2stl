@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-The F-SKY series is a set of 11+ computer-vision improvements to the skyline_cv height estimation pipeline. This document consolidates their status, active/disabled state, measurement results, and integration roadmap.
+The F-SKY series is a set of 11+ computer-vision improvements to the skyline height estimation pipeline. This document consolidates their status, active/disabled state, measurement results, and integration roadmap.
 
 **Current production**: `retna_pruned.pt` (0.2691 loss, 3.82m MAE)  
 **Target improvement**: Cartagena building height accuracy via cross-view registration
@@ -22,10 +22,10 @@ The F-SKY series is a set of 11+ computer-vision improvements to the skyline_cv 
 
 ## Pipeline Architecture
 
-The skyline_cv pipeline lives in two core files plus thin helpers:
+The skyline pipeline lives in two core files plus thin helpers:
 
 ```
-city2stl/skyline_cv/
+city2stl/skyline/
 ├── pipeline.py          (~3370 lines, pure math, unit-tested)
 ├── region_pdf.py        (~3900 lines, orchestration + I/O + PDF rendering)
 ├── scripts/
@@ -121,7 +121,7 @@ def generate_region_report(region_name):
 - **Purpose**: Detect horizontal banding in building masks → estimate floor count → independent height validation
 - **Activation**: Gated by `config.F_SKY1_ENABLED`
 - **Current use**: Diagnostic; not yet feeding into main height calculation
-- **Last commit**: Part of 2026-05-17 commit (height_trace.py + test_skyline_cv_height_trace.py)
+- **Last commit**: Part of 2026-05-17 commit (height_trace.py + test_skyline_height_trace.py)
 
 #### **F-SKY2: OSM-Anchored Silhouette Splitting**
 - **Status**: Implemented, measured ✅
@@ -202,27 +202,27 @@ def generate_region_report(region_name):
 
 #### **F-SKY10: Non-ML Cross-View Registration**
 - **Status**: Landed, demoted to diagnostic-only
-- **Location**: `city2stl/skyline_cv/cross_view.py`; opt-in via `use_cross_view_scoring`
+- **Location**: `city2stl/skyline/cross_view.py`; opt-in via `use_cross_view_scoring`
 - **What landed**: All 3 signals (colour/width/edges) implemented; blended into matcher at 0.85/0.15 weights; `cv̄=X.XX/min=Y.YY` shown in per-view PDF header (F-CLEAN5, 2026-05-24)
 - **Why demoted**: Per-building colour was empirically fragile; F-SKY11.1 supersedes the cross-view registration intent. The scorer stays on disk and is wired behind the opt-in flag; it does NOT drive production heights.
 - **Phase B** (production reranking): still pending — measure first whether F-SKY2/6/8 coverage is sufficient
 
 #### **F-SKY12: Depth Anything V2 on Street View Panos**
 - **Status**: Phase A landed (verifier only)
-- **Location**: `city2stl/skyline_cv/depth_estimation.py`; emits `depth_height_m` + `depth_disagreement` per match
+- **Location**: `city2stl/skyline/depth_estimation.py`; emits `depth_height_m` + `depth_disagreement` per match
 - **Activation**: Does NOT influence aggregated heights; Phase B (confidence weighting/rescue) pending
 - **Plan**: `docs/plans/F-SKY12-depth-from-panos.md`
 
 #### **F-SKY13: OSM-Coastline Registration + Footprints Overlay**
 - **Status**: Phases A, A.2, B all landed; Phase C in progress
-- **Location**: `city2stl/skyline_cv/osm_water.py`, `coastline_registration.py`, `region_pdf.py`
+- **Location**: `city2stl/skyline/osm_water.py`, `coastline_registration.py`, `region_pdf.py`
 - **Landed**: OSM fetch + 1 km clip + keypoints (`osm_water.py`); minimap OSM coastline + 1 km circle; satellite-image background (opt-in, `SKYLINE_CV_F_SKY13_SAT_BG=1`); pano-projected coastline dots; pano↔OSM IoU annotation
 - **Phase C** (`SKYLINE_CV_PHASE_C=1`): OSM-primary sweep replacing satellite-HSV as keypoint source — in progress
 - **Plan**: `docs/plans/F-SKY13-osm-coastline-footprints-overlay.md`
 
 #### **F-SKY15: HTML Diagnostic Report**
 - **Status**: Landed
-- **Location**: `city2stl/skyline_cv/html_report.py`; call site in `region_pdf.py`
+- **Location**: `city2stl/skyline/html_report.py`; call site in `region_pdf.py`
 - **What it does**: Renders `index.html` + per-seed HTML pages with embedded minimap PNGs; all tabular data lives here (PDF became compact archival artefact via `pano_only_pdf: true`)
 - **Plan**: `docs/plans/F-SKY15-html-diagnostic-report.md`
 
@@ -309,8 +309,8 @@ config = {
 - [ ] **F-SKY5 decision**: Measure F-SKY2/6/8 effectiveness first; if insufficient, implement
 - [x] **F-SKY10 integration**: Landed as diagnostic-only; `use_cross_view_scoring` opt-in; `cv̄` shown in PDF header
 - [ ] **modules.md update**: Document all new helper modules (osm_water, depth_estimation, html_report, etc.)
-- [ ] **test_skyline_cv_*.py**: Unit test for `sweep_pano_heading_offset` on synthetic input; unit test for F-SKY13 OSM coastline extraction edge cases
-- [ ] **Documentation**: Update `city2stl/skyline_cv/README.md` with consolidated feature list and current state
+- [ ] **test_skyline_*.py**: Unit test for `sweep_pano_heading_offset` on synthetic input; unit test for F-SKY13 OSM coastline extraction edge cases
+- [ ] **Documentation**: Update `city2stl/skyline/README.md` with consolidated feature list and current state
 - [ ] **F-SKY-PIPELINE Phase 3**: Wire Miami + Chicago to new flags; capture per-seed recovery accuracy in STATUS.md
 
 ---
@@ -324,8 +324,8 @@ config = {
 - Deleted: `pano_birdseye.py` (F-CLEAN6), `config.py` (F-CLEAN1)
 
 ### Test & Demo
-- `tests/test_skyline_cv_height_trace.py` (F-SKY1 tests)
-- `tests/test_skyline_cv_osm_water.py` (F-SKY13 tests)
+- `tests/test_skyline_height_trace.py` (F-SKY1 tests)
+- `tests/test_skyline_osm_water.py` (F-SKY13 tests)
 - `scripts/08_region_skyline_pdf.py` (entry point; uses activated features from config)
 - `scripts/09_height_trace.py` (F-SKY1 demo)
 - `scripts/10_cross_view_demo.py` (F-SKY10 prep)
@@ -338,8 +338,8 @@ config = {
 - `docs/plans/F-SKY*.md` (13 feature plans)
 - `docs/plans/F-SKY-PIPELINE-CONSOLIDATION.md` (consolidation roadmap)
 - `docs/plans/F-SKY-AUDIT-2026-05-17.md` (current state audit)
-- `city2stl/skyline_cv/STATUS.md` (accuracy numbers, open gaps)
-- `city2stl/skyline_cv/README.md` (architecture overview, this file)
+- `city2stl/skyline/STATUS.md` (accuracy numbers, open gaps)
+- `city2stl/skyline/README.md` (architecture overview, this file)
 
 ### References
 - Memory: `project_building_heights.md` (height sources and strategy)

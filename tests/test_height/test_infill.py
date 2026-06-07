@@ -12,7 +12,7 @@ import pytest
 # Skip entire module if scipy unavailable
 pytest.importorskip("scipy")
 
-from city2stl.skyline_cv.height.infill import infill_idw, infill_nearest
+from city2stl.skyline.height.infill import infill_idw, infill_nearest
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

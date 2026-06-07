@@ -1,4 +1,4 @@
-# skyline_cv audit — 2026-05-17 (SUPERSEDED)
+# skyline audit — 2026-05-17 (SUPERSEDED)
 
 > **Superseded by [F-SKY-AUDIT-2026-05-24.md](F-SKY-AUDIT-2026-05-24.md)**
 > — 11 of 13 F-CLEAN proposals shipped since this baseline, and a new

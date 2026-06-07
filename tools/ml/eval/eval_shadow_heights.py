@@ -28,7 +28,7 @@ import numpy as np
 # Ensure project root is importable
 sys.path.insert(0, ".")
 
-from city2stl.skyline_cv.height.providers.shadow_height import (
+from city2stl.skyline.height.providers.shadow_height import (
     ShadowHeightProvider,
     _infer_from_rgb,
     _detect_shadows,

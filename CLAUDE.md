@@ -174,7 +174,7 @@ After you edit code, before committing:
 - See: `PHASE-H-LAUNCH-SUMMARY.md`, `PHASE-H-BENCHMARK-TIERS.md`
 
 ### F-SKY (Current focus, May 2026) — Skyline CV pipeline
-Computer-vision improvements to `city2stl/skyline_cv/` for cross-view building height estimation.
+Computer-vision improvements to `city2stl/skyline/` for cross-view building height estimation.
 - **Active:** F-SKY2, 4, 6, 7, 8, 10 (opt-in), 11.1
 - **Removed:** F-SKY3 (regression), F-SKY11.2 (dead-end)
 - **Pending:** F-SKY5 (MobileSAM instance head)

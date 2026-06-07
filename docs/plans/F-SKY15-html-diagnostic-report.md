@@ -32,7 +32,7 @@ This isn't a migration; it's a parallel renderer.
 ### Output layout
 
 ```
-output/skyline_cv/<region>/
+output/skyline/<region>/
 ├── index.html          ← seed list + region summary
 ├── seed_1.html         ← per-seed page (matches PDF page structure)
 ├── seed_2.html
@@ -112,7 +112,7 @@ front-matter page.
 
 ## Target files
 
-- `city2stl/skyline_cv/html_report.py` (NEW) — pure rendering
+- `city2stl/skyline/html_report.py` (NEW) — pure rendering
   helpers. Three public functions:
   - `render_region_index(region_name, seed_views, ...) -> str`
   - `render_seed_page(sv, osm_data, ...) -> str`
@@ -121,12 +121,12 @@ front-matter page.
   string templates. **Reuses** existing
   `_draw_view_minimap` for the PNG (saving the figure to a
   buffer instead of a PDF page).
-- `city2stl/skyline_cv/region_pdf.py` — at the end of the
+- `city2stl/skyline/region_pdf.py` — at the end of the
   existing `generate_region_report` function, if
   `SKYLINE_CV_HTML_REPORT=1` (or unconditionally — TBD after
   Phase A trial), call `write_region_report` with the same
   data the PDF just consumed. ~10 lines.
-- `tests/test_skyline_cv_html_report.py` (NEW) — render with
+- `tests/test_skyline_html_report.py` (NEW) — render with
   a tiny synthetic seed_view fixture; assert the output is
   valid HTML and contains the key field values
   (`pano_osm_iou`, `depth_height_m`, etc).
@@ -135,7 +135,7 @@ front-matter page.
 
 Phase A is successful if:
 - Running `08_region_skyline_pdf.py cartagena` produces both
-  the existing PDF and a new `output/skyline_cv/cartagena/`
+  the existing PDF and a new `output/skyline/cartagena/`
   directory with `index.html` + per-seed pages.
 - The HTML page for a coastal seed shows the same minimap PNG
   the PDF shows (visual parity for Phase A).

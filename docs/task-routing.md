@@ -9,10 +9,10 @@ Use this document to choose the right files before editing.
 If working on street-view-based building height estimation or F-SKY features:
 
 - **Start here**: [F-SKY-INTEGRATION.md](F-SKY-INTEGRATION.md) for feature status and architecture
-- **Code**: `city2stl/skyline_cv/` (pipeline.py + region_pdf.py)
+- **Code**: `city2stl/skyline/` (pipeline.py + region_pdf.py)
 - **Modules**: height_trace.py, satellite_footprints.py, coastline_registration.py, etc.
 - **Scripts**: `scripts/08_region_skyline_pdf.py` (entry point); demo scripts 09–13
-- **Tests**: `tests/test_skyline_cv_height_trace.py` (expand for other F-SKY features)
+- **Tests**: `tests/test_skyline_height_trace.py` (expand for other F-SKY features)
 
 ## First Decision
 

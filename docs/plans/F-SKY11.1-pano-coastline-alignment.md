@@ -117,7 +117,7 @@ Cost: 360 candidates × 24 keypoints × O(1) lookup ≈ 9k ops. Cheap.
 
 ## Diagnostic deliverable (script 12)
 
-`city2stl/skyline_cv/scripts/12_pano_coastline_demo.py` — analogous to
+`city2stl/skyline/scripts/12_pano_coastline_demo.py` — analogous to
 script 11 but on the pano:
 
 - Page 1 — same satellite reference page as script 11 (key points
@@ -161,9 +161,9 @@ removing the manual override requirement for water-adjacent seeds
 
 | File | Change |
 |---|---|
-| `city2stl/skyline_cv/coastline_registration.py` | Add `score_pano_offset_keypoints` and `sweep_pano_heading_offset` |
-| `city2stl/skyline_cv/scripts/12_pano_coastline_demo.py` (new) | Standalone visualisation |
-| `city2stl/skyline_cv/region_pdf.py` (Phase B integration) | Wire the recovered offset into the joint anchor optimizer's seed |
+| `city2stl/skyline/coastline_registration.py` | Add `score_pano_offset_keypoints` and `sweep_pano_heading_offset` |
+| `city2stl/skyline/scripts/12_pano_coastline_demo.py` (new) | Standalone visualisation |
+| `city2stl/skyline/region_pdf.py` (Phase B integration) | Wire the recovered offset into the joint anchor optimizer's seed |
 | `sites/cartagena.json` (Phase B) | Mark which `anchor_offsets_deg` entries become obsolete once Phase B lands |
 
 ## Success criteria

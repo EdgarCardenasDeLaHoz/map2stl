@@ -44,7 +44,7 @@ Cartagena shows the premise does NOT hold there (see Measured results).
 - Log the estimated offset in metres + pair count.
 
 ## Target files
-- `city2stl/skyline_cv/satellite_footprints.py` — `merge_satellite_into_osm` only.
+- `city2stl/skyline/satellite_footprints.py` — `merge_satellite_into_osm` only.
 
 ## Success criteria
 - Cartagena: offset-twin duplicates collapse (dedup count rises; minimap shows grey/brown aligned).

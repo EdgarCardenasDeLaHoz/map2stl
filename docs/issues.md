@@ -20,7 +20,7 @@ HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `a
 ### ~~F-SKY11.1 Phase A (pano-level coastline alignment)~~ ✅ (2026-05-17)
 Pano heading-offset recovery from stitched 360° pano + water mask vs coastline keypoints. Demo script `scripts/12_pano_coastline_demo.py` demonstrates approach; Cartagena seed_5 recovers 310° vs manual 320°. Phase B (integration into region_pdf.py) pending.
 
-### ~~skyline_cv script sprawl~~ ✅
+### ~~skyline script sprawl~~ ✅
 Scripts `00`–`07` (individual-step runners) removed; single orchestration
 entry point is now `scripts/08_region_skyline_pdf.py`. `review.py` removed
 (logic merged into `region_pdf.py`). `pipeline.py` and `region_pdf.py` have

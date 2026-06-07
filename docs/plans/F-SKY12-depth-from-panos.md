@@ -29,13 +29,13 @@ the geometric extraction path. Adds one new step between
 segmentation and matching, and one verification hook at
 aggregation.
 
-1. **Lazy DA2 loader in `skyline_cv.pipeline`.** Reuse
+1. **Lazy DA2 loader in `skyline.pipeline`.** Reuse
    `city2stl/height/predict.py:_load_da2` rather than introducing
    a parallel loader. Cache the pipeline as a module-level
    singleton (DA2 is ~300 MB; one load per process).
 
 2. **`predict_pano_depth(view_rgb) -> depth_rel`** in
-   `skyline_cv/pipeline.py`. Same pattern as
+   `skyline/pipeline.py`. Same pattern as
    `_depth_anything_inference` in `height/predict.py`: feed the
    PIL image, get the predicted-depth tensor, resize, normalise
    to [0, 1]. Pure function, unit-testable.
@@ -95,13 +95,13 @@ ordering.
 
 ## Target files
 
-- `city2stl/skyline_cv/pipeline.py` — new `predict_pano_depth`,
+- `city2stl/skyline/pipeline.py` — new `predict_pano_depth`,
   `calibrate_pano_depth`, `depth_height_from_segment` functions
   (pure, unit-testable). Lazy DA2 loader.
-- `city2stl/skyline_cv/region_pdf.py` — hook in the per-view
+- `city2stl/skyline/region_pdf.py` — hook in the per-view
   loop; store `depth_height_m` and `depth_disagreement` in the
   per-match record; render the small text overlay.
-- `tests/test_skyline_cv_depth.py` (new) — unit tests on the
+- `tests/test_skyline_depth.py` (new) — unit tests on the
   three pure functions with mocked depth maps.
 - `docs/F-SKY-INTEGRATION.md` — add F-SKY12 row to active
   features table after Phase A lands.

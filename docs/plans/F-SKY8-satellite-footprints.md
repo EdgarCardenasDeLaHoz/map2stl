@@ -27,7 +27,7 @@ Either source would 2–5× the matchable polygon set in the gap.
 
 ### Stage A — fetch + cache
 
-Add `city2stl/skyline_cv/satellite_footprints.py`:
+Add `city2stl/skyline/satellite_footprints.py`:
 
 ```python
 def fetch_microsoft_buildings_for_bbox(
@@ -94,14 +94,14 @@ the new source visible.
 
 ## Target files
 
-- `city2stl/skyline_cv/satellite_footprints.py` (new) —
+- `city2stl/skyline/satellite_footprints.py` (new) —
   `fetch_microsoft_buildings_for_bbox`, `_dedup_against_osm`,
   quadkey helpers, cache.
-- `city2stl/skyline_cv/region_pdf.py` — read site config flag, call
+- `city2stl/skyline/region_pdf.py` — read site config flag, call
   the fetcher, merge into building list before the per-seed loop.
-- `city2stl/skyline_cv/sites/cartagena.json` — add
+- `city2stl/skyline/sites/cartagena.json` — add
   `"use_satellite_footprints": true`.
-- `city2stl/skyline_cv/README.md` — document the new field + the
+- `city2stl/skyline/README.md` — document the new field + the
   one-time download cost.
 
 ## Success criteria

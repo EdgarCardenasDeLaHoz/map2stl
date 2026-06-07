@@ -89,10 +89,10 @@ tell you whether the gap is a matcher failure or an OSM data gap.
 
 ## Target files
 
-- `city2stl/skyline_cv/pipeline.py`
+- `city2stl/skyline/pipeline.py`
   - `match_segments_to_buildings` rewrite to use
     `linear_sum_assignment` for the final pick stage.
-- `city2stl/skyline_cv/region_pdf.py`
+- `city2stl/skyline/region_pdf.py`
   - `_draw_view_minimap`: add the all-projections background overlay
     before the matched-segment painting.
 

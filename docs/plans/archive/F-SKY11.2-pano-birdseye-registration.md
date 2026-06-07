@@ -108,7 +108,7 @@ of the prior heading-recovery code.
 
 ## Diagnostic deliverable (script 13)
 
-`city2stl/skyline_cv/scripts/13_birdseye_registration_demo.py` — 4 pages:
+`city2stl/skyline/scripts/13_birdseye_registration_demo.py` — 4 pages:
 
 1. **Satellite reference**: the satellite + cyan water mask + seed.
 2. **Bird's-eye rendering**: the pano-derived bird's-eye water mask
@@ -134,8 +134,8 @@ of the prior heading-recovery code.
 
 | File | Change |
 |---|---|
-| `city2stl/skyline_cv/pano_birdseye.py` (new) | Inverse perspective mapping + rotation search |
-| `city2stl/skyline_cv/scripts/13_birdseye_registration_demo.py` (new) | Stand-alone visualisation |
+| `city2stl/skyline/pano_birdseye.py` (new) | Inverse perspective mapping + rotation search |
+| `city2stl/skyline/scripts/13_birdseye_registration_demo.py` (new) | Stand-alone visualisation |
 
 ## Success criteria (Phase A — visualisation)
 

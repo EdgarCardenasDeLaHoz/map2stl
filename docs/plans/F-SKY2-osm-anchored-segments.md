@@ -74,11 +74,11 @@ dependency on the registration step.
 
 ## Target files
 
-- `city2stl/skyline_cv/pipeline.py`
+- `city2stl/skyline/pipeline.py`
   - New function `osm_anchor_silhouettes`.
   - Optional: add `osm_split_count` / `osm_merge_count` to the segment
     dict for diagnostic visibility.
-- `city2stl/skyline_cv/region_pdf.py`
+- `city2stl/skyline/region_pdf.py`
   - After `_merge_silhouette_sources`, call `osm_anchor_silhouettes(
     segments, reg["all_projections"], building_mask=_bmask)`.
 

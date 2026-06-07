@@ -4,8 +4,8 @@ import pathlib
 import sys
 
 pdf_path = pathlib.Path(
-    "city2stl/skyline_cv/runs/region_reports/Miami_skyline_report.pdf")
-out = pathlib.Path("city2stl/skyline_cv/runs/region_reports")
+    "city2stl/skyline/runs/region_reports/Miami_skyline_report.pdf")
+out = pathlib.Path("city2stl/skyline/runs/region_reports")
 
 pdf = fitz.open(str(pdf_path))
 n = pdf.page_count

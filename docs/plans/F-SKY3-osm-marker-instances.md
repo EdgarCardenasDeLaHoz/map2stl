@@ -59,10 +59,10 @@ fallback that catches the no-gap cases F-SKY2 left untouched.
 
 ## Target files
 
-- `city2stl/skyline_cv/pipeline.py`
+- `city2stl/skyline/pipeline.py`
   - New function `osm_marker_voronoi_silhouettes`.
   - Reuse `_proj_x_range` and the containment metric introduced in F-SKY2.
-- `city2stl/skyline_cv/region_pdf.py`
+- `city2stl/skyline/region_pdf.py`
   - Add the second call right after `osm_anchor_silhouettes`.
 
 ## Success criteria
