@@ -61,6 +61,7 @@ is intended to be functional without the model.
 from __future__ import annotations
 from collections import OrderedDict as _OrderedDict
 
+import logging
 import math
 import os
 from dataclasses import dataclass, replace
@@ -73,6 +74,11 @@ from scipy.ndimage import gaussian_filter1d, median_filter, uniform_filter1d
 from scipy.optimize import linear_sum_assignment
 from scipy.signal import find_peaks
 from shapely.geometry import shape
+
+# F-CLEAN14: the F-SKY12 depth except-branches reference ``logger`` but the
+# module never defined one (latent NameError, only reachable on a depth-module
+# failure). Defined here so those branches log instead of crashing.
+logger = logging.getLogger(__name__)
 
 # ── SegFormer-b0 (ADE20K) — lazy-loaded neural sky/building segmentation ─────
 # ADE20K 0-based label indices:
@@ -1863,6 +1869,153 @@ def compute_building_band(
     return y_top, y_bot
 
 
+def _component_gradient_col_signal(
+    image: "np.ndarray | None", building_mask: np.ndarray
+) -> "np.ndarray | None":
+    """Per-column vertical-gradient signal across the frame, integrated over
+    the building band (Phase A). Captures facade edges between adjacent towers
+    that share a roofline. Returns None when no usable RGB image is supplied;
+    the contour + col-count signals then carry the work.
+    """
+    if image is None or image.ndim != 3:
+        return None
+    try:
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        sx = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3))
+        # Integrate vertical edges within the BUILDING band only. Rows outside
+        # the band would add noise from water/sky textures.
+        band_for_grad = compute_building_band(building_mask, slack_px=8)
+        if band_for_grad is not None:
+            y0g, y1g = band_for_grad
+            grad_col_signal = sx[y0g : y1g + 1].sum(axis=0)
+        else:
+            grad_col_signal = sx.sum(axis=0)
+        # Mild smoothing — facade edges are thin but noise is thinner.
+        return gaussian_filter1d(grad_col_signal, sigma=1.5).astype(np.float32)
+    except Exception:
+        return None
+
+
+def _component_peak_columns(
+    col_counts: np.ndarray,
+    grad_col_signal: "np.ndarray | None",
+    contour: "np.ndarray | None",
+    x: int,
+    cw: int,
+    min_width_px: int,
+    max_splits_per_component: int,
+) -> np.ndarray:
+    """Pick per-tower peak columns (component-local offsets) inside one mask
+    component. Unions gradient-subdivided col_counts peaks, contour spire
+    peaks, and raw col_counts peaks, then dedups (10 px), support-filters, and
+    caps the count. Returns offsets in [0, cw); an empty array tells the caller
+    to emit a single silhouette for the whole component. Extracted verbatim
+    from detect_buildings_from_mask (F-CLEAN14).
+    """
+    peaks: np.ndarray = np.empty(0, dtype=np.int64)
+    from scipy.signal import find_peaks  # scipy already a project dep
+    # Phase A rework: gradient peaks are facade BOUNDARIES (between
+    # towers), not building centers. Previously we unioned them with
+    # contour and col-counts peaks, then applied a mask-height
+    # support threshold — which rejected the gradient peaks because
+    # facade gaps have LOW mask coverage, not high. The result was
+    # zero gradient contribution on the exact case it's needed for:
+    # rows of similar-height towers with flat col_counts.
+    #
+    # New approach:
+    #   1. Find gradient peaks → use them as BOUNDARIES that
+    #      subdivide the component's column range.
+    #   2. Within each subrange, pick ONE peak (col_counts argmax)
+    #      as that subdivision's building center.
+    #   3. Union with contour peaks (still useful for spires).
+    #
+    # This lets the gradient drive splitting even when col_counts
+    # is flat — exactly the merged-row-of-towers case.
+    grad_boundaries: list[int] = []
+    if grad_col_signal is not None:
+        grad_slice = grad_col_signal[x : x + cw].astype(np.float32)
+        grad_std = float(np.std(grad_slice))
+        grad_prom = max(1.5, grad_std * 0.20)
+        gp, _ = find_peaks(
+            grad_slice, distance=10, prominence=grad_prom)
+        grad_boundaries = [int(v) for v in gp.tolist()]
+
+    # Build the subrange list using gradient boundaries.
+    subrange_edges = [0, *sorted(grad_boundaries), cw - 1]
+    # Per subrange, pick the col_counts argmax as the candidate
+    # building center. Skip degenerate (too-narrow) subranges.
+    grad_derived_peaks: list[int] = []
+    for a, b in zip(subrange_edges[:-1], subrange_edges[1:]):
+        if b - a < 6:
+            continue
+        sub = col_counts[a : b + 1]
+        if sub.size == 0 or sub.max() < 6:
+            continue
+        grad_derived_peaks.append(int(np.argmax(sub)) + a)
+
+    # Also find contour peaks (rooftop spires) — these still help
+    # when towers have distinctive rooflines even within a flat row.
+    contour_peaks: list[int] = []
+    if contour is not None and contour.size >= x + cw:
+        contour_slice = np.asarray(
+            contour[x: x + cw], dtype=np.float32)
+        if np.any(~np.isfinite(contour_slice)):
+            fill = float(np.nanmedian(contour_slice))
+            contour_slice = np.where(np.isfinite(
+                contour_slice), contour_slice, fill)
+        c_std = float(np.std(contour_slice))
+        c_prom = max(1.5, c_std * 0.15)
+        cp, _ = find_peaks(-contour_slice, distance=8, prominence=c_prom)
+        contour_peaks = [int(v) for v in cp.tolist()]
+
+    # And col_counts peaks (the original signal) — these catch
+    # narrow spires that don't show up in the gradient subdivision
+    # because they're entirely within one gap-bounded subrange.
+    col_std = float(np.std(col_counts))
+    col_prom = max(1.5, col_std * 0.15)
+    cc_p, _ = find_peaks(col_counts, distance=8, prominence=col_prom)
+    col_peaks = [int(v) for v in cc_p.tolist()]
+
+    # Union all three sources.
+    all_peaks = grad_derived_peaks + contour_peaks + col_peaks
+
+    # Dedup with a 10-px tolerance — peaks within that window from
+    # different signals are the same tower.
+    if all_peaks:
+        all_peaks.sort()
+        dedup: list[int] = [all_peaks[0]]
+        for p in all_peaks[1:]:
+            if p - dedup[-1] >= 10:
+                dedup.append(p)
+        # Anti-over-split guard: require mask-height support for
+        # each peak. With gradient now used to subdivide (not as a
+        # peak source), the support threshold is purely a noise
+        # filter on contour/col peaks. The gradient-derived peaks
+        # already passed through the col_counts argmax, so they
+        # implicitly have support.
+        col_peak_h = float(col_counts.max())
+        support_threshold = max(6.0, col_peak_h * 0.25)
+        supported = [
+            p for p in dedup
+            if col_counts[p] >= support_threshold
+        ]
+        if supported:
+            dedup = supported
+        # Cap the number of splits to avoid degenerate over-segmentation
+        # of very wide components (a 1500-px-wide row of identical
+        # towers shouldn't produce 30+ tiny segments).
+        if len(dedup) > max_splits_per_component:
+            # Keep the top-N by col-height (tallest support wins).
+            dedup = sorted(
+                dedup,
+                key=lambda p: float(col_counts[p]),
+                reverse=True,
+            )[:max_splits_per_component]
+            dedup.sort()
+        peaks = np.asarray(dedup, dtype=np.int64)
+    return peaks
+
+
 def detect_buildings_from_mask(
     building_mask: "np.ndarray | None",
     min_width_px: int = 18,
@@ -1901,30 +2054,7 @@ def detect_buildings_from_mask(
         return []
     h, w = mask.shape[:2]
 
-    # Pre-compute a per-column vertical-gradient signal across the full
-    # frame (Phase A — Plan, STATUS.md). Captures facade edges between
-    # adjacent towers that share a roofline. Computed once here, sliced
-    # per-component in the peak loop below. Only used when an image is
-    # supplied; if not, the existing contour + col-counts signals carry
-    # the work.
-    grad_col_signal: "np.ndarray | None" = None
-    if image is not None and image.ndim == 3:
-        try:
-            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY).astype(np.float32)
-            sx = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3))
-            # Integrate vertical edges within the BUILDING band only. Rows
-            # outside the band would add noise from water/sky textures.
-            band_for_grad = compute_building_band(building_mask, slack_px=8)
-            if band_for_grad is not None:
-                y0g, y1g = band_for_grad
-                grad_col_signal = sx[y0g : y1g + 1].sum(axis=0)
-            else:
-                grad_col_signal = sx.sum(axis=0)
-            # Mild smoothing — facade edges are thin but noise is thinner.
-            grad_col_signal = gaussian_filter1d(
-                grad_col_signal, sigma=1.5).astype(np.float32)
-        except Exception:
-            grad_col_signal = None
+    grad_col_signal = _component_gradient_col_signal(image, building_mask)
 
     # Pre-crop to the building band: zero out mask rows above/below the band
     # where building pixels actually exist. Stops connected components from
@@ -1973,108 +2103,11 @@ def detect_buildings_from_mask(
         # captures tower-to-tower variation directly, even when adjacent towers
         # share base pixels in the mask). Otherwise we fall back to the mask's
         # per-column height profile.
-        peaks: np.ndarray = np.empty(0, dtype=np.int64)
+        peaks = np.empty(0, dtype=np.int64)
         if split_wide_components and cw >= int(1.5 * min_width_px):
-            from scipy.signal import find_peaks  # scipy already a project dep
-            # Phase A rework: gradient peaks are facade BOUNDARIES (between
-            # towers), not building centers. Previously we unioned them with
-            # contour and col-counts peaks, then applied a mask-height
-            # support threshold — which rejected the gradient peaks because
-            # facade gaps have LOW mask coverage, not high. The result was
-            # zero gradient contribution on the exact case it's needed for:
-            # rows of similar-height towers with flat col_counts.
-            #
-            # New approach:
-            #   1. Find gradient peaks → use them as BOUNDARIES that
-            #      subdivide the component's column range.
-            #   2. Within each subrange, pick ONE peak (col_counts argmax)
-            #      as that subdivision's building center.
-            #   3. Union with contour peaks (still useful for spires).
-            #
-            # This lets the gradient drive splitting even when col_counts
-            # is flat — exactly the merged-row-of-towers case.
-            grad_boundaries: list[int] = []
-            if grad_col_signal is not None:
-                grad_slice = grad_col_signal[x : x + cw].astype(np.float32)
-                grad_std = float(np.std(grad_slice))
-                grad_prom = max(1.5, grad_std * 0.20)
-                gp, _ = find_peaks(
-                    grad_slice, distance=10, prominence=grad_prom)
-                grad_boundaries = [int(v) for v in gp.tolist()]
-
-            # Build the subrange list using gradient boundaries.
-            subrange_edges = [0, *sorted(grad_boundaries), cw - 1]
-            # Per subrange, pick the col_counts argmax as the candidate
-            # building center. Skip degenerate (too-narrow) subranges.
-            grad_derived_peaks: list[int] = []
-            for a, b in zip(subrange_edges[:-1], subrange_edges[1:]):
-                if b - a < 6:
-                    continue
-                sub = col_counts[a : b + 1]
-                if sub.size == 0 or sub.max() < 6:
-                    continue
-                grad_derived_peaks.append(int(np.argmax(sub)) + a)
-
-            # Also find contour peaks (rooftop spires) — these still help
-            # when towers have distinctive rooflines even within a flat row.
-            contour_peaks: list[int] = []
-            if contour is not None and contour.size >= x + cw:
-                contour_slice = np.asarray(
-                    contour[x: x + cw], dtype=np.float32)
-                if np.any(~np.isfinite(contour_slice)):
-                    fill = float(np.nanmedian(contour_slice))
-                    contour_slice = np.where(np.isfinite(
-                        contour_slice), contour_slice, fill)
-                c_std = float(np.std(contour_slice))
-                c_prom = max(1.5, c_std * 0.15)
-                cp, _ = find_peaks(-contour_slice, distance=8, prominence=c_prom)
-                contour_peaks = [int(v) for v in cp.tolist()]
-
-            # And col_counts peaks (the original signal) — these catch
-            # narrow spires that don't show up in the gradient subdivision
-            # because they're entirely within one gap-bounded subrange.
-            col_std = float(np.std(col_counts))
-            col_prom = max(1.5, col_std * 0.15)
-            cc_p, _ = find_peaks(col_counts, distance=8, prominence=col_prom)
-            col_peaks = [int(v) for v in cc_p.tolist()]
-
-            # Union all three sources.
-            all_peaks = grad_derived_peaks + contour_peaks + col_peaks
-
-            # Dedup with a 10-px tolerance — peaks within that window from
-            # different signals are the same tower.
-            if all_peaks:
-                all_peaks.sort()
-                dedup: list[int] = [all_peaks[0]]
-                for p in all_peaks[1:]:
-                    if p - dedup[-1] >= 10:
-                        dedup.append(p)
-                # Anti-over-split guard: require mask-height support for
-                # each peak. With gradient now used to subdivide (not as a
-                # peak source), the support threshold is purely a noise
-                # filter on contour/col peaks. The gradient-derived peaks
-                # already passed through the col_counts argmax, so they
-                # implicitly have support.
-                col_peak_h = float(col_counts.max())
-                support_threshold = max(6.0, col_peak_h * 0.25)
-                supported = [
-                    p for p in dedup
-                    if col_counts[p] >= support_threshold
-                ]
-                if supported:
-                    dedup = supported
-                # Cap the number of splits to avoid degenerate over-segmentation
-                # of very wide components (a 1500-px-wide row of identical
-                # towers shouldn't produce 30+ tiny segments).
-                if len(dedup) > max_splits_per_component:
-                    # Keep the top-N by col-height (tallest support wins).
-                    dedup = sorted(
-                        dedup,
-                        key=lambda p: float(col_counts[p]),
-                        reverse=True,
-                    )[:max_splits_per_component]
-                    dedup.sort()
-                peaks = np.asarray(dedup, dtype=np.int64)
+            peaks = _component_peak_columns(
+                col_counts, grad_col_signal, contour, x, cw,
+                min_width_px, max_splits_per_component)
 
         if peaks.size >= 2:
             # Split: one silhouette per peak. We bound each peak by walking left

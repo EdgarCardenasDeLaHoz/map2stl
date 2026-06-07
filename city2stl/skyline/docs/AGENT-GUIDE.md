@@ -5,8 +5,8 @@ Read [`STATUS.md`](STATUS.md) for "what works / what doesn't" feature-level
 notes. **This file** is the map of *where things live* and *how the
 pieces fit together*.
 
-Last updated: 2026-06-02 (session that landed cross-view smoothing,
-auto-seed replacement, bbox base cap, and the SegFormer-b1 switch).
+Last updated: 2026-06-07 (F-CLEAN14 split region_pdf.py into focused
+modules; earlier: cross-view smoothing, auto-seed replacement, SegFormer-b1).
 
 ## How to run
 
@@ -37,43 +37,49 @@ Env vars that control the run:
 
 ## Pipeline shape (high level)
 
+> **F-CLEAN14 (2026-06-07):** `region_pdf.py` was split into focused modules.
+> `region_pdf.py` is now just `run_region_pdf_report` + a re-export hub. The
+> column below names the module each function NOW lives in. Precise line
+> numbers are omitted because they drift; `grep -n '^def <name>'` the named
+> file. Function *names* are the stable handle.
+
 ```
-run_region_pdf_report(region_name)                          [region_pdf.py:5440]
-  ├─ load OSM data                                          fetch.py / osm_water.py
-  ├─ filter buildings in water polygons / centroids         _drop_buildings_in_water [region_pdf.py:667]
+run_region_pdf_report(region_name)                          region_pdf.py
+  ├─ load OSM data                                          region_data.py / osm_water.py
+  ├─ filter buildings in water polygons / centroids         _drop_buildings_in_water        region_data.py
   ├─ optional satellite footprint merge (F-SKY8)            satellite_footprints.py
   ├─ fetch region satellite image (F-SKY10)                 satellite_image.py
   ├─ pano-coastline-recovery precompute (F-SKY11/13)        coastline_registration.py
-  ├─ parse seed URLs → SkylinePoint                         _parse_streetview_url
-  ├─ generate auto-proposals                                _propose_standoff_locations
-  ├─ screen all candidates (Static API gate)                _screen_locations  [region_pdf.py:1510]
-  ├─ AUTO-REPLACE BAD SEEDS                                 _auto_replace_bad_seeds [region_pdf.py:1510-ish, just above _screen_locations]
-  └─ _seed_multiview_registration(...)                      [region_pdf.py:2939]
+  ├─ parse seed URLs → SkylinePoint                         _parse_streetview_url           streetview_io.py
+  ├─ generate auto-proposals                                _propose_standoff_locations     seed_selection.py
+  ├─ AUTO-REPLACE BAD SEEDS                                 _auto_replace_bad_seeds         seed_selection.py
+  ├─ screen all candidates (Static API gate)                _screen_locations               seed_selection.py
+  └─ _seed_multiview_registration(...)                      pano_registration.py
         For each seed:
-        ├─ Phase 1: _capture_pano_views                     [region_pdf.py:1841]
+        ├─ Phase 1: _capture_pano_views                     pano_registration.py
         │            12 spin headings, screen each, pitch-correct
         ├─ Phase 1b: prefetch_label_maps (batched spin)     pipeline.py
         │            one forward pass for all spin views → cache;
         │            every later per-view mask call is a cache hit
-        ├─ Phase 2a: _recover_pano_heading (F-SKY11/13)     [region_pdf.py:1899]
+        ├─ Phase 2a: _recover_pano_heading (F-SKY11/13)     pano_registration.py
         │            water + vegetation co-registration
         │            (see "Vegetation co-registration" below)
-        ├─ Phase 2b: _recover_anchor_offset                 [region_pdf.py:2238]
+        ├─ Phase 2b: _recover_anchor_offset                 pano_registration.py
         │            joint IoU sweep across all spin views
-        ├─ Phase 3:  _register_views (per-view matcher)     [region_pdf.py:2329]
-        │            ├─ register_view_to_osm
+        ├─ Phase 3:  _register_views (per-view matcher)     pano_registration.py
+        │            ├─ register_view_to_osm                pipeline.py
         │            ├─ Stages 1–7 (segmentation)           pipeline.py
-        │            ├─ match_segments_to_buildings        pipeline.py:2340
+        │            ├─ match_segments_to_buildings         pipeline.py
         │            └─ post-match cross-verify rescue
-        ├─ Phase 3b: _smooth_matches_across_views           [region_pdf.py:2885]
+        ├─ Phase 3b: _smooth_matches_across_views           pano_registration.py
         │            cross-view consensus + post-swap dedup
-        ├─ Phase 4:  _stitch_pano_composite                 [region_pdf.py:3007]
-        │            + _smooth_pano_matches_against_views  [region_pdf.py:2962]
+        ├─ Phase 4:  _stitch_pano_composite                 pano_registration.py
+        │            + _smooth_pano_matches_against_views   pano_registration.py
         └─ done; aggregate
-  ├─ aggregate_building_heights                             pipeline.py:3830
+  ├─ aggregate_building_heights                             pipeline.py
   │   per-view height outlier rejection inside the seed
-  ├─ render PDF (region_pdf._render_pdf)                    region_pdf.py
-  └─ render HTML report                                     html_report.py
+  ├─ render PDF (_render_pdf)                               region_render.py
+  └─ render HTML report                                     html_report.py / report_plots.py
 ```
 
 ## Where each "stage" of segmentation lives
@@ -82,37 +88,37 @@ The 7-stage segmentation pipeline (referenced in the HTML timing table):
 
 | Stage | What | Function |
 |---|---|---|
-| 1 | SegFormer-b1 inference, label_map cached | `_ensure_label_map` [pipeline.py:617] |
-| 2 | Morphology cleanup + glass-tower hole-fill + ground cap | `_neural_sky_and_building_masks` [pipeline.py:680] |
-| 3 | Skyline contour | `detect_skyline_contour` [pipeline.py:978] |
-| 4 | Contour-based silhouettes | `detect_building_silhouettes` [pipeline.py:1465] |
-| 5 | Mask-based silhouettes (peak/valley splitter) | `detect_buildings_from_mask` [pipeline.py:1700] |
-| 6 | Merge silhouette sources | `_merge_silhouette_sources` [pipeline.py] |
-| 7 | OSM-anchored re-cut | `osm_anchor_silhouettes` [pipeline.py:1990] |
-| 8 | (Optional) MobileSAM instance head | `osm_sam_instance_silhouettes` [pipeline.py:2106] |
+| 1 | SegFormer-b1 inference, label_map cached | `_ensure_label_map` [pipeline.py:631] |
+| 2 | Morphology cleanup + glass-tower hole-fill + ground cap | `_neural_sky_and_building_masks` [pipeline.py:771] |
+| 3 | Skyline contour | `detect_skyline_contour` [pipeline.py:1258] |
+| 4 | Contour-based silhouettes | `detect_building_silhouettes` [pipeline.py:1635] |
+| 5 | Mask-based silhouettes (peak/valley splitter) | `detect_buildings_from_mask` [pipeline.py:1866] |
+| 6 | Merge silhouette sources | `_merge_silhouette_sources` [pipeline.py:2186] |
+| 7 | OSM-anchored re-cut | `osm_anchor_silhouettes` [pipeline.py:2239] |
+| 8 | (Optional) MobileSAM instance head | `osm_sam_instance_silhouettes` [pipeline.py:2371] |
 
 Stage 1 is the only learned step. Stages 2–7 are classical CV on top of
 the semantic mask.
 
 ## Pano path (the 360° report) — where the recent work lives
 
-The per-seed pano is built in `region_pdf._stitch_pano_composite`, which
+The per-seed pano is built in `pano_registration._stitch_pano_composite`, which
 also runs bearing recovery and stores everything on a
 `StitchedPanoResult`. Key functions added/changed 2026-06:
 
 | Concern | Function | File |
 |---|---|---|
-| Sliding-window splitter (F-SKY22) | `_pano_sliding_window_split` | region_pdf.py |
+| Sliding-window splitter (F-SKY22) | `_pano_sliding_window_split` | pano_registration.py |
 | Depth (tiled, full-res per tile) | `predict_pano_depth_tiled` | depth_estimation.py |
 | Per-column depth→distance | `column_building_distance` | depth_estimation.py |
-| Bearing recovery (xcorr + gate) | inline in `_stitch_pano_composite` | region_pdf.py |
+| Bearing recovery (xcorr + gate) | inline in `_stitch_pano_composite` | pano_registration.py |
 | F-SKY1 fundamental detection | `_floor_period_for_building` | pipeline.py |
 | Water-only ground cap | `_neural_sky_and_building_masks` | pipeline.py |
-| Distance scan (column-indexed) | `_render_pano_bearing_scan_png` | html_report.py |
-| Cardinal N/E/S/W pano lines | `_draw_pano_north_line_inplace` | html_report.py |
-| Heights polar plot | `_render_pano_heights_polar_png` | html_report.py |
-| OSM nearest-per-degree signal | `_build_osm_nearest_per_degree` | html_report.py |
-| Cross-correlation gate | `_bearing_xcorr_offset` | html_report.py |
+| Distance scan (column-indexed) | `_render_pano_bearing_scan_png` | report_plots.py |
+| Cardinal N/E/S/W pano lines | `_draw_pano_north_line_inplace` | report_plots.py |
+| Heights polar plot | `_render_pano_heights_polar_png` | report_plots.py |
+| OSM nearest-per-degree signal | `_build_osm_nearest_per_degree` | report_plots.py |
+| Cross-correlation gate | `_bearing_xcorr_offset` | report_plots.py |
 
 The ML height stack (DA2 loader, U-Net, providers) is in
 `city2stl/skyline/height/` (moved from `city2stl/height/` 2026-06-07).
@@ -145,7 +151,7 @@ Each region has a JSON config controlling:
 Three layered correctness passes, all running inside
 `_seed_multiview_registration`:
 
-1. **`_smooth_matches_across_views`** ([region_pdf.py:2885]) — after
+1. **`_smooth_matches_across_views`** (`pano_registration.py`) — after
    per-view matching, build `fid → popularity` across all the seed's
    views. For any segment whose matched `feature_id` has popularity 1
    and whose `match_diagnostics` contains a candidate with popularity
@@ -156,7 +162,7 @@ Three layered correctness passes, all running inside
    Keep the one with the higher per-fid combined score in
    `match_diagnostics`; clear the loser. Necessary because the swap
    pass doesn't enforce one-to-one match like the original matcher.
-3. **`_smooth_pano_matches_against_views`** ([region_pdf.py:2962]) —
+3. **`_smooth_pano_matches_against_views`** (`pano_registration.py`) —
    apply the same popularity-based swap to the stitched-pano's
    independent matcher output, so the pano page shows the same OSM
    buildings as the per-view consensus.
@@ -169,7 +175,7 @@ frozen dataclass.
 
 ## Water filter (3 layers)
 
-`_drop_buildings_in_water` [region_pdf.py:667] applies up to three
+`_drop_buildings_in_water` (`region_data.py`) applies up to three
 checks; first hit drops the record:
 
 1. **Centroid in water polygon** — the original safe check.
@@ -191,7 +197,7 @@ checks; first hit drops the record:
 
 ## Auto-replace bad seeds (added 2026-06-02)
 
-`_auto_replace_bad_seeds` [region_pdf.py:1510-ish, just above
+`_auto_replace_bad_seeds` (`seed_selection.py`, just above
 `_screen_locations`] swaps a user-supplied seed for a nearby auto-
 proposal when the seed's screening result is "rejected" or
 `screen_score < 0.20`. Combined score for replacements is
@@ -204,7 +210,7 @@ attribute matches to the actual location used.
 
 ## bbox base cap
 
-In `_register_views` after match dedup ([region_pdf.py:2670-ish]):
+In `_register_views` (`pano_registration.py`) after match dedup:
 each matched segment's `base_y` is compared to the OSM-projected
 expected ground row (pinhole formula). If the mask-derived base is
 more than `max(80, 0.18 × H)` pixels below the expected row, clip
@@ -307,21 +313,34 @@ statements need the discipline.
 
 ## Tests
 
-CV-math unit tests live in `strm2stl/tests/skyline/`. They cover
-the deterministic geometry / scoring functions; orchestration is
-exercised by full-run smoke tests rather than unit tests.
+CV-math unit tests live in `strm2stl/tests/test_skyline*.py` (7 files,
+130 tests; **129 pass, 1 skip** as of 2026-06-07). They cover the
+deterministic geometry / scoring functions; orchestration is exercised
+by full-run smoke tests rather than unit tests.
 
 ```powershell
-"C:\venvs\strm2stl\Scripts\python.exe" -m pytest tests/skyline/ -v
+"C:\venvs\strm2stl\Scripts\python.exe" -m pytest tests/test_skyline*.py -v
 ```
 
 ## File map
 
+> **F-CLEAN14 (2026-06-07):** `region_pdf.py` (was ~6500 lines) split into the
+> first block below. `region_pdf.py` is now a ~700-line wiring layer that
+> re-exports everything, so old import paths still work.
+
 | file | purpose |
 |---|---|
-| `region_pdf.py` | Orchestrator + Pass 1/2/3 helpers + PDF rendering. ~5500 lines. |
-| `pipeline.py` | All segmentation / matching / aggregation primitives. ~4000 lines. |
-| `html_report.py` | Per-region HTML diagnostic report. |
+| `region_pdf.py` | `run_region_pdf_report` entry point + re-export hub. ~700 lines. |
+| `pano_registration.py` | Per-seed multi-view registration loop (capture, heading/anchor recovery, match, smoothing, pano stitch, splitters, orchestrator). ~2570 lines. |
+| `region_render.py` | All PDF page builders + minimap/overlay drawing + `_StepTimer`. ~1880 lines (largest fn `_render_pdf` ~556). |
+| `seed_selection.py` | Auto-standoff proposal + screening + bad-seed auto-replace. ~640 lines. |
+| `region_data.py` | Region bbox + OSM fetch + `BuildingRecord` build + water filter + `sites/*.json` readers. ~560 lines. |
+| `streetview_io.py` | Street View Static API I/O + image cache + URL parse/sign. ~330 lines. |
+| `region_types.py` | Frozen dataclasses (`RegionBBox`, `SkylinePoint`, `StitchedPanoResult`, `SeedViewRegistration`). ~145 lines. |
+| `region_config.py` | Shared F-SKY env flags + `_SEGMENT_PALETTE`. ~75 lines. |
+| `pipeline.py` | All segmentation / matching / aggregation primitives. ~4100 lines (largest fn `estimate_heights_from_registration` ~458). |
+| `html_report.py` | Per-region HTML diagnostic report assembly. ~1220 lines. |
+| `report_plots.py` | matplotlib/PIL PNG renderers for the HTML report. ~1710 lines. |
 | `coastline_registration.py` | F-SKY11.1 pano-coastline keypoint sweep. |
 | `osm_water.py` | OSM coastline / water / green polygon extraction. |
 | `satellite_footprints.py` | F-SKY8 Microsoft Buildings polygon fetch + merge. |

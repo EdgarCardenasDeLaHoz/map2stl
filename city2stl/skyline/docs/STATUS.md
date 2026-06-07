@@ -14,6 +14,9 @@
 | Region | Seeds (user + auto) | `seed_extracted_buildings` | Bearing recovery |
 |---|---|---|---|
 | Cartagena | 5 + 6 auto = 11 | ~716 | all SKIP (already aligned) |
+<!-- negative_seeds for Cartagena is ["seed_2", "seed_3"] (see sites/cartagena.json) -->
+<!-- seed_2 is screened-rejected dense interior; seed_3 is the gas-station view. -->
+
 | Miami | 4 + 2 auto = 6 | ~381 | seed_3/4 APPLY, rest SKIP |
 | Chicago | 2 + 3 auto = 5 | ~210 | 4/5 APPLY (Loop was ~180° off) |
 

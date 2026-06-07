@@ -12,7 +12,7 @@ Legacy models (UNet, Retna_V1, Retna_V2, RoofNet v1) remain in
 tools/networks.py for backward compatibility.
 
 Inference-only code lives in city2stl/roof_classifier.py and
-city2stl/height/predict.py — this module is training-side only.
+city2stl/skyline/height/predict.py — this module is training-side only.
 """
 
 from __future__ import annotations

@@ -106,10 +106,27 @@ SKYLINE_CV_F_SKY5=1 python scripts/08_region_skyline_pdf.py cartagena
 
 ### Core Files
 
+`region_pdf.py` was split into focused modules in F-CLEAN14 (2026-06-07);
+`region_pdf.py` is now just the `run_region_pdf_report` entry point that wires
+the others together (and re-exports their public names, so existing imports
+like `from city2stl.skyline.region_pdf import run_region_pdf_report` /
+`SeedViewRegistration` still work).
+
 | File | Role | Lines | F-SKY Features |
 |---|---|---|---|
-| [pipeline.py](pipeline.py) | CV primitives: SegFormer integration, projection, registration, height extraction, aggregation. Pure functions, unit-tested. | ~3650 | F-SKY1, F-SKY2, F-SKY6, F-SKY7 |
-| [region_pdf.py](region_pdf.py) | Orchestration + Street View I/O + seed selection + PDF rendering. Stateful; harder to test in isolation. `_seed_multiview_registration` is a thin orchestrator over 5 phase helpers (F-CLEAN8, 2026-05-27); largest function is now `_render_pdf` (~556 LOC). | ~4500 | F-SKY4, F-SKY8, integration layer |
+| [pipeline.py](pipeline.py) | CV primitives: SegFormer integration, projection, registration, height extraction, aggregation. Pure functions, unit-tested. | ~4100 | F-SKY1, F-SKY2, F-SKY6, F-SKY7 |
+| [region_pdf.py](region_pdf.py) | `run_region_pdf_report` entry point + re-export hub. Thin wiring layer. | ~700 | integration layer |
+| [pano_registration.py](pano_registration.py) | Per-seed multi-view registration: spin capture, heading/anchor recovery, per-view match, cross-view smoothing, 360° pano stitch + splitters, `_seed_multiview_registration` orchestrator. | ~2570 | F-SKY1/2/6/7/22/24 |
+| [region_render.py](region_render.py) | All PDF page builders + minimap/overlay drawing + location map + `_StepTimer`. | ~1880 | F-SKY4, F-SKY13 overlay |
+| [seed_selection.py](seed_selection.py) | Auto-standoff proposal, 1-image screening + quality gate, bad-seed auto-replace. | ~640 | auto-seed |
+| [region_data.py](region_data.py) | Region bbox (SQLite), OSM fetch + `BuildingRecord` build, water filter, DEM terrain, `sites/*.json` config readers. | ~560 | F-SKY8 merge entry |
+| [streetview_io.py](streetview_io.py) | Google Street View Static API: URL parse/sign, metadata + image fetch, image cache, no-imagery detect. | ~330 | — |
+| [region_types.py](region_types.py) | Frozen dataclasses: `RegionBBox`, `SkylinePoint`, `StitchedPanoResult`, `SeedViewRegistration`. | ~145 | — |
+| [region_config.py](region_config.py) | Shared F-SKY env flags + `_SEGMENT_PALETTE`. | ~75 | all flags |
+| [html_report.py](html_report.py) | HTML diagnostic report assembly (per-building tables + page layout). | ~1220 | F-SKY15, pano report v2 |
+| [report_plots.py](report_plots.py) | matplotlib/PIL PNG renderers for the HTML report (polar/pano/minimap plots). | ~1710 | F-SKY15, pano report v2 |
+
+Module dependency DAG (acyclic): `region_types`/`region_config` ← `region_data`/`streetview_io` ← `seed_selection` ← `region_render` ← `pano_registration` ← `region_pdf`. `report_plots` ← `html_report`.
 
 ### Helper Modules (F-SKY Implementation)
 
@@ -407,12 +424,19 @@ Two on-disk caches under `runs/` keep runs reproducible and fast:
 ## Tests
 
 ```bash
-python -m pytest tests/test_skyline.py -v   # 21 tests
+python -m pytest tests/test_skyline*.py -v   # 130 tests across 7 files
 ```
+
+The skyline suite is split across `tests/test_skyline*.py` (not a single
+file): `test_skyline.py` (21), `test_skyline_cross_view.py` (26),
+`test_skyline_depth.py` (19), `test_skyline_height_trace.py` (10),
+`test_skyline_html_report.py` (21), `test_skyline_osm_water.py` (27),
+`test_skyline_pano_inverse.py` (6). Current: **129 pass, 1 skip** (~22 s).
 
 Tests cover the CV math (URL parsing, frustum culling, occlusion
 ordering, Hungarian matching, mask-based silhouette detection,
-interval-IoU matcher, aggregation grouping). They do NOT cover the
+interval-IoU matcher, aggregation grouping, depth/pano-inverse geometry,
+OSM-water extraction, HTML-report rendering). They do NOT cover the
 orchestration in `region_pdf.py` — that's exercised by full-run smoke
 tests against the saved Cartagena baseline.
 
@@ -432,7 +456,15 @@ skyline/
 ├── README.md
 ├── __init__.py
 ├── pipeline.py            ← CV primitives + math (F-SKY1/2/6/7)
-├── region_pdf.py          ← orchestration + rendering, production entry
+├── region_pdf.py          ← run_region_pdf_report entry + re-export hub (was the 6.5k-line monolith)
+├── pano_registration.py   ← per-seed multi-view registration (F-CLEAN14 split)
+├── region_render.py       ← PDF page builders + minimap/overlay drawing (F-CLEAN14 split)
+├── seed_selection.py      ← auto-standoff proposal + screening + auto-replace (F-CLEAN14 split)
+├── region_data.py         ← region bbox + OSM fetch + water filter + config readers (F-CLEAN14 split)
+├── streetview_io.py       ← Street View Static API I/O + image cache (F-CLEAN14 split)
+├── region_types.py        ← frozen dataclasses (F-CLEAN14 split)
+├── region_config.py       ← shared F-SKY env flags + palette (F-CLEAN14 split)
+├── report_plots.py        ← matplotlib PNG renderers for the HTML report (F-CLEAN14 split)
 ├── coastline_registration.py  ← F-SKY11/11.1 keypoint heading recovery
 ├── osm_water.py           ← F-SKY13 OSM coastline + water extraction (primary keypoint source)
 ├── cross_view.py          ← F-SKY10 cross-view colour/width/edges
@@ -447,11 +479,13 @@ skyline/
 │   ├── STATUS.md          ← what works / doesn't / next steps
 │   ├── glass-roof-height-fix-plan.md
 │   └── archive/           ← historical audits + plans
-├── scripts/
+├── scripts/                            ← standalone diagnostics; only 08 is on the production path
 │   ├── 08_region_skyline_pdf.py        ← production entry
 │   ├── 09_height_trace.py              ← F-SKY1 diagnostic
-│   ├── 13_heading_recovery_demo.py     ← multi-channel heading research
-│   └── 14_seed5_diagnostic.py          ← seed-level registration diagnostic
+│   ├── 13_heading_recovery_demo.py     ← multi-channel heading research (~1085 LOC)
+│   ├── 14_seed5_diagnostic.py          ← seed-level registration diagnostic (~1063 LOC)
+│   ├── 15_multires_segmentation_demo.py ← multi-resolution segmentation experiment (~531 LOC)
+│   └── 16_view_minimap_compare.py      ← per-view minimap comparison (~138 LOC)
 ├── sites/
 │   ├── cartagena.json
 │   ├── chicago.json

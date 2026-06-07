@@ -16,9 +16,10 @@ Two-file architecture:
 
 Entry point: ``city2stl/skyline/scripts/08_region_skyline_pdf.py``.
 
-This is a research module, NOT the production height pipeline (that's
-``city2stl/height/``). See ``README.md`` and ``STATUS.md`` for current
-strengths, weaknesses, and known failure modes.
+This is the cross-view research pipeline. The ML height stack it builds on
+lives alongside it in ``city2stl/skyline/height/`` (moved from
+``city2stl/height/`` on 2026-06-07). See ``README.md`` and ``STATUS.md`` for
+current strengths, weaknesses, and known failure modes.
 """
 
 from .pipeline import aggregate_building_heights, detect_skyline_contour

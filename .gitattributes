@@ -1,0 +1,74 @@
+# Normalize line endings (F-CLEAN14 / AUDIT-2026-06-07).
+# Without this, core.autocrlf=true on this OneDrive checkout makes `git status`
+# report the whole tree as modified (pure CRLF<->LF noise). Storing files as LF
+# and checking them out as LF kills that phantom diff on every machine.
+#
+# One-time apply after adding this file:  git add --renormalize .  (then commit)
+
+* text=auto eol=lf
+
+# --- explicit text types (LF) ---
+*.py     text eol=lf
+*.pyi    text eol=lf
+*.md     text eol=lf
+*.txt    text eol=lf
+*.rst    text eol=lf
+*.json   text eol=lf
+*.jsonl  text eol=lf
+*.js     text eol=lf
+*.mjs    text eol=lf
+*.cjs    text eol=lf
+*.ts     text eol=lf
+*.css    text eol=lf
+*.html   text eol=lf
+*.svg    text eol=lf
+*.toml   text eol=lf
+*.cfg    text eol=lf
+*.ini    text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.sh     text eol=lf
+*.csv    text eol=lf
+*.ipynb  text eol=lf
+
+# --- Windows-only scripts keep CRLF ---
+*.bat    text eol=crlf
+*.cmd    text eol=crlf
+*.ps1    text eol=crlf
+
+# --- binary (never touch line endings) ---
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.bmp    binary
+*.tif    binary
+*.tiff   binary
+*.pdf    binary
+*.stl    binary
+*.obj    binary
+*.h5     binary
+*.hdf5   binary
+*.npy    binary
+*.npz    binary
+*.pt     binary
+*.pth    binary
+*.onnx   binary
+*.zip    binary
+*.gz     binary
+*.7z     binary
+*.xls    binary
+*.xlsx   binary
+*.db     binary
+*.sqlite binary
+*.woff   binary
+*.woff2  binary
+*.ttf    binary
+*.eot    binary
+*.otf    binary
+# HydroRIVERS / shapefiles
+*.shp    binary
+*.shx    binary
+*.dbf    binary
+*.prj    binary

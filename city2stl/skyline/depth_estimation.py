@@ -2,7 +2,7 @@
 
 F-SKY12 Phase A — verifier only.
 
-Reuses the Depth Anything V2 loader from ``city2stl/height/predict.py`` (already
+Reuses the Depth Anything V2 loader from ``city2stl/skyline/height/predict.py`` (already
 a project dependency, already cached on disk). Calibrates relative depth to
 metres using known OSM building anchor distances, then derives a per-match
 height estimate that can be cross-checked against the geometric (pinhole-y)
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# DA2 inference (delegates to the existing loader in city2stl/height/predict)
+# DA2 inference (delegates to the existing loader in city2stl/skyline/height/predict)
 # ---------------------------------------------------------------------------
 
 def predict_pano_depth(view_rgb: np.ndarray, device: str = "cpu") -> np.ndarray:

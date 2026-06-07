@@ -32,6 +32,7 @@ These are useful after orientation, but they are not the best first stop:
 - `terrain-api-audit.md` — full call-stack audit of all `/api/terrain/` endpoints with quality analysis
 - `layer-system.md` — complete reference for the 7-layer canvas pipeline, GPU memory management, and per-layer data flows
 - `issues.md`
+- `AUDIT-2026-06-07.md` — most recent full-project audit (skyline focus: bloat, dead code, doc drift)
 - `ux-audit.md`
 - design and proposal documents tied to a specific subsystem
 

@@ -9,6 +9,21 @@ _Last updated: 2026-05-26_
 
 ## Active Technical Debt
 
+### 0. Git line-ending churn (CRLF) — `.gitattributes` ADDED 2026-06-07, apply pending
+`git status` reports ~95 files modified, but `git diff --ignore-all-space` is
+empty: every diff is pure CRLF↔LF noise (`core.autocrlf=true`, repo inside
+OneDrive). **`strm2stl/.gitattributes` is now committed-to-disk** (`* text=auto
+eol=lf` + per-type rules; `.bat/.cmd/.ps1` keep CRLF) and verified applying.
+**Remaining one-time step (owner, needs a commit):**
+`git add --renormalize . && git commit -m "Normalize line endings to LF"`.
+Until that commit + re-checkout the phantom diff persists. Do it as its own
+commit, ideally before/after the F-CLEAN14 refactor commit (not mixed in).
+
+### 0b. `city2stl/skyline/runs/` is 1.1 GB on disk
+Gitignored (not in history) but a OneDrive-sync burden. Most of it is
+`runs/height_traces/_unused/` minimap PNGs + stale `cartagena_run*.log`.
+Safe to delete; consider a `make clean-runs` target. See AUDIT-2026-06-07.md.
+
 ### 1. `<script>` vs Module Boundary
 HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `addEventListener` in event-listeners.js). One intentional inline `onclick=` remains on the dev-only debug error overlay dismiss button. Converting app.js itself to a full ES module is not planned — keep public functions on `window.*`.
 
