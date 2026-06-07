@@ -869,27 +869,31 @@ def _neural_sky_and_building_masks(
     # low-tower matches); the unconditional waterline band was
     # reverted in favour of trusting the model's own ground labels
     # where it provides them.
-    # WATER ONLY for the bottom-up cap — deliberately excludes earth/sand
-    # (ADE20K 13/46). Buildings stand ON sand/beach, so a sand region is
-    # NOT a place a building "can't be": clipping at sand-top wrongly
-    # removes the building's lower floors. Worse, Cartagena's bright
-    # sandy-coloured towers get partially mislabelled as sand, so a
-    # sand-inclusive run extends UP into the facade and chops it (the
-    # seed_5 peninsula-tip cluster that went missing). Water is the only
-    # class where a building genuinely cannot stand, so only water caps.
-    _GROUND_CLASSES = _ADE20K_WATER_CLASSES
+    # Ground = water + earth + sand (ADE20K 21/26/60 + 13/46). All three
+    # are surfaces a building cannot occupy, so the foreground ground
+    # strip below a building base (beach/street/sand) must be clipped or
+    # SegFormer's beach-as-building mislabels leak the mask down into the
+    # ground (over-segmentation). The KEY is finding the groundline
+    # BOTTOM-UP, not via a topmost-pixel argmax:
+    #   * Bottom-up: the far bay water / distant sand visible at the
+    #     horizon ABOVE the foreground building bases is NOT the bottom-
+    #     most ground run, so it can't chop a building standing in front
+    #     of open bay (the seed_5 peninsula failure that the old argmax
+    #     cap caused).
+    #   * Including sand/earth: the real foreground beach/street below a
+    #     building base joins the bottom water run, so the clip lands at
+    #     the building base instead of leaving sand-as-building blobs
+    #     hanging down to the waterline (the over-segmentation a water-
+    #     only cap produced).
+    # A building whose own lower facade fades into mislabelled sand loses
+    # at most a few base rows — the lesser evil vs. leaking into ground.
+    _GROUND_CLASSES = _ADE20K_WATER_CLASSES + (13, 46)  # + earth, sand
     ground_mask_local = np.isin(label_map, _GROUND_CLASSES)
     if ground_mask_local.any():
-        # Waterline = top of the FOREGROUND water block, found bottom-up
-        # per column — NOT the topmost water pixel. In a 360° pano the
-        # far bay water is visible at the horizon ABOVE the foreground
-        # building bases; a naive topmost-water argmax would treat that
-        # distant strip as "ground" and zero the entire building beneath
-        # it (the Cartagena seed_5 failure: buildings standing in front
-        # of open bay get chopped). Instead we locate the bottom-most
-        # contiguous water run in each column — the real foreground
-        # waterline — and clip only at/below that. Horizon water above
-        # the buildings no longer participates.
+        # Groundline = top of the FOREGROUND ground block, found bottom-up
+        # per column. We locate the bottom-most contiguous ground run in
+        # each column and clip only at/below its top. Ground above the
+        # buildings (horizon water/sand) does not participate.
         gm = ground_mask_local
         rev = gm[::-1, :]  # row 0 = image bottom
         has_ground = rev.any(axis=0)
