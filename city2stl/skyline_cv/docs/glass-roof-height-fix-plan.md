@@ -1,6 +1,12 @@
 # Plan — Glass-Roof Under-Reach: Trace First, Then Monocular Depth
 
-_Created: 2026-05-14. Owner: skyline_cv. Status: not started._
+_Created: 2026-05-14. Owner: skyline_cv. Status (2026-05-24): **Phase 1 shipped**
+(`height_trace.py` + `height_trace_render.py` + `scripts/09_height_trace.py`
+record every gate decision per building per view). **Phase 2 (monocular
+depth) deferred indefinitely** — F-SKY11.2 explored adjacent monocular-IPM
+territory and hit a depth-reach wall, weakening the case for the heavier
+depth-model investment until a clear gating result emerges from Phase 1
+traces._
 
 ## Problem
 

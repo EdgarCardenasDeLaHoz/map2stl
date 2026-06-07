@@ -98,7 +98,7 @@ def main() -> int:
         json.dumps(payload, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    print(f"[trace] {len(recorder.events)} events → {json_path}")
+    print(f"[trace] {len(recorder.events)} events -> {json_path}")
     print(f"[trace] {len(recorder.view_artifacts)} view artefacts retained")
 
     if not args.no_render:
@@ -110,7 +110,7 @@ def main() -> int:
             print(f"[trace] diagnostic render skipped ({exc})")
             return 0
         render_trace_diagnostic(recorder, png_path, target=args.feature_id)
-        print(f"[trace] diagnostic image → {png_path}")
+        print(f"[trace] diagnostic image -> {png_path}")
     return 0
 
 

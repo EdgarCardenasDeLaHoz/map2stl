@@ -326,17 +326,12 @@ class TestCityRasterNaNBug:
         }
 
     @pytest.mark.parametrize("projection", _VALID_PROJECTIONS)
-    @pytest.mark.xfail(reason="BUG: NaN from projection not JSON-serializable",
-                       raises=Exception, strict=False)
-    def test_city_projection_crashes_with_nan(self, client, projection):
-        """City raster with projection CRASHES due to NaN in JSON.
-        When this bug is fixed, remove xfail and these tests should pass.
-
-        Note: Some projections (e.g. lambert) may not produce NaN for all
-        bboxes, so strict=False — XPASS is tolerated."""
+    def test_city_projection_succeeds_with_nan(self, client, projection):
+        """City raster with projection succeeds since the NaN bug is fixed.
+        np.nan_to_num(grid, nan=0.0) is applied before .flatten().tolist()
+        so projection fill areas become 0.0 instead of JSON-invalid NaN."""
         r = client.post("/api/cities/raster",
                         json=self._make_body(projection, clip_nans=False))
-        # If we get here, the bug is fixed (or this projection didn't produce NaN)
         assert r.status_code == 200
 
     def test_city_cache_key_includes_projection(self, client):

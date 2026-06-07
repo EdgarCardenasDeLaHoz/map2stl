@@ -285,7 +285,7 @@ async def get_city_raster(req: CityRasterRequest):
                     )
 
                 cached_result = _sanitize_raster_result({
-                    "values": grid.flatten().tolist(),
+                    "values": np.nan_to_num(grid, nan=0.0).flatten().tolist(),
                     "width": int(grid.shape[1]),
                     "height": int(grid.shape[0]),
                     "vmin": float(np.nanmin(grid)),
@@ -352,7 +352,7 @@ async def get_city_raster(req: CityRasterRequest):
                             req.projection, clip_valid_region, categorical=False)
         h, w = grid.shape
         result = {
-            "values": grid.flatten().tolist(),
+            "values": np.nan_to_num(grid, nan=0.0).flatten().tolist(),
             "width": w,
             "height": h,
             "vmin": float(np.nanmin(grid)),
@@ -437,7 +437,7 @@ async def export_city_3mf(req: CityExportRequest):
 @router.get("/api/cities/google3d-available")
 async def google3d_available():
     """Check if Google 3D Tiles API key is configured."""
-    from city2stl.height.providers.google_3d import _get_api_key
+    from city2stl.skyline_cv.height.providers.google_3d import _get_api_key
     return JSONResponse(content={"available": _get_api_key() is not None})
 
 
@@ -449,7 +449,7 @@ async def enhance_heights(req: EnhanceHeightsRequest):
     each building centroid to replace default (10 m) heights with real
     photogrammetric measurements.
     """
-    from city2stl.height.providers.google_3d import Google3DProvider, _get_api_key
+    from city2stl.skyline_cv.height.providers.google_3d import Google3DProvider, _get_api_key
     from city2stl.heights import enhance_buildings_with_raster
     import numpy as np
 

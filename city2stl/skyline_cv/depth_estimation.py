@@ -54,9 +54,163 @@ def predict_pano_depth(view_rgb: np.ndarray, device: str = "cpu") -> np.ndarray:
                 Not yet calibrated to metres — use ``calibrate_pano_depth``.
     """
     # Delegate to the existing helper so we share the cache and the loader.
-    from city2stl.height.predict import _depth_anything_inference  # noqa: PLC0415
+    from city2stl.skyline_cv.height.predict import _depth_anything_inference  # noqa: PLC0415
 
     return _depth_anything_inference(view_rgb, device=device)
+
+
+def _depth_anything_raw(view_rgb: np.ndarray, device: str = "cpu") -> np.ndarray:
+    """Run DA2 and return the RAW (unnormalised) per-pixel inverse-depth
+    map. Bypasses the [0, 1] renormalisation that the public
+    ``predict_pano_depth`` applies so tile-stitching can stay in one
+    consistent global scale.
+    """
+    from city2stl.skyline_cv.height.predict import _load_da2  # noqa: PLC0415
+    from PIL import Image as PILImage  # noqa: PLC0415
+    pipe = _load_da2(device)
+    pil_img = PILImage.fromarray(view_rgb)
+    result = pipe(pil_img)
+    t = result["predicted_depth"]
+    try:
+        d = t.squeeze().numpy()
+    except AttributeError:
+        d = np.array(t).squeeze()
+    if d.shape != view_rgb.shape[:2]:
+        try:
+            import cv2  # noqa: PLC0415
+            d = cv2.resize(
+                d.astype(np.float32),
+                (view_rgb.shape[1], view_rgb.shape[0]),
+                interpolation=cv2.INTER_LINEAR)
+        except Exception:
+            d = np.asarray(d, dtype=np.float32)
+    return d.astype(np.float32)
+
+
+def predict_pano_depth_tiled(
+    pano_rgb: np.ndarray,
+    *,
+    tile_size: int = 518,
+    overlap: int = 120,
+    device: str = "cpu",
+) -> np.ndarray:
+    """Run Depth Anything V2 on a wide pano by tiling.
+
+    The HuggingFace pipeline scales any input to its native ~518-px
+    short side. For a 2688×540 pano that throws away ~80% of horizontal
+    information BEFORE inference. Tiling at full resolution gives each
+    horizontal segment its own 518-px inference, then we feather-blend
+    the overlaps.
+
+    Tiles are RE-NORMALISED per-pano AFTER stitching: each tile's
+    depth is rescaled into [0, 1] using the global min/max so the
+    stitched map has a single consistent depth range (the per-tile
+    normalisation that ``_depth_anything_inference`` applies otherwise
+    creates banding at tile seams).
+
+    Returns a (H, W) float32 map in [0, 1] matching the input pano
+    shape. Closer = higher (same convention as ``predict_pano_depth``).
+    """
+    from city2stl.skyline_cv.height.predict import _depth_anything_inference  # noqa: PLC0415
+
+    H, W = pano_rgb.shape[:2]
+    if W <= tile_size:
+        return _depth_anything_inference(pano_rgb, device=device)
+
+    stride = max(1, tile_size - overlap)
+    xs: list[int] = list(range(0, max(1, W - tile_size + 1), stride))
+    if xs and xs[-1] + tile_size < W:
+        xs.append(W - tile_size)
+    if not xs:
+        xs = [0]
+
+    depth_sum = np.zeros((H, W), dtype=np.float32)
+    weight_sum = np.zeros((H, W), dtype=np.float32)
+
+    # Cosine taper across the overlap zone keeps seams invisible.
+    taper = np.ones(tile_size, dtype=np.float32)
+    feather = max(1, overlap)
+    for i in range(feather):
+        w = 0.5 * (1.0 - math.cos(math.pi * i / feather))
+        taper[i] = w
+        taper[tile_size - 1 - i] = w
+    taper_2d = np.broadcast_to(taper, (H, tile_size)).copy()
+
+    for x in xs:
+        tile = pano_rgb[:, x: x + tile_size]
+        # RAW per-tile output: skip the per-call [0, 1] renorm so all
+        # tiles share one global scale. We renormalise once after the
+        # stitch so the output stays in [0, 1] matching the rest of the
+        # pipeline.
+        d = _depth_anything_raw(tile, device=device)
+        if d.shape[:2] != (H, tile_size):
+            try:
+                import cv2  # noqa: PLC0415
+                d = cv2.resize(
+                    d.astype(np.float32), (tile_size, H),
+                    interpolation=cv2.INTER_LINEAR)
+            except Exception:
+                d = np.asarray(d, dtype=np.float32)
+        depth_sum[:, x: x + tile_size] += d.astype(np.float32) * taper_2d
+        weight_sum[:, x: x + tile_size] += taper_2d
+
+    stitched = depth_sum / np.maximum(weight_sum, 1e-6)
+    # Renormalise globally so the output stays in [0, 1].
+    s_min, s_max = float(stitched.min()), float(stitched.max())
+    if s_max > s_min + 1e-9:
+        stitched = (stitched - s_min) / (s_max - s_min)
+    return stitched.astype(np.float32)
+
+
+def column_building_distance(
+    depth_rel: "np.ndarray",
+    building_mask: "np.ndarray",
+    col: int,
+    *,
+    scale: float = 1450.0,
+    mode: str = "lower_median",
+    lower_frac: float = 0.5,
+) -> "float | None":
+    """Estimate the distance (m) to the building in one pano column from
+    its depth-mask intersection.
+
+    ``mode``:
+      - ``"base"``       — median of a small window at the bottom-most
+        mask pixel (ground-contact; most-correct point but noisy).
+      - ``"lower_median"`` (default) — median depth over the LOWER
+        ``lower_frac`` of the building-mask pixels in the column. Cuts
+        single-pixel noise while staying near the base, so it doesn't
+        pick up the "farther" bias of high facade pixels (whose line of
+        sight is longer).
+      - ``"full_median"`` — median over ALL building-mask pixels in the
+        column (maximum noise reduction, mild far-bias).
+
+    Returns ``None`` when the column has no building pixels. Distance is
+    ``sqrt(1 - depth_rel) * scale`` — the same monotonic mapping the
+    silhouette/polar plots use.
+    """
+    rows = np.flatnonzero(building_mask[:, col])
+    if rows.size == 0:
+        return None
+    H, W = depth_rel.shape[:2]
+    if mode == "base":
+        r = int(rows[-1])
+        r0 = max(0, r - 2)
+        r1 = min(H - 1, r + 2)
+        c0 = max(0, col - 1)
+        c1 = min(W - 1, col + 1)
+        s = depth_rel[r0: r1 + 1, c0: c1 + 1]
+        if s.size == 0:
+            return None
+        d_val = float(np.median(s))
+    elif mode == "full_median":
+        d_val = float(np.median(depth_rel[rows, col]))
+    else:  # lower_median
+        k = max(1, int(round(rows.size * lower_frac)))
+        lower_rows = rows[-k:]
+        d_val = float(np.median(depth_rel[lower_rows, col]))
+    d_inv = 1.0 - max(0.0, min(1.0, d_val))
+    return math.sqrt(d_inv) * scale
 
 
 # ---------------------------------------------------------------------------

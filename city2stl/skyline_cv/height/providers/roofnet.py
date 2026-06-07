@@ -1,7 +1,7 @@
 """RoofNet height provider â€” wraps a trained RoofNetV3 / HeightUNet checkpoint.
 
 Fetches an ESRI World Imagery RGB tile for the bbox, runs the model from
-`city2stl.height.predict` to produce a per-pixel height raster, and exposes
+`city2stl.skyline_cv.height.predict` to produce a per-pixel height raster, and exposes
 it through the standard `HeightProvider` protocol so it joins the parallel
 fetch pool in `app.server.routers.height`.
 
@@ -25,7 +25,7 @@ from typing import Tuple
 
 import numpy as np
 
-from city2stl.height import BBox, HeightResult
+from city2stl.skyline_cv.height import BBox, HeightResult
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ class RoofNetProvider:
             model_kind = "unet"
 
         try:
-            from city2stl.height.predict import predict
+            from city2stl.skyline_cv.height.predict import predict
             res = predict(
                 sat_rgb=rgb,
                 known_heights=None,

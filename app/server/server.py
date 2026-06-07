@@ -16,6 +16,7 @@ from app.server.schemas import (
     Region,
     ProcessingSpec, MergeLayerSpec, MergeRequest,
 )
+from app.server.routers.auth import router as _auth_router
 from app.server.routers.height import router as _height_router
 from app.server.routers.composite import router as _composite_router
 from app.server.routers.settings import router as _settings_router
@@ -296,6 +297,7 @@ if not os.path.isdir(static_path):
 # ---------------------------------------------------------------------------
 # Routers (backend refactor step 6)
 # ---------------------------------------------------------------------------
+app.include_router(_auth_router)
 app.include_router(_regions_router)
 app.include_router(_terrain_router)
 app.include_router(_cities_router)

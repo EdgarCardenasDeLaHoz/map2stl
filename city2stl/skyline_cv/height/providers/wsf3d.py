@@ -22,7 +22,7 @@ import numpy as np
 import requests
 import rasterio
 
-from city2stl.height import BBox, HeightProvider, HeightResult, _resample
+from city2stl.skyline_cv.height import BBox, HeightProvider, HeightResult, _resample
 from app.server.core.cache import (
     CACHE_ROOT, make_cache_key,
     write_array_cache, read_array_cache,

@@ -2,10 +2,24 @@
 
 Computer-vision pipeline that estimates per-building heights for a city
 region by registering Google Street View imagery against OpenStreetMap
-building footprints (+ satellite footprints). Research branch — not part of the production height
-stack in `city2stl/height/`. Implements F-SKY series of features (F-SKY1, F-SKY2, F-SKY4–F-SKY8, F-SKY10, F-SKY11, F-SKY11.1).
+building footprints (+ satellite footprints). The ML height stack lives
+alongside it in `city2stl/skyline_cv/height/` (moved here from
+`city2stl/height/` on 2026-06-07). Implements the F-SKY series
+(F-SKY1, F-SKY2, F-SKY4–F-SKY8, F-SKY10–F-SKY13, F-SKY18, F-SKY22,
+F-SKY24).
 
-**Status**: Phase A features active and tested; Phase B in progress. See [docs/F-SKY-INTEGRATION.md](../../docs/F-SKY-INTEGRATION.md) for consolidated status, measurement results, and integration roadmap.
+**Status**: see [docs/STATUS.md](docs/STATUS.md) — the dated "Current
+state (2026-06-07)" section is authoritative. Highlights: 360° pano
+report v2 (pano-space + top-down tab groups, Distance scan, Heights,
+cardinal lines), automatic bearing recovery (silhouette × OSM cross-
+correlation with a confidence gate), sliding-window + OSM-anchored
+splitter, water-only ground cap, tiled depth, F-SKY1 re-enabled.
+
+Key references:
+- [docs/STATUS.md](docs/STATUS.md) — current run metrics + per-seed heading-recovery measurement
+- [docs/plans/F-SKY-PIPELINE-CONSOLIDATION.md](../../docs/plans/F-SKY-PIPELINE-CONSOLIDATION.md) — canonical end-state pipeline shape, signal source-of-truth table
+- [docs/plans/F-SKY-AUDIT-2026-05-24.md](../../docs/plans/F-SKY-AUDIT-2026-05-24.md) — current structural-audit refresh (11 of 13 F-CLEAN proposals shipped; new pano-recovery non-determinism finding). [Original 2026-05-17 baseline](../../docs/plans/F-SKY-AUDIT-2026-05-17.md) kept for context.
+- [docs/F-SKY-INTEGRATION.md](../../docs/F-SKY-INTEGRATION.md) — consolidated F-SKY status (older snapshot)
 
 ## Quick start
 
@@ -36,7 +50,7 @@ handful of screening images).
 
 **See [docs/F-SKY-INTEGRATION.md](../../docs/F-SKY-INTEGRATION.md)** for the consolidated F-SKY feature status, measurement results, and integration roadmap. That document is the single source of truth for what's active, disabled, or pending.
 
-Quick summary from [STATUS.md](STATUS.md):
+Quick summary from [docs/STATUS.md](docs/STATUS.md):
 
 - Heading registration is reliable when seeds are placed across water
   from a tall-building cluster (Bocagrande from across the bay).
@@ -45,26 +59,48 @@ Quick summary from [STATUS.md](STATUS.md):
 - Cross-seed coverage (the only honest validation signal) is currently
   ~3 buildings per run, which makes the height MAE numbers noisy.
 
-### Active F-SKY Features (2026-05-17)
+### Active F-SKY Features (2026-05-24)
 
 Core pipeline features enabled by default:
 - **F-SKY2**: OSM-anchored silhouette splitting
 - **F-SKY4**: SegFormer mask overlay (diagnostic)
 - **F-SKY6**: One-to-one segment-to-building assignment
-- **F-SKY7**: Local-maxima peak detection
-- **F-SKY8**: Satellite-derived building footprints
-- **F-SKY10**: Cross-view colour/geometry verification (opt-in per region)
+- **F-SKY7**: Local-maxima peak detection + dual baseline
+- **F-SKY8**: Satellite-derived building footprints (opt-in per region: `use_satellite_footprints`)
+- **F-SKY10**: Cross-view colour/width/edges verification (opt-in: `use_cross_view_scoring`); 3 signals shipped in `cross_view.py`, `cv` field not yet rendered in PDF (see F-CLEAN5)
+- **F-SKY11.1 Phase B**: Pano-coastline heading recovery wired as the joint-anchor optimizer's coarse seed (opt-in: `use_pano_coastline_recovery` + `drive_pano_recovery_anchor`); on Cartagena dropped seed_1's manual `anchor_offsets_deg` override
 
-Pending integration:
-- **F-SKY11.1 Phase B**: Pano-level coastline heading correction (Phase A demo complete)
-- **F-SKY5**: MobileSAM instance segmentation (pending evaluation)
+Diagnostic/inspector tools (standalone scripts):
+- **F-SKY11**: per-view coastline-keypoint inspector — `scripts/11_coastline_demo.py`
+- **F-SKY11.1**: pano-keypoint inspector — `scripts/12_pano_coastline_demo.py`
+- Multi-channel heading-recovery experiment — `scripts/13_heading_recovery_demo.py` (replaces the failed bird's-eye demo at the same script number)
 
-Disabled (measured regression):
-- **F-SKY3**: Voronoi splitting (use F-SKY5 instead)
-- **F-SKY11.2**: Bird's-eye registration — code deleted; see archived plan
-  `docs/plans/archive/F-SKY11.2-FAILURE-ANALYSIS.md`. IPM assumes flat
-  ground which fails for tall buildings; correlation on the resulting
-  bird's-eye canvas never beat the simpler keypoint method.
+Disabled / superseded:
+- **F-SKY1**: floor-period diagnostic — computed per-segment but never read by the renderer (audit F-CLEAN4)
+- **F-SKY3**: Voronoi splitting (measured regression 2026-05-16; superseded by planned F-SKY5)
+- **F-SKY11.2**: bird's-eye IPM registration (denied; monocular depth reach too small — see plan post-mortem)
+
+## Optional SAM instance head (F-SKY5)
+
+MobileSAM (~10 M params) can split merged building blobs that F-SKY2 did not
+resolve using SAM point prompts sourced from OSM centroids. It is **off by
+default** and has no effect when not installed — the pipeline degrades
+gracefully to F-SKY2-only behaviour.
+
+**Install:**
+```bash
+pip install git+https://github.com/ChaoningZhang/MobileSAM.git
+```
+
+**Download checkpoint** (~40 MB) from
+https://github.com/ChaoningZhang/MobileSAM/tree/master/weights
+and place at `~/.cache/mobile_sam/vit_t.pth`, or set env var
+`MOBILESAM_CHECKPOINT_PATH` to the file path.
+
+**Enable:**
+```bash
+SKYLINE_CV_F_SKY5=1 python scripts/08_region_skyline_pdf.py cartagena
+```
 
 ## How it works
 
@@ -72,8 +108,8 @@ Disabled (measured regression):
 
 | File | Role | Lines | F-SKY Features |
 |---|---|---|---|
-| [pipeline.py](pipeline.py) | CV primitives: SegFormer integration, projection, registration, height extraction, aggregation. Pure functions, unit-tested. | ~2400 | F-SKY1, F-SKY2, F-SKY6, F-SKY7 |
-| [region_pdf.py](region_pdf.py) | Orchestration + Street View I/O + seed selection + PDF rendering. Stateful; harder to test in isolation. | ~2750 | F-SKY4, F-SKY8, integration layer |
+| [pipeline.py](pipeline.py) | CV primitives: SegFormer integration, projection, registration, height extraction, aggregation. Pure functions, unit-tested. | ~3650 | F-SKY1, F-SKY2, F-SKY6, F-SKY7 |
+| [region_pdf.py](region_pdf.py) | Orchestration + Street View I/O + seed selection + PDF rendering. Stateful; harder to test in isolation. `_seed_multiview_registration` is a thin orchestrator over 5 phase helpers (F-CLEAN8, 2026-05-27); largest function is now `_render_pdf` (~556 LOC). | ~4500 | F-SKY4, F-SKY8, integration layer |
 
 ### Helper Modules (F-SKY Implementation)
 
@@ -84,6 +120,9 @@ Disabled (measured regression):
 | [satellite_image.py](satellite_image.py) | Satellite image fetch and preprocessing. | F-SKY8, F-SKY10 |
 | [cross_view.py](cross_view.py) | Cross-view geometric + appearance verification (roof colour, width, edges). | F-SKY10 |
 | [coastline_registration.py](coastline_registration.py) | Water-mask based heading recovery via per-bearing keypoints. | F-SKY11, F-SKY11.1 |
+| [osm_water.py](osm_water.py) | OSM `natural=coastline` + water-polygon extraction; primary coastline keypoint source (replaces HSV satellite-water). | F-SKY13 |
+| [depth_estimation.py](depth_estimation.py) | Depth Anything V2 on stitched panos; OSM-calibrated `depth_height_m` cross-check (diagnostic, Phase A). | F-SKY12 |
+| [html_report.py](html_report.py) | HTML diagnostic report — where the per-building tables live after `pano_only_pdf` trimmed them from the PDF. | F-SKY15 |
 
 End-to-end flow:
 
@@ -285,6 +324,8 @@ from city2stl.skyline_cv.pipeline import (
     stitch_pano_views,
     stitch_pano_masks,
     project_buildings_to_pano,
+    # Neural masks (batched prefetch)
+    prefetch_label_maps,
 )
 
 # region_pdf.py
@@ -347,7 +388,8 @@ locations screened per run.
 |---|---|---|
 | `GOOGLE_MAPS_API_KEY` | Street View Static API key (required) | — |
 | `GOOGLE_MAPS_SIGN_SECRET` | URL-signing secret for paid Static API. When set, requests are HMAC-SHA1 signed and the default spin-view fetch size bumps to 1280×720. Unsigned requests are silently clamped by Google to 640×640 regardless of size, so this is the only way to get higher-resolution imagery. Find the secret in Google Cloud Console → APIs & Services → Credentials → URL signing secret. | unset (unsigned, 960×540 requested / 640×540 delivered) |
-| `SKYLINE_CV_SEGFORMER_SIZE` | SegFormer model variant — `b0` (fastest, ~3 min on Cartagena), `b1`, `b2`, `b3` (default, ~5–6 min on Cartagena), `b4`, `b5` (most accurate, ~10× slower). b3 was promoted to default 2026-05-16 after measurement: on Cartagena it doubled the matched-tagged-building count (n=8 → 17), dropped MAE 22.13 → 13.73 m, and collapsed the cross-seed bias from +20.30 m to +0.87 m. Smaller variants are still useful for fast iteration. First run at a new size downloads ~190 MB (b3) / ~80 MB (b0) to the HF cache. | `b3` |
+| `SKYLINE_CV_SEGFORMER_SIZE` | SegFormer model variant — `b0` (fastest, ~3 min on Cartagena), `b1`, `b2`, `b3` (default, ~5–6 min on Cartagena), `b4`, `b5` (most accurate, ~10× slower). b3 was promoted to default 2026-05-16 after measurement: on Cartagena it doubled the matched-tagged-building count (n=8 → 17), dropped MAE 22.13 → 13.73 m, and collapsed the cross-seed bias from +20.30 m to +0.87 m. **Production runs now pin `b1`** (see [docs/AGENT-GUIDE.md](docs/AGENT-GUIDE.md)) — ~3× faster than b3 with no matched-building loss on Cartagena. First run at a new size downloads ~190 MB (b3) / ~55 MB (b1) / ~80 MB (b0) to the HF cache. | `b3` |
+| `SKYLINE_CV_SEGFORMER_BATCH` | Images per batched SegFormer forward pass. Each seed's spin is prefetched in one (chunked) pass before per-view work via `prefetch_label_maps`; measured ~2.4× faster on a 12-view spin (b1, CPU) with bit-identical label maps. `1` disables batching. | `12` |
 | `OPENTOPO_API_KEY` | Optional, enables DEM-based terrain elevation for building bases. | unset |
 
 ## Caches
@@ -388,21 +430,28 @@ Beyond standard `requests`/`numpy`/`scipy`/`shapely`/`opencv-python`:
 ```
 skyline_cv/
 ├── README.md
-├── STATUS.md              ← what works / doesn't / next steps
 ├── __init__.py
-├── config.py              ← shared config
 ├── pipeline.py            ← CV primitives + math (F-SKY1/2/6/7)
 ├── region_pdf.py          ← orchestration + rendering, production entry
 ├── coastline_registration.py  ← F-SKY11/11.1 keypoint heading recovery
+├── osm_water.py           ← F-SKY13 OSM coastline + water extraction (primary keypoint source)
 ├── cross_view.py          ← F-SKY10 cross-view colour/width/edges
+├── depth_estimation.py    ← F-SKY12 Depth Anything V2 pano cross-check (diagnostic)
 ├── satellite_footprints.py    ← F-SKY8 Microsoft Building Footprints
 ├── satellite_image.py     ← ESRI satellite mosaic fetch
 ├── height_trace.py        ← F-SKY1 floor-strip detection
 ├── height_trace_render.py ← F-SKY1 diagnostic rendering
+├── html_report.py         ← F-SKY15 HTML diagnostic report (tables live here)
+├── docs/                  ← all in-repo docs live here
+│   ├── AGENT-GUIDE.md     ← code navigation guide for future agents
+│   ├── STATUS.md          ← what works / doesn't / next steps
+│   ├── glass-roof-height-fix-plan.md
+│   └── archive/           ← historical audits + plans
 ├── scripts/
 │   ├── 08_region_skyline_pdf.py        ← production entry
 │   ├── 09_height_trace.py              ← F-SKY1 diagnostic
-│   └── 13_heading_recovery_demo.py     ← multi-channel heading research
+│   ├── 13_heading_recovery_demo.py     ← multi-channel heading research
+│   └── 14_seed5_diagnostic.py          ← seed-level registration diagnostic
 ├── sites/
 │   ├── cartagena.json
 │   ├── chicago.json

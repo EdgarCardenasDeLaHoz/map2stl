@@ -30,7 +30,7 @@ from app.server.core.cache import (
     CACHE_ROOT, make_cache_key, read_array_cache, write_array_cache,
     NAMESPACE_TTL,
 )
-from city2stl.height import BBox, HeightResult
+from city2stl.skyline_cv.height import BBox, HeightResult
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +285,7 @@ class NDSMProvider:
 
     def fetch_heights(self, bbox: BBox, dim: Tuple[int, int]) -> HeightResult:
         """Fetch nDSM for *bbox*, resample to *dim* = (H, W)."""
-        from city2stl.height import _resample
+        from city2stl.skyline_cv.height import _resample
 
         north, south, east, west = bbox
         cache_key = make_cache_key("ndsm", north, south, east, west,

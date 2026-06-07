@@ -17,7 +17,7 @@ import pytest
 # ── Skip whole module if trimesh is not available ────────────────────────────
 trimesh = pytest.importorskip("trimesh")
 
-from city2stl.height.stl_import import stl_to_heightmap, _UP_AXIS_ROTATIONS
+from city2stl.skyline_cv.height.stl_import import stl_to_heightmap, _UP_AXIS_ROTATIONS
 
 # ── STL writing helpers ───────────────────────────────────────────────────────
 
@@ -178,7 +178,7 @@ class TestErrorHandling:
         monkeypatch.setattr(builtins, "__import__", _blocked_import)
         # Must re-import the module so the patched import path is taken
         import importlib
-        import city2stl.height.stl_import as mod
+        import city2stl.skyline_cv.height.stl_import as mod
         importlib.reload(mod)
         try:
             with pytest.raises(ImportError, match="trimesh"):

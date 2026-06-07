@@ -5,10 +5,11 @@
   "east": -75.44,
   "west": -75.59,
   "max_plausible_height_m": 200,
-  "use_satellite_footprints": true,
+  "use_satellite_footprints": false,
   "use_cross_view_scoring": true,
   "use_pano_coastline_recovery": true,
   "drive_pano_recovery_anchor": true,
+  "pano_only_pdf": true,
   "seed_urls": [
     "https://www.google.com/maps/place/Virgen+del+Carmen+Bahia+De+Cartagena/@10.4069333,-75.5559,3a,75y,321.21h,95.81t/data=!3m8!1e1!3m6!1sCIHM0ogKEICAgIDagoD5Mg!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf50BoOJxa02Hbio1sUu1VJ7Hlw1TqVGPRbwxGvtLuj7oV65q4pa9hWYBg6ljNW6hx-rR-Qyf6TXzielBuWFbGays56wdc-wyWtLbPi-_trRKCPp7Y7R38Uk_upMMHBwLlNEEkYE1%3Dw900-h600-k-no-pi-5.81202481501434-ya321.20719120178666-ro0-fo100!7i8192!8i4096!4m9!1m2!2m1!1smaps!3m5!1s0x8ef62f463804adc1:0xe292d48236c2c15e!8m2!3d10.3980106!4d-75.5424562!16s%2Fg%2F11fk53hc87?entry=ttu&g_ep=EgoyMDI2MDUwNi4wIKXMDSoASAFQAw%3D%3D",
     "https://www.google.com/maps/place/Virgen+del+Carmen+Bahia+De+Cartagena/@10.3924431,-75.5551967,3a,75y,20.84h,90.63t/data=!3m11!1e1!3m9!1sCIHM0ogKEICAgIChjeiXtgE!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf51KiGLA4ffL4fxDM3pJ2fgcPCwUimRC9vxmPteBfAo2mbKH4BFHYJsE0f1W4b42CTw6sqJ6NVsfkyjOSil_f1jGdgxC6WDWpfou-SgIE86eDcT9TxwBcp2504ddiGpFgO-YZjQi%3Dw900-h600-k-no-pi-0.6308517094508943-ya20.835048740367426-ro0-fo100!7i8192!8i4096!9m2!1b1!2i49!4m9!1m2!2m1!1smaps!3m5!1s0x8ef62f463804adc1:0xe292d48236c2c15e!8m2!3d10.3980106!4d-75.5424562!16s%2Fg%2F11fk53hc87?entry=ttu&g_ep=EgoyMDI2MDUwNi4wIKXMDSoASAFQAw%3D%3D",
@@ -17,9 +18,12 @@
     "https://www.google.com/maps/place/Bahia+de+Castillo+Grande/@10.3967483,-75.5492917,3a,75y,320.28h,82.71t/data=!3m8!1e1!3m6!1sCIHM0ogKEICAgIC08ef0jwE!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf50q3OEcIbxu781EV6TdnT3F6P4UxYRDiDCLUzfjNqbi3iSxjfOV48w42Fi4cNG4pZFSxw7voZbVLpqkP2IhuuwNvMFJjCoXJ6Yg493rnPZphqnMW_oA7XnzjcBPo9lZ6CTPTMKGOg%3Dw900-h600-k-no-pi7.293251704163509-ya320.2824419843646-ro0-fo100!7i8192!8i4096!4m9!1m2!2m1!1smaps!3m5!1s0x8ef62f0e9444bb25:0x91f0e229648a028f!8m2!3d10.3964469!4d-75.5525571!16s%2Fg%2F11fj44ms1n?entry=ttu&g_ep=EgoyMDI2MDUwNi4wIKXMDSoASAFQAw%3D%3D"
   ],
   "anchor_offsets_deg": {
-    "_comment_2026_05_17": "Manual overrides removed to test pano registration. Pano recovery will determine headings freely."
+    "_comment_2026_06_01_revert": "seed_1 manual RESTORED after run #30 measurement: auto path landed somewhere that cost 54 matched buildings (383→329) despite the pano recovery only being +6° off. The joint IoU sweep's local maximum near 141° is not the same as the global at 135°. Keep manual until a sharper anchor recovery (sigma ≤ 0.10) appears.",
+    "seed_1": 135.0,
+    "seed_4": -180.0,
+    "seed_5": 320.0
   },
-  "negative_seeds": ["seed_3"],
+  "negative_seeds": ["seed_2", "seed_3"],
   "viewpoints": [
     {
       "name": "baluarte_santo_domingo",

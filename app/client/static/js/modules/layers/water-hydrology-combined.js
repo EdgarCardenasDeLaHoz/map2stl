@@ -163,9 +163,14 @@ window.loadWaterHydrology = async function loadWaterHydrology() {
   const waterDataset = document.getElementById('waterDataset')?.value || 'esa';
   const hydroSource = document.getElementById('hydroSource')?.value || 'hydrorivers';
 
+    // Get projection and clip_nans settings from DOM
+    const projection = document.getElementById('paramProjection')?.value || 'none';
+    const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
+
   const inflightKey = JSON.stringify({
     n: north, s: south, e: east, w: west,
     waterDim, hydroDim, waterDataset, hydroSource
+      , projection, clipNans
   });
 
   if (_combinedInflightPromise && _combinedInflightKey === inflightKey) {
@@ -180,6 +185,7 @@ window.loadWaterHydrology = async function loadWaterHydrology() {
   _combinedInflightKey = inflightKey;
   _combinedInflightPromise = _performCombinedLoad(
     north, south, east, west, waterDim, hydroDim, waterDataset, hydroSource, signal
+      , projection, clipNans
   );
 
   try {
@@ -193,7 +199,8 @@ window.loadWaterHydrology = async function loadWaterHydrology() {
 /**
  * Internal function to perform the actual load and render.
  */
-async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim, waterDataset, hydroSource, signal) {
+async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim, waterDataset, hydroSource, signal, projection = 'none', clipNans = 'false') {
+
   const statusEl = document.getElementById('waterHydrologyStatus');
   const loadBtn = document.getElementById('loadWaterHydrologyBtn');
 
@@ -207,11 +214,15 @@ async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim
   window.setLayerStatus?.('waterHydrology', 'loading');
 
   try {
-    // Fetch water and hydrology in parallel
-    const waterPromise = window.api.dem.waterMask(
-      new URLSearchParams({ north, south, east, west, dim: waterDim, dataset: waterDataset }),
-      signal
-    );
+    // Fetch water and hydrology in parallel, passing projection and clip_valid_region
+    const waterParams = new URLSearchParams({
+      north, south, east, west, dim: waterDim, dataset: waterDataset
+    });
+    if (projection && projection !== 'none') {
+      waterParams.append('projection', projection);
+      waterParams.append('clip_valid_region', clipNans);
+    }
+    const waterPromise = window.api.dem.waterMask(waterParams, signal);
 
     const hydroParams = new URLSearchParams({
       north, south, east, west, dim: hydroDim, source: hydroSource,
@@ -221,6 +232,10 @@ async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim
       hydroParams.append('min_order', parseInt(document.getElementById('hydroMinOrder')?.value ?? '3'));
       hydroParams.append('order_exponent', parseFloat(document.getElementById('hydroOrderExponent')?.value ?? '1.5'));
       hydroParams.append('width_factor', parseFloat(document.getElementById('hydroWidthFactor')?.value ?? '0.5'));
+    }
+    if (projection && projection !== 'none') {
+      hydroParams.append('projection', projection);
+      hydroParams.append('clip_valid_region', clipNans);
     }
 
     const hydroPromise = window.api.dem.hydrology(hydroParams, signal);

@@ -143,11 +143,13 @@ function _applyDemResult(data, north, south, east, west) {
         const sat_h = data.sat_dimensions[0];
         const sat_w = data.sat_dimensions[1];
         const satCanvas = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
-        landuseContainer.innerHTML = '';
-        landuseContainer.appendChild(satCanvas);
-        landuseWrapper.classList.remove('hidden');
+        if (landuseContainer && satCanvas) {
+            landuseContainer.innerHTML = '';
+            landuseContainer.appendChild(satCanvas);
+        }
+        landuseWrapper?.classList.remove('hidden');
     } else {
-        landuseWrapper.classList.add('hidden');
+        landuseWrapper?.classList.add('hidden');
     }
 
     // Enable zoom/pan on new canvas
@@ -512,6 +514,7 @@ window._updateWorkflowStepper = function _updateWorkflowStepper() {
  */
 window.updatePrintDimensions = function updatePrintDimensions() {
     const panel = document.getElementById('printDimensions');
+    if (!panel) return;  // Extrude tab not mounted yet — nothing to update
     const lastDemData = window.appState.lastDemData;
     if (!lastDemData || !lastDemData.width || !lastDemData.height) {
         panel.classList.add('hidden');

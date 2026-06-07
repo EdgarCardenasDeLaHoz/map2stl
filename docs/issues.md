@@ -1,6 +1,11 @@
 # Known Issues & Status — strm2stl
 
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-26_
+
+## Active Bugs
+
+### 1. City raster endpoint 500 — NaN values in JSON response
+`/api/terrain/city` (and related city overlay endpoints) returns HTTP 500 when the rasterized city grid contains `NaN` values; Python's `json.dumps` emits bare `NaN` tokens which are not valid JSON, and the browser rejects the response. Fix in progress (parallel task, 2026-05-26).
 
 ## Active Technical Debt
 
@@ -8,6 +13,9 @@ _Last updated: 2026-05-17_
 HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `addEventListener` in event-listeners.js). One intentional inline `onclick=` remains on the dev-only debug error overlay dismiss button. Converting app.js itself to a full ES module is not planned — keep public functions on `window.*`.
 
 ## Resolved Technical Debt
+
+### ~~City raster NaN JSON crash~~ ✅ (2026-05-26)
+`/api/cities/raster` crashed with a 500 error when a non-identity projection (e.g. "cosine", "lambert") was applied, because `project_grid` fills out-of-projection areas with `numpy.nan` and `grid.flatten().tolist()` produces Python `float('nan')` which is not valid JSON. Fixed by wrapping the grid with `np.nan_to_num(grid, nan=0.0)` before `.flatten().tolist()` at both the cache-hit and fresh-fetch code paths in `app/server/routers/cities.py`.
 
 ### ~~F-SKY11.1 Phase A (pano-level coastline alignment)~~ ✅ (2026-05-17)
 Pano heading-offset recovery from stitched 360° pano + water mask vs coastline keypoints. Demo script `scripts/12_pano_coastline_demo.py` demonstrates approach; Cartagena seed_5 recovers 310° vs manual 320°. Phase B (integration into region_pdf.py) pending.

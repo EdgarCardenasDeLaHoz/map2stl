@@ -194,7 +194,7 @@ def train(
             "Install with: pip install torch torchvision timm"
         ) from exc
 
-    from city2stl.height.predict import _build_unet
+    from city2stl.skyline_cv.height.predict import _build_unet
 
     cfg = config or TrainConfig()
     torch.manual_seed(cfg.seed)

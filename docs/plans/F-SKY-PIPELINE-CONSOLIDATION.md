@@ -41,7 +41,10 @@ blurry; this plan makes it explicit.
 | F-SKY10 | landed conservatively, opt-in | Per-building roof-colour cross-view scorer (0.15 weight blend) | **Demoted to diagnostic-only**. Per-building colour was empirically fragile; keep the scorer + module on disk but DO NOT default-wire into matcher. F-SKY11.1 supersedes the *intent* (cross-view registration). |
 | F-SKY11 | demo + visualization tool | Per-view image-level coastline alignment with numbered keypoints | **Useful diagnostic tool** — `scripts/11_coastline_demo.py` visualises the same numbered keypoints in both the satellite (top-down) and street view (side-on), letting the user verify heading recovery by eye. The PER-VIEW sweep is lossy compared to F-SKY11.1's pano sweep (only ~5 of 24 keypoints per FOV), so production heading recovery uses F-SKY11.1 instead, but the per-view PDF inspector stays the per-direction debug tool. |
 | F-SKY11.1 | Phase A landed; Phase B landed gated (log-only by default) | Pano-level coastline-offset recovery | **Real measurement on Cartagena**: seed_1 recovered 136° vs manual 135° (Δ +1°, accurate enough to drop the manual override); seeds 4/5 recovered values 75-85° wrong with apparently-sharp peaks (gates can't filter automatically). Now integrated as the joint-anchor optimizer's coarse seed when `drive_pano_recovery_anchor` is set + sharp + no manual override + peak > 0.15. The fallback to today's full 360° coarse sweep stays in place for all other cases. |
-| F-SKY11.2 | experiment failed | Pano→bird's-eye IPM + 2-D rotation IoU registration | **Recorded** in [`plans/F-SKY11.2-pano-birdseye-registration.md`](plans/F-SKY11.2-pano-birdseye-registration.md). The algorithm is sound but monocular SegFormer water classification has limited depth reach (~5-7 m), so the bird's-eye recovers only an inner disc — too small to constrain a rotation against bay-scale satellite shapes. Module + demo stay on disk for reference. |
+| F-SKY11.2 | experiment failed | Pano→bird's-eye IPM + 2-D rotation IoU registration | **Recorded** in [`plans/F-SKY11.2-pano-birdseye-registration.md`](plans/F-SKY11.2-pano-birdseye-registration.md). The algorithm is sound but monocular SegFormer water classification has limited depth reach (~5-7 m), so the bird's-eye recovers only an inner disc — too small to constrain a rotation against bay-scale satellite shapes. Module + demo deleted 2026-05-24; plan post-mortem preserved. |
+| F-SKY12 | Phase A — verifier only | Depth Anything V2 on stitched panos → per-match height as an OSM-independent cross-check | **Diagnostic-only**, currently. `depth_estimation.py` calibrates the model's relative depth against OSM anchor distances and emits `depth_height_m` + `depth_disagreement` flag alongside the geometric pinhole-y estimate. Phase A does NOT influence aggregated heights; Phase B (future) would use it for confidence weighting and rescue. Plan: [`plans/F-SKY12-depth-from-panos.md`](plans/F-SKY12-depth-from-panos.md). |
+| F-SKY13 | core opt-in | OSM coastline + water polygon overlay on the minimap + coastline-keypoint source for F-SKY11.1 | **Replaces the unreliable HSV satellite-water detector** as the primary coastline ground truth (see feedback memory). `osm_water.py` extracts `natural=coastline` linestrings + water polygons from the existing OSM fetch, clips to a 1 km radius per seed, and samples evenly-spaced points usable as registration keypoints. Plan: [`plans/F-SKY13-osm-coastline-footprints-overlay.md`](plans/F-SKY13-osm-coastline-footprints-overlay.md). |
+| F-SKY15 | parallel renderer (added) | HTML diagnostic report — same data sources as the PDF, but a folder of static HTML pages | **Where the tables live now**. The PDF was shrunk dramatically by `pano_only_pdf: true` + dropping per-building text tables; everything that came out of the PDF is rendered into HTML by `html_report.py`. The PDF stays the canonical archival artefact; the HTML is the grep-able / diff-able / AI-readable companion. Plan: [`plans/F-SKY15-html-diagnostic-report.md`](plans/F-SKY15-html-diagnostic-report.md). |
 
 Other strm2stl features (terrain elevation, screen scoring, height
 proxy, aggregation) sit outside the F-SKY series and are unchanged by
@@ -59,32 +62,47 @@ REGION STAGE (once per run)
   R1. Load OSM features + convert to BuildingRecord (existing)
   R2. F-SKY8: merge MS Buildings polygons (when enabled)              [opt-in]
   R3. Attach DEM elevations to each building (existing)
-  R4. F-SKY11: build satellite radial water signature + 24 keypoints  [auto if
-        the bbox has > 5% water pixels; skipped for inland regions]
+  R4. F-SKY13: extract OSM natural=coastline + water polygons,        [auto if
+        clip to bbox, sample as keypoints                              region
+                                                                       has any
+                                                                       water]
+        (HSV satellite-water detector is kept on disk in
+         coastline_registration.py for offline A/B but is no longer
+         the primary keypoint source.)
 
 SEED STAGE (once per seed)
   S1. Resolve seed pano (cached, existing)
   S2. Pre-fetch 12 spin views at URL pitch; screen each
-  S3. Compute pitch correction (F-SKY1 trigger + F-SKY7 widened
-        top-clipping trigger from this session)
+  S3. Compute pitch correction (auto-pitch trigger + widened
+        top-clipping trigger)
   S4. Re-fetch 12 spin views at corrected pitch (uniform per spin)
   S5. Run SegFormer on each view -> sky/building/water masks
+        (rejected views still retain their image for pano recovery —
+         only excluded from per-view registration. F-CLEAN bug fix.)
   S6. Stitch pano + pano water mask (existing stitch_pano_*)
 
-HEADING RECOVERY (one offset per seed, NEW arrangement)
+HEADING RECOVERY (one offset per seed)
   H1. F-SKY11.1 pano-coastline-offset sweep                  ──► PRIMARY
-      - Inputs: pano water mask, keypoints, headings_per_col
+      - Inputs: pano water mask, F-SKY13 keypoints, headings_per_col
       - Output: recovered_offset_deg + peak score + flatness sigma
-      - GATE: when peak sigma < 0.10 (sharp), use the offset as the
-        seed's anchor. When flat / multimodal, fall through to H2.
+      - GATE (calibrated 2026-05-24 on Cartagena):
+          sigma <= 0.10  AND  peak > 0.40
+        Tighter than the original 0.10/0.15 because measured wrong
+        recoveries had sharp sigma but lower peak (seeds 4/5 came in
+        at peak 0.35/0.33 with sigma 0.023/0.130 → wrong by 76°/34°).
+      - When the gate passes AND no manual override is set, fold the
+        recovery into the joint optimizer's ±15° fine refine.
   H2. Joint anchor IoU optimizer (today's path)              ──► FALLBACK
-      - Existing 3° coarse + 0.5° fine sweep maximizing per-building
-        IoU - water - miss penalties
-      - GATE: results when H1 didn't fire OR when manual
-        sites/<region>.json `anchor_offsets_deg` is set
+      - 3° coarse + 0.5° fine sweep maximizing per-building IoU −
+        water − miss penalties.
+      - Fires when H1 was gated out OR when a manual override is set
+        (then the optimizer skips entirely and uses the override).
   H3. sites/<region>.json `anchor_offsets_deg`               ──► MANUAL OVERRIDE
-      - Always wins when present (user explicit), never automatic
-      - Phase B success ⇒ this list shrinks over time
+      - Always wins when present (user explicit), never automatic.
+      - 2026-05-24 state on Cartagena: seed_1 / seed_4 / seed_5
+        require manual overrides; the latest keypoint detector pulls
+        seed_1's H1 recovery 38° off truth so the override is back.
+        See F-SKY-AUDIT-2026-05-24.md for the diagnosis.
 
 PER-VIEW STAGE (12 views per seed)
   V1. Per-view registration around the recovered anchor (existing
@@ -98,43 +116,68 @@ PER-VIEW STAGE (12 views per seed)
       and considered-but-lost diagnostics
   V6. Height extraction per matched segment (pinhole y -> height m,
       existing _building_roof_y_from_mask + similar)
-  V7. F-SKY1 floor period (optional, diagnostic field only)
-  V8. F-SKY10 cross-view colour score on each match (optional,
-      diagnostic field only) — DEMOTED from rerank
+  V7. F-SKY1 floor period: GATED behind compute_floor_period=False
+      default. Compute is skipped unless caller opts in.
+  V8. F-SKY10 cross-view (colour / width / edges) on each match
+      when use_cross_view_scoring is enabled (all three signals exist
+      in cross_view.py; combined as 0.5/0.3/0.2). cv blended into the
+      matcher score at 0.85/0.15 weights; per-view PDF header surfaces
+      `cv̄=X.XX/min=Y.YY` aggregate.
+  V9. F-SKY12 depth-from-pano (Phase A): predict Depth Anything V2 on
+      the stitched pano, calibrate via OSM anchor distances, emit a
+      per-match depth_height_m field + depth_disagreement flag for
+      cross-check. Currently does NOT influence aggregated heights.
 
 SEED AGGREGATION
   A1. aggregate_building_heights with cross-seed downweighting
         (existing, unchanged)
-  A2. PDF render (existing + the new F-SKY11.1 pano-coastline page
-        when H1 produced a valid recovery)
+  A2. PDF render
+      - When pano_only_pdf is set: skip per-view registration pages;
+        skip per-building text-table pages (Seed-Derived heights,
+        worst-residuals list, CTBUH per-building). PDF becomes the
+        compact orientation/QA artefact (~5 MB on Cartagena vs 28 MB).
+      - When pano_only_pdf is unset: render everything (legacy mode).
+  A3. F-SKY15 HTML render — writes index.html + seed_N.html files
+      with embedded minimap PNGs. ALL tabular data lives here now,
+      regardless of pano_only_pdf.
 ```
 
 ---
 
-## What changes vs today
+## What has changed since the original plan (2026-05-17 → 2026-05-24)
 
-### Adds
-- **R4 (region stage)** runs the satellite water-mask + keypoint
-  detection once per region, not per seed.
-- **H1** new pano-coastline-offset solve becomes the primary heading
-  source.
-- **A2** PDF acquires a new "pano coastline alignment" page per
-  water-adjacent seed.
+### Shipped
+- **R4** runs F-SKY13 OSM coastline keypoint extraction (HSV
+  satellite-water demoted — it was unreliable, see feedback memory)
+- **S5** the prefetch retains rejected-by-screening images for
+  pano-recovery use only (cache-key bug at the same site also fixed)
+- **H1** F-SKY11.1 pano recovery wired as joint-anchor coarse seed
+  via `use_pano_coastline_recovery` + `drive_pano_recovery_anchor`
+  flags; gate calibrated to sigma ≤ 0.10 AND peak > 0.40
+- **V7** F-SKY1 floor period gated off by default (F-CLEAN4)
+- **V8** F-SKY10 expanded to 3 signals (colour/width/edges) and
+  surfaced in per-view PDF header (F-CLEAN5)
+- **V9** F-SKY12 depth-from-pano landed as Phase A verifier
+- **A2** `pano_only_pdf: true` flag drops per-view pages + text tables
+- **A3** F-SKY15 HTML report renders the tabular data that came out
+  of the PDF
+- **Module deletions**: `pano_birdseye.py` + script 13 (F-CLEAN6),
+  `config.py` (F-CLEAN1), `osm_marker_voronoi_silhouettes` (F-CLEAN2)
+- **Boilerplate consolidation**: 8 `_load_site_*` helpers → 1
+  `_read_site_config` (F-CLEAN7)
 
-### Removes / demotes
-- **F-SKY3** removed from the core path (kept on module surface).
-- **F-SKY10** demoted from in-line matcher rerank (still on
-  module surface, exposed via opt-in flag, default off).
-- **Per-view F-SKY11** removed from the production path — kept as
-  the standalone demo script for offline inspection of seeds that
-  H1 couldn't solve.
+### Demoted
+- **F-SKY3** function removed; only the plan doc + git history remain
+- **F-SKY10** per-building rerank now diagnostic-only (still wired
+  behind `use_cross_view_scoring` opt-in, doesn't drive production)
+- **Per-view F-SKY11** kept as the standalone demo only
 
 ### Stays the same
-- Everything in S5–S8 (capture / mask / stitch), V1–V6 (per-view
-  registration + matching + height), A1 (aggregation).
+- S6 pano stitch, V1–V6 (registration + matching + height extraction),
+  A1 (cross-seed aggregation)
 - All site-config flags (`use_satellite_footprints`,
   `anchor_offsets_deg`, `negative_seeds`, `max_plausible_height_m`)
-  keep their current semantics.
+  keep their current semantics; new flags layer on top
 
 ---
 
@@ -145,68 +188,98 @@ says which one wins.
 
 | Question | Primary | Fallback | Diagnostic-only |
 |---|---|---|---|
-| What is the seed's true geographic heading? | H1 pano coastline | H2 joint IoU | F-SKY11 per-view sweep |
-| Are two adjacent towers one segment or two? | F-SKY2 anchored split | F-SKY7 local-max peak | F-SKY3 Voronoi (off) |
-| Does this segment match a real building? | F-SKY6 1:1 IoU+containment+width | (none — segment becomes unmatched) | F-SKY10 colour |
+| What is the seed's true geographic heading? | H1 pano coastline (F-SKY11.1) — keypoints sourced from **F-SKY13 OSM coastline** | H2 joint IoU | F-SKY11 per-view sweep |
+| Where is the coastline ground truth? | **F-SKY13 OSM `natural=coastline`** | (HSV satellite-water was previously primary; demoted as unreliable) | — |
+| Are two adjacent towers one segment or two? | F-SKY2 anchored split | F-SKY7 local-max peak | F-SKY3 Voronoi (deleted) |
+| Does this segment match a real building? | F-SKY6 1:1 IoU+containment+width | (none — segment becomes unmatched) | F-SKY10 colour/width/edges |
 | What polygon covers this visible tower? | OSM | F-SKY8 MS Buildings | — |
-| How tall is the building? | Pinhole roof-y / forward_m | sqrt-area `_height_proxy` | F-SKY1 floor period |
+| How tall is the building? | Pinhole roof-y / forward_m | sqrt-area `_height_proxy` | **F-SKY12 Depth Anything V2** (Phase A verifier), F-SKY1 floor period |
 | Did this view actually see the building? | matcher's bearing_in_fov + closest_in_bin + plausibility flags (F/B/P) | — | per-view PDF column-coverage strip |
+| Where does the per-building data live for review / diff / AI access? | **F-SKY15 HTML report** (`html_report.py`) | — | PDF (visual-only after pano_only_pdf + table-drop) |
 
 The table is the canonical spec — when implementation diverges from
 this, either the table or the implementation is wrong.
 
 ---
 
-## Phasing (delivery order)
+## Phasing (delivery order — refreshed 2026-05-24)
 
-### Phase 0 — Plan + visual confirmation (NOW; Phase A of F-SKY11.1)
-- ✅ `coastline_registration.score_pano_offset_keypoints` + `sweep_pano_heading_offset`
-- ✅ `scripts/12_pano_coastline_demo.py`
-- ✅ Cartagena seed_5 demo: recovered 310° vs manual 320° (Δ=10°)
-- ☐ Visually confirm pano page-2 dots land on the water/non-water
-  boundary at the recovered offset
-- ☐ Run on a second seed (seed_2 or seed_4) to verify the algorithm
-  isn't just lucky on seed_5
+### Phase 0 — F-SKY11.1 algorithm + demo  ✅ DONE
+- ✅ `coastline_registration.score_pano_offset_keypoints` +
+  `sweep_pano_heading_offset`
+- ✅ Standalone demo scripts (since superseded — script 13 is now
+  `13_heading_recovery_demo.py`, the older 10/11/12 demos were
+  deleted along with `pano_birdseye.py` in F-CLEAN6)
+- ✅ Visual confirmation on Cartagena seeds 1/4/5
 
-### Phase 1 — Phase B integration into `_seed_multiview_registration`
-1. After `stitch_pano_masks` returns, run
-   `sweep_pano_heading_offset` (gated on region's keypoints being
-   present — i.e., R4 actually fired).
-2. When peak sigma < 0.10:
-   - If `anchor_offsets_deg` for this seed is also set: log both,
-     keep the manual value (user explicit wins), but emit a "manual
-     override could be removed (recovered ≈ X)" diagnostic to stdout.
-   - Else: feed the recovered offset into the joint anchor optimizer
-     as the centre of its ±8° fine refine (replacing the URL-derived
-     centre).
-3. When peak sigma >= 0.10: do nothing (joint optimizer runs as today).
+### Phase 1 — Production integration in `_seed_multiview_registration`  ✅ DONE
+- ✅ Pano stitching happens with API-frame headings; F-SKY11.1
+  sweeps the pano water mask against F-SKY13 keypoints
+- ✅ Gate calibrated 2026-05-24: sigma ≤ 0.10 AND peak > 0.40
+- ✅ Manual `anchor_offsets_deg` wins when present (logs the recovery
+  for comparison)
+- ✅ When no manual override + sharp recovery: replaces the joint
+  optimizer's coarse 360° sweep with ±15° fine refine around the
+  recovered offset
 
-Expected outcome: Cartagena's three `anchor_offsets_deg` overrides
-become removable for water-adjacent seeds (seed_1, seed_4, seed_5);
-the seeds that already work without an override stay working.
+**Outcome on Cartagena (current state)**: seed_1 / seed_4 / seed_5
+still have manual overrides. seed_1's was dropped briefly when its
+recovery matched within ±7°, then restored after the latest keypoint
+detector shifted the recovery 30° (see F-SKY-AUDIT-2026-05-24.md
+diagnosis). The Phase 1 wiring works; the keypoint-detector calibration
+is the open issue, not the integration.
 
-### Phase 2 — F-SKY3 / F-SKY10 cleanup
-- Remove `osm_marker_voronoi_silhouettes` call site (already
-  commented out); leave the function on the surface; update README.
-- Remove the `cross_view_scorer` parameter from the matcher's default
-  call path. Function + module stay. `use_cross_view_scoring` flag in
-  sites JSON stays but becomes diagnostic-only (writes per-segment
-  `cv` field for inspection, doesn't influence the chosen match).
-- Update `region_pdf.py`'s cross-view loading block to skip the
-  satellite-image fetch when the flag is off (already true).
+### Phase 2 — F-SKY3 / F-SKY10 cleanup  ✅ DONE
+- ✅ `osm_marker_voronoi_silhouettes` function REMOVED 2026-05-18
+  (was commented out as the call site even before that)
+- ✅ F-SKY10 cross-view stayed in the matcher path but is opt-in,
+  default-off, **and** all 3 signals (colour/width/edges) implemented
+- ✅ F-SKY10 `cv` field surfaced in per-view PDF header (F-CLEAN5)
 
-### Phase 3 — second region scaffolding
-- Wire Miami (`sites/miami.json`) to opt into F-SKY8 + F-SKY11.1
-  primary heading recovery without any `anchor_offsets_deg`.
-- Run end-to-end and confirm heading recovery succeeds for ≥ 3 of
-  the seeds.
+### Phase 3 — second region scaffolding  ⏳ PENDING (F-CLEAN13)
+- ☐ Wire Miami (`sites/miami.json`) to opt into F-SKY8 + F-SKY11.1
+  + F-SKY13 + `pano_only_pdf` and measure recovered headings
+- ☐ Same for Chicago (`sites/chicago.json`)
+- ☐ Capture per-seed recovery accuracy + coverage in STATUS.md
+- Estimate: ~1 hour total (3 min/run × 2 regions + inspection)
 
-### Phase 4 — docs + tests
-- Update `city2stl/skyline_cv/README.md` to reference the
-  consolidated pipeline (link this document; collapse the per-feature
-  blocks to one-line summaries linking each plan).
-- Add a unit test for `sweep_pano_heading_offset` on a synthetic
-  pano water mask + synthetic keypoints (no I/O dependency).
+### Phase 4 — docs + tests  PARTIAL
+- ✅ README.md repointed at the consolidation plan + audit
+- ✅ STATUS.md rewritten (F-CLEAN9)
+- ✅ Stale in-module docs archived (F-CLEAN10, F-CLEAN11) + the
+  glass-roof-fix header updated (F-CLEAN12)
+- ☐ Unit test for `sweep_pano_heading_offset` on synthetic input
+- ☐ Unit test for F-SKY13 OSM coastline extraction edge cases
+
+### Phase 5 — emerging follow-ups (post-audit, 2026-05-24)
+- ✅ Investigated why the latest keypoint detector pulled seed_1's
+  recovery 30° off truth. Root cause: `score_pano_offset_keypoints`
+  averaged all keypoints with equal weight, but far keypoints
+  (>200 m) all predict horizon-y identically and don't discriminate.
+  Fix: added `max_signal_dist_m=200` parameter that weights each
+  keypoint by `min(1, max_signal_dist_m / distance)`. After the fix
+  (2026-05-25): seed_1 recovery 112°→142° (within ±15° of truth 135°)
+  and seed_5 235°→339° (within ±19° of truth 320°). seed_4 still
+  wrong — coastline isn't sufficient signal there.
+- ☐ Consider raising the σ gate from 0.10 to ~0.15 once more regions
+  have been measured. Current seed_1 σ=0.120 just clears the strict
+  threshold so the correct-direction recovery doesn't auto-drive.
+- ✅ F-CLEAN8 (2026-05-27): split the 1211-line
+  `_seed_multiview_registration` into 5 named helpers
+  (`_capture_pano_views`, `_recover_pano_heading`,
+  `_recover_anchor_offset`, `_register_views`, `_stitch_pano_composite`);
+  the orchestrator is now ~215 LOC.
+- ✅ Coverage 8/2/1 → 2/1/7 regression diagnosed (2026-05-26): it's
+  an OSM-fetch drift artefact, not a screening regression. Live OSM
+  fetch returns 4 new high-rises vs the 2026-05-17 cached snapshot;
+  `_propose_standoff_locations` places auto-proposals at different
+  lat/lons in response, and those new positions screen worse than
+  the previous geometry-driven picks. Screening function itself is
+  bit-for-bit unchanged. See F-SKY-AUDIT-2026-05-24.md for the full
+  table comparison.
+- ☐ Persist auto-proposal positions so coverage is stable across
+  runs (one-line change in `_screen_locations` to read/write a
+  per-region cache file similar to `seed_resolution_cache.json`).
 
 ---
 

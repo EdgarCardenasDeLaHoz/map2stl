@@ -38,6 +38,8 @@ Public surface (in dependency order):
     match_segments_to_buildings     — interval-IoU + width-ratio scorer
     (F-SKY3 / osm_marker_voronoi_silhouettes removed 2026-05-18 after a
      measured MAE regression; see docs/plans/F-SKY3-osm-marker-instances.md)
+    osm_sam_instance_silhouettes    — F-SKY5 MobileSAM instance head
+                                       (optional; no-op if MobileSAM not installed)
 
   Pano helpers
     stitch_pano_views               — stitch RGB strip from spin views
@@ -80,9 +82,22 @@ from shapely.geometry import shape
 #  26 = sea
 #  60 = river
 # We treat any of {21, 26, 60} as "water" for the mIoU water co-objective.
-_ADE20K_BUILDING: int = 1
 _ADE20K_SKY: int = 2
+# Building classes: 1 (building/edifice), 25 (house), 48 (skyscraper).
+# Tall glass towers on Cartagena's Bocagrande get labelled by SegFormer-b3
+# as "skyscraper" (48), NOT "building" (1) — so the unioned mask above
+# captures them instead of leaving black holes in the per-view overlay.
+# 25 (house) added for the short residential blocks south of the bay.
+_ADE20K_BUILDING_CLASSES: tuple[int, ...] = (1, 25, 48)
+# Backwards-compat alias: existing call sites that read _ADE20K_BUILDING as
+# a scalar still see the primary class. Treat the tuple as the source of
+# truth in mask construction.
+_ADE20K_BUILDING: int = _ADE20K_BUILDING_CLASSES[0]
 _ADE20K_WATER_CLASSES: tuple[int, ...] = (21, 26, 60)
+# Vegetation classes (F-SKY18 bearing landmarks): tree=4, grass=9, plant=17,
+# field=29. Field added because SegFormer routinely labels low coastal
+# grass / esplanade plantings as "field" instead of "grass".
+_ADE20K_VEGETATION_CLASSES: tuple[int, ...] = (4, 9, 17, 29)
 def _segformer_model_id() -> str:
     """Resolve the SegFormer model ID at first inference.
 
@@ -103,6 +118,25 @@ def _segformer_model_id() -> str:
     return f"nvidia/segformer-{size}-finetuned-ade-512-512"
 
 
+def _segformer_input_size() -> int:
+    """Resolve the SegFormer processor input resolution (square).
+
+    Inference cost on a transformer scales roughly with the *pixel count*
+    of the input, so dropping from 512² to 384² is ~44% fewer pixels and
+    ~1.8× speedup; 320² is ~61% fewer pixels and ~2.5× speedup. The
+    accuracy floor is the inter-tower gap width: at 320 px, a 3-pixel-wide
+    sky strip between two close towers becomes ~2 px and may merge.
+    Default 512 (the size the model was finetuned at). Override with
+    ``SKYLINE_CV_SEGFORMER_INPUT_SIZE`` (integer ≥ 128).
+    """
+    raw = os.environ.get("SKYLINE_CV_SEGFORMER_INPUT_SIZE", "512").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        return 512
+    return max(128, n)
+
+
 _SEGFORMER_MODEL_ID: str = _segformer_model_id()
 _SEGFORMER_LOADED: bool = False
 _SEGFORMER_OK: bool = False
@@ -112,8 +146,16 @@ _segformer_model = None
 # detect_skyline_contour, detect_building_silhouettes, register_view_to_osm,
 # and the joint optimizer all want the same image's masks. Capacity sized
 # for one seed's spin views (12) + a few headroom slots.
-_NEURAL_CACHE_CAPACITY = 16
+_NEURAL_CACHE_CAPACITY = 64
 _neural_cache: "_OrderedDict[int, dict]" = _OrderedDict()
+
+# ── MobileSAM (optional) — instance head for merged-blob splitting (F-SKY5) ───
+# Checkpoint path: env var MOBILESAM_CHECKPOINT_PATH or ~/.cache/mobile_sam/vit_t.pth
+# Install: pip install git+https://github.com/ChaoningZhang/MobileSAM.git
+# Graceful no-op when package or checkpoint is absent.
+_MOBILESAM_LOADED: bool = False
+_MOBILESAM_OK: bool = False
+_mobilesam_predictor = None
 
 
 @dataclass(frozen=True)
@@ -474,13 +516,24 @@ def _project_building(
     }
 
 
+_segformer_device: str = "cpu"
+
+
 def _ensure_segformer() -> bool:
-    """Lazily load SegFormer-b0 (ADE20K). Returns True if the model is ready."""
-    global _SEGFORMER_LOADED, _SEGFORMER_OK, _segformer_processor, _segformer_model
+    """Lazily load SegFormer-b0 (ADE20K). Returns True if the model is ready.
+
+    Moves the model to CUDA when available (single forward pass is dominated
+    by GPU transfer + transformer math; on Cartagena we measured ~2 s/image
+    on CPU vs ~0.2-0.4 s/image on a consumer GPU). Override the device with
+    the ``SKYLINE_CV_SEGFORMER_DEVICE`` env var (e.g. ``cpu`` to force CPU
+    on a machine with a busy GPU).
+    """
+    global _SEGFORMER_LOADED, _SEGFORMER_OK, _segformer_processor, _segformer_model, _segformer_device
     if _SEGFORMER_LOADED:
         return _SEGFORMER_OK
     _SEGFORMER_LOADED = True
     try:
+        import torch  # noqa: PLC0415
         from transformers import (  # noqa: PLC0415
             SegformerForSemanticSegmentation,
             SegformerImageProcessor,
@@ -490,10 +543,67 @@ def _ensure_segformer() -> bool:
         _segformer_model = SegformerForSemanticSegmentation.from_pretrained(
             _SEGFORMER_MODEL_ID)
         _segformer_model.eval()  # type: ignore[union-attr]
+        # Override the processor's internal resize so a smaller input
+        # square reduces the per-forward-pass cost. We touch both the
+        # ``size`` dict (canonical for new transformers) AND ``do_resize``
+        # so the processor actually performs the resize before it hands
+        # tensors to the model.
+        _input_n = _segformer_input_size()
+        try:
+            _segformer_processor.size = {"height": _input_n, "width": _input_n}
+            _segformer_processor.do_resize = True
+        except Exception as _e_size:
+            print(f"[segformer] failed to set input size to {_input_n}: {_e_size}")
+        # Device selection: respect the override env var, otherwise pick CUDA
+        # if it's available, falling back to CPU.
+        override = os.environ.get("SKYLINE_CV_SEGFORMER_DEVICE", "").strip().lower()
+        if override:
+            _segformer_device = override
+        elif torch.cuda.is_available():
+            _segformer_device = "cuda"
+        else:
+            _segformer_device = "cpu"
+        try:
+            _segformer_model.to(_segformer_device)  # type: ignore[union-attr]
+            print(f"[segformer] device={_segformer_device}  model={_SEGFORMER_MODEL_ID.split('/')[-1]}  input={_input_n}px")
+        except Exception as _e_dev:
+            print(f"[segformer] failed to move to {_segformer_device}: {_e_dev} — falling back to CPU")
+            _segformer_device = "cpu"
+            _segformer_model.to("cpu")  # type: ignore[union-attr]
         _SEGFORMER_OK = True
     except Exception:
         _SEGFORMER_OK = False
     return _SEGFORMER_OK
+
+
+def _ensure_mobilesam() -> bool:
+    """Lazily load MobileSAM vit_t. Returns True if the predictor is ready."""
+    global _MOBILESAM_LOADED, _MOBILESAM_OK, _mobilesam_predictor
+    if _MOBILESAM_LOADED:
+        return _MOBILESAM_OK
+    _MOBILESAM_LOADED = True
+    ckpt = os.environ.get(
+        "MOBILESAM_CHECKPOINT_PATH",
+        str(Path.home() / ".cache" / "mobile_sam" / "vit_t.pth"),
+    )
+    try:
+        from mobile_sam import SamPredictor, sam_model_registry  # noqa: PLC0415
+        if not Path(ckpt).is_file():
+            return False
+        model = sam_model_registry["vit_t"](checkpoint=ckpt)
+        model.eval()
+        _mobilesam_predictor = SamPredictor(model)
+        _MOBILESAM_OK = True
+    except Exception:
+        _MOBILESAM_OK = False
+    return _MOBILESAM_OK
+
+
+def _mobilesam_available() -> bool:
+    """Return True without triggering a load (for quick gate checks)."""
+    if _MOBILESAM_LOADED:
+        return _MOBILESAM_OK
+    return _ensure_mobilesam()
 
 
 def _neural_cache_put(img_id: int, entry: dict, image_rgb: np.ndarray) -> None:
@@ -518,32 +628,26 @@ def _neural_cache_put(img_id: int, entry: dict, image_rgb: np.ndarray) -> None:
         _neural_cache.popitem(last=False)
 
 
-def _neural_sky_and_building_masks(
-    image_rgb: np.ndarray,
-) -> tuple["np.ndarray | None", "np.ndarray | None"]:
-    """Run SegFormer-b0 (ADE20K) inference and return boolean (H, W) masks.
+def _ensure_label_map(image_rgb: np.ndarray) -> "np.ndarray | None":
+    """Run SegFormer-b0 (ADE20K) and return the per-pixel argmax label map.
 
-    Returns (sky_mask, building_mask) where each pixel is True for that class,
-    or (None, None) if the model is unavailable or inference fails.
+    Cached by id(image_rgb). All higher-level mask getters
+    (``_neural_sky_and_building_masks``, ``_neural_water_mask``,
+    ``_neural_vegetation_mask``) share this single forward pass — once the
+    label map is cached, deriving any class mask is a ~1 ms boolean op.
 
-    Results are cached by id(image_rgb). The cache pins the image array
-    (see _neural_cache_put) so id() collisions from GC reuse cannot happen.
+    Returns None if the model is unavailable or inference fails. Cache
+    entries store None for the failure case so we don't retry forever.
     """
     img_id = id(image_rgb)
     entry = _neural_cache.get(img_id)
-    # Defence-in-depth: verify the cached entry's anchor IS the array we were
-    # called with. If anything ever bypasses the anchor (e.g. someone clears
-    # _neural_cache externally without resetting anchors), the identity check
-    # catches stale-id collisions before they corrupt results.
     if entry is not None and entry.get("_anchor") is image_rgb:
         _neural_cache.move_to_end(img_id)
-        return entry["sky"], entry["building"]
+        return entry.get("label_map")
 
     if not _ensure_segformer():
-        _neural_cache_put(
-            img_id, {"sky": None, "building": None, "water": None},
-            image_rgb)
-        return None, None
+        _neural_cache_put(img_id, {"label_map": None}, image_rgb)
+        return None
 
     try:
         import torch  # noqa: PLC0415
@@ -554,80 +658,362 @@ def _neural_sky_and_building_masks(
         pil = PILImage.fromarray(image_rgb)
         inputs = _segformer_processor(
             images=pil, return_tensors="pt")  # type: ignore[misc]
+        # Move inputs to the model's device (CUDA when available).
+        if _segformer_device != "cpu":
+            inputs = {k: v.to(_segformer_device) for k, v in inputs.items()}
         with torch.no_grad():
             outputs = _segformer_model(**inputs)  # type: ignore[misc]
         # logits: (1, num_classes, H/4, W/4) → upsample to original resolution
         upsampled = F.interpolate(
             outputs.logits, size=(h, w), mode="bilinear", align_corners=False
         )
-        label_map = upsampled.squeeze(0).argmax(dim=0).numpy()  # (H, W) int64
-        sky_mask = label_map == _ADE20K_SKY
-        building_mask = label_map == _ADE20K_BUILDING
-        # Water is the union of "water", "sea", "river" classes.
-        water_mask = np.isin(label_map, _ADE20K_WATER_CLASSES)
-        # Mask cleanup: SegFormer's per-pixel argmax produces speckle —
-        # small isolated sky pixels INSIDE a building (window reflections
-        # of the sky on glass), and small isolated building pixels
-        # OUTSIDE buildings (cloud edges, antenna tips). A 5×5 closing on
-        # the building mask fills sub-window holes; a 3×3 opening on the
-        # sky mask removes isolated-sky speckle. Then we reassert
-        # mutual-exclusion (a pixel can't be both sky AND building post-
-        # cleanup) by giving sky precedence near the top of the image
-        # and building precedence below — that mirrors the physical
-        # likelihood at each y. Net effect on Cartagena: the central
-        # tower cluster's mask blob acquires sharper inter-building
-        # gaps that F-SKY7's local-max peak detector can exploit.
-        b_u8 = (building_mask.astype(np.uint8)) * 255
-        s_u8 = (sky_mask.astype(np.uint8)) * 255
-        close_k = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        open_k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        b_u8 = cv2.morphologyEx(b_u8, cv2.MORPH_CLOSE, close_k)
-        s_u8 = cv2.morphologyEx(s_u8, cv2.MORPH_OPEN, open_k)
-        # Glass-tower top repair: a tall narrow vertical closing (1 col ×
-        # 11 rows) bridges short sky strips that mirrored-sky reflections
-        # carve into a glass facade — the canonical Cartagena Bocagrande
-        # failure where the mask top has a wavy edge a row of grey-blue
-        # pixels below the actual roofline. Vertical-only kernel preserves
-        # the HORIZONTAL inter-tower gaps that F-SKY2 splitting depends
-        # on (a 5×5 isotropic closing would erase those too). Capped at
-        # 11 px so windows-and-cornice gaps two storeys tall don't get
-        # mistakenly filled in.
-        vert_k = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 11))
-        b_u8 = cv2.morphologyEx(b_u8, cv2.MORPH_CLOSE, vert_k)
-        building_mask = b_u8.astype(bool)
-        sky_mask = s_u8.astype(bool)
-        # Pixels claimed by both: building wins (sky-on-glass-reflection
-        # is the dominant failure case; cyan-tower-edge cloud is rare).
-        sky_mask &= ~building_mask
-        _neural_cache_put(img_id, {
-            "sky": sky_mask, "building": building_mask, "water": water_mask},
-            image_rgb)
-        return sky_mask, building_mask
+        # argmax on-device, then transfer the small int64 (H, W) result to CPU
+        # for the downstream numpy work — cheaper than moving the full logits.
+        label_map = upsampled.squeeze(0).argmax(dim=0).cpu().numpy()
+        _neural_cache_put(img_id, {"label_map": label_map}, image_rgb)
+        return label_map
     except Exception:
-        _neural_cache_put(
-            img_id, {"sky": None, "building": None, "water": None},
-            image_rgb)
-        return None, None
+        _neural_cache_put(img_id, {"label_map": None}, image_rgb)
+        return None
 
 
-def _neural_water_mask(image_rgb: np.ndarray) -> "np.ndarray | None":
-    """Return the cached water-class mask for this image. Triggers a forward
-    pass if not yet cached. Subsequent calls within the cache window are O(1).
+def _segformer_batch_size() -> int:
+    """Resolve the prefetch forward-pass batch size (images per call).
+
+    Batching the spin views into a single forward pass amortizes Python
+    dispatch and (on GPU) kernel-launch overhead — the dominant per-image
+    cost on the 12-view spin once the model itself is warm. Bounded so peak
+    activation memory stays modest on CPU-only machines. Override with
+    ``SKYLINE_CV_SEGFORMER_BATCH`` (integer ≥ 1; 1 disables batching).
+    """
+    raw = os.environ.get("SKYLINE_CV_SEGFORMER_BATCH", "12").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 12
+
+
+def prefetch_label_maps(images: "list[np.ndarray]") -> int:
+    """Run SegFormer once on a *batch* of images, populating the neural cache.
+
+    Every higher-level mask getter (``_ensure_label_map`` and the sky /
+    building / water / vegetation masks built on it) is keyed by
+    ``id(image_rgb)`` in ``_neural_cache``. Pre-running the whole spin as one
+    (or a few) batched forward pass(es) means each later per-view call is a
+    cache hit instead of its own forward pass — identical numerics, but the
+    transformer's fixed per-call overhead is paid once for the batch rather
+    than 12×.
+
+    Images already cached (by id + anchor identity) are skipped, so this is
+    idempotent and safe to call from multiple phases on overlapping image
+    sets. Returns the number of images actually pushed through the model.
+    A no-op returning 0 when the model is unavailable or the batch is empty;
+    callers then fall back transparently to lazy per-image inference.
+    """
+    if not images:
+        return 0
+    # Filter to images not already cached (same id AND same array object, to
+    # respect the anti-GC-reuse anchor invariant in _neural_cache_put).
+    pending: list[np.ndarray] = []
+    seen_ids: set[int] = set()
+    for img in images:
+        if img is None:
+            continue
+        img_id = id(img)
+        if img_id in seen_ids:
+            continue
+        seen_ids.add(img_id)
+        entry = _neural_cache.get(img_id)
+        if (entry is not None and entry.get("_anchor") is img
+                and "label_map" in entry):
+            continue
+        pending.append(img)
+    if not pending:
+        return 0
+    if not _ensure_segformer():
+        return 0
+
+    try:
+        import torch  # noqa: PLC0415
+        import torch.nn.functional as F  # noqa: PLC0415
+        from PIL import Image as PILImage  # noqa: PLC0415
+
+        batch_n = _segformer_batch_size()
+        ran = 0
+        for start in range(0, len(pending), batch_n):
+            chunk = pending[start:start + batch_n]
+            pil_batch = [PILImage.fromarray(img) for img in chunk]
+            inputs = _segformer_processor(  # type: ignore[misc]
+                images=pil_batch, return_tensors="pt")
+            if _segformer_device != "cpu":
+                inputs = {k: v.to(_segformer_device) for k, v in inputs.items()}
+            with torch.no_grad():
+                outputs = _segformer_model(**inputs)  # type: ignore[misc]
+            # logits: (N, num_classes, H/4, W/4). Upsample + argmax per image
+            # at its own native resolution (the spin views are uniform size,
+            # but this stays correct if a caller mixes sizes) — and avoids
+            # one giant (N, C, H, W) full-res tensor.
+            logits = outputs.logits
+            for i, img in enumerate(chunk):
+                h, w = img.shape[:2]
+                upsampled = F.interpolate(
+                    logits[i:i + 1], size=(h, w),
+                    mode="bilinear", align_corners=False)
+                label_map = upsampled.squeeze(0).argmax(dim=0).cpu().numpy()
+                _neural_cache_put(id(img), {"label_map": label_map}, img)
+                ran += 1
+        return ran
+    except Exception:
+        # Leave the cache untouched; lazy per-image inference still works.
+        return 0
+
+
+def _neural_sky_and_building_masks(
+    image_rgb: np.ndarray,
+) -> tuple["np.ndarray | None", "np.ndarray | None"]:
+    """Return cleaned-up boolean (sky_mask, building_mask) — morphology applied.
+
+    The SegFormer forward pass is shared with the water/vegetation getters
+    via ``_ensure_label_map``. This function adds the morphological cleanup
+    (~50 ms/image) that the silhouette/registration code depends on:
+    speckle removal, glass-tower top repair, and sky/building mutual
+    exclusion. Callers who only need water or vegetation masks should use
+    their respective helpers — those skip the morphology entirely.
     """
     img_id = id(image_rgb)
     entry = _neural_cache.get(img_id)
-    if entry is not None and entry.get("_anchor") is not image_rgb:
-        # Stale id collision (impossible while anchors are honoured, but
-        # defensive): force re-fetch by clearing the matched slot.
-        _neural_cache.pop(img_id, None)
-        entry = None
-    if entry is None:
-        _neural_sky_and_building_masks(image_rgb)
+    if (entry is not None and entry.get("_anchor") is image_rgb
+            and "sky" in entry and "building" in entry):
+        _neural_cache.move_to_end(img_id)
+        return entry["sky"], entry["building"]
+
+    label_map = _ensure_label_map(image_rgb)
+    if label_map is None:
         entry = _neural_cache.get(img_id)
-    if entry is None:
+        if entry is not None:
+            entry["sky"] = None
+            entry["building"] = None
+        return None, None
+
+    sky_mask = label_map == _ADE20K_SKY
+    # Union all building-family classes (building, house, skyscraper) so a
+    # dark-glass tower SegFormer prefers to label "skyscraper" still
+    # contributes to the building mask the silhouette splitter sees.
+    building_mask = np.isin(label_map, _ADE20K_BUILDING_CLASSES)
+    # Mask cleanup: SegFormer's per-pixel argmax produces speckle —
+    # small isolated sky pixels INSIDE a building (window reflections
+    # of the sky on glass), and small isolated building pixels
+    # OUTSIDE buildings (cloud edges, antenna tips). A 5×5 closing on
+    # the building mask fills sub-window holes; a 3×3 opening on the
+    # sky mask removes isolated-sky speckle. Then we reassert
+    # mutual-exclusion (a pixel can't be both sky AND building post-
+    # cleanup) by giving sky precedence near the top of the image
+    # and building precedence below — that mirrors the physical
+    # likelihood at each y. Net effect on Cartagena: the central
+    # tower cluster's mask blob acquires sharper inter-building
+    # gaps that F-SKY7's local-max peak detector can exploit.
+    b_u8 = (building_mask.astype(np.uint8)) * 255
+    s_u8 = (sky_mask.astype(np.uint8)) * 255
+    close_k = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    open_k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    b_u8 = cv2.morphologyEx(b_u8, cv2.MORPH_CLOSE, close_k)
+    s_u8 = cv2.morphologyEx(s_u8, cv2.MORPH_OPEN, open_k)
+    # Glass-tower top repair: a tall narrow vertical closing (1 col ×
+    # 11 rows) bridges short sky strips that mirrored-sky reflections
+    # carve into a glass facade — the canonical Cartagena Bocagrande
+    # failure where the mask top has a wavy edge a row of grey-blue
+    # pixels below the actual roofline. Vertical-only kernel preserves
+    # the HORIZONTAL inter-tower gaps that F-SKY2 splitting depends
+    # on (a 5×5 isotropic closing would erase those too). Capped at
+    # 11 px so windows-and-cornice gaps two storeys tall don't get
+    # mistakenly filled in.
+    vert_k = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 25))
+    b_u8 = cv2.morphologyEx(b_u8, cv2.MORPH_CLOSE, vert_k)
+    # Glass-tower hole-fill: any non-building region NOT reachable from
+    # the image border (i.e. fully enclosed by building) is almost
+    # certainly a mis-classified dark glass facade. Flood-fill the
+    # complement from (0,0); cells still untouched after the fill are
+    # interior holes worth promoting to building.
+    inv = (b_u8 == 0).astype(np.uint8)
+    h_full, w_full = inv.shape[:2]
+    ff_mask = np.zeros((h_full + 2, w_full + 2), dtype=np.uint8)
+    flood = inv.copy()
+    cv2.floodFill(flood, ff_mask, (0, 0), 2)
+    interior_holes = (flood == 1)
+    if interior_holes.any():
+        b_u8[interior_holes] = 255
+    # Beach/sand/earth-as-building cap (Cartagena coast): SegFormer-b1
+    # routinely labels coastal sand strips as "building" (class 1), which
+    # the hole-fill above then fuses with real tower bases — producing
+    # per-view bboxes whose base lands at the waterline instead of the
+    # actual building base. Two complementary clips run here:
+    #
+    #   A. Hard ground cap: in any column where SegFormer DID correctly
+    #      label water/earth/sand at row Y, building above row Y is
+    #      kept but anything at or below Y is zeroed.
+    #
+    #   B. Beach-band heuristic: in columns where the model is fooling
+    #      itself (no ground class anywhere — just one tall "building"
+    #      strip running into the waterline), use the column's water
+    #      neighbours to estimate a "ground row" and clip the building
+    #      mask at ~0.08 * H above the waterline. This catches the
+    #      common case where the model labels the entire beach as
+    #      building class 1 with no internal sand pixels.
+    # Class-membership ground cap: in any column where SegFormer
+    # explicitly labelled a non-building "ground" class (water, sea,
+    # river, earth, sand) at row Y, clip the building mask at/below Y.
+    # Catches the failure mode where the hole-fill fuses real towers
+    # to a correctly-labelled patch of sand below them. Does NOT clip
+    # at columns where the model itself mis-labels the beach as
+    # building (that overcorrected on run #22 and cost legitimate
+    # low-tower matches); the unconditional waterline band was
+    # reverted in favour of trusting the model's own ground labels
+    # where it provides them.
+    # WATER ONLY for the bottom-up cap — deliberately excludes earth/sand
+    # (ADE20K 13/46). Buildings stand ON sand/beach, so a sand region is
+    # NOT a place a building "can't be": clipping at sand-top wrongly
+    # removes the building's lower floors. Worse, Cartagena's bright
+    # sandy-coloured towers get partially mislabelled as sand, so a
+    # sand-inclusive run extends UP into the facade and chops it (the
+    # seed_5 peninsula-tip cluster that went missing). Water is the only
+    # class where a building genuinely cannot stand, so only water caps.
+    _GROUND_CLASSES = _ADE20K_WATER_CLASSES
+    ground_mask_local = np.isin(label_map, _GROUND_CLASSES)
+    if ground_mask_local.any():
+        # Waterline = top of the FOREGROUND water block, found bottom-up
+        # per column — NOT the topmost water pixel. In a 360° pano the
+        # far bay water is visible at the horizon ABOVE the foreground
+        # building bases; a naive topmost-water argmax would treat that
+        # distant strip as "ground" and zero the entire building beneath
+        # it (the Cartagena seed_5 failure: buildings standing in front
+        # of open bay get chopped). Instead we locate the bottom-most
+        # contiguous water run in each column — the real foreground
+        # waterline — and clip only at/below that. Horizon water above
+        # the buildings no longer participates.
+        gm = ground_mask_local
+        rev = gm[::-1, :]  # row 0 = image bottom
+        has_ground = rev.any(axis=0)
+        # Bottom-most ground pixel (index in reversed coords).
+        first_ground_rev = rev.argmax(axis=0)
+        # First NON-ground row at/above that pixel (still reversed): the
+        # top of the foreground ground run.
+        row_idx_rev = np.arange(h_full)[:, None]
+        non_ground_rev = (~rev) & (row_idx_rev >= first_ground_rev[None, :])
+        has_break = non_ground_rev.any(axis=0)
+        first_break_rev = np.where(
+            has_break, non_ground_rev.argmax(axis=0), h_full)
+        # Convert the run-top from reversed to original row coords.
+        waterline_per_col = (h_full - first_break_rev).astype(np.int32)
+        # Columns with no ground at all: cap below the image (no-op).
+        waterline_per_col = np.where(
+            has_ground, waterline_per_col, h_full).astype(np.int32)
+        row_idx = np.arange(h_full)[:, None]
+        margin_px = 4
+        below_ground = row_idx >= (waterline_per_col[None, :] - margin_px)
+        b_u8[below_ground] = 0
+    building_mask = b_u8.astype(bool)
+    sky_mask = s_u8.astype(bool)
+    # Pixels claimed by both: building wins (sky-on-glass-reflection
+    # is the dominant failure case; cyan-tower-edge cloud is rare).
+    sky_mask &= ~building_mask
+    entry = _neural_cache.get(img_id)
+    if entry is not None:
+        entry["sky"] = sky_mask
+        entry["building"] = building_mask
+    return sky_mask, building_mask
+
+
+def _neural_water_mask(image_rgb: np.ndarray) -> "np.ndarray | None":
+    """Return the cached water-class boolean mask for this image.
+
+    Shares the SegFormer forward pass with ``_neural_sky_and_building_masks``
+    via the cached label_map but skips the (~50 ms/image) morphology pass —
+    water consumers don't need it. Subsequent calls within the cache window
+    are O(1).
+    """
+    img_id = id(image_rgb)
+    entry = _neural_cache.get(img_id)
+    if (entry is not None and entry.get("_anchor") is image_rgb
+            and "water" in entry):
+        _neural_cache.move_to_end(img_id)
+        return entry["water"]
+
+    label_map = _ensure_label_map(image_rgb)
+    entry = _neural_cache.get(img_id)
+    if label_map is None or entry is None:
+        if entry is not None:
+            entry["water"] = None
         return None
-    _neural_cache.move_to_end(img_id)
-    return entry.get("water")
+    water_mask = np.isin(label_map, _ADE20K_WATER_CLASSES)
+    entry["water"] = water_mask
+    return water_mask
+
+
+def _neural_vegetation_mask(image_rgb: np.ndarray) -> "np.ndarray | None":
+    """Return the cached vegetation-class boolean mask (F-SKY18).
+
+    Shares the SegFormer forward pass via the cached label_map; skips
+    morphology like ``_neural_water_mask``. Consumers only use per-column
+    extents, where speckle is averaged out.
+    """
+    img_id = id(image_rgb)
+    entry = _neural_cache.get(img_id)
+    if (entry is not None and entry.get("_anchor") is image_rgb
+            and "vegetation" in entry):
+        _neural_cache.move_to_end(img_id)
+        return entry["vegetation"]
+
+    label_map = _ensure_label_map(image_rgb)
+    entry = _neural_cache.get(img_id)
+    if label_map is None or entry is None:
+        if entry is not None:
+            entry["vegetation"] = None
+        return None
+    vegetation_mask = np.isin(label_map, _ADE20K_VEGETATION_CLASSES)
+    entry["vegetation"] = vegetation_mask
+    return vegetation_mask
+
+
+def stitch_pano_mask_channel(
+    views: list[dict],
+    fov_deg: float,
+    step_deg: float,
+    mask_key: str,
+) -> "np.ndarray | None":
+    """Stitch one boolean per-view mask channel into a 360° strip (F-SKY18).
+
+    Generalises the building/water cropping in ``stitch_pano_masks`` to any
+    mask key (e.g. ``"vegetation_mask"``) so additional landmark classes can
+    be projected with the SAME pinhole geometry / column→heading mapping. The
+    output aligns column-for-column with ``stitch_pano_masks`` /
+    ``stitch_pano_views`` so ``headings_per_col`` applies unchanged.
+    """
+    if not views:
+        return None
+    sorted_views = sorted(views, key=lambda v: float(v["geo_heading"]))
+    ref = next((v for v in sorted_views if v.get("building_mask") is not None), None)
+    if ref is None:
+        return None
+    H_view, W_view = ref["building_mask"].shape[:2]
+    f_px = 0.5 * W_view / math.tan(math.radians(fov_deg) * 0.5)
+    crop_half_px = int(round(f_px * math.tan(math.radians(step_deg * 0.5))))
+    crop_x0 = max(0, W_view // 2 - crop_half_px)
+    crop_x1 = min(W_view, W_view // 2 + crop_half_px)
+    if crop_x1 <= crop_x0:
+        return None
+    crops: list[np.ndarray] = []
+    for v in sorted_views:
+        bmask = v.get("building_mask")
+        if bmask is None or bmask.shape[0] != H_view:
+            continue
+        m = v.get(mask_key)
+        if m is not None and m.shape[:2] == bmask.shape[:2]:
+            crops.append(np.asarray(m[:, crop_x0:crop_x1], dtype=bool))
+        else:
+            crops.append(np.zeros((H_view, crop_x1 - crop_x0), dtype=bool))
+    if not crops:
+        return None
+    return np.concatenate(crops, axis=1)
 
 
 def stitch_pano_masks(
@@ -1160,11 +1546,50 @@ def _floor_period_for_building(
     if max_lag_px >= autocorr.size:
         return None
     window = autocorr[min_lag_px: max_lag_px + 1]
-    peak_idx_rel = int(np.argmax(window))
-    peak_val = float(window[peak_idx_rel])
-    if peak_val < min_confidence:
+    if window.size < 3:
         return None
-    period_px = float(min_lag_px + peak_idx_rel)
+
+    # Fundamental-period detection via sub-harmonic descent (harmonic
+    # disambiguation). The autocorrelation of a periodic facade peaks
+    # at the fundamental floor period P *and* every multiple 2P, 3P, …
+    # The DOMINANT peak is frequently a multiple when the building has
+    # strong coarse banding (mechanical floors, every-3rd-floor balcony
+    # bands), so a naive argmax returns 2-3× the true period and the
+    # back-derived distance comes out 2-3× too small.
+    #
+    # Strategy: take the dominant peak lag L_best, then test its integer
+    # sub-divisors L_best/k (k=2..6). If a divisor lag d still shows a
+    # strong autocorr peak (≥ ``sub_frac`` of the dominant), d is the
+    # real fundamental and we descend to it. We keep the SMALLEST such
+    # divisor that holds up — that's the fundamental floor period.
+    best_abs = int(min_lag_px + int(np.argmax(window)))
+    best_val = float(autocorr[best_abs])
+    if best_val < min_confidence:
+        return None
+
+    def _peak_val_near(lag: int, tol: int = 1) -> tuple[int, float]:
+        """Best autocorr value within ±tol of `lag` (periods aren't
+        exact integers); returns (lag_of_max, value)."""
+        lo = max(min_lag_px, lag - tol)
+        hi = min(max_lag_px, lag + tol)
+        if hi < lo:
+            return lag, -1.0
+        seg = autocorr[lo: hi + 1]
+        j = int(np.argmax(seg))
+        return lo + j, float(seg[j])
+
+    sub_frac = 0.55
+    fund_abs = best_abs
+    for k in (6, 5, 4, 3, 2):  # try the deepest division first
+        d = int(round(best_abs / k))
+        if d < min_lag_px:
+            continue
+        d_lag, d_val = _peak_val_near(d)
+        if d_val >= sub_frac * best_val and d_val >= min_confidence:
+            fund_abs = d_lag  # descend; keep iterating toward smaller k
+    peak_idx_rel = fund_abs - min_lag_px
+    peak_val = float(autocorr[fund_abs])
+    period_px = float(fund_abs)
     if period_px <= 0.0:
         return None
 
@@ -1441,7 +1866,7 @@ def detect_buildings_from_mask(
     split_wide_components: bool = True,
     contour: "np.ndarray | None" = None,
     image: "np.ndarray | None" = None,
-    max_splits_per_component: int = 12,
+    max_splits_per_component: int = 24,
 ) -> list[dict]:
     """Identify individual buildings as connected components of the SegFormer
     building mask.
@@ -1813,8 +2238,9 @@ def osm_anchor_silhouettes(
     *,
     building_mask: "np.ndarray | None" = None,
     min_proj_containment: float = 0.5,
-    min_gap_px: int = 6,
+    min_gap_px: int = 2,
     min_child_width_px: int = 4,
+    min_center_separation_px: int = 14,
 ) -> list[dict]:
     """Split mask-merged silhouettes using OSM footprint projections as
     structural anchors (F-SKY2).
@@ -1875,21 +2301,36 @@ def osm_anchor_silhouettes(
 
         split_cols: list[float] = []
         for i in range(len(overlapping) - 1):
-            _, _, this_R, _ = overlapping[i]
-            _, next_L, _, _ = overlapping[i + 1]
-            gap_w = next_L - this_R
-            if gap_w < min_gap_px:
+            this_xpx, _, this_R, _ = overlapping[i]
+            next_xpx, next_L, _, _ = overlapping[i + 1]
+            # Always cut between two distinct OSM building centres as long
+            # as their projection centres are far enough apart to leave
+            # workable children. The previous gap-only rule failed on
+            # adjacent waterfront towers whose footprints just touched —
+            # zero gap, zero cut, one mega-segment swallowing both. Now
+            # the cut fires on centre separation; the mask-thinnest
+            # refinement still snaps to a real valley when one exists.
+            if next_xpx - this_xpx < min_center_separation_px:
                 continue
-            mid = 0.5 * (this_R + next_L)
+            gap_w = next_L - this_R
+            if gap_w >= min_gap_px:
+                # Real valley between footprints — cut at gap midpoint.
+                mid = 0.5 * (this_R + next_L)
+            else:
+                # Footprints abut or overlap; cut between the projection
+                # centres themselves and let mask refinement find the
+                # nearest valley.
+                mid = 0.5 * (this_xpx + next_xpx)
             if mid <= sL + 2 or mid >= sR - 2:
                 continue
-            # Refine: snap split column to the within-gap minimum of
-            # building-mask column coverage. This is the actual
-            # inter-building separator when the mask has a real (if
-            # narrow) valley between the towers.
+            # Refine: snap split column to the building-mask column with
+            # lowest coverage within a window around the candidate cut.
+            # Generous window so we can find a thin valley even when the
+            # initial midpoint sits inside a tall column.
             if building_mask is not None:
-                wL = max(int(this_R), int(sL))
-                wR = min(int(next_L), int(sR))
+                search_half = max(8, int(0.5 * (next_xpx - this_xpx)))
+                wL = max(int(mid - search_half), int(sL))
+                wR = min(int(mid + search_half), int(sR))
                 if wR > wL:
                     col_cov = building_mask[:, wL:wR + 1].sum(axis=0)
                     mid = float(wL + int(np.argmin(col_cov)))
@@ -1919,6 +2360,135 @@ def osm_anchor_silhouettes(
             child["peak_x"] = child_peak
             child["osm_anchored"] = True
             out.append(child)
+
+    return sorted(out, key=lambda s: s["mid_x"])
+
+
+def osm_sam_instance_silhouettes(
+    image_rgb: np.ndarray,
+    segments: list[dict],
+    projections: list[dict],
+    *,
+    building_mask: "np.ndarray | None" = None,
+    min_proj_containment: float = 0.5,
+    min_marker_separation_px: int = 20,
+    confidence_floor: float = 0.65,
+    min_child_width_px: int = 4,
+) -> list[dict]:
+    """Split merged segments using MobileSAM prompted by OSM centroids (F-SKY5).
+
+    Replaces F-SKY3's heuristic Voronoi split with a learned instance-
+    segmentation model. Fires only on segments that contain ≥ 2 OSM marker
+    projections (the cases where F-SKY2 gap-based splitting and the matcher's
+    containment fallback did not already resolve the merge). When MobileSAM is
+    not installed or the checkpoint is missing, returns ``segments`` unchanged
+    (transparent no-op — the pipeline continues with F-SKY2 segments).
+
+    For each qualifying merged segment:
+    - Gather the OSM-projected centroids (x_px, mid_y) as SAM point prompts.
+    - Run MobileSAM; discard masks below ``confidence_floor``.
+    - Intersect each surviving mask with the SegFormer ``building_mask`` (when
+      provided) so SAM predictions that leak into sky / water are clipped.
+    - Bound children to the parent segment's [x_left, x_right] column range.
+    - Collapse sibling masks whose peaks are within ``min_marker_separation_px``
+      pixels (avoids over-segmenting a single tower into body + spire).
+    - If 0 masks survive the floor, leave the original segment unchanged.
+
+    See ``docs/plans/F-SKY5-mobilesam-instance.md``.
+    """
+    if not _mobilesam_available():
+        return list(segments)
+    if not segments or not projections:
+        return list(segments)
+
+    predictor = _mobilesam_predictor
+    h, w = image_rgb.shape[:2]
+    mid_y = h // 2
+
+    # Set image once for this call (MobileSAM caches the embedding internally).
+    import torch  # noqa: PLC0415
+    with torch.no_grad():
+        predictor.set_image(image_rgb)
+
+    out: list[dict] = []
+    for seg in segments:
+        sL = float(seg["x_left"])
+        sR = float(seg["x_right"])
+
+        # Collect OSM markers contained in this segment.
+        markers: list[tuple[float, float]] = []
+        for p in projections:
+            if _proj_containment_in_seg(sL, sR, p) >= min_proj_containment:
+                markers.append((float(p["x_px"]), float(mid_y)))
+
+        if len(markers) < 2:
+            out.append(seg)
+            continue
+
+        # Prompt SAM once per marker to get per-instance masks.
+        # Batching all points together returns a single mask covering the union;
+        # one point per call is the correct instance-segmentation pattern.
+        surviving: list[tuple[float, np.ndarray]] = []
+        for mx, my in markers:
+            try:
+                with torch.no_grad():
+                    masks_arr, scores_arr, _ = predictor.predict(
+                        point_coords=np.array([[mx, my]], dtype=np.float32),
+                        point_labels=np.array([1], dtype=np.int32),
+                        multimask_output=True,
+                    )
+            except Exception:
+                continue
+            # Pick the highest-confidence mask from the 3 multimask outputs.
+            best_idx = int(np.argmax(scores_arr))
+            best_score = float(scores_arr[best_idx])
+            if best_score < confidence_floor:
+                continue
+            m = masks_arr[best_idx].astype(bool)
+            if building_mask is not None:
+                m = m & building_mask.astype(bool)
+            m[:, :int(sL)] = False
+            m[:, int(sR) + 1:] = False
+            if not m.any():
+                continue
+            surviving.append((best_score, m))
+
+        if not surviving:
+            out.append(seg)
+            continue
+
+        # Sort by score descending; build non-overlapping child segments.
+        surviving.sort(key=lambda t: t[0], reverse=True)
+
+        children: list[dict] = []
+        used_cols: set[int] = set()
+        for _score, m in surviving:
+            cols = np.where(m.any(axis=0))[0]
+            if len(cols) == 0:
+                continue
+            cL, cR = float(cols[0]), float(cols[-1])
+            if cR - cL < min_child_width_px:
+                continue
+            peak_x = int(round(0.5 * (cL + cR)))
+            # Collapse: skip if a prior child's peak is within separation_px.
+            if any(abs(peak_x - c["peak_x"]) < min_marker_separation_px
+                   for c in children):
+                continue
+            if peak_x in used_cols:
+                continue
+            used_cols.update(range(int(cL), int(cR) + 1))
+            child = dict(seg)
+            child["x_left"] = cL
+            child["x_right"] = cR
+            child["mid_x"] = peak_x
+            child["peak_x"] = peak_x
+            child["sam_instance"] = True
+            children.append(child)
+
+        if not children:
+            out.append(seg)
+        else:
+            out.extend(children)
 
     return sorted(out, key=lambda s: s["mid_x"])
 
@@ -2062,9 +2632,26 @@ def match_segments_to_buildings(
             combined_intra = 0.55 * iou + 0.30 * w_score + 0.15 * (1.0 - occ)
             # Hard width disqualifier: a building projected 4× wider or
             # narrower than the segment is implausible as a match.
-            ratio = _proj_width(p) / _seg_width(seg)
-            if ratio > 4.0 or ratio < 0.25:
-                combined_intra *= 0.3
+            # EXCEPT when the segment was already cut by ``osm_anchor_silhouettes``
+            # — that splitter trims the segment to one tower's width
+            # exactly because the candidate footprint is wider than a
+            # single tower's silhouette; the ratio > 4 there is a
+            # signal of correctness, not implausibility.
+            if not seg.get("osm_anchored"):
+                ratio = _proj_width(p) / _seg_width(seg)
+                if ratio > 4.0 or ratio < 0.25:
+                    combined_intra *= 0.3
+            # Distance bias: closer buildings score higher. f(d) softly
+            # decays from ~1.0 at the camera to ~0.45 at 1500 m. The 0.7
+            # baseline + 0.3 weighting on the bonus caps the effect at
+            # ~22 % score swing between a 100 m and a 1500 m candidate,
+            # enough to flip the bucket when IoU is within ~0.10 of each
+            # other — the canonical "inland complex beats waterfront
+            # tower" failure mode — without tipping cases where a closer
+            # weak-IoU bush wins over the actual tower.
+            fwd_m = float(p.get("forward_m", 1e9))
+            depth_bonus = 1.0 / (1.0 + fwd_m / 500.0)
+            combined_intra *= (0.70 + 0.30 * depth_bonus)
             # F-SKY10: optional cross-view rerank. Score lookup is the
             # one expensive call (satellite ndarray slice + median RGB)
             # so it's gated on the candidate having passed the
@@ -2126,6 +2713,16 @@ def match_segments_to_buildings(
                 default=1e9)
             peak_x = float(seg.get(
                 "peak_x", (float(seg["x_left"]) + float(seg["x_right"])) * 0.5))
+            # Image-derived plausibility: a segment whose silhouette spans
+            # ≥ 100 px vertically is, in image space, a foreground building
+            # — the closest-strict-rescue can accept untagged candidates
+            # for it. Untagged condos / new construction in OSM have
+            # ``_height_proxy = 0``; the old gate (≥ 8 m) discarded
+            # the exact waterfront-tower rescue case that drives the
+            # "inland complex matched, foreground tower ignored" failure.
+            seg_pixel_height = (
+                float(seg.get("base_y", 0)) - float(seg.get("top_y", 0)))
+            seg_is_tall_in_image = seg_pixel_height >= 100.0
             for c, _iou, _w, _occ, p, _cv in scored:
                 if p in bucket:
                     continue
@@ -2137,7 +2734,13 @@ def match_segments_to_buildings(
                     continue
                 b = buildings_by_id.get(p["feature_id"])
                 h_proxy = _height_proxy(b) if b is not None else 0.0
-                if h_proxy < 8.0:
+                # Accept rescue when the OSM tag indicates a real
+                # building OR the image-space height says the segment
+                # itself is a foreground tower. Either signal alone is
+                # sufficient — a tagged 10 m+ candidate behind a short
+                # mask is still a real building; a 100+ px-tall segment
+                # in the image is unmistakably a tower regardless of tag.
+                if h_proxy < 8.0 and not seg_is_tall_in_image:
                     continue
                 bucket.append(p)
             bucket.sort(key=lambda p: float(p.get("forward_m", 1e9)))
@@ -2364,16 +2967,23 @@ def _building_vertex_arrays(
     )
 
 
-# Module-level cache keyed by id(buildings_list) — cleared automatically when
-# the list is garbage-collected. For a single PDF run we project the same
-# list across hundreds of offset candidates, so this saves a lot of work.
-_VERT_CACHE: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+# Module-level caches keyed by (id(buildings_list), len(buildings_list)).
+# Pure id() keying is unsafe across runs / seed iterations: when Python GCs
+# the old list and a NEW list of different size lands at the same memory
+# address, an id-only cache returns stale metadata whose
+# `building_idx_for_group` points past the end of the new list →
+# IndexError downstream in _project_all_buildings_vectorized. Including
+# `len(buildings)` in the key forces a recompute on any size change.
+# (Two same-size lists at the same id can still collide in principle but
+# that's a far narrower window than the size-change failure mode that
+# blocked Cartagena runs on 2026-05-24.)
+_VERT_CACHE: dict[tuple[int, int], tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
 
 
 def _get_vertex_arrays_cached(
     buildings: Sequence[BuildingRecord],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    key = id(buildings)
+    key = (id(buildings), len(buildings))
     cached = _VERT_CACHE.get(key)
     if cached is not None:
         return cached
@@ -2392,18 +3002,18 @@ def _get_vertex_arrays_cached(
 
 # Cache for per-buildings-list metadata (group_starts and building_idx_for_group)
 # so the same grouping work isn't repeated for every offset candidate.
-_GROUP_CACHE: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+# Same (id, len) key for the same reason as _VERT_CACHE.
+_GROUP_CACHE: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
 
 
 def _get_group_arrays_cached(
     buildings: Sequence[BuildingRecord],
 ) -> tuple[np.ndarray, np.ndarray] | None:
     """Return (group_starts, building_idx_for_group) for the packed vertex
-    arrays. Cached per buildings-list identity. group_starts gives the first
-    vertex index of each building's contiguous run; building_idx_for_group
-    gives the building index that each entry corresponds to.
+    arrays. Cached per (id, len) of the buildings list — see _VERT_CACHE
+    docstring above for why both components are needed.
     """
-    key = id(buildings)
+    key = (id(buildings), len(buildings))
     cached = _GROUP_CACHE.get(key)
     if cached is not None:
         return cached
@@ -3396,6 +4006,35 @@ def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) 
         for item in items:
             seed_name = _seed_from_view_name(item.view_name)
             per_seed_items.setdefault(seed_name, []).append(item)
+
+        # Per-view outlier rejection inside each seed: a single dissenting
+        # view (rooftop occluded by a tree, mis-bounded segment, depth
+        # blowup) can pull a seed's median 20+ m. When a seed has ≥3
+        # views of the same building, drop any view that's more than
+        # 2.5 MAD from the seed's per-view median before computing the
+        # seed's authoritative height. Improves cross-seed agreement
+        # numbers and aligns with the cross-view smoothing of matches
+        # (no point trusting a view whose match was overridden because
+        # the consensus disagreed).
+        per_view_outliers_dropped = 0
+        for seed_name, seed_its in list(per_seed_items.items()):
+            if len(seed_its) < 3:
+                continue
+            view_heights = np.asarray(
+                [it.estimated_height_m for it in seed_its], dtype=np.float32)
+            v_med = float(np.median(view_heights))
+            v_mad = float(np.median(np.abs(view_heights - v_med)))
+            if v_mad < 1.0:
+                continue
+            v_threshold = 2.5 * v_mad
+            kept = [
+                it for it, h in zip(seed_its, view_heights)
+                if abs(float(h) - v_med) <= v_threshold
+            ]
+            if kept and len(kept) < len(seed_its):
+                per_view_outliers_dropped += (len(seed_its) - len(kept))
+                per_seed_items[seed_name] = kept
+
         per_seed_median = {
             s: float(np.median([it.estimated_height_m for it in seed_its]))
             for s, seed_its in per_seed_items.items()}
@@ -3417,12 +4056,16 @@ def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) 
                     if abs(m - seed_median_overall) > threshold:
                         outlier_seeds.add(s)
 
-        # Build the effective items/heights/confidences (excluding outliers)
-        # for the aggregate. Keep the raw per-seed metadata for diagnostics.
-        eff_items = [
-            it for it in items
-            if _seed_from_view_name(it.view_name) not in outlier_seeds
-        ]
+        # Build the effective items/heights/confidences (excluding outliers).
+        # ``items`` is the raw input; rebuild from the per-view-filtered
+        # per_seed_items so per-view outliers are also removed.
+        survivors_set = set()
+        for seed_name, seed_its in per_seed_items.items():
+            if seed_name in outlier_seeds:
+                continue
+            for it in seed_its:
+                survivors_set.add(id(it))
+        eff_items = [it for it in items if id(it) in survivors_set]
         if not eff_items:
             eff_items = list(items)  # all were outliers — fall back to raw
         eff_heights = np.asarray(
@@ -3448,6 +4091,8 @@ def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) 
                 "feature_id": feature_id,
                 "name": items[0].name,
                 "n_views": int(heights.size),
+                "n_views_after_outlier_filter": int(eff_heights.size),
+                "n_view_outliers_dropped": int(per_view_outliers_dropped),
                 "n_seeds": len(per_seed_items),
                 "n_outlier_seeds": len(outlier_seeds),
                 "outlier_seeds": sorted(outlier_seeds),

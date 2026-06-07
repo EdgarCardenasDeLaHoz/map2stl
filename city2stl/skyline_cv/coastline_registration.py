@@ -304,6 +304,8 @@ def score_pano_offset_keypoints(
     pitch_deg: float = 0.0,
     tolerance_px: int = 25,
     column_match_tol_deg: float = 1.0,
+    max_signal_dist_m: float = 200.0,
+    use_base_y: bool = False,
 ) -> float:
     """Score how well the satellite key points line up with the pano's
     horizon line at a candidate heading offset.
@@ -327,8 +329,17 @@ def score_pano_offset_keypoints(
     H, W = pano_water_mask.shape[:2]
     if headings_per_col.size != W:
         return 0.0
-    n = 0
-    total = 0.0
+    # Distance weighting: at default max_signal_dist_m=200 a keypoint at
+    # 100 m contributes weight 1.0, at 500 m weight 0.4, at 1500 m weight
+    # 0.13. Compensates for the structural flaw where far keypoints all
+    # predict horizon-y (camera_h/D shrinks fast) and would otherwise
+    # out-vote the few near keypoints that carry the discriminative
+    # signal. Set max_signal_dist_m to a huge value to recover the
+    # original equal-weight behaviour. See F-SKY-AUDIT-2026-05-24.md
+    # "Underlying issue diagnosed" section for the seed_1 case study
+    # that motivated this.
+    weighted_sum = 0.0
+    weight_total = 0.0
     f_per_col_px = W / 360.0  # for the pitch-projection y term
     # The pano's "effective focal length" used for vertical projection
     # is W / 2π since 360° wraps to W pixels — so deg per px = 360 / W,
@@ -346,18 +357,28 @@ def score_pano_offset_keypoints(
         idx = int(np.argmin(np.abs(diffs)))
         if abs(float(diffs[idx])) > column_match_tol_deg:
             continue
-        column = pano_water_mask[:, idx]
-        water_rows = np.where(column)[0]
-        if water_rows.size == 0:
-            n += 1  # contributes 0 — keypoint expected but no water
-            continue
-        y_top_water = int(water_rows.min())
-        # Expected y for a sea-level point at the keypoint's distance
-        # (same formula as project_lonlat_to_view's vertical term, with
-        # per-pano-column focal equivalent at the local bearing).
         kp_dist = float(kp.get("distance_m", 0.0))
         if kp_dist <= 1.0:
             continue
+        # Distance-derived weight (1.0 for keypoints at or under
+        # max_signal_dist_m; falls off linearly with distance beyond).
+        weight = min(1.0, max_signal_dist_m / kp_dist)
+        column = pano_water_mask[:, idx]
+        water_rows = np.where(column)[0]
+        if water_rows.size == 0:
+            weight_total += weight  # contributes 0 to weighted_sum
+            continue
+        # Water/coastline keypoints sit at the horizon (top of water mask).
+        # Ground-plane keypoints (e.g. OSM park boundaries) sit at the BASE
+        # of the masked region instead — the bottom row where vegetation
+        # still appears in that pano column. Selectable so the same scoring
+        # function serves both registration channels.
+        y_top_water = (
+            int(water_rows.max()) if use_base_y else int(water_rows.min())
+        )
+        # Expected y for a sea-level point at the keypoint's distance
+        # (same formula as project_lonlat_to_view's vertical term, with
+        # per-pano-column focal equivalent at the local bearing).
         # Use the focal length the equivalent F-SKY11 75°-FOV view
         # would have at the same image height. Pano H is the same as a
         # per-view image, so a 75° FOV at this H gives:
@@ -370,9 +391,10 @@ def score_pano_offset_keypoints(
             + math.tan(p_rad) * focal_for_y
         )
         delta = abs(y_top_water - expected_y)
-        total += max(0.0, 1.0 - delta / float(tolerance_px))
-        n += 1
-    return (total / n) if n > 0 else 0.0
+        per_kp = max(0.0, 1.0 - delta / float(tolerance_px))
+        weighted_sum += per_kp * weight
+        weight_total += weight
+    return (weighted_sum / weight_total) if weight_total > 0.0 else 0.0
 
 
 def sweep_pano_heading_offset(
@@ -386,6 +408,8 @@ def sweep_pano_heading_offset(
     step_deg: float = 1.0,
     tolerance_px: int = 25,
     column_match_tol_deg: float = 1.0,
+    max_signal_dist_m: float = 200.0,
+    use_base_y: bool = False,
 ) -> tuple[float, np.ndarray, np.ndarray]:
     """Full 360°-of-offset sweep against the pano. Returns
     (best_offset_deg, cand_offsets_array, score_array).
@@ -404,10 +428,206 @@ def sweep_pano_heading_offset(
             seed_lat, seed_lon, c,
             pitch_deg=pitch_deg, tolerance_px=tolerance_px,
             column_match_tol_deg=column_match_tol_deg,
+            max_signal_dist_m=max_signal_dist_m,
+            use_base_y=use_base_y,
         )
         for c in cand_deg
     ], dtype=np.float32)
     best_idx = int(np.argmax(scores))
     return float(cand_deg[best_idx]), cand_deg, scores
+
+
+def _points_to_seed_polar(
+    points: "list[tuple[float, float]]",
+    seed_lat: float,
+    seed_lon: float,
+) -> "tuple[np.ndarray, np.ndarray]":
+    """Convert (lon, lat) points to seed-relative (bearing_deg, range_m).
+
+    Bearing is compass (0° = north, clockwise); range is planar metres
+    via the local lat/lon scale. Returns (bearings, ranges) float arrays.
+    Empty input → two empty arrays.
+    """
+    if not points:
+        return np.empty(0, dtype=np.float64), np.empty(0, dtype=np.float64)
+    mlat = _METRES_PER_DEG_LAT
+    mlon = _metres_per_deg_lon(seed_lat)
+    lons = np.array([p[0] for p in points], dtype=np.float64)
+    lats = np.array([p[1] for p in points], dtype=np.float64)
+    east = (lons - seed_lon) * mlon
+    north = (lats - seed_lat) * mlat
+    bearings = (np.degrees(np.arctan2(east, north)) + 360.0) % 360.0
+    ranges = np.hypot(east, north)
+    return bearings, ranges
+
+
+def pano_vegetation_base_to_lonlat(
+    pano_veg_mask: "np.ndarray",
+    headings_per_col: "np.ndarray",
+    seed_lat: float,
+    seed_lon: float,
+    *,
+    column_stride: int = 8,
+    pitch_deg: float = 0.0,
+    camera_elev_m: float = 1.7,
+    max_distance_m: float = 1500.0,
+    min_streak_px: int = 4,
+) -> list[tuple[float, float]]:
+    """Project the GROUND-CONTACT (base) of the vegetation band per column to
+    sea-level ``(lon, lat)`` (F-SKY18).
+
+    Same inverse pinhole as ``pano_water_top_to_lonlat`` but uses the
+    BOTTOM-most vegetation row in each column (where greenery meets the
+    ground) as the distance cue, since that's the point whose ground position
+    we can estimate. Ranges share the monocular unreliability — callers should
+    depth-snap the output to OSM green along bearing. ``min_streak_px`` ignores
+    thin speckle columns (a few stray green pixels aren't a real region).
+    """
+    if pano_veg_mask is None or pano_veg_mask.size == 0:
+        return []
+    H, W = pano_veg_mask.shape[:2]
+    if headings_per_col.size != W:
+        return []
+    focal_y = H / (2.0 * math.tan(math.radians(37.5)))
+    cy = H / 2.0
+    horizon_shift = math.tan(math.radians(pitch_deg)) * focal_y
+    mlat = _METRES_PER_DEG_LAT
+    mlon = _metres_per_deg_lon(seed_lat)
+    out: list[tuple[float, float]] = []
+    for col in range(0, W, max(1, column_stride)):
+        rows = np.where(pano_veg_mask[:, col])[0]
+        if rows.size < min_streak_px:
+            continue
+        y_base = float(rows.max())
+        denom = y_base - cy - horizon_shift
+        if denom <= 1.0:
+            continue
+        distance_m = camera_elev_m * focal_y / denom
+        if not (0.0 < distance_m <= max_distance_m):
+            continue
+        br = math.radians(float(headings_per_col[col]))
+        out.append((seed_lon + distance_m * math.sin(br) / mlon,
+                    seed_lat + distance_m * math.cos(br) / mlat))
+    return out
+
+
+def snap_points_to_osm_along_bearing(
+    pano_points: "list[tuple[float, float]]",
+    osm_points: "list[tuple[float, float]]",
+    seed_lat: float,
+    seed_lon: float,
+    *,
+    max_bearing_tol_deg: float = 4.0,
+) -> "list[tuple[float, float]]":
+    """Correct each pano point's bad range using OSM (F-SKY18 depth-snap).
+
+    Monocular projection gives an exact bearing but an unreliable range, so
+    the pano coastline dots scatter radially off the real coast. For each pano
+    point we keep its (trusted) bearing and replace its range with the range of
+    the nearest OSM point IN BEARING — i.e. we slide the dot along its own ray
+    until it lands on the OSM coastline. Points with no OSM feature within
+    ``max_bearing_tol_deg`` are dropped (nothing to snap to on that ray).
+
+    Returns the snapped (lon, lat) list (same order, minus unmatched points).
+    """
+    if not pano_points or not osm_points:
+        return list(pano_points)
+    pano_b, _pano_r = _points_to_seed_polar(pano_points, seed_lat, seed_lon)
+    osm_b, osm_r = _points_to_seed_polar(osm_points, seed_lat, seed_lon)
+    mlat = _METRES_PER_DEG_LAT
+    mlon = _metres_per_deg_lon(seed_lat)
+    out: list[tuple[float, float]] = []
+    for b in pano_b:
+        # Circular bearing distance to every OSM point.
+        diff = np.abs(((osm_b - b + 180.0) % 360.0) - 180.0)
+        j = int(np.argmin(diff))
+        if diff[j] > max_bearing_tol_deg:
+            continue
+        rng = float(osm_r[j])
+        br = math.radians(float(b))
+        east = rng * math.sin(br)
+        north = rng * math.cos(br)
+        out.append((seed_lon + east / mlon, seed_lat + north / mlat))
+    return out
+
+
+def coastline_icp_offset(
+    pano_points: "list[tuple[float, float]]",
+    osm_points: "list[tuple[float, float]]",
+    seed_lat: float,
+    seed_lon: float,
+    *,
+    search_range_deg: float = 180.0,
+    step_deg: float = 2.0,
+    max_range_m: float = 1000.0,
+    trim_frac: float = 0.2,
+    init_offset_deg: float = 0.0,
+) -> "tuple[float, np.ndarray, np.ndarray]":
+    """Register the pano-projected coastline to the OSM coastline by a
+    seed-centred rotation, returning the heading offset that best
+    aligns them (F-SKY16).
+
+    The two point sets are seed-centred, so registration is a pure
+    rotation (no translation). Bearings are trusted (exact stitch
+    geometry); ranges are NOT compared (the pano's radial depth is
+    unreliable — that's the whole motivation). For each candidate
+    offset we rotate the pano bearings, find each pano point's nearest
+    OSM point IN BEARING, and accumulate a trimmed mean of the absolute
+    bearing residuals. The offset minimising that residual wins.
+
+    Robustness:
+      - only OSM/pano points within ``max_range_m`` participate (far
+        coastline is where the pano depth is worst and OSM is densest)
+      - ``trim_frac`` drops the worst-matching fraction of pano points
+        before averaging (the pano arc is noisy; OSM isn't), so a
+        minority of bad correspondences can't dominate
+      - search is centred on ``init_offset_deg`` (pass the URL heading
+        or the keypoint-sweep result) to bias away from the 180°
+        bay-symmetry mirror
+
+    Returns ``(best_offset_deg, cand_deg, cost)`` — cost is the trimmed
+    mean bearing residual in degrees (LOWER is better, unlike the
+    keypoint sweep's score where higher is better). Returns
+    ``(init_offset_deg, empty, empty)`` when either point set is empty.
+    """
+    pano_b, pano_r = _points_to_seed_polar(pano_points, seed_lat, seed_lon)
+    osm_b, osm_r = _points_to_seed_polar(osm_points, seed_lat, seed_lon)
+    if pano_b.size == 0 or osm_b.size == 0:
+        return float(init_offset_deg), np.empty(0), np.empty(0)
+
+    pano_mask = pano_r <= max_range_m
+    osm_mask = osm_r <= max_range_m
+    pano_b = pano_b[pano_mask]
+    osm_b = osm_b[osm_mask]
+    if pano_b.size == 0 or osm_b.size == 0:
+        return float(init_offset_deg), np.empty(0), np.empty(0)
+
+    n = int(2.0 * search_range_deg / step_deg) + 1
+    cand_deg = np.linspace(
+        init_offset_deg - search_range_deg,
+        init_offset_deg + search_range_deg,
+        n,
+    )
+    osm_sorted = np.sort(osm_b)
+
+    def _trimmed_bearing_cost(offset: float) -> float:
+        world_b = (pano_b + offset) % 360.0
+        # Nearest OSM bearing per pano bearing via searchsorted on the
+        # sorted OSM bearing array, checking both neighbours + the wrap.
+        idx = np.searchsorted(osm_sorted, world_b)
+        idx_lo = (idx - 1) % osm_sorted.size
+        idx_hi = idx % osm_sorted.size
+        d_lo = np.abs((world_b - osm_sorted[idx_lo] + 180.0) % 360.0 - 180.0)
+        d_hi = np.abs((world_b - osm_sorted[idx_hi] + 180.0) % 360.0 - 180.0)
+        resid = np.minimum(d_lo, d_hi)
+        if trim_frac > 0.0 and resid.size > 4:
+            keep = int(round(resid.size * (1.0 - trim_frac)))
+            resid = np.sort(resid)[:max(1, keep)]
+        return float(resid.mean())
+
+    cost = np.array([_trimmed_bearing_cost(float(c)) for c in cand_deg],
+                    dtype=np.float64)
+    best_idx = int(np.argmin(cost))
+    return float(cand_deg[best_idx]) % 360.0, cand_deg, cost
 
 

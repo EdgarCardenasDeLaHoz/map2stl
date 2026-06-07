@@ -275,6 +275,18 @@ def fetch_osm_data(
             keep_cols=["name", "historic"], label="fortifications",
         )
 
+    if "green" in layers:
+        # F-SKY18 vegetation landmarks: parks / grass / forest / wood as
+        # polygon areas, used to match pano vegetation regions by bearing.
+        result["green"] = _fetch_polygon_layer(
+            ox, bbox,
+            tags={"leisure": ["park", "garden", "recreation_ground"],
+                  "landuse": ["grass", "forest", "meadow", "recreation_ground", "village_green"],
+                  "natural": ["wood", "scrub", "grassland"]},
+            height_default=0.0, height_lo=0.0, height_hi=0.0,
+            keep_cols=["name", "leisure", "landuse", "natural"], label="green",
+        )
+
     result["city_pipeline_version"] = 2
 
     return result

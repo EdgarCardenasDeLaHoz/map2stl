@@ -28,7 +28,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from city2stl.height import BBox, HeightResult
+from city2stl.skyline_cv.height import BBox, HeightResult
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +58,25 @@ def _load_da2(device: str = "cpu"):
             "Install with: pip install transformers"
         ) from exc
 
-    logger.info("Loading Depth Anything V2 Small from HuggingFace...")
+    # F-SKY24 depth experiment: env var ``SKYLINE_CV_DA2_VARIANT``
+    # selects Small / Base / Large. Default Small — empirical test on
+    # Miami showed Base produces visually identical output at ~3x CPU
+    # cost (Method 2 finding). Larger variants kept as opt-in for users
+    # with GPU budget who want to retest the comparison.
+    import os as _os  # noqa: PLC0415
+    variant = _os.environ.get(
+        "SKYLINE_CV_DA2_VARIANT", "Small").strip()
+    if variant not in ("Small", "Base", "Large"):
+        variant = "Small"
+    model_id = f"depth-anything/Depth-Anything-V2-{variant}-hf"
+    logger.info("Loading Depth Anything V2 %s from HuggingFace...", variant)
     _da2_model = hf_pipeline(
         task="depth-estimation",
-        model="depth-anything/Depth-Anything-V2-Small-hf",
+        model=model_id,
         device=device,
         cache_dir=str(_DA2_CACHE_DIR),
     )
-    logger.info("Depth Anything V2 Small loaded")
+    logger.info("Depth Anything V2 %s loaded", variant)
     return _da2_model
 
 

@@ -16,7 +16,7 @@ for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from city2stl.height.providers.google_3d import (
+from city2stl.skyline_cv.height.providers.google_3d import (
     Google3DProvider,
     ecef_to_wgs84,
     wgs84_to_ecef,
@@ -262,7 +262,7 @@ class TestGoogle3DProvider:
                     return MockResp(json.dumps(tileset).encode(), is_json=True)
                 return MockResp(glb_bytes)
 
-        monkeypatch.setattr("city2stl.height.providers.google_3d.requests.Session",
+        monkeypatch.setattr("city2stl.skyline_cv.height.providers.google_3d.requests.Session",
                             MockSession)
 
         p = Google3DProvider(api_key="test-key", max_tiles=10)
@@ -335,7 +335,7 @@ class TestGoogle3DProvider:
                     return MockResp(json_mod.dumps(tileset).encode())
                 return MockResp(glb_bytes)
 
-        monkeypatch.setattr("city2stl.height.providers.google_3d.requests.Session",
+        monkeypatch.setattr("city2stl.skyline_cv.height.providers.google_3d.requests.Session",
                             MockSession)
 
         # DEM at 100m terrain → building height should be ~50m

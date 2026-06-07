@@ -474,7 +474,8 @@ window.drawLayerGrid = function drawLayerGrid() {
     const { scale, offsetX, offsetY } = stackZoom;
     const densityCheck = Math.max(2, parseInt(document.getElementById('gridlineCount')?.value || '10', 10));
     const showGrid = document.getElementById('showGridlines')?.checked ?? true;
-    const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${_gridPixelMode}|${showGrid}`;
+    const projection = document.getElementById('paramProjection')?.value || 'none';
+    const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${_gridPixelMode}|${showGrid}|${projection}`;
     if (newKey === _gridCacheKey) return;
     _gridCacheKey = newKey;
 

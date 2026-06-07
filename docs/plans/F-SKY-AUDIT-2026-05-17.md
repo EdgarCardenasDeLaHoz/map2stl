@@ -1,4 +1,11 @@
-# skyline_cv audit — 2026-05-17
+# skyline_cv audit — 2026-05-17 (SUPERSEDED)
+
+> **Superseded by [F-SKY-AUDIT-2026-05-24.md](F-SKY-AUDIT-2026-05-24.md)**
+> — 11 of 13 F-CLEAN proposals shipped since this baseline, and a new
+> pano-recovery non-determinism finding emerged on 2026-05-24. This
+> document is kept verbatim as the original audit snapshot; the
+> refresh has the current state, current open items, and the new
+> recommendations.
 
 Status: **audit only**. No code changes in this iteration. Items below
 are individually small but each has its own proposal entry so cleanup
@@ -94,16 +101,19 @@ diagnostic value over the 6 months it's been live.
 ### O2. F-SKY10 `cv` field in `match_diagnostics`
 
 When `use_cross_view_scoring=true`, every matched-segment candidate
-gets a `cv` entry in `match_diagnostics`. The PDF render code never
-reads this field. The flag is default-off so the overhead is
-conditional, but the dead-output pattern is the same as O1.
+gets a `cv` entry in `match_diagnostics` from a blend of three
+signals (colour 0.5 + width 0.3 + edges 0.2 — all three now
+implemented in `cross_view.py` as of 2026-05-17). The PDF render
+code reads `iou`, `width_score`, `occlusion`, `forward_m` from the
+same dict but NOT `cv`. The flag is default-off so overhead is
+conditional.
 
-→ **Proposal F-CLEAN5**: either surface `cv` in the per-view diag
-table (the PDF page already shows other `match_diagnostics` fields),
-or drop the field and the scorer wiring entirely. Path A is the
-"keep the diagnostic capability" call; Path B is the "F-SKY10
-intent is superseded by F-SKY11.1" call. The consolidation plan
-already favours Path B.
+→ **Proposal F-CLEAN5 (revised)**: surface `cv` (plus its three
+component sub-scores) in the per-view PDF audit table. The
+infrastructure exists; only the renderer doesn't read it.
+Previously this proposal entertained "drop the wiring" — that's no
+longer on the table now that all three signals have been built out
+(see `docs/plans/F-SKY10-F-SKY11.2-IMPLEMENTATION-2026-05-17.md`).
 
 ## Conditionally-wired with weak gates
 
@@ -222,23 +232,25 @@ exercised". Reveals whatever's broken before the user finds it.
 
 ## Summary table
 
-| ID | Action | Type | Effort | Estimated LOC removed |
-|---|---|---|---|---|
-| F-CLEAN1 | Delete `config.py` | Dead code | 5 min | 123 |
-| F-CLEAN2 | Remove `osm_marker_voronoi_silhouettes` + reference | Dead code | 15 min | ~125 |
-| F-CLEAN3 | Inline `_make_sky_mask_from_bool` | Trivial | 5 min | 12 |
-| F-CLEAN4b | Drop floor-period compute + 4 unread fields | Dead-output | 1 h | ~120 |
-| F-CLEAN5 | Surface `cv` in PDF OR drop F-SKY10 wiring | Dead-output | 1-2 h | varies |
-| F-CLEAN6 | Delete `pano_birdseye.py` + script 13 | Dead-end | 10 min | 672 |
-| F-CLEAN7 | Consolidate 8 site loaders → 1 helper | Boilerplate | 1 h | ~150 |
-| F-CLEAN8 | Split `_seed_multiview_registration` (918 lines) | Refactor | 1–2 days | reorg only |
-| F-CLEAN9 | Rewrite STATUS.md top | Docs | 30 min | doc cleanup |
-| F-CLEAN10 | Archive `cartagena-audit-2026-05.md` | Docs | 5 min | 78 |
-| F-CLEAN11 | Archive `implementation-plan.md` | Docs | 5 min | 158 |
-| F-CLEAN12 | Update `glass-roof-height-fix-plan.md` header | Docs | 5 min | – |
-| F-CLEAN13 | Measure chicago + miami end-to-end | Validation | 30 min | – |
+| ID | Action | Type | Effort | Estimated LOC removed | Status (2026-05-24) |
+|---|---|---|---|---|---|
+| F-CLEAN1 | Delete `config.py` | Dead code | 5 min | 123 | ✅ done |
+| F-CLEAN2 | Remove `osm_marker_voronoi_silhouettes` + reference | Dead code | 15 min | ~125 | ✅ done (2026-05-18) |
+| F-CLEAN3 | Inline `_make_sky_mask_from_bool` | Trivial | 5 min | 12 | ✅ done |
+| F-CLEAN4b | Drop floor-period compute + 4 unread fields | Dead-output | 1 h | ~120 | ✅ done — gated behind `compute_floor_period=False` |
+| F-CLEAN5 | Surface `cv` in PDF | Dead-output | 1-2 h | UI add | ✅ done (2026-05-24) — `cv̄=X.XX/min=Y.YY` in per-view header |
+| F-CLEAN6 | Delete `pano_birdseye.py` + script 13 | Dead-end | 10 min | 672 | ✅ done |
+| F-CLEAN7 | Consolidate 8 site loaders → 1 helper | Boilerplate | 1 h | ~150 | ✅ done via `_read_site_config` |
+| F-CLEAN8 | Split `_seed_multiview_registration` (now **1211 lines**) | Refactor | 1–2 days | reorg only | ⏳ pending (grown from 918 since audit) |
+| F-CLEAN9 | Rewrite STATUS.md top | Docs | 30 min | doc cleanup | ✅ done (2026-05-24) |
+| F-CLEAN10 | Archive `cartagena-audit-2026-05.md` | Docs | 5 min | 78 | ✅ done (2026-05-24) |
+| F-CLEAN11 | Archive `implementation-plan.md` | Docs | 5 min | 158 | ✅ done (2026-05-24) |
+| F-CLEAN12 | Update `glass-roof-height-fix-plan.md` header | Docs | 5 min | – | ✅ done (2026-05-24) |
+| F-CLEAN13 | Measure chicago + miami end-to-end | Validation | 30 min | – | ⏳ pending (needs API key + run) |
 
-**Total trivial / quick wins: ~1300 LOC removable in ~3 hours.**
+**Closed so far**: 11 of 13. ~**1300 LOC** removed/archived/gated.
+**Outstanding**: F-CLEAN8 (the big refactor — now 1211 lines vs 918 at audit
+time), F-CLEAN13 (validation run on Chicago + Miami end-to-end).
 
 ## Recommended order
 
@@ -274,10 +286,10 @@ unrelated cleanup.
 
 ## Open questions for the user
 
-1. **F-CLEAN5**: keep F-SKY10 wiring for future per-building
-   experiments, or rip it out now since F-SKY11.1 supersedes the
-   *intent*? Both are defensible; the consolidation plan favours
-   rip-it-out.
+1. ~~F-CLEAN5: keep or rip F-SKY10~~ — resolved by the
+   2026-05-17 expansion of `cross_view.py` to all three signals.
+   The clean revised action is "surface the `cv` field in the PDF
+   audit table" (F-CLEAN5 revised above).
 2. **F-CLEAN8**: who owns the time for the 918-line function split?
    It's a 1–2 day refactor with real regression risk that's worth
    doing but not urgent.

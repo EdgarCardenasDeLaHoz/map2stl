@@ -48,6 +48,11 @@ STAGES: tuple[str, ...] = (
     "geometric_y_gate",
     "drop_geometric_gate",
     "drop_plausibility_tag",
+    # Tag-disagreement filter (pipeline.py): drops a tagged building's per-view
+    # estimate when |pred - tag| > min(2*tag, 50 m). This is the gate that
+    # silently discards under-predicting glass-tower views, so it MUST be a
+    # recorded stage for the Phase-1 height trace to see the failure.
+    "drop_tag_disagreement",
     "drop_plausibility_area",
     "emit",
 )

@@ -73,7 +73,8 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
             if (!clipChk) return;
             const noProjection = projSelect.value === 'none';
             clipChk.disabled = noProjection;
-            clipChk.closest('label')?.classList.toggle('disabled', noProjection);
+            const label = clipChk.closest('label');
+            if (label) label.classList.toggle('disabled', noProjection);
             clipChk.title = noProjection
                 ? 'Clip edges has no effect when projection is None.'
                 : 'Strip all-NaN border rows/columns introduced by projection warping.';

@@ -19,7 +19,8 @@
         Import
       </button>
         <button class="sidebar-vis-btn" id="bboxVisToggleBtn"
-                title="Show/hide region boxes on map">👁</button>
+                title="Show/hide region boxes on map"
+                @click="toggleBboxVis">👁</button>
         <button class="sidebar-toggle-btn" id="sidebarToggleBtn"
                 :title="`${stateLabel} sidebar (${stateDescription})`"
                 :aria-label="`Toggle sidebar: currently ${mode} — ${stateLabel} to ${nextStateDescription}`"
@@ -47,7 +48,7 @@
       <SidebarEditView :visible="editViewOpen" @back="editViewOpen = false" />
 
       <!-- Expanded table (expanded mode) -->
-      <RegionListTable v-if="mode === 'expanded'" />
+      <RegionListTable v-show="mode === 'expanded'" />
 
       <!-- New region -->
       <NewRegionSection />
@@ -117,6 +118,10 @@ function handleOpenSidebarClick() {
 }
 
 let _openSidebarButton: HTMLElement | null = null;
+
+function toggleBboxVis() {
+  window.toggleBboxLayerVisibility?.();
+}
 
 function exportRegions() {
   (window as any).exportRegionsJson?.();

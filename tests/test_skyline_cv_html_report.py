@@ -104,50 +104,35 @@ class TestRenderSeedPage:
         html = render_seed_page(fake_sv, "cartagena", minimap_rel_path=None)
         assert "Minimap unavailable" in html
 
-    def test_estimates_table_renders_depth_columns(self, fake_sv):
+    def test_estimates_accepted_and_page_renders(self, fake_sv):
+        """The per-seed estimates *text table* was removed in the
+        pano-layered report restructure (F-SKY15): per-building depth
+        diagnostics now surface visually on the pano report's
+        Reconstruction/Depth tabs and badge overlays, not as an HTML
+        table. ``render_seed_page`` still accepts the ``estimates`` kwarg
+        for backward compatibility — this test pins that it consumes the
+        records without error and emits a valid page identifying the
+        seed."""
         from types import SimpleNamespace
         ests = [
             SimpleNamespace(
-                feature_id="b0142",
-                name="Torre del Reloj",
-                view_name="v3",
-                forward_m=180.5,
-                estimated_height_m=52.0,
-                depth_height_m=48.0,
-                depth_disagreement=False,
+                feature_id="b0142", name="Torre del Reloj", view_name="v3",
+                forward_m=180.5, estimated_height_m=52.0,
+                depth_height_m=48.0, depth_disagreement=False,
                 confidence=0.91,
             ),
             SimpleNamespace(
-                feature_id="b0150",
-                name="",
-                view_name="v4",
-                forward_m=210.0,
-                estimated_height_m=72.0,
-                depth_height_m=20.0,
-                depth_disagreement=True,
+                feature_id="b0150", name="", view_name="v4",
+                forward_m=210.0, estimated_height_m=72.0,
+                depth_height_m=20.0, depth_disagreement=True,
                 confidence=0.62,
             ),
         ]
         html = render_seed_page(fake_sv, "cartagena", None, estimates=ests)
-        assert "b0142" in html
-        assert "Torre del Reloj" in html
-        # Depth heights appear with their unit
-        assert "48.0 m" in html
-        assert "20.0 m" in html
-        # Disagreement row gets the "disagree" CSS class
-        assert 'class="disagree"' in html
-
-    def test_depth_dash_when_unavailable(self, fake_sv):
-        from types import SimpleNamespace
-        ests = [SimpleNamespace(
-            feature_id="b0001", name="", view_name="v1",
-            forward_m=100.0, estimated_height_m=30.0,
-            depth_height_m=None, depth_disagreement=None,
-            confidence=0.5,
-        )]
-        html = render_seed_page(fake_sv, "cartagena", None, estimates=ests)
-        # The depth column shows the em-dash placeholder
-        assert "—" in html
+        assert html.startswith("<!doctype html>")
+        # Seed identity from the summary panel is present.
+        assert "5" in html and "cartagena" in html
+        assert "10.4069" in html  # seed lat from the summary table
 
     def test_html_escaping(self):
         from types import SimpleNamespace
@@ -303,10 +288,13 @@ class TestWriteRegionReport:
         assert seed_files == []
 
     def test_auto_collects_view_estimates(self, fake_sv, tmp_path):
-        """F-SKY15 wiring: if SeedViewRegistration has view_estimates
-        populated (set by the pipeline when F-SKY12 runs), the HTML
-        report picks them up without needing estimates_by_seed
-        explicitly. This is the path the depth diagnostics flow through.
+        """F-SKY15 wiring: when a SeedViewRegistration carries
+        ``view_estimates`` (set by the pipeline when F-SKY12 runs), the
+        report consumes them without needing ``estimates_by_seed``
+        passed explicitly. The pano-layered restructure dropped the
+        per-estimate *text table*, so we no longer assert the estimate's
+        name/id as page text — instead we pin that the auto-collection
+        path runs end-to-end and produces a valid per-seed page.
         """
         from types import SimpleNamespace
         from city2stl.skyline_cv.html_report import write_region_report
@@ -327,8 +315,10 @@ class TestWriteRegionReport:
             tmp_path, region_name="auto",
             seed_views=[fake_sv], osm_data={},
         )
-        page = (tmp_path / "seed_5.html").read_text(encoding="utf-8")
-        # The estimate should appear in the page even though we never
-        # passed estimates_by_seed explicitly
-        assert "AutoCollected Tower" in page
-        assert "b0999" in page
+        page_path = tmp_path / "seed_5.html"
+        assert page_path.exists()
+        page = page_path.read_text(encoding="utf-8")
+        # Valid page that identifies the seed (estimates flow into the
+        # pano visual layers, not a text table any more).
+        assert page.startswith("<!doctype html>")
+        assert "5" in page

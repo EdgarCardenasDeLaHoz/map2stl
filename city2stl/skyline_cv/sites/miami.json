@@ -6,15 +6,15 @@
   "west": -80.22,
   "seed_urls": [
     "https://www.google.com/maps/@25.7753,-80.1868,3a,75y,185h,87t/",
-    "https://www.google.com/maps/place/Miami,+FL/@25.7697585,-80.1786411,3a,75y,320.28h,100.98t/data=!3m8!1e1!3m6!1sCIHM0ogKEICAgIDm3b7XyQE!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf53tFE-sfUbNrE_5AYhWDKDqiCSNhdGl4H93Ix5gTqF6NjahQH0Vt1UsYbtWDf432AnQM88BN6x32aoFb7O4nq3698WxWsdC9NF0Zo0z7yZldNdIUiOKpGDE1dp6e_rz7konzl4e0Q%3Dw900-h600-k-no-pi-10.983190638793289-ya64.88082302985038-ro0-fo100!7i5472!8i2736",
+    "https://www.google.com/maps/place/Miami,+FL/@25.7697585,-80.1786411,3a,75y,306.43h,108.94t/data=!3m11!1e1!3m9!1sCIHM0ogKEICAgIDm3b7XyQE!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf50qZizKQBuP6muryDqoLzfRgNoogJOipz8eNqERCa8yKACnmjzhRgVxfGyX-qVRbg8uKWiqpA-TCeJGPhfDW_eSaZTu_Cnuun2ULmrvgflPqNZU2C0vqXbfYyyJhHX2VLRGaGa_yA%3Dw900-h600-k-no-pi-18.940616087721523-ya51.03533404158833-ro0-fo100!7i5472!8i2736",
     "https://www.google.com/maps/place/Miami,+FL/@25.7757033,-80.18224,3a,75y,245.49h,95.22t/data=!3m8!1e1!3m6!1sCIHM0ogKEICAgIDUj7r5YA!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf5099lRfG9vIbbFlg-y5jJPIcHWDFuyKnfSkcA3jcIrtiqGPw3cvrA5NFR0voVksxozO60wlOQEcvL5Isvh-mxt8dkT_R-Z4-WMht5Q_DppELYv3nDS3dC7oiKdHzRpLk8pHeXvM%3Dw900-h600-k-no-pi-5.222818196613872-ya245.49463481035048-ro0-fo100!7i8192!8i4096",
-    "https://www.google.com/maps/place/Miami,+FL/@25.752425,-80.19027,3a,41.1y,9.66h,93.55t/data=!3m8!1e1!3m6!1sCIHM0ogKEICAgID2pajyfA!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf52K4a4hc5NLsaNPpNxCsnZSMjLYiKUQokVZriWiU-ntWiajNzp-XxRheceDyPphFPFDIuhSYR0B9dXI3Pt7awSMoNyBi-WPb0qFFOQsI-ShwHTTF3g-NWglG5wOgQlHaomf6XRs%3Dw900-h600-k-no-pi-3.5497364343333544-ya9.656848750797185-ro0-fo100!7i14400!8i7200"
+    "https://www.google.com/maps/place/Miami,+FL/@25.752425,-80.19027,3a,75y,42.57h,97.01t/data=!3m11!1e1!3m9!1sCIHM0ogKEICAgID2pajyfA!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf50RGI7rTfSwMyYiRt_lcXTDr6mIubdfOZJoNo2rXzosneYaPThoxtjVjJ8WJZIqzKJGaCRhJ1TzQywFUDRaQm2llYvYmVWX0Y7g6Po4hNuJYg2yfoHBGWrhlLJWkN6nkwojAluP%3Dw900-h600-k-no-pi-7.012460019409602-ya42.57203699321361-ro0-fo100!7i14400!8i7200"
   ],
   "_seed_url_notes": [
     "seed_1: Bayside Marketplace waterfront, heading 185° (south) toward Brickell towers — synthetic",
-    "seed_2: Photo Sphere @ 25.7698,-80.1786 hdg 320° — Brickell waterfront, NW toward CBD",
+    "seed_2: Photo Sphere @ 25.7698,-80.1786 hdg 306.43° (user-refined 2026-06-02, was 320°) — NW toward CBD. Alt heading 298.9° available for same pano.",
     "seed_3: Photo Sphere @ 25.7757,-80.1822 hdg 245° — Biscayne Bay, SW toward Brickell",
-    "seed_4: Photo Sphere @ 25.7524,-80.1903 hdg 10°  — south Brickell, N toward skyline",
+    "seed_4: Photo Sphere @ 25.7524,-80.1903 hdg 42.57° (user-refined 2026-06-02, was ~10°) — south Brickell, NE toward skyline",
     "_removed: Virginia Key synthetic (@25.7538,-80.1593,320h) — snapped to bad location, no buildings detected"
   ],
   "known_heights_m": {

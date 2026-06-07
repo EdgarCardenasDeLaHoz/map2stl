@@ -64,6 +64,71 @@ def extract_coastline_features(osm_data: dict) -> list[dict]:
     return out
 
 
+def extract_green_features(osm_data: dict) -> list[dict]:
+    """Return vegetation-area polygons from the ``green`` layer (F-SKY18).
+
+    The ``green`` layer is populated by ``fetch.fetch_osm_data`` when
+    requested: leisure=park/garden, landuse=grass/forest/meadow, natural=
+    wood/scrub/grassland. Only Polygon/MultiPolygon geometries are kept —
+    their boundaries become bearing landmarks matched against pano vegetation.
+    """
+    out: list[dict] = []
+    for feat in list((osm_data.get("green") or {}).get("features") or []):
+        geom = (feat.get("geometry") or {}).get("type")
+        if geom in ("Polygon", "MultiPolygon"):
+            out.append(feat)
+    return out
+
+
+def sample_green_points(
+    features: list[dict],
+    spacing_m: float = 20.0,
+) -> list[tuple[float, float]]:
+    """Evenly-spaced (lon, lat) points along green-area polygon boundaries.
+
+    Mirrors ``sample_coastline_points`` but walks each Polygon/MultiPolygon
+    exterior ring (the visible vegetation edge) instead of a LineString.
+    """
+    out: list[tuple[float, float]] = []
+    for feat in features:
+        geom = feat.get("geometry") or {}
+        gtype = geom.get("type")
+        coords = geom.get("coordinates")
+        if not coords:
+            continue
+        rings: list = []
+        if gtype == "Polygon":
+            rings = [coords[0]] if coords else []
+        elif gtype == "MultiPolygon":
+            rings = [poly[0] for poly in coords if poly]
+        for ring in rings:
+            out.extend(_resample_line(ring, spacing_m))
+    return out
+
+
+def _resample_line(line: list, spacing_m: float) -> list[tuple[float, float]]:
+    """Evenly-resample a single [lon,lat] polyline/ring (shared helper)."""
+    pts: list[tuple[float, float]] = []
+    if not line or len(line) < 2:
+        return pts
+    carry = 0.0
+    prev_lon, prev_lat = float(line[0][0]), float(line[0][1])
+    pts.append((prev_lon, prev_lat))
+    for vert in line[1:]:
+        lon, lat = float(vert[0]), float(vert[1])
+        seg_m = _haversine_m(prev_lon, prev_lat, lon, lat)
+        if seg_m <= 0.0:
+            prev_lon, prev_lat = lon, lat
+            continue
+        t = (spacing_m - carry) / seg_m
+        while t <= 1.0:
+            pts.append((prev_lon + t * (lon - prev_lon), prev_lat + t * (lat - prev_lat)))
+            t += spacing_m / seg_m
+        carry = (carry + seg_m) % spacing_m
+        prev_lon, prev_lat = lon, lat
+    return pts
+
+
 def extract_water_features(osm_data: dict) -> list[dict]:
     """Return water-area polygons (excluding bare coastline linestrings).
 
@@ -169,6 +234,35 @@ def _iter_linestring_coords(feat: dict) -> Iterable[list[list[float]]]:
     elif gtype == "MultiLineString":
         for ring in coords:
             yield ring
+
+
+def green_keypoints_for_scoring(
+    green_features: list[dict],
+    seed_lonlat: tuple[float, float],
+    spacing_m: float = 20.0,
+) -> list[dict]:
+    """Convert OSM green polygons (parks/grass/forests) into scoring keypoints.
+
+    Mirrors ``osm_keypoints_for_scoring`` but walks polygon exteriors via
+    ``sample_green_points``. Used by the pano vegetation-keypoint heading
+    sweep so the registration solver can lock onto visible grass / park
+    edges in views with little or no water.
+    """
+    out: list[dict] = []
+    lon0, lat0 = seed_lonlat
+    for lon, lat in sample_green_points(green_features, spacing_m=spacing_m):
+        dx, dy = lonlat_to_local_m(lon, lat, lon0, lat0)
+        distance_m = math.hypot(dx, dy)
+        if distance_m < 1.0:
+            continue
+        bearing_deg = math.degrees(math.atan2(dx, dy)) % 360.0
+        out.append({
+            "lon": lon,
+            "lat": lat,
+            "distance_m": distance_m,
+            "bearing_deg": bearing_deg,
+        })
+    return out
 
 
 def osm_keypoints_for_scoring(

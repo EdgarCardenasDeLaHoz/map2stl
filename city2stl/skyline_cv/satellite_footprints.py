@@ -234,11 +234,77 @@ def fetch_microsoft_buildings_for_bbox(
     return out
 
 
+def _estimate_ms_osm_offset(
+    sat_polygons: list[dict],
+    osm_geoms: list,
+    tree: "STRtree | None",
+    seed_lat: float,
+    *,
+    pair_max_dist_m: float = 30.0,
+    area_ratio_lo: float = 0.5,
+    area_ratio_hi: float = 2.0,
+    min_pairs: int = 8,
+) -> tuple[float, float] | None:
+    """Estimate the global (lon, lat) offset between the MS and OSM sources
+    (F-SKY17).
+
+    OSM and Microsoft ML footprints are independently georeferenced, so the
+    same building is positionally offset between them; the area-IoU dedup
+    then fails to merge the pair. We estimate the offset as the *median*
+    centroid displacement (MS − OSM) over near-neighbour pairs that are
+    plausibly the same building (close centroids + similar area), then the
+    caller translates all MS polygons by ``-offset`` before dedup.
+
+    Returns ``(dlon, dlat)`` in degrees, or ``None`` when fewer than
+    ``min_pairs`` plausible pairs are found (offset unreliable → caller
+    proceeds without registration).
+    """
+    if tree is None or not osm_geoms:
+        return None
+    mlat = 110_540.0
+    mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+    dx_list: list[float] = []
+    dy_list: list[float] = []
+    for s in sat_polygons:
+        sg = s.get("geometry")
+        if sg is None or sg.is_empty:
+            continue
+        sc = sg.centroid
+        # Nearest OSM polygon by geometry; STRtree.nearest returns an index.
+        try:
+            idx = int(tree.nearest(sg))
+        except Exception:
+            continue
+        og = osm_geoms[idx]
+        oc = og.centroid
+        dlon = sc.x - oc.x
+        dlat = sc.y - oc.y
+        dist_m = math.hypot(dlon * mlon, dlat * mlat)
+        if dist_m > pair_max_dist_m:
+            continue
+        # Similar-area gate so we pair building↔building, not a small MS
+        # polygon against a large OSM block that merely happens to be near.
+        oa = og.area
+        sa = sg.area
+        if oa <= 0.0 or sa <= 0.0:
+            continue
+        ratio = sa / oa
+        if ratio < area_ratio_lo or ratio > area_ratio_hi:
+            continue
+        dx_list.append(dlon)
+        dy_list.append(dlat)
+    if len(dx_list) < min_pairs:
+        return None
+    import statistics
+    return (statistics.median(dx_list), statistics.median(dy_list))
+
+
 def merge_satellite_into_osm(
     osm_buildings: list[BuildingRecord],
     sat_polygons: list[dict],
     *,
     iou_dedup_threshold: float = 0.5,
+    register_to_osm: bool = True,
 ) -> list[BuildingRecord]:
     """Add satellite polygons as additional ``BuildingRecord`` entries,
     skipping ones that duplicate an existing OSM polygon (interval IoU
@@ -249,6 +315,10 @@ def merge_satellite_into_osm(
     ``_height_proxy`` sqrt-area fallback then governs their downstream
     weighting. ``feature_id`` gets a stable ``ms_<hash>`` prefix so the
     matcher can use it like any OSM id.
+
+    When ``register_to_osm`` is set (default), the MS polygons are first
+    shifted by the estimated global MS→OSM offset (F-SKY17) so the dedup
+    sees aligned polygons and the matcher inherits corrected geometry.
     """
     if not sat_polygons:
         return osm_buildings
@@ -258,6 +328,33 @@ def merge_satellite_into_osm(
     # Cartagena-scale region (≈ 12 hours). STRtree's bbox prefilter cuts
     # that to ~10 candidates per satellite polygon (a few seconds total).
     tree = STRtree(osm_geoms) if osm_geoms else None
+
+    # ── F-SKY17: register MS→OSM before dedup ───────────────────────────────
+    # Estimate the global offset from near-neighbour pairs and translate all
+    # MS polygons by -offset, so positionally-offset twins now overlap and the
+    # IoU dedup can merge them (instead of keeping both).
+    if register_to_osm and tree is not None:
+        seed_lat = osm_buildings[0].centroid_lat if osm_buildings else 0.0
+        offset = _estimate_ms_osm_offset(sat_polygons, osm_geoms, tree, seed_lat)
+        if offset is not None:
+            from shapely.affinity import translate
+            dlon, dlat = offset
+            mlat = 110_540.0
+            mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+            shifted: list[dict] = []
+            for s in sat_polygons:
+                sg = s.get("geometry")
+                if sg is None or sg.is_empty:
+                    shifted.append(s)
+                    continue
+                shifted.append({**s, "geometry": translate(sg, xoff=-dlon, yoff=-dlat)})
+            sat_polygons = shifted
+            print(f"[ms_buildings] F-SKY17 registered MS->OSM by "
+                  f"({-dlon * mlon:.1f}, {-dlat * mlat:.1f}) m before dedup")
+        else:
+            print("[ms_buildings] F-SKY17 skipped — too few plausible "
+                  "OSM/MS pairs to estimate offset")
+
     out: list[BuildingRecord] = list(osm_buildings)
     added = 0
     for s in sat_polygons:

@@ -1,20 +1,174 @@
 # Status — what works, what doesn't
 
-Snapshot of the skyline_cv pipeline as of the latest commit. Updated when
-the behaviour changes materially.
+> The dated **Current state (2026-06-07)** section directly below is the
+> authoritative snapshot. The older 2026-05-24 material further down is
+> kept for historical context; where the two disagree, this top section
+> wins.
 
-## Run characteristics (Cartagena baseline, with overrides)
+---
+
+## Current state (2026-06-07) — pano report v2, bearing recovery, F-SKY22/24
+
+### Headline metrics (all three test regions, full pipeline)
+
+| Region | Seeds (user + auto) | `seed_extracted_buildings` | Bearing recovery |
+|---|---|---|---|
+| Cartagena | 5 + 6 auto = 11 | ~716 | all SKIP (already aligned) |
+| Miami | 4 + 2 auto = 6 | ~381 | seed_3/4 APPLY, rest SKIP |
+| Chicago | 2 + 3 auto = 5 | ~210 | 4/5 APPLY (Loop was ~180° off) |
+
+Auto-proposed standoff locations now run through the **full** pipeline in
+addition to the user seeds (previously they were only a swap pool). This
+roughly doubled Cartagena (375→716) and Chicago (101→210) coverage.
+
+### HTML report structure (per seed page)
+
+Two **independent** tab groups so a pano view and a top-down view are
+visible together:
+
+- **Pano-space** (wide strips): Street view · SegFormer mask · Depth ·
+  **Distance scan**.
+- **Top-down** (square polar plots, shared 1500 m axis): Footprints ·
+  Satellite · Reconstruction · **Heights**.
+
+Cross-cutting overlays:
+- **Cardinal lines** N/E/S/W drawn on every pano-space strip
+  (`_draw_pano_north_line_inplace`) so the column→bearing mapping is
+  visually checkable.
+- **Distance scan** (`_render_pano_bearing_scan_png`): column-indexed
+  (x = pano column, aligns 1:1 under the pano) plot of depth-derived
+  nearest-building distance (blue, raw) vs OSM nearest (orange), with
+  N/E/S/W dashed guides and building-column tick markers. The horizontal
+  gap between the two curves is the bearing error.
+- **Image zoom/pan modal**: click any report image → wheel-zoom +
+  drag-pan + esc.
+- Anything farther than `POLAR_MAX_M = 1500 m` is dropped from all
+  top-down plots and the bearing recovery.
+
+### Bearing recovery (F-SKY24 Phase 3) — `region_pdf._stitch_pano_composite`
+
+A silhouette × OSM cross-correlation refines (or rescues) the satellite-
+coastline anchor:
+1. Per-degree depth silhouette (nearest building distance from the depth
+   mask) and per-degree nearest-OSM-building distance, both filled with a
+   **`NO_BUILDING_M = 3000 m` sentinel** on empty bearings. The sentinel
+   is what makes "pano sees a building where OSM says open space" a strong
+   penalty — without it, depth saturation flattened the score landscape
+   and a wrong rotation could win.
+2. Cross-correlate over all 360 rotations; **apply only when `improve ≥
+   45 %`** (MAE drop vs the current anchor) — empirically this cleanly
+   separates already-aligned seeds (improve <30 %) from genuinely
+   misaligned ones (improve >50 %). A naive "distinct peak" gate was
+   tried and rejected (broke on broad clusters like the Chicago Loop).
+
+Result: Chicago's Loop (satellite recovery landed ~180° off) is now
+auto-corrected; Cartagena/Miami's already-good anchors are preserved.
+
+### Splitter (F-SKY22 + F-SKY24 Phase 1)
+
+- **F-SKY22 sliding-window splitter** (`_pano_sliding_window_split`):
+  the global splitter's per-component split cap clipped towers on a wide
+  pano where the whole skyline is one connected blob. Windowed splitting
+  (360 px window, 280 px stride) gives each slice its own budget +
+  density filter. seed_1 went 12→33 segments, seed_5 13→25.
+- **F-SKY24 depth-fused post-cut**: depth-discontinuity cuts on the
+  pano-wide splitter — **measured no-op** across all 9 seeds because
+  F-SKY21's per-cluster depth pass (threshold 0.08) already drained that
+  signal upstream. Kept (cheap), but it is not contributing splits.
+- **OSM-anchored split** (F-SKY2 on the pano path): the win that depth
+  could not give — splits a wide segment at contained OSM projections.
+  +5 segments across the 9 seeds, catches same-distance adjacent towers.
+
+### Mask: water-only ground cap — `pipeline._neural_sky_and_building_masks`
+
+The waterline clip now (a) finds the foreground waterline **bottom-up**
+(distant bay water at the horizon no longer chops buildings standing in
+front of it) and (b) uses **water classes only** — earth/sand removed,
+because buildings stand *on* sand and Cartagena's bright sandy towers
+were being partially mislabelled sand and clipped. Recovered the seed_5
+peninsula-tip cluster.
+
+### Depth (Depth Anything V2)
+
+- **Tiled inference** (`predict_pano_depth_tiled`): the HF pipeline
+  squashes a 2688-wide pano to ~518 px before inference; tiling at full
+  resolution per 518 px tile sharpens the depth pano. Cost-neutral
+  (~4-7 s). Computed once per seed, shared via
+  `StitchedPanoResult.pano_depth`.
+- **Saturation past ~1.2 km is structural** to DA2's [0,1] inverse-depth
+  and is the dominant residual error (Chicago, far Miami/Cartagena
+  towers). Verified NOT fixable by: larger model (Base ≈ Small, 3× cost),
+  higher input res (tiling), or column-averaging the sample (base pixel
+  is marginally better — averaging biases farther via longer sightlines).
+  Worked around with an **OSM-clamp** (>1200 m silhouette values that
+  have a nearby OSM building adopt the OSM distance). The remaining path
+  to break saturation is a metric-depth model (ZoeDepth/Metric3D) — not
+  yet attempted.
+
+### F-SKY1 floor-strip periodicity — re-enabled (default on)
+
+The "striations ≈ 1 storey" signal. Re-enabled
+(`compute_floor_period=_F_SKY1_ENABLED`, env `SKYLINE_CV_F_SKY1=0` to
+disable) with a **sub-harmonic-descent fix**: the autocorrelation peak is
+frequently a 2-3× multiple (coarse banding), so we descend from the
+dominant peak to the fundamental. Status:
+- `inferred_height` (a ratio, f_px-independent) is **usable** — ~97 m
+  median on Cartagena.
+- `inferred_distance` is **not trustworthy yet** — still ~2.5× low
+  (~122 m vs ~300 m true), because the stitched-pano `f_px` is wrong.
+  Calibrating the pano `f_px` is the open task before this feeds heights.
+- Hit rate is low (~64/1672 on Cartagena; 0 on Chicago/Miami where far
+  facades are <80 px tall). Diagnostic-summary line printed per run.
+
+### Project move
+
+`city2stl/height/` → **`city2stl/skyline_cv/height/`** (the ML height
+stack now lives inside skyline_cv). All imports across `app/`, `tests/`,
+`tools/` were rewritten accordingly.
+
+### Known open items
+
+- F-SKY1 pano `f_px` calibration (blocks trustworthy floor-derived
+  distance).
+- Depth saturation > 1.2 km (metric-depth model is the real fix).
+- Miami seed_3 bearing correction passed at the 47 % gate edge — worth a
+  visual confirm; raising the gate to 50 % would skip it.
+- F-SKY1 `inferred_height` is computed but not yet surfaced in the report
+  or fed into the height aggregate.
+
+---
+
+## Historical snapshot (2026-05-24)
+
+Snapshot of the skyline_cv pipeline as of 2026-05-24. Updated when the
+behaviour changes materially.
+
+> **New here?** Read [`AGENT-GUIDE.md`](AGENT-GUIDE.md) first — it's the
+> navigation map for the codebase: where each pipeline stage lives,
+> how the cross-view consensus + water filter + auto-seed-replacement
+> chain together, env vars, troubleshooting cheatsheet, and known
+> dead-ends to avoid.
+
+For a structural audit of the whole module (dead code, redundant
+signals, oversized functions) see
+[`docs/plans/F-SKY-AUDIT-2026-05-24.md`](../../../docs/plans/F-SKY-AUDIT-2026-05-24.md)
+(latest refresh — 11 of 13 F-CLEAN proposals shipped, surfaces a new
+pano-recovery non-determinism finding).
+For the canonical pipeline shape see
+[`docs/plans/F-SKY-PIPELINE-CONSOLIDATION.md`](../../../docs/plans/F-SKY-PIPELINE-CONSOLIDATION.md).
+
+## Run characteristics (Cartagena, current baseline)
 
 | Metric | Value | Notes |
 |---|---|---|
-| Total runtime | ~120 s | Was 1033 s before vectorisation (~8.6× speedup) |
+| Total runtime | ~120 s | Same as before; F-SKY8 + F-SKY11.1 added negligible overhead |
+| `building_records` | 7076 | 3015 OSM + 4061 MS-merged (F-SKY8 opt-in via `use_satellite_footprints`) |
 | `seed_urls_used` | 5 | seed_1/2/3/4/5 from `sites/cartagena.json` |
-| `seed_registration_views` | 27 | Pass-2 successful spin views across all seeds |
-| `seed_extracted_buildings` | ~370 | Excludes seed_3 (negative example); was ~480 when all seeds contributed |
+| `seed_registration_views` | 26 | Per-seed view count varies with screening + pitch correction |
+| `seed_extracted_buildings` | ~593 | Up from ~370 once F-SKY8 added polygons in OSM-sparse waterfronts |
 | `negative_seeds` | `["seed_3"]` | Gas-station view, not a skyline; estimates excluded by design |
-| Cross-seed coverage | low (~3 buildings) | The reliable validation signal — still the headline gap |
-| Tagged-height MAE | 19 m single-seed / 53 m cross-seed | Cross-seed bias = −46 m → tall buildings under-predicted |
-| Tests | 21/21 pass | CV-math only; orchestration is untested |
+| Coverage | 8 good / 2 medium / 1 weak | of 11 screened locations |
+| Tests | 21/21 pass | CV-math only; orchestration exercised by full-run smoke |
 
 ## Active per-seed overrides (Cartagena)
 
@@ -122,7 +276,7 @@ ruled out:
 Until one specific failure is traced end-to-end, we can't pick between
 these.
 
-### Heading registration finds wrong local maxima for bay seeds
+### Heading registration is partially automated, still partially manual
 
 **The IoU objective is multi-modal when buildings exist in many
 directions from the seed.** Multiple offsets project OSM building columns
@@ -130,22 +284,37 @@ into observed mask-building columns with similar fidelity. The algorithm
 picks *a* local maximum; the user knows which one is geographically
 correct.
 
-For Cartagena specifically, **3 of 5 seeds (seed_1, seed_4, seed_5)
-require the manual override** documented above. Only seed_3 (a
-non-skyline view — negative example) and seed_2 (screened-rejected) work
-without manual intervention via the algorithm alone.
+**Heading-recovery stack as of 2026-05-24** (precedence order):
 
-**Tried and abandoned algorithmic fixes**:
-- URL `h_token` as initial anchor (±25°, then ±60°): edges of search
-  range were hitting the optimum.
-- Stronger miss-penalty in the IoU score (0.3 → 0.6): no change in the
-  found optima.
-- 180°-symmetric check + tiebreaker bias: planned but not yet built.
+1. **`anchor_offsets_deg` manual override** — highest precedence;
+   user-explicit. Only seed_4 (-180°) + seed_5 (320°) still need it on
+   Cartagena. seed_1's manual 135° was dropped after F-SKY11.1
+   recovered 136° (Δ +1°).
+2. **F-SKY11.1 pano-coastline recovery** — when `use_pano_coastline_recovery`
+   + `drive_pano_recovery_anchor` are set, a sharp recovery (σ ≤ 0.10,
+   peak > 0.15) replaces the joint-anchor coarse sweep with a ±15° fine
+   refine. Currently in use on Cartagena for seed_1.
+3. **Joint anchor IoU optimizer** — today's fallback when (1) and (2)
+   don't apply; 3° coarse over 360°, then 0.5° fine over ±5°.
 
-The manual override is the practical answer; an algorithmic fix would
-need either (a) a Photo Sphere metadata source that gives the pose
-heading directly, or (b) a stronger discriminating signal in the IoU
-objective (e.g. monocular depth comparison).
+**Measured per-seed on Cartagena** (recovery vs ground truth, 2026-05-17 run):
+
+| Seed | Manual | F-SKY11.1 recovered | Verdict |
+|---|---|---|---|
+| 1 | (dropped) | 142° | matches old manual within ~7° — auto path works |
+| 2 | (none) | low-peak | falls through to joint optimizer |
+| 3 | (negative seed) | flat curve | doesn't matter |
+| 4 | -180° | 104° (Δ -76°, sharp) | recovery confidently wrong — keep manual |
+| 5 | 320° | 310° (Δ -10°) | borderline; could drop manual with widened refine |
+
+**Tried and ruled out**:
+- F-SKY11.2 pano→birdseye IPM: monocular SegFormer water has insufficient depth reach (~5–7 m); IoU rotation search produces flat signal. Marked `denied` in proposals. See [F-SKY11.2 plan post-mortem](../../../docs/plans/F-SKY11.2-pano-birdseye-registration.md).
+- Per-bearing F-SKY11 sweep as production primary: lossy compared to F-SKY11.1 pano sweep; kept as the per-direction visualisation demo.
+
+The manual override is still the answer for seed_4's failure mode. An
+algorithmic fix would need a stronger discriminator — `scripts/13_heading_recovery_demo.py`
+is exploring a multi-channel approach (water + asymmetric RGB) for the
+peninsula 180° symmetry case.
 
 ### Cross-seed coverage is anaemic (~3 buildings)
 
@@ -197,7 +366,7 @@ clear "no segmentation possible" banner.
    sees it, what segment captures it, what y_px the mask returns, what
    `forward_m` projects, whether the closest-in-bin gate killed a
    higher prediction. Concrete plan with trace points and Phase-2
-   monocular-depth gating: [docs/glass-roof-height-fix-plan.md](docs/glass-roof-height-fix-plan.md).
+   monocular-depth gating: [glass-roof-height-fix-plan.md](glass-roof-height-fix-plan.md).
 2. **Fix the `iou=0.00` display bug** in `register_view_to_osm`.
 3. **Fix the over-sized FOV cone** — scale `cone_len` to the auto-zoom
    axis span.
@@ -205,11 +374,29 @@ clear "no segmentation possible" banner.
    (split the bbox into 2×2 cells, pick the best candidate per cell).
 5. **Drop the empty pano page** when `n_segments == 0`.
 
-## Detailed implementation roadmap (next pass)
+## Roadmap — archived
 
-This section expands the priority list into an execution plan with explicit
-success gates. The order is intentional: improve segment quality first,
-then matching, then pano rendering/cropping diagnostics, then reporting UX.
+The Phase A / B / C / D implementation roadmap that previously lived
+here described work that's been done (in different shapes) since this
+section was written. The canonical references now live in:
+
+| Concern | Where it lives now |
+|---|---|
+| Building split / instance separation (was Phase A) | F-SKY2 anchored split + F-SKY7 local-max + dual baseline (both shipped); see consolidation plan |
+| Matching plausibility (was Phase B) | F-SKY6 1:1 dedup + F-SKY2.1 containment fallback (shipped) |
+| Pano cropping (was Phase C) | `stitch_pano_views` central-30° crop + luminance normalisation (shipped) |
+| Page numbering (was Phase D) | Not done; folded into `F-CLEAN9` items if revisited |
+| Monocular depth integration | F-SKY11.2 (denied — see plan); future work owns its own proposal |
+
+The detailed plans for each shipped feature are in `docs/plans/F-SKY*.md`.
+The consolidated end-state pipeline shape is in
+[`docs/plans/F-SKY-PIPELINE-CONSOLIDATION.md`](../../../docs/plans/F-SKY-PIPELINE-CONSOLIDATION.md).
+The structural audit (dead code, redundancies, function sizes) and the
+F-CLEAN1..13 cleanup proposals are in
+[`docs/plans/F-SKY-AUDIT-2026-05-17.md`](../../../docs/plans/F-SKY-AUDIT-2026-05-17.md).
+
+<details>
+<summary>(Historical Phase A–D + depth-integration plan, kept for reference)</summary>
 
 ### Phase A — split buildings more aggressively but safely
 
@@ -473,6 +660,8 @@ Promotion gate to Stage 1/2:
 3. Runtime increase remains acceptable for current report workflow.
 4. Cross-seed disagreement does not worsen.
 
+</details>
+
 ## What's deliberately not on the list
 
 - Sliding-window SegFormer on stitched RGB — tried, removed in favour
@@ -484,7 +673,7 @@ Promotion gate to Stage 1/2:
 - Monocular depth (MiDaS/DPT) for the glass-roof roof-y fix is **planned but
   gated** on the Priority 1 height trace ruling out the simpler causes (mask
   under-reach vs. closest-in-bin gate vs. pinhole math). Full plan and
-  acceptance gate: [docs/glass-roof-height-fix-plan.md](docs/glass-roof-height-fix-plan.md).
+  acceptance gate: [glass-roof-height-fix-plan.md](glass-roof-height-fix-plan.md).
 
 ## Per-region configuration cheat sheet
 
