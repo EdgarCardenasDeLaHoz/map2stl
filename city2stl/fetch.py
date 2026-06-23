@@ -22,6 +22,15 @@ from typing import List
 
 logger = logging.getLogger(__name__)
 
+# Overpass base URLs (osmnx appends /interpreter automatically).
+# overpass-api.de is canonical but suffers frequent timeouts;
+# kumi.systems and mail.ru are reliable mirrors.
+_OVERPASS_ENDPOINTS = [
+    "https://overpass-api.de/api",
+    "https://overpass.kumi.systems/api",
+    "https://maps.mail.ru/osm/tools/overpass/api",
+]
+
 # _HIGHWAY_WIDTHS is defined in city2stl.roads (authoritative source).
 # Imported here so fetch.py is the single osm-facing module without callers
 # needing to know the internal split between roads.py and fetch.py.
@@ -220,6 +229,22 @@ def fetch_osm_data(
         import osmnx as ox
     except ImportError:
         raise RuntimeError("osmnx is not installed. Run: pip install osmnx")
+
+    # Try each Overpass endpoint in order; rotate on connection/timeout errors.
+    import requests
+    last_exc: Exception | None = None
+    for endpoint in _OVERPASS_ENDPOINTS:
+        try:
+            ox.settings.overpass_url = endpoint
+            # Quick connectivity probe (HEAD on the base URL) before running
+            # expensive layer fetches — avoids a 180 s connect timeout.
+            requests.head(endpoint, timeout=10)
+            break
+        except Exception as e:
+            logger.warning(f"Overpass endpoint {endpoint} unreachable: {e}; trying next")
+            last_exc = e
+    else:
+        raise RuntimeError(f"All Overpass endpoints unreachable. Last error: {last_exc}")
 
     # Convert simplification tolerance from metres to degrees (~111 km per degree)
     tol_deg = simplify_tolerance / 111_000.0

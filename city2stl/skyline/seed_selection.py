@@ -116,6 +116,28 @@ def _propose_standoff_locations(
         bs = sorted(bearings)
         return float(bs[-1] - bs[0])
 
+    def _osm_buildings_in_fov(
+        lat: float, lon: float, heading: float,
+        fov: float = 80.0, max_dist_m: float = 3000.0,
+    ) -> int:
+        """Count OSM building centroids in the forward FOV cone.
+
+        F-DET2: viewpoints with fewer than _MIN_OSM_IN_FOV buildings
+        in their cone will almost certainly produce nseg < 10 (Type 1
+        failure). Reject at proposal time rather than after spending
+        30–60 s on registration.
+        """
+        count = 0
+        for (blat, blon) in all_centroids:
+            d = _distance_m(lat, lon, blat, blon)
+            if d > max_dist_m:
+                continue
+            bear = _bearing_deg(lat, lon, blat, blon)
+            delta = abs((bear - heading + 540.0) % 360.0 - 180.0)
+            if delta <= fov * 0.5:
+                count += 1
+        return count
+
     # 4. Sample 8 directions × 3 standoff radii from the cluster centroid.
     # The previous range started at 400 m which put proposed positions INSIDE
     # the dense Bocagrande building cluster — auto-seeds at that distance
@@ -153,10 +175,30 @@ def _propose_standoff_locations(
             fg_count = _foreground_density(clat_c, clon_c, heading)
             # Hard reject: more than 12 building centroids inside the 200 m
             # foreground rectangle means the camera is INSIDE the urban
-            # cluster — guaranteed occluded shot. The soft penalty (-2 pts
-            # per obstruction) wasn't enough to consistently drop these
-            # below water-adjacent standoff positions in scoring.
+            # cluster — guaranteed occluded shot.
             if fg_count > 12:
+                continue
+            # Hard reject: nearest building too close — camera is essentially
+            # looking at one wall rather than a skyline. A single tower at
+            # 30 m fills the frame with facade; depth/OSM both signal "too
+            # close" and the height estimator cannot see the roof. Skylines
+            # need clearance: the building silhouette-top must be visible
+            # above the horizon, which requires standoff >> building height.
+            _nearest_m = min(
+                (_distance_m(clat_c, clon_c, blat, blon)
+                 for (blat, blon) in all_centroids),
+                default=9999.0,
+            )
+            if _nearest_m < 50.0:
+                continue
+            # F-DET2: OSM-backed FOV gate.
+            # A viewpoint facing open water/park with < 3 OSM building
+            # centroids in its 80° cone will almost certainly produce
+            # nseg < 10 at registration time (Type 1 failure). Reject
+            # at proposal time so we never waste 30–60 s on it.
+            _MIN_OSM_IN_FOV = 3
+            _osm_in_fov = _osm_buildings_in_fov(clat_c, clon_c, heading)
+            if _osm_in_fov < _MIN_OSM_IN_FOV:
                 continue
             # Water adjacency is strongly correlated with clear skyline:
             # Bocagrande/Old Town views from across the bay are the
@@ -166,7 +208,9 @@ def _propose_standoff_locations(
             water_bonus = 2.0 if _near_water(clat_c, clon_c) else 1.0
 
             base = spread - fg_count * 2.0
-            score = float(max(0.0, base) * water_bonus)
+            # Bonus for more OSM buildings in FOV — prefers denser skylines.
+            fov_bonus = _osm_in_fov / 10.0
+            score = float(max(0.0, base + fov_bonus) * water_bonus)
 
             name = f"auto_{int(dir_deg):03d}_{int(dist_m):04d}m"
             candidates.append(

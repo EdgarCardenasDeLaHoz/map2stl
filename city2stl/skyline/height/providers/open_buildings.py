@@ -27,14 +27,13 @@ import numpy as np
 import requests
 
 from city2stl.skyline.height import BBox, HeightResult, _resample
-from app.server.core.cache import (
-    make_cache_key, read_array_cache, write_array_cache,
-    NAMESPACE_TTL,
+from ._cache import (
+    register_ttl, make_cache_key, read_height_result, write_height_result,
 )
 
 logger = logging.getLogger(__name__)
 
-NAMESPACE_TTL.setdefault("open_buildings", 90 * 86400)
+register_ttl("open_buildings", 90)
 
 _CONFIDENCE = 0.6  # ML-derived heights, reasonable but not survey-grade
 _RESOLUTION_M = 5.0  # effective per-building resolution
@@ -238,15 +237,9 @@ class OpenBuildingsProvider:
         cache_key = make_cache_key(_NAMESPACE, north, south, east, west,
                                    {"dim": list(dim)})
 
-        cached = read_array_cache(_NAMESPACE, cache_key)
-        if cached is not None:
-            arrays, meta = cached
-            return HeightResult(
-                raster=arrays["raster"],
-                confidence=arrays["confidence"],
-                source_name=self.name,
-                resolution_m=meta.get("resolution_m", _RESOLUTION_M),
-            )
+        hit = read_height_result(_NAMESPACE, cache_key, self.name, _RESOLUTION_M)
+        if hit is not None:
+            return hit
 
         raster = _fetch_buildings_for_bbox(bbox, dim)
 
@@ -262,9 +255,7 @@ class OpenBuildingsProvider:
 
         result = HeightResult(raster, confidence, self.name, _RESOLUTION_M)
 
-        write_array_cache(_NAMESPACE, cache_key,
-                          {"raster": raster, "confidence": confidence},
-                          {"resolution_m": _RESOLUTION_M})
+        write_height_result(_NAMESPACE, cache_key, result)
         return result
 
 

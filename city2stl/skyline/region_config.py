@@ -47,6 +47,15 @@ _F_SKY5_ENABLED = os.environ.get("SKYLINE_CV_F_SKY5", "0").strip().lower() in (
     "1", "true", "yes", "on"
 )
 
+# F-SKY11.1 Phase B: wire the pano-recovered heading offset into the joint
+# anchor optimizer as its seed when the peak is sharp (sigma ≤ 0.10, peak >
+# 0.40). Default OFF until validated on a second region (Miami). Set
+# SKYLINE_CV_F_SKY11_1=1 to opt in. Falls back gracefully when no coastline
+# is visible (flat peak → quality gate fails → coarse sweep runs as before).
+_F_SKY11_1_ENABLED = os.environ.get("SKYLINE_CV_F_SKY11_1", "0").strip().lower() in (
+    "1", "true", "yes", "on"
+)
+
 # F-SKY1: floor-strip facade periodicity. Detects the per-floor horizontal
 # banding in a building's mask region (1D autocorrelation on a row-mean
 # intensity profile), reports the dominant pixel period, and back-derives
@@ -60,6 +69,11 @@ _F_SKY1_ENABLED = os.environ.get("SKYLINE_CV_F_SKY1", "1").strip().lower() in (
     "1", "true", "yes", "on"
 )
 
+
+# Flickr REST API key for web skyline image seeds (F-WEB1).
+# Free at https://www.flickr.com/services/api/keys/.
+# When absent, Wikimedia Commons is tried as a keyless fallback.
+FLICKR_API_KEY = os.environ.get("FLICKR_API_KEY", "").strip()
 
 _SEGMENT_PALETTE = (
     (255, 80, 80),

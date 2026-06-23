@@ -26,12 +26,17 @@ from __future__ import annotations
 import numpy as np
 from shapely.geometry import polygon as shapely_polygon
 
-from .buildings import get_polygons, triangulate_prism as _tri_prism
-from .dem2stl import reposition_dem as _reposition
-from .osm2stl import perimeter_to_walls as np2stl  # noqa: F401 – re-export for notebook compat
+from .buildings import get_polygons
 
-from numpy2stl import array_to_mesh
-import numpy2stl.simplify as simp
+# Canonical geometry primitives live in numpy2stl — city2stl reuses them rather
+# than maintaining a parallel (and previously broken) triangulation path.
+from numpy2stl import (
+    array_to_mesh,
+    polygon_to_prism as _polygon_to_prism,
+    vertices_to_index as _vertices_to_index,
+)
+from numpy2stl import perimeter_to_walls as np2stl  # noqa: F401 – re-export for notebook compat
+import numpy2stl.processing.simplify as simp
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +86,9 @@ def get_landspace_model(data: np.ndarray, bounds_NW=None, scale: float = 1, simp
     vx = vx.astype(float)
 
     if bounds_NW is not None:
+        # Geographic reprojection of terrain vertices is a notebook-only path;
+        # imported lazily so the module loads even where the helper is absent.
+        from .dem2stl import reposition_dem as _reposition
         im_lims = ((0, data.shape[0]), (0, data.shape[1]))
         vx = _reposition(vx, im_lims, bounds_NW)
         vx[:, [0, 1]] = vx[:, [0, 1]] * 1000
@@ -296,13 +304,10 @@ def polygon_to_prism(polygons, heights, base_val: float = 0) -> list:
         verts = np.concatenate((verts, np.zeros((len(verts), 1))), axis=1)
         verts[:, 2] = heights[n]
         try:
-            _, faces = _simplify_surface(verts, peri)
+            tris = _polygon_to_prism(verts, peri, base_val=base_val)
         except Exception:
             continue
-        top_tris = verts[faces]
-        all_triangles.append(top_tris)
-        wall_tris = _perimeter_to_walls(verts, peri, floor_val=base_val)
-        all_triangles.append(wall_tris)
+        all_triangles.append(tris)
 
     return all_triangles
 
@@ -328,9 +333,9 @@ def _triangulate_prism(polygons: list) -> np.ndarray:
     """
     Triangulate a list of prism dicts (each with z1, z0, points).
 
-    Returns concatenated triangle array.
+    Delegates extrusion to ``numpy2stl.polygon_to_prism`` (the canonical
+    primitive). Returns a concatenated triangle array.
     """
-    from .osm2stl import polygon_to_prism as _p2p
     triangles = []
     for p in polygons:
         vert = np.array(p['points']).T
@@ -338,7 +343,7 @@ def _triangulate_prism(polygons: list) -> np.ndarray:
             vert = vert[:-1]
         zdim = np.zeros((len(vert), 1)) + p['z1']
         vert = np.concatenate([vert, zdim], axis=1)
-        tri = _p2p(vert, base_val=p['z0'])
+        tri = _polygon_to_prism(vert, base_val=p['z0'])
         triangles.append(tri)
     return np.concatenate(triangles)
 

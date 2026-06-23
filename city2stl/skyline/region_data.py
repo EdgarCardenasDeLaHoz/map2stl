@@ -53,7 +53,7 @@ def _load_region_bbox(region_name: str) -> RegionBBox:
     )
     if site_json.exists():
         try:
-            data = json.loads(site_json.read_text(encoding="utf-8"))
+            data = json.loads(site_json.read_text(encoding="utf-8-sig"))
             return RegionBBox(
                 name=data.get("name", region_name),
                 north=float(data["north"]),

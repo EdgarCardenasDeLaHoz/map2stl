@@ -16,7 +16,6 @@
 
 import numpy as np
 from shapely.geometry import Polygon,MultiPolygon
-from descartes import PolygonPatch
 import osmnx as ox
 ## Functions using OSMNX
 

@@ -1,20 +1,20 @@
 {
   "name": "chicago",
-  "north": 41.910,
-  "south": 41.862,
-  "east": -87.600,
-  "west": -87.645,
+  "north": 41.9338,
+  "south": 41.8382,
+  "east": -87.5583,
+  "west": -87.6867,
   "seed_urls": [
     "https://www.google.com/maps/place/Chicago,+IL/@41.8804152,-87.6104108,2a,75y,348.76h,92.77t/data=!3m7!1e1!3m5!1sXgwNKF-K7P6n9vlh791qjw!2e0!6shttps:%2F%2Fstreetviewpixels-pa.googleapis.com%2Fv1%2Fthumbnail%3Fcb_client%3Dmaps_sv.tactile%26w%3D900%26h%3D600%26pitch%3D-2.772565791146789%26panoid%3DXgwNKF-K7P6n9vlh791qjw%26yaw%3D348.7595952875956!7i13312!8i6656",
     "https://www.google.com/maps/@41.8798333,-87.6117033,3a,75y,289.73h,90.26t/data=!3m8!1e1!3m6!1sCIHM0ogKEICAgIDyjt6VFw!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf50sNK9Df28IBKA6qNEQj__4jfrRTmk4EMhNBqpQh43zIxegPyXGO2mQPYzb7HS4Fzx3Y1J9_ATRTh3pZQnevOWe2lcZuCJ4aCelFktgZGiwiElEtRKKh00UJl9tBg0hCH7FVC2t%3Dw900-h600-k-no-pi-0.2592701802569479-ya289.7286774534645-ro0-fo100!7i8192!8i4096"
   ],
   "_seed_url_notes": [
     "Replaced 2026-06-02 (user-supplied): both seeds sit near the Chicago River / Streeterville (~41.880,-87.611) looking toward the Willis/Loop cluster (~41.883,-87.632). Earlier Adler/Olive Park/Solidarity seeds produced only 5 registration views.",
-    "seed_1: street pano XgwNKF-K7P6n9vlh791qjw @41.8804,-87.6104, heading 348.76° (N) toward the Loop.",
-    "seed_2: Photo Sphere CIHM0ogKEICAgIDyjt6VFw @41.8798,-87.6117, heading 289.73° (WNW) toward the Loop."
+    "seed_1: street pano XgwNKF-K7P6n9vlh791qjw @41.8804,-87.6104, heading 348.76\u00b0 (N) toward the Loop.",
+    "seed_2: Photo Sphere CIHM0ogKEICAgIDyjt6VFw @41.8798,-87.6117, heading 289.73\u00b0 (WNW) toward the Loop."
   ],
   "known_heights_m": {
-    "_note": "CTBUH verified heights for validation — compare pipeline estimates against these.",
+    "_note": "CTBUH verified heights for validation \u2014 compare pipeline estimates against these.",
     "Willis Tower": {
       "lat": 41.8789,
       "lon": -87.6359,
@@ -46,14 +46,14 @@
       "floors": 60
     },
     "Two Prudential Plaza": {
-      "lat": 41.8830,
+      "lat": 41.883,
       "lon": -87.6244,
       "height_m": 303,
       "floors": 64
     },
     "311 South Wacker Drive": {
-      "lat": 41.8770,
-      "lon": -87.6360,
+      "lat": 41.877,
+      "lon": -87.636,
       "height_m": 293,
       "floors": 65
     },

@@ -160,22 +160,35 @@ def render_seed_pano_page(
     # Reconstruction) below. They're independently tabbable so the
     # reader can hold a pano view and a top-down view side-by-side and
     # cross-reference bearings.
+    # "All" panels reuse the SAME panel HTML (same image files) stacked
+    # vertically — adds only a few <img> tags, no extra image data.
+    pano_all_panel = (
+        f'<div class="stack-all">{pano_rgb_panel}{pano_seg_panel}'
+        f'{pano_depth_panel}{pano_scan_panel}</div>'
+    )
+    topdown_all_panel = (
+        f'<div class="stack-all stack-td">{footprints_panel}{satellite_panel}'
+        f'{recon_panel}{heights_panel}</div>'
+    )
     pano_space_tabs = (
         f'    <figure class="tabs panospace">\n'
         f'      <input type="radio" name="pano_{tab_id}" id="pano_{tab_id}_rgb" checked>\n'
         f'      <input type="radio" name="pano_{tab_id}" id="pano_{tab_id}_seg">\n'
         f'      <input type="radio" name="pano_{tab_id}" id="pano_{tab_id}_depth">\n'
         f'      <input type="radio" name="pano_{tab_id}" id="pano_{tab_id}_scan">\n'
+        f'      <input type="radio" name="pano_{tab_id}" id="pano_{tab_id}_all">\n'
         f'      <div class="tab-labels">\n'
         f'        <label for="pano_{tab_id}_rgb">Street view</label>\n'
         f'        <label for="pano_{tab_id}_seg">SegFormer mask</label>\n'
         f'        <label for="pano_{tab_id}_depth">Depth</label>\n'
         f'        <label for="pano_{tab_id}_scan">Distance scan</label>\n'
+        f'        <label for="pano_{tab_id}_all">All</label>\n'
         f'      </div>\n'
         f'      <div class="tab-panel pano-rgb">{pano_rgb_panel}</div>\n'
         f'      <div class="tab-panel pano-seg">{pano_seg_panel}</div>\n'
         f'      <div class="tab-panel pano-depth">{pano_depth_panel}</div>\n'
         f'      <div class="tab-panel pano-scan">{pano_scan_panel}</div>\n'
+        f'      <div class="tab-panel pano-all">{pano_all_panel}</div>\n'
         f'    </figure>'
     )
     topdown_tabs = (
@@ -184,16 +197,19 @@ def render_seed_pano_page(
         f'      <input type="radio" name="td_{tab_id}" id="td_{tab_id}_sat">\n'
         f'      <input type="radio" name="td_{tab_id}" id="td_{tab_id}_recon">\n'
         f'      <input type="radio" name="td_{tab_id}" id="td_{tab_id}_heights">\n'
+        f'      <input type="radio" name="td_{tab_id}" id="td_{tab_id}_all">\n'
         f'      <div class="tab-labels">\n'
         f'        <label for="td_{tab_id}_fp">Footprints</label>\n'
         f'        <label for="td_{tab_id}_sat">Satellite</label>\n'
         f'        <label for="td_{tab_id}_recon">Reconstruction</label>\n'
         f'        <label for="td_{tab_id}_heights">Heights</label>\n'
+        f'        <label for="td_{tab_id}_all">All</label>\n'
         f'      </div>\n'
         f'      <div class="tab-panel pano-fp">{footprints_panel}</div>\n'
         f'      <div class="tab-panel pano-sat">{satellite_panel}</div>\n'
         f'      <div class="tab-panel pano-recon">{recon_panel}</div>\n'
         f'      <div class="tab-panel pano-heights">{heights_panel}</div>\n'
+        f'      <div class="tab-panel pano-all">{topdown_all_panel}</div>\n'
         f'    </figure>'
     )
     pano_tabs = pano_space_tabs + "\n" + topdown_tabs
@@ -229,27 +245,36 @@ def render_seed_pano_page(
   figure.tabs.panospace > input:nth-of-type(1):checked ~ .tab-labels label:nth-of-type(1),
   figure.tabs.panospace > input:nth-of-type(2):checked ~ .tab-labels label:nth-of-type(2),
   figure.tabs.panospace > input:nth-of-type(3):checked ~ .tab-labels label:nth-of-type(3),
-  figure.tabs.panospace > input:nth-of-type(4):checked ~ .tab-labels label:nth-of-type(4) {{
+  figure.tabs.panospace > input:nth-of-type(4):checked ~ .tab-labels label:nth-of-type(4),
+  figure.tabs.panospace > input:nth-of-type(5):checked ~ .tab-labels label:nth-of-type(5) {{
       background: #fff; border-color: #0a3070; color: #0a3070;
   }}
   figure.tabs.panospace > input:nth-of-type(1):checked ~ .pano-rgb {{ display: block; }}
   figure.tabs.panospace > input:nth-of-type(2):checked ~ .pano-seg {{ display: block; }}
   figure.tabs.panospace > input:nth-of-type(3):checked ~ .pano-depth {{ display: block; }}
   figure.tabs.panospace > input:nth-of-type(4):checked ~ .pano-scan {{ display: block; }}
-  /* Top-down tab group (4 tabs: footprints/satellite/reconstruction/heights). */
+  figure.tabs.panospace > input:nth-of-type(5):checked ~ .pano-all {{ display: block; }}
+  /* Top-down tab group (5 tabs: footprints/satellite/reconstruction/heights/all). */
   figure.tabs.topdown > input:nth-of-type(1):checked ~ .tab-labels label:nth-of-type(1),
   figure.tabs.topdown > input:nth-of-type(2):checked ~ .tab-labels label:nth-of-type(2),
   figure.tabs.topdown > input:nth-of-type(3):checked ~ .tab-labels label:nth-of-type(3),
-  figure.tabs.topdown > input:nth-of-type(4):checked ~ .tab-labels label:nth-of-type(4) {{
+  figure.tabs.topdown > input:nth-of-type(4):checked ~ .tab-labels label:nth-of-type(4),
+  figure.tabs.topdown > input:nth-of-type(5):checked ~ .tab-labels label:nth-of-type(5) {{
       background: #fff; border-color: #0a3070; color: #0a3070;
   }}
   figure.tabs.topdown > input:nth-of-type(1):checked ~ .pano-fp {{ display: block; }}
   figure.tabs.topdown > input:nth-of-type(2):checked ~ .pano-sat {{ display: block; }}
   figure.tabs.topdown > input:nth-of-type(3):checked ~ .pano-recon {{ display: block; }}
   figure.tabs.topdown > input:nth-of-type(4):checked ~ .pano-heights {{ display: block; }}
-  /* Center top-down square plots so they don't stretch to full width. */
-  figure.tabs.topdown .tab-panel img {{ max-width: 700px; display: block;
-                                         margin: 0 auto; }}
+  figure.tabs.topdown > input:nth-of-type(5):checked ~ .pano-all {{ display: block; }}
+  /* Center top-down square plots so they don't stretch to full width.
+     The "All" stack overrides this to a 2-col grid below. */
+  figure.tabs.topdown .tab-panel:not(.pano-all) img {{ max-width: 700px;
+                                         display: block; margin: 0 auto; }}
+  /* "All" stacked panels: each sub-image on its own row, small gap. */
+  .stack-all > * {{ margin-bottom: 0.6em; }}
+  .stack-td {{ display: grid; grid-template-columns: 1fr 1fr; gap: 0.6em; }}
+  .stack-td img {{ max-width: 100%; }}
   nav.breadcrumb {{ font-size: 0.9em; margin-bottom: 1em; }}
   nav.breadcrumb a {{ color: #0a3070; text-decoration: none; }}
   img {{ cursor: zoom-in; }}
@@ -452,10 +477,22 @@ def render_seed_page(
             f"{sv.pano_water_frac:.1%}",
         ))
 
+    neg_reason = getattr(sv, "negative_reason", None)
+    if neg_reason:
+        summary_rows.append(("Rejection reason", neg_reason))
+
     summary_html = "\n".join(
         f"    <tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>"
         for k, v in summary_rows
     )
+
+    _rejection_banner = (
+        f'<div style="background:#fff3cd;border-left:4px solid #e07b20;'
+        f'border-radius:0 4px 4px 0;padding:0.7em 1.2em;margin:0.8em 0;color:#7d4600;">'
+        f'<strong>Bad / negative seed</strong> — '
+        f'{html.escape(neg_reason or "declared negative in config")}. '
+        f'No per-view Street View analysis was run.</div>'
+    ) if sv.is_negative else ""
 
     minimap_html = (
         f'<img src="{html.escape(minimap_rel_path)}" alt="minimap for {html.escape(sv.seed_name)}" '
@@ -637,7 +674,7 @@ def render_seed_page(
 <body>
 <nav class="breadcrumb"><a href="index.html">← {html.escape(region_name)} index</a></nav>
 <h1>{html.escape(title)}</h1>
-
+{_rejection_banner}
 <section class="summary">
   <h2>Summary</h2>
   <table>
@@ -678,6 +715,7 @@ def render_region_index(
     *,
     step_timings: list[tuple[str, float]] | None = None,
     screening_map_rel: str | None = None,
+    pano_results: list | None = None,
 ) -> str:
     """Render the per-region index.html.
 
@@ -715,15 +753,94 @@ def render_region_index(
             return label, dt, level
         total = sum(_unpack(r)[1] for r in step_timings if _unpack(r)[2] == 0)
         unpacked = [_unpack(r) for r in step_timings]
+
+        # Per-step input → output descriptions (matched by substring of
+        # the step label, most-specific first). Lets the table explain
+        # WHAT each phase consumes and produces, not just how long it took.
+        _STEP_IO = [
+            ("OSM fetch", "region bbox", "OSM buildings + waterways"),
+            ("Drop buildings in water", "OSM buildings + water polys",
+             "land-only buildings"),
+            ("cross-view satellite", "region bbox", "satellite raster"),
+            ("pano-recovery precompute", "OSM coastline",
+             "recovery keypoints"),
+            ("Screen locations", "candidate seed points",
+             "screened seeds + coverage"),
+            ("Auto-replace bad seeds", "seeds + screening",
+             "cleaned seed list"),
+            ("Multiview registration", "seeds + buildings",
+             "per-seed registrations + pano results"),
+            ("capture pano views", "seed lat/lon", "12 spin-view images"),
+            ("SegFormer prefetch", "spin-view images",
+             "per-view sky/building/water masks"),
+            ("recover pano heading", "pano masks + OSM coastline",
+             "heading offset"),
+            ("recover anchor offset", "masks + OSM projections",
+             "anchor offset (deg)"),
+            ("register views + heights", "views + buildings",
+             "per-building height estimates"),
+            ("register_view_to_osm", "view mask + OSM projections",
+             "matched segments"),
+            ("estimate_heights_from_registration", "matched segments",
+             "per-building heights"),
+            ("augment_estimates_with_depth", "estimates + depth",
+             "depth-checked heights"),
+            ("pano detection", "spin views + masks",
+             "pano + tower↔OSM matches (stitch+depth+split+match)"),
+            ("project OSM buildings", "OSM buildings + per-col headings",
+             "per-column building projections"),
+            ("match pano segments", "tower segments + projections",
+             "matched tower↔building pairs"),
+            ("pano depth", "stitched pano RGB (building band)",
+             "depth map [0,1]"),
+            ("pano splitter", "pano building mask + OSM projections",
+             "per-tower segments"),
+            ("OSM-anchored split", "merged segments + projections",
+             "per-building split segments"),
+            ("bearing recovery", "depth silhouette + OSM distances",
+             "corrected per-column headings"),
+            ("match_segments_to_buildings", "segments + OSM projections",
+             "matched tower↔building pairs"),
+            ("anchor coarse sweep", "masks + OSM", "coarse offset"),
+            ("anchor fine sweep", "masks + OSM", "refined offset"),
+            ("sweep_pano_heading_offset", "pano mask + coastline",
+             "heading score curve"),
+            ("stitch pano RGB", "spin-view images", "360° pano image"),
+            ("stitch pano masks", "per-view masks", "360° mask strips"),
+            ("Render HTML", "all results", "HTML report"),
+        ]
+
+        def _io_for(label: str) -> tuple[str, str]:
+            for key, inp, outp in _STEP_IO:
+                if key.lower() in label.lower():
+                    return inp, outp
+            return "—", "—"
+
+        def _pct_bg(pct: float) -> str:
+            # Colour the % cell by magnitude: light → strong red as the
+            # share grows (alpha ∝ pct, capped). High-cost steps pop.
+            a = max(0.06, min(0.85, pct / 100.0))
+            return f"background: rgba(214,40,40,{a:.2f});"
+
+        # Drop steps below 5% of total — the table keeps only the
+        # sections that actually matter (child rows are always ≤ their
+        # parent, so a <5% parent's children are dropped too, keeping the
+        # indent structure consistent).
+        MIN_PCT = 5.0
         rows = []
         for label, dt, level in unpacked:
             pct = (dt / total * 100.0) if total > 0 else 0.0
-            pct_cell = f"{pct:.1f}%"
+            if pct < MIN_PCT:
+                continue
             indent = ("&nbsp;&nbsp;&nbsp;&nbsp;" * level + "↳ ") if level else ""
             row_cls = f' class="lvl{level}"' if level else ""
+            inp, outp = _io_for(label)
             rows.append(
                 f"      <tr{row_cls}><td>{indent}{html.escape(label)}</td>"
-                f"<td>{dt:.2f} s</td><td>{pct_cell}</td></tr>"
+                f"<td class='small'>{html.escape(inp)}</td>"
+                f"<td class='small'>{html.escape(outp)}</td>"
+                f"<td>{dt:.2f} s</td>"
+                f"<td style=\"{_pct_bg(pct)}\">{pct:.1f}%</td></tr>"
             )
 
         # Time-allocation chart uses LEAF steps — the deepest work units,
@@ -760,40 +877,48 @@ def render_region_index(
             w = max(1.0, dt / chart_max * 100.0)
             bar_rows.append(
                 f'      <div class="talloc-row">'
-                f'<div class="talloc-label">{html.escape(label)} '
-                f'<span class="talloc-num">{dt:.1f}s · {pct:.0f}%</span></div>'
-                f'<div class="talloc-track">'
-                f'<div class="talloc-bar" style="width:{w:.2f}%;'
-                f'background:{color};"></div></div></div>'
+                f'<span class="talloc-label" title="{html.escape(label)}">'
+                f'{html.escape(label)}</span>'
+                f'<span class="talloc-track">'
+                f'<span class="talloc-bar" style="width:{w:.2f}%;'
+                f'background:{color};"></span></span>'
+                f'<span class="talloc-num">{dt:.0f}s · {pct:.0f}%</span>'
+                f'</div>'
             )
 
+        # CHART ABOVE the table (stacked, both full-width). The chart
+        # answers "where does the wall-clock actually go?" (leaf work
+        # units); the table below shows the full call HIERARCHY with each
+        # step's input/output.
         timings_html = f"""
 <h2>Pipeline timing</h2>
-<div class="timing-layout">
-  <div class="timing-table-col">
-    <table class="timings">
-      <thead><tr><th>step</th><th>duration</th><th>% of total</th></tr></thead>
-      <tbody>
-{chr(10).join(rows)}
-          <tr><th>total (level-0 steps)</th><th>{total:.2f} s</th><th>100.0%</th></tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="timing-chart-col">
-    <h3 class="talloc-title">Time allocation (top {TOP_N} work steps)</h3>
+<h3 class="talloc-title">Where the time goes — top {TOP_N} leaf work steps
+   (of {total:.0f}s total)</h3>
+<div class="talloc">
 {chr(10).join(bar_rows)}
-    <p class="small">Each bar is one leaf step (an actual work unit, not
-       a containing phase), longest first; "% " is its share of the
-       {total:.0f}s wall-clock total. Bar length is relative to the
-       largest step.</p>
-  </div>
 </div>
-<p class="small">Wall-clock time per pipeline step. Indented rows
-   (<code>↳</code>) are sub-steps of the preceding top-level row and are
-   summed across all seeds. Their "% of total" shares the same denominator
-   as their parent — useful for spotting which inner operation dominates a
-   phase. The HTML render itself is not included (it runs after this table
-   is built); see the console <code>[timing]</code> lines for that.</p>
+<p class="small">Each bar is one <b>leaf</b> step (an actual unit of work,
+   not a containing phase), longest first. Bar length is relative to the
+   largest step; the number is absolute time &middot; share of the
+   {total:.0f}s wall-clock total.</p>
+
+<h3 class="talloc-title">Call hierarchy</h3>
+<table class="timings">
+  <thead><tr><th>step</th><th>input</th><th>output</th>
+    <th>duration</th><th>% of total</th></tr></thead>
+  <tbody>
+{chr(10).join(rows)}
+      <tr class="ttotal"><th>total (level-0 steps)</th><th></th><th></th>
+        <th>{total:.2f} s</th><th>100.0%</th></tr>
+  </tbody>
+</table>
+<p class="small">Indentation shows nesting: a <code>&#8627;</code> row is a
+   sub-step of the nearest less-indented row above it, summed across all
+   seeds. Every step's "% of total" shares one denominator (the
+   {total:.0f}s wall-clock), so a child's % is directly comparable to its
+   parent's — that's how to spot which inner operation dominates a phase.
+   Only steps &ge; 5% are listed; the % cell is shaded by magnitude. The
+   HTML render itself runs after this table is built and isn't included.</p>
 """
 
     # Aggregated building heights (headline output, ported from the PDF's
@@ -834,6 +959,17 @@ def render_region_index(
 
     # One row per UNIQUE seed name. seed_views contains one row per (seed, view),
     # so we dedupe by seed_name and pick the first row for the summary stats.
+    def _neg_cell(sv) -> str:
+        # Bad/negative marker: a coverage-rejected pano shows WHY in red;
+        # a config-declared negative shows "yes"; otherwise "no".
+        if not getattr(sv, "is_negative", False):
+            return "no"
+        reason = getattr(sv, "negative_reason", None)
+        if reason:
+            return (f'<span style="color:#d62728;font-weight:600">BAD</span> '
+                    f'<span class="small">({html.escape(reason)})</span>')
+        return "yes"
+
     seen = set()
     seed_rows = []
     for sv in seed_views:
@@ -860,12 +996,94 @@ def render_region_index(
             f"<td>{sv.pano_osm_n_keypoints or '—'}</td>"
             f"<td>{_fmt_optional_float(water, suffix='', precision=2) if water is not None else '—'}</td>"
             f"<td>{html.escape(recov_cell)}</td>"
-            f"<td>{_fmt_optional_bool(sv.is_negative)}</td>"
+            f"<td>{_neg_cell(sv)}</td>"
             f"</tr>"
         )
 
     n_buildings = len(building_heights) if building_heights else 0
     n_seeds = len(seen)
+
+    # Per-pano summary: heading correction, matches, coverage, quality.
+    pano_summary_html = ""
+    if pano_results:
+        srows = []
+        for pr in pano_results:
+            nm = int(getattr(pr, "n_matched", 0) or 0)
+            nseg = int(getattr(pr, "n_segments", 0) or 0)
+            shift = float(getattr(pr, "bearing_shift_deg", 0.0) or 0.0)
+            # Distinct OSM buildings covered (unique matched feature_ids) —
+            # an honest "coverage" count. n_buildings_in_view is ALL
+            # projected buildings in radius (~thousands), so a ratio to it
+            # is meaningless; the absolute distinct-building count is the
+            # useful signal.
+            fids = set()
+            for s in (getattr(pr, "matched_segments", None) or []):
+                m = s.get("matched_projection") if isinstance(s, dict) else None
+                if m and m.get("feature_id"):
+                    fids.add(str(m["feature_id"]))
+            ncov = len(fids)
+            mrate = (nm / nseg * 100.0) if nseg else 0.0   # precision
+            # Quality from precision AND absolute coverage AND minimum
+            # segment count.  A pano with 3 detected + 3 matched = 100%
+            # match-rate is not "good" — the percentage is meaningless
+            # when nseg < 10.  Require nseg >= 10 for "good" so the label
+            # reflects statistical weight, not just ratio.
+            if mrate >= 65 and ncov >= 15 and nseg >= 10:
+                qlabel, qbg = "good", "rgba(46,160,67,0.30)"
+            elif mrate >= 50 and ncov >= 5 and nseg >= 4:
+                qlabel, qbg = "medium", "rgba(230,180,40,0.30)"
+            elif nseg < 10:
+                # Type 1: camera not facing a skyline — F-DET1 should have
+                # already caught these, but keep the sub-label for any that
+                # slip through (e.g. curated seeds with an explicit override).
+                qlabel, qbg = "weak — no detection", "rgba(214,40,40,0.25)"
+            elif mrate < 40:
+                # Type 2: buildings visible but most don't match OSM —
+                # heading drift or OSM coverage gaps.
+                qlabel, qbg = "weak — mismatch", "rgba(200,60,20,0.28)"
+            else:
+                # Type 3: moderate detection but low matched-building coverage.
+                qlabel, qbg = "weak — low coverage", "rgba(200,130,20,0.28)"
+            # Warn when a high rate is computed from a tiny sample —
+            # the percentage is real but not statistically meaningful.
+            if nseg < 10 and mrate >= 65:
+                qlabel += " ⚠"
+            corr = (f"{shift:+.0f}&deg;" if abs(shift) >= 1.0
+                    else "<span class='small'>&mdash;</span>")
+            slug = (pr.seed_name[5:] if pr.seed_name.startswith("seed_")
+                    else pr.seed_name)
+            srows.append(
+                f"      <tr><td><a href=\"seed_{html.escape(slug)}.html\">"
+                f"{html.escape(pr.seed_name)}</a></td>"
+                f"<td>{corr}</td><td>{nseg}</td><td>{nm}</td>"
+                f"<td>{mrate:.0f}%</td><td>{ncov}</td>"
+                f"<td style=\"background:{qbg}\">{qlabel}</td></tr>"
+            )
+        n_corr = sum(1 for pr in pano_results
+                     if abs(float(getattr(pr, "bearing_shift_deg", 0.0)
+                                  or 0.0)) >= 1.0)
+        n_withmatch = sum(1 for pr in pano_results
+                          if int(getattr(pr, "n_matched", 0) or 0) > 0)
+        pano_summary_html = f"""
+<h2>Pano summary</h2>
+<p class="small">{len(pano_results)} panos &middot; {n_corr} got a bearing
+   correction &middot; {n_withmatch} produced matches. <b>Heading</b> =
+   bearing shift applied (&mdash; = anchor already good). <b>Detected</b> =
+   towers the splitter found. <b>Matched</b> = towers matched to OSM.
+   <b>Match rate</b> = matched / detected (precision; ⚠ = fewer than 10
+   segments detected — percentage is not statistically meaningful).
+   <b>Coverage</b> = distinct OSM buildings matched.
+   <b>Quality</b> = good requires ≥65% rate, ≥15 buildings, ≥10 segments;
+   medium ≥50%/≥5/≥4; otherwise weak.</p>
+<table>
+  <thead><tr><th>seed</th><th>heading</th><th>detected</th>
+    <th>matched</th><th>match rate</th><th>coverage</th>
+    <th>quality</th></tr></thead>
+  <tbody>
+{chr(10).join(srows)}
+  </tbody>
+</table>
+"""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -881,33 +1099,46 @@ def render_region_index(
   th {{ background: #f4f6fa; font-weight: 600; }}
   a {{ color: #0a3070; text-decoration: none; }}
   a:hover {{ text-decoration: underline; }}
-  table.timings tr.lvl1 td {{ background: #fafbfd; color: #444; }}
-  table.timings tr.lvl2 td {{ background: #fdfdfe; color: #666; font-size: 0.9em; }}
+  /* Call-hierarchy table: tint + left-accent per nesting level so the
+     parent→child structure reads at a glance. */
+  table.timings tr.lvl1 td {{ background: #fafbfd; color: #444;
+       box-shadow: inset 3px 0 #c7d4ea; }}
+  table.timings tr.lvl2 td {{ background: #fdfdfe; color: #666;
+       font-size: 0.9em; box-shadow: inset 6px 0 #e2e8f4; }}
+  table.timings tr.ttotal th {{ background: #eef1f6; }}
+  table.timings td:nth-child(4), table.timings td:nth-child(5),
+  table.timings th:nth-child(4), table.timings th:nth-child(5) {{
+       text-align: right; white-space: nowrap; }}
   .stats {{ display: flex; gap: 2em; margin: 1em 0; }}
   .stat {{ background: #f4f6fa; padding: 0.6em 1em; border-radius: 4px; }}
   .stat .num {{ font-size: 1.4em; font-weight: 600; color: #0a3070; }}
   .small {{ font-size: 0.85em; color: #666; }}
-  /* Pipeline-timing layout: step table left, allocation bars right. */
-  .timing-layout {{ display: flex; gap: 2em; align-items: flex-start;
-                    flex-wrap: wrap; }}
-  .timing-table-col {{ flex: 1 1 480px; min-width: 360px; }}
-  .timing-chart-col {{ flex: 1 1 420px; min-width: 320px; }}
-  .talloc-title {{ color: #0a3070; font-size: 1em; margin: 0 0 0.6em; }}
-  .talloc-row {{ margin-bottom: 0.55em; }}
-  .talloc-label {{ font-size: 0.82em; color: #333; margin-bottom: 0.15em; }}
-  .talloc-num {{ color: #888; font-weight: 600; }}
-  .talloc-track {{ background: #eef1f6; border-radius: 3px; height: 14px;
-                   width: 100%; overflow: hidden; }}
-  .talloc-bar {{ height: 100%; border-radius: 3px; min-width: 2px; }}
+  /* Time-allocation chart: stacked ABOVE the table, full width. Each row
+     is a 3-col grid (label | bar track | number) so bars never overlap
+     the labels. */
+  .talloc-title {{ color: #0a3070; font-size: 1em; margin: 1.2em 0 0.6em; }}
+  .talloc {{ max-width: 900px; margin-bottom: 0.4em; }}
+  .talloc-row {{ display: grid; grid-template-columns: 320px 1fr 78px;
+       align-items: center; gap: 0.6em; margin-bottom: 0.35em; }}
+  .talloc-label {{ font-size: 0.82em; color: #333; white-space: nowrap;
+       overflow: hidden; text-overflow: ellipsis; }}
+  .talloc-num {{ font-size: 0.82em; color: #555; font-weight: 600;
+       text-align: right; white-space: nowrap; }}
+  .talloc-track {{ background: #eef1f6; border-radius: 3px; height: 15px;
+       width: 100%; overflow: hidden; }}
+  .talloc-bar {{ display: block; height: 100%; border-radius: 3px;
+       min-width: 2px; }}
 </style>
 </head>
 <body>
+<nav class="breadcrumb"><a href="../index.html">&#8592; All regions</a></nav>
 <h1>{html.escape(title)}</h1>
 
 <div class="stats">
   <div class="stat"><div class="num">{n_seeds}</div>seeds</div>
   <div class="stat"><div class="num">{n_buildings}</div>aggregated buildings</div>
 </div>
+{pano_summary_html}
 {screening_map_html}
 {timings_html}
 <h2>Seeds</h2>
@@ -1058,7 +1289,7 @@ def write_region_report(
                 except Exception:
                     pass
                 # SegFormer 4-class pano overlay (free; reuses cached masks).
-                # The anchor_offset must match what ``_stitch_pano_composite``
+                # The anchor_offset must match what ``_build_and_detect_pano``
                 # used or the mask is shifted relative to the RGB.
                 seg_png = views_pano_dir / f"{slug}_pano_seg.png"
                 if _render_pano_segformer_overlay_png(
@@ -1071,6 +1302,9 @@ def write_region_report(
                     _draw_pano_north_line_inplace(seg_png, _hpc)
                     pano_rels["pano_segformer"] = (
                         f"assets/pano/{slug}_pano_seg.png")
+                # Depth PNG: slow (predict_pano_depth on CPU) — gated.
+                # Reconstruction + scan use pano_result.pano_depth (already
+                # computed during the pipeline run) so they always render.
                 if _depth_enabled:
                     depth_png = views_pano_dir / f"{slug}_pano_depth.png"
                     if _render_pano_depth_png(
@@ -1081,20 +1315,20 @@ def write_region_report(
                         _draw_pano_north_line_inplace(depth_png, _hpc)
                         pano_rels["pano_depth"] = (
                             f"assets/pano/{slug}_pano_depth.png")
-                    recon_png = views_pano_dir / f"{slug}_pano_recon.png"
-                    if _render_pano_reconstruction_png(
-                            recon_png, pano_result, buildings_by_id,
-                            osm_data=osm_data):
-                        pano_rels["pano_reconstruction"] = (
-                            f"assets/pano/{slug}_pano_recon.png")
-                    # 2D distance-vs-bearing strip (depth silhouette vs
-                    # OSM nearest). Lives in the pano-space tab group
-                    # because x = pano column → degree.
-                    scan_png = views_pano_dir / f"{slug}_pano_scan.png"
-                    if _render_pano_bearing_scan_png(
-                            scan_png, pano_result, osm_data):
-                        pano_rels["pano_scan"] = (
-                            f"assets/pano/{slug}_pano_scan.png")
+                # Reconstruction: uses cached pano_depth — always render.
+                recon_png = views_pano_dir / f"{slug}_pano_recon.png"
+                if _render_pano_reconstruction_png(
+                        recon_png, pano_result, buildings_by_id,
+                        osm_data=osm_data):
+                    pano_rels["pano_reconstruction"] = (
+                        f"assets/pano/{slug}_pano_recon.png")
+                # 2D distance-vs-bearing strip (depth silhouette vs OSM
+                # nearest). Uses pano_result data — always render.
+                scan_png = views_pano_dir / f"{slug}_pano_scan.png"
+                if _render_pano_bearing_scan_png(
+                        scan_png, pano_result, osm_data):
+                    pano_rels["pano_scan"] = (
+                        f"assets/pano/{slug}_pano_scan.png")
             # Polar footprint + satellite minimaps (replaces rectangular).
             polar_fp_png = minimap_dir / f"{slug}_polar_fp.png"
             if _render_pano_minimap_polar_png(
@@ -1118,6 +1352,20 @@ def write_region_report(
             page_html = render_seed_pano_page(
                 primary, sv_list, pano_result, region_name, minimap_rel,
                 pano_rel_paths=pano_rels,
+            )
+            (out_dir / f"seed_{slug}.html").write_text(page_html, encoding="utf-8")
+            continue
+
+        # Bad / negative seeds: skip ALL per-view PNG generation and write a
+        # minimal summary page (minimap + rejection reason only). Per-view
+        # Street View images have no diagnostic value when a seed failed the
+        # coverage screen or was declared negative — rendering them just bloats
+        # the report with imagery from a pano that was already discarded.
+        if primary.is_negative:
+            page_html = render_seed_page(
+                primary, region_name, minimap_rel,
+                estimates=None,
+                views=None,
             )
             (out_dir / f"seed_{slug}.html").write_text(page_html, encoding="utf-8")
             continue
@@ -1177,7 +1425,8 @@ def write_region_report(
                     view_depth_rels.append(None)
                 recon_png = views_dir / f"{slug}_view_{i}_recon.png"
                 if _render_view_reconstruction_png(
-                        recon_png, vsv, buildings_by_id):
+                        recon_png, vsv, buildings_by_id,
+                        osm_data=osm_data):
                     view_recon_rels.append(
                         f"assets/views/{slug}_view_{i}_recon.png")
                 else:
@@ -1208,7 +1457,7 @@ def write_region_report(
 
     index_html = render_region_index(
         region_name, seed_views, building_heights, step_timings=step_timings,
-        screening_map_rel=screening_map_rel)
+        screening_map_rel=screening_map_rel, pano_results=pano_results)
     (out_dir / "index.html").write_text(index_html, encoding="utf-8")
 
     logger.info(

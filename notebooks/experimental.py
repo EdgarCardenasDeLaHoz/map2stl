@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 
 from skimage import io, filters, morphology, transform
 
-from numpy2stl import numpy2stl as n2s
+import numpy2stl as n2s  # Import MODULE not function
 from geo2stl import geo2stl as g2s
 from geo2stl import sat2stl as s2s
 

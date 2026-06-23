@@ -19,7 +19,6 @@ download by Functional Urban Area. The GHSL WMS/WCS endpoint is simpler.
 
 from __future__ import annotations
 
-import io
 import logging
 from typing import Tuple
 
@@ -27,14 +26,14 @@ import numpy as np
 import requests
 
 from city2stl.skyline.height import BBox, HeightResult, _resample
-from app.server.core.cache import (
-    make_cache_key, read_array_cache, write_array_cache,
-    NAMESPACE_TTL,
+from ._cache import (
+    register_ttl, make_cache_key, read_height_result, write_height_result,
 )
+from ._raster import read_geotiff_bytes
 
 logger = logging.getLogger(__name__)
 
-NAMESPACE_TTL.setdefault("copernicus_bh", 90 * 86400)
+register_ttl("copernicus_bh", 90)
 
 _CONFIDENCE = 0.7
 _RESOLUTION_M = 10.0  # EU product
@@ -129,34 +128,8 @@ def _fetch_ghsl_tiles(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | None:
 
 
 def _parse_geotiff_bytes(data: bytes) -> np.ndarray | None:
-    """Parse GeoTIFF bytes into a float32 array."""
-    try:
-        import rasterio
-        try:
-            with rasterio.open(io.BytesIO(data)) as src:
-                arr = src.read(1).astype(np.float32)
-                nodata = src.nodata
-                if nodata is not None:
-                    arr[arr == nodata] = np.nan
-                # Zero height = no building
-                arr[arr <= 0] = np.nan
-                return arr
-        except rasterio.errors.RasterioIOError:
-            logger.warning("Failed to parse GeoTIFF with rasterio")
-            return None
-    except ImportError:
-        pass
-
-    # Fallback without rasterio: try PIL
-    try:
-        from PIL import Image
-        img = Image.open(io.BytesIO(data))
-        arr = np.array(img, dtype=np.float32)
-        arr[arr <= 0] = np.nan
-        return arr
-    except Exception as e:
-        logger.warning(f"Cannot parse GeoTIFF bytes: {e}")
-        return None
+    """Parse building-height GeoTIFF bytes (zero/negative = no building)."""
+    return read_geotiff_bytes(data, zero_as_nodata=True, context="Copernicus GeoTIFF")
 
 
 class CopernicusProvider:
@@ -175,15 +148,9 @@ class CopernicusProvider:
                                    {"dim": list(dim)})
 
         # Check cache
-        cached = read_array_cache(_NAMESPACE, cache_key)
-        if cached is not None:
-            arrays, meta = cached
-            return HeightResult(
-                raster=arrays["raster"],
-                confidence=arrays["confidence"],
-                source_name=self.name,
-                resolution_m=meta.get("resolution_m", _RESOLUTION_M),
-            )
+        hit = read_height_result(_NAMESPACE, cache_key, self.name, _RESOLUTION_M)
+        if hit is not None:
+            return hit
 
         raster = None
         resolution = _RESOLUTION_M
@@ -211,9 +178,7 @@ class CopernicusProvider:
         result = HeightResult(raster, confidence, self.name, resolution)
 
         # Cache
-        write_array_cache(_NAMESPACE, cache_key,
-                          {"raster": raster, "confidence": confidence},
-                          {"resolution_m": resolution})
+        write_height_result(_NAMESPACE, cache_key, result)
         return result
 
 

@@ -20,12 +20,16 @@ import osmnx as ox
 import pandas as pd
 
 from shapely.geometry import Polygon,MultiPolygon
-from descartes import PolygonPatch
 
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from matplotlib.collections import PatchCollection
 import matplotlib.cm as cm
+
+# ``descartes`` is unmaintained and frequently unavailable on modern Python.
+# It is only needed by the matplotlib visualisation helpers below, so it is
+# imported lazily inside ``building_to_patches`` rather than at module load —
+# this keeps ``get_polygons``/``building_heights`` importable without it.
 
 ####################################
 def building_to_gdf(GEO_poly):
@@ -150,8 +154,9 @@ def building_heights(gdf):
     return Heights
 
 def building_to_patches(gdf):
-    
-    patches = [] 
+    from descartes import PolygonPatch  # lazy: unmaintained, viz-only dependency
+
+    patches = []
     for _,row in gdf.iterrows():
         geometry = row["geometry"]
         if isinstance(geometry, Polygon):

@@ -52,17 +52,18 @@ class TestLiDARCovers:
 # ── Fetch (mocked) ──────────────────────────────────────────────
 
 class TestLiDARFetch:
-    @patch("city2stl.skyline.height.providers.lidar_3dep.read_array_cache", return_value=None)
-    @patch("city2stl.skyline.height.providers.lidar_3dep.write_array_cache")
-    @patch("city2stl.skyline.height.providers.lidar_3dep._fetch_3dep_image")
-    def test_ndsm_subtraction(self, mock_fetch, mock_write, mock_read):
-        """DSM=50m, DTM=30m → nDSM=20m."""
-        def fake_fetch(bbox, dim, rendering_rule=None):
-            if rendering_rule:  # DSM
-                return np.full(dim, 50.0, dtype=np.float32)
-            else:  # DTM
-                return np.full(dim, 30.0, dtype=np.float32)
-        mock_fetch.side_effect = fake_fetch
+    # The provider computes nDSM = COP30 DSM − SRTM DTM, both fetched via
+    # ``_fetch_opentopo_dem(demtype, bbox, api_key, label)`` and gated on an
+    # OpenTopography API key. (Earlier 3DEP ImageServer path removed.)
+    @patch("city2stl.skyline.height.providers.lidar_3dep.read_height_result", return_value=None)
+    @patch("city2stl.skyline.height.providers.lidar_3dep.write_height_result")
+    @patch("city2stl.skyline.height.providers.lidar_3dep._get_api_key", return_value="key")
+    @patch("city2stl.skyline.height.providers.lidar_3dep._fetch_opentopo_dem")
+    def test_ndsm_subtraction(self, mock_dem, mock_key, mock_write, mock_read):
+        """DSM=50m (COP30), DTM=30m (SRTM) → nDSM=20m."""
+        def fake_dem(demtype, bbox, api_key, label):
+            return np.full((40, 40), 50.0 if demtype == "COP30" else 30.0, dtype=np.float32)
+        mock_dem.side_effect = fake_dem
 
         p = LiDAR3DEPProvider()
         result = p.fetch_heights((40.0, 39.9, -75.0, -75.1), (40, 40))
@@ -72,56 +73,51 @@ class TestLiDARFetch:
         np.testing.assert_allclose(result.raster, 20.0, atol=0.1)
         np.testing.assert_allclose(result.confidence, _CONFIDENCE)
 
-    @patch("city2stl.skyline.height.providers.lidar_3dep.read_array_cache", return_value=None)
-    @patch("city2stl.skyline.height.providers.lidar_3dep.write_array_cache")
-    @patch("city2stl.skyline.height.providers.lidar_3dep._fetch_3dep_image")
-    def test_negative_clamped(self, mock_fetch, mock_write, mock_read):
+    @patch("city2stl.skyline.height.providers.lidar_3dep.read_height_result", return_value=None)
+    @patch("city2stl.skyline.height.providers.lidar_3dep.write_height_result")
+    @patch("city2stl.skyline.height.providers.lidar_3dep._get_api_key", return_value="key")
+    @patch("city2stl.skyline.height.providers.lidar_3dep._fetch_opentopo_dem")
+    def test_negative_clamped(self, mock_dem, mock_key, mock_write, mock_read):
         """DTM > DSM artefact → clamp to 0."""
-        def fake_fetch(bbox, dim, rendering_rule=None):
-            if rendering_rule:
-                return np.full(dim, 30.0, dtype=np.float32)
-            else:
-                return np.full(dim, 35.0, dtype=np.float32)
-        mock_fetch.side_effect = fake_fetch
+        def fake_dem(demtype, bbox, api_key, label):
+            return np.full((20, 20), 30.0 if demtype == "COP30" else 35.0, dtype=np.float32)
+        mock_dem.side_effect = fake_dem
 
         p = LiDAR3DEPProvider()
         result = p.fetch_heights((40.0, 39.9, -75.0, -75.1), (20, 20))
         assert np.all(result.raster >= 0)
 
-    @patch("city2stl.skyline.height.providers.lidar_3dep.read_array_cache", return_value=None)
-    @patch("city2stl.skyline.height.providers.lidar_3dep.write_array_cache")
-    @patch("city2stl.skyline.height.providers.lidar_3dep._fetch_3dep_image")
-    def test_no_dsm_returns_nan(self, mock_fetch, mock_write, mock_read):
+    @patch("city2stl.skyline.height.providers.lidar_3dep.read_height_result", return_value=None)
+    @patch("city2stl.skyline.height.providers.lidar_3dep.write_height_result")
+    @patch("city2stl.skyline.height.providers.lidar_3dep._get_api_key", return_value="key")
+    @patch("city2stl.skyline.height.providers.lidar_3dep._fetch_opentopo_dem")
+    def test_no_dsm_returns_nan(self, mock_dem, mock_key, mock_write, mock_read):
         """No DSM available → all NaN."""
-        mock_fetch.return_value = None
+        mock_dem.return_value = None
         p = LiDAR3DEPProvider()
         result = p.fetch_heights((40.0, 39.9, -75.0, -75.1), (20, 20))
         assert np.all(np.isnan(result.raster))
 
-    @patch("city2stl.skyline.height.providers.lidar_3dep.read_array_cache", return_value=None)
-    @patch("city2stl.skyline.height.providers.lidar_3dep.write_array_cache")
-    @patch("city2stl.skyline.height.providers.lidar_3dep._fetch_3dep_image")
-    def test_no_dtm_returns_nan(self, mock_fetch, mock_write, mock_read):
+    @patch("city2stl.skyline.height.providers.lidar_3dep.read_height_result", return_value=None)
+    @patch("city2stl.skyline.height.providers.lidar_3dep.write_height_result")
+    @patch("city2stl.skyline.height.providers.lidar_3dep._get_api_key", return_value="key")
+    @patch("city2stl.skyline.height.providers.lidar_3dep._fetch_opentopo_dem")
+    def test_no_dtm_returns_nan(self, mock_dem, mock_key, mock_write, mock_read):
         """DSM available but no DTM → can't compute nDSM → NaN."""
-        def fake_fetch(bbox, dim, rendering_rule=None):
-            if rendering_rule:
-                return np.full(dim, 50.0, dtype=np.float32)
-            return None
-        mock_fetch.side_effect = fake_fetch
+        def fake_dem(demtype, bbox, api_key, label):
+            return np.full((20, 20), 50.0, dtype=np.float32) if demtype == "COP30" else None
+        mock_dem.side_effect = fake_dem
 
         p = LiDAR3DEPProvider()
         result = p.fetch_heights((40.0, 39.9, -75.0, -75.1), (20, 20))
         assert np.all(np.isnan(result.raster))
 
-    @patch("city2stl.skyline.height.providers.lidar_3dep.read_array_cache")
+    @patch("city2stl.skyline.height.providers.lidar_3dep.read_height_result")
     def test_cache_hit(self, mock_read):
         """Cached result returned without fetching."""
         raster = np.full((30, 30), 12.0, dtype=np.float32)
         conf = np.full((30, 30), _CONFIDENCE, dtype=np.float32)
-        mock_read.return_value = (
-            {"raster": raster, "confidence": conf},
-            {"resolution_m": 1.0}
-        )
+        mock_read.return_value = HeightResult(raster, conf, "lidar_3dep", 1.0)
         p = LiDAR3DEPProvider()
         result = p.fetch_heights((40.0, 39.9, -75.0, -75.1), (30, 30))
         np.testing.assert_allclose(result.raster, 12.0)

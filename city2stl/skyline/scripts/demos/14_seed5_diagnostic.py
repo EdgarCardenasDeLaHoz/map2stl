@@ -34,7 +34,7 @@ from matplotlib.patches import Rectangle
 # ---------------------------------------------------------------------------
 # Path bootstrap — makes "PYTHONPATH=. python scripts/14_..." work.
 # ---------------------------------------------------------------------------
-ROOT = Path(__file__).resolve().parents[3]  # …/strm2stl/
+ROOT = Path(__file__).resolve().parents[4]  # …/strm2stl/
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -53,7 +53,7 @@ from city2stl.skyline.region_pdf import (  # noqa: E402
     _osm_to_building_records,
     _parse_streetview_url,
     _recover_anchor_offset,
-    _stitch_pano_composite,
+    _build_and_detect_pano,
     _resolve_api_key,
 )
 from city2stl.skyline.pipeline import (  # noqa: E402
@@ -916,7 +916,7 @@ def run_diagnostic(region: str, seed_name: str, out_path: Path) -> None:
     # populated).  Without this step, cache keys won't match and all views
     # return None.
     _res_cache_path = (
-        Path(__file__).resolve().parents[1] / "runs" / "seed_resolution_cache.json"
+        Path(__file__).resolve().parents[2] / "runs" / "seed_resolution_cache.json"
     )
     if _res_cache_path.exists():
         try:
@@ -1006,7 +1006,7 @@ def run_diagnostic(region: str, seed_name: str, out_path: Path) -> None:
     print(f"[diag] key view headings: {[vs['heading'] for vs in key_view_states]}")
 
     # ── 8. Run pano-path pipeline ─────────────────────────────────────────────
-    pano_result = _stitch_pano_composite(
+    pano_result = _build_and_detect_pano(
         target_seed, cached_views, seed_buildings, anchor_offset, SPIN_STEP_DEG)
     if pano_result:
         print(f"[diag] pano: segs={pano_result.n_segments} "

@@ -58,14 +58,14 @@ class StitchedPanoResult:
     headings_per_col: "np.ndarray | None" = None
     # Per-class pano-stitched masks (same view set + sort as
     # ``pano_image`` so the column geometry agrees). Populated by
-    # ``_stitch_pano_composite`` for the HTML report's SegFormer-mask
+    # ``_build_and_detect_pano`` for the HTML report's SegFormer-mask
     # pano layer; ``None`` when unavailable.
     pano_building_mask: "np.ndarray | None" = None
     pano_water_mask: "np.ndarray | None" = None
     pano_sky_mask: "np.ndarray | None" = None
     pano_vegetation_mask: "np.ndarray | None" = None
     # F-SKY24: pano-wide depth map (Depth Anything V2 inverse depth,
-    # [0, 1] scaled). Computed once in ``_stitch_pano_composite`` so the
+    # [0, 1] scaled). Computed once in ``_build_and_detect_pano`` so the
     # splitter + downstream renderers (depth pano, reconstruction polar
     # plot) all share one inference instead of recomputing per-tab.
     pano_depth: "np.ndarray | None" = None
@@ -77,6 +77,18 @@ class StitchedPanoResult:
     # recon used this anchor, giving the ~600 vs ~1000 m mismatch).
     # Falls back to 1450.0 when no OSM anchor is derivable.
     depth_scale: float = 1450.0
+    # F-SKY25 horizon-pitch geometric distance model:
+    #   dist_m = geom_K / (base_row - geom_horizon_row)
+    # Fitted (2 params) from matched towers' base rows vs OSM distance.
+    # Unlike the saturated depth value, the base-row position tracks real
+    # near/far variation, so this gives a non-flat distance estimate for
+    # every column. ``None`` when the fit wasn't possible (<3 towers or
+    # degenerate base-row spread).
+    geom_K: float | None = None
+    geom_horizon_row: float | None = None
+    # Bearing-recovery shift actually APPLIED to pano_headings (deg); 0.0
+    # when the gate skipped (anchor kept). Surfaced in the index summary.
+    bearing_shift_deg: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -102,6 +114,10 @@ class SeedViewRegistration:
     # view is still rendered (so the user can verify the pipeline isn't
     # producing spurious estimates) but no heights are aggregated.
     is_negative: bool = False
+    # Why this seed was marked bad (e.g. "low building coverage 3%") when
+    # auto-rejected by the pano coverage screen; None for config-declared
+    # negatives. Surfaced in the report so bad panos are labelled.
+    negative_reason: str | None = None
     # F-SKY4: the SegFormer building mask for this view. Persisted into the
     # registration so the PDF renderer can overlay it without depending on
     # the bounded in-memory neural cache (which evicts after 16 entries and

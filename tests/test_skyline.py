@@ -270,3 +270,102 @@ class TestAggregateBuildingHeights:
         assert len(agg) == 1
         assert agg[0]["n_seeds"] == 2
         assert agg[0]["n_views"] == 3
+
+    def test_new_fields_always_present(self):
+        """effective_height_m / source / F-SKY1 / depth-rescue always in output."""
+        ests = [
+            RegisteredBuildingEstimate("b1", "B1", "seed_1_010", 0.0, 100, 50, 200.0, 30.0, 0.7),
+        ]
+        agg = aggregate_building_heights(ests)
+        row = agg[0]
+        assert "effective_height_m" in row
+        assert "effective_height_source" in row
+        assert "f_sky1_height_m" in row
+        assert "f_sky1_n_views" in row
+        assert "depth_rescue_height_m" in row
+        # With no secondary signals, effective = geometric.
+        assert row["effective_height_source"] == "geometric"
+        assert row["effective_height_m"] == pytest.approx(row["median_height_m"])
+
+    def test_f_sky1_rescue_upward(self):
+        """When F-SKY1 says ≥40% taller than geometric, effective adopts it."""
+        def _est(h_geo, h_f1, conf):
+            return RegisteredBuildingEstimate(
+                "b1", "B1", "seed_1_010", 0.0, 100, 50, 200.0,
+                h_geo, 0.8,
+                inferred_height_m=h_f1, floor_confidence=conf,
+            )
+        # Two views agree: geometric ~40m, F-SKY1 ~100m (glass tower case).
+        ests = [_est(40.0, 100.0, 0.45), _est(42.0, 102.0, 0.50)]
+        agg = aggregate_building_heights(ests)
+        row = agg[0]
+        assert row["f_sky1_height_m"] is not None
+        assert row["f_sky1_height_m"] == pytest.approx(101.0)
+        assert row["effective_height_source"] == "f_sky1"
+        assert row["effective_height_m"] == pytest.approx(101.0)
+
+    def test_f_sky1_no_rescue_when_only_one_view(self):
+        """Single F-SKY1 view is not enough — avoid noise."""
+        ests = [
+            RegisteredBuildingEstimate(
+                "b1", "B1", "seed_1_010", 0.0, 100, 50, 200.0,
+                40.0, 0.8, inferred_height_m=120.0, floor_confidence=0.40,
+            ),
+        ]
+        agg = aggregate_building_heights(ests)
+        row = agg[0]
+        assert row["f_sky1_height_m"] is None
+        assert row["effective_height_source"] == "geometric"
+
+    def test_f_sky1_no_rescue_when_confidence_low(self):
+        """Below-threshold floor_confidence (< 0.30) suppressed."""
+        def _est(h_f1, conf):
+            return RegisteredBuildingEstimate(
+                "b1", "B1", f"seed_1_0{10+len(_est.__name__)}", 0.0, 100, 50, 200.0,
+                40.0, 0.8, inferred_height_m=h_f1, floor_confidence=conf,
+            )
+        ests = [
+            RegisteredBuildingEstimate("b1","B1","seed_1_010",0.0,100,50,200.0,40.0,0.8,
+                                       inferred_height_m=120.0, floor_confidence=0.20),
+            RegisteredBuildingEstimate("b1","B1","seed_1_020",0.0,100,50,200.0,40.0,0.8,
+                                       inferred_height_m=122.0, floor_confidence=0.15),
+        ]
+        agg = aggregate_building_heights(ests)
+        row = agg[0]
+        assert row["f_sky1_height_m"] is None
+        assert row["effective_height_source"] == "geometric"
+
+    def test_depth_rescue_upward(self):
+        """F-SKY12 Phase B: depth rescue fires when ≥2 views have depth > geo×1.3."""
+        def _est(h_geo, h_depth, disagree):
+            return RegisteredBuildingEstimate(
+                "b1", "B1", "seed_1_010", 0.0, 100, 50, 200.0,
+                h_geo, 0.8, depth_height_m=h_depth, depth_disagreement=disagree,
+            )
+        ests = [_est(35.0, 110.0, True), _est(38.0, 108.0, True)]
+        agg = aggregate_building_heights(ests)
+        row = agg[0]
+        assert row["depth_rescue_height_m"] is not None
+        assert row["depth_rescue_height_m"] == pytest.approx(109.0)
+        assert row["effective_height_source"] == "depth_rescue"
+
+    def test_depth_downweight_does_not_affect_median(self):
+        """Depth downweighting affects weighted_height_m, not median."""
+        # View 0: depth says shorter (disagree=True, depth < geo*0.7) → confidence halved
+        # View 1: no depth signal
+        ests = [
+            RegisteredBuildingEstimate(
+                "b1","B1","seed_1_010",0.0,100,50,200.0, 100.0, 1.0,
+                depth_height_m=50.0, depth_disagreement=True,
+            ),
+            RegisteredBuildingEstimate(
+                "b1","B1","seed_1_020",0.0,100,50,200.0, 20.0, 1.0,
+            ),
+        ]
+        agg = aggregate_building_heights(ests)
+        row = agg[0]
+        # Median is unaffected (60m).
+        assert row["median_height_m"] == pytest.approx(60.0)
+        # Weighted average must be lower than the naive equal-weight mean (60m)
+        # because view 0 (h=100) had its confidence halved → pulls weight toward view 1.
+        assert row["weighted_height_m"] < 60.0

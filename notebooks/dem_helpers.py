@@ -9,8 +9,8 @@ from geo2stl.dem import make_dem_image as _geo_make_dem_image
 from city2stl import create
 
 from numpy2stl import rescale, write3MF
-import numpy2stl.puzzle as puzzle
-import numpy2stl.boolean as boolean
+import numpy2stl.applications.puzzle as puzzle
+import numpy2stl.processing.boolean as boolean
 
 from notebooks import figure as figs
 

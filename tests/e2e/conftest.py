@@ -7,10 +7,12 @@ that triggers a JS error or unhandled promise rejection fails automatically.
 
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from urllib.request import urlopen
 from urllib.error import URLError
@@ -28,15 +30,24 @@ def _free_port() -> int:
     return port
 
 
-@pytest.fixture(scope="session")
-def live_server_url() -> str:
+def _run_uvicorn(*, test_mode: bool) -> Iterator[str]:
+    """Start `app.server.server:app` on a free port, yield its URL, then stop it.
+
+    When *test_mode* is True the server runs with STRM2STL_TEST_MODE=1, so the DEM
+    endpoint returns a fast deterministic gradient with no Earth Engine / network I/O
+    (see app/server/routers/terrain.py).
+    """
     port = _free_port()
+    env = dict(os.environ)
+    if test_mode:
+        env["STRM2STL_TEST_MODE"] = "1"
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.server.server:app",
          "--port", str(port), "--host", "127.0.0.1"],
         cwd=REPO_ROOT,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=env,
     )
     url = f"http://127.0.0.1:{port}"
     deadline = time.time() + 30
@@ -50,13 +61,29 @@ def live_server_url() -> str:
         proc.terminate()
         raise RuntimeError("uvicorn did not become ready in 30s")
 
-    yield url
-
-    proc.terminate()
     try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+        yield url
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+@pytest.fixture(scope="session")
+def live_server_url() -> Iterator[str]:
+    """Live server (normal mode) for load/contract/interaction smoke tests."""
+    yield from _run_uvicorn(test_mode=False)
+
+
+@pytest.fixture(scope="session")
+def live_server_url_testmode() -> Iterator[str]:
+    """Live server with STRM2STL_TEST_MODE=1 — deterministic DEM, no network.
+
+    Used by data-flow tests (e.g. terrain fetch) that must run reliably offline.
+    """
+    yield from _run_uvicorn(test_mode=True)
 
 
 @pytest.fixture

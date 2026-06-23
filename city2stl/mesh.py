@@ -28,7 +28,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 try:
-    from numpy2stl.save import write3MF as _write3mf
+    from numpy2stl import write3MF as _write3mf
     _WRITE3MF_AVAILABLE = True
 except ImportError:
     _WRITE3MF_AVAILABLE = False
@@ -40,8 +40,8 @@ except ImportError:
     _ARRAY_TO_MESH_AVAILABLE = False
 
 try:
-    from numpy2stl.generate import polygon_to_prism as _polygon_to_prism
-    from numpy2stl.solid import vertices_to_index as _vertices_to_index
+    from numpy2stl.core.generate import polygon_to_prism as _polygon_to_prism
+    from numpy2stl.core.solid import vertices_to_index as _vertices_to_index
     _POLYGON_TO_PRISM_AVAILABLE = True
 except ImportError:
     _POLYGON_TO_PRISM_AVAILABLE = False
@@ -596,7 +596,7 @@ def generate_city_3mf(
     # -- Cities 14: optional mesh simplification on terrain ---------------
     if simplify_terrain:
         try:
-            from numpy2stl.simplify import simplify_mesh_surfaces
+            from numpy2stl.processing.simplify import simplify_mesh_surfaces
             t_faces = simplify_mesh_surfaces(t_verts, t_faces)
             logger.info(f"Terrain mesh simplified to {len(t_faces)} faces")
         except Exception as e:

@@ -426,7 +426,7 @@ def generate_puzzle_3mf(data: dict, task: ExportTask | None = None):
     """
     from fastapi.responses import FileResponse, JSONResponse
     from numpy2stl import array_to_mesh
-    from numpy2stl.save import write3MF
+    from numpy2stl import write3MF
 
     def _progress(pct, msg):
         if task:

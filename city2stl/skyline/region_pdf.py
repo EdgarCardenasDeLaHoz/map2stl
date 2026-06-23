@@ -301,7 +301,7 @@ from .pano_registration import (  # noqa: E402,F401
     _smooth_matches_across_views,
     _smooth_pano_matches_against_views,
     _split_by_depth_discontinuity,
-    _stitch_pano_composite,
+    _build_and_detect_pano,
 )
 
 
@@ -538,6 +538,31 @@ def run_region_pdf_report(
             )
         )
 
+    # F-WEB1: fetch web skyline seeds (Flickr / Wikimedia) and append to the
+    # user seeds list.  Returns empty when FLICKR_API_KEY is absent and
+    # Wikimedia returns nothing.  Web seeds are single-image (no 360° spin).
+    web_image_cache: dict = {}
+    try:
+        from .web_image_seed import web_skyline_seeds as _web_seeds  # noqa: PLC0415
+        from .region_config import FLICKR_API_KEY as _fkey  # noqa: PLC0415
+        _bbox_center = (
+            (bbox.north + bbox.south) * 0.5,
+            (bbox.east + bbox.west) * 0.5,
+        )
+        _web_out, web_image_cache = _web_seeds(
+            city_name=region_name,
+            flickr_api_key=_fkey,
+            max_images=3,
+            cache_dir=output_pdf.parent / output_pdf.stem / "web_images",
+            region_bbox_center=_bbox_center,
+        )
+        if _web_out:
+            print(f"[web_seed] adding {len(_web_out)} web image seed(s) "
+                  f"for {region_name!r}")
+            seeds = list(seeds) + _web_out
+    except Exception as _web_exc:
+        print(f"[web_seed] fetch failed: {_web_exc}")
+
     # Generate geometry-driven auto-proposals from OSM tall-building cluster.
     # These are screened via Street View but NOT fed into multiview registration
     # unless the user explicitly promotes them to seed_urls in the sites JSON.
@@ -627,6 +652,7 @@ def run_region_pdf_report(
             cross_view_state=cross_view_state,
             pano_recovery_state=pano_recovery_state,
             timer=timer,
+            web_image_cache=web_image_cache or None,
         )
 
     # Load surveyed ground-truth heights from sites/<region>.json if present.

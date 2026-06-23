@@ -118,7 +118,7 @@ def get_z_values(polygon_list, im, bounds_NW):
 
 
 def polygon_to_vertices(polygon_list):
-    from numpy2stl import numpy2stl as n2s  # lazy import
+    import numpy2stl as n2s  # Import MODULE not function
 
     triangles = []
     for poly in polygon_list:
@@ -135,7 +135,7 @@ def polygon_to_vertices(polygon_list):
     return vertices, faces
 
 def render_vertices(gdf):
-    from numpy2stl import numpy2stl as n2s  # lazy import
+    import numpy2stl as n2s  # Import MODULE not function
     
     triangles = []
     

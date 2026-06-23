@@ -29,14 +29,13 @@ from typing import Tuple
 import numpy as np
 
 from city2stl.skyline.height import BBox, HeightResult
-from app.server.core.cache import (
-    make_cache_key, read_array_cache, write_array_cache,
-    NAMESPACE_TTL,
+from ._cache import (
+    register_ttl, make_cache_key, read_height_result, write_height_result,
 )
 
 logger = logging.getLogger(__name__)
 
-NAMESPACE_TTL.setdefault("shadow_height", 30 * 86400)
+register_ttl("shadow_height", 30)
 
 _CONFIDENCE = 0.3  # low â€” shadow estimation has Â±3-5m accuracy
 _RESOLUTION_M = 5.0  # depends on satellite image resolution
@@ -175,15 +174,9 @@ class ShadowHeightProvider:
         cache_key = make_cache_key(_NAMESPACE, north, south, east, west,
                                    {"dim": list(dim)})
 
-        cached = read_array_cache(_NAMESPACE, cache_key)
-        if cached is not None:
-            arrays, meta = cached
-            return HeightResult(
-                raster=arrays["raster"],
-                confidence=arrays["confidence"],
-                source_name=self.name,
-                resolution_m=meta.get("resolution_m", _RESOLUTION_M),
-            )
+        hit = read_height_result(_NAMESPACE, cache_key, self.name, _RESOLUTION_M)
+        if hit is not None:
+            return hit
 
         if rgb is None:
             logger.debug("Shadow height: no RGB provided, fetching satellite tiles")
@@ -195,9 +188,7 @@ class ShadowHeightProvider:
 
         result = _infer_from_rgb(rgb, bbox, dim)
 
-        write_array_cache(_NAMESPACE, cache_key,
-                          {"raster": result.raster, "confidence": result.confidence},
-                          {"resolution_m": _RESOLUTION_M})
+        write_height_result(_NAMESPACE, cache_key, result)
         return result
 
 

@@ -1,6 +1,6 @@
 # F-SKY Series — Integration Status & Consolidation
 
-**Last Updated**: 2026-05-26  
+**Last Updated**: 2026-06-20  
 **Author**: Claude (consolidation pass)  
 **Purpose**: Single source of truth for F-SKY feature activation, status, and pipeline integration
 
@@ -13,10 +13,16 @@ The F-SKY series is a set of 11+ computer-vision improvements to the skyline hei
 **Current production**: `retna_pruned.pt` (0.2691 loss, 3.82m MAE)  
 **Target improvement**: Cartagena building height accuracy via cross-view registration
 
-**Active features**: F-SKY2, F-SKY4, F-SKY6, F-SKY7, F-SKY8, F-SKY10 (opt-in, diagnostic-only), F-SKY11.1, F-SKY12 (Phase A verifier, done 2026-05-26), F-SKY13 (Phases A/A.2/B/C all done 2026-05-26), F-SKY15 (HTML report, done 2026-05-26)
-**Default-off / diagnostic**: F-SKY1 (gated behind compute_floor_period=False as of 2026-05-18; fields are computed only when explicitly requested for diagnostics)
+**Active features**: F-SKY1 (floor-period rescue in aggregation, 2026-06-10), F-SKY2, F-SKY4, F-SKY5 (wired, requires SKYLINE_CV_F_SKY5=1 + MobileSAM checkpoint), F-SKY6, F-SKY7, F-SKY8, F-SKY10 (opt-in, diagnostic-only), F-SKY11.1 Phase A+B (pano heading recovery → anchor seed, Phase B opt-in via SKYLINE_CV_F_SKY11_1=1, 2026-06-13), F-SKY12 Phase A+B (depth rescue + confidence downweight in aggregation, 2026-06-10), F-SKY13 (Phases A/A.2/B/C all done; Phase C requires SKYLINE_CV_PHASE_C=1), F-SKY15 (HTML report)
 **Removed**: F-SKY3 (measured regression; function deleted 2026-05-18 via F-CLEAN2), F-SKY11.2 (IPM bird's-eye dead-end; code deleted 2026-05-24 via F-CLEAN6)
-**Pending**: F-SKY5 (MobileSAM instance head — gating decision pending), F-SKY14 (trained satellite coastline detector)
+**Pending**: F-SKY14 (trained satellite coastline detector — deferred until OSM-sparse regions encountered)
+
+**F-DET series** (detection quality & early-out, 2026-06-20):
+- F-DET1 ✅: Blob-count pano screen — `pano_registration.py`; exit before registration if top-3-view blob count < 6 (saves 30–60 s per bad seed)
+- F-DET2 ✅: OSM-backed FOV gate — `seed_selection.py`; reject proposals with < 3 OSM buildings in 80° FOV cone; add FOV-density score bonus
+- F-DET3 ✅: Weak quality sub-labels — `html_report.py`; "weak — no detection" / "weak — mismatch" / "weak — low coverage" instead of a flat "weak"
+- F-DET5 ✅: Landing page det column — `build_landing_page.py`; Det cell colored red (nseg < 10) / amber (10–19); sub-label filter in quality dropdown
+- F-DET4a–c (pending): Type 2 root-cause fixes per-city (satellite footprints, snap tolerance, non-grid geometry)
 
 ---
 
@@ -41,7 +47,15 @@ city2stl/skyline/
     ├── coastline_registration.py  (F-SKY11, F-SKY11.1, F-SKY13)
     ├── osm_water.py               (F-SKY13 — OSM coastline fetch + keypoints)
     ├── depth_estimation.py        (F-SKY12 — Depth Anything V2 verifier)
-    └── html_report.py             (F-SKY15 — HTML diagnostic report)
+    ├── html_report.py             (F-SKY15 — HTML diagnostic report)
+    ├── report_plots.py            (F-SKY15 — plot renderers split from html_report)
+    ├── pano_registration.py       (F-CLEAN14 — per-seed orchestrator split from region_pdf)
+    ├── region_render.py           (F-CLEAN14 — overlay/negative helpers)
+    ├── region_data.py             (F-CLEAN14 — OSM/bbox/elevation data loaders)
+    ├── region_types.py            (F-CLEAN14 — frozen dataclasses)
+    ├── region_config.py           (F-CLEAN14 — env-var feature flags)
+    ├── seed_selection.py          (F-DET2 — standoff proposal + OSM FOV gate)
+    └── web_image_seed.py          (F-WEB1 — Flickr/Wikimedia skyline image seeds)
 ```
 
 Deleted: ``pano_birdseye.py`` + script 13 (F-CLEAN6, 2026-05-24), ``config.py``
@@ -116,12 +130,12 @@ def generate_region_report(region_name):
 ### 🟢 Active (Committed to Pipeline)
 
 #### **F-SKY1: Floor-Strip Periodicity Detection**
-- **Status**: Implemented, integrated
-- **Location**: `pipeline.py:detect_floor_periodicity()`, `height_trace.py`
-- **Purpose**: Detect horizontal banding in building masks → estimate floor count → independent height validation
-- **Activation**: Gated by `config.F_SKY1_ENABLED`
-- **Current use**: Diagnostic; not yet feeding into main height calculation
-- **Last commit**: Part of 2026-05-17 commit (height_trace.py + test_skyline_height_trace.py)
+- **Status**: Implemented, integrated into aggregation ✅ (2026-06-10)
+- **Location**: `pipeline.py:_floor_period_for_building()`, `height_trace.py`, `aggregate_building_heights()`
+- **Purpose**: Detect horizontal banding in building masks → estimate floor count → OSM-independent height rescue
+- **Activation**: Default ON (`SKYLINE_CV_F_SKY1=1`); `compute_floor_period=_F_SKY1_ENABLED` passed in `pano_registration.py`
+- **Current use**: `aggregate_building_heights` collects `inferred_height_m` across views with `floor_confidence ≥ 0.30`; if ≥2 views agree and F-SKY1 median ≥ 1.4× geometric median, `effective_height_m` rescues upward and `effective_height_source = "f_sky1"`
+- **New output fields**: `f_sky1_height_m`, `f_sky1_n_views`, `effective_height_m`, `effective_height_source`
 
 #### **F-SKY2: OSM-Anchored Silhouette Splitting**
 - **Status**: Implemented, measured ✅
@@ -169,18 +183,18 @@ def generate_region_report(region_name):
 - **Impact**: Enables matcher to assign previously-unmatchable segments
 - **Last commit**: Part of 2026-05-17 commit (satellite_footprints.py)
 
-#### **F-SKY11.1: Pano-Level Coastline Alignment (Phase A)**
-- **Status**: Phase A complete ✅, Phase B pending
-- **Location**: `coastline_registration.py`, demo script `scripts/12_pano_coastline_demo.py`
-- **Purpose**: Single global heading-offset recovery from stitched 360° pano + water mask
+#### **F-SKY11.1: Pano-Level Coastline Alignment (Phases A + B)**
+- **Status**: Phase A complete ✅, Phase B integrated ✅ (2026-06-13)
+- **Location**: `coastline_registration.py`, demo script `scripts/12_pano_coastline_demo.py`; Phase B in `region_config.py` + `pano_registration.py:_recover_anchor_offset`
+- **Purpose**: Single global heading-offset recovery from stitched 360° pano + water mask; recovered offset seeds the joint anchor optimizer's fine sweep
 - **Method**: Water-distance radial signatures + numbered coastline keypoints + multi-view sweep
 - **Previous approach**: F-SKY11 (12 independent per-view best-heading searches)
-- **Improvement**: One offset solve using all 24 keypoints simultaneously
+- **Improvement**: One offset solve using all 24 keypoints simultaneously; pano-recovered offset replaces the manual `anchor_offsets_deg` config for water-adjacent seeds
 - **Measurement**: Cartagena seed_5 recovers 310° vs manual 320° (within 10° tolerance)
 - **Phase A**: Scorer + demo script (diagnostic-only)
-- **Phase B**: Integration into region_pdf.py main pipeline (pending)
-- **Activation**: Gated by `config.F_SKY11_1_ENABLED`
-- **Last commit**: Part of 2026-05-17 commit
+- **Phase B**: `_recover_anchor_offset` uses `pano_recovered_offset` as fine-sweep seed when quality gate passes (`sigma ≤ 0.10`, `peak > 0.40`). Falls back to full coarse sweep when coastline signal is absent (inland, flat peak). Per-site `drive_anchor: true` in config still works; `SKYLINE_CV_F_SKY11_1=1` activates globally.
+- **Activation**: `SKYLINE_CV_F_SKY11_1=1` (default OFF until validated on Miami); per-site fallback: `drive_anchor: true` in `pano_recovery_state`
+- **Validation needed**: Run Cartagena seed_5 with `SKYLINE_CV_F_SKY11_1=1`; confirm `anchor_offset` matches existing `anchor_offsets_deg` value within ±5°; confirm MAE within ±1 m of baseline
 
 ---
 
@@ -208,16 +222,21 @@ def generate_region_report(region_name):
 - **Phase B** (production reranking): still pending — measure first whether F-SKY2/6/8 coverage is sufficient
 
 #### **F-SKY12: Depth Anything V2 on Street View Panos**
-- **Status**: Phase A landed (verifier only)
-- **Location**: `city2stl/skyline/depth_estimation.py`; emits `depth_height_m` + `depth_disagreement` per match
-- **Activation**: Does NOT influence aggregated heights; Phase B (confidence weighting/rescue) pending
+- **Status**: Phase A + Phase B landed ✅ (2026-06-10)
+- **Location**: `city2stl/skyline/depth_estimation.py`; `pipeline.py:augment_estimates_with_depth()`, `aggregate_building_heights()`
+- **Activation**: `SKYLINE_CV_F_SKY12=1` (DA2 inference ~1-2s/view on CPU)
+- **Phase A**: `augment_estimates_with_depth` adds `depth_height_m` + `depth_disagreement` to each estimate
+- **Phase B (new)**: `aggregate_building_heights` uses depth for two purposes:
+  - **Confidence downweight**: when `depth_disagreement=True` AND `depth_height_m < estimated_height_m × 0.70`, confidence halved (geometric may be chasing a false silhouette top)
+  - **Rescue**: when ≥2 views have `depth_height_m > geometric × 1.30`, `depth_rescue_height_m` is computed; if it exceeds geometric × 1.40, `effective_height_m` rescues upward
+- **New output fields**: `depth_rescue_height_m` (contributes to `effective_height_m`/`effective_height_source`)
 - **Plan**: `docs/plans/F-SKY12-depth-from-panos.md`
 
 #### **F-SKY13: OSM-Coastline Registration + Footprints Overlay**
-- **Status**: Phases A, A.2, B all landed; Phase C in progress
-- **Location**: `city2stl/skyline/osm_water.py`, `coastline_registration.py`, `region_pdf.py`
-- **Landed**: OSM fetch + 1 km clip + keypoints (`osm_water.py`); minimap OSM coastline + 1 km circle; satellite-image background (opt-in, `SKYLINE_CV_F_SKY13_SAT_BG=1`); pano-projected coastline dots; pano↔OSM IoU annotation
-- **Phase C** (`SKYLINE_CV_PHASE_C=1`): OSM-primary sweep replacing satellite-HSV as keypoint source — in progress
+- **Status**: Phases A, A.2, B, C all implemented ✅ (Phase C verified 2026-06-10)
+- **Location**: `city2stl/skyline/osm_water.py`, `coastline_registration.py`, `region_pdf.py`, `pano_registration.py`
+- **Phase C**: `SKYLINE_CV_PHASE_C=1` — `region_pdf.py` sets `primary_source: "osm"`; `_recover_pano_heading` branches to `osm_keypoints_for_scoring` instead of satellite HSV; same `sweep_pano_heading_offset` runs with OSM-derived `{bearing_deg, distance_m}` keypoints
+- **Validation needed**: Run on Cartagena seed_5 with `SKYLINE_CV_PHASE_C=1`; confirm recovered heading ≈ 320° and IoU improves vs Phase B
 - **Plan**: `docs/plans/F-SKY13-osm-coastline-footprints-overlay.md`
 
 #### **F-SKY15: HTML Diagnostic Report**
@@ -229,14 +248,13 @@ def generate_region_report(region_name):
 ### 🔴 Pending (Not Yet Integrated)
 
 #### **F-SKY5: MobileSAM Instance-Segmentation Head**
-- **Status**: Designed, not implemented
-- **Location**: Plan in `docs/plans/F-SKY5-mobilesam-instance.md`
-- **Purpose**: Replace F-SKY3 Voronoi with real instance-segmentation model
-- **Model**: MobileSAM (~10M params) with OSM-projected centroids as point prompts
-- **Trigger**: Fires only when SegFormer produces merged blob + ≥2 OSM markers inside
-- **Impact**: Solves F-SKY3 regression; enables F-SKY2+F-SKY6 to work on dense skylines
-- **Effort**: Large (model integration + inference optimization)
-- **Priority**: Pending alignment with F-SKY2/F-SKY6/F-SKY8 effectiveness; may not be needed
+- **Status**: Fully implemented and wired ✅ (2026-06-10); requires external checkpoint to activate
+- **Location**: `pipeline.py:osm_sam_instance_silhouettes()`, `pano_registration.py` Stage 8
+- **Purpose**: Split merged blobs (≥2 OSM markers inside) using MobileSAM point prompts
+- **Activation**: `SKYLINE_CV_F_SKY5=1` + MobileSAM installed + checkpoint at `~/.cache/mobile_sam/vit_t.pth`
+- **Install**: `pip install git+https://github.com/ChaoningZhang/MobileSAM.git` then download vit_t.pth
+- **Graceful no-op**: returns segments unchanged when package or checkpoint absent
+- **Documented**: installation steps added to `requirements.txt` (comments)
 
 #### **F-SKY14: Trained Satellite Coastline Detector**
 - **Status**: Proposed, not yet planned
@@ -302,16 +320,19 @@ config = {
 
 ---
 
-## Integration Checklist for Phase B & Beyond
+## Integration Checklist
 
-- [ ] **F-SKY11.1 Phase B**: Integrate heading correction into height aggregation
-- [ ] **F-SKY-PIPELINE consolidation**: Unify all config flags, document in README
-- [ ] **F-SKY5 decision**: Measure F-SKY2/6/8 effectiveness first; if insufficient, implement
+- [x] **F-SKY1 production integration**: `aggregate_building_heights` now uses `inferred_height_m` for upward rescue (2026-06-10)
+- [x] **F-SKY5 wiring**: `osm_sam_instance_silhouettes` fully wired; activate with `SKYLINE_CV_F_SKY5=1` + MobileSAM checkpoint
+- [x] **F-SKY12 Phase B**: depth confidence downweight + rescue in `aggregate_building_heights` (2026-06-10)
+- [x] **F-SKY13 Phase C wiring**: OSM-primary sweep complete; activate with `SKYLINE_CV_PHASE_C=1`
 - [x] **F-SKY10 integration**: Landed as diagnostic-only; `use_cross_view_scoring` opt-in; `cv̄` shown in PDF header
-- [ ] **modules.md update**: Document all new helper modules (osm_water, depth_estimation, html_report, etc.)
-- [ ] **test_skyline_*.py**: Unit test for `sweep_pano_heading_offset` on synthetic input; unit test for F-SKY13 OSM coastline extraction edge cases
-- [ ] **Documentation**: Update `city2stl/skyline/README.md` with consolidated feature list and current state
-- [ ] **F-SKY-PIPELINE Phase 3**: Wire Miami + Chicago to new flags; capture per-seed recovery accuracy in STATUS.md
+- [ ] **F-SKY13 Phase C validation**: Run Cartagena seed_5 with `SKYLINE_CV_PHASE_C=1`; confirm heading ≈ 320°
+- [ ] **F-SKY5 validation**: Install MobileSAM checkpoint; run on dense Cartagena skyline; confirm MAE ≤ F-SKY2 baseline
+- [x] **F-SKY11.1 Phase B**: `_recover_anchor_offset` uses pano-recovered offset as fine-sweep seed when `SKYLINE_CV_F_SKY11_1=1` and quality gate passes (2026-06-13)
+- [ ] **F-SKY-PIPELINE Phase 3**: Wire Miami + Chicago to active flags; capture per-seed recovery accuracy in STATUS.md
+- [ ] **modules.md update**: Document new helper modules (osm_water, depth_estimation, html_report)
+- [ ] **test_skyline_*.py**: Unit test for `sweep_pano_heading_offset` on synthetic input; F-SKY13 OSM coastline edge cases
 
 ---
 
@@ -349,10 +370,10 @@ config = {
 
 ## Recommendation for Next Session
 
-1. **F-SKY13 Phase C**: Validate OSM-primary sweep (`SKYLINE_CV_PHASE_C=1`) on Cartagena; calibrate peak floor vs satellite path; drop HSV detector if OSM-primary is consistent
-2. **F-SKY-PIPELINE Phase 3**: Wire Miami + Chicago to active flags (`use_satellite_footprints`, `use_pano_coastline_recovery`, `pano_only_pdf`); capture recovered headings + coverage in STATUS.md
-3. **F-CLEAN8**: Split `_seed_multiview_registration` (1211 LOC) into 5 named helpers
-4. **Tests**: Add unit tests for `sweep_pano_heading_offset` and F-SKY13 OSM edge cases
-5. **Decision**: Once Phase 3 coverage measured, decide whether F-SKY5 (MobileSAM) or continued tuning of F-SKY2/6/7 is the better path
+1. **F-SKY11.1 Phase B validation**: Run `SKYLINE_CV_F_SKY11_1=1` on Cartagena seed_5; confirm `anchor_offset` matches existing `anchor_offsets_deg` value within ±5°; confirm MAE within ±1 m of baseline (13.73 m)
+2. **F-SKY13 Phase C validation**: Run `SKYLINE_CV_PHASE_C=1` on Cartagena seed_5; confirm recovered heading ≈ 320° and IoU > Phase B (satellite HSV) baseline
+3. **F-SKY5 checkpoint install**: Download `vit_t.pth` → `~/.cache/mobile_sam/`; run `SKYLINE_CV_F_SKY5=1` on Cartagena dense skyline; confirm tagged-building MAE ≤ F-SKY2 baseline
+4. **F-SKY-PIPELINE Phase 3**: Wire Miami + Chicago to active flags; capture per-seed recovery accuracy in STATUS.md
+5. **Tests**: Add unit test for `sweep_pano_heading_offset` on synthetic keypoints; add F-SKY13 OSM coastline edge-case tests
 
-**Current Status**: Phases 0–2 complete; F-SKY13 Phase C is the active front; system is coherent with HTML report + all active flags wired.
+**Current Status (2026-06-13)**: F-SKY1, F-SKY5, F-SKY12 Phase B, F-SKY11.1 Phase B all wired and tested. F-SKY13 Phase C and F-SKY11.1 Phase B wired; both need on-region validation. Remaining work is validation + second region (Miami) scaffolding.

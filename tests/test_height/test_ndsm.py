@@ -127,11 +127,12 @@ class TestNDSMFetch:
             return None
         return fake
 
-    @patch("city2stl.skyline.height.providers.ndsm.read_array_cache", return_value=None)
-    @patch("city2stl.skyline.height.providers.ndsm.write_array_cache")
+    @patch("city2stl.skyline.height.providers.ndsm.read_height_result", return_value=None)
+    @patch("city2stl.skyline.height.providers.ndsm.write_height_result")
+    @patch("city2stl.skyline.height.providers.ndsm._fetch_srtm_opentopo", return_value=None)
     @patch("city2stl.skyline.height.providers.ndsm._get_tile")
-    def test_basic_subtraction(self, mock_tile, mock_write, mock_read):
-        """DSM=150m, DTM=130m → nDSM=20m building height."""
+    def test_basic_subtraction(self, mock_tile, mock_srtm, mock_write, mock_read):
+        """DSM=150m, DTM=130m → nDSM=20m building height (SRTM off → FABDEM tiles)."""
         mock_tile.side_effect = self._mock_get_tile(150.0, 130.0)
         p = NDSMProvider()
         result = p.fetch_heights((41.5, 41.3, 2.3, 2.1), (50, 50))
@@ -142,18 +143,19 @@ class TestNDSMFetch:
         np.testing.assert_allclose(result.raster, 20.0, atol=0.5)
         np.testing.assert_allclose(result.confidence, NDSM_CONFIDENCE)
 
-    @patch("city2stl.skyline.height.providers.ndsm.read_array_cache", return_value=None)
-    @patch("city2stl.skyline.height.providers.ndsm.write_array_cache")
+    @patch("city2stl.skyline.height.providers.ndsm.read_height_result", return_value=None)
+    @patch("city2stl.skyline.height.providers.ndsm.write_height_result")
+    @patch("city2stl.skyline.height.providers.ndsm._fetch_srtm_opentopo", return_value=None)
     @patch("city2stl.skyline.height.providers.ndsm._get_tile")
-    def test_negative_clamped_to_zero(self, mock_tile, mock_write, mock_read):
+    def test_negative_clamped_to_zero(self, mock_tile, mock_srtm, mock_write, mock_read):
         """DTM > DSM (artefact) → clamped to 0, not negative."""
         mock_tile.side_effect = self._mock_get_tile(100.0, 105.0)
         p = NDSMProvider()
         result = p.fetch_heights((41.5, 41.3, 2.3, 2.1), (20, 20))
         assert np.all(result.raster >= 0)
 
-    @patch("city2stl.skyline.height.providers.ndsm.read_array_cache", return_value=None)
-    @patch("city2stl.skyline.height.providers.ndsm.write_array_cache")
+    @patch("city2stl.skyline.height.providers.ndsm.read_height_result", return_value=None)
+    @patch("city2stl.skyline.height.providers.ndsm.write_height_result")
     @patch("city2stl.skyline.height.providers.ndsm._get_tile")
     def test_no_dsm_returns_nan(self, mock_tile, mock_write, mock_read):
         """No DSM tiles available → all NaN."""
@@ -162,11 +164,12 @@ class TestNDSMFetch:
         result = p.fetch_heights((41.5, 41.3, 2.3, 2.1), (20, 20))
         assert np.all(np.isnan(result.raster))
 
-    @patch("city2stl.skyline.height.providers.ndsm.read_array_cache", return_value=None)
-    @patch("city2stl.skyline.height.providers.ndsm.write_array_cache")
+    @patch("city2stl.skyline.height.providers.ndsm.read_height_result", return_value=None)
+    @patch("city2stl.skyline.height.providers.ndsm.write_height_result")
+    @patch("city2stl.skyline.height.providers.ndsm._fetch_srtm_opentopo", return_value=None)
     @patch("city2stl.skyline.height.providers.ndsm._get_tile")
-    def test_no_fabdem_returns_nan(self, mock_tile, mock_write, mock_read):
-        """DSM available but no FABDEM → nDSM is NaN (can't subtract)."""
+    def test_no_fabdem_returns_nan(self, mock_tile, mock_srtm, mock_write, mock_read):
+        """DSM available but no SRTM/FABDEM → nDSM is NaN (can't subtract)."""
         def fake(source, lat, lon):
             if source == "glo30":
                 return np.full((100, 100), 150.0, dtype=np.float32)
@@ -176,15 +179,12 @@ class TestNDSMFetch:
         result = p.fetch_heights((41.5, 41.3, 2.3, 2.1), (20, 20))
         assert np.all(np.isnan(result.raster))
 
-    @patch("city2stl.skyline.height.providers.ndsm.read_array_cache")
+    @patch("city2stl.skyline.height.providers.ndsm.read_height_result")
     def test_cache_hit(self, mock_read):
         """Cached result is returned without downloading."""
         raster = np.full((30, 30), 15.0, dtype=np.float32)
         conf = np.full((30, 30), NDSM_CONFIDENCE, dtype=np.float32)
-        mock_read.return_value = (
-            {"raster": raster, "confidence": conf},
-            {"resolution_m": 30.0}
-        )
+        mock_read.return_value = HeightResult(raster, conf, "ndsm", 30.0)
         p = NDSMProvider()
         result = p.fetch_heights((41.5, 41.3, 2.3, 2.1), (30, 30))
         assert result.raster.shape == (30, 30)

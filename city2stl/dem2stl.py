@@ -35,7 +35,6 @@ from PIL import Image
 import h5py
 
 from shapely.geometry import Polygon,MultiPolygon
-from descartes import PolygonPatch
 
 # Image and Visualization Tools
 import matplotlib.pyplot as plt

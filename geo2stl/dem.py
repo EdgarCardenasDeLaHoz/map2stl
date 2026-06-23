@@ -580,7 +580,7 @@ def create_dem_model(
 
     if simplify:
         try:
-            from numpy2stl.simplify import simplify_mesh
+            from numpy2stl.processing.simplify import simplify_mesh
             models[0]["vertices"], models[0]["faces"] = simplify_mesh(
                 vertices, faces, max_faces=max_faces
             )

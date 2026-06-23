@@ -631,3 +631,73 @@ def coastline_icp_offset(
     return float(cand_deg[best_idx]) % 360.0, cand_deg, cost
 
 
+def joint_class_icp_offset(
+    classes: "list[tuple[str, list[tuple[float, float]], list[tuple[float, float]], float]]",
+    seed_lat: float,
+    seed_lon: float,
+    *,
+    search_range_deg: float = 180.0,
+    step_deg: float = 2.0,
+    max_range_m: float = 1000.0,
+    trim_frac: float = 0.2,
+    init_offset_deg: float = 0.0,
+) -> "tuple[float, np.ndarray, np.ndarray, dict[str, np.ndarray]]":
+    """Joint bearings-only ICP across multiple landmark classes (F-SKY18 Phase 3).
+
+    Generalises ``coastline_icp_offset`` to N landmark classes. Each entry in
+    ``classes`` is ``(label, pano_points, osm_points, weight)``; per offset we
+    compute each class's trimmed-bearing-residual cost and combine them as a
+    weighted sum. The asymmetric vegetation class is the whole point: it
+    breaks the 180° bay-symmetry ambiguity that defeats coastline-only ICP on
+    peninsula seeds (see F-SKY16 measured results).
+
+    Returns ``(best_offset_deg, cand_deg, total_cost, per_class_cost)``.
+    ``per_class_cost`` maps each class label to its raw cost curve so the
+    caller can see which class is driving the joint result.
+    """
+    n_cand = int(2.0 * search_range_deg / step_deg) + 1
+    cand_deg = np.linspace(
+        init_offset_deg - search_range_deg,
+        init_offset_deg + search_range_deg,
+        n_cand,
+    )
+
+    per_class_cost: dict[str, np.ndarray] = {}
+    weights_used: dict[str, float] = {}
+    for label, pano_pts, osm_pts, weight in classes:
+        pano_b, pano_r = _points_to_seed_polar(pano_pts, seed_lat, seed_lon)
+        osm_b, osm_r = _points_to_seed_polar(osm_pts, seed_lat, seed_lon)
+        if pano_b.size == 0 or osm_b.size == 0 or weight <= 0.0:
+            continue
+        pano_b = pano_b[pano_r <= max_range_m]
+        osm_b = osm_b[osm_r <= max_range_m]
+        if pano_b.size == 0 or osm_b.size == 0:
+            continue
+        osm_sorted = np.sort(osm_b)
+        costs = np.empty(n_cand, dtype=np.float64)
+        for i, c in enumerate(cand_deg):
+            world_b = (pano_b + float(c)) % 360.0
+            idx = np.searchsorted(osm_sorted, world_b)
+            idx_lo = (idx - 1) % osm_sorted.size
+            idx_hi = idx % osm_sorted.size
+            d_lo = np.abs((world_b - osm_sorted[idx_lo] + 180.0) % 360.0 - 180.0)
+            d_hi = np.abs((world_b - osm_sorted[idx_hi] + 180.0) % 360.0 - 180.0)
+            resid = np.minimum(d_lo, d_hi)
+            if trim_frac > 0.0 and resid.size > 4:
+                keep = int(round(resid.size * (1.0 - trim_frac)))
+                resid = np.sort(resid)[:max(1, keep)]
+            costs[i] = float(resid.mean())
+        per_class_cost[label] = costs
+        weights_used[label] = float(weight)
+
+    if not per_class_cost:
+        return float(init_offset_deg), cand_deg, np.empty(0), {}
+
+    wsum = sum(weights_used.values()) or 1.0
+    total = np.zeros_like(cand_deg, dtype=np.float64)
+    for label, costs in per_class_cost.items():
+        total += costs * (weights_used[label] / wsum)
+    best_idx = int(np.argmin(total))
+    return float(cand_deg[best_idx]) % 360.0, cand_deg, total, per_class_cost
+
+

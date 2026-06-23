@@ -1,9 +1,9 @@
 {
   "name": "miami",
-  "north": 25.80,
-  "south": 25.74,
-  "east": -80.14,
-  "west": -80.22,
+  "north": 25.8178,
+  "south": 25.7222,
+  "east": -80.1269,
+  "west": -80.2331,
   "seed_urls": [
     "https://www.google.com/maps/@25.7753,-80.1868,3a,75y,185h,87t/",
     "https://www.google.com/maps/place/Miami,+FL/@25.7697585,-80.1786411,3a,75y,306.43h,108.94t/data=!3m11!1e1!3m9!1sCIHM0ogKEICAgIDm3b7XyQE!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf50qZizKQBuP6muryDqoLzfRgNoogJOipz8eNqERCa8yKACnmjzhRgVxfGyX-qVRbg8uKWiqpA-TCeJGPhfDW_eSaZTu_Cnuun2ULmrvgflPqNZU2C0vqXbfYyyJhHX2VLRGaGa_yA%3Dw900-h600-k-no-pi-18.940616087721523-ya51.03533404158833-ro0-fo100!7i5472!8i2736",
@@ -11,14 +11,14 @@
     "https://www.google.com/maps/place/Miami,+FL/@25.752425,-80.19027,3a,75y,42.57h,97.01t/data=!3m11!1e1!3m9!1sCIHM0ogKEICAgID2pajyfA!2e10!3e11!6shttps:%2F%2Flh3.googleusercontent.com%2Fgpms-cs-s%2FABJJf50RGI7rTfSwMyYiRt_lcXTDr6mIubdfOZJoNo2rXzosneYaPThoxtjVjJ8WJZIqzKJGaCRhJ1TzQywFUDRaQm2llYvYmVWX0Y7g6Po4hNuJYg2yfoHBGWrhlLJWkN6nkwojAluP%3Dw900-h600-k-no-pi-7.012460019409602-ya42.57203699321361-ro0-fo100!7i14400!8i7200"
   ],
   "_seed_url_notes": [
-    "seed_1: Bayside Marketplace waterfront, heading 185° (south) toward Brickell towers — synthetic",
-    "seed_2: Photo Sphere @ 25.7698,-80.1786 hdg 306.43° (user-refined 2026-06-02, was 320°) — NW toward CBD. Alt heading 298.9° available for same pano.",
-    "seed_3: Photo Sphere @ 25.7757,-80.1822 hdg 245° — Biscayne Bay, SW toward Brickell",
-    "seed_4: Photo Sphere @ 25.7524,-80.1903 hdg 42.57° (user-refined 2026-06-02, was ~10°) — south Brickell, NE toward skyline",
-    "_removed: Virginia Key synthetic (@25.7538,-80.1593,320h) — snapped to bad location, no buildings detected"
+    "seed_1: Bayside Marketplace waterfront, heading 185\u00b0 (south) toward Brickell towers \u2014 synthetic",
+    "seed_2: Photo Sphere @ 25.7698,-80.1786 hdg 306.43\u00b0 (user-refined 2026-06-02, was 320\u00b0) \u2014 NW toward CBD. Alt heading 298.9\u00b0 available for same pano.",
+    "seed_3: Photo Sphere @ 25.7757,-80.1822 hdg 245\u00b0 \u2014 Biscayne Bay, SW toward Brickell",
+    "seed_4: Photo Sphere @ 25.7524,-80.1903 hdg 42.57\u00b0 (user-refined 2026-06-02, was ~10\u00b0) \u2014 south Brickell, NE toward skyline",
+    "_removed: Virginia Key synthetic (@25.7538,-80.1593,320h) \u2014 snapped to bad location, no buildings detected"
   ],
   "known_heights_m": {
-    "_note": "OSM + CTBUH verified heights for validation — compare pipeline estimates against these.",
+    "_note": "OSM + CTBUH verified heights for validation \u2014 compare pipeline estimates against these.",
     "Panorama Tower": {
       "lat": 25.7639,
       "lon": -80.1929,
@@ -50,7 +50,7 @@
       "floors": 40
     },
     "Brickell City Centre (East)": {
-      "lat": 25.7650,
+      "lat": 25.765,
       "lon": -80.1942,
       "height_m": 150,
       "floors": 42
@@ -63,7 +63,7 @@
     },
     "Santa Maria": {
       "lat": 25.7628,
-      "lon": -80.1960,
+      "lon": -80.196,
       "height_m": 175,
       "floors": 50
     }
