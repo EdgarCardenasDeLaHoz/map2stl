@@ -7,6 +7,9 @@
     <Teleport to="#vue-notes-modal">
       <RegionNotesModal />
     </Teleport>
+    <Teleport to="#vue-mesh-registration-modal">
+      <MeshRegistrationModal />
+    </Teleport>
     <Teleport to="#vue-main-header">
       <MainHeader />
     </Teleport>
@@ -20,4 +23,5 @@ import { Teleport }        from 'vue';
 import MainHeader          from './MainHeader.vue';
 import WorkflowHint        from './WorkflowHint.vue';
 import RegionNotesModal    from './RegionNotesModal.vue';
+import MeshRegistrationModal from './MeshRegistrationModal.vue';
 </script>
