@@ -11,6 +11,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -36,39 +37,47 @@ def _run_uvicorn(*, test_mode: bool) -> Iterator[str]:
     When *test_mode* is True the server runs with STRM2STL_TEST_MODE=1, so the DEM
     endpoint returns a fast deterministic gradient with no Earth Engine / network I/O
     (see app/server/routers/terrain.py).
+
+    Each session gets its own STRM2STL_CACHE directory (a fresh tempdir), so a
+    stale/flat entry from a real (non-test) DEM fetch in the shared repo cache
+    can never leak into a test run and cause a false "DEM has no elevation
+    data" preview failure — this bit an earlier version of the export-pipeline
+    e2e tests via a poisoned cache entry left over from manual testing.
     """
     port = _free_port()
     env = dict(os.environ)
     if test_mode:
         env["STRM2STL_TEST_MODE"] = "1"
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app.server.server:app",
-         "--port", str(port), "--host", "127.0.0.1"],
-        cwd=REPO_ROOT,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=env,
-    )
-    url = f"http://127.0.0.1:{port}"
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        try:
-            urlopen(f"{url}/api/regions", timeout=1)
-            break
-        except URLError:
-            time.sleep(0.3)
-    else:
-        proc.terminate()
-        raise RuntimeError("uvicorn did not become ready in 30s")
+    with tempfile.TemporaryDirectory(prefix="strm2stl_e2e_cache_") as cache_dir:
+        env["STRM2STL_CACHE"] = cache_dir
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "app.server.server:app",
+             "--port", str(port), "--host", "127.0.0.1"],
+            cwd=REPO_ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        )
+        url = f"http://127.0.0.1:{port}"
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            try:
+                urlopen(f"{url}/api/regions", timeout=1)
+                break
+            except URLError:
+                time.sleep(0.3)
+        else:
+            proc.terminate()
+            raise RuntimeError("uvicorn did not become ready in 30s")
 
-    try:
-        yield url
-    finally:
-        proc.terminate()
         try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+            yield url
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
 
 @pytest.fixture(scope="session")
