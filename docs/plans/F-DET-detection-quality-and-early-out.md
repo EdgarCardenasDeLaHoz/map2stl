@@ -216,3 +216,90 @@ After implementing F-DET1–4:
   or correctly diagnosed and documented
 - Landing page `weak — no detection` / `weak — mismatch` distinction enables
   rapid triage without opening individual seed pages
+
+---
+
+## Critical review — challenged assumptions (2026-06-23)
+
+Before implementing the pending F-DET4a/b/c work, the assumptions underpinning the
+whole plan are worth challenging. F-DET1/2/3/5 are reasonable engineering (early-out
++ better labels) but several premises are weaker than the plan implies.
+
+**A1. The dataset is tiny and validation is circular.** Every threshold
+(`nseg<6`, `blobs<6`, `osm_in_fov<3`, `mrate≥65/ncov≥15/nseg≥10` for "good") is
+hand-tuned on the *same* 82 panos / 17 regions used to derive them. There is **no
+held-out set**, so these are fit-on-train numbers — expect them to be optimistic and
+to drift on new cities. The `nseg<6` cutoff in particular rests on a **single** data
+point (busan, "7/7 matched, borderline"). *Mitigation to plan: hold out 3–4 regions
+and re-measure the good/medium/weak split before trusting the thresholds.*
+
+**A2. The quality label is a proxy for a proxy — never validated against height
+accuracy.** "good/medium/weak" is computed from match-rate + coverage + nseg, but the
+project's real objective is **building-height error** (retna_pruned ≈ 3.82 m MAE; and
+[[project_terrain_segmentation_finding]] warns to use footprint_iou, not dice). A pano
+can score "good" on nseg/mrate yet yield poor heights, or be "weak" while its few
+matched buildings are dead-on. **F-DET optimises detection quality, not the metric we
+care about.** *Highest-value next step: on the 2 curated regions (and any with known
+heights), correlate the quality label against actual per-building MAE — confirm "good"
+really means accurate before tuning more thresholds.*
+
+**A3. The Type 1 / Type 2 dichotomy is presented as discrete but the data is a
+continuum.** At nseg ≥ 20 the split is still 43% good / 40% medium / 17% weak — high
+nseg does not imply good. Lumping all non-low-nseg failures into "Type 2 mismatch"
+hides other factors the plan never controls for: SegFormer variant (b0 vs b3), input
+resolution, lighting/time-of-day of the Street View capture, and sky/glass
+mis-segmentation. Some "Type 2" may actually be segmentation-quality problems, not
+OSM/heading problems.
+
+**A4. F-DET2 (OSM-in-FOV gate) is in direct tension with F-DET4a (OSM is
+incomplete).** F-DET2 *rejects* proposals with < 3 OSM buildings in the cone, while
+F-DET4a's premise is that OSM coverage is **sparse** in exactly the regions we want
+(tel_aviv, honolulu) and must be supplemented with satellite footprints. So the
+proposal gate can reject good viewpoints precisely where OSM is the unreliable signal.
+*Resolution: F-DET2 should count OSM **plus** satellite footprints (or be disabled for
+regions flagged `use_satellite_footprints`), otherwise it bakes OSM bias into seed
+selection.*
+
+**A5. Blob count (F-DET1) conflates buildings with noise.** `cv2.connectedComponents`
+on the SegFormer building mask counts *any* component — including glass towers split
+into fragments, or vegetation/cloud mislabels. A forest-facing view can clear the
+blob≥6 gate; a clean close-range skyline can merge into < 6 blobs (the plan notes this
+risk). Blob count is a coarse proxy for "buildings present"; pairing it with the
+F-DET2 OSM-in-FOV signal (geometry-based, view-independent) would be more robust than
+either alone.
+
+**A6. Early-out trades recall for speed — is the trade even needed?** F-DET1 assumes
+Type 1 seeds produce zero useful heights, but a 5-blob view may still height 2–3
+buildings correctly. The justification is the ~30–60 s/seed cost — but these are
+**offline batch** runs, so wall-clock cost may not be the binding constraint. Worth
+confirming the early-out doesn't silently drop buildings that aggregation would have
+used (measure: buildings-with-≥1-estimate before vs after F-DET1 on the suspect-zone
+seeds).
+
+**A7. The Type 2 "causes" are hypotheses, not diagnoses.** The plan itself hedges
+every one — "**likely** OSM gap" (tel_aviv), "**likely** non-grid geometry"
+(melbourne), "**likely** snap distance" (boston). Implementing fixes against unconfirmed
+causes risks fixing the wrong thing per city, and the fixes are **city-specific hacks**
+(toggle a JSON flag, retune a tolerance) that don't generalise and won't scale past 17
+regions. *Next step should be **instrumentation, not fixes**: for each Type 2 seed log
+`bearing_shift_deg`, resolved-pano-distance-from-proposed, and a SegFormer-segment ↔
+OSM-footprint overlap map. That converts "likely" into measured, and tells you whether
+4a/4b/4c are even the right levers.*
+
+**A8. F-DET4b (snap 200 m → 100 m) trades drift for coverage.** Street View panos are
+sparse; the nearest pano to a proposed standoff may legitimately be 120–180 m away.
+Tightening the snap will reject those, losing seeds in low-coverage cities. A
+**bearing-deviation penalty** (already floated as the alternative) is safer than a hard
+distance cut because it degrades gracefully.
+
+### Recommended next steps (revised order)
+1. **Instrument before fixing (replaces blind F-DET4):** add the per-seed diagnostics
+   in A7 to `pano_registration.py` + the pano summary table. Re-run the 4 suspect
+   cities and *confirm* each cause.
+2. **Validate the quality proxy (A2):** correlate label vs. actual height MAE on
+   curated regions. If they don't correlate, re-base the labels on height error.
+3. **Fix the F-DET2/4a tension (A4):** make the FOV gate satellite-aware before adding
+   more satellite-footprint regions.
+4. **Then, and only then,** apply the confirmed 4a/4b/4c fixes — preferring the
+   graceful bearing-penalty over the hard snap cut, and adding a held-out region to
+   check the thresholds generalise.

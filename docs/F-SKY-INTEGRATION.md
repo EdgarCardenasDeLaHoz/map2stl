@@ -1,7 +1,7 @@
 # F-SKY Series — Integration Status & Consolidation
 
-**Last Updated**: 2026-06-20  
-**Author**: Claude (consolidation pass)  
+**Last Updated**: 2026-06-23  
+**Author**: Claude (consolidation pass; 2026-06-23 refactor + F-DET review update)  
 **Purpose**: Single source of truth for F-SKY feature activation, status, and pipeline integration
 
 ---
@@ -28,38 +28,48 @@ The F-SKY series is a set of 11+ computer-vision improvements to the skyline hei
 
 ## Pipeline Architecture
 
-The skyline pipeline lives in two core files plus thin helpers:
+**Refactor note (F-CLEAN14 full split, 2026-06-23):** the four over-large skyline
+files are now **thin re-export façades** over focused subpackages — every existing
+`from city2stl.skyline.<module> import X` import path still works unchanged. The
+implementation moved to `_core/`, `_pano/`, `_report_plots/`, `_region_render/`. Split
+was behaviour-neutral (773 strm2stl tests + 10 Playwright e2e green); a post-split ruff
+audit caught and fixed 3 NameError bugs on untested paths (missing `logger` in two
+plot subpackages, missing `np` in `_plot_utils`). See `docs/plans/F-CLEAN14-skyline-file-split.md`.
 
 ```
 city2stl/skyline/
-├── pipeline.py          (~3370 lines, pure math, unit-tested)
-├── region_pdf.py        (~3900 lines, orchestration + I/O + PDF rendering)
+├── pipeline.py          (façade)  → _core/ {types, util, segmentation, projection,
+│                                            skyline, pano, registration, height}
+├── pano_registration.py (façade)  → _pano/ {capture, heading, detect, orchestrator}
+├── report_plots.py      (façade)  → _report_plots/ {_plot_utils, _view_plots, _pano_plots}
+├── region_render.py     (façade)  → _region_render/ {_draw, _pages}
+├── region_pdf.py        (orchestration + I/O + PDF rendering)
 ├── scripts/
 │   ├── 08_region_skyline_pdf.py  (production entry point)
 │   ├── 09_height_trace.py        (F-SKY1 diagnostic)
-│   └── 13_heading_recovery_demo.py  (multi-channel heading research)
+│   ├── build_landing_page.py / discover_city_seeds.py / height_diagnostic_report.py
+│   └── demos/ {13_heading_recovery, 14_seed5_diagnostic, 15_multires_seg, 16_view_minimap}
 └── [helper modules]
-    ├── height_trace.py            (F-SKY1)
-    ├── height_trace_render.py     (F-SKY1 PDF)
-    ├── satellite_footprints.py    (F-SKY8)
-    ├── satellite_image.py         (F-SKY8 + cross-view)
+    ├── height_trace.py / height_trace_render.py   (F-SKY1)
+    ├── satellite_footprints.py / satellite_image.py (F-SKY8 + cross-view)
     ├── cross_view.py              (F-SKY10)
     ├── coastline_registration.py  (F-SKY11, F-SKY11.1, F-SKY13)
     ├── osm_water.py               (F-SKY13 — OSM coastline fetch + keypoints)
     ├── depth_estimation.py        (F-SKY12 — Depth Anything V2 verifier)
-    ├── html_report.py             (F-SKY15 — HTML diagnostic report)
-    ├── report_plots.py            (F-SKY15 — plot renderers split from html_report)
-    ├── pano_registration.py       (F-CLEAN14 — per-seed orchestrator split from region_pdf)
-    ├── region_render.py           (F-CLEAN14 — overlay/negative helpers)
-    ├── region_data.py             (F-CLEAN14 — OSM/bbox/elevation data loaders)
-    ├── region_types.py            (F-CLEAN14 — frozen dataclasses)
-    ├── region_config.py           (F-CLEAN14 — env-var feature flags)
+    ├── region_data.py / region_types.py / region_config.py  (F-CLEAN14 data/types/flags)
     ├── seed_selection.py          (F-DET2 — standoff proposal + OSM FOV gate)
-    └── web_image_seed.py          (F-WEB1 — Flickr/Wikimedia skyline image seeds)
+    ├── web_image_seed.py          (Wikipedia/Wikimedia skyline image seeds)
+    └── height/providers/          (shared _cache.py + _raster.py dedup, 2026-06-22)
 ```
 
-Deleted: ``pano_birdseye.py`` + script 13 (F-CLEAN6, 2026-05-24), ``config.py``
-(F-CLEAN1, 2026-05-24). Post-mortem for F-SKY11.2 in ``docs/plans/archive/``.
+Deleted: ``pano_birdseye.py`` (F-CLEAN6, 2026-05-24), ``config.py`` (F-CLEAN1,
+2026-05-24). Demo/diagnostic scripts 13–16 moved to ``scripts/demos/`` (2026-06-23).
+Post-mortem for F-SKY11.2 in ``docs/plans/archive/``.
+
+> **numpy2stl (sibling repo) parallel refactor, 2026-06-22/23:**
+> `registration/pipeline.py` → orchestrator + `stages/`; `processing/building_simplify.py`
+> → package; report CSS → `registration/templates/report.css`; `test_registration.py`
+> split per-feature + new offline `test_pipeline_smoke.py`. 173 numpy2stl tests green.
 
 ### Core Flow (region_pdf.py, simplified)
 

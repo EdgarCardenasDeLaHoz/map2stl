@@ -1,9 +1,21 @@
 # F-CLEAN14 — Split the over-large skyline source files
 
-**Status:** Phase H + R done + smoke-validated (2026-06-07). Phase P2 done;
-P1 deferred. Two paid Cartagena smoke runs passed with **identical** output
-(673 extracted buildings, 63 views, coverage good:3) before vs after the
-pipeline.py changes — refactor confirmed behaviour-neutral end-to-end.
+**Status:** ✅ COMPLETE — full package split done (2026-06-23). The previously-deferred
+full package split is now done: `pipeline.py` (4256→73-line façade) → `_core/`
+{types, util, segmentation, projection, skyline, pano, registration, height};
+`pano_registration.py` (3075→façade) → `_pano/`; `report_plots.py` + `region_render.py`
+→ `_report_plots/` + `_region_render/`. Verbatim AST-slice; all public import paths
+preserved via `import *` façades with `__all__`. Behaviour-neutral: 773 strm2stl tests
++ 10 Playwright e2e green. A post-split ruff/F821 audit caught 3 NameError bugs on
+untested paths (missing `logger` in `_report_plots`/`_region_render`, missing `np` in
+`_plot_utils`) — fixed. Gotcha: `ast.get_source_segment` drops decorators, so the 4
+`@dataclass(frozen=True)` classes had to be re-added (recovered from the un-overwritten
+`.pyc`).
+
+_Prior (2026-06-07): Phase H + R done; P2 done; P1 + full package split deferred. Two
+paid Cartagena smoke runs gave identical output (673 buildings, 63 views, coverage
+good:3) before vs after the in-place pipeline.py changes._
+
 **Owner handle:** F-CLEAN14
 **Origin:** docs/AUDIT-2026-06-07.md, Part 2 finding #3.
 
@@ -21,7 +33,9 @@ behaviour change**:
 |---|---|---|
 | `region_pdf.py` | 6,524 LOC, 5 concerns | ~6 modules, each one concern |
 | `html_report.py` | 2,816 LOC | 2 modules (HTML assembly + PNG plot renderers) |
-| `pipeline.py` | 4,124 LOC | in-place: decompose 2 giant functions (full package split deferred) |
+| `pipeline.py` | 4,124 LOC | ✅ full package split → `_core/` (8 modules) behind façade (done 2026-06-23) |
+| `pano_registration.py` | 3,075 LOC | ✅ → `_pano/` (capture, heading, detect, orchestrator) |
+| `report_plots.py` / `region_render.py` | 1,900 / 1,888 LOC | ✅ → `_report_plots/` / `_region_render/` |
 
 ## Hard invariants (must hold after every step)
 

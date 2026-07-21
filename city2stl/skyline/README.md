@@ -112,21 +112,26 @@ the others together (and re-exports their public names, so existing imports
 like `from city2stl.skyline.region_pdf import run_region_pdf_report` /
 `SeedViewRegistration` still work).
 
-| File | Role | Lines | F-SKY Features |
-|---|---|---|---|
-| [pipeline.py](pipeline.py) | CV primitives: SegFormer integration, projection, registration, height extraction, aggregation. Pure functions, unit-tested. | ~4100 | F-SKY1, F-SKY2, F-SKY6, F-SKY7 |
-| [region_pdf.py](region_pdf.py) | `run_region_pdf_report` entry point + re-export hub. Thin wiring layer. | ~700 | integration layer |
-| [pano_registration.py](pano_registration.py) | Per-seed multi-view registration: spin capture, heading/anchor recovery, per-view match, cross-view smoothing, 360° pano stitch + splitters, `_seed_multiview_registration` orchestrator. | ~2570 | F-SKY1/2/6/7/22/24 |
-| [region_render.py](region_render.py) | All PDF page builders + minimap/overlay drawing + location map + `_StepTimer`. | ~1880 | F-SKY4, F-SKY13 overlay |
-| [seed_selection.py](seed_selection.py) | Auto-standoff proposal, 1-image screening + quality gate, bad-seed auto-replace. | ~640 | auto-seed |
-| [region_data.py](region_data.py) | Region bbox (SQLite), OSM fetch + `BuildingRecord` build, water filter, DEM terrain, `sites/*.json` config readers. | ~560 | F-SKY8 merge entry |
-| [streetview_io.py](streetview_io.py) | Google Street View Static API: URL parse/sign, metadata + image fetch, image cache, no-imagery detect. | ~330 | — |
-| [region_types.py](region_types.py) | Frozen dataclasses: `RegionBBox`, `SkylinePoint`, `StitchedPanoResult`, `SeedViewRegistration`. | ~145 | — |
-| [region_config.py](region_config.py) | Shared F-SKY env flags + `_SEGMENT_PALETTE`. | ~75 | all flags |
-| [html_report.py](html_report.py) | HTML diagnostic report assembly (per-building tables + page layout). | ~1220 | F-SKY15, pano report v2 |
-| [report_plots.py](report_plots.py) | matplotlib/PIL PNG renderers for the HTML report (polar/pano/minimap plots). | ~1710 | F-SKY15, pano report v2 |
+> **F-CLEAN14 full split (2026-06-23):** the four largest files are now thin
+> re-export **façades** over subpackages — every `from city2stl.skyline.<module>
+> import X` path is unchanged. "Lines" below is the façade size; the real code lives
+> in the listed subpackage.
 
-Module dependency DAG (acyclic): `region_types`/`region_config` ← `region_data`/`streetview_io` ← `seed_selection` ← `region_render` ← `pano_registration` ← `region_pdf`. `report_plots` ← `html_report`.
+| File | Role | Lines | Implementation | F-SKY Features |
+|---|---|---|---|---|
+| [pipeline.py](pipeline.py) | CV primitives: SegFormer integration, projection, registration, height extraction, aggregation. Pure functions, unit-tested. | 73 (façade) | `_core/` {types, util, segmentation, projection, skyline, pano, registration, height} | F-SKY1, F-SKY2, F-SKY6, F-SKY7 |
+| [region_pdf.py](region_pdf.py) | `run_region_pdf_report` entry point + re-export hub. Thin wiring layer. | ~700 | — | integration layer |
+| [pano_registration.py](pano_registration.py) | Per-seed multi-view registration: spin capture, heading/anchor recovery, per-view match, cross-view smoothing, 360° pano stitch + splitters, `_seed_multiview_registration` orchestrator. | 16 (façade) | `_pano/` {capture, heading, detect, orchestrator} | F-SKY1/2/6/7, F-DET1 |
+| [region_render.py](region_render.py) | All PDF page builders + minimap/overlay drawing + location map + `_StepTimer`. | 12 (façade) | `_region_render/` {_draw, _pages} | F-SKY4, F-SKY13 overlay |
+| [seed_selection.py](seed_selection.py) | Auto-standoff proposal, 1-image screening + quality gate, bad-seed auto-replace, OSM-FOV gate. | ~690 | — | auto-seed, F-DET2 |
+| [region_data.py](region_data.py) | Region bbox (SQLite), OSM fetch + `BuildingRecord` build, water filter, DEM terrain, `sites/*.json` config readers. | ~560 | — | F-SKY8 merge entry |
+| [streetview_io.py](streetview_io.py) | Google Street View Static API: URL parse/sign, metadata + image fetch, image cache, no-imagery detect. | ~330 | — | — |
+| [region_types.py](region_types.py) | Frozen dataclasses: `RegionBBox`, `SkylinePoint`, `StitchedPanoResult`, `SeedViewRegistration`. | ~145 | — | — |
+| [region_config.py](region_config.py) | Shared F-SKY env flags + `_SEGMENT_PALETTE`. | ~75 | — | all flags |
+| [html_report.py](html_report.py) | HTML diagnostic report assembly (per-building tables + page layout). | ~1470 | — | F-SKY15, pano report v2, F-DET3 |
+| [report_plots.py](report_plots.py) | matplotlib/PIL PNG renderers for the HTML report (polar/pano/minimap plots). | 12 (façade) | `_report_plots/` {_plot_utils, _view_plots, _pano_plots} | F-SKY15, pano report v2 |
+
+Module dependency DAG (acyclic): `region_types`/`region_config` ← `region_data`/`streetview_io` ← `seed_selection` ← `region_render` ← `pano_registration` ← `region_pdf`. `report_plots` ← `html_report`. Within `pipeline.py`'s `_core/`: `types` ← `projection` ← {`pano`,`registration`,`height`}; `segmentation` ← {`skyline`,`registration`,`height`}; `skyline` ← {`registration`,`height`}.
 
 ### Helper Modules (F-SKY Implementation)
 
