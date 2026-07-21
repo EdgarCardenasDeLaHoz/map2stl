@@ -36,6 +36,19 @@ class TestExportSTL:
         r = client.post("/api/export/stl", json=_EXPORT_BODY)
         assert r.status_code == 200
 
+    def test_non_square_dem_succeeds(self, client):
+        """F-PROJ-DIMS: projected DEMs can now be non-square (maintain_dimensions
+        defaults to False) — the export pipeline must not assume height==width."""
+        h, w = 6, 11
+        body = {
+            **_EXPORT_BODY,
+            "dem_values": [float(i) for i in range(h * w)],
+            "height": h, "width": w,
+        }
+        r = client.post("/api/export/stl", json=body)
+        assert r.status_code == 200
+        assert len(r.content) > 0
+
     def test_content_type_is_octet_stream(self, client):
         r = client.post("/api/export/stl", json=_EXPORT_BODY)
         assert "octet-stream" in r.headers.get("content-type", "")

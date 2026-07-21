@@ -373,12 +373,55 @@ def generate_mesh_preview(data: dict):
 
     p = _parse_export_params(data)
     if not p.dem_values or not p.height or not p.width:
-        return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
+        return JSONResponse(
+            content={
+                "error": "Missing DEM data",
+                "detail": (
+                    "No DEM is cached for this region yet. Load the terrain "
+                    "(Explore tab → Load DEM) before generating a model."
+                ),
+            },
+            status_code=400,
+        )
+
+    # A flat DEM (all values equal) means the source had no elevation coverage
+    # for this bbox — building a mesh from it produces a blank slab and usually
+    # signals the local-SRTM 'no coverage' fallback. Return a clear reason.
+    _vals = p.dem_values
+    if min(_vals) == max(_vals):
+        return JSONResponse(
+            content={
+                "error": "DEM has no elevation data",
+                "detail": (
+                    "The DEM for this region is flat (no relief). The local "
+                    "elevation tiles likely don't cover this area. Try a "
+                    "smaller region, or switch the DEM source to an "
+                    "OpenTopography dataset (add a free API key in the Keys "
+                    "panel)."
+                ),
+            },
+            status_code=400,
+        )
 
     im, im_min, im_max = _prepare_dem_array(
         p.dem_values, p.height, p.width,
         p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
     )
+
+    # Mirror the same label/contour steps as _run_export_pipeline so the live
+    # 3D preview matches what the file export will actually produce, instead
+    # of only showing these effects after downloading.
+    engrave_label = bool(data.get("engrave_label", False))
+    label_text = data.get("label_text", p.name)
+    if engrave_label and label_text:
+        im = _apply_label_engraving(im, label_text, p.base_height)
+
+    contours = bool(data.get("contours", False))
+    contour_interval = float(data.get("contour_interval", 100))
+    contour_style = data.get("contour_style", "engraved")
+    if contours and contour_interval > 0:
+        im = _apply_contour_lines(im, im_min, im_max, p.model_height,
+                                  p.base_height, contour_interval, contour_style)
 
     solid = bool(data.get("solid", False))
     vertices, faces = array_to_mesh(im, solid=solid)

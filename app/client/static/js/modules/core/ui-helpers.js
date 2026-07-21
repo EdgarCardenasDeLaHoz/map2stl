@@ -254,6 +254,23 @@ window.getBboxCoords = function getBboxCoords(boundingBox, selectedRegion) {
 };
 
 /**
+ * Read the current projection + maintain_dimensions UI state, shared by
+ * every layer fetch (DEM, water, ESA, satellite, hydrology, city, composite)
+ * so they all request the same projection settings and stay aligned
+ * (F-PROJ-DIMS). maintain_dimensions defaults to false — output reflects
+ * each projection's true geographic aspect ratio unless the user opts into
+ * the legacy fixed-canvas-shape behavior via #paramMaintainDimensions.
+ * @returns {{projection: string, maintainDimensions: boolean, clipValidRegion: boolean}}
+ */
+window.getProjectionParams = function getProjectionParams() {
+    return {
+        projection: document.getElementById('paramProjection')?.value || 'none',
+        maintainDimensions: document.getElementById('paramMaintainDimensions')?.checked ?? false,
+        clipValidRegion: document.getElementById('paramClipNans')?.checked ?? true,
+    };
+};
+
+/**
  * Replace the contents of a container element with a plain error paragraph.
  * @param {string} containerId - ID of the container element
  * @param {string} msg         - Error message (will be prefixed with "Error: ")
@@ -309,6 +326,23 @@ window.decodeHydrologyValues = function decodeHydrologyValues(data) {
     return _decodeGrid(data.river_grid_values_b64, data.river_grid_values);
 };
 
+window.decodeMeshValues = function decodeMeshValues(data) {
+    return _decodeGrid(data.mesh_values_b64, data.mesh_values);
+};
+
+/**
+ * Decode a base64 packed-bool mask (1 byte/px, 1=valid, 0=invalid).
+ * Distinct from _decodeGrid because mask bytes are not float32 samples.
+ * @param {string} b64
+ * @returns {Uint8Array}
+ */
+window.decodeMeshMask = function decodeMeshMask(b64) {
+    const bin = atob(b64);
+    const buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    return buf;
+};
+
 /**
  * Schedule a STACKED_UPDATE event on the next animation frame.
  * Centralises the repeated `requestAnimationFrame(() => window.events?.emit(...))` pattern.
@@ -343,6 +377,25 @@ window.DEM_CANVAS_SELECTOR = 'canvas:not(.dem-gridlines-overlay):not(.city-dem-o
  * @param {number} [size=1024] - Number of LUT entries
  * @returns {Uint8Array}
  */
+/**
+ * Resolve the effective colormap for a layer.
+ *
+ * Each colormap-using layer may have its own `<select id="{layerKey}Colormap">`.
+ * A value of '' or 'inherit' means "use the DEM colormap" (#demColormap), which
+ * keeps the previous single-colormap behaviour as the default. Pass no layerKey
+ * to just read the DEM colormap.
+ *
+ * @param {string} [layerKey] e.g. 'city', 'composite'
+ * @returns {string} colormap name (e.g. 'terrain')
+ */
+window.getLayerColormap = function getLayerColormap(layerKey) {
+    const demCm = document.getElementById('demColormap')?.value || 'terrain';
+    if (!layerKey) return demCm;
+    const own = document.getElementById(`${layerKey}Colormap`)?.value;
+    if (!own || own === 'inherit') return demCm;
+    return own;
+};
+
 window.buildColorLUT = function buildColorLUT(colormap, size = 1024) {
     const lut = new Uint8Array(size * 3);
     const maxIdx = size - 1;

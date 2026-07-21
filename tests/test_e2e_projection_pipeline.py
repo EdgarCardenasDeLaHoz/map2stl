@@ -27,7 +27,8 @@ import pytest
 _BBOX_QS = "north=40.0&south=39.9&east=-75.1&west=-75.2"
 _BBOX = (40.0, 39.9, -75.1, -75.2)  # north, south, east, west
 _VALID_PROJECTIONS = ["cosine", "mercator",
-                      "equidistant", "lambert", "sinusoidal"]
+                      "equidistant", "lambert", "sinusoidal",
+                      "miller", "gall"]
 
 
 # ===================================================================
@@ -241,11 +242,23 @@ class TestTestModeProjection:
         assert d_cos[1] <= d_none[1]
 
     def test_dem_projection_no_clip_preserves_dims(self, client):
-        """maintain_dimensions=True + clip_nans=False should keep dim×dim."""
+        """maintain_dimensions=True (explicit opt-in) + clip_nans=False should
+        keep dim×dim. maintain_dimensions now defaults to False (F-PROJ-DIMS)."""
+        r = client.get(
+            f"/api/terrain/dem?{_BBOX_QS}&dim=30&projection=cosine&clip_nans=false"
+            f"&maintain_dimensions=true")
+        d = r.json()["dimensions"]
+        assert d == [30, 30], f"Expected [30, 30], got {d}"
+
+    def test_dem_projection_default_varies_dims(self, client):
+        """Default (maintain_dimensions=False): cosine projection should now
+        produce a narrower output than the input dim, reflecting the true
+        aspect ratio, not a fixed dim×dim square (F-PROJ-DIMS)."""
         r = client.get(
             f"/api/terrain/dem?{_BBOX_QS}&dim=30&projection=cosine&clip_nans=false")
         d = r.json()["dimensions"]
-        assert d == [30, 30], f"Expected [30, 30], got {d}"
+        assert d[0] == 30
+        assert d[1] < 30, f"Expected narrower-than-30 width, got {d}"
 
     def test_satellite_applies_projection_in_test_mode(self, client):
         """Satellite with projection should produce a valid JPEG."""

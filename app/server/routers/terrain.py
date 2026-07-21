@@ -70,24 +70,26 @@ _HYDRO_INFLIGHT: dict[str, "asyncio.Future"] = {}
 
 
 def _project_grid(arr, north, south, east, west, projection, clip_nans,
-                  categorical=False):
+                  categorical=False, maintain_dimensions=False):
     """Apply geo2stl projection to a 2-D array. Sync helper.
 
     Delegates to core.projection.project_grid — kept as a thin wrapper
     so existing call-sites in this module do not change.
     """
     return _project_grid_impl(arr, north, south, east, west, projection,
-                              clip_nans, categorical=categorical)
+                              clip_nans, categorical=categorical,
+                              maintain_dimensions=maintain_dimensions)
 
 
 def _project_water_arrays(water_mask, esa_img, north, south, east, west,
-                          projection, clip_nans):
+                          projection, clip_nans, maintain_dimensions=False):
     """Project both water mask and ESA arrays to keep them aligned.
 
     Delegates to core.projection.project_water_arrays.
     """
     return _project_water_arrays_impl(water_mask, esa_img, north, south,
-                                      east, west, projection, clip_nans)
+                                      east, west, projection, clip_nans,
+                                      maintain_dimensions=maintain_dimensions)
 
 
 def _parse_clip_valid_region(params, default: bool = True) -> bool:
@@ -138,6 +140,11 @@ def _fetch_dem_array(dem_source, north, south, east, west, dim,
                                water_scale, subtract_water,
                                projection, maintain_dimensions, clip_nans)
     except Exception as dem_err:
+        # Common cause: the local SRTM tiles don't cover this bbox (e.g. a
+        # continent-scale region), so fetch_local_dem returns None. We fall
+        # back to a zero array so the response shape is valid; get_terrain_dem()
+        # detects the all-zero/flat result and warns the user (see
+        # _dem_empty_warning) instead of silently showing a flat map.
         logger.warning(f"Local DEM failed: {dem_err}, returning zeros")
         lat_r = abs(north - south)
         lon_r = abs(east - west)
@@ -146,6 +153,26 @@ def _fetch_dem_array(dem_source, north, south, east, west, dim,
         else:
             mw, mh = dim, max(1, int(dim * lat_r / lon_r))
         return np.zeros((mh, mw), dtype=float)
+
+
+def _dem_empty_warning(im: np.ndarray) -> Optional[str]:
+    """Return a user-facing warning if the DEM has no usable elevation data.
+
+    A flat (all-equal, incl. all-zero) or all-NaN array means the source had
+    no coverage for this bbox — the local fallback returns zeros in that case.
+    Returns None when the DEM contains real relief.
+    """
+    if im is None or im.size == 0:
+        return "The DEM for this region is empty."
+    finite = im[np.isfinite(im)]
+    if finite.size == 0 or float(np.ptp(finite)) == 0.0:
+        return (
+            "No elevation data covers this region (the DEM is flat). Try a "
+            "smaller area, or switch the DEM source to an OpenTopography "
+            "dataset — that needs a free API key, which you can add in the "
+            "\U0001f511 Keys panel."
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -197,8 +224,13 @@ async def get_terrain_dem(
     subtract_water = _parse_bool(params, "subtract_water", True)
     show_sat = _parse_bool(params, "show_sat", False)
     dataset = params.get("dataset", "esa")
-    projection = params.get("projection", "cosine")
-    maintain_dimensions = _parse_bool(params, "maintain_dimensions", True)
+    # 'none' matches every other terrain endpoint's default (water-mask, esa,
+    # satellite, hydrology) — this endpoint previously defaulted to 'cosine'
+    # alone, a real cross-layer inconsistency masked until now by
+    # maintain_dimensions=True forcing every endpoint back to the same (m,n)
+    # regardless of which projection was silently applied (F-PROJ-DIMS audit).
+    projection = params.get("projection", "none")
+    maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
     clip_valid_region = _parse_clip_valid_region(params, default=True)
     dem_source = params.get("dem_source", "local")
 
@@ -230,14 +262,31 @@ async def get_terrain_dem(
 
     # TEST_MODE: return deterministic gradient without network I/O
     if TEST_MODE:
-        im = np.linspace(0, 100, num=(dim * dim),
-                         dtype=float).reshape((dim, dim))
+        im_raw_test = np.linspace(0, 100, num=(dim * dim),
+                                  dtype=float).reshape((dim, dim))
+        # Write to the same disk cache the real path uses (raw/unprojected),
+        # so the settings-only export/preview path — which resolves the DEM by
+        # reconstructing this cache key — also works under TEST_MODE. Without
+        # this, e2e tests that load a DEM then build the Extrude preview would
+        # always miss the cache and get "Missing DEM data" in test mode only.
+        if not show_sat and not from_cache:
+            write_array_cache(
+                "dem", _dem_cache_key,
+                {"dem": im_raw_test.astype(np.float32, copy=False)},
+                {"min_elevation": float(im_raw_test.min()),
+                 "max_elevation": float(im_raw_test.max()),
+                 "mean_elevation": float(im_raw_test.mean()),
+                 "bbox": [west or 0.0, south or 0.0, east or 0.0, north or 0.0],
+                 "shape": list(im_raw_test.shape)})
+
+        im = im_raw_test
         # Apply projection even in TEST_MODE so tests exercise the full pipeline
         if projection != "none":
             im = _project_grid(
                 im.astype(np.float32), north or 0.0, south or 0.0,
                 east or 0.0, west or 0.0,
                 projection, clip_valid_region, categorical=False,
+                maintain_dimensions=maintain_dimensions,
             )
         payload = _make_dem_payload(im, west or 0.0, south or 0.0,
                                     east or 0.0, north or 0.0, show_sat=False)
@@ -267,11 +316,19 @@ async def get_terrain_dem(
             im = _project_grid(
                 im_raw.astype(np.float32), north, south, east, west,
                 projection, clip_valid_region, categorical=False,
+                maintain_dimensions=maintain_dimensions,
             )
 
         response_content = _make_dem_payload(
             im, west, south, east, north, show_sat)
         height_px, width_px = response_content["dimensions"]
+
+        # Flag DEMs that came back with no real relief (source had no coverage
+        # for this bbox) so the client can warn instead of showing a flat map.
+        _empty_warning = _dem_empty_warning(im)
+        if _empty_warning:
+            response_content["dem_empty"] = True
+            response_content["dem_warning"] = _empty_warning
 
         # Optional satellite/land-use overlay
         if show_sat:
@@ -317,6 +374,18 @@ async def get_terrain_dem(
 
     except Exception as e:
         logger.error(f"Error in get_terrain_dem: {e}", exc_info=True)
+        msg = str(e)
+        # OpenTopography rejects requests whose bbox exceeds the per-dataset
+        # area cap (e.g. SRTMGL3 = 4,050,000 km2). Surface that as a clear,
+        # actionable 400 instead of a generic 500 so the user knows to shrink
+        # the region or pick a coarser dataset.
+        if "maximum area" in msg or "OpenTopography API error" in msg:
+            detail = (
+                "This region is too large for the selected OpenTopography "
+                "dataset. Choose a smaller area, or use a coarser dataset "
+                "(e.g. SRTM15+/COP90)."
+            )
+            return error_response(f"{detail} (source said: {msg[:200]})", status=400)
         return error_response("DEM processing failed")
 
 
@@ -339,6 +408,8 @@ async def get_terrain_water_mask(
         description="Deprecated alias for clip_valid_region.",
         deprecated=True,
     ),
+    maintain_dimensions: Optional[bool] = Query(
+        None, description="Maintain output dimensions after projection"),
 ):
     """Fetch a binary water mask and ESA WorldCover land-cover data."""
     logger.info("Received request for /api/terrain/water-mask")
@@ -352,6 +423,7 @@ async def get_terrain_water_mask(
             water_dataset = "esa"
         projection = params.get("projection", "none")
         clip_valid_region = _parse_clip_valid_region(params, default=True)
+        maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
 
         err = _validate_bbox(north, south, east, west)
         if err:
@@ -381,7 +453,8 @@ async def get_terrain_water_mask(
                 if projection != "none":
                     _wm, _esa = _project_water_arrays(
                         _wm.astype(np.float32), _esa.astype(np.float32),
-                        north, south, east, west, projection, clip_valid_region)
+                        north, south, east, west, projection, clip_valid_region,
+                        maintain_dimensions=maintain_dimensions)
                 _h, _w = _wm.shape
                 _wp = int(np.sum(_wm > 0.5))
                 _tp = _h * _w
@@ -405,7 +478,8 @@ async def get_terrain_water_mask(
             if projection != "none":
                 water_arr, esa_arr = _project_water_arrays(
                     water_arr.astype(np.float32), esa_arr.astype(np.float32),
-                    north, south, east, west, projection, clip_valid_region)
+                    north, south, east, west, projection, clip_valid_region,
+                    maintain_dimensions=maintain_dimensions)
                 h, w = water_arr.shape
             wp = int(np.sum(water_arr > 0.5))
             tp = h * w
@@ -439,7 +513,8 @@ async def get_terrain_water_mask(
         # Apply projection if requested
         if projection != "none":
             water_mask, img = _project_water_arrays(
-                water_mask, img, north, south, east, west, projection, clip_valid_region)
+                water_mask, img, north, south, east, west, projection, clip_valid_region,
+                maintain_dimensions=maintain_dimensions)
             h, w = water_mask.shape
             water_pixels = int(np.sum(water_mask > 0.5))
             total_pixels = h * w
@@ -479,6 +554,8 @@ async def get_terrain_esa_land_cover(
         description="Deprecated alias for clip_valid_region.",
         deprecated=True,
     ),
+    maintain_dimensions: Optional[bool] = Query(
+        None, description="Maintain output dimensions after projection"),
 ):
     """Fetch ESA WorldCover land-cover class data independently of the water mask."""
     logger.info("Received request for /api/terrain/esa-land-cover")
@@ -488,6 +565,7 @@ async def get_terrain_esa_land_cover(
         dim = _parse_int(params, "dim", 600)
         projection = params.get("projection", "none")
         clip_valid_region = _parse_clip_valid_region(params, default=True)
+        maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
 
         err = _validate_bbox(north, south, east, west)
         if err:
@@ -501,17 +579,26 @@ async def get_terrain_esa_land_cover(
         _longer_m = max(_bbox_w_m, _bbox_h_m, 1.0)
         sat_scale = max(10, int(math.ceil(_longer_m / dim)))
 
-        # Note: Cache key does NOT include projection or clip_valid_region.
-        # Raw data is cached once per bbox; projection/clipping applied on fetch.
+        # Cache key does NOT include projection/clip_valid_region/maintain_dimensions —
+        # raw (unprojected) data is cached once per bbox; projection is (re-)applied
+        # on every request, including cache hits, so switching projection or
+        # maintain_dimensions for an already-cached bbox reflects the new setting
+        # instead of silently returning a stale shape from a prior request.
         _esa_cache_key = make_cache_key("esa_lc", north, south, east, west, {
             "dim": dim})
         _ec = read_array_cache("esa_lc", _esa_cache_key)
         if _ec is not None:
             _earr, _emeta = _ec
-            _esa = _earr.get("esa")
-            if _esa is not None:
+            _esa_raw = _earr.get("esa")
+            if _esa_raw is not None:
                 logger.info(
                     f"ESA land cover cache hit: {_esa_cache_key[:8]}...")
+                _esa = _esa_raw
+                if projection != "none":
+                    _esa = _project_grid(
+                        _esa_raw.astype(np.float32), north, south, east, west,
+                        projection, clip_valid_region, categorical=True,
+                        maintain_dimensions=maintain_dimensions)
                 _h, _w = _esa.shape
                 return JSONResponse(content={
                     "esa_values_b64": _b64(_esa),
@@ -527,7 +614,8 @@ async def get_terrain_esa_land_cover(
             if projection != "none":
                 esa_arr = _project_grid(
                     esa_arr, north, south, east, west,
-                    projection, clip_valid_region, categorical=True)
+                    projection, clip_valid_region, categorical=True,
+                    maintain_dimensions=maintain_dimensions)
                 h, w = esa_arr.shape
             return JSONResponse(content={
                 "esa_values_b64": _b64(esa_arr),
@@ -566,16 +654,22 @@ async def get_terrain_esa_land_cover(
         if img is None:
             return error_response("Failed to fetch ESA land cover data")
 
-        # Apply projection if requested
+        # Cache the RAW (unprojected) fetch — projection is applied fresh
+        # below, after the write, so it never gets baked into the cached
+        # value (see the cache-hit path above for why: baking it in made
+        # a later request with a different projection/maintain_dimensions
+        # silently return the first request's shape).
+        img = img.astype(np.float32)
+        write_array_cache("esa_lc", _esa_cache_key,
+                          {"esa": img},
+                          {"shape": list(img.shape)})
+
         if projection != "none":
-            img = _project_grid(img.astype(np.float32), north, south, east, west,
-                                projection, clip_valid_region, categorical=True)
+            img = _project_grid(img, north, south, east, west,
+                                projection, clip_valid_region, categorical=True,
+                                maintain_dimensions=maintain_dimensions)
 
         h, w = img.shape
-
-        write_array_cache("esa_lc", _esa_cache_key,
-                          {"esa": img.astype(np.float32)},
-                          {"shape": [h, w]})
 
         return JSONResponse(content={
             "esa_values_b64": _b64(img),
@@ -607,6 +701,8 @@ async def get_terrain_satellite(
         description="Deprecated alias for clip_valid_region.",
         deprecated=True,
     ),
+    maintain_dimensions: Optional[bool] = Query(
+        None, description="Maintain output dimensions after projection"),
 ):
     """
     Fetch real satellite imagery (ESRI World Imagery WMTS tiles) for a bounding box.
@@ -620,6 +716,7 @@ async def get_terrain_satellite(
     dim = _parse_int(params, "dim", 600)
     projection = params.get("projection", "none")
     clip_valid_region = _parse_clip_valid_region(params, default=True)
+    maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
     if err:
@@ -634,7 +731,8 @@ async def get_terrain_satellite(
         if projection != "none":
             img_arr = np.array(img)
             projected = _project_rgb_image(
-                img_arr, north, south, east, west, projection, clip_valid_region)
+                img_arr, north, south, east, west, projection, clip_valid_region,
+                maintain_dimensions=maintain_dimensions)
             img = Image.fromarray(projected)
         buf = BytesIO()
         img.save(buf, format="JPEG", quality=80)
@@ -657,7 +755,8 @@ async def get_terrain_satellite(
 
             projected = await run_sync(
                 _project_rgb_image, img_arr,
-                north, south, east, west, projection, clip_valid_region)
+                north, south, east, west, projection, clip_valid_region,
+                maintain_dimensions)
 
             out_img = _Image.fromarray(projected)
             buf = _BytesIO()
@@ -728,6 +827,8 @@ async def get_terrain_hydrology(
         description="Deprecated alias for clip_valid_region.",
         deprecated=True,
     ),
+    maintain_dimensions: Optional[bool] = Query(
+        None, description="Maintain output dimensions after projection"),
 ):
     """
     Fetch river hydrology and rasterize as an elevation depression grid.
@@ -770,6 +871,7 @@ async def get_terrain_hydrology(
 
     projection = params.get("projection", "none")
     clip_valid_region = _parse_clip_valid_region(params, default=True)
+    maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
     if err:
@@ -779,8 +881,11 @@ async def get_terrain_hydrology(
                  f"dim={dim} source={source} depression={depression_m}")
 
     # Cache key covers every parameter that affects the rasterized output.
-    # Note: Cache key does NOT include projection or clip_valid_region.
-    # Raw data is cached once per bbox; projection/clipping applied on fetch.
+    # Cache key does NOT include projection/clip_valid_region/maintain_dimensions —
+    # raw (unprojected) data is cached once per bbox; projection is (re-)applied
+    # on every request, including cache hits, so switching projection or
+    # maintain_dimensions for an already-cached bbox reflects the new setting
+    # instead of silently returning whichever projection was baked in first.
     cache_extra = {
         "dim": dim, "src": source, "dep": depression_m,
         "scl": scale_m, "mo": min_order, "oe": order_exponent,
@@ -793,6 +898,11 @@ async def get_terrain_hydrology(
         arrs, meta = cached
         river_grid = arrs.get("river_grid")
         if river_grid is not None:
+            if projection != "none":
+                river_grid = _project_grid(
+                    river_grid, north, south, east, west, projection, clip_valid_region,
+                    categorical=False, maintain_dimensions=maintain_dimensions)
+                river_grid = np.nan_to_num(river_grid, nan=0.0)
             h, w = river_grid.shape
             logger.info("Hydrology cache hit: %s (%dx%d)", cache_key[:8], w, h)
             return JSONResponse(content={
@@ -819,7 +929,8 @@ async def get_terrain_hydrology(
         if projection != "none":
             river_arr = _project_grid(
                 river_arr, north, south, east, west,
-                projection, clip_valid_region, categorical=False)
+                projection, clip_valid_region, categorical=False,
+                maintain_dimensions=maintain_dimensions)
             river_arr = np.nan_to_num(river_arr, nan=0.0)
             h, w = river_arr.shape
         return JSONResponse(content={
@@ -855,25 +966,28 @@ async def get_terrain_hydrology(
                 fut.set_result(payload)
             return JSONResponse(content=payload, status_code=200)
 
-        river_grid = result["river_grid"]
+        # Cache the RAW (unprojected) river grid — projection is applied fresh
+        # below (and on every future cache hit above), never baked into the
+        # cached value. See the cache-hit path's comment for why.
+        river_grid_raw = result["river_grid"]
+        write_array_cache(
+            "hydrology", cache_key,
+            {"river_grid": river_grid_raw},
+            {"feature_count": int(result["feature_count"]),
+             "source": result.get("source", source)},
+        )
 
+        river_grid = river_grid_raw
         # Apply projection if requested
         if projection != "none":
             river_grid = _project_grid(
                 river_grid, north, south, east, west, projection, clip_valid_region,
-                categorical=False)
+                categorical=False, maintain_dimensions=maintain_dimensions)
             # Replace NaN fill (from projection) with 0 (= no river) so JSON
             # serialisation produces 0.0 instead of null.
             river_grid = np.nan_to_num(river_grid, nan=0.0)
 
         h, w = river_grid.shape
-
-        write_array_cache(
-            "hydrology", cache_key,
-            {"river_grid": river_grid},
-            {"feature_count": int(result["feature_count"]),
-             "source": result.get("source", source)},
-        )
 
         payload = {
             "river_grid_values_b64": _b64(river_grid),

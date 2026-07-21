@@ -43,6 +43,24 @@
 let _waterMaskAbortController = null;
 let lastWaterMaskData = null;
 
+/**
+ * Nearest-neighbour resample of a flat row-major grid from (srcH,srcW) to
+ * (dstH,dstW). Used when two independently-fetched layers (e.g. DEM and
+ * water mask) share the same bbox/aspect-ratio but not the same absolute
+ * pixel count — see renderCombinedView().
+ */
+function _resampleNearest(src, srcH, srcW, dstH, dstW) {
+    const out = new Float32Array(dstW * dstH);
+    for (let y = 0; y < dstH; y++) {
+        const sy = Math.min(srcH - 1, Math.floor((y * srcH) / dstH));
+        for (let x = 0; x < dstW; x++) {
+            const sx = Math.min(srcW - 1, Math.floor((x * srcW) / dstW));
+            out[y * dstW + x] = src[sy * srcW + sx];
+        }
+    }
+    return out;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Fetch
 // ─────────────────────────────────────────────────────────────────────────────
@@ -73,9 +91,10 @@ async function loadWaterMask() {
     );
 
     const waterDataset = document.getElementById('waterDataset')?.value || 'esa';
-    const projection = document.getElementById('paramProjection')?.value || 'none';
-    const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
-    const cacheKey = { ...bbox, dim, dataset: waterDataset, projection, clip_valid_region: clipNans };
+    const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
+    const maintainDims = maintainDimensions ? 'true' : 'false';
+    const clipNans = clipValidRegion ? 'true' : 'false';
+    const cacheKey = { ...bbox, dim, dataset: waterDataset, projection, maintain_dimensions: maintainDims, clip_valid_region: clipNans };
 
     const cachedData = window.waterMaskCache.get(cacheKey);
     if (cachedData) {
@@ -91,7 +110,7 @@ async function loadWaterMask() {
         return;
     }
 
-    const params = new URLSearchParams({ north, south, east, west, dim, dataset: waterDataset, projection, clip_valid_region: clipNans });
+    const params = new URLSearchParams({ north, south, east, west, dim, dataset: waterDataset, projection, maintain_dimensions: maintainDims, clip_valid_region: clipNans });
 
     window.setLayerStatus('water', 'loading');
 
@@ -99,7 +118,11 @@ async function loadWaterMask() {
     window.showToast('Loading water mask from Earth Engine...', 'info');
 
     try {
-        const { data, error: wmErr } = await window.api.dem.waterMask(params, signal);
+        // Dedupe against any concurrent caller wanting this same bbox+params
+        // (e.g. the combined Water+Hydrology layer) so they share one request
+        // instead of both paying for a slow (or slow-and-failing) fetch.
+        const { data, error: wmErr } = await window.waterMaskCache.dedupe(
+            cacheKey, () => window.api.dem.waterMask(params, signal));
         if (wmErr) {
             window.showErrInEl('waterMaskImage', wmErr);
             window.setLayerStatus('water', 'error');
@@ -163,10 +186,11 @@ async function loadEsaLandCover() {
     const dim = parseInt(
         document.getElementById('esaResolution')?.value || '600'
     );
-    const projection = document.getElementById('paramProjection')?.value || 'none';
-    const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
+    const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
+    const maintainDims = maintainDimensions ? 'true' : 'false';
+    const clipNans = clipValidRegion ? 'true' : 'false';
 
-    const params = new URLSearchParams({ north, south, east, west, dim, projection, clip_valid_region: clipNans });
+    const params = new URLSearchParams({ north, south, east, west, dim, projection, maintain_dimensions: maintainDims, clip_valid_region: clipNans });
 
     window.setLayerStatus?.('landCover', 'loading');
     window.showToast('Loading ESA land cover...', 'info');
@@ -299,16 +323,6 @@ async function renderCombinedView() {
         await loadWaterMask();
     }
 
-    if (lastWaterMaskData && lastDemData) {
-        const demSize = lastDemData.width * lastDemData.height;
-        const _wm = lastWaterMaskData ? window.decodeWaterMask(lastWaterMaskData) : null;
-        const waterSize = _wm?.length ?? 0;
-        if (demSize !== waterSize) {
-            console.warn('DEM and water mask dimension mismatch - reloading water mask');
-            await loadWaterMask();
-        }
-    }
-
     const colormap = document.getElementById('demColormap').value;
     const { values, width, height, vmin, vmax } = lastDemData;
 
@@ -320,7 +334,18 @@ async function renderCombinedView() {
 
     const waterScale = parseFloat(document.getElementById('waterScaleSlider')?.value || 0.05);
     const opacityVal = window.getWaterOpacity?.() ?? 0.7;
-    const waterVals = lastWaterMaskData ? window.decodeWaterMask(lastWaterMaskData) : [];
+    const wmDims = lastWaterMaskData?.water_mask_dimensions;
+    const wmRaw = lastWaterMaskData ? window.decodeWaterMask(lastWaterMaskData) : null;
+    // DEM and water mask are fetched independently (different resolution
+    // algorithms — DEM resizes to `dim` on its longest axis, water mask
+    // derives a metres-per-pixel Earth Engine scale from `dim`) and are only
+    // guaranteed to match in aspect ratio, not absolute pixel count
+    // (F-PROJ-DIMS). Resample onto the DEM's exact grid via nearest-neighbour
+    // before the per-pixel loop below, which indexes both arrays by the same
+    // flat index and requires them to agree exactly.
+    const waterVals = (wmRaw && wmDims && (wmDims[0] !== height || wmDims[1] !== width))
+        ? _resampleNearest(wmRaw, wmDims[0], wmDims[1], height, width)
+        : (wmRaw || []);
     const ptp = vmax - vmin;
 
     for (let i = 0; i < values.length; i++) {

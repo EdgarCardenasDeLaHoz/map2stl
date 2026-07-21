@@ -43,10 +43,14 @@ function drawGridlinesOverlay(containerId = 'demImage') {
     const canvas = container.querySelector(window.DEM_CANVAS_SELECTOR);
     if (!canvas) return;
 
-    const showGridlines = document.getElementById('showGridlines');
-    if (!showGridlines || !showGridlines.checked) {
+    // The geographic graticule and the pixel grid are independent overlays.
+    const geoGridOn = !!document.getElementById('showGridlines')?.checked;
+    const pixelGridOn = !!document.getElementById('showPixelGrid')?.checked;
+    if (!geoGridOn && !pixelGridOn) {
         const existing = container.querySelector('.dem-gridlines-overlay');
         if (existing) existing.remove();
+        const dimsLabel = document.getElementById('pixelGridDimsLabel');
+        if (dimsLabel) dimsLabel.classList.add('hidden');
         return;
     }
 
@@ -56,29 +60,63 @@ function drawGridlinesOverlay(containerId = 'demImage') {
 
     const projection = document.getElementById('paramProjection')?.value || 'none';
     const toRad = d => d * Math.PI / 180;
+
+    // --- Per-projection geo -> normalized-fraction mapping ------------------
+    // These MUST match the server-side transforms in geo2stl/projections.py
+    // (maintain_dimensions=True) so the graticule aligns with the reprojected
+    // DEM raster and the curvature of the lines shows the true distortion.
     const mercY = l => Math.log(Math.tan(Math.PI / 4 + toRad(Math.max(-85, Math.min(85, l))) / 2));
     const mercN = mercY(Math.min(85, north));
     const mercS = mercY(Math.max(-85, south));
-    const mercRange = mercN - mercS;
+    const mercRange = (mercN - mercS) || 1;
 
+    // cosine / equidistant share a factor: each row's width scales by
+    // cos(lat)/mean(cos(lat over the column)), centred.
+    const latSamplesForAvg = [];
+    for (let k = 0; k <= 64; k++) latSamplesForAvg.push(Math.cos(toRad(north - (k / 64) * latRange)));
+    const avgCos = latSamplesForAvg.reduce((a, b) => a + b, 0) / latSamplesForAvg.length || 1;
+
+    // lambert equal-area: y = sin(lat)
+    const lY = l => Math.sin(toRad(l));
+    const lN = lY(north), lS = lY(south);
+    const lRange = (lN - lS) || 1;
+
+    // Generic cylindrical y = f(lat) for Miller / Gall (match geo2stl exactly).
+    const clampLat = l => Math.max(-89.9, Math.min(89.9, l));
+    const millerY = l => 1.25 * Math.log(Math.tan(Math.PI / 4 + 0.4 * toRad(clampLat(l))));
+    const gallY = l => (1 + Math.SQRT2 / 2) * Math.tan(toRad(clampLat(l)) / 2);
+    const milN = millerY(north), milRange = (milN - millerY(south)) || 1;
+    const galN = gallY(north), galRange = (galN - gallY(south)) || 1;
+
+    const centerLon = (east + west) / 2;
+
+    // Returns {xFrac, yFrac} in [0,1] (or null if the point projects outside
+    // the raster, e.g. sinusoidal wings). Mirrors the server exactly.
     function geoToFrac(lat, lon) {
-        let xFrac = (lon - west) / lonRange;
-        let yFrac;
+        const linX = (lon - west) / lonRange;
+        const linY = (north - lat) / latRange;
         switch (projection) {
-            case 'mercator': {
-                const my = mercY(lat);
-                yFrac = (mercN - my) / mercRange;
-                break;
+            case 'mercator':
+                return { xFrac: linX, yFrac: (mercN - mercY(lat)) / mercRange };
+            case 'lambert':
+                return { xFrac: linX, yFrac: (lN - lY(lat)) / lRange };
+            case 'miller':
+                return { xFrac: linX, yFrac: (milN - millerY(lat)) / milRange };
+            case 'gall':
+                return { xFrac: linX, yFrac: (galN - gallY(lat)) / galRange };
+            case 'cosine':
+            case 'equidistant': {
+                const scale = Math.cos(toRad(lat)) / avgCos;
+                const xFrac = 0.5 + (linX - 0.5) * scale;
+                return { xFrac, yFrac: linY };
             }
             case 'sinusoidal': {
-                yFrac = (north - lat) / latRange;
-                xFrac = null;
-                break;
+                const xFrac = 0.5 + ((lon - centerLon) / lonRange) * Math.cos(toRad(lat));
+                return { xFrac, yFrac: linY };
             }
-            default:
-                yFrac = (north - lat) / latRange;
+            default: // none
+                return { xFrac: linX, yFrac: linY };
         }
-        return { xFrac, yFrac };
     }
 
     let overlay = container.querySelector('.dem-gridlines-overlay');
@@ -108,103 +146,214 @@ function drawGridlinesOverlay(containerId = 'demImage') {
 
     const gridCount = parseInt(document.getElementById('gridlineCount')?.value || '5');
     const W = overlay.width, H = overlay.height;
+    const SEG = 48;  // polyline segments per graticule line (smooth curves)
 
-    const midLat = ((north + south) / 2) * Math.PI / 180;
-    let xOffset = 0, contentW = W;
-    if (projection === 'cosine' || projection === 'lambert') {
-        contentW = Math.max(1, Math.round(W * Math.cos(midLat)));
-        xOffset = Math.floor((W - contentW) / 2);
-    }
+    // Line colour is user-configurable and defaults to black.
+    const lineColor = document.getElementById('gridLineColor')?.value || '#000000';
+    // Grid mode: 'degrees' = lat/lon graticule; 'meters' = constant real-world
+    // distance section grid (constant-km cells) so real-space distortion shows.
+    const unitMode = document.getElementById('gridUnitMode')?.value || 'degrees';
 
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.lineWidth = 1;
-    ctx.font = '11px sans-serif';
-    ctx.fillStyle = '#fff';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-    ctx.shadowBlur = 2;
+    // A readable label colour that contrasts with the (possibly dark) lines.
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillStyle = lineColor;
+    ctx.shadowColor = 'rgba(255, 255, 255, 0.85)';  // halo so labels read on dark terrain
+    ctx.shadowBlur = 3;
 
-    if (projection !== 'sinusoidal') {
-        for (let i = 0; i <= gridCount; i++) {
-            const lon = west + (i / gridCount) * lonRange;
-            const xFrac = i / gridCount;
-            const x = xOffset + xFrac * contentW;
-            ctx.beginPath();
-            ctx.setLineDash([4, 4]);
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, H);
-            ctx.stroke();
-            ctx.setLineDash([]);
-            const label = lon.toFixed(2) + '°';
-            const textWidth = ctx.measureText(label).width;
-            const labelX = Math.max(textWidth / 2, Math.min(x, W - textWidth / 2));
-            ctx.fillText(label, labelX - textWidth / 2, H - 5);
-        }
-    } else {
-        for (let i = 0; i <= gridCount; i++) {
-            const lon = west + (i / gridCount) * lonRange;
-            ctx.beginPath();
-            ctx.setLineDash([4, 4]);
-            let first = true;
-            for (let row = 0; row <= H; row++) {
-                const lat = north - (row / H) * latRange;
-                const scale = Math.cos(toRad(lat));
-                const xFrac = 0.5 + (lon - (west + lonRange / 2)) / lonRange * scale;
-                const x = xFrac * W;
-                const y = row;
-                if (first) { ctx.moveTo(x, y); first = false; }
-                else ctx.lineTo(x, y);
-            }
-            ctx.stroke();
-            ctx.setLineDash([]);
-        }
-    }
+    const px = f => f * W;
+    const py = f => f * H;
 
-    for (let i = 0; i <= gridCount; i++) {
-        const lat = north - (i / gridCount) * latRange;
-        const { yFrac } = geoToFrac(lat, west);
-        if (yFrac < 0 || yFrac > 1) continue;
-        const y = yFrac * H;
-
-        let lineX0, lineX1;
-        if (projection === 'sinusoidal') {
-            const cosLat = Math.cos(toRad(lat));
-            lineX0 = W * (0.5 - 0.5 * cosLat);
-            lineX1 = W * (0.5 + 0.5 * cosLat);
-        } else {
-            lineX0 = xOffset;
-            lineX1 = xOffset + contentW;
-        }
-
+    // Draw one graticule polyline by sampling geoToFrac along it. `pts` is an
+    // array of {lat, lon}. Returns the first on-canvas point (for labels).
+    function drawLine(pts, { bold = false } = {}) {
         ctx.beginPath();
-        ctx.setLineDash([4, 4]);
-        ctx.moveTo(lineX0, y);
-        ctx.lineTo(lineX1, y);
+        ctx.lineWidth = bold ? 2.5 : 1.25;
+        ctx.strokeStyle = lineColor;
+        ctx.globalAlpha = bold ? 1.0 : 0.8;
+        ctx.setLineDash(bold ? [] : [6, 4]);
+        let started = false, anchor = null;
+        for (const p of pts) {
+            const f = geoToFrac(p.lat, p.lon);
+            if (f.xFrac == null || !isFinite(f.xFrac) || !isFinite(f.yFrac)) { started = false; continue; }
+            const x = px(f.xFrac), y = py(f.yFrac);
+            if (!started) { ctx.moveTo(x, y); started = true; if (!anchor) anchor = { x, y }; }
+            else ctx.lineTo(x, y);
+        }
         ctx.stroke();
         ctx.setLineDash([]);
-
-        const label = lat.toFixed(2) + '°';
-        ctx.fillText(label, lineX0 + 5, y + 4);
+        ctx.globalAlpha = 1.0;
+        return anchor;
     }
 
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([]);
-    if (projection === 'sinusoidal') {
-        ctx.beginPath();
-        for (let row = 0; row <= H; row++) {
-            const lat = north - (row / H) * latRange;
-            const x = W * (0.5 - 0.5 * Math.cos(toRad(lat)));
-            if (row === 0) ctx.moveTo(x, 0); else ctx.lineTo(x, row);
+    // --- Build the list of meridian longitudes + parallel latitudes ---------
+    // Degrees mode: evenly spaced by count. Meters mode: spaced by a constant
+    // real-world distance (km), which makes the cells non-square in lat/lon
+    // (real space), and then geoToFrac warps them per projection.
+    const midLat = (north + south) / 2;
+    const KM_PER_DEG_LAT = 110.574;
+    const kmPerDegLon = 111.320 * Math.cos(toRad(midLat)) || 1e-6;
+
+    let lonLines = [], latLines = [];
+    let spacingLabel = '';
+    if (unitMode === 'meters') {
+        const spacingKm = parseFloat(document.getElementById('gridMetersSpacing')?.value || '5');
+        const dLat = spacingKm / KM_PER_DEG_LAT;         // deg latitude per cell
+        const dLon = spacingKm / kmPerDegLon;            // deg longitude per cell
+        // Anchor the grid on the region centre so cells are symmetric.
+        const cLon = (east + west) / 2, cLat = midLat;
+        for (let lon = cLon; lon <= east + 1e-9; lon += dLon) lonLines.push(lon);
+        for (let lon = cLon - dLon; lon >= west - 1e-9; lon -= dLon) lonLines.push(lon);
+        for (let lat = cLat; lat <= north + 1e-9; lat += dLat) latLines.push(lat);
+        for (let lat = cLat - dLat; lat >= south - 1e-9; lat -= dLat) latLines.push(lat);
+        lonLines.sort((a, b) => a - b); latLines.sort((a, b) => b - a);
+        // Guard against pathological tiny spacing on huge regions.
+        if (lonLines.length > 200 || latLines.length > 200) {
+            lonLines = lonLines.filter((_, i) => i % Math.ceil(lonLines.length / 100) === 0);
+            latLines = latLines.filter((_, i) => i % Math.ceil(latLines.length / 100) === 0);
         }
-        for (let row = H; row >= 0; row--) {
-            const lat = north - (row / H) * latRange;
-            const x = W * (0.5 + 0.5 * Math.cos(toRad(lat)));
-            ctx.lineTo(x, row);
-        }
-        ctx.closePath();
-        ctx.stroke();
+        spacingLabel = `${spacingKm} km cells`;
     } else {
-        ctx.strokeRect(xOffset, 0, contentW, H);
+        for (let i = 0; i <= gridCount; i++) lonLines.push(west + (i / gridCount) * lonRange);
+        for (let i = 0; i <= gridCount; i++) latLines.push(north - (i / gridCount) * latRange);
+    }
+
+    const eqLat = (north >= 0 && south <= 0) ? 0 : null;      // equator in view?
+    const pmLon = (east >= 0 && west <= 0) ? 0 : null;        // prime meridian in view?
+
+    // ── Geographic graticule (degrees / meters) ─────────────────────────────
+    if (geoGridOn) {
+    // Meridians (constant lon): sample down the latitude span so the line
+    // curves/tilts exactly as the projection bends it.
+    for (const lon of lonLines) {
+        const pts = [];
+        for (let s = 0; s <= SEG; s++) pts.push({ lat: north - (s / SEG) * latRange, lon });
+        const isBold = pmLon != null && Math.abs(lon - pmLon) < lonRange / 200;
+        const a = drawLine(pts, { bold: isBold });
+        if (a && unitMode === 'degrees') {
+            const label = lon.toFixed(2) + '°';
+            const tw = ctx.measureText(label).width;
+            ctx.fillText(label, Math.max(2, Math.min(a.x - tw / 2, W - tw - 2)), H - 4);
+        }
+    }
+
+    // Parallels (constant lat): sample across the longitude span.
+    for (const lat of latLines) {
+        const pts = [];
+        for (let s = 0; s <= SEG; s++) pts.push({ lat, lon: west + (s / SEG) * lonRange });
+        const isBold = eqLat != null && Math.abs(lat - eqLat) < latRange / 200;
+        const a = drawLine(pts, { bold: isBold });
+        if (a && unitMode === 'degrees') ctx.fillText(lat.toFixed(2) + '°', Math.max(2, Math.min(a.x + 4, W - 46)), Math.max(12, a.y - 3));
+    }
+
+    // Outline the reprojected data footprint (the warped border) so the overall
+    // shape distortion reads at a glance.
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    let started = false;
+    const border = [];
+    for (let s = 0; s <= SEG; s++) border.push({ lat: north, lon: west + (s / SEG) * lonRange });
+    for (let s = 0; s <= SEG; s++) border.push({ lat: north - (s / SEG) * latRange, lon: east });
+    for (let s = 0; s <= SEG; s++) border.push({ lat: south, lon: east - (s / SEG) * lonRange });
+    for (let s = 0; s <= SEG; s++) border.push({ lat: south + (s / SEG) * latRange, lon: west });
+    for (const p of border) {
+        const f = geoToFrac(p.lat, p.lon);
+        if (f.xFrac == null || !isFinite(f.xFrac) || !isFinite(f.yFrac)) { started = false; continue; }
+        const x = px(f.xFrac), y = py(f.yFrac);
+        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    // Projection name badge (top-left) so the active transform is unmistakable.
+    const projLabel = {
+        none: 'Plate Carrée (no projection)', cosine: 'Cosine correction',
+        mercator: 'Web Mercator', equidistant: 'Equidistant Cylindrical',
+        lambert: 'Lambert Equal-Area', sinusoidal: 'Sinusoidal',
+        miller: 'Miller Cylindrical', gall: 'Gall Stereographic',
+    }[projection] || projection;
+    const badge = spacingLabel ? `${projLabel}  ·  ${spacingLabel}` : projLabel;
+    ctx.font = 'bold 13px sans-serif';
+    const bw = ctx.measureText(badge).width + 14;
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.fillRect(6, 6, bw, 22);
+    ctx.fillStyle = '#ffec78';
+    ctx.fillText(badge, 13, 22);
+    }  // end geographic graticule
+
+    // ── Pixel grid (independent, DEM pixel space, default red) ──────────────
+    if (pixelGridOn) {
+        _drawPixelGrid(ctx, W, H, canvas);
+    } else {
+        const dimsLabel = document.getElementById('pixelGridDimsLabel');
+        if (dimsLabel) dimsLabel.classList.add('hidden');
+    }
+}
+
+/**
+ * Draw a grid in DEM *pixel* space (independent of the geographic graticule).
+ * Lines every `pixelGridSpacing` DEM pixels, mapped onto the display canvas.
+ * Colour defaults to red. Also writes the raster's pixel dimensions to the
+ * #pixelGridDimsLabel readout and labels the on-canvas grid.
+ */
+function _drawPixelGrid(ctx, W, H, canvas) {
+    const dem = window.appState?.lastDemData;
+    // DEM raster pixel dimensions (fall back to the display canvas if absent).
+    const demW = dem?.width || canvas.width || 0;
+    const demH = dem?.height || canvas.height || 0;
+    if (!demW || !demH) return;
+
+    const color = document.getElementById('pixelGridColor')?.value || '#ff0000';
+    let spacing = parseInt(document.getElementById('pixelGridSpacing')?.value, 10);
+    if (!Number.isFinite(spacing) || spacing < 1) spacing = 1000;
+
+    // Map DEM-pixel coordinates onto the (possibly rescaled) display canvas.
+    const sx = W / demW, sy = H / demH;
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1.25;
+    ctx.setLineDash([]);
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur = 2;
+    ctx.font = 'bold 11px sans-serif';
+
+    // Vertical lines every `spacing` px in the X (column) direction.
+    for (let cx = 0; cx <= demW; cx += spacing) {
+        const x = cx * sx;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+        ctx.fillText(`${cx}px`, Math.min(x + 3, W - 32), 12);
+    }
+    // Always draw the far edge so the full width reads.
+    if (demW % spacing !== 0) {
+        ctx.beginPath(); ctx.moveTo(W, 0); ctx.lineTo(W, H); ctx.stroke();
+    }
+
+    // Horizontal lines every `spacing` px in the Y (row) direction.
+    for (let cy = 0; cy <= demH; cy += spacing) {
+        const y = cy * sy;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+        ctx.fillText(`${cy}px`, 3, Math.min(y + 12, H - 3));
+    }
+    if (demH % spacing !== 0) {
+        ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(W, H); ctx.stroke();
+    }
+    ctx.restore();
+
+    // Dimensions readout in the sidebar.
+    const dimsLabel = document.getElementById('pixelGridDimsLabel');
+    if (dimsLabel) {
+        dimsLabel.textContent = `Pixel grid: ${demW} × ${demH} px  (every ${spacing} px)`;
+        dimsLabel.classList.remove('hidden');
     }
 }
 

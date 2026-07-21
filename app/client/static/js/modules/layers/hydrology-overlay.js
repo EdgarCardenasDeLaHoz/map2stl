@@ -109,14 +109,15 @@ window.loadHydrology = async function loadHydrology() {
     const minOrder = parseInt(document.getElementById('hydroMinOrder')?.value ?? '3');
     const orderExp = parseFloat(document.getElementById('hydroOrderExponent')?.value ?? '1.5');
     const widthFactor = parseFloat(document.getElementById('hydroWidthFactor')?.value ?? '0.5');
-    const projection = document.getElementById('paramProjection')?.value || 'none';
-    const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
+    const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
+    const maintainDims = maintainDimensions ? 'true' : 'false';
+    const clipNans = clipValidRegion ? 'true' : 'false';
 
     // Build a stable param key for in-flight dedupe.
     const inflightKey = JSON.stringify({
         n: north, s: south, e: east, w: west, dim, source,
         dep: depressionM, mo: minOrder, oe: orderExp, wf: widthFactor,
-        proj: projection, cn: clipNans,
+        proj: projection, md: maintainDims, cn: clipNans,
     });
     if (_hydroInflightPromise && _hydroInflightKey === inflightKey) {
         return _hydroInflightPromise;
@@ -133,6 +134,7 @@ window.loadHydrology = async function loadHydrology() {
     }
     if (projection !== 'none') {
         paramObj.projection = projection;
+        paramObj.maintain_dimensions = maintainDims;
         paramObj.clip_valid_region = clipNans;
     }
     const params = new URLSearchParams(paramObj);
@@ -153,6 +155,16 @@ window.loadHydrology = async function loadHydrology() {
         try {
             const { data, error } = await window.api.dem.hydrology(params, signal);
             if (signal.aborted) return;
+            // The server reports "no rivers found" via the same `error` field as
+            // real failures (feature_count: 0 + error message). That's an empty
+            // result, not a failure — don't show a red error toast for it.
+            const isEmptyResult = data && data.feature_count === 0 && !error;
+            if (isEmptyResult) {
+                if (statusEl) statusEl.textContent = 'No rivers found in this region';
+                window.setLayerStatus?.('hydrology', 'loaded');
+                renderHydrology(data);
+                return;
+            }
             if (error || !data || data.error) {
                 const msg = (data?.error) || error || 'Unknown error';
                 if (statusEl) statusEl.textContent = `⚠ ${msg}`;

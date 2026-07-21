@@ -35,23 +35,31 @@ def resolve_dem_from_cache(data: dict) -> tuple[list, int, int] | None:
     if None in (north, south, east, west):
         return None
 
-    # DEM settings — match the key structure in terrain.py get_terrain_dem()
+    # DEM settings — this key MUST match the write key in
+    # terrain.py:get_terrain_dem(). Raw (unprojected) DEM is cached once per
+    # bbox, so the key intentionally excludes projection and clip_nans (those
+    # are applied per-request after the cache read) and includes the "v":2
+    # schema version. These previously diverged (proj/cn were included, v was
+    # missing), so the settings-only export path always missed the cache and
+    # failed with "Missing DEM data".
     dem = data.get("dem") or data
     dim         = int(dem.get("dim", 200))
     dem_source  = dem.get("dem_source", "local")
-    projection  = dem.get("projection", "cosine")
     depth_scale = float(dem.get("depth_scale", 0.5))
     water_scale = float(dem.get("water_scale", 0.05))
     subtract_water     = bool(dem.get("subtract_water", True))
-    maintain_dimensions = bool(dem.get("maintain_dimensions", True))
-    clip_nans   = bool(dem.get("clip_nans", False))
+    # Must match terrain.py:get_terrain_dem()'s own maintain_dimensions
+    # default (False since F-PROJ-DIMS) or this cache-key reconstruction
+    # misses whenever the caller omits the field.
+    maintain_dimensions = bool(dem.get("maintain_dimensions", False))
     show_sat    = bool(dem.get("show_sat", False))
 
     cache_key = make_cache_key("dem", north, south, east, west, {
-        "dim": dim, "src": dem_source, "proj": projection,
+        "v": 2,
+        "dim": dim, "src": dem_source,
         "ds": depth_scale, "ws": water_scale,
         "sw": subtract_water, "md": maintain_dimensions,
-        "cn": clip_nans, "sat": show_sat,
+        "sat": show_sat,
     })
 
     cached = read_array_cache("dem", cache_key)

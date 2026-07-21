@@ -52,6 +52,9 @@ class CompositeCityRasterRequest(BaseModel):
     projection: str = "none"
     clip_valid_region: bool | None = None
     clip_nans: bool = True
+    detail: str = "full"  # "full" or "coarse" — must match the tier used by /api/cities
+                          # so the OSM cache lookup key resolves to the matching entry
+    maintain_dimensions: bool = False  # keep input shape after projection (legacy/opt-in)
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +200,11 @@ def _rasterize_city(req: CompositeCityRasterRequest) -> dict:
 
     _, coords_to_px = _make_geo_to_px(N, S, E, W, PW, PH)
 
-    osm_key = osm_cache_key(N, S, E, W)
+    # min_area must match what /api/cities used for this tier, or the cache
+    # key (which is hashed from bbox + tol + min_area) will miss entirely.
+    from app.server.config import COARSE_MIN_BUILDING_AREA_M2
+    min_area = COARSE_MIN_BUILDING_AREA_M2 if req.detail == "coarse" else 5.0
+    osm_key = osm_cache_key(N, S, E, W, min_area=min_area)
     osm_data = read_osm_cache(osm_key)
     if not osm_data:
         logger.debug(
@@ -273,6 +280,7 @@ async def get_city_raster(req: CompositeCityRasterRequest):
                     out[lname],
                     req.north, req.south, req.east, req.west,
                     req.projection, clip_valid_region, categorical=False,
+                    maintain_dimensions=req.maintain_dimensions,
                 )
 
         ph, pw = out["buildings"].shape
@@ -309,7 +317,8 @@ async def get_city_raster(req: CompositeCityRasterRequest):
         for lname in layer_names:
             arr = np.array(result[lname], dtype=np.float32).reshape(PH, PW)
             arr = project_grid(arr, req.north, req.south, req.east, req.west,
-                               req.projection, clip_valid_region, categorical=False)
+                               req.projection, clip_valid_region, categorical=False,
+                               maintain_dimensions=req.maintain_dimensions)
             result[lname] = _json_safe_flat(arr)
         # Update dimensions to projected output size
         result["height"], result["width"] = arr.shape

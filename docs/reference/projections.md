@@ -1,6 +1,6 @@
 # Map Projections
 
-_Last updated: 2026-04-19_
+_Last updated: 2026-07-19 (F-PROJ-DIMS — maintain_dimensions default flipped to False)_
 
 All projections are implemented in `geo2stl/projections.py`.
 The active entry point is `project_coordinates(mat, bbox, projection=..., ...)`.
@@ -41,14 +41,14 @@ This is the original `proj_map_geo_to_2D` behavior from the Oceans notebook.
 
 **Two sub-modes via `maintain_dimensions`:**
 
-- `maintain_dimensions=False` (default for this projection): Scatter approach — each source pixel is placed at its projected x position. Leaves NaN gaps between pixels at high latitudes. Output width is narrower than input. Use `clip_nans=True` to strip empty columns.
+- `maintain_dimensions=False` (the pipeline default since F-PROJ-DIMS, 2026-07-19): resizes the whole row-scaled image to the true `cos(lat)`-corrected aspect ratio via `cv2.resize` — no NaN gaps, output width is narrower than input, deterministic from `(bbox, input_shape)` so independently-projected layers for the same bbox/dim stay aligned. (Prior to F-PROJ-DIMS this was a broken per-row integer-index scatter that could misalign layers — replaced, not just re-enabled.)
 - `maintain_dimensions=True`: Gather approach — each output row is resampled via `np.interp` to always fill the full output width. No NaNs, same shape as input, but the image is stretched back out to fill the frame.
 
 | | |
 |---|---|
-| **Pros** | Simple and fast. Good approximation for mid-latitudes. Matches the original notebook behavior exactly when `maintain_dimensions=False, clip_nans=True`. |
-| **Cons** | Discrete pixel scatter (not smooth interpolation) — can leave NaN gaps. Not conformal or equal-area, just a local approximation. |
-| **Best for** | General purpose terrain at 20°–60° latitude. Default choice. |
+| **Pros** | Simple and fast. Good approximation for mid-latitudes. |
+| **Cons** | Not conformal or equal-area, just a local approximation. |
+| **Best for** | General purpose terrain at 20°–60° latitude. |
 
 ---
 
@@ -110,10 +110,12 @@ Pseudocylindrical equal-area. Each row is scaled by `cos(lat)` (like cosine), bu
 
 Rows near the poles reach outside the valid longitude range → NaN margins on the sides.
 
+**`maintain_dimensions=False`:** Output width computed from the true projected width at the bbox's equator-ward edge (widest row), so no valid data is clipped by undersizing; `clip_nans=True` then trims the empty wing corners as usual. Since `clip_nans` on this shape is geometric (depends only on bbox, not on the source data), the post-clip result is still consistent across independently-projected layers for the same bbox — verified by cross-layer alignment tests, though the exact post-clip shape isn't modeled by `expected_aspect_ratio()`'s formula (only the cross-layer comparison is checked for sinusoidal, not an absolute target).
+
 | | |
 |---|---|
 | **Pros** | Equal-area. Good visual balance for single-continent maps. Central meridian is undistorted. |
-| **Cons** | Curved edges produce NaN margins that must be stripped. Distortion increases away from the central meridian. Currently always returns same `(m, n)` shape regardless of `maintain_dimensions`. |
+| **Cons** | Curved edges produce NaN margins that must be stripped. Distortion increases away from the central meridian. |
 | **Best for** | Africa, South America, single large continents centered on their own meridian. |
 
 ---
@@ -138,13 +140,15 @@ project_coordinates(
     mat,                          # 2D numpy array (elevation)
     bbox,                         # (north, south, east, west) in degrees
     projection='cosine',          # see types above
-    maintain_dimensions=True,     # True = same shape as input, False = true aspect ratio
+    maintain_dimensions=False,    # False (default since F-PROJ-DIMS) = true aspect ratio, True = same shape as input
     fill_value=np.nan,            # value for pixels outside valid projection area
     clip_nans=False,              # strip columns with any NaN after projection
 )
 ```
 
-`maintain_dimensions=True` is the safe default — same output shape, no NaN gaps, predictable mesh size. Use `maintain_dimensions=False` when you want the true geographic aspect ratio in the output model.
+`maintain_dimensions=False` is the pipeline default (F-PROJ-DIMS, 2026-07-19) — output reflects the projection's true geographic aspect ratio, so switching projections visibly changes the canvas/mesh shape. Every projection function computes its output shape deterministically from `(input_shape, bbox)`, so independently-projected layers (DEM, water, ESA, city, hydrology) for the same bbox/dim/projection still land on identical shapes — see `geo2stl.projections.verify_layer_alignment()` for a runtime/test guard, and `expected_aspect_ratio()` for the shared formula. Set `maintain_dimensions=True` (client: the "Keep fixed canvas shape across projections" checkbox next to the projection dropdown) to opt into the old fixed-shape behavior — same output shape as input, no NaN gaps, predictable mesh size, but the rendered aspect ratio no longer changes with projection.
+
+**Important:** `clip_nans=True` is automatically skipped whenever `maintain_dimensions=True` — trimming NaN border rows/cols would otherwise shrink the output below the input shape (a lat-warping projection can introduce genuine edge NaNs even when `out_m == m`), silently violating the "same shape as input" contract. This was a real bug found via Playwright verification (mercator + `clip_nans=True` + `maintain_dimensions=True` returned a shape 1px smaller than the input) — fixed in `project_coordinates()`.
 
 `clip_nans=True` is equivalent to the notebook line:
 ```python
@@ -182,15 +186,15 @@ ESA WorldCover uses integer class IDs (10=Tree cover, 20=Shrubland, 30=Grassland
 
 All raster endpoints pass data through `core/projection.py`. Key rules:
 
-- `maintain_dimensions=True` is used uniformly — output shape matches input shape.
-- `clip_nans` must use `fill_value=np.nan` for ALL data types (categorical and continuous) so that NaN-border clipping produces consistent dimensions across layers.
+- `maintain_dimensions` defaults to `False` (F-PROJ-DIMS) and is threaded through from the client's `#paramMaintainDimensions` checkbox (`window.getProjectionParams()`) uniformly to every layer fetch — same value for DEM/water/ESA/satellite/hydrology/city so their outputs land on matching aspect ratios.
+- `clip_nans` must use `fill_value=np.nan` for ALL data types (categorical and continuous) so that NaN-border clipping produces consistent dimensions across layers. Automatically skipped when `maintain_dimensions=True` (see above).
 - `project_water_arrays()` handles water mask + ESA as a paired operation, clipping both arrays identically from the water mask's NaN pattern.
 - `project_rgb_image()` projects RGB channel-by-channel with bilinear interpolation.
-- Cache keys include `projection` and `dataset` to avoid serving stale projected data.
+- Cache keys generally exclude `projection`/`clip_nans`/`maintain_dimensions` — raw (unprojected) data is cached once per bbox, and projection is (re-)applied fresh on every request, **including cache hits**. The ESA land-cover and hydrology endpoints previously baked the projected result into the cache and never re-projected on a cache hit (a real bug, fixed 2026-07-19) — if you add a new raster endpoint, follow the DEM/water-mask pattern (cache raw, project after every read) not that one.
 
 ### Cosine projection geometry
 
-Cosine projection squishes each row horizontally by `cos(lat)`. At 60° N, `cos(60°) = 0.5`, so the row is half its original width. With `maintain_dimensions=True`, the output is resampled back to the original width via `np.interp`, preserving shape but stretching the content.
+Cosine projection squishes each row horizontally by `cos(lat)`. At 60° N, `cos(60°) = 0.5`, so the row is half its original width. With `maintain_dimensions=True`, the output is resampled back to the original width via `np.interp`, preserving shape but stretching the content. With `maintain_dimensions=False` (default), the whole image is resized via `cv2.resize` to `avg_cos * input_width` — narrower, no stretching.
 
 ### Layer compositing
 

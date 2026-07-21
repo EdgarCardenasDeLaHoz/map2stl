@@ -19,7 +19,7 @@ import pytest
 
 _BBOX = (40.0, 39.5, -75.0, -75.5)  # north, south, east, west
 _PROJECTIONS = ["cosine", "mercator", "equidistant",
-                "lambert", "sinusoidal"]
+                "lambert", "sinusoidal", "miller", "gall"]
 
 
 def _project_grid(arr, projection, clip_nans=True, categorical=False):
@@ -83,6 +83,164 @@ class TestProjectionDimensionConsistency:
             water, esa, *_BBOX, projection, clip_nans=True)
         assert wm_out.shape == esa_out.shape, (
             f"{projection}: water {wm_out.shape} ≠ ESA {esa_out.shape}")
+
+
+# ---------------------------------------------------------------------------
+# F-PROJ-DIMS: maintain_dimensions=False (variable output aspect ratio)
+# ---------------------------------------------------------------------------
+
+# Real DEM fetches always start from an "equal-angle" input (degrees-per-pixel
+# equal in lat and lon — see geo2stl/dem.py make_dem_image, which sizes `dim`
+# off max(h,w) from raw SRTM tiles). Tests must respect this invariant or
+# 'none'/'cosine' results are not comparable to expected_aspect_ratio's default.
+def _equal_angle_shape(bbox, dim):
+    north, south, east, west = bbox
+    lon_span, lat_span = east - west, north - south
+    if lon_span >= lat_span:
+        return dim, max(1, int(dim * lat_span / lon_span))  # (w, h)
+    return max(1, int(dim * lon_span / lat_span)), dim
+
+
+class TestVariableDimensionOutput:
+    """maintain_dimensions=False: output aspect ratio should reflect the
+    projection's true geographic shape, and must stay identical across
+    independently-projected layers for the same bbox/projection — even at
+    different resolutions (resolution and aspect ratio are independent)."""
+
+    @pytest.mark.parametrize("projection", _PROJECTIONS)
+    def test_matches_expected_aspect_ratio(self, projection):
+        from geo2stl.projections import project_coordinates, expected_aspect_ratio
+        w, h = _equal_angle_shape(_BBOX, 300)
+        mat = np.random.rand(h, w).astype(np.float32)
+
+        result, _meta = project_coordinates(
+            mat, _BBOX, projection=projection, maintain_dimensions=False,
+            fill_value=np.nan, clip_nans=True,
+        )
+        actual_ratio = result.shape[1] / result.shape[0]
+
+        if projection in ("cosine",):
+            expected = expected_aspect_ratio(_BBOX, projection, input_shape=(h, w))
+        elif projection == "sinusoidal":
+            pytest.skip("sinusoidal's clip_nans wing-trim isn't modeled by "
+                        "expected_aspect_ratio exactly — covered by the "
+                        "cross-layer alignment test instead")
+        else:
+            expected = expected_aspect_ratio(_BBOX, projection)
+
+        assert actual_ratio == pytest.approx(expected, rel=0.03), (
+            f"{projection}: actual aspect {actual_ratio:.4f} != expected {expected:.4f}")
+
+    @pytest.mark.parametrize("projection", _PROJECTIONS + ["none"])
+    def test_cross_layer_alignment_same_resolution(self, projection):
+        """Two different source arrays (e.g. DEM + water), same bbox/dim/
+        projection, must produce identical output shapes."""
+        from geo2stl.projections import project_coordinates, verify_layer_alignment
+        w, h = _equal_angle_shape(_BBOX, 300)
+        dem = np.random.rand(h, w).astype(np.float32)
+        water = np.random.choice([0.0, 1.0], size=(h, w)).astype(np.float32)
+
+        dem_out, _ = project_coordinates(dem, _BBOX, projection=projection,
+                                         maintain_dimensions=False, clip_nans=True)
+        water_out, _ = project_coordinates(water, _BBOX, projection=projection,
+                                           maintain_dimensions=False, clip_nans=True)
+
+        verify_layer_alignment(
+            {"dem": dem_out.shape, "water": water_out.shape},
+            _BBOX, projection, maintain_dimensions=False,
+        )  # raises AssertionError on mismatch — a bare call is the assertion
+
+    @pytest.mark.parametrize("projection", _PROJECTIONS + ["none"])
+    def test_cross_layer_alignment_different_resolution(self, projection):
+        """Resolution (pixel count) is independent of alignment — a DEM at
+        600px and a water mask at 300px must still align in aspect ratio."""
+        from geo2stl.projections import project_coordinates, verify_layer_alignment
+        w600, h600 = _equal_angle_shape(_BBOX, 600)
+        w300, h300 = _equal_angle_shape(_BBOX, 300)
+        dem = np.random.rand(h600, w600).astype(np.float32)
+        water = np.random.choice([0.0, 1.0], size=(h300, w300)).astype(np.float32)
+
+        dem_out, _ = project_coordinates(dem, _BBOX, projection=projection,
+                                         maintain_dimensions=False, clip_nans=True)
+        water_out, _ = project_coordinates(water, _BBOX, projection=projection,
+                                           maintain_dimensions=False, clip_nans=True)
+
+        assert dem_out.shape != water_out.shape, (
+            "sanity check: different input resolutions should produce "
+            "different pixel counts (otherwise this test proves nothing)")
+        verify_layer_alignment(
+            {"dem": dem_out.shape, "water": water_out.shape},
+            _BBOX, projection, maintain_dimensions=False,
+        )
+
+    def test_mismatched_bbox_is_flagged_as_bug(self):
+        """A layer accidentally projected against the wrong bbox (e.g. a
+        stale/mismatched region between two layer fetches) must raise, not
+        silently pass — this is the regression guard for 'flag it as a bug'
+        behavior. (For the canonical-frame projections — mercator, lambert,
+        equidistant, miller, gall — output shape depends on the bbox+dim
+        given to THAT call, not on the input array's own pixel shape, so a
+        wrong-bbox call is the realistic failure mode to guard against, not
+        a wrong-input-shape call.)"""
+        from geo2stl.projections import project_coordinates, verify_layer_alignment
+        w, h = _equal_angle_shape(_BBOX, 300)
+        dem = np.random.rand(h, w).astype(np.float32)
+        other_bbox = (60.0, 10.0, 30.0, -30.0)  # a much larger, differently-shaped region
+        w2, h2 = _equal_angle_shape(other_bbox, 300)
+        mismatched_layer = np.random.rand(h2, w2).astype(np.float32)
+
+        dem_out, _ = project_coordinates(dem, _BBOX, projection="mercator",
+                                         maintain_dimensions=False, clip_nans=True)
+        bad_out, _ = project_coordinates(mismatched_layer, other_bbox, projection="mercator",
+                                         maintain_dimensions=False, clip_nans=True)
+
+        with pytest.raises(AssertionError, match="aspect ratio mismatch"):
+            verify_layer_alignment(
+                {"dem": dem_out.shape, "bad_layer": bad_out.shape},
+                _BBOX, "mercator", maintain_dimensions=False,
+            )
+
+    def test_maintain_dimensions_true_still_works_unchanged(self):
+        """Opt-in maintain_dimensions=True must still produce identical
+        input/output shapes exactly as before this change, for every
+        projection (backward compatibility)."""
+        from geo2stl.projections import project_coordinates
+        h, w = 100, 120
+        mat = np.random.rand(h, w).astype(np.float32)
+        for projection in _PROJECTIONS + ["none"]:
+            result, _meta = project_coordinates(
+                mat, _BBOX, projection=projection, maintain_dimensions=True,
+                fill_value=np.nan, clip_nans=False,
+            )
+            assert result.shape == (h, w), (
+                f"{projection}: maintain_dimensions=True changed shape to {result.shape}")
+
+    @pytest.mark.parametrize("projection", _PROJECTIONS)
+    def test_maintain_dimensions_true_wins_over_clip_nans(self, projection):
+        """Regression guard: clip_nans=True must NOT shrink the output when
+        maintain_dimensions=True — that would silently violate the
+        documented contract ("output has same dimensions as input").
+
+        Found via Playwright verification: a lat-warping projection
+        (mercator) can introduce genuine edge NaNs even when out_m==m (the
+        northernmost/southernmost rows can sample outside the valid domain),
+        and clip_nans was unconditionally trimming those — e.g. SF bbox at
+        dim=200 returned (128,200) instead of the input's (129,200) with
+        both maintain_dimensions=True and clip_nans=True set. Real bug, not
+        a test artifact — reproduced directly via curl against the live
+        /api/terrain/dem endpoint before the fix."""
+        from geo2stl.projections import project_coordinates
+        # SF-ish bbox — reproduces the exact latitude where mercator's edge
+        # sampling falls outside the valid domain for this input shape.
+        bbox = (37.812, 37.708, -122.353, -122.514)
+        mat = np.random.rand(129, 200).astype(np.float32)
+        result, _meta = project_coordinates(
+            mat, bbox, projection=projection, maintain_dimensions=True,
+            fill_value=np.nan, clip_nans=True,
+        )
+        assert result.shape == mat.shape, (
+            f"{projection}: maintain_dimensions=True + clip_nans=True gave "
+            f"{result.shape}, expected input shape {mat.shape}")
 
 
 # ---------------------------------------------------------------------------

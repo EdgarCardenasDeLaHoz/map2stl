@@ -164,13 +164,14 @@ window.loadWaterHydrology = async function loadWaterHydrology() {
   const hydroSource = document.getElementById('hydroSource')?.value || 'hydrorivers';
 
     // Get projection and clip_nans settings from DOM
-    const projection = document.getElementById('paramProjection')?.value || 'none';
-    const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
+    const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
+    const maintainDims = maintainDimensions ? 'true' : 'false';
+    const clipNans = clipValidRegion ? 'true' : 'false';
 
   const inflightKey = JSON.stringify({
     n: north, s: south, e: east, w: west,
     waterDim, hydroDim, waterDataset, hydroSource
-      , projection, clipNans
+      , projection, maintainDims, clipNans
   });
 
   if (_combinedInflightPromise && _combinedInflightKey === inflightKey) {
@@ -185,7 +186,7 @@ window.loadWaterHydrology = async function loadWaterHydrology() {
   _combinedInflightKey = inflightKey;
   _combinedInflightPromise = _performCombinedLoad(
     north, south, east, west, waterDim, hydroDim, waterDataset, hydroSource, signal
-      , projection, clipNans
+      , projection, maintainDims, clipNans
   );
 
   try {
@@ -199,7 +200,7 @@ window.loadWaterHydrology = async function loadWaterHydrology() {
 /**
  * Internal function to perform the actual load and render.
  */
-async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim, waterDataset, hydroSource, signal, projection = 'none', clipNans = 'false') {
+async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim, waterDataset, hydroSource, signal, projection = 'none', maintainDims = 'false', clipNans = 'false') {
 
   const statusEl = document.getElementById('waterHydrologyStatus');
   const loadBtn = document.getElementById('loadWaterHydrologyBtn');
@@ -214,15 +215,38 @@ async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim
   window.setLayerStatus?.('waterHydrology', 'loading');
 
   try {
-    // Fetch water and hydrology in parallel, passing projection and clip_valid_region
+    // Fetch water and hydrology in parallel, passing projection and clip_valid_region.
+    // Water mask is shared with the standalone Water layer (water-mask.js) — use
+    // the identical cache key + in-flight dedupe so loading both layers for the
+    // same region shares one /api/terrain/water-mask request rather than firing
+    // it twice. This matters most when Earth Engine isn't authenticated: each
+    // failed EE init costs ~3-4s, and a plain result-cache can't help two
+    // concurrent callers since neither has a result to cache yet — dedupe()
+    // shares the one in-flight (possibly failing) promise instead.
+    const waterCacheKey = {
+      north, south, east, west,
+      dim: waterDim, dataset: waterDataset,
+      projection, maintain_dimensions: maintainDims, clip_valid_region: clipNans,
+    };
+    const cachedWater = window.waterMaskCache?.get(waterCacheKey);
     const waterParams = new URLSearchParams({
       north, south, east, west, dim: waterDim, dataset: waterDataset
     });
     if (projection && projection !== 'none') {
       waterParams.append('projection', projection);
+      waterParams.append('maintain_dimensions', maintainDims);
       waterParams.append('clip_valid_region', clipNans);
     }
-    const waterPromise = window.api.dem.waterMask(waterParams, signal);
+    const waterPromise = cachedWater
+      ? Promise.resolve({ data: cachedWater, error: null })
+      : window.waterMaskCache.dedupe(waterCacheKey, () =>
+          window.api.dem.waterMask(waterParams, signal).then(res => {
+            if (!res.error && res.data && !res.data.error) {
+              window.waterMaskCache?.set(waterCacheKey, res.data);
+            }
+            return res;
+          })
+        );
 
     const hydroParams = new URLSearchParams({
       north, south, east, west, dim: hydroDim, source: hydroSource,
@@ -235,6 +259,7 @@ async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim
     }
     if (projection && projection !== 'none') {
       hydroParams.append('projection', projection);
+      hydroParams.append('maintain_dimensions', maintainDims);
       hydroParams.append('clip_valid_region', clipNans);
     }
 

@@ -130,18 +130,34 @@ async def check_city_cache(
 async def get_city_data(city_req: CityRequest):
     """
     Fetch OSM building, road, waterway, and POI data for a small bounding box.
-    Results are cached as .json.gz. Region must be ≤ 15 km diagonal.
+    Results are cached as .json.gz. Region must be ≤ 15 km diagonal (≤ 25 km
+    for ``detail="coarse"`` requests, which drop walls/small buildings).
     """
+    from app.server.config import MAX_BBOX_DIAGONAL_KM_COARSE, COARSE_MIN_BUILDING_AREA_M2
+
     north, south, east, west = city_req.north, city_req.south, city_req.east, city_req.west
     layers = city_req.layers or ["buildings", "roads", "waterways"]
+    min_area = city_req.min_area
 
-    # Server-side size guard
-    diag_km, diag_err = validate_bbox_diagonal(north, south, east, west)
+    is_coarse = city_req.detail == "coarse"
+    if is_coarse:
+        # Coarse tier: infrastructure + large buildings only, no wall detail.
+        layers = [l for l in layers if l != "walls"] or ["buildings", "roads", "waterways"]
+        min_area = max(min_area, COARSE_MIN_BUILDING_AREA_M2)
+
+    # Server-side size guard (coarse tier gets a larger cap)
+    if is_coarse:
+        diag_km, diag_err = validate_bbox_diagonal(
+            north, south, east, west, max_km=MAX_BBOX_DIAGONAL_KM_COARSE)
+    else:
+        diag_km, diag_err = validate_bbox_diagonal(north, south, east, west)
     if diag_err:
         return diag_err
 
+    # detail is folded into the cache key (via min_area, which differs
+    # between tiers) so full/coarse results never collide.
     cache_key = osm_cache_key(north, south, east, west,
-                              city_req.simplify_tolerance, city_req.min_area)
+                              city_req.simplify_tolerance, min_area)
 
     # Cache check
     if _CACHE_AVAILABLE:
@@ -173,7 +189,7 @@ async def get_city_data(city_req: CityRequest):
     try:
         result = await run_sync(
             _fetch_osm_data, north, south, east, west, layers,
-            city_req.simplify_tolerance, city_req.min_area,
+            city_req.simplify_tolerance, min_area,
         )
     except Exception as e:
         logger.error(f"OSM fetch error: {e}")
@@ -282,6 +298,7 @@ async def get_city_raster(req: CityRasterRequest):
                         grid,
                         req.north, req.south, req.east, req.west,
                         req.projection, clip_valid_region, categorical=False,
+                        maintain_dimensions=req.maintain_dimensions,
                     )
 
                 cached_result = _sanitize_raster_result({
@@ -349,7 +366,8 @@ async def get_city_raster(req: CityRasterRequest):
         grid = np.array(result["values"], dtype=np.float32).reshape(
             result["height"], result["width"])
         grid = project_grid(grid, req.north, req.south, req.east, req.west,
-                            req.projection, clip_valid_region, categorical=False)
+                            req.projection, clip_valid_region, categorical=False,
+                            maintain_dimensions=req.maintain_dimensions)
         h, w = grid.shape
         result = {
             "values": np.nan_to_num(grid, nan=0.0).flatten().tolist(),

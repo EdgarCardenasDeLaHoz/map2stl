@@ -224,6 +224,7 @@ window.loadDEM = async function loadDEM(highRes = false) {
 
     const demSource = document.getElementById('paramDemSource')?.value || 'local';
     const p = window.appState.demParams;
+    const proj = window.getProjectionParams();
 
     const params = new URLSearchParams({
         north, south, east, west,
@@ -233,9 +234,9 @@ window.loadDEM = async function loadDEM(highRes = false) {
         subtract_water: p.subtractWater,
         dataset: 'esa',
         dem_source: demSource,
-        projection: document.getElementById('paramProjection')?.value || 'none',
-        maintain_dimensions: true,
-        clip_valid_region: document.getElementById('paramClipNans')?.checked ?? true,
+        projection: proj.projection,
+        maintain_dimensions: proj.maintainDimensions,
+        clip_valid_region: proj.clipValidRegion,
     });
 
     // Clear DEM cache before loading new DEM
@@ -282,6 +283,19 @@ window.loadDEM = async function loadDEM(highRes = false) {
         // Track bbox and update status
         window.appState.layerBboxes.dem = { north, south, east, west };
         window.setLayerStatus('dem', 'loaded');
+
+        // The server flags DEMs that came back with no real relief (the source
+        // had no coverage for this bbox — e.g. a continent-scale region on the
+        // local SRTM tiles). Warn the user instead of showing a flat map that
+        // then fails to export. Record it so export/preview can react too.
+        window.appState.lastDemEmpty = !!data.dem_empty;
+        if (data.dem_empty) {
+            const msg = data.dem_warning ||
+                'No elevation data covers this region.';
+            // The layer technically loaded (a flat array), so leave the status
+            // as 'loaded'; the toast carries the actionable warning.
+            window.showToast?.(msg + ' (See 🩺 Diagnostics or 🔑 Keys.)', 'warning', 9000);
+        }
 
         // Remove loading overlay from stacked layers
         const stackC = document.getElementById('dem-image-section');
@@ -756,10 +770,12 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
         document.getElementById('satImgResolution')?.value ||
         document.getElementById('paramDim')?.value || 600
     );
+    const satProj = window.getProjectionParams();
     const params = new URLSearchParams({
         north, south, east, west, dim,
-        projection: document.getElementById('paramProjection')?.value || 'none',
-        clip_valid_region: document.getElementById('paramClipNans')?.checked ?? true,
+        projection: satProj.projection,
+        maintain_dimensions: satProj.maintainDimensions,
+        clip_valid_region: satProj.clipValidRegion,
     });
 
     window.showToast?.('Loading satellite imagery...', 'info');

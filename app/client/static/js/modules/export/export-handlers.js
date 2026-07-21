@@ -5,7 +5,6 @@
  *
  * Public API (all on window):
  *   _setExportButtonsEnabled(enabled) — toggle export button states
- *   generateModelFromTab()            — validate params, set generatedModelData
  *   downloadSTL()                     — POST to /api/export/stl → download
  *   downloadModel(format)             — POST to /api/export/{format} → download
  *   downloadCrossSection()            — POST to /api/export/crosssection → download
@@ -79,6 +78,7 @@ function _regionName() {
 function _demSettings() {
     const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion || {};
     const p = window.appState?.demParams || {};
+    const proj = window.getProjectionParams();
     const settings = {
         bbox: {
             north: bbox.north, south: bbox.south,
@@ -87,12 +87,12 @@ function _demSettings() {
         dem: {
             dim: parseInt(document.getElementById('paramDim')?.value) || 200,
             dem_source: document.getElementById('paramDemSource')?.value || 'local',
-            projection: document.getElementById('paramProjection')?.value || 'cosine',
+            projection: proj.projection,
             depth_scale: p.depthScale ?? 0.5,
             water_scale: p.waterScale ?? 0.05,
             subtract_water: p.subtractWater ?? true,
-            maintain_dimensions: true,
-            clip_nans: document.getElementById('paramClipNans')?.checked ?? false,
+            maintain_dimensions: proj.maintainDimensions,
+            clip_nans: proj.clipValidRegion,
             show_sat: false,
         },
     };
@@ -125,63 +125,11 @@ function _exportParams() {
     };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Generate
-// ─────────────────────────────────────────────────────────────────────────────
-
-function generateModelFromTab() {
-    const lastDemData = window.appState?.lastDemData;
-    if (!lastDemData || !lastDemData.values || !lastDemData.values.length) {
-        window.showToast('Please load a DEM first by selecting a region on the map.', 'warning');
-        return;
-    }
-
-    const resolution = parseInt(document.getElementById('modelResolution').value);
-    const modelHeight = parseFloat(document.getElementById('exportModelHeight')?.value) || 30;
-    const exaggeration = parseFloat(document.getElementById('exportExaggeration')?.value) || 1.0;
-    const baseHeight = parseFloat(document.getElementById('exportBaseHeight')?.value) || 0;
-
-    if (!resolution || resolution < 1 || resolution > 2000) {
-        window.showToast('Resolution must be between 1 and 2000.', 'warning'); return;
-    }
-    if (!modelHeight || modelHeight <= 0 || modelHeight > 500) {
-        window.showToast('Model height must be between 0 and 500 mm.', 'warning'); return;
-    }
-    if (!exaggeration || exaggeration <= 0 || exaggeration > 100) {
-        window.showToast('Exaggeration must be between 0 and 100.', 'warning'); return;
-    }
-    if (isNaN(baseHeight) || baseHeight < 0 || baseHeight > 100) {
-        window.showToast('Base height must be between 0 and 100 mm.', 'warning'); return;
-    }
-
-    const pr = _progressEl();
-    pr.set(0, 'Preparing data...');
-
-    const viewportEl = document.querySelector('.model-viewport');
-    if (viewportEl) showLoading(viewportEl, 'Generating model...');
-
-    setTimeout(() => pr.set(30, 'Generating mesh...'), 200);
-    setTimeout(() => pr.set(70, 'Applying parameters...'), 500);
-    setTimeout(() => {
-        window.appState.generatedModelData = {
-            values: lastDemData.values,
-            width: lastDemData.width,
-            height: lastDemData.height,
-            resolution,
-            modelHeight,
-            exaggeration,
-            baseHeight,
-            vmin: lastDemData.vmin,
-            vmax: lastDemData.vmax
-        };
-        _setExportButtonsEnabled(true);
-        window.appState._updateWorkflowStepper?.();
-        const statusEl = document.getElementById('modelStatus');
-        if (statusEl) statusEl.textContent = `Model ready (${resolution}x${resolution}, ${exaggeration}x exaggeration)`;
-        if (viewportEl) hideLoading(viewportEl);
-        pr.done('Complete!');
-    }, 800);
-}
+// Note: the 3D model is built by the Extrude-tab auto-rebuild preview
+// (`model-viewer.js:previewModelIn3D`), which sets
+// `appState.generatedModelData` and enables the export buttons. The old
+// `generateModelFromTab()` here referenced a removed `#modelResolution`
+// element (it always threw) and was never wired to any button — removed.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Async export helper (start → poll → download)
@@ -318,7 +266,6 @@ function downloadCrossSection() {
 
 window._setExportButtonsEnabled = _setExportButtonsEnabled;
 window._demSettings = _demSettings;
-window.generateModelFromTab = generateModelFromTab;
 window.downloadSTL = downloadSTL;
 window.downloadModel = downloadModel;
 window.downloadCrossSection = downloadCrossSection;

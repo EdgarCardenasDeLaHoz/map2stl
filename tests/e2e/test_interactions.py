@@ -115,3 +115,90 @@ def test_app_renders_screenshot(strict_page, live_server_url):
         f"screenshot is suspiciously small ({out.stat().st_size} bytes) — "
         "the app may have rendered blank"
     )
+
+
+def test_combined_view_resamples_mismatched_water_mask(strict_page, live_server_url):
+    """renderCombinedView() must resample the water mask onto the DEM's exact
+    grid, not assume the two independently-fetched layers share a pixel count.
+
+    Found via manual exploration (2026-07-19): DEM and water-mask endpoints
+    derive their output resolution through different algorithms (DEM resizes
+    to `dim` on its longest axis; water-mask derives an Earth-Engine
+    metres-per-pixel scale from `dim`), so with `maintain_dimensions=False`
+    (the default since F-PROJ-DIMS) they can land on very different absolute
+    pixel counts while still sharing the same aspect ratio. The combined view
+    does direct flat-index math over both arrays, so a real mismatch used to
+    log a warning and uselessly re-fetch the same mismatched shape — fixed by
+    nearest-neighbour resampling the water mask onto the DEM grid first.
+    """
+    page = strict_page
+    page.goto(live_server_url, wait_until="networkidle")
+
+    region = page.locator("span.coordinate-item-name").first
+    region.wait_for(state="visible", timeout=10_000)
+    region.click()
+
+    # Deliberately mismatched shapes (different aspect-preserving resolutions,
+    # as the two real endpoints can legitimately produce).
+    dem_h, dem_w = 40, 65
+    wm_h, wm_w = 61, 99
+
+    def _flat(h, w, fill=0.0):
+        return [fill] * (h * w)
+
+    def fulfill_dem(route):
+        route.fulfill(json={
+            "dem_values": _flat(dem_h, dem_w, 10.0),
+            "dimensions": [dem_h, dem_w],
+            "width": dem_w, "height": dem_h,
+            "min_elevation": 0.0, "max_elevation": 10.0, "mean_elevation": 5.0,
+            "bbox": [-122.514, 37.708, -122.353, 37.812],
+        })
+
+    def fulfill_water(route):
+        water_vals = [1.0 if i % 3 == 0 else 0.0 for i in range(wm_h * wm_w)]
+        route.fulfill(json={
+            "water_mask_values": water_vals,
+            "water_mask_dimensions": [wm_h, wm_w],
+            "water_pixels": sum(1 for v in water_vals if v > 0.5),
+            "total_pixels": wm_h * wm_w,
+            "water_percentage": 33.0,
+            "esa_values": [10.0] * (wm_h * wm_w),
+            "esa_dimensions": [wm_h, wm_w],
+        })
+
+    page.route("**/api/terrain/dem*", fulfill_dem)
+    page.route("**/api/terrain/water-mask*", fulfill_water)
+
+    page.locator("#tabEdit").click()
+    load_btn = page.locator("#loadDemBtn")
+    if not load_btn.is_visible():
+        section = page.locator(".collapsible-section", has=page.locator("#loadDemBtn")).first
+        section.locator(".collapsible-header").first.click()
+    load_btn.wait_for(state="visible", timeout=10_000)
+    with page.expect_response(lambda r: "/api/terrain/dem" in r.url, timeout=15_000):
+        load_btn.click()
+
+    page.evaluate("() => window.loadWaterMask && window.loadWaterMask()")
+    page.wait_for_timeout(1500)
+
+    dem_dims = page.evaluate(
+        "() => window.appState.lastDemData ? "
+        "[window.appState.lastDemData.height, window.appState.lastDemData.width] : null"
+    )
+    water_dims = page.evaluate(
+        "() => window.appState.lastWaterMaskData ? "
+        "window.appState.lastWaterMaskData.water_mask_dimensions : null"
+    )
+    assert dem_dims == [dem_h, dem_w], f"mocked DEM dims not applied: {dem_dims}"
+    assert water_dims == [wm_h, wm_w], f"mocked water dims not applied: {water_dims}"
+
+    result = page.evaluate(
+        "async () => { await window.renderCombinedView(); "
+        "const c = document.querySelector('#combinedImage canvas'); "
+        "return c ? {w: c.width, h: c.height} : null; }"
+    )
+    assert result is not None, "combined view did not render a canvas"
+    assert result["w"] == dem_w and result["h"] == dem_h, (
+        f"combined canvas should match DEM's own grid ({dem_h}x{dem_w}), got {result}"
+    )
