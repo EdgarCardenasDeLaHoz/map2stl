@@ -12,6 +12,7 @@ from app.server.core.validation import model_to_dict
 import json
 import logging
 import sqlite3
+from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -48,6 +49,86 @@ def _row_to_region(row) -> dict:
 def _ensure_db() -> None:
     """Create the database schema on first use."""
     init_db()
+
+
+def _bbox_iou(a: dict, b: dict) -> float:
+    """Intersection-over-union of two {north,south,east,west} bboxes.
+
+    Plain planar IoU on lat/lon degrees — fine for the small, roughly
+    similar-latitude bboxes this is used to compare (candidate cities),
+    not a precise geodesic area calculation.
+    """
+    ix0, iy0 = max(a["west"], b["west"]), max(a["south"], b["south"])
+    ix1, iy1 = min(a["east"], b["east"]), min(a["north"], b["north"])
+    iw, ih = max(0.0, ix1 - ix0), max(0.0, iy1 - iy0)
+    inter = iw * ih
+    area_a = max(0.0, a["east"] - a["west"]) * max(0.0, a["north"] - a["south"])
+    area_b = max(0.0, b["east"] - b["west"]) * max(0.0, b["north"] - b["south"])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def find_overlapping_region(bbox: dict, min_iou: float = 0.5) -> Optional[dict]:
+    """Return the saved region with the highest bbox IoU against `bbox`, if
+    it clears `min_iou`; otherwise None. Used by F-MESHIMPORT auto-register
+    to reuse an existing region rather than creating a near-duplicate.
+    """
+    _ensure_db()
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT name, label, description, north, south, east, west FROM regions"
+        ).fetchall()
+    best_name, best_iou = None, 0.0
+    for row in rows:
+        r = dict(row)
+        iou = _bbox_iou(bbox, r)
+        if iou > best_iou:
+            best_name, best_iou = r["name"], iou
+    if best_name is not None and best_iou >= min_iou:
+        return {"name": best_name, "iou": best_iou}
+    return None
+
+
+def _unique_region_name(base_name: str) -> str:
+    """Return base_name, or base_name suffixed with " (2)", " (3)", ... if
+    base_name already exists (regions.name is a primary key; POST /api/regions
+    silently overwrites on collision, which auto-register should never do to
+    an existing, possibly-customised region)."""
+    _ensure_db()
+    with get_db() as conn:
+        existing = {r["name"] for r in conn.execute("SELECT name FROM regions").fetchall()}
+    if base_name not in existing:
+        return base_name
+    i = 2
+    while f"{base_name} ({i})" in existing:
+        i += 1
+    return f"{base_name} ({i})"
+
+
+def find_or_create_region_for_bbox(
+    bbox: dict, label_hint: str, min_iou: float = 0.5,
+) -> dict:
+    """Reuse a saved region whose bbox overlaps `bbox` by >= min_iou, else
+    create a new one named after `label_hint` (de-duplicated if needed).
+
+    Returns {"name": str, "created": bool, "iou": float|None}.
+    """
+    match = find_overlapping_region(bbox, min_iou=min_iou)
+    if match is not None:
+        return {"name": match["name"], "created": False, "iou": match["iou"]}
+
+    name = _unique_region_name(label_hint.strip() or "Untitled region")
+    _ensure_db()
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO regions (name, label, description, north, south, east, west) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (name, label_hint, "Created by F-MESHIMPORT auto-register",
+             bbox["north"], bbox["south"], bbox["east"], bbox["west"]),
+        )
+        conn.commit()
+    logger.info(f"auto-register: created new region {name!r} for bbox {bbox}")
+    return {"name": name, "created": True, "iou": None}
 
 
 # ---------------------------------------------------------------------------

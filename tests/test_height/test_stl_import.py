@@ -88,6 +88,7 @@ class TestStlToHeightmap:
     def test_valid_pixels_have_nonnan_heights(self, tmp_path):
         stl = _make_box_stl(tmp_path)
         hm, mask = stl_to_heightmap(stl, _BBOX, resolution_m=1000.0)
+        assert mask.any(), "Expected at least one ray to hit the box"
         assert not np.isnan(hm[mask]).any(), "Masked pixels must not be NaN"
 
     def test_masked_pixels_are_nan(self, tmp_path):
@@ -99,8 +100,8 @@ class TestStlToHeightmap:
         """The ray-cast should return z1 = 5.0 as the max height."""
         stl = _make_box_stl(tmp_path, z1=5.0)
         hm, mask = stl_to_heightmap(stl, _BBOX, resolution_m=2000.0)
-        if mask.any():
-            assert np.nanmax(hm) == pytest.approx(5.0, abs=0.1)
+        assert mask.any(), "Expected at least one ray to hit the box"
+        assert np.nanmax(hm) == pytest.approx(5.0, abs=0.1)
 
     def test_resolution_affects_grid_size(self, tmp_path):
         """Finer resolution should yield a larger grid (more pixels)."""

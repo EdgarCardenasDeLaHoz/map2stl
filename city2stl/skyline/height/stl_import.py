@@ -161,11 +161,15 @@ def stl_to_heightmap(
     )
 
     # -- Accumulate max Z per pixel (topmost surface = roof height) ---------
-    heightmap = np.full(n_rays, np.nan, dtype=np.float32)
+    # NOTE: np.maximum.at cannot start from a NaN-filled array — np.maximum(nan, x)
+    # is always nan, so every hit pixel would stay nan. Start from -inf instead,
+    # then convert cells with no hit (still -inf) back to nan.
+    heightmap = np.full(n_rays, -np.inf, dtype=np.float32)
     if len(locations) > 0:
         # Vectorised: for each unique ray index, take the maximum z hit
         zvals = locations[:, 2].astype(np.float32)
         np.maximum.at(heightmap, index_ray, zvals)
+    heightmap[np.isinf(heightmap)] = np.nan
 
     heightmap = heightmap.reshape(h, w)
     mask = ~np.isnan(heightmap)
