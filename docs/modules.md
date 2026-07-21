@@ -28,7 +28,7 @@ flowchart LR
 | `state.js` | `window.appState` | Proxy-based reactive state with `.on()/.set()/.emit()` |
 | `events.js` | `window.events`, `window.EV` | Event bus + EV constants |
 | `api.js` | `window.api.*` | All fetch helpers (regions, dem, export, cities, cache, settings) |
-| `ui-helpers.js` | `showToast`, `showLoading`, `setLayerStatus` | Toast, spinners, layer status UI |
+| `ui-helpers.js` | `showToast`, `showLoading`, `setLayerStatus`, `getProjectionParams` | Toast, spinners, layer status UI; `getProjectionParams()` reads `#paramProjection`/`#paramMaintainDimensions`/`#paramClipNans` — the single source every layer fetch uses so they all request matching projection settings (F-PROJ-DIMS) |
 | `cache.js` | `waterMaskCache`, `setupCacheManagement` | In-memory water mask LRU + cache UI |
 
 ### `dem/` — DEM rendering & processing
@@ -42,8 +42,10 @@ flowchart LR
 ### `layers/` — Layer composition & city overlays
 | File | Key exports | Purpose |
 |------|-------------|---------|
-| `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `applyStackedTransform`, `moveLayer`, `setLayerOpacity`, `getLayerOrder` | Single-canvas stacked view, zoom/pan; uses `LAYER_CANVAS_IDS` registry + `_getLayerBuffer`/`_freeLayerBuffer` for GPU memory management |
-| `composite-dem.js` | `computeCompositeDem`, `setupCompositeDemControls` | Additive height contributions + ML feature arrays |
+| `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `applyStackedTransform`, `moveLayer`, `setLayerOpacity`, `getLayerOrder`, `setSplitViewEnabled`, `isSplitViewEnabled` | Single-canvas stacked view, zoom/pan; uses `LAYER_CANVAS_IDS` registry + `_getLayerBuffer`/`_freeLayerBuffer` for GPU memory management. `setSplitViewEnabled` draws CompositeDem/SatImg side-by-side in `stackViewCanvas` instead of alpha-blending, sharing the same `stackZoom` transform so pan/zoom stays synced. |
+| `composite-dem.js` | `computeCompositeDem`, `setupCompositeDemControls` | Additive height contributions (DEM/water/buildings/roads/waterways/walls/landcover/sat, each independently toggleable) + per-layer histograms + ML feature arrays |
+| `mesh-layer.js` | `uploadMeshLayer`, `selectLibraryMeshFile`, `computeMeshHeightmap`, `autoRegisterMesh`, `suggestedMeshResolutionM`, `applyMeshRegistration`, `applyMeshToDem`, `clearMeshLayer` | STL/OBJ import (F-MESHIMPORT): upload/library source → heightmap → registered `MeshImport` stacked layer → optional DEM merge. `autoRegisterMesh` geocodes the filename + runs automatic OSM registration, always handing off to the manual picker |
+| `mesh-registration.js` | `openMeshRegistrationModal`, `computeMeshRegistration`, `undoLastMeshPointPair`, `clearMeshPointPairs` | Side-by-side pan/zoom point-pair picker (DEM vs. mesh heightmap) feeding the `/register` affine fit |
 | `water-mask.js` | `loadWaterMask`, `renderWaterMask`, `renderEsaLandCover` | Water mask + ESA land cover |
 | `city-overlay.js` | `loadCityData`, `renderCityOverlay`, `window.renderCityOnDEM` | OSM building/road/waterway overlay |
 | `city-render.js` | `loadCityRaster`, `_clearCityRasterCache` | City rasterization via `/api/cities/raster` |
@@ -238,11 +240,33 @@ Use grep: `grep -rn "function functionName" app/client/static/js/`.
 
 | Function | Purpose |
 |----------|---------|
-| `computeCompositeDem(opts)` | Add water/city/landcover/sat contributions to DEM |
+| `computeCompositeDem(opts)` | Add DEM/water/city(buildings+roads+waterways+walls)/landcover/sat contributions — DEM and each city sub-layer independently toggleable |
 | `applyCompositeToDem()` | Copy composite into lastDemData.values |
-| `setupCompositeDemControls()` | Wire all composite sliders + buttons |
+| `setupCompositeDemControls()` | Wire all composite sliders + toggles + buttons + split-view button |
+| `_drawHistogram(canvas, values)` / `_renderAllHistograms(channels)` | Canvas-drawn per-layer + combined contribution histograms (no chart lib) |
 
-### export/model-viewer.js
+### layers/mesh-layer.js
+
+| Function | Purpose |
+|----------|---------|
+| `uploadMeshLayer(file)` | POST an STL/OBJ, store `upload_id` on `appState.meshImport` |
+| `selectLibraryMeshFile(relPath, filename)` | Use a mesh-library file instead of an upload |
+| `computeMeshHeightmap(opts)` | Fetch heightmap for the current DEM bbox, render preview canvas. Defaults `resolutionM` via `suggestedMeshResolutionM` when not given |
+| `autoRegisterMesh(opts)` | Geocode the mesh's filename/foldername, run automatic OSM registration + region match/create (`/auto-register`), then `loadDEM` + `computeMeshHeightmap` + always open the manual picker — never auto-accepts the result |
+| `suggestedMeshResolutionM(bbox)` | Suggest a heightmap resolution (m/px) targeting ~300px on a bbox's longer side; shared by the UI slider default and `autoRegisterMesh` |
+| `applyMeshRegistration(result)` | Called by mesh-registration.js with the `/register` response; renders the `MeshImport` layer canvas, fires `mesh-import-registered` window event |
+| `applyMeshToDem(blendWeight)` | Patch `lastDemData.values` with the registered mesh in its footprint (mirrors `applyCompositeToDem`) |
+| `clearMeshLayer()` | Reset `appState.meshImport`/`meshSourceCanvas` |
+
+### layers/mesh-registration.js
+
+| Function | Purpose |
+|----------|---------|
+| `openMeshRegistrationModal()` | Show the picker, render both DEM and mesh heightmap canvases |
+| `computeMeshRegistration()` | POST point pairs to `/register`, hand the warped result to `applyMeshRegistration` |
+| `undoLastMeshPointPair()` / `clearMeshPointPairs()` | Edit the pending point-pair list |
+
+### layers/stacked-layers.js
 
 | Function | Purpose |
 |----------|---------|

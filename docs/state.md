@@ -54,6 +54,11 @@ flowchart TD
 | `satImgSourceCanvas` | HTMLCanvasElement\|null | Offscreen canvas holding satellite imagery (set by `city-render.js` / `stacked-layers.js`) |
 | `cityRasterSourceCanvas` | HTMLCanvasElement\|null | Offscreen canvas holding city raster (set by `city-render.js`) |
 | `compositeDemSourceCanvas` | HTMLCanvasElement\|null | Offscreen canvas holding composite DEM output (set by `composite-dem.js`) |
+| `compositeFeatures` | Object\|null | `{dem, water, city, cityComponents: {buildings,roads,waterways,walls}, landcover, satellite, width, height}` — per-channel Float32Arrays for ML pipeline + histograms (set by `composite-dem.js`) |
+| `osmCityDetail` | `'full'`\|`'coarse'`\|undefined | Which OSM detail tier `loadCityData()` last fetched with — `'coarse'` above `CITY_MAX_DIAG_KM` (10km), rejected above `CITY_COARSE_MAX_DIAG_KM` (25km). Read by `composite-dem.js`'s `_fetchCityRaster` so the raster endpoint's OSM-cache lookup matches the fetched tier. |
+| `meshImport` | Object\|null | F-MESHIMPORT state: `{uploadId, libraryRelPath, filename, heightmap: {values,width,height,bbox,minElevation,maxElevation,validPct}\|null, registered: {values,mask,width,height,rmsResidualPx}\|null}` (set by `mesh-layer.js`) |
+| `meshSourceCanvas` | HTMLCanvasElement\|null | Offscreen canvas holding the *registered* mesh layer, masked to its footprint (set by `mesh-layer.js`'s `applyMeshRegistration`) |
+| `meshPreviewCanvas` | HTMLCanvasElement\|null | Offscreen canvas holding the *unregistered* mesh heightmap preview (set by `computeMeshHeightmap`) |
 
 ## Appearance & Settings
 
@@ -131,6 +136,9 @@ Mirrored from closure. Set via `appState.set(key, val)` or direct assignment:
 | `satImgSourceCanvas` | — | composite-dem, stacked-layers |
 | `cityRasterSourceCanvas` | — | city-render, stacked-layers |
 | `compositeDemSourceCanvas` | — | composite-dem, stacked-layers |
+| `meshImport` | — | mesh-layer, mesh-registration |
+| `meshSourceCanvas` | — | mesh-layer, stacked-layers |
+| `meshPreviewCanvas` | — | mesh-layer |
 | `demLayout` | — | stacked-layers, dem-loader |
 | `terrainMesh` | model-viewer | export-handlers |
 | `viewerScene` | model-viewer | (read-only) |

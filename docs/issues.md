@@ -1,6 +1,6 @@
 # Known Issues & Status — strm2stl
 
-_Last updated: 2026-05-26_
+_Last updated: 2026-07-19_
 
 ## Active Bugs
 
@@ -27,7 +27,41 @@ Safe to delete; consider a `make clean-runs` target. See AUDIT-2026-06-07.md.
 ### 1. `<script>` vs Module Boundary
 HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `addEventListener` in event-listeners.js). One intentional inline `onclick=` remains on the dev-only debug error overlay dismiss button. Converting app.js itself to a full ES module is not planned — keep public functions on `window.*`.
 
+## Resolved Bugs
+
+### ~~renderCombinedView() assumed DEM and water mask always share a pixel count~~ ✅ (2026-07-19)
+`water-mask.js`'s `renderCombinedView()` (DEM+water overlay view) indexes
+both decoded arrays by the same flat index, requiring identical dimensions.
+This was true only as an accidental side effect of `maintain_dimensions`
+defaulting to `True` everywhere (F-PROJ-DIMS's prior default) — the DEM and
+water-mask endpoints derive their output resolution through genuinely
+different algorithms (DEM resizes to `dim` on its longest axis; water-mask
+derives an Earth-Engine metres-per-pixel scale from `dim`), so once
+`maintain_dimensions` defaulted to `False` they could produce very different
+absolute pixel counts (e.g. DEM `387×474` vs. water `483×591` for the same
+bbox) while still sharing the same aspect ratio. The existing "fix" (reload
+water mask on mismatch) was a no-op — reloading re-derives the same
+mismatched shape from the same algorithm. Found via manual exploration of
+the app after the F-PROJ-DIMS default flip. Fixed by nearest-neighbour
+resampling the water mask onto the DEM's exact grid before the per-pixel
+loop (`_resampleNearest` helper). Regression test:
+`tests/e2e/test_interactions.py::test_combined_view_resamples_mismatched_water_mask`.
+
 ## Resolved Technical Debt
+
+### ~~stl_to_heightmap always returned an all-NaN heightmap~~ ✅ (2026-07-19)
+`city2stl/skyline/height/stl_import.py:stl_to_heightmap` accumulated per-pixel
+max-Z hits with `np.maximum.at(heightmap, index_ray, zvals)` on an array
+pre-filled with `np.nan` — `np.maximum(nan, x)` is always `nan`, so every hit
+pixel stayed `nan` regardless of ray-cast success (silent 0% valid output on
+every call). Existing tests didn't catch it because two assertions were
+gated behind `if mask.any():`, which is vacuously true when the mask is
+empty. Found while wiring F-MESHIMPORT (STL/OBJ import as a web-app layer,
+[proposals.md](proposals.md) F-MESHIMPORT). Fixed by initializing the
+accumulator to `-inf` instead of `nan`, then converting untouched (`-inf`)
+cells back to `nan` after the max-accumulate. Hardened
+`tests/test_height/test_stl_import.py`'s two previously-vacuous assertions
+to require `mask.any()` explicitly.
 
 ### ~~City raster NaN JSON crash~~ ✅ (2026-05-26)
 `/api/cities/raster` crashed with a 500 error when a non-identity projection (e.g. "cosine", "lambert") was applied, because `project_grid` fills out-of-projection areas with `numpy.nan` and `grid.flatten().tolist()` produces Python `float('nan')` which is not valid JSON. Fixed by wrapping the grid with `np.nan_to_num(grid, nan=0.0)` before `.flatten().tolist()` at both the cache-hit and fresh-fetch code paths in `app/server/routers/cities.py`.
@@ -40,8 +74,10 @@ Scripts `00`–`07` (individual-step runners) removed; single orchestration
 entry point is now `scripts/08_region_skyline_pdf.py`. `review.py` removed
 (logic merged into `region_pdf.py`). `pipeline.py` and `region_pdf.py` have
 expanded module-level docstrings. `STATUS.md` added to capture current
-accuracy numbers and known weaknesses. Two-file architecture: `pipeline.py`
-(pure math, unit-tested) + `region_pdf.py` (I/O + rendering).
+accuracy numbers and known weaknesses. Architecture (post F-CLEAN14 full split,
+2026-06-23): pure-math layer in `_core/` behind the `pipeline.py` façade +
+`region_pdf.py` (I/O + rendering), with `_pano/`, `_report_plots/`, `_region_render/`
+subpackages behind façades — all original import paths preserved.
 
 ### ~~app.js DOMContentLoaded Closure~~ ✅
 `renderDEMCanvas` and `window.loadDEM` were extracted to `dem-main.js`. Closure vars (`lastDemData`, `originalDemValues`) moved to `window.appState`.
