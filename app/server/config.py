@@ -42,6 +42,20 @@ OPENTOPO_CACHE_PATH = _STRM2STL_DIR / "cache" / "opentopo"
 EE_CACHE_DIR = _PROJECT_ROOT / "cache" / "ee"
 
 # ---------------------------------------------------------------------------
+# External STL/OBJ mesh library (F-MESHIMPORT)
+# ---------------------------------------------------------------------------
+# Pre-made city mesh sets (e.g. commercial "micropolitan" STL packs) live
+# outside the repo, as a sibling of Code/. Configurable + relative so the
+# path travels with the project if "3D Maps/" is relocated or used on
+# another machine. Default matches the current on-disk layout:
+#   3D Maps/
+#   ├── Code/                       <- _PROJECT_ROOT
+#   └── Cities/micropolitan/_extracted/
+_MICROPOLITAN_ENV = os.environ.get("STRM2STL_MICROPOLITAN_DIR",
+                                   "../Cities/micropolitan/_extracted")
+MICROPOLITAN_STL_DIR: Path = (_PROJECT_ROOT / _MICROPOLITAN_ENV).resolve()
+
+# ---------------------------------------------------------------------------
 # OpenTopography API key
 # ---------------------------------------------------------------------------
 
@@ -108,7 +122,9 @@ CACHE_MAX_FILES = 100        # trigger a sweep when this many files exist
 # ---------------------------------------------------------------------------
 
 MAX_DIM: int = 2000            # maximum grid resolution accepted by all endpoints
-MAX_BBOX_DIAGONAL_KM: float = 15.0  # cities endpoint bounding-box size cap
+MAX_BBOX_DIAGONAL_KM: float = 15.0  # cities endpoint bounding-box size cap (full detail tier)
+MAX_BBOX_DIAGONAL_KM_COARSE: float = 25.0  # cities endpoint cap for detail="coarse" requests
+COARSE_MIN_BUILDING_AREA_M2: float = 2000.0  # building area floor for detail="coarse" requests
 
 # ---------------------------------------------------------------------------
 # Luminance / colour constants (ITU-R BT.601 perceptual weights)

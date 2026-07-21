@@ -259,14 +259,24 @@ window._prebakeFeatures = _prebakeFeatures;
  * @returns {Promise<void>}
  */
 window.loadCityData = async function loadCityData() {
-    const { selectedRegion, showToast, haversineDiagKm } = window.appState || {};
+    const { selectedRegion } = window.appState || {};
     if (!selectedRegion) { window.showToast?.('Select a region first', 'warning'); return; }
-    const diagKm = haversineDiagKm
-        ? haversineDiagKm(selectedRegion.north, selectedRegion.south, selectedRegion.east, selectedRegion.west)
+    // haversineDiagKm lives on window (model-viewer.js), not appState.
+    const diagKm = typeof window.haversineDiagKm === 'function'
+        ? window.haversineDiagKm(selectedRegion.north, selectedRegion.south, selectedRegion.east, selectedRegion.west)
         : 0;
-    if (diagKm > 10) {
-        window.showToast?.(`Region too large (${diagKm.toFixed(1)} km). Max 10 km.`, 'error');
+    const maxDiag = window.CITY_MAX_DIAG_KM ?? 10;
+    const maxDiagCoarse = window.CITY_COARSE_MAX_DIAG_KM ?? 25;
+    // Regions between the two thresholds still get city data, just the
+    // coarse tier (roads + water + large buildings, no walls/small detail) —
+    // only regions beyond the coarse cap are rejected outright.
+    const detail = diagKm > maxDiag ? 'coarse' : 'full';
+    if (diagKm > maxDiagCoarse) {
+        window.showToast?.(`Region too large (${diagKm.toFixed(1)} km). Max ${maxDiagCoarse} km.`, 'error');
         return;
+    }
+    if (detail === 'coarse') {
+        window.showToast?.(`Region is ${diagKm.toFixed(1)} km — loading coarse city data (roads, water, large buildings only)`, 'info');
     }
 
     // Abort any in-flight city data request for the previous region.
@@ -285,7 +295,11 @@ window.loadCityData = async function loadCityData() {
 
     try {
         // Always fetch all city feature types; visibility is controlled in the View tab.
-        const layers = ['buildings', 'walls', 'towers', 'churches', 'fortifications', 'roads', 'waterways'];
+        // Coarse tier drops walls/towers/churches/fortifications (small-structure detail)
+        // and lets the server raise min_area to COARSE_MIN_BUILDING_AREA_M2.
+        const layers = detail === 'coarse'
+            ? ['buildings', 'roads', 'waterways']
+            : ['buildings', 'walls', 'towers', 'churches', 'fortifications', 'roads', 'waterways'];
 
         const simplifyTol = parseFloat(document.getElementById('citySimplifyTolerance')?.value) || 3.0;
         const minArea     = parseFloat(document.getElementById('cityMinArea')?.value) || 5.0;
@@ -313,6 +327,7 @@ window.loadCityData = async function loadCityData() {
             simplify_tolerance: simplifyTol,
             min_area: minArea,
             m_per_level: mPerLevel,
+            detail,
         }, signal);
         if (signal.aborted) return;
 
@@ -347,6 +362,7 @@ window.loadCityData = async function loadCityData() {
             data.buildings.features.forEach((feat, idx) => { feat._cityIndex = idx; });
         }
         window.appState.set('osmCityData', data);
+        window.appState.osmCityDetail = detail;
         window.syncCityBuildingsTable?.();
         window.appState.selectedCityBuildingIndex = null;
         window._invalidateCityCache();   // new data → force full re-render

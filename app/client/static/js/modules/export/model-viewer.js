@@ -453,6 +453,13 @@ async function previewModelIn3D() {
             mm_per_pixel:  mmPerPixel,
             sea_level_cap: document.getElementById('exportSeaLevelCap')?.checked || false,
             solid:         document.getElementById('viewerSolidPreview')?.checked || false,
+            // These previously only applied at file-export time, so the live
+            // preview never reflected them until you downloaded the model.
+            engrave_label:    document.getElementById('exportEngraveLabel')?.checked || false,
+            label_text:       document.getElementById('exportLabelText')?.value || window.appState?.selectedRegion?.name || '',
+            contours:         document.getElementById('exportContours')?.checked || false,
+            contour_interval: parseInt(document.getElementById('exportContourInterval')?.value) || 100,
+            contour_style:    document.getElementById('exportContourStyle')?.value || 'engraved',
         });
         if (previewErr) throw new Error(previewErr);
 
@@ -765,6 +772,18 @@ function haversineDiagKm(north, south, east, west) {
     return Math.sqrt(dx * dx + dy * dy);
 }
 
+// Single source of truth for the city/building-data region-size limit.
+// Previously the manual "Load Cities" button, its disable-gate, and the bulk
+// loadAllLayers() path each hardcoded their own number (10 in two places, 15
+// in the third) — unified here so they can never drift apart again.
+window.CITY_MAX_DIAG_KM = 10;
+
+// Above CITY_MAX_DIAG_KM, city data is not skipped outright — a coarser tier
+// (roads + water + large buildings only, no walls/small-building detail)
+// fetches up to this larger diagonal instead. Must match
+// config.MAX_BBOX_DIAGONAL_KM_COARSE server-side.
+window.CITY_COARSE_MAX_DIAG_KM = 25;
+
 function setViewerAutoRotate(val) {
     viewerAutoRotate = val;
 }
@@ -795,7 +814,11 @@ window.setViewerNormals     = setViewerNormals;
 const _FETCH_INPUT_IDS = [
     'mmPerPixel', 'exportModelHeight', 'exportBaseHeight',
     'exportExaggeration', 'exportSeaLevelCap', 'viewerSolidPreview',
+    'exportEngraveLabel', 'exportContours', 'exportContourInterval', 'exportContourStyle',
 ];
+// Text input: use 'input' (not 'change') so the preview updates as you type,
+// not only after the field loses focus.
+const _FETCH_INPUT_IDS_LIVE = ['exportLabelText'];
 
 let _rebuildTimer = null;
 
@@ -818,6 +841,9 @@ function _doAutoRebuild() {
 function _attachAutoRebuildListeners() {
     for (const id of _FETCH_INPUT_IDS) {
         document.getElementById(id)?.addEventListener('change', _scheduleRebuild);
+    }
+    for (const id of _FETCH_INPUT_IDS_LIVE) {
+        document.getElementById(id)?.addEventListener('input', _scheduleRebuild);
     }
     // First build when the user switches into the Extrude view.
     const mc = document.getElementById('modelContainer');

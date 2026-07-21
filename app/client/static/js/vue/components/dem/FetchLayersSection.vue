@@ -63,7 +63,8 @@
             <option value="200">200 px — Fast</option>
             <option value="400">400 px — Medium</option>
             <option value="600" selected>600 px — Default</option>
-            <option value="1200">1200 px — High Detail</option>
+            <option value="1000">1000 px — High Detail</option>
+            <option value="1200">1200 px — Max Detail</option>
           </select>
           <div id="waterResWarning" style="font-size:10px;color:#f90;display:none;">⚠️ May require tiling for large areas</div>
         </div>
@@ -116,7 +117,8 @@
             <option value="200">200 px — Fast</option>
             <option value="400">400 px — Medium</option>
             <option value="600" selected>600 px — Default</option>
-            <option value="1200">1200 px — High Detail</option>
+            <option value="1000">1000 px — High Detail</option>
+            <option value="1200">1200 px — Max Detail</option>
           </select>
         </div>
         <div class="fetch-action-row">
@@ -139,6 +141,7 @@
             <option value="400">400 px</option>
             <option value="600" selected>600 px</option>
             <option value="800">800 px</option>
+            <option value="1000">1000 px</option>
             <option value="1200">1200 px</option>
           </select>
         </div>
@@ -167,6 +170,20 @@
             <option value="200" selected>200 px — Default</option>
             <option value="400">400 px — Detail</option>
             <option value="600">600 px — High</option>
+            <option value="1000">1000 px — Max</option>
+          </select>
+        </div>
+
+        <div class="param-group">
+          <label for="cityColormap" title="Colour scheme for the city heights raster. 'Same as DEM' follows the main DEM colormap.">Colormap</label>
+          <select id="cityColormap" class="ctrl-select" aria-label="City layer colormap">
+            <option value="inherit" selected>Same as DEM</option>
+            <option value="rainbow">Rainbow</option>
+            <option value="terrain">Terrain</option>
+            <option value="viridis">Viridis</option>
+            <option value="jet">Jet</option>
+            <option value="hot">Hot</option>
+            <option value="gray">Gray</option>
           </select>
         </div>
 

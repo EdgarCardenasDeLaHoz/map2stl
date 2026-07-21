@@ -18,6 +18,12 @@ let stackZoom = { scale: 1, offsetX: 0, offsetY: 0 };
 let stackZoomInitialized = false;
 let _gridCacheKey = null;
 let _gridPixelMode = false;
+// The {scale, offsetX, offsetY} that drawLayerGrid() last actually redrew the
+// grid canvas pixels at. Between redraws (e.g. mid-drag, where only a cheap
+// CSS transform runs on every mousemove) the grid canvas gets the same CSS
+// transform, relative to this baseline, so it visibly tracks the pan/zoom
+// instead of sitting frozen until the drag ends.
+let _gridBakedZoom = { scale: 1, offsetX: 0, offsetY: 0 };
 
 // Cached DOM references (populated lazily on first use)
 let _layerModeBtns = null;
@@ -43,7 +49,7 @@ window.setGridPixelMode = function setGridPixelMode(on) {
 // All layer canvas IDs — render order (first = bottom, last = top).
 // Mutable so users can reorder via the UI.
 // NOTE: Water and Hydrology are combined into WaterHydrology for unified rendering
-let _layerOrder = ['Dem', 'WaterHydrology', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'CompositeDem'];
+let _layerOrder = ['Dem', 'WaterHydrology', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'MeshImport', 'CompositeDem'];
 const LAYER_STACK = _layerOrder;  // alias kept for backward compat
 
 /**
@@ -56,6 +62,7 @@ const LAYER_CANVAS_IDS = {
     Sat: 'layerSatCanvas',
     SatImg: 'layerSatImgCanvas',
     CityRaster: 'layerCityRasterCanvas',
+    MeshImport: 'layerMeshImportCanvas',
     CompositeDem: 'layerCompositeDemCanvas',
 };
 
@@ -118,14 +125,74 @@ window.clearAllLayerBuffers = function clearAllLayerBuffers() {
     // Reset zoom/pan so the new region starts at default view
     stackZoom = { scale: 1, offsetX: 0, offsetY: 0 };
     _gridCacheKey = null;
+    _gridBakedZoom = { scale: 1, offsetX: 0, offsetY: 0 };
+    const gridCanvas = document.getElementById('layerGridCanvas');
+    if (gridCanvas) gridCanvas.style.transform = '';
 };
 
 // Multi-layer state: set of active layer keys + per-layer opacity (0–1)
 let _activeLayers = new Set(['Dem', 'CityOverlay']);
-let _layerOpacities = { Dem: 1, WaterHydrology: 0.75, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CityOverlay: 0.85, CompositeDem: 1 };
+let _layerOpacities = { Dem: 1, WaterHydrology: 0.75, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CityOverlay: 0.85, MeshImport: 0.8, CompositeDem: 1 };
 
 // Kept for getStackMode() backward compat — last-toggled-on layer
 let _activeMode = 'Dem';
+
+// ─── Composite | Satellite split view ───────────────────────────────────────
+// A dual-pane alternative to the opacity-blended stack: draws the Composite
+// DEM and satellite image buffers side by side in one canvas instead of
+// alpha-blending them together. Both halves are drawn from the same buffers
+// used by the normal blended path and the whole canvas still receives one
+// shared stackZoom CSS transform, so pan/zoom stays in lockstep between panes
+// without any extra synchronization code.
+let _splitViewEnabled = false;
+
+/** Enable/disable the Composite | Satellite side-by-side split view. */
+window.setSplitViewEnabled = function setSplitViewEnabled(on) {
+    _splitViewEnabled = !!on;
+    if (_splitViewEnabled) {
+        _activeLayers.add('CompositeDem');
+        _activeLayers.add('SatImg');
+        if (!window.appState?.satImgSourceCanvas) {
+            window.loadSatelliteRGBImage?.().then(() => window.updateStackedLayers?.());
+        }
+    }
+    window.updateStackedLayers?.();
+};
+
+window.isSplitViewEnabled = function isSplitViewEnabled() { return _splitViewEnabled; };
+
+/** Draw CompositeDem (left) and SatImg (right) side by side into `ctx`. */
+function _drawSplitView(ctx, w, h) {
+    const halfW = Math.floor(w / 2);
+    const compositeBuf = _getLayerBuffer('CompositeDem');
+    const satBuf = _getLayerBuffer('SatImg');
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, halfW, h);
+    ctx.clip();
+    if (compositeBuf && compositeBuf.width > 0) {
+        ctx.drawImage(compositeBuf, 0, 0, compositeBuf.width, compositeBuf.height, 0, 0, w, h);
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(halfW, 0, w - halfW, h);
+    ctx.clip();
+    if (satBuf && satBuf.width > 0) {
+        ctx.drawImage(satBuf, 0, 0, satBuf.width, satBuf.height, 0, 0, w, h);
+    }
+    ctx.restore();
+
+    // Divider line
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(halfW, 0);
+    ctx.lineTo(halfW, h);
+    ctx.stroke();
+}
 
 /** Toggle a layer on/off; at least one layer stays on. */
 window.setStackMode = function setStackMode(mode) {
@@ -207,7 +274,7 @@ function _updateLayerOpacitySliders() {
     const container = document.getElementById('layerOpacitySliders');
     if (!container) return;
     container.innerHTML = '';
-    const labels = { Dem: '🏔 DEM', Water: '💧 Water', Sat: '🌿 ESA', SatImg: '🛰 Sat', CityRaster: '🏙 City Raster', CityOverlay: '🏙 City Polygons', CompositeDem: '★ Composite', Hydrology: '🌊 Hydro' };
+    const labels = { Dem: '🏔 DEM', Water: '💧 Water', Sat: '🌿 ESA', SatImg: '🛰 Sat', CityRaster: '🏙 City Raster', CityOverlay: '🏙 City Polygons', MeshImport: '📐 Mesh Import', CompositeDem: '★ Composite', Hydrology: '🌊 Hydro' };
     // Show active layers in current render order (bottom first, top last)
     const visible = _layerOrder.filter(m => _activeLayers.has(m));
     visible.forEach((mode, vi) => {
@@ -267,6 +334,25 @@ function _applyTransformCSS(xfm) {
     const osmOverlay = document.querySelector('#layersStack .osm-overlay');
     if (osmOverlay) { osmOverlay.style.transformOrigin = '0 0'; osmOverlay.style.transform = xfm; }
     if (window.appState) window.appState.stackZoom = stackZoom;
+    _applyGridCSSDelta();
+}
+
+/**
+ * CSS-transform the grid canvas by the delta between the current stackZoom
+ * and the zoom last actually baked into its pixels (by drawLayerGrid). This
+ * makes the grid visibly follow continuous pan/zoom gestures even though its
+ * content is only re-rasterized (cheaply) once the gesture settles — without
+ * this, the grid stayed frozen in place while the terrain slid underneath it
+ * during an active drag.
+ */
+function _applyGridCSSDelta() {
+    const gridCanvas = document.getElementById('layerGridCanvas');
+    if (!gridCanvas) return;
+    const dx = stackZoom.offsetX - _gridBakedZoom.offsetX;
+    const dy = stackZoom.offsetY - _gridBakedZoom.offsetY;
+    const ds = stackZoom.scale / _gridBakedZoom.scale;
+    gridCanvas.style.transformOrigin = '0 0';
+    gridCanvas.style.transform = `translate(${dx}px, ${dy}px) scale(${ds})`;
 }
 
 /**
@@ -406,6 +492,7 @@ window.updateStackedLayers = function updateStackedLayers() {
         Sat: () => satCanvas,
         SatImg: () => window.appState?.satImgSourceCanvas || null,
         CityRaster: () => window.appState?.cityRasterSourceCanvas || null,
+        MeshImport: () => window.appState?.meshSourceCanvas || null,
         CompositeDem: () => window.appState?.compositeDemSourceCanvas || null,
     };
 
@@ -425,16 +512,21 @@ window.updateStackedLayers = function updateStackedLayers() {
         if (displayCanvas.height !== stackHeight) displayCanvas.height = stackHeight;
         const dCtx = displayCanvas.getContext('2d');
         dCtx.clearRect(0, 0, stackWidth, stackHeight);
-        const masterOpacity = (document.getElementById('activeLayerOpacity')?.value ?? 100) / 100;
-        LAYER_STACK.forEach(mode => {
-            if (!_activeLayers.has(mode)) return;
-            if (mode === 'CityOverlay') return;
-            const buffer = _getLayerBuffer(mode);
-            if (!buffer || buffer.width === 0 || buffer.height === 0) return;
-            dCtx.globalAlpha = masterOpacity * (_layerOpacities[mode] ?? 1);
-            dCtx.drawImage(buffer, 0, 0);
-        });
-        dCtx.globalAlpha = 1;
+
+        if (_splitViewEnabled) {
+            _drawSplitView(dCtx, stackWidth, stackHeight);
+        } else {
+            const masterOpacity = (document.getElementById('activeLayerOpacity')?.value ?? 100) / 100;
+            LAYER_STACK.forEach(mode => {
+                if (!_activeLayers.has(mode)) return;
+                if (mode === 'CityOverlay') return;
+                const buffer = _getLayerBuffer(mode);
+                if (!buffer || buffer.width === 0 || buffer.height === 0) return;
+                dCtx.globalAlpha = masterOpacity * (_layerOpacities[mode] ?? 1);
+                dCtx.drawImage(buffer, 0, 0);
+            });
+            dCtx.globalAlpha = 1;
+        }
     }
 
     _syncCityOverlayLayerState();
@@ -475,9 +567,20 @@ window.drawLayerGrid = function drawLayerGrid() {
     const densityCheck = Math.max(2, parseInt(document.getElementById('gridlineCount')?.value || '10', 10));
     const showGrid = document.getElementById('showGridlines')?.checked ?? true;
     const projection = document.getElementById('paramProjection')?.value || 'none';
-    const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${_gridPixelMode}|${showGrid}|${projection}`;
+    // Independent red pixel grid (DEM pixel space, user-set spacing, default 1000).
+    const pixelGridOn = document.getElementById('showPixelGrid')?.checked ?? false;
+    let pixelGridSpacing = parseInt(document.getElementById('pixelGridSpacing')?.value, 10);
+    if (!Number.isFinite(pixelGridSpacing) || pixelGridSpacing < 1) pixelGridSpacing = 1000;
+    const pixelGridColor = document.getElementById('pixelGridColor')?.value || '#ff0000';
+    const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${_gridPixelMode}|${showGrid}|${projection}|${pixelGridOn}|${pixelGridSpacing}|${pixelGridColor}`;
     if (newKey === _gridCacheKey) return;
     _gridCacheKey = newKey;
+
+    // We're about to re-rasterize the grid at the current stackZoom — clear
+    // any interim CSS transform applied during a drag/zoom gesture (see
+    // _applyGridCSSDelta) and record this as the new baseline.
+    gridCanvas.style.transform = '';
+    _gridBakedZoom = { ...stackZoom };
 
     gridCanvas.width = gw;
     gridCanvas.height = gh;
@@ -489,6 +592,57 @@ window.drawLayerGrid = function drawLayerGrid() {
     if (xAxis) xAxis.innerHTML = '';
     const cw = demCanvas.width;
     const ch = demCanvas.height;
+
+    // ── Red pixel grid (independent of the geographic gridlines) ────────────
+    // Draws lines every `pixelGridSpacing` DEM pixels, mapped through the same
+    // letterbox + zoom transform as everything else, and updates the dims label.
+    if (pixelGridOn) {
+        const demW = demDataRef?.width || cw;
+        const demH = demDataRef?.height || ch;
+        const layout = demLayoutRef || { x: 0, y: 0, w: cw, h: ch };
+        const toScreenX = (pxCol) => (layout.x + pxCol / demW * layout.w) * scale + offsetX;
+        const toScreenY = (pxRow) => (layout.y + pxRow / demH * layout.h) * scale + offsetY;
+
+        ctx.save();
+        ctx.strokeStyle = pixelGridColor;
+        ctx.fillStyle = pixelGridColor;
+        ctx.lineWidth = 1.25;
+        ctx.font = 'bold 10px monospace';
+        ctx.shadowColor = 'rgba(0,0,0,0.7)';
+        ctx.shadowBlur = 2;
+
+        for (let col = 0; col <= demW; col += pixelGridSpacing) {
+            const x = toScreenX(col);
+            if (x < -2 || x > gw + 2) continue;
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, gh); ctx.stroke();
+            ctx.fillText(`${col}px`, Math.min(x + 3, gw - 34), 11);
+        }
+        // far edge (full width) if spacing doesn't land on it
+        if (demW % pixelGridSpacing !== 0) {
+            const xe = toScreenX(demW);
+            ctx.beginPath(); ctx.moveTo(xe, 0); ctx.lineTo(xe, gh); ctx.stroke();
+        }
+        for (let row = 0; row <= demH; row += pixelGridSpacing) {
+            const y = toScreenY(row);
+            if (y < -2 || y > gh + 2) continue;
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(gw, y); ctx.stroke();
+            ctx.fillText(`${row}px`, 3, Math.min(y + 11, gh - 3));
+        }
+        if (demH % pixelGridSpacing !== 0) {
+            const ye = toScreenY(demH);
+            ctx.beginPath(); ctx.moveTo(0, ye); ctx.lineTo(gw, ye); ctx.stroke();
+        }
+        ctx.restore();
+
+        const dimsLabel = document.getElementById('pixelGridDimsLabel');
+        if (dimsLabel) {
+            dimsLabel.textContent = `Pixel grid: ${demW} × ${demH} px  (every ${pixelGridSpacing} px)`;
+            dimsLabel.classList.remove('hidden');
+        }
+    } else {
+        const dimsLabel = document.getElementById('pixelGridDimsLabel');
+        if (dimsLabel) dimsLabel.classList.add('hidden');
+    }
 
     if (!showGrid) {
         return;
@@ -764,7 +918,10 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
     stackTooltip.className = 'stack-tooltip hidden';
     document.body.appendChild(stackTooltip);
 
-    // Lightweight CSS-only pan — no grid redraw (called on every mousemove tick)
+    // Lightweight CSS-only pan (called on every mousemove tick) — no expensive
+    // grid re-rasterization, but _applyTransformCSS also nudges the grid
+    // canvas's own CSS transform (see _applyGridCSSDelta) so it visibly
+    // follows the drag instead of sitting frozen until mouseup.
     function _applyCSSTransformOnly() {
         const xfm = `translate(${stackZoom.offsetX}px, ${stackZoom.offsetY}px) scale(${stackZoom.scale})`;
         _applyTransformCSS(xfm);

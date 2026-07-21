@@ -10,6 +10,7 @@
         <button class="layer-mode-btn" data-mode="SatImg" title="Satellite imagery">🛰 Sat</button>
         <button class="layer-mode-btn" data-mode="CityRaster" title="City heights raster">🏙 City</button>
         <button class="layer-mode-btn" data-mode="CityOverlay" title="City vector polygons">⬡ City Poly</button>
+        <button class="layer-mode-btn" data-mode="MeshImport" title="Imported STL/OBJ mesh layer">📐 Mesh</button>
         <button class="layer-mode-btn" data-mode="CompositeDem" title="Composite DEM">★ Composite</button>
       </div>
     </div>
@@ -77,6 +78,16 @@
         <span class="layer-row-pct" id="layerOpacityPct_CityOverlay">85%</span>
       </div>
 
+      <div class="layer-class-label">Imported</div>
+      <!-- Mesh Import row — load/register happens in the Mesh Import section below -->
+      <div class="layer-row">
+        <span class="layer-row-icon" title="Imported STL/OBJ mesh layer">📐</span>
+        <span class="layer-row-label">Mesh Import</span>
+        <span class="layer-row-res" id="layerRes_MeshImport"></span>
+        <input type="range" class="layer-row-opacity" id="layerOpacity_MeshImport" min="0" max="100" value="80" title="Mesh import opacity" aria-label="Mesh import opacity">
+        <span class="layer-row-pct" id="layerOpacityPct_MeshImport">80%</span>
+      </div>
+
       <div class="layer-class-label">Composite</div>
       <!-- Composite DEM row — no load button -->
       <div class="layer-row">
@@ -130,7 +141,7 @@ let _onCityPanelState: ((evt: Event) => void) | null = null;
 
 onMounted(() => {
     // Wire per-layer opacity sliders to window.setLayerOpacity
-  const layers = ['Dem', 'WaterHydrology', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'CompositeDem'];
+  const layers = ['Dem', 'WaterHydrology', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'MeshImport', 'CompositeDem'];
     for (const mode of layers) {
         const slider = document.getElementById(`layerOpacity_${mode}`) as HTMLInputElement | null;
         const pct    = document.getElementById(`layerOpacityPct_${mode}`);

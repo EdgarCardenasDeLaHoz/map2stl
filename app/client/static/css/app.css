@@ -88,15 +88,15 @@
         .composite-group-label {
             font-size: 11px;
             color: #8cf;
-            margin: 8px 0 4px;
+            margin: 6px 0 3px;
         }
 
         .composite-sliders {
             display: grid;
-            grid-template-columns: auto 1fr 36px;
-            gap: 2px 6px;
+            grid-template-columns: auto 1fr 34px;
+            gap: 1px 6px;
             align-items: center;
-            font-size: 11px;
+            font-size: 10px;
         }
 
         .composite-slider-label {
@@ -105,11 +105,40 @@
 
         .composite-sliders input[type=range] {
             width: 100%;
+            height: 12px;
+            margin: 0;
+            display: block;
         }
 
         .composite-slider-value {
             color: #aaa;
             text-align: right;
+        }
+
+        .composite-toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            color: #aaa;
+            margin: 1px 0;
+        }
+
+        .composite-toggle-row input[type=checkbox] {
+            margin: 0;
+        }
+
+        .composite-histogram {
+            display: block;
+            width: 100%;
+            height: 20px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 2px;
+            margin: 1px 0 3px;
+        }
+
+        .composite-histogram-combined {
+            height: 36px;
         }
 
         /* ─────────────────────────────────────────────────────────── */
@@ -1415,6 +1444,7 @@
         .dem-strip {
             display: flex;
             flex-direction: row;
+            flex-wrap: wrap;            /* wrap so no button overflows a narrow panel */
             width: 100%;
             background: #222;
             border-bottom: 1px solid var(--bg-light);
@@ -1424,6 +1454,10 @@
             flex-shrink: 0;
             box-sizing: border-box;
         }
+
+        /* When the strip is too narrow, drop the flexible spacer so the trailing
+           buttons (Hide / JSON) wrap onto the next line instead of overflowing. */
+        .dem-strip > [style*="flex:1"] { min-width: 0; }
 
         .dem-strip-btn {
             height: 26px;
@@ -2920,6 +2954,83 @@
             margin-top: 12px;
         }
 
+        /* Mesh registration picker (F-MESHIMPORT) */
+        .mesh-reg-modal {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 3100;
+        }
+        .mesh-reg-modal.hidden { display: none; }
+        .mesh-reg-dialog {
+            background: #252525;
+            border-radius: 8px;
+            padding: 16px;
+            width: min(1100px, 96vw);
+            max-height: 92vh;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .mesh-reg-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .mesh-reg-header h3 { margin: 0; font-size: 15px; color: #fff; flex: 0 0 auto; }
+        .mesh-reg-residual { font-size: 11px; color: #8ea6bf; flex: 1; }
+        .mesh-reg-close-btn {
+            background: none; border: none; color: #aaa; font-size: 20px;
+            cursor: pointer; line-height: 1; padding: 0 4px;
+        }
+        .mesh-reg-close-btn:hover { color: #fff; }
+        .mesh-reg-hint { font-size: 11px; color: #888; }
+        .mesh-reg-panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            min-height: 0;
+        }
+        .mesh-reg-panel-title { font-size: 11px; color: #8ea6bf; margin-bottom: 4px; }
+        .mesh-reg-canvas-wrap {
+            position: relative;
+            overflow: hidden;
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 4px;
+            height: 45vh;
+            cursor: grab;
+        }
+        .mesh-reg-canvas-wrap.mesh-reg-panning { cursor: grabbing; }
+        .mesh-reg-canvas { position: absolute; top: 0; left: 0; }
+        .mesh-reg-pair-list {
+            max-height: 90px;
+            overflow-y: auto;
+            font-size: 10px;
+            color: #ccc;
+            font-family: monospace;
+        }
+        .mesh-reg-pair-row {
+            display: grid;
+            grid-template-columns: 24px 1fr 1fr 20px;
+            gap: 6px;
+            align-items: center;
+            padding: 1px 4px;
+        }
+        .mesh-reg-pair-row.mesh-reg-pair-pending { color: #f0c674; }
+        .mesh-reg-pair-remove {
+            background: none; border: none; color: #e08080; cursor: pointer; font-size: 13px;
+        }
+        .mesh-reg-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
         /* Hidden */
         .hidden {
             display: none !important;
@@ -3689,8 +3800,8 @@
         .composite-info-box {
             font-size: 10px;
             color: #777;
-            margin-bottom: 8px;
-            padding: 4px 6px;
+            margin-bottom: 4px;
+            padding: 3px 6px;
             background: #2a2a2a;
             border-radius: 3px;
             border-left: 2px solid #4a9eff;
@@ -3718,7 +3829,7 @@
         }
 
         .composite-enable-row {
-            margin-bottom: 8px;
+            margin-bottom: 4px;
         }
 
         .composite-enable-label {
@@ -3746,12 +3857,12 @@
 
         /* Composite action buttons */
         .composite-actions {
-            margin-top: 8px;
+            margin-top: 4px;
         }
 
         .composite-action-btn {
             flex: 1;
-            padding: 5px 0;
+            padding: 4px 0;
             font-size: 11px;
         }
 
@@ -3759,13 +3870,13 @@
             font-size: 10px;
             color: #aaa;
             display: block;
-            margin-top: 4px;
+            margin-top: 2px;
         }
 
         .composite-footer-hint {
             font-size: 10px;
             color: #666;
-            margin-top: 2px;
+            margin-top: 1px;
         }
 
         /* New-region form — label spacing + optional hint */

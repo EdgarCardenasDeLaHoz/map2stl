@@ -146,6 +146,12 @@ class CityRequest(BoundingBox):
         default=0.5, description="Polygon simplification tolerance in metres")
     min_area: float = Field(
         default=5.0, description="Minimum building area in square metres to keep")
+    detail: Literal["full", "coarse"] = Field(
+        default="full",
+        description="'full' = existing 10-15km per-building tier (walls, small buildings, "
+                    "all layers). 'coarse' = 25km tier: roads + waterways + large buildings "
+                    "only (no walls, area-filtered), for regions too large for full detail."
+    )
 
 
 class EnhanceHeightsRequest(BoundingBox):
@@ -189,6 +195,11 @@ class CityRasterRequest(BaseModel):
     clip_nans: bool = Field(
         True,
         description="Deprecated alias for clip_valid_region.",
+    )
+    maintain_dimensions: bool = Field(
+        False,
+        description="Keep input grid shape after projection (legacy/opt-in). "
+                    "Default False: output reflects the projection's true aspect ratio.",
     )
 
 
@@ -426,3 +437,116 @@ class HydrologyMergeRequest(BaseModel):
     # Settings-only mode fields
     bbox: Optional[Dict[str, float]] = None
     dem: Optional[Dict[str, Any]] = None
+
+
+# ---------------------------------------------------------------------------
+# Mesh import (STL/OBJ layer)
+# ---------------------------------------------------------------------------
+
+class MeshUploadResponse(BaseModel):
+    """Response for POST /api/layers/mesh/upload."""
+    upload_id: str
+    filename: str
+    size_bytes: int
+    format: Literal["stl", "obj"]
+
+
+class MeshHeightmapRequest(BoundingBox):
+    """Request body for POST /api/layers/mesh/{upload_id}/heightmap."""
+    resolution_m: float = Field(5.0, gt=0, le=100,
+                                description="Target pixel resolution in metres")
+    up_axis: Literal["x", "y", "z", "-x", "-y", "-z"] = Field(
+        "z", description="Mesh axis that represents vertical height")
+    infill: Literal["none", "idw", "nearest"] = Field(
+        "none", description="Gap-fill method for NaN cells with no ray hit")
+
+
+class MeshHeightmapResponse(BaseModel):
+    """Response for POST /api/layers/mesh/{upload_id}/heightmap."""
+    mesh_values_b64: str = Field(
+        ..., description="Base64 little-endian float32 heightmap, row-major")
+    mesh_mask_b64: str = Field(
+        ..., description="Base64 packed bool mask (1 byte/px, 1=valid), row-major")
+    dimensions: Annotated[List[int], Field(min_length=2, max_length=2)]
+    min_elevation: float
+    max_elevation: float
+    valid_pct: float
+    bbox: Annotated[List[float], Field(min_length=4, max_length=4)]
+
+
+class MeshPointPair(BaseModel):
+    """One matched point pair from the manual registration picker.
+
+    Coordinates are pixel offsets in each canvas's own *native* (unzoomed)
+    pixel space — the client normalizes out any pan/zoom before sending.
+    """
+    ref_x: float
+    ref_y: float
+    mesh_x: float
+    mesh_y: float
+
+
+class MeshRegisterRequest(BaseModel):
+    """Request body for POST /api/layers/mesh/{upload_id}/register."""
+    point_pairs: List[MeshPointPair] = Field(..., min_length=3)
+    ref_width: int = Field(..., gt=0)
+    ref_height: int = Field(..., gt=0)
+    mesh_width: int = Field(..., gt=0)
+    mesh_height: int = Field(..., gt=0)
+
+
+class MeshRegisterResponse(BaseModel):
+    """Response for POST /api/layers/mesh/{upload_id}/register."""
+    mesh_values_b64: str = Field(
+        ..., description="Warped heightmap, resampled onto the reference (ref_width x ref_height) grid")
+    mesh_mask_b64: str
+    dimensions: Annotated[List[int], Field(min_length=2, max_length=2)]
+    min_elevation: float
+    max_elevation: float
+    rms_residual_px: float
+    per_pair_residuals_px: List[float]
+    affine: Annotated[List[float], Field(min_length=6, max_length=6)] = Field(
+        ..., description="2x3 affine matrix, row-major [a,b,tx,c,d,ty]")
+
+
+class MeshLibrarySetLocationRequest(BoundingBox):
+    """Request body for POST /api/layers/mesh/library/{rel_path:path}/location."""
+    up_axis: Literal["x", "y", "z", "-x", "-y", "-z"] = "z"
+    notes: str = ""
+    apply_to_city: bool = Field(
+        True, description="Also apply this bbox to sibling files in the same city folder")
+
+
+class MeshLibraryHeightmapRequest(BoundingBox):
+    """Request body for POST /api/layers/mesh/library/{rel_path:path}/heightmap."""
+    resolution_m: float = Field(5.0, gt=0, le=100)
+    up_axis: Literal["x", "y", "z", "-x", "-y", "-z"] = "z"
+    infill: Literal["none", "idw", "nearest"] = "none"
+
+
+class MeshAutoRegisterRequest(BaseModel):
+    """Request body for POST /api/layers/mesh/{upload_id}/auto-register and
+    the library equivalent."""
+    filename_hint: Optional[str] = Field(
+        None, description="Override the name used to derive a city — defaults to "
+                          "the upload's original filename or the library rel_path")
+    resolution: int = Field(512, ge=128, le=2048,
+                            description="OSM building-heightmap raster resolution")
+    min_region_iou: float = Field(
+        0.5, ge=0, le=1,
+        description="Minimum bbox IoU against a saved region to reuse it instead of creating a new one")
+
+
+class MeshAutoRegisterResponse(BaseModel):
+    """Response for the auto-register routes."""
+    status: Literal["ok", "geocode_failed", "unavailable"]
+    city_name: Optional[str] = None
+    bbox: Optional[Dict[str, float]] = None
+    confidence: Optional[float] = None
+    footprint_iou: Optional[float] = None
+    rmse_m: Optional[float] = None
+    scale: Optional[float] = None
+    angle_deg: Optional[float] = None
+    region: Optional[Dict[str, object]] = Field(
+        None, description="{name, created, iou} — the matched or newly created region")
+    infill: Literal["none", "idw", "nearest"] = "none"

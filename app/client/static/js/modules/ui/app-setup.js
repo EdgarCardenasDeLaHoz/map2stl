@@ -156,20 +156,38 @@ window.loadAllLayers = async function loadAllLayers() {
         // Load DEM first (other layers depend on DEM dimensions)
         await window.loadDEM?.();
 
-        // Load secondary layers in parallel
+        // Load secondary layers in parallel.
+        // Note: loadSatelliteImage() is an alias for loadEsaLandCover() (see
+        // dem-main.js) — call it once, not both, or the second call's
+        // AbortController cancels the first mid-flight (ERR_ABORTED + a
+        // confusing "signal is aborted" error toast for no reason).
         const tasks = [
             window.loadWaterMask?.(),
             window.loadWaterHydrology?.(),
-            window.loadSatelliteImage?.(),
             window.loadEsaLandCover?.(),
             window.loadSatelliteRGBImage?.(),
             window.loadHydrology?.(),
         ];
 
-        const diagKm = window.appState?.haversineDiagKm?.();
-        if (diagKm && diagKm <= 15) {
-            if (window.loadCityRaster) tasks.push(window.loadCityRaster());
-            else if (window.loadCityData) tasks.push(window.loadCityData());
+        // haversineDiagKm lives on window (model-viewer.js), not appState, and
+        // takes the bbox as explicit args — this previously always evaluated to
+        // undefined, so bulk-load never included city data for any region size.
+        const r = selectedRegion || boundingBox;
+        const diagKm = (r && typeof window.haversineDiagKm === 'function')
+            ? window.haversineDiagKm(r.north, r.south, r.east, r.west)
+            : null;
+        const maxDiag = window.CITY_MAX_DIAG_KM ?? 10;
+        const maxDiagCoarse = window.CITY_COARSE_MAX_DIAG_KM ?? 25;
+        // loadCityData() resolves full vs. coarse detail internally from the
+        // region size — only regions beyond the coarse cap are skipped here.
+        // loadCityRaster() (fast raster-only path) still requires full detail,
+        // so it's only used under the original 10km cap.
+        if (diagKm !== null && diagKm <= maxDiag && window.loadCityRaster) {
+            tasks.push(window.loadCityRaster());
+        } else if (diagKm !== null && diagKm <= maxDiagCoarse && window.loadCityData) {
+            tasks.push(window.loadCityData());
+        } else if (diagKm !== null) {
+            window.showToast?.(`Skipping city/building data — region too large (${diagKm.toFixed(1)} km, max ${maxDiagCoarse} km).`, 'info');
         }
 
         await Promise.all(tasks);

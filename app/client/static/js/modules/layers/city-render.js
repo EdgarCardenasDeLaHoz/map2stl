@@ -503,20 +503,28 @@ window._updateCitiesLoadButton = function _updateCitiesLoadButton(region) {
     const loadBtn = document.getElementById('loadCityDataBtn');
     const infoRow = document.getElementById('cityInfoRow');
     if (!loadBtn || !region) return;
-    const haversineDiagKm = window.appState?.haversineDiagKm;
-    if (!haversineDiagKm) return;
+    // haversineDiagKm lives on window (model-viewer.js), not appState.
+    const haversineDiagKm = window.haversineDiagKm;
+    if (typeof haversineDiagKm !== 'function') return;
     const diagKm = haversineDiagKm(region.north, region.south, region.east, region.west);
-    const available = diagKm <= 10;
+    const maxDiag = window.CITY_MAX_DIAG_KM ?? 10;
+    const maxDiagCoarse = window.CITY_COARSE_MAX_DIAG_KM ?? 25;
+    const available = diagKm <= maxDiagCoarse;
+    const isCoarse = diagKm > maxDiag && available;
     loadBtn.disabled = !available;
     loadBtn.style.opacity = available ? '' : '0.4';
     loadBtn.style.cursor = available ? '' : 'not-allowed';
-    loadBtn.title = available
-        ? `Fetch OSM data for this region (${diagKm.toFixed(1)} km)`
-        : `Region too large (${diagKm.toFixed(1)} km — max 10 km)`;
+    loadBtn.title = !available
+        ? `Region too large (${diagKm.toFixed(1)} km — max ${maxDiagCoarse} km)`
+        : isCoarse
+        ? `Fetch coarse OSM data — roads, water, large buildings only (${diagKm.toFixed(1)} km, no wall/small-building detail above ${maxDiag} km)`
+        : `Fetch OSM data for this region (${diagKm.toFixed(1)} km)`;
     if (infoRow) {
-        infoRow.textContent = available
-            ? `Region diagonal: ${diagKm.toFixed(1)} km — OSM data available.`
-            : `Region too large (${diagKm.toFixed(1)} km). Max 10 km for city data.`;
+        infoRow.textContent = !available
+            ? `Region too large (${diagKm.toFixed(1)} km). Max ${maxDiagCoarse} km for city data.`
+            : isCoarse
+            ? `Region diagonal: ${diagKm.toFixed(1)} km — coarse city data only (roads, water, large buildings; no walls/small-building detail above ${maxDiag} km).`
+            : `Region diagonal: ${diagKm.toFixed(1)} km — OSM data available.`;
     }
 
     // Keep the buildings table and selection feature disabled when city data is unavailable.
@@ -546,6 +554,7 @@ window.loadCityRaster = async function loadCityRaster() {
 
     window.setLayerStatus('cityRaster', 'loading');
     try {
+        const cityProj = window.getProjectionParams();
         const { data, error: rasterErr } = await window.api.cities.raster({
             north: bbox.north, south: bbox.south,
             east: bbox.east, west: bbox.west,
@@ -558,13 +567,14 @@ window.loadCityRaster = async function loadCityRaster() {
             building_scale: buildingScale,
             road_depression_m: 0,
             water_depression_m: waterOffset,
-            projection: document.getElementById('paramProjection')?.value || 'none',
-            clip_valid_region: document.getElementById('paramClipNans')?.checked ?? true,
+            projection: cityProj.projection,
+            maintain_dimensions: cityProj.maintainDimensions,
+            clip_valid_region: cityProj.clipValidRegion,
         });
         if (rasterErr) throw new Error(rasterErr);
         _lastCityRasterData = data;
 
-        const colormap = document.getElementById('demColormap')?.value || 'terrain';
+        const colormap = window.getLayerColormap?.('city') || document.getElementById('demColormap')?.value || 'terrain';
         // Render city raster to a standalone canvas WITHOUT overwriting DEM state.
         // Do NOT call renderDEMCanvas here — it clobbers lastDemData/curveData/workflow.
         const canvas = _renderRasterCanvas(
@@ -609,6 +619,22 @@ window._setupCityRasterLayer = function _setupCityRasterLayer() {
             canvas.style.opacity = opacity.value / 100;
         });
     }
+
+    // Per-layer city colormap — re-colour the cached raster without re-fetching.
+    document.getElementById('cityColormap')?.addEventListener('change', () => {
+        if (_lastCityRasterData) {
+            const d = _lastCityRasterData;
+            const cm = window.getLayerColormap?.('city') || 'terrain';
+            const c = _renderRasterCanvas(d.values, d.width, d.height, cm, d.vmin, d.vmax);
+            if (c && window.appState) {
+                window.appState._cityRasterRawCanvas = c;
+                window.appState.cityRasterSourceCanvas = c;
+            }
+            window.events?.emit(window.EV?.STACKED_UPDATE);
+        } else if (document.getElementById('layerCityRasterVisible')?.checked && window.appState?.osmCityData) {
+            window.loadCityRaster?.();
+        }
+    });
 
     if (window.appState?.on) {
         window.appState.on('osmCityData', (data) => {

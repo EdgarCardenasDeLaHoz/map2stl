@@ -82,6 +82,81 @@ class TestCitiesPostSizeGuard:
 
 
 # ---------------------------------------------------------------------------
+# POST /api/cities — detail="coarse" tier (F-COMPOSITE2)
+# ---------------------------------------------------------------------------
+
+class TestCitiesCoarseDetailTier:
+    """Regions between the 15km full-detail cap and 25km coarse cap should
+    still return city data — just roads/waterways/large-buildings only, no
+    walls or small-building detail. Reproduces the SF bbox (~18km diagonal)
+    that previously returned nothing for city/OSM data at all."""
+
+    # ~18.3 km diagonal — between the 15km full cap and 25km coarse cap.
+    MID_BBOX = {"north": 37.812, "south": 37.708, "east": -122.353, "west": -122.514}
+    # >25km — should be rejected even in coarse mode.
+    HUGE_BBOX = {"north": 60.0, "south": 50.0, "east": 30.0, "west": 10.0}
+
+    def test_full_detail_rejects_18km_bbox(self, client):
+        """Sanity check: without detail='coarse', the existing 15km cap still applies."""
+        resp = client.post("/api/cities", json={**self.MID_BBOX})
+        assert resp.status_code == 422
+
+    def test_coarse_detail_accepts_18km_bbox(self, client, tmp_data_dir):
+        empty_fc = {"type": "FeatureCollection", "features": []}
+        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
+
+        with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
+            resp = client.post("/api/cities", json={**self.MID_BBOX, "detail": "coarse"})
+        assert resp.status_code == 200
+        assert mock_fn.call_count == 1
+
+    def test_coarse_detail_rejects_beyond_25km(self, client):
+        resp = client.post("/api/cities", json={**self.HUGE_BBOX, "detail": "coarse"})
+        assert resp.status_code == 422
+        assert "too large" in resp.json()["error"].lower()
+
+    def test_coarse_detail_drops_walls_layer(self, client, tmp_data_dir):
+        """Coarse tier must never request walls, even if the client asks for them."""
+        empty_fc = {"type": "FeatureCollection", "features": []}
+        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
+
+        with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
+            client.post("/api/cities", json={
+                **self.MID_BBOX, "detail": "coarse",
+                "layers": ["buildings", "walls", "roads", "waterways"],
+            })
+        called_layers = mock_fn.call_args[0][4]
+        assert "walls" not in called_layers
+
+    def test_coarse_detail_raises_min_area(self, client, tmp_data_dir):
+        """Coarse tier should filter to large buildings only (min_area floor)."""
+        from app.server.config import COARSE_MIN_BUILDING_AREA_M2
+        empty_fc = {"type": "FeatureCollection", "features": []}
+        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
+
+        with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
+            client.post("/api/cities", json={
+                **self.MID_BBOX, "detail": "coarse", "min_area": 5.0,
+            })
+        called_min_area = mock_fn.call_args[0][6]
+        assert called_min_area >= COARSE_MIN_BUILDING_AREA_M2
+
+    def test_full_and_coarse_use_different_cache_entries(self, client, tmp_data_dir):
+        """A bbox under 15km could be requested in either tier — the two
+        results must not collide in cache (different min_area -> different key)."""
+        empty_fc = {"type": "FeatureCollection", "features": []}
+        small_bbox = {"north": 39.960, "south": 39.950, "east": -75.140, "west": -75.170}
+        mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
+
+        with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
+            full_resp = client.post("/api/cities", json={**small_bbox, "detail": "full"})
+            coarse_resp = client.post("/api/cities", json={**small_bbox, "detail": "coarse"})
+
+        assert mock_fn.call_count == 2  # neither hit the other's cache entry
+        assert full_resp.json()["cache_key"] != coarse_resp.json()["cache_key"]
+
+
+# ---------------------------------------------------------------------------
 # POST /api/cities — caching behaviour
 # ---------------------------------------------------------------------------
 

@@ -57,6 +57,7 @@
         <!-- ═══════════ Composite tab ═══════════ -->
         <div v-show="activeTab==='composite'">
           <CompositeDemSection />
+          <MeshImportSection />
         </div>
 
       </div><!-- /dem-controls-inner -->
@@ -101,6 +102,7 @@ import LayerViewSection      from './LayerViewSection.vue';
 import ProjectionSection     from './ProjectionSection.vue';
 import FetchLayersSection    from './FetchLayersSection.vue';
 import CompositeDemSection   from './CompositeDemSection.vue';
+import MeshImportSection     from './MeshImportSection.vue';
 import PresetsSection        from './PresetsSection.vue';
 
 const activeTab = ref<'fetch' | 'view' | 'composite'>('fetch');
