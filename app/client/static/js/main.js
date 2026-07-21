@@ -23,6 +23,8 @@ import './modules/layers/city-overlay.js';
 import './modules/layers/city-render.js';
 import './modules/layers/stacked-layers.js';
 import './modules/layers/composite-dem.js';
+import './modules/layers/mesh-layer.js';
+import './modules/layers/mesh-registration.js';
 import './modules/export/export-handlers.js';
 import './modules/export/model-viewer.js';
 import './modules/map/compare-view.js';

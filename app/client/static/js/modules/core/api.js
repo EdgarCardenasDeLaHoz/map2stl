@@ -316,5 +316,56 @@ window.api = (() => {
         cityRaster: (body) => _fetch('/api/composite/city-raster', _json(body)),
     };
 
-    return { _fetch, regions, dem, export: exportApi, cities, composite, cache, settings, misc };
+    // -------------------------------------------------------------------------
+    // Mesh import (STL/OBJ layer) — F-MESHIMPORT
+    // -------------------------------------------------------------------------
+    const mesh = {
+        /** POST /api/layers/mesh/upload (multipart) → {upload_id, filename, size_bytes, format} */
+        upload: (file) => {
+            const form = new FormData();
+            form.append('file', file);
+            return _fetch('/api/layers/mesh/upload', { method: 'POST', body: form });
+        },
+
+        /** POST /api/layers/mesh/{upload_id}/heightmap */
+        heightmap: (uploadId, body) => _fetch(
+            `/api/layers/mesh/${encodeURIComponent(uploadId)}/heightmap`, _json(body)),
+
+        /** POST /api/layers/mesh/{upload_id}/register */
+        register: (uploadId, body) => _fetch(
+            `/api/layers/mesh/${encodeURIComponent(uploadId)}/register`, _json(body)),
+
+        /** DELETE /api/layers/mesh/{upload_id} */
+        delete: (uploadId) => _fetch(
+            `/api/layers/mesh/${encodeURIComponent(uploadId)}`, { method: 'DELETE' }),
+
+        /** GET /api/layers/mesh/library → {cities: [{city, files: [...]}]} */
+        library: () => _fetch('/api/layers/mesh/library'),
+
+        /** POST /api/layers/mesh/library/{relPath}/location */
+        setLibraryLocation: (relPath, body) => _fetch(
+            `/api/layers/mesh/library/${relPath.split('/').map(encodeURIComponent).join('/')}/location`,
+            _json(body)),
+
+        /** POST /api/layers/mesh/library/{relPath}/heightmap */
+        libraryHeightmap: (relPath, body) => _fetch(
+            `/api/layers/mesh/library/${relPath.split('/').map(encodeURIComponent).join('/')}/heightmap`,
+            _json(body)),
+
+        /** POST /api/layers/mesh/library/{relPath}/register */
+        libraryRegister: (relPath, body) => _fetch(
+            `/api/layers/mesh/library/${relPath.split('/').map(encodeURIComponent).join('/')}/register`,
+            _json(body)),
+
+        /** POST /api/layers/mesh/{uploadId}/auto-register */
+        autoRegister: (uploadId, body) => _fetch(
+            `/api/layers/mesh/${encodeURIComponent(uploadId)}/auto-register`, _json(body)),
+
+        /** POST /api/layers/mesh/library/{relPath}/auto-register */
+        libraryAutoRegister: (relPath, body) => _fetch(
+            `/api/layers/mesh/library/${relPath.split('/').map(encodeURIComponent).join('/')}/auto-register`,
+            _json(body)),
+    };
+
+    return { _fetch, regions, dem, export: exportApi, cities, composite, cache, settings, misc, mesh };
 })();
