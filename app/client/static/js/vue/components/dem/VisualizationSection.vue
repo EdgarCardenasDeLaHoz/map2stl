@@ -32,6 +32,45 @@
         <button id="gridPixelModeBtn" title="Toggle pixel coordinates"
                 style="padding:2px 5px;font-size:10px;background:#404040;color:#aaa;border:1px solid #555;border-radius:3px;cursor:pointer;white-space:nowrap;">px</button>
       </div>
+      <div style="display:grid;grid-template-columns:auto 1fr auto;gap:4px 6px;align-items:center;margin-top:6px;">
+        <label class="check-label" style="white-space:nowrap;" title="Grid spacing mode. 'Meters' draws a constant real-world-distance section grid so projection distortion of real space is visible.">Grid units</label>
+        <select id="gridUnitMode" title="Degrees = lat/lon graticule. Meters = constant real-distance section grid (shows real-space distortion)."
+                style="width:100%;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;">
+          <option value="degrees" selected>Degrees (lat/lon)</option>
+          <option value="meters">Meters (real-space section grid)</option>
+        </select>
+        <input type="color" id="gridLineColor" value="#000000" title="Grid line colour (default black)"
+               style="width:28px;height:22px;padding:0;border:1px solid #555;border-radius:3px;background:#404040;cursor:pointer;">
+      </div>
+      <div id="gridMetersSpacingRow" class="hidden" style="display:grid;grid-template-columns:auto 1fr;gap:4px 6px;align-items:center;margin-top:4px;">
+        <label style="white-space:nowrap;font-size:11px;color:#ccc;" title="Distance between section-grid lines, in kilometres.">Spacing (km)</label>
+        <select id="gridMetersSpacing" style="width:100%;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;">
+          <option value="1">1 km</option>
+          <option value="2">2 km</option>
+          <option value="5" selected>5 km</option>
+          <option value="10">10 km</option>
+          <option value="25">25 km</option>
+          <option value="50">50 km</option>
+          <option value="100">100 km</option>
+        </select>
+      </div>
+      <!-- Pixel grid: independent red grid in DEM pixel space (shows raster dims) -->
+      <div style="display:grid;grid-template-columns:auto 1fr auto;gap:4px 6px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid #333;">
+        <label class="check-label" style="white-space:nowrap;" title="Overlay a grid in DEM pixel space (independent of the geographic grid). Shows the raster's pixel dimensions.">
+          <input type="checkbox" id="showPixelGrid" checked aria-label="Show pixel grid"> 🟥 Pixel grid
+        </label>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:11px;color:#ccc;white-space:nowrap;">every</span>
+          <input type="number" id="pixelGridSpacing" value="100" min="10" max="100000" step="10"
+                 title="Pixel grid spacing (DEM pixels between lines). Default 100."
+                 style="width:100%;min-width:52px;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;">
+          <span style="font-size:11px;color:#ccc;">px</span>
+        </div>
+        <input type="color" id="pixelGridColor" value="#ff0000" title="Pixel grid colour (default red)"
+               style="width:28px;height:22px;padding:0;border:1px solid #555;border-radius:3px;background:#404040;cursor:pointer;">
+      </div>
+      <div id="pixelGridDimsLabel" class="hidden" style="font-size:11px;color:#ff6b6b;margin-top:3px;text-align:right;font-weight:600;"></div>
+
       <div id="demPixelSizeLabel" class="hidden" style="font-size:10px;color:#8af;margin-top:3px;text-align:right;"></div>
     </div>
   </CollapsibleSection>

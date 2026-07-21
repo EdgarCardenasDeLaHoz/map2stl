@@ -65,9 +65,12 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         const projDescriptions = {
             'none': 'No correction — raw lat/lon grid displayed as-is.',
             'cosine': 'Horizontal scaling by cos(latitude). Correct east-west distances.',
-            'mercator': 'Web Mercator — vertical stretching increases towards poles.',
+            'mercator': 'Web Mercator — conformal; vertical stretching increases towards poles.',
+            'equidistant': 'Equidistant Cylindrical — preserves distances along meridians.',
             'lambert': 'Lambert Cylindrical Equal-Area — preserves area at the cost of shape.',
-            'sinusoidal': 'Sinusoidal — each row scaled by cos(lat), centred on meridian.',
+            'sinusoidal': 'Sinusoidal — pseudocylindrical equal-area; each row scaled by cos(lat).',
+            'miller': 'Miller Cylindrical — compromise; Mercator-like with less polar exaggeration.',
+            'gall': 'Gall Stereographic — compromise cylindrical; balanced shape/area distortion.',
         };
         const _syncClipToggleState = () => {
             if (!clipChk) return;
@@ -321,6 +324,26 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     };
     document.getElementById('gridlineCount')?.addEventListener('change', _refreshGridlines);
     document.getElementById('showGridlines')?.addEventListener('change', _refreshGridlines);
+
+    // Grid unit mode (degrees vs meters section grid), spacing, and line colour.
+    const _gridUnitMode = document.getElementById('gridUnitMode');
+    const _syncMetersRow = () => {
+        const row = document.getElementById('gridMetersSpacingRow');
+        const dens = document.getElementById('gridlineCount');
+        const isMeters = _gridUnitMode?.value === 'meters';
+        if (row) row.classList.toggle('hidden', !isMeters);
+        // Density count only applies to the degree graticule.
+        if (dens) dens.disabled = isMeters;
+    };
+    _syncMetersRow();
+    _gridUnitMode?.addEventListener('change', () => { _syncMetersRow(); _refreshGridlines(); });
+    document.getElementById('gridMetersSpacing')?.addEventListener('change', _refreshGridlines);
+    document.getElementById('gridLineColor')?.addEventListener('input', _refreshGridlines);
+
+    // Pixel grid (independent red grid in DEM pixel space).
+    document.getElementById('showPixelGrid')?.addEventListener('change', _refreshGridlines);
+    document.getElementById('pixelGridSpacing')?.addEventListener('input', _refreshGridlines);
+    document.getElementById('pixelGridColor')?.addEventListener('input', _refreshGridlines);
 
     document.getElementById('terrainOverlayOpacity')?.addEventListener('input', e => {
         const val = e.target.value;
