@@ -25,6 +25,8 @@ from app.server.routers.export import router as _export_router
 from app.server.routers.cities import router as _cities_router
 from app.server.routers.terrain import router as _terrain_router
 from app.server.routers.regions import router as _regions_router
+from app.server.routers.diagnostics import router as _diagnostics_router
+from app.server.routers.layers import router as _layers_router
 import mimetypes as _mimetypes
 from fastapi.responses import FileResponse as _FileResponse
 from fastapi import Response as _Response
@@ -221,6 +223,14 @@ _OPENAPI_TAGS = [
             "grids using PIL for blending with the primary DEM."
         ),
     },
+    {
+        "name": "layers",
+        "description": (
+            "STL/OBJ mesh import as a registered layer: upload, convert to a "
+            "geo-referenced heightmap, and fit a manual point-pair affine "
+            "registration against the current DEM/city view."
+        ),
+    },
 ]
 
 # FastAPI initialization
@@ -306,8 +316,10 @@ app.include_router(_cache_router)
 app.include_router(_settings_router)
 app.include_router(_composite_router)
 app.include_router(_height_router)
+app.include_router(_diagnostics_router)
+app.include_router(_layers_router)
 logger.info(
-    "Routers loaded: regions, terrain, cities, export, cache, settings, composite, height")
+    "Routers loaded: regions, terrain, cities, export, cache, settings, composite, height, diagnostics, layers")
 
 
 @app.get("/", response_class=HTMLResponse)
