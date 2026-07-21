@@ -173,12 +173,13 @@ After you edit code, before committing:
 - Deliverable: `models/retna_phase_h_final.pt`
 - See: `PHASE-H-LAUNCH-SUMMARY.md`, `PHASE-H-BENCHMARK-TIERS.md`
 
-### F-SKY (Current focus, May 2026) — Skyline CV pipeline
+### F-SKY / F-DET (Current focus) — Skyline CV pipeline
 Computer-vision improvements to `city2stl/skyline/` for cross-view building height estimation.
-- **Active:** F-SKY2, 4, 6, 7, 8, 10 (opt-in), 11.1
+- **Active F-SKY:** 1, 2, 4, 5 (opt-in), 6, 7, 8, 10 (opt-in), 11.1, 12, 13, 15
 - **Removed:** F-SKY3 (regression), F-SKY11.2 (dead-end)
-- **Pending:** F-SKY5 (MobileSAM instance head)
-- See: `docs/F-SKY-INTEGRATION.md`
+- **F-DET (detection quality & early-out, 2026-06):** F-DET1/2/3/5 done; F-DET4a–c (Type 2 per-city fixes) pending — **assumptions challenged 2026-06-23, see plan's "Critical review"**
+- **Structure (post F-CLEAN14 full split, 2026-06-23):** `pipeline.py`, `pano_registration.py`, `report_plots.py`, `region_render.py` are now thin façades over `_core/`, `_pano/`, `_report_plots/`, `_region_render/` subpackages — all import paths preserved. Demo scripts under `scripts/demos/`.
+- See: `docs/F-SKY-INTEGRATION.md`, `docs/plans/F-DET-detection-quality-and-early-out.md`, `docs/plans/F-CLEAN14-skyline-file-split.md`
 
 ## Full Details
 
