@@ -297,6 +297,12 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
 def fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset):
     """Fetch ESA/JRC images and optional elevation for bathymetry. Call via run_in_executor.
     Returns (img, jrc_img_or_None, elevation_raw_or_None) at native sat_scale resolution.
+
+    Raises the underlying exception (e.g. Earth Engine not authenticated)
+    rather than swallowing it to a bare None — callers previously had no way
+    to distinguish "EE isn't set up" from any other failure, so the route
+    always reported a generic "Failed to fetch ESA land cover data" instead
+    of the actionable auth message.
     """
     logger.info(f"fetch_water_mask_images: fetching ESA WorldCover layer "
                 f"(bbox {abs(east-west):.1f}deg x {abs(north-south):.1f}deg, scale={sat_scale}m/px)")
@@ -306,7 +312,12 @@ def fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset):
     except Exception as e:
         logger.error(f"fetch_water_mask_images: ESA WorldCover layer failed "
                      f"(scale={sat_scale}m/px, bbox {abs(east-west):.1f}deg x {abs(north-south):.1f}deg): {e}")
-        img = None
+        msg = str(e)
+        if "authorize" in msg.lower() or "authenticate" in msg.lower():
+            msg = ("Earth Engine is not authenticated on this server. Run "
+                   "'earthengine authenticate' (see the \U0001f511 Keys panel) "
+                   "to enable water mask / ESA land cover.")
+        raise RuntimeError(msg) from e
     jrc_img = None
     if water_dataset == "jrc":
         logger.info(f"fetch_water_mask_images: fetching JRC Global Surface Water layer "
@@ -451,14 +462,46 @@ map_labels = [
 ]
 
 
+_EE_STATUS_TTL_S = 300  # re-check at most every 5 minutes
+_ee_status_cache: dict = {"ok": None, "error": None, "checked_at": 0.0}
+
+
 def initialize_earth_engine():
-    """Initialize Earth Engine lazily to avoid import-time hard dependency."""
+    """Initialize Earth Engine lazily to avoid import-time hard dependency.
+
+    ee.Initialize() does real network I/O (credential check/refresh) even when
+    it's about to fail — on a machine with no EE credentials this takes ~3s
+    EVERY call. Without memoization, a single "load all layers" action (which
+    fires several EE-backed fetches in parallel/succession, e.g. water mask +
+    ESA land cover + the combined water/hydrology layer) pays that 3s tax
+    repeatedly and stacks up into many seconds of pure waiting before the
+    (unavoidable) failure. Cache the outcome for a few minutes so repeated
+    calls fail fast; a successful init is cheap to repeat so it isn't cached.
+    """
+    now = time.time()
+    if (_ee_status_cache["ok"] is False
+            and now - _ee_status_cache["checked_at"] < _EE_STATUS_TTL_S):
+        raise RuntimeError(_ee_status_cache["error"])
+
     try:
         import ee
         ee.Initialize()
+        _ee_status_cache.update(ok=True, error=None, checked_at=now)
     except Exception as e:
         logger.error("Earth Engine initialization failed: %s", e)
+        _ee_status_cache.update(ok=False, error=str(e), checked_at=now)
         raise
+
+
+def reset_earth_engine_status_cache():
+    """Clear the memoized EE status so the next call re-checks for real.
+
+    Call this right after a fresh `ee.Authenticate()` completes (see
+    app/server/routers/auth.py) — otherwise the negative result cached before
+    authentication would keep reporting "not authenticated" for up to
+    _EE_STATUS_TTL_S seconds even though credentials now exist.
+    """
+    _ee_status_cache.update(ok=None, error=None, checked_at=0.0)
 
 
 def calculate_scale_for_dimensions(N, S, E, W, target_dim=500):

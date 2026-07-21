@@ -17,6 +17,11 @@
     </div>
 
     <div class="header-actions">
+      <!-- Diagnostics button -->
+      <button class="btn btn-secondary docs-menu-btn" @click="openDiag" title="Check server status, keys, DEM sources, and region coverage">
+        🩺 Diagnostics
+      </button>
+
       <!-- Keys button -->
       <button class="btn btn-secondary docs-menu-btn" @click="openKeys">
         🔑 Keys
@@ -56,12 +61,36 @@
               <span v-else class="keys-badge keys-badge-error">✗ Not authenticated</span>
             </div>
             <p class="keys-service-desc">Required for ESA WorldCover land cover and water mask.</p>
+
             <div v-if="eeStatus === false" class="keys-instructions">
-              <p>Run this command in a terminal, then reload the page:</p>
-              <div class="keys-code-row">
-                <code class="keys-code">C:\venvs\strm2stl\Scripts\python.exe -c "import ee; ee.Authenticate()"</code>
-                <button class="keys-copy-btn" @click="copy(eeCmd)">{{ eeCopied ? '✓' : 'Copy' }}</button>
-              </div>
+              <!-- Step 1: request an auth URL from the server -->
+              <template v-if="!eeAuthUrl">
+                <p>Authenticate without leaving the browser — click below, approve access on Google's page, then paste the code back here.</p>
+                <button class="btn btn-secondary keys-save-btn" :disabled="eeStarting" @click="startEeAuth">
+                  {{ eeStarting ? 'Starting…' : '🌍 Authenticate with Google' }}
+                </button>
+              </template>
+              <!-- Step 2: open the URL, paste the resulting code -->
+              <template v-else>
+                <p>1. <a :href="eeAuthUrl" target="_blank" rel="noopener" @click="eeUrlOpened = true">Open the Google authorization page</a> and approve access.</p>
+                <p>2. Paste the code Google shows you:</p>
+                <div class="keys-input-row">
+                  <input
+                    v-model="eeCode"
+                    type="text"
+                    class="keys-input"
+                    placeholder="Paste authorization code…"
+                    @keyup.enter="completeEeAuth"
+                  />
+                  <button class="btn btn-secondary keys-save-btn" :disabled="!eeCode.trim() || eeCompleting" @click="completeEeAuth">
+                    {{ eeCompleting ? 'Verifying…' : 'Submit' }}
+                  </button>
+                </div>
+                <p class="keys-hint">
+                  <a href="#" @click.prevent="startEeAuth">Get a new link</a> if this one expired.
+                </p>
+              </template>
+              <p v-if="eeMsg" :class="eeMsgOk ? 'keys-msg-ok' : 'keys-msg-err'">{{ eeMsg }}</p>
               <p class="keys-hint">Don't have an account? <a href="https://earthengine.google.com/signup/" target="_blank" rel="noopener">Sign up free</a> (non-commercial use).</p>
             </div>
           </div>
@@ -92,6 +121,67 @@
             <p v-if="otopoMsg" :class="otopoMsgOk ? 'keys-msg-ok' : 'keys-msg-err'">{{ otopoMsg }}</p>
             <p class="keys-hint"><a href="https://opentopography.org/developers" target="_blank" rel="noopener">Get a free API key</a></p>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Diagnostics modal -->
+    <div v-if="diagOpen" class="keys-overlay" @click.self="diagOpen = false">
+      <div class="keys-modal">
+        <div class="keys-modal-header">
+          <span>🩺 Diagnostics</span>
+          <button class="keys-close-btn" @click="diagOpen = false">✕</button>
+        </div>
+        <div class="keys-modal-body">
+          <p v-if="diag === null" class="keys-service-desc">Loading…</p>
+          <template v-else-if="diag">
+            <!-- Keys -->
+            <div class="keys-service">
+              <div class="keys-service-header">
+                <span class="keys-service-name">🔑 API keys</span>
+              </div>
+              <p class="diag-line">OpenTopography key:
+                <span :class="diag.auth.opentopo_key ? 'keys-badge keys-badge-ok' : 'keys-badge keys-badge-error'">
+                  {{ diag.auth.opentopo_key ? 'configured' : 'missing' }}
+                </span>
+                <button v-if="!diag.auth.opentopo_key" class="keys-copy-btn" @click="diagOpen=false; openKeys()">Add key</button>
+              </p>
+            </div>
+            <hr class="keys-divider" />
+            <!-- DEM sources -->
+            <div class="keys-service">
+              <div class="keys-service-header"><span class="keys-service-name">🗺️ DEM sources</span></div>
+              <p v-for="(s, id) in diag.dem_sources" :key="id" class="diag-line">
+                <span :class="s.available ? 'keys-badge keys-badge-ok' : 'keys-badge keys-badge-error'">
+                  {{ s.available ? 'ready' : 'unavailable' }}
+                </span>
+                {{ s.label }}
+                <span v-if="s.note" class="keys-hint">— {{ s.note }}</span>
+              </p>
+            </div>
+            <hr class="keys-divider" />
+            <!-- Region probe -->
+            <div v-if="diag.region_probe" class="keys-service">
+              <div class="keys-service-header"><span class="keys-service-name">📐 Selected region</span></div>
+              <p class="diag-line">Span: {{ diag.region_probe.span_deg.ns }}° × {{ diag.region_probe.span_deg.ew }}°
+                <span :class="diag.region_probe.likely_local_coverage ? 'keys-badge keys-badge-ok' : 'keys-badge keys-badge-error'">
+                  {{ diag.region_probe.likely_local_coverage ? 'local coverage likely' : 'too large for local DEM' }}
+                </span>
+              </p>
+              <p class="keys-hint">{{ diag.region_probe.recommendation }}</p>
+            </div>
+            <div v-else class="keys-service">
+              <p class="keys-hint">Select a region to see coverage advice.</p>
+            </div>
+            <hr class="keys-divider" />
+            <!-- Cache -->
+            <div class="keys-service">
+              <div class="keys-service-header"><span class="keys-service-name">💾 Cache</span></div>
+              <p class="diag-line">{{ diag.cache.size_mb }} MB</p>
+              <p class="keys-hint keys-code">{{ diag.cache.path }}</p>
+            </div>
+          </template>
+          <p v-else class="keys-msg-err">Failed to load diagnostics.</p>
         </div>
       </div>
     </div>
@@ -127,9 +217,15 @@ const otopoKey = ref('');
 const otopoSaving = ref(false);
 const otopoMsg = ref('');
 const otopoMsgOk = ref(false);
-const eeCopied = ref(false);
 
-const eeCmd = `C:\\venvs\\strm2stl\\Scripts\\python.exe -c "import ee; ee.Authenticate()"`;
+// Earth Engine OAuth flow state
+const eeAuthUrl = ref('');
+const eeUrlOpened = ref(false);
+const eeCode = ref('');
+const eeStarting = ref(false);
+const eeCompleting = ref(false);
+const eeMsg = ref('');
+const eeMsgOk = ref(false);
 
 async function fetchStatus() {
   eeStatus.value = null;
@@ -147,7 +243,88 @@ async function fetchStatus() {
 
 function openKeys() {
   keysOpen.value = true;
+  eeAuthUrl.value = '';
+  eeCode.value = '';
+  eeMsg.value = '';
   fetchStatus();
+}
+
+async function startEeAuth() {
+  eeStarting.value = true;
+  eeMsg.value = '';
+  eeAuthUrl.value = '';
+  eeUrlOpened.value = false;
+  eeCode.value = '';
+  try {
+    const res = await fetch('/api/auth/earth-engine/start', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok && data.auth_url) {
+      eeAuthUrl.value = data.auth_url;
+      window.open(data.auth_url, '_blank', 'noopener');
+      eeUrlOpened.value = true;
+    } else {
+      eeMsg.value = data.error || 'Failed to start authentication.';
+      eeMsgOk.value = false;
+    }
+  } catch {
+    eeMsg.value = 'Network error starting authentication.';
+    eeMsgOk.value = false;
+  } finally {
+    eeStarting.value = false;
+  }
+}
+
+async function completeEeAuth() {
+  const code = eeCode.value.trim();
+  if (!code) return;
+  eeCompleting.value = true;
+  eeMsg.value = '';
+  try {
+    const res = await fetch('/api/auth/earth-engine/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      eeMsg.value = '✓ Authenticated — water mask and ESA land cover are ready.';
+      eeMsgOk.value = true;
+      eeStatus.value = true;
+      eeAuthUrl.value = '';
+      eeCode.value = '';
+    } else {
+      eeMsg.value = data.error || 'Invalid or expired code — try again.';
+      eeMsgOk.value = false;
+    }
+  } catch {
+    eeMsg.value = 'Network error completing authentication.';
+    eeMsgOk.value = false;
+  } finally {
+    eeCompleting.value = false;
+  }
+}
+
+// Diagnostics modal state
+const diagOpen = ref(false);
+const diag = ref<any>(null);
+
+async function openDiag() {
+  diagOpen.value = true;
+  diag.value = null;
+  // Include the selected region's bbox so the server can add a coverage probe.
+  let qs = '';
+  try {
+    const r = (window as any).appState?.selectedRegion;
+    if (r && r.north != null) {
+      qs = `?north=${r.north}&south=${r.south}&east=${r.east}&west=${r.west}`;
+    }
+  } catch { /* no selection */ }
+  try {
+    const res = await fetch('/api/diagnostics' + qs);
+    diag.value = res.ok ? await res.json() : false;
+  } catch {
+    diag.value = false;
+  }
 }
 
 async function saveOtopoKey() {
@@ -163,7 +340,9 @@ async function saveOtopoKey() {
     });
     const data = await res.json();
     if (res.ok) {
-      otopoMsg.value = '✓ Key saved — restart the server to apply.';
+      otopoMsg.value = data.applied
+        ? '✓ Key saved and applied — OpenTopography DEM sources are ready.'
+        : '✓ Key saved — restart the server to apply.';
       otopoMsgOk.value = true;
       otopoStatus.value = true;
       otopoKey.value = '';
@@ -179,13 +358,6 @@ async function saveOtopoKey() {
   }
 }
 
-async function copy(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    eeCopied.value = true;
-    setTimeout(() => { eeCopied.value = false; }, 2000);
-  } catch {}
-}
 </script>
 
 <style scoped>
@@ -355,4 +527,15 @@ async function copy(text: string) {
 
 .keys-msg-ok  { font-size: 12px; color: #6fcf6f; margin-top: 6px; }
 .keys-msg-err { font-size: 12px; color: #cf6f6f; margin-top: 6px; }
+
+.diag-line {
+  font-size: 12px;
+  color: #ccc;
+  margin: 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.diag-line .keys-badge { margin: 0; }
 </style>
