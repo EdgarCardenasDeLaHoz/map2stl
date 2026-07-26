@@ -94,15 +94,19 @@ OPENTOPO_DATASETS: dict[str, dict] = {
 # Local SRTM HDF5 tile store (city2stl pipeline)
 # ---------------------------------------------------------------------------
 # strm_data.h5 contains SRTM3 tiles (6000×6000 px per 5° tile = ~90m resolution).
-# Set STRM_H5_ROOT env var or update the default below to point at the directory
-# containing strm_data.h5.
+# Set STRM_H5_ROOT env var to override. Default is relative to _PROJECT_ROOT
+# (Code/) so it travels with the project like MICROPOLITAN_STL_DIR — matches
+# the actual on-disk layout:
+#   3D Maps/
+#   ├── Code/            <- _PROJECT_ROOT
+#   └── strm_h5/strm_data.h5
 #
 # Future: if the h5 file is absent, fall back to OpenTopography SRTMGL3 API
 # (same 90m SRTM3 data) or Google Earth Engine (SRTM/NASADEM, higher resolution
 # possible).  See docs/todos/README.md for the current roadmap location.
-H5_SRTM_ROOT: Optional[str] = os.environ.get(
-    "STRM_H5_ROOT",
-    r"C:\Users\eac84\Desktop\Desktop\FILES",
+_STRM_H5_ENV = os.environ.get("STRM_H5_ROOT")
+H5_SRTM_ROOT: Optional[str] = (
+    _STRM_H5_ENV if _STRM_H5_ENV else str((_PROJECT_ROOT / ".." / "strm_h5").resolve())
 )
 H5_SRTM_FILE: Optional[Path] = (
     Path(H5_SRTM_ROOT) / "strm_data.h5" if H5_SRTM_ROOT else None
