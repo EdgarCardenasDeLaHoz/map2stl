@@ -578,6 +578,9 @@ window.applyCompositeToDem = function applyCompositeToDem() {
     // Also update originalDemValues so curve editor works from the composite
     if (window.appState) {
         window.appState.originalDemValues = new Float32Array(_compositeValues);
+        // Tell export-handlers.js to ship these values inline instead of
+        // resolving the plain (non-composite) DEM from the server cache.
+        window.appState._newCompositeApplied = true;
     }
 
     // Re-render the DEM canvas

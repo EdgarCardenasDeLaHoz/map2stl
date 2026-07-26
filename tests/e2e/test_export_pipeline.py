@@ -107,3 +107,44 @@ def test_extrude_tab_export_settings_are_editable(strict_page, live_server_url_t
 
     with page.expect_response(lambda r: "/api/export/preview" in r.url, timeout=15_000):
         page.locator("#exportContours").check()
+
+
+def test_applied_composite_dem_is_exported_not_the_plain_dem(strict_page, live_server_url_testmode):
+    """Guards against the bug found 2026-07-26: applyCompositeToDem() (the new
+    Composite DEM panel) mutates appState.lastDemData.values in memory and the
+    live 3D preview reads it directly, but the export POST body only carried
+    bbox + DEM settings -- resolve_dem_from_cache() then re-read the plain,
+    non-composite DEM straight from the server-side disk cache, so the
+    exported file silently reverted to unmodified terrain while the on-screen
+    preview kept showing the composite. Fixed by having applyCompositeToDem()
+    set appState._newCompositeApplied, which _demSettings() (export-handlers.js)
+    now checks to ship the composite values inline instead."""
+    page = strict_page
+    _select_region_and_load_dem(page, live_server_url_testmode)
+
+    # Simulate "apply composite" without depending on OSM/water network calls:
+    # overwrite lastDemData with a distinctive array (offset +10000 from the
+    # loaded DEM, so it's trivially distinguishable, but with the same shape
+    # of variation so the server's flat-DEM guard doesn't reject it) and set
+    # the same flag applyCompositeToDem() sets, exactly as that function does.
+    page.evaluate(
+        """() => {
+            const dem = window.appState.lastDemData;
+            const composite = Float32Array.from(dem.values, v => v + 10000);
+            dem.values = composite;
+            dem.min += 10000; dem.max += 10000;
+            window.appState.lastDemData = dem;
+            window.appState._newCompositeApplied = true;
+        }"""
+    )
+
+    _open_extrude_export_subtab(page)
+
+    with page.expect_request("**/api/export/start") as req_info:
+        page.locator("#downloadSTLBtn").click()
+    body = req_info.value.post_data_json
+
+    assert body.get("dem_values"), "composite applied but export request carried no inline dem_values"
+    assert body["dem_values"][0] > 9999, (
+        "export request's dem_values did not match the applied composite array (got plain DEM instead)"
+    )

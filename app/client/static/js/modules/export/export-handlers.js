@@ -96,8 +96,22 @@ function _demSettings() {
             show_sat: false,
         },
     };
-    // If the user has configured + applied a composite, send the spec so the
-    // server rebuilds the same merged DEM for the 3D output.
+    // Composite DEM panel (composite-dem.js): applyCompositeToDem() already
+    // computed the merged values client-side and wrote them into
+    // lastDemData — send them inline so export uses exactly what the
+    // preview shows, instead of resolve_dem_from_cache() re-reading the
+    // plain (non-composite) DEM from the server-side cache.
+    if (window.appState?._newCompositeApplied) {
+        const dem = window.appState?.lastDemData;
+        if (dem?.values?.length) {
+            settings.dem_values = Array.from(dem.values);
+            settings.height = dem.height;
+            settings.width = dem.width;
+        }
+    }
+
+    // Legacy merge panel: if the user has configured + applied a composite
+    // there, send the spec so the server rebuilds the same merged DEM.
     const compositeSpec = window.getActiveCompositeSpec?.();
     if (compositeSpec) {
         settings.composite_layers = compositeSpec;

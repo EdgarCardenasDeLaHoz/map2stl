@@ -233,6 +233,10 @@ async function runMerge(apply = false) {
         const colormap = document.getElementById('demColormap')?.value || 'terrain';
 
         window.appState.currentDemBbox = { north: bbox.north, south: bbox.south, east: bbox.east, west: bbox.west };
+        // This (legacy) merge replaces lastDemData with its own result — drop
+        // any stale flag from the newer Composite DEM panel so export doesn't
+        // ship values that no longer match what's on screen.
+        if (window.appState) window.appState._newCompositeApplied = false;
         const canvas = window.renderDEMCanvas(demVals, w, h, colormap, vmin, vmax);
         const container = document.getElementById('demImage');
         container.innerHTML = '';

@@ -105,6 +105,10 @@ function _applyDemResult(data, north, south, east, west) {
     // Store bounding box for gridlines
     window.appState.currentDemBbox = { north, south, east, west };
 
+    // A freshly-fetched DEM invalidates any previously-applied composite —
+    // export must not ship stale composite values against new terrain.
+    if (window.appState) window.appState._newCompositeApplied = false;
+
     // Render DEM canvas — projection applied server-side, no client warp needed
     const canvas = window.renderDEMCanvas?.(demVals, w, h, colormap, vmin, vmax);
     const container = document.getElementById('demImage');
