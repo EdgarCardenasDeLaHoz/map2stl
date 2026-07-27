@@ -34,7 +34,6 @@ import shutil
 import sys
 import uuid
 from pathlib import Path
-from typing import Optional, Tuple
 
 import numpy as np
 
@@ -61,6 +60,8 @@ except ImportError:
 try:
     from city2stl.skyline.height.infill import (
         infill_idw as _infill_idw,
+    )
+    from city2stl.skyline.height.infill import (
         infill_nearest as _infill_nearest,
     )
     _INFILL_AVAILABLE = True
@@ -74,8 +75,9 @@ except ImportError:
     _APPLY_TRANSFORM_AVAILABLE = False
 
 try:
-    from numpy2stl.registration.pipeline import register_city_stl as _register_city_stl
     from numpy2stl.applications.cities import get_city_bbox as _get_city_bbox
+    from numpy2stl.applications.cities import get_city_center_point as _get_city_center_point
+    from numpy2stl.registration.pipeline import register_city_stl as _register_city_stl
     _AUTO_REGISTER_AVAILABLE = True
 except ImportError:
     _AUTO_REGISTER_AVAILABLE = False
@@ -130,7 +132,7 @@ def _library_session_dir(rel_path: str) -> Path:
     return _mesh_upload_root() / "library_sessions" / key
 
 
-def save_upload(filename: str, data: bytes) -> Tuple[str, str, int]:
+def save_upload(filename: str, data: bytes) -> tuple[str, str, int]:
     """Validate and persist an uploaded mesh file.
 
     Returns (upload_id, detected_format, size_bytes).
@@ -181,7 +183,7 @@ def compute_heightmap(
     resolution_m: float = 5.0,
     up_axis: str = "z",
     infill: str = "none",
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Convert the uploaded mesh to a (heightmap, mask) pair for the given bbox.
 
     Delegates to city2stl.skyline.height.stl_import.stl_to_heightmap, then
@@ -226,7 +228,7 @@ def _save_last_heightmap(session_dir: Path, heightmap: np.ndarray, mask: np.ndar
     np.save(session_dir / "last_mask.npy", mask.astype(bool))
 
 
-def get_last_heightmap(upload_id: str) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+def get_last_heightmap(upload_id: str) -> tuple[np.ndarray, np.ndarray] | None:
     """Return the (heightmap, mask) most recently computed for upload_id, or None."""
     d = _upload_dir(upload_id)
     if not d.is_dir():
@@ -234,12 +236,12 @@ def get_last_heightmap(upload_id: str) -> Optional[Tuple[np.ndarray, np.ndarray]
     return _read_last_heightmap(d)
 
 
-def get_last_library_heightmap(rel_path: str) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+def get_last_library_heightmap(rel_path: str) -> tuple[np.ndarray, np.ndarray] | None:
     """Return the (heightmap, mask) most recently computed for a library file, or None."""
     return _read_last_heightmap(_library_session_dir(rel_path))
 
 
-def _read_last_heightmap(session_dir: Path) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+def _read_last_heightmap(session_dir: Path) -> tuple[np.ndarray, np.ndarray] | None:
     hm_path, mask_path = session_dir / "last_heightmap.npy", session_dir / "last_mask.npy"
     if not (hm_path.is_file() and mask_path.is_file()):
         return None
@@ -286,8 +288,8 @@ def register_heightmap(
     heightmap: np.ndarray,
     mask: np.ndarray,
     M: np.ndarray,
-    output_shape: Tuple[int, int],
-) -> Tuple[np.ndarray, np.ndarray]:
+    output_shape: tuple[int, int],
+) -> tuple[np.ndarray, np.ndarray]:
     """Warp a mesh heightmap + mask into the reference canvas's pixel grid.
 
     M: (2, 3) affine mapping mesh-space (x, y) -> ref-space (x, y), as
@@ -362,7 +364,7 @@ def list_library() -> list[dict]:
     return [{"city": city, "files": files} for city, files in sorted(by_city.items())]
 
 
-def _read_location_sidecar(mesh_path: Path) -> Optional[dict]:
+def _read_location_sidecar(mesh_path: Path) -> dict | None:
     sidecar = _location_sidecar_path(mesh_path)
     if not sidecar.is_file():
         return None
@@ -373,7 +375,7 @@ def _read_location_sidecar(mesh_path: Path) -> Optional[dict]:
         return None
 
 
-def get_library_location(rel_path: str) -> Optional[dict]:
+def get_library_location(rel_path: str) -> dict | None:
     """Return the saved bbox/notes for a library-relative mesh path, or None."""
     mesh_path = _resolve_library_path(rel_path)
     return _read_location_sidecar(mesh_path)
@@ -426,7 +428,7 @@ def compute_library_heightmap(
     resolution_m: float = 5.0,
     up_axis: str = "z",
     infill: str = "none",
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Like compute_heightmap, but for a library file + with disk caching.
 
     Cache key covers the file's relative path (not upload_id, which doesn't
@@ -511,6 +513,43 @@ def parse_city_name_from_path(name: str) -> str:
     return s
 
 
+# Micropolitan STL packs (Cities/micropolitan/) tag each file with a size
+# tier — "<City>_<Tier>_Solid[_<Quadrant>].stl" — documented in each pack's
+# "Instructions - Micropolitan.pdf" as the real-world footprint the model
+# covers: Large ~2km per side, Medium ~1.5km, Small "samples" (no stated
+# size — excluded here as unreliable), Extra Large = the *same* 2km area as
+# Large split into 4 print tiles (confirmed by comparing Miami's
+# XL_Solid_A1's XY extent to L_Solid's: almost exactly half per axis).
+# This gives a real-world scale anchor for ANY city in the pack, not just
+# the four hardcoded in numpy2stl.applications.cities._CITY_CONFIG.
+_MICROPOLITAN_TIER_EXTENT_M = {
+    "L": 2000.0,
+    "M": 1500.0,
+    "XL": 1000.0,  # each quadrant tile covers 1/4 of the L-tier area (half per axis)
+}
+
+
+def parse_micropolitan_scale_m_per_unit(name: str, stl_xy_extent_units: float) -> float | None:
+    """Derive a metres-per-model-unit scale from a Micropolitan filename's size
+    tier, or None if no tier is recognized (e.g. "S", or a non-Micropolitan file).
+
+    `stl_xy_extent_units` is the mesh's XY bounding-box extent in its own
+    (unitless) model coordinates — the longer of its X/Y bounds spans, matching
+    how numpy2stl.registration.pipeline.register_city_stl computes stl_xy_extent.
+    """
+    if stl_xy_extent_units <= 0:
+        return None
+    stem = Path(name).stem
+    m = re.search(r"_(XL|L|M|S)_", f"_{stem}_")
+    if not m:
+        return None
+    tier = m.group(1)
+    extent_m = _MICROPOLITAN_TIER_EXTENT_M.get(tier)
+    if extent_m is None:
+        return None
+    return extent_m / stl_xy_extent_units
+
+
 def auto_register(
     mesh_path: Path,
     filename_hint: str,
@@ -522,7 +561,7 @@ def auto_register(
     field so the caller can decide whether to trust it:
         status: "ok" | "geocode_failed" | "unavailable"
         city_name: str            — the parsed/geocoded place name used
-        bbox: {north,south,east,west} | None
+        bbox: {north,south,east,west} | None  — see note below on which bbox this is
         confidence: float | None  — raw FFT xcorr peak (see docstring caveat below)
         footprint_iou: float | None
         rmse_m: float | None
@@ -532,6 +571,15 @@ def auto_register(
     ">0.4 = good" per that library's own docs, not independently validated
     here). Treat this as a hint for ranking/sorting, not a pass/fail gate;
     the manual picker remains the source of truth.
+
+    `bbox` is the region actually registered against — a tight bbox around
+    the mesh's real coverage when a scale anchor could be derived (currently:
+    Micropolitan filename size tiers, via parse_micropolitan_scale_m_per_unit),
+    falling back to the full city_name geocode otherwise. This matters for
+    sprawling metros: a downtown-only mesh registered against a whole-city
+    OSM raster searches for a small target in a frame mostly irrelevant to
+    it, which was a real, measured cause of poor fit quality before this was
+    added (see F-MESHIMPORT plan notes, Miami case study).
     """
     if not _AUTO_REGISTER_AVAILABLE:
         return {
@@ -551,8 +599,43 @@ def auto_register(
             "confidence": None, "footprint_iou": None, "rmse_m": None,
         }
 
+    # Without a scale anchor, register_city_stl's estimate_bbox_from_stl() can
+    # only produce a tight OSM-fetch bbox for the 4 cities hardcoded in
+    # numpy2stl's _CITY_CONFIG (Philadelphia/NYC/Chicago/Boston) — every other
+    # city (Miami included) falls back to fetching the ENTIRE city's OSM
+    # buildings, then tries to register a small downtown-only mesh against
+    # that whole-city raster. That's a large part of why auto-register's fit
+    # quality has been poor on non-hardcoded cities: the algorithm is
+    # searching for a small target in a frame dominated by irrelevant area,
+    # not failing to align what it can actually see.
+    # Micropolitan STL packs encode a real-world footprint size in the
+    # filename's size tier (see parse_micropolitan_scale_m_per_unit) — use it
+    # to give every city in the pack a real scale anchor, not just the 4.
+    scale_m_per_unit = None
     try:
-        report = _register_city_stl(str(mesh_path), city_name, resolution=resolution)
+        import trimesh as _trimesh
+        _bounds = _trimesh.load(str(mesh_path)).bounds
+        _xy_extent = float(max(_bounds[1][0] - _bounds[0][0], _bounds[1][1] - _bounds[0][1]))
+        scale_m_per_unit = parse_micropolitan_scale_m_per_unit(filename_hint, _xy_extent)
+        if scale_m_per_unit is not None:
+            logger.info(
+                f"auto_register: Micropolitan tier scale anchor for {filename_hint!r}: "
+                f"{scale_m_per_unit:.3f} m/unit (xy_extent={_xy_extent:.2f} units)")
+    except Exception as exc:
+        logger.info(f"auto_register: could not derive a scale anchor for {filename_hint!r}: {exc}")
+
+    # A tight bbox also needs to be centered on wherever the model actually is
+    # (usually downtown), not the administrative-boundary centroid get_city_bbox()
+    # above returns — for a sprawling metro that centroid can land many km from
+    # downtown, outside a small model's real coverage entirely.
+    center = None
+    if scale_m_per_unit is not None:
+        center = _get_city_center_point(city_name)
+
+    try:
+        report = _register_city_stl(
+            str(mesh_path), city_name, resolution=resolution,
+            scale_m_per_unit=scale_m_per_unit, center=center)
     except Exception as exc:
         logger.exception(f"auto_register: registration failed for {city_name!r}")
         return {
@@ -565,10 +648,20 @@ def auto_register(
 
     reg = report.registration
     cmp_ = report.comparison
+    # Prefer the tight bbox register_city_stl actually fetched/registered
+    # against (report.osm_bbox, set whenever scale_m_per_unit/center gave it a
+    # real anchor) over the full-city geocode above — the region created and
+    # the DEM subsequently loaded should match what the mesh actually covers,
+    # not the whole city the model is a small fragment of.
+    if report.osm_bbox is not None:
+        rn, rs, re_, rw = report.osm_bbox
+        bbox = {"north": rn, "south": rs, "east": re_, "west": rw}
+    else:
+        bbox = {"north": n, "south": s, "east": e, "west": w}
     return {
         "status": "ok",
         "city_name": city_name,
-        "bbox": {"north": n, "south": s, "east": e, "west": w},
+        "bbox": bbox,
         "confidence": float(reg.confidence),
         "footprint_iou": float(cmp_.footprint_iou),
         "rmse_m": float(cmp_.rmse),
@@ -578,7 +671,7 @@ def auto_register(
 
 
 def auto_register_upload(
-    upload_id: str, resolution: int = 512, filename_hint: Optional[str] = None,
+    upload_id: str, resolution: int = 512, filename_hint: str | None = None,
 ) -> dict:
     """auto_register() for an uploaded mesh, resolving its stored path.
 
@@ -591,7 +684,7 @@ def auto_register_upload(
 
 
 def auto_register_library(
-    rel_path: str, resolution: int = 512, filename_hint: Optional[str] = None,
+    rel_path: str, resolution: int = 512, filename_hint: str | None = None,
 ) -> dict:
     """auto_register() for a mesh library file, resolving its on-disk path.
 
