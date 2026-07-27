@@ -14,7 +14,7 @@ ifeq ($(wildcard $(PYTHON)),)
   RUFF   := python -m ruff
 endif
 
-.PHONY: serve test lint fmt install help
+.PHONY: serve test lint fmt install clean-runs help
 
 ## Start the FastAPI dev server on port 9000
 serve:
@@ -41,6 +41,10 @@ fmt:
 install:
 	$(PIP) install -r requirements.txt
 	$(PIP) install -r requirements-dev.txt
+
+## Delete regenerable skyline caches under city2stl/skyline/runs (frees GBs; keeps region_reports/ + height_traces/)
+clean-runs:
+	$(PYTHON) -c "import shutil, pathlib; b = pathlib.Path('city2stl/skyline/runs'); dirs = ['image_cache', 'satellite_image_cache', 'satellite_footprints_cache', 'screen_cache']; [(print('rm', b / d), shutil.rmtree(b / d, ignore_errors=True)) for d in dirs]; [(print('rm', f), f.unlink()) for f in b.glob('*.log')]; print('Done. Kept region_reports/ and height_traces/.')"
 
 help:
 	@grep -E '^##' Makefile | sed 's/## //'
