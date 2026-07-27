@@ -2995,7 +2995,15 @@
             gap: 10px;
             min-height: 0;
         }
-        .mesh-reg-panel-title { font-size: 11px; color: #8ea6bf; margin-bottom: 4px; }
+        .mesh-reg-panel-title {
+            font-size: 11px; color: #8ea6bf; margin-bottom: 4px;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .mesh-reg-osm-toggle {
+            display: inline-flex; align-items: center; gap: 3px;
+            font-size: 10px; color: #ffc400; cursor: pointer; user-select: none;
+        }
+        .mesh-reg-osm-toggle input { cursor: pointer; margin: 0; }
         .mesh-reg-canvas-wrap {
             position: relative;
             overflow: hidden;
@@ -3007,6 +3015,7 @@
         }
         .mesh-reg-canvas-wrap.mesh-reg-panning { cursor: grabbing; }
         .mesh-reg-canvas { position: absolute; top: 0; left: 0; }
+        .mesh-reg-osm-canvas { pointer-events: none; }
         .mesh-reg-pair-list {
             max-height: 90px;
             overflow-y: auto;

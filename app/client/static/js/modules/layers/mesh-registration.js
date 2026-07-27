@@ -8,6 +8,14 @@
  * "Compute Registration" posts them to the server, which fits a 2D affine
  * and warps the mesh heightmap onto the reference's pixel grid.
  *
+ * The reference panel also gets an OSM buildings/roads/waterways overlay
+ * (transparent canvas layered on top, toggleable) — local-SRTM terrain alone
+ * is often a flat, featureless gradient with no visual landmarks to click
+ * matching points against; building corners give the picker something
+ * concrete. Fetched independently of appState.osmCityData/selectedRegion
+ * (scoped to this modal's own reference bbox) so it never disturbs the
+ * sidebar's region/city-data state.
+ *
  * Point pairs are collected in each canvas's *native* (unzoomed) pixel
  * space — pan/zoom is undone client-side before a pair is recorded, so the
  * server-side fit never needs to know about viewport state.
@@ -54,6 +62,8 @@ function _els() {
         modal: document.getElementById('meshRegistrationModal'),
         refCanvas: document.getElementById('meshRegRefCanvas'),
         meshCanvas: document.getElementById('meshRegMeshCanvas'),
+        osmCanvas: document.getElementById('meshRegOsmCanvas'),
+        osmToggle: document.getElementById('meshRegOsmToggle'),
         refWrap: document.getElementById('meshRegRefWrap'),
         meshWrap: document.getElementById('meshRegMeshWrap'),
         pairList: document.getElementById('meshRegPairList'),
@@ -86,6 +96,15 @@ window.openMeshRegistrationModal = function openMeshRegistrationModal() {
     _drawSide('ref', dem.values, dem.width, dem.height, dem.min, dem.max);
     _drawSide('mesh', heightmap.values, heightmap.width, heightmap.height,
         heightmap.minElevation, heightmap.maxElevation);
+
+    const { osmCanvas, osmToggle } = _els();
+    if (osmCanvas) {
+        osmCanvas.getContext('2d').clearRect(0, 0, osmCanvas.width, osmCanvas.height);
+        const bbox = window.appState?.currentDemBbox;
+        if (bbox && osmToggle?.checked !== false) {
+            _loadOsmOverlay(bbox, dem.width, dem.height);
+        }
+    }
 
     _initZoomPan();
     _renderPairList();
@@ -240,6 +259,136 @@ function _drawMarker(canvas, nativeX, nativeY, label) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// OSM overlay (buildings/roads) on the reference panel — ground-truth points
+// are far easier to click on real building corners than on a flat terrain
+// gradient. Fetched independently of the app's main osmCityData/selectedRegion
+// so it doesn't disturb the sidebar/region-selection state; scoped purely to
+// this modal's own reference bbox.
+// ─────────────────────────────────────────────────────────────────────────────
+
+let _osmAbortController = null;
+
+/** Draw building/road outlines onto the OSM overlay canvas, in the ref canvas's native pixel space. */
+function _drawOsmOverlay(cityData, width, height, bbox) {
+    const canvas = _els().osmCanvas;
+    if (!canvas) return;
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, width, height);
+
+    const { north, south, east, west } = bbox;
+    const lonSpan = east - west || 1e-9;
+    const latSpan = north - south || 1e-9;
+    const toPx = (lat, lon) => ({
+        x: (lon - west) / lonSpan * width,
+        y: (north - lat) / latSpan * height,
+    });
+
+    function drawRings(rings, closePaths) {
+        for (const ring of rings) {
+            let first = true;
+            for (const coord of ring) {
+                const p = toPx(coord[1], coord[0]);
+                if (first) { ctx.moveTo(p.x, p.y); first = false; }
+                else ctx.lineTo(p.x, p.y);
+            }
+            if (closePaths) ctx.closePath();
+        }
+    }
+
+    function ringsFor(geom) {
+        if (!geom) return null;
+        if (geom.type === 'Polygon') return geom.coordinates;
+        if (geom.type === 'MultiPolygon') return geom.coordinates.flat(1);
+        if (geom.type === 'LineString') return [geom.coordinates];
+        if (geom.type === 'MultiLineString') return geom.coordinates;
+        return null;
+    }
+
+    ctx.lineWidth = 1;
+
+    // Waterways first (lowest visual priority), then roads, then buildings on top.
+    if (cityData.waterways?.features?.length) {
+        ctx.strokeStyle = 'rgba(68,136,204,0.85)';
+        ctx.fillStyle = 'rgba(68,136,204,0.25)';
+        for (const feat of cityData.waterways.features) {
+            const rings = ringsFor(feat.geometry);
+            if (!rings) continue;
+            const closed = feat.geometry.type.includes('Polygon');
+            ctx.beginPath();
+            drawRings(rings, closed);
+            if (closed) ctx.fill();
+            ctx.stroke();
+        }
+    }
+
+    if (cityData.roads?.features?.length) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+        for (const feat of cityData.roads.features) {
+            const rings = ringsFor(feat.geometry);
+            if (!rings) continue;
+            ctx.beginPath();
+            drawRings(rings, false);
+            ctx.stroke();
+        }
+    }
+
+    if (cityData.buildings?.features?.length) {
+        ctx.strokeStyle = 'rgba(255,196,0,0.9)';
+        ctx.fillStyle = 'rgba(255,196,0,0.18)';
+        for (const feat of cityData.buildings.features) {
+            const rings = ringsFor(feat.geometry);
+            if (!rings) continue;
+            ctx.beginPath();
+            drawRings(rings, true);
+            ctx.fill();
+            ctx.stroke();
+        }
+    }
+}
+
+/**
+ * Fetch OSM buildings/roads/waterways for the reference bbox and draw them
+ * as an outline overlay on top of the terrain canvas. Independent of
+ * appState.osmCityData/selectedRegion — scoped to this modal only, so it
+ * never disturbs the sidebar's region/city-data state.
+ */
+async function _loadOsmOverlay(bbox, width, height) {
+    const canvas = _els().osmCanvas;
+    if (!canvas || !bbox) return;
+
+    if (_osmAbortController) _osmAbortController.abort();
+    _osmAbortController = new AbortController();
+    const signal = _osmAbortController.signal;
+
+    const diagKm = typeof window.haversineDiagKm === 'function'
+        ? window.haversineDiagKm(bbox.north, bbox.south, bbox.east, bbox.west)
+        : 0;
+    // Same two-tier cap city-overlay.js uses: full detail under CITY_MAX_DIAG_KM,
+    // coarse (roads/water/large buildings only) up to CITY_COARSE_MAX_DIAG_KM,
+    // silently skip beyond that — /api/cities itself rejects >15km diagonal
+    // requests that aren't flagged detail:'coarse' (422), so this isn't optional.
+    const maxDiag = window.CITY_MAX_DIAG_KM ?? 10;
+    const maxDiagCoarse = window.CITY_COARSE_MAX_DIAG_KM ?? 25;
+    if (diagKm > maxDiagCoarse) return;
+    const detail = diagKm > maxDiag ? 'coarse' : 'full';
+
+    try {
+        const { data, error } = await window.api.cities.fetch({
+            north: bbox.north, south: bbox.south, east: bbox.east, west: bbox.west,
+            layers: ['buildings', 'roads', 'waterways'],
+            simplify_tolerance: 3.0, min_area: 5.0,
+            detail,
+        }, signal);
+        if (signal.aborted || error || !data) return;
+        _drawOsmOverlay(data, width, height, bbox);
+    } catch (e) {
+        if (e?.name !== 'AbortError') console.error('OSM overlay fetch failed:', e);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Pan/zoom + click-to-place (per side, independent)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -247,8 +396,16 @@ function _applyZoomCss(side) {
     const canvas = side === 'ref' ? _els().refCanvas : _els().meshCanvas;
     if (!canvas) return;
     const z = _zoom[side];
+    const transform = `translate(${z.offsetX}px, ${z.offsetY}px) scale(${z.scale})`;
     canvas.style.transformOrigin = '0 0';
-    canvas.style.transform = `translate(${z.offsetX}px, ${z.offsetY}px) scale(${z.scale})`;
+    canvas.style.transform = transform;
+    if (side === 'ref') {
+        const osmCanvas = _els().osmCanvas;
+        if (osmCanvas) {
+            osmCanvas.style.transformOrigin = '0 0';
+            osmCanvas.style.transform = transform;
+        }
+    }
 }
 
 function _nativePointFromEvent(side, e) {
@@ -348,4 +505,17 @@ function _initZoomPan() {
     document.getElementById('meshRegUndoBtn')?.addEventListener('click', () => window.undoLastMeshPointPair());
     document.getElementById('meshRegClearBtn')?.addEventListener('click', () => window.clearMeshPointPairs());
     document.getElementById('meshRegCloseBtn')?.addEventListener('click', () => window.closeMeshRegistrationModal());
+
+    const { osmToggle, osmCanvas } = _els();
+    osmToggle?.addEventListener('change', () => {
+        if (!osmCanvas) return;
+        if (!osmToggle.checked) {
+            osmCanvas.getContext('2d').clearRect(0, 0, osmCanvas.width, osmCanvas.height);
+            if (_osmAbortController) _osmAbortController.abort();
+            return;
+        }
+        const dem = window.appState?.lastDemData;
+        const bbox = window.appState?.currentDemBbox;
+        if (dem && bbox) _loadOsmOverlay(bbox, dem.width, dem.height);
+    });
 }

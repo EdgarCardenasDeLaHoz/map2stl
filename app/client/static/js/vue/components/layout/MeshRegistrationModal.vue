@@ -12,9 +12,16 @@
       </div>
       <div class="mesh-reg-panels">
         <div class="mesh-reg-panel">
-          <div class="mesh-reg-panel-title">DEM / Reference</div>
+          <div class="mesh-reg-panel-title">
+            DEM / Reference
+            <label class="mesh-reg-osm-toggle" title="Overlay OSM buildings/roads to make ground-truth points easier to match">
+              <input type="checkbox" id="meshRegOsmToggle" checked>
+              OSM
+            </label>
+          </div>
           <div id="meshRegRefWrap" class="mesh-reg-canvas-wrap">
             <canvas id="meshRegRefCanvas" class="mesh-reg-canvas"></canvas>
+            <canvas id="meshRegOsmCanvas" class="mesh-reg-canvas mesh-reg-osm-canvas"></canvas>
           </div>
         </div>
         <div class="mesh-reg-panel">
