@@ -165,13 +165,13 @@ After you edit code, before committing:
 - MAE 7.55m on 573 high-res tiles (512×512 @ 1.0 m/pixel)
 - Architecture [6,7,6,8,7,7,7,7,9] (22,184 params)
 - Deliverable: `models/retna_phase_g_global.pt` (Phase H warmstart)
-- See: `PHASE-G-README.md`
+- See: `docs/phase-history/PHASE-G-README.md`
 
 ### Phase H (May 7-8, 2026) — Validation complete
 - RMSE 17.75m (3-cycle test + 10-epoch retraining)
 - Promotion eligible; metric switched MAE → RMSE
 - Deliverable: `models/retna_phase_h_final.pt`
-- See: `PHASE-H-LAUNCH-SUMMARY.md`, `PHASE-H-BENCHMARK-TIERS.md`
+- See: `docs/phase-history/PHASE-H-LAUNCH-SUMMARY.md`, `docs/phase-history/PHASE-H-BENCHMARK-TIERS.md`
 
 ### F-SKY / F-DET (Current focus) — Skyline CV pipeline
 Computer-vision improvements to `city2stl/skyline/` for cross-view building height estimation.
