@@ -9,16 +9,6 @@ _Last updated: 2026-07-19_
 
 ## Active Technical Debt
 
-### 0. Git line-ending churn (CRLF) — `.gitattributes` ADDED 2026-06-07, apply pending
-`git status` reports ~95 files modified, but `git diff --ignore-all-space` is
-empty: every diff is pure CRLF↔LF noise (`core.autocrlf=true`, repo inside
-OneDrive). **`strm2stl/.gitattributes` is now committed-to-disk** (`* text=auto
-eol=lf` + per-type rules; `.bat/.cmd/.ps1` keep CRLF) and verified applying.
-**Remaining one-time step (owner, needs a commit):**
-`git add --renormalize . && git commit -m "Normalize line endings to LF"`.
-Until that commit + re-checkout the phantom diff persists. Do it as its own
-commit, ideally before/after the F-CLEAN14 refactor commit (not mixed in).
-
 ### 0b. `city2stl/skyline/runs/` is 1.1 GB on disk
 Gitignored (not in history) but a OneDrive-sync burden. Most of it is
 `runs/height_traces/_unused/` minimap PNGs + stale `cartagena_run*.log`.
@@ -48,6 +38,12 @@ loop (`_resampleNearest` helper). Regression test:
 `tests/e2e/test_interactions.py::test_combined_view_resamples_mismatched_water_mask`.
 
 ## Resolved Technical Debt
+
+### ~~Git line-ending churn (CRLF) — renormalization pending~~ ✅ (2026-07-26)
+`.gitattributes` (`* text=auto eol=lf` + per-type rules; `.bat/.cmd/.ps1` keep
+CRLF) was added 2026-06-07, and the index is now fully normalized: `git
+ls-files --eol` reports **0 files stored as CRLF**, and a clean tree no longer
+shows the ~95-file phantom diff. No `git add --renormalize` commit is needed.
 
 ### ~~stl_to_heightmap always returned an all-NaN heightmap~~ ✅ (2026-07-19)
 `city2stl/skyline/height/stl_import.py:stl_to_heightmap` accumulated per-pixel
