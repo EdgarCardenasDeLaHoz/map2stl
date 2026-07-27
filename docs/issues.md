@@ -9,10 +9,12 @@ _Last updated: 2026-07-19_
 
 ## Active Technical Debt
 
-### 0b. `city2stl/skyline/runs/` is 1.1 GB on disk
-Gitignored (not in history) but a OneDrive-sync burden. Most of it is
-`runs/height_traces/_unused/` minimap PNGs + stale `cartagena_run*.log`.
-Safe to delete; consider a `make clean-runs` target. See AUDIT-2026-06-07.md.
+### 0b. `city2stl/skyline/runs/` is ~6 GB on disk
+Gitignored (not in history) but a OneDrive-sync burden. As of 2026-07-26 it is
+~6 GB, dominated by regenerable caches: `image_cache` (2.6 GB),
+`satellite_image_cache` (1.9 GB), `region_reports` (1.4 GB PDFs). Run
+**`make clean-runs`** to drop the cache dirs + stale `*.log` (~4.6 GB); it keeps
+`region_reports/` and `height_traces/`. See AUDIT-2026-06-07.md.
 
 ### 1. `<script>` vs Module Boundary
 HTML inline `onclick=`/`onchange=` attributes have been removed (converted to `addEventListener` in event-listeners.js). One intentional inline `onclick=` remains on the dev-only debug error overlay dismiss button. Converting app.js itself to a full ES module is not planned — keep public functions on `window.*`.
