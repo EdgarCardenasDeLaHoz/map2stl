@@ -244,7 +244,8 @@ window.autoRegisterMesh = async function autoRegisterMesh(opts = {}) {
 
 /** Render the (unregistered) mesh heightmap into a preview canvas, reusing the DEM colour LUT. */
 function _renderMeshPreviewCanvas(values, width, height, vmin, vmax) {
-    const canvas = window.renderDEMCanvas?.(values, width, height, 'terrain', vmin, vmax);
+    const canvas = window.renderDEMCanvas?.(values, width, height, 'terrain', vmin, vmax,
+        { skipStateUpdate: true });
     window.appState.meshPreviewCanvas = canvas || null;
     return canvas;
 }
@@ -262,7 +263,7 @@ window.applyMeshRegistration = function applyMeshRegistration(result) {
 
     const canvas = window.renderDEMCanvas?.(
         result.values, result.width, result.height, 'terrain',
-        result.minElevation, result.maxElevation);
+        result.minElevation, result.maxElevation, { skipStateUpdate: true });
 
     // Cut out invalid (unregistered/out-of-mask) pixels so the layer only
     // covers the mesh's real footprint, not the full reference canvas.

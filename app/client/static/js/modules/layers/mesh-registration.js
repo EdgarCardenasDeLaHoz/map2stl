@@ -21,7 +21,15 @@
  *
  * Dependencies:
  *   window.appState.meshImport.heightmap  — set by computeMeshHeightmap()
- *   window.appState.lastDemData           — reference raster
+ *   window.appState.lastDemData           — reference raster (read once at
+ *                                            modal-open time; never write
+ *                                            back through it — pass
+ *                                            {skipStateUpdate: true} to
+ *                                            renderDEMCanvas, since it would
+ *                                            otherwise clobber the real DEM's
+ *                                            lastDemData with this modal's
+ *                                            preview canvases, see F-MESHIMPORT
+ *                                            auto-mode bug notes)
  *   window.renderDEMCanvas                — shared heightmap colorizer
  *   window.api.mesh.register
  *   window.applyMeshRegistration          — modules/layers/mesh-layer.js
@@ -154,7 +162,8 @@ window.computeMeshRegistration = async function computeMeshRegistration() {
 function _drawSide(side, values, width, height, vmin, vmax) {
     const canvas = side === 'ref' ? _els().refCanvas : _els().meshCanvas;
     if (!canvas) return;
-    const rendered = window.renderDEMCanvas?.(values, width, height, 'terrain', vmin, vmax);
+    const rendered = window.renderDEMCanvas?.(values, width, height, 'terrain', vmin, vmax,
+        { skipStateUpdate: true });
     if (!rendered) return;
     canvas.width = rendered.width;
     canvas.height = rendered.height;

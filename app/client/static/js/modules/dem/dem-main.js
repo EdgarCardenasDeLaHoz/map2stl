@@ -336,35 +336,42 @@ window.loadDEM = async function loadDEM(highRes = false) {
 
 /**
  * Render elevation values to a canvas element using a colour lookup table.
- * Stores data in appState.lastDemData, then updates layer status.
+ * Stores data in appState.lastDemData, then updates layer status — unless
+ * `skipStateUpdate` is set, for callers (mesh heightmap preview/registration)
+ * that only want the colorized canvas and must not clobber the real DEM's
+ * lastDemData/curveData/workflow state with their own unrelated raster.
  * @param {number[]} values - Flat array of elevation values (row-major)
  * @param {number} width - Canvas width in pixels
  * @param {number} height - Canvas height in pixels
  * @param {string} colormap - Colormap name ('terrain','viridis','jet','rainbow','hot','gray')
  * @param {number} [vmin] - Minimum value for colour mapping
  * @param {number} [vmax] - Maximum value for colour mapping
+ * @param {{skipStateUpdate?: boolean}} [opts] - set skipStateUpdate to render
+ *   a canvas without touching appState.lastDemData/curveData/workflow/layer status
  * @returns {HTMLCanvasElement} The rendered canvas element
  */
-window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colormap, vmin, vmax) {
-    // Store last DEM data
-    const lastDemData = { values: _isArrayLike(values) ? values : [], width, height, colormap, vmin, vmax };
-    window.appState.lastDemData = lastDemData;
+window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colormap, vmin, vmax, opts = {}) {
+    if (!opts.skipStateUpdate) {
+        // Store last DEM data
+        const lastDemData = { values: _isArrayLike(values) ? values : [], width, height, colormap, vmin, vmax };
+        window.appState.lastDemData = lastDemData;
 
-    window._setDemEmptyState?.(false);
-    window._updateWorkflowStepper?.();
+        window._setDemEmptyState?.(false);
+        window._updateWorkflowStepper?.();
 
-    // Notify curve-editor.js (and any other listeners) that a new DEM is loaded.
-    window.events?.emit(window.EV?.DEM_LOADED, vmin, vmax);
-    // Auto-rebuild the 3D model if the Extrude view is currently open.
-    window._modelViewerAutoRebuild?.();
-    window.appState.curveDataVmin = vmin;
-    window.appState.curveDataVmax = vmax;
+        // Notify curve-editor.js (and any other listeners) that a new DEM is loaded.
+        window.events?.emit(window.EV?.DEM_LOADED, vmin, vmax);
+        // Auto-rebuild the 3D model if the Extrude view is currently open.
+        window._modelViewerAutoRebuild?.();
+        window.appState.curveDataVmin = vmin;
+        window.appState.curveDataVmax = vmax;
 
-    // Track DEM layer bbox
-    const currentDemBbox = window.appState.currentDemBbox;
-    if (currentDemBbox) {
-        window.appState.layerBboxes.dem = { ...currentDemBbox };
-        window.setLayerStatus('dem', 'loaded');
+        // Track DEM layer bbox
+        const currentDemBbox = window.appState.currentDemBbox;
+        if (currentDemBbox) {
+            window.appState.layerBboxes.dem = { ...currentDemBbox };
+            window.setLayerStatus('dem', 'loaded');
+        }
     }
 
     const canvas = document.createElement('canvas');
