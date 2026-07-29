@@ -528,6 +528,23 @@ _MICROPOLITAN_TIER_EXTENT_M = {
     "XL": 1000.0,  # each quadrant tile covers 1/4 of the L-tier area (half per axis)
 }
 
+# Measured "L" tier XY extent (mesh units, isotropic render) across 8 real
+# Micropolitan cities: Miami 101.4, Bilbao 101.6, Barcelona 102.5, Paris
+# 101.4, Prague 107.6, Valencia 108.9, Lisbon 112.4, Salzburg 79.6 (median
+# 102.0, stdev 9.9). 7/8 sit within -0.7%..+10.2% of the median — consistent
+# with a genuinely fixed ~2km real-world footprint per "L" tile, so the flat
+# per-tier metres assumption is fine for them. Salzburg alone deviates by
+# -22% (its compact historic-core crop is real-world SMALLER than the other
+# cities' "L" tiles, not a differently-scaled export) — using the flat
+# assumption there was confirmed to derive a scale anchor ~29% off, which
+# fed a wrong OSM-fetch bbox that corrupted the registration search (see
+# numpy2stl's global_search.py / hill_relief_mask work). Below this
+# threshold, fall back to scaling the tier's real-world size by how far the
+# mesh's own extent deviates from the reference median — cheap, no network
+# call, and validated to recover Salzburg's correct footprint (~1.56km).
+_MICROPOLITAN_L_REFERENCE_EXTENT_UNITS = 102.0
+_MICROPOLITAN_OUTLIER_DEVIATION = 0.15  # trigger the extent-ratio correction beyond this
+
 
 def parse_micropolitan_scale_m_per_unit(name: str, stl_xy_extent_units: float) -> float | None:
     """Derive a metres-per-model-unit scale from a Micropolitan filename's size
@@ -536,6 +553,10 @@ def parse_micropolitan_scale_m_per_unit(name: str, stl_xy_extent_units: float) -
     `stl_xy_extent_units` is the mesh's XY bounding-box extent in its own
     (unitless) model coordinates — the longer of its X/Y bounds spans, matching
     how numpy2stl.registration.pipeline.register_city_stl computes stl_xy_extent.
+
+    For "L"-tier files (the tier this has real reference data for), corrects
+    for outlier crops whose real-world footprint genuinely isn't the tier's
+    nominal size — see _MICROPOLITAN_L_REFERENCE_EXTENT_UNITS above.
     """
     if stl_xy_extent_units <= 0:
         return None
@@ -547,6 +568,18 @@ def parse_micropolitan_scale_m_per_unit(name: str, stl_xy_extent_units: float) -
     extent_m = _MICROPOLITAN_TIER_EXTENT_M.get(tier)
     if extent_m is None:
         return None
+
+    if tier == "L":
+        deviation = (stl_xy_extent_units - _MICROPOLITAN_L_REFERENCE_EXTENT_UNITS) \
+            / _MICROPOLITAN_L_REFERENCE_EXTENT_UNITS
+        if abs(deviation) > _MICROPOLITAN_OUTLIER_DEVIATION:
+            corrected_extent_m = extent_m * (stl_xy_extent_units / _MICROPOLITAN_L_REFERENCE_EXTENT_UNITS)
+            logger.info(
+                f"auto_register: {name!r} L-tier extent {stl_xy_extent_units:.1f} units deviates "
+                f"{deviation:+.1%} from the {_MICROPOLITAN_L_REFERENCE_EXTENT_UNITS:.0f}-unit reference - "
+                f"using corrected footprint {corrected_extent_m:.0f}m instead of the flat {extent_m:.0f}m tier size")
+            extent_m = corrected_extent_m
+
     return extent_m / stl_xy_extent_units
 
 
