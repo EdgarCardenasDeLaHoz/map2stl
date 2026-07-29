@@ -591,6 +591,17 @@ def auto_register(
     toward a sharp, well-supported sweep peak, never an open-ended
     data-trust that could drift wildly wrong (see global_search.py's
     locked-scale branch for the full reasoning and guardrails).
+
+    Passes out_dir=False: register_city_stl() otherwise always writes a full
+    17-plot HTML report to Code/_reports/{region}/ (~11s/call measured
+    across an 8-city profiling run — matplotlib's own per-figure creation +
+    savefig overhead, not a bug in any one plot, so not worth chasing
+    further there). This app never reads that report — the manual picker's
+    own UI is the source of truth — so writing it on every auto-register
+    call was pure overhead on the interactive path. Standalone research/
+    batch scripts that DO want the HTML report should call
+    numpy2stl.registration.pipeline.register_city_stl() directly with its
+    default out_dir, not through this function.
     """
     if not _AUTO_REGISTER_AVAILABLE:
         return {
@@ -647,7 +658,7 @@ def auto_register(
         report = _register_city_stl(
             str(mesh_path), city_name, resolution=resolution,
             scale_m_per_unit=scale_m_per_unit, center=center,
-            free_scale=True)
+            free_scale=True, out_dir=False)
     except Exception as exc:
         logger.exception(f"auto_register: registration failed for {city_name!r}")
         return {
