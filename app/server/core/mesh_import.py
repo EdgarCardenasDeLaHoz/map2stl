@@ -580,6 +580,17 @@ def auto_register(
     OSM raster searches for a small target in a frame mostly irrelevant to
     it, which was a real, measured cause of poor fit quality before this was
     added (see F-MESHIMPORT plan notes, Miami case study).
+
+    Passes free_scale=True to register_city_stl(): the geometric scale
+    anchor (1/osm_margin) assumes the OSM fetch bbox landed at exactly
+    osm_margin x the STL footprint, but that's only as good as the upstream
+    footprint-size estimate (e.g. a Micropolitan pack's rounded "~2km" size
+    tier). Measured on Miami: the anchor (0.667x) was ~1-2% off two
+    independent data-driven estimates (Dice-peak 0.675x, Fourier 0.680x)
+    that agreed with each other — free_scale allows a bounded +-5% nudge
+    toward a sharp, well-supported sweep peak, never an open-ended
+    data-trust that could drift wildly wrong (see global_search.py's
+    locked-scale branch for the full reasoning and guardrails).
     """
     if not _AUTO_REGISTER_AVAILABLE:
         return {
@@ -635,7 +646,8 @@ def auto_register(
     try:
         report = _register_city_stl(
             str(mesh_path), city_name, resolution=resolution,
-            scale_m_per_unit=scale_m_per_unit, center=center)
+            scale_m_per_unit=scale_m_per_unit, center=center,
+            free_scale=True)
     except Exception as exc:
         logger.exception(f"auto_register: registration failed for {city_name!r}")
         return {
