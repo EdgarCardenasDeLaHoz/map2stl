@@ -108,7 +108,7 @@ async function loadCompareRegion(side) {
     try {
         const colormap = document.getElementById(`compare${cap}Colormap`)?.value || 'terrain';
         const params = new URLSearchParams({ north: region.north, south: region.south, east: region.east, west: region.west, dim: 200 });
-        const { data, error: demErr } = await api.dem.load(params);
+        const { data, error: demErr } = await window.api.dem.load(params);
         if (demErr) throw new Error(demErr);
         if (!(data.dem_values || data.dem_values_b64) || !data.dimensions) throw new Error(data.error || 'No DEM data returned');
 

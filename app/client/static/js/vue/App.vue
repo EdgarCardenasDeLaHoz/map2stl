@@ -14,7 +14,6 @@
 </template>
 
 <script setup lang="ts">
-import { Teleport } from 'vue';
 import SidebarPanel from './components/sidebar/SidebarPanel.vue';
 import AppShell     from './components/layout/AppShell.vue';
 import ContentArea  from './components/views/ContentArea.vue';

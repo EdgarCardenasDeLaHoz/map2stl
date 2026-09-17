@@ -1,46 +1,36 @@
 """skyline._pano.orchestrator — extracted from pano_registration.py (A2 split)."""
 from __future__ import annotations
+
 import json
 import math
-import os
-import time
 from contextlib import nullcontext
 from pathlib import Path
+
 import cv2
 import numpy as np
+
+from .._core.timing import _StepTimer
+from .._region_render._draw import _negative_seed_views
 from ..pipeline import (
     BuildingRecord,
-    CapturedView,
-    Viewpoint,
-    _merge_silhouette_sources,
     _neural_sky_and_building_masks,
     aggregate_building_heights,
-    augment_estimates_with_depth,
-    detect_building_silhouettes,
-    detect_buildings_from_mask,
-    estimate_heights_from_registration,
-    match_segments_to_buildings,
-    osm_anchor_silhouettes,
-    osm_sam_instance_silhouettes,
-    register_view_to_osm,
 )
-from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResult
 from ..region_config import (
-    FLICKR_API_KEY as _FLICKR_API_KEY,
     _F_SKY1_ENABLED,
-    _F_SKY11_1_ENABLED,
-    _F_SKY12_ENABLED,
-    _F_SKY5_ENABLED,
 )
-from ..region_data import _bearing_deg, _distance_m, _fetch_elevations
+from ..region_data import _fetch_elevations
+from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResult
 from ..streetview_io import _meta_location, _streetview_image, _streetview_metadata
-from ..seed_selection import _screen_score_from_image
-from ..region_render import _negative_seed_views, _registration_overlay
-
 from .capture import _capture_pano_views
-from .heading import _recover_pano_heading, _recover_anchor_offset
-from .detect import (_register_views, _smooth_matches_across_views,
-                     _smooth_pano_matches_against_views, _build_and_detect_pano)
+from .detect import (
+    _build_and_detect_pano,
+    _register_views,
+    _smooth_matches_across_views,
+    _smooth_pano_matches_against_views,
+)
+from .heading import _recover_anchor_offset, _recover_pano_heading
+
 
 def _seed_multiview_registration(
     seeds: list[SkylinePoint],
@@ -53,9 +43,9 @@ def _seed_multiview_registration(
     max_plausible_height_m: float = 300.0,
     cross_view_state: dict | None = None,
     pano_recovery_state: dict | None = None,
-    timer: "_StepTimer | None" = None,
-    web_image_cache: "dict[str, np.ndarray] | None" = None,
-) -> tuple[list[SeedViewRegistration], list[dict], list["StitchedPanoResult"]]:
+    timer: _StepTimer | None = None,
+    web_image_cache: dict[str, np.ndarray] | None = None,
+) -> tuple[list[SeedViewRegistration], list[dict], list[StitchedPanoResult]]:
     """Capture a full 360° spin (every spin_step_deg) at each seed location.
 
     Each successful registration contributes height estimates to the aggregate.
@@ -103,7 +93,7 @@ def _seed_multiview_registration(
 
     resolved: list[tuple[SkylinePoint, float, bool]] = []
     seed_elevs = _fetch_elevations([(s.lat, s.lon) for s in seeds])
-    for seed, seed_elev in zip(seeds, seed_elevs):
+    for seed, seed_elev in zip(seeds, seed_elevs, strict=False):
         bound: SkylinePoint | None = None
         cache_key = _seed_cache_key(seed)
 

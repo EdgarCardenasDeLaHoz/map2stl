@@ -244,7 +244,7 @@ def web_skyline_seeds(
     region_bbox_center: tuple[float, float] | None = None,
     # kept for call-site compatibility; Flickr is no longer used
     flickr_api_key: str = "",
-) -> tuple[list["SkylinePoint"], dict[str, np.ndarray]]:
+) -> tuple[list[SkylinePoint], dict[str, np.ndarray]]:
     """Fetch web skyline images and return (SkylinePoint list, image cache).
 
     Parameters

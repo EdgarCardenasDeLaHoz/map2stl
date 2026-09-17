@@ -422,47 +422,71 @@ function _updateSceneOverlays(data) {
 // Preview
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Read a numeric form field. `parseFloat(x) || default` turned a legitimate 0
+ * (no base plate) into the default, so this falls back only on a value that
+ * is not a number, or - for fields where zero is meaningless - not positive.
+ */
+function _num(id, fallback, { positive = false, int = false } = {}) {
+    const raw = document.getElementById(id)?.value;
+    const v = int ? parseInt(raw, 10) : parseFloat(raw);
+    if (!Number.isFinite(v) || (positive && v <= 0)) return fallback;
+    return v;
+}
+
+/**
+ * Every field that shapes the mesh, read from the Extrude form in one place.
+ * The preview sends exactly this, stores it on generatedModelData, and every
+ * export reuses the stored copy - so a downloaded file is always the model the
+ * viewer last showed, never a mix of that and whatever the form says now.
+ */
+function _readBuildParams() {
+    const checked = (id) => document.getElementById(id)?.checked || false;
+    return {
+        model_height:     _num('exportModelHeight', 30, { positive: true }),
+        base_height:      _num('exportBaseHeight', 5),
+        exaggeration:     _num('exportExaggeration', 1.0, { positive: true }),
+        mm_per_pixel:     _num('mmPerPixel', 1.0, { positive: true }),
+        sea_level_cap:    checked('exportSeaLevelCap'),
+        engrave_label:    checked('exportEngraveLabel'),
+        label_text:       document.getElementById('exportLabelText')?.value
+                          || window.appState?.selectedRegion?.name || 'terrain',
+        contours:         checked('exportContours'),
+        contour_interval: _num('exportContourInterval', 100, { positive: true, int: true }),
+        contour_style:    document.getElementById('exportContourStyle')?.value || 'engraved',
+    };
+}
+
+// Rebuilds fire on every settings change, so two can overlap. Each request
+// takes a number; a response that is not the latest is dropped, or a slow
+// older answer could land last and become the model the export ships.
+let _previewSeq = 0;
+
 async function previewModelIn3D() {
     const ldd = window.appState?.lastDemData;
     if (!ldd?.values?.length) {
         window.showToast('Load a DEM first (Edit tab → Reload).', 'warning'); return;
     }
 
-    const previewBtn = document.getElementById('previewModelBtn');
-    const statusEl   = document.getElementById('modelStatus');
-    if (previewBtn) previewBtn.disabled = true;
+    const seq = ++_previewSeq;
+    const statusEl = document.getElementById('modelStatus');
     if (statusEl) statusEl.textContent = '⏳ Building mesh…';
+    document.getElementById('modelViewerContainer')?.classList.add('mesh-building');
 
     if (!modelRenderer) initModelViewer();
 
+    const hadModel = !!window.appState.generatedModelData;
     try {
-        // Read all build params directly from the DOM — single source of truth.
-        // (appState.demParams.height is only synced on manual `change` events,
-        //  so it can lag the input when auto-rebuild fires.)
-        const modelHeight  = parseFloat(document.getElementById('exportModelHeight')?.value) || 30;
-        const baseHeight   = parseFloat(document.getElementById('exportBaseHeight')?.value)  || 5;
-        const exaggeration = parseFloat(document.getElementById('exportExaggeration')?.value) || 1.0;
-        const mmPerPixel   = parseFloat(document.getElementById('mmPerPixel')?.value) || 1.0;
-
+        const build = _readBuildParams();
         const ds = window._demSettings ? window._demSettings() : {};
         const { data, error: previewErr } = await window.api.export.preview({
             ...ds,
-            model_height: modelHeight,
-            base_height:  baseHeight,
-            exaggeration,
-            mm_per_pixel:  mmPerPixel,
-            sea_level_cap: document.getElementById('exportSeaLevelCap')?.checked || false,
-            // Absent checkbox means solid, matching the server default; an open
-            // top surface with no floor is the opt-in, not the fallback.
-            solid:         document.getElementById('viewerSolidPreview')?.checked ?? true,
-            // These previously only applied at file-export time, so the live
-            // preview never reflected them until you downloaded the model.
-            engrave_label:    document.getElementById('exportEngraveLabel')?.checked || false,
-            label_text:       document.getElementById('exportLabelText')?.value || window.appState?.selectedRegion?.name || '',
-            contours:         document.getElementById('exportContours')?.checked || false,
-            contour_interval: parseInt(document.getElementById('exportContourInterval')?.value) || 100,
-            contour_style:    document.getElementById('exportContourStyle')?.value || 'engraved',
+            ...build,
+            // View-only: the exported file is always a closed solid. Absent
+            // checkbox means solid, matching the server default.
+            solid: document.getElementById('viewerSolidPreview')?.checked ?? true,
         });
+        if (seq !== _previewSeq) return;          // superseded by a newer rebuild
         if (previewErr) throw new Error(previewErr);
 
         const cmap = document.getElementById('viewerColormap')?.value || 'terrain';
@@ -473,20 +497,46 @@ async function previewModelIn3D() {
 
         window.appState.generatedModelData = {
             values: ldd.values, width: ldd.width, height: ldd.height,
-            mmPerPixel,
-            modelHeight,
-            exaggeration, baseHeight,
             vmin: ldd.vmin, vmax: ldd.vmax,
+            // What the export sends: the same DEM settings and build fields
+            // this preview was made from.
+            demSettings: ds,
+            buildParams: build,
+            // Legacy names, still read by the cross-section export.
+            mmPerPixel: build.mm_per_pixel,
+            modelHeight: build.model_height,
+            exaggeration: build.exaggeration,
+            baseHeight: build.base_height,
         };
         window._setExportButtonsEnabled?.(true);
         window.appState._updateWorkflowStepper?.();
-        if (statusEl) statusEl.textContent = `Preview: ${ldd.width}×${ldd.height}, ${data.face_count.toLocaleString()} faces`;
-        window.showToast('3D preview ready — drag to rotate, shift+drag to pan, scroll to zoom.', 'success');
+        if (statusEl) {
+            const warn = data.composite_error ? `  ⚠ composite failed, raw DEM shown` : '';
+            statusEl.textContent = `Preview: ${ldd.width}×${ldd.height}, `
+                + `${data.face_count.toLocaleString()} faces, `
+                + `${(data.z_max ?? 0).toFixed(1)} mm tall${warn}`;
+        }
+        if (data.composite_error) {
+            window.showToast('Server composite failed - preview shows the raw DEM: '
+                + data.composite_error, 'error', 8000);
+        } else if (!hadModel) {
+            // Only on the first build; a toast per keystroke piles up.
+            window.showToast('3D preview ready — drag to rotate, shift+drag to pan, scroll to zoom.', 'success');
+        }
     } catch (e) {
+        if (seq !== _previewSeq) return;
+        // The form no longer matches any mesh, so there is nothing honest to
+        // export: drop the stale model and disable the buttons until a rebuild
+        // succeeds.
+        window.appState.generatedModelData = null;
+        window._setExportButtonsEnabled?.(false);
+        window.appState._updateWorkflowStepper?.();
         if (statusEl) statusEl.textContent = '❌ ' + e.message;
         window.showToast('Preview failed: ' + e.message, 'error');
     } finally {
-        if (previewBtn) previewBtn.disabled = false;
+        if (seq === _previewSeq) {
+            document.getElementById('modelViewerContainer')?.classList.remove('mesh-building');
+        }
     }
 }
 
@@ -504,7 +554,11 @@ function _buildMeshFromPreview(data, cmap) {
     const mmPerPx  = data.mm_per_pixel ?? 1.0;
     const widthMm  = Math.max(data.cols * mmPerPx, 1);
     const depthMm  = Math.max(data.rows * mmPerPx, 1);
-    const totalHeightMm = (data.model_height || 0) + (data.base_height || 0);
+    // The server reports the mesh's real top; model_height + base ignores
+    // exaggeration, which multiplies the relief.
+    const totalHeightMm = Number.isFinite(data.z_max)
+        ? data.z_max
+        : (data.model_height || 0) * (data.exaggeration || 1) + (data.base_height || 0);
     // Longest physical dimension maps to 100 display units; others scale equally.
     const longest = Math.max(widthMm, depthMm, totalHeightMm, 1);
     const SCALE = 100 / longest;
@@ -659,7 +713,11 @@ function updatePuzzlePreview() {
 
     const pX = parseInt(document.getElementById('splitCols')?.value) || 3;
     const pY = parseInt(document.getElementById('splitRows')?.value) || 3;
-    const w = 100, h = 100;
+    // Cut lines in the mesh's own display units, so they span the model rather
+    // than a fixed square, and sit just above its highest point.
+    const g = geometry_scale_for_overlays;
+    const w = (g.widthMm || 100) * (g.scale || 1);
+    const h = (g.depthMm || 100) * (g.scale || 1);
     const verts = [];
     for (let i = 1; i < pX; i++) { const x = (i / pX) * w - w / 2; verts.push(x, 0, -h / 2, x, 0, h / 2); }
     for (let j = 1; j < pY; j++) { const z = (j / pY) * h - h / 2; verts.push(-w / 2, 0, z, w / 2, 0, z); }
@@ -668,7 +726,7 @@ function updatePuzzlePreview() {
     const mat  = new THREE.LineBasicMaterial({ color: 0xff2222, depthTest: false });
     const lines = new THREE.LineSegments(geo, mat);
     lines.name = 'puzzleCuts';
-    lines.position.y = 6;
+    lines.position.y = (g.totalHeightMm || 0) * (g.scale || 1) + 0.5;
     modelScene.add(lines);
     needsRender = true;
 }
@@ -695,13 +753,12 @@ async function exportPuzzle3MF() {
     try {
         setStatus(`Starting puzzle export (${pX}×${pY})...`);
 
-        const ds = window._demSettings ? window._demSettings() : {};
+        // Same DEM and build fields as the preview. This sent
+        // `md.resolution`, which does not exist, so every puzzle came out at
+        // the server's 20 mm default and 1 mm per pixel.
         const body = {
-            ...ds,
-            model_height: md.resolution,
-            base_height: md.baseHeight,
-            exaggeration: md.exaggeration,
-            sea_level_cap: document.getElementById('exportSeaLevelCap')?.checked || false,
+            ...(md.demSettings || window._demSettings?.() || {}),
+            ...md.buildParams,
             name: region.name || 'terrain',
             split_cols: pX,
             split_rows: pY,
@@ -797,6 +854,7 @@ function setViewerAutoRotate(val) {
 window.previewModelIn3D     = previewModelIn3D;
 window.haversineDiagKm      = haversineDiagKm;
 window.updatePuzzlePreview  = updatePuzzlePreview;
+window._readBuildParams     = _readBuildParams;
 window.exportPuzzle3MF      = exportPuzzle3MF;
 window.setViewerAutoRotate  = setViewerAutoRotate;
 window.resetViewerCamera    = resetViewerCamera;

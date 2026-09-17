@@ -1,5 +1,9 @@
+import logging
+
 import numpy as np
 from shapely.geometry import MultiPolygon, Polygon
+
+logger = logging.getLogger(__name__)
 
 # Legacy imports -- only loaded at call time so that _HIGHWAY_WIDTHS and
 # get_road_width_m stay importable without the notebook-era mesh stack.
@@ -112,23 +116,6 @@ def get_z_values(polygon_list, im, bounds_NW):
     return  z_list
 
 
-def polygon_to_vertices(polygon_list):
-    import numpy2stl as n2s  # Import MODULE not function
-
-    triangles = []
-    for poly in polygon_list:
-        x,y,z = poly
-
-        pts = np.array([x,y,z]).T
-
-        tris = n2s.polygon_to_complex(pts, perimeters=None, z_margin=.5)
-        triangles.append(tris)
-
-    triangles = np.concatenate(triangles)
-    vertices, faces = n2s.vertices_to_index(triangles)
-
-    return vertices, faces
-
 def render_vertices(gdf):
     import numpy2stl as n2s  # Import MODULE not function
 
@@ -145,9 +132,11 @@ def render_vertices(gdf):
 
           tris = n2s.polygon_to_complex(pts, perimeters=None, z_margin=.5)
           triangles.append(tris)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("road polygon %d skipped: %s", _n, exc)
 
+    if not triangles:
+        return np.empty((0, 3)), np.empty((0, 3), dtype=int)
     triangles = np.concatenate(triangles)
     vertices, faces = n2s.vertices_to_index(triangles)
 

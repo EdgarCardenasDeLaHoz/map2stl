@@ -10,7 +10,10 @@ region_pdf re-imports these.
 
 # A2 split: thin façade. Implementation in the _pano/ subpackage; all names that
 # region_pdf imports are re-exported here.
-from ._pano.capture import *       # noqa: F401,F403
-from ._pano.heading import *       # noqa: F401,F403
-from ._pano.detect import *        # noqa: F401,F403
+# Star-import order decides which definition wins; keep it fixed.
+# isort: off
+from ._pano.capture import *  # noqa: F401,F403
+from ._pano.heading import *  # noqa: F401,F403
+from ._pano.detect import *  # noqa: F401,F403
 from ._pano.orchestrator import *  # noqa: F401,F403
+# isort: on

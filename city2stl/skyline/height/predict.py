@@ -24,9 +24,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import torch
 
 from city2stl.skyline.height import BBox, HeightResult
 
@@ -140,7 +143,7 @@ def _calibrate_depth(
     depth_rel: np.ndarray,
     known_heights: np.ndarray,
     bbox: BBox,
-) -> Tuple[np.ndarray, float, float]:
+) -> tuple[np.ndarray, float, float]:
     """Fit a linear mapping depth_rel -> metres using *known_heights* samples.
 
     Parameters
@@ -190,7 +193,7 @@ def _calibrate_depth(
 # U-Net helpers
 # ------------------------------------------------------------------------------
 
-def _build_unet(pretrained_encoder: bool = False) -> "torch.nn.Module":
+def _build_unet(pretrained_encoder: bool = False) -> torch.nn.Module:
     """Build a U-Net with EfficientNet-B4 encoder.
 
     Returns an ``nn.Module`` whose forward() accepts an (N, 3, H, W) float32
@@ -225,7 +228,6 @@ def _build_unet(pretrained_encoder: bool = False) -> "torch.nn.Module":
 
         def __init__(self):
             super().__init__()
-            import torch
 
             self.encoder = timm.create_model(
                 "efficientnet_b4",
@@ -367,10 +369,10 @@ def _unet_inference(
 
 def predict(
     sat_rgb: np.ndarray,
-    known_heights: Optional[np.ndarray],
+    known_heights: np.ndarray | None,
     bbox: BBox,
     model: str = "pretrained",
-    checkpoint: Optional[Path] = None,
+    checkpoint: Path | None = None,
     device: str = "cpu",
     tile_size: int = 256,
 ) -> HeightResult:

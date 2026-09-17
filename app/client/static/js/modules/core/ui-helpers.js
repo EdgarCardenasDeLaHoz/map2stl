@@ -6,6 +6,7 @@
  * Reads layer status via window.appState.layerStatus (shared reference with app.js).
  *
  * Public API:
+ *   window.escapeHtml(value)
  *   window.showToast(message, type, duration)
  *   window.toggleCollapsible(header)
  *   window.showLoading(container, message)
@@ -15,6 +16,23 @@
  *   window.updateLayerStatusIndicators()
  *   window.setupCoordinateSearch()
  */
+
+// ============================================================
+// HTML ESCAPING
+// ============================================================
+
+const _HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+/**
+ * Escape a value for safe interpolation into innerHTML (text or quoted attribute).
+ * null/undefined become ''. Non-strings are stringified first.
+ * @param {*} value
+ * @returns {string}
+ */
+window.escapeHtml = function escapeHtml(value) {
+    if (value == null) return '';
+    return String(value).replace(/[&<>"']/g, (c) => _HTML_ESCAPES[c]);
+};
 
 // ============================================================
 // TOAST NOTIFICATIONS

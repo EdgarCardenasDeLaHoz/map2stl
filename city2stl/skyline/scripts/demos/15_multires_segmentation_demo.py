@@ -25,7 +25,6 @@ matcher integration; the outputs are PNGs you can inspect.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
@@ -38,13 +37,6 @@ ROOT = Path(__file__).resolve().parents[4]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from city2stl.skyline.region_pdf import (  # noqa: E402
-    SkylinePoint,
-    _capture_pano_views,
-    _load_site_seed_urls,
-    _parse_streetview_url,
-    _resolve_api_key,
-)
 from city2stl.skyline.pipeline import (  # noqa: E402
     _ADE20K_BUILDING_CLASSES,
     _ADE20K_SKY,
@@ -55,6 +47,13 @@ from city2stl.skyline.pipeline import (  # noqa: E402
     detect_buildings_from_mask,
     stitch_pano_masks,
     stitch_pano_views,
+)
+from city2stl.skyline.region_pdf import (  # noqa: E402
+    SkylinePoint,
+    _capture_pano_views,
+    _load_site_seed_urls,
+    _parse_streetview_url,
+    _resolve_api_key,
 )
 
 SPIN_STEP_DEG = 30.0
@@ -71,7 +70,6 @@ def _segformer_infer(image_rgb: np.ndarray, input_size: int) -> np.ndarray:
     import torch
     import torch.nn.functional as F
     from transformers import (
-        SegformerForSemanticSegmentation,
         SegformerImageProcessor,
     )
     if not _ensure_segformer():

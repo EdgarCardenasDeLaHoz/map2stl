@@ -252,6 +252,8 @@ window.clearServerCache = async function clearServerCache() {
     }
 };
 
+let _cacheStatusIntervalId = null;
+
 /**
  * Wire cache management button click handlers and start the status refresh interval.
  */
@@ -262,5 +264,8 @@ window.setupCacheManagement = function setupCacheManagement() {
 
     window.updateCacheStatusUI();
     window.fetchServerCacheStatus();
-    setInterval(window.updateCacheStatusUI, 5000);
+    // Page-lifetime poll (no teardown in this legacy view); clear any previous
+    // interval so a repeated setup call cannot stack timers.
+    if (_cacheStatusIntervalId !== null) clearInterval(_cacheStatusIntervalId);
+    _cacheStatusIntervalId = setInterval(window.updateCacheStatusUI, 5000);
 };

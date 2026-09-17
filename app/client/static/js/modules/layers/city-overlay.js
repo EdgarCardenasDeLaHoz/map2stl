@@ -383,7 +383,7 @@ window.loadCityData = async function loadCityData() {
                 if (!feat.geometry || !feat.geometry.coordinates) skippedCount++;
             }
         }
-        if (skippedCount > 0 && showToast) {
+        if (skippedCount > 0 && window.showToast) {
             window.showToast(`Warning: ${skippedCount} feature${skippedCount > 1 ? 's' : ''} had missing geometry and were skipped`, 'warning');
         }
 
@@ -401,11 +401,6 @@ window.loadCityData = async function loadCityData() {
     } finally {
         if (loadBtn) loadBtn.disabled = false;
     }
-};
-
-/** Abort any in-flight city data request. */
-window.cancelCityLoad = function cancelCityLoad() {
-    if (_cityDataAbortController) _cityDataAbortController.abort();
 };
 
 // ---------------------------------------------------------------------------

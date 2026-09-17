@@ -240,9 +240,6 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
 
 // Module-scoped visibility state (mirrors the old closure var in app.js)
 let _bboxLayersVisible = true;
-window.getBboxLayersVisible = function getBboxLayersVisible() {
-    return _bboxLayersVisible;
-};
 
 /**
  * Toggle visibility of the preloaded-region and edit-marker Leaflet layers.

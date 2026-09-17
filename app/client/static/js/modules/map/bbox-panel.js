@@ -313,7 +313,7 @@ window.setupBboxKeyboardNav = function setupBboxKeyboardNav() {
         { el: document.getElementById('bboxWest'), key: 'west', isLat: false }
     ];
 
-    bboxInputs.forEach(({ el, key, isLat }) => {
+    bboxInputs.forEach(({ el }) => {
         if (!el) return;
 
         el.addEventListener('keydown', (e) => {

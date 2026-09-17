@@ -1,25 +1,21 @@
 """skyline region_render — split (A3) (_draw)."""
 from __future__ import annotations
-import json
+
 import logging
 import math
-import time
-from contextlib import contextmanager
-from pathlib import Path
+
 import cv2
-import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
-from matplotlib.backends.backend_pdf import PdfPages
-from ..pipeline import BuildingRecord
-from ..region_types import RegionBBox, SeedViewRegistration, SkylinePoint
-from ..region_data import _distance_m, _feature_rings
+
 from ..region_config import (
     _F_SKY13_ENABLED,
     _F_SKY13_RADIUS_M,
     _F_SKY13_SAT_BG_ENABLED,
     _SEGMENT_PALETTE,
 )
+from ..region_data import _feature_rings
+from ..region_types import RegionBBox, SeedViewRegistration, SkylinePoint
 
 logger = logging.getLogger(__name__)
 
@@ -129,10 +125,10 @@ def _registration_overlay(
     return out
 
 def _negative_seed_views(
-    seed: "SkylinePoint",
+    seed: SkylinePoint,
     cached_views: list[dict],
     reason: str | None = None,
-) -> list["SeedViewRegistration"]:
+) -> list[SeedViewRegistration]:
     """Build minimal view rows for a negative / bad seed WITHOUT analysis.
 
     Used for two cases, both kept frames-only as labelled bad examples
@@ -175,8 +171,8 @@ def _draw_osm_coastline_overlay(
     radius_m: float = 1000.0,
     *,
     satellite_bg: bool = False,
-    pano_projected_coastline: "list[tuple[float, float]] | None" = None,
-    pano_projected_vegetation: "list[tuple[float, float]] | None" = None,
+    pano_projected_coastline: list[tuple[float, float]] | None = None,
+    pano_projected_vegetation: list[tuple[float, float]] | None = None,
     pano_osm_iou: float | None = None,
     pano_osm_n_keypoints: int | None = None,
 ) -> None:
@@ -203,8 +199,8 @@ def _draw_osm_coastline_overlay(
         from city2stl.skyline.osm_water import (  # noqa: PLC0415
             clip_to_radius,
             extract_coastline_features,
-            extract_water_features,
             extract_green_features,
+            extract_water_features,
         )
     except ImportError as exc:
         logger.warning("F-SKY13 osm_water module unavailable: %s", exc)
@@ -437,10 +433,10 @@ def _draw_view_minimap(
     *,
     pano_osm_iou: float | None = None,
     pano_osm_n_keypoints: int | None = None,
-    pano_projected_coastline: "list[tuple[float, float]] | None" = None,
-    pano_projected_vegetation: "list[tuple[float, float]] | None" = None,
-    osm_green_features: "list[dict] | None" = None,
-    satellite_bg: "bool | None" = None,
+    pano_projected_coastline: list[tuple[float, float]] | None = None,
+    pano_projected_vegetation: list[tuple[float, float]] | None = None,
+    osm_green_features: list[dict] | None = None,
+    satellite_bg: bool | None = None,
 ) -> None:
     """Draw an OSM-footprint mini-map centered on the seed, with matched
     buildings colored to match their skyline segment.

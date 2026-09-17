@@ -104,10 +104,8 @@ class TestWSF3DProvider:
     def test_name(self):
         assert WSF3DProvider.name == "wsf3d"
 
-    def test_empty_result_when_no_tile_and_no_mosaic(self, monkeypatch, tmp_path):
+    def test_empty_result_when_no_tile_and_no_mosaic(self, monkeypatch, tmp_path, tmp_cache_root):
         """All tiles 404 and the mosaic decoders are absent: all-NaN, no network."""
-        import app.server.core.cache as cache_mod
-        monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path / "cache")
 
         class MockResp:
             status_code = 404
@@ -199,10 +197,8 @@ class TestGlobalMosaicFallback:
 
 
 class TestWSF3DProviderTiles:
-    def test_fetch_with_synthetic_tile(self, monkeypatch, tmp_path):
+    def test_fetch_with_synthetic_tile(self, monkeypatch, tmp_path, tmp_cache_root):
         """Build a fake GeoTIFF in memory and verify the full pipeline."""
-        import app.server.core.cache as cache_mod
-        monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path / "cache")
 
         # Create a synthetic GeoTIFF (Int16, 40×40 pixels, 1° tile)
         tile_h, tile_w = 40, 40
@@ -242,10 +238,8 @@ class TestWSF3DProviderTiles:
         # Confidence is 0.5 where data exists, 0 where NaN
         assert np.all(result.confidence[~np.isnan(result.raster)] == 0.5)
 
-    def test_cache_hit_skips_download(self, monkeypatch, tmp_path):
+    def test_cache_hit_skips_download(self, monkeypatch, tmp_path, tmp_cache_root):
         """Second call to same tile reads from cache, no HTTP."""
-        import app.server.core.cache as cache_mod
-        monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path / "cache")
 
         tile_h, tile_w = 10, 10
         raw = np.full((tile_h, tile_w), 200, dtype=np.int16)

@@ -94,8 +94,11 @@ class TestOpenBuildings:
         assert _is_in_coverage((60.2, 59.8, 11.0, 10.5))     # Oslo
         assert _is_in_coverage((-33.8, -34.0, 151.3, 151.1))  # Sydney
 
+    @patch("city2stl.skyline.height.providers.open_buildings.write_height_result")
+    @patch("city2stl.skyline.height.providers.open_buildings._fetch_buildings_for_bbox",
+           return_value=None)  # offline: no Overture STAC/S3 access
     @patch("city2stl.skyline.height.providers.open_buildings.read_height_result", return_value=None)
-    def test_fetch_returns_nan_placeholder(self, mock_read):
+    def test_fetch_returns_nan_placeholder(self, mock_read, mock_fetch, mock_write):
         """Returns sparse mock data with NaN-dominated raster (non-built areas)."""
         p = OpenBuildingsProvider()
         result = p.fetch_heights((10.5, 10.3, -75.4, -75.6), (20, 20))

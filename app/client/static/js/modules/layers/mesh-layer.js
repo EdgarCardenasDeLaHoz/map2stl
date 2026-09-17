@@ -324,6 +324,8 @@ window.applyMeshToDem = function applyMeshToDem(blendWeight = 1) {
     window.appState.lastDemData = dem;
     if (window.appState) {
         window.appState.originalDemValues = new Float32Array(values);
+        // Only the browser has the blended values; export must ship them.
+        window.appState.demValuesEdited = true;
     }
 
     window.recolorDEM?.();

@@ -37,20 +37,19 @@ See ``docs/plans/F-SKY10-F-SKY11.2-IMPLEMENTATION-2026-05-17.md``.
 from __future__ import annotations
 
 import math
-from typing import Callable
+from collections.abc import Callable
 
 import cv2
 import numpy as np
 
 from .satellite_image import crop_polygon_from_satellite
 
-
 # Max possible RGB Euclidean distance: sqrt(255^2 * 3) ≈ 441.7.
 # Used to normalize the colour distance into [0, 1].
 _MAX_RGB_DIST = 441.673
 
 
-def _median_rgb(patch: "np.ndarray | None") -> "tuple[float, float, float] | None":
+def _median_rgb(patch: np.ndarray | None) -> tuple[float, float, float] | None:
     """Median RGB triplet for a patch, or None if the patch is empty.
 
     Median (not mean) so a single specular highlight or a bird flying past
@@ -72,7 +71,7 @@ def _street_view_roof_strip(
     seg: dict,
     *,
     strip_height_px: int = 14,
-) -> "np.ndarray | None":
+) -> np.ndarray | None:
     """Pixels of the Street View image that the segment claims is the
     building's roof — the top ``strip_height_px`` rows of the segment's
     column range, starting at the segment's ``top_y``.

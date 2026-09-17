@@ -16,7 +16,6 @@ from pathlib import Path
 import numpy as np
 
 from .pipeline import _neural_sky_and_building_masks, detect_skyline_contour
-from .region_types import RegionBBox, SkylinePoint
 from .region_data import (
     _bearing_deg,
     _distance_m,
@@ -24,8 +23,8 @@ from .region_data import (
     _feature_rings,
     _fetch_elevations,
 )
+from .region_types import RegionBBox, SkylinePoint
 from .streetview_io import _meta_location, _streetview_image, _streetview_metadata
-
 
 _SCREEN_CACHE_DIR = Path(__file__).parent / "runs" / "screen_cache"
 
@@ -365,7 +364,7 @@ def _auto_replace_bad_seeds(
     bad_score_threshold: float = 0.20,
     good_score_threshold: float = 0.35,
     proximity_radius_m: float = 2000.0,
-    skip_names: "set[str] | None" = None,
+    skip_names: set[str] | None = None,
 ) -> tuple[list[SkylinePoint], list[tuple[SkylinePoint, SkylinePoint]]]:
     """Swap user-supplied seeds that failed screening with the best-scoring
     nearby auto-proposal.

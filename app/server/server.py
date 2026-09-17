@@ -1,15 +1,10 @@
 # ── sys.path bootstrap ────────────────────────────────────────────────────────
 # Ensure strm2stl/ (config, routers, core) and Code/ (numpy2stl peer) are
 # importable whether this file is run as a script or imported as a module.
-import asyncio
 import logging
 import mimetypes as _mimetypes
 import os
-import sys
 import sys as _sys
-import threading
-import time
-import webbrowser
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -54,19 +49,19 @@ except ImportError:
 
 # Configure logging to write to a file — use an absolute path so the log
 # file never lands inside a directory watched by uvicorn's auto-reloader.
+# Under STRM2STL_TEST_MODE (set by tests/conftest.py) skip the file handler so
+# importing the app in tests neither writes server.log nor holds it open.
 log_file = str(Path(__file__).parent.parent.parent / "server.log")
+_log_handlers: list[logging.Handler] = [logging.StreamHandler()]  # console
+if os.environ.get("STRM2STL_TEST_MODE", "0") != "1":
+    _log_handlers.append(RotatingFileHandler(
+        log_file, maxBytes=5*1024*1024, backupCount=3))  # file with rotation
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),  # Keep logging to console
-        RotatingFileHandler(log_file, maxBytes=5*1024*1024,
-                            backupCount=3)  # Log to file with rotation
-    ]
+    handlers=_log_handlers,
 )
 logger = logging.getLogger(__name__)
-
-selected_location = {}
 
 
 # ---------------------------------------------------------------------------
@@ -342,40 +337,6 @@ async def reports_page(request: Request):
 def run_server():
     port = int(os.environ.get('UI_PORT', '9000'))
     uvicorn.run(app, host="127.0.0.1", port=port)
-
-# Function to detect Jupyter notebook environment
-
-
-def in_notebook():
-    try:
-        from IPython import get_ipython  # noqa: F401
-        if 'IPython' in sys.modules:
-            return True
-        return False
-    except ImportError:
-        return False
-
-# Function to open browser and select location
-
-
-def get_location():
-    thread = threading.Thread(target=run_server, daemon=True)
-    thread.start()
-    webbrowser.open("http://127.0.0.1:9000")
-    logger.info("Waiting for user to select a bounding box...")
-
-    logger.debug(f"Templates path: {templates_path}")
-
-    if not in_notebook():
-        # If in Jupyter, use asyncio.sleep for non-blocking operation
-        while 'lat' not in selected_location:
-            asyncio.run(asyncio.sleep(0.2))
-    else:
-        # Otherwise, use time.sleep for standard blocking operation
-        while 'lat' not in selected_location:
-            time.sleep(0.2)
-
-    return selected_location['lat'], selected_location['lng']
 
 
 if __name__ == "__main__":

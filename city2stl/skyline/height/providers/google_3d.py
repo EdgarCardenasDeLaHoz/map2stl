@@ -715,10 +715,4 @@ class Google3DProvider:
 
 
 def _empty_result(dim: tuple[int, int]) -> HeightResult:
-    h, w = dim
-    return HeightResult(
-        raster=np.full((h, w), np.nan, dtype=np.float32),
-        confidence=np.zeros((h, w), dtype=np.float32),
-        source_name="google3d",
-        resolution_m=_RESOLUTION_M,
-    )
+    return HeightResult.empty(dim, "google3d", _RESOLUTION_M)

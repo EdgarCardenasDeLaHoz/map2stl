@@ -17,7 +17,7 @@ neighbours) are loaded into the leading slice. New neurons start at random,
 which is the desired behaviour — they fit residual error not yet captured.
 
 Usage:
-    python -m tools.ml.grow_prune \\
+    python -m tools.ml.train.grow_prune \\
         --tiles cache/height_tiles_combined \\
         --start-checkpoint models/retna_v1.pt \\
         --output models/retna_grow.pt \\
@@ -38,12 +38,10 @@ if hasattr(sys.stderr, "reconfigure"):
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
 
 _HERE = Path(__file__).resolve().parent
@@ -53,13 +51,14 @@ for _p in (_STRM2STL, _STRM2STL.parent):
         sys.path.insert(0, str(_p))
 
 from tools.ml.models import Retna_V1  # noqa: E402
-from tools.ml.train.train_retna import (
-    HeightTileDataset,
+from tools.ml.train.train_retna import (  # noqa: E402
     HEIGHT_NORM_M,
+    HeightTileDataset,
     dice_loss,
-    squared_residual_dice,
     evaluate,
+    squared_residual_dice,
 )  # noqa: E402
+
 
 # Default loss for the grow/prune loop. dice_l2 = Dice + L2 (squared residual)
 # was added in train_retna.py; it punishes big under-predictions of tall
@@ -127,7 +126,8 @@ def block_scores(model: Retna_V1, loader, device, batches: int = 4) -> list[dict
     for rgb, target in loader:
         if n >= batches:
             break
-        rgb = rgb.to(device); target = target.to(device)
+        rgb = rgb.to(device)
+        target = target.to(device)
         pred = model(rgb)
         loss = _loss_fn(pred, target)
         model.zero_grad(set_to_none=True)
@@ -241,7 +241,7 @@ def shape_aware_load(model: nn.Module, prev_state: dict[str, torch.Tensor]) -> N
 
             old_off = max(old_prefix, 0)
             new_off = max(new_prefix, 0)
-            for old_c, new_c in zip(prev_block_out, model_block_out):
+            for old_c, new_c in zip(prev_block_out, model_block_out, strict=False):
                 keep_c = min(old_c, new_c)
                 if keep_c > 0:
                     target[:n_out, new_off:new_off + keep_c, :, :].copy_(
@@ -253,7 +253,7 @@ def shape_aware_load(model: nn.Module, prev_state: dict[str, torch.Tensor]) -> N
             continue
 
         # Generic fallback: copy overlapping leading slice along each dim.
-        slices = tuple(slice(0, min(t, s)) for t, s in zip(target.shape, v.shape))
+        slices = tuple(slice(0, min(t, s)) for t, s in zip(target.shape, v.shape, strict=False))
         target[slices] = v[slices]
         n_copied += 1
 
@@ -370,7 +370,8 @@ def clone_top_channels_into_new(
             b = own[b_key]
             for slot, src in enumerate(src_idxs):
                 dst = old_c + slot
-                if dst >= b.shape[0]: continue
+                if dst >= b.shape[0]:
+                    continue
                 b[dst] = b[src]
 
         # Copy 1-D params (e.g. GroupNorm if ever used) for the output dim.
@@ -442,7 +443,8 @@ def clone_top_channels_into_new(
 def _val_loss(model, loader, device) -> float:
     """Plain Dice val loss (cheap, used by ablation)."""
     model.eval()
-    total = 0.0; n = 0
+    total = 0.0
+    n = 0
     with torch.no_grad():
         for rgb, target in loader:
             rgb, target = rgb.to(device), target.to(device)
@@ -521,7 +523,7 @@ def ablate_channels(model: Retna_V1, loader, device,
     pruned_per_block: dict[int, list[int]] = {b: [] for b in range(n_blocks)}
     accepted = []  # (blk_idx, channel_idx, delta)
 
-    for score, blk_idx, ch in candidates:
+    for _score, blk_idx, ch in candidates:
         # Don't drop below 4 channels per block
         out_ch_now = int(model.blocks[blk_idx][-2].out_channels)
         if len(pruned_per_block[blk_idx]) >= out_ch_now - 4:
@@ -673,7 +675,8 @@ def compact_pruned_channels(model: Retna_V1, pruned_per_block: dict) -> Retna_V1
                 continue
             if k not in dst:
                 continue
-            tdst = dst[k]; tsrc = v
+            tdst = dst[k]
+            tsrc = v
             if tsrc.ndim == 1 and tsrc.shape[0] == w_e.shape[0]:
                 tdst.copy_(tsrc[: tdst.shape[0]])
 
@@ -694,7 +697,8 @@ def compact_pruned_channels(model: Retna_V1, pruned_per_block: dict) -> Retna_V1
                 continue
             if k not in dst:
                 continue
-            tdst = dst[k]; tsrc = v
+            tdst = dst[k]
+            tsrc = v
             if tsrc.ndim == 1 and tsrc.shape[0] == w_o.shape[0]:
                 tdst.copy_(tsrc[kept][: tdst.shape[0]])
 
@@ -890,7 +894,8 @@ def main():
                         "lowest-score and highest-score blocks.")
     args = ap.parse_args()
 
-    torch.manual_seed(args.seed); np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
     strm2stl = Path(__file__).resolve().parents[2]
     tiles = Path(args.tiles)

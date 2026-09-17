@@ -7,6 +7,9 @@ static pages. matplotlib/numpy stay lazily imported inside the functions.
 """
 
 # split into the _report_plots/ subpackage; façade re-exports all names.
+# Star-import order decides which definition wins; keep it fixed.
+# isort: off
 from ._report_plots._plot_utils import *  # noqa: F401,F403
 from ._report_plots._view_plots import *  # noqa: F401,F403
 from ._report_plots._pano_plots import *  # noqa: F401,F403
+# isort: on

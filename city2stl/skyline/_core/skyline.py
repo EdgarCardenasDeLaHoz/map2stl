@@ -1,27 +1,20 @@
 """skyline._core.skyline — extracted from pipeline.py (A1 split)."""
 from __future__ import annotations
-from collections import OrderedDict as _OrderedDict
 
 import logging
-import math
-import os
-from dataclasses import dataclass, replace
-from pathlib import Path
-from typing import Sequence
 
 import cv2
 import numpy as np
 from scipy.ndimage import gaussian_filter1d, median_filter, uniform_filter1d
-from scipy.optimize import linear_sum_assignment
 from scipy.signal import find_peaks
-from shapely.geometry import shape
 
 # F-CLEAN14: the F-SKY12 depth except-branches reference ``logger`` but the
 # module never defined one (latent NameError, only reachable on a depth-module
 # failure). Defined here so those branches log instead of crashing.
 logger = logging.getLogger(__name__)
 
-from .segmentation import _neural_sky_and_building_masks
+from .segmentation import _neural_sky_and_building_masks  # noqa: E402
+
 
 def detect_skyline_contour(image_rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Return a top-down skyline contour and a binary sky mask.
@@ -91,7 +84,7 @@ def _segment_has_structure(
     x_right: int,
     top_y: int,
     base_y: int,
-    building_mask: "np.ndarray | None" = None,
+    building_mask: np.ndarray | None = None,
     peak_x: int | None = None,
 ) -> bool:
     """Return True if the image region plausibly contains a building facade.
@@ -139,7 +132,7 @@ def _segment_has_structure(
     return True
 
 def _footprint_roof_y_from_mask(
-    building_mask: "np.ndarray | None",
+    building_mask: np.ndarray | None,
     x_left: int,
     x_right: int,
     min_avg_rows: float = 8.0,
@@ -186,7 +179,7 @@ def _footprint_roof_y_from_mask(
     return None, avg_rows
 
 def _building_base_y_from_mask(
-    building_mask: "np.ndarray | None",
+    building_mask: np.ndarray | None,
     peak_x: int,
     top_y: int,
     half_width: int = 4,
@@ -226,7 +219,7 @@ def _building_base_y_from_mask(
 
 def _floor_period_for_building(
     image_rgb: np.ndarray,
-    building_mask: "np.ndarray | None",
+    building_mask: np.ndarray | None,
     x_range: tuple[int, int],
     y_top: float,
     y_base: float,
@@ -355,7 +348,6 @@ def _floor_period_for_building(
         d_lag, d_val = _peak_val_near(d)
         if d_val >= sub_frac * best_val and d_val >= min_confidence:
             fund_abs = d_lag  # descend; keep iterating toward smaller k
-    peak_idx_rel = fund_abs - min_lag_px
     peak_val = float(autocorr[fund_abs])
     period_px = float(fund_abs)
     if period_px <= 0.0:
@@ -377,7 +369,7 @@ def _estimate_building_base(
     peak_x: int,
     top_y: int,
     h: int,
-    building_mask: "np.ndarray | None" = None,
+    building_mask: np.ndarray | None = None,
 ) -> int:
     """Estimate the row where a building's base meets the ground/water.
 
@@ -417,7 +409,7 @@ def detect_building_silhouettes(
     Returns a list of dicts compatible with ``match_segments_to_buildings``:
     ``{x_left, x_right, top_y, base_y, mid_x, peak_x}``.
     """
-    from scipy.ndimage import uniform_filter1d, gaussian_filter1d  # already at module level
+    from scipy.ndimage import gaussian_filter1d, uniform_filter1d  # already at module level
     c = np.asarray(contour_y, dtype=np.float32)
     h, w = image.shape[:2]
 
@@ -591,7 +583,7 @@ def detect_building_silhouettes(
     return sorted(best.values(), key=lambda s: s["mid_x"])
 
 def compute_building_band(
-    building_mask: "np.ndarray | None",
+    building_mask: np.ndarray | None,
     min_col_frac: float = 0.01,
     slack_px: int = 5,
 ) -> tuple[int, int] | None:
@@ -624,8 +616,8 @@ def compute_building_band(
     return y_top, y_bot
 
 def _component_gradient_col_signal(
-    image: "np.ndarray | None", building_mask: np.ndarray
-) -> "np.ndarray | None":
+    image: np.ndarray | None, building_mask: np.ndarray
+) -> np.ndarray | None:
     """Per-column vertical-gradient signal across the frame, integrated over
     the building band (Phase A). Captures facade edges between adjacent towers
     that share a roofline. Returns None when no usable RGB image is supplied;
@@ -651,8 +643,8 @@ def _component_gradient_col_signal(
 
 def _component_peak_columns(
     col_counts: np.ndarray,
-    grad_col_signal: "np.ndarray | None",
-    contour: "np.ndarray | None",
+    grad_col_signal: np.ndarray | None,
+    contour: np.ndarray | None,
     x: int,
     cw: int,
     min_width_px: int,
@@ -698,7 +690,7 @@ def _component_peak_columns(
     # Per subrange, pick the col_counts argmax as the candidate
     # building center. Skip degenerate (too-narrow) subranges.
     grad_derived_peaks: list[int] = []
-    for a, b in zip(subrange_edges[:-1], subrange_edges[1:]):
+    for a, b in zip(subrange_edges[:-1], subrange_edges[1:], strict=False):
         if b - a < 6:
             continue
         sub = col_counts[a : b + 1]
@@ -769,12 +761,12 @@ def _component_peak_columns(
     return peaks
 
 def detect_buildings_from_mask(
-    building_mask: "np.ndarray | None",
+    building_mask: np.ndarray | None,
     min_width_px: int = 18,
     min_height_px: int = 25,
     split_wide_components: bool = True,
-    contour: "np.ndarray | None" = None,
-    image: "np.ndarray | None" = None,
+    contour: np.ndarray | None = None,
+    image: np.ndarray | None = None,
     max_splits_per_component: int = 24,
 ) -> list[dict]:
     """Identify individual buildings as connected components of the SegFormer
@@ -992,7 +984,7 @@ def _merge_silhouette_sources(
     return sorted(out, key=lambda s: s["mid_x"])
 
 def _building_roof_y_from_mask(
-    building_mask: "np.ndarray | None",
+    building_mask: np.ndarray | None,
     x_px: int,
     half_width: int = 4,
     min_run_px: int = 3,

@@ -6,24 +6,23 @@ and cache pruning.
 """
 import gzip
 import json
+import os
 import time
-from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 
 from app.server.core.cache import (
+    NAMESPACE_TTL,
     make_cache_key,
     osm_cache_key,
-    write_array_cache,
-    read_array_cache,
-    write_osm_cache,
-    read_osm_cache,
     prune_cache,
-    NAMESPACE_TTL,
+    read_array_cache,
+    read_osm_cache,
+    write_array_cache,
+    write_osm_cache,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -218,14 +217,17 @@ class TestPruneCache:
         ns_dir.mkdir()
         # Create 5 fresh files; set max_files=3 → 2 oldest should be removed
         files = []
+        now = time.time()
         for i in range(5):
             f = ns_dir / f"file{i}.npz"
             f.write_bytes(b"x")
+            ts = now - 50 + i  # explicit, distinct, still-fresh mtimes
+            os.utime(f, (ts, ts))
             files.append(f)
-            time.sleep(0.01)  # ensure distinct mtimes
 
         deleted = prune_cache("dem", max_files=3)
         assert deleted == 2
+        assert [f.exists() for f in files] == [False, False, True, True, True]
 
     def test_prune_returns_zero_for_nonexistent_namespace(self, patched_cache):
         assert prune_cache("nonexistent") == 0

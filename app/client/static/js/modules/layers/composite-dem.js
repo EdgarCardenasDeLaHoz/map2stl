@@ -398,7 +398,7 @@ function _satelliteContribution(demW, demH) {
  * Uses scheduler.yield() when available (Chrome 115+), falls back to RAF.
  */
 function _yieldToMain() {
-    if (typeof scheduler !== 'undefined' && scheduler.yield) return scheduler.yield();
+    if (window.scheduler?.yield) return window.scheduler.yield();
     return new Promise(resolve => requestAnimationFrame(resolve));
 }
 

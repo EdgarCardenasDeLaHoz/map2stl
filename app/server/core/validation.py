@@ -19,7 +19,7 @@ import numpy as np
 from fastapi import Query, Request
 from fastapi.responses import JSONResponse
 
-from app.server.config import MAX_DIM, MAX_BBOX_DIAGONAL_KM
+from app.server.config import MAX_BBOX_DIAGONAL_KM, MAX_DIM
 
 # ---------------------------------------------------------------------------
 # Metres-per-degree constant (equatorial)

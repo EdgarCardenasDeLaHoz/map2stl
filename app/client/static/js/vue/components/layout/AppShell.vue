@@ -16,7 +16,6 @@
   </div>
 </template>
 <script setup lang="ts">
-import { Teleport }        from 'vue';
 import MainHeader          from './MainHeader.vue';
 import RegionNotesModal    from './RegionNotesModal.vue';
 import MeshRegistrationModal from './MeshRegistrationModal.vue';

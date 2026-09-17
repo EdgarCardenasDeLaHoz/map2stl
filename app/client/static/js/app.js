@@ -225,7 +225,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         console.error('Leaflet library not loaded!');
         document.getElementById('coordinatesList').innerHTML = '<div class="loading" style="color:red">Error: Leaflet library failed to load. Try refreshing or use a different browser.</div>';
         // Still try to load coordinates without map
-        await loadCoordinates();
+        await window.loadCoordinates();
         return;
     }
 
@@ -302,7 +302,6 @@ window.isLayerCurrent = isLayerCurrent;
 // Appearance
 window.appState.waterOpacity = 0.7;
 window.getWaterOpacity = () => window.appState.waterOpacity;
-window.setWaterOpacity = (v) => { window.appState.waterOpacity = v; };
 
 // ============================================================
 // SIDEBAR

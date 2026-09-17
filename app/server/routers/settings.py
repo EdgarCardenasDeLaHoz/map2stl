@@ -7,7 +7,6 @@ Extracted from location_picker.py (backend refactor, step 6).
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -194,18 +193,18 @@ def _list_datasets() -> list[dict]:
 try:
     from app.server.schemas import ColormapInfo, DatasetInfo, ProjectionInfo
 except ImportError:
+
     from pydantic import BaseModel
-    from typing import Optional
 
     class ColormapInfo(BaseModel):
         id: str
-        description: Optional[str] = None
+        description: str | None = None
 
     class DatasetInfo(BaseModel):
         id: str
         name: str
         description: str
-        source: Optional[str] = None
+        source: str | None = None
         requires_auth: bool = False
 
     class ProjectionInfo(BaseModel):

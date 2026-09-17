@@ -29,7 +29,6 @@ from typing import Any
 
 import numpy as np
 
-
 # Ordered list of event stages emitted by estimate_heights_from_registration.
 # Keep in sync with the trace calls in pipeline.py — adding a new stage requires
 # updating this list AND the script schema in 09_height_trace.py.

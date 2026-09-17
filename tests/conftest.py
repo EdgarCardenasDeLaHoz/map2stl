@@ -4,7 +4,6 @@ Shared pytest fixtures for strm2stl API tests.
 Sets STRM2STL_TEST_MODE=1 so the DEM endpoint returns a fast deterministic
 response without any Earth Engine or network calls.
 """
-import json
 import os
 import sys
 from pathlib import Path
@@ -59,9 +58,8 @@ def tmp_data_dir(tmp_path, monkeypatch):
     """
     # Trigger the server import first so all modules are in sys.modules
     import app.server  # noqa: F401 — ensures routers are imported
-
-    import app.server.core.db as db_module
     import app.server.core.cache as cache_module
+    import app.server.core.db as db_module
     import app.server.routers.cities as cities_router
 
     # Redirect SQLite to a fresh temp file with TestRegion pre-seeded
@@ -93,5 +91,53 @@ def tmp_data_dir(tmp_path, monkeypatch):
 def client(tmp_data_dir):
     """FastAPI TestClient using the real server app with patched paths."""
     from fastapi.testclient import TestClient
+
     from app.server.server import app
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_export_tasks():
+    """Drain export threads started by a test and restore the task registry.
+
+    ``start_export_task`` runs each job in a daemon thread named
+    ``export-<task_id>`` and records it in ``export_tasks._export_tasks``.
+    Tests that start exports without polling to completion would otherwise
+    leak running threads (and registry entries) into later tests.
+    """
+    import sys
+    import threading
+    import time
+
+    mod = sys.modules.get("app.server.core.export_tasks")
+    before_threads = set(threading.enumerate())
+    before_tasks = dict(getattr(mod, "_export_tasks", {}) or {}) if mod else None
+
+    yield
+
+    new_exports = [
+        t for t in threading.enumerate()
+        if t not in before_threads and t.name.startswith("export-")
+    ]
+    deadline = time.monotonic() + 10.0
+    for t in new_exports:
+        t.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    mod = sys.modules.get("app.server.core.export_tasks")
+    tasks = getattr(mod, "_export_tasks", None) if mod else None
+    if tasks is None:
+        return
+    lock = getattr(mod, "_export_tasks_lock", None)
+    if lock is None:
+        import contextlib
+        lock = contextlib.nullcontext()
+    with lock:
+        leaked = [tid for tid in tasks if not before_tasks or tid not in before_tasks]
+        removed = [tasks.pop(tid) for tid in leaked]
+    for task in removed:
+        path = getattr(task, "result_path", None)
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass

@@ -27,11 +27,14 @@ Usage (session):
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import torch
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +60,7 @@ class TileDataset:
     augment    : whether to apply random horizontal/vertical flips.
     """
 
-    tile_paths: List[Path]
+    tile_paths: list[Path]
     augment: bool = True
 
     def __post_init__(self):
@@ -91,7 +94,7 @@ class TileDataset:
 # Loss
 # ------------------------------------------------------------------------------
 
-def gradient_loss(pred: "torch.Tensor", target: "torch.Tensor") -> "torch.Tensor":
+def gradient_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     """Sobel gradient loss -- encourages edges to align with ground truth."""
     import torch
     import torch.nn.functional as F
@@ -114,10 +117,10 @@ def gradient_loss(pred: "torch.Tensor", target: "torch.Tensor") -> "torch.Tensor
 
 
 def combined_loss(
-    pred: "torch.Tensor",
-    target: "torch.Tensor",
+    pred: torch.Tensor,
+    target: torch.Tensor,
     grad_weight: float = 0.5,
-) -> "torch.Tensor":
+) -> torch.Tensor:
     """L1 + weighted Sobel gradient loss."""
     import torch.nn.functional as F
 
@@ -168,9 +171,9 @@ class TrainConfig:
 
 
 def train(
-    tile_paths: List[Path],
+    tile_paths: list[Path],
     output_path: Path,
-    config: Optional[TrainConfig] = None,
+    config: TrainConfig | None = None,
 ) -> dict:
     """Train the U-Net and save a checkpoint.
 

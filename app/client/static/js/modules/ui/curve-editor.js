@@ -123,15 +123,6 @@ function initCurveEditor() {
     });
     resizeObserver.observe(container);
     _applyCurveResize();
-
-    // Expose a CurveEditor-like instance on window for programmatic access
-    window.curveEditor = {
-        getPoints() { return _state.getPoints(); },
-        setPoints(pts) { applyCurveSettings(pts, 'custom'); },
-        redraw() { drawCurve(); },
-        serialize() { return _state.serialize(); },
-        deserialize(data) { if (data?.points) applyCurveSettings(data.points, data.preset ?? 'custom'); },
-    };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -459,8 +450,10 @@ function applyCurveTodem() {
         return;
     }
 
-    const { remapped, vmin, vmax } = _applyCurrentCurve();
+    const { remapped } = _applyCurrentCurve();
     lastDemData.values = remapped;
+    // The server's cached DEM has no curve; export must ship these values.
+    window.appState.demValuesEdited = true;
 
     if (document.getElementById('autoRescale')?.checked) {
         let newMin = Infinity, newMax = -Infinity;
@@ -484,6 +477,7 @@ function applyCurveTodemSilent() {
     if (!lastDemData || !lastDemData.values || _getState().points.length < 2) return;
     const { remapped } = _applyCurrentCurve();
     lastDemData.values = remapped;
+    window.appState.demValuesEdited = true;
     let newMin = Infinity, newMax = -Infinity;
     for (const v of remapped) {
         if (isFinite(v)) { if (v < newMin) newMin = v; if (v > newMax) newMax = v; }

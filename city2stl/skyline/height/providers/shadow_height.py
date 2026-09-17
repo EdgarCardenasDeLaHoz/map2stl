@@ -24,13 +24,16 @@ shadow inference. Omitting it returns an empty result (safe default).
 from __future__ import annotations
 
 import logging
-from typing import Tuple
 
 import numpy as np
 
 from city2stl.skyline.height import BBox, HeightResult
+
 from ._cache import (
-    register_ttl, make_cache_key, read_height_result, write_height_result,
+    make_cache_key,
+    read_height_result,
+    register_ttl,
+    write_height_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,7 +108,7 @@ def _shadow_length_to_height(shadow_pixels: int, pixel_size_m: float,
 _SAT_TARGET_M_PER_PX = 2.0  # analyse shadows at ~2 m/pixel
 
 
-def _fetch_rgb_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> "np.ndarray | None":
+def _fetch_rgb_for_bbox(bbox: BBox, dim: tuple[int, int]) -> np.ndarray | None:
     """Fetch satellite imagery for bbox at native resolution.
 
     Returns the image at a resolution appropriate for shadow detection
@@ -119,7 +122,9 @@ def _fetch_rgb_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> "np.ndarray | None"
     try:
         import base64 as _b64
         from io import BytesIO
+
         from PIL import Image
+
         from geo2stl.sat2stl import fetch_satellite_tiles
 
         north, south, east, west = bbox
@@ -154,8 +159,8 @@ class ShadowHeightProvider:
     def fetch_heights(
         self,
         bbox: BBox,
-        dim: Tuple[int, int],
-        rgb: "np.ndarray | None" = None,
+        dim: tuple[int, int],
+        rgb: np.ndarray | None = None,
     ) -> HeightResult:
         """Estimate building heights from shadow lengths in satellite imagery.
 
@@ -195,7 +200,7 @@ class ShadowHeightProvider:
 def _infer_from_rgb(
     rgb: np.ndarray,
     bbox: BBox,
-    dim: Tuple[int, int],
+    dim: tuple[int, int],
 ) -> HeightResult:
     """Run the shadow-to-height pipeline on a satellite RGB image.
 
@@ -294,7 +299,7 @@ def _infer_from_rgb(
     return HeightResult(raster, conf, "shadow_height", pixel_m)
 
 
-def _downsample_height(arr: np.ndarray, dim: Tuple[int, int]) -> np.ndarray:
+def _downsample_height(arr: np.ndarray, dim: tuple[int, int]) -> np.ndarray:
     """Downsample a sparse height raster to ``dim`` using max-pooling.
 
     Each output cell gets the maximum non-NaN value from its corresponding
@@ -320,11 +325,5 @@ def _downsample_height(arr: np.ndarray, dim: Tuple[int, int]) -> np.ndarray:
     return out
 
 
-def _empty_result(dim: Tuple[int, int]) -> HeightResult:
-    h, w = dim
-    return HeightResult(
-        raster=np.full((h, w), np.nan, dtype=np.float32),
-        confidence=np.zeros((h, w), dtype=np.float32),
-        source_name="shadow_height",
-        resolution_m=_RESOLUTION_M,
-    )
+def _empty_result(dim: tuple[int, int]) -> HeightResult:
+    return HeightResult.empty(dim, "shadow_height", _RESOLUTION_M)

@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
-from typing import Tuple, Union
+from typing import Union
 
 import numpy as np
 
@@ -44,7 +44,7 @@ def stl_to_heightmap(
     bbox: dict,
     resolution_m: float = 5.0,
     up_axis: str = "z",
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Convert a georeferenced STL mesh to a raster heightmap.
 
     The mesh's bounding box in X/Y is mapped linearly to the geographic

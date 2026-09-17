@@ -25,7 +25,7 @@
 
 function _setExportButtonsEnabled(enabled) {
     const ids = ['downloadSTLBtn', 'downloadOBJBtn', 'download3MFBtn',
-        'exportCityBtn', 'exportCrossSectionBtn', 'exportPuzzleBtn'];
+        'exportCityBtn', 'downloadCrossSectionBtn', 'exportPuzzle3MFBtn'];
     for (const id of ids) {
         const el = document.getElementById(id);
         if (!el) continue;
@@ -115,6 +115,18 @@ function _demSettings() {
             show_sat: false,
         },
     };
+    // Values edited in the browser (elevation curve, imported-mesh blend) exist
+    // nowhere on the server, so the only way the model can carry them is to
+    // ship the array. That array already contains any applied composite, so
+    // it wins over the layer spec below.
+    const edited = window.appState?.lastDemData;
+    if (window.appState?.demValuesEdited && edited?.values?.length) {
+        settings.dem_values = Array.from(edited.values);
+        settings.height = edited.height;
+        settings.width = edited.width;
+        return settings;
+    }
+
     // Composite DEM panel (composite-dem.js). Preferred path: send the layer
     // spec and let the server add and subtract the layers itself, so the mesh
     // and the export are built from the server's arithmetic rather than from
@@ -151,22 +163,17 @@ function _demSettings() {
     return settings;
 }
 
+/**
+ * The export request: exactly what the last successful preview was built
+ * from. This used to take four fields from the preview and the rest from the
+ * live form, so a file could mix two different models.
+ */
 function _exportParams() {
     const md = window.appState?.generatedModelData;
     return {
-        ..._demSettings(),
-        // model_height is the physical height in mm from #exportModelHeight.
-        model_height: md.modelHeight,
-        base_height: md.baseHeight,
-        exaggeration: md.exaggeration,
-        mm_per_pixel: md.mmPerPixel,
-        sea_level_cap: document.getElementById('exportSeaLevelCap')?.checked || false,
-        engrave_label: document.getElementById('exportEngraveLabel')?.checked || false,
-        label_text: document.getElementById('exportLabelText')?.value || window.appState?.selectedRegion?.name || _regionName(),
-        contours: document.getElementById('exportContours')?.checked || false,
-        contour_interval: parseInt(document.getElementById('exportContourInterval')?.value) || 100,
-        contour_style: document.getElementById('exportContourStyle')?.value || 'engraved',
-        name: _regionName()
+        ...(md.demSettings || _demSettings()),
+        ...(md.buildParams || window._readBuildParams?.() || {}),
+        name: _regionName(),
     };
 }
 
@@ -260,10 +267,12 @@ async function _asyncExport(format) {
 
         _triggerDownload(blob, `${name}.${format}`);
 
-        if (format === 'stl' && faceCount) {
+        // All three formats go through the same repair and send these headers.
+        if (faceCount) {
             const faces = `${parseInt(faceCount).toLocaleString()} faces`;
-            const quality = isWatertight ? 'watertight' : 'not watertight';
-            window.showToast(`STL ready - ${faces} ${quality}`, isWatertight ? 'success' : 'info', 4000);
+            const quality = isWatertight ? 'watertight' : 'NOT watertight';
+            window.showToast(`${format.toUpperCase()} ready - ${faces}, ${quality}`,
+                isWatertight ? 'success' : 'warning', 5000);
         } else {
             window.showToast(`${format.toUpperCase()} ready`, 'success');
         }
@@ -314,7 +323,6 @@ function downloadCrossSection() {
     const statusEl = document.getElementById('crossSectionStatus');
     if (statusEl) statusEl.textContent = 'Generating…';
 
-    const r = window.appState?.selectedRegion || {};
     const name = _regionName();
     const md = window.appState.generatedModelData;
 

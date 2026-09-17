@@ -7,12 +7,10 @@ All torch-dependent tests are auto-skipped when torch is not installed.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -27,7 +25,7 @@ def _make_npz(path: Path, tile_size: int = 8) -> Path:
     return path
 
 
-def _make_tiles(tmp_path: Path, n: int = 10, tile_size: int = 8) -> List[Path]:
+def _make_tiles(tmp_path: Path, n: int = 10, tile_size: int = 8) -> list[Path]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     return [_make_npz(tmp_path / f"tile_{i:03d}.npz", tile_size) for i in range(n)]
 
@@ -51,6 +49,7 @@ class TestGradientLoss:
     @torch_required
     def test_perfect_prediction_gives_zero_gradient_loss(self):
         import torch
+
         from city2stl.skyline.height.train import gradient_loss
 
         t = torch.ones(2, 1, 16, 16)
@@ -60,9 +59,10 @@ class TestGradientLoss:
     @torch_required
     def test_loss_positive_for_different_tensors(self):
         import torch
+
         from city2stl.skyline.height.train import gradient_loss
 
-        rng = torch.manual_seed(0)
+        torch.manual_seed(0)
         pred = torch.rand(2, 1, 16, 16)
         target = torch.rand(2, 1, 16, 16)
         loss = gradient_loss(pred, target)
@@ -71,6 +71,7 @@ class TestGradientLoss:
     @torch_required
     def test_loss_is_scalar(self):
         import torch
+
         from city2stl.skyline.height.train import gradient_loss
 
         pred = torch.zeros(1, 1, 8, 8)
@@ -87,6 +88,7 @@ class TestCombinedLoss:
     @torch_required
     def test_combined_loss_zero_for_perfect_prediction(self):
         import torch
+
         from city2stl.skyline.height.train import combined_loss
 
         t = torch.full((2, 1, 8, 8), 10.0)
@@ -98,6 +100,7 @@ class TestCombinedLoss:
         """With grad_weight > 0 and different tensors, combined > pure L1."""
         import torch
         import torch.nn.functional as F
+
         from city2stl.skyline.height.train import combined_loss
 
         torch.manual_seed(0)
@@ -135,6 +138,7 @@ class TestTileDataset:
     @torch_required
     def test_getitem_dtype_float32(self, tmp_path):
         import torch
+
         from city2stl.skyline.height.train import TileDataset
 
         paths = _make_tiles(tmp_path, n=1)
@@ -147,16 +151,18 @@ class TestTileDataset:
     def test_augmentation_changes_output(self, tmp_path):
         """Augmentation should sometimes change the tensor values."""
         import torch
+
         from city2stl.skyline.height.train import TileDataset
 
         paths = _make_tiles(tmp_path, n=1, tile_size=8)
         ds_no_aug = TileDataset(paths, augment=False)
         ds_aug = TileDataset(paths, augment=True)
 
-        np.random.seed(99)  # fix to a seed where flip fires
         base_rgb, _ = ds_no_aug[0]
 
-        # Try many samples; at least one should differ
+        # Try many samples; at least one should differ.  TileDataset draws from
+        # the global np.random state (no rng parameter), so seed right before use.
+        np.random.seed(99)  # fix to a seed where flip fires
         diffs = []
         for _ in range(20):
             aug_rgb, _ = ds_aug[0]
@@ -177,8 +183,9 @@ class TestTrainSmoke:
     def test_one_epoch_completes_and_saves_checkpoint(self, tmp_path):
         import torch
         import torch.nn as nn
-        from city2stl.skyline.height.train import TrainConfig, train
+
         import city2stl.skyline.height.predict as _pm
+        from city2stl.skyline.height.train import TrainConfig, train
 
         # Use a trivially small model so we don't need EfficientNet
         class _TinyUNet(nn.Module):
@@ -221,8 +228,9 @@ class TestCheckpointRoundtrip:
         """Checkpoint saved by train() can be loaded by _unet_inference."""
         import torch
         import torch.nn as nn
-        from city2stl.skyline.height.train import TrainConfig, train
+
         import city2stl.skyline.height.predict as _pm
+        from city2stl.skyline.height.train import TrainConfig, train
 
         class _TinyUNet(nn.Module):
             def __init__(self):
@@ -250,8 +258,9 @@ class TestCheckpointRoundtrip:
         """State dict from saved checkpoint loads without errors."""
         import torch
         import torch.nn as nn
-        from city2stl.skyline.height.train import TrainConfig, train
+
         import city2stl.skyline.height.predict as _pm
+        from city2stl.skyline.height.train import TrainConfig, train
 
         class _TinyUNet(nn.Module):
             def __init__(self):

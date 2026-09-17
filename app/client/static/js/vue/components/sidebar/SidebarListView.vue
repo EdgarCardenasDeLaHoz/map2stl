@@ -22,8 +22,8 @@
 import { ref, watch } from 'vue';
 import { useAppStore } from '../../stores/app';
 
-const props = defineProps<{ visible: boolean }>();
-const store = useAppStore();
+defineProps<{ visible: boolean }>();
+useAppStore();
 const searchQuery = ref('');
 
 // Sync search input to the existing coordSearch handler

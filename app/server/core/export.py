@@ -47,6 +47,10 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
     if not p.dem_values or not p.height or not p.width:
         task.fail("Missing DEM data")
         return
+    if len(p.dem_values) != p.height * p.width:
+        task.fail(f"DEM has {len(p.dem_values)} values, expected "
+                  f"{p.height} x {p.width}")
+        return
 
     # Step 1: Prepare DEM
     task.update(10, "Preparing DEM array...")
@@ -71,15 +75,10 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
     # Step 4: Mesh generation (heaviest step)
     task.update(45, "Generating mesh...")
     if fmt == "obj":
-        from numpy2stl import array_to_mesh, writeOBJ
-        vertices, faces = array_to_mesh(im, floor_val=0.0)  # floor at z=0 so base_height is a real thickness
-        vertices = _scale_xy(vertices, p.mm_per_pixel)
+        from numpy2stl import writeOBJ
     elif fmt == "3mf":
-        from numpy2stl import array_to_mesh, write3MF
-        vertices, faces = array_to_mesh(im, floor_val=0.0)  # floor at z=0 so base_height is a real thickness
-        vertices = _scale_xy(vertices, p.mm_per_pixel)
-    else:
-        vertices, faces = _numpy2stl_mesh(im, mm_per_pixel=p.mm_per_pixel)
+        from numpy2stl import write3MF
+    vertices, faces = _grid_mesh(im, mm_per_pixel=p.mm_per_pixel)
 
     # Repair runs for every format now. OBJ and 3MF used to be written straight
     # from array_to_mesh, so an interior boundary loop - a NaN DEM cell drops the
@@ -94,26 +93,20 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
     if not is_watertight:
         logger.warning("%s mesh is not watertight after repair (%d faces)",
                        fmt.upper(), face_count)
-    mesh_headers = {
-        "X-Watertight": str(is_watertight).lower(),
-        "X-Face-Count": str(face_count),
-        "Access-Control-Expose-Headers": "X-Watertight, X-Face-Count",
-    }
+    mesh_headers = _quality_headers(is_watertight, face_count, p.composite_error)
 
     # Step 5: Export to file
     suffix = f".{fmt}"
     if fmt in ("stl",):
         temp_path = _write_mesh(mesh, suffix)
-        headers = {"Content-Disposition": f"attachment; filename={p.name}.stl",
-                   **mesh_headers}
+        headers = {**_disposition(f"{p.name}.stl"), **mesh_headers}
         logger.info("STL generated: %d faces, watertight=%s", face_count, is_watertight)
     elif fmt == "obj":
         tf = tempfile.NamedTemporaryFile(delete=False, suffix=".obj")
         temp_path = tf.name
         tf.close()
         writeOBJ(temp_path, {p.name: (vertices, faces)})
-        headers = {"Content-Disposition": f"attachment; filename={p.name}.obj",
-                   **mesh_headers}
+        headers = {**_disposition(f"{p.name}.obj"), **mesh_headers}
         logger.info("OBJ generated: %d vertices, %d faces, watertight=%s",
                     len(vertices), len(faces), is_watertight)
     elif fmt == "3mf":
@@ -121,8 +114,7 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
         temp_path = tf.name
         tf.close()
         write3MF(temp_path, {p.name: (vertices, faces)})
-        headers = {"Content-Disposition": f"attachment; filename={p.name}.3mf",
-                   **mesh_headers}
+        headers = {**_disposition(f"{p.name}.3mf"), **mesh_headers}
         logger.info("3MF generated: %d vertices, %d faces, watertight=%s",
                     len(vertices), len(faces), is_watertight)
     else:
@@ -168,6 +160,16 @@ def _prepare_dem_array(
     """
     im = np.array(dem_values, dtype=np.float64).reshape(height, width)
 
+    # JSON nulls arrive as NaN (projection edges, inline values). One NaN made
+    # array_to_mesh's mask value NaN, every comparison against it False, and the
+    # mesh empty - an 84-byte STL reported as watertight. Fill them with the
+    # lowest real elevation so they print as the floor of the relief.
+    nan_mask = ~np.isfinite(im)
+    if nan_mask.all():
+        raise ValueError("DEM contains no finite elevation values")
+    if nan_mask.any():
+        im[nan_mask] = float(np.nanmin(np.where(nan_mask, np.nan, im)))
+
     if sea_level_cap:
         # Raise everything below sea level up to zero, so the ocean floor prints
         # as a flat sea. This was np.minimum, which did the exact opposite: it
@@ -200,8 +202,23 @@ def _scale_xy(vertices: np.ndarray, mm_per_pixel: float) -> np.ndarray:
     return vertices
 
 
-def _numpy2stl_mesh(im: np.ndarray, mm_per_pixel: float = 1.0) -> tuple:
-    """Convert a DEM array to a (vertices, faces) mesh, scaled to mm.
+def _north_up(vertices: np.ndarray, faces: np.ndarray, n_rows: int) -> tuple:
+    """Put DEM row 0 (north) at +Y, where a slicer shows the back of the bed.
+
+    array_to_mesh maps row index straight to y, so north landed at y = 0 and
+    the printed model was the mirror image of the map, engraved label
+    included. Reflecting y reverses the handedness, so the triangle winding is
+    reversed with it to keep normals pointing outward. The in-browser viewer
+    maps rows itself and does not go through this.
+    """
+    if len(vertices):
+        vertices[:, 1] = (n_rows - 1) - vertices[:, 1]
+        faces = np.ascontiguousarray(faces[:, ::-1])
+    return vertices, faces
+
+
+def _grid_mesh(im: np.ndarray, mm_per_pixel: float = 1.0) -> tuple:
+    """The single DEM-to-mesh step every file export uses: build, orient, scale.
 
     ``floor_val=0`` puts the bottom cap at z=0. Without it array_to_mesh floors
     one unit below the surface minimum, which made the base thickness setting
@@ -209,20 +226,29 @@ def _numpy2stl_mesh(im: np.ndarray, mm_per_pixel: float = 1.0) -> tuple:
     """
     from numpy2stl import array_to_mesh
     vertices, faces = array_to_mesh(im, floor_val=0.0)
+    vertices, faces = _north_up(vertices, faces, im.shape[0])
     return _scale_xy(vertices, mm_per_pixel), faces
 
 
-def _repair_mesh(vertices, faces):
-    """Fill holes and fix winding. Returns the repaired trimesh.
+# Kept under its old name for callers outside this module.
+_numpy2stl_mesh = _grid_mesh
 
-    Split out from the write step so the formats numpy2stl serialises itself,
-    OBJ and 3MF, can be repaired too instead of shipping raw array_to_mesh
-    output.
+
+def _repair_mesh(vertices, faces):
+    """Return the mesh as a trimesh, repairing it only if it needs it.
+
+    array_to_mesh builds a closed, consistently wound solid, so fill_holes and
+    fix_normals - about half the export time at dim 1200 - almost always
+    changed nothing. ``is_volume`` checks watertightness, winding consistency
+    and positive volume in one pass; only a mesh that fails it is repaired.
     """
     import trimesh as tm
     mesh = tm.Trimesh(vertices=vertices, faces=faces, process=False)
-    tm.repair.fill_holes(mesh)
-    tm.repair.fix_normals(mesh)
+    if len(mesh.faces) == 0:
+        raise ValueError("Mesh generation produced no faces")
+    if not mesh.is_volume:
+        tm.repair.fill_holes(mesh)
+        tm.repair.fix_normals(mesh)
     return mesh
 
 
@@ -251,7 +277,7 @@ def _prepare_export_mesh(p, data: dict):
     the same request produced a different model depending on the file extension.
     Returns the repaired mesh along with its vertices and faces.
     """
-    from numpy2stl import array_to_mesh
+    from numpy2stl import array_to_mesh  # noqa: F401
 
     im, im_min, im_max = _prepare_dem_array(
         p.dem_values, p.height, p.width,
@@ -270,25 +296,52 @@ def _prepare_export_mesh(p, data: dict):
         im = _apply_contour_lines(im, im_min, im_max, p.model_height * p.exaggeration,
                                   p.base_height, contour_interval, contour_style)
 
-    # floor at z=0 so base_height is a real thickness
-    vertices, faces = array_to_mesh(im, floor_val=0.0)
-    vertices = _scale_xy(vertices, p.mm_per_pixel)
+    vertices, faces = _grid_mesh(im, mm_per_pixel=p.mm_per_pixel)
     mesh = _repair_mesh(vertices, faces)
     return mesh, mesh.vertices, mesh.faces
 
 
-def _mesh_response_headers(name: str, ext: str, mesh) -> dict:
+def _disposition(filename: str) -> dict:
+    """A Content-Disposition header that survives any region name.
+
+    Headers are latin-1, so a non-ASCII name raised a 500, and a quote or
+    semicolon in the name broke the header. The plain ``filename`` gets a
+    sanitised ASCII fallback; ``filename*`` carries the real name (RFC 5987).
+    """
+    from urllib.parse import quote
+    ascii_name = "".join(
+        c if (c.isascii() and (c.isalnum() or c in "._- ")) else "_"
+        for c in filename
+    ) or "model"
+    return {"Content-Disposition":
+            f"attachment; filename=\"{ascii_name}\"; "
+            f"filename*=UTF-8''{quote(filename, safe='')}"}
+
+
+def _quality_headers(watertight: bool, face_count: int,
+                     composite_error: str | None = None) -> dict:
+    """The mesh-quality headers every export sends and the client reads back."""
+    headers = {
+        "X-Watertight": str(bool(watertight)).lower(),
+        "X-Face-Count": str(int(face_count)),
+        "Access-Control-Expose-Headers":
+            "X-Watertight, X-Face-Count, X-Composite-Error",
+    }
+    if composite_error:
+        headers["X-Composite-Error"] = composite_error.encode(
+            "ascii", "replace").decode("ascii").replace("\n", " ")
+    return headers
+
+
+def _mesh_response_headers(name: str, ext: str, mesh,
+                           composite_error: str | None = None) -> dict:
     """Content-Disposition plus the watertightness figures the client reads back."""
     watertight = bool(mesh.is_watertight)
     if not watertight:
         logger.warning("%s mesh is not watertight after repair (%d faces)",
                        ext.upper(), len(mesh.faces))
-    return {
-        "Content-Disposition": f"attachment; filename={name}.{ext}",
-        "X-Watertight": str(watertight).lower(),
-        "X-Face-Count": str(len(mesh.faces)),
-        "Access-Control-Expose-Headers": "X-Watertight, X-Face-Count",
-    }
+    return {**_disposition(f"{name}.{ext}"),
+            **_quality_headers(watertight, len(mesh.faces), composite_error)}
 
 
 def _apply_label_engraving(im: np.ndarray, label_text: str, base_height: float) -> np.ndarray:
@@ -377,7 +430,7 @@ def generate_stl(data: dict):
         filename=f"{p.name}.stl",
         media_type="application/octet-stream",
         background=BackgroundTask(os.unlink, temp_path),
-        headers=_mesh_response_headers(p.name, "stl", mesh),
+        headers=_mesh_response_headers(p.name, "stl", mesh, p.composite_error),
     )
 
 
@@ -404,7 +457,7 @@ def generate_obj(data: dict):
         filename=f"{p.name}.obj",
         media_type="application/octet-stream",
         background=BackgroundTask(os.unlink, temp_path),
-        headers=_mesh_response_headers(p.name, "obj", mesh),
+        headers=_mesh_response_headers(p.name, "obj", mesh, p.composite_error),
     )
 
 
@@ -431,7 +484,7 @@ def generate_3mf(data: dict):
         filename=f"{p.name}.3mf",
         media_type="application/octet-stream",
         background=BackgroundTask(os.unlink, temp_path),
-        headers=_mesh_response_headers(p.name, "3mf", mesh),
+        headers=_mesh_response_headers(p.name, "3mf", mesh, p.composite_error),
     )
 
 
@@ -461,8 +514,11 @@ def generate_mesh_preview(data: dict):
     # A flat DEM (all values equal) means the source had no elevation coverage
     # for this bbox — building a mesh from it produces a blank slab and usually
     # signals the local-SRTM 'no coverage' fallback. Return a clear reason.
-    _vals = p.dem_values
-    if min(_vals) == max(_vals):
+    # NaN-aware and vectorised: the Python min()/max() pair raised TypeError on
+    # a JSON null and walked the list twice at Python speed.
+    _vals = np.asarray(p.dem_values, dtype=np.float64)
+    _finite = _vals[np.isfinite(_vals)]
+    if _finite.size == 0 or _finite.min() == _finite.max():
         return JSONResponse(
             content={
                 "error": "DEM has no elevation data",
@@ -523,6 +579,8 @@ def generate_mesh_preview(data: dict):
         "cols":         int(p.width),
         "rows":         int(p.height),
         "mm_per_pixel": p.mm_per_pixel,
+        "exaggeration": p.exaggeration,
+        "composite_error": p.composite_error,
     })
 
 
@@ -621,16 +679,15 @@ def generate_puzzle_3mf(data: dict, task: ExportTask | None = None):
             vertices, faces = array_to_mesh(piece, floor_val=0.0)  # floor at z=0 so base_height is a real thickness
 
             # Offset vertices to world position so pieces don't overlap
-            # when loaded in a slicer
+            # when loaded in a slicer, then orient the whole layout north-up
+            # the same way the single-piece export is.
             if len(vertices) > 0:
                 vertices[:, 0] += c0  # X offset (still pixel units)
                 vertices[:, 1] += r0  # Y offset
+                vertices, faces = _north_up(vertices, faces, H)
                 vertices = _scale_xy(vertices, p.mm_per_pixel)
 
-            import trimesh as tm
-            mesh = tm.Trimesh(vertices=vertices, faces=faces, process=False)
-            tm.repair.fill_holes(mesh)
-            tm.repair.fix_normals(mesh)
+            mesh = _repair_mesh(vertices, faces)
 
             piece_name = f"{p.name}_r{row}c{col}"
             models[piece_name] = (mesh.vertices, mesh.faces)
@@ -647,7 +704,7 @@ def generate_puzzle_3mf(data: dict, task: ExportTask | None = None):
     logger.info("Puzzle 3MF: %d pieces, %d total faces", len(models), total_faces)
 
     headers = {
-        "Content-Disposition": f"attachment; filename={p.name}_puzzle.3mf",
+        **_disposition(f"{p.name}_puzzle.3mf"),
         "X-Piece-Count": str(len(models)),
         "X-Total-Faces": str(total_faces),
         "Access-Control-Expose-Headers": "X-Piece-Count, X-Total-Faces",
@@ -779,8 +836,11 @@ def generate_crosssection(data: dict):
 
     if not dem_values or not height or not width:
         return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
+    if north <= south or east <= west:
+        return JSONResponse(content={"error": "Invalid bbox for cross-section"},
+                            status_code=400)
 
-    im = np.array(dem_values, dtype=np.float32).reshape(height, width) * exaggeration
+    im = np.array(dem_values, dtype=np.float32).reshape(height, width)
 
     if cut_axis == 'lat':
         row = int(np.clip((north - cut_value) / (north - south) * height, 0, height - 1))
@@ -793,11 +853,19 @@ def generate_crosssection(data: dict):
 
     p_min = float(np.nanmin(profile))
     p_max = float(np.nanmax(profile))
+    # Exaggeration after the normalisation, as in _prepare_dem_array; applied
+    # before it, a min-max normalise cancels it exactly.
+    profile = np.nan_to_num(profile, nan=p_min)
     if p_max > p_min:
-        profile = (profile - p_min) / (p_max - p_min) * model_height
+        profile = (profile - p_min) / (p_max - p_min) * model_height * exaggeration
+    else:
+        profile = np.zeros_like(profile)
     profile = profile + base_height
 
-    thickness_px = max(3, int(round(thickness_mm)))
+    # N rows of a grid span N-1 pixels, so the slab is thickness/mm_per_pixel
+    # pixels plus one row. This rounded thickness_mm itself, which ignored the
+    # horizontal scale entirely.
+    thickness_px = max(2, int(round(thickness_mm / max(mm_per_pixel, 1e-6))) + 1)
     im_cross = np.tile(profile, (thickness_px, 1)).astype(np.float32)
 
     vertices, faces = _numpy2stl_mesh(im_cross, mm_per_pixel=mm_per_pixel)
@@ -811,5 +879,5 @@ def generate_crosssection(data: dict):
         filename=fname,
         media_type="application/octet-stream",
         background=BackgroundTask(os.unlink, temp_path),
-        headers={"Content-Disposition": f"attachment; filename={fname}"},
+        headers=_disposition(fname),
     )

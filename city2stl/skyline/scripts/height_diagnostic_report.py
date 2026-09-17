@@ -21,14 +21,13 @@ from __future__ import annotations
 import argparse
 import base64
 import io
-import json
 import logging
 import math
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 
@@ -41,12 +40,12 @@ logger = logging.getLogger("height_report")
 
 def _build_registry() -> list[dict]:
     """Import providers lazily so missing optional deps don't crash startup."""
+    from city2stl.skyline.height.providers.copernicus import CopernicusProvider
+    from city2stl.skyline.height.providers.ghsl import GHSLProvider
     from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
     from city2stl.skyline.height.providers.ndsm import NDSMProvider
-    from city2stl.skyline.height.providers.copernicus import CopernicusProvider
     from city2stl.skyline.height.providers.open_buildings import OpenBuildingsProvider
     from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
-    from city2stl.skyline.height.providers.ghsl import GHSLProvider
 
     return [
         {"name": "3DEP LiDAR",     "instance": LiDAR3DEPProvider(),    "confidence": 0.95, "res_m": 1.0,   "color": "#4caf50"},
@@ -481,10 +480,8 @@ def _generate_html(
     elapsed_s: float,
 ) -> str:
     north, south, east, west = bbox
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     ok_providers = [p for p in provider_results if p.status == "ok"]
-    fail_providers = [p for p in provider_results if p.status not in ("ok", "no_coverage")]
-    skip_providers = [p for p in provider_results if p.status == "no_coverage"]
 
     # --- provider summary cards ---
     cards_html = ""
@@ -542,7 +539,7 @@ def _generate_html(
     panels_html = ""
     if raster_panels:
         panels_html += "<div class='grid3'>\n"
-        for name, img_b64, cbar_b64, caption in raster_panels:
+        for _name, img_b64, cbar_b64, caption in raster_panels:
             panels_html += (
                 f"<div class='panel'>"
                 f"<img src='data:image/png;base64,{img_b64}' width='100%'>"
@@ -694,9 +691,9 @@ def _generate_html(
 def _run(region_name: str, bbox: tuple[float, float, float, float],
          out_dir: Path) -> None:
     from city2stl.skyline.height import merge_height_rasters, provider_stats
-    from city2stl.skyline.satellite_image import fetch_region_satellite
-    from city2stl.skyline.region_data import _load_osm_for_region, _load_region_bbox
+    from city2stl.skyline.region_data import _load_osm_for_region
     from city2stl.skyline.region_types import RegionBBox
+    from city2stl.skyline.satellite_image import fetch_region_satellite
 
     north, south, east, west = bbox
     rbb = RegionBBox(name=region_name, north=north, south=south, east=east, west=west)
@@ -913,7 +910,6 @@ def _run(region_name: str, bbox: tuple[float, float, float, float],
     # -- Render PNG panels --
     print("[height_report] Rendering images …")
     all_heights = [b.assigned_height_m for b in buildings]
-    vmin_h = float(np.percentile(all_heights, 2)) if all_heights else 0.0
     vmax_h = float(np.percentile(all_heights, 98)) if all_heights else 100.0
 
     raster_panels: list[tuple[str, str, str, str]] = []

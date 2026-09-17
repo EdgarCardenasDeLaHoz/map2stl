@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 
@@ -52,12 +52,25 @@ class HeightResult:
         self.raster = self.raster.astype(np.float32)
         self.confidence = self.confidence.astype(np.float32)
 
+    @classmethod
+    def empty(cls, dim: tuple[int, int], source_name: str,
+              resolution_m: float) -> HeightResult:
+        """All-NaN raster with zero confidence, shaped *dim* = (H, W)."""
+        h, w = dim
+        return cls(
+            raster=np.full((h, w), np.nan, dtype=np.float32),
+            confidence=np.zeros((h, w), dtype=np.float32),
+            source_name=source_name,
+            resolution_m=resolution_m,
+        )
+
 
 # -- bbox type alias ---------------------------------------------------------
 # (north, south, east, west) matching the rest of the codebase
 BBox = tuple[float, float, float, float]
 
 
+@runtime_checkable
 class HeightProvider(Protocol):
     """Interface every height-data source must satisfy."""
 

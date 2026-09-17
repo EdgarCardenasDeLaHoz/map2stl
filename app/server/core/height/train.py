@@ -19,21 +19,21 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Sequence
 from pathlib import Path
-from typing import List, Optional, Sequence
 
 import numpy as np
 
 from city2stl.skyline.height.train import (  # noqa: F401
-    TILE_SIZE,
-    TARGET_RES_M,
-    MAX_NAN_FRAC,
-    TileDataset,
-    gradient_loss,
-    combined_loss,
-    CitySpec,
     _DEFAULT_CITIES,
+    MAX_NAN_FRAC,
+    TARGET_RES_M,
+    TILE_SIZE,
+    CitySpec,
+    TileDataset,
     TrainConfig,
+    combined_loss,
+    gradient_loss,
     train,
 )
 
@@ -47,8 +47,8 @@ def collect_tiles(
     tiles_per_city: int = 100,
     tile_size: int = TILE_SIZE,
     resolution_m: float = TARGET_RES_M,
-    api_key: Optional[str] = None,
-) -> List[Path]:
+    api_key: str | None = None,
+) -> list[Path]:
     """Collect (RGB, height) tile pairs from provider data for training.
 
     For each city, the bbox is subdivided into a grid.  For each grid cell:
@@ -70,13 +70,13 @@ def collect_tiles(
     List of Paths to collected .npz tile files.
     """
     from city2stl.skyline.height import merge_height_rasters
-    from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
-    from city2stl.skyline.height.providers.ndsm import NDSMProvider
-    from city2stl.skyline.height.providers.google_3d import Google3DProvider
     from city2stl.skyline.height.providers.copernicus import CopernicusProvider
-    from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
     from city2stl.skyline.height.providers.ghsl import GHSLProvider
+    from city2stl.skyline.height.providers.google_3d import Google3DProvider
+    from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
+    from city2stl.skyline.height.providers.ndsm import NDSMProvider
     from city2stl.skyline.height.providers.shadow_height import ShadowHeightProvider
+    from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
 
     _prov_map = {
         "wsf3d":       WSF3DProvider(),
@@ -91,7 +91,7 @@ def collect_tiles(
     active_providers = [_prov_map[p] for p in providers if p in _prov_map]
     tile_dir.mkdir(parents=True, exist_ok=True)
 
-    collected: List[Path] = []
+    collected: list[Path] = []
 
     for city_name in city_names:
         city = _DEFAULT_CITIES.get(city_name)

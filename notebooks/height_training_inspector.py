@@ -159,6 +159,7 @@ def section_training_history(pdf: PdfPages) -> None:
 def section_model_evaluation(arch: str | None, tile_paths: list[Path], pdf: PdfPages) -> None:
     if MODEL_PATH.exists() and tile_paths:
         import torch
+
         from tools.ml.data.datasets import make_height_loaders
         from tools.ml.models import build_model
 
@@ -227,6 +228,7 @@ def section_model_evaluation(arch: str | None, tile_paths: list[Path], pdf: PdfP
 def section_per_tile_predictions(arch: str | None, tile_paths: list[Path], pdf: PdfPages) -> None:
     if MODEL_PATH.exists() and tile_paths:
         import torch
+
         from tools.ml.data.datasets import HeightTileDataset
         from tools.ml.models import build_model
 
@@ -313,7 +315,7 @@ def main() -> None:
     print(f"Saved PDF report: {REPORT_PDF}")
 
     # Optional quick training section kept as comments from notebook:
-    # from tools.ml.train import TrainConfig, train_v3
+    # from tools.ml.train.train import TrainConfig, train_v3
     # cfg = TrainConfig(
     #     task="height",
     #     epochs=8,

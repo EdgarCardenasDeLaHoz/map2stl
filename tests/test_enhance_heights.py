@@ -405,17 +405,14 @@ class TestReduceBuildingsRoofTags:
 
 
 class TestEnhanceHeightsRouter:
-    @pytest.fixture
-    def client(self):
-        from fastapi.testclient import TestClient
+    # Uses the shared ``client`` fixture from tests/conftest.py (temp DB/cache).
 
-        from app.server.server import app
-        return TestClient(app)
-
-    def test_google3d_available_endpoint(self, client):
-        """GET /api/cities/google3d-available returns available flag."""
+    @pytest.mark.parametrize("key, expected", [(None, False), ("test-key", True)])
+    def test_google3d_available_endpoint(self, client, monkeypatch, key, expected):
+        """GET /api/cities/google3d-available reflects the key lookup, not the machine."""
+        import city2stl.skyline.height.providers.google_3d as g3d
+        monkeypatch.setattr(g3d, "_get_api_key", lambda *a, **k: key)
         resp = client.get("/api/cities/google3d-available")
         assert resp.status_code == 200
         body = resp.json()
-        assert "available" in body
-        assert isinstance(body["available"], bool)
+        assert body["available"] is expected

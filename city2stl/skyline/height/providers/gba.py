@@ -303,10 +303,4 @@ class GBAProvider:
 
 
 def _empty_result(dim: tuple[int, int]) -> HeightResult:
-    h, w = dim
-    return HeightResult(
-        raster=np.full((h, w), np.nan, dtype=np.float32),
-        confidence=np.zeros((h, w), dtype=np.float32),
-        source_name="gba",
-        resolution_m=_RESOLUTION_M,
-    )
+    return HeightResult.empty(dim, "gba", _RESOLUTION_M)

@@ -18,7 +18,6 @@ city2stl/skyline/height/predict.py — this module is training-side only.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -33,259 +32,15 @@ except ImportError:
     pass
 
 
-def _require_torch():
-    if not _TORCH_AVAILABLE:
-        raise ImportError(
-            "PyTorch is required for model definitions. "
-            "Install with: pip install torch torchvision"
-        )
-
-
-# ---------------------------------------------------------------------------
-# MobileNetV3 feature extractor
-# ---------------------------------------------------------------------------
-
-def _build_mobilenet_backbone(
-    pretrained: bool = True,
-    freeze_bn: bool = False,
-    in_channels: int = 3,
-) -> "nn.Module":
-    """Build a MobileNetV3-Small backbone, returning the feature extractor.
-
-    The classifier head is removed.  Output is a feature tensor from the
-    last convolutional layer (576 channels at 1/32 input resolution).
-
-    Parameters
-    ----------
-    pretrained : bool
-        Load ImageNet-pretrained weights.
-    freeze_bn : bool
-        Freeze BatchNorm layers (useful for small batch sizes during
-        fine-tuning).
-    in_channels : int
-        Number of input channels.  Default 3 (RGB).  When >3, the first conv
-        is rebuilt: existing weights for the first 3 channels are kept, and
-        the extra channels are initialised to the mean of the original RGB
-        weights so the pretrained features still apply.
-    """
-    _require_torch()
-    from torchvision.models import mobilenet_v3_small, MobileNet_V3_Small_Weights
-
-    weights = MobileNet_V3_Small_Weights.DEFAULT if pretrained else None
-    backbone = mobilenet_v3_small(weights=weights)
-    features = backbone.features  # nn.Sequential
-
-    if in_channels != 3:
-        # First conv is features[0][0] (Conv2dNormActivation -> Conv2d)
-        first = features[0][0]
-        old_w = first.weight.data  # (out, 3, k, k)
-        new_first = nn.Conv2d(
-            in_channels, first.out_channels,
-            kernel_size=first.kernel_size,
-            stride=first.stride,
-            padding=first.padding,
-            bias=first.bias is not None,
-        )
-        with torch.no_grad():
-            new_w = new_first.weight.data
-            new_w[:, :3] = old_w
-            if in_channels > 3:
-                # Init extra channels with mean of RGB weights, attenuated
-                mean_w = old_w.mean(dim=1, keepdim=True)
-                new_w[:, 3:] = mean_w.repeat(1, in_channels - 3, 1, 1) * 0.1
-            if first.bias is not None:
-                new_first.bias.data.copy_(first.bias.data)
-        features[0][0] = new_first
-
-    if freeze_bn:
-        for m in features.modules():
-            if isinstance(m, (nn.BatchNorm2d, nn.SyncBatchNorm)):
-                m.eval()
-                for p in m.parameters():
-                    p.requires_grad = False
-
-    return features
-
-
-def _mobilenet_out_channels() -> int:
-    """Number of output channels from MobileNetV3-Small features."""
-    return 576
-
-
-# ---------------------------------------------------------------------------
-# Feature Pyramid Neck (lightweight multi-scale fusion)
-# ---------------------------------------------------------------------------
-
-class _FPN(nn.Module):
-    """Simple Feature Pyramid Network for multi-scale features.
-
-    Takes the MobileNetV3 feature map (single scale) and produces a
-    multi-resolution feature stack, upsampled back to a common size.
-    This provides the dense spatial info needed by the height head and
-    gives the shape head richer multi-scale context.
-
-    A future version can incorporate Retna_V2-style iterative aggregation
-    and DenseNet-style skip connections here.
-    """
-
-    def __init__(self, in_channels: int = 576, mid_channels: int = 128):
-        super().__init__()
-        self.lateral = nn.Conv2d(in_channels, mid_channels, 1)
-        self.smooth = nn.Sequential(
-            nn.Conv2d(mid_channels, mid_channels, 3, padding=1),
-            nn.BatchNorm2d(mid_channels),
-            nn.ReLU(inplace=True),
-        )
-        self.upsample_conv = nn.Sequential(
-            nn.Conv2d(mid_channels, mid_channels, 3, padding=1),
-            nn.BatchNorm2d(mid_channels),
-            nn.ReLU(inplace=True),
-        )
-        self.out_channels = mid_channels
-
-    def forward(self, x: "torch.Tensor", target_size: tuple[int, int]) -> "torch.Tensor":
-        x = self.lateral(x)
-        x = self.smooth(x)
-        x = F.interpolate(x, size=target_size, mode="bilinear", align_corners=False)
-        x = self.upsample_conv(x)
-        return x
-
-
-# ---------------------------------------------------------------------------
-# RoofNetV2
-# ---------------------------------------------------------------------------
-
-class RoofNetV2(nn.Module):
-    """Multi-task building analysis network (v2).
-
-    Architecture:
-      MobileNetV3-Small backbone (pretrained) -> FPN neck -> two heads:
-
-      * **height_head** — dense H*W regression (pseudo-nDSM).
-        Output: B x 1 x H x W (raw, apply clamp post-hoc).
-
-      * **shape_head** — building footprint-masked global pool -> classifier.
-        Output: B x n_classes logits.
-
-    The backbone is pretrained on ImageNet and fine-tuned end-to-end.
-    For small datasets, freeze the backbone initially and train heads only,
-    then unfreeze for full fine-tuning.
-
-    Parameters
-    ----------
-    n_classes : int
-        Number of roof shape classes.  Default 6.
-    fpn_channels : int
-        Feature pyramid intermediate channels.  Default 128.
-    pretrained : bool
-        Use ImageNet-pretrained MobileNetV3 weights.
-    freeze_backbone : bool
-        Freeze backbone weights (train heads only).
-    """
-
-    def __init__(
-        self,
-        n_classes: int = 6,
-        fpn_channels: int = 128,
-        pretrained: bool = True,
-        freeze_backbone: bool = False,
-    ) -> None:
-        _require_torch()
-        super().__init__()
-
-        self.n_classes = n_classes
-        self.backbone = _build_mobilenet_backbone(pretrained=pretrained)
-        backbone_ch = _mobilenet_out_channels()
-
-        if freeze_backbone:
-            for p in self.backbone.parameters():
-                p.requires_grad = False
-
-        self.fpn = _FPN(backbone_ch, fpn_channels)
-
-        # Height head: dense per-pixel regression + dropout for regularization
-        self.height_head = nn.Sequential(
-            nn.Conv2d(fpn_channels, fpn_channels // 2, 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Dropout2d(0.2),
-            nn.Conv2d(fpn_channels // 2, 1, 1),
-        )
-
-        # Shape head: masked global pool -> classifier
-        self.shape_pool = nn.AdaptiveAvgPool2d(1)
-        self.shape_head = nn.Sequential(
-            nn.Flatten(),
-            nn.Dropout(0.2),
-            nn.Linear(fpn_channels, n_classes),
-        )
-
-    def forward(
-        self,
-        x: "torch.Tensor",
-        mask: "torch.Tensor | None" = None,
-    ) -> "tuple[torch.Tensor, torch.Tensor]":
-        """Run both heads.
-
-        Parameters
-        ----------
-        x : Tensor, B x 3 x H x W (normalised with ImageNet stats)
-        mask : Tensor (optional), B x 1 x H x W or B x H x W
-            Building footprint mask. Applied before shape pooling.
-
-        Returns
-        -------
-        height_map : Tensor B x 1 x H x W (raw; clamp to [0, MAX_HEIGHT_M])
-        shape_logits : Tensor B x n_classes
-        """
-        input_size = x.shape[2:]
-
-        feat = self.backbone(x)  # B x 576 x H/32 x W/32
-        feat = self.fpn(feat, target_size=input_size)  # B x fpn_ch x H x W
-
-        # Height head
-        height_map = self.height_head(feat)
-
-        # Shape head with optional mask
-        shape_feat = feat
-        if mask is not None:
-            m = mask.float()
-            if m.dim() == 3:
-                m = m.unsqueeze(1)
-            if m.shape[2:] != feat.shape[2:]:
-                m = F.interpolate(m, size=feat.shape[2:], mode="nearest")
-            shape_feat = shape_feat * m
-
-        shape_feat = self.shape_pool(shape_feat)
-        shape_logits = self.shape_head(shape_feat)
-
-        return height_map, shape_logits
-
-    def predict_shape(self, x: "torch.Tensor", mask: "torch.Tensor | None" = None) -> "torch.Tensor":
-        """Shape classification only (no height computation)."""
-        _, logits = self.forward(x, mask)
-        return logits
-
-    def predict_height(self, x: "torch.Tensor") -> "torch.Tensor":
-        """Height regression only."""
-        h, _ = self.forward(x)
-        return h
-
-    def unfreeze_backbone(self) -> None:
-        """Unfreeze backbone for full fine-tuning."""
-        for p in self.backbone.parameters():
-            p.requires_grad = True
-
-    def freeze_backbone(self) -> None:
-        """Freeze backbone (train heads only)."""
-        for p in self.backbone.parameters():
-            p.requires_grad = False
-
-    def trainable_params(self) -> int:
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
-
-    def total_params(self) -> int:
-        return sum(p.numel() for p in self.parameters())
-
+# RoofNetV2 and its building blocks live in the library so inference does not
+# import from tools/; re-exported here for training code.
+from city2stl.roof_nets import (  # noqa: E402,F401
+    _FPN,
+    RoofNetV2,
+    _build_mobilenet_backbone,
+    _mobilenet_out_channels,
+    _require_torch,
+)
 
 # ---------------------------------------------------------------------------
 # RoofNetV3 -- iterative refinement with explicit segmentation mask head
@@ -385,10 +140,10 @@ class RoofNetV3(nn.Module):
 
     def _forward_once(
         self,
-        rgb: "torch.Tensor",
-        prev_mask: "torch.Tensor",
-        prev_height: "torch.Tensor",
-        footprint_mask: "torch.Tensor | None",
+        rgb: torch.Tensor,
+        prev_mask: torch.Tensor,
+        prev_height: torch.Tensor,
+        footprint_mask: torch.Tensor | None,
     ):
         """Single forward pass with a given prior.
 
@@ -422,10 +177,10 @@ class RoofNetV3(nn.Module):
 
     def forward(
         self,
-        rgb: "torch.Tensor",
+        rgb: torch.Tensor,
         n_iters: int = 1,
         return_all: bool = False,
-        footprint_mask: "torch.Tensor | None" = None,
+        footprint_mask: torch.Tensor | None = None,
     ):
         """Run iterative refinement.
 
@@ -448,7 +203,7 @@ class RoofNetV3(nn.Module):
         prev_height = torch.zeros(B, 1, H, W, device=device, dtype=rgb.dtype)
 
         outputs = []
-        for it in range(max(1, n_iters)):
+        for _it in range(max(1, n_iters)):
             mask_logits, height_map, shape_logits = self._forward_once(
                 rgb, prev_mask, prev_height, footprint_mask,
             )
@@ -466,7 +221,7 @@ class RoofNetV3(nn.Module):
 
     def predict(
         self,
-        rgb: "torch.Tensor",
+        rgb: torch.Tensor,
         n_iters: int = 2,
         gate_by_mask: bool = True,
         mask_threshold: float = 0.3,
@@ -511,7 +266,7 @@ class _MobileNetSkipBackbone(nn.Module):
             pretrained=pretrained, in_channels=in_channels,
         )
 
-    def forward(self, x: "torch.Tensor") -> "dict[str, torch.Tensor]":
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         skips: dict[str, torch.Tensor] = {}
         for i, layer in enumerate(self.features):
             x = layer(x)
@@ -558,14 +313,14 @@ class _RetnaFusionHead(nn.Module):
 
     def forward(
         self,
-        fpn_feat: "torch.Tensor",
-        skips: "dict[str, torch.Tensor]",
-        rgb_input: "torch.Tensor",
-    ) -> "torch.Tensor":
+        fpn_feat: torch.Tensor,
+        skips: dict[str, torch.Tensor],
+        rgb_input: torch.Tensor,
+    ) -> torch.Tensor:
         H, W = fpn_feat.shape[2:]
         outs = [fpn_feat, rgb_input if rgb_input.shape[2:] == (H, W)
                 else F.interpolate(rgb_input, size=(H, W), mode="bilinear", align_corners=False)]
-        for lat, name in zip(self.lateral, ("s2", "s8", "s16", "s32")):
+        for lat, name in zip(self.lateral, ("s2", "s8", "s16", "s32"), strict=False):
             s = lat(skips[name])
             if s.shape[2:] != (H, W):
                 s = F.interpolate(s, size=(H, W), mode="bilinear", align_corners=False)
@@ -653,11 +408,11 @@ class RoofNetV3_1(nn.Module):
 
     def _forward_once(
         self,
-        rgb: "torch.Tensor",
-        prev_mask: "torch.Tensor",
-        prev_height: "torch.Tensor",
-        prev_scratch: "torch.Tensor",
-        footprint_mask: "torch.Tensor | None",
+        rgb: torch.Tensor,
+        prev_mask: torch.Tensor,
+        prev_height: torch.Tensor,
+        prev_scratch: torch.Tensor,
+        footprint_mask: torch.Tensor | None,
     ):
         """Single forward pass with full prior input."""
         prev_h_norm = prev_height / self.height_norm
@@ -690,10 +445,10 @@ class RoofNetV3_1(nn.Module):
 
     def forward(
         self,
-        rgb: "torch.Tensor",
+        rgb: torch.Tensor,
         n_iters: int = 2,
         return_all: bool = False,
-        footprint_mask: "torch.Tensor | None" = None,
+        footprint_mask: torch.Tensor | None = None,
     ):
         """Run iterative refinement with FULL backprop (no detach)."""
         B, _, H, W = rgb.shape
@@ -705,7 +460,7 @@ class RoofNetV3_1(nn.Module):
         )
 
         outputs = []
-        for it in range(max(1, n_iters)):
+        for _it in range(max(1, n_iters)):
             mask_logits, height_map, scratch, shape_logits = self._forward_once(
                 rgb, prev_mask, prev_height, prev_scratch, footprint_mask,
             )
@@ -725,7 +480,7 @@ class RoofNetV3_1(nn.Module):
 
     def predict(
         self,
-        rgb: "torch.Tensor",
+        rgb: torch.Tensor,
         n_iters: int = 3,
         gate_by_mask: bool = True,
         mask_threshold: float = 0.3,
@@ -839,10 +594,10 @@ class RoofNetV3_S(nn.Module):
 
     def forward(
         self,
-        rgb: "torch.Tensor",
+        rgb: torch.Tensor,
         n_iters: int = 2,
         return_all: bool = False,
-        footprint_mask: "torch.Tensor | None" = None,
+        footprint_mask: torch.Tensor | None = None,
     ):
         B, _, H, W = rgb.shape
         device, dtype = rgb.device, rgb.dtype
@@ -864,7 +619,7 @@ class RoofNetV3_S(nn.Module):
 
     def predict(
         self,
-        rgb: "torch.Tensor",
+        rgb: torch.Tensor,
         n_iters: int = 2,
         gate_by_mask: bool = True,
         mask_threshold: float = 0.3,
@@ -968,7 +723,7 @@ class HeightUNet(nn.Module):
         self.mask_head   = nn.Conv2d(ch, 1, 1)
         self.height_head = nn.Conv2d(ch, 1, 1)
 
-    def _decode(self, rgb: "torch.Tensor") -> "torch.Tensor":
+    def _decode(self, rgb: torch.Tensor) -> torch.Tensor:
         skips = self.backbone(rgb)
         x = self.dec32_16(skips["s32"], skips["s16"])
         x = self.dec16_8(x, skips["s8"])
@@ -976,7 +731,7 @@ class HeightUNet(nn.Module):
         x = F.interpolate(x, size=rgb.shape[2:], mode="bilinear", align_corners=False)
         return self.final_up(x)
 
-    def forward(self, rgb: "torch.Tensor") -> "tuple[torch.Tensor, torch.Tensor]":
+    def forward(self, rgb: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Return (mask_logits, height_map) — both (B, 1, H, W).
 
         mask_logits : raw (pre-sigmoid) building probability
@@ -989,9 +744,9 @@ class HeightUNet(nn.Module):
 
     def predict(
         self,
-        rgb: "torch.Tensor",
+        rgb: torch.Tensor,
         mask_threshold: float = 0.3,
-    ) -> "tuple[torch.Tensor, torch.Tensor]":
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Inference: return (mask_prob, gated_height)."""
         with torch.no_grad():
             mask_logits, height_map = self.forward(rgb)
@@ -1018,7 +773,7 @@ def build_model(
     n_classes: int = 6,
     pretrained: bool = True,
     freeze_backbone: bool = False,
-    checkpoint: "str | None" = None,
+    checkpoint: str | None = None,
     device: str = "cpu",
 ):
     """Build a RoofNetV2 or RoofNetV3 model, optionally loading a checkpoint.
@@ -1117,7 +872,7 @@ def build_model(
 # baseline used by train_retna.py, grow_prune.py, and inspect_retna.py.
 # ---------------------------------------------------------------------------
 
-def double_conv(in_channels: int, out_channels: int) -> "nn.Module":
+def double_conv(in_channels: int, out_channels: int) -> nn.Module:
     """Two 3×3 conv+LeakyReLU layers (UNet building block)."""
     _require_torch()
     return nn.Sequential(
@@ -1128,7 +883,7 @@ def double_conv(in_channels: int, out_channels: int) -> "nn.Module":
     )
 
 
-def res_conv(in_channels: int, out_channels: int) -> "nn.Module":
+def res_conv(in_channels: int, out_channels: int) -> nn.Module:
     """Strided 3×3 conv pair that halves spatial resolution (Retna_V1 block)."""
     _require_torch()
     return nn.Sequential(
@@ -1157,7 +912,7 @@ class UNet(nn.Module):
         self.dconv_up1 = double_conv(num_chan[0] + num_chan[1], num_chan[0])
         self.conv_last = nn.Conv2d(num_chan[0], out_classes, 1)
 
-    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         conv1 = self.dconv_down1(x)
         x = self.maxpool(conv1)
         conv2 = self.dconv_down2(x)
@@ -1190,7 +945,7 @@ class Retna_V1(nn.Module):
         self,
         in_channels: int,
         out_classes: int,
-        hidden_channels: "list[int] | None" = None,
+        hidden_channels: list[int] | None = None,
     ) -> None:
         _require_torch()
         super().__init__()
@@ -1205,7 +960,7 @@ class Retna_V1(nn.Module):
         self.blocks = nn.ModuleList(blocks)
         self.conv_last = nn.Conv2d(sum(hidden_channels), out_classes, 1)
 
-    def forward(self, x_in: "torch.Tensor") -> "torch.Tensor":
+    def forward(self, x_in: torch.Tensor) -> torch.Tensor:
         x_next = x_in
         out_list = [x_in]
         for block in self.blocks:
@@ -1232,7 +987,7 @@ def _valid_groups(channels: int, preferred: int = 8) -> int:
     return 1
 
 
-def add_coord_channels(x: "torch.Tensor") -> "torch.Tensor":
+def add_coord_channels(x: torch.Tensor) -> torch.Tensor:
     """Append (y, x) coordinate grids normalised to [-1, 1] as extra channels."""
     _require_torch()
     B, _, H, W = x.shape
@@ -1262,7 +1017,7 @@ class ResBlock(nn.Module):
             nn.GroupNorm(g_out, out_ch),
         )
 
-    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return F.leaky_relu(self.body(x) + self.shortcut(x), inplace=True)
 
 
@@ -1273,7 +1028,7 @@ class Retna_V2(nn.Module):
         self,
         in_channels: int,
         out_classes: int,
-        hidden_channels: "list[int] | None" = None,
+        hidden_channels: list[int] | None = None,
         coord_conv: bool = True,
     ) -> None:
         _require_torch()
@@ -1294,7 +1049,7 @@ class Retna_V2(nn.Module):
         self._sum_ch = sum(hidden)
         self.conv_last = nn.Conv2d(self._sum_ch, out_classes, 1)
 
-    def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.coord_conv:
             x = add_coord_channels(x)
         x_in = x
@@ -1319,7 +1074,7 @@ class RoofNet(nn.Module):
         self,
         in_channels: int = 3,
         n_classes: int = 6,
-        hidden_channels: "list[int] | None" = None,
+        hidden_channels: list[int] | None = None,
         coord_conv: bool = True,
     ) -> None:
         _require_torch()
@@ -1344,7 +1099,7 @@ class RoofNet(nn.Module):
             nn.Linear(self._backbone_ch, n_classes),
         )
 
-    def _backbone_features(self, x: "torch.Tensor") -> "torch.Tensor":
+    def _backbone_features(self, x: torch.Tensor) -> torch.Tensor:
         if self.coord_conv:
             x = add_coord_channels(x)
         x_in = x
@@ -1360,9 +1115,9 @@ class RoofNet(nn.Module):
 
     def forward(
         self,
-        x: "torch.Tensor",
-        mask: "torch.Tensor | None" = None,
-    ) -> "tuple[torch.Tensor, torch.Tensor]":
+        x: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         feat = self._backbone_features(x)
         height_map = self.height_head(feat)
         if mask is not None:

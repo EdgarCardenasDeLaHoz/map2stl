@@ -20,14 +20,17 @@ download by Functional Urban Area. The GHSL WMS/WCS endpoint is simpler.
 from __future__ import annotations
 
 import logging
-from typing import Tuple
 
 import numpy as np
 import requests
 
 from city2stl.skyline.height import BBox, HeightResult, _resample
+
 from ._cache import (
-    register_ttl, make_cache_key, read_height_result, write_height_result,
+    make_cache_key,
+    read_height_result,
+    register_ttl,
+    write_height_result,
 )
 from ._raster import read_geotiff_bytes
 
@@ -69,7 +72,7 @@ def _is_in_europe(bbox: BBox) -> bool:
     return (south < 72 and north > 34 and west < 45 and east > -25)
 
 
-def _fetch_eu_wcs(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | None:
+def _fetch_eu_wcs(bbox: BBox, dim: tuple[int, int]) -> np.ndarray | None:
     """Fetch building heights from Copernicus EU WCS endpoint.
 
     Returns float32 array (H, W) in metres, or None on failure.
@@ -113,7 +116,7 @@ def _fetch_eu_wcs(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | None:
         return None
 
 
-def _fetch_ghsl_tiles(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | None:
+def _fetch_ghsl_tiles(bbox: BBox, dim: tuple[int, int]) -> np.ndarray | None:
     """Fetch GHSL GHS-BUILT-H tiles (global, 100m).
 
     This is the fallback for non-European areas.
@@ -141,7 +144,7 @@ class CopernicusProvider:
         """Returns True for European bboxes (primary coverage area)."""
         return _is_in_europe(bbox)
 
-    def fetch_heights(self, bbox: BBox, dim: Tuple[int, int]) -> HeightResult:
+    def fetch_heights(self, bbox: BBox, dim: tuple[int, int]) -> HeightResult:
         """Fetch building heights from Copernicus/GHSL sources."""
         north, south, east, west = bbox
         cache_key = make_cache_key(_NAMESPACE, north, south, east, west,
@@ -182,11 +185,5 @@ class CopernicusProvider:
         return result
 
 
-def _empty_result(dim: Tuple[int, int]) -> HeightResult:
-    h, w = dim
-    return HeightResult(
-        raster=np.full((h, w), np.nan, dtype=np.float32),
-        confidence=np.zeros((h, w), dtype=np.float32),
-        source_name="copernicus",
-        resolution_m=_RESOLUTION_M,
-    )
+def _empty_result(dim: tuple[int, int]) -> HeightResult:
+    return HeightResult.empty(dim, "copernicus", _RESOLUTION_M)

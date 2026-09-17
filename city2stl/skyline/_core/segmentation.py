@@ -1,20 +1,13 @@
 """skyline._core.segmentation — extracted from pipeline.py (A1 split)."""
 from __future__ import annotations
-from collections import OrderedDict as _OrderedDict
 
 import logging
-import math
 import os
-from dataclasses import dataclass, replace
+from collections import OrderedDict as _OrderedDict
 from pathlib import Path
-from typing import Sequence
 
 import cv2
 import numpy as np
-from scipy.ndimage import gaussian_filter1d, median_filter, uniform_filter1d
-from scipy.optimize import linear_sum_assignment
-from scipy.signal import find_peaks
-from shapely.geometry import shape
 
 # F-CLEAN14: the F-SKY12 depth except-branches reference ``logger`` but the
 # module never defined one (latent NameError, only reachable on a depth-module
@@ -80,7 +73,7 @@ _segformer_model = None
 
 _NEURAL_CACHE_CAPACITY = 64
 
-_neural_cache: "_OrderedDict[int, dict]" = _OrderedDict()
+_neural_cache: _OrderedDict[int, dict] = _OrderedDict()
 
 _MOBILESAM_LOADED: bool = False
 
@@ -195,7 +188,7 @@ def _neural_cache_put(img_id: int, entry: dict, image_rgb: np.ndarray) -> None:
     while len(_neural_cache) > _NEURAL_CACHE_CAPACITY:
         _neural_cache.popitem(last=False)
 
-def _ensure_label_map(image_rgb: np.ndarray) -> "np.ndarray | None":
+def _ensure_label_map(image_rgb: np.ndarray) -> np.ndarray | None:
     """Run SegFormer-b0 (ADE20K) and return the per-pixel argmax label map.
 
     Cached by id(image_rgb). All higher-level mask getters
@@ -258,7 +251,7 @@ def _segformer_batch_size() -> int:
     except ValueError:
         return 12
 
-def prefetch_label_maps(images: "list[np.ndarray]") -> int:
+def prefetch_label_maps(images: list[np.ndarray]) -> int:
     """Run SegFormer once on a *batch* of images, populating the neural cache.
 
     Every higher-level mask getter (``_ensure_label_map`` and the sky /
@@ -334,7 +327,7 @@ def prefetch_label_maps(images: "list[np.ndarray]") -> int:
 
 def _neural_sky_and_building_masks(
     image_rgb: np.ndarray,
-) -> tuple["np.ndarray | None", "np.ndarray | None"]:
+) -> tuple[np.ndarray | None, np.ndarray | None]:
     """Return cleaned-up boolean (sky_mask, building_mask) — morphology applied.
 
     The SegFormer forward pass is shared with the water/vegetation getters
@@ -510,7 +503,7 @@ def _neural_sky_and_building_masks(
         entry["building"] = building_mask
     return sky_mask, building_mask
 
-def _neural_water_mask(image_rgb: np.ndarray) -> "np.ndarray | None":
+def _neural_water_mask(image_rgb: np.ndarray) -> np.ndarray | None:
     """Return the cached water-class boolean mask for this image.
 
     Shares the SegFormer forward pass with ``_neural_sky_and_building_masks``
@@ -535,7 +528,7 @@ def _neural_water_mask(image_rgb: np.ndarray) -> "np.ndarray | None":
     entry["water"] = water_mask
     return water_mask
 
-def _neural_vegetation_mask(image_rgb: np.ndarray) -> "np.ndarray | None":
+def _neural_vegetation_mask(image_rgb: np.ndarray) -> np.ndarray | None:
     """Return the cached vegetation-class boolean mask (F-SKY18).
 
     Shares the SegFormer forward pass via the cached label_map; skips

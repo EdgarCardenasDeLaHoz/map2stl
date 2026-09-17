@@ -1,31 +1,33 @@
 """skyline._core.registration — extracted from pipeline.py (A1 split)."""
 from __future__ import annotations
-from collections import OrderedDict as _OrderedDict
 
 import logging
 import math
-import os
-from dataclasses import dataclass, replace
-from pathlib import Path
-from typing import Sequence
+from collections.abc import Sequence
 
-import cv2
 import numpy as np
-from scipy.ndimage import gaussian_filter1d, median_filter, uniform_filter1d
+from scipy.ndimage import median_filter
 from scipy.optimize import linear_sum_assignment
 from scipy.signal import find_peaks
-from shapely.geometry import shape
 
 # F-CLEAN14: the F-SKY12 depth except-branches reference ``logger`` but the
 # module never defined one (latent NameError, only reachable on a depth-module
 # failure). Defined here so those branches log instead of crashing.
 logger = logging.getLogger(__name__)
 
-from .types import BuildingRecord, Viewpoint, CapturedView
-from .projection import _project_all_buildings_vectorized, _projected_building_x_ranges
-from .segmentation import (_neural_sky_and_building_masks, _neural_water_mask,
-                           _mobilesam_available, _get_mobilesam_predictor)
-from .skyline import detect_skyline_contour
+from .projection import (  # noqa: E402
+    _project_all_buildings_vectorized,
+    _projected_building_x_ranges,
+)
+from .segmentation import (  # noqa: E402
+    _get_mobilesam_predictor,
+    _mobilesam_available,
+    _neural_sky_and_building_masks,
+    _neural_water_mask,
+)
+from .skyline import detect_skyline_contour  # noqa: E402
+from .types import BuildingRecord, CapturedView, Viewpoint  # noqa: E402
+
 
 def _proj_x_range(p: dict) -> tuple[float, float]:
     """Return (left, right) pixel x-bounds of a projection dict.
@@ -57,7 +59,7 @@ def osm_anchor_silhouettes(
     segments: list[dict],
     projections: list[dict],
     *,
-    building_mask: "np.ndarray | None" = None,
+    building_mask: np.ndarray | None = None,
     min_proj_containment: float = 0.5,
     min_gap_px: int = 2,
     min_child_width_px: int = 4,
@@ -189,7 +191,7 @@ def osm_sam_instance_silhouettes(
     segments: list[dict],
     projections: list[dict],
     *,
-    building_mask: "np.ndarray | None" = None,
+    building_mask: np.ndarray | None = None,
     min_proj_containment: float = 0.5,
     min_marker_separation_px: int = 20,
     confidence_floor: float = 0.65,
@@ -317,7 +319,7 @@ def match_segments_to_buildings(
     projections: list[dict],
     buildings_by_id: dict[str, BuildingRecord],
     min_interval_iou: float = 0.10,
-    cross_view_scorer: "callable | None" = None,
+    cross_view_scorer: callable | None = None,
 ) -> list[dict]:
     """For each skyline segment, pick the best-matching projected building.
 
@@ -433,7 +435,7 @@ def match_segments_to_buildings(
             xs, ys = geom.exterior.xy
         except Exception:
             return []
-        return [(float(x), float(y)) for x, y in zip(xs, ys)]
+        return [(float(x), float(y)) for x, y in zip(xs, ys, strict=False)]
 
     out: list[dict] = []
     for seg in segments:
@@ -542,7 +544,7 @@ def match_segments_to_buildings(
             seg_pixel_height = (
                 float(seg.get("base_y", 0)) - float(seg.get("top_y", 0)))
             seg_is_tall_in_image = seg_pixel_height >= 100.0
-            for c, _iou, _w, _occ, p, _cv in scored:
+            for _c, _iou, _w, _occ, p, _cv in scored:
                 if p in bucket:
                     continue
                 pL, pR = _proj_range(p)
@@ -609,7 +611,7 @@ def match_segments_to_buildings(
         if m is None:
             continue
         fid_claimants.setdefault(m["feature_id"], []).append(i)
-    for fid, idxs in fid_claimants.items():
+    for _fid, idxs in fid_claimants.items():
         if len(idxs) <= 1:
             continue
         idxs.sort(key=lambda i: -float(out[i].get("matched_combined", 0.0)))
@@ -700,7 +702,7 @@ def _match_projections_to_peaks(
     row_idx, col_idx = linear_sum_assignment(cost)
     matches: list[tuple[int, int]] = []
     residuals: list[float] = []
-    for r, c in zip(row_idx, col_idx):
+    for r, c in zip(row_idx, col_idx, strict=False):
         d = float(cost[r, c])
         if d <= max_match_px:
             matches.append((int(r), int(c)))
@@ -714,7 +716,7 @@ def _score_offset_semantic_iou(
     viewpoint: Viewpoint,
     offset_deg: float,
     building_mask: np.ndarray,
-    water_mask: "np.ndarray | None" = None,
+    water_mask: np.ndarray | None = None,
 ) -> float:
     """Width-weighted semantic-alignment score in [-1, 1] (clamped ≥ 0).
 
@@ -772,7 +774,7 @@ def _score_offset_semantic_iou(
     hit_cols = 0
     water_cols = 0
     pred_cols = 0
-    for xL, xR in zip(x_min.tolist(), x_max.tolist()):
+    for xL, xR in zip(x_min.tolist(), x_max.tolist(), strict=False):
         width = xR - xL + 1
         if width <= 0:
             continue
@@ -955,7 +957,7 @@ def register_view_to_osm(
                 is_b_col = (build_per_col > water_per_col) & (build_per_col > 5)
                 hit = 0
                 pred = 0
-                for xL, xR in zip(x_min.tolist(), x_max.tolist()):
+                for xL, xR in zip(x_min.tolist(), x_max.tolist(), strict=False):
                     width = xR - xL + 1
                     if width <= 0:
                         continue

@@ -16,13 +16,15 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_BUILDING_HEIGHT_M = 10.0
+
 
 def _count_verts(g) -> int:
     """Count total exterior vertices in a geometry (for simplification logging)."""
     if g.geom_type == "LineString":
         return len(g.coords)
     if g.geom_type == "MultiLineString":
-        return sum(len(l.coords) for l in g.geoms)
+        return sum(len(ln.coords) for ln in g.geoms)
     if g.geom_type == "Polygon":
         return len(g.exterior.coords)
     if g.geom_type == "MultiPolygon":
@@ -58,13 +60,16 @@ def rasterize_city_data(
     Returns a dict compatible with the DEM response format:
       { values: [float, ...], width, height, vmin, vmax, bbox }
     """
-    from rasterio.transform import from_bounds
     from rasterio.enums import MergeAlg
     from rasterio.features import rasterize as _rasterize
-    from shapely.geometry import shape, mapping
+    from rasterio.transform import from_bounds
+    from shapely.geometry import mapping, shape
 
     transform = from_bounds(west, south, east, north, dim, dim)
     grid = np.zeros((dim, dim), dtype=np.float32)
+    # Features that fail to convert or burn are skipped, counted per layer and
+    # reported once at the end rather than dropped silently.
+    skipped = {"waterways": 0, "roads": 0, "buildings": 0}
 
     # -- Waterways --------------------------------------------------------
     water_shapes = []
@@ -81,7 +86,7 @@ def rasterize_city_data(
             if not s.is_empty:
                 water_shapes.append((mapping(s), water_depression_m))
         except Exception:
-            continue
+            skipped["waterways"] += 1
     if water_shapes:
         try:
             _rasterize(water_shapes, out=grid, transform=transform,
@@ -105,7 +110,7 @@ def rasterize_city_data(
             if not s.is_empty:
                 road_shapes.append((mapping(s), road_depression_m))
         except Exception:
-            continue
+            skipped["roads"] += 1
     if road_shapes:
         try:
             _rasterize(road_shapes, out=grid, transform=transform,
@@ -122,10 +127,15 @@ def rasterize_city_data(
         if not geom:
             continue
         try:
-            h = float((feat.get("properties") or {}).get("height_m", 10.0)) * building_scale
+            # A present-but-null height means "unknown": use the default
+            # rather than dropping the building on float(None).
+            height_m = (feat.get("properties") or {}).get("height_m")
+            if height_m is None:
+                height_m = _DEFAULT_BUILDING_HEIGHT_M
+            h = float(height_m) * building_scale
             building_shapes.append((mapping(shape(geom)), h))
         except Exception:
-            continue
+            skipped["buildings"] += 1
     if building_shapes:
         for feat_shape, h in building_shapes:
             try:
@@ -135,7 +145,11 @@ def rasterize_city_data(
                 )
                 np.maximum(grid, tmp, out=grid)
             except Exception:
-                continue
+                skipped["buildings"] += 1
+
+    if any(skipped.values()):
+        logger.warning("rasterize_city_data skipped features: %s",
+                       ", ".join(f"{k}={v}" for k, v in skipped.items() if v))
 
     vmin = float(grid.min())
     vmax = float(grid.max())

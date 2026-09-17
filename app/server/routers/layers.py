@@ -54,7 +54,7 @@ def _heightmap_response(heightmap: np.ndarray, mask: np.ndarray, body) -> JSONRe
 
 
 async def _register_response(
-    cache: "tuple[np.ndarray, np.ndarray] | None",
+    cache: tuple[np.ndarray, np.ndarray] | None,
     not_found_hint: str,
     body: MeshRegisterRequest,
 ) -> JSONResponse:

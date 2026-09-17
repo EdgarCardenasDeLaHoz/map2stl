@@ -227,7 +227,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 
 const docsOpen = ref(false);
 const docsLinks = [
@@ -238,14 +238,14 @@ const docsLinks = [
 ];
 
 // Close docs dropdown when clicking outside
-if (typeof document !== 'undefined') {
-  document.addEventListener('click', (e: Event) => {
-    const btn = document.getElementById('docsMenuBtn');
-    if (btn && !btn.contains(e.target as Node)) {
-      docsOpen.value = false;
-    }
-  });
+function onDocumentClick(e: Event) {
+  const btn = document.getElementById('docsMenuBtn');
+  if (btn && !btn.contains(e.target as Node)) {
+    docsOpen.value = false;
+  }
 }
+onMounted(() => document.addEventListener('click', onDocumentClick));
+onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick));
 
 // Keys modal state
 const keysOpen = ref(false);

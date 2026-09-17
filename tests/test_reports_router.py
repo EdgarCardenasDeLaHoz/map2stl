@@ -80,7 +80,7 @@ def report_tree(tmp_path, monkeypatch):
 
 
 @pytest.fixture()
-def client(report_tree):
+def client(report_tree, tmp_data_dir):
     return TestClient(app)
 
 

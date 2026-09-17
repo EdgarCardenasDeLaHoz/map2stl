@@ -25,7 +25,6 @@ Notes
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import numpy as np
 
@@ -34,8 +33,8 @@ logger = logging.getLogger(__name__)
 
 def infill_idw(
     heightmap: np.ndarray,
-    mask: Optional[np.ndarray] = None,
-    dem_baseline: Optional[np.ndarray] = None,
+    mask: np.ndarray | None = None,
+    dem_baseline: np.ndarray | None = None,
     power: float = 2.0,
 ) -> np.ndarray:
     """Fill NaN pixels in *heightmap* using Inverse Distance Weighting.
@@ -118,7 +117,7 @@ def infill_idw(
 
     # Linear requires >= 4 non-collinear known points for Delaunay triangulation.
     # Fall back immediately to nearest when the known set is too small.
-    filled_linear: Optional[np.ndarray] = None
+    filled_linear: np.ndarray | None = None
     if len(known_coords) >= 4:
         try:
             filled_linear = griddata(

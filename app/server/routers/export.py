@@ -15,54 +15,57 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["export"])
 
-from app.server.core.export import (
-    generate_stl,
-    generate_obj,
+from app.server.core.export import (  # noqa: E402
     generate_3mf,
     generate_crosssection,
     generate_mesh_preview,
-    generate_puzzle_3mf,
-    start_export_task,
-    get_task_status,
+    generate_obj,
+    generate_stl,
     get_task_file,
+    get_task_status,
+    start_export_task,
 )
+
+
+async def _off_loop(fn, data):
+    """Run a mesh build in the thread pool. A dim-1200 export is ~17 s of CPU;
+    run inline it froze every other request, the progress polls included."""
+    import asyncio
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, fn, data)
+    except ValueError as exc:
+        return JSONResponse(content={"error": str(exc)}, status_code=400)
 
 
 @router.post("/api/export/stl")
 async def export_stl(request: Request):
     """Generate and download an STL file from DEM data."""
-    data = await request.json()
-    return generate_stl(data)
+    return await _off_loop(generate_stl, await request.json())
 
 
 @router.post("/api/export/obj")
 async def export_obj(request: Request):
     """Generate and download an OBJ file from DEM data."""
-    data = await request.json()
-    return generate_obj(data)
+    return await _off_loop(generate_obj, await request.json())
 
 
 @router.post("/api/export/3mf")
 async def export_3mf(request: Request):
     """Generate and download a 3MF file from DEM data."""
-    data = await request.json()
-    return generate_3mf(data)
+    return await _off_loop(generate_3mf, await request.json())
 
 
 @router.post("/api/export/preview")
 async def export_preview(request: Request):
     """Return numpy2stl vertices+faces as JSON for the in-browser 3D viewer."""
-    import asyncio
-    data = await request.json()
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, generate_mesh_preview, data)
+    return await _off_loop(generate_mesh_preview, await request.json())
 
 
 @router.post("/api/export/crosssection")
 async def export_crosssection(request: Request):
     """Generate a cross-section STL along a chosen latitude or longitude line."""
-    data = await request.json()
-    return generate_crosssection(data)
+    return await _off_loop(generate_crosssection, await request.json())
 
 
 @router.post("/api/export/puzzle")

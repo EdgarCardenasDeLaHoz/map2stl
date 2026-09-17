@@ -63,7 +63,7 @@ let _presetSnapshot = null;
 
 function initPresetProfiles() {
     let saved = null;
-    try { saved = localStorage.getItem('strm2stl_userPresets'); } catch (_) { }
+    try { saved = localStorage.getItem('strm2stl_userPresets'); } catch (_) { /* best-effort; failure is non-fatal */ }
     if (saved) {
         try {
             const raw = JSON.parse(saved);
@@ -659,7 +659,7 @@ function setupAutoSave() {
     }
 
     chk.addEventListener('change', () => {
-        try { localStorage.setItem('strm2stl_autoSave', chk.checked); } catch (_) { }
+        try { localStorage.setItem('strm2stl_autoSave', chk.checked); } catch (_) { /* best-effort; failure is non-fatal */ }
         // Turning auto-save on should flush whatever is already pending.
         if (chk.checked && _dirty) _scheduleAutoSave();
     });

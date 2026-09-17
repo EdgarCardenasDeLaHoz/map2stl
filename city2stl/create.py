@@ -24,20 +24,23 @@ here for offline experimentation via the Jupyter notebooks in strm2stl/notebooks
 from __future__ import annotations
 
 import numpy as np
-from shapely.geometry import polygon as shapely_polygon
-
-from .buildings import get_polygons
+import numpy2stl.processing.simplify as simp
 
 # Canonical geometry primitives live in numpy2stl — city2stl reuses them rather
 # than maintaining a parallel (and previously broken) triangulation path.
 from numpy2stl import (
     array_to_mesh,
-    polygon_to_prism as _polygon_to_prism,
-    vertices_to_index as _vertices_to_index,
 )
 from numpy2stl import perimeter_to_walls as np2stl  # noqa: F401 – re-export for notebook compat
-import numpy2stl.processing.simplify as simp
+from numpy2stl import (
+    polygon_to_prism as _polygon_to_prism,
+)
+from numpy2stl import (
+    vertices_to_index as _vertices_to_index,
+)
+from shapely.geometry import polygon as shapely_polygon
 
+from .buildings import get_polygons
 
 # ---------------------------------------------------------------------------
 # Public mesh builders
@@ -371,7 +374,6 @@ def _perimeter_angles(line: np.ndarray) -> np.ndarray:
     Compute interior angles (in degrees) at each vertex of a closed polygon.
     Used to detect and remove collinear vertices before ear-clip triangulation.
     """
-    n = len(line)
     prev_pts = np.roll(line, 1, axis=0)
     next_pts = np.roll(line, -1, axis=0)
     v1 = prev_pts - line

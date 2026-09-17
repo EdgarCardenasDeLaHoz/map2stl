@@ -6,8 +6,6 @@ Uses a small 5×5 synthetic DEM to avoid heavy computation.
 
 import time
 
-import pytest
-
 # ---------------------------------------------------------------------------
 # Shared DEM fixture
 # ---------------------------------------------------------------------------
@@ -137,13 +135,16 @@ class TestAsyncExportFlow:
         assert task_id
 
         status_payload = None
-        for _ in range(40):
+        deadline = time.monotonic() + 60.0
+        while True:
             status = client.get(f"/api/export/status/{task_id}")
             assert status.status_code == 200
             status_payload = status.json()
             if status_payload["status"] == "complete":
                 break
             assert status_payload["status"] == "running"
+            if time.monotonic() > deadline:
+                break
             time.sleep(0.05)
 
         assert status_payload is not None

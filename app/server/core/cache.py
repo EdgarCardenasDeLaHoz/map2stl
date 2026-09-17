@@ -122,7 +122,7 @@ def write_array_cache(namespace: str, key: str,
             try:
                 p.unlink(missing_ok=True)
             except Exception:
-                pass
+                logger.debug('Could not delete cache file', exc_info=True)
 
 
 def read_array_cache(namespace: str, key: str) -> tuple[dict[str, np.ndarray], dict] | None:
@@ -172,7 +172,7 @@ def write_osm_cache(key: str, data: dict) -> None:
         try:
             path.unlink(missing_ok=True)
         except Exception:
-            pass
+            logger.debug('Could not delete stale OSM cache file', exc_info=True)
 
 
 def read_osm_cache(key: str, allow_stale: bool = False) -> dict | None:
@@ -239,7 +239,7 @@ def prune_cache(namespace: str, ttl_seconds: int | None = None,
                 f.unlink()
                 deleted += 1
             except Exception:
-                pass
+                logger.debug('Could not delete cache file during prune', exc_info=True)
 
     if deleted:
         logger.info(f"prune_cache({namespace}): deleted {deleted} files")
@@ -277,7 +277,7 @@ def clear_bbox_cache(north: float, south: float,
                 f.unlink()
                 deleted += 1
             except Exception:
-                pass
+                logger.debug('Could not delete cache file during clear', exc_info=True)
         results[ns] = deleted
 
     # Also clear the legacy EE cache directory
@@ -289,7 +289,7 @@ def clear_bbox_cache(north: float, south: float,
                 f.unlink()
                 deleted += 1
             except Exception:
-                pass
+                logger.debug('Could not delete EE cache file during clear', exc_info=True)
         results["ee"] = deleted
 
     if any(results.values()):
@@ -319,7 +319,7 @@ def migrate_osm_plain_json(osm_cache_path: Path) -> int:
                 old_file.unlink()
                 migrated += 1
             except Exception:
-                pass
+                logger.debug('Could not remove legacy OSM cache file', exc_info=True)
             continue
         try:
             data = json.loads(old_file.read_text())

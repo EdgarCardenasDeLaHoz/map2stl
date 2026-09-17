@@ -55,20 +55,20 @@ class StitchedPanoResult:
     # Per-column compass heading (matches pano_image.shape[1]). Used by the
     # PDF page to overlay yellow heading ticks so the user can verify the
     # column-to-heading mapping visually.
-    headings_per_col: "np.ndarray | None" = None
+    headings_per_col: np.ndarray | None = None
     # Per-class pano-stitched masks (same view set + sort as
     # ``pano_image`` so the column geometry agrees). Populated by
     # ``_build_and_detect_pano`` for the HTML report's SegFormer-mask
     # pano layer; ``None`` when unavailable.
-    pano_building_mask: "np.ndarray | None" = None
-    pano_water_mask: "np.ndarray | None" = None
-    pano_sky_mask: "np.ndarray | None" = None
-    pano_vegetation_mask: "np.ndarray | None" = None
+    pano_building_mask: np.ndarray | None = None
+    pano_water_mask: np.ndarray | None = None
+    pano_sky_mask: np.ndarray | None = None
+    pano_vegetation_mask: np.ndarray | None = None
     # F-SKY24: pano-wide depth map (Depth Anything V2 inverse depth,
     # [0, 1] scaled). Computed once in ``_build_and_detect_pano`` so the
     # splitter + downstream renderers (depth pano, reconstruction polar
     # plot) all share one inference instead of recomputing per-tab.
-    pano_depth: "np.ndarray | None" = None
+    pano_depth: np.ndarray | None = None
     # OSM-anchored depth→distance scale: median(osm_dist / sqrt(d_inv))
     # over matched towers, so ``dist_m = sqrt(1 - depth_rel) * depth_scale``
     # is calibrated to real metres. Computed once in the pipeline and
@@ -122,19 +122,19 @@ class SeedViewRegistration:
     # registration so the PDF renderer can overlay it without depending on
     # the bounded in-memory neural cache (which evicts after 16 entries and
     # otherwise misses by PDF-render time on multi-seed runs).
-    building_mask: "np.ndarray | None" = None
+    building_mask: np.ndarray | None = None
     # Additional SegFormer class masks captured at the same time as
     # ``building_mask``. Free piggy-back on the already-cached label_map
     # forward pass. Used by the HTML report to render a "all
     # segmentations on grayscale" diagnostic image so reviewers can see
     # what every class label looked like, not just buildings.
-    sky_mask: "np.ndarray | None" = None
-    water_mask: "np.ndarray | None" = None
-    vegetation_mask: "np.ndarray | None" = None
+    sky_mask: np.ndarray | None = None
+    water_mask: np.ndarray | None = None
+    vegetation_mask: np.ndarray | None = None
     # Raw RGB frame (pre-overlay) used as the grayscale base for the
     # multi-class mask diagnostic. Kept separately from ``image`` because
     # ``image`` is overwritten with the registration-overlay drawing.
-    raw_image: "np.ndarray | None" = None
+    raw_image: np.ndarray | None = None
     # F-SKY13 Phase B: pano↔OSM-coastline registration score at the
     # recovered (or manually overridden) heading offset. Per-seed, not
     # per-view — populated only when pano-recovery is enabled and the
@@ -156,14 +156,14 @@ class SeedViewRegistration:
     # coarse stride). Drawn as a dashed orange polyline on the minimap so
     # the user can see where the pano "thinks" the coast is. None when
     # pano-recovery is disabled or there's no water in the pano.
-    pano_projected_coastline: "list[tuple[float, float]] | None" = None
+    pano_projected_coastline: list[tuple[float, float]] | None = None
     # F-SKY18: depth-snapped pano vegetation base points (lon/lat). Second
     # bearing-landmark class alongside coastline; drawn as green dots on the
     # minimap and (Phase 3) fed into heading registration.
-    pano_projected_vegetation: "list[tuple[float, float]] | None" = None
+    pano_projected_vegetation: list[tuple[float, float]] | None = None
     # F-SKY15: per-view list of ``RegisteredBuildingEstimate`` records
     # (with F-SKY12 depth fields when SKYLINE_CV_F_SKY12=1). Persisted so
     # the HTML diagnostic report can render the depth diagnostics today
     # without waiting for the PDF rendering path. None elsewhere.
-    view_estimates: "list | None" = None
+    view_estimates: list | None = None
 

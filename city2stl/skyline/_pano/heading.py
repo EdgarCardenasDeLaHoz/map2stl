@@ -1,53 +1,32 @@
 """skyline._pano.heading — extracted from pano_registration.py (A2 split)."""
 from __future__ import annotations
-import json
-import math
-import os
-import time
+
 from contextlib import nullcontext
-from pathlib import Path
-import cv2
+
 import numpy as np
+
+from .._core.timing import _StepTimer
 from ..pipeline import (
     BuildingRecord,
-    CapturedView,
-    Viewpoint,
-    _merge_silhouette_sources,
     _neural_sky_and_building_masks,
-    aggregate_building_heights,
-    augment_estimates_with_depth,
-    detect_building_silhouettes,
-    detect_buildings_from_mask,
-    estimate_heights_from_registration,
-    match_segments_to_buildings,
-    osm_anchor_silhouettes,
-    osm_sam_instance_silhouettes,
-    register_view_to_osm,
 )
-from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResult
 from ..region_config import (
-    FLICKR_API_KEY as _FLICKR_API_KEY,
-    _F_SKY1_ENABLED,
     _F_SKY11_1_ENABLED,
-    _F_SKY12_ENABLED,
-    _F_SKY5_ENABLED,
 )
-from ..region_data import _bearing_deg, _distance_m, _fetch_elevations
-from ..streetview_io import _meta_location, _streetview_image, _streetview_metadata
-from ..seed_selection import _screen_score_from_image
-from ..region_render import _negative_seed_views, _registration_overlay
+from ..region_types import SkylinePoint
+
 
 def _recover_pano_heading(
-    seed: "SkylinePoint",
+    seed: SkylinePoint,
     prefetch: list[dict],
     cached_views: list[dict],
     effective_pitch: float,
     spin_step_deg: float,
-    pano_recovery_state: "dict | None",
-    timer: "_StepTimer | None" = None,
+    pano_recovery_state: dict | None,
+    timer: _StepTimer | None = None,
 ) -> tuple[
-    "float | None", "float | None", "float | None", "float | None",
-    "float | None", "int | None", "list | None", "list | None",
+    float | None, float | None, float | None, float | None,
+    float | None, int | None, list | None, list | None,
 ]:
     """F-SKY11.1 pano-coastline heading recovery (+ F-SKY18 vegetation).
 
@@ -65,14 +44,14 @@ def _recover_pano_heading(
 
     All values are None when pano_recovery_state is None or recovery fails.
     """
-    pano_recovered_offset: "float | None" = None
-    pano_recovered_sigma: "float | None" = None
-    pano_recovered_peak: "float | None" = None
-    pano_water_frac: "float | None" = None
-    pano_osm_iou: "float | None" = None
-    pano_osm_n_keypoints: "int | None" = None
-    pano_projected_coastline: "list | None" = None
-    pano_projected_vegetation: "list | None" = None
+    pano_recovered_offset: float | None = None
+    pano_recovered_sigma: float | None = None
+    pano_recovered_peak: float | None = None
+    pano_water_frac: float | None = None
+    pano_osm_iou: float | None = None
+    pano_osm_n_keypoints: int | None = None
+    pano_projected_coastline: list | None = None
+    pano_projected_vegetation: list | None = None
 
     if pano_recovery_state is None:
         return (
@@ -86,12 +65,15 @@ def _recover_pano_heading(
         return timer.timed(label, level=2) if timer is not None else nullcontext()
 
     try:
+        from ..coastline_registration import (
+            detect_coastline_keypoints,
+            sweep_pano_heading_offset,
+        )
         from ..pipeline import (
             stitch_pano_masks as _stitch_masks,
-            stitch_pano_views as _stitch_rgb,
         )
-        from ..coastline_registration import (
-            detect_coastline_keypoints, sweep_pano_heading_offset,
+        from ..pipeline import (
+            stitch_pano_views as _stitch_rgb,
         )
         # Build a set of image IDs for cached (screened) views so we can
         # use id() to avoid double-inference on the same ndarray objects.
@@ -115,8 +97,8 @@ def _recover_pano_heading(
             # large spins).
             from ..pipeline import (
                 _neural_sky_and_building_masks,
-                _neural_water_mask,
                 _neural_vegetation_mask,
+                _neural_water_mask,
             )
             with _sub("SegFormer masks (pano-recovery prefetch)"):
                 # Pull water first — it only needs the SegFormer forward pass
@@ -204,13 +186,15 @@ def _recover_pano_heading(
                 # the final ``pano_recovered_offset``. Falls through
                 # silently when OSM has no green polygons in the seed's
                 # 1 km window, or no vegetation visible in the pano.
-                _veg_scores: "np.ndarray | None" = None
+                _veg_scores: np.ndarray | None = None
                 _veg_peak: float = 0.0
                 _veg_keypoints: list[dict] = []
                 if _pveg is not None and float(_pveg.mean()) > 0.005:
                     try:
                         from ..osm_water import (  # noqa: PLC0415
                             clip_to_radius as _clip_g,
+                        )
+                        from ..osm_water import (
                             green_keypoints_for_scoring as _green_kps,
                         )
                         with _sub("OSM green keypoint extraction"):
@@ -308,6 +292,8 @@ def _recover_pano_heading(
                     if pano_projected_coastline:
                         from ..osm_water import (  # noqa: PLC0415
                             clip_to_radius as _clip_snap,
+                        )
+                        from ..osm_water import (
                             sample_coastline_points as _samp_snap,
                         )
                         _osm_snap = _samp_snap(
@@ -333,9 +319,11 @@ def _recover_pano_heading(
                         from ..coastline_registration import (  # noqa: PLC0415
                             pano_vegetation_base_to_lonlat,
                         )
+                        from ..osm_water import (
+                            clip_to_radius as _clip_green,
+                        )
                         from ..osm_water import (  # noqa: PLC0415
                             sample_green_points as _samp_green,
-                            clip_to_radius as _clip_green,
                         )
                         pano_projected_vegetation = pano_vegetation_base_to_lonlat(
                             _pveg, _headings_per_col,
@@ -376,10 +364,14 @@ def _recover_pano_heading(
                 try:
                     from ..coastline_registration import (  # noqa: PLC0415
                         coastline_icp_offset as _icp,
+                    )
+                    from ..coastline_registration import (
                         joint_class_icp_offset as _joint_icp,
                     )
                     from ..osm_water import (  # noqa: PLC0415
                         clip_to_radius as _clip_icp,
+                    )
+                    from ..osm_water import (
                         sample_coastline_points as _samp_icp,
                     )
                     if _pano_proj_raw:
@@ -458,12 +450,14 @@ def _recover_pano_heading(
                     )
                 else:
                     try:
-                        from ..osm_water import (  # noqa: PLC0415
-                            clip_to_radius as _clip,
-                            osm_keypoints_for_scoring as _osm_kps_fn,
-                        )
                         from ..coastline_registration import (  # noqa: PLC0415
                             score_pano_offset_keypoints,
+                        )
+                        from ..osm_water import (  # noqa: PLC0415
+                            clip_to_radius as _clip,
+                        )
+                        from ..osm_water import (
+                            osm_keypoints_for_scoring as _osm_kps_fn,
                         )
                         _osm_coast = _clip(
                             pano_recovery_state.get("osm_coastline_features") or [],
@@ -510,15 +504,15 @@ def _recover_pano_heading(
     )
 
 def _recover_anchor_offset(
-    seed: "SkylinePoint",
+    seed: SkylinePoint,
     cached_views: list[dict],
-    seed_buildings: list["BuildingRecord"],
-    pano_recovered_offset: "float | None",
-    pano_recovered_peak: "float | None",
-    pano_recovered_sigma: "float | None",
-    pano_recovery_state: "dict | None",
-    anchor_overrides: "dict[str, float] | None",
-    timer: "_StepTimer | None" = None,
+    seed_buildings: list[BuildingRecord],
+    pano_recovered_offset: float | None,
+    pano_recovered_peak: float | None,
+    pano_recovered_sigma: float | None,
+    pano_recovery_state: dict | None,
+    anchor_overrides: dict[str, float] | None,
+    timer: _StepTimer | None = None,
 ) -> float:
     """Joint-optimize the pano-to-geographic heading offset across all views.
 
@@ -526,9 +520,8 @@ def _recover_anchor_offset(
     registration search centre.
     """
     from ..pipeline import (  # noqa: PLC0415
-        _score_offset_semantic_iou,
-        _neural_sky_and_building_masks,
         _neural_water_mask,
+        _score_offset_semantic_iou,
     )
 
     def _sub(label: str):
@@ -565,7 +558,7 @@ def _recover_anchor_offset(
 
     def _joint_score(cand: float) -> float:
         total = 0.0
-        for (bmask, wmask, vp), wt in zip(masks_per_view, weights):
+        for (bmask, wmask, vp), wt in zip(masks_per_view, weights, strict=False):
             if bmask is None or wt <= 0:
                 continue
             s = _score_offset_semantic_iou(seed_buildings, vp, cand, bmask, wmask)

@@ -6,16 +6,16 @@ Step 12: reads/writes SQLite via core/db.py.
 """
 
 from __future__ import annotations
-from app.server.core.db import get_db, init_db
-from app.server.core.validation import model_to_dict
 
 import json
 import logging
 import sqlite3
-from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
+from app.server.core.db import get_db, init_db
+from app.server.core.validation import model_to_dict
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["regions"])
@@ -24,8 +24,7 @@ router = APIRouter(tags=["regions"])
 # ---------------------------------------------------------------------------
 # Schema imports
 # ---------------------------------------------------------------------------
-from app.server.schemas import RegionCreate, RegionParameters, RegionSettings
-
+from app.server.schemas import RegionCreate, RegionParameters  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # SQLite helpers
@@ -68,7 +67,7 @@ def _bbox_iou(a: dict, b: dict) -> float:
     return inter / union if union > 0 else 0.0
 
 
-def find_overlapping_region(bbox: dict, min_iou: float = 0.5) -> Optional[dict]:
+def find_overlapping_region(bbox: dict, min_iou: float = 0.5) -> dict | None:
     """Return the saved region with the highest bbox IoU against `bbox`, if
     it clears `min_iou`; otherwise None. Used by F-MESHIMPORT auto-register
     to reuse an existing region rather than creating a near-duplicate.
@@ -160,11 +159,22 @@ async def create_region(region: RegionCreate):
         _ensure_db()
         params = region.parameters or RegionParameters()
         with get_db() as conn:
+            # An upsert, not INSERT OR REPLACE: REPLACE deletes the old row
+            # first, and with foreign keys on that cascade-deleted the
+            # region's saved settings every time a region was re-saved.
             conn.execute(
-                "INSERT OR REPLACE INTO regions "
+                "INSERT INTO regions "
                 "(name, label, description, north, south, east, west, "
                 " dim, depth_scale, water_scale, height, base, subtract_water, sat_scale) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(name) DO UPDATE SET "
+                "label=excluded.label, description=excluded.description, "
+                "north=excluded.north, south=excluded.south, "
+                "east=excluded.east, west=excluded.west, "
+                "dim=excluded.dim, depth_scale=excluded.depth_scale, "
+                "water_scale=excluded.water_scale, height=excluded.height, "
+                "base=excluded.base, subtract_water=excluded.subtract_water, "
+                "sat_scale=excluded.sat_scale",
                 (
                     region.name, region.label, region.description,
                     region.north, region.south, region.east, region.west,
@@ -190,22 +200,35 @@ async def update_region(name: str, region: RegionCreate):
     """Update an existing saved region by name."""
     try:
         _ensure_db()
-        params = region.parameters or RegionParameters()
+        params = region.parameters
         with get_db() as conn:
-            cur = conn.execute(
-                "UPDATE regions SET "
-                "label=?, description=?, north=?, south=?, east=?, west=?, "
-                "dim=?, depth_scale=?, water_scale=?, height=?, base=?, subtract_water=?, sat_scale=? "
-                "WHERE name=?",
-                (
-                    region.label, region.description,
-                    region.north, region.south, region.east, region.west,
-                    params.dim, params.depth_scale, params.water_scale,
-                    params.height, params.base,
-                    int(params.subtract_water), params.sat_scale,
-                    name,
-                ),
-            )
+            if params is None:
+                # A rename or bbox edit sends no parameters. Writing the
+                # RegionParameters defaults here reset the region's stored
+                # values on every such edit; leave them alone instead.
+                cur = conn.execute(
+                    "UPDATE regions SET "
+                    "label=?, description=?, north=?, south=?, east=?, west=? "
+                    "WHERE name=?",
+                    (region.label, region.description,
+                     region.north, region.south, region.east, region.west,
+                     name),
+                )
+            else:
+                cur = conn.execute(
+                    "UPDATE regions SET "
+                    "label=?, description=?, north=?, south=?, east=?, west=?, "
+                    "dim=?, depth_scale=?, water_scale=?, height=?, base=?, subtract_water=?, sat_scale=? "
+                    "WHERE name=?",
+                    (
+                        region.label, region.description,
+                        region.north, region.south, region.east, region.west,
+                        params.dim, params.depth_scale, params.water_scale,
+                        params.height, params.base,
+                        int(params.subtract_water), params.sat_scale,
+                        name,
+                    ),
+                )
             conn.commit()
             if cur.rowcount == 0:
                 return JSONResponse(content={"error": f"Region '{name}' not found"}, status_code=404)

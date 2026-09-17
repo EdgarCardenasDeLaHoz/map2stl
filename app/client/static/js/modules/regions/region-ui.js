@@ -232,14 +232,18 @@ function renderCoordinatesList() {
             item.className = 'coordinate-item';
             item.dataset.regionName = region.name;
             if (selected && selected.name === region.name) item.classList.add('selected');
+            const esc = window.escapeHtml;
             item.innerHTML = `
                 <span class="coordinate-item-icon">📍</span>
-                <span class="coordinate-item-name">${region.name}</span>
-                <span class="coordinate-item-meta">${region.description || ''}</span>
+                <span class="coordinate-item-name">${esc(region.name)}</span>
+                <span class="coordinate-item-meta">${esc(region.description || '')}</span>
                 <span class="coordinate-item-notes ${hasNote ? 'has-note' : ''}"
-                      onclick="event.stopPropagation(); showNotesModal('${region.name.replace(/'/g, "\\'")}')"
                       title="${hasNote ? 'View/edit notes' : 'Add notes'}">📝</span>
             `;
+            item.querySelector('.coordinate-item-notes').addEventListener('click', (e) => {
+                e.stopPropagation();
+                showNotesModal(region.name);
+            });
             item.tabIndex = 0;
             item.setAttribute('role', 'option');
             item.onclick = () => window.selectCoordinate?.(originalIndex);
@@ -305,7 +309,7 @@ function populateRegionsTable() {
 
     const q = _tableSearch.toLowerCase();
     const filtered = q
-        ? coordinatesData.filter((r, i) => r.name.toLowerCase().includes(q))
+        ? coordinatesData.filter((r) => r.name.toLowerCase().includes(q))
         : coordinatesData;
 
     const totalPages = Math.max(1, Math.ceil(filtered.length / TABLE_PAGE_SIZE));
@@ -323,7 +327,7 @@ function populateRegionsTable() {
         tr.dataset.regionIndex = index;
         if (selected && selected.name === region.name) tr.classList.add('selected');
         tr.innerHTML = `
-            <td>${region.name}</td>
+            <td>${window.escapeHtml(region.name)}</td>
             <td>${region.north?.toFixed(5) || ''}</td>
             <td>${region.south?.toFixed(5) || ''}</td>
             <td>${region.east?.toFixed(5) || ''}</td>
@@ -406,13 +410,13 @@ function initRegionThumbnails() {
     try {
         const saved = localStorage.getItem('strm2stl_thumbs');
         if (saved) regionThumbnails = JSON.parse(saved);
-    } catch (_) { }
+    } catch (_) { /* best-effort; failure is non-fatal */ }
     window.appState.regionThumbnails = regionThumbnails;
 }
 
 function saveRegionThumbnail(name, dataURL) {
     regionThumbnails[name] = dataURL;
-    try { localStorage.setItem('strm2stl_thumbs', JSON.stringify(regionThumbnails)); } catch (_) { }
+    try { localStorage.setItem('strm2stl_thumbs', JSON.stringify(regionThumbnails)); } catch (_) { /* best-effort; failure is non-fatal */ }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

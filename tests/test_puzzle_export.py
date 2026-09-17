@@ -1,19 +1,15 @@
 """Tests for the B-MULTI puzzle/multi-piece export feature."""
 
-import json
 import zipfile
 
 import numpy as np
-import pytest
 
 from app.server.core.export import (
-    _prepare_dem_array,
+    ExportTask,
     _add_alignment_features,
     _apply_edge_tabs_v,
     generate_puzzle_3mf,
-    ExportTask,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -203,11 +199,8 @@ class TestGeneratePuzzle3MF:
 # ---------------------------------------------------------------------------
 
 class TestPuzzleRouter:
-    @pytest.fixture
-    def client(self):
-        from fastapi.testclient import TestClient
-        from app.server.server import app
-        return TestClient(app)
+    # Uses the shared ``client`` fixture from tests/conftest.py (temp DB/cache).
+    # Export threads it starts are drained by the autouse fixture there.
 
     def test_puzzle_endpoint_returns_task_id(self, client):
         """POST /api/export/puzzle should return a task_id."""

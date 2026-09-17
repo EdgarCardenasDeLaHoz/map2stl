@@ -1,35 +1,27 @@
 """skyline._core.pano — extracted from pipeline.py (A1 split)."""
 from __future__ import annotations
-from collections import OrderedDict as _OrderedDict
 
 import logging
 import math
-import os
-from dataclasses import dataclass, replace
-from pathlib import Path
-from typing import Sequence
+from collections.abc import Sequence
 
-import cv2
 import numpy as np
-from scipy.ndimage import gaussian_filter1d, median_filter, uniform_filter1d
-from scipy.optimize import linear_sum_assignment
-from scipy.signal import find_peaks
-from shapely.geometry import shape
 
 # F-CLEAN14: the F-SKY12 depth except-branches reference ``logger`` but the
 # module never defined one (latent NameError, only reachable on a depth-module
 # failure). Defined here so those branches log instead of crashing.
 logger = logging.getLogger(__name__)
 
-from .types import BuildingRecord
-from .projection import _building_vertices_lonlat
+from .projection import _building_vertices_lonlat  # noqa: E402
+from .types import BuildingRecord  # noqa: E402
+
 
 def stitch_pano_mask_channel(
     views: list[dict],
     fov_deg: float,
     step_deg: float,
     mask_key: str,
-) -> "np.ndarray | None":
+) -> np.ndarray | None:
     """Stitch one boolean per-view mask channel into a 360° strip (F-SKY18).
 
     Generalises the building/water cropping in ``stitch_pano_masks`` to any
@@ -152,7 +144,6 @@ def project_buildings_to_pano(
         return []
     mlat = 110_540.0
     mlon = 111_320.0 * math.cos(math.radians(seed_lat))
-    image_width = int(headings_per_col.size)
 
     def _bearing_to_col(bearing_deg: float) -> int | None:
         """Find the column whose recorded heading is closest to bearing_deg.
@@ -285,7 +276,7 @@ def stitch_pano_views(
     means = [float(c.astype(np.float32).mean()) for c in crops]
     ref = float(np.median(means))
     norm: list[np.ndarray] = []
-    for c, m in zip(crops, means):
+    for c, m in zip(crops, means, strict=False):
         if m > 1.0:
             scale = ref / m
             norm.append(np.clip(c.astype(np.float32) *

@@ -446,7 +446,6 @@ function formatCoord(val, isLat, interval) {
  */
 window.updateStackedLayers = function updateStackedLayers() {
     const demCanvas = document.querySelector(`#demImage ${window.DEM_CANVAS_SELECTOR}`);
-    const waterCanvas = document.querySelector('#waterMaskImage canvas');
     const satCanvas = document.querySelector('#satelliteImage canvas');
 
     const stack = document.getElementById('layersStack');
@@ -553,12 +552,12 @@ window.updateStackedLayers = function updateStackedLayers() {
 
     _syncCityOverlayLayerState();
 
-    drawLayerGrid();
+    window.drawLayerGrid();
 
-    applyStackedTransform();
+    window.applyStackedTransform();
 
     if (window.appState?.osmCityData && _activeLayers.has('CityOverlay')) {
-        renderCityOverlay();
+        window.renderCityOverlay();
     } else {
         window._cancelCityRenders?.();
         document.querySelector('#layersStack .osm-overlay')?.remove();
@@ -905,7 +904,7 @@ let _cityOverlayDebounceTimer = null;
 window.applyStackedTransform = function applyStackedTransform() {
     const xfm = `translate(${stackZoom.offsetX}px, ${stackZoom.offsetY}px) scale(${stackZoom.scale})`;
     _applyTransformCSS(xfm);
-    drawLayerGrid();
+    window.drawLayerGrid();
 
     // Schedule city re-render only when needed
     if (window.appState?.osmCityData && _activeLayers.has('CityOverlay') && typeof window.renderCityOverlay === 'function') {
@@ -1021,7 +1020,7 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
 
     stack.addEventListener('dblclick', () => {
         stackZoom = { scale: 1, offsetX: 0, offsetY: 0 };
-        applyStackedTransform();
+        window.applyStackedTransform();
         stack.classList.remove('stack-cursor-grabbing');
         stack.classList.add('stack-cursor-grab');
     });
@@ -1040,7 +1039,7 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
     stack.addEventListener('mouseup', () => {
         if (isPanning) {
             isPanning = false;
-            applyStackedTransform();  // Full redraw (grid + city overlay) once pan ends
+            window.applyStackedTransform();  // Full redraw (grid + city overlay) once pan ends
         }
         stack.classList.remove('stack-cursor-grabbing');
         stack.classList.add('stack-cursor-grab');
@@ -1057,7 +1056,7 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
         stackZoom.offsetX = mouseX - (mouseX - stackZoom.offsetX) * scaleChange;
         stackZoom.offsetY = mouseY - (mouseY - stackZoom.offsetY) * scaleChange;
         stackZoom.scale = newScale;
-        applyStackedTransform();
+        window.applyStackedTransform();
     });
 };
 

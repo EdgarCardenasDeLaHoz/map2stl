@@ -19,14 +19,17 @@ We use the STAC API to find the correct tile(s) for a bbox.
 from __future__ import annotations
 
 import logging
-from typing import Tuple
 
 import numpy as np
 import requests
 
 from city2stl.skyline.height import BBox, HeightResult, _resample
+
 from ._cache import (
-    register_ttl, make_cache_key, read_height_result, write_height_result,
+    make_cache_key,
+    read_height_result,
+    register_ttl,
+    write_height_result,
 )
 from ._raster import read_geotiff_bytes
 
@@ -48,7 +51,7 @@ _WMS_URLS = [
 _LAYER_NAME = "GHS_BUILT_H_ANBH_E2018_GLOBE_R2023A_54009_100_V1_0"
 
 
-def _fetch_ghsl_wms(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | None:
+def _fetch_ghsl_wms(bbox: BBox, dim: tuple[int, int]) -> np.ndarray | None:
     """Fetch building heights from GHSL WMS endpoint.
 
     Tries each URL in _WMS_URLS in order; returns the first successful raster.
@@ -108,7 +111,7 @@ class GHSLProvider:
         """GHSL has global coverage."""
         return True
 
-    def fetch_heights(self, bbox: BBox, dim: Tuple[int, int]) -> HeightResult:
+    def fetch_heights(self, bbox: BBox, dim: tuple[int, int]) -> HeightResult:
         """Fetch building heights from GHSL WMS."""
         north, south, east, west = bbox
         cache_key = make_cache_key(_NAMESPACE, north, south, east, west,
@@ -137,11 +140,5 @@ class GHSLProvider:
         return result
 
 
-def _empty_result(dim: Tuple[int, int]) -> HeightResult:
-    h, w = dim
-    return HeightResult(
-        raster=np.full((h, w), np.nan, dtype=np.float32),
-        confidence=np.zeros((h, w), dtype=np.float32),
-        source_name="ghsl",
-        resolution_m=_RESOLUTION_M,
-    )
+def _empty_result(dim: tuple[int, int]) -> HeightResult:
+    return HeightResult.empty(dim, "ghsl", _RESOLUTION_M)

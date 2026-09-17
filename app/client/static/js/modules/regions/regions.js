@@ -75,7 +75,7 @@ async function loadCoordinates() {
         window.setCoordinatesData?.(data.regions || []);
 
         // Populate coordinates list with enhanced styling
-        renderCoordinatesList();
+        window.renderCoordinatesList();
 
         const coordinatesData = window.getCoordinatesData?.() || [];
 
@@ -112,7 +112,7 @@ async function loadCoordinates() {
                 // Tag rectangle with continent for visibility toggling
                 const cLat = (region.north + region.south) / 2;
                 const cLon = (region.east + region.west) / 2;
-                rect._continentName = detectContinent(cLat, cLon);
+                rect._continentName = window.detectContinent(cLat, cLon);
 
                 // Click selects the region (stays on Explore)
                 rect.on('click', () => window.selectCoordinate(originalIndex));
@@ -290,10 +290,10 @@ async function selectCoordinate(index, opts = {}) {
 
     // CRITICAL: Clear cached layer data and clear visual displays when region changes
     // Prevents stale water mask / land cover / DEM from showing with new region
-    clearLayerCache();
-    clearLayerDisplays();
+    window.clearLayerCache();
+    window.clearLayerDisplays();
     // Clear city overlay so auto-load triggers for the new region
-    if (typeof clearCityOverlay === 'function') clearCityOverlay();
+    if (typeof window.clearCityOverlay === 'function') window.clearCityOverlay();
 
     // Highlight in sidebar list
     document.querySelectorAll('.coordinate-item').forEach(item => {
@@ -399,7 +399,7 @@ async function selectCoordinate(index, opts = {}) {
     if (map) {
         const bounds = [[selectedRegion.south, selectedRegion.west],
         [selectedRegion.north, selectedRegion.east]];
-        try { map.fitBounds(bounds, { padding: [20, 20] }); } catch (e) { }
+        try { map.fitBounds(bounds, { padding: [20, 20] }); } catch (e) { /* best-effort; failure is non-fatal */ }
     }
 
     // If the user is already in Edit/DEM view, region selection should immediately
@@ -426,7 +426,7 @@ window.selectCoordinate = selectCoordinate;
  */
 async function goToEdit(index) {
     await window.selectCoordinate(index, { skipEditReload: true });
-    switchView('dem');
+    window.switchView('dem');
 
     // Populate the compact sidebar edit panel
     const coordinatesData = window.getCoordinatesData?.() || [];

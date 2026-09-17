@@ -78,7 +78,7 @@ flowchart LR
 |------|-------------|---------|
 | `view-management.js` | `switchView`, `switchDemSubtab`, `_setSidebarViews` | Tab switching; shows the sidebar's list/table view for a mode. The mode itself belongs to `SidebarPanel.vue`. |
 | `app-setup.js` | `setupOpacityControls`, `loadAllLayers`, `saveCurrentRegion` | App init wiring helpers |
-| `cache-inventory.js` | `loadCacheInventory`, `setupCacheInventoryView` | Cache stats browser (Plotly chart + region table) |
+| `cache-inventory.js` | `loadCacheInventory` | Cache stats browser (Plotly chart + region table) |
 | `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset` | Preset save/load/apply; `PRESET_VERSION` migration; `_presetSnapshot` revert; `_migratePreset()` fills missing keys from built-in defaults |
 | `curve-editor-state.js` | `CurveEditorState`, `CURVE_PRESETS` | Curve editor state class + named preset definitions (shared by curve-editor.js and tests) |
 | `curve-editor.js` | `initCurveEditor`, `applyCurveTodem`, `interpolateCurve`, `undoCurve` | Elevation curve editor (spline + undo/redo) |

@@ -65,7 +65,7 @@ try:
         _cfg = json.loads(_cfg_path.read_text())
         _OPENTOPO_API_KEY = _cfg.get("opentopo_api_key") or None
 except Exception:
-    pass
+    _log.debug('Could not read opentopo key from config.json', exc_info=True)
 
 OPENTOPO_API_KEY: str | None = _OPENTOPO_API_KEY
 

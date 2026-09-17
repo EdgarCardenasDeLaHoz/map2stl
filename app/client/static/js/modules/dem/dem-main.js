@@ -105,9 +105,23 @@ function _applyDemResult(data, north, south, east, west) {
     // Store bounding box for gridlines
     window.appState.currentDemBbox = { north, south, east, west };
 
-    // A freshly-fetched DEM invalidates any previously-applied composite —
-    // export must not ship stale composite values against new terrain.
-    if (window.appState) window.appState._newCompositeApplied = false;
+    // A freshly-fetched DEM invalidates any previously-applied composite and
+    // any browser-side edit — export must not ship stale values against new
+    // terrain. Say so, since a projection change reloads the DEM too.
+    if (window.appState) {
+        if (window.appState._newCompositeApplied) {
+            window.showToast?.('DEM reloaded - the applied composite was cleared. '
+                + 'Apply it again to include it in the model.', 'warning', 6000);
+        }
+        window.appState._newCompositeApplied = false;
+        window.appState.demValuesEdited = false;
+        // The last preview was built from the previous DEM. Drop it so export
+        // stays disabled until the Extrude view rebuilds from this one.
+        if (window.appState.generatedModelData) {
+            window.appState.generatedModelData = null;
+            window._setExportButtonsEnabled?.(false);
+        }
+    }
 
     // Render DEM canvas — projection applied server-side, no client warp needed
     const canvas = window.renderDEMCanvas?.(demVals, w, h, colormap, vmin, vmax);
@@ -168,7 +182,7 @@ function _applyDemResult(data, north, south, east, west) {
             thumbCanvas.getContext('2d').drawImage(canvas, 0, 0, 48, 30);
             window.saveRegionThumbnail?.(currentSelectedRegion.name, thumbCanvas.toDataURL('image/jpeg', 0.6));
             window.renderCoordinatesList?.();
-        } catch (_) { }
+        } catch (_) { /* best-effort; failure is non-fatal */ }
     }
 
     // Store bbox on lastDemData for physical dimensions calculation
@@ -596,10 +610,12 @@ window.updatePrintDimensions = function updatePrintDimensions() {
     const demCanvas = document.querySelector(`#demImage ${window.DEM_CANVAS_SELECTOR}`);
     const gridW = demCanvas?.width || lastDemData.width;
     const gridH = demCanvas?.height || lastDemData.height;
-    const mmPerPx = parseFloat(document.getElementById('mmPerPixel')?.value) || 1.0;
-    const modelH = parseFloat(document.getElementById('exportModelHeight')?.value) || 30;
-    const baseH = parseFloat(document.getElementById('exportBaseHeight')?.value) || 0;
-    const totalH = modelH + baseH;
+    const bp = window._readBuildParams?.() || {};
+    const mmPerPx = bp.mm_per_pixel ?? 1.0;
+    // Relief is model height times exaggeration; the base sits under it.
+    const modelH = +((bp.model_height ?? 30) * (bp.exaggeration ?? 1)).toFixed(1);
+    const baseH = bp.base_height ?? 0;
+    const totalH = +(modelH + baseH).toFixed(1);
     const footW = Math.round(gridW * mmPerPx);
     const footH = Math.round(gridH * mmPerPx);
 

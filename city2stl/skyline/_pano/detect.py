@@ -10,6 +10,8 @@ from pathlib import Path
 import numpy as np
 
 from .._core.height import _ground_elev_m
+from .._core.timing import _StepTimer
+from .._region_render._draw import _registration_overlay
 from ..pipeline import (
     BuildingRecord,
     _merge_silhouette_sources,
@@ -29,7 +31,6 @@ from ..region_config import (
     _F_SKY12_ENABLED,
 )
 from ..region_data import _bearing_deg, _distance_m
-from ..region_render import _registration_overlay, _StepTimer
 from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResult
 
 
@@ -569,9 +570,9 @@ def _smooth_matches_across_views(
             for fid, segs in claimants.items():
                 if len(segs) <= 1:
                     continue
-                def _score(s):
+                def _score(s, fid=fid):
                     for d in s.get("match_diagnostics", []) or []:
-                        if str(d.get("feature_id", "")) == fid:  # noqa: B023
+                        if str(d.get("feature_id", "")) == fid:
                             return float(d.get("combined", 0.0))
                     return float(s.get("matched_combined", 0.0))
                 segs.sort(key=_score, reverse=True)

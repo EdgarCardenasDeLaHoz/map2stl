@@ -2676,8 +2676,8 @@ class TerrainSession:
             Torchvision model name string or a ``RoofNet`` instance loaded
             via :meth:`load_roof_model`.  When ``None`` (default) the session
             uses a pre-loaded ``RoofNet`` if one was set via
-            ``load_roof_model()``, otherwise falls back to
-            ``"mobilenet_v3_small"``.
+            ``load_roof_model()``, otherwise the CNN step is skipped
+            (there are no trained weights for a bare architecture name).
         use_model : bool
             Let the trained ``roof_shape_gbm`` checkpoint answer first,
             reading its own zoom-18 tiles per building instead of the
@@ -2720,7 +2720,7 @@ class TerrainSession:
 
         # ── Resolve CNN model ──────────────────────────────────────────
         if cnn_model is None:
-            cnn_model = getattr(self, "_roof_model", None) or "mobilenet_v3_small"
+            cnn_model = getattr(self, "_roof_model", None)
 
         # ── Build bbox tuple ───────────────────────────────────────────
         north = self.bbox["north"]

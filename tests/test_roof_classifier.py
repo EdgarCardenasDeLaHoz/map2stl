@@ -7,34 +7,30 @@ valid output.
 """
 from __future__ import annotations
 
-import math
-
 import numpy as np
-import pytest
 
 from city2stl.roof_classifier import (
-    _ElevFeatures,
-    _MultiTemporalFeatures,
-    _RGBFeatures,
-    _ShadowFeatures,
     _classify,
     _crop_bounds_for_ring,
     _crop_geo_bounds,
     _detect_shadows,
+    _ElevFeatures,
     _ellipse_axes,
     _extract_elev_features,
     _extract_multitemporal_features,
     _extract_rgb_features,
     _extract_shadow_features,
     _lonlat_to_pixel,
+    _MultiTemporalFeatures,
     _profile_along_axis,
+    _RGBFeatures,
     _ring_to_footprint_mask,
+    _ShadowFeatures,
     _sun_azimuth_elevation,
     _triangularity,
     _triangulate_heights_from_shadows,
     classify_roof_shapes,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -712,3 +708,52 @@ class TestMultiTemporalStack:
         # Single image → low/zero triangulation confidence
         assert feat.n_images == 1
         assert feat.tri_confidence <= 0.30
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CNN tier is opt-in and needs trained weights
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCnnOptIn:
+    _BBOX = (51.502, 51.498, 0.004, -0.002)
+
+    def test_default_never_calls_cnn(self, monkeypatch):
+        from city2stl import roof_classifier as rc
+
+        def boom(*a, **k):
+            raise AssertionError("CNN must not run without trained weights")
+
+        monkeypatch.setattr(rc, "_roofnet_classify_patch", boom)
+        result = classify_roof_shapes(_simple_geojson(), _solid_rgb(), self._BBOX)
+        assert result["_stats"]["total"] == 1
+
+    def test_architecture_name_is_refused(self, caplog):
+        from city2stl.roof_classifier import _resolve_cnn_model
+
+        with caplog.at_level("WARNING"):
+            assert _resolve_cnn_model("mobilenet_v3_small") is None
+        assert "without trained weights" in caplog.text
+
+    def test_missing_checkpoint_is_none(self, caplog):
+        from city2stl.roof_classifier import _resolve_cnn_model
+
+        with caplog.at_level("WARNING"):
+            assert _resolve_cnn_model("no/such/roofnet.pt") is None
+        assert "not found" in caplog.text
+
+    def test_model_resolved_once_per_call(self, monkeypatch):
+        from city2stl import roof_classifier as rc
+
+        net = object()
+        calls = []
+        monkeypatch.setattr(rc, "_resolve_cnn_model",
+                            lambda m: calls.append(m) or net)
+        monkeypatch.setattr(rc, "_roofnet_classify_patch",
+                            lambda crops, mask, model: ("dome", 0.9))
+        geo = _simple_geojson()
+        geo["features"] = geo["features"] * 2
+        result = classify_roof_shapes(geo, _solid_rgb(), self._BBOX,
+                                      cnn_model=net)
+        assert calls == [net]
+        shapes = [f["properties"].get("roof:shape") for f in result["features"]]
+        assert shapes == ["dome", "dome"]

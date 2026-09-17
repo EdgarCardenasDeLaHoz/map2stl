@@ -31,10 +31,9 @@ region_settings
 
 from __future__ import annotations
 
-import sqlite3
 import logging
+import sqlite3
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +80,7 @@ CREATE TABLE IF NOT EXISTS region_settings (
 # Public API
 # ---------------------------------------------------------------------------
 
-def get_db(path: Optional[Path] = None) -> sqlite3.Connection:
+def get_db(path: Path | None = None) -> sqlite3.Connection:
     """
     Return a sqlite3 Connection to *path* (defaults to DB_PATH).
 
@@ -96,7 +95,7 @@ def get_db(path: Optional[Path] = None) -> sqlite3.Connection:
     return conn
 
 
-def init_db(path: Optional[Path] = None) -> None:
+def init_db(path: Path | None = None) -> None:
     """
     Create the database schema if it does not already exist.
     Safe to call multiple times (all statements use IF NOT EXISTS).

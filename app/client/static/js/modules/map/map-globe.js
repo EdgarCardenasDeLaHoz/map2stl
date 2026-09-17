@@ -286,7 +286,7 @@ async function toggleDemOverlay(show) {
                         usedGlobal = true;
                     }
                 }
-            } catch (_) { }
+            } catch (_) { /* best-effort; failure is non-fatal */ }
 
             // ── Strategy 2: generate on demand via preview_dem ─────────
             if (!usedGlobal) {

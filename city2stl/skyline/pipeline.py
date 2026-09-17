@@ -1,9 +1,11 @@
 """Skyline-based building-height estimation — pure CV / geometry primitives.
 
-This module is the "math layer" of skyline. It is intentionally free of
-HTTP I/O, matplotlib, and Street View concerns so its functions can be
+This module is the "math layer" of skyline: a thin façade that star-imports
+the ``_core/`` subpackage (types, util, segmentation, projection, skyline,
+pano, registration, height; the step timer lives in ``_core/timing.py``).
+It carries no Street View or report code, so its functions can be
 unit-tested without API keys. The orchestration that ties these primitives
-to a real region run lives in ``region_pdf.py``.
+to a real region run lives in ``region_pdf.py`` and ``_pano/``.
 
 Public surface (in dependency order):
 
@@ -63,11 +65,14 @@ is intended to be functional without the model.
 # registration, height). Every name that callers imported from
 # ``city2stl.skyline.pipeline`` is re-exported here, including the private
 # helpers other skyline modules and tests rely on.
-from ._core.types import *          # noqa: F401,F403
-from ._core.util import *           # noqa: F401,F403
-from ._core.segmentation import *   # noqa: F401,F403
-from ._core.projection import *     # noqa: F401,F403
-from ._core.skyline import *        # noqa: F401,F403
-from ._core.pano import *           # noqa: F401,F403
-from ._core.registration import *   # noqa: F401,F403
-from ._core.height import *         # noqa: F401,F403
+# Star-import order decides which definition wins; keep it fixed.
+# isort: off
+from ._core.types import *  # noqa: F401,F403
+from ._core.util import *  # noqa: F401,F403
+from ._core.segmentation import *  # noqa: F401,F403
+from ._core.projection import *  # noqa: F401,F403
+from ._core.skyline import *  # noqa: F401,F403
+from ._core.pano import *  # noqa: F401,F403
+from ._core.registration import *  # noqa: F401,F403
+from ._core.height import *  # noqa: F401,F403
+# isort: on

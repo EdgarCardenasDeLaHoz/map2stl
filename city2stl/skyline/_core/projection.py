@@ -1,27 +1,19 @@
 """skyline._core.projection — extracted from pipeline.py (A1 split)."""
 from __future__ import annotations
-from collections import OrderedDict as _OrderedDict
 
 import logging
 import math
-import os
-from dataclasses import dataclass, replace
-from pathlib import Path
-from typing import Sequence
+from collections.abc import Sequence
 
-import cv2
 import numpy as np
-from scipy.ndimage import gaussian_filter1d, median_filter, uniform_filter1d
-from scipy.optimize import linear_sum_assignment
-from scipy.signal import find_peaks
-from shapely.geometry import shape
 
 # F-CLEAN14: the F-SKY12 depth except-branches reference ``logger`` but the
 # module never defined one (latent NameError, only reachable on a depth-module
 # failure). Defined here so those branches log instead of crashing.
 logger = logging.getLogger(__name__)
 
-from .types import Viewpoint, BuildingRecord
+from .types import BuildingRecord, Viewpoint  # noqa: E402
+
 
 def _lonlat_to_local_m(lon: float, lat: float, lon0: float, lat0: float) -> tuple[float, float]:
     meters_per_deg_lat = 110_540.0
@@ -442,7 +434,7 @@ def _projected_building_column_mask(
     predicted = np.zeros(image_width, dtype=bool)
     x_min, x_max = _projected_building_x_ranges(
         buildings, viewpoint, offset_deg, image_width)
-    for xL, xR in zip(x_min.tolist(), x_max.tolist()):
+    for xL, xR in zip(x_min.tolist(), x_max.tolist(), strict=False):
         predicted[xL: xR + 1] = True
     return predicted
 

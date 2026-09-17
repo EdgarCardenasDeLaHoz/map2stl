@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Iterable
+from collections.abc import Iterable
 
 from city2stl.skyline.pipeline import lonlat_to_local_m
 
@@ -232,8 +232,7 @@ def _iter_linestring_coords(feat: dict) -> Iterable[list[list[float]]]:
     if gtype == "LineString":
         yield coords
     elif gtype == "MultiLineString":
-        for ring in coords:
-            yield ring
+        yield from coords
 
 
 def green_keypoints_for_scoring(

@@ -60,7 +60,7 @@ strm2stl/
 │   │   ├── server.py      ← FastAPI app + lifespan  (entry: uvicorn app.server.server:app)
 │   │   ├── config.py      ← constants, OPENTOPO_DATASETS, API keys
 │   │   ├── schemas.py     ← all Pydantic models
-│   │   ├── core/          ← cache.py, cache_inspector.py, db.py, export.py,
+│   │   ├── core/          ← cache.py, cache_inspector.py, db.py, export.py, inflight.py,
 │   │   │                    export_params.py, export_tasks.py, osm_cache_policy.py,
 │   │   │                    responses.py, terrain_raster.py, validation.py,
 │   │   │                    height/ subpackage (service.py, train.py)

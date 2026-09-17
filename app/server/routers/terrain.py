@@ -25,6 +25,7 @@ from app.server.config import (
 )
 from app.server.core.cache import make_cache_key, read_array_cache, write_array_cache
 from app.server.core.dem_cache import dem_cache_key
+from app.server.core.inflight import dedupe
 from app.server.core.responses import error_response
 from app.server.core.validation import (
     BboxQueryParams,
@@ -98,9 +99,8 @@ from geo2stl.trails import (
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["terrain"])
 
-# In-flight request dedupe: maps cache_key -> asyncio.Future of the JSONResponse
-# payload dict. When a duplicate request arrives while one is running, it awaits
-# the same Future instead of starting a fresh pipeline. Cleared on completion.
+# In-flight request dedupe registries (see app.server.core.inflight.dedupe):
+# cache_key -> asyncio.Future of the JSONResponse payload dict.
 _HYDRO_INFLIGHT: dict[str, "asyncio.Future"] = {}
 _TRAILS_INFLIGHT: dict[str, "asyncio.Future"] = {}
 
@@ -979,14 +979,6 @@ async def get_terrain_hydrology(
                 "depression_m": depression_m,
             })
 
-    # In-flight dedupe: if an identical request is already running, await its result
-    # instead of starting a duplicate ~150-second pipeline.
-    inflight = _HYDRO_INFLIGHT.get(cache_key)
-    if inflight is not None:
-        logger.info("Hydrology in-flight join: %s", cache_key[:8])
-        payload = await inflight
-        return JSONResponse(content=payload)
-
     if TEST_MODE:
         h, w = dim, dim
         river_arr = np.zeros((h, w), dtype=np.float32)
@@ -1007,12 +999,9 @@ async def get_terrain_hydrology(
             "depression_m": depression_m,
         })
 
-    # No cache, no in-flight: register a Future so concurrent duplicates can join.
-    loop = asyncio.get_running_loop()
-    fut: asyncio.Future = loop.create_future()
-    _HYDRO_INFLIGHT[cache_key] = fut
-
-    try:
+    # In-flight dedupe: if an identical request is already running, await its result
+    # instead of starting a duplicate ~150-second pipeline.
+    async def _compute() -> dict:
         result = await run_sync(
             _fetch_and_rasterize_hydrology,
             north, south, east, west, dim,
@@ -1028,9 +1017,7 @@ async def get_terrain_hydrology(
                 "depression_m": depression_m,
                 "error": "No rivers found in region",
             }
-            if not fut.done():
-                fut.set_result(payload)
-            return JSONResponse(content=payload, status_code=200)
+            return payload
 
         # Cache the RAW (unprojected) river grid — projection is applied fresh
         # below (and on every future cache hit above), never baked into the
@@ -1062,18 +1049,15 @@ async def get_terrain_hydrology(
             "source": result.get("source", source),
             "depression_m": depression_m,
         }
-        if not fut.done():
-            fut.set_result(payload)
-        return JSONResponse(content=payload)
 
+    if cache_key in _HYDRO_INFLIGHT:
+        logger.info("Hydrology in-flight join: %s", cache_key[:8])
+    try:
+        payload = await dedupe(_HYDRO_INFLIGHT, cache_key, _compute)
     except Exception as e:
         logger.error(f"Error in get_terrain_hydrology: {e}", exc_info=True)
-        if not fut.done():
-            fut.set_exception(e)
         return error_response("Hydrology fetch failed")
-    finally:
-        # Always clear the in-flight slot so retries can start a fresh pipeline.
-        _HYDRO_INFLIGHT.pop(cache_key, None)
+    return JSONResponse(content=payload)
 
 
 # ---------------------------------------------------------------------------
@@ -1212,14 +1196,6 @@ async def get_terrain_trails(
                 "relief_m": relief_m,
             })
 
-    # In-flight dedupe: Overpass trail queries are slow, and the layer can be asked
-    # for by the load button and the layer auto-load at the same moment.
-    inflight = _TRAILS_INFLIGHT.get(cache_key)
-    if inflight is not None:
-        logger.info("Trails in-flight join: %s", cache_key[:8])
-        payload = await inflight
-        return JSONResponse(content=payload)
-
     if TEST_MODE:
         ski = np.zeros((dim, dim), dtype=np.float32)
         hiking = np.zeros((dim, dim), dtype=np.float32)
@@ -1249,17 +1225,79 @@ async def get_terrain_trails(
             "relief_m": relief_m,
         })
 
-    loop = asyncio.get_running_loop()
-    fut: asyncio.Future = loop.create_future()
-    _TRAILS_INFLIGHT[cache_key] = fut
+    # In-flight dedupe: Overpass trail queries are slow, and the layer can be asked
+    # for by the load button and the layer auto-load at the same moment.
+    async def _compute() -> dict:
+        try:
+            result = await run_sync(
+                _fetch_and_rasterize_trails,
+                north, south, east, west, dim,
+                relief_m, width_m, source, categories)
 
-    try:
-        result = await run_sync(
-            _fetch_and_rasterize_trails,
-            north, south, east, west, dim,
-            relief_m, width_m, source, categories)
+            if result is None:
+                payload = {
+                    "ski_grid_values_b64": None,
+                    "hiking_grid_values_b64": None,
+                    "ski_area_grid_values_b64": None,
+                    "hiking_area_grid_values_b64": None,
+                    "ski_difficulty_grid_values_b64": None,
+                    "difficulty_classes": list(SKI_DIFFICULTY_CLASSES),
+                    "grid_dimensions": [dim, dim],
+                    "ski_count": 0,
+                    "hiking_count": 0,
+                    "feature_count": 0,
+                    "sources": [],
+                    "source": source,
+                    "relief_m": relief_m,
+                    "error": "No trails found in region",
+                }
+                return payload
 
-        if result is None:
+            # Cache the RAW (unprojected) grids; projection is applied fresh below and
+            # on every later cache hit.
+            write_array_cache(
+                "trails", cache_key,
+                {"ski_grid": result["ski_grid"], "hiking_grid": result["hiking_grid"],
+                 "ski_area_grid": result["ski_area_grid"],
+                 "hiking_area_grid": result["hiking_area_grid"],
+                 "ski_difficulty_grid": result["ski_difficulty_grid"]},
+                {"ski_count": int(result["ski_count"]),
+                 "hiking_count": int(result["hiking_count"]),
+                 "sources": result.get("sources", [])},
+            )
+
+            ski, hiking, ski_area, hiking_area = _project_many(
+                result["ski_grid"], result["hiking_grid"],
+                result["ski_area_grid"], result["hiking_area_grid"])
+            ski_difficulty, = _project_many(
+                result["ski_difficulty_grid"], categorical=True)
+            h, w = ski.shape
+
+            payload = {
+                "ski_grid_values_b64": _b64(ski),
+                "hiking_grid_values_b64": _b64(hiking),
+                "ski_area_grid_values_b64": _b64(ski_area),
+                "hiking_area_grid_values_b64": _b64(hiking_area),
+                # Encoded as float32 like every other grid so the client reuses one
+                # decoder; the values are small integers, so the cast is exact.
+                "ski_difficulty_grid_values_b64": _b64(ski_difficulty),
+                "difficulty_classes": list(SKI_DIFFICULTY_CLASSES),
+                "grid_dimensions": [h, w],
+                "ski_count": result["ski_count"],
+                "hiking_count": result["hiking_count"],
+                "feature_count": result["feature_count"],
+                "sources": result.get("sources", []),
+                "source": source,
+                "relief_m": relief_m,
+            }
+            return payload
+
+        except TrailsUpstreamError as e:
+            # Nothing is cached: an outage must not be remembered as an answer. The
+            # payload is shaped like the empty one so the client decodes it the same
+            # way, but the message says the source could not be reached rather than
+            # that the region has no trails - the client shows it verbatim.
+            logger.warning(f"Trails upstream unavailable: {e}")
             payload = {
                 "ski_grid_values_b64": None,
                 "hiking_grid_values_b64": None,
@@ -1274,83 +1312,16 @@ async def get_terrain_trails(
                 "sources": [],
                 "source": source,
                 "relief_m": relief_m,
-                "error": "No trails found in region",
+                "upstream_error": True,
+                "error": f"Trail data source unreachable - {e}",
             }
-            if not fut.done():
-                fut.set_result(payload)
-            return JSONResponse(content=payload, status_code=200)
+            return payload
 
-        # Cache the RAW (unprojected) grids; projection is applied fresh below and
-        # on every later cache hit.
-        write_array_cache(
-            "trails", cache_key,
-            {"ski_grid": result["ski_grid"], "hiking_grid": result["hiking_grid"],
-             "ski_area_grid": result["ski_area_grid"],
-             "hiking_area_grid": result["hiking_area_grid"],
-             "ski_difficulty_grid": result["ski_difficulty_grid"]},
-            {"ski_count": int(result["ski_count"]),
-             "hiking_count": int(result["hiking_count"]),
-             "sources": result.get("sources", [])},
-        )
-
-        ski, hiking, ski_area, hiking_area = _project_many(
-            result["ski_grid"], result["hiking_grid"],
-            result["ski_area_grid"], result["hiking_area_grid"])
-        ski_difficulty, = _project_many(
-            result["ski_difficulty_grid"], categorical=True)
-        h, w = ski.shape
-
-        payload = {
-            "ski_grid_values_b64": _b64(ski),
-            "hiking_grid_values_b64": _b64(hiking),
-            "ski_area_grid_values_b64": _b64(ski_area),
-            "hiking_area_grid_values_b64": _b64(hiking_area),
-            # Encoded as float32 like every other grid so the client reuses one
-            # decoder; the values are small integers, so the cast is exact.
-            "ski_difficulty_grid_values_b64": _b64(ski_difficulty),
-            "difficulty_classes": list(SKI_DIFFICULTY_CLASSES),
-            "grid_dimensions": [h, w],
-            "ski_count": result["ski_count"],
-            "hiking_count": result["hiking_count"],
-            "feature_count": result["feature_count"],
-            "sources": result.get("sources", []),
-            "source": source,
-            "relief_m": relief_m,
-        }
-        if not fut.done():
-            fut.set_result(payload)
-        return JSONResponse(content=payload)
-
-    except TrailsUpstreamError as e:
-        # Nothing is cached: an outage must not be remembered as an answer. The
-        # payload is shaped like the empty one so the client decodes it the same
-        # way, but the message says the source could not be reached rather than
-        # that the region has no trails - the client shows it verbatim.
-        logger.warning(f"Trails upstream unavailable: {e}")
-        payload = {
-            "ski_grid_values_b64": None,
-            "hiking_grid_values_b64": None,
-            "ski_area_grid_values_b64": None,
-            "hiking_area_grid_values_b64": None,
-            "ski_difficulty_grid_values_b64": None,
-            "difficulty_classes": list(SKI_DIFFICULTY_CLASSES),
-            "grid_dimensions": [dim, dim],
-            "ski_count": 0,
-            "hiking_count": 0,
-            "feature_count": 0,
-            "sources": [],
-            "source": source,
-            "relief_m": relief_m,
-            "upstream_error": True,
-            "error": f"Trail data source unreachable - {e}",
-        }
-        if not fut.done():
-            fut.set_result(payload)
-        return JSONResponse(content=payload, status_code=200)
+    if cache_key in _TRAILS_INFLIGHT:
+        logger.info("Trails in-flight join: %s", cache_key[:8])
+    try:
+        payload = await dedupe(_TRAILS_INFLIGHT, cache_key, _compute)
     except Exception as e:
         logger.error(f"Error in get_terrain_trails: {e}", exc_info=True)
-        if not fut.done():
-            fut.set_exception(e)
         return error_response("Trails fetch failed")
-    finally:
-        _TRAILS_INFLIGHT.pop(cache_key, None)
+    return JSONResponse(content=payload)

@@ -1,9 +1,7 @@
 """skyline report_plots — split (A3) (_plot_utils)."""
 from __future__ import annotations
+
 import html
-import logging
-from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -82,7 +80,7 @@ def _build_osm_nearest_per_degree(
     min_area_m2: float = 150.0,
     require_height_tag: bool = False,
     median_kernel: int = 5,
-) -> "np.ndarray":
+) -> np.ndarray:
     """Compute the per-degree nearest-OSM-building distance.
 
     Filters:
@@ -98,9 +96,9 @@ def _build_osm_nearest_per_degree(
     Returns a length-360 array with NaN for bearings with no nearby
     qualifying building.
     """
-    import math  # noqa: PLC0415
     import numpy as np  # noqa: PLC0415
-    from ..region_pdf import _bearing_deg, _distance_m  # noqa: PLC0415
+
+    from ..region_data import _bearing_deg, _distance_m  # noqa: PLC0415
     out = np.full(360, np.nan, dtype=np.float32)
     if osm_data is None:
         return out
@@ -135,7 +133,6 @@ def _build_osm_nearest_per_degree(
     # the filter handles the 0°/360° boundary correctly.
     if median_kernel >= 3 and median_kernel % 2 == 1:
         try:
-            from scipy.signal import medfilt  # noqa: PLC0415
             pad = median_kernel // 2
             padded = np.concatenate(
                 [out[-pad:], out, out[:pad]])
@@ -153,9 +150,9 @@ def _build_osm_nearest_per_degree(
     return out
 
 def _bearing_xcorr_offset(
-    silh: "np.ndarray", osm_nearest: "np.ndarray",
+    silh: np.ndarray, osm_nearest: np.ndarray,
     *, improve_min: float = 0.45,
-) -> "tuple[int, float, np.ndarray, bool]":
+) -> tuple[int, float, np.ndarray, bool]:
     """Cross-correlate two dense 360-bin signals over all rotations and
     return ``(best_offset_deg, best_mae, mae_curve, applied)``.
 

@@ -1,32 +1,15 @@
-import os
-import sys
 
-import trimesh
-import glob
 
-import numpy as np
-import pandas as pd
+from typing import Any
 
-import osmnx as ox
 import cv2
-
-from shapely.geometry import Polygon
-from shapely.geometry import Polygon, MultiPolygon
-from shapely.ops import unary_union
-
 import numba
-import matplotlib.pyplot as plt
-
-from skimage import io, filters, morphology, transform
-
+import numpy as np
 import numpy2stl as n2s  # Import MODULE not function
-from geo2stl import geo2stl as g2s
-from geo2stl import sat2stl as s2s
+import pandas as pd
+from skimage import filters, morphology
 
 from city2stl import create
-import city2stl.dem2stl as d2s
-
-from typing import Optional, Tuple, Any
 
 
 def fill_building_heights(gdf: Any) -> Any:
@@ -66,7 +49,7 @@ def fill_building_heights(gdf: Any) -> Any:
     return gdf
 
 
-def add_building_z(gdf: Any, im: Optional[np.ndarray], coor_lims: Tuple[float, ...]) -> Any:
+def add_building_z(gdf: Any, im: np.ndarray | None, coor_lims: tuple[float, ...]) -> Any:
     """
     Add Z coordinates to buildings based on base height from DEM.
 
@@ -270,7 +253,7 @@ def rescale(im, max_size=600, height=20, base=10, clip=None, smooth=None):
 
     im = im - im.min()
 
-    im = im / im.ptp() * height
+    im = im / np.ptp(im) * height
     im = im + base
     return im
 
@@ -295,6 +278,9 @@ def subtract_water(dem, aquatic, height=0.2, ocean_level=1):
 
 
 def get_border(nsew, country, shape):
+    from skimage.draw import line_aa
+
+    from city2stl import osm2stl as o2s
 
     bounds, bbox = o2s.get_boundries_osmnx(nsew, country)
     boundry = bounds[-2]

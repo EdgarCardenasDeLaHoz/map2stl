@@ -63,3 +63,12 @@ city2stl/skyline/sites/
 # Ad-hoc rebuild / scratch logs at repo root
 _t.log
 rebuild_*.log
+
+# Server logs at repo root (server.log, server.out.log, server.err.log, ...)
+/*.log
+
+# SvelteKit generated output (rebuilt by `npm run build` in v2/web)
+.svelte-kit/
+
+# Ad-hoc roof test artifacts at repo root
+/roof_test_*

@@ -1,12 +1,21 @@
 """skyline report_plots — split (A3) (_pano_plots)."""
 from __future__ import annotations
-import html
-import logging
-from pathlib import Path
+
 from typing import TYPE_CHECKING
 
-from ._plot_utils import (POLAR_MAX_M, NO_BUILDING_M, _osm_height_m,
-                          _bearing_xcorr_offset, _build_osm_nearest_per_degree)
+if TYPE_CHECKING:
+    from ..region_types import SeedViewRegistration
+
+import logging
+from pathlib import Path
+
+from ._plot_utils import (
+    NO_BUILDING_M,
+    POLAR_MAX_M,
+    _bearing_xcorr_offset,
+    _build_osm_nearest_per_degree,
+    _osm_height_m,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +35,8 @@ def _draw_pano_bboxes_inplace(
         return
     try:
         import cv2  # noqa: PLC0415
-        import numpy as np  # noqa: PLC0415
-        from ..region_pdf import _SEGMENT_PALETTE  # noqa: PLC0415
+
+        from ..region_config import _SEGMENT_PALETTE  # noqa: PLC0415
     except Exception:
         return
     if not png_path.exists():
@@ -135,7 +144,7 @@ def _draw_pano_north_line_inplace(
 
 def _render_pano_minimap_polar_png(
     out_path: Path,
-    sv: "SeedViewRegistration",
+    sv: SeedViewRegistration,
     osm_data: dict,
     buildings_by_id: dict,
     pano_result,
@@ -154,14 +163,15 @@ def _render_pano_minimap_polar_png(
     """
     try:
         import math  # noqa: PLC0415
-        import numpy as np  # noqa: PLC0415
+
         import matplotlib  # noqa: PLC0415
+        import numpy as np  # noqa: PLC0415
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt  # noqa: PLC0415
         from matplotlib.patches import Polygon as MPLPolygon  # noqa: PLC0415
-        from ..region_pdf import (  # noqa: PLC0415
-            _bearing_deg, _distance_m, _SEGMENT_PALETTE,
-        )
+
+        from ..region_config import _SEGMENT_PALETTE  # noqa: PLC0415
+        from ..region_data import _bearing_deg, _distance_m  # noqa: PLC0415
     except Exception as exc:
         logger.warning("polar minimap skipped: %s", exc)
         return False
@@ -355,7 +365,7 @@ def _render_pano_minimap_polar_png(
 
 def _render_pano_heights_polar_png(
     out_path: Path,
-    sv: "SeedViewRegistration",
+    sv: SeedViewRegistration,
     osm_data: dict,
     pano_result,
     *,
@@ -372,16 +382,16 @@ def _render_pano_heights_polar_png(
     """
     try:
         import math  # noqa: PLC0415
-        import numpy as np  # noqa: PLC0415
+
         import matplotlib  # noqa: PLC0415
+        import numpy as np  # noqa: PLC0415
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt  # noqa: PLC0415
-        from matplotlib.patches import Polygon as MPLPolygon  # noqa: PLC0415
         from matplotlib.cm import ScalarMappable  # noqa: PLC0415
         from matplotlib.colors import Normalize  # noqa: PLC0415
-        from ..region_pdf import (  # noqa: PLC0415
-            _bearing_deg, _distance_m,
-        )
+        from matplotlib.patches import Polygon as MPLPolygon  # noqa: PLC0415
+
+        from ..region_data import _bearing_deg, _distance_m  # noqa: PLC0415
     except Exception as exc:
         logger.warning("heights polar plot skipped: %s", exc)
         return False
@@ -493,6 +503,7 @@ def _render_pano_segformer_overlay_png(
     try:
         import numpy as np  # noqa: PLC0415
         from PIL import Image  # noqa: PLC0415
+
         from ..pipeline import (  # noqa: PLC0415
             stitch_pano_mask_channel,
         )
@@ -507,7 +518,7 @@ def _render_pano_segformer_overlay_png(
     # construction. Fallback: re-stitch from sv_list (legacy path, may
     # misalign if cached_views ≠ stitch_source).
     bld = getattr(pano_result, "pano_building_mask", None)
-    sky = getattr(pano_result, "pano_sky_mask", None)
+    _sky = getattr(pano_result, "pano_sky_mask", None)
     water = getattr(pano_result, "pano_water_mask", None)
     veg = getattr(pano_result, "pano_vegetation_mask", None)
     if bld is None:
@@ -531,7 +542,7 @@ def _render_pano_segformer_overlay_png(
         try:
             bld = stitch_pano_mask_channel(
                 spin_for_stitch, fov_deg, spin_step_deg, "building_mask")
-            sky = stitch_pano_mask_channel(
+            _sky = stitch_pano_mask_channel(
                 spin_for_stitch, fov_deg, spin_step_deg, "sky_mask")
             water = stitch_pano_mask_channel(
                 spin_for_stitch, fov_deg, spin_step_deg, "water_mask")
@@ -595,13 +606,12 @@ def _render_pano_bearing_scan_png(
     needs to be rotated to match OSM ground truth.
     """
     try:
-        import math  # noqa: PLC0415
-        import numpy as np  # noqa: PLC0415
         import matplotlib  # noqa: PLC0415
+        import numpy as np  # noqa: PLC0415
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt  # noqa: PLC0415
+
         from ..depth_estimation import predict_pano_depth  # noqa: PLC0415
-        from ..region_pdf import _bearing_deg, _distance_m  # noqa: PLC0415
     except Exception as exc:
         logger.warning("bearing scan skipped: %s", exc)
         return False
@@ -887,9 +897,10 @@ def _render_pano_depth_png(
     if pano_image is None or pano_image.size == 0:
         return False
     try:
+        import cv2  # noqa: PLC0415
         import numpy as np  # noqa: PLC0415
         from PIL import Image  # noqa: PLC0415
-        import cv2  # noqa: PLC0415
+
         from ..depth_estimation import predict_pano_depth  # noqa: PLC0415
         try:
             import matplotlib.pyplot as plt  # noqa: PLC0415
@@ -952,13 +963,15 @@ def _render_pano_reconstruction_png(
         return False
     try:
         import math  # noqa: PLC0415
-        import numpy as np  # noqa: PLC0415
+
         import matplotlib  # noqa: PLC0415
+        import numpy as np  # noqa: PLC0415
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt  # noqa: PLC0415
+
         from ..depth_estimation import predict_pano_depth  # noqa: PLC0415
-        from ..region_pdf import _bearing_deg, _distance_m  # noqa: PLC0415
-        from ..region_pdf import _SEGMENT_PALETTE  # noqa: PLC0415
+        from ..region_config import _SEGMENT_PALETTE  # noqa: PLC0415
+        from ..region_data import _bearing_deg, _distance_m  # noqa: PLC0415
     except Exception as exc:
         logger.warning("pano reconstruction skipped: %s", exc)
         return False
@@ -1174,7 +1187,7 @@ def _render_pano_reconstruction_png(
                     breaks = np.flatnonzero(diffs > gap_thresh)
                     starts = np.concatenate(([0], breaks + 1))
                     ends = np.concatenate((breaks + 1, [th_arr.size]))
-                    for s, e in zip(starts, ends):
+                    for s, e in zip(starts, ends, strict=False):
                         if e - s >= 2:
                             ax.plot(th_arr[s:e], d_arr[s:e],
                                     color="#1f77b4", linewidth=1.2,
@@ -1203,15 +1216,15 @@ def _render_pano_reconstruction_png(
                     [theta, math.radians(ob)], [dist, od],
                     color=color, linewidth=0.8, alpha=0.5, zorder=1,
                 )
-        for (bearing, dist, fid, color, badge) in osm_xy:
+        for (bearing, dist, _fid, color, _badge) in osm_xy:
             theta = math.radians(bearing)
             ax.scatter([theta], [dist], facecolors="none", edgecolors=color,
                        s=100, marker="^", linewidth=1.3, zorder=2)
         # Unified axis with Footprints / Satellite tabs (POLAR_MAX_M).
         ax.set_ylim(0, POLAR_MAX_M)
         ax.set_title(
-            f"360° depth → footprint reconstruction "
-            f"(circle: depth-derived  ▲: OSM-projected)",
+            "360° depth → footprint reconstruction "
+            "(circle: depth-derived  ▲: OSM-projected)",
             fontsize=10,
         )
         out_path.parent.mkdir(parents=True, exist_ok=True)

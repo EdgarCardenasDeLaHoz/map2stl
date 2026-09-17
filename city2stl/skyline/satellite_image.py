@@ -31,13 +31,12 @@ import hashlib
 import io
 import json
 import math
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 import requests
 from PIL import Image
-
 
 _CACHE_DIR = Path(__file__).parent / "runs" / "satellite_image_cache"
 _TILE_URL = (
@@ -100,7 +99,6 @@ def _choose_zoom(
     equator; cos(lat) compresses that at higher latitudes.
     """
     south, west, north, east = bbox
-    mid_lat = 0.5 * (south + north)
     earth_m = 40_075_017.0
     # tiles_per_side ≈ earth_m / (256 · target_m_per_px) at equator
     raw_zoom = math.log2(earth_m / (_TILE_SIZE * target_m_per_px))
@@ -263,7 +261,7 @@ def crop_polygon_from_satellite(
     project: Callable[[float, float], tuple[float, float]],
     polygon_lonlat: list[tuple[float, float]],
     padding_px: int = 4,
-) -> "np.ndarray | None":
+) -> np.ndarray | None:
     """Return the satellite-image crop covering a polygon's projected
     pixel bounding box, with ``padding_px`` of slack on each side.
 

@@ -13,7 +13,6 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, Optional
 
 from starlette.background import BackgroundTask
 
@@ -27,10 +26,10 @@ class ExportTask:
     status: str = "running"          # running | complete | error
     progress: int = 0                # 0-100
     message: str = "Starting..."
-    result_path: Optional[str] = None
-    filename: Optional[str] = None
+    result_path: str | None = None
+    filename: str | None = None
     media_type: str = "application/octet-stream"
-    headers: Dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
     created: float = field(default_factory=time.time)
 
     def update(self, progress: int, message: str) -> None:
@@ -51,7 +50,7 @@ class ExportTask:
         self.message = message
 
 
-_export_tasks: Dict[str, ExportTask] = {}
+_export_tasks: dict[str, ExportTask] = {}
 _export_tasks_lock = threading.Lock()
 _TASK_TTL = 300  # seconds before stale tasks are cleaned up
 
@@ -71,7 +70,7 @@ def _cleanup_stale_tasks() -> None:
                 pass
 
 
-def get_task_status(task_id: str) -> Optional[dict]:
+def get_task_status(task_id: str) -> dict | None:
     """Return progress info for a task, or None if not found."""
     with _export_tasks_lock:
         task = _export_tasks.get(task_id)

@@ -1,49 +1,28 @@
 """skyline._pano.capture — extracted from pano_registration.py (A2 split)."""
 from __future__ import annotations
-import json
-import math
-import os
-import time
+
 from contextlib import nullcontext
 from pathlib import Path
-import cv2
+
 import numpy as np
+
+from .._core.timing import _StepTimer
 from ..pipeline import (
-    BuildingRecord,
     CapturedView,
     Viewpoint,
-    _merge_silhouette_sources,
-    _neural_sky_and_building_masks,
-    aggregate_building_heights,
-    augment_estimates_with_depth,
-    detect_building_silhouettes,
-    detect_buildings_from_mask,
-    estimate_heights_from_registration,
-    match_segments_to_buildings,
-    osm_anchor_silhouettes,
-    osm_sam_instance_silhouettes,
-    register_view_to_osm,
 )
-from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResult
-from ..region_config import (
-    FLICKR_API_KEY as _FLICKR_API_KEY,
-    _F_SKY1_ENABLED,
-    _F_SKY11_1_ENABLED,
-    _F_SKY12_ENABLED,
-    _F_SKY5_ENABLED,
-)
-from ..region_data import _bearing_deg, _distance_m, _fetch_elevations
-from ..streetview_io import _meta_location, _streetview_image, _streetview_metadata
+from ..region_types import SkylinePoint
 from ..seed_selection import _screen_score_from_image
-from ..region_render import _negative_seed_views, _registration_overlay
+from ..streetview_io import _streetview_image
+
 
 def _capture_pano_views(
-    seed: "SkylinePoint",
+    seed: SkylinePoint,
     api_key: str,
     spin_headings: tuple[float, ...],
     is_photosphere: bool,
-    timer: "_StepTimer | None" = None,
-    web_image_cache: "dict[str, np.ndarray] | None" = None,
+    timer: _StepTimer | None = None,
+    web_image_cache: dict[str, np.ndarray] | None = None,
 ) -> tuple[list[dict], float, list[dict]]:
     """Pass 1: fetch every spin-view image, apply pitch correction if needed.
 

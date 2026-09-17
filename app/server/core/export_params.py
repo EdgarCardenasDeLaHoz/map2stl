@@ -47,9 +47,26 @@ def resolve_dem_from_cache(data: dict) -> tuple[list, int, int] | None:
         logger.debug("DEM cache miss for export (key %s)", cache_key[:8])
         return None
 
-    dem_arr = cached[0]["dem"]  # np.ndarray (H, W)
+    dem_arr = cached[0]["dem"]  # np.ndarray (H, W), raw Plate Carree
+
+    # The cache holds the grid before projection (projection is deliberately
+    # not in the key, see core/dem_cache.py), and /api/terrain/dem projects it
+    # on the way out. Returning it as-is meant the mesh and every export were
+    # built from the unprojected grid - a different shape from the map the user
+    # was looking at whenever a projection was selected, which is the default.
+    projection = dem.get("projection") or "none"
+    if projection != "none":
+        from geo2stl.projections import project_grid
+        clip = dem.get("clip_valid_region", dem.get("clip_nans", True))
+        dem_arr = project_grid(
+            dem_arr.astype("float32"), north, south, east, west, projection,
+            bool(clip), categorical=False,
+            maintain_dimensions=bool(dem.get("maintain_dimensions", False)),
+        )
+
     h, w = dem_arr.shape
-    logger.info("DEM resolved from cache for export (key %s, %dx%d)", cache_key[:8], w, h)
+    logger.info("DEM resolved from cache for export (key %s, %dx%d, %s)",
+                cache_key[:8], w, h, projection)
     return dem_arr.ravel().tolist(), h, w
 
 
@@ -77,6 +94,10 @@ class ExportContext:
     composite_layers: list | None = None
     composite_dim: int | None = None
     bbox: dict | None = None
+    # Set when a composite spec was sent but could not be built. The request
+    # still succeeds on the plain DEM, so callers must surface this; a model
+    # that silently lacks the configured layers looks like a correct one.
+    composite_error: str | None = None
 
     @classmethod
     def from_request(cls, data: dict) -> ExportContext:
@@ -95,6 +116,7 @@ class ExportContext:
         # Composite mode (highest priority): rebuild the DEM from the merge spec
         # so the 3D output reflects the user's Composite-tab configuration.
         composite_layers = data.get("composite_layers") or None
+        composite_error = None
         if composite_layers and data.get("bbox"):
             try:
                 # Lazy import — avoids circular deps with the composite router.
@@ -112,6 +134,7 @@ class ExportContext:
                 height, width = composite.shape
             except Exception as exc:
                 logger.exception("Composite resolve failed; falling back: %s", exc)
+                composite_error = f"{type(exc).__name__}: {exc}"[:300]
 
         # Settings-only mode: resolve DEM from cache
         if not dem_values:
@@ -132,6 +155,7 @@ class ExportContext:
             composite_layers=data.get("composite_layers") or None,
             composite_dim=int(data["composite_dim"]) if data.get("composite_dim") else None,
             bbox=data.get("bbox") or None,
+            composite_error=composite_error,
         )
 
 

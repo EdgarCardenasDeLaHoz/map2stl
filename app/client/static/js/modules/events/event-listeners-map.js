@@ -13,7 +13,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     function activateDrawTool() {
         const dc = window.getDrawControl?.();
         if (dc && dc._toolbars?.draw) {
-            try { dc._toolbars.draw._modes.rectangle.handler.enable(); } catch (e) { }
+            try { dc._toolbars.draw._modes.rectangle.handler.enable(); } catch (e) { /* best-effort; failure is non-fatal */ }
         }
         const btn = document.getElementById('floatingDrawBtn');
         if (btn) btn.classList.add('drawing');

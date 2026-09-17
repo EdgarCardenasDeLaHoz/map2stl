@@ -6,7 +6,6 @@
 
 'use strict';
 
-let _cacheInventoryWired = false;
 const _cacheInventoryState = {
     payload: null,
     selectedRegion: '__all__',
@@ -177,12 +176,13 @@ function _renderTable() {
     for (const group of groups) {
         const collapsed = _cacheInventoryState.collapsedRegions.has(group.regionName);
         const headerRow = document.createElement('tr');
+        const esc = window.escapeHtml;
         headerRow.className = 'cache-group-row';
         headerRow.innerHTML = `
             <td colspan="6">
-                <button type="button" class="cache-group-toggle" data-region="${group.regionName}">
+                <button type="button" class="cache-group-toggle" data-region="${esc(group.regionName)}">
                     <span class="cache-group-caret">${collapsed ? '▶' : '▼'}</span>
-                    <span class="cache-group-name">${group.regionName}</span>
+                    <span class="cache-group-name">${esc(group.regionName)}</span>
                     <span class="cache-group-meta">${group.files.length} items</span>
                     <span class="cache-group-size">${_formatBytes(group.totalSizeBytes)}</span>
                 </button>
@@ -203,10 +203,10 @@ function _renderTable() {
             tr.className = 'cache-file-row';
             tr.setAttribute('data-ext', ext);
             tr.innerHTML = `
-                <td>${group.regionName}</td>
-                <td>${file.namespace || file.root || ''}</td>
-                <td>${file.root || ''}</td>
-                <td title="${rel}"><span class="cache-ext-tag">${ext}</span> ${rel}</td>
+                <td>${esc(group.regionName)}</td>
+                <td>${esc(file.namespace || file.root || '')}</td>
+                <td>${esc(file.root || '')}</td>
+                <td title="${esc(rel)}"><span class="cache-ext-tag">${esc(ext)}</span> ${esc(rel)}</td>
                 <td>${_formatBytes(file.size_bytes)}</td>
                 <td>${_formatTime(file.mtime)}</td>
             `;
@@ -332,37 +332,3 @@ window.loadCacheInventory = async function loadCacheInventory() {
     _renderCacheInventory();
 };
 
-window.setupCacheInventoryView = function setupCacheInventoryView() {
-    if (_cacheInventoryWired) return;
-    _cacheInventoryWired = true;
-
-    document.getElementById('cacheInventoryRefreshBtn')?.addEventListener('click', () => {
-        window.loadCacheInventory?.();
-    });
-    document.getElementById('cacheInventoryRegionFilter')?.addEventListener('change', (event) => {
-        _cacheInventoryState.selectedRegion = event.target.value;
-        _renderCacheInventory();
-    });
-    document.querySelectorAll('.cache-sort-btn').forEach((button) => {
-        button.addEventListener('click', () => {
-            const key = button.getAttribute('data-sort-key');
-            if (!key) return;
-            if (_cacheInventoryState.sortKey === key) {
-                _cacheInventoryState.sortDir = _cacheInventoryState.sortDir === 'asc' ? 'desc' : 'asc';
-            } else {
-                _cacheInventoryState.sortKey = key;
-                _cacheInventoryState.sortDir = key === 'size_bytes' || key === 'mtime' ? 'desc' : 'asc';
-            }
-            _renderCacheInventory();
-        });
-    });
-    document.getElementById('cacheInventoryTableBody')?.addEventListener('click', (event) => {
-        const toggle = event.target.closest('.cache-group-toggle');
-        if (!toggle) return;
-        const region = toggle.getAttribute('data-region');
-        if (!region) return;
-        if (_cacheInventoryState.collapsedRegions.has(region)) _cacheInventoryState.collapsedRegions.delete(region);
-        else _cacheInventoryState.collapsedRegions.add(region);
-        _renderTable();
-    });
-};

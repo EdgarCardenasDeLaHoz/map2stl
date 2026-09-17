@@ -24,8 +24,8 @@ import sys
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")  # non-interactive backend — must be set before pyplot
-import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
@@ -41,21 +41,6 @@ if str(ROOT) not in sys.path:
 # ---------------------------------------------------------------------------
 # Pipeline imports (must come after path bootstrap)
 # ---------------------------------------------------------------------------
-from city2stl.skyline.region_pdf import (  # noqa: E402
-    SkylinePoint,
-    _attach_building_terrain,
-    _capture_pano_views,
-    _load_osm_for_region,
-    _load_region_bbox,
-    _load_site_anchor_overrides,
-    _load_site_negative_seeds,
-    _load_site_seed_urls,
-    _osm_to_building_records,
-    _parse_streetview_url,
-    _recover_anchor_offset,
-    _build_and_detect_pano,
-    _resolve_api_key,
-)
 from city2stl.skyline.pipeline import (  # noqa: E402
     BuildingRecord,
     CapturedView,
@@ -68,12 +53,20 @@ from city2stl.skyline.pipeline import (  # noqa: E402
     osm_anchor_silhouettes,
     osm_sam_instance_silhouettes,
     register_view_to_osm,
-    stitch_pano_masks,
-    stitch_pano_views,
-    project_buildings_to_pano,
-    detect_buildings_from_mask as _det_pano,
-    match_segments_to_buildings as _match_pano,
-    compute_building_band,
+)
+from city2stl.skyline.region_pdf import (  # noqa: E402
+    SkylinePoint,
+    _attach_building_terrain,
+    _build_and_detect_pano,
+    _capture_pano_views,
+    _load_osm_for_region,
+    _load_region_bbox,
+    _load_site_anchor_overrides,
+    _load_site_seed_urls,
+    _osm_to_building_records,
+    _parse_streetview_url,
+    _recover_anchor_offset,
+    _resolve_api_key,
 )
 
 # ---------------------------------------------------------------------------
@@ -276,8 +269,8 @@ def _page_title(pdf: PdfPages,
     ax.axis("off")
 
     fig.suptitle(
-        f"Cartagena seed_5 — Pipeline Diagnostic\n"
-        f"Goal: identify where 10-segment pano limit originates",
+        "Cartagena seed_5 — Pipeline Diagnostic\n"
+        "Goal: identify where 10-segment pano limit originates",
         fontsize=18, fontweight="bold", y=0.95,
     )
 
@@ -285,7 +278,7 @@ def _page_title(pdf: PdfPages,
     pano_segs    = pano_result.n_segments if pano_result else "N/A"
     pano_matched = pano_result.n_matched  if pano_result else "N/A"
 
-    all_per_view_matched = [s for v in view_states for s in v["matched_segs"]
+    _all_per_view_matched = [s for v in view_states for s in v["matched_segs"]
                              if s.get("matched_projection")]
     per_view_segs_total  = sum(v["n_fsky5"] for v in view_states)
     per_view_matched_n   = sum(v["n_matched"] for v in view_states)
@@ -360,7 +353,7 @@ def _page_spin_grid(pdf: PdfPages, prefetch: list[dict]):
 
     key_headings_set = set(_PREFERRED_KEY_HEADINGS)
 
-    for ax, entry in zip(axes.flat, prefetch):
+    for ax, entry in zip(axes.flat, prefetch, strict=False):
         img = entry.get("image")
         gh  = float(entry.get("geo_heading", 0))
         label = entry.get("sv_label", "?")
@@ -418,10 +411,12 @@ def _page_segformer_masks(pdf: PdfPages, key_view_states: list[dict]):
             bfrac = float("nan")
 
         row = axes[row_i]
-        row[0].imshow(img); row[0].set_title(f"View {h_deg:.0f}° — raw", fontsize=9)
+        row[0].imshow(img)
+        row[0].set_title(f"View {h_deg:.0f}° — raw", fontsize=9)
         row[0].axis("off")
 
-        row[1].imshow(img); _overlay_mask(row[1], bmask, "Blues")
+        row[1].imshow(img)
+        _overlay_mask(row[1], bmask, "Blues")
         row[1].set_title(f"Building mask  ({bfrac:.1f}%)", fontsize=9)
         row[1].axis("off")
 
@@ -440,7 +435,8 @@ def _page_segformer_masks(pdf: PdfPages, key_view_states: list[dict]):
         row[2].set_title("Sky mask (from contour)", fontsize=9)
         row[2].axis("off")
 
-        row[3].imshow(img); _overlay_mask(row[3], wmask, "cyan")
+        row[3].imshow(img)
+        _overlay_mask(row[3], wmask, "cyan")
         row[3].set_title("Water mask", fontsize=9)
         row[3].axis("off")
 
@@ -535,7 +531,8 @@ def _page_fsky2(pdf: PdfPages, key_view_states: list[dict]):
             xl, xr = _seg_x_left(seg), _seg_x_right(seg)
             inside = [p for p in projs if xl <= float(p.get("x_px", -1)) <= xr]
             if len(inside) >= 2:
-                yt = _seg_y_top(seg); yb = _seg_y_bot(seg)
+                yt = _seg_y_top(seg)
+                yb = _seg_y_bot(seg)
                 row[0].add_patch(Rectangle(
                     (xl, yt), xr - xl, yb - yt,
                     linewidth=2.5, edgecolor="orangered",
@@ -630,8 +627,10 @@ def _page_per_view_matching(pdf: PdfPages, key_view_states: list[dict]):
         _draw_osm_projections(ax_img, projs, color="yellow", lw=0.8)
 
         for si, seg in enumerate(matched):
-            xl = _seg_x_left(seg);   xr = _seg_x_right(seg)
-            yt = _seg_y_top(seg);    yb = _seg_y_bot(seg)
+            xl = _seg_x_left(seg)
+            xr = _seg_x_right(seg)
+            yt = _seg_y_top(seg)
+            yb = _seg_y_bot(seg)
             is_matched = bool(seg.get("matched_projection"))
             col = _seg_color(si) if is_matched else (0.8, 0.8, 0.8, 0.7)
             ax_img.add_patch(Rectangle(
@@ -655,7 +654,8 @@ def _page_per_view_matching(pdf: PdfPages, key_view_states: list[dict]):
             if not m:
                 continue
             fid     = m.get("feature_id", "?")
-            xl      = int(_seg_x_left(seg));  xr = int(_seg_x_right(seg))
+            xl      = int(_seg_x_left(seg))
+            xr = int(_seg_x_right(seg))
             h_est   = seg.get("predicted_height_m", float("nan"))
             tbl_rows.append([fid[-6:], f"{xl}..{xr}",
                              f"{h_est:.1f}m" if math.isfinite(h_est) else "—"])
@@ -695,8 +695,10 @@ def _page_pano_vs_perv(pdf: PdfPages, pano_result, view_states: list[dict]):
 
         # Draw pano-level segment boxes (green)
         for seg in pano_result.matched_segments:
-            xl = _seg_x_left(seg);   xr = _seg_x_right(seg)
-            yt = _seg_y_top(seg);    yb = _seg_y_bot(seg)
+            xl = _seg_x_left(seg)
+            xr = _seg_x_right(seg)
+            yt = _seg_y_top(seg)
+            yb = _seg_y_bot(seg)
             is_m = bool(seg.get("matched_projection"))
             col = "lime" if is_m else "grey"
             ax_pano.add_patch(Rectangle(
@@ -705,7 +707,7 @@ def _page_pano_vs_perv(pdf: PdfPages, pano_result, view_states: list[dict]):
 
         # Highlight gap columns — columns where per-view matched but pano didn't.
         # Build per-view matched column ranges
-        pano_col_ranges: list[tuple[float, float]] = [
+        _pano_col_ranges: list[tuple[float, float]] = [
             (_seg_x_left(s), _seg_x_right(s))
             for s in pano_result.matched_segments
             if s.get("matched_projection")
@@ -749,7 +751,6 @@ def _page_pano_vs_perv(pdf: PdfPages, pano_result, view_states: list[dict]):
     n_mask     = [v["n_mask"]    for v in view_states]
     n_merged   = [v["n_merged"]  for v in view_states]
     n_fsky2    = [v["n_fsky2"]   for v in view_states]
-    n_fsky5    = [v["n_fsky5"]   for v in view_states]
     n_matched  = [v["n_matched"] for v in view_states]
 
     x = np.arange(len(headings))

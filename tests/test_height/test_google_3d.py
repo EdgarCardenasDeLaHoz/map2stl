@@ -266,10 +266,8 @@ class TestGoogle3DProvider:
         p = Google3DProvider(api_key="test-key")
         assert p.covers((41.4, 41.3, 2.2, 2.1))
 
-    def test_empty_result_without_key(self, monkeypatch, tmp_path):
+    def test_empty_result_without_key(self, monkeypatch, tmp_path, tmp_cache_root):
         """No API key → empty result with NaN."""
-        import app.server.core.cache as cache_mod
-        monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path / "cache")
 
         p = Google3DProvider(api_key=None)
         result = p.fetch_heights((41.4, 41.3, 2.2, 2.1), (10, 10))
@@ -277,10 +275,8 @@ class TestGoogle3DProvider:
         assert np.all(np.isnan(result.raster))
         assert np.all(result.confidence == 0.0)
 
-    def test_fetch_with_mock_tileset(self, monkeypatch, tmp_path):
+    def test_fetch_with_mock_tileset(self, monkeypatch, tmp_path, tmp_cache_root):
         """Mock the API to return a simple tileset and glb → verify pipeline."""
-        import app.server.core.cache as cache_mod
-        monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path / "cache")
 
         # Create a simple box mesh as glb
         box = trimesh.creation.box(extents=[100, 100, 100])
@@ -344,10 +340,8 @@ class TestGoogle3DProvider:
         p = Google3DProvider(api_key="test-key", max_tiles=5)
         assert p._max_tiles == 5
 
-    def test_dem_subtraction(self, monkeypatch, tmp_path):
+    def test_dem_subtraction(self, monkeypatch, tmp_path, tmp_cache_root):
         """When DEM is provided, output = DSM - DEM."""
-        import app.server.core.cache as cache_mod
-        monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path / "cache")
 
         # Create a flat mesh at ~150m altitude
         cx, cy, cz = wgs84_to_ecef(2.17, 41.385, 150.0)

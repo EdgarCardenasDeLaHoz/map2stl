@@ -8,8 +8,11 @@ can be tested and reused without importing FastAPI router machinery.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -29,6 +32,7 @@ def build_tree_node(path: Path, root: Path) -> dict[str, Any] | None:
             size = int(path.stat().st_size)
             mtime = float(path.stat().st_mtime)
         except Exception:
+            logger.debug('Could not stat cache file', exc_info=True)
             return None
         return {
             "name": path.name,
@@ -78,6 +82,7 @@ def read_json_metadata(path: Path) -> dict[str, Any] | None:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else None
     except Exception:
+        logger.debug('Could not read JSON metadata', exc_info=True)
         return None
 
 
@@ -90,7 +95,7 @@ def bbox_from_metadata(meta: dict[str, Any] | None) -> tuple[float, float, float
         west, south, east, north = bbox
         try:
             return float(west), float(south), float(east), float(north)
-        except Exception:
+        except (TypeError, ValueError):
             return None
 
     try:
@@ -100,7 +105,7 @@ def bbox_from_metadata(meta: dict[str, Any] | None) -> tuple[float, float, float
             float(meta["east"]),
             float(meta["north"]),
         )
-    except Exception:
+    except (KeyError, TypeError, ValueError):
         return None
 
 

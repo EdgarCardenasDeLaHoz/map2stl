@@ -1,14 +1,18 @@
 """skyline report_plots — split (A3) (_view_plots)."""
 from __future__ import annotations
-import html
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..region_types import SeedViewRegistration
+
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
 
-def _save_view_image_png(out_path: Path, sv: "SeedViewRegistration") -> bool:
+def _save_view_image_png(out_path: Path, sv: SeedViewRegistration) -> bool:
     """Save the per-view registration overlay image (``sv.image``) as a PNG.
 
     ``sv.image`` is the BGR/RGB numpy array set during pipeline run; it
@@ -42,7 +46,8 @@ def _render_screening_map_png(out_path: Path, region_bbox, screened: list, osm_d
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        from ..region_pdf import _draw_location_map  # noqa: PLC0415
+
+        from .._region_render._draw import _draw_location_map  # noqa: PLC0415
     except Exception as exc:
         logger.warning("F-SKY15 screening map skipped (matplotlib unavailable): %s", exc)
         return False
@@ -58,7 +63,7 @@ def _render_screening_map_png(out_path: Path, region_bbox, screened: list, osm_d
     finally:
         plt.close(fig)
 
-def _render_view_mask_png(out_path: Path, sv: "SeedViewRegistration") -> bool:
+def _render_view_mask_png(out_path: Path, sv: SeedViewRegistration) -> bool:
     """Save the SegFormer class masks over a grayscale base frame.
 
     All four ADE20K classes the pipeline cares about are layered on top of
@@ -134,7 +139,7 @@ def _render_view_mask_png(out_path: Path, sv: "SeedViewRegistration") -> bool:
         logger.warning("F-SKY15 mask render failed for seed=%s: %s", sv.seed_name, exc)
         return False
 
-def _render_view_depth_png(out_path: Path, sv: "SeedViewRegistration") -> bool:
+def _render_view_depth_png(out_path: Path, sv: SeedViewRegistration) -> bool:
     """Save the Depth Anything V2 inverse-depth map of the raw frame as a
     colormapped PNG (F-SKY12 diagnostic tab).
 
@@ -152,9 +157,10 @@ def _render_view_depth_png(out_path: Path, sv: "SeedViewRegistration") -> bool:
     if img is None:
         return False
     try:
-        from ..depth_estimation import predict_pano_depth  # noqa: PLC0415
         import numpy as np  # noqa: PLC0415
         from PIL import Image  # noqa: PLC0415
+
+        from ..depth_estimation import predict_pano_depth  # noqa: PLC0415
         try:
             import matplotlib.pyplot as plt  # noqa: PLC0415
             cmap = plt.get_cmap("turbo")
@@ -183,9 +189,9 @@ def _render_view_depth_png(out_path: Path, sv: "SeedViewRegistration") -> bool:
 
 def _render_view_reconstruction_png(
     out_path: Path,
-    sv: "SeedViewRegistration",
+    sv: SeedViewRegistration,
     buildings_by_id: dict,
-    osm_data: "dict | None" = None,
+    osm_data: dict | None = None,
 ) -> bool:
     """Plot a per-view depth-to-footprint reconstruction next to the OSM
     projection so a reviewer can verify the registration is consistent
@@ -211,12 +217,14 @@ def _render_view_reconstruction_png(
         return False
     try:
         import math  # noqa: PLC0415
-        import numpy as np  # noqa: PLC0415
+
         import matplotlib  # noqa: PLC0415
+        import numpy as np  # noqa: PLC0415
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt  # noqa: PLC0415
+
         from ..depth_estimation import predict_pano_depth  # noqa: PLC0415
-        from ..region_pdf import _bearing_deg, _distance_m  # noqa: PLC0415
+        from ..region_data import _bearing_deg, _distance_m  # noqa: PLC0415
     except Exception as exc:
         logger.warning(
             "F-SKY12 reconstruction skipped for seed=%s: %s",
@@ -227,7 +235,6 @@ def _render_view_reconstruction_png(
         h, w = depth.shape[:2]
         half_fov = float(sv.fov) * 0.5
         heading_eff = (sv.heading + sv.best_offset) % 360.0
-        f_px = 0.5 * w / math.tan(math.radians(sv.fov) * 0.5)
 
         # Collect (bearing_deg, depth_distance_m_proxy, fid, color) for
         # each matched segment + the OSM-projected counterpart distance.
@@ -240,7 +247,7 @@ def _render_view_reconstruction_png(
             fid = str(m.get("feature_id", ""))
             badge_n = int(seg.get("seed_index", 0))
             # Reuse the report's palette so colours match the bboxes.
-            from ..region_pdf import _SEGMENT_PALETTE  # noqa: PLC0415
+            from ..region_config import _SEGMENT_PALETTE  # noqa: PLC0415
             r, g, b = _SEGMENT_PALETTE[
                 (badge_n - 1) % len(_SEGMENT_PALETTE)]
             color = (r / 255.0, g / 255.0, b / 255.0)
@@ -331,7 +338,7 @@ def _render_view_reconstruction_png(
                 ox, oy = _to_xy(ob, od)
                 ax.plot([x, ox], [y, oy], color=color, linewidth=0.8,
                         alpha=0.6, zorder=1)
-        for (bearing, dist, fid, color) in osm_dots:
+        for (bearing, dist, _fid, color) in osm_dots:
             x, y = _to_xy(bearing, dist)
             ax.scatter([x], [y], c=[color], s=120, marker="^",
                        edgecolors="black", linewidth=0.6, zorder=2,
@@ -347,8 +354,8 @@ def _render_view_reconstruction_png(
         ax.set_xlabel("bearing offset from camera heading (deg, image-x)")
         ax.set_ylabel("estimated distance from camera (m)")
         ax.set_title(
-            f"Depth → footprint reconstruction "
-            f"(circle: depth-derived  ▲: OSM-projected)",
+            "Depth → footprint reconstruction "
+            "(circle: depth-derived  ▲: OSM-projected)",
             fontsize=10,
         )
         ax.set_xlim(-half_fov * 1.2, +half_fov * 1.2)
@@ -367,7 +374,7 @@ def _render_view_reconstruction_png(
 
 def _render_seed_minimap_png(
     out_path: Path,
-    sv: "SeedViewRegistration",
+    sv: SeedViewRegistration,
     osm_data: dict,
     buildings_by_id: dict,
     *,
@@ -400,7 +407,7 @@ def _render_seed_minimap_png(
         import matplotlib.pyplot as plt
 
         # Late import to avoid the heavy region_pdf module at module load
-        from ..region_pdf import _draw_view_minimap  # noqa: PLC0415
+        from .._region_render._draw import _draw_view_minimap  # noqa: PLC0415
     except Exception as exc:
         logger.warning("F-SKY15 minimap render skipped (matplotlib unavailable): %s", exc)
         return False

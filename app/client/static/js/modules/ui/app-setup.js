@@ -10,7 +10,7 @@
  *   window.appState.lastDemData, window.appState.selectedRegion
  *   window.getCoordinatesData?.(), window.getDrawnItems?.(),
  *   window.getPreloadedLayer?.(), window.getEditMarkersLayer?.(),
- *   window.getWaterOpacity?.(), window.setWaterOpacity?.()
+ *   window.getWaterOpacity?.()
  *   window.BBOX_COLORS, window.resetBboxColorIndex?.(),
  *   window.updateBboxIndicator?.()
  *   window.loadDEM?.(), window.loadWaterMask?.(),

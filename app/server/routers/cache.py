@@ -11,18 +11,18 @@ import time
 from pathlib import Path
 from typing import Any
 
-from app.server.core.cache_inspector import (
-    build_tree_node as _build_tree_node,
-    read_json_metadata as _read_json_metadata,
-    bbox_from_metadata as _bbox_from_metadata,
-    match_region_name as _match_region_name,
-    infer_region_group as _infer_region_group,
-    build_region_tree as _build_region_tree,
-    flatten_files as _flatten_files,
-)
-
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
+
+from app.server.core.cache_inspector import (
+    build_region_tree as _build_region_tree,
+)
+from app.server.core.cache_inspector import (
+    build_tree_node as _build_tree_node,
+)
+from app.server.core.cache_inspector import (
+    flatten_files as _flatten_files,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cache"])
@@ -31,7 +31,7 @@ router = APIRouter(tags=["cache"])
 # Config imports
 # ---------------------------------------------------------------------------
 try:
-    from app.server.config import CACHE_DIRS, CACHE_CLEAR_INTERVAL, CACHE_MAX_FILES, EE_CACHE_DIR
+    from app.server.config import CACHE_CLEAR_INTERVAL, CACHE_DIRS, CACHE_MAX_FILES, EE_CACHE_DIR
 except ImportError:
     _UI_DIR = Path(__file__).parent.parent
     _PROJECT_ROOT = _UI_DIR.parent.parent
@@ -57,6 +57,7 @@ def _iter_cache_roots() -> list[Path]:
         try:
             p = Path(raw).resolve()
         except Exception:
+            logger.debug('Could not resolve cache root path', exc_info=True)
             continue
         key = str(p).lower()
         if key in seen:
@@ -105,7 +106,7 @@ async def _clear_cache():
                     f.unlink()
                     deleted += 1
                 except Exception:
-                    pass
+                    logger.debug('Could not delete cache file', exc_info=True)
             cleared.append({"path": str(
                 cache_dir), "files_deleted": deleted, "total_files": len(cache_files)})
             logger.info(

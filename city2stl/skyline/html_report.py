@@ -48,26 +48,27 @@ logger = logging.getLogger(__name__)
 # Imported back so the HTML-assembly functions below call them unchanged.
 from .report_plots import (  # noqa: E402,F401
     POLAR_MAX_M,
-    _save_view_image_png,
-    _render_screening_map_png,
-    _render_view_mask_png,
-    _render_view_depth_png,
-    _render_view_reconstruction_png,
-    _render_seed_minimap_png,
-    _fmt_optional_float,
-    _fmt_optional_bool,
     _draw_pano_bboxes_inplace,
     _draw_pano_north_line_inplace,
-    _render_pano_minimap_polar_png,
-    _render_pano_heights_polar_png,
-    _render_pano_segformer_overlay_png,
+    _fmt_optional_bool,
+    _fmt_optional_float,
     _render_pano_bearing_scan_png,
     _render_pano_depth_png,
+    _render_pano_heights_polar_png,
+    _render_pano_minimap_polar_png,
     _render_pano_reconstruction_png,
+    _render_pano_segformer_overlay_png,
+    _render_screening_map_png,
+    _render_seed_minimap_png,
+    _render_view_depth_png,
+    _render_view_mask_png,
+    _render_view_reconstruction_png,
+    _save_view_image_png,
 )
 
+
 def render_seed_pano_page(
-    primary_sv: "SeedViewRegistration",
+    primary_sv: SeedViewRegistration,
     sv_list: list,
     pano_result,
     region_name: str,
@@ -392,7 +393,7 @@ def render_seed_pano_page(
 
 
 def render_seed_page(
-    sv: "SeedViewRegistration",
+    sv: SeedViewRegistration,
     region_name: str,
     minimap_rel_path: str | None,
     *,
@@ -517,7 +518,7 @@ def render_seed_page(
         view_blocks = []
         for i, (vsv, rel, mm_rel, mask_rel, sat_rel, depth_rel, recon_rel) in enumerate(
                 zip(views, rel_paths, mm_paths, mask_paths, sat_paths,
-                    depth_paths, recon_paths)):
+                    depth_paths, recon_paths, strict=False)):
             img_block = (
                 f'<img src="{html.escape(rel)}" alt="view {i} for {html.escape(sv.seed_name)}" '
                 'style="width:100%;height:auto;border:1px solid #ccc;">'
@@ -1217,7 +1218,7 @@ def write_region_report(
     # per-view rows for that seed. The first entry is used for the
     # seed-level summary panel; all entries are walked for the per-view
     # image gallery.
-    views_by_seed: dict[str, list["SeedViewRegistration"]] = {}
+    views_by_seed: dict[str, list[SeedViewRegistration]] = {}
     for sv in seed_views:
         views_by_seed.setdefault(sv.seed_name, []).append(sv)
 

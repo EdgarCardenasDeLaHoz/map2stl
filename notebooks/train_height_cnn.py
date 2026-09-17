@@ -15,8 +15,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from tools.ml.train import train_v3, TrainConfig  # noqa: E402
-from tools.ml.eval import detect_arch             # noqa: E402
+from tools.ml.eval import detect_arch  # noqa: E402
+from tools.ml.train.train import TrainConfig, train_v3  # noqa: E402
 
 TILE_DIR   = PROJECT_ROOT / "cache" / "height_tiles_osm"
 CHECKPOINT = PROJECT_ROOT / "models" / "roofnet_v3s.pt"
@@ -113,8 +113,9 @@ def main() -> None:
     # 4) Quick inference check on one val tile
     if CHECKPOINT.exists():
         import torch
-        from tools.ml.models import build_model
+
         from tools.ml.data.datasets import make_height_loaders
+        from tools.ml.models import build_model
 
         arch_detected = detect_arch(CHECKPOINT) or ARCH
         model = build_model(arch=arch_detected, task="both", pretrained=False, device=DEVICE)
@@ -144,11 +145,19 @@ def main() -> None:
 
         ncols = 4 if mask is not None else 3
         fig, axes = plt.subplots(1, ncols, figsize=(4 * ncols, 4))
-        axes[0].imshow(rgb_display);      axes[0].set_title("RGB");          axes[0].axis("off")
-        axes[1].imshow(gt_np,  cmap="hot"); axes[1].set_title("GT height");  axes[1].axis("off")
-        axes[2].imshow(pred_np, cmap="hot"); axes[2].set_title("Predicted"); axes[2].axis("off")
+        axes[0].imshow(rgb_display)
+        axes[0].set_title("RGB")
+        axes[0].axis("off")
+        axes[1].imshow(gt_np,  cmap="hot")
+        axes[1].set_title("GT height")
+        axes[1].axis("off")
+        axes[2].imshow(pred_np, cmap="hot")
+        axes[2].set_title("Predicted")
+        axes[2].axis("off")
         if mask is not None:
-            axes[3].imshow(mask, cmap="Blues"); axes[3].set_title("Mask"); axes[3].axis("off")
+            axes[3].imshow(mask, cmap="Blues")
+            axes[3].set_title("Mask")
+            axes[3].axis("off")
         plt.tight_layout()
         plt.show()
 

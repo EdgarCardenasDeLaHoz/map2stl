@@ -41,11 +41,10 @@ Public surface:
 from __future__ import annotations
 
 import math
-from typing import Callable
+from collections.abc import Callable
 
 import cv2
 import numpy as np
-
 
 # Earth-projection constants. Both used for the same lat→m / lon→m
 # conversion that everything else in skyline uses; kept local so the
@@ -225,8 +224,8 @@ def project_lonlat_to_view(
 
 
 def pano_water_top_to_lonlat(
-    pano_water_mask: "np.ndarray",
-    headings_per_col: "np.ndarray",
+    pano_water_mask: np.ndarray,
+    headings_per_col: np.ndarray,
     seed_lat: float,
     seed_lon: float,
     *,
@@ -340,7 +339,6 @@ def score_pano_offset_keypoints(
     # that motivated this.
     weighted_sum = 0.0
     weight_total = 0.0
-    f_per_col_px = W / 360.0  # for the pitch-projection y term
     # The pano's "effective focal length" used for vertical projection
     # is W / 2π since 360° wraps to W pixels — so deg per px = 360 / W,
     # rad per px = 2π / W, and focal_for_y = (W/2) / tan(π) is ill-
@@ -438,10 +436,10 @@ def sweep_pano_heading_offset(
 
 
 def _points_to_seed_polar(
-    points: "list[tuple[float, float]]",
+    points: list[tuple[float, float]],
     seed_lat: float,
     seed_lon: float,
-) -> "tuple[np.ndarray, np.ndarray]":
+) -> tuple[np.ndarray, np.ndarray]:
     """Convert (lon, lat) points to seed-relative (bearing_deg, range_m).
 
     Bearing is compass (0° = north, clockwise); range is planar metres
@@ -462,8 +460,8 @@ def _points_to_seed_polar(
 
 
 def pano_vegetation_base_to_lonlat(
-    pano_veg_mask: "np.ndarray",
-    headings_per_col: "np.ndarray",
+    pano_veg_mask: np.ndarray,
+    headings_per_col: np.ndarray,
     seed_lat: float,
     seed_lon: float,
     *,
@@ -512,13 +510,13 @@ def pano_vegetation_base_to_lonlat(
 
 
 def snap_points_to_osm_along_bearing(
-    pano_points: "list[tuple[float, float]]",
-    osm_points: "list[tuple[float, float]]",
+    pano_points: list[tuple[float, float]],
+    osm_points: list[tuple[float, float]],
     seed_lat: float,
     seed_lon: float,
     *,
     max_bearing_tol_deg: float = 4.0,
-) -> "list[tuple[float, float]]":
+) -> list[tuple[float, float]]:
     """Correct each pano point's bad range using OSM (F-SKY18 depth-snap).
 
     Monocular projection gives an exact bearing but an unreliable range, so
@@ -552,8 +550,8 @@ def snap_points_to_osm_along_bearing(
 
 
 def coastline_icp_offset(
-    pano_points: "list[tuple[float, float]]",
-    osm_points: "list[tuple[float, float]]",
+    pano_points: list[tuple[float, float]],
+    osm_points: list[tuple[float, float]],
     seed_lat: float,
     seed_lon: float,
     *,
@@ -562,7 +560,7 @@ def coastline_icp_offset(
     max_range_m: float = 1000.0,
     trim_frac: float = 0.2,
     init_offset_deg: float = 0.0,
-) -> "tuple[float, np.ndarray, np.ndarray]":
+) -> tuple[float, np.ndarray, np.ndarray]:
     """Register the pano-projected coastline to the OSM coastline by a
     seed-centred rotation, returning the heading offset that best
     aligns them (F-SKY16).
@@ -632,7 +630,7 @@ def coastline_icp_offset(
 
 
 def joint_class_icp_offset(
-    classes: "list[tuple[str, list[tuple[float, float]], list[tuple[float, float]], float]]",
+    classes: list[tuple[str, list[tuple[float, float]], list[tuple[float, float]], float]],
     seed_lat: float,
     seed_lon: float,
     *,
@@ -641,7 +639,7 @@ def joint_class_icp_offset(
     max_range_m: float = 1000.0,
     trim_frac: float = 0.2,
     init_offset_deg: float = 0.0,
-) -> "tuple[float, np.ndarray, np.ndarray, dict[str, np.ndarray]]":
+) -> tuple[float, np.ndarray, np.ndarray, dict[str, np.ndarray]]:
     """Joint bearings-only ICP across multiple landmark classes (F-SKY18 Phase 3).
 
     Generalises ``coastline_icp_offset`` to N landmark classes. Each entry in

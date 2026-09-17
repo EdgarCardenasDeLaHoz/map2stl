@@ -34,16 +34,13 @@ import gzip
 import hashlib
 import json
 import math
-import os
 from pathlib import Path
-from typing import Iterable
 
 import requests
 from shapely.geometry import box, shape
 from shapely.strtree import STRtree
 
 from .pipeline import BuildingRecord, _polygon_area_m2
-
 
 _MS_DATASET_LINKS_URL = (
     "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"
@@ -237,7 +234,7 @@ def fetch_microsoft_buildings_for_bbox(
 def _estimate_ms_osm_offset(
     sat_polygons: list[dict],
     osm_geoms: list,
-    tree: "STRtree | None",
+    tree: STRtree | None,
     seed_lat: float,
     *,
     pair_max_dist_m: float = 30.0,

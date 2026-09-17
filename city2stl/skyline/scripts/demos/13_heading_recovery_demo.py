@@ -39,10 +39,10 @@ import math
 import sys
 from pathlib import Path
 
-import numpy as np
-from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
 
 ROOT = Path(__file__).resolve().parents[4]
 if str(ROOT) not in sys.path:
@@ -431,7 +431,8 @@ def _render_satellite_page(pdf, sat_image, sat_water, sat_project,
     ax = fig.add_axes([0.04, 0.05, 0.92, 0.88])
     ax.imshow(sat_image)
     cyan = np.zeros((*sat_water.shape, 4), dtype=np.float32)
-    cyan[..., 1] = 0.85; cyan[..., 2] = 1.0
+    cyan[..., 1] = 0.85
+    cyan[..., 2] = 1.0
     cyan[..., 3] = np.where(sat_water, 0.35, 0.0)
     ax.imshow(cyan)
     sx, sy = sat_project(lon, lat)
@@ -458,11 +459,13 @@ def _render_pano_page(pdf, pano_image, pano_water, pano_building,
     ax = fig.add_axes([0.03, 0.12, 0.94, 0.76])
     ax.imshow(pano_image)
     cyan = np.zeros((H, W, 4), dtype=np.float32)
-    cyan[..., 1] = 0.85; cyan[..., 2] = 1.0
+    cyan[..., 1] = 0.85
+    cyan[..., 2] = 1.0
     cyan[..., 3] = np.where(pano_water, 0.40, 0.0)
     ax.imshow(cyan)
     red = np.zeros((H, W, 4), dtype=np.float32)
-    red[..., 0] = 1.0; red[..., 1] = 0.40
+    red[..., 0] = 1.0
+    red[..., 1] = 0.40
     red[..., 3] = np.where(pano_building, 0.35, 0.0)
     ax.imshow(red)
     # Show the ground band used for sampling.
@@ -632,7 +635,7 @@ def sweep_offset_by_onboundary(
 
     Returns (best_offset_deg, cand_deg, scores) with scores in [0, 1].
     """
-    from scipy.ndimage import distance_transform_edt, binary_erosion, binary_dilation
+    from scipy.ndimage import binary_dilation, binary_erosion, distance_transform_edt
     mlat = 110_540.0
     mlon = 111_320.0 * math.cos(math.radians(seed_lat))
     d_lon = canvas_radius_m / mlon
@@ -738,7 +741,8 @@ def _project_one(ax, pano_boundaries: dict, offset_deg: float,
             br = math.radians(float((bearings[c] + offset_deg) % 360.0))
             x_px = seed_x + (d * math.sin(br)) / m_per_px_x
             y_px = seed_y - (d * math.cos(br)) / m_per_px_y
-            xs.append(x_px); ys.append(y_px)
+            xs.append(x_px)
+            ys.append(y_px)
             if arr is pano_boundaries["water_dist"]:
                 water_pts[c, 0] = x_px
                 water_pts[c, 1] = y_px
@@ -870,7 +874,8 @@ def _render_birdseye_page(pdf, sat_image, sat_water, sat_project,
         ax = fig.add_axes([0.03 + i * 0.325, 0.05, 0.30, 0.83])
         ax.imshow(crop)
         cyan_sat = np.zeros((*water_crop.shape, 4), dtype=np.float32)
-        cyan_sat[..., 1] = 0.85; cyan_sat[..., 2] = 1.0
+        cyan_sat[..., 1] = 0.85
+        cyan_sat[..., 2] = 1.0
         cyan_sat[..., 3] = np.where(water_crop, 0.30, 0.0)
         ax.imshow(cyan_sat)
         # Range rings.
@@ -913,16 +918,21 @@ def main() -> int:
     if not sf_ok:
         return 1
 
-    from city2stl.skyline.region_pdf import (
-        _resolve_api_key, _load_region_bbox, _load_site_seed_urls,
-        _parse_streetview_url, _streetview_image,
-    )
+    from city2stl.skyline.coastline_registration import detect_sat_water_mask
     from city2stl.skyline.pipeline import (
-        _neural_sky_and_building_masks, _neural_water_mask,
-        stitch_pano_views, stitch_pano_masks,
+        _neural_sky_and_building_masks,
+        _neural_water_mask,
+        stitch_pano_masks,
+        stitch_pano_views,
+    )
+    from city2stl.skyline.region_pdf import (
+        _load_region_bbox,
+        _load_site_seed_urls,
+        _parse_streetview_url,
+        _resolve_api_key,
+        _streetview_image,
     )
     from city2stl.skyline.satellite_image import fetch_region_satellite
-    from city2stl.skyline.coastline_registration import detect_sat_water_mask
 
     api_key = _resolve_api_key(args.api_key)
     bbox = _load_region_bbox(args.region)

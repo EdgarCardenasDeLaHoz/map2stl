@@ -43,7 +43,7 @@ window._setupResizablePanel = function _setupResizablePanel() {
         resizeHandle.classList.remove('dragging');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        try { localStorage.setItem('strm2stl_settingsPanelWidth', rightPanel.offsetWidth); } catch (_) { }
+        try { localStorage.setItem('strm2stl_settingsPanelWidth', rightPanel.offsetWidth); } catch (_) { /* best-effort; failure is non-fatal */ }
         window.emitStackUpdate();
     });
     try {
@@ -64,7 +64,7 @@ window._setupResizablePanel = function _setupResizablePanel() {
                 window._ensureDemViewportSpace?.();
             });
         }
-    } catch (_) { }
+    } catch (_) { /* best-effort; failure is non-fatal */ }
 
     let _raf = null;
     new ResizeObserver(() => {
@@ -116,7 +116,6 @@ window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {
     const jsonToggleBtn = document.getElementById('jsonViewToggleBtn');
     const jsonView = document.getElementById('settingsJsonView');
     const demControlsInner = document.getElementById('demControlsInner');
-    const settingsSaveRow = document.getElementById('settingsSaveRow');
 
     if (jsonToggleBtn && jsonView) {
         let jsonViewOpen = false;

@@ -7,7 +7,6 @@ orchestrator (which would be circular). region_pdf re-imports these.
 
 import os
 
-
 # F-SKY12: enable Depth Anything V2 verifier on each view. Off by default
 # while Phase A is validated. Set env var SKYLINE_CV_F_SKY12=1 to turn on.
 _F_SKY12_ENABLED = os.environ.get("SKYLINE_CV_F_SKY12", "0").strip().lower() in (
