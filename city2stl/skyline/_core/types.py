@@ -1,20 +1,11 @@
 """skyline._core.types — extracted from pipeline.py (A1 split)."""
 from __future__ import annotations
-from collections import OrderedDict as _OrderedDict
 
 import logging
-import math
-import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
-import cv2
 import numpy as np
-from scipy.ndimage import gaussian_filter1d, median_filter, uniform_filter1d
-from scipy.optimize import linear_sum_assignment
-from scipy.signal import find_peaks
-from shapely.geometry import shape
 
 # F-CLEAN14: the F-SKY12 depth except-branches reference ``logger`` but the
 # module never defined one (latent NameError, only reachable on a depth-module
@@ -44,7 +35,17 @@ class BuildingRecord:
     height_tag_m: float | None
     height_source: str
     area_m2: float
+    # Ground elevation at the building centroid, in metres above sea level —
+    # the SAME datum as the camera's ``camera_elev_m``. ``terrain_known``
+    # says whether it was actually measured. It matters: the pinhole height
+    # math is ``cam_elev + cam_height + forward*tan(angle) - ground_elev``,
+    # so a 0.0 placeholder paired with a real absolute camera elevation adds
+    # the whole camera elevation to every building height (a 1600 m offset in
+    # Denver). When ``terrain_known`` is False, callers must treat the
+    # building as standing on the camera's own ground plane instead of
+    # subtracting the placeholder. See ``_core.height._ground_elev_m``.
     terrain_elev_m: float = 0.0
+    terrain_known: bool = False
 
 @dataclass(frozen=True)
 class CapturedView:

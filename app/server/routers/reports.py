@@ -1,0 +1,376 @@
+"""reports.py — browse the skyline pipeline's rendered artifacts.
+
+Serves three things under ``/reports``:
+
+* ``GET /reports`` — a single navigation page (Jinja2 template ``reports.html``).
+* ``GET /api/reports/index`` — an inventory of every region report, height report and height
+  trace currently on disk, built by scanning the directories rather than by reading a
+  pre-generated file. ``scripts/build_landing_page.py`` writes a static ``index.html`` that has to
+  be re-run after every batch, and it was three regions stale when this router was written; the
+  page served here cannot go stale for the same reason.
+* ``GET /reports/files/{root}/{path}`` — the artifact files themselves (HTML pages, PNGs, PDFs,
+  JSON sidecars), rooted at a small fixed set of directories with a traversal guard.
+
+The per-seed statistics are parsed back out of each region's rendered ``index.html`` using the
+regexes in ``build_landing_page``. Those numbers are not written to a sidecar anywhere, so the
+rendered page is the only machine-readable copy, and importing the existing parsers keeps one
+definition of the row format instead of two that drift apart.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import mimetypes
+import re
+from datetime import UTC, datetime
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["reports"])
+
+#: strm2stl/ — routers -> server -> app -> strm2stl
+_STRM2STL = Path(__file__).resolve().parents[3]
+_SKYLINE_RUNS = _STRM2STL / "city2stl" / "skyline" / "runs"
+
+#: Only these directories are reachable through ``/reports/files``. Keys appear in URLs.
+_ROOTS: dict[str, Path] = {
+    "region": _SKYLINE_RUNS / "region_reports",
+    "height": _STRM2STL / "output" / "height_reports",
+    "trace": _SKYLINE_RUNS / "height_traces",
+}
+
+_REPORT_DIR_SUFFIX = "_skyline_report"
+
+#: Extensions the browser can render. Anything else is refused rather than offered as a download,
+#: because these roots also hold caches that are of no use to a reader.
+_SERVABLE = {".html", ".htm", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".pdf", ".json", ".css"}
+
+
+# --- parsers ------------------------------------------------------------------
+
+def _parsers():
+    """Import the landing-page parsers lazily.
+
+    Kept out of module scope so a missing or renamed script degrades to an inventory with no
+    per-seed rows instead of preventing the whole app from importing this router.
+    """
+    from city2stl.skyline.scripts.build_landing_page import _BG_TO_QUAL, _CURATED, _ROW_RE, _stat
+    return _ROW_RE, _BG_TO_QUAL, _CURATED, _stat
+
+
+def _seed_slug(seed_name: str) -> str:
+    """Asset filenames drop a leading ``seed_``; ``html_report.py:1256`` does the same."""
+    return seed_name[5:] if seed_name.startswith("seed_") else seed_name
+
+
+def _source_of(seed_name: str, region: str, curated: set) -> str:
+    if seed_name.startswith("web_"):
+        return "web"
+    if seed_name.startswith("auto"):
+        return "auto"
+    return "curated" if region in curated else "seed"
+
+
+_PANO_KINDS = ("pano", "pano_seg", "pano_depth", "pano_recon", "pano_scan")
+
+
+def _pano_assets(report_dir: Path, slug: str, url_base: str) -> dict[str, str]:
+    """URLs for whichever panorama renders this seed actually produced."""
+    out = {}
+    for kind in _PANO_KINDS:
+        if (report_dir / "assets" / "pano" / f"{slug}_{kind}.png").is_file():
+            out[kind] = f"{url_base}/assets/pano/{slug}_{kind}.png"
+    return out
+
+
+#: Overhead context renders. ``fp`` / ``sat`` / ``heights`` are the polar views drawn around the
+#: seed point; all four are roughly square, unlike the 5:1 panorama strips.
+_MINIMAP_KINDS = (("minimap", ""), ("polar footprints", "_polar_fp"),
+                  ("polar satellite", "_polar_sat"), ("polar heights", "_polar_heights"))
+
+
+def _minimap_assets(report_dir: Path, slug: str, url_base: str) -> list[dict]:
+    out = []
+    for label, suffix in _MINIMAP_KINDS:
+        name = f"{slug}{suffix}.png"
+        if (report_dir / "assets" / "minimap" / name).is_file():
+            out.append({"label": label, "url": f"{url_base}/assets/minimap/{name}"})
+    return out
+
+
+def _view_assets(report_dir: Path, slug: str, url_base: str) -> list[dict]:
+    """Per-view Street View frames, in view order, with whatever renders exist for each."""
+    views_dir = report_dir / "assets" / "views"
+    if not views_dir.is_dir():
+        return []
+    pat = re.compile(rf"^{re.escape(slug)}_view_(\d+)\.png$")
+    out = []
+    for path in sorted(views_dir.glob(f"{slug}_view_*.png")):
+        m = pat.match(path.name)
+        if not m:
+            continue
+        idx = int(m.group(1))
+        entry = {"index": idx, "image": f"{url_base}/assets/views/{path.name}"}
+        for kind in ("mask", "depth", "recon"):
+            if (views_dir / f"{slug}_view_{idx}_{kind}.png").is_file():
+                entry[kind] = f"{url_base}/assets/views/{slug}_view_{idx}_{kind}.png"
+        out.append(entry)
+    return sorted(out, key=lambda e: e["index"])
+
+
+def _region_rows(report_dir: Path, region: str, text: str) -> list[dict]:
+    """Per-seed rows for one region, each carrying its own artifact URLs."""
+    try:
+        row_re, bg_to_qual, curated, _ = _parsers()
+    except Exception as e:  # pragma: no cover - only if the script moves
+        logger.warning("Landing-page parsers unavailable: %s", e)
+        return []
+
+    url_base = f"/reports/files/region/{report_dir.name}"
+    rows = []
+    for m in row_re.finditer(text):
+        rel_url, seed_name, nseg, nm, rate, ncov, bgcolor, qlabel = m.groups()
+        slug = _seed_slug(seed_name)
+        qual = next((v for k, v in bg_to_qual.items() if k in bgcolor), "weak")
+        rows.append({
+            "region": region,
+            "seed": seed_name,
+            "slug": slug,
+            "url": f"{url_base}/{rel_url}",
+            "source": _source_of(seed_name, region, curated),
+            "detected": int(nseg),
+            "matched": int(nm),
+            "match_rate": rate.strip(),
+            "coverage": int(ncov),
+            "quality": qual,
+            "quality_label": qlabel.strip(),
+            "minimaps": _minimap_assets(report_dir, slug, url_base),
+            "pano": _pano_assets(report_dir, slug, url_base),
+            "views": _view_assets(report_dir, slug, url_base),
+        })
+    return rows
+
+
+# --- inventory ----------------------------------------------------------------
+
+def _mtime(path: Path) -> str | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime,
+                                      tz=UTC).isoformat(timespec="seconds")
+    except OSError:
+        return None
+
+
+def _count(dir_path: Path, pattern: str) -> int:
+    return len(list(dir_path.glob(pattern))) if dir_path.is_dir() else 0
+
+
+def _region_entry(report_dir: Path) -> dict:
+    region = report_dir.name[:-len(_REPORT_DIR_SUFFIX)]
+    url_base = f"/reports/files/region/{report_dir.name}"
+    index_path = report_dir / "index.html"
+
+    entry = {
+        "name": region,
+        "dir": report_dir.name,
+        "index_url": f"{url_base}/index.html" if index_path.is_file() else None,
+        "modified": _mtime(index_path if index_path.is_file() else report_dir),
+        "seed_pages": _count(report_dir, "seed_*.html"),
+        "pano_images": _count(report_dir / "assets" / "pano", "*.png"),
+        "view_images": _count(report_dir / "assets" / "views", "*.png"),
+        "minimap_images": _count(report_dir / "assets" / "minimap", "*.png"),
+        "screening_map": None,
+        "web_images": [],
+        "heights_json": None,
+        "buildings": 0,
+        "seeds": 0,
+        "rows": [],
+        "quality": {"good": 0, "medium": 0, "weak": 0},
+    }
+
+    if (report_dir / "assets" / "screening_map.png").is_file():
+        entry["screening_map"] = f"{url_base}/assets/screening_map.png"
+    if (report_dir / "heights.json").is_file():
+        entry["heights_json"] = f"{url_base}/heights.json"
+
+    web_dir = report_dir / "web_images"
+    if web_dir.is_dir():
+        entry["web_images"] = [f"{url_base}/web_images/{p.name}"
+                               for p in sorted(web_dir.iterdir())
+                               if p.suffix.lower() in (".jpg", ".jpeg", ".png")]
+
+    if index_path.is_file():
+        try:
+            text = index_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            logger.warning("Cannot read %s: %s", index_path, e)
+            return entry
+        try:
+            _, _, _, stat = _parsers()
+            entry["seeds"] = stat(text, "seeds")
+            entry["buildings"] = stat(text, "aggregated buildings")
+        except Exception:  # pragma: no cover - parser import already logged
+            pass
+        entry["rows"] = _region_rows(report_dir, region, text)
+        for row in entry["rows"]:
+            entry["quality"][row["quality"]] = entry["quality"].get(row["quality"], 0) + 1
+
+    return entry
+
+
+def _build_inventory() -> dict:
+    regions_root = _ROOTS["region"]
+    regions, pdfs = [], []
+    if regions_root.is_dir():
+        for path in sorted(regions_root.iterdir(), key=lambda p: p.name.lower()):
+            if path.is_dir() and path.name.endswith(_REPORT_DIR_SUFFIX):
+                regions.append(_region_entry(path))
+            elif path.suffix.lower() == ".pdf":
+                pdfs.append({
+                    "name": path.stem,
+                    "url": f"/reports/files/region/{path.name}",
+                    "modified": _mtime(path),
+                    "size": path.stat().st_size,
+                })
+
+    heights_root = _ROOTS["height"]
+    height_reports = []
+    if heights_root.is_dir():
+        for path in sorted(heights_root.glob("*.html")):
+            height_reports.append({
+                "name": path.stem.replace("_height_report", ""),
+                "url": f"/reports/files/height/{path.name}",
+                "modified": _mtime(path),
+                "size": path.stat().st_size,
+            })
+
+    traces_root = _ROOTS["trace"]
+    traces = []
+    if traces_root.is_dir():
+        for path in sorted(traces_root.glob("*.json")):
+            region, _, feature = path.stem.partition("__")
+            plot = path.with_suffix(".png")
+            traces.append({
+                "name": path.stem,
+                "region": region,
+                "feature": feature or "all",
+                "url": f"/reports/files/trace/{path.name}",
+                "plot": f"/reports/files/trace/{plot.name}" if plot.is_file() else None,
+                "modified": _mtime(path),
+            })
+
+    landing = regions_root / "index.html"
+    totals = {
+        "regions": len(regions),
+        "seeds": sum(len(r["rows"]) for r in regions),
+        "pano_images": sum(r["pano_images"] for r in regions),
+        "view_images": sum(r["view_images"] for r in regions),
+        "buildings": sum(r["buildings"] for r in regions),
+        "good": sum(r["quality"]["good"] for r in regions),
+        "medium": sum(r["quality"]["medium"] for r in regions),
+        "weak": sum(r["quality"]["weak"] for r in regions),
+    }
+
+    return {
+        "generated": datetime.now(UTC).isoformat(timespec="seconds"),
+        "totals": totals,
+        "regions": regions,
+        "height_reports": height_reports,
+        "traces": traces,
+        "pdfs": pdfs,
+        "legacy_landing_url": ("/reports/files/region/index.html"
+                               if landing.is_file() else None),
+    }
+
+
+@router.get("/api/reports/index")
+async def reports_index():
+    """Everything the browser page needs, in one request."""
+    try:
+        return JSONResponse(_build_inventory())
+    except Exception as e:
+        logger.error("Failed to build report inventory: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Report inventory failed: {e}") from e
+
+
+@router.get("/api/reports/heights/{region_dir}")
+async def reports_heights(region_dir: str):
+    """Summary of one region's ``heights.json`` — the per-building metrics are large.
+
+    Returns the header fields plus per-building height sources counted, not the building list
+    itself; the raw file stays available through ``/reports/files``.
+    """
+    path = _safe_path("region", f"{region_dir}/heights.json")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise HTTPException(status_code=500, detail=f"Cannot read heights.json: {e}") from e
+
+    buildings = data.get("buildings") or []
+    sources: dict[str, int] = {}
+    heights = []
+    for b in buildings:
+        src = b.get("effective_height_source") or "unknown"
+        sources[src] = sources.get(src, 0) + 1
+        h = b.get("effective_height_m")
+        if isinstance(h, (int, float)):
+            heights.append(float(h))
+    heights.sort()
+
+    def _pct(frac: float) -> float | None:
+        if not heights:
+            return None
+        return round(heights[min(len(heights) - 1, int(frac * len(heights)))], 1)
+
+    return JSONResponse({
+        "region": data.get("region"),
+        "bbox_nsew": data.get("bbox_nsew"),
+        "n_building_records": data.get("n_building_records"),
+        "known_heights": data.get("known_heights"),
+        "n_buildings": len(buildings),
+        "height_sources": sources,
+        "height_p10": _pct(0.10),
+        "height_median": _pct(0.50),
+        "height_p90": _pct(0.90),
+        "height_max": round(heights[-1], 1) if heights else None,
+    })
+
+
+# --- file serving -------------------------------------------------------------
+
+def _safe_path(root_key: str, rel_path: str) -> Path:
+    """Resolve ``rel_path`` under one of the fixed roots, or raise.
+
+    ``/static`` next door resolves user paths with ``os.path.join`` and no containment check.
+    These roots sit beside the OSM and Street View caches, so the check is made here rather than
+    inherited.
+    """
+    root = _ROOTS.get(root_key)
+    if root is None or not root.is_dir():
+        raise HTTPException(status_code=404, detail="Unknown report root")
+    try:
+        target = (root / rel_path).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise HTTPException(status_code=404, detail="Not found") from None
+    if not target.is_relative_to(root.resolve()):
+        raise HTTPException(status_code=404, detail="Not found")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    if target.suffix.lower() not in _SERVABLE:
+        raise HTTPException(status_code=404, detail="Not a viewable artifact")
+    return target
+
+
+@router.get("/reports/files/{root_key}/{rel_path:path}")
+async def reports_file(root_key: str, rel_path: str):
+    """Serve one artifact file out of a report directory."""
+    path = _safe_path(root_key, rel_path)
+    mime, _ = mimetypes.guess_type(str(path))
+    # Reports are rewritten in place by a re-run, so a cached copy would show the previous batch.
+    return FileResponse(path, media_type=mime or "application/octet-stream",
+                        headers={"Cache-Control": "no-cache"})

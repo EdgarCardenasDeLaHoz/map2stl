@@ -1,20 +1,19 @@
 """skyline._pano.detect — extracted from pano_registration.py (A2 split)."""
 from __future__ import annotations
-import json
+
 import math
 import os
 import time
 from contextlib import nullcontext
 from pathlib import Path
-import cv2
+
 import numpy as np
+
+from .._core.height import _ground_elev_m
 from ..pipeline import (
     BuildingRecord,
-    CapturedView,
-    Viewpoint,
     _merge_silhouette_sources,
     _neural_sky_and_building_masks,
-    aggregate_building_heights,
     augment_estimates_with_depth,
     detect_building_silhouettes,
     detect_buildings_from_mask,
@@ -24,39 +23,36 @@ from ..pipeline import (
     osm_sam_instance_silhouettes,
     register_view_to_osm,
 )
-from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResult
 from ..region_config import (
-    FLICKR_API_KEY as _FLICKR_API_KEY,
     _F_SKY1_ENABLED,
-    _F_SKY11_1_ENABLED,
-    _F_SKY12_ENABLED,
     _F_SKY5_ENABLED,
+    _F_SKY12_ENABLED,
 )
-from ..region_data import _bearing_deg, _distance_m, _fetch_elevations
-from ..streetview_io import _meta_location, _streetview_image, _streetview_metadata
-from ..seed_selection import _screen_score_from_image
-from ..region_render import _negative_seed_views, _registration_overlay
+from ..region_data import _bearing_deg, _distance_m
+from ..region_render import _registration_overlay, _StepTimer
+from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResult
+
 
 def _register_views(
-    seed: "SkylinePoint",
+    seed: SkylinePoint,
     seed_elev: float,
     cached_views: list[dict],
-    seed_buildings: list["BuildingRecord"],
+    seed_buildings: list[BuildingRecord],
     anchor_offset: float,
-    cross_view_state: "dict | None",
-    negative_seeds: "set[str] | None",
+    cross_view_state: dict | None,
+    negative_seeds: set[str] | None,
     max_plausible_height_m: float,
-    pano_osm_iou: "float | None",
-    pano_osm_n_keypoints: "int | None",
-    pano_projected_coastline: "list | None",
-    pano_recovered_offset: "float | None",
-    pano_recovered_peak: "float | None",
-    pano_recovered_sigma: "float | None",
-    pano_water_frac: "float | None",
+    pano_osm_iou: float | None,
+    pano_osm_n_keypoints: int | None,
+    pano_projected_coastline: list | None,
+    pano_recovered_offset: float | None,
+    pano_recovered_peak: float | None,
+    pano_recovered_sigma: float | None,
+    pano_water_frac: float | None,
     trace=None,
-    timer: "_StepTimer | None" = None,
-    pano_projected_vegetation: "list | None" = None,
-) -> tuple[list["SeedViewRegistration"], list]:
+    timer: _StepTimer | None = None,
+    pano_projected_vegetation: list | None = None,
+) -> tuple[list[SeedViewRegistration], list]:
     """Pass 2: per-view registration, height extraction, and diagnostics.
 
     Returns (view_rows_for_seed, estimates_for_seed).
@@ -85,8 +81,9 @@ def _register_views(
             seg["seed_index"] = seed_index_map[fid]
 
     from ..pipeline import (  # noqa: PLC0415
-        _neural_sky_and_building_masks,
         _height_proxy as _hp,
+    )
+    from ..pipeline import (
         compute_building_band,
     )
     view_rows: list[SeedViewRegistration] = []
@@ -130,9 +127,17 @@ def _register_views(
                     compute_floor_period=_F_SKY1_ENABLED,
                 )
             if _F_SKY12_ENABLED and est_for_view:
+                # camera_ground - building_ground, per building. Zero unless
+                # per-building terrain was actually fetched; the depth path
+                # then matches the geometric path's own datum assumption.
+                _offsets = {
+                    b.feature_id: float(seed_elev) - _ground_elev_m(b, float(seed_elev))
+                    for b in seed_buildings
+                }
                 with _sub("augment_estimates_with_depth (F-SKY12)"):
                     est_for_view = augment_estimates_with_depth(
                         image, est_for_view, cap.viewpoint, camera_height_m=1.7,
+                        ground_offsets_m=_offsets,
                     )
             estimates.extend(est_for_view)
 
@@ -153,7 +158,8 @@ def _register_views(
         # report can render all four classes on the grayscale diagnostic.
         with _sub("Stage 1: SegFormer water+veg (cache hits)"):
             from ..pipeline import (  # noqa: PLC0415
-                _neural_water_mask, _neural_vegetation_mask,
+                _neural_vegetation_mask,
+                _neural_water_mask,
             )
             _wmask = _neural_water_mask(image)
             _vmask = _neural_vegetation_mask(image)
@@ -219,21 +225,21 @@ def _register_views(
                 seed.lat, seed.lon, b.centroid_lat, b.centroid_lon)
             true_dist = _distance_m(
                 seed.lat, seed.lon, b.centroid_lat, b.centroid_lon)
-            delta = (true_bearing - effective_heading + 540.0) % 360.0 - 180.0
+            delta = (true_bearing - effective_heading + 540.0) % 360.0 - 180.0  # noqa: B023
             proxy_h = float(_hp(b))
             x_px = int(round(float(m.get("x_px", 0))))
             pred_h = float("nan")
-            if 0 <= x_px < contour_arr.size:
-                y_px = float(contour_arr[x_px])
+            if 0 <= x_px < contour_arr.size:  # noqa: B023
+                y_px = float(contour_arr[x_px])  # noqa: B023
                 if np.isfinite(y_px):
-                    ang = math.atan((cy - y_px) / f_px) + pitch_rad
+                    ang = math.atan((cy - y_px) / f_px) + pitch_rad  # noqa: B023
                     pred_h = max(
                         0.0,
-                        cam_z + float(m.get("forward_m", 0.0)) * math.tan(ang)
-                        - float(getattr(b, "terrain_elev_m", 0.0))
+                        cam_z + float(m.get("forward_m", 0.0)) * math.tan(ang)  # noqa: B023
+                        - _ground_elev_m(b, float(seed_elev))
                     )
             near = [
-                p for p in all_proj_list
+                p for p in all_proj_list  # noqa: B023
                 if abs(float(p.get("x_px", 0)) - float(m.get("x_px", 0))) <= 15.0
             ]
             is_closest = bool(near) and min(
@@ -242,7 +248,7 @@ def _register_views(
             seg["true_bearing_deg"] = true_bearing
             seg["true_distance_m"] = true_dist
             seg["bearing_delta_deg"] = delta
-            seg["bearing_in_fov"] = abs(delta) <= half_fov
+            seg["bearing_in_fov"] = abs(delta) <= half_fov  # noqa: B023
             seg["height_proxy_m"] = proxy_h
             seg["predicted_height_m"] = pred_h
             seg["is_closest_in_bin"] = is_closest
@@ -281,7 +287,7 @@ def _register_views(
                 continue
             cur_fid = str(m.get("feature_id", ""))
             best_alt = None
-            best_alt_fid: "str | None" = None
+            best_alt_fid: str | None = None
             for d in diags:
                 alt_fid = str(d.get("feature_id", ""))
                 if alt_fid == cur_fid:
@@ -317,7 +323,7 @@ def _register_views(
                         alt_pred_h = max(
                             0.0,
                             cam_z + alt_fwd * math.tan(ang)
-                            - float(getattr(alt_b, "terrain_elev_m", 0.0))
+                            - _ground_elev_m(alt_b, float(seed_elev))
                         )
                 if (not np.isfinite(alt_pred_h)
                         or alt_pred_h > max_plausible_height_m
@@ -421,7 +427,8 @@ def _register_views(
             if dist < 10.0:
                 continue
             b = buildings_by_id.get(m.get("feature_id"))
-            terrain_z = float(getattr(b, "terrain_elev_m", 0.0)) if b is not None else 0.0
+            terrain_z = (_ground_elev_m(b, float(seed_elev))
+                         if b is not None else float(seed_elev))
             expected_base_y = (
                 cy
                 + (cam_z - terrain_z) / dist * f_px
@@ -473,7 +480,7 @@ def _register_views(
     return view_rows, estimates
 
 def _smooth_matches_across_views(
-    seed_view_rows: list["SeedViewRegistration"],
+    seed_view_rows: list[SeedViewRegistration],
     min_popularity_swap: int = 2,
 ) -> None:
     """Promote popular OSM matches across a seed's views.
@@ -564,7 +571,7 @@ def _smooth_matches_across_views(
                     continue
                 def _score(s):
                     for d in s.get("match_diagnostics", []) or []:
-                        if str(d.get("feature_id", "")) == fid:
+                        if str(d.get("feature_id", "")) == fid:  # noqa: B023
                             return float(d.get("combined", 0.0))
                     return float(s.get("matched_combined", 0.0))
                 segs.sort(key=_score, reverse=True)
@@ -617,8 +624,8 @@ def _smooth_matches_across_views(
             object.__setattr__(sv, "image", new_overlay)
 
 def _smooth_pano_matches_against_views(
-    pano_result: "StitchedPanoResult",
-    seed_view_rows: list["SeedViewRegistration"],
+    pano_result: StitchedPanoResult,
+    seed_view_rows: list[SeedViewRegistration],
     min_popularity: int = 2,
 ) -> None:
     """Promote per-view popular OSM matches into the pano's match list.
@@ -693,7 +700,7 @@ def _multires_sam_instances(
     refined_mask: np.ndarray,
     confidence_floor: float = 0.6,
     intersect_with_segformer: bool = True,
-) -> "tuple[list[dict], float]":
+) -> tuple[list[dict], float]:
     """Run MobileSAM on each multires cluster crop with OSM building
     centroids as point prompts to obtain per-instance silhouettes
     (F-SKY20).
@@ -713,7 +720,7 @@ def _multires_sam_instances(
     so the pipeline still ships the multires refined mask.
     """
     try:
-        from mobile_sam import sam_model_registry, SamPredictor  # noqa: PLC0415
+        from mobile_sam import SamPredictor, sam_model_registry  # noqa: PLC0415
     except Exception:
         return [], 0.0
     ckpt = os.environ.get(
@@ -854,14 +861,14 @@ def _split_by_depth_discontinuity(
 def _multires_pano_refine(
     pano_img: np.ndarray,
     pano_bmask: np.ndarray,
-    pano_wmask: "np.ndarray | None",
+    pano_wmask: np.ndarray | None,
     *,
     min_cluster_width_px: int = 30,
     min_gap_px: int = 24,
     min_column_height_px: int = 30,
     fine_input_size: int = 512,
     use_depth: bool = True,
-) -> "tuple[np.ndarray, list[tuple[int, int]], tuple[int, int], float]":
+) -> tuple[np.ndarray, list[tuple[int, int]], tuple[int, int], float]:
     """Coarse-to-fine refinement of a pano building mask (F-SKY19).
 
     Pipeline:
@@ -940,10 +947,11 @@ def _multires_pano_refine(
         )
         if not _ensure_segformer():
             return coarse, clusters, 0.0
-        from transformers import SegformerImageProcessor  # noqa: PLC0415
         import torch  # noqa: PLC0415
         import torch.nn.functional as F  # noqa: PLC0415
         from PIL import Image as PILImage  # noqa: PLC0415
+        from transformers import SegformerImageProcessor  # noqa: PLC0415
+
         from .. import pipeline as _p  # noqa: PLC0415
 
         model = _p._segformer_model
@@ -1007,13 +1015,13 @@ def _multires_pano_refine(
     return refined, clusters, (y_top, y_bot), fine_total
 
 def _pano_sliding_window_split(
-    pano_mask: "np.ndarray | None",
-    pano_image: "np.ndarray | None",
+    pano_mask: np.ndarray | None,
+    pano_image: np.ndarray | None,
     det_fn,
     window_w: int = 360,
     stride: int = 280,
     iou_dedup: float = 0.5,
-    pano_depth: "np.ndarray | None" = None,
+    pano_depth: np.ndarray | None = None,
     depth_jump_thresh: float = 0.03,
 ) -> list[dict]:
     """F-SKY22 — run the per-view splitter in a sliding window across the
@@ -1135,8 +1143,8 @@ def _pano_sliding_window_split(
             col_md_filled = np.interp(idx, idx[valid], col_md[valid])
             # Smooth lightly then differentiate.
             try:
-                from scipy.signal import find_peaks  # noqa: PLC0415
                 from scipy.ndimage import gaussian_filter1d  # noqa: PLC0415
+                from scipy.signal import find_peaks  # noqa: PLC0415
                 smoothed = gaussian_filter1d(col_md_filled, sigma=2.0)
                 grad = np.abs(np.diff(smoothed))
                 # Diagnostic: track the max gradient inside the inner
@@ -1209,15 +1217,15 @@ def _pano_sliding_window_split(
     return depth_split
 
 def _build_and_detect_pano(
-    seed: "SkylinePoint",
+    seed: SkylinePoint,
     cached_views: list[dict],
-    seed_buildings: list["BuildingRecord"],
+    seed_buildings: list[BuildingRecord],
     anchor_offset: float,
     spin_step_deg: float,
     prefetch_views: list[dict] | None = None,
-    timer: "_StepTimer | None" = None,
-    osm_green_features: "list | None" = None,
-) -> "StitchedPanoResult | None":
+    timer: _StepTimer | None = None,
+    osm_green_features: list | None = None,
+) -> StitchedPanoResult | None:
     """Pass 3: stitch all spin views into a 360° pano and run pano-level matching.
 
     Returns a ``StitchedPanoResult`` on success, ``None`` on failure (the pano
@@ -1241,14 +1249,20 @@ def _build_and_detect_pano(
 
     try:
         from ..pipeline import (  # noqa: PLC0415
-            stitch_pano_views,
-            stitch_pano_masks,
-            project_buildings_to_pano,
-            detect_buildings_from_mask as _det_pano,
-            match_segments_to_buildings as _match_pano,
-            compute_building_band as _cbb,
             _neural_sky_and_building_masks,
             _neural_water_mask,
+            project_buildings_to_pano,
+            stitch_pano_masks,
+            stitch_pano_views,
+        )
+        from ..pipeline import (
+            compute_building_band as _cbb,
+        )
+        from ..pipeline import (
+            detect_buildings_from_mask as _det_pano,
+        )
+        from ..pipeline import (
+            match_segments_to_buildings as _match_pano,
         )
         # Use the broader prefetch (all spin headings that returned an
         # image, including those screening rejected) when available so
@@ -1376,7 +1390,7 @@ def _build_and_detect_pano(
         # depth-aware post-cut pass AND for the downstream HTML renderers
         # (depth pano + reconstruction polar plot). Cheap-ish (~5-10 s
         # CPU) but a clear win to share.
-        pano_depth_arr: "np.ndarray | None" = None
+        pano_depth_arr: np.ndarray | None = None
         try:
             from ..depth_estimation import predict_pano_depth_tiled  # noqa: PLC0415
             t_dep = time.perf_counter()
@@ -1532,13 +1546,15 @@ def _build_and_detect_pano(
                 # BEFORE the apply decision so a strong ``favors_mirror`` can
                 # veto an aggressive rotation (the auto_270_2000m failure mode
                 # — 52% MAE improve looked confident, vegetation disagreed).
-                v_best: "float | None" = None
-                v_mirror: "float | None" = None
+                v_best: float | None = None
+                v_mirror: float | None = None
                 veg_verdict = "no_data"
                 try:
                     if pano_veg_arr_xc is not None and osm_green_features:
                         from ..osm_water import (  # noqa: PLC0415
                             clip_to_radius as _clip_xc_g,
+                        )
+                        from ..osm_water import (
                             sample_green_points as _samp_xc_g,
                         )
                         _g_pts = _samp_xc_g(

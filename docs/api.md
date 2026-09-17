@@ -48,8 +48,9 @@ without repeating the four bbox parsers in every endpoint.
 | GET | `/api/terrain/satellite` | Fetch satellite imagery (ESRI tiles) |
 | GET | `/api/terrain/sources` | List DEM data sources |
 | GET | `/api/terrain/hydrology` | Fetch HydroRIVERS depression grid for bbox |
+| GET | `/api/terrain/trails` | Fetch ski and hiking trail relief grids for bbox. **Params:** `dim` (default 600), `relief_m` (default -2.0, negative engraves), `width_m` (default 8, clamped 1–500), `source` (`osm` \| `usfs` \| `all`), `categories` (comma-separated subset of `ski,hiking`). Returns **both** grids (`ski_grid_values_b64`, `hiking_grid_values_b64`) in one response so client-side category toggles need no refetch. Also returns `ski_area_grid_values_b64` and `hiking_area_grid_values_b64`: display-only 0/1 masks of the interiors of features mapped as closed ways (piste and ski-area polygons). The relief grids carry only linework, boundaries included, so an areal feature can never engrave a filled region into the DEM. Also returns `ski_difficulty_grid_values_b64` - the piste grade per pixel as a 1-based index into `difficulty_classes` (0 means no usable `piste:difficulty` tag), sent as float32 like the other grids because the values are small integers and survive the cast exactly. A reader must treat it as class indices and never interpolate it; the server reprojects it nearest-neighbour for the same reason. Where two pistes cross, the harder grade wins. On an Overpass outage the response is HTTP 200 with null grids, `upstream_error: true`, and an `error` naming the failure - distinct from a region that genuinely holds no trails, which returns null grids with `feature_count: 0` and no `upstream_error`. Nothing is cached in either failure case. |
 | POST | `/api/composite/hydrology-merge` | Merge hydrology depression into DEM array |
-| POST | `/api/composite/dem-merge` | Merge multiple DEM layers (`MergeRequest`) |
+| POST | `/api/composite/dem-merge` | Merge multiple DEM layers (`MergeRequest`). Layers are an ordered list: each names a source, a blend mode (`add` raises, `rivers` cuts), a weight and a processing pipeline. Sources are geo2stl's built-ins plus anything the server registered — `osm_buildings`, `osm_roads`, `osm_waterways`, `osm_walls`. The same spec is what an export sends as `composite_layers`. |
 | POST | `/api/export/preview` | DEM values for Three.js preview (no STL) |
 
 ## Export Routes (`routers/export.py`)
@@ -129,6 +130,35 @@ Primary `TerrainSession` touchpoints:
 | GET | `/api/settings` | Combined settings payload for SDK/bootstrap clients |
 | GET | `/api/global_dem_overview` | Cached global DEM PNG (served by `server.py`) |
 
+## Auth & Data Sources (`routers/auth.py`)
+
+Backs the 🔑 Keys panel in the header. Everything here writes to
+`strm2stl/config.json` and re-binds the running process, so no restart is needed.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/auth/status` | Earth Engine and OpenTopography authentication state |
+| POST | `/api/auth/opentopo-key` | Save an OpenTopography API key |
+| GET | `/api/auth/tile-store` | Where the local `.tif` tiles are, and how many there are |
+| POST | `/api/auth/tile-store` | Repoint `ocean_root` at a folder of `.tif` tiles |
+| POST | `/api/auth/tile-store/browse` | Open a native folder picker on the server's desktop |
+| POST | `/api/auth/earth-engine/start` | Begin the EE OAuth flow; returns a URL to open |
+| POST | `/api/auth/earth-engine/complete` | Exchange the pasted code for credentials |
+
+`POST /api/auth/tile-store` returns 400 unless the folder exists and holds at least
+one `.tif` directly inside it, so a typo cannot replace a working store with a broken
+one; when tiles are one level down the error names the subfolder that has them. On
+success it resets geo2stl's memoized tile list, so the `local` source becomes usable
+immediately. See `app/server/core/tile_store.py`.
+
+`POST /api/auth/tile-store/browse` raises a `tkinter.filedialog.askdirectory()` dialog
+on the machine running the server, because a browser cannot report an absolute
+filesystem path (`webkitdirectory` yields only relative names) and an absolute path is
+exactly what `ocean_root` needs. This is sound only because the app is a localhost
+desktop tool. The dialog blocks, so it runs through `core.validation.run_sync`; a server
+with no display returns **501** and the client falls back to typing the path. Returns
+`{"supported": true, "cancelled": true}` when the user dismisses the dialog.
+
 ## Height Routes (`routers/height.py`)
 
 Building height estimation from multiple data sources. Router uses prefix `/api/height`.
@@ -140,6 +170,20 @@ Building height estimation from multiple data sources. Router uses prefix `/api/
 
 See [arch.md](arch.md) for the height provider architecture and
 [height-pipeline-plan.md](height-pipeline-plan.md) for implementation status.
+
+## Pipeline Report Routes (`routers/reports.py`)
+
+Browse the skyline pipeline's rendered artifacts. The page itself is `GET /reports`
+(template `reports.html`, behaviour in `static/js/reports.js`).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/reports/index` | Inventory of every region report, height report, trace and PDF on disk, with per-seed rows and artifact URLs |
+| GET | `/api/reports/heights/{region_dir}` | Summary of one region's `heights.json` (source counts and height percentiles, not the building list) |
+| GET | `/reports/files/{root}/{path}` | One artifact file. `root` is `region`, `height` or `trace`; paths are resolved and checked for containment, and only viewable extensions are served |
+
+The inventory is rebuilt by scanning directories on every request rather than read from
+`build_landing_page.py`'s static `index.html`, which has to be re-run after each batch.
 
 ## Key Pydantic Models (`schemas.py`)
 

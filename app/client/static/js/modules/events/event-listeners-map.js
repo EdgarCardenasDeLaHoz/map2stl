@@ -171,9 +171,19 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     });
 
     document.getElementById('showTerrainOverlay')?.addEventListener('change', e => {
-        window.toggleTerrainOverlay?.(e.target.checked);
-        window.updateFloatingTerrainButton?.(e.target.checked);
-        window.showToast?.(e.target.checked ? 'Terrain relief enabled' : 'Terrain relief disabled', 'info');
+        const on = e.target.checked;
+        window.toggleTerrainOverlay?.(on);
+        window.updateFloatingTerrainButton?.(on);
+        // The Explore tab's settings popover drives the same overlay through its
+        // own checkbox, and the floating button routes through this one, so
+        // clicking the button used to leave the popover reading "off" with its
+        // opacity slider hidden. Assign rather than dispatch, so the two
+        // checkboxes cannot ping-pong through each other's change handlers.
+        const exploreCb = document.getElementById('showTerrainOverlayExplore');
+        if (exploreCb) exploreCb.checked = on;
+        const exploreRow = document.getElementById('terrainOpacityRowExplore');
+        if (exploreRow) exploreRow.style.display = on ? 'flex' : 'none';
+        window.showToast?.(on ? 'Terrain relief enabled' : 'Terrain relief disabled', 'info');
     });
     document.getElementById('floatingTerrainToggle')?.addEventListener('click', () => {
         const cb = document.getElementById('showTerrainOverlay');
@@ -274,6 +284,10 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     terrainCheckboxExplore?.addEventListener('change', () => {
         const on = terrainCheckboxExplore.checked;
         window.toggleTerrainOverlay?.(on);
+        // Mirror of the #showTerrainOverlay handler above. The floating button is
+        // the same control by another name, so it has to follow this checkbox as
+        // well; without it the button stayed unlit over a visible overlay.
+        window.updateFloatingTerrainButton?.(on);
         if (terrainRowExplore) terrainRowExplore.style.display = on ? 'flex' : 'none';
         const editCb = document.getElementById('showTerrainOverlay');
         if (editCb) editCb.checked = on;
@@ -464,13 +478,7 @@ window._setupBboxListeners = function _setupBboxListeners() {
         window.setSelectedRegion?.(selectedRegion);
         window.appState.selectedRegion = selectedRegion;
         window.appState.currentDemBbox = { north: nc, south: sc, east: ec, west: wc };
-        const _map = window.getMap?.();
-        const _bb = window.getBoundingBox?.();
-        if (_bb && _map) _map.removeLayer(_bb);
-        const newBb = L.rectangle([[sc, wc], [nc, ec]],
-            { color: '#e74c3c', weight: 2, fillOpacity: 0.05 });
-        if (_map) newBb.addTo(_map);
-        window.setBoundingBox?.(newBb);
+        window.setBboxRectangle?.(nc, sc, ec, wc);
         window.clearLayerCache?.();
         window.loadAllLayers?.();
     });
@@ -499,18 +507,9 @@ window._setupBboxListeners = function _setupBboxListeners() {
             if (eEl) eEl.style.borderColor = lonOk ? '' : '#e74c3c';
             if (wEl) wEl.style.borderColor = lonOk ? '' : '#e74c3c';
             if (!latOk || !lonOk) return;
-            const _map = window.getMap?.();
-            const _bb = window.getBoundingBox?.();
-            if (!_map) return;
-            if (_bb) {
-                // Update existing rectangle in-place (no layer churn)
-                _bb.setBounds([[s, w], [n, e]]);
-            } else {
-                const newBb = L.rectangle([[s, w], [n, e]],
-                    { color: '#e74c3c', weight: 2, fillOpacity: 0.05 });
-                newBb.addTo(_map);
-                window.setBoundingBox?.(newBb);
-            }
+            // Updates the rectangle in place, so typing does not churn a layer
+            // per keystroke.
+            window.setBboxRectangle?.(n, s, e, w);
         });
     });
 

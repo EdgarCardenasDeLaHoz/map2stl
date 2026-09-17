@@ -137,6 +137,35 @@ window.api = (() => {
     // -------------------------------------------------------------------------
 
     /**
+     * Describe a failed response using the server's own words where it has any.
+     *
+     * Our routers answer with {error: "..."}, but anything FastAPI raises itself
+     * answers with `detail` instead — a string for HTTPException, and a list of
+     * per-field objects for a 422 request-validation failure. Reading only
+     * `error` reduced both of those to "HTTP 422 Unprocessable Entity", which
+     * names neither the field nor the problem.
+     *
+     * @param {Response} resp
+     * @param {any} data - Already-parsed body: an object for JSON, a Blob otherwise.
+     * @returns {string} A message fit to show the user.
+     */
+    function _describeFailure(resp, data) {
+        const detail = data && data.detail;
+        if (data && typeof data.error === 'string' && data.error) return data.error;
+        if (typeof detail === 'string' && detail) return detail;
+        if (Array.isArray(detail) && detail.length) {
+            // loc is like ["body", "model_height"]; drop the first element, which
+            // only says which part of the request the field lives in.
+            const first = detail[0] || {};
+            const field = Array.isArray(first.loc) ? first.loc.slice(1).join('.') : '';
+            const msg = first.msg || 'invalid value';
+            const more = detail.length > 1 ? ` (and ${detail.length - 1} more)` : '';
+            return (field ? `${field}: ${msg}` : msg) + more;
+        }
+        return `HTTP ${resp.status} ${resp.statusText}`;
+    }
+
+    /**
      * Fetch a URL, parse JSON, return { data, error }.
      * Never throws — always returns an object.
      * In dev mode, validates JSON responses against OpenAPI schema.
@@ -155,8 +184,7 @@ window.api = (() => {
                 data = await resp.blob();
             }
             if (!resp.ok) {
-                const msg = (data && data.error) || `HTTP ${resp.status} ${resp.statusText}`;
-                return { data: null, error: msg };
+                return { data: null, error: _describeFailure(resp, data) };
             }
             // Dev-mode schema validation (non-blocking)
             if (_devValidation && _openApiSchema && typeof data === 'object') {
@@ -216,6 +244,9 @@ window.api = (() => {
 
         /** GET /api/terrain/hydrology?{params} */
         hydrology: (params, signal) => _fetch(`/api/terrain/hydrology?${params}`, signal ? { signal } : {}),
+
+        /** GET /api/terrain/trails?{params} */
+        trails: (params, signal) => _fetch(`/api/terrain/trails?${params}`, signal ? { signal } : {}),
 
         /** GET /api/terrain/satellite?{params} */
         satellite: (params, signal) => _fetch(`/api/terrain/satellite?${params}`, signal ? { signal } : {}),

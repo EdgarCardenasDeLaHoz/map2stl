@@ -1,45 +1,98 @@
 """skyline._core.height — extracted from pipeline.py (A1 split)."""
 from __future__ import annotations
-from collections import OrderedDict as _OrderedDict
 
 import logging
 import math
 import os
-from dataclasses import dataclass, replace
-from pathlib import Path
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import replace
 
-import cv2
 import numpy as np
-from scipy.ndimage import gaussian_filter1d, median_filter, uniform_filter1d
-from scipy.optimize import linear_sum_assignment
-from scipy.signal import find_peaks
-from shapely.geometry import shape
 
 # F-CLEAN14: the F-SKY12 depth except-branches reference ``logger`` but the
 # module never defined one (latent NameError, only reachable on a depth-module
 # failure). Defined here so those branches log instead of crashing.
 logger = logging.getLogger(__name__)
 
-from .types import BuildingRecord, CapturedView, RegisteredBuildingEstimate, Viewpoint
-from .projection import _building_projected_x_range, _focal_length_px
-from .segmentation import _neural_sky_and_building_masks
-from .skyline import (_building_base_y_from_mask, _building_roof_y_from_mask,
-                      _floor_period_for_building, _footprint_roof_y_from_mask)
+from .projection import _building_projected_x_range, _focal_length_px  # noqa: E402
+from .segmentation import _neural_sky_and_building_masks  # noqa: E402
+from .skyline import (  # noqa: E402
+    _building_base_y_from_mask,
+    _building_roof_y_from_mask,
+    _floor_period_for_building,
+    _footprint_roof_y_from_mask,
+)
+from .types import BuildingRecord, CapturedView, RegisteredBuildingEstimate, Viewpoint  # noqa: E402
+
+
+def _tag_filter_enabled() -> bool:
+    """Whether per-view estimates far from the OSM height tag are dropped.
+
+    On by default — the tag really is the strongest per-building constraint the
+    pipeline has, and the filter measurably tightens the aggregate. But it also
+    makes any accuracy figure computed over tagged buildings partly
+    self-fulfilling, because the predictions that would have disagreed were
+    removed on the strength of the same tag they are then scored against. Set
+    ``SKYLINE_TAG_FILTER=0`` to measure the pipeline's unaided error, e.g. when
+    scoring against an independent source such as a registered vendor plate.
+    """
+    return os.environ.get("SKYLINE_TAG_FILTER", "1").strip().lower() not in (
+        "0", "false", "no", "off")
+
+
+def _ground_elev_m(building: BuildingRecord, camera_elev_m: float) -> float:
+    """Ground elevation to subtract from a building's absolute rooftop z.
+
+    The pinhole math works in absolute elevation: the camera sits at
+    ``camera_elev_m + camera_height_m`` above sea level, and a building's
+    height above its own base is ``rooftop_z - ground_z``. That only works
+    when both sides use the same datum.
+
+    Per-building terrain is expensive (one elevation lookup per centroid) and
+    is currently not fetched by the region pipeline, so ``terrain_elev_m``
+    is left at its 0.0 placeholder. Subtracting that placeholder from an
+    absolute rooftop z adds ``camera_elev_m`` to every height — harmless at
+    sea level (Cartagena), catastrophic anywhere elevated (Denver +1600 m,
+    Bogotá +2640 m, where every estimate then fails the plausibility gates
+    and the region yields no heights at all).
+
+    So: use the measured terrain when we have it, and otherwise assume the
+    building stands on the camera's own ground plane, which cancels
+    ``camera_elev_m`` out of the arithmetic entirely.
+    """
+    if getattr(building, "terrain_known", False):
+        return float(building.terrain_elev_m)
+    return float(camera_elev_m)
+
 
 def augment_estimates_with_depth(
     image_rgb: np.ndarray,
     estimates: list[RegisteredBuildingEstimate],
-    viewpoint: "Viewpoint",
+    viewpoint: Viewpoint,
     camera_height_m: float = 1.7,
+    ground_offsets_m: dict[str, float] | None = None,
 ) -> list[RegisteredBuildingEstimate]:
     """F-SKY12: augment per-view estimates with depth-derived heights.
 
     Runs Depth Anything V2 once on the view image, calibrates relative
-    depth to metres using each estimate's ``forward_m`` as an anchor at
-    its ``(x_px, y_px)``, and computes a second height estimate at the
-    silhouette-top pixel via pinhole geometry. Sets ``depth_height_m``
-    and ``depth_disagreement`` on each returned estimate.
+    depth to metres against each estimate's known ``forward_m``, and
+    computes a second height estimate via pinhole geometry: the ray angle
+    from the silhouette-top pixel, the distance from a facade pixel in the
+    same column. Sets ``depth_height_m`` and ``depth_disagreement`` on each
+    returned estimate.
+
+    Calibration anchors sit on the **facade**, at the row where the sight
+    line is horizontal, not at the silhouette top. At the horizontal row a
+    z-depth *is* the ground distance, so it can be equated with
+    ``forward_m`` directly. The silhouette top cannot: it is the last
+    building pixel before sky, so DA2 often reports the far background
+    there, and regressing background depth against near footprint
+    distances mis-scales the whole map.
+
+    ``ground_offsets_m`` maps feature_id to ``camera_ground - building_ground``
+    in metres. Pass it when per-building terrain is known; omit it and the
+    depth estimate assumes both stand on the same ground plane, matching
+    what the geometric path does under the same conditions.
 
     Heavy: DA2 inference is ~1–2 s on CPU. Callers should only invoke
     this when the per-view PDF page needs the diagnostic. Returns a new
@@ -66,16 +119,38 @@ def augment_estimates_with_depth(
         logger.warning("F-SKY12 DA2 inference failed: %s", exc)
         return estimates
 
-    # Build anchors from the estimates: (row, col, distance_m). Use the
-    # silhouette-top pixel as the sample location and forward_m as the
-    # known distance to the matched building.
+    fy = _focal_length_px(viewpoint)
+    cy = float(viewpoint.image_height) / 2.0
+    pitch_rad = math.radians(float(viewpoint.pitch))
+    d_h, d_w = depth_rel.shape[:2]
+
+    # Row whose sight line is horizontal. Solving
+    # ``atan((cy - y) / fy) + pitch = 0`` gives ``y = cy + fy*tan(pitch)``.
+    # Scale from viewpoint pixels into the depth map's own resolution — DA2
+    # may return a different size than the source view.
+    y_scale = float(d_h) / float(max(1, viewpoint.image_height))
+    x_scale = float(d_w) / float(max(1, viewpoint.image_width))
+    y_horizon = (cy + fy * math.tan(pitch_rad)) * y_scale
+
+    # Build calibration anchors: (row, col, distance_m) on the facade.
     anchors: list[tuple[int, int, float]] = []
     for est in estimates:
-        if est.forward_m > 0.0 and 0.0 <= est.y_px and 0.0 <= est.x_px:
-            anchors.append(
-                (int(round(est.y_px)), int(round(est.x_px)), float(est.forward_m))
-            )
+        if est.forward_m <= 0.0 or est.x_px < 0.0 or est.y_px < 0.0:
+            continue
+        col = int(round(est.x_px * x_scale))
+        row = int(round(y_horizon))
+        if not (0 <= col < d_w and 0 <= row < d_h):
+            continue
+        # The anchor must land on the facade, i.e. strictly below this
+        # building's own roof line. When the roof is already below the
+        # horizon the horizontal row shows ground or another building, so
+        # skip rather than poison the fit with a wrong distance.
+        if row <= int(round(est.y_px * y_scale)) + 2:
+            continue
+        anchors.append((row, col, float(est.forward_m)))
     if not anchors:
+        logger.debug(
+            "F-SKY12: no facade anchors on the horizontal row; skipping depth")
         return estimates
 
     try:
@@ -84,17 +159,27 @@ def augment_estimates_with_depth(
         logger.warning("F-SKY12 depth calibration failed: %s", exc)
         return estimates
 
-    fy = _focal_length_px(viewpoint)
-    cy = float(viewpoint.image_height) / 2.0
-
+    offsets = ground_offsets_m or {}
+    horizon_row = int(round(y_horizon))
     out: list[RegisteredBuildingEstimate] = []
     for est in estimates:
+        col = int(round(est.x_px * x_scale))
+        roof_row = int(round(est.y_px * y_scale))
+        # Angle from the roof pixel, distance from a facade pixel in the
+        # same column. Sampling depth at the roof reads whatever the model
+        # hallucinated for the sky just past the silhouette — the same
+        # background bleed the anchor selection above avoids. Fall back to
+        # the roof pixel when the horizontal row is not on this facade.
+        sample = (col, horizon_row) if horizon_row > roof_row + 2 else None
         h_depth = depth_height_from_segment(
             depth_m,
-            (int(round(est.x_px)), int(round(est.y_px))),
-            fy=fy,
-            cy=cy,
+            (col, roof_row),
+            fy=fy * y_scale,
+            cy=cy * y_scale,
             camera_height_m=camera_height_m,
+            pitch_rad=pitch_rad,
+            ground_offset_m=float(offsets.get(est.feature_id, 0.0)),
+            depth_sample_xy=sample,
         )
         disagree = compare_heights(est.estimated_height_m, h_depth)
         out.append(
@@ -175,6 +260,10 @@ def estimate_heights_from_registration(
                 saver(view_name, captured.image, contour, building_mask)
     for building in buildings:
         fid = building.feature_id
+        # Ground elevation for this building, on the same datum as cam_z.
+        # Falls back to the camera's ground when per-building terrain was
+        # never fetched — see _ground_elev_m.
+        ground_z = _ground_elev_m(building, camera_elev_m)
         if trace is not None:
             trace(
                 "building_start",
@@ -184,6 +273,8 @@ def estimate_heights_from_registration(
                 tag_h=building.height_tag_m,
                 area_m2=building.area_m2,
                 terrain_elev_m=float(building.terrain_elev_m),
+                terrain_known=bool(getattr(building, "terrain_known", False)),
+                ground_z_m=float(ground_z),
             )
         proj = projections.get(fid)
         if not proj:
@@ -255,9 +346,10 @@ def estimate_heights_from_registration(
         # Footprint-driven roof sampling: use the FULL projected x-range of
         # this building's footprint instead of just the centroid column. A
         # narrow building gets a tight column band; a wide one gets a wide
-        # one. The footprint also gives us a coverage check — if < 25 % of
-        # the projected range has building-mask pixels, this building is
-        # occluded or off-frame, skip the estimate.
+        # one. _footprint_roof_y_from_mask applies its own coverage gate
+        # (mean building rows per column, >= 8) and returns None when the
+        # projected range lands on water or sky; `coverage` is that mean,
+        # reported here for the trace only.
         x_range = _building_projected_x_range(
             building, captured.viewpoint, best_offset, contour.size)
         if x_range is not None:
@@ -327,8 +419,7 @@ def estimate_heights_from_registration(
                                 (cy - contour_top_y) / f_px) + pitch_rad
                             top_at_contour = forward * \
                                 math.tan(angle_at_contour)
-                            implied_h = cam_z + top_at_contour - float(
-                                building.terrain_elev_m)
+                            implied_h = cam_z + top_at_contour - ground_z
                             implied_h_val = float(implied_h)
                             # 1c: require SegFormer-sky pixels just above the
                             # contour roof. Without sky there, the contour is
@@ -372,8 +463,8 @@ def estimate_heights_from_registration(
         angle_rad = math.atan((cy - y_px) / f_px) + pitch_rad
         top_above_camera = forward * math.tan(angle_rad)
         # Height of the building above its own base (ground at footprint):
-        # top_z = cam_z + forward*tan(angle); height_above_base = top_z - bld_terrain_z
-        height_m = cam_z + top_above_camera - float(building.terrain_elev_m)
+        # top_z = cam_z + forward*tan(angle); height_above_base = top_z - ground_z
+        height_m = cam_z + top_above_camera - ground_z
         if trace is not None:
             trace(
                 "pinhole_math",
@@ -415,10 +506,15 @@ def estimate_heights_from_registration(
         # is far from the wide segment).
         max_plausible_top = float(max_plausible_height_m)
         min_plausible_top = 2.0
+        # Invert height_m = cam_z + forward*tan(angle) - ground_z for angle:
+        #   tan(angle) = (H + ground_z - cam_z) / forward
+        # The terrain term is ADDED here, not subtracted (it was subtracted
+        # before, which double-counted the ground offset and squeezed the
+        # gate by 2 x terrain_elev on any sloped site).
         max_top_angle = math.atan(
-            (max_plausible_top - cam_z - float(building.terrain_elev_m)) / forward)
+            (max_plausible_top + ground_z - cam_z) / forward)
         min_top_angle = math.atan(
-            (min_plausible_top - cam_z - float(building.terrain_elev_m)) / forward)
+            (min_plausible_top + ground_z - cam_z) / forward)
         # Convert angle bounds back to y_px bounds (inverted: smaller y = higher).
         min_y_for_building = cy - f_px * math.tan(max_top_angle - pitch_rad)
         max_y_for_building = cy - f_px * math.tan(min_top_angle - pitch_rad)
@@ -458,7 +554,7 @@ def estimate_heights_from_registration(
         # multi-square-metre footprint that predicts <3 m almost always
         # means roof_y was sampled in water/sky, not on the building.
         pred_capped = max(height_m, 0.0)
-        if building.height_tag_m is not None:
+        if building.height_tag_m is not None and _tag_filter_enabled():
             tag_h = float(building.height_tag_m)
             if tag_h >= 3.0:
                 diff = abs(pred_capped - tag_h)
@@ -581,7 +677,7 @@ def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) 
     for feature_id, items in grouped.items():
         heights = np.asarray(
             [item.estimated_height_m for item in items], dtype=np.float32)
-        confidences = np.asarray(
+        _confidences = np.asarray(
             [item.confidence for item in items], dtype=np.float32)
         if heights.size == 0:
             continue
@@ -613,7 +709,7 @@ def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) 
                 continue
             v_threshold = 2.5 * v_mad
             kept = [
-                it for it, h in zip(seed_its, view_heights)
+                it for it, h in zip(seed_its, view_heights, strict=False)
                 if abs(float(h) - v_med) <= v_threshold
             ]
             if kept and len(kept) < len(seed_its):
@@ -688,7 +784,7 @@ def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) 
             and _it.floor_confidence >= 0.30
             and _it.inferred_height_m > 0.0
         ]
-        f1_height_m: "float | None" = None
+        f1_height_m: float | None = None
         f1_n_views: int = 0
         if len(_f1_valid) >= 2:
             f1_height_m = float(np.median(np.asarray(_f1_valid, dtype=np.float32)))
@@ -706,7 +802,7 @@ def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) 
             and getattr(_it, "depth_disagreement", None)
             and _it.depth_height_m > _it.estimated_height_m * 1.30
         ]
-        depth_rescue_height_m: "float | None" = None
+        depth_rescue_height_m: float | None = None
         if len(_d_rescue) >= 2:
             depth_rescue_height_m = float(
                 np.median(np.asarray(_d_rescue, dtype=np.float32)))
@@ -746,7 +842,9 @@ def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) 
                 "median_height_m": median,
                 "weighted_height_m": weighted,
                 "mad_m": spread,
-                "mean_confidence": float(np.mean(eff_confidences)),
+                # Reported from the same weights the weighted mean uses, so
+                # a depth-downweighted view shows up in both.
+                "mean_confidence": float(np.mean(eff_confidences_adj)),
                 "per_seed_median_m": per_seed_median,
                 "seed_disagreement_m": seed_disagreement_m,
                 "seed_std_m": seed_std_m,

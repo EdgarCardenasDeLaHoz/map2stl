@@ -150,6 +150,31 @@ Phase A is successful if:
 - Plug into F-SKY5 (MobileSAM) once that lands so depth is
   sampled within instance masks instead of OSM footprints.
 
+## As built — corrections to steps 3 and 4 (2026-08-28)
+
+The plan's pixel choice was wrong in a way that only showed up under audit, and
+the implementation now differs from it:
+
+- **Anchors sit on the horizon row, not on the silhouette top.** The plan equated
+  the depth at a matched building's top pixel with the known distance to its
+  footprint. Those are different quantities: `forward_m` is a horizontal ground
+  distance, so only a pixel whose sight line is horizontal has a z-depth equal to
+  it. Worse, the silhouette top is the last building pixel before sky, where a
+  monocular model routinely reports the far background — so the fit regressed
+  background depth against near footprint distances and mis-scaled the whole map.
+  Anchors are now taken at `y = cy + fy*tan(pitch)`, in the matched building's own
+  column, and skipped when that row is not on the facade.
+- **The height reads two different pixels.** The ray angle still comes from the
+  silhouette top (that is the roof), but the distance comes from a facade pixel via
+  the new `depth_sample_xy` parameter, for the same background-bleed reason.
+- **The trig gained two terms the plan omitted**: the view's own camera pitch
+  (seed capture tilts up for tall buildings, so ignoring it under-read every
+  pitched view) and a `ground_offset_m` for camera-versus-building terrain.
+
+Known remaining approximation: the calibrated depth is treated as a horizontal
+distance when it is really slant range. See `docs/issues.md` § "Active Technical
+Debt".
+
 ## References
 
 - `city2stl/height/predict.py:47-125` — existing DA2 loader

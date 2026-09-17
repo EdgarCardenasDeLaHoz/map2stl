@@ -325,6 +325,22 @@ function collectAllSettings() {
             order_exponent: _flt('hydroOrderExponent', 1.5),
             width_factor: _flt('hydroWidthFactor', 0.5),
         },
+        trails: {
+            source: _str('trailsSource', 'all'),
+            dim: _int('trailsDim', _int('paramDim', 600)),
+            relief_m: _flt('trailsReliefM', -2.0),
+            width_m: _flt('trailsWidthM', 8.0),
+            // Display-only from here down: these controls live in the Trails
+            // Display view section and repaint the retained payload, but they
+            // are saved with the fetch parameters so one preset restores the
+            // whole layer.
+            show_ski: _chk('trailsShowSki', true),
+            show_hiking: _chk('trailsShowHiking', true),
+            show_areas: _chk('trailsShowAreas', true),
+            color_by_difficulty: _chk('trailsColorByDifficulty', false),
+            ski_color: _str('trailsSkiColor', '#28bee6'),
+            hiking_color: _str('trailsHikingColor', '#eb8228'),
+        },
     };
 }
 
@@ -352,7 +368,25 @@ function applyAllSettings(s) {
     if (dem.depth_scale != null) set('paramDepthScale', dem.depth_scale);
     if (dem.water_scale != null) set('paramWaterScale', dem.water_scale);
     if (dem.subtract_water != null) setChk('paramSubtractWater', dem.subtract_water);
-    if (dem.dem_source != null) set('paramDemSource', dem.dem_source);
+    // Saved settings outlive the data behind them: a region stored months ago
+    // can name a source whose tiles or API key are gone. Restoring it anyway
+    // pins the select to an unavailable option (disabled blocks the user, not
+    // an assignment) and every fetch comes back flat, so fall back to a source
+    // that still works.
+    if (dem.dem_source != null) {
+        const sel = _get('paramDemSource');
+        const wanted = sel?.querySelector(`option[value="${CSS.escape(String(dem.dem_source))}"]`);
+        if (sel && wanted?.disabled) {
+            const usable = sel.querySelector('option:not(:disabled)');
+            if (usable) {
+                console.warn(
+                    `Saved DEM source "${dem.dem_source}" is unavailable (${wanted.title || 'no data'}); using "${usable.value}".`);
+                sel.value = usable.value;
+            }
+        } else {
+            set('paramDemSource', dem.dem_source);
+        }
+    }
 
     // projection group — new: paramMaintainDimensions
     const projVal = proj.projection ?? s.projection;
@@ -452,6 +486,24 @@ function applyAllSettings(s) {
     if (hydro.min_order != null) set('hydroMinOrder', hydro.min_order);
     if (hydro.order_exponent != null) set('hydroOrderExponent', hydro.order_exponent);
     if (hydro.width_factor != null) set('hydroWidthFactor', hydro.width_factor);
+
+    // trails group
+    const trails = s.trails || {};
+    if (trails.source != null) set('trailsSource', trails.source);
+    if (trails.dim != null) set('trailsDim', trails.dim);
+    else if (dem.dim != null) set('trailsDim', dem.dim);
+    if (trails.relief_m != null) set('trailsReliefM', trails.relief_m);
+    if (trails.width_m != null) set('trailsWidthM', trails.width_m);
+    if (trails.show_ski != null) setChk('trailsShowSki', !!trails.show_ski);
+    if (trails.show_hiking != null) setChk('trailsShowHiking', !!trails.show_hiking);
+    if (trails.show_areas != null) setChk('trailsShowAreas', !!trails.show_areas);
+    if (trails.color_by_difficulty != null) {
+        setChk('trailsColorByDifficulty', !!trails.color_by_difficulty);
+    }
+    if (trails.ski_color != null) set('trailsSkiColor', trails.ski_color);
+    if (trails.hiking_color != null) set('trailsHikingColor', trails.hiking_color);
+    // A preset that changes how trails look must show it without a refetch.
+    window.refreshTrailsCategories?.();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -467,7 +519,8 @@ async function saveRegionSettings() {
     try {
         const { error } = await window.api.regions.saveSettings(region.name, settings);
         if (!error) {
-            if (statusEl) { statusEl.textContent = 'Saved ✓'; setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 2000); }
+            _setDirty(false);
+            if (statusEl) { statusEl.textContent = 'Saved ✓'; statusEl.style.color = '#4CAF50'; setTimeout(() => { if (statusEl && !_dirty) statusEl.textContent = ''; }, 2000); }
             window.showToast('Settings saved for ' + region.name, 'success');
         } else {
             window.showToast('Save failed: ' + error, 'error');
@@ -502,10 +555,15 @@ async function loadAndApplyRegionSettings(regionName) {
         if (!error && data) {
             const merged = defaults ? _mergeSettings(defaults, data.settings || {}) : (data.settings || {});
             applyAllSettings(merged);
+            // applyAllSettings writes to the controls, which fires the same
+            // delegated input/change listeners a user edit would. Clear the
+            // flag afterwards so freshly-loaded settings do not read as unsaved.
+            setTimeout(() => _setDirty(false), 0);
             return true;
         }
         if (defaults) {
             applyAllSettings(defaults);
+            setTimeout(() => _setDirty(false), 0);
             return false;
         }
     } catch (_) { /* network error — use defaults */ }
@@ -564,16 +622,46 @@ function deleteSelectedPreset() {
 
 let _autoSaveTimer = null;
 
+/** True when a control has changed since the last successful save. */
+let _dirty = false;
+
+/**
+ * Reflect unsaved state in #saveSettingsStatus.
+ *
+ * Settings previously changed with no visible acknowledgement at all: with
+ * auto-save off (the old default) an edit was simply lost on reload, and with
+ * it on there was no way to tell a saved state from a pending one. The status
+ * line now always says which of the three it is.
+ */
+function _setDirty(dirty) {
+    _dirty = dirty;
+    const status = document.getElementById('saveSettingsStatus');
+    if (!status) return;
+    if (dirty) {
+        status.textContent = 'Unsaved changes';
+        status.style.color = '#f90';
+    } else if (status.textContent === 'Unsaved changes') {
+        status.textContent = '';
+    }
+}
+
 function setupAutoSave() {
-    // Restore preference from localStorage
+    // Restore preference from localStorage.
     const chk = document.getElementById('autoSaveEnabled');
     if (!chk) return;
     try {
-        chk.checked = localStorage.getItem('strm2stl_autoSave') === 'true';
-    } catch (_) { }
+        // Default ON. It used to default OFF, which meant every setting a user
+        // touched was silently discarded on reload unless they found this
+        // checkbox first. Only an explicit opt-out turns it back off.
+        chk.checked = localStorage.getItem('strm2stl_autoSave') !== 'false';
+    } catch (_) {
+        chk.checked = true;
+    }
 
     chk.addEventListener('change', () => {
         try { localStorage.setItem('strm2stl_autoSave', chk.checked); } catch (_) { }
+        // Turning auto-save on should flush whatever is already pending.
+        if (chk.checked && _dirty) _scheduleAutoSave();
     });
 
     // Delegated listener on the settings container
@@ -582,32 +670,45 @@ function setupAutoSave() {
 
     container.addEventListener('change', _scheduleAutoSave);
     container.addEventListener('input', _scheduleAutoSave);
+
+    // Last line of defence: with auto-save off, or with a save still pending
+    // in the 3s debounce window, warn before the tab goes away.
+    window.addEventListener('beforeunload', (e) => {
+        if (!_dirty || !window.appState?.selectedRegion) return;
+        e.preventDefault();
+        e.returnValue = '';   // required by Chrome to show the native prompt
+        return '';
+    });
 }
 
 function _scheduleAutoSave(e) {
-    const chk = document.getElementById('autoSaveEnabled');
-    if (!chk?.checked) return;
-    // Don't auto-save when there's no region selected
+    // Don't track or save when there's no region to save to.
     if (!window.appState?.selectedRegion) return;
     // Ignore the auto-save checkbox itself
     if (e?.target?.id === 'autoSaveEnabled') return;
+
+    _setDirty(true);
+
+    const chk = document.getElementById('autoSaveEnabled');
+    if (!chk?.checked) return;
 
     clearTimeout(_autoSaveTimer);
     _autoSaveTimer = setTimeout(async () => {
         const status = document.getElementById('saveSettingsStatus');
         try {
             await saveRegionSettings();
+            _setDirty(false);
             if (status) {
                 status.textContent = 'Auto-saved ✓';
                 status.style.color = '#4CAF50';
-                setTimeout(() => { status.textContent = ''; }, 2000);
+                setTimeout(() => { if (!_dirty) status.textContent = ''; }, 2000);
             }
         } catch (err) {
             console.warn('Auto-save failed:', err);
+            // Stay dirty — the unload guard should still fire.
             if (status) {
-                status.textContent = 'Auto-save failed';
+                status.textContent = 'Auto-save failed — use 💾 Save';
                 status.style.color = '#f44';
-                setTimeout(() => { status.textContent = ''; }, 3000);
             }
         }
     }, 3000);

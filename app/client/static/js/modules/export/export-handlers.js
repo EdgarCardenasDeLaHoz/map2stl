@@ -8,6 +8,7 @@
  *   downloadSTL()                     — POST to /api/export/stl → download
  *   downloadModel(format)             — POST to /api/export/{format} → download
  *   downloadCrossSection()            — POST to /api/export/crosssection → download
+ *   cancelExport()                    — abandon the in-flight export (client-side)
  *
  * External dependencies:
  *   window.appState.lastDemData
@@ -51,17 +52,25 @@ function _progressEl() {
         text: document.getElementById('modelProgressText'),
         set(pct, msg) {
             if (this.wrap) this.wrap.classList.remove('hidden');
-            if (this.bar) this.bar.style.width = pct + '%';
+            if (this.bar) {
+                this.bar.style.width = pct + '%';
+                // Clear any red left by a previous failed export.
+                this.bar.style.backgroundColor = '';
+            }
             if (this.text) this.text.textContent = msg;
         },
         done(msg) { this.set(100, msg); setTimeout(() => { if (this.wrap) this.wrap.classList.add('hidden'); }, 1000); },
+        /** Show a failure and leave it on screen.
+         *
+         * This used to auto-hide after 2s, which meant a failed export could
+         * erase its own only explanation before the user looked back at the
+         * tab. The bar now stays until the next export starts (`set()` clears
+         * the red), and the caller also raises a toast.
+         */
         error(msg) {
+            if (this.wrap) this.wrap.classList.remove('hidden');
             if (this.text) this.text.textContent = msg;
-            if (this.bar) this.bar.style.backgroundColor = '#e74c3c';
-            setTimeout(() => {
-                if (this.wrap) this.wrap.classList.add('hidden');
-                if (this.bar) this.bar.style.backgroundColor = '';
-            }, 2000);
+            if (this.bar) { this.bar.style.width = '100%'; this.bar.style.backgroundColor = '#e74c3c'; }
         }
     };
 }
@@ -74,9 +83,19 @@ function _regionName() {
 /**
  * Return bbox + DEM settings so the server can look up the cached DEM
  * instead of receiving the full array over the wire.
+ *
+ * These have to hash to the same cache key the server used when it *wrote*
+ * the DEM (see app/server/core/dem_cache.py), so the settings must describe
+ * the DEM that is currently loaded — not whatever the form says right now.
+ * loadDEM() snapshots its own request into appState.lastDemRequest for
+ * exactly this purpose; the DOM read below is only a fallback for DEMs
+ * loaded before that snapshot existed, and its defaults are kept in step
+ * with DEM_SETTING_DEFAULTS on the server.
  */
 function _demSettings() {
-    const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion || {};
+    const snapshot = window.appState?.lastDemRequest;
+    const bbox = snapshot?.bbox || window.appState?.currentDemBbox
+        || window.appState?.selectedRegion || {};
     const p = window.appState?.demParams || {};
     const proj = window.getProjectionParams();
     const settings = {
@@ -84,8 +103,8 @@ function _demSettings() {
             north: bbox.north, south: bbox.south,
             east: bbox.east, west: bbox.west,
         },
-        dem: {
-            dim: parseInt(document.getElementById('paramDim')?.value) || 200,
+        dem: snapshot?.dem ? { ...snapshot.dem } : {
+            dim: parseInt(document.getElementById('paramDim')?.value, 10) || 600,
             dem_source: document.getElementById('paramDemSource')?.value || 'local',
             projection: proj.projection,
             depth_scale: p.depthScale ?? 0.5,
@@ -96,24 +115,36 @@ function _demSettings() {
             show_sat: false,
         },
     };
-    // Composite DEM panel (composite-dem.js): applyCompositeToDem() already
-    // computed the merged values client-side and wrote them into
-    // lastDemData — send them inline so export uses exactly what the
-    // preview shows, instead of resolve_dem_from_cache() re-reading the
-    // plain (non-composite) DEM from the server-side cache.
+    // Composite DEM panel (composite-dem.js). Preferred path: send the layer
+    // spec and let the server add and subtract the layers itself, so the mesh
+    // and the export are built from the server's arithmetic rather than from
+    // an array the browser shipped. The inline values are the fallback for a
+    // channel the server cannot build yet (land cover, vegetation, trails) —
+    // exporting the spec then would silently drop it.
     if (window.appState?._newCompositeApplied) {
-        const dem = window.appState?.lastDemData;
-        if (dem?.values?.length) {
-            settings.dem_values = Array.from(dem.values);
-            settings.height = dem.height;
-            settings.width = dem.width;
+        const spec = window.appState?.compositeLayerSpec
+            || window.buildCompositeLayerSpec?.();
+        if (spec?.layers?.length && !spec.unsupported?.length) {
+            settings.composite_layers = spec.layers;
+            settings.composite_dim = settings.dem.dim;
+        } else {
+            if (spec?.unsupported?.length) {
+                console.info('[export] composite computed in-browser — no server '
+                    + `source for: ${spec.unsupported.join(', ')}`);
+            }
+            const dem = window.appState?.lastDemData;
+            if (dem?.values?.length) {
+                settings.dem_values = Array.from(dem.values);
+                settings.height = dem.height;
+                settings.width = dem.width;
+            }
         }
     }
 
     // Legacy merge panel: if the user has configured + applied a composite
     // there, send the spec so the server rebuilds the same merged DEM.
     const compositeSpec = window.getActiveCompositeSpec?.();
-    if (compositeSpec) {
+    if (compositeSpec && !settings.composite_layers) {
         settings.composite_layers = compositeSpec;
         settings.composite_dim = settings.dem.dim;
     }
@@ -149,21 +180,49 @@ function _exportParams() {
 // Async export helper (start → poll → download)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// A running export can only be abandoned client-side — the server task has no
+// cancel route — so "cancel" means: stop polling, stop waiting, and let the
+// orphaned task expire under the normal TTL sweep.
+let _exportAbort = null;
+
+/** Stop waiting on the in-flight export. Wired to the progress bar's ✕. */
+function cancelExport() {
+    _exportAbort?.abort();
+}
+
+function _setCancelVisible(visible) {
+    document.getElementById('modelProgressCancel')
+        ?.classList.toggle('hidden', !visible);
+}
+
+// Upper bound on how long we will poll before giving up. A stuck task used to
+// spin the 250 ms poll loop forever with no way out; the bound turns that into
+// a visible error the user can act on.
+const _EXPORT_POLL_TIMEOUT_MS = 10 * 60 * 1000;
+
 async function _asyncExport(format) {
     const pr = _progressEl();
     const name = _regionName();
+
+    _exportAbort?.abort();          // supersede any earlier export
+    const abort = new AbortController();
+    _exportAbort = abort;
+    const startedAt = Date.now();
+
     pr.set(0, `Starting ${format.toUpperCase()} export...`);
+    _setCancelVisible(true);
 
     try {
         // 1. Start the export task
         const startResp = await fetch('/api/export/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ format, ..._exportParams() })
+            body: JSON.stringify({ format, ..._exportParams() }),
+            signal: abort.signal,
         });
         if (!startResp.ok) {
-            const err = await startResp.json();
-            throw new Error(err.error || 'Failed to start export');
+            const err = await startResp.json().catch(() => ({}));
+            throw new Error(err.error || err.detail || `Failed to start export (HTTP ${startResp.status})`);
         }
         const { task_id } = await startResp.json();
 
@@ -171,7 +230,14 @@ async function _asyncExport(format) {
         let status = { status: 'running', progress: 0, message: 'Starting...' };
         while (status.status === 'running') {
             await new Promise(r => setTimeout(r, 250));
-            const pollResp = await fetch(`/api/export/status/${encodeURIComponent(task_id)}`);
+            if (abort.signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+            if (Date.now() - startedAt > _EXPORT_POLL_TIMEOUT_MS) {
+                throw new Error(
+                    `Export timed out after ${Math.round(_EXPORT_POLL_TIMEOUT_MS / 60000)} minutes. ` +
+                    'Try a smaller resolution, or check server.log.');
+            }
+            const pollResp = await fetch(
+                `/api/export/status/${encodeURIComponent(task_id)}`, { signal: abort.signal });
             if (!pollResp.ok) throw new Error('Lost connection to export task');
             status = await pollResp.json();
             pr.set(status.progress, status.message);
@@ -183,7 +249,8 @@ async function _asyncExport(format) {
 
         // 3. Download the result
         pr.set(98, `Downloading ${format.toUpperCase()}...`);
-        const dlResp = await fetch(`/api/export/download/${encodeURIComponent(task_id)}`);
+        const dlResp = await fetch(
+            `/api/export/download/${encodeURIComponent(task_id)}`, { signal: abort.signal });
         if (!dlResp.ok) throw new Error('Download failed');
 
         const blob = await dlResp.blob();
@@ -202,8 +269,19 @@ async function _asyncExport(format) {
         }
         pr.done('Complete!');
     } catch (e) {
+        if (e.name === 'AbortError') {
+            pr.set(0, 'Export cancelled.');
+            window.showToast?.('Export cancelled', 'info');
+            return;
+        }
         console.error(`${format} export error:`, e);
-        pr.error('Error: ' + e.message);
+        // Both surfaces: the bar (persistent, next to the button that failed)
+        // and a toast (visible even if the user has switched tabs).
+        pr.error(`${format.toUpperCase()} export failed: ${e.message}`);
+        window.showToast?.(`${format.toUpperCase()} export failed: ${e.message}`, 'error', 6000);
+    } finally {
+        _setCancelVisible(false);
+        if (_exportAbort === abort) _exportAbort = null;
     }
 }
 
@@ -213,21 +291,21 @@ async function _asyncExport(format) {
 
 function downloadSTL() {
     if (!window.appState?.generatedModelData) {
-        window.showToast('Please generate a model first.', 'warning'); return;
+        window.showToast('Load a DEM first - the 3D preview builds from it, and export needs that preview.', 'warning'); return;
     }
     _asyncExport('stl');
 }
 
 function downloadModel(format) {
     if (!window.appState?.generatedModelData) {
-        window.showToast('Please generate a model first.', 'warning'); return;
+        window.showToast('Load a DEM first - the 3D preview builds from it, and export needs that preview.', 'warning'); return;
     }
     _asyncExport(format);
 }
 
 function downloadCrossSection() {
     if (!window.appState?.generatedModelData) {
-        window.showToast('Please generate a model first.', 'warning'); return;
+        window.showToast('Load a DEM first - the 3D preview builds from it, and export needs that preview.', 'warning'); return;
     }
     const cutAxis = document.getElementById('crossSectionAxis')?.value || 'lat';
     const cutValue = parseFloat(document.getElementById('crossSectionValue')?.value);
@@ -250,7 +328,7 @@ function downloadCrossSection() {
             east: ds.bbox.east, west: ds.bbox.west,
             cut_axis: cutAxis,
             cut_value: cutValue,
-            model_height: md.resolution,
+            model_height: md.modelHeight,
             base_height: md.baseHeight,
             exaggeration: md.exaggeration,
             thickness_mm: thickness,
@@ -283,3 +361,4 @@ window._demSettings = _demSettings;
 window.downloadSTL = downloadSTL;
 window.downloadModel = downloadModel;
 window.downloadCrossSection = downloadCrossSection;
+window.cancelExport = cancelExport;

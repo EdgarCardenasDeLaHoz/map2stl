@@ -7,27 +7,31 @@
     <!-- Header ─────────────────────────────────────────────────────────────── -->
     <div class="sidebar-header">
       <div class="sidebar-title">Region Selection</div>
-      <div class="row-gap6">
-      <button class="sidebar-header-action-btn"
-        title="Export saved regions to JSON"
-        @click="exportRegions">
-        Export
-      </button>
-      <button v-show="mode !== 'hidden'" class="sidebar-header-action-btn"
-        title="Import regions from JSON"
-        @click="openImportPicker">
-        Import
-      </button>
+      <div class="row-gap6 sidebar-header-actions">
+        <button class="sidebar-header-action-btn"
+                title="Export saved regions to JSON"
+                @click="exportRegions">
+          Export
+        </button>
+        <button class="sidebar-header-action-btn"
+                title="Import regions from JSON"
+                @click="openImportPicker">
+          Import
+        </button>
         <button class="sidebar-vis-btn" id="bboxVisToggleBtn"
                 title="Show/hide region boxes on map"
                 @click="toggleBboxVis">👁</button>
         <button class="sidebar-toggle-btn" id="sidebarToggleBtn"
-                :title="`${stateLabel} sidebar (${stateDescription})`"
-                :aria-label="`Toggle sidebar: currently ${mode} — ${stateLabel} to ${nextStateDescription}`"
-                @click="cycleSidebar">
-          <span class="state-icon">{{ stateIcon }}</span>
-          <span class="state-label">{{ stateLabel }}</span>
+                :title="`${widthLabel} the region panel`"
+                :aria-label="`${widthLabel} the region panel`"
+                @click="toggleWidth">
+          <span class="state-icon">{{ widthIcon }}</span>
+          <span class="state-label">{{ widthLabel }}</span>
         </button>
+        <button class="sidebar-hide-btn" id="sidebarHideBtn"
+                title="Hide the region panel"
+                aria-label="Hide the region panel"
+                @click="hideSidebar">✕</button>
       </div>
       <input
         ref="regionImportInput"
@@ -73,29 +77,36 @@ const mode       = computed(() => store.sidebarMode);
 const editViewOpen = ref(false);
 const regionImportInput = ref<HTMLInputElement | null>(null);
 
+// `normal` was never emitted, which left the `.sidebar.normal` rules in
+// app.css matching nothing.
 const sidebarClass = computed(() => ({
   expanded: mode.value === 'expanded',
+  normal: mode.value === 'normal',
   collapsed: mode.value === 'hidden',
 }));
 
-const stateIcon  = computed(() => ({ expanded: '⇐', normal: '⇔', hidden: '⇒' }[mode.value]));
-const stateLabel = computed(() => ({ expanded: 'Hide', normal: 'Expand', hidden: 'Show' }[mode.value]));
-const stateDescription = computed(() => ({ expanded: 'Large', normal: 'Normal', hidden: 'Compact' }[mode.value]));
-const nextStateDescription = computed(() => {
-  const next = { expanded: 'Hidden', normal: 'Expanded', hidden: 'Normal' }[mode.value];
-  return next;
-});
+// The panel is on the left, so widening moves its right edge right.
+const widthIcon  = computed(() => (mode.value === 'expanded' ? '«' : '»'));
+const widthLabel = computed(() => (mode.value === 'expanded' ? 'Narrow' : 'Widen'));
 
-function cycleSidebar() {
-  const next: Record<string, 'expanded' | 'normal' | 'hidden'> = {
-    expanded: 'hidden',
-    hidden:   'normal',
-    normal:   'expanded',
-  };
-  setSidebarMode(next[mode.value]);
+// Restored by the floating "Regions" button, so hiding and reopening the panel
+// does not quietly change its width.
+let lastVisibleMode: 'expanded' | 'normal' = 'normal';
+
+// One control for width and one for hiding. The single three-state cycle these
+// replace ran expanded -> hidden -> normal -> expanded, so from the default
+// width the button offering to change the panel made it wider, and hiding took
+// two clicks through a state the user had not asked for.
+function toggleWidth() {
+  setSidebarMode(mode.value === 'expanded' ? 'normal' : 'expanded');
+}
+
+function hideSidebar() {
+  setSidebarMode('hidden');
 }
 
 function setSidebarMode(newMode: 'expanded' | 'normal' | 'hidden') {
+  if (newMode !== 'hidden') lastVisibleMode = newMode;
   store.sidebarMode = newMode;
   // Keep app.js closure in sync until Stage 7
   window.setSidebarState?.(newMode);
@@ -106,15 +117,20 @@ function setSidebarMode(newMode: 'expanded' | 'normal' | 'hidden') {
     openBtn.classList.toggle('hidden', newMode !== 'hidden');
   }
 
-  requestAnimationFrame(() => {
+  // The width transition runs for 300ms. Relaying out only on the next frame
+  // sizes the map to the width the panel is leaving, not the one it is going
+  // to, so do it again once the transition has finished.
+  const relayout = () => {
     (window as any)._globalMap?.invalidateSize?.();
     window.emitStackUpdate?.();
     window.dispatchEvent(new Event('resize'));
-  });
+  };
+  requestAnimationFrame(relayout);
+  window.setTimeout(relayout, 340);
 }
 
 function handleOpenSidebarClick() {
-  setSidebarMode('normal');
+  setSidebarMode(lastVisibleMode);
 }
 
 let _openSidebarButton: HTMLElement | null = null;
@@ -142,6 +158,12 @@ onMounted(() => {
   // Start in normal mode so region selection stays compact by default.
   setSidebarMode('normal');
 
+  // The one way for the non-Vue modules to change the mode. They used to set
+  // `sidebar.classList` and the toggle button's text by hand, which left this
+  // component's store stale - the panel then snapped back to whatever the store
+  // still said on its next render.
+  (window as any).setSidebarMode = setSidebarMode;
+
   _openSidebarButton = document.getElementById('openSidebarBtn');
   _openSidebarButton?.addEventListener('click', handleOpenSidebarClick);
 });
@@ -149,5 +171,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   _openSidebarButton?.removeEventListener('click', handleOpenSidebarClick);
   _openSidebarButton = null;
+  if ((window as any).setSidebarMode === setSidebarMode) {
+    delete (window as any).setSidebarMode;
+  }
 });
 </script>

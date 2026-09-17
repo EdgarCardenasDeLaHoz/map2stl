@@ -326,6 +326,33 @@ window.decodeHydrologyValues = function decodeHydrologyValues(data) {
     return _decodeGrid(data.river_grid_values_b64, data.river_grid_values);
 };
 
+window.decodeSkiTrailValues = function decodeSkiTrailValues(data) {
+    return _decodeGrid(data.ski_grid_values_b64, data.ski_grid_values);
+};
+
+window.decodeHikingTrailValues = function decodeHikingTrailValues(data) {
+    return _decodeGrid(data.hiking_grid_values_b64, data.hiking_grid_values);
+};
+
+// Interiors of trail features mapped as closed ways — ski-area and piste
+// polygons. Display only: they tint the overlay and never reach the DEM.
+window.decodeSkiAreaValues = function decodeSkiAreaValues(data) {
+    return _decodeGrid(data.ski_area_grid_values_b64, data.ski_area_grid_values);
+};
+
+window.decodeHikingAreaValues = function decodeHikingAreaValues(data) {
+    return _decodeGrid(data.hiking_area_grid_values_b64, data.hiking_area_grid_values);
+};
+
+// Piste grade per pixel, as an index into the response's `difficulty_classes`
+// (0 = no usable `piste:difficulty` tag). Sent as float32 like every other grid
+// so it can share this decoder; the values are small integers, so nothing is
+// lost, but a reader must treat them as classes and never interpolate them.
+window.decodeSkiDifficultyValues = function decodeSkiDifficultyValues(data) {
+    return _decodeGrid(data.ski_difficulty_grid_values_b64,
+                       data.ski_difficulty_grid_values);
+};
+
 window.decodeMeshValues = function decodeMeshValues(data) {
     return _decodeGrid(data.mesh_values_b64, data.mesh_values);
 };

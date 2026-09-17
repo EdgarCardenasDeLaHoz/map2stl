@@ -150,6 +150,104 @@ window.toggleMapLabels = function toggleMapLabels(show) {
 
 // ── DEM overlay ─────────────────────────────────────────────────────────────
 
+/** Leaflet's own latitude clamp for EPSG:3857. */
+const MERCATOR_MAX_LAT = 85.0511287798;
+
+const DEM_OVERLAY_PANE = 'demOverlayPane';
+
+/** Web Mercator y for a latitude in degrees, in radians of projected space. */
+function _mercatorY(latDeg) {
+    const lat = Math.max(-MERCATOR_MAX_LAT, Math.min(MERCATOR_MAX_LAT, latDeg)) * Math.PI / 180;
+    return Math.log(Math.tan(Math.PI / 4 + lat / 2));
+}
+
+/**
+ * Own pane for the terrain overlay, sitting above the basemap tiles (z-index
+ * 200) but below the vector overlay pane (400). Added to the default overlay
+ * pane, the image is appended after the vector <svg> and so paints over every
+ * region rectangle and drawn shape on the map.
+ * @returns {string} The pane name, for passing to a layer's options.
+ */
+function ensureDemOverlayPane() {
+    if (_map && !_map.getPane(DEM_OVERLAY_PANE)) {
+        _map.createPane(DEM_OVERLAY_PANE).style.zIndex = 250;
+    }
+    return DEM_OVERLAY_PANE;
+}
+
+/**
+ * Load the pre-rendered global DEM PNG and resample it from equirectangular
+ * (plate carree, the projection the file is written in) to Web Mercator.
+ *
+ * Handing the source image straight to Leaflet with its own bounds is what
+ * this used to do, and it misregisters badly: Leaflet clamps the bounds to
+ * +/-85.05 and then stretches a linear-latitude image across the nonlinear
+ * Mercator axis. Measured against the basemap, 45N was drawn at 66.5N and 30N
+ * at 51.3N - only the equator landed in the right place. The on-demand path in
+ * toggleDemOverlay already resamples this way; this makes the cached path
+ * agree with it.
+ *
+ * @param {object|null} meta - Parsed global_dem_meta.json, for the source bounds.
+ * @returns {Promise<L.ImageOverlay|null>} null if the image or its pixels are unreadable.
+ */
+function buildGlobalDemOverlay(meta) {
+    return new Promise(resolve => {
+        const img = new Image();
+        img.onerror = () => resolve(null);
+        img.onload = () => {
+            const north = Number(meta?.north ?? 90);
+            const south = Number(meta?.south ?? -90);
+            const east = Number(meta?.east ?? 180);
+            const west = Number(meta?.west ?? -180);
+            const w = img.naturalWidth, h = img.naturalHeight;
+            const latRange = north - south;
+            const lonSpanRad = (east - west) * Math.PI / 180;
+            if (!w || !h || latRange <= 0 || lonSpanRad <= 0) return resolve(null);
+
+            const src = document.createElement('canvas');
+            src.width = w; src.height = h;
+            const srcCtx = src.getContext('2d');
+            srcCtx.drawImage(img, 0, 0);
+            let srcData;
+            try {
+                srcData = srcCtx.getImageData(0, 0, w, h).data;
+            } catch (_) {
+                // Tainted canvas. Better no overlay than one in the wrong place.
+                return resolve(null);
+            }
+
+            const outN = Math.min(north, MERCATOR_MAX_LAT);
+            const outS = Math.max(south, -MERCATOR_MAX_LAT);
+            const mercN = _mercatorY(outN), mercRange = mercN - _mercatorY(outS);
+            // A full-globe Mercator square is as tall as it is wide, so the
+            // output needs more rows than the 2:1 source to keep detail at high
+            // latitude, where Mercator spreads a few source rows over many.
+            const outH = Math.max(2, Math.min(4096, Math.round(w * mercRange / lonSpanRad)));
+
+            const dst = document.createElement('canvas');
+            dst.width = w; dst.height = outH;
+            const dstCtx = dst.getContext('2d');
+            const dstImg = dstCtx.createImageData(w, outH);
+            for (let y = 0; y < outH; y++) {
+                const mv = mercN - (y / (outH - 1)) * mercRange;
+                const lat = (2 * Math.atan(Math.exp(mv)) - Math.PI / 2) * 180 / Math.PI;
+                const srcY = Math.round((north - lat) / latRange * (h - 1));
+                if (srcY < 0 || srcY >= h) continue;
+                dstImg.data.set(srcData.subarray(srcY * w * 4, (srcY + 1) * w * 4), y * w * 4);
+            }
+            dstCtx.putImageData(dstImg, 0, 0);
+
+            resolve(L.imageOverlay(
+                dst.toDataURL('image/png'),
+                [[outS, west], [outN, east]],
+                { opacity: 0.7, interactive: false, pane: ensureDemOverlayPane() }
+            ));
+        };
+        // Same-origin, so the canvas stays untainted and toDataURL works.
+        img.src = `/static/global_dem.png?_=${Date.now()}`;
+    });
+}
+
 /**
  * Toggle the DEM terrain overlay on the Leaflet map.
  * Strategy 1: uses a pre-generated global PNG if available.
@@ -175,14 +273,18 @@ async function toggleDemOverlay(show) {
             try {
                 const metaResp = await fetch('/static/global_dem_meta.json');
                 if (metaResp.ok) {
-                    // meta is only used to confirm the file exists; overlay is always full-globe
-                    demOverlayLayer = L.imageOverlay(
-                        `/static/global_dem.png?_=${Date.now()}`,
-                        [[-90, -180], [90, 180]],
-                        { opacity: 0.7, interactive: false }
-                    ).addTo(_map);
-                    window.showToast('Terrain overlay loaded', 'success');
-                    usedGlobal = true;
+                    // The meta's bounds describe the PNG's own extent, in the
+                    // equirectangular projection it was written in. They are what
+                    // the resample reads; discarding them and assuming a full
+                    // globe is how the overlay came to be drawn 20 degrees north
+                    // of where it belongs.
+                    const meta = await metaResp.json().catch(() => null);
+                    const layer = await buildGlobalDemOverlay(meta);
+                    if (layer) {
+                        demOverlayLayer = layer.addTo(_map);
+                        window.showToast('Terrain overlay loaded', 'success');
+                        usedGlobal = true;
+                    }
                 }
             } catch (_) { }
 
@@ -240,7 +342,7 @@ async function toggleDemOverlay(show) {
                     projCtx.putImageData(projImg, 0, 0);
                     demOverlayLayer = L.imageOverlay(projCanvas.toDataURL('image/png'),
                         [[_bS, _bW], [_bN, _bE]],
-                        { opacity: 0.7, interactive: false }
+                        { opacity: 0.7, interactive: false, pane: ensureDemOverlayPane() }
                     ).addTo(_map);
                     window.showToast('Terrain overlay loaded', 'success');
                 }

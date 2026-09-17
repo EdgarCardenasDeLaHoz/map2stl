@@ -27,6 +27,7 @@
                 <canvas class="layer-canvas hidden" id="layerCityRasterCanvas"></canvas>
                 <canvas class="layer-canvas hidden" id="layerCompositeDemCanvas"></canvas>
                 <canvas class="layer-canvas hidden" id="layerHydroCanvas"></canvas>
+                <canvas class="layer-canvas hidden" id="layerTrailsCanvas"></canvas>
                 <!-- Single display canvas — shows the active view mode -->
                 <canvas class="layer-canvas" id="stackViewCanvas"></canvas>
                 <!-- Grid overlay — always on top, exempt from zoom transform -->
@@ -84,8 +85,14 @@
         <div id="demLanduse"></div>
       </div>
 
-      <!-- BBox editor + colorbar -->
-      <div class="dem-info">
+      <!-- BBox editor + colorbar. Overlays the bottom of the stack and
+           slides up on hover, focus or a click on the handle. -->
+      <div class="dem-info" id="demInfoBar">
+        <button type="button" id="demInfoHandle" class="dem-info-handle"
+                aria-controls="bboxEditor" aria-expanded="false"
+                title="Bounding box and elevation scale — click to keep open">
+          ··· bbox ···
+        </button>
         <div class="bbox-editor" id="bboxEditor">
           <!-- Row 1: 2×2 coordinate grid -->
           <div class="bbox-coords-grid">
@@ -114,7 +121,7 @@
             <div class="bbox-divider"></div>
             <div id="colorbar" class="bbox-colorbar" title="Elevation colorbar"></div>
             <span id="bboxElevRange" class="bbox-elev-range"></span>
-            <button id="settingsExternalBtn" class="bbox-reload-btn bbox-settings-btn" title="Toggle settings panel">⚙</button>
+            <button id="settingsExternalBtn" class="bbox-reload-btn bbox-settings-btn" aria-label="Toggle settings panel" title="Toggle settings panel">⚙</button>
           </div>
         </div>
         <!-- Inline mini-map for drag-editing the bounding box -->

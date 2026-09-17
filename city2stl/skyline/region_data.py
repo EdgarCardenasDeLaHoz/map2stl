@@ -101,15 +101,53 @@ def _load_osm_for_region(bbox: RegionBBox) -> tuple[dict, str]:
             _ensure_green(cached, key)
             return cached, f"cache:{key[:8]} tol={tol} area={min_area}"
 
-    fetched = fetch_osm_data(
-        bbox.north,
-        bbox.south,
-        bbox.east,
-        bbox.west,
-        ["buildings", "roads", "waterways"],
-        simplify_tolerance=0.5,
-        min_area=5.0,
-    )
+    try:
+        fetched = fetch_osm_data(
+            bbox.north,
+            bbox.south,
+            bbox.east,
+            bbox.west,
+            ["buildings", "roads", "waterways"],
+            simplify_tolerance=0.5,
+            min_area=5.0,
+        )
+    except Exception as fetch_exc:
+        # Overpass mirrors go down, rate-limit, and return 502 often enough
+        # that a live fetch is not a dependable input. The cache above refuses
+        # anything past a 7-day TTL, which is right for a fresh run and wrong
+        # as a failure mode: building footprints from two months ago are the
+        # same footprints, and losing a whole region run over a mirror outage
+        # costs far more than the staleness. Re-probe every key ignoring the
+        # TTL before giving up.
+        for tol, min_area in key_params:
+            key = osm_cache_key(bbox.north, bbox.south,
+                                bbox.east, bbox.west, tol, min_area)
+            stale = read_osm_cache(key, allow_stale=True)
+            if stale and (stale.get("buildings", {}).get("features") or []):
+                print(f"[osm_cache] live fetch failed ({fetch_exc}); "
+                      f"falling back to stale cache {key[:8]}")
+                _ensure_green(stale, key)
+                return stale, f"stale_cache:{key[:8]} tol={tol} area={min_area}"
+        raise
+    # A fetch that came back with no buildings is not a region worth caching —
+    # the layer fetchers turn an Overpass failure into an empty
+    # FeatureCollection rather than an exception, so writing it here would
+    # poison every later run with a hit that says the city has no buildings.
+    if not (fetched.get("buildings", {}).get("features") or []):
+        for tol, min_area in key_params:
+            key = osm_cache_key(bbox.north, bbox.south,
+                                bbox.east, bbox.west, tol, min_area)
+            stale = read_osm_cache(key, allow_stale=True)
+            if stale and (stale.get("buildings", {}).get("features") or []):
+                print(f"[osm_cache] fetch returned 0 buildings; "
+                      f"falling back to stale cache {key[:8]}")
+                _ensure_green(stale, key)
+                return stale, f"stale_cache:{key[:8]} tol={tol} area={min_area}"
+        raise RuntimeError(
+            "OSM fetch returned no buildings for "
+            f"{bbox.name} and no cached copy exists: "
+            + str(fetched.get("buildings", {}).get("error", "no error reported")))
+
     # Persist under the (0.5, 5.0) key — matches the first key_params entry
     # the reader probes — so the next run hits the cache instead of re-querying
     # Overpass (~56 s on Cartagena). Previously this was never written, so
@@ -287,9 +325,9 @@ def _osm_to_building_records(osm_data: dict, min_area_m2: float = 8.0) -> list[B
     return out
 
 def _drop_buildings_in_water(
-    records: list["BuildingRecord"],
+    records: list[BuildingRecord],
     osm_data: dict,
-) -> list["BuildingRecord"]:
+) -> list[BuildingRecord]:
     """Filter out buildings whose centroid lies inside an OSM water polygon.
 
     Catches the failure mode where the OSM building layer (or, more often,
@@ -305,9 +343,10 @@ def _drop_buildings_in_water(
     counts in a city OSM dump.
     """
     try:
-        from .osm_water import extract_water_features  # noqa: PLC0415
-        from shapely.geometry import shape, Point  # noqa: PLC0415
+        from shapely.geometry import Point, shape  # noqa: PLC0415
         from shapely.prepared import prep  # noqa: PLC0415
+
+        from .osm_water import extract_water_features  # noqa: PLC0415
     except Exception:
         return records
     water_feats = extract_water_features(osm_data)
@@ -350,7 +389,7 @@ def _drop_buildings_in_water(
             raw_polys.append(poly)
         except Exception:
             continue
-    kept: list["BuildingRecord"] = []
+    kept: list[BuildingRecord] = []
     dropped_centroid = 0
     dropped_overlap = 0
     for b in records:
@@ -382,9 +421,24 @@ def _drop_buildings_in_water(
     return kept
 
 def _fetch_elevations(points: list[tuple[float, float]], chunk_size: int = 80) -> list[float]:
+    """Ground elevation (m above sea level) for each point, 0.0 on failure.
+
+    A failed chunk is indistinguishable from genuine sea level here. Callers
+    that need to know the difference should use ``_fetch_elevations_opt``,
+    which returns None for the points it could not resolve — silently
+    treating an API failure as 0.0 m is what makes a building look
+    ``camera_elev_m`` metres taller than it is.
+    """
+    return [0.0 if v is None else v for v in _fetch_elevations_opt(points, chunk_size)]
+
+
+def _fetch_elevations_opt(
+    points: list[tuple[float, float]], chunk_size: int = 80,
+) -> list[float | None]:
+    """As ``_fetch_elevations``, but None marks a point the API did not resolve."""
     if not points:
         return []
-    out: list[float] = []
+    out: list[float | None] = []
     for start in range(0, len(points), chunk_size):
         chunk = points[start: start + chunk_size]
         try:
@@ -403,16 +457,22 @@ def _fetch_elevations(points: list[tuple[float, float]], chunk_size: int = 80) -
                 continue
         except Exception:
             pass
-        out.extend(0.0 for _ in chunk)
+        out.extend(None for _ in chunk)
     return out
 
 def _attach_building_terrain(buildings: list[BuildingRecord]) -> list[BuildingRecord]:
     if not buildings:
         return buildings
     pts = [(b.centroid_lat, b.centroid_lon) for b in buildings]
-    elevs = _fetch_elevations(pts)
+    elevs = _fetch_elevations_opt(pts)
     out: list[BuildingRecord] = []
-    for b, e in zip(buildings, elevs):
+    for b, e in zip(buildings, elevs, strict=False):
+        if e is None:
+            # Unresolved: leave the placeholder and the False flag so the
+            # height math falls back to the camera's ground plane rather
+            # than subtracting a fake 0 m from an absolute rooftop z.
+            out.append(b)
+            continue
         out.append(
             BuildingRecord(
                 feature_id=b.feature_id,
@@ -424,6 +484,7 @@ def _attach_building_terrain(buildings: list[BuildingRecord]) -> list[BuildingRe
                 height_source=b.height_source,
                 area_m2=b.area_m2,
                 terrain_elev_m=float(e),
+                terrain_known=True,
             )
         )
     return out
@@ -441,7 +502,11 @@ def _read_site_config(region_name: str) -> dict:
     if not cfg.exists():
         return {}
     try:
-        return json.loads(cfg.read_text(encoding="utf-8"))
+        # utf-8-sig, not utf-8: sites/panama_city.json was written by a tool
+        # that emits a BOM, and a plain utf-8 read fails on it. The failure is
+        # swallowed below, so the city kept running with no seed URLs and no
+        # anchor offsets rather than announcing anything.
+        return json.loads(cfg.read_text(encoding="utf-8-sig"))
     except Exception:
         return {}
 

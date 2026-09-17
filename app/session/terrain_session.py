@@ -27,13 +27,12 @@ from __future__ import annotations
 import base64
 import copy
 import math
-import os
 import subprocess
 import sys
 import time
 from io import BytesIO
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 
 import matplotlib.cm as cm
 import matplotlib.patches as mpatches
@@ -44,8 +43,7 @@ import requests
 from IPython.display import display
 from PIL import Image
 
-from app.server.config import LUMINANCE_R, LUMINANCE_G, LUMINANCE_B
-from app.server.core.validation import METRES_PER_DEGREE
+from app.server.config import LUMINANCE_B, LUMINANCE_G, LUMINANCE_R
 
 _ALLOWED_HTTP_METHODS = {"get", "post", "put", "delete", "patch"}
 
@@ -252,29 +250,33 @@ class TerrainSession:
     def __init__(self, port: int = 9090):
         self._port = port
         self._base = f"http://127.0.0.1:{port}"
-        self._server_proc: Optional[subprocess.Popen] = None
+        self._server_proc: subprocess.Popen | None = None
 
-        self.region_name: Optional[str] = None
+        self.region_name: str | None = None
         self.bbox: dict = {}
         self.settings: dict = copy.deepcopy(_DEFAULT_SETTINGS)
-        self.dem: Optional[dict] = None
-        self.obj_path: Optional[Path] = None
+        self.dem: dict | None = None
+        self.obj_path: Path | None = None
         # binary water mask response dict
-        self.water_mask: Optional[dict] = None
+        self.water_mask: dict | None = None
         # raw ESA land-cover class response dict
-        self.esa_landcover: Optional[dict] = None
-        self.satellite: Optional[str] = None
-        self.city_data: Optional[dict] = None
-        self.city_raster: Optional[dict] = None
+        self.esa_landcover: dict | None = None
+        self.satellite: str | None = None
+        self.city_data: dict | None = None
+        # True once a session method has edited the building tags in place.
+        # The export normally lets the server resolve buildings from its own
+        # OSM cache; local edits only reach the mesh if they are sent along.
+        self._buildings_dirty: bool = False
+        self.city_raster: dict | None = None
         # Merged building height raster (HeightResult dataclass)
         self.building_heights = None
         # STL-imported heightmap + mask (set by load_stl())
-        self.stl_heightmap: Optional[np.ndarray] = None
-        self.stl_mask: Optional[np.ndarray] = None
+        self.stl_heightmap: np.ndarray | None = None
+        self.stl_mask: np.ndarray | None = None
         # IDW/nearest-infilled complete heightmap (set by infill_heights())
-        self.infilled_heights: Optional[np.ndarray] = None
+        self.infilled_heights: np.ndarray | None = None
         # Natural Earth hydrology (rivers, lakes, coastlines)
-        self.hydrology: Optional[dict] = None
+        self.hydrology: dict | None = None
 
     # Settings convenience properties for reduced verbosity
     @property
@@ -404,11 +406,11 @@ class TerrainSession:
         return _strip_none(copy.deepcopy(self.settings))
 
     def _build_region_payload(self,
-                              name: Optional[str] = None,
-                              north: Optional[float] = None,
-                              south: Optional[float] = None,
-                              east: Optional[float] = None,
-                              west: Optional[float] = None,
+                              name: str | None = None,
+                              north: float | None = None,
+                              south: float | None = None,
+                              east: float | None = None,
+                              west: float | None = None,
                               **metadata) -> dict:
         """Build region creation/update payload.
 
@@ -427,10 +429,10 @@ class TerrainSession:
     def _plot_geo_image(self,
                         arr: np.ndarray,
                         title: str,
-                        cmap: Optional[str] = None,
-                        vmin: Optional[float] = None,
-                        vmax: Optional[float] = None,
-                        legend_handles: Optional[list] = None,
+                        cmap: str | None = None,
+                        vmin: float | None = None,
+                        vmax: float | None = None,
+                        legend_handles: list | None = None,
                         figsize: tuple = (8, 8),
                         **imshow_kwargs) -> None:
         """Generic geographic extent image plotter with optional legend.
@@ -525,7 +527,7 @@ class TerrainSession:
                     _kill_tree(stale)
                     killed = True
         except psutil.AccessDenied:
-            print(f"Warning: access denied scanning ports (try running as admin)")
+            print("Warning: access denied scanning ports (try running as admin)")
         if killed:
             time.sleep(0.5)
 
@@ -706,7 +708,7 @@ class TerrainSession:
     # ================================================================== #
 
     def start(self, force_restart: bool = False, reload: bool = False,
-              visible: bool = False) -> "TerrainSession":
+              visible: bool = False) -> TerrainSession:
         """Launch the uvicorn server and wait until it responds.
 
         Parameters
@@ -741,7 +743,7 @@ class TerrainSession:
         return self
 
     def restart(self, reload: bool = False,
-                visible: bool = False) -> "TerrainSession":
+                visible: bool = False) -> TerrainSession:
         """Kill any server on the port and start a fresh one.
 
         Shorthand for ``s.start(force_restart=True, ...)``.
@@ -769,7 +771,7 @@ class TerrainSession:
             self._kill_stale_server()
             print("Server stopped (external process).")
 
-    def __enter__(self) -> "TerrainSession":
+    def __enter__(self) -> TerrainSession:
         return self
 
     def __exit__(self, *_) -> None:
@@ -795,8 +797,8 @@ class TerrainSession:
             f"Datasets     : {[d['id'] for d in data.get('datasets', [])]}")
         return data
 
-    def regions(self, filter_col: Optional[str] = None,
-                filter_val: Optional[str] = None) -> pd.DataFrame:
+    def regions(self, filter_col: str | None = None,
+                filter_val: str | None = None) -> pd.DataFrame:
         """GET /api/regions — list saved regions as a DataFrame.
 
         Use this before select() when the notebook needs to discover available
@@ -817,7 +819,7 @@ class TerrainSession:
         print(f"Showing {len(df)} regions")
         return df
 
-    def select(self, name: str) -> "TerrainSession":
+    def select(self, name: str) -> TerrainSession:
         """Select a region by name and hydrate bbox plus saved settings.
 
         Reads the region list from GET /api/regions and then loads persisted
@@ -863,9 +865,9 @@ class TerrainSession:
 
     def create_region(self, name: str, north: float, south: float,
                       east: float, west: float,
-                      description: Optional[str] = None,
-                      continent: Optional[str] = None,
-                      source: Optional[str] = None) -> "TerrainSession":
+                      description: str | None = None,
+                      continent: str | None = None,
+                      source: str | None = None) -> TerrainSession:
         """POST /api/regions — create a new named region in the database.
 
         Also selects the new region (sets self.region_name and self.bbox).
@@ -882,11 +884,11 @@ class TerrainSession:
         print(f"Created region: {name}")
         return self
 
-    def update_region(self, north: Optional[float] = None, south: Optional[float] = None,
-                      east: Optional[float] = None, west: Optional[float] = None,
-                      description: Optional[str] = None,
-                      continent: Optional[str] = None,
-                      source: Optional[str] = None) -> "TerrainSession":
+    def update_region(self, north: float | None = None, south: float | None = None,
+                      east: float | None = None, west: float | None = None,
+                      description: str | None = None,
+                      continent: str | None = None,
+                      source: str | None = None) -> TerrainSession:
         """PUT /api/regions/{name} — update the current region's metadata or bbox.
 
         Any argument left as None keeps the existing value from self.bbox.
@@ -909,7 +911,7 @@ class TerrainSession:
         print(f"Updated region: {self.region_name}")
         return self
 
-    def delete_region(self, name: Optional[str] = None) -> "TerrainSession":
+    def delete_region(self, name: str | None = None) -> TerrainSession:
         """DELETE /api/regions/{name} — remove a region from the database.
 
         Defaults to the currently selected region. Clears selection if it
@@ -925,7 +927,7 @@ class TerrainSession:
             self.bbox = {}
         return self
 
-    def save_settings(self) -> "TerrainSession":
+    def save_settings(self) -> TerrainSession:
         """PUT /api/regions/{name}/settings — persist current settings to the database.
 
         Sends the full grouped settings dict (dem, projection, view, water,
@@ -1172,7 +1174,7 @@ class TerrainSession:
             msg += f"  {extra}"
         print(msg)
 
-    def fetch_dem(self) -> "TerrainSession":
+    def fetch_dem(self) -> TerrainSession:
         """POST /api/terrain/dem — fetch and store the processed DEM.
 
         Request parameters come primarily from settings['dem'] plus
@@ -1202,8 +1204,9 @@ class TerrainSession:
         relative to the image dimensions.
         """
         self._require_attribute("dem", "fetch_dem")
-        from app.session.viz import plot_data
         import base64
+
+        from app.session.viz import plot_data
         H, W = self.dem["dimensions"]
         # Server returns dem_values_b64 (base64-encoded float32 data)
         if "dem_values_b64" in self.dem:
@@ -1380,7 +1383,7 @@ class TerrainSession:
                             dtype=np.float32).reshape(H, W)
             return self._colorize_dem(elev).astype(np.float32)
 
-        def _water_rgb() -> Optional[np.ndarray]:
+        def _water_rgb() -> np.ndarray | None:
             if self.water_mask is None:
                 return None
             h, w = self.water_mask["water_mask_dimensions"]
@@ -1393,7 +1396,7 @@ class TerrainSession:
             rgb[mask < 0.5] = [34,  85,  34]   # land  → dark green
             return rgb
 
-        def _esa_rgb() -> Optional[np.ndarray]:
+        def _esa_rgb() -> np.ndarray | None:
             if self.esa_landcover is None:
                 return None
             h, w = self.esa_landcover["esa_dimensions"]
@@ -1401,14 +1404,14 @@ class TerrainSession:
                            dtype=np.float32).reshape(h, w)
             return self._colorize_esa(esa).astype(np.float32)
 
-        def _satellite_rgb() -> Optional[np.ndarray]:
+        def _satellite_rgb() -> np.ndarray | None:
             if self.satellite is None:
                 return None
             img = Image.open(
                 BytesIO(base64.b64decode(self.satellite))).convert("RGB")
             return np.array(img, dtype=np.float32)
 
-        def _city_rgb() -> Optional[np.ndarray]:
+        def _city_rgb() -> np.ndarray | None:
             if self.city_raster is None:
                 return None
             h = self.city_raster["height"]
@@ -1506,7 +1509,6 @@ class TerrainSession:
         #   b) Sobel gradient magnitude  → emphasises boundaries
         #   c) Gaussian blur  → reduce noise
         #   d) zero-mean / unit-std normalisation so amplitudes match
-        import cv2 as _cv2
 
         edges = {name: self._compute_edge_map(
             arr) for name, arr in padded.items()}
@@ -1563,8 +1565,6 @@ class TerrainSession:
 
         # Satellite is already the NCC reference — skip registering it against
         # itself (would always give shift=0, ncc=1.0, which is trivially true).
-        registration_names = [n for n in other_names if n != ncc_ref_name]
-
         for col, name in enumerate(other_names, start=1):
             # Satellite used as NCC reference — report ncc=1 trivially, no shift
             if name == ncc_ref_name:
@@ -1697,7 +1697,7 @@ class TerrainSession:
             "get", "/api/terrain/water-mask", params=params, timeout=120
         )
 
-    def fetch_water_mask(self, max_display_dim: int = 1000) -> "TerrainSession":
+    def fetch_water_mask(self, max_display_dim: int = 1000) -> TerrainSession:
         """GET /api/terrain/water-mask — fetch binary water mask (0 = land, 1 = water).
 
         Result stored on self.water_mask. Also populates self.esa_landcover since
@@ -1753,7 +1753,7 @@ class TerrainSession:
         self._print_grid_info("Water coverage", w, h, f"{pct:.1f}%")
         return self
 
-    def fetch_esa_landcover(self, max_display_dim: int = 1000) -> "TerrainSession":
+    def fetch_esa_landcover(self, max_display_dim: int = 1000) -> TerrainSession:
         """GET /api/terrain/water-mask — fetch ESA WorldCover land-cover class raster.
 
         Returns raw ESA class values (10=tree cover, 20=shrub, 30=grass, 40=crop,
@@ -1821,7 +1821,7 @@ class TerrainSession:
         self._print_grid_info("ESA land-cover", w, h)
         return self
 
-    def fetch_satellite(self) -> "TerrainSession":
+    def fetch_satellite(self) -> TerrainSession:
         """Fetch base64-encoded JPEG satellite image for bbox.
 
         GET /api/terrain/satellite fetches the image and stores it on
@@ -1853,7 +1853,7 @@ class TerrainSession:
 
         return self
 
-    def merge_dem(self, layers: list) -> "TerrainSession":
+    def merge_dem(self, layers: list) -> TerrainSession:
         """POST /api/composite/dem-merge — composite multiple elevation/mask layers into one DEM.
 
         Each layer is a dict matching MergeLayerSpec:
@@ -1892,7 +1892,7 @@ class TerrainSession:
               f"layers={d.get('layer_count', len(layers))}")
         return self
 
-    def fetch_cities(self) -> "TerrainSession":
+    def fetch_cities(self) -> TerrainSession:
         """POST /api/cities — fetch OSM building/road/waterway data for bbox.
 
         Result stored on self.city_data. Configure via settings['city'].
@@ -1915,7 +1915,7 @@ class TerrainSession:
             msg2 = f"   Current region: {diag_km:.0f} km × {diag_km:.0f} km (too large)"
             print(msg1)
             print(msg2)
-            print(f"   💡 Tip: Select a city-scale region or draw a smaller bounding box")
+            print("   💡 Tip: Select a city-scale region or draw a smaller bounding box")
             self.city_data = None
             return self
 
@@ -1938,7 +1938,7 @@ class TerrainSession:
                 except Exception:
                     error_msg = "Bounding box too large"
                 print(f"⚠️  {error_msg}")
-                print(f"   💡 Use a smaller region (≤10 km diagonal for best results)")
+                print("   💡 Use a smaller region (≤10 km diagonal for best results)")
                 self.city_data = None
                 return self
             elif r.status_code == 400:
@@ -1952,6 +1952,7 @@ class TerrainSession:
 
             r.raise_for_status()
             self.city_data = r.json()
+            self._buildings_dirty = False
             n_buildings = len(self.city_data.get(
                 "buildings", {}).get("features", []))
             n_roads = len(self.city_data.get("roads", {}).get("features", []))
@@ -1966,7 +1967,7 @@ class TerrainSession:
 
         return self
 
-    def fetch_hydrology(self, max_display_dim: int = 1000) -> "TerrainSession":
+    def fetch_hydrology(self, max_display_dim: int = 1000) -> TerrainSession:
         """GET /api/terrain/hydrology — fetch river hydrology as a depression grid.
 
         Source is controlled by ``settings['hydrology']['source']``:
@@ -2042,7 +2043,7 @@ class TerrainSession:
 
         feature_count = resp.get("feature_count", 0)
         if feature_count == 0:
-            print(f"  No rivers found in region")
+            print("  No rivers found in region")
             self.hydrology = None
             return self
 
@@ -2082,7 +2083,7 @@ class TerrainSession:
               f"(API={dt_api:.1f}s, post={dt_post:.1f}s)")
         return self
 
-    def merge_hydrology_with_dem(self) -> "TerrainSession":
+    def merge_hydrology_with_dem(self) -> TerrainSession:
         """Merge hydrology depressions with DEM elevation values.
 
         Applies self.hydrology as a depression layer to self.dem using element-wise minimum.
@@ -2143,7 +2144,7 @@ class TerrainSession:
             self.dem["min_elevation"] = float(merged_arr.min())
             self.dem["max_elevation"] = float(merged_arr.max())
             self.dem["mean_elevation"] = float(merged_arr.mean())
-            print(f"Merged hydrology depressions into DEM")
+            print("Merged hydrology depressions into DEM")
         except Exception as e:
             print(f"Failed to apply merged DEM: {e}")
 
@@ -2181,7 +2182,7 @@ class TerrainSession:
             "split":  self.settings["split"],
         }
 
-    def export_obj(self) -> "TerrainSession":
+    def export_obj(self) -> TerrainSession:
         """POST /api/export (format=obj_split) — generate puzzle OBJ and save to output/.
 
         fetch_dem() is no longer required before this call — the export endpoint
@@ -2278,8 +2279,8 @@ class TerrainSession:
         print(f"Cache cleared: {total} files deleted")
         return data
 
-    def composite_city_raster(self, width: Optional[int] = None,
-                              height: Optional[int] = None) -> "TerrainSession":
+    def composite_city_raster(self, width: int | None = None,
+                              height: int | None = None) -> TerrainSession:
         """POST /api/composite/city-raster — rasterize OSM city data from disk cache.
 
         Faster than fetch_cities() + cities/raster because it reads the OSM cache
@@ -2336,7 +2337,7 @@ class TerrainSession:
         print(f"City cache: {'hit ✓' if cached else 'miss'}")
         return cached
 
-    def rasterize_city(self) -> "TerrainSession":
+    def rasterize_city(self) -> TerrainSession:
         """POST /api/cities/raster — burn OSM features onto a height-delta grid.
 
         Unlike composite_city_raster() which returns separate per-layer arrays,
@@ -2371,42 +2372,79 @@ class TerrainSession:
             f"City raster: {w}×{h} px, elevation range [{vmin:.1f}, {vmax:.1f}] m")
         return self
 
-    def export_city_3mf(self, name: Optional[str] = None) -> bytes:
+    def export_city_3mf(
+        self,
+        name: str | None = None,
+        classify_roofs: bool = False,
+        estimate_roof_heights: bool = True,
+        timeout: float = 1800.0,
+    ) -> bytes:
         """POST /api/cities/export3mf — export terrain + extruded buildings as 3MF.
 
         Requires fetch_dem() and fetch_cities() to have been called first.
         Returns raw 3MF bytes.
+
+        Parameters
+        ----------
+        classify_roofs : bool
+            Fill in the missing ``roof:shape`` tags from the satellite image
+            before exporting. Off by default because it costs a satellite fetch
+            and changes the geometry, but it is the difference between a real
+            roof and a flat extrusion nearly everywhere: OSM tags a roof shape
+            on one or two per cent of buildings, and the mesh treats every
+            untagged building as flat. Requires fetch_satellite() first.
+        timeout : float
+            Seconds to wait for the export. Meshing is O(buildings) and runs
+            inside the request, so a dense 3 km box takes minutes: Seville's
+            4388 buildings overran the old hard-coded 120 s and the client gave
+            up on a server that was still working. Half an hour is far past any
+            real export and still bounded.
+        estimate_roof_heights : bool
+            Also fill ``roof:height`` from the elevation profile while
+            classifying. Only read when *classify_roofs* is set, and only does
+            anything when a height raster is available — call
+            fetch_building_heights() first, or the profile it would measure
+            does not exist and every roof keeps the mesh's fallback of 30 per
+            cent of the building's height.
         """
         self._require_attribute("dem", "export_city_3mf")
         if self.city_data is None:
             raise RuntimeError("Call fetch_cities() before export_city_3mf()")
+        if classify_roofs:
+            self.classify_roof_shapes(
+                estimate_roof_heights=estimate_roof_heights)
         c = self.settings["city"]
         e = self.settings["export"]
         s = self.settings["dem"]
-        # Send bbox + DEM settings — server resolves arrays from disk cache
+        # Send bbox + DEM settings — server resolves arrays from disk cache.
+        #
+        # The settings go over verbatim, exactly as fetch_dem sent them. Any
+        # field they omit is filled by the server's own defaults in
+        # core/dem_cache.py, which is the only place those defaults are
+        # allowed to live. Restating them here is what broke this call: the
+        # settings carry no `maintain_dimensions`, the fetch therefore stored
+        # the array under the server default of False while this payload
+        # claimed True, the two sides hashed different keys, and every
+        # settings-only export answered "DEM not found in cache — load DEM
+        # first" on a DEM that was sitting in the cache.
         payload = {
             **self.bbox,
             "bbox": self.bbox,
-            "dem": {
-                "dim":          s.get("dim", 200),
-                "dem_source":   s.get("dem_source", "local"),
-                "projection":   s.get("projection", "cosine"),
-                "depth_scale":  s.get("depth_scale", 0.5),
-                "water_scale":  s.get("water_scale", 0.05),
-                "subtract_water":      s.get("subtract_water", True),
-                "maintain_dimensions": s.get("maintain_dimensions", True),
-                "clip_nans":    s.get("clip_nans", False),
-                "show_sat":     False,
-            },
+            "dem": dict(s),
             "model_height_mm":   e["model_height"],
             "base_mm":           e["base_height"],
             "building_z_scale":  c["building_scale"],
             "simplify_terrain":  c.get("simplify_terrain", True),
             "name":              name or self.region_name or "city",
         }
+        # The server resolves buildings from its own OSM cache, which has no
+        # record of tags this session added. Send them when there are any.
+        if self._buildings_dirty:
+            payload["buildings"] = self.city_data["buildings"]
+            print("Sending locally modified building tags with the export")
         print(f"Exporting city 3MF for {payload['name']}…")
         r = self._api_request_raw(
-            "post", "/api/cities/export3mf", json=payload, timeout=120
+            "post", "/api/cities/export3mf", json=payload, timeout=timeout
         )
         r.raise_for_status()
         data = r.content
@@ -2418,7 +2456,7 @@ class TerrainSession:
     def fetch_building_heights(
         self,
         providers: list[str] | None = None,
-    ) -> "TerrainSession":
+    ) -> TerrainSession:
         """Fetch building heights from multiple data sources and merge.
 
         Runs locally (no server round-trip) — each provider downloads its
@@ -2449,14 +2487,14 @@ class TerrainSession:
             providers = ["wsf3d", "google3d"]
 
         from city2stl.skyline.height import HeightResult, merge_height_rasters
-        from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
-        from city2stl.skyline.height.providers.google_3d import Google3DProvider
-        from city2stl.skyline.height.providers.ndsm import NDSMProvider
         from city2stl.skyline.height.providers.copernicus import CopernicusProvider
-        from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
         from city2stl.skyline.height.providers.ghsl import GHSLProvider
+        from city2stl.skyline.height.providers.google_3d import Google3DProvider
+        from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
+        from city2stl.skyline.height.providers.ndsm import NDSMProvider
         from city2stl.skyline.height.providers.open_buildings import OpenBuildingsProvider
         from city2stl.skyline.height.providers.shadow_height import ShadowHeightProvider
+        from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
 
         north = self.bbox["north"]
         south = self.bbox["south"]
@@ -2532,7 +2570,7 @@ class TerrainSession:
         self,
         providers: list[str] | None = None,
         source_name: str | None = None,
-    ) -> "TerrainSession":
+    ) -> TerrainSession:
         """Apply inferred building heights to the cached OSM building GeoJSON.
 
         Convenience wrapper that:
@@ -2586,6 +2624,7 @@ class TerrainSession:
             source_name=effective_source,
         )
         self.city_data["buildings"] = result["buildings"]
+        self._buildings_dirty = True
         stats = result["stats"]
         print(
             f"Building enrichment: {stats['enhanced']}/{stats['total']} updated "
@@ -2599,14 +2638,15 @@ class TerrainSession:
 
     def classify_roof_shapes(
         self,
-        satellite_rgb: "np.ndarray | list[np.ndarray] | None" = None,
-        height_raster: "np.ndarray | None" = None,
+        satellite_rgb: np.ndarray | list[np.ndarray] | None = None,
+        height_raster: np.ndarray | None = None,
         estimate_roof_heights: bool = False,
         overwrite: bool = False,
-        acquisition_months: "list[int] | None" = None,
-        acquisition_hours: "list[int] | None" = None,
-        cnn_model: "str | object | None" = None,
-    ) -> "TerrainSession":
+        acquisition_months: list[int] | None = None,
+        acquisition_hours: list[int] | None = None,
+        cnn_model: str | object | None = None,
+        use_model: bool = True,
+    ) -> TerrainSession:
         """Classify ``roof:shape`` (and optionally ``roof:height``) for buildings.
 
         Calls :func:`city2stl.roof_classifier.classify_roof_shapes` on
@@ -2638,6 +2678,13 @@ class TerrainSession:
             uses a pre-loaded ``RoofNet`` if one was set via
             ``load_roof_model()``, otherwise falls back to
             ``"mobilenet_v3_small"``.
+        use_model : bool
+            Let the trained ``roof_shape_gbm`` checkpoint answer first,
+            reading its own zoom-18 tiles per building instead of the
+            city-wide image, which the 400-tile cap degrades to roughly a
+            metre per pixel.  Default True; the hand-written signal cascade
+            still covers whatever the model cannot measure, and the whole
+            path is inert when the checkpoint is missing.
 
         Returns self for chaining.
         """
@@ -2645,11 +2692,25 @@ class TerrainSession:
             raise RuntimeError("Call fetch_cities() before classify_roof_shapes()")
 
         # ── Resolve satellite image ────────────────────────────────────
+        # `self.satellite` holds a base64 PNG, which is what the server sends
+        # and what the viewer wants back, but the classifier measures pixels
+        # and needs an array. Decode here so no caller has to know that.
         if satellite_rgb is None:
-            satellite_rgb = getattr(self, "satellite", None)
+            satellite_rgb = self.satellite_array()
+        elif isinstance(satellite_rgb, str):
+            satellite_rgb = self.satellite_array(satellite_rgb)
+        elif isinstance(satellite_rgb, list):
+            satellite_rgb = [self.satellite_array(s) if isinstance(s, str)
+                             else s for s in satellite_rgb]
         if satellite_rgb is None:
-            print("⚠️  No satellite image available — call fetch_satellite() first")
-            return self
+            # The trained model reads its own per-building tiles, so it does
+            # not need the city-wide image the signal cascade measures. Only
+            # the cascade is blocked without one.
+            from city2stl import roof_model as _roof_model
+
+            if not (use_model and _roof_model.load() is not None):
+                print("⚠️  No satellite image available — call fetch_satellite() first")
+                return self
 
         # ── Resolve height raster ──────────────────────────────────────
         if height_raster is None:
@@ -2680,9 +2741,11 @@ class TerrainSession:
             acquisition_months=acquisition_months,
             acquisition_hours=acquisition_hours,
             cnn_model=cnn_model,
+            use_model=use_model,
         )
 
         self.city_data["buildings"] = result
+        self._buildings_dirty = True
         stats = result.get("_stats", {})
         print(
             f"Roof classification: {stats.get('classified', 0)}/{stats.get('total', 0)} classified "
@@ -2690,11 +2753,19 @@ class TerrainSession:
         )
         return self
 
+    def satellite_array(self, b64: str | None = None) -> np.ndarray | None:
+        """The satellite image as an H×W×3 uint8 array, or None if unfetched."""
+        b64 = self.satellite if b64 is None else b64
+        if b64 is None:
+            return None
+        img = Image.open(BytesIO(base64.b64decode(b64))).convert("RGB")
+        return np.array(img, dtype=np.uint8)
+
     # ------------------------------------------------------------------ #
     # RoofNet checkpoint loading                                            #
     # ------------------------------------------------------------------ #
 
-    def load_roof_model(self, checkpoint_path: str) -> "TerrainSession":
+    def load_roof_model(self, checkpoint_path: str) -> TerrainSession:
         """Load a ``RoofNet`` checkpoint and register it for use in
         :meth:`classify_roof_shapes`.
 
@@ -2711,11 +2782,11 @@ class TerrainSession:
         """
         try:
             import torch
-        except ImportError:
+        except ImportError as exc:
             raise RuntimeError(
                 "PyTorch is required to load a RoofNet checkpoint. "
                 "Install it with: pip install torch"
-            )
+            ) from exc
 
         model = torch.load(
             checkpoint_path, map_location="cpu", weights_only=False
@@ -2732,9 +2803,9 @@ class TerrainSession:
     def predict_heights(
         self,
         model: str = "pretrained",
-        checkpoint: Optional[Union[str, "Path"]] = None,
+        checkpoint: Union[str, Path] | None = None,
         device: str = "cpu",
-    ) -> "TerrainSession":
+    ) -> TerrainSession:
         """Predict building heights from satellite imagery using a CNN.
 
         Requires ``self.satellite`` to be populated (call ``fetch_satellite()``
@@ -2811,14 +2882,14 @@ class TerrainSession:
 
     def train_height_model(
         self,
-        cities: Optional[list] = None,
+        cities: list | None = None,
         epochs: int = 50,
         batch_size: int = 8,
         lr: float = 1e-4,
         device: str = "cpu",
-        output: Optional[Union[str, "Path"]] = None,
+        output: Union[str, Path] | None = None,
         tiles_per_city: int = 100,
-        providers: Optional[list] = None,
+        providers: list | None = None,
     ) -> dict:
         """Collect training tiles and train the U-Net height predictor.
 
@@ -2844,12 +2915,14 @@ class TerrainSession:
         dict with ``best_val_loss``, ``epochs_trained``, ``n_train``,
         ``n_val``, ``checkpoint``.
         """
-        from city2stl.skyline.height.train import (
-            TrainConfig,
-            train as _train,
-            _DEFAULT_CITIES,
-        )
         from app.server.core.height.train import collect_tiles
+        from city2stl.skyline.height.train import (
+            _DEFAULT_CITIES,
+            TrainConfig,
+        )
+        from city2stl.skyline.height.train import (
+            train as _train,
+        )
 
         cities = cities or ["Barcelona"]
         providers = providers or ["ndsm", "wsf3d"]
@@ -2902,11 +2975,11 @@ class TerrainSession:
 
     def load_stl(
         self,
-        path: Union[str, "Path"],
-        bbox: Optional[dict] = None,
+        path: Union[str, Path],
+        bbox: dict | None = None,
         up_axis: str = "z",
         resolution_m: float = 5.0,
-    ) -> "TerrainSession":
+    ) -> TerrainSession:
         """Import an STL (or any trimesh-supported mesh) and rasterize to a heightmap.
 
         The mesh's XY extent is mapped to the geographic bbox so the result
@@ -2951,8 +3024,8 @@ class TerrainSession:
             f"{n_valid}/{total} surface pixels ({pct:.0f}%)  "
             f"Z-range [{np.nanmin(heightmap):.2f}, {np.nanmax(heightmap):.2f}]"
         )
-        self.stl_heightmap: Optional[np.ndarray] = heightmap
-        self.stl_mask: Optional[np.ndarray] = mask
+        self.stl_heightmap: np.ndarray | None = heightmap
+        self.stl_mask: np.ndarray | None = mask
         return self
 
     def preview_stl(self) -> None:
@@ -2986,7 +3059,7 @@ class TerrainSession:
         method: str = "idw",
         use_dem_baseline: bool = True,
         power: float = 2.0,
-    ) -> "TerrainSession":
+    ) -> TerrainSession:
         """Fill NaN gaps in ``self.stl_heightmap`` using deterministic infill.
 
         Parameters
@@ -3051,7 +3124,7 @@ class TerrainSession:
             f"✓ Infill complete: {nan_before} NaN → {nan_after} NaN  "
             f"Z-range [{float(np.nanmin(filled)):.2f}, {float(np.nanmax(filled)):.2f}]"
         )
-        self.infilled_heights: Optional[np.ndarray] = filled
+        self.infilled_heights: np.ndarray | None = filled
         return self
 
     def slice(self) -> dict:
@@ -3087,7 +3160,7 @@ class TerrainSession:
                       f"{e['stderr'][:200]}")
         return result
 
-    def run_all(self) -> "TerrainSession":
+    def run_all(self) -> TerrainSession:
         """Run the full pipeline: fetch_dem → export_obj → verify → slice.
 
         Configure slicer via settings['slicer']['slicer_config'] before calling.

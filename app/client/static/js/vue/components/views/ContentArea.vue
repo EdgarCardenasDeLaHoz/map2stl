@@ -14,7 +14,7 @@
         <h3>📋 All Regions</h3>
         <div class="regions-actions">
           <input type="text" id="regionsSearch" placeholder="Search regions..." class="regions-search">
-          <button id="refreshRegionsBtn" class="btn btn-secondary" title="Refresh list">🔄</button>
+          <button id="refreshRegionsBtn" class="btn btn-secondary" aria-label="Refresh region list" title="Refresh list">🔄</button>
         </div>
       </div>
       <div class="regions-table-wrapper">

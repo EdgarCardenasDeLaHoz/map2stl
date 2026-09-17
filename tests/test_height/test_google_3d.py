@@ -2,28 +2,45 @@
 
 All tests use synthetic data — no network or API key required.
 """
-import io
 import math
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 import trimesh
-
-import sys
-from pathlib import Path
 
 _STRM2STL_ROOT = Path(__file__).parent.parent.parent
 for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from city2stl.skyline.height.providers.google_3d import (
+from city2stl.skyline.height.providers.google_3d import (  # noqa: E402
     Google3DProvider,
+    _accumulate_mesh,
+    _bv_intersects_bbox,
+    _finish_dsm,
+    _looks_built,
+    _new_dsm_acc,
+    _sample_spacing_m,
+    _target_error_m,
     ecef_to_wgs84,
     wgs84_to_ecef,
-    _bv_intersects_bbox,
-    _meshes_to_dsm,
-    _get_api_key,
 )
+
+
+def _meshes_to_dsm(meshes, bbox, dim):
+    """Bin whole meshes at once, the way the tests want to read.
+
+    The provider bins one tile at a time and discards it, so that peak memory
+    follows the download chunk rather than the tile budget. These are the same
+    three calls it makes, gathered up for tests that have only a mesh or two.
+    """
+    acc = _new_dsm_acc(dim)
+    spacing_m = _sample_spacing_m(bbox, dim)
+    for mesh in meshes:
+        _accumulate_mesh(acc, mesh, bbox, dim, spacing_m)
+    return _finish_dsm(acc, dim)
 
 
 # ── ECEF ↔ WGS84 transforms ────────────────────────────────────
@@ -176,13 +193,62 @@ class TestRaycastDSM:
         cx, cy, cz = wgs84_to_ecef(2.17, 41.385, 50.0)
         box = trimesh.creation.box(extents=[50, 50, 50])
         box.apply_translation([cx, cy, cz])
-        # NOTE: This box is in ECEF, faces won't perfectly align with
-        # lat/lon grid, but it validates the ray-cast pipeline
+        # NOTE: This box is in ECEF, so its faces do not align with the
+        # lat/lon grid; the test is that binning it produces a raster of
+        # the right shape without raising.
         bbox = (41.390, 41.380, 2.175, 2.165)
         dsm = _meshes_to_dsm([box], bbox, (10, 10))
         assert dsm.shape == (10, 10)
         # At least some pixels should have hits (or all NaN if box too small
         # for the grid spacing — both are valid outputs)
+
+
+# ── Level of detail and coverage ────────────────────────────────
+
+class TestTargetError:
+    def test_scales_with_output_cell(self):
+        """A coarser grid stops the walk higher up the tile tree."""
+        bbox = (41.400, 41.300, 2.200, 2.100)
+        coarse = _target_error_m(bbox, (64, 64))
+        fine = _target_error_m(bbox, (1024, 1024))
+        assert coarse > fine
+
+    def test_clamped_both_ends(self):
+        """Extreme grids stay inside the useful part of the tree."""
+        bbox = (41.400, 41.300, 2.200, 2.100)
+        assert _target_error_m(bbox, (4, 4)) <= 64.0
+        assert _target_error_m(bbox, (8192, 8192)) >= 4.0
+
+
+class TestLooksBuilt:
+    """Outside Google's photorealistic cities the tiles are bare terrain.
+
+    The fetch succeeds either way, so relief inside a block-sized window is
+    what separates a city from the global base mesh.
+    """
+
+    bbox = (41.400, 41.390, 2.180, 2.170)  # roughly 1 km across
+
+    def test_flat_terrain_rejected(self):
+        raster = np.zeros((128, 128), dtype=np.float32)
+        assert not _looks_built(raster, self.bbox)
+
+    def test_gentle_relief_rejected(self):
+        """A few metres of variation is terrain, not buildings."""
+        rng = np.random.default_rng(0)
+        raster = rng.uniform(0.0, 3.0, size=(128, 128)).astype(np.float32)
+        assert not _looks_built(raster, self.bbox)
+
+    def test_buildings_accepted(self):
+        """Blocks of tall roofs over open ground read as built."""
+        raster = np.zeros((128, 128), dtype=np.float32)
+        raster[16:48, 16:48] = 60.0
+        raster[80:112, 80:112] = 40.0
+        assert _looks_built(raster, self.bbox)
+
+    def test_empty_raster_rejected(self):
+        raster = np.full((128, 128), np.nan, dtype=np.float32)
+        assert not _looks_built(raster, self.bbox)
 
 
 # ── Provider interface ──────────────────────────────────────────

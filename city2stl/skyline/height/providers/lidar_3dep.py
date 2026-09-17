@@ -25,14 +25,17 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import Tuple
 
 import numpy as np
 import requests
 
 from city2stl.skyline.height import BBox, HeightResult, _resample
+
 from ._cache import (
-    register_ttl, make_cache_key, read_height_result, write_height_result,
+    make_cache_key,
+    read_height_result,
+    register_ttl,
+    write_height_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,7 +107,7 @@ class LiDAR3DEPProvider:
     def covers(self, bbox: BBox) -> bool:
         return _is_in_us(bbox)
 
-    def fetch_heights(self, bbox: BBox, dim: Tuple[int, int]) -> HeightResult:
+    def fetch_heights(self, bbox: BBox, dim: tuple[int, int]) -> HeightResult:
         north, south, east, west = bbox
         cache_key = make_cache_key(_NAMESPACE, north, south, east, west,
                                    {"dim": list(dim)})
@@ -139,15 +142,15 @@ class LiDAR3DEPProvider:
 
         confidence = np.where(np.isnan(ndsm), 0.0, _CONFIDENCE).astype(np.float32)
 
-        lat_span = north - south
-        resolution_m = (lat_span * 111_000) / dim[0]
-
-        result = HeightResult(ndsm, confidence, self.name, resolution_m)
+        # The reported resolution is the source products' (COP30 minus SRTM),
+        # not the output grid spacing. Sampling a 30 m difference onto a 512-cell
+        # grid does not make it finer, and the merge ranks on this field.
+        result = HeightResult(ndsm, confidence, self.name, _RESOLUTION_M)
         write_height_result(_NAMESPACE, cache_key, result)
         return result
 
 
-def _empty_result(dim: Tuple[int, int]) -> HeightResult:
+def _empty_result(dim: tuple[int, int]) -> HeightResult:
     h, w = dim
     return HeightResult(
         raster=np.full((h, w), np.nan, dtype=np.float32),

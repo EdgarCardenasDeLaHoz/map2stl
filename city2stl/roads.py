@@ -1,15 +1,10 @@
 import numpy as np
-import matplotlib.pyplot as plt
+from shapely.geometry import MultiPolygon, Polygon
 
-from shapely.ops import unary_union
-from shapely.geometry import Polygon, MultiPolygon
-
-import pandas as pd
-import osmnx as ox
-
-# Legacy imports -- only loaded at call time to avoid breaking the module
-# when descartes (required by city2stl.buildings) is not installed.
-# _HIGHWAY_WIDTHS and get_road_width_m above do NOT require these imports.
+# Legacy imports -- only loaded at call time so that _HIGHWAY_WIDTHS and
+# get_road_width_m stay importable without the notebook-era mesh stack.
+# (This guard originally also worked around descartes, which city2stl.buildings
+# needed; that dependency was deleted with the dead code on 2026-09-01.)
 # from . import create   <-- moved inside get_z_values()
 # from numpy2stl import numpy2stl as n2s  <-- moved inside functions that use it
 
@@ -48,9 +43,9 @@ def get_road_model(gdf_roads, scale):
 
   TOLERANCE_M = 0.1            # Simplification tolerance in meters
   ROAD_WIDTHS = {
-      'motorway': 12, 'trunk': 10, 'primary': 8, 
+      'motorway': 12, 'trunk': 10, 'primary': 8,
       'secondary': 7, 'tertiary': 6, 'residential': 4, 'service': 2
-  }  
+  }
 
   gdf_roads2 = get_road_segments(gdf_roads, ROAD_WIDTHS, TOLERANCE_M)
   vx, fs = render_vertices(gdf_roads2)
@@ -65,20 +60,20 @@ def get_road_segments(gdf_roads, ROAD_WIDTHS, TOLERANCE_M):
   def get_width(highway_attr):
         if isinstance(highway_attr, list):
             highway_attr = highway_attr[0] # Take the first classification
-        return ROAD_WIDTHS.get(highway_attr, 3)	
+        return ROAD_WIDTHS.get(highway_attr, 3)
 
   gdf_roads = gdf_roads.to_crs(epsg=3857)
 
   # Apply the buffer using the helper function
   gdf_roads['geometry'] = gdf_roads.apply(
       lambda row: row.geometry.buffer( get_width(row.highway),  join_style=2, cap_style=2 ), axis=1)
-    
+
   gdf_roads = gdf_roads.to_crs(epsg=4326)
   # --- 4. PROCESSING ROADS (Line to Polygon) ---
   gdf_roads_exploded = gdf_roads.explode(index_parts=False)
 
-  return gdf_roads_exploded 
-    
+  return gdf_roads_exploded
+
 
 def geom_to_points(geom):
     """Converts a Polygon or MultiPolygon into the [[x],[y]] format."""
@@ -109,9 +104,9 @@ def get_z_values(polygon_list, im, bounds_NW):
         Nc, Wc = create.coor2im(bounds_NW , im_lims, xy_list)
         Nc = Nc.clip(0,im.shape[0]-1)
         Wc = Wc.clip(0,im.shape[1]-1)
-        
+
         ############################
-        z = im[Nc, Wc] 
+        z = im[Nc, Wc]
         z_list.append(z)
 
     return  z_list
@@ -125,8 +120,8 @@ def polygon_to_vertices(polygon_list):
         x,y,z = poly
 
         pts = np.array([x,y,z]).T
-        
-        tris = n2s.polygon_to_complex(pts, perimeters=None, z_margin=.5)	
+
+        tris = n2s.polygon_to_complex(pts, perimeters=None, z_margin=.5)
         triangles.append(tris)
 
     triangles = np.concatenate(triangles)
@@ -136,10 +131,10 @@ def polygon_to_vertices(polygon_list):
 
 def render_vertices(gdf):
     import numpy2stl as n2s  # Import MODULE not function
-    
+
     triangles = []
-    
-    for n,row in enumerate(gdf.itertuples(index=False)):
+
+    for _n,row in enumerate(gdf.itertuples(index=False)):
 
         x,y = row.geometry.exterior.coords.xy
 
@@ -147,10 +142,10 @@ def render_vertices(gdf):
           x,y = x[:-1],y[:-1]
           z1 = row.z
           pts = np.array([x,y,z1]).T
-          
-          tris = n2s.polygon_to_complex(pts, perimeters=None, z_margin=.5)	
+
+          tris = n2s.polygon_to_complex(pts, perimeters=None, z_margin=.5)
           triangles.append(tris)
-        except:
+        except Exception:
             pass
 
     triangles = np.concatenate(triangles)

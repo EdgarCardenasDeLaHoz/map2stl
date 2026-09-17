@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipeline results — strm2stl</title>
+<style>
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --ink: #1c2024;
+  --muted: #6b7280;
+  --line: #e3e6ea;
+  --accent: #1f6feb;
+  --good: #1a7a1a;
+  --medium: #856404;
+  --weak: #cc0000;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .01em; }
+header a { color: var(--accent); text-decoration: none; }
+header a:hover { text-decoration: underline; }
+.totals { display: flex; gap: 14px; flex-wrap: wrap; margin-left: auto; align-items: center; }
+.chip { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.chip b { color: var(--ink); font-size: 13px; }
+button.ghost {
+  font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 5px; color: var(--ink);
+}
+button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+.body { flex: 1 1 auto; display: flex; min-height: 0; }
+
+aside {
+  width: 268px; flex: 0 0 268px; overflow-y: auto;
+  background: var(--panel); border-right: 1px solid var(--line); padding: 10px;
+}
+aside input[type=search] {
+  width: 100%; font: inherit; padding: 6px 8px; margin-bottom: 10px;
+  border: 1px solid var(--line); border-radius: 5px;
+}
+.sec { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--muted); margin: 14px 0 6px; }
+.navitem {
+  display: flex; align-items: baseline; gap: 6px; padding: 5px 8px;
+  border-radius: 5px; cursor: pointer; font-size: 13px;
+}
+.navitem:hover { background: #eef2f7; }
+.navitem.active { background: #e3edfd; color: var(--accent); font-weight: 600; }
+.navitem .sub { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.tabs { display: flex; gap: 2px; padding: 8px 16px 0; border-bottom: 1px solid var(--line);
+        background: var(--panel); flex: 0 0 auto; align-items: center; }
+.tab {
+  padding: 7px 14px; cursor: pointer; font-size: 13px; border: 1px solid transparent;
+  border-bottom: none; border-radius: 6px 6px 0 0; margin-bottom: -1px; color: var(--muted);
+}
+.tab.active { background: var(--bg); border-color: var(--line); color: var(--ink); font-weight: 600; }
+.filters { margin-left: auto; display: flex; gap: 10px; align-items: center;
+           font-size: 12px; color: var(--muted); padding-bottom: 6px; }
+.filters label { cursor: pointer; user-select: none; }
+
+.pane { flex: 1 1 auto; overflow-y: auto; padding: 16px; min-height: 0; }
+.pane[hidden] { display: none; }
+iframe#frame { width: 100%; height: 100%; border: 0; background: #fff; }
+.paneframe { flex: 1 1 auto; min-height: 0; }
+
+h2 { font-size: 16px; margin: 0 0 4px; }
+h3 { font-size: 13px; margin: 18px 0 8px; color: var(--muted);
+     text-transform: uppercase; letter-spacing: .05em; }
+.meta { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+
+.cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px; cursor: pointer;
+}
+.card:hover { border-color: var(--accent); }
+.card h4 { margin: 0 0 6px; font-size: 14px; }
+.card .nums { font-size: 12px; color: var(--muted); }
+.qbar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin: 8px 0 6px;
+        background: var(--line); }
+.qbar i { display: block; }
+.qbar i.good { background: #2ea043; }
+.qbar i.medium { background: #e6b428; }
+.qbar i.weak { background: #d62828; }
+
+table { border-collapse: collapse; width: 100%; background: var(--panel);
+        border: 1px solid var(--line); border-radius: 8px; overflow: hidden; font-size: 13px; }
+th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--line); }
+th { background: #f0f2f5; font-size: 11px; text-transform: uppercase;
+     letter-spacing: .05em; color: var(--muted); }
+tr:last-child td { border-bottom: none; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: #f4f8ff; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.q-good { color: var(--good); font-weight: 600; }
+.q-medium { color: var(--medium); font-weight: 600; }
+.q-weak { color: var(--weak); font-weight: 600; }
+.warn { background: rgba(214, 40, 40, .14); }
+.caution { background: rgba(230, 180, 40, .2); }
+
+.seedblock { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+             padding: 12px; margin-bottom: 14px; }
+.seedhead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.seedhead b { font-size: 14px; }
+.seedhead .stat { font-size: 12px; color: var(--muted); }
+.strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.shot { flex: 0 0 auto; }
+.shot img { display: block; height: 120px; width: 160px; object-fit: cover;
+            border: 1px solid var(--line); border-radius: 5px; cursor: zoom-in; background: #fff; }
+.shot span { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+/* Panorama renders are about 5:1; the minimaps and the reconstruction are square. Giving them
+   one shared row shrinks the panoramas to nothing, so they get separate lanes. */
+.panolayout { display: flex; gap: 12px; align-items: flex-start; }
+.rail { flex: 0 0 132px; display: flex; flex-direction: column; gap: 8px; }
+.rail figure { margin: 0; }
+.rail img { width: 132px; height: 132px; object-fit: contain; background: #fff;
+            border: 1px solid var(--line); border-radius: 4px; cursor: zoom-in; }
+.wide { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.wide figure { margin: 0; }
+.wide img { width: 100%; height: auto; max-height: 210px; object-fit: contain; background: #fff;
+            border: 1px solid var(--line); border-radius: 4px; cursor: zoom-in; }
+figcaption { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.viewgrid { display: grid; gap: 8px;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.viewgrid figure { margin: 0; }
+.viewgrid img { width: 100%; height: 96px; object-fit: cover; border: 1px solid var(--line);
+                border-radius: 4px; cursor: zoom-in; background: #fff; }
+.gallery { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.gallery img { width: 100%; height: 110px; object-fit: cover; border: 1px solid var(--line);
+               border-radius: 4px; cursor: zoom-in; }
+
+#lightbox {
+  position: fixed; inset: 0; background: rgba(12, 14, 18, .92); display: none;
+  align-items: center; justify-content: center; z-index: 50; cursor: zoom-out; padding: 20px;
+}
+#lightbox.open { display: flex; flex-direction: column; }
+#lightbox img { max-width: 100%; max-height: calc(100% - 30px); object-fit: contain; }
+#lightbox .cap { color: #d7dbe0; font-size: 12px; margin-top: 8px; }
+
+.empty { color: var(--muted); padding: 20px 0; }
+.err { color: var(--weak); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Pipeline results</h1>
+  <a href="/">&#8592; app</a>
+  <span id="scope" class="chip"></span>
+  <div class="totals" id="totals"></div>
+  <button class="ghost" id="reload">Rescan</button>
+</header>
+
+<div class="body">
+  <aside id="sidebar"></aside>
+  <main>
+    <div class="tabs">
+      <div class="tab active" data-tab="overview">Overview</div>
+      <div class="tab" data-tab="panoramas">Panoramas</div>
+      <div class="tab" data-tab="views">Street views</div>
+      <div class="tab" data-tab="report">Rendered report</div>
+      <div class="filters">
+        <span>quality</span>
+        <label><input type="checkbox" class="qf" value="good" checked> good</label>
+        <label><input type="checkbox" class="qf" value="medium" checked> medium</label>
+        <label><input type="checkbox" class="qf" value="weak" checked> weak</label>
+      </div>
+    </div>
+    <div class="pane" id="pane-overview"></div>
+    <div class="pane" id="pane-panoramas" hidden></div>
+    <div class="pane" id="pane-views" hidden></div>
+    <div class="pane paneframe" id="pane-report" hidden><iframe id="frame" title="report"></iframe></div>
+  </main>
+</div>
+
+<div id="lightbox"><img alt=""><div class="cap"></div></div>
+
+<script src="/static/js/reports.js"></script>
+</body>
+</html>

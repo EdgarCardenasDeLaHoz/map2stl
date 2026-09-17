@@ -103,6 +103,9 @@
     <details class="composite-layer-group">
       <summary class="composite-layer-header">🌿 Land cover</summary>
       <div class="composite-layer-body">
+        <label class="composite-toggle-row">
+          <input type="checkbox" id="compositeLandcoverEnabled" checked aria-label="Enable land cover contribution"> Enable
+        </label>
         <div class="composite-sliders">
           <span class="composite-slider-label">Tree height</span>
           <input type="range" id="compositeTreeHeight" min="0" max="40" value="8" step="0.5" aria-label="Composite tree height">
@@ -118,6 +121,9 @@
     <details class="composite-layer-group">
       <summary class="composite-layer-header">🛰 Satellite vegetation</summary>
       <div class="composite-layer-body">
+        <label class="composite-toggle-row">
+          <input type="checkbox" id="compositeSatEnabled" checked aria-label="Enable satellite vegetation contribution"> Enable
+        </label>
         <div class="composite-sliders">
           <span class="composite-slider-label">Veg height</span>
           <input type="range" id="compositeVegHeight" min="0" max="30" value="5" step="0.5" aria-label="Composite vegetation height">
@@ -127,6 +133,33 @@
           <span id="compositeSatWeightLabel" class="composite-slider-value">0.0</span>
         </div>
         <canvas id="compositeHistSatellite" class="composite-histogram" width="240" height="20" title="Satellite vegetation contribution distribution"></canvas>
+      </div>
+    </details>
+
+    <details class="composite-layer-group">
+      <summary class="composite-layer-header">🥾 Trails</summary>
+      <div class="composite-layer-body">
+        <!-- Uses the relief already rasterized by the Trails layer, so the sign
+             and depth come from the Trails fetch section. Weight starts at 0:
+             having trails loaded to look at must not silently carve them into
+             an export. -->
+        <div class="composite-footer-hint" style="margin:0 0 4px;">Load the Trails layer first — depth comes from its Relief (m) setting</div>
+
+        <label class="composite-toggle-row">
+          <input type="checkbox" id="compositeTrailsEnabled" checked aria-label="Enable trails contribution"> Enable
+        </label>
+        <label class="composite-toggle-row">
+          <input type="checkbox" id="compositeTrailsSkiEnabled" checked aria-label="Enable ski piste contribution"> Ski pistes
+        </label>
+        <label class="composite-toggle-row">
+          <input type="checkbox" id="compositeTrailsHikingEnabled" checked aria-label="Enable hiking path contribution"> Hiking paths
+        </label>
+        <div class="composite-sliders">
+          <span class="composite-slider-label">Weight</span>
+          <input type="range" id="compositeTrailsWeight" min="0" max="5" value="0" step="0.1" aria-label="Composite trails weight">
+          <span id="compositeTrailsWeightLabel" class="composite-slider-value">0.0</span>
+        </div>
+        <canvas id="compositeHistTrails" class="composite-histogram" width="240" height="20" title="Trails contribution distribution"></canvas>
       </div>
     </details>
 

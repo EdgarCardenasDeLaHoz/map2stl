@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -56,21 +55,26 @@ def _dem_sources() -> dict:
         h5_ok = bool(H5_SRTM_FILE and Path(H5_SRTM_FILE).exists())
     except Exception:
         h5_ok = False
+    from app.server.core import tile_store
+    local = tile_store.status()
     return {
-        "local": {"label": "Local SRTM Tiles", "available": True,
-                  "note": "Coverage is limited; large/continent-scale boxes may be empty."},
+        "local": {"label": "Local SRTM Tiles", "available": local["available"],
+                  "note": local["note"] if not local["available"] else
+                  f"{local['note']}. Coverage is limited; large/continent-scale boxes may be empty."},
         "h5_local": {"label": "Local SRTM H5 (~90m)", "available": h5_ok},
         "opentopo": {"label": "OpenTopography (SRTM/COP/ALOS)", "available": has_key,
                      "note": None if has_key else "Add an API key in the Keys panel to enable."},
     }
 
 
-def _coverage_probe(request: Request) -> Optional[dict]:
+def _coverage_probe(request: Request) -> dict | None:
     """If bbox query params are present, report its size + a coverage guess."""
     q = request.query_params
     try:
-        north = float(q["north"]); south = float(q["south"])
-        east = float(q["east"]);   west = float(q["west"])
+        north = float(q["north"])
+        south = float(q["south"])
+        east = float(q["east"])
+        west = float(q["west"])
     except (KeyError, ValueError, TypeError):
         return None
     span_ns = abs(north - south)

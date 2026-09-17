@@ -154,60 +154,6 @@ window._setSidebarViews = function _setSidebarViews(state) {
 };
 
 // ---------------------------------------------------------------------------
-// cycleSidebarState
-// ---------------------------------------------------------------------------
-
-/**
- * Cycle the sidebar through normal → expanded → hidden → normal.
- * Updates button icon/label and calls _setSidebarViews.
- */
-window.cycleSidebarState = function cycleSidebarState() {
-    const sidebar = document.getElementById('sidebar');
-    const toggleBtn = document.getElementById('sidebarToggleBtn');
-    const openBtn = document.getElementById('openSidebarBtn');
-    const icon = toggleBtn.querySelector('.state-icon');
-    const label = toggleBtn.querySelector('.state-label');
-
-    let sidebarState = window.getSidebarState?.() || 'normal';
-
-    if (sidebarState === 'normal') {
-        sidebarState = 'expanded';
-        sidebar.classList.remove('collapsed');
-        sidebar.classList.add('expanded');
-        openBtn.classList.add('hidden');
-        icon.textContent = '⇐';
-        label.textContent = 'Collapse';
-    } else if (sidebarState === 'expanded') {
-        sidebarState = 'hidden';
-        sidebar.classList.remove('expanded');
-        sidebar.classList.add('collapsed');
-        openBtn.classList.remove('hidden');
-        icon.textContent = '✖';
-        label.textContent = 'Hide';
-    } else {
-        sidebarState = 'normal';
-        sidebar.classList.remove('collapsed', 'expanded');
-        openBtn.classList.add('hidden');
-        icon.textContent = '⇔';
-        label.textContent = 'Expand';
-    }
-
-    window.setSidebarState?.(sidebarState);
-    window._setSidebarViews?.(sidebarState);
-
-    // Sidebar width changes require map/canvas relayout.
-    requestAnimationFrame(() => {
-        window._globalMap?.invalidateSize?.();
-        window.emitStackUpdate?.();
-        window.dispatchEvent(new Event('resize'));
-    });
-    setTimeout(() => {
-        window._globalMap?.invalidateSize?.();
-        window.emitStackUpdate?.();
-    }, 140);
-};
-
-// ---------------------------------------------------------------------------
 // renderSidebarTable
 // ---------------------------------------------------------------------------
 
@@ -453,6 +399,22 @@ window.setupDemSubtabs = function setupDemSubtabs() {
             ? forceCollapsed
             : !wrapper.classList.contains('settings-collapsed');
         wrapper.classList.toggle('settings-collapsed', collapsed);
+
+        // A dragged, restored, or auto-clamped panel carries an inline width,
+        // and an inline declaration outranks the collapsed rule's width:0, so
+        // the panel would stay open as an empty gap with its contents hidden.
+        // Stash the width on collapse and put it back on expand. The resize
+        // handle goes with it; a 5px col-resize sliver against a closed panel
+        // is dead weight.
+        if (collapsed) {
+            if (wrapper.style.width) wrapper.dataset.expandedWidth = wrapper.style.width;
+            wrapper.style.width = '';
+        } else if (wrapper.dataset.expandedWidth) {
+            wrapper.style.width = wrapper.dataset.expandedWidth;
+        }
+        document.getElementById('settingsPanelResizeHandle')
+            ?.classList.toggle('hidden', collapsed);
+
         const stripBtn = document.getElementById('settingsStripBtn');
         if (stripBtn) stripBtn.classList.toggle('active', !collapsed);
         document.getElementById('layersContainer')?.classList.remove('hidden');
@@ -470,14 +432,35 @@ window.setupDemSubtabs = function setupDemSubtabs() {
 
     window.toggleDemSettingsPanel = toggleSettingsPanel;
 
-    const settingsBtn = document.getElementById('settingsStripBtn');
-    if (settingsBtn) settingsBtn.addEventListener('click', toggleSettingsPanel);
-    const settingsExtBtn = document.getElementById('settingsExternalBtn');
-    if (settingsExtBtn) settingsExtBtn.addEventListener('click', toggleSettingsPanel);
-    const settingsHideBtn = document.getElementById('settingsHideBtn');
-    if (settingsHideBtn) settingsHideBtn.addEventListener('click', () => toggleSettingsPanel(true));
-    const settingsCollapsedTab = document.getElementById('settingsCollapsedTab');
-    if (settingsCollapsedTab) settingsCollapsedTab.addEventListener('click', toggleSettingsPanel);
+    // setupDemSubtabs re-runs on every entry into the Edit view so that Vue
+    // children mounted after the first pass still get wired. addEventListener
+    // does not deduplicate a fresh closure, so binding here unguarded stacked
+    // one handler per entry, and with an even number of them a single click
+    // toggled the panel shut and open again: the reopen tab looked dead on a
+    // fresh session and alive after a layer load, purely on parity. Guard each
+    // element with a dataset flag, and give every button whose intent is fixed
+    // an explicit boolean so it stays correct even if one ever slips through.
+    const bindSettingsToggle = (id, handler) => {
+        const el = document.getElementById(id);
+        if (!el || el.dataset.settingsToggleBound === '1') return;
+        el.addEventListener('click', handler);
+        el.dataset.settingsToggleBound = '1';
+    };
+
+    // The bbox bar hover-reveals; clicking its handle pins it open so that a
+    // user reading coordinates does not lose them to a stray mouse move.
+    bindSettingsToggle('demInfoHandle', () => {
+        const bar = document.getElementById('demInfoBar');
+        if (!bar) return;
+        const pinned = bar.classList.toggle('dem-info-pinned');
+        document.getElementById('demInfoHandle')
+            ?.setAttribute('aria-expanded', String(pinned));
+    });
+
+    bindSettingsToggle('settingsStripBtn', () => toggleSettingsPanel());
+    bindSettingsToggle('settingsExternalBtn', () => toggleSettingsPanel());
+    bindSettingsToggle('settingsHideBtn', () => toggleSettingsPanel(true));
+    bindSettingsToggle('settingsCollapsedTab', () => toggleSettingsPanel(false));
 
     // Keep DEM viewport usable when side panels consume too much width.
     window._ensureDemViewportSpace = function _ensureDemViewportSpace() {

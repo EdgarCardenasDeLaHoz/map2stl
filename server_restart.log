@@ -1,0 +1,672 @@
+INFO:     Will watch for changes in these directories: ['D:\\OneDrive\\Documents\\Projects\\3D Maps\\Code\\strm2stl']
+INFO:     Uvicorn running on http://127.0.0.1:9000 (Press CTRL+C to quit)
+INFO:     Started reloader process [15620] using StatReload
+2026-08-28 00:40:13,221 - INFO - Templates path: D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\app\server\..\client\templates
+2026-08-28 00:40:13,222 - INFO - Mounted /project-docs -> D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\app\server\..\..\docs_site
+2026-08-28 00:40:13,222 - INFO - Mounted /api-reference -> D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\app\server\..\..\sphinx_site
+2026-08-28 00:40:13,289 - INFO - Routers loaded: regions, terrain, cities, export, cache, settings, composite, height, diagnostics, layers
+INFO:     Started server process [9928]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:58807 - "GET / HTTP/1.1" 200 OK
+2026-08-28 00:40:24,109 - INFO - Trails cache hit: ec85fa90 (300x300)
+INFO:     127.0.0.1:58809 - "GET /api/terrain/trails?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=300&source=osm&width_m=8 HTTP/1.1" 200 OK
+2026-08-28 00:40:53,891 - INFO - Rasterized 340 trail features to 300x300 (width 65 m), 18 areal
+2026-08-28 00:40:54,368 - INFO - Rasterized 829 trail features to 300x300 (width 65 m)
+2026-08-28 00:40:54,375 - INFO - Trails total: 2.83s, 340 ski + 829 hiking via osm
+INFO:     127.0.0.1:58875 - "GET /api/terrain/trails?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=300&source=osm HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'app\server\config.py'. Reloading...
+ INFO:     127.0.0.1:49531 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49531 - "GET /static/vendor/leaflet.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49534 - "GET /static/css/vue-main.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "GET /static/vendor/primeicons.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49533 - "GET /static/css/app.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49532 - "GET /static/vendor/leaflet-draw.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49536 - "GET /static/vendor/leaflet.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49531 - "GET /static/vendor/leaflet-draw.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "GET /static/js/main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49534 - "GET /static/js/vue-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49534 - "GET /static/js/modules/core/events.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49531 - "GET /static/js/modules/core/api.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49536 - "GET /static/js/modules/core/ui-helpers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49532 - "GET /static/js/modules/dem/dem-loader.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49533 - "GET /static/js/modules/core/state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "GET /static/js/modules/core/cache.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49531 - "GET /static/js/modules/ui/presets.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49536 - "GET /static/js/modules/ui/curve-editor-state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49534 - "GET /static/js/modules/dem/dem-gridlines.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49533 - "GET /static/js/modules/layers/city-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49532 - "GET /static/js/modules/ui/curve-editor.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "GET /static/js/modules/layers/city-render.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49536 - "GET /static/js/modules/layers/composite-dem.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49534 - "GET /static/js/modules/layers/mesh-layer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49531 - "GET /static/js/modules/layers/stacked-layers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49533 - "GET /static/js/modules/layers/mesh-registration.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "GET /static/js/modules/export/model-viewer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49532 - "GET /static/js/modules/export/export-handlers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49534 - "GET /static/js/modules/regions/region-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49536 - "GET /static/js/modules/map/compare-view.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "GET /static/js/modules/layers/water-mask.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49533 - "GET /static/js/modules/dem/dem-merge.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49531 - "GET /static/js/modules/regions/regions-import-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49532 - "GET /static/js/modules/layers/hydrology-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49534 - "GET /static/js/modules/layers/water-hydrology-combined.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49533 - "GET /static/js/modules/regions/regions.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "GET /static/js/modules/map/map-globe.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49536 - "GET /static/js/modules/layers/trails-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49531 - "GET /static/js/modules/map/bbox-panel.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49532 - "GET /static/js/modules/ui/cache-inventory.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49534 - "GET /static/js/modules/ui/app-setup.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49532 - "GET /static/js/modules/events/event-listeners.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "GET /static/js/modules/events/event-listeners-map.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49531 - "GET /static/js/modules/events/event-listeners-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49533 - "GET /static/js/modules/ui/keyboard-shortcuts.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49536 - "GET /static/js/modules/events/event-listeners-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49534 - "GET /static/js/modules/ui/view-management.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "GET /static/js/app.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49532 - "GET /static/js/modules/dem/dem-main.js HTTP/1.1" 200 OK
+C:\venvs\strm2stl\Lib\site-packages\fastapi\openapi\utils.py:255: UserWarning: Duplicate Operation ID get_terrain_dem_api_terrain_dem_get for function get_terrain_dem at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\app\server\routers\terrain.py
+  warnings.warn(message, stacklevel=1)
+C:\venvs\strm2stl\Lib\site-packages\fastapi\openapi\utils.py:255: UserWarning: Duplicate Operation ID get_terrain_water_mask_api_terrain_water_mask_get for function get_terrain_water_mask at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\app\server\routers\terrain.py
+  warnings.warn(message, stacklevel=1)
+C:\venvs\strm2stl\Lib\site-packages\fastapi\openapi\utils.py:255: UserWarning: Duplicate Operation ID get_terrain_esa_land_cover_api_terrain_esa_land_cover_get for function get_terrain_esa_land_cover at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\app\server\routers\terrain.py
+  warnings.warn(message, stacklevel=1)
+INFO:     127.0.0.1:49532 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49534 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49533 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49535 - "GET /api/cities/google3d-available HTTP/1.1" 200 OK
+2026-08-28 00:51:05,733 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:49536 - "GET /api/regions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49536 - "GET /api/cache HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49535 - "GET /api/settings/default HTTP/1.1" 200 OK
+2026-08-28 00:51:10,440 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:49536 - "GET /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+2026-08-28 00:51:10,471 - INFO - DEM cache hit: 3a15e524...
+INFO:     127.0.0.1:49536 - "GET /api/terrain/dem?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&depth_scale=0.5&water_scale=0.05&subtract_water=true&dataset=esa&dem_source=h5_local&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49536 - "GET /static/js/workers/dem-render-worker.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49536 - "GET /api/cities/cached?north=39.51&south=39.43&east=-106.03&west=-106.125&simplify_tolerance=0.5&min_area=5&m_per_level=3.5 HTTP/1.1" 200 OK
+2026-08-28 00:51:10,680 - INFO - Received request for /api/terrain/water-mask
+2026-08-28 00:51:10,690 - INFO - Water mask cache hit: 4cf6fee8...
+INFO:     127.0.0.1:49535 - "GET /api/terrain/water-mask?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&dataset=esa&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 00:51:10,953 - INFO - Received request for /api/terrain/esa-land-cover
+2026-08-28 00:51:10,964 - INFO - ESA land cover cache hit: 46c54648...
+INFO:     127.0.0.1:49533 - "GET /api/terrain/esa-land-cover?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 00:51:11,252 - INFO - Hydrology cache hit: 58f2e6aa (463x600)
+INFO:     127.0.0.1:49536 - "GET /api/terrain/hydrology?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&source=hydrorivers&depression_m=-5&min_order=3&order_exponent=1.5&width_factor=0.5&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 00:51:11,298 - INFO - Hydrology cache hit: 58f2e6aa (463x600)
+INFO:     127.0.0.1:49532 - "GET /api/terrain/hydrology?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&depression_m=-5&source=hydrorivers&min_order=3&order_exponent=1.5&width_factor=0.5&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49547 - "GET /api/cities/cached?north=39.51&south=39.43&east=-106.03&west=-106.125&simplify_tolerance=0.5&min_area=5&m_per_level=3.5 HTTP/1.1" 200 OK
+2026-08-28 00:51:11,934 - INFO - Serving OSM data from .json.gz cache: 1b217f1cf0f287cb3b542aae7712d972
+INFO:     127.0.0.1:49547 - "POST /api/cities HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49547 - "POST /api/cities/raster HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49532 - "GET /static/js/workers/city-worker.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49532 - "POST /api/composite/city-raster HTTP/1.1" 200 OK
+2026-08-28 00:51:13,367 - INFO - Satellite tiles: 12/12 loaded at zoom 13
+INFO:     127.0.0.1:49534 - "GET /api/terrain/satellite?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49581 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49581 - "GET /static/vendor/leaflet.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49582 - "GET /static/vendor/leaflet-draw.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49583 - "GET /static/css/app.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49585 - "GET /static/vendor/primeicons.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49586 - "GET /static/vendor/leaflet.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "GET /static/css/vue-main.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49581 - "GET /static/vendor/leaflet-draw.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49582 - "GET /static/js/vue-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49585 - "GET /static/js/main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49582 - "GET /static/js/modules/core/events.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49585 - "GET /static/js/modules/core/api.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49581 - "GET /static/js/modules/core/cache.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49586 - "GET /static/js/modules/core/ui-helpers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49583 - "GET /static/js/modules/core/state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "GET /static/js/modules/dem/dem-loader.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49582 - "GET /static/js/modules/dem/dem-gridlines.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49585 - "GET /static/js/modules/ui/presets.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49581 - "GET /static/js/modules/ui/curve-editor-state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49586 - "GET /static/js/modules/ui/curve-editor.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49583 - "GET /static/js/modules/layers/city-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "GET /static/js/modules/layers/city-render.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49585 - "GET /static/js/modules/layers/composite-dem.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49582 - "GET /static/js/modules/layers/stacked-layers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49586 - "GET /static/js/modules/layers/mesh-registration.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49581 - "GET /static/js/modules/layers/mesh-layer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "GET /static/js/modules/export/model-viewer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49583 - "GET /static/js/modules/export/export-handlers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49585 - "GET /static/js/modules/map/compare-view.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49582 - "GET /static/js/modules/regions/region-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49586 - "GET /static/js/modules/regions/regions-import-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49581 - "GET /static/js/modules/dem/dem-merge.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49583 - "GET /static/js/modules/layers/hydrology-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "GET /static/js/modules/layers/water-mask.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49585 - "GET /static/js/modules/layers/water-hydrology-combined.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49582 - "GET /static/js/modules/layers/trails-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49586 - "GET /static/js/modules/map/map-globe.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49581 - "GET /static/js/modules/regions/regions.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49583 - "GET /static/js/modules/map/bbox-panel.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "GET /static/js/modules/ui/cache-inventory.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49582 - "GET /static/js/modules/ui/keyboard-shortcuts.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49585 - "GET /static/js/modules/ui/app-setup.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49581 - "GET /static/js/modules/events/event-listeners-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49586 - "GET /static/js/modules/events/event-listeners-map.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49583 - "GET /static/js/modules/events/event-listeners-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49585 - "GET /static/js/modules/dem/dem-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49582 - "GET /static/js/modules/ui/view-management.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "GET /static/js/modules/events/event-listeners.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49581 - "GET /static/js/app.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49581 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "GET /api/cities/google3d-available HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49582 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+2026-08-28 00:51:30,035 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:49582 - "GET /api/regions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49582 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49582 - "GET /api/cache HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "GET /api/settings/default HTTP/1.1" 200 OK
+2026-08-28 00:51:32,025 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:49582 - "GET /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49582 - "GET /api/settings/default HTTP/1.1" 200 OK
+2026-08-28 00:51:33,935 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:49584 - "GET /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+2026-08-28 00:51:33,953 - INFO - DEM cache hit: 3a15e524...
+INFO:     127.0.0.1:49584 - "GET /api/terrain/dem?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&depth_scale=0.5&water_scale=0.05&subtract_water=true&dataset=esa&dem_source=h5_local&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "GET /static/js/workers/dem-render-worker.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "GET /api/cities/cached?north=39.51&south=39.43&east=-106.03&west=-106.125&simplify_tolerance=0.5&min_area=5&m_per_level=3.5 HTTP/1.1" 200 OK
+2026-08-28 00:51:34,139 - INFO - Received request for /api/terrain/water-mask
+2026-08-28 00:51:34,150 - INFO - Water mask cache hit: 4cf6fee8...
+INFO:     127.0.0.1:49582 - "GET /api/terrain/water-mask?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&dataset=esa&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 00:51:34,447 - INFO - Hydrology cache hit: 58f2e6aa (463x600)
+INFO:     127.0.0.1:49581 - "GET /api/terrain/hydrology?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&source=hydrorivers&depression_m=-5&min_order=3&order_exponent=1.5&width_factor=0.5&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49586 - "GET /api/cities/cached?north=39.51&south=39.43&east=-106.03&west=-106.125&simplify_tolerance=0.5&min_area=5&m_per_level=3.5 HTTP/1.1" 200 OK
+2026-08-28 00:51:34,484 - INFO - Received request for /api/terrain/esa-land-cover
+2026-08-28 00:51:34,489 - INFO - ESA land cover cache hit: 46c54648...
+INFO:     127.0.0.1:49584 - "GET /api/terrain/esa-land-cover?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 00:51:34,713 - INFO - Hydrology cache hit: 58f2e6aa (463x600)
+INFO:     127.0.0.1:49583 - "GET /api/terrain/hydrology?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&depression_m=-5&source=hydrorivers&min_order=3&order_exponent=1.5&width_factor=0.5&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 00:51:34,765 - INFO - Serving OSM data from .json.gz cache: 1b217f1cf0f287cb3b542aae7712d972
+INFO:     127.0.0.1:49586 - "POST /api/cities HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49586 - "POST /api/cities/raster HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49584 - "POST /api/composite/city-raster HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49583 - "GET /static/js/workers/city-worker.js HTTP/1.1" 200 OK
+2026-08-28 00:51:38,349 - INFO - Satellite tiles: 12/12 loaded at zoom 13
+INFO:     127.0.0.1:49585 - "GET /api/terrain/satellite?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55993 - "POST /api/composite/city-raster HTTP/1.1" 200 OK
+2026-08-28 01:08:07,922 - INFO - Trails cache hit: ec85fa90 (232x300)
+INFO:     127.0.0.1:58153 - "GET /api/terrain/trails?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=300&relief_m=-2&width_m=8&source=osm&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 01:09:06,347 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-08-28 01:09:06,873 - INFO - Settings saved for region 'Breckenridge' (11 top-level keys)
+INFO:     127.0.0.1:61374 - "PUT /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/vendor/leaflet.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/css/app.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60530 - "GET /static/vendor/leaflet-draw.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/css/vue-main.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/vendor/leaflet.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60530 - "GET /static/vendor/primeicons.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/vendor/leaflet-draw.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/vue-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/core/api.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/core/events.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/core/ui-helpers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/core/cache.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/dem/dem-loader.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/core/state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/dem/dem-gridlines.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/ui/presets.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/ui/curve-editor-state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/ui/curve-editor.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/layers/city-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/layers/city-render.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/layers/stacked-layers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/layers/composite-dem.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/layers/mesh-layer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/layers/mesh-registration.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/export/export-handlers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/export/model-viewer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/map/compare-view.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/regions/region-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/regions/regions-import-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/dem/dem-merge.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/layers/water-mask.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/layers/hydrology-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/layers/water-hydrology-combined.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/layers/trails-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/map/map-globe.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/regions/regions.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/map/bbox-panel.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/ui/cache-inventory.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/ui/app-setup.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/ui/keyboard-shortcuts.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/events/event-listeners-map.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/events/event-listeners-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/events/event-listeners-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/events/event-listeners.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/modules/ui/view-management.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /static/js/modules/dem/dem-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /static/js/app.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /api/cities/google3d-available HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+2026-08-28 01:22:17,105 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:60529 - "GET /api/regions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60529 - "GET /api/cache HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60531 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60651 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60651 - "GET /static/vendor/leaflet.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60652 - "GET /static/vendor/leaflet-draw.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "GET /static/css/vue-main.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60653 - "GET /static/css/app.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60655 - "GET /static/vendor/primeicons.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60656 - "GET /static/vendor/leaflet.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60651 - "GET /static/vendor/leaflet-draw.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "GET /static/js/main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60652 - "GET /static/js/vue-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "GET /static/js/modules/core/cache.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60656 - "GET /static/js/modules/core/events.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60651 - "GET /static/js/modules/core/api.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60655 - "GET /static/js/modules/core/state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60653 - "GET /static/js/modules/core/ui-helpers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60652 - "GET /static/js/modules/dem/dem-loader.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "GET /static/js/modules/dem/dem-gridlines.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60656 - "GET /static/js/modules/ui/presets.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60655 - "GET /static/js/modules/ui/curve-editor.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60651 - "GET /static/js/modules/ui/curve-editor-state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60653 - "GET /static/js/modules/layers/city-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60652 - "GET /static/js/modules/layers/city-render.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60651 - "GET /static/js/modules/layers/mesh-registration.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60656 - "GET /static/js/modules/layers/composite-dem.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60655 - "GET /static/js/modules/layers/mesh-layer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60653 - "GET /static/js/modules/export/export-handlers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "GET /static/js/modules/layers/stacked-layers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60652 - "GET /static/js/modules/export/model-viewer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60651 - "GET /static/js/modules/map/compare-view.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60656 - "GET /static/js/modules/regions/region-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60653 - "GET /static/js/modules/dem/dem-merge.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60655 - "GET /static/js/modules/regions/regions-import-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "GET /static/js/modules/layers/water-mask.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60652 - "GET /static/js/modules/layers/hydrology-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60656 - "GET /static/js/modules/layers/trails-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60651 - "GET /static/js/modules/layers/water-hydrology-combined.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60653 - "GET /static/js/modules/map/map-globe.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "GET /static/js/modules/map/bbox-panel.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60652 - "GET /static/js/modules/ui/cache-inventory.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60655 - "GET /static/js/modules/regions/regions.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60653 - "GET /static/js/modules/events/event-listeners-map.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60651 - "GET /static/js/modules/ui/keyboard-shortcuts.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60656 - "GET /static/js/modules/ui/app-setup.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60652 - "GET /static/js/modules/events/event-listeners-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "GET /static/js/modules/events/event-listeners-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60655 - "GET /static/js/modules/events/event-listeners.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60653 - "GET /static/js/modules/ui/view-management.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60651 - "GET /static/js/modules/dem/dem-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60656 - "GET /static/js/app.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60656 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60653 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60651 - "GET /api/cities/google3d-available HTTP/1.1" 200 OK
+2026-08-28 01:25:13,522 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:60651 - "GET /api/regions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60651 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:60651 - "GET /api/cache HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60653 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60669 - "GET /api/settings/default HTTP/1.1" 200 OK
+2026-08-28 01:25:20,858 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:60670 - "GET /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60670 - "GET /api/settings/default HTTP/1.1" 200 OK
+2026-08-28 01:25:23,247 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:60669 - "GET /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+2026-08-28 01:25:23,270 - INFO - DEM cache hit: 3a15e524...
+INFO:     127.0.0.1:60669 - "GET /api/terrain/dem?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&depth_scale=0.5&water_scale=0.05&subtract_water=true&dataset=esa&dem_source=h5_local&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60669 - "GET /static/js/workers/dem-render-worker.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60669 - "GET /api/cities/cached?north=39.51&south=39.43&east=-106.03&west=-106.125&simplify_tolerance=0.5&min_area=5&m_per_level=3.5 HTTP/1.1" 200 OK
+2026-08-28 01:25:23,510 - INFO - Received request for /api/terrain/water-mask
+2026-08-28 01:25:23,518 - INFO - Water mask cache hit: 4cf6fee8...
+INFO:     127.0.0.1:60669 - "GET /api/terrain/water-mask?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&dataset=esa&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 01:25:23,807 - INFO - Hydrology cache hit: 58f2e6aa (463x600)
+INFO:     127.0.0.1:60670 - "GET /api/terrain/hydrology?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&source=hydrorivers&depression_m=-5&min_order=3&order_exponent=1.5&width_factor=0.5&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60674 - "GET /api/cities/cached?north=39.51&south=39.43&east=-106.03&west=-106.125&simplify_tolerance=0.5&min_area=5&m_per_level=3.5 HTTP/1.1" 200 OK
+2026-08-28 01:25:23,836 - INFO - Received request for /api/terrain/esa-land-cover
+2026-08-28 01:25:23,843 - INFO - ESA land cover cache hit: 46c54648...
+INFO:     127.0.0.1:60671 - "GET /api/terrain/esa-land-cover?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 01:25:24,067 - INFO - Hydrology cache hit: 58f2e6aa (463x600)
+INFO:     127.0.0.1:60673 - "GET /api/terrain/hydrology?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&depression_m=-5&source=hydrorivers&min_order=3&order_exponent=1.5&width_factor=0.5&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 01:25:24,122 - INFO - Serving OSM data from .json.gz cache: 1b217f1cf0f287cb3b542aae7712d972
+INFO:     127.0.0.1:60674 - "POST /api/cities HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60674 - "POST /api/cities/raster HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60673 - "GET /static/js/workers/city-worker.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60673 - "POST /api/composite/city-raster HTTP/1.1" 200 OK
+2026-08-28 01:25:26,767 - INFO - Satellite tiles: 12/12 loaded at zoom 13
+INFO:     127.0.0.1:60672 - "GET /api/terrain/satellite?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 01:25:56,729 - INFO - Trails cache hit: ec85fa90 (232x300)
+INFO:     127.0.0.1:61021 - "GET /api/terrain/trails?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=300&relief_m=-2&width_m=8&source=osm&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/vendor/leaflet.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/vendor/leaflet-draw.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/css/app.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/vendor/primeicons.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/css/vue-main.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/vendor/leaflet.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/vue-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/vendor/leaflet-draw.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/core/api.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/modules/core/events.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/core/cache.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/modules/core/state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/core/ui-helpers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/dem/dem-loader.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/dem/dem-gridlines.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/ui/presets.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/modules/ui/curve-editor-state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/ui/curve-editor.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/layers/city-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/modules/layers/city-render.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/layers/stacked-layers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/layers/composite-dem.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/modules/layers/mesh-layer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/layers/mesh-registration.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/export/export-handlers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/modules/export/model-viewer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/map/compare-view.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/regions/region-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/dem/dem-merge.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/regions/regions-import-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/modules/layers/water-mask.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/modules/layers/hydrology-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/layers/water-hydrology-combined.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/layers/trails-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/map/map-globe.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/regions/regions.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/modules/map/bbox-panel.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/ui/cache-inventory.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/modules/ui/app-setup.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/ui/keyboard-shortcuts.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/events/event-listeners-map.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/modules/events/event-listeners-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/events/event-listeners-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/modules/events/event-listeners.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61763 - "GET /static/js/modules/ui/view-management.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /static/js/modules/dem/dem-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /static/js/app.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /api/cities/google3d-available HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+2026-08-28 01:28:47,682 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:61762 - "GET /api/regions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61762 - "GET /api/cache HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61764 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+2026-08-28 01:29:10,603 - WARNING - Overpass endpoint https://overpass-api.de/api unreachable: HTTPSConnectionPool(host='overpass-api.de', port=443): Max retries exceeded with url: /api (Caused by ConnectTimeoutError(<HTTPSConnection(host='overpass-api.de', port=443) at 0x179ef980a40>, 'Connection to overpass-api.de timed out. (connect timeout=10)'))
+2026-08-28 01:31:12,991 - INFO - OSM ski trails: no features ('overpass.kumi.systems' responded: 500 Internal Server Error Internal Server Error)
+2026-08-28 01:32:47,815 - INFO - OSM hiking trails: no features ('overpass.kumi.systems' responded: 502 Bad Gateway )
+2026-08-28 01:32:49,383 - INFO - Rasterized 30 trail features to 600x600 (width 32 m)
+2026-08-28 01:32:49,388 - INFO - Trails total: 228.79s, 0 ski + 30 hiking via usfs
+INFO:     127.0.0.1:61767 - "GET /api/terrain/trails?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&relief_m=-2&width_m=8&source=all&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/vendor/leaflet.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/vendor/leaflet-draw.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/css/app.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/css/vue-main.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/vendor/primeicons.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/vendor/leaflet.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/vendor/leaflet-draw.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/vue-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/core/events.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/core/api.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/core/cache.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/core/ui-helpers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /static/js/modules/dem/dem-loader.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/core/state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52375 - "GET /static/js/modules/dem/dem-gridlines.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/ui/curve-editor-state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52375 - "GET /static/js/modules/ui/presets.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /static/js/modules/ui/curve-editor.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/layers/city-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52375 - "GET /static/js/modules/layers/stacked-layers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /static/js/modules/layers/city-render.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/layers/composite-dem.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /static/js/modules/layers/mesh-layer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52375 - "GET /static/js/modules/layers/mesh-registration.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /static/js/modules/export/export-handlers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52375 - "GET /static/js/modules/export/model-viewer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/map/compare-view.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /static/js/modules/regions/region-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/regions/regions-import-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52375 - "GET /static/js/modules/dem/dem-merge.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /static/js/modules/layers/water-mask.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52375 - "GET /static/js/modules/layers/hydrology-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/layers/water-hydrology-combined.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /static/js/modules/layers/trails-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52375 - "GET /static/js/modules/regions/regions.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/map/map-globe.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /static/js/modules/map/bbox-panel.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/ui/cache-inventory.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52375 - "GET /static/js/modules/ui/app-setup.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/ui/keyboard-shortcuts.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52375 - "GET /static/js/modules/events/event-listeners-map.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /static/js/modules/events/event-listeners-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/events/event-listeners-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /static/js/modules/events/event-listeners.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52375 - "GET /static/js/modules/ui/view-management.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /static/js/modules/dem/dem-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /static/js/app.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /api/cities/google3d-available HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+2026-08-28 10:19:40,768 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:52374 - "GET /api/regions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52369 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:52369 - "GET /api/cache HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52374 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53435 - "GET /api/settings/default HTTP/1.1" 200 OK
+2026-08-28 10:30:21,847 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:53436 - "GET /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53436 - "GET /api/settings/default HTTP/1.1" 200 OK
+2026-08-28 10:30:23,688 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:53435 - "GET /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+2026-08-28 10:30:23,832 - INFO - DEM cache hit: 3a15e524...
+INFO:     127.0.0.1:53435 - "GET /api/terrain/dem?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&depth_scale=0.5&water_scale=0.05&subtract_water=true&dataset=esa&dem_source=h5_local&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53435 - "GET /static/js/workers/dem-render-worker.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53435 - "GET /api/cities/cached?north=39.51&south=39.43&east=-106.03&west=-106.125&simplify_tolerance=0.5&min_area=5&m_per_level=3.5 HTTP/1.1" 200 OK
+2026-08-28 10:30:24,129 - INFO - Received request for /api/terrain/water-mask
+2026-08-28 10:30:24,168 - INFO - Water mask cache hit: 4cf6fee8...
+INFO:     127.0.0.1:53435 - "GET /api/terrain/water-mask?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&dataset=esa&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 10:30:24,552 - INFO - Hydrology cache hit: 58f2e6aa (463x600)
+INFO:     127.0.0.1:53436 - "GET /api/terrain/hydrology?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&source=hydrorivers&depression_m=-5&min_order=3&order_exponent=1.5&width_factor=0.5&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 10:30:24,594 - INFO - Received request for /api/terrain/esa-land-cover
+2026-08-28 10:30:24,622 - INFO - ESA land cover cache hit: 46c54648...
+INFO:     127.0.0.1:53442 - "GET /api/terrain/esa-land-cover?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53435 - "GET /api/cities/cached?north=39.51&south=39.43&east=-106.03&west=-106.125&simplify_tolerance=0.5&min_area=5&m_per_level=3.5 HTTP/1.1" 200 OK
+2026-08-28 10:30:24,877 - INFO - Hydrology cache hit: 58f2e6aa (463x600)
+INFO:     127.0.0.1:53483 - "GET /api/terrain/hydrology?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&depression_m=-5&source=hydrorivers&min_order=3&order_exponent=1.5&width_factor=0.5&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 10:30:24,959 - INFO - Trails cache hit: ec85fa90 (232x300)
+INFO:     127.0.0.1:53484 - "GET /api/terrain/trails?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=300&relief_m=-2&width_m=8&source=osm&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 10:30:25,530 - INFO - Serving OSM data from .json.gz cache: 1b217f1cf0f287cb3b542aae7712d972
+INFO:     127.0.0.1:53484 - "POST /api/cities HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53484 - "POST /api/cities/raster HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53483 - "GET /static/js/workers/city-worker.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53483 - "POST /api/composite/city-raster HTTP/1.1" 200 OK
+2026-08-28 10:30:38,259 - INFO - Satellite tiles: 12/12 loaded at zoom 13
+INFO:     127.0.0.1:53623 - "GET /api/terrain/satellite?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 10:30:38,443 - INFO - Satellite tiles: 12/12 loaded at zoom 13
+INFO:     127.0.0.1:53666 - "POST /api/composite/city-raster HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53666 - "POST /api/composite/city-raster HTTP/1.1" 200 OK
+2026-08-28 10:31:36,089 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-08-28 10:31:36,552 - INFO - Settings saved for region 'Breckenridge' (11 top-level keys)
+INFO:     127.0.0.1:53667 - "PUT /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+2026-08-28 10:31:40,434 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-08-28 10:31:40,612 - INFO - Settings saved for region 'Breckenridge' (11 top-level keys)
+INFO:     127.0.0.1:53667 - "PUT /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+2026-08-28 10:32:44,039 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-08-28 10:32:44,143 - INFO - Settings saved for region 'Breckenridge' (11 top-level keys)
+INFO:     127.0.0.1:53737 - "PUT /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+2026-08-28 10:32:44,472 - INFO - Rasterized 340 trail features to 800x800 (width 24 m), 18 areal
+2026-08-28 10:32:45,023 - INFO - Rasterized 829 trail features to 800x800 (width 24 m)
+2026-08-28 10:32:45,033 - INFO - Trails total: 3.68s, 340 ski + 829 hiking via osm
+INFO:     127.0.0.1:53735 - "GET /api/terrain/trails?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=800&relief_m=-2&width_m=8&source=osm&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/vendor/leaflet.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/vendor/leaflet-draw.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/css/app.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/css/vue-main.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/vendor/primeicons.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/vendor/leaflet.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/vendor/leaflet-draw.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/core/events.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/vue-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/core/api.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/modules/core/cache.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/core/ui-helpers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/modules/core/state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/modules/dem/dem-loader.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/dem/dem-gridlines.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /static/js/modules/ui/presets.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /static/js/modules/ui/curve-editor-state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/modules/layers/city-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/ui/curve-editor.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /static/js/modules/layers/composite-dem.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/layers/city-render.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/modules/layers/stacked-layers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /static/js/modules/layers/mesh-layer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/layers/mesh-registration.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/modules/export/export-handlers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /static/js/modules/export/model-viewer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/map/compare-view.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /static/js/modules/regions/regions-import-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/modules/regions/region-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/dem/dem-merge.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /static/js/modules/layers/water-mask.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/layers/water-hydrology-combined.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/modules/layers/hydrology-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/modules/regions/regions.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /static/js/modules/layers/trails-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/map/map-globe.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /static/js/modules/map/bbox-panel.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/ui/cache-inventory.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/modules/ui/app-setup.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /static/js/modules/ui/keyboard-shortcuts.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/events/event-listeners-map.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/modules/events/event-listeners-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /static/js/modules/events/event-listeners-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/modules/events/event-listeners.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /static/js/app.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /static/js/modules/ui/view-management.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /static/js/modules/dem/dem-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59838 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /api/cities/google3d-available HTTP/1.1" 200 OK
+2026-08-28 18:48:15,191 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:59832 - "GET /api/regions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59832 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59832 - "GET /api/cache HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59837 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+2026-08-28 18:48:28,513 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:59839 - "GET /api/regions HTTP/1.1" 200 OK
+2026-08-28 18:48:35,162 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:59840 - "GET /api/regions HTTP/1.1" 200 OK
+2026-08-28 18:48:51,155 - INFO - Rasterized 340 trail features to 300x300 (width 65 m), 18 areal
+2026-08-28 18:48:52,134 - INFO - Rasterized 859 trail features to 300x300 (width 65 m)
+2026-08-28 18:48:52,158 - INFO - Trails total: 9.71s, 340 ski + 859 hiking via osm, usfs
+INFO:     127.0.0.1:59841 - "GET /api/terrain/trails?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=300&relief_m=-2&width_m=8&source=all&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60152 - "GET /api/settings/default HTTP/1.1" 200 OK
+2026-08-28 18:51:15,896 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:60153 - "GET /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60153 - "GET /api/settings/default HTTP/1.1" 200 OK
+2026-08-28 18:51:19,511 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:60152 - "GET /api/regions/Breckenridge/settings HTTP/1.1" 200 OK
+2026-08-28 18:51:19,708 - INFO - DEM cache hit: 3a15e524...
+INFO:     127.0.0.1:60152 - "GET /api/terrain/dem?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&depth_scale=0.5&water_scale=0.05&subtract_water=true&dataset=esa&dem_source=h5_local&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60152 - "GET /static/js/workers/dem-render-worker.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60152 - "GET /api/cities/cached?north=39.51&south=39.43&east=-106.03&west=-106.125&simplify_tolerance=0.5&min_area=5&m_per_level=3.5 HTTP/1.1" 200 OK
+2026-08-28 18:51:20,167 - INFO - Received request for /api/terrain/water-mask
+2026-08-28 18:51:20,215 - INFO - Water mask cache hit: 4cf6fee8...
+INFO:     127.0.0.1:60152 - "GET /api/terrain/water-mask?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&dataset=esa&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 18:51:20,722 - INFO - Hydrology cache hit: 58f2e6aa (463x600)
+INFO:     127.0.0.1:60153 - "GET /api/terrain/hydrology?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&source=hydrorivers&depression_m=-5&min_order=3&order_exponent=1.5&width_factor=0.5&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 18:51:20,769 - INFO - Received request for /api/terrain/esa-land-cover
+2026-08-28 18:51:20,816 - INFO - ESA land cover cache hit: 46c54648...
+INFO:     127.0.0.1:60154 - "GET /api/terrain/esa-land-cover?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60152 - "GET /api/cities/cached?north=39.51&south=39.43&east=-106.03&west=-106.125&simplify_tolerance=0.5&min_area=5&m_per_level=3.5 HTTP/1.1" 200 OK
+2026-08-28 18:51:21,500 - INFO - Trails cache hit: f16599b4 (618x800)
+INFO:     127.0.0.1:60220 - "GET /api/terrain/trails?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=800&relief_m=-2&width_m=8&source=osm&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 18:51:22,150 - INFO - Hydrology cache hit: 58f2e6aa (463x600)
+INFO:     127.0.0.1:60221 - "GET /api/terrain/hydrology?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&depression_m=-5&source=hydrorivers&min_order=3&order_exponent=1.5&width_factor=0.5&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 18:51:22,407 - INFO - Serving OSM data from .json.gz cache: 1b217f1cf0f287cb3b542aae7712d972
+INFO:     127.0.0.1:60221 - "POST /api/cities HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60221 - "POST /api/cities/raster HTTP/1.1" 200 OK
+2026-08-28 18:51:23,697 - INFO - Satellite tiles: 12/12 loaded at zoom 13
+INFO:     127.0.0.1:60221 - "POST /api/composite/city-raster HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60220 - "GET /static/js/workers/city-worker.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60222 - "GET /api/terrain/satellite?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 18:51:38,524 - INFO - Trails cache hit: f16599b4 (618x800)
+INFO:     127.0.0.1:60254 - "GET /api/terrain/trails?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=800&relief_m=-2&width_m=8&source=osm&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+2026-08-28 18:56:22,649 - INFO - DEM cache hit: 3a15e524...
+INFO:     127.0.0.1:60740 - "GET /api/terrain/dem?north=39.51&south=39.43&east=-106.03&west=-106.125&dim=600&depth_scale=0.5&water_scale=0.05&subtract_water=true&dataset=esa&dem_source=h5_local&projection=cosine&maintain_dimensions=false&clip_valid_region=true HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60740 - "POST /api/composite/city-raster HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50787 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/vendor/leaflet.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/vendor/leaflet-draw.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/css/app.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/css/vue-main.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/vendor/primeicons.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/vendor/leaflet.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/vendor/leaflet-draw.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/vue-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/core/events.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/core/api.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/core/cache.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/core/ui-helpers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/core/state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/dem/dem-loader.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/dem/dem-gridlines.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/ui/presets.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/ui/curve-editor-state.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/ui/curve-editor.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/layers/city-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/layers/city-render.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/layers/stacked-layers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/layers/composite-dem.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/layers/mesh-layer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/layers/mesh-registration.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/export/export-handlers.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/export/model-viewer.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/map/compare-view.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/regions/region-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/regions/regions-import-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/dem/dem-merge.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/layers/water-mask.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /static/js/modules/layers/hydrology-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/layers/water-hydrology-combined.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /static/js/modules/layers/trails-overlay.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/map/map-globe.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /static/js/modules/regions/regions.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/map/bbox-panel.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/ui/cache-inventory.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /static/js/modules/ui/app-setup.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/ui/keyboard-shortcuts.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/events/event-listeners-map.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /static/js/modules/events/event-listeners-export.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /static/js/modules/events/event-listeners-ui.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/events/event-listeners.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/modules/ui/view-management.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /static/js/modules/dem/dem-main.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /static/js/app.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50807 - "GET /openapi.json HTTP/1.1" 200 OK
+2026-08-28 19:11:35,844 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+INFO:     127.0.0.1:50814 - "GET /api/regions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/cities/google3d-available HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50813 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50813 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50813 - "GET /api/cache HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50812 - "GET /api/terrain/sources HTTP/1.1" 200 OK
+2026-08-28 19:12:00,185 - INFO - Rasterized 314 trail features to 300x300 (width 52 m), 12 areal
+2026-08-28 19:12:01,281 - INFO - Rasterized 883 trail features to 300x300 (width 52 m)
+2026-08-28 19:12:01,293 - INFO - Trails total: 9.77s, 314 ski + 883 hiking via osm
+INFO:     127.0.0.1:50815 - "GET /api/terrain/trails?north=39.51&south=39.45&east=-106.02&west=-106.10&dim=300&source=osm HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50909 - "GET /openapi.json HTTP/1.1" 200 OK
+2026-08-28 19:13:37,489 - INFO - Trails cache hit: d2427a16 (300x300)
+INFO:     127.0.0.1:51368 - "GET /api/terrain/trails?north=39.51&south=39.45&east=-106.02&west=-106.10&dim=300&source=osm HTTP/1.1" 200 OK

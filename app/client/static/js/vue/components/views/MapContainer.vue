@@ -16,7 +16,7 @@
     <div id="mapSettingsPanel" class="map-settings-panel hidden">
       <div class="map-settings-header">
         <span>Map Settings</span>
-        <button id="closeMapSettingsBtn" class="map-settings-close">✕</button>
+        <button id="closeMapSettingsBtn" class="map-settings-close" aria-label="Close map settings" title="Close">✕</button>
       </div>
       <div class="map-settings-body">
         <div class="map-settings-row">

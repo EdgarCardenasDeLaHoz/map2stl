@@ -24,18 +24,18 @@ import json
 import logging
 import math
 import os
-import sys
 from itertools import product as _product
 from pathlib import Path
-from typing import Optional
 
 import cv2 as _cv2
 import numpy as np
 import requests as _requests
+
+from geo2stl.processing import apply_layer_processing, blend_layers, upsample_dem  # noqa: F401
+from geo2stl.projections import project_coordinates, project_grid
 from geo2stl.sat2stl import fetch_bbox_image
 from geo2stl.tiles import stitch_tiles_no_rasterio
-from geo2stl.projections import project_grid, project_coordinates
-from geo2stl.processing import apply_layer_processing, blend_layers, upsample_dem  # noqa: F401
+
 try:
     from skimage import filters as _ski_filters
 except ImportError:
@@ -59,7 +59,7 @@ _STRM2STL_DIR = Path(__file__).parent.parent
 _OPENTOPO_CACHE_PATH: Path = _STRM2STL_DIR / "cache" / "opentopo"
 
 # OpenTopography API key: env var > config.json > None
-_OPENTOPO_API_KEY: Optional[str] = os.environ.get("OPENTOPO_API_KEY")
+_OPENTOPO_API_KEY: str | None = os.environ.get("OPENTOPO_API_KEY")
 try:
     _cfg_path = _STRM2STL_DIR / "config.json"
     if _cfg_path.exists() and _OPENTOPO_API_KEY is None:
@@ -85,11 +85,56 @@ OPENTOPO_DATASETS: dict[str, dict] = {
 }
 
 # H5 SRTM tile store
-_H5_SRTM_ROOT: Optional[str] = os.environ.get("STRM_H5_ROOT")
-_H5_SRTM_FILE: Optional[Path] = (
+#
+# The default must stay in step with app/server/config.py:H5_SRTM_ROOT, which
+# falls back to a project-relative path (Code/../strm_h5) when STRM_H5_ROOT is
+# unset. This module previously read the env var alone, so with the var unset
+# it resolved to None while config.py resolved to a file that exists. The
+# server therefore advertised `h5_local` as available while every h5_local
+# request silently fell through to the OpenTopography network path.
+#
+# geo2stl must not import from app.server (the dependency runs the other way),
+# so the fallback is duplicated here rather than shared. Keep both in sync.
+# dem.py -> geo2stl -> strm2stl -> Code -> "3D Maps"; strm_h5 sits beside Code.
+_H5_SRTM_ROOT: str | None = os.environ.get("STRM_H5_ROOT") or str(
+    (Path(__file__).resolve().parents[3] / "strm_h5").resolve()
+)
+_H5_SRTM_FILE: Path | None = (
     Path(_H5_SRTM_ROOT) / "strm_data.h5" if _H5_SRTM_ROOT else None
 )
 _H5_SRTM_AVAILABLE: bool = bool(_H5_SRTM_FILE and _H5_SRTM_FILE.exists())
+
+
+# ---------------------------------------------------------------------------
+# Layer source registry
+# ---------------------------------------------------------------------------
+#
+# The composite DEM draws on layers this library cannot reach: the OSM
+# rasterizers read the server-side OSM cache, and geo2stl must not import from
+# app.server (the dependency runs the other way). The registry inverts that -
+# the server registers its own sources here at import, and fetch_layer_data
+# resolves them alongside the built-in elevation and water sources.
+#
+# A provider is called as provider(north, south, east, west, dim, options) and
+# must return a 2-D float array. ``options`` is the per-layer parameter bag
+# from MergeLayerSpec, for anything a scalar weight cannot express (the ESA
+# class-to-height table, a trails difficulty filter).
+
+_LAYER_SOURCES: dict = {}
+
+
+def register_layer_source(name: str, provider) -> None:
+    """Register a named layer source for fetch_layer_data.
+
+    Registering a name that already exists replaces it, so a server module can
+    be re-imported without raising.
+    """
+    _LAYER_SOURCES[name] = provider
+
+
+def registered_layer_sources() -> list:
+    """Names of every source registered beyond the built-in ones."""
+    return sorted(_LAYER_SOURCES)
 
 
 # ---------------------------------------------------------------------------
@@ -100,15 +145,27 @@ def fetch_layer_data(
     source: str,
     north: float, south: float, east: float, west: float,
     dim: int,
+    options: dict | None = None,
 ) -> np.ndarray:
     """
     Fetch a 2-D float64 numpy array for one merge layer.
 
-    Sources:
-      "local"           â€“ local SRTM elevation tiles (metres)
-      "water_esa"       â€“ ESA WorldCover water mask  (0/1 float)
-      Any key in OPENTOPO_DATASETS â€“ OpenTopography elevation (metres)
+    Built-in sources:
+      "local"     - local SRTM elevation tiles (metres)
+      "h5_local"  - the local HDF5 SRTM store, falling back to SRTMGL3
+      "water_esa" - ESA WorldCover water mask (0/1 float)
+      Any key in OPENTOPO_DATASETS - OpenTopography elevation (metres)
+
+    Anything registered through register_layer_source resolves first, so
+    the server can supply layers this library cannot reach on its own -
+    the OSM rasterizers, which read the server-side OSM cache. *options*
+    is the per-layer parameter bag those providers receive; the built-in
+    sources ignore it.
     """
+    provider = _LAYER_SOURCES.get(source)
+    if provider is not None:
+        return provider(north, south, east, west, dim, options or {})
+
     if source == "water_esa":
         return fetch_esa_water_layer(north, south, east, west, dim)
     elif source == "h5_local":
@@ -316,7 +373,7 @@ def _geo_to_tile_pixel(lat: float, lon: float):
 
 def fetch_h5_dem(
     north: float, south: float, east: float, west: float,
-    h5_file: Optional[Path] = None,
+    h5_file: Path | None = None,
 ) -> np.ndarray:
     """
     Read elevation from the local SRTM HDF5 tile store (strm_data.h5).
@@ -380,8 +437,13 @@ def fetch_h5_dem(
             f"bbox ({north},{south},{east},{west})"
         )
 
-    # Transpose to match row=lat, col=lon orientation and crop
-    mosaic = mosaic.T
+    # The datasets are already stored row=lat (north at row 0), col=lon, which is
+    # also how the mosaic is assembled above — iy walks tile rows southward, ix
+    # walks tile columns eastward. A transpose used to be applied here, which
+    # swapped the pixel axes and silently sampled a point elsewhere in the same
+    # 5-degree tile: Breckenridge read 1745-2029 m instead of its true
+    # 2860-4210 m. The result still looked like plausible terrain, which is why
+    # it survived. Verified against SRTMGL1/COP30 for the same bbox.
     x1i = max(0, x1i)
     y1i = max(0, y1i)
     x2i = min(mosaic.shape[1], x2i)
@@ -426,7 +488,7 @@ def fetch_esa_water_layer(
 
 def fetch_opentopo_dem(
     north: float, south: float, east: float, west: float,
-    demtype: str, api_key: Optional[str], dim: int
+    demtype: str, api_key: str | None, dim: int
 ) -> np.ndarray:
     """
     Download a GeoTIFF from OpenTopography's global DEM API and return a
@@ -440,12 +502,18 @@ def fetch_opentopo_dem(
     try:
         import rasterio
         from rasterio.enums import Resampling
-    except ImportError:
+    except ImportError as exc:
         raise RuntimeError("rasterio is required for OpenTopography DEM fetching. "
-                           "Install it with: pip install rasterio")
+                           "Install it with: pip install rasterio") from exc
 
+    # NOTE: `dim` is deliberately NOT part of this key. The GeoTIFF that
+    # OpenTopography returns depends only on (demtype, bbox) — `dim` never
+    # reaches the API, it only sets `out_shape` on the rasterio read below.
+    # Including it here meant every resolution change re-downloaded a
+    # byte-identical file over the network (measured: 11.9 s for a 0.2 deg
+    # bbox, versus 0.4 s once the tile is on disk).
     cache_key = hashlib.md5(
-        f"{demtype}_{north:.5f}_{south:.5f}_{east:.5f}_{west:.5f}_{dim}".encode()
+        f"{demtype}_{north:.5f}_{south:.5f}_{east:.5f}_{west:.5f}".encode()
     ).hexdigest()
     _OPENTOPO_CACHE_PATH.mkdir(parents=True, exist_ok=True)
     cache_file = _OPENTOPO_CACHE_PATH / f"{cache_key}.tif"

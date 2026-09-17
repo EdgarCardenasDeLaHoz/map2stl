@@ -29,6 +29,14 @@ requests==2.32.5
 # Geo raster I/O (used by height providers: WSF3D, Copernicus, 3DEP, nDSM)
 rasterio>=1.3
 
+# WSF3D global mosaic fallback. The per-tile endpoint publishes only 453 tiles, so most cities
+# 404 and are served from the 2.1 GB global BigTIFF by HTTP range instead. Read with tifffile
+# because GDAL cannot open that URL on Windows (schannel fails a revocation check on the DLR
+# chain); imagecodecs supplies the LZW decoder. Absent, the provider keeps its tile-only
+# behaviour and those cities get no coarse height layer.
+tifffile>=2024.1
+imagecodecs>=2024.1
+
 # Satellite imagery / geo raster I/O (skimage.io in geo2stl/tiles.py)
 scikit-image==0.26.0
 
@@ -53,3 +61,9 @@ scikit-image==0.26.0
 pyarrow[s3]>=14
 fsspec>=2023.1
 s3fs>=2023.1
+
+# Roof shape classifier - loads models/roof_shape_gbm.joblib. Absent, the
+# classifier falls back to its hand-written tiers rather than failing, so
+# these are only needed to get the trained call.
+scikit-learn==1.9.0
+joblib==1.5.3

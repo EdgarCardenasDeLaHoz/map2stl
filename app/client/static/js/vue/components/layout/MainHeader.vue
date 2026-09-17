@@ -48,7 +48,7 @@
       <div class="keys-modal">
         <div class="keys-modal-header">
           <span>🔑 Service Authentication</span>
-          <button class="keys-close-btn" @click="keysOpen = false">✕</button>
+          <button class="keys-close-btn" aria-label="Close keyboard shortcuts" title="Close" @click="keysOpen = false">✕</button>
         </div>
 
         <div class="keys-modal-body">
@@ -121,6 +121,44 @@
             <p v-if="otopoMsg" :class="otopoMsgOk ? 'keys-msg-ok' : 'keys-msg-err'">{{ otopoMsg }}</p>
             <p class="keys-hint"><a href="https://opentopography.org/developers" target="_blank" rel="noopener">Get a free API key</a></p>
           </div>
+
+          <hr class="keys-divider" />
+
+          <!-- Local SRTM tile folder (the `local` DEM source) -->
+          <div class="keys-service">
+            <div class="keys-service-header">
+              <span class="keys-service-name">🗂 Local SRTM tiles</span>
+              <span v-if="tileStore === null" class="keys-badge keys-badge-checking">checking…</span>
+              <span v-else-if="tileStore.available" class="keys-badge keys-badge-ok">✓ {{ tileStore.tile_count }} tiles</span>
+              <span v-else class="keys-badge keys-badge-error">✗ No tiles</span>
+            </div>
+            <p class="keys-service-desc">
+              The folder of GeoTIFF tiles behind the “Local SRTM Tiles” DEM source. Without it that
+              source returns a flat, empty elevation grid.
+            </p>
+            <p v-if="tileStore && !tileStore.available" class="keys-msg-err">{{ tileStore.note }}</p>
+            <div class="keys-input-row">
+              <input
+                v-model="tilePath"
+                type="text"
+                class="keys-input"
+                placeholder="C:\path\to\srtm_tifs"
+                @keyup.enter="saveTilePath"
+              />
+              <button class="btn btn-secondary keys-save-btn" :disabled="tileBrowsing || tileSaving" @click="browseTilePath">
+                {{ tileBrowsing ? 'Picking…' : 'Browse…' }}
+              </button>
+              <button class="btn btn-secondary keys-save-btn" :disabled="!tilePath.trim() || tileSaving" @click="saveTilePath">
+                {{ tileSaving ? 'Checking…' : 'Save' }}
+              </button>
+            </div>
+            <p v-if="tileMsg" :class="tileMsgOk ? 'keys-msg-ok' : 'keys-msg-err'">{{ tileMsg }}</p>
+            <p class="keys-hint">
+              Pick or paste the folder that holds the <code>.tif</code> files directly. Browse opens
+              a dialog on the machine running the server. Saved to <code>config.json</code> as
+              <code>ocean_root</code> and applied without a restart.
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -130,7 +168,7 @@
       <div class="keys-modal">
         <div class="keys-modal-header">
           <span>🩺 Diagnostics</span>
-          <button class="keys-close-btn" @click="diagOpen = false">✕</button>
+          <button class="keys-close-btn" aria-label="Close diagnostics" title="Close" @click="diagOpen = false">✕</button>
         </div>
         <div class="keys-modal-body">
           <p v-if="diag === null" class="keys-service-desc">Loading…</p>
@@ -218,6 +256,14 @@ const otopoSaving = ref(false);
 const otopoMsg = ref('');
 const otopoMsgOk = ref(false);
 
+// Local SRTM tile folder state (the `local` DEM source)
+const tileStore = ref<{ path: string | null; available: boolean; tile_count: number; note: string } | null>(null);
+const tilePath = ref('');
+const tileSaving = ref(false);
+const tileBrowsing = ref(false);
+const tileMsg = ref('');
+const tileMsgOk = ref(false);
+
 // Earth Engine OAuth flow state
 const eeAuthUrl = ref('');
 const eeUrlOpened = ref(false);
@@ -241,12 +287,28 @@ async function fetchStatus() {
   }
 }
 
+async function fetchTileStore() {
+  tileStore.value = null;
+  try {
+    const res = await fetch('/api/auth/tile-store');
+    const data = await res.json();
+    tileStore.value = data;
+    // Prefill with the configured path so a broken one can be corrected in
+    // place rather than retyped from scratch.
+    if (!tilePath.value && data.path) tilePath.value = data.path;
+  } catch {
+    tileStore.value = { path: null, available: false, tile_count: 0, note: 'Could not reach the server.' };
+  }
+}
+
 function openKeys() {
   keysOpen.value = true;
   eeAuthUrl.value = '';
   eeCode.value = '';
   eeMsg.value = '';
+  tileMsg.value = '';
   fetchStatus();
+  fetchTileStore();
 }
 
 async function startEeAuth() {
@@ -355,6 +417,69 @@ async function saveOtopoKey() {
     otopoMsgOk.value = false;
   } finally {
     otopoSaving.value = false;
+  }
+}
+
+async function browseTilePath() {
+  // The dialog opens on the server's desktop, not in this page: a browser is not
+  // allowed to report an absolute path, and the path is exactly what config.json
+  // needs. Same machine, so the two are equivalent from the user's side.
+  tileBrowsing.value = true;
+  tileMsg.value = '';
+  try {
+    const res = await fetch('/api/auth/tile-store/browse', { method: 'POST' });
+    const data = await res.json();
+    if (res.status === 501) {
+      tileMsg.value = `${data.error || 'No folder dialog on the server.'} Type the path instead.`;
+      tileMsgOk.value = false;
+      return;
+    }
+    if (!res.ok) {
+      tileMsg.value = data.error || 'Could not open the folder dialog.';
+      tileMsgOk.value = false;
+      return;
+    }
+    if (data.cancelled || !data.path) return;
+    tilePath.value = data.path;
+    // Picking a folder is the whole gesture; making the user press Save
+    // afterwards would only be a second chance to change nothing.
+    await saveTilePath();
+  } catch {
+    tileMsg.value = 'Network error opening the folder dialog.';
+    tileMsgOk.value = false;
+  } finally {
+    tileBrowsing.value = false;
+  }
+}
+
+async function saveTilePath() {
+  const path = tilePath.value.trim();
+  if (!path) return;
+  tileSaving.value = true;
+  tileMsg.value = '';
+  try {
+    const res = await fetch('/api/auth/tile-store', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    const data = await res.json();
+    if (res.ok && data.saved) {
+      tileStore.value = data;
+      tileMsg.value = `✓ ${data.tile_count} tiles found — the Local SRTM Tiles source is ready.`;
+      tileMsgOk.value = true;
+      // The source list is built from availability, so refresh it: the option
+      // was disabled a moment ago and is selectable now.
+      (window as any).populateDemSources?.();
+    } else {
+      tileMsg.value = data.error || 'Could not use that folder.';
+      tileMsgOk.value = false;
+    }
+  } catch {
+    tileMsg.value = 'Network error saving the folder.';
+    tileMsgOk.value = false;
+  } finally {
+    tileSaving.value = false;
   }
 }
 

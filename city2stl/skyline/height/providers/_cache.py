@@ -23,10 +23,10 @@ Usage::
 from __future__ import annotations
 
 from app.server.core.cache import (  # noqa: F401 – make_cache_key re-exported for callers
+    NAMESPACE_TTL,
     make_cache_key,
     read_array_cache,
     write_array_cache,
-    NAMESPACE_TTL,
 )
 from city2stl.skyline.height import HeightResult
 
@@ -52,18 +52,26 @@ def read_height_result(
 ) -> HeightResult | None:
     """Return a cached ``HeightResult`` for *key*, or ``None`` on a miss.
 
-    Reconstructs the standard ``{raster, confidence}`` arrays + ``resolution_m``
-    metadata layout written by :func:`write_height_result`.
+    Reconstructs the standard ``{raster, confidence}`` arrays written by
+    :func:`write_height_result`.
+
+    ``default_resolution_m`` is authoritative and the cached sidecar's
+    ``resolution_m`` is ignored. Resolution is a property of the source
+    product, not of the bytes on disk, and every caller passes its module's own
+    constant. Sidecars written before 2026-08-30 hold the *output grid spacing*
+    for the nDSM and 3DEP providers -- around 5.9 m for a 3 km box at 512 cells
+    -- which claims a detail level those 30 m products do not have. Trusting
+    that number would keep the old merge ordering alive on every cache hit.
     """
     cached = read_array_cache(namespace, key)
     if cached is None:
         return None
-    arrays, meta = cached
+    arrays, _meta = cached
     return HeightResult(
         raster=arrays["raster"],
         confidence=arrays["confidence"],
         source_name=source_name,
-        resolution_m=meta.get("resolution_m", default_resolution_m),
+        resolution_m=default_resolution_m,
     )
 
 

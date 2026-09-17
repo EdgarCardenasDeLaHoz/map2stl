@@ -15,18 +15,18 @@ from __future__ import annotations
 
 import io
 import logging
-from math import floor, ceil
-from typing import Tuple
+from math import ceil, floor
 
 import numpy as np
-import requests
 import rasterio
+import requests
 
-from city2stl.skyline.height import BBox, HeightProvider, HeightResult, _resample
 from app.server.core.cache import (
-    CACHE_ROOT, make_cache_key,
-    write_array_cache, read_array_cache,
+    make_cache_key,
+    read_array_cache,
+    write_array_cache,
 )
+from city2stl.skyline.height import BBox, HeightResult, _resample
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,8 @@ _NAMESPACE = "wsf3d"
 _DOWNLOAD_TIMEOUT = 60  # seconds per tile
 
 # Register TTL if not already present
-from app.server.core import cache as _cache_mod
+from app.server.core import cache as _cache_mod  # noqa: E402
+
 _cache_mod.NAMESPACE_TTL.setdefault(_NAMESPACE, 90 * 86400)
 
 
@@ -119,8 +120,9 @@ def _download_tile(lon_west: int, lat_south: int) -> np.ndarray | None:
         logger.warning("WSF3D download failed: %s", exc)
         return None
     if r.status_code == 404:
-        logger.debug("WSF3D tile not found (no settlements): %s",
-                      tile_name(lon_west, lat_south))
+        # NOT "no settlements here". The tiles directory publishes 453 tiles, so most of the
+        # populated world 404s; the global mosaic is the answer for those. See _global_result().
+        logger.debug("WSF3D tile not published: %s", tile_name(lon_west, lat_south))
         return None
     r.raise_for_status()
 
@@ -146,7 +148,7 @@ class WSF3DProvider:
         """WSF3D has global coverage; always returns True."""
         return True
 
-    def fetch_heights(self, bbox: BBox, dim: Tuple[int, int]) -> HeightResult:
+    def fetch_heights(self, bbox: BBox, dim: tuple[int, int]) -> HeightResult:
         """Fetch and mosaic WSF3D tiles for *bbox*, resample to *dim* = (H, W)."""
         north, south, east, west = bbox
         tiles = tiles_for_bbox(bbox)
@@ -166,7 +168,8 @@ class WSF3DProvider:
                 tile_arrays[(lon_w, lat_s)] = arr
 
         if not tile_arrays:
-            return _empty_result(dim)
+            # Every tile 404'd, which says nothing about settlement -- only 453 tiles exist.
+            return _global_result(bbox, dim)
 
         # Mosaic tiles into a single array covering the full tile extent
         # All tiles should be the same size (1° at same resolution)
@@ -221,7 +224,55 @@ class WSF3DProvider:
         )
 
 
-def _empty_result(dim: Tuple[int, int]) -> HeightResult:
+def _global_result(bbox: BBox, dim: tuple[int, int]) -> HeightResult:
+    """Serve *bbox* from the global mosaic, by HTTP range, when no tile covers it.
+
+    Cached under the same namespace as the tiles, keyed by bbox and target dim, so a repeat
+    request for a city costs nothing. Any failure -- decoders absent, host unreachable, a
+    truncated range response -- degrades to the empty raster the caller used to get, because a
+    coarse fallback that raises would take down the whole height merge.
+    """
+    from . import wsf3d_global
+
+    if not wsf3d_global.available():
+        logger.debug("WSF3D global mosaic needs tifffile + imagecodecs; not installed")
+        return _empty_result(dim)
+
+    north, south, east, west = bbox
+    key = make_cache_key(_NAMESPACE, north, south, east, west,
+                         extra={"src": "global", "dim": list(dim)})
+    hit = read_array_cache(_NAMESPACE, key)
+    if hit is not None:
+        arrays, meta = hit
+        raster = arrays["height"]
+        return HeightResult(
+            raster=raster,
+            confidence=np.where(np.isnan(raster), 0.0, _CONFIDENCE).astype(np.float32),
+            source_name="wsf3d",
+            resolution_m=float(meta.get("resolution_m", _RESOLUTION_M)),
+        )
+
+    try:
+        raster, res_m = wsf3d_global.read_grid(bbox, dim)
+    except Exception as exc:                                       # noqa: BLE001
+        logger.warning("WSF3D global mosaic read failed: %s: %s", type(exc).__name__, exc)
+        return _empty_result(dim)
+
+    if not np.isfinite(raster).any():
+        return _empty_result(dim)
+
+    logger.info("WSF3D served from the global mosaic (no tile for this bbox)")
+    write_array_cache(_NAMESPACE, key, {"height": raster},
+                      metadata={"tile": "global", "resolution_m": res_m})
+    return HeightResult(
+        raster=raster,
+        confidence=np.where(np.isnan(raster), 0.0, _CONFIDENCE).astype(np.float32),
+        source_name="wsf3d",
+        resolution_m=res_m,
+    )
+
+
+def _empty_result(dim: tuple[int, int]) -> HeightResult:
     h, w = dim
     return HeightResult(
         raster=np.full((h, w), np.nan, dtype=np.float32),

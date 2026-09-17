@@ -6,15 +6,17 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 
 from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
 
+# config.json lives at the strm2stl root, which is where config.py and geo2stl both
+# look for it. This module used to derive its own path one `.parent` short, so a saved
+# key was written to app/config.json — a file nothing reads.
+from app.server.core.tile_store import CONFIG_PATH as _CONFIG_PATH
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["auth"])
-
-_CONFIG_PATH = Path(__file__).parent.parent.parent / "config.json"
 
 
 def _apply_opentopo_key(key: str) -> bool:
@@ -101,6 +103,65 @@ async def save_opentopo_key(body: dict = Body(...)):
     except Exception as exc:
         logger.error("Failed to save OpenTopography key: %s", exc)
         return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
+@router.get("/api/auth/tile-store")
+async def get_tile_store():
+    """Report where the local SRTM/GEBCO tiles are, and whether any are there.
+
+    The `local` DEM source degrades silently when its folder is missing — the
+    fetch returns zeros and the map goes flat — so the state of the folder is
+    surfaced next to the API keys rather than left to be inferred.
+    """
+    from app.server.core import tile_store
+    return JSONResponse(content=tile_store.status())
+
+
+@router.post("/api/auth/tile-store")
+async def save_tile_store(body: dict = Body(...)):
+    """Point `ocean_root` at a folder of .tif tiles.
+
+    Rejected unless the folder exists and holds at least one tile, so a typo
+    cannot replace a working store with a broken one.
+    """
+    path = (body.get("path") or "").strip()
+    if not path:
+        return JSONResponse(status_code=400, content={"error": "Path must not be empty"})
+
+    from app.server.core import tile_store
+    try:
+        result = tile_store.set_path(path)
+    except Exception as exc:
+        logger.error("Failed to save the tile store path: %s", exc)
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+    if not result.get("saved"):
+        return JSONResponse(status_code=400, content=result)
+    return JSONResponse(content=result)
+
+
+@router.post("/api/auth/tile-store/browse")
+async def browse_tile_store():
+    """Open a native folder picker on the machine running the server.
+
+    A browser cannot report an absolute filesystem path, so the dialog has to be
+    raised server-side; that is only meaningful because this is a localhost
+    desktop app. The dialog blocks until the user answers it, so it runs in the
+    executor rather than on the event loop.
+    """
+    from app.server.core import tile_store
+    from app.server.core.validation import run_sync
+
+    try:
+        result = await run_sync(tile_store.pick_folder)
+    except Exception as exc:
+        logger.error("Folder picker failed: %s", exc)
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+    if not result.get("supported"):
+        # 501: the server has no display, so the user must type the path instead.
+        return JSONResponse(status_code=501, content=result)
+    return JSONResponse(content=result)
 
 
 # ---------------------------------------------------------------------------

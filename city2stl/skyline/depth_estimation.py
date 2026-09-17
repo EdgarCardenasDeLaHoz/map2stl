@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -65,8 +65,9 @@ def _depth_anything_raw(view_rgb: np.ndarray, device: str = "cpu") -> np.ndarray
     ``predict_pano_depth`` applies so tile-stitching can stay in one
     consistent global scale.
     """
-    from city2stl.skyline.height.predict import _load_da2  # noqa: PLC0415
     from PIL import Image as PILImage  # noqa: PLC0415
+
+    from city2stl.skyline.height.predict import _load_da2  # noqa: PLC0415
     pipe = _load_da2(device)
     pil_img = PILImage.fromarray(view_rgb)
     result = pipe(pil_img)
@@ -163,14 +164,14 @@ def predict_pano_depth_tiled(
 
 
 def column_building_distance(
-    depth_rel: "np.ndarray",
-    building_mask: "np.ndarray",
+    depth_rel: np.ndarray,
+    building_mask: np.ndarray,
     col: int,
     *,
     scale: float = 1450.0,
     mode: str = "lower_median",
     lower_frac: float = 0.5,
-) -> "float | None":
+) -> float | None:
     """Estimate the distance (m) to the building in one pano column from
     its depth-mask intersection.
 
@@ -291,21 +292,52 @@ def depth_height_from_segment(
     fy: float,
     cy: float,
     camera_height_m: float = 2.5,
+    pitch_rad: float = 0.0,
+    ground_offset_m: float = 0.0,
+    depth_sample_xy: tuple[int, int] | None = None,
 ) -> float:
     """Derive a building's absolute height from a metric depth map.
 
     Given the silhouette **top pixel** ``(x, y)`` of a building and the
-    metric depth at that pixel, recover the physical height above the
-    camera using the pinhole pitch:
+    metric depth at that pixel, recover the physical height using the same
+    pinhole model as the geometric path in ``_core.height``:
 
-        pitch  = atan((cy - y) / fy)
-        height = camera_height_m + depth_m_at_pixel * tan(pitch)
+        elevation = atan((cy - y) / fy) + pitch_rad
+        height    = camera_height_m + ground_offset_m
+                    + depth_m_at_pixel * tan(elevation)
+
+    Two terms matter and used to be missing, which made this estimate
+    disagree with the geometric one for structural reasons rather than
+    because either was wrong:
+
+    ``pitch_rad``
+        The view's own camera pitch. ``atan((cy - y) / fy)`` is the ray
+        angle relative to the *optical axis*, not the horizon. Seed capture
+        tilts the camera up for tall buildings (see
+        ``seed_selection.corrected_pitch``), so omitting it understates
+        every height in a pitched view.
+
+    ``ground_offset_m``
+        ``camera_elev - building_ground_elev``. The geometric path works in
+        absolute elevation and subtracts the building's own ground; this one
+        works relative to the camera. On a slope the two differ by exactly
+        this offset.
 
     The camera_height_m default (2.5 m) matches Street View's typical
-    capture rig elevation. Distance to the building is the metric depth at
-    the silhouette-top pixel (we approximate that the top is at the same
-    horizontal distance as the facade, which holds for tall narrow towers
-    and is a small error for short squat blocks).
+    capture rig elevation.
+
+    The angle and the distance come from two different pixels on purpose.
+    The angle must come from the silhouette top, since that is the roof.
+    The distance must not: the silhouette top is the last building pixel
+    before sky, and a monocular depth model routinely bleeds the far
+    background into it, so sampling depth there reports the distance to
+    whatever lies beyond the roof rather than to the building. Pass
+    ``depth_sample_xy`` pointing at a facade pixel in the same column
+    (the horizon row is a good choice — its sight line is horizontal, so
+    its depth equals the horizontal ground distance the geometric path
+    calls ``forward_m``). Both pixels default to ``segment_top_xy``, which
+    keeps the old single-pixel behaviour for callers that have no facade
+    pixel to offer.
 
     Parameters
     ----------
@@ -315,29 +347,42 @@ def depth_height_from_segment(
     fy              : vertical focal length in pixels.
     cy              : vertical principal point in pixels (usually H/2).
     camera_height_m : Street View camera elevation above ground (m).
+    pitch_rad       : Camera pitch in radians, positive = tilted up.
+    ground_offset_m : Camera ground elevation minus the building's ground
+                      elevation, in metres. 0.0 when both stand on the same
+                      ground or when per-building terrain is unknown.
+    depth_sample_xy : Optional (col, row) pixel to read the distance from.
+                      Defaults to ``segment_top_xy``. See above — a facade
+                      pixel gives the building's own distance, the roof
+                      pixel often gives the sky's.
 
     Returns
     -------
-    height_m : float — estimated total building height above ground (m).
-               Returns 0.0 if the top is at or below the horizon (cy);
-               negative depths or NaN inputs are guarded.
+    height_m : float — estimated total building height above its own base
+               (m). Returns 0.0 if the sight line to the top does not rise
+               above the horizon; negative depths or NaN inputs are guarded.
     """
     x, y = segment_top_xy
     h, w = depth_m.shape
     if not (0 <= x < w and 0 <= y < h):
         return 0.0
 
-    dy = float(cy - y)
-    if dy <= 0.0:
-        # Top pixel is at or below the principal point — no positive pitch.
+    elevation = math.atan(float(cy - y) / float(fy)) + float(pitch_rad)
+    if elevation <= 0.0:
+        # The sight line to the "top" points at or below the horizon, so
+        # there is no positive height to recover from it.
         return 0.0
 
-    d_m = float(depth_m[y, x])
+    sx, sy = depth_sample_xy if depth_sample_xy is not None else (x, y)
+    if not (0 <= sx < w and 0 <= sy < h):
+        return 0.0
+
+    d_m = float(depth_m[sy, sx])
     if not math.isfinite(d_m) or d_m <= 0.0:
         return 0.0
 
-    pitch = math.atan(dy / float(fy))
-    return float(camera_height_m + d_m * math.tan(pitch))
+    return float(camera_height_m + float(ground_offset_m)
+                 + d_m * math.tan(elevation))
 
 
 # ---------------------------------------------------------------------------

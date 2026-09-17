@@ -49,7 +49,7 @@ window.setGridPixelMode = function setGridPixelMode(on) {
 // All layer canvas IDs — render order (first = bottom, last = top).
 // Mutable so users can reorder via the UI.
 // NOTE: Water and Hydrology are combined into WaterHydrology for unified rendering
-let _layerOrder = ['Dem', 'WaterHydrology', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'MeshImport', 'CompositeDem'];
+let _layerOrder = ['Dem', 'WaterHydrology', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'Trails', 'MeshImport', 'CompositeDem'];
 const LAYER_STACK = _layerOrder;  // alias kept for backward compat
 
 /**
@@ -62,8 +62,50 @@ const LAYER_CANVAS_IDS = {
     Sat: 'layerSatCanvas',
     SatImg: 'layerSatImgCanvas',
     CityRaster: 'layerCityRasterCanvas',
+    Trails: 'layerTrailsCanvas',
     MeshImport: 'layerMeshImportCanvas',
     CompositeDem: 'layerCompositeDemCanvas',
+};
+
+/**
+ * Layers that can fetch their own data when they are switched on.
+ *
+ * `ready()` reports whether the layer already holds something to draw, so
+ * activating it costs a request only the first time; every loader here also
+ * de-duplicates its own in-flight calls. Two layers are deliberately absent:
+ * `MeshImport` comes from a file the user uploads, and `CompositeDem` is built
+ * from layers that are already loaded rather than fetched.
+ */
+const LAYER_AUTOLOAD = {
+    Dem: {
+        ready: () => !!window.appState?.lastDemData,
+        load: () => window.loadDEM?.(),
+    },
+    WaterHydrology: {
+        ready: () => !!window.appState?.waterHydrologyCanvas,
+        load: () => window.loadWaterHydrology?.(),
+    },
+    Sat: {
+        ready: () => !!document.querySelector('#satelliteImage canvas'),
+        load: () => window.loadEsaLandCover?.(),
+    },
+    SatImg: {
+        ready: () => !!window.appState?.satImgSourceCanvas,
+        load: () => window.loadSatelliteRGBImage?.(),
+    },
+    CityRaster: {
+        ready: () => !!window.appState?.cityRasterSourceCanvas,
+        load: () => window.loadCityRaster?.(),
+    },
+    CityOverlay: {
+        ready: () => !!window.appState?.osmCityData,
+        load: () => window.loadCityData?.(),
+    },
+    Trails: {
+        ready: () => !!window.appState?.lastTrailsData,
+        // Already switched on by setStackMode, so it must not click itself again.
+        load: () => window.loadTrails?.({ activate: false }),
+    },
 };
 
 /** Return the layer buffer canvas for the given mode, or null if not found. */
@@ -132,7 +174,7 @@ window.clearAllLayerBuffers = function clearAllLayerBuffers() {
 
 // Multi-layer state: set of active layer keys + per-layer opacity (0–1)
 let _activeLayers = new Set(['Dem', 'CityOverlay']);
-let _layerOpacities = { Dem: 1, WaterHydrology: 0.75, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CityOverlay: 0.85, MeshImport: 0.8, CompositeDem: 1 };
+let _layerOpacities = { Dem: 1, WaterHydrology: 0.75, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CityOverlay: 0.85, Trails: 0.9, MeshImport: 0.8, CompositeDem: 1 };
 
 // Kept for getStackMode() backward compat — last-toggled-on layer
 let _activeMode = 'Dem';
@@ -194,10 +236,18 @@ function _drawSplitView(ctx, w, h) {
     ctx.stroke();
 }
 
-/** Toggle a layer on/off; at least one layer stays on. */
+/**
+ * Toggle a layer on/off; at least one layer stays on.
+ *
+ * Switching a layer on fetches its data when it has none yet, so making a layer
+ * visible is enough to populate it — see LAYER_AUTOLOAD. The fetch is fired
+ * without awaiting it, and the button state and stack are refreshed straight
+ * away, so the layer reads as active while its request is still in flight.
+ */
 window.setStackMode = function setStackMode(mode) {
     if (!LAYER_STACK.includes(mode)) return;
 
+    let autoload = null;
     if (_activeLayers.has(mode) && _activeLayers.size > 1) {
         _activeLayers.delete(mode);
         // Free GPU backing store for this buffer — it will be re-allocated on next render
@@ -205,16 +255,8 @@ window.setStackMode = function setStackMode(mode) {
     } else {
         _activeLayers.add(mode);
         _activeMode = mode;
-        // Auto-load satellite imagery if switching to SatImg with no data yet
-        if (mode === 'SatImg' && !window.appState?.satImgSourceCanvas) {
-            window.loadSatelliteRGBImage?.().then(() => window.updateStackedLayers?.());
-            return;
-        }
-        // Auto-load water+hydrology combined if switching to WaterHydrology with no data yet
-        if (mode === 'WaterHydrology' && !window.appState?.waterHydrologyCanvas) {
-            window.loadWaterHydrology?.();
-            return;
-        }
+        const entry = LAYER_AUTOLOAD[mode];
+        if (entry && !entry.ready()) autoload = entry.load;
     }
 
     // Update button active states
@@ -223,9 +265,17 @@ window.setStackMode = function setStackMode(mode) {
         btn.classList.toggle('active', _activeLayers.has(btn.dataset.mode));
     });
 
-    _updateLayerOpacitySliders();
+    _notifyLayerStackChanged();
     _syncCityOverlayLayerState();
     window.updateStackedLayers?.();
+
+    if (autoload) {
+        // Loaders report their own failures through toasts; catching here only
+        // keeps a rejected fetch from surfacing as an unhandled rejection.
+        Promise.resolve(autoload())
+            .then(() => window.updateStackedLayers?.())
+            .catch(err => console.warn(`Auto-load failed for ${mode}:`, err));
+    }
 };
 
 /** Returns the last-activated layer mode key (backward compat). */
@@ -242,6 +292,23 @@ window.setLayerOpacity = function setLayerOpacity(mode, value) {
 window.getLayerOrder = function getLayerOrder() {
     return [..._layerOrder];
 };
+
+/** Return a copy of the set of layers currently switched on. */
+window.getActiveLayers = function getActiveLayers() {
+    return new Set(_activeLayers);
+};
+
+/**
+ * Tell the UI that the render order or the active set has changed.
+ *
+ * The layer rack in LayerViewSection.vue rebuilds itself from getLayerOrder()
+ * and getActiveLayers() on this event. It replaced a rack this module used to
+ * render into a hidden div, which is why reordering worked in the engine but
+ * could not be reached from the UI.
+ */
+function _notifyLayerStackChanged() {
+    window.dispatchEvent(new CustomEvent('layer-stack-changed'));
+}
 
 /**
  * Move a layer up or down in the render order.
@@ -264,55 +331,9 @@ window.moveLayer = function moveLayer(mode, delta) {
         if (_activeLayers.has(neighbor)) { swapped = true; break; }
     }
     if (!swapped) return;  // couldn't move past any active layer
-    _updateLayerOpacitySliders();
+    _notifyLayerStackChanged();
     window.updateStackedLayers?.();
 };
-
-/** Rebuild the per-layer opacity slider rows below the mode buttons.
- *  Shows active layers in render order (bottom → top) with reorder arrows. */
-function _updateLayerOpacitySliders() {
-    const container = document.getElementById('layerOpacitySliders');
-    if (!container) return;
-    container.innerHTML = '';
-    const labels = { Dem: '🏔 DEM', Water: '💧 Water', Sat: '🌿 ESA', SatImg: '🛰 Sat', CityRaster: '🏙 City Raster', CityOverlay: '🏙 City Polygons', MeshImport: '📐 Mesh Import', CompositeDem: '★ Composite', Hydrology: '🌊 Hydro' };
-    // Show active layers in current render order (bottom first, top last)
-    const visible = _layerOrder.filter(m => _activeLayers.has(m));
-    visible.forEach((mode, vi) => {
-        const pct = Math.round((_layerOpacities[mode] ?? 1) * 100);
-        const isFirst = vi === 0;
-        const isLast = vi === visible.length - 1;
-        const row = document.createElement('div');
-        row.className = 'layer-stack-row';
-        row.innerHTML = `
-            <span class="layer-reorder-arrows" style="display:flex;flex-direction:column;line-height:1;font-size:9px;gap:0;">
-                <button class="layer-arrow-btn" data-layer="${mode}" data-dir="1"
-                    style="background:none;border:none;color:${isLast ? '#333' : '#888'};cursor:${isLast ? 'default' : 'pointer'};padding:0;font-size:9px;line-height:1;"
-                    title="Move up (render later / on top)" ${isLast ? 'disabled' : ''}>▲</button>
-                <button class="layer-arrow-btn" data-layer="${mode}" data-dir="-1"
-                    style="background:none;border:none;color:${isFirst ? '#333' : '#888'};cursor:${isFirst ? 'default' : 'pointer'};padding:0;font-size:9px;line-height:1;"
-                    title="Move down (render earlier / behind)" ${isFirst ? 'disabled' : ''}>▼</button>
-            </span>
-            <span style="font-size:10px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${labels[mode]}</span>
-            <input type="range" min="0" max="100" value="${pct}" data-layer="${mode}"
-                style="width:100%;" title="${labels[mode]} opacity">
-            <span style="font-size:10px;color:#888;text-align:right;">${pct}%</span>`;
-        // Wire opacity slider
-        const slider = row.querySelector('input[type="range"]');
-        const label = row.querySelector('span:last-child');
-        slider.addEventListener('input', () => {
-            label.textContent = slider.value + '%';
-            window.setLayerOpacity(mode, slider.value / 100);
-        });
-        // Wire reorder arrows
-        row.querySelectorAll('.layer-arrow-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const dir = parseInt(btn.dataset.dir);
-                window.moveLayer(btn.dataset.layer, dir);
-            });
-        });
-        container.appendChild(row);
-    });
-}
 
 function _syncCityOverlayLayerState() {
     const overlay = document.querySelector('#layersStack .osm-overlay');
@@ -492,6 +513,7 @@ window.updateStackedLayers = function updateStackedLayers() {
         Sat: () => satCanvas,
         SatImg: () => window.appState?.satImgSourceCanvas || null,
         CityRaster: () => window.appState?.cityRasterSourceCanvas || null,
+        Trails: () => window.appState?.trailsSourceCanvas || null,
         MeshImport: () => window.appState?.meshSourceCanvas || null,
         CompositeDem: () => window.appState?.compositeDemSourceCanvas || null,
     };
@@ -549,7 +571,6 @@ window.updateStackedLayers = function updateStackedLayers() {
  */
 window.drawLayerGrid = function drawLayerGrid() {
     const gridCanvas = document.getElementById('layerGridCanvas');
-    const demCanvas = _cachedDemCanvas || document.getElementById('layerDemCanvas');
     const stack = document.getElementById('layersStack');
     const yAxis = document.getElementById('layersYAxis');
     const xAxis = document.getElementById('layersXAxis');
@@ -561,7 +582,12 @@ window.drawLayerGrid = function drawLayerGrid() {
     if (gw === 0 || gh === 0) return;
 
     const { currentDemBbox: bbox, lastDemData: demDataRef, demLayout: demLayoutRef } = window.appState || {};
-    if (!bbox || !demCanvas || demCanvas.width === 0 || demCanvas.height === 0) return;
+    // Only the bounding box is required. The grid used to depend on
+    // #layerDemCanvas having non-zero dimensions, but that buffer is only sized
+    // while the Dem layer is active, so viewing Sat or Trails on their own left
+    // the graticule frozen: drawLayerGrid returned here and _applyGridCSSDelta
+    // went on sliding and scaling a stale bitmap through every pan and zoom.
+    if (!bbox) return;
 
     const { scale, offsetX, offsetY } = stackZoom;
     const densityCheck = Math.max(2, parseInt(document.getElementById('gridlineCount')?.value || '10', 10));
@@ -590,8 +616,12 @@ window.drawLayerGrid = function drawLayerGrid() {
 
     if (yAxis) yAxis.innerHTML = '';
     if (xAxis) xAxis.innerHTML = '';
-    const cw = demCanvas.width;
-    const ch = demCanvas.height;
+    // Container extent in device pixels. This was read off #layerDemCanvas, but
+    // every layer buffer is sized to the stack rect rather than to the DEM
+    // image, so the two were always the same number whenever the DEM was drawn
+    // — and this one is also defined when it is not.
+    const cw = gw;
+    const ch = gh;
 
     // ── Red pixel grid (independent of the geographic gridlines) ────────────
     // Draws lines every `pixelGridSpacing` DEM pixels, mapped through the same
@@ -1033,10 +1063,3 @@ window.enableStackedZoomPan = function enableStackedZoomPan() {
 
 // Listen for STACKED_UPDATE events (replaces scattered direct calls)
 window.events?.on(window.EV?.STACKED_UPDATE, () => window.updateStackedLayers());
-
-// Initialise per-layer opacity sliders once DOM is ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', _updateLayerOpacitySliders);
-} else {
-    _updateLayerOpacitySliders();
-}

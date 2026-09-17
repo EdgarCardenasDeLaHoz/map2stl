@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -22,10 +23,83 @@ import requests
 
 from .pipeline import _load_env_file_if_present
 
-
 STREETVIEW_METADATA_URL = "https://maps.googleapis.com/maps/api/streetview/metadata"
 STREETVIEW_IMAGE_URL = "https://maps.googleapis.com/maps/api/streetview"
 _SV_IMAGE_CACHE_DIR = Path(__file__).parent / "runs" / "image_cache"
+
+# Retry/backoff policy for the image endpoint. Previously any non-200 was
+# treated as "no imagery available" and returned None with no retry and no
+# log line, so a rate-limit burst or a single 502 permanently removed views
+# from a run and looked identical to a genuinely blank location. Only these
+# statuses are worth retrying; 400/403/404 are terminal and mean the request
+# or the key is wrong, or the pano really does not exist.
+_SV_RETRY_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+_SV_MAX_ATTEMPTS = 3
+_SV_BACKOFF_S = 1.5
+
+# Negative cache: how long a confirmed "no imagery here" answer is trusted.
+# Google does add coverage, but not on a timescale that justifies re-asking
+# for every missing pano on every run — a region with sparse coverage spent
+# most of its wall clock re-confirming absences it already knew about.
+_SV_NEGATIVE_TTL_S = 30 * 86400
+
+
+def _negative_cache_path(cache_key: str) -> Path:
+    return _SV_IMAGE_CACHE_DIR / f"{cache_key}.none"
+
+
+def _negative_cache_hit(cache_key: str) -> bool:
+    """True when this exact request was confirmed to have no imagery recently."""
+    path = _negative_cache_path(cache_key)
+    try:
+        if not path.exists():
+            return False
+        if time.time() - path.stat().st_mtime > _SV_NEGATIVE_TTL_S:
+            path.unlink(missing_ok=True)
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _write_negative_cache(cache_key: str) -> None:
+    """Record that this request has no imagery. Never raises."""
+    try:
+        _SV_IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _negative_cache_path(cache_key).write_text("", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _streetview_get(url: str) -> tuple[bytes | None, bool]:
+    """GET a signed Street View URL. Returns ``(content, definitely_absent)``.
+
+    ``definitely_absent`` is True only for a terminal 404 — the caller may
+    then write a negative-cache marker. A transient failure (retryable status,
+    or a network exception, which previously propagated out of the fetch and
+    aborted the whole region run) returns ``(None, False)`` after logging, so
+    the view is skipped for this run but re-tried on the next one.
+    """
+    last = ""
+    for attempt in range(_SV_MAX_ATTEMPTS):
+        try:
+            r = requests.get(_sign_streetview_url(url), timeout=40)
+        except Exception as exc:
+            last = f"{type(exc).__name__}: {exc}"
+        else:
+            if r.status_code == 200:
+                return r.content, False
+            if r.status_code == 404:
+                return None, True
+            if r.status_code not in _SV_RETRY_STATUS:
+                print(f"[streetview] HTTP {r.status_code}, not retrying")
+                return None, False
+            last = f"HTTP {r.status_code}"
+        if attempt < _SV_MAX_ATTEMPTS - 1:
+            time.sleep(_SV_BACKOFF_S * (2 ** attempt))
+    print(f"[streetview] giving up after {_SV_MAX_ATTEMPTS} attempts ({last})")
+    return None, False
+
 
 def _resolve_api_key(explicit_key: str | None = None) -> str:
     _load_env_file_if_present()
@@ -118,19 +192,32 @@ def _streetview_signing_enabled() -> bool:
 def _default_streetview_image_size() -> tuple[int, int]:
     """Default (width, height) for spin-view fetches.
 
-    Without URL signing, Google's Static API caps unsigned requests at
-    640×640 — a request for 1280×720 silently delivers 640×540 (height
-    honoured, width clamped). We keep the historical 960×540 default in
-    the unsigned path to preserve the existing on-disk image cache:
-    swapping to 640×540 would invalidate ~120 cached images per region.
+    Without URL signing, Google's Static API caps each dimension at 640, so
+    the historical 960×540 default delivers 640×540 — byte-identical to what
+    a 640×540 request returns (measured: mean abs diff 0.00). The excess
+    width is discarded, not cropped, so ``fov`` applies to the delivered 640
+    px and ``_focal_length_px`` — which reads the decoded array width — is
+    correct. The clamp costs angular resolution, never accuracy.
 
-    With URL signing enabled the cap rises to 2048×2048 and 1280×720
-    becomes a meaningful resolution bump. Signed requests get their own
-    cache keys (size is part of the cache hash), so they don't collide
-    with the unsigned-default cache files.
+    ``SKYLINE_SV_TALL_FRAME=1`` requests 640×640 instead. The extra 100 rows
+    are genuine additional coverage, not a vertical squash: the centre 540
+    rows of a 640×640 fetch match the 640×540 fetch to within JPEG noise
+    (2.78) while a resize does not (16.89). Same focal length, vertical FOV
+    70.6° → 80°. That headroom matters because the roof pixel *is* the
+    measurement — a roofline running off the top of frame yields no height
+    at all. Opt-in rather than default only because image size is part of
+    the cache key, so flipping it re-fetches the whole on-disk image cache
+    (~4.6k images) and breaks like-for-like comparison against earlier runs.
+
+    With URL signing enabled the cap rises to 2048×2048 and 1280×720 is a
+    real resolution bump. Signed requests get their own cache keys, so they
+    don't collide with the unsigned-default cache files.
     """
     if _streetview_signing_enabled():
         return 1280, 720
+    if os.environ.get("SKYLINE_SV_TALL_FRAME", "").strip().lower() in (
+            "1", "true", "yes", "on"):
+        return 640, 640
     return 960, 540
 
 def _sign_streetview_url(url: str) -> str:
@@ -284,16 +371,22 @@ def _streetview_image(
             if img is not None:
                 return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        url = f"{STREETVIEW_IMAGE_URL}?{urlencode(params)}"
-        r = requests.get(_sign_streetview_url(url), timeout=40)
-        if r.status_code != 200:
+        if _negative_cache_hit(cache_key):
             return None
-        arr = np.frombuffer(r.content, dtype=np.uint8)
+
+        url = f"{STREETVIEW_IMAGE_URL}?{urlencode(params)}"
+        content, definitely_absent = _streetview_get(url)
+        if content is None:
+            if definitely_absent:
+                _write_negative_cache(cache_key)
+            return None
+        arr = np.frombuffer(content, dtype=np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is None:
             return None
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         if _is_no_imagery_placeholder(rgb):
+            _write_negative_cache(cache_key)
             return None
         # Persist to disk — BGR for cv2.imwrite.
         cv2.imwrite(str(cache_path), img)

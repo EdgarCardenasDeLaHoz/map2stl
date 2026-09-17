@@ -117,44 +117,60 @@ async function loadCoordinates() {
                 // Click selects the region (stays on Explore)
                 rect.on('click', () => window.selectCoordinate(originalIndex));
 
-                // Edit button pinned at the top-right corner of each bbox (hidden until hover)
-                const editIcon = L.divIcon({
-                    html: `<div class="bbox-edit-icon">✏️ Edit</div>`,
-                    className: 'bbox-edit-marker',
-                    iconSize: [56, 22],
-                    iconAnchor: [56, 0]   // top-right corner of the icon aligns with [north, east]
-                });
-                const editMarker = L.marker([region.north, region.east], {
-                    icon: editIcon,
-                    interactive: true,
-                    keyboard: false,
-                    zIndexOffset: 500
-                });
-                editMarker.on('click', () => window.goToEdit(originalIndex));
-                editMarker._regionBounds = L.latLngBounds(bounds[0], bounds[1]);
-                if (editMarkersLayer) editMarkersLayer.addLayer(editMarker);
+                // Edit button pinned at the top-right corner of each bbox.
+                //
+                // Built on first hover, not up front: it is invisible until
+                // hovered anyway, and eagerly constructing one divIcon marker
+                // per region meant every page load paid for all of them (125
+                // markers in the current region set) to show at most one.
+                let editMarker = null;
+                function _ensureEditMarker() {
+                    if (editMarker) return editMarker;
+                    const editIcon = L.divIcon({
+                        html: `<div class="bbox-edit-icon">✏️ Edit</div>`,
+                        className: 'bbox-edit-marker',
+                        iconSize: [56, 22],
+                        iconAnchor: [56, 0]   // top-right corner of the icon aligns with [north, east]
+                    });
+                    editMarker = L.marker([region.north, region.east], {
+                        icon: editIcon,
+                        interactive: true,
+                        keyboard: false,
+                        zIndexOffset: 500
+                    });
+                    editMarker.on('click', () => window.goToEdit(originalIndex));
+                    // Read by map-globe.js:_updateEditMarkerVisibility to hide
+                    // the button when its bbox is smaller than ~40px on screen.
+                    editMarker._regionBounds = L.latLngBounds(bounds[0], bounds[1]);
+                    // Keep edit button visible while hovering it directly
+                    editMarker.on('mouseover', function () {
+                        editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.add('visible');
+                    });
+                    editMarker.on('mouseout', function () {
+                        editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.remove('visible');
+                    });
+                    if (editMarkersLayer) editMarkersLayer.addLayer(editMarker);
+                    return editMarker;
+                }
 
                 // Hover: show tooltip + reveal Edit button
                 rect.on('mouseover', function (e) {
-                    const label = region.label || region.name;
+                    // The label is the import batch tag ("coorlist" for the bulk CSV
+                    // import), not a name. Preferring it made 76 of the 125 boxes on
+                    // the map all hover as "coorlist".
+                    const label = region.name || region.label;
                     rect.unbindTooltip();
                     rect.bindTooltip(label, { sticky: false, direction: 'top', offset: [0, -4] });
                     rect.openTooltip(e.latlng);
-                    editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.add('visible');
+                    _ensureEditMarker().getElement()
+                        ?.querySelector('.bbox-edit-icon')?.classList.add('visible');
                 });
                 rect.on('mouseout', function () {
                     // Delay hiding so the user can move to the edit button
                     setTimeout(() => {
-                        const icon = editMarker.getElement()?.querySelector('.bbox-edit-icon');
+                        const icon = editMarker?.getElement()?.querySelector('.bbox-edit-icon');
                         if (icon && !icon.matches(':hover')) icon.classList.remove('visible');
                     }, 300);
-                });
-                // Keep edit button visible while hovering it directly
-                editMarker.on('mouseover', function () {
-                    editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.add('visible');
-                });
-                editMarker.on('mouseout', function () {
-                    editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.remove('visible');
                 });
 
                 preloadedLayer.addLayer(rect);
@@ -265,6 +281,11 @@ async function selectCoordinate(index, opts = {}) {
 
     // Populate bbox inputs immediately so they're never empty after selection
     window.setBboxInputValues?.(selectedRegion.north, selectedRegion.south,
+        selectedRegion.east, selectedRegion.west);
+    // The inputs are only the display. `appState.boundingBox` is what every
+    // layer fetch reads, and `loadAllLayers()` below is one of those callers, so
+    // without this the new region is selected and the old region's data loads.
+    window.setBboxRectangle?.(selectedRegion.north, selectedRegion.south,
         selectedRegion.east, selectedRegion.west);
 
     // CRITICAL: Clear cached layer data and clear visual displays when region changes
@@ -429,18 +450,11 @@ async function goToEdit(index) {
     document.getElementById('sidebarTableView')?.classList.add('hidden');
     document.getElementById('sidebarEditView')?.classList.add('hidden');
 
-    // Ensure sidebar is in normal mode (visible, not expanded/hidden)
+    // Ensure sidebar is in normal mode (visible, not expanded/hidden). Editing a
+    // region needs the panel on screen; SidebarPanel.vue owns the mode, so go
+    // through it rather than moving its classes underneath it.
     if (window.getSidebarState?.() !== 'normal') {
-        const sidebar = document.getElementById('sidebar');
-        const openBtn = document.getElementById('openSidebarBtn');
-        const toggleBtn = document.getElementById('sidebarToggleBtn');
-        sidebar?.classList.remove('collapsed', 'expanded');
-        openBtn?.classList.add('hidden');
-        const icon = toggleBtn?.querySelector('.state-icon');
-        const label = toggleBtn?.querySelector('.state-label');
-        if (icon) icon.textContent = '⇔';
-        if (label) label.textContent = 'Expand';
-        window.setSidebarState?.('normal');
+        window.setSidebarMode?.('normal');
     }
 
     window.loadAllLayers?.().catch(err => {

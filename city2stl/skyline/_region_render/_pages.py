@@ -1,31 +1,28 @@
 """skyline region_render — split (A3) (_pages)."""
 from __future__ import annotations
+
 import json
-import logging
-import math
 import time
 from contextlib import contextmanager
 from pathlib import Path
+
 import cv2
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
+
 from ..pipeline import BuildingRecord
-from ..region_types import RegionBBox, SeedViewRegistration, SkylinePoint
-from ..region_data import _distance_m, _feature_rings
 from ..region_config import (
-    _F_SKY13_ENABLED,
-    _F_SKY13_RADIUS_M,
-    _F_SKY13_SAT_BG_ENABLED,
     _SEGMENT_PALETTE,
 )
-
+from ..region_data import _distance_m
+from ..region_types import RegionBBox, SeedViewRegistration, SkylinePoint, StitchedPanoResult
 from ._draw import _draw_location_map, _draw_view_minimap
+
 
 def _render_stitched_pano_page(
     pdf,
-    pr: "StitchedPanoResult",
+    pr: StitchedPanoResult,
     osm_data: dict,
     buildings_by_id: dict | None = None,
     seed_views: list[SeedViewRegistration] | None = None,
@@ -161,7 +158,7 @@ def _render_stitched_pano_page(
     pano_only = matched_pano_ids - matched_view_ids
     view_only = matched_view_ids - matched_pano_ids
     cmp_lines = [
-        f"PANO vs PER-VIEW (this seed only)",
+        "PANO vs PER-VIEW (this seed only)",
         "",
         f"{'metric':<28}{'pano':>10}{'per-view':>12}",
         f"{'-'*52}",
@@ -452,7 +449,9 @@ def _load_known_heights(
     if not cfg.exists():
         return []
     try:
-        data = json.loads(cfg.read_text(encoding="utf-8"))
+        # utf-8-sig: some sites files carry a BOM, and a plain utf-8 read
+        # fails on it into the silent `return []` below.
+        data = json.loads(cfg.read_text(encoding="utf-8-sig"))
     except Exception:
         return []
     raw = data.get("known_heights_m")
@@ -500,7 +499,7 @@ def _render_pdf(
     building_heights: list[dict],
     building_records: list[BuildingRecord],
     known_heights: list[dict] | None = None,
-    pano_results: list["StitchedPanoResult"] | None = None,
+    pano_results: list[StitchedPanoResult] | None = None,
     pano_only: bool = False,
 ) -> None:
     out_pdf.parent.mkdir(parents=True, exist_ok=True)

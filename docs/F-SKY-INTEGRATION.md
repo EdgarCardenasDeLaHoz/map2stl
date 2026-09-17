@@ -240,6 +240,7 @@ def generate_region_report(region_name):
   - **Confidence downweight**: when `depth_disagreement=True` AND `depth_height_m < estimated_height_m × 0.70`, confidence halved (geometric may be chasing a false silhouette top)
   - **Rescue**: when ≥2 views have `depth_height_m > geometric × 1.30`, `depth_rescue_height_m` is computed; if it exceeds geometric × 1.40, `effective_height_m` rescues upward
 - **New output fields**: `depth_rescue_height_m` (contributes to `effective_height_m`/`effective_height_source`)
+- **Geometry fixes (2026-08-28)**: anchors moved from the silhouette top to the horizon row (a z-depth only equals `forward_m` where the sight line is horizontal, and the silhouette top reads sky); the height now takes its angle from the roof pixel and its distance from a facade pixel; `depth_height_from_segment` gained `pitch_rad` and `ground_offset_m`. See the plan's "As built" section.
 - **Plan**: `docs/plans/F-SKY12-depth-from-panos.md`
 
 #### **F-SKY13: OSM-Coastline Registration + Footprints Overlay**

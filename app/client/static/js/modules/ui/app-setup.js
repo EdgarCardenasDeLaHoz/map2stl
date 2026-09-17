@@ -132,7 +132,8 @@ window.clearAllBoundingBoxes = function clearAllBoundingBoxes() {
 // ─── loadAllLayers ────────────────────────────────────────────────────────────
 
 /**
- * Load DEM, water mask, and land cover in sequence for the current region.
+ * Load the DEM first, then every secondary layer in parallel — water mask,
+ * hydrology, land cover, satellite imagery, trails, and city data.
  * Switches to the Edit view first.
  * @returns {Promise<void>}
  */
@@ -167,6 +168,9 @@ window.loadAllLayers = async function loadAllLayers() {
             window.loadEsaLandCover?.(),
             window.loadSatelliteRGBImage?.(),
             window.loadHydrology?.(),
+            // activate:false - a bulk load fetches every layer and must not
+            // change which one the user is looking at.
+            window.loadTrails?.({ activate: false }),
         ];
 
         // haversineDiagKm lives on window (model-viewer.js), not appState, and
@@ -190,7 +194,12 @@ window.loadAllLayers = async function loadAllLayers() {
             window.showToast?.(`Skipping city/building data — region too large (${diagKm.toFixed(1)} km, max ${maxDiagCoarse} km).`, 'info');
         }
 
-        await Promise.all(tasks);
+        // allSettled, not all: these layers are independent, and one flaky
+        // source — trails in particular, since Overpass returns 500s under
+        // load — must not throw away the layers that did arrive.
+        const results = await Promise.allSettled(tasks);
+        results.filter(r => r.status === 'rejected')
+            .forEach(r => console.warn('Layer failed during bulk load:', r.reason));
 
         // Precompute combined output, but keep the visible canvas on Layers
         // so the user always lands on a non-empty default rendering pane.

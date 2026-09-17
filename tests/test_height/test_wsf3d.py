@@ -3,29 +3,27 @@
 Unit tests use synthetic data — no network required.
 """
 import io
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 import rasterio
 from rasterio.transform import from_bounds
-
-import sys
-from pathlib import Path
 
 _STRM2STL_ROOT = Path(__file__).parent.parent.parent
 for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from city2stl.skyline.height.providers.wsf3d import (
+from city2stl.skyline.height.providers import wsf3d_global  # noqa: E402
+from city2stl.skyline.height.providers.wsf3d import (  # noqa: E402
     WSF3DProvider,
+    _lat_label,
+    _lon_label,
     tile_name,
     tiles_for_bbox,
-    _lon_label,
-    _lat_label,
-    _download_tile,
-    _GAIN,
 )
-
 
 # ── Tile naming ──────────────────────────────────────────────────
 
@@ -106,17 +104,17 @@ class TestWSF3DProvider:
     def test_name(self):
         assert WSF3DProvider.name == "wsf3d"
 
-    def test_empty_result_on_404(self, monkeypatch, tmp_path):
-        """When all tiles return 404, fetch_heights returns all-NaN."""
+    def test_empty_result_when_no_tile_and_no_mosaic(self, monkeypatch, tmp_path):
+        """All tiles 404 and the mosaic decoders are absent: all-NaN, no network."""
         import app.server.core.cache as cache_mod
         monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path / "cache")
 
-        # Mock requests.get to always return 404
         class MockResp:
             status_code = 404
             content = b""
         monkeypatch.setattr("city2stl.skyline.height.providers.wsf3d.requests.get",
                             lambda *a, **kw: MockResp())
+        monkeypatch.setattr(wsf3d_global, "available", lambda: False)
 
         p = WSF3DProvider()
         result = p.fetch_heights((37.2, 37.1, -3.5, -3.6), (10, 10))
@@ -124,6 +122,83 @@ class TestWSF3DProvider:
         assert np.all(np.isnan(result.raster))
         assert np.all(result.confidence == 0.0)
 
+
+class TestGlobalMosaicFallback:
+    """A 404 from the tile endpoint means "not published", not "no settlements".
+
+    Only 453 one-degree tiles exist, so most of the populated world 404s and has to come from the
+    global mosaic instead. These tests drive that path with the mosaic reader stubbed out; the
+    reader itself is exercised against the live host, not here.
+    """
+
+    @staticmethod
+    def _no_tiles(monkeypatch, tmp_path):
+        import app.server.core.cache as cache_mod
+        monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path / "cache")
+
+        class MockResp:
+            status_code = 404
+            content = b""
+        monkeypatch.setattr("city2stl.skyline.height.providers.wsf3d.requests.get",
+                            lambda *a, **kw: MockResp())
+        monkeypatch.setattr(wsf3d_global, "available", lambda: True)
+
+    def test_served_from_mosaic(self, monkeypatch, tmp_path):
+        self._no_tiles(monkeypatch, tmp_path)
+        grid = np.full((10, 10), 21.0, np.float32)
+        grid[0, 0] = np.nan
+        monkeypatch.setattr(wsf3d_global, "read_grid",
+                            lambda bbox, shape: (grid.copy(), 86.5822))
+
+        result = WSF3DProvider().fetch_heights((50.12, 50.09, 8.69, 8.65), (10, 10))
+        assert result.source_name == "wsf3d"
+        assert result.resolution_m == pytest.approx(86.5822)
+        assert np.nanmedian(result.raster) == pytest.approx(21.0)
+        assert result.confidence[0, 0] == 0.0
+        assert result.confidence[5, 5] == pytest.approx(0.5)
+
+    def test_mosaic_result_is_cached(self, monkeypatch, tmp_path):
+        self._no_tiles(monkeypatch, tmp_path)
+        calls = {"n": 0}
+
+        def counted(bbox, shape):
+            calls["n"] += 1
+            return np.full(shape, 12.0, np.float32), 86.5822
+
+        monkeypatch.setattr(wsf3d_global, "read_grid", counted)
+
+        p, bbox = WSF3DProvider(), (50.12, 50.09, 8.69, 8.65)
+        first = p.fetch_heights(bbox, (8, 8))
+        second = p.fetch_heights(bbox, (8, 8))
+        assert calls["n"] == 1
+        assert np.allclose(first.raster, second.raster)
+        assert second.resolution_m == pytest.approx(86.5822)
+
+    def test_mosaic_failure_degrades_to_empty(self, monkeypatch, tmp_path):
+        """A coarse fallback that raises would take the whole height merge down with it."""
+        self._no_tiles(monkeypatch, tmp_path)
+
+        def boom(bbox, shape):
+            raise OSError("range request failed")
+
+        monkeypatch.setattr(wsf3d_global, "read_grid", boom)
+
+        result = WSF3DProvider().fetch_heights((50.12, 50.09, 8.69, 8.65), (6, 6))
+        assert np.all(np.isnan(result.raster))
+        assert np.all(result.confidence == 0.0)
+
+    def test_all_nan_mosaic_is_empty_not_cached(self, monkeypatch, tmp_path):
+        """Genuinely unsettled ground reads as all-zero in WSF3D, which is NaN here."""
+        self._no_tiles(monkeypatch, tmp_path)
+        monkeypatch.setattr(wsf3d_global, "read_grid",
+                            lambda bbox, shape: (np.full(shape, np.nan, np.float32), 86.5822))
+
+        result = WSF3DProvider().fetch_heights((-20.0, -20.05, -140.0, -140.05), (6, 6))
+        assert np.all(np.isnan(result.raster))
+        assert result.resolution_m == 90.0
+
+
+class TestWSF3DProviderTiles:
     def test_fetch_with_synthetic_tile(self, monkeypatch, tmp_path):
         """Build a fake GeoTIFF in memory and verify the full pipeline."""
         import app.server.core.cache as cache_mod

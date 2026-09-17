@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,8 @@ def resolve_dem_from_cache(data: dict) -> tuple[list, int, int] | None:
 
     Returns ``(dem_values_list, height, width)`` or ``None`` on cache miss.
     """
-    from app.server.core.cache import make_cache_key, read_array_cache
+    from app.server.core.cache import read_array_cache
+    from app.server.core.dem_cache import dem_cache_key
 
     bbox = data.get("bbox") or data
     north = bbox.get("north")
@@ -35,32 +35,12 @@ def resolve_dem_from_cache(data: dict) -> tuple[list, int, int] | None:
     if None in (north, south, east, west):
         return None
 
-    # DEM settings — this key MUST match the write key in
-    # terrain.py:get_terrain_dem(). Raw (unprojected) DEM is cached once per
-    # bbox, so the key intentionally excludes projection and clip_nans (those
-    # are applied per-request after the cache read) and includes the "v":2
-    # schema version. These previously diverged (proj/cn were included, v was
-    # missing), so the settings-only export path always missed the cache and
-    # failed with "Missing DEM data".
+    # The key and its defaults live in core/dem_cache.py, which the terrain
+    # router also calls when it writes the entry. Reconstructing the key here
+    # by hand is what made this path fail twice before; do not reintroduce a
+    # local copy of the field list or the defaults.
     dem = data.get("dem") or data
-    dim         = int(dem.get("dim", 200))
-    dem_source  = dem.get("dem_source", "local")
-    depth_scale = float(dem.get("depth_scale", 0.5))
-    water_scale = float(dem.get("water_scale", 0.05))
-    subtract_water     = bool(dem.get("subtract_water", True))
-    # Must match terrain.py:get_terrain_dem()'s own maintain_dimensions
-    # default (False since F-PROJ-DIMS) or this cache-key reconstruction
-    # misses whenever the caller omits the field.
-    maintain_dimensions = bool(dem.get("maintain_dimensions", False))
-    show_sat    = bool(dem.get("show_sat", False))
-
-    cache_key = make_cache_key("dem", north, south, east, west, {
-        "v": 2,
-        "dim": dim, "src": dem_source,
-        "ds": depth_scale, "ws": water_scale,
-        "sw": subtract_water, "md": maintain_dimensions,
-        "sat": show_sat,
-    })
+    cache_key = dem_cache_key(north, south, east, west, dem)
 
     cached = read_array_cache("dem", cache_key)
     if cached is None or cached[0].get("dem") is None:
@@ -80,7 +60,7 @@ class ExportContext:
     Replaces the raw dict returned by _parse_export_params, giving IDE
     autocompletion and catching typos at attribute-access time.
     """
-    dem_values: List[float]
+    dem_values: list[float]
     height: int
     width: int
     model_height: float = 20.0
@@ -94,12 +74,12 @@ class ExportContext:
     # Optional composite layer spec — when present the server runs the merge
     # pipeline before scaling/extrusion so the 3D model matches what the user
     # configured in the Composite tab.
-    composite_layers: Optional[list] = None
-    composite_dim: Optional[int] = None
-    bbox: Optional[dict] = None
+    composite_layers: list | None = None
+    composite_dim: int | None = None
+    bbox: dict | None = None
 
     @classmethod
-    def from_request(cls, data: dict) -> "ExportContext":
+    def from_request(cls, data: dict) -> ExportContext:
         """Construct from an incoming request dict.
 
         Supports two modes:
@@ -119,9 +99,15 @@ class ExportContext:
             try:
                 # Lazy import — avoids circular deps with the composite router.
                 from app.server.routers.composite import compute_composite_dem
-                dim = int(data.get("composite_dim") or data.get("dem", {}).get("dim") or 600)
+                dem_settings = data.get("dem") or {}
+                dim = int(data.get("composite_dim") or dem_settings.get("dim") or 600)
                 composite = compute_composite_dem(
-                    data["bbox"], dim, composite_layers)
+                    data["bbox"], dim, composite_layers,
+                    projection=dem_settings.get("projection") or "none",
+                    clip_nans=bool(dem_settings.get("clip_nans", True)),
+                    maintain_dimensions=bool(
+                        dem_settings.get("maintain_dimensions", False)),
+                )
                 dem_values = composite.flatten().tolist()
                 height, width = composite.shape
             except Exception as exc:

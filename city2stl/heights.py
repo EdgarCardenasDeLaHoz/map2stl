@@ -22,6 +22,14 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Metres of building height per OSM ``building:levels``. 3.2 m is the middle
+# of the residential/commercial range and is the same figure the skyline
+# facade-periodicity estimator assumes (``_floor_period_for_building``'s
+# ``floor_height_m``). The two used to disagree — 4.0 here against 3.2 there —
+# which made a floor-count height and a levels-tag height for the same
+# building differ by 25 % for no physical reason.
+METRES_PER_LEVEL = 3.2
+
 # Roof geometry tags preserved through the dissolve step so that
 # _build_building_meshes() can generate shaped roofs.
 _ROOF_COLS = [
@@ -48,7 +56,6 @@ def _reduce_buildings(gdf):
     Falls back to the original gdf on any error.
     """
     try:
-        import numpy as np  # noqa: F811 (local re-import for clarity)
 
         original_crs = gdf.crs
         gdf = gdf.copy().to_crs(epsg=3857)
@@ -121,7 +128,7 @@ def _reduce_buildings(gdf):
         if extra_cols and tag_lookup:
             for col in extra_cols:
                 gdf_out[col] = gdf_out.index.map(
-                    lambda cid: tag_lookup.get(cid, {}).get(col)
+                    lambda cid: tag_lookup.get(cid, {}).get(col)  # noqa: B023
                 )
 
         gdf_out = gdf_out.reset_index(drop=True)
@@ -149,8 +156,10 @@ def _fill_heights(
     Args:
         default_m:  Fallback height when tag is absent or unparseable.
         lo, hi:     Clip bounds in metres.
-        levels_col: If set, use ``gdf[levels_col] * 4.0`` as a secondary
-                    fallback before *default_m* (buildings only).
+        levels_col: If set, use ``gdf[levels_col] * METRES_PER_LEVEL`` as a
+                    secondary fallback before *default_m* (buildings only).
+                    Rows with no level count still fall through to
+                    *default_m*.
     """
     try:
         import pandas as pd
@@ -163,11 +172,15 @@ def _fill_heights(
     n = len(gdf)  # noqa: F841 (kept for potential future use)
     source = pd.Series('default', index=gdf.index)
 
-    # Levels-based estimate (buildings only)
+    # Levels-based estimate (buildings only). Buildings with no levels tag
+    # fall through to *default_m*: filling the level count with an invented
+    # 3.0 first (as this did) meant every untagged building silently became
+    # 3 x METRES_PER_LEVEL instead, and default_m was dead code whenever
+    # levels_col was passed.
     if levels_col and levels_col in gdf.columns:
         levels = pd.to_numeric(gdf[levels_col], errors='coerce')
         has_levels = levels.notna()
-        height_from_levels = levels.fillna(3.0) * 4.0
+        height_from_levels = (levels * METRES_PER_LEVEL).fillna(float(default_m))
         source = source.where(~has_levels, 'osm_levels')
     else:
         height_from_levels = pd.Series(float(default_m), index=gdf.index)

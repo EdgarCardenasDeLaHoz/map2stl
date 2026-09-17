@@ -452,7 +452,9 @@ async function previewModelIn3D() {
             exaggeration,
             mm_per_pixel:  mmPerPixel,
             sea_level_cap: document.getElementById('exportSeaLevelCap')?.checked || false,
-            solid:         document.getElementById('viewerSolidPreview')?.checked || false,
+            // Absent checkbox means solid, matching the server default; an open
+            // top surface with no floor is the opt-in, not the fallback.
+            solid:         document.getElementById('viewerSolidPreview')?.checked ?? true,
             // These previously only applied at file-export time, so the live
             // preview never reflected them until you downloaded the model.
             engrave_label:    document.getElementById('exportEngraveLabel')?.checked || false,

@@ -71,7 +71,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import numpy as np
 
@@ -394,7 +394,7 @@ def _extract_elev_features(
 def _estimate_roof_height_from_elev(
     dem_crop: np.ndarray,
     footprint_mask: np.ndarray,
-) -> Optional[float]:
+) -> float | None:
     valid = dem_crop[footprint_mask]
     valid = valid[np.isfinite(valid)]
     if len(valid) < 6:
@@ -520,7 +520,6 @@ def _shadow_vector_px(
     pixel_m: float,
 ) -> tuple[float, float]:
     """Return (dy, dx) shadow offset per metre of building height in pixels."""
-    az_r = math.radians(az_deg)
     shadow_per_m = 1.0 / math.tan(math.radians(elev_deg))   # metres of shadow per metre height
     shadow_px_per_m = shadow_per_m / max(pixel_m, 0.01)
     # Shadow falls opposite to sun: sun in direction az → shadow in direction az+180
@@ -666,7 +665,7 @@ def _roofnet_classify_patch(
     rgb_crops: list[np.ndarray],
     footprint_mask: np.ndarray,
     roofnet: object,
-) -> tuple[Optional[str], float]:
+) -> tuple[str | None, float]:
     """Classify a roof-shape patch using a RoofNet or RoofNetV2 instance.
 
     The model returns a ``(height_map, shape_logits)`` tuple.  This
@@ -755,8 +754,8 @@ def _roofnet_classify_patch(
 def _cnn_classify_patch(
     rgb_crops: list[np.ndarray],
     footprint_mask: np.ndarray,
-    model_name: "str | object" = "mobilenet_v3_small",
-) -> tuple[Optional[str], float]:
+    model_name: str | object = "mobilenet_v3_small",
+) -> tuple[str | None, float]:
     """Classify a roof-shape patch using a lightweight torchvision CNN.
 
     Accepts either a torchvision model name string (built and run with random
@@ -922,9 +921,9 @@ def _classify(
     rgb: _RGBFeatures,
     shadow: _ShadowFeatures,
     mt: _MultiTemporalFeatures,
-    cnn: tuple[Optional[str], float],
+    cnn: tuple[str | None, float],
     pixel_m: float = 1.0,
-) -> tuple[Optional[str], float]:
+) -> tuple[str | None, float]:
     """Fuse all signals into a (roof_shape, confidence) decision.
 
     Priority order:
@@ -994,16 +993,25 @@ def _classify(
 
 def classify_roof_shapes(
     buildings_geojson: dict,
-    satellite_rgb: "np.ndarray | list[np.ndarray]",
+    satellite_rgb: np.ndarray | list[np.ndarray],
     bbox: tuple,
-    height_raster: "np.ndarray | None" = None,
+    height_raster: np.ndarray | None = None,
     estimate_roof_heights: bool = False,
     overwrite: bool = False,
-    acquisition_months: "list[int] | None" = None,
-    acquisition_hours: "list[int] | None" = None,
-    cnn_model: "str | object" = "mobilenet_v3_small",
+    acquisition_months: list[int] | None = None,
+    acquisition_hours: list[int] | None = None,
+    cnn_model: str | object = "mobilenet_v3_small",
+    use_model: bool = False,
 ) -> dict:
     """Classify ``roof:shape`` for buildings using multi-signal satellite analysis.
+
+    With *use_model* the trained checkpoint in :mod:`city2stl.roof_model`
+    answers first and the signals below are only consulted for buildings it
+    cannot measure.  That path is worth preferring where it applies: held out
+    by city it beats always-flat, while the hand-written tiers below have been
+    measured scoring exactly their always-majority baseline on tagged cities
+    (Salzburg came back 100 per cent pitched, Cartagena 99.6 per cent
+    pyramidal).  It is off by default only because it fetches its own tiles.
 
     Combines up to five complementary signals in priority order:
 
@@ -1049,6 +1057,11 @@ def classify_roof_shapes(
             When a ``RoofNet`` instance is passed the shape-classification
             head of the model is used and the height head provides an
             additional pseudo-nDSM input to the elevation-feature extractor.
+        use_model: Consult the trained ``roof_shape_gbm`` checkpoint first,
+            fetching a zoom-18 crop per building rather than reading the
+            supplied city-wide image.  Falls back to the signal cascade for
+            any building the model cannot measure, and silently does nothing
+            when the checkpoint is absent.
 
     Returns:
         A copy of *buildings_geojson* with ``roof:shape``, ``roof_source``,
@@ -1060,15 +1073,36 @@ def classify_roof_shapes(
     """
     import copy
 
+    trained = None
+    if use_model:
+        from city2stl import roof_model as _roof_model
+
+        trained = _roof_model.load()
+        if trained is None:
+            logger.warning("use_model requested but no checkpoint at %s; "
+                           "falling back to the signal cascade",
+                           _roof_model.MODEL_PATH)
+
     # ── Normalise input to a list of images ─────────────────────────────
-    if isinstance(satellite_rgb, np.ndarray):
-        rgb_stack: list[np.ndarray] = [satellite_rgb]
+    # No image at all is a supported case once the model is loaded: it reads
+    # its own tiles, so a city no longer has to be fetched whole and degraded
+    # to a metre per pixel just to have its roofs classified. Buildings the
+    # model declines are then reported as skipped rather than handed to a
+    # cascade that has nothing to look at.
+    model_only = satellite_rgb is None
+    if model_only:
+        if trained is None:
+            raise ValueError(
+                "classify_roof_shapes needs either a satellite image or the "
+                "trained checkpoint; neither was available")
+        rgb_stack: list[np.ndarray] = []
+    elif isinstance(satellite_rgb, np.ndarray):
+        rgb_stack = [satellite_rgb]
     else:
         rgb_stack = list(satellite_rgb)
 
     n_images = len(rgb_stack)
-    ref = rgb_stack[0]
-    rgb_h, rgb_w = ref.shape[:2]
+    rgb_h, rgb_w = (0, 0) if model_only else rgb_stack[0].shape[:2]
 
     if acquisition_months is None:
         acquisition_months = [6] * n_images
@@ -1076,17 +1110,31 @@ def classify_roof_shapes(
         acquisition_hours = [10] * n_images
 
     north, south, east, west = bbox
-    pixel_m = (north - south) * 111_320.0 / rgb_h
+    pixel_m = 0.0 if model_only else (north - south) * 111_320.0 / rgb_h
 
     shadow_stack = [_detect_shadows(img) for img in rgb_stack]
-    shadow_primary = shadow_stack[0]
 
     features_list = buildings_geojson.get("features") or []
+
+    if trained is not None and features_list:
+        # The model reads one crop per building, and on a whole city that is
+        # tens of thousands of serial requests against a few hundred distinct
+        # tiles.  Warming the cache concurrently first turns the round-trip
+        # latency from per-building into per-city.
+        try:
+            from city2stl import roof_tiles as _roof_tiles
+            _roof_tiles.prefetch_bbox(north, south, east, west,
+                                      zoom=trained.zoom,
+                                      log=lambda m: logger.info("roof tiles: %s", m))
+        except Exception as exc:                            # noqa: BLE001
+            logger.warning("roof tile prefetch failed (%s); "
+                           "falling back to per-building fetches", exc)
     out_features: list[dict] = []
     total = len(features_list)
     classified = 0
     skipped = 0
     unchanged = 0
+    by_model = 0
 
     lat_mid = (north + south) / 2.0
     lon_mid = (east + west) / 2.0
@@ -1125,13 +1173,49 @@ def classify_roof_shapes(
             out_features.append(feat)
             continue
 
+        # ── Trained model ──────────────────────────────────────────────
+        # Asked before the crop below, and from its own zoom-18 tiles rather
+        # than the supplied image: a city-wide fetch is capped at 400 tiles
+        # and walks the zoom down until it fits, so it arrives at roughly a
+        # metre per pixel and a ten-metre house is eight pixels across.
+        model_shape, model_conf = None, 0.0
+        if trained is not None:
+            try:
+                model_shape, model_conf = trained.classify(ring, props)
+            except Exception as exc:                        # noqa: BLE001
+                logger.debug("roof model failed on one building: %s", exc)
+                model_shape = None
+
+        if model_only:
+            if model_shape is None:
+                skipped += 1
+            else:
+                props["roof:shape"] = model_shape
+                props["roof_source"] = "roof_model_gbm"
+                props["roof_confidence"] = round(float(model_conf), 3)
+                feat["properties"] = props
+                classified += 1
+                by_model += 1
+            out_features.append(feat)
+            continue
+
         # ── Crop bounds ────────────────────────────────────────────────
         cr0, cr1, cc0, cc1 = _crop_bounds_for_ring(
             ring, north, south, east, west, rgb_h, rgb_w
         )
         crop_h, crop_w = cr1 - cr0, cc1 - cc0
         if crop_h < 2 or crop_w < 2:
-            skipped += 1
+            # Too few pixels in the supplied image for the signal cascade, but
+            # the model read its own tiles and does not care.
+            if model_shape is not None:
+                props["roof:shape"] = model_shape
+                props["roof_source"] = "roof_model_gbm"
+                props["roof_confidence"] = round(float(model_conf), 3)
+                feat["properties"] = props
+                classified += 1
+                by_model += 1
+            else:
+                skipped += 1
             out_features.append(feat)
             continue
 
@@ -1144,7 +1228,9 @@ def classify_roof_shapes(
 
         # ── Signal 1: CNN ──────────────────────────────────────────────
         rgb_crops = [img[cr0:cr1, cc0:cc1] for img in rgb_stack]
-        cnn_result = _cnn_classify_patch(rgb_crops, footprint_mask, cnn_model)
+        cnn_result = ((None, 0.0) if model_shape is not None
+                      else _cnn_classify_patch(rgb_crops, footprint_mask,
+                                               cnn_model))
 
         # ── Signal 2: elevation profile ────────────────────────────────
         if height_raster is not None:
@@ -1172,9 +1258,13 @@ def classify_roof_shapes(
         shadow_feat = _extract_shadow_features(shadow_crops[0], footprint_mask)
 
         # ── Fuse ───────────────────────────────────────────────────────
-        roof_shape, _conf = _classify(
-            elev_feat, rgb_feat, shadow_feat, mt_feat, cnn_result, pixel_m
-        )
+        if model_shape is not None:
+            roof_shape, conf = model_shape, model_conf
+            by_model += 1
+        else:
+            roof_shape, conf = _classify(
+                elev_feat, rgb_feat, shadow_feat, mt_feat, cnn_result, pixel_m
+            )
 
         if roof_shape is None:
             skipped += 1
@@ -1182,7 +1272,12 @@ def classify_roof_shapes(
             continue
 
         props["roof:shape"] = roof_shape
-        props["roof_source"] = "satellite_classify"
+        props["roof_source"] = ("roof_model_gbm" if model_shape is not None
+                                else "satellite_classify")
+        # The tier that produced the call, as a number. The lower tiers answer
+        # for every building whether or not they know anything, so a consumer
+        # that cannot afford a guess needs to see how confident this one was.
+        props["roof_confidence"] = round(float(conf), 3)
 
         # ── Optional height estimate ───────────────────────────────────
         if (
@@ -1206,10 +1301,12 @@ def classify_roof_shapes(
         "skipped": skipped,
         "unchanged": unchanged,
         "n_images": n_images,
+        "by_model": by_model,
     }
     logger.info(
-        "classify_roof_shapes: %d buildings, %d classified, %d skipped, %d unchanged",
-        total, classified, skipped, unchanged,
+        "classify_roof_shapes: %d buildings, %d classified (%d by model), "
+        "%d skipped, %d unchanged",
+        total, classified, by_model, skipped, unchanged,
     )
     return result
 

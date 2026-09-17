@@ -6,19 +6,19 @@ Delegates OSM fetching to core/osm.py and caching to core/cache.py.
 """
 
 from __future__ import annotations
-from app.server.schemas import CityRequest, CityRasterRequest, EnhanceHeightsRequest
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel
 
 import json
 import logging
+from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel
 
 from app.server.config import OSM_CACHE_PATH
-from app.server.core.validation import validate_bbox_diagonal, run_sync
 from app.server.core.responses import error_response
+from app.server.core.validation import run_sync, validate_bbox_diagonal
+from app.server.schemas import CityRasterRequest, CityRequest, EnhanceHeightsRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cities"])
@@ -27,7 +27,7 @@ router = APIRouter(tags=["cities"])
 # Cache helpers
 # ---------------------------------------------------------------------------
 try:
-    from app.server.core.cache import read_osm_cache, write_osm_cache, osm_cache_key, CACHE_ROOT
+    from app.server.core.cache import CACHE_ROOT, osm_cache_key, read_osm_cache, write_osm_cache
     _CACHE_AVAILABLE = True
 except ImportError:
     _CACHE_AVAILABLE = False
@@ -37,12 +37,12 @@ except ImportError:
 # OSM fetch helper
 # ---------------------------------------------------------------------------
 try:
-    from city2stl.fetch import fetch_osm_data as _fetch_osm_data
-    from city2stl.rasterize import rasterize_city_data as _rasterize_city_data
     from city2stl.cache_policy import (
         city_cache_missing_building_parts,
         city_cache_missing_height_source,
     )
+    from city2stl.fetch import fetch_osm_data as _fetch_osm_data
+    from city2stl.rasterize import rasterize_city_data as _rasterize_city_data
 except ImportError:
     def _fetch_osm_data(*a, **kw):
         raise RuntimeError(
@@ -61,12 +61,21 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # 3D export helper
 # ---------------------------------------------------------------------------
-try:
-    from app.server.core.cities_3d import generate_city_3mf
-    _CITIES_3D_AVAILABLE = True
-except ImportError:
-    _CITIES_3D_AVAILABLE = False
-    generate_city_3mf = None  # type: ignore
+def _load_city_3mf():
+    """The 3MF writer, or None if its dependencies are missing.
+
+    It lives in city2stl.mesh, not under app.server.core; the old path here did
+    not exist, so the import always failed and /api/cities/export3mf answered
+    501 for every request. Resolved on first use rather than at import, because
+    mesh.py needs numpy2stl from the Code/ directory and server.py puts that on
+    sys.path further down the file than it imports this router.
+    """
+    try:
+        from city2stl.mesh import generate_city_3mf
+        return generate_city_3mf
+    except ImportError as exc:
+        logger.error("city2stl.mesh unavailable for 3MF export: %s", exc)
+        return None
 
 try:
     from app.server.core.height.service import enhance_city_data as _enhance_city_data
@@ -85,13 +94,13 @@ class CityExportRequest(BaseModel):
     south: float
     east: float
     west: float
-    dem_values:   Optional[List[float]] = None
-    dem_width:    Optional[int] = None
-    dem_height:   Optional[int] = None
-    buildings:    Optional[Dict[str, Any]] = None   # GeoJSON FeatureCollection
+    dem_values:   list[float] | None = None
+    dem_width:    int | None = None
+    dem_height:   int | None = None
+    buildings:    dict[str, Any] | None = None   # GeoJSON FeatureCollection
     # DEM cache lookup settings (used when dem_values is not provided)
-    bbox:         Optional[Dict[str, float]] = None
-    dem:          Optional[Dict[str, Any]] = None
+    bbox:         dict[str, float] | None = None
+    dem:          dict[str, Any] | None = None
     model_height_mm:  float = 20.0
     base_mm:          float = 5.0
     building_z_scale: float = 0.5        # mm per real metre for building heights
@@ -133,7 +142,7 @@ async def get_city_data(city_req: CityRequest):
     Results are cached as .json.gz. Region must be ≤ 15 km diagonal (≤ 25 km
     for ``detail="coarse"`` requests, which drop walls/small buildings).
     """
-    from app.server.config import MAX_BBOX_DIAGONAL_KM_COARSE, COARSE_MIN_BUILDING_AREA_M2
+    from app.server.config import COARSE_MIN_BUILDING_AREA_M2, MAX_BBOX_DIAGONAL_KM_COARSE
 
     north, south, east, west = city_req.north, city_req.south, city_req.east, city_req.west
     layers = city_req.layers or ["buildings", "roads", "waterways"]
@@ -142,7 +151,7 @@ async def get_city_data(city_req: CityRequest):
     is_coarse = city_req.detail == "coarse"
     if is_coarse:
         # Coarse tier: infrastructure + large buildings only, no wall detail.
-        layers = [l for l in layers if l != "walls"] or ["buildings", "roads", "waterways"]
+        layers = [lyr for lyr in layers if lyr != "walls"] or ["buildings", "roads", "waterways"]
         min_area = max(min_area, COARSE_MIN_BUILDING_AREA_M2)
 
     # Server-side size guard (coarse tier gets a larger cap)
@@ -238,9 +247,10 @@ async def get_city_raster(req: CityRasterRequest):
     Cached as .npz alongside other DEM rasters.
     """
     import hashlib
+
     import numpy as np
 
-    def _sanitize_raster_result(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_raster_result(payload: dict[str, Any]) -> dict[str, Any]:
         """Normalize raster payload so JSON serialization never sees NaN/Inf."""
         grid = np.array(payload["values"], dtype=np.float32).reshape(
             int(payload["height"]), int(payload["width"])
@@ -393,8 +403,9 @@ async def export_city_3mf(req: CityExportRequest):
     Expects DEM values (from /api/terrain/dem) and a buildings GeoJSON
     FeatureCollection (from /api/cities) with height_m and terrain_z properties.
     """
-    if not _CITIES_3D_AVAILABLE:
-        return error_response("core.cities_3d not available", 501)
+    generate_city_3mf = _load_city_3mf()
+    if generate_city_3mf is None:
+        return error_response("city2stl.mesh not available", 501)
 
     # Resolve DEM from cache when not provided
     dem_values = req.dem_values
@@ -467,9 +478,10 @@ async def enhance_heights(req: EnhanceHeightsRequest):
     each building centroid to replace default (10 m) heights with real
     photogrammetric measurements.
     """
-    from city2stl.skyline.height.providers.google_3d import Google3DProvider, _get_api_key
-    from city2stl.heights import enhance_buildings_with_raster
     import numpy as np
+
+    from city2stl.heights import enhance_buildings_with_raster
+    from city2stl.skyline.height.providers.google_3d import Google3DProvider, _get_api_key
 
     if not _get_api_key():
         return error_response(

@@ -18,9 +18,20 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import List
 
 logger = logging.getLogger(__name__)
+
+
+class OverpassUpstreamError(RuntimeError):
+    """Every Overpass mirror failed to serve a layer the caller asked for.
+
+    Distinct from a bbox that genuinely contains no buildings. The two used to be
+    indistinguishable through the HTTP API: during the 2026-08-30 outage Naples answered 200 with
+    an empty buildings collection while Palermo, hitting the same outage, correctly failed. An
+    empty answer that is really an outage is a wrong answer, not a missing one, and it poisons
+    the OSM cache and every export built on it.
+    """
+
 
 # Overpass base URLs (osmnx appends /interpreter automatically).
 # overpass-api.de is canonical but suffers frequent timeouts;
@@ -31,48 +42,123 @@ _OVERPASS_ENDPOINTS = [
     "https://maps.mail.ru/osm/tools/overpass/api",
 ]
 
+# The status probe's budget. Generous because a healthy mirror under load still
+# takes ~10 s to answer /status — probing at 8 s rejected the only working
+# mirror during an outage of the other two. Short enough that walking the whole
+# list costs well under a minute when they are all down.
+_OVERPASS_PROBE_TIMEOUT_S = 20.0
+
+# Per-request budget for the Overpass queries themselves. A city-sized
+# buildings query on a healthy mirror is ~60 s; 300 s leaves room for a loaded
+# one while still failing over in bounded time rather than hanging.
+_OVERPASS_REQUEST_TIMEOUT_S = 300
+
+
+def _healthy_overpass_endpoints() -> list[str]:
+    """Overpass mirrors that answered ``/status``, in preference order.
+
+    Previously this probed with a bare ``requests.head`` on the base URL and
+    accepted the first one that did not raise. ``head`` does not raise on a 502,
+    so a mirror that was up but broken (kumi.systems, routinely) was selected
+    and every subsequent query failed against it while a healthy mirror sat
+    untried further down the list. ``/status`` is the endpoint Overpass provides
+    for exactly this, and the status code is checked.
+    """
+    import requests
+
+    healthy: list[str] = []
+    for endpoint in _OVERPASS_ENDPOINTS:
+        try:
+            resp = requests.get(f"{endpoint}/status",
+                                timeout=_OVERPASS_PROBE_TIMEOUT_S)
+            resp.raise_for_status()
+            healthy.append(endpoint)
+        except Exception as e:
+            logger.warning(f"Overpass endpoint {endpoint} not healthy: {e}")
+    return healthy
+
 # _HIGHWAY_WIDTHS is defined in city2stl.roads (authoritative source).
 # Imported here so fetch.py is the single osm-facing module without callers
 # needing to know the internal split between roads.py and fetch.py.
-from .roads import _HIGHWAY_WIDTHS, get_road_width_m as _get_road_width_m
-from .heights import _fill_heights, _reduce_buildings
-from .rasterize import _count_verts, _empty_fc
+from .heights import _fill_heights, _reduce_buildings  # noqa: E402
+from .rasterize import _count_verts, _empty_fc  # noqa: E402
+from .roads import get_road_width_m as _get_road_width_m  # noqa: E402
+
+try:
+    from osmnx._errors import InsufficientResponseError
+except Exception:  # pragma: no cover - osmnx layout change
+    #: Nothing will match, so every failure keeps the old "worth another mirror" reading.
+    InsufficientResponseError = ()
 
 
 # ---------------------------------------------------------------------------
 # Per-layer fetch helpers
 # ---------------------------------------------------------------------------
 
+def _to_metric(gdf):
+    """
+    Reproject to a CRS whose areas are true square metres.
+
+    EPSG:3857 (Web Mercator) is conformal, not equal-area: its areas are
+    inflated by sec^2(latitude) — 1.7x at 40 deg, 4x at 60 deg. Anything that
+    compares a computed area against a threshold in m^2 (the ``min_area``
+    building filter) or reports one in a log line must not use it. The local
+    UTM zone is accurate to a fraction of a percent over a city-sized bbox.
+    """
+    try:
+        return gdf.to_crs(gdf.estimate_utm_crs())
+    except Exception as e:  # pragma: no cover - depends on pyproj grid availability
+        logger.warning(f"UTM estimation failed ({e}); falling back to EPSG:3857 areas")
+        return gdf.to_crs(epsg=3857)
+
+
+def _features_or_none(ox, bbox, tags):
+    """One ``features_from_bbox`` query, with "nothing matched" as a value rather than a raise.
+
+    osmnx signals an empty result by raising, which is the wrong shape for a caller that runs
+    several queries and merges them: most bboxes have no ``building:part`` at all, and letting
+    that raise would throw away the footprints the other query did find. A genuine request
+    failure still propagates, because failover has to be able to see it.
+    """
+    try:
+        return ox.features_from_bbox(bbox, tags=tags)
+    except InsufficientResponseError:
+        return None
+
+
 def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_area: float) -> dict:
     try:
         import pandas as pd
 
-        base_gdf = ox.features_from_bbox(bbox, tags={"building": True})
-        part_gdf = ox.features_from_bbox(bbox, tags={"building:part": True})
-        if len(base_gdf) and len(part_gdf):
+        base_gdf = _features_or_none(ox, bbox, {"building": True})
+        part_gdf = _features_or_none(ox, bbox, {"building:part": True})
+        if base_gdf is None and part_gdf is None:
+            logger.info("OSM buildings: none in region")
+            return _empty_fc()
+        if base_gdf is not None and part_gdf is not None:
             # Keep first occurrence for duplicated OSM ids returned by both queries.
             gdf = pd.concat([part_gdf, base_gdf], axis=0, copy=False)
             gdf = gdf.reset_index().drop_duplicates(subset=["element", "id"], keep="first")
             gdf = gdf.set_index(["element", "id"])
-        elif len(base_gdf):
+        elif base_gdf is not None:
             gdf = base_gdf
         else:
             gdf = part_gdf
         gdf = gdf[gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])].reset_index(drop=True)
         n_raw = len(gdf)
         if min_area > 0 and len(gdf):
-            gdf_m = gdf.to_crs(epsg=3857)
+            gdf_m = _to_metric(gdf)
             gdf = gdf[gdf_m.geometry.area >= min_area].reset_index(drop=True)
         logger.info(
             f"[buildings] raw={n_raw} features  after area filter (>={min_area} m^2): {len(gdf)} features"
         )
         if tol_deg > 0 and len(gdf):
-            gdf_m_pre = gdf.to_crs(epsg=3857)
+            gdf_m_pre = _to_metric(gdf)
             verts_before = int(gdf_m_pre.geometry.apply(lambda g: sum(len(p.exterior.coords) for p in ([g] if g.geom_type == 'Polygon' else g.geoms))).sum())
             area_before  = float(gdf_m_pre.geometry.area.sum())
             gdf["geometry"] = gdf["geometry"].simplify(tol_deg, preserve_topology=True)
             gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].reset_index(drop=True)
-            gdf_m_post = gdf.to_crs(epsg=3857)
+            gdf_m_post = _to_metric(gdf)
             verts_after = int(gdf_m_post.geometry.apply(lambda g: sum(len(p.exterior.coords) for p in ([g] if g.geom_type == 'Polygon' else g.geoms))).sum())
             area_after  = float(gdf_m_post.geometry.area.sum())
             area_delta_pct = (area_after - area_before) / area_before * 100 if area_before else 0
@@ -83,10 +169,10 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
             )
         gdf = _fill_heights(gdf, default_m=10.0, lo=3.0, hi=300.0, levels_col='building:levels')
         n_pre_dissolve = len(gdf)
-        gdf_m_pre_d = gdf.to_crs(epsg=3857)
+        gdf_m_pre_d = _to_metric(gdf)
         area_pre_dissolve = float(gdf_m_pre_d.geometry.area.sum())
         gdf = _reduce_buildings(gdf)
-        gdf_m_post_d = gdf.to_crs(epsg=3857)
+        gdf_m_post_d = _to_metric(gdf)
         area_post_dissolve = float(gdf_m_post_d.geometry.area.sum())
         area_dissolve_delta_pct = (area_post_dissolve - area_pre_dissolve) / area_pre_dissolve * 100 if area_pre_dissolve else 0
         logger.info(
@@ -104,6 +190,9 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
         ]
         gdf = gdf[[c for c in keep if c in gdf.columns]]
         return json.loads(gdf.to_json())
+    except InsufficientResponseError as e:
+        logger.info(f"OSM buildings: none in region ({e})")
+        return _empty_fc()
     except Exception as e:
         logger.warning(f"OSM buildings fetch failed: {e}", exc_info=True)
         return _empty_fc(str(e))
@@ -119,6 +208,9 @@ def _fetch_roads(ox, bbox) -> dict:
         keep = ["geometry", "highway", "name", "lanes", "maxspeed", "road_width_m"]
         edges = edges[[c for c in keep if c in edges.columns]]
         return json.loads(edges.to_json())
+    except InsufficientResponseError as e:
+        logger.info(f"OSM roads: none in region ({e})")
+        return _empty_fc()
     except Exception as e:
         logger.warning(f"OSM roads fetch failed: {e}", exc_info=True)
         return _empty_fc(str(e))
@@ -137,14 +229,14 @@ def _fetch_waterways(ox, bbox, tol_deg: float, simplify_tolerance: float) -> dic
         _supported = {"Polygon", "MultiPolygon", "LineString", "MultiLineString"}
         gdf = gdf[gdf.geometry.notna() & gdf.geometry.geom_type.isin(_supported)].reset_index(drop=True)
         if tol_deg > 0 and len(gdf):
-            gdf_m_pre = gdf.to_crs(epsg=3857)
+            gdf_m_pre = _to_metric(gdf)
             poly_mask = gdf_m_pre.geometry.geom_type.isin(["Polygon", "MultiPolygon"])
             verts_before = int(gdf_m_pre.geometry.apply(_count_verts).sum())
             area_before  = float(gdf_m_pre.geometry[poly_mask].area.sum()) if poly_mask.any() else 0.0
             gdf["geometry"] = gdf["geometry"].simplify(tol_deg, preserve_topology=True)
             gdf["geometry"] = gdf.geometry.make_valid()
             gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].reset_index(drop=True)
-            gdf_m_post = gdf.to_crs(epsg=3857)
+            gdf_m_post = _to_metric(gdf)
             poly_mask_post = gdf_m_post.geometry.geom_type.isin(["Polygon", "MultiPolygon"])
             verts_after = int(gdf_m_post.geometry.apply(_count_verts).sum())
             area_after  = float(gdf_m_post.geometry[poly_mask_post].area.sum()) if poly_mask_post.any() else 0.0
@@ -160,6 +252,9 @@ def _fetch_waterways(ox, bbox, tol_deg: float, simplify_tolerance: float) -> dic
         keep = ["geometry", "waterway", "natural", "name", "water"]
         gdf = gdf[[c for c in keep if c in gdf.columns]]
         return json.loads(gdf.to_json())
+    except InsufficientResponseError as e:
+        logger.info(f"OSM waterways: none in region ({e})")
+        return _empty_fc()
     except Exception as e:
         logger.warning(f"OSM waterways fetch failed: {e}", exc_info=True)
         return _empty_fc(str(e))
@@ -173,6 +268,9 @@ def _fetch_pois(ox, bbox) -> dict:
         keep = ["geometry", "amenity", "tourism", "historic", "name"]
         gdf = gdf[[c for c in keep if c in gdf.columns]]
         return json.loads(gdf.to_json())
+    except InsufficientResponseError as e:
+        logger.info(f"OSM pois: none in region ({e})")
+        return _empty_fc()
     except Exception as e:
         logger.warning(f"OSM pois fetch failed: {e}", exc_info=True)
         return _empty_fc(str(e))
@@ -200,6 +298,9 @@ def _fetch_polygon_layer(
         result = json.loads(gdf.to_json())
         logger.info(f"[{label}] fetched {len(gdf)} features")
         return result
+    except InsufficientResponseError as e:
+        logger.info(f"OSM {label}: none in region ({e})")
+        return _empty_fc()
     except Exception as e:
         logger.warning(f"OSM {label} fetch failed: {e}", exc_info=True)
         return _empty_fc(str(e))
@@ -211,7 +312,7 @@ def _fetch_polygon_layer(
 
 def fetch_osm_data(
     north: float, south: float, east: float, west: float,
-    layers: List[str],
+    layers: list[str],
     simplify_tolerance: float = 0.5,
     min_area: float = 5.0,
 ) -> dict:
@@ -227,24 +328,14 @@ def fetch_osm_data(
     """
     try:
         import osmnx as ox
-    except ImportError:
-        raise RuntimeError("osmnx is not installed. Run: pip install osmnx")
+    except ImportError as exc:
+        raise RuntimeError("osmnx is not installed. Run: pip install osmnx") from exc
 
-    # Try each Overpass endpoint in order; rotate on connection/timeout errors.
-    import requests
-    last_exc: Exception | None = None
-    for endpoint in _OVERPASS_ENDPOINTS:
-        try:
-            ox.settings.overpass_url = endpoint
-            # Quick connectivity probe (HEAD on the base URL) before running
-            # expensive layer fetches — avoids a 180 s connect timeout.
-            requests.head(endpoint, timeout=10)
-            break
-        except Exception as e:
-            logger.warning(f"Overpass endpoint {endpoint} unreachable: {e}; trying next")
-            last_exc = e
-    else:
-        raise RuntimeError(f"All Overpass endpoints unreachable. Last error: {last_exc}")
+    healthy = _healthy_overpass_endpoints()
+    if not healthy:
+        raise RuntimeError(
+            "No Overpass endpoint answered its /status probe: "
+            + ", ".join(_OVERPASS_ENDPOINTS))
 
     # Convert simplification tolerance from metres to degrees (~111 km per degree)
     tol_deg = simplify_tolerance / 111_000.0
@@ -252,6 +343,64 @@ def fetch_osm_data(
     # osmnx 2.x bbox format: (left, bottom, right, top) = (west, south, east, north)
     bbox = (west, south, east, north)
 
+    # The layer fetchers swallow their own exceptions and return an empty
+    # FeatureCollection carrying an ``error`` key, so a mirror that answers its
+    # status probe and then 502s every query used to produce a "successful"
+    # fetch with no buildings in it. Retry the whole set on the next healthy
+    # mirror instead, and only give up when none of them can serve the layer
+    # the caller actually came for.
+    result: dict = {}
+    for attempt, endpoint in enumerate(healthy):
+        ox.settings.overpass_url = endpoint
+        # osmnx's rate limiter polls ``{overpass_url}/status`` and sleeps until
+        # the server reports a free slot. Only the official instance publishes
+        # that in the format osmnx parses; against a third-party mirror the
+        # parse yields no available slot and osmnx sleeps and re-polls
+        # indefinitely — a Cartagena fetch that takes ~56 s on a good day sat
+        # for 55 minutes with no output and had to be killed. Rate-limit only
+        # the endpoint whose protocol osmnx actually speaks, and bound every
+        # request so a wedged mirror fails over instead of hanging.
+        ox.settings.overpass_rate_limit = endpoint.startswith(
+            "https://overpass-api.de")
+        ox.settings.requests_timeout = _OVERPASS_REQUEST_TIMEOUT_S
+        result = _fetch_layers(ox, bbox, layers, tol_deg,
+                               simplify_tolerance, min_area)
+        failed = _layers_failed(result, layers)
+        if not failed:
+            break
+        remaining = len(healthy) - attempt - 1
+        logger.warning(
+            "Overpass %s returned no usable data for %s; %d mirror(s) left",
+            endpoint, ",".join(failed), remaining)
+    else:
+        # Out of mirrors with the caller's own layers still failing. Returning the last empty
+        # collection here would present an outage as an empty region.
+        raise OverpassUpstreamError(
+            f"All {len(healthy)} Overpass mirror(s) failed to serve "
+            f"{', '.join(failed)}: {', '.join(healthy)}")
+
+    result["city_pipeline_version"] = 2
+    return result
+
+
+def _layers_failed(result: dict, layers: list[str]) -> list[str]:
+    """Requested layers that came back empty *and* carrying a fetch error.
+
+    An empty layer is not by itself a failure — plenty of bboxes genuinely have
+    no city walls. The ``error`` key is what distinguishes "nothing there" from
+    "the server refused", and only the latter is worth another mirror.
+    """
+    failed = []
+    for name in layers:
+        fc = result.get(name)
+        if isinstance(fc, dict) and fc.get("error") and not fc.get("features"):
+            failed.append(name)
+    return failed
+
+
+def _fetch_layers(ox, bbox, layers: list[str], tol_deg: float,
+                  simplify_tolerance: float, min_area: float) -> dict:
+    """One pass over the requested layers against the currently-set mirror."""
     result: dict = {}
 
     if "buildings" in layers:
@@ -311,7 +460,5 @@ def fetch_osm_data(
             height_default=0.0, height_lo=0.0, height_hi=0.0,
             keep_cols=["name", "leisure", "landuse", "natural"], label="green",
         )
-
-    result["city_pipeline_version"] = 2
 
     return result

@@ -53,6 +53,7 @@ NAMESPACE_TTL = {
     "composite":  30 * 86400,   # 30 days (city rasters tied to OSM data)
     "opentopo":   90 * 86400,   # 90 days (raw GeoTIFFs rarely change)
     "hydrology":  30 * 86400,   # 30 days (river network rarely changes)
+    "trails":      7 * 86400,   # 7 days (OSM-derived; tracks OSM's own TTL)
 }
 MAX_FILES_PER_NAMESPACE = 200
 
@@ -174,13 +175,19 @@ def write_osm_cache(key: str, data: dict) -> None:
             pass
 
 
-def read_osm_cache(key: str) -> dict | None:
-    """Return parsed GeoJSON dict or None if not cached / stale."""
+def read_osm_cache(key: str, allow_stale: bool = False) -> dict | None:
+    """Return parsed GeoJSON dict or None if not cached / stale.
+
+    ``allow_stale`` ignores the TTL. Intended for callers that have already
+    tried and failed to fetch fresh data: Overpass goes down often enough that
+    refusing a two-month-old building footprint — for buildings that have not
+    moved — turns a mirror outage into a failed run.
+    """
     path = _osm_dir() / f"{key}.json.gz"
     if not path.exists():
         return None
     try:
-        if _is_stale(path.stat().st_mtime, "osm"):
+        if _is_stale(path.stat().st_mtime, "osm") and not allow_stale:
             logger.debug(f"OSM cache stale: {key}")
             return None
         data = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))

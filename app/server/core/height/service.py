@@ -4,7 +4,7 @@ import asyncio
 import base64
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 
@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 try:
     from app.server.core.cache import (
         CACHE_ROOT as _CACHE_ROOT,
+    )
+    from app.server.core.cache import (
         make_cache_key,
         read_array_cache,
         write_array_cache,
@@ -25,16 +27,22 @@ except Exception:
     _CACHE_AVAILABLE = False
     make_cache_key = read_array_cache = write_array_cache = None  # type: ignore
 
-from city2stl.skyline.height import HeightResult, _filter_outliers, merge_height_rasters, provider_stats
-from city2stl.skyline.height.providers.copernicus import CopernicusProvider
-from city2stl.skyline.height.providers.ghsl import GHSLProvider
-from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
-from city2stl.skyline.height.providers.ndsm import NDSMProvider
-from city2stl.skyline.height.providers.open_buildings import OpenBuildingsProvider
-from city2stl.skyline.height.providers.roofnet import RoofNetProvider
-from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
-from city2stl.heights import enhance_buildings_with_raster
-
+from city2stl.heights import enhance_buildings_with_raster  # noqa: E402
+from city2stl.skyline.height import (  # noqa: E402
+    BUILDING_RESOLUTION_LIMIT_M,
+    HeightResult,
+    _filter_outliers,
+    merge_height_rasters,
+    provider_stats,
+)
+from city2stl.skyline.height.providers.copernicus import CopernicusProvider  # noqa: E402
+from city2stl.skyline.height.providers.gba import GBAProvider  # noqa: E402
+from city2stl.skyline.height.providers.ghsl import GHSLProvider  # noqa: E402
+from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider  # noqa: E402
+from city2stl.skyline.height.providers.ndsm import NDSMProvider  # noqa: E402
+from city2stl.skyline.height.providers.open_buildings import OpenBuildingsProvider  # noqa: E402
+from city2stl.skyline.height.providers.roofnet import RoofNetProvider  # noqa: E402
+from city2stl.skyline.height.providers.wsf3d import WSF3DProvider  # noqa: E402
 
 _HEIGHT_CACHE_VERSION = "v2"  # bumped: cache format changed to shared npz+json
 
@@ -51,12 +59,29 @@ class RegisteredProvider:
         return self.instance.name
 
 
+# Confidence and resolution here must match the constants inside each provider
+# module, because `merge_height_rasters` ranks on what the provider reports and
+# this table is what the API shows. `lidar_3dep` used to be listed at 0.95 / 1 m
+# on the strength of its name; it actually computes COP30 minus SRTM and its own
+# module has always said 0.82 / 30 m.
+#
+# Ordering this table by confidence alone no longer decides who wins a pixel:
+# the merge scales confidence by `resolution_priority`, so a coarse source is
+# demoted for the per-building question however trustworthy it is in general.
 _REGISTRY: list[RegisteredProvider] = [
-    RegisteredProvider(LiDAR3DEPProvider(),    confidence=0.95, resolution_m=1.0),
+    RegisteredProvider(LiDAR3DEPProvider(),     confidence=0.82, resolution_m=30.0),
     RegisteredProvider(NDSMProvider(),          confidence=0.80, resolution_m=30.0),
     RegisteredProvider(CopernicusProvider(),    confidence=0.70, resolution_m=10.0),
     RegisteredProvider(RoofNetProvider(),       confidence=0.65, resolution_m=5.0),
     RegisteredProvider(OpenBuildingsProvider(), confidence=0.60, resolution_m=5.0),
+    # GBA sits just under Overture on measurement, not on principle. Against
+    # Miami's OSM-tagged heights Overture scores MAE 5.86 m / corr +0.912 and
+    # GBA 25.90 m / +0.489, and above 50 m GBA loses 67 m of height. It earns
+    # its place by being the only globally complete per-building source: it is
+    # what fires in Cartagena, where Overture covers 9 % of footprints, and its
+    # tall-building deficit is nearly unreachable there (0.31 % of pixels above
+    # 50 m, against Miami's 18.06 %). See the module docstring before raising.
+    RegisteredProvider(GBAProvider(),           confidence=0.55, resolution_m=3.0),
     RegisteredProvider(WSF3DProvider(),         confidence=0.50, resolution_m=90.0),
     RegisteredProvider(GHSLProvider(),          confidence=0.40, resolution_m=100.0),
 ]
@@ -77,7 +102,7 @@ def provider_infos(bbox):
     ]
 
 
-def _select_providers(bbox, requested: Optional[list[str]] = None):
+def _select_providers(bbox, requested: list[str] | None = None):
     if requested:
         providers = [_PROVIDER_MAP[name].instance for name in requested if name in _PROVIDER_MAP]
         unknown = [name for name in requested if name not in _PROVIDER_MAP]
@@ -273,8 +298,22 @@ async def fetch_height_diagnostics(north, south, east, west, width, height, prov
     return {"providers": [item for item in gathered if item is not None], "errors": errors}
 
 
-def enhance_city_data(payload: Dict[str, Any], north: float, south: float, east: float, west: float,
-                      dim: int = 512) -> Dict[str, Any]:
+def enhance_city_data(payload: dict[str, Any], north: float, south: float, east: float, west: float,
+                      dim: int = 512) -> dict[str, Any]:
+    """Fill in heights for buildings that have no OSM tag, from raster sources.
+
+    Only features whose ``height_source`` is ``default`` are touched, which makes
+    this idempotent: re-running it over an already-enhanced payload changes
+    nothing.
+
+    Providers coarser than ``BUILDING_RESOLUTION_LIMIT_M`` are excluded here even
+    though ``merge_height_rasters`` will happily rank them, because a cell wider
+    than a building measures the block, not the roof.  A city covered only by
+    coarse sources therefore gets no enhancement at all and its buildings keep
+    the 10 m fallback; measured over the eight plate cities that is the better
+    answer.  ``payload["height_enhancement"]["providers_too_coarse"]`` records
+    what was dropped so this reads as a decision rather than a silent no-op.
+    """
     features = ((payload.get("buildings") or {}).get("features") or [])
     if not features:
         return payload
@@ -301,18 +340,19 @@ def enhance_city_data(payload: Dict[str, Any], north: float, south: float, east:
         return payload
 
     bbox = (north, south, east, west)
-    providers = [
-        provider for provider in (
-            NDSMProvider(),
-            CopernicusProvider(),
-            OpenBuildingsProvider(),
-            WSF3DProvider(),
-            GHSLProvider(),
-        )
-        if provider.covers(bbox)
-    ]
+    # The provider list comes from `_REGISTRY` -- the same one `/api/height/*`
+    # answers from -- and not from a tuple written out here. This function used
+    # to name five providers explicitly, which meant every provider added after
+    # it was written was invisible to the export path however prominently it
+    # was registered. GlobalBuildingAtlas was the casualty: the registry entry
+    # above says it "is what fires in Cartagena", and it never did, because
+    # this list did not mention it. LiDAR3DEP and RoofNet are new to the list
+    # and cost nothing outside their coverage; the US early-return above means
+    # LiDAR3DEP can never be reached from here at all.
+    providers, _unknown = _select_providers(bbox)
 
     results = []
+    too_coarse = []
     for provider in providers:
         try:
             result = provider.fetch_heights(bbox, (dim, dim))
@@ -324,9 +364,33 @@ def enhance_city_data(payload: Dict[str, Any], north: float, south: float, east:
         valid_pixels = int(np.count_nonzero(~np.isnan(result.raster)))
         if valid_pixels <= 0:
             continue
+        # A cell coarser than a building cannot answer a per-building question:
+        # it averages the roof with the streets and courtyards around it. Over
+        # the eight plate cities the 30 m nDSM covers 100 % of every grid and
+        # reads a median of 0.0 to 2.6 m, which the `max(3.0, ...)` clamp in
+        # `enhance_buildings_with_raster` then turns into a field of 3 m boxes.
+        # Leaving those buildings on the 10 m fallback is measurably better.
+        if result.resolution_m > BUILDING_RESOLUTION_LIMIT_M:
+            too_coarse.append(result.source_name)
+            continue
         results.append(result)
 
     if not results:
+        if too_coarse:
+            logger.info(
+                "City height enhancement skipped: only sources coarser than %.0f m "
+                "cover this bbox (%s); buildings keep the OSM fallback height",
+                BUILDING_RESOLUTION_LIMIT_M, ", ".join(too_coarse),
+            )
+            payload["height_enhancement"] = {
+                "source_name": "osm_only_coarse",
+                "providers_used": [],
+                "providers_too_coarse": too_coarse,
+                "resolution_m": 0.0,
+                "stats": {"skipped": True,
+                          "reason": "no provider finer than "
+                                    f"{BUILDING_RESOLUTION_LIMIT_M:.0f} m"},
+            }
         return payload
 
     merged = merge_height_rasters(results, target_shape=(dim, dim))
@@ -341,6 +405,7 @@ def enhance_city_data(payload: Dict[str, Any], north: float, south: float, east:
     payload["height_enhancement"] = {
         "source_name": merged.source_name,
         "providers_used": [item.source_name for item in results],
+        "providers_too_coarse": too_coarse,
         "resolution_m": float(merged.resolution_m),
         "stats": enhanced.get("stats") or {},
     }

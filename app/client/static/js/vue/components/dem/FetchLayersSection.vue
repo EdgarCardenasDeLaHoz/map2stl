@@ -8,7 +8,11 @@
 
         <div class="param-group">
           <label for="paramDemSource" title="Elevation data source.">Source</label>
+          <!-- Replaced at load by populateDemSources(), which asks the server which
+               sources actually work. This list is the fallback if that call fails, so
+               h5_local leads: it needs no API key and no tile folder. -->
           <select id="paramDemSource" class="ctrl-select">
+            <option value="h5_local">Local SRTM H5 (city-scale)</option>
             <option value="local">Local SRTM Tiles</option>
             <option value="SRTMGL1">OpenTopo — SRTM 30m</option>
             <option value="SRTMGL3">OpenTopo — SRTM 90m</option>
@@ -97,7 +101,7 @@
         <!-- Unified Hydrology Load Button -->
         <div class="fetch-action-row">
           <button id="loadWaterHydrologyBtn" class="btn btn-primary" style="flex:1;">🌊 Load Hydrology</button>
-          <button id="clearWaterHydrologyBtn" class="btn btn-secondary btn-clear">✕</button>
+          <button id="clearWaterHydrologyBtn" class="btn btn-secondary btn-clear" aria-label="Clear water and hydrology layers" title="Clear water and hydrology layers">✕</button>
         </div>
         <div id="waterHydrologyStatus" class="fetch-status"></div>
 
@@ -147,7 +151,7 @@
         </div>
         <div class="fetch-action-row">
           <button id="loadSatImgBtn"  class="btn btn-secondary">🛰 Load</button>
-          <button id="clearSatImgBtn" class="btn btn-secondary btn-clear">✕</button>
+          <button id="clearSatImgBtn" class="btn btn-secondary btn-clear" aria-label="Clear satellite imagery layer" title="Clear satellite imagery layer">✕</button>
         </div>
         <div id="satImgStatus" class="fetch-status"></div>
 
@@ -202,7 +206,7 @@
 
         <div class="fetch-action-row">
           <button id="loadCityDataBtn"  class="btn btn-primary">📥 Load Cities</button>
-          <button id="clearCityDataBtn" class="btn btn-secondary btn-clear">✕</button>
+          <button id="clearCityDataBtn" class="btn btn-secondary btn-clear" aria-label="Clear city data layer" title="Clear city data layer">✕</button>
         </div>
         <div id="cityDataStatus" class="fetch-status"></div>
         <div class="fetch-status" style="display:flex;gap:8px;">
@@ -236,6 +240,42 @@
           </div>
           <div id="enhanceHeightsStatus" class="fetch-status"></div>
         </div>
+
+      </div>
+    </details>
+
+    <!-- ═══ Trails ═══ -->
+    <details>
+      <summary class="fetch-section-header">🥾 Trails</summary>
+      <div class="fetch-section-body">
+
+        <div class="fetch-help-text">Ski pistes and hiking paths. OSM covers both worldwide; the US Forest Service adds hiking trails inside the United States.</div>
+
+        <div class="param-group">
+          <label for="trailsSource" title="Data source for trail geometry.">Source</label>
+          <select id="trailsSource" class="ctrl-select">
+            <option value="all" selected>All sources</option>
+            <option value="osm">OpenStreetMap (ski + hiking)</option>
+            <option value="usfs">US Forest Service (hiking, US only)</option>
+          </select>
+        </div>
+        <div class="fetch-inline-row">
+          <label for="trailsDim" title="Grid resolution in pixels per side.">Res</label>
+          <input type="number" id="trailsDim" class="ctrl-input fetch-num-sm" value="600" min="50" max="2000" step="50">
+          <label for="trailsReliefM" title="Signed trail relief in metres; negative engraves the trail into the terrain.">Relief&nbsp;(m)</label>
+          <input type="number" id="trailsReliefM" class="ctrl-input fetch-num-sm" value="-2.0" min="-100" max="100" step="0.5">
+          <label for="trailsWidthM" title="Rendered trail width in metres (floored at two pixels).">Width&nbsp;(m)</label>
+          <input type="number" id="trailsWidthM" class="ctrl-input fetch-num-sm" value="8" min="1" max="500" step="1">
+        </div>
+        <!-- Both categories are always fetched in one request, so which of them
+             is drawn is a display choice and lives under Trails Display in the
+             View tab, not here. -->
+
+        <div class="fetch-action-row">
+          <button id="loadTrailsBtn" class="btn btn-primary" style="flex:1;">🥾 Load Trails</button>
+          <button id="clearTrailsBtn" class="btn btn-secondary btn-clear" aria-label="Clear trails layer" title="Clear trails layer">✕</button>
+        </div>
+        <div id="trailsStatus" class="fetch-status"></div>
 
       </div>
     </details>

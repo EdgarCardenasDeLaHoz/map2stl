@@ -50,98 +50,46 @@ table — production strm2stl integration points).
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import json
-import math
 import os
 import time
-from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlparse
 
-import cv2
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import numpy as np
-import requests
-from matplotlib.backends.backend_pdf import PdfPages
-from shapely.geometry import shape
-
-from app.server.core.cache import osm_cache_key, read_osm_cache, write_osm_cache
-from app.server.core.db import get_db, init_db
-from city2stl.fetch import fetch_osm_data
-
+# ---------------------------------------------------------------------------
+# F-CLEAN8 named helpers — split from _seed_multiview_registration.
+# Each helper owns one responsibility; the orchestrator calls them in order.
+# All existing logic is preserved verbatim — pure refactor, no behaviour change.
+# ---------------------------------------------------------------------------
+# Per-seed multi-view registration extracted to pano_registration.py (F-CLEAN14).
+from .pano_registration import (  # noqa: E402,F401
+    _build_and_detect_pano,
+    _capture_pano_views,
+    _multires_pano_refine,
+    _multires_sam_instances,
+    _pano_sliding_window_split,
+    _recover_anchor_offset,
+    _recover_pano_heading,
+    _register_views,
+    _seed_multiview_registration,
+    _smooth_matches_across_views,
+    _smooth_pano_matches_against_views,
+    _split_by_depth_discontinuity,
+)
 from .pipeline import (
     BuildingRecord,
-    CapturedView,
-    Viewpoint,
-    _building_height_from_tags,
-    _load_env_file_if_present,
-    _polygon_area_m2,
-    aggregate_building_heights,
-    augment_estimates_with_depth,
-    _merge_silhouette_sources,
-    _neural_sky_and_building_masks,
-    detect_building_silhouettes,
-    detect_buildings_from_mask,
-    detect_skyline_contour,
-    estimate_heights_from_registration,
-    match_segments_to_buildings,
-    osm_anchor_silhouettes,
-    osm_sam_instance_silhouettes,
-    register_view_to_osm,
 )
-
 
 # Feature flags + segment palette extracted to region_config.py (F-CLEAN14).
 from .region_config import (  # noqa: E402,F401
     _F_SKY1_ENABLED,
+    _F_SKY5_ENABLED,
     _F_SKY12_ENABLED,
     _F_SKY13_ENABLED,
     _F_SKY13_RADIUS_M,
     _F_SKY13_SAT_BG_ENABLED,
-    _F_SKY5_ENABLED,
     _PHASE_C_ENABLED,
     _SEGMENT_PALETTE,
 )
-
-
-# Street View Static API I/O extracted to streetview_io.py (F-CLEAN14).
-from .streetview_io import (  # noqa: E402,F401
-    STREETVIEW_METADATA_URL,
-    STREETVIEW_IMAGE_URL,
-    _SV_IMAGE_CACHE_DIR,
-    _default_streetview_image_size,
-    _extract_pano_id,
-    _is_no_imagery_placeholder,
-    _meta_location,
-    _parse_streetview_url,
-    _resolve_api_key,
-    _sign_streetview_url,
-    _streetview_image,
-    _streetview_metadata,
-    _streetview_signing_enabled,
-)
-
-# Disk cache for Street View images — avoids repeat API charges on re-runs.
-# Key = SHA-1 of the request params *without* the API key.
-
-
-
-# Dataclasses extracted to region_types.py (F-CLEAN14, 2026-06-07). Re-imported
-# here so ``from city2stl.skyline.region_pdf import RegionBBox`` etc. keep working.
-from .region_types import (  # noqa: E402,F401
-    RegionBBox,
-    SkylinePoint,
-    StitchedPanoResult,
-    SeedViewRegistration,
-)
-
-
-
 
 # region/config/OSM data loaders extracted to region_data.py (F-CLEAN14).
 from .region_data import (  # noqa: E402,F401
@@ -170,99 +118,8 @@ from .region_data import (  # noqa: E402,F401
     _read_site_config,
 )
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------------------
-# Geometry-driven viewpoint proposal
-# ---------------------------------------------------------------------------
-
-
-# Seed proposal / screening / auto-replace extracted to seed_selection.py (F-CLEAN14).
-from .seed_selection import (  # noqa: E402,F401
-    _SCREEN_CACHE_DIR,
-    _auto_replace_bad_seeds,
-    _propose_standoff_locations,
-    _screen_locations,
-    _screen_score_from_image,
-    _screen_score_from_image_uncached,
-)
-
-
-
-
-
-
-
-
-
-
-
-
-
 # PDF rendering extracted to region_render.py (F-CLEAN14).
 from .region_render import (  # noqa: E402,F401
-    _StepTimer,
     _count_seg_flags,
     _draw_location_map,
     _draw_osm_coastline_overlay,
@@ -273,77 +130,108 @@ from .region_render import (  # noqa: E402,F401
     _render_pdf,
     _render_seed_view_page,
     _render_stitched_pano_page,
+    _StepTimer,
+)
+
+# Disk cache for Street View images — avoids repeat API charges on re-runs.
+# Key = SHA-1 of the request params *without* the API key.
+# Dataclasses extracted to region_types.py (F-CLEAN14, 2026-06-07). Re-imported
+# here so ``from city2stl.skyline.region_pdf import RegionBBox`` etc. keep working.
+from .region_types import (  # noqa: E402,F401
+    RegionBBox,
+    SeedViewRegistration,
+    SkylinePoint,
+    StitchedPanoResult,
+)
+
+# ---------------------------------------------------------------------------
+# Geometry-driven viewpoint proposal
+# ---------------------------------------------------------------------------
+# Seed proposal / screening / auto-replace extracted to seed_selection.py (F-CLEAN14).
+from .seed_selection import (  # noqa: E402,F401
+    _SCREEN_CACHE_DIR,
+    _auto_replace_bad_seeds,
+    _propose_standoff_locations,
+    _screen_locations,
+    _screen_score_from_image,
+    _screen_score_from_image_uncached,
+)
+
+# Street View Static API I/O extracted to streetview_io.py (F-CLEAN14).
+from .streetview_io import (  # noqa: E402,F401
+    _SV_IMAGE_CACHE_DIR,
+    STREETVIEW_IMAGE_URL,
+    STREETVIEW_METADATA_URL,
+    _default_streetview_image_size,
+    _extract_pano_id,
+    _is_no_imagery_placeholder,
+    _meta_location,
+    _parse_streetview_url,
+    _resolve_api_key,
+    _sign_streetview_url,
+    _streetview_image,
+    _streetview_metadata,
+    _streetview_signing_enabled,
 )
 
 
+def _write_heights_json(
+    path: Path,
+    *,
+    region_name: str,
+    bbox,
+    building_heights: list,
+    building_records: list[BuildingRecord],
+    known_heights: list[dict] | None,
+) -> None:
+    """Dump the aggregated per-building heights next to the HTML report.
 
+    The aggregation is the pipeline's actual answer, and it used to live only
+    inside a rendered figure. Anything that wants to score the run — a vendor
+    plate used as ground truth, a surveyed height list, a before/after
+    comparison across a fix — needs it as data, so it is written here with the
+    footprint metadata each row has to be joined against (centroid, area, OSM
+    tag and its provenance).
+    """
+    # ``building_heights`` arrives already aggregated —
+    # _seed_multiview_registration runs aggregate_building_heights before
+    # returning it — so re-aggregating here raised AttributeError on the
+    # dicts it hands back. Copy rather than mutate: the same list was already
+    # passed to the HTML report.
+    rows = [dict(row) for row in building_heights]
+    by_id = {b.feature_id: b for b in building_records}
+    for row in rows:
+        rec = by_id.get(row["feature_id"])
+        if rec is None:
+            continue
+        row["centroid_lat"] = rec.centroid_lat
+        row["centroid_lon"] = rec.centroid_lon
+        row["area_m2"] = rec.area_m2
+        row["height_tag_m"] = rec.height_tag_m
+        row["height_source"] = rec.height_source
+        # The exterior ring, so a consumer can rasterize the footprint instead
+        # of approximating it with a disc around the centroid. Only the rows
+        # that got an estimate are written, so this stays a few hundred KB.
+        try:
+            ring = list(rec.geometry.exterior.coords)
+            row["footprint_lonlat"] = [[round(x, 6), round(y, 6)]
+                                       for x, y in ring]
+        except Exception:
+            row["footprint_lonlat"] = None
 
-
-
-# ---------------------------------------------------------------------------
-# F-CLEAN8 named helpers — split from _seed_multiview_registration.
-# Each helper owns one responsibility; the orchestrator calls them in order.
-# All existing logic is preserved verbatim — pure refactor, no behaviour change.
-# ---------------------------------------------------------------------------
-
-
-
-# Per-seed multi-view registration extracted to pano_registration.py (F-CLEAN14).
-from .pano_registration import (  # noqa: E402,F401
-    _capture_pano_views,
-    _multires_pano_refine,
-    _multires_sam_instances,
-    _pano_sliding_window_split,
-    _recover_anchor_offset,
-    _recover_pano_heading,
-    _register_views,
-    _seed_multiview_registration,
-    _smooth_matches_across_views,
-    _smooth_pano_matches_against_views,
-    _split_by_depth_discontinuity,
-    _build_and_detect_pano,
-)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    doc = {
+        "region": region_name,
+        "bbox_nsew": [bbox.north, bbox.south, bbox.east, bbox.west],
+        "n_building_records": len(building_records),
+        "known_heights": known_heights or [],
+        "buildings": rows,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        print(f"[heights_json] {len(rows)} buildings -> {path}")
+    except Exception as exc:      # diagnostics must never break a run
+        print(f"[heights_json] failed: {exc}")
 
 
 def run_region_pdf_report(
@@ -435,8 +323,8 @@ def run_region_pdf_report(
             try:
                 from .osm_water import (  # noqa: PLC0415
                     extract_coastline_features,
-                    extract_water_features,
                     extract_green_features,
+                    extract_water_features,
                 )
                 osm_coastline_features = extract_coastline_features(osm_data)
                 osm_water_features = extract_water_features(osm_data)
@@ -474,10 +362,10 @@ def run_region_pdf_report(
                           "(OSM-primary, satellite HSV skipped)")
             else:
                 # Legacy / Phase B path: satellite HSV drives recovery.
-                from .satellite_image import fetch_region_satellite
                 from .coastline_registration import (
-                    detect_sat_water_mask, detect_coastline_keypoints,
+                    detect_sat_water_mask,
                 )
+                from .satellite_image import fetch_region_satellite
                 if cross_view_state is not None:
                     sat_image = cross_view_state["sat_image"]
                     sat_project = cross_view_state["sat_project"]
@@ -543,8 +431,8 @@ def run_region_pdf_report(
     # Wikimedia returns nothing.  Web seeds are single-image (no 360° spin).
     web_image_cache: dict = {}
     try:
-        from .web_image_seed import web_skyline_seeds as _web_seeds  # noqa: PLC0415
         from .region_config import FLICKR_API_KEY as _fkey  # noqa: PLC0415
+        from .web_image_seed import web_skyline_seeds as _web_seeds  # noqa: PLC0415
         _bbox_center = (
             (bbox.north + bbox.south) * 0.5,
             (bbox.east + bbox.west) * 0.5,
@@ -703,6 +591,20 @@ def run_region_pdf_report(
             print(f"[timing] Render HTML: {time.perf_counter() - _html_t0:.2f}s")
         except Exception as _html_e:
             print(f"[F-SKY15] HTML report failed: {_html_e}")
+
+    # Machine-readable heights. Until now the aggregated per-building result
+    # existed only inside the rendered PDF and HTML, so any accuracy check —
+    # against surveyed heights, against a registered vendor plate, against a
+    # previous run — meant scraping a report. Written unconditionally because
+    # it is a few hundred KB and every evaluation depends on it.
+    _write_heights_json(
+        output_pdf.parent / output_pdf.stem / "heights.json",
+        region_name=bbox.name,
+        bbox=bbox,
+        building_heights=building_heights,
+        building_records=building_records,
+        known_heights=known_heights,
+    )
 
     good = len([r for r in screened if r["coverage"] == "good"])
     medium = len([r for r in screened if r["coverage"] == "medium"])

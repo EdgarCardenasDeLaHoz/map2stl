@@ -21,7 +21,6 @@ import logging
 import math
 import os
 import tempfile
-from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -38,6 +37,12 @@ try:
     _ARRAY_TO_MESH_AVAILABLE = True
 except ImportError:
     _ARRAY_TO_MESH_AVAILABLE = False
+
+try:
+    from shapely.geometry import Polygon as _ShapelyPolygon
+    _SHAPELY_AVAILABLE = True
+except ImportError:
+    _SHAPELY_AVAILABLE = False
 
 try:
     from numpy2stl.core.generate import polygon_to_prism as _polygon_to_prism
@@ -62,7 +67,7 @@ def _point_in_triangle(p, a, b, c):
     return (d1 >= 0 and d2 >= 0 and d3 >= 0) or (d1 <= 0 and d2 <= 0 and d3 <= 0)
 
 
-def _ear_clip(pts: np.ndarray) -> List[Tuple[int, int, int]]:
+def _ear_clip(pts: np.ndarray) -> list[tuple[int, int, int]]:
     """
     Ear-clipping triangulation for a simple 2-D polygon given as Nx2 array.
     Returns a list of (i, j, k) index triples. O(n^2) -- fine for building footprints.
@@ -80,8 +85,19 @@ def _ear_clip(pts: np.ndarray) -> List[Tuple[int, int, int]]:
         pts = pts[::-1].copy()
 
     idx = list(range(n))
-    tris: List[Tuple[int, int, int]] = []
+    tris: list[tuple[int, int, int]] = []
     max_iter = n * n * 2
+
+    # A vertex sitting on a corner of the candidate triangle is not evidence against the ear;
+    # it is the same point named twice. Rings that have had a hole bridged into them contain
+    # such pairs by construction, and without this the containment test rejects every ear near
+    # the bridge and the triangulation returns nothing at all.
+    diag = float(np.linalg.norm(pts.max(axis=0) - pts.min(axis=0))) or 1.0
+    tol2 = (1e-5 * diag) ** 2
+
+    def coincident(p, q) -> bool:
+        d = p - q
+        return float(d[0] * d[0] + d[1] * d[1]) <= tol2
 
     for _ in range(max_iter):
         if len(idx) < 3:
@@ -97,7 +113,10 @@ def _ear_clip(pts: np.ndarray) -> List[Tuple[int, int, int]]:
                 continue  # reflex vertex
             # Check no other vertex lies inside triangle (a, b, c)
             inside = any(
-                j not in (a, b, c) and _point_in_triangle(pts[j], pts[a], pts[b], pts[c])
+                j not in (a, b, c)
+                and not (coincident(pts[j], pts[a]) or coincident(pts[j], pts[b])
+                         or coincident(pts[j], pts[c]))
+                and _point_in_triangle(pts[j], pts[a], pts[b], pts[c])
                 for j in idx
             )
             if not inside:
@@ -120,16 +139,216 @@ def _ear_clip(pts: np.ndarray) -> List[Tuple[int, int, int]]:
 
 
 # ---------------------------------------------------------------------------
+# Holes
+# ---------------------------------------------------------------------------
+
+def _segments_cross(p1, p2, q1, q2) -> bool:
+    """True when segment p1-p2 properly crosses q1-q2, endpoints touching excluded."""
+    d1 = _cross2(q1, q2, p1)
+    d2 = _cross2(q1, q2, p2)
+    d3 = _cross2(p1, p2, q1)
+    d4 = _cross2(p1, p2, q2)
+    return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
+
+
+def _ring_array(ring) -> np.ndarray:
+    """A GeoJSON ring as an Nx2 array with any closing duplicate removed."""
+    pts = np.asarray(ring, dtype=float)
+    if len(pts) > 1 and np.allclose(pts[0], pts[-1]):
+        pts = pts[:-1]
+    return pts
+
+
+def _point_in_ring(p, ring: np.ndarray) -> bool:
+    """Even-odd crossing test for a point against a closed Nx2 ring."""
+    x, y = float(p[0]), float(p[1])
+    inside = False
+    n = len(ring)
+    for i in range(n):
+        x0, y0 = ring[i]
+        x1, y1 = ring[(i + 1) % n]
+        if (y0 > y) != (y1 > y):
+            t = (y - y0) / ((y1 - y0) or 1e-30)
+            if x < x0 + t * (x1 - x0):
+                inside = not inside
+    return inside
+
+
+def _oriented(pts: np.ndarray, ccw: bool) -> np.ndarray:
+    """The ring, reversed if its winding is not the one asked for."""
+    if len(pts) < 3:
+        return pts
+    x, y = pts[:, 0], pts[:, 1]
+    signed = float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+    return pts if (signed > 0) == ccw else pts[::-1].copy()
+
+
+def _ring_area(pts: np.ndarray) -> float:
+    """Unsigned shoelace area of an Nx2 ring."""
+    x, y = pts[:, 0], pts[:, 1]
+    return abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))) / 2.0
+
+
+def _bridge_holes(exterior, interiors) -> list[list[float]]:
+    """One simple ring walking the exterior and every interior, joined by cuts.
+
+    Ear clipping cannot see a hole; it needs a single closed loop. Each interior ring is
+    therefore spliced into the exterior along a cut between the closest mutually visible pair of
+    vertices, and is traversed in the opposite winding so that the interior stays on the outside
+    of the resulting loop -- which is what makes the courtyard remain empty after triangulation.
+
+    A cut that crosses any existing edge would produce a self-intersecting ring, so candidate
+    pairs are tried nearest first and the first clear one wins. Footprints are small enough that
+    the quadratic search costs nothing. An interior no cut can reach is dropped rather than
+    allowed to corrupt the ring: a filled courtyard is wrong, a self-intersecting prism is worse.
+    """
+    outer = _oriented(_ring_array(exterior), ccw=True)
+    if len(outer) < 3:
+        return [list(map(float, p)) for p in outer]
+
+    # The exterior runs counter-clockwise and every interior clockwise, whatever the source
+    # claimed. GeoJSON specifies this and producers routinely ignore it; a hole spliced in with
+    # the same winding as its exterior adds area instead of removing it.
+    holes = [_oriented(_ring_array(h), ccw=False) for h in interiors]
+    holes = [h for h in holes if len(h) >= 3]
+    # Largest first: a big courtyard has more room to find a clear cut before the ring has been
+    # complicated by earlier splices.
+    holes.sort(key=lambda h: -_ring_area(h))
+
+    for hole in holes:
+        edges = [(outer[i], outer[(i + 1) % len(outer)]) for i in range(len(outer))]
+        edges += [(hole[i], hole[(i + 1) % len(hole)]) for i in range(len(hole))]
+
+        # Every (outer vertex, hole vertex) pair, closest first.
+        d = np.linalg.norm(outer[:, None, :] - hole[None, :, :], axis=2)
+        order = np.dstack(np.unravel_index(np.argsort(d, axis=None), d.shape))[0]
+
+        spliced = False
+        for oi, hi in order:
+            a, b = outer[oi], hole[hi]
+            # An edge meeting the cut at one of its own endpoints is not a crossing; only edges
+            # clear of both ends can disqualify it.
+            blocked = any(
+                _segments_cross(a, b, e0, e1)
+                for e0, e1 in edges
+                if not (np.allclose(e0, a) or np.allclose(e0, b)
+                        or np.allclose(e1, a) or np.allclose(e1, b))
+            )
+            if blocked:
+                continue
+            # A cut clear of every edge may still run outside the footprint, through a concave
+            # notch in the exterior or straight across another hole. Its midpoint settles that.
+            mid = (a + b) / 2.0
+            if not _point_in_ring(mid, outer):
+                continue
+            if any(_point_in_ring(mid, other) for other in holes if other is not hole):
+                continue
+            # In along the cut, once round the hole, back out the same way.
+            loop = list(hole[hi:]) + list(hole[:hi]) + [b]
+            outer = np.array(list(outer[:oi + 1]) + loop + list(outer[oi:]), dtype=float)
+            # The return leg of the cut coincides with the outward leg, which gives the ring two
+            # pairs of identical vertices. Ear clipping cannot make progress on those -- every
+            # candidate triangle contains its own duplicate -- so the return leg is moved aside
+            # by a fraction of the footprint's own size. The resulting sliver is far below any
+            # printable resolution but the triangulator can see round it.
+            eps = 1e-6 * float(np.linalg.norm(outer.max(axis=0) - outer.min(axis=0)))
+            cut = b - a
+            norm = float(np.linalg.norm(cut))
+            if norm > 0:
+                perp = np.array([-cut[1], cut[0]]) / norm * eps
+                outer[oi + len(hole) + 1] = outer[oi + len(hole) + 1] + perp
+                outer[oi + len(hole) + 2] = outer[oi + len(hole) + 2] + perp
+            spliced = True
+            break
+        if not spliced:
+            logger.debug("no clear bridge for an interior ring; leaving it filled")
+
+    return [[float(x), float(y)] for x, y in outer]
+
+
+# ---------------------------------------------------------------------------
 # Building prism (extruded polygon)
 # ---------------------------------------------------------------------------
 
+# Two points closer together than this in millimetres are the same point as far
+# as the triangulator is concerned. At the city scale one micron is far below
+# any real geometry and far above float noise in the lon/lat -> mm transform.
+_RING_EPS_MM = 1e-3
+
+
+def _sanitize_ring_xy(pts_mm: np.ndarray) -> np.ndarray | None:
+    """Make a 2-D ring safe to hand to the triangulator, or reject it.
+
+    Triangle is a C library reached through a Python wrapper, and on a
+    degenerate input it does not raise -- it faults. An access violation
+    inside triangulate cannot be caught by the try/except around
+    polygon_to_prism, so it takes the whole process down, which in production
+    means the server dies mid-export with no traceback on either side. Seville
+    did exactly that three times. So the ring has to be checked before the call
+    rather than after it.
+
+    Rejects non-finite coordinates, collapses repeated vertices, and requires
+    at least three distinct points enclosing a non-zero area. Rings that are
+    merely self-intersecting are repaired with a zero-width buffer rather than
+    dropped, since the hole-bridged rings this pipeline builds for courtyard
+    buildings self-intersect by construction and are otherwise fine.
+
+    Returns the cleaned Nx2 array, or None if nothing usable remains.
+    """
+    if pts_mm.ndim != 2 or pts_mm.shape[1] != 2 or len(pts_mm) < 3:
+        return None
+    pts = pts_mm[np.isfinite(pts_mm).all(axis=1)]
+    if len(pts) < 3:
+        return None
+
+    # Collapse consecutive duplicates, treating the ring as closed so that a
+    # first point equal to the last is caught too.
+    keep = [0]
+    for i in range(1, len(pts)):
+        if np.hypot(*(pts[i] - pts[keep[-1]])) > _RING_EPS_MM:
+            keep.append(i)
+    if len(keep) >= 2 and np.hypot(*(pts[keep[-1]] - pts[keep[0]])) <= _RING_EPS_MM:
+        keep.pop()
+    pts = pts[keep]
+    if len(pts) < 3:
+        return None
+
+    # Shoelace area. A zero-area ring is a line, and Triangle has no answer
+    # for a polygon with no interior.
+    x, y = pts[:, 0], pts[:, 1]
+    area = 0.5 * float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+    if abs(area) < _RING_EPS_MM:
+        return None
+
+    if _SHAPELY_AVAILABLE:
+        try:
+            poly = _ShapelyPolygon(pts)
+            if not poly.is_valid:
+                fixed = poly.buffer(0)
+                if fixed.is_empty:
+                    return None
+                if fixed.geom_type == "MultiPolygon":
+                    fixed = max(fixed.geoms, key=lambda g: g.area)
+                if fixed.geom_type != "Polygon":
+                    return None
+                repaired = np.asarray(fixed.exterior.coords, dtype=float)[:-1]
+                if len(repaired) < 3:
+                    return None
+                return repaired
+        except Exception as _e:                                   # noqa: BLE001
+            logger.debug("ring repair failed (%s); rejecting ring", _e)
+            return None
+
+    return pts
+
+
 def _extrude_ring(
-    ring: List[List[float]],
+    ring: list[list[float]],
     z0: float,
     z1: float,
     lon_to_x,
     lat_to_y,
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+) -> tuple[np.ndarray | None, np.ndarray | None]:
     """
     Extrude one GeoJSON exterior ring into a closed 3-D prism.
 
@@ -149,9 +368,11 @@ def _extrude_ring(
     # Drop closing duplicate
     raw = ring[:-1] if ring and len(ring) > 1 and ring[0] == ring[-1] else ring
     pts_mm = np.array([[lon_to_x(lo), lat_to_y(la)] for lo, la in raw], dtype=float)
-    n = len(pts_mm)
-    if n < 3:
+    cleaned = _sanitize_ring_xy(pts_mm)
+    if cleaned is None:
         return None, None
+    pts_mm = cleaned
+    n = len(pts_mm)
 
     if _POLYGON_TO_PRISM_AVAILABLE:
         try:
@@ -167,7 +388,7 @@ def _extrude_ring(
     floor_ = np.column_stack([pts_mm, np.full(n, z0)])
     verts  = np.vstack([roof, floor_]).astype(np.float32)  # [0..n-1]=roof, [n..2n-1]=floor
 
-    faces: List[List[int]] = []
+    faces: list[list[int]] = []
 
     # Roof faces (CCW from above -> correct outward normal)
     for a, b, c in _ear_clip(pts_mm):
@@ -195,14 +416,14 @@ def _extrude_ring(
 # ---------------------------------------------------------------------------
 
 def _extrude_ring_with_roof(
-    ring: List[List[float]],
+    ring: list[list[float]],
     z0: float,
     z1: float,
     roof_shape: str,
     roof_height_mm: float,
     lon_to_x,
     lat_to_y,
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+) -> tuple[np.ndarray | None, np.ndarray | None]:
     """Extrude one GeoJSON exterior ring into a closed 3-D prism with a shaped roof.
 
     Supported ``roof_shape`` values (from the OSM ``roof:shape`` tag):
@@ -248,12 +469,14 @@ def _extrude_ring_with_roof(
     # Convert ring to 2-D mm coordinates
     raw = ring[:-1] if ring and len(ring) > 1 and ring[0] == ring[-1] else ring
     pts_mm = np.array([[lon_to_x(lo), lat_to_y(la)] for lo, la in raw], dtype=np.float64)
-    n = len(pts_mm)
-    if n < 3:
+    cleaned = _sanitize_ring_xy(pts_mm)
+    if cleaned is None:
         return None, None
+    pts_mm = cleaned
+    n = len(pts_mm)
 
     # Compute per-vertex roof heights above z1 ----------------------------
-    apex: Optional[np.ndarray] = None
+    apex: np.ndarray | None = None
     has_apex = False
 
     if shape == "pyramidal":
@@ -297,7 +520,7 @@ def _extrude_ring_with_roof(
         verts = np.vstack([roof_ring, floor_ring])
         apex_idx = -1  # unused
 
-    faces: List[List[int]] = []
+    faces: list[list[int]] = []
 
     # Floor (flat bottom, winding reversed so normal points down) ---------
     for a, b, c in _ear_clip(pts_mm):
@@ -339,14 +562,16 @@ def _build_building_meshes(
     z_min: float,
     z_max: float,
     building_z_scale: float,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Convert a GeoJSON FeatureCollection of buildings into a single combined mesh.
 
     Each building's terrain_z and height_m properties are used for z0/z1.
     """
-    north = bbox["north"]; south = bbox["south"]
-    east  = bbox["east"];  west  = bbox["west"]
+    north = bbox["north"]
+    south = bbox["south"]
+    east  = bbox["east"]
+    west  = bbox["west"]
     lat_range = north - south or 1.0
     lon_range = east  - west  or 1.0
     z_range   = (z_max - z_min) or 1.0
@@ -355,8 +580,8 @@ def _build_building_meshes(
     def lat_to_y(la): return (la - south) / lat_range * H_mm
     def elev_to_z(e): return base_mm + (e - z_min) / z_range * model_height_mm
 
-    all_verts: List[np.ndarray] = []
-    all_faces: List[np.ndarray] = []
+    all_verts: list[np.ndarray] = []
+    all_faces: list[np.ndarray] = []
     v_offset = 0
 
     features = buildings_geojson.get("features") or []
@@ -367,7 +592,8 @@ def _build_building_meshes(
             continue
 
         height_m  = float(props.get("height_m") or 10)
-        terrain_z = float(props.get("terrain_z") or z_min)
+        terrain_raw = props.get("terrain_z")
+        terrain_z = z_min if terrain_raw is None else float(terrain_raw)
         z0 = elev_to_z(terrain_z)
         z1 = z0 + height_m * building_z_scale
 
@@ -384,12 +610,19 @@ def _build_building_meshes(
             roof_height_mm = height_m * 0.30 * building_z_scale if roof_shape != "flat" else 0.0
 
         # Collect rings
+        # Each part contributes one ring: its exterior, with any interiors bridged in so a
+        # courtyard survives extrusion instead of being filled solid.
         if geom["type"] == "Polygon":
-            rings = [geom["coordinates"][0]]          # exterior only
+            parts = [geom["coordinates"]]
         elif geom["type"] == "MultiPolygon":
-            rings = [poly[0] for poly in geom["coordinates"]]
+            parts = list(geom["coordinates"])
         else:
             continue
+        rings = []
+        for part in parts:
+            if not part:
+                continue
+            rings.append(_bridge_holes(part[0], part[1:]) if len(part) > 1 else part[0])
 
         for ring in rings:
             if roof_shape != "flat" and roof_height_mm > 0:
@@ -423,7 +656,7 @@ def _terrain_mesh(
     H_mm: float,
     base_mm: float,
     model_height_mm: float,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Convert a 2-D DEM array [rows, cols] into a closed, printable terrain mesh.
 
@@ -474,7 +707,7 @@ def _terrain_mesh(
 
     def ti(r, c): return r * cols + c
 
-    faces: List[List[int]] = []
+    faces: list[list[int]] = []
     for r in range(rows - 1):
         for c in range(cols - 1):
             tl, tr_, bl, br = ti(r, c), ti(r, c + 1), ti(r + 1, c), ti(r + 1, c + 1)
@@ -487,31 +720,43 @@ def _terrain_mesh(
     front_skirt = np.column_stack([np.linspace(0, W_mm, cols), np.zeros(cols),           np.zeros(cols)])
 
     n_top = len(top_v)
-    li = n_top;            n_top += rows
-    ri = n_top;            n_top += rows
-    bi = n_top;            n_top += cols
-    fi = n_top;            n_top += cols
+    li = n_top
+    n_top += rows
+    ri = n_top
+    n_top += rows
+    bi = n_top
+    n_top += cols
+    fi = n_top
+    n_top += cols
 
     all_v = np.vstack([top_v, left_skirt, right_skirt, back_skirt, front_skirt])
 
     for r in range(rows - 1):
-        t0 = ti(r, 0);        t1 = ti(r + 1, 0)
-        s0 = li + r;          s1 = li + r + 1
+        t0 = ti(r, 0)
+        t1 = ti(r + 1, 0)
+        s0 = li + r
+        s1 = li + r + 1
         faces.extend([[t0, s0, t1], [s0, s1, t1]])
 
     for r in range(rows - 1):
-        t0 = ti(r, cols - 1); t1 = ti(r + 1, cols - 1)
-        s0 = ri + r;          s1 = ri + r + 1
+        t0 = ti(r, cols - 1)
+        t1 = ti(r + 1, cols - 1)
+        s0 = ri + r
+        s1 = ri + r + 1
         faces.extend([[t0, t1, s0], [s0, t1, s1]])
 
     for c in range(cols - 1):
-        t0 = ti(0, c);        t1 = ti(0, c + 1)
-        s0 = bi + c;          s1 = bi + c + 1
+        t0 = ti(0, c)
+        t1 = ti(0, c + 1)
+        s0 = bi + c
+        s1 = bi + c + 1
         faces.extend([[t0, t1, s0], [s0, t1, s1]])
 
     for c in range(cols - 1):
-        t0 = ti(rows - 1, c); t1 = ti(rows - 1, c + 1)
-        s0 = fi + c;          s1 = fi + c + 1
+        t0 = ti(rows - 1, c)
+        t1 = ti(rows - 1, c + 1)
+        s0 = fi + c
+        s1 = fi + c + 1
         faces.extend([[t0, s0, t1], [s0, s1, t1]])
 
     bl_c = li + rows - 1
@@ -529,7 +774,7 @@ def _terrain_mesh(
 
 def generate_city_3mf(
     buildings_geojson: dict,
-    dem_values: List[float],
+    dem_values: list[float],
     dem_width: int,
     dem_height: int,
     bbox: dict,           # {north, south, east, west}
@@ -581,8 +826,10 @@ def generate_city_3mf(
     z_max = float(dem_arr.max())
 
     # Physical XY dimensions: preserve geographic aspect ratio, target 150 mm wide
-    north = bbox["north"]; south = bbox["south"]
-    east  = bbox["east"];  west  = bbox["west"]
+    north = bbox["north"]
+    south = bbox["south"]
+    east  = bbox["east"]
+    west  = bbox["west"]
     lat_mid  = (north + south) / 2
     lon_range = (east - west) * math.cos(math.radians(lat_mid))
     lat_range = north - south

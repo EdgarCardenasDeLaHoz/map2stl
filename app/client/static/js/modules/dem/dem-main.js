@@ -174,6 +174,15 @@ function _applyDemResult(data, north, south, east, west) {
     // Store bbox on lastDemData for physical dimensions calculation
     if (window.appState.lastDemData) window.appState.lastDemData.bbox = { north, south, east, west };
 
+    // Pre-projection grid size, reported by the DEM endpoint. Layers that have to
+    // align with the DEM (composite's city raster) must be rasterized at this size
+    // and projected once; passing the projected size back to the server projects
+    // the data a second time. Absent when no projection was applied.
+    if (window.appState.lastDemData) {
+        window.appState.lastDemData.sourceDimensions =
+            Array.isArray(data.source_dimensions) ? data.source_dimensions : null;
+    }
+
     // Cities: refresh city overlay on DEM canvas after reload
     if (window.appState?.osmCityData) requestAnimationFrame(() => window.renderCityOnDEM?.());
 
@@ -230,9 +239,11 @@ window.loadDEM = async function loadDEM(highRes = false) {
     const p = window.appState.demParams;
     const proj = window.getProjectionParams();
 
+    const dim = highRes ? 600 : parseInt(document.getElementById('paramDim').value, 10) || 600;
+
     const params = new URLSearchParams({
         north, south, east, west,
-        dim: highRes ? 600 : document.getElementById('paramDim').value,
+        dim,
         depth_scale: p.depthScale,
         water_scale: p.waterScale,
         subtract_water: p.subtractWater,
@@ -242,6 +253,28 @@ window.loadDEM = async function loadDEM(highRes = false) {
         maintain_dimensions: proj.maintainDimensions,
         clip_valid_region: proj.clipValidRegion,
     });
+
+    // Record exactly what we asked for. Export sends these settings back so the
+    // server can reconstruct the DEM cache key and read the array off disk
+    // instead of receiving it over the wire. It must be a snapshot of this
+    // request, not a re-read of the form: `highRes` overrides the form's dim,
+    // and the user can edit any of these controls between loading a DEM and
+    // exporting it. Re-reading the DOM at export time was what produced the
+    // "Missing DEM data" cache misses. Only committed on success, below.
+    const requestedDemSettings = {
+        bbox: { north, south, east, west },
+        dem: {
+            dim,
+            dem_source: demSource,
+            projection: proj.projection,
+            depth_scale: p.depthScale,
+            water_scale: p.waterScale,
+            subtract_water: p.subtractWater,
+            maintain_dimensions: proj.maintainDimensions,
+            clip_nans: proj.clipValidRegion,
+            show_sat: false,
+        },
+    };
 
     // Clear DEM cache before loading new DEM
     window.clearLayerCache?.();
@@ -286,6 +319,7 @@ window.loadDEM = async function loadDEM(highRes = false) {
 
         // Track bbox and update status
         window.appState.layerBboxes.dem = { north, south, east, west };
+        window.appState.lastDemRequest = requestedDemSettings;
         window.setLayerStatus('dem', 'loaded');
 
         // The server flags DEMs that came back with no real relief (the source
@@ -494,6 +528,21 @@ window._setDemEmptyState = function _setDemEmptyState(isEmpty) {
 // ---------------------------------------------------------------------------
 
 /**
+ * The three pipeline stages, named once.
+ *
+ * The header tabs and the hint below them used to use two different
+ * vocabularies for the same three steps — the tabs said "Explore › Edit ›
+ * Extrude" while the hint said "Select region › Load DEM › Generate model",
+ * so the instruction never named the control it was telling you to click.
+ * The hint now leads with the tab name and follows with the action.
+ */
+const WORKFLOW_STEPS = [
+    { tabId: 'tabExplore', tab: 'Explore', action: 'select a region' },
+    { tabId: 'tabEdit', tab: 'Edit', action: 'load the DEM' },
+    { tabId: 'tabExtrude', tab: 'Extrude', action: 'build the model' },
+];
+
+/**
  * Update the workflow stepper in the header.
  * Three steps: (1) region selected, (2) DEM loaded, (3) model generated.
  */
@@ -502,30 +551,27 @@ window._updateWorkflowStepper = function _updateWorkflowStepper() {
     const step2Done = !!window.appState.lastDemData;
     const step3Done = !!window.appState.generatedModelData;
 
-    document.getElementById('tabExplore')?.classList.toggle('step-done', step1Done);
-    document.getElementById('tabEdit')?.classList.toggle('step-done', step2Done);
-    document.getElementById('tabExtrude')?.classList.toggle('step-done', step3Done);
+    const done = [step1Done, step2Done, step3Done];
+    WORKFLOW_STEPS.forEach((step, i) => {
+        document.getElementById(step.tabId)?.classList.toggle('step-done', done[i]);
+    });
 
-    const hint = document.getElementById('workflowHint');
-    const hintText = document.getElementById('workflowHintText');
-    if (!hint || !hintText) return;
+    // The first not-yet-done step is the one to act on; earlier steps are done,
+    // later ones are not reachable yet. -1 once everything is done.
+    const activeIndex = done.indexOf(false);
 
-    if (step1Done && step2Done && step3Done) {
-        hint.hidden = true;
-        return;
-    }
-    hint.hidden = false;
-
-    function _stepEl(n, label, state) {
-        const icon = state === 'done' ? '✓' : String(n);
-        return `<span class="workflow-hint-step ${state}">${icon} ${label}</span>`;
-    }
-
-    const s1 = _stepEl(1, 'Select region', step1Done ? 'done' : 'active');
-    const s2 = _stepEl(2, 'Load DEM', step2Done ? 'done' : (step1Done ? 'active' : 'pending'));
-    const s3 = _stepEl(3, 'Generate model', step3Done ? 'done' : (step2Done ? 'active' : 'pending'));
-
-    hintText.innerHTML = `${s1} <span class="workflow-hint-sep">›</span> ${s2} <span class="workflow-hint-sep">›</span> ${s3}`;
+    // This used to render a hint row under the tab strip, which repeated the
+    // strip's own three labels and cost 28px of map height on every screen.
+    // The wording now rides on each tab as its tooltip, and the step to act
+    // on is marked with a class rather than a duplicate line of text.
+    WORKFLOW_STEPS.forEach((step, i) => {
+        const tab = document.getElementById(step.tabId);
+        if (!tab) return;
+        tab.classList.toggle('step-next', !done[i] && i === activeIndex);
+        tab.title = done[i]
+            ? `${step.tab} — done`
+            : `${step.tab} — ${step.action}`;
+    });
 };
 
 // ---------------------------------------------------------------------------
@@ -823,6 +869,68 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
 };
 
 // ---------------------------------------------------------------------------
+// DEM source list
+// ---------------------------------------------------------------------------
+
+/**
+ * Fill #paramDemSource from GET /api/terrain/sources.
+ *
+ * The option list used to be hardcoded in the template, which meant it drifted
+ * from the server: `h5_local` was never listed, so the local SRTM3 store was
+ * unreachable from the UI, and OpenTopography entries stayed selectable even
+ * with no API key configured. The server already reports both the full list and
+ * per-source `available` flags, so ask it.
+ *
+ * Falls back to leaving the markup's options in place if the call fails —
+ * a stale list beats an empty one.
+ */
+window.populateDemSources = async function populateDemSources(attempt = 0) {
+    // The select is rendered by the Vue bundle, which may mount after
+    // DOMContentLoaded. Retry briefly rather than silently doing nothing.
+    const select = document.getElementById('paramDemSource');
+    if (!select) {
+        if (attempt < 20) setTimeout(() => window.populateDemSources(attempt + 1), 100);
+        return;
+    }
+
+    const { data, error } = await window.api.dem.sources();
+    if (error || !data?.sources?.length) {
+        console.warn('Could not load DEM source list; keeping built-in options:', error);
+        return;
+    }
+
+    // Preserve whatever was already chosen (a preset may have applied first).
+    const previous = select.value;
+    select.innerHTML = '';
+    for (const src of data.sources) {
+        const opt = document.createElement('option');
+        opt.value = src.id;
+        opt.textContent = src.available
+            ? src.label
+            : `${src.label} (unavailable)`;
+        // Unavailable sources stay visible but unselectable, so the reason a
+        // source is missing is discoverable rather than silent.
+        opt.disabled = !src.available;
+        if (src.note) opt.title = src.note;
+        select.appendChild(opt);
+    }
+    if (previous && select.querySelector(`option[value="${CSS.escape(previous)}"]:not(:disabled)`)) {
+        select.value = previous;
+    } else {
+        // Rebuilding the option list leaves the browser on index 0 whether or
+        // not that option is disabled — disabled only blocks the *user* from
+        // picking it, never a programmatic or default selection. With `local`
+        // first and unavailable, the select therefore read "local" and every
+        // fetch came back flat. Land on the first source that actually works.
+        const firstUsable = select.querySelector('option:not(:disabled)');
+        if (firstUsable) select.value = firstUsable.value;
+    }
+
+    const warn = document.getElementById('demSourceApiKeyWarning');
+    if (warn) warn.style.display = data.opentopo_api_key_configured ? 'none' : '';
+};
+
+// ---------------------------------------------------------------------------
 // DOMContentLoaded: initialise empty state and workflow stepper
 // ---------------------------------------------------------------------------
 
@@ -830,6 +938,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window._setExportButtonsEnabled?.(false);
     window._setDemEmptyState?.(true);
     window._updateWorkflowStepper?.();
+    window.populateDemSources?.();
 
     // Wire appState callbacks so other modules (e.g., presets.js) can trigger them
     window.appState._setDemEmptyState = window._setDemEmptyState;

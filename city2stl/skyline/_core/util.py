@@ -1,29 +1,38 @@
 """skyline._core.util — extracted from pipeline.py (A1 split)."""
 from __future__ import annotations
-from collections import OrderedDict as _OrderedDict
 
 import logging
 import math
 import os
-from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Sequence
 
-import cv2
 import numpy as np
-from scipy.ndimage import gaussian_filter1d, median_filter, uniform_filter1d
-from scipy.optimize import linear_sum_assignment
-from scipy.signal import find_peaks
-from shapely.geometry import shape
 
 # F-CLEAN14: the F-SKY12 depth except-branches reference ``logger`` but the
 # module never defined one (latent NameError, only reachable on a depth-module
 # failure). Defined here so those branches log instead of crashing.
 logger = logging.getLogger(__name__)
 
+def _find_env_file() -> Path | None:
+    """Return the nearest ``.env`` at or above this module, or None.
+
+    This was a fixed ``parents[2]`` index, which reached the project root while
+    the module lived directly in ``skyline/``. The F-CLEAN14 split moved it into
+    ``skyline/_core/``, so the same index began resolving to ``city2stl/.env``
+    and the real key file one level higher was never read — every region run
+    then died with "Google Maps API key not found". Walking upward survives
+    further moves.
+    """
+    for parent in Path(__file__).resolve().parents[:6]:
+        candidate = parent / ".env"
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _load_env_file_if_present() -> None:
-    env_path = Path(__file__).resolve().parents[2] / ".env"
-    if not env_path.exists():
+    env_path = _find_env_file()
+    if env_path is None:
         return
     try:
         for raw in env_path.read_text(encoding="utf-8").splitlines():

@@ -41,6 +41,13 @@
                 <div id="modelProgressBar" class="progress-bar"></div>
               </div>
               <span id="modelProgressText">Building...</span>
+              <!-- Shown only while an export is polling; export-handlers.js
+                   toggles it. The server has no cancel route, so this abandons
+                   the task client-side and lets it expire. -->
+              <button id="modelProgressCancel" type="button" class="dem-cancel-btn hidden"
+                      aria-label="Cancel export"
+                      title="Stop waiting for this export"
+                      @click="cancelExport">✕ Cancel</button>
             </div>
 
             <!-- ═══════════ Fetch tab ═══════════ -->
@@ -68,7 +75,7 @@
                   <input type="checkbox" id="exportSeaLevelCap"> Sea-level cap
                 </label>
                 <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Render the full solid mesh (walls + floor) — matches what export will produce. Slower.">
-                  <input type="checkbox" id="viewerSolidPreview"> Solid mesh
+                  <input type="checkbox" id="viewerSolidPreview" checked> Solid mesh
                 </label>
               </div>
             </div>
@@ -289,4 +296,10 @@ import CollapsibleSection from '../shared/CollapsibleSection.vue';
 const activeTab = ref<'fetch' | 'view' | 'export'>('fetch');
 // Auto-rebuild wiring lives in modules/export/model-viewer.js
 // (attached to Fetch-tab inputs and to modelContainer visibility changes).
+
+// The export lifecycle lives in modules/export/export-handlers.js, which is a
+// plain ES module loaded outside the Vue bundle; reach it through window.
+function cancelExport() {
+    (window as any).cancelExport?.();
+}
 </script>

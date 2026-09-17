@@ -1,12 +1,12 @@
 """
-Composite DEM routes — composition operations that combine data layers.
+Composite DEM routes - composition operations that combine data layers.
 
 POST /api/composite/city-raster
-  Reads OSM buildings/roads/waterways from the disk cache (written by
+  Reads OSM buildings/roads/waterways/walls from the disk cache (written by
   /api/cities) and rasterizes them into per-pixel height-delta arrays using
   PIL/Pillow.  This is ~50x faster than the equivalent JS scanline fill.
 
-  Weights / scales are NOT applied server-side — the client multiplies these
+  Weights / scales are NOT applied server-side - the client multiplies these
   normalized arrays by the slider values.  This means only a bbox or dimension
   change triggers a new backend call; all slider adjustments are instant
   client-side multiplications.
@@ -14,12 +14,16 @@ POST /api/composite/city-raster
   Input:  { north, south, east, west, width, height }
   Output: { buildings, roads, waterways, walls, width, height }
             each is a flat float32 list at (width x height) pixels.
-              buildings  — per-pixel building height in metres  (scale=1)
-              roads      ��� binary road mask (0 or 1)
-              waterways  — binary waterway mask (0 or 1)
-              walls      — per-pixel wall height in metres  (scale=1)
+              buildings  - per-pixel building height in metres  (scale=1)
+              roads      - binary road mask (0 or 1)
+              waterways  - binary waterway mask (0 or 1)
+              walls      - per-pixel wall height in metres  (scale=1)
 
-  Cached under namespace "composite" by (bbox, width, height).
+  Cached under namespace "composite" by (bbox, width, height, detail).
+
+  The same four channels are also registered as geo2stl layer sources
+  ("osm_buildings", "osm_roads", "osm_waterways", "osm_walls") so the composite
+  DEM can add and subtract them server-side - see register_city_layer_sources.
 
 POST /api/composite/dem-merge
   Merge multiple elevation/mask layers into one composite DEM with
@@ -29,14 +33,22 @@ POST /api/composite/hydrology-merge
   Merge river depression values into a DEM elevation grid.
 """
 
-from app.server.core.validation import run_sync, METRES_PER_DEGREE
-from app.server.core.cache import make_cache_key, osm_cache_key, read_array_cache, write_array_cache, read_osm_cache
-from app.server.schemas import HydrologyMergeRequest, MergeRequest
-from pydantic import BaseModel
-from fastapi.responses import JSONResponse
-from fastapi import APIRouter
-import numpy as np
 import logging
+
+import numpy as np
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+from app.server.core.cache import (
+    make_cache_key,
+    osm_cache_key,
+    read_array_cache,
+    read_osm_cache,
+    write_array_cache,
+)
+from app.server.core.validation import METRES_PER_DEGREE, run_sync
+from app.server.schemas import HydrologyMergeRequest, MergeRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["composite"])
@@ -238,26 +250,21 @@ def _rasterize_city(req: CompositeCityRasterRequest) -> dict:
     }
 
 
-@router.post("/api/composite/city-raster")
-async def get_city_raster(req: CompositeCityRasterRequest):
-    """
-    Rasterize OSM features to height-delta grids using PIL.
-    Returns normalized arrays (scale=1); client applies slider weights.
+_CITY_CHANNELS = ("buildings", "roads", "waterways", "walls")
 
-    Supports ``projection`` and ``clip_valid_region`` for uniform pipeline alignment
-    with all other raster layers (DEM, water, hydrology, satellite, city).
-    """
-    def _json_safe_flat(arr: np.ndarray) -> list[float]:
-        safe = np.nan_to_num(arr, nan=0.0, posinf=0.0,
-                             neginf=0.0).astype(np.float32)
-        return safe.ravel().tolist()
 
-    clip_valid_region = req.clip_valid_region if req.clip_valid_region is not None else req.clip_nans
-    # Note: Cache key does NOT include projection or clip_valid_region.
-    # Raw city raster is cached once per bbox; projection/clipping applied on fetch.
+def _city_raster_arrays(req: CompositeCityRasterRequest) -> dict:
+    """Return the four unprojected city channels as 2-D float32 arrays.
+
+    Reads the disk cache first and rasterizes on a miss, writing the raw result
+    back.  Projection is deliberately absent here and absent from the cache
+    key: the raw raster is cached once per (bbox, size, detail) and each caller
+    projects it fresh.  ``detail`` is part of the key because the coarse tier
+    drops small buildings, so the two tiers are different rasters.
+    """
     comp_key = make_cache_key(
         "composite", req.north, req.south, req.east, req.west,
-        {"w": req.width, "h": req.height}
+        {"w": req.width, "h": req.height, "detail": req.detail},
     )
     cached = read_array_cache("composite", comp_key)
     if cached:
@@ -265,65 +272,87 @@ async def get_city_raster(req: CompositeCityRasterRequest):
         logger.debug(f"Composite city-raster cache hit: {comp_key[:8]}...")
         h = int(meta.get("height", req.height))
         w = int(meta.get("width", req.width))
-        out = {
-            "buildings": np.array(arrays["buildings"], dtype=np.float32).reshape(h, w),
-            "roads": np.array(arrays["roads"], dtype=np.float32).reshape(h, w),
-            "waterways": np.array(arrays["waterways"], dtype=np.float32).reshape(h, w),
-            "walls": np.array(arrays["walls"], dtype=np.float32).reshape(h, w),
-        }
+        return {name: np.asarray(arrays[name], dtype=np.float32).reshape(h, w)
+                for name in _CITY_CHANNELS}
 
-        # Projection/clipping is always applied fresh from raw cached arrays.
-        if req.projection != "none":
-            from geo2stl.projections import project_grid
-            for lname in ["buildings", "roads", "waterways", "walls"]:
-                out[lname] = project_grid(
-                    out[lname],
-                    req.north, req.south, req.east, req.west,
-                    req.projection, clip_valid_region, categorical=False,
-                    maintain_dimensions=req.maintain_dimensions,
-                )
-
-        ph, pw = out["buildings"].shape
-        return JSONResponse(content={
-            "buildings":  _json_safe_flat(out["buildings"]),
-            "roads":      _json_safe_flat(out["roads"]),
-            "waterways":  _json_safe_flat(out["waterways"]),
-            "walls":      _json_safe_flat(out["walls"]),
-            "width":      pw,
-            "height":     ph,
-        })
-
-    result = await run_sync(_rasterize_city, req)
-
-    # Cache raw unprojected result (cache key has NO projection/clip params)
-    # Projection and clipping are applied fresh on every request
-    PW, PH = result["width"], result["height"]
+    result = _rasterize_city(req)
+    pw, ph = result["width"], result["height"]
+    out = {name: np.asarray(result[name], dtype=np.float32).reshape(ph, pw)
+           for name in _CITY_CHANNELS}
     try:
-        write_array_cache("composite", comp_key, {
-            "buildings":  np.array(result["buildings"], dtype=np.float32).reshape(PH, PW),
-            "roads":      np.array(result["roads"], dtype=np.float32).reshape(PH, PW),
-            "waterways":  np.array(result["waterways"], dtype=np.float32).reshape(PH, PW),
-            "walls":      np.array(result["walls"], dtype=np.float32).reshape(PH, PW),
-        }, {"width": PW, "height": PH})
+        write_array_cache("composite", comp_key, out,
+                          {"width": pw, "height": ph})
     except Exception as e:
         logger.warning(f"Failed to cache composite city-raster: {e}")
+    return out
 
-    # Apply map projection (all raster layers share the same pipeline)
-    # This is applied FRESH on every request, not cached
+
+def _make_city_layer_source(channel: str):
+    """Build a geo2stl layer provider for one OSM channel."""
+
+    def provider(north, south, east, west, dim, options):
+        req = CompositeCityRasterRequest(
+            north=north, south=south, east=east, west=west,
+            width=dim, height=dim,
+            detail=str((options or {}).get("detail", "full")),
+        )
+        return _city_raster_arrays(req)[channel].astype(np.float64)
+
+    provider.__name__ = f"city_layer_source_{channel}"
+    return provider
+
+
+def register_city_layer_sources() -> None:
+    """Expose the OSM channels to geo2stl's fetch_layer_data.
+
+    geo2stl must not import from app.server - the dependency runs the other
+    way - and these rasterizers need the server-side OSM cache, so the server
+    pushes them into the registry instead.  Called at import, and safe to call
+    again because registering a name replaces it.
+    """
+    from geo2stl.dem import register_layer_source
+    for channel in _CITY_CHANNELS:
+        register_layer_source(f"osm_{channel}",
+                              _make_city_layer_source(channel))
+
+
+register_city_layer_sources()
+
+
+@router.post("/api/composite/city-raster")
+async def get_city_raster(req: CompositeCityRasterRequest):
+    """
+    Rasterize OSM features to height-delta grids using PIL.
+    Returns normalized arrays (scale=1); client applies slider weights.
+
+    Supports ``projection`` and ``clip_valid_region`` for uniform pipeline
+    alignment with all other raster layers (DEM, water, hydrology, satellite,
+    city).  Projection is applied fresh on every request, never cached.
+    """
+    def _json_safe_flat(arr: np.ndarray) -> list[float]:
+        safe = np.nan_to_num(arr, nan=0.0, posinf=0.0,
+                             neginf=0.0).astype(np.float32)
+        return safe.ravel().tolist()
+
+    clip_valid_region = (req.clip_valid_region
+                         if req.clip_valid_region is not None else req.clip_nans)
+
+    out = await run_sync(_city_raster_arrays, req)
+
     if req.projection != "none":
         from geo2stl.projections import project_grid
-        layer_names = ["buildings", "roads", "waterways", "walls"]
-        PW, PH = result["width"], result["height"]
-        for lname in layer_names:
-            arr = np.array(result[lname], dtype=np.float32).reshape(PH, PW)
-            arr = project_grid(arr, req.north, req.south, req.east, req.west,
-                               req.projection, clip_valid_region, categorical=False,
-                               maintain_dimensions=req.maintain_dimensions)
-            result[lname] = _json_safe_flat(arr)
-        # Update dimensions to projected output size
-        result["height"], result["width"] = arr.shape
+        for name in _CITY_CHANNELS:
+            out[name] = project_grid(
+                out[name], req.north, req.south, req.east, req.west,
+                req.projection, clip_valid_region, categorical=False,
+                maintain_dimensions=req.maintain_dimensions,
+            )
 
-    return JSONResponse(content=result)
+    ph, pw = out["buildings"].shape
+    payload = {name: _json_safe_flat(out[name]) for name in _CITY_CHANNELS}
+    payload["width"] = pw
+    payload["height"] = ph
+    return JSONResponse(content=payload)
 
 
 # ---------------------------------------------------------------------------
@@ -331,8 +360,16 @@ async def get_city_raster(req: CompositeCityRasterRequest):
 # ---------------------------------------------------------------------------
 
 def _composite_cache_key(north: float, south: float, east: float, west: float,
-                         dim: int, layers: list) -> str:
-    """Stable hash of (bbox, dim, layer specs). Used as cache key."""
+                         dim: int, layers: list,
+                         projection: str = "none",
+                         clip_valid_region: bool = True,
+                         maintain_dimensions: bool = False) -> str:
+    """Stable hash of (bbox, dim, layer specs, projection). Used as cache key.
+
+    The projection belongs in the key because compute_composite_dem projects
+    each layer before blending, so two projections of the same layer stack
+    are different grids.
+    """
     from app.server.core.cache import make_cache_key
     # Render each spec to a JSON-serializable form for stable hashing
     spec_dicts = []
@@ -346,23 +383,44 @@ def _composite_cache_key(north: float, south: float, east: float, west: float,
         else:
             spec_dicts.append(dict(spec))
     return make_cache_key("composite", north, south, east, west,
-                          {"dim": dim, "layers": spec_dicts})
+                          {"dim": dim, "layers": spec_dicts,
+                           "projection": projection,
+                           "clip": bool(clip_valid_region),
+                           "maintain": bool(maintain_dimensions)})
 
 
-def compute_composite_dem(bbox: dict, dim: int, layers: list) -> "np.ndarray":
+def compute_composite_dem(bbox: dict, dim: int, layers: list,
+                          projection: str = "none",
+                          clip_valid_region: bool | None = None,
+                          clip_nans: bool = True,
+                          maintain_dimensions: bool = False) -> "np.ndarray":
     """Run the dem-merge pipeline and return a numpy array.
 
     Used both by the HTTP endpoint and inline by the export pipeline so the
     3D model is rendered from the same composite the user configured.
     Caches results on disk under the ``composite`` namespace keyed by
-    (bbox, dim, layers) so the same spec hits cache on subsequent requests.
+    (bbox, dim, layers, projection) so the same spec hits cache on subsequent
+    requests.
+
+    Each layer is fetched, projected onto the requested map projection, put
+    through its own processing pipeline, and blended onto the running
+    composite.  The first layer sets the output grid; later layers are resized
+    onto it by ``blend_layers``.
+
+    *layers* accepts MergeLayerSpec objects or the plain dicts an export
+    request carries; dicts are coerced so processing specs behave the same
+    either way.
     """
-    from geo2stl.dem import (
-        fetch_layer_data, apply_layer_processing, blend_layers,
-    )
-    from app.server.core.cache import read_array_cache, write_array_cache
-    from app.server.config import TEST_MODE
     import cv2 as _cv2
+
+    from app.server.config import TEST_MODE
+    from app.server.core.cache import read_array_cache, write_array_cache
+    from app.server.schemas import MergeLayerSpec
+    from geo2stl.dem import (
+        apply_layer_processing,
+        blend_layers,
+        fetch_layer_data,
+    )
 
     north = bbox.get("north")
     south = bbox.get("south")
@@ -371,7 +429,14 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list) -> "np.ndarray":
     if None in (north, south, east, west):
         raise ValueError("bbox must contain north/south/east/west")
 
-    cache_key = _composite_cache_key(north, south, east, west, dim, layers)
+    specs = [spec if hasattr(spec, "source") else MergeLayerSpec(**spec)
+             for spec in layers]
+    clip_valid = (clip_valid_region
+                  if clip_valid_region is not None else clip_nans)
+
+    cache_key = _composite_cache_key(north, south, east, west, dim, specs,
+                                     projection, clip_valid,
+                                     maintain_dimensions)
     cached = read_array_cache("composite", cache_key)
     if cached is not None and cached[0].get("composite") is not None:
         logger.debug("Composite cache hit (%s)", cache_key[:8])
@@ -382,18 +447,17 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list) -> "np.ndarray":
         composite = np.linspace(0, 100, h * w, dtype=np.float64).reshape(h, w)
     else:
         composite = None
-        for spec in layers:
-            source = getattr(spec, "source", None) or spec["source"]
-            spec_dim = getattr(spec, "dim", None) or spec["dim"]
-            blend_mode = getattr(spec, "blend_mode", None) or spec.get(
-                "blend_mode", "blend")
-            weight = getattr(spec, "weight", None) if hasattr(
-                spec, "weight") else spec.get("weight", 1.0)
-            processing = getattr(spec, "processing",
-                                 None) or spec.get("processing")
+        for spec in specs:
+            raw = fetch_layer_data(spec.source, north, south, east, west,
+                                   spec.dim, spec.options)
 
-            raw = fetch_layer_data(source, north, south, east, west, spec_dim)
-            processed = apply_layer_processing(raw, processing)
+            if projection and projection != "none":
+                from geo2stl.projections import project_grid
+                raw = project_grid(raw, north, south, east, west, projection,
+                                   clip_valid, categorical=False,
+                                   maintain_dimensions=maintain_dimensions)
+
+            processed = apply_layer_processing(raw, spec.processing)
 
             if composite is None:
                 h, w = processed.shape
@@ -401,13 +465,17 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list) -> "np.ndarray":
                     out_h, out_w = dim, max(1, int(dim * w / h))
                 else:
                     out_w, out_h = dim, max(1, int(dim * h / w))
+                # The first layer sets the grid. Its weight scales it, so the
+                # panel's DEM weight means the same thing here as in the
+                # browser; blend_layers never sees this layer.
                 composite = _cv2.resize(
                     processed.astype(np.float32), (out_w, out_h),
                     interpolation=_cv2.INTER_LINEAR).astype(np.float64)
+                composite *= float(spec.weight)
             else:
                 composite = blend_layers(
                     base=composite, layer=processed,
-                    blend_mode=blend_mode, weight=weight,
+                    blend_mode=spec.blend_mode, weight=spec.weight,
                     output_shape=composite.shape)
 
         if composite is None:
@@ -440,7 +508,9 @@ async def merge_dem_layers(req: MergeRequest):
 
     try:
         composite = await run_sync(compute_composite_dem,
-                                   req.bbox, req.dim, list(req.layers))
+                                   req.bbox, req.dim, list(req.layers),
+                                   req.projection, req.clip_valid_region,
+                                   req.clip_nans, req.maintain_dimensions)
         h, w = composite.shape
         return JSONResponse(content={
             "dem_values_b64": b64_encode(composite),
@@ -469,9 +539,9 @@ async def merge_hydrology(req: HydrologyMergeRequest):
     Both arrays must have identical dimensions. River depression values
     (negative) are added to the DEM via element-wise minimum.
     """
-    from app.server.core.hydrology import merge_rivers_with_dem
-    from app.server.core.validation import b64_encode
     from app.server.config import TEST_MODE
+    from app.server.core.validation import b64_encode
+    from geo2stl.hydrology import merge_rivers_with_dem
 
     dem_values = req.dem_values
     dem_dims = req.dem_dimensions

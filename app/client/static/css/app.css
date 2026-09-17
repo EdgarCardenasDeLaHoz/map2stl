@@ -202,8 +202,16 @@
             overflow: hidden;
         }
 
+        /* Hidden means hidden. This used to leave a 50px stub that sat underneath
+           the floating "Regions" button and carried a toggle clipped entirely out
+           of view, so there was nothing to click and nothing to read.
+           `visibility` also takes the hidden panel out of the tab order; the
+           narrow breakpoints below put it back, because there the collapsed bar
+           is the only way to reopen the panel. */
         .sidebar.collapsed {
-            width: 50px;
+            width: 0;
+            border-right: none;
+            visibility: hidden;
         }
 
         .sidebar-header {
@@ -212,23 +220,28 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            /* The panel clips its overflow, so a header that does not fit loses
+               its rightmost control silently. Wrapping drops the action group
+               onto a second line instead. */
+            flex-wrap: wrap;
+            gap: 6px 8px;
             background-color: var(--bg-light);
             flex-shrink: 0;
-        }
-
-        .sidebar.collapsed .sidebar-header {
-            padding: 8px 10px;
-            justify-content: center;
         }
 
         .sidebar-title {
             font-size: 13px;
             font-weight: 600;
-            transition: opacity 0.3s ease;
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
-        .sidebar.collapsed .sidebar-title {
-            opacity: 0;
+        .sidebar-header-actions {
+            flex: 0 0 auto;
+            margin-left: auto;
         }
 
         .sidebar-content {
@@ -239,14 +252,9 @@
             transition: opacity 0.3s ease;
         }
 
-        .sidebar.collapsed .sidebar-content {
-            opacity: 0;
-            pointer-events: none;
-        }
 
         /* Vue teleport placeholder divs — must not break flex layout chains */
-        #vue-main-header,
-        #vue-workflow-hint {
+        #vue-main-header {
             flex-shrink: 0;
         }
 
@@ -428,56 +436,16 @@
             opacity: 0.6;
         }
 
-        /* UX10: workflow hint bar */
-        .workflow-hint {
-            background: #1a2a1a;
-            border-bottom: 1px solid #2a3a2a;
-            padding: 4px 14px;
-            font-size: 11px;
-            color: #7aaa7a;
-            min-height: 24px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            transition: opacity 0.3s;
+        /* The step still to act on. This replaces the workflow hint bar, whose
+           three labels repeated the tab strip immediately above it; the wording
+           it carried is now each tab's title attribute. */
+        .tab.step-next {
+            box-shadow: inset 0 -2px 0 #4a8ae8;
         }
 
-        .workflow-hint:empty,
-        .workflow-hint[hidden] {
-            display: none;
-        }
-
-        .workflow-hint-step {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 1px 7px;
-            border-radius: 10px;
-            background: rgba(46, 204, 113, 0.12);
-            border: 1px solid rgba(46, 204, 113, 0.25);
-            white-space: nowrap;
-        }
-
-        .workflow-hint-step.done {
-            color: #2ecc71;
-        }
-
-        .workflow-hint-step.active {
-            background: rgba(0, 122, 204, 0.2);
-            border-color: rgba(0, 122, 204, 0.4);
-            color: #66b8e8;
-            font-weight: 600;
-        }
-
-        .workflow-hint-step.pending {
-            color: #555;
-            background: transparent;
-            border-color: #333;
-        }
-
-        .workflow-hint-sep {
-            color: #333;
-            user-select: none;
+        .tab.step-next .tab-step {
+            background: #4a8ae8;
+            color: #fff;
         }
 
         .content-area {
@@ -1407,6 +1375,11 @@
 
         .dem-right-panel.settings-collapsed {
             width: 0;
+            /* min-width is inherited from the expanded rule and would hold a
+               200px empty gap open after the contents are display:none'd. The
+               inline width a drag leaves behind is cleared in JS, since an
+               inline declaration outranks this one. */
+            min-width: 0;
             border-left: none;
         }
 
@@ -1611,14 +1584,57 @@
             margin-top: 10px;
         }
 
+        /* The bbox bar reveals on hover rather than holding 57px of the Edit
+           view open permanently. It is reference and occasional-edit chrome,
+           so it overlays the bottom of the layer stack instead of displacing
+           it. A strip stays visible so the control is still discoverable, and
+           the bar also opens on keyboard focus, whenever the mini-map is open,
+           and when the user pins it. */
         .dem-info {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 20;
             margin-top: 0;
-            padding: 2px 6px;
+            padding: 0 6px 4px;
             font-size: 12px;
             color: #ccc;
             border-top: 1px solid var(--bg-light);
             background: #252525;
             flex-shrink: 0;
+            transform: translateY(calc(100% - 14px));
+            transition: transform 0.18s ease-out;
+        }
+
+        .dem-info:hover,
+        .dem-info:focus-within,
+        .dem-info.dem-info-pinned,
+        .dem-info:has(.bbox-mini-map:not(.hidden)) {
+            transform: translateY(0);
+        }
+
+        .dem-info-handle {
+            display: block;
+            width: 100%;
+            height: 14px;
+            padding: 0;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 9px;
+            line-height: 14px;
+            letter-spacing: 2px;
+            text-align: center;
+            cursor: pointer;
+        }
+
+        .dem-info-handle:hover {
+            color: #e0e0e0;
+        }
+
+        .dem-info.dem-info-pinned .dem-info-handle {
+            color: #4a8ae8;
         }
 
         /* Inline mini-map for bbox drag-editing */
@@ -3148,13 +3164,16 @@
             width: 460px;
         }
 
-        /* 3-state sidebar toggle button */
+        /* Width toggle: normal <-> expanded. Hiding is the separate button below,
+           because the three-state cycle this replaced reached "hidden" only by
+           way of "expanded" - from the default width, the button offering to
+           hide the panel made it wider instead. */
         .sidebar-toggle-btn {
             background: none;
             border: 1px solid transparent;
             color: var(--text-muted);
             cursor: pointer;
-            padding: 0 10px;
+            padding: 0 8px;
             font-size: 12px;
             border-radius: 4px;
             display: flex;
@@ -3162,7 +3181,38 @@
             gap: 6px;
             height: 26px;
             transition: all 0.2s;
-            min-width: 70px;
+            flex-shrink: 0;
+        }
+
+        /* At the default width the header controls do not all fit beside the
+           title with their labels attached; the icon plus its tooltip does. */
+        .sidebar:not(.expanded) .sidebar-toggle-btn .state-label {
+            display: none;
+        }
+
+        .sidebar-hide-btn {
+            background: none;
+            border: 1px solid transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 0 8px;
+            font-size: 13px;
+            line-height: 1;
+            border-radius: 4px;
+            height: 26px;
+            flex-shrink: 0;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+
+        .sidebar-hide-btn:hover {
+            color: #fff;
+            background: #7a3030;
+            border-color: #a04a4a;
+        }
+
+        .sidebar-hide-btn:focus {
+            outline: 2px solid #0078d4;
+            outline-offset: 2px;
         }
 
         .sidebar-toggle-btn:hover {
@@ -3198,11 +3248,6 @@
             /* Gold = normal/balanced */
         }
 
-        .sidebar.collapsed .sidebar-toggle-btn .state-icon {
-            color: #90EE90;
-            /* Light green = hidden/compact */
-        }
-
         /* Responsive */
         /* ──── RESPONSIVE BREAKPOINTS ──── */
 
@@ -3213,7 +3258,7 @@
             }
 
             .sidebar.collapsed {
-                width: 40px;
+                width: 0;
             }
         }
 
@@ -3242,6 +3287,11 @@
                 max-width: 100vw;
                 height: 50px;
                 max-height: 50px;
+                visibility: visible;
+            }
+
+            .sidebar.collapsed .sidebar-content {
+                display: none;
             }
 
             .sidebar-content {
@@ -3287,6 +3337,11 @@
                 max-width: 100vw;
                 height: 45px;
                 max-height: 45px;
+                visibility: visible;
+            }
+
+            .sidebar.collapsed .sidebar-content {
+                display: none;
             }
 
             .sidebar-header {

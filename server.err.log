@@ -1,0 +1,60 @@
+C:\venvs\strm2stl\Lib\site-packages\skimage\color\colorconv.py:55: UserWarning: A NumPy version >=1.23.5 and <2.5.0 is required for this version of SciPy (detected version 2.5.2)
+  from scipy import linalg
+2026-09-04 22:08:59,660 - INFO - Templates path: D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\app\server\..\client\templates
+2026-09-04 22:08:59,686 - INFO - Mounted /project-docs -> D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\app\server\..\..\docs_site
+2026-09-04 22:08:59,706 - INFO - Mounted /api-reference -> D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\app\server\..\..\sphinx_site
+2026-09-04 22:08:59,818 - INFO - Routers loaded: regions, terrain, cities, export, cache, settings, composite, height, diagnostics, layers
+INFO:     Started server process [26000]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:9000 (Press CTRL+C to quit)
+2026-09-04 22:09:08,369 - INFO - Contours: interval=100.0m (5.00mm), style=engraved
+2026-09-04 22:09:08,377 - INFO - Generated mesh with 2492 vertices, 4980 faces
+2026-09-04 22:09:08,386 - INFO - STL generated: 4980 faces, watertight=True
+2026-09-04 22:09:10,475 - INFO - Contours: interval=100.0m (5.00mm), style=engraved
+2026-09-04 22:09:10,512 - INFO - Generated mesh with 2492 vertices, 4980 faces
+2026-09-04 22:09:10,556 - INFO - Successfully saved 1 objects to C:\Users\eac84\AppData\Local\Temp\tmpiw1517kt.obj
+2026-09-04 22:09:10,557 - INFO - OBJ generated: 2492 vertices, 4980 faces, watertight=True
+2026-09-04 22:09:12,636 - INFO - Contours: interval=100.0m (5.00mm), style=engraved
+2026-09-04 22:09:12,644 - INFO - Generated mesh with 2492 vertices, 4980 faces
+2026-09-04 22:09:12,730 - INFO - Successfully saved 1 objects to C:\Users\eac84\AppData\Local\Temp\tmpz2kl37sx.3mf
+2026-09-04 22:09:12,731 - INFO - 3MF generated: 2492 vertices, 4980 faces, watertight=True
+2026-09-04 22:09:14,802 - INFO - Contours: interval=100.0m (5.00mm), style=engraved
+2026-09-04 22:09:14,850 - INFO - Generated mesh with 2492 vertices, 4980 faces
+2026-09-04 22:09:14,867 - INFO - Preview mesh: 2492 vertices, 4980 faces
+2026-09-04 22:10:12,920 - INFO - Received request for /api/terrain/esa-land-cover
+2026-09-04 22:10:12,921 - INFO - fetch_water_mask_images: fetching ESA WorldCover layer (bbox 0.0deg x 0.0deg, scale=10m/px)
+2026-09-04 22:10:14,682 - ERROR - Earth Engine initialization failed: Please authorize access to your Earth Engine account by running
+
+earthengine authenticate
+
+in your command line, or ee.Authenticate() in Python, and then retry.
+2026-09-04 22:10:14,684 - ERROR - fetch_water_mask_images: ESA WorldCover layer failed (scale=10m/px, bbox 0.0deg x 0.0deg): Please authorize access to your Earth Engine account by running
+
+earthengine authenticate
+
+in your command line, or ee.Authenticate() in Python, and then retry.
+2026-09-04 22:10:14,992 - INFO - Received request for /api/terrain/esa-land-cover
+2026-09-04 22:10:14,993 - INFO - fetch_water_mask_images: fetching ESA WorldCover layer (bbox 0.0deg x 0.0deg, scale=10m/px)
+2026-09-04 22:10:14,995 - ERROR - fetch_water_mask_images: ESA WorldCover layer failed (scale=10m/px, bbox 0.0deg x 0.0deg): Please authorize access to your Earth Engine account by running
+
+earthengine authenticate
+
+in your command line, or ee.Authenticate() in Python, and then retry.
+C:\venvs\strm2stl\Lib\site-packages\fastapi\openapi\utils.py:255: UserWarning: Duplicate Operation ID get_terrain_dem_api_terrain_dem_get for function get_terrain_dem at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\app\server\routers\terrain.py
+  warnings.warn(message, stacklevel=1)
+C:\venvs\strm2stl\Lib\site-packages\fastapi\openapi\utils.py:255: UserWarning: Duplicate Operation ID get_terrain_water_mask_api_terrain_water_mask_get for function get_terrain_water_mask at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\app\server\routers\terrain.py
+  warnings.warn(message, stacklevel=1)
+C:\venvs\strm2stl\Lib\site-packages\fastapi\openapi\utils.py:255: UserWarning: Duplicate Operation ID get_terrain_esa_land_cover_api_terrain_esa_land_cover_get for function get_terrain_esa_land_cover at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\app\server\routers\terrain.py
+  warnings.warn(message, stacklevel=1)
+2026-09-05 19:12:59,163 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-09-05 19:16:17,671 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-09-05 19:17:10,578 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-09-05 19:23:02,665 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-09-05 19:23:18,166 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-09-05 19:23:36,645 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-09-06 08:56:02,488 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-09-06 08:56:47,820 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-09-06 08:57:31,718 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-09-06 08:58:16,618 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db
+2026-09-06 08:58:31,772 - INFO - Database initialised at D:\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\data.db

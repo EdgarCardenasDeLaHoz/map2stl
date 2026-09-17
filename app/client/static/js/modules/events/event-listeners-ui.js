@@ -170,13 +170,7 @@ window._setupSidebarEditView = function _setupSidebarEditView() {
         const nf = parseFloat(n), sf = parseFloat(s),
             ef = parseFloat(e), wf = parseFloat(w);
         if (!isNaN(nf) && !isNaN(sf) && !isNaN(ef) && !isNaN(wf)) {
-            const _map = window.getMap?.();
-            const _bb = window.getBoundingBox?.();
-            if (_bb && _map) _map.removeLayer(_bb);
-            const newBb = L.rectangle([[sf, wf], [nf, ef]],
-                { color: '#e74c3c', weight: 2, fillOpacity: 0.05 });
-            if (_map) newBb.addTo(_map);
-            window.setBoundingBox?.(newBb);
+            window.setBboxRectangle?.(nf, sf, ef, wf);
         }
         window.loadAllLayers?.();
     });

@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def apply_layer_processing(arr: np.ndarray, spec: "ProcessingSpec") -> np.ndarray:
+def apply_layer_processing(arr: np.ndarray, spec: ProcessingSpec) -> np.ndarray:
     """
     Apply the processing pipeline defined in *spec* to a 2-D float64 array.
 
@@ -84,7 +84,14 @@ def blend_layers(
 ) -> np.ndarray:
     """Blend *layer* onto *base* using the specified mode.
 
-    Valid modes: ``base``, ``replace``, ``blend``, ``rivers``, ``max``, ``min``.
+    Valid modes: ``base``, ``replace``, ``add``, ``blend``, ``rivers``,
+    ``max``, ``min``.
+
+    ``add`` and ``rivers`` are the additive and subtractive pair used by the
+    composite DEM: a layer that raises the terrain (buildings, walls, tree
+    cover) adds ``layer * weight``, and one that cuts into it (water, roads,
+    waterways) subtracts the same quantity. ``blend`` is a weighted average,
+    which is a different operation and not a substitute for either.
     """
     import cv2 as _cv2
 
@@ -100,6 +107,8 @@ def blend_layers(
         out = base.copy()
         out[mask] = layer[mask]
         return out
+    elif blend_mode == "add":
+        return base + layer * weight
     elif blend_mode == "blend":
         return base * (1.0 - weight) + layer * weight
     elif blend_mode == "rivers":
@@ -111,7 +120,7 @@ def blend_layers(
     else:
         raise ValueError(
             f"Unknown blend_mode {blend_mode!r}. "
-            "Valid modes: base, replace, blend, rivers, max, min"
+            "Valid modes: base, replace, add, blend, rivers, max, min"
         )
 
 

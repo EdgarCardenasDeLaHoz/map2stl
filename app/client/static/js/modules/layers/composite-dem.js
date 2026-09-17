@@ -4,14 +4,15 @@
  * Combines per-layer height contributions (in metres) onto the base DEM
  * and renders the result as a new canvas in the stacked layers view.
  *
- * Each loaded data source (water mask, city/OSM, land cover) produces a
- * signed height-delta array.  A user-adjustable weight (scalar) controls
+ * Each loaded data source (water mask, city/OSM, land cover, trails) produces
+ * a signed height-delta array.  A user-adjustable weight (scalar) controls
  * each contribution.  The architecture is designed so a neural network can
  * later replace the linear scalers with learned weights.
  *
  * Public API (on window):
  *   window.computeCompositeDem()       — recompute & render the composite layer
  *   window.applyCompositeToDem()       — replace lastDemData with composite
+ *   window.buildCompositeLayerSpec()   — the same stack as a server layer list
  *   window.setupCompositeDemControls() — wire UI event listeners
  *
  * See COMPOSITE_DEM_DESIGN.md for full design rationale.
@@ -33,10 +34,20 @@ const DEFAULTS = {
     riverDepth: 3.0,   // metres to subtract for waterway LineStrings
     wallsEnabled: true,
     wallScale: 1.0,   // multiplier on OSM wall heights
+    landcoverEnabled: true,
     treeHeight: 8.0,   // metres to add for tree-cover pixels
     landcoverWeight: 0.0,   // off by default — speculative
+    satEnabled: true,
     vegHeight: 5.0,   // max metres for satellite-derived vegetation
     satWeight: 0.0,   // off by default — weakest signal
+    trailsEnabled: true,
+    trailsSkiEnabled: true,
+    trailsHikingEnabled: true,
+    // Off by default, like land cover and vegetation: a user who has loaded the
+    // Trails layer to look at it has not thereby asked for it to be carved into
+    // an export, and switching it on silently would change every mesh built
+    // from a region that happens to have trails loaded.
+    trailsWeight: 0.0,
 };
 
 // ESA WorldCover class → height offset (metres)
@@ -77,9 +88,15 @@ let _satPixelCache = null;  // { canvas, width, height, data }
 
 /** Add weight × feature into composite in-place; no-op if weight==0 or feat==null. */
 function _addWeightedFeature(composite, feat, weight) {
-    if (weight > 0 && feat) {
-        for (let i = 0; i < composite.length; i++) composite[i] += weight * feat[i];
+    if (!(weight > 0) || !feat) return;
+    if (feat.length !== composite.length) {
+        // Reading past a short channel yields undefined, and `+= weight * undefined`
+        // turns the rest of the composite into NaN — which renders as a blank
+        // region rather than an error. Refuse the channel and say so.
+        console.warn(`[composite] channel length ${feat.length} != ${composite.length}; skipped`);
+        return;
     }
+    for (let i = 0; i < composite.length; i++) composite[i] += weight * feat[i];
 }
 
 /** Unit suffix for a slider label ('m' for distance, '' for weights/scales). */
@@ -135,14 +152,25 @@ async function _fetchCityRaster(demW, demH) {
 
     // Client-side cache keyed by bbox + dims + projection so re-fetching only happens on change
     const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
-    const cacheKey = `${bbox.north.toFixed(4)}_${bbox.south.toFixed(4)}_${bbox.east.toFixed(4)}_${bbox.west.toFixed(4)}_${demW}x${demH}_${projection}_${maintainDimensions}_${detail}`;
+
+    // The server rasterizes at the requested size and THEN projects. demW/demH are
+    // the DEM's post-projection size, so sending them re-projects the raster a
+    // second time: the returned grid comes back narrower than the DEM (a 600×505
+    // DEM projects to 463×505; feeding 463 back yields 357) and its contents are
+    // squeezed relative to the terrain underneath. Send the DEM's pre-projection
+    // size instead, so one projection lands the raster exactly on the DEM grid.
+    const srcDims = window.appState?.lastDemData?.sourceDimensions;
+    const reqH = (projection !== 'none' && srcDims?.length === 2) ? srcDims[0] : demH;
+    const reqW = (projection !== 'none' && srcDims?.length === 2) ? srcDims[1] : demW;
+
+    const cacheKey = `${bbox.north.toFixed(4)}_${bbox.south.toFixed(4)}_${bbox.east.toFixed(4)}_${bbox.west.toFixed(4)}_${reqW}x${reqH}->${demW}x${demH}_${projection}_${maintainDimensions}_${detail}`;
     const cached = window.appState.compositeCityRaster;
     if (cached?.cacheKey === cacheKey) return cached;
 
     const { data, error } = await (window.api?.composite?.cityRaster({
         north: bbox.north, south: bbox.south,
         east: bbox.east, west: bbox.west,
-        width: demW, height: demH,
+        width: reqW, height: reqH,
         projection,
         maintain_dimensions: maintainDimensions,
         detail,
@@ -154,18 +182,47 @@ async function _fetchCityRaster(demW, demH) {
         return null;
     }
 
-    // Store normalized component arrays for slider-driven recombination
+    // Store normalized component arrays for slider-driven recombination.
+    // Resample to the DEM grid if the server's output still differs: every
+    // consumer indexes these arrays with the DEM's stride, and a length or
+    // stride mismatch silently produces NaNs and a sheared city layer rather
+    // than an error.
+    const gotW = Number(data.width) || demW;
+    const gotH = Number(data.height) || demH;
+    const fit = (arr) => _resampleGrid(new Float32Array(arr), gotW, gotH, demW, demH);
+    if (gotW !== demW || gotH !== demH) {
+        console.warn(`[composite] city raster ${gotW}×${gotH} != DEM ${demW}×${demH}; resampling`);
+    }
     const raster = {
         cacheKey,
-        buildings: new Float32Array(data.buildings),
-        roads: new Float32Array(data.roads),
-        waterways: new Float32Array(data.waterways),
-        walls: new Float32Array(data.walls),
-        width: data.width,
-        height: data.height,
+        buildings: fit(data.buildings),
+        roads: fit(data.roads),
+        waterways: fit(data.waterways),
+        walls: fit(data.walls),
+        width: demW,
+        height: demH,
     };
     if (window.appState) window.appState.compositeCityRaster = raster;
     return raster;
+}
+
+/**
+ * Nearest-neighbour resample of a flat grid onto another grid size.
+ * Returns the input untouched when the sizes already match.
+ * @param {Float32Array} src - Source values, row-major
+ */
+function _resampleGrid(src, srcW, srcH, dstW, dstH) {
+    if (srcW === dstW && srcH === dstH) return src;
+    const out = new Float32Array(dstW * dstH);
+    if (!srcW || !srcH) return out;
+    for (let y = 0; y < dstH; y++) {
+        const sy = Math.min(Math.floor(y * srcH / dstH), srcH - 1);
+        for (let x = 0; x < dstW; x++) {
+            const sx = Math.min(Math.floor(x * srcW / dstW), srcW - 1);
+            out[y * dstW + x] = src[sy * srcW + sx];
+        }
+    }
+    return out;
 }
 
 /**
@@ -248,6 +305,47 @@ function _landcoverContribution(demW, demH) {
             const srcX = Math.min(Math.floor(x * esaW / demW), esaW - 1);
             const cls = esaVals[srcY * esaW + srcX];
             out[y * demW + x] = table[cls] || 0;
+        }
+    }
+    return out;
+}
+
+/**
+ * Trail contribution: the signed relief the trails layer already rasterized.
+ *
+ * The grids come straight from the last /api/terrain/trails response and are
+ * already in metres, signed the way the fetch section's Relief control asked
+ * for — negative engraves the trail into the terrain. Nothing is rescaled here;
+ * the composite weight is the only multiplier.
+ *
+ * Only the linework contributes. The area masks are display-only tints, and
+ * folding one in would drop or raise a whole ski area's worth of mountain face.
+ */
+function _trailsContribution(demW, demH) {
+    const data = window.appState?.lastTrailsData;
+    if (!data) return null;
+    const dims = data.grid_dimensions;
+    if (!dims || dims.length < 2) return null;
+    const gh = dims[0], gw = dims[1];
+    if (!gw || !gh) return null;
+
+    const ski = params.trailsSkiEnabled ? window.decodeSkiTrailValues?.(data) : null;
+    const hiking = params.trailsHikingEnabled
+        ? window.decodeHikingTrailValues?.(data) : null;
+    if (!ski?.length && !hiking?.length) return null;
+
+    const out = new Float32Array(demW * demH);
+    for (let y = 0; y < demH; y++) {
+        const srcY = Math.min(Math.floor(y * gh / demH), gh - 1);
+        for (let x = 0; x < demW; x++) {
+            const srcX = Math.min(Math.floor(x * gw / demW), gw - 1);
+            const idx = srcY * gw + srcX;
+            const s = ski ? ski[idx] : 0;
+            // Where a piste and a path cross, take the deeper cut rather than
+            // summing them — two overlapping trails are one trench, not one
+            // twice as deep.
+            const k = hiking ? hiking[idx] : 0;
+            out[y * demW + x] = Math.abs(s) >= Math.abs(k) ? s : k;
         }
     }
     return out;
@@ -368,7 +466,8 @@ window.computeCompositeDem = async function computeCompositeDem() {
     const cityAnyEnabled = params.buildingsEnabled || params.roadsEnabled
         || params.waterwaysEnabled || params.wallsEnabled;
 
-    let waterFeat = null, cityFeat = null, cityComponents = null, lcFeat = null, satFeat = null;
+    let waterFeat = null, cityFeat = null, cityComponents = null, lcFeat = null,
+        satFeat = null, trailsFeat = null;
     if (params.waterEnabled && params.waterWeight > 0) {
         try { waterFeat = _waterContribution(W, H); } catch (e) { console.warn('[composite] water:', e); }
         await _yieldToMain(); if (gen !== _computeGen) return;
@@ -382,12 +481,16 @@ window.computeCompositeDem = async function computeCompositeDem() {
         } catch (e) { console.warn('[composite] city:', e); }
         await _yieldToMain(); if (gen !== _computeGen) return;
     }
-    if (params.landcoverWeight > 0) {
+    if (params.landcoverEnabled && params.landcoverWeight > 0) {
         try { lcFeat = _landcoverContribution(W, H); } catch (e) { console.warn('[composite] landcover:', e); }
         await _yieldToMain(); if (gen !== _computeGen) return;
     }
-    if (params.satWeight > 0) {
+    if (params.satEnabled && params.satWeight > 0) {
         try { satFeat = _satelliteContribution(W, H); } catch (e) { console.warn('[composite] satellite:', e); }
+        await _yieldToMain(); if (gen !== _computeGen) return;
+    }
+    if (params.trailsEnabled && params.trailsWeight > 0) {
+        try { trailsFeat = _trailsContribution(W, H); } catch (e) { console.warn('[composite] trails:', e); }
         await _yieldToMain(); if (gen !== _computeGen) return;
     }
 
@@ -395,15 +498,17 @@ window.computeCompositeDem = async function computeCompositeDem() {
     if (window.appState) {
         window.appState.compositeFeatures = {
             dem: demFeat, water: waterFeat, city: cityFeat, cityComponents,
-            landcover: lcFeat, satellite: satFeat, width: W, height: H,
+            landcover: lcFeat, satellite: satFeat, trails: trailsFeat,
+            width: W, height: H,
         };
     }
 
     // Add weighted contributions (DEM already folded into `composite` above)
     _addWeightedFeature(composite, waterFeat, params.waterEnabled ? params.waterWeight : 0);
     _addWeightedFeature(composite, cityFeat, cityAnyEnabled ? 1 : 0);
-    _addWeightedFeature(composite, lcFeat, params.landcoverWeight);
-    _addWeightedFeature(composite, satFeat, params.satWeight);
+    _addWeightedFeature(composite, lcFeat, params.landcoverEnabled ? params.landcoverWeight : 0);
+    _addWeightedFeature(composite, satFeat, params.satEnabled ? params.satWeight : 0);
+    _addWeightedFeature(composite, trailsFeat, params.trailsEnabled ? params.trailsWeight : 0);
 
     await _yieldToMain(); if (gen !== _computeGen) return;
 
@@ -439,7 +544,7 @@ window.computeCompositeDem = async function computeCompositeDem() {
     _renderAllHistograms({
         dem: params.demEnabled ? demFeat : null,
         water: waterFeat, ...cityComponents,
-        landcover: lcFeat, satellite: satFeat,
+        landcover: lcFeat, satellite: satFeat, trails: trailsFeat,
         composite,
     });
 };
@@ -489,6 +594,7 @@ const _HISTOGRAM_CANVAS_IDS = {
     walls: 'compositeHistWalls',
     landcover: 'compositeHistLandcover',
     satellite: 'compositeHistSatellite',
+    trails: 'compositeHistTrails',
     composite: 'compositeHistCombined',
 };
 
@@ -556,6 +662,80 @@ function _renderAllHistograms(channels) {
     }
 }
 
+// ─── Server-side layer spec ───────────────────────────────────────
+
+/**
+ * Translate this panel's flat parameters into the ordered layer list the
+ * server understands (MergeLayerSpec in app/server/schemas.py).
+ *
+ * The browser and the server both know how to composite: the browser keeps
+ * computing the live preview so a slider drag stays instant, and the server
+ * recomputes the same stack for the 3D mesh and every export. This function is
+ * the translation between the two.
+ *
+ * Each channel becomes one layer. `add` raises the terrain and `rivers`
+ * subtracts from it, and the per-channel depths and scales collapse into the
+ * layer's single `weight` — the browser's own arithmetic is
+ * `bScale*buildings - rCut*roads - rDepth*waterways + wScale*walls`, so each
+ * of the four is an independent layer with its own weight.
+ *
+ * Land cover, satellite vegetation and trails have no server-side source yet
+ * (F-COMPOSITE3 passes 2 and 3). When one of those is switched on with a
+ * non-zero weight it is reported in `unsupported`, and the caller falls back
+ * to shipping the browser's values inline rather than exporting a mesh that
+ * quietly omits a channel the user enabled.
+ *
+ * @returns {{layers: Array<Object>, unsupported: string[]}}
+ */
+window.buildCompositeLayerSpec = function buildCompositeLayerSpec() {
+    const snapshot = window.appState?.lastDemRequest?.dem;
+    const dim = parseInt(snapshot?.dim
+        ?? document.getElementById('paramDim')?.value, 10) || 600;
+    const demSource = snapshot?.dem_source
+        || document.getElementById('paramDemSource')?.value || 'local';
+    const detail = window.appState?.osmCityDetail || 'full';
+
+    const layers = [];
+    const unsupported = [];
+    const push = (source, blendMode, weight, options) => {
+        if (!(weight > 0)) return;
+        layers.push({
+            source,
+            dim,
+            blend_mode: blendMode,
+            weight,
+            options: options || {},
+        });
+    };
+
+    // The base layer must come first: the server takes the first layer as the
+    // grid every later layer is resized onto.
+    if (params.demEnabled && params.demWeight > 0) {
+        push(demSource, 'base', params.demWeight, {});
+    }
+    if (params.waterEnabled) {
+        push('water_esa', 'rivers', params.waterDepth * params.waterWeight, {});
+    }
+    if (params.buildingsEnabled) {
+        push('osm_buildings', 'add', params.buildingScale, { detail });
+    }
+    if (params.roadsEnabled) {
+        push('osm_roads', 'rivers', params.roadCut, { detail });
+    }
+    if (params.waterwaysEnabled) {
+        push('osm_waterways', 'rivers', params.riverDepth, { detail });
+    }
+    if (params.wallsEnabled) {
+        push('osm_walls', 'add', params.wallScale, { detail });
+    }
+
+    if (params.landcoverEnabled && params.landcoverWeight > 0) unsupported.push('land cover');
+    if (params.satEnabled && params.satWeight > 0) unsupported.push('vegetation');
+    if (params.trailsEnabled && params.trailsWeight > 0) unsupported.push('trails');
+
+    return { layers, unsupported };
+};
+
 // ─── Apply to DEM ────────────────────────────────────────────────────────────
 
 /**
@@ -578,9 +758,11 @@ window.applyCompositeToDem = function applyCompositeToDem() {
     // Also update originalDemValues so curve editor works from the composite
     if (window.appState) {
         window.appState.originalDemValues = new Float32Array(_compositeValues);
-        // Tell export-handlers.js to ship these values inline instead of
-        // resolving the plain (non-composite) DEM from the server cache.
+        // Tell export-handlers.js a composite is active. It prefers the
+        // server-side layer spec below; the values stay available as the
+        // fallback for a channel the server cannot yet build.
         window.appState._newCompositeApplied = true;
+        window.appState.compositeLayerSpec = window.buildCompositeLayerSpec();
     }
 
     // Re-render the DEM canvas
@@ -633,8 +815,9 @@ function _updateContribStatus() {
     if (params.roadsEnabled) parts.push(`− Roads (${params.roadCut.toFixed(1)}m)`);
     if (params.waterwaysEnabled) parts.push(`− Waterways (${params.riverDepth.toFixed(1)}m)`);
     if (params.wallsEnabled) parts.push(`+ Walls (${params.wallScale.toFixed(1)}×)`);
-    if (params.landcoverWeight > 0) parts.push(`+ LC (${params.landcoverWeight.toFixed(1)}×)`);
-    if (params.satWeight > 0) parts.push(`+ Veg (${params.satWeight.toFixed(1)}×)`);
+    if (params.landcoverEnabled && params.landcoverWeight > 0) parts.push(`+ LC (${params.landcoverWeight.toFixed(1)}×)`);
+    if (params.satEnabled && params.satWeight > 0) parts.push(`+ Veg (${params.satWeight.toFixed(1)}×)`);
+    if (params.trailsEnabled && params.trailsWeight > 0) parts.push(`± Trails (${params.trailsWeight.toFixed(1)}×)`);
     el.textContent = parts.join(' ') || '(no channels enabled)';
 }
 
@@ -667,6 +850,7 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
         compositeLandcoverWeight: 'landcoverWeight',
         compositeVegHeight: 'vegHeight',
         compositeSatWeight: 'satWeight',
+        compositeTrailsWeight: 'trailsWeight',
     };
 
     for (const [elemId, paramKey] of Object.entries(sliderMap)) {
@@ -692,6 +876,11 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
         compositeRoadsEnabled: 'roadsEnabled',
         compositeWaterwaysEnabled: 'waterwaysEnabled',
         compositeWallsEnabled: 'wallsEnabled',
+        compositeLandcoverEnabled: 'landcoverEnabled',
+        compositeSatEnabled: 'satEnabled',
+        compositeTrailsEnabled: 'trailsEnabled',
+        compositeTrailsSkiEnabled: 'trailsSkiEnabled',
+        compositeTrailsHikingEnabled: 'trailsHikingEnabled',
     };
     for (const [elemId, paramKey] of Object.entries(toggleMap)) {
         const cb = document.getElementById(elemId);

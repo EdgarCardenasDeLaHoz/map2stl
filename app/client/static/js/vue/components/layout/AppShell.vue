@@ -13,15 +13,11 @@
     <Teleport to="#vue-main-header">
       <MainHeader />
     </Teleport>
-    <Teleport to="#vue-workflow-hint">
-      <WorkflowHint />
-    </Teleport>
   </div>
 </template>
 <script setup lang="ts">
 import { Teleport }        from 'vue';
 import MainHeader          from './MainHeader.vue';
-import WorkflowHint        from './WorkflowHint.vue';
 import RegionNotesModal    from './RegionNotesModal.vue';
 import MeshRegistrationModal from './MeshRegistrationModal.vue';
 </script>

@@ -14,23 +14,22 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import List
-
-from starlette.background import BackgroundTask
 
 import numpy as np
+from starlette.background import BackgroundTask
+
+from app.server.core.export_params import (
+    ExportContext,  # noqa: F401  (re-export for backward compatibility)
+    _parse_export_params,
+    resolve_dem_from_cache,
+)
 
 # Re-export from refactored modules for backward compatibility
-from app.server.core.export_tasks import (
+from app.server.core.export_tasks import (  # noqa: F401
     ExportTask,
     get_task_file,
     get_task_status,
     start_export_task,
-)
-from app.server.core.export_params import (
-    ExportContext,
-    resolve_dem_from_cache,
-    _parse_export_params,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,51 +63,68 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
     # Step 3: Optional contours
     if contours and contour_interval > 0:
         task.update(35, "Generating contours...")
-        im = _apply_contour_lines(im, im_min, im_max, p.model_height,
+        # Relief is model_height * exaggeration mm, so the contour spacing has
+        # to be computed against that same height rather than model_height alone.
+        im = _apply_contour_lines(im, im_min, im_max, p.model_height * p.exaggeration,
                                   p.base_height, contour_interval, contour_style)
 
     # Step 4: Mesh generation (heaviest step)
     task.update(45, "Generating mesh...")
     if fmt == "obj":
         from numpy2stl import array_to_mesh, writeOBJ
-        vertices, faces = array_to_mesh(im)
+        vertices, faces = array_to_mesh(im, floor_val=0.0)  # floor at z=0 so base_height is a real thickness
         vertices = _scale_xy(vertices, p.mm_per_pixel)
     elif fmt == "3mf":
         from numpy2stl import array_to_mesh, write3MF
-        vertices, faces = array_to_mesh(im)
+        vertices, faces = array_to_mesh(im, floor_val=0.0)  # floor at z=0 so base_height is a real thickness
         vertices = _scale_xy(vertices, p.mm_per_pixel)
     else:
         vertices, faces = _numpy2stl_mesh(im, mm_per_pixel=p.mm_per_pixel)
 
+    # Repair runs for every format now. OBJ and 3MF used to be written straight
+    # from array_to_mesh, so an interior boundary loop - a NaN DEM cell drops the
+    # quads around it - shipped as a hole in what is supposed to be a closed
+    # solid. Watertightness is measured after the repair and reported on all
+    # three formats rather than STL alone.
     task.update(70, "Repairing mesh...")
+    mesh = _repair_mesh(vertices, faces)
+    vertices, faces = mesh.vertices, mesh.faces
+    is_watertight = bool(mesh.is_watertight)
+    face_count = int(len(mesh.faces))
+    if not is_watertight:
+        logger.warning("%s mesh is not watertight after repair (%d faces)",
+                       fmt.upper(), face_count)
+    mesh_headers = {
+        "X-Watertight": str(is_watertight).lower(),
+        "X-Face-Count": str(face_count),
+        "Access-Control-Expose-Headers": "X-Watertight, X-Face-Count",
+    }
 
     # Step 5: Export to file
     suffix = f".{fmt}"
     if fmt in ("stl",):
-        temp_path, mesh = _repair_and_export(vertices, faces, suffix)
-        is_watertight = bool(mesh.is_watertight)
-        face_count = len(mesh.faces)
-        headers = {
-            "Content-Disposition": f"attachment; filename={p.name}.stl",
-            "X-Watertight": str(is_watertight).lower(),
-            "X-Face-Count": str(face_count),
-            "Access-Control-Expose-Headers": "X-Watertight, X-Face-Count",
-        }
+        temp_path = _write_mesh(mesh, suffix)
+        headers = {"Content-Disposition": f"attachment; filename={p.name}.stl",
+                   **mesh_headers}
         logger.info("STL generated: %d faces, watertight=%s", face_count, is_watertight)
     elif fmt == "obj":
         tf = tempfile.NamedTemporaryFile(delete=False, suffix=".obj")
         temp_path = tf.name
         tf.close()
         writeOBJ(temp_path, {p.name: (vertices, faces)})
-        headers = {"Content-Disposition": f"attachment; filename={p.name}.obj"}
-        logger.info("OBJ generated: %d vertices, %d faces", len(vertices), len(faces))
+        headers = {"Content-Disposition": f"attachment; filename={p.name}.obj",
+                   **mesh_headers}
+        logger.info("OBJ generated: %d vertices, %d faces, watertight=%s",
+                    len(vertices), len(faces), is_watertight)
     elif fmt == "3mf":
         tf = tempfile.NamedTemporaryFile(delete=False, suffix=".3mf")
         temp_path = tf.name
         tf.close()
         write3MF(temp_path, {p.name: (vertices, faces)})
-        headers = {"Content-Disposition": f"attachment; filename={p.name}.3mf"}
-        logger.info("3MF generated: %d vertices, %d faces", len(vertices), len(faces))
+        headers = {"Content-Disposition": f"attachment; filename={p.name}.3mf",
+                   **mesh_headers}
+        logger.info("3MF generated: %d vertices, %d faces, watertight=%s",
+                    len(vertices), len(faces), is_watertight)
     else:
         task.fail(f"Unknown format: {fmt}")
         return
@@ -134,20 +150,38 @@ def _prepare_dem_array(
     sea_level_cap: bool,
 ) -> tuple[np.ndarray, float, float]:
     """
-    Reshape, exaggerate, sea-level-clip, normalise, and add base to a DEM array.
-    Returns (im, im_min_orig, im_max_orig) where im is in model-mm space with
-    base added, and im_min/max are the original (pre-normalisation) extents.
+    Reshape, sea-level-clip, normalise, exaggerate, and add base to a DEM array.
+
+    Returns ``(im, im_min, im_max)``. ``im`` is in model-mm space with the base
+    added; ``im_min``/``im_max`` are the source extents in metres, which is what
+    the contour spacing needs in order to convert a contour interval in metres
+    into millimetres.
+
+    Vertical relief comes out as ``model_height * exaggeration`` millimetres.
+    Exaggeration is applied *after* the normalisation, not before, because a
+    positive constant cancels exactly through a min-max normalisation:
+    ``(k*x - k*min) / (k*max - k*min) == (x - min) / (max - min)``. Applying it
+    first, as this did, left the slider with no effect at all on the exported
+    mesh. Reordering the clamp does not help either - both ``min(k*x, 0)`` and
+    ``max(k*x, 0)`` equal ``k`` times the unexaggerated clamp for ``k > 0`` - so
+    the multiplication has to land on the far side of the normalisation.
     """
     im = np.array(dem_values, dtype=np.float64).reshape(height, width)
-    im = im * exaggeration
 
     if sea_level_cap:
-        im = np.minimum(im, 0.0)
+        # Raise everything below sea level up to zero, so the ocean floor prints
+        # as a flat sea. This was np.minimum, which did the exact opposite: it
+        # flattened every piece of land to zero and kept only the trenches.
+        im = np.maximum(im, 0.0)
 
     im_min = float(np.nanmin(im))
     im_max = float(np.nanmax(im))
     if im_max > im_min:
-        im = (im - im_min) / (im_max - im_min) * model_height
+        im = (im - im_min) / (im_max - im_min) * model_height * exaggeration
+    else:
+        # A genuinely flat region (a lake, a salt pan) is legitimate. Emit a
+        # flat plate rather than dividing by zero.
+        im = np.zeros_like(im)
 
     im = im + base_height
     return im, im_min, im_max
@@ -167,24 +201,94 @@ def _scale_xy(vertices: np.ndarray, mm_per_pixel: float) -> np.ndarray:
 
 
 def _numpy2stl_mesh(im: np.ndarray, mm_per_pixel: float = 1.0) -> tuple:
-    """Convert a DEM array to a (vertices, faces) mesh, scaled to mm."""
+    """Convert a DEM array to a (vertices, faces) mesh, scaled to mm.
+
+    ``floor_val=0`` puts the bottom cap at z=0. Without it array_to_mesh floors
+    one unit below the surface minimum, which made the base thickness setting
+    inert - every solid came out ``model_height + 1`` mm tall.
+    """
     from numpy2stl import array_to_mesh
-    vertices, faces = array_to_mesh(im)
+    vertices, faces = array_to_mesh(im, floor_val=0.0)
     return _scale_xy(vertices, mm_per_pixel), faces
 
 
-def _repair_and_export(vertices, faces, suffix: str) -> str:
-    """Repair mesh with trimesh and write to a temp file. Returns temp file path."""
+def _repair_mesh(vertices, faces):
+    """Fill holes and fix winding. Returns the repaired trimesh.
+
+    Split out from the write step so the formats numpy2stl serialises itself,
+    OBJ and 3MF, can be repaired too instead of shipping raw array_to_mesh
+    output.
+    """
     import trimesh as tm
     mesh = tm.Trimesh(vertices=vertices, faces=faces, process=False)
     tm.repair.fill_holes(mesh)
     tm.repair.fix_normals(mesh)
+    return mesh
+
+
+def _write_mesh(mesh, suffix: str) -> str:
+    """Write a trimesh to a temp file with the given suffix. Returns the path."""
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     path = tf.name
     tf.close()
     mesh.export(path, file_type=suffix.lstrip('.'))
-    return path, mesh
+    return path
 
+
+def _repair_and_export(vertices, faces, suffix: str):
+    """Repair a mesh and write it out. Returns (temp file path, mesh)."""
+    mesh = _repair_mesh(vertices, faces)
+    return _write_mesh(mesh, suffix), mesh
+
+
+
+def _prepare_export_mesh(p, data: dict):
+    """Shared DEM-to-mesh path for the direct export routes.
+
+    generate_stl, generate_obj and generate_3mf each inlined their own copy of
+    this sequence, and the OBJ and 3MF copies had drifted off it: they skipped
+    the label engraving, the contour lines and the trimesh repair entirely, so
+    the same request produced a different model depending on the file extension.
+    Returns the repaired mesh along with its vertices and faces.
+    """
+    from numpy2stl import array_to_mesh
+
+    im, im_min, im_max = _prepare_dem_array(
+        p.dem_values, p.height, p.width,
+        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
+    )
+
+    engrave_label = bool(data.get("engrave_label", False))
+    label_text = data.get("label_text", p.name)
+    if engrave_label and label_text:
+        im = _apply_label_engraving(im, label_text, p.base_height)
+
+    contours = bool(data.get("contours", False))
+    contour_interval = float(data.get("contour_interval", 100))
+    contour_style = data.get("contour_style", "engraved")
+    if contours and contour_interval > 0:
+        im = _apply_contour_lines(im, im_min, im_max, p.model_height * p.exaggeration,
+                                  p.base_height, contour_interval, contour_style)
+
+    # floor at z=0 so base_height is a real thickness
+    vertices, faces = array_to_mesh(im, floor_val=0.0)
+    vertices = _scale_xy(vertices, p.mm_per_pixel)
+    mesh = _repair_mesh(vertices, faces)
+    return mesh, mesh.vertices, mesh.faces
+
+
+def _mesh_response_headers(name: str, ext: str, mesh) -> dict:
+    """Content-Disposition plus the watertightness figures the client reads back."""
+    watertight = bool(mesh.is_watertight)
+    if not watertight:
+        logger.warning("%s mesh is not watertight after repair (%d faces)",
+                       ext.upper(), len(mesh.faces))
+    return {
+        "Content-Disposition": f"attachment; filename={name}.{ext}",
+        "X-Watertight": str(watertight).lower(),
+        "X-Face-Count": str(len(mesh.faces)),
+        "Access-Control-Expose-Headers": "X-Watertight, X-Face-Count",
+    }
 
 
 def _apply_label_engraving(im: np.ndarray, label_text: str, base_height: float) -> np.ndarray:
@@ -232,7 +336,11 @@ def _apply_contour_lines(
         on_contour |= phase > (1.0 - band_half)
         index_interval_mm = interval_mm * 5.0
         index_phase = ((im - base_height) % index_interval_mm) / index_interval_mm
-        index_band = index_phase < (band_half * 2) | (index_phase > (1.0 - band_half * 2))
+        # Parenthesise both comparisons: | binds tighter than <, so this used to
+        # evaluate float | ndarray and raise a TypeError that the surrounding
+        # try/except swallowed, making contours a silent no-op in every export.
+        index_band = ((index_phase < (band_half * 2))
+                      | (index_phase > (1.0 - band_half * 2)))
         depth = line_width_mm * 0.8
         index_depth = depth * 2.0
         if contour_style == "engraved":
@@ -256,115 +364,81 @@ def generate_stl(data: dict):
     from fastapi.responses import FileResponse, JSONResponse
 
     p = _parse_export_params(data)
-    engrave_label   = bool(data.get("engrave_label", False))
-    label_text      = data.get("label_text", p.name)
-    contours        = bool(data.get("contours", False))
-    contour_interval = float(data.get("contour_interval", 100))
-    contour_style   = data.get("contour_style", "engraved")
-
     if not p.dem_values or not p.height or not p.width:
         return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
 
-    im, im_min, im_max = _prepare_dem_array(
-        p.dem_values, p.height, p.width,
-        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
-    )
-
-    if engrave_label and label_text:
-        im = _apply_label_engraving(im, label_text, p.base_height)
-
-    if contours and contour_interval > 0:
-        im = _apply_contour_lines(im, im_min, im_max, p.model_height,
-                                  p.base_height, contour_interval, contour_style)
-
-    vertices, faces = _numpy2stl_mesh(im, mm_per_pixel=p.mm_per_pixel)
-    temp_path, mesh = _repair_and_export(vertices, faces, ".stl")
-    is_watertight = bool(mesh.is_watertight)
-    face_count = len(mesh.faces)
-    logger.info(f"STL generated: {face_count} faces, watertight={is_watertight}")
+    mesh, _vertices, _faces = _prepare_export_mesh(p, data)
+    temp_path = _write_mesh(mesh, ".stl")
+    logger.info("STL generated: %d faces, watertight=%s",
+                len(mesh.faces), mesh.is_watertight)
 
     return FileResponse(
         temp_path,
         filename=f"{p.name}.stl",
         media_type="application/octet-stream",
         background=BackgroundTask(os.unlink, temp_path),
-        headers={
-            "Content-Disposition": f"attachment; filename={p.name}.stl",
-            "X-Watertight": str(is_watertight).lower(),
-            "X-Face-Count": str(face_count),
-            "Access-Control-Expose-Headers": "X-Watertight, X-Face-Count",
-        },
+        headers=_mesh_response_headers(p.name, "stl", mesh),
     )
 
 
 def generate_obj(data: dict):
     """Generate an OBJ file from DEM data. Returns a FastAPI FileResponse."""
     from fastapi.responses import FileResponse, JSONResponse
-    from numpy2stl import array_to_mesh
     from numpy2stl import writeOBJ
 
     p = _parse_export_params(data)
     if not p.dem_values or not p.height or not p.width:
         return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
 
-    im, _, _ = _prepare_dem_array(
-        p.dem_values, p.height, p.width,
-        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
-    )
-    vertices, faces = array_to_mesh(im)
-    vertices = _scale_xy(vertices, p.mm_per_pixel)
+    mesh, vertices, faces = _prepare_export_mesh(p, data)
 
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".obj")
     temp_path = tf.name
     tf.close()
     writeOBJ(temp_path, {p.name: (vertices, faces)})
-    logger.info(f"OBJ generated: {len(vertices)} vertices, {len(faces)} faces")
+    logger.info("OBJ generated: %d vertices, %d faces, watertight=%s",
+                len(vertices), len(faces), mesh.is_watertight)
 
     return FileResponse(
         temp_path,
         filename=f"{p.name}.obj",
         media_type="application/octet-stream",
         background=BackgroundTask(os.unlink, temp_path),
-        headers={"Content-Disposition": f"attachment; filename={p.name}.obj"},
+        headers=_mesh_response_headers(p.name, "obj", mesh),
     )
 
 
 def generate_3mf(data: dict):
     """Generate a 3MF file from DEM data. Returns a FastAPI FileResponse."""
     from fastapi.responses import FileResponse, JSONResponse
-    from numpy2stl import array_to_mesh
     from numpy2stl import write3MF
 
     p = _parse_export_params(data)
     if not p.dem_values or not p.height or not p.width:
         return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
 
-    im, _, _ = _prepare_dem_array(
-        p.dem_values, p.height, p.width,
-        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
-    )
-    vertices, faces = array_to_mesh(im)
-    vertices = _scale_xy(vertices, p.mm_per_pixel)
+    mesh, vertices, faces = _prepare_export_mesh(p, data)
 
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".3mf")
     temp_path = tf.name
     tf.close()
     write3MF(temp_path, {p.name: (vertices, faces)})
-    logger.info(f"3MF generated: {len(vertices)} vertices, {len(faces)} faces")
+    logger.info("3MF generated: %d vertices, %d faces, watertight=%s",
+                len(vertices), len(faces), mesh.is_watertight)
 
     return FileResponse(
         temp_path,
         filename=f"{p.name}.3mf",
         media_type="application/octet-stream",
         background=BackgroundTask(os.unlink, temp_path),
-        headers={"Content-Disposition": f"attachment; filename={p.name}.3mf"},
+        headers=_mesh_response_headers(p.name, "3mf", mesh),
     )
 
 
 def generate_mesh_preview(data: dict):
     """
     Run the numpy2stl pipeline and return vertices + faces as JSON for the
-    in-browser 3-D viewer.  Defaults to solid=False (top surface only) for a
+    in-browser 3-D viewer.  Defaults to solid=True so the preview matches the
     light payload; client can request the full solid (walls + floor) by
     passing ``solid: true`` — matches what export will produce.
     """
@@ -420,11 +494,16 @@ def generate_mesh_preview(data: dict):
     contour_interval = float(data.get("contour_interval", 100))
     contour_style = data.get("contour_style", "engraved")
     if contours and contour_interval > 0:
-        im = _apply_contour_lines(im, im_min, im_max, p.model_height,
+        im = _apply_contour_lines(im, im_min, im_max, p.model_height * p.exaggeration,
                                   p.base_height, contour_interval, contour_style)
 
-    solid = bool(data.get("solid", False))
-    vertices, faces = array_to_mesh(im, solid=solid)
+    # Default to a closed solid so the preview shows the floor and side walls
+    # the exported file actually has. This defaulted to a bare top surface,
+    # so the viewer rendered an open shell with nothing underneath it.
+    solid = bool(data.get("solid", True))
+    # Same floor as the file exports, so the preview shows the model that will
+    # actually be written rather than one a millimetre taller.
+    vertices, faces = array_to_mesh(im, solid=solid, floor_val=0.0)
     logger.info(f"Preview mesh: {len(vertices)} vertices, {len(faces)} faces")
 
     # Vertices come back in pixel-grid units; client multiplies by mm_per_pixel
@@ -468,8 +547,7 @@ def generate_puzzle_3mf(data: dict, task: ExportTask | None = None):
     include_border : bool — whether to add the raised lip.
     """
     from fastapi.responses import FileResponse, JSONResponse
-    from numpy2stl import array_to_mesh
-    from numpy2stl import write3MF
+    from numpy2stl import array_to_mesh, write3MF
 
     def _progress(pct, msg):
         if task:
@@ -487,7 +565,7 @@ def generate_puzzle_3mf(data: dict, task: ExportTask | None = None):
     connector_mm = float(data.get("connector_size_mm", 50))
     connectors_n = int(data.get("connectors_per_edge", 10))
     border_h = float(data.get("border_height_mm", 1.0))
-    border_off = float(data.get("border_offset_mm", 5.0))
+    _border_off = float(data.get("border_offset_mm", 5.0))
     include_border = bool(data.get("include_border", True))
 
     if split_cols < 1 or split_rows < 1:
@@ -512,7 +590,7 @@ def generate_puzzle_3mf(data: dict, task: ExportTask | None = None):
     H, W = im.shape
     # Tab geometry in pixel space
     tab_depth_px = max(2, int(round(connectors_n * 0.5)))
-    tab_width_px = max(3, int(round(connector_mm / max(1, W / split_cols) * (W / split_cols) * 0.15)))
+    _tab_width_px = max(3, int(round(connector_mm / max(1, W / split_cols) * (W / split_cols) * 0.15)))
 
     models = {}
     total = split_cols * split_rows
@@ -540,7 +618,7 @@ def generate_puzzle_3mf(data: dict, task: ExportTask | None = None):
                 tab_depth_px, p.base_height, border_h if include_border else 0,
             )
 
-            vertices, faces = array_to_mesh(piece)
+            vertices, faces = array_to_mesh(piece, floor_val=0.0)  # floor at z=0 so base_height is a real thickness
 
             # Offset vertices to world position so pieces don't overlap
             # when loaded in a slicer
@@ -607,20 +685,26 @@ def _add_alignment_features(
 
     # Determine number and size of tabs along each edge
     def _apply_edge_tabs(arr_slice, is_tab):
-        """Modify a 2D slice in-place: raise for tabs, lower for slots."""
+        """Left/right edge tabs, spaced down the rows. Modifies in place.
+
+        The slice here is (piece height, tab depth), so the tabs belong along
+        the height. This used to index the same axis as the top/bottom variant,
+        which spread them across the handful of pixels of tab depth and left one
+        ridge running the full length of the edge instead of discrete tabs.
+        """
         h, w = arr_slice.shape
-        n_tabs = max(1, min(3, w // 8))  # 1-3 tabs depending on edge length
-        tab_w = max(2, w // (n_tabs * 3))  # each tab is ~1/3 of spacing
-        spacing = w // (n_tabs + 1)
+        n_tabs = max(1, min(3, h // 8))  # 1-3 tabs depending on edge length
+        tab_len = max(2, h // (n_tabs * 3))  # each tab is ~1/3 of spacing
+        spacing = h // (n_tabs + 1)
         for t in range(n_tabs):
-            cx = spacing * (t + 1)
-            x0 = max(0, cx - tab_w // 2)
-            x1 = min(w, cx + tab_w // 2)
+            cy = spacing * (t + 1)
+            y0 = max(0, cy - tab_len // 2)
+            y1 = min(h, cy + tab_len // 2)
             if is_tab:
-                arr_slice[:, x0:x1] += tab_h
+                arr_slice[y0:y1, :] += tab_h
             else:
-                arr_slice[:, x0:x1] = np.maximum(
-                    arr_slice[:, x0:x1] - slot_depth, 0.1)
+                arr_slice[y0:y1, :] = np.maximum(
+                    arr_slice[y0:y1, :] - slot_depth, 0.1)
 
     depth = min(tab_depth_px, max(2, ph // 10), max(2, pw // 10))
 

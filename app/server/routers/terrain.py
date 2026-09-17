@@ -6,54 +6,94 @@ HTTP adapter that parses requests, delegates, and formats responses.
 """
 
 import asyncio
-from geo2stl.hydrology import (
-    fetch_and_rasterize_hydrology as _fetch_and_rasterize_hydrology,
+import logging
+import math
+
+import numpy as np
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse
+
+from app.server.config import (
+    H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
 )
-from geo2stl.sat2stl import (
-    fetch_water_mask as _fetch_water_mask,
-    fetch_water_mask_images as _fetch_water_mask_images,
-    fetch_sat_overlay as _fetch_sat_overlay,
-    fetch_satellite_tiles as _fetch_satellite_tiles,
+from app.server.config import (
+    OPENTOPO_API_KEY as _OPENTOPO_API_KEY,
+)
+from app.server.config import (
+    OPENTOPO_DATASETS,
+    TEST_MODE,
+)
+from app.server.core.cache import make_cache_key, read_array_cache, write_array_cache
+from app.server.core.dem_cache import dem_cache_key
+from app.server.core.responses import error_response
+from app.server.core.validation import (
+    BboxQueryParams,
+    run_sync,
+)
+from app.server.core.validation import (
+    b64_encode as _b64,
+)
+from app.server.core.validation import (
+    parse_bbox_query as _parse_bbox_query,
+)
+from app.server.core.validation import (
+    parse_bool as _parse_bool,
+)
+from app.server.core.validation import (
+    parse_float as _parse_float,
+)
+from app.server.core.validation import (
+    parse_int as _parse_int,
+)
+from app.server.core.validation import (
+    validate_bbox as _validate_bbox,
+)
+from app.server.core.validation import (
+    validate_dim as _validate_dim,
 )
 from geo2stl.dem import (
     fetch_layer_data as _fetch_layer_data,
+)
+from geo2stl.dem import (
     fetch_local_dem as _fetch_local_dem,
+)
+from geo2stl.dem import (
     make_dem_payload as _make_dem_payload,
+)
+from geo2stl.hydrology import (
+    fetch_and_rasterize_hydrology as _fetch_and_rasterize_hydrology,
 )
 from geo2stl.processing import (
     upsample_dem as _upsample_dem,
 )
-from app.server.core.cache import make_cache_key, write_array_cache, read_array_cache
-from app.server.core.validation import (
-    BboxQueryParams,
-    parse_float as _parse_float,
-    parse_int as _parse_int,
-    parse_bool as _parse_bool,
-    parse_bbox_query as _parse_bbox_query,
-    b64_encode as _b64,
-    validate_bbox as _validate_bbox,
-    validate_dim as _validate_dim,
-    run_sync,
-)
 from geo2stl.projections import (
     project_grid as _project_grid_impl,
-    project_water_arrays as _project_water_arrays_impl,
+)
+from geo2stl.projections import (
     project_rgb_image as _project_rgb_image,
 )
-from app.server.core.responses import error_response
-from app.server.config import (
-    TEST_MODE,
-    OPENTOPO_DATASETS,
-    OPENTOPO_API_KEY as _OPENTOPO_API_KEY,
-    H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
-    MAX_DIM,
+from geo2stl.projections import (
+    project_water_arrays as _project_water_arrays_impl,
 )
-from typing import Optional
-from fastapi.responses import JSONResponse
-from fastapi import APIRouter, Request, Query, Depends
-import numpy as np
-import math
-import logging
+from geo2stl.sat2stl import (
+    fetch_sat_overlay as _fetch_sat_overlay,
+)
+from geo2stl.sat2stl import (
+    fetch_satellite_tiles as _fetch_satellite_tiles,
+)
+from geo2stl.sat2stl import (
+    fetch_water_mask as _fetch_water_mask,
+)
+from geo2stl.sat2stl import (
+    fetch_water_mask_images as _fetch_water_mask_images,
+)
+from geo2stl.trails import (
+    SKI_DIFFICULTY_CLASSES,
+    TrailsUpstreamError,
+)
+from geo2stl.trails import (
+    fetch_and_rasterize_trails as _fetch_and_rasterize_trails,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["terrain"])
@@ -62,6 +102,7 @@ router = APIRouter(tags=["terrain"])
 # payload dict. When a duplicate request arrives while one is running, it awaits
 # the same Future instead of starting a fresh pipeline. Cleared on completion.
 _HYDRO_INFLIGHT: dict[str, "asyncio.Future"] = {}
+_TRAILS_INFLIGHT: dict[str, "asyncio.Future"] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +196,7 @@ def _fetch_dem_array(dem_source, north, south, east, west, dim,
         return np.zeros((mh, mw), dtype=float)
 
 
-def _dem_empty_warning(im: np.ndarray) -> Optional[str]:
+def _dem_empty_warning(im: np.ndarray) -> str | None:
     """Return a user-facing warning if the DEM has no usable elevation data.
 
     A flat (all-equal, incl. all-zero) or all-NaN array means the source had
@@ -183,32 +224,32 @@ def _dem_empty_warning(im: np.ndarray) -> Optional[str]:
 async def get_terrain_dem(
     request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
-    dim: Optional[int] = Query(
+    dim: int | None = Query(
         None, description="Output grid resolution (pixels per side)"),
-    depth_scale: Optional[float] = Query(
+    depth_scale: float | None = Query(
         None, description="Depth scaling factor for ocean/bathymetry"),
-    water_scale: Optional[float] = Query(
+    water_scale: float | None = Query(
         None, description="Water subtraction strength"),
-    subtract_water: Optional[bool] = Query(
+    subtract_water: bool | None = Query(
         None, description="Subtract water bodies from terrain"),
-    show_sat: Optional[bool] = Query(
+    show_sat: bool | None = Query(
         None, description="Include ESA land-use overlay in response"),
-    dataset: Optional[str] = Query(
+    dataset: str | None = Query(
         None, description="Land-use dataset: 'esa' or 'jrc'"),
-    projection: Optional[str] = Query(
+    projection: str | None = Query(
         None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
-    maintain_dimensions: Optional[bool] = Query(
+    maintain_dimensions: bool | None = Query(
         None, description="Maintain output dimensions after projection"),
-    clip_valid_region: Optional[bool] = Query(
+    clip_valid_region: bool | None = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
     ),
-    clip_nans: Optional[bool] = Query(
+    clip_nans: bool | None = Query(
         None,
         description="Deprecated alias for clip_valid_region.",
         deprecated=True,
     ),
-    dem_source: Optional[str] = Query(
+    dem_source: str | None = Query(
         None, description="DEM source: 'local', 'h5_local', or OpenTopography key"),
 ):
     """
@@ -243,14 +284,19 @@ async def get_terrain_dem(
         f"west={west} dim={dim} show_sat={show_sat}")
 
     # --- DEM disk cache check ---
-    # Note: Cache key does NOT include projection or clip_valid_region.
+    # The key is built by core/dem_cache.py, which the export path also calls —
+    # the two must agree exactly or a settings-only export fails with
+    # "Missing DEM data". Do not inline the key here again.
+    # Note: the key deliberately excludes projection and clip_valid_region.
     # Raw data is cached once per bbox; projection/clipping applied on fetch.
-    _dem_cache_key = make_cache_key("dem", north, south, east, west, {
-        "v": 2,
-        "dim": dim, "src": dem_source,
-        "ds": depth_scale, "ws": water_scale,
-        "sw": subtract_water, "md": maintain_dimensions,
-        "sat": show_sat,
+    _dem_cache_key = dem_cache_key(north, south, east, west, {
+        "dim": dim,
+        "dem_source": dem_source,
+        "depth_scale": depth_scale,
+        "water_scale": water_scale,
+        "subtract_water": subtract_water,
+        "maintain_dimensions": maintain_dimensions,
+        "show_sat": show_sat,
     })
     _cached = read_array_cache("dem", _dem_cache_key)
     im_raw = None
@@ -323,6 +369,13 @@ async def get_terrain_dem(
             im, west, south, east, north, show_sat)
         height_px, width_px = response_content["dimensions"]
 
+        # Pre-projection grid size. Any other layer that must line up with this
+        # DEM has to be rasterized at THIS size and then projected once — feeding
+        # the already-projected dimensions back in projects the data twice, which
+        # both shrinks the grid again and shears its contents relative to the DEM.
+        response_content["source_dimensions"] = [
+            int(im_raw.shape[0]), int(im_raw.shape[1])]
+
         # Flag DEMs that came back with no real relief (source had no coverage
         # for this bbox) so the client can warn instead of showing a flat map.
         _empty_warning = _dem_empty_warning(im)
@@ -359,7 +412,11 @@ async def get_terrain_dem(
 
         # Write DEM disk cache (skip when satellite overlay is embedded)
         # Cache raw (unprojected) DEM so projection/clip toggles are honored per request.
-        if not show_sat and not from_cache:
+        # An empty DEM is a failure, not a result: caching it would keep serving
+        # the flat map after the underlying cause is fixed (a repointed tile
+        # folder, a newly added API key), and the fix would look like it did
+        # nothing until the cache was cleared by hand.
+        if not show_sat and not from_cache and not _empty_warning:
             im_clean = im_raw.astype(np.float32, copy=False)
             write_array_cache(
                 "dem", _dem_cache_key,
@@ -393,22 +450,22 @@ async def get_terrain_dem(
 async def get_terrain_water_mask(
     request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
-    dim: Optional[int] = Query(
+    dim: int | None = Query(
         None, description="Output grid resolution (pixels per side)"),
-    dataset: Optional[str] = Query(
+    dataset: str | None = Query(
         None, description="Water dataset: 'esa' or 'jrc'"),
-    projection: Optional[str] = Query(
+    projection: str | None = Query(
         None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
-    clip_valid_region: Optional[bool] = Query(
+    clip_valid_region: bool | None = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
     ),
-    clip_nans: Optional[bool] = Query(
+    clip_nans: bool | None = Query(
         None,
         description="Deprecated alias for clip_valid_region.",
         deprecated=True,
     ),
-    maintain_dimensions: Optional[bool] = Query(
+    maintain_dimensions: bool | None = Query(
         None, description="Maintain output dimensions after projection"),
 ):
     """Fetch a binary water mask and ESA WorldCover land-cover data."""
@@ -541,20 +598,20 @@ async def get_terrain_water_mask(
 async def get_terrain_esa_land_cover(
     request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
-    dim: Optional[int] = Query(
+    dim: int | None = Query(
         None, description="Output grid resolution (pixels per side)"),
-    projection: Optional[str] = Query(
+    projection: str | None = Query(
         None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
-    clip_valid_region: Optional[bool] = Query(
+    clip_valid_region: bool | None = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
     ),
-    clip_nans: Optional[bool] = Query(
+    clip_nans: bool | None = Query(
         None,
         description="Deprecated alias for clip_valid_region.",
         deprecated=True,
     ),
-    maintain_dimensions: Optional[bool] = Query(
+    maintain_dimensions: bool | None = Query(
         None, description="Maintain output dimensions after projection"),
 ):
     """Fetch ESA WorldCover land-cover class data independently of the water mask."""
@@ -688,20 +745,20 @@ async def get_terrain_esa_land_cover(
 async def get_terrain_satellite(
     request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
-    dim: Optional[int] = Query(
+    dim: int | None = Query(
         None, description="Output image resolution (pixels per side)"),
-    projection: Optional[str] = Query(
+    projection: str | None = Query(
         None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
-    clip_valid_region: Optional[bool] = Query(
+    clip_valid_region: bool | None = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
     ),
-    clip_nans: Optional[bool] = Query(
+    clip_nans: bool | None = Query(
         None,
         description="Deprecated alias for clip_valid_region.",
         deprecated=True,
     ),
-    maintain_dimensions: Optional[bool] = Query(
+    maintain_dimensions: bool | None = Query(
         None, description="Maintain output dimensions after projection"),
 ):
     """
@@ -724,8 +781,9 @@ async def get_terrain_satellite(
 
     if TEST_MODE:
         import base64
-        from PIL import Image
         from io import BytesIO
+
+        from PIL import Image
         img = Image.new("RGB", (dim, dim), color=(80, 120, 60))
         # Apply projection even in TEST_MODE
         if projection != "none":
@@ -747,6 +805,7 @@ async def get_terrain_satellite(
         if projection != "none":
             import base64 as _b64mod
             from io import BytesIO as _BytesIO
+
             from PIL import Image as _Image
 
             raw_bytes = _b64mod.b64decode(b64)
@@ -772,9 +831,15 @@ async def get_terrain_satellite(
 @router.get("/api/terrain/sources", tags=["terrain"])
 async def get_terrain_sources():
     """List available DEM data sources with availability status."""
+    # The local tile store is only "available" if it actually has tiles: with an
+    # empty or missing folder the fetch quietly returns zeros and exports a flat
+    # slab, so reporting it as ready is worse than reporting nothing at all.
+    from app.server.core import tile_store
+    local_status = tile_store.status()
     sources = [
         {"id": "local", "label": "Local SRTM Tiles", "provider": "local",
-         "resolution_m": 30, "requires_api_key": False, "available": True},
+         "resolution_m": 30, "requires_api_key": False,
+         "available": local_status["available"], "note": local_status["note"]},
         {"id": "h5_local", "label": "Local SRTM H5 (City-scale, ~90m)",
          "provider": "local_h5", "resolution_m": 90,
          "requires_api_key": False, "available": _H5_SRTM_AVAILABLE,
@@ -791,6 +856,7 @@ async def get_terrain_sources():
         "sources": sources,
         "opentopo_api_key_configured": has_key,
         "h5_srtm_available": _H5_SRTM_AVAILABLE,
+        "local_tile_store": local_status,
     })
 
 
@@ -802,32 +868,32 @@ async def get_terrain_sources():
 async def get_terrain_hydrology(
     request: Request,
     bbox: BboxQueryParams = Depends(_parse_bbox_query),
-    dim: Optional[int] = Query(
+    dim: int | None = Query(
         None, description="Output grid resolution (pixels per side)"),
-    depression_m: Optional[float] = Query(
+    depression_m: float | None = Query(
         None, description="Max river depression in metres (negative, default -5.0)"),
-    source: Optional[str] = Query(
+    source: str | None = Query(
         None, description="River data source: 'natural_earth' or 'hydrorivers'"),
-    scale_m: Optional[int] = Query(
+    scale_m: int | None = Query(
         None, description="Natural Earth dataset tier: 10 (finest), 50, or 110"),
-    min_order: Optional[int] = Query(
+    min_order: int | None = Query(
         None, description="HydroRIVERS minimum Strahler order 1-9 (1=all, 9=major only)"),
-    order_exponent: Optional[float] = Query(
+    order_exponent: float | None = Query(
         None, description="HydroRIVERS depression scaling exponent"),
-    width_factor: Optional[float] = Query(
+    width_factor: float | None = Query(
         None, description="HydroRIVERS line width multiplier (default 1.0; higher = thicker rivers)"),
-    projection: Optional[str] = Query(
+    projection: str | None = Query(
         None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
-    clip_valid_region: Optional[bool] = Query(
+    clip_valid_region: bool | None = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
     ),
-    clip_nans: Optional[bool] = Query(
+    clip_nans: bool | None = Query(
         None,
         description="Deprecated alias for clip_valid_region.",
         deprecated=True,
     ),
-    maintain_dimensions: Optional[bool] = Query(
+    maintain_dimensions: bool | None = Query(
         None, description="Maintain output dimensions after projection"),
 ):
     """
@@ -1008,3 +1074,283 @@ async def get_terrain_hydrology(
     finally:
         # Always clear the in-flight slot so retries can start a fresh pipeline.
         _HYDRO_INFLIGHT.pop(cache_key, None)
+
+
+# ---------------------------------------------------------------------------
+# Trails — ski pistes and hiking paths
+# ---------------------------------------------------------------------------
+
+@router.get("/api/terrain/trails", tags=["terrain"])
+async def get_terrain_trails(
+    request: Request,
+    bbox: BboxQueryParams = Depends(_parse_bbox_query),
+    dim: int | None = Query(
+        None, description="Output grid resolution (pixels per side)"),
+    relief_m: float | None = Query(
+        None, description="Signed trail relief in metres (negative engraves, default -2.0)"),
+    width_m: float | None = Query(
+        None, description="Rendered trail width in metres (default 8, floored at 2 px)"),
+    source: str | None = Query(
+        None, description="Trail source: 'osm', 'usfs', or 'all' (default)"),
+    categories: str | None = Query(
+        None, description="Comma-separated categories to fetch: 'ski', 'hiking'"),
+    projection: str | None = Query(
+        None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+    clip_valid_region: bool | None = Query(
+        None, description="Clip projection padding to valid data extent (recommended)."),
+    clip_nans: bool | None = Query(
+        None, description="Deprecated alias for clip_valid_region.", deprecated=True),
+    maintain_dimensions: bool | None = Query(
+        None, description="Maintain output dimensions after projection"),
+):
+    """
+    Fetch ski and hiking trails and rasterize each category to its own relief grid.
+
+    Both categories come back in one response even when the client is showing only
+    one of them, so toggling ski/hiking in the UI is a repaint rather than a second
+    Overpass round trip.
+
+    Query parameters:
+        north, south, east, west: bounding box
+        dim:        output grid resolution (pixels per side, default 600)
+        relief_m:   signed relief in metres; negative engraves (default -2.0)
+        width_m:    rendered trail width in metres (default 8.0)
+        source:     'osm' (global, both categories), 'usfs' (US hiking only),
+                    or 'all' (default, union of both)
+        categories: comma-separated subset of 'ski,hiking' to fetch
+    """
+    params = request.query_params
+
+    north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
+    dim = _parse_int(params, "dim", 600)
+    relief_m = _parse_float(params, "relief_m", -2.0)
+    width_m = _parse_float(params, "width_m", 8.0)
+    width_m = max(1.0, min(500.0, width_m))
+
+    source = params.get("source", "all")
+    if source not in ("osm", "usfs", "all"):
+        source = "all"
+
+    raw_categories = params.get("categories", "ski,hiking")
+    categories = tuple(
+        c for c in (p.strip() for p in raw_categories.split(","))
+        if c in ("ski", "hiking")
+    ) or ("ski", "hiking")
+
+    projection = params.get("projection", "none")
+    clip_valid_region = _parse_clip_valid_region(params, default=True)
+    maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
+
+    err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
+    if err:
+        return err
+
+    logger.debug(f"GET /api/terrain/trails bbox=({north},{south},{east},{west}) "
+                 f"dim={dim} source={source} categories={categories}")
+
+    def _project_many(*grids, categorical=False):
+        """Apply the requested projection to every grid, or return them unchanged.
+
+        ``categorical`` switches the resampler to nearest-neighbour, which the
+        difficulty grid needs: its values are class indices, and interpolating
+        between "easy" and "expert" would invent a grade that is neither.
+        """
+        if projection == "none":
+            return list(grids)
+        out = []
+        for grid in grids:
+            g = _project_grid(
+                grid, north, south, east, west, projection, clip_valid_region,
+                categorical=categorical, maintain_dimensions=maintain_dimensions)
+            # Projection pads with NaN; here 0 is the "no trail" value.
+            out.append(np.nan_to_num(g, nan=0.0))
+        return out
+
+    # Cache key covers every parameter that changes the rasterized output.
+    # Projection is deliberately excluded and re-applied per request, matching the
+    # hydrology endpoint: switching projection must not force a refetch. Categories
+    # are excluded too — both grids are always computed, so an entry written for
+    # one category request serves the other as well.
+    cache_extra = {"dim": dim, "src": source, "rel": relief_m, "wid": width_m}
+    cache_key = make_cache_key("trails", north, south, east, west, cache_extra)
+    cached = read_array_cache("trails", cache_key)
+    if cached is not None:
+        arrs, meta = cached
+        # Every grid must be present. The area masks and the difficulty grid were
+        # each added after the first entries were written, and an entry missing
+        # one is served as a miss rather than backfilled with zeros: an all-zero
+        # difficulty grid is indistinguishable from a resort whose pistes carry
+        # no grades, so the degradation would be a silent wrong answer. The cost
+        # is one refetch per stale entry.
+        ski = arrs.get("ski_grid")
+        hiking = arrs.get("hiking_grid")
+        ski_area = arrs.get("ski_area_grid")
+        hiking_area = arrs.get("hiking_area_grid")
+        ski_difficulty = arrs.get("ski_difficulty_grid")
+        if all(a is not None for a in
+               (ski, hiking, ski_area, hiking_area, ski_difficulty)):
+            ski, hiking, ski_area, hiking_area = _project_many(
+                ski, hiking, ski_area, hiking_area)
+            ski_difficulty, = _project_many(ski_difficulty, categorical=True)
+            h, w = ski.shape
+            logger.info("Trails cache hit: %s (%dx%d)", cache_key[:8], w, h)
+            ski_count = int(meta.get("ski_count", 0))
+            hiking_count = int(meta.get("hiking_count", 0))
+            return JSONResponse(content={
+                "ski_grid_values_b64": _b64(ski),
+                "hiking_grid_values_b64": _b64(hiking),
+                "ski_area_grid_values_b64": _b64(ski_area),
+                "hiking_area_grid_values_b64": _b64(hiking_area),
+                "ski_difficulty_grid_values_b64": _b64(ski_difficulty),
+                "difficulty_classes": list(SKI_DIFFICULTY_CLASSES),
+                "grid_dimensions": [h, w],
+                "ski_count": ski_count,
+                "hiking_count": hiking_count,
+                "feature_count": ski_count + hiking_count,
+                "sources": meta.get("sources", []),
+                "source": source,
+                "relief_m": relief_m,
+            })
+
+    # In-flight dedupe: Overpass trail queries are slow, and the layer can be asked
+    # for by the load button and the layer auto-load at the same moment.
+    inflight = _TRAILS_INFLIGHT.get(cache_key)
+    if inflight is not None:
+        logger.info("Trails in-flight join: %s", cache_key[:8])
+        payload = await inflight
+        return JSONResponse(content=payload)
+
+    if TEST_MODE:
+        ski = np.zeros((dim, dim), dtype=np.float32)
+        hiking = np.zeros((dim, dim), dtype=np.float32)
+        ski[dim // 3, :] = relief_m
+        hiking[:, dim // 3] = relief_m
+        ski_area = np.zeros((dim, dim), dtype=np.float32)
+        hiking_area = np.zeros((dim, dim), dtype=np.float32)
+        ski_difficulty = np.zeros((dim, dim), dtype=np.uint8)
+        ski_difficulty[dim // 3, :] = 3          # one "intermediate" run
+        ski, hiking, ski_area, hiking_area = _project_many(
+            ski, hiking, ski_area, hiking_area)
+        ski_difficulty, = _project_many(ski_difficulty, categorical=True)
+        h, w = ski.shape
+        return JSONResponse(content={
+            "ski_grid_values_b64": _b64(ski),
+            "hiking_grid_values_b64": _b64(hiking),
+            "ski_area_grid_values_b64": _b64(ski_area),
+            "hiking_area_grid_values_b64": _b64(hiking_area),
+            "ski_difficulty_grid_values_b64": _b64(ski_difficulty),
+            "difficulty_classes": list(SKI_DIFFICULTY_CLASSES),
+            "grid_dimensions": [h, w],
+            "ski_count": 1,
+            "hiking_count": 1,
+            "feature_count": 2,
+            "sources": ["osm"],
+            "source": source,
+            "relief_m": relief_m,
+        })
+
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future = loop.create_future()
+    _TRAILS_INFLIGHT[cache_key] = fut
+
+    try:
+        result = await run_sync(
+            _fetch_and_rasterize_trails,
+            north, south, east, west, dim,
+            relief_m, width_m, source, categories)
+
+        if result is None:
+            payload = {
+                "ski_grid_values_b64": None,
+                "hiking_grid_values_b64": None,
+                "ski_area_grid_values_b64": None,
+                "hiking_area_grid_values_b64": None,
+                "ski_difficulty_grid_values_b64": None,
+                "difficulty_classes": list(SKI_DIFFICULTY_CLASSES),
+                "grid_dimensions": [dim, dim],
+                "ski_count": 0,
+                "hiking_count": 0,
+                "feature_count": 0,
+                "sources": [],
+                "source": source,
+                "relief_m": relief_m,
+                "error": "No trails found in region",
+            }
+            if not fut.done():
+                fut.set_result(payload)
+            return JSONResponse(content=payload, status_code=200)
+
+        # Cache the RAW (unprojected) grids; projection is applied fresh below and
+        # on every later cache hit.
+        write_array_cache(
+            "trails", cache_key,
+            {"ski_grid": result["ski_grid"], "hiking_grid": result["hiking_grid"],
+             "ski_area_grid": result["ski_area_grid"],
+             "hiking_area_grid": result["hiking_area_grid"],
+             "ski_difficulty_grid": result["ski_difficulty_grid"]},
+            {"ski_count": int(result["ski_count"]),
+             "hiking_count": int(result["hiking_count"]),
+             "sources": result.get("sources", [])},
+        )
+
+        ski, hiking, ski_area, hiking_area = _project_many(
+            result["ski_grid"], result["hiking_grid"],
+            result["ski_area_grid"], result["hiking_area_grid"])
+        ski_difficulty, = _project_many(
+            result["ski_difficulty_grid"], categorical=True)
+        h, w = ski.shape
+
+        payload = {
+            "ski_grid_values_b64": _b64(ski),
+            "hiking_grid_values_b64": _b64(hiking),
+            "ski_area_grid_values_b64": _b64(ski_area),
+            "hiking_area_grid_values_b64": _b64(hiking_area),
+            # Encoded as float32 like every other grid so the client reuses one
+            # decoder; the values are small integers, so the cast is exact.
+            "ski_difficulty_grid_values_b64": _b64(ski_difficulty),
+            "difficulty_classes": list(SKI_DIFFICULTY_CLASSES),
+            "grid_dimensions": [h, w],
+            "ski_count": result["ski_count"],
+            "hiking_count": result["hiking_count"],
+            "feature_count": result["feature_count"],
+            "sources": result.get("sources", []),
+            "source": source,
+            "relief_m": relief_m,
+        }
+        if not fut.done():
+            fut.set_result(payload)
+        return JSONResponse(content=payload)
+
+    except TrailsUpstreamError as e:
+        # Nothing is cached: an outage must not be remembered as an answer. The
+        # payload is shaped like the empty one so the client decodes it the same
+        # way, but the message says the source could not be reached rather than
+        # that the region has no trails - the client shows it verbatim.
+        logger.warning(f"Trails upstream unavailable: {e}")
+        payload = {
+            "ski_grid_values_b64": None,
+            "hiking_grid_values_b64": None,
+            "ski_area_grid_values_b64": None,
+            "hiking_area_grid_values_b64": None,
+            "ski_difficulty_grid_values_b64": None,
+            "difficulty_classes": list(SKI_DIFFICULTY_CLASSES),
+            "grid_dimensions": [dim, dim],
+            "ski_count": 0,
+            "hiking_count": 0,
+            "feature_count": 0,
+            "sources": [],
+            "source": source,
+            "relief_m": relief_m,
+            "upstream_error": True,
+            "error": f"Trail data source unreachable - {e}",
+        }
+        if not fut.done():
+            fut.set_result(payload)
+        return JSONResponse(content=payload, status_code=200)
+    except Exception as e:
+        logger.error(f"Error in get_terrain_trails: {e}", exc_info=True)
+        if not fut.done():
+            fut.set_exception(e)
+        return error_response("Trails fetch failed")
+    finally:
+        _TRAILS_INFLIGHT.pop(cache_key, None)

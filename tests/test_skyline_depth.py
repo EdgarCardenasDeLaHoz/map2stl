@@ -118,6 +118,66 @@ class TestDepthHeightFromSegment:
         # No camera offset -> pure trig
         assert h == pytest.approx(50.0 * math.tan(math.atan(20.0 / 100.0)), rel=1e-3)
 
+    def test_camera_pitch_is_applied(self):
+        """A view tilted up sees a taller building at the same pixel.
+
+        The geometric path in _core.height adds the viewpoint pitch to the
+        ray angle; this one used to ignore it, so every pitched view's depth
+        estimate was short and the disagreement flag fired for a reason that
+        had nothing to do with either estimate being wrong.
+        """
+        depth_m = np.full((100, 100), 100.0, dtype=np.float32)
+        pitch = math.radians(10.0)
+        flat = depth_height_from_segment(depth_m, (50, 30), fy=100.0, cy=50.0)
+        tilted = depth_height_from_segment(
+            depth_m, (50, 30), fy=100.0, cy=50.0, pitch_rad=pitch)
+        expected = 2.5 + 100.0 * math.tan(math.atan(20.0 / 100.0) + pitch)
+        assert tilted == pytest.approx(expected, rel=1e-3)
+        assert tilted > flat
+
+    def test_downward_pitch_can_push_the_ray_below_the_horizon(self):
+        depth_m = np.full((100, 100), 100.0, dtype=np.float32)
+        # 20 px above the principal row is atan(0.2) = 11.3 deg; pitching
+        # 20 deg down leaves the sight line below the horizon.
+        h = depth_height_from_segment(
+            depth_m, (50, 30), fy=100.0, cy=50.0,
+            pitch_rad=math.radians(-20.0))
+        assert h == 0.0
+
+    def test_depth_sample_pixel_supplies_the_distance(self):
+        """Angle from the roof pixel, distance from the sampled pixel.
+
+        The roof pixel here holds a sky-like 900 m; the facade pixel below
+        it holds the building's real 100 m. Only the latter may reach the
+        result, and the angle must still come from the roof row.
+        """
+        depth_m = np.full((100, 100), 900.0, dtype=np.float32)
+        depth_m[50, 50] = 100.0
+        h = depth_height_from_segment(
+            depth_m, (50, 30), fy=100.0, cy=50.0, depth_sample_xy=(50, 50))
+        assert h == pytest.approx(2.5 + 100.0 * 0.2, rel=1e-3)
+
+    def test_depth_sample_defaults_to_the_segment_top(self):
+        depth_m = np.full((100, 100), 50.0, dtype=np.float32)
+        assert depth_height_from_segment(
+            depth_m, (50, 30), fy=100.0, cy=50.0
+        ) == depth_height_from_segment(
+            depth_m, (50, 30), fy=100.0, cy=50.0, depth_sample_xy=(50, 30))
+
+    def test_out_of_bounds_depth_sample_returns_zero(self):
+        depth_m = np.full((100, 100), 50.0, dtype=np.float32)
+        assert depth_height_from_segment(
+            depth_m, (50, 30), fy=100.0, cy=50.0,
+            depth_sample_xy=(999, 30)) == 0.0
+
+    def test_ground_offset_shifts_the_result_one_for_one(self):
+        """Camera 30 m above the footprint -> 30 m more building."""
+        depth_m = np.full((100, 100), 100.0, dtype=np.float32)
+        level = depth_height_from_segment(depth_m, (50, 30), fy=100.0, cy=50.0)
+        uphill = depth_height_from_segment(
+            depth_m, (50, 30), fy=100.0, cy=50.0, ground_offset_m=30.0)
+        assert uphill == pytest.approx(level + 30.0, rel=1e-6)
+
 
 class TestCompareHeights:
     """Disagreement flag for cross-verification."""

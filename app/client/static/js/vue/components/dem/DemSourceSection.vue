@@ -4,7 +4,10 @@
     <!-- dem.dem_source -->
     <div class="param-group">
       <label for="paramDemSource" title="Elevation data source.">Source:</label>
+      <!-- Replaced at load by populateDemSources(); this is the fallback list, so
+           h5_local leads: it needs no API key and no tile folder. -->
       <select id="paramDemSource" class="ctrl-select">
+        <option value="h5_local">Local SRTM H5 (city-scale)</option>
         <option value="local">Local SRTM Tiles</option>
         <option value="SRTMGL1">OpenTopo — SRTM 30m</option>
         <option value="SRTMGL3">OpenTopo — SRTM 90m</option>

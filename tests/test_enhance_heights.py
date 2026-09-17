@@ -3,8 +3,11 @@
 import numpy as np
 import pytest
 
-from city2stl.heights import _fill_heights, enhance_buildings_with_raster
-
+from city2stl.heights import (
+    METRES_PER_LEVEL,
+    _fill_heights,
+    enhance_buildings_with_raster,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -93,7 +96,24 @@ class TestFillHeights:
         )
         result = _fill_heights(gdf, default_m=10.0, levels_col="building:levels")
         assert result["height_source"].iloc[0] == "osm_levels"
-        assert result["height_m"].iloc[0] == 20.0  # 5 * 4.0
+        assert result["height_m"].iloc[0] == 5 * METRES_PER_LEVEL
+
+    def test_missing_levels_falls_back_to_default_not_an_invented_count(self):
+        """No height and no levels -> default_m, even when levels_col is set.
+
+        Regression: the levels column used to be filled with an invented 3.0
+        before multiplying, so an untagged building silently became
+        3 x METRES_PER_LEVEL and *default_m* never applied.
+        """
+        import geopandas as gpd
+        from shapely.geometry import box
+        gdf = gpd.GeoDataFrame(
+            {"geometry": [box(0, 0, 1, 1)], "building:levels": [None]},
+            crs="EPSG:4326",
+        )
+        result = _fill_heights(gdf, default_m=10.0, levels_col="building:levels")
+        assert result["height_source"].iloc[0] == "default"
+        assert result["height_m"].iloc[0] == 10.0
 
     def test_tag_overrides_levels(self):
         """Explicit height tag takes priority over levels."""
@@ -364,6 +384,7 @@ class TestReduceBuildingsRoofTags:
         """For merged groups, roof tags from the largest-area building win."""
         import geopandas as gpd
         from shapely.geometry import box
+
         from city2stl.heights import _reduce_buildings
 
         # Big building (area=4) tagged 'pyramidal'; small (area=1) tagged 'flat'
@@ -387,6 +408,7 @@ class TestEnhanceHeightsRouter:
     @pytest.fixture
     def client(self):
         from fastapi.testclient import TestClient
+
         from app.server.server import app
         return TestClient(app)
 

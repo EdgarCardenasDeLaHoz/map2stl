@@ -12,7 +12,6 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional
 
 _log = logging.getLogger(__name__)
 
@@ -59,7 +58,7 @@ MICROPOLITAN_STL_DIR: Path = (_PROJECT_ROOT / _MICROPOLITAN_ENV).resolve()
 # OpenTopography API key
 # ---------------------------------------------------------------------------
 
-_OPENTOPO_API_KEY: Optional[str] = os.environ.get("OPENTOPO_API_KEY")
+_OPENTOPO_API_KEY: str | None = os.environ.get("OPENTOPO_API_KEY")
 try:
     _cfg_path = _STRM2STL_DIR / "config.json"
     if _cfg_path.exists() and _OPENTOPO_API_KEY is None:
@@ -68,7 +67,7 @@ try:
 except Exception:
     pass
 
-OPENTOPO_API_KEY: Optional[str] = _OPENTOPO_API_KEY
+OPENTOPO_API_KEY: str | None = _OPENTOPO_API_KEY
 
 if not OPENTOPO_API_KEY:
     _log.warning(
@@ -105,10 +104,10 @@ OPENTOPO_DATASETS: dict[str, dict] = {
 # (same 90m SRTM3 data) or Google Earth Engine (SRTM/NASADEM, higher resolution
 # possible).  See docs/todos/README.md for the current roadmap location.
 _STRM_H5_ENV = os.environ.get("STRM_H5_ROOT")
-H5_SRTM_ROOT: Optional[str] = (
+H5_SRTM_ROOT: str | None = (
     _STRM_H5_ENV if _STRM_H5_ENV else str((_PROJECT_ROOT / ".." / "strm_h5").resolve())
 )
-H5_SRTM_FILE: Optional[Path] = (
+H5_SRTM_FILE: Path | None = (
     Path(H5_SRTM_ROOT) / "strm_data.h5" if H5_SRTM_ROOT else None
 )
 H5_SRTM_AVAILABLE: bool = bool(H5_SRTM_FILE and H5_SRTM_FILE.exists())
@@ -128,7 +127,13 @@ CACHE_MAX_FILES = 100        # trigger a sweep when this many files exist
 MAX_DIM: int = 2000            # maximum grid resolution accepted by all endpoints
 MAX_BBOX_DIAGONAL_KM: float = 15.0  # cities endpoint bounding-box size cap (full detail tier)
 MAX_BBOX_DIAGONAL_KM_COARSE: float = 25.0  # cities endpoint cap for detail="coarse" requests
-COARSE_MIN_BUILDING_AREA_M2: float = 2000.0  # building area floor for detail="coarse" requests
+# Building area floor for detail="coarse" requests. This is 1200 rather than the original
+# 2000 because the filter used to measure area in Web Mercator, whose areas are inflated by
+# sec^2(latitude) — about 1.68x at Breckenridge. Measurement now goes through local UTM
+# (city2stl.fetch._to_metric), so keeping 2000 would have quietly tightened a threshold
+# nobody chose. 1200 leaves the tier filtering about where it always did in practice, and
+# now does so identically at every latitude.
+COARSE_MIN_BUILDING_AREA_M2: float = 1200.0
 
 # ---------------------------------------------------------------------------
 # Luminance / colour constants (ITU-R BT.601 perceptual weights)

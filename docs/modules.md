@@ -42,8 +42,8 @@ flowchart LR
 ### `layers/` — Layer composition & city overlays
 | File | Key exports | Purpose |
 |------|-------------|---------|
-| `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `applyStackedTransform`, `moveLayer`, `setLayerOpacity`, `getLayerOrder`, `setSplitViewEnabled`, `isSplitViewEnabled` | Single-canvas stacked view, zoom/pan; uses `LAYER_CANVAS_IDS` registry + `_getLayerBuffer`/`_freeLayerBuffer` for GPU memory management. `setSplitViewEnabled` draws CompositeDem/SatImg side-by-side in `stackViewCanvas` instead of alpha-blending, sharing the same `stackZoom` transform so pan/zoom stays synced. |
-| `composite-dem.js` | `computeCompositeDem`, `setupCompositeDemControls` | Additive height contributions (DEM/water/buildings/roads/waterways/walls/landcover/sat, each independently toggleable) + per-layer histograms + ML feature arrays |
+| `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `applyStackedTransform`, `moveLayer`, `setLayerOpacity`, `getLayerOrder`, `getActiveLayers`, `setSplitViewEnabled`, `isSplitViewEnabled` | Single-canvas stacked view, zoom/pan; uses `LAYER_CANVAS_IDS` registry + `_getLayerBuffer`/`_freeLayerBuffer` for GPU memory management. `setSplitViewEnabled` draws CompositeDem/SatImg side-by-side in `stackViewCanvas` instead of alpha-blending, sharing the same `stackZoom` transform so pan/zoom stays synced. |
+| `composite-dem.js` | `computeCompositeDem`, `setupCompositeDemControls` | Additive height contributions (DEM/water/buildings/roads/waterways/walls/landcover/sat/trails, each independently toggleable) + per-layer histograms + ML feature arrays |
 | `mesh-layer.js` | `uploadMeshLayer`, `selectLibraryMeshFile`, `computeMeshHeightmap`, `autoRegisterMesh`, `suggestedMeshResolutionM`, `applyMeshRegistration`, `applyMeshToDem`, `clearMeshLayer` | STL/OBJ import (F-MESHIMPORT): upload/library source → heightmap → registered `MeshImport` stacked layer → optional DEM merge. `autoRegisterMesh` geocodes the filename + runs automatic OSM registration, always handing off to the manual picker |
 | `mesh-registration.js` | `openMeshRegistrationModal`, `computeMeshRegistration`, `undoLastMeshPointPair`, `clearMeshPointPairs` | Side-by-side pan/zoom point-pair picker (DEM vs. mesh heightmap) feeding the `/register` affine fit |
 | `water-mask.js` | `loadWaterMask`, `renderWaterMask`, `renderEsaLandCover` | Water mask + ESA land cover |
@@ -51,12 +51,13 @@ flowchart LR
 | `city-render.js` | `loadCityRaster`, `_clearCityRasterCache` | City rasterization via `/api/cities/raster` |
 | `hydrology-overlay.js` | `window.loadHydrology`, `window.clearHydrology`, `window.cancelHydroLoad` | HydroRIVERS depression grid fetch + canvas render |
 | `water-hydrology-combined.js` | `loadWaterHydrology`, `clearWaterHydrology` | Unified water + hydrology combined layer; sets `appState.waterHydrologyCanvas` |
+| `trails-overlay.js` | `loadTrails`, `renderTrails`, `refreshTrailsCategories`, `clearTrails`, `cancelTrailsLoad` | Ski + hiking trail grids from `/api/terrain/trails`; sets `appState.trailsSourceCanvas` and retains `appState.lastTrailsData` so every display control (category, area fill, colours, difficulty) repaints without refetching. Exposes the difficulty palette as `window.TRAILS_DIFFICULTY_RGB` and fires a `trails-rendered` window event after each repaint |
 
 ### `map/` — Map, globe, bbox
 | File | Key exports | Purpose |
 |------|-------------|---------|
 | `map-globe.js` | `initMap`, `initGlobe`, `setTileLayer`, `toggleDemOverlay` | Leaflet 2D map + Three.js globe |
-| `bbox-panel.js` | `setBboxInputValues`, `initBboxMiniMap`, `syncBboxMiniMap` | Bbox input panel + mini-map |
+| `bbox-panel.js` | `setBboxInputValues`, `setBboxRectangle`, `initBboxMiniMap`, `syncBboxMiniMap` | Bbox input panel + mini-map. `setBboxInputValues` writes the four coordinate fields, which are display only; `setBboxRectangle` moves `appState.boundingBox`, which is the value every layer fetch actually reads. Anything that changes which area the app is looking at has to call the second one, and the pair should normally be called together |
 | `compare-view.js` | `initCompareMode`, `loadCompareRegion` | Side-by-side region comparison |
 
 ### `regions/` — Region management
@@ -75,7 +76,7 @@ flowchart LR
 ### `ui/` — UI management
 | File | Key exports | Purpose |
 |------|-------------|---------|
-| `view-management.js` | `switchView`, `switchDemSubtab`, `cycleSidebarState` | Tab switching + sidebar state machine |
+| `view-management.js` | `switchView`, `switchDemSubtab`, `_setSidebarViews` | Tab switching; shows the sidebar's list/table view for a mode. The mode itself belongs to `SidebarPanel.vue`. |
 | `app-setup.js` | `setupOpacityControls`, `loadAllLayers`, `saveCurrentRegion` | App init wiring helpers |
 | `cache-inventory.js` | `loadCacheInventory`, `setupCacheInventoryView` | Cache stats browser (Plotly chart + region table) |
 | `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset` | Preset save/load/apply; `PRESET_VERSION` migration; `_presetSnapshot` revert; `_migratePreset()` fills missing keys from built-in defaults |
@@ -106,6 +107,14 @@ ui/cache-inventory → ui/app-setup → ui/keyboard-shortcuts
 events/event-listeners-map → events/event-listeners-export → events/event-listeners-ui → events/event-listeners
 ui/view-management → dem/dem-main → app.js
 ```
+
+## Standalone page scripts
+
+Not part of `main.js`. Each is loaded by its own template and owns its whole page.
+
+| Script | Page | Purpose |
+|--------|------|---------|
+| `static/js/reports.js` | `templates/reports.html` (`GET /reports`) | Pipeline results browser: reads `/api/reports/index` and renders the skyline artifacts |
 
 ## Notes
 - `app.js` is loaded as plain `<script>`, **after** all modules. It is the only non-module file.
@@ -219,6 +228,17 @@ Use grep: `grep -rn "function functionName" app/client/static/js/`.
 | `clearHydrology()` | Clear canvas + state + emit update |
 | `cancelHydroLoad()` | Abort any in-flight hydrology request |
 
+### layers/trails-overlay.js
+
+| Function | Purpose |
+|----------|---------|
+| `loadTrails({activate})` | Fetch /api/terrain/trails, retain payload, render both categories. `activate` defaults to true and switches the Trails layer on; callers that did not ask to see trails (`loadAllLayers`, `LAYER_AUTOLOAD`) pass false |
+| `renderTrails(data?)` | Paint ski and hiking linework to the offscreen canvas; ski wins on overlap. Colours default to cyan/orange but follow the `trailsSkiColor` / `trailsHikingColor` pickers. Interiors of areal features are tinted in the same colour at alpha 46 from the response's area masks, so a ski-area polygon reads as an extent rather than a solid blob. With `trailsColorByDifficulty` on, each ski pixel takes its colour from the response's `ski_difficulty_grid`; an ungraded piste keeps the plain ski colour rather than vanishing. Fires a `trails-rendered` window event when done |
+| `_viewSettings()` (private) | Read every Trails Display control out of the DOM in one place, with defaults for the case where the view section has not mounted yet |
+| `refreshTrailsCategories()` | Repaint from the retained payload when any Trails Display control changes. Never refetches - one response already carries both categories, both area masks, and the grades |
+| `clearTrails()` | Clear canvas + retained payload + emit update |
+| `cancelTrailsLoad()` | Abort any in-flight trails request |
+
 ### layers/water-hydrology-combined.js
 
 | Function | Purpose |
@@ -231,17 +251,20 @@ Use grep: `grep -rn "function functionName" app/client/static/js/`.
 | Function | Purpose |
 |----------|---------|
 | `updateStackedLayers()` | Render active mode buffer → stackViewCanvas |
-| `setStackMode(mode)` | Switch active layer mode |
+| `setStackMode(mode)` | Toggle a layer on or off. Switching one on fetches its data when it has none yet, via the `LAYER_AUTOLOAD` registry (Dem, WaterHydrology, Sat, SatImg, CityRaster, CityOverlay, Trails) |
+| `getActiveLayers()` | Copy of the set of layers currently switched on. Read by the layer rack in `LayerViewSection.vue`, which rebuilds on the `layer-stack-changed` window event that `setStackMode` and `moveLayer` dispatch |
 | `applyStackedTransform()` | Apply CSS zoom/pan transform |
 | `enableStackedZoomPan()` | Wire wheel/drag on stackViewCanvas |
-| `drawLayerGrid()` | Coordinate grid overlay |
+| `drawLayerGrid()` | Coordinate grid overlay. Needs only `currentDemBbox` and the stack rect — it does not depend on the Dem layer being active |
 
 ### layers/composite-dem.js
 
 | Function | Purpose |
 |----------|---------|
-| `computeCompositeDem(opts)` | Add DEM/water/city(buildings+roads+waterways+walls)/landcover/sat contributions — DEM and each city sub-layer independently toggleable |
-| `applyCompositeToDem()` | Copy composite into lastDemData.values |
+| `computeCompositeDem(opts)` | Add DEM/water/city(buildings+roads+waterways+walls)/landcover/sat/trails contributions — DEM and each city sub-layer independently toggleable |
+| `_trailsContribution(demW, demH)` (private) | Nearest-neighbour resample of the retained trails relief onto the DEM grid. Only the linework contributes; the area masks are display-only. Where a piste and a path cross, the deeper cut wins rather than the two summing. Weight defaults to 0, so loading the Trails layer to look at it never silently changes an export |
+| `applyCompositeToDem()` | Copy composite into lastDemData.values, and publish the server layer spec on `appState.compositeLayerSpec` |
+| `buildCompositeLayerSpec()` | Translate the panel's flat parameters into the server's ordered `MergeLayerSpec` list; returns `{layers, unsupported}` — `unsupported` names channels with no server source yet (land cover, vegetation, trails), for which export falls back to inline values |
 | `setupCompositeDemControls()` | Wire all composite sliders + toggles + buttons + split-view button |
 | `_drawHistogram(canvas, values)` / `_renderAllHistograms(channels)` | Canvas-drawn per-layer + combined contribution histograms (no chart lib) |
 
@@ -326,7 +349,7 @@ Use grep: `grep -rn "function functionName" app/client/static/js/`.
 |----------|---------|
 | `switchView(view)` | Switch Explore/Edit/Extrude tab |
 | `switchDemSubtab(tab)` | Switch DEM sub-tab |
-| `cycleSidebarState()` | normal → list → table cycle |
+| `_setSidebarViews(state)` | Show the list or table view for a sidebar mode |
 
 ### map/map-globe.js
 
@@ -343,3 +366,24 @@ Use grep: `grep -rn "function functionName" app/client/static/js/`.
 |----------|---------|
 | `initCompareMode()` | Side-by-side compare panel |
 | `loadCompareRegion(side)` | Load DEM for left/right panel |
+
+### reports.js — pipeline results browser (standalone)
+
+One IIFE on `window.reportsPage`; state is `{data, selection, tab, quality, search, heights}`.
+
+| Function | Purpose |
+|----------|---------|
+| `load()` | Fetch `/api/reports/index` and rerender everything |
+| `currentRegions()` / `currentRows()` | Apply the sidebar search and quality filters |
+| `renderTotals()` / `renderSidebar()` | Header chips; region, height-report and trace lists |
+| `qbar(qual)` / `detClass(n)` | Quality bar markup; the warn/caution class for a detection count |
+| `seedTable(rows, withRegion)` | Per-seed metrics table, one row per seed |
+| `renderOverview()` / `renderRegionOverview(pane)` | All-regions cards vs. one region's screening map, web sources and seeds |
+| `loadHeights(dir)` | Fetch `/api/reports/heights/{dir}` for the height summary line |
+| `seedHead(row)` / `figure(row, label, url)` | Seed block header; one captioned, lightbox-able image |
+| `renderPanoramas()` / `renderViews()` | The panorama lanes and the street-view grid |
+| `renderActive()` / `setTab(tab)` | Draw the visible tab only |
+| `selectRegion(dir)` / `selectAll()` | Sidebar selection |
+| `openFile(url, label)` | Point the Rendered report iframe at an artifact |
+| `openLightbox(src, cap)` | Full-size image overlay |
+| `init()` | Wire the tabs, filters, search and lightbox, then `load()` |

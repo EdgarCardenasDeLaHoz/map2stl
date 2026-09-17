@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import List, Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from geo2stl.projections import project_grid as _project_grid
 from app.server.core.responses import error_response
 from app.server.schemas import BoundingBox
+from geo2stl.projections import project_grid as _project_grid
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +38,14 @@ class ProviderInfo(BaseModel):
 
 
 class HeightSourcesResponse(BaseModel):
-    providers: List[ProviderInfo]
+    providers: list[ProviderInfo]
 
 
 class HeightFetchRequest(BoundingBox):
     """Fetch and merge building heights from specified providers."""
     width: int = Field(256, ge=1, le=4096)
     height: int = Field(256, ge=1, le=4096)
-    providers: Optional[List[str]] = Field(
+    providers: list[str] | None = Field(
         None,
         description="Provider names to use. None = all available."
     )
@@ -71,37 +70,17 @@ class HeightFetchResponse(BaseModel):
 
 # ── Provider registry ───────────────────────────────────────────
 
-from city2stl.skyline.height.providers.ndsm import NDSMProvider
-from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
-from city2stl.skyline.height.providers.copernicus import CopernicusProvider
-from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
-from city2stl.skyline.height.providers.ghsl import GHSLProvider
-from city2stl.skyline.height.providers.open_buildings import OpenBuildingsProvider
-from city2stl.skyline.height.providers.roofnet import RoofNetProvider
-
-# Ordered by priority (highest confidence first)
-_ALL_PROVIDERS = [
-    LiDAR3DEPProvider(),      # 0.95 — US only, sub-metre
-    NDSMProvider(),            # 0.80 — global, 30m
-    CopernicusProvider(),      # 0.70 — EU only, 10m
-    RoofNetProvider(),         # 0.65 — learned raster estimate
-    OpenBuildingsProvider(),   # 0.60 — developing regions, per-building
-    WSF3DProvider(),           # 0.50 — global, 90m
-    GHSLProvider(),            # 0.40 — global, 100m
-]
-
-_PROVIDER_MAP = {p.name: p for p in _ALL_PROVIDERS}
-
-_PROVIDER_META = {
-    "lidar_3dep":    {"confidence": 0.95, "resolution_m": 1.0},
-    "ndsm":          {"confidence": 0.80, "resolution_m": 30.0},
-    "copernicus":    {"confidence": 0.70, "resolution_m": 10.0},
-    "roofnet":        {"confidence": 0.65, "resolution_m": 5.0},
-    "open_buildings": {"confidence": 0.60, "resolution_m": 5.0},
-    "wsf3d":          {"confidence": 0.50, "resolution_m": 90.0},
-    "ghsl":           {"confidence": 0.40, "resolution_m": 100.0},
-}
-
+# The registry lives in `app.server.core.height.service` and is imported, not
+# restated. This router used to keep its own copy of the provider list and a
+# `_PROVIDER_META` table beside it; the two drifted, and the copy here was the
+# one that went stale. It was still advertising `lidar_3dep` at 0.95 / 1 m after
+# bug 3 corrected it to 0.82 / 30 m, and it never learned about GlobalBuilding-
+# Atlas, so `/api/height/sources` denied the existence of a provider that the
+# export path was already using.
+from app.server.core.height.service import (  # noqa: E402
+    _select_providers,
+    provider_infos,
+)
 
 # ── Endpoints ────────────────────────────────────────────────────
 
@@ -109,35 +88,25 @@ _PROVIDER_META = {
 async def height_sources(req: HeightSourcesRequest):
     """List height providers and whether they cover the given bbox."""
     bbox = (req.north, req.south, req.east, req.west)
-    providers = []
-    for p in _ALL_PROVIDERS:
-        meta = _PROVIDER_META.get(p.name, {})
-        providers.append(ProviderInfo(
-            name=p.name,
-            covers=p.covers(bbox),
-            confidence=meta.get("confidence", 0.5),
-            resolution_m=meta.get("resolution_m", 100.0),
-        ))
-    return HeightSourcesResponse(providers=providers)
+    return HeightSourcesResponse(
+        providers=[ProviderInfo(**info) for info in provider_infos(bbox)]
+    )
 
 
 @router.post("/fetch")
 async def height_fetch(req: HeightFetchRequest):
     """Fetch and merge building heights from multiple providers."""
     import numpy as np
+
     from city2stl.skyline.height import HeightResult, merge_height_rasters
 
     bbox = (req.north, req.south, req.east, req.west)
     dim = (req.height, req.width)
 
     # Select providers
-    if req.providers:
-        providers = [_PROVIDER_MAP[n] for n in req.providers if n in _PROVIDER_MAP]
-        unknown = [n for n in req.providers if n not in _PROVIDER_MAP]
-        if unknown:
-            logger.warning(f"Unknown providers ignored: {unknown}")
-    else:
-        providers = [p for p in _ALL_PROVIDERS if p.covers(bbox)]
+    providers, unknown = _select_providers(bbox, req.providers)
+    if unknown:
+        logger.warning(f"Unknown providers ignored: {unknown}")
 
     if not providers:
         return error_response("No height providers available for this bbox", 404)

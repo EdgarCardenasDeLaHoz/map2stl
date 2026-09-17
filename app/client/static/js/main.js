@@ -34,6 +34,7 @@ import './modules/dem/dem-merge.js';
 import './modules/layers/water-mask.js';
 import './modules/layers/hydrology-overlay.js';
 import './modules/layers/water-hydrology-combined.js';
+import './modules/layers/trails-overlay.js';
 import './modules/map/map-globe.js';
 import './modules/regions/regions.js';
 import './modules/map/bbox-panel.js';

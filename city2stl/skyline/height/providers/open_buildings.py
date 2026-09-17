@@ -1,34 +1,45 @@
 """
-Google Open Buildings 2.5D provider.
+Overture Maps buildings height provider.
 
-Data: Google Open Buildings — V3 with height attributes
-- ML-derived building footprints + estimated height
-- Coverage: Africa, South/Southeast Asia, Latin America, Caribbean, Middle East
-- Access: Google Cloud Storage (public, no key)
-- Format: CSV with WKT geometry + height columns
-- Resolution: Per-building footprint, ~1-5m accuracy
-- License: CC-BY-4.0
+Data: Overture Maps buildings theme -- footprints carrying ``height`` and
+``num_floors``, conflated from OSM, Esri, Microsoft and Google Open Buildings
+among other sources.
 
-The Open Buildings dataset provides individual building polygons with
-height estimates derived from satellite imagery. We rasterize these
-into a grid matching the target dimensions.
+- Access: anonymous S3 parquet, located through the Overture STAC catalog
+- Coverage: global, though the height column is populated unevenly
+- Resolution: per-building footprint
+- License: CDLA Permissive 2.0 / ODbL, by source
 
-Note: Coverage is limited to developing regions. For Europe/US/Japan,
-other providers (3DEP, Copernicus, nDSM) are more appropriate.
+The module is named ``open_buildings`` and long claimed to fetch Google Open
+Buildings, which it does not. The name is kept because the provider namespace
+is written into cache keys and region reports; the description is corrected
+instead.
+
+Measured against the Miami reference plate: MAE 20.95 m, correlation +0.866
+over 61 footprints. The accuracy holds on buildings OSM does not tag, so the
+height column carries real information rather than echoing the OSM tag.
+
+Two limits decide when to reach for this source. Coverage is thin outside
+well-mapped cities -- Cartagena yields a height for 9% of registered
+footprints, against 26% of grid pixels in Miami -- and footprints without a
+height fall back to ``num_floors`` times a nominal storey height.
 """
 
 from __future__ import annotations
 
 import functools
 import logging
-from typing import Tuple
 
 import numpy as np
 import requests
 
 from city2stl.skyline.height import BBox, HeightResult, _resample
+
 from ._cache import (
-    register_ttl, make_cache_key, read_height_result, write_height_result,
+    make_cache_key,
+    read_height_result,
+    register_ttl,
+    write_height_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,29 +54,16 @@ _STAC_CATALOG = "https://stac.overturemaps.org/catalog.json"
 _STAC_BUILDING_COLLECTION = "https://stac.overturemaps.org/{release}/buildings/building/collection.json"
 _DEFAULT_RELEASE = "2026-04-15.0"
 
-# Coverage regions (approximate bboxes where Open Buildings has data)
-_COVERAGE_REGIONS = [
-    # Africa
-    {"name": "africa", "n": 37, "s": -35, "e": 52, "w": -18},
-    # South Asia
-    {"name": "south_asia", "n": 38, "s": 5, "e": 98, "w": 60},
-    # Southeast Asia
-    {"name": "southeast_asia", "n": 28, "s": -11, "e": 150, "w": 92},
-    # Latin America & Caribbean
-    {"name": "latam", "n": 33, "s": -55, "e": -34, "w": -118},
-    # Middle East
-    {"name": "middle_east", "n": 42, "s": 12, "e": 63, "w": 25},
-]
 
 
 def _is_in_coverage(bbox: BBox) -> bool:
-    """Check if bbox overlaps any Open Buildings coverage region."""
-    north, south, east, west = bbox
-    for region in _COVERAGE_REGIONS:
-        if (south < region["n"] and north > region["s"] and
-                west < region["e"] and east > region["w"]):
-            return True
-    return False
+    """Overture is global, so every bbox is covered."""
+    # Overture publishes globally, so there is nothing to gate on. The region
+    # list that used to be tested here was Google Open Buildings' footprint --
+    # Africa, South and Southeast Asia, Latin America, the Middle East -- which
+    # does not describe what this provider fetches. It admitted Miami only
+    # because the Latin America box reaches north to 33 degrees.
+    return True
 
 
 @functools.lru_cache(maxsize=1)
@@ -79,7 +77,7 @@ def _latest_overture_release() -> str:
         if latest:
             return latest
     except Exception as exc:
-        logger.debug("Open Buildings STAC latest release lookup failed: %s", exc)
+        logger.debug("Overture STAC latest release lookup failed: %s", exc)
     return _DEFAULT_RELEASE
 
 
@@ -134,7 +132,7 @@ def _intersecting_partitions(bbox: BBox) -> tuple[dict, ...]:
     return tuple(matches)
 
 
-def _fetch_buildings_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | None:
+def _fetch_buildings_for_bbox(bbox: BBox, dim: tuple[int, int]) -> np.ndarray | None:
     """Fetch building heights from Overture Maps GeoParquet on S3 and rasterize.
 
     Uses pyarrow.dataset with an anonymous S3FileSystem to scan the Overture
@@ -150,7 +148,7 @@ def _fetch_buildings_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | 
         from pyarrow.fs import S3FileSystem
         from shapely import wkb as shapely_wkb
     except ImportError as exc:
-        logger.debug("pyarrow[s3] not installed - skipping Open Buildings: %s", exc)
+        logger.debug("pyarrow[s3] not installed - skipping Overture: %s", exc)
         return None
 
     north, south, east, west = bbox
@@ -160,7 +158,7 @@ def _fetch_buildings_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | 
         fs = S3FileSystem(anonymous=True, region="us-west-2")
         partitions = _intersecting_partitions(bbox)
         if not partitions:
-            logger.debug("Open Buildings STAC has no intersecting partitions for bbox %s", bbox)
+            logger.debug("Overture STAC has no intersecting partitions for bbox %s", bbox)
             return None
 
         grid = np.full((h, w), np.nan, dtype=np.float32)
@@ -187,7 +185,7 @@ def _fetch_buildings_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | 
             height_col = table.column("height").to_pylist()
             floors_col = table.column("num_floors").to_pylist()
 
-            for geom_bytes, bld_height, bld_floors in zip(geom_col, height_col, floors_col):
+            for geom_bytes, bld_height, bld_floors in zip(geom_col, height_col, floors_col, strict=False):
                 if geom_bytes is None:
                     continue
                 bld_h = (
@@ -218,21 +216,21 @@ def _fetch_buildings_for_bbox(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | 
         return grid
 
     except Exception as exc:
-        logger.warning("Open Buildings S3 fetch failed: %s", exc)
+        logger.warning("Overture S3 fetch failed: %s", exc)
         return None
 
 
 class OpenBuildingsProvider:
-    """Google Open Buildings 2.5D — ML-derived building heights."""
+    """Overture Maps buildings — footprint heights from a conflated source."""
 
     name = "open_buildings"
 
     def covers(self, bbox: BBox) -> bool:
-        """Returns True if bbox overlaps Open Buildings coverage."""
+        """True everywhere: Overture publishes worldwide."""
         return _is_in_coverage(bbox)
 
-    def fetch_heights(self, bbox: BBox, dim: Tuple[int, int]) -> HeightResult:
-        """Fetch and rasterize Open Buildings heights for bbox."""
+    def fetch_heights(self, bbox: BBox, dim: tuple[int, int]) -> HeightResult:
+        """Fetch and rasterize Overture building heights for bbox."""
         north, south, east, west = bbox
         cache_key = make_cache_key(_NAMESPACE, north, south, east, west,
                                    {"dim": list(dim)})
@@ -259,7 +257,7 @@ class OpenBuildingsProvider:
         return result
 
 
-def _empty_result(dim: Tuple[int, int]) -> HeightResult:
+def _empty_result(dim: tuple[int, int]) -> HeightResult:
     h, w = dim
     return HeightResult(
         raster=np.full((h, w), np.nan, dtype=np.float32),

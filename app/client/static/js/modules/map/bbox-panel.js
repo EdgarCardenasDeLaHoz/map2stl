@@ -1,6 +1,9 @@
 // Keyboard accessibility for bbox inputs: arrow keys nudge by 0.1°
 // === Constants ===
 const BBOX_KEYBOARD_NUDGE_STEP = 0.1;
+// Shared by every caller of setBboxRectangle, so the box looks the same however
+// the user got to it.
+const BBOX_RECT_STYLE = { color: '#e74c3c', weight: 2, fillOpacity: 0.05 };
 
 ['bboxNorth', 'bboxSouth', 'bboxEast', 'bboxWest'].forEach(id => {
     const el = document.getElementById(id);
@@ -67,6 +70,43 @@ window.setBboxInputValues = function setBboxInputValues(n, s, e, w) {
     if (bboxS) bboxS.value = parseFloat(s).toFixed(decimals);
     if (bboxE) bboxE.value = parseFloat(e).toFixed(decimals);
     if (bboxW) bboxW.value = parseFloat(w).toFixed(decimals);
+};
+
+// ─── setBboxRectangle ─────────────────────────────────────────────────────────
+
+/**
+ * Point `appState.boundingBox` at the given coordinates.
+ *
+ * `appState.boundingBox` is the Leaflet rectangle every layer fetch reads its
+ * extent from, so anything that changes which area the app is looking at has to
+ * come through here. Setting only the coordinate input fields is not enough:
+ * the fields are display, this is the value.
+ *
+ * The rectangle is updated in place when one already exists, because the bbox
+ * inputs call this on every keystroke and re-adding a map layer per character
+ * is visible churn.
+ *
+ * @param {number} n - North latitude
+ * @param {number} s - South latitude
+ * @param {number} e - East longitude
+ * @param {number} w - West longitude
+ * @returns {object|null} The rectangle, or null when there is no map yet.
+ */
+window.setBboxRectangle = function setBboxRectangle(n, s, e, w) {
+    const map = window.getMap?.();
+    if (!map) return null;
+    const bounds = [[s, w], [n, e]];
+    let bb = window.getBoundingBox?.();
+    if (bb?.setBounds) {
+        bb.setBounds(bounds);
+        // A previous caller may have detached it from the map.
+        if (!map.hasLayer(bb)) bb.addTo(map);
+    } else {
+        bb = L.rectangle(bounds, BBOX_RECT_STYLE);
+        bb.addTo(map);
+    }
+    window.setBoundingBox?.(bb);
+    return bb;
 };
 
 // ─── initBboxMiniMap ──────────────────────────────────────────────────────────

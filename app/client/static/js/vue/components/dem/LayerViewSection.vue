@@ -1,185 +1,163 @@
 <template>
+  <!-- One rack, one row per layer, in _layerOrder (stacked-layers.js) — which is
+       the render order and the order every other panel now lists layers in.
+
+       Every row carries the same three properties: visibility, opacity, and
+       z-order. Class-specific extras (a resolution readout, the per-layer
+       display sections in LayerDisplaySections.vue) hang off that common base
+       rather than replacing it. Before this, the visible rack offered opacity
+       alone and the reorder arrows lived in a rack rendered into a hidden div,
+       so z-order worked in the engine and was unreachable from the UI. -->
   <CollapsibleSection title="🗺️ Layers" :start-open="false" wrap-style="">
 
+    <!-- Kept as the quick all-layers toggle strip. trails-overlay.js:327 and
+         app-setup.js:31 both query these buttons by selector, and the row
+         checkboxes below drive the same setStackMode, so the two stay in sync
+         through the layer-stack-changed event. -->
     <div class="layer-mode-wrap">
       <div class="layer-mode-title">Active Layers</div>
       <div id="layerModeSelector" class="layer-mode-row">
-        <button class="layer-mode-btn active" data-mode="Dem" title="Base elevation">🏔 DEM</button>
-        <button class="layer-mode-btn" data-mode="WaterHydrology" title="Merged hydrology overlay">🌊 Hydrology</button>
-        <button class="layer-mode-btn" data-mode="Sat" title="ESA land cover">🌿 ESA</button>
-        <button class="layer-mode-btn" data-mode="SatImg" title="Satellite imagery">🛰 Sat</button>
-        <button class="layer-mode-btn" data-mode="CityRaster" title="City heights raster">🏙 City</button>
-        <button class="layer-mode-btn" data-mode="CityOverlay" title="City vector polygons">⬡ City Poly</button>
-        <button class="layer-mode-btn" data-mode="MeshImport" title="Imported STL/OBJ mesh layer">📐 Mesh</button>
-        <button class="layer-mode-btn" data-mode="CompositeDem" title="Composite DEM">★ Composite</button>
+        <button v-for="l in LAYERS" :key="l.key" class="layer-mode-btn"
+                :class="{ active: active.has(l.key) }"
+                :data-mode="l.key" :title="l.hint">{{ l.icon }} {{ l.short }}</button>
       </div>
     </div>
 
-    <!-- Per-layer rows — one row per entry in _layerOrder -->
     <div id="layerRows" style="display:flex;flex-direction:column;gap:2px;">
+      <div v-for="(l, i) in orderedLayers" :key="l.key" class="layer-row"
+           :class="{ 'layer-row-off': !active.has(l.key) }">
 
-      <div class="layer-class-label">Terrain</div>
+        <!-- Visibility. Switching a layer on also fetches it when it has no
+             data yet — see LAYER_AUTOLOAD in stacked-layers.js. -->
+        <input type="checkbox" class="layer-row-vis" :id="`layerVis_${l.key}`"
+               :checked="active.has(l.key)" :title="`Show ${l.label}`"
+               :aria-label="`Show ${l.label}`"
+               @change="toggleLayer(l.key)">
 
-      <!-- Dem row -->
-      <div class="layer-row">
-        <span class="layer-row-icon" title="Base elevation">🏔</span>
-        <span class="layer-row-label">DEM</span>
-        <span class="layer-row-res" id="layerRes_Dem"></span>
-        <input type="range" class="layer-row-opacity" id="layerOpacity_Dem" min="0" max="100" value="100" title="DEM opacity" aria-label="DEM opacity">
-        <span class="layer-row-pct" id="layerOpacityPct_Dem">100%</span>
+        <span class="layer-row-icon" :title="l.hint">{{ l.icon }}</span>
+        <span class="layer-row-label" :title="l.label">{{ l.label }}</span>
+        <span class="layer-row-class">{{ l.cls }}</span>
+        <span class="layer-row-res" :id="`layerRes_${l.key}`"></span>
+
+        <input type="range" class="layer-row-opacity" :id="`layerOpacity_${l.key}`"
+               min="0" max="100" :value="l.opacity"
+               :title="`${l.label} opacity`" :aria-label="`${l.label} opacity`"
+               @input="onOpacity(l.key, $event)">
+        <span class="layer-row-pct" :id="`layerOpacityPct_${l.key}`">{{ l.opacity }}%</span>
+
+        <!-- z-order. Bottom of the list renders first, so "up" is later/on top. -->
+        <span class="layer-row-move">
+          <button type="button" class="layer-arrow-btn"
+                  :disabled="i === orderedLayers.length - 1"
+                  :title="`Move ${l.label} up (renders on top)`"
+                  :aria-label="`Move ${l.label} up`"
+                  @click="move(l.key, 1)">▲</button>
+          <button type="button" class="layer-arrow-btn"
+                  :disabled="i === 0"
+                  :title="`Move ${l.label} down (renders behind)`"
+                  :aria-label="`Move ${l.label} down`"
+                  @click="move(l.key, -1)">▼</button>
+        </span>
       </div>
-
-      <!-- Hydrology merged row -->
-      <div class="layer-row">
-        <span class="layer-row-icon" title="Merged hydrology overlay">🌊</span>
-        <span class="layer-row-label">Hydrology</span>
-        <span class="layer-row-res" id="layerRes_WaterHydrology"></span>
-        <input type="range" class="layer-row-opacity" id="layerOpacity_WaterHydrology" min="0" max="100" value="75" title="Hydrology opacity" aria-label="Hydrology opacity">
-        <span class="layer-row-pct" id="layerOpacityPct_WaterHydrology">75%</span>
-      </div>
-
-      <div class="layer-class-label">Imagery</div>
-
-      <!-- ESA row -->
-      <div class="layer-row">
-        <span class="layer-row-icon" title="ESA land cover">🌿</span>
-        <span class="layer-row-label">ESA</span>
-        <span class="layer-row-res" id="layerRes_Sat"></span>
-        <input type="range" class="layer-row-opacity" id="layerOpacity_Sat" min="0" max="100" value="70" title="ESA opacity" aria-label="ESA opacity">
-        <span class="layer-row-pct" id="layerOpacityPct_Sat">70%</span>
-      </div>
-
-      <!-- Satellite imagery row -->
-      <div class="layer-row">
-        <span class="layer-row-icon" title="Satellite imagery">🛰</span>
-        <span class="layer-row-label">Sat Img</span>
-        <span class="layer-row-res" id="layerRes_SatImg"></span>
-        <input type="range" class="layer-row-opacity" id="layerOpacity_SatImg" min="0" max="100" value="80" title="Sat imagery opacity" aria-label="Satellite imagery opacity">
-        <span class="layer-row-pct" id="layerOpacityPct_SatImg">80%</span>
-      </div>
-
-      <div class="layer-class-label">City</div>
-
-      <!-- City Raster row -->
-      <div class="layer-row">
-        <span class="layer-row-icon" title="City heights raster">🏙</span>
-        <span class="layer-row-label">City ↑</span>
-        <span class="layer-row-res" id="layerRes_CityRaster"></span>
-        <input type="range" class="layer-row-opacity" id="layerOpacity_CityRaster" min="0" max="100" value="70" title="City raster opacity" aria-label="City raster opacity">
-        <span class="layer-row-pct" id="layerOpacityPct_CityRaster">70%</span>
-      </div>
-
-      <!-- City Vector overlay row -->
-      <div class="layer-row">
-        <span class="layer-row-icon" title="City vector overlay">🏙</span>
-        <span class="layer-row-label">City ⬡</span>
-        <span class="layer-row-res" id="layerRes_CityOverlay"></span>
-        <input type="range" class="layer-row-opacity" id="layerOpacity_CityOverlay" min="0" max="100" value="85" title="City vector opacity" aria-label="City vector opacity">
-        <span class="layer-row-pct" id="layerOpacityPct_CityOverlay">85%</span>
-      </div>
-
-      <div class="layer-class-label">Imported</div>
-      <!-- Mesh Import row — load/register happens in the Mesh Import section below -->
-      <div class="layer-row">
-        <span class="layer-row-icon" title="Imported STL/OBJ mesh layer">📐</span>
-        <span class="layer-row-label">Mesh Import</span>
-        <span class="layer-row-res" id="layerRes_MeshImport"></span>
-        <input type="range" class="layer-row-opacity" id="layerOpacity_MeshImport" min="0" max="100" value="80" title="Mesh import opacity" aria-label="Mesh import opacity">
-        <span class="layer-row-pct" id="layerOpacityPct_MeshImport">80%</span>
-      </div>
-
-      <div class="layer-class-label">Composite</div>
-      <!-- Composite DEM row — no load button -->
-      <div class="layer-row">
-        <span class="layer-row-icon" title="Composite DEM">★</span>
-        <span class="layer-row-label">Composite</span>
-        <span class="layer-row-res" id="layerRes_CompositeDem"></span>
-        <input type="range" class="layer-row-opacity" id="layerOpacity_CompositeDem" min="0" max="100" value="100" title="Composite DEM opacity" aria-label="Composite DEM opacity">
-        <span class="layer-row-pct" id="layerOpacityPct_CompositeDem">100%</span>
-      </div>
-
-    </div><!-- /layerRows -->
-
-    <!-- Hidden legacy div — kept so _updateLayerOpacitySliders() doesn't error -->
-    <div id="layerOpacitySliders" style="display:none;"></div>
+    </div>
 
   </CollapsibleSection>
 
-  <CollapsibleSection title="🏙 City Polygon Display" :start-open="false">
-    <div style="display:flex;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
-      <label class="check-label"><input type="checkbox" id="cityLayerBuildings" checked aria-label="Show city buildings polygons"> 🏠 Buildings</label>
-      <label class="check-label"><input type="checkbox" id="cityLayerRoads" checked aria-label="Show city roads polylines"> 🛣 Roads</label>
-      <label class="check-label"><input type="checkbox" id="cityLayerWaterways" checked aria-label="Show city waterways"> 💧 Waterways</label>
-    </div>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-      <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Buildings <input type="color" id="layerBuildingsColor" value="#c8b89a" class="city-color-swatch" aria-label="Buildings polygon color"></label>
-      <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Roads <input type="color" id="layerRoadsColor" value="#cc8844" class="city-color-swatch" aria-label="Roads polyline color"></label>
-      <label style="font-size:10px;color:#888;display:flex;align-items:center;gap:4px;">Water <input type="color" id="layerWaterwaysColor" value="#4488cc" class="city-color-swatch" aria-label="Waterways color"></label>
-    </div>
-    <div style="margin-top:6px;">
-      <button id="viewOpenCityTablePanelBtn" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" @click="toggleCityTablePanel">📋 {{ cityTableToggleLabel }}</button>
-    </div>
-  </CollapsibleSection>
 </template>
 <script setup lang="ts">
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
-const cityTableToggleLabel = ref('Show Buildings Table');
+/**
+ * The nine layers, keyed as in _layerOrder. `cls` groups them the way the user
+ * thinks about them; it is a per-row badge rather than a group heading because
+ * the reorder arrows mean no fixed grouping survives.
+ *
+ * `res` names the Fetch-tab input whose value the row echoes. Layers without
+ * one (city polygons, mesh import, composite) simply show nothing there.
+ */
+const LAYERS = [
+  { key: 'Dem',             icon: '🏔', short: 'DEM',       label: 'DEM',         cls: 'Terrain',  hint: 'Base elevation',              res: 'paramDim',        def: 100 },
+  { key: 'WaterHydrology',  icon: '🌊', short: 'Hydrology', label: 'Hydrology',   cls: 'Terrain',  hint: 'Merged hydrology overlay',    res: 'waterResolution', def: 75 },
+  { key: 'Sat',             icon: '🌿', short: 'ESA',       label: 'ESA',         cls: 'Imagery',  hint: 'ESA land cover',              res: 'esaResolution',   def: 70 },
+  { key: 'SatImg',          icon: '🛰', short: 'Sat',       label: 'Sat Img',     cls: 'Imagery',  hint: 'Satellite imagery',           res: 'satImgResolution', def: 80 },
+  { key: 'CityRaster',      icon: '🏙', short: 'City',      label: 'City ↑',      cls: 'City',     hint: 'City heights raster',         res: 'cityRasterDim',   def: 70 },
+  { key: 'CityOverlay',     icon: '⬡',  short: 'City Poly', label: 'City ⬡',      cls: 'City',     hint: 'City vector polygons',        res: null,              def: 85 },
+  { key: 'Trails',          icon: '🥾', short: 'Trails',    label: 'Trails',      cls: 'Trails',   hint: 'Ski and hiking trails',       res: 'trailsDim',       def: 90 },
+  { key: 'MeshImport',      icon: '📐', short: 'Mesh',      label: 'Mesh Import', cls: 'Imported', hint: 'Imported STL/OBJ mesh layer', res: null,              def: 80 },
+  { key: 'CompositeDem',    icon: '★',  short: 'Composite', label: 'Composite',   cls: 'Composite', hint: 'Composite DEM',              res: null,              def: 100 },
+];
 
-function _syncCityTableToggleLabel() {
-  const collapsed = (window as any).isCityBuildingsPanelCollapsed?.();
-  cityTableToggleLabel.value = collapsed ? 'Show Buildings Table' : 'Hide Buildings Table';
+const order = ref<string[]>(LAYERS.map(l => l.key));
+const active = ref<Set<string>>(new Set(['Dem', 'CityOverlay']));
+const opacity = ref<Record<string, number>>(
+  Object.fromEntries(LAYERS.map(l => [l.key, l.def])));
+
+const byKey = Object.fromEntries(LAYERS.map(l => [l.key, l]));
+
+/** Rows in render order, bottom first, each carrying its live opacity. */
+const orderedLayers = computed(() =>
+  order.value
+    .filter(k => byKey[k])
+    .map(k => ({ ...byKey[k], opacity: opacity.value[k] ?? byKey[k].def })));
+
+function toggleLayer(key: string) {
+  // setStackMode refuses to switch off the last remaining layer, so the
+  // checkbox is re-synced from the engine rather than assumed.
+  window.setStackMode?.(key);
+  _syncFromEngine();
 }
 
-function toggleCityTablePanel() {
-  (window as any).toggleCityBuildingsPanel?.();
-  _syncCityTableToggleLabel();
+function move(key: string, delta: number) {
+  window.moveLayer?.(key, delta);
+  _syncFromEngine();
 }
 
-let _onCityPanelState: ((evt: Event) => void) | null = null;
+function onOpacity(key: string, evt: Event) {
+  const v = Number((evt.target as HTMLInputElement).value);
+  opacity.value = { ...opacity.value, [key]: v };
+  window.setLayerOpacity?.(key, v / 100);
+}
+
+/** Pull order and active set back from stacked-layers, the owner of both. */
+function _syncFromEngine() {
+  const o = (window as any).getLayerOrder?.();
+  if (Array.isArray(o) && o.length) order.value = o;
+  const a = (window as any).getActiveLayers?.();
+  if (a instanceof Set) active.value = new Set(a);
+}
+
+/**
+ * Echo each layer's fetch resolution next to its name. The inputs live in the
+ * Fetch tab, so this runs after a short delay and again whenever one changes.
+ */
+function _syncResSpans() {
+  for (const l of LAYERS) {
+    if (!l.res) continue;
+    const inp = document.getElementById(l.res) as HTMLInputElement | null;
+    const span = document.getElementById(`layerRes_${l.key}`);
+    if (!inp || !span) continue;
+    const paint = () => { span.textContent = inp.value ? inp.value + ' px' : ''; };
+    paint();
+    inp.addEventListener('change', paint);
+    inp.addEventListener('input', paint);
+  }
+}
+
+let _onStackChanged: (() => void) | null = null;
 
 onMounted(() => {
-    // Wire per-layer opacity sliders to window.setLayerOpacity
-  const layers = ['Dem', 'WaterHydrology', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'MeshImport', 'CompositeDem'];
-    for (const mode of layers) {
-        const slider = document.getElementById(`layerOpacity_${mode}`) as HTMLInputElement | null;
-        const pct    = document.getElementById(`layerOpacityPct_${mode}`);
-        if (slider && pct) {
-            slider.addEventListener('input', () => {
-                pct.textContent = slider.value + '%';
-                window.setLayerOpacity?.(mode, Number(slider.value) / 100);
-            });
-        }
-    }
-
-    // Update res spans from linked inputs whenever values change
-    function _syncResSpans() {
-        const resMap: Record<string, string> = {
-        Dem: 'paramDim', WaterHydrology: 'waterResolution', Sat: 'esaResolution',
-        SatImg: 'satImgResolution', CityRaster: 'cityRasterDim',
-        };
-        for (const [mode, inputId] of Object.entries(resMap)) {
-            const inp = document.getElementById(inputId) as HTMLInputElement | null;
-            const span = document.getElementById(`layerRes_${mode}`);
-            if (!inp || !span) continue;
-            span.textContent = inp.value ? inp.value + ' px' : '';
-            inp.addEventListener('change', () => { span.textContent = inp.value ? inp.value + ' px' : ''; });
-            inp.addEventListener('input', () => { span.textContent = inp.value ? inp.value + ' px' : ''; });
-        }
-    }
-    // Defer slightly so fetch section inputs are mounted
-    setTimeout(_syncResSpans, 200);
-
-    _onCityPanelState = () => _syncCityTableToggleLabel();
-    window.addEventListener('city-buildings-panel-state', _onCityPanelState);
-    _syncCityTableToggleLabel();
+  _syncFromEngine();
+  _onStackChanged = () => _syncFromEngine();
+  window.addEventListener('layer-stack-changed', _onStackChanged);
+  // Deferred so the Fetch tab's inputs exist to read from.
+  setTimeout(_syncResSpans, 200);
 });
 
 onBeforeUnmount(() => {
-  if (_onCityPanelState) {
-    window.removeEventListener('city-buildings-panel-state', _onCityPanelState);
-    _onCityPanelState = null;
+  if (_onStackChanged) {
+    window.removeEventListener('layer-stack-changed', _onStackChanged);
+    _onStackChanged = null;
   }
 });
 </script>
@@ -210,63 +188,77 @@ onBeforeUnmount(() => {
 
 .layer-row {
   display: grid;
-  grid-template-columns: 20px minmax(52px, 0.9fr) 44px minmax(72px, 1.4fr) 32px;
-  gap: 0 6px;
+  grid-template-columns: 14px 18px minmax(46px, 0.9fr) auto 40px minmax(60px, 1.3fr) 30px 12px;
+  gap: 0 5px;
   align-items: center;
   min-height: 28px;
 }
 
-.layer-class-label {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid #2f2f2f;
-  font-size: 10px;
-  color: #8ea6bf;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+/* A layer that is switched off keeps its row, so its opacity and position stay
+   visible and adjustable, but reads as inactive. */
+.layer-row-off .layer-row-label,
+.layer-row-off .layer-row-icon,
+.layer-row-off .layer-row-class {
+  opacity: 0.45;
 }
+
+.layer-row-vis {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  cursor: pointer;
+}
+
 .layer-row-icon {
   font-size: 13px;
-  width: 20px;
   text-align: center;
   opacity: 0.9;
 }
 .layer-row-label {
-    font-size: 10px;
-    color: #aaa;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  font-size: 10px;
+  color: #aaa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.layer-row-class {
+  font-size: 8px;
+  color: #8ea6bf;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 .layer-row-res {
-    font-size: 9px;
-    color: #666;
-    white-space: nowrap;
+  font-size: 9px;
+  color: #666;
+  white-space: nowrap;
 }
 .layer-row-opacity {
-    width: 100%;
+  width: 100%;
 }
 .layer-row-pct {
-    font-size: 9px;
-    color: #888;
-    text-align: right;
-    white-space: nowrap;
+  font-size: 9px;
+  color: #888;
+  text-align: right;
+  white-space: nowrap;
 }
-.layer-row-load {
-    font-size: 11px;
-    padding: 0 !important;
-    width: 28px;
-    min-width: 28px;
-    max-width: 28px;
-    height: 22px;
-    box-sizing: border-box;
+.layer-row-move {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+  gap: 0;
 }
-.layer-subrow {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 8px;
-    padding: 2px 0 4px 32px;
-    border-bottom: 1px solid #2a2a2a;
+.layer-arrow-btn {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 0;
+  font-size: 9px;
+  line-height: 1;
 }
-
+.layer-arrow-btn:disabled {
+  color: #333;
+  cursor: default;
+}
 </style>

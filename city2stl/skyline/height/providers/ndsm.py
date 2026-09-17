@@ -23,15 +23,18 @@ import io
 import logging
 import tempfile
 from pathlib import Path
-from typing import Tuple
 
 import numpy as np
 import requests
 
 from app.server.core.cache import CACHE_ROOT
 from city2stl.skyline.height import BBox, HeightResult
+
 from ._cache import (
-    register_ttl, make_cache_key, read_height_result, write_height_result,
+    make_cache_key,
+    read_height_result,
+    register_ttl,
+    write_height_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,6 +42,14 @@ logger = logging.getLogger(__name__)
 register_ttl("ndsm", 90)  # 90 days
 
 NDSM_CONFIDENCE = 0.8
+
+# Both the DSM and the DTM behind this provider are 1-arcsecond global products,
+# so the finest real detail an nDSM pixel can carry is about 30 m regardless of
+# how densely the output grid is sampled. Reporting the output grid spacing here
+# instead -- which this provider used to do -- claims a resolution the data does
+# not have, and the merge reads this field to decide which source resolves a
+# building. See `resolution_priority` in city2stl/skyline/height/__init__.py.
+NDSM_RESOLUTION_M = 30.0
 
 # OpenTopography global DEM API — used to fetch SRTM as DTM source.
 # FABDEM (Bristol uni) tiles are no longer available at data.bris.ac.uk.
@@ -116,7 +127,7 @@ def _tile_url_fabdem(lat: int, lon: int) -> str:
     return f"https://data.bris.ac.uk/datasets/s5hqmjcdj8yo2ibzi9b4ew3sn/{name}.tif"
 
 
-def _tiles_for_bbox(bbox: BBox) -> list[Tuple[int, int]]:
+def _tiles_for_bbox(bbox: BBox) -> list[tuple[int, int]]:
     """Return list of (lat, lon) SW corners covering *bbox*.
 
     bbox = (north, south, east, west).
@@ -143,8 +154,8 @@ def _tile_cache_dir() -> Path:
 
 def _download_tile(url: str, dest: Path) -> bool:
     """Download a GeoTIFF from *url* to *dest*. Returns False on 404/error."""
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     try:
         logger.info(f"Downloading {url}")
@@ -161,7 +172,7 @@ def _download_tile(url: str, dest: Path) -> bool:
         return False
 
 
-def _read_geotiff(path: Path) -> Tuple[np.ndarray, dict] | None:
+def _read_geotiff(path: Path) -> tuple[np.ndarray, dict] | None:
     """Read a GeoTIFF as float32 array + transform metadata.
 
     Uses rasterio if available, else falls back to PIL + manual georef.
@@ -272,14 +283,14 @@ def _crop_to_bbox(tile_arr: np.ndarray, tile_lat: int, tile_lon: int,
     return tile_arr[r0:r1, c0:c1]
 
 
-def _stitch_tiles(tiles: dict[Tuple[int, int], np.ndarray],
+def _stitch_tiles(tiles: dict[tuple[int, int], np.ndarray],
                   bbox: BBox) -> np.ndarray:
     """Stitch and crop multiple 1° tile arrays into a single array for *bbox*."""
     if not tiles:
         return np.array([], dtype=np.float32).reshape(0, 0)
 
     # Crop each tile to the bbox portion
-    cropped: dict[Tuple[int, int], np.ndarray] = {}
+    cropped: dict[tuple[int, int], np.ndarray] = {}
     for (lat, lon), arr in tiles.items():
         c = _crop_to_bbox(arr, lat, lon, bbox)
         if c.size > 0:
@@ -326,7 +337,7 @@ class NDSMProvider:
         north, south, _, _ = bbox
         return -80 <= south and north <= 80
 
-    def fetch_heights(self, bbox: BBox, dim: Tuple[int, int]) -> HeightResult:
+    def fetch_heights(self, bbox: BBox, dim: tuple[int, int]) -> HeightResult:
         """Fetch nDSM for *bbox*, resample to *dim* = (H, W)."""
         from city2stl.skyline.height import _resample
 
@@ -345,7 +356,7 @@ class NDSMProvider:
                     f"N={north:.3f} S={south:.3f} E={east:.3f} W={west:.3f}")
 
         # Download GLO-30 DSM tiles (AWS S3 COG — reliable)
-        dsm_tiles: dict[Tuple[int, int], np.ndarray] = {}
+        dsm_tiles: dict[tuple[int, int], np.ndarray] = {}
         for lat, lon in tile_coords:
             dsm = _get_tile("glo30", lat, lon)
             if dsm is not None:
@@ -365,7 +376,7 @@ class NDSMProvider:
 
         if dtm_stitched is None:
             # Fallback: per-tile FABDEM (kept for when Bristol restores the mirror)
-            dtm_tiles: dict[Tuple[int, int], np.ndarray] = {}
+            dtm_tiles: dict[tuple[int, int], np.ndarray] = {}
             for lat, lon in tile_coords:
                 dtm = _get_tile("fabdem", lat, lon)
                 if dtm is not None:
@@ -389,11 +400,7 @@ class NDSMProvider:
         raster = _resample(ndsm, dim)
         confidence = np.where(np.isnan(raster), 0.0, NDSM_CONFIDENCE).astype(np.float32)
 
-        # Approximate resolution
-        lat_span = north - south
-        resolution_m = (lat_span * 111_000) / dim[0]  # metres per pixel
-
-        result = HeightResult(raster, confidence, self.name, resolution_m)
+        result = HeightResult(raster, confidence, self.name, NDSM_RESOLUTION_M)
 
         # Cache
         write_height_result("ndsm", cache_key, result)

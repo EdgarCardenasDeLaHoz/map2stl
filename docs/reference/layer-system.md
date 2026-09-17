@@ -22,11 +22,12 @@ flowchart LR
         CITY["#layerCityRasterCanvas"]
         COMP["#layerCompositeDemCanvas"]
         HYDRO["#layerHydroCanvas"]
+        TRAILS["#layerTrailsCanvas"]
     end
     subgraph Visible ["Visible output"]
         STACK["#stackViewCanvas"]
     end
-    DEM & WATER & SAT & SATIMG & CITY & COMP & HYDRO --> STACK
+    DEM & WATER & SAT & SATIMG & CITY & COMP & HYDRO & TRAILS --> STACK
 ```
 
 ---
@@ -43,7 +44,9 @@ flowchart LR
 | `SatImg` | `layerSatImgCanvas` | High-res satellite imagery → `appState.satImgSourceCanvas` |
 | `CityRaster` | `layerCityRasterCanvas` | City height raster → `appState.cityRasterSourceCanvas` |
 | `CompositeDem` | `layerCompositeDemCanvas` | Composite DEM output → `appState.compositeDemSourceCanvas` |
-| `Hydrology` | `layerHydroCanvas` | HydroRIVERS depression grid → `appState.hydrologySourceCanvas` |
+| `WaterHydrology` | `layerWaterHydrologyCanvas` | Water mask and HydroRIVERS depressions composited together → `appState.waterHydrologyCanvas`. The separate `Water` and `Hydrology` modes were merged into this one; `#layerHydroCanvas` still exists in the DOM as the hydrology renderer's own target. |
+| `MeshImport` | `layerMeshImportCanvas` | Imported STL/OBJ heightmap → `appState.meshSourceCanvas` |
+| `Trails` | `layerTrailsCanvas` | Ski and hiking trail relief grids → `appState.trailsSourceCanvas` |
 
 ---
 
@@ -71,6 +74,7 @@ stateDiagram-v2
 | `moveLayer(mode, direction)` | Reorder layers in the stack |
 | `setLayerOpacity(mode, opacity)` | Set alpha for a layer in compositing |
 | `getLayerOrder()` | Return current ordered list of active modes |
+| `getActiveLayers()` | Return a copy of the set of layers switched on |
 
 ---
 
@@ -157,6 +161,50 @@ The endpoint accepts `source=natural_earth | hydrorivers` but HydroRIVERS wins a
 Use Natural Earth only as a fallback when (a) the HydroRIVERS regional shapefile hasn't been downloaded yet, or (b) the bbox covers a region HydroRIVERS does not include (e.g. Antarctica).
 
 **Server cache.** Rasterized `river_grid` is cached under `cache/hydrology/{key}.npz` keyed on `(bbox, dim, source, depression_m, scale_m, min_order, order_exponent, projection, clip_nans)` with a 30-day TTL. First Amazon-bbox call ≈200 s; repeats <50 ms. See [`app/server/routers/terrain.py`](../../app/server/routers/terrain.py) `get_terrain_hydrology` and [`app/server/core/cache.py`](../../app/server/core/cache.py).
+
+### Trails Layer
+
+```mermaid
+sequenceDiagram
+    participant FE as Browser
+    participant BE as FastAPI
+    participant OSM as Overpass
+    participant USFS as USFS EDW
+
+    FE->>BE: GET /api/terrain/trails
+    BE->>OSM: piste/route + path/footway tags in bbox
+    BE->>USFS: TrailNFSPublish query in bbox (US only)
+    BE-->>FE: {ski_grid, hiking_grid, counts, sources}
+    FE->>FE: Render both to appState.trailsSourceCanvas
+    FE->>FE: updateStackedLayers()
+```
+
+**Both categories always come back together.** The endpoint rasterizes ski and
+hiking into two separate grids and returns both, even when the UI is showing
+only one. The category checkboxes are therefore a client-side repaint
+(`refreshTrailsCategories()` re-renders from `appState.lastTrailsData`) rather
+than a second Overpass round trip, which would cost tens of seconds.
+
+**Source choice.** OSM is authoritative for ski: OpenSkiMap and OpenSnowMap are
+rendered *from* OSM and publish tiles or planet dumps, not bbox vector queries,
+so querying them would return the same geometry by a slower route. The US Forest
+Service EDW service is the one genuinely independent source, and it carries
+hiking trails only, inside the United States. `source=all` unions what is
+available for the bbox and reports which providers actually contributed in the
+response's `sources` field.
+
+**Rendering.** Ski is cyan and hiking is orange; where the two overlap, ski wins
+so pistes stay readable through a dense path network. Trail lines are buffered
+to a minimum of two pixels before rasterization for the same reason the
+hydrology rasterizer buffers rivers — a sub-pixel line aliases away entirely at
+print resolution.
+
+**Server cache.** Rasterized grids are cached under `cache/trails/{key}.npz`
+keyed on `(bbox, dim, source, relief_m, width_m)` with a 7-day TTL matching the
+`osm` namespace. Projection is deliberately *not* part of the key: it is applied
+per request to the cached raw grids, so changing projection never triggers a
+refetch. Categories are not part of the key either, since both grids are always
+computed.
 
 ### City Raster Layer
 

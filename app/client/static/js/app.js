@@ -124,6 +124,13 @@ function clearLayerCache() {
     window.clearHydrology?.();
     window.appState.hydrologySourceCanvas = null;
 
+    // Trails are fetched the same way and need the same treatment: a slow
+    // Overpass query started for the old region must not paint over the new one.
+    window.cancelTrailsLoad?.();
+    window.clearTrails?.();
+    window.appState.trailsSourceCanvas = null;
+    window.appState.lastTrailsData = null;
+
     // Free all DOM layer buffer canvases and reset the stacked view
     window.clearAllLayerBuffers?.();
 
@@ -249,18 +256,9 @@ document.addEventListener('DOMContentLoaded', async function () {
     window.setupBboxKeyboardNav?.();
     window.setupCacheManagement?.();
 
-    // Start in normal sidebar state by default to keep region selection compact.
-    window.appState.sidebarState = 'normal';
-    const _sidebar = document.getElementById('sidebar');
-    if (_sidebar) { _sidebar.classList.remove('collapsed', 'expanded'); }
-    const _toggleBtn = document.getElementById('sidebarToggleBtn');
-    if (_toggleBtn) {
-        const _icon = _toggleBtn.querySelector('.state-icon');
-        const _lbl = _toggleBtn.querySelector('.state-label');
-        if (_icon) _icon.textContent = '⇔';
-        if (_lbl) _lbl.textContent = 'Expand';
-    }
-    window._setSidebarViews?.('normal');
+    // The sidebar starts in normal mode from SidebarPanel.vue's own onMounted.
+    // Setting the classes and the toggle button's text here as well only fought
+    // that component for the same nodes.
 
     // Load available DEM sources and show API key warning if needed
     window._initDemSources?.();
@@ -313,23 +311,9 @@ window.setWaterOpacity = (v) => { window.appState.waterOpacity = v; };
 window.appState.sidebarState = 'normal'; // 'normal', 'expanded', 'hidden'
 window.getSidebarState = () => window.appState.sidebarState;
 
-// Open sidebar from floating button (goes to normal state)
-const _openSidebarBtn = document.getElementById('openSidebarBtn');
-if (_openSidebarBtn) {
-    _openSidebarBtn.addEventListener('click', () => {
-        const sidebar = document.getElementById('sidebar');
-        const toggleBtn = document.getElementById('sidebarToggleBtn');
-        const icon = toggleBtn?.querySelector('.state-icon');
-        const label = toggleBtn?.querySelector('.state-label');
-
-        window.appState.sidebarState = 'normal';
-        sidebar?.classList.remove('collapsed', 'expanded');
-        document.getElementById('regionParamsSection')?.classList.add('hidden');
-        _openSidebarBtn.classList.add('hidden');
-        if (icon) icon.textContent = '⇔';
-        if (label) label.textContent = 'Expand';
-    });
-}
+// The floating "Regions" button is wired by SidebarPanel.vue, which owns the
+// sidebar mode. A second listener used to live here and set the classes and the
+// toggle button's label by hand, fighting Vue's own render for the same nodes.
 
 // ============================================================
 // 3D MODEL VIEWER & EXPORT

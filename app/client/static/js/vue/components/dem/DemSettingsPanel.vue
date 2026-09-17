@@ -49,9 +49,13 @@
 
         <!-- ═══════════ View tab ═══════════ -->
         <!-- IMPORTANT: Rendering section contains #curveCanvas — never use v-if here, only v-show -->
+        <!-- Global chrome first, then one section per layer in render-stack
+             order: DEM, land cover, city, trails. These used to interleave,
+             with Canvas sitting between two per-layer blocks. -->
         <div v-show="activeTab==='view'">
           <LayerViewSection />
           <VisualizationSection />
+          <LayerDisplaySections />
         </div>
 
         <!-- ═══════════ Composite tab ═══════════ -->
@@ -99,6 +103,7 @@
 import { ref } from 'vue';
 import VisualizationSection  from './VisualizationSection.vue';
 import LayerViewSection      from './LayerViewSection.vue';
+import LayerDisplaySections from './LayerDisplaySections.vue';
 import ProjectionSection     from './ProjectionSection.vue';
 import FetchLayersSection    from './FetchLayersSection.vue';
 import CompositeDemSection   from './CompositeDemSection.vue';

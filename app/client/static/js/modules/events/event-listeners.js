@@ -85,4 +85,22 @@ window.setupEventListeners = function setupEventListeners() {
     });
 
     // qlLoadHydro (quick-load) wired in event-listeners-map.js via _asyncBtn
+
+    // Trails section. Only the two buttons here are fetch controls; everything
+    // below repaints from the retained payload rather than refetching, since one
+    // response already carries both categories, the area masks, and the piste
+    // grades. Those controls live in the Trails Display view section.
+    document.getElementById('loadTrailsBtn')?.addEventListener('click', () => window.loadTrails?.());
+    document.getElementById('clearTrailsBtn')?.addEventListener('click', () => window.clearTrails?.());
+    for (const id of ['trailsShowSki', 'trailsShowHiking', 'trailsShowAreas',
+                      'trailsColorByDifficulty']) {
+        document.getElementById(id)?.addEventListener(
+            'change', () => window.refreshTrailsCategories?.());
+    }
+    // Colour pickers fire `input` continuously while dragging; the repaint is a
+    // canvas rewrite of a grid already in memory, so it keeps up.
+    for (const id of ['trailsSkiColor', 'trailsHikingColor']) {
+        document.getElementById(id)?.addEventListener(
+            'input', () => window.refreshTrailsCategories?.());
+    }
 };

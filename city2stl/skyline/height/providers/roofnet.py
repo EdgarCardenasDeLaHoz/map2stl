@@ -21,7 +21,6 @@ import io
 import logging
 import os
 from pathlib import Path
-from typing import Tuple
 
 import numpy as np
 
@@ -63,13 +62,14 @@ def _resolve_checkpoint() -> Path | None:
     return None
 
 
-def _fetch_rgb(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | None:
+def _fetch_rgb(bbox: BBox, dim: tuple[int, int]) -> np.ndarray | None:
     """Fetch satellite RGB for *bbox* at *dim* using ESRI WMTS.
 
     Returns (H, W, 3) uint8 or None on failure.
     """
-    from geo2stl.sat2stl import fetch_satellite_tiles
     from PIL import Image
+
+    from geo2stl.sat2stl import fetch_satellite_tiles
 
     h, w = dim
     try:
@@ -86,7 +86,7 @@ def _fetch_rgb(bbox: BBox, dim: Tuple[int, int]) -> np.ndarray | None:
         return None
 
 
-def _empty(dim: Tuple[int, int]) -> HeightResult:
+def _empty(dim: tuple[int, int]) -> HeightResult:
     h, w = dim
     return HeightResult(
         raster=np.full((h, w), np.nan, dtype=np.float32),
@@ -117,7 +117,7 @@ class RoofNetProvider:
         # Disable if no checkpoint is present.
         return self._ckpt is not None
 
-    def fetch_heights(self, bbox: BBox, dim: Tuple[int, int]) -> HeightResult:
+    def fetch_heights(self, bbox: BBox, dim: tuple[int, int]) -> HeightResult:
         if self._ckpt is None:
             return _empty(dim)
 
@@ -150,10 +150,12 @@ class RoofNetProvider:
             logger.warning(f"roofnet: inference failed: {e}", exc_info=True)
             return _empty(dim)
 
-        # Normalise resolution_m to bbox-derived value
+        # Normalise resolution_m to the bbox-derived cell size, floored at the
+        # nominal value: a coarse output grid really does resolve less, but a
+        # fine one cannot beat the satellite tile zoom the segmentation ran on.
         north, south = bbox[0], bbox[1]
         bbox_h_m = abs(north - south) * 111_320.0
-        res_m = bbox_h_m / h if h > 0 else _RESOLUTION_M
+        res_m = max(_RESOLUTION_M, bbox_h_m / h) if h > 0 else _RESOLUTION_M
 
         return HeightResult(
             raster=res.raster.astype(np.float32),

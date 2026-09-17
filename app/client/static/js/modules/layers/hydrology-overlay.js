@@ -177,8 +177,6 @@ window.loadHydrology = async function loadHydrology() {
             if (statusEl) statusEl.textContent =
                 `${fc} river feature${fc !== 1 ? 's' : ''} · ${source === 'hydrorivers' ? 'HydroRIVERS' : 'Natural Earth'}`;
             window.setLayerStatus?.('hydrology', 'loaded');
-            const hydroBtn = document.querySelector('#layerModeSelector .layer-mode-btn[data-mode="Hydrology"]');
-            if (hydroBtn && !hydroBtn.classList.contains('active')) hydroBtn.click();
             window.emitStackUpdate();
             window.showToast?.(`Hydrology loaded (${fc} features)`, 'success');
         } finally {
