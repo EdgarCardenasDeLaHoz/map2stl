@@ -1,7 +1,8 @@
 """Extract key pages from the latest Cartagena skyline report PDF."""
-import fitz
 import pathlib
 import sys
+
+import fitz
 
 pdf_path = pathlib.Path(
     "city2stl/skyline/runs/region_reports/Miami_skyline_report.pdf")

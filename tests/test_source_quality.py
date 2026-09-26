@@ -10,7 +10,6 @@ to detect in unit tests but easy to catch with static analysis:
    is overwritten by vanilla JS (causes Vue insertBefore-on-null errors)
 """
 import ast
-import os
 import re
 from pathlib import Path
 
@@ -42,8 +41,7 @@ def _vue_files():
 
 def _js_module_files():
     """All vanilla JS module files (not Vue, not workers)."""
-    for f in _JS_TOP.glob("*.js"):
-        yield f
+    yield from _JS_TOP.glob("*.js")
     if _JS_MODULES.is_dir():
         yield from _JS_MODULES.rglob("*.js")
 

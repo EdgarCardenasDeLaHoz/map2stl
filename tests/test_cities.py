@@ -7,10 +7,9 @@ POST /api/cities/raster — rasterize OSM features to a DEM-format height map
 """
 import gzip
 import json
-import pytest
-import numpy as np
 from unittest.mock import patch
 
+import numpy as np
 
 # ---------------------------------------------------------------------------
 # Helpers

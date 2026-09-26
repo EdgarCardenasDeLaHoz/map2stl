@@ -1,6 +1,6 @@
 """Playwright UI audit script — run from strm2stl/ directory."""
 import asyncio
-import json
+
 from playwright.async_api import async_playwright
 
 OVERFLOW_JS = """() => {

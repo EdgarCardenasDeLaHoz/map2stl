@@ -18,8 +18,8 @@ import json
 import logging
 import math
 import os
-from pathlib import Path
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -207,9 +207,10 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
     Returns a base64-encoded JPEG string, or raises on failure.
     """
     import base64
+    from io import BytesIO
+
     import requests
     from PIL import Image
-    from io import BytesIO
 
     # Use intelligent zoom calculation instead of fixed loop
     zoom = _calculate_optimal_zoom(north, south, east, west, dim)
@@ -528,9 +529,10 @@ def calculate_scale_for_dimensions(N, S, E, W, target_dim=500):
 
 def fetch_bbox_image(N, S, E, W, scale=None, dataset="copernicus", use_cache=True, target_dim=None):
     """Fetch Earth Engine raster for bbox and dataset."""
+    from io import BytesIO
+
     import requests
     from PIL import Image
-    from io import BytesIO
 
     if scale is None:
         if target_dim is not None:

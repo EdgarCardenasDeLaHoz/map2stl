@@ -15,7 +15,6 @@
  *   applyCurveSettings(pts, preset) — restore curve state (called by presets.js)
  *   undoCurve()                      — step back in history
  *   redoCurve()                      — step forward in history
- *   interpolateCurve(x)             — evaluate curve at x in [0,1]
  *   resetDemToOriginal()            — restore DEM to pre-curve values
  *
  * External dependencies (accessed via window / window.appState):
@@ -298,10 +297,6 @@ function removeCurvePointNear(x, y) {
     drawCurve();
 }
 
-function findCurvePointNear(x, y) {
-    return _getState().findPointNear(x, y);
-}
-
 function drawCurve() {
     const state = _getState();
     state._lut = null;
@@ -413,10 +408,6 @@ function drawCurve() {
     curveCtx.fillText('\u2190 Output', 0, 0);
     curveCtx.restore();
     curveCtx.textAlign = 'left';
-}
-
-function interpolateCurve(x) {
-    return _getState().interpolate(x);
 }
 
 function _applyCurrentCurve() {

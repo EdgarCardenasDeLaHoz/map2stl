@@ -5,15 +5,16 @@ Signals 2 & 3 (geometric width, vertical edges) deferred to future work.
 """
 
 import unittest
+
 import numpy as np
 
 from city2stl.skyline.cross_view import (
     _median_rgb,
     _street_view_roof_strip,
-    score_roof_color_consistency,
-    score_geometric_width_consistency,
-    score_vertical_edge_consistency,
     make_cross_view_scorer,
+    score_geometric_width_consistency,
+    score_roof_color_consistency,
+    score_vertical_edge_consistency,
 )
 
 

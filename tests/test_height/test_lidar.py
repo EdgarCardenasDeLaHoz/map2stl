@@ -1,16 +1,15 @@
 """Unit tests for the USGS 3DEP LiDAR provider — no network."""
 
-import numpy as np
-import pytest
 from unittest.mock import patch
+
+import numpy as np
 
 from city2stl.skyline.height import HeightResult
 from city2stl.skyline.height.providers.lidar_3dep import (
+    _CONFIDENCE,
     LiDAR3DEPProvider,
     _is_in_us,
-    _CONFIDENCE,
 )
-
 
 # ── Geography ────────────────────────────────────────────────────
 

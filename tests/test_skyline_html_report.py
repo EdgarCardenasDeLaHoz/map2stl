@@ -9,8 +9,6 @@ missing PNG by emitting a placeholder.
 
 from __future__ import annotations
 
-import re
-
 import numpy as np
 import pytest
 
@@ -253,9 +251,10 @@ class TestRenderRegionIndex:
 
 class TestWriteRegionReport:
     def test_writes_index_and_seed_pages(self, fake_sv, tmp_path):
-        from city2stl.skyline.html_report import write_region_report
         # Two distinct seeds
         from types import SimpleNamespace
+
+        from city2stl.skyline.html_report import write_region_report
         sv2 = SimpleNamespace(**vars(fake_sv))
         sv2.seed_name = "6"
 
@@ -297,6 +296,7 @@ class TestWriteRegionReport:
         path runs end-to-end and produces a valid per-seed page.
         """
         from types import SimpleNamespace
+
         from city2stl.skyline.html_report import write_region_report
 
         est = SimpleNamespace(

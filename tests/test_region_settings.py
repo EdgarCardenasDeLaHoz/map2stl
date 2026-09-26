@@ -9,7 +9,6 @@ Endpoints:
 Uses a fresh SQLite DB (temp file) set up by conftest.tmp_data_dir.
 The fixture pre-populates the DB with one region ("TestRegion").
 """
-import pytest
 
 
 # ---------------------------------------------------------------------------

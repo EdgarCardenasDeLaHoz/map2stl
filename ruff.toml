@@ -3,6 +3,9 @@
 
 line-length = 100
 target-version = "py311"
+# Exploratory notebooks are not linted: several are pre-refactor and no longer
+# import cleanly. Library, app, tests and tools code must pass `ruff check .`.
+extend-exclude = ["notebooks", "node_modules", "dist"]
 
 [lint]
 select = [

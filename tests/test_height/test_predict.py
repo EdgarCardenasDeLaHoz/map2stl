@@ -14,7 +14,6 @@ import pytest
 
 from city2stl.skyline.height import HeightResult
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
@@ -311,7 +310,7 @@ class TestPredictUNet:
 class TestMissingDependencies:
     def test_load_da2_raises_helpful_error_without_transformers(self):
         import sys
-        from importlib import import_module
+
         import city2stl.skyline.height.predict as _pm
 
         # Remove _da2_model singleton so the function tries to import
@@ -323,6 +322,7 @@ class TestMissingDependencies:
 
     def test_build_unet_raises_without_torch(self):
         import sys
+
         import city2stl.skyline.height.predict as _pm
 
         with patch.dict(sys.modules, {"torch": None, "timm": None,

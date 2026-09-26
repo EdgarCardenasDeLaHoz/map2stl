@@ -75,8 +75,6 @@ const _lutCache = {};
 
 /** Last computed composite Float32Array (same dims as DEM). */
 let _compositeValues = null;
-let _compositeWidth = 0;
-let _compositeHeight = 0;
 let _compositeMin = 0;
 let _compositeMax = 0;
 
@@ -520,8 +518,6 @@ window.computeCompositeDem = async function computeCompositeDem() {
         if (v > cMax) cMax = v;
     }
     _compositeValues = composite;
-    _compositeWidth = W;
-    _compositeHeight = H;
     _compositeMin = cMin;
     _compositeMax = cMax;
 

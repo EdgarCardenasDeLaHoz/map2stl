@@ -1,21 +1,20 @@
 """Unit tests for the nDSM provider — no network calls."""
 
+from unittest.mock import patch
+
 import numpy as np
-import pytest
-from unittest.mock import patch, MagicMock
 
 from city2stl.skyline.height import HeightResult
 from city2stl.skyline.height.providers.ndsm import (
+    NDSM_CONFIDENCE,
     NDSMProvider,
-    _tile_name_glo30,
-    _tile_url_glo30,
-    _tile_url_fabdem,
-    _tiles_for_bbox,
     _crop_to_bbox,
     _stitch_tiles,
-    NDSM_CONFIDENCE,
+    _tile_name_glo30,
+    _tile_url_fabdem,
+    _tile_url_glo30,
+    _tiles_for_bbox,
 )
-
 
 # ── Tile naming ──────────────────────────────────────────────────
 

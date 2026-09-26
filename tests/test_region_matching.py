@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from app.server.routers.regions import (
     _bbox_iou,
-    find_overlapping_region,
     find_or_create_region_for_bbox,
+    find_overlapping_region,
 )
 
 _TEST_REGION_BBOX = {"north": 40.0, "south": 39.9, "east": -75.1, "west": -75.2}

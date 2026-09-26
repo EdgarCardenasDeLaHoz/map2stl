@@ -10,6 +10,7 @@ gate from conftest.py — any JS error during the flow fails the test.
 
 from __future__ import annotations
 
+import os
 import struct
 from pathlib import Path
 
@@ -229,8 +230,6 @@ def test_mesh_layer_toggle_in_layer_view(strict_page, live_server_url_testmode, 
 # CI/most dev machines won't have the (non-repo, licensed) micropolitan STL
 # set checked out.
 
-import os
-
 _RUN_SLOW = os.environ.get("STRM2STL_RUN_SLOW_NETWORK_TESTS") == "1"
 
 
@@ -302,7 +301,7 @@ def test_auto_register_geocodes_and_opens_prefilled_picker(strict_page, live_ser
     modal = page.locator("#meshRegistrationModal")
     try:
         modal.wait_for(state="visible", timeout=240_000)
-    except Exception:
+    except Exception as exc:
         mesh_state = page.evaluate("() => window.appState?.meshImport")
         dem_bbox = page.evaluate("() => window.appState?.currentDemBbox")
         dem_dims = page.evaluate(
@@ -311,7 +310,7 @@ def test_auto_register_geocodes_and_opens_prefilled_picker(strict_page, live_ser
         raise AssertionError(
             f"registration modal never opened — meshImport={mesh_state}, "
             f"currentDemBbox={dem_bbox}, demDims={dem_dims}, "
-            f"mesh-related requests={reqs}, responses={resps}")
+            f"mesh-related requests={reqs}, responses={resps}") from exc
 
     ref_canvas = page.locator("#meshRegRefCanvas")
     mesh_canvas = page.locator("#meshRegMeshCanvas")

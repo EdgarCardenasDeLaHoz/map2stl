@@ -6,8 +6,6 @@ breakage, broken bundles, and frontend-to-backend contract drift.
 
 from __future__ import annotations
 
-import pytest
-
 
 def test_page_loads_without_errors(strict_page, live_server_url):
     """Index page renders and Vue mounts without console errors."""

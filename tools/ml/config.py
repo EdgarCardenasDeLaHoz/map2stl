@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 # ---------------------------------------------------------------------------
 # Roof shape labels  (order defines class indices — do NOT reorder)
 # ---------------------------------------------------------------------------

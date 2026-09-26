@@ -1,17 +1,16 @@
 """Unit tests for the Copernicus EU Building Height provider — no network."""
 
+from unittest.mock import patch
+
 import numpy as np
-import pytest
-from unittest.mock import patch, MagicMock
 
 from city2stl.skyline.height import HeightResult
 from city2stl.skyline.height.providers.copernicus import (
+    _CONFIDENCE,
     CopernicusProvider,
     _is_in_europe,
     _parse_geotiff_bytes,
-    _CONFIDENCE,
 )
-
 
 # ── Geography ────────────────────────────────────────────────────
 
@@ -55,9 +54,7 @@ class TestCopernicusCovers:
 class TestParseGeotiff:
     def test_parse_returns_none_on_bad_data(self):
         """Bad bytes → returns None (not crash)."""
-        result = _parse_geotiff_bytes(b"not a geotiff")
-        # May return None or raise depending on installed libs
-        # Just verify it doesn't crash the process
+        assert _parse_geotiff_bytes(b"not a geotiff") is None
 
 
 # ── Provider fetch (mocked) ──────────────────────────────────────

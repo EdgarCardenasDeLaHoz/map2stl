@@ -5,7 +5,6 @@ All tests run with STRM2STL_TEST_MODE=1 (set in conftest) so the DEM
 endpoint returns a fast deterministic gradient with no network calls.
 """
 
-import pytest
 
 
 _BBOX = {"north": 40.0, "south": 39.9, "east": -75.1, "west": -75.2}

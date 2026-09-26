@@ -372,21 +372,6 @@ async function selectCoordinate(index, opts = {}) {
             // region-specific saved settings already provided an explicit hydrology dim.
             if (!hasSaved) hydroDimEl.value = dimEl.value || String(autoDim);
         }
-
-        // Sync layer-view per-layer resolution selects from the persisted/auto-set values.
-        // These are independent controls in LayerViewSection for one-shot loads at a
-        // specific resolution, initialized to match the persisted settings on region change.
-        // If the value doesn't match an option exactly, snap to the nearest valid option.
-        const _snapSelectToNearest = (selectEl, val) => {
-            if (!selectEl) return;
-            const options = Array.from(selectEl.options).map(o => parseInt(o.value));
-            if (!options.length) return;
-            const num = parseInt(val) || options[0];
-            const nearest = options.reduce((prev, curr) =>
-                Math.abs(curr - num) < Math.abs(prev - num) ? curr : prev
-            );
-            selectEl.value = String(nearest);
-        };
     }
 
     // Update region params table if sidebar is expanded

@@ -4,8 +4,8 @@ viz.py — Shared visualisation utilities for strm2stl notebooks.
 Migrated from notebooks/figure.py.
 """
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def plot_data(im, name=None, bbox=None, colormap="terrain", close=False):

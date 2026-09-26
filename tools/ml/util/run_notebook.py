@@ -1,5 +1,6 @@
 """Execute a notebook's code cells in-process.  Used for headless runs."""
 from __future__ import annotations
+
 import json
 import os
 import sys
@@ -7,6 +8,7 @@ import traceback
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 
 

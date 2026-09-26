@@ -30,10 +30,9 @@ Quick verification
 from __future__ import annotations
 
 import numpy as np
-from numpy import random as npr
-
 import torch
-from torch.utils.data import Dataset, DataLoader
+from numpy import random as npr
+from torch.utils.data import DataLoader, Dataset
 
 # ---------------------------------------------------------------------------
 # Shape primitives  (all operate on 2-D bool arrays)
@@ -265,7 +264,6 @@ def smoke_test_height(epochs: int = 15, device: str = "cpu") -> dict:
 
     Returns the final history list.
     """
-    import torch.nn.functional as F
     from tools.ml.models import HeightUNet
     from tools.ml.train import _unet_loss
 
@@ -321,6 +319,7 @@ def smoke_test_seg(epochs: int = 10, device: str = "cpu") -> dict:
     Should reach IoU > 0.7 within 10 epochs.
     """
     import torch.nn.functional as F
+
     from tools.ml.models import HeightUNet
 
     print("=== HeightUNet mask-head smoke test (segmentation) ===")

@@ -32,7 +32,7 @@ def get_tile_files() -> list:
         _tile_files = []
         return _tile_files
 
-    with open(config_path, "r") as handle:
+    with open(config_path) as handle:
         config = json.load(handle)
 
     ocean_root = config.get("ocean_root", ".")

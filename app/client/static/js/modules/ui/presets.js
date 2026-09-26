@@ -54,7 +54,6 @@ const builtInPresets = {
 };
 
 let _userPresets = {};
-let _lastAppliedPresetName = null;
 let _presetSnapshot = null;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -132,7 +131,6 @@ function loadSelectedPreset() {
     const select = document.getElementById('presetSelect');
     if (!select || !select.value) { window.showToast('Select a preset first', 'warning'); return; }
 
-    _lastAppliedPresetName = select.value;
     const preset = select.value.startsWith('user:')
         ? _userPresets[select.value.substring(5)]
         : builtInPresets[select.value];

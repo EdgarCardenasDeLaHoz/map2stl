@@ -29,7 +29,6 @@ ee_cache/*
 
 # Node / Vite
 node_modules/
-package-lock.json
 
 # Built docs sites
 docs_site/

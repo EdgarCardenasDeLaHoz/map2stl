@@ -15,8 +15,8 @@ import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from urllib.request import urlopen
 from urllib.error import URLError
+from urllib.request import urlopen
 
 import pytest
 
@@ -121,9 +121,9 @@ def strict_page(page):
 
     failures = []
     if errors:
-        failures.append(f"console errors:\n  - " + "\n  - ".join(errors))
+        failures.append("console errors:\n  - " + "\n  - ".join(errors))
     if page_errors:
-        failures.append(f"page errors:\n  - " + "\n  - ".join(page_errors))
+        failures.append("page errors:\n  - " + "\n  - ".join(page_errors))
     if failures:
         pytest.fail("\n\n".join(failures))
 

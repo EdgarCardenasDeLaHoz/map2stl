@@ -563,11 +563,6 @@ function updateMapGrid() {
         dashArray: '4, 4'
     };
 
-    const labelStyle = {
-        className: 'grid-label',
-        permanent: true,
-        direction: 'center'
-    };
 
     // Draw latitude lines
     for (let lat = south; lat <= north; lat += interval) {

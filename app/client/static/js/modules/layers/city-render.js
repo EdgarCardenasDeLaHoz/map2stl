@@ -335,12 +335,12 @@ function _doRenderCityOverlay() {
             } catch (err) {
                 // If a stale detached buffer slips through, fall back to sync rendering for this frame.
                 console.warn('city-worker postMessage failed, using sync fallback:', err?.message || err);
-                _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs, selectedBuildingIndex);
+                _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs);
             }
         }
     } else if (rs.offscreenOk) {
         // PERF6 Part A: per-layer OffscreenCanvas on main thread (no worker)
-        _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs, selectedBuildingIndex);
+        _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs);
     } else {
         // Fallback: draw all visible layers in one pass directly to visible canvas
         ctx.clearRect(0, 0, W, H);
@@ -363,7 +363,7 @@ function _doRenderCityOverlay() {
  * Synchronous per-layer OffscreenCanvas render (PERF6 Part A).
  * Used when workers are unavailable or as a fallback after worker error.
  */
-function _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs, selectedBuildingIndex) {
+function _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs) {
     const H = ctx.canvas.height;
     for (const layer of rs.LAYER_NAMES) {
         if (rs.stackLayer[layer].key === cacheKey && rs.stackLayer[layer].canvas) continue;

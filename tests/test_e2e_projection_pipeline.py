@@ -15,7 +15,6 @@ See also: test_projection_alignment.py for unit-level projection dimension tests
 """
 
 import base64
-import json
 
 import numpy as np
 import pytest
@@ -433,9 +432,7 @@ class TestImportChain:
     that terrain.py delegates to it (not defining its own)."""
 
     def test_geo2stl_projection_importable(self):
-        from geo2stl.projections import project_grid
-        from geo2stl.projections import project_water_arrays
-        from geo2stl.projections import project_rgb_image
+        from geo2stl.projections import project_grid, project_rgb_image, project_water_arrays
         assert callable(project_grid)
         assert callable(project_water_arrays)
         assert callable(project_rgb_image)
@@ -479,6 +476,7 @@ class TestDEMLocalNormalization:
     def test_make_local_dem_forces_none_projection(self):
         """Inspect _make_local_dem source to verify it passes projection='none'."""
         import inspect
+
         from app.server.routers.terrain import _make_local_dem
         source = inspect.getsource(_make_local_dem)
         assert "projection='none'" in source, (
@@ -488,6 +486,7 @@ class TestDEMLocalNormalization:
     def test_dem_endpoint_projects_all_sources(self):
         """Inspect DEM endpoint to verify projection is applied for ALL sources."""
         import inspect
+
         from app.server.routers.terrain import get_terrain_dem
         source = inspect.getsource(get_terrain_dem)
         # Should NOT contain the old guard that skipped local sources

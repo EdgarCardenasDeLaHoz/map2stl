@@ -7,9 +7,9 @@ were not being projected to match the DEM when a map projection was selected.
 
 import gzip
 import json
-import pytest
-import numpy as np
 from pathlib import Path
+
+import pytest
 
 BBOX = {
     "north": 41.395,
@@ -50,7 +50,7 @@ class TestProjectionCityAlignment:
     def test_composite_city_raster_with_projection_none(self, client, tmp_data_dir):
         """Test composite city-raster endpoint with projection='none'."""
         _write_osm_cache(tmp_data_dir["cache_root"], BBOX, EMPTY_OSM)
-        
+
         payload = {
             **BBOX,
             "width": 50,
@@ -58,19 +58,19 @@ class TestProjectionCityAlignment:
             "projection": "none",
             "clip_valid_region": False,
         }
-        
+
         resp = client.post("/api/composite/city-raster", json=payload)
         assert resp.status_code == 200
         body = resp.json()
-        
+
         assert "buildings" in body
         assert body["width"] > 0 and body["height"] > 0
-        print(f"✓ Composite city-raster projection='none': OK")
+        print("✓ Composite city-raster projection='none': OK")
 
     def test_composite_city_raster_with_projection_cosine(self, client, tmp_data_dir):
         """Test composite city-raster endpoint with projection='cosine'."""
         _write_osm_cache(tmp_data_dir["cache_root"], BBOX, EMPTY_OSM)
-        
+
         payload = {
             **BBOX,
             "width": 50,
@@ -78,19 +78,19 @@ class TestProjectionCityAlignment:
             "projection": "cosine",
             "clip_valid_region": False,
         }
-        
+
         resp = client.post("/api/composite/city-raster", json=payload)
         assert resp.status_code == 200
         body = resp.json()
-        
+
         assert "buildings" in body
         assert body["width"] > 0 and body["height"] > 0
-        print(f"✓ Composite city-raster projection='cosine': OK")
+        print("✓ Composite city-raster projection='cosine': OK")
 
     def test_composite_city_raster_with_projection_mercator(self, client, tmp_data_dir):
         """Test composite city-raster endpoint with projection='mercator'."""
         _write_osm_cache(tmp_data_dir["cache_root"], BBOX, EMPTY_OSM)
-        
+
         payload = {
             **BBOX,
             "width": 50,
@@ -98,14 +98,14 @@ class TestProjectionCityAlignment:
             "projection": "mercator",
             "clip_valid_region": False,
         }
-        
+
         resp = client.post("/api/composite/city-raster", json=payload)
         assert resp.status_code == 200
         body = resp.json()
-        
+
         assert "buildings" in body
         assert body["width"] > 0 and body["height"] > 0
-        print(f"✓ Composite city-raster projection='mercator': OK")
+        print("✓ Composite city-raster projection='mercator': OK")
 
     def test_cities_raster_with_projection_none(self, client, tmp_data_dir):
         """Test that /api/cities/raster accepts projection='none'."""
@@ -115,14 +115,14 @@ class TestProjectionCityAlignment:
             "projection": "none",
             "clip_valid_region": False,
         }
-        
+
         resp = client.post("/api/cities/raster", json=payload)
         assert resp.status_code == 200
         body = resp.json()
-        
+
         assert "values" in body
         assert body["width"] > 0 and body["height"] > 0
-        print(f"✓ Cities raster projection='none': OK")
+        print("✓ Cities raster projection='none': OK")
 
     def test_cities_raster_with_projection_mercator(self, client, tmp_data_dir):
         """Test that /api/cities/raster accepts projection='mercator'."""
@@ -132,14 +132,14 @@ class TestProjectionCityAlignment:
             "projection": "mercator",
             "clip_valid_region": False,
         }
-        
+
         resp = client.post("/api/cities/raster", json=payload)
         assert resp.status_code == 200
         body = resp.json()
-        
+
         assert "values" in body
         assert body["width"] > 0 and body["height"] > 0
-        print(f"✓ Cities raster projection='mercator': OK")
+        print("✓ Cities raster projection='mercator': OK")
 
 
 if __name__ == "__main__":
