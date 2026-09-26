@@ -46,7 +46,8 @@ class CityExportRequest(BaseModel):
     dem_width:    int | None = None
     dem_height:   int | None = None
     buildings:    dict[str, Any] | None = None   # GeoJSON FeatureCollection
-    # DEM cache lookup settings (used when dem_values is not provided)
+    # DEM lookup when dem_values is not provided: handle first, else cache settings
+    dem_id:       str | None = None
     bbox:         dict[str, float] | None = None
     dem:          dict[str, Any] | None = None
     model_height_mm:  float = 20.0
@@ -324,9 +325,9 @@ async def export_city_3mf(req: CityExportRequest):
     dem_width = req.dem_width
     dem_height = req.dem_height
     if not dem_values:
-        from app.server.core.export_params import resolve_dem_from_cache
+        from app.server.core.export_params import resolve_dem
         req_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
-        resolved = resolve_dem_from_cache(req_dict)
+        resolved = resolve_dem(req_dict)
         if resolved:
             dem_values, dem_height, dem_width = resolved
         else:

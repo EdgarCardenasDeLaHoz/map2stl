@@ -287,9 +287,11 @@ class SatelliteResponse(BaseModel):
 class ExportRequest(BoundingBox):
     """Parameters for generating a 3D model file.
 
-    DEM data is resolved from the server-side disk cache using bbox + dem
-    settings.  Legacy callers may still pass ``dem_values`` directly.
+    The DEM comes from ``dem_id`` (the handle /api/terrain/dem returned), else
+    the disk cache via bbox + dem settings, else an inline ``dem_values`` array.
     """
+    dem_id: str | None = Field(
+        None, description="DEM handle returned by /api/terrain/dem (preferred)")
     dem_values: list[float] | None = Field(
         None, description="Flat row-major elevation array (omit to resolve from server cache)")
     height: int = Field(0, description="Grid height in pixels")
@@ -440,6 +442,7 @@ class HydrologyMergeRequest(BaseModel):
     river_grid_values: list[float] | None = None
     river_grid_dimensions: Annotated[list[int], Field(min_length=2, max_length=2)] | None = None
     # Settings-only mode fields
+    dem_id: str | None = None
     bbox: dict[str, float] | None = None
     dem: dict[str, Any] | None = None
 

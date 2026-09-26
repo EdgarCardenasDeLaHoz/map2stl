@@ -333,7 +333,9 @@ window.loadDEM = async function loadDEM(highRes = false) {
 
         // Track bbox and update status
         window.appState.layerBboxes.dem = { north, south, east, west };
-        window.appState.lastDemRequest = requestedDemSettings;
+        // dem_id names the exact grid the server returned; export sends it back
+        // so the server never has to re-derive the cache key (core/dem_store.py).
+        window.appState.lastDemRequest = { ...requestedDemSettings, dem_id: data.dem_id };
         window.setLayerStatus('dem', 'loaded');
 
         // The server flags DEMs that came back with no real relief (the source

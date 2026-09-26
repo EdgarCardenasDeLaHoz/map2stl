@@ -13,19 +13,30 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
-def resolve_dem_from_cache(data: dict) -> tuple[list, int, int] | None:
-    """Look up a cached DEM from bbox + DEM settings.
+def resolve_dem(data: dict) -> tuple[list, int, int] | None:
+    """Find the DEM an export refers to, without the client resending the array.
 
-    The DEM endpoint caches processed arrays under a key derived from
-    bbox + {dim, src, proj, ds, ws, sw, md, cn, sat}.  If the caller
-    provides these settings instead of raw ``dem_values``, we can
-    reconstruct the key and read from disk — eliminating the need to
-    retransmit the (potentially multi-MB) array.
+    Preferred: ``dem_id``, the handle /api/terrain/dem returned; it names the
+    exact grid the user saw (see core/dem_store.py) and raises DemGone if it
+    has expired. Fallback while clients migrate: rebuild the disk-cache key from
+    bbox + DEM settings, which misses if any setting disagrees.
 
-    Returns ``(dem_values_list, height, width)`` or ``None`` on cache miss.
+    Returns ``(dem_values_list, height, width)``, or ``None`` on a cache miss.
     """
     from app.server.core.cache import read_array_cache
     from app.server.core.dem_cache import dem_cache_key
+    from app.server.core.dem_store import DemGone, dem_store
+
+    gone = None
+    if data.get("dem_id"):
+        try:
+            grid, _ = dem_store.get(data["dem_id"])
+            h, w = grid.shape
+            return grid.ravel().tolist(), h, w
+        except DemGone as exc:
+            # Handles do not survive a restart; the disk cache does. Try it
+            # before telling the user to reload.
+            gone = exc
 
     bbox = data.get("bbox") or data
     north = bbox.get("north")
@@ -33,6 +44,8 @@ def resolve_dem_from_cache(data: dict) -> tuple[list, int, int] | None:
     east  = bbox.get("east")
     west  = bbox.get("west")
     if None in (north, south, east, west):
+        if gone is not None:
+            raise gone
         return None
 
     # The key and its defaults live in core/dem_cache.py, which the terrain
@@ -45,6 +58,8 @@ def resolve_dem_from_cache(data: dict) -> tuple[list, int, int] | None:
     cached = read_array_cache("dem", cache_key)
     if cached is None or cached[0].get("dem") is None:
         logger.debug("DEM cache miss for export (key %s)", cache_key[:8])
+        if gone is not None:
+            raise gone
         return None
 
     dem_arr = cached[0]["dem"]  # np.ndarray (H, W), raw Plate Carree
@@ -103,11 +118,9 @@ class ExportContext:
     def from_request(cls, data: dict) -> ExportContext:
         """Construct from an incoming request dict.
 
-        Supports two modes:
-        - **Legacy (array):** ``dem_values``, ``height``, ``width`` in the dict.
-        - **Settings-only:** ``bbox`` + ``dem`` settings — DEM is read from
-          the server-side disk cache (populated when the user loaded the DEM
-          in the browser).  This avoids retransmitting multi-MB arrays.
+        The DEM comes from, in priority order: a composite spec, an inline
+        ``dem_values`` array (edited grids), or :func:`resolve_dem` (``dem_id``
+        handle, else bbox + settings).
         """
         dem_values = data.get("dem_values", [])
         height = data.get("height", 0)
@@ -138,7 +151,7 @@ class ExportContext:
 
         # Settings-only mode: resolve DEM from cache
         if not dem_values:
-            resolved = resolve_dem_from_cache(data)
+            resolved = resolve_dem(data)
             if resolved is not None:
                 dem_values, height, width = resolved
 

@@ -99,6 +99,9 @@ function _demSettings() {
     const p = window.appState?.demParams || {};
     const proj = window.getProjectionParams();
     const settings = {
+        // Preferred by the server; bbox + dem below are the fallback for a DEM
+        // loaded before handles existed, and are still needed by composite exports.
+        dem_id: snapshot?.dem_id,
         bbox: {
             north: bbox.north, south: bbox.south,
             east: bbox.east, west: bbox.west,

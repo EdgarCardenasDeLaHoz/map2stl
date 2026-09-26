@@ -11,12 +11,13 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse as _FileResponse
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.server.config import OSM_CACHE_PATH
 from app.server.core.cache import migrate_osm_plain_json, prune_all_caches
+from app.server.core.dem_store import DemGone
 from app.server.routers.auth import router as _auth_router
 from app.server.routers.cache import router as _cache_router
 from app.server.routers.cities import router as _cities_router
@@ -208,6 +209,12 @@ app = FastAPI(
 # are already binary and are streamed as FileResponse, which GZipMiddleware
 # leaves alone below the size threshold it applies per response.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+
+@app.exception_handler(DemGone)
+async def _dem_gone(_request: Request, exc: DemGone):
+    # An expired or pre-restart DEM handle: the client should reload, not retry.
+    return JSONResponse(status_code=410, content={"error": str(exc)})
 
 # Template path using absolute path
 templates_path = os.path.join(os.path.dirname(

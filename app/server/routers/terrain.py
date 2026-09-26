@@ -25,6 +25,7 @@ from app.server.config import (
 )
 from app.server.core.cache import make_cache_key, read_array_cache, write_array_cache
 from app.server.core.dem_cache import dem_cache_key
+from app.server.core.dem_store import dem_store
 from app.server.core.inflight import dedupe
 from app.server.core.responses import error_response
 from app.server.core.validation import (
@@ -337,6 +338,8 @@ async def get_terrain_dem(
         payload = _make_dem_payload(im, west or 0.0, south or 0.0,
                                     east or 0.0, north or 0.0, show_sat=False)
         payload["sat_available"] = False
+        payload["dem_id"] = dem_store.put(im, {"north": north, "south": south,
+                                               "east": east, "west": west})
         return JSONResponse(content=payload)
 
     # Guard: bbox already validated above but south/north could be None only in edge cases
@@ -368,6 +371,10 @@ async def get_terrain_dem(
         response_content = _make_dem_payload(
             im, west, south, east, north, show_sat)
         height_px, width_px = response_content["dimensions"]
+        # Handle for the exact grid returned (projected + clipped): export asks for
+        # it by id instead of re-deriving the cache key (core/dem_store.py).
+        response_content["dem_id"] = dem_store.put(
+            im, {"north": north, "south": south, "east": east, "west": west})
 
         # Pre-projection grid size. Any other layer that must line up with this
         # DEM has to be rasterized at THIS size and then projected once — feeding

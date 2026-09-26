@@ -18,7 +18,7 @@ from starlette.background import BackgroundTask
 
 from app.server.core.export_params import (
     _parse_export_params,
-    resolve_dem_from_cache,
+    resolve_dem,
 )
 from app.server.core.export_tasks import ExportTask
 
@@ -795,7 +795,7 @@ def generate_crosssection(data: dict):
 
     # Settings-only mode: resolve DEM from cache
     if not dem_values:
-        resolved = resolve_dem_from_cache(data)
+        resolved = resolve_dem(data)
         if resolved is not None:
             dem_values, height, width = resolved
 

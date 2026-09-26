@@ -415,6 +415,7 @@ class TestSessionLayerFetches:
 
 
 class TestSessionCityFlows:
+    @pytest.mark.integration  # live Overpass (OSM) request
     def test_fetch_cities_populates_city_data_for_small_region(self, session):
         session.create_region(
             "SmallFetchedCityRegion", north=40.000, south=39.995, east=-75.100, west=-75.105
@@ -429,6 +430,7 @@ class TestSessionCityFlows:
         cached = session.check_city_cache()
         assert isinstance(cached, bool)
 
+    @pytest.mark.integration  # live Overpass (OSM) request
     def test_composite_city_raster_populates_session_state(self, session):
         session.create_region(
             "SmallCityRasterRegion", north=40.000, south=39.995, east=-75.100, west=-75.105

@@ -14,15 +14,15 @@ jobs:
     # Windows matches the development machines (paths, h5py/pymeshlab wheels).
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: strm2stl
       # numpy2stl is a sibling repo; pytest.ini also runs its tests.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: EdgarCardenasDeLaHoz/numpy2stl
           path: numpy2stl
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -47,10 +47,10 @@ jobs:
       run:
         working-directory: strm2stl
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: strm2stl
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
