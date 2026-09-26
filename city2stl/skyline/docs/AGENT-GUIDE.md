@@ -15,7 +15,7 @@ modules; earlier: cross-view smoothing, auto-seed replacement, SegFormer-b1).
 cd "d:/OneDrive/Documents/Projects/3D Maps/Code/strm2stl"
 
 # Cartagena (canonical test region):
-SKYLINE_CV_SEGFORMER_SIZE=b1 "C:\venvs\strm2stl\Scripts\python.exe" \
+SKYLINE_CV_SEGFORMER_SIZE=b1 ~/.venvs/strm2stl/Scripts/python.exe \
   -m city2stl.skyline.scripts.08_region_skyline_pdf --region Cartagena
 
 # Outputs (HTML report, PDF, PNGs, JSON aggregates):
@@ -319,7 +319,7 @@ deterministic geometry / scoring functions; orchestration is exercised
 by full-run smoke tests rather than unit tests.
 
 ```powershell
-"C:\venvs\strm2stl\Scripts\python.exe" -m pytest tests/test_skyline*.py -v
+& "$HOME\.venvs\strm2stl\Scripts\python.exe" -m pytest tests/test_skyline*.py -v
 ```
 
 ## File map

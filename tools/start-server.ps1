@@ -5,15 +5,14 @@
 #>
 $ErrorActionPreference = 'Stop'
 $Port = 9000
-$VenvPython = Join-Path $PSScriptRoot '..\..\.venv\Scripts\python.exe'
-$VenvPython = [System.IO.Path]::GetFullPath($VenvPython)
+$VenvPython = Join-Path $HOME '.venvs\strm2stl\Scripts\python.exe'
 
 # ── Check Python ──────────────────────────────────────────────
 if (-not (Test-Path $VenvPython)) {
     Write-Host ""
     Write-Host "  ERROR: Virtual-env Python not found at:" -ForegroundColor Red
     Write-Host "         $VenvPython" -ForegroundColor Yellow
-    Write-Host "  Run:   python -m venv .venv && .venv\Scripts\pip install -r strm2stl\requirements.txt" -ForegroundColor Gray
+    Write-Host "  Run:   powershell -ExecutionPolicy Bypass -File scripts\setup-venv.ps1" -ForegroundColor Gray
     Write-Host ""
     exit 1
 }

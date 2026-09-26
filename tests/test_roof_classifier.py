@@ -8,6 +8,7 @@ valid output.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from city2stl.roof_classifier import (
     _classify,
@@ -735,6 +736,8 @@ class TestCnnOptIn:
         assert "without trained weights" in caplog.text
 
     def test_missing_checkpoint_is_none(self, caplog):
+        # Without torch the resolver bails earlier with "torch is not installed".
+        pytest.importorskip("torch")
         from city2stl.roof_classifier import _resolve_cnn_model
 
         with caplog.at_level("WARNING"):

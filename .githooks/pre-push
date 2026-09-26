@@ -1,0 +1,14 @@
+#!/bin/sh
+# Run the test suite (this repo's and ../numpy2stl's, per pytest.ini) before
+# every push. Enabled by scripts/setup-venv.ps1 (core.hooksPath .githooks).
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+PYTHON="$HOME/.venvs/strm2stl/Scripts/python.exe"
+if [ ! -f "$PYTHON" ]; then
+    echo "pre-push: $PYTHON missing; run scripts/setup-venv.ps1" >&2
+    exit 1
+fi
+
+echo "Running test suite before push..."
+"$PYTHON" -m pytest -q --tb=short -p no:cacheprovider

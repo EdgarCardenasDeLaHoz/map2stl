@@ -49,7 +49,7 @@ _ALLOWED_HTTP_METHODS = {"get", "post", "put", "delete", "patch"}
 
 # Paths relative to this file (app/session/ → app/ → strm2stl/)
 _STRM2STL_DIR = Path(__file__).parent.parent.parent   # strm2stl/
-_VENV_PYTHON = _STRM2STL_DIR.parent / ".venv" / "Scripts" / "python.exe"
+_VENV_PYTHON = Path.home() / ".venvs" / "strm2stl" / "Scripts" / "python.exe"  # scripts/setup-venv.ps1
 
 _DEFAULT_SETTINGS: dict = {
     # ── Projection ────────────────────────────────────────────────────────

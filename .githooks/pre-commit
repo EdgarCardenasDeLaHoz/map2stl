@@ -1,7 +1,15 @@
 #!/bin/sh
-# Run pytest before every commit. Abort if any test fails.
+# Lint only the staged Python files. The whole tree still has pre-existing ruff
+# findings that no single commit should have to fix; the full test suite runs in
+# pre-push. Enabled by scripts/setup-venv.ps1 (git config core.hooksPath .githooks).
 set -e
-
-echo "Running tests..."
 cd "$(git rev-parse --show-toplevel)"
-python -m pytest tests/ -q --tb=short
+
+RUFF="$HOME/.venvs/strm2stl/Scripts/ruff.exe"
+[ -f "$RUFF" ] || RUFF="ruff"
+
+STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM -- '*.py')
+[ -z "$STAGED_PY" ] && exit 0
+
+echo "Running lint on staged Python files..."
+"$RUFF" check $STAGED_PY

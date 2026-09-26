@@ -72,3 +72,8 @@ rebuild_*.log
 
 # Ad-hoc roof test artifacts at repo root
 /roof_test_*
+
+# Venvs live in ~/.venvs/<project>, never in this OneDrive tree
+.venv/
+venv/
+env/

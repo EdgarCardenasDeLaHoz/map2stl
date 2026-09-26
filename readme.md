@@ -21,15 +21,18 @@ SDK** for driving the same pipeline from notebooks or scripts.
 
 ## Install
 
-Requires **Python 3.12**. The maintained venv lives *outside* OneDrive at
-`C:\venvs\strm2stl` (OneDrive sync locks binary packages — do not put the venv
-inside the synced tree).
+Requires **Python 3.11+**. The venv lives *outside* OneDrive at
+`~\.venvs\strm2stl` (OneDrive sync locks binary packages, and a synced venv breaks
+on the other PC — never put the venv inside the synced tree).
 
 ```powershell
-# From this directory (strm2stl/)
-python -m venv C:\venvs\strm2stl
-& C:\venvs\strm2stl\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+# From this directory (strm2stl/). Run once per PC; safe to re-run.
+powershell -ExecutionPolicy Bypass -File scripts\setup-venv.ps1
 ```
+
+The script installs `requirements.txt` + `requirements-dev.txt`, sends bytecode to
+`~\.cache\pycache`, and points the `nbstripout` git filter at the venv (git refuses
+to stage notebooks until it does).
 
 The sibling `../numpy2stl/` package (mesh generation) is used as a library and
 is expected on the path alongside this repo — see [`../numpy2stl/README.md`](../numpy2stl/README.md).
@@ -37,7 +40,7 @@ is expected on the path alongside this repo — see [`../numpy2stl/README.md`](.
 ## Run the web app
 
 ```powershell
-& C:\venvs\strm2stl\Scripts\python.exe -m uvicorn app.server.server:app --host 127.0.0.1 --port 9000 --reload
+& "$HOME\.venvs\strm2stl\Scripts\python.exe" -m uvicorn app.server.server:app --host 127.0.0.1 --port 9000 --reload
 ```
 
 Then open <http://127.0.0.1:9000>. Equivalent shortcuts:
@@ -83,7 +86,7 @@ See [`docs/sdk-workflow.md`](docs/sdk-workflow.md) for notebook → SDK → rout
 ## Tests
 
 ```powershell
-& C:\venvs\strm2stl\Scripts\python.exe -m pytest tests/ -v   # or: make test
+& "$HOME\.venvs\strm2stl\Scripts\python.exe" -m pytest tests/ -v   # or: make test
 ```
 
 `pytest.ini` collects `tests/` and `../numpy2stl/tests`. The `tests/e2e/`
