@@ -27,24 +27,23 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
+from app.paths import REPO_ROOT
 from tools.ml.config import (
-    SHAPE_LABELS,
-    DEFAULT_CROP_SIZE,
-    DEFAULT_TILE_SIZE,
-    DEFAULT_EPOCHS,
     DEFAULT_BATCH_SIZE,
+    DEFAULT_CROP_SIZE,
+    DEFAULT_EPOCHS,
+    DEFAULT_HEIGHT_MODEL,
     DEFAULT_LR,
+    DEFAULT_SHAPE_MODEL,
+    DEFAULT_TILE_SIZE,
     DEFAULT_WEIGHT_DECAY,
     EARLY_STOP_PATIENCE,
-    DEFAULT_SHAPE_MODEL,
-    DEFAULT_HEIGHT_MODEL,
-    MAX_HEIGHT_M,
+    SHAPE_LABELS,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,7 +104,7 @@ class TrainConfig:
     # Resume from latest checkpoint (or resume_from if provided)
     resume: bool = False
     # Optional explicit checkpoint path to resume from
-    resume_from: Optional[str] = None
+    resume_from: str | None = None
     # If True, also load scheduler state when resuming
     resume_scheduler: bool = True
 
@@ -114,7 +113,7 @@ class TrainConfig:
 # Loss functions
 # ---------------------------------------------------------------------------
 
-def _gradient_loss(pred: "torch.Tensor", target: "torch.Tensor") -> "torch.Tensor":
+def _gradient_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     """Sobel gradient loss for height maps."""
     import torch.nn.functional as F
 
@@ -139,7 +138,7 @@ def _gradient_loss(pred: "torch.Tensor", target: "torch.Tensor") -> "torch.Tenso
 # Training loop
 # ---------------------------------------------------------------------------
 
-def _resolve_device(device_str: str) -> "torch.device":
+def _resolve_device(device_str: str) -> torch.device:
     if device_str == "auto":
         if torch.cuda.is_available():
             return torch.device("cuda")
@@ -153,7 +152,7 @@ def _load_history(history_path: Path) -> list[dict]:
     if not history_path.exists():
         return []
     try:
-        with open(history_path, "r", encoding="utf-8") as fh:
+        with open(history_path, encoding="utf-8") as fh:
             payload = json.load(fh)
         hist = payload.get("history", [])
         return hist if isinstance(hist, list) else []
@@ -227,7 +226,6 @@ def _height_loss(
     loss. We upweight building pixels (target > 0) by `bldg_weight` so the
     gradient signal is dominated by what we actually care about.
     """
-    import torch.nn.functional as F
     bldg_mask = (target > 0).float()
     weight = 1.0 + bldg_weight * bldg_mask
     diff = pred - target
@@ -646,7 +644,7 @@ def _unet_loss(
 def train_unet(
     tile_dir: str = "cache/height_tiles_osm",
     output_model: str = "models/roofnet_unet.pt",
-    config: "TrainConfig | None" = None,
+    config: TrainConfig | None = None,
     verbose: bool = True,
 ) -> dict:
     """Train HeightUNet â€” U-Net with shared decoder, mask head + height head.
@@ -659,8 +657,8 @@ def train_unet(
     Returns the same result dict as ``train_v3``.
     """
     _require_torch()
-    from tools.ml.models import HeightUNet
     from tools.ml.data.datasets import make_height_loaders
+    from tools.ml.models import HeightUNet
 
     cfg = config or TrainConfig()
     device = torch.device(
@@ -668,9 +666,8 @@ def train_unet(
         else ("cpu" if cfg.device == "auto" else cfg.device)
     )
 
-    strm2stl = Path(__file__).resolve().parents[2]
-    tile_path = Path(tile_dir) if Path(tile_dir).is_absolute() else strm2stl / tile_dir
-    out_path  = Path(output_model) if Path(output_model).is_absolute() else strm2stl / output_model
+    tile_path = Path(tile_dir) if Path(tile_dir).is_absolute() else REPO_ROOT / tile_dir
+    out_path  = Path(output_model) if Path(output_model).is_absolute() else REPO_ROOT / output_model
     out_path.parent.mkdir(parents=True, exist_ok=True)
     latest_path = out_path.with_suffix(".latest.pt")
 
@@ -715,7 +712,7 @@ def train_unet(
     if cfg.resume_from:
         candidate = Path(cfg.resume_from)
         if not candidate.is_absolute():
-            candidate = strm2stl / candidate
+            candidate = REPO_ROOT / candidate
         if candidate.exists():
             resume_ckpt = candidate
     elif cfg.resume and latest_path.exists():
@@ -893,7 +890,7 @@ def _make_v3_optimizer(model, lr: float, weight_decay: float, backbone_frozen: b
 def train_v3(
     tile_dir: str = "cache/height_tiles_osm",
     output_model: str = "models/roofnet_v3.pt",
-    config: "TrainConfig | None" = None,
+    config: TrainConfig | None = None,
     n_iters: int = 2,
     arch: str = "v3",
     verbose: bool = True,
@@ -908,16 +905,15 @@ def train_v3(
     n_iters : Refinement iterations per forward pass.  Default 2.
     """
     _require_torch()
-    from tools.ml.models import build_model
     from tools.ml.data.datasets import make_height_loaders
+    from tools.ml.models import build_model
 
     cfg = config or TrainConfig(task="height")
     device = _resolve_device(cfg.device)
 
-    strm2stl = Path(__file__).resolve().parents[2]
     tile_root = Path(tile_dir)
     if not tile_root.is_absolute():
-        tile_root = strm2stl / tile_dir
+        tile_root = REPO_ROOT / tile_dir
 
     tile_paths = sorted(tile_root.glob("*.npz"))
     if not tile_paths:
@@ -925,7 +921,7 @@ def train_v3(
 
     out_path = Path(output_model)
     if not out_path.is_absolute():
-        out_path = strm2stl / output_model
+        out_path = REPO_ROOT / output_model
     out_path.parent.mkdir(parents=True, exist_ok=True)
     latest_path = out_path.with_suffix(".latest.pt")
 
@@ -965,7 +961,7 @@ def train_v3(
     if cfg.resume_from:
         candidate = Path(cfg.resume_from)
         if not candidate.is_absolute():
-            candidate = strm2stl / candidate
+            candidate = REPO_ROOT / candidate
         if candidate.exists():
             resume_ckpt = candidate
     elif cfg.resume:
@@ -1159,7 +1155,7 @@ def train_v3(
 def train_shape(
     data_dir: str = "output/roof_crops",
     output_model: str = DEFAULT_SHAPE_MODEL,
-    config: "TrainConfig | None" = None,
+    config: TrainConfig | None = None,
     verbose: bool = True,
 ) -> dict:
     """Train the RoofNetV2 shape classification head.
@@ -1176,8 +1172,8 @@ def train_shape(
     dict with best_val_acc, best_epoch, per_class_acc, model_path, history.
     """
     _require_torch()
-    from tools.ml.models import build_model
     from tools.ml.data.datasets import make_roof_loaders
+    from tools.ml.models import build_model
 
     cfg = config or TrainConfig(task="shape")
     device = _resolve_device(cfg.device)
@@ -1185,10 +1181,9 @@ def train_shape(
     if verbose:
         print(f"Device: {device}")
 
-    strm2stl = Path(__file__).resolve().parents[2]
     data_root = Path(data_dir)
     if not data_root.is_absolute():
-        data_root = strm2stl / data_dir
+        data_root = REPO_ROOT / data_dir
 
     manifest = data_root / "manifest.csv"
     if not manifest.exists():
@@ -1199,7 +1194,7 @@ def train_shape(
 
     out_path = Path(output_model)
     if not out_path.is_absolute():
-        out_path = strm2stl / output_model
+        out_path = REPO_ROOT / output_model
     out_path.parent.mkdir(parents=True, exist_ok=True)
     latest_path = out_path.with_suffix(".latest.pt")
 
@@ -1248,7 +1243,7 @@ def train_shape(
     if cfg.resume_from:
         candidate = Path(cfg.resume_from)
         if not candidate.is_absolute():
-            candidate = strm2stl / candidate
+            candidate = REPO_ROOT / candidate
         if candidate.exists():
             resume_ckpt = candidate
     elif cfg.resume:
@@ -1415,7 +1410,7 @@ def train_shape(
 def train_height(
     tile_dir: str = "cache/height_tiles",
     output_model: str = DEFAULT_HEIGHT_MODEL,
-    config: "TrainConfig | None" = None,
+    config: TrainConfig | None = None,
     verbose: bool = True,
 ) -> dict:
     """Train the RoofNetV2 height regression head.
@@ -1432,16 +1427,15 @@ def train_height(
     dict with best_val_loss, model_path, history.
     """
     _require_torch()
-    from tools.ml.models import build_model
     from tools.ml.data.datasets import make_height_loaders
+    from tools.ml.models import build_model
 
     cfg = config or TrainConfig(task="height")
     device = _resolve_device(cfg.device)
 
-    strm2stl = Path(__file__).resolve().parents[2]
     tile_root = Path(tile_dir)
     if not tile_root.is_absolute():
-        tile_root = strm2stl / tile_dir
+        tile_root = REPO_ROOT / tile_dir
 
     tile_paths = sorted(tile_root.glob("*.npz"))
     if not tile_paths:
@@ -1449,7 +1443,7 @@ def train_height(
 
     out_path = Path(output_model)
     if not out_path.is_absolute():
-        out_path = strm2stl / output_model
+        out_path = REPO_ROOT / output_model
     out_path.parent.mkdir(parents=True, exist_ok=True)
     latest_path = out_path.with_suffix(".latest.pt")
 
@@ -1484,7 +1478,7 @@ def train_height(
     if cfg.resume_from:
         candidate = Path(cfg.resume_from)
         if not candidate.is_absolute():
-            candidate = strm2stl / candidate
+            candidate = REPO_ROOT / candidate
         if candidate.exists():
             resume_ckpt = candidate
     elif cfg.resume:

@@ -8,16 +8,11 @@ should share a single cache entry for the same raw bbox data.
 """
 
 import shutil
-import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import requests
-
-# Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).parents[2]))
-
 
 BASE_URL = "http://127.0.0.1:9000"
 CACHE_DIR = Path(__file__).parents[2] / "cache"

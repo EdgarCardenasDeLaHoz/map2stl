@@ -28,19 +28,7 @@ changes.
 from __future__ import annotations
 
 import argparse
-import sys
 import time
-from pathlib import Path
-
-# ---------------------------------------------------------------------------
-# Path bootstrap
-# ---------------------------------------------------------------------------
-_HERE = Path(__file__).resolve().parent
-_STRM2STL = _HERE.parent
-_REPO_ROOT = _STRM2STL.parent
-for _p in (_STRM2STL, _REPO_ROOT):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
 
 # ---------------------------------------------------------------------------
 # Evaluation city definitions
@@ -185,7 +173,7 @@ def seed_regions(
                     print(f"  OSM cached in {dt:.1f}s")
             else:
                 if verbose:
-                    print(f"  OSM skipped (bbox too large or server error)")
+                    print("  OSM skipped (bbox too large or server error)")
 
             # ── 3. Cache city raster (frontend-visible) ─────────────────
             if session.city_data is not None:

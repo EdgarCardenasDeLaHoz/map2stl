@@ -25,17 +25,13 @@ matcher integration; the outputs are PNGs you can inspect.
 from __future__ import annotations
 
 import argparse
-import sys
 import time
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
-# Path bootstrap so "PYTHONPATH=. python scripts/15..." works from any cwd.
 ROOT = Path(__file__).resolve().parents[4]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 from city2stl.skyline.pipeline import (  # noqa: E402
     _ADE20K_BUILDING_CLASSES,

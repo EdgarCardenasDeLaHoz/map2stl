@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sys
 from pathlib import Path
 
 import matplotlib
@@ -31,12 +30,7 @@ import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Rectangle
 
-# ---------------------------------------------------------------------------
-# Path bootstrap — makes "PYTHONPATH=. python scripts/14_..." work.
-# ---------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[4]  # …/strm2stl/
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 # ---------------------------------------------------------------------------
 # Pipeline imports (must come after path bootstrap)

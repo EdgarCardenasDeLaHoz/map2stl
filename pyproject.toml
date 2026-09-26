@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+# Pinned runtime versions live in requirements.txt (what the app is tested with);
+# this file declares the packages so `pip install -e .` makes app / geo2stl /
+# city2stl importable from any working directory — no sys.path edits.
+# numpy2stl is the sibling repo, installed editable by scripts/setup-venv.ps1.
+[project]
+name = "strm2stl"
+version = "0.1.0"
+description = "Terrain, water and city data to printable 3D models: FastAPI app, geo2stl, city2stl"
+readme = "readme.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Edgar Cardenas De La Hoz" }]
+dependencies = ["numpy2stl"]
+
+[project.urls]
+Repository = "https://github.com/EdgarCardenasDeLaHoz/map2stl"
+
+[tool.setuptools.packages.find]
+include = ["app*", "geo2stl*", "city2stl*"]
+
+[tool.setuptools.package-data]
+"app.client" = ["static/**/*", "templates/**/*"]

@@ -31,7 +31,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_STRM2STL = Path(__file__).resolve().parents[2]
+from app.paths import REPO_ROOT
 
 
 def _run(cmd: list[str], description: str) -> int:
@@ -39,13 +39,13 @@ def _run(cmd: list[str], description: str) -> int:
     print("$ " + " ".join(cmd))
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
-    return subprocess.call(cmd, cwd=str(_STRM2STL), env=env)
+    return subprocess.call(cmd, cwd=str(REPO_ROOT), env=env)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     tile_dir = Path(args.tile_dir)
     if not tile_dir.is_absolute():
-        tile_dir = _STRM2STL / tile_dir
+        tile_dir = REPO_ROOT / tile_dir
 
     if not args.skip_collect:
         if not args.cities:
@@ -66,7 +66,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     output = Path(args.output)
     if not output.is_absolute():
-        output = _STRM2STL / output
+        output = REPO_ROOT / output
 
     if args.grow:
         cmd = [

@@ -31,22 +31,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset, random_split
 
-_HERE = Path(__file__).resolve().parent
-_STRM2STL = _HERE.parents[1]
-for _p in (_STRM2STL, _STRM2STL.parent):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-
+from app.paths import REPO_ROOT
 from tools.ml.models import Retna_V1  # noqa: E402
 
 HEIGHT_NORM_M = 200.0  # divisor that maps real metres → [0, 1]. 200m covers skyscrapers.
@@ -238,13 +230,12 @@ def main():
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    strm2stl = Path(__file__).resolve().parents[2]
     tiles = Path(args.tiles)
     if not tiles.is_absolute():
-        tiles = strm2stl / args.tiles
+        tiles = REPO_ROOT / args.tiles
     out_path = Path(args.output)
     if not out_path.is_absolute():
-        out_path = strm2stl / args.output
+        out_path = REPO_ROOT / args.output
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     paths = sorted(tiles.glob("*.npz"))
@@ -274,7 +265,7 @@ def main():
     if args.resume:
         rp = Path(args.resume)
         if not rp.is_absolute():
-            rp = strm2stl / args.resume
+            rp = REPO_ROOT / args.resume
         if rp.exists():
             state = torch.load(str(rp), map_location="cpu", weights_only=False)
             sd = state.get("model_state_dict", state)

@@ -13,22 +13,22 @@ Features:
 
 Usage (script):
     # Step 1 — convert tile CSV to geo CSV
-    python tools/tile_to_geo.py
+    python tools/data/tile_to_geo.py
 
     # Step 2 — import geo CSV into database
-    python tools/import_regions.py [geo_csv] [--label coorlist] [--dry-run]
+    python -m tools.data.import_regions [geo_csv] [--label coorlist] [--dry-run]
 
 Usage (module):
-    from tools.import_regions import import_geo_csv
-    import_geo_csv(Path("locations/CoOrLists_geo.csv"), label_prefix="coorlist")
+    from tools.data.import_regions import import_geo_csv
+    import_geo_csv(Path("data/locations/CoOrLists_geo.csv"), label_prefix="coorlist")
 """
 
 import csv
 import json
 import sys
 from pathlib import Path
-from typing import Optional
 
+from app.paths import REPO_ROOT
 
 # ---------------------------------------------------------------------------
 # Database helpers (mirrors core/db.py without FastAPI dependency)
@@ -64,7 +64,7 @@ def _unique_name(base: str, existing: set[str]) -> str:
 
 def import_geo_csv(
     csv_path: Path,
-    db_path: Optional[Path] = None,
+    db_path: Path | None = None,
     label_prefix: str = "coorlist",
     dry_run: bool = False,
 ) -> list[dict]:
@@ -86,8 +86,7 @@ def import_geo_csv(
     """
     # Locate DB
     if db_path is None:
-        here = Path(__file__).parent
-        db_path = here.parent / "data.db"
+        db_path = REPO_ROOT / "data.db"
     if not db_path.exists() and not dry_run:
         raise FileNotFoundError(f"Database not found: {db_path}")
 
@@ -173,8 +172,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "csv",
         nargs="?",
-        default=str(Path(__file__).parent.parent.parent / "locations" / "CoOrLists_geo.csv"),
-        help="Path to geo CSV (default: locations/CoOrLists_geo.csv)",
+        default=str(REPO_ROOT / "data" / "locations" / "CoOrLists_geo.csv"),
+        help="Path to geo CSV (default: data/locations/CoOrLists_geo.csv)",
     )
     parser.add_argument(
         "--label",
@@ -191,7 +190,7 @@ if __name__ == "__main__":
     csv_path = Path(args.csv)
     if not csv_path.exists():
         print(f"CSV not found: {csv_path}")
-        print("Run tools/tile_to_geo.py first to generate it.")
+        print("Run tools/data/tile_to_geo.py first to generate it.")
         sys.exit(1)
 
     import_geo_csv(csv_path, label_prefix=args.label, dry_run=args.dry_run)

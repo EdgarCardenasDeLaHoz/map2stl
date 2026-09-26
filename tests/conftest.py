@@ -5,18 +5,9 @@ Sets STRM2STL_TEST_MODE=1 so the DEM endpoint returns a fast deterministic
 response without any Earth Engine or network calls.
 """
 import os
-import sys
 from pathlib import Path
 
 import pytest
-
-# Point to strm2stl root so imports match the app's own paths.
-# server.py uses short paths like `from app.server.routers.regions import router` and
-# `from app.server.core.cache import ...`.  We must patch those same module objects.
-_STRM2STL_ROOT = Path(__file__).parent.parent
-for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 # Enable test mode before importing the app
 os.environ["STRM2STL_TEST_MODE"] = "1"

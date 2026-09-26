@@ -19,9 +19,6 @@ import argparse
 import logging
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, List
-
-sys.path.insert(0, ".")
 
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -45,7 +42,7 @@ _DEFAULT_CITIES = [
 ]
 
 # Small urban bboxes for each city (north, south, east, west)
-_CITY_BBOXES: Dict[str, tuple] = {
+_CITY_BBOXES: dict[str, tuple] = {
     "Amsterdam":  (52.380, 52.355, 4.920, 4.880),
     "Vienna":     (48.215, 48.190, 16.380, 16.340),
     "Prague":     (50.090, 50.065, 14.450, 14.410),
@@ -61,9 +58,9 @@ _CITY_BBOXES: Dict[str, tuple] = {
 class CityResult:
     name: str
     total_buildings: int = 0
-    tag_coverage: Dict[str, int] = field(default_factory=dict)
-    shape_distribution: Dict[str, int] = field(default_factory=dict)
-    height_sources: Dict[str, int] = field(default_factory=dict)
+    tag_coverage: dict[str, int] = field(default_factory=dict)
+    shape_distribution: dict[str, int] = field(default_factory=dict)
+    height_sources: dict[str, int] = field(default_factory=dict)
     error: str = ""
 
 
@@ -145,7 +142,7 @@ def _evaluate_city(city: str, bbox: tuple, verbose: bool = False) -> CityResult:
     return result
 
 
-def _print_report(results: List[CityResult]) -> None:
+def _print_report(results: list[CityResult]) -> None:
     # Roof tag coverage
     print()
     print("=" * 78)
@@ -158,13 +155,10 @@ def _print_report(results: List[CityResult]) -> None:
             print(f"  {r.name:<12} {'ERROR':>7}  {r.error}")
             continue
         n = r.total_buildings
-
-        def _pct(tag):
-            c = r.tag_coverage.get(tag, 0)
-            return f"{100*c/n:.1f}%" if n else "-"
-
-        print(f"  {r.name:<12} {n:>7,}  {_pct('roof:shape'):>8} {_pct('roof:height'):>8} "
-              f"{_pct('roof:levels'):>8}  {_pct('height'):>7} {_pct('building:levels'):>8}")
+        pct = {tag: (f"{100 * r.tag_coverage.get(tag, 0) / n:.1f}%" if n else "-")
+               for tag in ("roof:shape", "roof:height", "roof:levels", "height", "building:levels")}
+        print(f"  {r.name:<12} {n:>7,}  {pct['roof:shape']:>8} {pct['roof:height']:>8} "
+              f"{pct['roof:levels']:>8}  {pct['height']:>7} {pct['building:levels']:>8}")
 
     # Height source breakdown
     print()
@@ -209,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Available: {list(_CITY_BBOXES)}")
         return 1
 
-    results: List[CityResult] = []
+    results: list[CityResult] = []
     for city in city_names:
         bbox = _CITY_BBOXES[city]
         print(f"Fetching {city}...", end=" ", flush=True)

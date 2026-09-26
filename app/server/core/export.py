@@ -11,9 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 import tempfile
-from pathlib import Path
 
 import numpy as np
 from starlette.background import BackgroundTask
@@ -123,13 +121,6 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
 
     task.update(95, "Finalizing...")
     task.complete(temp_path, f"{p.name}.{fmt}", headers)
-
-# strm2stl root dir (app/server/core/export.py → core → server → app → strm2stl)
-_STRM2STL_DIR = Path(__file__).parent.parent.parent.parent
-# Ensure local packages (numpy2stl, geo2stl) are importable without os.chdir.
-if str(_STRM2STL_DIR) not in sys.path:
-    sys.path.insert(0, str(_STRM2STL_DIR))
-
 
 
 def _prepare_dem_array(
@@ -265,7 +256,6 @@ def _repair_and_export(vertices, faces, suffix: str):
     """Repair a mesh and write it out. Returns (temp file path, mesh)."""
     mesh = _repair_mesh(vertices, faces)
     return _write_mesh(mesh, suffix), mesh
-
 
 
 def _prepare_export_mesh(p, data: dict):

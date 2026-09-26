@@ -8,22 +8,19 @@ Usage:
 """
 
 from __future__ import annotations
+
 import argparse
-import sys
 import base64
 from io import BytesIO
 from pathlib import Path
 
-import numpy as np
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-_HERE = Path(__file__).resolve().parent
-_STRM2STL = _HERE.parents[1]
-for _p in (_STRM2STL, _STRM2STL.parent):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+from app.paths import REPO_ROOT
 
 
 def predict_and_plot(
@@ -34,6 +31,7 @@ def predict_and_plot(
 ):
     import torch
     from PIL import Image
+
     from geo2stl.sat2stl import fetch_satellite_tiles
     from tools.ml.data.collect_osm_tiles import _fetch_buildings_via_osmnx, _rasterize_buildings
     from tools.ml.models import RoofNetV2
@@ -60,7 +58,7 @@ def predict_and_plot(
     print(f"Loading checkpoint: {checkpoint}")
     ckpt_path = Path(checkpoint)
     if not ckpt_path.is_absolute():
-        ckpt_path = _STRM2STL / checkpoint
+        ckpt_path = REPO_ROOT / checkpoint
     state = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     sd = state.get("model_state_dict", state)
 
@@ -114,12 +112,12 @@ def predict_and_plot(
     ax_rgb.set_title("Satellite RGB")
     ax_rgb.axis("off")
 
-    im = ax_pred.imshow(pred, cmap="hot", vmin=0, vmax=vmax)
+    ax_pred.imshow(pred, cmap="hot", vmin=0, vmax=vmax)
     ax_pred.set_title(f"RoofNetV2 prediction (max {pred.max():.0f}m)")
     ax_pred.axis("off")
 
     plt.tight_layout()
-    out_path = _STRM2STL / output if not Path(output).is_absolute() else Path(output)
+    out_path = REPO_ROOT / output if not Path(output).is_absolute() else Path(output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(str(out_path), dpi=120, bbox_inches="tight")
     print(f"Saved: {out_path}")

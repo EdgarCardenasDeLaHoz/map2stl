@@ -1,14 +1,11 @@
-# ── sys.path bootstrap ────────────────────────────────────────────────────────
-# Ensure strm2stl/ (config, routers, core) and Code/ (numpy2stl peer) are
-# importable whether this file is run as a script or imported as a module.
+# app, geo2stl, city2stl and numpy2stl are installed packages (pip install -e,
+# see scripts/setup-venv.ps1), so no sys.path bootstrap is needed here.
 import logging
 import mimetypes as _mimetypes
 import os
-import sys as _sys
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from pathlib import Path as _Path
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -31,14 +28,6 @@ from app.server.routers.regions import router as _regions_router
 from app.server.routers.reports import router as _reports_router
 from app.server.routers.settings import router as _settings_router
 from app.server.routers.terrain import router as _terrain_router
-
-_STRM2STL_ROOT = str(_Path(__file__).parent.parent.parent)      # .../strm2stl/
-_CODE_ROOT = str(_Path(__file__).parent.parent.parent.parent)   # .../Code/
-for _p in (_CODE_ROOT, _STRM2STL_ROOT):
-    if _p not in _sys.path:
-        _sys.path.insert(0, _p)
-del _sys, _Path, _STRM2STL_ROOT, _CODE_ROOT
-# ─────────────────────────────────────────────────────────────────────────────
 
 # Disk-cache helpers: prune on startup, migrate legacy OSM cache
 try:

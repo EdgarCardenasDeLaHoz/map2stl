@@ -14,22 +14,20 @@ import csv
 import logging
 from collections import Counter
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
+from app.paths import REPO_ROOT
 from tools.ml.config import (
-    SHAPE_LABELS,
-    LABEL_TO_IDX,
-    RARE_CLASSES,
+    ALL_CITIES,
     DEFAULT_CROP_SIZE,
     DEFAULT_TILE_SIZE,
-    MAX_HEIGHT_M,
     IMAGENET_MEAN,
     IMAGENET_STD,
-    TRAIN_CITIES,
-    EVAL_CITIES,
-    ALL_CITIES,
+    LABEL_TO_IDX,
+    MAX_HEIGHT_M,
+    RARE_CLASSES,
+    SHAPE_LABELS,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,8 +36,8 @@ logger = logging.getLogger(__name__)
 _TORCH_AVAILABLE = False
 try:
     import torch
-    from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
     import torchvision.transforms as T
+    from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
     _TORCH_AVAILABLE = True
 except ImportError:
     pass
@@ -168,7 +166,7 @@ class RoofCropDataset(Dataset):
         manifest_path: Path,
         root_dir: Path,
         transform=None,
-        city_filter: "list[str] | None" = None,
+        city_filter: list[str] | None = None,
     ) -> None:
         _require_torch()
         from PIL import Image  # noqa: F401 — verify available
@@ -207,7 +205,7 @@ class RoofCropDataset(Dataset):
             counts[lbl] += 1
         return counts
 
-    def class_weights(self) -> "torch.Tensor":
+    def class_weights(self) -> torch.Tensor:
         """Inverse-frequency weights for WeightedRandomSampler."""
         counts = self.class_counts()
         counts = [max(c, 1) for c in counts]
@@ -352,11 +350,11 @@ def make_roof_loaders(
     root_dir: Path,
     crop_size: int = DEFAULT_CROP_SIZE,
     batch_size: int = 16,
-    val_cities: "list[str] | None" = None,
-    test_cities: "list[str] | None" = None,
+    val_cities: list[str] | None = None,
+    test_cities: list[str] | None = None,
     num_workers: int = 0,
     seed: int = 42,
-) -> "tuple[DataLoader, DataLoader, DataLoader | None, dict]":
+) -> tuple[DataLoader, DataLoader, DataLoader | None, dict]:
     """Build train/val/test DataLoaders from a manifest with city-based split.
 
     Parameters
@@ -428,9 +426,9 @@ def make_roof_loaders(
 
 
 def _filter_uniform_tiles(
-    tile_paths: "list[Path]",
+    tile_paths: list[Path],
     min_unique_heights: int = 3,
-) -> "list[Path]":
+) -> list[Path]:
     """Remove tiles where all building pixels share <= min_unique_heights distinct
     height values (rounded to 1 decimal).  Such tiles are dominated by OSM
     default-height fallbacks (e.g. all 10.0 m) and provide only noise labels.
@@ -459,7 +457,7 @@ def make_height_loaders(
     seed: int = 42,
     num_workers: int = 0,
     filter_uniform: bool = True,
-) -> "tuple[DataLoader, DataLoader, dict]":
+) -> tuple[DataLoader, DataLoader, dict]:
     """Build train/val DataLoaders for height regression.
 
     Parameters
@@ -515,7 +513,7 @@ def harvest_roof_crops(
     crop_size: int = DEFAULT_CROP_SIZE,
     min_pixels: int = 12,
     oversample_rare: int = 5,
-    cities: "dict | None" = None,
+    cities: dict | None = None,
     port: int = 9090,
     start_server: bool = True,
     verbose: bool = True,
@@ -547,7 +545,7 @@ def harvest_roof_crops(
     out_root = Path(output_dir)
     if not out_root.is_absolute():
         # Resolve relative to strm2stl/
-        out_root = Path(__file__).resolve().parents[2] / output_dir
+        out_root = REPO_ROOT / output_dir
     out_root.mkdir(parents=True, exist_ok=True)
 
     manifest_path = out_root / "manifest.csv"
@@ -721,7 +719,7 @@ def _bbox_to_pixel_box(
     satellite_transform,
     satellite_shape: tuple[int, int],
     crop_size: int,
-) -> "tuple[int, int, int, int] | None":
+) -> tuple[int, int, int, int] | None:
     """Convert a GeoJSON geometry to a square pixel crop (row0, col0, row1, col1)."""
     try:
         import rasterio.transform as rtransform
@@ -752,7 +750,7 @@ def _bbox_to_pixel_box(
 
 
 def _augment_and_save(
-    rgb_array: "np.ndarray",
+    rgb_array: np.ndarray,
     r0: int, c0: int, r1: int, c1: int,
     base_path: Path,
     factor: int,

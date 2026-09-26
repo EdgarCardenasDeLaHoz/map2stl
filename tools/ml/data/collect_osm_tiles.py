@@ -16,24 +16,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import base64
 import logging
 import math
-import sys
-import time
-import base64
 from io import BytesIO
 from pathlib import Path
 
 import numpy as np
 
-# Path bootstrap so this can run as `python -m tools.ml.collect_osm_tiles`
-_HERE = Path(__file__).resolve().parent
-_STRM2STL = _HERE.parents[1]
-for _p in (_STRM2STL, _STRM2STL.parent):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-
-from tools.ml.config import TRAIN_CITIES, DEFAULT_TILE_SIZE  # noqa: E402
+from app.paths import REPO_ROOT
+from tools.ml.config import DEFAULT_TILE_SIZE, TRAIN_CITIES  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +85,9 @@ def _rasterize_buildings(
     dim: int,
 ) -> np.ndarray:
     """Burn building footprints into a `dim x dim` height-per-pixel array (metres)."""
-    from rasterio.transform import from_bounds
     from rasterio.features import rasterize as _rasterize
-    from shapely.geometry import shape, mapping
+    from rasterio.transform import from_bounds
+    from shapely.geometry import mapping, shape
 
     transform = from_bounds(west, south, east, north, dim, dim)
     grid = np.zeros((dim, dim), dtype=np.float32)
@@ -125,8 +117,9 @@ def _fetch_satellite(
     dim: int,
 ) -> np.ndarray:
     """Fetch ESRI WMTS RGB tiles, return (3, dim, dim) float32 in [0, 1]."""
-    from geo2stl.sat2stl import fetch_satellite_tiles
     from PIL import Image
+
+    from geo2stl.sat2stl import fetch_satellite_tiles
 
     sat_b64 = fetch_satellite_tiles(north, south, east, west, dim=dim)
     img = Image.open(BytesIO(base64.b64decode(sat_b64))).convert("RGB")
@@ -158,12 +151,12 @@ def _fetch_provider_label(
     """
     # Lazy imports â€” keeps this module importable on minimal environments
     from city2stl.skyline.height import HeightResult, merge_height_rasters
-    from city2stl.skyline.height.providers.ndsm import NDSMProvider
-    from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
     from city2stl.skyline.height.providers.copernicus import CopernicusProvider
-    from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
     from city2stl.skyline.height.providers.ghsl import GHSLProvider
+    from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
+    from city2stl.skyline.height.providers.ndsm import NDSMProvider
     from city2stl.skyline.height.providers.open_buildings import OpenBuildingsProvider
+    from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
 
     all_providers = {
         "lidar_3dep":     LiDAR3DEPProvider(),
@@ -375,7 +368,7 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Collect height tiles for training")
     p.add_argument("--cities", nargs="+", default=["Berlin"],
                    help="Cities (from tools.ml.config.TRAIN_CITIES)")
-    p.add_argument("--tile-dir", type=Path, default=_STRM2STL / "cache" / "height_tiles_osm")
+    p.add_argument("--tile-dir", type=Path, default=REPO_ROOT / "cache" / "height_tiles_osm")
     p.add_argument("--tile-size", type=int, default=DEFAULT_TILE_SIZE)
     p.add_argument("--target-res-m", type=float, default=2.0)
     p.add_argument("--tiles-per-city", type=int, default=80)

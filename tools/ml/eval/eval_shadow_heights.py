@@ -19,21 +19,15 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
 from dataclasses import dataclass
-from typing import List
 
 import numpy as np
 
-# Ensure project root is importable
-sys.path.insert(0, ".")
-
 from city2stl.skyline.height.providers.shadow_height import (
-    ShadowHeightProvider,
-    _infer_from_rgb,
     _detect_shadows,
     _estimate_sun_elevation,
     _fetch_rgb_for_bbox,
+    _infer_from_rgb,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -49,7 +43,7 @@ class CityEval:
     west: float
 
 
-CITIES: List[CityEval] = [
+CITIES: list[CityEval] = [
     CityEval("Barcelona",    41.410, 41.370, 2.200, 2.140),   # Eixample district
     CityEval("Granada",      37.185, 37.165, -3.590, -3.620), # City centre
     CityEval("Cartagena",    10.430, 10.400, -75.520, -75.555),# Walled City

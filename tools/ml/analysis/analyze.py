@@ -28,11 +28,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from app.paths import REPO_ROOT
 
 try:
     import torch
@@ -42,13 +43,12 @@ except ImportError as e:
 
 
 def _resolve_paths(checkpoint: str, tiles: str) -> tuple[Path, Path]:
-    strm2stl = Path(__file__).resolve().parents[2]
     ckpt = Path(checkpoint)
     if not ckpt.is_absolute():
-        ckpt = strm2stl / checkpoint
+        ckpt = REPO_ROOT / checkpoint
     tdir = Path(tiles)
     if not tdir.is_absolute():
-        tdir = strm2stl / tiles
+        tdir = REPO_ROOT / tiles
     return ckpt, tdir
 
 
@@ -182,11 +182,9 @@ def _render_examples(
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     try:
-        from PIL import Image
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        import matplotlib.cm as cm
     except Exception as e:
         print(f"  (matplotlib not available â€” skipping render: {e})")
         return []
@@ -381,7 +379,7 @@ def main():
     if args.render:
         out_dir = Path(args.render)
         if not out_dir.is_absolute():
-            out_dir = Path(__file__).resolve().parents[2] / args.render
+            out_dir = REPO_ROOT / args.render
         print(f"\n[5/5] rendering {args.n_samples} sample tiles â†’ {out_dir} â€¦")
         saved = _render_examples(model, val_loader, args.n_iters, out_dir, args.n_samples)
         for p in saved:

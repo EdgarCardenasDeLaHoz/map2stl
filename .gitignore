@@ -77,3 +77,8 @@ rebuild_*.log
 .venv/
 venv/
 env/
+
+# Align tool: exported rasters, fetch caches, debug renders (ground_truth/ is tracked)
+tools/align_tool/data/
+tools/align_tool/cache/
+tools/align_tool/_debug/

@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
+
+from app.paths import REPO_ROOT
 
 
 def gray_minus_green(rgb: np.ndarray, max_h_m: float = 50.0) -> np.ndarray:
@@ -156,10 +158,9 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
-    strm2stl = Path(__file__).resolve().parents[2]
     tiles = Path(args.tiles)
     if not tiles.is_absolute():
-        tiles = strm2stl / args.tiles
+        tiles = REPO_ROOT / args.tiles
 
     result = evaluate(tiles, args.tile_size, args.baseline, args.seed)
     print(json.dumps(result, indent=2))

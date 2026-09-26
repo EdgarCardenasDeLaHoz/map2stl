@@ -36,7 +36,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sys
 from pathlib import Path
 
 import matplotlib.patches as mpatches
@@ -45,8 +44,6 @@ import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 
 ROOT = Path(__file__).resolve().parents[4]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 
 def build_parser() -> argparse.ArgumentParser:

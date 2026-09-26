@@ -33,8 +33,6 @@ import argparse
 import base64
 import copy
 import csv
-import json
-import sys
 import time
 from collections import Counter
 from io import BytesIO
@@ -42,15 +40,7 @@ from pathlib import Path
 
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Path bootstrap
-# ---------------------------------------------------------------------------
-_HERE = Path(__file__).resolve().parent
-_STRM2STL = _HERE.parent
-_REPO_ROOT = _STRM2STL.parent
-for _p in (_STRM2STL, _REPO_ROOT):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+from app.paths import REPO_ROOT
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -139,7 +129,6 @@ def _evaluate_city(
     verbose: bool,
 ) -> dict:
     """Run full evaluation for a single city.  Returns summary dict."""
-    import numpy as np  # noqa: F401
 
     summary: dict = {
         "city": name,
@@ -383,7 +372,7 @@ def eval_roof_classifier(
     dict mapping city name → summary dict
     """
     if output_dir is None:
-        output_dir = _STRM2STL / "output"
+        output_dir = REPO_ROOT / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     from app.session.terrain_session import TerrainSession
@@ -416,7 +405,7 @@ def eval_roof_classifier(
 
         if verbose:
             print(f"\n{'═' * 60}")
-            print(f"  Roof classifier evaluation summary")
+            print("  Roof classifier evaluation summary")
             print(f"{'═' * 60}")
             print(f"  {'city':<22}  {'bldg':>5}  {'gt':>5}  "
                   f"{'gain':>5}  {'acc':>6}  {'top1_shape':<12}  note")

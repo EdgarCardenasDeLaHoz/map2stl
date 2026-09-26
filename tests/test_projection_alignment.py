@@ -73,7 +73,7 @@ class TestProjectionDimensionConsistency:
     @pytest.mark.parametrize("projection", _PROJECTIONS)
     def test_project_water_arrays_keeps_alignment(self, projection):
         """_project_water_arrays guarantees water and ESA stay aligned."""
-        from strm2stl.app.server.routers.terrain import _project_water_arrays
+        from app.server.routers.terrain import _project_water_arrays
         h, w = 100, 120
         water = np.random.choice([0.0, 1.0], size=(h, w)).astype(np.float32)
         esa = np.random.choice([10, 20, 30, 50, 80],
@@ -109,7 +109,7 @@ class TestVariableDimensionOutput:
 
     @pytest.mark.parametrize("projection", _PROJECTIONS)
     def test_matches_expected_aspect_ratio(self, projection):
-        from geo2stl.projections import project_coordinates, expected_aspect_ratio
+        from geo2stl.projections import expected_aspect_ratio, project_coordinates
         w, h = _equal_angle_shape(_BBOX, 300)
         mat = np.random.rand(h, w).astype(np.float32)
 

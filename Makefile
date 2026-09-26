@@ -1,18 +1,11 @@
 # strm2stl — common dev commands
 # Run from strm2stl/ (the directory containing this Makefile)
 
-VENV := ../.venv
+# The venv lives outside OneDrive; scripts/setup-venv.ps1 creates it.
+VENV := $(USERPROFILE)/.venvs/strm2stl
 PYTHON := $(VENV)/Scripts/python
-PIP := $(VENV)/Scripts/pip
-PYTEST := $(VENV)/Scripts/pytest
+PYTEST := $(PYTHON) -m pytest
 RUFF := $(VENV)/Scripts/ruff
-
-# Fallback to system Python if venv not found
-ifeq ($(wildcard $(PYTHON)),)
-  PYTHON := python
-  PYTEST := python -m pytest
-  RUFF   := python -m ruff
-endif
 
 .PHONY: serve test lint fmt install clean-runs help
 
@@ -20,27 +13,25 @@ endif
 serve:
 	$(PYTHON) -m uvicorn app.server.server:app --host 127.0.0.1 --port 9000 --reload
 
-## Run the full pytest test suite
+## Run the test suite (this repo + ../numpy2stl, per pytest.ini)
 test:
-	$(PYTEST) tests/ -v
+	$(PYTEST)
 
 ## Run a specific test file or pattern (usage: make test-one T=tests/test_regions.py)
 test-one:
 	$(PYTEST) $(T) -v
 
-## Lint all Python files with ruff
+## Lint the libraries and app with ruff
 lint:
-	$(RUFF) check app/ tests/
+	$(RUFF) check app/ geo2stl/ city2stl/ tests/ tools/
 
 ## Auto-fix ruff lint issues
 fmt:
-	$(RUFF) check --fix app/ tests/
-	$(RUFF) format app/ tests/
+	$(RUFF) check --fix app/ geo2stl/ city2stl/ tests/ tools/
 
-## Install Python dependencies
+## Create / refresh the venv and install both repos editable
 install:
-	$(PIP) install -r requirements.txt
-	$(PIP) install -r requirements-dev.txt
+	powershell -ExecutionPolicy Bypass -File scripts/setup-venv.ps1
 
 ## Delete regenerable skyline caches under city2stl/skyline/runs (frees GBs; keeps region_reports/ + height_traces/)
 clean-runs:

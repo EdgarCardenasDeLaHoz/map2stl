@@ -48,14 +48,11 @@ except RuntimeError:
     pass
 
 import argparse  # noqa: E402
-import sys  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 from city2stl.skyline.region_pdf import run_region_pdf_report  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 
 def build_parser() -> argparse.ArgumentParser:

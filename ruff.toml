@@ -1,6 +1,5 @@
 # ruff configuration for strm2stl
-# Run: ruff check ui/ tests/
-# Fix:  ruff check --fix ui/ tests/
+# Run: ruff check .      Fix: ruff check --fix .
 
 line-length = 100
 target-version = "py311"
@@ -23,6 +22,10 @@ ignore = [
 
 [lint.per-file-ignores]
 "tests/*" = ["F811"]   # redefinition of unused name (fixture overrides are expected)
+# Research / operator scripts: correctness rules (F, B0xx bugs) still apply; the
+# style-only rules below are not worth churning one-off analysis code for.
+"tools/**" = ["E701", "E702", "E731", "E741", "UP031", "B904", "B905"]
+"tests/manual/**" = ["E701", "E702", "E731", "E741", "UP031", "B904", "B905"]
 
 [format]
 quote-style = "double"

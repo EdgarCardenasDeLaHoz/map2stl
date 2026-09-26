@@ -31,7 +31,6 @@ import logging
 import math
 import re
 import shutil
-import sys
 import uuid
 from pathlib import Path
 
@@ -41,15 +40,6 @@ from app.server.config import MAX_DIM, MICROPOLITAN_STL_DIR
 from app.server.core.cache import CACHE_ROOT, make_cache_key
 
 logger = logging.getLogger(__name__)
-
-# strm2stl/../ (Code/) root — numpy2stl is a sibling package to strm2stl/, not
-# inside it, so it needs this on sys.path. server.py does this too, but its
-# bootstrap runs *after* this module's import (routers/layers.py is imported
-# before server.py's bootstrap block executes), so a numpy2stl import at
-# module load time here would fail. Guard locally, same fix as core/export.py.
-_CODE_DIR = Path(__file__).parent.parent.parent.parent.parent
-if str(_CODE_DIR) not in sys.path:
-    sys.path.insert(0, str(_CODE_DIR))
 
 try:
     from city2stl.skyline.height.stl_import import stl_to_heightmap as _stl_to_heightmap

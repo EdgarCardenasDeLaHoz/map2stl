@@ -24,25 +24,23 @@ import json
 import sys
 from pathlib import Path
 
+from app.paths import REPO_ROOT
+
 # ---------------------------------------------------------------------------
 # Resolve paths relative to this script's location (strm2stl/tools/)
 # ---------------------------------------------------------------------------
-_TOOLS_DIR      = Path(__file__).resolve().parent   # strm2stl/tools/
-_STRM2STL_DIR   = _TOOLS_DIR.parent                 # strm2stl/
 
-# Add strm2stl/ to path so we can import app.server.core.db and app.config
-sys.path.insert(0, str(_STRM2STL_DIR))
 
 try:
-    from app.server.core.db import get_db, init_db, DB_PATH
+    from app.server.core.db import DB_PATH, get_db, init_db
 except ImportError as exc:
     sys.exit(f"Cannot import app.server.core.db: {exc}\nRun this script from the strm2stl root or ensure the venv is active.")
 
 try:
     from app.server.config import COORDINATES_PATH, REGION_SETTINGS_PATH
 except ImportError:
-    COORDINATES_PATH     = _STRM2STL_DIR / "coordinates.json"
-    REGION_SETTINGS_PATH = _STRM2STL_DIR / "region_settings.json"
+    COORDINATES_PATH     = REPO_ROOT / "coordinates.json"
+    REGION_SETTINGS_PATH = REPO_ROOT / "region_settings.json"
 
 
 # ---------------------------------------------------------------------------

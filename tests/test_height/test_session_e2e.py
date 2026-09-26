@@ -5,20 +5,12 @@ session.fetch_building_heights() through provider selection, fetch,
 merge, and storage on self.building_heights.
 """
 
-import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
-_STRM2STL_ROOT = Path(__file__).parent.parent.parent
-for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
 from city2stl.skyline.height import HeightResult
-
 
 # ── helper to build a fake session ──────────────────────────────
 
@@ -396,8 +388,6 @@ class TestProviderErrors:
     def test_provider_exception_caught(self, monkeypatch, tmp_path, capsys):
         """If one provider throws, others still run."""
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
-
-        wsf = _synthetic_height_result((800, 800), 10.0, 0.5, "wsf3d")
 
         with patch(
             "city2stl.skyline.height.providers.wsf3d.WSF3DProvider.fetch_heights",

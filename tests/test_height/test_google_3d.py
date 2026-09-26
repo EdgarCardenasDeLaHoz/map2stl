@@ -3,17 +3,10 @@
 All tests use synthetic data — no network or API key required.
 """
 import math
-import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
 import trimesh
-
-_STRM2STL_ROOT = Path(__file__).parent.parent.parent
-for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 from city2stl.skyline.height.providers.google_3d import (  # noqa: E402
     Google3DProvider,

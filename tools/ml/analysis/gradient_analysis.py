@@ -19,11 +19,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 
-from tools.ml.data.datasets import make_height_loaders, make_roof_loaders
+from app.paths import REPO_ROOT
+from tools.ml.data.datasets import make_height_loaders
 from tools.ml.models import build_model
 
 
@@ -75,10 +75,9 @@ def analyze_height_contributions(
     model = build_model(task="height", arch=arch, checkpoint=str(ckpt), device=str(dev))
     model.train()  # keep grads enabled on all modules
 
-    strm2stl = Path(__file__).resolve().parents[2]
     tile_root = Path(tile_dir)
     if not tile_root.is_absolute():
-        tile_root = strm2stl / tile_dir
+        tile_root = REPO_ROOT / tile_dir
     tile_paths = sorted(tile_root.glob("*.npz"))
     if not tile_paths:
         raise FileNotFoundError(f"No .npz tiles found in {tile_root}")
@@ -203,10 +202,9 @@ def main() -> None:
         batches=args.batches,
     )
 
-    strm2stl = Path(__file__).resolve().parents[2]
     out_path = Path(args.out)
     if not out_path.is_absolute():
-        out_path = strm2stl / out_path
+        out_path = REPO_ROOT / out_path
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(out_path, "w", encoding="utf-8") as fh:

@@ -29,17 +29,13 @@ if (-not (Test-Path (Join-Path $Venv "Scripts\python.exe"))) {
 $vpy = Join-Path $Venv "Scripts\python.exe"
 & $vpy -m pip install --upgrade pip
 
-if (Test-Path (Join-Path $root "pyproject.toml")) {
-    # the dev extra when the project declares one, the plain install otherwise
-    & $vpy -m pip install -e "$root[dev]"
-    if ($LASTEXITCODE -ne 0) { & $vpy -m pip install -e "$root" }
-} elseif (Test-Path (Join-Path $root "requirements.txt")) {
-    $reqs = @("-r", (Join-Path $root "requirements.txt"))
-    $dev = Join-Path $root "requirements-dev.txt"
-    if (Test-Path $dev) { $reqs += @("-r", $dev) }
-    & $vpy -m pip install @reqs
-}
-if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
+# Pinned versions first (requirements*.txt), then both repos as editable
+# packages so app / geo2stl / city2stl / numpy2stl import from any directory.
+$numpy2stl = Join-Path (Split-Path -Parent $root) "numpy2stl"
+& $vpy -m pip install -r (Join-Path $root "requirements.txt") -r (Join-Path $root "requirements-dev.txt")
+if ($LASTEXITCODE -ne 0) { throw "pip install of requirements failed" }
+& $vpy -m pip install --no-deps -e $numpy2stl -e $root
+if ($LASTEXITCODE -ne 0) { throw "editable install failed (is ../numpy2stl checked out?)" }
 
 # Keep bytecode out of the synced folder for every run of this venv, not only
 # the ones launched through a script: a .pth line runs at interpreter start.

@@ -1,5 +1,5 @@
 """
-tools/tile_to_geo.py — Convert a tile-index coordinate list to geographic coordinates.
+tools/data/tile_to_geo.py — Convert a tile-index coordinate list to geographic coordinates.
 
 The legacy CoOrLists.csv stores bounding boxes as SRTM tile numbers + pixel offsets:
     Filename, Rotation, GridX1, GridX2, GridY1, GridY2, X1, X2, Y1, Y2
@@ -23,17 +23,18 @@ Corner 1 (GridX1, GridY1, Y1_lon, X1_lat) → northwest corner (north, west)
 Corner 2 (GridX1, GridY1, Y2_lon, X2_lat) → southeast corner (south, east)
 
 Usage:
-    python tools/tile_to_geo.py [input_csv] [output_csv]
+    python tools/data/tile_to_geo.py [input_csv] [output_csv]
 
 Defaults:
-    input  = locations/CoOrLists.csv  (relative to project root)
-    output = locations/CoOrLists_geo.csv
+    input  = data/locations/CoOrLists.csv  (relative to the strm2stl root)
+    output = data/locations/CoOrLists_geo.csv
 """
 
 import csv
 import sys
 from pathlib import Path
 
+from app.paths import REPO_ROOT
 
 # ---------------------------------------------------------------------------
 # Coordinate conversion — mirrors dem2stl.tile_num_2_geo_coor exactly
@@ -94,9 +95,7 @@ def convert_csv(input_path: Path, output_path: Path) -> int:
 
             try:
                 gx1 = float(row["GridX1"])
-                gx2 = float(row["GridX2"])
                 gy1 = float(row["GridY1"])
-                gy2 = float(row["GridY2"])
                 x1  = float(row["X1"])
                 x2  = float(row["X2"])
                 y1  = float(row["Y1"])
@@ -139,10 +138,8 @@ def convert_csv(input_path: Path, output_path: Path) -> int:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    root = Path(__file__).parent.parent.parent  # …/3D Maps/Code
-
-    input_csv  = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "locations" / "CoOrLists.csv"
-    output_csv = Path(sys.argv[2]) if len(sys.argv) > 2 else root / "locations" / "CoOrLists_geo.csv"
+    input_csv  = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO_ROOT / "data" / "locations" / "CoOrLists.csv"
+    output_csv = Path(sys.argv[2]) if len(sys.argv) > 2 else REPO_ROOT / "data" / "locations" / "CoOrLists_geo.csv"
 
     if not input_csv.exists():
         print(f"Input file not found: {input_csv}")

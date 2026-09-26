@@ -12,17 +12,13 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
+from app.paths import REPO_ROOT
 from tools.ml.config import DEFAULT_HEIGHT_MODEL  # noqa: E402
 from tools.ml.eval import detect_arch  # noqa: E402
 
@@ -32,26 +28,26 @@ def _resolve_path(env_name: str, default: Path) -> Path:
     if not raw:
         return default
     p = Path(raw)
-    return p if p.is_absolute() else PROJECT_ROOT / raw
+    return p if p.is_absolute() else REPO_ROOT / raw
 
 
-TILE_DIR = _resolve_path("INSPECTOR_TILE_DIR", PROJECT_ROOT / "cache" / "height_tiles_osm")
+TILE_DIR = _resolve_path("INSPECTOR_TILE_DIR", REPO_ROOT / "cache" / "height_tiles_osm")
 REPORT_PDF = _resolve_path(
-    "INSPECTOR_PDF", PROJECT_ROOT / "output" / "height_training_inspector_report.pdf"
+    "INSPECTOR_PDF", REPO_ROOT / "output" / "height_training_inspector_report.pdf"
 )
 
 CANDIDATE_PATHS = [
-    PROJECT_ROOT / DEFAULT_HEIGHT_MODEL,
-    PROJECT_ROOT / "models" / "roofnet_v3s_v2.pt",
-    PROJECT_ROOT / "models" / "roofnet_v3s.pt",
-    PROJECT_ROOT / "models" / "roofnet_v3.pt",
-    PROJECT_ROOT / "models" / "roofnet_height_v3.pt",
-    PROJECT_ROOT / "models" / "roofnet_height_v1.pt",
+    REPO_ROOT / DEFAULT_HEIGHT_MODEL,
+    REPO_ROOT / "models" / "roofnet_v3s_v2.pt",
+    REPO_ROOT / "models" / "roofnet_v3s.pt",
+    REPO_ROOT / "models" / "roofnet_v3.pt",
+    REPO_ROOT / "models" / "roofnet_height_v3.pt",
+    REPO_ROOT / "models" / "roofnet_height_v1.pt",
 ]
 _env_model = os.environ.get("INSPECTOR_MODEL")
 if _env_model:
     _candidate = Path(_env_model)
-    MODEL_PATH = _candidate if _candidate.is_absolute() else PROJECT_ROOT / _env_model
+    MODEL_PATH = _candidate if _candidate.is_absolute() else REPO_ROOT / _env_model
 else:
     MODEL_PATH = next((p for p in CANDIDATE_PATHS if p.exists()), CANDIDATE_PATHS[0])
 

@@ -19,15 +19,14 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
+from app.paths import REPO_ROOT
 from tools.ml.config import (
-    SHAPE_LABELS,
     DEFAULT_CROP_SIZE,
     DEFAULT_SHAPE_MODEL,
-    MAX_HEIGHT_M,
+    SHAPE_LABELS,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,8 +99,8 @@ def evaluate_shape_model(
     if not _TORCH_AVAILABLE:
         raise ImportError("PyTorch required")
 
-    from tools.ml.models import build_model
     from tools.ml.data.datasets import make_roof_loaders
+    from tools.ml.models import build_model
 
     if device == "auto":
         if torch.cuda.is_available():
@@ -113,10 +112,9 @@ def evaluate_shape_model(
     else:
         dev = torch.device(device)
 
-    strm2stl = Path(__file__).resolve().parents[2]
     data_root = Path(data_dir)
     if not data_root.is_absolute():
-        data_root = strm2stl / data_dir
+        data_root = REPO_ROOT / data_dir
 
     manifest = data_root / "manifest.csv"
     if not manifest.exists():
@@ -184,18 +182,17 @@ def evaluate_height_model(
     if not _TORCH_AVAILABLE:
         raise ImportError("PyTorch required")
 
-    from tools.ml.models import build_model
     from tools.ml.data.datasets import make_height_loaders
+    from tools.ml.models import build_model
 
     if device == "auto":
         dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     else:
         dev = torch.device(device)
 
-    strm2stl = Path(__file__).resolve().parents[2]
     tile_root = Path(tile_dir)
     if not tile_root.is_absolute():
-        tile_root = strm2stl / tile_dir
+        tile_root = REPO_ROOT / tile_dir
 
     tile_paths = sorted(tile_root.glob("*.npz"))
     if not tile_paths:
@@ -239,10 +236,10 @@ def evaluate_height_model(
 
 def plot_confusion_matrix(
     confusion: np.ndarray,
-    labels: "list[str] | None" = None,
+    labels: list[str] | None = None,
     title: str = "Roof Shape Confusion Matrix",
     figsize: tuple = (8, 7),
-    save_path: "str | None" = None,
+    save_path: str | None = None,
 ):
     """Plot a confusion matrix heatmap.  Returns the matplotlib figure."""
     import matplotlib.pyplot as plt
@@ -285,7 +282,7 @@ def plot_confusion_matrix(
 
 def plot_training_history(
     history_path: str,
-    save_path: "str | None" = None,
+    save_path: str | None = None,
 ):
     """Plot training curves from a history JSON file.  Returns the figure."""
     import matplotlib.pyplot as plt
@@ -347,7 +344,7 @@ def plot_height_scatter(
     targets: np.ndarray,
     mae: float,
     rmse: float,
-    save_path: "str | None" = None,
+    save_path: str | None = None,
 ):
     """Scatter plot of predicted vs true heights.  Returns the figure."""
     import matplotlib.pyplot as plt
@@ -379,7 +376,7 @@ def plot_sample_predictions(
     n_samples: int = 16,
     crop_size: int = DEFAULT_CROP_SIZE,
     device: str = "cpu",
-    save_path: "str | None" = None,
+    save_path: str | None = None,
 ):
     """Show a grid of sample crops with true vs predicted labels.
 
@@ -389,13 +386,13 @@ def plot_sample_predictions(
     if not _TORCH_AVAILABLE:
         raise ImportError("PyTorch required")
     import matplotlib.pyplot as plt
-    from tools.ml.models import build_model
-    from tools.ml.data.datasets import RoofCropDataset, build_transforms
 
-    strm2stl = Path(__file__).resolve().parents[2]
+    from tools.ml.data.datasets import RoofCropDataset, build_transforms
+    from tools.ml.models import build_model
+
     data_root = Path(data_dir)
     if not data_root.is_absolute():
-        data_root = strm2stl / data_dir
+        data_root = REPO_ROOT / data_dir
 
     manifest = data_root / "manifest.csv"
     eval_tf = build_transforms(crop_size, augment=False)

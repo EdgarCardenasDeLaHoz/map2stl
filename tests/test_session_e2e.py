@@ -17,8 +17,6 @@ conftest.py) which:
 """
 
 import os
-import sys
-from pathlib import Path
 
 import pytest
 
@@ -26,10 +24,6 @@ import pytest
 # returns deterministic synthetic data without network/Earth Engine calls.
 os.environ.setdefault("STRM2STL_TEST_MODE", "1")
 
-_ROOT = Path(__file__).parent.parent
-for _p in (str(_ROOT.parent), str(_ROOT)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 import app.session.terrain_session as _ts_module  # noqa: E402
 from app.session.terrain_session import TerrainSession  # noqa: E402
@@ -533,7 +527,7 @@ class TestSessionWaterMaskSmoke:
         session.select("TestRegion")
         bbox = session.bbox
         # In TEST_MODE, water-mask should return synthetic data or test stub
-        params = {"north": bbox["north"], "south": bbox["south"], 
+        params = {"north": bbox["north"], "south": bbox["south"],
                   "east": bbox["east"], "west": bbox["west"]}
         data = session._api_request("get", "/api/terrain/water-mask", params=params, timeout=10)
         assert data is not None
@@ -544,7 +538,7 @@ class TestSessionWaterMaskSmoke:
         """Verify water-mask response includes required fields."""
         session.select("TestRegion")
         bbox = session.bbox
-        params = {"north": bbox["north"], "south": bbox["south"], 
+        params = {"north": bbox["north"], "south": bbox["south"],
                   "east": bbox["east"], "west": bbox["west"]}
         data = session._api_request("get", "/api/terrain/water-mask", params=params, timeout=10)
         # Expect ESA land cover and water mask dimensions
@@ -559,7 +553,7 @@ class TestSessionCompositeDeMMerge:
         """POST /api/composite/dem-merge should accept proper merge request."""
         session.select("TestRegion")
         bbox = session.bbox
-        
+
         # Create a minimal merge request with one layer spec
         payload = {
             "bbox": bbox,
@@ -575,7 +569,7 @@ class TestSessionCompositeDeMMerge:
             ]
         }
         result = session._api_request("post", "/api/composite/dem-merge", json=payload, timeout=10)
-        
+
         # Should return merged result
         assert result is not None
         assert isinstance(result, dict)
@@ -586,7 +580,7 @@ class TestSessionCompositeDeMMerge:
         """Verify dem-merge returns valid output structure in TEST_MODE."""
         session.select("TestRegion")
         bbox = session.bbox
-        
+
         payload = {
             "bbox": bbox,
             "dim": 64,
@@ -601,7 +595,7 @@ class TestSessionCompositeDeMMerge:
             ]
         }
         result = session._api_request("post", "/api/composite/dem-merge", json=payload, timeout=10)
-        
+
         # Should return dimensions and elevation data (or error is acceptable for smoke test)
         assert "dimensions" in result or "error" in result
         if "dimensions" in result:
@@ -634,7 +628,7 @@ class TestSessionHydrologySmoke:
         """GET /api/terrain/hydrology should use offline Natural Earth data."""
         session.select("TestRegion")
         bbox = session.bbox
-        params = {"north": bbox["north"], "south": bbox["south"], 
+        params = {"north": bbox["north"], "south": bbox["south"],
                   "east": bbox["east"], "west": bbox["west"]}
         # Natural Earth HydroRIVERS is cached locally; should not need network
         data = session._api_request("get", "/api/terrain/hydrology", params=params, timeout=10)
@@ -645,7 +639,7 @@ class TestSessionHydrologySmoke:
         """Verify hydrology response has valid structure."""
         session.select("TestRegion")
         bbox = session.bbox
-        params = {"north": bbox["north"], "south": bbox["south"], 
+        params = {"north": bbox["north"], "south": bbox["south"],
                   "east": bbox["east"], "west": bbox["west"]}
         data = session._api_request("get", "/api/terrain/hydrology", params=params, timeout=10)
         # Should have river grid data with encoded geometry

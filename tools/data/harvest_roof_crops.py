@@ -35,25 +35,16 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
-import json
-import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from io import BytesIO
 from pathlib import Path
 
 import numpy as np
+import rasterio.transform as rtransform
+from shapely.geometry import shape as shapely_shape
 
-# ---------------------------------------------------------------------------
-# Path bootstrap
-# ---------------------------------------------------------------------------
-_HERE = Path(__file__).resolve().parent
-_STRM2STL = _HERE.parent
-_REPO_ROOT = _STRM2STL.parent
-for _p in (_STRM2STL, _REPO_ROOT):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-
-from tools.data.seed_eval_regions import EVAL_CITIES  # noqa: E402
+from app.paths import REPO_ROOT
+from tools.data.seed_eval_regions import EVAL_CITIES
 
 # ---------------------------------------------------------------------------
 # Shape label set (must match roof_classifier._SHAPE_LABELS and RoofNet order)
@@ -81,15 +72,6 @@ def _bbox_to_pixel_box(
 
     Returns None if the footprint is too small or out of bounds.
     """
-    try:
-        import rasterio.transform as rtransform
-        from shapely.geometry import shape as shapely_shape
-    except ImportError:
-        raise ImportError(
-            "rasterio and shapely are required for harvest_roof_crops. "
-            "Install with: pip install rasterio shapely"
-        )
-
     geom = shapely_shape(footprint_geom)
     minx, miny, maxx, maxy = geom.bounds
 
@@ -119,11 +101,6 @@ def _footprint_pixel_area(
     satellite_transform,
 ) -> int:
     """Approximate footprint area in satellite pixels."""
-    try:
-        import rasterio.transform as rtransform
-        from shapely.geometry import shape as shapely_shape
-    except ImportError:
-        return 1  # can't measure — include anyway
 
     geom = shapely_shape(footprint_geom)
     minx, miny, maxx, maxy = geom.bounds
@@ -135,7 +112,7 @@ def _footprint_pixel_area(
 
 
 def _save_crop(
-    rgb_array: "np.ndarray",
+    rgb_array: np.ndarray,
     r0: int, c0: int, r1: int, c1: int,
     out_path: Path,
 ) -> bool:
@@ -156,7 +133,7 @@ def _save_crop(
 
 
 def _augment_and_save(
-    rgb_array: "np.ndarray",
+    rgb_array: np.ndarray,
     r0: int, c0: int, r1: int, c1: int,
     base_path: Path,
     factor: int,
@@ -230,17 +207,9 @@ def harvest_roof_crops(
     -------
     dict with keys 'total_crops', 'per_label', 'per_city', 'manifest_path'.
     """
-    try:
-        import rasterio
-        import rasterio.transform
-    except ImportError:
-        raise ImportError(
-            "rasterio is required. Install with: pip install rasterio"
-        )
-
     out_root = Path(output_dir)
     if not out_root.is_absolute():
-        out_root = _STRM2STL / output_dir
+        out_root = REPO_ROOT / output_dir
     out_root.mkdir(parents=True, exist_ok=True)
 
     manifest_path = out_root / "manifest.csv"
@@ -406,13 +375,13 @@ def harvest_roof_crops(
     total = sum(per_label.values())
     if verbose:
         print(f"\n{'═' * 60}")
-        print(f"  Harvest summary")
+        print("  Harvest summary")
         print(f"{'═' * 60}")
         print(f"  Total crops: {total}")
-        print(f"  Per label:")
+        print("  Per label:")
         for lbl in SHAPE_LABELS:
             print(f"    {lbl:<12} {per_label.get(lbl, 0):>6}")
-        print(f"  Per city:")
+        print("  Per city:")
         for city, n in per_city.most_common():
             print(f"    {city:<25} {n:>6}")
         print(f"  Manifest: {manifest_path}")

@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STL ↔ OSM / satellite drag-align tool</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #14161a; color: #d8dce2; font: 13px/1.45 system-ui, sans-serif;
+         display: flex; height: 100vh; overflow: hidden; }
+  #side { width: 310px; min-width: 310px; padding: 14px 16px; box-sizing: border-box;
+          background: #1b1e24; border-right: 1px solid #2a2e36; overflow-y: auto; }
+  #main { flex: 1; position: relative; }
+  canvas { display: block; width: 100%; height: 100%; background: #0c0d10;
+           cursor: grab; touch-action: none; }
+  canvas.dragging { cursor: grabbing; }
+  canvas.panning { cursor: move; }
+  h1 { font-size: 15px; margin: 0 0 10px; color: #fff; }
+  label { display: block; margin: 8px 0 2px; color: #9aa2ad; }
+  select, button { width: 100%; box-sizing: border-box; padding: 6px 8px; margin: 2px 0;
+                   background: #262b33; color: #e6e9ee; border: 1px solid #3a4150;
+                   border-radius: 4px; font: inherit; cursor: pointer; }
+  select:hover, button:hover { background: #2f3540; }
+  button.primary { background: #2b5cab; border-color: #3a6fc4; }
+  button.primary:hover { background: #336cc7; }
+  input[type=range] { width: 100%; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row label { margin: 0; flex: 1; }
+  .seg { display: flex; gap: 0; margin: 4px 0; }
+  .seg button { border-radius: 0; margin: 0; }
+  .seg button:first-child { border-radius: 4px 0 0 4px; }
+  .seg button:last-child { border-radius: 0 4px 4px 0; border-left: none; }
+  .seg button.on { background: #2b5cab; border-color: #3a6fc4; color: #fff; }
+  #readout { margin-top: 10px; padding: 8px; background: #14171c; border: 1px solid #2a2e36;
+             border-radius: 4px; font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+             white-space: pre; }
+  .help { margin-top: 12px; color: #7d8590; font-size: 12px; }
+  .help kbd { background: #262b33; border: 1px solid #3a4150; border-radius: 3px;
+              padding: 0 4px; font-family: inherit; }
+  #status { margin-top: 8px; color: #6fbf73; min-height: 1.2em; font-size: 12px; }
+  #err { display: none; margin: 8px 0; padding: 8px; border-radius: 4px; font-size: 12px;
+         background: #3a1d1d; border: 1px solid #7b3030; color: #ffb4b4; white-space: pre-wrap; }
+  #err code { color: #ffd9a0; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>STL ↔ OSM / satellite align</h1>
+
+  <div id="err"></div>
+  <div id="loaderBox" style="display:none">
+    <label for="fileIn">Load <code>data/align_data.js</code> manually</label>
+    <input type="file" id="fileIn" accept=".js,.json">
+  </div>
+
+  <label for="city">City</label>
+  <select id="city"></select>
+
+  <label>Moving layer</label>
+  <div class="seg">
+    <button id="layerOsm" class="on">OSM</button>
+    <button id="layerSat">Satellite</button>
+  </div>
+
+  <button id="loadGuess">Load pipeline guess</button>
+  <button id="reset">Reset (centered, 0°)</button>
+  <button id="fit">Fit view</button>
+
+  <div class="row" style="margin-top:8px">
+    <label for="unlockScale"><input type="checkbox" id="unlockScale"> Unlock scale (locked at <span id="lockVal">1.499</span>)</label>
+  </div>
+
+  <label for="opacity">Moving-layer opacity</label>
+  <input type="range" id="opacity" min="0" max="100" value="65">
+
+  <label for="refetchMargin">Reference window size (re-fetch)</label>
+  <select id="refetchMargin">
+    <option value="1.5" selected>1.5× the STL footprint</option>
+    <option value="2">2× — a little context</option>
+    <option value="3">3× — find a badly placed match</option>
+    <option value="4">4× — last resort, slow fetch</option>
+  </select>
+
+  <label for="refetchCenter">Re-fetch centre (lat, lon) — blank = keep here</label>
+  <input type="text" id="refetchCenter" placeholder="e.g. 41.3874, 2.1686">
+  <div id="centerNow" class="help" style="margin:2px 0 0">window centre —</div>
+
+  <div id="readout">—</div>
+
+  <button class="primary" id="save" style="margin-top:10px">Save ground truth (server)</button>
+  <button id="refine">Fine-tune with registration</button>
+  <button id="refetch">Re-fetch OSM region here</button>
+  <button id="export">Export JSON (download)</button>
+  <div id="status"></div>
+
+  <div class="help">
+    <b>Controls</b><br>
+    Drag — move the OSM/satellite layer (STL never moves)<br>
+    Wheel / <kbd>+</kbd> <kbd>-</kbd> — scale the layer (when unlocked;
+    <kbd>Ctrl</kbd>+wheel is coarse)<br>
+    <kbd>Shift</kbd>+wheel / <kbd>Q</kbd> <kbd>E</kbd> — rotate 0.1°
+    (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+wheel: 1°)<br>
+    Arrow keys — nudge 0.5 px (<kbd>Shift</kbd>: 5 px)<br>
+    <kbd>Shift</kbd>+drag or middle-drag — pan the view<br>
+    <kbd>Alt</kbd>+wheel — zoom the view<br>
+    <kbd>Space</kbd> (hold) — hide the moving layer<br><br>
+    <b>Buttons</b><br>
+    Save — writes <code>toolslign_tool\ground_truth\&lt;slug&gt;.json</code> directly
+    (needs server.py; falls back to a browser download).<br>
+    Fine-tune — runs the OpenCV ECC refine seeded with the current alignment.<br>
+    Re-fetch — pulls a fresh OSM + satellite raster for the window the current
+    alignment implies. Use it when the region is simply wrong: the pipeline sizes
+    the window from the mesh Z range and centres it on the administrative
+    centroid, so the true match can sit entirely outside the fetched raster.<br><br>
+    Reference window size sets how much ground that re-fetch covers, as a multiple
+    of the STL footprint. Raise it when the match is nowhere on screen and you need
+    the surrounding streets to find it; 1.5× is what the pipeline itself uses. The
+    raster resolution rises with the window, so metres-per-pixel stays roughly
+    constant and a wider window mostly just costs fetch time.<br><br>
+    The on-screen state maps OSM px → STL px. The export inverts it, so the saved
+    matrix keeps the pipeline convention: 2×3 affine, STL px → OSM px, rotation
+    about the origin (cv2.warpAffine).
+  </div>
+</div>
+<div id="main"><canvas id="cv"></canvas></div>
+
+<script src="data/align_data.js" onerror="window.__dataScriptFailed = true;"></script>
+<script>
+"use strict";
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const citySel = document.getElementById("city");
+const readout = document.getElementById("readout");
+const statusEl = document.getElementById("status");
+const errEl = document.getElementById("err");
+const opacityEl = document.getElementById("opacity");
+const unlockEl = document.getElementById("unlockScale");
+const lockValEl = document.getElementById("lockVal");
+
+let DATA = {};
+let cur = null;            // {meta, stl, osm, sat, w, h, sw, sh}
+let st = { s: 1.4993, rot: 0, tx: 0, ty: 0 };   // OSM px -> STL px
+let view = { k: 1, vx: 0, vy: 0 };              // STL px -> screen px (display only)
+let lockScale = 1.4993;
+let layer = "osm";
+let hideOverlay = false;
+
+function showError(msg) {
+  errEl.style.display = "block";
+  errEl.textContent = msg;
+}
+window.addEventListener("error", e => {
+  showError("Script error: " + (e.message || e) + "\n" + (e.filename || "") + ":" + (e.lineno || ""));
+});
+
+// ---- geometry -------------------------------------------------------------
+// Canvas transform arg order is (a, b, cc, d, tx, ty) with
+//   x' = a*x + cc*y + tx ;  y' = b*x + d*y + ty
+// which is exactly the cv2 2x3 matrix [[a, cc, tx], [b, d, ty]].
+
+function linear() {
+  const r = st.rot * Math.PI / 180, c = Math.cos(r) * st.s, s = Math.sin(r) * st.s;
+  return { a: c, b: s, cc: -s, d: c };
+}
+
+function nMatrix() {                       // OSM px -> STL px
+  const L = linear();
+  return [[L.a, L.cc, st.tx], [L.b, L.d, st.ty]];
+}
+
+function invert2x3(M) {
+  const a = M[0][0], cc = M[0][1], tx = M[0][2];
+  const b = M[1][0], d = M[1][1], ty = M[1][2];
+  const det = a * d - cc * b;
+  if (!det) throw new Error("singular transform");
+  const ia = d / det, icc = -cc / det, ib = -b / det, id = a / det;
+  return [[ia, icc, -(ia * tx + icc * ty)], [ib, id, -(ib * tx + id * ty)]];
+}
+
+function decompose(M) {                    // similarity params of a 2x3
+  return {
+    scale: Math.hypot(M[0][0], M[1][0]),
+    rot_deg: Math.atan2(M[1][0], M[0][0]) * 180 / Math.PI,
+    tx: M[0][2], ty: M[1][2],
+  };
+}
+
+function layerCenterPos() {                // moving-layer centre, in STL px
+  const L = linear(), cx = cur.w / 2, cy = cur.h / 2;
+  return { x: L.a * cx + L.cc * cy + st.tx, y: L.b * cx + L.d * cy + st.ty };
+}
+
+function pivotUpdate(fn) {                 // change state, keep layer centre fixed
+  const p = layerCenterPos();
+  fn();
+  const L = linear(), cx = cur.w / 2, cy = cur.h / 2;
+  st.tx = p.x - (L.a * cx + L.cc * cy);
+  st.ty = p.y - (L.b * cx + L.d * cy);
+}
+
+// ---- image building -------------------------------------------------------
+function loadImage(uri) {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error("image decode failed"));
+    im.src = uri;
+  });
+}
+
+function pixels(img, w, h) {
+  const t = document.createElement("canvas"); t.width = w; t.height = h;
+  const c = t.getContext("2d");
+  c.drawImage(img, 0, 0, w, h);
+  return c.getImageData(0, 0, w, h);
+}
+
+async function buildCity(slug) {
+  const d = DATA[slug];
+  const W = d.meta.osm_shape[1], H = d.meta.osm_shape[0];
+  const sw = d.meta.stl_shape[1], sh = d.meta.stl_shape[0];
+  const hasSat = !!d.images.sat;
+  const imgs = await Promise.all([
+    loadImage(d.images.osm_buildings), loadImage(d.images.osm_water),
+    loadImage(d.images.stl_heightmap), loadImage(d.images.stl_mask),
+    hasSat ? loadImage(d.images.sat) : Promise.resolve(null),
+    d.images.stl_water ? loadImage(d.images.stl_water) : Promise.resolve(null),
+  ]);
+  const [bld, wat, shm, smk, satImg, swtImg] = imgs;
+
+  // Stationary base: the STL heightmap, opaque, warm grey-to-orange ramp.
+  const stl = document.createElement("canvas"); stl.width = sw; stl.height = sh;
+  const sc = stl.getContext("2d");
+  const ph = pixels(shm, sw, sh), pm = pixels(smk, sw, sh);
+  // The plate's own river, cut out of the vendor's *_L_Water.stl. Painted in
+  // the same blue the OSM water uses so the two can be matched by eye: the
+  // river is the one feature sparse and distinctive enough to align on, where
+  // the height mask is terrain plus buildings and covers most of the plate.
+  const pr = swtImg ? pixels(swtImg, sw, sh) : null;
+  const so = sc.createImageData(sw, sh);
+  for (let i = 0; i < sw * sh; i++) {
+    const h = ph.data[i * 4], m = pm.data[i * 4];
+    let r = 12, g = 13, b = 16;
+    if (m > 127) { const t = h / 255; r = 70 + t * 185; g = 50 + t * 150; b = 30 + t * 90; }
+    if (pr && pr.data[i * 4] > 127) { r = 30; g = 90; b = 170; }
+    so.data[i * 4] = r; so.data[i * 4 + 1] = g; so.data[i * 4 + 2] = b; so.data[i * 4 + 3] = 255;
+  }
+  sc.putImageData(so, 0, 0);
+
+  // Moving layer A: OSM composite (buildings grey-white, water blue, transparent bg).
+  const osm = document.createElement("canvas"); osm.width = W; osm.height = H;
+  const oc = osm.getContext("2d");
+  const pb = pixels(bld, W, H), pw = pixels(wat, W, H);
+  const oo = oc.createImageData(W, H);
+  for (let i = 0; i < W * H; i++) {
+    const b = pb.data[i * 4], w = pw.data[i * 4];
+    let r = 18, g = 20, bl = 24, a = 90;
+    if (w > 127) { r = 40; g = 110; bl = 210; a = 220; }
+    if (b > 0) { const v = 90 + (b / 255) * 165; r = v; g = v; bl = v; a = 255; }
+    oo.data[i * 4] = r; oo.data[i * 4 + 1] = g; oo.data[i * 4 + 2] = bl; oo.data[i * 4 + 3] = a;
+  }
+  oc.putImageData(oo, 0, 0);
+
+  // Moving layer B: satellite RGB, opaque.
+  let sat = null;
+  if (satImg) {
+    sat = document.createElement("canvas"); sat.width = W; sat.height = H;
+    sat.getContext("2d").drawImage(satImg, 0, 0, W, H);
+  }
+  return { meta: d.meta, stl, osm, sat, w: W, h: H, sw, sh };
+}
+
+// ---- rendering ------------------------------------------------------------
+function resizeCanvas() {
+  const r = cv.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.max(1, Math.round(r.width * dpr));
+  cv.height = Math.max(1, Math.round(r.height * dpr));
+  cv.__dpr = dpr;
+}
+
+function movingCanvas() {
+  if (layer === "sat" && cur.sat) return cur.sat;
+  return cur.osm;
+}
+
+function draw() {
+  if (!cur) return;
+  const dpr = cv.__dpr || 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#0c0d10";
+  ctx.fillRect(0, 0, cv.width, cv.height);
+
+  const k = view.k * dpr, vx = view.vx * dpr, vy = view.vy * dpr;
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.setTransform(k, 0, 0, k, vx, vy);
+  ctx.drawImage(cur.stl, 0, 0);
+  ctx.strokeStyle = "rgba(255,170,80,0.55)";
+  ctx.lineWidth = 1 / k;
+  ctx.strokeRect(0, 0, cur.sw, cur.sh);
+
+  if (!hideOverlay) {
+    const L = linear();
+    ctx.globalAlpha = opacityEl.value / 100;
+    ctx.setTransform(k * L.a, k * L.b, k * L.cc, k * L.d, k * st.tx + vx, k * st.ty + vy);
+    ctx.drawImage(movingCanvas(), 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "rgba(120,180,255,0.7)";
+    ctx.lineWidth = 1 / (k * st.s);
+    ctx.strokeRect(0, 0, cur.w, cur.h);
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  updateReadout();
+}
+
+function updateReadout() {
+  const m = cur.meta, g = m.pipeline_guess, cell = m.cell_size_m;
+  const M = invert2x3(nMatrix());          // pipeline convention: STL px -> OSM px
+  const p = decompose(M);
+  const ddx = p.tx - g.tx, ddy = p.ty - g.ty;
+  readout.textContent =
+    `moving layer  ${layer.toUpperCase()}\n` +
+    `view zoom     ${view.k.toFixed(2)}×\n` +
+    `--- OSM px -> STL px (on screen) ---\n` +
+    `scale ${st.s.toFixed(4)}${unlockEl.checked ? "" : " (locked)"}\n` +
+    `rot   ${st.rot.toFixed(2)}°\n` +
+    `tx,ty ${st.tx.toFixed(1)}, ${st.ty.toFixed(1)} px\n` +
+    `--- exported: STL px -> OSM px ---\n` +
+    `scale ${p.scale.toFixed(4)}\n` +
+    `rot   ${p.rot_deg.toFixed(2)}°\n` +
+    `tx,ty ${p.tx.toFixed(1)}, ${p.ty.toFixed(1)} px\n` +
+    `      ${(p.tx * cell).toFixed(0)}, ${(p.ty * cell).toFixed(0)} m\n` +
+    `Δ vs pipeline guess:\n` +
+    `  ${ddx.toFixed(1)}, ${ddy.toFixed(1)} px  (${Math.hypot(ddx * cell, ddy * cell).toFixed(0)} m)\n` +
+    `  rot Δ ${(p.rot_deg - g.rot_deg).toFixed(2)}°`;
+}
+
+// ---- view -----------------------------------------------------------------
+function fitView() {
+  const r = cv.getBoundingClientRect();
+  const L = linear();
+  const pts = [[0, 0], [cur.sw, 0], [0, cur.sh], [cur.sw, cur.sh]];
+  for (const [x, y] of [[0, 0], [cur.w, 0], [0, cur.h], [cur.w, cur.h]]) {
+    pts.push([L.a * x + L.cc * y + st.tx, L.b * x + L.d * y + st.ty]);
+  }
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const k = Math.min(r.width / (x1 - x0), r.height / (y1 - y0)) * 0.96;
+  view.k = k;
+  view.vx = r.width / 2 - k * (x0 + x1) / 2;
+  view.vy = r.height / 2 - k * (y0 + y1) / 2;
+  draw();
+}
+
+// ---- state presets --------------------------------------------------------
+function loadGuess() {
+  const g = cur.meta.pipeline_guess;
+  const N = invert2x3(g.matrix);           // guess is STL->OSM; we hold OSM->STL
+  const p = decompose(N);
+  st = { s: p.scale, rot: p.rot_deg, tx: p.tx, ty: p.ty };
+  fitView(); status("Pipeline guess loaded.");
+}
+
+/** Put the moving layer's centre on the STL centre, keeping the current scale and rotation. */
+function recenterLayer() {
+  const L = linear(), cx = cur.w / 2, cy = cur.h / 2;
+  st.tx = cur.sw / 2 - (L.a * cx + L.cc * cy);
+  st.ty = cur.sh / 2 - (L.b * cx + L.d * cy);
+}
+
+function reset() {
+  st.s = lockScale; st.rot = 0;
+  recenterLayer();
+  fitView(); status("Reset.");
+}
+
+function status(msg) {
+  statusEl.textContent = msg;
+  setTimeout(() => { if (statusEl.textContent === msg) statusEl.textContent = ""; }, 4000);
+}
+
+async function selectCity(slug) {
+  try {
+    cur = await buildCity(slug);
+  } catch (exc) {
+    showError("Failed to build city " + slug + ": " + exc.message);
+    return;
+  }
+  lockScale = 1 / cur.meta.pipeline_guess.scale;
+  lockValEl.textContent = lockScale.toFixed(3);
+  document.getElementById("layerSat").disabled = !cur.sat;
+  if (!cur.sat && layer === "sat") setLayer("osm");
+  showWindowCenter(cur.meta.osm_bbox_nsew);
+  resizeCanvas();
+  const saved = await loadSavedGroundTruth(slug);
+  if (saved && applySaved(saved)) {
+    status("Restored saved alignment (" + (saved.exported_at || "no date") + ").");
+  } else {
+    loadGuess();
+  }
+}
+
+// ---- saved alignments -----------------------------------------------------
+// A save writes tools/align_tool/ground_truth/<slug>.json through the server, and is also
+// mirrored into localStorage so the page restores the same alignment when it is
+// opened as a plain file:// with no server behind it.
+function savedKey(slug) { return "align_ground_truth_" + slug; }
+
+function rememberLocally(gt) {
+  try { localStorage.setItem(savedKey(gt.slug), JSON.stringify(gt)); }
+  catch (exc) { /* private mode or quota: the server copy is the real one */ }
+}
+
+async function loadSavedGroundTruth(slug) {
+  try {
+    const r = await api("/api/load", { slug });
+    if (r.found) return r.payload;
+    return null;                             // server answered: nothing saved yet
+  } catch (exc) {
+    // No server, or an older server without /api/load. Fall back to the mirror.
+  }
+  try {
+    const raw = localStorage.getItem(savedKey(slug));
+    return raw ? JSON.parse(raw) : null;
+  } catch (exc) {
+    return null;
+  }
+}
+
+/** Restore a saved record as the current state. Returns false if it carries no usable transform. */
+function applySaved(gt) {
+  const u = gt && gt.ui && gt.ui.osm_to_stl;
+  if (u) {
+    st = { s: u.scale, rot: u.rot_deg, tx: u.tx, ty: u.ty };
+  } else if (gt && gt.transform) {
+    const p = decompose(invert2x3(gt.transform));
+    st = { s: p.scale, rot: p.rot_deg, tx: p.tx, ty: p.ty };
+  } else {
+    return false;
+  }
+  fitView();
+  return true;
+}
+
+// The centre of the fetched reference window, so the user can tell at a glance
+// whether the raster is even near the ground the plate shows, and can nudge it
+// from a known coordinate instead of guessing.
+function showWindowCenter(bbox) {
+  const el = document.getElementById("centerNow");
+  if (!bbox) { el.textContent = "window centre —"; return; }
+  const [N, S, E, W] = bbox;
+  el.textContent = "window centre " + ((N + S) / 2).toFixed(5)
+    + ", " + ((E + W) / 2).toFixed(5);
+}
+
+// Accepts "lat, lon" or "lat lon"; returns null when blank, throws when the
+// text is present but unusable, so a typo cannot silently re-fetch the old spot.
+function parseCenter(text) {
+  const s = (text || "").trim();
+  if (!s) return null;
+  const parts = s.split(/[,\s]+/).map(parseFloat);
+  if (parts.length !== 2 || !parts.every(Number.isFinite)) {
+    throw new Error("centre must be 'lat, lon'");
+  }
+  if (Math.abs(parts[0]) > 90 || Math.abs(parts[1]) > 180) {
+    throw new Error("centre out of range (lat +/-90, lon +/-180)");
+  }
+  return parts;
+}
+
+function setLayer(which) {
+  if (which === "sat" && cur && !cur.sat) { status("No satellite image for this city — re-run export_align_data.py."); return; }
+  layer = which;
+  document.getElementById("layerOsm").classList.toggle("on", layer === "osm");
+  document.getElementById("layerSat").classList.toggle("on", layer === "sat");
+  draw();
+}
+
+// ---- interactions ---------------------------------------------------------
+let drag = null;
+cv.addEventListener("pointerdown", e => {
+  const pan = e.shiftKey || e.button === 1;
+  drag = { x: e.clientX, y: e.clientY, pan };
+  cv.classList.add(pan ? "panning" : "dragging");
+  cv.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+cv.addEventListener("pointermove", e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (drag.pan) { view.vx += dx; view.vy += dy; }
+  else { st.tx += dx / view.k; st.ty += dy / view.k; }
+  drag.x = e.clientX; drag.y = e.clientY;
+  draw();
+});
+cv.addEventListener("pointerup", () => { drag = null; cv.classList.remove("dragging", "panning"); });
+cv.addEventListener("contextmenu", e => e.preventDefault());
+
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  if (!cur) return;
+  const dir = e.deltaY > 0 ? 1 : -1;
+  if (e.altKey) {                                   // view zoom about the cursor
+    const r = cv.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const f = dir > 0 ? 1 / 1.1 : 1.1;
+    view.vx = mx - (mx - view.vx) * f;
+    view.vy = my - (my - view.vy) * f;
+    view.k *= f;
+  } else if (e.shiftKey) {                          // rotate; Ctrl+Shift = coarse
+    pivotUpdate(() => { st.rot += dir * ((e.ctrlKey || e.metaKey) ? 1 : 0.1); });
+  } else {                                          // scale; Ctrl = coarse
+    if (!unlockEl.checked) { status("Scale locked — tick 'Unlock scale' to change it."); return; }
+    const f = (e.ctrlKey || e.metaKey) ? 1.05 : 1.005;
+    pivotUpdate(() => { st.s *= dir > 0 ? 1 / f : f; });
+  }
+  draw();
+}, { passive: false });
+
+window.addEventListener("keydown", e => {
+  if (!cur) return;
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+  const step = e.shiftKey ? 5 : 0.5, rstep = e.shiftKey ? 1 : 0.1;
+  let handled = true;
+  switch (e.key) {
+    case "ArrowLeft": st.tx -= step; break;
+    case "ArrowRight": st.tx += step; break;
+    case "ArrowUp": st.ty -= step; break;
+    case "ArrowDown": st.ty += step; break;
+    case "q": case "Q": pivotUpdate(() => { st.rot -= rstep; }); break;
+    case "e": case "E": pivotUpdate(() => { st.rot += rstep; }); break;
+    case "+": case "=":
+      if (unlockEl.checked) pivotUpdate(() => { st.s *= 1.005; });
+      else status("Scale locked — tick 'Unlock scale' to change it.");
+      break;
+    case "-": case "_":
+      if (unlockEl.checked) pivotUpdate(() => { st.s /= 1.005; });
+      else status("Scale locked — tick 'Unlock scale' to change it.");
+      break;
+    case " ": hideOverlay = true; break;
+    default: handled = false;
+  }
+  if (handled) { e.preventDefault(); draw(); }
+});
+window.addEventListener("keyup", e => {
+  if (e.key === " ") { hideOverlay = false; draw(); }
+});
+window.addEventListener("resize", () => { resizeCanvas(); draw(); });
+// The canvas is sized by CSS flex, so its box can still be 0x0 when a city is
+// first selected. Track the real box and re-fit once it becomes non-empty.
+if (window.ResizeObserver) {
+  let hadBox = false;
+  new ResizeObserver(() => {
+    const r = cv.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    resizeCanvas();
+    if (!hadBox) { hadBox = true; if (cur) fitView(); }
+    draw();
+  }).observe(cv);
+}
+
+opacityEl.addEventListener("input", draw);
+unlockEl.addEventListener("change", draw);
+document.getElementById("loadGuess").addEventListener("click", () => cur && loadGuess());
+document.getElementById("reset").addEventListener("click", () => cur && reset());
+document.getElementById("fit").addEventListener("click", () => cur && fitView());
+document.getElementById("layerOsm").addEventListener("click", () => setLayer("osm"));
+document.getElementById("layerSat").addEventListener("click", () => setLayer("sat"));
+citySel.addEventListener("change", () => selectCity(citySel.value));
+
+// ---- server calls ---------------------------------------------------------
+// Everything above this line is pure pixel math and runs fine from a plain
+// file:// page. These three endpoints are the only things that need server.py:
+// writing outside the Downloads folder, running OpenCV ECC, and re-fetching OSM.
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let j;
+  try { j = await r.json(); }
+  catch (exc) { throw new Error("HTTP " + r.status + " (non-JSON reply)"); }
+  if (!r.ok || !j.ok) throw new Error(j.error || ("HTTP " + r.status));
+  return j;
+}
+
+/** Ground truth record in the pipeline convention: 2x3 STL px -> OSM px. */
+function buildGroundTruth() {
+  const m = cur.meta;
+  const N = nMatrix();
+  const M = invert2x3(N);                  // STL px -> OSM px, pipeline convention
+  return {
+    city: m.city, region: m.region, slug: m.slug,
+    resolution: m.resolution, cell_size_m: m.cell_size_m,
+    osm_bbox_nsew: m.osm_bbox_nsew,
+    layer_used: layer,
+    ui: { osm_to_stl: { scale: st.s, rot_deg: st.rot, tx: st.tx, ty: st.ty },
+          osm_to_stl_matrix: N },
+    transform: M,                          // 2x3, STL px -> OSM px
+    transform_params: decompose(M),
+    pipeline_guess: m.pipeline_guess,
+    exported_at: new Date().toISOString(),
+  };
+}
+
+function downloadGroundTruth(gt) {
+  const blob = new Blob([JSON.stringify(gt, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = gt.slug + ".json"; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/** Adopt a pipeline-convention matrix (STL px -> OSM px) as the current state. */
+function setFromPipelineMatrix(M) {
+  const p = decompose(invert2x3(M));
+  st = { s: p.scale, rot: p.rot_deg, tx: p.tx, ty: p.ty };
+  draw(); updateReadout();
+}
+
+document.getElementById("export").addEventListener("click", () => {
+  if (!cur) return;
+  downloadGroundTruth(buildGroundTruth());
+  status("Exported " + cur.meta.slug + ".json to your Downloads folder.");
+});
+
+document.getElementById("save").addEventListener("click", async () => {
+  if (!cur) return;
+  const gt = buildGroundTruth();
+  rememberLocally(gt);
+  status("Saving…");
+  try {
+    const r = await api("/api/save", { slug: gt.slug, payload: gt });
+    status("Saved " + r.path + " (" + r.bytes + " bytes).");
+  } catch (exc) {
+    downloadGroundTruth(gt);
+    status("No server (" + exc.message + ") — downloaded instead; move it to Code\\_ground_truth\\");
+  }
+});
+
+document.getElementById("refine").addEventListener("click", async () => {
+  if (!cur) return;
+  const btn = document.getElementById("refine");
+  btn.disabled = true;
+  status("Refining with ECC…");
+  try {
+    // The refine is always affine on blurred building edges: a euclidean model
+    // cannot carry the pipeline's scale, so it diverges every time.
+    const r = await api("/api/refine", {
+      slug: cur.meta.slug,
+      matrix: invert2x3(nMatrix()),        // seed in pipeline convention
+    });
+    if (!r.improved) {
+      status("Refine found nothing better than your alignment (edge-IoU "
+        + r.iou_before.toFixed(4) + " unchanged) — nudge it closer and retry.");
+    } else {
+      setFromPipelineMatrix(r.matrix);
+      status("Refined: edge-IoU " + r.iou_before.toFixed(4) + " → " + r.iou_after.toFixed(4)
+        + " (moved " + r.delta_translation_px.toFixed(1) + " px, "
+        + r.delta_rot_deg.toFixed(2) + "°, scale " + r.scale.toFixed(3)
+        + "), correlation " + r.confidence.toFixed(3));
+    }
+    console.log("[refine]", r.trace);
+  } catch (exc) {
+    status("Refine failed: " + exc.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById("refetch").addEventListener("click", async () => {
+  if (!cur) return;
+  const btn = document.getElementById("refetch");
+  const m = cur.meta;
+  const margin = parseFloat(document.getElementById("refetchMargin").value) || 1.5;
+  let center;
+  try {
+    center = parseCenter(document.getElementById("refetchCenter").value);
+  } catch (exc) {
+    status("Re-fetch failed: " + exc.message);
+    return;
+  }
+  // Raise the raster resolution in step with the window so that a wider window
+  // buys context rather than losing detail: metres-per-pixel stays put, and the
+  // buildings stay recognisable enough to align against.
+  const resolution = Math.min(2048, Math.round(512 * margin / 1.5 / 64) * 64);
+  btn.disabled = true;
+  status("Re-fetching OSM + satellite at " + margin + "×"
+    + (center ? " centred on " + center[0] + ", " + center[1] : " here")
+    + " (can take a minute)…");
+  try {
+    const r = await api("/api/refetch", {
+      slug: m.slug,
+      matrix: invert2x3(nMatrix()),        // STL px -> OSM px, defines the window
+      bbox_nsew: m.osm_bbox_nsew,
+      stl_shape: m.stl_shape,
+      osm_shape: m.osm_shape,
+      margin: margin,
+      resolution: resolution,
+      center: center,
+    });
+    // The fetched raster is now the authoritative OSM frame for this city.
+    const entry = DATA[m.slug];
+    Object.assign(entry.images, r.images);
+    entry.meta.osm_bbox_nsew = r.bbox_nsew;
+    entry.meta.cell_size_m = r.cell_size_m;
+    entry.meta.osm_shape = r.osm_shape;
+    entry.meta.resolution = r.resolution;
+    showWindowCenter(r.bbox_nsew);
+    const keepRot = st.rot;
+    cur = await buildCity(m.slug);
+    lockScale = r.fit_scale;
+    lockValEl.textContent = lockScale.toFixed(3);
+    resizeCanvas();
+    // The new window was cut to fit the STL frame, so the correct alignment is
+    // the layer centred at the fit scale with the rotation the user had found.
+    st.s = lockScale;
+    st.rot = keepRot;
+    recenterLayer();
+    fitView();
+    status("Re-fetched: " + r.side_m.toFixed(0) + " m across, "
+      + r.cell_size_m.toFixed(2) + " m/px, " + r.buildings_px + " building px. "
+      + "Scale lock now " + lockScale.toFixed(3) + ".");
+  } catch (exc) {
+    status("Re-fetch failed: " + exc.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---- data loading ---------------------------------------------------------
+function initData() {
+  const slugs = Object.keys(DATA);
+  if (!slugs.length) return false;
+  errEl.style.display = "none";
+  document.getElementById("loaderBox").style.display = "none";
+  citySel.innerHTML = "";
+  for (const s of slugs) {
+    const o = document.createElement("option");
+    o.value = s; o.textContent = DATA[s].meta.city + " — " + DATA[s].meta.region;
+    citySel.appendChild(o);
+  }
+  selectCity(slugs[0]);
+  return true;
+}
+
+function tryAttach() {
+  if (window.ALIGN_DATA && Object.keys(window.ALIGN_DATA).length) {
+    DATA = window.ALIGN_DATA;
+    return initData();
+  }
+  return false;
+}
+
+document.getElementById("fileIn").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    try {
+      const text = String(fr.result);
+      if (text.trim().startsWith("{")) {
+        window.ALIGN_DATA = JSON.parse(text);
+      } else {
+        // Run the file's own `window.ALIGN_DATA = {...};` assignment in global scope.
+        const s = document.createElement("script");
+        s.textContent = text;
+        document.head.appendChild(s);
+      }
+      if (!tryAttach()) showError("File loaded but window.ALIGN_DATA is still empty.");
+    } catch (exc) {
+      showError("Could not parse that file: " + exc.message);
+    }
+  };
+  fr.onerror = () => showError("Could not read that file.");
+  fr.readAsText(f);
+});
+
+if (!tryAttach()) {
+  const why = window.__dataScriptFailed
+    ? "data/align_data.js did not load (file missing, or the browser blocked it)."
+    : (typeof window.ALIGN_DATA === "undefined"
+        ? "data/align_data.js loaded but never set window.ALIGN_DATA."
+        : "window.ALIGN_DATA is empty (no cities in it).");
+  showError(
+    "No city data.\n" + why +
+    "\n\nFixes, in order:\n" +
+    "1. Run:  ~/.venvs/strm2stl/Scripts/python.exe tools/align_tool/export_align_data.py\n" +
+    "2. Serve the folder instead of using file:// —\n" +
+    "   cd strm2stl/tools/align_tool && python -m http.server 8765\n" +
+    "   then open http://localhost:8765/drag_align.html\n" +
+    "3. Or pick data/align_data.js by hand below.");
+  document.getElementById("loaderBox").style.display = "block";
+}
+</script>
+</body>
+</html>

@@ -13,23 +13,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn as nn
 
-_HERE = Path(__file__).resolve().parent
-_STRM2STL = _HERE.parents[1]
-for _p in (_STRM2STL, _STRM2STL.parent):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-
+from app.paths import REPO_ROOT
 from tools.ml.models import Retna_V1  # noqa: E402
 from tools.ml.train.train_retna import (  # noqa: E402
-    HeightTileDataset,
     HEIGHT_NORM_M,
+    HeightTileDataset,
     dice_loss,
 )
 
@@ -137,16 +131,15 @@ def main():
                     help="Number of sample tiles to render in the PDF")
     args = ap.parse_args()
 
-    strm2stl = Path(__file__).resolve().parents[2]
     ckpt_path = Path(args.checkpoint)
     if not ckpt_path.is_absolute():
-        ckpt_path = strm2stl / args.checkpoint
+        ckpt_path = REPO_ROOT / args.checkpoint
     tiles = Path(args.tiles)
     if not tiles.is_absolute():
-        tiles = strm2stl / args.tiles
+        tiles = REPO_ROOT / args.tiles
     out_path = Path(args.out)
     if not out_path.is_absolute():
-        out_path = strm2stl / args.out
+        out_path = REPO_ROOT / args.out
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     state = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
@@ -167,7 +160,7 @@ def main():
     n_train = n - n_val
 
     full = HeightTileDataset(paths, args.tile_size, augment=False)
-    from torch.utils.data import random_split, DataLoader
+    from torch.utils.data import DataLoader, random_split
     _, val_ds = random_split(
         full, [n_train, n_val],
         generator=torch.Generator().manual_seed(args.seed),

@@ -6,11 +6,7 @@ We test the no-cache, cache-miss, and cache-hit paths without real OSM network c
 """
 import gzip
 import json
-import pytest
 from pathlib import Path
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "ui"))
-
 
 SMALL_BBOX = {"north": 39.960, "south": 39.950, "east": -75.140, "west": -75.170}
 PAYLOAD = {**SMALL_BBOX, "width": 32, "height": 32}

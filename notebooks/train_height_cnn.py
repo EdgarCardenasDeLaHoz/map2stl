@@ -5,21 +5,15 @@ Height CNN training workflow using tools.ml (RoofNetV3 family).
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import matplotlib.pyplot as plt
 import numpy as np
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
+from app.paths import REPO_ROOT
 from tools.ml.eval import detect_arch  # noqa: E402
 from tools.ml.train.train import TrainConfig, train_v3  # noqa: E402
 
-TILE_DIR   = PROJECT_ROOT / "cache" / "height_tiles_osm"
-CHECKPOINT = PROJECT_ROOT / "models" / "roofnet_v3s.pt"
+TILE_DIR   = REPO_ROOT / "cache" / "height_tiles_osm"
+CHECKPOINT = REPO_ROOT / "models" / "roofnet_v3s.pt"
 
 # Configuration
 ARCH       = "v3s"

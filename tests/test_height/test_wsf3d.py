@@ -3,18 +3,11 @@
 Unit tests use synthetic data — no network required.
 """
 import io
-import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
 import rasterio
 from rasterio.transform import from_bounds
-
-_STRM2STL_ROOT = Path(__file__).parent.parent.parent
-for _p in (str(_STRM2STL_ROOT.parent), str(_STRM2STL_ROOT)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 from city2stl.skyline.height.providers import wsf3d_global  # noqa: E402
 from city2stl.skyline.height.providers.wsf3d import (  # noqa: E402

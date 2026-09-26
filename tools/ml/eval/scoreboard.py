@@ -30,12 +30,13 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Any
+
+from app.paths import REPO_ROOT
 
 logger = logging.getLogger(__name__)
 
 # Default scoreboard location: alongside the model checkpoints
-_DEFAULT_PATH = Path(__file__).resolve().parents[2] / "models" / "scoreboard.json"
+_DEFAULT_PATH = REPO_ROOT / "models" / "scoreboard.json"
 
 
 def _config_fingerprint(config: dict) -> str:
@@ -48,7 +49,7 @@ def _load(path: Path) -> list[dict]:
     if not path.exists():
         return []
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         return data.get("runs", []) if isinstance(data, dict) else data
     except Exception as e:
@@ -60,6 +61,15 @@ def _save(path: Path, runs: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"runs": runs, "version": 1}, f, indent=2, default=str)
+
+
+def _repo_relative(path: str | Path) -> str:
+    """Checkpoints inside the repo are stored repo-relative, so the file is portable."""
+    p = Path(path)
+    try:
+        return p.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def record_run(
@@ -85,7 +95,7 @@ def record_run(
         "ts": dt.datetime.now().isoformat(timespec="seconds"),
         "arch": arch,
         "task": task,
-        "model_path": str(model_path),
+        "model_path": _repo_relative(model_path),
         "best_metrics": {k: round(float(v), 4) if isinstance(v, (int, float)) else v
                          for k, v in best_metrics.items()},
         "n_train": int(n_train),

@@ -28,21 +28,12 @@ from __future__ import annotations
 
 import argparse
 import csv
-import sys
 import time
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Path bootstrap
-# ---------------------------------------------------------------------------
-_HERE = Path(__file__).resolve().parent
-_STRM2STL = _HERE.parent
-_REPO_ROOT = _STRM2STL.parent
-for _p in (_STRM2STL, _REPO_ROOT):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-
 import numpy as np  # noqa: E402
+
+from app.paths import REPO_ROOT
 
 # ---------------------------------------------------------------------------
 # Evaluation cities (same as seed_eval_regions.py and eval_roof_tags.py)
@@ -76,7 +67,7 @@ DEFAULT_PROVIDERS = ["wsf3d"]  # lightweight, global; extend to ["wsf3d", "ndsm"
 
 def _building_coverage(
     buildings_geojson: dict,
-    height_raster: "np.ndarray",
+    height_raster: np.ndarray,
     north: float,
     south: float,
     east: float,
@@ -99,8 +90,8 @@ def _building_coverage(
       mean_height_m, p50_height_m, p90_height_m
     """
     try:
-        from rasterio.transform import from_bounds
         from rasterio.features import rasterize as _rasterize
+        from rasterio.transform import from_bounds
         from shapely.geometry import shape
     except ImportError:
         print("  ⚠️  rasterio/shapely not available — skipping per-building stats")
@@ -167,7 +158,7 @@ def eval_pseudo_ndsm(
     if providers is None:
         providers = DEFAULT_PROVIDERS
     if output_dir is None:
-        output_dir = _STRM2STL / "output"
+        output_dir = REPO_ROOT / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     from app.session.terrain_session import TerrainSession
