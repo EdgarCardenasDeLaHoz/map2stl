@@ -8,24 +8,15 @@ from typing import Any
 
 import numpy as np
 
+from app.server import config as _config
+from app.server.core.cache import (
+    make_cache_key,
+    read_array_cache,
+    write_array_cache,
+)
 from geo2stl.projections import project_grid as _project_grid
 
 logger = logging.getLogger(__name__)
-
-try:
-    from app.server.core.cache import (
-        CACHE_ROOT as _CACHE_ROOT,
-    )
-    from app.server.core.cache import (
-        make_cache_key,
-        read_array_cache,
-        write_array_cache,
-    )
-    _CACHE_AVAILABLE = _CACHE_ROOT is not None
-except Exception:
-    _CACHE_ROOT = None
-    _CACHE_AVAILABLE = False
-    make_cache_key = read_array_cache = write_array_cache = None  # type: ignore
 
 from city2stl.heights import enhance_buildings_with_raster  # noqa: E402
 from city2stl.skyline.height import (  # noqa: E402
@@ -41,7 +32,6 @@ from city2stl.skyline.height.providers.ghsl import GHSLProvider  # noqa: E402
 from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider  # noqa: E402
 from city2stl.skyline.height.providers.ndsm import NDSMProvider  # noqa: E402
 from city2stl.skyline.height.providers.open_buildings import OpenBuildingsProvider  # noqa: E402
-from city2stl.skyline.height.providers.roofnet import RoofNetProvider  # noqa: E402
 from city2stl.skyline.height.providers.wsf3d import WSF3DProvider  # noqa: E402
 
 _HEIGHT_CACHE_VERSION = "v2"  # bumped: cache format changed to shared npz+json
@@ -69,10 +59,11 @@ class RegisteredProvider:
 # the merge scales confidence by `resolution_priority`, so a coarse source is
 # demoted for the per-building question however trustworthy it is in general.
 _REGISTRY: list[RegisteredProvider] = [
-    RegisteredProvider(LiDAR3DEPProvider(),     confidence=0.82, resolution_m=30.0),
-    RegisteredProvider(NDSMProvider(),          confidence=0.80, resolution_m=30.0),
+    RegisteredProvider(LiDAR3DEPProvider(api_key=_config.OPENTOPO_API_KEY),
+                       confidence=0.82, resolution_m=30.0),
+    RegisteredProvider(NDSMProvider(api_key=_config.OPENTOPO_API_KEY),
+                       confidence=0.80, resolution_m=30.0),
     RegisteredProvider(CopernicusProvider(),    confidence=0.70, resolution_m=10.0),
-    RegisteredProvider(RoofNetProvider(),       confidence=0.65, resolution_m=5.0),
     RegisteredProvider(OpenBuildingsProvider(), confidence=0.60, resolution_m=5.0),
     # GBA sits just under Overture on measurement, not on principle. Against
     # Miami's OSM-tagged heights Overture scores MAE 5.86 m / corr +0.912 and
@@ -88,6 +79,13 @@ _REGISTRY: list[RegisteredProvider] = [
 
 _ALL_PROVIDERS = [r.instance for r in _REGISTRY]
 _PROVIDER_MAP: dict[str, RegisteredProvider] = {r.name: r for r in _REGISTRY}
+
+
+def set_opentopo_api_key(key: str | None) -> None:
+    """Give the OpenTopography-backed providers a new key without a restart."""
+    for r in _REGISTRY:
+        if isinstance(r.instance, (LiDAR3DEPProvider, NDSMProvider)):
+            r.instance.api_key = key
 
 
 def provider_infos(bbox):
@@ -122,8 +120,6 @@ def _provider_cache_key(name: str, bbox: tuple, dim: tuple) -> str:
 
 
 def _read_provider_cache(name: str, bbox: tuple, dim: tuple) -> HeightResult | None:
-    if not _CACHE_AVAILABLE:
-        return None
     try:
         key = _provider_cache_key(name, bbox, dim)
         result = read_array_cache(f"height_{name}", key)
@@ -142,8 +138,6 @@ def _read_provider_cache(name: str, bbox: tuple, dim: tuple) -> HeightResult | N
 
 
 def _write_provider_cache(name: str, bbox: tuple, dim: tuple, hr: HeightResult) -> None:
-    if not _CACHE_AVAILABLE:
-        return
     try:
         key = _provider_cache_key(name, bbox, dim)
         write_array_cache(
@@ -346,8 +340,8 @@ def enhance_city_data(payload: dict[str, Any], north: float, south: float, east:
     # it was written was invisible to the export path however prominently it
     # was registered. GlobalBuildingAtlas was the casualty: the registry entry
     # above says it "is what fires in Cartagena", and it never did, because
-    # this list did not mention it. LiDAR3DEP and RoofNet are new to the list
-    # and cost nothing outside their coverage; the US early-return above means
+    # this list did not mention it. LiDAR3DEP is new to the list and costs
+    # nothing outside its coverage; the US early-return above means
     # LiDAR3DEP can never be reached from here at all.
     providers, _unknown = _select_providers(bbox)
 

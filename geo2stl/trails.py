@@ -363,10 +363,7 @@ class OsmTrailsLayer(TrailsLayerBase):
         Returns ``[None]`` when the probe is unavailable or every mirror is down,
         which means "use whatever osmnx is configured with and try once".
         """
-        try:
-            from city2stl.fetch import _healthy_overpass_endpoints
-        except Exception:  # city2stl not importable in a geo2stl-only install
-            return [None]
+        from city2stl.fetch import _healthy_overpass_endpoints
         healthy = _healthy_overpass_endpoints()
         return list(healthy) if healthy else [None]
 

@@ -55,52 +55,14 @@ import os
 import time
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# F-CLEAN8 named helpers — split from _seed_multiview_registration.
-# Each helper owns one responsibility; the orchestrator calls them in order.
-# All existing logic is preserved verbatim — pure refactor, no behaviour change.
-# ---------------------------------------------------------------------------
-# Per-seed multi-view registration extracted to pano_registration.py (F-CLEAN14).
-from .pano_registration import (  # noqa: E402,F401
-    _build_and_detect_pano,
-    _capture_pano_views,
-    _multires_pano_refine,
-    _multires_sam_instances,
-    _pano_sliding_window_split,
-    _recover_anchor_offset,
-    _recover_pano_heading,
-    _register_views,
-    _seed_multiview_registration,
-    _smooth_matches_across_views,
-    _smooth_pano_matches_against_views,
-    _split_by_depth_discontinuity,
-)
-from .pipeline import (
-    BuildingRecord,
-)
-
-# Feature flags + segment palette extracted to region_config.py (F-CLEAN14).
-from .region_config import (  # noqa: E402,F401
-    _F_SKY1_ENABLED,
-    _F_SKY5_ENABLED,
-    _F_SKY12_ENABLED,
-    _F_SKY13_ENABLED,
-    _F_SKY13_RADIUS_M,
-    _F_SKY13_SAT_BG_ENABLED,
-    _PHASE_C_ENABLED,
-    _SEGMENT_PALETTE,
-)
-
-# region/config/OSM data loaders extracted to region_data.py (F-CLEAN14).
-from .region_data import (  # noqa: E402,F401
-    _attach_building_terrain,
-    _bearing_deg,
-    _distance_m,
+from ._core.timing import _StepTimer
+from ._core.types import BuildingRecord
+from ._pano.orchestrator import _seed_multiview_registration
+from ._region_render._pages import _load_known_heights, _render_pdf
+from .region_config import _PHASE_C_ENABLED
+from .region_data import (
     _drop_buildings_in_water,
     _extract_high_rises,
-    _feature_centroid,
-    _feature_rings,
-    _fetch_elevations,
     _load_osm_for_region,
     _load_region_bbox,
     _load_site_anchor_overrides,
@@ -114,65 +76,14 @@ from .region_data import (  # noqa: E402,F401
     _load_site_use_pano_coastline_recovery,
     _load_site_use_satellite_footprints,
     _osm_to_building_records,
-    _parse_height,
-    _read_site_config,
 )
-
-# PDF rendering extracted to region_render.py (F-CLEAN14).
-from .region_render import (  # noqa: E402,F401
-    _count_seg_flags,
-    _draw_location_map,
-    _draw_osm_coastline_overlay,
-    _draw_view_minimap,
-    _load_known_heights,
-    _negative_seed_views,
-    _registration_overlay,
-    _render_pdf,
-    _render_seed_view_page,
-    _render_stitched_pano_page,
-    _StepTimer,
-)
-
-# Disk cache for Street View images — avoids repeat API charges on re-runs.
-# Key = SHA-1 of the request params *without* the API key.
-# Dataclasses extracted to region_types.py (F-CLEAN14, 2026-06-07). Re-imported
-# here so ``from city2stl.skyline.region_pdf import RegionBBox`` etc. keep working.
-from .region_types import (  # noqa: E402,F401
-    RegionBBox,
-    SeedViewRegistration,
-    SkylinePoint,
-    StitchedPanoResult,
-)
-
-# ---------------------------------------------------------------------------
-# Geometry-driven viewpoint proposal
-# ---------------------------------------------------------------------------
-# Seed proposal / screening / auto-replace extracted to seed_selection.py (F-CLEAN14).
-from .seed_selection import (  # noqa: E402,F401
-    _SCREEN_CACHE_DIR,
+from .region_types import SkylinePoint
+from .seed_selection import (
     _auto_replace_bad_seeds,
     _propose_standoff_locations,
     _screen_locations,
-    _screen_score_from_image,
-    _screen_score_from_image_uncached,
 )
-
-# Street View Static API I/O extracted to streetview_io.py (F-CLEAN14).
-from .streetview_io import (  # noqa: E402,F401
-    _SV_IMAGE_CACHE_DIR,
-    STREETVIEW_IMAGE_URL,
-    STREETVIEW_METADATA_URL,
-    _default_streetview_image_size,
-    _extract_pano_id,
-    _is_no_imagery_placeholder,
-    _meta_location,
-    _parse_streetview_url,
-    _resolve_api_key,
-    _sign_streetview_url,
-    _streetview_image,
-    _streetview_metadata,
-    _streetview_signing_enabled,
-)
+from .streetview_io import _parse_streetview_url, _resolve_api_key
 
 
 def _write_heights_json(
@@ -431,7 +342,6 @@ def run_region_pdf_report(
     # Wikimedia returns nothing.  Web seeds are single-image (no 360° spin).
     web_image_cache: dict = {}
     try:
-        from .region_config import FLICKR_API_KEY as _fkey  # noqa: PLC0415
         from .web_image_seed import web_skyline_seeds as _web_seeds  # noqa: PLC0415
         _bbox_center = (
             (bbox.north + bbox.south) * 0.5,
@@ -439,7 +349,6 @@ def run_region_pdf_report(
         )
         _web_out, web_image_cache = _web_seeds(
             city_name=region_name,
-            flickr_api_key=_fkey,
             max_images=3,
             cache_dir=output_pdf.parent / output_pdf.stem / "web_images",
             region_bbox_center=_bbox_center,

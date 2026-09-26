@@ -15,7 +15,7 @@ Pipeline:
 
 Usage (from the strm2stl/ directory):
 
-    PYTHONPATH=. python city2stl/skyline/scripts/15_multires_segmentation_demo.py \
+    python city2stl/skyline/scripts/demos/15_multires_segmentation_demo.py \
         --region Cartagena --seed seed_1
 
 The script is a self-contained smoke test of the multires idea. No
@@ -33,21 +33,23 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[4]
 
-from city2stl.skyline.pipeline import (  # noqa: E402
+from city2stl.skyline._core.segmentation import (  # noqa: E402
     _ADE20K_BUILDING_CLASSES,
     _ADE20K_SKY,
     _ADE20K_WATER_CLASSES,
     _ensure_segformer,
     _neural_sky_and_building_masks,
     _neural_water_mask,
+)
+from city2stl.skyline._pano.capture import _capture_pano_views  # noqa: E402
+from city2stl.skyline.pipeline import (  # noqa: E402
     detect_buildings_from_mask,
     stitch_pano_masks,
     stitch_pano_views,
 )
-from city2stl.skyline.region_pdf import (  # noqa: E402
-    SkylinePoint,
-    _capture_pano_views,
-    _load_site_seed_urls,
+from city2stl.skyline.region_data import _load_site_seed_urls  # noqa: E402
+from city2stl.skyline.region_types import SkylinePoint  # noqa: E402
+from city2stl.skyline.streetview_io import (  # noqa: E402
     _parse_streetview_url,
     _resolve_api_key,
 )
@@ -73,12 +75,12 @@ def _segformer_infer(image_rgb: np.ndarray, input_size: int) -> np.ndarray:
     # Reuse the singleton model the rest of the pipeline loaded; build a
     # one-off processor with the requested input size so the original
     # processor's 512x512 config isn't disturbed.
-    from city2stl.skyline import pipeline as _p
-    model = _p._segformer_model
+    from city2stl.skyline._core import segmentation as _seg
+    model = _seg._segformer_model
     if model is None:
         raise RuntimeError("SegFormer model not loaded")
 
-    model_id = _p._SEGFORMER_MODEL_ID
+    model_id = _seg._SEGFORMER_MODEL_ID
     processor = SegformerImageProcessor.from_pretrained(model_id)
     processor.size = {"height": int(input_size), "width": int(input_size)}
     processor.do_resize = True
@@ -86,8 +88,8 @@ def _segformer_infer(image_rgb: np.ndarray, input_size: int) -> np.ndarray:
     h, w = image_rgb.shape[:2]
     pil = Image.fromarray(image_rgb)
     inputs = processor(images=pil, return_tensors="pt")
-    if _p._segformer_device != "cpu":
-        inputs = {k: v.to(_p._segformer_device) for k, v in inputs.items()}
+    if _seg._segformer_device != "cpu":
+        inputs = {k: v.to(_seg._segformer_device) for k, v in inputs.items()}
     with torch.no_grad():
         outputs = model(**inputs)
     upsampled = F.interpolate(

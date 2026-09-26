@@ -33,14 +33,14 @@ import logging
 import math
 from collections.abc import Iterable
 
-from city2stl.skyline.pipeline import lonlat_to_local_m
+from city2stl.skyline._core.projection import lonlat_to_local_m
 
 logger = logging.getLogger(__name__)
 
 
 # Earth radius for haversine; kept for parity with the prior implementation but
 # the radius-clipping helper now uses the canonical equirectangular projection
-# (``pipeline.lonlat_to_local_m``) so the distance metric matches the rest of
+# (``_core.projection.lonlat_to_local_m``) so the distance metric matches the rest of
 # the skyline pipeline (minimap rendering, registration sweeps).
 _EARTH_R_M = 6_378_137.0
 
@@ -167,7 +167,7 @@ def _haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
 def _coords_within(coords: Iterable, seed_lonlat: tuple[float, float], radius_m: float) -> bool:
     """True if *any* coord in the (possibly nested) coords sequence is within radius.
 
-    Uses the canonical equirectangular projection (``pipeline.lonlat_to_local_m``)
+    Uses the canonical equirectangular projection (``_core.projection.lonlat_to_local_m``)
     so the distance metric matches the rest of skyline. At ≤ 1 km windows the
     difference vs full haversine is sub-metre.
     """

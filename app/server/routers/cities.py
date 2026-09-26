@@ -7,7 +7,6 @@ Delegates OSM fetching to core/osm.py and caching to core/cache.py.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -15,72 +14,21 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from app.server.config import OSM_CACHE_PATH
+from app.server.core.cache import CACHE_ROOT, osm_cache_key, read_osm_cache, write_osm_cache
+from app.server.core.height.service import enhance_city_data as _enhance_city_data
 from app.server.core.responses import error_response
 from app.server.core.validation import run_sync, validate_bbox_diagonal
 from app.server.schemas import CityRasterRequest, CityRequest, EnhanceHeightsRequest
+from city2stl.cache_policy import (
+    city_cache_missing_building_parts,
+    city_cache_missing_height_source,
+)
+from city2stl.fetch import fetch_osm_data as _fetch_osm_data
+from city2stl.mesh import generate_city_3mf
+from city2stl.rasterize import rasterize_city_data as _rasterize_city_data
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cities"])
-
-# ---------------------------------------------------------------------------
-# Cache helpers
-# ---------------------------------------------------------------------------
-try:
-    from app.server.core.cache import CACHE_ROOT, osm_cache_key, read_osm_cache, write_osm_cache
-    _CACHE_AVAILABLE = True
-except ImportError:
-    _CACHE_AVAILABLE = False
-    read_osm_cache = write_osm_cache = osm_cache_key = CACHE_ROOT = None  # type: ignore
-
-# ---------------------------------------------------------------------------
-# OSM fetch helper
-# ---------------------------------------------------------------------------
-try:
-    from city2stl.cache_policy import (
-        city_cache_missing_building_parts,
-        city_cache_missing_height_source,
-    )
-    from city2stl.fetch import fetch_osm_data as _fetch_osm_data
-    from city2stl.rasterize import rasterize_city_data as _rasterize_city_data
-except ImportError:
-    def _fetch_osm_data(*a, **kw):
-        raise RuntimeError(
-            "city2stl.fetch or city2stl.rasterize not available")
-
-    def _rasterize_city_data(*a, **kw):
-        raise RuntimeError(
-            "city2stl.fetch or city2stl.rasterize not available")
-
-    def city_cache_missing_building_parts(*a, **kw):
-        return False
-
-    def city_cache_missing_height_source(*a, **kw):
-        return False
-
-# ---------------------------------------------------------------------------
-# 3D export helper
-# ---------------------------------------------------------------------------
-def _load_city_3mf():
-    """The 3MF writer, or None if its dependencies are missing.
-
-    It lives in city2stl.mesh, not under app.server.core; the old path here did
-    not exist, so the import always failed and /api/cities/export3mf answered
-    501 for every request. Resolved on first use rather than at import, because
-    mesh.py needs numpy2stl from the Code/ directory and server.py puts that on
-    sys.path further down the file than it imports this router.
-    """
-    try:
-        from city2stl.mesh import generate_city_3mf
-        return generate_city_3mf
-    except ImportError as exc:
-        logger.error("city2stl.mesh unavailable for 3MF export: %s", exc)
-        return None
-
-try:
-    from app.server.core.height.service import enhance_city_data as _enhance_city_data
-except ImportError:
-    _enhance_city_data = None  # type: ignore
 
 
 class CityExportRequest(BaseModel):
@@ -127,11 +75,7 @@ async def check_city_cache(
 ):
     """Check whether OSM city data for this bbox is already cached locally."""
     key = osm_cache_key(north, south, east, west, simplify_tolerance, min_area)
-    if _CACHE_AVAILABLE:
-        cached = (CACHE_ROOT / "osm" / f"{key}.json.gz").exists()
-    else:
-        OSM_CACHE_PATH.mkdir(parents=True, exist_ok=True)
-        cached = (OSM_CACHE_PATH / f"{key}.json").exists()
+    cached = (CACHE_ROOT / "osm" / f"{key}.json.gz").exists()
     return JSONResponse(content={"cached": cached, "cache_key": key})
 
 
@@ -169,31 +113,14 @@ async def get_city_data(city_req: CityRequest):
                               city_req.simplify_tolerance, min_area)
 
     # Cache check
-    if _CACHE_AVAILABLE:
-        cached_data = read_osm_cache(cache_key)
-        if cached_data is not None:
-            if city_cache_missing_height_source(cached_data) or city_cache_missing_building_parts(cached_data):
-                logger.info("Ignoring stale OSM cache payload: %s", cache_key)
-            else:
-                logger.info(
-                    f"Serving OSM data from .json.gz cache: {cache_key}")
-                return JSONResponse(content=cached_data)
-    else:
-        OSM_CACHE_PATH.mkdir(parents=True, exist_ok=True)
-        cache_file = OSM_CACHE_PATH / f"{cache_key}.json"
-        if cache_file.exists():
-            try:
-                cached_data = json.loads(cache_file.read_text())
-                if city_cache_missing_height_source(cached_data) or city_cache_missing_building_parts(cached_data):
-                    logger.info(
-                        "Ignoring stale legacy OSM cache payload: %s", cache_key)
-                else:
-                    logger.info(
-                        f"Serving OSM data from legacy cache: {cache_key}")
-                    return JSONResponse(content=cached_data)
-            except Exception as cache_read_err:
-                logger.debug(
-                    f"Legacy OSM cache read failed, re-fetching: {cache_read_err}")
+    cached_data = read_osm_cache(cache_key)
+    if cached_data is not None:
+        if city_cache_missing_height_source(cached_data) or city_cache_missing_building_parts(cached_data):
+            logger.info("Ignoring stale OSM cache payload: %s", cache_key)
+        else:
+            logger.info(
+                f"Serving OSM data from .json.gz cache: {cache_key}")
+            return JSONResponse(content=cached_data)
 
     try:
         result = await run_sync(
@@ -204,19 +131,18 @@ async def get_city_data(city_req: CityRequest):
         logger.error(f"OSM fetch error: {e}")
         return error_response(f"OSM fetch failed: {str(e)}")
 
-    if _enhance_city_data is not None:
-        try:
-            result = await run_sync(
-                _enhance_city_data,
-                result,
-                north,
-                south,
-                east,
-                west,
-            )
-        except Exception as enhance_err:
-            logger.warning(
-                "City height auto-enhancement skipped: %s", enhance_err)
+    try:
+        result = await run_sync(
+            _enhance_city_data,
+            result,
+            north,
+            south,
+            east,
+            west,
+        )
+    except Exception as enhance_err:
+        logger.warning(
+            "City height auto-enhancement skipped: %s", enhance_err)
 
     result.setdefault("city_pipeline_version", 2)
 
@@ -225,15 +151,7 @@ async def get_city_data(city_req: CityRequest):
     has_error = any("error" in v for v in result.values()
                     if isinstance(v, dict))
     if not has_error:
-        if _CACHE_AVAILABLE:
-            write_osm_cache(cache_key, result)
-        else:
-            OSM_CACHE_PATH.mkdir(parents=True, exist_ok=True)
-            try:
-                (OSM_CACHE_PATH /
-                 f"{cache_key}.json").write_text(json.dumps(result))
-            except Exception as ce:
-                logger.warning(f"OSM cache write failed: {ce}")
+        write_osm_cache(cache_key, result)
 
     return JSONResponse(content=result)
 
@@ -291,38 +209,37 @@ async def get_city_raster(req: CityRasterRequest):
     ).hexdigest()
 
     # Cache check
-    if _CACHE_AVAILABLE and CACHE_ROOT is not None:
-        cache_path = CACHE_ROOT / "dem" / f"{cache_key}.npz"
-        if cache_path.exists():
-            try:
-                arr = np.load(cache_path)
-                raw_h = int(arr["height"])
-                raw_w = int(arr["width"])
-                grid = np.array(arr["values"], dtype=np.float32).reshape(
-                    raw_h, raw_w)
+    cache_path = CACHE_ROOT / "dem" / f"{cache_key}.npz"
+    if cache_path.exists():
+        try:
+            arr = np.load(cache_path)
+            raw_h = int(arr["height"])
+            raw_w = int(arr["width"])
+            grid = np.array(arr["values"], dtype=np.float32).reshape(
+                raw_h, raw_w)
 
-                # Projection/clipping is always applied fresh from raw cached raster.
-                if req.projection != "none":
-                    from geo2stl.projections import project_grid
-                    grid = project_grid(
-                        grid,
-                        req.north, req.south, req.east, req.west,
-                        req.projection, clip_valid_region, categorical=False,
-                        maintain_dimensions=req.maintain_dimensions,
-                    )
+            # Projection/clipping is always applied fresh from raw cached raster.
+            if req.projection != "none":
+                from geo2stl.projections import project_grid
+                grid = project_grid(
+                    grid,
+                    req.north, req.south, req.east, req.west,
+                    req.projection, clip_valid_region, categorical=False,
+                    maintain_dimensions=req.maintain_dimensions,
+                )
 
-                cached_result = _sanitize_raster_result({
-                    "values": np.nan_to_num(grid, nan=0.0).flatten().tolist(),
-                    "width": int(grid.shape[1]),
-                    "height": int(grid.shape[0]),
-                    "vmin": float(np.nanmin(grid)),
-                    "vmax": float(np.nanmax(grid)),
-                    "bbox": {"north": req.north, "south": req.south,
-                             "east": req.east, "west": req.west},
-                })
-                return JSONResponse(content=cached_result)
-            except Exception as e:
-                logger.debug(f"City raster cache read failed: {e}")
+            cached_result = _sanitize_raster_result({
+                "values": np.nan_to_num(grid, nan=0.0).flatten().tolist(),
+                "width": int(grid.shape[1]),
+                "height": int(grid.shape[0]),
+                "vmin": float(np.nanmin(grid)),
+                "vmax": float(np.nanmax(grid)),
+                "bbox": {"north": req.north, "south": req.south,
+                         "east": req.east, "west": req.west},
+            })
+            return JSONResponse(content=cached_result)
+        except Exception as e:
+            logger.debug(f"City raster cache read failed: {e}")
 
     # Resolve GeoJSON from OSM cache when not provided in request body
     buildings = req.buildings
@@ -330,7 +247,7 @@ async def get_city_raster(req: CityRasterRequest):
     waterways = req.waterways
     _from_cache = False
     if (not buildings.get("features") and not roads.get("features")
-            and not waterways.get("features") and _CACHE_AVAILABLE):
+            and not waterways.get("features")):
         osm_key = osm_cache_key(req.north, req.south, req.east, req.west)
         osm_data = read_osm_cache(osm_key)
         if osm_data:
@@ -354,20 +271,19 @@ async def get_city_raster(req: CityRasterRequest):
 
     # Cache raw unprojected result (cache key has NO projection/clip params).
     raw_result = _sanitize_raster_result(result)
-    if _CACHE_AVAILABLE and CACHE_ROOT is not None:
-        try:
-            cache_path = CACHE_ROOT / "dem" / f"{cache_key}.npz"
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            np.savez_compressed(
-                cache_path,
-                values=np.array(raw_result["values"], dtype=np.float32),
-                width=np.array(raw_result["width"]),
-                height=np.array(raw_result["height"]),
-                vmin=np.array(raw_result["vmin"]),
-                vmax=np.array(raw_result["vmax"]),
-            )
-        except Exception as e:
-            logger.debug(f"City raster cache write failed: {e}")
+    try:
+        cache_path = CACHE_ROOT / "dem" / f"{cache_key}.npz"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            cache_path,
+            values=np.array(raw_result["values"], dtype=np.float32),
+            width=np.array(raw_result["width"]),
+            height=np.array(raw_result["height"]),
+            vmin=np.array(raw_result["vmin"]),
+            vmax=np.array(raw_result["vmax"]),
+        )
+    except Exception as e:
+        logger.debug(f"City raster cache write failed: {e}")
 
     # Apply map projection (all raster layers use the same pipeline)
     if req.projection != "none":
@@ -403,16 +319,12 @@ async def export_city_3mf(req: CityExportRequest):
     Expects DEM values (from /api/terrain/dem) and a buildings GeoJSON
     FeatureCollection (from /api/cities) with height_m and terrain_z properties.
     """
-    generate_city_3mf = _load_city_3mf()
-    if generate_city_3mf is None:
-        return error_response("city2stl.mesh not available", 501)
-
     # Resolve DEM from cache when not provided
     dem_values = req.dem_values
     dem_width = req.dem_width
     dem_height = req.dem_height
     if not dem_values:
-        from app.server.core.export import resolve_dem_from_cache
+        from app.server.core.export_params import resolve_dem_from_cache
         req_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
         resolved = resolve_dem_from_cache(req_dict)
         if resolved:
@@ -422,7 +334,7 @@ async def export_city_3mf(req: CityExportRequest):
 
     # Resolve buildings from OSM cache when not provided
     buildings = req.buildings
-    if (not buildings or not buildings.get("features")) and _CACHE_AVAILABLE:
+    if (not buildings or not buildings.get("features")):
         osm_key = osm_cache_key(req.north, req.south, req.east, req.west)
         osm_data = read_osm_cache(osm_key)
         if osm_data and osm_data.get("buildings"):
@@ -498,7 +410,7 @@ async def enhance_heights(req: EnhanceHeightsRequest):
 
     # Resolve buildings from OSM cache when not provided
     buildings = req.buildings
-    if (not buildings or not buildings.get("features")) and _CACHE_AVAILABLE:
+    if (not buildings or not buildings.get("features")):
         osm_key = osm_cache_key(req.north, req.south, req.east, req.west)
         osm_data = read_osm_cache(osm_key)
         if osm_data and osm_data.get("buildings"):

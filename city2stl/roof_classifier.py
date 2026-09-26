@@ -790,26 +790,6 @@ def _resolve_cnn_model(cnn_model: str | object | None) -> object | None:
     return None
 
 
-def _cnn_classify_patch(
-    rgb_crops: list[np.ndarray],
-    footprint_mask: np.ndarray,
-    model_name: str | object | None = None,
-) -> tuple[str | None, float]:
-    """Classify one roof patch with a trained CNN, or return ``(None, 0.0)``.
-
-    *model_name* is resolved by :func:`_resolve_cnn_model` on every call, so
-    loops should resolve once and call :func:`_roofnet_classify_patch`
-    directly, as :func:`classify_roof_shapes` does.
-
-    Multi-temporal early fusion: when ``rgb_crops`` has N > 1 images they are
-    stacked along the channel dimension (H x W x N*3) before the network.
-    """
-    model = _resolve_cnn_model(model_name)
-    if model is None:
-        return None, 0.0
-    return _roofnet_classify_patch(rgb_crops, footprint_mask, model)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Classification fusion
 # ─────────────────────────────────────────────────────────────────────────────

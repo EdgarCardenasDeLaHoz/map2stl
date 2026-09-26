@@ -1,9 +1,8 @@
 """
 core/height/train -- Server-side training orchestration.
 
-Pure training code lives in city2stl.skyline.height.train.  This module re-exports
-all of those symbols for backward compatibility and retains collect_tiles()
-which requires the server's height data providers (cache-backed).
+Pure training code lives in city2stl.skyline.height.train.  This module holds
+collect_tiles(), which requires the server's height data providers (cache-backed).
 
 Usage (standalone):
   python -m app.server.core.height.train \
@@ -24,16 +23,12 @@ from pathlib import Path
 
 import numpy as np
 
-from city2stl.skyline.height.train import (  # noqa: F401
+from city2stl.skyline.height.train import (
     _DEFAULT_CITIES,
     MAX_NAN_FRAC,
     TARGET_RES_M,
     TILE_SIZE,
-    CitySpec,
-    TileDataset,
     TrainConfig,
-    combined_loss,
-    gradient_loss,
     train,
 )
 
@@ -69,6 +64,7 @@ def collect_tiles(
     -------
     List of Paths to collected .npz tile files.
     """
+    from app.server.config import OPENTOPO_API_KEY
     from city2stl.skyline.height import merge_height_rasters
     from city2stl.skyline.height.providers.copernicus import CopernicusProvider
     from city2stl.skyline.height.providers.ghsl import GHSLProvider
@@ -80,10 +76,10 @@ def collect_tiles(
 
     _prov_map = {
         "wsf3d":       WSF3DProvider(),
-        "ndsm":        NDSMProvider(),
+        "ndsm":        NDSMProvider(api_key=OPENTOPO_API_KEY),
         "google3d":    Google3DProvider(),
         "copernicus":  CopernicusProvider(),
-        "lidar_3dep":  LiDAR3DEPProvider(),
+        "lidar_3dep":  LiDAR3DEPProvider(api_key=OPENTOPO_API_KEY),
         "ghsl":        GHSLProvider(),
         "shadow":      ShadowHeightProvider(),
     }

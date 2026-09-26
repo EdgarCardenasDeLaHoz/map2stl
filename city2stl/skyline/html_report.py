@@ -40,24 +40,27 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .region_pdf import SeedViewRegistration
+    from .region_types import SeedViewRegistration
 
 logger = logging.getLogger(__name__)
 
-# PNG / plot renderers split out to report_plots.py (F-CLEAN14, 2026-06-07).
-# Imported back so the HTML-assembly functions below call them unchanged.
-from .report_plots import (  # noqa: E402,F401
-    POLAR_MAX_M,
+# PNG / plot renderers live in the _report_plots/ subpackage (F-CLEAN14,
+# 2026-06-07); the HTML-assembly functions below call them unchanged.
+from ._report_plots._pano_plots import (  # noqa: E402
     _draw_pano_bboxes_inplace,
     _draw_pano_north_line_inplace,
-    _fmt_optional_bool,
-    _fmt_optional_float,
     _render_pano_bearing_scan_png,
     _render_pano_depth_png,
     _render_pano_heights_polar_png,
     _render_pano_minimap_polar_png,
     _render_pano_reconstruction_png,
     _render_pano_segformer_overlay_png,
+)
+from ._report_plots._plot_utils import (  # noqa: E402
+    _fmt_optional_bool,
+    _fmt_optional_float,
+)
+from ._report_plots._view_plots import (  # noqa: E402
     _render_screening_map_png,
     _render_seed_minimap_png,
     _render_view_depth_png,

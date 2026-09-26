@@ -235,7 +235,7 @@ class TestMinimapOverlay:
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        from city2stl.skyline.region_pdf import _draw_osm_coastline_overlay
+        from city2stl.skyline._region_render._draw import _draw_osm_coastline_overlay
 
         fig, ax = plt.subplots()
         # Empty osm_data → no-op, no exception
@@ -255,7 +255,7 @@ class TestMinimapOverlay:
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        from city2stl.skyline.region_pdf import _draw_osm_coastline_overlay
+        from city2stl.skyline._region_render._draw import _draw_osm_coastline_overlay
 
         coastline = _make_coastline_feat([[-75.0, 40.0], [-75.001, 40.0]])
         osm = _wrap([coastline])

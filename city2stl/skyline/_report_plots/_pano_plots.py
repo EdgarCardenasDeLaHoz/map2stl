@@ -504,9 +504,7 @@ def _render_pano_segformer_overlay_png(
         import numpy as np  # noqa: PLC0415
         from PIL import Image  # noqa: PLC0415
 
-        from ..pipeline import (  # noqa: PLC0415
-            stitch_pano_mask_channel,
-        )
+        from .._core.pano import stitch_pano_mask_channel  # noqa: PLC0415
     except Exception as exc:
         logger.warning("pano mask stitch unavailable: %s", exc)
         return False

@@ -5,11 +5,9 @@ from contextlib import nullcontext
 
 import numpy as np
 
+from .._core.segmentation import _neural_sky_and_building_masks
 from .._core.timing import _StepTimer
-from ..pipeline import (
-    BuildingRecord,
-    _neural_sky_and_building_masks,
-)
+from .._core.types import BuildingRecord
 from ..region_config import (
     _F_SKY11_1_ENABLED,
 )
@@ -65,15 +63,11 @@ def _recover_pano_heading(
         return timer.timed(label, level=2) if timer is not None else nullcontext()
 
     try:
+        from .._core.pano import stitch_pano_masks as _stitch_masks
+        from .._core.pano import stitch_pano_views as _stitch_rgb
         from ..coastline_registration import (
             detect_coastline_keypoints,
             sweep_pano_heading_offset,
-        )
-        from ..pipeline import (
-            stitch_pano_masks as _stitch_masks,
-        )
-        from ..pipeline import (
-            stitch_pano_views as _stitch_rgb,
         )
         # Build a set of image IDs for cached (screened) views so we can
         # use id() to avoid double-inference on the same ndarray objects.
@@ -83,7 +77,7 @@ def _recover_pano_heading(
         # in one forward pass. The cached subset is a no-op here (already
         # prefetched in the orchestrator); the rejected extras are inferred
         # together instead of one-at-a-time in the loop below.
-        from ..pipeline import prefetch_label_maps as _prefetch  # noqa: PLC0415
+        from .._core.segmentation import prefetch_label_maps as _prefetch  # noqa: PLC0415
         with _sub("SegFormer prefetch (batched pano set)"):
             _prefetch([e.get("image") for e in prefetch])
         _spin_views_raw = []
@@ -95,7 +89,7 @@ def _recover_pano_heading(
             # SegFormer masks (the LRU cache in pipeline.py handles this
             # transparently, but being explicit avoids the eviction risk on
             # large spins).
-            from ..pipeline import (
+            from .._core.segmentation import (
                 _neural_sky_and_building_masks,
                 _neural_vegetation_mask,
                 _neural_water_mask,
@@ -122,7 +116,7 @@ def _recover_pano_heading(
             _stitched = _stitch_masks(_spin_views_raw, seed.fov, spin_step_deg)
         # F-SKY18: stitch the vegetation channel with identical geometry so
         # the same headings_per_col applies. None if no view supplied one.
-        from ..pipeline import stitch_pano_mask_channel as _stitch_chan
+        from .._core.pano import stitch_pano_mask_channel as _stitch_chan
         _pveg = _stitch_chan(_spin_views_raw, seed.fov, spin_step_deg, "vegetation_mask")
         if _rgb_stitched is not None and _stitched is not None:
             _pano_img_unused, _headings_per_col = _rgb_stitched
@@ -519,10 +513,8 @@ def _recover_anchor_offset(
     Returns the anchor offset in degrees to be applied to every view's
     registration search centre.
     """
-    from ..pipeline import (  # noqa: PLC0415
-        _neural_water_mask,
-        _score_offset_semantic_iou,
-    )
+    from .._core.registration import _score_offset_semantic_iou  # noqa: PLC0415
+    from .._core.segmentation import _neural_water_mask  # noqa: PLC0415
 
     def _sub(label: str):
         return timer.timed(label, level=2) if timer is not None else nullcontext()

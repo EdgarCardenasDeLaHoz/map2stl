@@ -9,22 +9,26 @@ from pathlib import Path
 
 import numpy as np
 
-from .._core.height import _ground_elev_m
-from .._core.timing import _StepTimer
-from .._region_render._draw import _registration_overlay
-from ..pipeline import (
-    BuildingRecord,
-    _merge_silhouette_sources,
-    _neural_sky_and_building_masks,
+from .._core.height import (
+    _ground_elev_m,
     augment_estimates_with_depth,
-    detect_building_silhouettes,
-    detect_buildings_from_mask,
     estimate_heights_from_registration,
+)
+from .._core.registration import (
     match_segments_to_buildings,
     osm_anchor_silhouettes,
     osm_sam_instance_silhouettes,
     register_view_to_osm,
 )
+from .._core.segmentation import _neural_sky_and_building_masks
+from .._core.skyline import (
+    _merge_silhouette_sources,
+    detect_building_silhouettes,
+    detect_buildings_from_mask,
+)
+from .._core.timing import _StepTimer
+from .._core.types import BuildingRecord
+from .._region_render._draw import _registration_overlay
 from ..region_config import (
     _F_SKY1_ENABLED,
     _F_SKY5_ENABLED,
@@ -81,12 +85,8 @@ def _register_views(
                 _next_idx[0] += 1
             seg["seed_index"] = seed_index_map[fid]
 
-    from ..pipeline import (  # noqa: PLC0415
-        _height_proxy as _hp,
-    )
-    from ..pipeline import (
-        compute_building_band,
-    )
+    from .._core.registration import _height_proxy as _hp  # noqa: PLC0415
+    from .._core.skyline import compute_building_band
     view_rows: list[SeedViewRegistration] = []
     estimates: list = []
     buildings_by_id = {b.feature_id: b for b in seed_buildings}
@@ -158,7 +158,7 @@ def _register_views(
         # forward pass produced the label_map); cheap to grab so the HTML
         # report can render all four classes on the grayscale diagnostic.
         with _sub("Stage 1: SegFormer water+veg (cache hits)"):
-            from ..pipeline import (  # noqa: PLC0415
+            from .._core.segmentation import (  # noqa: PLC0415
                 _neural_vegetation_mask,
                 _neural_water_mask,
             )
@@ -941,10 +941,12 @@ def _multires_pano_refine(
     refined = coarse.copy()
     fine_total = 0.0
     try:
-        from ..pipeline import (  # noqa: PLC0415
+        # Read the model globals off the module after _ensure_segformer() has
+        # set them; a from-import would capture the pre-load None / "cpu".
+        from .._core import segmentation as _seg  # noqa: PLC0415
+        from .._core.segmentation import (  # noqa: PLC0415
             _ADE20K_BUILDING_CLASSES,
             _ensure_segformer,
-            _segformer_device,
         )
         if not _ensure_segformer():
             return coarse, clusters, 0.0
@@ -953,10 +955,8 @@ def _multires_pano_refine(
         from PIL import Image as PILImage  # noqa: PLC0415
         from transformers import SegformerImageProcessor  # noqa: PLC0415
 
-        from .. import pipeline as _p  # noqa: PLC0415
-
-        model = _p._segformer_model
-        processor = SegformerImageProcessor.from_pretrained(_p._SEGFORMER_MODEL_ID)
+        model = _seg._segformer_model
+        processor = SegformerImageProcessor.from_pretrained(_seg._SEGFORMER_MODEL_ID)
         processor.size = {"height": int(fine_input_size), "width": int(fine_input_size)}
         processor.do_resize = True
 
@@ -976,8 +976,8 @@ def _multires_pano_refine(
             t0 = time.perf_counter()
             pil = PILImage.fromarray(crop)
             inputs = processor(images=pil, return_tensors="pt")
-            if _segformer_device != "cpu":
-                inputs = {k: v.to(_segformer_device) for k, v in inputs.items()}
+            if _seg._segformer_device != "cpu":
+                inputs = {k: v.to(_seg._segformer_device) for k, v in inputs.items()}
             with torch.no_grad():
                 outputs = model(**inputs)
             upsampled = F.interpolate(
@@ -1249,22 +1249,18 @@ def _build_and_detect_pano(
         return timer.timed(label, level=2) if timer is not None else nullcontext()
 
     try:
-        from ..pipeline import (  # noqa: PLC0415
-            _neural_sky_and_building_masks,
-            _neural_water_mask,
+        from .._core.pano import (  # noqa: PLC0415
             project_buildings_to_pano,
             stitch_pano_masks,
             stitch_pano_views,
         )
-        from ..pipeline import (
-            compute_building_band as _cbb,
+        from .._core.registration import match_segments_to_buildings as _match_pano
+        from .._core.segmentation import (  # noqa: PLC0415
+            _neural_sky_and_building_masks,
+            _neural_water_mask,
         )
-        from ..pipeline import (
-            detect_buildings_from_mask as _det_pano,
-        )
-        from ..pipeline import (
-            match_segments_to_buildings as _match_pano,
-        )
+        from .._core.skyline import compute_building_band as _cbb
+        from .._core.skyline import detect_buildings_from_mask as _det_pano
         # Use the broader prefetch (all spin headings that returned an
         # image, including those screening rejected) when available so
         # the panorama covers a full 360° view even when only a few
@@ -1278,7 +1274,7 @@ def _build_and_detect_pano(
         spin_views_for_pano: list[dict] = []
         # Late import — vegetation mask is opt-in (F-SKY18).
         try:
-            from ..pipeline import _neural_vegetation_mask  # noqa: PLC0415
+            from .._core.segmentation import _neural_vegetation_mask  # noqa: PLC0415
         except Exception:
             _neural_vegetation_mask = None
         with _sub("pano mask assembly (SegFormer cache hits/misses)"):
@@ -1290,7 +1286,7 @@ def _build_and_detect_pano(
           # but for manual-anchor seeds — where we skip recovery and thus
           # its prefetch — this restores the batched fast path instead of
           # 12 separate inferences.
-          from ..pipeline import prefetch_label_maps as _prefetch_lm  # noqa: PLC0415
+          from .._core.segmentation import prefetch_label_maps as _prefetch_lm  # noqa: PLC0415
           _prefetch_lm([cv.get("image") for cv in stitch_source
                         if cv.get("image") is not None])
           for cv in stitch_source:
@@ -1324,7 +1320,7 @@ def _build_and_detect_pano(
         # 180° symmetry (the bay-coastline failure mode). Cheap concat; the
         # later stitch at composite-render time reuses the cached masks.
         try:
-            from ..pipeline import stitch_pano_mask_channel as _stitch_chan_xc  # noqa: PLC0415
+            from .._core.pano import stitch_pano_mask_channel as _stitch_chan_xc  # noqa: PLC0415
             pano_veg_arr_xc = _stitch_chan_xc(
                 spin_views_for_pano, seed.fov, spin_step_deg, "vegetation_mask")
         except Exception:
@@ -1680,7 +1676,7 @@ def _build_and_detect_pano(
         # couldn't: adjacent same-distance towers merged into one mask
         # blob.
         try:
-            from ..pipeline import osm_anchor_silhouettes  # noqa: PLC0415
+            from .._core.registration import osm_anchor_silhouettes  # noqa: PLC0415
             pre_n = len(pano_segs)
             with _sub("OSM-anchored split (per-projection cut)"):
                 pano_segs = osm_anchor_silhouettes(
@@ -1813,7 +1809,7 @@ def _build_and_detect_pano(
         # source view set & sort order as the building/water stitches
         # above, so the column geometry agrees with ``pano_img``).
         try:
-            from ..pipeline import stitch_pano_mask_channel  # noqa: PLC0415
+            from .._core.pano import stitch_pano_mask_channel  # noqa: PLC0415
             pano_sky_arr = stitch_pano_mask_channel(
                 spin_views_for_pano, seed.fov, spin_step_deg, "sky_mask")
             pano_veg_arr = stitch_pano_mask_channel(

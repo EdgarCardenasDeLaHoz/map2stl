@@ -9,13 +9,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from .._core.height import aggregate_building_heights
+from .._core.segmentation import _neural_sky_and_building_masks
 from .._core.timing import _StepTimer
+from .._core.types import BuildingRecord
 from .._region_render._draw import _negative_seed_views
-from ..pipeline import (
-    BuildingRecord,
-    _neural_sky_and_building_masks,
-    aggregate_building_heights,
-)
 from ..region_config import (
     _F_SKY1_ENABLED,
 )
@@ -246,7 +244,7 @@ def _seed_multiview_registration(
         # is paid once for the spin instead of 12×. No-op fallback to lazy
         # per-image inference if the model is unavailable.
         with _phase("SegFormer prefetch (batched spin)"):
-            from ..pipeline import prefetch_label_maps as _prefetch  # noqa: PLC0415
+            from .._core.segmentation import prefetch_label_maps as _prefetch  # noqa: PLC0415
             _prefetch([cv["image"] for cv in cached_views_for_seed])
 
         # Negative seed: a known-bad skyline. Skip all analysis (heading

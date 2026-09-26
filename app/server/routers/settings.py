@@ -11,6 +11,8 @@ import logging
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from app.server.schemas import ColormapInfo, DatasetInfo, ProjectionInfo
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
 
@@ -177,32 +179,6 @@ def _list_datasets() -> list[dict]:
                     source="JRC/GSW1_4/GlobalSurfaceWater",    requires_auth=True),
     ]
     return [_model_to_dict(d) for d in datasets]
-
-
-# ---------------------------------------------------------------------------
-# Schema imports
-# ---------------------------------------------------------------------------
-try:
-    from app.server.schemas import ColormapInfo, DatasetInfo, ProjectionInfo
-except ImportError:
-
-    from pydantic import BaseModel
-
-    class ColormapInfo(BaseModel):
-        id: str
-        description: str | None = None
-
-    class DatasetInfo(BaseModel):
-        id: str
-        name: str
-        description: str
-        source: str | None = None
-        requires_auth: bool = False
-
-    class ProjectionInfo(BaseModel):
-        id: str
-        name: str
-        description: str
 
 
 # ---------------------------------------------------------------------------

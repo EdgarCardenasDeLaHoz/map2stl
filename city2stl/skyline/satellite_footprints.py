@@ -40,7 +40,8 @@ import requests
 from shapely.geometry import box, shape
 from shapely.strtree import STRtree
 
-from .pipeline import BuildingRecord, _polygon_area_m2
+from ._core.types import BuildingRecord
+from ._core.util import _polygon_area_m2
 
 _MS_DATASET_LINKS_URL = (
     "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"

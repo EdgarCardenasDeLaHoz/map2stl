@@ -18,7 +18,7 @@ The F-SKY series is a set of 11+ computer-vision improvements to the skyline hei
 **Pending**: F-SKY14 (trained satellite coastline detector — deferred until OSM-sparse regions encountered)
 
 **F-DET series** (detection quality & early-out, 2026-06-20):
-- F-DET1 ✅: Blob-count pano screen — `pano_registration.py`; exit before registration if top-3-view blob count < 6 (saves 30–60 s per bad seed)
+- F-DET1 ✅: Blob-count pano screen — `_pano/`; exit before registration if top-3-view blob count < 6 (saves 30–60 s per bad seed)
 - F-DET2 ✅: OSM-backed FOV gate — `seed_selection.py`; reject proposals with < 3 OSM buildings in 80° FOV cone; add FOV-density score bonus
 - F-DET3 ✅: Weak quality sub-labels — `html_report.py`; "weak — no detection" / "weak — mismatch" / "weak — low coverage" instead of a flat "weak"
 - F-DET5 ✅: Landing page det column — `build_landing_page.py`; Det cell colored red (nseg < 10) / amber (10–19); sub-label filter in quality dropdown
@@ -29,9 +29,9 @@ The F-SKY series is a set of 11+ computer-vision improvements to the skyline hei
 ## Pipeline Architecture
 
 **Refactor note (F-CLEAN14 full split, 2026-06-23):** the four over-large skyline
-files are now **thin re-export façades** over focused subpackages — every existing
-`from city2stl.skyline.<module> import X` import path still works unchanged. The
-implementation moved to `_core/`, `_pano/`, `_report_plots/`, `_region_render/`. Split
+files were split into focused subpackages. Since 2026-09-25 only `pipeline.py` remains as
+a façade (for callers outside `skyline/`); the other three were removed and internal code
+imports the defining module. The implementation lives in `_core/`, `_pano/`, `_report_plots/`, `_region_render/`. Split
 was behaviour-neutral (773 strm2stl tests + 10 Playwright e2e green); a post-split ruff
 audit caught and fixed 3 NameError bugs on untested paths (missing `logger` in two
 plot subpackages, missing `np` in `_plot_utils`). See `docs/plans/F-CLEAN14-skyline-file-split.md`.
@@ -40,9 +40,9 @@ plot subpackages, missing `np` in `_plot_utils`). See `docs/plans/F-CLEAN14-skyl
 city2stl/skyline/
 ├── pipeline.py          (façade)  → _core/ {types, util, segmentation, projection,
 │                                            skyline, pano, registration, height}
-├── pano_registration.py (façade)  → _pano/ {capture, heading, detect, orchestrator}
-├── report_plots.py      (façade)  → _report_plots/ {_plot_utils, _view_plots, _pano_plots}
-├── region_render.py     (façade)  → _region_render/ {_draw, _pages}
+├── _pano/                {capture, heading, detect, orchestrator}
+├── _report_plots/        {_plot_utils, _view_plots, _pano_plots}
+├── _region_render/       {_draw, _pages}
 ├── region_pdf.py        (orchestration + I/O + PDF rendering)
 ├── scripts/
 │   ├── 08_region_skyline_pdf.py  (production entry point)
@@ -143,7 +143,7 @@ def generate_region_report(region_name):
 - **Status**: Implemented, integrated into aggregation ✅ (2026-06-10)
 - **Location**: `pipeline.py:_floor_period_for_building()`, `height_trace.py`, `aggregate_building_heights()`
 - **Purpose**: Detect horizontal banding in building masks → estimate floor count → OSM-independent height rescue
-- **Activation**: Default ON (`SKYLINE_CV_F_SKY1=1`); `compute_floor_period=_F_SKY1_ENABLED` passed in `pano_registration.py`
+- **Activation**: Default ON (`SKYLINE_CV_F_SKY1=1`); `compute_floor_period=_F_SKY1_ENABLED` passed in `_pano/`
 - **Current use**: `aggregate_building_heights` collects `inferred_height_m` across views with `floor_confidence ≥ 0.30`; if ≥2 views agree and F-SKY1 median ≥ 1.4× geometric median, `effective_height_m` rescues upward and `effective_height_source = "f_sky1"`
 - **New output fields**: `f_sky1_height_m`, `f_sky1_n_views`, `effective_height_m`, `effective_height_source`
 
@@ -195,7 +195,7 @@ def generate_region_report(region_name):
 
 #### **F-SKY11.1: Pano-Level Coastline Alignment (Phases A + B)**
 - **Status**: Phase A complete ✅, Phase B integrated ✅ (2026-06-13)
-- **Location**: `coastline_registration.py`, demo script `scripts/12_pano_coastline_demo.py`; Phase B in `region_config.py` + `pano_registration.py:_recover_anchor_offset`
+- **Location**: `coastline_registration.py`, demo script `scripts/12_pano_coastline_demo.py`; Phase B in `region_config.py` + `_pano/heading.py:_recover_anchor_offset`
 - **Purpose**: Single global heading-offset recovery from stitched 360° pano + water mask; recovered offset seeds the joint anchor optimizer's fine sweep
 - **Method**: Water-distance radial signatures + numbered coastline keypoints + multi-view sweep
 - **Previous approach**: F-SKY11 (12 independent per-view best-heading searches)
@@ -245,7 +245,7 @@ def generate_region_report(region_name):
 
 #### **F-SKY13: OSM-Coastline Registration + Footprints Overlay**
 - **Status**: Phases A, A.2, B, C all implemented ✅ (Phase C verified 2026-06-10)
-- **Location**: `city2stl/skyline/osm_water.py`, `coastline_registration.py`, `region_pdf.py`, `pano_registration.py`
+- **Location**: `city2stl/skyline/osm_water.py`, `coastline_registration.py`, `region_pdf.py`, `_pano/`
 - **Phase C**: `SKYLINE_CV_PHASE_C=1` — `region_pdf.py` sets `primary_source: "osm"`; `_recover_pano_heading` branches to `osm_keypoints_for_scoring` instead of satellite HSV; same `sweep_pano_heading_offset` runs with OSM-derived `{bearing_deg, distance_m}` keypoints
 - **Validation needed**: Run on Cartagena seed_5 with `SKYLINE_CV_PHASE_C=1`; confirm recovered heading ≈ 320° and IoU improves vs Phase B
 - **Plan**: `docs/plans/F-SKY13-osm-coastline-footprints-overlay.md`
@@ -260,7 +260,7 @@ def generate_region_report(region_name):
 
 #### **F-SKY5: MobileSAM Instance-Segmentation Head**
 - **Status**: Fully implemented and wired ✅ (2026-06-10); requires external checkpoint to activate
-- **Location**: `pipeline.py:osm_sam_instance_silhouettes()`, `pano_registration.py` Stage 8
+- **Location**: `pipeline.py:osm_sam_instance_silhouettes()`, `_pano/` Stage 8
 - **Purpose**: Split merged blobs (≥2 OSM markers inside) using MobileSAM point prompts
 - **Activation**: `SKYLINE_CV_F_SKY5=1` + MobileSAM installed + checkpoint at `~/.cache/mobile_sam/vit_t.pth`
 - **Install**: `pip install git+https://github.com/ChaoningZhang/MobileSAM.git` then download vit_t.pth

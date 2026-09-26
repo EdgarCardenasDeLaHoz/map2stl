@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.server.config import OSM_CACHE_PATH
+from app.server.core.cache import migrate_osm_plain_json, prune_all_caches
 from app.server.routers.auth import router as _auth_router
 from app.server.routers.cache import router as _cache_router
 from app.server.routers.cities import router as _cities_router
@@ -28,13 +29,6 @@ from app.server.routers.regions import router as _regions_router
 from app.server.routers.reports import router as _reports_router
 from app.server.routers.settings import router as _settings_router
 from app.server.routers.terrain import router as _terrain_router
-
-# Disk-cache helpers: prune on startup, migrate legacy OSM cache
-try:
-    from app.server.core.cache import migrate_osm_plain_json, prune_all_caches
-    _CACHE_AVAILABLE = True
-except ImportError:
-    _CACHE_AVAILABLE = False
 
 # Configure logging to write to a file — use an absolute path so the log
 # file never lands inside a directory watched by uvicorn's auto-reloader.
@@ -64,17 +58,16 @@ async def _lifespan(app):
     import asyncio
     loop = asyncio.get_running_loop()
     # Cache maintenance
-    if _CACHE_AVAILABLE:
-        def _startup_cache_maintenance():
-            try:
-                migrate_osm_plain_json(OSM_CACHE_PATH)
-                counts = prune_all_caches()
-                if any(v > 0 for v in counts.values()):
-                    logger.info(f"Startup cache prune: {counts}")
-            except Exception as e:
-                logger.warning(
-                    f"Startup cache maintenance failed (non-fatal): {e}")
-        loop.run_in_executor(None, _startup_cache_maintenance)
+    def _startup_cache_maintenance():
+        try:
+            migrate_osm_plain_json(OSM_CACHE_PATH)
+            counts = prune_all_caches()
+            if any(v > 0 for v in counts.values()):
+                logger.info(f"Startup cache prune: {counts}")
+        except Exception as e:
+            logger.warning(
+                f"Startup cache maintenance failed (non-fatal): {e}")
+    loop.run_in_executor(None, _startup_cache_maintenance)
     yield  # server runs here
 
 

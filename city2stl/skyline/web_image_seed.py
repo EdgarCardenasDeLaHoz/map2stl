@@ -242,8 +242,6 @@ def web_skyline_seeds(
     max_images: int = 3,
     cache_dir: Path | None = None,
     region_bbox_center: tuple[float, float] | None = None,
-    # kept for call-site compatibility; Flickr is no longer used
-    flickr_api_key: str = "",
 ) -> tuple[list[SkylinePoint], dict[str, np.ndarray]]:
     """Fetch web skyline images and return (SkylinePoint list, image cache).
 
@@ -254,7 +252,6 @@ def web_skyline_seeds(
     max_images         : Maximum number of seeds to return (default 3).
     cache_dir          : Directory for downloaded image disk cache.
     region_bbox_center : (lat, lon) of city centre; improves heading accuracy.
-    flickr_api_key     : Ignored — retained so existing call sites don't break.
     """
     from .region_types import SkylinePoint  # noqa: PLC0415
 

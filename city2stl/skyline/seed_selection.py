@@ -15,7 +15,8 @@ from pathlib import Path
 
 import numpy as np
 
-from .pipeline import _neural_sky_and_building_masks, detect_skyline_contour
+from ._core.segmentation import _neural_sky_and_building_masks
+from ._core.skyline import detect_skyline_contour
 from .region_data import (
     _bearing_deg,
     _distance_m,

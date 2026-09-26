@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import tempfile
 from pathlib import Path
 
@@ -61,17 +62,12 @@ _OT_TIMEOUT = 120
 from ._raster import read_geotiff_bytes as _parse_tiff_bytes  # noqa: E402
 
 
-def _fetch_srtm_opentopo(bbox: BBox) -> np.ndarray | None:
+def _fetch_srtm_opentopo(bbox: BBox, api_key: str | None) -> np.ndarray | None:
     """Fetch SRTM 30m DTM for *bbox* from OpenTopography API.
 
-    Requires OPENTOPO_API_KEY in config or environment.
-    Returns float32 array or None on failure.
+    Returns float32 array or None on failure (including when *api_key* is empty).
     """
-    try:
-        from app.server.config import OPENTOPO_API_KEY  # noqa: PLC0415
-    except ImportError:
-        OPENTOPO_API_KEY = None  # type: ignore[assignment]
-    if not OPENTOPO_API_KEY:
+    if not api_key:
         logger.warning("nDSM: OPENTOPO_API_KEY not set; cannot fetch SRTM DTM")
         return None
     north, south, east, west = bbox
@@ -82,7 +78,7 @@ def _fetch_srtm_opentopo(bbox: BBox) -> np.ndarray | None:
         "west": west,
         "east": east,
         "outputFormat": "GTiff",
-        "API_Key": OPENTOPO_API_KEY,
+        "API_Key": api_key,
     }
     try:
         logger.info("nDSM: fetching SRTM via OpenTopography for "
@@ -332,6 +328,11 @@ class NDSMProvider:
 
     name = "ndsm"
 
+    def __init__(self, api_key: str | None = None) -> None:
+        """*api_key* is the OpenTopography key for the SRTM DTM; when omitted,
+        the OPENTOPO_API_KEY environment variable is used."""
+        self.api_key = api_key
+
     def covers(self, bbox: BBox) -> bool:
         """nDSM is global (FABDEM covers ±80° latitude)."""
         north, south, _, _ = bbox
@@ -372,7 +373,8 @@ class NDSMProvider:
 
         # DTM: SRTM via OpenTopography (primary) or FABDEM tiles (fallback).
         # FABDEM from Bristol uni (data.bris.ac.uk) has been 404 since early 2026.
-        dtm_stitched = _fetch_srtm_opentopo(bbox)
+        dtm_stitched = _fetch_srtm_opentopo(
+            bbox, self.api_key or os.environ.get("OPENTOPO_API_KEY"))
 
         if dtm_stitched is None:
             # Fallback: per-tile FABDEM (kept for when Bristol restores the mirror)

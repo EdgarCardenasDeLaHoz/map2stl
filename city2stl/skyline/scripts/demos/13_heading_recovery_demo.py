@@ -27,7 +27,7 @@ PDF pages:
   4. Per-channel correlation curves + combined.
 
 Usage:
-    PYTHONPATH=. python city2stl/skyline/scripts/13_heading_recovery_demo.py \\
+    python city2stl/skyline/scripts/demos/13_heading_recovery_demo.py \\
         --region Cartagena --seed-index 5
 """
 
@@ -922,14 +922,13 @@ def main() -> int:
         stitch_pano_masks,
         stitch_pano_views,
     )
-    from city2stl.skyline.region_pdf import (
-        _load_region_bbox,
-        _load_site_seed_urls,
+    from city2stl.skyline.region_data import _load_region_bbox, _load_site_seed_urls
+    from city2stl.skyline.satellite_image import fetch_region_satellite
+    from city2stl.skyline.streetview_io import (
         _parse_streetview_url,
         _resolve_api_key,
         _streetview_image,
     )
-    from city2stl.skyline.satellite_image import fetch_region_satellite
 
     api_key = _resolve_api_key(args.api_key)
     bbox = _load_region_bbox(args.region)

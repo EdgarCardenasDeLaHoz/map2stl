@@ -43,7 +43,7 @@ import requests
 from IPython.display import display
 from PIL import Image
 
-from app.server.config import LUMINANCE_B, LUMINANCE_G, LUMINANCE_R
+from app.server.config import LUMINANCE_B, LUMINANCE_G, LUMINANCE_R, OPENTOPO_API_KEY
 
 _ALLOWED_HTTP_METHODS = {"get", "post", "put", "delete", "patch"}
 
@@ -2519,9 +2519,9 @@ class TerrainSession:
         # Registry of available providers
         _registry = {
             "wsf3d": lambda: WSF3DProvider(),
-            "ndsm": lambda: NDSMProvider(),
+            "ndsm": lambda: NDSMProvider(api_key=OPENTOPO_API_KEY),
             "copernicus": lambda: CopernicusProvider(),
-            "lidar_3dep": lambda: LiDAR3DEPProvider(),
+            "lidar_3dep": lambda: LiDAR3DEPProvider(api_key=OPENTOPO_API_KEY),
             "ghsl": lambda: GHSLProvider(),
             "open_buildings": lambda: OpenBuildingsProvider(),
             "shadow_height": lambda: ShadowHeightProvider(),

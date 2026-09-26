@@ -47,6 +47,8 @@ def _apply_opentopo_key(key: str) -> bool:
         applied = True
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Could not rebind geo2stl.dem._OPENTOPO_API_KEY: %s", exc)
+    from app.server.core.height.service import set_opentopo_api_key
+    set_opentopo_api_key(key)
     return applied
 
 

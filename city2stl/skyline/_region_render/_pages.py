@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 
-from ..pipeline import BuildingRecord
+from .._core.types import BuildingRecord
 from ..region_config import (
     _SEGMENT_PALETTE,
 )
@@ -1040,14 +1040,10 @@ def _render_pdf(
         # Page numbering is cosmetic; never let it break the report.
         pass
 
-# _StepTimer moved to _core/timing.py; re-exported here for back-compat.
-from .._core.timing import _StepTimer  # noqa: E402,F401
-
 __all__ = [
     '_render_stitched_pano_page',
     '_count_seg_flags',
     '_render_seed_view_page',
     '_load_known_heights',
     '_render_pdf',
-    '_StepTimer',
 ]

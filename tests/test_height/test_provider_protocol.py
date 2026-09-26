@@ -22,7 +22,6 @@ _PROVIDERS = [
     ("lidar_3dep", "LiDAR3DEPProvider"),
     ("ndsm", "NDSMProvider"),
     ("open_buildings", "OpenBuildingsProvider"),
-    ("roofnet", "RoofNetProvider"),
     ("shadow_height", "ShadowHeightProvider"),
     ("wsf3d", "WSF3DProvider"),
 ]

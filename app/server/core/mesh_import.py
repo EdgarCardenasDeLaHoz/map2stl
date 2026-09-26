@@ -35,42 +35,18 @@ import uuid
 from pathlib import Path
 
 import numpy as np
+from numpy2stl.applications.cities import get_city_bbox as _get_city_bbox
+from numpy2stl.applications.cities import get_city_center_point as _get_city_center_point
+from numpy2stl.registration.align.transform import apply_transform as _apply_transform
+from numpy2stl.registration.pipeline import register_city_stl as _register_city_stl
 
 from app.server.config import MAX_DIM, MICROPOLITAN_STL_DIR
 from app.server.core.cache import CACHE_ROOT, make_cache_key
+from city2stl.skyline.height.infill import infill_idw as _infill_idw
+from city2stl.skyline.height.infill import infill_nearest as _infill_nearest
+from city2stl.skyline.height.stl_import import stl_to_heightmap as _stl_to_heightmap
 
 logger = logging.getLogger(__name__)
-
-try:
-    from city2stl.skyline.height.stl_import import stl_to_heightmap as _stl_to_heightmap
-    _STL_IMPORT_AVAILABLE = True
-except ImportError:
-    _STL_IMPORT_AVAILABLE = False
-
-try:
-    from city2stl.skyline.height.infill import (
-        infill_idw as _infill_idw,
-    )
-    from city2stl.skyline.height.infill import (
-        infill_nearest as _infill_nearest,
-    )
-    _INFILL_AVAILABLE = True
-except ImportError:
-    _INFILL_AVAILABLE = False
-
-try:
-    from numpy2stl.registration.align.transform import apply_transform as _apply_transform
-    _APPLY_TRANSFORM_AVAILABLE = True
-except ImportError:
-    _APPLY_TRANSFORM_AVAILABLE = False
-
-try:
-    from numpy2stl.applications.cities import get_city_bbox as _get_city_bbox
-    from numpy2stl.applications.cities import get_city_center_point as _get_city_center_point
-    from numpy2stl.registration.pipeline import register_city_stl as _register_city_stl
-    _AUTO_REGISTER_AVAILABLE = True
-except ImportError:
-    _AUTO_REGISTER_AVAILABLE = False
 
 ALLOWED_EXTENSIONS = {".stl", ".obj"}
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB
@@ -179,11 +155,6 @@ def compute_heightmap(
     Delegates to city2stl.skyline.height.stl_import.stl_to_heightmap, then
     optionally fills NaN gaps via infill_idw/infill_nearest.
     """
-    if not _STL_IMPORT_AVAILABLE:
-        raise MeshImportError(
-            "Mesh import support is unavailable on this server "
-            "(city2stl.skyline.height.stl_import failed to import — "
-            "check trimesh/rtree are installed).")
     _check_grid_size(bbox, resolution_m)
 
     mesh_path = _resolve_mesh_path(upload_id)
@@ -191,9 +162,6 @@ def compute_heightmap(
         mesh_path, bbox, resolution_m=resolution_m, up_axis=up_axis)
 
     if infill != "none":
-        if not _INFILL_AVAILABLE:
-            raise MeshImportError(
-                "Infill requested but city2stl.skyline.height.infill is unavailable.")
         if infill == "idw":
             heightmap = _infill_idw(heightmap, mask)
         elif infill == "nearest":
@@ -286,12 +254,6 @@ def register_heightmap(
     returned by fit_affine_from_pairs.
     output_shape: (rows, cols) of the reference grid.
     """
-    if not _APPLY_TRANSFORM_AVAILABLE:
-        raise MeshImportError(
-            "Registration warp is unavailable on this server "
-            "(numpy2stl.registration.align.transform failed to import — "
-            "check opencv-python is installed).")
-
     warped = _apply_transform(
         heightmap.astype(np.float64), M, output_shape=output_shape, fill_value=np.nan)
     # Nearest-style mask warp: treat as float 0/1, threshold at 0.5 after warp.
@@ -443,19 +405,11 @@ def compute_library_heightmap(
         _save_last_heightmap(_library_session_dir(rel_path), heightmap, mask)
         return heightmap, mask
 
-    if not _STL_IMPORT_AVAILABLE:
-        raise MeshImportError(
-            "Mesh import support is unavailable on this server "
-            "(city2stl.skyline.height.stl_import failed to import — "
-            "check trimesh/rtree are installed).")
 
     heightmap, mask = _stl_to_heightmap(
         mesh_path, bbox, resolution_m=resolution_m, up_axis=up_axis)
 
     if infill != "none":
-        if not _INFILL_AVAILABLE:
-            raise MeshImportError(
-                "Infill requested but city2stl.skyline.height.infill is unavailable.")
         heightmap = _infill_idw(heightmap, mask) if infill == "idw" else _infill_nearest(heightmap)
 
     write_array_cache(
@@ -582,7 +536,7 @@ def auto_register(
 
     Returns a dict describing what was found, always including a `status`
     field so the caller can decide whether to trust it:
-        status: "ok" | "geocode_failed" | "unavailable"
+        status: "ok" | "geocode_failed"
         city_name: str            — the parsed/geocoded place name used
         bbox: {north,south,east,west} | None  — see note below on which bbox this is
         confidence: float | None  — raw FFT xcorr peak (see docstring caveat below)
@@ -626,13 +580,6 @@ def auto_register(
     numpy2stl.registration.pipeline.register_city_stl() directly with its
     default out_dir, not through this function.
     """
-    if not _AUTO_REGISTER_AVAILABLE:
-        return {
-            "status": "unavailable",
-            "city_name": None, "bbox": None,
-            "confidence": None, "footprint_iou": None, "rmse_m": None,
-        }
-
     city_name = parse_city_name_from_path(filename_hint)
     try:
         n, s, e, w = _get_city_bbox(city_name)

@@ -13,10 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-trimesh = pytest.importorskip("trimesh")
-
 import app.server.core.mesh_import as mesh_import
-
 
 # ── STL fixture helper (mirrors tests/test_height/test_stl_import.py) ───────
 
@@ -368,15 +365,3 @@ class TestParseCityNameFromPath:
     def test_upload_filename_with_underscores_only(self):
         result = mesh_import.parse_city_name_from_path("verify_box.stl")
         assert result == "verify box"
-
-
-class TestAutoRegisterUnavailable:
-    """When numpy2stl.registration.pipeline/applications.cities can't be
-    imported, auto_register must degrade to a clear 'unavailable' status
-    rather than raising."""
-
-    def test_returns_unavailable_status_when_guarded_import_failed(self, monkeypatch):
-        monkeypatch.setattr(mesh_import, "_AUTO_REGISTER_AVAILABLE", False)
-        result = mesh_import.auto_register(Path("does-not-matter.stl"), "Miami, FL")
-        assert result["status"] == "unavailable"
-        assert result["bbox"] is None

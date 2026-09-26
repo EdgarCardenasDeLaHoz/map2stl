@@ -10,12 +10,13 @@ Estimates per-building heights for a city region by:
      pinhole-y → height_m per building.
   5. Aggregating per-view estimates with outlier-seed downweighting.
 
-Layout (the top-level modules are façades over private subpackages; every
-import path is preserved):
+Layout:
   - ``pipeline.py``          -> ``_core/``          CV/geometry primitives, step timer
-  - ``pano_registration.py`` -> ``_pano/``          per-seed capture, heading, detection
-  - ``region_render.py``     -> ``_region_render/`` PDF drawing and pages
-  - ``report_plots.py``      -> ``_report_plots/``  HTML-report figures
+                                (public façade for external callers; skyline's
+                                own modules import from ``_core.*`` directly)
+  - ``_pano/``               — per-seed capture, heading, detection
+  - ``_region_render/``      — PDF drawing and pages
+  - ``_report_plots/``       — HTML-report figures
   - ``region_pdf.py``        — region orchestration; ``region_config``,
     ``region_data`` and ``region_types`` hold its flags, I/O and dataclasses
   - ``height/``              — ML height stack and external height providers
@@ -28,6 +29,7 @@ lives alongside it in ``city2stl/skyline/height/`` (moved from
 current strengths, weaknesses, and known failure modes.
 """
 
-from .pipeline import aggregate_building_heights, detect_skyline_contour
+from ._core.height import aggregate_building_heights
+from ._core.skyline import detect_skyline_contour
 
 __all__ = ["aggregate_building_heights", "detect_skyline_contour"]

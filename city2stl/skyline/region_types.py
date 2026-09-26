@@ -2,10 +2,9 @@
 skyline orchestration modules.
 
 Split out of ``region_pdf.py`` (F-CLEAN14, 2026-06-07) so region_data,
-streetview_io, seed_selection, pano_registration and region_render can all
+streetview_io, seed_selection, ``_pano/`` and ``_region_render/`` can all
 import the shared result/structure types from one place without importing the
-heavyweight orchestrator. ``region_pdf`` re-exports these names, so
-``from city2stl.skyline.region_pdf import SeedViewRegistration`` still works.
+heavyweight orchestrator.
 """
 
 from __future__ import annotations

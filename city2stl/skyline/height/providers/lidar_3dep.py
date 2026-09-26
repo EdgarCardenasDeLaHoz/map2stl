@@ -18,13 +18,15 @@ Coverage: US (contiguous, Alaska, Hawaii); falls back to the global NDSMProvider
 for non-US regions via the provider registry coverage check.
 Resolution: ~30 m.
 Confidence: 0.82 (US-specific, slight advantage over global SRTM-only nDSM).
-Requires: OPENTOPO_API_KEY in config.json or environment variable.
+Requires: an OpenTopography API key, passed as ``LiDAR3DEPProvider(api_key=...)``
+or read from the OPENTOPO_API_KEY environment variable.
 """
 
 from __future__ import annotations
 
 import io
 import logging
+import os
 
 import numpy as np
 import requests
@@ -59,11 +61,7 @@ def _is_in_us(bbox: BBox) -> bool:
 
 
 def _get_api_key() -> str | None:
-    try:
-        from app.server.config import OPENTOPO_API_KEY  # noqa: PLC0415
-        return OPENTOPO_API_KEY or None
-    except ImportError:
-        return None
+    return os.environ.get("OPENTOPO_API_KEY") or None
 
 
 # GeoTIFF parsing (rasterio→PIL fallback) is shared across DEM providers.
@@ -104,6 +102,9 @@ class LiDAR3DEPProvider:
 
     name = "lidar_3dep"
 
+    def __init__(self, api_key: str | None = None) -> None:
+        self.api_key = api_key
+
     def covers(self, bbox: BBox) -> bool:
         return _is_in_us(bbox)
 
@@ -116,7 +117,7 @@ class LiDAR3DEPProvider:
         if hit is not None:
             return hit
 
-        api_key = _get_api_key()
+        api_key = self.api_key or _get_api_key()
         if not api_key:
             logger.warning("lidar_3dep: OPENTOPO_API_KEY not set; returning empty")
             return _empty_result(dim)

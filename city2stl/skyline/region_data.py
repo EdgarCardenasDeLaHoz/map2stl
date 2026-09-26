@@ -20,7 +20,8 @@ from app.server.core.cache import osm_cache_key, read_osm_cache, write_osm_cache
 from app.server.core.db import get_db, init_db
 from city2stl.fetch import fetch_osm_data
 
-from .pipeline import BuildingRecord, _building_height_from_tags, _polygon_area_m2
+from ._core.types import BuildingRecord
+from ._core.util import _building_height_from_tags, _polygon_area_m2
 from .region_types import RegionBBox
 
 

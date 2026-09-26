@@ -18,7 +18,6 @@ import json
 import logging
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -45,7 +44,7 @@ class HydrologyLayerBase:
         raise NotImplementedError()
 
 
-def fetch_natural_earth_rivers(scale_m: int = 10) -> Optional[Dict]:
+def fetch_natural_earth_rivers(scale_m: int = 10) -> dict | None:
     """
     Fetch Natural Earth rivers dataset as GeoJSON.
 
@@ -76,8 +75,8 @@ def fetch_natural_earth_rivers(scale_m: int = 10) -> Optional[Dict]:
                 logger.warning("No .shp file in Natural Earth archive")
                 return None
 
-            import tempfile
             import os
+            import tempfile
             with tempfile.TemporaryDirectory() as tmpdir:
                 z.extractall(tmpdir)
                 shp_path = os.path.join(tmpdir, shp_files[0])
@@ -94,7 +93,7 @@ def fetch_natural_earth_rivers(scale_m: int = 10) -> Optional[Dict]:
         return None
 
 
-def filter_rivers_by_bbox(geojson: Dict, bbox: Tuple[float, float, float, float]) -> Dict:
+def filter_rivers_by_bbox(geojson: dict, bbox: tuple[float, float, float, float]) -> dict:
     """
     Filter GeoJSON features to a bounding box.
 
@@ -139,8 +138,8 @@ def filter_rivers_by_bbox(geojson: Dict, bbox: Tuple[float, float, float, float]
 
 
 def rasterize_rivers_with_buffering(
-    geojson: Dict,
-    bbox: Tuple[float, float, float, float],
+    geojson: dict,
+    bbox: tuple[float, float, float, float],
     dim: int,
     depression_m: float = -3.0,
 ) -> np.ndarray:
@@ -157,10 +156,10 @@ def rasterize_rivers_with_buffering(
         Float32 array of shape (dim, dim) with river elevation values
     """
     try:
-        from shapely.geometry import shape, mapping
+        from rasterio.enums import MergeAlg
         from rasterio.features import rasterize as rio_rasterize
         from rasterio.transform import from_bounds
-        from rasterio.enums import MergeAlg
+        from shapely.geometry import mapping, shape
     except ImportError:
         logger.warning(
             "shapely or rasterio not installed for hydrology rasterization")
@@ -169,7 +168,6 @@ def rasterize_rivers_with_buffering(
     west, south, east, north = bbox
 
     # Calculate pixel size in metres (approximate)
-    mid_lat = (north + south) / 2.0
     pixel_size_lon_m = (east - west) * 111_320.0 / dim
     pixel_size_lat_m = (north - south) * 111_320.0 / dim
     pixel_size_m = (pixel_size_lon_m + pixel_size_lat_m) / 2.0
@@ -372,7 +370,7 @@ _REGION_URLS: dict[str, str] = {
 
 # Coarse region bounding boxes: (west, south, east, north)
 # Note: HydroRIVERS regions overlap by design; pyogrio bbox parameter clips at read time.
-_REGION_BBOX: dict[str, Tuple[float, float, float, float]] = {
+_REGION_BBOX: dict[str, tuple[float, float, float, float]] = {
     "af": (-20,  -35,  55,  38),
     "ar": (-180,  60, 180,  90),
     "as": (57,  -5, 180,  60),
@@ -404,7 +402,7 @@ def _cache_dir() -> Path:
     return d
 
 
-def _ensure_region_shapefile(region: str) -> Optional[Path]:
+def _ensure_region_shapefile(region: str) -> Path | None:
     """Download and unzip the HydroRIVERS shapefile for *region* if not cached.
 
     On first use, extracts and simplifies geometries (removes collinear points)
@@ -481,7 +479,7 @@ def _ensure_region_shapefile(region: str) -> Optional[Path]:
         return None
 
 
-def _simplify_and_cache_shapefile(shp_path: Path, region: str) -> Optional[Path]:
+def _simplify_and_cache_shapefile(shp_path: Path, region: str) -> Path | None:
     """Simplify geometries in a shapefile and cache as a new simplified version.
 
     Removes collinear points from all LineString/MultiLineString geometries.
@@ -558,7 +556,7 @@ def _parquet_is_valid(pq: Path) -> bool:
     return False
 
 
-def _ensure_region_parquet(region: str) -> Optional[Path]:
+def _ensure_region_parquet(region: str) -> Path | None:
     """Return the *full* GeoParquet file for *region*, building both the
     full and order-3+ variants from the shapefile if needed.
 
@@ -967,10 +965,6 @@ def fetch_and_rasterize_hydrology(
     except Exception as e:
         logger.error(f"Hydrology fetch/rasterize failed: {e}", exc_info=True)
         return None
-
-
-# Canonical name used by geo2stl public API
-rasterize_hydrology = fetch_and_rasterize_hydrology
 
 
 def merge_rivers_with_dem(dem: np.ndarray, rivers: np.ndarray) -> np.ndarray:

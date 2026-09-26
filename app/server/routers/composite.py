@@ -550,7 +550,7 @@ async def merge_hydrology(req: HydrologyMergeRequest):
 
     # Settings-only mode: resolve DEM from cache
     if not dem_values and req.bbox:
-        from app.server.core.export import resolve_dem_from_cache
+        from app.server.core.export_params import resolve_dem_from_cache
         req_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
         resolved = resolve_dem_from_cache(req_dict)
         if resolved:

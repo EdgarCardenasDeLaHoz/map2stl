@@ -21,6 +21,8 @@ from app.server.core.export import (  # noqa: E402
     generate_mesh_preview,
     generate_obj,
     generate_stl,
+)
+from app.server.core.export_tasks import (  # noqa: E402
     get_task_file,
     get_task_status,
     start_export_task,

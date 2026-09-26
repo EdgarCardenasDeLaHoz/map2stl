@@ -21,7 +21,7 @@ import cv2
 import numpy as np
 import requests
 
-from .pipeline import _load_env_file_if_present
+from ._core.util import _load_env_file_if_present
 
 STREETVIEW_METADATA_URL = "https://maps.googleapis.com/maps/api/streetview/metadata"
 STREETVIEW_IMAGE_URL = "https://maps.googleapis.com/maps/api/streetview"

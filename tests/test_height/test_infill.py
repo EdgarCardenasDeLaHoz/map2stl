@@ -7,13 +7,8 @@ scipy is required (it's in requirements.txt).
 from __future__ import annotations
 
 import numpy as np
-import pytest
-
-# Skip entire module if scipy unavailable
-pytest.importorskip("scipy")
 
 from city2stl.skyline.height.infill import infill_idw, infill_nearest
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -67,8 +62,6 @@ class TestInfillIdw:
         result = infill_idw(hm, mask=mask)
         known_min = float(np.nanmin(hm))
         known_max = float(np.nanmax(hm))
-        interior = mask & (~np.isnan(hm))
-        filled = ~mask | interior
         # Filled values should not exceed known range (plus tolerance)
         assert float(np.nanmin(result)) >= known_min - 0.5
         assert float(np.nanmax(result)) <= known_max + 0.5

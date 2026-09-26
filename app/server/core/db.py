@@ -35,18 +35,14 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from app.server.config import COORDINATES_PATH
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Path
 # ---------------------------------------------------------------------------
-try:
-    from app.server.config import COORDINATES_PATH
-    _STRM2STL_DIR = COORDINATES_PATH.parent
-except ImportError:
-    _STRM2STL_DIR = Path(__file__).parent.parent.parent
-
-DB_PATH: Path = _STRM2STL_DIR / "data.db"
+DB_PATH: Path = COORDINATES_PATH.parent / "data.db"
 
 _CREATE_REGIONS = """
 CREATE TABLE IF NOT EXISTS regions (

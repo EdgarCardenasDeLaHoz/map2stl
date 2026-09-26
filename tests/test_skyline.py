@@ -7,17 +7,17 @@ import pytest
 
 from city2stl.skyline.pipeline import (
     BuildingRecord,
+    RegisteredBuildingEstimate,
     Viewpoint,
     _cull_occluded_projections,
     _match_projections_to_peaks,
     _project_building,
     _seed_from_view_name,
     aggregate_building_heights,
-    match_segments_to_buildings,
     detect_building_silhouettes,
-    RegisteredBuildingEstimate,
+    match_segments_to_buildings,
 )
-from city2stl.skyline.region_pdf import _parse_streetview_url
+from city2stl.skyline.streetview_io import _parse_streetview_url
 
 
 def _vp(heading: float = 0.0, fov: float = 80.0, w: int = 960, h: int = 540) -> Viewpoint:

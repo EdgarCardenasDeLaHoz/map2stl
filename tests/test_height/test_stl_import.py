@@ -6,18 +6,13 @@ trimesh is required.  Tests are skipped if not installed.
 
 from __future__ import annotations
 
-import math
 import struct
-from io import BytesIO
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-# ── Skip whole module if trimesh is not available ────────────────────────────
-trimesh = pytest.importorskip("trimesh")
-
-from city2stl.skyline.height.stl_import import stl_to_heightmap, _UP_AXIS_ROTATIONS
+from city2stl.skyline.height.stl_import import _UP_AXIS_ROTATIONS, stl_to_heightmap
 
 # ── STL writing helpers ───────────────────────────────────────────────────────
 
@@ -179,6 +174,7 @@ class TestErrorHandling:
         monkeypatch.setattr(builtins, "__import__", _blocked_import)
         # Must re-import the module so the patched import path is taken
         import importlib
+
         import city2stl.skyline.height.stl_import as mod
         importlib.reload(mod)
         try:

@@ -38,13 +38,8 @@ def _dir_size_mb(path: Path) -> float:
 
 def _auth_summary() -> dict:
     """Key/auth status without importing the auth router's heavy EE check."""
-    out = {"opentopo_key": False, "earth_engine": None}
-    try:
-        from app.server.config import OPENTOPO_API_KEY
-        out["opentopo_key"] = bool(OPENTOPO_API_KEY)
-    except Exception as exc:  # pragma: no cover - defensive
-        out["opentopo_error"] = str(exc)
-    return out
+    from app.server.config import OPENTOPO_API_KEY
+    return {"opentopo_key": bool(OPENTOPO_API_KEY), "earth_engine": None}
 
 
 def _dem_sources() -> dict:
@@ -101,11 +96,8 @@ async def diagnostics(request: Request):
     Optional query params ``north/south/east/west`` add a coverage probe for
     the currently-selected region.
     """
-    try:
-        from app.server.core.cache import CACHE_ROOT
-        cache_path = Path(CACHE_ROOT)
-    except Exception:
-        cache_path = Path(__file__).parent.parent.parent / "cache"
+    from app.server.core.cache import CACHE_ROOT
+    cache_path = Path(CACHE_ROOT)
 
     payload = {
         "ok": True,

@@ -30,20 +30,13 @@ from pathlib import Path
 import cv2 as _cv2
 import numpy as np
 import requests as _requests
+from skimage import filters as _ski_filters
 
 from geo2stl.processing import apply_layer_processing, blend_layers, upsample_dem  # noqa: F401
 from geo2stl.projections import project_coordinates, project_grid
 from geo2stl.sat2stl import fetch_bbox_image
+from geo2stl.sat2stl import get_aquatic_regions as _get_aquatic_regions
 from geo2stl.tiles import stitch_tiles_no_rasterio
-
-try:
-    from skimage import filters as _ski_filters
-except ImportError:
-    _ski_filters = None
-try:
-    from geo2stl.sat2stl import get_aquatic_regions as _get_aquatic_regions
-except ImportError:
-    _get_aquatic_regions = None
 
 logger = logging.getLogger(__name__)
 
@@ -232,8 +225,7 @@ def make_dem_image(
                 if sat is not None:
                     sat = np.array(sat).clip(0, 100)
                     water = 1.0 * ((sat == 80) | (sat == 0))
-                    if _ski_filters is not None:
-                        water = _ski_filters.median(water, np.ones((3, 3)))
+                    water = _ski_filters.median(water, np.ones((3, 3)))
                     h_im, w_im = im.shape
                     water = _cv2.resize(water, (w_im, h_im),
                                         interpolation=_cv2.INTER_LINEAR)
@@ -241,15 +233,14 @@ def make_dem_image(
                     im = im - water
             except Exception as exc:
                 logger.warning("Could not process ESA water data: %s", exc)
-        elif water_dataset == "jrc" and _get_aquatic_regions is not None:
+        elif water_dataset == "jrc":
             try:
                 target_dim = min(max(im.shape[0], im.shape[1]), 500)
                 img = _get_aquatic_regions(
                     N, S, E, W, dataset="jrc", scale=None, target_dim=target_dim)
                 if img is not None:
                     img2 = img.copy().astype(np.uint8)
-                    if _ski_filters is not None:
-                        img2 = _ski_filters.median(img2, np.ones((3, 3)))
+                    img2 = _ski_filters.median(img2, np.ones((3, 3)))
                     img2 = _cv2.resize(img2, (im.shape[1], im.shape[0]),
                                        interpolation=_cv2.INTER_LINEAR).astype(int)
                     img2[im < 0] = 200
@@ -626,37 +617,19 @@ def compute_raw_dem(north, south, east, west, dim, depth_scale):
 # Mesh generation — bbox → DEM → STL pipeline
 # ---------------------------------------------------------------------------
 
-def create_dem_model(
-    im: np.ndarray,
-    simplify: bool = False,
-    max_faces: int = 50_000,
-    **kwargs,
-) -> list:
+def create_dem_model(im: np.ndarray, **kwargs) -> list:
     """Convert a DEM array to a list of mesh dicts via numpy2stl.
 
     Returns a list of dicts with keys ``vertices``, ``faces``, ``name``.
-    Pass ``simplify=True`` to reduce the face count (requires numpy2stl.simplify).
     Extra *kwargs* are forwarded to :func:`numpy2stl.array_to_mesh`.
     """
-    from numpy2stl import array_to_mesh  # lazy import — keeps geo2stl usable without numpy2stl
+    from numpy2stl import array_to_mesh
 
     # array_to_mesh accepts kwargs like mask_val, solid, walls, floor, floor_val
     mesh_kwargs = {k: v for k, v in kwargs.items()
                    if k in ("mask_val", "solid", "floor_val", "walls", "floor")}
     vertices, faces = array_to_mesh(im, **mesh_kwargs)
-    models = [{"vertices": vertices, "faces": faces, "name": "terrain"}]
-
-    if simplify:
-        try:
-            from numpy2stl.processing.simplify import simplify_mesh
-            models[0]["vertices"], models[0]["faces"] = simplify_mesh(
-                vertices, faces, max_faces=max_faces
-            )
-        except ImportError:
-            logger.warning(
-                "numpy2stl.simplify unavailable; skipping mesh simplification")
-
-    return models
+    return [{"vertices": vertices, "faces": faces, "name": "terrain"}]
 
 
 def process_region(

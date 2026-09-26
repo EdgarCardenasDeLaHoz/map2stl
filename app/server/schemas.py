@@ -53,14 +53,6 @@ class BoundingBox(BaseModel):
     north_gt_south = _north_validator
 
 
-# Legacy alias kept for backward-compatibility with older frontend code
-class BoundingBoxLegacy(BaseModel):
-    southWestLat: float
-    southWestLng: float
-    northEastLat: float
-    northEastLng: float
-
-
 # ---------------------------------------------------------------------------
 # Regions
 # ---------------------------------------------------------------------------
@@ -379,14 +371,6 @@ class DatasetsResponse(BaseModel):
     datasets: list[DatasetInfo]
 
 
-# Legacy alias kept so existing water-mask handler can still be used as body model
-class Region(BoundingBox):
-    sat_scale: int | None = None
-    dim: int | None = None
-    target_width: int | None = None
-    target_height: int | None = None
-
-
 # ---------------------------------------------------------------------------
 # DEM Merge / Composite
 # ---------------------------------------------------------------------------
@@ -560,7 +544,7 @@ class MeshAutoRegisterRequest(BaseModel):
 
 class MeshAutoRegisterResponse(BaseModel):
     """Response for the auto-register routes."""
-    status: Literal["ok", "geocode_failed", "unavailable"]
+    status: Literal["ok", "geocode_failed"]
     city_name: str | None = None
     bbox: dict[str, float] | None = None
     confidence: float | None = None

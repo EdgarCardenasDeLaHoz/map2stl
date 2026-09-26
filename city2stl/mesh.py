@@ -3,16 +3,11 @@ city2stl/mesh.py — 3D city mesh generation: extruded buildings + terrain.
 
 Provides pure-computation geometry and mesh assembly for the city 3MF pipeline.
 No HTTP, cache, or server dependencies — importable from notebooks and tests.
-
-Server entry point: app.server.core.cities_3d re-exports all public symbols
-from this module as a thin shim.
+Server entry point: app.server.routers.cities (/api/cities/export3mf).
 
 -- Legacy note --
-city2stl/buildings.py (triangulate_prism, get_polygons) and
-city2stl/create.py (get_building_model, get_landspace_model) served the same
-purpose with the old osmnx API. The functions in this module are the modern
-replacement: _extrude_ring supersedes triangulate_prism, _build_building_meshes
-supersedes get_building_model, and _terrain_mesh supersedes get_landspace_model.
+city2stl/buildings.py (triangulate_prism, get_polygons) served the same
+purpose with the old osmnx API; _extrude_ring supersedes triangulate_prism.
 """
 
 from __future__ import annotations
@@ -23,33 +18,14 @@ import os
 import tempfile
 
 import numpy as np
+from numpy2stl import array_to_mesh as _array_to_mesh
+from numpy2stl import write3MF as _write3mf
+from numpy2stl.core.generate import polygon_to_prism as _polygon_to_prism
+from numpy2stl.core.solid import vertices_to_index as _vertices_to_index
+from shapely.geometry import Polygon as _ShapelyPolygon
+from skimage.transform import resize as sk_resize
 
 logger = logging.getLogger(__name__)
-
-try:
-    from numpy2stl import write3MF as _write3mf
-    _WRITE3MF_AVAILABLE = True
-except ImportError:
-    _WRITE3MF_AVAILABLE = False
-
-try:
-    from numpy2stl import array_to_mesh as _array_to_mesh
-    _ARRAY_TO_MESH_AVAILABLE = True
-except ImportError:
-    _ARRAY_TO_MESH_AVAILABLE = False
-
-try:
-    from shapely.geometry import Polygon as _ShapelyPolygon
-    _SHAPELY_AVAILABLE = True
-except ImportError:
-    _SHAPELY_AVAILABLE = False
-
-try:
-    from numpy2stl.core.generate import polygon_to_prism as _polygon_to_prism
-    from numpy2stl.core.solid import vertices_to_index as _vertices_to_index
-    _POLYGON_TO_PRISM_AVAILABLE = True
-except ImportError:
-    _POLYGON_TO_PRISM_AVAILABLE = False
 
 
 # ---------------------------------------------------------------------------
@@ -320,24 +296,23 @@ def _sanitize_ring_xy(pts_mm: np.ndarray) -> np.ndarray | None:
     if abs(area) < _RING_EPS_MM:
         return None
 
-    if _SHAPELY_AVAILABLE:
-        try:
-            poly = _ShapelyPolygon(pts)
-            if not poly.is_valid:
-                fixed = poly.buffer(0)
-                if fixed.is_empty:
-                    return None
-                if fixed.geom_type == "MultiPolygon":
-                    fixed = max(fixed.geoms, key=lambda g: g.area)
-                if fixed.geom_type != "Polygon":
-                    return None
-                repaired = np.asarray(fixed.exterior.coords, dtype=float)[:-1]
-                if len(repaired) < 3:
-                    return None
-                return repaired
-        except Exception as _e:                                   # noqa: BLE001
-            logger.debug("ring repair failed (%s); rejecting ring", _e)
-            return None
+    try:
+        poly = _ShapelyPolygon(pts)
+        if not poly.is_valid:
+            fixed = poly.buffer(0)
+            if fixed.is_empty:
+                return None
+            if fixed.geom_type == "MultiPolygon":
+                fixed = max(fixed.geoms, key=lambda g: g.area)
+            if fixed.geom_type != "Polygon":
+                return None
+            repaired = np.asarray(fixed.exterior.coords, dtype=float)[:-1]
+            if len(repaired) < 3:
+                return None
+            return repaired
+    except Exception as _e:                                   # noqa: BLE001
+        logger.debug("ring repair failed (%s); rejecting ring", _e)
+        return None
 
     return pts
 
@@ -374,14 +349,13 @@ def _extrude_ring(
     pts_mm = cleaned
     n = len(pts_mm)
 
-    if _POLYGON_TO_PRISM_AVAILABLE:
-        try:
-            verts_3d = np.column_stack([pts_mm, np.full(n, z1)])
-            raw_tris = _polygon_to_prism(verts_3d, perimeters=[np.arange(n)], base_val=z0)
-            verts, faces = _vertices_to_index(raw_tris)
-            return verts.astype(np.float32), faces.astype(np.int32)
-        except Exception as _e:
-            logger.debug("polygon_to_prism failed (%s), using fallback ear-clip", _e)
+    try:
+        verts_3d = np.column_stack([pts_mm, np.full(n, z1)])
+        raw_tris = _polygon_to_prism(verts_3d, perimeters=[np.arange(n)], base_val=z0)
+        verts, faces = _vertices_to_index(raw_tris)
+        return verts.astype(np.float32), faces.astype(np.int32)
+    except Exception as _e:
+        logger.debug("polygon_to_prism failed (%s), using fallback ear-clip", _e)
 
     # -- Fallback: manual ear-clip implementation -------------------------
     roof   = np.column_stack([pts_mm, np.full(n, z1)])
@@ -660,7 +634,7 @@ def _terrain_mesh(
     """
     Convert a 2-D DEM array [rows, cols] into a closed, printable terrain mesh.
 
-    Delegates to numpy2stl.array_to_mesh(solid=True) when available.
+    Delegates to numpy2stl.array_to_mesh(solid=True).
     Pre-scales DEM values into [base_mm, base_mm+model_height_mm], then
     rescales the returned (col_idx, row_idx) coordinates to physical mm space.
 
@@ -673,99 +647,27 @@ def _terrain_mesh(
     # Scale DEM to desired physical z range
     scaled = base_mm + (dem_arr - z_min) / z_range * model_height_mm
 
-    if _ARRAY_TO_MESH_AVAILABLE:
-        import io
-        import sys
-        _devnull = io.StringIO()
-        _old_stdout, sys.stdout = sys.stdout, _devnull
-        try:
-            verts, faces = _array_to_mesh(scaled, floor_val=0.0, solid=True)
-        finally:
-            sys.stdout = _old_stdout
+    import io
+    import sys
+    _devnull = io.StringIO()
+    _old_stdout, sys.stdout = sys.stdout, _devnull
+    try:
+        verts, faces = _array_to_mesh(scaled, floor_val=0.0, solid=True)
+    finally:
+        sys.stdout = _old_stdout
 
-        if verts is None or len(verts) == 0:
-            return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.int32)
+    if verts is None or len(verts) == 0:
+        return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.int32)
 
-        verts = verts.astype(np.float32).copy()
-        # x: col_idx [0, cols-1] -> [0, W_mm]
-        # y: row_idx [0, rows-1] -> [H_mm, 0]  (row 0 = north, inverted)
-        col_scale = W_mm / max(cols - 1, 1)
-        row_scale = H_mm / max(rows - 1, 1)
-        verts[:, 0] = verts[:, 0] * col_scale
-        verts[:, 1] = H_mm - verts[:, 1] * row_scale
+    verts = verts.astype(np.float32).copy()
+    # x: col_idx [0, cols-1] -> [0, W_mm]
+    # y: row_idx [0, rows-1] -> [H_mm, 0]  (row 0 = north, inverted)
+    col_scale = W_mm / max(cols - 1, 1)
+    row_scale = H_mm / max(rows - 1, 1)
+    verts[:, 0] = verts[:, 0] * col_scale
+    verts[:, 1] = H_mm - verts[:, 1] * row_scale
 
-        return verts, faces.astype(np.int32)
-
-    # -- Fallback: manual implementation ---------------------------------
-    xs = np.linspace(0.0, W_mm, cols)
-    ys = np.linspace(H_mm, 0.0, rows)   # row 0 -> north (H_mm), last row -> south (0)
-    xx, yy = np.meshgrid(xs, ys)
-    zz = scaled
-
-    # -- Top surface vertices ---------------------------------------------
-    top_v = np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()])
-
-    def ti(r, c): return r * cols + c
-
-    faces: list[list[int]] = []
-    for r in range(rows - 1):
-        for c in range(cols - 1):
-            tl, tr_, bl, br = ti(r, c), ti(r, c + 1), ti(r + 1, c), ti(r + 1, c + 1)
-            faces.extend([[tl, bl, tr_], [tr_, bl, br]])
-
-    # -- Skirt vertices at z=0 --------------------------------------------
-    left_skirt  = np.column_stack([np.zeros(rows),          np.linspace(H_mm, 0, rows), np.zeros(rows)])
-    right_skirt = np.column_stack([np.full(rows, W_mm),     np.linspace(H_mm, 0, rows), np.zeros(rows)])
-    back_skirt  = np.column_stack([np.linspace(0, W_mm, cols), np.full(cols, H_mm),     np.zeros(cols)])
-    front_skirt = np.column_stack([np.linspace(0, W_mm, cols), np.zeros(cols),           np.zeros(cols)])
-
-    n_top = len(top_v)
-    li = n_top
-    n_top += rows
-    ri = n_top
-    n_top += rows
-    bi = n_top
-    n_top += cols
-    fi = n_top
-    n_top += cols
-
-    all_v = np.vstack([top_v, left_skirt, right_skirt, back_skirt, front_skirt])
-
-    for r in range(rows - 1):
-        t0 = ti(r, 0)
-        t1 = ti(r + 1, 0)
-        s0 = li + r
-        s1 = li + r + 1
-        faces.extend([[t0, s0, t1], [s0, s1, t1]])
-
-    for r in range(rows - 1):
-        t0 = ti(r, cols - 1)
-        t1 = ti(r + 1, cols - 1)
-        s0 = ri + r
-        s1 = ri + r + 1
-        faces.extend([[t0, t1, s0], [s0, t1, s1]])
-
-    for c in range(cols - 1):
-        t0 = ti(0, c)
-        t1 = ti(0, c + 1)
-        s0 = bi + c
-        s1 = bi + c + 1
-        faces.extend([[t0, t1, s0], [s0, t1, s1]])
-
-    for c in range(cols - 1):
-        t0 = ti(rows - 1, c)
-        t1 = ti(rows - 1, c + 1)
-        s0 = fi + c
-        s1 = fi + c + 1
-        faces.extend([[t0, s0, t1], [s0, s1, t1]])
-
-    bl_c = li + rows - 1
-    br_c = ri + rows - 1
-    tr_c = ri + 0
-    tl_c = li + 0
-    faces.extend([[bl_c, tr_c, br_c], [bl_c, tl_c, tr_c]])
-
-    return all_v.astype(np.float32), np.array(faces, dtype=np.int32)
+    return verts, faces.astype(np.int32)
 
 
 # ---------------------------------------------------------------------------
@@ -801,9 +703,6 @@ def generate_city_3mf(
         terrain_max_dim   : max grid dimension; downsamples large DEMs
         name              : base name for the 3MF objects
     """
-    if not _WRITE3MF_AVAILABLE:
-        raise RuntimeError("numpy2stl.save.write3MF not available; check numpy2stl path")
-
     # Reshape DEM
     dem_arr = np.array(dem_values, dtype=np.float32).reshape(dem_height, dem_width)
 
@@ -812,14 +711,7 @@ def generate_city_3mf(
         factor = terrain_max_dim / max(dem_height, dem_width)
         new_h = max(4, int(dem_height * factor))
         new_w = max(4, int(dem_width  * factor))
-        try:
-            from skimage.transform import resize as sk_resize
-            dem_arr = sk_resize(dem_arr, (new_h, new_w), anti_aliasing=True).astype(np.float32)
-        except ImportError:
-            # Manual strided downsample
-            row_step = max(1, dem_height // new_h)
-            col_step = max(1, dem_width  // new_w)
-            dem_arr  = dem_arr[::row_step, ::col_step]
+        dem_arr = sk_resize(dem_arr, (new_h, new_w), anti_aliasing=True).astype(np.float32)
 
     rows, cols = dem_arr.shape
     z_min = float(dem_arr.min())

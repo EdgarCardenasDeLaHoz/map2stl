@@ -18,7 +18,7 @@ Venv: `~/.venvs/strm2stl` (local, never under OneDrive). Create/refresh it with
 ```bash
 cd strm2stl && source ~/.venvs/strm2stl/Scripts/activate
 python -m uvicorn app.server.server:app --port 9000 --reload   # starts FastAPI
-python -m pytest tests/ -v                                     # run all tests (651 pass; tests/e2e/ requires playwright — excluded via pytest.ini)
+python -m pytest tests/ -v                                     # run all tests (also runs ../numpy2stl/tests; e2e/, integration and slow are opt-in)
 ```
 
 ## Recommended Read Order
@@ -65,8 +65,7 @@ strm2stl/
 │   │   ├── config.py      ← constants, OPENTOPO_DATASETS, API keys
 │   │   ├── schemas.py     ← all Pydantic models
 │   │   ├── core/          ← cache.py, cache_inspector.py, db.py, export.py, inflight.py,
-│   │   │                    export_params.py, export_tasks.py, osm_cache_policy.py,
-│   │   │                    responses.py, terrain_raster.py, validation.py,
+│   │   │                    export_params.py, export_tasks.py, responses.py, validation.py,
 │   │   │                    height/ subpackage (service.py, train.py)
 │   │   └── routers/       ← terrain.py, regions.py, export.py, cities.py, cache.py,
 │   │                        settings.py, composite.py, height.py
@@ -182,7 +181,7 @@ Computer-vision improvements to `city2stl/skyline/` for cross-view building heig
 - **Active F-SKY:** 1, 2, 4, 5 (opt-in), 6, 7, 8, 10 (opt-in), 11.1, 12, 13, 15
 - **Removed:** F-SKY3 (regression), F-SKY11.2 (dead-end)
 - **F-DET (detection quality & early-out, 2026-06):** F-DET1/2/3/5 done; F-DET4a–c (Type 2 per-city fixes) pending — **assumptions challenged 2026-06-23, see plan's "Critical review"**
-- **Structure (post F-CLEAN14 full split, 2026-06-23):** `pipeline.py`, `pano_registration.py`, `report_plots.py`, `region_render.py` are now thin façades over `_core/`, `_pano/`, `_report_plots/`, `_region_render/` subpackages — all import paths preserved. Demo scripts under `scripts/demos/`.
+- **Structure (post F-CLEAN14 full split, 2026-06-23):** `pipeline.py` is the public façade over `_core/` for callers outside `skyline/`; code inside `skyline/` imports the defining `_core/`, `_pano/`, `_report_plots/`, `_region_render/` module directly (the other façades were removed 2026-09-25). Demo scripts under `scripts/demos/`.
 - See: `docs/F-SKY-INTEGRATION.md`, `docs/plans/F-DET-detection-quality-and-early-out.md`, `docs/plans/F-CLEAN14-skyline-file-split.md`
 
 ## Full Details

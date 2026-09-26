@@ -15,14 +15,12 @@ logger = logging.getLogger(__name__)
 from .types import BuildingRecord, Viewpoint  # noqa: E402
 
 
-def _lonlat_to_local_m(lon: float, lat: float, lon0: float, lat0: float) -> tuple[float, float]:
+def lonlat_to_local_m(lon: float, lat: float, lon0: float, lat0: float) -> tuple[float, float]:
     meters_per_deg_lat = 110_540.0
     meters_per_deg_lon = 111_320.0 * math.cos(math.radians(lat0))
     dx = (lon - lon0) * meters_per_deg_lon
     dy = (lat - lat0) * meters_per_deg_lat
     return dx, dy
-
-lonlat_to_local_m = _lonlat_to_local_m
 
 def _focal_length_px(viewpoint: Viewpoint) -> float:
     return 0.5 * viewpoint.image_width / math.tan(math.radians(viewpoint.fov) * 0.5)
@@ -62,7 +60,7 @@ def _project_building(
     heading_total_deg = viewpoint.heading + heading_offset_deg
 
     # Centroid frame for in-FOV gating
-    cdx, cdy = _lonlat_to_local_m(
+    cdx, cdy = lonlat_to_local_m(
         building.centroid_lon, building.centroid_lat, viewpoint.lon, viewpoint.lat
     )
     c_forward, c_lateral = _camera_frame(cdx, cdy, heading_total_deg)
@@ -96,7 +94,7 @@ def _project_building(
         lat_lo = float("inf")
         lat_hi = float("-inf")
         for vlon, vlat in verts:
-            vdx, vdy = _lonlat_to_local_m(
+            vdx, vdy = lonlat_to_local_m(
                 vlon, vlat, viewpoint.lon, viewpoint.lat)
             v_forward, v_lateral = _camera_frame(vdx, vdy, heading_total_deg)
             if v_forward < min_forward_m:
@@ -440,7 +438,6 @@ def _projected_building_column_mask(
 
 
 __all__ = [
-    '_lonlat_to_local_m',
     'lonlat_to_local_m',
     '_focal_length_px',
     '_camera_frame',

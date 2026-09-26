@@ -41,7 +41,6 @@ def tmp_data_dir(tmp_path, monkeypatch):
 
     - Points core.db.DB_PATH to a fresh tmp SQLite file with TestRegion seeded.
     - Redirects CACHE_ROOT so cache reads/writes go to tmp/.
-    - Redirects legacy OSM_CACHE_PATH in the cities router.
 
     IMPORTANT: imports use the same short paths that server.py uses
     (e.g. `import app.server.routers.regions`, not `strm2stl.ui.routers.regions`)
@@ -65,14 +64,8 @@ def tmp_data_dir(tmp_path, monkeypatch):
     # Also update the CACHE_ROOT reference already imported into the cities router
     monkeypatch.setattr(cities_router, "CACHE_ROOT", test_cache_root)
 
-    # Legacy OSM_CACHE_PATH fallback (used when _CACHE_AVAILABLE=False)
-    osm_cache = tmp_path / "osm_raw_cache"
-    osm_cache.mkdir()
-    monkeypatch.setattr(cities_router, "OSM_CACHE_PATH", osm_cache)
-
     return {
         "db_path": test_db,
-        "osm_cache": osm_cache,
         "cache_root": test_cache_root,
         "tmp_path": tmp_path,
     }

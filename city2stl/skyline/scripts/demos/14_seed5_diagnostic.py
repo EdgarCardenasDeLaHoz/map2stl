@@ -4,7 +4,7 @@ to expose exactly where the "10 bounding boxes" pano limit originates.
 
 Usage (from the strm2stl/ directory)::
 
-    PYTHONPATH=. python city2stl/skyline/scripts/14_seed5_diagnostic.py \
+    python city2stl/skyline/scripts/demos/14_seed5_diagnostic.py \
         [--region cartagena] [--seed seed_5] [--out <path>]
 
 The script re-uses the same pipeline functions as the main report
@@ -35,6 +35,9 @@ ROOT = Path(__file__).resolve().parents[4]  # …/strm2stl/
 # ---------------------------------------------------------------------------
 # Pipeline imports (must come after path bootstrap)
 # ---------------------------------------------------------------------------
+from city2stl.skyline._pano.capture import _capture_pano_views  # noqa: E402
+from city2stl.skyline._pano.detect import _build_and_detect_pano  # noqa: E402
+from city2stl.skyline._pano.heading import _recover_anchor_offset  # noqa: E402
 from city2stl.skyline.pipeline import (  # noqa: E402
     BuildingRecord,
     CapturedView,
@@ -48,18 +51,17 @@ from city2stl.skyline.pipeline import (  # noqa: E402
     osm_sam_instance_silhouettes,
     register_view_to_osm,
 )
-from city2stl.skyline.region_pdf import (  # noqa: E402
-    SkylinePoint,
+from city2stl.skyline.region_data import (  # noqa: E402
     _attach_building_terrain,
-    _build_and_detect_pano,
-    _capture_pano_views,
     _load_osm_for_region,
     _load_region_bbox,
     _load_site_anchor_overrides,
     _load_site_seed_urls,
     _osm_to_building_records,
+)
+from city2stl.skyline.region_types import SkylinePoint  # noqa: E402
+from city2stl.skyline.streetview_io import (  # noqa: E402
     _parse_streetview_url,
-    _recover_anchor_offset,
     _resolve_api_key,
 )
 

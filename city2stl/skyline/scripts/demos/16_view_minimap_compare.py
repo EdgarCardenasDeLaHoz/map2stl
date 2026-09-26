@@ -10,7 +10,7 @@ compare/<seed>_view_<i>.png``.
 
 Usage::
 
-    PYTHONPATH=. python city2stl/skyline/scripts/16_view_minimap_compare.py \
+    python city2stl/skyline/scripts/demos/16_view_minimap_compare.py \
         --region Cartagena --seeds seed_1 seed_4 --views 0 2 4
 """
 

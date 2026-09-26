@@ -7,10 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from .._core.timing import _StepTimer
-from ..pipeline import (
-    CapturedView,
-    Viewpoint,
-)
+from .._core.types import CapturedView, Viewpoint
 from ..region_types import SkylinePoint
 from ..seed_selection import _screen_score_from_image
 from ..streetview_io import _streetview_image

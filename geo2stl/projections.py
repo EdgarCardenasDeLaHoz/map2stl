@@ -13,10 +13,11 @@ Projections available:
 - sinusoidal: Sinusoidal projection (equal-area, good for continents)
 """
 
+from typing import Literal
+
+import cv2
 import numpy as np
 from scipy import ndimage
-import cv2
-from typing import Tuple, Optional, Literal
 
 ProjectionType = Literal['none', 'cosine', 'mercator',
                          'equidistant', 'lambert', 'sinusoidal']
@@ -104,9 +105,9 @@ def get_projection_info() -> dict:
     }
 
 
-def expected_aspect_ratio(bbox: Tuple[float, float, float, float],
+def expected_aspect_ratio(bbox: tuple[float, float, float, float],
                           projection: ProjectionType,
-                          input_shape: Optional[Tuple[int, int]] = None) -> float:
+                          input_shape: tuple[int, int] | None = None) -> float:
     """Return the width/height aspect ratio a *true* (non-dimension-preserving)
     projection of this bbox should produce.
 
@@ -157,12 +158,14 @@ def expected_aspect_ratio(bbox: Tuple[float, float, float, float],
     if projection == 'mercator':
         max_lat = 85.0
         n_c, s_c = min(north, max_lat), max(south, -max_lat)
-        y = lambda lat: np.log(np.tan(np.pi / 4 + np.radians(np.clip(lat, -max_lat, max_lat)) / 2))
+        def y(lat):
+            return np.log(np.tan(np.pi / 4 + np.radians(np.clip(lat, -max_lat, max_lat)) / 2))
         merc_height = abs(y(n_c) - y(s_c))
         merc_width = np.radians(east - west)
         return merc_width / merc_height if merc_height else 1.0
     if projection == 'lambert':
-        y = lambda lat: np.sin(np.radians(lat))
+        def y(lat):
+            return np.sin(np.radians(lat))
         lam_height = abs(y(north) - y(south))
         lam_width = np.radians(east - west)
         return lam_width / lam_height if lam_height else 1.0
@@ -181,7 +184,7 @@ def expected_aspect_ratio(bbox: Tuple[float, float, float, float],
     raise ValueError(f"Unknown projection: {projection}")
 
 
-def verify_layer_alignment(shapes: dict, bbox: Tuple[float, float, float, float],
+def verify_layer_alignment(shapes: dict, bbox: tuple[float, float, float, float],
                            projection: ProjectionType,
                            maintain_dimensions: bool,
                            rtol: float = 0.02) -> None:
@@ -241,13 +244,13 @@ def verify_layer_alignment(shapes: dict, bbox: Tuple[float, float, float, float]
 
 def project_coordinates(
     mat: np.ndarray,
-    bbox: Tuple[float, float, float, float],
+    bbox: tuple[float, float, float, float],
     projection: ProjectionType = 'cosine',
     maintain_dimensions: bool = True,
     fill_value: float = np.nan,
     clip_nans: bool = False,
     order: int = 1,
-) -> Tuple[np.ndarray, dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Project a geographic raster to a 2D planar coordinate system.
 
@@ -360,12 +363,12 @@ def project_coordinates(
 
 def _project_cosine(
     mat: np.ndarray,
-    bbox: Tuple[float, float, float, float],
+    bbox: tuple[float, float, float, float],
     maintain_dimensions: bool,
     fill_value: float,
     metadata: dict,
     order: int = 1,
-) -> Tuple[np.ndarray, dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Original cosine latitude correction.
     Squishes horizontal pixels by cos(lat) to approximate local scale.
@@ -386,7 +389,7 @@ def _project_cosine(
         # Each row needs different horizontal scaling
         result = np.full((m, n), fill_value, dtype=np.float64)
 
-        for i, (lat, c) in enumerate(zip(lat_values, cos_lat)):
+        for i, c in enumerate(cos_lat):
             row = mat[i, :]
             # Scale factor relative to center
             scale = c / avg_cos
@@ -474,13 +477,13 @@ def _gall_y(lat_deg):
 
 def _project_cylindrical_y(
     mat: np.ndarray,
-    bbox: Tuple[float, float, float, float],
+    bbox: tuple[float, float, float, float],
     maintain_dimensions: bool,
     fill_value: float,
     metadata: dict,
     y_of_lat,
     order: int = 1,
-) -> Tuple[np.ndarray, dict]:
+) -> tuple[np.ndarray, dict]:
     """Project a raster with a cylindrical y = y_of_lat(lat) transform.
 
     Longitude is linear in x; latitude is warped in y by ``y_of_lat`` (a
@@ -535,12 +538,12 @@ def _project_cylindrical_y(
 
 def _project_mercator(
     mat: np.ndarray,
-    bbox: Tuple[float, float, float, float],
+    bbox: tuple[float, float, float, float],
     maintain_dimensions: bool,
     fill_value: float,
     metadata: dict,
     order: int = 1,
-) -> Tuple[np.ndarray, dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Web Mercator projection.
     Conformal (preserves angles), but distorts area at high latitudes.
@@ -604,8 +607,7 @@ def _project_mercator(
     metadata['output_shape'] = (out_m, out_n)
     metadata['mercator_y_range'] = (y_north, y_south)
 
-    # Scale at center latitude
-    center_lat = (north + south) / 2
+    # Scale at the equator
     metadata['scale_m_per_px'] = EARTH_RADIUS * np.radians(east - west) / out_n
 
     return result, metadata
@@ -613,12 +615,12 @@ def _project_mercator(
 
 def _project_equidistant(
     mat: np.ndarray,
-    bbox: Tuple[float, float, float, float],
+    bbox: tuple[float, float, float, float],
     maintain_dimensions: bool,
     fill_value: float,
     metadata: dict,
     order: int = 1,
-) -> Tuple[np.ndarray, dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Equidistant Cylindrical projection.
     Preserves distances along meridians.
@@ -660,12 +662,12 @@ def _project_equidistant(
 
 def _project_lambert(
     mat: np.ndarray,
-    bbox: Tuple[float, float, float, float],
+    bbox: tuple[float, float, float, float],
     maintain_dimensions: bool,
     fill_value: float,
     metadata: dict,
     order: int = 1,
-) -> Tuple[np.ndarray, dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Lambert Cylindrical Equal-Area projection.
     Preserves area, but distorts shapes.
@@ -726,12 +728,12 @@ def _project_lambert(
 
 def _project_sinusoidal(
     mat: np.ndarray,
-    bbox: Tuple[float, float, float, float],
+    bbox: tuple[float, float, float, float],
     maintain_dimensions: bool,
     fill_value: float,
     metadata: dict,
     order: int = 1,
-) -> Tuple[np.ndarray, dict]:
+) -> tuple[np.ndarray, dict]:
     """
     Sinusoidal (Sanson-Flamsteed) projection.
     Equal-area pseudocylindrical projection.
@@ -873,46 +875,6 @@ def project_grid(arr: np.ndarray,
     if categorical:
         projected = np.nan_to_num(projected, nan=0.0)
     return projected
-
-
-def project_binary_mask(arr: np.ndarray,
-                        north: float, south: float, east: float, west: float,
-                        projection: ProjectionType,
-                        clip_nans: bool,
-                        maintain_dimensions: bool = False) -> np.ndarray:
-    """Project a binary mask independently and return a binarized float32 array."""
-    projected, _meta = project_coordinates(
-        arr.astype(np.float32), (north, south, east, west),
-        projection=projection,
-        maintain_dimensions=maintain_dimensions,
-        fill_value=np.nan,
-        clip_nans=clip_nans,
-        order=1,
-    )
-    projected = np.nan_to_num(projected, nan=0.0)
-    return (projected > 0.5).astype(np.float32)
-
-
-def project_categorical_layer(arr: np.ndarray,
-                              north: float, south: float, east: float, west: float,
-                              projection: ProjectionType,
-                              clip_nans: bool,
-                              maintain_dimensions: bool = False) -> np.ndarray:
-    """Project a categorical raster independently using nearest-neighbour sampling."""
-    return project_grid(arr.astype(np.float32), north, south, east, west,
-                        projection, clip_nans, categorical=True,
-                        maintain_dimensions=maintain_dimensions)
-
-
-def project_city_raster(arr: np.ndarray,
-                        north: float, south: float, east: float, west: float,
-                        projection: ProjectionType,
-                        clip_nans: bool,
-                        maintain_dimensions: bool = False) -> np.ndarray:
-    """Project city raster (continuous height field) through the shared grid path."""
-    return project_grid(arr.astype(np.float32), north, south, east, west,
-                        projection, clip_nans, categorical=False,
-                        maintain_dimensions=maintain_dimensions)
 
 
 def project_water_arrays(water_mask: np.ndarray,

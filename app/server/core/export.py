@@ -17,18 +17,10 @@ import numpy as np
 from starlette.background import BackgroundTask
 
 from app.server.core.export_params import (
-    ExportContext,  # noqa: F401  (re-export for backward compatibility)
     _parse_export_params,
     resolve_dem_from_cache,
 )
-
-# Re-export from refactored modules for backward compatibility
-from app.server.core.export_tasks import (  # noqa: F401
-    ExportTask,
-    get_task_file,
-    get_task_status,
-    start_export_task,
-)
+from app.server.core.export_tasks import ExportTask
 
 logger = logging.getLogger(__name__)
 
@@ -219,10 +211,6 @@ def _grid_mesh(im: np.ndarray, mm_per_pixel: float = 1.0) -> tuple:
     vertices, faces = array_to_mesh(im, floor_val=0.0)
     vertices, faces = _north_up(vertices, faces, im.shape[0])
     return _scale_xy(vertices, mm_per_pixel), faces
-
-
-# Kept under its old name for callers outside this module.
-_numpy2stl_mesh = _grid_mesh
 
 
 def _repair_mesh(vertices, faces):
@@ -858,7 +846,7 @@ def generate_crosssection(data: dict):
     thickness_px = max(2, int(round(thickness_mm / max(mm_per_pixel, 1e-6))) + 1)
     im_cross = np.tile(profile, (thickness_px, 1)).astype(np.float32)
 
-    vertices, faces = _numpy2stl_mesh(im_cross, mm_per_pixel=mm_per_pixel)
+    vertices, faces = _grid_mesh(im_cross, mm_per_pixel=mm_per_pixel)
     temp_path, _ = _repair_and_export(vertices, faces, '.stl')
 
     fname = f"{name}_cross_{label_axis}.stl"

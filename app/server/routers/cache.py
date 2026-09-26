@@ -14,6 +14,8 @@ from typing import Any
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
+from app.server.config import CACHE_CLEAR_INTERVAL, CACHE_DIRS, CACHE_MAX_FILES, EE_CACHE_DIR
+from app.server.core.cache import CACHE_ROOT as CORE_CACHE_ROOT
 from app.server.core.cache_inspector import (
     build_region_tree as _build_region_tree,
 )
@@ -26,24 +28,6 @@ from app.server.core.cache_inspector import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cache"])
-
-# ---------------------------------------------------------------------------
-# Config imports
-# ---------------------------------------------------------------------------
-try:
-    from app.server.config import CACHE_CLEAR_INTERVAL, CACHE_DIRS, CACHE_MAX_FILES, EE_CACHE_DIR
-except ImportError:
-    _UI_DIR = Path(__file__).parent.parent
-    _PROJECT_ROOT = _UI_DIR.parent.parent
-    EE_CACHE_DIR = _PROJECT_ROOT / "cache" / "ee"
-    CACHE_DIRS = [EE_CACHE_DIR]
-    CACHE_CLEAR_INTERVAL = 3600
-    CACHE_MAX_FILES = 100
-
-try:
-    from app.server.core.cache import CACHE_ROOT as CORE_CACHE_ROOT
-except ImportError:
-    CORE_CACHE_ROOT = Path(__file__).resolve().parents[3] / "cache"
 
 _last_cache_clear: float = 0.0
 
@@ -69,10 +53,7 @@ def _iter_cache_roots() -> list[Path]:
 
 
 def _load_regions() -> list[dict[str, Any]]:
-    try:
-        from app.server.core.db import get_db
-    except Exception:
-        return []
+    from app.server.core.db import get_db
 
     try:
         with get_db() as conn:

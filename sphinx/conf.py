@@ -1,13 +1,5 @@
-# Sphinx configuration for strm2stl Python API reference
-import os
-import sys
-
-# Add project roots to sys.path so autodoc can import modules
-_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-_code_root = os.path.abspath(os.path.join(_project_root, '..'))
-for _p in (_code_root, _project_root):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+# Sphinx configuration for strm2stl Python API reference.
+# autodoc imports app / geo2stl / city2stl as installed packages (pip install -e).
 
 project = '3D Maps — Python API Reference'
 author = 'strm2stl'

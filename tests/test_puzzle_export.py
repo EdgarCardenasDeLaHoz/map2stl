@@ -5,11 +5,11 @@ import zipfile
 import numpy as np
 
 from app.server.core.export import (
-    ExportTask,
     _add_alignment_features,
     _apply_edge_tabs_v,
     generate_puzzle_3mf,
 )
+from app.server.core.export_tasks import ExportTask
 
 # ---------------------------------------------------------------------------
 # Helpers
