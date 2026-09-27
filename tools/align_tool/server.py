@@ -245,8 +245,8 @@ def api_refine(body: dict) -> dict:
     more useful than a confident no-op.
     """
     import cv2
+    from numpy2stl.raster import building_edges
     from numpy2stl.registration.align.metrics import _tolerant_iou
-    from numpy2stl.registration.align.segmentation import building_edges
     from numpy2stl.registration.align.transform import apply_transform
 
     slug = str(body["slug"])
@@ -350,7 +350,7 @@ def api_refetch(body: dict) -> dict:
     footprint, centred on it, so the correct alignment is "OSM centred on the
     STL frame at scale = fit_scale" -- which is what the client resets to.
     """
-    from numpy2stl.applications.cities import (
+    from city2stl.osm_raster import (
         get_osm_building_heightmap,
         get_osm_semantic_masks,
     )

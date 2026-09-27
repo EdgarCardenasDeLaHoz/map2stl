@@ -120,3 +120,25 @@ class TestCityRasterEndpoint:
         assert resp.status_code == 200
         buildings = resp.json()["buildings"]
         assert any(v > 0 for v in buildings), "Expected nonzero building pixels"
+
+
+def test_building_burn_keeps_tallest_and_leaves_holes_empty():
+    """Overlapping footprints take the max (not the sum) and courtyards stay 0."""
+    from app.server.routers.composite import _rasterize_buildings
+
+    def square(x0, y0, x1, y1):
+        return [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]
+
+    feats = [
+        {"geometry": {"type": "Polygon",
+                      "coordinates": [square(0, 0, 10, 10), square(4, 4, 6, 6)]},
+         "properties": {"height_m": 20.0}},
+        {"geometry": {"type": "Polygon", "coordinates": [square(0, 0, 3, 3)]},
+         "properties": {"height_m": 30.0}},
+    ]
+    arr = _rasterize_buildings(feats, (0.0, 0.0, 10.0, 10.0), 10, 10)
+    assert arr.dtype.name == "float32"
+    assert arr.max() == 30.0                 # overlap: max, not 50
+    assert arr[9, 0] == 30.0                 # row 0 = north: the (0..3, 0..3) square is bottom-left
+    assert arr[5, 5] == 0.0                  # courtyard hole
+    assert arr[0, 9] == 20.0

@@ -192,12 +192,11 @@ def _fetch_buildings_for_bbox(bbox: BBox, dim: tuple[int, int]) -> np.ndarray | 
     """
     try:
         import pyarrow.dataset as ds
+        from numpy2stl.raster import burn_polygons
         from pyarrow.fs import S3FileSystem
-        from rasterio.features import rasterize
-        from rasterio.transform import from_bounds
         from shapely import wkb as shapely_wkb
     except ImportError as exc:
-        logger.debug("GBA dependencies missing (pyarrow[s3]/rasterio/shapely): %s", exc)
+        logger.debug("GBA dependencies missing (pyarrow[s3]/shapely): %s", exc)
         return None
 
     north, south, east, west = bbox
@@ -245,13 +244,9 @@ def _fetch_buildings_for_bbox(bbox: BBox, dim: tuple[int, int]) -> np.ndarray | 
         if not shapes:
             return None
 
-        shapes.sort(key=lambda pair: pair[1])
-        grid = rasterize(
-            shapes,
-            out_shape=(h, w),
-            transform=from_bounds(west, south, east, north, w, h),
-            fill=np.nan,
-            dtype="float32",
+        grid = burn_polygons(
+            [g for g, _ in shapes], (h, w), bounds=(west, south, east, north),
+            values=[v for _, v in shapes], mode="max", fill=np.nan, dtype=np.float32,
         )
 
         if np.all(np.isnan(grid)):

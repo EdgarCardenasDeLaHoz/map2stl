@@ -157,3 +157,41 @@ edited values first, DEM handle otherwise) instead of the raw handle.
   stays until `numpy2stl.utils.image.engrave_text` exists. `city2stl.height.infill.infill_nearest`
   (used by the app's mesh import and the session) now delegates to `numpy2stl.raster.fill_nan`
   (all-NaN still returns zeros, output still float32).
+- 2026-09-27 — step 13 (OSM / lidar out of numpy2stl): numpy2stl is geo-free.
+  `numpy2stl.registration.register_city_stl(stl_file, reference)` takes a `ReferenceSource`
+  (`registration/reference.py`: building heightmap with `cell_size_m`, optional masks / nDSM,
+  scale anchor, centre-search candidates; `StaticReference` for in-memory arrays); the centre
+  search is `center_search.find_best_target` over the source's candidates; `config.M_PER_DEG_LAT`
+  is gone. The OSM code is `city2stl/osm_raster.py` (cache now `cache/osm_raster/`, the old
+  `registration/runs/osm_cache` files were copied there), the 3DEP EPT nDSM is
+  `city2stl/height/providers/lidar_3dep_ept.py`, and `city2stl.registration.register_city_stl`
+  (same arguments as before) builds an `OSMReference` for the app's mesh import and the align
+  tool. The three OSM CLIs moved to `city2stl/registration/scripts/`; the Fourier–Mellin
+  prototype stays in numpy2stl and reads its reference from an .npz. numpy2stl cannot import
+  strm2stl, so `applications/cities.py` / `lidar.py` raise an ImportError naming the new home
+  (one release) and a city name passed to numpy2stl raises a TypeError;
+  `tests/test_geo_free.py` fails on any osmnx / requests / pdal / strm2stl import. Removes
+  violation 2.
+- 2026-09-27 — step 9 (one rasteriser), the identical-behaviour part: `city2stl.rasterize`,
+  `height/providers/gba.py`, `geo2stl/trails.py` (relief, areas, piste grades) and
+  `geo2stl/hydrology.py` (both river rasterisers) burn through `numpy2stl.raster.burn_polygons`;
+  old vs new compared on random polygons/lines, holes and multipolygons: byte-identical.
+  Behaviour change on purpose: the composite router's building channel keeps the tallest
+  footprint and leaves holes empty (was: overlaps added, holes ignored, PIL edge rule); its
+  cache key gained `"burn": 2`. Left: `tools/align_tool/plate_vectors._burn` (pixel-space cv2
+  fill, a different edge rule: 198 of 14 400 cells differ on a test pair), the roof /
+  city-model burns (being edited), the composite road / waterway / wall line draws (lines,
+  not polygon burns). Known quirk kept identical: in `rasterize_city_data` any building
+  np.maximum's the whole grid with 0, erasing negative water / road depressions.
+- 2026-09-27 — step 12 finished: `city2stl/height/stl_import.py` ray-casts through
+  `mesh_to_heightmap(method="raycast", row0="north")` and keeps the bbox → grid mapping (rays
+  now at cell centres instead of `linspace` edge-to-edge samples, so values move by up to half
+  a cell at feature edges). `mesh_to_heightmap` defaults to `row0="north"`; the registration
+  pipeline and stages, `building_simplify` (`prism`, `_io`) and `align_tool/locate._heightmap`
+  pass `row0="south"`. The STL heightmap cache keys are unchanged for south renders. The align
+  tool no longer imports the `registration.align.segmentation` shim (now `numpy2stl.raster`).
+
+Not complete — rows still open: label engraving (`numpy2stl.utils.image.engrave_text` does not
+exist yet), mesh I/O (`numpy2stl.io.write_mesh` does not exist), caches (`numpy2stl.utils.cache`
+does not exist), the plate / roof / city-model burns above, and `geo2stl.raster.georef_heightmap`
+(the STL-import bbox mapping stays in `stl_import` by choice).

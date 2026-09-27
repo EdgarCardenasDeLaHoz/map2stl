@@ -3,7 +3,10 @@ city2stl/height/stl_import -- Convert a georeferenced STL mesh to a 2-D heightma
 
 The STL file format is unit-less and has no embedded coordinate system.
 The caller provides the real-world bounding box the mesh should be mapped
-onto so the heightmap can be overlaid on terrain and city data.
+onto so the heightmap can be overlaid on terrain and city data.  This module
+owns that bbox -> grid mapping (grid size from the bbox in metres, up-axis
+rotation); the ray-cast itself is
+``numpy2stl.stl2numpy.heightmap.mesh_to_heightmap(method="raycast", row0="north")``.
 
 Public API
 ----------
@@ -22,6 +25,7 @@ from pathlib import Path
 from typing import Union
 
 import numpy as np
+from numpy2stl.stl2numpy.heightmap import mesh_to_heightmap
 
 from geo2stl.geo import bbox_size_m
 
@@ -46,10 +50,11 @@ def stl_to_heightmap(
     resolution_m: float = 5.0,
     up_axis: str = "z",
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Convert a georeferenced STL mesh to a raster heightmap.
+    """Convert a georeferenced STL mesh to a raster heightmap (row 0 = north).
 
     The mesh's bounding box in X/Y is mapped linearly to the geographic
-    bounding box.  The mesh Z values (after optional axis rotation) become
+    bounding box; one vertical ray per grid-cell centre reads the topmost
+    surface.  The mesh Z values (after optional axis rotation) become
     the heightmap pixel values.  No unit conversion is applied -- the caller
     is responsible for knowing the mesh units and applying a scale factor
     before or after this function if needed.
@@ -125,45 +130,13 @@ def stl_to_heightmap(
     w = max(1, int(round(lon_m / resolution_m)))
     logger.debug(f"Target grid: {w}x{h} px at {resolution_m} m/px")
 
-    # -- Build ray origins: grid of (x, y) mapped to mesh XY range ----------
-    x_min, x_max = bounds_min[0], bounds_max[0]
-    y_min, y_max = bounds_min[1], bounds_max[1]
-    z_top = bounds_max[2] + 1.0   # ray start slightly above mesh top
-
-    xs = np.linspace(x_min, x_max, w, dtype=np.float64)
-    # North -> top of image (row 0 = north), so Y goes from y_max to y_min
-    ys = np.linspace(y_max, y_min, h, dtype=np.float64)
-    XX, YY = np.meshgrid(xs, ys)
-
+    # -- Ray-cast (one ray per cell centre, topmost hit; row 0 = mesh max-y) --
+    logger.info(f"Ray-casting {h * w} rays against mesh ({len(mesh.faces)} faces)...")
+    heightmap = mesh_to_heightmap(
+        mesh, resolution=(h, w), projection="max", method="raycast", row0="north",
+        allow_large=True, cache=False,
+    )["heightmap"].astype(np.float32)
     n_rays = h * w
-    ray_origins = np.column_stack([
-        XX.ravel(),
-        YY.ravel(),
-        np.full(n_rays, z_top),
-    ])
-    ray_dirs = np.tile([0.0, 0.0, -1.0], (n_rays, 1))
-
-    # -- Ray-cast ------------------------------------------------------------
-    logger.info(f"Ray-casting {n_rays} rays against mesh "
-                f"({len(mesh.faces)} faces)...")
-    locations, index_ray, _ = mesh.ray.intersects_location(
-        ray_origins=ray_origins,
-        ray_directions=ray_dirs,
-        multiple_hits=True,
-    )
-
-    # -- Accumulate max Z per pixel (topmost surface = roof height) ---------
-    # NOTE: np.maximum.at cannot start from a NaN-filled array — np.maximum(nan, x)
-    # is always nan, so every hit pixel would stay nan. Start from -inf instead,
-    # then convert cells with no hit (still -inf) back to nan.
-    heightmap = np.full(n_rays, -np.inf, dtype=np.float32)
-    if len(locations) > 0:
-        # Vectorised: for each unique ray index, take the maximum z hit
-        zvals = locations[:, 2].astype(np.float32)
-        np.maximum.at(heightmap, index_ray, zvals)
-    heightmap[np.isinf(heightmap)] = np.nan
-
-    heightmap = heightmap.reshape(h, w)
     mask = ~np.isnan(heightmap)
 
     n_valid = int(mask.sum())

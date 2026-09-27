@@ -285,7 +285,7 @@ def plate_buildings(solid_stl, span_m: float, resolution: int = PLATE_RASTER) ->
     solved moves: micropolitan Philadelphia holds its position exactly while its agreement
     rises from 9 of 16 to 13, and the Boston miniature stays 10 m out.
     """
-    from numpy2stl.registration.align.segmentation import (
+    from numpy2stl.raster.segment import (
         _adaptive_residual_threshold,
         terrain_residual,
     )
@@ -531,7 +531,7 @@ def solve_center(
     is trustworthy enough to feed back: the crops disagree radially when the span is wrong,
     which is a much sharper signal than the shift in a single correlation peak.
     """
-    from numpy2stl.applications.cities import tight_bbox_from_extent
+    from city2stl.osm_raster import tight_bbox_from_extent
 
     if seed is None:
         seed = L.seed_center(region)

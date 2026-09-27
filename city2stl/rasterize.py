@@ -2,7 +2,8 @@
 city2stl/rasterize.py — Rasterize OSM vector features onto a height-map grid.
 
 Provides pure-computation helpers that burn building, road, and waterway
-GeoJSON features onto a float32 numpy grid. No HTTP, cache, or server deps.
+GeoJSON features onto a float32 numpy grid (row 0 = north) with
+``numpy2stl.raster.burn_polygons``. No HTTP, cache, or server deps.
 
 Server entry point: app.server.core.osm re-exports all public symbols.
 """
@@ -12,6 +13,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from numpy2stl.raster import burn_polygons
 
 from geo2stl.geo import m_per_deg_lon
 
@@ -40,6 +42,14 @@ def _empty_fc(error: str = "") -> dict:
     return fc
 
 
+def _burn_over(grid: np.ndarray, shapes: list, value: float, bounds) -> None:
+    """Set ``value`` on every cell of ``grid`` a shape covers; other cells keep theirs."""
+    burnt = burn_polygons(shapes, grid.shape, bounds=bounds, values=value, mode="set",
+                          fill=np.nan)
+    covered = ~np.isnan(burnt)
+    grid[covered] = burnt[covered]
+
+
 def rasterize_city_data(
     north: float, south: float, east: float, west: float,
     dim: int,
@@ -61,12 +71,9 @@ def rasterize_city_data(
     Returns a dict compatible with the DEM response format:
       { values: [float, ...], width, height, vmin, vmax, bbox }
     """
-    from rasterio.enums import MergeAlg
-    from rasterio.features import rasterize as _rasterize
-    from rasterio.transform import from_bounds
-    from shapely.geometry import mapping, shape
+    from shapely.geometry import shape
 
-    transform = from_bounds(west, south, east, north, dim, dim)
+    bounds = (west, south, east, north)
     grid = np.zeros((dim, dim), dtype=np.float32)
     # Features that fail to convert or burn are skipped, counted per layer and
     # reported once at the end rather than dropped silently.
@@ -85,13 +92,12 @@ def rasterize_city_data(
                 pixel_deg = (north - south) / dim
                 s = s.buffer(pixel_deg * 0.5)
             if not s.is_empty:
-                water_shapes.append((mapping(s), water_depression_m))
+                water_shapes.append(s)
         except Exception:
             skipped["waterways"] += 1
     if water_shapes:
         try:
-            _rasterize(water_shapes, out=grid, transform=transform,
-                       merge_alg=MergeAlg.replace, dtype="float32")
+            _burn_over(grid, water_shapes, water_depression_m, bounds)
         except Exception as e:
             logger.warning(f"rasterize waterways failed: {e}")
 
@@ -109,19 +115,18 @@ def rasterize_city_data(
             buf_deg = (width_m / 2) / metres_per_deg_lon
             s = shape(geom).buffer(max(buf_deg, (north - south) / dim * 0.5))
             if not s.is_empty:
-                road_shapes.append((mapping(s), road_depression_m))
+                road_shapes.append(s)
         except Exception:
             skipped["roads"] += 1
     if road_shapes:
         try:
-            _rasterize(road_shapes, out=grid, transform=transform,
-                       merge_alg=MergeAlg.replace, dtype="float32")
+            _burn_over(grid, road_shapes, road_depression_m, bounds)
         except Exception as e:
             logger.warning(f"rasterize roads failed: {e}")
 
     # -- Buildings --------------------------------------------------------
-    # Burn each building separately and take the maximum so tall buildings
-    # win over adjacent shorter ones (can't batch because each has a different value).
+    # Tallest building wins where footprints overlap (burn mode "max"); the
+    # building layer (0 off-footprint) is then np.maximum'd into the grid.
     building_shapes = []
     for feat in (buildings_geojson.get("features") or []):
         geom = feat.get("geometry")
@@ -134,19 +139,18 @@ def rasterize_city_data(
             if height_m is None:
                 height_m = _DEFAULT_BUILDING_HEIGHT_M
             h = float(height_m) * building_scale
-            building_shapes.append((mapping(shape(geom)), h))
+            building_shapes.append((shape(geom), h))
         except Exception:
             skipped["buildings"] += 1
     if building_shapes:
-        for feat_shape, h in building_shapes:
-            try:
-                tmp = _rasterize(
-                    [(feat_shape, h)], out_shape=(dim, dim),
-                    transform=transform, fill=0, dtype="float32",
-                )
-                np.maximum(grid, tmp, out=grid)
-            except Exception:
-                skipped["buildings"] += 1
+        try:
+            tmp = burn_polygons([g for g, _ in building_shapes], (dim, dim), bounds=bounds,
+                                values=[h for _, h in building_shapes], mode="max",
+                                dtype=np.float32)
+            np.maximum(grid, tmp, out=grid)
+        except Exception as e:
+            skipped["buildings"] += len(building_shapes)
+            logger.warning(f"rasterize buildings failed: {e}")
 
     if any(skipped.values()):
         logger.warning("rasterize_city_data skipped features: %s",

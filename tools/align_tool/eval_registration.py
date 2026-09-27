@@ -51,8 +51,8 @@ import numpy as np
 # The repo root, so `numpy2stl` imports work from any cwd (same trick as
 # export_align_data.py).
 import paths  # noqa: E402
+from numpy2stl.raster import building_mask  # noqa: E402
 from numpy2stl.registration.align.metrics import score_alignment  # noqa: E402
-from numpy2stl.registration.align.segmentation import building_mask  # noqa: E402
 from numpy2stl.registration.align.transform import apply_transform  # noqa: E402
 
 # Follows the same override the exporter reads, so a set exported into a scratch

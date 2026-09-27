@@ -3,8 +3,10 @@ Composite DEM routes - composition operations that combine data layers.
 
 POST /api/composite/city-raster
   Reads OSM buildings/roads/waterways/walls from the disk cache (written by
-  /api/cities) and rasterizes them into per-pixel height-delta arrays using
-  PIL/Pillow.  This is ~50x faster than the equivalent JS scanline fill.
+  /api/cities) and rasterizes them into per-pixel height-delta arrays:
+  building footprints with numpy2stl.raster.burn_polygons (tallest wins where
+  footprints overlap, holes left empty), lines with PIL/Pillow.  ~50x faster
+  than the equivalent JS scanline fill.
 
   Weights / scales are NOT applied server-side - the client multiplies these
   normalized arrays by the slider values.  This means only a bbox or dimension
@@ -38,6 +40,7 @@ import logging
 import numpy as np
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from numpy2stl.raster import burn_polygons
 from pydantic import BaseModel
 
 from app.server.core.cache import (
@@ -94,26 +97,22 @@ def _make_geo_to_px(N, S, E, W, PW, PH):
 # Per-layer rasterizers
 # ---------------------------------------------------------------------------
 
-def _rasterize_buildings(features, coords_to_px, PW, PH):
-    """Return a float32 array (PH×PW) with per-pixel building height in metres."""
-    from PIL import Image, ImageDraw
-    arr = np.zeros((PH, PW), dtype=np.float32)
+def _rasterize_buildings(features, bounds, PW, PH):
+    """Return a float32 array (PH×PW, row 0 = north) with per-pixel building height in metres.
+
+    ``bounds`` is (west, south, east, north).  Overlapping footprints keep the
+    tallest and courtyards (holes) stay empty (``numpy2stl.raster.burn_polygons``,
+    cell-centre rule).
+    """
+    geoms, heights = [], []
     for feat in features:
         geom = feat.get("geometry") or {}
-        h_m = float((feat.get("properties") or {}).get("height_m") or 10)
-        rings = []
-        if geom.get("type") == "Polygon":
-            rings = [geom["coordinates"][0]]
-        elif geom.get("type") == "MultiPolygon":
-            rings = [p[0] for p in geom["coordinates"]]
-        for ring in rings:
-            if not ring:
-                continue
-            px = coords_to_px(ring)
-            mask = Image.new("1", (PW, PH), 0)
-            ImageDraw.Draw(mask).polygon(px, fill=1)
-            arr += np.array(mask, dtype=np.float32) * h_m
-    return arr
+        if geom.get("type") not in ("Polygon", "MultiPolygon") or not geom.get("coordinates"):
+            continue
+        geoms.append(geom)
+        heights.append(float((feat.get("properties") or {}).get("height_m") or 10))
+    return burn_polygons(geoms, (PH, PW), bounds=bounds, values=heights, mode="max",
+                         dtype=np.float32)
 
 
 def _rasterize_roads(features, coords_to_px, PW, PH, m_per_px):
@@ -225,7 +224,7 @@ def _rasterize_city(req: CompositeCityRasterRequest) -> dict:
 
     building_arr = _rasterize_buildings(
         (osm_data.get("buildings") or {}).get("features") or [],
-        coords_to_px, PW, PH,
+        (W, S, E, N), PW, PH,
     )
     road_arr = _rasterize_roads(
         (osm_data.get("roads") or {}).get("features") or [],
@@ -264,7 +263,8 @@ def _city_raster_arrays(req: CompositeCityRasterRequest) -> dict:
     """
     comp_key = make_cache_key(
         "composite", req.north, req.south, req.east, req.west,
-        {"w": req.width, "h": req.height, "detail": req.detail},
+        # "burn": 2 = buildings burnt with max + holes (was additive, holes ignored)
+        {"w": req.width, "h": req.height, "detail": req.detail, "burn": 2},
     )
     cached = read_array_cache("composite", comp_key)
     if cached:

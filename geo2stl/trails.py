@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from numpy2stl.raster import burn_polygons
 
 from geo2stl.geo import M_PER_DEG_LAT, M_PER_DEG_LON_EQ
 from geo2stl.osm import use_overpass_endpoint
@@ -148,11 +149,9 @@ def rasterize_trails(
         resamples it must do so with nearest-neighbour.
     """
     try:
-        from rasterio.features import rasterize as rio_rasterize
-        from rasterio.transform import from_bounds
-        from shapely.geometry import mapping, shape
+        from shapely.geometry import shape
     except ImportError:
-        logger.warning("shapely or rasterio not installed for trail rasterization")
+        logger.warning("shapely not installed for trail rasterization")
         return _blank(dim, with_areas, with_difficulty)
 
     west, south, east, north = bbox
@@ -184,37 +183,35 @@ def rasterize_trails(
             # mountain face. The interior goes to the display-only area mask and
             # the boundary carries on as linework of the requested width.
             if with_areas:
-                area_shapes.append((mapping(geom), 1.0))
+                area_shapes.append(geom)
             geom = geom.boundary
         if geom.is_empty:
             continue
         if geom.geom_type in ("LineString", "MultiLineString",
                               "LinearRing", "GeometryCollection"):
-            buffered = mapping(geom.buffer(buffer_deg))
-            shapes.append((buffered, relief_m))
+            buffered = geom.buffer(buffer_deg)
+            shapes.append(buffered)
             if difficulty:
                 difficulty_shapes.append((difficulty, buffered))
 
     if not shapes and not area_shapes:
         return _blank(dim, with_areas, with_difficulty)
 
-    transform = from_bounds(west, south, east, north, dim, dim)
+    bounds = (west, south, east, north)
 
-    def _burn(items):
+    def _burn(items, value):
         # Every shape carries the same value, so overlapping features paint the
-        # identical number and the merge algorithm cannot change the result. No
-        # merge_alg is passed on purpose: rasterio only offers `replace` and
-        # `add`, and `add` would stack relief where trails cross.
+        # identical number ("set"); "sum" would stack relief where trails cross.
         if not items:
             return np.zeros((dim, dim), dtype=np.float32)
         try:
-            return rio_rasterize(items, out_shape=(dim, dim), transform=transform,
-                                 fill=0.0, dtype=np.float32)
+            return burn_polygons(items, (dim, dim), bounds=bounds, values=value,
+                                 mode="set", dtype=np.float32)
         except Exception as e:
             logger.error(f"Trail rasterization failed: {e}")
             return np.zeros((dim, dim), dtype=np.float32)
 
-    grid = _burn(shapes)
+    grid = _burn(shapes, relief_m)
 
     logger.info(f"Rasterized {len(shapes)} trail features to {dim}x{dim} "
                 f"(width {half_width_m * 2:.0f} m)"
@@ -223,9 +220,9 @@ def rasterize_trails(
 
     out = [grid]
     if with_areas:
-        out.append(_burn(area_shapes))
+        out.append(_burn(area_shapes, 1.0))
     if with_difficulty:
-        out.append(_burn_difficulty(difficulty_shapes, dim, transform))
+        out.append(_burn_difficulty(difficulty_shapes, dim, bounds))
     return out[0] if len(out) == 1 else tuple(out)
 
 
@@ -238,8 +235,8 @@ def _difficulty_class(feature: dict) -> int:
     return _DIFFICULTY_INDEX.get(raw.strip().lower(), 0)
 
 
-def _burn_difficulty(items, dim: int, transform) -> np.ndarray:
-    """Rasterize difficulty class indices, hardest last so it wins any overlap.
+def _burn_difficulty(items, dim: int, bounds) -> np.ndarray:
+    """Rasterize difficulty class indices; the hardest wins any overlap ("max").
 
     Kept apart from ``_burn`` because this grid is categorical: it is burned as
     uint8 and must never be interpolated, whereas the relief and area grids are
@@ -247,12 +244,9 @@ def _burn_difficulty(items, dim: int, transform) -> np.ndarray:
     """
     if not items:
         return np.zeros((dim, dim), dtype=np.uint8)
-    from rasterio.features import rasterize as rio_rasterize
-
-    ordered = [(geom, cls) for cls, geom in sorted(items, key=lambda pair: pair[0])]
     try:
-        return rio_rasterize(ordered, out_shape=(dim, dim), transform=transform,
-                             fill=0, dtype=np.uint8)
+        return burn_polygons([geom for _, geom in items], (dim, dim), bounds=bounds,
+                             values=[cls for cls, _ in items], mode="max", dtype=np.uint8)
     except Exception as e:
         logger.error(f"Trail difficulty rasterization failed: {e}")
         return np.zeros((dim, dim), dtype=np.uint8)

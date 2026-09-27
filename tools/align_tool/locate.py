@@ -258,7 +258,8 @@ def _heightmap(stl_path, resolution: int) -> np.ndarray:
     key = (str(stl_path), resolution)
     if key not in _mesh_cache:
         from numpy2stl.stl2numpy.heightmap import mesh_to_heightmap
-        hm = mesh_to_heightmap(str(stl_path), resolution=resolution, isotropic=True)
+        hm = mesh_to_heightmap(str(stl_path), resolution=resolution, isotropic=True,
+                               row0="south")
         _mesh_cache[key] = np.asarray(hm["heightmap"], dtype=np.float64)
     return _mesh_cache[key]
 
@@ -816,7 +817,7 @@ def solve_center(
     real figure anywhere from 1651 m to 2269 m, so it is searched over together
     with the position.
     """
-    from numpy2stl.applications.cities import tight_bbox_from_extent
+    from city2stl.osm_raster import tight_bbox_from_extent
 
     if seed is None:
         seed = seed_center(region)
@@ -931,7 +932,7 @@ def tune_osmnx(probe_timeout_s: float = 30.0, verbose: bool = True,
                force: bool = False) -> str | None:
     """Make osmnx able to reach Overpass from this machine.
 
-    The building heightmap comes from `numpy2stl.registration`, which fetches
+    The building heightmap comes from `city2stl.osm_raster`, which fetches
     through osmnx, and osmnx here fails with a connect or read timeout while a
     plain POST of the same query returns in under two seconds.  That was put
     down to the network for weeks.  It is not the network.
@@ -1040,7 +1041,7 @@ def seed_center(region: str) -> tuple[float, float]:
     `get_city_center_point` geocodes "Downtown {region}" and falls back to the bounding
     box midpoint itself, so this is strictly better informed than what it replaces.
     """
-    from numpy2stl.applications.cities import get_city_bbox, get_city_center_point
+    from city2stl.osm_raster import get_city_bbox, get_city_center_point
     point = get_city_center_point(region)
     if point is not None:
         return (float(point[0]), float(point[1]))

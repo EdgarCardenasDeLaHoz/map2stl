@@ -100,7 +100,7 @@ def plate_relief(rep):
     low-rise is called ground; clipping the tail first takes Miami from 74% of the best any
     threshold could do to 99%, and moves the cities that have no tail by at most two percent.
     """
-    from numpy2stl.registration.align.segmentation import (
+    from numpy2stl.raster.segment import (
         _adaptive_residual_threshold,
         terrain_residual,
     )
@@ -389,7 +389,8 @@ def semantic_exclusion(bbox_nsew, matrix, shape_hw):
     which is why this runs after refinement rather than before it.
     """
     import cv2
-    from numpy2stl.applications.cities import get_osm_semantic_masks
+
+    from city2stl.osm_raster import get_osm_semantic_masks
 
     sem = get_osm_semantic_masks(bbox_nsew, resolution=RESOLUTION)
     src = (np.asarray(sem["vegetation"], dtype=bool)
@@ -433,8 +434,9 @@ def fetch_sat(bbox_nsew, shape_hw: tuple[int, int]) -> np.ndarray:
 
 def main(only: list[str] | None = None):
     import locate
-    from numpy2stl.applications.cities import get_osm_semantic_masks
-    from numpy2stl.registration import register_city_stl
+
+    from city2stl.osm_raster import get_osm_semantic_masks
+    from city2stl.registration import register_city_stl
 
     # register_city_stl fetches its buildings through osmnx, whose default
     # Overpass host is unreachable from this machine often enough to lose a

@@ -20,6 +20,7 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
+from numpy2stl.raster import burn_polygons
 
 from geo2stl.geo import M_PER_DEG_LAT, M_PER_DEG_LON_EQ
 
@@ -158,13 +159,9 @@ def rasterize_rivers_with_buffering(
         Float32 array of shape (dim, dim) with river elevation values
     """
     try:
-        from rasterio.enums import MergeAlg
-        from rasterio.features import rasterize as rio_rasterize
-        from rasterio.transform import from_bounds
-        from shapely.geometry import mapping, shape
+        from shapely.geometry import shape
     except ImportError:
-        logger.warning(
-            "shapely or rasterio not installed for hydrology rasterization")
+        logger.warning("shapely not installed for hydrology rasterization")
         return np.zeros((dim, dim), dtype=np.float32)
 
     west, south, east, north = bbox
@@ -190,8 +187,7 @@ def rasterize_rivers_with_buffering(
 
             if geom.geom_type in ('LineString', 'MultiLineString'):
                 # Buffer to ensure minimum width
-                buffered = geom.buffer(min_buffer_deg)
-                shapes.append((mapping(buffered), depression_m))
+                shapes.append(geom.buffer(min_buffer_deg))
         except Exception as e:
             logger.debug(f"Skipping river feature: {e}")
             continue
@@ -200,28 +196,10 @@ def rasterize_rivers_with_buffering(
         logger.warning("No river features to rasterize")
         return np.zeros((dim, dim), dtype=np.float32)
 
-    # Rasterize
-    transform = from_bounds(west, south, east, north, dim, dim)
+    # Every river carries the same depression, so overlaps simply keep it ("set").
     try:
-        # Try rasterizing with merge_alg parameter (newer rasterio versions)
-        try:
-            river_grid = rio_rasterize(
-                shapes,
-                out_shape=(dim, dim),
-                transform=transform,
-                fill=0.0,
-                dtype=np.float32,
-                merge_alg=MergeAlg.min
-            )
-        except (AttributeError, TypeError):
-            # Fallback for older rasterio or if MergeAlg not available
-            river_grid = rio_rasterize(
-                shapes,
-                out_shape=(dim, dim),
-                transform=transform,
-                fill=0.0,
-                dtype=np.float32
-            )
+        river_grid = burn_polygons(shapes, (dim, dim), bounds=(west, south, east, north),
+                                   values=depression_m, mode="set", dtype=np.float32)
 
         logger.info(
             f"Rasterized {len(shapes)} river features to {dim}x{dim} grid")
@@ -744,17 +722,9 @@ def rasterize_hydrorivers(
           line crosses it, so single-pixel-wide rivers stay visible without
           requiring extra width.
     """
-    try:
-        from rasterio.features import rasterize as _rasterize
-        from rasterio.transform import from_bounds
-    except ImportError:
-        logger.error("rasterio not installed; returning zero grid")
-        return np.zeros((dim, dim), dtype=np.float32)
-
     import time as _time
     t0 = _time.perf_counter()
 
-    transform = from_bounds(west, south, east, north, dim, dim)
     pixel_deg = (north - south) / dim
     min_buf_deg = pixel_deg * 0.6 * \
         float(width_factor)  # ≥1 px wide × user factor
@@ -819,11 +789,10 @@ def rasterize_hydrorivers(
         mask = order_arr == o
         if not mask.any():
             continue
-        shapes = [(g, float(depth)) for g in geoms_arr[mask]]
         try:
-            layer = np.zeros((dim, dim), dtype=np.float32)
-            _rasterize(shapes, out=layer, transform=transform, dtype="float32",
-                       all_touched=True)
+            layer = burn_polygons(list(geoms_arr[mask]), (dim, dim),
+                                  bounds=(west, south, east, north), values=float(depth),
+                                  mode="set", all_touched=True, dtype=np.float32)
             layer_mask = layer != 0.0
             grid[layer_mask] = np.minimum(grid[layer_mask], layer[layer_mask])
         except Exception as e:

@@ -29,6 +29,7 @@ ignore = [
 # style-only rules below are not worth churning one-off analysis code for.
 "tools/**" = ["E701", "E702", "E731", "E741", "UP031", "B904", "B905"]
 "tests/manual/**" = ["E701", "E702", "E731", "E741", "UP031", "B904", "B905"]
+"city2stl/registration/scripts/*" = ["E701", "E702", "E731", "E741", "UP031", "B904", "B905"]
 
 [format]
 quote-style = "double"

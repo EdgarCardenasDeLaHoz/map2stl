@@ -34,16 +34,16 @@ import uuid
 from pathlib import Path
 
 import numpy as np
-from numpy2stl.applications.cities import get_city_bbox as _get_city_bbox
-from numpy2stl.applications.cities import get_city_center_point as _get_city_center_point
 from numpy2stl.registration.align.transform import apply_transform as _apply_transform
-from numpy2stl.registration.pipeline import register_city_stl as _register_city_stl
 
 from app.server.config import MAX_DIM, MICROPOLITAN_STL_DIR
 from app.server.core.cache import CACHE_ROOT, make_cache_key
 from city2stl.height.infill import infill_idw as _infill_idw
 from city2stl.height.infill import infill_nearest as _infill_nearest
 from city2stl.height.stl_import import stl_to_heightmap as _stl_to_heightmap
+from city2stl.osm_raster import get_city_bbox as _get_city_bbox
+from city2stl.osm_raster import get_city_center_point as _get_city_center_point
+from city2stl.registration import register_city_stl as _register_city_stl
 from geo2stl.geo import bbox_size_m
 
 logger = logging.getLogger(__name__)
@@ -461,7 +461,7 @@ def parse_city_name_from_path(name: str) -> str:
 # Large split into 4 print tiles (confirmed by comparing Miami's
 # XL_Solid_A1's XY extent to L_Solid's: almost exactly half per axis).
 # This gives a real-world scale anchor for ANY city in the pack, not just
-# the four hardcoded in numpy2stl.applications.cities._CITY_CONFIG.
+# the four hardcoded in city2stl.osm_raster._CITY_CONFIG.
 _MICROPOLITAN_TIER_EXTENT_M = {
     "L": 2000.0,
     "M": 1500.0,
@@ -573,7 +573,7 @@ def auto_register(
     own UI is the source of truth — so writing it on every auto-register
     call was pure overhead on the interactive path. Standalone research/
     batch scripts that DO want the HTML report should call
-    numpy2stl.registration.pipeline.register_city_stl() directly with its
+    city2stl.registration.register_city_stl() directly with its
     default out_dir, not through this function.
     """
     city_name = parse_city_name_from_path(filename_hint)
@@ -589,7 +589,7 @@ def auto_register(
 
     # Without a scale anchor, register_city_stl's estimate_bbox_from_stl() can
     # only produce a tight OSM-fetch bbox for the 4 cities hardcoded in
-    # numpy2stl's _CITY_CONFIG (Philadelphia/NYC/Chicago/Boston) — every other
+    # city2stl.osm_raster._CITY_CONFIG (Philadelphia/NYC/Chicago/Boston) — every other
     # city (Miami included) falls back to fetching the ENTIRE city's OSM
     # buildings, then tries to register a small downtown-only mesh against
     # that whole-city raster. That's a large part of why auto-register's fit
