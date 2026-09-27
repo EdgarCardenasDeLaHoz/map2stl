@@ -47,11 +47,14 @@ def _long_axis(poly: Polygon) -> np.ndarray:
     return v / max(np.linalg.norm(v), 1e-12)
 
 
-def _planes(p: Polygon, slope: float, ridge_axis: np.ndarray | None) -> np.ndarray:
+def _planes(p: Polygon, slope: float, ridge_axis: np.ndarray | None,
+            outline: Polygon | None = None) -> np.ndarray:
     """(k, 3) planes z = a x + b y + c rising inward from the eave edges.
 
     ``ridge_axis`` None: every edge (hipped); otherwise only edges within 30 degrees
-    of the axis (gabled; the others become vertical gable walls).
+    of the axis (gabled; the others become vertical gable walls). With ``outline``
+    (``p`` is a convex piece of it), only edges on the outline are eaves: the cuts
+    between pieces are not, so neighbouring pieces meet in a valley, not a notch.
     """
     p0, p1 = _edges(p)
     d = p1 - p0
@@ -60,53 +63,70 @@ def _planes(p: Polygon, slope: float, ridge_axis: np.ndarray | None) -> np.ndarr
     if ridge_axis is not None:
         cos = np.abs(d @ ridge_axis) / np.maximum(length, 1e-12)
         keep &= cos > math.cos(math.radians(30))
+    if outline is not None:
+        mid = (p0 + p1) / 2
+        keep &= shapely.distance(outline.exterior, shapely.points(mid)) < 1e-6
     p0, d, length = p0[keep], d[keep], length[keep]
     n = np.column_stack([-d[:, 1], d[:, 0]]) / length[:, None]     # inward for a CCW ring
     return np.column_stack([slope * n, -slope * (n * p0).sum(1)])
 
 
 def _envelope_top(p: Polygon, planes: np.ndarray, rise_mm: float) -> Mesh | None:
-    """Triangulated top surface z = min(planes, rise) over convex ``p``, above z = 0."""
-    import triangle
+    """Triangulated top surface z = min(planes, rise) over convex ``p``, above z = 0.
 
+    The cap at ``rise_mm`` is one more (horizontal) plane. Each plane's region is
+    convex; regions are triangulated separately after inserting their neighbours'
+    vertices on shared edges, so the surface is conforming (no T-junctions) without
+    a global constrained triangulation (Triangle aborts the process on the sliver
+    segments this arrangement can produce).
+    """
+    planes = np.vstack([planes, [0.0, 0.0, rise_mm]]) if np.isfinite(rise_mm) else planes
     x0, y0, x1, y1 = p.bounds
     big = box(x0 - 1, y0 - 1, x1 + 1, y1 + 1)
-    pieces = []
+    regions = []
     for i, (a, b, c) in enumerate(planes):
         region = p
         for j, (a2, b2, c2) in enumerate(planes):
             if i == j:
                 continue
-            # keep where plane i <= plane j: (a-a2) x + (b-b2) y + (c-c2) <= 0
-            region = region.intersection(_halfplane(big, a - a2, b - b2, c - c2))
+            # keep where plane i <= plane j (ties go to the lower index)
+            eps = 1e-12 if j < i else 0.0
+            region = region.intersection(_halfplane(big, a - a2, b - b2, c - c2 + eps))
             if region.is_empty:
                 break
-        if not region.is_empty:
-            pieces.append(region)
-    if rise_mm < math.inf:
-        # A flat top where every plane is above the ridge cap (wide hipped roofs).
-        pieces.append(p)
-    rings = [np.asarray(g.exterior.coords)[:-1] for r in pieces
-             for g in shapely.get_parts(r) if g.geom_type == "Polygon" and g.area > 1e-9]
-    if not rings:
+        for g in shapely.get_parts(region):
+            if g.geom_type == "Polygon" and g.area > 1e-9:
+                regions.append(g)
+    if not regions:
         return None
-    pts, segs, start = [], [], 0
-    for r in rings:
-        k = np.arange(start, start + len(r))
-        pts.append(r)
-        segs.append(np.column_stack([k, np.roll(k, -1)]))
-        start += len(r)
-    verts, inv = np.unique(np.round(np.concatenate(pts), 9), axis=0, return_inverse=True)
-    seg = inv.ravel()[np.concatenate(segs)]
-    seg = np.unique(np.sort(seg[seg[:, 0] != seg[:, 1]], axis=1), axis=0)
-    out = triangle.triangulate({"vertices": np.ascontiguousarray(verts, np.float64),
-                                "segments": np.ascontiguousarray(seg, np.int32)}, "pQ")
-    v2, f = out.get("vertices"), out.get("triangles")
-    if f is None or not len(f):
+    rings = [np.round(np.asarray(g.exterior.coords)[:-1], 9) for g in regions]
+    allv = np.unique(np.concatenate(rings), axis=0)
+    tris = []
+    for ring in rings:
+        pts = []
+        for k in range(len(ring)):
+            a, b = ring[k], ring[(k + 1) % len(ring)]
+            pts.append(a)
+            ab = b - a
+            L2 = float(ab @ ab)
+            if L2 < 1e-18:
+                continue
+            t = ((allv - a) @ ab) / L2
+            off = np.abs((allv[:, 0] - a[0]) * ab[1] - (allv[:, 1] - a[1]) * ab[0]) / math.sqrt(L2)
+            on = (t > 1e-9) & (t < 1 - 1e-9) & (off < 1e-7)
+            pts.extend(allv[on][np.argsort(t[on])])
+        poly = Polygon(pts)
+        if not poly.is_valid or poly.area <= 1e-12:
+            poly = shapely.make_valid(poly)
+        t = shapely.get_coordinates(shapely.constrained_delaunay_triangles(poly)).reshape(-1, 4, 2)[:, :3]
+        tris.append(t)
+    tri = np.concatenate(tris)
+    if not len(tri):
         return None
-    inside = shapely.contains_xy(p.buffer(1e-7), *v2[f].mean(axis=1).T)
-    f = f[inside]
-    z = np.minimum((v2 @ planes[:, :2].T + planes[:, 2]).min(axis=1), rise_mm)
+    v2, inv = np.unique(np.round(tri.reshape(-1, 2), 9), axis=0, return_inverse=True)
+    f = inv.ravel().reshape(-1, 3)
+    f = f[(f[:, 0] != f[:, 1]) & (f[:, 1] != f[:, 2]) & (f[:, 0] != f[:, 2])]
+    z = (v2 @ planes[:, :2].T + planes[:, 2]).min(axis=1)
     top = np.column_stack([v2, np.maximum(z, 0.0)])
     return top, orient_ccw(top, f)
 
@@ -213,15 +233,27 @@ def building_solids(poly: Polygon, z_floor: float, z_eave: float, rise_mm: float
     # radius of the largest inscribed circle is half the width of a rectangle and
     # of each arm of an L, where the bounding rectangle would overstate an L.
     half_width = poly.exterior.distance(polylabel(poly, tolerance=0.01))
+    if shape not in HIPPED and poly.area >= 0.85 * poly.minimum_rotated_rectangle.area:
+        # A gable spans the footprint across its ridge (half of it on each side),
+        # whichever way the ridge runs.
+        xy = np.asarray(poly.exterior.coords) @ np.array([-axis[1], axis[0]])
+        half_width = np.ptp(xy) / 2
     slope = rise_mm / max(half_width, 1e-9)
 
     out: list[Mesh] = []
-    for piece in convex_pieces(poly):
+    pieces = convex_pieces(poly)
+    for piece in pieces:
+        if len(pieces) > 1:
+            # Neighbouring pieces overlap by a hair across their cuts (clipped to the
+            # outline), so their union fuses instead of touching face to face.
+            piece = orient(piece.buffer(1e-4, join_style="mitre").intersection(poly), 1.0)
+            if piece.geom_type != "Polygon":
+                continue
         if shape == "skillion":
             planes = _skillion_plane(piece, rise_mm, props.get("roof:direction"), axis)
             cap = rise_mm
         else:
-            planes = _planes(piece, slope, None if shape in HIPPED else axis)
+            planes = _planes(piece, slope, None if shape in HIPPED else axis, poly)
             cap = rise_mm
         if not len(planes):
             m = prism(piece, z_floor, flat_top)
@@ -237,6 +269,9 @@ def building_solids(poly: Polygon, z_floor: float, z_eave: float, rise_mm: float
             m = prism(piece, z_floor, flat_top)
         if m is not None:
             out.append(m)
+    if not out:
+        m = prism(poly, z_floor, flat_top)
+        out = [m] if m is not None else []
     return out
 
 

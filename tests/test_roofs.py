@@ -61,3 +61,22 @@ def test_courtyard_building_gets_a_flat_top():
     ring = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)], [[(3, 3), (7, 3), (7, 7), (3, 7)]])
     m = _solid(ring, "gabled")
     assert m.bounds[1, 2] == pytest.approx(6.5)
+
+
+def test_random_footprints_always_give_closed_solids():
+    """Rotated, scaled and rounded outlines (as OSM gives them) never crash or leak."""
+    from shapely import affinity
+
+    rng = np.random.default_rng(7)
+    for k in range(120):
+        base = [RECT, ELL][k % 2]
+        s = rng.uniform(0.05, 3)
+        p = affinity.rotate(affinity.scale(base, s * rng.uniform(0.5, 2), s), rng.uniform(0, 180))
+        p = Polygon(np.round(np.asarray(affinity.translate(p, 300, 200).exterior.coords), 2))
+        if not p.is_valid:
+            continue
+        for shape in ("pyramidal", "hipped", "gabled", "skillion"):
+            u, rejected = union(building_solids(p, 0.0, 5.0, rng.uniform(0.1, 3), shape))
+            assert rejected == 0 and u is not None
+            v, f = from_manifold(u)
+            assert trimesh.Trimesh(v, f, process=False).is_watertight
