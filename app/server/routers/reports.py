@@ -11,10 +11,10 @@ Serves three things under ``/reports``:
 * ``GET /reports/files/{root}/{path}`` — the artifact files themselves (HTML pages, PNGs, PDFs,
   JSON sidecars), rooted at a small fixed set of directories with a traversal guard.
 
-The per-seed statistics are parsed back out of each region's rendered ``index.html`` using the
-regexes in ``build_landing_page``. Those numbers are not written to a sidecar anywhere, so the
-rendered page is the only machine-readable copy, and importing the existing parsers keeps one
-definition of the row format instead of two that drift apart.
+The per-seed statistics are parsed back out of each region's rendered ``index.html`` by
+``city2stl.skyline.report_index``, which ``build_landing_page`` uses too. Those numbers are not
+written to a sidecar anywhere, so the rendered page is the only machine-readable copy, and one
+parser keeps one definition of the row format instead of two that drift apart.
 """
 
 from __future__ import annotations
@@ -28,6 +28,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
+
+from city2stl.skyline.report_index import parse_pano_rows, seed_source, stat
 
 logger = logging.getLogger(__name__)
 
@@ -53,27 +55,9 @@ _SERVABLE = {".html", ".htm", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".pdf", 
 
 # --- parsers ------------------------------------------------------------------
 
-def _parsers():
-    """Import the landing-page parsers lazily.
-
-    Kept out of module scope so a missing or renamed script degrades to an inventory with no
-    per-seed rows instead of preventing the whole app from importing this router.
-    """
-    from city2stl.skyline.scripts.build_landing_page import _BG_TO_QUAL, _CURATED, _ROW_RE, _stat
-    return _ROW_RE, _BG_TO_QUAL, _CURATED, _stat
-
-
 def _seed_slug(seed_name: str) -> str:
     """Asset filenames drop a leading ``seed_``; ``html_report.py:1256`` does the same."""
     return seed_name[5:] if seed_name.startswith("seed_") else seed_name
-
-
-def _source_of(seed_name: str, region: str, curated: set) -> str:
-    if seed_name.startswith("web_"):
-        return "web"
-    if seed_name.startswith("auto"):
-        return "auto"
-    return "curated" if region in curated else "seed"
 
 
 _PANO_KINDS = ("pano", "pano_seg", "pano_depth", "pano_recon", "pano_scan")
@@ -125,30 +109,22 @@ def _view_assets(report_dir: Path, slug: str, url_base: str) -> list[dict]:
 
 def _region_rows(report_dir: Path, region: str, text: str) -> list[dict]:
     """Per-seed rows for one region, each carrying its own artifact URLs."""
-    try:
-        row_re, bg_to_qual, curated, _ = _parsers()
-    except Exception as e:  # pragma: no cover - only if the script moves
-        logger.warning("Landing-page parsers unavailable: %s", e)
-        return []
-
     url_base = f"/reports/files/region/{report_dir.name}"
     rows = []
-    for m in row_re.finditer(text):
-        rel_url, seed_name, nseg, nm, rate, ncov, bgcolor, qlabel = m.groups()
-        slug = _seed_slug(seed_name)
-        qual = next((v for k, v in bg_to_qual.items() if k in bgcolor), "weak")
+    for r in parse_pano_rows(text):
+        slug = _seed_slug(r["seed"])
         rows.append({
             "region": region,
-            "seed": seed_name,
+            "seed": r["seed"],
             "slug": slug,
-            "url": f"{url_base}/{rel_url}",
-            "source": _source_of(seed_name, region, curated),
-            "detected": int(nseg),
-            "matched": int(nm),
-            "match_rate": rate.strip(),
-            "coverage": int(ncov),
-            "quality": qual,
-            "quality_label": qlabel.strip(),
+            "url": f"{url_base}/{r['url']}",
+            "source": seed_source(r["seed"], region),
+            "detected": r["detected"],
+            "matched": r["matched"],
+            "match_rate": r["match_rate"],
+            "coverage": r["coverage"],
+            "quality": r["quality"],
+            "quality_label": r["quality_label"],
             "minimaps": _minimap_assets(report_dir, slug, url_base),
             "pano": _pano_assets(report_dir, slug, url_base),
             "views": _view_assets(report_dir, slug, url_base),
@@ -210,12 +186,8 @@ def _region_entry(report_dir: Path) -> dict:
         except OSError as e:
             logger.warning("Cannot read %s: %s", index_path, e)
             return entry
-        try:
-            _, _, _, stat = _parsers()
-            entry["seeds"] = stat(text, "seeds")
-            entry["buildings"] = stat(text, "aggregated buildings")
-        except Exception:  # pragma: no cover - parser import already logged
-            pass
+        entry["seeds"] = stat(text, "seeds")
+        entry["buildings"] = stat(text, "aggregated buildings")
         entry["rows"] = _region_rows(report_dir, region, text)
         for row in entry["rows"]:
             entry["quality"][row["quality"]] = entry["quality"].get(row["quality"], 0) + 1

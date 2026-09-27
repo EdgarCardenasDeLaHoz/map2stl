@@ -47,7 +47,7 @@ flowchart LR
 
 | Router | Library | Import | Note |
 |---|---|---|---|
-| routers/terrain.py | geo2stl.dem | fetch_dem_from_source | Primary DEM dispatcher — was `_fetch_dem_array` in router, now library function |
+| routers/terrain.py | geo2stl.dem | fetch_dem | Primary DEM dispatcher (source routing, h5 → SRTMGL3 fallback, local zero fallback) |
 | routers/terrain.py | geo2stl.raster | clamp_esa_scale, derive_sat_scale | Scale math helpers |
 | routers/terrain.py | geo2stl.projections | project_grid, project_water_arrays, project_rgb_image | Projection helpers |
 | routers/terrain.py | geo2stl.hydrology | HYDROLOGY_LAYER | Hydrology service |
@@ -69,7 +69,7 @@ terrain_session.py is primarily an HTTP client. It also imports city2stl provide
 
 | Module | Key functions |
 |---|---|
-| dem.py | fetch_dem_from_source, fetch_layer_data, fetch_local_dem, fetch_h5_dem, fetch_opentopo_dem, compute_raw_dem, upsample_dem, make_dem_payload |
+| dem.py | fetch_dem, fetch_layer_data, fetch_local_dem, fetch_h5_dem, fetch_opentopo_dem (from opentopo.py), compute_raw_dem, upsample_dem, make_dem_payload |
 | raster.py | bbox_longer_side_m, clamp_esa_scale, derive_sat_scale |
 | projections.py | get_projection_info, project_coordinates, project_grid, project_water_arrays, project_rgb_image |
 | sat2stl.py | fetch_bbox_image, fetch_sat_overlay, fetch_satellite_tiles, fetch_water_mask, fetch_water_mask_images, calculate_scale_for_dimensions |

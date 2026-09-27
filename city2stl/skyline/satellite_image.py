@@ -3,12 +3,10 @@
 The F-SKY10 cross-view scorer needs a high-resolution aerial / satellite
 image of the region so it can sample each OSM polygon's *roof* colour and
 geometry, then compare to that building's *side* appearance in a Street
-View. The strm2stl project already uses ESRI World Imagery WMTS tiles
-(no API key) for the main app via ``geo2stl/sat2stl.py``; this module is
-a focused wrapper for the skyline flow:
+View. Tile math and stitching are ``geo2stl.imagery`` (ESRI World Imagery,
+no API key); this module is a focused wrapper for the skyline flow:
 
-  - Fetch + stitch the ESRI tiles that cover a region's bbox into a single
-    numpy RGB image.
+  - Fetch the ESRI image that covers a region's bbox (``imagery.fetch_rgb``).
   - Cache the composite to disk (PNG under ``runs/satellite_image_cache/``)
     so subsequent runs skip the ~5-50 HTTP requests. Keyed by bbox + zoom.
   - Return a closure that projects (lon, lat) → (x_px, y_px) into the
@@ -28,94 +26,40 @@ See ``docs/plans/F-SKY10-non-ml-cross-view-registration.md``.
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import math
 from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
-import requests
 from PIL import Image
 
-_CACHE_DIR = Path(__file__).parent / "runs" / "satellite_image_cache"
-_TILE_URL = (
-    "https://server.arcgisonline.com/ArcGIS/rest/services"
-    "/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-)
-_TILE_SIZE = 256
+from geo2stl import imagery
 
-# ESRI's World_Imagery service maxes out at zoom 19 in well-covered metros;
-# above that we'd get 404s. 18 is the safe ceiling.
-_MAX_ZOOM = 18
-_MIN_ZOOM = 6
-# A region bigger than 64×64 tiles at the requested zoom would mean 4000+
-# HTTP requests per fetch — the existing geo2stl uses the same guard.
-_MAX_TILES_PER_DIM = 64
+_CACHE_DIR = Path(__file__).parent / "runs" / "satellite_image_cache"
+
 # Total-tile cap. At 256×256 px per tile the disk footprint is ~25 KB/tile
 # JPEG and ~200 KB/tile raw, so 400 tiles ≈ 10 MB cached / 80 MB in memory
 # composite. Picked to keep skyline's per-region cache and process RSS
 # at reasonable strm2stl scale. Caller can pre-narrow the bbox or raise
-# ``target_m_per_px`` to get under this cap on huge regions.
+# ``target_m_per_px`` to get under this cap on huge regions. The total cap
+# is what catches large bboxes — a Cartagena-scale bbox at 1 m/px would be
+# 56×53 tiles (under the per-dim cap) but 2968 total.
 _MAX_TILES_TOTAL = 400
 
 
-def _lonlat_to_tile(lon: float, lat: float, zoom: int) -> tuple[int, int]:
-    """Web Mercator tile (x, y) at the given zoom level."""
-    n = 1 << zoom
-    x = int((lon + 180.0) / 360.0 * n)
-    lat_r = math.radians(max(-85.05, min(85.05, lat)))
-    y = int(
-        (1.0 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi)
-        * 0.5 * n
-    )
-    return x, y
-
-
-def _lon_to_global_px(lon: float, zoom: int) -> float:
-    """Continuous Web Mercator pixel X at a given zoom (no tile rounding)."""
-    n = 1 << zoom
-    return (lon + 180.0) / 360.0 * n * _TILE_SIZE
-
-
-def _lat_to_global_px(lat: float, zoom: int) -> float:
-    """Continuous Web Mercator pixel Y at a given zoom (no tile rounding)."""
-    n = 1 << zoom
-    lat_r = math.radians(max(-85.05, min(85.05, lat)))
-    return (
-        (1.0 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi)
-        * 0.5 * n * _TILE_SIZE
-    )
+def _bbox_dict(bbox: tuple[float, float, float, float]) -> dict:
+    south, west, north, east = bbox
+    return {"north": north, "south": south, "east": east, "west": west}
 
 
 def _choose_zoom(
     bbox: tuple[float, float, float, float], target_m_per_px: float
 ) -> int:
-    """Pick the zoom level that gets closest to ``target_m_per_px`` at the
-    bbox's mid-latitude without exceeding ``_MAX_TILES_PER_DIM`` tiles per
-    side.
-
-    Web Mercator: zoom z covers 40075 km / (256·2^z) m per pixel at the
-    equator; cos(lat) compresses that at higher latitudes.
-    """
-    south, west, north, east = bbox
-    earth_m = 40_075_017.0
-    # tiles_per_side ≈ earth_m / (256 · target_m_per_px) at equator
-    raw_zoom = math.log2(earth_m / (_TILE_SIZE * target_m_per_px))
-    zoom = max(_MIN_ZOOM, min(_MAX_ZOOM, int(round(raw_zoom))))
-    # Tile-count guard: walk zoom down until both per-dimension and total
-    # caps are satisfied. The total cap is what catches large bboxes — a
-    # Cartagena-scale bbox at 1 m/px would be 56×53 tiles (under the
-    # per-dim cap) but 2968 total which busts cache/RAM budgets.
-    while zoom > _MIN_ZOOM:
-        tx0, ty0 = _lonlat_to_tile(west, north, zoom)
-        tx1, ty1 = _lonlat_to_tile(east, south, zoom)
-        n_x = abs(tx1 - tx0) + 1
-        n_y = abs(ty1 - ty0) + 1
-        if max(n_x, n_y) <= _MAX_TILES_PER_DIM and n_x * n_y <= _MAX_TILES_TOTAL:
-            break
-        zoom -= 1
-    return zoom
+    """Zoom closest to ``target_m_per_px`` within the 64-per-side and
+    ``_MAX_TILES_TOTAL`` tile caps (``geo2stl.imagery.choose_zoom``)."""
+    return imagery.choose_zoom(_bbox_dict(bbox), target_m_per_px=target_m_per_px,
+                               max_tiles_total=_MAX_TILES_TOTAL)
 
 
 def _bbox_hash(bbox: tuple[float, float, float, float]) -> str:
@@ -168,7 +112,8 @@ def fetch_region_satellite(
         img = np.asarray(Image.open(png_path).convert("RGB"))
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     else:
-        img, meta = _fetch_and_stitch(bbox, zoom)
+        img, meta = imagery.fetch_rgb(_bbox_dict(bbox), zoom=zoom)
+        meta["bbox"] = list(bbox)
         Image.fromarray(img).save(png_path, optimize=True)
         meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
@@ -180,80 +125,11 @@ def fetch_region_satellite(
     z = int(meta["zoom"])
 
     def project(lon: float, lat: float) -> tuple[float, float]:
-        gx = _lon_to_global_px(lon, z)
-        gy = _lat_to_global_px(lat, z)
+        gx = imagery.lon_to_global_px(lon, z)
+        gy = imagery.lat_to_global_px(lat, z)
         return gx - crop_origin_x, gy - crop_origin_y
 
     return img, project, meta
-
-
-def _fetch_and_stitch(
-    bbox: tuple[float, float, float, float], zoom: int,
-) -> tuple[np.ndarray, dict]:
-    """Pull every WMTS tile covering ``bbox`` at ``zoom``, paste into one
-    composite, crop to the bbox, return (rgb_ndarray, meta).
-    """
-    south, west, north, east = bbox
-    tx_min, ty_min = _lonlat_to_tile(west, north, zoom)
-    tx_max, ty_max = _lonlat_to_tile(east, south, zoom)
-
-    big_w = (tx_max - tx_min + 1) * _TILE_SIZE
-    big_h = (ty_max - ty_min + 1) * _TILE_SIZE
-    composite = Image.new("RGB", (big_w, big_h))
-
-    session = requests.Session()
-    session.headers["User-Agent"] = "strm2stl/skyline/1.0"
-    loaded = 0
-    total = (tx_max - tx_min + 1) * (ty_max - ty_min + 1)
-    last_err: Exception | None = None
-    for tx in range(tx_min, tx_max + 1):
-        for ty in range(ty_min, ty_max + 1):
-            url = _TILE_URL.format(z=zoom, y=ty, x=tx)
-            try:
-                r = session.get(url, timeout=10)
-                r.raise_for_status()
-                tile = Image.open(io.BytesIO(r.content)).convert("RGB")
-                composite.paste(
-                    tile,
-                    ((tx - tx_min) * _TILE_SIZE, (ty - ty_min) * _TILE_SIZE),
-                )
-                loaded += 1
-            except Exception as e:
-                last_err = e
-                # Continue — partial-coverage composites still let the
-                # cross-view scorer work for buildings under loaded tiles.
-                continue
-    if loaded == 0:
-        raise RuntimeError(
-            f"All {total} ESRI satellite tiles failed for bbox {bbox} at "
-            f"zoom {zoom}. Last error: {last_err}"
-        )
-
-    # Crop to the actual bbox in global pixel coords.
-    crop_x0 = int(math.floor(_lon_to_global_px(west, zoom)))
-    crop_y0 = int(math.floor(_lat_to_global_px(north, zoom)))
-    crop_x1 = int(math.ceil(_lon_to_global_px(east, zoom)))
-    crop_y1 = int(math.ceil(_lat_to_global_px(south, zoom)))
-    tile_origin_x = tx_min * _TILE_SIZE
-    tile_origin_y = ty_min * _TILE_SIZE
-    local_box = (
-        max(0, crop_x0 - tile_origin_x),
-        max(0, crop_y0 - tile_origin_y),
-        min(big_w, crop_x1 - tile_origin_x),
-        min(big_h, crop_y1 - tile_origin_y),
-    )
-    cropped = composite.crop(local_box)
-    arr = np.asarray(cropped, dtype=np.uint8)
-    meta = {
-        "zoom": zoom,
-        "bbox": list(bbox),
-        "shape": [int(arr.shape[0]), int(arr.shape[1])],
-        "crop_origin_x": tile_origin_x + local_box[0],
-        "crop_origin_y": tile_origin_y + local_box[1],
-        "tiles_loaded": loaded,
-        "tiles_total": total,
-    }
-    return arr, meta
 
 
 def crop_polygon_from_satellite(

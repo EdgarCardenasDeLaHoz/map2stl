@@ -5,7 +5,7 @@ Contains:
   - fetch_water_mask        — binary water mask from ESA/JRC + SRTM bathymetry
   - fetch_water_mask_images — raw image fetch (ESA, JRC, elevation); call via run_in_executor
   - fetch_sat_overlay       — Google Earth Engine satellite overlay
-  - fetch_satellite_tiles   — ESRI World Imagery WMTS tile stitcher (no API key required)
+  - fetch_satellite_tiles   — ESRI World Imagery bbox JPEG (tiles via geo2stl.imagery)
 
 All functions are pure computation with no HTTP framework dependencies and
 can be called from route handlers via asyncio.run_in_executor.
@@ -33,104 +33,6 @@ except ImportError:
     joblib = None
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# ESRI World Imagery WMTS tile constants + Web Mercator helpers
-# ---------------------------------------------------------------------------
-
-_SAT_TILE_URL: str = (
-    "https://server.arcgisonline.com/ArcGIS/rest/services"
-    "/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-)
-_SAT_TILE_SIZE: int = 256  # pixels per tile side (standard WMTS)
-# Maximum tiles in one dimension before capping zoom (avoids 4000+ tiles for huge bboxes)
-_MAX_SAT_TILES: int = 64
-_MIN_SAT_ZOOM: int = 6  # Minimum zoom level (world overview)
-_MAX_SAT_ZOOM: int = 18  # Maximum zoom level (highest detail available)
-
-
-def _calculate_optimal_zoom(
-    north: float, south: float, east: float, west: float,
-    requested_dim: int, target_m_per_px: float = None
-) -> int:
-    """
-    Calculate optimal zoom level for satellite tiles based on geographic scale and requested resolution.
-
-    Strategy:
-      1. Calculate bounding box dimensions in meters at the given latitude
-      2. Determine target m/pixel based on bbox size (larger regions -> coarser resolution)
-      3. Clamp zoom to avoid fetching excessive tiles (>64 tiles per dimension)
-      4. Return zoom level that achieves ~requested_dim pixels output without tile explosion
-
-    Args:
-        north, south, east, west: Bounding box in degrees
-        requested_dim: Target output dimension (pixels)
-        target_m_per_px: Optional fixed m/pixel target; if None, auto-calculate
-
-    Returns:
-        Zoom level (6-18) optimized for the bbox scale and requested resolution
-    """
-    # Calculate bbox dimensions in meters
-    mid_lat = (north + south) / 2.0
-    m_per_deg_lon = _m_per_deg_lon(mid_lat)
-    m_per_deg_lat = M_PER_DEG_LAT
-
-    bbox_w_m = abs(east - west) * m_per_deg_lon
-    bbox_h_m = abs(north - south) * m_per_deg_lat
-    bbox_diag_m = math.sqrt(bbox_w_m**2 + bbox_h_m**2)
-
-    # If no fixed target, auto-calculate based on bbox size vs. requested output resolution
-    if target_m_per_px is None:
-        # Heuristic: for a bbox_diag_m distance, aim for requested_dim pixels
-        # This ensures large regions don't pull unnecessarily hi-res tiles
-        target_m_per_px = max(1, bbox_diag_m / (requested_dim * math.sqrt(2)))
-
-    # Zoom 0 = 40075 km / 256 px = ~156.5 km/px
-    # Zoom z = 40075 km / (256 * 2^z) px
-    # Solve: 40075000 m / (256 * 2^z) ~= target_m_per_px
-    # => 2^z ~= 40075000 / (256 * target_m_per_px)
-    # => z ~= log2(40075000 / (256 * target_m_per_px))
-    earth_circumference_m = 40075000.0
-    tiles_per_side_needed = earth_circumference_m / (256.0 * target_m_per_px)
-    zoom = max(_MIN_SAT_ZOOM, min(_MAX_SAT_ZOOM,
-               math.log2(tiles_per_side_needed)))
-    zoom = int(round(zoom))
-
-    # Secondary check: clamp zoom if it would request too many tiles
-    n = 2 ** zoom
-    max_tiles_per_dim = max(
-        abs(_wm_lon_to_tile(east, n) - _wm_lon_to_tile(west, n)) + 1,
-        abs(_wm_lat_to_tile(north, n) - _wm_lat_to_tile(south, n)) + 1
-    )
-    while max_tiles_per_dim > _MAX_SAT_TILES and zoom > _MIN_SAT_ZOOM:
-        zoom -= 1
-        n = 2 ** zoom
-        max_tiles_per_dim = max(
-            abs(_wm_lon_to_tile(east, n) - _wm_lon_to_tile(west, n)) + 1,
-            abs(_wm_lat_to_tile(north, n) - _wm_lat_to_tile(south, n)) + 1
-        )
-
-    logger.debug(f"Satellite zoom: bbox={bbox_diag_m:.0f}m, target={target_m_per_px:.0f}m/px, "
-                 f"zoom={zoom}, max_tiles_per_dim={max_tiles_per_dim}")
-    return zoom
-
-
-def _wm_lon_to_tile(lon: float, n: int) -> int:
-    """Return the X tile index for a longitude at zoom level with *n* = 2**zoom tiles."""
-    return int((lon + 180.0) / 360.0 * n)
-
-
-def _wm_lat_to_tile(lat: float, n: int) -> int:
-    """Return the Y tile index for a latitude at zoom level with *n* = 2**zoom tiles.
-
-    Uses the Web Mercator (EPSG:3857) tile formula. Clamps lat to +-85.05 degrees.
-    """
-    lat_r = math.radians(max(-85.05, min(85.05, lat)))
-    return int(
-        (1.0 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi)
-        / 2.0 * n
-    )
 
 
 def _mercator_to_plate_carree(img, north: float, south: float):
@@ -193,96 +95,31 @@ def _mercator_to_plate_carree(img, north: float, south: float):
 
 def fetch_satellite_tiles(north: float, south: float, east: float, west: float, dim: int = 600) -> str:
     """
-    Stitch ESRI World Imagery WMTS tiles into a bbox-cropped JPEG and return as base64.
+    Stitch ESRI World Imagery tiles into a bbox-cropped JPEG and return it as base64.
 
-    Uses dynamic zoom level selection based on geographic scale and requested resolution:
-      - Small regions (<100km): Requests high-res tiles (zoom 14-18)
-      - Large regions (1000km+): Uses coarser tiles (zoom 8-12) to avoid fetching thousands of tiles
-      - Medium regions: Intermediate zoom levels
+    The zoom comes from ``geo2stl.imagery.choose_zoom(dim=...)``: the target
+    ground resolution is the bbox diagonal over ``dim`` pixels, so a small region
+    gets zoom 14-18 and a 1000 km region zoom 8-12, and at most 64 tiles per side
+    are fetched. The Mercator crop is resampled to plate carrée (uniform latitude
+    rows, row 0 = north) and resized so its longer side is ``dim``.
 
-    Automatically limits to max 64 tiles per dimension to prevent excessive network requests
-    (e.g., Amazon region would fail with naive zoom, but succeeds with adaptive selection).
-
-    No API key required -- ESRI World Imagery tiles are publicly accessible for reasonable use.
-
-    Returns a base64-encoded JPEG string, or raises on failure.
+    Returns a base64-encoded JPEG string; raises RuntimeError if every tile fails.
     """
     import base64
     from io import BytesIO
 
-    import requests
     from PIL import Image
 
-    # Use intelligent zoom calculation instead of fixed loop
-    zoom = _calculate_optimal_zoom(north, south, east, west, dim)
+    from geo2stl.imagery import fetch_rgb
 
-    n = 2 ** zoom
-
-    tx_min = _wm_lon_to_tile(west, n)
-    tx_max = _wm_lon_to_tile(east, n)
-    ty_min = _wm_lat_to_tile(north, n)
-    ty_max = _wm_lat_to_tile(south, n)
-
-    max_t = n - 1
-    tx_min = max(0, min(tx_min, max_t))
-    tx_max = max(0, min(tx_max, max_t))
-    ty_min = max(0, min(ty_min, max_t))
-    ty_max = max(0, min(ty_max, max_t))
-
-    img_w = (tx_max - tx_min + 1) * _SAT_TILE_SIZE
-    img_h = (ty_max - ty_min + 1) * _SAT_TILE_SIZE
-    composite = Image.new("RGB", (img_w, img_h))
-
-    session = requests.Session()
-    session.headers["User-Agent"] = "strm2stl/1.0"
-
-    tiles_loaded = 0
-    tiles_total = (tx_max - tx_min + 1) * (ty_max - ty_min + 1)
-    last_tile_err = None
-
-    for tx in range(tx_min, tx_max + 1):
-        for ty in range(ty_min, ty_max + 1):
-            url = _SAT_TILE_URL.format(z=zoom, y=ty, x=tx)
-            try:
-                resp = session.get(url, timeout=8)
-                resp.raise_for_status()
-                tile = Image.open(BytesIO(resp.content)).convert("RGB")
-                composite.paste(
-                    tile, ((tx - tx_min) * _SAT_TILE_SIZE, (ty - ty_min) * _SAT_TILE_SIZE))
-                tiles_loaded += 1
-            except Exception as tile_err:
-                last_tile_err = tile_err
-                logger.debug(
-                    f"Satellite tile {zoom}/{ty}/{tx} failed: {tile_err}")
-
-    if tiles_loaded == 0:
-        raise RuntimeError(
-            f"All {tiles_total} satellite tiles failed to load. "
-            f"Last error: {last_tile_err}. "
-            "Check network access to server.arcgisonline.com."
-        )
-    logger.info(
-        f"Satellite tiles: {tiles_loaded}/{tiles_total} loaded at zoom {zoom}")
-
-    def _lon2px(lon):
-        return int((lon + 180.0) / 360.0 * n * _SAT_TILE_SIZE) - tx_min * _SAT_TILE_SIZE
-
-    def _lat2py(lat):
-        lat_r = math.radians(max(-85.05, min(85.05, lat)))
-        return int((1.0 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2.0 * n * _SAT_TILE_SIZE) - ty_min * _SAT_TILE_SIZE
-
-    crop = composite.crop((
-        max(0, _lon2px(west)),
-        max(0, _lat2py(north)),
-        min(img_w, _lon2px(east)),
-        min(img_h, _lat2py(south)),
-    ))
+    rgb, _meta = fetch_rgb({"north": north, "south": south, "east": east, "west": west},
+                           dim=dim, timeout=8)
 
     # De-project from Web Mercator to Plate Carree (equirectangular)
     # The cropped image has non-uniform latitude spacing per pixel row
     # (Mercator stretches high latitudes). Resample to uniform geographic
     # latitude spacing so that downstream map projections work correctly.
-    crop = _mercator_to_plate_carree(crop, north, south)
+    crop = _mercator_to_plate_carree(Image.fromarray(rgb), north, south)
 
     cw, ch = crop.size
     if cw >= ch:

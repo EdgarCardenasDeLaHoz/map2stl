@@ -31,6 +31,8 @@ from pathlib import Path
 
 import numpy as np
 
+from city2stl.heights import height_from_tags
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("height_report")
 
@@ -136,19 +138,8 @@ def _sample_raster(raster: np.ndarray, lat: float, lon: float,
 
 def _osm_height(props: dict) -> tuple[float | None, str]:
     """Return (height_m, source) from OSM properties, or (None, 'none')."""
-    h = props.get("height")
-    if h is not None:
-        try:
-            return float(str(h).split()[0]), "osm_tag"
-        except (ValueError, TypeError):
-            pass
-    lvl = props.get("building:levels")
-    if lvl is not None:
-        try:
-            return float(lvl) * 3.0, "osm_levels"
-        except (ValueError, TypeError):
-            pass
-    return None, "none"
+    h, source = height_from_tags(props)
+    return (h, source) if h is not None else (None, "none")
 
 
 # ---------------------------------------------------------------------------

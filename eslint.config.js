@@ -29,7 +29,6 @@ export default [
       'app/client/static/dist/**',
       '.venv/**',
       'htmlcov/**',
-      'v2/**',
       'docs_site/**',
       'sphinx_site/**',
       'output/**',

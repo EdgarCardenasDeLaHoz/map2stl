@@ -20,36 +20,22 @@ router = APIRouter(tags=["auth"])
 
 
 def _apply_opentopo_key(key: str) -> bool:
-    """Rebind the OpenTopography key in already-imported modules.
+    """Make a newly saved OpenTopography key live without a server restart.
 
-    config.OPENTOPO_API_KEY is captured at import time, and terrain.py holds
-    its own alias (_OPENTOPO_API_KEY). Update both so downloads work without a
-    server restart. Returns True if at least one binding was updated.
+    ``geo2stl.opentopo`` holds the key the DEM downloads use; the height
+    providers and ``config.OPENTOPO_API_KEY`` (read by the status endpoints)
+    keep their own copies. Returns True once the geo2stl key is set.
     """
-    applied = False
+    from geo2stl import opentopo
+    opentopo.set_api_key(key)
     try:
         from app.server import config as _config
         _config.OPENTOPO_API_KEY = key
-        applied = True
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Could not rebind config.OPENTOPO_API_KEY: %s", exc)
-    try:
-        from app.server.routers import terrain as _terrain
-        _terrain._OPENTOPO_API_KEY = key
-        applied = True
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Could not rebind terrain._OPENTOPO_API_KEY: %s", exc)
-    # geo2stl.dem holds the key actually passed to the OpenTopography download
-    # call, captured at its own import time — rebind it too.
-    try:
-        from geo2stl import dem as _geo_dem
-        _geo_dem._OPENTOPO_API_KEY = key
-        applied = True
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Could not rebind geo2stl.dem._OPENTOPO_API_KEY: %s", exc)
     from app.server.core.height.service import set_opentopo_api_key
     set_opentopo_api_key(key)
-    return applied
+    return True
 
 
 def _check_earth_engine() -> dict:
@@ -98,8 +84,7 @@ async def save_opentopo_key(body: dict = Body(...)):
         logger.info("OpenTopography API key saved to config.json")
 
         # Apply immediately to the running process so the user doesn't have to
-        # restart the server. config.OPENTOPO_API_KEY is read at import time;
-        # rebind it (and the terrain router's cached copy) here.
+        # restart the server (geo2stl.opentopo, config and the height providers).
         applied = _apply_opentopo_key(key)
         return JSONResponse(content={"ok": True, "applied": applied})
     except Exception as exc:

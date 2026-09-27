@@ -23,11 +23,12 @@ import requests
 from shapely.geometry import shape
 
 from city2stl.fetch import fetch_osm_data
+from city2stl.heights import height_from_tags
 from geo2stl.cache import osm_cache_key, read_osm_cache, write_osm_cache
 from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
 from ._core.types import BuildingRecord
-from ._core.util import _building_height_from_tags, _polygon_area_m2
+from ._core.util import _polygon_area_m2
 from .region_types import RegionBBox
 
 #: The strm2stl regions database (the app's ``core.db.DB_PATH``).
@@ -204,22 +205,9 @@ def _parse_height(props: dict) -> float:
         except Exception:
             pass
 
-    raw_h = props.get("height")
-    if raw_h is not None:
-        try:
-            digits = "".join(ch for ch in str(
-                raw_h) if ch.isdigit() or ch == ".")
-            if digits:
-                return float(digits)
-        except Exception:
-            pass
-
-    raw_levels = props.get("building:levels") or props.get("levels")
-    if raw_levels is not None:
-        try:
-            return max(3.0, float(str(raw_levels).split(";")[0]) * 3.4)
-        except Exception:
-            pass
+    h, _ = height_from_tags(props)
+    if h is not None:
+        return h
 
     return 10.0
 
@@ -335,7 +323,7 @@ def _osm_to_building_records(osm_data: dict, min_area_m2: float = 8.0) -> list[B
             continue
         c = poly.centroid
         props = feat.get("properties") or {}
-        h, hs = _building_height_from_tags(props)
+        h, hs = height_from_tags(props)
         raw.append((float(c.y), float(c.x), poly, props, area_m2, h, hs))
 
     # Stable ordering — sort south→north then west→east.

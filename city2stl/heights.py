@@ -6,17 +6,17 @@ No HTTP, cache, or server dependencies.
 
 Server entry point: app.server.core.osm re-exports all public symbols.
 
--- Legacy note --
-city2stl/buildings.py had a building_heights() function that did similar
-height parsing from GeoDataFrames using the old "building:height" column.
-_fill_heights here is the modern replacement: it handles both "height" and
-"building:levels" OSM tags, applies clip bounds, and tags each row with a
-height_source so downstream code can identify default-height buildings.
+``height_from_tags`` is the one rule for OSM tag heights (``height`` with
+units, else ``building:levels`` x 3.2 m plus the roof); ``_fill_heights``
+applies it to a GeoDataFrame with clip bounds and a ``height_source`` column
+so downstream code can identify default-height buildings.
 """
 
 from __future__ import annotations
 
 import logging
+import math
+import re
 
 import numpy as np
 
@@ -29,6 +29,83 @@ logger = logging.getLogger(__name__)
 # which made a floor-count height and a levels-tag height for the same
 # building differ by 25 % for no physical reason.
 METRES_PER_LEVEL = 3.2
+
+_FEET_TO_M = 0.3048
+_NUMBER_RE = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
+
+
+def _is_missing(value) -> bool:
+    """True for None, NaN and blank strings (pandas hands NaN for absent tags)."""
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    return isinstance(value, str) and not value.strip()
+
+
+def parse_length_m(value) -> float | None:
+    """Parse an OSM length tag (``"12"``, ``"12 m"``, ``"40 ft"``, ``"40'"``) to metres.
+
+    Only the first value of a ``;``-separated list is used. Returns None when
+    the tag is missing or holds no number.
+    """
+    if _is_missing(value):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).split(";")[0].strip().lower()
+    m = _NUMBER_RE.search(text)
+    if not m:
+        return None
+    number = float(m.group(0).replace(",", "."))
+    unit = text[m.end():].strip()
+    if unit.startswith(("ft", "feet", "foot", "'")):
+        number *= _FEET_TO_M
+    return number
+
+
+def _parse_count(value) -> float | None:
+    """Parse a ``building:levels`` / ``roof:levels`` count, or None."""
+    if _is_missing(value):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    m = _NUMBER_RE.search(str(value).split(";")[0])
+    return float(m.group(0).replace(",", ".")) if m else None
+
+
+def height_from_tags(props) -> tuple[float | None, str]:
+    """Building height in metres from OSM tags, and where it came from.
+
+    The single rule for tag heights:
+
+    1. ``height`` (or ``building:height``), units parsed (``"12 m"``,
+       ``"40 ft"``) → source ``"osm_tag"``.
+    2. ``building:levels`` (or ``levels``) × :data:`METRES_PER_LEVEL`, plus
+       ``roof:levels`` × :data:`METRES_PER_LEVEL` when tagged, else one
+       level-equivalent for the roof → source ``"osm_levels"``.
+    3. Otherwise ``(None, "default")``; callers apply their own default
+       height (usually 10 m) and clamps.
+
+    Args:
+        props: Mapping of OSM tags (GeoJSON ``properties``, a dict, or a
+            pandas row).
+    """
+    for key in ("height", "building:height"):
+        h = parse_length_m(props.get(key))
+        if h is not None:
+            return h, "osm_tag"
+
+    levels = _parse_count(props.get("building:levels"))
+    if levels is None:
+        levels = _parse_count(props.get("levels"))
+    if levels is not None:
+        roof_levels = _parse_count(props.get("roof:levels"))
+        if roof_levels is None:
+            roof_levels = 1.0
+        return (levels + roof_levels) * METRES_PER_LEVEL, "osm_levels"
+
+    return None, "default"
 
 # Roof geometry tags preserved through the dissolve step so that
 # _build_building_meshes() can generate shaped roofs.
@@ -147,63 +224,44 @@ def _fill_heights(
     hi: float = 300.0,
     levels_col: str | None = None,
 ):
-    """Fill height_m for OSM features from the ``height`` tag.
+    """Fill height_m for OSM features with :func:`height_from_tags`.
 
     Also sets ``height_source`` to one of ``"osm_tag"``, ``"osm_levels"``,
     or ``"default"`` so downstream code can identify buildings that only
     have a fallback height (candidates for raster enhancement).
 
     Args:
-        default_m:  Fallback height when tag is absent or unparseable.
+        default_m:  Fallback height when no tag gives one.
         lo, hi:     Clip bounds in metres.
-        levels_col: If set, use ``gdf[levels_col] * METRES_PER_LEVEL`` as a
-                    secondary fallback before *default_m* (buildings only).
-                    Rows with no level count still fall through to
-                    *default_m*.
+        levels_col: If set, the level-count column (with ``roof:levels``) is
+                    a secondary fallback before *default_m* (buildings only).
+                    Without it only the ``height`` tags are read.
     """
-    try:
-        import pandas as pd
-    except ImportError:
-        gdf = gdf.copy()
-        gdf['height_m'] = float(default_m)
-        gdf['height_source'] = 'default'
-        return gdf
-
-    n = len(gdf)  # noqa: F841 (kept for potential future use)
-    source = pd.Series('default', index=gdf.index)
-
-    # Levels-based estimate (buildings only). Buildings with no levels tag
-    # fall through to *default_m*: filling the level count with an invented
-    # 3.0 first (as this did) meant every untagged building silently became
-    # 3 x METRES_PER_LEVEL instead, and default_m was dead code whenever
-    # levels_col was passed.
+    tag_cols = [c for c in ("height", "building:height") if c in gdf.columns]
+    level_cols: dict[str, str] = {}
     if levels_col and levels_col in gdf.columns:
-        levels = pd.to_numeric(gdf[levels_col], errors='coerce')
-        has_levels = levels.notna()
-        height_from_levels = (levels * METRES_PER_LEVEL).fillna(float(default_m))
-        source = source.where(~has_levels, 'osm_levels')
-    else:
-        height_from_levels = pd.Series(float(default_m), index=gdf.index)
+        level_cols["building:levels"] = levels_col
+        if "roof:levels" in gdf.columns:
+            level_cols["roof:levels"] = "roof:levels"
 
-    # Explicit OSM height tag (strip trailing unit strings like " m" or "ft")
-    if 'height' in gdf.columns:
-        raw = gdf['height'].astype(str).str.extract(r'([\d.]+)', expand=False)
-        explicit = pd.to_numeric(raw, errors='coerce')
-        has_tag = explicit.notna()
-        height_m = explicit.fillna(height_from_levels)
-        source = source.where(~has_tag, 'osm_tag')
-    else:
-        height_m = height_from_levels
+    heights: list[float] = []
+    sources: list[str] = []
+    tag_rows = gdf[tag_cols].to_dict("records") if tag_cols else [{}] * len(gdf)
+    level_rows = (gdf[list(level_cols.values())].to_dict("records")
+                  if level_cols else [{}] * len(gdf))
+    for tags, lv in zip(tag_rows, level_rows, strict=True):
+        props = dict(tags)
+        for key, col in level_cols.items():
+            props[key] = lv.get(col)
+        h, src = height_from_tags(props)
+        if h is None:
+            h = float(default_m)
+        heights.append(round(min(max(h, lo), hi), 1))
+        sources.append(src)
 
-    height_m = (
-        pd.to_numeric(height_m, errors='coerce')
-        .fillna(float(default_m))
-        .clip(lower=lo, upper=hi)
-        .round(1)
-    )
     gdf = gdf.copy()
-    gdf['height_m'] = height_m
-    gdf['height_source'] = source
+    gdf['height_m'] = np.asarray(heights, dtype=float)
+    gdf['height_source'] = sources
     return gdf
 
 

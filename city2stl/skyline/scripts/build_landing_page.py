@@ -17,80 +17,39 @@ Run:
 from __future__ import annotations
 
 import html
-import re
 from datetime import datetime
 from pathlib import Path
 
+from city2stl.skyline.report_index import (
+    CURATED_REGIONS,
+    parse_pano_rows,
+    seed_source,
+    stat,
+)
+
 _REPORTS = (Path(__file__).resolve().parent.parent
             / "runs" / "region_reports")
-
-_CURATED = {"cartagena", "chicago", "miami"}
 
 _BACKLINK = ('<nav class="breadcrumb" style="font-size:0.9em;margin-bottom:1em;">'
              '&#8592; <a href="../index.html">strm2stl home</a></nav>')
 
 # --- parsers ------------------------------------------------------------------
 
-def _stat(txt: str, label: str) -> int:
-    m = re.search(
-        r'<div class="num">\s*([0-9]+)\s*</div>\s*' + re.escape(label), txt)
-    return int(m.group(1)) if m else 0
-
-
-# Matches a row in the pano summary <tbody>:
-#   <tr><td><a href="seed_N.html">seed_1</a></td>
-#       <td>corr</td><td>nseg</td><td>nm</td>
-#       <td>rate%</td><td>ncov</td>
-#       <td style="background:rgba(...)">quality_label</td></tr>
-_ROW_RE = re.compile(
-    r'<tr><td><a href="([^"]+)">([^<]+)</a></td>'   # (url, name)
-    r'<td>.*?</td>'                                   # heading correction
-    r'<td>(\d+)</td>'                                 # detected
-    r'<td>(\d+)</td>'                                 # matched
-    r'<td>([^<]+)</td>'                               # match rate  e.g. "84%"
-    r'<td>(\d+)</td>'                                 # coverage
-    r'<td[^>]*?background:([^"]+)"[^>]*>([^<]+)</td>'# bgcolor, quality label
-    r'</tr>',
-    re.DOTALL,
-)
-
-# Quality background colour → canonical state (coarse: good / medium / weak)
-_BG_TO_QUAL = {
-    "rgba(46,160,67":  "good",
-    "rgba(230,180,40": "medium",
-    "rgba(214,40,40":  "weak",    # original red + F-DET3 "no detection"
-    "rgba(200,60,20":  "weak",    # F-DET3 "mismatch"
-    "rgba(200,130,20": "weak",    # F-DET3 "low coverage"
-}
-
-
 def _parse_pano_rows(txt: str, region: str, report_dir: Path
                      ) -> list[dict]:
     """Extract per-pano stats from a region's rendered index.html."""
-    rows = []
-    for m in _ROW_RE.finditer(txt):
-        rel_url, seed_name, nseg, nm, rate, ncov, bgcolor, qlabel = m.groups()
-        qual = next((v for k, v in _BG_TO_QUAL.items() if k in bgcolor), "weak")
-        # Seed source type
-        if seed_name.startswith("web_"):
-            src = "web"
-        elif seed_name.startswith("auto"):
-            src = "auto"
-        else:
-            src = "curated" if region in _CURATED else "seed"
-        rows.append(dict(
-            region=region,
-            seed=seed_name,
-            url=f"{report_dir.name}/{rel_url}",
-            src=src,
-            nseg=int(nseg),
-            nm=int(nm),
-            rate=rate.strip(),
-            ncov=int(ncov),
-            qual=qual,
-            qlabel=qlabel.strip(),
-        ))
-    return rows
+    return [dict(
+        region=region,
+        seed=r["seed"],
+        url=f"{report_dir.name}/{r['url']}",
+        src=seed_source(r["seed"], region),
+        nseg=r["detected"],
+        nm=r["matched"],
+        rate=r["match_rate"],
+        ncov=r["coverage"],
+        qual=r["quality"],
+        qlabel=r["quality_label"],
+    ) for r in parse_pano_rows(txt)]
 
 
 def _web_images(report_dir: Path) -> list[Path]:
@@ -181,7 +140,7 @@ def main() -> None:
             idx.write_text(txt, encoding="utf-8")
 
         region = idx.parent.name.replace("_skyline_report", "")
-        total_buildings += _stat(txt, "aggregated buildings")
+        total_buildings += stat(txt, "aggregated buildings")
         all_rows.extend(_parse_pano_rows(txt, region, idx.parent))
 
         for img in _web_images(idx.parent):
@@ -197,7 +156,7 @@ def main() -> None:
     table_rows_html = ""
     for region in seen_regions:
         region_rows = [r for r in all_rows if r["region"] == region]
-        curated = region in _CURATED
+        curated = region in CURATED_REGIONS
         region_label = region.replace("_", " ").title()
         badge = "👤 curated" if curated else "🤖 auto"
         badge_cls = "badge-curated" if curated else "badge-auto"

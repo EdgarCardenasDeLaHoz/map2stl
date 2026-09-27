@@ -13,12 +13,10 @@ coarse-resolution baseline; finer sources (Google 3D, LiDAR) override it.
 
 from __future__ import annotations
 
-import io
 import logging
 from math import ceil, floor
 
 import numpy as np
-import rasterio
 import requests
 
 from city2stl.height import BBox, HeightResult, _resample
@@ -27,6 +25,7 @@ from geo2stl.cache import (
     read_array_cache,
     write_array_cache,
 )
+from geo2stl.raster import read_geotiff
 
 logger = logging.getLogger(__name__)
 
@@ -126,10 +125,8 @@ def _download_tile(lon_west: int, lat_south: int) -> np.ndarray | None:
         return None
     r.raise_for_status()
 
-    with rasterio.open(io.BytesIO(r.content)) as src:
-        raw = src.read(1)  # Int16
-    arr = raw.astype(np.float32) * _GAIN
-    arr[raw <= 0] = np.nan  # 0 or negative → no building data
+    raw = read_geotiff(r.content, zero_as_nodata=True)[0]  # Int16 counts
+    arr = raw * _GAIN  # 0 or negative (and the file's no-data) → NaN, no building data
 
     write_array_cache(_NAMESPACE, key, {"height": arr},
                       metadata={"tile": tile_name(lon_west, lat_south),

@@ -166,8 +166,9 @@ def infill_idw(
 def infill_nearest(heightmap: np.ndarray) -> np.ndarray:
     """Fill NaN pixels using nearest-known-neighbour propagation.
 
-    Fast O(N) algorithm using ``scipy.ndimage.distance_transform_edt``.
-    Produces sharp fill boundaries.  Use ``infill_idw`` for smoother results.
+    ``numpy2stl.raster.fill_nan(method="nearest")`` (scipy EDT) on a float32
+    copy. Produces sharp fill boundaries.  Use ``infill_idw`` for smoother
+    results.
 
     Parameters
     ----------
@@ -177,31 +178,12 @@ def infill_nearest(heightmap: np.ndarray) -> np.ndarray:
     Returns
     -------
     (H, W) float32 ndarray
-        Fully filled copy (no NaN where a neighbour exists).
+        Fully filled copy (no NaN where a neighbour exists); all zeros when
+        every pixel is NaN.
     """
-    try:
-        from scipy.ndimage import distance_transform_edt
-    except ImportError:
-        # Last-resort: replace NaN with 0
-        result = heightmap.astype(np.float32).copy()
-        result[np.isnan(result)] = 0.0
-        return result
+    from numpy2stl.raster import fill_nan
 
-    result = heightmap.astype(np.float32).copy()
-    nan_mask = np.isnan(result)
-
-    if not nan_mask.any():
-        return result
-
-    if nan_mask.all():
-        result[:] = 0.0
-        return result
-
-    # Replace NaN temporarily with 0 for indexing
-    filled = result.copy()
-    filled[nan_mask] = 0.0
-
-    # distance_transform_edt with return_indices gives nearest non-zero pixel
-    _, indices = distance_transform_edt(nan_mask, return_indices=True)
-    result[nan_mask] = filled[indices[0][nan_mask], indices[1][nan_mask]]
-    return result
+    result = heightmap.astype(np.float32)
+    if np.isnan(result).all():
+        return np.zeros_like(result)
+    return fill_nan(result, method="nearest")

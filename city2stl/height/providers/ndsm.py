@@ -19,17 +19,16 @@ Resolution: ~30 m.
 
 from __future__ import annotations
 
-import io
 import logging
-import os
 import tempfile
 from pathlib import Path
 
 import numpy as np
-import requests
 
 import geo2stl.cache as _cache_mod
 from city2stl.height import BBox, HeightResult
+from geo2stl import opentopo
+from geo2stl.raster import read_geotiff
 
 from ._cache import (
     make_cache_key,
@@ -52,9 +51,8 @@ NDSM_CONFIDENCE = 0.8
 # building. See `resolution_priority` in city2stl/height/__init__.py.
 NDSM_RESOLUTION_M = 30.0
 
-# OpenTopography global DEM API — used to fetch SRTM as DTM source.
-# FABDEM (Bristol uni) tiles are no longer available at data.bris.ac.uk.
-_OT_GLOBAL_API = "https://portal.opentopography.org/API/globaldem"
+# OpenTopography global DEM API (geo2stl.opentopo) — used to fetch SRTM as DTM
+# source. FABDEM (Bristol uni) tiles are no longer available at data.bris.ac.uk.
 _OT_TIMEOUT = 120
 
 
@@ -65,27 +63,20 @@ from ._raster import read_geotiff_bytes as _parse_tiff_bytes  # noqa: E402
 def _fetch_srtm_opentopo(bbox: BBox, api_key: str | None) -> np.ndarray | None:
     """Fetch SRTM 30m DTM for *bbox* from OpenTopography API.
 
-    Returns float32 array or None on failure (including when *api_key* is empty).
+    Returns float32 array or None on failure (including when no key is set:
+    *api_key*, else ``geo2stl.opentopo.get_api_key()``).
     """
+    api_key = api_key or opentopo.get_api_key()
     if not api_key:
         logger.warning("nDSM: OPENTOPO_API_KEY not set; cannot fetch SRTM DTM")
         return None
     north, south, east, west = bbox
-    params = {
-        "demtype": "SRTMGL1",
-        "south": south,
-        "north": north,
-        "west": west,
-        "east": east,
-        "outputFormat": "GTiff",
-        "API_Key": api_key,
-    }
     try:
         logger.info("nDSM: fetching SRTM via OpenTopography for "
                     "N=%.3f S=%.3f E=%.3f W=%.3f", north, south, east, west)
-        r = requests.get(_OT_GLOBAL_API, params=params, timeout=_OT_TIMEOUT)
-        r.raise_for_status()
-        return _parse_tiff_bytes(io.BytesIO(r.content))
+        data = opentopo.request_geotiff("SRTMGL1", north, south, east, west,
+                                        api_key=api_key, timeout=_OT_TIMEOUT)
+        return _parse_tiff_bytes(data)
     except Exception as e:
         logger.warning("nDSM: SRTM OpenTopography fetch failed: %s", e)
         return None
@@ -168,41 +159,6 @@ def _download_tile(url: str, dest: Path) -> bool:
         return False
 
 
-def _read_geotiff(path: Path) -> tuple[np.ndarray, dict] | None:
-    """Read a GeoTIFF as float32 array + transform metadata.
-
-    Uses rasterio if available, else falls back to PIL + manual georef.
-    Returns (array, {"transform": [a,b,c,d,e,f], "crs": "EPSG:4326"}) or None.
-    """
-    try:
-        import rasterio
-        with rasterio.open(str(path)) as ds:
-            arr = ds.read(1).astype(np.float32)
-            nodata = ds.nodata
-            if nodata is not None:
-                arr[arr == nodata] = np.nan
-            t = ds.transform
-            meta = {
-                "transform": [t.a, t.b, t.c, t.d, t.e, t.f],
-                "width": ds.width,
-                "height": ds.height,
-                "crs": str(ds.crs),
-            }
-            return arr, meta
-    except ImportError:
-        pass
-
-    # Fallback: PIL (no CRS info, assume EPSG:4326 for 1° tiles)
-    try:
-        from PIL import Image
-        img = Image.open(str(path))
-        arr = np.array(img, dtype=np.float32)
-        return arr, {"width": arr.shape[1], "height": arr.shape[0]}
-    except Exception as e:
-        logger.warning(f"Cannot read GeoTIFF {path}: {e}")
-        return None
-
-
 def _get_tile(source: str, lat: int, lon: int) -> np.ndarray | None:
     """Fetch a single 1° tile (cached). *source* is 'glo30' or 'fabdem'.
 
@@ -232,10 +188,11 @@ def _get_tile(source: str, lat: int, lon: int) -> np.ndarray | None:
     try:
         if not _download_tile(url, tmp_path):
             return None
-        result = _read_geotiff(tmp_path)
-        if result is None:
+        try:
+            arr = read_geotiff(tmp_path)[0]
+        except ValueError as e:
+            logger.warning(f"Cannot read GeoTIFF {tmp_path}: {e}")
             return None
-        arr, _ = result
         # Cache as compressed npz
         np.savez_compressed(str(cache_path), arr=arr)
         return arr
@@ -330,7 +287,7 @@ class NDSMProvider:
 
     def __init__(self, api_key: str | None = None) -> None:
         """*api_key* is the OpenTopography key for the SRTM DTM; when omitted,
-        the OPENTOPO_API_KEY environment variable is used."""
+        ``geo2stl.opentopo.get_api_key()`` ($OPENTOPO_API_KEY / config.json) is used."""
         self.api_key = api_key
 
     def covers(self, bbox: BBox) -> bool:
@@ -373,8 +330,7 @@ class NDSMProvider:
 
         # DTM: SRTM via OpenTopography (primary) or FABDEM tiles (fallback).
         # FABDEM from Bristol uni (data.bris.ac.uk) has been 404 since early 2026.
-        dtm_stitched = _fetch_srtm_opentopo(
-            bbox, self.api_key or os.environ.get("OPENTOPO_API_KEY"))
+        dtm_stitched = _fetch_srtm_opentopo(bbox, self.api_key)
 
         if dtm_stitched is None:
             # Fallback: per-tile FABDEM (kept for when Bristol restores the mirror)

@@ -5,6 +5,7 @@ import html
 
 import numpy as np
 
+from city2stl.heights import height_from_tags
 from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
 POLAR_MAX_M = 1000.0
@@ -32,26 +33,11 @@ def _fmt_optional_bool(value: bool | None) -> str:
 def _osm_height_m(feat: dict) -> float | None:
     """Extract a metres-units height from an OSM building feature.
 
-    Priority: explicit ``height`` / ``building:height`` (stripped of
-    units), then ``building:levels`` × 3.0 m as a coarse fallback.
-    Returns ``None`` when no usable tag is present.
+    Uses :func:`city2stl.heights.height_from_tags` (``height`` with units,
+    else ``building:levels`` x 3.2 m plus the roof). Returns ``None`` when no
+    usable tag is present.
     """
-    props = feat.get("properties") or {}
-    for key in ("height", "building:height"):
-        v = props.get(key)
-        if v is None:
-            continue
-        try:
-            return float(str(v).split()[0].replace("m", "").strip())
-        except (ValueError, TypeError):
-            continue
-    lv = props.get("building:levels")
-    if lv is not None:
-        try:
-            return float(str(lv).split()[0]) * 3.0
-        except (ValueError, TypeError):
-            pass
-    return None
+    return height_from_tags(feat.get("properties") or {})[0]
 
 def _osm_polygon_area_m2(ring: list, lat0: float) -> float:
     """Rough planar area in m² for a small lon/lat ring using a local

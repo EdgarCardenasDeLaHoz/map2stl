@@ -228,6 +228,10 @@ live-looking import statement names it. It was left alone rather than chased, si
 it means deciding the fate of create.py and the notebook mesh path — a larger question than
 this cleanup.
 
+2026-09-27 (F-ARCH): `create.py` had since been deleted, leaving `get_polygons` with no importer;
+`city2stl/buildings.py` was deleted. `notebooks/granada.ipynb` still calls `get_polygons` through
+`notebooks/experimental.py`, which imports the missing `city2stl.create` and so already fails.
+
 `heights.py`'s `METRES_PER_LEVEL = 3.2` is now the only levels-to-metres conversion in the
 tree.
 

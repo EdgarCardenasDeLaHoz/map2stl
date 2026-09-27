@@ -48,27 +48,6 @@ def _load_env_file_if_present() -> None:
     except Exception:
         return
 
-def _building_height_from_tags(properties: dict) -> tuple[float | None, str]:
-    raw_height = properties.get("height")
-    if raw_height is not None:
-        try:
-            digits = "".join(ch for ch in str(raw_height)
-                             if (ch.isdigit() or ch == "."))
-            if digits:
-                return float(digits), "osm_tag"
-        except Exception:
-            pass
-
-    raw_levels = properties.get("building:levels") or properties.get("levels")
-    if raw_levels is not None:
-        try:
-            levels = float(str(raw_levels).split(";")[0])
-            return max(3.0, levels * 3.4), "osm_levels"
-        except Exception:
-            pass
-
-    return None, "default"
-
 def _polygon_area_m2(coords: list[tuple[float, float]]) -> float:
     """Approximate polygon area in m^2 from lon/lat coordinates.
 
@@ -88,6 +67,5 @@ def _polygon_area_m2(coords: list[tuple[float, float]]) -> float:
 
 __all__ = [
     '_load_env_file_if_present',
-    '_building_height_from_tags',
     '_polygon_area_m2',
 ]

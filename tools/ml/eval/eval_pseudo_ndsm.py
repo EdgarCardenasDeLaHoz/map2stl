@@ -90,15 +90,13 @@ def _building_coverage(
       mean_height_m, p50_height_m, p90_height_m
     """
     try:
-        from rasterio.features import rasterize as _rasterize
-        from rasterio.transform import from_bounds
+        from numpy2stl.raster import burn_polygons
         from shapely.geometry import shape
     except ImportError:
         print("  ⚠️  rasterio/shapely not available — skipping per-building stats")
         return []
 
     H, W = height_raster.shape
-    transform = from_bounds(west, south, east, north, W, H)
     records = []
 
     for i, feat in enumerate(buildings_geojson.get("features") or []):
@@ -109,8 +107,8 @@ def _building_coverage(
         osm_h = props.get("height_m")
         try:
             shp = shape(geom)
-            mask = _rasterize([(shp, 1)], out_shape=(H, W), transform=transform,
-                              fill=0, dtype="uint8")
+            mask = burn_polygons([shp], (H, W), bounds=(west, south, east, north),
+                                 dtype=np.uint8)
         except Exception:
             continue
 

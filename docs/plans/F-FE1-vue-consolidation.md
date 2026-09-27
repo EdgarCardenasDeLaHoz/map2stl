@@ -62,8 +62,9 @@ Each step: vitest + Playwright e2e green, ESLint clean, no new `window.*` export
    DEM canvas + stacked layers, model viewer, curve editor, city overlay. Engine code
    becomes TS modules imported by components.
 6. **Remove glue**: `app.js`, `events.js` bus → store actions, `window.*` exports.
-7. **Delete `v2/`** once F-DEMID and settings versioning are in (v2's cancel/SSE job
-   model can follow as its own item).
+7. **Delete `v2/`** — done 2026-09-27 (F-ARCH step list; its DEM handle store already
+   lived on as `app/server/core/dem_store.py`). v2's cancel/SSE job model can follow as its
+   own item.
 
 ## Risks
 

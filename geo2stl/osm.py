@@ -2,7 +2,9 @@
 
 City layers (``city2stl.fetch``) and trails (``geo2stl.trails``) both query
 Overpass through osmnx; the mirror list, the health probe and the per-mirror
-osmnx settings live here so the two cannot drift apart.
+osmnx settings live here so the two cannot drift apart. ``overpass_query`` is
+the raw-QL client (mirror rotation, pacing, backoff) for callers that need one
+request per selector rather than osmnx (the align tools).
 """
 
 from __future__ import annotations
@@ -78,3 +80,72 @@ def use_overpass_endpoint(ox, endpoint: str, query_timeout_s: float) -> None:
     ox.settings.overpass_rate_limit = endpoint.startswith("https://overpass-api.de")
     ox.settings.requests_timeout = (CONNECT_TIMEOUT_S, query_timeout_s)
     ox.settings.overpass_settings = f"[out:json][timeout:{int(query_timeout_s)}]{{maxsize}}"
+
+
+# ---------------------------------------------------------------------------
+# Raw Overpass QL (no osmnx)
+# ---------------------------------------------------------------------------
+
+#: Interpreter URLs for raw queries, one per mirror in :data:`OVERPASS_ENDPOINTS`.
+OVERPASS_INTERPRETER_URLS = tuple(f"{e}/interpreter" for e in OVERPASS_ENDPOINTS)
+
+_last_overpass_call = [0.0]
+
+
+def overpass_wait(min_gap_s: float) -> None:
+    """Hold back until *min_gap_s* has passed since the last raw Overpass request.
+
+    The public endpoints hand out a few concurrent slots per client and answer
+    429 once they are gone, so a caller firing many queries spaces them out.
+    The clock is shared by every raw query in the process.
+    """
+    import time
+    gap = min_gap_s - (time.monotonic() - _last_overpass_call[0])
+    if gap > 0:
+        time.sleep(gap)
+    _last_overpass_call[0] = time.monotonic()
+
+
+def overpass_backoff(attempt: int, backoff_s: float) -> None:
+    """Sleep after failed attempt *attempt*, doubling from *backoff_s* (capped at 8x)."""
+    import time
+    time.sleep(backoff_s * (2 ** min(attempt, 3)))
+    _last_overpass_call[0] = time.monotonic()
+
+
+def overpass_query(
+    query: str,
+    *,
+    urls: tuple[str, ...] | list[str] = OVERPASS_INTERPRETER_URLS,
+    attempts: int = 6,
+    timeout_s: float = 180,
+    min_gap_s: float = 0.0,
+    backoff_s: float = 0.0,
+    user_agent: str | None = None,
+) -> list[dict]:
+    """POST one Overpass QL *query* and return its ``elements``.
+
+    Attempt *k* goes to ``urls[k % len(urls)]``, paced by :func:`overpass_wait`
+    (*min_gap_s*) and, when *backoff_s* > 0, followed by :func:`overpass_backoff`
+    on failure. The read timeout is *timeout_s* + 30 s (the query's own
+    ``[timeout:]`` is the caller's). Raises the last error once every attempt
+    has failed; 429 and 504 are routine on the public mirrors.
+    """
+    import requests
+
+    headers = {"User-Agent": user_agent} if user_agent else {}
+    attempts = max(1, int(attempts))
+    last: Exception = RuntimeError("no attempt made")
+    for attempt in range(attempts):
+        url = urls[attempt % len(urls)]
+        overpass_wait(min_gap_s)
+        try:
+            response = requests.post(url, data={"data": query},
+                                     timeout=(20, timeout_s + 30), headers=headers)
+            response.raise_for_status()
+            return response.json().get("elements", [])
+        except Exception as exc:  # noqa: BLE001 - retried on the next mirror
+            last = exc
+            if backoff_s > 0 and attempt + 1 < attempts:
+                overpass_backoff(attempt, backoff_s)
+    raise last

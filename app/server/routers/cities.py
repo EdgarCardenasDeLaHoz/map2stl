@@ -248,8 +248,8 @@ async def get_city_raster(req: CityRasterRequest):
 @router.get("/api/cities/google3d-available")
 async def google3d_available():
     """Check if Google 3D Tiles API key is configured."""
-    from city2stl.height.providers.google_3d import _get_api_key
-    return JSONResponse(content={"available": _get_api_key() is not None})
+    from city2stl.height.providers.google_3d import get_api_key
+    return JSONResponse(content={"available": get_api_key() is not None})
 
 
 @router.post("/api/cities/enhance-heights")
@@ -262,10 +262,10 @@ async def enhance_heights(req: EnhanceHeightsRequest):
     """
     import numpy as np
 
-    from city2stl.height.providers.google_3d import Google3DProvider, _get_api_key
+    from city2stl.height.providers.google_3d import Google3DProvider, get_api_key
     from city2stl.heights import enhance_buildings_with_raster
 
-    if not _get_api_key():
+    if not get_api_key():
         return error_response(
             "Google Maps API key not configured. "
             "Set GOOGLE_MAPS_API_KEY env var or add google_maps_api_key to config.json.",

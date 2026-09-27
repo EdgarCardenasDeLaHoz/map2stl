@@ -470,17 +470,17 @@ class TestImportChain:
 # ===================================================================
 
 class TestDEMLocalNormalization:
-    """Verify that _make_local_dem now forces projection='none'
+    """Verify that the local DEM source forces projection='none'
     so projection is applied externally."""
 
-    def test_make_local_dem_forces_none_projection(self):
-        """Inspect _make_local_dem source to verify it passes projection='none'."""
+    def test_fetch_local_dem_forces_none_projection(self):
+        """Inspect geo2stl.dem.fetch_local_dem to verify it passes projection='none'."""
         import inspect
 
-        from app.server.routers.terrain import _make_local_dem
-        source = inspect.getsource(_make_local_dem)
-        assert "projection='none'" in source, (
-            "_make_local_dem should pass projection='none' to make_dem_image, "
+        from geo2stl.dem import fetch_local_dem
+        source = inspect.getsource(fetch_local_dem)
+        assert 'projection="none"' in source, (
+            "fetch_local_dem should pass projection='none' to make_dem_image, "
             "but the source doesn't contain this override")
 
     def test_dem_endpoint_projects_all_sources(self):

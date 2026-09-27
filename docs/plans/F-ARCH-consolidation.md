@@ -110,3 +110,50 @@ edited values first, DEM handle otherwise) instead of the raw handle.
   OpenTopography key in. `skyline/region_data` reads the regions table read-only via
   `sqlite3` (`REGIONS_DB`, optional `region_lookup`); `geo2stl/processing` uses a local
   `ProcessingSpec` Protocol. Violation 4 removed: no `app.*` imports left in the libraries.
+- 2026-09-27 — tag heights done: `city2stl.heights.height_from_tags(props)` (`height` /
+  `building:height` with units, else (`building:levels` + `roof:levels`, or + 1 roof level)
+  × 3.2 m) replaces the copies in `_fill_heights`, `skyline/_core/util` (3.4 m, deleted),
+  `skyline/region_data`, the height diagnostic script and `_report_plots` (3.0 m) and
+  `tools/ml/data/collect_osm_tiles` (3.5 m). Callers keep their own 10 m default and clamps.
+- 2026-09-27 — GeoTIFF reader done: `geo2stl.raster.read_geotiff(bytes|path, fit_dim=,
+  zero_as_nodata=, dtype=) -> (array, transform, crs, nodata)` (rasterio, PIL fallback)
+  replaces the rasterio blocks in `height/providers/_raster.py` (now a None-on-failure
+  wrapper), `ndsm._read_geotiff` (deleted), `wsf3d` and `geo2stl.dem.fetch_opentopo_dem`.
+  `wsf3d_global` (tifffile range reads of a 2 GB COG) and `geo2stl.tiles` (skimage on local
+  SRTM tiles, no georef) stay as they are.
+- 2026-09-27 — satellite tiles done: `geo2stl/imagery.py` holds slippy tile math
+  (`lon/lat_to_global_px`, `global_px_to_lonlat`, `lonlat_to_tile`, `tile_bounds`,
+  `m_per_px`, `tile_range`), `choose_zoom` (target m/px or `dim`, per-side / total caps),
+  `fetch_tile` (optional disk cache), `stitch_tiles` and `fetch_rgb`. `sat2stl.fetch_satellite_tiles`,
+  `roof_tiles` (`lon_to_gpx`, `lat_to_gpy`, `m_per_px`, `tile`, `prefetch_bbox`, `crop_for_ring`)
+  and `skyline/satellite_image.fetch_region_satellite` keep their signatures as thin wrappers.
+- 2026-09-27 — DEM fetch / OpenTopography done: `geo2stl/opentopo.py` holds the key
+  (`get_api_key` / `set_api_key`), `OPENTOPO_DATASETS`, `request_geotiff` and the cached
+  `fetch_opentopo_dem` (re-exported by `geo2stl.dem`); `geo2stl.dem.fetch_dem(bbox, dim, source,
+  api_key)` owns source routing and fallbacks (`fetch_dem_from_source` is a one-release alias),
+  and the terrain router's `_fetch_dem_array` is a one-call adapter. `app/server/config.py` reads
+  the key and dataset table from geo2stl; `routers/auth.py` calls `opentopo.set_api_key` instead
+  of rebinding module privates. nDSM / 3DEP providers request through `opentopo.request_geotiff`
+  and fall back to the geo2stl key. `google_3d._get_api_key` → public `get_api_key`. Violation 6:
+  `reports.py` reads the region-report rows through `city2stl.skyline.report_index` (shared with
+  `scripts/build_landing_page.py`), not the script.
+- 2026-09-27 — step 8 (tool dedupes), the identical-behaviour part: `geo2stl.osm.overpass_query`
+  (+ `overpass_wait` / `overpass_backoff`, one pacing clock per process) replaces the raw
+  Overpass loops in `align_tool/locate._overpass` and `osm_model._nodes` (both pass their own
+  mirror list, timeouts and user agent). `numpy2stl.raster.burn_polygons` replaces the rasterio
+  burns in `locate._rasterize`, `osm_model.coverage`, `tools/ml/data/collect_osm_tiles`
+  (`_rasterize_buildings`) and `tools/ml/eval/eval_pseudo_ndsm`. `street_place._terrain_tile`
+  caches through `geo2stl.cache` (namespace `align_terrain`, one-year TTL). Left: `tune_osmnx`
+  (process-wide osmnx surgery, not the app's per-endpoint settings), the tools/ml osmnx building
+  fetches (need raw per-footprint tags; `city2stl.fetch` dissolves), `plate_vectors` /
+  `plate_height_truth` pixel-space `cv2.fillPoly` (different edge rule; moving with
+  `numpy2stl.raster` step 7), affine decompose (no public numpy2stl helper yet).
+- 2026-09-27 — `v2/` retired (F-FE1): directory, `Code/docs/app-v2.md`, its INDEX section, the
+  two `.claude/launch.json` configurations, the eslint ignore and the `.svelte-kit/` ignore are
+  gone; nothing outside it imported it. `city2stl/buildings.py` deleted (no importer; the notebook
+  path that named `get_polygons` already failed on the missing `city2stl.create`).
+- 2026-09-27 — label engraving / NaN fill (app side): `app/server/core/export.py`
+  `_apply_label_engraving` has no twin left in strm2stl (the other copy was in `v2/`), so it
+  stays until `numpy2stl.utils.image.engrave_text` exists. `city2stl.height.infill.infill_nearest`
+  (used by the app's mesh import and the session) now delegates to `numpy2stl.raster.fill_nan`
+  (all-NaN still returns zeros, output still float32).

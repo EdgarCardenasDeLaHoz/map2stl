@@ -12,7 +12,7 @@ Audit of every endpoint in the terrain and composite routers, tracing each call 
 - `/api/terrain/hydrology/merge` — **moved** to `/api/composite/hydrology-merge` with Pydantic schema + b64 response
 - `/api/terrain/esa-land-cover` — **fixed** to call `fetch_water_mask_images()` directly (no longer fetches+discards SRTM/water mask)
 - `_fetch_and_rasterize_hydrology()` — **moved** from router to `geo2stl.hydrology`
-- `_fetch_dem_array()` — **removed** from terrain router; replaced by `geo2stl.dem.fetch_dem_from_source()` directly
+- `_fetch_dem_array()` — now a one-call adapter over `geo2stl.dem.fetch_dem()` (source routing and fallbacks live in the library)
 - `_CACHE_AVAILABLE` guard pattern — **removed** from cities router; cache always available, imported unconditionally
 - `_load_osm_cache()` / `_save_osm_cache()` wrappers — **removed** from cities router; direct `read_osm_cache()`/`write_osm_cache()` calls
 - `core/terrain_raster.py` + `core/osm_cache_policy.py` — converted to **deprecated compatibility wrappers**; implementations live in `geo2stl.raster` and `city2stl.cache_policy`
@@ -55,17 +55,17 @@ get_terrain_dem()
 ├── [TEST_MODE] → np.linspace() gradient
 │   └── geo2stl.projections.project_grid()
 │   └── geo2stl.dem.make_dem_payload()
-├── run_sync(geo2stl.dem.fetch_dem_from_source, ...)                    — thread pool
-│   └── fetch_dem_from_source(source, N,S,E,W, dim, **kw)
+├── run_sync(_fetch_dem_array → geo2stl.dem.fetch_dem, ...)            — thread pool
+│   └── fetch_dem((N,S,E,W), dim, source, api_key=None, **kw)
 │       ├── "h5_local" → geo2stl.dem.fetch_h5_dem()                    — h5py tile reader
-│       │   └── fallback → geo2stl.dem.fetch_opentopo_dem()             — HTTP + rasterio
-│       ├── OPENTOPO key → geo2stl.dem.fetch_opentopo_dem()
-│       │   └── requests.get(portal.opentopography.org) + rasterio
+│       │   └── fallback → geo2stl.opentopo.fetch_opentopo_dem()        — HTTP + geo2stl.raster.read_geotiff
+│       ├── OPENTOPO key → geo2stl.opentopo.fetch_opentopo_dem()
+│       │   └── opentopo.request_geotiff() + read_geotiff (cached .tif)
 │       ├── "water_esa" → geo2stl.dem.fetch_esa_water_layer()
 │       │   └── geo2stl.sat2stl.fetch_bbox_image() + cv2.resize
 │       ├── "local" → geo2stl.dem.fetch_local_dem()
 │       │   └── geo2stl.tiles.stitch_tiles_no_rasterio()               — SRTM tile stitch
-│       └── projection applied inside fetch_dem_from_source
+│       └── projection applied by the router after the fetch
 │           └── geo2stl.projections.project_grid()
 ├── geo2stl.dem.upsample_dem()                                          — cv2.resize if native < dim
 ├── geo2stl.dem.make_dem_payload()                                      — b64 encode + stats

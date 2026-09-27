@@ -8,10 +8,11 @@ them across files.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from pathlib import Path
+
+from geo2stl import opentopo as _opentopo
 
 _log = logging.getLogger(__name__)
 
@@ -58,35 +59,16 @@ MICROPOLITAN_STL_DIR: Path = (_PROJECT_ROOT / _MICROPOLITAN_ENV).resolve()
 # OpenTopography API key
 # ---------------------------------------------------------------------------
 
-_OPENTOPO_API_KEY: str | None = os.environ.get("OPENTOPO_API_KEY")
-try:
-    _cfg_path = _STRM2STL_DIR / "config.json"
-    if _cfg_path.exists() and _OPENTOPO_API_KEY is None:
-        _cfg = json.loads(_cfg_path.read_text())
-        _OPENTOPO_API_KEY = _cfg.get("opentopo_api_key") or None
-except Exception:
-    _log.debug('Could not read opentopo key from config.json', exc_info=True)
-
-OPENTOPO_API_KEY: str | None = _OPENTOPO_API_KEY
-
-if not OPENTOPO_API_KEY:
-    _log.warning(
-        "No OpenTopography API key found. "
-        "Set the OPENTOPO_API_KEY environment variable to enable DEM downloads."
-    )
+# The key and the dataset table live in geo2stl.opentopo ($OPENTOPO_API_KEY, else
+# config.json's opentopo_api_key); this is the value at startup. routers/auth.py
+# rebinds it together with geo2stl.opentopo.set_api_key() when a key is saved.
+OPENTOPO_API_KEY: str | None = _opentopo.get_api_key()
 
 # ---------------------------------------------------------------------------
 # Supported OpenTopography DEM types
 # ---------------------------------------------------------------------------
 
-OPENTOPO_DATASETS: dict[str, dict] = {
-    "SRTMGL1":    {"label": "SRTM 30m (Global)",          "resolution_m": 30},
-    "SRTMGL3":    {"label": "SRTM 90m (Global)",          "resolution_m": 90},
-    "AW3D30":     {"label": "ALOS World 3D 30m",          "resolution_m": 30},
-    "COP30":      {"label": "Copernicus DSM 30m",         "resolution_m": 30},
-    "COP90":      {"label": "Copernicus DSM 90m",         "resolution_m": 90},
-    "SRTM15Plus": {"label": "SRTM15+ (Bathymetry+Land)", "resolution_m": 500},
-}
+OPENTOPO_DATASETS: dict[str, dict] = _opentopo.OPENTOPO_DATASETS
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------

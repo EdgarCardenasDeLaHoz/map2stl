@@ -99,7 +99,7 @@ _ROOT_URL = "https://tile.googleapis.com/v1/3dtiles/root.json"
 
 # ── API key resolution ──────────────────────────────────────────
 
-def _get_api_key() -> str | None:
+def get_api_key() -> str | None:
     """Read Google Maps API key from env or config.json."""
     key = os.environ.get("GOOGLE_MAPS_API_KEY")
     if key:
@@ -559,7 +559,7 @@ class Google3DProvider:
 
     def __init__(self, api_key: str | None = None,
                  max_tiles: int = _MAX_TILES):
-        self._api_key = api_key or _get_api_key()
+        self._api_key = api_key or get_api_key()
         self._max_tiles = max_tiles
 
     def covers(self, bbox: BBox) -> bool:

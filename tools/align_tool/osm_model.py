@@ -55,22 +55,15 @@ def elements(selector: str, bbox, cache_dir: pathlib.Path, kind: str, nodes: boo
 def _nodes(selector: str, bbox):
     """Overpass nodes for one selector (trees are points)."""
     import locate
-    import requests
+
+    from geo2stl.osm import overpass_query
     N, S, E, W = bbox
     query = (f"[out:json][timeout:{locate.OVERPASS_TIMEOUT_S}];"
              f"node{selector}({S},{W},{N},{E});out;")
-    last: Exception = RuntimeError("no attempt made")
-    for attempt in range(locate.OVERPASS_ATTEMPTS):
-        locate._overpass_wait()
-        try:
-            r = requests.post(locate.OVERPASS_URLS[attempt % len(locate.OVERPASS_URLS)],
-                              data={"data": query}, timeout=(20, locate.OVERPASS_TIMEOUT_S + 30),
-                              headers={"User-Agent": locate.OVERPASS_USER_AGENT})
-            r.raise_for_status()
-            return r.json().get("elements", [])
-        except Exception as exc:
-            last = exc
-    raise last
+    return overpass_query(query, urls=locate.OVERPASS_URLS, attempts=locate.OVERPASS_ATTEMPTS,
+                          timeout_s=locate.OVERPASS_TIMEOUT_S,
+                          min_gap_s=locate.OVERPASS_MIN_GAP_S,
+                          user_agent=locate.OVERPASS_USER_AGENT)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -158,15 +151,10 @@ def points(els, radius_of):
 
 def coverage(geoms, bbox, grid, ss=SS):
     """Fraction of each cell covered, row 0 south (the plate rasters' orientation)."""
-    if not geoms:
-        return np.zeros((grid, grid), np.float32)
-    from rasterio import features
-    from rasterio.transform import from_bounds
+    from numpy2stl.raster import burn_polygons
     N, S, E, W = bbox
     g = grid * ss
-    arr = features.rasterize(((geom, 1) for geom in geoms if not geom.is_empty),
-                             out_shape=(g, g), transform=from_bounds(W, S, E, N, g, g),
-                             fill=0, all_touched=False, dtype="uint8")
+    arr = burn_polygons(geoms, (g, g), bounds=(W, S, E, N), values=1.0, dtype=np.uint8)
     cov = arr.reshape(grid, ss, grid, ss).mean(axis=(1, 3)).astype(np.float32)
     return np.flipud(cov).copy()
 

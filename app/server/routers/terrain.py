@@ -17,9 +17,6 @@ from app.server.config import (
     H5_SRTM_AVAILABLE as _H5_SRTM_AVAILABLE,
 )
 from app.server.config import (
-    OPENTOPO_API_KEY as _OPENTOPO_API_KEY,
-)
-from app.server.config import (
     OPENTOPO_DATASETS,
     TEST_MODE,
 )
@@ -53,11 +50,9 @@ from app.server.core.validation import (
 from app.server.core.validation import (
     validate_dim as _validate_dim,
 )
+from geo2stl import opentopo as _opentopo
 from geo2stl.dem import (
-    fetch_layer_data as _fetch_layer_data,
-)
-from geo2stl.dem import (
-    fetch_local_dem as _fetch_local_dem,
+    fetch_dem as _fetch_dem,
 )
 from geo2stl.dem import (
     make_dem_payload as _make_dem_payload,
@@ -148,54 +143,18 @@ def _parse_clip_valid_region(params, default: bool = True) -> bool:
     return default
 
 
-def _make_local_dem(north, south, east, west, dim, depth_scale, water_scale,
-                    subtract_water, projection, maintain_dimensions, clip_nans):
-    """Run fetch_local_dem synchronously. Called from run_in_executor.
-
-    Always fetches in Plate Carree (projection='none') so the server can
-    apply projection externally, consistent with OpenTopo/H5 sources.
-    """
-    return _fetch_local_dem(
-        north, south, east, west, dim,
-        depth_scale=depth_scale,
-        water_scale=water_scale,
-        subtract_water=subtract_water,
-        maintain_dimensions=maintain_dimensions,
-    )
-
-
 def _fetch_dem_array(dem_source, north, south, east, west, dim,
-                     depth_scale, water_scale,
-                     subtract_water, projection, maintain_dimensions,
-                     clip_nans):
-    """
-    Fetch a DEM array from the specified source. Sync — call via run_in_executor.
+                     depth_scale, water_scale, subtract_water, maintain_dimensions):
+    """Fetch a plate-carrée DEM array. Sync — call via run_in_executor.
 
-    Routing:
-      h5_local or any OPENTOPO_DATASETS key → _fetch_layer_data (handles h5→SRTMGL3 fallback)
-      "local" or unknown                    → _make_local_dem (local SRTM tiles)
+    Source routing, the h5 -> SRTMGL3 fallback and the zero array on a local
+    failure (detected by _dem_empty_warning) are ``geo2stl.dem.fetch_dem``;
+    projection is applied by the caller.
     """
-    if dem_source in ("h5_local", *OPENTOPO_DATASETS):
-        return _fetch_layer_data(dem_source, north, south, east, west, dim)
-
-    try:
-        return _make_local_dem(north, south, east, west, dim, depth_scale,
-                               water_scale, subtract_water,
-                               projection, maintain_dimensions, clip_nans)
-    except Exception as dem_err:
-        # Common cause: the local SRTM tiles don't cover this bbox (e.g. a
-        # continent-scale region), so fetch_local_dem returns None. We fall
-        # back to a zero array so the response shape is valid; get_terrain_dem()
-        # detects the all-zero/flat result and warns the user (see
-        # _dem_empty_warning) instead of silently showing a flat map.
-        logger.warning(f"Local DEM failed: {dem_err}, returning zeros")
-        lat_r = abs(north - south)
-        lon_r = abs(east - west)
-        if lat_r > lon_r:
-            mh, mw = dim, max(1, int(dim * lon_r / lat_r))
-        else:
-            mw, mh = dim, max(1, int(dim * lat_r / lon_r))
-        return np.zeros((mh, mw), dtype=float)
+    return _fetch_dem((north, south, east, west), dim, dem_source,
+                      depth_scale=depth_scale, water_scale=water_scale,
+                      subtract_water=subtract_water,
+                      maintain_dimensions=maintain_dimensions)
 
 
 def _dem_empty_warning(im: np.ndarray) -> str | None:
@@ -354,8 +313,7 @@ async def get_terrain_dem(
             im_raw = await run_sync(_fetch_dem_array, dem_source,
                                     north, south, east, west, dim,
                                     depth_scale, water_scale,
-                                    subtract_water, projection, maintain_dimensions,
-                                    clip_valid_region)
+                                    subtract_water, maintain_dimensions)
             im_raw = _upsample_dem(im_raw, dim)
 
         # Apply projection uniformly for ALL sources.
@@ -843,7 +801,7 @@ async def get_terrain_sources():
          "requires_api_key": False, "available": _H5_SRTM_AVAILABLE,
          "note": "High-fidelity SRTM3 from local strm_data.h5 — best for regions < 15 km."},
     ]
-    has_key = bool(_OPENTOPO_API_KEY)
+    has_key = bool(_opentopo.get_api_key())
     for demtype, info in OPENTOPO_DATASETS.items():
         sources.append({
             "id": demtype, "label": info["label"], "provider": "OpenTopography",

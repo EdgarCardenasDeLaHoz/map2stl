@@ -10,7 +10,7 @@ id: nothing is re-derived, so nothing can disagree.
 Grids stay in memory up to MEMORY_LIMIT, then spill to .npy under the cache
 root; handles expire after TTL_SECONDS. Handles do not survive a restart; an
 unknown id raises DemGone, which the server maps to 410 "reload the DEM".
-Ported from v2/server/store.py (see docs/plans/F-FE1-vue-consolidation.md).
+See docs/plans/F-FE1-vue-consolidation.md.
 """
 
 from __future__ import annotations

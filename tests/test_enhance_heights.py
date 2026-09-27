@@ -7,6 +7,7 @@ from city2stl.heights import (
     METRES_PER_LEVEL,
     _fill_heights,
     enhance_buildings_with_raster,
+    height_from_tags,
 )
 
 # ---------------------------------------------------------------------------
@@ -96,7 +97,8 @@ class TestFillHeights:
         )
         result = _fill_heights(gdf, default_m=10.0, levels_col="building:levels")
         assert result["height_source"].iloc[0] == "osm_levels"
-        assert result["height_m"].iloc[0] == 5 * METRES_PER_LEVEL
+        # Five levels plus one level-equivalent for the (untagged) roof.
+        assert result["height_m"].iloc[0] == round(6 * METRES_PER_LEVEL, 1)
 
     def test_missing_levels_falls_back_to_default_not_an_invented_count(self):
         """No height and no levels -> default_m, even when levels_col is set.
@@ -148,6 +150,34 @@ class TestFillHeights:
         assert sources[0] == "osm_tag"
         assert sources[1] == "osm_levels"
         assert sources[2] == "default"
+
+
+class TestHeightFromTags:
+    def test_height_tag_with_units(self):
+        assert height_from_tags({"height": "12 m"}) == (12.0, "osm_tag")
+        h, src = height_from_tags({"height": "40 ft"})
+        assert src == "osm_tag"
+        assert abs(h - 12.192) < 1e-9
+        assert height_from_tags({"height": "7.5;9"}) == (7.5, "osm_tag")
+
+    def test_height_tag_beats_levels(self):
+        assert height_from_tags({"height": "30", "building:levels": "5"}) == (30.0, "osm_tag")
+
+    def test_levels_add_one_roof_level_when_roof_levels_absent(self):
+        h, src = height_from_tags({"building:levels": "5"})
+        assert src == "osm_levels"
+        assert h == 6 * METRES_PER_LEVEL
+
+    def test_roof_levels_used_when_present(self):
+        h, _ = height_from_tags({"building:levels": 4, "roof:levels": "2"})
+        assert h == 6 * METRES_PER_LEVEL
+        h, _ = height_from_tags({"building:levels": 4, "roof:levels": 0})
+        assert h == 4 * METRES_PER_LEVEL
+
+    def test_no_tags_or_nan(self):
+        assert height_from_tags({}) == (None, "default")
+        assert height_from_tags({"height": float("nan"), "building:levels": None}) == (None, "default")
+        assert height_from_tags({"height": "unknown"}) == (None, "default")
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +441,7 @@ class TestEnhanceHeightsRouter:
     def test_google3d_available_endpoint(self, client, monkeypatch, key, expected):
         """GET /api/cities/google3d-available reflects the key lookup, not the machine."""
         import city2stl.height.providers.google_3d as g3d
-        monkeypatch.setattr(g3d, "_get_api_key", lambda *a, **k: key)
+        monkeypatch.setattr(g3d, "get_api_key", lambda *a, **k: key)
         resp = client.get("/api/cities/google3d-available")
         assert resp.status_code == 200
         body = resp.json()

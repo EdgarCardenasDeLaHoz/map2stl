@@ -2,11 +2,12 @@
 geo2stl/dem.py â€” DEM fetch and layer-blend helpers.
 
 Covers elevation data only:
+  - fetch_dem               — DEM for a bbox from any source (local / h5 / OpenTopography)
   - fetch_layer_data        â€” dispatcher for all DEM sources
   - fetch_local_dem         â€” local SRTM tiles via numpy2stl
   - fetch_h5_dem            â€” local SRTM HDF5 tile store
   - fetch_esa_water_layer   â€” ESA WorldCover water band as float array
-  - fetch_opentopo_dem      â€” OpenTopography global DEM API (cached GeoTIFF)
+  - fetch_opentopo_dem      â€” re-exported from geo2stl.opentopo (cached GeoTIFF)
   - apply_layer_processing  â€” clip / smooth / sharpen / normalise pipeline
   - blend_layers            â€” blend two arrays with a named mode
   - upsample_dem            â€” cv2 upscale to display resolution
@@ -19,8 +20,6 @@ Satellite and water-mask imagery lives in geo2stl/sat.py.
 from __future__ import annotations
 
 import base64
-import hashlib
-import json
 import logging
 import math
 import os
@@ -29,10 +28,10 @@ from pathlib import Path
 
 import cv2 as _cv2
 import numpy as np
-import requests as _requests
 from skimage import filters as _ski_filters
 
 from geo2stl.geo import bbox_size_m
+from geo2stl.opentopo import OPENTOPO_DATASETS, fetch_opentopo_dem  # noqa: F401 (re-export)
 from geo2stl.processing import apply_layer_processing, blend_layers, upsample_dem  # noqa: F401
 from geo2stl.projections import project_coordinates, project_grid
 from geo2stl.sat2stl import fetch_bbox_image
@@ -45,38 +44,6 @@ logger = logging.getLogger(__name__)
 # Config constants â€” inlined from app.server.config so this module can run
 # outside the FastAPI server (notebooks, SDK, etc.).
 # ---------------------------------------------------------------------------
-
-# strm2stl root dir (geo2stl/dem.py â†’ geo2stl â†’ strm2stl)
-_STRM2STL_DIR = Path(__file__).parent.parent
-
-# OpenTopography GeoTIFF tile cache
-_OPENTOPO_CACHE_PATH: Path = _STRM2STL_DIR / "cache" / "opentopo"
-
-# OpenTopography API key: env var > config.json > None
-_OPENTOPO_API_KEY: str | None = os.environ.get("OPENTOPO_API_KEY")
-try:
-    _cfg_path = _STRM2STL_DIR / "config.json"
-    if _cfg_path.exists() and _OPENTOPO_API_KEY is None:
-        _cfg = json.loads(_cfg_path.read_text())
-        _OPENTOPO_API_KEY = _cfg.get("opentopo_api_key") or None
-except Exception:
-    pass
-
-if not _OPENTOPO_API_KEY:
-    logger.warning(
-        "No OpenTopography API key found. "
-        "Set the OPENTOPO_API_KEY environment variable to enable DEM downloads."
-    )
-
-# Supported OpenTopography DEM types
-OPENTOPO_DATASETS: dict[str, dict] = {
-    "SRTMGL1":    {"label": "SRTM 30m (Global)",          "resolution_m": 30},
-    "SRTMGL3":    {"label": "SRTM 90m (Global)",          "resolution_m": 90},
-    "AW3D30":     {"label": "ALOS World 3D 30m",          "resolution_m": 30},
-    "COP30":      {"label": "Copernicus DSM 30m",         "resolution_m": 30},
-    "COP90":      {"label": "Copernicus DSM 90m",         "resolution_m": 90},
-    "SRTM15Plus": {"label": "SRTM15+ (Bathymetry+Land)", "resolution_m": 500},
-}
 
 # H5 SRTM tile store
 #
@@ -140,6 +107,8 @@ def fetch_layer_data(
     north: float, south: float, east: float, west: float,
     dim: int,
     options: dict | None = None,
+    *,
+    api_key: str | None = None,
 ) -> np.ndarray:
     """
     Fetch a 2-D float64 numpy array for one merge layer.
@@ -154,7 +123,8 @@ def fetch_layer_data(
     the server can supply layers this library cannot reach on its own -
     the OSM rasterizers, which read the server-side OSM cache. *options*
     is the per-layer parameter bag those providers receive; the built-in
-    sources ignore it.
+    sources ignore it. *api_key* is the OpenTopography key (None:
+    ``geo2stl.opentopo.get_api_key()``).
     """
     provider = _LAYER_SOURCES.get(source)
     if provider is not None:
@@ -171,12 +141,12 @@ def fetch_layer_data(
             )
             return fetch_opentopo_dem(north, south, east, west,
                                       demtype="SRTMGL3",
-                                      api_key=_OPENTOPO_API_KEY,
+                                      api_key=api_key,
                                       dim=dim)
     elif source in OPENTOPO_DATASETS:
         return fetch_opentopo_dem(north, south, east, west,
                                   demtype=source,
-                                  api_key=_OPENTOPO_API_KEY,
+                                  api_key=api_key,
                                   dim=dim)
     else:  # "local" or unknown â†’ local SRTM
         return fetch_local_dem(north, south, east, west, dim)
@@ -296,25 +266,40 @@ def fetch_local_dem(
     return im.astype(np.float64, copy=False)
 
 
-def fetch_dem_from_source(
-    source: str,
-    north: float,
-    south: float,
-    east: float,
-    west: float,
+def fetch_dem(
+    bbox,
     dim: int,
+    source: str = "local",
+    api_key: str | None = None,
     *,
     depth_scale: float = 0.5,
     water_scale: float = 0.05,
     subtract_water: bool = True,
     maintain_dimensions: bool = True,
 ) -> np.ndarray:
-    """Fetch DEM for any supported source with local failure fallback.
+    """Fetch a plate-carrée DEM for *bbox* from any DEM source.
 
-    Returns a zero-filled array if local DEM fetch fails at runtime.
+    Routing:
+      ``h5_local`` or an ``OPENTOPO_DATASETS`` key -> :func:`fetch_layer_data`
+      (``h5_local`` falls back to OpenTopography SRTMGL3 when the store is missing);
+      ``local`` or unknown -> :func:`fetch_local_dem` (local SRTM tiles, with the
+      depth / water options). A local failure (usually no tile coverage) returns
+      a zero array with the bbox aspect, longer side *dim*; callers detect the
+      flat result and warn.
+
+    Args:
+        bbox: ``(north, south, east, west)`` or a dict with those keys.
+        dim: Longer output side in pixels (sources may return their native size;
+            upsample with :func:`upsample_dem`).
+        source: DEM source id.
+        api_key: OpenTopography key; None means ``geo2stl.opentopo.get_api_key()``.
     """
+    if isinstance(bbox, dict):
+        north, south, east, west = bbox["north"], bbox["south"], bbox["east"], bbox["west"]
+    else:
+        north, south, east, west = bbox
     if source in ("h5_local", *OPENTOPO_DATASETS):
-        return fetch_layer_data(source, north, south, east, west, dim)
+        return fetch_layer_data(source, north, south, east, west, dim, api_key=api_key)
 
     try:
         return fetch_local_dem(
@@ -337,6 +322,11 @@ def fetch_dem_from_source(
         else:
             mw, mh = dim, max(1, int(dim * lat_r / lon_r))
         return np.zeros((mh, mw), dtype=float)
+
+
+def fetch_dem_from_source(source, north, south, east, west, dim, **kwargs) -> np.ndarray:
+    """One-release alias of :func:`fetch_dem` with the old argument order."""
+    return fetch_dem((north, south, east, west), dim, source, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -474,89 +464,6 @@ def fetch_esa_water_layer(
     img_r = _cv2.resize(img.astype(np.float32), (out_w, out_h),
                         interpolation=_cv2.INTER_NEAREST)
     return (img_r == 80).astype(np.float64)
-
-
-def fetch_opentopo_dem(
-    north: float, south: float, east: float, west: float,
-    demtype: str, api_key: str | None, dim: int
-) -> np.ndarray:
-    """
-    Download a GeoTIFF from OpenTopography's global DEM API and return a
-    (height, width) numpy float64 array of elevation values (metres).
-
-    Responses are cached locally under _OPENTOPO_CACHE_PATH.
-
-    Raises:
-        RuntimeError  if the API returns an error or rasterio is unavailable.
-    """
-    try:
-        import rasterio
-        from rasterio.enums import Resampling
-    except ImportError as exc:
-        raise RuntimeError("rasterio is required for OpenTopography DEM fetching. "
-                           "Install it with: pip install rasterio") from exc
-
-    # NOTE: `dim` is deliberately NOT part of this key. The GeoTIFF that
-    # OpenTopography returns depends only on (demtype, bbox) — `dim` never
-    # reaches the API, it only sets `out_shape` on the rasterio read below.
-    # Including it here meant every resolution change re-downloaded a
-    # byte-identical file over the network (measured: 11.9 s for a 0.2 deg
-    # bbox, versus 0.4 s once the tile is on disk).
-    cache_key = hashlib.md5(
-        f"{demtype}_{north:.5f}_{south:.5f}_{east:.5f}_{west:.5f}".encode()
-    ).hexdigest()
-    _OPENTOPO_CACHE_PATH.mkdir(parents=True, exist_ok=True)
-    cache_file = _OPENTOPO_CACHE_PATH / f"{cache_key}.tif"
-
-    if not cache_file.exists():
-        url = "https://portal.opentopography.org/API/globaldem"
-        params = {
-            "demtype": demtype,
-            "south": south, "north": north, "west": west, "east": east,
-            "outputFormat": "GTiff",
-        }
-        if api_key:
-            params["API_Key"] = api_key
-
-        logger.info(
-            f"Fetching OpenTopography DEM: {demtype} bbox=({north},{south},{east},{west})")
-        resp = _requests.get(url, params=params, timeout=120)
-
-        if resp.status_code != 200:
-            try:
-                err_text = resp.text[:500]
-            except Exception:
-                err_text = f"HTTP {resp.status_code}"
-            raise RuntimeError(
-                f"OpenTopography API error ({resp.status_code}): {err_text}")
-
-        cache_file.write_bytes(resp.content)
-        logger.info(f"Cached OpenTopography response to {cache_file}")
-
-    with rasterio.open(str(cache_file)) as src:
-        src_h, src_w = src.height, src.width
-        if src_h == 0 or src_w == 0:
-            raise RuntimeError(
-                "OpenTopography returned an empty raster for this bbox.")
-
-        if src_h >= src_w:
-            out_h = dim
-            out_w = max(1, int(dim * src_w / src_h))
-        else:
-            out_w = dim
-            out_h = max(1, int(dim * src_h / src_w))
-
-        data = src.read(
-            1,
-            out_shape=(out_h, out_w),
-            resampling=Resampling.bilinear,
-        ).astype(np.float64)
-
-        nodata = src.nodata
-        if nodata is not None:
-            data = np.where(data == nodata, np.nan, data)
-
-    return data
 
 
 # apply_layer_processing, blend_layers, upsample_dem are re-exported above

@@ -56,6 +56,7 @@ from pathlib import Path
 import numpy as np
 import paths  # noqa: E402
 
+from geo2stl import osm as _osm  # noqa: E402
 from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon  # noqa: E402
 
 HERE = paths.HERE
@@ -665,25 +666,16 @@ def _geometries(elements: list[dict], line_width_m: float | None = None) -> list
 def _rasterize(geoms: list, bbox, grid: int) -> np.ndarray:
     """Burn geometries into a square grid with row 0 = south.
 
-    North-up is what `rasterio.transform.from_bounds` produces and row 0 = south
+    North-up is what `numpy2stl.raster.burn_polygons` produces and row 0 = south
     is what `mesh_to_heightmap` produces, so the result is flipped to match the
     plate raster -- the same correction `cities._rasterize_rasterio` makes.
     """
-    if not geoms:
-        return np.zeros((grid, grid), dtype=np.float32)
-    from rasterio import features
-    from rasterio.transform import from_bounds
+    from numpy2stl.raster import burn_polygons
 
     N, S, E, W = bbox
-    arr = features.rasterize(
-        ((g, 1) for g in geoms),
-        out_shape=(grid, grid),
-        transform=from_bounds(W, S, E, N, grid, grid),
-        fill=0,
-        all_touched=True,
-        dtype="uint8",
-    )
-    return np.flipud(arr).astype(np.float32)
+    arr = burn_polygons(geoms, (grid, grid), bounds=(W, S, E, N), values=1.0,
+                        all_touched=True, dtype=np.float32)
+    return np.flipud(arr).copy()
 
 
 def _overpass(selector: str, bbox, attempts: int = OVERPASS_ATTEMPTS) -> list[dict]:
@@ -703,35 +695,16 @@ def _overpass(selector: str, bbox, attempts: int = OVERPASS_ATTEMPTS) -> list[di
     drag-tool overlay does not justify six attempts at a three-minute timeout --
     that is eighteen minutes of waiting for one decorative selector.
     """
-    import requests
-
     N, S, E, W = bbox
     query = (
         f"[out:json][timeout:{OVERPASS_TIMEOUT_S}];"
         f"(way{selector}({S},{W},{N},{E});"
         f"relation{selector}({S},{W},{N},{E}););out geom;"
     )
-    attempts = max(1, int(attempts))
-    last: Exception = RuntimeError("no attempt made")
-    for attempt in range(attempts):
-        url = OVERPASS_URLS[attempt % len(OVERPASS_URLS)]
-        _overpass_wait()
-        try:
-            response = requests.post(
-                url, data={"data": query},
-                timeout=(20, OVERPASS_TIMEOUT_S + 30),
-                headers={"User-Agent": OVERPASS_USER_AGENT},
-            )
-            response.raise_for_status()
-            return response.json().get("elements", [])
-        except Exception as exc:  # 429 and 504 are both routine here
-            last = exc
-            if attempt + 1 < attempts:
-                _overpass_backoff(attempt)
-    raise last
-
-
-_last_overpass_call = [0.0]
+    return _osm.overpass_query(
+        query, urls=OVERPASS_URLS, attempts=attempts, timeout_s=OVERPASS_TIMEOUT_S,
+        min_gap_s=OVERPASS_MIN_GAP_S, backoff_s=OVERPASS_BACKOFF_S,
+        user_agent=OVERPASS_USER_AGENT)
 
 
 def _overpass_wait() -> None:
@@ -740,19 +713,9 @@ def _overpass_wait() -> None:
     The public endpoint hands out a small number of concurrent slots per client
     and answers 429 once they are gone.  A full validate run fires two dozen
     queries, which is more than enough to trip that, so calls are spaced out.
+    The clock is `geo2stl.osm`'s, shared with every raw query in the process.
     """
-    import time
-    gap = OVERPASS_MIN_GAP_S - (time.monotonic() - _last_overpass_call[0])
-    if gap > 0:
-        time.sleep(gap)
-    _last_overpass_call[0] = time.monotonic()
-
-
-def _overpass_backoff(attempt: int) -> None:
-    """Sleep after a failed attempt, doubling each time from `OVERPASS_BACKOFF_S`."""
-    import time
-    time.sleep(OVERPASS_BACKOFF_S * (2 ** min(attempt, 3)))
-    _last_overpass_call[0] = time.monotonic()
+    _osm.overpass_wait(OVERPASS_MIN_GAP_S)
 
 
 def _cache_path(key: str, bbox, grid: int) -> Path:

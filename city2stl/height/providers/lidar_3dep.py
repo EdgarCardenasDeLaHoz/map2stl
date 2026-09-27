@@ -19,19 +19,17 @@ for non-US regions via the provider registry coverage check.
 Resolution: ~30 m.
 Confidence: 0.82 (US-specific, slight advantage over global SRTM-only nDSM).
 Requires: an OpenTopography API key, passed as ``LiDAR3DEPProvider(api_key=...)``
-or read from the OPENTOPO_API_KEY environment variable.
+or ``geo2stl.opentopo.get_api_key()`` ($OPENTOPO_API_KEY / config.json).
 """
 
 from __future__ import annotations
 
-import io
 import logging
-import os
 
 import numpy as np
-import requests
 
 from city2stl.height import BBox, HeightResult, _resample
+from geo2stl import opentopo
 
 from ._cache import (
     make_cache_key,
@@ -49,8 +47,6 @@ _RESOLUTION_M = 30.0
 _NAMESPACE = "lidar_3dep"
 _TIMEOUT = 180
 
-_OT_GLOBAL_API = "https://portal.opentopography.org/API/globaldem"
-
 
 def _is_in_us(bbox: BBox) -> bool:
     north, south, east, west = bbox
@@ -61,25 +57,11 @@ def _is_in_us(bbox: BBox) -> bool:
 
 
 def _get_api_key() -> str | None:
-    return os.environ.get("OPENTOPO_API_KEY") or None
+    return opentopo.get_api_key()
 
 
 # GeoTIFF parsing (rasterio→PIL fallback) is shared across DEM providers.
 from ._raster import read_geotiff_bytes as _parse_tiff_bytes  # noqa: E402
-
-
-def _fetch_raster(endpoint: str, params: dict) -> np.ndarray | None:
-    try:
-        r = requests.get(endpoint, params=params, timeout=_TIMEOUT)
-        r.raise_for_status()
-        ct = r.headers.get("Content-Type", "")
-        if "json" in ct or "xml" in ct or "html" in ct:
-            logger.warning("lidar_3dep: unexpected content-type %s from %s", ct, endpoint)
-            return None
-        return _parse_tiff_bytes(io.BytesIO(r.content))
-    except Exception as e:
-        logger.warning("lidar_3dep: request to %s failed: %s", endpoint, e)
-        return None
 
 
 def _fetch_opentopo_dem(demtype: str, bbox: BBox, api_key: str,
@@ -88,13 +70,13 @@ def _fetch_opentopo_dem(demtype: str, bbox: BBox, api_key: str,
     north, south, east, west = bbox
     logger.info("lidar_3dep: fetching %s for "
                 "N=%.4f S=%.4f E=%.4f W=%.4f", label, north, south, east, west)
-    params = {
-        "demtype": demtype,
-        "south": south, "north": north, "west": west, "east": east,
-        "outputFormat": "GTiff",
-        "API_Key": api_key,
-    }
-    return _fetch_raster(_OT_GLOBAL_API, params)
+    try:
+        data = opentopo.request_geotiff(demtype, north, south, east, west,
+                                        api_key=api_key, timeout=_TIMEOUT)
+    except Exception as e:
+        logger.warning("lidar_3dep: %s request failed: %s", label, e)
+        return None
+    return _parse_tiff_bytes(data)
 
 
 class LiDAR3DEPProvider:

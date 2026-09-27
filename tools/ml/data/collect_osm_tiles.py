@@ -5,7 +5,8 @@ OSM building heights as ground truth.
 Why this approach:
     External height providers (WSF3D, GHSL, Copernicus, etc.) often 404 for
     European cities or require API keys.  OSM buildings have height tags
-    (`height` directly, or `building:levels * 4m` fallback) for a substantial
+    (`height` directly, or the `building:levels` fallback of
+    `city2stl.heights.height_from_tags`) for a substantial
     fraction of city buildings.  We rasterize these into a height-per-pixel
     label and pair with ESRI satellite RGB.
 
@@ -25,6 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from app.paths import REPO_ROOT
+from city2stl.heights import height_from_tags
 from geo2stl.geo import M_PER_DEG_LAT
 from geo2stl.geo import m_per_deg_lon as _m_per_deg_lon
 from tools.ml.config import DEFAULT_TILE_SIZE, TRAIN_CITIES  # noqa: E402
@@ -50,23 +52,7 @@ def _fetch_buildings_via_osmnx(
         except Exception:
             continue
 
-        # Resolve height
-        h = None
-        for col in ("height", "building:height"):
-            v = row.get(col, None) if col in gdf.columns else None
-            if v and not (isinstance(v, float) and math.isnan(v)):
-                try:
-                    h = float(str(v).split()[0])
-                    break
-                except Exception:
-                    pass
-        if h is None and "building:levels" in gdf.columns:
-            v = row.get("building:levels", None)
-            if v and not (isinstance(v, float) and math.isnan(v)):
-                try:
-                    h = float(str(v).split()[0]) * 3.5  # avg storey height
-                except Exception:
-                    pass
+        h, _ = height_from_tags(row)
         if h is None:
             h = 10.0  # default fallback
 
@@ -86,14 +72,14 @@ def _rasterize_buildings(
     north: float, south: float, east: float, west: float,
     dim: int,
 ) -> np.ndarray:
-    """Burn building footprints into a `dim x dim` height-per-pixel array (metres)."""
-    from rasterio.features import rasterize as _rasterize
-    from rasterio.transform import from_bounds
-    from shapely.geometry import mapping, shape
+    """Burn building footprints into a `dim x dim` height-per-pixel array (metres).
 
-    transform = from_bounds(west, south, east, north, dim, dim)
-    grid = np.zeros((dim, dim), dtype=np.float32)
+    Row 0 = north; where footprints overlap the taller one wins.
+    """
+    from numpy2stl.raster import burn_polygons
+    from shapely.geometry import shape
 
+    shapes, heights = [], []
     for feat in buildings_geojson.get("features", []):
         geom = feat.get("geometry")
         if geom is None:
@@ -102,16 +88,13 @@ def _rasterize_buildings(
         if h <= 0:
             continue
         try:
-            s = shape(geom)
-            if s.is_empty:
-                continue
-            mask = _rasterize([(mapping(s), 1.0)], out_shape=(dim, dim),
-                              transform=transform, dtype="float32")
-            np.maximum(grid, h * mask, out=grid)
+            shapes.append(shape(geom))
         except Exception:
             continue
+        heights.append(h)
 
-    return grid
+    return burn_polygons(shapes, (dim, dim), bounds=(west, south, east, north),
+                         values=heights, mode="max", dtype=np.float32)
 
 
 def _fetch_satellite(

@@ -11,19 +11,17 @@ here needs a city-sized image. Fetch only the tiles each footprint touches, at
 zoom 18 (about 0.4 to 0.6 m per pixel depending on latitude), and cache them on
 disk so neighbouring buildings that share a tile cost one request between them.
 
-Same ESRI World Imagery endpoint the rest of the project uses.
+Tile math and fetching are ``geo2stl.imagery``; this module adds the on-disk
+tile cache and the per-footprint crop.
 """
-import io
 import math
 import os
 
 import numpy as np
-import requests
-from PIL import Image
 
-TILE_URL = ("https://server.arcgisonline.com/ArcGIS/rest/services"
-            "/World_Imagery/MapServer/tile/{z}/{y}/{x}")
-TILE = 256
+from geo2stl import imagery
+
+TILE = imagery.TILE_SIZE
 # Shared with the rest of the project's caches rather than kept beside the
 # module, so a checkout can be wiped without losing the tiles.
 CACHE = os.path.join(
@@ -35,48 +33,25 @@ _session = None
 def _sess():
     global _session
     if _session is None:
-        _session = requests.Session()
-        _session.headers["User-Agent"] = "3dmaps-research/1.0"
+        _session = imagery.new_session()
     return _session
 
 
 def lon_to_gpx(lon, z):
-    return (lon + 180.0) / 360.0 * TILE * (2 ** z)
+    return imagery.lon_to_global_px(lon, z)
 
 
 def lat_to_gpy(lat, z):
-    s = math.sin(math.radians(max(-85.05, min(85.05, lat))))
-    y = 0.5 - math.log((1 + s) / (1 - s)) / (4 * math.pi)
-    return y * TILE * (2 ** z)
+    return imagery.lat_to_global_px(lat, z)
 
 
 def m_per_px(lat, z):
-    return 40075016.686 * math.cos(math.radians(lat)) / (TILE * 2 ** z)
+    return imagery.m_per_px(lat, z)
 
 
 def tile(z, x, y):
     """One 256×256 tile as RGB, cached on disk. None if it cannot be had."""
-    n = 2 ** z
-    if not (0 <= x < n and 0 <= y < n):
-        return None
-    path = os.path.join(CACHE, str(z), str(x), f"{y:d}.jpg")
-    if os.path.exists(path):
-        try:
-            return Image.open(path).convert("RGB")
-        except Exception:                                   # noqa: BLE001
-            os.remove(path)
-    try:
-        r = _sess().get(TILE_URL.format(z=z, x=x, y=y), timeout=20)
-        r.raise_for_status()
-        img = Image.open(io.BytesIO(r.content)).convert("RGB")
-    except Exception:                                       # noqa: BLE001
-        return None
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    try:
-        img.save(path, "JPEG", quality=90)
-    except Exception:                                       # noqa: BLE001
-        pass
-    return img
+    return imagery.fetch_tile(z, x, y, session=_sess(), cache_dir=CACHE, timeout=20)
 
 
 def prefetch_bbox(north, south, east, west, zoom=18, workers=16, log=None):
@@ -106,8 +81,7 @@ def prefetch_bbox(north, south, east, west, zoom=18, workers=16, log=None):
     todo, cached = [], 0
     for tx in range(tx0, tx1 + 1):
         for ty in range(ty0, ty1 + 1):
-            if os.path.exists(os.path.join(CACHE, str(zoom), str(tx),
-                                           f"{ty:d}.jpg")):
+            if imagery.tile_cache_path(CACHE, zoom, tx, ty).exists():
                 cached += 1
             else:
                 todo.append((tx, ty))
@@ -128,18 +102,9 @@ def prefetch_bbox(north, south, east, west, zoom=18, workers=16, log=None):
         key = threading.get_ident()
         s = local.get(key)
         if s is None:
-            s = local[key] = requests.Session()
-            s.headers["User-Agent"] = "3dmaps-research/1.0"
-        path = os.path.join(CACHE, str(zoom), str(tx), f"{ty:d}.jpg")
-        try:
-            r = s.get(TILE_URL.format(z=zoom, x=tx, y=ty), timeout=20)
-            r.raise_for_status()
-            img = Image.open(io.BytesIO(r.content)).convert("RGB")
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            img.save(path, "JPEG", quality=90)
-            return True
-        except Exception:                                   # noqa: BLE001
-            return False
+            s = local[key] = imagery.new_session()
+        return imagery.fetch_tile(zoom, tx, ty, session=s, cache_dir=CACHE,
+                                  timeout=20) is not None
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         ok = sum(1 for r in pool.map(one, todo) if r)
@@ -173,15 +138,8 @@ def crop_for_ring(ring, zoom=18, pad=1.0, max_px=768):
 
     tx0, tx1 = int(math.floor(x0 / TILE)), int(math.floor((x1 - 1e-6) / TILE))
     ty0, ty1 = int(math.floor(y0 / TILE)), int(math.floor((y1 - 1e-6) / TILE))
-    big = Image.new("RGB", ((tx1 - tx0 + 1) * TILE, (ty1 - ty0 + 1) * TILE))
-    got = 0
-    for tx in range(tx0, tx1 + 1):
-        for ty in range(ty0, ty1 + 1):
-            t = tile(zoom, tx, ty)
-            if t is None:
-                continue
-            big.paste(t, ((tx - tx0) * TILE, (ty - ty0) * TILE))
-            got += 1
+    big, got = imagery.stitch_tiles(tx0, tx1, ty0, ty1, zoom, session=_sess(),
+                                    cache_dir=CACHE, timeout=20)
     if got == 0:
         return None
 
@@ -193,15 +151,6 @@ def crop_for_ring(ring, zoom=18, pad=1.0, max_px=768):
         return None
 
     # Geo bounds of the crop, so the caller can rasterise the ring into it.
-    def gpx_to_lon(gx):
-        return gx / (TILE * 2 ** zoom) * 360.0 - 180.0
-
-    def gpy_to_lat(gy):
-        y = 0.5 - gy / (TILE * 2 ** zoom)
-        return math.degrees(math.atan(math.sinh(2 * math.pi * y)))
-
-    west = gpx_to_lon(ox + box[0])
-    east = gpx_to_lon(ox + box[2])
-    north = gpy_to_lat(oy + box[1])
-    south = gpy_to_lat(oy + box[3])
+    west, north = imagery.global_px_to_lonlat(ox + box[0], oy + box[1], zoom)
+    east, south = imagery.global_px_to_lonlat(ox + box[2], oy + box[3], zoom)
     return rgb, north, south, east, west, m_per_px(clat, zoom)

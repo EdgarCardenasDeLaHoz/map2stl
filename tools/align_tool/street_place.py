@@ -654,31 +654,35 @@ def _islands(bbox, grid):
 
 
 TERRAIN_TILE_SIDE_M = 12000.0
+_TERRAIN_CACHE_NS = "align_terrain"
 
 
 def _terrain_tile(lat, lon):
     """A 30 m DEM tile about (lat, lon), row 0 north, with its bbox.
 
     One tile per city, snapped to a 0.05 degree grid so every window in that city reuses it:
-    OpenTopography allows 50 calls a day.  Falls back to the local ~90 m SRTM store.
+    OpenTopography allows 50 calls a day.  Falls back to the local ~90 m SRTM store.  Cached in
+    `geo2stl.cache` (namespace `align_terrain`, kept a year); the raw COP30 GeoTIFF is also kept
+    by `geo2stl.opentopo`, so a lost entry is rebuilt without another API call.
     """
+    from geo2stl.cache import NAMESPACE_TTL, make_cache_key, read_array_cache, write_array_cache
+    NAMESPACE_TTL.setdefault(_TERRAIN_CACHE_NS, 365 * 86400)
     snap = 0.05
     clat, clon = round(lat / snap) * snap, round(lon / snap) * snap
     half_lat = 0.5 * TERRAIN_TILE_SIDE_M / M_PER_DEG_LAT
     half_lon = 0.5 * TERRAIN_TILE_SIDE_M / m_per_deg_lon(clat)
     bbox = (clat + half_lat, clat - half_lat, clon + half_lon, clon - half_lon)
-    CACHE.mkdir(parents=True, exist_ok=True)
-    path = CACHE / f"terrain_{clat:.2f}_{clon:.2f}.npz"
-    if path.exists():
-        z = np.load(path)
-        return z["dem"], tuple(z["bbox"]), str(z["source"])
+    key = make_cache_key(_TERRAIN_CACHE_NS, *bbox, {"side_m": TERRAIN_TILE_SIDE_M})
+    hit = read_array_cache(_TERRAIN_CACHE_NS, key)
+    if hit is not None:
+        return hit[0]["dem"], tuple(hit[1]["bbox"]), str(hit[1]["source"])
     import locate  # puts strm2stl on the path
 
     from geo2stl import dem as geodem
     n, s, e, w = bbox
     dem, source = None, None
     try:
-        dem = geodem.fetch_opentopo_dem(n, s, e, w, "COP30", geodem._OPENTOPO_API_KEY, 512)
+        dem = geodem.fetch_opentopo_dem(n, s, e, w, "COP30", None, 512)
         source = "COP30"
     except Exception as exc:
         print(f"COP30 unavailable ({type(exc).__name__}: {str(exc)[:120]}); using local SRTM",
@@ -689,7 +693,8 @@ def _terrain_tile(lat, lon):
     if not np.isfinite(dem).any():
         raise RuntimeError("DEM tile is empty")
     dem = np.where(np.isfinite(dem), dem, np.nanmedian(dem)).astype(np.float32)
-    np.savez(path, dem=dem, bbox=np.array(bbox), source=source)
+    write_array_cache(_TERRAIN_CACHE_NS, key, {"dem": dem},
+                      {"bbox": list(bbox), "source": source})
     return dem, bbox, source
 
 

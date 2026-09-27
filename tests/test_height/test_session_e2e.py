@@ -87,7 +87,7 @@ class TestSessionPlumbing:
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         # google3d with no API key → skipped; no other provider
         with patch(
-            "city2stl.height.providers.google_3d._get_api_key",
+            "city2stl.height.providers.google_3d.get_api_key",
             return_value=None,
         ):
             s.fetch_building_heights(providers=["google3d"])
