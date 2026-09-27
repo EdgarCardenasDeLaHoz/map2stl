@@ -15,6 +15,10 @@ Request (``POST /api/export/start`` with ``format="city"``)::
     (legacy names mm_per_px, fit_height_mm, base_mm are still accepted)
     layers          {layer: {enabled, mode, offset_mm, height_scale, line_width_m, ...}}
     layer_data      {layer: FeatureCollection} to use instead of the cached OSM layer
+    landmark_overrides  {osm_id: {kind: "mesh"|"ndsm"|"osm", ...}} buildings replaced by
+                    an uploaded mesh or a surveyed nDSM solid (city2stl.landmarks;
+                    resolved before the build, a bad mesh / no survey data fails the
+                    task with the reason; report.json "landmarks" says what applied)
     puzzle          {piece_mm | cols+rows | col_edges_mm+row_edges_mm, knob_width_mm,
                      knob_depth_mm, knob_shape, clearance_mm, method, engrave,
                      layout, bed_mm}   (app/server/core/puzzle.py)
@@ -41,9 +45,11 @@ from app.server.core.city_data import CityAreaTooLarge, check_city_area, get_cit
 from app.server.core.export import terrain_stage
 from app.server.core.export_params import ExportContext
 from app.server.core.export_tasks import ExportTask
+from app.server.core.landmarks import resolve as resolve_landmarks
 from app.server.core.preflight import build_check
 from app.server.core.puzzle import Heightfield, cut_to_zip
 from city2stl.city_model import build_on_terrain, resolve_layers
+from city2stl.landmarks import LandmarkError
 
 logger = logging.getLogger(__name__)
 
@@ -113,11 +119,21 @@ def run_city_model(data: dict, task: ExportTask) -> None:
         except Exception as exc:
             logger.warning("Trails skipped: %s", exc)
 
+    landmark_overrides = {}
+    if data.get("landmark_overrides") and "buildings" in layers:
+        task.update(22, "Loading landmark overrides...")
+        try:
+            landmark_overrides = resolve_landmarks(data["landmark_overrides"], layers["buildings"])
+        except LandmarkError as exc:
+            task.fail(str(exc))
+            return
+
     task.update(25, "Terrain stage...")
     field = terrain_stage(p, data)
     task.update(30, "Building model...")
     model = build_on_terrain(field.z_mm, bbox, field.scale, layers,
-                             layer_overrides=data.get("layers"))
+                             layer_overrides=data.get("layers"),
+                             landmark_overrides=landmark_overrides)
     report = dict(model.report)
     if p.composite_error:
         report["composite_error"] = p.composite_error

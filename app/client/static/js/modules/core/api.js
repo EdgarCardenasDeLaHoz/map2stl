@@ -227,6 +227,19 @@ window.api = (() => {
         saveSettings: (name, settings) => _fetch(`/api/regions/${encodeURIComponent(name)}/settings`, {
             ..._json(settings), method: 'PUT'
         }),
+
+        /** GET /api/regions/{name}/landmarks → {overrides: {osm_id: spec}} (F-LANDMARK §3) */
+        landmarks: (name) => _fetch(`/api/regions/${encodeURIComponent(name)}/landmarks`),
+
+        /** PUT /api/regions/{name}/landmarks/{osm_id} — osm_id like "way/123" */
+        saveLandmark: (name, osmId, spec) => _fetch(
+            `/api/regions/${encodeURIComponent(name)}/landmarks/${osmId.split('/').map(encodeURIComponent).join('/')}`,
+            { ..._json(spec), method: 'PUT' }),
+
+        /** DELETE /api/regions/{name}/landmarks/{osm_id} */
+        deleteLandmark: (name, osmId) => _fetch(
+            `/api/regions/${encodeURIComponent(name)}/landmarks/${osmId.split('/').map(encodeURIComponent).join('/')}`,
+            { method: 'DELETE' }),
     };
 
     // -------------------------------------------------------------------------
@@ -308,6 +321,12 @@ window.api = (() => {
 
         /** POST /api/cities/cancel/{id} */
         cancel: (taskId) => _fetch(`/api/cities/cancel/${encodeURIComponent(taskId)}`, { method: 'POST' }),
+
+        /** POST /api/cities/landmarks {buildings, tallest_n, region} → {landmarks, survey_sources, overrides, ids_missing} */
+        landmarks: (body) => _fetch('/api/cities/landmarks', _json(body)),
+
+        /** POST /api/cities/landmarks/preview {buildings, osm_id, override} → {vertices, faces, size_mm, report} */
+        landmarkPreview: (body) => _fetch('/api/cities/landmarks/preview', _json(body)),
     };
 
     // -------------------------------------------------------------------------

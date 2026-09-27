@@ -299,3 +299,44 @@ async def save_region_settings_route(name: str, request: Request):
     except Exception as e:
         logger.error(f"Error saving region settings: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# Landmark overrides (F-LANDMARK §3), one row per (region, OSM id)
+# ---------------------------------------------------------------------------
+
+@router.get("/api/regions/{name}/landmarks")
+async def get_region_landmarks(name: str):
+    """``{"name", "overrides": {osm_id: spec}}`` stored for the region."""
+    from app.server.core.landmarks import load_region_overrides
+    try:
+        return JSONResponse(content={"name": name, "overrides": load_region_overrides(name)})
+    except sqlite3.Error as e:
+        logger.error(f"Error reading landmark overrides: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@router.put("/api/regions/{name}/landmarks/{osm_id:path}")
+async def save_region_landmark(name: str, osm_id: str, request: Request):
+    """Store one override: body ``{"kind": "osm"|"mesh"|"ndsm", ...}`` (city2stl.landmarks)."""
+    from app.server.core.landmarks import save_region_override
+    from city2stl.landmarks import LandmarkError
+    try:
+        spec = await request.json()
+        spec = save_region_override(name, osm_id, spec)
+    except LandmarkError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except KeyError:
+        return JSONResponse(content={"error": f"Region '{name}' not found"}, status_code=404)
+    except (ValueError, sqlite3.Error) as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    return JSONResponse(content={"status": "saved", "name": name, "osm_id": osm_id, "override": spec})
+
+
+@router.delete("/api/regions/{name}/landmarks/{osm_id:path}")
+async def delete_region_landmark(name: str, osm_id: str):
+    """Remove one stored override (the building goes back to its OSM tags)."""
+    from app.server.core.landmarks import delete_region_override
+    if not delete_region_override(name, osm_id):
+        return JSONResponse(content={"error": f"No override for {osm_id} in '{name}'"}, status_code=404)
+    return JSONResponse(content={"status": "deleted", "name": name, "osm_id": osm_id})

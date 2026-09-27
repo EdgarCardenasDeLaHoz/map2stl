@@ -27,6 +27,17 @@ regions
 region_settings
     region_name   TEXT PRIMARY KEY REFERENCES regions(name) ON DELETE CASCADE
     settings_json TEXT   -- full panel settings blob (JSON string)
+
+region_landmarks   (F-LANDMARK §3: per-building overrides, one row per OSM id)
+    region_name   TEXT REFERENCES regions(name) ON DELETE CASCADE
+    osm_id        TEXT   -- "way/123"
+    spec_json     TEXT   -- {"kind": "mesh"|"ndsm"|"osm", ...} (city2stl.landmarks)
+    updated_at    REAL
+    PRIMARY KEY (region_name, osm_id)
+
+    Its own table rather than a key in region_settings: the settings blob is
+    replaced wholesale by every panel save, which would drop overrides it did
+    not know about.
 """
 
 from __future__ import annotations
@@ -71,6 +82,16 @@ CREATE TABLE IF NOT EXISTS region_settings (
 );
 """
 
+_CREATE_REGION_LANDMARKS = """
+CREATE TABLE IF NOT EXISTS region_landmarks (
+    region_name   TEXT NOT NULL REFERENCES regions(name) ON DELETE CASCADE,
+    osm_id        TEXT NOT NULL,
+    spec_json     TEXT NOT NULL DEFAULT '{}',
+    updated_at    REAL,
+    PRIMARY KEY (region_name, osm_id)
+);
+"""
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -100,5 +121,6 @@ def init_db(path: Path | None = None) -> None:
     with get_db(p) as conn:
         conn.execute(_CREATE_REGIONS)
         conn.execute(_CREATE_REGION_SETTINGS)
+        conn.execute(_CREATE_REGION_LANDMARKS)
         conn.commit()
     logger.info(f"Database initialised at {p}")

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * modules/export-handlers.js — Model generation and file export handlers.
  *
  * Loaded as a plain <script> before app.js.
@@ -18,12 +18,14 @@
  *   window.appState.generatedModelData  (written here, read by _updateWorkflowStepper)
  *   window.appState._updateWorkflowStepper()
  *   window.appState.osmCityData, cityHeightOverrides  (City Model layer_data)
+ *   window.appState.cityLandmarkOverrides  (City Model landmark_overrides, F-LANDMARK)
  *   showLoading(el, msg), hideLoading(el)   — file-top globals in app.js
  *   window.showToast(msg, type)                    — file-top global in app.js
  */
 
 import { buildingsWithOverrides, hasOverrides } from '../layers/building-heights.js';
 import { FEATURE_SOURCES } from '../layers/composite-spec.js';
+import { overridesForBuild } from '../layers/landmark-overrides.js';
 import { parseBedSize } from './print-scale.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -274,6 +276,9 @@ function _cityExtra() {
     if (extra.layers.buildings?.enabled && buildings?.length && hasOverrides(overrides)) {
         extra.layer_data = { buildings: buildingsWithOverrides(buildings, overrides) };
     }
+    // Landmarks panel: buildings replaced by an uploaded mesh or a surveyed nDSM.
+    const landmarks = overridesForBuild(window.appState?.cityLandmarkOverrides);
+    if (extra.layers.buildings?.enabled !== false && landmarks) extra.landmark_overrides = landmarks;
     if (document.getElementById('cityPuzzleEnabled')?.checked) {
         extra.puzzle = {
             piece_mm: parseFloat(document.getElementById('cityPieceMm')?.value) || 200,

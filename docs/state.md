@@ -112,6 +112,7 @@ flowchart TD
 | `modelPreviewState` | `'idle'\|'building'\|'ready'\|'error'` | Extrude preview lifecycle (model-viewer.js); ModelContainer.vue words its empty state from it |
 | `puzzleEdges` | `{cols: number[], rows: number[], key: string}`\|null | Puzzle cuts dragged in the Extrude preview, mm from the west / south edge; `key` = grid + model size they belong to (a different grid falls back to the even split). Sent as `col_edges_mm` / `row_edges_mm` |
 | `cityHeightOverrides` | `Record<number, number>` | Buildings-panel height overrides by feature index; sent by `exportCityModel()` as `layer_data.buildings`; reset when a new building set loads |
+| `cityLandmarkOverrides` | `Record<string, object>` | Landmark overrides of the selected region by OSM id (`way/123`): `{kind: osm\|ndsm\|mesh, ...}`; loaded from / saved to `/api/regions/{name}/landmarks`; non-`osm` ones sent by `exportCityModel()` as `landmark_overrides` (F-LANDMARK) |
 
 ## Other
 
@@ -153,5 +154,6 @@ Mirrored from closure. Set via `appState.set(key, val)` or direct assignment:
 | `modelPreviewState` | model-viewer | ModelContainer.vue |
 | `puzzleEdges` | model-viewer (drag), `resetPuzzleEdges` | model-viewer, export-handlers (`puzzleEdgesFor`) |
 | `cityHeightOverrides` | CityBuildingsPanel.vue | export-handlers |
+| `cityLandmarkOverrides` | CityLandmarksSection.vue | export-handlers (`overridesForBuild`) |
 | `_setDemEmptyState` | callback | dem-main |
 | `_updateWorkflowStepper` | callback | dem-main, model-viewer |

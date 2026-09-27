@@ -127,6 +127,10 @@ _ROOF_COLS = [
     "roof:colour", "roof:material",
     "building:levels", "min_height",
 ]
+# Identity and classification tags (F-LANDMARK §3/§5), preserved the same way:
+# a merged group keeps the largest member's OSM id, so an override of that id
+# replaces the whole merged footprint.
+LANDMARK_TAG_COLS = ["osm_id", "name", "building", "amenity", "historic", "tourism"]
 
 
 def _reduce_buildings(gdf):
@@ -139,7 +143,8 @@ def _reduce_buildings(gdf):
     This avoids the unary_union-per-height-group mistake that previously merged
     ALL buildings of the same height into one blob regardless of distance.
 
-    Roof tag columns (_ROOF_COLS) and height_source are preserved: for each
+    Roof tag columns (_ROOF_COLS), LANDMARK_TAG_COLS (osm_id, name, ...) and
+    height_source are preserved: for each
     merged group the tags from the largest-area member building are used.
 
     Falls back to the original gdf on any error.
@@ -184,7 +189,8 @@ def _reduce_buildings(gdf):
         # Build a lookup: comp_id -> tag dict from the largest-area building.
         # This ensures that, e.g., a cathedral's bell-tower tags win over an
         # adjacent tiny annexe when both are merged into one component.
-        extra_cols = ["height_source"] + [c for c in _ROOF_COLS if c in gdf.columns]
+        extra_cols = ["height_source"] + [c for c in _ROOF_COLS + LANDMARK_TAG_COLS
+                                          if c in gdf.columns]
         if extra_cols:
             gdf['_area_m2'] = gdf.geometry.area
             # Sort descending so the first row per group is the largest building

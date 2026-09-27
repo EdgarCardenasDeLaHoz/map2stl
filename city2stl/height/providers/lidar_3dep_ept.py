@@ -160,3 +160,26 @@ def get_ndsm(bbox, resolution: int = 512, cache: bool = True, ept_url: str | Non
     except Exception as exc:
         logger.warning("nDSM build failed (%s); falling back to OSM heights.", exc)
         return None
+
+
+def ndsm_for_bbox(bbox, resolution_m: float = 1.0):
+    """:func:`get_ndsm` behind the survey-provider interface (F-LANDMARK §4).
+
+    ``(array row0=north, lon/lat Affine)`` over ``bbox`` = (N, S, E, W) at about
+    ``resolution_m``, or None without PDAL/py3dep or outside 3DEP. ``get_ndsm``
+    grids square (``resolution`` x ``resolution``) and row 0 = south; this picks
+    the grid size from the bbox and flips it north-up.
+    """
+    from ._survey import as_nsew, clean_heights, lonlat_grid
+
+    if not _deps():
+        return None
+    n, s, e, w = as_nsew(bbox)
+    h, wd, _ = lonlat_grid(bbox, resolution_m)
+    side = max(h, wd)
+    ndsm = get_ndsm((n, s, e, w), resolution=side)
+    if ndsm is None:
+        return None
+    from rasterio.transform import Affine
+    arr = np.flipud(np.asarray(ndsm, dtype=np.float32))
+    return clean_heights(arr), Affine((e - w) / side, 0.0, w, 0.0, -(n - s) / side, n)

@@ -77,7 +77,7 @@ def _redirect_cache(tmp_data_dir, monkeypatch):
 class TestSaveUpload:
     def test_rejects_bad_extension(self, _redirect_cache):
         with pytest.raises(mesh_import.MeshImportError, match="Unsupported file type"):
-            mesh_import.save_upload("model.gltf", b"data")
+            mesh_import.save_upload("model.fbx", b"data")
 
     def test_rejects_empty_file(self, _redirect_cache):
         with pytest.raises(mesh_import.MeshImportError, match="empty"):
@@ -196,7 +196,7 @@ class TestUploadRoute:
     def test_upload_rejects_bad_extension(self, client, tmp_data_dir, monkeypatch):
         monkeypatch.setattr(mesh_import, "CACHE_ROOT", tmp_data_dir["cache_root"])
         r = client.post("/api/layers/mesh/upload",
-                        files={"file": ("model.gltf", b"data", "application/octet-stream")})
+                        files={"file": ("model.fbx", b"data", "application/octet-stream")})
         assert r.status_code == 400
 
     def test_register_without_heightmap_returns_400(self, client, tmp_data_dir, monkeypatch, _box_stl_bytes):

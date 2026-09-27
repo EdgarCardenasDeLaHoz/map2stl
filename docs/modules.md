@@ -78,6 +78,7 @@ flowchart LR
 | `puzzle-cuts.js` | `evenEdges`, `nearestEdge`, `moveEdge`, `minPieceMm`, `gridKey`, `isCustom`, `roundEdges` | Pure ES exports: puzzle cut positions in mm from the west / south edge (the server's `col_edges_mm` / `row_edges_mm`) |
 | `print-scale.js` | `modelScale`, `bboxDiagonalKm`, `formatGroundLength`, `parseBedSize`, `defaultPieceMm`, `piecesNeeded` | Pure ES exports (no window): model scale and vertical exaggeration (port of `city_model.choose_scale`), bed size, puzzle piece grid (port of `puzzle.plan_grid`) |
 | `building-heights.js` | `summarizeBuildingHeights`, `heightSourceGroup`, `buildingsWithOverrides`, `hasOverrides` | Pure ES exports: height-source summary, histogram, tallest list; City Model `layer_data` payload with height overrides |
+| `landmark-overrides.js` | `overridesForBuild`, `draftFromSpec`, `specFromDraft`, `overrideLabel`, `meshBounds`, `CATEGORY_LABELS` | Pure ES exports: landmark override specs (osm / ndsm / mesh) for the Landmarks panel and the City Model `landmark_overrides` (F-LANDMARK §3/§5) |
 
 ### `ui/` — UI management
 | File | Key exports | Purpose |
@@ -303,6 +304,13 @@ Pure ES module (no DOM, no `window`), unit-tested in `tests/js/compositeSpec.tes
 | `vue/components/views/ModelScorePanel.vue` | Export tab, City Model section ("Score this model"); registered globally in `main-vue.ts` so `ModelContainer.vue` mounts it with one line. Model = current `osmCityData.buildings` (with `cityHeightOverrides`) or an uploaded STL spanning `currentDemBbox`; reference from `api.registration.criticReferences`; shows per-building median/p90 error, bias, footprint IoU/precision/recall, cell MAE/r, roof shape error |
 | `MeshImportSection.vue` auto-register | Shows the `scores` breakdown (RMSE, MAE, bias, Pearson r, coverage, footprint IoU, match score, per-building p95) and a link to `report_url` |
 | `window.api.registration` (`core/api.js`) | `packs`, `match`, `start`, `status`, `cancel`, `criticReferences`, `criticScore` |
+
+### Landmarks panel (Vue, F-LANDMARK §3–§5)
+
+| Component / API | Purpose |
+|-----------------|---------|
+| `vue/components/dem/CityLandmarksSection.vue` | Settings → Fetch tab, under Fetch Layers ("🏛 Landmarks"). **Find landmarks** posts `osmCityData.buildings` to `api.cities.landmarks` (places of worship, town halls, castles, attractions + tallest N, with parts, roof shapes, height, source, stored override). Per landmark: OSM parts / nDSM (provider list from `survey_sources`) / uploaded mesh (`api.mesh.upload`, STL/OBJ/glTF; fit, rotation, scale, offset, vertical mode). **Preview** → `api.cities.landmarkPreview` into a small three.js view (drag to rotate, wheel to zoom); **Save** → `api.regions.saveLandmark` + `appState.cityLandmarkOverrides`; **Reset to OSM** → `deleteLandmark` |
+| `window.api.cities` / `window.api.regions` (`core/api.js`) | `landmarks`, `landmarkPreview`; `landmarks(name)`, `saveLandmark`, `deleteLandmark` |
 
 ### layers/mesh-registration.js
 

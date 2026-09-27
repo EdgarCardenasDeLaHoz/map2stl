@@ -82,6 +82,11 @@ export const useAppStore = defineStore('app', {
         // osmCityData.buildings.features; sent with the City Model build as
         // layer_data. Reset whenever a new building set loads.
         cityHeightOverrides: {} as Record<number, number>,
+        // Landmark overrides of the selected region, keyed by OSM id ("way/123"):
+        // {kind: 'osm'|'ndsm'|'mesh', ...}. Loaded from / saved to
+        // /api/regions/{name}/landmarks by the Landmarks panel; sent with the City
+        // Model build as landmark_overrides (F-LANDMARK §3/§5).
+        cityLandmarkOverrides: {} as Record<string, Record<string, unknown>>,
 
         // ── F-UX batch 2 ──────────────────────────────────────────────────────
         // Background city fetch status (city-fetch.js / CityFetchProgress.vue):

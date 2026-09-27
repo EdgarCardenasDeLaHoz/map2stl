@@ -57,7 +57,8 @@ from geo2stl.geo import bbox_size_m
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_EXTENSIONS = {".stl", ".obj"}
+# glTF (binary .glb, or .gltf with embedded buffers) for landmark overrides (F-LANDMARK §3).
+ALLOWED_EXTENSIONS = {".stl", ".obj", ".glb", ".gltf"}
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB
 
 
@@ -111,7 +112,7 @@ def save_upload(filename: str, data: bytes) -> tuple[str, str, int]:
     ext = Path(filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise MeshImportError(
-            f"Unsupported file type {ext!r}. Only .stl and .obj are accepted.")
+            f"Unsupported file type {ext!r}. Accepted: .stl, .obj, .glb, .gltf (embedded buffers).")
     if len(data) > MAX_UPLOAD_BYTES:
         raise MeshImportError(
             f"File too large ({len(data) / 1e6:.1f} MB). Max is "

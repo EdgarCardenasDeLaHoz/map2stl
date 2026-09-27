@@ -1,6 +1,7 @@
 # F-LANDMARK — Roofs, building parts and landmark detail
 
-Status: planned 2026-09-27; §6 (scoring) done 2026-09-27 (user: "we still have not finalized any pipelines for adding
+Status: planned 2026-09-27; §6 (scoring) done 2026-09-27; §3 overrides, §4 survey sources,
+§5 Landmarks panel done 2026-09-27 (user: "we still have not finalized any pipelines for adding
 rooftop details for rendering complex key buildings like cathedrals, city hall").
 Survey: this session's read-only audit (roofs, parts, sources) — findings below.
 
@@ -35,12 +36,48 @@ Survey: this session's read-only audit (roofs, parts, sources) — findings belo
 3. **Landmark overrides** (per OSM id): (a) a mesh (STL/OBJ/glTF) placed by footprint
    alignment and scaled to the model, or (b) an nDSM patch (lidar DSM − DTM) turned into a
    roof solid clipped to the footprint. Stored per region; applied by `build_on_terrain`.
+   **Done 2026-09-27** (`city2stl/landmarks.py`, `app/server/core/landmarks.py`):
+   - ids: `fetch.py` keeps `osm_id` (`way/123`) plus `name`, `building`, `amenity`, `historic`,
+     `tourism`; a dissolved group keeps its largest member's (so overriding that id replaces the
+     merged footprint). `CITY_PIPELINE_VERSION` 4; a v3 cache re-fetches only its buildings.
+   - storage: table `region_landmarks` (region, osm_id, spec_json), not a key in
+     `region_settings` — every panel save replaces that blob wholesale and would drop overrides.
+   - resolution before geometry (`resolve_overrides`): mesh loaded, vertices merged, holes
+     filled, then refused with the reason if manifold3d still cannot read it as a solid; nDSM
+     fetched for footprint + 5 m. A failure fails the export task naming the landmark.
+   - mesh placement: min-rotated-rectangle long axis onto the footprint's, per-axis
+     (`fit=rectangle`) or uniform scale, 0°/180° chosen by overlap, then manual rotation /
+     scale / offset (m). Vertical `true` = mesh proportions at the horizontal fit (geometric mean
+     of the two stretches) × `z_mm_per_m`; `fit` = `height_m` (OSM height by default). glTF is
+     Y-up (auto by extension). Base on the footprint's highest ground, prism skirt down to the
+     lowest, clipped to the model.
+   - nDSM: TIN of the footprint outline + raster cell centres inside it, bilinear heights,
+     voids filled from the nearest measured cell, closed to the skirt floor; < 30 % measured
+     coverage is refused. A geometry-time failure keeps the OSM building and is reported.
+   - `LandmarkPlan` runs inside `build_layer`: overridden building, its parts and any other
+     extrude-layer feature ≥ 50 % inside (e.g. the `churches` copy) are removed; report block
+     `landmarks: {osm_id: {status: applied|failed|missing, ...}}`.
 4. **Survey sources** (for 3b): promote the lidar readers from scratch into
    `city2stl/height/providers/`: USGS 3DEP (exists), Spain CNIG PNOA / REDIAM (Granada,
    Cartagena ES), France IGN LiDAR HD, Prague ČÚZK; 1 m nDSM per landmark footprint.
+   **Done 2026-09-27**: `ndsm_for_bbox(bbox, resolution_m) -> (array row0=north, lon/lat
+   Affine) | None` in `ign_lidarhd` (WMS-R MNH float GeoTIFF, 0.5 m), `rediam_mdhn` (regional
+   COG, 1 m), `cnig_mdsn` (IDEE WCS `mdsn_e025`, buildings only, 2.5 m, 2008-15 — also covers
+   Cartagena ES), `cuzk_dmp` (DMP 1G − DMR 5G), and 3DEP (`lidar_3dep_copc.ndsm_for_bbox` grids
+   the COPC cloud; `lidar_3dep_ept.ndsm_for_bbox` wraps the PDAL path); registry `survey.py`,
+   shared contract/cache `_survey.py`. All checked live once, tested offline with synthetic
+   GeoTIFFs. Gaps (not scraped): CNIG 0.5 m surfaces of the 2nd/3rd PNOA coverages (download
+   form only), Lisbon (account), Barcelona ICGC (WMS returns pictures), Salzburg BEV (not wired),
+   Cartagena de Indias (no open surface). REDIAM has voids on Granada Cathedral's roofs (~26 %
+   of the window). Details: `Code/docs/survey-sources.md`.
 5. **UI**: a Landmarks panel — notable buildings (place of worship, town hall, castle,
    attraction, tallest N) with part count, roof shapes, height source; per landmark:
    choose OSM parts / nDSM / uploaded mesh, preview in 3D.
+   **Done 2026-09-27**: `CityLandmarksSection.vue` (Settings → Fetch, under Fetch Layers);
+   `POST /api/cities/landmarks`, `POST /api/cities/landmarks/preview` (the landmark alone,
+   true scale, no slenderness cap, through `build_on_terrain`),
+   `/api/regions/{name}/landmarks/{osm_id}`; saved overrides go out with the City Model build as
+   `landmark_overrides`.
 6. **Scoring**: promote the scratch "plate critic" (generated model vs plate / lidar) to
    `tools/critic/` and track roof error on the landmark set.
    **Done 2026-09-27** as `city2stl/registration/critic.py` (library code, not `tools/`, so the

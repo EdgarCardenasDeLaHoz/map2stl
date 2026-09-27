@@ -158,6 +158,24 @@ class EnhanceHeightsRequest(BoundingBox):
                      description="Height raster resolution (dim x dim)")
 
 
+class LandmarksRequest(BaseModel):
+    """Request body for POST /api/cities/landmarks (F-LANDMARK §5)."""
+    buildings: dict[str, Any] = Field(..., description="Buildings GeoJSON FeatureCollection "
+                                      "(the loaded city data)")
+    tallest_n: int = Field(10, ge=0, le=100, description="Also list the N tallest other buildings")
+    region: str | None = Field(None, description="Region whose stored overrides to return")
+
+
+class LandmarkPreviewRequest(BaseModel):
+    """Request body for POST /api/cities/landmarks/preview."""
+    buildings: dict[str, Any] = Field(..., description="Buildings FeatureCollection holding the "
+                                      "landmark (at least its outline and parts)")
+    osm_id: str = Field(..., description='The landmark\'s OSM id, e.g. "way/123"')
+    override: dict[str, Any] | None = Field(
+        None, description='{"kind": "osm"|"mesh"|"ndsm", ...} (city2stl.landmarks); '
+                          'omitted = as OSM tags build it')
+
+
 class CityRasterRequest(BaseModel):
     """Request body for POST /api/cities/raster — burns OSM features onto a height-map grid."""
     north: float

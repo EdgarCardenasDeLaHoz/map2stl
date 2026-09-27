@@ -16,6 +16,7 @@ from city2stl.cache_policy import (
     CITY_PIPELINE_VERSION,
     city_cache_missing_building_parts,
     city_cache_missing_height_source,
+    city_cache_stale_buildings_only,
 )
 from city2stl.fetch import FetchCancelled, fetch_osm_data
 from geo2stl.geo import bbox_diagonal_km
@@ -66,8 +67,14 @@ def get_city_layers(north: float, south: float, east: float, west: float,
     check_city_area(north, south, east, west, layers, allow_large)
     key = osm_cache_key(north, south, east, west, simplify_tolerance, min_area)
     cached = read_osm_cache(key) or {}
-    if cached and (city_cache_missing_height_source(cached)
-                   or city_cache_missing_building_parts(cached)):
+    if cached and not city_cache_missing_height_source(cached) \
+            and city_cache_stale_buildings_only(cached):
+        # Only the buildings' columns changed since this payload was written:
+        # keep the other layers and re-fetch buildings.
+        logger.info("Re-fetching buildings of an older OSM cache payload: %s", key)
+        cached = {k: v for k, v in cached.items() if k not in ("buildings", "city_pipeline_version")}
+    elif cached and (city_cache_missing_height_source(cached)
+                     or city_cache_missing_building_parts(cached)):
         logger.info("Ignoring stale OSM cache payload: %s", key)
         cached = {}
 

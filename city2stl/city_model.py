@@ -53,6 +53,7 @@ from scipy.ndimage import map_coordinates, median_filter
 from shapely.geometry import Polygon, box
 
 from city2stl.heights import min_height_from_tags
+from city2stl.landmarks import LandmarkPlan
 from city2stl.roofs import building_solids
 from geo2stl.geo import GeoGrid, bbox_diagonal_km
 
@@ -196,14 +197,28 @@ class Terrain:
         s = self.scale.mm_per_px
         self.rect = box(0.0, 0.0, (w - 1) * s, (h - 1) * s)
 
-    def project(self, geoms: np.ndarray) -> np.ndarray:
-        """lon/lat geometries -> model mm (vectorised)."""
+    def _lonlat_affine(self) -> tuple[np.ndarray, np.ndarray]:
+        """(scale, offset): model mm = lon/lat * scale + offset."""
         h, w = self.z.shape
         s = self.scale.mm_per_px
         n, so, e, wst = (self.bbox[k] for k in ("north", "south", "east", "west"))
         fx, fy = w / (e - wst) * s, h / (n - so) * s
-        off = np.array([-wst * fx - 0.5 * s, (h - 0.5) * s - n * fy])
-        return shapely.transform(geoms, lambda c: c * np.array([fx, fy]) + off)
+        return np.array([fx, fy]), np.array([-wst * fx - 0.5 * s, (h - 0.5) * s - n * fy])
+
+    def project(self, geoms: np.ndarray) -> np.ndarray:
+        """lon/lat geometries -> model mm (vectorised)."""
+        k, off = self._lonlat_affine()
+        return shapely.transform(geoms, lambda c: c * k + off)
+
+    def unproject_xy(self, xy_mm: np.ndarray) -> np.ndarray:
+        """Model mm points (N, 2) -> lon/lat (N, 2); the inverse of :meth:`project`."""
+        k, off = self._lonlat_affine()
+        return (np.asarray(xy_mm, dtype=np.float64) - off) / k
+
+    @property
+    def mm_per_m(self) -> float:
+        """Horizontal model mm per ground metre."""
+        return self.scale.mm_per_px / self.scale.m_per_px
 
     def m_to_mm(self, metres):
         return np.asarray(metres) / self.scale.m_per_px * self.scale.mm_per_px
@@ -368,7 +383,11 @@ def _roofed(poly: Polygon, props: dict, z_floor: float, ground_hi: float,
         if roof_mm <= 0.2:            # below print resolution: flat at full height
             shape_, roof_mm = "flat", 0.0
     top = ground_hi + total
-    solids = building_solids(poly, z_floor, top - roof_mm, roof_mm, shape_, props)
+    try:
+        solids = building_solids(poly, z_floor, top - roof_mm, roof_mm, shape_, props)
+    except (RuntimeError, ValueError) as exc:   # Triangle on a sliver the snap left behind
+        logger.debug("roof %s failed (%s); flat at mid-roof", shape_, exc)
+        solids = []
     good = [m for m in solids if _manifold(m).status() == mf.Error.NoError]
     if len(good) == len(solids) and good:
         return good
@@ -386,10 +405,24 @@ def _slab(poly: Polygon, terrain: Terrain, top_off: float, bottom_off: float) ->
     Outline edges are split at the terrain's seed spacing so they do not bridge
     over a crest between two distant outline vertices.
     """
-    import triangle
-
     s = terrain.scale.mm_per_px
     poly = shapely.segmentize(poly, 4.0 * s)
+    tri = triangulate_polygon(poly, terrain.tin_xy, 0.25 * s)
+    if tri is None:
+        return None
+    v2, f = tri
+    ground = terrain.sample(v2[:, 0], v2[:, 1])
+    top = np.column_stack([v2, ground + top_off])
+    f = orient_ccw(top, f)
+    return close_surface(top, f, lambda xy: terrain.sample(xy[:, 0], xy[:, 1]) + bottom_off)
+
+
+def triangulate_polygon(poly: Polygon, extra: np.ndarray | None = None,
+                        inset: float = 0.0) -> tuple[np.ndarray, np.ndarray] | None:
+    """Constrained triangulation of ``poly`` (outline and holes kept as edges) plus the
+    ``extra`` points (N, 2) lying more than ``inset`` inside it. Returns (xy, faces) or None."""
+    import triangle
+
     rings = [np.asarray(poly.exterior.coords)[:-1]] + [np.asarray(r.coords)[:-1] for r in poly.interiors]
     pts, segs, start = [], [], 0
     for r in rings:
@@ -398,10 +431,10 @@ def _slab(poly: Polygon, terrain: Terrain, top_off: float, bottom_off: float) ->
         k = np.arange(start, start + n)
         segs.append(np.column_stack([k, np.roll(k, -1)]))
         start += n
-    if terrain.tin_xy is not None:
-        inner = shapely.buffer(poly, -0.25 * s)
+    if extra is not None and len(extra):
+        inner = shapely.buffer(poly, -inset) if inset > 0 else poly
         x0, y0, x1, y1 = poly.bounds
-        t = terrain.tin_xy
+        t = np.asarray(extra, dtype=np.float64)
         cand = t[(t[:, 0] > x0) & (t[:, 0] < x1) & (t[:, 1] > y0) & (t[:, 1] < y1)]
         if len(cand) and not inner.is_empty:
             pts.append(cand[shapely.contains_xy(inner, cand[:, 0], cand[:, 1])])
@@ -423,10 +456,7 @@ def _slab(poly: Polygon, terrain: Terrain, top_off: float, bottom_off: float) ->
     v2, f = out.get("vertices"), out.get("triangles")
     if f is None or not len(f):
         return None
-    ground = terrain.sample(v2[:, 0], v2[:, 1])
-    top = np.column_stack([v2, ground + top_off])
-    f = orient_ccw(top, f)
-    return close_surface(top, f, lambda xy: terrain.sample(xy[:, 0], xy[:, 1]) + bottom_off)
+    return np.asarray(v2, np.float64), np.asarray(f)
 
 
 def _is_flowing_water(props: dict) -> bool:
@@ -522,12 +552,21 @@ def layer_preflight(name: str, features: list[dict], style: LayerStyle, terrain:
 
 
 def build_layer(name: str, features: list[dict], style: LayerStyle,
-                terrain: Terrain) -> tuple[list[Mesh], dict]:
-    """Solids for one layer, plus counts for the report."""
+                terrain: Terrain, landmarks: LandmarkPlan | None = None) -> tuple[list[Mesh], dict]:
+    """Solids for one layer, plus counts for the report.
+
+    ``landmarks`` (extrude layers): overridden buildings are swapped for their
+    override solids before parts are assembled (``city2stl.landmarks``).
+    """
     polys, props, counts = feature_polygons(name, features, style, terrain)
     stats = {"features": len(features), "polygons": len(polys), **counts}
     solids: list[Mesh] = []
     if style.mode == "extrude":
+        if landmarks:
+            n_before = len(polys)
+            polys, props, solids = landmarks.take(name, polys, props, terrain, style)
+            if n_before != len(polys):
+                stats["landmark_replaced"] = n_before - len(polys)
         polys, props, stats["parts"], stats["outlines_replaced"] = assemble_parts(polys, props)
         z_per_m = terrain.scale.z_mm_per_m * style.height_scale
         lo, hi = terrain.ranges_under(polys)
@@ -671,6 +710,7 @@ def build_city_model(
     terrain_max_error_mm: float | None = None,
     simplify: bool = True,
     layer_overrides: dict | None = None,
+    landmark_overrides: dict | None = None,
 ) -> CityModel:
     """Terrain from ``dem_m`` (metres, row 0 north, already projected like the
     app's DEM) plus the OSM layers in ``layers_geojson`` ({layer: FeatureCollection}).
@@ -685,7 +725,8 @@ def build_city_model(
                          fit_height_mm=fit_height_mm, base_mm=base_mm)
     return build_on_terrain(scale.z_mm(dem), bbox, scale, layers_geojson,
                             terrain_max_error_mm=terrain_max_error_mm, simplify=simplify,
-                            layer_overrides=layer_overrides)
+                            layer_overrides=layer_overrides,
+                            landmark_overrides=landmark_overrides)
 
 
 def build_on_terrain(
@@ -697,6 +738,7 @@ def build_on_terrain(
     terrain_max_error_mm: float | None = None,
     simplify: bool = True,
     layer_overrides: dict | None = None,
+    landmark_overrides: dict | None = None,
 ) -> CityModel:
     """The feature stage: OSM layers on a finished terrain heightfield.
 
@@ -704,6 +746,11 @@ def build_on_terrain(
     as produced by the terrain stage with ``scale``. With no layers this is the
     terrain-only model every mesh export uses. ``bbox`` is needed only to place
     features.
+
+    ``landmark_overrides``: ``{osm_id: LandmarkOverride}`` from
+    ``city2stl.landmarks.resolve_overrides`` -- those buildings are replaced by an
+    uploaded mesh or a surveyed nDSM solid; the report's ``landmarks`` block says
+    which were applied and why any was not.
     """
     dem_shape = z_mm.shape
     terrain = Terrain(np.asarray(z_mm, np.float64), bbox or {}, scale)
@@ -727,6 +774,7 @@ def build_on_terrain(
 
     adds: dict[str, mf.Manifold] = {}
     cuts: dict[str, mf.Manifold] = {}
+    plan = LandmarkPlan(landmark_overrides) if landmark_overrides else None
     for name in LAYER_PRIORITY + [n for n in styles if n not in LAYER_PRIORITY]:
         style = styles.get(name)
         feats = (layers_geojson.get(name) or {}).get("features") or []
@@ -735,7 +783,7 @@ def build_on_terrain(
         if not bbox:
             raise ValueError(f"layer {name!r} needs the model's bbox to place its features")
         t0 = time.perf_counter()
-        solids, stats = build_layer(name, feats, style, terrain)
+        solids, stats = build_layer(name, feats, style, terrain, plan)
         t1 = time.perf_counter()
         u, rejected = union(solids)
         report["layers"][name] = {"mode": style.mode, **stats, "rejected": rejected,
@@ -743,6 +791,8 @@ def build_on_terrain(
                                               "union": round(time.perf_counter() - t1, 2)}}
         if u is not None:
             (cuts if style.mode in ("engraved", "water") else adds)[name] = u
+    if plan is not None:
+        report["landmarks"] = plan.report
 
     t0 = time.perf_counter()
     cut_all = mf.Manifold.batch_boolean(list(cuts.values()), mf.OpType.Add) if cuts else None

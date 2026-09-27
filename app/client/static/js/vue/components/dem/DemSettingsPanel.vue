@@ -49,6 +49,7 @@
         <div v-show="activeTab==='fetch'">
           <ProjectionSection />
           <FetchLayersSection />
+          <CityLandmarksSection />
           <PresetsSection />
         </div>
 
@@ -94,6 +95,7 @@ import LayerViewSection      from './LayerViewSection.vue';
 import LayerDisplaySections from './LayerDisplaySections.vue';
 import ProjectionSection     from './ProjectionSection.vue';
 import FetchLayersSection    from './FetchLayersSection.vue';
+import CityLandmarksSection  from './CityLandmarksSection.vue';
 import CompositeDemSection   from './CompositeDemSection.vue';
 import MeshImportSection     from './MeshImportSection.vue';
 import PlateRegistrationSection from './PlateRegistrationSection.vue';

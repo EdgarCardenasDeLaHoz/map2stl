@@ -21,6 +21,10 @@ lodgepole pines is not given the trees' height the way a gridded maximum would,
 and no ``building`` class is needed (most 3DEP projects, Breckenridge's
 included, classify only ground and "unclassified").
 
+``ndsm_for_bbox`` grids the same point cloud (highest return minus the
+interpolated ground) for the survey-provider interface of
+``city2stl.height.providers._survey`` -- a landmark's nDSM override.
+
 A building with too few returns keeps its fallback height for the raster
 providers to fill; so does one that measures under ``_MIN_HEIGHT_M``, which is
 usually a building that went up after the survey.
@@ -132,9 +136,27 @@ def _item_crs(item: dict):
     return horiz, float(h_unit or 1.0), float(v_unit or 1.0)
 
 
+def _query_points(item: dict, bounds, spacing: float, v_unit: float, tokens: dict[str, str]):
+    """``(x, y, z metres, class)`` of one tile's returns inside native ``bounds``
+    (x0, y0, x1, y1) at octree ``spacing`` (native units), noise classes dropped."""
+    import laspy
+
+    x0, y0, x1, y1 = bounds
+    href = _signed(item["assets"]["data"]["href"], tokens)
+    with laspy.CopcReader.open(href, http_num_threads=_HTTP_THREADS_PER_TILE) as reader:
+        pts = reader.query(
+            bounds=laspy.copc.Bounds(mins=np.array([x0, y0]), maxs=np.array([x1, y1])),
+            resolution=spacing,
+        )
+    x, y = np.asarray(pts.x), np.asarray(pts.y)
+    z = np.asarray(pts.z) * v_unit
+    cls = np.asarray(pts.classification)
+    keep = ~np.isin(cls, _NOISE_CLASSES)
+    return x[keep], y[keep], z[keep], cls[keep]
+
+
 def _read_tile(item: dict, polys_ll: dict[int, object], tokens: dict[str, str]):
     """Roof and ground elevations (metres) per building index, from one tile."""
-    import laspy
     import shapely
     from pyproj import Transformer
 
@@ -146,17 +168,7 @@ def _read_tile(item: dict, polys_ll: dict[int, object], tokens: dict[str, str]):
     outer = {i: p.buffer(ring) for i, p in native.items()}
     x0, y0, x1, y1 = shapely.total_bounds(list(outer.values()))
 
-    href = _signed(item["assets"]["data"]["href"], tokens)
-    with laspy.CopcReader.open(href, http_num_threads=_HTTP_THREADS_PER_TILE) as reader:
-        pts = reader.query(
-            bounds=laspy.copc.Bounds(mins=np.array([x0, y0]), maxs=np.array([x1, y1])),
-            resolution=_QUERY_SPACING_M / h_unit,
-        )
-    x, y = np.asarray(pts.x), np.asarray(pts.y)
-    z = np.asarray(pts.z) * v_unit
-    cls = np.asarray(pts.classification)
-    keep = ~np.isin(cls, _NOISE_CLASSES)
-    x, y, z, cls = x[keep], y[keep], z[keep], cls[keep]
+    x, y, z, cls = _query_points(item, (x0, y0, x1, y1), _QUERY_SPACING_M / h_unit, v_unit, tokens)
     order = np.argsort(x)
     x, y, z, cls = x[order], y[order], z[order], cls[order]
 
@@ -250,3 +262,80 @@ def footprint_heights(polygons: dict[int, object], bbox) -> tuple[dict[int, floa
                 "%d points, %.1fs", len(heights), len(polygons), stats["tiles"],
                 stats["tiles_failed"], stats["points"], stats["seconds"])
     return heights, stats
+
+
+# ---------------------------------------------------------------------------
+# Gridded nDSM (F-LANDMARK §4: the survey-provider interface)
+# ---------------------------------------------------------------------------
+
+#: Ground returns are interpolated from this far around the bbox, so a landmark
+#: whose footprint fills the window still has ground on every side.
+_GRID_PAD_M = 15.0
+
+
+def ndsm_for_bbox(bbox, resolution_m: float = 1.0):
+    """Height above ground over ``bbox`` from the COPC point cloud, on the survey grid.
+
+    Surface = highest return per cell; ground = the class-2 returns interpolated
+    (linear, nearest outside their hull) to the cell centres. Cells no return
+    reached are NaN. ``(array row0=north, lon/lat Affine)`` or None when laspy is
+    missing, the bbox is outside the US, or no 3DEP tile covers it. See
+    ``city2stl.height.providers._survey`` for the contract.
+    """
+    from ._survey import cached_ndsm
+
+    if not covers(bbox) or not available():
+        return None
+    return cached_ndsm("survey_usgs_3dep_copc", bbox, resolution_m,
+                       lambda: _grid_ndsm(bbox, resolution_m))
+
+
+def _grid_ndsm(bbox, res: float):
+    from pyproj import Transformer
+    from scipy.interpolate import griddata
+
+    from ._survey import SurveyError, as_nsew, lonlat_grid
+
+    n, s, e, w = as_nsew(bbox)
+    h, wd, transform = lonlat_grid(bbox, res)
+    try:
+        items = _search_items((n, s, e, w))
+    except requests.RequestException as exc:
+        raise SurveyError(f"3DEP COPC: STAC search failed ({exc})") from exc
+    if not items:
+        return None
+    dsm = np.full((h, wd), -np.inf)
+    ground: list[np.ndarray] = []
+    tokens: dict[str, str] = {}
+    for item in items:
+        horiz, h_unit, v_unit = _item_crs(item)
+        to_native = Transformer.from_crs("EPSG:4326", horiz, always_xy=True)
+        to_ll = Transformer.from_crs(horiz, "EPSG:4326", always_xy=True)
+        xs, ys = to_native.transform([w, e, w, e], [s, s, n, n])
+        pad = _GRID_PAD_M / h_unit
+        bounds = (min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad)
+        try:
+            x, y, z, cls = _query_points(item, bounds, res / h_unit, v_unit, tokens)
+        except Exception as exc:
+            raise SurveyError(f"3DEP COPC tile {item.get('id')}: {exc}") from exc
+        lon, lat = to_ll.transform(x, y)
+        lon, lat = np.asarray(lon), np.asarray(lat)
+        g = cls == 2
+        if g.any():
+            ground.append(np.column_stack([lon[g], lat[g], z[g]]))
+        col = np.floor((lon - w) / transform.a).astype(np.int64)
+        row = np.floor((lat - n) / transform.e).astype(np.int64)
+        inside = (col >= 0) & (col < wd) & (row >= 0) & (row < h)
+        np.maximum.at(dsm, (row[inside], col[inside]), z[inside])
+    if not ground or not np.isfinite(dsm).any():
+        return None
+    gp = np.concatenate(ground)
+    cols, rows = np.meshgrid(np.arange(wd) + 0.5, np.arange(h) + 0.5)
+    cx, cy = transform * (cols, rows)
+    dtm = griddata(gp[:, :2], gp[:, 2], (cx, cy), method="linear")
+    if np.isnan(dtm).any():
+        near = griddata(gp[:, :2], gp[:, 2], (cx, cy), method="nearest")
+        dtm = np.where(np.isnan(dtm), near, dtm)
+    out = np.where(np.isfinite(dsm), dsm - dtm, np.nan)
+    from ._survey import clean_heights
+    return clean_heights(out, hi=_MAX_HEIGHT_M), transform

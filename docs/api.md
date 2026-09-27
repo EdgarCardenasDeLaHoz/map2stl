@@ -25,6 +25,9 @@ Primary `TerrainSession` touchpoints:
 | DELETE | `/api/regions/{name}` | Delete region + cascade settings |
 | GET | `/api/regions/{name}/settings` | Get saved panel settings (200 + `{}` if none) |
 | PUT | `/api/regions/{name}/settings` | Save panel settings |
+| GET | `/api/regions/{name}/landmarks` | Stored landmark overrides → `{name, overrides: {osm_id: spec}}` (table `region_landmarks`, F-LANDMARK §3) |
+| PUT | `/api/regions/{name}/landmarks/{osm_id}` | Store one override; `osm_id` like `way/123` (path); body `{kind: "osm"\|"mesh"\|"ndsm", ...}` (see City Routes). 400 bad spec, 404 unknown region |
+| DELETE | `/api/regions/{name}/landmarks/{osm_id}` | Remove one override (404 if none) |
 
 ## DEM / Terrain Routes (`routers/terrain.py`)
 
@@ -71,7 +74,7 @@ Primary `TerrainSession` touchpoints:
 | POST | `/api/export/preview` | Adaptive preview mesh for Three.js → `{vertices [col,row,z_mm], faces, face_count, cols, rows, z_min, z_max, …, preview: {adaptive, stride, tolerance_mm, max_error_mm, seconds}}`. ≤ 150 k faces: `heightfield_tin_budget` from the export tolerance, raised until it fits; DEMs over 250 k px are strided first (preview only) |
 | POST | `/api/export/preflight` | Same body as `/start` (`format` = `city` \| `puzzle` \| …), nothing built → `{size_mm, bed_mm, fits_bed, scale, vertical_exaggeration, puzzle: {cols, rows, method, col_edges_mm, row_edges_mm, largest_piece_mm, knob_mm}, layers: {name: {polygons, widened, clamped, dropped, thinnest_mm, tallest_mm, …}}, thinnest_feature_mm, tallest_spike_mm, faces_est, estimate: {filament_g, print_hours, printed_cm3, formula}, warnings, seconds}`. OSM layers from the cache only (uncached ones are a warning). `app/server/core/preflight.py` |
 | POST | `/api/export/puzzle` | Start async puzzle export → `{task_id}` (same as `/start` with `format="puzzle"`) |
-| POST | `/api/export/start` | Start async export (any format) → `{task_id}`; body must include `"format"` field. `format="city"` fails with a clear message when city layers (trails included) are enabled on a bbox over 25 km diagonal, unless the body sets `"allow_large_city": true` (`core/city_data.check_city_area`) |
+| POST | `/api/export/start` | Start async export (any format) → `{task_id}`; body must include `"format"` field. `format="city"` takes `landmark_overrides: {osm_id: {kind: "mesh", upload_id, fit?, rotation_deg?, scale?, offset_m?, vertical?: "true"\|"fit", height_m?, up_axis?} \| {kind: "ndsm", provider?: "auto"\|name, resolution_m?}}` — resolved before the build (bad mesh / no survey data fails the task naming the landmark), applied by `build_on_terrain`; `report.json` `landmarks` = `{osm_id: {kind, source, status: applied\|failed\|missing, reason?, replaced_features, faces}}`. `format="city"` fails with a clear message when city layers (trails included) are enabled on a bbox over 25 km diagonal, unless the body sets `"allow_large_city": true` (`core/city_data.check_city_area`) |
 | GET | `/api/export/status/{task_id}` | Poll async task → `{status, progress, message}` |
 | GET | `/api/export/download/{task_id}` | Download result of completed async task (file auto-deleted after send) |
 
@@ -100,6 +103,9 @@ Primary `TerrainSession` touchpoints:
 | POST | `/api/cities/export3mf` | Generate 3MF with terrain + building prisms |
 | GET | `/api/cities/google3d-available` | Check if Google 3D Tiles are available for the current bbox |
 | POST | `/api/cities/enhance-heights` | Refine building heights using an alternative height provider (e.g. Google 3D Tiles) |
+| POST | `/api/cities/landmarks` | `LandmarksRequest {buildings, tallest_n=10, region?}` → `{landmarks: [{osm_id, index, name, category (worship\|civic\|historic\|attraction\|tallest), building, height_m, height_source, parts, roof_shapes, area_m2, centroid, bbox}], survey_sources: [{name, label, resolution_m, available, note}], overrides, ids_missing}` (`city2stl.landmarks.list_landmarks`; `ids_missing` = data cached before OSM ids were kept) |
+| GET | `/api/cities/survey-sources?north&south&east&west` | Surveyed nDSM providers and whether each covers the bbox (`city2stl.height.providers.survey`, no network) |
+| POST | `/api/cities/landmarks/preview` | `LandmarkPreviewRequest {buildings, osm_id, override?}` → `{vertices, faces (flat lists, mm), size_mm, mm_per_m, report: {landmarks, buildings, watertight}}` — that landmark alone, true scale, no slenderness cap, on a 2 mm plinth, built by `build_on_terrain`. 400 with the reason for a bad mesh / no survey data / unknown id |
 
 > **Two city rasterization endpoints exist:**
 > - `/api/cities/raster` — returns a flat height map in DEM format (direct canvas rendering via `city-render.js`)
@@ -259,6 +265,9 @@ only when the client posts it to the location route above.
 - `MeshAutoRegisterRequest` — `{filename_hint?, resolution, min_region_iou, write_report}`
 - `PlateRegistrationStartRequest` — `{slug, place, fix, rel_path?}`
 - `CriticScoreRequest` — `{reference: CriticReference, model: CriticModel}`
+- `LandmarksRequest` — `{buildings, tallest_n, region?}`; `LandmarkPreviewRequest` — `{buildings, osm_id, override?}`
+
+Mesh upload (`POST /api/layers/mesh/upload`) accepts `.stl`, `.obj`, `.glb`, `.gltf` (embedded buffers); glTF is for landmark meshes.
 
 ## DEM Sources (OPENTOPO_DATASETS in `config.py`)
 

@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 # 3: building parts and their outlines are no longer dissolved together.
-CITY_PIPELINE_VERSION = 3
+# 4: buildings carry osm_id, name, building, amenity, historic, tourism (landmarks).
+CITY_PIPELINE_VERSION = 4
+#: Payload versions whose only defect is the buildings layer: re-fetching that
+#: layer brings them up to date, the other cached layers are still good.
+BUILDINGS_ONLY_STALE_VERSIONS = frozenset({3})
 
 
 def building_features(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -29,6 +33,11 @@ def city_cache_missing_building_parts(payload: dict[str, Any]) -> bool:
         return True
     # Versioned payloads are authoritative.
     return False
+
+
+def city_cache_stale_buildings_only(payload: dict[str, Any]) -> bool:
+    """True for a payload that is current except for its buildings layer's columns."""
+    return int(payload.get("city_pipeline_version") or 0) in BUILDINGS_ONLY_STALE_VERSIONS
 
 
 def city_cache_needs_enrichment(payload: dict[str, Any]) -> bool:

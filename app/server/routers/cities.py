@@ -18,7 +18,13 @@ from app.server.core.cache import CACHE_ROOT, osm_cache_key, read_osm_cache
 from app.server.core.city_data import get_city_layers
 from app.server.core.responses import error_response
 from app.server.core.validation import run_sync, validate_bbox_diagonal
-from app.server.schemas import CityRasterRequest, CityRequest, EnhanceHeightsRequest
+from app.server.schemas import (
+    CityRasterRequest,
+    CityRequest,
+    EnhanceHeightsRequest,
+    LandmarkPreviewRequest,
+    LandmarksRequest,
+)
 from city2stl.rasterize import rasterize_city_data as _rasterize_city_data
 
 logger = logging.getLogger(__name__)
@@ -398,3 +404,55 @@ async def enhance_heights(req: EnhanceHeightsRequest):
     except Exception as e:
         logger.error(f"Height enhancement error: {e}", exc_info=True)
         return error_response(f"Height enhancement failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Landmarks (F-LANDMARK §3-§5): list, survey sources, preview
+# ---------------------------------------------------------------------------
+
+@router.post("/api/cities/landmarks")
+async def list_city_landmarks(req: LandmarksRequest):
+    """Notable buildings in the posted buildings layer (``city2stl.landmarks.list_landmarks``),
+    the nDSM survey sources covering them, and the region's stored overrides."""
+    from app.server.core import landmarks as lm_core
+    from city2stl.height.providers.survey import available_for_bbox
+    from city2stl.landmarks import list_landmarks
+
+    feats = (req.buildings or {}).get("features") or []
+    items = await run_sync(list_landmarks, feats, req.tallest_n)
+    sources = []
+    if items:
+        n = max(i["bbox"]["north"] for i in items)
+        s = min(i["bbox"]["south"] for i in items)
+        e = max(i["bbox"]["east"] for i in items)
+        w = min(i["bbox"]["west"] for i in items)
+        sources = available_for_bbox((n, s, e, w))
+    overrides = lm_core.load_region_overrides(req.region) if req.region else {}
+    return JSONResponse(content={"landmarks": items, "survey_sources": sources,
+                                 "overrides": overrides,
+                                 "ids_missing": bool(feats) and not any(
+                                     (f.get("properties") or {}).get("osm_id") for f in feats)})
+
+
+@router.get("/api/cities/survey-sources")
+async def survey_sources(north: float, south: float, east: float, west: float):
+    """Surveyed nDSM providers and whether each covers the bbox (no network)."""
+    from city2stl.height.providers.survey import available_for_bbox
+    return JSONResponse(content={"sources": available_for_bbox((north, south, east, west))})
+
+
+@router.post("/api/cities/landmarks/preview")
+async def preview_city_landmark(req: LandmarkPreviewRequest):
+    """One landmark alone as the City Model would build it with ``override`` applied:
+    ``{vertices, faces, size_mm, mm_per_m, report}`` (flat lists for three.js)."""
+    from app.server.core import landmarks as lm_core
+    from city2stl.landmarks import LandmarkError
+
+    try:
+        out = await run_sync(lm_core.preview, req.buildings, req.osm_id, req.override)
+    except LandmarkError as exc:
+        return error_response(str(exc), 400)
+    except Exception as exc:
+        logger.error("Landmark preview failed: %s", exc, exc_info=True)
+        return error_response(f"Landmark preview failed: {exc}")
+    return JSONResponse(content=out)

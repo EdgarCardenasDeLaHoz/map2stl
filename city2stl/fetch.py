@@ -52,7 +52,7 @@ _OVERPASS_REQUEST_TIMEOUT_S = 300
 # Imported here so fetch.py is the single osm-facing module without callers
 # needing to know the internal split between roads.py and fetch.py.
 from .cache_policy import CITY_PIPELINE_VERSION  # noqa: E402
-from .heights import _fill_heights, _reduce_buildings  # noqa: E402
+from .heights import LANDMARK_TAG_COLS, _fill_heights, _reduce_buildings  # noqa: E402
 from .rasterize import _count_verts, _empty_fc  # noqa: E402
 from .roads import get_road_width_m as _get_road_width_m  # noqa: E402
 
@@ -116,7 +116,12 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
             gdf = base_gdf
         else:
             gdf = part_gdf
-        gdf = gdf[gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])].reset_index(drop=True)
+        gdf = gdf[gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])].copy()
+        # The OSM id ("way/123") identifies a building for landmark overrides
+        # (city2stl.landmarks); osmnx keeps it in the (element, id) index.
+        if gdf.index.nlevels == 2:
+            gdf["osm_id"] = [f"{el}/{i}" for el, i in gdf.index]
+        gdf = gdf.reset_index(drop=True)
         n_raw = len(gdf)
         if min_area > 0 and len(gdf):
             gdf_m = _to_metric(gdf)
@@ -153,12 +158,15 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
         )
         # Keep roof geometry tags so mesh generation can produce shaped roofs.
         # building:levels and min_height are also passed through for completeness.
+        # osm_id + name/building/amenity/historic/tourism identify and classify
+        # landmarks (city2stl.landmarks; CITY_PIPELINE_VERSION 4).
         keep = [
             "geometry", "height_m", "height_source",
             "roof:shape", "roof:height", "roof:levels",
             "roof:direction", "roof:orientation",
             "roof:colour", "roof:material",
             "building:levels", "min_height", "building:min_level", "building:part",
+            *LANDMARK_TAG_COLS,
         ]
         gdf = gdf[[c for c in keep if c in gdf.columns]]
         return json.loads(gdf.to_json())
