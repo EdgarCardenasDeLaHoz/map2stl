@@ -1,0 +1,189 @@
+"""Vector city model (city2stl/city_model.py) and the ``city`` export task."""
+
+import io
+import json
+import time
+import zipfile
+
+import numpy as np
+import pytest
+import trimesh
+
+from city2stl.city_model import (
+    DEFAULT_LAYERS,
+    build_city_model,
+    choose_scale,
+    resolve_layers,
+)
+
+BBOX = dict(north=37.19, south=37.172, east=-3.578, west=-3.605)   # ~3 km diagonal
+
+
+def _hill(h=120, w=150):
+    y, x = np.mgrid[0:h, 0:w]
+    return 100 + 80 * np.exp(-(((x - w / 2) / 30) ** 2 + ((y - h / 2) / 25) ** 2))
+
+
+def _square(lon, lat, d=0.0004):
+    return {"type": "Polygon", "coordinates": [[[lon - d, lat - d], [lon + d, lat - d],
+                                                 [lon + d, lat + d], [lon - d, lat + d],
+                                                 [lon - d, lat - d]]]}
+
+
+def _fc(*feats):
+    return {"type": "FeatureCollection", "features": list(feats)}
+
+
+LAYERS = {
+    "buildings": _fc(
+        {"geometry": _square(-3.588, 37.183), "properties": {"height_m": 20}},     # on the slope
+        {"geometry": _square(-3.6049, 37.18), "properties": {"height_m": 12}},     # crosses west edge
+        {"geometry": _square(-3.70, 37.18), "properties": {"height_m": 12}},       # outside
+    ),
+    "roads": _fc({"geometry": {"type": "LineString",
+                               "coordinates": [[-3.60, 37.175], [-3.58, 37.187]]},
+                  "properties": {"road_width_m": 10}}),
+    "waterways": _fc({"geometry": {"type": "LineString",
+                                   "coordinates": [[-3.603, 37.173], [-3.580, 37.176]]},
+                      "properties": {"waterway": "river"}}),
+}
+
+
+class TestScale:
+    def test_auto_is_true_scale_for_small_regions(self):
+        s = choose_scale(BBOX, (200, 240), 100, 180)
+        assert s.z_mode == "true"
+        assert s.z_mm_per_m == pytest.approx(s.mm_per_px / s.m_per_px)
+
+    def test_auto_fits_height_for_large_regions(self):
+        big = dict(north=40.0, south=39.0, east=-105.0, west=-106.0)
+        s = choose_scale(big, (600, 600), 1000, 4000, fit_height_mm=30)
+        assert s.z_mode == "fit"
+        assert (4000 - 1000) * s.z_mm_per_m == pytest.approx(30)
+
+    def test_override(self):
+        s = choose_scale(BBOX, (200, 240), 100, 180, z_mode="fit", fit_height_mm=10)
+        assert s.z_mode == "fit"
+
+
+class TestBuild:
+    @pytest.fixture(scope="class")
+    def model(self):
+        return build_city_model(_hill(), BBOX, LAYERS)
+
+    def test_merged_is_a_valid_solid(self, model):
+        m = model.merged
+        assert m.is_watertight and m.is_winding_consistent and m.volume > 0
+
+    def test_parts_are_watertight_and_disjoint(self, model):
+        parts = list(model.parts.values())
+        assert all(p.is_watertight for p in parts)
+        assert sum(p.volume for p in parts) == pytest.approx(model.merged.volume, rel=1e-3)
+
+    def test_features_stay_inside_the_model(self, model):
+        t = model.parts["terrain"].bounds
+        b = model.parts["buildings"].bounds
+        assert b[0][0] >= t[0][0] - 1e-6 and b[1][0] <= t[1][0] + 1e-6
+        assert b[0][1] >= t[0][1] - 1e-6 and b[1][1] <= t[1][1] + 1e-6
+        assert model.report["layers"]["buildings"]["solids"] == 2
+
+    def test_building_sits_on_terrain_high_with_true_height(self, model):
+        bodies = model.parts["buildings"].split(only_watertight=False)
+        tall = max(bodies, key=lambda b: b.bounds[1][2])
+        # roof = highest ground under the footprint + 20 m at the model's vertical scale
+        x0, y0, _ = tall.bounds[0]
+        x1, y1, _ = tall.bounds[1]
+        gx, gy = np.meshgrid(np.linspace(x0, x1, 9), np.linspace(y0, y1, 9))
+        terrain = model.parts["terrain"]
+        rays = np.column_stack([gx.ravel(), gy.ravel(), np.full(gx.size, 1000.0)])
+        hits, idx, _ = terrain.ray.intersects_location(rays, np.tile([0, 0, -1.0], (len(rays), 1)))
+        ground_max = hits[:, 2].max()
+        roof = tall.bounds[1][2]
+        assert roof == pytest.approx(ground_max + 20 * model.scale.z_mm_per_m, abs=0.25)
+
+    def test_water_is_cut_below_the_surface(self, model):
+        assert model.report["layers"]["waterways"]["solids"] == 1
+        plain = build_city_model(_hill(), BBOX, {})
+        assert model.parts["terrain"].volume < plain.merged.volume
+
+    def test_layer_toggle_and_override(self):
+        styles = resolve_layers({"roads": {"enabled": False}, "buildings": {"height_scale": 2}})
+        assert not styles["roads"].enabled
+        assert styles["buildings"].height_scale == 2
+        assert styles["walls"] == DEFAULT_LAYERS["walls"]
+        m = build_city_model(_hill(), BBOX, LAYERS, layer_overrides={"roads": {"enabled": False}})
+        assert "roads" not in m.parts
+
+
+class TestCityExportTask:
+    def test_zip_contains_stl_3mf_and_report(self, client, monkeypatch):
+        import app.server.core.city_model_task as task_mod
+
+        monkeypatch.setattr(task_mod, "get_city_layers", lambda *a, **k: dict(LAYERS))
+        r = client.get("/api/terrain/dem", params={**BBOX, "dim": 60, "projection": "none"})
+        dem_id = r.json()["dem_id"]
+        r = client.post("/api/export/start", json={
+            "format": "city", "dem_id": dem_id, "name": "t",
+            "layers": {"trails": {"enabled": False}}})
+        task_id = r.json()["task_id"]
+        for _ in range(300):
+            st = client.get(f"/api/export/status/{task_id}").json()
+            if st["status"] != "running":
+                break
+            time.sleep(0.2)
+        assert st["status"] == "complete", st
+        z = zipfile.ZipFile(io.BytesIO(client.get(f"/api/export/download/{task_id}").content))
+        names = set(z.namelist())
+        assert {"t.stl", "t.3mf", "report.json"} <= names
+        mesh = trimesh.load(io.BytesIO(z.read("t.stl")), file_type="stl")
+        assert mesh.is_watertight
+        report = json.loads(z.read("report.json"))
+        assert report["scale"]["z_mode"] == "true"
+
+
+class TestSimplificationAtPrintScale:
+    def test_terrain_tin_stays_within_tolerance(self):
+        import matplotlib.tri as mtri
+
+        from city2stl.city_model import terrain_tin
+
+        z = _hill(80, 100) * 0.1
+        idx, tris = terrain_tin(z, max_error=0.05)
+        h, w = z.shape
+        # Check the triangles actually returned (an independent interpolator), not a
+        # re-triangulation: on a pixel grid many point sets are cocircular, so two
+        # Delaunay codes may pick different diagonals.
+        remap = np.full(h * w, -1)
+        remap[idx] = np.arange(len(idx))
+        ii, jj = np.divmod(idx, w)
+        tri = mtri.Triangulation(jj.astype(float), ii.astype(float), remap[tris])
+        interp = mtri.LinearTriInterpolator(tri, z.ravel()[idx])
+        gj, gi = np.meshgrid(np.arange(w, dtype=float), np.arange(h, dtype=float))
+        err = np.abs(np.asarray(interp(gj, gi).filled(np.nan)) - z)
+        assert np.nanmax(err) <= 0.05 + 1e-9
+        assert len(tris) < 2 * (h - 1) * (w - 1) / 3      # substantially fewer triangles
+
+    def test_prism_with_courtyard_is_closed(self):
+        from shapely.geometry import Polygon
+
+        from city2stl.city_model import _prism
+
+        p = Polygon([(0, 0), (10, 0), (10, 8), (0, 8)], [[(3, 3), (6, 3), (6, 5), (3, 5)]])
+        v, f = _prism(p, 1.0, 4.0)
+        m = trimesh.Trimesh(v, f)
+        assert m.is_watertight and m.is_winding_consistent
+        assert m.volume == pytest.approx((80 - 6) * 3.0)
+
+    def test_dense_road_network_builds(self):
+        # A grid of crossing streets dissolves into one polygon with many holes,
+        # which a single triangulation could not handle.
+        lons = np.linspace(-3.603, -3.580, 12)
+        lats = np.linspace(37.174, 37.188, 12)
+        feats = [{"geometry": {"type": "LineString", "coordinates": [[x, lats[0]], [x, lats[-1]]]},
+                  "properties": {"road_width_m": 8}} for x in lons]
+        feats += [{"geometry": {"type": "LineString", "coordinates": [[lons[0], y], [lons[-1], y]]},
+                   "properties": {"road_width_m": 8}} for y in lats]
+        m = build_city_model(_hill(), BBOX, {"roads": _fc(*feats)})
+        assert m.report["layers"]["roads"]["solids"] == len(feats)
+        assert m.report["layers"]["roads"]["rejected"] == 0
+        assert "roads" in m.parts and m.merged.is_watertight

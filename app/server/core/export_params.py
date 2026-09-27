@@ -113,6 +113,9 @@ class ExportContext:
     # still succeeds on the plain DEM, so callers must surface this; a model
     # that silently lacks the configured layers looks like a correct one.
     composite_error: str | None = None
+    # Vertical scale: "auto" (true scale under 20 km diagonal, fit above), "true", "fit".
+    z_mode: str = "auto"
+    median_size: int = 3
 
     @classmethod
     def from_request(cls, data: dict) -> ExportContext:
@@ -155,6 +158,14 @@ class ExportContext:
             if resolved is not None:
                 dem_values, height, width = resolved
 
+        bbox = data.get("bbox") or None
+        if not bbox and data.get("dem_id"):
+            from app.server.core.dem_store import DemGone, dem_store
+            try:
+                bbox = dem_store.get(data["dem_id"])[1]
+            except DemGone:
+                bbox = None
+
         return cls(
             dem_values=dem_values,
             height=height,
@@ -167,8 +178,10 @@ class ExportContext:
             mm_per_pixel=float(data.get("mm_per_pixel", 1.0)),
             composite_layers=data.get("composite_layers") or None,
             composite_dim=int(data["composite_dim"]) if data.get("composite_dim") else None,
-            bbox=data.get("bbox") or None,
+            bbox=bbox,
             composite_error=composite_error,
+            z_mode=str(data.get("z_mode", "auto")),
+            median_size=int(data.get("median_size", 3)),
         )
 
 

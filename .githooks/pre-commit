@@ -12,4 +12,5 @@ STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM -- '*.py')
 [ -z "$STAGED_PY" ] && exit 0
 
 echo "Running lint on staged Python files..."
-"$RUFF" check $STAGED_PY
+# --force-exclude: ruff.toml exclusions (notebooks/) apply to explicitly passed paths too.
+"$RUFF" check --force-exclude $STAGED_PY

@@ -72,7 +72,7 @@ class TestCitiesPostSizeGuard:
         mock_result = {"buildings": empty_fc,
                        "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result):
+        with patch("app.server.core.city_data.fetch_osm_data", return_value=mock_result):
             resp = client.post("/api/cities", json={
                 "north": 39.960, "south": 39.950, "east": -75.140, "west": -75.170,
                 "layers": ["buildings", "roads", "waterways"]
@@ -104,7 +104,7 @@ class TestCitiesCoarseDetailTier:
         empty_fc = {"type": "FeatureCollection", "features": []}
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
+        with patch("app.server.core.city_data.fetch_osm_data", return_value=mock_result) as mock_fn:
             resp = client.post("/api/cities", json={**self.MID_BBOX, "detail": "coarse"})
         assert resp.status_code == 200
         assert mock_fn.call_count == 1
@@ -119,7 +119,7 @@ class TestCitiesCoarseDetailTier:
         empty_fc = {"type": "FeatureCollection", "features": []}
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
+        with patch("app.server.core.city_data.fetch_osm_data", return_value=mock_result) as mock_fn:
             client.post("/api/cities", json={
                 **self.MID_BBOX, "detail": "coarse",
                 "layers": ["buildings", "walls", "roads", "waterways"],
@@ -133,7 +133,7 @@ class TestCitiesCoarseDetailTier:
         empty_fc = {"type": "FeatureCollection", "features": []}
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
+        with patch("app.server.core.city_data.fetch_osm_data", return_value=mock_result) as mock_fn:
             client.post("/api/cities", json={
                 **self.MID_BBOX, "detail": "coarse", "min_area": 5.0,
             })
@@ -147,7 +147,7 @@ class TestCitiesCoarseDetailTier:
         small_bbox = {"north": 39.960, "south": 39.950, "east": -75.140, "west": -75.170}
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
+        with patch("app.server.core.city_data.fetch_osm_data", return_value=mock_result) as mock_fn:
             full_resp = client.post("/api/cities", json={**small_bbox, "detail": "full"})
             coarse_resp = client.post("/api/cities", json={**small_bbox, "detail": "coarse"})
 
@@ -169,12 +169,12 @@ class TestCitiesPostCaching:
         mock_result = {"buildings": empty_fc,
                        "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result) as mock_fn:
+        with patch("app.server.core.city_data.fetch_osm_data", return_value=mock_result) as mock_fn:
             client.post("/api/cities",
                         json={**self.SMALL_BBOX, "layers": self.LAYERS})
             assert mock_fn.call_count == 1
 
-            # Second request should be served from cache — _fetch_osm_data NOT called again
+            # Second request should be served from cache — fetch_osm_data NOT called again
             client.post("/api/cities",
                         json={**self.SMALL_BBOX, "layers": self.LAYERS})
             assert mock_fn.call_count == 1  # Still 1
@@ -184,7 +184,7 @@ class TestCitiesPostCaching:
         mock_result = {"buildings": empty_fc,
                        "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result):
+        with patch("app.server.core.city_data.fetch_osm_data", return_value=mock_result):
             resp = client.post(
                 "/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
 
@@ -198,7 +198,7 @@ class TestCitiesPostCaching:
         mock_result = {"buildings": empty_fc,
                        "roads": empty_fc, "waterways": empty_fc}
 
-        with patch("app.server.routers.cities._fetch_osm_data", return_value=mock_result):
+        with patch("app.server.core.city_data.fetch_osm_data", return_value=mock_result):
             resp = client.post(
                 "/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
 
@@ -211,7 +211,7 @@ class TestCitiesPostCaching:
         def raise_runtime(*args, **kwargs):
             raise RuntimeError("osmnx is not installed")
 
-        with patch("app.server.routers.cities._fetch_osm_data", side_effect=raise_runtime):
+        with patch("app.server.core.city_data.fetch_osm_data", side_effect=raise_runtime):
             resp = client.post(
                 "/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
         assert resp.status_code == 500
@@ -275,7 +275,7 @@ class TestCitiesPostCaching:
             "city_pipeline_version": 2,
         }
 
-        with patch("app.server.routers.cities._fetch_osm_data", return_value=fresh_payload) as mock_fn:
+        with patch("app.server.core.city_data.fetch_osm_data", return_value=fresh_payload) as mock_fn:
             resp = client.post("/api/cities", json={**self.SMALL_BBOX, "layers": self.LAYERS})
 
         assert resp.status_code == 200

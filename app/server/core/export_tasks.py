@@ -31,6 +31,7 @@ class ExportTask:
     media_type: str = "application/octet-stream"
     headers: dict[str, str] = field(default_factory=dict)
     created: float = field(default_factory=time.time)
+    finished: float | None = None
 
     def update(self, progress: int, message: str) -> None:
         self.progress = progress
@@ -38,6 +39,7 @@ class ExportTask:
 
     def complete(self, result_path: str, filename: str, headers: dict = None) -> None:
         self.status = "complete"
+        self.finished = time.time()
         self.progress = 100
         self.message = "Complete"
         self.result_path = result_path
@@ -47,6 +49,7 @@ class ExportTask:
 
     def fail(self, message: str) -> None:
         self.status = "error"
+        self.finished = time.time()
         self.message = message
 
 
@@ -56,10 +59,15 @@ _TASK_TTL = 300  # seconds before stale tasks are cleaned up
 
 
 def _cleanup_stale_tasks() -> None:
-    """Remove tasks older than _TASK_TTL seconds."""
+    """Remove tasks that finished more than _TASK_TTL seconds ago.
+
+    Running tasks are never swept: a city model can take several minutes, and
+    sweeping by creation time deleted it before the client could download it.
+    """
     cutoff = time.time() - _TASK_TTL
     with _export_tasks_lock:
-        stale = [tid for tid, t in _export_tasks.items() if t.created < cutoff]
+        stale = [tid for tid, t in _export_tasks.items()
+                 if t.finished is not None and t.finished < cutoff]
     for tid in stale:
         with _export_tasks_lock:
             task = _export_tasks.pop(tid, None)
@@ -112,7 +120,7 @@ def get_task_file(task_id: str):
 def start_export_task(data: dict, fmt: str) -> str:
     """Start an export in a background thread. Returns task_id."""
     # Lazy imports to avoid circular dependency with export.py
-    from app.server.core.export import _run_export_pipeline, generate_puzzle_3mf
+    from app.server.core.export import _run_export_pipeline, generate_puzzle
 
     _cleanup_stale_tasks()
 
@@ -124,7 +132,10 @@ def start_export_task(data: dict, fmt: str) -> str:
     def _run():
         try:
             if fmt == "puzzle":
-                generate_puzzle_3mf(data, task=task)
+                generate_puzzle(data, task)
+            elif fmt == "city":
+                from app.server.core.city_model_task import run_city_model
+                run_city_model(data, task)
             else:
                 _run_export_pipeline(data, fmt, task)
         except Exception as exc:

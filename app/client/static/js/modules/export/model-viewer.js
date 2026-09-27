@@ -7,7 +7,6 @@
  *   previewModelIn3D()                          — build/replace terrain in viewer
  *   haversineDiagKm(N, S, E, W)                — bbox diagonal in km
  *   updatePuzzlePreview()                       — draw puzzle cut lines in viewer
- *   exportPuzzle3MF()                           — stub: puzzle 3MF export
  *   window.setViewerAutoRotate(val)             — set auto-rotate flag from app.js
  *   window.resetViewerCamera()                  — fit camera to current mesh
  *   window.rebuildViewerColors(cmap)            — recolor mesh from a colormap name
@@ -447,6 +446,8 @@ function _readBuildParams() {
         base_height:      _num('exportBaseHeight', 5),
         exaggeration:     _num('exportExaggeration', 1.0, { positive: true }),
         mm_per_pixel:     _num('mmPerPixel', 1.0, { positive: true }),
+        z_mode:           document.getElementById('exportZMode')?.value || 'auto',
+        median_size:      parseInt(document.getElementById('exportMedian')?.value ?? '3', 10),
         sea_level_cap:    checked('exportSeaLevelCap'),
         engrave_label:    checked('exportEngraveLabel'),
         label_text:       document.getElementById('exportLabelText')?.value
@@ -456,6 +457,41 @@ function _readBuildParams() {
         contour_style:    document.getElementById('exportContourStyle')?.value || 'engraved',
     };
 }
+
+/**
+ * Remembers the last preview request so an identical one is not sent again.
+ *
+ * Every DEM re-render (recolour, rescale, a layer finishing its load) calls the
+ * auto-rebuild, and so does entering the Extrude view; none of them change the
+ * mesh, but each used to POST the same body and have the server rebuild the same
+ * 700k-face mesh. The request body fully determines the mesh (it carries the DEM
+ * handle, or the edited values themselves), so its serialisation is the key.
+ *
+ * A request is skipped while an identical one is in flight, or once it has
+ * succeeded and its mesh is still the one shown; a failed one may be retried.
+ * Pure (no DOM), so it is unit-tested directly.
+ */
+function _createPreviewGate() {
+    let last = null;   // { key, state: 'pending' | 'done' | 'failed' }
+    return {
+        /** True if a request with this key would repeat the in-flight or shown mesh. */
+        isDuplicate(key, meshShown) {
+            if (last === null || last.key !== key) return false;
+            return last.state === 'pending' || (last.state === 'done' && meshShown);
+        },
+        /** Record a request about to be sent; returns the ticket to settle. */
+        begin(key) {
+            last = { key, state: 'pending' };
+            return last;
+        },
+        /** Mark a request finished. A ticket superseded by a newer begin() is ignored. */
+        settle(ticket, ok) {
+            if (ticket === last) last.state = ok ? 'done' : 'failed';
+        },
+    };
+}
+
+const _previewGate = _createPreviewGate();
 
 // Rebuilds fire on every settings change, so two can overlap. Each request
 // takes a number; a response that is not the latest is dropped, or a slow
@@ -468,7 +504,22 @@ async function previewModelIn3D() {
         window.showToast('Load a DEM first (Edit tab → Reload).', 'warning'); return;
     }
 
+    const build = _readBuildParams();
+    const ds = window._demSettings ? window._demSettings() : {};
+    const body = {
+        ...ds,
+        ...build,
+        // View-only: the exported file is always a closed solid. Absent
+        // checkbox means solid, matching the server default.
+        solid: document.getElementById('viewerSolidPreview')?.checked ?? true,
+    };
+    const key = JSON.stringify(body);
+    // Once generatedModelData is cleared (a failed rebuild, a reset) the viewer no
+    // longer shows this key's mesh, so the same body is worth sending again.
+    if (_previewGate.isDuplicate(key, !!window.appState.generatedModelData)) return;
+
     const seq = ++_previewSeq;
+    const ticket = _previewGate.begin(key);
     const statusEl = document.getElementById('modelStatus');
     if (statusEl) statusEl.textContent = '⏳ Building mesh…';
     document.getElementById('modelViewerContainer')?.classList.add('mesh-building');
@@ -477,15 +528,7 @@ async function previewModelIn3D() {
 
     const hadModel = !!window.appState.generatedModelData;
     try {
-        const build = _readBuildParams();
-        const ds = window._demSettings ? window._demSettings() : {};
-        const { data, error: previewErr } = await window.api.export.preview({
-            ...ds,
-            ...build,
-            // View-only: the exported file is always a closed solid. Absent
-            // checkbox means solid, matching the server default.
-            solid: document.getElementById('viewerSolidPreview')?.checked ?? true,
-        });
+        const { data, error: previewErr } = await window.api.export.preview(body);
         if (seq !== _previewSeq) return;          // superseded by a newer rebuild
         if (previewErr) throw new Error(previewErr);
 
@@ -508,6 +551,7 @@ async function previewModelIn3D() {
             exaggeration: build.exaggeration,
             baseHeight: build.base_height,
         };
+        _previewGate.settle(ticket, true);
         window._setExportButtonsEnabled?.(true);
         window.appState._updateWorkflowStepper?.();
         if (statusEl) {
@@ -524,6 +568,7 @@ async function previewModelIn3D() {
             window.showToast('3D preview ready — drag to rotate, shift+drag to pan, scroll to zoom.', 'success');
         }
     } catch (e) {
+        _previewGate.settle(ticket, false);
         if (seq !== _previewSeq) return;
         // The form no longer matches any mesh, so there is nothing honest to
         // export: drop the stale model and disable the buttons until a rebuild
@@ -731,92 +776,6 @@ function updatePuzzlePreview() {
     needsRender = true;
 }
 
-async function exportPuzzle3MF() {
-    const region = window.appState?.selectedRegion;
-    if (!region) { window.showToast('Select a region first', 'warning'); return; }
-    const md = window.appState?.generatedModelData;
-    if (!md) { window.showToast('Please generate a model first', 'warning'); return; }
-
-    const pX = parseInt(document.getElementById('splitCols')?.value) || 3;
-    const pY = parseInt(document.getElementById('splitRows')?.value) || 3;
-    if (pX * pY > 64) { window.showToast('Too many pieces (max 64 total)', 'warning'); return; }
-
-    const connectorMm = parseFloat(document.getElementById('splitPuzzleM')?.value) || 50;
-    const connectorsN = parseInt(document.getElementById('splitPuzzleBaseN')?.value) || 10;
-    const borderH = parseFloat(document.getElementById('splitBorderHeight')?.value) || 1.0;
-    const borderOff = parseFloat(document.getElementById('splitBorderOffset')?.value) || 5.0;
-    const includeBorder = document.getElementById('splitIncludeBorder')?.checked ?? true;
-
-    const statusEl = document.getElementById('modelStatus');
-    const setStatus = (msg) => { if (statusEl) statusEl.textContent = msg; };
-
-    try {
-        setStatus(`Starting puzzle export (${pX}×${pY})...`);
-
-        // Same DEM and build fields as the preview. This sent
-        // `md.resolution`, which does not exist, so every puzzle came out at
-        // the server's 20 mm default and 1 mm per pixel.
-        const body = {
-            ...(md.demSettings || window._demSettings?.() || {}),
-            ...md.buildParams,
-            name: region.name || 'terrain',
-            split_cols: pX,
-            split_rows: pY,
-            connector_size_mm: connectorMm,
-            connectors_per_edge: connectorsN,
-            border_height_mm: borderH,
-            border_offset_mm: borderOff,
-            include_border: includeBorder,
-        };
-
-        // Start the async task
-        const startResp = await fetch('/api/export/puzzle', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        if (!startResp.ok) {
-            const err = await startResp.json();
-            throw new Error(err.error || 'Failed to start puzzle export');
-        }
-        const { task_id } = await startResp.json();
-
-        // Poll for progress
-        let status = { status: 'running', progress: 0 };
-        while (status.status === 'running') {
-            await new Promise(r => setTimeout(r, 300));
-            const pollResp = await fetch(`/api/export/status/${encodeURIComponent(task_id)}`);
-            if (!pollResp.ok) throw new Error('Lost connection to export task');
-            status = await pollResp.json();
-            setStatus(`Puzzle: ${status.message} (${status.progress}%)`);
-        }
-
-        if (status.status === 'error') throw new Error(status.message || 'Puzzle export failed');
-
-        // Download
-        setStatus('Downloading puzzle 3MF...');
-        const dlResp = await fetch(`/api/export/download/${encodeURIComponent(task_id)}`);
-        if (!dlResp.ok) throw new Error('Download failed');
-        const blob = await dlResp.blob();
-
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `${region.name || 'terrain'}_puzzle.3mf`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(a.href);
-
-        const pieces = dlResp.headers.get('X-Piece-Count') || (pX * pY);
-        window.showToast(`Puzzle 3MF ready - ${pieces} pieces`, 'success', 4000);
-        setStatus(`Puzzle export complete (${pieces} pieces)`);
-    } catch (e) {
-        console.error('Puzzle export error:', e);
-        window.showToast('Puzzle export failed: ' + e.message, 'error');
-        setStatus('Puzzle export failed');
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -855,7 +814,6 @@ window.previewModelIn3D     = previewModelIn3D;
 window.haversineDiagKm      = haversineDiagKm;
 window.updatePuzzlePreview  = updatePuzzlePreview;
 window._readBuildParams     = _readBuildParams;
-window.exportPuzzle3MF      = exportPuzzle3MF;
 window.setViewerAutoRotate  = setViewerAutoRotate;
 window.resetViewerCamera    = resetViewerCamera;
 window.rebuildViewerColors  = _rebuildColors;

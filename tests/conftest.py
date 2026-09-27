@@ -125,3 +125,15 @@ def _isolate_export_tasks():
                 os.unlink(path)
             except OSError:
                 pass
+
+
+@pytest.fixture(autouse=True)
+def _no_live_height_enhancement(request, monkeypatch):
+    """Keep POST /api/cities offline: height enhancement queries lidar and raster services.
+
+    Tests of the enhancement itself, and integration tests, get the real thing.
+    """
+    if "test_city_height_enhance" in request.node.nodeid or request.node.get_closest_marker("integration"):
+        return
+    import app.server.core.city_data as city_data
+    monkeypatch.setattr(city_data, "enhance_city_data", lambda result, *a, **k: result)

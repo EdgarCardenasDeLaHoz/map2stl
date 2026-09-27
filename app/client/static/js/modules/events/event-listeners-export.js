@@ -80,48 +80,7 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
     });
     // cityRoadWidth removed — road canvas width is now a fixed default; road_depression_m is for 3D export
 
-    document.getElementById('exportCityBtn')?.addEventListener('click', async () => {
-        const buildings = window.appState?.osmCityData?.buildings;
-        const demData = window.appState.lastDemData;
-        if (!buildings?.features?.length) {
-            window.showToast?.('Load city data first', 'warning'); return;
-        }
-        if (!demData?.values?.length) {
-            window.showToast?.('Load DEM first', 'warning'); return;
-        }
-        const bbox = window.appState.currentDemBbox || window.appState.selectedRegion;
-        if (!bbox) { window.showToast?.('No bounding box', 'warning'); return; }
-
-        const btn = document.getElementById('exportCityBtn');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ Exporting…'; }
-        try {
-            const ds = window._demSettings ? window._demSettings() : {};
-            const payload = {
-                ...ds,
-                model_height_mm: parseFloat(document.getElementById('exportModelHeight')?.value) || 20,
-                base_mm: parseFloat(document.getElementById('exportBaseHeight')?.value) || 5,
-                building_z_scale: parseFloat(document.getElementById('cityBuildingScale')?.value) || 0.5,
-                simplify_terrain: document.getElementById('citySimplifyMesh')?.checked ?? true,
-                name: (window.appState.selectedRegion?.name || 'city').replace(/[^a-z0-9_-]/gi, '_'),
-            };
-            const { data: blob, error: exportErr } = await window.api.cities.export3mf(payload);
-            if (exportErr) throw new Error(exportErr);
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = payload.name + '_city.3mf';
-            a.click();
-            URL.revokeObjectURL(url);
-            window.showToast?.('City 3MF exported', 'success');
-        } catch (e) {
-            window.showToast?.('Export failed: ' + e.message, 'error');
-        } finally {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = '<span class="btn-icon">🏙️</span> 3MF + Buildings';
-            }
-        }
-    });
+    document.getElementById('exportCityBtn')?.addEventListener('click', () => window.exportCityModel?.());
 
     const puzzleEnabledChk = document.getElementById('puzzleEnabled');
     const puzzleParams = document.getElementById('puzzleParams');
@@ -131,7 +90,7 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
             window.updatePuzzlePreview?.();
         });
     }
-    ['splitCols', 'splitRows', 'splitPuzzleM', 'splitBorderHeight'].forEach(id => {
+    ['splitCols', 'splitRows', 'splitKnobWidth', 'splitKnobDepth'].forEach(id => {
         document.getElementById(id)?.addEventListener('input', () => window.updatePuzzlePreview?.());
     });
 
@@ -164,5 +123,5 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
     });
 
     document.getElementById('exportPuzzle3MFBtn')
-        ?.addEventListener('click', () => window.exportPuzzle3MF?.());
+        ?.addEventListener('click', () => window.exportPuzzle?.());
 };

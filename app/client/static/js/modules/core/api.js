@@ -291,9 +291,6 @@ window.api = (() => {
         /** POST /api/cities/raster */
         raster: (body, signal) => _fetch('/api/cities/raster', signal ? { ..._json(body), signal } : _json(body)),
 
-        /** POST /api/cities/export3mf → blob */
-        export3mf: (body) => _fetch('/api/cities/export3mf', _json(body)),
-
         /** GET /api/cities/google3d-available */
         google3dAvailable: () => _fetch('/api/cities/google3d-available'),
 

@@ -60,7 +60,7 @@
                 <label for="mmPerPixel" title="Horizontal scale: how many millimetres each DEM pixel becomes in the printed model. 1.0 means an N×M DEM produces an N×M mm STL.">Resolution (mm/px)</label>
                 <input type="number" id="mmPerPixel" value="1.0" min="0.05" max="20" step="0.05" class="ctrl-input-sm">
 
-                <label for="exportModelHeight" title="Physical height of the tallest terrain point in mm.">Height (mm)</label>
+                <label for="exportModelHeight" title="Relief height in mm when the vertical scale is Fit (and Auto on regions over 20 km diagonal).">Fit height (mm)</label>
                 <input type="number" id="exportModelHeight" value="30" min="1" max="200" step="1" class="ctrl-input-sm">
 
                 <label for="exportBaseHeight" title="Solid base plate thickness in mm.">Base (mm)</label>
@@ -68,6 +68,20 @@
 
                 <label for="exportExaggeration" title="Vertical exaggeration multiplier applied to the mesh.">Exaggeration</label>
                 <input type="number" id="exportExaggeration" value="1.0" step="0.1" min="0.1" max="10" class="ctrl-input-sm">
+
+                <label for="exportZMode" title="Auto: true scale x exaggeration when the region diagonal is under 20 km (buildings and terrain share it), otherwise the relief is fitted to Fit height.">Vertical</label>
+                <select id="exportZMode" class="ctrl-input-sm" style="width:auto;">
+                  <option value="auto" selected>Auto</option>
+                  <option value="true">True scale × exag.</option>
+                  <option value="fit">Fit to height</option>
+                </select>
+
+                <label for="exportMedian" title="Median filter on the DEM: removes the blocky steps of an upsampled DEM.">Smoothing</label>
+                <select id="exportMedian" class="ctrl-input-sm" style="width:auto;">
+                  <option value="0">Off</option>
+                  <option value="3" selected>3×3 median</option>
+                  <option value="5">5×5 median</option>
+                </select>
               </div>
 
               <div style="display:flex;flex-wrap:wrap;gap:6px 14px;margin:10px 0 4px;font-size:11px;">
@@ -186,27 +200,19 @@
                     <input type="number" id="splitRows" value="4" min="1" max="20">
                   </div>
                   <div class="param-group">
-                    <label title="Puzzle connector size in mm">Connector size (mm):</label>
-                    <input type="number" id="splitPuzzleM" value="50" min="5" max="200" step="5">
+                    <label title="Width of the tongue on each shared edge (mm)">Knob width (mm):</label>
+                    <input type="number" id="splitKnobWidth" value="20" min="2" max="200" step="1">
                   </div>
                   <div class="param-group">
-                    <label title="Number of connector bumps per edge">Connectors / edge:</label>
-                    <input type="number" id="splitPuzzleBaseN" value="10" min="1" max="40">
+                    <label title="How far the tongue reaches into the neighbouring piece (mm)">Knob depth (mm):</label>
+                    <input type="number" id="splitKnobDepth" value="8" min="1" max="50" step="0.5">
                   </div>
                   <div class="param-group">
-                    <label title="Raised lip height around each piece base (mm)">Border height (mm):</label>
-                    <input type="number" id="splitBorderHeight" value="1.0" min="0" max="10" step="0.5">
-                  </div>
-                  <div class="param-group">
-                    <label title="Inset from piece edge for raised lip (mm)">Border offset (mm):</label>
-                    <input type="number" id="splitBorderOffset" value="5.0" min="0" max="20" step="0.5">
-                  </div>
-                  <div class="param-group">
-                    <label title="Add a raised lip around each piece base">Include Border:</label>
-                    <input type="checkbox" id="splitIncludeBorder" checked>
+                    <label title="Gap taken off the groove side so printed pieces fit (mm)">Clearance (mm):</label>
+                    <input type="number" id="splitClearance" value="0.3" min="0" max="2" step="0.05">
                   </div>
                   <button id="exportPuzzle3MFBtn" class="btn btn-success" style="width:100%;margin-top:6px;font-size:11px;">
-                    🖨 Export Puzzle 3MF
+                    🧩 Export puzzle (.zip: OBJ pieces + 3MF)
                   </button>
                 </div>
               </CollapsibleSection>
@@ -235,17 +241,42 @@
                 <div id="crossSectionStatus" style="font-size:11px;color:#888;margin-top:4px;"></div>
               </CollapsibleSection>
 
-              <!-- City Export -->
-              <CollapsibleSection title="🏙️ City Export" wrap-style="margin-bottom:10px;">
-                <div class="row-gap6">
-                  <button id="exportCityBtn" class="btn btn-success btn-sm" title="Export terrain + OSM buildings as 3MF.">
-                    <span class="btn-icon">🏙️</span> 3MF + Buildings
-                  </button>
+              <!-- City Model -->
+              <CollapsibleSection title="🏙️ City Model" wrap-style="margin-bottom:10px;">
+                <div style="font-size:10px;color:#aaa;margin-bottom:6px;line-height:1.4;">
+                  Terrain + OSM layers merged into one solid at the Resolution and Vertical
+                  settings. Downloads a .zip: merged STL, 3MF with one part per layer,
+                  report, and puzzle pieces (OBJ) if enabled.
                 </div>
-                <div class="row-gap6" style="margin-top:5px;font-size:10px;color:#aaa;">
-                  <input type="checkbox" id="citySimplifyMesh" checked>
-                  <label for="citySimplifyMesh" style="cursor:pointer;">Simplify terrain mesh</label>
+                <table class="city-layer-table" style="width:100%;font-size:11px;border-collapse:collapse;">
+                  <tr v-for="l in cityLayers" :key="l.id">
+                    <td style="white-space:nowrap;">
+                      <input :id="'cityLayer_' + l.id + '_enabled'" v-model="l.enabled" type="checkbox">
+                      <label :for="'cityLayer_' + l.id + '_enabled'" style="cursor:pointer;">{{ l.label }}</label>
+                    </td>
+                    <td>
+                      <select :id="'cityLayer_' + l.id + '_mode'" v-model="l.mode" :disabled="!l.enabled"
+                              class="ctrl-input-sm" style="width:auto;">
+                        <option v-for="m in l.modes" :key="m" :value="m">{{ m }}</option>
+                      </select>
+                    </td>
+                    <td style="white-space:nowrap;">
+                      <input :id="'cityLayer_' + l.id + '_value'" v-model.number="l.value" type="number"
+                             :disabled="!l.enabled" min="0" step="0.1" class="ctrl-input-sm" style="width:52px;">
+                      <span style="color:#888;">{{ l.mode === 'extrude' ? '× height' : 'mm' }}</span>
+                    </td>
+                  </tr>
+                </table>
+                <div class="param-group" style="margin-top:6px;">
+                  <label for="cityPuzzleEnabled" title="Cut the merged model into interlocking jigsaw pieces">Puzzle pieces:</label>
+                  <input id="cityPuzzleEnabled" type="checkbox">
+                  <label for="cityPieceMm" title="Largest piece size; the grid is chosen so pieces fit (your bed)">max</label>
+                  <input id="cityPieceMm" type="number" value="200" min="30" max="1000" step="10" style="width:56px;"> mm
                 </div>
+                <button id="exportCityBtn" class="btn btn-success btn-sm" style="width:100%;margin-top:6px;"
+                        title="Build terrain + all enabled layers as one model and download a .zip.">
+                  <span class="btn-icon">🏙️</span> Build city model (.zip)
+                </button>
               </CollapsibleSection>
 
               <!-- Print Dimensions + Bed Optimizer -->
@@ -294,6 +325,23 @@ import { ref } from 'vue';
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
 
 const activeTab = ref<'fetch' | 'view' | 'export'>('fetch');
+
+// City Model layers. Defaults mirror city2stl.city_model.DEFAULT_LAYERS; the export
+// handler reads them back from the DOM ids (cityLayer_<id>_enabled/_mode/_value).
+// value: extrude -> multiplier on real height; raised -> mm above; engraved/water -> mm deep.
+const SURFACE = ['raised', 'engraved'];
+const cityLayers = ref([
+    { id: 'buildings', label: 'Buildings', enabled: true, mode: 'extrude', value: 1, modes: ['extrude'] },
+    { id: 'fortifications', label: 'Fortifications', enabled: true, mode: 'extrude', value: 1, modes: ['extrude'] },
+    { id: 'walls', label: 'City walls', enabled: true, mode: 'extrude', value: 1, modes: ['extrude'] },
+    { id: 'towers', label: 'Towers', enabled: true, mode: 'extrude', value: 1, modes: ['extrude'] },
+    { id: 'churches', label: 'Churches', enabled: true, mode: 'extrude', value: 1, modes: ['extrude'] },
+    { id: 'roads', label: 'Roads', enabled: true, mode: 'raised', value: 0.4, modes: SURFACE },
+    { id: 'railways', label: 'Rail', enabled: true, mode: 'raised', value: 0.3, modes: SURFACE },
+    { id: 'trails', label: 'Trails', enabled: true, mode: 'raised', value: 0.3, modes: SURFACE },
+    { id: 'green', label: 'Parks / green', enabled: true, mode: 'raised', value: 0.2, modes: SURFACE },
+    { id: 'waterways', label: 'Water', enabled: true, mode: 'water', value: 1.0, modes: ['water', 'engraved'] },
+]);
 // Auto-rebuild wiring lives in modules/export/model-viewer.js
 // (attached to Fetch-tab inputs and to modelContainer visibility changes).
 

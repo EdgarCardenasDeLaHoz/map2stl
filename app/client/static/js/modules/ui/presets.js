@@ -300,11 +300,9 @@ function collectAllSettings() {
         split: {
             split_rows: _int('splitRows', 4),
             split_cols: _int('splitCols', 4),
-            puzzle_m: _int('splitPuzzleM', 50),
-            puzzle_base_n: _int('splitPuzzleBaseN', 10),
-            border_height: _flt('splitBorderHeight', 1.0),
-            border_offset: _flt('splitBorderOffset', 5.0),
-            include_border: _chk('splitIncludeBorder', true),
+            knob_width_mm: _flt('splitKnobWidth', 20),
+            knob_depth_mm: _flt('splitKnobDepth', 8),
+            clearance_mm: _flt('splitClearance', 0.3),
         },
         city: {
             layers: cityLayers.length ? cityLayers : ['buildings', 'roads', 'waterways'],
@@ -454,14 +452,12 @@ function applyAllSettings(s) {
     if (exp.contour_interval != null) set('exportContourInterval', exp.contour_interval);
     if (exp.contour_style != null) set('exportContourStyle', exp.contour_style);
 
-    // split group — new IDs: splitRows, splitCols, splitPuzzleM, splitPuzzleBaseN, etc.
+    // split group — splitRows, splitCols and the jigsaw knob/clearance fields.
     if (spl.split_rows != null) set('splitRows', spl.split_rows);
     if (spl.split_cols != null) set('splitCols', spl.split_cols);
-    if (spl.puzzle_m != null) set('splitPuzzleM', spl.puzzle_m);
-    if (spl.puzzle_base_n != null) set('splitPuzzleBaseN', spl.puzzle_base_n);
-    if (spl.border_height != null) set('splitBorderHeight', spl.border_height);
-    if (spl.border_offset != null) set('splitBorderOffset', spl.border_offset);
-    if (spl.include_border != null) setChk('splitIncludeBorder', spl.include_border);
+    if (spl.knob_width_mm != null) set('splitKnobWidth', spl.knob_width_mm);
+    if (spl.knob_depth_mm != null) set('splitKnobDepth', spl.knob_depth_mm);
+    if (spl.clearance_mm != null) set('splitClearance', spl.clearance_mm);
 
     // city group — road_depression_m → #cityRoadDepression
     if (city.simplify_tolerance != null) set('citySimplifyTolerance', city.simplify_tolerance);

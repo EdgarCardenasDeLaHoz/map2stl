@@ -69,11 +69,9 @@ def _default_region_settings() -> dict:
         "split": {
             "split_rows": 4,
             "split_cols": 4,
-            "puzzle_m": 50,
-            "puzzle_base_n": 10,
-            "border_height": 1.0,
-            "border_offset": 5.0,
-            "include_border": True,
+            "knob_width_mm": 20.0,
+            "knob_depth_mm": 8.0,
+            "clearance_mm": 0.3,
         },
         "city": {
             "layers": ["buildings", "roads", "waterways"],

@@ -11,50 +11,17 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
 
-from app.server.core.cache import CACHE_ROOT, osm_cache_key, read_osm_cache, write_osm_cache
-from app.server.core.height.service import enhance_city_data as _enhance_city_data
+from app.server.core.cache import CACHE_ROOT, osm_cache_key, read_osm_cache
+from app.server.core.city_data import get_city_layers
 from app.server.core.responses import error_response
 from app.server.core.validation import run_sync, validate_bbox_diagonal
 from app.server.schemas import CityRasterRequest, CityRequest, EnhanceHeightsRequest
-from city2stl.cache_policy import (
-    city_cache_missing_building_parts,
-    city_cache_missing_height_source,
-)
-from city2stl.fetch import fetch_osm_data as _fetch_osm_data
-from city2stl.mesh import generate_city_3mf
 from city2stl.rasterize import rasterize_city_data as _rasterize_city_data
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cities"])
-
-
-class CityExportRequest(BaseModel):
-    """Request body for POST /api/cities/export3mf.
-
-    DEM and buildings data are resolved from the server-side disk cache.
-    Legacy callers may still pass dem_values/buildings directly — the
-    endpoint accepts both forms.
-    """
-    north: float
-    south: float
-    east: float
-    west: float
-    dem_values:   list[float] | None = None
-    dem_width:    int | None = None
-    dem_height:   int | None = None
-    buildings:    dict[str, Any] | None = None   # GeoJSON FeatureCollection
-    # DEM lookup when dem_values is not provided: handle first, else cache settings
-    dem_id:       str | None = None
-    bbox:         dict[str, float] | None = None
-    dem:          dict[str, Any] | None = None
-    model_height_mm:  float = 20.0
-    base_mm:          float = 5.0
-    building_z_scale: float = 0.5        # mm per real metre for building heights
-    simplify_terrain: bool = True       # Cities 14: reduce terrain triangle count
-    name:             str = "city"
 
 
 def _city_clip_valid_region(req) -> bool:
@@ -110,50 +77,13 @@ async def get_city_data(city_req: CityRequest):
 
     # detail is folded into the cache key (via min_area, which differs
     # between tiers) so full/coarse results never collide.
-    cache_key = osm_cache_key(north, south, east, west,
-                              city_req.simplify_tolerance, min_area)
-
-    # Cache check
-    cached_data = read_osm_cache(cache_key)
-    if cached_data is not None:
-        if city_cache_missing_height_source(cached_data) or city_cache_missing_building_parts(cached_data):
-            logger.info("Ignoring stale OSM cache payload: %s", cache_key)
-        else:
-            logger.info(
-                f"Serving OSM data from .json.gz cache: {cache_key}")
-            return JSONResponse(content=cached_data)
-
     try:
-        result = await run_sync(
-            _fetch_osm_data, north, south, east, west, layers,
-            city_req.simplify_tolerance, min_area,
-        )
+        result = await run_sync(get_city_layers, north, south, east, west, layers,
+                                city_req.simplify_tolerance, min_area)
     except Exception as e:
         logger.error(f"OSM fetch error: {e}")
         return error_response(f"OSM fetch failed: {str(e)}")
-
-    try:
-        result = await run_sync(
-            _enhance_city_data,
-            result,
-            north,
-            south,
-            east,
-            west,
-        )
-    except Exception as enhance_err:
-        logger.warning(
-            "City height auto-enhancement skipped: %s", enhance_err)
-
-    result.setdefault("city_pipeline_version", 2)
-
-    result["cache_key"] = cache_key
     result["diagonal_km"] = round(diag_km, 2)
-    has_error = any("error" in v for v in result.values()
-                    if isinstance(v, dict))
-    if not has_error:
-        write_osm_cache(cache_key, result)
-
     return JSONResponse(content=result)
 
 
@@ -309,67 +239,6 @@ async def get_city_raster(req: CityRasterRequest):
     result = _sanitize_raster_result(result)
 
     return JSONResponse(content=result)
-
-
-@router.post("/api/cities/export3mf")
-async def export_city_3mf(req: CityExportRequest):
-    """
-    Generate a 3MF file containing the terrain mesh plus extruded building prisms.
-    Cities 10+12.
-
-    Expects DEM values (from /api/terrain/dem) and a buildings GeoJSON
-    FeatureCollection (from /api/cities) with height_m and terrain_z properties.
-    """
-    # Resolve DEM from cache when not provided
-    dem_values = req.dem_values
-    dem_width = req.dem_width
-    dem_height = req.dem_height
-    if not dem_values:
-        from app.server.core.export_params import resolve_dem
-        req_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
-        resolved = resolve_dem(req_dict)
-        if resolved:
-            dem_values, dem_height, dem_width = resolved
-        else:
-            return error_response("DEM not found in cache — load DEM first", 400)
-
-    # Resolve buildings from OSM cache when not provided
-    buildings = req.buildings
-    if (not buildings or not buildings.get("features")):
-        osm_key = osm_cache_key(req.north, req.south, req.east, req.west)
-        osm_data = read_osm_cache(osm_key)
-        if osm_data and osm_data.get("buildings"):
-            buildings = osm_data["buildings"]
-            logger.debug(
-                "City export: resolved buildings from OSM cache (%s)", osm_key[:8])
-        else:
-            return error_response("Buildings not found in cache — load city data first", 400)
-
-    try:
-        bbox = {"north": req.north, "south": req.south,
-                "east": req.east, "west": req.west}
-        three_mf_bytes = await run_sync(
-            generate_city_3mf,
-            buildings_geojson=buildings,
-            dem_values=dem_values,
-            dem_width=dem_width,
-            dem_height=dem_height,
-            bbox=bbox,
-            model_height_mm=req.model_height_mm,
-            base_mm=req.base_mm,
-            building_z_scale=req.building_z_scale,
-            simplify_terrain=req.simplify_terrain,
-            name=req.name,
-        )
-        filename = f"{req.name}_city.3mf"
-        return Response(
-            content=three_mf_bytes,
-            media_type="application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
-    except Exception as e:
-        logger.error(f"City 3MF export error: {e}", exc_info=True)
-        return error_response("3MF export failed")
 
 
 # ---------------------------------------------------------------------------

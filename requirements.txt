@@ -34,6 +34,7 @@ h5py==3.16.0
 psutil==7.0.0
 ipython==9.1.0       # IPython.display, imported at the top of app/session/terrain_session.py
 pymeshlab==2025.7.post1  # numpy2stl decimate_mesh + building_simplify
+manifold3d==3.5.4      # city model union/difference and puzzle cuts (watertight booleans)
 
 # Geo raster I/O (used by height providers: WSF3D, Copernicus, 3DEP, nDSM)
 rasterio>=1.3
@@ -45,6 +46,10 @@ rasterio>=1.3
 # behaviour and those cities get no coarse height layer.
 tifffile>=2024.1
 imagecodecs>=2024.1
+
+# USGS 3DEP lidar building heights (US cities): COPC point clouds read by HTTP range from
+# Microsoft Planetary Computer. Absent, US cities fall back to the raster height providers.
+laspy[lazrs]==2.7.0
 
 # Satellite imagery / geo raster I/O (skimage.io in geo2stl/tiles.py)
 scikit-image==0.26.0

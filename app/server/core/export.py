@@ -17,6 +17,7 @@ import numpy as np
 from starlette.background import BackgroundTask
 
 from app.server.core.export_params import (
+    ExportContext,
     _parse_export_params,
     resolve_dem,
 )
@@ -44,10 +45,7 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
 
     # Step 1: Prepare DEM
     task.update(10, "Preparing DEM array...")
-    im, im_min, im_max = _prepare_dem_array(
-        p.dem_values, p.height, p.width,
-        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
-    )
+    im, im_min, im_max = _prepare_dem_array(p)
 
     # Step 2: Optional label engraving
     if engrave_label and label_text:
@@ -115,60 +113,45 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
     task.complete(temp_path, f"{p.name}.{fmt}", headers)
 
 
-def _prepare_dem_array(
-    dem_values: list,
-    height: int,
-    width: int,
-    model_height: float,
-    base_height: float,
-    exaggeration: float,
-    sea_level_cap: bool,
-) -> tuple[np.ndarray, float, float]:
+def _prepare_dem_array(p: ExportContext) -> tuple[np.ndarray, float, float]:
     """
-    Reshape, sea-level-clip, normalise, exaggerate, and add base to a DEM array.
+    Reshape, fill, median-filter, sea-level-clip and scale the DEM into model mm.
 
-    Returns ``(im, im_min, im_max)``. ``im`` is in model-mm space with the base
-    added; ``im_min``/``im_max`` are the source extents in metres, which is what
-    the contour spacing needs in order to convert a contour interval in metres
-    into millimetres.
+    Returns ``(im, im_min, im_max)``: ``im`` is the top surface in mm with the base
+    added; ``im_min``/``im_max`` are the source extents in metres (the contour
+    spacing converts a contour interval in metres into millimetres with them).
 
-    Vertical relief comes out as ``model_height * exaggeration`` millimetres.
-    Exaggeration is applied *after* the normalisation, not before, because a
-    positive constant cancels exactly through a min-max normalisation:
-    ``(k*x - k*min) / (k*max - k*min) == (x - min) / (max - min)``. Applying it
-    first, as this did, left the slider with no effect at all on the exported
-    mesh. Reordering the clamp does not help either - both ``min(k*x, 0)`` and
-    ``max(k*x, 0)`` equal ``k`` times the unexaggerated clamp for ``k > 0`` - so
-    the multiplication has to land on the far side of the normalisation.
+    Vertical scale comes from ``city2stl.city_model.choose_scale``: ``z_mode``
+    "true" is true scale x exaggeration; "fit" maps the relief to
+    ``model_height * exaggeration`` mm (the exaggeration is applied after the
+    normalisation - before it, it cancels out); "auto" picks true scale for
+    regions under 20 km diagonal, fit above, and falls back to fit when no bbox
+    is known. A 3x3 median (``median_size``) removes the blocky artefacts of an
+    upsampled DEM. NaNs (projection edges, JSON nulls) are filled with the lowest
+    real elevation so they print as the floor of the relief.
     """
-    im = np.array(dem_values, dtype=np.float64).reshape(height, width)
+    from city2stl.city_model import choose_scale, prepare_dem
 
-    # JSON nulls arrive as NaN (projection edges, inline values). One NaN made
-    # array_to_mesh's mask value NaN, every comparison against it False, and the
-    # mesh empty - an 84-byte STL reported as watertight. Fill them with the
-    # lowest real elevation so they print as the floor of the relief.
-    nan_mask = ~np.isfinite(im)
-    if nan_mask.all():
-        raise ValueError("DEM contains no finite elevation values")
-    if nan_mask.any():
-        im[nan_mask] = float(np.nanmin(np.where(nan_mask, np.nan, im)))
+    im = np.array(p.dem_values, dtype=np.float64).reshape(p.height, p.width)
+    im = prepare_dem(im, p.median_size)
 
-    if sea_level_cap:
-        # Raise everything below sea level up to zero, so the ocean floor prints
-        # as a flat sea. This was np.minimum, which did the exact opposite: it
-        # flattened every piece of land to zero and kept only the trenches.
+    if p.sea_level_cap:
+        # Raise everything below sea level to zero so the sea prints flat. (This was
+        # np.minimum once, which flattened the land and kept only the trenches.)
         im = np.maximum(im, 0.0)
 
-    im_min = float(np.nanmin(im))
-    im_max = float(np.nanmax(im))
-    if im_max > im_min:
-        im = (im - im_min) / (im_max - im_min) * model_height * exaggeration
+    im_min = float(im.min())
+    im_max = float(im.max())
+    z_mode = p.z_mode if p.bbox else "fit"
+    if im_max > im_min or z_mode == "true":
+        scale = choose_scale(p.bbox or {"north": 1, "south": 0, "east": 1, "west": 0},
+                             im.shape, im_min, im_max, mm_per_px=p.mm_per_pixel,
+                             z_mode=z_mode, exaggeration=p.exaggeration,
+                             fit_height_mm=p.model_height, base_mm=p.base_height)
+        im = scale.z_mm(im)
     else:
-        # A genuinely flat region (a lake, a salt pan) is legitimate. Emit a
-        # flat plate rather than dividing by zero.
-        im = np.zeros_like(im)
-
-    im = im + base_height
+        # A genuinely flat region (a lake, a salt pan) prints as a flat plate.
+        im = np.full_like(im, p.base_height)
     return im, im_min, im_max
 
 
@@ -257,10 +240,7 @@ def _prepare_export_mesh(p, data: dict):
     """
     from numpy2stl import array_to_mesh  # noqa: F401
 
-    im, im_min, im_max = _prepare_dem_array(
-        p.dem_values, p.height, p.width,
-        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
-    )
+    im, im_min, im_max = _prepare_dem_array(p)
 
     engrave_label = bool(data.get("engrave_label", False))
     label_text = data.get("label_text", p.name)
@@ -511,10 +491,7 @@ def generate_mesh_preview(data: dict):
             status_code=400,
         )
 
-    im, im_min, im_max = _prepare_dem_array(
-        p.dem_values, p.height, p.width,
-        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
-    )
+    im, im_min, im_max = _prepare_dem_array(p)
 
     # Mirror the same label/contour steps as _run_export_pipeline so the live
     # 3D preview matches what the file export will actually produce, instead
@@ -562,227 +539,43 @@ def generate_mesh_preview(data: dict):
     })
 
 
-def generate_puzzle_3mf(data: dict, task: ExportTask | None = None):
-    """Split a DEM into N×M pieces with alignment tabs and export as 3MF.
+def generate_puzzle(data: dict, task: ExportTask) -> None:
+    """The terrain model (same mesh as the STL export) cut into jigsaw pieces.
 
-    Each piece is a watertight solid mesh. Adjacent pieces have interlocking
-    tab/slot connectors on their shared edges so the printed tiles snap
-    together.  All pieces are packed into a single 3MF file as separate
-    named objects.
-
-    Parameters (in *data* dict)
-    ---------------------------
-    dem_values, height, width, model_height, base_height, exaggeration,
-    sea_level_cap, name — same as other export functions.
-    split_cols : int   — columns in the puzzle grid (X).
-    split_rows : int   — rows in the puzzle grid (Y).
-    connector_size_mm : float — width of each tab/slot connector (mm).
-    connectors_per_edge : int — number of connectors per shared edge.
-    border_height_mm : float — raised lip height around each piece base.
-    border_offset_mm : float — inset of lip from piece edge.
-    include_border : bool — whether to add the raised lip.
+    Result: a zip with one OBJ per piece and a 3MF of all pieces
+    (app/server/core/puzzle.py). Request: the usual export fields plus
+    ``split_cols``/``split_rows`` (or ``piece_mm``), ``knob_width_mm``,
+    ``knob_depth_mm``, ``clearance_mm``.
     """
-    from fastapi.responses import FileResponse, JSONResponse
-    from numpy2stl import array_to_mesh, write3MF
+    import zipfile
 
-    def _progress(pct, msg):
-        if task:
-            task.update(pct, msg)
+    from app.server.core.puzzle import cut_to_zip
 
     p = _parse_export_params(data)
     if not p.dem_values or not p.height or not p.width:
-        if task:
-            task.fail("Missing DEM data")
-            return None
-        return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
-
-    split_cols = int(data.get("split_cols", 3))
-    split_rows = int(data.get("split_rows", 3))
-    connector_mm = float(data.get("connector_size_mm", 50))
-    connectors_n = int(data.get("connectors_per_edge", 10))
-    border_h = float(data.get("border_height_mm", 1.0))
-    _border_off = float(data.get("border_offset_mm", 5.0))
-    include_border = bool(data.get("include_border", True))
-
-    if split_cols < 1 or split_rows < 1:
-        msg = "split_cols and split_rows must be >= 1"
-        if task:
-            task.fail(msg)
-            return None
-        return JSONResponse(content={"error": msg}, status_code=400)
-    if split_cols * split_rows > 64:
-        msg = "Maximum 64 pieces (cols * rows <= 64)"
-        if task:
-            task.fail(msg)
-            return None
-        return JSONResponse(content={"error": msg}, status_code=400)
-
-    _progress(5, "Preparing DEM array...")
-    im, _, _ = _prepare_dem_array(
-        p.dem_values, p.height, p.width,
-        p.model_height, p.base_height, p.exaggeration, p.sea_level_cap,
-    )
-
-    H, W = im.shape
-    # Tab geometry in pixel space
-    tab_depth_px = max(2, int(round(connectors_n * 0.5)))
-    _tab_width_px = max(3, int(round(connector_mm / max(1, W / split_cols) * (W / split_cols) * 0.15)))
-
-    models = {}
-    total = split_cols * split_rows
-    for row in range(split_rows):
-        for col in range(split_cols):
-            idx = row * split_cols + col
-            _progress(10 + int(80 * idx / total),
-                      f"Generating piece {idx + 1}/{total}...")
-
-            # Slice boundaries
-            r0 = int(round(row * H / split_rows))
-            r1 = int(round((row + 1) * H / split_rows))
-            c0 = int(round(col * W / split_cols))
-            c1 = int(round((col + 1) * W / split_cols))
-
-            piece = im[r0:r1, c0:c1].copy()
-            ph, pw = piece.shape
-
-            # --- Alignment tabs ---
-            # Add tabs (protrusions) on right/bottom edges of even-index
-            # pieces, and matching slots (indentations) on left/top edges
-            # of odd-index neighbours.
-            piece = _add_alignment_features(
-                piece, row, col, split_rows, split_cols,
-                tab_depth_px, p.base_height, border_h if include_border else 0,
-            )
-
-            vertices, faces = array_to_mesh(piece, floor_val=0.0)  # floor at z=0 so base_height is a real thickness
-
-            # Offset vertices to world position so pieces don't overlap
-            # when loaded in a slicer, then orient the whole layout north-up
-            # the same way the single-piece export is.
-            if len(vertices) > 0:
-                vertices[:, 0] += c0  # X offset (still pixel units)
-                vertices[:, 1] += r0  # Y offset
-                vertices, faces = _north_up(vertices, faces, H)
-                vertices = _scale_xy(vertices, p.mm_per_pixel)
-
-            mesh = _repair_mesh(vertices, faces)
-
-            piece_name = f"{p.name}_r{row}c{col}"
-            models[piece_name] = (mesh.vertices, mesh.faces)
-            logger.info("Piece %s: %d verts, %d faces",
-                        piece_name, len(mesh.vertices), len(mesh.faces))
-
-    _progress(92, "Writing 3MF...")
-    tf = tempfile.NamedTemporaryFile(delete=False, suffix=".3mf")
-    temp_path = tf.name
-    tf.close()
-    write3MF(temp_path, models)
-
-    total_faces = sum(len(f) for _, f in models.values())
-    logger.info("Puzzle 3MF: %d pieces, %d total faces", len(models), total_faces)
-
-    headers = {
-        **_disposition(f"{p.name}_puzzle.3mf"),
-        "X-Piece-Count": str(len(models)),
-        "X-Total-Faces": str(total_faces),
-        "Access-Control-Expose-Headers": "X-Piece-Count, X-Total-Faces",
-    }
-
-    if task:
-        task.complete(temp_path, f"{p.name}_puzzle.3mf", headers)
-        return None
-
-    return FileResponse(
-        temp_path,
-        filename=f"{p.name}_puzzle.3mf",
-        media_type="application/octet-stream",
-        background=BackgroundTask(os.unlink, temp_path),
-        headers=headers,
-    )
-
-
-def _add_alignment_features(
-    piece: np.ndarray,
-    row: int, col: int,
-    n_rows: int, n_cols: int,
-    tab_depth_px: int,
-    base_height: float,
-    border_height: float,
-) -> np.ndarray:
-    """Add tab protrusions and slot indentations to piece edges.
-
-    Convention: even-index edges get tabs (raised), odd-index edges get
-    slots (lowered).  Exterior edges are left flat.
-    """
-    ph, pw = piece.shape
-    tab_h = base_height * 0.4  # tab protrusion height (mm)
-    slot_depth = base_height * 0.35  # slot depth (mm) — slightly less for clearance
-
-    # Determine number and size of tabs along each edge
-    def _apply_edge_tabs(arr_slice, is_tab):
-        """Left/right edge tabs, spaced down the rows. Modifies in place.
-
-        The slice here is (piece height, tab depth), so the tabs belong along
-        the height. This used to index the same axis as the top/bottom variant,
-        which spread them across the handful of pixels of tab depth and left one
-        ridge running the full length of the edge instead of discrete tabs.
-        """
-        h, w = arr_slice.shape
-        n_tabs = max(1, min(3, h // 8))  # 1-3 tabs depending on edge length
-        tab_len = max(2, h // (n_tabs * 3))  # each tab is ~1/3 of spacing
-        spacing = h // (n_tabs + 1)
-        for t in range(n_tabs):
-            cy = spacing * (t + 1)
-            y0 = max(0, cy - tab_len // 2)
-            y1 = min(h, cy + tab_len // 2)
-            if is_tab:
-                arr_slice[y0:y1, :] += tab_h
-            else:
-                arr_slice[y0:y1, :] = np.maximum(
-                    arr_slice[y0:y1, :] - slot_depth, 0.1)
-
-    depth = min(tab_depth_px, max(2, ph // 10), max(2, pw // 10))
-
-    # Right edge: tab if col is even, slot if col is odd (skip last column)
-    if col < n_cols - 1:
-        edge = piece[:, -depth:]
-        _apply_edge_tabs(edge, is_tab=(col % 2 == 0))
-
-    # Left edge: match right edge of left neighbour
-    if col > 0:
-        edge = piece[:, :depth]
-        _apply_edge_tabs(edge, is_tab=(col % 2 != 0))
-
-    # Bottom edge: tab if row is even, slot if row is odd (skip last row)
-    if row < n_rows - 1:
-        edge = piece[-depth:, :]
-        _apply_edge_tabs_v(edge, is_tab=(row % 2 == 0),
-                           tab_h=tab_h, slot_depth=slot_depth)
-
-    # Top edge: match bottom edge of upper neighbour
-    if row > 0:
-        edge = piece[:depth, :]
-        _apply_edge_tabs_v(edge, is_tab=(row % 2 != 0),
-                           tab_h=tab_h, slot_depth=slot_depth)
-
-    return piece
-
-
-def _apply_edge_tabs_v(arr_slice, is_tab, tab_h, slot_depth):
-    """Vertical (row) edge tabs — tabs run along columns."""
-    h, w = arr_slice.shape
-    n_tabs = max(1, min(3, w // 8))
-    tab_w = max(2, w // (n_tabs * 3))
-    spacing = w // (n_tabs + 1)
-    for t in range(n_tabs):
-        cx = spacing * (t + 1)
-        x0 = max(0, cx - tab_w // 2)
-        x1 = min(w, cx + tab_w // 2)
-        if is_tab:
-            arr_slice[:, x0:x1] += tab_h
-        else:
-            arr_slice[:, x0:x1] = np.maximum(
-                arr_slice[:, x0:x1] - slot_depth, 0.1)
+        task.fail("Missing DEM data")
+        return
+    task.update(5, "Building terrain mesh...")
+    mesh, _, _ = _prepare_export_mesh(p, data)
+    spec = {"cols": data.get("split_cols"), "rows": data.get("split_rows"),
+            "piece_mm": data.get("piece_mm"), "knob_width_mm": data.get("knob_width_mm"),
+            "knob_depth_mm": data.get("knob_depth_mm"),
+            "clearance_mm": data.get("clearance_mm", 0.3)}
+    spec = {k: v for k, v in spec.items() if v is not None}
+    fd, zip_path = tempfile.mkstemp(suffix=".zip")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            info = cut_to_zip(mesh, spec, p.name, zf, progress=task.update)
+    except ValueError as exc:
+        os.unlink(zip_path)
+        task.fail(str(exc))
+        return
+    task.complete(zip_path, f"{p.name}_puzzle.zip", {
+        **_disposition(f"{p.name}_puzzle.zip"),
+        "X-Piece-Count": str(info["pieces"]),
+        "Access-Control-Expose-Headers": "X-Piece-Count",
+    })
 
 
 def generate_crosssection(data: dict):

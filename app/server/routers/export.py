@@ -87,7 +87,7 @@ async def export_start(request: Request):
     """Start an async export task. Returns {task_id} for polling."""
     data = await request.json()
     fmt = data.pop("format", "stl")
-    if fmt not in ("stl", "obj", "3mf", "puzzle"):
+    if fmt not in ("stl", "obj", "3mf", "puzzle", "city"):
         return JSONResponse(content={"error": f"Unsupported format: {fmt}"}, status_code=400)
     task_id = start_export_task(data, fmt)
     return JSONResponse(content={"task_id": task_id})

@@ -11,9 +11,8 @@ Usage:
     s.settings["split"]["split_rows"] = 4
     s.fetch_dem()
     s.show_dem()
-    s.export_obj()
+    s.export_puzzle()
     s.verify()
-    s.slice()
     s.stop()
 
     # Context manager + run_all
@@ -94,22 +93,13 @@ _DEFAULT_SETTINGS: dict = {
         "puzzle_z":         None,
     },
     # ── Puzzle split ──────────────────────────────────────────────────────
-    # Sent to /api/export (format=obj_split)
-    # include_border: add a raised lip border around each puzzle piece base
+    # Sent to /api/export/start (format=puzzle): interlocking jigsaw pieces.
     "split": {
         "split_rows":     4,
         "split_cols":     4,
-        "puzzle_m":       50,
-        "puzzle_base_n":  10,
-        "border_height":  1.0,
-        "border_offset":  5.0,
-        "include_border": True,
-    },
-    # ── Slicer ────────────────────────────────────────────────────────────
-    # Sent to /api/export/slice
-    "slicer": {
-        "slicer_config": "maps_2025_part2.ini",
-        "output_subdir": "gcode",
+        "knob_width_mm":  20.0,
+        "knob_depth_mm":  8.0,
+        "clearance_mm":   0.3,
     },
     # ── Water mask ────────────────────────────────────────────────────────
     # Sent to /api/terrain/water-mask
@@ -126,7 +116,7 @@ _DEFAULT_SETTINGS: dict = {
         "dim": 600,
     },
     # ── City / OSM features ───────────────────────────────────────────────
-    # Sent to /api/cities, /api/cities/raster, /api/cities/export3mf
+    # Sent to /api/cities and /api/cities/raster
     "city": {
         "layers":              ["buildings", "roads", "waterways"],
         # polygon simplification tolerance (metres)
@@ -256,7 +246,7 @@ class TerrainSession:
         self.bbox: dict = {}
         self.settings: dict = copy.deepcopy(_DEFAULT_SETTINGS)
         self.dem: dict | None = None
-        self.obj_path: Path | None = None
+        self.puzzle_path: Path | None = None
         # binary water mask response dict
         self.water_mask: dict | None = None
         # raw ESA land-cover class response dict
@@ -623,8 +613,7 @@ class TerrainSession:
             ("dem",    [("dim", d), ("depth_scale", d)]),
             ("export", [("model_height", e), ("base_height", e), ("exaggeration", e),
                         ("contour_interval", e)]),
-            ("split",  [("puzzle_m", sp), ("puzzle_base_n", sp),
-                        ("border_height", sp), ("border_offset", sp)]),
+            ("split",  [("knob_width_mm", sp), ("knob_depth_mm", sp)]),
             ("city",   [("simplify_tolerance", c),
              ("min_area", c), ("building_scale", c)]),
         ):
@@ -668,7 +657,6 @@ class TerrainSession:
         p = self.settings["projection"]
         d = self.settings["dem"]
         e = self.settings["export"]
-        sp = self.settings["split"]
         c = self.settings["city"]
 
         for key, src, group_key in (
@@ -679,7 +667,6 @@ class TerrainSession:
             ("sea_level_cap",      e,  "export"),
             ("engrave_label",      e,  "export"),
             ("contours",           e,  "export"),
-            ("include_border",     sp, "split"),
             ("simplify_terrain",   c,  "city"),
         ):
             val = src.get(key)
@@ -1873,7 +1860,7 @@ class TerrainSession:
           }
 
         Result is stored as self.dem (same shape as fetch_dem() output) so it can
-        be used directly with export_obj() and show_dem().
+        be used directly with export_puzzle() and show_dem().
         """
         if not self.bbox:
             raise RuntimeError("Call select() before merge_dem()")
@@ -2182,88 +2169,66 @@ class TerrainSession:
             "split":  self.settings["split"],
         }
 
-    def export_obj(self) -> TerrainSession:
-        """POST /api/export (format=obj_split) — generate puzzle OBJ and save to output/.
+    def export_puzzle(self, timeout: float = 1800.0) -> TerrainSession:
+        """Export the terrain as interlocking jigsaw pieces; saves the zip to output/.
 
-        fetch_dem() is no longer required before this call — the export endpoint
-        derives the DEM from settings, using the disk cache if available.
-        Request body is assembled from settings['dem'], settings['export'], and
-        settings['split'].
+        The zip holds one OBJ per piece and a 3MF of all pieces (the server's
+        ``puzzle`` export task). Pieces follow settings['split'] and the export
+        settings (scale, height, base). Requires fetch_dem().
         """
-        payload = self._export_payload("obj_split")
-        rows, cols = self.settings["split"]["split_rows"], self.settings["split"]["split_cols"]
-        print(f"Generating {rows}x{cols} puzzle split OBJ…")
-        r = self._api_request_raw(
-            "post", "/api/export", json=payload, timeout=300
-        )
+        self._require_attribute("dem", "export_puzzle")
+        sp, e = self.settings["split"], self.settings["export"]
+        body = {
+            "format": "puzzle", "dem_id": self.dem["dem_id"],
+            "name": self.region_name or "terrain",
+            "model_height": e["model_height"], "base_height": e["base_height"],
+            "exaggeration": e["exaggeration"], "mm_per_pixel": e.get("mm_per_pixel", 1.0),
+            "split_cols": sp["split_cols"], "split_rows": sp["split_rows"],
+            "knob_width_mm": sp["knob_width_mm"], "knob_depth_mm": sp["knob_depth_mm"],
+            "clearance_mm": sp["clearance_mm"],
+        }
+        print(f"Cutting {sp['split_cols']}x{sp['split_rows']} jigsaw puzzle…")
+        task_id = self._api_request("post", "/api/export/start", json=body)["task_id"]
+        deadline = time.time() + timeout
+        while (st := self._api_request("get", f"/api/export/status/{task_id}"))["status"] == "running":
+            if time.time() > deadline:
+                raise TimeoutError(f"Puzzle not finished after {timeout:.0f} s")
+            time.sleep(1.0)
+        if st["status"] != "complete":
+            raise RuntimeError(f"Puzzle export failed: {st.get('message')}")
+        r = self._api_request_raw("get", f"/api/export/download/{task_id}", timeout=600)
         r.raise_for_status()
-
         output_dir = _STRM2STL_DIR / "output"
         output_dir.mkdir(exist_ok=True)
-        # Prefer the server-supplied filename from Content-Disposition
-        cd = r.headers.get("Content-Disposition", "")
-        if "filename=" in cd:
-            filename = cd.split("filename=")[-1].strip().strip('"')
-        else:
-            filename = f"{self.region_name}_puzzle_{rows}x{cols}.obj"
-        self.obj_path = output_dir / filename
-        self.obj_path.write_bytes(r.content)
-        print(f"Saved: {self.obj_path}  ({len(r.content) / 1024:.1f} KB)")
+        self.puzzle_path = output_dir / f"{body['name']}_puzzle.zip"
+        self.puzzle_path.write_bytes(r.content)
+        print(f"Saved: {self.puzzle_path}  ({len(r.content) / 1024:.1f} KB)")
         return self
 
-    def verify(self) -> dict:
-        """GET /api/export/obj/verify — run mesh health checks and print a table.
+    def verify(self) -> list[dict]:
+        """Mesh health of every piece in the last export_puzzle() zip, printed as a table."""
+        import io
+        import zipfile
 
-        This inspects the last exported OBJ for the selected region name.
-        """
-        if not self.region_name:
-            raise RuntimeError("Call select() first")
-        info = self._api_request(
-            "get", "/api/export/obj/verify", params={"name": self.region_name}
-        )
+        import trimesh
 
-        terrain_pieces = [p for p in info["pieces"]
-                          if not p["name"].startswith("Base")]
-        base_pieces = [p for p in info["pieces"]
-                       if p["name"].startswith("Base")]
-
-        def _print_pieces(pieces):
-            for p in pieces:
-                wt = "watertight" if p["watertight"] else "HOLES"
-                vol = "valid_vol" if p["valid_volume"] else "INVALID_VOL"
-                wnd = "" if p["winding_consistent"] else " WINDING!"
-                z_ok = "" if abs(
-                    p["z_min"]) < 0.001 else f" FLOAT(z_min={p['z_min']})"
-                print(
-                    f"  {p['name']:<40}  "
-                    f"v={p['vertex_count']:>6} f={p['face_count']:>6}  "
-                    f"z=[{p['z_min']:.3f},{p['z_max']:.3f}]  "
-                    f"holes={p['holes']} nm={p['non_manifold']}  "
-                    f"{wt} {vol}{wnd}{z_ok}"
-                )
-
-        print(f"Total objects: {info['total']}\n")
-        print(
-            f"── Terrain pieces ({len(terrain_pieces)}) ──────────────────────────")
-        _print_pieces(terrain_pieces)
-        print(
-            f"\n── Base border pieces ({len(base_pieces)}) ─────────────────────────")
-        _print_pieces(base_pieces)
-        return info
-
-    def inspect_obj(self) -> dict:
-        """GET /api/export/obj/inspect — return object names and piece counts from saved OBJ.
-
-        Lighter than verify() — no mesh health checks, just a fast parse of object names.
-        """
-        if not self.region_name:
-            raise RuntimeError("Call select() first")
-        info = self._api_request(
-            "get", "/api/export/obj/inspect", params={"name": self.region_name}
-        )
-        print(f"Total objects: {info['total']}  "
-              f"({info['terrain_count']} terrain + {info['base_count']} base)")
-        return info
+        if self.puzzle_path is None:
+            raise RuntimeError("Call export_puzzle() first")
+        rows = []
+        with zipfile.ZipFile(self.puzzle_path) as zf:
+            for name in sorted(n for n in zf.namelist() if n.endswith(".obj")):
+                m = trimesh.load(io.BytesIO(zf.read(name)), file_type="obj", force="mesh")
+                rows.append({"name": Path(name).stem, "faces": len(m.faces),
+                             "watertight": bool(m.is_watertight),
+                             "winding_consistent": bool(m.is_winding_consistent),
+                             "volume_mm3": round(float(m.volume), 1),
+                             "z_min": round(float(m.bounds[0][2]), 3)})
+        for r in rows:
+            flags = "watertight" if r["watertight"] else "HOLES"
+            flags += "" if r["winding_consistent"] else " WINDING!"
+            flags += "" if abs(r["z_min"]) < 1e-3 else f" FLOAT(z_min={r['z_min']})"
+            print(f"  {r['name']:<40} f={r['faces']:>7}  vol={r['volume_mm3']:>10}  {flags}")
+        return rows
 
     def cache_status(self) -> dict:
         """GET /api/cache — return cache stats (file count, size, recent files)."""
@@ -2372,84 +2337,84 @@ class TerrainSession:
             f"City raster: {w}×{h} px, elevation range [{vmin:.1f}, {vmax:.1f}] m")
         return self
 
-    def export_city_3mf(
+    def export_city_model(
         self,
         name: str | None = None,
+        *,
+        z_mode: str = "auto",
+        exaggeration: float = 1.0,
+        median_size: int = 3,
+        layers: dict | None = None,
+        puzzle: dict | None = None,
         classify_roofs: bool = False,
         estimate_roof_heights: bool = True,
         timeout: float = 1800.0,
     ) -> bytes:
-        """POST /api/cities/export3mf — export terrain + extruded buildings as 3MF.
+        """Build the vector city model on the server and return the .zip bytes.
 
-        Requires fetch_dem() and fetch_cities() to have been called first.
-        Returns raw 3MF bytes.
+        The zip holds the merged watertight STL, a 3MF with one part per layer,
+        ``report.json`` and, when *puzzle* is given, one OBJ per jigsaw piece.
+        Terrain and every enabled OSM layer share one scale (see
+        city2stl/city_model.py): ``mm_per_pixel`` from the export settings, and
+        *z_mode* ``"auto"`` (true scale x *exaggeration* under 20 km diagonal,
+        fit to ``model_height`` above), ``"true"`` or ``"fit"``.
 
         Parameters
         ----------
+        layers : dict, optional
+            Per-layer overrides, e.g. ``{"roads": {"enabled": False},
+            "buildings": {"height_scale": 2}, "waterways": {"offset_mm": 1.5}}``.
+        puzzle : dict, optional
+            ``{"piece_mm": 200}`` (grid chosen so pieces fit) or
+            ``{"cols": 3, "rows": 2}``; plus ``knob_width_mm``,
+            ``knob_depth_mm``, ``clearance_mm``.
         classify_roofs : bool
-            Fill in the missing ``roof:shape`` tags from the satellite image
-            before exporting. Off by default because it costs a satellite fetch
-            and changes the geometry, but it is the difference between a real
-            roof and a flat extrusion nearly everywhere: OSM tags a roof shape
-            on one or two per cent of buildings, and the mesh treats every
-            untagged building as flat. Requires fetch_satellite() first.
+            Fill missing ``roof:shape`` tags from the satellite image first (see
+            classify_roof_shapes); the edited buildings are sent with the request
+            because the server's OSM cache has no record of them.
         timeout : float
-            Seconds to wait for the export. Meshing is O(buildings) and runs
-            inside the request, so a dense 3 km box takes minutes: Seville's
-            4388 buildings overran the old hard-coded 120 s and the client gave
-            up on a server that was still working. Half an hour is far past any
-            real export and still bounded.
-        estimate_roof_heights : bool
-            Also fill ``roof:height`` from the elevation profile while
-            classifying. Only read when *classify_roofs* is set, and only does
-            anything when a height raster is available — call
-            fetch_building_heights() first, or the profile it would measure
-            does not exist and every roof keeps the mesh's fallback of 30 per
-            cent of the building's height.
+            Seconds to wait for the build (dense cities take minutes).
         """
-        self._require_attribute("dem", "export_city_3mf")
-        if self.city_data is None:
-            raise RuntimeError("Call fetch_cities() before export_city_3mf()")
+        self._require_attribute("dem", "export_city_model")
         if classify_roofs:
-            self.classify_roof_shapes(
-                estimate_roof_heights=estimate_roof_heights)
-        c = self.settings["city"]
+            if self.city_data is None:
+                raise RuntimeError("Call fetch_cities() before classify_roofs=True")
+            self.classify_roof_shapes(estimate_roof_heights=estimate_roof_heights)
         e = self.settings["export"]
-        s = self.settings["dem"]
-        # Send bbox + DEM settings — server resolves arrays from disk cache.
-        #
-        # The settings go over verbatim, exactly as fetch_dem sent them. Any
-        # field they omit is filled by the server's own defaults in
-        # core/dem_cache.py, which is the only place those defaults are
-        # allowed to live. Restating them here is what broke this call: the
-        # settings carry no `maintain_dimensions`, the fetch therefore stored
-        # the array under the server default of False while this payload
-        # claimed True, the two sides hashed different keys, and every
-        # settings-only export answered "DEM not found in cache — load DEM
-        # first" on a DEM that was sitting in the cache.
-        payload = {
-            **self.bbox,
-            "bbox": self.bbox,
-            "dem": dict(s),
-            "model_height_mm":   e["model_height"],
-            "base_mm":           e["base_height"],
-            "building_z_scale":  c["building_scale"],
-            "simplify_terrain":  c.get("simplify_terrain", True),
-            "name":              name or self.region_name or "city",
+        body = {
+            "format": "city",
+            "dem_id": self.dem["dem_id"],
+            "name": name or self.region_name or "city",
+            "mm_per_px": e.get("mm_per_pixel", 1.0),
+            "z_mode": z_mode,
+            "exaggeration": exaggeration,
+            "fit_height_mm": e["model_height"],
+            "base_mm": e["base_height"],
+            "median_size": median_size,
+            "layers": layers or {},
         }
-        # The server resolves buildings from its own OSM cache, which has no
-        # record of tags this session added. Send them when there are any.
-        if self._buildings_dirty:
-            payload["buildings"] = self.city_data["buildings"]
+        if puzzle:
+            body["puzzle"] = puzzle
+        if self._buildings_dirty and self.city_data is not None:
+            body["layer_data"] = {"buildings": self.city_data["buildings"]}
             print("Sending locally modified building tags with the export")
-        print(f"Exporting city 3MF for {payload['name']}…")
-        r = self._api_request_raw(
-            "post", "/api/cities/export3mf", json=payload, timeout=timeout
-        )
+
+        print(f"Building city model for {body['name']}…")
+        task_id = self._api_request("post", "/api/export/start", json=body)["task_id"]
+        deadline = time.time() + timeout
+        while True:
+            st = self._api_request("get", f"/api/export/status/{task_id}")
+            if st["status"] != "running":
+                break
+            if time.time() > deadline:
+                raise TimeoutError(f"City model not finished after {timeout:.0f} s")
+            time.sleep(1.0)
+        if st["status"] != "complete":
+            raise RuntimeError(f"City model failed: {st.get('message')}")
+        r = self._api_request_raw("get", f"/api/export/download/{task_id}", timeout=600)
         r.raise_for_status()
-        data = r.content
-        print(f"✓ 3MF exported ({len(data):,} bytes)")
-        return data
+        print(f"✓ City model built ({len(r.content):,} bytes zip)")
+        return r.content
 
     # ── Building height estimation ────────────────────────────────────
 
@@ -2578,7 +2543,7 @@ class TerrainSession:
         2. Calls ``enhance_buildings_with_raster()`` on ``self.city_data["buildings"]``
            using the merged raster from ``self.building_heights``.
         3. Updates ``self.city_data["buildings"]`` in-place so downstream
-           ``export_city_3mf()`` sees the enriched heights.
+           ``export_city_model()`` sees the enriched heights.
 
         Only buildings whose ``height_source`` is ``"default"`` are modified —
         those with an explicit OSM ``height`` or ``building:levels`` tag are left
@@ -3127,47 +3092,10 @@ class TerrainSession:
         self.infilled_heights: np.ndarray | None = filled
         return self
 
-    def slice(self) -> dict:
-        """POST /api/export/slice — slice all terrain+base pairs with PrusaSlicer.
-
-        Configure via settings['slicer']['slicer_config'] and settings['slicer']['output_subdir'].
-        This operates on the selected region's exported puzzle pieces.
-        """
-        if not self.region_name:
-            raise RuntimeError("Call select() first")
-        n_pairs = self.settings["split"]["split_rows"] * \
-            self.settings["split"]["split_cols"]
-        slicer_config = self.settings["slicer"]["slicer_config"]
-        print(f"Slicing {n_pairs} terrain+base pairs with {slicer_config} …")
-        payload = {
-            "name":          self.region_name,
-            "slicer_config": slicer_config,
-            "output_subdir": self.settings["slicer"]["output_subdir"],
-        }
-        r = self._api_request_raw(
-            "post", "/api/export/slice", json=payload, timeout=600
-        )
-        r.raise_for_status()
-        result = r.json()
-
-        print(f"Sliced : {result['sliced']} / {n_pairs} pairs")
-        for fname in result["gcode_files"]:
-            print(f"  {fname}")
-        if result["errors"]:
-            print(f"\nErrors ({len(result['errors'])}):")
-            for e in result["errors"]:
-                print(f"  pair {e['pair']} ({e['terrain']} + {e['base']}): "
-                      f"{e['stderr'][:200]}")
-        return result
-
     def run_all(self) -> TerrainSession:
-        """Run the full pipeline: fetch_dem → export_obj → verify → slice.
-
-        Configure slicer via settings['slicer']['slicer_config'] before calling.
-        """
+        """Run the full pipeline: fetch_dem → export_puzzle → verify."""
         self.fetch_dem()
         self.show_dem()
-        self.export_obj()
+        self.export_puzzle()
         self.verify()
-        self.slice()
         return self

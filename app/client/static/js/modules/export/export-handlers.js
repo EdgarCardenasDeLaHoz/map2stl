@@ -205,12 +205,69 @@ function _setCancelVisible(visible) {
         ?.classList.toggle('hidden', !visible);
 }
 
+/**
+ * City Model: terrain + every enabled OSM layer merged server-side into one solid
+ * (city2stl/city_model.py). Layer rows come from the City Model table in
+ * ModelContainer.vue; value is a height multiplier for extruded layers and
+ * mm above/below the terrain for surface layers.
+ */
+function _cityLayerSettings() {
+    const layers = {};
+    document.querySelectorAll('[id^="cityLayer_"][id$="_enabled"]').forEach((box) => {
+        const id = box.id.slice('cityLayer_'.length, -'_enabled'.length);
+        const mode = document.getElementById(`cityLayer_${id}_mode`)?.value || 'raised';
+        const value = parseFloat(document.getElementById(`cityLayer_${id}_value`)?.value);
+        const style = { enabled: box.checked, mode };
+        if (Number.isFinite(value)) {
+            if (mode === 'extrude') style.height_scale = value;
+            else style.offset_mm = value;
+        }
+        layers[id] = style;
+    });
+    return layers;
+}
+
+/** Terrain jigsaw puzzle: a .zip of OBJ pieces + a 3MF (app/server/core/puzzle.py). */
+function exportPuzzle() {
+    const num = (id, fallback) => parseFloat(document.getElementById(id)?.value) || fallback;
+    const cols = parseInt(document.getElementById('splitCols')?.value, 10) || 3;
+    const rows = parseInt(document.getElementById('splitRows')?.value, 10) || 3;
+    if (cols * rows > 64) {
+        window.showToast?.('Too many pieces (max 64 total)', 'warning');
+        return;
+    }
+    return _asyncExport('puzzle', {
+        split_cols: cols,
+        split_rows: rows,
+        knob_width_mm: num('splitKnobWidth', 20),
+        knob_depth_mm: num('splitKnobDepth', 8),
+        clearance_mm: num('splitClearance', 0.3),
+    }, `${_regionName()}_puzzle.zip`);
+}
+
+function exportCityModel() {
+    if (!window.appState?.lastDemRequest?.dem_id) {
+        window.showToast?.('Load the DEM first', 'warning');
+        return;
+    }
+    const extra = { layers: _cityLayerSettings() };
+    if (document.getElementById('cityPuzzleEnabled')?.checked) {
+        extra.puzzle = {
+            piece_mm: parseFloat(document.getElementById('cityPieceMm')?.value) || 200,
+            knob_width_mm: parseFloat(document.getElementById('splitKnobWidth')?.value) || 20,
+            knob_depth_mm: parseFloat(document.getElementById('splitKnobDepth')?.value) || 8,
+            clearance_mm: parseFloat(document.getElementById('splitClearance')?.value) || 0.3,
+        };
+    }
+    return _asyncExport('city', extra, `${_regionName()}_city.zip`);
+}
+
 // Upper bound on how long we will poll before giving up. A stuck task used to
 // spin the 250 ms poll loop forever with no way out; the bound turns that into
 // a visible error the user can act on.
 const _EXPORT_POLL_TIMEOUT_MS = 10 * 60 * 1000;
 
-async function _asyncExport(format) {
+async function _asyncExport(format, extra = {}, fileName = null) {
     const pr = _progressEl();
     const name = _regionName();
 
@@ -227,7 +284,7 @@ async function _asyncExport(format) {
         const startResp = await fetch('/api/export/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ format, ..._exportParams() }),
+            body: JSON.stringify({ format, ..._exportParams(), ...extra }),
             signal: abort.signal,
         });
         if (!startResp.ok) {
@@ -268,7 +325,7 @@ async function _asyncExport(format) {
         const isWatertight = dlResp.headers.get('X-Watertight') === 'true';
         const faceCount = dlResp.headers.get('X-Face-Count');
 
-        _triggerDownload(blob, `${name}.${format}`);
+        _triggerDownload(blob, fileName || `${name}.${format}`);
 
         // All three formats go through the same repair and send these headers.
         if (faceCount) {
@@ -372,4 +429,6 @@ window._demSettings = _demSettings;
 window.downloadSTL = downloadSTL;
 window.downloadModel = downloadModel;
 window.downloadCrossSection = downloadCrossSection;
+window.exportCityModel = exportCityModel;
+window.exportPuzzle = exportPuzzle;
 window.cancelExport = cancelExport;

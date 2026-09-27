@@ -41,7 +41,7 @@ def render_model(target_bbox, dim,
     
 def create_dem_model(im, cut=True):
 
-    width = im.shape
+    width = (im.shape[1], im.shape[0])   # (x, y); the puzzle helpers take x first
     model = create.get_landspace_model(im, None, 1, simplify=False)
 
     if cut:
