@@ -35,6 +35,7 @@ from pathlib import Path
 import numpy as np
 
 from geo2stl import cache as _geo_cache
+from geo2stl.geo import m_per_deg_lon
 
 logger = logging.getLogger(__name__)
 
@@ -130,10 +131,14 @@ def get_ndsm(bbox, resolution: int = 512, cache: bool = True, ept_url: str | Non
         dsm, _, _, _ = binned_statistic_2d(
             xs, ys, zs, statistic="max",
             bins=[resolution, resolution], range=[[W, E], [S, N]])
-        dsm = np.flipud(dsm.T)  # -> row0=south, matching city2stl.osm_raster
+        # binned_statistic_2d indexes [x, y] with y ascending, so the transpose is
+        # already row0=south (city2stl.osm_raster); a flipud here mirrored the DSM
+        # against the DEM below.
+        dsm = dsm.T
 
         # --- DEM via py3dep (bare earth) on the same grid ---
-        dem_da = py3dep.get_dem((W, S, E, N), resolution=max(1, int((E - W) * 111320 / resolution)))
+        cell_m = (E - W) * m_per_deg_lon((N + S) / 2) / resolution
+        dem_da = py3dep.get_dem((W, S, E, N), resolution=max(1, int(cell_m)))
         import rioxarray  # noqa: F401
         dem = dem_da.rio.reproject(
             "EPSG:4326",
