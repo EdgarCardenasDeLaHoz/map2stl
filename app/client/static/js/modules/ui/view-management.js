@@ -416,7 +416,6 @@ window.setupDemSubtabs = function setupDemSubtabs() {
         if (stripBtn) stripBtn.classList.toggle('active', !collapsed);
         document.getElementById('layersContainer')?.classList.remove('hidden');
         document.getElementById('citiesPanel')?.classList.add('hidden');
-        document.getElementById('mergePanel')?.classList.add('hidden');
         document.getElementById('compareInlineContainer')?.classList.add('hidden');
         document.getElementById('combinedContainer')?.classList.add('hidden');
         document.getElementById('demControlsInner')?.classList.remove('hidden');
@@ -504,8 +503,7 @@ window.setupDemSubtabs = function setupDemSubtabs() {
         const layersHidden = document.getElementById('layersContainer')?.classList.contains('hidden') ?? true;
         const compareHidden = document.getElementById('compareInlineContainer')?.classList.contains('hidden') ?? true;
         const combinedHidden = document.getElementById('combinedContainer')?.classList.contains('hidden') ?? true;
-        const mergeHidden = document.getElementById('mergePanel')?.classList.contains('hidden') ?? true;
-        if (layersHidden && compareHidden && combinedHidden && mergeHidden) {
+        if (layersHidden && compareHidden && combinedHidden) {
             window.switchDemSubtab?.(window.appState?.activeDemSubtab || 'layers');
         }
         window._ensureDemViewportSpace?.();
@@ -518,16 +516,10 @@ window.setupDemSubtabs = function setupDemSubtabs() {
 
 /**
  * Switch the active DEM sub-tab, showing/hiding the appropriate container.
- * @param {'dem'|'water'|'landcover'|'combined'|'satellite'|'cities'|'merge'|'compare'} subtab
+ * @param {'dem'|'water'|'landcover'|'combined'|'satellite'|'cities'|'compare'} subtab
  */
 window.switchDemSubtab = function switchDemSubtab(subtab) {
     window.appState.activeDemSubtab = subtab;
-
-    // For merge the right panel IS the content — expand it if collapsed
-    if (subtab === 'merge') {
-        const rightPanel = document.getElementById('demRightPanel');
-        rightPanel?.classList.remove('settings-collapsed');
-    }
 
     // Update active state on strip buttons
     document.querySelectorAll('#demRightPanel [data-subtab]').forEach(t => {
@@ -538,7 +530,6 @@ window.switchDemSubtab = function switchDemSubtab(subtab) {
     document.getElementById('layersContainer')?.classList.add('hidden');
     document.getElementById('compareInlineContainer')?.classList.add('hidden');
     document.getElementById('combinedContainer')?.classList.add('hidden');
-    document.getElementById('mergePanel')?.classList.add('hidden');
     document.getElementById('demControlsInner')?.classList.remove('hidden');
 
     // Close JSON editor if open
@@ -561,10 +552,6 @@ window.switchDemSubtab = function switchDemSubtab(subtab) {
         case 'compare':
             document.getElementById('compareInlineContainer')?.classList.remove('hidden');
             window.updateCompareCanvases?.();
-            break;
-        case 'merge':
-            document.getElementById('mergePanel')?.classList.remove('hidden');
-            document.getElementById('demControlsInner')?.classList.add('hidden');
             break;
         default:
             // Default: show layers stack

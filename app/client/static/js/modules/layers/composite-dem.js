@@ -9,14 +9,26 @@
  * each contribution.  The architecture is designed so a neural network can
  * later replace the linear scalers with learned weights.
  *
+ * Two outputs (F-ARCH "one two-stage mesh pipeline"):
+ *   - the 2D preview: terrain channels + the rasterised OSM feature channels
+ *     (buildings, roads, waterways, walls), so the user sees everything;
+ *   - the terrain heightfield: terrain channels only. This is what Apply
+ *     writes into lastDemData.values and what the export spec describes. In
+ *     3D, OSM features come from the City Model layers (vector stage), and
+ *     baking their pixels into the terrain as well would print them twice.
+ *
  * Public API (on window):
  *   window.computeCompositeDem()       — recompute & render the composite layer
- *   window.applyCompositeToDem()       — replace lastDemData with composite
- *   window.buildCompositeLayerSpec()   — the same stack as a server layer list
+ *   window.applyCompositeToDem()       — replace lastDemData with the terrain-only composite
+ *   window.buildCompositeLayerSpec(o)  — the same stack as a server layer list
+ *                                        (terrain only unless o.includeFeatures)
  *   window.setupCompositeDemControls() — wire UI event listeners
  *
- * See COMPOSITE_DEM_DESIGN.md for full design rationale.
+ * The pure spec builder lives in composite-spec.js.
+ * See docs/design/composite-dem-design.md for full design rationale.
  */
+
+import { buildCompositeLayerSpec as _buildSpec, anyFeatureChannelEnabled } from './composite-spec.js';
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
@@ -73,10 +85,16 @@ const params = { ...DEFAULTS };
 /** LUT cache — keyed by colormap name, invalidated on colormap change. */
 const _lutCache = {};
 
-/** Last computed composite Float32Array (same dims as DEM). */
-let _compositeValues = null;
-let _compositeMin = 0;
-let _compositeMax = 0;
+/**
+ * Last computed terrain-only composite (same dims as DEM): every channel
+ * except the rasterised OSM features. This — not the preview — is what
+ * applyCompositeToDem() makes the active DEM.
+ */
+let _terrainValues = null;
+let _terrainMin = 0;
+let _terrainMax = 0;
+/** True when the last preview included OSM feature channels the terrain omits. */
+let _previewHadFeatures = false;
 
 /** Cached satellite pixel data to avoid repeated getImageData() calls. */
 let _satPixelCache = null;  // { canvas, width, height, data }
@@ -95,6 +113,17 @@ function _addWeightedFeature(composite, feat, weight) {
         return;
     }
     for (let i = 0; i < composite.length; i++) composite[i] += weight * feat[i];
+}
+
+/** [min, max] of a numeric array. */
+function _minMax(values) {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < values.length; i++) {
+        const v = values[i];
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+    }
+    return [lo, hi];
 }
 
 /** Unit suffix for a slider label ('m' for distance, '' for weights/scales). */
@@ -414,7 +443,7 @@ window.computeCompositeDem = async function computeCompositeDem() {
     const gen = ++_computeGen;
     const enabled = document.getElementById('compositeEnabled')?.checked;
     if (!enabled) {
-        _compositeValues = null;
+        _terrainValues = null;
         // Clear offscreen canvas so stacked view shows nothing
         if (window.appState?.compositeDemSourceCanvas) {
             const src = window.appState.compositeDemSourceCanvas;
@@ -432,7 +461,7 @@ window.computeCompositeDem = async function computeCompositeDem() {
     // of the composite silently producing nothing.
     const region = window.appState?.currentDemBbox || window.appState?.selectedRegion;
     if (!region) {
-        _compositeValues = null;
+        _terrainValues = null;
         return;
     }
 
@@ -461,8 +490,7 @@ window.computeCompositeDem = async function computeCompositeDem() {
     // Only compute contributions when at least one relevant toggle is on
     // (skip expensive work). Yield between each contribution so the browser
     // can handle input events.
-    const cityAnyEnabled = params.buildingsEnabled || params.roadsEnabled
-        || params.waterwaysEnabled || params.wallsEnabled;
+    const cityAnyEnabled = anyFeatureChannelEnabled(params);
 
     let waterFeat = null, cityFeat = null, cityComponents = null, lcFeat = null,
         satFeat = null, trailsFeat = null;
@@ -501,25 +529,28 @@ window.computeCompositeDem = async function computeCompositeDem() {
         };
     }
 
-    // Add weighted contributions (DEM already folded into `composite` above)
+    // Terrain stage first (DEM already folded into `composite` above).
     _addWeightedFeature(composite, waterFeat, params.waterEnabled ? params.waterWeight : 0);
-    _addWeightedFeature(composite, cityFeat, cityAnyEnabled ? 1 : 0);
     _addWeightedFeature(composite, lcFeat, params.landcoverEnabled ? params.landcoverWeight : 0);
     _addWeightedFeature(composite, satFeat, params.satEnabled ? params.satWeight : 0);
     _addWeightedFeature(composite, trailsFeat, params.trailsEnabled ? params.trailsWeight : 0);
 
+    // Snapshot the terrain heightfield before the OSM feature channels go on:
+    // Apply uses this, so the mesh gets buildings/roads/waterways/walls only
+    // from the City Model's vector stage, never also as raster pixels.
+    const terrain = new Float32Array(composite);
+    const [tMin, tMax] = _minMax(terrain);
+
+    // Feature channels: 2D preview only.
+    _addWeightedFeature(composite, cityFeat, cityAnyEnabled ? 1 : 0);
+
     await _yieldToMain(); if (gen !== _computeGen) return;
 
-    // Compute min/max
-    let cMin = Infinity, cMax = -Infinity;
-    for (let i = 0; i < composite.length; i++) {
-        const v = composite[i];
-        if (v < cMin) cMin = v;
-        if (v > cMax) cMax = v;
-    }
-    _compositeValues = composite;
-    _compositeMin = cMin;
-    _compositeMax = cMax;
+    const [cMin, cMax] = cityFeat ? _minMax(composite) : [tMin, tMax];
+    _terrainValues = terrain;
+    _terrainMin = tMin;
+    _terrainMax = tMax;
+    _previewHadFeatures = !!cityFeat;
 
     await _yieldToMain(); if (gen !== _computeGen) return;
 
@@ -666,94 +697,51 @@ function _renderAllHistograms(channels) {
  *
  * The browser and the server both know how to composite: the browser keeps
  * computing the live preview so a slider drag stays instant, and the server
- * recomputes the same stack for the 3D mesh and every export. This function is
- * the translation between the two.
+ * recomputes the terrain stack for the 3D mesh and every export. The pure
+ * translation is composite-spec.js; this wrapper supplies the DEM snapshot.
  *
- * Each channel becomes one layer. `add` raises the terrain and `rivers`
- * subtracts from it, and the per-channel depths and scales collapse into the
- * layer's single `weight` — the browser's own arithmetic is
- * `bScale*buildings - rCut*roads - rDepth*waterways + wScale*walls`, so each
- * of the four is an independent layer with its own weight.
+ * Default is the terrain-only spec (what Apply publishes and export sends as
+ * `composite_layers`). `{ includeFeatures: true }` adds the rasterised OSM
+ * channels, for a 2D preview only — never send that one to a mesh endpoint.
  *
- * Land cover, satellite vegetation and trails have no server-side source yet
- * (F-COMPOSITE3 passes 2 and 3). When one of those is switched on with a
- * non-zero weight it is reported in `unsupported`, and the caller falls back
- * to shipping the browser's values inline rather than exporting a mesh that
- * quietly omits a channel the user enabled.
- *
+ * @param {{includeFeatures?:boolean}} [opts]
  * @returns {{layers: Array<Object>, unsupported: string[]}}
  */
-window.buildCompositeLayerSpec = function buildCompositeLayerSpec() {
+window.buildCompositeLayerSpec = function buildCompositeLayerSpec(opts = {}) {
     const snapshot = window.appState?.lastDemRequest?.dem;
     const dim = parseInt(snapshot?.dim
         ?? document.getElementById('paramDim')?.value, 10) || 600;
     const demSource = snapshot?.dem_source
         || document.getElementById('paramDemSource')?.value || 'local';
     const detail = window.appState?.osmCityDetail || 'full';
-
-    const layers = [];
-    const unsupported = [];
-    const push = (source, blendMode, weight, options) => {
-        if (!(weight > 0)) return;
-        layers.push({
-            source,
-            dim,
-            blend_mode: blendMode,
-            weight,
-            options: options || {},
-        });
-    };
-
-    // The base layer must come first: the server takes the first layer as the
-    // grid every later layer is resized onto.
-    if (params.demEnabled && params.demWeight > 0) {
-        push(demSource, 'base', params.demWeight, {});
-    }
-    if (params.waterEnabled) {
-        push('water_esa', 'rivers', params.waterDepth * params.waterWeight, {});
-    }
-    if (params.buildingsEnabled) {
-        push('osm_buildings', 'add', params.buildingScale, { detail });
-    }
-    if (params.roadsEnabled) {
-        push('osm_roads', 'rivers', params.roadCut, { detail });
-    }
-    if (params.waterwaysEnabled) {
-        push('osm_waterways', 'rivers', params.riverDepth, { detail });
-    }
-    if (params.wallsEnabled) {
-        push('osm_walls', 'add', params.wallScale, { detail });
-    }
-
-    if (params.landcoverEnabled && params.landcoverWeight > 0) unsupported.push('land cover');
-    if (params.satEnabled && params.satWeight > 0) unsupported.push('vegetation');
-    if (params.trailsEnabled && params.trailsWeight > 0) unsupported.push('trails');
-
-    return { layers, unsupported };
+    return _buildSpec(params, { dim, demSource, detail }, opts);
 };
 
 // ─── Apply to DEM ────────────────────────────────────────────────────────────
 
 /**
- * Replace lastDemData.values with the composite values, making it the
- * active DEM for export and 3D preview.
+ * Replace lastDemData.values with the terrain-only composite, making it the
+ * active DEM for export and 3D preview. The OSM feature channels shown in the
+ * 2D preview are left out on purpose — see the module header.
  */
 window.applyCompositeToDem = function applyCompositeToDem() {
-    if (!_compositeValues) {
+    if (!_terrainValues) {
         window.showToast?.('No composite data — enable and compute first', 'warning');
         return;
     }
     const dem = window.appState?.lastDemData;
     if (!dem) return;
 
-    dem.values = _compositeValues;
-    dem.min = _compositeMin;
-    dem.max = _compositeMax;
+    // A copy, so a later recompute (which replaces _terrainValues) and an
+    // in-place edit of lastDemData.values can never alias each other.
+    dem.values = new Float32Array(_terrainValues);
+    dem.min = _terrainMin;
+    dem.max = _terrainMax;
     window.appState.lastDemData = dem;
 
     // Also update originalDemValues so curve editor works from the composite
     if (window.appState) {
-        window.appState.originalDemValues = new Float32Array(_compositeValues);
+        window.appState.originalDemValues = new Float32Array(_terrainValues);
         // Tell export-handlers.js a composite is active. It prefers the
         // server-side layer spec below; the values stay available as the
         // fallback for a channel the server cannot yet build.
@@ -763,7 +751,10 @@ window.applyCompositeToDem = function applyCompositeToDem() {
 
     // Re-render the DEM canvas
     window.recolorDEM?.();
-    window.showToast?.('Composite applied as DEM', 'success');
+    window.showToast?.(_previewHadFeatures
+        ? 'Composite terrain applied as DEM (OSM buildings/roads/waterways/walls '
+            + 'come from the City Model layers in 3D, not the terrain)'
+        : 'Composite applied as DEM', 'success', _previewHadFeatures ? 6000 : undefined);
 };
 
 // ─── Preview & thumbnail ─────────────────────────────────────────────────────
@@ -814,7 +805,8 @@ function _updateContribStatus() {
     if (params.landcoverEnabled && params.landcoverWeight > 0) parts.push(`+ LC (${params.landcoverWeight.toFixed(1)}×)`);
     if (params.satEnabled && params.satWeight > 0) parts.push(`+ Veg (${params.satWeight.toFixed(1)}×)`);
     if (params.trailsEnabled && params.trailsWeight > 0) parts.push(`± Trails (${params.trailsWeight.toFixed(1)}×)`);
-    el.textContent = parts.join(' ') || '(no channels enabled)';
+    el.textContent = (parts.join(' ') || '(no channels enabled)')
+        + (anyFeatureChannelEnabled(params) ? ' — OSM channels: 2D preview only' : '');
 }
 
 // ─── UI wiring ───────────────────────────────────────────────────────────────

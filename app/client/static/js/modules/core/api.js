@@ -253,9 +253,6 @@ window.api = (() => {
 
         /** GET /api/terrain/sources */
         sources: () => _fetch('/api/terrain/sources'),
-
-        /** POST /api/composite/dem-merge */
-        merge: (body) => _fetch('/api/composite/dem-merge', _json(body)),
     };
 
     // -------------------------------------------------------------------------

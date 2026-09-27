@@ -88,5 +88,16 @@ edited values first, DEM handle otherwise) instead of the raw handle.
   the city task resolves its DEM through `ExportContext`; composite `osm_*` feature
   sources are dropped from mesh exports (`export_params.mesh_composite_layers`). The
   session's puzzle and city builds share `_mesh_export_body()`.
+- 2026-09-27 — client side of the two-stage pipeline done: `composite-dem.js` keeps the
+  `osm_*` channels in the 2D preview only; Apply to DEM writes the terrain-only composite
+  into `lastDemData.values` (so `dem_values` never carries them) and publishes a
+  terrain-only `compositeLayerSpec`; the pure builder is `layers/composite-spec.js`
+  (`FEATURE_SOURCES`, tested in `tests/js/compositeSpec.test.js`) and
+  `export-handlers.js` `_demSettings()` filters `FEATURE_SOURCES` again. The Composite
+  panel's City / OSM group says these come from the City Model layers in 3D. Legacy merge
+  panel removed (`dem-merge.js`, `#mergePanel`, its CSS, the `merge` DEM subtab,
+  `api.dem.merge`, `getActiveCompositeSpec`/`setCompositeActive`); `_initDemSources` was
+  dropped rather than moved, as `dem-main.js` `populateDemSources()` already owns the
+  source dropdown. `/api/composite/dem-merge` itself stays (SDK `merge_dem()` uses it).
 - Step 5 started: `geo2stl/osm.py` holds the Overpass mirrors, health probe and osmnx
   settings for both city layers and trails (removes violation 5, trails -> city2stl private).

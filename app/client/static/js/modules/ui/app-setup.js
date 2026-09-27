@@ -275,16 +275,6 @@ window.ensureA11yLabels = function ensureA11yLabels() {
             el.setAttribute('aria-label', label);
         }
     });
-
-    document.querySelectorAll('select.merge-src:not([aria-label])').forEach(el => {
-        el.setAttribute('aria-label', 'Merge layer source');
-    });
-    document.querySelectorAll('input.merge-dim:not([aria-label])').forEach(el => {
-        el.setAttribute('aria-label', 'Merge layer resolution');
-    });
-    document.querySelectorAll('select.merge-mode:not([aria-label])').forEach(el => {
-        el.setAttribute('aria-label', 'Merge layer blend mode');
-    });
 };
 
 document.addEventListener('DOMContentLoaded', () => {

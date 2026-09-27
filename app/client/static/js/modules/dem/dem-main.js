@@ -534,8 +534,7 @@ window._setDemEmptyState = function _setDemEmptyState(isEmpty) {
         const layersHidden = document.getElementById('layersContainer')?.classList.contains('hidden') ?? true;
         const compareHidden = document.getElementById('compareInlineContainer')?.classList.contains('hidden') ?? true;
         const combinedHidden = document.getElementById('combinedContainer')?.classList.contains('hidden') ?? true;
-        const mergeHidden = document.getElementById('mergePanel')?.classList.contains('hidden') ?? true;
-        if (layersHidden && compareHidden && combinedHidden && mergeHidden) {
+        if (layersHidden && compareHidden && combinedHidden) {
             window.switchDemSubtab?.(window.appState?.activeDemSubtab || 'layers');
         }
     }

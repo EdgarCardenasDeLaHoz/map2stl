@@ -260,11 +260,8 @@ document.addEventListener('DOMContentLoaded', async function () {
     // Setting the classes and the toggle button's text here as well only fought
     // that component for the same nodes.
 
-    // Load available DEM sources and show API key warning if needed
-    window._initDemSources?.();
-
-    // Initialize merge panel
-    window.setupMergePanel?.();
+    // The DEM source dropdown and API-key warning are populated by
+    // dem-main.js's populateDemSources() on DOMContentLoaded.
 
     // Activate default tab (map) so tab button gets .active class
     window.switchView?.('map');

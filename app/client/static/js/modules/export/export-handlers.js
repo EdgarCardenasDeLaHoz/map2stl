@@ -21,6 +21,7 @@
  */
 
 import { buildingsWithOverrides, hasOverrides } from '../layers/building-heights.js';
+import { FEATURE_SOURCES } from '../layers/composite-spec.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -138,12 +139,17 @@ function _demSettings() {
     // and the export are built from the server's arithmetic rather than from
     // an array the browser shipped. The inline values are the fallback for a
     // channel the server cannot build yet (land cover, vegetation, trails) —
-    // exporting the spec then would silently drop it.
+    // exporting the spec then would silently drop it. Both carry the terrain
+    // stage only: rasterised OSM channels are filtered out here as well as in
+    // the builder, since the mesh gets those from the City Model's vector
+    // stage (F-ARCH two-stage pipeline).
     if (window.appState?._newCompositeApplied) {
         const spec = window.appState?.compositeLayerSpec
             || window.buildCompositeLayerSpec?.();
-        if (spec?.layers?.length && !spec.unsupported?.length) {
-            settings.composite_layers = spec.layers;
+        const terrainLayers = (spec?.layers || [])
+            .filter(l => !FEATURE_SOURCES.includes(l.source));
+        if (terrainLayers.length && !spec.unsupported?.length) {
+            settings.composite_layers = terrainLayers;
             settings.composite_dim = settings.dem.dim;
         } else {
             if (spec?.unsupported?.length) {
@@ -157,14 +163,6 @@ function _demSettings() {
                 settings.width = dem.width;
             }
         }
-    }
-
-    // Legacy merge panel: if the user has configured + applied a composite
-    // there, send the spec so the server rebuilds the same merged DEM.
-    const compositeSpec = window.getActiveCompositeSpec?.();
-    if (compositeSpec && !settings.composite_layers) {
-        settings.composite_layers = compositeSpec;
-        settings.composite_dim = settings.dem.dim;
     }
     return settings;
 }

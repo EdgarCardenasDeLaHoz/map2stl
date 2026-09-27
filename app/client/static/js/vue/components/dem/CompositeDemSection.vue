@@ -2,7 +2,8 @@
   <CollapsibleSection title="📊 Composite DEM — Output" :start-open="true"
                       header-title="Final height map that feeds into Extrude. Adjust per-layer contributions below.">
     <div class="composite-info-box">
-      Pipeline: DEM → <span class="composite-pipe-water">− water</span> → <span class="composite-pipe-city">+ city</span> → <span class="composite-pipe-landcover">+ land cover</span> → <span class="composite-pipe-veg">+ vegetation</span> → <strong class="composite-pipe-output">Composite → Extrude</strong>
+      Pipeline: DEM → <span class="composite-pipe-water">− water</span> → <span class="composite-pipe-landcover">+ land cover</span> → <span class="composite-pipe-veg">+ vegetation</span> → <strong class="composite-pipe-output">Composite terrain → Extrude</strong>
+      (<span class="composite-pipe-city">city</span>: 2D preview only)
     </div>
     <div class="composite-enable-row">
       <label class="check-label composite-enable-label">
@@ -54,8 +55,17 @@
     </details>
 
     <details class="composite-layer-group">
-      <summary class="composite-layer-header">🏙 City / OSM</summary>
+      <summary class="composite-layer-header">🏙 City / OSM <span class="composite-2d-only">2D preview only</span></summary>
       <div class="composite-layer-body">
+        <!-- Two-stage mesh pipeline (docs/plans/F-ARCH-consolidation.md): the
+             3D model takes these features from the City Model's vector stage,
+             so Apply to DEM and every export leave these channels out of the
+             terrain — otherwise buildings would print twice. -->
+        <div class="composite-footer-hint composite-2d-note">
+          In 3D, buildings, roads, waterways and walls come from the City Model
+          layers (Extrude tab). These toggles only change the 2D preview; Apply
+          to DEM and exports leave them out of the terrain.
+        </div>
         <div class="composite-footer-hint" style="margin:0 0 4px;">Regions &gt;10km fetch a coarser tier automatically (roads + water + large buildings only)</div>
 
         <label class="composite-toggle-row">
@@ -170,7 +180,7 @@
       <button id="previewCompositeBtn" class="btn composite-action-btn"
               title="Recompute and preview the composite layer">👁 Preview</button>
       <button id="applyCompositeToDemBtn" class="btn btn-primary composite-action-btn"
-              title="Replace current DEM with composite values">✓ Apply to DEM</button>
+              title="Replace current DEM with the composite terrain (City / OSM channels excluded — they come from the City Model in 3D)">✓ Apply to DEM</button>
       <button id="splitViewToggleBtn" class="btn composite-action-btn"
               title="Show Composite DEM and satellite image side by side, synced pan/zoom">⬓ Split view</button>
     </div>
@@ -225,6 +235,16 @@ import CollapsibleSection from '../shared/CollapsibleSection.vue';
     transition: transform 0.15s;
 }
 details[open] > .composite-layer-header::before { transform: rotate(90deg); }
+.composite-2d-only {
+    font-size: 9px;
+    font-weight: 400;
+    color: #d9a441;
+    margin-left: 4px;
+}
+.composite-2d-note {
+    margin: 0 0 4px;
+    color: #d9a441;
+}
 .composite-layer-body {
     padding: 3px 4px 1px 8px;
     display: flex;

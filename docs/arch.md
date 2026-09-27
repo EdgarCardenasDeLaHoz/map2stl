@@ -34,7 +34,7 @@ flowchart LR
 flowchart TD
     subgraph Modules ["modules/ (8 subdirs)"]
         CORE_JS["core/ — api, state, events, cache"]
-        DEM_JS["dem/ — loader, renderer, merge, gridlines"]
+        DEM_JS["dem/ — loader, renderer, gridlines"]
         LAYERS_JS["layers/ — stacked, water, city, composite"]
         MAP_JS["map/ — bbox, compare, globe"]
         UI_JS["ui/ — curves, presets, shortcuts, views"]
@@ -420,6 +420,21 @@ loadWaterMask() → waterMaskCache.has? return cached : GET /api/terrain/water-m
 downloadSTL() → POST /api/export/stl {dem_values, depth_scale, base, ...}
   → blob → browser download
 ```
+
+### Composite → mesh (two-stage pipeline, F-ARCH)
+```
+Composite panel → computeCompositeDem()
+  → terrain channels (DEM, water depth, land cover, vegetation, trails) → terrain snapshot
+  → + OSM channels (buildings, roads, waterways, walls) → 2D preview canvas only
+Apply to DEM → lastDemData.values = terrain snapshot
+             → appState.compositeLayerSpec = buildCompositeLayerSpec()   (terrain only)
+export/preview → _demSettings(): dem_values (edited) | composite_layers (osm_* filtered) | dem_id
+  → server terrain_stage() → city2stl.city_model feature stage (OSM as vector prisms/cuts)
+```
+Rasterised OSM channels never reach the mesh terrain, from the client (composite-spec.js
+`FEATURE_SOURCES`, filtered again in `_demSettings()`) or the server
+(`export_params.mesh_composite_layers`) — otherwise buildings print twice. The legacy
+merge panel (`dem-merge.js`) was removed; the Composite panel supersedes it.
 
 ### City Overlay
 ```

@@ -79,24 +79,6 @@
           <button id="cancelJsonSettingsBtn" class="btn btn-secondary" style="font-size:11px;">✕ Cancel</button>
         </div>
       </div>
-
-      <!-- Merge subtab panel -->
-      <div id="mergePanel" class="hidden">
-        <div class="dem-controls-inner">
-          <div class="row" style="justify-content:space-between;margin-bottom:6px;">
-            <span style="font-size:11px;color:#aaa;">Elevation layers</span>
-            <button id="mergeSyncBtn" class="btn btn-secondary" style="font-size:10px;padding:2px 8px;"
-                    title="Rebuild layers from current DEM source and water mask settings">↺ Sync from layers</button>
-          </div>
-          <div id="mergeLayerList" class="col" style="gap:8px;"></div>
-          <button id="mergeAddLayerBtn" class="btn btn-secondary" style="width:100%;margin-top:8px;font-size:11px;">+ Add Layer</button>
-          <div class="row-gap6" style="margin-top:10px;">
-            <button id="mergePreviewBtn" class="btn btn-primary" style="flex:1;font-size:11px;">👁 Preview</button>
-            <button id="mergeApplyBtn" class="btn btn-success" style="flex:1;font-size:11px;">✓ Apply as DEM</button>
-          </div>
-          <div id="mergeStatus" style="font-size:10px;color:#888;margin-top:6px;min-height:16px;"></div>
-        </div>
-      </div>
     </div><!-- /dem-controls -->
 
   </div><!-- /dem-right-panel -->

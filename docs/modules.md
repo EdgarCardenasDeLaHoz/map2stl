@@ -10,7 +10,7 @@ See [arch.md § Module Boundary](arch.md#module-boundary) for detailed coordinat
 
 ```mermaid
 flowchart LR
-    CORE["core/<br/>state, events, api"] --> DEM["dem/<br/>loader, merge"]
+    CORE["core/<br/>state, events, api"] --> DEM["dem/<br/>loader, gridlines"]
     CORE --> LAYERS["layers/<br/>water, city, composite"]
     CORE --> MAP["map/<br/>globe, bbox"]
     DEM --> EXPORT["export/<br/>STL, 3MF, viewer"]
@@ -37,13 +37,13 @@ flowchart LR
 | `dem-loader.js` | `mapElevationToColor`, `recolorDEM`, `applyProjection`, `drawHistogram` | Canvas rendering, colormaps, projection, zoom |
 | `dem-main.js` | `loadDEM`, `window.renderDEMCanvas` | Main DEM loader + orchestration |
 | `dem-gridlines.js` | `drawGridlinesOverlay`, `toggleGridOverlay` | Lat/lon gridline overlay |
-| `dem-merge.js` | `setupMergePanel`, `runMerge` | Multi-source DEM blending UI |
 
 ### `layers/` — Layer composition & city overlays
 | File | Key exports | Purpose |
 |------|-------------|---------|
 | `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `applyStackedTransform`, `moveLayer`, `setLayerOpacity`, `getLayerOrder`, `getActiveLayers`, `setSplitViewEnabled`, `isSplitViewEnabled` | Single-canvas stacked view, zoom/pan; uses `LAYER_CANVAS_IDS` registry + `_getLayerBuffer`/`_freeLayerBuffer` for GPU memory management. `setSplitViewEnabled` draws CompositeDem/SatImg side-by-side in `stackViewCanvas` instead of alpha-blending, sharing the same `stackZoom` transform so pan/zoom stays synced. |
-| `composite-dem.js` | `computeCompositeDem`, `setupCompositeDemControls` | Additive height contributions (DEM/water/buildings/roads/waterways/walls/landcover/sat/trails, each independently toggleable) + per-layer histograms + ML feature arrays |
+| `composite-dem.js` | `computeCompositeDem`, `applyCompositeToDem`, `buildCompositeLayerSpec`, `setupCompositeDemControls` | Additive height contributions (DEM/water/buildings/roads/waterways/walls/landcover/sat/trails, each independently toggleable) + per-layer histograms + ML feature arrays. The OSM channels (buildings/roads/waterways/walls) are 2D preview only; Apply and export use the terrain-only composite (F-ARCH two-stage mesh pipeline). Supersedes the removed legacy merge panel (`dem-merge.js`) |
+| `composite-spec.js` | `FEATURE_SOURCES`, `buildCompositeLayerSpec`, `anyFeatureChannelEnabled` | Pure ES exports: composite panel params → server `MergeLayerSpec` list; terrain-only unless `includeFeatures` |
 | `mesh-layer.js` | `uploadMeshLayer`, `selectLibraryMeshFile`, `computeMeshHeightmap`, `autoRegisterMesh`, `suggestedMeshResolutionM`, `applyMeshRegistration`, `applyMeshToDem`, `clearMeshLayer` | STL/OBJ import (F-MESHIMPORT): upload/library source → heightmap → registered `MeshImport` stacked layer → optional DEM merge. `autoRegisterMesh` geocodes the filename + runs automatic OSM registration, always handing off to the manual picker |
 | `mesh-registration.js` | `openMeshRegistrationModal`, `computeMeshRegistration`, `undoLastMeshPointPair`, `clearMeshPointPairs` | Side-by-side pan/zoom point-pair picker (DEM vs. mesh heightmap) feeding the `/register` affine fit |
 | `water-mask.js` | `loadWaterMask`, `renderWaterMask`, `renderEsaLandCover` | Water mask + ESA land cover |
@@ -101,9 +101,9 @@ The current order in `main.js` (must be preserved — foundation before dependen
 ```
 core/events → core/api → core/cache → core/ui-helpers → core/state
 dem/dem-loader → dem/dem-gridlines → ui/presets → ui/curve-editor-state → ui/curve-editor
-layers/city-overlay → layers/city-render → layers/stacked-layers → layers/composite-dem
+layers/city-overlay → layers/city-render → layers/stacked-layers → layers/composite-dem (imports layers/composite-spec)
 export/export-handlers → export/model-viewer → map/compare-view
-regions/region-ui → regions/regions-import-export → dem/dem-merge → layers/water-mask
+regions/region-ui → regions/regions-import-export → layers/water-mask
 layers/hydrology-overlay → layers/water-hydrology-combined
 map/map-globe → regions/regions → map/bbox-panel
 ui/cache-inventory → ui/app-setup → ui/keyboard-shortcuts
@@ -197,13 +197,6 @@ Use grep: `grep -rn "function functionName" app/client/static/js/`.
 | `loadSatelliteImage()` | Load ESA land cover (classification raster) |
 | `loadSatelliteRGBImage()` | Load ESRI satellite imagery tiles |
 
-### dem/dem-merge.js
-
-| Function | Purpose |
-|----------|---------|
-| `setupMergePanel()` | Wire merge panel events |
-| `runMerge(apply)` | POST /api/composite/dem-merge, optionally apply |
-
 ### layers/water-mask.js
 
 | Function | Purpose |
@@ -264,10 +257,20 @@ Use grep: `grep -rn "function functionName" app/client/static/js/`.
 
 | Function | Purpose |
 |----------|---------|
-| `computeCompositeDem(opts)` | Add DEM/water/city(buildings+roads+waterways+walls)/landcover/sat/trails contributions — DEM and each city sub-layer independently toggleable |
+| `computeCompositeDem()` | Add DEM/water/landcover/sat/trails contributions (the terrain heightfield, kept for Apply) and then the city channels (buildings+roads+waterways+walls) for the 2D preview only — DEM and each city sub-layer independently toggleable |
 | `_trailsContribution(demW, demH)` (private) | Nearest-neighbour resample of the retained trails relief onto the DEM grid. Only the linework contributes; the area masks are display-only. Where a piste and a path cross, the deeper cut wins rather than the two summing. Weight defaults to 0, so loading the Trails layer to look at it never silently changes an export |
-| `applyCompositeToDem()` | Copy composite into lastDemData.values, and publish the server layer spec on `appState.compositeLayerSpec` |
-| `buildCompositeLayerSpec()` | Translate the panel's flat parameters into the server's ordered `MergeLayerSpec` list; returns `{layers, unsupported}` — `unsupported` names channels with no server source yet (land cover, vegetation, trails), for which export falls back to inline values |
+| `applyCompositeToDem()` | Copy the **terrain-only** composite (no OSM feature channels) into lastDemData.values, and publish the terrain-only server layer spec on `appState.compositeLayerSpec`. Two-stage mesh pipeline (F-ARCH): buildings/roads/waterways/walls reach the mesh only through the City Model's vector stage |
+| `buildCompositeLayerSpec({includeFeatures})` | Wrapper around `composite-spec.js` that supplies dim / DEM source / OSM detail from the DEM snapshot. Default is the terrain-only export spec; `includeFeatures: true` adds the `osm_*` channels for a 2D preview only |
+
+### layers/composite-spec.js
+
+Pure ES module (no DOM, no `window`), unit-tested in `tests/js/compositeSpec.test.js`.
+
+| Export | Purpose |
+|----------|---------|
+| `FEATURE_SOURCES` | `['osm_buildings','osm_roads','osm_waterways','osm_walls']` — 2D preview only, never the mesh terrain. Also used by `export-handlers.js` `_demSettings()` as a last filter on `composite_layers` |
+| `buildCompositeLayerSpec(params, {dim, demSource, detail}, {includeFeatures=false})` | Translate the panel's flat parameters into the server's ordered `MergeLayerSpec` list; returns `{layers, unsupported}` — `unsupported` names channels with no server source yet (land cover, vegetation, trails), for which export falls back to inline (terrain-only) values. Water depth (`water_esa`) is a terrain modifier and stays |
+| `anyFeatureChannelEnabled(params)` | True when any OSM feature toggle is on |
 | `setupCompositeDemControls()` | Wire all composite sliders + toggles + buttons + split-view button |
 | `_drawHistogram(canvas, values)` / `_renderAllHistograms(channels)` | Canvas-drawn per-layer + combined contribution histograms (no chart lib) |
 

@@ -54,7 +54,10 @@ flowchart TD
 | `satImgSourceCanvas` | HTMLCanvasElement\|null | Offscreen canvas holding satellite imagery (set by `city-render.js` / `stacked-layers.js`) |
 | `cityRasterSourceCanvas` | HTMLCanvasElement\|null | Offscreen canvas holding city raster (set by `city-render.js`) |
 | `compositeDemSourceCanvas` | HTMLCanvasElement\|null | Offscreen canvas holding composite DEM output (set by `composite-dem.js`) |
-| `compositeFeatures` | Object\|null | `{dem, water, city, cityComponents: {buildings,roads,waterways,walls}, landcover, satellite, width, height}` — per-channel Float32Arrays for ML pipeline + histograms (set by `composite-dem.js`) |
+| `compositeFeatures` | Object\|null | `{dem, water, city, cityComponents: {buildings,roads,waterways,walls}, landcover, satellite, trails, width, height}` — per-channel Float32Arrays for ML pipeline + histograms (set by `composite-dem.js`) |
+| `_newCompositeApplied` | Boolean | Set by `applyCompositeToDem()`, cleared by a fresh `loadDEM()`. Tells `export-handlers.js` `_demSettings()` to send `compositeLayerSpec` (or, if a channel has no server source, the inline `lastDemData.values`) |
+| `compositeLayerSpec` | `{layers, unsupported}`\|null | Terrain-only server layer spec published by `applyCompositeToDem()` — never contains the `osm_*` feature sources (two-stage mesh pipeline: those come from the City Model's vector stage) |
+| `demValuesEdited` | Boolean | Browser-side edits (curve editor, mesh blend) exist in `lastDemData.values`; export ships them as `dem_values`. Applied composites put only terrain channels there, so this never carries rasterised OSM features |
 | `osmCityDetail` | `'full'`\|`'coarse'`\|undefined | Which OSM detail tier `loadCityData()` last fetched with — `'coarse'` above `CITY_MAX_DIAG_KM` (10km), rejected above `CITY_COARSE_MAX_DIAG_KM` (25km). Read by `composite-dem.js`'s `_fetchCityRaster` so the raster endpoint's OSM-cache lookup matches the fetched tier. |
 | `meshImport` | Object\|null | F-MESHIMPORT state: `{uploadId, libraryRelPath, filename, heightmap: {values,width,height,bbox,minElevation,maxElevation,validPct}\|null, registered: {values,mask,width,height,rmsResidualPx}\|null}` (set by `mesh-layer.js`) |
 | `meshSourceCanvas` | HTMLCanvasElement\|null | Offscreen canvas holding the *registered* mesh layer, masked to its footprint (set by `mesh-layer.js`'s `applyMeshRegistration`) |
@@ -112,8 +115,6 @@ flowchart TD
 |-----|------|-------------|
 | `stackedLayerData` | Object | `{dem, water, landCover}` each `{canvas, bbox, label}` |
 | `compareData` | Object | `{left: {region, dem, ...}, right: {...}}` |
-| `_mergeSources` | Array | Available DEM source descriptors |
-| `_mergeLayers` | Array | Current merge layer stack |
 | `waterMaskCache` | Object | File-top LRU, max 20 entries. Methods: `get/set/has/generateKey/getStats/clear` |
 
 ## window.appState Keys (modules read these)
