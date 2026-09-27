@@ -4,8 +4,9 @@
  * Loaded as a plain <script> by templates/reports.html. All state lives on window.reportsPage so
  * the page can be poked at from the console while judging a batch.
  *
- * Everything comes from one GET /api/reports/index, which scans the report directories on each
- * request. That is deliberately not cached here: the point of the page is to look at a batch that
+ * Everything comes from GET /api/reports/index (skyline artifacts) and GET
+ * /api/reports/registration (plate-registration reports and align-tool packs, F-REGION 5), which
+ * scan the report directories on each request. That is deliberately not cached here: the point of the page is to look at a batch that
  * has just finished, and the Rescan button has to be able to show it.
  */
 
@@ -17,6 +18,7 @@ window.reportsPage = (() => {
     quality: new Set(['good', 'medium', 'weak']),
     search: '',
     heights: {},   // region dir -> summary from /api/reports/heights
+    registration: null,   // /api/reports/registration, loaded beside the index
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -33,8 +35,19 @@ window.reportsPage = (() => {
 
   // --- data ------------------------------------------------------------------
 
+  async function loadRegistration() {
+    try {
+      const res = await fetch('/api/reports/registration');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      state.registration = await res.json();
+    } catch (e) {
+      state.registration = { error: e.message, reports: [], packs: [], roots: [] };
+    }
+  }
+
   async function load() {
     $('#pane-overview').innerHTML = '<div class="empty">Scanning report directories…</div>';
+    const reg = loadRegistration();
     try {
       const res = await fetch('/api/reports/index');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -44,6 +57,7 @@ window.reportsPage = (() => {
         `<div class="empty err">Could not load the inventory: ${esc(e.message)}</div>`;
       return;
     }
+    await reg;
     renderTotals();
     renderSidebar();
     renderActive();
@@ -134,6 +148,15 @@ window.reportsPage = (() => {
         `data-file="${esc(p.url)}" data-label="${esc(p.name)}"`,
         sel.url === p.url)).join('');
     }
+    const reg = state.registration;
+    if (reg && reg.reports && reg.reports.length) {
+      html += '<div class="sec">Registration reports</div>';
+      html += reg.reports.filter((r) => match(`${r.root} ${r.name}`)).map((r) => item(
+        r.name, r.root,
+        `data-file="${esc(r.index_url)}" data-label="${esc(r.root)} / ${esc(r.name)}"`,
+        sel.url === r.index_url)).join('');
+    }
+
     if (d.legacy_landing_url) {
       html += '<div class="sec">Generated landing page</div>';
       html += item('build_landing_page.py output', 'static',
@@ -253,6 +276,72 @@ window.reportsPage = (() => {
     if (state.tab === 'overview') renderOverview();
   }
 
+  // --- registration ----------------------------------------------------------
+
+  const fmtNum = (v, digits = 2) => (typeof v === 'number' && Number.isFinite(v)
+    ? v.toFixed(digits) : '—');
+
+  function renderRegistration() {
+    const pane = $('#pane-registration');
+    const reg = state.registration;
+    if (!reg) { pane.innerHTML = '<div class="empty">Loading…</div>'; return; }
+    if (reg.error) {
+      pane.innerHTML = `<div class="empty err">Could not load registration reports: ${esc(reg.error)}</div>`;
+      return;
+    }
+    const q = state.search.toLowerCase();
+    const match = (name) => !q || String(name || '').toLowerCase().includes(q);
+    const roots = reg.roots.map((r) => `<code>${esc(r.key)}</code>${r.exists ? '' : ' (missing)'}`)
+      .join(' · ');
+    const verdicts = Object.entries(reg.totals.verdicts || {})
+      .map(([k, v]) => `<span class="v-${esc(k)}">${esc(k)} ${v}</span>`).join(' · ');
+
+    let html = '<h2>Plate registration</h2>'
+      + `<div class="meta">${reg.totals.reports} reports · ${reg.totals.packs} align packs `
+      + `(${verdicts || 'no verdicts'}) · roots: ${roots}. Read-only; place and verify plates `
+      + 'from the app (Composite tab, Plate registration).</div>';
+
+    const packs = reg.packs.filter((p) => match(`${p.slug} ${p.city}`));
+    html += '<h3>Align-tool packs</h3>';
+    html += packs.length ? '<table><thead><tr><th>pack</th><th>verdict</th><th>placement</th>'
+      + '<th>refinement</th><th>cell</th><th>rasters</th><th></th></tr></thead><tbody>'
+      + packs.map((p) => {
+        const v = p.registration || {};
+        const sp = p.street_placement || {};
+        const rf = p.refinement || {};
+        const status = v.status || 'unchecked';
+        const placement = p.street_placement
+          ? `${sp.confident ? 'confident' : (sp.position_confident ? 'position only' : 'unsure')}`
+            + ` · moved ${fmtNum(sp.moved_m, 0)} m · ×${fmtNum(sp.size, 3)}`
+          : (p.guess ? esc(p.guess.source || '') : '—');
+        const thumbs = (p.images || []).slice(0, 4).map((im) => `<img loading="lazy" `
+          + `src="${esc(im.url)}" alt="${esc(im.name)}" data-cap="${esc(p.slug)} ${esc(im.name)}">`)
+          .join('');
+        return `<tr><td><b>${esc(p.city || p.slug)}</b><br><span class="meta">${esc(p.slug)}</span></td>`
+          + `<td class="v-${esc(status)}">${esc(status)}${v.lead != null ? ` (lead ${fmtNum(v.lead)})` : ''}</td>`
+          + `<td>${placement}</td>`
+          + `<td>${p.refinement ? `${rf.accepted ? 'accepted' : 'rejected'} · r ${fmtNum(rf.r)}` : '—'}</td>`
+          + `<td class="num">${fmtNum(p.cell_size_m, 1)} m</td>`
+          + `<td><div class="packthumbs">${thumbs}</div></td>`
+          + `<td><a href="${esc(p.meta_url)}" target="_blank">meta</a>`
+          + (p.placement_url ? ` · <a href="${esc(p.placement_url)}" target="_blank">placement</a>` : '')
+          + '</td></tr>';
+      }).join('') + '</tbody></table>'
+      : '<div class="empty">No align packs on disk.</div>';
+
+    const reports = reg.reports.filter((r) => match(`${r.root} ${r.name} ${r.title}`));
+    html += '<h3>Registration reports</h3>';
+    html += reports.length ? '<table><thead><tr><th>report</th><th>root</th><th>plots</th>'
+      + '<th>written</th><th></th></tr></thead><tbody>'
+      + reports.map((r) => `<tr data-file="${esc(r.index_url)}" data-label="${esc(r.root)} / ${esc(r.name)}">`
+        + `<td>${esc(r.title || r.name)}</td><td>${esc(r.root)}</td>`
+        + `<td class="num">${r.images}</td><td>${esc(fmtDate(r.modified))}</td>`
+        + `<td>${r.summary_url ? `<a href="${esc(r.summary_url)}" target="_blank">summary</a>` : ''}</td></tr>`)
+        .join('') + '</tbody></table>'
+      : '<div class="empty">No registration reports under the configured roots.</div>';
+    pane.innerHTML = html;
+  }
+
   // --- galleries -------------------------------------------------------------
 
   /** The 5:1 panorama strips, in the order the pipeline produces them. */
@@ -334,6 +423,7 @@ window.reportsPage = (() => {
     if (state.tab === 'overview') renderOverview();
     else if (state.tab === 'panoramas') renderPanoramas();
     else if (state.tab === 'views') renderViews();
+    else if (state.tab === 'registration') renderRegistration();
     const sel = state.selection;
     $('#scope').textContent = sel.kind === 'region'
       ? `region: ${sel.region}` : (sel.label || 'all regions');
@@ -343,7 +433,7 @@ window.reportsPage = (() => {
     state.tab = tab;
     document.querySelectorAll('.tab').forEach(
       (el) => el.classList.toggle('active', el.dataset.tab === tab));
-    ['overview', 'panoramas', 'views', 'report'].forEach(
+    ['overview', 'panoramas', 'views', 'report', 'registration'].forEach(
       (t) => { $(`#pane-${t}`).hidden = t !== tab; });
     renderActive();
   }
@@ -418,6 +508,7 @@ window.reportsPage = (() => {
       if (img) return openLightbox(img.src, img.dataset.cap);
       const card = e.target.closest('.card[data-region]');
       if (card) return selectRegion(card.dataset.region);
+      if (e.target.closest('a')) return undefined;   // plain links open in a new tab
       const row = e.target.closest('tr[data-file]');
       if (row) return openFile(row.dataset.file, row.dataset.label);
     }));

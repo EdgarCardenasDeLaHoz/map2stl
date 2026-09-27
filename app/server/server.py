@@ -28,6 +28,7 @@ from app.server.routers.geocode import router as _geocode_router
 from app.server.routers.height import router as _height_router
 from app.server.routers.layers import router as _layers_router
 from app.server.routers.regions import router as _regions_router
+from app.server.routers.registration import router as _registration_router
 from app.server.routers.reports import router as _reports_router
 from app.server.routers.settings import router as _settings_router
 from app.server.routers.terrain import router as _terrain_router
@@ -304,10 +305,11 @@ app.include_router(_height_router)
 app.include_router(_diagnostics_router)
 app.include_router(_layers_router)
 app.include_router(_reports_router)
+app.include_router(_registration_router)
 app.include_router(_geocode_router)
 logger.info(
     "Routers loaded: regions, terrain, cities, export, cache, settings, composite, height, "
-    "diagnostics, layers, reports")
+    "diagnostics, layers, reports, registration")
 
 
 @app.get("/", response_class=HTMLResponse)

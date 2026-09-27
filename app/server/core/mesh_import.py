@@ -22,10 +22,19 @@ single bbox: `set_library_location()` writes the same bbox to every mesh
 file's sidecar in that city folder. Computed heightmaps are cached on disk
 per (file, bbox, resolution, up_axis) so re-opening a previously registered
 city doesn't re-run the ray-cast.
+
+Auto-register reports (F-REGION §5)
+-----------------------------------
+``auto_register`` writes numpy2stl's HTML registration report to one folder per
+import source under ``CACHE_ROOT/mesh_imports/reports/<city>_<hash>/`` (re-running
+overwrites it) and returns its ``/reports/files/mesh_import/...`` URL together with
+the ``ComparisonResult`` score breakdown (``comparison_scores``).  The ``/reports``
+browser lists that folder beside the batch registration reports.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -89,7 +98,6 @@ def _library_session_dir(rel_path: str) -> Path:
     """Per-library-file scratch dir for the 'last heightmap' cache, mirroring
     _upload_dir's layout but keyed by a hash of rel_path (which may contain
     slashes/spaces) rather than an opaque upload_id."""
-    import hashlib
     key = hashlib.md5(rel_path.encode()).hexdigest()
     return _mesh_upload_root() / "library_sessions" / key
 
@@ -130,6 +138,11 @@ def _resolve_mesh_path(upload_id: str) -> Path:
         if p.is_file():
             return p
     raise MeshImportError(f"No mesh file found for upload_id: {upload_id!r}")
+
+
+def upload_mesh_path(upload_id: str) -> Path:
+    """On-disk path of a stored upload (raises MeshImportError if unknown)."""
+    return _resolve_mesh_path(upload_id)
 
 
 def delete_upload(upload_id: str) -> None:
@@ -335,8 +348,13 @@ def set_library_location(
     up_axis: str = "z",
     notes: str = "",
     apply_to_city: bool = True,
+    placement: dict | None = None,
 ) -> list[str]:
-    """Persist bbox (+ up_axis/notes) as a sidecar for rel_path.
+    """Persist bbox (+ up_axis/notes, and an optional placement record) as a sidecar.
+
+    ``placement`` is what the Plate registration panel saves beside the bbox: the pack
+    slug, centre, turn, size and tile-consensus verdict (the bbox alone cannot say the
+    plate is turned).  Omitted, the sidecar has the same three keys as before.
 
     When apply_to_city is True (default), the same bbox is written to every
     other mesh file in the same immediate folder — city STL packs split a
@@ -350,6 +368,8 @@ def set_library_location(
         raise MeshImportError(f"Mesh file not found in library: {rel_path!r}")
 
     record = {"bbox": bbox, "up_axis": up_axis, "notes": notes}
+    if placement:
+        record["placement"] = placement
     targets = [mesh_path]
     if apply_to_city:
         targets = sorted(
@@ -523,10 +543,66 @@ def parse_micropolitan_scale_m_per_unit(name: str, stl_xy_extent_units: float) -
     return extent_m / stl_xy_extent_units
 
 
+def _report_root() -> Path:
+    """Per-import registration reports; read fresh so tests can move CACHE_ROOT."""
+    return _mesh_upload_root() / "reports"
+
+
+def auto_report_dir(city_name: str, source_key: str) -> Path:
+    """One report folder per import source: ``<city-slug>_<hash8>`` (re-runs overwrite)."""
+    slug = re.sub(r"[^a-z0-9]+", "_", city_name.lower()).strip("_") or "mesh"
+    digest = hashlib.md5(source_key.encode("utf-8")).hexdigest()[:8]
+    return _report_root() / f"{slug}_{digest}"
+
+
+def report_url_for(report_dir: Path) -> str | None:
+    """``/reports/files/mesh_import/...`` URL of a report folder's index.html, if written."""
+    index = report_dir / "index.html"
+    if not index.is_file():
+        return None
+    return f"/reports/files/mesh_import/{report_dir.relative_to(_report_root()).as_posix()}/index.html"
+
+
+def _finite(v) -> float | None:
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if np.isfinite(v) else None
+
+
+def comparison_scores(cmp_) -> dict:
+    """The ``ComparisonResult`` breakdown the UI shows, JSON-safe (NaN -> None).
+
+    ``building_p95_abs_m`` is the 95th percentile of the per-building |STL - OSM| height
+    difference: ``building_diff_map`` paints one value per footprint, so its distinct
+    finite values are the per-building samples.
+    """
+    per_building = np.asarray(getattr(cmp_, "building_diff_map", np.array([])), dtype=np.float64)
+    vals = np.unique(per_building[np.isfinite(per_building)]) if per_building.size else np.array([])
+    return {
+        "rmse_m": _finite(cmp_.rmse),
+        "mae_m": _finite(cmp_.mae),
+        "bias_m": _finite(cmp_.bias),
+        "pearson_r": _finite(cmp_.correlation),
+        "spearman_r": _finite(getattr(cmp_, "rank_correlation", None)),
+        "coverage_pct": _finite(cmp_.coverage_pct),
+        "footprint_iou": _finite(cmp_.footprint_iou),
+        "match_score": _finite(getattr(cmp_, "match_score", None)),
+        "n_buildings": int(vals.size),
+        "building_p95_abs_m": _finite(np.percentile(np.abs(vals), 95)) if vals.size else None,
+        "building_median_abs_m": _finite(np.median(np.abs(vals))) if vals.size else None,
+        "height_scale_used": _finite(getattr(cmp_, "height_scale_used", None)),
+    }
+
+
 def auto_register(
     mesh_path: Path,
     filename_hint: str,
     resolution: int = 512,
+    *,
+    write_report: bool = True,
+    source_key: str | None = None,
 ) -> dict:
     """Run the automatic geocode + OSM registration pipeline against a mesh.
 
@@ -565,16 +641,15 @@ def auto_register(
     data-trust that could drift wildly wrong (see global_search.py's
     locked-scale branch for the full reasoning and guardrails).
 
-    Passes out_dir=False: register_city_stl() otherwise always writes a full
-    17-plot HTML report to Code/_reports/{region}/ (~11s/call measured
-    across an 8-city profiling run — matplotlib's own per-figure creation +
-    savefig overhead, not a bug in any one plot, so not worth chasing
-    further there). This app never reads that report — the manual picker's
-    own UI is the source of truth — so writing it on every auto-register
-    call was pure overhead on the interactive path. Standalone research/
-    batch scripts that DO want the HTML report should call
-    city2stl.registration.register_city_stl() directly with its
-    default out_dir, not through this function.
+    Report (F-REGION §5): with ``write_report`` (default) the full numpy2stl HTML
+    report is written to ``auto_report_dir(city_name, source_key)`` under the cache —
+    one folder per import source, overwritten on re-run, never into the batch
+    ``Code/_reports/`` — and the result carries ``report_url`` (served by the
+    ``/reports`` browser) and ``report_dir``.  It costs ~11 s of matplotlib per call
+    (measured over 8 cities), so ``write_report=False`` restores the old
+    ``out_dir=False`` fast path.  ``scores`` is always returned
+    (``comparison_scores``): RMSE, MAE, bias, Pearson r, coverage, footprint IoU,
+    match score and the per-building p95.
     """
     city_name = parse_city_name_from_path(filename_hint)
     try:
@@ -585,6 +660,7 @@ def auto_register(
             "status": "geocode_failed",
             "city_name": city_name, "bbox": None,
             "confidence": None, "footprint_iou": None, "rmse_m": None,
+            "scores": None, "report_url": None, "report_dir": None,
         }
 
     # Without a scale anchor, register_city_stl's estimate_bbox_from_stl() can
@@ -620,11 +696,13 @@ def auto_register(
     if scale_m_per_unit is not None:
         center = _get_city_center_point(city_name)
 
+    out_dir = (auto_report_dir(city_name, source_key or str(mesh_path))
+               if write_report else False)
     try:
         report = _register_city_stl(
             str(mesh_path), city_name, resolution=resolution,
             scale_m_per_unit=scale_m_per_unit, center=center,
-            free_scale=True, out_dir=False)
+            free_scale=True, out_dir=out_dir)
     except Exception as exc:
         logger.exception(f"auto_register: registration failed for {city_name!r}")
         return {
@@ -632,6 +710,7 @@ def auto_register(
             "city_name": city_name,
             "bbox": {"north": n, "south": s, "east": e, "west": w},
             "confidence": None, "footprint_iou": None, "rmse_m": None,
+            "scores": None, "report_url": None, "report_dir": None,
             "error": str(exc),
         }
 
@@ -656,11 +735,15 @@ def auto_register(
         "rmse_m": float(cmp_.rmse),
         "scale": float(reg.scale),
         "angle_deg": float(reg.angle_deg),
+        "scores": comparison_scores(cmp_),
+        "report_url": report_url_for(out_dir) if out_dir else None,
+        "report_dir": str(out_dir) if out_dir else None,
     }
 
 
 def auto_register_upload(
     upload_id: str, resolution: int = 512, filename_hint: str | None = None,
+    write_report: bool = True,
 ) -> dict:
     """auto_register() for an uploaded mesh, resolving its stored path.
 
@@ -669,11 +752,13 @@ def auto_register_upload(
     """
     mesh_path = _resolve_mesh_path(upload_id)
     hint = filename_hint or mesh_path.name
-    return auto_register(mesh_path, hint, resolution=resolution)
+    return auto_register(mesh_path, hint, resolution=resolution,
+                         write_report=write_report, source_key=f"upload:{upload_id}")
 
 
 def auto_register_library(
     rel_path: str, resolution: int = 512, filename_hint: str | None = None,
+    write_report: bool = True,
 ) -> dict:
     """auto_register() for a mesh library file, resolving its on-disk path.
 
@@ -685,4 +770,5 @@ def auto_register_library(
     if not mesh_path.is_file():
         raise MeshImportError(f"Mesh file not found in library: {rel_path!r}")
     hint = filename_hint or rel_path
-    return auto_register(mesh_path, hint, resolution=resolution)
+    return auto_register(mesh_path, hint, resolution=resolution,
+                         write_report=write_report, source_key=f"library:{rel_path}")

@@ -177,12 +177,14 @@ async def mesh_auto_register(upload_id: str, body: MeshAutoRegisterRequest):
     field tells the caller what happened. This is a starting point for the
     manual point-pair picker, not a final answer: the client is expected to
     show the confidence/quality metrics and let the user confirm or refine.
+    The response also carries ``scores`` (the ComparisonResult breakdown) and
+    ``report_url`` (the per-import HTML report, unless ``write_report`` is false).
     """
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, mesh_import.auto_register_upload,
-            upload_id, body.resolution, body.filename_hint,
+            upload_id, body.resolution, body.filename_hint, body.write_report,
         )
     except mesh_import.MeshImportError as e:
         return error_response(str(e), status=400)
@@ -215,7 +217,7 @@ async def set_mesh_library_location(rel_path: str, body: MeshLibrarySetLocationR
     try:
         updated = mesh_import.set_library_location(
             rel_path, bbox, up_axis=body.up_axis, notes=body.notes,
-            apply_to_city=body.apply_to_city,
+            apply_to_city=body.apply_to_city, placement=body.placement,
         )
         return JSONResponse(content={"updated": updated})
     except mesh_import.MeshImportError as e:
@@ -259,7 +261,7 @@ async def library_mesh_auto_register(rel_path: str, body: MeshAutoRegisterReques
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, mesh_import.auto_register_library,
-            rel_path, body.resolution, body.filename_hint,
+            rel_path, body.resolution, body.filename_hint, body.write_report,
         )
     except mesh_import.MeshImportError as e:
         return error_response(str(e), status=400)

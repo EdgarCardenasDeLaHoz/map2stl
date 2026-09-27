@@ -67,6 +67,7 @@
         <div v-show="activeTab==='composite'">
           <CompositeDemSection />
           <MeshImportSection />
+          <PlateRegistrationSection />
         </div>
 
       </div><!-- /dem-controls-inner -->
@@ -95,6 +96,7 @@ import ProjectionSection     from './ProjectionSection.vue';
 import FetchLayersSection    from './FetchLayersSection.vue';
 import CompositeDemSection   from './CompositeDemSection.vue';
 import MeshImportSection     from './MeshImportSection.vue';
+import PlateRegistrationSection from './PlateRegistrationSection.vue';
 import PresetsSection        from './PresetsSection.vue';
 import WorkflowPresetBar     from './WorkflowPresetBar.vue';
 import EdgeLandmarkWarnings  from '../views/EdgeLandmarkWarnings.vue';

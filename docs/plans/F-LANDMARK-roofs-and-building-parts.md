@@ -1,6 +1,6 @@
 # F-LANDMARK — Roofs, building parts and landmark detail
 
-Status: planned 2026-09-27 (user: "we still have not finalized any pipelines for adding
+Status: planned 2026-09-27; §6 (scoring) done 2026-09-27 (user: "we still have not finalized any pipelines for adding
 rooftop details for rendering complex key buildings like cathedrals, city hall").
 Survey: this session's read-only audit (roofs, parts, sources) — findings below.
 
@@ -43,6 +43,18 @@ Survey: this session's read-only audit (roofs, parts, sources) — findings belo
    choose OSM parts / nDSM / uploaded mesh, preview in 3D.
 6. **Scoring**: promote the scratch "plate critic" (generated model vs plate / lidar) to
    `tools/critic/` and track roof error on the landmark set.
+   **Done 2026-09-27** as `city2stl/registration/critic.py` (library code, not `tools/`, so the
+   app can call it): the scratch `critic/` code was not recoverable, so the metrics were
+   re-implemented from `Code/docs/plate-critic.md` — both surfaces as height above ground in
+   metres on the reference grid; plate warped by the pack's placement and put in metres by the
+   tallest-roof anchor; our model as filled footprints at `height_m` or a rendered STL with the
+   80 m top-hat ground removed (scale fitted by median ratio when units are unknown). Reports
+   per-building median |error| (headline), p90, bias, within 2/5 m, footprint IoU / precision /
+   recall, per-cell MAE / r, and a roof shape error flagged unresolvable above 2 m cells. The
+   learned critic was **not** promoted (monotone in relief, 0/8 argmin agreement). Endpoint
+   `POST /api/registration/critic/score`; UI "Score this model" in the Export tab
+   (`ModelScorePanel.vue`). Tracking roof error on the landmark set waits on §1–§3 and on a
+   ≤ 1 m reference (lidar nDSM or surveyed pack such as Old San Juan).
 
 ## Target files
 

@@ -57,6 +57,10 @@ from pathlib import Path
 import locate  # noqa: E402
 import numpy as np
 
+# Promoted to city2stl.registration.correlate (2026-09-27); re-exported so
+# `refine_guess.ncc_surface` / `.height_channel` keep working for the other tools.
+from city2stl.registration.correlate import height_channel, ncc_surface  # noqa: E402,F401
+
 DATA = Path(__file__).resolve().parent / "data"
 
 # Span sweep for a plate nobody has measured.  `locate`'s own search uses 0.78-1.20 of
@@ -117,40 +121,6 @@ MAX_WATER_LOSS = 0.01
 # --------------------------------------------------------------------------
 # Scoring
 # --------------------------------------------------------------------------
-
-def _corr(a_fft, b, shape):
-    return np.fft.irfft2(a_fft * np.conj(np.fft.rfft2(b)), s=shape)
-
-
-def ncc_surface(fixed, template, support, fixed_ffts=None):
-    """Pearson correlation of `template` against `fixed`, taken inside `support` only.
-
-    The plain FFT correlation the water solver uses zero-means over the whole frame, which
-    hands a larger template a higher score for nothing.  Restricting the statistics to the
-    plate's own footprint makes scores from different spans comparable, which is what the
-    span sweep needs.  The surface is rolled so that zero shift sits at the centre, the same
-    convention as `locate.correlation_surface`.
-    """
-    shape = fixed.shape
-    if fixed_ffts is None:
-        fixed_ffts = (np.fft.rfft2(fixed), np.fft.rfft2(fixed * fixed))
-    f_fft, f2_fft = fixed_ffts
-
-    n = float(support.sum())
-    sum_ft = _corr(f_fft, template * support, shape)
-    sum_f = _corr(f_fft, support, shape)
-    sum_f2 = _corr(f2_fft, support, shape)
-    sum_t = float((template * support).sum())
-    sum_t2 = float(((template * support) ** 2).sum())
-
-    num = sum_ft - sum_f * sum_t / n
-    var_f = np.maximum(sum_f2 - sum_f * sum_f / n, 0.0)
-    var_t = max(sum_t2 - sum_t * sum_t / n, 0.0)
-    den = np.sqrt(var_f * var_t)
-    out = np.where(den > 1e-9, num / np.maximum(den, 1e-9), 0.0)
-    h, w = shape
-    return np.roll(out, (h // 2, w // 2), axis=(0, 1))
-
 
 def _warp(plate, scale, tx, ty, res, nearest=False):
     import cv2
@@ -353,20 +323,6 @@ def refine_arrays(plate_b, osm_b, plate_w, osm_w, scale, span_locked: bool,
 # --------------------------------------------------------------------------
 # On-disk exports
 # --------------------------------------------------------------------------
-
-def height_channel(raw) -> np.ndarray:
-    """A height raster as the fit wants it: no NaN, nothing negative, unit maximum.
-
-    NaN is the "no building" sentinel on the OSM side and does not occur on the plate side;
-    both become zero, which is what "ground" means to the correlation.  The unit scaling is
-    cosmetic -- the correlation is scale-invariant -- but it keeps the two sides' numbers
-    comparable when they are printed.
-    """
-    a = np.nan_to_num(np.asarray(raw, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
-    a = np.maximum(a, 0.0)
-    peak = float(a.max())
-    return a / peak if peak > 0 else a
-
 
 def load_export(slug: str, data_dir: Path = DATA):
     """The four masks the refinement needs, plus the export's own metadata."""

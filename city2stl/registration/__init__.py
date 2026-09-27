@@ -13,6 +13,18 @@ never fetches.  This package supplies the OSM side:
 
 CLIs: ``python -m city2stl.registration.scripts.run_registration`` (one city),
 ``...benchmark_micropolitan`` and ``...robustness_test``.
+
+Plate placement and scoring, promoted from ``tools/align_tool`` on 2026-09-27 so the
+web app can import them (the tool scripts now import from here):
+
+* ``street_place`` — place a plate pack by its streets (with ``osm_model`` and
+  ``osm_water`` for the map side, ``align_paths`` for where packs and caches live);
+* ``consensus`` — the tile-consensus verdict (pass / review / fail);
+* ``correlate`` — shared NCC / peak / height-channel primitives;
+* ``critic`` — score a generated model against a plate or lidar nDSM
+  (per-building median absolute error, footprint IoU, roof summary).
+
+Import those submodules directly; this package ``__init__`` does not pull them in.
 """
 
 from __future__ import annotations

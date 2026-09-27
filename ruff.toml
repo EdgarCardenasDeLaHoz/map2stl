@@ -30,6 +30,8 @@ ignore = [
 "tools/**" = ["E701", "E702", "E731", "E741", "UP031", "B904", "B905"]
 "tests/manual/**" = ["E701", "E702", "E731", "E741", "UP031", "B904", "B905"]
 "city2stl/registration/scripts/*" = ["E701", "E702", "E731", "E741", "UP031", "B904", "B905"]
+# Promoted from tools/align_tool (2026-09-27) with their research-script style intact.
+"city2stl/registration/{street_place,osm_model}.py" = ["E701", "E702", "E731", "E741", "UP031", "B904", "B905"]
 
 [format]
 quote-style = "double"

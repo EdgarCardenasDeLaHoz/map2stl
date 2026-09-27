@@ -71,6 +71,16 @@
       </button>
     </div>
     <div v-if="autoStatusLabel" class="mesh-import-hint" :class="{ 'mesh-import-error': autoStatusIsError }">{{ autoStatusLabel }}</div>
+    <div v-if="autoScoreRows.length" class="mesh-import-scores">
+      <table aria-label="Auto-register score breakdown">
+        <tbody>
+          <tr v-for="row in autoScoreRows" :key="row.label" :title="row.hint">
+            <th>{{ row.label }}</th><td>{{ row.value }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <a v-if="autoReportUrl" :href="autoReportUrl" target="_blank" rel="noopener" class="mesh-import-report-link">📄 Open registration report</a>
+    </div>
 
     <div class="row-gap6 mesh-import-actions">
       <button id="meshComputeHeightmapBtn" class="btn btn-secondary mesh-import-action-btn"
@@ -89,7 +99,7 @@
 </template>
 <script setup lang="ts">
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 /** Suggest a resolution (m/px) for the current DEM bbox — delegates to
  * mesh-layer.js's window.suggestedMeshResolutionM so both the UI's initial
@@ -122,13 +132,39 @@ const hasSource = ref(false);
 const autoRunning = ref(false);
 const autoStatusLabel = ref('');
 const autoStatusIsError = ref(false);
+/** ComparisonResult breakdown from the last auto-register (F-REGION 5). */
+const autoScores = ref<Record<string, number | null> | null>(null);
+const autoReportUrl = ref('');
+
+const _SCORE_ROWS: [string, string, (v: number) => string, string][] = [
+  ['rmse_m', 'RMSE', (v) => `${v.toFixed(1)} m`, 'Root-mean-square STL-OSM height difference over the overlap'],
+  ['mae_m', 'MAE', (v) => `${v.toFixed(1)} m`, 'Mean absolute height difference'],
+  ['bias_m', 'Bias', (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)} m`, 'Mean(STL - OSM); positive = mesh taller'],
+  ['pearson_r', 'Pearson r', (v) => v.toFixed(2), 'Height correlation over the overlap'],
+  ['coverage_pct', 'Coverage', (v) => `${v.toFixed(0)}%`, 'OSM building pixels with matching mesh data'],
+  ['footprint_iou', 'Footprint IoU', (v) => v.toFixed(2), 'Union IoU of mesh vs OSM footprints (registration quality)'],
+  ['match_score', 'Match score', (v) => v.toFixed(2), 'Composite 0-1 match quality'],
+  ['building_p95_abs_m', 'Per-building p95', (v) => `${v.toFixed(1)} m`, '95th percentile of per-building |mesh - OSM| height'],
+];
+
+const autoScoreRows = computed(() => {
+  const s = autoScores.value;
+  if (!s) return [];
+  return _SCORE_ROWS
+    .filter(([key]) => typeof s[key] === 'number')
+    .map(([key, label, fmt, hint]) => ({ label, value: fmt(s[key] as number), hint }));
+});
 
 async function autoRegister() {
   autoRunning.value = true;
   autoStatusLabel.value = '';
   autoStatusIsError.value = false;
+  autoScores.value = null;
+  autoReportUrl.value = '';
   try {
     const result = await (window as any).autoRegisterMesh({ resolution: 512 });
+    autoScores.value = result?.scores || null;
+    autoReportUrl.value = result?.report_url || '';
     if (!result) {
       autoStatusIsError.value = true;
       autoStatusLabel.value = 'Auto mode failed — see toast for details.';
@@ -334,6 +370,31 @@ onBeforeUnmount(() => {
   color: #888;
   display: block;
   margin-top: 4px;
+}
+.mesh-import-scores {
+  margin: 4px 0 6px;
+  font-size: 11px;
+}
+.mesh-import-scores table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.mesh-import-scores th {
+  text-align: left;
+  font-weight: normal;
+  color: #8ea6bf;
+  padding: 1px 4px;
+}
+.mesh-import-scores td {
+  text-align: right;
+  color: #ddd;
+  padding: 1px 4px;
+  font-variant-numeric: tabular-nums;
+}
+.mesh-import-report-link {
+  display: inline-block;
+  margin-top: 4px;
+  color: #7fb3ff;
 }
 .mesh-import-footer-hint {
   font-size: 10px;

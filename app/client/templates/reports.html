@@ -160,6 +160,15 @@ figcaption { font-size: 11px; color: var(--muted); margin-top: 2px; }
 #lightbox img { max-width: 100%; max-height: calc(100% - 30px); object-fit: contain; }
 #lightbox .cap { color: #d7dbe0; font-size: 12px; margin-top: 8px; }
 
+.v-pass { color: var(--good); font-weight: 600; }
+.v-review { color: var(--medium); font-weight: 600; }
+.v-fail { color: var(--weak); font-weight: 600; }
+.v-unchecked { color: var(--muted); }
+.packthumbs { display: flex; gap: 4px; }
+.packthumbs img { width: 44px; height: 44px; object-fit: cover; border: 1px solid var(--line);
+                  border-radius: 3px; cursor: zoom-in; background: #fff; }
+td a { color: var(--accent); }
+
 .empty { color: var(--muted); padding: 20px 0; }
 .err { color: var(--weak); }
 </style>
@@ -182,6 +191,7 @@ figcaption { font-size: 11px; color: var(--muted); margin-top: 2px; }
       <div class="tab" data-tab="panoramas">Panoramas</div>
       <div class="tab" data-tab="views">Street views</div>
       <div class="tab" data-tab="report">Rendered report</div>
+      <div class="tab" data-tab="registration">Registration</div>
       <div class="filters">
         <span>quality</span>
         <label><input type="checkbox" class="qf" value="good" checked> good</label>
@@ -193,6 +203,7 @@ figcaption { font-size: 11px; color: var(--muted); margin-top: 2px; }
     <div class="pane" id="pane-panoramas" hidden></div>
     <div class="pane" id="pane-views" hidden></div>
     <div class="pane paneframe" id="pane-report" hidden><iframe id="frame" title="report"></iframe></div>
+    <div class="pane" id="pane-registration" hidden></div>
   </main>
 </div>
 

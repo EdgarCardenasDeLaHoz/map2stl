@@ -8,8 +8,14 @@ Serves three things under ``/reports``:
   pre-generated file. ``scripts/build_landing_page.py`` writes a static ``index.html`` that has to
   be re-run after every batch, and it was three regions stale when this router was written; the
   page served here cannot go stale for the same reason.
+* ``GET /api/reports/registration`` — plate-registration reports (numpy2stl HTML reports under
+  ``Code/_reports/``, ``Code/_reports_regen/``, ``Cities/micropolitan/reports/`` and the web app's
+  per-import mesh auto-register folders) plus a summary of every align-tool pack
+  (``tools/align_tool/data/<slug>/meta.json``). Roots are configurable (``_REG_ROOTS``).
 * ``GET /reports/files/{root}/{path}`` — the artifact files themselves (HTML pages, PNGs, PDFs,
   JSON sidecars), rooted at a small fixed set of directories with a traversal guard.
+
+Everything here is read-only: nothing under any root is written, moved or deleted.
 
 The per-seed statistics are parsed back out of each region's rendered ``index.html`` by
 ``city2stl.skyline.report_index``, which ``build_landing_page`` uses too. Those numbers are not
@@ -22,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import mimetypes
+import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,6 +54,42 @@ _ROOTS: dict[str, Path] = {
 }
 
 _REPORT_DIR_SUFFIX = "_skyline_report"
+
+#: Code/ — the workspace holding strm2stl/ and numpy2stl/; Cities/ is beside it.
+_WORKSPACE = _STRM2STL.parent
+
+
+def _default_registration_roots() -> dict[str, Path]:
+    """Registration report roots, keyed by the name used in ``/reports/files/<key>/``.
+
+    ``STRM2STL_REGISTRATION_REPORT_ROOTS`` overrides the whole set as ``key=path;key=path``
+    (relative paths resolve against ``Code/``).  A root that does not exist is simply
+    skipped by the scan.
+    """
+    env = os.environ.get("STRM2STL_REGISTRATION_REPORT_ROOTS")
+    if env:
+        out = {}
+        for part in env.split(";"):
+            key, _, raw = part.partition("=")
+            if key.strip() and raw.strip():
+                path = Path(raw.strip())
+                out[key.strip()] = path if path.is_absolute() else _WORKSPACE / path
+        return out
+    from app.server.core.cache import CACHE_ROOT
+    return {
+        "registration": _WORKSPACE / "_reports",               # numpy2stl REPORTS_ROOT
+        "registration_regen": _WORKSPACE / "_reports_regen",
+        "micropolitan": _WORKSPACE.parent / "Cities" / "micropolitan" / "reports",
+        "mesh_import": CACHE_ROOT / "mesh_imports" / "reports",  # web app auto-register
+        "align": _STRM2STL / "tools" / "align_tool" / "data",    # plate packs (meta.json)
+    }
+
+
+#: Registration roots, separate from ``_ROOTS`` so the skyline inventory is unaffected.
+#: The ``align`` key is a pack directory (one folder per plate, each with meta.json);
+#: every other key holds HTML report folders.
+_REG_ROOTS: dict[str, Path] = _default_registration_roots()
+_ALIGN_KEY = "align"
 
 #: Extensions the browser can render. Anything else is refused rather than offered as a download,
 #: because these roots also hold caches that are of no use to a reader.
@@ -313,6 +356,146 @@ async def reports_heights(region_dir: str):
     })
 
 
+# --- registration reports and align packs ---------------------------------------
+
+def _report_folder_entry(key: str, root: Path, folder: Path) -> dict | None:
+    """One numpy2stl registration report folder (``index.html`` + ``assets/``)."""
+    index = folder / "index.html"
+    if not index.is_file():
+        return None
+    rel = folder.relative_to(root).as_posix()
+    url_base = f"/reports/files/{key}/{rel}"
+    title = None
+    try:
+        head = index.read_text(encoding="utf-8", errors="replace")[:4000]
+        m = re.search(r"<title>([^<]*)</title>", head)
+        title = m.group(1).strip() if m else None
+    except OSError:
+        pass
+    return {
+        "root": key,
+        "name": rel,
+        "title": title,
+        "index_url": f"{url_base}/index.html",
+        "summary_url": (f"{url_base}/summary.html"
+                        if (folder / "summary.html").is_file() else None),
+        "images": _count(folder / "assets", "*.png"),
+        "modified": _mtime(index),
+    }
+
+
+def _scan_report_root(key: str, root: Path) -> list[dict]:
+    """Report folders one or two levels down, plus loose HTML pages at the top."""
+    out = []
+    if not root.is_dir():
+        return out
+    for path in sorted(root.iterdir(), key=lambda p: p.name.lower()):
+        if path.is_dir():
+            entry = _report_folder_entry(key, root, path)
+            if entry is not None:
+                out.append(entry)
+                continue
+            for sub in sorted(p for p in path.iterdir() if p.is_dir()):
+                entry = _report_folder_entry(key, root, sub)
+                if entry is not None:
+                    out.append(entry)
+        elif path.suffix.lower() in (".html", ".htm"):
+            out.append({"root": key, "name": path.name, "title": None,
+                        "index_url": f"/reports/files/{key}/{path.name}",
+                        "summary_url": None, "images": 0, "modified": _mtime(path)})
+    return out
+
+
+#: Pack rasters worth showing as thumbnails, in the drag tool's order.
+_PACK_IMAGES = ("stl_heightmap.png", "osm_buildings.png", "sat.png", "stl_water.png",
+                "osm_water.png", "stl_mask.png", "stl_relief.png")
+
+
+def _pick(d: dict | None, *keys) -> dict | None:
+    if not isinstance(d, dict):
+        return None
+    return {k: d.get(k) for k in keys if k in d}
+
+
+def _pack_entry(folder: Path) -> dict | None:
+    """Summary of one align-tool pack's ``meta.json`` (the heavy arrays stay on disk)."""
+    meta_path = folder / "meta.json"
+    if not meta_path.is_file():
+        return None
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return {"slug": folder.name, "dir": folder.name, "error": f"meta.json unreadable: {e}"}
+    url_base = f"/reports/files/{_ALIGN_KEY}/{folder.name}"
+    bbox = meta.get("osm_bbox_nsew")
+    return {
+        "slug": meta.get("slug") or folder.name,
+        "dir": folder.name,
+        "city": meta.get("city"),
+        "region": meta.get("region"),
+        "source": meta.get("source"),
+        "bbox": ({"north": bbox[0], "south": bbox[1], "east": bbox[2], "west": bbox[3]}
+                 if isinstance(bbox, list) and len(bbox) == 4 else None),
+        "cell_size_m": meta.get("cell_size_m"),
+        "resolution": meta.get("resolution"),
+        "tallest_m": meta.get("tallest_m"),
+        "refined_span_m": meta.get("refined_span_m"),
+        "guess": _pick(meta.get("pipeline_guess"), "source", "scale", "rot_deg"),
+        "refinement": _pick(meta.get("refinement"), "accepted", "r", "peak_z", "shift_m",
+                            "reasons"),
+        "street_placement": _pick(meta.get("street_placement"), "confident",
+                                  "position_confident", "moved_m", "size", "turn_deg",
+                                  "unique", "size_margin", "agree", "channels"),
+        "registration": _pick(meta.get("registration"), "status", "reasons", "lead",
+                              "endorsing", "voting", "corrected_m"),
+        "meta_url": f"{url_base}/meta.json",
+        "placement_url": (f"{url_base}/placement.json"
+                          if (folder / "placement.json").is_file() else None),
+        "images": [{"name": n, "url": f"{url_base}/{n}"} for n in _PACK_IMAGES
+                   if (folder / n).is_file()],
+        "modified": _mtime(meta_path),
+    }
+
+
+def _build_registration_inventory() -> dict:
+    roots_out, reports, packs = [], [], []
+    for key, root in _REG_ROOTS.items():
+        exists = root.is_dir()
+        roots_out.append({"key": key, "path": str(root), "exists": exists,
+                          "kind": "packs" if key == _ALIGN_KEY else "reports"})
+        if not exists:
+            continue
+        if key == _ALIGN_KEY:
+            for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+                entry = _pack_entry(folder)
+                if entry is not None:
+                    packs.append(entry)
+        else:
+            reports.extend(_scan_report_root(key, root))
+    verdicts: dict[str, int] = {}
+    for p in packs:
+        status = (p.get("registration") or {}).get("status") or "unchecked"
+        verdicts[status] = verdicts.get(status, 0) + 1
+    return {
+        "generated": datetime.now(UTC).isoformat(timespec="seconds"),
+        "roots": roots_out,
+        "reports": reports,
+        "packs": packs,
+        "totals": {"reports": len(reports), "packs": len(packs), "verdicts": verdicts},
+    }
+
+
+@router.get("/api/reports/registration")
+async def reports_registration():
+    """Registration reports and align-tool packs, scanned on each request (read-only)."""
+    try:
+        return JSONResponse(_build_registration_inventory())
+    except Exception as e:
+        logger.error("Failed to build registration inventory: %s", e, exc_info=True)
+        raise HTTPException(status_code=500,
+                            detail=f"Registration inventory failed: {e}") from e
+
+
 # --- file serving -------------------------------------------------------------
 
 def _safe_path(root_key: str, rel_path: str) -> Path:
@@ -322,7 +505,7 @@ def _safe_path(root_key: str, rel_path: str) -> Path:
     These roots sit beside the OSM and Street View caches, so the check is made here rather than
     inherited.
     """
-    root = _ROOTS.get(root_key)
+    root = _ROOTS.get(root_key) or _REG_ROOTS.get(root_key)
     if root is None or not root.is_dir():
         raise HTTPException(status_code=404, detail="Unknown report root")
     try:

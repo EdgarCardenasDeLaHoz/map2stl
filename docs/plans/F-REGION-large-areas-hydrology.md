@@ -1,6 +1,6 @@
 # F-REGION — Large regions with rivers, and registration in the UI
 
-Status: steps 1–3 done 2026-09-27 (planned 2026-09-27) (user: "do the same thing for new other examples, large areas
+Status: steps 1–3 and 5 done 2026-09-27 (planned 2026-09-27) (user: "do the same thing for new other examples, large areas
 don't require city layers, but may require river and hydrology layers … registration
 pipelines … are we able to follow those steps using the UI tool").
 
@@ -36,7 +36,7 @@ pipelines … are we able to follow those steps using the UI tool").
    `tools/align_tool/data/`; auto-register returns the report path and score breakdown;
    a "Plate registration" panel wrapping street placement + auto-register as background
    tasks; "score this model" against a registered plate or lidar nDSM using the promoted
-   critic (F-LANDMARK §6).
+   critic (F-LANDMARK §6). **Done 2026-09-27** (see Progress).
 
 ## Progress
 
@@ -85,6 +85,32 @@ pipelines … are we able to follow those steps using the UI tool").
     `tests/js/workflowPresets.test.js`.
   - Left: step 4 (render three reference regions, SOP), step 5 (registration UI); the
     100 km < 2 min criterion is not yet measured on a real region.
+
+- 2026-09-27 — step 5 done (registration in the UI).
+  - **Promoted, not shelled out**: the align tool's placement and check now live in
+    `city2stl/registration/` — `street_place.py` + `osm_model.py` (moved whole; the tool files
+    are `sys.modules` aliases / a CLI shim), `osm_water.py` (locate's OSM-water section),
+    `correlate.py` (`find_peaks`, `edges`, `ncc_surface`, `height_channel`), `consensus.py`
+    (`crop_consensus`, `verdict`, `correct`, `score_export(matrix=...)`, `record_verdict`) and
+    `align_paths.py`. `locate`, `refine_guess` and `auto_register` import them, so the tool
+    CLIs are unchanged; pack discovery / adoption / the batch export stay in the tool.
+  - **Reports**: `GET /api/reports/registration` scans `Code/_reports/`, `_reports_regen/`,
+    `Cities/micropolitan/reports/`, the app's `cache/mesh_imports/reports/` and summarises every
+    `tools/align_tool/data/<slug>/meta.json` (roots overridable with
+    `STRM2STL_REGISTRATION_REPORT_ROOTS`; read-only; same traversal guard). New Registration tab.
+  - **Auto-register**: writes the numpy2stl HTML report to `cache/mesh_imports/reports/<city>_<hash>/`
+    (per import source, overwritten on re-run; `write_report: false` for the old fast path) and
+    returns `report_url` + `scores` (RMSE, MAE, bias, Pearson r, coverage, footprint IoU, match
+    score, per-building p95), shown as a table in `MeshImportSection.vue`.
+  - **Plate registration panel** (`PlateRegistrationSection.vue`, Composite tab): library plate →
+    matched pack → street placement + tile consensus as a background task
+    (`core/plate_registration.py`, `/api/registration/plate/*`, city-fetch task pattern) →
+    verdict, placement table, outline on the map → saved to the location sidecar through the
+    existing location route (new optional `placement` record beside the bbox).
+  - **Score this model** (`ModelScorePanel.vue`, Export tab → City Model): see F-LANDMARK §6.
+  - Known limits: a pack whose placement window is not in the Overpass cache takes minutes (the
+    placement fetches buildings, decks, parks and water for a new window); the sidecar bbox is
+    the plate's unrotated extent about the placed centre, with the turn kept in `placement`.
 
 ## Target files
 

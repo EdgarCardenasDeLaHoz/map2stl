@@ -365,3 +365,87 @@ class TestParseCityNameFromPath:
     def test_upload_filename_with_underscores_only(self):
         result = mesh_import.parse_city_name_from_path("verify_box.stl")
         assert result == "verify box"
+
+
+# ── auto-register report + score breakdown (F-REGION 5) ─────────────────────
+
+def _fake_cmp(**over):
+    from types import SimpleNamespace
+    diff = np.full((6, 6), np.nan)
+    diff[0:2, 0:2] = 1.0      # building A, painted over its footprint
+    diff[3:5, 3:5] = -4.0     # building B
+    base = dict(rmse=2.5, mae=2.0, bias=-0.5, correlation=0.8, rank_correlation=0.7,
+                coverage_pct=91.0, footprint_iou=0.62, match_score=0.55,
+                height_scale_used=3.1, building_diff_map=diff)
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+class TestAutoRegisterReport:
+    def test_comparison_scores_per_building_p95(self):
+        s = mesh_import.comparison_scores(_fake_cmp())
+        assert s["rmse_m"] == 2.5 and s["footprint_iou"] == 0.62 and s["match_score"] == 0.55
+        assert s["n_buildings"] == 2
+        assert s["building_p95_abs_m"] == pytest.approx(np.percentile([1.0, 4.0], 95))
+
+    def test_comparison_scores_nan_becomes_none(self):
+        s = mesh_import.comparison_scores(_fake_cmp(correlation=float("nan"),
+                                                    building_diff_map=np.full((2, 2), np.nan)))
+        assert s["pearson_r"] is None and s["building_p95_abs_m"] is None
+        assert s["n_buildings"] == 0
+
+    def test_report_dir_is_per_source_under_cache(self, _redirect_cache):
+        a = mesh_import.auto_report_dir("Miami, FL", "library:x/a.stl")
+        b = mesh_import.auto_report_dir("Miami, FL", "library:x/b.stl")
+        assert a != b and a.name.startswith("miami_fl_")
+        assert a == mesh_import.auto_report_dir("Miami, FL", "library:x/a.stl")
+        assert a.parent == mesh_import._mesh_upload_root() / "reports"
+        assert mesh_import.report_url_for(a) is None          # nothing written yet
+        a.mkdir(parents=True)
+        (a / "index.html").write_text("<p>r</p>")
+        assert mesh_import.report_url_for(a) == f"/reports/files/mesh_import/{a.name}/index.html"
+
+    @pytest.mark.parametrize("write_report", [True, False])
+    def test_auto_register_returns_scores_and_report(self, _library_dir, _redirect_cache,
+                                                     monkeypatch, write_report):
+        from types import SimpleNamespace
+        seen = {}
+        monkeypatch.setattr(mesh_import, "_get_city_bbox", lambda name: (1.0, 0.0, 1.0, 0.0))
+        monkeypatch.setattr(mesh_import, "_get_city_center_point", lambda name: (0.5, 0.5))
+
+        def fake_register(stl, city, **kw):
+            seen.update(kw)
+            if kw["out_dir"] is not False:
+                kw["out_dir"].mkdir(parents=True, exist_ok=True)
+                (kw["out_dir"] / "index.html").write_text("<p>report</p>")
+            return SimpleNamespace(
+                registration=SimpleNamespace(confidence=0.6, scale=0.67, angle_deg=0.2),
+                comparison=_fake_cmp(), osm_bbox=(0.9, 0.1, 0.9, 0.1))
+
+        monkeypatch.setattr(mesh_import, "_register_city_stl", fake_register)
+        rel = "TestCity_Pack/TestCity_Solid.stl"
+        out = mesh_import.auto_register_library(rel, write_report=write_report)
+        assert out["status"] == "ok"
+        assert out["scores"]["rmse_m"] == 2.5 and out["rmse_m"] == 2.5
+        if write_report:
+            assert out["report_url"].startswith("/reports/files/mesh_import/testcity_pack_")
+            assert out["report_dir"] and seen["out_dir"] is not False
+        else:
+            assert seen["out_dir"] is False
+            assert out["report_url"] is None and out["report_dir"] is None
+
+    def test_geocode_failure_has_empty_scores(self, _library_dir, monkeypatch):
+        def fail(name):
+            raise ValueError("no such place")
+        monkeypatch.setattr(mesh_import, "_get_city_bbox", fail)
+        out = mesh_import.auto_register_library("TestCity_Pack/TestCity_Solid.stl")
+        assert out["status"] == "geocode_failed"
+        assert out["scores"] is None and out["report_url"] is None
+
+    def test_set_location_stores_placement(self, _library_dir):
+        rel = "TestCity_Pack/TestCity_Solid.stl"
+        mesh_import.set_library_location(rel, _BBOX, placement={"pack": "testcity", "turn_deg": 1.5})
+        loc = mesh_import.get_library_location(rel)
+        assert loc["placement"] == {"pack": "testcity", "turn_deg": 1.5}
+        mesh_import.set_library_location(rel, _BBOX)
+        assert "placement" not in mesh_import.get_library_location(rel)

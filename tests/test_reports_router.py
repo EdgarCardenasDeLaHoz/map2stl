@@ -180,3 +180,107 @@ class TestPage:
         res = TestClient(app).get("/reports")
         assert res.status_code == 200
         assert "/static/js/reports.js" in res.text
+
+
+# --- registration reports and align packs (F-REGION 5) ---------------------------
+
+@pytest.fixture()
+def reg_tree(tmp_path, monkeypatch):
+    """Two report roots (one missing), a mesh-import report, and two align packs."""
+    reports = tmp_path / "reg_reports"
+    (reports / "barcelona_spain" / "assets").mkdir(parents=True)
+    (reports / "barcelona_spain" / "index.html").write_text(
+        "<html><head><title>Barcelona, Spain - Registration report</title></head></html>",
+        encoding="utf-8")
+    (reports / "barcelona_spain" / "summary.html").write_text("<p>s</p>", encoding="utf-8")
+    (reports / "barcelona_spain" / "assets" / "comparison.png").write_bytes(b"\x89PNG")
+    (reports / "e2e" / "nested").mkdir(parents=True)
+    (reports / "e2e" / "nested" / "index.html").write_text("<p>n</p>", encoding="utf-8")
+    (reports / "batch_summary.html").write_text("<p>b</p>", encoding="utf-8")
+    (reports / "empty_dir").mkdir()
+
+    mesh = tmp_path / "mesh_reports"
+    (mesh / "miami_fl_1234abcd").mkdir(parents=True)
+    (mesh / "miami_fl_1234abcd" / "index.html").write_text("<p>m</p>", encoding="utf-8")
+
+    align = tmp_path / "align"
+    (align / "barcelona_spain").mkdir(parents=True)
+    (align / "barcelona_spain" / "meta.json").write_text(json.dumps({
+        "slug": "barcelona_spain", "city": "Barcelona", "region": "Barcelona, Spain",
+        "osm_bbox_nsew": [41.4, 41.37, 2.2, 2.16], "cell_size_m": 5.9, "resolution": 512,
+        "pipeline_guess": {"source": "street_place", "scale": 0.68, "rot_deg": 0.0,
+                           "matrix": [[1, 0, 0], [0, 1, 0]]},
+        "refinement": {"accepted": True, "r": 0.77},
+        "street_placement": {"confident": True, "moved_m": 8.0, "size": 1.025},
+        "registration": {"status": "pass", "lead": 1.0, "reasons": []},
+    }), encoding="utf-8")
+    (align / "barcelona_spain" / "stl_heightmap.png").write_bytes(b"\x89PNG")
+    (align / "barcelona_spain" / "stl_heightmap.npy").write_bytes(b"not served")
+    (align / "barcelona_spain" / "placement.json").write_text("{}", encoding="utf-8")
+    (align / "broken").mkdir()
+    (align / "broken" / "meta.json").write_text("{not json", encoding="utf-8")
+    (align / "water_cache").mkdir()                       # no meta.json: skipped
+    (tmp_path / "outside.json").write_text('{"secret": 1}', encoding="utf-8")
+
+    monkeypatch.setattr(reports_router, "_REG_ROOTS", {
+        "registration": reports, "registration_regen": tmp_path / "does_not_exist",
+        "mesh_import": mesh, "align": align})
+    return tmp_path
+
+
+class TestRegistrationInventory:
+    def test_lists_reports_from_every_existing_root(self, client, reg_tree):
+        data = client.get("/api/reports/registration").json()
+        names = {(r["root"], r["name"]) for r in data["reports"]}
+        assert ("registration", "barcelona_spain") in names
+        assert ("registration", "e2e/nested") in names             # one level deeper
+        assert ("registration", "batch_summary.html") in names      # loose page
+        assert ("mesh_import", "miami_fl_1234abcd") in names
+        assert not any(n == "empty_dir" for _, n in names)
+        roots = {r["key"]: r["exists"] for r in data["roots"]}
+        assert roots["registration_regen"] is False
+        bcn = next(r for r in data["reports"] if r["name"] == "barcelona_spain")
+        assert bcn["title"].startswith("Barcelona")
+        assert bcn["images"] == 1
+        assert bcn["summary_url"].endswith("/barcelona_spain/summary.html")
+
+    def test_summarises_align_packs(self, client, reg_tree):
+        data = client.get("/api/reports/registration").json()
+        packs = {p["dir"]: p for p in data["packs"]}
+        assert set(packs) == {"barcelona_spain", "broken"}
+        bcn = packs["barcelona_spain"]
+        assert bcn["registration"]["status"] == "pass"
+        assert bcn["street_placement"]["confident"] is True
+        assert bcn["guess"] == {"source": "street_place", "scale": 0.68, "rot_deg": 0.0}
+        assert bcn["bbox"]["north"] == 41.4
+        assert bcn["placement_url"].endswith("/placement.json")
+        assert [i["name"] for i in bcn["images"]] == ["stl_heightmap.png"]
+        assert "error" in packs["broken"]
+        assert data["totals"]["verdicts"] == {"pass": 1, "unchecked": 1}
+
+    def test_serves_report_and_pack_files(self, client, reg_tree):
+        assert client.get(
+            "/reports/files/registration/barcelona_spain/index.html").status_code == 200
+        assert client.get(
+            "/reports/files/align/barcelona_spain/meta.json").status_code == 200
+        assert client.get(
+            "/reports/files/mesh_import/miami_fl_1234abcd/index.html").status_code == 200
+
+    @pytest.mark.parametrize("url", [
+        "/reports/files/align/../outside.json",
+        "/reports/files/align/barcelona_spain/../../outside.json",
+        "/reports/files/registration/%2e%2e/outside.json",
+        "/reports/files/align/barcelona_spain/stl_heightmap.npy",   # not a viewable type
+        "/reports/files/registration_regen/x.html",                  # root missing
+    ])
+    def test_is_read_only_and_traversal_safe(self, client, reg_tree, url):
+        res = client.get(url)
+        assert res.status_code == 404
+        assert "secret" not in res.text
+
+    def test_env_override_parses_roots(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("STRM2STL_REGISTRATION_REPORT_ROOTS",
+                           f"a={tmp_path};b=relative/dir")
+        roots = reports_router._default_registration_roots()
+        assert roots["a"] == tmp_path
+        assert roots["b"] == reports_router._WORKSPACE / "relative" / "dir"

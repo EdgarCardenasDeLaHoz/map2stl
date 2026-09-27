@@ -16,6 +16,8 @@ import ToastService from 'primevue/toastservice';
 import ConfirmationService from 'primevue/confirmationservice';
 
 import App from './App.vue';
+// Registered globally so the Export tab mounts it with one template line (F-LANDMARK 6).
+import ModelScorePanel from './components/views/ModelScorePanel.vue';
 import { useAppStore } from './stores/app';
 
 // ─── 1. Bootstrap Vue ────────────────────────────────────────────────────────
@@ -35,6 +37,7 @@ app.use(PrimeVue, {
 });
 app.use(ToastService);
 app.use(ConfirmationService);
+app.component('ModelScorePanel', ModelScorePanel);
 
 app.mount('#vue-app');
 
