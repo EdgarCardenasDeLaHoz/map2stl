@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-CITY_PIPELINE_VERSION = 2
+# 3: building parts and their outlines are no longer dissolved together.
+CITY_PIPELINE_VERSION = 3
 
 
 def building_features(payload: dict[str, Any]) -> list[dict[str, Any]]:

@@ -52,6 +52,7 @@ from rasterio.transform import Affine
 from scipy.ndimage import map_coordinates, median_filter
 from shapely.geometry import Polygon, box
 
+from city2stl.heights import min_height_from_tags
 from city2stl.roofs import building_solids
 from geo2stl.geo import GeoGrid, bbox_diagonal_km
 
@@ -435,6 +436,40 @@ def _is_flowing_water(props: dict) -> bool:
     return str(props.get("water") or "") in ("river", "stream", "canal", "stream_pool")
 
 
+def is_part(props: dict) -> bool:
+    """An OSM ``building:part`` (Simple 3D Buildings)."""
+    v = props.get("building:part")
+    return bool(v) and str(v).lower() not in ("no", "none", "nan")
+
+
+def assemble_parts(polys: list[Polygon], props: list[dict]) -> tuple[list, list, int, int]:
+    """Simple 3D Buildings: where ``building:part`` features exist, they are the
+    building; the outline (which carries the overall, usually tallest, height)
+    only fills the area no part covers. Without this a cathedral printed as one
+    block at the height of its bell tower.
+
+    Returns (polygons, properties, number of parts, number of outlines trimmed).
+    """
+    part_idx = [k for k, pr in enumerate(props) if is_part(pr)]
+    if not part_idx:
+        return polys, props, 0, 0
+    parts = shapely.union_all([polys[k] for k in part_idx])
+    tree = shapely.STRtree([polys[k] for k in part_idx])
+    out_p, out_pr, trimmed = [], [], 0
+    for k, (poly, pr) in enumerate(zip(polys, props, strict=True)):
+        if k in part_idx or not len(tree.query(poly, predicate="intersects")):
+            out_p.append(poly)
+            out_pr.append(pr)
+            continue
+        rest = shapely.set_precision(poly.difference(parts), SNAP_MM)
+        trimmed += 1
+        for g in shapely.get_parts(rest):
+            if g.geom_type == "Polygon" and g.area >= MIN_FOOTPRINT_MM2:
+                out_p.append(g)
+                out_pr.append(pr)
+    return out_p, out_pr, len(part_idx), trimmed
+
+
 def build_layer(name: str, features: list[dict], style: LayerStyle,
                 terrain: Terrain) -> tuple[list[Mesh], dict]:
     """Solids for one layer, plus counts for the report."""
@@ -442,14 +477,19 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
     stats = {"features": len(features), "polygons": len(polys), **counts}
     solids: list[Mesh] = []
     if style.mode == "extrude":
+        polys, props, stats["parts"], stats["outlines_replaced"] = assemble_parts(polys, props)
         z_per_m = terrain.scale.z_mm_per_m * style.height_scale
         lo, hi = terrain.ranges_under(polys)
+        base = np.array([min_height_from_tags(p) for p in props]) * z_per_m
         cap = (style.max_slenderness * _widths(np.asarray(polys, dtype=object))
                if style.max_slenderness > 0 and polys else np.full(len(polys), np.inf))
-        want = np.array([float(p.get("height_m") or 10.0) for p in props]) * z_per_m
+        # The slenderness rule applies to each solid's own extent: a spire part
+        # stands on its tower, not on the ground.
+        want = np.array([float(p.get("height_m") or 10.0) for p in props]) * z_per_m - base
         stats["clamped"] = int((want > cap).sum())
-        for poly, pr, l_, h_, c_ in zip(polys, props, lo, hi, cap, strict=True):
-            solids.extend(_roofed(poly, pr, max(l_ - 0.2, 0.0), h_, z_per_m, style, c_))
+        for poly, pr, l_, h_, b_, c_ in zip(polys, props, lo, hi, base, cap, strict=True):
+            z_floor = h_ + b_ if b_ > 0 else max(l_ - 0.2, 0.0)
+            solids.extend(_roofed(poly, pr, z_floor, h_, z_per_m, style, b_ + c_))
     elif style.mode == "water":
         # Standing water (lakes, reservoirs, the sea) is cut flat below its lowest
         # shore; flowing water follows the valley floor. Cut flat, a river on a

@@ -47,6 +47,7 @@ _OVERPASS_REQUEST_TIMEOUT_S = 300
 # _HIGHWAY_WIDTHS is defined in city2stl.roads (authoritative source).
 # Imported here so fetch.py is the single osm-facing module without callers
 # needing to know the internal split between roads.py and fetch.py.
+from .cache_policy import CITY_PIPELINE_VERSION  # noqa: E402
 from .heights import _fill_heights, _reduce_buildings  # noqa: E402
 from .rasterize import _count_verts, _empty_fc  # noqa: E402
 from .roads import get_road_width_m as _get_road_width_m  # noqa: E402
@@ -138,7 +139,7 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
         n_pre_dissolve = len(gdf)
         gdf_m_pre_d = _to_metric(gdf)
         area_pre_dissolve = float(gdf_m_pre_d.geometry.area.sum())
-        gdf = _reduce_buildings(gdf)
+        gdf = _reduce_buildings_keeping_parts(gdf)
         gdf_m_post_d = _to_metric(gdf)
         area_post_dissolve = float(gdf_m_post_d.geometry.area.sum())
         area_dissolve_delta_pct = (area_post_dissolve - area_pre_dissolve) / area_pre_dissolve * 100 if area_pre_dissolve else 0
@@ -153,7 +154,7 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
             "roof:shape", "roof:height", "roof:levels",
             "roof:direction", "roof:orientation",
             "roof:colour", "roof:material",
-            "building:levels", "min_height", "building:part",
+            "building:levels", "min_height", "building:min_level", "building:part",
         ]
         gdf = gdf[[c for c in keep if c in gdf.columns]]
         return json.loads(gdf.to_json())
@@ -163,6 +164,25 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
     except Exception as e:
         logger.warning(f"OSM buildings fetch failed: {e}", exc_info=True)
         return _empty_fc(str(e))
+
+
+def _reduce_buildings_keeping_parts(gdf):
+    """Dissolve touching same-height buildings, except building parts and the
+    outlines they belong to: those keep their own footprints and tags (roof shape,
+    ``min_height``) so the city model can stack the parts (Simple 3D Buildings)."""
+    import pandas as pd
+
+    if "building:part" not in gdf.columns or not len(gdf):
+        return _reduce_buildings(gdf)
+    part = gdf["building:part"].notna() & ~gdf["building:part"].astype(str).str.lower().isin(["no"])
+    if not part.any():
+        return _reduce_buildings(gdf)
+    parts = gdf[part]
+    near = gdf.geometry.intersects(parts.geometry.union_all())
+    keep = part | near
+    plain = _reduce_buildings(gdf[~keep].reset_index(drop=True))
+    return pd.concat([plain, gdf[keep].to_crs(plain.crs) if plain.crs else gdf[keep]],
+                     ignore_index=True)
 
 
 def _fetch_roads(ox, bbox) -> dict:
@@ -344,7 +364,7 @@ def fetch_osm_data(
             f"All {len(healthy)} Overpass mirror(s) failed to serve "
             f"{', '.join(failed)}: {', '.join(healthy)}")
 
-    result["city_pipeline_version"] = 2
+    result["city_pipeline_version"] = CITY_PIPELINE_VERSION
     return result
 
 

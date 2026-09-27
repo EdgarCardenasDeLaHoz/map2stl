@@ -248,6 +248,36 @@ class TestSimplificationAtPrintScale:
         assert len(flat.parts["roads"].faces) * 2 < len(hill.parts["roads"].faces)
 
 
+class TestBuildingParts:
+    """Simple 3D Buildings: parts replace the outline and stack on min_height."""
+
+    def _rect(self, w, s, e, n):
+        return {"type": "Polygon", "coordinates": [[[w, s], [e, s], [e, n], [w, n], [w, s]]]}
+
+    def test_cathedral_parts(self):
+        flat = np.full((120, 150), 100.0)
+        nave = {"geometry": self._rect(-3.5910, 37.1800, -3.5890, 37.1806),
+                "properties": {"height_m": 60}}                      # overall height
+        body = {"geometry": self._rect(-3.5910, 37.1800, -3.5895, 37.1806),
+                "properties": {"height_m": 20, "building:part": "yes", "roof:shape": "gabled"}}
+        tower = {"geometry": self._rect(-3.5895, 37.1801, -3.5890, 37.1805),
+                 "properties": {"height_m": 45, "building:part": "yes"}}
+        spire = {"geometry": self._rect(-3.5894, 37.1802, -3.5891, 37.1804),
+                 "properties": {"height_m": 60, "min_height": "45", "building:part": "yes",
+                                "roof:shape": "pyramidal", "roof:height": "15"}}
+        m = build_city_model(flat, BBOX, {"buildings": _fc(nave, body, tower, spire)})
+        rep = m.report["layers"]["buildings"]
+        assert rep["parts"] == 3 and rep["outlines_replaced"] == 1
+        z = m.scale.z_mm_per_m
+        ground = m.merged.vertices[:, 2].min() + m.scale.base_mm
+        b = m.parts["buildings"]
+        assert b.bounds[1, 2] == pytest.approx(ground + 60 * z, abs=0.3)
+        # the nave is not a 60 m block: most of the footprint stays near 20 m
+        high = b.vertices[b.vertices[:, 2] > ground + 30 * z]
+        assert np.ptp(high[:, 0]) < 0.5 * np.ptp(b.vertices[:, 0])
+        assert m.report["merged"]["watertight"]
+
+
 class TestWater:
     def test_river_follows_the_valley_and_lake_is_flat(self):
         y, x = np.mgrid[0:120, 0:150]

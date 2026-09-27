@@ -9,6 +9,7 @@ failed; only the batch script's own sanity check caught the difference.
 import pytest
 
 from city2stl import fetch as osm_fetch
+from city2stl.cache_policy import CITY_PIPELINE_VERSION
 
 
 class _FakeSettings:
@@ -78,7 +79,7 @@ class TestMirrorExhaustion:
 
         assert len(seen) == 2, "should stop at the first mirror that answers"
         assert result["buildings"]["features"]
-        assert result["city_pipeline_version"] == 2
+        assert result["city_pipeline_version"] == CITY_PIPELINE_VERSION
 
     def test_genuinely_empty_region_is_not_a_failure(self, three_mirrors, monkeypatch):
         """An empty collection with no error key is a real answer; do not retry, do not raise."""

@@ -11,6 +11,8 @@ from unittest.mock import patch
 
 import numpy as np
 
+from city2stl.cache_policy import CITY_PIPELINE_VERSION
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -272,7 +274,7 @@ class TestCitiesPostCaching:
             },
             "roads": {"type": "FeatureCollection", "features": []},
             "waterways": {"type": "FeatureCollection", "features": []},
-            "city_pipeline_version": 2,
+            "city_pipeline_version": CITY_PIPELINE_VERSION,
         }
 
         with patch("app.server.core.city_data.fetch_osm_data", return_value=fresh_payload) as mock_fn:

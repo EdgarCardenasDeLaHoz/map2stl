@@ -103,9 +103,21 @@ def height_from_tags(props) -> tuple[float | None, str]:
         roof_levels = _parse_count(props.get("roof:levels"))
         if roof_levels is None:
             roof_levels = 1.0
-        return (levels + roof_levels) * METRES_PER_LEVEL, "osm_levels"
+        # A building:part's levels start at its building:min_level.
+        below = _parse_count(props.get("building:min_level")) or 0.0
+        return (below + levels + roof_levels) * METRES_PER_LEVEL, "osm_levels"
 
     return None, "default"
+
+def min_height_from_tags(props) -> float:
+    """Where a ``building:part`` starts above the ground, in metres: ``min_height``,
+    else ``building:min_level`` x :data:`METRES_PER_LEVEL`, else 0."""
+    h = parse_length_m(props.get("min_height"))
+    if h is None:
+        levels = _parse_count(props.get("building:min_level"))
+        h = levels * METRES_PER_LEVEL if levels is not None else 0.0
+    return max(h, 0.0)
+
 
 # Roof geometry tags preserved through the dissolve step so that
 # _build_building_meshes() can generate shaped roofs.

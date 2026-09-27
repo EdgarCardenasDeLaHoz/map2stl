@@ -13,6 +13,7 @@ import logging
 from app.server.core.cache import osm_cache_key, read_osm_cache, write_osm_cache
 from app.server.core.height.service import enhance_city_data
 from city2stl.cache_policy import (
+    CITY_PIPELINE_VERSION,
     city_cache_missing_building_parts,
     city_cache_missing_height_source,
 )
@@ -45,7 +46,7 @@ def get_city_layers(north: float, south: float, east: float, west: float,
             logger.warning("City height auto-enhancement skipped: %s", exc)
 
     result = {**cached, **fetched, "cache_key": key}
-    result.setdefault("city_pipeline_version", 2)
+    result.setdefault("city_pipeline_version", CITY_PIPELINE_VERSION)
     if not any("error" in v for v in fetched.values() if isinstance(v, dict)):
         write_osm_cache(key, result)
     return result
