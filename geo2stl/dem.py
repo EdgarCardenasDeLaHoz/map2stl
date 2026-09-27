@@ -172,6 +172,16 @@ def registered_layer_sources() -> list:
     return sorted(_LAYER_SOURCES)
 
 
+def is_terrain_relative_source(name: str) -> bool:
+    """True for a registered source whose grid is a depth relative to the ground.
+
+    Such a provider (``provider.terrain_relative = True``; the rivers and lakes
+    of ``geo2stl.water_layers``) is called with ``base=`` the base DEM layer's
+    raw grid, returns negative metres on that grid, and is blended with ``add``.
+    """
+    return bool(getattr(_LAYER_SOURCES.get(name), "terrain_relative", False))
+
+
 # ---------------------------------------------------------------------------
 # Public helpers
 # ---------------------------------------------------------------------------
@@ -183,6 +193,7 @@ def fetch_layer_data(
     options: dict | None = None,
     *,
     api_key: str | None = None,
+    base: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Fetch a 2-D float64 numpy array for one merge layer.
@@ -198,10 +209,14 @@ def fetch_layer_data(
     the OSM rasterizers, which read the server-side OSM cache. *options*
     is the per-layer parameter bag those providers receive; the built-in
     sources ignore it. *api_key* is the OpenTopography key (None:
-    ``geo2stl.opentopo.get_api_key()``).
+    ``geo2stl.opentopo.get_api_key()``). *base* is the base DEM layer's raw
+    grid, passed only to terrain-relative providers
+    (:func:`is_terrain_relative_source`), which rasterise onto it.
     """
     provider = _LAYER_SOURCES.get(source)
     if provider is not None:
+        if getattr(provider, "terrain_relative", False):
+            return provider(north, south, east, west, dim, options or {}, base=base)
         return provider(north, south, east, west, dim, options or {})
 
     if source == "water_esa":

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,10 @@ class ExportContext:
     # Vertical scale: "auto" (true scale under 20 km diagonal, fit above), "true", "fit".
     z_mode: str = "auto"
     median_size: int = 3
+    # Terrain-relative carve (rivers, lakes; negative m, same grid as dem_values)
+    # from the composite spec. Kept out of dem_values so the terrain stage can
+    # add it after the median filter, which would erase a one-pixel channel.
+    carve_m: Any = None
 
     @classmethod
     def from_request(cls, data: dict) -> ExportContext:
@@ -148,21 +153,24 @@ class ExportContext:
         # so the 3D output reflects the user's Composite-tab configuration.
         composite_layers = mesh_composite_layers(data.get("composite_layers"))
         composite_error = None
+        carve_m = None
         if composite_layers and data.get("bbox"):
             try:
                 # Lazy import — avoids circular deps with the composite router.
                 from app.server.routers.composite import compute_composite_dem
                 dem_settings = data.get("dem") or {}
                 dim = int(data.get("composite_dim") or dem_settings.get("dim") or 600)
-                composite = compute_composite_dem(
+                composite, carve = compute_composite_dem(
                     data["bbox"], dim, composite_layers,
                     projection=dem_settings.get("projection") or "none",
                     clip_nans=bool(dem_settings.get("clip_nans", True)),
                     maintain_dimensions=bool(
                         dem_settings.get("maintain_dimensions", False)),
+                    split_carve=True,
                 )
                 dem_values = composite.flatten().tolist()
                 height, width = composite.shape
+                carve_m = carve if carve.any() else None
             except Exception as exc:
                 logger.exception("Composite resolve failed; falling back: %s", exc)
                 composite_error = f"{type(exc).__name__}: {exc}"[:300]
@@ -197,6 +205,7 @@ class ExportContext:
             composite_error=composite_error,
             z_mode=str(data.get("z_mode", "auto")),
             median_size=int(data.get("median_size", 3)),
+            carve_m=carve_m,
         )
 
 

@@ -55,6 +55,54 @@
     </details>
 
     <details class="composite-layer-group">
+      <summary class="composite-layer-header">🌊 Rivers &amp; lakes</summary>
+      <div class="composite-layer-body">
+        <!-- Terrain channels (F-REGION, geo2stl/water_layers.py): depths relative
+             to the ground, computed server-side and carved after the export's
+             median filter, so they are part of Apply to DEM and every export. -->
+        <div class="composite-footer-hint" style="margin:0 0 4px;">
+          Carved relative to the ground: channel width and depth follow discharge
+          (or stream order), never narrower than one pixel. Lakes (OSM) are cut flat
+          below their lowest shore.
+        </div>
+        <label class="composite-toggle-row">
+          <input type="checkbox" id="compositeRiversEnabled" aria-label="Enable rivers contribution"> Rivers
+        </label>
+        <div class="composite-sliders">
+          <span class="composite-slider-label">Source</span>
+          <select id="compositeRiverSource" class="ctrl-select" aria-label="River dataset"
+                  title="HydroRIVERS: every river with discharge (regional download on first use). Natural Earth: major rivers only.">
+            <option value="hydrorivers" selected>HydroRIVERS</option>
+            <option value="natural_earth_rivers">Natural Earth</option>
+          </select>
+          <span></span>
+          <span class="composite-slider-label">Min order</span>
+          <input type="range" id="compositeRiverMinOrder" min="1" max="8" value="3" step="1" aria-label="Minimum Strahler order"
+                 title="Leave out streams below this Strahler order">
+          <span id="compositeRiverMinOrderLabel" class="composite-slider-value">3</span>
+          <span class="composite-slider-label">Depth ×</span>
+          <input type="range" id="compositeRiverDepthScale" min="0" max="20" value="1" step="0.5" aria-label="River depth scale">
+          <span id="compositeRiverDepthScaleLabel" class="composite-slider-value">1.0</span>
+          <span class="composite-slider-label">Width ×</span>
+          <input type="range" id="compositeRiverWidthScale" min="0.5" max="10" value="1" step="0.5" aria-label="River width scale">
+          <span id="compositeRiverWidthScaleLabel" class="composite-slider-value">1.0</span>
+        </div>
+        <label class="composite-toggle-row">
+          <input type="checkbox" id="compositeLakesEnabled" aria-label="Enable lakes contribution"> Lakes
+        </label>
+        <div class="composite-sliders">
+          <span class="composite-slider-label">Depth</span>
+          <input type="range" id="compositeLakeDepth" min="0.5" max="50" value="2" step="0.5" aria-label="Lake depth below shore">
+          <span id="compositeLakeDepthLabel" class="composite-slider-value">2.0 m</span>
+          <span class="composite-slider-label">Min area</span>
+          <input type="range" id="compositeLakeMinAreaHa" min="0.5" max="100" value="1" step="0.5" aria-label="Minimum lake area in hectares">
+          <span id="compositeLakeMinAreaHaLabel" class="composite-slider-value">1.0 ha</span>
+        </div>
+        <canvas id="compositeHistHydro" class="composite-histogram" width="240" height="20" title="Rivers and lakes contribution distribution"></canvas>
+      </div>
+    </details>
+
+    <details class="composite-layer-group">
       <summary class="composite-layer-header">🏙 City / OSM <span class="composite-2d-only">2D preview only</span></summary>
       <div class="composite-layer-body">
         <!-- Two-stage mesh pipeline (docs/plans/F-ARCH-consolidation.md): the

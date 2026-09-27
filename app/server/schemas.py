@@ -395,7 +395,9 @@ class MergeLayerSpec(BaseModel):
     ``source`` is either a built-in geo2stl source ("local", "h5_local",
     "water_esa", an OpenTopography dataset key) or a name the server has
     registered through ``geo2stl.dem.register_layer_source`` -
-    "osm_buildings", "osm_roads", "osm_waterways", "osm_walls".
+    "osm_buildings", "osm_roads", "osm_waterways", "osm_walls", and the
+    terrain-relative water sources "hydrorivers", "natural_earth_rivers",
+    "lakes" (negative metres below the ground; use ``add``).
 
     ``add`` and ``rivers`` are the additive and subtractive pair: a layer
     that raises the terrain adds ``layer * weight``, one that cuts into it
@@ -523,6 +525,9 @@ class MeshLibrarySetLocationRequest(BoundingBox):
     notes: str = ""
     apply_to_city: bool = Field(
         True, description="Also apply this bbox to sibling files in the same city folder")
+    placement: dict[str, Any] | None = Field(
+        None, description="Optional street-placement record (pack slug, centre, turn, "
+                          "size, verdict) stored beside the bbox in the sidecar")
 
 
 class MeshLibraryHeightmapRequest(BoundingBox):
@@ -543,6 +548,9 @@ class MeshAutoRegisterRequest(BaseModel):
     min_region_iou: float = Field(
         0.5, ge=0, le=1,
         description="Minimum bbox IoU against a saved region to reuse it instead of creating a new one")
+    write_report: bool = Field(
+        True, description="Write the numpy2stl HTML report to a per-import folder under the "
+                          "cache (browsable at /reports); ~10 s of matplotlib per call")
 
 
 class MeshAutoRegisterResponse(BaseModel):
@@ -557,4 +565,52 @@ class MeshAutoRegisterResponse(BaseModel):
     angle_deg: float | None = None
     region: dict[str, object] | None = Field(
         None, description="{name, created, iou} — the matched or newly created region")
+    scores: dict[str, Any] | None = Field(
+        None, description="ComparisonResult breakdown: rmse_m, mae_m, bias_m, pearson_r, "
+                          "coverage_pct, footprint_iou, match_score, building_p95_abs_m, ...")
+    report_url: str | None = Field(
+        None, description="/reports/files/mesh_import/<folder>/index.html when a report was written")
+    report_dir: str | None = None
     infill: Literal["none", "idw", "nearest"] = "none"
+
+
+# ---------------------------------------------------------------------------
+# Plate registration panel and model critic (F-REGION §5, F-LANDMARK §6)
+# ---------------------------------------------------------------------------
+
+class PlateRegistrationStartRequest(BaseModel):
+    """Request body for POST /api/registration/plate/start."""
+    slug: str = Field(..., min_length=1, max_length=120,
+                      description="Align-tool pack (tools/align_tool/data/<slug>)")
+    place: bool = Field(True, description="Run the street placement first; False scores "
+                                          "the pack's current placement only")
+    fix: bool = Field(True, description="Let the tile consensus move the placement onto "
+                                        "the position the tiles agree on")
+    rel_path: str | None = Field(None, description="Mesh-library file this run is for "
+                                                    "(echoed back for the sidecar save)")
+
+
+class CriticReference(BaseModel):
+    """What a model is scored against."""
+    kind: Literal["pack", "ndsm"] = "pack"
+    slug: str | None = Field(None, description="kind=pack: align-tool pack slug")
+    bbox: dict[str, float] | None = Field(None, description="kind=ndsm: {north,south,east,west}")
+    resolution: int = Field(512, ge=64, le=2048, description="kind=ndsm: grid cells per side")
+
+
+class CriticModel(BaseModel):
+    """The generated model being scored."""
+    kind: Literal["buildings", "stl"] = "buildings"
+    features: list[dict[str, Any]] | None = Field(
+        None, description="kind=buildings: GeoJSON building features (properties.height_m)")
+    upload_id: str | None = Field(None, description="kind=stl: id from /api/layers/mesh/upload")
+    bbox: dict[str, float] | None = Field(None, description="kind=stl: the bbox the STL spans")
+    up_axis: Literal["x", "y", "z", "-x", "-y", "-z"] = "z"
+    m_per_unit: float | None = Field(None, gt=0, description="kind=stl: metres per model "
+                                                             "unit; omitted = fitted")
+
+
+class CriticScoreRequest(BaseModel):
+    """Request body for POST /api/registration/critic/score."""
+    reference: CriticReference
+    model: CriticModel

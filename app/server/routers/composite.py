@@ -319,6 +319,21 @@ def register_city_layer_sources() -> None:
 register_city_layer_sources()
 
 
+def register_water_sources() -> None:
+    """Register the terrain-relative water sources (F-REGION).
+
+    ``hydrorivers`` and ``natural_earth_rivers`` live in geo2stl; ``lakes``
+    needs the OSM fetch in city2stl, which geo2stl must not import, so the
+    server supplies it (``city2stl.fetch.fetch_osm_lakes``, disk-cached).
+    """
+    from city2stl.fetch import fetch_osm_lakes
+    from geo2stl.water_layers import register_water_layer_sources
+    register_water_layer_sources(fetch_lakes=fetch_osm_lakes)
+
+
+register_water_sources()
+
+
 @router.post("/api/composite/city-raster")
 async def get_city_raster(req: CompositeCityRasterRequest):
     """
@@ -393,7 +408,8 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
                           projection: str = "none",
                           clip_valid_region: bool | None = None,
                           clip_nans: bool = True,
-                          maintain_dimensions: bool = False) -> "np.ndarray":
+                          maintain_dimensions: bool = False,
+                          *, split_carve: bool = False):
     """Run the dem-merge pipeline and return a numpy array.
 
     Used both by the HTTP endpoint and inline by the export pipeline so the
@@ -410,6 +426,14 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
     *layers* accepts MergeLayerSpec objects or the plain dicts an export
     request carries; dicts are coerced so processing specs behave the same
     either way.
+
+    Terrain-relative sources (rivers, lakes: ``geo2stl.water_layers``) blended
+    with ``add`` are fetched on the base layer's raw grid, projected with
+    nearest-neighbour, resized keeping the deepest value, and combined into a
+    separate *carve* grid (deeper wins where they overlap). The result is
+    ``composite + carve``; with ``split_carve=True`` it is ``(composite,
+    carve)`` instead, so the mesh export can add the carve after its median
+    filter, which would otherwise erase a one-pixel channel.
     """
     import cv2 as _cv2
 
@@ -420,7 +444,14 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
         apply_layer_processing,
         blend_layers,
         fetch_layer_data,
+        is_terrain_relative_source,
     )
+    from geo2stl.water_layers import resize_relative
+
+    def _result(composite, carve):
+        if split_carve:
+            return composite, carve
+        return composite + carve
 
     north = bbox.get("north")
     south = bbox.get("south")
@@ -440,26 +471,39 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
     cached = read_array_cache("composite", cache_key)
     if cached is not None and cached[0].get("composite") is not None:
         logger.debug("Composite cache hit (%s)", cache_key[:8])
-        return cached[0]["composite"]
+        hit = cached[0]["composite"]
+        carve = cached[0].get("carve")
+        return _result(hit, carve if carve is not None and carve.shape == hit.shape
+                       else np.zeros_like(hit))
 
+    carve = None
     if TEST_MODE:
         h = w = dim
         composite = np.linspace(0, 100, h * w, dtype=np.float64).reshape(h, w)
     else:
         composite = None
+        base_raw = None
+        relative = []   # (processed, weight) of terrain-relative layers
         for spec in specs:
+            is_relative = (composite is not None and spec.blend_mode == "add"
+                           and is_terrain_relative_source(spec.source))
             raw = fetch_layer_data(spec.source, north, south, east, west,
-                                   spec.dim, spec.options)
+                                   spec.dim, spec.options,
+                                   base=base_raw if is_relative else None)
+            if base_raw is None:
+                base_raw = raw
 
             if projection and projection != "none":
                 from geo2stl.projections import project_grid
                 raw = project_grid(raw, north, south, east, west, projection,
-                                   clip_valid, categorical=False,
+                                   clip_valid, categorical=is_relative,
                                    maintain_dimensions=maintain_dimensions)
 
             processed = apply_layer_processing(raw, spec.processing)
 
-            if composite is None:
+            if is_relative:
+                relative.append((processed, float(spec.weight)))
+            elif composite is None:
                 h, w = processed.shape
                 if h >= w:
                     out_h, out_w = dim, max(1, int(dim * w / h))
@@ -484,10 +528,16 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
         composite = np.nan_to_num(composite, nan=0.0,
                                   posinf=np.finfo(np.float32).max,
                                   neginf=np.finfo(np.float32).min)
+        for processed, weight in relative:
+            layer = np.minimum(np.nan_to_num(
+                resize_relative(processed, composite.shape), nan=0.0), 0.0) * weight
+            carve = layer if carve is None else np.minimum(carve, layer)
 
-    write_array_cache("composite", cache_key, {"composite": composite})
+    if carve is None:
+        carve = np.zeros_like(composite)
+    write_array_cache("composite", cache_key, {"composite": composite, "carve": carve})
     logger.info("Composite cached (%s, %s)", cache_key[:8], composite.shape)
-    return composite
+    return _result(composite, carve)
 
 
 @router.post("/api/composite/dem-merge")

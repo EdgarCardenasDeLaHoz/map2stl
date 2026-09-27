@@ -50,7 +50,7 @@ without repeating the four bbox parsers in every endpoint.
 | GET | `/api/terrain/hydrology` | Fetch HydroRIVERS depression grid for bbox |
 | GET | `/api/terrain/trails` | Fetch ski and hiking trail relief grids for bbox. **Params:** `dim` (default 600), `relief_m` (default -2.0, negative engraves), `width_m` (default 8, clamped 1–500), `source` (`osm` \| `usfs` \| `all`), `categories` (comma-separated subset of `ski,hiking`). Returns **both** grids (`ski_grid_values_b64`, `hiking_grid_values_b64`) in one response so client-side category toggles need no refetch. Also returns `ski_area_grid_values_b64` and `hiking_area_grid_values_b64`: display-only 0/1 masks of the interiors of features mapped as closed ways (piste and ski-area polygons). The relief grids carry only linework, boundaries included, so an areal feature can never engrave a filled region into the DEM. Also returns `ski_difficulty_grid_values_b64` - the piste grade per pixel as a 1-based index into `difficulty_classes` (0 means no usable `piste:difficulty` tag), sent as float32 like the other grids because the values are small integers and survive the cast exactly. A reader must treat it as class indices and never interpolate it; the server reprojects it nearest-neighbour for the same reason. Where two pistes cross, the harder grade wins. On an Overpass outage the response is HTTP 200 with null grids, `upstream_error: true`, and an `error` naming the failure - distinct from a region that genuinely holds no trails, which returns null grids with `feature_count: 0` and no `upstream_error`. Nothing is cached in either failure case. |
 | POST | `/api/composite/hydrology-merge` | Merge hydrology depression into DEM array |
-| POST | `/api/composite/dem-merge` | Merge multiple DEM layers (`MergeRequest`). Layers are an ordered list: each names a source, a blend mode (`add` raises, `rivers` cuts), a weight and a processing pipeline. Sources are geo2stl's built-ins plus anything the server registered — `osm_buildings`, `osm_roads`, `osm_waterways`, `osm_walls`. The same spec is what an export sends as `composite_layers`. |
+| POST | `/api/composite/dem-merge` | Merge multiple DEM layers (`MergeRequest`). Layers are an ordered list: each names a source, a blend mode (`add` raises, `rivers` cuts), a weight and a processing pipeline. Sources are geo2stl's built-ins plus anything the server registered — `osm_buildings`, `osm_roads`, `osm_waterways`, `osm_walls`, and the terrain-relative water sources `hydrorivers`, `natural_earth_rivers`, `lakes` (F-REGION, `geo2stl/water_layers.py`: negative metres below the ground on the base DEM grid, blend `add`; options `min_order`, `width_scale` for rivers, `depth_m`, `min_area_m2` for lakes). The same spec is what an export sends as `composite_layers`; there the river/lake carve is added after the median filter. |
 | POST | `/api/export/preview` | DEM values for Three.js preview (no STL) |
 
 ## Export Routes (`routers/export.py`)
@@ -70,7 +70,7 @@ Primary `TerrainSession` touchpoints:
 | POST | `/api/export/crosssection` | Generate cross-section OBJ |
 | POST | `/api/export/preview` | DEM values for Three.js preview (no mesh file) |
 | POST | `/api/export/puzzle` | Start async puzzle 3MF export → `{task_id}` |
-| POST | `/api/export/start` | Start async export (any format) → `{task_id}`; body must include `"format"` field |
+| POST | `/api/export/start` | Start async export (any format) → `{task_id}`; body must include `"format"` field. `format="city"` fails with a clear message when city layers (trails included) are enabled on a bbox over 25 km diagonal, unless the body sets `"allow_large_city": true` (`core/city_data.check_city_area`) |
 | GET | `/api/export/status/{task_id}` | Poll async task → `{status, progress, message}` |
 | GET | `/api/export/download/{task_id}` | Download result of completed async task (file auto-deleted after send) |
 
@@ -211,7 +211,7 @@ The inventory is rebuilt by scanning directories on every request rather than re
 - `ExportRequest(BoundingBox)` — `+ dim, depth_scale, height, base, subtract_water, ...`
 - `CityRequest(BoundingBox)` — `+ layers: list[str], simplify_tolerance, min_area`
 - `MergeRequest` — `{bbox, dim, layers: list[MergeLayerSpec]}`
-- `MergeLayerSpec` — `{source, blend_mode, weight, processing: ProcessingSpec}`
+- `MergeLayerSpec` — `{source, blend_mode, weight, processing: ProcessingSpec, options}` (river/lake sources: `blend_mode: "add"`, see `/api/composite/dem-merge`)
 - `ProcessingSpec` — `{clip_min, clip_max, smooth_sigma, sharpen, normalize, invert, extract_rivers, river_max_width_px}`
 
 ## DEM Sources (OPENTOPO_DATASETS in `config.py`)

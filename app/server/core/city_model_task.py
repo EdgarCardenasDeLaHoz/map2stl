@@ -15,7 +15,14 @@ Request (``POST /api/export/start`` with ``format="city"``)::
     (legacy names mm_per_px, fit_height_mm, base_mm are still accepted)
     layers          {layer: {enabled, mode, offset_mm, height_scale, line_width_m, ...}}
     layer_data      {layer: FeatureCollection} to use instead of the cached OSM layer
-    puzzle          {piece_mm | cols+rows, knob_width_mm, knob_depth_mm, clearance_mm}
+    puzzle          {piece_mm | cols+rows | col_edges_mm+row_edges_mm, knob_width_mm,
+                     knob_depth_mm, knob_shape, clearance_mm, method, engrave,
+                     layout, bed_mm}   (app/server/core/puzzle.py)
+    bed_mm          [w, h] print bed, for the report's ``check`` block
+
+report.json carries the build report plus ``puzzle`` (grid, method, timings) and
+``check`` (size vs bed, faces, watertight, widened/clamped, filament and print
+time estimates - app/server/core/preflight.py).
 
 See city2stl/city_model.py and docs/plans/F-CITYMODEL-vector-city-model.md.
 """
@@ -30,11 +37,12 @@ import zipfile
 
 from numpy2stl import write3MF
 
-from app.server.core.city_data import get_city_layers
+from app.server.core.city_data import CityAreaTooLarge, check_city_area, get_city_layers
 from app.server.core.export import terrain_stage
 from app.server.core.export_params import ExportContext
 from app.server.core.export_tasks import ExportTask
-from app.server.core.puzzle import cut_to_zip
+from app.server.core.preflight import build_check
+from app.server.core.puzzle import Heightfield, cut_to_zip
 from city2stl.city_model import build_on_terrain, resolve_layers
 
 logger = logging.getLogger(__name__)
@@ -58,11 +66,17 @@ _LEGACY_NAMES = {"mm_per_px": "mm_per_pixel", "fit_height_mm": "model_height",
                  "base_mm": "base_height"}
 
 
-def run_city_model(data: dict, task: ExportTask) -> None:
+def normalize_request(data: dict) -> dict:
+    """The city defaults (fit height 30 mm) and legacy field names applied."""
     data = {"model_height": 30.0, **data}
     for old, new in _LEGACY_NAMES.items():
         if old in data:
             data.setdefault(new, data[old])
+    return data
+
+
+def run_city_model(data: dict, task: ExportTask) -> None:
+    data = normalize_request(data)
     name = data.get("name") or "city"
     task.update(2, "Loading DEM...")
     p = ExportContext.from_request(data)
@@ -76,9 +90,18 @@ def run_city_model(data: dict, task: ExportTask) -> None:
 
     styles = resolve_layers(data.get("layers"))
     enabled = [n for n, s in styles.items() if s.enabled]
+    # Size guard (F-REGION): no city layers, trails included, on boxes > 25 km
+    # diagonal unless the request sets allow_large_city.
+    allow_large = bool(data.get("allow_large_city"))
+    try:
+        check_city_area(bbox["north"], bbox["south"], bbox["east"], bbox["west"],
+                        [n for n in enabled if n in OSM_LAYERS or n == "trails"], allow_large)
+    except CityAreaTooLarge as exc:
+        task.fail(str(exc))
+        return
     task.update(5, "Loading OSM layers...")
     osm = get_city_layers(bbox["north"], bbox["south"], bbox["east"], bbox["west"],
-                          [n for n in enabled if n in OSM_LAYERS])
+                          [n for n in enabled if n in OSM_LAYERS], allow_large=allow_large)
     layers = {n: osm[n] for n in enabled if isinstance(osm.get(n), dict)}
     # Layers the caller edited locally (e.g. SDK roof classification) replace the
     # cached OSM copy, which has no record of those edits.
@@ -113,8 +136,13 @@ def run_city_model(data: dict, task: ExportTask) -> None:
         finally:
             os.unlink(tmp3mf)
         if data.get("puzzle"):
+            # With no layer solids the model is the terrain block: cut it the fast
+            # way, straight from the heightfield, unless the request says otherwise.
+            hf = (Heightfield(field.z_mm, p.mm_per_pixel, report["tolerances_mm"]["terrain"])
+                  if set(model.parts) == {"terrain"} else None)
             report["puzzle"] = cut_to_zip(model.merged, data["puzzle"], name, zf,
-                                          progress=task.update)
+                                          progress=task.update, heightfield=hf)
+        report["check"] = build_check(report, model.merged, data, report.get("puzzle"))
         zf.writestr("report.json", json.dumps(report, indent=2))
 
     task.complete(zip_path, f"{name}_city.zip",

@@ -273,6 +273,9 @@ window.api = (() => {
 
         /** POST /api/export/puzzle → start async puzzle 3MF export */
         puzzle: (body) => _fetch('/api/export/puzzle', _json(body)),
+
+        /** POST /api/export/preflight → size/bed/pieces/counts/estimates report (no build) */
+        preflight: (body) => _fetch('/api/export/preflight', _json(body)),
     };
 
     // -------------------------------------------------------------------------
@@ -365,6 +368,8 @@ window.api = (() => {
     const composite = {
         /** POST /api/composite/city-raster — rasterize OSM features server-side */
         cityRaster: (body) => _fetch('/api/composite/city-raster', _json(body)),
+        /** POST /api/composite/dem-merge — server-side layer merge (rivers/lakes preview) */
+        demMerge: (body) => _fetch('/api/composite/dem-merge', _json(body)),
     };
 
     // -------------------------------------------------------------------------
@@ -418,5 +423,27 @@ window.api = (() => {
             _json(body)),
     };
 
-    return { _fetch, regions, dem, export: exportApi, cities, geocode, composite, cache, settings, misc, mesh };
+    // -------------------------------------------------------------------------
+    // Plate registration + model critic (F-REGION 5, F-LANDMARK 6)
+    // -------------------------------------------------------------------------
+    const registration = {
+        /** GET /api/registration/packs -> {packs: [{slug, city, window, placeable, scorable, ...}]} */
+        packs: () => _fetch('/api/registration/packs'),
+        /** GET /api/registration/match?rel_path= -> {rel_path, slug|null} */
+        match: (relPath) => _fetch(`/api/registration/match?rel_path=${encodeURIComponent(relPath)}`),
+        /** POST /api/registration/plate/start {slug, place, fix, rel_path} -> task snapshot */
+        start: (body) => _fetch('/api/registration/plate/start', _json(body)),
+        /** GET /api/registration/plate/status/{id} -> task snapshot (result when done) */
+        status: (taskId) => _fetch(`/api/registration/plate/status/${encodeURIComponent(taskId)}`),
+        /** POST /api/registration/plate/cancel/{id} */
+        cancel: (taskId) => _fetch(
+            `/api/registration/plate/cancel/${encodeURIComponent(taskId)}`, { method: 'POST' }),
+        /** GET /api/registration/critic/references?north&south&east&west -> {references} */
+        criticReferences: (bbox) => _fetch('/api/registration/critic/references?'
+            + new URLSearchParams({ north: bbox.north, south: bbox.south, east: bbox.east, west: bbox.west })),
+        /** POST /api/registration/critic/score {reference, model} -> metrics */
+        criticScore: (body) => _fetch('/api/registration/critic/score', _json(body)),
+    };
+
+    return { _fetch, regions, dem, export: exportApi, cities, geocode, composite, cache, settings, misc, mesh, registration };
 })();

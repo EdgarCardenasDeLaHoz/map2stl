@@ -18,14 +18,38 @@ from city2stl.cache_policy import (
     city_cache_missing_height_source,
 )
 from city2stl.fetch import FetchCancelled, fetch_osm_data
+from geo2stl.geo import bbox_diagonal_km
 
 logger = logging.getLogger(__name__)
+
+#: Largest bbox diagonal (km) served with city layers unless the caller overrides
+#: (``allow_large``). Beyond it an OSM fetch takes minutes and most features print
+#: below nozzle width; large regions are terrain + rivers (F-REGION, Region preset).
+CITY_LAYERS_MAX_DIAGONAL_KM = 25.0
+
+
+class CityAreaTooLarge(ValueError):
+    """City layers were requested for a bbox beyond CITY_LAYERS_MAX_DIAGONAL_KM."""
+
+
+def check_city_area(north: float, south: float, east: float, west: float,
+                    layers: list[str], allow_large: bool = False) -> None:
+    """Raise :class:`CityAreaTooLarge` for city layers on a box > 25 km diagonal."""
+    if not layers or allow_large:
+        return
+    diag = bbox_diagonal_km({"north": north, "south": south, "east": east, "west": west})
+    if diag > CITY_LAYERS_MAX_DIAGONAL_KM:
+        raise CityAreaTooLarge(
+            f"City layers are limited to regions of {CITY_LAYERS_MAX_DIAGONAL_KM:.0f} km "
+            f"diagonal; this one is {diag:.1f} km. Turn the city layers off (the Region "
+            f"preset builds terrain with rivers and lakes), choose a smaller box, or set "
+            f"allow_large_city to fetch anyway.")
 
 
 def get_city_layers(north: float, south: float, east: float, west: float,
                     layers: list[str], simplify_tolerance: float = 0.5,
                     min_area: float = 5.0, *, progress=None, on_mirror=None,
-                    should_cancel=None) -> dict:
+                    should_cancel=None, allow_large: bool = False) -> dict:
     """Return {layer: FeatureCollection, ...} for ``layers`` (plus whatever else is cached).
 
     Optional hooks, for the background fetch (``core/city_fetch_tasks.py``):
@@ -35,7 +59,11 @@ def get_city_layers(north: float, south: float, east: float, west: float,
     ``on_mirror(endpoint)`` names the Overpass mirror of each pass;
     ``should_cancel()`` is checked before each layer and before the height step
     (raises ``city2stl.fetch.FetchCancelled``). A cancelled fetch writes no cache.
+
+    Raises :class:`CityAreaTooLarge` when layers are asked for on a bbox over
+    ``CITY_LAYERS_MAX_DIAGONAL_KM`` diagonal, unless ``allow_large``.
     """
+    check_city_area(north, south, east, west, layers, allow_large)
     key = osm_cache_key(north, south, east, west, simplify_tolerance, min_area)
     cached = read_osm_cache(key) or {}
     if cached and (city_cache_missing_height_source(cached)

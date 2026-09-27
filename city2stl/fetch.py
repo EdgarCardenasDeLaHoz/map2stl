@@ -392,6 +392,26 @@ def fetch_osm_data(
     return result
 
 
+def fetch_osm_lakes(north: float, south: float, east: float, west: float) -> dict:
+    """OSM ``natural=water`` / reservoir polygons for a bbox, disk-cached.
+
+    The source of the composite ``lakes`` terrain layer (``geo2stl.water_layers``).
+    Cached in the OSM cache under its own key (namespace ``osm_lakes``), so it
+    never collides with the city payload; an Overpass outage raises
+    (:class:`OverpassUpstreamError`) instead of caching an empty region.
+    """
+    from geo2stl.cache import make_cache_key, read_osm_cache, write_osm_cache
+
+    key = make_cache_key("osm_lakes", north, south, east, west)
+    cached = read_osm_cache(key)
+    if cached is not None:
+        return cached
+    fc = fetch_osm_data(north, south, east, west, ["lakes"])["lakes"]
+    if not fc.get("error"):
+        write_osm_cache(key, fc)
+    return fc
+
+
 def _layers_failed(result: dict, layers: list[str]) -> list[str]:
     """Requested layers that came back empty *and* carrying a fetch error.
 
@@ -453,6 +473,11 @@ def _layer_jobs(ox, bbox, tol_deg: float, simplify_tolerance: float,
         "railways": polygon(
             {"railway": ["rail", "light_rail", "tram", "narrow_gauge", "funicular"]},
             0.0, 0.0, 0.0, ["name", "railway"], "railways"),
+        # Standing water for the composite ``lakes`` terrain layer (F-REGION);
+        # geo2stl.water_layers drops rivers drawn as areas (water=river, ...).
+        "lakes": polygon(
+            {"natural": "water", "landuse": "reservoir"},
+            0.0, 0.0, 0.0, ["name", "natural", "water", "waterway", "landuse"], "lakes"),
     }
 
 

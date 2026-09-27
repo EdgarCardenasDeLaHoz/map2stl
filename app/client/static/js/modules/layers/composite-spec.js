@@ -21,6 +21,41 @@ export const FEATURE_SOURCES = Object.freeze([
 ]);
 
 /**
+ * Terrain-relative water sources (F-REGION, geo2stl/water_layers.py): each
+ * returns negative metres below the ground on the base DEM grid, blended with
+ * `add`. The mesh export carves them after its median filter. Unlike the
+ * `osm_*` channels they are terrain, so they go in the export spec.
+ */
+export const RIVER_SOURCES = Object.freeze(['hydrorivers', 'natural_earth_rivers']);
+export const WATER_TERRAIN_SOURCES = Object.freeze([...RIVER_SOURCES, 'lakes']);
+
+/**
+ * The river / lake layers for `params` (empty when both are off). Shared by
+ * the spec builder and the 2D preview's server fetch.
+ *
+ * @param {Object} params  Composite panel parameters
+ * @param {number} dim
+ * @returns {Array<Object>}
+ */
+export function waterTerrainLayers(params, dim) {
+    const layers = [];
+    if (params.riversEnabled && params.riverDepthScale > 0) {
+        const source = RIVER_SOURCES.includes(params.riverSource) ? params.riverSource : 'hydrorivers';
+        layers.push({
+            source, dim, blend_mode: 'add', weight: params.riverDepthScale,
+            options: { min_order: params.riverMinOrder ?? 3, width_scale: params.riverWidthScale ?? 1 },
+        });
+    }
+    if (params.lakesEnabled && params.lakeDepth > 0) {
+        layers.push({
+            source: 'lakes', dim, blend_mode: 'add', weight: 1,
+            options: { depth_m: params.lakeDepth, min_area_m2: (params.lakeMinAreaHa ?? 1) * 10000 },
+        });
+    }
+    return layers;
+}
+
+/**
  * Build the ordered server layer list for the composite panel.
  *
  * Each channel becomes one layer. `add` raises the terrain and `rivers`
@@ -57,6 +92,8 @@ export function buildCompositeLayerSpec(params, ctx, { includeFeatures = false }
     if (params.waterEnabled) {
         push('water_esa', 'rivers', params.waterDepth * params.waterWeight, {});
     }
+    // Rivers and lakes: terrain-relative depth grids, always in the terrain spec.
+    for (const l of waterTerrainLayers(params, dim)) push(l.source, l.blend_mode, l.weight, l.options);
     if (includeFeatures) {
         if (params.buildingsEnabled) push('osm_buildings', 'add', params.buildingScale, { detail });
         if (params.roadsEnabled) push('osm_roads', 'rivers', params.roadCut, { detail });

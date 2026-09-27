@@ -191,7 +191,8 @@ function revertPreset() {
 function applyWorkflowPreset(name) {
     const preset = WORKFLOW_PRESETS[name];
     if (!preset) { window.showToast('Preset not found', 'error'); return; }
-    const { applied, skipped, undo } = applyFields(preset.fields, document);
+    const bbox = window.appState?.selectedRegion || window.appState?.currentDemBbox || null;
+    const { applied, skipped, undo } = applyFields(preset.fields, document, { bbox });
     _presetSnapshot = { workflowUndo: undo };
     const revertBtn = document.getElementById('revertPresetBtn');
     if (revertBtn) revertBtn.style.display = '';
@@ -201,7 +202,8 @@ function applyWorkflowPreset(name) {
         window.showToast(`${preset.label} preset applied; skipped `
             + skipped.map(s => `${s.id} (${s.reason})`).join(', '), 'warning', 6000);
     } else {
-        window.showToast(`${preset.label} preset applied (${applied.length} settings changed)`, 'success');
+        window.showToast(`${preset.label} preset applied (${applied.length} settings changed)`
+            + (preset.hint ? ` - ${preset.hint}` : ''), 'success', preset.hint ? 6000 : undefined);
     }
 }
 

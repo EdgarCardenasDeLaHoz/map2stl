@@ -28,7 +28,9 @@
  * See docs/design/composite-dem-design.md for full design rationale.
  */
 
-import { buildCompositeLayerSpec as _buildSpec, anyFeatureChannelEnabled } from './composite-spec.js';
+import {
+    buildCompositeLayerSpec as _buildSpec, anyFeatureChannelEnabled, waterTerrainLayers,
+} from './composite-spec.js';
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
@@ -60,6 +62,17 @@ const DEFAULTS = {
     // an export, and switching it on silently would change every mesh built
     // from a region that happens to have trails loaded.
     trailsWeight: 0.0,
+    // Rivers and lakes (F-REGION): terrain-relative depth grids computed by the
+    // server (geo2stl/water_layers.py). Off by default - HydroRIVERS downloads a
+    // regional dataset on first use; the Region workflow preset turns them on.
+    riversEnabled: false,
+    riverSource: 'hydrorivers',   // or 'natural_earth_rivers'
+    riverMinOrder: 3,             // Strahler order cut-off
+    riverDepthScale: 1.0,         // x hydraulic-geometry depth
+    riverWidthScale: 1.0,         // x hydraulic-geometry width (min 1 px)
+    lakesEnabled: false,
+    lakeDepth: 2.0,               // metres below the lowest shore point
+    lakeMinAreaHa: 1.0,           // smaller water bodies are left alone
 };
 
 // ESA WorldCover class → height offset (metres)
@@ -128,7 +141,8 @@ function _minMax(values) {
 
 /** Unit suffix for a slider label ('m' for distance, '' for weights/scales). */
 function _unitSuffix(elemId) {
-    return (elemId.includes('Weight') || elemId.includes('Scale')) ? '' : ' m';
+    if (elemId.includes('Area')) return ' ha';
+    return (elemId.includes('Weight') || elemId.includes('Scale') || elemId.includes('Order')) ? '' : ' m';
 }
 
 // ─── Contribution functions ──────────────────────────────────────────────────
@@ -439,6 +453,45 @@ let _computeGen = 0;
  * Renders result to the layerCompositeDemCanvas in the stacked view.
  * Yields to the browser every ~10k pixels to avoid main-thread freezes.
  */
+/**
+ * Rivers + lakes contribution (negative metres), from the server: the same
+ * terrain-relative layers the export carves, fetched through dem-merge on a
+ * zero-weight base DEM so only the carve comes back. Cached per request body.
+ */
+let _hydroCache = null;   // { key, values }
+async function _hydroContribution(demW, demH) {
+    const bbox = window.appState?.currentDemBbox;
+    if (!bbox) return null;
+    const snapshot = window.appState?.lastDemRequest?.dem;
+    const dim = parseInt(snapshot?.dim ?? document.getElementById('paramDim')?.value, 10) || 600;
+    const demSource = snapshot?.dem_source || document.getElementById('paramDemSource')?.value || 'local';
+    const water = waterTerrainLayers(params, dim);
+    if (!water.length) return null;
+    const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
+    const body = {
+        bbox: { north: bbox.north, south: bbox.south, east: bbox.east, west: bbox.west },
+        dim,
+        layers: [{ source: demSource, dim, blend_mode: 'base', weight: 0, options: {} }, ...water],
+        projection,
+        clip_valid_region: clipValidRegion,
+        maintain_dimensions: maintainDimensions,
+    };
+    const key = JSON.stringify(body) + `->${demW}x${demH}`;
+    if (_hydroCache?.key === key) return _hydroCache.values;
+    const { data, error } = await (window.api?.composite?.demMerge(body)
+        ?? Promise.resolve({ data: null, error: 'api not ready' }));
+    if (error || !data || data.error) {
+        console.warn('[composite] rivers/lakes fetch failed:', error || data?.error);
+        return null;
+    }
+    const vals = window.decodeDemValues?.(data);
+    const [h, w] = data.dimensions || [];
+    if (!vals?.length || !h || !w) return null;
+    const values = _resampleGrid(new Float32Array(vals), w, h, demW, demH);
+    _hydroCache = { key, values };
+    return values;
+}
+
 window.computeCompositeDem = async function computeCompositeDem() {
     const gen = ++_computeGen;
     const enabled = document.getElementById('compositeEnabled')?.checked;
@@ -493,10 +546,14 @@ window.computeCompositeDem = async function computeCompositeDem() {
     const cityAnyEnabled = anyFeatureChannelEnabled(params);
 
     let waterFeat = null, cityFeat = null, cityComponents = null, lcFeat = null,
-        satFeat = null, trailsFeat = null;
+        satFeat = null, trailsFeat = null, hydroFeat = null;
     if (params.waterEnabled && params.waterWeight > 0) {
         try { waterFeat = _waterContribution(W, H); } catch (e) { console.warn('[composite] water:', e); }
         await _yieldToMain(); if (gen !== _computeGen) return;
+    }
+    if (params.riversEnabled || params.lakesEnabled) {
+        try { hydroFeat = await _hydroContribution(W, H); } catch (e) { console.warn('[composite] rivers/lakes:', e); }
+        if (gen !== _computeGen) return;
     }
     if (cityAnyEnabled) {
         try {
@@ -523,7 +580,7 @@ window.computeCompositeDem = async function computeCompositeDem() {
     // Store feature channels on appState for ML pipeline access (lazy — only non-null)
     if (window.appState) {
         window.appState.compositeFeatures = {
-            dem: demFeat, water: waterFeat, city: cityFeat, cityComponents,
+            dem: demFeat, water: waterFeat, hydro: hydroFeat, city: cityFeat, cityComponents,
             landcover: lcFeat, satellite: satFeat, trails: trailsFeat,
             width: W, height: H,
         };
@@ -531,6 +588,7 @@ window.computeCompositeDem = async function computeCompositeDem() {
 
     // Terrain stage first (DEM already folded into `composite` above).
     _addWeightedFeature(composite, waterFeat, params.waterEnabled ? params.waterWeight : 0);
+    _addWeightedFeature(composite, hydroFeat, 1);   // server already applied the weights
     _addWeightedFeature(composite, lcFeat, params.landcoverEnabled ? params.landcoverWeight : 0);
     _addWeightedFeature(composite, satFeat, params.satEnabled ? params.satWeight : 0);
     _addWeightedFeature(composite, trailsFeat, params.trailsEnabled ? params.trailsWeight : 0);
@@ -570,7 +628,7 @@ window.computeCompositeDem = async function computeCompositeDem() {
 
     _renderAllHistograms({
         dem: params.demEnabled ? demFeat : null,
-        water: waterFeat, ...cityComponents,
+        water: waterFeat, hydro: hydroFeat, ...cityComponents,
         landcover: lcFeat, satellite: satFeat, trails: trailsFeat,
         composite,
     });
@@ -615,6 +673,7 @@ function _renderCompositeCanvas(canvas, values, width, height, vmin, vmax) {
 const _HISTOGRAM_CANVAS_IDS = {
     dem: 'compositeHistDem',
     water: 'compositeHistWater',
+    hydro: 'compositeHistHydro',
     buildings: 'compositeHistBuildings',
     roads: 'compositeHistRoads',
     waterways: 'compositeHistWaterways',
@@ -798,6 +857,8 @@ function _updateContribStatus() {
     const parts = [];
     if (params.demEnabled) parts.push(`DEM (${params.demWeight.toFixed(1)}×)`);
     if (params.waterEnabled && params.waterWeight > 0) parts.push(`− Water (${params.waterDepth.toFixed(1)}m, ${params.waterWeight.toFixed(1)}×)`);
+    if (params.riversEnabled) parts.push(`− Rivers (${params.riverSource === 'natural_earth_rivers' ? 'Natural Earth' : 'HydroRIVERS'}, ${params.riverDepthScale.toFixed(1)}×)`);
+    if (params.lakesEnabled) parts.push(`− Lakes (${params.lakeDepth.toFixed(1)}m)`);
     if (params.buildingsEnabled) parts.push(`+ Buildings (${params.buildingScale.toFixed(1)}×)`);
     if (params.roadsEnabled) parts.push(`− Roads (${params.roadCut.toFixed(1)}m)`);
     if (params.waterwaysEnabled) parts.push(`− Waterways (${params.riverDepth.toFixed(1)}m)`);
@@ -839,6 +900,11 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
         compositeVegHeight: 'vegHeight',
         compositeSatWeight: 'satWeight',
         compositeTrailsWeight: 'trailsWeight',
+        compositeRiverMinOrder: 'riverMinOrder',
+        compositeRiverDepthScale: 'riverDepthScale',
+        compositeRiverWidthScale: 'riverWidthScale',
+        compositeLakeDepth: 'lakeDepth',
+        compositeLakeMinAreaHa: 'lakeMinAreaHa',
     };
 
     for (const [elemId, paramKey] of Object.entries(sliderMap)) {
@@ -869,6 +935,8 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
         compositeTrailsEnabled: 'trailsEnabled',
         compositeTrailsSkiEnabled: 'trailsSkiEnabled',
         compositeTrailsHikingEnabled: 'trailsHikingEnabled',
+        compositeRiversEnabled: 'riversEnabled',
+        compositeLakesEnabled: 'lakesEnabled',
     };
     for (const [elemId, paramKey] of Object.entries(toggleMap)) {
         const cb = document.getElementById(elemId);
@@ -876,6 +944,16 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
         cb.checked = params[paramKey];
         cb.addEventListener('change', () => {
             params[paramKey] = cb.checked;
+            _scheduleRecompute();
+        });
+    }
+
+    // River dataset select (HydroRIVERS / Natural Earth).
+    const riverSource = document.getElementById('compositeRiverSource');
+    if (riverSource) {
+        riverSource.value = params.riverSource;
+        riverSource.addEventListener('change', () => {
+            params.riverSource = riverSource.value;
             _scheduleRecompute();
         });
     }
