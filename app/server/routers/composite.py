@@ -36,6 +36,7 @@ POST /api/composite/hydrology-merge
 """
 
 import logging
+import time
 
 import numpy as np
 from fastapi import APIRouter
@@ -374,6 +375,12 @@ async def get_city_raster(req: CompositeCityRasterRequest):
 # DEM layer merge — composite multiple elevation/mask layers
 # ---------------------------------------------------------------------------
 
+#: Bumped when the composite's arithmetic changes, so older cached grids are not
+#: served: 2 = projected base grid kept (not stretched to dim), rivers snapped to
+#: the valley floor, lakes levelled after the median (F-REGION step 4).
+COMPOSITE_CACHE_VERSION = 2
+
+
 def _composite_cache_key(north: float, south: float, east: float, west: float,
                          dim: int, layers: list,
                          projection: str = "none",
@@ -398,10 +405,15 @@ def _composite_cache_key(north: float, south: float, east: float, west: float,
         else:
             spec_dicts.append(dict(spec))
     return make_cache_key("composite", north, south, east, west,
-                          {"dim": dim, "layers": spec_dicts,
+                          {"v": COMPOSITE_CACHE_VERSION, "dim": dim, "layers": spec_dicts,
                            "projection": projection,
                            "clip": bool(clip_valid_region),
                            "maintain": bool(maintain_dimensions)})
+
+
+#: How long a composite built with a skipped (failed) layer is reused before
+#: the failed source is tried again (seconds).
+RETRY_SKIPPED_S = 15 * 60
 
 
 def compute_composite_dem(bbox: dict, dim: int, layers: list,
@@ -409,7 +421,8 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
                           clip_valid_region: bool | None = None,
                           clip_nans: bool = True,
                           maintain_dimensions: bool = False,
-                          *, split_carve: bool = False):
+                          *, split_carve: bool = False,
+                          warnings: list | None = None):
     """Run the dem-merge pipeline and return a numpy array.
 
     Used both by the HTTP endpoint and inline by the export pipeline so the
@@ -434,6 +447,17 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
     ``composite + carve``; with ``split_carve=True`` it is ``(composite,
     carve)`` instead, so the mesh export can add the carve after its median
     filter, which would otherwise erase a one-pixel channel.
+
+    A layer after the first whose source fails (``water_esa`` without Earth
+    Engine, a download error) is skipped instead of failing the whole stack:
+    the Region preset leaves the ESA water channel on, and one unavailable
+    optional service used to cost the user every river and lake as well (the
+    export fell back to the plain DEM, Apply to DEM returned 500). Each skip is
+    logged and appended to *warnings* (the dem-merge response returns them).
+    A composite with a skipped layer is cached with the skips recorded and
+    reused for :data:`RETRY_SKIPPED_S` only (so pre-flight, preview and export
+    agree and an Overpass outage is not waited out three times), then rebuilt.
+    The base layer failing still raises.
     """
     import cv2 as _cv2
 
@@ -445,6 +469,7 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
         blend_layers,
         fetch_layer_data,
         is_terrain_relative_source,
+        upsample_dem,
     )
     from geo2stl.water_layers import resize_relative
 
@@ -470,6 +495,13 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
                                      maintain_dimensions)
     cached = read_array_cache("composite", cache_key)
     if cached is not None and cached[0].get("composite") is not None:
+        skipped_before = list(cached[1].get("skipped") or [])
+        if skipped_before and (time.time() - float(cached[1].get("_cached_at", 0))
+                               > RETRY_SKIPPED_S):
+            cached = None           # retry the layers that failed last time
+        elif skipped_before and warnings is not None:
+            warnings.extend(skipped_before)
+    if cached is not None and cached[0].get("composite") is not None:
         logger.debug("Composite cache hit (%s)", cache_key[:8])
         hit = cached[0]["composite"]
         carve = cached[0].get("carve")
@@ -477,6 +509,7 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
                        else np.zeros_like(hit))
 
     carve = None
+    skipped: list[str] = []
     if TEST_MODE:
         h = w = dim
         composite = np.linspace(0, 100, h * w, dtype=np.float64).reshape(h, w)
@@ -487,10 +520,21 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
         for spec in specs:
             is_relative = (composite is not None and spec.blend_mode == "add"
                            and is_terrain_relative_source(spec.source))
-            raw = fetch_layer_data(spec.source, north, south, east, west,
-                                   spec.dim, spec.options,
-                                   base=base_raw if is_relative else None)
+            try:
+                raw = fetch_layer_data(spec.source, north, south, east, west,
+                                       spec.dim, spec.options,
+                                       base=base_raw if is_relative else None)
+            except Exception as exc:  # noqa: BLE001 - see the docstring
+                if composite is None:
+                    raise
+                msg = f"Layer '{spec.source}' skipped: {type(exc).__name__}: {exc}"[:300]
+                logger.warning("Composite: %s", msg)
+                skipped.append(msg)
+                continue
             if base_raw is None:
+                # Same order as /api/terrain/dem: upsample the raw grid to *dim*,
+                # then project. The terrain-relative layers rasterise on it.
+                raw = upsample_dem(raw, dim)
                 base_raw = raw
 
             if projection and projection != "none":
@@ -504,18 +548,25 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
             if is_relative:
                 relative.append((processed, float(spec.weight)))
             elif composite is None:
+                # The first layer sets the grid: the projected grid itself, as
+                # /api/terrain/dem returns it (a cosine projection narrows the
+                # longer side below *dim*). Stretching it back to *dim* made
+                # Apply to DEM widen the model by 1/cos(lat) - a 403 mm Grand
+                # Canyon became 500 mm - and interpolated every cell. Only a grid
+                # larger than *dim* is resized (down).
                 h, w = processed.shape
-                if h >= w:
-                    out_h, out_w = dim, max(1, int(dim * w / h))
-                else:
-                    out_w, out_h = dim, max(1, int(dim * h / w))
-                # The first layer sets the grid. Its weight scales it, so the
-                # panel's DEM weight means the same thing here as in the
-                # browser; blend_layers never sees this layer.
-                composite = _cv2.resize(
-                    processed.astype(np.float32), (out_w, out_h),
-                    interpolation=_cv2.INTER_LINEAR).astype(np.float64)
-                composite *= float(spec.weight)
+                composite = processed.astype(np.float64)
+                if max(h, w) > dim:
+                    if h >= w:
+                        out_h, out_w = dim, max(1, int(dim * w / h))
+                    else:
+                        out_w, out_h = dim, max(1, int(dim * h / w))
+                    composite = _cv2.resize(
+                        composite.astype(np.float32), (out_w, out_h),
+                        interpolation=_cv2.INTER_AREA).astype(np.float64)
+                # Its weight scales it, so the panel's DEM weight means the same
+                # thing here as in the browser; blend_layers never sees this layer.
+                composite = composite * float(spec.weight)
             else:
                 composite = blend_layers(
                     base=composite, layer=processed,
@@ -535,8 +586,12 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
 
     if carve is None:
         carve = np.zeros_like(composite)
-    write_array_cache("composite", cache_key, {"composite": composite, "carve": carve})
-    logger.info("Composite cached (%s, %s)", cache_key[:8], composite.shape)
+    if skipped and warnings is not None:
+        warnings.extend(skipped)
+    write_array_cache("composite", cache_key, {"composite": composite, "carve": carve},
+                      {"skipped": skipped} if skipped else None)
+    logger.info("Composite cached (%s, %s%s)", cache_key[:8], composite.shape,
+                f", {len(skipped)} layer(s) skipped" if skipped else "")
     return _result(composite, carve)
 
 
@@ -556,11 +611,13 @@ async def merge_dem_layers(req: MergeRequest):
     if any(req.bbox.get(k) is None for k in ("north", "south", "east", "west")):
         return JSONResponse(content={"error": "bbox must contain north/south/east/west"}, status_code=422)
 
+    warnings: list[str] = []
     try:
         composite = await run_sync(compute_composite_dem,
                                    req.bbox, req.dim, list(req.layers),
                                    req.projection, req.clip_valid_region,
-                                   req.clip_nans, req.maintain_dimensions)
+                                   req.clip_nans, req.maintain_dimensions,
+                                   warnings=warnings)
         h, w = composite.shape
         return JSONResponse(content={
             "dem_values_b64": b64_encode(composite),
@@ -571,6 +628,7 @@ async def merge_dem_layers(req: MergeRequest):
             "bbox": [req.bbox["west"], req.bbox["south"],
                      req.bbox["east"], req.bbox["north"]],
             "source": "merge", "layer_count": len(req.layers),
+            "warnings": warnings,
         })
     except Exception as e:
         logger.error(f"DEM merge failed: {e}", exc_info=True)

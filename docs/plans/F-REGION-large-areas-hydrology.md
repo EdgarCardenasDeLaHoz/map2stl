@@ -1,6 +1,6 @@
 # F-REGION — Large regions with rivers, and registration in the UI
 
-Status: steps 1–3 and 5 done 2026-09-27 (planned 2026-09-27) (user: "do the same thing for new other examples, large areas
+Status: all steps (1–5) done 2026-09-27 (planned 2026-09-27) (user: "do the same thing for new other examples, large areas
 don't require city layers, but may require river and hydrology layers … registration
 pipelines … are we able to follow those steps using the UI tool").
 
@@ -29,7 +29,7 @@ pipelines … are we able to follow those steps using the UI tool").
 3. **Done 2026-09-27 — Large-region preset**: Region preset (terrain only, rivers on, Vertical auto → fit,
    30 m source up to ~100 km, 90 m beyond), city layers disabled with a size guard on
    `get_city_layers` for boxes > 25 km.
-4. **Examples + SOP**: render and review three new regions end to end (e.g. Grand Canyon
+4. **Done 2026-09-27 — Examples + SOP**: render and review three new regions end to end (e.g. Grand Canyon
    ~100 km, Middle Rhine valley ~50 km, Sierra Nevada + Granada ~60 km), write the SOP
    section "Large regions and rivers", and record reference results like §1 of the city SOP.
 5. **Registration in the UI**: `/reports` roots for `_reports/` (plate registration) and
@@ -83,8 +83,7 @@ pipelines … are we able to follow those steps using the UI tool").
     `/api/cities` already caps at 15/25 km.
   - Tests: `tests/test_water_layers.py` (synthetic GeoDataFrames), `tests/js/compositeSpec.test.js`,
     `tests/js/workflowPresets.test.js`.
-  - Left: step 4 (render three reference regions, SOP), step 5 (registration UI); the
-    100 km < 2 min criterion is not yet measured on a real region.
+  - Left then: step 4 (done below), step 5 (done below).
 
 - 2026-09-27 — step 5 done (registration in the UI).
   - **Promoted, not shelled out**: the align tool's placement and check now live in
@@ -111,6 +110,36 @@ pipelines … are we able to follow those steps using the UI tool").
   - Known limits: a pack whose placement window is not in the Overpass cache takes minutes (the
     placement fetches buildings, decks, parks and water for a new window); the sidecar bbox is
     the plate's unrotated extent about the placed centre, with the turn kept in `placement`.
+
+- 2026-09-27 — step 4 done (three regions, SOP). `docs/sop/large-region-sop.md`; outputs in
+  `output/renders_regions/<region>/` (gitignored), rendered through the app's routes from the
+  snapshot worktree.
+  - **Results**: Grand Canyon 98.8 × 55.3 km → 403 × 227 × 40 mm, 384 k faces, watertight,
+    export 27 s (DEM 13 s cold, Apply 3 s): the 100 km < 2 min criterion is **met** (Overpass
+    lakes fetch on first use adds 45–75 s). Middle Rhine 320 × 452 mm, 653 k faces, 47 s.
+    Sierra Nevada + Granada 398 × 258 mm, 226 k faces, 17 s. Grand Canyon puzzle 3 × 2, 33 s,
+    all pieces watertight.
+  - **River visibility**: depth on the print is hydraulic depth × depth × × vertical scale:
+    Rhine 0.23 mm at ×1, Colorado 0.04 mm (×5 → 0.21), Sierra streams 0.005 mm (×20 → 0.10).
+    One multiplier cannot serve all regions → recommended: depth in print mm (SOP §6).
+  - **Bugs fixed** (`routers/composite.py`, `geo2stl/water_layers.py`, tests in
+    `tests/test_water_layers.py`):
+    - a failing optional layer (ESA water without Earth Engine, which the Region preset leaves
+      on; an Overpass outage for lakes) failed the whole composite, so Region exports had no
+      rivers and Apply returned 500 → skipped with `warnings` (dem-merge response), cached with
+      the skip for 15 min (`RETRY_SKIPPED_S`);
+    - the composite stretched the projected base grid back to *dim* → Apply widened the model
+      by 1/cos(lat) (403 → 500 mm) and interpolated every cell → kept on the grid
+      `/api/terrain/dem` returns (upsample raw to dim, then project);
+    - HydroRIVERS lines sit up to ~2 km off the SRTM valley (15" source, staircase geometry):
+      the Colorado was carved ~100–150 m up the canyon walls → reaches re-routed along the
+      least-cost path in a corridor (400–2,000 m by order), `options.snap` (default on); median
+      offset 98 → 15 m;
+    - lakes levelled against the raw DEM came out non-flat after the export median → levelled
+      against the 3×3 median (`smooth`); rims still vary (projection resampling, SOP §5);
+    - `COMPOSITE_CACHE_VERSION = 2` so older cached composites are not served.
+  - Not fixed here (out of scope files): pre-flight face estimate 1.3–3× low; composite
+    warnings not surfaced by the export / pre-flight; Overpass dead-mirror probing 40 s.
 
 ## Target files
 

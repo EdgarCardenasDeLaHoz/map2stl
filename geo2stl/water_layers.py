@@ -24,6 +24,18 @@ River size (do not re-litigate: docs/plans/F-REGION-large-areas-hydrology.md):
   ratio of ~4 per order: order 1 ~ 0.2 m^3/s, order 5 ~ 50, order 9 ~ 13 000).
 - Width is clamped to [2, 3000] m and depth to [0.5, 30] m, and the channel is
   never narrower than one DEM pixel, so every river that is drawn also prints.
+
+Valley snapping (F-REGION step 4 review): HydroRIVERS is traced on a 15"
+(~450 m) grid and stored as grid-aligned staircases, so its lines sit up to
+~2 km from the SRTM valley floor. In the Grand Canyon the median carved cell was
+~100 m above the lowest ground within 4 px: the channel was cut into the canyon
+walls and across buttes. With the DEM at hand (``base``) each reach is re-routed
+along the least-cost path through a corridor around it, cost = 1 + height above
+the local valley floor / 5 m, between end points moved to the lowest ground
+nearby (:func:`snap_reaches_to_valley`). The corridor widens with river size
+(:func:`snap_radius_m`): big rivers sit in the deepest, widest valleys and have
+the largest offsets, while a small stream with a wide corridor could jump into
+the next valley. ``options.snap = false`` turns it off.
 """
 
 from __future__ import annotations
@@ -132,15 +144,121 @@ def river_size_m(order=None, discharge=None) -> tuple[np.ndarray, np.ndarray]:
     return width, depth
 
 
+# Valley snapping: corridor half-width by Strahler order, and the cost scale.
+SNAP_RADIUS_M = {3: 400.0, 4: 600.0, 5: 1000.0, 6: 1500.0}   # order >= 7: max
+SNAP_RADIUS_MAX_M = 2000.0
+SNAP_COST_M = 5.0      # 5 m above the valley floor costs as much as one more pixel
+SNAP_END_M_PER_PX = 1.0  # an end point moves 1 px only for 1 m lower ground
+
+
+def snap_radius_m(order) -> np.ndarray:
+    """Corridor half-width (m) searched for the valley floor, by Strahler order."""
+    order = np.nan_to_num(np.atleast_1d(np.asarray(order, dtype=np.float64)), nan=3.0)
+    out = np.full(order.shape, SNAP_RADIUS_MAX_M)
+    for o, r in sorted(SNAP_RADIUS_M.items(), reverse=True):
+        out = np.where(order <= o, r, out)
+    return out
+
+
+def snap_reaches_to_valley(geoms, dem: np.ndarray, width_m: float, height_m: float,
+                           radius_m) -> list:
+    """Re-route each (Multi)LineString along the valley floor of *dem*.
+
+    *geoms* are in the local metric frame of :func:`_metric_frame` (x east from
+    the west edge, y north from the south edge); *dem* is the grid over
+    ``(0, 0, width_m, height_m)`` with row 0 north. Per part: the end points move
+    to the lowest cell within the radius, then the part follows the
+    least-cost 8-connected path inside the corridor of that radius around it,
+    cost ``1 + (z - local floor) / SNAP_COST_M``. End points shared by reaches
+    move to the same cell, so a network stays connected.
+    """
+    from scipy import ndimage
+    from shapely.geometry import LineString, MultiLineString
+    from skimage.graph import route_through_array
+
+    dem = np.asarray(dem, dtype=np.float64)
+    h, w = dem.shape
+    if not np.isfinite(dem).any():
+        return list(geoms)
+    # The raw grid, not a median: a median widens a one-pixel gorge floor into
+    # a three-pixel tie and the channel lands beside it.
+    sm = np.where(np.isfinite(dem), dem, np.nanmax(dem))
+    px_x, px_y = width_m / w, height_m / h
+    px = min(px_x, px_y)
+    radius_m = np.broadcast_to(np.asarray(radius_m, dtype=np.float64), (len(geoms),))
+    floors: dict[int, np.ndarray] = {}
+
+    def to_px(xy):
+        xy = np.asarray(xy, dtype=np.float64)[:, :2]
+        return (np.clip((height_m - xy[:, 1]) / px_y - 0.5, 0, h - 1),
+                np.clip(xy[:, 0] / px_x - 0.5, 0, w - 1))
+
+    def lowest_near(r, c, rp):
+        r, c = int(round(r)), int(round(c))
+        r0, r1, c0, c1 = max(r - rp, 0), min(r + rp + 1, h), max(c - rp, 0), min(c + rp + 1, w)
+        yy, xx = np.mgrid[r0:r1, c0:c1]
+        d2 = (yy - r) ** 2 + (xx - c) ** 2
+        # Lowest ground, with a small price per pixel moved so an end point on a
+        # flat floor stays put instead of sliding up or down the valley.
+        win = np.where(d2 <= rp * rp, sm[r0:r1, c0:c1] + SNAP_END_M_PER_PX * np.sqrt(d2),
+                       np.inf)
+        k = int(np.argmin(win))
+        return r0 + k // win.shape[1], c0 + k % win.shape[1]
+
+    def snap_part(line, rp):
+        if line.length < 2 * px:
+            return line
+        dense = np.array([line.interpolate(d).coords[0]
+                          for d in np.linspace(0.0, line.length,
+                                               max(2, int(np.ceil(2 * line.length / px))))])
+        rows, cols = to_px(dense)
+        floor = floors.get(rp)
+        if floor is None:
+            floor = floors[rp] = ndimage.minimum_filter(sm, size=2 * rp + 1, mode="nearest")
+        start = lowest_near(rows[0], cols[0], rp)
+        end = lowest_near(rows[-1], cols[-1], rp)
+        r0 = max(int(min(rows.min(), start[0], end[0])) - rp - 1, 0)
+        r1 = min(int(max(rows.max(), start[0], end[0])) + rp + 2, h)
+        c0 = max(int(min(cols.min(), start[1], end[1])) - rp - 1, 0)
+        c1 = min(int(max(cols.max(), start[1], end[1])) + rp + 2, w)
+        off_line = np.ones((r1 - r0, c1 - c0), dtype=bool)
+        off_line[np.round(rows).astype(int) - r0, np.round(cols).astype(int) - c0] = False
+        corridor = ndimage.distance_transform_edt(off_line) <= rp
+        cost = 1.0 + (sm[r0:r1, c0:c1] - floor[r0:r1, c0:c1]) / SNAP_COST_M
+        cost = np.where(corridor, cost, 1e6)
+        path, _ = route_through_array(cost, (start[0] - r0, start[1] - c0),
+                                      (end[0] - r0, end[1] - c0),
+                                      fully_connected=True, geometric=True)
+        path = np.asarray(path, dtype=np.float64) + [r0, c0]
+        if len(path) < 2:
+            return line
+        return LineString(np.column_stack([(path[:, 1] + 0.5) * px_x,
+                                           height_m - (path[:, 0] + 0.5) * px_y]))
+
+    out = []
+    for geom, rad in zip(geoms, radius_m, strict=True):
+        if geom is None or geom.is_empty:
+            out.append(geom)
+            continue
+        rp = max(1, int(round(float(rad) / px)))
+        parts = list(geom.geoms) if geom.geom_type == "MultiLineString" else [geom]
+        snapped = [snap_part(part, rp) for part in parts if not part.is_empty]
+        out.append(snapped[0] if len(snapped) == 1 else MultiLineString(snapped))
+    return out
+
+
 def rasterize_river_depth(gdf, north: float, south: float, east: float, west: float,
                           shape: tuple[int, int], *, width_scale: float = 1.0,
-                          depth_scale: float = 1.0) -> np.ndarray:
+                          depth_scale: float = 1.0, dem: np.ndarray | None = None,
+                          snap: bool = True) -> np.ndarray:
     """Burn river centrelines into a relative-depth grid (negative m, 0 off-river).
 
     *gdf* is a GeoDataFrame of (Multi)LineStrings in lon/lat with optional
     ``ORD_STRA`` (Strahler order) and ``DIS_AV_CMS`` (mean discharge) columns.
     Each reach is buffered by half its width in ground metres (never less than
     half a pixel) and burnt at its depth; where reaches overlap the deeper wins.
+    With *dem* (the grid being carved, of *shape*) and *snap*, each reach is
+    first moved onto the valley floor (:func:`snap_reaches_to_valley`).
     """
     from numpy2stl.raster import burn_polygons
 
@@ -167,6 +285,18 @@ def rasterize_river_depth(gdf, north: float, south: float, east: float, west: fl
 
     # Local metres, no CRS: buffers are then true ground distances.
     geoms = gpd.GeoSeries(gdf.geometry.affine_transform(affine).to_numpy())
+    if snap and dem is not None and np.shape(dem) == (h, w):
+        from shapely.geometry import box
+        lines = geoms.intersection(box(0.0, 0.0, width_m, height_m)).to_numpy()
+        ok = np.array([g is not None and not g.is_empty
+                       and g.geom_type in ("LineString", "MultiLineString") for g in lines])
+        if ok.any():
+            orders = order[ok] if order is not None else np.full(int(ok.sum()), 3.0)
+            snapped = snap_reaches_to_valley(list(lines[ok]), dem, width_m, height_m,
+                                             snap_radius_m(orders))
+            for i, g in zip(np.flatnonzero(ok), snapped, strict=True):
+                lines[i] = g
+        geoms = gpd.GeoSeries(lines)
     geoms = geoms.simplify(px_m / 2.0)
     buffered = geoms.buffer(radius)
     keep = (~buffered.is_empty).to_numpy()
@@ -239,7 +369,8 @@ def _river_source(name: str, fetch):
         return rasterize_river_depth(
             gdf, north, south, east, west, shape,
             width_scale=float(options.get("width_scale", 1.0)),
-            depth_scale=float(options.get("depth_scale", 1.0)))
+            depth_scale=float(options.get("depth_scale", 1.0)),
+            dem=base, snap=bool(options.get("snap", True)))
 
     provider.__name__ = f"river_layer_source_{name}"
     provider.terrain_relative = True
@@ -282,7 +413,7 @@ def _is_lake(props: dict) -> bool:
 
 def lake_depth_grid(features, north: float, south: float, east: float, west: float,
                     base: np.ndarray, *, depth_m: float = 2.0,
-                    min_area_m2: float = 10_000.0) -> np.ndarray:
+                    min_area_m2: float = 10_000.0, smooth: int = 3) -> np.ndarray:
     """Flatten lakes to their shore minimum minus *depth_m*, as a relative grid.
 
     *features* are GeoJSON features (OSM ``natural=water`` / reservoirs) in
@@ -292,6 +423,13 @@ def lake_depth_grid(features, north: float, south: float, east: float, west: flo
     it; cells already below that surface are left alone (the grid only lowers).
     Rivers mapped as areas (``water=river`` etc.) are skipped - see
     :data:`RIVER_WATER_TAGS`.
+
+    The levels are taken against *base* after a ``smooth`` x ``smooth`` median,
+    the filter the mesh export applies before it adds the carve
+    (``export._prepare_dem_array``, 3 by default), so the printed surface is
+    ``median(base) + (level - median(base))`` = flat. Levelled against the raw
+    grid, SRTM noise over the water came back as 0.1-0.5 mm of relief on the
+    printed lake (F-REGION step 4). ``smooth`` <= 1 uses the raw grid.
     """
     from numpy2stl.raster import burn_polygons
     from scipy import ndimage
@@ -328,6 +466,11 @@ def lake_depth_grid(features, north: float, south: float, east: float, west: flo
     if not len(ids):
         return out
 
+    if smooth and smooth > 1:
+        filled = np.where(np.isfinite(base), base, np.nanmax(base) if np.isfinite(base).any()
+                          else 0.0)
+        base = np.where(np.isfinite(base), ndimage.median_filter(filled, size=int(smooth)),
+                        np.nan)
     finite = np.where(np.isfinite(base), base, np.inf)
     # Shore ring: pixels outside every lake that touch lake k.
     grown = ndimage.grey_dilation(labels, size=(3, 3))
@@ -363,7 +506,8 @@ def make_lakes_source(fetch_features):
         fc = fetch_features(north, south, east, west) or {}
         return lake_depth_grid(fc.get("features") or [], north, south, east, west, base,
                                depth_m=float(options.get("depth_m", 2.0)),
-                               min_area_m2=float(options.get("min_area_m2", 10_000.0)))
+                               min_area_m2=float(options.get("min_area_m2", 10_000.0)),
+                               smooth=int(options.get("smooth", 3)))
 
     provider.__name__ = "lakes_layer_source"
     provider.terrain_relative = True

@@ -118,9 +118,10 @@ than 0.8 mm are widened, extruded heights capped at 8 × footprint width (report
 
 ## 6. Large regions (> 20 km)
 
-Buildings are below print resolution at these scales; build terrain only, Vertical *auto*
-(fit to *Height*), rivers from the composite water depth or the `waterways` layer. A
-dedicated large-region and hydrology workflow is the next SOP section to write.
+Buildings are below print resolution at these scales; build terrain only with the
+*Region* preset (Vertical *auto* → fit, rivers + lakes from the Composite panel, then
+*Apply to DEM*). Full procedure, reference results (Grand Canyon, Middle Rhine, Sierra
+Nevada), river-depth table and known limits: **[large-region-sop.md](large-region-sop.md)**.
 
 ## History
 

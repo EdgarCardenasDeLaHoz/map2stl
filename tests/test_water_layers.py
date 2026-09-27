@@ -130,7 +130,7 @@ def test_lake_is_flat_at_shore_minimum_minus_depth():
 
     dem = 300.0 - _bowl()            # a dome: every lake cell is above the shore minimum
     rel = wl.lake_depth_grid([_poly(0.3, 0.3, 0.7, 0.7, natural="water")],
-                             N, S, E, W, dem, depth_m=3.0, min_area_m2=0)
+                             N, S, E, W, dem, depth_m=3.0, min_area_m2=0, smooth=1)
     lake = rel < 0
     assert lake.sum() > 100
     surface = (dem + rel)[lake]
@@ -267,3 +267,115 @@ def test_city_task_fails_with_the_guard_message(monkeypatch):
                              "height": 2, "width": 2,
                              "layers": {"buildings": {"enabled": True}}}, task)
     assert task.failed and "allow_large_city" in task.failed
+
+
+def test_failing_optional_layer_is_skipped_not_fatal(composite_env, monkeypatch):
+    """The Region preset leaves the ESA water channel on; without Earth Engine
+    it raised and the whole composite (rivers included) was lost. It is now
+    skipped with a warning, and the partial composite is cached with the skip
+    recorded, so a cache hit repeats the warning."""
+    from app.server.routers import composite as composite_mod
+
+    def no_ee(*a, **k):
+        raise RuntimeError("No module named 'ee'")
+
+    written = []
+    monkeypatch.setattr("app.server.core.cache.write_array_cache",
+                        lambda *a, **k: written.append(a))
+    register_layer_source("unit_needs_ee", no_ee)
+    try:
+        warnings = []
+        base, carve = composite_mod.compute_composite_dem(
+            BBOX, 64, [LAYERS[0],
+                       {"source": "unit_needs_ee", "dim": 64, "blend_mode": "rivers",
+                        "weight": 5.0},
+                       LAYERS[1]],
+            split_carve=True, warnings=warnings)
+        assert np.allclose(base, 200.0) and carve.min() < 0      # rivers still there
+        assert len(warnings) == 1 and "unit_needs_ee" in warnings[0]
+        assert len(written) == 1 and written[0][3] == {"skipped": warnings}
+
+        import time as _time
+        arrays = {k: v for k, v in written[0][2].items()}
+        hit = (arrays, {"skipped": warnings, "_cached_at": _time.time()})
+        monkeypatch.setattr("app.server.core.cache.read_array_cache", lambda *a, **k: hit)
+        again = []
+        composite_mod.compute_composite_dem(BBOX, 64, LAYERS, warnings=again)
+        assert again == warnings                       # the hit repeats the skip
+        stale = (arrays, {"skipped": warnings, "_cached_at": 0.0})
+        monkeypatch.setattr("app.server.core.cache.read_array_cache", lambda *a, **k: stale)
+        fresh = []
+        composite_mod.compute_composite_dem(BBOX, 64, LAYERS, warnings=fresh)
+        assert fresh == []                              # old skip: rebuilt, retried
+
+        # The base layer failing is still an error.
+        with pytest.raises(RuntimeError):
+            composite_mod.compute_composite_dem(
+                BBOX, 64, [{"source": "unit_needs_ee", "dim": 64, "blend_mode": "base"}])
+    finally:
+        _LAYER_SOURCES.pop("unit_needs_ee", None)
+
+
+def test_composite_keeps_the_projected_dem_grid(composite_env):
+    """The composite's grid is the projected base grid, as /api/terrain/dem
+    returns it: a cosine projection narrows the longitude side below dim, and
+    the composite used to stretch it back to dim (Apply to DEM widened the
+    model by 1/cos(lat) and interpolated every cell)."""
+    from app.server.routers.composite import compute_composite_dem
+    from geo2stl.projections import project_grid
+
+    bbox = {"north": 60.5, "south": 60.0, "east": 11.0, "west": 10.0}   # 2:1 in degrees
+    register_layer_source("unit_tilted", lambda n, s, e, w, dim, o: np.tile(
+        np.linspace(0, 100, dim), (dim // 2, 1)))
+    try:
+        base, carve = compute_composite_dem(
+            bbox, 64, [{"source": "unit_tilted", "dim": 64, "blend_mode": "base"}],
+            projection="cosine", split_carve=True)
+    finally:
+        _LAYER_SOURCES.pop("unit_tilted", None)
+    expected = project_grid(np.tile(np.linspace(0, 100, 64), (32, 1)), 60.5, 60.0, 11.0, 10.0,
+                            "cosine", True, categorical=False)
+    assert base.shape == expected.shape and max(base.shape) < 64
+    assert carve.shape == base.shape
+
+
+def test_river_snaps_to_the_valley_floor():
+    """HydroRIVERS lines can sit hundreds of metres off the SRTM valley (15"
+    source grid): with the DEM given, the channel is re-routed onto the floor."""
+    h, w = 100, 100
+    rows = np.arange(h)[:, None]
+    # A V-shaped valley along row 60 (bottom at 100 m, walls rising 20 m per row).
+    dem = 100.0 + 20.0 * np.abs(rows - 60) + np.zeros((1, w))
+    lat = N - (N - S) * 55.5 / h                      # drawn 5 rows (~280 m) north of it
+    gdf = _river(order=6, lat=lat)
+    drawn = wl.rasterize_river_depth(gdf, N, S, E, W, (h, w))
+    snapped = wl.rasterize_river_depth(gdf, N, S, E, W, (h, w), dem=dem)
+    assert set(np.nonzero(drawn < 0)[0]) <= {54, 55, 56}
+    carved_rows = np.nonzero(snapped < 0)[0]
+    assert np.median(carved_rows) == 60
+    assert (snapped < 0).any(axis=0).all()             # still continuous
+    assert snapped.min() == pytest.approx(drawn.min())  # same depth, new place
+    off = wl.rasterize_river_depth(gdf, N, S, E, W, (h, w), dem=dem, snap=False)
+    assert np.array_equal(off, drawn)
+
+
+def test_snap_radius_grows_with_order():
+    r = wl.snap_radius_m([3, 5, 7, np.nan])
+    assert r[0] < r[1] < r[2] == wl.SNAP_RADIUS_MAX_M and r[3] == r[0]
+
+
+def test_lake_is_flat_after_the_export_median():
+    """Levelled against the 3x3 median the export applies before adding the
+    carve, so a noisy water surface still prints flat."""
+    from scipy import ndimage
+
+    rng = np.random.default_rng(0)
+    dem = 300.0 - _bowl() + rng.normal(0, 2.0, (60, 60))
+    rel = wl.lake_depth_grid([_poly(0.3, 0.3, 0.7, 0.7, natural="water")],
+                             N, S, E, W, dem, depth_m=2.0, min_area_m2=0)
+    lake = rel < 0
+    printed = ndimage.median_filter(dem, size=3) + rel
+    assert lake.sum() > 100 and np.ptp(printed[lake]) < 1e-9
+    raw = wl.lake_depth_grid([_poly(0.3, 0.3, 0.7, 0.7, natural="water")],
+                             N, S, E, W, dem, depth_m=2.0, min_area_m2=0, smooth=1)
+    assert np.ptp((ndimage.median_filter(dem, size=3) + raw)[raw < 0]) > 0.5
