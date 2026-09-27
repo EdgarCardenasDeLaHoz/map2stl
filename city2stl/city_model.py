@@ -43,9 +43,10 @@ import manifold3d as mf
 import numpy as np
 import shapely
 import trimesh
+from numpy2stl.processing.decimate import heightfield_tin
 from rasterio.features import rasterize
 from rasterio.transform import Affine
-from scipy.ndimage import map_coordinates, maximum_filter, median_filter
+from scipy.ndimage import map_coordinates, median_filter
 from shapely.geometry import Polygon, box
 
 from city2stl.mesh import _extrude_ring_with_roof
@@ -244,70 +245,14 @@ def prepare_dem(dem_m: np.ndarray, median_size: int = 3) -> np.ndarray:
     return dem
 
 
-def _triangulate_pixels(ij: np.ndarray) -> np.ndarray:
-    """Delaunay triangles over integer pixel coordinates (Shewchuk's Triangle)."""
-    import triangle
-
-    return triangle.triangulate({"vertices": ij.astype(np.float64)}, "Q")["triangles"]
-
-
-def _rasterize_tin(xy: np.ndarray, zv: np.ndarray, tris: np.ndarray,
-                   shape: tuple[int, int]) -> np.ndarray:
-    """Linear interpolation of a TIN whose vertices lie on pixel centres, per pixel.
-
-    Scan-converts every triangle's bounding box at once (vectorised) instead of
-    locating each pixel in the triangulation, which is ~50x slower.
-    """
-    h, w = shape
-    a, b, c = xy[tris[:, 0]], xy[tris[:, 1]], xy[tris[:, 2]]
-    lo = np.minimum(np.minimum(a, b), c).astype(np.int64)
-    hi = np.maximum(np.maximum(a, b), c).astype(np.int64)
-    bw, bh = hi[:, 0] - lo[:, 0] + 1, hi[:, 1] - lo[:, 1] + 1
-    counts = bw * bh
-    tid = np.repeat(np.arange(len(tris)), counts)
-    off = np.arange(counts.sum()) - np.repeat(np.cumsum(counts) - counts, counts)
-    px = lo[tid, 0] + off % bw[tid]
-    py = lo[tid, 1] + off // bw[tid]
-    A, B, C = a[tid], b[tid], c[tid]
-    den = (B[:, 1] - C[:, 1]) * (A[:, 0] - C[:, 0]) + (C[:, 0] - B[:, 0]) * (A[:, 1] - C[:, 1])
-    l1 = ((B[:, 1] - C[:, 1]) * (px - C[:, 0]) + (C[:, 0] - B[:, 0]) * (py - C[:, 1])) / den
-    l2 = ((C[:, 1] - A[:, 1]) * (px - C[:, 0]) + (A[:, 0] - C[:, 0]) * (py - C[:, 1])) / den
-    l3 = 1.0 - l1 - l2
-    inside = (l1 >= -1e-9) & (l2 >= -1e-9) & (l3 >= -1e-9)
-    zt = zv[tris][tid]
-    out = np.full(shape, np.nan)
-    out[py[inside], px[inside]] = (l1 * zt[:, 0] + l2 * zt[:, 1] + l3 * zt[:, 2])[inside]
-    return out
-
-
 def terrain_tin(z: np.ndarray, max_error: float = TERRAIN_MAX_ERROR_MM,
                 seed_step: int = 8, max_iter: int = 80) -> tuple[np.ndarray, np.ndarray]:
-    """Adaptive triangulation of a heightfield within ``max_error`` at every pixel.
+    """Adaptive terrain triangulation within ``max_error`` mm at every pixel.
 
-    Start from every border pixel plus a lattice every ``seed_step`` pixels (about
-    the source DEM's own spacing, where its information actually is), triangulate,
-    then add every pixel that is a local peak of the remaining error and exceeds
-    ``max_error``; repeat until no pixel does. Border pixels are all kept, so the
-    model edge (and its side walls) is exact.
-    Returns (pixel indices into z.ravel(), triangles over those indices).
+    See ``numpy2stl.processing.decimate.heightfield_tin``. Returns (pixel indices
+    into z.ravel(), triangles over those indices).
     """
-    h, w = z.shape
-    ii, jj = np.divmod(np.arange(h * w), w)
-    zf = z.ravel()
-    chosen = (ii == 0) | (ii == h - 1) | (jj == 0) | (jj == w - 1)
-    chosen |= (ii % seed_step == 0) & (jj % seed_step == 0)
-    for _ in range(max_iter):
-        idx = np.flatnonzero(chosen)
-        xy = np.column_stack([jj[idx], ii[idx]])
-        tris = _triangulate_pixels(xy)
-        err = np.abs(_rasterize_tin(xy, zf[idx], tris, (h, w)) - z)
-        err[~np.isfinite(err)] = 0.0
-        if err.max() <= max_error:
-            return idx, idx[tris]
-        chosen |= ((err > max_error) & (err >= maximum_filter(err, size=3))).ravel()
-    logger.warning("terrain_tin stopped at %d iterations above %.3f mm", max_iter, max_error)
-    idx = np.flatnonzero(chosen)
-    return idx, idx[_triangulate_pixels(np.column_stack([jj[idx], ii[idx]]))]
+    return heightfield_tin(z, max_error, seed_step=seed_step, max_iter=max_iter)
 
 
 def terrain_solid(terrain: Terrain, max_error: float = TERRAIN_MAX_ERROR_MM) -> Mesh:
