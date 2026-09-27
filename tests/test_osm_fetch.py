@@ -97,12 +97,107 @@ class TestMirrorExhaustion:
 
         assert result["buildings"]["features"]
 
+    def test_retry_refetches_only_the_failed_layers(self, three_mirrors, monkeypatch):
+        """A layer the first mirror served is kept, not fetched again from the next."""
+        requested = []
+
+        def fake(ox, bbox, layers, tol_deg, simplify_tolerance, min_area):
+            requested.append((ox.settings.overpass_url, list(layers)))
+            if len(requested) == 1:
+                return {"buildings": _failed_fc(), "roads": _full_fc()}
+            return {"buildings": _full_fc()}
+
+        monkeypatch.setattr(osm_fetch, "_fetch_layers", fake)
+        result = osm_fetch.fetch_osm_data(37.11, 37.10, -3.59, -3.60, ["buildings", "roads"])
+
+        assert requested == [(three_mirrors[0], ["buildings", "roads"]),
+                             (three_mirrors[1], ["buildings"])]
+        assert result["buildings"]["features"] and result["roads"]["features"]
+
     def test_no_healthy_mirror_raises_before_querying(self, monkeypatch):
         monkeypatch.setattr(osm_fetch, "_healthy_overpass_endpoints", lambda: [])
         monkeypatch.setitem(__import__("sys").modules, "osmnx", _FakeOx())
 
         with pytest.raises(RuntimeError, match="/status probe"):
             osm_fetch.fetch_osm_data(37.11, 37.10, -3.59, -3.60, ["buildings"])
+
+
+def test_status_probe_sends_the_osmnx_user_agent(monkeypatch):
+    """overpass-api.de answers python-requests' default user agent with 406."""
+    import osmnx as ox
+    import requests
+
+    sent = []
+
+    class _Ok:
+        def raise_for_status(self):
+            pass
+
+    def fake_get(url, headers=None, timeout=None):
+        sent.append((headers or {}).get("User-Agent"))
+        return _Ok()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    assert osm_fetch._healthy_overpass_endpoints() == osm_fetch._OVERPASS_ENDPOINTS
+    assert sent and all(ua == ox.settings.http_user_agent for ua in sent)
+
+
+class TestConcurrentLayers:
+    """``_fetch_layers`` runs the layers in parallel, bounded, and reports each one."""
+
+    ALL = ["buildings", "roads", "waterways", "pois", "walls", "towers",
+           "churches", "fortifications", "green"]
+
+    @staticmethod
+    def _slow_jobs(monkeypatch, fail=None, raise_in=None):
+        import threading
+        import time
+
+        state = {"now": 0, "peak": 0, "threads": set()}
+        lock = threading.Lock()
+
+        def job(name):
+            def run():
+                with lock:
+                    state["now"] += 1
+                    state["peak"] = max(state["peak"], state["now"])
+                    state["threads"].add(threading.get_ident())
+                time.sleep(0.05)
+                with lock:
+                    state["now"] -= 1
+                if name == raise_in:
+                    raise RuntimeError("boom")
+                return _failed_fc() if name == fail else {
+                    "type": "FeatureCollection", "features": [{"type": "Feature", "id": name}]}
+            return run
+
+        monkeypatch.setattr(
+            osm_fetch, "_layer_jobs",
+            lambda *a, **k: {name: job(name) for name in TestConcurrentLayers.ALL})
+        return state
+
+    def test_all_layers_fetched_at_most_three_at_once(self, monkeypatch):
+        state = self._slow_jobs(monkeypatch)
+        result = osm_fetch._fetch_layers(None, (0, 0, 1, 1), self.ALL, 0.0, 0.0, 0.0)
+
+        assert list(result) == self.ALL, "results keep the fixed layer order"
+        assert all(result[n]["features"][0]["id"] == n for n in self.ALL)
+        assert state["peak"] == osm_fetch._MAX_CONCURRENT_LAYERS
+        assert len(state["threads"]) > 1
+
+    def test_only_requested_layers_are_fetched(self, monkeypatch):
+        self._slow_jobs(monkeypatch)
+        result = osm_fetch._fetch_layers(None, (0, 0, 1, 1), ["roads", "buildings"],
+                                         0.0, 0.0, 0.0)
+        assert list(result) == ["buildings", "roads"]
+
+    def test_a_raising_layer_is_reported_without_losing_the_others(self, monkeypatch):
+        self._slow_jobs(monkeypatch, fail="roads", raise_in="walls")
+        result = osm_fetch._fetch_layers(None, (0, 0, 1, 1), self.ALL, 0.0, 0.0, 0.0)
+
+        assert "boom" in result["walls"]["error"]
+        assert osm_fetch._layers_failed(result, self.ALL) == ["roads", "walls"]
+        assert result["buildings"]["features"]
 
 
 class TestEmptyVersusFailed:

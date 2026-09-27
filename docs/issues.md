@@ -25,6 +25,36 @@ small buildings. `detail` is now part of the key
 (`_city_raster_arrays`, `app/server/routers/composite.py:245`). Found while
 registering the OSM channels as composite layer sources.
 
+### 2c. Extrude preview mesh built twice — fixed 2026-09-26
+- Every `renderDEMCanvas` (recolour, rescale, a layer finishing) calls the auto-rebuild, as
+  does entering the Extrude view; each POSTed the same `/api/export/preview` body, so the
+  server built the same ~700k-face mesh again.
+- `previewModelIn3D` now keys each request on its serialised body and skips one that is in
+  flight or already shown (`_createPreviewGate`, `modules/export/model-viewer.js`;
+  test `tests/js/previewGate.test.js`).
+
+### 2d. `read_array_cache failed (...): [Errno 22] Invalid argument` — fixed 2026-09-26
+- Cause: `cache/` lives in OneDrive, which dehydrated old entries into cloud-only
+  placeholders (`RECALL_ON_DATA_ACCESS | OFFLINE`); opening one from a process OneDrive
+  will not hydrate for raises Errno 22. Reproduced on 3 of 6 `cache/wsf3d` entries.
+- `read_array_cache` detects placeholders, logs, deletes the pair and misses, so the
+  re-fetch writes a local copy. Array and OSM cache writes are now temp-file + rename, and
+  the `.npz` handle is closed after reading (it blocked replacement on Windows).
+- Lasting fix is outside the code: point `STRM2STL_CACHE` outside OneDrive, or mark
+  `cache/` "Always keep on this device".
+
+### 2e. US cities got no building heights — fixed 2026-09-26
+- `enhance_city_data` returned early for US bboxes ("osm_only_us"), a guard from before
+  the resolution limit existed. Breckenridge, CO: 3,788 / 3,973 buildings at 10 m.
+- `lidar_3dep` is not lidar (COP30 − SRTM, 30 m) and the limit rightly refuses it;
+  OpenTopography only serves 3DEP bare-earth DTMs. Real 3DEP heights now come from the
+  COPC point clouds on Planetary Computer, measured per footprint
+  (`city2stl/skyline/height/providers/lidar_3dep_copc.py`), before the raster providers.
+- Breckenridge: default share 95.3 % → 1.0 % (3,686 lidar, 63 raster), ~66 s. Against its
+  185 OSM-tagged buildings: lidar MAE 1.98 m / corr +0.876, GBA + Open Buildings
+  2.13 m / +0.666.
+- Coarse providers are now skipped before download instead of after (~2 min saved there).
+
 ### 3. Raster height enhancement makes buildings shorter than the fallback it replaces — fixed 2026-08-30
 `enhance_city_data` (`app/server/core/height/service.py:276`) runs automatically whenever a
 city has default-height buildings, and on every European city measured it makes the model
@@ -62,7 +92,8 @@ Those sub-3 m values then hit the `max(3.0, ...)` clamp in
 of enhanced buildings come out at exactly 3.0 m — replacing a 10 m box with a 3 m one. The
 clamp is not the bug; it is what makes the bug visible in the output.
 
-US bboxes are unaffected: `enhance_city_data` skips them (`source_name: "osm_only_us"`).
+US bboxes were unaffected at the time: `enhance_city_data` skipped them
+(`source_name: "osm_only_us"`). That skip was removed 2026-09-26; see 2e.
 
 #### Fix (2026-08-30), in two parts
 

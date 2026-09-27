@@ -63,13 +63,23 @@ def _healthy_overpass_endpoints() -> list[str]:
     and every subsequent query failed against it while a healthy mirror sat
     untried further down the list. ``/status`` is the endpoint Overpass provides
     for exactly this, and the status code is checked.
+
+    The probe identifies itself the way the queries will (osmnx's user agent).
+    overpass-api.de answers a bare ``python-requests`` user agent with 406, so
+    the canonical instance, with 4 free slots, was marked unhealthy on every
+    fetch and everything went to the slowest mirror.
     """
     import requests
 
+    try:
+        import osmnx as ox
+        headers = {"User-Agent": ox.settings.http_user_agent}
+    except Exception:  # pragma: no cover - osmnx is a hard dependency of the caller
+        headers = {}
     healthy: list[str] = []
     for endpoint in _OVERPASS_ENDPOINTS:
         try:
-            resp = requests.get(f"{endpoint}/status",
+            resp = requests.get(f"{endpoint}/status", headers=headers,
                                 timeout=_OVERPASS_PROBE_TIMEOUT_S)
             resp.raise_for_status()
             healthy.append(endpoint)
@@ -321,7 +331,7 @@ def fetch_osm_data(
 
     Uses osmnx to query the Overpass API.  Returns a dict with one key per
     requested layer (buildings / roads / waterways / pois / walls / towers /
-    churches / fortifications), each value being a GeoJSON FeatureCollection.
+    churches / fortifications / green / railways), each value being a GeoJSON FeatureCollection.
 
     Raises:
         RuntimeError  if osmnx is not installed.
@@ -349,7 +359,15 @@ def fetch_osm_data(
     # fetch with no buildings in it. Retry the whole set on the next healthy
     # mirror instead, and only give up when none of them can serve the layer
     # the caller actually came for.
+    #
+    # The layers of one pass are fetched concurrently (``_fetch_layers``), but
+    # ``ox.settings`` is process-global, so the mirror only changes between
+    # passes, after every thread of the previous one has returned. A layer can
+    # therefore never be half-served by one mirror and half by the next; the
+    # layers that failed are retried together on the next mirror, and the ones
+    # that succeeded are kept.
     result: dict = {}
+    pending = list(layers)
     for attempt, endpoint in enumerate(healthy):
         ox.settings.overpass_url = endpoint
         # osmnx's rate limiter polls ``{overpass_url}/status`` and sleeps until
@@ -363,11 +381,12 @@ def fetch_osm_data(
         ox.settings.overpass_rate_limit = endpoint.startswith(
             "https://overpass-api.de")
         ox.settings.requests_timeout = _OVERPASS_REQUEST_TIMEOUT_S
-        result = _fetch_layers(ox, bbox, layers, tol_deg,
-                               simplify_tolerance, min_area)
+        result.update(_fetch_layers(ox, bbox, pending, tol_deg,
+                                    simplify_tolerance, min_area))
         failed = _layers_failed(result, layers)
         if not failed:
             break
+        pending = failed
         remaining = len(healthy) - attempt - 1
         logger.warning(
             "Overpass %s returned no usable data for %s; %d mirror(s) left",
@@ -398,67 +417,79 @@ def _layers_failed(result: dict, layers: list[str]) -> list[str]:
     return failed
 
 
-def _fetch_layers(ox, bbox, layers: list[str], tol_deg: float,
-                  simplify_tolerance: float, min_area: float) -> dict:
-    """One pass over the requested layers against the currently-set mirror."""
-    result: dict = {}
+#: Overpass queries in flight at once. The public servers allow a couple of
+#: slots per client; three keeps a 9-layer fetch well under the sequential time
+#: without hammering a shared, donated service.
+_MAX_CONCURRENT_LAYERS = 3
 
-    if "buildings" in layers:
-        result["buildings"] = _fetch_buildings(ox, bbox, tol_deg, simplify_tolerance, min_area)
 
-    if "roads" in layers:
-        result["roads"] = _fetch_roads(ox, bbox)
-
-    if "waterways" in layers:
-        result["waterways"] = _fetch_waterways(ox, bbox, tol_deg, simplify_tolerance)
-
-    if "pois" in layers:
-        result["pois"] = _fetch_pois(ox, bbox)
-
-    if "walls" in layers:
-        result["walls"] = _fetch_polygon_layer(
-            ox, bbox,
-            tags={"historic": "city_wall", "barrier": "city_wall"},
-            height_default=8.0, height_lo=2.0, height_hi=30.0,
-            keep_cols=["name"], label="walls",
+def _layer_jobs(ox, bbox, tol_deg: float, simplify_tolerance: float,
+                min_area: float) -> dict:
+    """Layer name -> zero-argument fetcher, in the order results are reported."""
+    def polygon(tags, height_default, height_lo, height_hi, keep_cols, label):
+        return lambda: _fetch_polygon_layer(
+            ox, bbox, tags=tags,
+            height_default=height_default, height_lo=height_lo, height_hi=height_hi,
+            keep_cols=keep_cols, label=label,
         )
 
-    if "towers" in layers:
-        result["towers"] = _fetch_polygon_layer(
-            ox, bbox,
-            tags={"historic": ["tower", "watchtower", "fortification"],
-                  "man_made": ["defensive_works"],
-                  "tower:type": ["defensive", "watchtower", "bell_tower", "minaret"]},
-            height_default=20.0, height_lo=5.0, height_hi=200.0,
-            keep_cols=["name"], label="towers",
-        )
-
-    if "churches" in layers:
-        result["churches"] = _fetch_polygon_layer(
-            ox, bbox,
-            tags={"amenity": "place_of_worship"},
-            height_default=15.0, height_lo=3.0, height_hi=150.0,
-            keep_cols=["name", "amenity", "religion"], label="churches",
-        )
-
-    if "fortifications" in layers:
-        result["fortifications"] = _fetch_polygon_layer(
-            ox, bbox,
-            tags={"historic": ["fort", "castle", "fortress", "fortification"]},
-            height_default=12.0, height_lo=3.0, height_hi=60.0,
-            keep_cols=["name", "historic"], label="fortifications",
-        )
-
-    if "green" in layers:
+    return {
+        "buildings": lambda: _fetch_buildings(ox, bbox, tol_deg, simplify_tolerance, min_area),
+        "roads": lambda: _fetch_roads(ox, bbox),
+        "waterways": lambda: _fetch_waterways(ox, bbox, tol_deg, simplify_tolerance),
+        "pois": lambda: _fetch_pois(ox, bbox),
+        "walls": polygon(
+            {"historic": "city_wall", "barrier": "city_wall"},
+            8.0, 2.0, 30.0, ["name"], "walls"),
+        "towers": polygon(
+            {"historic": ["tower", "watchtower", "fortification"],
+             "man_made": ["defensive_works"],
+             "tower:type": ["defensive", "watchtower", "bell_tower", "minaret"]},
+            20.0, 5.0, 200.0, ["name"], "towers"),
+        "churches": polygon(
+            {"amenity": "place_of_worship"},
+            15.0, 3.0, 150.0, ["name", "amenity", "religion"], "churches"),
+        "fortifications": polygon(
+            {"historic": ["fort", "castle", "fortress", "fortification"]},
+            12.0, 3.0, 60.0, ["name", "historic"], "fortifications"),
         # F-SKY18 vegetation landmarks: parks / grass / forest / wood as
         # polygon areas, used to match pano vegetation regions by bearing.
-        result["green"] = _fetch_polygon_layer(
-            ox, bbox,
-            tags={"leisure": ["park", "garden", "recreation_ground"],
-                  "landuse": ["grass", "forest", "meadow", "recreation_ground", "village_green"],
-                  "natural": ["wood", "scrub", "grassland"]},
-            height_default=0.0, height_lo=0.0, height_hi=0.0,
-            keep_cols=["name", "leisure", "landuse", "natural"], label="green",
-        )
+        "green": polygon(
+            {"leisure": ["park", "garden", "recreation_ground"],
+             "landuse": ["grass", "forest", "meadow", "recreation_ground", "village_green"],
+             "natural": ["wood", "scrub", "grassland"]},
+            0.0, 0.0, 0.0, ["name", "leisure", "landuse", "natural"], "green"),
+        # Surface rail for the city model (subways run underground and are left out).
+        "railways": polygon(
+            {"railway": ["rail", "light_rail", "tram", "narrow_gauge", "funicular"]},
+            0.0, 0.0, 0.0, ["name", "railway"], "railways"),
+    }
 
+
+def _fetch_layers(ox, bbox, layers: list[str], tol_deg: float,
+                  simplify_tolerance: float, min_area: float) -> dict:
+    """One pass over the requested layers against the currently-set mirror.
+
+    Up to ``_MAX_CONCURRENT_LAYERS`` layers are fetched at once; each is an
+    independent Overpass round trip of 15-20 s, so running them one after
+    another made a 9-layer city fetch take minutes. Every fetcher reports its
+    own failure as an ``error`` key on an empty collection; a fetcher that raises
+    anyway is recorded the same way, so one broken layer cannot lose the others.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    jobs = _layer_jobs(ox, bbox, tol_deg, simplify_tolerance, min_area)
+    wanted = [name for name in jobs if name in layers]
+    if not wanted:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(_MAX_CONCURRENT_LAYERS, len(wanted)),
+                            thread_name_prefix="osm-layer") as pool:
+        futures = {name: pool.submit(jobs[name]) for name in wanted}
+    result: dict = {}
+    for name in wanted:
+        try:
+            result[name] = futures[name].result()
+        except Exception as e:
+            logger.warning(f"OSM {name} fetch failed: {e}", exc_info=True)
+            result[name] = _empty_fc(str(e))
     return result

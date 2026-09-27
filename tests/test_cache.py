@@ -144,6 +144,24 @@ class TestArrayCache:
             write_array_cache("dem", "broken", {"v": np.zeros(4)})
         assert not (patched_cache / "dem" / "broken.npz").exists()
         assert not (patched_cache / "dem" / "broken.json").exists()
+        assert not list((patched_cache / "dem").glob("*.tmp"))
+
+    def test_failed_rewrite_keeps_no_temp_file(self, patched_cache):
+        """A write that dies mid-way never truncates the file readers see."""
+        write_array_cache("dem", "k", {"v": np.ones(4)})
+        with patch("numpy.savez_compressed", side_effect=OSError("disk full")):
+            write_array_cache("dem", "k", {"v": np.zeros(4)})
+        assert not list((patched_cache / "dem").glob("*.tmp"))
+
+    def test_cloud_placeholder_is_a_miss_and_dropped(self, patched_cache):
+        """A dehydrated OneDrive placeholder (open() -> Errno 22) reads as a miss
+        and is removed so the re-fetch can write a local copy."""
+        import app.server.core.cache as cache_mod
+        write_array_cache("wsf3d", "ph", {"height": np.ones(4)})
+        with patch.object(cache_mod, "_is_cloud_placeholder", return_value=True):
+            assert read_array_cache("wsf3d", "ph") is None
+        assert not (patched_cache / "wsf3d" / "ph.npz").exists()
+        assert not (patched_cache / "wsf3d" / "ph.json").exists()
 
 
 # ---------------------------------------------------------------------------

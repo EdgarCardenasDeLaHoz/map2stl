@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -99,20 +100,59 @@ def _array_dir(namespace: str) -> Path:
     return d
 
 
+# Windows attributes OneDrive sets on a cloud-only ("Files On-Demand") placeholder:
+# RECALL_ON_DATA_ACCESS | RECALL_ON_OPEN | OFFLINE.
+_PLACEHOLDER_ATTRS = 0x400000 | 0x40000 | 0x1000
+
+
+def _is_cloud_placeholder(path: Path) -> bool:
+    """True if *path* is a dehydrated OneDrive placeholder.
+
+    Opening one needs the OneDrive client to download it first; from a process it
+    will not hydrate for (the MSIX-sandboxed desktop app, or with OneDrive not
+    running) ``open()`` fails with ``[Errno 22] Invalid argument``.
+    """
+    try:
+        return bool(getattr(path.stat(), "st_file_attributes", 0) & _PLACEHOLDER_ATTRS)
+    except OSError:
+        return False
+
+
+def _atomic_write(path: Path, write) -> None:
+    """Call ``write(fileobj)`` on a temp file beside *path*, then rename it over *path*.
+
+    A reader never sees a half-written entry: two requests for the same bbox (or
+    tile) can fetch concurrently, and a crash mid-write used to leave a truncated
+    .npz that failed every later read.
+    """
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        with open(tmp, "wb") as f:
+            write(f)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def write_array_cache(namespace: str, key: str,
                       arrays: dict[str, np.ndarray],
                       metadata: dict[str, Any] | None = None) -> None:
-    """Save ``arrays`` as float32 .npz and ``metadata`` as .json sidecar."""
+    """Save ``arrays`` as float32 .npz and ``metadata`` as .json sidecar.
+
+    Both files are written atomically; the sidecar goes last, so its presence
+    means the .npz beside it is complete.
+    """
     d = _array_dir(namespace)
     npz_path = d / f"{key}.npz"
     json_path = d / f"{key}.json"
     try:
         # Downcast to float32 to keep files small
         save_dict = {k: v.astype(np.float32) for k, v in arrays.items()}
-        np.savez_compressed(str(npz_path), **save_dict)
+        _atomic_write(npz_path, lambda f: np.savez_compressed(f, **save_dict))
         meta = dict(metadata or {})
         meta["_cached_at"] = time.time()
-        json_path.write_text(json.dumps(meta))
+        _atomic_write(json_path, lambda f: f.write(json.dumps(meta).encode()))
         logger.debug(f"Array cache written: {namespace}/{key} "
                      f"({npz_path.stat().st_size // 1024} KB)")
     except Exception as e:
@@ -132,6 +172,17 @@ def read_array_cache(namespace: str, key: str) -> tuple[dict[str, np.ndarray], d
     json_path = d / f"{key}.json"
     if not npz_path.exists():
         return None
+    if _is_cloud_placeholder(npz_path) or _is_cloud_placeholder(json_path):
+        # OneDrive dehydrated the entry and this process cannot recall it. Drop it
+        # so the caller's re-fetch writes a local copy instead of hitting this again.
+        logger.info(f"Array cache entry is a cloud-only OneDrive placeholder, "
+                    f"re-fetching: {namespace}/{key}")
+        for p in (npz_path, json_path):
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:
+                logger.debug('Could not delete placeholder cache file', exc_info=True)
+        return None
     try:
         meta: dict = json.loads(json_path.read_text()
                                 ) if json_path.exists() else {}
@@ -139,8 +190,8 @@ def read_array_cache(namespace: str, key: str) -> tuple[dict[str, np.ndarray], d
         if _is_stale(meta.get("_cached_at", 0), namespace):
             logger.debug(f"Array cache stale: {namespace}/{key}")
             return None
-        loaded = np.load(str(npz_path))
-        arrays = {k: loaded[k] for k in loaded.files}
+        with np.load(str(npz_path)) as loaded:
+            arrays = {k: loaded[k] for k in loaded.files}
         logger.debug(f"Array cache hit: {namespace}/{key}")
         return arrays, meta
     except Exception as e:
@@ -164,7 +215,7 @@ def write_osm_cache(key: str, data: dict) -> None:
     try:
         compressed = gzip.compress(json.dumps(
             data).encode("utf-8"), compresslevel=6)
-        path.write_bytes(compressed)
+        _atomic_write(path, lambda f: f.write(compressed))
         logger.debug(
             f"OSM cache written: {key} ({len(compressed) // 1024} KB gz)")
     except Exception as e:

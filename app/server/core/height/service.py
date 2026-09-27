@@ -312,42 +312,45 @@ def enhance_city_data(payload: dict[str, Any], north: float, south: float, east:
     if not features:
         return payload
 
-    center_lat = (north + south) * 0.5
-    center_lon = (east + west) * 0.5
-    in_conus = 24.0 <= center_lat <= 50.0 and -125.0 <= center_lon <= -66.0
-    in_alaska = 51.0 <= center_lat <= 72.0 and -170.0 <= center_lon <= -129.0
-    in_hawaii = 18.0 <= center_lat <= 23.5 and -161.0 <= center_lon <= -154.0
-    if in_conus or in_alaska or in_hawaii:
-        payload["height_enhancement"] = {
-            "source_name": "osm_only_us",
-            "providers_used": [],
-            "resolution_m": 0.0,
-            "stats": {"skipped": True, "reason": "US bbox uses OSM heights only"},
-        }
-        return payload
-
-    default_count = sum(
-        1 for feat in features
-        if (feat.get("properties") or {}).get("height_source") == "default"
-    )
-    if default_count == 0:
+    if not _count_default(features):
         return payload
 
     bbox = (north, south, east, west)
+    # Measured lidar first: it answers per footprint, so whatever it cannot
+    # measure is left on "default" for the raster sources below.
+    lidar = _enhance_from_lidar(features, bbox)
+    if not _count_default(features):
+        payload["height_enhancement"] = _with_lidar({
+            "source_name": LIDAR_SOURCE_NAME, "providers_used": [],
+            "providers_too_coarse": [], "resolution_m": 1.0, "stats": {},
+        }, lidar)
+        return payload
     # The provider list comes from `_REGISTRY` -- the same one `/api/height/*`
     # answers from -- and not from a tuple written out here. This function used
     # to name five providers explicitly, which meant every provider added after
     # it was written was invisible to the export path however prominently it
     # was registered. GlobalBuildingAtlas was the casualty: the registry entry
     # above says it "is what fires in Cartagena", and it never did, because
-    # this list did not mention it. LiDAR3DEP is new to the list and costs
-    # nothing outside its coverage; the US early-return above means
-    # LiDAR3DEP can never be reached from here at all.
+    # this list did not mention it.
+    #
+    # US bboxes go through the same path. They used to return early with
+    # "osm_only_us", a guard from before the resolution limit below existed,
+    # when the only sources were 30 m nDSMs that flattened houses to 3 m. It
+    # also shut out the fine per-building sources, so Breckenridge, CO kept
+    # 3,788 of 3,973 buildings at the 10 m fallback. GBA and Open Buildings
+    # alone bring that to 456; 3DEP lidar first, then those two, to 39.
     providers, _unknown = _select_providers(bbox)
 
     results = []
     too_coarse = []
     for provider in providers:
+        # Known-coarse sources are dropped before fetching, not after: the
+        # nDSM and COP30-minus-SRTM downloads were ~2 min of a Breckenridge
+        # enhancement whose result was then thrown away.
+        registered = _PROVIDER_MAP.get(provider.name)
+        if registered is not None and registered.resolution_m > BUILDING_RESOLUTION_LIMIT_M:
+            too_coarse.append(provider.name)
+            continue
         try:
             result = provider.fetch_heights(bbox, (dim, dim))
         except Exception as exc:
@@ -376,7 +379,7 @@ def enhance_city_data(payload: dict[str, Any], north: float, south: float, east:
                 "cover this bbox (%s); buildings keep the OSM fallback height",
                 BUILDING_RESOLUTION_LIMIT_M, ", ".join(too_coarse),
             )
-            payload["height_enhancement"] = {
+            payload["height_enhancement"] = _with_lidar({
                 "source_name": "osm_only_coarse",
                 "providers_used": [],
                 "providers_too_coarse": too_coarse,
@@ -384,7 +387,12 @@ def enhance_city_data(payload: dict[str, Any], north: float, south: float, east:
                 "stats": {"skipped": True,
                           "reason": "no provider finer than "
                                     f"{BUILDING_RESOLUTION_LIMIT_M:.0f} m"},
-            }
+            }, lidar)
+        elif lidar:
+            payload["height_enhancement"] = _with_lidar({
+                "source_name": LIDAR_SOURCE_NAME, "providers_used": [],
+                "providers_too_coarse": [], "resolution_m": 1.0, "stats": {},
+            }, lidar)
         return payload
 
     merged = merge_height_rasters(results, target_shape=(dim, dim))
@@ -396,11 +404,63 @@ def enhance_city_data(payload: dict[str, Any], north: float, south: float, east:
         source_name=merged.source_name,
     )
     payload["buildings"] = enhanced["buildings"]
-    payload["height_enhancement"] = {
+    payload["height_enhancement"] = _with_lidar({
         "source_name": merged.source_name,
         "providers_used": [item.source_name for item in results],
         "providers_too_coarse": too_coarse,
         "resolution_m": float(merged.resolution_m),
         "stats": enhanced.get("stats") or {},
-    }
+    }, lidar)
     return payload
+
+
+LIDAR_SOURCE_NAME = "lidar_3dep_copc"
+
+
+def _count_default(features: list[dict]) -> int:
+    return sum(1 for feat in features
+               if (feat.get("properties") or {}).get("height_source") == "default")
+
+
+def _enhance_from_lidar(features: list[dict], bbox: tuple) -> dict | None:
+    """Set measured 3DEP lidar heights on the ``default`` buildings of a US bbox.
+
+    Returns the measurement stats, or None when lidar was not tried (outside the
+    US, reader not installed) or failed outright; either way the raster
+    providers still run for every building left on ``default``.
+    """
+    from city2stl.skyline.height.providers import lidar_3dep_copc
+
+    if not (lidar_3dep_copc.covers(bbox) and lidar_3dep_copc.available()):
+        return None
+    from shapely.geometry import shape
+
+    polygons = {}
+    for i, feat in enumerate(features):
+        if (feat.get("properties") or {}).get("height_source") != "default":
+            continue
+        geom = feat.get("geometry") or {}
+        if geom.get("type") not in ("Polygon", "MultiPolygon"):
+            continue
+        try:
+            polygons[i] = shape(geom)
+        except Exception:
+            continue
+    try:
+        heights, stats = lidar_3dep_copc.footprint_heights(polygons, bbox)
+    except Exception as exc:
+        logger.warning("3DEP lidar height measurement failed: %s", exc)
+        return None
+    for i, h in heights.items():
+        props = features[i]["properties"]
+        props["height_m"] = max(3.0, h)
+        props["height_source"] = LIDAR_SOURCE_NAME
+    return stats if stats.get("tiles") else None
+
+
+def _with_lidar(info: dict, lidar: dict | None) -> dict:
+    """Record the lidar pass in a ``height_enhancement`` block."""
+    if lidar:
+        info["providers_used"] = [LIDAR_SOURCE_NAME, *info["providers_used"]]
+        info["lidar"] = lidar
+    return info

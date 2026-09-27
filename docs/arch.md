@@ -196,7 +196,7 @@ app/
 │   │   ├── responses.py  — standardized API response builders
 │   │   └── height/       — building height estimation package
 │   │       ├── __init__.py     — HeightResult, HeightProvider, merge_height_rasters()
-│   │       └── providers/      — wsf3d, google_3d, copernicus, ndsm, lidar_3dep
+│   │       └── providers/      — wsf3d, google_3d, copernicus, ndsm, lidar_3dep, lidar_3dep_copc (per-footprint 3DEP point cloud)
 │   └── routers/
 │       ├── terrain.py    — /api/terrain/*
 │       ├── regions.py    — /api/regions/* (SQLite-first, JSON fallback)
