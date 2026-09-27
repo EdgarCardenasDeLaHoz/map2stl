@@ -43,6 +43,9 @@ import manifold3d as mf
 import numpy as np
 import shapely
 import trimesh
+from numpy2stl.core.extrude import close_surface, orient_ccw, prism
+from numpy2stl.core.heightfield import tin_solid
+from numpy2stl.processing.boolean import from_manifold, to_manifold, union
 from numpy2stl.processing.decimate import heightfield_tin
 from rasterio.features import rasterize
 from rasterio.transform import Affine
@@ -257,36 +260,9 @@ def terrain_tin(z: np.ndarray, max_error: float = TERRAIN_MAX_ERROR_MM,
 
 def terrain_solid(terrain: Terrain, max_error: float = TERRAIN_MAX_ERROR_MM) -> Mesh:
     """Watertight terrain block: adaptive top surface, side walls, flat bottom at z = 0."""
-    h, w = terrain.z.shape
-    s = terrain.scale.mm_per_px
-    idx, tris = terrain_tin(terrain.z, max_error)
-    remap = np.full(h * w, -1)
-    remap[idx] = np.arange(len(idx))
-    ii, jj = np.divmod(idx, w)
-    top = np.column_stack([jj * s, (h - 1 - ii) * s, terrain.z.ravel()[idx]])
-    terrain.tin_xy = top[:, :2]
-    f = remap[tris]
-    # Counter-clockwise from above => normals up.
-    p = top[f]
-    ccw = ((p[:, 1, 0] - p[:, 0, 0]) * (p[:, 2, 1] - p[:, 0, 1])
-           - (p[:, 1, 1] - p[:, 0, 1]) * (p[:, 2, 0] - p[:, 0, 0])) > 0
-    f[~ccw] = f[~ccw][:, ::-1]
-    return _close_surface(top, f, lambda xy: np.zeros(len(xy)))
-
-
-def _close_surface(top: np.ndarray, f: np.ndarray, bottom_z) -> Mesh:
-    """Solid from an upward-facing open surface: walls down to bottom_z(xy), bottom reversed."""
-    n = len(top)
-    bot = top.copy()
-    bot[:, 2] = bottom_z(top[:, :2])
-    edges = np.concatenate([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]])
-    key = np.sort(edges, axis=1)
-    _, inv, counts = np.unique(key, axis=0, return_inverse=True, return_counts=True)
-    border = edges[counts[inv.ravel()] == 1]          # directed as in the CCW top faces
-    a, b = border[:, 0], border[:, 1]
-    walls = np.vstack([np.column_stack([a, b + n, b]), np.column_stack([a, a + n, b + n])])
-    faces = np.vstack([f, f[:, ::-1] + n, walls])
-    return np.vstack([top, bot]), faces
+    v, f = tin_solid(terrain.z, max_error, mm_per_px=terrain.scale.mm_per_px)
+    terrain.tin_xy = v[: len(v) // 2, :2]
+    return v, f
 
 
 # ---------------------------------------------------------------------------
@@ -371,37 +347,6 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
     return out_polys, out_props, counts
 
 
-def _prism(poly: Polygon, z0: float, z1: float) -> Mesh | None:
-    """Closed prism over a polygon (holes kept) using only the outline's own vertices."""
-    if z1 - z0 <= 1e-6:
-        return None
-    poly = shapely.geometry.polygon.orient(poly, 1.0)   # exterior CCW, holes CW
-    rings = [np.asarray(poly.exterior.coords)[:-1]] + [np.asarray(r.coords)[:-1] for r in poly.interiors]
-    tri = shapely.get_coordinates(shapely.constrained_delaunay_triangles(poly)).reshape(-1, 4, 2)[:, :3]
-    if not len(tri):
-        return None
-    ring_pts = np.concatenate(rings)
-    uniq, inv = np.unique(np.concatenate([ring_pts, tri.reshape(-1, 2)]), axis=0, return_inverse=True)
-    inv = inv.ravel()
-    ring_idx, f = inv[:len(ring_pts)], inv[len(ring_pts):].reshape(-1, 3)
-    p = uniq[f]
-    ccw = ((p[:, 1, 0] - p[:, 0, 0]) * (p[:, 2, 1] - p[:, 0, 1])
-           - (p[:, 1, 1] - p[:, 0, 1]) * (p[:, 2, 0] - p[:, 0, 0])) > 0
-    f[~ccw] = f[~ccw][:, ::-1]
-    n = len(uniq)
-    walls = []
-    start = 0
-    for r in rings:
-        k = ring_idx[start:start + len(r)]
-        a, b = k, np.roll(k, -1)
-        walls += [np.column_stack([a, b + n, b]), np.column_stack([a, a + n, b + n])]
-        start += len(r)
-    v = np.vstack([np.column_stack([uniq, np.full(n, z1)]), np.column_stack([uniq, np.full(n, z0)])])
-    # Rings run with the solid on their left (exterior CCW, holes CW), so each wall
-    # quad (top a, bottom b, top b)+(top a, bottom a, bottom b) faces outward.
-    return v, np.vstack([f, f[:, ::-1] + n] + walls)
-
-
 def _roofed(poly: Polygon, props: dict, z_floor: float, ground_hi: float,
             z_per_m: float, style: LayerStyle, cap_mm: float = math.inf) -> Mesh | None:
     """A building-like prism from the skirt floor to its roof (OSM roof shapes kept).
@@ -428,8 +373,8 @@ def _roofed(poly: Polygon, props: dict, z_floor: float, ground_hi: float,
                     return roofed
             # The roof generator cannot close pitched roofs on concave footprints:
             # keep the building, flat at mid-roof height.
-            return _prism(poly, z_floor, ground_hi + total - roof_mm / 2)
-    return _prism(poly, z_floor, ground_hi + total)
+            return prism(poly, z_floor, ground_hi + total - roof_mm / 2)
+    return prism(poly, z_floor, ground_hi + total)
 
 
 def _slab(poly: Polygon, terrain: Terrain, top_off: float, bottom_off: float) -> Mesh | None:
@@ -480,11 +425,8 @@ def _slab(poly: Polygon, terrain: Terrain, top_off: float, bottom_off: float) ->
         return None
     ground = terrain.sample(v2[:, 0], v2[:, 1])
     top = np.column_stack([v2, ground + top_off])
-    p = top[f]
-    ccw = ((p[:, 1, 0] - p[:, 0, 0]) * (p[:, 2, 1] - p[:, 0, 1])
-           - (p[:, 1, 1] - p[:, 0, 1]) * (p[:, 2, 0] - p[:, 0, 0])) > 0
-    f = np.where(ccw[:, None], f, f[:, ::-1])
-    return _close_surface(top, f, lambda xy: terrain.sample(xy[:, 0], xy[:, 1]) + bottom_off)
+    f = orient_ccw(top, f)
+    return close_surface(top, f, lambda xy: terrain.sample(xy[:, 0], xy[:, 1]) + bottom_off)
 
 
 def _is_flowing_water(props: dict) -> bool:
@@ -520,7 +462,7 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
             if _is_flowing_water(pr):
                 m = _slab(poly, terrain, 1.0, -style.offset_mm)
             else:
-                m = _prism(poly, max(l_ - style.offset_mm, 0.1), h_ + 1.0)
+                m = prism(poly, max(l_ - style.offset_mm, 0.1), h_ + 1.0)
             if m is not None:
                 solids.append(m)
     else:
@@ -546,18 +488,14 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
 # ---------------------------------------------------------------------------
 
 def _manifold(mesh: Mesh) -> mf.Manifold:
-    v, f = mesh
-    return mf.Manifold(mf.Mesh(vert_properties=np.ascontiguousarray(v, np.float32),
-                               tri_verts=np.ascontiguousarray(f, np.uint32)))
+    return to_manifold(*mesh, strict=False)
 
 
 CONTACT_SPLIT_MM = 1e-3   # separation given to solids that touch at a point or edge
 
 
 def _to_trimesh(m: mf.Manifold) -> trimesh.Trimesh:
-    out = m.to_mesh()
-    v = np.asarray(out.vert_properties)[:, :3].astype(np.float64)
-    f = np.asarray(out.tri_verts)
+    v, f = from_manifold(m)
     return trimesh.Trimesh(_separate_contacts(v, f), f, process=False)
 
 
@@ -569,7 +507,10 @@ def _separate_contacts(v: np.ndarray, f: np.ndarray) -> np.ndarray:
     Moving each copy ``CONTACT_SPLIT_MM`` towards its own faces (far below print
     resolution) keeps the file watertight after welding.
     """
-    _, inv, counts = np.unique(v, axis=0, return_inverse=True, return_counts=True)
+    # Compared as STL stores them (float32): positions that differ only below
+    # that precision are welded by every reader too.
+    _, inv, counts = np.unique(v.astype(np.float32), axis=0, return_inverse=True,
+                               return_counts=True)
     dup = counts[inv.ravel()] > 1
     if not dup.any():
         return v
@@ -597,16 +538,6 @@ def welded_watertight(mesh: trimesh.Trimesh) -> bool:
     """Watertight as an STL reader sees it: coincident vertices merged."""
     w = trimesh.Trimesh(mesh.vertices, mesh.faces, process=True)
     return bool(w.is_watertight)
-
-
-def _union(solids: list[Mesh]) -> tuple[mf.Manifold | None, int]:
-    """Union of the valid solids, and how many were rejected as non-manifold."""
-    ms = [_manifold(s) for s in solids]
-    good = [m for m in ms if m.status() == mf.Error.NoError and not m.is_empty()]
-    if not good:
-        return None, len(ms)
-    u = mf.Manifold.batch_boolean(good, mf.OpType.Add) if len(good) > 1 else good[0]
-    return u, len(ms) - len(good)
 
 
 def lossless_simplify(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
@@ -718,7 +649,7 @@ def build_on_terrain(
         t0 = time.perf_counter()
         solids, stats = build_layer(name, feats, style, terrain)
         t1 = time.perf_counter()
-        u, rejected = _union(solids)
+        u, rejected = union(solids)
         report["layers"][name] = {"mode": style.mode, **stats, "rejected": rejected,
                                   "seconds": {"geometry": round(t1 - t0, 2),
                                               "union": round(time.perf_counter() - t1, 2)}}

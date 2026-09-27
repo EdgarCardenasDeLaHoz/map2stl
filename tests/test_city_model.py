@@ -225,17 +225,6 @@ class TestSimplificationAtPrintScale:
         assert np.nanmax(err) <= 0.05 + 1e-9
         assert len(tris) < 2 * (h - 1) * (w - 1) / 3      # substantially fewer triangles
 
-    def test_prism_with_courtyard_is_closed(self):
-        from shapely.geometry import Polygon
-
-        from city2stl.city_model import _prism
-
-        p = Polygon([(0, 0), (10, 0), (10, 8), (0, 8)], [[(3, 3), (6, 3), (6, 5), (3, 5)]])
-        v, f = _prism(p, 1.0, 4.0)
-        m = trimesh.Trimesh(v, f)
-        assert m.is_watertight and m.is_winding_consistent
-        assert m.volume == pytest.approx((80 - 6) * 3.0)
-
     def test_dense_road_network_builds(self):
         # A grid of crossing streets dissolves into one slab with many holes.
         lons = np.linspace(-3.603, -3.580, 12)
