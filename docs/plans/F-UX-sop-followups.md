@@ -71,13 +71,13 @@ that touches library code; client-only items run alongside it.
   Done (part A).
 - **Printability rules** in the city model: minimum wall width (0.8 mm) and slenderness
   cap (height ≤ 8× min width, clamp or flag), reported per build.
-- **Pre-flight report + panel**: size vs bed, thinnest feature, tallest spike, piece
+- ~~**Pre-flight report + panel**: size vs bed, thinnest feature, tallest spike, piece
   count, estimated filament/print time, watertight — computed server-side, shown before
-  download.
-- **Decimated preview** (≤ 150k faces) using the adaptive terrain mesh.
-- **Puzzle**: fast heightmap-mask cutting for terrain-only puzzles; engraved piece IDs and
+  download.~~ Done (part B, below).
+- ~~**Decimated preview** (≤ 150k faces) using the adaptive terrain mesh.~~ Done (part B).
+- ~~**Puzzle**: fast heightmap-mask cutting for terrain-only puzzles; engraved piece IDs and
   a north arrow on the underside; pieces laid out on the plate; knob shapes (rectangular,
-  dovetail, rounded); draggable cut lines (non-uniform grid) in the preview.
+  dovetail, rounded); draggable cut lines (non-uniform grid) in the preview.~~ Done (part B).
 
 ### Batch 2 part A — done 2026-09-27
 
@@ -135,3 +135,73 @@ that touches library code; client-only items run alongside it.
   `/api/cities`; `terrain_session.py` and the export side still default `dem_source` to
   `local` when a caller passes none; the edge warning is not re-run when only the saved
   region list changes without a box move.
+
+### Batch 2 part B — done 2026-09-27 (pre-flight, decimated preview, puzzle)
+
+- **Pre-flight report + panel** — `POST /api/export/preflight` (`core/preflight.py`), same
+  body as `/api/export/start` (`format` = `city` | `puzzle` | …). Runs the terrain stage and
+  `city_model.layer_preflight` (new: `feature_polygons` + the printability rules, no
+  solids — the `widened` / `clamped` / `dropped` counts equal the build's) on the OSM
+  cache only (uncached layers and a stale cache payload are warnings, never fetched).
+  Returns size vs bed (`bed_mm` in the body), scale, vertical exaggeration, piece grid and
+  method (`puzzle.grid_edges` / `choose_method`), per-layer counts, thinnest feature,
+  tallest spike (terrain: height above a 5 mm mean; extruded: top above the lowest ground
+  under it), estimated faces (terrain TIN of a strided grid × √stride + layers at 4 per
+  outline vertex), filament and print time, warnings. Formula (in the response): printed
+  = shell + 15 % × (volume − shell), shell = area × 0.9 mm (2 perimeters × 0.45 mm);
+  grams = printed × 1.24 g/cm³; hours = printed / 8 mm³/s. The city build writes the
+  same figures from the real mesh as `report.json` `check` (`build_check`), plus
+  `puzzle`. Client: `PreflightPanel.vue` at the top of the Export tab (City model /
+  Terrain puzzle, stale marker after any form change or dragged cut),
+  `export-handlers.js:runPreflight` sends exactly the build's body.
+  Measured (Cartagena 590×600, all layers): 2.6 s city, 0.5 s puzzle; filament 1430 g
+  estimated vs 1442 g from the built mesh, faces 240 k estimated vs 206 k built.
+- **Decimated preview** — `generate_mesh_preview` → `_preview_mesh`:
+  `numpy2stl.processing.decimate.heightfield_tin_budget` (new) starts at the export
+  tolerance (`city_model.terrain_tolerance`) and relaxes it in ×3 steps until ≤ 150 k
+  faces fit; DEMs over 250 k px are strided for the preview only; solid = walls + a
+  bottom fanned from its centre. Same JSON (`vertices` [col, row, z], `faces`, …) plus
+  `preview: {adaptive, stride, tolerance_mm, max_error_mm, seconds}`; the viewer already
+  drew from the faces given (no grid assumption); the HUD shows the bound reached.
+  Also: `heightfield_tin` re-rasterises only the triangles each pass changed (Delaunay
+  insertion touches its cavity only) with an affine-form rasteriser — same bound, the
+  1000×1000 export TIN went 29.8 s → 8.7 s. Measured, 1000×1000 DEM (warm): **11.3 s,
+  65.5 MB, 2.0 M faces → 3.3 s, 2.5 MB, 85 k faces** (bound 0.18 mm at stride 2).
+- **Puzzle** (`core/puzzle.py`, `numpy2stl/applications/puzzle.py`):
+  - *Mask path* for terrain-only models (automatic; `puzzle_method` / `puzzle.method`
+    forces `mask` or `boolean`): `heightfield_pieces` takes the terrain TIN vertices
+    inside each outline (one label raster, `raster.burn_polygons`) plus the outline
+    split at the pixel spacing, triangulates them together (constrained), walls on the
+    exact outline, flat bottom triangulated from the outline — so edges follow the
+    outline, not the pixel grid. Volume check as for `cut_jigsaw` (TIN volume − gap
+    area × mean gap height; overlap rejected). The city build uses it when no layer
+    produced a solid. 1000×1000, 4×4 pieces: **18.0 s (mask) vs 26.1 s (boolean)** end to
+    end; the mask time is mostly the TIN (8 s) and writing OBJ/3MF (8 s).
+  - *Engraved id + north arrow*: `underside_marks` (matplotlib `TextPath`, DejaVu Sans
+    Bold, height min(8 mm, 20 % of the piece), shrunk until it sits 1 mm inside the
+    outline, mirrored to read with the piece turned over) cut 0.6 mm deep with
+    manifold3d (`engrave_underside`); skipped where the piece is < 1 mm thick. Default
+    on (`engrave_ids` / `puzzle.engrave`); removes exactly text area × 0.6 mm (tested).
+  - *Plates*: `layout: true` + `bed_mm` → `<name>_plate<N>.3mf`, shelf-packed with a 5 mm
+    gap and margin; oversize pieces get a plate each and are listed in the report.
+  - *Knob shapes*: `knob_shape` = `classic` (rounded head on a neck; the app default),
+    `dovetail`, `rectangular` (the library default, the old tab). The groove is the
+    tongue grown by the clearance.
+  - *Non-uniform grid*: `col_edges_mm` / `row_edges_mm` (from the west / south edge,
+    validated by `validate_edges`: strictly increasing, ends within max(0.5 mm, 1 %) of
+    the model size and snapped to it, every piece big enough for its knobs). Client:
+    the preview's red cut lines can be dragged (`model-viewer.js`, arithmetic in
+    `puzzle-cuts.js`), stored as `appState.puzzleEdges` for that grid, sent by both
+    puzzle routes; *Reset cuts* in Split / Puzzle.
+- Tests: numpy2stl `test_puzzle.py` (knob shapes watertight and tiling, explicit edges,
+  mask pieces = boolean pieces and conserve volume, uncovered model detected, engraving
+  volume, plate layout), `test_decimate.py` (budget); strm2stl `tests/test_preflight.py`
+  (preflight counts = build counts, edges, warnings, 400; mask vs boolean, explicit
+  edges, engraving, plates; preview capped and watertight), `tests/js/puzzleCuts.test.js`.
+- Not done / follow-ups: the preview does not show the city layers (terrain only, as
+  before); face estimates are ±40 %; the print-time model is one flow rate; the
+  thinnest-feature figure includes slivers clipped at the model edge; the viewer's
+  "Simplify" and "Surface groups" controls call `window.applySimplification` /
+  `applySurfaceGroups`, which nothing defines (pre-existing, dead).
+- The "Printability rules" item above was implemented with F-CITYMODEL (widened /
+  clamped per layer); part B only reports it ahead of the build.

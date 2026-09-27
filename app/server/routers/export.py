@@ -27,6 +27,7 @@ from app.server.core.export_tasks import (  # noqa: E402
     get_task_status,
     start_export_task,
 )
+from app.server.core.preflight import preflight  # noqa: E402
 
 
 async def _off_loop(fn, data):
@@ -62,6 +63,16 @@ async def export_3mf(request: Request):
 async def export_preview(request: Request):
     """Return numpy2stl vertices+faces as JSON for the in-browser 3D viewer."""
     return await _off_loop(generate_mesh_preview, await request.json())
+
+
+@router.post("/api/export/preflight")
+async def export_preflight(request: Request):
+    """Fast estimate of a city / puzzle / terrain export before building it:
+    size vs bed, scale, pieces, per-layer counts, faces, filament, time, warnings."""
+    result = await _off_loop(preflight, await request.json())
+    if isinstance(result, JSONResponse):   # a ValueError, already a 400
+        return result
+    return JSONResponse(content=result)
 
 
 @router.post("/api/export/crosssection")

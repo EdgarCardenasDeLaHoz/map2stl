@@ -92,6 +92,10 @@ export const useAppStore = defineStore('app', {
         // Named landmarks near the region box edge (EdgeLandmarkWarnings.vue):
         // {key, loading, error, landmarks: [{name, message, lat, lon, ...}]}.
         edgeLandmarks: null as Record<string, unknown> | null,
+        // Puzzle cut positions dragged in the Extrude preview (puzzle-cuts.js,
+        // model-viewer.js), in mm from the model's west / south edge; `key`
+        // is the grid + size they belong to. null = even split.
+        puzzleEdges: null as { cols: number[]; rows: number[]; key: string } | null,
 
         // ── 3D viewer ─────────────────────────────────────────────────────────
         // Extrude preview lifecycle, set by model-viewer.js:previewModelIn3D;

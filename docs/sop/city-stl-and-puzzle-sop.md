@@ -44,14 +44,32 @@ source); server running (`Start 3D Maps.bat`).
 5. **Model** (Extrude): the scale line shows "1 mm = X m" and the vertical exaggeration;
    the bed outline shows fit. Vertical: *auto* = true scale below a 20 km diagonal, fit
    to *Height* above; override with *true* × exaggeration or *fit*. Smoothing 3×3.
-6. **Build** (Export → City Model): toggle layers per situation (see §3), keep *Puzzle*
+6. **Pre-flight** (Export → ✈ Pre-flight check, *City model* or *Terrain puzzle*,
+   seconds): size vs the bed, scale and vertical exaggeration, piece grid, per-layer
+   shapes with the `widened` / `capped` counts the build will report, thinnest feature,
+   tallest spike, estimated faces, filament (g PLA) and print time, and a warning list.
+   Fix what it flags before building (layers not yet cached are listed, not counted).
+7. **Puzzle options** (Export → Split / Puzzle; they apply to the City Model puzzle too):
+   knob shape (*classic* rounded, *dovetail*, *rectangular*), engraved piece ids + north
+   arrow on the underside (on by default), *Lay out on plates* (one 3MF per bed). With a
+   puzzle on, the preview draws the cut lines in red: drag one to move that cut (it stops
+   where a piece would get too small for its knobs); *Reset cuts* goes back to equal pieces.
+8. **Build** (Export → City Model): toggle layers per situation (see §3), keep *Puzzle*
    on with max piece = bed − 10 mm (set from the printer). One build writes the merged
-   STL, the per-layer 3MF and the puzzle.
-7. **QA**: open `report.json` — `merged.watertight`, `widened`/`clamped` counts per layer,
-   `scale`. In the slicer: size vs bed, no "errors fixed", tallest spike.
+   STL, the per-layer 3MF, the puzzle (pieces in place + laid-out plates) and
+   `report.json`.
+9. **QA**: open `report.json` — `check` (size vs bed, faces, watertight, widened/clamped
+   per layer, filament and time from the real mesh, warnings), `merged.watertight`,
+   `scale`, `puzzle` (grid, method, timings). In the slicer: size vs bed, no "errors
+   fixed", tallest spike.
 
 Terrain-only models (no city) use the same route: *Export → STL/OBJ/3MF* or *Puzzle* build
-the city model with no layers, so they get the same adaptive mesh and scale.
+the city model with no layers, so they get the same adaptive mesh and scale. A terrain-only
+puzzle is cut the fast way (pieces meshed straight from the heightfield, see §4).
+
+The Extrude preview is the adaptive mesh capped at 150 k faces (tolerance raised until it
+fits); the HUD shows the tolerance reached. The downloaded file is always the full-tolerance
+mesh.
 
 ## 3. Layer choices
 
@@ -79,8 +97,16 @@ than 0.8 mm are widened, extruded heights capped at 8 × footprint width (report
    terrain's own vertices; water is cut flat.
 4. **Merge** (manifold3d): union → contacts separated by 0.001 mm (watertight after STL
    welding) → lossless coplanar merge.
-5. **Puzzle**: jigsaw cutters from the bed size, boolean cut of the merged model, volume
-   check (pieces must sum to the model).
+5. **Puzzle**: piece outlines from the bed size (or dragged cut positions), then
+   - terrain-only (*mask* path, automatic): each piece's top is the terrain TIN's vertices
+     inside the outline plus the outline itself (split at the pixel spacing), triangulated
+     together, walls on the exact outline, flat bottom — no boolean engine;
+   - with city layers (*boolean* path): manifold3d intersection of the merged model with
+     the cutter prisms.
+   Both check the volume (pieces must sum to the model minus the clearance gaps). Then the
+   id and north arrow are cut 0.6 mm into each piece's underside (mirrored so they read
+   with the piece turned over), and the pieces are packed onto beds for the plate 3MFs.
+   `puzzle_method` / `puzzle.method` forces either path.
 
 ## 5. Known limits
 

@@ -110,6 +110,7 @@ flowchart TD
 | `viewerScene` | THREE.Scene\|null | The Three.js scene for the model viewer |
 | `generatedModelData` | Object\|null | `{values, width, height, resolution, exaggeration, baseHeight, vmin, vmax}` — last preview parameters, used by download buttons |
 | `modelPreviewState` | `'idle'\|'building'\|'ready'\|'error'` | Extrude preview lifecycle (model-viewer.js); ModelContainer.vue words its empty state from it |
+| `puzzleEdges` | `{cols: number[], rows: number[], key: string}`\|null | Puzzle cuts dragged in the Extrude preview, mm from the west / south edge; `key` = grid + model size they belong to (a different grid falls back to the even split). Sent as `col_edges_mm` / `row_edges_mm` |
 | `cityHeightOverrides` | `Record<number, number>` | Buildings-panel height overrides by feature index; sent by `exportCityModel()` as `layer_data.buildings`; reset when a new building set loads |
 
 ## Other
@@ -150,6 +151,7 @@ Mirrored from closure. Set via `appState.set(key, val)` or direct assignment:
 | `viewerScene` | model-viewer | (read-only) |
 | `generatedModelData` | model-viewer | export-handlers, puzzle export |
 | `modelPreviewState` | model-viewer | ModelContainer.vue |
+| `puzzleEdges` | model-viewer (drag), `resetPuzzleEdges` | model-viewer, export-handlers (`puzzleEdgesFor`) |
 | `cityHeightOverrides` | CityBuildingsPanel.vue | export-handlers |
 | `_setDemEmptyState` | callback | dem-main |
 | `_updateWorkflowStepper` | callback | dem-main, model-viewer |

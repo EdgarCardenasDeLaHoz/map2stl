@@ -94,9 +94,11 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
             window.updatePuzzlePreview?.();
         });
     }
-    ['splitCols', 'splitRows', 'splitKnobWidth', 'splitKnobDepth'].forEach(id => {
+    ['splitCols', 'splitRows', 'splitKnobWidth', 'splitKnobDepth', 'cityPieceMm'].forEach(id => {
         document.getElementById(id)?.addEventListener('input', () => window.updatePuzzlePreview?.());
     });
+    document.getElementById('cityPuzzleEnabled')
+        ?.addEventListener('change', () => window.updatePuzzlePreview?.());
 
     document.getElementById('viewerWireframe')?.addEventListener('change', e => {
         if (window.appState.terrainMesh) {

@@ -143,6 +143,9 @@
             <!-- ═══════════ Export tab ═══════════ -->
             <div v-show="activeTab==='export'">
 
+              <!-- Pre-flight: size vs bed, pieces, counts, filament/time, warnings -->
+              <PreflightPanel :form-tick="formTick" />
+
               <!-- Download buttons -->
               <div class="row-gap6" style="margin-bottom:10px;">
                 <button id="downloadSTLBtn" class="btn btn-success btn-sm" style="flex:1;" title="Download as STL.">
@@ -220,6 +223,27 @@
                     <label title="Gap taken off the groove side so printed pieces fit (mm)">Clearance (mm):</label>
                     <input type="number" id="splitClearance" value="0.3" min="0" max="2" step="0.05">
                   </div>
+                  <div class="param-group">
+                    <label for="splitKnobShape" title="Tongue outline: classic rounded knob, dovetail, or a plain rectangular tab">Knob shape:</label>
+                    <select id="splitKnobShape" class="ctrl-input-sm" style="width:auto;">
+                      <option value="classic" selected>Classic (rounded)</option>
+                      <option value="dovetail">Dovetail</option>
+                      <option value="rectangular">Rectangular</option>
+                    </select>
+                  </div>
+                  <div style="display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;margin:4px 0;">
+                    <label title="Engrave the piece id (r1c2) and a north arrow into each piece's underside, 0.6 mm deep">
+                      <input type="checkbox" id="puzzleEngrave" checked> Engrave ids + north arrow
+                    </label>
+                    <label title="Also write one 3MF per print bed with the pieces laid out side by side">
+                      <input type="checkbox" id="puzzleLayout" checked> Lay out on plates
+                    </label>
+                  </div>
+                  <div class="bed-fit-note" style="color:#aaa;">
+                    Drag the red cut lines in the preview to move a cut.
+                    <button type="button" class="btn btn-xs" style="margin-left:4px;"
+                            title="Back to equal pieces" @click="resetCuts">Reset cuts</button>
+                  </div>
                   <button id="exportPuzzle3MFBtn" class="btn btn-success" style="width:100%;margin-top:6px;font-size:11px;">
                     🧩 Export puzzle (.zip: OBJ pieces + 3MF)
                   </button>
@@ -284,10 +308,13 @@
                          @input="onPieceInput"> mm
                 </div>
                 <div v-if="bedFit" class="bed-fit-note" :class="bedFit.fits ? 'ok' : 'warn'">{{ bedFitText }}</div>
+                <div style="font-size:10px;color:#888;">Knobs, engraving, plates and dragged cuts: see Split / Puzzle
+                  (cut lines show while Split / Puzzle is off).</div>
                 <button id="exportCityBtn" class="btn btn-success btn-sm" style="width:100%;margin-top:6px;"
                         title="Build terrain + all enabled layers as one model and download a .zip.">
                   <span class="btn-icon">🏙️</span> Build city model (.zip)
                 </button>
+                <ModelScorePanel />
               </CollapsibleSection>
 
               <!-- Print Dimensions + Bed Optimizer -->
@@ -334,6 +361,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
+import PreflightPanel from './PreflightPanel.vue';
 import { useAppStore } from '../../stores/app';
 import {
   defaultPieceMm, formatGroundLength, modelScale, parseBedSize, piecesNeeded,
@@ -463,6 +491,10 @@ const cityLayers = ref([
 
 // The export lifecycle lives in modules/export/export-handlers.js, which is a
 // plain ES module loaded outside the Vue bundle; reach it through window.
+function resetCuts() {
+    (window as any).resetPuzzleEdges?.();
+}
+
 function cancelExport() {
     (window as any).cancelExport?.();
 }

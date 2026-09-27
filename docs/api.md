@@ -68,11 +68,14 @@ Primary `TerrainSession` touchpoints:
 | POST | `/api/export/obj` | Generate + download OBJ (sync) |
 | POST | `/api/export/3mf` | Generate + download 3MF (sync) |
 | POST | `/api/export/crosssection` | Generate cross-section OBJ |
-| POST | `/api/export/preview` | DEM values for Three.js preview (no mesh file) |
-| POST | `/api/export/puzzle` | Start async puzzle 3MF export → `{task_id}` |
+| POST | `/api/export/preview` | Adaptive preview mesh for Three.js → `{vertices [col,row,z_mm], faces, face_count, cols, rows, z_min, z_max, …, preview: {adaptive, stride, tolerance_mm, max_error_mm, seconds}}`. ≤ 150 k faces: `heightfield_tin_budget` from the export tolerance, raised until it fits; DEMs over 250 k px are strided first (preview only) |
+| POST | `/api/export/preflight` | Same body as `/start` (`format` = `city` \| `puzzle` \| …), nothing built → `{size_mm, bed_mm, fits_bed, scale, vertical_exaggeration, puzzle: {cols, rows, method, col_edges_mm, row_edges_mm, largest_piece_mm, knob_mm}, layers: {name: {polygons, widened, clamped, dropped, thinnest_mm, tallest_mm, …}}, thinnest_feature_mm, tallest_spike_mm, faces_est, estimate: {filament_g, print_hours, printed_cm3, formula}, warnings, seconds}`. OSM layers from the cache only (uncached ones are a warning). `app/server/core/preflight.py` |
+| POST | `/api/export/puzzle` | Start async puzzle export → `{task_id}` (same as `/start` with `format="puzzle"`) |
 | POST | `/api/export/start` | Start async export (any format) → `{task_id}`; body must include `"format"` field. `format="city"` fails with a clear message when city layers (trails included) are enabled on a bbox over 25 km diagonal, unless the body sets `"allow_large_city": true` (`core/city_data.check_city_area`) |
 | GET | `/api/export/status/{task_id}` | Poll async task → `{status, progress, message}` |
 | GET | `/api/export/download/{task_id}` | Download result of completed async task (file auto-deleted after send) |
+
+> **Puzzle fields** (`format="puzzle"`, flat; the city build takes the same keys under `puzzle`, see `core/puzzle.py`): `split_cols`/`split_rows` or `piece_mm`, or `col_edges_mm`/`row_edges_mm` (cut positions from the west / south edge, `[0, …, size]`, strictly increasing, ends within max(0.5 mm, 1 %) of the model size), `knob_width_mm`, `knob_depth_mm`, `knob_shape` (`classic` \| `dovetail` \| `rectangular`), `clearance_mm`, `puzzle_method` (`auto` \| `mask` \| `boolean`; auto = mask for terrain-only models), `engrave_ids` (default true: id + north arrow 0.6 mm into the underside), `layout` + `bed_mm` (adds `<name>_plate<N>.3mf`). The download carries `X-Puzzle-Info` (grid, method, timings). The city `report.json` gains `puzzle` and `check` (size vs bed, faces, watertight, widened/clamped, filament and time estimate).
 
 > **Sync vs async export:** Sync endpoints (`/stl`, `/obj`, `/3mf`) block until the file is ready and stream it directly. Async endpoints (`/start`, `/puzzle`) start a background thread and return a `task_id` for polling. The async path is preferred for large DEMs and puzzle exports. Tasks expire after 300 s.
 
@@ -195,10 +198,50 @@ Browse the skyline pipeline's rendered artifacts. The page itself is `GET /repor
 |--------|------|-------------|
 | GET | `/api/reports/index` | Inventory of every region report, height report, trace and PDF on disk, with per-seed rows and artifact URLs |
 | GET | `/api/reports/heights/{region_dir}` | Summary of one region's `heights.json` (source counts and height percentiles, not the building list) |
-| GET | `/reports/files/{root}/{path}` | One artifact file. `root` is `region`, `height` or `trace`; paths are resolved and checked for containment, and only viewable extensions are served |
+| GET | `/api/reports/registration` | Plate-registration reports and align-tool packs (F-REGION §5): `{roots, reports, packs, totals}` |
+| GET | `/reports/files/{root}/{path}` | One artifact file. `root` is `region`, `height`, `trace`, or a registration root (below); paths are resolved and checked for containment, and only viewable extensions are served |
 
 The inventory is rebuilt by scanning directories on every request rather than read from
 `build_landing_page.py`'s static `index.html`, which has to be re-run after each batch.
+
+Registration roots (`_REG_ROOTS`, read-only; override the whole set with
+`STRM2STL_REGISTRATION_REPORT_ROOTS="key=path;key=path"`, relative to `Code/`):
+
+- `registration` — `Code/_reports/` (numpy2stl batch reports, `index.html` + `summary.html`)
+- `registration_regen` — `Code/_reports_regen/` (skipped when absent)
+- `micropolitan` — `Cities/micropolitan/reports/`
+- `mesh_import` — `cache/mesh_imports/reports/` (the app's per-import auto-register reports)
+- `align` — `tools/align_tool/data/`: one entry per pack from its `meta.json` (placement
+  source, refinement, street placement, tile-consensus verdict, thumbnails); `.npy` arrays
+  are never served
+
+The page shows them under a **Registration** tab and in the sidebar.
+
+## Mesh Import and Plate Registration (`routers/layers.py`, `routers/registration.py`)
+
+Mesh import (`/api/layers/mesh/*`, F-MESHIMPORT): upload, heightmap, manual point-pair
+register, library browse and per-city location sidecars.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/layers/mesh/{upload_id}/auto-register` | Geocode + OSM registration. Response adds `scores` (`rmse_m, mae_m, bias_m, pearson_r, spearman_r, coverage_pct, footprint_iou, match_score, n_buildings, building_p95_abs_m, building_median_abs_m, height_scale_used`) and `report_url` / `report_dir` (numpy2stl HTML report in `cache/mesh_imports/reports/<city>_<hash>/`; body `write_report: false` skips the ~10 s report) |
+| POST | `/api/layers/mesh/library/{rel_path}/auto-register` | Same, for a library file |
+| POST | `/api/layers/mesh/library/{rel_path}/location` | Save the sidecar bbox; optional `placement` object is stored beside it (the panel saves pack, centre, turn, size, verdict) |
+
+Plate registration and the model critic (`/api/registration/*`, F-REGION §5 / F-LANDMARK §6):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/registration/packs` | Align-tool packs: `{slug, city, region, window, placeable, scorable, surveyed, verdict}` |
+| GET | `/api/registration/match?rel_path=` | The pack a mesh-library file depicts (city-name match, miniature-aware), or `null` |
+| POST | `/api/registration/plate/start` | `{slug, place=true, fix=true, rel_path?}` → task snapshot; an identical running task is joined |
+| GET | `/api/registration/plate/status/{task_id}` | `{status: running/done/error/cancelled, stage, progress, message, elapsed_s, result}`; `result` = `{placement, verdict{status, reasons, lead, endorsing, voting, corrected_m, ...}, geometry{center, corners, turn_deg, width_m, height_m, bbox}, matrix, window}` |
+| POST | `/api/registration/plate/cancel/{task_id}` | Mark cancelled (a running placement finishes in its thread; its result is discarded) |
+| GET | `/api/registration/critic/references?north&south&east&west` | Packs overlapping the bbox (best overlap first) plus the 3DEP nDSM option |
+| POST | `/api/registration/critic/score` | `{reference: {kind: pack, slug} or {kind: ndsm, bbox, resolution}, model: {kind: buildings, features} or {kind: stl, upload_id, bbox, up_axis, m_per_unit?}}` → `{buildings{n, median_abs_error_m, p90_abs_error_m, mean_error_m, within_2m_pct, within_5m_pct}, footprint{iou, precision, recall}, cells{mae_m, rmse_m, bias_m, pearson_r}, roofs{median_shape_error_m, median_relief_ref_m, median_relief_model_m, resolvable, note}, scale, reference, model}` |
+
+Nothing under `tools/align_tool/data/` is written by these routes; the placement is saved
+only when the client posts it to the location route above.
 
 ## Key Pydantic Models (`schemas.py`)
 
@@ -213,6 +256,9 @@ The inventory is rebuilt by scanning directories on every request rather than re
 - `MergeRequest` — `{bbox, dim, layers: list[MergeLayerSpec]}`
 - `MergeLayerSpec` — `{source, blend_mode, weight, processing: ProcessingSpec, options}` (river/lake sources: `blend_mode: "add"`, see `/api/composite/dem-merge`)
 - `ProcessingSpec` — `{clip_min, clip_max, smooth_sigma, sharpen, normalize, invert, extract_rivers, river_max_width_px}`
+- `MeshAutoRegisterRequest` — `{filename_hint?, resolution, min_region_iou, write_report}`
+- `PlateRegistrationStartRequest` — `{slug, place, fix, rel_path?}`
+- `CriticScoreRequest` — `{reference: CriticReference, model: CriticModel}`
 
 ## DEM Sources (OPENTOPO_DATASETS in `config.py`)
 

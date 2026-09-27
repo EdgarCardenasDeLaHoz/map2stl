@@ -17,9 +17,12 @@ Each function accepts a plain dict (pre-parsed JSON body).
 
 from __future__ import annotations
 
+import json
 import logging
+import math
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -145,6 +148,10 @@ def _prepare_dem_array(p: ExportContext) -> tuple[np.ndarray, float, float, Mode
 
     im = np.array(p.dem_values, dtype=np.float64).reshape(p.height, p.width)
     im = prepare_dem(im, p.median_size)
+    if p.carve_m is not None and p.carve_m.shape == im.shape:
+        # Rivers / lakes carve after the median: a 1-px channel is 3 of 9 cells in
+        # a 3x3 window, so smoothing after carving would erase it (F-REGION).
+        im = im + p.carve_m
 
     if p.sea_level_cap:
         # Raise everything below sea level to zero so the sea prints flat. (This was
@@ -458,7 +465,6 @@ def generate_mesh_preview(data: dict):
     passing ``solid: true`` — matches what export will produce.
     """
     from fastapi.responses import JSONResponse
-    from numpy2stl import array_to_mesh
 
     p = _parse_export_params(data)
     if not p.dem_values or not p.height or not p.width:
@@ -496,19 +502,20 @@ def generate_mesh_preview(data: dict):
         )
 
     # The export's own terrain stage, so label, contours and scale match the file.
-    im = terrain_stage(p, data).z_mm
-
+    t0 = time.perf_counter()
+    field = terrain_stage(p, data)
+    im = field.z_mm
     # Default to a closed solid so the preview shows the floor and side walls
     # the exported file actually has. This defaulted to a bare top surface,
     # so the viewer rendered an open shell with nothing underneath it.
     solid = bool(data.get("solid", True))
-    # Same floor as the file exports, so the preview shows the model that will
-    # actually be written rather than one a millimetre taller.
-    vertices, faces = array_to_mesh(im, solid=solid, floor_val=0.0)
-    logger.info(f"Preview mesh: {len(vertices)} vertices, {len(faces)} faces")
+    vertices, faces, info = _preview_mesh(im, field.scale, solid)
+    info["seconds"] = round(time.perf_counter() - t0, 2)
+    logger.info("Preview mesh: %d vertices, %d faces (%s)", len(vertices), len(faces), info)
 
-    # Vertices come back in pixel-grid units; client multiplies by mm_per_pixel
-    # to display real mm. Keep payload integer-rounded for compactness.
+    # Vertices are in pixel-grid units (x = column, y = row, row 0 north); the
+    # client multiplies by mm_per_pixel to display real mm. Integer x/y keep
+    # the payload compact.
     v_rounded = vertices.copy()
     v_rounded[:, :2] = np.round(v_rounded[:, :2]).astype(np.int32)
     v_rounded[:, 2]  = np.round(v_rounded[:, 2], 2)
@@ -526,45 +533,143 @@ def generate_mesh_preview(data: dict):
         "mm_per_pixel": p.mm_per_pixel,
         "exaggeration": p.exaggeration,
         "composite_error": p.composite_error,
+        "preview": info,
     })
 
 
-def generate_puzzle(data: dict, task: ExportTask) -> None:
-    """The terrain model (same mesh as the STL export) cut into jigsaw pieces.
+PREVIEW_MAX_FACES = 150_000
+PREVIEW_MAX_PIXELS = 250_000   # larger DEMs are strided for the preview only
 
-    Result: a zip with one OBJ per piece and a 3MF of all pieces
-    (app/server/core/puzzle.py). Request: the usual export fields plus
-    ``split_cols``/``split_rows`` (or ``piece_mm``), ``knob_width_mm``,
-    ``knob_depth_mm``, ``clearance_mm``.
+
+def _preview_mesh(im: np.ndarray, scale: ModelScale, solid: bool = True) -> tuple:
+    """Adaptive preview mesh of the heightfield ``im`` (mm), at most PREVIEW_MAX_FACES.
+
+    The top is ``heightfield_tin_budget`` started at the export's own terrain
+    tolerance and raised until the vertex budget fits. DEMs over
+    PREVIEW_MAX_PIXELS are sampled every ``stride`` pixels first (preview only;
+    the export always meshes every pixel). The solid adds side walls and a flat
+    bottom fanned from its centre - one triangle per border edge instead of a
+    copy of the top. Returns (vertices [col, row, z_mm] in pixel units, faces, info).
+    """
+    from numpy2stl.processing.decimate import heightfield_tin_budget
+
+    from city2stl.city_model import terrain_tolerance
+
+    h, w = im.shape
+    stride = max(1, math.ceil(math.sqrt(h * w / PREVIEW_MAX_PIXELS)))
+    rows = np.unique(np.r_[0:h:stride, h - 1])
+    cols = np.unique(np.r_[0:w:stride, w - 1])
+    zs = im[np.ix_(rows, cols)]
+    border = 2 * (len(rows) + len(cols)) - 4
+    # Faces: top ~ 2 per vertex, walls 2 and bottom 1 per border edge.
+    budget = max((PREVIEW_MAX_FACES - (3 * border if solid else 0)) // 2, border + 16)
+    tol = terrain_tolerance(scale)
+    idx, tris, err = heightfield_tin_budget(zs, tol, seed_step=max(2, 8 // stride),
+                                            max_vertices=budget, ladder=3.0)
+    ii, jj = np.divmod(idx, len(cols))
+    top = np.column_stack([cols[jj], rows[ii], zs.ravel()[idx]]).astype(np.float64)
+    remap = np.full(zs.size, -1)
+    remap[idx] = np.arange(len(idx))
+    f = remap[tris]
+    info = {"adaptive": True, "stride": stride, "tolerance_mm": round(tol, 3),
+            "max_error_mm": round(float(err), 3)}
+    if not solid:
+        return top, f, info
+    # Border edges, directed as in the top faces; walls down to z = 0, bottom fan.
+    edges = np.concatenate([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]])
+    _, inv, counts = np.unique(np.sort(edges, axis=1), axis=0,
+                               return_inverse=True, return_counts=True)
+    e = edges[counts[inv.ravel()] == 1]
+    ring = np.unique(e)
+    n = len(top)
+    below = np.full(n, -1)
+    below[ring] = n + np.arange(len(ring))
+    centre = n + len(ring)
+    bottom = np.vstack([np.column_stack([top[ring, :2], np.zeros(len(ring))]),
+                        [[(w - 1) / 2, (h - 1) / 2, 0.0]]])
+    a, b = e[:, 0], e[:, 1]
+    faces = np.vstack([f, np.column_stack([a, below[b], b]),
+                       np.column_stack([a, below[a], below[b]]),
+                       np.column_stack([np.full(len(e), centre), below[b], below[a]])])
+    return np.vstack([top, bottom]), faces, info
+
+
+# Flat request field -> puzzle spec key (app/server/core/puzzle.py). A nested
+# ``puzzle`` dict, as the city export sends, is accepted too and wins.
+_PUZZLE_FIELDS = {
+    "split_cols": "cols", "split_rows": "rows", "piece_mm": "piece_mm",
+    "knob_width_mm": "knob_width_mm", "knob_depth_mm": "knob_depth_mm",
+    "knob_shape": "knob_shape", "clearance_mm": "clearance_mm",
+    "col_edges_mm": "col_edges_mm", "row_edges_mm": "row_edges_mm",
+    "puzzle_method": "method", "engrave_ids": "engrave", "layout": "layout",
+    "bed_mm": "bed_mm",
+}
+
+
+def puzzle_spec(data: dict) -> dict:
+    """The puzzle spec of a ``puzzle`` export request (flat fields or ``puzzle``)."""
+    spec = {"clearance_mm": 0.3}
+    spec.update({key: data[f] for f, key in _PUZZLE_FIELDS.items() if data.get(f) is not None})
+    if isinstance(data.get("puzzle"), dict):
+        spec.update(data["puzzle"])
+    return spec
+
+
+def generate_puzzle(data: dict, task: ExportTask) -> None:
+    """The terrain model cut into jigsaw pieces.
+
+    Result: a zip with one OBJ per piece, a 3MF of all pieces in place and,
+    with ``layout``, one 3MF per print bed (app/server/core/puzzle.py).
+    Request: the usual export fields plus the puzzle spec (:func:`puzzle_spec`):
+    ``split_cols``/``split_rows`` (or ``piece_mm``, or ``col_edges_mm`` /
+    ``row_edges_mm``), ``knob_width_mm``, ``knob_depth_mm``, ``knob_shape``,
+    ``clearance_mm``, ``puzzle_method`` (auto | mask | boolean), ``engrave_ids``,
+    ``layout`` + ``bed_mm``.
+
+    A terrain-only model is cut by the fast mask path (pieces meshed straight
+    from the heightfield); ``puzzle_method: "boolean"`` builds the whole model
+    and cuts it with manifold3d instead.
     """
     import zipfile
 
-    from app.server.core.puzzle import cut_to_zip
+    from app.server.core.puzzle import Heightfield, choose_method, cut_to_zip
+    from city2stl.city_model import build_on_terrain, terrain_tolerance
 
     p = _parse_export_params(data)
     if not p.dem_values or not p.height or not p.width:
         task.fail("Missing DEM data")
         return
-    task.update(5, "Building terrain mesh...")
-    mesh = _prepare_export_mesh(p, data, progress=task.update)
-    spec = {"cols": data.get("split_cols"), "rows": data.get("split_rows"),
-            "piece_mm": data.get("piece_mm"), "knob_width_mm": data.get("knob_width_mm"),
-            "knob_depth_mm": data.get("knob_depth_mm"),
-            "clearance_mm": data.get("clearance_mm", 0.3)}
-    spec = {k: v for k, v in spec.items() if v is not None}
+    spec = puzzle_spec(data)
+    try:
+        method = choose_method(spec, terrain_only=True)
+    except ValueError as exc:
+        task.fail(str(exc))
+        return
+    task.update(5, "Terrain stage...")
+    field = terrain_stage(p, data)
+    mesh = heightfield = None
+    if method == "mask":
+        heightfield = Heightfield(field.z_mm, p.mm_per_pixel, terrain_tolerance(field.scale))
+    else:
+        task.update(20, "Building terrain mesh...")
+        mesh = build_on_terrain(field.z_mm, p.bbox, field.scale, {}).merged
     fd, zip_path = tempfile.mkstemp(suffix=".zip")
     os.close(fd)
     try:
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            info = cut_to_zip(mesh, spec, p.name, zf, progress=task.update)
+            info = cut_to_zip(mesh, spec, p.name, zf, progress=task.update,
+                              heightfield=heightfield)
     except ValueError as exc:
         os.unlink(zip_path)
         task.fail(str(exc))
         return
+    logger.info("Puzzle %s: %d pieces, %s path, %s", p.name, info["pieces"], info["method"],
+                info["seconds"])
     task.complete(zip_path, f"{p.name}_puzzle.zip", {
         **_disposition(f"{p.name}_puzzle.zip"),
         "X-Piece-Count": str(info["pieces"]),
-        "Access-Control-Expose-Headers": "X-Piece-Count",
+        "X-Puzzle-Info": json.dumps({k: info[k] for k in ("cols", "rows", "method", "seconds")}),
+        "Access-Control-Expose-Headers": "X-Piece-Count, X-Puzzle-Info",
     })
 
 

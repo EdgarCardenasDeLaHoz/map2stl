@@ -73,8 +73,9 @@ flowchart LR
 ### `export/` — 3D export
 | File | Key exports | Purpose |
 |------|-------------|---------|
-| `model-viewer.js` | `initModelViewer`, `previewModelIn3D`, `haversineDiagKm`, `exportPuzzle3MF`, `resetViewerCamera`, `rebuildViewerColors`, `setViewerNormals`, `setViewerAutoRotate` | Three.js terrain preview; orbit/pan/zoom + pinch-zoom; puzzle cut preview; async puzzle export with progress polling |
-| `export-handlers.js` | `downloadSTL`, `downloadModel`, `downloadCrossSection` | STL/OBJ/3MF/cross-section downloads |
+| `model-viewer.js` | `initModelViewer`, `previewModelIn3D`, `haversineDiagKm`, `updatePuzzlePreview`, `puzzleEdgesFor`, `resetPuzzleEdges`, `resetViewerCamera`, `rebuildViewerColors`, `setViewerNormals`, `setViewerAutoRotate` | Three.js terrain preview (the server's adaptive ≤ 150 k-face mesh, drawn from the faces it sends); orbit/pan/zoom + pinch-zoom; puzzle cut lines that can be dragged (non-uniform grid) |
+| `export-handlers.js` | `downloadSTL`, `downloadModel`, `downloadCrossSection`, `exportPuzzle`, `exportCityModel`, `runPreflight` | STL/OBJ/3MF/cross-section downloads; puzzle and City Model builds (knob shape, engraving, plates, dragged edges); pre-flight request |
+| `puzzle-cuts.js` | `evenEdges`, `nearestEdge`, `moveEdge`, `minPieceMm`, `gridKey`, `isCustom`, `roundEdges` | Pure ES exports: puzzle cut positions in mm from the west / south edge (the server's `col_edges_mm` / `row_edges_mm`) |
 | `print-scale.js` | `modelScale`, `bboxDiagonalKm`, `formatGroundLength`, `parseBedSize`, `defaultPieceMm`, `piecesNeeded` | Pure ES exports (no window): model scale and vertical exaggeration (port of `city_model.choose_scale`), bed size, puzzle piece grid (port of `puzzle.plan_grid`) |
 | `building-heights.js` | `summarizeBuildingHeights`, `heightSourceGroup`, `buildingsWithOverrides`, `hasOverrides` | Pure ES exports: height-source summary, histogram, tallest list; City Model `layer_data` payload with height overrides |
 
@@ -120,7 +121,7 @@ Not part of `main.js`. Each is loaded by its own template and owns its whole pag
 
 | Script | Page | Purpose |
 |--------|------|---------|
-| `static/js/reports.js` | `templates/reports.html` (`GET /reports`) | Pipeline results browser: reads `/api/reports/index` and renders the skyline artifacts |
+| `static/js/reports.js` | `templates/reports.html` (`GET /reports`) | Pipeline results browser: reads `/api/reports/index` (skyline artifacts) and `/api/reports/registration` (registration reports + align packs, Registration tab) |
 
 ## Notes
 - `app.js` is loaded as plain `<script>`, **after** all modules. It is the only non-module file.
@@ -294,6 +295,15 @@ Pure ES module (no DOM, no `window`), unit-tested in `tests/js/compositeSpec.tes
 | `applyMeshToDem(blendWeight)` | Patch `lastDemData.values` with the registered mesh in its footprint (mirrors `applyCompositeToDem`) |
 | `clearMeshLayer()` | Reset `appState.meshImport`/`meshSourceCanvas` |
 
+### Plate registration and model scoring (Vue, F-REGION §5 / F-LANDMARK §6)
+
+| Component / API | Purpose |
+|-----------------|---------|
+| `vue/components/dem/PlateRegistrationSection.vue` | Composite tab, under Mesh Import. Pick a library plate → `api.registration.match` pre-selects its align pack → `api.registration.start` (street placement + tile consensus) → polls `status` every 1.5 s → verdict, reasons, placement table; draws the placed outline and the OSM window on `window.getMap()`; **Save to sidecar** posts `geometry.bbox` + a `placement` record through `api.mesh.setLibraryLocation(..., apply_to_city)` |
+| `vue/components/views/ModelScorePanel.vue` | Export tab, City Model section ("Score this model"); registered globally in `main-vue.ts` so `ModelContainer.vue` mounts it with one line. Model = current `osmCityData.buildings` (with `cityHeightOverrides`) or an uploaded STL spanning `currentDemBbox`; reference from `api.registration.criticReferences`; shows per-building median/p90 error, bias, footprint IoU/precision/recall, cell MAE/r, roof shape error |
+| `MeshImportSection.vue` auto-register | Shows the `scores` breakdown (RMSE, MAE, bias, Pearson r, coverage, footprint IoU, match score, per-building p95) and a link to `report_url` |
+| `window.api.registration` (`core/api.js`) | `packs`, `match`, `start`, `status`, `cancel`, `criticReferences`, `criticScore` |
+
 ### layers/mesh-registration.js
 
 | Function | Purpose |
@@ -309,7 +319,9 @@ Pure ES module (no DOM, no `window`), unit-tested in `tests/js/compositeSpec.tes
 | `initModelViewer()` | Three.js scene init |
 | `previewModelIn3D()` | Render current DEM in 3D viewer |
 | `haversineDiagKm()` | Bbox diagonal in km |
-| `exportPuzzle3MF()` | Puzzle piece 3MF export |
+| `updatePuzzlePreview()` | Draw the puzzle cut lines (Split/Puzzle grid, else the City Model grid) at `appState.puzzleEdges` or evenly |
+| `puzzleEdgesFor(cols, rows)` | Dragged cut positions `{col_edges_mm, row_edges_mm}` for that grid (or the drawn one), null for an even split |
+| `resetPuzzleEdges()` | Back to the even split |
 
 ### export/export-handlers.js
 
@@ -318,7 +330,8 @@ Pure ES module (no DOM, no `window`), unit-tested in `tests/js/compositeSpec.tes
 | `downloadSTL()` | POST /api/export/stl → blob download |
 | `downloadModel(format)` | POST /api/export/{format} → download |
 | `downloadCrossSection()` | Cross-section OBJ export |
-| `generateModelFromTab()` | Trigger server-side generation |
+| `exportPuzzle()` / `exportCityModel()` | Async `puzzle` / `city` builds; bodies from `_puzzleExtra()` / `_cityExtra()` |
+| `runPreflight(format)` | POST /api/export/preflight with the body that build would send → `{data, error}` |
 
 ### regions/regions.js + region-ui.js
 
@@ -382,11 +395,13 @@ Pure ES module (no DOM, no `window`), unit-tested in `tests/js/compositeSpec.tes
 
 ### reports.js — pipeline results browser (standalone)
 
-One IIFE on `window.reportsPage`; state is `{data, selection, tab, quality, search, heights}`.
+One IIFE on `window.reportsPage`; state is `{data, selection, tab, quality, search, heights, registration}`.
 
 | Function | Purpose |
 |----------|---------|
-| `load()` | Fetch `/api/reports/index` and rerender everything |
+| `load()` | Fetch `/api/reports/index` (and `loadRegistration()` beside it) and rerender everything |
+| `loadRegistration()` | Fetch `/api/reports/registration` into `state.registration` (errors kept, not thrown) |
+| `renderRegistration()` | Registration tab: align-pack table (verdict, placement, refinement, thumbnails) and the registration report list; rows open in the Rendered report iframe |
 | `currentRegions()` / `currentRows()` | Apply the sidebar search and quality filters |
 | `renderTotals()` / `renderSidebar()` | Header chips; region, height-report and trace lists |
 | `qbar(qual)` / `detClass(n)` | Quality bar markup; the warn/caution class for a detection count |

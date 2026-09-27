@@ -470,6 +470,57 @@ def assemble_parts(polys: list[Polygon], props: list[dict]) -> tuple[list, list,
     return out_p, out_pr, len(part_idx), trimmed
 
 
+def terrain_tolerance(scale: ModelScale) -> float:
+    """The terrain mesh tolerance :func:`build_on_terrain` uses by default (mm)."""
+    return max(TERRAIN_MAX_ERROR_MM, 0.5 * SOURCE_VERTICAL_STEP_M * scale.z_mm_per_m)
+
+
+def layer_preflight(name: str, features: list[dict], style: LayerStyle, terrain: Terrain,
+                    tin_density: float = 0.0) -> dict:
+    """Cheap per-layer figures for the pre-flight report, without building a solid.
+
+    The same ``dropped`` / ``widened`` / ``clamped`` counts :func:`build_layer`
+    reports (same polygons, same rules), plus ``thinnest_mm`` (narrowest printed
+    footprint), ``tallest_mm`` (extruded top above the lowest ground under it),
+    ``area_mm2``, ``volume_mm3`` (added, or removed for engraved / water),
+    ``surface_mm2`` (extruded: roofs + walls) and
+    ``faces_est``: 4 per outline vertex, plus the terrain vertices a draped slab
+    carries (``tin_density`` = terrain vertices per mm²).
+    """
+    polys, props, counts = feature_polygons(name, features, style, terrain)
+    out: dict = {"mode": style.mode, "features": len(features), "polygons": len(polys), **counts}
+    if not polys:
+        return out
+    arr = np.asarray(polys, dtype=object)
+    area = shapely.area(arr)
+    nverts = shapely.get_num_coordinates(arr)
+    out["thinnest_mm"] = round(float(_widths(arr).min()), 3)
+    out["area_mm2"] = round(float(area.sum()), 1)
+    if style.mode == "extrude":
+        polys, props, _, _ = assemble_parts(polys, props)
+        arr = np.asarray(polys, dtype=object)
+        z_per_m = terrain.scale.z_mm_per_m * style.height_scale
+        lo, hi = terrain.ranges_under(polys)
+        base = np.array([min_height_from_tags(p) for p in props]) * z_per_m
+        cap = (style.max_slenderness * _widths(arr)
+               if style.max_slenderness > 0 else np.full(len(polys), np.inf))
+        height = np.array([float(p.get("height_m") or 10.0) for p in props]) * z_per_m
+        out["clamped"] = int((height - base > cap).sum())
+        # As in _roofed: never above base + cap, never thinner than min_height_mm.
+        total = np.maximum(np.minimum(height, base + cap), style.min_height_mm)
+        out["tallest_mm"] = round(float((hi - lo + total).max()), 2)
+        # Above the ground: a part on a tower from base up, a building from its skirt.
+        above = np.where(base > 0, total - base, total + (hi - lo) / 2)
+        out["volume_mm3"] = round(float((shapely.area(arr) * above).sum()), 1)
+        out["surface_mm2"] = round(float((shapely.area(arr) + shapely.length(arr) * above).sum()), 1)
+        out["faces_est"] = int(4 * shapely.get_num_coordinates(arr).sum())
+    else:
+        sign = 1.0 if style.mode == "raised" else -1.0
+        out["volume_mm3"] = round(sign * float(area.sum()) * style.offset_mm, 1)
+        out["faces_est"] = int(4 * (nverts.sum() + tin_density * area.sum()))
+    return out
+
+
 def build_layer(name: str, features: list[dict], style: LayerStyle,
                 terrain: Terrain) -> tuple[list[Mesh], dict]:
     """Solids for one layer, plus counts for the report."""

@@ -12,6 +12,13 @@
  *   window.rebuildViewerColors(cmap)            — recolor mesh from a colormap name
  *   window.setViewerNormals(bool)               — toggle normals-debug material
  *   window.updateBedOutline()                   — redraw the printer-bed outline
+ *   window.puzzleEdgesFor(cols, rows)           — dragged cut positions {col_edges_mm,
+ *                                                 row_edges_mm} for that grid, or null
+ *   window.resetPuzzleEdges()                   — back to the even split
+ *
+ * Puzzle cut lines (updatePuzzlePreview) are drawn at appState.puzzleEdges when
+ * they belong to the current grid, else evenly; a plain left drag near a line
+ * moves that cut (modules/export/puzzle-cuts.js) and fires 'puzzle-edges-changed'.
  *
  * State exposed on window.appState:
  *   window.appState.terrainMesh  — current terrain mesh (or null)
@@ -26,7 +33,10 @@
  *   window.mapElevationToColor(t, cmap)         — from dem-loader.js (loaded first)
  */
 
-import { parseBedSize } from './print-scale.js';
+import { parseBedSize, piecesNeeded } from './print-scale.js';
+import {
+    evenEdges, gridKey, isCustom, minPieceMm, moveEdge, nearestEdge, roundEdges,
+} from './puzzle-cuts.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope state
@@ -161,6 +171,7 @@ function _setupOrbitControls() {
     const el = modelRenderer.domElement;
 
     el.addEventListener('mousedown', e => {
+        if (e.button === 0 && !e.shiftKey && _startCutDrag(e)) { e.preventDefault(); return; }
         _isDragging = true;
         _isPanning  = e.shiftKey || e.button === 1;
         _prevMouse  = { x: e.clientX, y: e.clientY };
@@ -168,15 +179,16 @@ function _setupOrbitControls() {
     });
 
     el.addEventListener('mousemove', e => {
-        if (!_isDragging) return;
+        if (_cutDrag) { _moveCutDrag(e); return; }
+        if (!_isDragging) { el.style.cursor = _cutUnderMouse(e)?.cursor || ''; return; }
         const dx = e.clientX - _prevMouse.x;
         const dy = e.clientY - _prevMouse.y;
         _prevMouse = { x: e.clientX, y: e.clientY };
         if (_isPanning) _orbitPan(dx, dy); else _orbitRotate(dx, dy);
     });
 
-    el.addEventListener('mouseup',    () => { _isDragging = false; });
-    el.addEventListener('mouseleave', () => { _isDragging = false; });
+    el.addEventListener('mouseup',    () => { _isDragging = false; _endCutDrag(); });
+    el.addEventListener('mouseleave', () => { _isDragging = false; _endCutDrag(); });
 
     el.addEventListener('wheel', e => {
         e.preventDefault();
@@ -679,6 +691,10 @@ function _buildMeshFromPreview(data, cmap) {
     geometry_scale_for_overlays = {
         scale: SCALE,
         widthMm, depthMm, totalHeightMm,
+        // The mesh spans pixel centres 0..cols-1: the model the server cuts.
+        modelWidthMm: Math.max(data.cols - 1, 1) * mmPerPx,
+        modelDepthMm: Math.max(data.rows - 1, 1) * mmPerPx,
+        xOffset, zOffset,
     };
 
     const indices = new Uint32Array(rawFaces.length * 3);
@@ -790,7 +806,9 @@ function setViewerNormals(active) {
 function _updateHud(data) {
     const hud = document.getElementById('viewerHud');
     if (!hud) return;
-    const lines = [`${data.face_count.toLocaleString()} faces  |  ${data.cols}×${data.rows} pts`];
+    const pv = data.preview;
+    const lines = [`${data.face_count.toLocaleString()} faces  |  ${data.cols}×${data.rows} pts`
+        + (pv?.adaptive ? `  |  adaptive ±${pv.max_error_mm} mm${pv.stride > 1 ? `, every ${pv.stride} px` : ''}` : '')];
     const r = window.appState?.selectedRegion;
     if (r) lines.push(`~${haversineDiagKm(r.north, r.south, r.east, r.west).toFixed(1)} km diagonal`);
     hud.textContent = lines.join('\n');
@@ -800,30 +818,150 @@ function _updateHud(data) {
 // Puzzle preview
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The puzzle grid the Export tab describes: Split/Puzzle's Columns × Rows when
+ * that is enabled, else the City Model's grid from its max piece size (the
+ * server's plan_grid rule). null when neither puzzle is on or no mesh is shown.
+ */
+function _puzzleGrid() {
+    const g = geometry_scale_for_overlays;
+    if (!g.modelWidthMm) return null;
+    const num = (id, fallback) => _num(id, fallback, { positive: true });
+    let cols, rows;
+    if (document.getElementById('puzzleEnabled')?.checked) {
+        cols = Math.max(1, Math.round(num('splitCols', 3)));
+        rows = Math.max(1, Math.round(num('splitRows', 3)));
+    } else if (document.getElementById('cityPuzzleEnabled')?.checked) {
+        const piece = num('cityPieceMm', 200);
+        ({ cols, rows } = piecesNeeded(g.modelWidthMm, g.modelDepthMm, { w: piece, h: piece }, piece));
+    } else {
+        return null;
+    }
+    const key = gridKey(cols, rows, g.modelWidthMm, g.modelDepthMm);
+    const saved = window.appState?.puzzleEdges;
+    const own = saved && saved.key === key;
+    return {
+        cols, rows, key,
+        colEdges: own ? saved.cols : evenEdges(g.modelWidthMm, cols),
+        rowEdges: own ? saved.rows : evenEdges(g.modelDepthMm, rows),
+        minGap: minPieceMm(num('splitKnobWidth', 20), num('splitKnobDepth', 8),
+            _num('splitClearance', 0.3)),
+    };
+}
+
+/**
+ * Dragged cut positions for the export request, if the drawn grid is cols × rows
+ * (or whatever is drawn, when called without arguments); null for an even split.
+ */
+function puzzleEdgesFor(cols, rows) {
+    const grid = _puzzleGrid();
+    if (!grid || (cols !== undefined && (grid.cols !== cols || grid.rows !== rows))) return null;
+    if (!isCustom(grid.colEdges) && !isCustom(grid.rowEdges)) return null;
+    return { col_edges_mm: roundEdges(grid.colEdges), row_edges_mm: roundEdges(grid.rowEdges) };
+}
+
 function updatePuzzlePreview() {
     if (!terrainMesh || !modelScene) return;
     const old = modelScene.getObjectByName('puzzleCuts');
-    if (old) modelScene.remove(old);
-    if (!document.getElementById('puzzleEnabled')?.checked) { needsRender = true; return; }
+    if (old) {
+        old.traverse(c => { c.geometry?.dispose(); c.material?.map?.dispose(); c.material?.dispose(); });
+        modelScene.remove(old);
+    }
+    const grid = _puzzleGrid();
+    if (!grid) { needsRender = true; return; }
 
-    const pX = parseInt(document.getElementById('splitCols')?.value) || 3;
-    const pY = parseInt(document.getElementById('splitRows')?.value) || 3;
-    // Cut lines in the mesh's own display units, so they span the model rather
-    // than a fixed square, and sit just above its highest point.
+    // Model mm (x from west, y from south) -> display units, as the mesh is mapped.
     const g = geometry_scale_for_overlays;
-    const w = (g.widthMm || 100) * (g.scale || 1);
-    const h = (g.depthMm || 100) * (g.scale || 1);
+    const S = g.scale || 1;
+    const dx = (xMm) => xMm * S - g.xOffset;
+    const dz = (yMm) => (g.modelDepthMm - yMm) * S - g.zOffset;
+    const x0 = dx(0), x1 = dx(g.modelWidthMm), zS = dz(0), zN = dz(g.modelDepthMm);
     const verts = [];
-    for (let i = 1; i < pX; i++) { const x = (i / pX) * w - w / 2; verts.push(x, 0, -h / 2, x, 0, h / 2); }
-    for (let j = 1; j < pY; j++) { const z = (j / pY) * h - h / 2; verts.push(-w / 2, 0, z, w / 2, 0, z); }
-    const geo  = new THREE.BufferGeometry();
+    for (let i = 1; i < grid.cols; i++) { const x = dx(grid.colEdges[i]); verts.push(x, 0, zS, x, 0, zN); }
+    for (let j = 1; j < grid.rows; j++) { const z = dz(grid.rowEdges[j]); verts.push(x0, 0, z, x1, 0, z); }
+    const group = new THREE.Group();
+    group.name = 'puzzleCuts';
+    const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-    const mat  = new THREE.LineBasicMaterial({ color: 0xff2222, depthTest: false });
-    const lines = new THREE.LineSegments(geo, mat);
-    lines.name = 'puzzleCuts';
-    lines.position.y = (g.totalHeightMm || 0) * (g.scale || 1) + 0.5;
-    modelScene.add(lines);
+    group.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xff2222, depthTest: false })));
+    if (grid.cols * grid.rows > 1) {
+        const custom = isCustom(grid.colEdges) || isCustom(grid.rowEdges);
+        const label = _makeTextSprite(`${grid.cols}×${grid.rows}${custom ? ' custom' : ''} · drag cuts`,
+            { fontSize: 15, color: '#ff9999' });
+        label.scale.multiplyScalar(0.6);
+        label.position.set(0, 0, zS + 6);
+        group.add(label);
+    }
+    group.position.y = (g.totalHeightMm || 0) * S + 0.5;
+    modelScene.add(group);
     needsRender = true;
+}
+
+// ── Dragging cut lines ──────────────────────────────────────────────────────
+let _cutDrag = null;    // { axis: 'cols' | 'rows', index, grid } while a cut is dragged
+let _raycaster = null;
+
+/** Model mm {x from west, y from south} under the mouse, in the cut lines' plane. */
+function _mouseToModelMm(e) {
+    const lines = modelScene?.getObjectByName('puzzleCuts');
+    if (!lines || !modelCamera) return null;
+    const rect = modelRenderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    _raycaster = _raycaster || new THREE.Raycaster();
+    _raycaster.setFromCamera(ndc, modelCamera);
+    const hit = new THREE.Vector3();
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -lines.position.y);
+    if (!_raycaster.ray.intersectPlane(plane, hit)) return null;
+    const g = geometry_scale_for_overlays;
+    const S = g.scale || 1;
+    return { x: (hit.x + g.xOffset) / S, y: g.modelDepthMm - (hit.z + g.zOffset) / S };
+}
+
+/** The interior cut line under the mouse: { axis, index, grid, cursor } or null. */
+function _cutUnderMouse(e) {
+    if (!modelScene?.getObjectByName('puzzleCuts')) return null;
+    const grid = _puzzleGrid();
+    const p = grid && _mouseToModelMm(e);
+    if (!p) return null;
+    const g = geometry_scale_for_overlays;
+    if (p.x < 0 || p.y < 0 || p.x > g.modelWidthMm || p.y > g.modelDepthMm) return null;
+    const tol = Math.max(2, 0.015 * Math.max(g.modelWidthMm, g.modelDepthMm));
+    const ci = nearestEdge(grid.colEdges, p.x, tol);
+    const ri = nearestEdge(grid.rowEdges, p.y, tol);
+    const dc = ci > 0 ? Math.abs(grid.colEdges[ci] - p.x) : Infinity;
+    const dr = ri > 0 ? Math.abs(grid.rowEdges[ri] - p.y) : Infinity;
+    if (dc === Infinity && dr === Infinity) return null;
+    return dc <= dr ? { axis: 'cols', index: ci, grid, cursor: 'ew-resize' }
+        : { axis: 'rows', index: ri, grid, cursor: 'ns-resize' };
+}
+
+function _startCutDrag(e) {
+    _cutDrag = _cutUnderMouse(e);
+    return !!_cutDrag;
+}
+
+function _moveCutDrag(e) {
+    const p = _mouseToModelMm(e);
+    if (!p) return;
+    const d = _cutDrag;
+    const key = d.axis === 'cols' ? 'colEdges' : 'rowEdges';
+    d.grid[key] = moveEdge(d.grid[key], d.index, d.axis === 'cols' ? p.x : p.y, d.grid.minGap);
+    window.appState.puzzleEdges = { cols: d.grid.colEdges, rows: d.grid.rowEdges, key: d.grid.key };
+    updatePuzzlePreview();
+}
+
+function _endCutDrag() {
+    if (!_cutDrag) return;
+    _cutDrag = null;
+    window.dispatchEvent(new CustomEvent('puzzle-edges-changed'));
+}
+
+/** Back to the even split (the Export tab's "Reset cuts"). */
+function resetPuzzleEdges() {
+    window.appState.puzzleEdges = null;
+    updatePuzzlePreview();
+    window.dispatchEvent(new CustomEvent('puzzle-edges-changed'));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -869,6 +1007,8 @@ window.resetViewerCamera    = resetViewerCamera;
 window.rebuildViewerColors  = _rebuildColors;
 window.setViewerNormals     = setViewerNormals;
 window.updateBedOutline     = updateBedOutline;
+window.puzzleEdgesFor       = puzzleEdgesFor;
+window.resetPuzzleEdges     = resetPuzzleEdges;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Auto-rebuild wiring

@@ -67,7 +67,8 @@ class TestGeneratePuzzle:
         from app.server.core.export import _prepare_export_mesh
         from app.server.core.export_params import _parse_export_params
 
-        data = _puzzle_request(cols=3, rows=2, height=60, width=90, clearance_mm=0.0)
+        data = _puzzle_request(cols=3, rows=2, height=60, width=90, clearance_mm=0.0,
+                               engrave_ids=False)
         whole = _prepare_export_mesh(_parse_export_params(data), data)
         task = _run(data)
         assert task.status == "complete", task.message

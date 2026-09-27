@@ -9,6 +9,8 @@
  *   downloadModel(format)             — POST to /api/export/{format} → download
  *   downloadCrossSection()            — POST to /api/export/crosssection → download
  *   cancelExport()                    — abandon the in-flight export (client-side)
+ *   runPreflight(format)              — POST /api/export/preflight with the body the
+ *                                       'city' / 'puzzle' export would send → {data, error}
  *
  * External dependencies:
  *   window.appState.lastDemData
@@ -22,6 +24,7 @@
 
 import { buildingsWithOverrides, hasOverrides } from '../layers/building-heights.js';
 import { FEATURE_SOURCES } from '../layers/composite-spec.js';
+import { parseBedSize } from './print-scale.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -228,30 +231,42 @@ function _cityLayerSettings() {
     return layers;
 }
 
-/** Terrain jigsaw puzzle: a .zip of OBJ pieces + a 3MF (app/server/core/puzzle.py). */
-function exportPuzzle() {
-    const num = (id, fallback) => parseFloat(document.getElementById(id)?.value) || fallback;
-    const cols = parseInt(document.getElementById('splitCols')?.value, 10) || 3;
-    const rows = parseInt(document.getElementById('splitRows')?.value, 10) || 3;
-    if (cols * rows > 64) {
-        window.showToast?.('Too many pieces (max 64 total)', 'warning');
-        return;
-    }
-    return _asyncExport('puzzle', {
-        split_cols: cols,
-        split_rows: rows,
-        knob_width_mm: num('splitKnobWidth', 20),
-        knob_depth_mm: num('splitKnobDepth', 8),
-        clearance_mm: num('splitClearance', 0.3),
-    }, `${_regionName()}_puzzle.zip`);
+function _bedMm() {
+    const bed = parseBedSize(document.getElementById('bedSizeSelect')?.value,
+        document.getElementById('bedCustomW')?.value, document.getElementById('bedCustomH')?.value);
+    return [bed.w, bed.h];
 }
 
-function exportCityModel() {
-    if (!window.appState?.lastDemRequest?.dem_id) {
-        window.showToast?.('Load the DEM first', 'warning');
-        return;
-    }
-    const extra = { layers: _cityLayerSettings() };
+/** Knob, engraving and layout options shared by both puzzle routes. */
+function _puzzleOptions() {
+    const num = (id, fallback) => parseFloat(document.getElementById(id)?.value) || fallback;
+    return {
+        knob_width_mm: num('splitKnobWidth', 20),
+        knob_depth_mm: num('splitKnobDepth', 8),
+        knob_shape: document.getElementById('splitKnobShape')?.value || 'classic',
+        clearance_mm: num('splitClearance', 0.3),
+    };
+}
+
+/** Request fields of the terrain puzzle (flat names, app/server/core/export.py:puzzle_spec). */
+function _puzzleExtra() {
+    const cols = parseInt(document.getElementById('splitCols')?.value, 10) || 3;
+    const rows = parseInt(document.getElementById('splitRows')?.value, 10) || 3;
+    return {
+        split_cols: cols,
+        split_rows: rows,
+        ..._puzzleOptions(),
+        engrave_ids: document.getElementById('puzzleEngrave')?.checked ?? true,
+        layout: document.getElementById('puzzleLayout')?.checked ?? false,
+        bed_mm: _bedMm(),
+        // Cuts dragged in the Extrude preview, if they belong to this grid.
+        ...(window.puzzleEdgesFor?.(cols, rows) || {}),
+    };
+}
+
+/** Request fields of the City Model build. */
+function _cityExtra() {
+    const extra = { layers: _cityLayerSettings(), bed_mm: _bedMm() };
     // Heights edited in the Buildings panel exist only here; send the edited
     // buildings so the server uses them in place of its cached OSM copy.
     const overrides = window.appState?.cityHeightOverrides;
@@ -262,12 +277,47 @@ function exportCityModel() {
     if (document.getElementById('cityPuzzleEnabled')?.checked) {
         extra.puzzle = {
             piece_mm: parseFloat(document.getElementById('cityPieceMm')?.value) || 200,
-            knob_width_mm: parseFloat(document.getElementById('splitKnobWidth')?.value) || 20,
-            knob_depth_mm: parseFloat(document.getElementById('splitKnobDepth')?.value) || 8,
-            clearance_mm: parseFloat(document.getElementById('splitClearance')?.value) || 0.3,
+            ..._puzzleOptions(),
+            engrave: document.getElementById('puzzleEngrave')?.checked ?? true,
+            layout: document.getElementById('puzzleLayout')?.checked ?? false,
+            bed_mm: extra.bed_mm,
+            // The preview draws the City grid only while Split/Puzzle is off.
+            ...(document.getElementById('puzzleEnabled')?.checked ? {}
+                : window.puzzleEdgesFor?.() || {}),
         };
     }
-    return _asyncExport('city', extra, `${_regionName()}_city.zip`);
+    return extra;
+}
+
+/** Terrain jigsaw puzzle: a .zip of OBJ pieces + 3MFs (app/server/core/puzzle.py). */
+function exportPuzzle() {
+    const extra = _puzzleExtra();
+    if (extra.split_cols * extra.split_rows > 64) {
+        window.showToast?.('Too many pieces (max 64 total)', 'warning');
+        return;
+    }
+    return _asyncExport('puzzle', extra, `${_regionName()}_puzzle.zip`);
+}
+
+function exportCityModel() {
+    if (!window.appState?.lastDemRequest?.dem_id) {
+        window.showToast?.('Load the DEM first', 'warning');
+        return;
+    }
+    return _asyncExport('city', _cityExtra(), `${_regionName()}_city.zip`);
+}
+
+/**
+ * Pre-flight report for the 'city' or 'puzzle' export: the exact body that
+ * export would send, to POST /api/export/preflight (nothing is built).
+ * Resolves to {data, error} like every api call.
+ */
+async function runPreflight(format = 'city') {
+    if (!window.appState?.generatedModelData) {
+        return { data: null, error: 'Load a DEM first - the pre-flight uses the model the preview shows.' };
+    }
+    const extra = format === 'puzzle' ? _puzzleExtra() : _cityExtra();
+    return window.api.export.preflight({ format, ..._exportParams(), ...extra });
 }
 
 // Upper bound on how long we will poll before giving up. A stuck task used to
@@ -439,4 +489,5 @@ window.downloadModel = downloadModel;
 window.downloadCrossSection = downloadCrossSection;
 window.exportCityModel = exportCityModel;
 window.exportPuzzle = exportPuzzle;
+window.runPreflight = runPreflight;
 window.cancelExport = cancelExport;
