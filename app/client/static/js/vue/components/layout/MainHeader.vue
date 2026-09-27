@@ -17,6 +17,12 @@
     </div>
 
     <div class="header-actions">
+      <!-- Guides: the step-by-step SOPs (docs/sop/*.md) rendered at /guides -->
+      <a class="btn btn-secondary docs-menu-btn guides-btn" href="/guides" target="_blank" rel="noopener"
+         title="Step-by-step guides with screenshots: city models, puzzles, large regions">
+        📘 Guides
+      </a>
+
       <!-- Diagnostics button -->
       <button class="btn btn-secondary docs-menu-btn" @click="openDiag" title="Check server status, keys, DEM sources, and region coverage">
         🩺 Diagnostics
@@ -495,6 +501,12 @@ async function saveTilePath() {
 
 .docs-menu {
   position: relative;
+}
+
+.guides-btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
 }
 
 /* Keys modal overlay */

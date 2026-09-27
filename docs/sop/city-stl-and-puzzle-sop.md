@@ -207,8 +207,12 @@ than 0.8 mm are widened, extruded heights capped at 8 × footprint width (report
 
 ## 5. Known limits
 
-- Pitched roofs on concave footprints are flat at mid-roof height; no `building:part`
-  (towers, domes, spires) yet — cathedrals and city halls print as their footprint prism.
+- Roofs (`city2stl/roofs.py`) cover gabled, hipped, skillion, dome, onion and cone, and
+  concave footprints (split into convex pieces); `building:part` towers, domes and spires
+  stack; the 🏛 Landmarks panel overrides one landmark. Limits: a pitched roof on a
+  footprint with a courtyard (inner ring) is flat at mid-roof height, as are unknown
+  `roof:shape` values; the *nDSM* landmark source needs regional lidar coverage (else use
+  *OSM parts* or an uploaded mesh).
 - Draped layers duplicate terrain detail on steep ground (Breckenridge green).
 - Heights outside Spain/US lidar coverage are thin; check the default-height warning.
 - The city fetch shows per-layer progress, but layers the build needs that *Load Cities*

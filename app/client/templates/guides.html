@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guides — map2stl</title>
+<style>
+/* Colours are the app's (static/css/app.css :root and .btn-secondary); app.css itself is not
+   linked because it fixes body to 100vh/overflow:hidden and resets every margin. */
+:root {
+  --bg-dark: #1a1a1a;
+  --bg-mid: #2a2a2a;
+  --bg-light: #333;
+  --border: #444;
+  --border-light: #555;
+  --text: #e0e0e0;
+  --text-soft: #bbb;
+  --text-faint: #888;
+  --link: #6aacff;
+  --accent: #4a9eff;
+  --code-bg: #111;
+  --sidebar-w: 280px;
+}
+* { box-sizing: border-box; }
+html { scroll-padding-top: 52px; }  /* clear the sticky header */
+body {
+  margin: 0;
+  font: 15px/1.6 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--text);
+  background: var(--bg-dark);
+}
+a { color: var(--link); }
+
+header {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px;
+  background: #222; border-bottom: 1px solid var(--bg-light);
+}
+header h1 { font-size: 15px; font-weight: 600; margin: 0; }
+header .home { font-size: 13px; text-decoration: none; margin-left: auto; white-space: nowrap; }
+header .home:hover { text-decoration: underline; }
+#tocToggle {
+  display: none;
+  font: inherit; font-size: 13px; padding: 3px 10px; cursor: pointer;
+  background: #404040; color: var(--text); border: 1px solid var(--border-light); border-radius: 4px;
+}
+
+.layout { display: flex; align-items: flex-start; }
+
+aside {
+  position: sticky; top: 41px;
+  width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
+  height: calc(100vh - 41px); overflow-y: auto;
+  padding: 12px 10px 24px;
+  background: var(--bg-mid); border-right: 1px solid var(--border);
+  font-size: 13px; line-height: 1.4;
+}
+aside h2 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-faint); margin: 4px 6px 6px; font-weight: 600;
+}
+.guide-list { list-style: none; margin: 0 0 14px; padding: 0; }
+.guide-list a {
+  display: block; padding: 6px 8px; border-radius: 5px;
+  color: var(--text); text-decoration: none; border: 1px solid transparent;
+}
+.guide-list a:hover { background: var(--bg-light); }
+.guide-list a.active { background: #383838; border-color: var(--border-light); }
+.guide-list .g-title { font-weight: 600; }
+.guide-list .g-summary {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  color: var(--text-faint); font-size: 12px; margin-top: 2px;
+}
+.toc { list-style: none; margin: 0; padding: 0; }
+.toc a {
+  display: block; padding: 3px 8px; border-radius: 4px;
+  color: var(--text-soft); text-decoration: none;
+}
+.toc a:hover { background: var(--bg-light); color: #fff; }
+.toc a.current { color: #fff; background: #383838; }
+.toc .lvl-3 a { padding-left: 22px; font-size: 12.5px; }
+.toc .step a { color: #cfe3ff; }
+
+main { flex: 1 1 auto; min-width: 0; padding: 20px 32px 80px; }
+article { max-width: 900px; margin: 0 auto; }
+article h1 { font-size: 26px; line-height: 1.25; margin: 4px 0 12px; }
+article h2 {
+  font-size: 20px; margin: 36px 0 10px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+article h3 { font-size: 16px; margin: 24px 0 8px; }
+article p, article li { color: #d8d8d8; }
+article li { margin: 4px 0; }
+article ol > li.guide-step {
+  margin: 18px 0; padding: 10px 14px 6px;
+  background: #212121; border: 1px solid #303030; border-left: 3px solid var(--accent);
+  border-radius: 6px;
+}
+article li.guide-step::marker { color: var(--accent); font-weight: 700; }
+article li.guide-step > p:first-child { margin-top: 0; }
+.headerlink {
+  margin-left: 8px; font-size: .8em; color: var(--text-faint);
+  text-decoration: none; opacity: 0;
+}
+h2:hover .headerlink, h3:hover .headerlink, .headerlink:focus { opacity: 1; }
+code {
+  font: 0.88em Consolas, 'Courier New', monospace;
+  background: var(--code-bg); border: 1px solid var(--bg-light); border-radius: 3px;
+  padding: 0 4px; color: #a0d0ff; overflow-wrap: anywhere;
+}
+pre { background: var(--code-bg); border: 1px solid var(--bg-light); border-radius: 6px; padding: 10px; overflow-x: auto; }
+pre code { border: 0; padding: 0; }
+
+/* Screenshots: column width, click for full size. The caption is the italic line that follows. */
+article img {
+  display: block; max-width: 100%; height: auto; margin: 12px 0 4px;
+  border: 1px solid var(--border); border-radius: 6px; cursor: zoom-in;
+  background: #111;
+}
+article p:has(> img) > em { display: block; font-size: 13px; color: var(--text-faint); }
+
+.table-wrap { overflow-x: auto; margin: 12px 0; }
+table { border-collapse: collapse; font-size: 13.5px; min-width: 100%; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--bg-light); font-weight: 600; white-space: nowrap; }
+tr:nth-child(even) td { background: #202020; }
+
+.status { color: var(--text-faint); padding: 40px 0; text-align: center; }
+.status.error { color: #cf6f6f; }
+
+/* Lightbox */
+#lightbox {
+  position: fixed; inset: 0; z-index: 100;
+  display: none; align-items: center; justify-content: center; flex-direction: column;
+  background: rgba(0, 0, 0, .88); padding: 16px; cursor: zoom-out;
+}
+#lightbox.open { display: flex; }
+#lightbox .lb-scroll { max-width: 100%; max-height: calc(100% - 40px); overflow: auto; }
+#lightbox img { display: block; max-width: none; border-radius: 4px; }
+#lightbox.fit img { max-width: 100%; max-height: calc(100vh - 72px); }
+#lightbox .lb-caption { color: #ccc; font-size: 13px; margin-top: 8px; text-align: center; max-width: 900px; }
+#lightbox .lb-close {
+  position: absolute; top: 10px; right: 14px; font-size: 22px; line-height: 1;
+  background: none; border: 0; color: #ccc; cursor: pointer;
+}
+#lightbox .lb-close:hover { color: #fff; }
+
+@media (max-width: 800px) {
+  #tocToggle { display: inline-block; }
+  .layout { display: block; }
+  aside {
+    position: fixed; top: 41px; left: 0; z-index: 15;
+    width: min(86vw, 320px); height: calc(100vh - 41px);
+    transform: translateX(-105%); transition: transform .2s ease;
+    box-shadow: 4px 0 18px rgba(0, 0, 0, .5);
+  }
+  body.toc-open aside { transform: none; }
+  main { padding: 14px 16px 60px; }
+  article h1 { font-size: 21px; }
+  article h2 { font-size: 18px; }
+  article ol { padding-left: 22px; }
+  article ol > li.guide-step { padding: 8px 10px 4px; }
+  header h1 { font-size: 14px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <button id="tocToggle" type="button" aria-controls="sidebar" aria-expanded="false">☰ Contents</button>
+  <h1>📘 Guides</h1>
+  <a class="home" href="/">← map2stl</a>
+</header>
+<div class="layout">
+  <aside id="sidebar">
+    <h2>Guides</h2>
+    <ul class="guide-list" id="guideList"></ul>
+    <h2>On this page</h2>
+    <ul class="toc" id="toc"></ul>
+  </aside>
+  <main>
+    <article id="guide"><p class="status">Loading…</p></article>
+  </main>
+</div>
+<div id="lightbox" class="fit" role="dialog" aria-modal="true" aria-label="Screenshot">
+  <button class="lb-close" type="button" aria-label="Close">✕</button>
+  <div class="lb-scroll"><img alt=""></div>
+  <div class="lb-caption"></div>
+</div>
+<script type="module" src="/static/js/guides.js"></script>
+</body>
+</html>

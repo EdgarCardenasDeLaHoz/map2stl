@@ -34,6 +34,9 @@
           <button :class="['dem-strip-btn', activeTab==='export' && 'active']"
                   @click="activeTab='export'"
                   title="Download the model and printer-related options">📤 Export</button>
+          <div style="flex:1"></div>
+          <a class="dem-strip-btn guide-link" :href="guideLink" target="_blank" rel="noopener"
+             title="Open the step-by-step guide for this part (new tab)">? Guide</a>
         </div>
 
         <div class="dem-controls" id="modelControls">
@@ -363,11 +366,15 @@ import { computed, onMounted, ref } from 'vue';
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
 import PreflightPanel from './PreflightPanel.vue';
 import { useAppStore } from '../../stores/app';
+import { guideHref } from '../../../modules/ui/guide-links.js';
 import {
   defaultPieceMm, formatGroundLength, modelScale, parseBedSize, piecesNeeded,
 } from '../../../modules/export/print-scale.js';
 
 const activeTab = ref<'fetch' | 'view' | 'export'>('fetch');
+// City SOP: step 5 (Model) covers Fetch/View, step 6 onward (pre-flight, puzzle, build) Export.
+const guideLink = computed(() => guideHref('city-stl-and-puzzle-sop',
+  activeTab.value === 'export' ? 'step-6' : 'step-5'));
 const store = useAppStore();
 
 // ── Empty state ──────────────────────────────────────────────────────────────

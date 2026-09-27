@@ -1456,6 +1456,12 @@
             border-color: var(--border);
         }
 
+        /* "? Guide" link in the Edit / Extrude strips (opens /guides at the matching SOP step) */
+        a.dem-strip-btn.guide-link {
+            text-decoration: none;
+            font-size: 11px;
+        }
+
         .dem-strip-btn.active {
             color: #ddd;
             background: #383838;

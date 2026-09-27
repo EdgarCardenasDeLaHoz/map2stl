@@ -25,6 +25,8 @@ from app.server.routers.composite import router as _composite_router
 from app.server.routers.diagnostics import router as _diagnostics_router
 from app.server.routers.export import router as _export_router
 from app.server.routers.geocode import router as _geocode_router
+from app.server.routers.guides import guide_path as _guide_path
+from app.server.routers.guides import router as _guides_router
 from app.server.routers.height import router as _height_router
 from app.server.routers.layers import router as _layers_router
 from app.server.routers.regions import router as _regions_router
@@ -305,11 +307,12 @@ app.include_router(_height_router)
 app.include_router(_diagnostics_router)
 app.include_router(_layers_router)
 app.include_router(_reports_router)
+app.include_router(_guides_router)
 app.include_router(_registration_router)
 app.include_router(_geocode_router)
 logger.info(
     "Routers loaded: regions, terrain, cities, export, cache, settings, composite, height, "
-    "diagnostics, layers, reports, registration")
+    "diagnostics, layers, reports, guides, registration")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -322,6 +325,20 @@ async def reports_page(request: Request):
     """Browser for the skyline pipeline's rendered reports; data comes from
     /api/reports/index in app/server/routers/reports.py."""
     return templates.TemplateResponse("reports.html", {"request": request})
+
+
+@app.get("/guides", response_class=HTMLResponse)
+async def guides_page(request: Request):
+    """Step-by-step SOPs (docs/sop/*.md) rendered in the app; data comes from
+    /api/guides in app/server/routers/guides.py. Deep link: /guides#<slug>/<anchor>."""
+    return templates.TemplateResponse(request, "guides.html")
+
+
+@app.get("/guides/{slug}", response_class=HTMLResponse)
+async def guides_page_for(request: Request, slug: str):
+    """The Guides page opening ``slug`` first (404 for an unknown guide)."""
+    _guide_path(slug)
+    return templates.TemplateResponse(request, "guides.html")
 
 
 # Function to run FastAPI server

@@ -223,6 +223,25 @@ Registration roots (`_REG_ROOTS`, read-only; override the whole set with
 
 The page shows them under a **Registration** tab and in the sidebar.
 
+## Guides (`routers/guides.py`)
+
+The SOPs in `docs/sop/*.md`, rendered in the app. The page is `GET /guides` (and
+`GET /guides/{slug}`, which opens that guide first; 404 for an unknown slug) in `server.py`,
+template `guides.html`, behaviour in `static/js/guides.js`. Deep links:
+`/guides#<slug>/<anchor>` or `/guides/<slug>#<anchor>`; anchors are heading ids and `step-N`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/guides` | `[{slug, title, summary}]` for every `docs/sop/*.md` (title = first `# ` heading, summary = first paragraph, plain text); a new file appears without registration |
+| GET | `/api/guides/{slug}` | `{slug, title, html, toc: [{id, text, level}]}`. `toc`: `##`/`###` headings plus the numbered steps of the "process" section (`step-N`, level 3) |
+| GET | `/guides/img/{path}` | A screenshot from `docs/sop/img/` (images only, traversal-guarded, read-only) |
+
+Rendered server-side with `markdown` (tables, fenced_code, toc with permalinks, attr_list,
+sane_lists; `tab_length=3` because the SOPs indent step continuations by three spaces).
+Relative `img/...` URLs become `/guides/img/...` and `other-sop.md#x` links become
+`/guides/other-sop#x`. Slugs must match `[A-Za-z0-9][A-Za-z0-9_-]*` and name a file directly
+in `docs/sop/`. Renders are cached per file mtime.
+
 ## Mesh Import and Plate Registration (`routers/layers.py`, `routers/registration.py`)
 
 Mesh import (`/api/layers/mesh/*`, F-MESHIMPORT): upload, heightmap, manual point-pair

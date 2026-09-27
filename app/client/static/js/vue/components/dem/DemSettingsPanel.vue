@@ -16,7 +16,9 @@
               @click="activeTab='composite'"
               title="Composite DEM and saved presets">⊕ Composite</button>
       <div style="flex:1"></div>
-            <button class="dem-strip-btn" id="settingsHideBtn" title="Hide settings panel">◀ Hide</button>
+      <a class="dem-strip-btn guide-link" :href="guideLink" target="_blank" rel="noopener"
+         title="Open the step-by-step guide for this part (new tab)">? Guide</a>
+      <button class="dem-strip-btn" id="settingsHideBtn" title="Hide settings panel">◀ Hide</button>
       <button class="dem-strip-btn" id="jsonViewToggleBtn" title="Toggle between form and JSON editor">{ } JSON</button>
     </div>
 
@@ -89,7 +91,8 @@
   <button id="settingsCollapsedTab" class="settings-collapsed-tab" title="Open settings panel">⚙ Settings</button>
 </template>
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+import { guideHref } from '../../../modules/ui/guide-links.js';
 import VisualizationSection  from './VisualizationSection.vue';
 import LayerViewSection      from './LayerViewSection.vue';
 import LayerDisplaySections from './LayerDisplaySections.vue';
@@ -104,6 +107,9 @@ import WorkflowPresetBar     from './WorkflowPresetBar.vue';
 import EdgeLandmarkWarnings  from '../views/EdgeLandmarkWarnings.vue';
 
 const activeTab = ref<'fetch' | 'view' | 'composite'>('fetch');
+// City SOP: step 2 (Load terrain) for Fetch/View, step 3 (Terrain edits) for Composite.
+const guideLink = computed(() => guideHref('city-stl-and-puzzle-sop',
+  activeTab.value === 'composite' ? 'step-3' : 'step-2'));
 </script>
 <style scoped>
 .settings-primary-row {

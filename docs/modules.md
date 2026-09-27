@@ -124,6 +124,7 @@ Not part of `main.js`. Each is loaded by its own template and owns its whole pag
 | Script | Page | Purpose |
 |--------|------|---------|
 | `static/js/reports.js` | `templates/reports.html` (`GET /reports`) | Pipeline results browser: reads `/api/reports/index` (skyline artifacts) and `/api/reports/registration` (registration reports + align packs, Registration tab) |
+| `static/js/guides.js` | `templates/guides.html` (`GET /guides`) | Guides (SOPs from `docs/sop/`): guide list + TOC sidebar (drawer below 800 px), rendered guide from `/api/guides/{slug}`, screenshot lightbox, address bar kept at `/guides#<slug>/<anchor>`. ES module; imports `modules/ui/guide-links.js` |
 
 ## Notes
 - `app.js` is loaded as plain `<script>`, **after** all modules. It is the only non-module file.
@@ -404,6 +405,26 @@ Pure ES module (no DOM, no `window`), unit-tested in `tests/js/compositeSpec.tes
 |----------|---------|
 | `initCompareMode()` | Side-by-side compare panel |
 | `loadCompareRegion(side)` | Load DEM for left/right panel |
+
+### guides.js — in-app Guides page (standalone, ES module)
+
+State on `window.guidesPage` = `{guides, current, observer}`.
+
+| Function | Purpose |
+|----------|---------|
+| `openGuide(slug, anchor, {push})` | Fetch `/api/guides/{slug}` (only when the guide changes), render HTML + TOC, push/replace the URL, scroll to the anchor |
+| `fromLocation()` | Current URL → `{slug, anchor}`; `#step-4` alone is an anchor in the current guide |
+| `renderList()` / `renderToc(toc)` | Sidebar guide list; TOC (sections, indented steps) |
+| `trackSections(toc)` | IntersectionObserver highlighting the TOC entry being read |
+| `wrapTables(root)` | Wrap tables for horizontal scroll at phone width |
+| `openLightbox(img)` / `closeLightbox()` | Full-size screenshot with its caption; click image toggles fit/1:1, Esc closes |
+
+`modules/ui/guide-links.js` (pure, also imported by the Vue panels below):
+`parseGuideLocation(pathname, hash)`, `guideHref(slug, anchor)` → `/guides#slug/anchor`,
+`guideLinkTarget(href)` (in-guide cross-link → target). Tests: `tests/js/guideLinks.test.js`.
+The "? Guide" links: `DemSettingsPanel.vue` strip (city SOP step 2, step 3 on Composite) and
+`ModelContainer.vue` strip (step 5, step 6 on Export); the 📘 Guides button is in
+`MainHeader.vue`.
 
 ### reports.js — pipeline results browser (standalone)
 
