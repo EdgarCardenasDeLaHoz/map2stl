@@ -64,6 +64,7 @@ from city2stl.skyline.streetview_io import (  # noqa: E402
     _parse_streetview_url,
     _resolve_api_key,
 )
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -941,8 +942,8 @@ def run_diagnostic(region: str, seed_name: str, out_path: Path) -> None:
           f"pano_id={target_seed.pano_id!r}")
 
     # ── 3. Filter buildings near seed ────────────────────────────────────────
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians(target_seed.lat))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(target_seed.lat)
     radius_m = 4500.0
     rad_sq   = radius_m * radius_m
     seed_buildings = [

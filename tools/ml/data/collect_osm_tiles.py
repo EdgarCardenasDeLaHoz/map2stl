@@ -25,6 +25,8 @@ from pathlib import Path
 import numpy as np
 
 from app.paths import REPO_ROOT
+from geo2stl.geo import M_PER_DEG_LAT
+from geo2stl.geo import m_per_deg_lon as _m_per_deg_lon
 from tools.ml.config import DEFAULT_TILE_SIZE, TRAIN_CITIES  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -246,8 +248,8 @@ def collect_osm_tiles(
 
         north, south, east, west = spec.north, spec.south, spec.east, spec.west
         mid_lat = (north + south) / 2.0
-        m_per_deg_lat = 111_320.0
-        m_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
+        m_per_deg_lat = M_PER_DEG_LAT
+        m_per_deg_lon = _m_per_deg_lon(mid_lat)
 
         tile_deg_lat = tile_size * target_res_m / m_per_deg_lat
         tile_deg_lon = tile_size * target_res_m / m_per_deg_lon

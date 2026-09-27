@@ -8,6 +8,8 @@ import cv2
 import matplotlib.patches as mpatches
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
+
 from ..region_config import (
     _F_SKY13_ENABLED,
     _F_SKY13_RADIUS_M,
@@ -452,8 +454,8 @@ def _draw_view_minimap(
     the matched BuildingRecord — used to draw the polygon in the segment
     colour, since the raw OSM feature list uses a different id encoding.
     """
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
     dlat = radius_m / mlat
     dlon = radius_m / mlon
 

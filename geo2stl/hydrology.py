@@ -21,6 +21,8 @@ from pathlib import Path
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_LAT, M_PER_DEG_LON_EQ
+
 logger = logging.getLogger(__name__)
 
 
@@ -168,8 +170,8 @@ def rasterize_rivers_with_buffering(
     west, south, east, north = bbox
 
     # Calculate pixel size in metres (approximate)
-    pixel_size_lon_m = (east - west) * 111_320.0 / dim
-    pixel_size_lat_m = (north - south) * 111_320.0 / dim
+    pixel_size_lon_m = (east - west) * M_PER_DEG_LON_EQ / dim
+    pixel_size_lat_m = (north - south) * M_PER_DEG_LAT / dim
     pixel_size_m = (pixel_size_lon_m + pixel_size_lat_m) / 2.0
 
     # Rivers must be at least 2 pixels wide to avoid aliasing
@@ -179,7 +181,7 @@ def rasterize_rivers_with_buffering(
         f"Rasterizing rivers: pixel size {pixel_size_m:.0f} m, min buffer {min_buffer_m:.0f} m")
 
     # Convert to degrees for buffering (approximate; best approach is UTM reprojection)
-    min_buffer_deg = min_buffer_m / 111_320.0
+    min_buffer_deg = min_buffer_m / M_PER_DEG_LAT
 
     shapes = []
     for feature in geojson.get('features', []):

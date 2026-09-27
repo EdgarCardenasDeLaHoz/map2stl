@@ -21,6 +21,7 @@ import logging
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_LAT, M_PER_DEG_LON_EQ
 from geo2stl.osm import use_overpass_endpoint
 
 logger = logging.getLogger(__name__)
@@ -157,12 +158,12 @@ def rasterize_trails(
     west, south, east, north = bbox
 
     # Approximate metres per pixel; good enough for a width floor.
-    pixel_size_lon_m = (east - west) * 111_320.0 / max(dim, 1)
-    pixel_size_lat_m = (north - south) * 111_320.0 / max(dim, 1)
+    pixel_size_lon_m = (east - west) * M_PER_DEG_LON_EQ / max(dim, 1)
+    pixel_size_lat_m = (north - south) * M_PER_DEG_LAT / max(dim, 1)
     pixel_size_m = (pixel_size_lon_m + pixel_size_lat_m) / 2.0
 
     half_width_m = max(width_m, pixel_size_m * 2.0) / 2.0
-    buffer_deg = half_width_m / 111_320.0
+    buffer_deg = half_width_m / M_PER_DEG_LAT
 
     shapes = []
     area_shapes = []

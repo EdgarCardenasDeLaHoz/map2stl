@@ -32,6 +32,7 @@ import numpy as np
 import requests as _requests
 from skimage import filters as _ski_filters
 
+from geo2stl.geo import bbox_size_m
 from geo2stl.processing import apply_layer_processing, blend_layers, upsample_dem  # noqa: F401
 from geo2stl.projections import project_coordinates, project_grid
 from geo2stl.sat2stl import fetch_bbox_image
@@ -214,9 +215,7 @@ def make_dem_image(
     if subtract_water:
         if water_dataset == "esa":
             _ee_max_px = 50_331_648 // 2
-            mid_lat = (N + S) / 2.0
-            _w_m = abs(E - W) * 111_320 * math.cos(math.radians(mid_lat))
-            _h_m = abs(N - S) * 111_320
+            _w_m, _h_m = bbox_size_m({"north": N, "south": S, "east": E, "west": W})
             min_safe = int(math.ceil(math.sqrt(_w_m * _h_m / _ee_max_px)))
             sat_scale = max(sat_scale, min_safe)
             try:

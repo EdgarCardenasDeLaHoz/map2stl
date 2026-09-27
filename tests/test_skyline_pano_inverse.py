@@ -17,6 +17,7 @@ from city2stl.skyline.coastline_registration import (
     pano_water_top_to_lonlat,
     project_lonlat_to_view,
 )
+from geo2stl.geo import m_per_deg_lon
 
 
 def _make_pano_mask(height: int, width: int, water_top_y: int) -> np.ndarray:
@@ -113,7 +114,7 @@ class TestPanoWaterTopToLonLat:
         # samples at column_stride=8 so the result is rounded to that grid).
         seed_lat, seed_lon = 40.0, -75.0
         # Point ~500 m east of the seed at sea level
-        target_lon = seed_lon + (500.0 / (111_320.0 * math.cos(math.radians(seed_lat))))
+        target_lon = seed_lon + 500.0 / m_per_deg_lon(seed_lat)
         target_lat = seed_lat
         # 96-wide pano covering 360° → heading at col 24 is 90° (east)
         proj = project_lonlat_to_view(

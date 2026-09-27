@@ -9,6 +9,8 @@ if TYPE_CHECKING:
 import logging
 from pathlib import Path
 
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
+
 from ._plot_utils import (
     NO_BUILDING_M,
     POLAR_MAX_M,
@@ -191,9 +193,8 @@ def _render_pano_minimap_polar_png(
     if satellite_bg:
         try:
             from ..satellite_image import fetch_region_satellite  # noqa: PLC0415
-            deg_per_m_lat = 1.0 / 110540.0
-            deg_per_m_lon = 1.0 / (
-                111320.0 * math.cos(math.radians(seed_lat)))
+            deg_per_m_lat = 1.0 / M_PER_DEG_LAT
+            deg_per_m_lon = 1.0 / m_per_deg_lon(seed_lat)
             margin_m = radius_m * 1.1
             bbox = (
                 seed_lat - margin_m * deg_per_m_lat,

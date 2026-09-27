@@ -46,6 +46,7 @@ from app.server.core.cache import (
     write_array_cache,
 )
 from city2stl.skyline.height import BBox, HeightResult, _resample
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
 logger = logging.getLogger(__name__)
 
@@ -377,9 +378,8 @@ def _target_error_m(bbox: BBox, dim: tuple[int, int]) -> float:
     """
     north, south, east, west = bbox
     h, w = dim
-    cell_lat_m = (north - south) * 111_320.0 / max(h, 1)
-    cell_lon_m = ((east - west) * 111_320.0
-                  * math.cos(math.radians((north + south) / 2)) / max(w, 1))
+    cell_lat_m = (north - south) * M_PER_DEG_LAT / max(h, 1)
+    cell_lon_m = (east - west) * m_per_deg_lon((north + south) / 2) / max(w, 1)
     cell_m = max(min(cell_lat_m, cell_lon_m), 0.1)
     return float(np.clip(cell_m * _ERROR_PER_CELL,
                          _MIN_TARGET_ERROR_M, _MAX_TARGET_ERROR_M))
@@ -421,7 +421,7 @@ def _surface_points(mesh, target_spacing_m: float) -> np.ndarray:
 def _sample_spacing_m(bbox: BBox, dim: tuple[int, int]) -> float:
     """Point spacing that fills the output grid without oversampling it."""
     north, south, _east, _west = bbox
-    lat_m = (north - south) * 111_320.0
+    lat_m = (north - south) * M_PER_DEG_LAT
     return max(lat_m / max(dim[0], 1) * 0.5, 0.5)
 
 
@@ -486,8 +486,8 @@ def _looks_built(raster: np.ndarray, bbox: BBox) -> bool:
     """
     north, south, east, west = bbox
     h, w = raster.shape
-    lat_m = (north - south) * 111_320.0
-    lon_m = (east - west) * 111_320.0 * math.cos(math.radians((north + south) / 2))
+    lat_m = (north - south) * M_PER_DEG_LAT
+    lon_m = (east - west) * m_per_deg_lon((north + south) / 2)
     win_r = max(2, int(round(_BUILT_WINDOW_M / max(lat_m / h, 1e-6))))
     win_c = max(2, int(round(_BUILT_WINDOW_M / max(lon_m / w, 1e-6))))
 
@@ -527,8 +527,8 @@ def _ground_from_dsm(dsm: np.ndarray, bbox: BBox,
     """
     north, south, east, west = bbox
     h, w = dsm.shape
-    lat_m = (north - south) * 111_320.0
-    lon_m = (east - west) * 111_320.0 * math.cos(math.radians((north + south) / 2))
+    lat_m = (north - south) * M_PER_DEG_LAT
+    lon_m = (east - west) * m_per_deg_lon((north + south) / 2)
     win_r = max(1, int(round(window_m / max(lat_m / h, 1e-6))))
     win_c = max(1, int(round(window_m / max(lon_m / w, 1e-6))))
 

@@ -54,6 +54,8 @@ import math
 import locate as L
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
+
 # Every building, without the tag filtering the semantic masks apply. A plate carries every
 # roof its region has, so narrowing the query to a tag family would compare a complete plate
 # against a partial city.
@@ -408,9 +410,8 @@ def crops_of(plate_px: np.ndarray, grid: int):
 
 def _ground_m(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
     """Roughly how far apart two coordinates are, in metres."""
-    mid = math.radians((lat_a + lat_b) / 2.0)
-    return math.hypot((lat_a - lat_b) * 111320.0,
-                      (lon_a - lon_b) * 111320.0 * math.cos(mid))
+    return math.hypot((lat_a - lat_b) * M_PER_DEG_LAT,
+                      (lon_a - lon_b) * m_per_deg_lon((lat_a + lat_b) / 2.0))
 
 
 def vote(votes: list[dict], agree_px: float = AGREE_PX) -> dict | None:

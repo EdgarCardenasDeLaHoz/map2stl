@@ -46,14 +46,7 @@ from collections.abc import Callable
 import cv2
 import numpy as np
 
-# Earth-projection constants. Both used for the same lat→m / lon→m
-# conversion that everything else in skyline uses; kept local so the
-# module has no import dependency on the bigger pipeline.
-_METRES_PER_DEG_LAT = 110_540.0
-
-
-def _metres_per_deg_lon(lat_deg: float) -> float:
-    return 111_320.0 * math.cos(math.radians(lat_deg))
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
 
 def detect_sat_water_mask(
@@ -129,8 +122,8 @@ def detect_coastline_keypoints(
     near-duplicate points that visualise badly.
     """
     h_img, w_img = sat_water_mask.shape[:2]
-    mlat = _METRES_PER_DEG_LAT
-    mlon = _metres_per_deg_lon(seed_lat)
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
 
     bearings_deg = np.linspace(0.0, 360.0, n_bearings, endpoint=False)
     out: list[dict] = []
@@ -199,8 +192,8 @@ def project_lonlat_to_view(
     the actual water/land boundary appears for typical Google Street
     View URLs whose tilt parameter encodes a small downward angle.
     """
-    mlat = _METRES_PER_DEG_LAT
-    mlon = _metres_per_deg_lon(seed_lat)
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
     dx_m = (lon - seed_lon) * mlon
     dy_m = (lat - seed_lat) * mlat
     h_rad = math.radians(heading_deg)
@@ -266,8 +259,8 @@ def pano_water_top_to_lonlat(
     p_rad = math.radians(pitch_deg)
     horizon_shift = math.tan(p_rad) * focal_y
 
-    mlat = _METRES_PER_DEG_LAT
-    mlon = _metres_per_deg_lon(seed_lat)
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
 
     out: list[tuple[float, float]] = []
     for col in range(0, W, max(1, column_stride)):
@@ -448,8 +441,8 @@ def _points_to_seed_polar(
     """
     if not points:
         return np.empty(0, dtype=np.float64), np.empty(0, dtype=np.float64)
-    mlat = _METRES_PER_DEG_LAT
-    mlon = _metres_per_deg_lon(seed_lat)
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
     lons = np.array([p[0] for p in points], dtype=np.float64)
     lats = np.array([p[1] for p in points], dtype=np.float64)
     east = (lons - seed_lon) * mlon
@@ -489,8 +482,8 @@ def pano_vegetation_base_to_lonlat(
     focal_y = H / (2.0 * math.tan(math.radians(37.5)))
     cy = H / 2.0
     horizon_shift = math.tan(math.radians(pitch_deg)) * focal_y
-    mlat = _METRES_PER_DEG_LAT
-    mlon = _metres_per_deg_lon(seed_lat)
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
     out: list[tuple[float, float]] = []
     for col in range(0, W, max(1, column_stride)):
         rows = np.where(pano_veg_mask[:, col])[0]
@@ -532,8 +525,8 @@ def snap_points_to_osm_along_bearing(
         return list(pano_points)
     pano_b, _pano_r = _points_to_seed_polar(pano_points, seed_lat, seed_lon)
     osm_b, osm_r = _points_to_seed_polar(osm_points, seed_lat, seed_lon)
-    mlat = _METRES_PER_DEG_LAT
-    mlon = _metres_per_deg_lon(seed_lat)
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
     out: list[tuple[float, float]] = []
     for b in pano_b:
         # Circular bearing distance to every OSM point.

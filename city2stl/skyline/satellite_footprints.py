@@ -40,6 +40,8 @@ import requests
 from shapely.geometry import box, shape
 from shapely.strtree import STRtree
 
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
+
 from ._core.types import BuildingRecord
 from ._core.util import _polygon_area_m2
 
@@ -259,8 +261,8 @@ def _estimate_ms_osm_offset(
     """
     if tree is None or not osm_geoms:
         return None
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
     dx_list: list[float] = []
     dy_list: list[float] = []
     for s in sat_polygons:
@@ -337,8 +339,8 @@ def merge_satellite_into_osm(
         if offset is not None:
             from shapely.affinity import translate
             dlon, dlat = offset
-            mlat = 110_540.0
-            mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+            mlat = M_PER_DEG_LAT
+            mlon = m_per_deg_lon(seed_lat)
             shifted: list[dict] = []
             for s in sat_polygons:
                 sg = s.get("geometry")

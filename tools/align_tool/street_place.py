@@ -71,11 +71,12 @@ import time
 import cv2
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
+
 HERE = pathlib.Path(__file__).resolve().parent
 
 DATA = HERE / "data"
 CACHE = HERE / "cache" / "street_place"
-M_PER_DEG = 111320.0
 
 PLATE_RES = 256          # the plate is read at this many cells across before posing
 FLOOR_M = 2.0            # height above ground that counts as built
@@ -527,8 +528,8 @@ def window(meta, side_m, cell_m=TARGET_CELL_M, centre=None):
     lat, lon = centre if centre is not None else (0.5 * (n + s), 0.5 * (e + w))
     grid = int(math.ceil(side_m / cell_m / 2.0)) * 2
     side = grid * cell_m
-    half_lat = 0.5 * side / M_PER_DEG
-    half_lon = half_lat / math.cos(math.radians(lat))
+    half_lat = 0.5 * side / M_PER_DEG_LAT
+    half_lon = 0.5 * side / m_per_deg_lon(lat)
     return (lat + half_lat, lat - half_lat, lon + half_lon, lon - half_lon), grid, cell_m
 
 
@@ -663,8 +664,8 @@ def _terrain_tile(lat, lon):
     """
     snap = 0.05
     clat, clon = round(lat / snap) * snap, round(lon / snap) * snap
-    half_lat = 0.5 * TERRAIN_TILE_SIDE_M / M_PER_DEG
-    half_lon = half_lat / math.cos(math.radians(clat))
+    half_lat = 0.5 * TERRAIN_TILE_SIDE_M / M_PER_DEG_LAT
+    half_lon = 0.5 * TERRAIN_TILE_SIDE_M / m_per_deg_lon(clat)
     bbox = (clat + half_lat, clat - half_lat, clon + half_lon, clon - half_lon)
     CACHE.mkdir(parents=True, exist_ok=True)
     path = CACHE / f"terrain_{clat:.2f}_{clon:.2f}.npz"
@@ -926,7 +927,6 @@ def place_plate(plate, hide_pose_m=0.0, channels=("buildings", "water", "terrain
     meta = plate.meta
     n0, s0, e0, w0 = (float(v) for v in meta["osm_bbox_nsew"])
     lat0, lon0 = 0.5 * (n0 + s0), 0.5 * (e0 + w0)
-    coslat = math.cos(math.radians(lat0))
     cell = map_cell(plate)
     diag = plate.span_m() * max(REFINE_SIZES) * math.sqrt(2.0)
 
@@ -937,8 +937,8 @@ def place_plate(plate, hide_pose_m=0.0, channels=("buildings", "water", "terrain
     if hide_pose_m > 0:
         # A deterministic direction per slug, so a rerun is comparable.
         ang = (sum(map(ord, slug)) % 360) * math.pi / 180.0
-        lat_s = lat0 + hide_pose_m * math.sin(ang) / M_PER_DEG
-        lon_s = lon0 + hide_pose_m * math.cos(ang) / (M_PER_DEG * coslat)
+        lat_s = lat0 + hide_pose_m * math.sin(ang) / M_PER_DEG_LAT
+        lon_s = lon0 + hide_pose_m * math.cos(ang) / m_per_deg_lon(lat0)
         reach = hide_pose_m * 1.5 + 200.0
         big_bbox, big_n, _ = window(meta, diag + 2 * reach + side, cell, (lat_s, lon_s))
         big = map_buildings(big_bbox, big_n)
@@ -1035,10 +1035,10 @@ def place_plate(plate, hide_pose_m=0.0, channels=("buildings", "water", "terrain
         c = found["candidates"]
         best["unique"] = min(best["unique"], c[0]["score"] - c[1]["score"])
     dy, dx = best["at"]
-    lat = start[0] + dy * cell / M_PER_DEG
-    lon = start[1] + dx * cell / (M_PER_DEG * coslat)
-    sy = (start[0] - lat0) * M_PER_DEG / cell
-    sx = (start[1] - lon0) * M_PER_DEG * coslat / cell
+    lat = start[0] + dy * cell / M_PER_DEG_LAT
+    lon = start[1] + dx * cell / m_per_deg_lon(lat0)
+    sy = (start[0] - lat0) * M_PER_DEG_LAT / cell
+    sx = (start[1] - lon0) * m_per_deg_lon(lat0) / cell
     move_m = math.hypot(sy + dy, sx + dx) * cell
     res = {
         "slug": slug, "city": meta.get("city", slug),

@@ -15,6 +15,9 @@ from pathlib import Path
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_LAT
+from geo2stl.geo import m_per_deg_lon as _m_per_deg_lon
+
 from ._core.segmentation import _neural_sky_and_building_masks
 from ._core.skyline import detect_skyline_contour
 from .region_data import (
@@ -147,8 +150,8 @@ def _propose_standoff_locations(
     # ≥1 km standoff to clear the foreground).
     standoffs_m = [900.0, 1400.0, 2000.0]
     dirs_deg = list(np.arange(0.0, 360.0, 45.0))
-    m_per_deg_lat = 110_540.0
-    m_per_deg_lon = 111_320.0 * math.cos(math.radians(clat))
+    m_per_deg_lat = M_PER_DEG_LAT
+    m_per_deg_lon = _m_per_deg_lon(clat)
 
     # Extend bbox tolerance by ~600 m on each side so coastal/causeway
     # positions outside the strict city boundary are still proposed.

@@ -62,6 +62,7 @@ from geo2stl.dem import (
 from geo2stl.dem import (
     make_dem_payload as _make_dem_payload,
 )
+from geo2stl.geo import bbox_size_m
 from geo2stl.hydrology import (
     fetch_and_rasterize_hydrology as _fetch_and_rasterize_hydrology,
 )
@@ -495,11 +496,8 @@ async def get_terrain_water_mask(
 
         # Derive sat_scale (m/px) from requested dim and bbox size.
         # Scale clamping (50 MB / 32768 px limits) is handled inside fetch_water_mask.
-        mid_lat = ((north or 0.0) + (south or 0.0)) / 2.0
-        _m_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
-        _bbox_w_m = abs((east or 0.0) - (west or 0.0)) * _m_per_deg_lon
-        _bbox_h_m = abs((north or 0.0) - (south or 0.0)) * 111_320.0
-        _longer_m = max(_bbox_w_m, _bbox_h_m, 1.0)
+        _longer_m = max(*bbox_size_m({"north": north or 0.0, "south": south or 0.0,
+                                      "east": east or 0.0, "west": west or 0.0}), 1.0)
         sat_scale = max(10, int(math.ceil(_longer_m / dim)))
 
         # --- Water mask disk cache check ---
@@ -636,11 +634,8 @@ async def get_terrain_esa_land_cover(
             return err
 
         # Derive sat_scale from requested dim and bbox size.
-        mid_lat = ((north or 0.0) + (south or 0.0)) / 2.0
-        _m_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
-        _bbox_w_m = abs((east or 0.0) - (west or 0.0)) * _m_per_deg_lon
-        _bbox_h_m = abs((north or 0.0) - (south or 0.0)) * 111_320.0
-        _longer_m = max(_bbox_w_m, _bbox_h_m, 1.0)
+        _longer_m = max(*bbox_size_m({"north": north or 0.0, "south": south or 0.0,
+                                      "east": east or 0.0, "west": west or 0.0}), 1.0)
         sat_scale = max(10, int(math.ceil(_longer_m / dim)))
 
         # Cache key does NOT include projection/clip_valid_region/maintain_dimensions —
@@ -691,12 +686,8 @@ async def get_terrain_esa_land_cover(
         # (fetch_water_mask would also download SRTM tiles for bathymetry,
         # build a water mask, and apply JRC logic — all discarded here).
         # Apply the same scale-clamping guards as fetch_water_mask.
-        bbox_w = abs(east - west)
-        bbox_h = abs(north - south)
-        mid_lat = (north + south) / 2.0
-        m_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
-        bbox_w_m = bbox_w * m_per_deg_lon
-        bbox_h_m = bbox_h * 111_320.0
+        bbox_w_m, bbox_h_m = bbox_size_m(
+            {"north": north, "south": south, "east": east, "west": west})
         _MAX_ESA_PX = 50_331_648 // 2
         est_px = (bbox_w_m / sat_scale) * (bbox_h_m / sat_scale)
         if est_px > _MAX_ESA_PX:

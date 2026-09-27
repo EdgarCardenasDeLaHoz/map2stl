@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import re
 import shutil
 import uuid
@@ -45,6 +44,7 @@ from app.server.core.cache import CACHE_ROOT, make_cache_key
 from city2stl.skyline.height.infill import infill_idw as _infill_idw
 from city2stl.skyline.height.infill import infill_nearest as _infill_nearest
 from city2stl.skyline.height.stl_import import stl_to_heightmap as _stl_to_heightmap
+from geo2stl.geo import bbox_size_m
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +64,7 @@ def _check_grid_size(bbox: dict, resolution_m: float) -> None:
     than timing out mid-request. Caps at MAX_DIM per side, same limit every
     other raster endpoint (DEM/water/ESA) already uses (config.MAX_DIM).
     """
-    mid_lat = (bbox["north"] + bbox["south"]) / 2.0
-    metres_per_deg_lat = 111_320.0
-    metres_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
-    lat_m = abs(bbox["north"] - bbox["south"]) * metres_per_deg_lat
-    lon_m = abs(bbox["east"] - bbox["west"]) * metres_per_deg_lon
+    lon_m, lat_m = bbox_size_m(bbox)
     h = max(1, round(lat_m / resolution_m))
     w = max(1, round(lon_m / resolution_m))
     if h > MAX_DIM or w > MAX_DIM:

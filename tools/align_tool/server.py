@@ -34,11 +34,12 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 import paths  # noqa: E402
 
+from geo2stl.geo import M_PER_DEG_LAT, M_PER_DEG_LON_EQ, bbox_size_m  # noqa: E402
+
 HERE = paths.HERE
 
 DATA = HERE / "data"
 GROUND_TRUTH = paths.GROUND_TRUTH
-M_PER_DEG_LAT = 111_320.0
 MAX_BODY = 8 * 1024 * 1024
 
 
@@ -142,17 +143,15 @@ def _square_bbox(north, south, east, west, margin, center=None):
         lon_c = (east + west) / 2.0
     coslat = max(math.cos(math.radians(lat_c)), 1e-6)
     h_m = abs(north - south) * M_PER_DEG_LAT
-    w_m = abs(east - west) * M_PER_DEG_LAT * coslat
+    w_m = abs(east - west) * M_PER_DEG_LON_EQ * coslat
     side_m = max(h_m, w_m) * float(margin)
     d_lat = (side_m / 2.0) / M_PER_DEG_LAT
-    d_lon = (side_m / 2.0) / (M_PER_DEG_LAT * coslat)
+    d_lon = (side_m / 2.0) / (M_PER_DEG_LON_EQ * coslat)
     return (lat_c + d_lat, lat_c - d_lat, lon_c + d_lon, lon_c - d_lon), side_m
 
 
 def _cell_size_m(north, south, east, west, resolution):
-    lat_c = (north + south) / 2.0
-    dy = abs(north - south) * M_PER_DEG_LAT
-    dx = abs(east - west) * M_PER_DEG_LAT * math.cos(math.radians(lat_c))
+    dx, dy = bbox_size_m({"north": north, "south": south, "east": east, "west": west})
     return ((dx + dy) / 2.0) / float(resolution)
 
 

@@ -29,6 +29,7 @@ from city2stl.skyline.height.providers.shadow_height import (
     _fetch_rgb_for_bbox,
     _infer_from_rgb,
 )
+from geo2stl.geo import M_PER_DEG_LAT
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ def _make_synthetic_rgb(h: int, w: int, n_buildings: int = 12) -> np.ndarray:
 def evaluate_city(city: CityEval, dim: int, live: bool) -> dict:
     bbox = (city.north, city.south, city.east, city.west)
     lat_span = city.north - city.south
-    bbox_m = lat_span * 111_320.0
+    bbox_m = lat_span * M_PER_DEG_LAT
     sun_elev = _estimate_sun_elevation(
         (city.north + city.south) / 2,
         (city.east + city.west) / 2,

@@ -19,6 +19,7 @@ from shapely.geometry import shape
 from app.server.core.cache import osm_cache_key, read_osm_cache, write_osm_cache
 from app.server.core.db import get_db, init_db
 from city2stl.fetch import fetch_osm_data
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
 from ._core.types import BuildingRecord
 from ._core.util import _building_height_from_tags, _polygon_area_m2
@@ -237,15 +238,15 @@ def _extract_high_rises(osm_data: dict, min_height_m: float = 35.0) -> list[tupl
     return [r for r in rows if r[2] >= thr]
 
 def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians((lat1 + lat2) * 0.5))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon((lat1 + lat2) * 0.5)
     dx = (lon2 - lon1) * mlon
     dy = (lat2 - lat1) * mlat
     return float(math.hypot(dx, dy))
 
 def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians((lat1 + lat2) * 0.5))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon((lat1 + lat2) * 0.5)
     dx = (lon2 - lon1) * mlon
     dy = (lat2 - lat1) * mlat
     b = math.degrees(math.atan2(dx, dy))

@@ -12,12 +12,14 @@ import numpy as np
 # failure). Defined here so those branches log instead of crashing.
 logger = logging.getLogger(__name__)
 
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon  # noqa: E402
+
 from .types import BuildingRecord, Viewpoint  # noqa: E402
 
 
 def lonlat_to_local_m(lon: float, lat: float, lon0: float, lat0: float) -> tuple[float, float]:
-    meters_per_deg_lat = 110_540.0
-    meters_per_deg_lon = 111_320.0 * math.cos(math.radians(lat0))
+    meters_per_deg_lat = M_PER_DEG_LAT
+    meters_per_deg_lon = m_per_deg_lon(lat0)
     dx = (lon - lon0) * meters_per_deg_lon
     dy = (lat - lat0) * meters_per_deg_lat
     return dx, dy
@@ -169,8 +171,8 @@ def _building_projected_x_range(
     heading_total = viewpoint.heading + offset_deg
     cos_t = math.cos(math.radians(heading_total))
     sin_t = math.sin(math.radians(heading_total))
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians(viewpoint.lat))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(viewpoint.lat)
     f_px = _focal_length_px(viewpoint)
     cx = viewpoint.image_width * 0.5
     half_fov_rad = math.radians(viewpoint.fov * 0.5)
@@ -304,8 +306,8 @@ def _project_all_buildings_vectorized(
     heading_total = viewpoint.heading + offset_deg
     cos_t = math.cos(math.radians(heading_total))
     sin_t = math.sin(math.radians(heading_total))
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians(viewpoint.lat))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(viewpoint.lat)
     f_px = _focal_length_px(viewpoint)
     cx = viewpoint.image_width * 0.5
     half_fov_rad = math.radians(viewpoint.fov * 0.5 + fov_margin_deg)
@@ -393,8 +395,8 @@ def _projected_building_x_ranges(
     half_fov_rad = math.radians(viewpoint.fov * 0.5)
     cos_t = math.cos(math.radians(heading_total))
     sin_t = math.sin(math.radians(heading_total))
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians(viewpoint.lat))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(viewpoint.lat)
 
     dx = (lons - viewpoint.lon) * mlon
     dy = (lats - viewpoint.lat) * mlat

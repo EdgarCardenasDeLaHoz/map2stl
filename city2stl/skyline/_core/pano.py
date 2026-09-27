@@ -7,6 +7,8 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
+
 # F-CLEAN14: the F-SKY12 depth except-branches reference ``logger`` but the
 # module never defined one (latent NameError, only reachable on a depth-module
 # failure). Defined here so those branches log instead of crashing.
@@ -142,8 +144,8 @@ def project_buildings_to_pano(
     """
     if headings_per_col.size == 0:
         return []
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
 
     def _bearing_to_col(bearing_deg: float) -> int | None:
         """Find the column whose recorded heading is closest to bearing_deg.

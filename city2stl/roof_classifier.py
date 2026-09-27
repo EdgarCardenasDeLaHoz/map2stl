@@ -76,6 +76,8 @@ from typing import NamedTuple
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_LAT
+
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -986,7 +988,7 @@ def classify_roof_shapes(
         acquisition_hours = [10] * n_images
 
     north, south, east, west = bbox
-    pixel_m = 0.0 if model_only else (north - south) * 111_320.0 / rgb_h
+    pixel_m = 0.0 if model_only else (north - south) * M_PER_DEG_LAT / rgb_h
 
     shadow_stack = [_detect_shadows(img) for img in rgb_stack]
 

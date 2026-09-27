@@ -46,11 +46,10 @@ class CitySpec:
 
     @property
     def area_km2(self) -> float:
-        import math
-        lat_km = (self.north - self.south) * 111.32
-        lon_km = (self.east - self.west) * 111.32 * math.cos(
-            math.radians((self.north + self.south) / 2)
-        )
+        from geo2stl.geo import bbox_size_m
+        lon_m, lat_m = bbox_size_m({"north": self.north, "south": self.south,
+                                    "east": self.east, "west": self.west})
+        lon_km, lat_km = lon_m / 1000, lat_m / 1000
         return lat_km * lon_km
 
 

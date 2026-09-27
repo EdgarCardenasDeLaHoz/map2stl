@@ -33,6 +33,7 @@ class OverpassUpstreamError(RuntimeError):
     """
 
 
+from geo2stl.geo import M_PER_DEG_LAT  # noqa: E402
 from geo2stl.osm import OVERPASS_ENDPOINTS as _OVERPASS_ENDPOINTS  # noqa: E402
 from geo2stl.osm import healthy_overpass_endpoints as _healthy_overpass_endpoints  # noqa: E402
 from geo2stl.osm import use_overpass_endpoint  # noqa: E402
@@ -304,7 +305,7 @@ def fetch_osm_data(
             + ", ".join(_OVERPASS_ENDPOINTS))
 
     # Convert simplification tolerance from metres to degrees (~111 km per degree)
-    tol_deg = simplify_tolerance / 111_000.0
+    tol_deg = simplify_tolerance / M_PER_DEG_LAT
 
     # osmnx 2.x bbox format: (left, bottom, right, top) = (west, south, east, north)
     bbox = (west, south, east, north)

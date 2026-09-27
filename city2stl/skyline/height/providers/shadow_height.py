@@ -28,6 +28,7 @@ import logging
 import numpy as np
 
 from city2stl.skyline.height import BBox, HeightResult
+from geo2stl.geo import M_PER_DEG_LAT
 
 from ._cache import (
     make_cache_key,
@@ -129,7 +130,7 @@ def _fetch_rgb_for_bbox(bbox: BBox, dim: tuple[int, int]) -> np.ndarray | None:
 
         north, south, east, west = bbox
         # Compute a resolution that gives ~2 m/pixel
-        bbox_m = (north - south) * 111_320.0
+        bbox_m = (north - south) * M_PER_DEG_LAT
         sat_dim = max(256, min(1024, int(bbox_m / _SAT_TARGET_M_PER_PX)))
 
         b64 = fetch_satellite_tiles(north, south, east, west, dim=sat_dim)
@@ -230,7 +231,7 @@ def _infer_from_rgb(
     sun_elev = _estimate_sun_elevation(lat_mid, lon_mid)
 
     # Pixel scale from the RGB image resolution, not the output grid
-    pixel_m = (north - south) * 111_320.0 / rgb_h
+    pixel_m = (north - south) * M_PER_DEG_LAT / rgb_h
 
     # Work at RGB resolution, then downsample
     raster_hr = np.full((rgb_h, rgb_w), np.nan, dtype=np.float32)

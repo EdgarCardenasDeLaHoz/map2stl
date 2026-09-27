@@ -24,7 +24,8 @@ import pathlib
 
 import numpy as np
 
-M_PER_DEG = 111_320.0
+from geo2stl.geo import M_PER_DEG_LAT as M_PER_DEG
+
 SS = 4   # supersampling per cell side when rasterizing coverage
 
 

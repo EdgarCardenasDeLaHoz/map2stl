@@ -32,6 +32,8 @@ import threading
 import numpy as np
 import requests
 
+from geo2stl.geo import M_PER_DEG_LAT
+
 logger = logging.getLogger(__name__)
 
 URL = "https://download.geoservice.dlr.de/WSF3D/files/global/WSF3D_V02_BuildingHeight.tif"
@@ -188,7 +190,7 @@ def read_window(bbox) -> tuple[np.ndarray, float, tuple[float, float, float, flo
            st["x0"] + col1 * st["sx"], st["x0"] + col0 * st["sx"])
     # Metres per pixel north-south. The product is a geographic grid, so this is the honest
     # single figure to report as its resolution.
-    return out * GAIN, st["sy"] * 111320.0, geo
+    return out * GAIN, st["sy"] * M_PER_DEG_LAT, geo
 
 
 def read_grid(bbox, shape: tuple[int, int]) -> tuple[np.ndarray, float]:

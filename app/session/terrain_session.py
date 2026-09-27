@@ -43,6 +43,7 @@ from IPython.display import display
 from PIL import Image
 
 from app.server.config import LUMINANCE_B, LUMINANCE_G, LUMINANCE_R, OPENTOPO_API_KEY
+from geo2stl.geo import bbox_size_m
 
 _ALLOWED_HTTP_METHODS = {"get", "post", "put", "delete", "patch"}
 
@@ -1205,13 +1206,7 @@ class TerrainSession:
             grid = np.array(self.dem["dem_values"]).reshape(H, W)
 
         # Compute metres-per-pixel from the bbox geographic extent.
-        lat_c = (self.bbox["north"] + self.bbox["south"]) / 2.0
-        metres_per_deg_lat = 111_320.0
-        metres_per_deg_lon = 111_320.0 * np.cos(np.radians(lat_c))
-        lat_span_m = abs(self.bbox["north"] -
-                         self.bbox["south"]) * metres_per_deg_lat
-        lon_span_m = abs(self.bbox["east"] -
-                         self.bbox["west"]) * metres_per_deg_lon
+        lon_span_m, lat_span_m = bbox_size_m(self.bbox)
         m_per_px = max(lat_span_m, lon_span_m) / self.dem_settings["dim"]
 
         if m_per_px > 0:

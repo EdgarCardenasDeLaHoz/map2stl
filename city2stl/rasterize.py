@@ -10,9 +10,10 @@ Server entry point: app.server.core.osm re-exports all public symbols.
 from __future__ import annotations
 
 import logging
-import math
 
 import numpy as np
+
+from geo2stl.geo import m_per_deg_lon
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,7 @@ def rasterize_city_data(
             width_m = (feat.get("properties") or {}).get("road_width_m", 4.0)
             # Convert metres to degrees (approximate at this latitude)
             mid_lat = (north + south) / 2
-            metres_per_deg_lon = 111_000.0 * math.cos(math.radians(mid_lat))
+            metres_per_deg_lon = m_per_deg_lon(mid_lat)
             buf_deg = (width_m / 2) / metres_per_deg_lon
             s = shape(geom).buffer(max(buf_deg, (north - south) / dim * 0.5))
             if not s.is_empty:

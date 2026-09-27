@@ -21,11 +21,6 @@ from fastapi.responses import JSONResponse
 
 from app.server.config import MAX_BBOX_DIAGONAL_KM, MAX_DIM
 
-# ---------------------------------------------------------------------------
-# Metres-per-degree constant (equatorial)
-# ---------------------------------------------------------------------------
-
-METRES_PER_DEGREE: float = 111_320.0
 EARTH_RADIUS_KM: float = 6371.0
 
 

@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import json
-import math
 from contextlib import nullcontext
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
 from .._core.height import aggregate_building_heights
 from .._core.segmentation import _neural_sky_and_building_masks
@@ -178,8 +179,8 @@ def _seed_multiview_registration(
     all_estimates: list = []
 
     def _buildings_near_seed(seed_lat: float, seed_lon: float, radius_m: float = 4500.0):
-        mlat = 110_540.0
-        mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+        mlat = M_PER_DEG_LAT
+        mlon = m_per_deg_lon(seed_lat)
         rad_sq = radius_m * radius_m
         out: list[BuildingRecord] = []
         for b in buildings:

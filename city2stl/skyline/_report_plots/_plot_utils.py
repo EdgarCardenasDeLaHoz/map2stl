@@ -5,6 +5,8 @@ import html
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
+
 POLAR_MAX_M = 1000.0
 
 NO_BUILDING_M = 3000.0
@@ -57,9 +59,8 @@ def _osm_polygon_area_m2(ring: list, lat0: float) -> float:
     polygons up to a few km wide — good enough to filter sheds / kiosks
     from real buildings.
     """
-    import math  # noqa: PLC0415
-    mlat = 110540.0
-    mlon = 111320.0 * math.cos(math.radians(lat0))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(lat0)
     if len(ring) < 3:
         return 0.0
     s = 0.0

@@ -49,6 +49,7 @@ from scipy.ndimage import map_coordinates, maximum_filter, median_filter
 from shapely.geometry import Polygon, box
 
 from city2stl.mesh import _extrude_ring_with_roof
+from geo2stl.geo import GeoGrid, bbox_diagonal_km
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +61,6 @@ SNAP_MM = 0.01                # coordinate grid for outlines
 MIN_FOOTPRINT_MM2 = 0.3       # smaller footprints cannot print as a distinct feature
 PRINT_MIN_WIDTH_MM = 0.8      # two 0.4 mm extrusion lines: the narrowest reliable feature
 MAX_SLENDERNESS = 8.0         # extruded height <= this x footprint width (snaps off otherwise)
-_M_PER_DEG_LAT = 110_540.0
-_M_PER_DEG_LON = 111_320.0
 
 Mode = Literal["extrude", "raised", "engraved", "water"]
 Mesh = tuple[np.ndarray, np.ndarray]
@@ -97,13 +96,6 @@ class ModelScale:
         }
 
 
-def bbox_diagonal_km(bbox: dict) -> float:
-    lat_mid = math.radians((bbox["north"] + bbox["south"]) / 2)
-    dy = (bbox["north"] - bbox["south"]) * _M_PER_DEG_LAT
-    dx = (bbox["east"] - bbox["west"]) * _M_PER_DEG_LON * math.cos(lat_mid)
-    return math.hypot(dx, dy) / 1000
-
-
 def choose_scale(
     bbox: dict,
     dem_shape: tuple[int, int],
@@ -117,11 +109,7 @@ def choose_scale(
     base_mm: float = 5.0,
 ) -> ModelScale:
     """Pick the vertical scale: true x exaggeration below the auto threshold, else fit."""
-    h, w = dem_shape
-    lat_mid = math.radians((bbox["north"] + bbox["south"]) / 2)
-    m_px_y = (bbox["north"] - bbox["south"]) * _M_PER_DEG_LAT / h
-    m_px_x = (bbox["east"] - bbox["west"]) * _M_PER_DEG_LON * math.cos(lat_mid) / w
-    m_per_px = (m_px_x + m_px_y) / 2
+    m_per_px = GeoGrid(bbox, dem_shape).m_per_px
     if z_mode == "auto":
         z_mode = "true" if bbox_diagonal_km(bbox) < AUTO_TRUE_SCALE_MAX_KM else "fit"
     if z_mode == "true":

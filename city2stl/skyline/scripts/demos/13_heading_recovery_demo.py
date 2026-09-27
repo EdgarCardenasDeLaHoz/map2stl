@@ -43,6 +43,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
+
 ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -220,8 +222,8 @@ def _ray_walk_first(
 ) -> float:
     """Walk along the bearing from the seed; return distance in metres where
     `sat_mask` first equals `want_value`, or `max_m` if never."""
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
     br = math.radians(bearing_deg)
     sin_b, cos_b = math.sin(br), math.cos(br)
     h, w = sat_mask.shape[:2]
@@ -257,8 +259,8 @@ def build_sat_signatures(
                   transitions).
       d_water_far: derivative of water_far.
     """
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
     bearings = np.linspace(0.0, 360.0, n_bearings, endpoint=False)
     d_lo, d_hi = near_range_m
     f_lo, f_hi = far_water_range_m
@@ -633,8 +635,8 @@ def sweep_offset_by_onboundary(
     Returns (best_offset_deg, cand_deg, scores) with scores in [0, 1].
     """
     from scipy.ndimage import binary_dilation, binary_erosion, distance_transform_edt
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
     d_lon = canvas_radius_m / mlon
     d_lat = canvas_radius_m / mlat
     x0, _ = sat_project(seed_lon - d_lon, seed_lat)
@@ -829,8 +831,8 @@ def _render_birdseye_page(pdf, sat_image, sat_water, sat_project,
     neighbourhood) — high % = good fit; low % = points scattered into
     pure water or pure land regions.
     """
-    mlat = 110_540.0
-    mlon = 111_320.0 * math.cos(math.radians(seed_lat))
+    mlat = M_PER_DEG_LAT
+    mlon = m_per_deg_lon(seed_lat)
     d_lon = canvas_radius_m / mlon
     d_lat = canvas_radius_m / mlat
     x0, _ = sat_project(seed_lon - d_lon, seed_lat)

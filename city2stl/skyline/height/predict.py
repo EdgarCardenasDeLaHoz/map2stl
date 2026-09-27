@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     import torch
 
 from city2stl.skyline.height import BBox, HeightResult
+from geo2stl.geo import M_PER_DEG_LAT
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +403,7 @@ def predict(
     """
     H, W = sat_rgb.shape[:2]
     north, south, east, west = bbox
-    bbox_h_m = abs(north - south) * 111_320.0
+    bbox_h_m = abs(north - south) * M_PER_DEG_LAT
     resolution_m = bbox_h_m / H if H > 0 else 1.0
 
     if model == "pretrained":

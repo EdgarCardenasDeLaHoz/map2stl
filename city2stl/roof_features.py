@@ -22,6 +22,8 @@ import math
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
+
 FEATURES = [
     # geometry
     "area_m2", "log_area", "perimeter_m", "compactness", "elongation",
@@ -74,8 +76,8 @@ def _ring_metres(ring):
     if len(lons) > 1 and lons[0] == lons[-1] and lats[0] == lats[-1]:
         lons, lats = lons[:-1], lats[:-1]
     clat, clon = lats.mean(), lons.mean()
-    mx = 111320.0 * math.cos(math.radians(clat))
-    return np.column_stack([(lons - clon) * mx, (lats - clat) * 110540.0])
+    mx = m_per_deg_lon(clat)
+    return np.column_stack([(lons - clon) * mx, (lats - clat) * M_PER_DEG_LAT])
 
 
 def _geometry(ring):

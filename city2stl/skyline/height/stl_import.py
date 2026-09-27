@@ -18,11 +18,12 @@ stl_to_heightmap(stl_path, bbox, resolution_m=5.0, up_axis="z")
 from __future__ import annotations
 
 import logging
-import math
 from pathlib import Path
 from typing import Union
 
 import numpy as np
+
+from geo2stl.geo import bbox_size_m
 
 logger = logging.getLogger(__name__)
 
@@ -118,16 +119,7 @@ def stl_to_heightmap(
     logger.debug(f"Mesh bounds after rotation: {bounds_min} -> {bounds_max}")
 
     # -- Compute grid dimensions from geographic bbox + resolution -----------
-    north = bbox["north"]
-    south = bbox["south"]
-    east = bbox["east"]
-    west = bbox["west"]
-    mid_lat = (north + south) / 2.0
-    metres_per_deg_lat = 111_320.0
-    metres_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
-
-    lat_m = abs(north - south) * metres_per_deg_lat
-    lon_m = abs(east - west) * metres_per_deg_lon
+    lon_m, lat_m = bbox_size_m(bbox)
 
     h = max(1, int(round(lat_m / resolution_m)))
     w = max(1, int(round(lon_m / resolution_m)))

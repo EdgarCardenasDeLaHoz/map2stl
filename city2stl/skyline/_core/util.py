@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import logging
-import math
 import os
 from pathlib import Path
 
 import numpy as np
+
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
 # F-CLEAN14: the F-SKY12 depth except-branches reference ``logger`` but the
 # module never defined one (latent NameError, only reachable on a depth-module
@@ -79,10 +80,8 @@ def _polygon_area_m2(coords: list[tuple[float, float]]) -> float:
     lats = np.asarray([p[1] for p in coords], dtype=np.float64)
     lon0 = float(np.mean(lons))
     lat0 = float(np.mean(lats))
-    m_per_deg_lat = 110_540.0
-    m_per_deg_lon = 111_320.0 * math.cos(math.radians(lat0))
-    x = (lons - lon0) * m_per_deg_lon
-    y = (lats - lat0) * m_per_deg_lat
+    x = (lons - lon0) * m_per_deg_lon(lat0)
+    y = (lats - lat0) * M_PER_DEG_LAT
     area = 0.5 * abs(np.dot(x[:-1], y[1:]) - np.dot(x[1:], y[:-1]))
     return float(area)
 

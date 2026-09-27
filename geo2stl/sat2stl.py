@@ -24,12 +24,13 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_LAT, bbox_size_m
+from geo2stl.geo import m_per_deg_lon as _m_per_deg_lon
+
 try:
     import joblib
 except ImportError:
     joblib = None
-
-METRES_PER_DEGREE: float = 111_320.0
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,8 @@ def _calculate_optimal_zoom(
     """
     # Calculate bbox dimensions in meters
     mid_lat = (north + south) / 2.0
-    m_per_deg_lon = METRES_PER_DEGREE * math.cos(math.radians(mid_lat))
-    m_per_deg_lat = METRES_PER_DEGREE
+    m_per_deg_lon = _m_per_deg_lon(mid_lat)
+    m_per_deg_lat = M_PER_DEG_LAT
 
     bbox_w_m = abs(east - west) * m_per_deg_lon
     bbox_h_m = abs(north - south) * m_per_deg_lat
@@ -361,8 +362,8 @@ def fetch_water_mask(
     bbox_w = abs(east - west)
     bbox_h = abs(north - south)
     mid_lat = (north + south) / 2.0
-    m_per_deg_lon = METRES_PER_DEGREE * math.cos(math.radians(mid_lat))
-    m_per_deg_lat = METRES_PER_DEGREE
+    m_per_deg_lon = _m_per_deg_lon(mid_lat)
+    m_per_deg_lat = M_PER_DEG_LAT
 
     bbox_w_m = bbox_w * m_per_deg_lon
     bbox_h_m = bbox_h * m_per_deg_lat
@@ -512,8 +513,8 @@ def calculate_scale_for_dimensions(N, S, E, W, target_dim=500):
     lat_range = abs(N - S)
     lon_range = abs(E - W)
 
-    height_meters = lat_range * 111000
-    width_meters = lon_range * 111000 * math.cos(math.radians(lat_center))
+    height_meters = lat_range * M_PER_DEG_LAT
+    width_meters = lon_range * _m_per_deg_lon(lat_center)
 
     max_meters = max(height_meters, width_meters)
     target_scale = max_meters / target_dim
@@ -543,9 +544,7 @@ def fetch_bbox_image(N, S, E, W, scale=None, dataset="copernicus", use_cache=Tru
     ee_max_bytes = 50_331_648
     bytes_per_px = 2
     ee_max_px = ee_max_bytes // bytes_per_px
-    lat_center = (N + S) / 2.0
-    bbox_w_m = abs(E - W) * 111_320 * math.cos(math.radians(lat_center))
-    bbox_h_m = abs(N - S) * 111_320
+    bbox_w_m, bbox_h_m = bbox_size_m({"north": N, "south": S, "east": E, "west": W})
     est_px = (bbox_w_m / scale) * (bbox_h_m / scale)
 
     if est_px > ee_max_px:

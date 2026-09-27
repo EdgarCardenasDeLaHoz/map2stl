@@ -17,7 +17,6 @@ Usage (session):
 from __future__ import annotations
 
 import logging
-import math
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -31,6 +30,8 @@ from city2stl.skyline.height.train import (
     TrainConfig,
     train,
 )
+from geo2stl.geo import M_PER_DEG_LAT
+from geo2stl.geo import m_per_deg_lon as _m_per_deg_lon
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +100,8 @@ def collect_tiles(
         lat_span = city.north - city.south
         lon_span = city.east - city.west
         mid_lat = (city.north + city.south) / 2.0
-        m_per_deg_lat = 111_320.0
-        m_per_deg_lon = 111_320.0 * math.cos(math.radians(mid_lat))
+        m_per_deg_lat = M_PER_DEG_LAT
+        m_per_deg_lon = _m_per_deg_lon(mid_lat)
 
         tile_deg_lat = tile_size * resolution_m / m_per_deg_lat
         tile_deg_lon = tile_size * resolution_m / m_per_deg_lon

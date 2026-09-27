@@ -56,6 +56,8 @@ from pathlib import Path
 import numpy as np
 import paths  # noqa: E402
 
+from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon  # noqa: E402
+
 HERE = paths.HERE
 
 GROUND_TRUTH = paths.GROUND_TRUTH
@@ -604,7 +606,7 @@ def _geometries(elements: list[dict], line_width_m: float | None = None) -> list
     from shapely.geometry import LineString, Polygon
     from shapely.ops import linemerge, polygonize
 
-    buffer_deg = WATER_LINE_BUFFER_M / 111_000.0
+    buffer_deg = WATER_LINE_BUFFER_M / M_PER_DEG_LAT
     out = []
 
     def add(points: list[dict], tags: dict) -> None:
@@ -616,7 +618,7 @@ def _geometries(elements: list[dict], line_width_m: float | None = None) -> list
                 width = (_tag_width_m(tags)
                          or BARRIER_WIDTH_M.get(tags.get("barrier", ""))
                          or line_width_m)
-                geom = LineString(coords).buffer(width / 2.0 / 111_000.0)
+                geom = LineString(coords).buffer(width / 2.0 / M_PER_DEG_LAT)
             elif len(coords) >= 4 and coords[0] == coords[-1]:
                 geom = Polygon(coords)
                 if not geom.is_valid:
@@ -1253,8 +1255,8 @@ def measured_rotation_deg(region: str, plate_key: str | None = None) -> float | 
 
 def meters_between(a: tuple[float, float], b: tuple[float, float]) -> tuple[float, float]:
     """North and east offset from `a` to `b`, in metres."""
-    dn = (b[0] - a[0]) * 111_000.0
-    de = (b[1] - a[1]) * 111_000.0 * math.cos(math.radians(a[0]))
+    dn = (b[0] - a[0]) * M_PER_DEG_LAT
+    de = (b[1] - a[1]) * m_per_deg_lon(a[0])
     return dn, de
 
 

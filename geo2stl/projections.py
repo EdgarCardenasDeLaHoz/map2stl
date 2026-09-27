@@ -19,6 +19,8 @@ import cv2
 import numpy as np
 from scipy import ndimage
 
+from geo2stl.geo import M_PER_DEG_LAT, M_PER_DEG_LON_EQ, m_per_deg_lon
+
 ProjectionType = Literal['none', 'cosine', 'mercator',
                          'equidistant', 'lambert', 'sinusoidal']
 
@@ -300,8 +302,8 @@ def project_coordinates(
         # No transformation - just return a copy
         metadata['output_shape'] = (m, n)
         metadata['scale_x_m_per_px'] = (
-            east - west) * 111320 * np.cos(np.radians(center_lat)) / n
-        metadata['scale_y_m_per_px'] = (north - south) * 110540 / m
+            east - west) * m_per_deg_lon(center_lat) / n
+        metadata['scale_y_m_per_px'] = (north - south) * M_PER_DEG_LAT / m
         return mat.copy(), metadata
 
     elif projection == 'cosine':
@@ -429,8 +431,8 @@ def _project_cosine(
 
         metadata['output_shape'] = (m, n)
         # Scale in meters per pixel (approximate at center)
-        metadata['scale_x_m_per_px'] = (east - west) * 111320 * avg_cos / n
-        metadata['scale_y_m_per_px'] = (north - south) * 110540 / m
+        metadata['scale_x_m_per_px'] = (east - west) * M_PER_DEG_LON_EQ * avg_cos / n
+        metadata['scale_y_m_per_px'] = (north - south) * M_PER_DEG_LAT / m
 
         return result, metadata
 
@@ -448,8 +450,8 @@ def _project_cosine(
                             interpolation=interp)
 
         metadata['output_shape'] = (out_m, out_n)
-        metadata['scale_x_m_per_px'] = (east - west) * 111320 * avg_cos / out_n
-        metadata['scale_y_m_per_px'] = (north - south) * 110540 / out_m
+        metadata['scale_x_m_per_px'] = (east - west) * M_PER_DEG_LON_EQ * avg_cos / out_n
+        metadata['scale_y_m_per_px'] = (north - south) * M_PER_DEG_LAT / out_m
 
         return result.astype(np.float64), metadata
 
@@ -654,8 +656,8 @@ def _project_equidistant(
 
     metadata['output_shape'] = (out_m, out_n)
     metadata['standard_parallel'] = center_lat
-    metadata['scale_x_m_per_px'] = (east - west) * 111320 * cos_std / out_n
-    metadata['scale_y_m_per_px'] = (north - south) * 110540 / out_m
+    metadata['scale_x_m_per_px'] = (east - west) * M_PER_DEG_LON_EQ * cos_std / out_n
+    metadata['scale_y_m_per_px'] = (north - south) * M_PER_DEG_LAT / out_m
 
     return result, metadata
 

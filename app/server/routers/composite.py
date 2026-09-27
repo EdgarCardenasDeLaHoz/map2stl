@@ -47,8 +47,9 @@ from app.server.core.cache import (
     read_osm_cache,
     write_array_cache,
 )
-from app.server.core.validation import METRES_PER_DEGREE, run_sync
+from app.server.core.validation import run_sync
 from app.server.schemas import HydrologyMergeRequest, MergeRequest
+from geo2stl.geo import m_per_deg_lon
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["composite"])
@@ -207,8 +208,7 @@ def _rasterize_city(req: CompositeCityRasterRequest) -> dict:
         return _empty_result()
 
     lat_mid = (N + S) / 2
-    m_per_px = (lon_span * np.cos(np.radians(lat_mid))
-                * METRES_PER_DEGREE) / PW
+    m_per_px = lon_span * m_per_deg_lon(lat_mid) / PW
 
     _, coords_to_px = _make_geo_to_px(N, S, E, W, PW, PH)
 
