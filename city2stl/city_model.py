@@ -52,7 +52,7 @@ from rasterio.transform import Affine
 from scipy.ndimage import map_coordinates, median_filter
 from shapely.geometry import Polygon, box
 
-from city2stl.mesh import _extrude_ring_with_roof
+from city2stl.roofs import building_solids
 from geo2stl.geo import GeoGrid, bbox_diagonal_km
 
 logger = logging.getLogger(__name__)
@@ -348,8 +348,8 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
 
 
 def _roofed(poly: Polygon, props: dict, z_floor: float, ground_hi: float,
-            z_per_m: float, style: LayerStyle, cap_mm: float = math.inf) -> Mesh | None:
-    """A building-like prism from the skirt floor to its roof (OSM roof shapes kept).
+            z_per_m: float, style: LayerStyle, cap_mm: float = math.inf) -> list[Mesh]:
+    """Solids for one building from the skirt floor to its roof (``city2stl.roofs``).
 
     OSM ``height`` includes the roof: the eave sits roof-height below the top.
     ``cap_mm`` limits the height above the ground (slenderness rule).
@@ -357,24 +357,23 @@ def _roofed(poly: Polygon, props: dict, z_floor: float, ground_hi: float,
     height_m = float(props.get("height_m") or 10.0)
     total = max(min(height_m * z_per_m, cap_mm), style.min_height_mm)
     shape_ = str(props.get("roof:shape") or "flat").lower().strip()
-    if shape_ != "flat" and not poly.interiors:
+    roof_mm = 0.0
+    if shape_ != "flat":
         try:
             roof_m = float(str(props.get("roof:height")).split()[0])
         except (TypeError, ValueError, IndexError):
             roof_m = 0.3 * height_m
         roof_mm = min(max(roof_m, 0.0), 0.5 * height_m) * z_per_m
-        if roof_mm > 0.2:
-            ring = [list(c) for c in poly.exterior.coords]
-            v, f = _extrude_ring_with_roof(ring, z_floor, ground_hi + total - roof_mm,
-                                           shape_, roof_mm, float, float)
-            if v is not None:
-                roofed = np.asarray(v, np.float64), np.asarray(f)
-                if _manifold(roofed).status() == mf.Error.NoError:
-                    return roofed
-            # The roof generator cannot close pitched roofs on concave footprints:
-            # keep the building, flat at mid-roof height.
-            return prism(poly, z_floor, ground_hi + total - roof_mm / 2)
-    return prism(poly, z_floor, ground_hi + total)
+        if roof_mm <= 0.2:            # below print resolution: flat at full height
+            shape_, roof_mm = "flat", 0.0
+    top = ground_hi + total
+    solids = building_solids(poly, z_floor, top - roof_mm, roof_mm, shape_, props)
+    good = [m for m in solids if _manifold(m).status() == mf.Error.NoError]
+    if len(good) == len(solids) and good:
+        return good
+    # Keep the building if a roof cannot be closed: flat at mid-roof height.
+    m = prism(poly, z_floor, top - roof_mm / 2)
+    return [m] if m is not None else []
 
 
 def _slab(poly: Polygon, terrain: Terrain, top_off: float, bottom_off: float) -> Mesh | None:
@@ -450,9 +449,7 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
         want = np.array([float(p.get("height_m") or 10.0) for p in props]) * z_per_m
         stats["clamped"] = int((want > cap).sum())
         for poly, pr, l_, h_, c_ in zip(polys, props, lo, hi, cap, strict=True):
-            m = _roofed(poly, pr, max(l_ - 0.2, 0.0), h_, z_per_m, style, c_)
-            if m is not None:
-                solids.append(m)
+            solids.extend(_roofed(poly, pr, max(l_ - 0.2, 0.0), h_, z_per_m, style, c_))
     elif style.mode == "water":
         # Standing water (lakes, reservoirs, the sea) is cut flat below its lowest
         # shore; flowing water follows the valley floor. Cut flat, a river on a
