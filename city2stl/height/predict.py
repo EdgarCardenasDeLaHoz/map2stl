@@ -31,7 +31,7 @@ import numpy as np
 if TYPE_CHECKING:
     import torch
 
-from city2stl.skyline.height import BBox, HeightResult
+from city2stl.height import BBox, HeightResult
 from geo2stl.geo import M_PER_DEG_LAT
 
 logger = logging.getLogger(__name__)

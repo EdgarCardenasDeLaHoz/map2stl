@@ -410,7 +410,7 @@ class TestEnhanceHeightsRouter:
     @pytest.mark.parametrize("key, expected", [(None, False), ("test-key", True)])
     def test_google3d_available_endpoint(self, client, monkeypatch, key, expected):
         """GET /api/cities/google3d-available reflects the key lookup, not the machine."""
-        import city2stl.skyline.height.providers.google_3d as g3d
+        import city2stl.height.providers.google_3d as g3d
         monkeypatch.setattr(g3d, "_get_api_key", lambda *a, **k: key)
         resp = client.get("/api/cities/google3d-available")
         assert resp.status_code == 200

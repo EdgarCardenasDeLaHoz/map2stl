@@ -19,13 +19,13 @@ Layout:
   - ``_report_plots/``       — HTML-report figures
   - ``region_pdf.py``        — region orchestration; ``region_config``,
     ``region_data`` and ``region_types`` hold its flags, I/O and dataclasses
-  - ``height/``              — ML height stack and external height providers
+  - ``height/``              — re-export shim for ``city2stl.height``
 
 Entry point: ``city2stl/skyline/scripts/08_region_skyline_pdf.py``.
 
-This is the cross-view research pipeline. The ML height stack it builds on
-lives alongside it in ``city2stl/skyline/height/`` (moved from
-``city2stl/height/`` on 2026-06-07). See ``README.md`` and ``STATUS.md`` for
+This is the cross-view research pipeline. The ML height stack and the external
+height providers it builds on are general-purpose and live in
+``city2stl/height/``. See ``README.md`` and ``STATUS.md`` for
 current strengths, weaknesses, and known failure modes.
 """
 

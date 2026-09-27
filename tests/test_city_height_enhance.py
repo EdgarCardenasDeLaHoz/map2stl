@@ -1,5 +1,5 @@
 """
-Tests for app.server.core.height.service.enhance_city_data provider handling.
+Tests for city2stl.height.service.enhance_city_data provider handling.
 
 US bboxes used to return early ("osm_only_us") and never reach any provider;
 coarse providers used to be downloaded and then discarded.
@@ -7,8 +7,7 @@ coarse providers used to be downloaded and then discarded.
 import numpy as np
 import pytest
 
-from app.server.core.height import service
-from city2stl.skyline.height import BUILDING_RESOLUTION_LIMIT_M, HeightResult
+from city2stl.height import BUILDING_RESOLUTION_LIMIT_M, HeightResult, service
 
 # Breckenridge, CO
 N, S, E, W = 39.51, 39.43, -106.03, -106.125
@@ -45,7 +44,7 @@ def _payload():
 @pytest.fixture
 def providers(monkeypatch):
     """A fine and a coarse raster provider, and no lidar (it is network-bound)."""
-    from city2stl.skyline.height.providers import lidar_3dep_copc
+    from city2stl.height.providers import lidar_3dep_copc
     monkeypatch.setattr(lidar_3dep_copc, "available", lambda: False)
     fine = _FakeProvider("fine", 3.0)
     coarse = _FakeProvider("coarse", BUILDING_RESOLUTION_LIMIT_M * 3, value=2.0)
@@ -77,7 +76,7 @@ def test_coarse_provider_is_not_fetched(providers):
 
 
 def _lidar(monkeypatch, heights, tiles=1):
-    from city2stl.skyline.height.providers import lidar_3dep_copc
+    from city2stl.height.providers import lidar_3dep_copc
     monkeypatch.setattr(lidar_3dep_copc, "available", lambda: True)
     seen = {}
 

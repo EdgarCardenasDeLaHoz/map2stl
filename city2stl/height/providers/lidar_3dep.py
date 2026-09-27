@@ -31,7 +31,7 @@ import os
 import numpy as np
 import requests
 
-from city2stl.skyline.height import BBox, HeightResult, _resample
+from city2stl.height import BBox, HeightResult, _resample
 
 from ._cache import (
     make_cache_key,

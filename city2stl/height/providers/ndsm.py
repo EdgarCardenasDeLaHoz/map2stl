@@ -28,8 +28,8 @@ from pathlib import Path
 import numpy as np
 import requests
 
-from app.server.core.cache import CACHE_ROOT
-from city2stl.skyline.height import BBox, HeightResult
+import geo2stl.cache as _cache_mod
+from city2stl.height import BBox, HeightResult
 
 from ._cache import (
     make_cache_key,
@@ -49,7 +49,7 @@ NDSM_CONFIDENCE = 0.8
 # how densely the output grid is sampled. Reporting the output grid spacing here
 # instead -- which this provider used to do -- claims a resolution the data does
 # not have, and the merge reads this field to decide which source resolves a
-# building. See `resolution_priority` in city2stl/skyline/height/__init__.py.
+# building. See `resolution_priority` in city2stl/height/__init__.py.
 NDSM_RESOLUTION_M = 30.0
 
 # OpenTopography global DEM API — used to fetch SRTM as DTM source.
@@ -143,7 +143,7 @@ def _tiles_for_bbox(bbox: BBox) -> list[tuple[int, int]]:
 # ── Tile download + cache ────────────────────────────────────────
 
 def _tile_cache_dir() -> Path:
-    d = CACHE_ROOT / "ndsm" / "tiles"
+    d = _cache_mod.CACHE_ROOT / "ndsm" / "tiles"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -340,7 +340,7 @@ class NDSMProvider:
 
     def fetch_heights(self, bbox: BBox, dim: tuple[int, int]) -> HeightResult:
         """Fetch nDSM for *bbox*, resample to *dim* = (H, W)."""
-        from city2stl.skyline.height import _resample
+        from city2stl.height import _resample
 
         north, south, east, west = bbox
         cache_key = make_cache_key("ndsm", north, south, east, west,

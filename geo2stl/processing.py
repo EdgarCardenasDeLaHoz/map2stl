@@ -14,17 +14,25 @@ Those names are still importable at app.server.core.dem.* so routers keep workin
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 import numpy as np
 
-if TYPE_CHECKING:
-    # ProcessingSpec is a Pydantic model defined in app.server.schemas.
-    # We reference it only in type annotations (never at runtime) to avoid
-    # creating a dependency from this library package onto the server layer.
-    from app.server.schemas import ProcessingSpec  # noqa: F401
-
 logger = logging.getLogger(__name__)
+
+
+class ProcessingSpec(Protocol):
+    """The attributes ``apply_layer_processing`` reads; the app's Pydantic
+    ``ProcessingSpec`` satisfies it structurally."""
+
+    clip_min: float | None
+    clip_max: float | None
+    smooth_sigma: float
+    sharpen: bool
+    extract_rivers: bool
+    river_max_width_px: int
+    normalize: bool
+    invert: bool
 
 
 def apply_layer_processing(arr: np.ndarray, spec: ProcessingSpec) -> np.ndarray:

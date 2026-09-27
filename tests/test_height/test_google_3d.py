@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import trimesh
 
-from city2stl.skyline.height.providers.google_3d import (  # noqa: E402
+from city2stl.height.providers.google_3d import (  # noqa: E402
     Google3DProvider,
     _accumulate_mesh,
     _bv_intersects_bbox,
@@ -317,7 +317,7 @@ class TestGoogle3DProvider:
                     return MockResp(json.dumps(tileset).encode(), is_json=True)
                 return MockResp(glb_bytes)
 
-        monkeypatch.setattr("city2stl.skyline.height.providers.google_3d.requests.Session",
+        monkeypatch.setattr("city2stl.height.providers.google_3d.requests.Session",
                             MockSession)
 
         p = Google3DProvider(api_key="test-key", max_tiles=10)
@@ -388,7 +388,7 @@ class TestGoogle3DProvider:
                     return MockResp(json_mod.dumps(tileset).encode())
                 return MockResp(glb_bytes)
 
-        monkeypatch.setattr("city2stl.skyline.height.providers.google_3d.requests.Session",
+        monkeypatch.setattr("city2stl.height.providers.google_3d.requests.Session",
                             MockSession)
 
         # DEM at 100m terrain → building height should be ~50m

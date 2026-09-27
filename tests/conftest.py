@@ -48,9 +48,10 @@ def tmp_data_dir(tmp_path, monkeypatch):
     """
     # Trigger the server import first so all modules are in sys.modules
     import app.server  # noqa: F401 — ensures routers are imported
-    import app.server.core.cache as cache_module
     import app.server.core.db as db_module
+    import app.server.core.dem_store as dem_store_module
     import app.server.routers.cities as cities_router
+    import geo2stl.cache as cache_module
 
     # Redirect SQLite to a fresh temp file with TestRegion pre-seeded
     test_db = tmp_path / "test_data.db"
@@ -63,6 +64,8 @@ def tmp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(cache_module, "CACHE_ROOT", test_cache_root)
     # Also update the CACHE_ROOT reference already imported into the cities router
     monkeypatch.setattr(cities_router, "CACHE_ROOT", test_cache_root)
+    # DEM handles are stored under a path fixed at import time
+    monkeypatch.setattr(dem_store_module, "STORE_DIR", test_cache_root / "dem_handles")
 
     return {
         "db_path": test_db,

@@ -40,12 +40,12 @@ logger = logging.getLogger("height_report")
 
 def _build_registry() -> list[dict]:
     """Import providers lazily so missing optional deps don't crash startup."""
-    from city2stl.skyline.height.providers.copernicus import CopernicusProvider
-    from city2stl.skyline.height.providers.ghsl import GHSLProvider
-    from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
-    from city2stl.skyline.height.providers.ndsm import NDSMProvider
-    from city2stl.skyline.height.providers.open_buildings import OpenBuildingsProvider
-    from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
+    from city2stl.height.providers.copernicus import CopernicusProvider
+    from city2stl.height.providers.ghsl import GHSLProvider
+    from city2stl.height.providers.lidar_3dep import LiDAR3DEPProvider
+    from city2stl.height.providers.ndsm import NDSMProvider
+    from city2stl.height.providers.open_buildings import OpenBuildingsProvider
+    from city2stl.height.providers.wsf3d import WSF3DProvider
 
     return [
         {"name": "3DEP LiDAR",     "instance": LiDAR3DEPProvider(),    "confidence": 0.95, "res_m": 1.0,   "color": "#4caf50"},
@@ -690,7 +690,7 @@ def _generate_html(
 
 def _run(region_name: str, bbox: tuple[float, float, float, float],
          out_dir: Path) -> None:
-    from city2stl.skyline.height import merge_height_rasters, provider_stats
+    from city2stl.height import merge_height_rasters, provider_stats
     from city2stl.skyline.region_data import _load_osm_for_region
     from city2stl.skyline.region_types import RegionBBox
     from city2stl.skyline.satellite_image import fetch_region_satellite
@@ -810,7 +810,7 @@ def _run(region_name: str, bbox: tuple[float, float, float, float],
             "p95_m": float(np.nanpercentile(osm_vals, 95)),
         }
         # Add to merge as confidence=1.0 so OSM beats all raster providers
-        from city2stl.skyline.height import HeightResult as _HR  # noqa: PLC0415
+        from city2stl.height import HeightResult as _HR  # noqa: PLC0415
         osm_conf_r = np.where(np.isnan(osm_raster), 0.0, 1.0).astype(np.float32)
         ok_rasters.insert(0, _HR(osm_raster, osm_conf_r, "osm_tags", 0.0))
         print(f"[height_report] OSM: {osm_tagged_n} height tags + "
@@ -823,7 +823,7 @@ def _run(region_name: str, bbox: tuple[float, float, float, float],
     # -- Merge --
     merged_raster: np.ndarray | None = None
     if ok_rasters:
-        from city2stl.skyline.height import merge_height_rasters
+        from city2stl.height import merge_height_rasters
         merged_hr = merge_height_rasters(ok_rasters, target_shape=dim)
         merged_raster = merged_hr.raster
         valid_m = int(np.count_nonzero(~np.isnan(merged_raster)))

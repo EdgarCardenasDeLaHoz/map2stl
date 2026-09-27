@@ -21,12 +21,12 @@ import numpy as np
 import rasterio
 import requests
 
-from app.server.core.cache import (
+from city2stl.height import BBox, HeightResult, _resample
+from geo2stl.cache import (
     make_cache_key,
     read_array_cache,
     write_array_cache,
 )
-from city2stl.skyline.height import BBox, HeightResult, _resample
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ _NAMESPACE = "wsf3d"
 _DOWNLOAD_TIMEOUT = 60  # seconds per tile
 
 # Register TTL if not already present
-from app.server.core import cache as _cache_mod  # noqa: E402
+import geo2stl.cache as _cache_mod  # noqa: E402
 
 _cache_mod.NAMESPACE_TTL.setdefault(_NAMESPACE, 90 * 86400)
 

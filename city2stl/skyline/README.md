@@ -2,9 +2,9 @@
 
 Computer-vision pipeline that estimates per-building heights for a city
 region by registering Google Street View imagery against OpenStreetMap
-building footprints (+ satellite footprints). The ML height stack lives
-alongside it in `city2stl/skyline/height/` (moved here from
-`city2stl/height/` on 2026-06-07). Implements the F-SKY series
+building footprints (+ satellite footprints). The ML height stack and
+height providers it uses live in `city2stl/height/` (general-purpose;
+`skyline/height/` is a re-export shim). Implements the F-SKY series
 (F-SKY1, F-SKY2, F-SKY4–F-SKY8, F-SKY10–F-SKY13, F-SKY18, F-SKY22,
 F-SKY24).
 

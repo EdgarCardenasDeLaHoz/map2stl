@@ -101,3 +101,12 @@ edited values first, DEM handle otherwise) instead of the raw handle.
   source dropdown. `/api/composite/dem-merge` itself stays (SDK `merge_dem()` uses it).
 - Step 5 started: `geo2stl/osm.py` holds the Overpass mirrors, health probe and osmnx
   settings for both city layers and trails (removes violation 5, trails -> city2stl private).
+- 2026-09-27 — steps 2–4 done. (2) `geo2stl/cache.py` holds `CACHE_ROOT`, TTLs, key helpers
+  and the array/OSM cache; `app/server/core/cache.py` keeps pruning/clear/migration and
+  re-exports the rest (`CACHE_ROOT` forwarded live). Tests patch `geo2stl.cache.CACHE_ROOT`.
+  (3) `city2stl/skyline/height/` → `city2stl/height/`; `skyline/height/__init__.py` is a
+  one-release re-export shim. (4) registry, selection and `enhance_city_data` in
+  `city2stl/height/service.py`; the app keeps the async `/api/height/*` glue and passes its
+  OpenTopography key in. `skyline/region_data` reads the regions table read-only via
+  `sqlite3` (`REGIONS_DB`, optional `region_lookup`); `geo2stl/processing` uses a local
+  `ProcessingSpec` Protocol. Violation 4 removed: no `app.*` imports left in the libraries.

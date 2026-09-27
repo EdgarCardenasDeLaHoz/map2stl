@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from city2stl.skyline.height.stl_import import _UP_AXIS_ROTATIONS, stl_to_heightmap
+from city2stl.height.stl_import import _UP_AXIS_ROTATIONS, stl_to_heightmap
 
 # ── STL writing helpers ───────────────────────────────────────────────────────
 
@@ -175,7 +175,7 @@ class TestErrorHandling:
         # Must re-import the module so the patched import path is taken
         import importlib
 
-        import city2stl.skyline.height.stl_import as mod
+        import city2stl.height.stl_import as mod
         importlib.reload(mod)
         try:
             with pytest.raises(ImportError, match="trimesh"):

@@ -4,49 +4,82 @@ Split out of region_pdf.py (F-CLEAN14, 2026-06-07). Pure data-acquisition
 helpers: region bbox from the strm2stl SQLite table, OSM fetch + BuildingRecord
 construction, the water filter, DEM terrain attach, and the sites/<region>.json
 config readers. No Street View I/O, no rendering. region_pdf re-imports these.
+
+The regions table is read straight from the SQLite file (``REGIONS_DB``,
+read-only) rather than through the app's ``db`` module, so this library does
+not import ``app``.
 """
 
 from __future__ import annotations
 
 import json
 import math
+import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import requests
 from shapely.geometry import shape
 
-from app.server.core.cache import osm_cache_key, read_osm_cache, write_osm_cache
-from app.server.core.db import get_db, init_db
 from city2stl.fetch import fetch_osm_data
+from geo2stl.cache import osm_cache_key, read_osm_cache, write_osm_cache
 from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
 from ._core.types import BuildingRecord
 from ._core.util import _building_height_from_tags, _polygon_area_m2
 from .region_types import RegionBBox
 
+#: The strm2stl regions database (the app's ``core.db.DB_PATH``).
+REGIONS_DB = Path(__file__).resolve().parents[2] / "data.db"
 
-def _load_region_bbox(region_name: str) -> RegionBBox:
+
+def _regions_db_lookup(region_name: str) -> RegionBBox | None:
+    """Return the region's bbox from the ``regions`` table, or None.
+
+    Opens ``REGIONS_DB`` read-only, so a missing database or table is a miss
+    rather than a new empty file.
+    """
+    if not REGIONS_DB.exists():
+        return None
+    try:
+        conn = sqlite3.connect(f"{REGIONS_DB.as_uri()}?mode=ro", uri=True)
+        try:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT name, north, south, east, west FROM regions WHERE name = ?",
+                (region_name,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    if row is None:
+        return None
+    return RegionBBox(
+        name=str(row["name"]),
+        north=float(row["north"]),
+        south=float(row["south"]),
+        east=float(row["east"]),
+        west=float(row["west"]),
+    )
+
+
+def _load_region_bbox(
+    region_name: str,
+    region_lookup: Callable[[str], RegionBBox | None] | None = None,
+) -> RegionBBox:
     """Load a RegionBBox from the SQLite regions table.
 
-    Falls back to ``sites/<region_name>.json`` so that cities defined via the
-    site JSON files work without requiring a DB entry.  Matching against the DB
-    is case-sensitive; the JSON fallback is case-insensitive on the filename.
+    *region_lookup* replaces the table read (the app can pass its own DB
+    accessor). Falls back to ``sites/<region_name>.json`` so that cities
+    defined via the site JSON files work without requiring a DB entry.
+    Matching against the DB is case-sensitive; the JSON fallback is
+    case-insensitive on the filename.
     """
-    init_db()
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT name, north, south, east, west FROM regions WHERE name = ?",
-            (region_name,),
-        ).fetchone()
-    if row is not None:
-        return RegionBBox(
-            name=str(row["name"]),
-            north=float(row["north"]),
-            south=float(row["south"]),
-            east=float(row["east"]),
-            west=float(row["west"]),
-        )
+    found = (region_lookup or _regions_db_lookup)(region_name)
+    if found is not None:
+        return found
 
     # Fallback: load bbox from sites/<region_name>.json if it exists.
     site_json = (

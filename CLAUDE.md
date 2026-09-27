@@ -38,7 +38,7 @@ python -m pytest tests/ -v                                     # run all tests (
 | Terrain API call stacks | `docs/terrain-api-audit.md` |
 | Session client (Python API) | `docs/sdk-workflow.md` + `app/session/terrain_session.py` + `notebooks/Session_API_Reference.ipynb` |
 | Notebook-driven terrain workflow | `docs/sdk-workflow.md` + `notebooks/API_Terrain.ipynb` |
-| Cache / storage | `app/server/core/cache.py` header + `docs/api.md` |
+| Cache / storage | `geo2stl/cache.py` header (primitives) + `app/server/core/cache.py` (pruning) + `docs/api.md` |
 | DEM rendering / colormaps | `docs/modules.md` + `app/client/static/js/modules/dem/dem-loader.js:1-30` |
 | City / OSM features | `docs/modules.md` + `app/client/static/js/modules/layers/city-overlay.js:1-40` |
 | Stacked layers / composite | `docs/modules.md` + `app/client/static/js/modules/layers/stacked-layers.js:1-30` |
@@ -66,7 +66,7 @@ strm2stl/
 │   │   ├── schemas.py     ← all Pydantic models
 │   │   ├── core/          ← cache.py, cache_inspector.py, db.py, export.py, inflight.py,
 │   │   │                    export_params.py, export_tasks.py, responses.py, validation.py,
-│   │   │                    height/ subpackage (service.py, train.py)
+│   │   │                    height/ subpackage (async service glue, train.py)
 │   │   └── routers/       ← terrain.py, regions.py, export.py, cities.py, cache.py,
 │   │                        settings.py, composite.py, height.py
 │   ├── client/            ← browser client (HTML/CSS/JS)
@@ -78,8 +78,8 @@ strm2stl/
 │       └── viz.py
 │
 │  ── geo/mesh libraries ─────────────────────────────────────────────────
-├── geo2stl/               ← map projections + tile stitching
-├── city2stl/              ← OSM/building to 3D mesh helpers
+├── geo2stl/               ← map projections + tile stitching, disk cache (cache.py)
+├── city2stl/              ← OSM/building to 3D mesh helpers; height/ = height providers + registry
 │
 │  ── project tooling ────────────────────────────────────────────────────
 ├── tests/                 ← pytest suite (conftest.py + 32 test files; e2e/ requires playwright)

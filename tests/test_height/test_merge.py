@@ -7,7 +7,7 @@ No network, no external dependencies beyond numpy.
 import numpy as np
 import pytest
 
-from city2stl.skyline.height import HeightResult, _resample, merge_height_rasters
+from city2stl.height import HeightResult, _resample, merge_height_rasters
 
 # ── Helpers ──────────────────────────────────────────────────────
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from city2stl.skyline.height.infill import infill_idw, infill_nearest
+from city2stl.height.infill import infill_idw, infill_nearest
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

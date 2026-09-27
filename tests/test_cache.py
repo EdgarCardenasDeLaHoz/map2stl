@@ -31,7 +31,7 @@ from app.server.core.cache import (
 @pytest.fixture()
 def patched_cache(tmp_path, monkeypatch):
     """Redirect CACHE_ROOT to a temp directory for all cache operations."""
-    import app.server.core.cache as cache_mod
+    import geo2stl.cache as cache_mod
     monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path)
     return tmp_path
 
@@ -156,7 +156,7 @@ class TestArrayCache:
     def test_cloud_placeholder_is_a_miss_and_dropped(self, patched_cache):
         """A dehydrated OneDrive placeholder (open() -> Errno 22) reads as a miss
         and is removed so the re-fetch can write a local copy."""
-        import app.server.core.cache as cache_mod
+        import geo2stl.cache as cache_mod
         write_array_cache("wsf3d", "ph", {"height": np.ones(4)})
         with patch.object(cache_mod, "_is_cloud_placeholder", return_value=True):
             assert read_array_cache("wsf3d", "ph") is None

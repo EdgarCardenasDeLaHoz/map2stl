@@ -2440,15 +2440,15 @@ class TerrainSession:
         if providers is None:
             providers = ["wsf3d", "google3d"]
 
-        from city2stl.skyline.height import HeightResult, merge_height_rasters
-        from city2stl.skyline.height.providers.copernicus import CopernicusProvider
-        from city2stl.skyline.height.providers.ghsl import GHSLProvider
-        from city2stl.skyline.height.providers.google_3d import Google3DProvider
-        from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
-        from city2stl.skyline.height.providers.ndsm import NDSMProvider
-        from city2stl.skyline.height.providers.open_buildings import OpenBuildingsProvider
-        from city2stl.skyline.height.providers.shadow_height import ShadowHeightProvider
-        from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
+        from city2stl.height import HeightResult, merge_height_rasters
+        from city2stl.height.providers.copernicus import CopernicusProvider
+        from city2stl.height.providers.ghsl import GHSLProvider
+        from city2stl.height.providers.google_3d import Google3DProvider
+        from city2stl.height.providers.lidar_3dep import LiDAR3DEPProvider
+        from city2stl.height.providers.ndsm import NDSMProvider
+        from city2stl.height.providers.open_buildings import OpenBuildingsProvider
+        from city2stl.height.providers.shadow_height import ShadowHeightProvider
+        from city2stl.height.providers.wsf3d import WSF3DProvider
 
         north = self.bbox["north"]
         south = self.bbox["south"]
@@ -2785,7 +2785,7 @@ class TerrainSession:
 
         Returns self for chaining.
         """
-        from city2stl.skyline.height.predict import predict as _predict
+        from city2stl.height.predict import predict as _predict
 
         if getattr(self, "satellite", None) is None:
             raise RuntimeError("Call fetch_satellite() before predict_heights().")
@@ -2870,11 +2870,11 @@ class TerrainSession:
         ``n_val``, ``checkpoint``.
         """
         from app.server.core.height.train import collect_tiles
-        from city2stl.skyline.height.train import (
+        from city2stl.height.train import (
             _DEFAULT_CITIES,
             TrainConfig,
         )
-        from city2stl.skyline.height.train import (
+        from city2stl.height.train import (
             train as _train,
         )
 
@@ -2957,7 +2957,7 @@ class TerrainSession:
             ``self.stl_heightmap`` : (H, W) float32 — height values in mesh units.
             ``self.stl_mask``      : (H, W) bool    — True where surface found.
         """
-        from city2stl.skyline.height.stl_import import stl_to_heightmap
+        from city2stl.height.stl_import import stl_to_heightmap
 
         target_bbox = bbox or self.bbox
         if not target_bbox:
@@ -3036,7 +3036,7 @@ class TerrainSession:
         if getattr(self, "stl_heightmap", None) is None:
             raise RuntimeError("Call load_stl() first.")
 
-        from city2stl.skyline.height.infill import infill_idw, infill_nearest
+        from city2stl.height.infill import infill_idw, infill_nearest
 
         hm = self.stl_heightmap
         mask = getattr(self, "stl_mask", None)

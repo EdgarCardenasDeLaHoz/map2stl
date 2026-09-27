@@ -9,8 +9,8 @@ import pytest
 import rasterio
 from rasterio.transform import from_bounds
 
-from city2stl.skyline.height.providers import wsf3d_global  # noqa: E402
-from city2stl.skyline.height.providers.wsf3d import (  # noqa: E402
+from city2stl.height.providers import wsf3d_global  # noqa: E402
+from city2stl.height.providers.wsf3d import (  # noqa: E402
     WSF3DProvider,
     _lat_label,
     _lon_label,
@@ -103,7 +103,7 @@ class TestWSF3DProvider:
         class MockResp:
             status_code = 404
             content = b""
-        monkeypatch.setattr("city2stl.skyline.height.providers.wsf3d.requests.get",
+        monkeypatch.setattr("city2stl.height.providers.wsf3d.requests.get",
                             lambda *a, **kw: MockResp())
         monkeypatch.setattr(wsf3d_global, "available", lambda: False)
 
@@ -124,13 +124,13 @@ class TestGlobalMosaicFallback:
 
     @staticmethod
     def _no_tiles(monkeypatch, tmp_path):
-        import app.server.core.cache as cache_mod
+        import geo2stl.cache as cache_mod
         monkeypatch.setattr(cache_mod, "CACHE_ROOT", tmp_path / "cache")
 
         class MockResp:
             status_code = 404
             content = b""
-        monkeypatch.setattr("city2stl.skyline.height.providers.wsf3d.requests.get",
+        monkeypatch.setattr("city2stl.height.providers.wsf3d.requests.get",
                             lambda *a, **kw: MockResp())
         monkeypatch.setattr(wsf3d_global, "available", lambda: True)
 
@@ -214,7 +214,7 @@ class TestWSF3DProviderTiles:
             def raise_for_status(self):
                 pass
 
-        monkeypatch.setattr("city2stl.skyline.height.providers.wsf3d.requests.get",
+        monkeypatch.setattr("city2stl.height.providers.wsf3d.requests.get",
                             lambda *a, **kw: MockResp())
 
         p = WSF3DProvider()
@@ -260,7 +260,7 @@ class TestWSF3DProviderTiles:
             call_count += 1
             return MockResp()
 
-        monkeypatch.setattr("city2stl.skyline.height.providers.wsf3d.requests.get",
+        monkeypatch.setattr("city2stl.height.providers.wsf3d.requests.get",
                             mock_get)
 
         p = WSF3DProvider()

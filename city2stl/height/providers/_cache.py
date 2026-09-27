@@ -1,10 +1,11 @@
 """Shared height-provider cache plumbing.
 
 Every height provider persists a single ``HeightResult`` (raster + confidence +
-``resolution_m``) per ``(bbox, dim)`` key in the app-server array cache, and
-registers a namespace TTL at import time. That contract was copy-pasted into
-each provider; this module centralises it so the providers only express the
-parts that actually differ (namespace, default resolution, the fetch body).
+``resolution_m``) per ``(bbox, dim)`` key in the shared array cache
+(``geo2stl.cache``), and registers a namespace TTL at import time. That
+contract was copy-pasted into each provider; this module centralises it so the
+providers only express the parts that actually differ (namespace, default
+resolution, the fetch body).
 
 Usage::
 
@@ -22,13 +23,13 @@ Usage::
 
 from __future__ import annotations
 
-from app.server.core.cache import (  # noqa: F401 – make_cache_key re-exported for callers
+from city2stl.height import HeightResult
+from geo2stl.cache import (  # noqa: F401 – make_cache_key re-exported for callers
     NAMESPACE_TTL,
     make_cache_key,
     read_array_cache,
     write_array_cache,
 )
-from city2stl.skyline.height import HeightResult
 
 __all__ = [
     "register_ttl",

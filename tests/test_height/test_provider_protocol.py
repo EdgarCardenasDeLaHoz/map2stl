@@ -2,7 +2,7 @@
 
 Constructs each provider and checks its shape only; nothing here touches the
 network. The list covers every provider class under
-``city2stl/skyline/height/providers/`` (a superset of the server registry in
+``city2stl/height/providers/`` (a superset of the server registry in
 ``app/server/core/height/service.py``).
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ import importlib
 import numpy as np
 import pytest
 
-from city2stl.skyline.height import HeightProvider, HeightResult
+from city2stl.height import HeightProvider, HeightResult
 
 _PROVIDERS = [
     ("copernicus", "CopernicusProvider"),
@@ -29,7 +29,7 @@ _PROVIDERS = [
 
 @pytest.mark.parametrize(("module", "cls_name"), _PROVIDERS, ids=[m for m, _ in _PROVIDERS])
 def test_provider_satisfies_protocol(module: str, cls_name: str) -> None:
-    mod = importlib.import_module(f"city2stl.skyline.height.providers.{module}")
+    mod = importlib.import_module(f"city2stl.height.providers.{module}")
     provider = getattr(mod, cls_name)()
 
     assert isinstance(provider, HeightProvider)
@@ -72,7 +72,7 @@ _EMPTY_NAMES = [
 
 @pytest.mark.parametrize(("module", "source_name"), _EMPTY_NAMES, ids=[m for m, _ in _EMPTY_NAMES])
 def test_module_empty_result_keeps_source_name(module: str, source_name: str) -> None:
-    mod = importlib.import_module(f"city2stl.skyline.height.providers.{module}")
+    mod = importlib.import_module(f"city2stl.height.providers.{module}")
     res = mod._empty_result((2, 5))
 
     assert res.source_name == source_name

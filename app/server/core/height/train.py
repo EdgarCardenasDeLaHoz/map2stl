@@ -1,7 +1,7 @@
 """
 core/height/train -- Server-side training orchestration.
 
-Pure training code lives in city2stl.skyline.height.train.  This module holds
+Pure training code lives in city2stl.height.train.  This module holds
 collect_tiles(), which requires the server's height data providers (cache-backed).
 
 Usage (standalone):
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from city2stl.skyline.height.train import (
+from city2stl.height.train import (
     _DEFAULT_CITIES,
     MAX_NAN_FRAC,
     TARGET_RES_M,
@@ -66,14 +66,14 @@ def collect_tiles(
     List of Paths to collected .npz tile files.
     """
     from app.server.config import OPENTOPO_API_KEY
-    from city2stl.skyline.height import merge_height_rasters
-    from city2stl.skyline.height.providers.copernicus import CopernicusProvider
-    from city2stl.skyline.height.providers.ghsl import GHSLProvider
-    from city2stl.skyline.height.providers.google_3d import Google3DProvider
-    from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
-    from city2stl.skyline.height.providers.ndsm import NDSMProvider
-    from city2stl.skyline.height.providers.shadow_height import ShadowHeightProvider
-    from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
+    from city2stl.height import merge_height_rasters
+    from city2stl.height.providers.copernicus import CopernicusProvider
+    from city2stl.height.providers.ghsl import GHSLProvider
+    from city2stl.height.providers.google_3d import Google3DProvider
+    from city2stl.height.providers.lidar_3dep import LiDAR3DEPProvider
+    from city2stl.height.providers.ndsm import NDSMProvider
+    from city2stl.height.providers.shadow_height import ShadowHeightProvider
+    from city2stl.height.providers.wsf3d import WSF3DProvider
 
     _prov_map = {
         "wsf3d":       WSF3DProvider(),

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from city2stl.skyline.height.providers.shadow_height import (
+from city2stl.height.providers.shadow_height import (
     _detect_shadows,
     _estimate_sun_elevation,
     _fetch_rgb_for_bbox,

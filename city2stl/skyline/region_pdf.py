@@ -44,8 +44,8 @@ Key state structures
 
 Hard dependencies beyond pipeline.py: ``requests`` (Street View Static API
 + Overpass + open-meteo elevations), ``matplotlib`` (PDF rendering),
-``app.server.core.cache`` / ``app.server.core.db`` (OSM cache + region
-table — production strm2stl integration points).
+``geo2stl.cache`` (OSM cache) and the strm2stl regions SQLite table, read
+by ``region_data`` without importing ``app``.
 """
 
 from __future__ import annotations

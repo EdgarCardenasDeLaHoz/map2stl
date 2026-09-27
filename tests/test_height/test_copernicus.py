@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 import numpy as np
 
-from city2stl.skyline.height import HeightResult
-from city2stl.skyline.height.providers.copernicus import (
+from city2stl.height import HeightResult
+from city2stl.height.providers.copernicus import (
     _CONFIDENCE,
     CopernicusProvider,
     _is_in_europe,
@@ -60,9 +60,9 @@ class TestParseGeotiff:
 # ── Provider fetch (mocked) ──────────────────────────────────────
 
 class TestCopernicusFetch:
-    @patch("city2stl.skyline.height.providers.copernicus.read_height_result", return_value=None)
-    @patch("city2stl.skyline.height.providers.copernicus.write_height_result")
-    @patch("city2stl.skyline.height.providers.copernicus._fetch_eu_wcs")
+    @patch("city2stl.height.providers.copernicus.read_height_result", return_value=None)
+    @patch("city2stl.height.providers.copernicus.write_height_result")
+    @patch("city2stl.height.providers.copernicus._fetch_eu_wcs")
     def test_eu_wcs_success(self, mock_wcs, mock_write, mock_read):
         """EU WCS returns valid data → HeightResult with correct shape."""
         mock_wcs.return_value = np.full((50, 50), 15.0, dtype=np.float32)
@@ -75,9 +75,9 @@ class TestCopernicusFetch:
         np.testing.assert_allclose(result.raster, 15.0)
         np.testing.assert_allclose(result.confidence, _CONFIDENCE)
 
-    @patch("city2stl.skyline.height.providers.copernicus.read_height_result", return_value=None)
-    @patch("city2stl.skyline.height.providers.copernicus.write_height_result")
-    @patch("city2stl.skyline.height.providers.copernicus._fetch_eu_wcs")
+    @patch("city2stl.height.providers.copernicus.read_height_result", return_value=None)
+    @patch("city2stl.height.providers.copernicus.write_height_result")
+    @patch("city2stl.height.providers.copernicus._fetch_eu_wcs")
     def test_eu_wcs_failure_returns_nan(self, mock_wcs, mock_write, mock_read):
         """EU WCS fails → all NaN result."""
         mock_wcs.return_value = None
@@ -86,9 +86,9 @@ class TestCopernicusFetch:
         assert np.all(np.isnan(result.raster))
         assert np.all(result.confidence == 0.0)
 
-    @patch("city2stl.skyline.height.providers.copernicus.read_height_result", return_value=None)
-    @patch("city2stl.skyline.height.providers.copernicus.write_height_result")
-    @patch("city2stl.skyline.height.providers.copernicus._fetch_eu_wcs")
+    @patch("city2stl.height.providers.copernicus.read_height_result", return_value=None)
+    @patch("city2stl.height.providers.copernicus.write_height_result")
+    @patch("city2stl.height.providers.copernicus._fetch_eu_wcs")
     def test_resamples_to_target_dim(self, mock_wcs, mock_write, mock_read):
         """WCS returns 10×10 but target is 50×50 → resampled."""
         mock_wcs.return_value = np.full((10, 10), 25.0, dtype=np.float32)
@@ -97,7 +97,7 @@ class TestCopernicusFetch:
         assert result.raster.shape == (50, 50)
         np.testing.assert_allclose(result.raster, 25.0, atol=0.1)
 
-    @patch("city2stl.skyline.height.providers.copernicus.read_height_result")
+    @patch("city2stl.height.providers.copernicus.read_height_result")
     def test_cache_hit(self, mock_read):
         """Cached result returned without fetching."""
         raster = np.full((30, 30), 18.0, dtype=np.float32)

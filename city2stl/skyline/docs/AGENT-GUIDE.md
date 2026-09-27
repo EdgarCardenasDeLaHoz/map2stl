@@ -121,7 +121,7 @@ also runs bearing recovery and stores everything on a
 | Cross-correlation gate | `_bearing_xcorr_offset` | _report_plots/ |
 
 The ML height stack (DA2 loader, U-Net, providers) is in
-`city2stl/skyline/height/` (moved from `city2stl/height/` 2026-06-07).
+`city2stl/height/` (`skyline/height/` is a re-export shim).
 
 ## Config: `sites/<region>.json`
 

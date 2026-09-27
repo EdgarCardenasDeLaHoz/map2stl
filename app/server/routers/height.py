@@ -98,7 +98,7 @@ async def height_fetch(req: HeightFetchRequest):
     """Fetch and merge building heights from multiple providers."""
     import numpy as np
 
-    from city2stl.skyline.height import HeightResult, merge_height_rasters
+    from city2stl.height import HeightResult, merge_height_rasters
 
     bbox = (req.north, req.south, req.east, req.west)
     dim = (req.height, req.width)

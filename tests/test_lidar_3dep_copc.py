@@ -1,12 +1,12 @@
 """
-Tests for city2stl.skyline.height.providers.lidar_3dep_copc -- per-footprint
+Tests for city2stl.height.providers.lidar_3dep_copc -- per-footprint
 building heights from USGS 3DEP point clouds.
 """
 import numpy as np
 import pytest
 from shapely.geometry import box
 
-from city2stl.skyline.height.providers import lidar_3dep_copc as L
+from city2stl.height.providers import lidar_3dep_copc as L
 
 # Breckenridge, CO: 3DEP CO_Central_Western_2016 covers it.
 BRECK = (39.51, 39.43, -106.03, -106.125)

@@ -2,7 +2,7 @@
 core/mesh_import.py — STL/OBJ mesh import: upload storage, heightmap
 conversion, and manual point-pair registration.
 
-Delegates the heavy lifting to city2stl.skyline.height (stl_to_heightmap,
+Delegates the heavy lifting to city2stl.height (stl_to_heightmap,
 infill_idw/infill_nearest) and numpy2stl.registration.align.transform
 (apply_transform), following the guarded-import delegation pattern used
 throughout city2stl/mesh.py.
@@ -41,9 +41,9 @@ from numpy2stl.registration.pipeline import register_city_stl as _register_city_
 
 from app.server.config import MAX_DIM, MICROPOLITAN_STL_DIR
 from app.server.core.cache import CACHE_ROOT, make_cache_key
-from city2stl.skyline.height.infill import infill_idw as _infill_idw
-from city2stl.skyline.height.infill import infill_nearest as _infill_nearest
-from city2stl.skyline.height.stl_import import stl_to_heightmap as _stl_to_heightmap
+from city2stl.height.infill import infill_idw as _infill_idw
+from city2stl.height.infill import infill_nearest as _infill_nearest
+from city2stl.height.stl_import import stl_to_heightmap as _stl_to_heightmap
 from geo2stl.geo import bbox_size_m
 
 logger = logging.getLogger(__name__)
@@ -148,7 +148,7 @@ def compute_heightmap(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Convert the uploaded mesh to a (heightmap, mask) pair for the given bbox.
 
-    Delegates to city2stl.skyline.height.stl_import.stl_to_heightmap, then
+    Delegates to city2stl.height.stl_import.stl_to_heightmap, then
     optionally fills NaN gaps via infill_idw/infill_nearest.
     """
     _check_grid_size(bbox, resolution_m)

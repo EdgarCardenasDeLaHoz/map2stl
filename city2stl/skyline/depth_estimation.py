@@ -2,7 +2,7 @@
 
 F-SKY12 Phase A — verifier only.
 
-Reuses the Depth Anything V2 loader from ``city2stl/skyline/height/predict.py`` (already
+Reuses the Depth Anything V2 loader from ``city2stl/height/predict.py`` (already
 a project dependency, already cached on disk). Calibrates relative depth to
 metres using known OSM building anchor distances, then derives a per-match
 height estimate that can be cross-checked against the geometric (pinhole-y)
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# DA2 inference (delegates to the existing loader in city2stl/skyline/height/predict)
+# DA2 inference (delegates to the existing loader in city2stl/height/predict)
 # ---------------------------------------------------------------------------
 
 def predict_pano_depth(view_rgb: np.ndarray, device: str = "cpu") -> np.ndarray:
@@ -54,7 +54,7 @@ def predict_pano_depth(view_rgb: np.ndarray, device: str = "cpu") -> np.ndarray:
                 Not yet calibrated to metres — use ``calibrate_pano_depth``.
     """
     # Delegate to the existing helper so we share the cache and the loader.
-    from city2stl.skyline.height.predict import _depth_anything_inference  # noqa: PLC0415
+    from city2stl.height.predict import _depth_anything_inference  # noqa: PLC0415
 
     return _depth_anything_inference(view_rgb, device=device)
 
@@ -67,7 +67,7 @@ def _depth_anything_raw(view_rgb: np.ndarray, device: str = "cpu") -> np.ndarray
     """
     from PIL import Image as PILImage  # noqa: PLC0415
 
-    from city2stl.skyline.height.predict import _load_da2  # noqa: PLC0415
+    from city2stl.height.predict import _load_da2  # noqa: PLC0415
     pipe = _load_da2(device)
     pil_img = PILImage.fromarray(view_rgb)
     result = pipe(pil_img)
@@ -112,7 +112,7 @@ def predict_pano_depth_tiled(
     Returns a (H, W) float32 map in [0, 1] matching the input pano
     shape. Closer = higher (same convention as ``predict_pano_depth``).
     """
-    from city2stl.skyline.height.predict import _depth_anything_inference  # noqa: PLC0415
+    from city2stl.height.predict import _depth_anything_inference  # noqa: PLC0415
 
     H, W = pano_rgb.shape[:2]
     if W <= tile_size:

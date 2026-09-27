@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 import numpy as np
 
-from city2stl.skyline.height import HeightResult
-from city2stl.skyline.height.providers.lidar_3dep import (
+from city2stl.height import HeightResult
+from city2stl.height.providers.lidar_3dep import (
     _CONFIDENCE,
     LiDAR3DEPProvider,
     _is_in_us,
@@ -54,10 +54,10 @@ class TestLiDARFetch:
     # The provider computes nDSM = COP30 DSM − SRTM DTM, both fetched via
     # ``_fetch_opentopo_dem(demtype, bbox, api_key, label)`` and gated on an
     # OpenTopography API key. (Earlier 3DEP ImageServer path removed.)
-    @patch("city2stl.skyline.height.providers.lidar_3dep.read_height_result", return_value=None)
-    @patch("city2stl.skyline.height.providers.lidar_3dep.write_height_result")
-    @patch("city2stl.skyline.height.providers.lidar_3dep._get_api_key", return_value="key")
-    @patch("city2stl.skyline.height.providers.lidar_3dep._fetch_opentopo_dem")
+    @patch("city2stl.height.providers.lidar_3dep.read_height_result", return_value=None)
+    @patch("city2stl.height.providers.lidar_3dep.write_height_result")
+    @patch("city2stl.height.providers.lidar_3dep._get_api_key", return_value="key")
+    @patch("city2stl.height.providers.lidar_3dep._fetch_opentopo_dem")
     def test_ndsm_subtraction(self, mock_dem, mock_key, mock_write, mock_read):
         """DSM=50m (COP30), DTM=30m (SRTM) → nDSM=20m."""
         def fake_dem(demtype, bbox, api_key, label):
@@ -72,10 +72,10 @@ class TestLiDARFetch:
         np.testing.assert_allclose(result.raster, 20.0, atol=0.1)
         np.testing.assert_allclose(result.confidence, _CONFIDENCE)
 
-    @patch("city2stl.skyline.height.providers.lidar_3dep.read_height_result", return_value=None)
-    @patch("city2stl.skyline.height.providers.lidar_3dep.write_height_result")
-    @patch("city2stl.skyline.height.providers.lidar_3dep._get_api_key", return_value="key")
-    @patch("city2stl.skyline.height.providers.lidar_3dep._fetch_opentopo_dem")
+    @patch("city2stl.height.providers.lidar_3dep.read_height_result", return_value=None)
+    @patch("city2stl.height.providers.lidar_3dep.write_height_result")
+    @patch("city2stl.height.providers.lidar_3dep._get_api_key", return_value="key")
+    @patch("city2stl.height.providers.lidar_3dep._fetch_opentopo_dem")
     def test_negative_clamped(self, mock_dem, mock_key, mock_write, mock_read):
         """DTM > DSM artefact → clamp to 0."""
         def fake_dem(demtype, bbox, api_key, label):
@@ -86,10 +86,10 @@ class TestLiDARFetch:
         result = p.fetch_heights((40.0, 39.9, -75.0, -75.1), (20, 20))
         assert np.all(result.raster >= 0)
 
-    @patch("city2stl.skyline.height.providers.lidar_3dep.read_height_result", return_value=None)
-    @patch("city2stl.skyline.height.providers.lidar_3dep.write_height_result")
-    @patch("city2stl.skyline.height.providers.lidar_3dep._get_api_key", return_value="key")
-    @patch("city2stl.skyline.height.providers.lidar_3dep._fetch_opentopo_dem")
+    @patch("city2stl.height.providers.lidar_3dep.read_height_result", return_value=None)
+    @patch("city2stl.height.providers.lidar_3dep.write_height_result")
+    @patch("city2stl.height.providers.lidar_3dep._get_api_key", return_value="key")
+    @patch("city2stl.height.providers.lidar_3dep._fetch_opentopo_dem")
     def test_no_dsm_returns_nan(self, mock_dem, mock_key, mock_write, mock_read):
         """No DSM available → all NaN."""
         mock_dem.return_value = None
@@ -97,10 +97,10 @@ class TestLiDARFetch:
         result = p.fetch_heights((40.0, 39.9, -75.0, -75.1), (20, 20))
         assert np.all(np.isnan(result.raster))
 
-    @patch("city2stl.skyline.height.providers.lidar_3dep.read_height_result", return_value=None)
-    @patch("city2stl.skyline.height.providers.lidar_3dep.write_height_result")
-    @patch("city2stl.skyline.height.providers.lidar_3dep._get_api_key", return_value="key")
-    @patch("city2stl.skyline.height.providers.lidar_3dep._fetch_opentopo_dem")
+    @patch("city2stl.height.providers.lidar_3dep.read_height_result", return_value=None)
+    @patch("city2stl.height.providers.lidar_3dep.write_height_result")
+    @patch("city2stl.height.providers.lidar_3dep._get_api_key", return_value="key")
+    @patch("city2stl.height.providers.lidar_3dep._fetch_opentopo_dem")
     def test_no_dtm_returns_nan(self, mock_dem, mock_key, mock_write, mock_read):
         """DSM available but no DTM → can't compute nDSM → NaN."""
         def fake_dem(demtype, bbox, api_key, label):
@@ -111,7 +111,7 @@ class TestLiDARFetch:
         result = p.fetch_heights((40.0, 39.9, -75.0, -75.1), (20, 20))
         assert np.all(np.isnan(result.raster))
 
-    @patch("city2stl.skyline.height.providers.lidar_3dep.read_height_result")
+    @patch("city2stl.height.providers.lidar_3dep.read_height_result")
     def test_cache_hit(self, mock_read):
         """Cached result returned without fetching."""
         raster = np.full((30, 30), 12.0, dtype=np.float32)

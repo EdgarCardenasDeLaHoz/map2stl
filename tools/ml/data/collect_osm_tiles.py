@@ -152,13 +152,13 @@ def _fetch_provider_label(
                decide whether the tile is worth saving.
     """
     # Lazy imports â€” keeps this module importable on minimal environments
-    from city2stl.skyline.height import HeightResult, merge_height_rasters
-    from city2stl.skyline.height.providers.copernicus import CopernicusProvider
-    from city2stl.skyline.height.providers.ghsl import GHSLProvider
-    from city2stl.skyline.height.providers.lidar_3dep import LiDAR3DEPProvider
-    from city2stl.skyline.height.providers.ndsm import NDSMProvider
-    from city2stl.skyline.height.providers.open_buildings import OpenBuildingsProvider
-    from city2stl.skyline.height.providers.wsf3d import WSF3DProvider
+    from city2stl.height import HeightResult, merge_height_rasters
+    from city2stl.height.providers.copernicus import CopernicusProvider
+    from city2stl.height.providers.ghsl import GHSLProvider
+    from city2stl.height.providers.lidar_3dep import LiDAR3DEPProvider
+    from city2stl.height.providers.ndsm import NDSMProvider
+    from city2stl.height.providers.open_buildings import OpenBuildingsProvider
+    from city2stl.height.providers.wsf3d import WSF3DProvider
 
     all_providers = {
         "lidar_3dep":     LiDAR3DEPProvider(),
