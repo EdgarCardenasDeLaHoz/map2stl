@@ -61,12 +61,14 @@ that touches library code; client-only items run alongside it.
 
 ## Batch 2 — needs server work (after F-ARCH)
 
-- **Landmark search** for the region box (geocoding endpoint) and a warning when a named
-  POI lies within 200 m of the box edge.
-- **Source resolution**: DEM response reports the native sample count; the Edit tab shows
-  "~30 m → 165×165 real samples, upsampled to 600×600".
-- **Default DEM source**: SRTM 30 m (or best available) instead of the ~90 m local file.
-- **City fetch as a background job** with per-layer progress, mirror state and cancel.
+- ~~**Landmark search** for the region box (geocoding endpoint) and a warning when a named
+  POI lies within 200 m of the box edge.~~ Done (part A, below).
+- ~~**Source resolution**: DEM response reports the native sample count; the Edit tab shows
+  "~30 m → 165×165 real samples, upsampled to 600×600".~~ Done (part A).
+- ~~**Default DEM source**: SRTM 30 m (or best available) instead of the ~90 m local file.~~
+  Done (part A).
+- ~~**City fetch as a background job** with per-layer progress, mirror state and cancel.~~
+  Done (part A).
 - **Printability rules** in the city model: minimum wall width (0.8 mm) and slenderness
   cap (height ≤ 8× min width, clamp or flag), reported per build.
 - **Pre-flight report + panel**: size vs bed, thinnest feature, tallest spike, piece
@@ -76,3 +78,60 @@ that touches library code; client-only items run alongside it.
 - **Puzzle**: fast heightmap-mask cutting for terrain-only puzzles; engraved piece IDs and
   a north arrow on the underside; pieces laid out on the plate; knob shapes (rectangular,
   dovetail, rounded); draggable cut lines (non-uniform grid) in the preview.
+
+### Batch 2 part A — done 2026-09-27
+
+- **Landmark search** — `GET /api/geocode?q=` (`routers/geocode.py` → `geo2stl/geocode.py:
+  search_places`): Nominatim `format=jsonv2`, identifying User-Agent (`map2stl/0.1 (+repo
+  URL)`), ≤ 1 request/s process-wide, results cached 30 days (`geocode` namespace; new
+  `json_cache_key` / `read_json_cache` / `write_json_cache` in `geo2stl/cache.py`). Returns
+  `{query, results: [{name, display_name, lat, lon, bbox, class, type, osm_type, osm_id}]}`.
+  `LandmarkSearch.vue` on the Explore map searches on submit only (the usage policy forbids
+  autocomplete), pans/zooms to a result with a marker, and offers "Extend the box to include
+  it" (`modules/map/landmarks.js:extendBboxToInclude`: the place's own extent if ≤ 3 km
+  across, else its point, plus 100 m; the region is updated but not saved or reloaded).
+- **POI-near-edge warning** — `GET /api/geocode/edge-landmarks` (`geo2stl/landmarks.py`):
+  one Overpass query (`geo2stl.osm.overpass_query`) over the four 400 m strips centred on
+  the edges for named `amenity=place_of_worship|townhall`, `historic=*` (minus memorial,
+  boundary_stone, milestone, wayside_*, marker, district, road, yes — too many and not
+  landmarks), `tourism=attraction|museum|viewpoint`, `out tags bb` so an area's extent (not
+  just its centre) is measured. Features within 200 m inside/outside, or crossing the edge,
+  are reported nearest first with a message ("Alhambra is 120 m outside the east edge";
+  "… crosses the east edge (24 m sticks out)"); cached 7 days per rounded bbox; boxes over
+  60 km diagonal are skipped. Client: new `EV.BBOX_CHANGED` (from `setBboxRectangle`, the
+  mini-map drag and a drawn rectangle); `EdgeLandmarkWarnings.vue` debounces 1.5 s, writes
+  `appState.edgeLandmarks`, toasts the first warning, and shows the list on the Explore map
+  and (compact) under the Edit panel's preset bar.
+- **Source resolution** — `geo2stl.dem.DEM_SOURCE_INFO` (arc-seconds + nominal metres per
+  source; `OPENTOPO_DATASETS` gained `arcsec`), `dem_sampling()`; `/api/terrain/dem` returns
+  `source_resolution: {source, native_resolution_m, native_samples, grid, upsample}` (test
+  mode too), `/api/terrain/sources` gives each source `native_resolution_m`.
+  `DemSamplingInfo.vue` under Fetch Layers → Resolution: "~30 m → 41×43 real samples,
+  upsampled to 478×600", warning above 4×. **Correction:** the `local` source is the GEBCO
+  2025 store (15″ ≈ 460 m), not 30 m as `/api/terrain/sources` used to say.
+- **Default DEM source** — `geo2stl.dem.default_dem_source`: `SRTMGL1` with an
+  OpenTopography key, else `h5_local` if the H5 store exists, else `local`. Used by
+  `/api/settings/default` and the new `default_source` of `/api/terrain/sources`;
+  `populateDemSources` selects it until a preset, saved region settings (`presets.js` marks
+  `data-dem-source-chosen`) or the user pick a source.
+- **City fetch as a background job** — `core/city_fetch_tasks.py` (own small registry, the
+  `export_tasks.py` pattern: lock + 5 min TTL after finishing; an identical running request
+  is joined). `POST /api/cities/start` → status; `GET /api/cities/status/{id}` →
+  `{task_id, status, layers: [{name, state}], mirror, message, error, elapsed_s,
+  diagonal_km}` with layer states pending / fetching / done / failed / cached / cancelled
+  (+ a `heights` row for height enhancement); `GET /api/cities/result/{id}` (payload, 409
+  unless done); `POST /api/cities/cancel/{id}`. Hooks: `city2stl.fetch.fetch_osm_data(...,
+  progress=, on_mirror=, should_cancel=)` and `_fetch_layers(..., progress, should_cancel)`
+  (`FetchCancelled`; a layer that has not started is skipped, in-flight Overpass queries
+  finish and are discarded); `core/city_data.get_city_layers` passes them on and reports
+  `cached` layers. Client: `modules/layers/city-fetch.js:runCityFetch` (start → poll 750 ms
+  → result; aborting the signal cancels the server task), `loadCityData()` uses it,
+  `CityFetchProgress.vue` shows the per-layer list, mirror host, elapsed time and Cancel
+  (`window.cancelCityFetch`). The synchronous `POST /api/cities` is unchanged for the SDK.
+- Tests: `tests/test_geocode.py`, `test_dem_sources.py`, `test_city_fetch_tasks.py`,
+  additions to `test_osm_fetch.py` (all network mocked); `tests/js/landmarks.test.js`,
+  `demSampling.test.js`, `cityFetch.test.js`.
+- Not done / follow-ups: the SDK (`TerrainSession`) still uses the blocking
+  `/api/cities`; `terrain_session.py` and the export side still default `dem_source` to
+  `local` when a caller passes none; the edge warning is not re-run when only the saved
+  region list changes without a box move.

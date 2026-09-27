@@ -43,6 +43,8 @@ const _evConstants = {
     COLORMAP_CHANGE: 'colormap:change',
     /** Fired when the user selects a region; payload: (index). */
     REGION_SELECTED: 'region:selected',
+    /** Fired when the region box (appState.boundingBox) is set or moved; payload: (bbox). */
+    BBOX_CHANGED: 'bbox:changed',
 };
 
 // Proxy warns on access to unknown event names — catches typos at runtime.

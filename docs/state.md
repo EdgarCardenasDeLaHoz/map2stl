@@ -98,6 +98,9 @@ flowchart TD
 | `hydrologySourceCanvas` | HTMLCanvasElement\|null | Offscreen canvas with rendered river depression grid (set by hydrology-overlay.js) |
 | `waterHydrologyCanvas` | HTMLCanvasElement\|null | Offscreen canvas with the combined water + hydrology layer (set by water-hydrology-combined.js); read by stacked-layers.js |
 | `lastLandCoverData` | Object\|null | ESA WorldCover classification response |
+| `cityFetch` | Object\|null | Status of the background city fetch (`GET /api/cities/status/{id}` shape: `task_id, status, layers[{name,state}], mirror, elapsed_s, error`); written by `loadCityData()` (city-overlay.js via `city-fetch.js:runCityFetch`), read by `CityFetchProgress.vue`. `window.cancelCityFetch()` cancels |
+| `demSampling` | Object\|null | `source_resolution` of the last `/api/terrain/dem` response (`native_resolution_m, native_samples, grid, upsample`); set by `loadDEM()`, cleared at the start of each load; read by `DemSamplingInfo.vue` |
+| `edgeLandmarks` | Object\|null | `{key, loading, error, landmarks[]}` — named landmarks within 200 m of the box edge (`GET /api/geocode/edge-landmarks`). Written by the Explore map's `EdgeLandmarkWarnings.vue` (`fetcher`), 1.5 s after `EV.BBOX_CHANGED`; the Edit panel's compact instance only reads it |
 
 ## 3D Viewer
 

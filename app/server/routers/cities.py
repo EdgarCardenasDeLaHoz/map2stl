@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from app.server.core import city_fetch_tasks
 from app.server.core.cache import CACHE_ROOT, osm_cache_key, read_osm_cache
 from app.server.core.city_data import get_city_layers
 from app.server.core.responses import error_response
@@ -47,12 +48,10 @@ async def check_city_cache(
     return JSONResponse(content={"cached": cached, "cache_key": key})
 
 
-@router.post("/api/cities")
-async def get_city_data(city_req: CityRequest):
-    """
-    Fetch OSM building, road, waterway, and POI data for a small bounding box.
-    Results are cached as .json.gz. Region must be ≤ 15 km diagonal (≤ 25 km
-    for ``detail="coarse"`` requests, which drop walls/small buildings).
+def _resolve_city_request(city_req: CityRequest):
+    """Apply the detail tier and the size guard.
+
+    Returns ``(layers, min_area, diag_km, None)`` or ``(None, None, None, error_response)``.
     """
     from app.server.config import COARSE_MIN_BUILDING_AREA_M2, MAX_BBOX_DIAGONAL_KM_COARSE
 
@@ -73,10 +72,27 @@ async def get_city_data(city_req: CityRequest):
     else:
         diag_km, diag_err = validate_bbox_diagonal(north, south, east, west)
     if diag_err:
-        return diag_err
-
+        return None, None, None, diag_err
     # detail is folded into the cache key (via min_area, which differs
     # between tiers) so full/coarse results never collide.
+    return layers, min_area, diag_km, None
+
+
+@router.post("/api/cities")
+async def get_city_data(city_req: CityRequest):
+    """
+    Fetch OSM building, road, waterway, and POI data for a small bounding box.
+    Results are cached as .json.gz. Region must be ≤ 15 km diagonal (≤ 25 km
+    for ``detail="coarse"`` requests, which drop walls/small buildings).
+
+    Blocks until every layer is in. The browser client uses the background
+    variant (``/api/cities/start`` + ``/status`` + ``/result``); this one stays
+    for the SDK.
+    """
+    layers, min_area, diag_km, err = _resolve_city_request(city_req)
+    if err:
+        return err
+    north, south, east, west = city_req.north, city_req.south, city_req.east, city_req.west
     try:
         result = await run_sync(get_city_layers, north, south, east, west, layers,
                                 city_req.simplify_tolerance, min_area)
@@ -85,6 +101,58 @@ async def get_city_data(city_req: CityRequest):
         return error_response(f"OSM fetch failed: {str(e)}")
     result["diagonal_km"] = round(diag_km, 2)
     return JSONResponse(content=result)
+
+
+# ---------------------------------------------------------------------------
+# Background city fetch (per-layer progress, mirror, cancel)
+# ---------------------------------------------------------------------------
+
+@router.post("/api/cities/start")
+async def start_city_fetch(city_req: CityRequest):
+    """Start the ``POST /api/cities`` fetch in the background.
+
+    Same body and size guard. Returns the status shape of
+    ``GET /api/cities/status/{task_id}``; an identical fetch still running is joined.
+    """
+    layers, min_area, diag_km, err = _resolve_city_request(city_req)
+    if err:
+        return err
+    task = city_fetch_tasks.start_city_fetch(
+        city_req.north, city_req.south, city_req.east, city_req.west,
+        layers, city_req.simplify_tolerance, min_area, diagonal_km=diag_km)
+    return JSONResponse(content=task.snapshot())
+
+
+@router.get("/api/cities/status/{task_id}")
+async def city_fetch_status(task_id: str):
+    """``{task_id, status: running|done|error|cancelled, layers: [{name, state}],
+    mirror, message, error, elapsed_s, diagonal_km}``; layer state is one of
+    pending, fetching, done, failed, cached, cancelled."""
+    task = city_fetch_tasks.get_task(task_id)
+    if task is None:
+        return error_response("Unknown or expired city fetch task", 404)
+    return JSONResponse(content=task.snapshot())
+
+
+@router.get("/api/cities/result/{task_id}")
+async def city_fetch_result(task_id: str):
+    """The finished fetch's payload — the same body ``POST /api/cities`` returns."""
+    task = city_fetch_tasks.get_task(task_id)
+    if task is None:
+        return error_response("Unknown or expired city fetch task", 404)
+    if task.status != "done" or task.result is None:
+        return error_response(f"City fetch is {task.status}", 409)
+    return JSONResponse(content=task.result)
+
+
+@router.post("/api/cities/cancel/{task_id}")
+async def cancel_city_fetch(task_id: str):
+    """Cancel a running fetch; returns its status. Layers already being fetched
+    finish in the background and are discarded."""
+    task = city_fetch_tasks.cancel_task(task_id)
+    if task is None:
+        return error_response("Unknown or expired city fetch task", 404)
+    return JSONResponse(content=task.snapshot())
 
 
 @router.post("/api/cities/raster")

@@ -106,6 +106,7 @@ window.setBboxRectangle = function setBboxRectangle(n, s, e, w) {
         bb.addTo(map);
     }
     window.setBoundingBox?.(bb);
+    window.events?.emit(window.EV?.BBOX_CHANGED, { north: n, south: s, east: e, west: w });
     return bb;
 };
 
@@ -197,6 +198,7 @@ window._onBboxMiniMouseUp = function _onBboxMiniMouseUp() {
 
         const currentDemBbox = { north: n, south: s, east: e, west: w };
         window.appState.currentDemBbox = currentDemBbox;
+        window.events?.emit(window.EV?.BBOX_CHANGED, currentDemBbox);
 
         window.clearLayerCache?.();
         window.loadDEM?.().then(() => {

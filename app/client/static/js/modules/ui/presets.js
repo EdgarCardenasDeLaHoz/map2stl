@@ -417,6 +417,8 @@ function applyAllSettings(s) {
     // that still works.
     if (dem.dem_source != null) {
         const sel = _get('paramDemSource');
+        // Tells populateDemSources() the value is a real choice, not the markup default.
+        if (sel) sel.dataset.demSourceChosen = '1';
         const wanted = sel?.querySelector(`option[value="${CSS.escape(String(dem.dem_source))}"]`);
         if (sel && wanted?.disabled) {
             const usable = sel.querySelector('option:not(:disabled)');

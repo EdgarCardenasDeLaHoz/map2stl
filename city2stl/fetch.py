@@ -22,6 +22,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class FetchCancelled(RuntimeError):
+    """The caller's ``should_cancel`` returned True; layers not yet started were skipped."""
+
+
 class OverpassUpstreamError(RuntimeError):
     """Every Overpass mirror failed to serve a layer the caller asked for.
 
@@ -302,6 +306,10 @@ def fetch_osm_data(
     layers: list[str],
     simplify_tolerance: float = 0.5,
     min_area: float = 5.0,
+    *,
+    progress=None,
+    on_mirror=None,
+    should_cancel=None,
 ) -> dict:
     """
     Fetch OSM building, road, waterway, and POI data for a bounding box.
@@ -310,8 +318,17 @@ def fetch_osm_data(
     requested layer (buildings / roads / waterways / pois / walls / towers /
     churches / fortifications / green / railways), each value being a GeoJSON FeatureCollection.
 
+    Optional hooks (the background city fetch, ``app/server/core/city_fetch_tasks.py``):
+      progress(layer, state)  state is "fetching", "done" or "failed"; a layer that
+                              failed on one mirror goes back to "fetching" on the next.
+      on_mirror(endpoint)     called before each pass with the Overpass mirror in use.
+      should_cancel()         checked before each layer starts and between passes;
+                              when it returns True, raises :class:`FetchCancelled`.
+                              Queries already in flight run to completion.
+
     Raises:
         RuntimeError  if osmnx is not installed.
+        FetchCancelled  if ``should_cancel`` asked for it.
     """
     try:
         import osmnx as ox
@@ -345,10 +362,17 @@ def fetch_osm_data(
     # that succeeded are kept.
     result: dict = {}
     pending = list(layers)
+    # Hooks are only passed on when set, so a stand-in _fetch_layers with the
+    # plain signature (tests) keeps working.
+    hooks = {k: v for k, v in (("progress", progress), ("should_cancel", should_cancel)) if v}
     for attempt, endpoint in enumerate(healthy):
+        if should_cancel and should_cancel():
+            raise FetchCancelled("City fetch cancelled")
+        if on_mirror:
+            on_mirror(endpoint)
         use_overpass_endpoint(ox, endpoint, _OVERPASS_REQUEST_TIMEOUT_S)
         result.update(_fetch_layers(ox, bbox, pending, tol_deg,
-                                    simplify_tolerance, min_area))
+                                    simplify_tolerance, min_area, **hooks))
         failed = _layers_failed(result, layers)
         if not failed:
             break
@@ -433,7 +457,8 @@ def _layer_jobs(ox, bbox, tol_deg: float, simplify_tolerance: float,
 
 
 def _fetch_layers(ox, bbox, layers: list[str], tol_deg: float,
-                  simplify_tolerance: float, min_area: float) -> dict:
+                  simplify_tolerance: float, min_area: float,
+                  progress=None, should_cancel=None) -> dict:
     """One pass over the requested layers against the currently-set mirror.
 
     Up to ``_MAX_CONCURRENT_LAYERS`` layers are fetched at once; each is an
@@ -441,6 +466,10 @@ def _fetch_layers(ox, bbox, layers: list[str], tol_deg: float,
     another made a 9-layer city fetch take minutes. Every fetcher reports its
     own failure as an ``error`` key on an empty collection; a fetcher that raises
     anyway is recorded the same way, so one broken layer cannot lose the others.
+
+    ``progress(layer, state)`` and ``should_cancel()`` are the hooks documented on
+    :func:`fetch_osm_data`; a layer whose turn comes after cancellation is skipped,
+    and the pass then raises :class:`FetchCancelled`.
     """
     from concurrent.futures import ThreadPoolExecutor
 
@@ -448,14 +477,33 @@ def _fetch_layers(ox, bbox, layers: list[str], tol_deg: float,
     wanted = [name for name in jobs if name in layers]
     if not wanted:
         return {}
+
+    def run(name):
+        if should_cancel and should_cancel():
+            raise FetchCancelled(name)
+        if progress:
+            progress(name, "fetching")
+        fc = jobs[name]()
+        if progress:
+            failed = isinstance(fc, dict) and fc.get("error") and not fc.get("features")
+            progress(name, "failed" if failed else "done")
+        return fc
+
     with ThreadPoolExecutor(max_workers=min(_MAX_CONCURRENT_LAYERS, len(wanted)),
                             thread_name_prefix="osm-layer") as pool:
-        futures = {name: pool.submit(jobs[name]) for name in wanted}
+        futures = {name: pool.submit(run, name) for name in wanted}
     result: dict = {}
+    cancelled = False
     for name in wanted:
         try:
             result[name] = futures[name].result()
+        except FetchCancelled:
+            cancelled = True
         except Exception as e:
             logger.warning(f"OSM {name} fetch failed: {e}", exc_info=True)
+            if progress:
+                progress(name, "failed")
             result[name] = _empty_fc(str(e))
+    if cancelled:
+        raise FetchCancelled("City fetch cancelled")
     return result

@@ -20,7 +20,13 @@
  * Render functions (renderCityOverlay, renderCityOnDEM) and raster helpers
  * (loadCityRaster, _setupCityRasterLayer, _clearCityRasterCache, _updateCitiesLoadButton)
  * live in city-render.js, which must be loaded immediately after this file.
+ *
+ * loadCityData() runs the fetch as a background job (POST /api/cities/start, see
+ * city-fetch.js) and mirrors its status into appState.cityFetch for
+ * CityFetchProgress.vue; window.cancelCityFetch() stops it.
  */
+
+import { runCityFetch, summarizeCityFetch } from './city-fetch.js';
 
 const ALPHA_BUCKETS = 8;   // number of opacity bands for building height shading
 
@@ -279,8 +285,10 @@ window.loadCityData = async function loadCityData() {
         window.showToast?.(`Region is ${diagKm.toFixed(1)} km — loading coarse city data (roads, water, large buildings only)`, 'info');
     }
 
-    // Abort any in-flight city data request for the previous region.
+    // Abort any in-flight city data request for the previous region (this also
+    // cancels its server-side task).
     if (_cityDataAbortController) _cityDataAbortController.abort();
+    window.appState.cityFetch = null;
     _cityDataAbortController = new AbortController();
     const signal = _cityDataAbortController.signal;
 
@@ -320,7 +328,9 @@ window.loadCityData = async function loadCityData() {
             if (statusEl) statusEl.textContent = 'Fetching from OpenStreetMap…';
         }
 
-        const { data, error: cityErr } = await window.api.cities.fetch({
+        // Background job: per-layer progress, current Overpass mirror, Cancel
+        // (CityFetchProgress.vue). The synchronous POST /api/cities stays for the SDK.
+        const run = await runCityFetch(window.api.cities, {
             north: selectedRegion.north, south: selectedRegion.south,
             east:  selectedRegion.east,  west:  selectedRegion.west,
             layers,
@@ -328,14 +338,35 @@ window.loadCityData = async function loadCityData() {
             min_area: minArea,
             m_per_level: mPerLevel,
             detail,
-        }, signal);
-        if (signal.aborted) return;
-
-        if (cityErr) {
-            window.showToast?.('OSM error: ' + cityErr, 'error');
-            if (statusEl) statusEl.textContent = 'Failed.';
+        }, {
+            signal,
+            onStatus: (st) => {
+                if (_cityDataAbortController?.signal !== signal) return;   // superseded
+                window.appState.cityFetch = st;
+                if (statusEl && st.status === 'running') {
+                    statusEl.textContent = `Fetching from OpenStreetMap… ${summarizeCityFetch(st)}`;
+                }
+            },
+        });
+        // A newer loadCityData() aborted this one: it owns the status line now.
+        if (_cityDataAbortController?.signal !== signal) return;
+        if (run.status === 'cancelled') {
+            if (statusEl) statusEl.textContent = 'Cancelled.';
+            const cd = document.getElementById('stripDotCities');
+            if (cd) cd.classList.remove('loading');
             return;
         }
+        if (signal.aborted) return;
+
+        if (run.status !== 'done') {
+            const cityErr = run.error || run.status;
+            window.showToast?.('OSM error: ' + cityErr, 'error');
+            if (statusEl) statusEl.textContent = 'Failed.';
+            const cd = document.getElementById('stripDotCities');
+            if (cd) { cd.classList.remove('loading', 'loaded'); cd.classList.add('error'); }
+            return;
+        }
+        const data = run.data;
 
         // Merge towers, churches, fortifications polygon features into buildings
         for (const key of ['towers', 'churches', 'fortifications']) {
@@ -401,6 +432,11 @@ window.loadCityData = async function loadCityData() {
     } finally {
         if (loadBtn) loadBtn.disabled = false;
     }
+};
+
+/** Cancel the running city fetch (CityFetchProgress.vue's Cancel button). */
+window.cancelCityFetch = function cancelCityFetch() {
+    _cityDataAbortController?.abort();
 };
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
 
 
+def _default_dem_source() -> str:
+    """SRTMGL1 when an OpenTopography key is configured, else the local source."""
+    from geo2stl import opentopo
+    from geo2stl.dem import default_dem_source
+
+    return default_dem_source(bool(opentopo.get_api_key()))
+
+
 def _default_region_settings() -> dict:
     """Return the browser client default grouped settings payload."""
     return {
@@ -25,7 +33,8 @@ def _default_region_settings() -> dict:
             "depth_scale": 0.5,
             "water_scale": 0.05,
             "subtract_water": True,
-            "dem_source": "local",
+            # SRTM 30 m with an OpenTopography key, else the best local store.
+            "dem_source": _default_dem_source(),
             "show_sat": False,
         },
         "projection": {

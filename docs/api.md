@@ -42,11 +42,11 @@ without repeating the four bbox parsers in every endpoint.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET/POST | `/api/terrain/dem` | Fetch processed DEM |
+| GET/POST | `/api/terrain/dem` | Fetch processed DEM. Also returns `source_resolution: {source, native_resolution_m, native_samples: [rows, cols], grid: [rows, cols], upsample}` — the real samples of the chosen source across the box vs the grid returned (`geo2stl.dem.dem_sampling`; shown in the Edit tab by `DemSamplingInfo.vue`, warning above 4×). |
 | GET/POST | `/api/terrain/water-mask` | Fetch water mask + ESA land cover. **Scale param:** `dim` (int, pixels per side, default 600) — server computes resolution and returns `resolution_m` in response. |
 | GET/POST | `/api/terrain/esa-land-cover` | Fetch ESA WorldCover classification raster. **Scale param:** `dim` (pixels per side, default 600) — same server-side resolution computation; returns `resolution_m`. |
 | GET | `/api/terrain/satellite` | Fetch satellite imagery (ESRI tiles) |
-| GET | `/api/terrain/sources` | List DEM data sources |
+| GET | `/api/terrain/sources` | List DEM data sources; each has `native_resolution_m` (`geo2stl.dem.DEM_SOURCE_INFO`). `default_source` is `SRTMGL1` when an OpenTopography key is configured, else `h5_local` / `local` (`default_dem_source`); the client selects it until a preset, saved settings or the user choose. |
 | GET | `/api/terrain/hydrology` | Fetch HydroRIVERS depression grid for bbox |
 | GET | `/api/terrain/trails` | Fetch ski and hiking trail relief grids for bbox. **Params:** `dim` (default 600), `relief_m` (default -2.0, negative engraves), `width_m` (default 8, clamped 1–500), `source` (`osm` \| `usfs` \| `all`), `categories` (comma-separated subset of `ski,hiking`). Returns **both** grids (`ski_grid_values_b64`, `hiking_grid_values_b64`) in one response so client-side category toggles need no refetch. Also returns `ski_area_grid_values_b64` and `hiking_area_grid_values_b64`: display-only 0/1 masks of the interiors of features mapped as closed ways (piste and ski-area polygons). The relief grids carry only linework, boundaries included, so an areal feature can never engrave a filled region into the DEM. Also returns `ski_difficulty_grid_values_b64` - the piste grade per pixel as a 1-based index into `difficulty_classes` (0 means no usable `piste:difficulty` tag), sent as float32 like the other grids because the values are small integers and survive the cast exactly. A reader must treat it as class indices and never interpolate it; the server reprojects it nearest-neighbour for the same reason. Where two pistes cross, the harder grade wins. On an Overpass outage the response is HTTP 200 with null grids, `upstream_error: true`, and an `error` naming the failure - distinct from a region that genuinely holds no trails, which returns null grids with `feature_count: 0` and no `upstream_error`. Nothing is cached in either failure case. |
 | POST | `/api/composite/hydrology-merge` | Merge hydrology depression into DEM array |
@@ -88,7 +88,11 @@ Primary `TerrainSession` touchpoints:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/cities/cached` | Check if OSM bbox is cached |
-| POST | `/api/cities` | Fetch OSM data (rejects >15 km diagonal); cached as `.json.gz` |
+| POST | `/api/cities` | Fetch OSM data (rejects >15 km diagonal); cached as `.json.gz`. Blocking; kept for the SDK — the browser uses the background variant below |
+| POST | `/api/cities/start` | Same body and size guard as `POST /api/cities`, run as a background task (`core/city_fetch_tasks.py`); returns the status shape below. An identical fetch still running is joined |
+| GET | `/api/cities/status/{task_id}` | `{task_id, status: running\|done\|error\|cancelled, layers: [{name, state}], mirror, message, error, elapsed_s, diagonal_km}`; layer state `pending\|fetching\|done\|failed\|cached\|cancelled` (plus a `heights` row for building-height enhancement). 404 once expired (5 min after finishing) |
+| GET | `/api/cities/result/{task_id}` | The finished payload (same body as `POST /api/cities`); 409 unless `done` |
+| POST | `/api/cities/cancel/{task_id}` | Cancel: layers not yet started are skipped; Overpass queries in flight finish in the worker and are discarded. Returns the status |
 | POST | `/api/cities/raster` | Rasterize OSM buildings/roads/waterways to a DEM-format height map (`values`, `width`, `height`, `vmin`, `vmax`) — used by `loadCityRaster()` in `city-render.js` |
 | POST | `/api/cities/export3mf` | Generate 3MF with terrain + building prisms |
 | GET | `/api/cities/google3d-available` | Check if Google 3D Tiles are available for the current bbox |
@@ -99,6 +103,16 @@ Primary `TerrainSession` touchpoints:
 > - `/api/composite/city-raster` — returns per-feature height-delta arrays used by the composite DEM pipeline
 >
 > They serve different consumers: the first is for the CityRaster layer view; the second feeds `composite-dem.js`.
+
+## Geocode Routes (`routers/geocode.py`)
+
+Landmark search and the POI-near-edge warning (F-UX batch 2). Both results are cached
+on disk (`geocode` / `landmarks` namespaces of `geo2stl.cache`); tests mock the network.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/geocode?q=&limit=5` | Nominatim search (`geo2stl.geocode.search_places`: `format=jsonv2`, identifying User-Agent, ≤ 1 request/s process-wide, cached 30 days). Returns `{query, results: [{name, display_name, lat, lon, bbox: {north, south, east, west} \| null, class, type, osm_type, osm_id}]}`; 502 on upstream failure. The client searches on submit only (the usage policy forbids autocomplete) |
+| GET | `/api/geocode/edge-landmarks?north&south&east&west[&warn_m=200&band_m=400]` | Named notable OSM features (place of worship, town hall, castle / historic=*, tourism attraction / museum / viewpoint) in a `band_m` band centred on the box edge — one Overpass query over the four edge strips (`geo2stl.landmarks`, cached 7 days) — reported when within `warn_m` of the edge, inside or outside: `{landmarks: [{name, class, type, lat, lon, position: inside\|outside\|crosses, edge, distance_m, message}], warn_m, band_m}`, nearest first (crossings first). `message` reads "Alhambra is 120 m outside the east edge". Boxes over 60 km diagonal return `skipped` without a query; 502 on upstream failure |
 
 ## Composite Routes (`routers/composite.py`)
 
@@ -127,6 +141,7 @@ Primary `TerrainSession` touchpoints:
 | GET | `/api/settings/projections` | Available projections |
 | GET | `/api/settings/colormaps` | Available colormaps |
 | GET | `/api/settings/datasets` | Available DEM datasets |
+| GET | `/api/settings/default` | Grouped browser-client defaults; `dem.dem_source` is `SRTMGL1` with an OpenTopography key, else the local store |
 | GET | `/api/settings` | Combined settings payload for SDK/bootstrap clients |
 | GET | `/api/global_dem_overview` | Cached global DEM PNG (served by `server.py`) |
 
@@ -209,5 +224,8 @@ The inventory is rebuilt by scanning directories on every request rather than re
 | `COP30` | Copernicus DSM 30m |
 | `COP90` | Copernicus DSM 90m |
 | `SRTM15Plus` | SRTM15+ bathymetry + land |
-| `local` | Local SRTM tiles via `make_dem_image()` |
+| `local` | Local tile store (`config.json` `ocean_root`, via `make_dem_image()`); the project's store is GEBCO 2025, 15″ ≈ 460 m |
+| `h5_local` | Local SRTM3 HDF5 store, 3″ ≈ 90 m |
+
+Native resolutions (arc-seconds and nominal metres) live in `geo2stl.dem.DEM_SOURCE_INFO`.
 | `water_esa` | ESA WorldCover water mask band |

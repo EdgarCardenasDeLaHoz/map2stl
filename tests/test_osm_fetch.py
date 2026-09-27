@@ -283,3 +283,48 @@ def test_mirror_settings_bound_connect_separately_from_the_query():
     assert ox.settings.overpass_rate_limit is False
     use_overpass_endpoint(ox, "https://overpass-api.de/api", 300)
     assert ox.settings.overpass_rate_limit is True
+
+    def test_progress_reports_each_layer_fetching_then_done_or_failed(self, monkeypatch):
+        self._slow_jobs(monkeypatch, fail="roads")
+        events = []
+        osm_fetch._fetch_layers(None, (0, 0, 1, 1), ["buildings", "roads"], 0.0, 0.0, 0.0,
+                                progress=lambda layer, state: events.append((layer, state)))
+        assert ("buildings", "fetching") in events and ("buildings", "done") in events
+        assert ("roads", "fetching") in events and ("roads", "failed") in events
+        assert events.index(("roads", "fetching")) < events.index(("roads", "failed"))
+
+    def test_cancel_skips_layers_not_started_and_raises(self, monkeypatch):
+        self._slow_jobs(monkeypatch)
+        started = []
+
+        def progress(layer, state):
+            if state == "fetching":
+                started.append(layer)
+
+        with pytest.raises(osm_fetch.FetchCancelled):
+            osm_fetch._fetch_layers(None, (0, 0, 1, 1), self.ALL, 0.0, 0.0, 0.0,
+                                    progress=progress, should_cancel=lambda: len(started) >= 1)
+        assert len(started) < len(self.ALL)
+
+
+class TestFetchHooks:
+    """``fetch_osm_data`` names the mirror of each pass and checks for cancellation."""
+
+    def test_on_mirror_reports_each_pass(self, three_mirrors, monkeypatch):
+        mirrors_seen = []
+        calls = iter([{"buildings": _failed_fc()}, {"buildings": _full_fc()}])
+
+        def fake(ox, bbox, layers, tol_deg, simplify_tolerance, min_area, **hooks):
+            return next(calls)
+
+        monkeypatch.setattr(osm_fetch, "_fetch_layers", fake)
+        osm_fetch.fetch_osm_data(37.11, 37.10, -3.59, -3.60, ["buildings"],
+                                 on_mirror=mirrors_seen.append)
+        assert mirrors_seen == three_mirrors[:2]
+
+    def test_cancel_before_first_pass(self, three_mirrors, monkeypatch):
+        monkeypatch.setattr(osm_fetch, "_fetch_layers",
+                            lambda *a, **k: pytest.fail("no pass after cancel"))
+        with pytest.raises(osm_fetch.FetchCancelled):
+            osm_fetch.fetch_osm_data(37.11, 37.10, -3.59, -3.60, ["buildings"],
+                                     should_cancel=lambda: True)

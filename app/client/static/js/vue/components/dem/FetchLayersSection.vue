@@ -32,6 +32,7 @@
           <label for="paramDim" title="Number of grid points per side fetched from the DEM source.">Resolution</label>
           <input type="number" id="paramDim" value="600" min="50" max="2000" step="50">
           <div id="demResWarning" style="font-size:10px;color:#f90;display:none;">⚠️ High resolution may be slow</div>
+          <DemSamplingInfo />
         </div>
 
         <div class="fetch-inline-row">
@@ -211,6 +212,7 @@
           <button id="clearCityDataBtn" class="btn btn-secondary btn-clear" aria-label="Clear city data layer" title="Clear city data layer">✕</button>
         </div>
         <div id="cityDataStatus" class="fetch-status"></div>
+        <CityFetchProgress />
         <div class="fetch-status" style="display:flex;gap:8px;">
           <span id="cityBuildingCount"  class="city-layer-count"></span>
           <span id="cityRoadCount"      class="city-layer-count"></span>
@@ -286,6 +288,8 @@
 </template>
 <script setup lang="ts">
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
+import CityFetchProgress from './CityFetchProgress.vue';
+import DemSamplingInfo from './DemSamplingInfo.vue';
 
 function toggleCityTablePanel() {
   (window as any).toggleCityBuildingsPanel?.();

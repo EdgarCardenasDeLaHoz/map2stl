@@ -24,6 +24,7 @@ from app.server.routers.cities import router as _cities_router
 from app.server.routers.composite import router as _composite_router
 from app.server.routers.diagnostics import router as _diagnostics_router
 from app.server.routers.export import router as _export_router
+from app.server.routers.geocode import router as _geocode_router
 from app.server.routers.height import router as _height_router
 from app.server.routers.layers import router as _layers_router
 from app.server.routers.regions import router as _regions_router
@@ -303,6 +304,7 @@ app.include_router(_height_router)
 app.include_router(_diagnostics_router)
 app.include_router(_layers_router)
 app.include_router(_reports_router)
+app.include_router(_geocode_router)
 logger.info(
     "Routers loaded: regions, terrain, cities, export, cache, settings, composite, height, "
     "diagnostics, layers, reports")

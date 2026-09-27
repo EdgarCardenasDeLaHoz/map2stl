@@ -83,6 +83,16 @@ export const useAppStore = defineStore('app', {
         // layer_data. Reset whenever a new building set loads.
         cityHeightOverrides: {} as Record<number, number>,
 
+        // ── F-UX batch 2 ──────────────────────────────────────────────────────
+        // Background city fetch status (city-fetch.js / CityFetchProgress.vue):
+        // {task_id, status, layers: [{name, state}], mirror, elapsed_s, ...}.
+        cityFetch: null as Record<string, unknown> | null,
+        // `source_resolution` of the last DEM response (DemSamplingInfo.vue).
+        demSampling: null as Record<string, unknown> | null,
+        // Named landmarks near the region box edge (EdgeLandmarkWarnings.vue):
+        // {key, loading, error, landmarks: [{name, message, lat, lon, ...}]}.
+        edgeLandmarks: null as Record<string, unknown> | null,
+
         // ── 3D viewer ─────────────────────────────────────────────────────────
         // Extrude preview lifecycle, set by model-viewer.js:previewModelIn3D;
         // ModelContainer.vue words its empty state from it.

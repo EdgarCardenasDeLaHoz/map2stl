@@ -48,6 +48,10 @@
       </div>
     </div>
 
+    <!-- Landmark search + named landmarks near the box edge (F-UX batch 2) -->
+    <LandmarkSearch />
+    <EdgeLandmarkWarnings fetcher />
+
     <!-- "Create Region" button -->
     <button id="floatingDrawBtn" class="map-draw-region-btn" title="Draw a new region on the map">+ New Region</button>
 
@@ -55,4 +59,6 @@
 </template>
 <script setup lang="ts">
 // No local state — Leaflet initialises by reading #map after DOMContentLoaded
+import EdgeLandmarkWarnings from './EdgeLandmarkWarnings.vue';
+import LandmarkSearch from './LandmarkSearch.vue';
 </script>

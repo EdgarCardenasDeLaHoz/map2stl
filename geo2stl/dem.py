@@ -13,6 +13,8 @@ Covers elevation data only:
   - upsample_dem            â€” cv2 upscale to display resolution
   - make_dem_payload        â€” build standard DEM JSON response dict
   - compute_raw_dem         â€” unprocessed DEM array (call via run_in_executor)
+  - DEM_SOURCE_INFO / dem_sampling / default_dem_source — native resolution per
+    source, real samples across a bbox vs the returned grid, the default source
 
 Satellite and water-mask imagery lives in geo2stl/sat.py.
 """
@@ -64,6 +66,78 @@ _H5_SRTM_FILE: Path | None = (
     Path(_H5_SRTM_ROOT) / "strm_data.h5" if _H5_SRTM_ROOT else None
 )
 _H5_SRTM_AVAILABLE: bool = bool(_H5_SRTM_FILE and _H5_SRTM_FILE.exists())
+
+
+# ---------------------------------------------------------------------------
+# DEM source metadata: native resolution and the default source
+# ---------------------------------------------------------------------------
+
+#: Native grid of every DEM source. ``arcsec`` is the sample spacing (exact for
+#: counting samples across a bbox); ``native_resolution_m`` is its nominal ground
+#: size at the equator, for display ("~30 m"). ``local`` is whatever GeoTIFF store
+#: ``config.json``'s ``ocean_root`` points at; the project's store is GEBCO 2025
+#: (15 arc-second, ~460 m), not SRTM, despite the source's historical label.
+DEM_SOURCE_INFO: dict[str, dict] = {
+    "local": {"label": "Local tile store (GEBCO 2025)", "arcsec": 15,
+              "native_resolution_m": 460},
+    "h5_local": {"label": "Local SRTM3 H5", "arcsec": 3, "native_resolution_m": 90},
+    **{demtype: {"label": info["label"], "arcsec": info["arcsec"],
+                 "native_resolution_m": info["resolution_m"]}
+       for demtype, info in OPENTOPO_DATASETS.items()},
+}
+
+
+def native_resolution_m(source: str) -> float | None:
+    """Nominal native ground resolution of *source* in metres (None if unknown)."""
+    info = DEM_SOURCE_INFO.get(source)
+    return float(info["native_resolution_m"]) if info else None
+
+
+def dem_sampling(source: str, bbox, grid_shape) -> dict | None:
+    """How many real samples of *source* span *bbox*, against the returned grid.
+
+    Returns ``{source, native_resolution_m, native_samples: [rows, cols],
+    grid: [rows, cols], upsample: float}`` where ``upsample`` is the larger of the
+    two per-axis ratios grid / native (> 1 means the grid is interpolated from
+    fewer real samples). None for an unknown source.
+
+    Args:
+        bbox: ``(north, south, east, west)`` or a dict with those keys.
+        grid_shape: ``(rows, cols)`` of the array actually returned.
+    """
+    info = DEM_SOURCE_INFO.get(source)
+    if info is None:
+        return None
+    if isinstance(bbox, dict):
+        north, south, east, west = bbox["north"], bbox["south"], bbox["east"], bbox["west"]
+    else:
+        north, south, east, west = bbox
+    per_deg = 3600.0 / float(info["arcsec"])
+    rows = max(1, int(round(abs(north - south) * per_deg)))
+    cols = max(1, int(round(abs(east - west) * per_deg)))
+    g_rows, g_cols = int(grid_shape[0]), int(grid_shape[1])
+    return {
+        "source": source,
+        "native_resolution_m": float(info["native_resolution_m"]),
+        "native_samples": [rows, cols],
+        "grid": [g_rows, g_cols],
+        "upsample": round(max(g_rows / rows, g_cols / cols), 2),
+    }
+
+
+def default_dem_source(api_key_configured: bool,
+                       h5_available: bool | None = None) -> str:
+    """The DEM source a new region starts with.
+
+    SRTM 30 m (``SRTMGL1``) whenever an OpenTopography key is configured; without
+    one, the best local store: the ~90 m SRTM3 H5 file if present, else the tile
+    store (``local``).
+    """
+    if api_key_configured:
+        return "SRTMGL1"
+    if h5_available is None:
+        h5_available = _H5_SRTM_AVAILABLE
+    return "h5_local" if h5_available else "local"
 
 
 # ---------------------------------------------------------------------------

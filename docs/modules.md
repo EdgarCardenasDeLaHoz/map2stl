@@ -26,8 +26,8 @@ flowchart LR
 | File | Key exports | Purpose |
 |------|-------------|---------|
 | `state.js` | `window.appState` | Proxy-based reactive state with `.on()/.set()/.emit()` |
-| `events.js` | `window.events`, `window.EV` | Event bus + EV constants |
-| `api.js` | `window.api.*` | All fetch helpers (regions, dem, export, cities, cache, settings) |
+| `events.js` | `window.events`, `window.EV` | Event bus + EV constants. `EV.BBOX_CHANGED` (payload: bbox) fires from `setBboxRectangle`, the mini-map drag and a drawn rectangle |
+| `api.js` | `window.api.*` | All fetch helpers (regions, dem, export, cities incl. `start/status/result/cancel`, geocode `search/edgeLandmarks`, cache, settings) |
 | `ui-helpers.js` | `showToast`, `showLoading`, `setLayerStatus`, `getProjectionParams` | Toast, spinners, layer status UI; `getProjectionParams()` reads `#paramProjection`/`#paramMaintainDimensions`/`#paramClipNans` — the single source every layer fetch uses so they all request matching projection settings (F-PROJ-DIMS) |
 | `cache.js` | `waterMaskCache`, `setupCacheManagement` | In-memory water mask LRU + cache UI |
 
@@ -37,6 +37,7 @@ flowchart LR
 | `dem-loader.js` | `mapElevationToColor`, `recolorDEM`, `applyProjection`, `drawHistogram` | Canvas rendering, colormaps, projection, zoom |
 | `dem-main.js` | `loadDEM`, `window.renderDEMCanvas` | Main DEM loader + orchestration |
 | `dem-gridlines.js` | `drawGridlinesOverlay`, `toggleGridOverlay` | Lat/lon gridline overlay |
+| `dem-sampling.js` | `describeDemSampling`, `UPSAMPLE_WARN` | Pure ES exports: "~30 m → 165×165 real samples, upsampled to 600×600" from the DEM response's `source_resolution`, with a warning above 4× (`DemSamplingInfo.vue`) |
 
 ### `layers/` — Layer composition & city overlays
 | File | Key exports | Purpose |
@@ -47,7 +48,8 @@ flowchart LR
 | `mesh-layer.js` | `uploadMeshLayer`, `selectLibraryMeshFile`, `computeMeshHeightmap`, `autoRegisterMesh`, `suggestedMeshResolutionM`, `applyMeshRegistration`, `applyMeshToDem`, `clearMeshLayer` | STL/OBJ import (F-MESHIMPORT): upload/library source → heightmap → registered `MeshImport` stacked layer → optional DEM merge. `autoRegisterMesh` geocodes the filename + runs automatic OSM registration, always handing off to the manual picker |
 | `mesh-registration.js` | `openMeshRegistrationModal`, `computeMeshRegistration`, `undoLastMeshPointPair`, `clearMeshPointPairs` | Side-by-side pan/zoom point-pair picker (DEM vs. mesh heightmap) feeding the `/register` affine fit |
 | `water-mask.js` | `loadWaterMask`, `renderWaterMask`, `renderEsaLandCover` | Water mask + ESA land cover |
-| `city-overlay.js` | `loadCityData`, `renderCityOverlay`, `window.renderCityOnDEM` | OSM building/road/waterway overlay |
+| `city-overlay.js` | `loadCityData`, `cancelCityFetch`, `renderCityOverlay`, `window.renderCityOnDEM` | OSM building/road/waterway overlay. `loadCityData` runs the background fetch (`city-fetch.js`) and mirrors its status into `appState.cityFetch` |
+| `city-fetch.js` | `runCityFetch`, `summarizeCityFetch`, `mirrorHost`, `LAYER_STATE_ICON` | Pure ES exports: start → poll status → result of `/api/cities/start` (cancels the server task when the signal aborts); per-layer summary for `CityFetchProgress.vue` |
 | `city-render.js` | `loadCityRaster`, `_clearCityRasterCache` | City rasterization via `/api/cities/raster` |
 | `hydrology-overlay.js` | `window.loadHydrology`, `window.clearHydrology`, `window.cancelHydroLoad` | HydroRIVERS depression grid fetch + canvas render |
 | `water-hydrology-combined.js` | `loadWaterHydrology`, `clearWaterHydrology` | Unified water + hydrology combined layer; sets `appState.waterHydrologyCanvas` |
@@ -59,6 +61,7 @@ flowchart LR
 | `map-globe.js` | `initMap`, `initGlobe`, `setTileLayer`, `toggleDemOverlay` | Leaflet 2D map + Three.js globe |
 | `bbox-panel.js` | `setBboxInputValues`, `setBboxRectangle`, `initBboxMiniMap`, `syncBboxMiniMap` | Bbox input panel + mini-map. `setBboxInputValues` writes the four coordinate fields, which are display only; `setBboxRectangle` moves `appState.boundingBox`, which is the value every layer fetch actually reads. Anything that changes which area the app is looking at has to call the second one, and the pair should normally be called together |
 | `compare-view.js` | `initCompareMode`, `loadCompareRegion` | Side-by-side region comparison |
+| `landmarks.js` | `toBbox`, `bboxKey`, `extendBboxToInclude`, `bboxContains`, `placeCaption` | Pure ES exports for `LandmarkSearch.vue` (search box on the Explore map, "extend the box to include it") and `EdgeLandmarkWarnings.vue` (named landmarks within 200 m of the box edge) |
 
 ### `regions/` — Region management
 | File | Key exports | Purpose |
@@ -210,7 +213,8 @@ Use grep: `grep -rn "function functionName" app/client/static/js/`.
 
 | Function | Purpose |
 |----------|---------|
-| `loadCityData()` | POST /api/cities, computeTerrainZ, store osmCityData |
+| `loadCityData()` | POST /api/cities/start + poll (city-fetch.js), computeTerrainZ, store osmCityData |
+| `cancelCityFetch()` | Abort the running fetch; cancels its server task |
 | `clearCityOverlay()` | Remove city overlays from canvases |
 | `renderCityOverlay()` | Debounced: paint buildings/roads on stacked + DEM canvases |
 | `_drawCityCanvas(ctx,...)` | Core draw: buildings alpha-batched (8), sub-pixel skipped |

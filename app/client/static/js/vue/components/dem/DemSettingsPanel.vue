@@ -42,6 +42,8 @@
           <span id="saveSettingsStatus" class="settings-save-status"></span>
         </div>
         <WorkflowPresetBar v-show="activeTab==='fetch'" />
+        <!-- Landmarks near the box edge; fetched by the Explore map's instance. -->
+        <EdgeLandmarkWarnings v-show="activeTab==='fetch'" compact :max="3" />
 
         <!-- ═══════════ Fetch tab ═══════════ -->
         <div v-show="activeTab==='fetch'">
@@ -95,6 +97,7 @@ import CompositeDemSection   from './CompositeDemSection.vue';
 import MeshImportSection     from './MeshImportSection.vue';
 import PresetsSection        from './PresetsSection.vue';
 import WorkflowPresetBar     from './WorkflowPresetBar.vue';
+import EdgeLandmarkWarnings  from '../views/EdgeLandmarkWarnings.vue';
 
 const activeTab = ref<'fetch' | 'view' | 'composite'>('fetch');
 </script>

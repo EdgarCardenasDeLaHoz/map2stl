@@ -17,6 +17,8 @@ Directory layout (under strm2stl/cache/, or $STRM2STL_CACHE)
   ├── water/      {key}.npz  +  {key}.json
   ├── satellite/  {key}.npz  +  {key}.json
   ├── osm/        {key}.json.gz
+  ├── geocode/    {key}.json.gz   (JSON cache: Nominatim search results)
+  ├── landmarks/  {key}.json.gz   (JSON cache: notable OSM features near a bbox)
   └── opentopo/   {key}.tif  (raw GeoTIFFs from OpenTopography API)
 
 Every function reads the module-global ``CACHE_ROOT`` at call time, so tests
@@ -60,6 +62,8 @@ NAMESPACE_TTL = {
     "opentopo":   90 * 86400,   # 90 days (raw GeoTIFFs rarely change)
     "hydrology":  30 * 86400,   # 30 days (river network rarely changes)
     "trails":      7 * 86400,   # 7 days (OSM-derived; tracks OSM's own TTL)
+    "geocode":    30 * 86400,   # 30 days (Nominatim search results)
+    "landmarks":   7 * 86400,   # 7 days (OSM notable features near a bbox edge)
 }
 
 
@@ -250,4 +254,38 @@ def read_osm_cache(key: str, allow_stale: bool = False) -> dict | None:
         return data
     except Exception as e:
         logger.warning(f"read_osm_cache failed ({key}): {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Small JSON cache (.json.gz) in any namespace
+# ---------------------------------------------------------------------------
+
+def json_cache_key(namespace: str, *parts: Any) -> str:
+    """MD5 key for a JSON cache entry built from *parts* (query text, rounded bbox...)."""
+    raw = namespace + ":" + json.dumps(parts, sort_keys=True, separators=(",", ":"))
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def write_json_cache(namespace: str, key: str, data: Any) -> None:
+    """Save *data* as gzip-compressed JSON under ``CACHE_ROOT/namespace``."""
+    path = _array_dir(namespace) / f"{key}.json.gz"
+    try:
+        blob = gzip.compress(json.dumps(data).encode("utf-8"), compresslevel=6)
+        _atomic_write(path, lambda f: f.write(blob))
+    except Exception as e:
+        logger.warning(f"write_json_cache failed ({namespace}/{key}): {e}")
+
+
+def read_json_cache(namespace: str, key: str) -> Any | None:
+    """Return the cached JSON value, or None if missing, unreadable or past the namespace TTL."""
+    path = CACHE_ROOT / namespace / f"{key}.json.gz"
+    if not path.exists():
+        return None
+    try:
+        if _is_stale(path.stat().st_mtime, namespace):
+            return None
+        return json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
+    except Exception as e:
+        logger.warning(f"read_json_cache failed ({namespace}/{key}): {e}")
         return None

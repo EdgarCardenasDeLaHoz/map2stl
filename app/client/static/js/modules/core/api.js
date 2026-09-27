@@ -293,6 +293,32 @@ window.api = (() => {
 
         /** POST /api/cities/enhance-heights */
         enhanceHeights: (body) => _fetch('/api/cities/enhance-heights', _json(body)),
+
+        /** POST /api/cities/start — background fetch; → status (task_id, layers, mirror…) */
+        start: (body) => _fetch('/api/cities/start', _json(body)),
+
+        /** GET /api/cities/status/{id} */
+        status: (taskId) => _fetch(`/api/cities/status/${encodeURIComponent(taskId)}`),
+
+        /** GET /api/cities/result/{id} — the POST /api/cities payload once done */
+        result: (taskId) => _fetch(`/api/cities/result/${encodeURIComponent(taskId)}`),
+
+        /** POST /api/cities/cancel/{id} */
+        cancel: (taskId) => _fetch(`/api/cities/cancel/${encodeURIComponent(taskId)}`, { method: 'POST' }),
+    };
+
+    // -------------------------------------------------------------------------
+    // Geocoding / landmarks (F-UX batch 2)
+    // -------------------------------------------------------------------------
+    const geocode = {
+        /** GET /api/geocode?q= → {query, results: [{name, lat, lon, bbox, class, type, …}]} */
+        search: (q, limit = 5) => _fetch(`/api/geocode?${new URLSearchParams({ q, limit })}`),
+
+        /** GET /api/geocode/edge-landmarks?north&south&east&west → {landmarks: [...]} */
+        edgeLandmarks: (bbox, signal) => _fetch(
+            `/api/geocode/edge-landmarks?${new URLSearchParams({
+                north: bbox.north, south: bbox.south, east: bbox.east, west: bbox.west,
+            })}`, signal ? { signal } : {}),
     };
 
     // -------------------------------------------------------------------------
@@ -392,5 +418,5 @@ window.api = (() => {
             _json(body)),
     };
 
-    return { _fetch, regions, dem, export: exportApi, cities, composite, cache, settings, misc, mesh };
+    return { _fetch, regions, dem, export: exportApi, cities, geocode, composite, cache, settings, misc, mesh };
 })();

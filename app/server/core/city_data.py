@@ -17,15 +17,25 @@ from city2stl.cache_policy import (
     city_cache_missing_building_parts,
     city_cache_missing_height_source,
 )
-from city2stl.fetch import fetch_osm_data
+from city2stl.fetch import FetchCancelled, fetch_osm_data
 
 logger = logging.getLogger(__name__)
 
 
 def get_city_layers(north: float, south: float, east: float, west: float,
                     layers: list[str], simplify_tolerance: float = 0.5,
-                    min_area: float = 5.0) -> dict:
-    """Return {layer: FeatureCollection, ...} for ``layers`` (plus whatever else is cached)."""
+                    min_area: float = 5.0, *, progress=None, on_mirror=None,
+                    should_cancel=None) -> dict:
+    """Return {layer: FeatureCollection, ...} for ``layers`` (plus whatever else is cached).
+
+    Optional hooks, for the background fetch (``core/city_fetch_tasks.py``):
+    ``progress(layer, state)`` gets "cached" for layers served from disk, then
+    "fetching" / "done" / "failed" from ``city2stl.fetch.fetch_osm_data``, and
+    ``("heights", "fetching" | "done")`` around building-height enhancement;
+    ``on_mirror(endpoint)`` names the Overpass mirror of each pass;
+    ``should_cancel()`` is checked before each layer and before the height step
+    (raises ``city2stl.fetch.FetchCancelled``). A cancelled fetch writes no cache.
+    """
     key = osm_cache_key(north, south, east, west, simplify_tolerance, min_area)
     cached = read_osm_cache(key) or {}
     if cached and (city_cache_missing_height_source(cached)
@@ -34,16 +44,29 @@ def get_city_layers(north: float, south: float, east: float, west: float,
         cached = {}
 
     missing = [name for name in layers if name not in cached]
+    if progress:
+        for name in layers:
+            if name in cached:
+                progress(name, "cached")
     if not missing:
         return cached
 
     logger.info("OSM layers %s not cached for %s; fetching", missing, key[:8])
-    fetched = fetch_osm_data(north, south, east, west, missing, simplify_tolerance, min_area)
+    hooks = {k: v for k, v in (("progress", progress), ("on_mirror", on_mirror),
+                               ("should_cancel", should_cancel)) if v}
+    fetched = fetch_osm_data(north, south, east, west, missing, simplify_tolerance, min_area,
+                             **hooks)
     if "buildings" in fetched:
+        if should_cancel and should_cancel():
+            raise FetchCancelled("City fetch cancelled")
+        if progress:
+            progress("heights", "fetching")
         try:
             fetched = enhance_city_data(fetched, north, south, east, west)
         except Exception as exc:
             logger.warning("City height auto-enhancement skipped: %s", exc)
+        if progress:
+            progress("heights", "done")
 
     result = {**cached, **fetched, "cache_key": key}
     result.setdefault("city_pipeline_version", CITY_PIPELINE_VERSION)

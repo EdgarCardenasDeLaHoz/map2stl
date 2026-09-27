@@ -294,6 +294,7 @@ window.loadDEM = async function loadDEM(highRes = false) {
 
     // Clear DEM cache before loading new DEM
     window.clearLayerCache?.();
+    window.appState.demSampling = null;
     // While loading, show spinner/canvas area and hide the empty-state message.
     window._setDemEmptyState?.(false);
 
@@ -338,6 +339,8 @@ window.loadDEM = async function loadDEM(highRes = false) {
         // dem_id names the exact grid the server returned; export sends it back
         // so the server never has to re-derive the cache key (core/dem_store.py).
         window.appState.lastDemRequest = { ...requestedDemSettings, dem_id: data.dem_id };
+        // Native resolution vs the returned grid, for DemSamplingInfo.vue.
+        window.appState.demSampling = data.source_resolution || null;
         window.setLayerStatus('dem', 'loaded');
 
         // The server flags DEMs that came back with no real relief (the source
@@ -918,8 +921,15 @@ window.populateDemSources = async function populateDemSources(attempt = 0) {
         return;
     }
 
-    // Preserve whatever was already chosen (a preset may have applied first).
-    const previous = select.value;
+    // Preserve whatever was already chosen (a preset, saved region settings or
+    // the user may have set it first). Until one has, the markup's first option
+    // is only a placeholder, so the server's default_source (SRTM 30 m with an
+    // OpenTopography key, else the local store) takes its place.
+    if (!select.dataset.demSourceListener) {
+        select.dataset.demSourceListener = '1';
+        select.addEventListener('change', () => { select.dataset.demSourceChosen = '1'; });
+    }
+    const previous = select.dataset.demSourceChosen ? select.value : (data.default_source || select.value);
     select.innerHTML = '';
     // The common sources lead; the rest go under a "More sources" group so the
     // list reads as a choice of three. Option values are unchanged, so nothing

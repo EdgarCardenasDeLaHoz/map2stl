@@ -30,13 +30,14 @@ logger = logging.getLogger(__name__)
 GLOBALDEM_URL = "https://portal.opentopography.org/API/globaldem"
 
 #: Global DEM types offered as DEM sources.
+#: ``arcsec`` is the native grid spacing; ``resolution_m`` its nominal size at the equator.
 OPENTOPO_DATASETS: dict[str, dict] = {
-    "SRTMGL1":    {"label": "SRTM 30m (Global)",          "resolution_m": 30},
-    "SRTMGL3":    {"label": "SRTM 90m (Global)",          "resolution_m": 90},
-    "AW3D30":     {"label": "ALOS World 3D 30m",          "resolution_m": 30},
-    "COP30":      {"label": "Copernicus DSM 30m",         "resolution_m": 30},
-    "COP90":      {"label": "Copernicus DSM 90m",         "resolution_m": 90},
-    "SRTM15Plus": {"label": "SRTM15+ (Bathymetry+Land)", "resolution_m": 500},
+    "SRTMGL1":    {"label": "SRTM 30m (Global)",          "resolution_m": 30,  "arcsec": 1},
+    "SRTMGL3":    {"label": "SRTM 90m (Global)",          "resolution_m": 90,  "arcsec": 3},
+    "AW3D30":     {"label": "ALOS World 3D 30m",          "resolution_m": 30,  "arcsec": 1},
+    "COP30":      {"label": "Copernicus DSM 30m",         "resolution_m": 30,  "arcsec": 1},
+    "COP90":      {"label": "Copernicus DSM 90m",         "resolution_m": 90,  "arcsec": 3},
+    "SRTM15Plus": {"label": "SRTM15+ (Bathymetry+Land)", "resolution_m": 500, "arcsec": 15},
 }
 
 # strm2stl root (geo2stl/opentopo.py -> geo2stl -> strm2stl)

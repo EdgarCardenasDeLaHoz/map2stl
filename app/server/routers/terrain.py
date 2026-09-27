@@ -52,6 +52,11 @@ from app.server.core.validation import (
 )
 from geo2stl import opentopo as _opentopo
 from geo2stl.dem import (
+    DEM_SOURCE_INFO,
+    default_dem_source,
+    dem_sampling,
+)
+from geo2stl.dem import (
     fetch_dem as _fetch_dem,
 )
 from geo2stl.dem import (
@@ -300,6 +305,9 @@ async def get_terrain_dem(
         payload["sat_available"] = False
         payload["dem_id"] = dem_store.put(im, {"north": north, "south": south,
                                                "east": east, "west": west})
+        payload["source_resolution"] = dem_sampling(
+            dem_source, (north or 0.0, south or 0.0, east or 0.0, west or 0.0),
+            payload["dimensions"])
         return JSONResponse(content=payload)
 
     # Guard: bbox already validated above but south/north could be None only in edge cases
@@ -341,6 +349,12 @@ async def get_terrain_dem(
         # both shrinks the grid again and shears its contents relative to the DEM.
         response_content["source_dimensions"] = [
             int(im_raw.shape[0]), int(im_raw.shape[1])]
+
+        # Native resolution of the source and how many real samples span the box,
+        # against the grid returned: a 2 km box on SRTM 30 m is ~65 samples across,
+        # so a 600 px grid is mostly interpolation (F-UX batch 2).
+        response_content["source_resolution"] = dem_sampling(
+            dem_source, (north, south, east, west), response_content["dimensions"])
 
         # Flag DEMs that came back with no real relief (source had no coverage
         # for this bbox) so the client can warn instead of showing a flat map.
@@ -792,12 +806,17 @@ async def get_terrain_sources():
     # slab, so reporting it as ready is worse than reporting nothing at all.
     from app.server.core import tile_store
     local_status = tile_store.status()
+    # resolution_m is kept for older clients; native_resolution_m comes from
+    # geo2stl.dem.DEM_SOURCE_INFO, the table the DEM response's sampling uses.
     sources = [
         {"id": "local", "label": "Local SRTM Tiles", "provider": "local",
-         "resolution_m": 30, "requires_api_key": False,
+         "resolution_m": DEM_SOURCE_INFO["local"]["native_resolution_m"],
+         "native_resolution_m": DEM_SOURCE_INFO["local"]["native_resolution_m"],
+         "requires_api_key": False,
          "available": local_status["available"], "note": local_status["note"]},
         {"id": "h5_local", "label": "Local SRTM H5 (City-scale, ~90m)",
          "provider": "local_h5", "resolution_m": 90,
+         "native_resolution_m": DEM_SOURCE_INFO["h5_local"]["native_resolution_m"],
          "requires_api_key": False, "available": _H5_SRTM_AVAILABLE,
          "note": "High-fidelity SRTM3 from local strm_data.h5 — best for regions < 15 km."},
     ]
@@ -806,10 +825,12 @@ async def get_terrain_sources():
         sources.append({
             "id": demtype, "label": info["label"], "provider": "OpenTopography",
             "resolution_m": info["resolution_m"],
+            "native_resolution_m": DEM_SOURCE_INFO[demtype]["native_resolution_m"],
             "requires_api_key": True, "available": has_key,
         })
     return JSONResponse(content={
         "sources": sources,
+        "default_source": default_dem_source(has_key, _H5_SRTM_AVAILABLE),
         "opentopo_api_key_configured": has_key,
         "h5_srtm_available": _H5_SRTM_AVAILABLE,
         "local_tile_store": local_status,

@@ -508,6 +508,9 @@ function initMap() {
         });
         _drawnItems.addLayer(layer);
         window.setBoundingBox?.(layer.getBounds());
+        const b = layer.getBounds();
+        window.events?.emit(window.EV?.BBOX_CHANGED, {
+            north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() });
 
         // Update the current box indicator
         updateBboxIndicator(bboxColor);
