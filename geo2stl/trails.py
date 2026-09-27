@@ -21,6 +21,8 @@ import logging
 
 import numpy as np
 
+from geo2stl.osm import use_overpass_endpoint
+
 logger = logging.getLogger(__name__)
 
 # Categories are fixed: the UI toggles exactly these two.
@@ -312,14 +314,7 @@ class OsmTrailsLayer(TrailsLayerBase):
         # the transport level.
         for attempt, endpoint in enumerate(endpoints):
             if endpoint is not None:
-                ox.settings.overpass_url = endpoint
-                # osmnx's rate limiter polls ``{overpass_url}/status`` and sleeps
-                # until a slot frees. Only the official instance publishes that in
-                # the format osmnx parses; against a mirror the parse yields no
-                # slot and osmnx sleeps forever.
-                ox.settings.overpass_rate_limit = endpoint.startswith(
-                    "https://overpass-api.de")
-                ox.settings.requests_timeout = _OVERPASS_REQUEST_TIMEOUT_S
+                use_overpass_endpoint(ox, endpoint, _OVERPASS_REQUEST_TIMEOUT_S)
 
             out = {}
             failures = []
@@ -352,8 +347,8 @@ class OsmTrailsLayer(TrailsLayerBase):
     def _endpoints() -> list[str | None]:
         """Overpass mirrors to try, in preference order.
 
-        Delegates to city2stl's health probe, which requests ``/status`` and
-        checks the status code. The probe this replaced was a bare
+        Uses the shared health probe (``geo2stl.osm``), which requests
+        ``/status`` and checks the status code. The probe this replaced was a bare
         ``requests.head`` on the base URL that accepted anything which did not
         raise - and ``head`` does not raise on a 502, so a mirror that was up but
         broken was selected while healthy ones sat untried. It also assigned
@@ -363,8 +358,8 @@ class OsmTrailsLayer(TrailsLayerBase):
         Returns ``[None]`` when the probe is unavailable or every mirror is down,
         which means "use whatever osmnx is configured with and try once".
         """
-        from city2stl.fetch import _healthy_overpass_endpoints
-        healthy = _healthy_overpass_endpoints()
+        from geo2stl.osm import healthy_overpass_endpoints
+        healthy = healthy_overpass_endpoints()
         return list(healthy) if healthy else [None]
 
     @staticmethod

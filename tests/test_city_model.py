@@ -141,6 +141,68 @@ class TestCityExportTask:
         assert report["scale"]["z_mode"] == "true"
 
 
+class TestTwoStagePipeline:
+    """Every mesh export: terrain stage (raster) -> city model (vector)."""
+
+    def _city(self, client, body):
+        r = client.post("/api/export/start", json={"format": "city", "name": "t", **body})
+        task_id = r.json()["task_id"]
+        for _ in range(300):
+            st = client.get(f"/api/export/status/{task_id}").json()
+            if st["status"] != "running":
+                break
+            time.sleep(0.2)
+        assert st["status"] == "complete", st
+        z = zipfile.ZipFile(io.BytesIO(client.get(f"/api/export/download/{task_id}").content))
+        return json.loads(z.read("report.json")), trimesh.load(
+            io.BytesIO(z.read("t.stl")), file_type="stl")
+
+    def test_city_build_uses_edited_dem_values(self, client, monkeypatch):
+        import app.server.core.city_model_task as task_mod
+
+        monkeypatch.setattr(task_mod, "get_city_layers", lambda *a, **k: {})
+        dem = _hill(40, 50)
+        body = {"bbox": BBOX, "dem_values": dem.ravel().tolist(), "height": 40, "width": 50,
+                "layers": {"trails": {"enabled": False}}, "z_mode": "true", "base_height": 5}
+        report, mesh = self._city(client, body)
+        assert report["dem_shape"] == [40, 50]
+        relief = (dem.max() - dem.min()) * report["scale"]["z_mm_per_m"]
+        assert mesh.extents[2] == pytest.approx(5 + relief, abs=0.5)
+
+    def test_city_build_applies_the_terrain_stage(self, client, monkeypatch):
+        import app.server.core.city_model_task as task_mod
+
+        monkeypatch.setattr(task_mod, "get_city_layers", lambda *a, **k: {})
+        dem = _hill(40, 50) - 150            # mostly below sea level
+        body = {"bbox": BBOX, "dem_values": dem.ravel().tolist(), "height": 40, "width": 50,
+                "layers": {"trails": {"enabled": False}}, "z_mode": "true",
+                "sea_level_cap": True, "median_size": 0}
+        report, mesh = self._city(client, body)
+        relief = dem.max() * report["scale"]["z_mm_per_m"]    # capped at 0 m
+        assert mesh.extents[2] == pytest.approx(5 + relief, abs=0.5)
+
+    def test_terrain_export_is_the_city_model_without_layers(self):
+        from app.server.core.export import _prepare_export_mesh
+        from app.server.core.export_params import ExportContext
+
+        dem = _hill()
+        data = {"bbox": BBOX, "dem_values": dem.ravel().tolist(), "height": 120, "width": 150,
+                "z_mode": "true"}
+        mesh = _prepare_export_mesh(ExportContext.from_request(data), data)
+        city = build_city_model(dem, BBOX, {})
+        assert mesh.is_watertight
+        assert mesh.volume == pytest.approx(city.merged.volume, rel=1e-6)
+        assert len(mesh.faces) < 2 * 119 * 149      # adaptive, not one quad per pixel
+
+    def test_feature_channels_never_reach_the_terrain(self):
+        from app.server.core.export_params import mesh_composite_layers
+
+        spec = [{"source": "SRTMGL1"}, {"source": "water_esa"}, {"source": "osm_buildings"},
+                {"source": "osm_roads"}, {"source": "osm_walls"}, {"source": "osm_waterways"}]
+        assert [s["source"] for s in mesh_composite_layers(spec)] == ["SRTMGL1", "water_esa"]
+        assert mesh_composite_layers([{"source": "osm_buildings"}]) is None
+
+
 class TestSimplificationAtPrintScale:
     def test_terrain_tin_stays_within_tolerance(self):
         import matplotlib.tri as mtri
@@ -175,8 +237,7 @@ class TestSimplificationAtPrintScale:
         assert m.volume == pytest.approx((80 - 6) * 3.0)
 
     def test_dense_road_network_builds(self):
-        # A grid of crossing streets dissolves into one polygon with many holes,
-        # which a single triangulation could not handle.
+        # A grid of crossing streets dissolves into one slab with many holes.
         lons = np.linspace(-3.603, -3.580, 12)
         lats = np.linspace(37.174, 37.188, 12)
         feats = [{"geometry": {"type": "LineString", "coordinates": [[x, lats[0]], [x, lats[-1]]]},
@@ -184,6 +245,60 @@ class TestSimplificationAtPrintScale:
         feats += [{"geometry": {"type": "LineString", "coordinates": [[lons[0], y], [lons[-1], y]]},
                    "properties": {"road_width_m": 8}} for y in lats]
         m = build_city_model(_hill(), BBOX, {"roads": _fc(*feats)})
-        assert m.report["layers"]["roads"]["solids"] == len(feats)
+        assert m.report["layers"]["roads"]["slabs"] == 1
         assert m.report["layers"]["roads"]["rejected"] == 0
         assert "roads" in m.parts and m.merged.is_watertight
+
+    def test_draped_slab_takes_detail_from_the_terrain_mesh(self):
+        road = {"geometry": {"type": "LineString", "coordinates": [[-3.60, 37.18], [-3.58, 37.18]]},
+                "properties": {"road_width_m": 60}}
+        flat = build_city_model(np.full((120, 150), 100.0), BBOX, {"roads": _fc(road)},
+                                simplify=False)
+        hill = build_city_model(_hill(), BBOX, {"roads": _fc(road)}, simplify=False)
+        # Flat ground needs no interior points; the hill needs them where it curves.
+        assert len(flat.parts["roads"].faces) * 2 < len(hill.parts["roads"].faces)
+
+
+class TestPrintability:
+    def _stl_watertight(self, mesh):
+        buf = io.BytesIO()
+        mesh.export(buf, file_type="stl")
+        buf.seek(0)
+        return trimesh.load(buf, file_type="stl").is_watertight
+
+    def test_solids_touching_at_a_corner_stay_watertight_as_stl(self):
+        d = 0.0004
+        sq = lambda lon, lat: {"type": "Polygon", "coordinates": [[  # noqa: E731
+            [lon, lat], [lon + d, lat], [lon + d, lat + d], [lon, lat + d], [lon, lat]]]}
+        lon, lat = -3.59, 37.18
+        feats = [{"geometry": sq(lon, lat), "properties": {"height_m": 20}},
+                 {"geometry": sq(lon + d, lat + d), "properties": {"height_m": 12}},
+                 {"geometry": sq(lon + d, lat - d), "properties": {"height_m": 15}}]
+        m = build_city_model(_hill(), BBOX, {"buildings": _fc(*feats)})
+        assert m.report["merged"]["watertight"] and self._stl_watertight(m.merged)
+
+    def test_thin_lines_are_widened_to_print_width(self):
+        trail = {"geometry": {"type": "LineString", "coordinates": [[-3.60, 37.18], [-3.58, 37.18]]},
+                 "properties": {"width": "0.5"}}
+        m = build_city_model(_hill(), BBOX, {"trails": _fc(trail)})
+        assert m.report["layers"]["trails"]["widened"] == 1
+        ys = m.parts["trails"].vertices[:, 1]
+        assert ys.max() - ys.min() >= 0.8 - 1e-6
+
+    def test_slender_towers_are_clamped(self):
+        tower = {"geometry": _square(-3.59, 37.18, d=0.00002), "properties": {"height_m": 300}}
+        m = build_city_model(_hill(), BBOX, {"towers": _fc(tower)})
+        assert m.report["layers"]["towers"]["clamped"] == 1
+        top = m.parts["towers"].vertices[:, 2].max()
+        width = m.parts["towers"].extents[:2].min()
+        assert top - m.merged.vertices[:, 2].min() < 300 * m.scale.z_mm_per_m
+        assert m.parts["towers"].extents[2] <= 8 * width + 1.0
+
+    def test_pitched_roof_on_concave_footprint_is_kept(self):
+        ell = {"type": "Polygon", "coordinates": [[[-3.590, 37.180], [-3.589, 37.180], [-3.589, 37.1804],
+                                                   [-3.5894, 37.1804], [-3.5894, 37.181],
+                                                   [-3.590, 37.181], [-3.590, 37.180]]]}
+        m = build_city_model(_hill(), BBOX, {"buildings": _fc(
+            {"geometry": ell, "properties": {"height_m": 15, "roof:shape": "hipped"}})})
+        assert m.report["layers"]["buildings"]["rejected"] == 0
+        assert "buildings" in m.parts

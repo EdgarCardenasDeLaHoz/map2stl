@@ -76,21 +76,22 @@ _DEFAULT_SETTINGS: dict = {
         "show_sat":            False,
     },
     # ── 3-D model export ──────────────────────────────────────────────────
-    # Sent to /api/export/stl|obj|obj/split
+    # Terrain-stage fields of every mesh export (/api/export/start: puzzle, city).
     # sea_level_cap: clamp ocean surfaces to z=0 (prevents deep-ocean trenches in mesh)
-    # puzzle_z: None = auto (model_height + base_height + margin)
+    # z_mode: "auto" (true scale under 20 km diagonal, fit to model_height above) | "true" | "fit"
     "export": {
         "model_height":     30.0,
         "base_height":      10.0,
         "exaggeration":     1.0,
+        "mm_per_pixel":     1.0,
+        "z_mode":           "auto",
+        "median_size":      3,
         "sea_level_cap":    False,
-        "floor_val":        0.0,
         "engrave_label":    False,
         "label_text":       "",               # empty = use region name
         "contours":         False,
         "contour_interval": 100.0,            # metres between contour lines
         "contour_style":    "engraved",       # "engraved" | "embossed"
-        "puzzle_z":         None,
     },
     # ── Puzzle split ──────────────────────────────────────────────────────
     # Sent to /api/export/start (format=puzzle): interlocking jigsaw pieces.
@@ -632,7 +633,6 @@ class TerrainSession:
         # Non-negative floats
         for key, src, group_key in (
             ("water_scale", d, "dem"),
-            ("floor_val",   e, "export"),
         ):
             val = src.get(key)
             if val is not None and (not isinstance(val, (int, float)) or val < 0):
@@ -2155,18 +2155,21 @@ class TerrainSession:
             vmin=self.hydrology["depression_m"],
             vmax=0)
 
-    def _export_payload(self, fmt: str) -> dict:
-        """Build the unified /api/export request body."""
-        exp = copy.copy(self.settings["export"])
-        if not exp["label_text"]:
-            exp["label_text"] = self.region_name or "terrain"
+    def _mesh_export_body(self, fmt: str, name: str | None = None) -> dict:
+        """The /api/export/start body every mesh export shares: the loaded DEM
+        handle plus the terrain-stage settings (scale, base, sea-level cap,
+        smoothing, label, contours), in the server's field names."""
+        e = self.settings["export"]
+        body = {k: e[k] for k in ("model_height", "base_height", "exaggeration", "mm_per_pixel",
+                                  "z_mode", "median_size", "sea_level_cap", "engrave_label",
+                                  "contours", "contour_interval", "contour_style") if k in e}
         return {
-            **self.bbox,
+            **body,
             "format": fmt,
-            "name":   self.region_name,
-            "dem":    self.settings["dem"],
-            "export": exp,
-            "split":  self.settings["split"],
+            "dem_id": self.dem["dem_id"],
+            "bbox": self.bbox,
+            "name": name or self.region_name or "terrain",
+            "label_text": e.get("label_text") or self.region_name or "terrain",
         }
 
     def export_puzzle(self, timeout: float = 1800.0) -> TerrainSession:
@@ -2177,12 +2180,9 @@ class TerrainSession:
         settings (scale, height, base). Requires fetch_dem().
         """
         self._require_attribute("dem", "export_puzzle")
-        sp, e = self.settings["split"], self.settings["export"]
+        sp = self.settings["split"]
         body = {
-            "format": "puzzle", "dem_id": self.dem["dem_id"],
-            "name": self.region_name or "terrain",
-            "model_height": e["model_height"], "base_height": e["base_height"],
-            "exaggeration": e["exaggeration"], "mm_per_pixel": e.get("mm_per_pixel", 1.0),
+            **self._mesh_export_body("puzzle"),
             "split_cols": sp["split_cols"], "split_rows": sp["split_rows"],
             "knob_width_mm": sp["knob_width_mm"], "knob_depth_mm": sp["knob_depth_mm"],
             "clearance_mm": sp["clearance_mm"],
@@ -2380,16 +2380,10 @@ class TerrainSession:
             if self.city_data is None:
                 raise RuntimeError("Call fetch_cities() before classify_roofs=True")
             self.classify_roof_shapes(estimate_roof_heights=estimate_roof_heights)
-        e = self.settings["export"]
         body = {
-            "format": "city",
-            "dem_id": self.dem["dem_id"],
-            "name": name or self.region_name or "city",
-            "mm_per_px": e.get("mm_per_pixel", 1.0),
+            **self._mesh_export_body("city", name or self.region_name or "city"),
             "z_mode": z_mode,
             "exaggeration": exaggeration,
-            "fit_height_mm": e["model_height"],
-            "base_mm": e["base_height"],
             "median_size": median_size,
             "layers": layers or {},
         }

@@ -85,6 +85,21 @@ def resolve_dem(data: dict) -> tuple[list, int, int] | None:
     return dem_arr.ravel().tolist(), h, w
 
 
+# Composite sources that rasterise OSM features. Meshes get those features from
+# the vector stage (city2stl.city_model); baked into the terrain as well, every
+# building would print twice, once as a pixel block. They stay available for
+# the 2D composite preview and ML rasters.
+FEATURE_SOURCES = frozenset({"osm_buildings", "osm_roads", "osm_waterways", "osm_walls"})
+
+
+def mesh_composite_layers(layers: list | None) -> list | None:
+    """The terrain-stage part of a composite spec (feature channels removed)."""
+    kept = [spec for spec in (layers or [])
+            if (spec.get("source") if isinstance(spec, dict) else getattr(spec, "source", None))
+            not in FEATURE_SOURCES]
+    return kept or None
+
+
 @dataclass
 class ExportContext:
     """Typed container for parsed export parameters.
@@ -131,7 +146,7 @@ class ExportContext:
 
         # Composite mode (highest priority): rebuild the DEM from the merge spec
         # so the 3D output reflects the user's Composite-tab configuration.
-        composite_layers = data.get("composite_layers") or None
+        composite_layers = mesh_composite_layers(data.get("composite_layers"))
         composite_error = None
         if composite_layers and data.get("bbox"):
             try:
@@ -176,7 +191,7 @@ class ExportContext:
             sea_level_cap=bool(data.get("sea_level_cap", False)),
             name=data.get("name", "terrain"),
             mm_per_pixel=float(data.get("mm_per_pixel", 1.0)),
-            composite_layers=data.get("composite_layers") or None,
+            composite_layers=composite_layers,
             composite_dim=int(data["composite_dim"]) if data.get("composite_dim") else None,
             bbox=bbox,
             composite_error=composite_error,

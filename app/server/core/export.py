@@ -1,10 +1,18 @@
 """
-core/export.py — STL / OBJ / 3MF / cross-section generation.
+core/export.py — STL / OBJ / 3MF / puzzle / preview / cross-section generation.
 
-Extracted from location_picker.py (backend refactor, step 5).
-Each function accepts a plain dict (pre-parsed JSON body) and returns a
-FastAPI FileResponse (or raises an exception on failure).
-Route handlers in location_picker.py / routers/export.py call these.
+Every mesh export runs the same two stages:
+
+1. **Terrain stage** (:func:`terrain_stage`, raster): the DEM from the request
+   (composite spec, edited values or ``dem_id``), median filter, sea-level cap,
+   vertical scale, label engraving and contour lines -> one heightfield in mm.
+2. **Feature stage** (``city2stl.city_model.build_on_terrain``, vector): OSM
+   layers extruded / draped / cut on that heightfield and merged in 3D. A
+   terrain-only export is this stage with no layers, so the STL, OBJ, 3MF,
+   puzzle and city exports all share one adaptive, watertight terrain mesh.
+
+The in-browser preview uses the terrain stage too, meshed as a plain grid (fast).
+Each function accepts a plain dict (pre-parsed JSON body).
 """
 
 from __future__ import annotations
@@ -12,6 +20,8 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from starlette.background import BackgroundTask
@@ -23,18 +33,15 @@ from app.server.core.export_params import (
 )
 from app.server.core.export_tasks import ExportTask
 
+if TYPE_CHECKING:
+    from city2stl.city_model import ModelScale
+
 logger = logging.getLogger(__name__)
 
 
 def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
     """Execute the full export pipeline with progress updates."""
     p = _parse_export_params(data)
-    engrave_label = bool(data.get("engrave_label", False))
-    label_text = data.get("label_text", p.name)
-    contours = bool(data.get("contours", False))
-    contour_interval = float(data.get("contour_interval", 100))
-    contour_style = data.get("contour_style", "engraved")
-
     if not p.dem_values or not p.height or not p.width:
         task.fail("Missing DEM data")
         return
@@ -43,44 +50,17 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
                   f"{p.height} x {p.width}")
         return
 
-    # Step 1: Prepare DEM
-    task.update(10, "Preparing DEM array...")
-    im, im_min, im_max = _prepare_dem_array(p)
-
-    # Step 2: Optional label engraving
-    if engrave_label and label_text:
-        task.update(25, "Engraving label...")
-        im = _apply_label_engraving(im, label_text, p.base_height)
-
-    # Step 3: Optional contours
-    if contours and contour_interval > 0:
-        task.update(35, "Generating contours...")
-        # Relief is model_height * exaggeration mm, so the contour spacing has
-        # to be computed against that same height rather than model_height alone.
-        im = _apply_contour_lines(im, im_min, im_max, p.model_height * p.exaggeration,
-                                  p.base_height, contour_interval, contour_style)
-
-    # Step 4: Mesh generation (heaviest step)
-    task.update(45, "Generating mesh...")
+    task.update(10, "Preparing terrain...")
+    mesh = _prepare_export_mesh(p, data, progress=task.update)
+    vertices, faces = mesh.vertices, mesh.faces
     if fmt == "obj":
         from numpy2stl import writeOBJ
     elif fmt == "3mf":
         from numpy2stl import write3MF
-    vertices, faces = _grid_mesh(im, mm_per_pixel=p.mm_per_pixel)
-
-    # Repair runs for every format now. OBJ and 3MF used to be written straight
-    # from array_to_mesh, so an interior boundary loop - a NaN DEM cell drops the
-    # quads around it - shipped as a hole in what is supposed to be a closed
-    # solid. Watertightness is measured after the repair and reported on all
-    # three formats rather than STL alone.
-    task.update(70, "Repairing mesh...")
-    mesh = _repair_mesh(vertices, faces)
-    vertices, faces = mesh.vertices, mesh.faces
-    is_watertight = bool(mesh.is_watertight)
+    is_watertight = _watertight(mesh)
     face_count = int(len(mesh.faces))
     if not is_watertight:
-        logger.warning("%s mesh is not watertight after repair (%d faces)",
-                       fmt.upper(), face_count)
+        logger.warning("%s mesh is not watertight (%d faces)", fmt.upper(), face_count)
     mesh_headers = _quality_headers(is_watertight, face_count, p.composite_error)
 
     # Step 5: Export to file
@@ -113,13 +93,44 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
     task.complete(temp_path, f"{p.name}.{fmt}", headers)
 
 
-def _prepare_dem_array(p: ExportContext) -> tuple[np.ndarray, float, float]:
+@dataclass
+class TerrainField:
+    """Output of the terrain stage: the top surface in model mm and its scale."""
+
+    z_mm: np.ndarray       # (H, W), row 0 north, base included
+    scale: ModelScale
+    elev_min_m: float
+    elev_max_m: float
+
+
+def terrain_stage(p: ExportContext, data: dict) -> TerrainField:
+    """Stage 1 of every mesh export: the request's DEM as a heightfield in mm.
+
+    Raster terrain modifiers only (composite / edited values are already in
+    ``p.dem_values``): median filter, sea-level cap, vertical scale, then the
+    label and contour engraving. Features belong to the vector stage.
+    """
+    im, im_min, im_max, scale = _prepare_dem_array(p)
+    label_text = data.get("label_text", p.name)
+    if data.get("engrave_label") and label_text:
+        im = _apply_label_engraving(im, label_text, p.base_height)
+    contour_interval = float(data.get("contour_interval", 100))
+    if data.get("contours") and contour_interval > 0:
+        # Relief is model_height * exaggeration mm, so the contour spacing has
+        # to be computed against that same height rather than model_height alone.
+        im = _apply_contour_lines(im, im_min, im_max, p.model_height * p.exaggeration,
+                                  p.base_height, contour_interval,
+                                  data.get("contour_style", "engraved"))
+    return TerrainField(im, scale, im_min, im_max)
+
+
+def _prepare_dem_array(p: ExportContext) -> tuple[np.ndarray, float, float, ModelScale]:
     """
     Reshape, fill, median-filter, sea-level-clip and scale the DEM into model mm.
 
-    Returns ``(im, im_min, im_max)``: ``im`` is the top surface in mm with the base
-    added; ``im_min``/``im_max`` are the source extents in metres (the contour
-    spacing converts a contour interval in metres into millimetres with them).
+    Returns ``(im, im_min, im_max, scale)``: ``im`` is the top surface in mm with
+    the base added; ``im_min``/``im_max`` are the source extents in metres (the
+    contour spacing converts a contour interval in metres into millimetres with them).
 
     Vertical scale comes from ``city2stl.city_model.choose_scale``: ``z_mode``
     "true" is true scale x exaggeration; "fit" maps the relief to
@@ -143,16 +154,14 @@ def _prepare_dem_array(p: ExportContext) -> tuple[np.ndarray, float, float]:
     im_min = float(im.min())
     im_max = float(im.max())
     z_mode = p.z_mode if p.bbox else "fit"
-    if im_max > im_min or z_mode == "true":
-        scale = choose_scale(p.bbox or {"north": 1, "south": 0, "east": 1, "west": 0},
-                             im.shape, im_min, im_max, mm_per_px=p.mm_per_pixel,
-                             z_mode=z_mode, exaggeration=p.exaggeration,
-                             fit_height_mm=p.model_height, base_mm=p.base_height)
-        im = scale.z_mm(im)
-    else:
-        # A genuinely flat region (a lake, a salt pan) prints as a flat plate.
-        im = np.full_like(im, p.base_height)
-    return im, im_min, im_max
+    flat = not (im_max > im_min or z_mode == "true")
+    scale = choose_scale(p.bbox or {"north": 1, "south": 0, "east": 1, "west": 0},
+                         im.shape, im_min, im_max, mm_per_px=p.mm_per_pixel,
+                         z_mode="true" if flat else z_mode, exaggeration=p.exaggeration,
+                         fit_height_mm=p.model_height, base_mm=p.base_height)
+    # A genuinely flat region (a lake, a salt pan) prints as a flat plate.
+    im = np.full_like(im, p.base_height) if flat else scale.z_mm(im)
+    return im, im_min, im_max, scale
 
 
 def _scale_xy(vertices: np.ndarray, mm_per_pixel: float) -> np.ndarray:
@@ -229,34 +238,27 @@ def _repair_and_export(vertices, faces, suffix: str):
     return _write_mesh(mesh, suffix), mesh
 
 
-def _prepare_export_mesh(p, data: dict):
-    """Shared DEM-to-mesh path for the direct export routes.
+def _prepare_export_mesh(p: ExportContext, data: dict, progress=None):
+    """Both stages for a terrain-only export: heightfield, then the city model on it.
 
-    generate_stl, generate_obj and generate_3mf each inlined their own copy of
-    this sequence, and the OBJ and 3MF copies had drifted off it: they skipped
-    the label engraving, the contour lines and the trimesh repair entirely, so
-    the same request produced a different model depending on the file extension.
-    Returns the repaired mesh along with its vertices and faces.
+    Returns the merged ``trimesh.Trimesh`` (adaptive terrain within the print
+    tolerance, watertight, north up, z = 0 floor). The city export calls
+    :func:`terrain_stage` and ``build_on_terrain`` itself to add its layers.
     """
-    from numpy2stl import array_to_mesh  # noqa: F401
+    from city2stl.city_model import build_on_terrain
 
-    im, im_min, im_max = _prepare_dem_array(p)
+    field = terrain_stage(p, data)
+    if progress:
+        progress(30, "Meshing terrain...")
+    mesh = build_on_terrain(field.z_mm, p.bbox, field.scale, {}).merged
+    if len(mesh.faces) == 0:
+        raise ValueError("Mesh generation produced no faces")
+    return mesh
 
-    engrave_label = bool(data.get("engrave_label", False))
-    label_text = data.get("label_text", p.name)
-    if engrave_label and label_text:
-        im = _apply_label_engraving(im, label_text, p.base_height)
 
-    contours = bool(data.get("contours", False))
-    contour_interval = float(data.get("contour_interval", 100))
-    contour_style = data.get("contour_style", "engraved")
-    if contours and contour_interval > 0:
-        im = _apply_contour_lines(im, im_min, im_max, p.model_height * p.exaggeration,
-                                  p.base_height, contour_interval, contour_style)
-
-    vertices, faces = _grid_mesh(im, mm_per_pixel=p.mm_per_pixel)
-    mesh = _repair_mesh(vertices, faces)
-    return mesh, mesh.vertices, mesh.faces
+def _watertight(mesh) -> bool:
+    from city2stl.city_model import welded_watertight
+    return welded_watertight(mesh)
 
 
 def _disposition(filename: str) -> dict:
@@ -294,9 +296,9 @@ def _quality_headers(watertight: bool, face_count: int,
 def _mesh_response_headers(name: str, ext: str, mesh,
                            composite_error: str | None = None) -> dict:
     """Content-Disposition plus the watertightness figures the client reads back."""
-    watertight = bool(mesh.is_watertight)
+    watertight = _watertight(mesh)
     if not watertight:
-        logger.warning("%s mesh is not watertight after repair (%d faces)",
+        logger.warning("%s mesh is not watertight (%d faces)",
                        ext.upper(), len(mesh.faces))
     return {**_disposition(f"{name}.{ext}"),
             **_quality_headers(watertight, len(mesh.faces), composite_error)}
@@ -378,7 +380,7 @@ def generate_stl(data: dict):
     if not p.dem_values or not p.height or not p.width:
         return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
 
-    mesh, _vertices, _faces = _prepare_export_mesh(p, data)
+    mesh = _prepare_export_mesh(p, data)
     temp_path = _write_mesh(mesh, ".stl")
     logger.info("STL generated: %d faces, watertight=%s",
                 len(mesh.faces), mesh.is_watertight)
@@ -401,7 +403,8 @@ def generate_obj(data: dict):
     if not p.dem_values or not p.height or not p.width:
         return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
 
-    mesh, vertices, faces = _prepare_export_mesh(p, data)
+    mesh = _prepare_export_mesh(p, data)
+    vertices, faces = mesh.vertices, mesh.faces
 
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".obj")
     temp_path = tf.name
@@ -428,7 +431,8 @@ def generate_3mf(data: dict):
     if not p.dem_values or not p.height or not p.width:
         return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
 
-    mesh, vertices, faces = _prepare_export_mesh(p, data)
+    mesh = _prepare_export_mesh(p, data)
+    vertices, faces = mesh.vertices, mesh.faces
 
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".3mf")
     temp_path = tf.name
@@ -491,22 +495,8 @@ def generate_mesh_preview(data: dict):
             status_code=400,
         )
 
-    im, im_min, im_max = _prepare_dem_array(p)
-
-    # Mirror the same label/contour steps as _run_export_pipeline so the live
-    # 3D preview matches what the file export will actually produce, instead
-    # of only showing these effects after downloading.
-    engrave_label = bool(data.get("engrave_label", False))
-    label_text = data.get("label_text", p.name)
-    if engrave_label and label_text:
-        im = _apply_label_engraving(im, label_text, p.base_height)
-
-    contours = bool(data.get("contours", False))
-    contour_interval = float(data.get("contour_interval", 100))
-    contour_style = data.get("contour_style", "engraved")
-    if contours and contour_interval > 0:
-        im = _apply_contour_lines(im, im_min, im_max, p.model_height * p.exaggeration,
-                                  p.base_height, contour_interval, contour_style)
+    # The export's own terrain stage, so label, contours and scale match the file.
+    im = terrain_stage(p, data).z_mm
 
     # Default to a closed solid so the preview shows the floor and side walls
     # the exported file actually has. This defaulted to a bare top surface,
@@ -556,7 +546,7 @@ def generate_puzzle(data: dict, task: ExportTask) -> None:
         task.fail("Missing DEM data")
         return
     task.update(5, "Building terrain mesh...")
-    mesh, _, _ = _prepare_export_mesh(p, data)
+    mesh = _prepare_export_mesh(p, data, progress=task.update)
     spec = {"cols": data.get("split_cols"), "rows": data.get("split_rows"),
             "piece_mm": data.get("piece_mm"), "knob_width_mm": data.get("knob_width_mm"),
             "knob_depth_mm": data.get("knob_depth_mm"),

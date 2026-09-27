@@ -58,6 +58,8 @@ SOURCE_VERTICAL_STEP_M = 1.0  # SRTM / Copernicus heights are stored in whole me
 SIMPLIFY_TOL_MM = 0.05        # outline simplification tolerance at model scale
 SNAP_MM = 0.01                # coordinate grid for outlines
 MIN_FOOTPRINT_MM2 = 0.3       # smaller footprints cannot print as a distinct feature
+PRINT_MIN_WIDTH_MM = 0.8      # two 0.4 mm extrusion lines: the narrowest reliable feature
+MAX_SLENDERNESS = 8.0         # extruded height <= this x footprint width (snaps off otherwise)
 _M_PER_DEG_LAT = 110_540.0
 _M_PER_DEG_LON = 111_320.0
 
@@ -145,6 +147,8 @@ class LayerStyle:
     offset_mm: float = 0.4        # raised: height above terrain; engraved/water: depth
     line_width_m: float = 4.0     # buffer width for line features without their own width
     min_height_mm: float = 0.4    # extrude: never thinner than this
+    min_width_mm: float = PRINT_MIN_WIDTH_MM   # narrower features are widened to this
+    max_slenderness: float = MAX_SLENDERNESS   # extrude: height cap as a multiple of width (0 = off)
 
 
 DEFAULT_LAYERS: dict[str, LayerStyle] = {
@@ -192,6 +196,7 @@ class Terrain:
     bbox: dict
     scale: ModelScale
     rect: Polygon = field(init=False)
+    tin_xy: np.ndarray | None = None   # adaptive terrain vertices (mm), set by terrain_solid
 
     def __post_init__(self) -> None:
         h, w = self.z.shape
@@ -326,6 +331,7 @@ def terrain_solid(terrain: Terrain, max_error: float = TERRAIN_MAX_ERROR_MM) -> 
     remap[idx] = np.arange(len(idx))
     ii, jj = np.divmod(idx, w)
     top = np.column_stack([jj * s, (h - 1 - ii) * s, terrain.z.ravel()[idx]])
+    terrain.tin_xy = top[:, :2]
     f = remap[tris]
     # Counter-clockwise from above => normals up.
     p = top[f]
@@ -367,26 +373,49 @@ def _line_width_m(layer: str, props: dict, style: LayerStyle) -> float:
     return style.line_width_m
 
 
+def _widths(polys: np.ndarray) -> np.ndarray:
+    """Footprint width: short side of the minimum rotated rectangle."""
+    rect = shapely.minimum_rotated_rectangle(polys)
+    c = shapely.get_coordinates(rect).reshape(len(polys), -1, 2)[:, :3]
+    return np.minimum(np.linalg.norm(c[:, 1] - c[:, 0], axis=1),
+                      np.linalg.norm(c[:, 2] - c[:, 1], axis=1))
+
+
 def feature_polygons(name: str, features: list[dict], style: LayerStyle,
-                     terrain: Terrain) -> tuple[list[Polygon], list[dict], int]:
+                     terrain: Terrain) -> tuple[list[Polygon], list[dict], dict]:
     """Features as clipped, simplified, snapped model-mm polygons (vectorised).
 
-    Returns (polygons, their properties, number of features that produced nothing).
+    Features narrower than ``style.min_width_mm`` at model scale are widened to it
+    (a 2 m trail at 1:3500 is 0.6 mm: below what a 0.4 mm nozzle lays down).
+    Returns (polygons, their properties, counts: ``dropped`` = features that
+    produced nothing, ``widened``).
     """
     feats = [f for f in features if f.get("geometry")
              and not (name == "waterways" and (f.get("properties") or {}).get("natural") == "coastline")]
+    counts = {"dropped": len(features) - len(feats), "widened": 0}
     if not feats:
-        return [], [], len(features)
+        return [], [], counts
     props = [f.get("properties") or {} for f in feats]
     geoms = shapely.from_geojson([json.dumps(f["geometry"]) for f in feats], on_invalid="ignore")
     geoms = terrain.project(geoms)
     type_id = shapely.get_type_id(geoms)
     lines = (type_id == 1) | (type_id == 5)
     if lines.any():
-        half = terrain.m_to_mm([_line_width_m(name, props[i], style)
-                                for i in np.flatnonzero(lines)]) / 2
+        width = terrain.m_to_mm([_line_width_m(name, props[i], style)
+                                 for i in np.flatnonzero(lines)])
+        counts["widened"] += int((width < style.min_width_mm).sum())
+        half = np.maximum(width, style.min_width_mm) / 2
         geoms[lines] = shapely.buffer(geoms[lines], half, cap_style="flat", join_style="mitre")
     geoms = shapely.make_valid(geoms)
+    areas = (~lines) & (shapely.get_type_id(geoms) >= 3) & ~shapely.is_empty(geoms)
+    if areas.any():
+        w = _widths(geoms[areas])
+        thin = w < style.min_width_mm
+        if thin.any():
+            idx = np.flatnonzero(areas)[thin]
+            geoms[idx] = shapely.buffer(geoms[idx], (style.min_width_mm - w[thin]) / 2,
+                                        join_style="mitre")
+            counts["widened"] += int(thin.sum())
     geoms = shapely.simplify(geoms, SIMPLIFY_TOL_MM, preserve_topology=True)
     geoms = shapely.intersection(geoms, terrain.rect)
     geoms = shapely.set_precision(geoms, SNAP_MM)
@@ -405,7 +434,8 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
     out_props = [props[k] for k in owner[polys_mask]]
     produced = np.zeros(len(feats), bool)
     produced[owner[polys_mask]] = True
-    return out_polys, out_props, int((~produced).sum()) + len(features) - len(feats)
+    counts["dropped"] += int((~produced).sum())
+    return out_polys, out_props, counts
 
 
 def _prism(poly: Polygon, z0: float, z1: float) -> Mesh | None:
@@ -440,13 +470,14 @@ def _prism(poly: Polygon, z0: float, z1: float) -> Mesh | None:
 
 
 def _roofed(poly: Polygon, props: dict, z_floor: float, ground_hi: float,
-            z_per_m: float, style: LayerStyle) -> Mesh | None:
+            z_per_m: float, style: LayerStyle, cap_mm: float = math.inf) -> Mesh | None:
     """A building-like prism from the skirt floor to its roof (OSM roof shapes kept).
 
     OSM ``height`` includes the roof: the eave sits roof-height below the top.
+    ``cap_mm`` limits the height above the ground (slenderness rule).
     """
     height_m = float(props.get("height_m") or 10.0)
-    total = max(height_m * z_per_m, style.min_height_mm)
+    total = max(min(height_m * z_per_m, cap_mm), style.min_height_mm)
     shape_ = str(props.get("roof:shape") or "flat").lower().strip()
     if shape_ != "flat" and not poly.interiors:
         try:
@@ -459,24 +490,60 @@ def _roofed(poly: Polygon, props: dict, z_floor: float, ground_hi: float,
             v, f = _extrude_ring_with_roof(ring, z_floor, ground_hi + total - roof_mm,
                                            shape_, roof_mm, float, float)
             if v is not None:
-                return np.asarray(v, np.float64), np.asarray(f)
+                roofed = np.asarray(v, np.float64), np.asarray(f)
+                if _manifold(roofed).status() == mf.Error.NoError:
+                    return roofed
+            # The roof generator cannot close pitched roofs on concave footprints:
+            # keep the building, flat at mid-roof height.
+            return _prism(poly, z_floor, ground_hi + total - roof_mm / 2)
     return _prism(poly, z_floor, ground_hi + total)
 
 
 def _slab(poly: Polygon, terrain: Terrain, top_off: float, bottom_off: float) -> Mesh | None:
     """Solid between terrain+bottom_off and terrain+top_off, following the terrain.
 
-    Interior points about two DEM cells apart keep the slab on the terrain surface
-    (within the terrain's own tolerance) instead of bridging over it.
+    The top is triangulated from the outline plus the adaptive terrain's own
+    vertices inside it, so the slab carries exactly the detail the terrain needed
+    (flat ground stays a few large triangles) instead of a fixed-density mesh.
+    Outline edges are split at the terrain's seed spacing so they do not bridge
+    over a crest between two distant outline vertices.
     """
+    import triangle
+
     s = terrain.scale.mm_per_px
+    poly = shapely.segmentize(poly, 4.0 * s)
+    rings = [np.asarray(poly.exterior.coords)[:-1]] + [np.asarray(r.coords)[:-1] for r in poly.interiors]
+    pts, segs, start = [], [], 0
+    for r in rings:
+        n = len(r)
+        pts.append(r)
+        k = np.arange(start, start + n)
+        segs.append(np.column_stack([k, np.roll(k, -1)]))
+        start += n
+    if terrain.tin_xy is not None:
+        inner = shapely.buffer(poly, -0.25 * s)
+        x0, y0, x1, y1 = poly.bounds
+        t = terrain.tin_xy
+        cand = t[(t[:, 0] > x0) & (t[:, 0] < x1) & (t[:, 1] > y0) & (t[:, 1] < y1)]
+        if len(cand) and not inner.is_empty:
+            pts.append(cand[shapely.contains_xy(inner, cand[:, 0], cand[:, 1])])
+    # Triangle (C) reads int32 indices and crashes on duplicate vertices or
+    # zero-length segments, e.g. where a snapped hole touches its outline.
+    verts, inv = np.unique(np.concatenate(pts), axis=0, return_inverse=True)
+    seg = inv.ravel()[np.concatenate(segs)]
+    seg = np.unique(np.sort(seg[seg[:, 0] != seg[:, 1]], axis=1), axis=0)
+    tri_in = {"vertices": np.ascontiguousarray(verts, np.float64),
+              "segments": np.ascontiguousarray(seg, np.int32)}
+    if poly.interiors:
+        tri_in["holes"] = np.ascontiguousarray(
+            [shapely.Polygon(r).point_on_surface().coords[0] for r in poly.interiors], np.float64)
     try:
-        v2, f = trimesh.creation.triangulate_polygon(
-            poly, triangle_args=f"pq20a{2.0 * s * s:.4f}", engine="triangle")
+        out = triangle.triangulate(tri_in, "pQ")
     except Exception as exc:
         logger.debug("triangulate failed: %s", exc)
         return None
-    if not len(f):
+    v2, f = out.get("vertices"), out.get("triangles")
+    if f is None or not len(f):
         return None
     ground = terrain.sample(v2[:, 0], v2[:, 1])
     top = np.column_stack([v2, ground + top_off])
@@ -490,14 +557,18 @@ def _slab(poly: Polygon, terrain: Terrain, top_off: float, bottom_off: float) ->
 def build_layer(name: str, features: list[dict], style: LayerStyle,
                 terrain: Terrain) -> tuple[list[Mesh], dict]:
     """Solids for one layer, plus counts for the report."""
-    polys, props, dropped = feature_polygons(name, features, style, terrain)
-    stats = {"features": len(features), "polygons": len(polys), "dropped": dropped}
+    polys, props, counts = feature_polygons(name, features, style, terrain)
+    stats = {"features": len(features), "polygons": len(polys), **counts}
     solids: list[Mesh] = []
     if style.mode == "extrude":
         z_per_m = terrain.scale.z_mm_per_m * style.height_scale
         lo, hi = terrain.ranges_under(polys)
-        for poly, pr, l_, h_ in zip(polys, props, lo, hi, strict=True):
-            m = _roofed(poly, pr, max(l_ - 0.2, 0.0), h_, z_per_m, style)
+        cap = (style.max_slenderness * _widths(np.asarray(polys, dtype=object))
+               if style.max_slenderness > 0 and polys else np.full(len(polys), np.inf))
+        want = np.array([float(p.get("height_m") or 10.0) for p in props]) * z_per_m
+        stats["clamped"] = int((want > cap).sum())
+        for poly, pr, l_, h_, c_ in zip(polys, props, lo, hi, cap, strict=True):
+            m = _roofed(poly, pr, max(l_ - 0.2, 0.0), h_, z_per_m, style, c_)
             if m is not None:
                 solids.append(m)
     elif style.mode == "water":
@@ -509,6 +580,13 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
     else:
         top, bottom = ((style.offset_mm, -1.0) if style.mode == "raised"
                        else (1.0, -style.offset_mm))
+        # One slab per connected area: overlapping or touching features (a road
+        # network) would otherwise each carry walls and a bottom inside the others.
+        if len(polys) > 1:
+            merged = shapely.set_precision(shapely.union_all(polys), SNAP_MM)
+            polys = [p for p in shapely.get_parts(merged)
+                     if p.geom_type == "Polygon" and p.area >= MIN_FOOTPRINT_MM2]
+        stats["slabs"] = len(polys)
         for poly in polys:
             m = _slab(poly, terrain, top, bottom)
             if m is not None:
@@ -527,10 +605,52 @@ def _manifold(mesh: Mesh) -> mf.Manifold:
                                tri_verts=np.ascontiguousarray(f, np.uint32)))
 
 
+CONTACT_SPLIT_MM = 1e-3   # separation given to solids that touch at a point or edge
+
+
 def _to_trimesh(m: mf.Manifold) -> trimesh.Trimesh:
     out = m.to_mesh()
-    return trimesh.Trimesh(np.asarray(out.vert_properties)[:, :3], np.asarray(out.tri_verts),
-                           process=False)
+    v = np.asarray(out.vert_properties)[:, :3].astype(np.float64)
+    f = np.asarray(out.tri_verts)
+    return trimesh.Trimesh(_separate_contacts(v, f), f, process=False)
+
+
+def _separate_contacts(v: np.ndarray, f: np.ndarray) -> np.ndarray:
+    """Pull apart vertices that share a position (solids touching at a corner/edge).
+
+    manifold3d keeps such contacts as distinct vertices, so its mesh is closed, but
+    STL has no indices: any reader welds them back into edges used four times.
+    Moving each copy ``CONTACT_SPLIT_MM`` towards its own faces (far below print
+    resolution) keeps the file watertight after welding.
+    """
+    _, inv, counts = np.unique(v, axis=0, return_inverse=True, return_counts=True)
+    dup = counts[inv.ravel()] > 1
+    if not dup.any():
+        return v
+    centre = np.zeros_like(v)
+    n = np.zeros(len(v))
+    tri_c = v[f].mean(axis=1)
+    for k in range(3):
+        np.add.at(centre, f[:, k], tri_c)
+        np.add.at(n, f[:, k], 1)
+    d = centre[dup] / np.maximum(n[dup], 1)[:, None] - v[dup]
+    d /= np.maximum(np.linalg.norm(d, axis=1), 1e-12)[:, None]
+    # Copies whose fans point the same way would land together again: the k-th
+    # copy of a position moves (k + 1) steps.
+    group = inv.ravel()[dup]
+    order = np.argsort(group, kind="stable")
+    first = np.searchsorted(group[order], group[order])
+    rank = np.empty(len(group), np.int64)
+    rank[order] = np.arange(len(group)) - first
+    out = v.copy()
+    out[dup] += (CONTACT_SPLIT_MM * (rank + 1))[:, None] * d
+    return out
+
+
+def welded_watertight(mesh: trimesh.Trimesh) -> bool:
+    """Watertight as an STL reader sees it: coincident vertices merged."""
+    w = trimesh.Trimesh(mesh.vertices, mesh.faces, process=True)
+    return bool(w.is_watertight)
 
 
 def _union(solids: list[Mesh]) -> tuple[mf.Manifold | None, int]:
@@ -588,12 +708,40 @@ def build_city_model(
     layer_overrides: dict | None = None,
 ) -> CityModel:
     """Terrain from ``dem_m`` (metres, row 0 north, already projected like the
-    app's DEM) plus the OSM layers in ``layers_geojson`` ({layer: FeatureCollection})."""
+    app's DEM) plus the OSM layers in ``layers_geojson`` ({layer: FeatureCollection}).
+
+    Convenience for callers holding a plain DEM: the terrain stage here is only the
+    median filter and the scale. The app runs its own terrain stage (composite,
+    edits, sea-level cap, label, contours) and calls :func:`build_on_terrain`.
+    """
     dem = prepare_dem(dem_m, median_size)
     scale = choose_scale(bbox, dem.shape, float(dem.min()), float(dem.max()),
                          mm_per_px=mm_per_px, z_mode=z_mode, exaggeration=exaggeration,
                          fit_height_mm=fit_height_mm, base_mm=base_mm)
-    terrain = Terrain(scale.z_mm(dem), bbox, scale)
+    return build_on_terrain(scale.z_mm(dem), bbox, scale, layers_geojson,
+                            terrain_max_error_mm=terrain_max_error_mm, simplify=simplify,
+                            layer_overrides=layer_overrides)
+
+
+def build_on_terrain(
+    z_mm: np.ndarray,
+    bbox: dict | None,
+    scale: ModelScale,
+    layers_geojson: dict[str, dict],
+    *,
+    terrain_max_error_mm: float | None = None,
+    simplify: bool = True,
+    layer_overrides: dict | None = None,
+) -> CityModel:
+    """The feature stage: OSM layers on a finished terrain heightfield.
+
+    ``z_mm`` is the terrain top surface in model mm (row 0 north, base included),
+    as produced by the terrain stage with ``scale``. With no layers this is the
+    terrain-only model every mesh export uses. ``bbox`` is needed only to place
+    features.
+    """
+    dem_shape = z_mm.shape
+    terrain = Terrain(np.asarray(z_mm, np.float64), bbox or {}, scale)
     if terrain_max_error_mm is None:
         terrain_max_error_mm = max(TERRAIN_MAX_ERROR_MM,
                                    0.5 * SOURCE_VERTICAL_STEP_M * scale.z_mm_per_m)
@@ -603,12 +751,12 @@ def build_city_model(
     ground_m = _manifold(ground)
 
     styles = resolve_layers(layer_overrides)
-    report: dict = {"scale": scale.describe(), "dem_shape": list(dem.shape),
-                    "diagonal_km": round(bbox_diagonal_km(bbox), 2),
+    report: dict = {"scale": scale.describe(), "dem_shape": list(dem_shape),
+                    "diagonal_km": round(bbox_diagonal_km(bbox), 2) if bbox else None,
                     "tolerances_mm": {"terrain": terrain_max_error_mm, "outline": SIMPLIFY_TOL_MM,
                                       "snap": SNAP_MM, "min_footprint_mm2": MIN_FOOTPRINT_MM2},
                     # full-resolution grid solid (top + bottom) vs the adaptive one
-                    "terrain_faces": {"grid": 4 * (dem.shape[0] - 1) * (dem.shape[1] - 1),
+                    "terrain_faces": {"grid": 4 * (dem_shape[0] - 1) * (dem_shape[1] - 1),
                                       "adaptive": int(len(ground[1]))},
                     "layers": {}}
 
@@ -619,6 +767,8 @@ def build_city_model(
         feats = (layers_geojson.get(name) or {}).get("features") or []
         if style is None or not style.enabled or not feats:
             continue
+        if not bbox:
+            raise ValueError(f"layer {name!r} needs the model's bbox to place its features")
         t0 = time.perf_counter()
         solids, stats = build_layer(name, feats, style, terrain)
         t1 = time.perf_counter()
@@ -653,7 +803,7 @@ def build_city_model(
         timings["simplify"] = round(time.perf_counter() - t0, 2)
     report["seconds"] = timings
 
-    report["merged"] = {"faces": len(merged.faces), "watertight": bool(merged.is_watertight),
+    report["merged"] = {"faces": len(merged.faces), "watertight": welded_watertight(merged),
                         "volume_mm3": round(float(merged.volume), 1),
                         "size_mm": [round(float(x), 2) for x in merged.extents]}
     report["parts"] = {k: len(v.faces) for k, v in parts.items()}

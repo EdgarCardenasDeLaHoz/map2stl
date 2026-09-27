@@ -1,12 +1,18 @@
-"""Export task: the loaded DEM + OSM layers -> city model zip (STL, 3MF, puzzle, report).
+"""Export task: terrain stage + OSM layers -> city model zip (STL, 3MF, puzzle, report).
+
+The DEM and every terrain setting are resolved exactly as for the other mesh
+exports (``ExportContext`` + ``export.terrain_stage``): composite spec, edited
+values or ``dem_id``; median filter, sea-level cap, vertical scale, label and
+contours. The layers are then built on that heightfield (``build_on_terrain``).
 
 Request (``POST /api/export/start`` with ``format="city"``)::
 
-    dem_id          handle from /api/terrain/dem (the grid the user sees)
+    dem_id | dem_values | composite_layers    the terrain, as for any export
     name            base file name
-    mm_per_px       horizontal scale (default 1: one DEM pixel = 1 mm)
-    z_mode          "auto" | "true" | "fit"      exaggeration, fit_height_mm, base_mm
+    mm_per_pixel    horizontal scale (default 1: one DEM pixel = 1 mm)
+    z_mode          "auto" | "true" | "fit"   exaggeration, model_height, base_height
     median_size     DEM median filter (default 3; 0/1 = off)
+    (legacy names mm_per_px, fit_height_mm, base_mm are still accepted)
     layers          {layer: {enabled, mode, offset_mm, height_scale, line_width_m, ...}}
     layer_data      {layer: FeatureCollection} to use instead of the cached OSM layer
     puzzle          {piece_mm | cols+rows, knob_width_mm, knob_depth_mm, clearance_mm}
@@ -22,14 +28,14 @@ import os
 import tempfile
 import zipfile
 
-import numpy as np
 from numpy2stl import write3MF
 
 from app.server.core.city_data import get_city_layers
-from app.server.core.dem_store import dem_store
+from app.server.core.export import terrain_stage
+from app.server.core.export_params import ExportContext
 from app.server.core.export_tasks import ExportTask
 from app.server.core.puzzle import cut_to_zip
-from city2stl.city_model import build_city_model, resolve_layers
+from city2stl.city_model import build_on_terrain, resolve_layers
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +54,25 @@ def _stl_bytes(mesh) -> bytes:
     return mesh.export(file_type="stl")
 
 
+_LEGACY_NAMES = {"mm_per_px": "mm_per_pixel", "fit_height_mm": "model_height",
+                 "base_mm": "base_height"}
+
+
 def run_city_model(data: dict, task: ExportTask) -> None:
+    data = {"model_height": 30.0, **data}
+    for old, new in _LEGACY_NAMES.items():
+        if old in data:
+            data.setdefault(new, data[old])
     name = data.get("name") or "city"
     task.update(2, "Loading DEM...")
-    grid, bbox = dem_store.get(data["dem_id"])
-    dem = np.asarray(grid, dtype=np.float64)
+    p = ExportContext.from_request(data)
+    if not p.dem_values or not p.height or not p.width:
+        task.fail("Missing DEM data")
+        return
+    if not p.bbox:
+        task.fail("The city model needs the region's bbox (dem_id or bbox)")
+        return
+    bbox = p.bbox
 
     styles = resolve_layers(data.get("layers"))
     enabled = [n for n, s in styles.items() if s.enabled]
@@ -70,18 +90,14 @@ def run_city_model(data: dict, task: ExportTask) -> None:
         except Exception as exc:
             logger.warning("Trails skipped: %s", exc)
 
+    task.update(25, "Terrain stage...")
+    field = terrain_stage(p, data)
     task.update(30, "Building model...")
-    model = build_city_model(
-        dem, bbox, layers,
-        mm_per_px=float(data.get("mm_per_px", 1.0)),
-        z_mode=data.get("z_mode", "auto"),
-        exaggeration=float(data.get("exaggeration", 1.0)),
-        fit_height_mm=float(data.get("fit_height_mm", 30.0)),
-        base_mm=float(data.get("base_mm", 5.0)),
-        median_size=int(data.get("median_size", 3)),
-        layer_overrides=data.get("layers"),
-    )
+    model = build_on_terrain(field.z_mm, bbox, field.scale, layers,
+                             layer_overrides=data.get("layers"))
     report = dict(model.report)
+    if p.composite_error:
+        report["composite_error"] = p.composite_error
 
     fd, zip_path = tempfile.mkstemp(suffix=".zip")
     os.close(fd)

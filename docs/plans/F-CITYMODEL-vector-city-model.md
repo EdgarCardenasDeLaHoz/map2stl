@@ -65,3 +65,22 @@ Measured on Granada + Alhambra (797×575 px, 1:3472, 588 s, 1.07 M faces, 12 pie
 - **Reproducibility**: write the full build spec into `report.json` and accept it back
   (`TerrainSession.build(spec)` / CLI), and keep the three cities as a slow regression set
   tracking faces, time, watertight and volume.
+
+### Done (2026-09-27)
+
+- Draped slabs are triangulated from the outline plus the adaptive terrain's own vertices
+  (no fixed-area refinement), and each layer's touching features are dissolved into one
+  slab first. Granada, all layers: 915 k faces (was 1.07 M), build 123 s (was ~240 s).
+  The trails layer is still the largest: 4,293 trails, ~95 m of outline at model scale,
+  which is geometry, not missed simplification.
+- Watertight as STL: vertices that manifold3d keeps separate where solids touch at a point
+  or edge are moved 0.001 mm apart (`_separate_contacts`), so welding cannot fuse them;
+  the report's `watertight` is now the welded check. Granada: 0 non-manifold edges.
+- Pitched roofs on concave footprints (29 Granada buildings) fall back to a flat roof at
+  mid-roof height instead of being dropped.
+- Printability: features narrower than 0.8 mm are widened (`widened` per layer); extruded
+  heights are capped at 8 x footprint width (`clamped`). Both per-layer overridable
+  (`min_width_mm`, `max_slenderness`).
+- Overpass: 10 s connect timeout separate from the 300 s query budget (`geo2stl/osm.py`).
+- Two-stage pipeline: `build_on_terrain` is the feature stage; `export.terrain_stage`
+  the terrain stage; STL/OBJ/3MF/puzzle/city all run both (see F-ARCH).

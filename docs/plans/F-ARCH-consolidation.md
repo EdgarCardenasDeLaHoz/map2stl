@@ -79,3 +79,14 @@ Every mesh export (terrain STL/OBJ/3MF, preview, puzzle, city model) runs both s
 "terrain only" export is the city model with no feature layers. The city build therefore
 resolves its DEM through the same request path as the other exports (composite spec or
 edited values first, DEM handle otherwise) instead of the raw handle.
+
+### Progress
+
+- 2026-09-27 — server side of the two-stage pipeline done: `app/server/core/export.py`
+  `terrain_stage()` (composite / edited values / `dem_id`, median, sea-level cap, scale,
+  label, contours) feeds `city2stl.city_model.build_on_terrain()` for every mesh export;
+  the city task resolves its DEM through `ExportContext`; composite `osm_*` feature
+  sources are dropped from mesh exports (`export_params.mesh_composite_layers`). The
+  session's puzzle and city builds share `_mesh_export_body()`.
+- Step 5 started: `geo2stl/osm.py` holds the Overpass mirrors, health probe and osmnx
+  settings for both city layers and trails (removes violation 5, trails -> city2stl private).

@@ -33,59 +33,15 @@ class OverpassUpstreamError(RuntimeError):
     """
 
 
-# Overpass base URLs (osmnx appends /interpreter automatically).
-# overpass-api.de is canonical but suffers frequent timeouts;
-# kumi.systems and mail.ru are reliable mirrors.
-_OVERPASS_ENDPOINTS = [
-    "https://overpass-api.de/api",
-    "https://overpass.kumi.systems/api",
-    "https://maps.mail.ru/osm/tools/overpass/api",
-]
-
-# The status probe's budget. Generous because a healthy mirror under load still
-# takes ~10 s to answer /status — probing at 8 s rejected the only working
-# mirror during an outage of the other two. Short enough that walking the whole
-# list costs well under a minute when they are all down.
-_OVERPASS_PROBE_TIMEOUT_S = 20.0
+from geo2stl.osm import OVERPASS_ENDPOINTS as _OVERPASS_ENDPOINTS  # noqa: E402
+from geo2stl.osm import healthy_overpass_endpoints as _healthy_overpass_endpoints  # noqa: E402
+from geo2stl.osm import use_overpass_endpoint  # noqa: E402
 
 # Per-request budget for the Overpass queries themselves. A city-sized
 # buildings query on a healthy mirror is ~60 s; 300 s leaves room for a loaded
 # one while still failing over in bounded time rather than hanging.
 _OVERPASS_REQUEST_TIMEOUT_S = 300
 
-
-def _healthy_overpass_endpoints() -> list[str]:
-    """Overpass mirrors that answered ``/status``, in preference order.
-
-    Previously this probed with a bare ``requests.head`` on the base URL and
-    accepted the first one that did not raise. ``head`` does not raise on a 502,
-    so a mirror that was up but broken (kumi.systems, routinely) was selected
-    and every subsequent query failed against it while a healthy mirror sat
-    untried further down the list. ``/status`` is the endpoint Overpass provides
-    for exactly this, and the status code is checked.
-
-    The probe identifies itself the way the queries will (osmnx's user agent).
-    overpass-api.de answers a bare ``python-requests`` user agent with 406, so
-    the canonical instance, with 4 free slots, was marked unhealthy on every
-    fetch and everything went to the slowest mirror.
-    """
-    import requests
-
-    try:
-        import osmnx as ox
-        headers = {"User-Agent": ox.settings.http_user_agent}
-    except Exception:  # pragma: no cover - osmnx is a hard dependency of the caller
-        headers = {}
-    healthy: list[str] = []
-    for endpoint in _OVERPASS_ENDPOINTS:
-        try:
-            resp = requests.get(f"{endpoint}/status", headers=headers,
-                                timeout=_OVERPASS_PROBE_TIMEOUT_S)
-            resp.raise_for_status()
-            healthy.append(endpoint)
-        except Exception as e:
-            logger.warning(f"Overpass endpoint {endpoint} not healthy: {e}")
-    return healthy
 
 # _HIGHWAY_WIDTHS is defined in city2stl.roads (authoritative source).
 # Imported here so fetch.py is the single osm-facing module without callers
@@ -369,18 +325,7 @@ def fetch_osm_data(
     result: dict = {}
     pending = list(layers)
     for attempt, endpoint in enumerate(healthy):
-        ox.settings.overpass_url = endpoint
-        # osmnx's rate limiter polls ``{overpass_url}/status`` and sleeps until
-        # the server reports a free slot. Only the official instance publishes
-        # that in the format osmnx parses; against a third-party mirror the
-        # parse yields no available slot and osmnx sleeps and re-polls
-        # indefinitely — a Cartagena fetch that takes ~56 s on a good day sat
-        # for 55 minutes with no output and had to be killed. Rate-limit only
-        # the endpoint whose protocol osmnx actually speaks, and bound every
-        # request so a wedged mirror fails over instead of hanging.
-        ox.settings.overpass_rate_limit = endpoint.startswith(
-            "https://overpass-api.de")
-        ox.settings.requests_timeout = _OVERPASS_REQUEST_TIMEOUT_S
+        use_overpass_endpoint(ox, endpoint, _OVERPASS_REQUEST_TIMEOUT_S)
         result.update(_fetch_layers(ox, bbox, pending, tol_deg,
                                     simplify_tolerance, min_area))
         failed = _layers_failed(result, layers)

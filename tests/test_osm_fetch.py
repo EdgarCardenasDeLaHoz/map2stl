@@ -269,3 +269,16 @@ class TestBuildingPartSubQuery:
         fc = osm_fetch._fetch_buildings(ox, (0, 0, 1, 1), 0.0, 0.0, 0.0)
         assert fc["features"] == []
         assert "error" not in fc, "an empty region must not trigger mirror failover"
+
+
+def test_mirror_settings_bound_connect_separately_from_the_query():
+    """A mirror that will not connect fails over in seconds, not the query budget."""
+    from geo2stl.osm import CONNECT_TIMEOUT_S, use_overpass_endpoint
+
+    ox = _FakeOx()
+    use_overpass_endpoint(ox, "https://a.example/api", 300)
+    assert ox.settings.requests_timeout == (CONNECT_TIMEOUT_S, 300)
+    assert ox.settings.overpass_settings.format(maxsize="") == "[out:json][timeout:300]"
+    assert ox.settings.overpass_rate_limit is False
+    use_overpass_endpoint(ox, "https://overpass-api.de/api", 300)
+    assert ox.settings.overpass_rate_limit is True
