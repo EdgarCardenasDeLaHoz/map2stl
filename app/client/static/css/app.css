@@ -1001,9 +1001,11 @@
             margin-top: 20px;
         }
 
+        /* Visibility is controlled only by the .hidden class (markup starts
+           hidden; export-handlers.js toggles it). Do not add display:none here,
+           or the bar and its Cancel button can never appear. */
         .model-progress {
             margin-top: 15px;
-            display: none;
         }
 
         .model-progress .progress-bar-container {
@@ -2095,7 +2097,9 @@
             display: flex;
             align-items: center;
             gap: 10px;
-            animation: slideIn 0.3s ease, fadeOut 0.3s ease 2.7s forwards;
+            /* Fade-out timing is set per toast from JS (window.toastAnimation)
+               so it matches the duration passed to showToast. */
+            animation: slideIn 0.3s ease;
             pointer-events: auto;
             max-width: 350px;
         }

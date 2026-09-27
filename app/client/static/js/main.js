@@ -9,6 +9,7 @@
  * fully parsed before any module code runs — DOMContentLoaded fires after.
  */
 
+import './modules/core/storage-migrate.js';   // first: renamed localStorage keys
 import './modules/core/events.js';
 import './modules/core/api.js';
 import './modules/core/cache.js';

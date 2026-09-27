@@ -416,12 +416,16 @@ const scale = computed(() => {
 const scaleText = computed(() => {
   const s = scale.value;
   if (!s) return '';
+  const ground = `1 mm = ${formatGroundLength(s.mPerMm)} (1:${s.scaleDenominator.toLocaleString()})`;
+  // A flat DEM (vmin == vmax) has no relief to fit to height: the ratio would
+  // be fit height / 1e-6 m, i.e. billions of times.
+  if (s.flatRelief) return `${ground} · vertical: DEM is flat (no relief to fit)`;
   const v = s.verticalExaggeration;
   const vText = v >= 10 ? v.toFixed(0) : v.toFixed(v >= 1 ? 1 : 2);
   const vert = Math.abs(v - 1) < 0.005
     ? 'vertical 1× (true scale)'
     : `vertical ${vText}× true scale${s.zMode === 'fit' ? ' (fit to height)' : ''}`;
-  return `1 mm = ${formatGroundLength(s.mPerMm)} (1:${s.scaleDenominator.toLocaleString()}) · ${vert}`;
+  return `${ground} · ${vert}`;
 });
 
 const bedFit = computed(() => {

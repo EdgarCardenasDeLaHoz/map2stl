@@ -64,11 +64,10 @@ refresh them). A red outline marks the control each step talks about.
 2. **Region preset** (Edit → 📥 Fetch, *Preset* row; switching to Edit may already load
    the DEM with the region's saved or default settings — load it again in step 3): sets
    SRTM 30 m (≤ 100 km) or 90 m, 1000 px, Vertical auto, city layers and puzzle off,
-   Composite rivers + lakes on. It
-   does **not** set the projection: open **Projection** and pick **Cosine Correction**.
-   The default for a region without saved settings is *None* (Plate Carrée), which keeps
-   the grid in degrees — Grand Canyon 1000 × 454 px instead of 807 × 454, a model 24 %
-   too wide east-west.
+   Composite rivers + lakes on, and **Projection → Cosine Correction**. (The default for
+   a region without saved settings is *None* (Plate Carrée), which keeps the grid in
+   degrees — Grand Canyon 1000 × 454 px instead of 807 × 454, a model 24 % too wide
+   east-west — so check Projection if you skip the preset.)
 
    ![Region preset](img/region/02-region-preset.png)
    *Region preset, Cosine Correction and SRTM 30 m set; the DEM is not reloaded yet.*
@@ -82,10 +81,9 @@ refresh them). A red outline marks the control each step talks about.
 4. **Composite → Rivers & lakes** (Edit → ⊕ Composite, open *🌊 Rivers & lakes*): set
    **Depth ×** from the table below, click **👁 Preview**, wait until the range under the
    buttons shows the terrain (e.g. `517.4m — 2811.4m`, not `0.0m — 0.0m`), then **✓ Apply
-   to DEM**. Apply takes the last composite *computed*: clicked while a recompute is still
-   running it can apply an empty (all-zero) grid, the Edit canvas goes flat and the
-   Extrude scale line shows a vertical exaggeration in the billions — Preview again and
-   re-apply. Skipped layers are not shown in the UI yet (only in the `dem-merge`
+   to DEM**. Apply only uses a composite computed for the loaded DEM and the current
+   settings: clicked while a recompute is running it waits for it (or starts one), and it
+   refuses a flat or all-zero result with a toast instead of replacing the DEM. Skipped layers are not shown in the UI yet (only in the `dem-merge`
    response's `warnings` and the server log): Water (ESA) needs Earth Engine; untick
    *💧 Water → Enable* if it is not set up — lakes do the same job.
 
@@ -113,8 +111,9 @@ refresh them). A red outline marks the control each step talks about.
 7. **Export** (Extrude → 📤 Export): *STL* for one piece; for anything larger than the
    bed open *🧩 Split / Puzzle*, tick **Enable**, click **Use** (sets Columns × Rows to the
    bed grid), then **🧩 Export puzzle** (terrain puzzles take the mask path: fast,
-   watertight). There is no progress display while it runs (see §5); the download and a
-   "PUZZLE ready" toast mark the end (50–70 s here). Watertightness is in the zip's
+   watertight). The progress bar above the Extrude tabs shows the step and elapsed
+   time, with ✕ Cancel; the download and a "PUZZLE ready" toast mark the end (50–70 s
+   here). Watertightness is in the zip's
    pieces, not the toast (only single-file STL/OBJ/3MF exports report faces and
    watertightness in the toast).
 
@@ -186,13 +185,13 @@ separate colour (§6).
   the export's median exactly (interior flat to ≤ 0.12 mm).
 - *dim* applies to the longer side **in degrees**; at mid latitudes the projected model
   comes out 10–20 % smaller than *dim* × mm/px suggests.
-- **UI feedback during export**: the Extrude panel's progress bar (and its ✕ Cancel)
-  never appears — `app.css` sets `.model-progress { display: none }` and
-  `export-handlers.js` only removes `.hidden` — and every toast fades out after 3 s
-  (CSS animation) whatever its duration, so the "ready" toast is easy to miss. Watch for
-  the download.
-- **Apply to DEM** uses the last composite that finished computing, not the one being
-  computed; applied too early it replaces the DEM with zeros (step 4).
+- **UI feedback during export** (fixed 2026-09-27): the progress bar (with elapsed time
+  and ✕ Cancel) shows during every export and toasts stay up for their requested
+  duration. The browser gives up only after 3 min with no progress and no server
+  heartbeat, not after a fixed 10 min.
+- **Apply to DEM** (fixed 2026-09-27) waits for / starts the recompute for the loaded
+  DEM and refuses a stale, all-zero or flat composite; a flat DEM shows "vertical: DEM
+  is flat" on the Extrude scale line instead of a billions-× exaggeration.
 
 ## 6. What to improve (prioritised)
 
@@ -212,8 +211,8 @@ Process / pipeline:
    calibrate the `sqrt(stride)` factor or estimate from a full-resolution TIN of a tile.
 
 UI:
-1. Region preset: set Projection to *Cosine Correction* (the settings default is *None*),
-   untick *Water (ESA)* when Earth Engine is not configured, set Base 5 mm, and set mm/px
+1. Region preset: ~~set Projection to *Cosine Correction*~~ (done 2026-09-27), untick
+   *Water (ESA)* when Earth Engine is not configured, set Base 5 mm, and set mm/px
    from the bed (pieces ≤ bed − 10 mm) as the City preset does.
 2. Show the river depth on the print (mm) beside the depth slider, from the current scale.
 3. Apply to DEM: list skipped layers in the toast (the response now has `warnings`).

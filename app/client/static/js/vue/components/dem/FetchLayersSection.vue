@@ -354,8 +354,10 @@ details[open] > .fetch-section-header::before { transform: rotate(90deg); }
     height: 24px;
     box-sizing: border-box;
 }
-/* Warnings and trailing notes span both columns */
-.fetch-section-body :deep(.param-group > div[id$="Warning"]) {
+/* Warnings and trailing notes (every div child: #demResWarning, DemSamplingInfo's
+   #demSamplingInfo, ...) span both columns. Matching only ids ending in "Warning"
+   left the DEM sampling note in the 70 px label column, wrapping every word. */
+.fetch-section-body :deep(.param-group > div) {
     grid-column: 1 / -1;
 }
 

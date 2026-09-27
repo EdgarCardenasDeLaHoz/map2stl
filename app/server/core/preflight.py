@@ -99,16 +99,19 @@ def _terrain_faces_estimate(z: np.ndarray, tol: float) -> tuple[int, int]:
     return int(top + 3 * border), stride
 
 
-def _cached_layers(bbox: dict, names: list[str]) -> tuple[dict, list[str], bool]:
+def _cached_layers(bbox: dict, names: list[str], data: dict) -> tuple[dict, list[str], bool]:
     """The cached OSM payload for ``names`` (never fetched), the names missing, and
-    whether the payload is one ``city_data.get_city_layers`` would refetch (stale)."""
+    whether the payload is one ``city_data.get_city_layers`` would refetch (stale).
+    Reads the entry the build would (``city_model_task.city_osm_params``)."""
     from app.server.core.cache import osm_cache_key, read_osm_cache
+    from app.server.core.city_model_task import city_osm_params
     from city2stl.cache_policy import (
         city_cache_missing_building_parts,
         city_cache_missing_height_source,
     )
 
-    key = osm_cache_key(bbox["north"], bbox["south"], bbox["east"], bbox["west"], 0.5, 5.0)
+    tol, min_area = city_osm_params(data)
+    key = osm_cache_key(bbox["north"], bbox["south"], bbox["east"], bbox["west"], tol, min_area)
     cached = read_osm_cache(key) or {}
     stale = bool(cached) and (city_cache_missing_height_source(cached)
                               or city_cache_missing_building_parts(cached))
@@ -178,7 +181,7 @@ def preflight(data: dict) -> dict:
             raise ValueError("The city model needs the region's bbox (dem_id or bbox)")
         styles = resolve_layers(data.get("layers"))
         enabled = [n for n, st in styles.items() if st.enabled]
-        layers, missing, stale = _cached_layers(p.bbox, [n for n in enabled if n in OSM_LAYERS])
+        layers, missing, stale = _cached_layers(p.bbox, [n for n in enabled if n in OSM_LAYERS], data)
         if stale:
             warnings.append("The cached city data predates the current pipeline: the build "
                             "refetches it, so its counts may differ from these")

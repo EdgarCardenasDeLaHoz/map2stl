@@ -141,6 +141,53 @@ class TestCityExportTask:
         assert report["scale"]["z_mode"] == "true"
 
 
+class TestCityOsmParams:
+    """The build reads the OSM cache entry the Cities panel loaded (tolerance/min area)."""
+
+    def test_defaults_are_the_cities_panel_defaults(self):
+        from app.server.core.city_model_task import city_osm_params
+        assert city_osm_params({}) == (3.0, 5.0)
+
+    def test_request_values_win_and_bad_values_fall_back(self):
+        from app.server.core.city_model_task import city_osm_params
+        assert city_osm_params({"simplify_tolerance": 0.5, "min_area": 20}) == (0.5, 20.0)
+        assert city_osm_params({"simplify_tolerance": "x", "min_area": -1}) == (3.0, 5.0)
+        assert city_osm_params({"simplify_tolerance": float("nan")}) == (3.0, 5.0)
+
+    def test_coarse_detail_raises_min_area_like_the_cities_route(self):
+        from app.server.config import COARSE_MIN_BUILDING_AREA_M2
+        from app.server.core.city_model_task import city_osm_params
+        assert city_osm_params({"min_area": 5, "detail": "coarse"}) == (
+            3.0, COARSE_MIN_BUILDING_AREA_M2)
+
+    @pytest.mark.parametrize("extra, expected", [
+        ({}, (3.0, 5.0)),                                          # old clients
+        ({"simplify_tolerance": 2.0, "min_area": 12.0}, (2.0, 12.0)),
+    ])
+    def test_build_passes_them_to_the_osm_cache(self, client, monkeypatch, extra, expected):
+        import app.server.core.city_model_task as task_mod
+
+        seen = []
+
+        def fake(north, south, east, west, layers, simplify_tolerance=0.5, min_area=5.0, **kw):
+            seen.append((simplify_tolerance, min_area))
+            return {}
+
+        monkeypatch.setattr(task_mod, "get_city_layers", fake)
+        dem = _hill(20, 25)
+        r = client.post("/api/export/start", json={
+            "format": "city", "name": "t", "bbox": BBOX, "dem_values": dem.ravel().tolist(),
+            "height": 20, "width": 25, "layers": {"trails": {"enabled": False}}, **extra})
+        task_id = r.json()["task_id"]
+        for _ in range(300):
+            st = client.get(f"/api/export/status/{task_id}").json()
+            if st["status"] != "running":
+                break
+            time.sleep(0.2)
+        assert st["status"] == "complete", st
+        assert seen == [expected]
+
+
 class TestTwoStagePipeline:
     """Every mesh export: terrain stage (raster) -> city model (vector)."""
 

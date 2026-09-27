@@ -49,10 +49,11 @@ Export" below is the Export tab inside the Extrude view (there is no top-level E
    the region's saved (or default) settings. Click a preset in the *Preset* row — *City*,
    *Mountain*, *Region* or *Coast* — then **🏔 Load DEM** (top of the panel) to reload
    with it. Presets set source, resolution, vertical mode, layers and puzzle options; ↩
-   (in *Parameter Presets*, further down) reverts. They do **not** set the projection: open
-   **Projection** and pick **Cosine Correction** — a region without saved settings starts
-   at *None* (Plate Carrée), which makes Granada 1000 × 575 px (a model 25 % too wide)
-   instead of 797 × 575. Use SRTM 30 m or Copernicus 30 m (the local file is ~90 m). Avoid
+   (in *Parameter Presets*, further down) reverts. *City* and *Region* also set
+   **Projection → Cosine Correction**; with *Mountain*, *Coast* or no preset, check
+   **Projection** yourself — a region without saved settings starts at *None* (Plate
+   Carrée), which makes Granada 1000 × 575 px (a model 25 % too wide) instead of
+   797 × 575. Use SRTM 30 m or Copernicus 30 m (the local file is ~90 m). Avoid
    Copernicus **DSM** under OSM buildings: it already contains roofs.
 
    ![City preset](img/city/03-city-preset.png)
@@ -75,9 +76,10 @@ Export" below is the Export tab inside the Extrude view (there is no top-level E
 
 4. **City data** (Edit → 📥 Fetch → 🗂 Fetch Layers → 🏙 Cities → **📥 Load Cities**):
    first fetch 1–5 min, cached after; the progress box lists each OSM layer (cached /
-   fetching / done) with *Cancel*. Set *Tolerance (m)* to **0.5** first: the City Model
-   build always reads the OSM cache at 0.5 m / 5 m², so with the panel default (3 m)
-   Load Cities fetches and caches a second, coarser copy, and the build fetches again. Open the **Buildings panel** (📋 Toggle Buildings Table
+   fetching / done) with *Cancel*. *Tolerance (m)* (default 3) and *Min area (m²)* are
+   sent with the City Model build, which reads exactly the OSM cache entry Load Cities
+   wrote (and the height overrides made on it), so the build fetches only the layers
+   Load Cities does not (railways, green, trails). Open the **Buildings panel** (📋 Toggle Buildings Table
    Panel, or the 📋 Buildings tab at the right edge of the map) and check the height
    sources, histogram, the "> 20 % default height" warning (only shown above 20 %), the
    tallest list. Fix wrong heights with the per-building override (click a building, *Height
@@ -140,8 +142,10 @@ Export" below is the Export tab inside the Extrude view (there is no top-level E
 8. **Build** (Extrude → 📤 Export → 🏙️ City Model): toggle layers per situation (see §3),
    keep *Puzzle pieces* on with *max* = bed − 10 mm (set from the Printer section's bed).
    **Build city model (.zip)**. One build writes the merged STL, the per-layer 3MF, the
-   puzzle (pieces in place + laid-out plates) and `report.json`. Nothing shows progress
-   while it runs (see §5); the download and a "CITY ready" toast mark the end.
+   puzzle (pieces in place + laid-out plates) and `report.json`. The progress bar above
+   the Extrude tabs shows the server's step and the elapsed time (e.g. "Building
+   model... (4:05)") with **✕ Cancel**; the download and a "CITY ready" toast (kept up
+   for its full 5 s) mark the end.
 
    ![City Model](img/city/13-city-model.png)
    *All ten layers, puzzle pieces ≤ 200 mm (Prusa 250 × 210 bed) → 4 × 3 pieces.*
@@ -210,12 +214,12 @@ than 0.8 mm are widened, extruded heights capped at 8 × footprint width (report
 - The city fetch shows per-layer progress, but layers the build needs that *Load Cities*
   does not fetch (railways, green, trails) are fetched from Overpass during the build,
   with no progress shown; during an Overpass outage the build waits on dead mirrors.
-- **No export progress in the UI**: the Extrude panel's progress bar and its ✕ Cancel
-  never appear (`app.css` sets `.model-progress { display: none }`; `export-handlers.js`
-  only toggles `.hidden`), and toasts fade out after 3 s whatever their duration. The
-  browser also stops waiting after 10 minutes (`_EXPORT_POLL_TIMEOUT_MS`); the Granada
-  build with a cold railways/green fetch took ~10 min in the screenshot run, so a slower
-  build fails in the browser while the server finishes it.
+- **Export feedback** (fixed 2026-09-27): the progress bar and ✕ Cancel now show during
+  every export, toasts stay up for their requested duration, and the browser has no
+  fixed time limit: it keeps polling while the server reports progress or its worker
+  heartbeat (`alive`), and gives up only after 3 min without either, or when the task is
+  gone (server restarted). ✕ Cancel still only stops waiting — the server task has no
+  cancel route and runs to the end.
 
 ## 6. Large regions (> 20 km)
 

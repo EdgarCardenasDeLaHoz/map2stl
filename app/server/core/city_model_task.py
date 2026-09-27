@@ -15,6 +15,12 @@ Request (``POST /api/export/start`` with ``format="city"``)::
     (legacy names mm_per_px, fit_height_mm, base_mm are still accepted)
     layers          {layer: {enabled, mode, offset_mm, height_scale, line_width_m, ...}}
     layer_data      {layer: FeatureCollection} to use instead of the cached OSM layer
+    simplify_tolerance, min_area, detail
+                    the Cities panel settings the OSM layers were loaded with, so the
+                    build reads that exact cache entry instead of refetching (and the
+                    panel's height overrides match its features). Defaults 3 m / 5 m² /
+                    "full" = the panel defaults; "coarse" raises min_area as
+                    /api/cities does. See city_osm_params().
     landmark_overrides  {osm_id: {kind: "mesh"|"ndsm"|"osm", ...}} buildings replaced by
                     an uploaded mesh or a surveyed nDSM solid (city2stl.landmarks;
                     resolved before the build, a bad mesh / no survey data fails the
@@ -35,12 +41,14 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import tempfile
 import zipfile
 
 from numpy2stl import write3MF
 
+from app.server.config import COARSE_MIN_BUILDING_AREA_M2
 from app.server.core.city_data import CityAreaTooLarge, check_city_area, get_city_layers
 from app.server.core.export import terrain_stage
 from app.server.core.export_params import ExportContext
@@ -55,6 +63,35 @@ logger = logging.getLogger(__name__)
 
 OSM_LAYERS = ["buildings", "roads", "waterways", "walls", "towers", "churches",
               "fortifications", "green", "railways"]
+
+
+# Cities panel defaults (FetchLayersSection.vue #citySimplifyTolerance / #cityMinArea,
+# city-overlay.js fallbacks). A build used to read the OSM cache at 0.5 m / 5 m²
+# whatever the panel loaded, so the first build refetched every layer.
+CITY_SIMPLIFY_TOLERANCE_M = 3.0
+CITY_MIN_AREA_M2 = 5.0
+
+
+def _non_negative(value, default: float) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return v if math.isfinite(v) and v >= 0 else default
+
+
+def city_osm_params(data: dict) -> tuple[float, float]:
+    """``(simplify_tolerance, min_area)`` of the OSM cache entry a city build reads.
+
+    The request's values (the Cities panel's, as loaded), else the panel defaults.
+    ``detail="coarse"`` raises min_area like ``/api/cities`` does, so the key matches
+    the entry a coarse load wrote.
+    """
+    tol = _non_negative(data.get("simplify_tolerance"), CITY_SIMPLIFY_TOLERANCE_M)
+    min_area = _non_negative(data.get("min_area"), CITY_MIN_AREA_M2)
+    if data.get("detail") == "coarse":
+        min_area = max(min_area, COARSE_MIN_BUILDING_AREA_M2)
+    return tol, min_area
 
 
 def _trails(bbox: dict) -> dict:
@@ -106,8 +143,10 @@ def run_city_model(data: dict, task: ExportTask) -> None:
         task.fail(str(exc))
         return
     task.update(5, "Loading OSM layers...")
+    tol, min_area = city_osm_params(data)
     osm = get_city_layers(bbox["north"], bbox["south"], bbox["east"], bbox["west"],
-                          [n for n in enabled if n in OSM_LAYERS], allow_large=allow_large)
+                          [n for n in enabled if n in OSM_LAYERS], tol, min_area,
+                          allow_large=allow_large)
     layers = {n: osm[n] for n in enabled if isinstance(osm.get(n), dict)}
     # Layers the caller edited locally (e.g. SDK roof classification) replace the
     # cached OSM copy, which has no record of those edits.

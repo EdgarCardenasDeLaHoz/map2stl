@@ -113,3 +113,43 @@ export function anyFeatureChannelEnabled(params) {
     return !!(params.buildingsEnabled || params.roadsEnabled
         || params.waterwaysEnabled || params.wallsEnabled);
 }
+
+// ─── Apply-to-DEM guard ──────────────────────────────────────────────────────
+
+/** Terrain range (m) at or below which a composite counts as flat. */
+export const FLAT_COMPOSITE_RANGE_M = 1e-3;
+
+/**
+ * Identity of the inputs a composite was computed from: the loaded DEM (a
+ * per-values-array token), its grid, the bbox and every panel parameter. Two
+ * computes with equal keys produce the same terrain.
+ *
+ * @param {{demToken:(number|null), width:number, height:number,
+ *          bbox:(Object|null), params:Object}} inputs
+ * @returns {string}
+ */
+export function compositeInputKey({ demToken, width, height, bbox, params }) {
+    const b = bbox ? [bbox.north, bbox.south, bbox.east, bbox.west] : null;
+    const p = Object.keys(params || {}).sort().map((k) => [k, params[k]]);
+    return JSON.stringify({ demToken: demToken ?? null, width, height, bbox: b, params: p });
+}
+
+/**
+ * May Apply to DEM use this composite? Apply replaces the active DEM, so it
+ * must never use a result computed for other inputs (e.g. the all-zero
+ * baseline computed before the DEM loaded) or one that came out flat.
+ *
+ * @param {Object|null} result   What the last finished compute recorded:
+ *   { key, usedDem, min, max } (null when nothing was computed)
+ * @param {{key:string, hasDem:boolean}} current  The inputs as they are now
+ * @returns {{ok:boolean, reason?:'no-dem'|'not-computed'|'stale'|'baseline'|'flat'}}
+ */
+export function compositeApplyCheck(result, current) {
+    if (!current?.hasDem) return { ok: false, reason: 'no-dem' };
+    if (!result) return { ok: false, reason: 'not-computed' };
+    if (result.key !== current.key) return { ok: false, reason: 'stale' };
+    if (!result.usedDem) return { ok: false, reason: 'baseline' };
+    const range = result.max - result.min;
+    if (!(Number.isFinite(range) && range > FLAT_COMPOSITE_RANGE_M)) return { ok: false, reason: 'flat' };
+    return { ok: true };
+}

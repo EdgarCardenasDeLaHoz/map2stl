@@ -2,8 +2,8 @@
  * modules/ui/workflow-presets.js — one-click City / Mountain / Coast / Region set-ups.
  *
  * A workflow preset sets the existing form controls across the Edit and Extrude
- * tabs (DEM source + resolution, vertical mode + exaggeration, City Model layer
- * rows, puzzle options) and dispatches input + change on each, so every
+ * tabs (DEM source + resolution, projection, vertical mode + exaggeration, City
+ * Model layer rows, puzzle options) and dispatches input + change on each, so every
  * listener that already watches those controls (Vue v-model, auto-save,
  * model auto-rebuild) runs as if the user had edited them.
  *
@@ -48,14 +48,25 @@ const ALL_CITY_LAYERS = [...EXTRUDED, ...SURFACE];
 const layer = (id, enabled) => ({ id: `cityLayer_${id}_enabled`, checked: enabled });
 
 /**
+ * Projection → Cosine correction. Without it (Plate Carrée) a degree of
+ * longitude prints as wide as a degree of latitude, so at Granada's 37° the
+ * model comes out ~25 % too wide (1 / cos 37° ≈ 1.25). The SOPs use cosine.
+ * It goes first: a #paramDim change reloads every layer at once (auto-reload in
+ * app-setup.js), and that reload must already see the new projection.
+ */
+const COSINE = { id: 'paramProjection', value: 'cosine' };
+
+/**
  * Fields are applied in order; a layer's enable box comes before its mode and
  * value so they are not written while disabled.
  */
 export const WORKFLOW_PRESETS = {
     city: {
         label: 'City',
-        title: 'SRTM 30 m at 1000 px, true-scale vertical, every city layer on, puzzle pieces sized to the bed',
+        title: 'SRTM 30 m at 1000 px, cosine projection, true-scale vertical, every city layer on, '
+            + 'puzzle pieces sized to the bed',
         fields: [
+            COSINE,   // before paramDim: its change event reloads the DEM right away
             { id: 'paramDemSource', value: 'SRTMGL1' },
             { id: 'paramDim', value: '1000' },
             { id: 'exportZMode', value: 'auto' },
@@ -82,11 +93,12 @@ export const WORKFLOW_PRESETS = {
     },
     region: {
         label: 'Region',
-        title: 'Large area: terrain only (city layers off), rivers + lakes carved, vertical auto '
-            + '(fit above 20 km), SRTM 30 m up to ~100 km and 90 m beyond',
+        title: 'Large area: terrain only (city layers off), rivers + lakes carved, cosine '
+            + 'projection, vertical auto (fit above 20 km), SRTM 30 m up to ~100 km and 90 m beyond',
         // Rivers and lakes live in the Composite panel: load the DEM, then Apply.
         hint: 'Load the DEM, then Composite → Apply to DEM to carve rivers and lakes.',
         fields: [
+            COSINE,   // before paramDim: its change event reloads the DEM right away
             { id: 'paramDemSource', value: REGION_DEM_SOURCE },
             { id: 'paramDim', value: '1000' },
             { id: 'exportZMode', value: 'auto' },

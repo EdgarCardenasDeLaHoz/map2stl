@@ -32,10 +32,22 @@ class ExportTask:
     headers: dict[str, str] = field(default_factory=dict)
     created: float = field(default_factory=time.time)
     finished: float | None = None
+    updated: float = field(default_factory=time.time)   # last progress/message change
+    # The worker thread; its liveness is the status "heartbeat". A single build
+    # step (e.g. "Building model...") can run for minutes without a progress
+    # change, so the client must not read an unchanged status as a stall while
+    # the worker is still alive.
+    thread: threading.Thread | None = field(default=None, repr=False, compare=False)
 
     def update(self, progress: int, message: str) -> None:
+        if progress != self.progress or message != self.message:
+            self.updated = time.time()
         self.progress = progress
         self.message = message
+
+    def alive(self) -> bool:
+        """True while the task is running and its worker thread is alive."""
+        return self.status == "running" and (self.thread is None or self.thread.is_alive())
 
     def complete(self, result_path: str, filename: str, headers: dict = None) -> None:
         self.status = "complete"
@@ -79,16 +91,26 @@ def _cleanup_stale_tasks() -> None:
 
 
 def get_task_status(task_id: str) -> dict | None:
-    """Return progress info for a task, or None if not found."""
+    """Return progress info for a task, or None if not found.
+
+    ``alive`` is the heartbeat (the worker thread is still running), ``elapsed_s``
+    the time since the task started and ``idle_s`` the time since progress or
+    message last changed. export-handlers.js keeps polling while ``alive`` or
+    the status changes, instead of giving up after a fixed wall-clock time.
+    """
     with _export_tasks_lock:
         task = _export_tasks.get(task_id)
     if task is None:
         return None
+    now = time.time()
     return {
         "task_id": task.task_id,
         "status": task.status,
         "progress": task.progress,
         "message": task.message,
+        "alive": task.alive(),
+        "elapsed_s": round((task.finished or now) - task.created, 1),
+        "idle_s": round(now - task.updated, 1),
     }
 
 
@@ -143,5 +165,6 @@ def start_export_task(data: dict, fmt: str) -> str:
             task.fail(str(exc))
 
     thread = threading.Thread(target=_run, daemon=True, name=f"export-{task_id}")
+    task.thread = thread
     thread.start()
     return task_id

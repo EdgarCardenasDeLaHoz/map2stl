@@ -47,9 +47,9 @@ from geo2stl.geo import bbox_size_m
 
 _ALLOWED_HTTP_METHODS = {"get", "post", "put", "delete", "patch"}
 
-# Paths relative to this file (app/session/ → app/ → strm2stl/)
-_STRM2STL_DIR = Path(__file__).parent.parent.parent   # strm2stl/
-_VENV_PYTHON = Path.home() / ".venvs" / "strm2stl" / "Scripts" / "python.exe"  # scripts/setup-venv.ps1
+# Paths relative to this file (app/session/ → app/ → map2stl/)
+_MAP2STL_DIR = Path(__file__).parent.parent.parent   # map2stl/
+_VENV_PYTHON = Path.home() / ".venvs" / "map2stl" / "Scripts" / "python.exe"  # scripts/setup-venv.ps1
 
 _DEFAULT_SETTINGS: dict = {
     # ── Projection ────────────────────────────────────────────────────────
@@ -233,7 +233,7 @@ def _kill_tree(proc) -> None:
 
 
 class TerrainSession:
-    """Wrap the strm2stl HTTP API as a single Python object.
+    """Wrap the map2stl HTTP API as a single Python object.
 
     This is the main Python SDK used by the notebooks. For a faster map of how
     these methods relate to the server, see docs/sdk-workflow.md and docs/api.md.
@@ -547,7 +547,7 @@ class TerrainSession:
 
         if visible:
             # Let output flow to a new console window
-            kwargs: dict = {"cwd": str(_STRM2STL_DIR)}
+            kwargs: dict = {"cwd": str(_MAP2STL_DIR)}
             if sys.platform == "win32":
                 kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
             else:
@@ -556,7 +556,7 @@ class TerrainSession:
 
         return subprocess.Popen(
             cmd,
-            cwd=str(_STRM2STL_DIR),
+            cwd=str(_MAP2STL_DIR),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -2193,7 +2193,7 @@ class TerrainSession:
             raise RuntimeError(f"Puzzle export failed: {st.get('message')}")
         r = self._api_request_raw("get", f"/api/export/download/{task_id}", timeout=600)
         r.raise_for_status()
-        output_dir = _STRM2STL_DIR / "output"
+        output_dir = _MAP2STL_DIR / "output"
         output_dir.mkdir(exist_ok=True)
         self.puzzle_path = output_dir / f"{body['name']}_puzzle.zip"
         self.puzzle_path.write_bytes(r.content)
@@ -2381,6 +2381,9 @@ class TerrainSession:
             "exaggeration": exaggeration,
             "median_size": median_size,
             "layers": layers or {},
+            # The OSM cache entry fetch_cities() used, so the build reuses it.
+            "simplify_tolerance": self.settings["city"]["simplify_tolerance"],
+            "min_area": self.settings["city"]["min_area"],
         }
         if puzzle:
             body["puzzle"] = puzzle

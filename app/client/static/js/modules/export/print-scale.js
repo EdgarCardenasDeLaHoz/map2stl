@@ -14,6 +14,11 @@
 export const M_PER_DEG_LAT = 110540;
 export const M_PER_DEG_LON = 111320;
 export const AUTO_TRUE_SCALE_MAX_KM = 20;
+/**
+ * Below this elevation range (m) fit-to-height has no relief to fit, so the
+ * vertical exaggeration is meaningless (30 mm / 1e-6 m gave "3,662,321,645×").
+ */
+export const MIN_FIT_RELIEF_M = 0.01;
 /** Margin taken off the bed when it sets the default puzzle piece size. */
 export const BED_MARGIN_MM = 10;
 
@@ -40,9 +45,11 @@ export function bboxDiagonalKm(bbox) {
  * @param {number} [p.elevMax=0]   highest DEM elevation (m), used by fit mode
  * @returns {null | {mPerPx:number, mPerMm:number, scaleDenominator:number,
  *                   zMode:'true'|'fit', zMmPerM:number, verticalExaggeration:number,
- *                   widthMm:number, depthMm:number}}
+ *                   widthMm:number, depthMm:number, flatRelief:boolean}}
  *   mPerMm: ground metres per model millimetre ("1 mm = X m");
- *   verticalExaggeration: vertical scale over horizontal scale (1 = true scale).
+ *   verticalExaggeration: vertical scale over horizontal scale (1 = true scale);
+ *   flatRelief: fit mode with (near-)zero or unknown elevation range, so
+ *     verticalExaggeration is not meaningful and should not be displayed.
  */
 export function modelScale({
     bbox, cols, rows, mmPerPx,
@@ -61,6 +68,8 @@ export function modelScale({
         mode = bboxDiagonalKm(bbox) < AUTO_TRUE_SCALE_MAX_KM ? 'true' : 'fit';
     }
     const trueZ = mmPerPx / mPerPx;   // mm per metre at true scale
+    const relief = elevMax - elevMin;
+    const flatRelief = mode === 'fit' && !(relief >= MIN_FIT_RELIEF_M);
     const zMmPerM = mode === 'true'
         ? trueZ * exag
         : fitHeightMm / Math.max(elevMax - elevMin, 1e-6) * exag;
@@ -74,6 +83,7 @@ export function modelScale({
         verticalExaggeration: zMmPerM / trueZ,
         widthMm: cols * mmPerPx,
         depthMm: rows * mmPerPx,
+        flatRelief,
     };
 }
 

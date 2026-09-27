@@ -60,6 +60,21 @@ describe('modelScale', () => {
         const f = modelScale({ bbox: SMALL, cols: 500, rows: 500, mmPerPx: 1, zMode: 'fit', elevMin: 100, elevMax: 100 });
         expect(f.zMode).toBe('fit');
         expect(Number.isFinite(f.verticalExaggeration)).toBe(true);
+        expect(f.flatRelief).toBe(true);
+    });
+
+    it('flags a flat DEM in fit mode instead of a huge exaggeration', () => {
+        const flat = modelScale({ bbox: LARGE, cols: 500, rows: 500, mmPerPx: 1, elevMin: 0, elevMax: 0 });
+        expect(flat.zMode).toBe('fit');
+        expect(flat.flatRelief).toBe(true);
+        const nan = modelScale({ bbox: LARGE, cols: 500, rows: 500, mmPerPx: 1, elevMin: NaN, elevMax: NaN });
+        expect(nan.flatRelief).toBe(true);
+        const hilly = modelScale({ bbox: LARGE, cols: 500, rows: 500, mmPerPx: 1, elevMin: 0, elevMax: 500 });
+        expect(hilly.flatRelief).toBe(false);
+        // True scale does not depend on relief, so a flat DEM is fine there.
+        const t = modelScale({ bbox: SMALL, cols: 500, rows: 500, mmPerPx: 1, elevMin: 5, elevMax: 5 });
+        expect(t.zMode).toBe('true');
+        expect(t.flatRelief).toBe(false);
     });
 
     it('returns null without a usable bbox or grid', () => {

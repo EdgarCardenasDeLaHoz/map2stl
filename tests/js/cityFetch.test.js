@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-    mirrorHost, runCityFetch, summarizeCityFetch,
+    cityBuildOsmParams, cityPanelOsmParams, mirrorHost, runCityFetch, summarizeCityFetch,
 } from '../../app/client/static/js/modules/layers/city-fetch.js';
 
 const status = (st, states, extra = {}) => ({
@@ -76,5 +76,25 @@ describe('runCityFetch', () => {
     it('reports a start failure', async () => {
         const api = { start: async () => ({ data: null, error: 'HTTP 422: too large' }) };
         expect(await runCityFetch(api, {})).toEqual({ status: 'error', error: 'HTTP 422: too large' });
+    });
+});
+
+describe('City Model OSM params', () => {
+    it('parses the panel like loadCityData, with the panel defaults', () => {
+        expect(cityPanelOsmParams('2.5', '10')).toEqual({ simplify_tolerance: 2.5, min_area: 10 });
+        expect(cityPanelOsmParams(undefined, '')).toEqual({ simplify_tolerance: 3, min_area: 5 });
+    });
+
+    it('builds from the settings the loaded city data used', () => {
+        const loaded = { simplify_tolerance: 3, min_area: 5, detail: 'coarse' };
+        // The panel was edited after loading: the loaded data (and its height
+        // overrides) still belong to the loaded settings.
+        expect(cityBuildOsmParams(loaded, '1', '50')).toEqual(
+            { simplify_tolerance: 3, min_area: 5, detail: 'coarse' });
+    });
+
+    it('falls back to the panel when no city data was loaded', () => {
+        expect(cityBuildOsmParams(null, '1.5', '20')).toEqual(
+            { simplify_tolerance: 1.5, min_area: 20, detail: 'full' });
     });
 });

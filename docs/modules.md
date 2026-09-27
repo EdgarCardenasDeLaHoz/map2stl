@@ -1,4 +1,4 @@
-# JS Module Map — strm2stl
+# JS Module Map — map2stl
 
 _Last updated: 2026-05-14_
 
@@ -28,7 +28,7 @@ flowchart LR
 | `state.js` | `window.appState` | Proxy-based reactive state with `.on()/.set()/.emit()` |
 | `events.js` | `window.events`, `window.EV` | Event bus + EV constants. `EV.BBOX_CHANGED` (payload: bbox) fires from `setBboxRectangle`, the mini-map drag and a drawn rectangle |
 | `api.js` | `window.api.*` | All fetch helpers (regions, dem, export, cities incl. `start/status/result/cancel`, geocode `search/edgeLandmarks`, cache, settings) |
-| `ui-helpers.js` | `showToast`, `showLoading`, `setLayerStatus`, `getProjectionParams` | Toast, spinners, layer status UI; `getProjectionParams()` reads `#paramProjection`/`#paramMaintainDimensions`/`#paramClipNans` — the single source every layer fetch uses so they all request matching projection settings (F-PROJ-DIMS) |
+| `ui-helpers.js` | `showToast`, `toastAnimation`, `showLoading`, `setLayerStatus`, `getProjectionParams` | Toast (fade timing from `toastAnimation(duration)`, so a toast stays up for the duration passed to `showToast`; app.css only slides it in), spinners, layer status UI; `getProjectionParams()` reads `#paramProjection`/`#paramMaintainDimensions`/`#paramClipNans` — the single source every layer fetch uses so they all request matching projection settings (F-PROJ-DIMS) |
 | `cache.js` | `waterMaskCache`, `setupCacheManagement` | In-memory water mask LRU + cache UI |
 
 ### `dem/` — DEM rendering & processing
@@ -44,12 +44,12 @@ flowchart LR
 |------|-------------|---------|
 | `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `applyStackedTransform`, `moveLayer`, `setLayerOpacity`, `getLayerOrder`, `getActiveLayers`, `setSplitViewEnabled`, `isSplitViewEnabled` | Single-canvas stacked view, zoom/pan; uses `LAYER_CANVAS_IDS` registry + `_getLayerBuffer`/`_freeLayerBuffer` for GPU memory management. `setSplitViewEnabled` draws CompositeDem/SatImg side-by-side in `stackViewCanvas` instead of alpha-blending, sharing the same `stackZoom` transform so pan/zoom stays synced. |
 | `composite-dem.js` | `computeCompositeDem`, `applyCompositeToDem`, `buildCompositeLayerSpec`, `setupCompositeDemControls` | Additive height contributions (DEM/water/buildings/roads/waterways/walls/landcover/sat/trails, each independently toggleable) + per-layer histograms + ML feature arrays. The OSM channels (buildings/roads/waterways/walls) are 2D preview only; Apply and export use the terrain-only composite (F-ARCH two-stage mesh pipeline). Supersedes the removed legacy merge panel (`dem-merge.js`) |
-| `composite-spec.js` | `FEATURE_SOURCES`, `WATER_TERRAIN_SOURCES`, `waterTerrainLayers`, `buildCompositeLayerSpec`, `anyFeatureChannelEnabled` | Pure ES exports: composite panel params → server `MergeLayerSpec` list; terrain-only unless `includeFeatures` |
+| `composite-spec.js` | `FEATURE_SOURCES`, `WATER_TERRAIN_SOURCES`, `waterTerrainLayers`, `buildCompositeLayerSpec`, `anyFeatureChannelEnabled`, `compositeInputKey`, `compositeApplyCheck` | Pure ES exports: composite panel params → server `MergeLayerSpec` list; terrain-only unless `includeFeatures`. Apply-to-DEM guard (key of the inputs a composite was computed from; refuse stale / flat) |
 | `mesh-layer.js` | `uploadMeshLayer`, `selectLibraryMeshFile`, `computeMeshHeightmap`, `autoRegisterMesh`, `suggestedMeshResolutionM`, `applyMeshRegistration`, `applyMeshToDem`, `clearMeshLayer` | STL/OBJ import (F-MESHIMPORT): upload/library source → heightmap → registered `MeshImport` stacked layer → optional DEM merge. `autoRegisterMesh` geocodes the filename + runs automatic OSM registration, always handing off to the manual picker |
 | `mesh-registration.js` | `openMeshRegistrationModal`, `computeMeshRegistration`, `undoLastMeshPointPair`, `clearMeshPointPairs` | Side-by-side pan/zoom point-pair picker (DEM vs. mesh heightmap) feeding the `/register` affine fit |
 | `water-mask.js` | `loadWaterMask`, `renderWaterMask`, `renderEsaLandCover` | Water mask + ESA land cover |
 | `city-overlay.js` | `loadCityData`, `cancelCityFetch`, `renderCityOverlay`, `window.renderCityOnDEM` | OSM building/road/waterway overlay. `loadCityData` runs the background fetch (`city-fetch.js`) and mirrors its status into `appState.cityFetch` |
-| `city-fetch.js` | `runCityFetch`, `summarizeCityFetch`, `mirrorHost`, `LAYER_STATE_ICON` | Pure ES exports: start → poll status → result of `/api/cities/start` (cancels the server task when the signal aborts); per-layer summary for `CityFetchProgress.vue` |
+| `city-fetch.js` | `runCityFetch`, `summarizeCityFetch`, `mirrorHost`, `LAYER_STATE_ICON`, `cityPanelOsmParams`, `cityBuildOsmParams` | Pure ES exports: start → poll status → result of `/api/cities/start` (cancels the server task when the signal aborts); per-layer summary for `CityFetchProgress.vue`; the Cities panel's tolerance / min area (and the ones the loaded data used, sent with the City Model build) |
 | `city-render.js` | `loadCityRaster`, `_clearCityRasterCache` | City rasterization via `/api/cities/raster` |
 | `hydrology-overlay.js` | `window.loadHydrology`, `window.clearHydrology`, `window.cancelHydroLoad` | HydroRIVERS depression grid fetch + canvas render |
 | `water-hydrology-combined.js` | `loadWaterHydrology`, `clearWaterHydrology` | Unified water + hydrology combined layer; sets `appState.waterHydrologyCanvas` |
@@ -74,9 +74,10 @@ flowchart LR
 | File | Key exports | Purpose |
 |------|-------------|---------|
 | `model-viewer.js` | `initModelViewer`, `previewModelIn3D`, `haversineDiagKm`, `updatePuzzlePreview`, `puzzleEdgesFor`, `resetPuzzleEdges`, `resetViewerCamera`, `rebuildViewerColors`, `setViewerNormals`, `setViewerAutoRotate` | Three.js terrain preview (the server's adaptive ≤ 150 k-face mesh, drawn from the faces it sends); orbit/pan/zoom + pinch-zoom; puzzle cut lines that can be dragged (non-uniform grid) |
-| `export-handlers.js` | `downloadSTL`, `downloadModel`, `downloadCrossSection`, `exportPuzzle`, `exportCityModel`, `runPreflight` | STL/OBJ/3MF/cross-section downloads; puzzle and City Model builds (knob shape, engraving, plates, dragged edges); pre-flight request |
+| `export-handlers.js` | `downloadSTL`, `downloadModel`, `downloadCrossSection`, `exportPuzzle`, `exportCityModel`, `runPreflight` | STL/OBJ/3MF/cross-section downloads; puzzle and City Model builds (knob shape, engraving, plates, dragged edges, OSM tolerance / min area); pre-flight request. Polls with a stall timeout (`export-poll.js`), not a wall-clock limit |
+| `export-poll.js` | `EXPORT_STALL_TIMEOUT_MS`, `createStallWatch`, `formatElapsed`, `exportProgressText` | Pure ES exports: give up on an export only after 3 min with no status change and no server heartbeat (`alive`); elapsed time for the progress text |
 | `puzzle-cuts.js` | `evenEdges`, `nearestEdge`, `moveEdge`, `minPieceMm`, `gridKey`, `isCustom`, `roundEdges` | Pure ES exports: puzzle cut positions in mm from the west / south edge (the server's `col_edges_mm` / `row_edges_mm`) |
-| `print-scale.js` | `modelScale`, `bboxDiagonalKm`, `formatGroundLength`, `parseBedSize`, `defaultPieceMm`, `piecesNeeded` | Pure ES exports (no window): model scale and vertical exaggeration (port of `city_model.choose_scale`), bed size, puzzle piece grid (port of `puzzle.plan_grid`) |
+| `print-scale.js` | `modelScale` (`flatRelief` when fit mode has no elevation range), `bboxDiagonalKm`, `formatGroundLength`, `parseBedSize`, `defaultPieceMm`, `piecesNeeded` | Pure ES exports (no window): model scale and vertical exaggeration (port of `city_model.choose_scale`), bed size, puzzle piece grid (port of `puzzle.plan_grid`) |
 | `building-heights.js` | `summarizeBuildingHeights`, `heightSourceGroup`, `buildingsWithOverrides`, `hasOverrides` | Pure ES exports: height-source summary, histogram, tallest list; City Model `layer_data` payload with height overrides |
 | `landmark-overrides.js` | `overridesForBuild`, `draftFromSpec`, `specFromDraft`, `overrideLabel`, `meshBounds`, `CATEGORY_LABELS` | Pure ES exports: landmark override specs (osm / ndsm / mesh) for the Landmarks panel and the City Model `landmark_overrides` (F-LANDMARK §3/§5) |
 
@@ -87,7 +88,7 @@ flowchart LR
 | `app-setup.js` | `setupOpacityControls`, `loadAllLayers`, `saveCurrentRegion` | App init wiring helpers |
 | `cache-inventory.js` | `loadCacheInventory` | Cache stats browser (Plotly chart + region table) |
 | `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset` | Preset save/load/apply; `PRESET_VERSION` migration; `_presetSnapshot` revert; `_migratePreset()` fills missing keys from built-in defaults |
-| `workflow-presets.js` | `WORKFLOW_PRESETS`, `applyFields`, `applyWorkflowPreset`, `regionDemSource` | Pure ES exports: City / Mountain / Region / Coast presets applied by setting inputs and firing input+change; returns an undo list (presets.js `window.applyWorkflowPreset` wraps it) |
+| `workflow-presets.js` | `WORKFLOW_PRESETS`, `applyFields`, `applyWorkflowPreset`, `regionDemSource` | Pure ES exports: City / Mountain / Region / Coast presets (City and Region also set `#paramProjection` = cosine) applied by setting inputs and firing input+change; returns an undo list (presets.js `window.applyWorkflowPreset` wraps it) |
 | `curve-editor-state.js` | `CurveEditorState`, `CURVE_PRESETS` | Curve editor state class + named preset definitions (shared by curve-editor.js and tests) |
 | `curve-editor.js` | `initCurveEditor`, `applyCurveTodem`, `interpolateCurve`, `undoCurve` | Elevation curve editor (spline + undo/redo) |
 | `keyboard-shortcuts.js` | (no named exports) | Keyboard shortcut event listeners |
@@ -266,7 +267,7 @@ Use grep: `grep -rn "function functionName" app/client/static/js/`.
 | `computeCompositeDem()` | Add DEM/water/landcover/sat/trails contributions (the terrain heightfield, kept for Apply) and then the city channels (buildings+roads+waterways+walls) for the 2D preview only — DEM and each city sub-layer independently toggleable |
 | `_hydroContribution(demW, demH)` (private) | Rivers + lakes for the 2D preview: POSTs the `waterTerrainLayers` stack on a zero-weight base DEM to `/api/composite/dem-merge` (`api.composite.demMerge`), so only the server's carve comes back; nearest-resampled onto the DEM grid and cached per request body. Apply/export send the same layers in the spec |
 | `_trailsContribution(demW, demH)` (private) | Nearest-neighbour resample of the retained trails relief onto the DEM grid. Only the linework contributes; the area masks are display-only. Where a piste and a path cross, the deeper cut wins rather than the two summing. Weight defaults to 0, so loading the Trails layer to look at it never silently changes an export |
-| `applyCompositeToDem()` | Copy the **terrain-only** composite (no OSM feature channels) into lastDemData.values, and publish the terrain-only server layer spec on `appState.compositeLayerSpec`. Two-stage mesh pipeline (F-ARCH): buildings/roads/waterways/walls reach the mesh only through the City Model's vector stage |
+| `applyCompositeToDem()` | (async → bool) Wait for / start the recompute for the loaded DEM + current settings, refuse (toast) a stale, zero-baseline or flat result (`compositeApplyCheck`), then copy the **terrain-only** composite (no OSM feature channels) into lastDemData.values (and vmin/vmax), and publish the terrain-only server layer spec on `appState.compositeLayerSpec`. Two-stage mesh pipeline (F-ARCH): buildings/roads/waterways/walls reach the mesh only through the City Model's vector stage |
 | `buildCompositeLayerSpec({includeFeatures})` | Wrapper around `composite-spec.js` that supplies dim / DEM source / OSM detail from the DEM snapshot. Default is the terrain-only export spec; `includeFeatures: true` adds the `osm_*` channels for a 2D preview only |
 
 ### layers/composite-spec.js
@@ -280,6 +281,8 @@ Pure ES module (no DOM, no `window`), unit-tested in `tests/js/compositeSpec.tes
 | `WATER_TERRAIN_SOURCES` / `RIVER_SOURCES` | `hydrorivers`, `natural_earth_rivers`, `lakes` — terrain-relative server sources (F-REGION, `geo2stl/water_layers.py`), blend `add`; unlike `FEATURE_SOURCES` they are terrain and stay in the export spec |
 | `waterTerrainLayers(params, dim)` | The river (`riversEnabled`, `riverSource`, `riverMinOrder`, `riverDepthScale` = weight, `riverWidthScale`) and lake (`lakesEnabled`, `lakeDepth`, `lakeMinAreaHa`) layers; shared by the spec builder and the 2D preview fetch |
 | `anyFeatureChannelEnabled(params)` | True when any OSM feature toggle is on |
+| `compositeInputKey({demToken, width, height, bbox, params})` | Identity of the inputs a composite was computed from (DEM values-array token, grid, bbox, every panel param) |
+| `compositeApplyCheck(result, current)` | `{ok}` or `{ok:false, reason}` (`no-dem`, `not-computed`, `stale`, `baseline`, `flat`) — whether Apply to DEM may use the last composite |
 | `setupCompositeDemControls()` | Wire all composite sliders + toggles + buttons + split-view button |
 | `_drawHistogram(canvas, values)` / `_renderAllHistograms(channels)` | Canvas-drawn per-layer + combined contribution histograms (no chart lib) |
 
@@ -338,7 +341,8 @@ Pure ES module (no DOM, no `window`), unit-tested in `tests/js/compositeSpec.tes
 | `downloadSTL()` | POST /api/export/stl → blob download |
 | `downloadModel(format)` | POST /api/export/{format} → download |
 | `downloadCrossSection()` | Cross-section OBJ export |
-| `exportPuzzle()` / `exportCityModel()` | Async `puzzle` / `city` builds; bodies from `_puzzleExtra()` / `_cityExtra()` |
+| `exportPuzzle()` / `exportCityModel()` | Async `puzzle` / `city` builds; bodies from `_puzzleExtra()` / `_cityExtra()` (the city body carries `simplify_tolerance` / `min_area` / `detail` from `cityBuildOsmParams`) |
+| `_asyncExport(format, extra, fileName)` (private) | Start → poll every 500 ms → download. Progress bar + ✕ Cancel shown throughout, text "<server step> (m:ss)"; gives up after `EXPORT_STALL_TIMEOUT_MS` without a status change or heartbeat, or on 404 (task gone) |
 | `runPreflight(format)` | POST /api/export/preflight with the body that build would send → `{data, error}` |
 
 ### regions/regions.js + region-ui.js

@@ -33,6 +33,10 @@ function makeDoc({ srtmDisabled = false } = {}) {
         ],
     });
     add('paramDim', { value: '600' });
+    add('paramProjection', {
+        tagName: 'SELECT', value: 'none',
+        options: ['none', 'cosine', 'mercator', 'lambert'].map(value => ({ value, disabled: false })),
+    });
     add('exportZMode', {
         tagName: 'SELECT', value: 'fit',
         options: ['auto', 'true', 'fit'].map(value => ({ value, disabled: false })),
@@ -77,6 +81,8 @@ describe('applyWorkflowPreset', () => {
         const e = doc.els;
         expect(e.paramDemSource.value).toBe('SRTMGL1');
         expect(e.paramDim.value).toBe('1000');
+        expect(e.paramProjection.value).toBe('cosine');
+        expect(e.paramProjection.events).toEqual(['input', 'change']);
         expect(e.exportZMode.value).toBe('auto');
         expect(e.exportExaggeration.value).toBe('1');
         expect(e.cityLayer_trails_enabled.checked).toBe(true);
@@ -103,6 +109,7 @@ describe('applyWorkflowPreset', () => {
         expect(skipped).toEqual([]);
         const e = doc.els;
         expect(e.paramDemSource.value).toBe('SRTMGL1');
+        expect(e.paramProjection.value).toBe('cosine');
         expect(e.exportZMode.value).toBe('auto');
         for (const id of ['buildings', 'roads', 'waterways', 'trails', 'green']) {
             expect(e[`cityLayer_${id}_enabled`].checked).toBe(false);
@@ -151,6 +158,21 @@ describe('applyWorkflowPreset', () => {
         applyFields(undo, doc);
         const after = Object.fromEntries(Object.entries(doc.els).map(([k, el]) => [k, [el.value, el.checked]]));
         expect(after).toEqual(before);
+    });
+
+    it('City and Region set the projection before the resolution (dim change reloads)', () => {
+        for (const name of ['city', 'region']) {
+            const ids = WORKFLOW_PRESETS[name].fields.map(f => f.id);
+            expect(ids.indexOf('paramProjection')).toBeGreaterThanOrEqual(0);
+            expect(ids.indexOf('paramProjection')).toBeLessThan(ids.indexOf('paramDim'));
+        }
+    });
+
+    it('undoing City restores the previous projection', () => {
+        const { undo } = applyWorkflowPreset('city', doc);
+        expect(doc.els.paramProjection.value).toBe('cosine');
+        applyFields(undo, doc);
+        expect(doc.els.paramProjection.value).toBe('none');
     });
 
     it('rejects an unknown preset', () => {

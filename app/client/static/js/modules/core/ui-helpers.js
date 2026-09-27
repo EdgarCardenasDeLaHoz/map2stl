@@ -8,6 +8,7 @@
  * Public API:
  *   window.escapeHtml(value)
  *   window.showToast(message, type, duration)
+ *   window.toastAnimation(duration)
  *   window.toggleCollapsible(header)
  *   window.showLoading(container, message)
  *   window.hideLoading(container)
@@ -44,6 +45,21 @@ window.escapeHtml = function escapeHtml(value) {
  * @param {'success'|'error'|'warning'|'info'} [type='info'] - Visual style
  * @param {number} [duration=3000] - Auto-dismiss delay in milliseconds
  */
+/**
+ * CSS `animation` value for a toast shown for `duration` ms: slide in, stay,
+ * then fade out so the fade ends exactly at `duration` (when the element is
+ * removed). The fade timing lives here, not in app.css, so a 6–8 s toast
+ * stays readable for its whole requested duration.
+ * @param {number} duration - Total on-screen time in milliseconds
+ * @returns {string}
+ */
+window.toastAnimation = function toastAnimation(duration) {
+    const total = Number.isFinite(duration) && duration > 0 ? duration : 3000;
+    const fadeMs = Math.min(300, total / 2);
+    const delayMs = Math.max(0, total - fadeMs);
+    return `slideIn 0.3s ease, fadeOut ${fadeMs / 1000}s ease ${delayMs / 1000}s forwards`;
+};
+
 window.showToast = function showToast(message, type = 'info', duration = 3000) {
     const container = document.getElementById('toastContainer');
     if (!container) return;
@@ -62,6 +78,7 @@ window.showToast = function showToast(message, type = 'info', duration = 3000) {
         <span class="toast-message">${message}</span>
     `;
 
+    toast.style.animation = window.toastAnimation(duration);
     container.appendChild(toast);
 
     setTimeout(() => {

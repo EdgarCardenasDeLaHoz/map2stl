@@ -1,4 +1,4 @@
-# Backend API Routes — strm2stl
+# Backend API Routes — map2stl
 
 _Last updated: 2026-05-14_
 
@@ -75,7 +75,7 @@ Primary `TerrainSession` touchpoints:
 | POST | `/api/export/preflight` | Same body as `/start` (`format` = `city` \| `puzzle` \| …), nothing built → `{size_mm, bed_mm, fits_bed, scale, vertical_exaggeration, puzzle: {cols, rows, method, col_edges_mm, row_edges_mm, largest_piece_mm, knob_mm}, layers: {name: {polygons, widened, clamped, dropped, thinnest_mm, tallest_mm, …}}, thinnest_feature_mm, tallest_spike_mm, faces_est, estimate: {filament_g, print_hours, printed_cm3, formula}, warnings, seconds}`. OSM layers from the cache only (uncached ones are a warning). `app/server/core/preflight.py` |
 | POST | `/api/export/puzzle` | Start async puzzle export → `{task_id}` (same as `/start` with `format="puzzle"`) |
 | POST | `/api/export/start` | Start async export (any format) → `{task_id}`; body must include `"format"` field. `format="city"` takes `landmark_overrides: {osm_id: {kind: "mesh", upload_id, fit?, rotation_deg?, scale?, offset_m?, vertical?: "true"\|"fit", height_m?, up_axis?} \| {kind: "ndsm", provider?: "auto"\|name, resolution_m?}}` — resolved before the build (bad mesh / no survey data fails the task naming the landmark), applied by `build_on_terrain`; `report.json` `landmarks` = `{osm_id: {kind, source, status: applied\|failed\|missing, reason?, replaced_features, faces}}`. `format="city"` fails with a clear message when city layers (trails included) are enabled on a bbox over 25 km diagonal, unless the body sets `"allow_large_city": true` (`core/city_data.check_city_area`) |
-| GET | `/api/export/status/{task_id}` | Poll async task → `{status, progress, message}` |
+| GET | `/api/export/status/{task_id}` | Poll async task → `{status, progress, message, alive, elapsed_s, idle_s}` (`alive` = worker heartbeat; the client gives up only after 3 min with no status change and no heartbeat) |
 | GET | `/api/export/download/{task_id}` | Download result of completed async task (file auto-deleted after send) |
 
 > **Puzzle fields** (`format="puzzle"`, flat; the city build takes the same keys under `puzzle`, see `core/puzzle.py`): `split_cols`/`split_rows` or `piece_mm`, or `col_edges_mm`/`row_edges_mm` (cut positions from the west / south edge, `[0, …, size]`, strictly increasing, ends within max(0.5 mm, 1 %) of the model size), `knob_width_mm`, `knob_depth_mm`, `knob_shape` (`classic` \| `dovetail` \| `rectangular`), `clearance_mm`, `puzzle_method` (`auto` \| `mask` \| `boolean`; auto = mask for terrain-only models), `engrave_ids` (default true: id + north arrow 0.6 mm into the underside), `layout` + `bed_mm` (adds `<name>_plate<N>.3mf`). The download carries `X-Puzzle-Info` (grid, method, timings). The city `report.json` gains `puzzle` and `check` (size vs bed, faces, watertight, widened/clamped, filament and time estimate).
@@ -157,7 +157,7 @@ Primary `TerrainSession` touchpoints:
 ## Auth & Data Sources (`routers/auth.py`)
 
 Backs the 🔑 Keys panel in the header. Everything here writes to
-`strm2stl/config.json` and re-binds the running process, so no restart is needed.
+`map2stl/config.json` and re-binds the running process, so no restart is needed.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -211,7 +211,7 @@ The inventory is rebuilt by scanning directories on every request rather than re
 `build_landing_page.py`'s static `index.html`, which has to be re-run after each batch.
 
 Registration roots (`_REG_ROOTS`, read-only; override the whole set with
-`STRM2STL_REGISTRATION_REPORT_ROOTS="key=path;key=path"`, relative to `Code/`):
+`MAP2STL_REGISTRATION_REPORT_ROOTS="key=path;key=path"`, relative to `Code/`):
 
 - `registration` — `Code/_reports/` (numpy2stl batch reports, `index.html` + `summary.html`)
 - `registration_regen` — `Code/_reports_regen/` (skipped when absent)

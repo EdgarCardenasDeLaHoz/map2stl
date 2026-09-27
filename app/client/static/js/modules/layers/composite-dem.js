@@ -19,7 +19,9 @@
  *
  * Public API (on window):
  *   window.computeCompositeDem()       — recompute & render the composite layer
- *   window.applyCompositeToDem()       — replace lastDemData with the terrain-only composite
+ *   window.applyCompositeToDem()       — (async) replace lastDemData with the terrain-only
+ *                                        composite computed for the loaded DEM; refuses a
+ *                                        stale, zero-baseline or flat result
  *   window.buildCompositeLayerSpec(o)  — the same stack as a server layer list
  *                                        (terrain only unless o.includeFeatures)
  *   window.setupCompositeDemControls() — wire UI event listeners
@@ -30,6 +32,7 @@
 
 import {
     buildCompositeLayerSpec as _buildSpec, anyFeatureChannelEnabled, waterTerrainLayers,
+    compositeInputKey, compositeApplyCheck,
 } from './composite-spec.js';
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
@@ -108,6 +111,44 @@ let _terrainMin = 0;
 let _terrainMax = 0;
 /** True when the last preview included OSM feature channels the terrain omits. */
 let _previewHadFeatures = false;
+/**
+ * What _terrainValues was computed from: { key, usedDem, min, max } (see
+ * compositeApplyCheck). Apply refuses a result whose key is not the current
+ * inputs' key, e.g. the all-zero baseline computed before the DEM loaded.
+ */
+let _terrainResult = null;
+/** Promise of the compute currently running (null when idle). */
+let _inflightCompute = null;
+
+/** Stable token per DEM values array, so a newly loaded DEM changes the key. */
+const _demTokens = new WeakMap();
+let _nextDemToken = 1;
+function _demToken(values) {
+    if (!values?.length || typeof values !== 'object') return null;
+    if (!_demTokens.has(values)) _demTokens.set(values, _nextDemToken++);
+    return _demTokens.get(values);
+}
+
+/**
+ * The composite's inputs as they are right now: grid from the loaded DEM (or
+ * the zero baseline's #paramDim square), bbox, and every panel parameter.
+ * @returns {{key:string, hasDem:boolean}}
+ */
+function _currentInputs() {
+    const dem = window.appState?.lastDemData;
+    const hasDem = !!dem?.values?.length;
+    let W, H;
+    if (hasDem) {
+        W = dem.width; H = dem.height;
+    } else {
+        W = H = parseInt(document.getElementById('paramDim')?.value) || 200;
+    }
+    const bbox = window.appState?.currentDemBbox || window.appState?.selectedRegion || null;
+    const key = compositeInputKey({
+        demToken: hasDem ? _demToken(dem.values) : null, width: W, height: H, bbox, params,
+    });
+    return { key, hasDem };
+}
 
 /** Cached satellite pixel data to avoid repeated getImageData() calls. */
 let _satPixelCache = null;  // { canvas, width, height, data }
@@ -492,11 +533,20 @@ async function _hydroContribution(demW, demH) {
     return values;
 }
 
-window.computeCompositeDem = async function computeCompositeDem() {
+window.computeCompositeDem = function computeCompositeDem() {
+    const run = _computeCompositeDem();
+    _inflightCompute = run;
+    const clear = () => { if (_inflightCompute === run) _inflightCompute = null; };
+    run.then(clear, clear);
+    return run;
+};
+
+async function _computeCompositeDem() {
     const gen = ++_computeGen;
     const enabled = document.getElementById('compositeEnabled')?.checked;
     if (!enabled) {
         _terrainValues = null;
+        _terrainResult = null;
         // Clear offscreen canvas so stacked view shows nothing
         if (window.appState?.compositeDemSourceCanvas) {
             const src = window.appState.compositeDemSourceCanvas;
@@ -515,9 +565,12 @@ window.computeCompositeDem = async function computeCompositeDem() {
     const region = window.appState?.currentDemBbox || window.appState?.selectedRegion;
     if (!region) {
         _terrainValues = null;
+        _terrainResult = null;
         return;
     }
 
+    // Recorded with the result so Apply can tell whether it still matches.
+    const inputs = _currentInputs();
     const dem = window.appState?.lastDemData;
     let values, width, height;
     if (dem?.values?.length) {
@@ -608,6 +661,7 @@ window.computeCompositeDem = async function computeCompositeDem() {
     _terrainValues = terrain;
     _terrainMin = tMin;
     _terrainMax = tMax;
+    _terrainResult = { key: inputs.key, usedDem: inputs.hasDem, min: tMin, max: tMax };
     _previewHadFeatures = !!cityFeat;
 
     await _yieldToMain(); if (gen !== _computeGen) return;
@@ -632,7 +686,7 @@ window.computeCompositeDem = async function computeCompositeDem() {
         landcover: lcFeat, satellite: satFeat, trails: trailsFeat,
         composite,
     });
-};
+}
 
 /**
  * Render composite values to a canvas using the DEM colormap.
@@ -779,23 +833,67 @@ window.buildCompositeLayerSpec = function buildCompositeLayerSpec(opts = {}) {
 // ─── Apply to DEM ────────────────────────────────────────────────────────────
 
 /**
+ * Make sure _terrainValues was computed for the current inputs (loaded DEM,
+ * bbox, grid, panel parameters): wait for a running compute, and start a
+ * fresh one when the last result is stale. A few rounds cover a compute that
+ * was superseded while we waited (e.g. the DEM finished loading).
+ * @returns {Promise<{ok:boolean, reason?:string}>}
+ */
+async function _ensureFreshTerrain() {
+    for (let round = 0; round < 4; round++) {
+        if (_inflightCompute) {
+            try { await _inflightCompute; } catch (e) { console.warn('[composite] compute:', e); }
+            continue;
+        }
+        const check = compositeApplyCheck(_terrainResult, _currentInputs());
+        if (check.ok || check.reason === 'no-dem' || check.reason === 'flat') return check;
+        clearTimeout(_recomputeTimer);   // this compute replaces the debounced one
+        await window.computeCompositeDem();
+    }
+    return compositeApplyCheck(_terrainResult, _currentInputs());
+}
+
+const _APPLY_REFUSALS = {
+    'no-dem': 'Load a DEM first: Apply replaces the loaded DEM with the composite',
+    'not-computed': 'No composite data: enable Composite DEM and compute first',
+    stale: 'The composite is still being recomputed. Try Apply again in a moment',
+    baseline: 'The composite was computed before the DEM loaded. Try Apply again in a moment',
+    flat: 'Composite is flat (no elevation range), so it was not applied. Is the DEM channel on?',
+};
+
+/**
  * Replace lastDemData.values with the terrain-only composite, making it the
  * active DEM for export and 3D preview. The OSM feature channels shown in the
  * 2D preview are left out on purpose — see the module header.
+ *
+ * Only a composite computed for the currently loaded DEM and the current
+ * panel settings is applied: a running recompute is awaited (or a stale one
+ * redone), and a flat or all-zero result is refused with a toast, so Apply
+ * can never swap the DEM for the zero baseline computed before it loaded.
+ * @returns {Promise<boolean>} true when the DEM was replaced
  */
-window.applyCompositeToDem = function applyCompositeToDem() {
-    if (!_terrainValues) {
-        window.showToast?.('No composite data — enable and compute first', 'warning');
-        return;
+window.applyCompositeToDem = async function applyCompositeToDem() {
+    if (!document.getElementById('compositeEnabled')?.checked) {
+        window.showToast?.(_APPLY_REFUSALS['not-computed'], 'warning');
+        return false;
+    }
+    const check = await _ensureFreshTerrain();
+    if (!check.ok || !_terrainValues) {
+        window.showToast?.(_APPLY_REFUSALS[check.reason] || _APPLY_REFUSALS['not-computed'],
+            'warning', 6000);
+        return false;
     }
     const dem = window.appState?.lastDemData;
-    if (!dem) return;
+    if (!dem) return false;
 
     // A copy, so a later recompute (which replaces _terrainValues) and an
     // in-place edit of lastDemData.values can never alias each other.
     dem.values = new Float32Array(_terrainValues);
     dem.min = _terrainMin;
     dem.max = _terrainMax;
+    // Keep the display range (and the Extrude scale readout) in step.
+    dem.vmin = _terrainMin;
+    dem.vmax = _terrainMax;
     window.appState.lastDemData = dem;
 
     // Also update originalDemValues so curve editor works from the composite
@@ -814,6 +912,7 @@ window.applyCompositeToDem = function applyCompositeToDem() {
         ? 'Composite terrain applied as DEM (OSM buildings/roads/waterways/walls '
             + 'come from the City Model layers in 3D, not the terrain)'
         : 'Composite applied as DEM', 'success', _previewHadFeatures ? 6000 : undefined);
+    return true;
 };
 
 // ─── Preview & thumbnail ─────────────────────────────────────────────────────
@@ -970,8 +1069,11 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
     });
 
     // Apply button
-    document.getElementById('applyCompositeToDemBtn')?.addEventListener('click', () => {
-        window.applyCompositeToDem();
+    const applyBtn = document.getElementById('applyCompositeToDemBtn');
+    applyBtn?.addEventListener('click', async () => {
+        // Apply may wait for a recompute; block double clicks meanwhile.
+        applyBtn.disabled = true;
+        try { await window.applyCompositeToDem(); } finally { applyBtn.disabled = false; }
     });
 
     // Split view toggle — Composite DEM | Satellite side-by-side

@@ -20,6 +20,47 @@ export const LAYER_STATE_ICON = {
     cancelled: '–',
 };
 
+/** Cities panel defaults (#citySimplifyTolerance, #cityMinArea in FetchLayersSection.vue). */
+export const CITY_SIMPLIFY_TOLERANCE_DEFAULT = 3.0;
+export const CITY_MIN_AREA_DEFAULT = 5.0;
+
+/**
+ * The Cities panel's OSM fetch settings, parsed the way loadCityData() always
+ * has (`parseFloat(x) || default`), so the key they produce matches the cache
+ * entry the panel wrote.
+ * @param {string|number|undefined} tolerance  #citySimplifyTolerance value
+ * @param {string|number|undefined} minArea    #cityMinArea value
+ * @returns {{simplify_tolerance:number, min_area:number}}
+ */
+export function cityPanelOsmParams(tolerance, minArea) {
+    return {
+        simplify_tolerance: parseFloat(tolerance) || CITY_SIMPLIFY_TOLERANCE_DEFAULT,
+        min_area: parseFloat(minArea) || CITY_MIN_AREA_DEFAULT,
+    };
+}
+
+/**
+ * OSM settings for the City Model build: those the loaded city data was
+ * fetched with (appState.osmCityParams), else the panel's current values. The
+ * server reads the OSM cache entry with this key, so the build reuses exactly
+ * the layers the user loaded (and their height overrides) instead of fetching
+ * again at other settings.
+ * @param {{simplify_tolerance:number, min_area:number, detail?:string}|null} loaded
+ * @param {string|number|undefined} tolerance  #citySimplifyTolerance value
+ * @param {string|number|undefined} minArea    #cityMinArea value
+ * @returns {{simplify_tolerance:number, min_area:number, detail:string}}
+ */
+export function cityBuildOsmParams(loaded, tolerance, minArea) {
+    if (Number.isFinite(loaded?.simplify_tolerance) && Number.isFinite(loaded?.min_area)) {
+        return {
+            simplify_tolerance: loaded.simplify_tolerance,
+            min_area: loaded.min_area,
+            detail: loaded.detail || 'full',
+        };
+    }
+    return { ...cityPanelOsmParams(tolerance, minArea), detail: 'full' };
+}
+
 /** Terminal task states. */
 export const FINISHED = new Set(['done', 'error', 'cancelled']);
 

@@ -18,14 +18,18 @@
  *   window.appState.generatedModelData  (written here, read by _updateWorkflowStepper)
  *   window.appState._updateWorkflowStepper()
  *   window.appState.osmCityData, cityHeightOverrides  (City Model layer_data)
+ *   window.appState.osmCityParams  (OSM tolerance / min area / detail the city data
+ *                                   was loaded with; sent with the City Model build)
  *   window.appState.cityLandmarkOverrides  (City Model landmark_overrides, F-LANDMARK)
  *   showLoading(el, msg), hideLoading(el)   — file-top globals in app.js
  *   window.showToast(msg, type)                    — file-top global in app.js
  */
 
 import { buildingsWithOverrides, hasOverrides } from '../layers/building-heights.js';
+import { cityBuildOsmParams } from '../layers/city-fetch.js';
 import { FEATURE_SOURCES } from '../layers/composite-spec.js';
 import { overridesForBuild } from '../layers/landmark-overrides.js';
+import { EXPORT_STALL_TIMEOUT_MS, createStallWatch, exportProgressText } from './export-poll.js';
 import { parseBedSize } from './print-scale.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -268,7 +272,15 @@ function _puzzleExtra() {
 
 /** Request fields of the City Model build. */
 function _cityExtra() {
-    const extra = { layers: _cityLayerSettings(), bed_mm: _bedMm() };
+    const extra = {
+        layers: _cityLayerSettings(),
+        bed_mm: _bedMm(),
+        // The OSM cache entry the Cities panel loaded (tolerance, min area,
+        // detail): without these the server read 0.5 m / 5 m² and refetched.
+        ...cityBuildOsmParams(window.appState?.osmCityParams,
+            document.getElementById('citySimplifyTolerance')?.value,
+            document.getElementById('cityMinArea')?.value),
+    };
     // Heights edited in the Buildings panel exist only here; send the edited
     // buildings so the server uses them in place of its cached OSM copy.
     const overrides = window.appState?.cityHeightOverrides;
@@ -325,11 +337,6 @@ async function runPreflight(format = 'city') {
     return window.api.export.preflight({ format, ..._exportParams(), ...extra });
 }
 
-// Upper bound on how long we will poll before giving up. A stuck task used to
-// spin the 250 ms poll loop forever with no way out; the bound turns that into
-// a visible error the user can act on.
-const _EXPORT_POLL_TIMEOUT_MS = 10 * 60 * 1000;
-
 async function _asyncExport(format, extra = {}, fileName = null) {
     const pr = _progressEl();
     const name = _regionName();
@@ -356,21 +363,37 @@ async function _asyncExport(format, extra = {}, fileName = null) {
         }
         const { task_id } = await startResp.json();
 
-        // 2. Poll for progress
+        // 2. Poll for progress. No wall-clock limit (a first city build can
+        // take >10 min): keep going while the status changes or the server's
+        // heartbeat says the worker is alive; give up after a stall of
+        // EXPORT_STALL_TIMEOUT_MS or when the task is gone (export-poll.js).
         let status = { status: 'running', progress: 0, message: 'Starting...' };
+        const watch = createStallWatch(startedAt);
         while (status.status === 'running') {
-            await new Promise(r => setTimeout(r, 250));
+            await new Promise(r => setTimeout(r, 500));
             if (abort.signal.aborted) throw new DOMException('Cancelled', 'AbortError');
-            if (Date.now() - startedAt > _EXPORT_POLL_TIMEOUT_MS) {
-                throw new Error(
-                    `Export timed out after ${Math.round(_EXPORT_POLL_TIMEOUT_MS / 60000)} minutes. ` +
-                    'Try a smaller resolution, or check server.log.');
+            let pollResp = null;
+            try {
+                pollResp = await fetch(
+                    `/api/export/status/${encodeURIComponent(task_id)}`, { signal: abort.signal });
+            } catch (e) {
+                if (e.name === 'AbortError') throw e;
+                console.warn('[export] status poll failed:', e);   // a blip counts toward the stall
             }
-            const pollResp = await fetch(
-                `/api/export/status/${encodeURIComponent(task_id)}`, { signal: abort.signal });
-            if (!pollResp.ok) throw new Error('Lost connection to export task');
-            status = await pollResp.json();
-            pr.set(status.progress, status.message);
+            if (pollResp?.status === 404) {
+                throw new Error('The export task is gone (was the server restarted?). '
+                    + 'Start the export again.');
+            }
+            const polled = pollResp?.ok ? await pollResp.json().catch(() => null) : null;
+            const now = Date.now();
+            if (polled) status = polled;
+            const { stalled } = watch.observe(polled, now);
+            if (stalled) {
+                throw new Error(`No progress from the server for `
+                    + `${Math.round(EXPORT_STALL_TIMEOUT_MS / 60000)} minutes. `
+                    + 'Check server.log, or try a smaller region or resolution.');
+            }
+            pr.set(status.progress, exportProgressText(status.message, now - startedAt));
         }
 
         if (status.status === 'error') {
