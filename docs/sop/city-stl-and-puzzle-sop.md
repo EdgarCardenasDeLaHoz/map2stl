@@ -28,44 +28,137 @@ per-layer counts and timings, checks).
 **Prerequisites**: venv (`scripts/setup-venv.ps1`); OpenTopography key in *Keys* (any 30 m
 source); server running (`Start 3D Maps.bat`).
 
-1. **Pick the area** (Explore): select or draw the region. Check that landmarks are
-   inside the box with margin (Granada's saved box cut through the Alhambra).
-2. **Load terrain** (Edit): click a preset — *City*, *Mountain* or *Coast* — then
-   **Load DEM** (top of the panel). Presets set source, resolution, vertical mode, layers
-   and puzzle options; ↩ reverts. Use SRTM 30 m or Copernicus 30 m (the local file is
-   ~90 m). Avoid Copernicus **DSM** under OSM buildings: it already contains roofs.
-3. **Terrain edits** (optional, Edit → Composite): water depth, land cover, curve edits.
+Screenshots: Granada + Alhambra (N 37.1873, S 37.1693, E −3.5780, W −3.6093), taken by
+`Code/agent-scripts/sop_screenshots.py` (outside the repo; its docstring says how to
+refresh them). A red outline marks the control each step talks about. "Extrude → 📤
+Export" below is the Export tab inside the Extrude view (there is no top-level Export tab).
+
+1. **Pick the area** (Explore): select or draw the region (type in "Search regions…" to
+   find a saved one). Check that landmarks are inside the box with margin: the
+   *Near the box edge* box (bottom left of the map, and at the top of Edit → 📥 Fetch)
+   lists named places within 200 m of an edge, inside or out.
+
+   ![Edge landmark warning](img/city/01-edge-landmark-warning.png)
+   *Granada's saved box: "Alhambra crosses the east edge (150 m sticks out)".*
+
+   ![Pick the area](img/city/02-pick-area.png)
+   *The box widened to E −3.5780: the Alhambra is inside; the remaining entries stick out
+   by metres (Fuente de las Granadas 1 m) and can be ignored.*
+
+2. **Load terrain** (Edit → 📥 Fetch): switching to Edit may already load the DEM with
+   the region's saved (or default) settings. Click a preset in the *Preset* row — *City*,
+   *Mountain*, *Region* or *Coast* — then **🏔 Load DEM** (top of the panel) to reload
+   with it. Presets set source, resolution, vertical mode, layers and puzzle options; ↩
+   (in *Parameter Presets*, further down) reverts. They do **not** set the projection: open
+   **Projection** and pick **Cosine Correction** — a region without saved settings starts
+   at *None* (Plate Carrée), which makes Granada 1000 × 575 px (a model 25 % too wide)
+   instead of 797 × 575. Use SRTM 30 m or Copernicus 30 m (the local file is ~90 m). Avoid
+   Copernicus **DSM** under OSM buildings: it already contains roofs.
+
+   ![City preset](img/city/03-city-preset.png)
+   *City preset, Cosine Correction, SRTM 30 m (Global) at 1000 px. The sampling note
+   still describes the DEM Edit loaded on entry (1000 × 575, projection None) until Load
+   DEM is clicked.*
+
+   ![Load DEM](img/city/04-load-dem.png)
+   *The note under Resolution: ~30 m → 113 × 65 real samples upsampled 8.8× to
+   797 × 575 — at city scale every source is interpolated; a lower Resolution loses no
+   real detail.*
+
+3. **Terrain edits** (optional, Edit → ⊕ Composite): water depth, land cover, curve edits.
    These are the *terrain stage*. The Composite's buildings / roads / waterways / walls
    toggles are 2D preview only; in 3D those come from the City Model layers.
-4. **City data** (Edit → Cities → *Load Cities*): first fetch 1–5 min, cached after.
-   Check the **Buildings panel**: height sources, histogram, the "> 20 % default height"
-   warning, the tallest list. Fix wrong heights with the per-building override — it is
-   sent with the build.
-5. **Model** (Extrude): the scale line shows "1 mm = X m" and the vertical exaggeration;
-   the bed outline shows fit. Vertical: *auto* = true scale below a 20 km diagonal, fit
-   to *Height* above; override with *true* × exaggeration or *fit*. Smoothing 3×3.
-6. **Pre-flight** (Export → ✈ Pre-flight check, *City model* or *Terrain puzzle*,
-   seconds): size vs the bed, scale and vertical exaggeration, piece grid, per-layer
-   shapes with the `widened` / `capped` counts the build will report, thinnest feature,
-   tallest spike, estimated faces, filament (g PLA) and print time, and a warning list.
-   Fix what it flags before building (layers not yet cached are listed, not counted).
-7. **Puzzle options** (Export → Split / Puzzle; they apply to the City Model puzzle too):
-   knob shape (*classic* rounded, *dovetail*, *rectangular*), engraved piece ids + north
-   arrow on the underside (on by default), *Lay out on plates* (one 3MF per bed). With a
-   puzzle on, the preview draws the cut lines in red: drag one to move that cut (it stops
-   where a piece would get too small for its knobs); *Reset cuts* goes back to equal pieces.
-8. **Build** (Export → City Model): toggle layers per situation (see §3), keep *Puzzle*
-   on with max piece = bed − 10 mm (set from the printer). One build writes the merged
-   STL, the per-layer 3MF, the puzzle (pieces in place + laid-out plates) and
-   `report.json`.
+
+   ![Composite](img/city/05-composite.png)
+   *The Composite panel: City / OSM is marked "2D preview only"; ✓ Apply to DEM writes the
+   terrain channels into the DEM.*
+
+4. **City data** (Edit → 📥 Fetch → 🗂 Fetch Layers → 🏙 Cities → **📥 Load Cities**):
+   first fetch 1–5 min, cached after; the progress box lists each OSM layer (cached /
+   fetching / done) with *Cancel*. Set *Tolerance (m)* to **0.5** first: the City Model
+   build always reads the OSM cache at 0.5 m / 5 m², so with the panel default (3 m)
+   Load Cities fetches and caches a second, coarser copy, and the build fetches again. Open the **Buildings panel** (📋 Toggle Buildings Table
+   Panel, or the 📋 Buildings tab at the right edge of the map) and check the height
+   sources, histogram, the "> 20 % default height" warning (only shown above 20 %), the
+   tallest list. Fix wrong heights with the per-building override (click a building, *Height
+   (m)*, *Set*) — it is sent with the build. **🏛 Landmarks** (same tab, below Fetch Layers)
+   → *🔎 Find landmarks* lists places of worship, town halls, castles, attractions and the
+   tallest buildings with part count, roof shapes and height source; click one to build it
+   from *OSM parts* (default), a surveyed *nDSM* or an *Uploaded mesh*, *👁 Preview* it and
+   *💾 Save* (stored per region, sent with the City Model build).
+
+   ![Load Cities](img/city/06-load-cities.png)
+   *Tolerance 0.5 m (the build's); "Done · 7/7 layers", each served from cache.*
+
+   ![Buildings panel](img/city/07-buildings-panel.png)
+   *24,007 buildings: 98 % from OSM levels, 115 (0 %) at the default height — no warning;
+   histogram 0–70 m; tallest 64 m.*
+
+   ![Landmarks](img/city/08-landmarks.png)
+   *Find landmarks: Catedral de Granada (50 m, 41 parts, 5 roof shapes) first; click a row
+   for its editor.*
+
+5. **Model** (Extrude → 📥 Fetch): the line under the preview shows "1 mm = X m" and the
+   vertical exaggeration; the bed outline and its label show fit. Vertical: *auto* = true
+   scale below a 20 km diagonal, fit to *Fit height* above; override with *True scale ×
+   exag.* or *Fit to height*. Smoothing 3×3. With the City preset's puzzle on, the red
+   lines are already the piece grid.
+
+   ![Extrude](img/city/09-extrude.png)
+   *797 × 575 × 81 mm at 1 mm/px: "1 mm = 3.5 m (1:3,472) · vertical 1× (true scale)";
+   bed 250 × 210 "too small", 4 × 3 cut lines.*
+
+6. **Pre-flight** (Extrude → 📤 Export → ✈ Pre-flight check, *City model* or *Terrain
+   puzzle*, **Run pre-flight**; seconds for terrain, about a minute with 24 k buildings):
+   size vs the bed, scale and vertical exaggeration, piece grid, per-layer shapes with the
+   `widened` / `capped` counts the build will report, thinnest feature, tallest spike,
+   estimated faces, filament (g PLA) and print time, and a warning list. Fix what it flags
+   before building (layers not yet cached are listed, not counted).
+
+   ![Pre-flight](img/city/10-preflight.png)
+   *796 × 574 × 81 mm, 1:3,472, 4 × 3 boolean pieces; buildings: 3,291 widened, 1,449
+   capped; railways and green not cached yet (fetched at build time).*
+
+7. **Puzzle options** (Extrude → 📤 Export → 🧩 Split / Puzzle; they apply to the City
+   Model puzzle too): knob shape (*classic* rounded, *dovetail*, *rectangular*), engraved
+   piece ids + north arrow on the underside (on by default), *Lay out on plates* (one 3MF
+   per bed). These controls only show while Split / Puzzle's **Enable** is ticked, and
+   while it is ticked the preview draws *its* Columns × Rows grid and the City Model build
+   ignores dragged cuts. For a City Model puzzle: tick *Enable*, set the options, untick
+   it again (the options stay), then drag the red City-grid cuts in the preview (a cut
+   stops where a piece would get too small for its knobs); *Reset cuts* (visible with
+   *Enable* ticked) goes back to equal pieces.
+
+   ![Puzzle options](img/city/11-puzzle-options.png)
+   *Enable ticked: knob shape, engraving and plate layout (Columns × Rows are the terrain
+   puzzle's).*
+
+   ![Dragged cut](img/city/12-drag-cuts.png)
+   *Enable unticked again: the City grid, left vertical cut dragged east — the label
+   reads "4×3 custom · drag cuts".*
+
+8. **Build** (Extrude → 📤 Export → 🏙️ City Model): toggle layers per situation (see §3),
+   keep *Puzzle pieces* on with *max* = bed − 10 mm (set from the Printer section's bed).
+   **Build city model (.zip)**. One build writes the merged STL, the per-layer 3MF, the
+   puzzle (pieces in place + laid-out plates) and `report.json`. Nothing shows progress
+   while it runs (see §5); the download and a "CITY ready" toast mark the end.
+
+   ![City Model](img/city/13-city-model.png)
+   *All ten layers, puzzle pieces ≤ 200 mm (Prusa 250 × 210 bed) → 4 × 3 pieces.*
+
+   ![Build finished](img/city/14-build-finished.png)
+   *"CITY ready" after ~10 min (this run also fetched the uncached railways and green
+   layers from Overpass).*
+
 9. **QA**: open `report.json` — `check` (size vs bed, faces, watertight, widened/clamped
    per layer, filament and time from the real mesh, warnings), `merged.watertight`,
    `scale`, `puzzle` (grid, method, timings). In the slicer: size vs bed, no "errors
    fixed", tallest spike.
 
-Terrain-only models (no city) use the same route: *Export → STL/OBJ/3MF* or *Puzzle* build
-the city model with no layers, so they get the same adaptive mesh and scale. A terrain-only
-puzzle is cut the fast way (pieces meshed straight from the heightfield, see §4).
+Terrain-only models (no city) use the same route: *Extrude → 📤 Export → STL/OBJ/3MF* or
+*Puzzle* build the city model with no layers, so they get the same adaptive mesh and
+scale. A terrain-only puzzle is cut the fast way (pieces meshed straight from the
+heightfield, see §4).
 
 The Extrude preview is the adaptive mesh capped at 150 k faces (tolerance raised until it
 fits); the HUD shows the tolerance reached. The downloaded file is always the full-tolerance
@@ -80,7 +173,7 @@ mesh.
 | Mountain town (Breckenridge) | buildings, roads, water, trails | green is 612 k faces on steep ground — leave it off |
 | Region > 20 km | none (terrain), water | see §6 |
 
-Per layer (Export → City Model table): enabled, mode (extrude / raised / engraved / water),
+Per layer (Extrude → 📤 Export → City Model table): enabled, mode (extrude / raised / engraved / water),
 height or depth, line width. Printability rules apply to every layer: features narrower
 than 0.8 mm are widened, extruded heights capped at 8 × footprint width (reported).
 
@@ -114,7 +207,15 @@ than 0.8 mm are widened, extruded heights capped at 8 × footprint width (report
   (towers, domes, spires) yet — cathedrals and city halls print as their footprint prism.
 - Draped layers duplicate terrain detail on steep ground (Breckenridge green).
 - Heights outside Spain/US lidar coverage are thin; check the default-height warning.
-- The city fetch is a single blocking step (no per-layer progress yet).
+- The city fetch shows per-layer progress, but layers the build needs that *Load Cities*
+  does not fetch (railways, green, trails) are fetched from Overpass during the build,
+  with no progress shown; during an Overpass outage the build waits on dead mirrors.
+- **No export progress in the UI**: the Extrude panel's progress bar and its ✕ Cancel
+  never appear (`app.css` sets `.model-progress { display: none }`; `export-handlers.js`
+  only toggles `.hidden`), and toasts fade out after 3 s whatever their duration. The
+  browser also stops waiting after 10 minutes (`_EXPORT_POLL_TIMEOUT_MS`); the Granada
+  build with a cold railways/green fetch took ~10 min in the screenshot run, so a slower
+  build fails in the browser while the server finishes it.
 
 ## 6. Large regions (> 20 km)
 

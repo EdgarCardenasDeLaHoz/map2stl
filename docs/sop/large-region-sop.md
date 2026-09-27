@@ -50,23 +50,79 @@ lakes ≥ 1 ha 2 m below the shore. 0.5 mm per pixel. Run through the app's rout
 **Prerequisites**: as in the city SOP (venv, OpenTopography key, server running). Rivers
 use HydroRIVERS, downloaded per continent on first use (§5); lakes use Overpass.
 
+Screenshots: Grand Canyon reference box (N 36.47, S 35.97, E −111.78, W −112.88), taken
+by `Code/agent-scripts/sop_screenshots.py` (outside the repo; its docstring says how to
+refresh them). A red outline marks the control each step talks about.
+
 1. **Pick the area** (Explore). Frame the river with a margin: the model's longer side is
    *dim* px in degrees, so after the cosine projection the east-west side shrinks by
    cos(lat) (Grand Canyon: 1000 → 807 px).
-2. **Region preset** (Edit): sets SRTM 30 m (≤ 100 km) or 90 m, 1000 px, Vertical auto,
-   city layers and puzzle off, Composite rivers + lakes on.
-3. **Load DEM** (top of the panel). ~13 s cold for 100 km, cached after.
-4. **Composite → Rivers & lakes**: set **depth ×** from the table below, then **Apply to
-   DEM**. Check the toast / response for skipped layers (Water (ESA) needs Earth Engine;
-   untick *Water* if it is not set up — lakes do the same job).
-5. **Extrude**: *mm per pixel* = target size / longest side in px (0.5 → ~400–450 mm);
-   *Height* 30 mm is the fitted relief; lower *Base* from 10 to 3–5 mm for large prints
-   (10 mm is ~40 % of the filament here).
-6. **Pre-flight** (Export → ✈): size vs bed, scale, vertical exaggeration. Expect 1.3–3× the
-   estimated faces.
-7. **Export**: *STL* for one piece, *Puzzle* for anything larger than the bed (terrain
-   puzzles take the mask path: fast, watertight).
-8. **QA**: `X-Watertight` / toast, slicer size, and look at a river in the slicer's
+
+   ![Pick the area](img/region/01-pick-area.png)
+   *The saved box (red) on the Explore map; type in "Search regions…" to find it in a long list.*
+
+2. **Region preset** (Edit → 📥 Fetch, *Preset* row; switching to Edit may already load
+   the DEM with the region's saved or default settings — load it again in step 3): sets
+   SRTM 30 m (≤ 100 km) or 90 m, 1000 px, Vertical auto, city layers and puzzle off,
+   Composite rivers + lakes on. It
+   does **not** set the projection: open **Projection** and pick **Cosine Correction**.
+   The default for a region without saved settings is *None* (Plate Carrée), which keeps
+   the grid in degrees — Grand Canyon 1000 × 454 px instead of 807 × 454, a model 24 %
+   too wide east-west.
+
+   ![Region preset](img/region/02-region-preset.png)
+   *Region preset, Cosine Correction and SRTM 30 m set; the DEM is not reloaded yet.*
+
+3. **Load DEM** (top of the panel). ~13 s cold for 100 km, cached after. The note under
+   *Resolution* compares the source's real samples with the grid.
+
+   ![Load DEM](img/region/03-load-dem.png)
+   *807 × 454 grid; the note under Resolution: 3960 × 1800 real SRTM samples, downsampled.*
+
+4. **Composite → Rivers & lakes** (Edit → ⊕ Composite, open *🌊 Rivers & lakes*): set
+   **Depth ×** from the table below, click **👁 Preview**, wait until the range under the
+   buttons shows the terrain (e.g. `517.4m — 2811.4m`, not `0.0m — 0.0m`), then **✓ Apply
+   to DEM**. Apply takes the last composite *computed*: clicked while a recompute is still
+   running it can apply an empty (all-zero) grid, the Edit canvas goes flat and the
+   Extrude scale line shows a vertical exaggeration in the billions — Preview again and
+   re-apply. Skipped layers are not shown in the UI yet (only in the `dem-merge`
+   response's `warnings` and the server log): Water (ESA) needs Earth Engine; untick
+   *💧 Water → Enable* if it is not set up — lakes do the same job.
+
+   ![Rivers and lakes](img/region/04-rivers-lakes.png)
+   *HydroRIVERS, min order 3, depth ×10; the combined histogram and the range line
+   (517 m — 2811 m) show the carved composite before Apply.*
+
+5. **Extrude**: *Resolution (mm/px)* = target size / longest side in px (0.5 → ~400–450
+   mm); *Fit height* 30 mm is the fitted relief; lower *Base* from 10 to 3–5 mm for large
+   prints (10 mm is ~40 % of the filament here). The line under the preview gives the
+   scale and the vertical exaggeration; the bed outline and its label show the fit.
+
+   ![Extrude](img/region/05-extrude.png)
+   *0.5 mm/px and 5 mm base: 404 × 227 mm, "1 mm = 244 m (1:244,155) · vertical 3.2× true
+   scale (fit to height)"; the bed label reads "too small".*
+
+6. **Pre-flight** (Extrude → 📤 Export → ✈ Pre-flight check): pick *Terrain puzzle* (or
+   *City model*, which with every layer off is the terrain) and **Run pre-flight**: size
+   vs bed, scale, vertical exaggeration, piece grid. Expect 1.3–3× the estimated faces.
+
+   ![Pre-flight](img/region/06-preflight.png)
+   *Terrain puzzle at the bed grid: 403 × 227 × 35 mm, 1:244,192, vertical 3.27×, 3 × 2
+   pieces (mask path), ~192 k faces (estimate), ~593 g, ~16.6 h.*
+
+7. **Export** (Extrude → 📤 Export): *STL* for one piece; for anything larger than the
+   bed open *🧩 Split / Puzzle*, tick **Enable**, click **Use** (sets Columns × Rows to the
+   bed grid), then **🧩 Export puzzle** (terrain puzzles take the mask path: fast,
+   watertight). There is no progress display while it runs (see §5); the download and a
+   "PUZZLE ready" toast mark the end (50–70 s here). Watertightness is in the zip's
+   pieces, not the toast (only single-file STL/OBJ/3MF exports report faces and
+   watertightness in the toast).
+
+   ![Export finished](img/region/07-export-finished.png)
+   *3 × 2 puzzle: the red cut lines in the preview are the piece boundaries (drag to move
+   one); "PUZZLE ready" at the bottom right.*
+
+8. **QA**: `X-Watertight` / toast (single-file exports), slicer size, and look at a river in the slicer's
    layer preview: it should show in at least two layers.
 
 ### River depth (depth ×) — what prints
@@ -130,6 +186,13 @@ separate colour (§6).
   the export's median exactly (interior flat to ≤ 0.12 mm).
 - *dim* applies to the longer side **in degrees**; at mid latitudes the projected model
   comes out 10–20 % smaller than *dim* × mm/px suggests.
+- **UI feedback during export**: the Extrude panel's progress bar (and its ✕ Cancel)
+  never appears — `app.css` sets `.model-progress { display: none }` and
+  `export-handlers.js` only removes `.hidden` — and every toast fades out after 3 s
+  (CSS animation) whatever its duration, so the "ready" toast is easy to miss. Watch for
+  the download.
+- **Apply to DEM** uses the last composite that finished computing, not the one being
+  computed; applied too early it replaces the DEM with zeros (step 4).
 
 ## 6. What to improve (prioritised)
 
@@ -149,8 +212,9 @@ Process / pipeline:
    calibrate the `sqrt(stride)` factor or estimate from a full-resolution TIN of a tile.
 
 UI:
-1. Region preset: untick *Water (ESA)* when Earth Engine is not configured, set Base 5 mm,
-   and set mm/px from the bed (pieces ≤ bed − 10 mm) as the City preset does.
+1. Region preset: set Projection to *Cosine Correction* (the settings default is *None*),
+   untick *Water (ESA)* when Earth Engine is not configured, set Base 5 mm, and set mm/px
+   from the bed (pieces ≤ bed − 10 mm) as the City preset does.
 2. Show the river depth on the print (mm) beside the depth slider, from the current scale.
 3. Apply to DEM: list skipped layers in the toast (the response now has `warnings`).
 4. Terrain puzzle: offer *max piece* (mm) like the City Model instead of only cols × rows.
