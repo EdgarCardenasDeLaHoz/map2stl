@@ -1,4 +1,4 @@
-# Layer System — strm2stl
+# Layer System — map2stl
 
 _Last updated: 2026-05-28_
 

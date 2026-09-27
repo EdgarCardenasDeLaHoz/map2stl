@@ -2,7 +2,7 @@
 Evaluate OSM roof tag coverage for several cities.
 
 Usage:
-  cd strm2stl
+  cd map2stl
   python -m tools.eval_roof_tags                          # default city list
   python -m tools.eval_roof_tags --cities Amsterdam Prague Vienna Berlin
   python -m tools.eval_roof_tags --cities Barcelona --verbose

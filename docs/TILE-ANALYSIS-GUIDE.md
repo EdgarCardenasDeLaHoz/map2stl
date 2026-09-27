@@ -40,7 +40,7 @@ Contains:
 
 **How to read**:
 ```bash
-cd strm2stl
+cd map2stl
 python -c "import json; m = json.load(open('output/phase_g_tile_metrics.json')); print(m['metrics_summary'])"
 ```
 

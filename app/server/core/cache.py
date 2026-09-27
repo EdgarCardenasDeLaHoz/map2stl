@@ -1,5 +1,5 @@
 """
-core/cache.py — App-side cache policy for strm2stl.
+core/cache.py — App-side cache policy for map2stl.
 
 The storage primitives (``CACHE_ROOT``, key helpers, array and OSM cache
 read/write) live in ``geo2stl.cache`` so the libraries can use them without

@@ -5,7 +5,7 @@
 Once the 10-cycle training completes:
 
 ```bash
-cd strm2stl
+cd map2stl
 python tools/ml/analyze_growth_degradation.py
 ```
 

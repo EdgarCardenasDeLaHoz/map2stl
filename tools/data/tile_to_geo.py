@@ -26,7 +26,7 @@ Usage:
     python tools/data/tile_to_geo.py [input_csv] [output_csv]
 
 Defaults:
-    input  = data/locations/CoOrLists.csv  (relative to the strm2stl root)
+    input  = data/locations/CoOrLists.csv  (relative to the map2stl root)
     output = data/locations/CoOrLists_geo.csv
 """
 

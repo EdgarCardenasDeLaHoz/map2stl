@@ -11,11 +11,11 @@ For each city the script:
   4. Compares predictions to ground-truth and reports per-class accuracy.
   5. Also runs classify on the full building set (overwrite=False) to report
      coverage gain (how many un-tagged buildings now have a roof shape).
-  6. Saves per-city CSVs and a combined summary to strm2stl/output/.
+  6. Saves per-city CSVs and a combined summary to map2stl/output/.
 
 Usage
 -----
-    # from the strm2stl/ directory:
+    # from the map2stl/ directory:
     ..\\..venv\\Scripts\\python.exe -m tools.eval_roof_classifier
     # or:
     ..\\..venv\\Scripts\\python.exe tools/eval_roof_classifier.py
@@ -437,7 +437,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-dir", type=Path, default=None, metavar="DIR",
-        help="Directory for CSV output (default: strm2stl/output/).",
+        help="Directory for CSV output (default: map2stl/output/).",
     )
     parser.add_argument("--no-server", action="store_true")
     parser.add_argument("--port", type=int, default=9090)

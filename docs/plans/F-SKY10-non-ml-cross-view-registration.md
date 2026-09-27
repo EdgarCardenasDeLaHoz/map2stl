@@ -104,7 +104,7 @@ others the match goes to the second-place candidate.
 The implementation surface is moderate, but the **infrastructure for
 fetching satellite imagery for each region is the big-cost part**:
 
-1. **Satellite tile fetcher** — the strm2stl backend already pulls
+1. **Satellite tile fetcher** — the map2stl backend already pulls
    satellite imagery (`app/server/routers/terrain.py` mentions
    satellite endpoints). The skyline module would need to call
    into that or fetch tiles directly.
@@ -153,7 +153,7 @@ cache / projection plumbing; 40% is the actual scoring logic.
 - **Satellite imagery licensing.** Google Maps Static API for
   satellite imagery is allowed under the standard Google Maps
   terms; **the existing project already uses this path** in the
-  main strm2stl app. Mapbox, Bing, and Sentinel-2 are alternatives
+  main map2stl app. Mapbox, Bing, and Sentinel-2 are alternatives
   if Google's terms become problematic for derived products.
 - **Sentinel-2 resolution (10 m/px) too coarse for building roofs.**
   Need the higher-resolution providers (Google ~30 cm/px, Bing

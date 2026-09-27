@@ -178,7 +178,7 @@ const HIST_H = 48;
 
 const PANEL_MIN_WIDTH = 260;
 const PANEL_MAX_WIDTH = 900;
-const PANEL_WIDTH_STORAGE_KEY = 'strm2stl_cityTablePanelWidth';
+const PANEL_WIDTH_STORAGE_KEY = 'map2stl_cityTablePanelWidth';
 
 let _resizeStartX = 0;
 let _resizeStartW = panelWidth.value;

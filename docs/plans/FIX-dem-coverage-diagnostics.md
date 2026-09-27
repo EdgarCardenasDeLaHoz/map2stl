@@ -42,7 +42,7 @@ that throws, and guide the user to the (already-built) OpenTopo key modal.
 - **Key UX:** (a) `save_opentopo_key` also updates the running process config so
   it applies without a restart; (b) the DEM-empty toast links to the Keys
   modal when the failure is coverage/large-region related.
-- **Cache config (fold-in):** `config.py` cache dir honours `STRM2STL_CACHE`
+- **Cache config (fold-in):** `config.py` cache dir honours `MAP2STL_CACHE`
   env var (default unchanged) so caches can move out of OneDrive later.
 
 ## Target files
@@ -53,7 +53,7 @@ that throws, and guide the user to the (already-built) OpenTopo key modal.
 - `app/server/routers/diagnostics.py` (new) + `server.py` (register)
 - `app/client/static/js/vue/components/layout/MainHeader.vue` (Diagnostics button/modal + link to Keys)
 - `app/server/routers/auth.py` (hot-apply key)
-- `app/server/config.py` (STRM2STL_CACHE env)
+- `app/server/config.py` (MAP2STL_CACHE env)
 - `app/client/static/js/modules/dem/dem-main.js` (surface empty-DEM warning)
 
 ## Success criteria

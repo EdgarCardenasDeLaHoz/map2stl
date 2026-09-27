@@ -58,7 +58,7 @@ Two things deliberately not done here:
 
 - The parquet carries a per-building ``var`` column (height variance, -1.0 being
   the unknown sentinel, so it must not be read as a bad reading). It is not used
-  to scale confidence. Bug 3 in ``strm2stl/docs/issues.md`` is what happens when
+  to scale confidence. Bug 3 in ``map2stl/docs/issues.md`` is what happens when
   a provider's ranking is tuned on an argument rather than a measurement.
 - No correction is applied for the tall-building deficit. It is a real, measured,
   consistent bias and it is tempting to fit it out, but it has been measured in

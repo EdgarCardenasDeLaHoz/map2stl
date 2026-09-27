@@ -34,11 +34,11 @@ def _free_port() -> int:
 def _run_uvicorn(*, test_mode: bool) -> Iterator[str]:
     """Start `app.server.server:app` on a free port, yield its URL, then stop it.
 
-    When *test_mode* is True the server runs with STRM2STL_TEST_MODE=1, so the DEM
+    When *test_mode* is True the server runs with MAP2STL_TEST_MODE=1, so the DEM
     endpoint returns a fast deterministic gradient with no Earth Engine / network I/O
     (see app/server/routers/terrain.py).
 
-    Each session gets its own STRM2STL_CACHE directory (a fresh tempdir), so a
+    Each session gets its own MAP2STL_CACHE directory (a fresh tempdir), so a
     stale/flat entry from a real (non-test) DEM fetch in the shared repo cache
     can never leak into a test run and cause a false "DEM has no elevation
     data" preview failure — this bit an earlier version of the export-pipeline
@@ -47,9 +47,9 @@ def _run_uvicorn(*, test_mode: bool) -> Iterator[str]:
     port = _free_port()
     env = dict(os.environ)
     if test_mode:
-        env["STRM2STL_TEST_MODE"] = "1"
-    with tempfile.TemporaryDirectory(prefix="strm2stl_e2e_cache_") as cache_dir:
-        env["STRM2STL_CACHE"] = cache_dir
+        env["MAP2STL_TEST_MODE"] = "1"
+    with tempfile.TemporaryDirectory(prefix="map2stl_e2e_cache_") as cache_dir:
+        env["MAP2STL_CACHE"] = cache_dir
         proc = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "app.server.server:app",
              "--port", str(port), "--host", "127.0.0.1"],
@@ -88,7 +88,7 @@ def live_server_url() -> Iterator[str]:
 
 @pytest.fixture(scope="session")
 def live_server_url_testmode() -> Iterator[str]:
-    """Live server with STRM2STL_TEST_MODE=1 — deterministic DEM, no network.
+    """Live server with MAP2STL_TEST_MODE=1 — deterministic DEM, no network.
 
     Used by data-flow tests (e.g. terrain fetch) that must run reliably offline.
     """

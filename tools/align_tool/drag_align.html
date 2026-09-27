@@ -787,9 +787,9 @@ if (!tryAttach()) {
   showError(
     "No city data.\n" + why +
     "\n\nFixes, in order:\n" +
-    "1. Run:  ~/.venvs/strm2stl/Scripts/python.exe tools/align_tool/export_align_data.py\n" +
+    "1. Run:  ~/.venvs/map2stl/Scripts/python.exe tools/align_tool/export_align_data.py\n" +
     "2. Serve the folder instead of using file:// —\n" +
-    "   cd strm2stl/tools/align_tool && python -m http.server 8765\n" +
+    "   cd map2stl/tools/align_tool && python -m http.server 8765\n" +
     "   then open http://localhost:8765/drag_align.html\n" +
     "3. Or pick data/align_data.js by hand below.");
   document.getElementById("loaderBox").style.display = "block";

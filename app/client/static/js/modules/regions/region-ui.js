@@ -408,7 +408,7 @@ function setupRegionsTable() {
 
 function initRegionThumbnails() {
     try {
-        const saved = localStorage.getItem('strm2stl_thumbs');
+        const saved = localStorage.getItem('map2stl_thumbs');
         if (saved) regionThumbnails = JSON.parse(saved);
     } catch (_) { /* best-effort; failure is non-fatal */ }
     window.appState.regionThumbnails = regionThumbnails;
@@ -416,7 +416,7 @@ function initRegionThumbnails() {
 
 function saveRegionThumbnail(name, dataURL) {
     regionThumbnails[name] = dataURL;
-    try { localStorage.setItem('strm2stl_thumbs', JSON.stringify(regionThumbnails)); } catch (_) { /* best-effort; failure is non-fatal */ }
+    try { localStorage.setItem('map2stl_thumbs', JSON.stringify(regionThumbnails)); } catch (_) { /* best-effort; failure is non-fatal */ }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -425,7 +425,7 @@ function saveRegionThumbnail(name, dataURL) {
 
 function initRegionNotes() {
     try {
-        const saved = localStorage.getItem('strm2stl_regionNotes');
+        const saved = localStorage.getItem('map2stl_regionNotes');
         if (saved) regionNotes = JSON.parse(saved);
     } catch (e) {
         console.warn('Failed to load region notes:', e);
@@ -470,7 +470,7 @@ function saveRegionNotes() {
     } else {
         delete regionNotes[currentNotesRegion];
     }
-    try { localStorage.setItem('strm2stl_regionNotes', JSON.stringify(regionNotes)); }
+    try { localStorage.setItem('map2stl_regionNotes', JSON.stringify(regionNotes)); }
     catch (_) { window.showToast('Could not save notes — storage full or unavailable', 'warning'); }
     hideNotesModal();
     renderCoordinatesList();

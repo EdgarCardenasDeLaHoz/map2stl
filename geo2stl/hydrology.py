@@ -253,8 +253,8 @@ class NaturalEarthHydrologyLayer(HydrologyLayerBase):
 # ---------------------------------------------------------------------------
 
 # Cache root resolved from this file's location — no server dependency.
-# geo2stl/hydrology.py → geo2stl/ → strm2stl/
-_STRM2STL_ROOT = Path(__file__).parent.parent
+# geo2stl/hydrology.py → geo2stl/ → map2stl/
+_MAP2STL_ROOT = Path(__file__).parent.parent
 
 
 def _collinear_point_reduction(coords: list, tolerance: float = 1e-4) -> list:
@@ -377,7 +377,7 @@ def _regions_for_bbox(west: float, south: float, east: float, north: float) -> l
 
 def _cache_dir() -> Path:
     """Return (and create) the local shapefile cache directory."""
-    d = _STRM2STL_ROOT / "cache" / "hydrorivers"
+    d = _MAP2STL_ROOT / "cache" / "hydrorivers"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

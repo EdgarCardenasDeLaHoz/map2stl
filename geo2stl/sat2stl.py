@@ -394,7 +394,7 @@ def fetch_bbox_image(N, S, E, W, scale=None, dataset="copernicus", use_cache=Tru
         )
         scale = min_scale
 
-    if os.environ.get("STRM2STL_TEST_MODE", "0") == "1":
+    if os.environ.get("MAP2STL_TEST_MODE", "0") == "1":
         td = target_dim or 100
         if dataset in ("esa", "jrc"):
             return np.zeros((td, td), dtype=np.uint8)

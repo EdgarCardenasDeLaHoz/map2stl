@@ -2,17 +2,17 @@
 scripts/migrate_json_to_sqlite.py — One-time migration from JSON files to SQLite.
 
 Reads:
-  strm2stl/coordinates.json      → regions table
-  strm2stl/region_settings.json  → region_settings table
+  map2stl/coordinates.json      → regions table
+  map2stl/region_settings.json  → region_settings table
 
 Writes:
-  strm2stl/data.db               (created / updated via core.db)
+  map2stl/data.db               (created / updated via core.db)
 
 After a successful migration the originals are renamed to .json.bak.
 The script is idempotent: re-running it inserts or replaces rows without
 duplicating data, and skips backing up files that were already renamed.
 
-Usage (from the strm2stl/ directory or any location):
+Usage (from the map2stl/ directory or any location):
     python scripts/migrate_json_to_sqlite.py
     python scripts/migrate_json_to_sqlite.py --dry-run
 """
@@ -27,14 +27,14 @@ from pathlib import Path
 from app.paths import REPO_ROOT
 
 # ---------------------------------------------------------------------------
-# Resolve paths relative to this script's location (strm2stl/tools/)
+# Resolve paths relative to this script's location (map2stl/tools/)
 # ---------------------------------------------------------------------------
 
 
 try:
     from app.server.core.db import DB_PATH, get_db, init_db
 except ImportError as exc:
-    sys.exit(f"Cannot import app.server.core.db: {exc}\nRun this script from the strm2stl root or ensure the venv is active.")
+    sys.exit(f"Cannot import app.server.core.db: {exc}\nRun this script from the map2stl root or ensure the venv is active.")
 
 try:
     from app.server.config import COORDINATES_PATH, REGION_SETTINGS_PATH

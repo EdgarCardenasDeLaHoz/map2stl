@@ -1,4 +1,4 @@
-# App Improvement Plan — strm2stl UX/Performance Audit
+# App Improvement Plan — map2stl UX/Performance Audit
 
 _Last updated: 2026-04-19_
 

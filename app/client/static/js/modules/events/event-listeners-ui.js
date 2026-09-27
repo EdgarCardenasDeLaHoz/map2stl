@@ -43,11 +43,11 @@ window._setupResizablePanel = function _setupResizablePanel() {
         resizeHandle.classList.remove('dragging');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        try { localStorage.setItem('strm2stl_settingsPanelWidth', rightPanel.offsetWidth); } catch (_) { /* best-effort; failure is non-fatal */ }
+        try { localStorage.setItem('map2stl_settingsPanelWidth', rightPanel.offsetWidth); } catch (_) { /* best-effort; failure is non-fatal */ }
         window.emitStackUpdate();
     });
     try {
-        const savedW = localStorage.getItem('strm2stl_settingsPanelWidth');
+        const savedW = localStorage.getItem('map2stl_settingsPanelWidth');
         if (savedW) {
             rightPanel.style.width = parseInt(savedW) + 'px';
         } else {

@@ -1,4 +1,4 @@
-"""Playwright UI audit script — run from strm2stl/ directory."""
+"""Playwright UI audit script — run from map2stl/ directory."""
 import asyncio
 
 from playwright.async_api import async_playwright

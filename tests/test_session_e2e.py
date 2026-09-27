@@ -20,9 +20,9 @@ import os
 
 import pytest
 
-# Ensure STRM2STL_TEST_MODE is set before any app import so the DEM endpoint
+# Ensure MAP2STL_TEST_MODE is set before any app import so the DEM endpoint
 # returns deterministic synthetic data without network/Earth Engine calls.
-os.environ.setdefault("STRM2STL_TEST_MODE", "1")
+os.environ.setdefault("MAP2STL_TEST_MODE", "1")
 
 
 import app.session.terrain_session as _ts_module  # noqa: E402

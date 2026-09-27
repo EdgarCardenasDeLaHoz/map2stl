@@ -1,4 +1,4 @@
-# Known Issues & Status — strm2stl
+# Known Issues & Status — map2stl
 
 _Last updated: 2026-09-06_
 
@@ -40,7 +40,7 @@ registering the OSM channels as composite layer sources.
 - `read_array_cache` detects placeholders, logs, deletes the pair and misses, so the
   re-fetch writes a local copy. Array and OSM cache writes are now temp-file + rename, and
   the `.npz` handle is closed after reading (it blocked replacement on Windows).
-- Lasting fix is outside the code: point `STRM2STL_CACHE` outside OneDrive, or mark
+- Lasting fix is outside the code: point `MAP2STL_CACHE` outside OneDrive, or mark
   `cache/` "Always keep on this device".
 
 ### 2e. US cities got no building heights — fixed 2026-09-26
@@ -561,7 +561,7 @@ absolute path.
 
 ### ~~Saving an OpenTopography key wrote to a file nothing reads~~ ✅ (2026-08-27)
 `routers/auth.py` built its config path with one `.parent` too few, resolving to
-`app/config.json` instead of `strm2stl/config.json`. The key was applied to the
+`app/config.json` instead of `map2stl/config.json`. The key was applied to the
 running process by `_apply_opentopo_key`, so the panel reported success and
 downloads worked — until the next restart, when the key was gone again. Both the
 key route and the new tile-store route now share `tile_store.CONFIG_PATH`.

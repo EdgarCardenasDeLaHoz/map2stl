@@ -10,7 +10,7 @@ import logging
 from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
 
-# config.json lives at the strm2stl root, which is where config.py and geo2stl both
+# config.json lives at the map2stl root, which is where config.py and geo2stl both
 # look for it. This module used to derive its own path one `.parent` short, so a saved
 # key was written to app/config.json — a file nothing reads.
 from app.server.core.tile_store import CONFIG_PATH as _CONFIG_PATH

@@ -5,7 +5,7 @@ from the repo root, e.g. `python -m tools.ml.train.train_retna`.
 
 ## `setup-venv.ps1`
 
-Creates or refreshes `~/.venvs/strm2stl` (never inside OneDrive), installs the pinned
+Creates or refreshes `~/.venvs/map2stl` (never inside OneDrive), installs the pinned
 `requirements*.txt`, installs this repo and `../numpy2stl` as editable packages, and
 points git at the tracked hooks (`.githooks/`) and the nbstripout notebook filter.
 

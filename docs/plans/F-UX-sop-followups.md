@@ -195,7 +195,7 @@ that touches library code; client-only items run alongside it.
     puzzle routes; *Reset cuts* in Split / Puzzle.
 - Tests: numpy2stl `test_puzzle.py` (knob shapes watertight and tiling, explicit edges,
   mask pieces = boolean pieces and conserve volume, uncovered model detected, engraving
-  volume, plate layout), `test_decimate.py` (budget); strm2stl `tests/test_preflight.py`
+  volume, plate layout), `test_decimate.py` (budget); map2stl `tests/test_preflight.py`
   (preflight counts = build counts, edges, warnings, 400; mask vs boolean, explicit
   edges, engraving, plates; preview capped and watertight), `tests/js/puzzleCuts.test.js`.
 - Not done / follow-ups: the preview does not show the city layers (terrain only, as

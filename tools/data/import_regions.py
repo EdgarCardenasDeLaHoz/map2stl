@@ -1,5 +1,5 @@
 """
-tools/import_regions.py — Import a geographic-coordinate CSV into the strm2stl region database.
+tools/import_regions.py — Import a geographic-coordinate CSV into the map2stl region database.
 
 Expects CSV columns: name, label, north, south, east, west, rotation
 (as produced by tile_to_geo.py).
@@ -69,12 +69,12 @@ def import_geo_csv(
     dry_run: bool = False,
 ) -> list[dict]:
     """
-    Import a geographic-coordinate CSV into the strm2stl SQLite database.
+    Import a geographic-coordinate CSV into the map2stl SQLite database.
 
     Parameters
     ----------
     csv_path     : Path to CSV with columns: name, label, north, south, east, west, rotation
-    db_path      : Path to data.db (auto-detected from strm2stl layout if None)
+    db_path      : Path to data.db (auto-detected from map2stl layout if None)
     label_prefix : Label assigned to every imported region. Shown in the UI region list.
                    Use a distinct value (e.g. "coorlist") so these regions are visually
                    distinct from hand-drawn ones which have label=None or label="".
@@ -168,7 +168,7 @@ def import_geo_csv(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Import a geo CSV into the strm2stl region database")
+    parser = argparse.ArgumentParser(description="Import a geo CSV into the map2stl region database")
     parser.add_argument(
         "csv",
         nargs="?",

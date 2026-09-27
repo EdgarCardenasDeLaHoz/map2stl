@@ -205,6 +205,6 @@ EARLY_STOP_PATIENCE: int = 12       # epochs without val improvement
 IMAGENET_MEAN: tuple[float, ...] = (0.485, 0.456, 0.406)
 IMAGENET_STD: tuple[float, ...] = (0.229, 0.224, 0.225)
 
-# Model save paths (relative to strm2stl/)
+# Model save paths (relative to map2stl/)
 DEFAULT_SHAPE_MODEL: str = "models/roofnet_shape_v2.pt"
 DEFAULT_HEIGHT_MODEL: str = "models/roofnet_height_v3.pt"

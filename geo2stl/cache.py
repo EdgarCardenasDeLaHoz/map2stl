@@ -10,7 +10,7 @@ Cache key scheme
   make_cache_key(namespace, bbox, extra_params) → 32-char hex string
   MD5(namespace + ":" + "N{n:.4f}_S{s:.4f}_E{e:.4f}_W{w:.4f}" + ":" + sorted_json(extra_params))
 
-Directory layout (under strm2stl/cache/, or $STRM2STL_CACHE)
+Directory layout (under map2stl/cache/, or $MAP2STL_CACHE)
 ------------------------------------------------------------
   cache/
   ├── dem/        {key}.npz  +  {key}.json
@@ -43,14 +43,14 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# strm2stl/ root  (geo2stl/cache.py → geo2stl → strm2stl)
-_STRM2STL_DIR = Path(__file__).resolve().parents[1]
+# map2stl/ root  (geo2stl/cache.py → geo2stl → map2stl)
+_MAP2STL_DIR = Path(__file__).resolve().parents[1]
 
-# Cache location. Defaults to strm2stl/cache, but can be redirected OUTSIDE the
-# project tree via STRM2STL_CACHE — recommended so the (large, regeneratable)
-# cache isn't synced by OneDrive. e.g. setx STRM2STL_CACHE "%LOCALAPPDATA%\strm2stl\cache"
-_CACHE_ENV = os.environ.get("STRM2STL_CACHE")
-CACHE_ROOT = Path(_CACHE_ENV).expanduser() if _CACHE_ENV else _STRM2STL_DIR / "cache"
+# Cache location. Defaults to map2stl/cache, but can be redirected OUTSIDE the
+# project tree via MAP2STL_CACHE — recommended so the (large, regeneratable)
+# cache isn't synced by OneDrive. e.g. setx MAP2STL_CACHE "%LOCALAPPDATA%\map2stl\cache"
+_CACHE_ENV = os.environ.get("MAP2STL_CACHE") or os.environ.get("STRM2STL_CACHE")
+CACHE_ROOT = Path(_CACHE_ENV).expanduser() if _CACHE_ENV else _MAP2STL_DIR / "cache"
 
 # Per-namespace TTLs in seconds
 NAMESPACE_TTL = {

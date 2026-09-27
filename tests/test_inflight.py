@@ -128,7 +128,7 @@ def test_unjoined_exception_is_not_logged_as_unretrieved(caplog):
 def test_test_mode_skips_server_log_file_handler():
     from logging.handlers import RotatingFileHandler
 
-    assert os.environ.get("STRM2STL_TEST_MODE") == "1"
+    assert os.environ.get("MAP2STL_TEST_MODE") == "1"
     import app.server.server as srv
 
     assert not any(isinstance(h, RotatingFileHandler) for h in srv._log_handlers)

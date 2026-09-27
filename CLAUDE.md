@@ -1,4 +1,4 @@
-# CLAUDE.md — strm2stl
+# CLAUDE.md — map2stl
 
 > **Index file only.** Full details are in `docs/`. Read this first, then load only what you need.
 
@@ -11,12 +11,12 @@
 
 ## Quick Start
 
-Venv: `~/.venvs/strm2stl` (local, never under OneDrive). Create/refresh it with
+Venv: `~/.venvs/map2stl` (local, never under OneDrive). Create/refresh it with
 `powershell -ExecutionPolicy Bypass -File scripts\setup-venv.ps1`, which also points the
 `nbstripout` git filter at it (git refuses to stage notebooks until it does).
 
 ```bash
-cd strm2stl && source ~/.venvs/strm2stl/Scripts/activate
+cd map2stl && source ~/.venvs/map2stl/Scripts/activate
 python -m uvicorn app.server.server:app --port 9000 --reload   # starts FastAPI
 python -m pytest tests/ -v                                     # run all tests (also runs ../numpy2stl/tests; e2e/, integration and slow are opt-in)
 ```
@@ -56,7 +56,7 @@ python -m pytest tests/ -v                                     # run all tests (
 ## Project Structure (key paths)
 
 ```
-strm2stl/
+map2stl/
 │
 │  ── application ────────────────────────────────────────────────────────
 ├── app/

@@ -12,10 +12,10 @@ What this script does for each city
 
 Usage
 -----
-    # from the strm2stl/ directory:
+    # from the map2stl/ directory:
     ..\\..venv\\Scripts\\python.exe -m tools.seed_eval_regions
     # or from the repo root:
-    .venv\\Scripts\\python.exe strm2stl/tools/seed_eval_regions.py
+    .venv\\Scripts\\python.exe map2stl/tools/seed_eval_regions.py
 
 The script starts the FastAPI server automatically if it is not already running.
 Pass --no-server to skip server management (server must already be running on

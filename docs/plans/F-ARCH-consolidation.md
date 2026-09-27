@@ -3,7 +3,7 @@
 Status: planned 2026-09-26 from a read-only audit of both repos. Dependency rule:
 `app → city2stl / geo2stl → numpy2stl`; inside numpy2stl
 `registration / applications → stl2numpy / processing / raster → core / io / utils`.
-Nothing lower may import anything higher; numpy2stl never imports strm2stl; libraries
+Nothing lower may import anything higher; numpy2stl never imports map2stl; libraries
 never import `app.*`.
 
 ## Duplicated capabilities → single home
@@ -33,7 +33,7 @@ never import `app.*`.
 
 1. numpy2stl `processing/building_simplify` → `registration.align.segmentation`.
 2. numpy2stl `applications/cities` ↔ `registration` (cycle, incl. a private import).
-3. `_paths.py` assumes a sibling `strm2stl/`; cache root inside `registration/runs`.
+3. `_paths.py` assumes a sibling `map2stl/`; cache root inside `registration/runs`.
 4. Libraries importing `app.*`: skyline height providers (`_cache`, `google_3d`, `ndsm`, `wsf3d`), `skyline/region_data` (`app.server.core.db`), `geo2stl/processing` (type-only).
 5. `geo2stl/trails` → private `city2stl.fetch` function.
 6. App → privates/scripts (`reports.py` → skyline scripts; `_get_api_key`; `geodem._OPENTOPO_API_KEY`).
@@ -53,7 +53,7 @@ boolean helpers. Decisions are recorded in `memory-bank/decisions.md`.
 
 ## Decisions (user, 2026-09-26)
 
-- **numpy2stl is geo-free**: OSM and lidar fetching move to strm2stl (`city2stl`);
+- **numpy2stl is geo-free**: OSM and lidar fetching move to map2stl (`city2stl`);
   registration takes OSM rasters/polygons as inputs. One-release shims for the old
   `numpy2stl.applications.cities` API.
 - **Raster row 0 = north** (image convention) by default; mesh/registration code flips
@@ -153,7 +153,7 @@ edited values first, DEM handle otherwise) instead of the raw handle.
   gone; nothing outside it imported it. `city2stl/buildings.py` deleted (no importer; the notebook
   path that named `get_polygons` already failed on the missing `city2stl.create`).
 - 2026-09-27 — label engraving / NaN fill (app side): `app/server/core/export.py`
-  `_apply_label_engraving` has no twin left in strm2stl (the other copy was in `v2/`), so it
+  `_apply_label_engraving` has no twin left in map2stl (the other copy was in `v2/`), so it
   stays until `numpy2stl.utils.image.engrave_text` exists. `city2stl.height.infill.infill_nearest`
   (used by the app's mesh import and the session) now delegates to `numpy2stl.raster.fill_nan`
   (all-NaN still returns zeros, output still float32).
@@ -168,9 +168,9 @@ edited values first, DEM handle otherwise) instead of the raw handle.
   (same arguments as before) builds an `OSMReference` for the app's mesh import and the align
   tool. The three OSM CLIs moved to `city2stl/registration/scripts/`; the Fourier–Mellin
   prototype stays in numpy2stl and reads its reference from an .npz. numpy2stl cannot import
-  strm2stl, so `applications/cities.py` / `lidar.py` raise an ImportError naming the new home
+  map2stl, so `applications/cities.py` / `lidar.py` raise an ImportError naming the new home
   (one release) and a city name passed to numpy2stl raises a TypeError;
-  `tests/test_geo_free.py` fails on any osmnx / requests / pdal / strm2stl import. Removes
+  `tests/test_geo_free.py` fails on any osmnx / requests / pdal / map2stl import. Removes
   violation 2.
 - 2026-09-27 — step 9 (one rasteriser), the identical-behaviour part: `city2stl.rasterize`,
   `height/providers/gba.py`, `geo2stl/trails.py` (relief, areas, piste grades) and

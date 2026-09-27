@@ -102,7 +102,7 @@ Jump magnitude:            -0.0032 (IMPROVEMENT, not degradation)
 
 ### Phase 1: Quick Analysis (5 minutes)
 ```bash
-cd strm2stl
+cd map2stl
 python tools/ml/analyze_growth_degradation.py
 ```
 

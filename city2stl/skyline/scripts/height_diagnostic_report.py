@@ -8,7 +8,7 @@ main STL pipeline.
 
 Usage
 -----
-    cd strm2stl
+    cd map2stl
     python -m city2stl.skyline.scripts.height_diagnostic_report --region cartagena
     python -m city2stl.skyline.scripts.height_diagnostic_report --region boston
     python -m city2stl.skyline.scripts.height_diagnostic_report --bbox 42.4 42.3 -71.0 -71.1

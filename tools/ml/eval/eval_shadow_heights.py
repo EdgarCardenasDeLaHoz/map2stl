@@ -2,7 +2,7 @@
 Evaluate shadow-based building height estimation for multiple cities.
 
 Usage:
-  cd strm2stl
+  cd map2stl
   python -m tools.eval_shadow_heights                   # all cities, offline (synthetic)
   python -m tools.eval_shadow_heights --live             # fetch real satellite imagery
   python -m tools.eval_shadow_heights --cities Barcelona Cartagena

@@ -46,7 +46,7 @@ blurry; this plan makes it explicit.
 | F-SKY13 | core opt-in | OSM coastline + water polygon overlay on the minimap + coastline-keypoint source for F-SKY11.1 | **Replaces the unreliable HSV satellite-water detector** as the primary coastline ground truth (see feedback memory). `osm_water.py` extracts `natural=coastline` linestrings + water polygons from the existing OSM fetch, clips to a 1 km radius per seed, and samples evenly-spaced points usable as registration keypoints. Plan: [`plans/F-SKY13-osm-coastline-footprints-overlay.md`](plans/F-SKY13-osm-coastline-footprints-overlay.md). |
 | F-SKY15 | parallel renderer (added) | HTML diagnostic report — same data sources as the PDF, but a folder of static HTML pages | **Where the tables live now**. The PDF was shrunk dramatically by `pano_only_pdf: true` + dropping per-building text tables; everything that came out of the PDF is rendered into HTML by `html_report.py`. The PDF stays the canonical archival artefact; the HTML is the grep-able / diff-able / AI-readable companion. Plan: [`plans/F-SKY15-html-diagnostic-report.md`](plans/F-SKY15-html-diagnostic-report.md). |
 
-Other strm2stl features (terrain elevation, screen scoring, height
+Other map2stl features (terrain elevation, screen scoring, height
 proxy, aggregation) sit outside the F-SKY series and are unchanged by
 this plan.
 

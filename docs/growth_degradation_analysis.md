@@ -14,7 +14,7 @@ The model recovers, but this initial shock suggests the new architecture is poor
 > ⚠️ **Applicability Note (updated 2026-05-03):** This hypothesis was written before confirming the active model's architecture.  
 > **Retna_V1 uses `res_conv` blocks (`Conv2d → LeakyReLU → Conv2d → LeakyReLU`)** with **no `nn.BatchNorm2d`** at any layer.  
 > BN statistics cannot be the cause of epoch-1 jumps in the current training run.  
-> See `strm2stl/tools/ml/models.py` — search for `res_conv` to verify.  
+> See `map2stl/tools/ml/models.py` — search for `res_conv` to verify.  
 > The actual root cause for Retna_V1 growth degradation was **gradient-flow bias toward deep blocks** (see Hypothesis 3 and the mitigation doc), resolved by the lowest-score-block growth warmup strategy in `grow_prune.py`.
 
 **Why it happens (for BN-based architectures):**
@@ -129,7 +129,7 @@ def adaptive_grad_clip(model, epoch_ratio):
 ## Implementation Plan
 
 ### Option A: Batch Norm Reset (Lowest Risk)
-**File:** `strm2stl/tools/ml/train/grow_prune.py`
+**File:** `map2stl/tools/ml/train/grow_prune.py`
 **Location:** In `clone_top_channels_into_new()`, after weight copying:
 
 ```python

@@ -2,7 +2,7 @@
 
 - ``get_api_key()`` / ``set_api_key(key)`` — the key used when a caller passes
   none. It starts from ``$OPENTOPO_API_KEY``, else ``opentopo_api_key`` in the
-  strm2stl ``config.json``; the app calls ``set_api_key`` when the user saves a
+  map2stl ``config.json``; the app calls ``set_api_key`` when the user saves a
   new key, so downloads pick it up without a restart.
 - ``OPENTOPO_DATASETS`` — the global DEM types the app offers.
 - ``request_geotiff(demtype, ...)`` — one ``/API/globaldem`` GeoTIFF download.
@@ -40,12 +40,12 @@ OPENTOPO_DATASETS: dict[str, dict] = {
     "SRTM15Plus": {"label": "SRTM15+ (Bathymetry+Land)", "resolution_m": 500, "arcsec": 15},
 }
 
-# strm2stl root (geo2stl/opentopo.py -> geo2stl -> strm2stl)
-_STRM2STL_DIR = Path(__file__).resolve().parent.parent
-_CONFIG_PATH = _STRM2STL_DIR / "config.json"
+# map2stl root (geo2stl/opentopo.py -> geo2stl -> map2stl)
+_MAP2STL_DIR = Path(__file__).resolve().parent.parent
+_CONFIG_PATH = _MAP2STL_DIR / "config.json"
 
 #: Downloaded GeoTIFFs, keyed by (demtype, bbox).
-CACHE_PATH: Path = _STRM2STL_DIR / "cache" / "opentopo"
+CACHE_PATH: Path = _MAP2STL_DIR / "cache" / "opentopo"
 
 
 def _load_api_key() -> str | None:

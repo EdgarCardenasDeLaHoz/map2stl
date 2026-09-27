@@ -27,7 +27,7 @@ m/unit), which is the evidence that the plate's z is trustworthy at all.
 Usage (from the Code/ directory, with the working venv):
 
     python tools/align_tool/plate_height_truth.py --slug miami_fl_usa \\
-        --heights strm2stl/city2stl/skyline/runs/region_reports/\\
+        --heights map2stl/city2stl/skyline/runs/region_reports/\\
 miami_postfix_skyline_report/heights.json
 """
 from __future__ import annotations

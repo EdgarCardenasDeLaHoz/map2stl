@@ -159,7 +159,7 @@ The 7.55m MAE is acceptable for a geographically diverse dataset. The model gene
 ### Option 2: Retry Phase 5 (experimental)
 If you want to attempt the high-resolution training again:
 ```bash
-cd strm2stl && python scripts/train_phase_g_hires.py
+cd map2stl && python scripts/train_phase_g_hires.py
 # Runs ~12-15 hours, expects 7.0–7.3m MAE (5–10% improvement)
 # NOTE: Warmstarts from retna_pruned.pt, not retna_phase_g_global.pt
 ```

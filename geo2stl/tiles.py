@@ -22,7 +22,7 @@ def get_tile_files() -> list:
 
     config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
     if not os.path.exists(config_path):
-        config_path = os.path.join(os.getcwd(), "strm2stl", "config.json")
+        config_path = os.path.join(os.getcwd(), "map2stl", "config.json")
 
     if not os.path.exists(config_path):
         logger.warning(

@@ -1,4 +1,4 @@
-# AI Agent Onboarding — strm2stl
+# AI Agent Onboarding — map2stl
 
 _Last updated: 2026-05-14_
 
@@ -7,13 +7,13 @@ Use this document when you need a fast, correct mental model of the repository b
 ## Start Here
 
 1. Read `../CLAUDE.md` first. It is the index for the project.
-2. Treat `strm2stl/` as the main application.
-3. Treat `../numpy2stl/` as a supporting mesh-generation library and `geo2stl/`, `city2stl/` as supporting geospatial libraries inside `strm2stl/`.
+2. Treat `map2stl/` as the main application.
+3. Treat `../numpy2stl/` as a supporting mesh-generation library and `geo2stl/`, `city2stl/` as supporting geospatial libraries inside `map2stl/`.
 4. Choose the narrowest next document based on your task instead of scanning the whole repo.
 
 ## Fast Mental Model
 
-`strm2stl` is a terrain-to-3D pipeline with three main surfaces:
+`map2stl` is a terrain-to-3D pipeline with three main surfaces:
 
 - FastAPI backend in `app/server/`
 - Browser client in `app/client/`

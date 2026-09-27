@@ -10,7 +10,7 @@ $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
 $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$start`""
 $shortcut.WorkingDirectory = $root
-$shortcut.Description = 'Launch the 3D Maps (strm2stl) web app in your browser'
+$shortcut.Description = 'Launch the 3D Maps (map2stl) web app in your browser'
 $shortcut.IconLocation = (Join-Path $env:SystemRoot 'System32\imageres.dll') + ',20'   # globe
 $shortcut.Save()
 

@@ -11,7 +11,7 @@ PDF that doubles as the primary debug artefact for inspection.
 
 Flow per region
 ---------------
-1. Load region bbox from the strm2stl SQLite ``regions`` table.
+1. Load region bbox from the map2stl SQLite ``regions`` table.
 2. Fetch OSM buildings + waterways via Overpass (cached if available).
 3. Build ``BuildingRecord`` list with tagged heights, area, and DEM
    terrain elevation (open-meteo).
@@ -44,7 +44,7 @@ Key state structures
 
 Hard dependencies beyond pipeline.py: ``requests`` (Street View Static API
 + Overpass + open-meteo elevations), ``matplotlib`` (PDF rendering),
-``geo2stl.cache`` (OSM cache) and the strm2stl regions SQLite table, read
+``geo2stl.cache`` (OSM cache) and the map2stl regions SQLite table, read
 by ``region_data`` without importing ``app``.
 """
 

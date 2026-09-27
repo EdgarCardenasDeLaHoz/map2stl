@@ -1,8 +1,8 @@
-# Sphinx configuration for strm2stl Python API reference.
+# Sphinx configuration for map2stl Python API reference.
 # autodoc imports app / geo2stl / city2stl as installed packages (pip install -e).
 
 project = '3D Maps — Python API Reference'
-author = 'strm2stl'
+author = 'map2stl'
 release = '1.0.0'
 
 extensions = [

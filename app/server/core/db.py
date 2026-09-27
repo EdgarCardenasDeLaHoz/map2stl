@@ -3,7 +3,7 @@ core/db.py — SQLite database initialisation and connection helpers.
 
 Extracted from location_picker.py (backend refactor, step 10).
 Replaces the dual-JSON storage (coordinates.json + region_settings.json)
-with a single WAL-mode SQLite database at strm2stl/data.db.
+with a single WAL-mode SQLite database at map2stl/data.db.
 
 Schema
 ------

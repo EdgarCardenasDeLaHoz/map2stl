@@ -31,7 +31,7 @@ _REPORTS = (Path(__file__).resolve().parent.parent
             / "runs" / "region_reports")
 
 _BACKLINK = ('<nav class="breadcrumb" style="font-size:0.9em;margin-bottom:1em;">'
-             '&#8592; <a href="../index.html">strm2stl home</a></nav>')
+             '&#8592; <a href="../index.html">map2stl home</a></nav>')
 
 # --- parsers ------------------------------------------------------------------
 

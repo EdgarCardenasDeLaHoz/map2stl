@@ -1,4 +1,4 @@
-# SDK Workflow Map — strm2stl
+# SDK Workflow Map — map2stl
 
 _Last updated: 2026-04-24_
 

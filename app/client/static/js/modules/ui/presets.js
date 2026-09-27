@@ -67,7 +67,7 @@ let _presetSnapshot = null;
 
 function initPresetProfiles() {
     let saved = null;
-    try { saved = localStorage.getItem('strm2stl_userPresets'); } catch (_) { /* best-effort; failure is non-fatal */ }
+    try { saved = localStorage.getItem('map2stl_userPresets'); } catch (_) { /* best-effort; failure is non-fatal */ }
     if (saved) {
         try {
             const raw = JSON.parse(saved);
@@ -635,7 +635,7 @@ function saveNewPreset() {
     if (builtInPresets[name.toLowerCase()]) { window.showToast('Cannot overwrite built-in preset', 'error'); return; }
 
     _userPresets[name] = Object.assign(getCurrentSettings(), { _version: PRESET_VERSION });
-    try { localStorage.setItem('strm2stl_userPresets', JSON.stringify(_userPresets)); }
+    try { localStorage.setItem('map2stl_userPresets', JSON.stringify(_userPresets)); }
     catch (_) { window.showToast('Could not save preset — storage full or unavailable', 'warning'); }
 
     updatePresetSelect();
@@ -653,7 +653,7 @@ function deleteSelectedPreset() {
     const name = select.value.substring(5);
     if (confirm(`Delete preset "${name}"?`)) {
         delete _userPresets[name];
-        try { localStorage.setItem('strm2stl_userPresets', JSON.stringify(_userPresets)); }
+        try { localStorage.setItem('map2stl_userPresets', JSON.stringify(_userPresets)); }
         catch (_) { window.showToast('Could not save preset — storage full or unavailable', 'warning'); }
         updatePresetSelect();
         window.showToast(`Preset "${name}" deleted`, 'info');
@@ -697,13 +697,13 @@ function setupAutoSave() {
         // Default ON. It used to default OFF, which meant every setting a user
         // touched was silently discarded on reload unless they found this
         // checkbox first. Only an explicit opt-out turns it back off.
-        chk.checked = localStorage.getItem('strm2stl_autoSave') !== 'false';
+        chk.checked = localStorage.getItem('map2stl_autoSave') !== 'false';
     } catch (_) {
         chk.checked = true;
     }
 
     chk.addEventListener('change', () => {
-        try { localStorage.setItem('strm2stl_autoSave', chk.checked); } catch (_) { /* best-effort; failure is non-fatal */ }
+        try { localStorage.setItem('map2stl_autoSave', chk.checked); } catch (_) { /* best-effort; failure is non-fatal */ }
         // Turning auto-save on should flush whatever is already pending.
         if (chk.checked && _dirty) _scheduleAutoSave();
     });

@@ -544,7 +544,7 @@ def harvest_roof_crops(
     city_specs = cities or ALL_CITIES
     out_root = Path(output_dir)
     if not out_root.is_absolute():
-        # Resolve relative to strm2stl/
+        # Resolve relative to map2stl/
         out_root = REPO_ROOT / output_dir
     out_root.mkdir(parents=True, exist_ok=True)
 

@@ -5,7 +5,7 @@ Historical status reports from the building‑height model training effort
 current production model is `models/retna_pruned.pt` (see
 `../MODEL-STRATEGY.md` and `../MODELS-REFERENCE.md`).
 
-These files were moved here from the `strm2stl/` root during a cleanup; their
+These files were moved here from the `map2stl/` root during a cleanup; their
 paths are referenced from `../../CLAUDE.md`.
 
 | File | Contents |

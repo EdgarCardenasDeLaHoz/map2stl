@@ -339,9 +339,9 @@ def natural_earth_river_features(north: float, south: float, east: float, west: 
 
     gdf = _NE_MEMO.get(scale_m)
     if gdf is None:
-        from geo2stl.hydrology import _STRM2STL_ROOT
+        from geo2stl.hydrology import _MAP2STL_ROOT
         name = f"ne_{scale_m}m_rivers_lake_centerlines.zip"
-        path = Path(_STRM2STL_ROOT) / "cache" / "natural_earth" / name
+        path = Path(_MAP2STL_ROOT) / "cache" / "natural_earth" / name
         if not path.exists():
             import requests
             path.parent.mkdir(parents=True, exist_ok=True)

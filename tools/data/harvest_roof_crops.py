@@ -16,7 +16,7 @@ so ``train_roof_classifier.py`` can consume it directly.
 
 Usage
 -----
-    # from the strm2stl/ directory:
+    # from the map2stl/ directory:
     ..\\..venv\\Scripts\\python.exe -m tools.harvest_roof_crops [options]
 
 Options
@@ -189,7 +189,7 @@ def harvest_roof_crops(
     Parameters
     ----------
     output_dir : str
-        Root directory for saved crops (relative to strm2stl/ or absolute).
+        Root directory for saved crops (relative to map2stl/ or absolute).
     crop_size : int
         Pixel dimension of each square crop.
     min_pixels : int

@@ -2,8 +2,8 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "strm2stl",
-      "runtimeExecutable": "C:/Users/eac84/.venvs/strm2stl/Scripts/python.exe",
+      "name": "map2stl",
+      "runtimeExecutable": "C:/Users/eac84/.venvs/map2stl/Scripts/python.exe",
       "runtimeArgs": ["-m", "uvicorn", "app.server.server:app", "--port", "9000", "--reload"],
       "port": 9000
     }

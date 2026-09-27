@@ -1,4 +1,4 @@
-# Accessibility Color Contrast Audit — strm2stl
+# Accessibility Color Contrast Audit — map2stl
 
 _Last updated: 2026-04-19_
 

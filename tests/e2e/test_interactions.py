@@ -62,7 +62,7 @@ def test_terrain_fetch_renders_dem(strict_page, live_server_url_testmode):
     """Full terrain fetch flow: select region → Edit (Load DEM) step → Load DEM →
     `/api/terrain/dem` returns 200 → the DEM renders into a visible canvas.
 
-    Runs against a STRM2STL_TEST_MODE server, so the DEM endpoint returns a
+    Runs against a MAP2STL_TEST_MODE server, so the DEM endpoint returns a
     deterministic gradient with no Earth Engine / network calls — reliable offline.
     The strict_page gate additionally fails on any JS error during the flow.
     """

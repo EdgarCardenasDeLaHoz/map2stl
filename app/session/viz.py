@@ -1,5 +1,5 @@
 """
-viz.py — Shared visualisation utilities for strm2stl notebooks.
+viz.py — Shared visualisation utilities for map2stl notebooks.
 
 Migrated from notebooks/figure.py.
 """

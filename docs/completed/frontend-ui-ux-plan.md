@@ -2,7 +2,7 @@
 
 _Last updated: 2026-04-30 (Phase 5 complete — all items shipped)._
 
-This plan tracked impactful UI/UX improvements for the `strm2stl` frontend. All items have now shipped.
+This plan tracked impactful UI/UX improvements for the `map2stl` frontend. All items have now shipped.
 
 ---
 

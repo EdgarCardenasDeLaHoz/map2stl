@@ -41,7 +41,7 @@ _CACHE_DIR = Path(__file__).parent / "runs" / "satellite_image_cache"
 # Total-tile cap. At 256×256 px per tile the disk footprint is ~25 KB/tile
 # JPEG and ~200 KB/tile raw, so 400 tiles ≈ 10 MB cached / 80 MB in memory
 # composite. Picked to keep skyline's per-region cache and process RSS
-# at reasonable strm2stl scale. Caller can pre-narrow the bbox or raise
+# at reasonable map2stl scale. Caller can pre-narrow the bbox or raise
 # ``target_m_per_px`` to get under this cap on huge regions. The total cap
 # is what catches large bboxes — a Cartagena-scale bbox at 1 m/px would be
 # 56×53 tiles (under the per-dim cap) but 2968 total.

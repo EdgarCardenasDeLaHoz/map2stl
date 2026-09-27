@@ -123,7 +123,7 @@ async def main():
 
             # Take screenshot
             screenshot_path = Path(
-                r"c:\Users\eac84\OneDrive\Documents\Projects\3D Maps\Code\strm2stl\tests\hydrology-render-test.png")
+                r"c:\Users\eac84\OneDrive\Documents\Projects\3D Maps\Code\map2stl\tests\hydrology-render-test.png")
             screenshot_path.parent.mkdir(parents=True, exist_ok=True)
 
             print("5. Taking screenshot...")

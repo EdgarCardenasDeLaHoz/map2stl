@@ -1,7 +1,7 @@
 """city2stl.skyline.region_data - region/config/OSM data loading for skyline.
 
 Split out of region_pdf.py (F-CLEAN14, 2026-06-07). Pure data-acquisition
-helpers: region bbox from the strm2stl SQLite table, OSM fetch + BuildingRecord
+helpers: region bbox from the map2stl SQLite table, OSM fetch + BuildingRecord
 construction, the water filter, DEM terrain attach, and the sites/<region>.json
 config readers. No Street View I/O, no rendering. region_pdf re-imports these.
 
@@ -31,7 +31,7 @@ from ._core.types import BuildingRecord
 from ._core.util import _polygon_area_m2
 from .region_types import RegionBBox
 
-#: The strm2stl regions database (the app's ``core.db.DB_PATH``).
+#: The map2stl regions database (the app's ``core.db.DB_PATH``).
 REGIONS_DB = Path(__file__).resolve().parents[2] / "data.db"
 
 

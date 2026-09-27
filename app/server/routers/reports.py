@@ -42,31 +42,31 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["reports"])
 
-#: strm2stl/ — routers -> server -> app -> strm2stl
-_STRM2STL = Path(__file__).resolve().parents[3]
-_SKYLINE_RUNS = _STRM2STL / "city2stl" / "skyline" / "runs"
+#: map2stl/ — routers -> server -> app -> map2stl
+_MAP2STL = Path(__file__).resolve().parents[3]
+_SKYLINE_RUNS = _MAP2STL / "city2stl" / "skyline" / "runs"
 
 #: Only these directories are reachable through ``/reports/files``. Keys appear in URLs.
 _ROOTS: dict[str, Path] = {
     "region": _SKYLINE_RUNS / "region_reports",
-    "height": _STRM2STL / "output" / "height_reports",
+    "height": _MAP2STL / "output" / "height_reports",
     "trace": _SKYLINE_RUNS / "height_traces",
 }
 
 _REPORT_DIR_SUFFIX = "_skyline_report"
 
-#: Code/ — the workspace holding strm2stl/ and numpy2stl/; Cities/ is beside it.
-_WORKSPACE = _STRM2STL.parent
+#: Code/ — the workspace holding map2stl/ and numpy2stl/; Cities/ is beside it.
+_WORKSPACE = _MAP2STL.parent
 
 
 def _default_registration_roots() -> dict[str, Path]:
     """Registration report roots, keyed by the name used in ``/reports/files/<key>/``.
 
-    ``STRM2STL_REGISTRATION_REPORT_ROOTS`` overrides the whole set as ``key=path;key=path``
+    ``MAP2STL_REGISTRATION_REPORT_ROOTS`` overrides the whole set as ``key=path;key=path``
     (relative paths resolve against ``Code/``).  A root that does not exist is simply
     skipped by the scan.
     """
-    env = os.environ.get("STRM2STL_REGISTRATION_REPORT_ROOTS")
+    env = os.environ.get("MAP2STL_REGISTRATION_REPORT_ROOTS") or os.environ.get("STRM2STL_REGISTRATION_REPORT_ROOTS")
     if env:
         out = {}
         for part in env.split(";"):
@@ -81,7 +81,7 @@ def _default_registration_roots() -> dict[str, Path]:
         "registration_regen": _WORKSPACE / "_reports_regen",
         "micropolitan": _WORKSPACE.parent / "Cities" / "micropolitan" / "reports",
         "mesh_import": CACHE_ROOT / "mesh_imports" / "reports",  # web app auto-register
-        "align": _STRM2STL / "tools" / "align_tool" / "data",    # plate packs (meta.json)
+        "align": _MAP2STL / "tools" / "align_tool" / "data",    # plate packs (meta.json)
     }
 
 

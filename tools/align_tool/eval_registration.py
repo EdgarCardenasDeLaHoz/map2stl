@@ -35,7 +35,7 @@ the move, not the placement.
 
 Usage
 -----
-    ~/.venvs/strm2stl/Scripts/python.exe tools/align_tool/eval_registration.py
+    ~/.venvs/map2stl/Scripts/python.exe tools/align_tool/eval_registration.py
     ... --transforms my_solves.json --json out/eval.json
 """
 

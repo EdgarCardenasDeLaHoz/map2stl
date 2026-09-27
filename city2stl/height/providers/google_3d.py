@@ -21,7 +21,7 @@ see ``_ground_from_dsm``. A caller may pass a DEM instead.
 Measured against Miami's registered STL plate, this is the most accurate
 height source in the project: 14.4 m mean absolute error over 61 footprints,
 8.9 m on the buildings above 100 m that the panoramic pipeline reads as a
-third of their true height. See ``strm2stl/docs/issues.md`` section 0c.
+third of their true height. See ``map2stl/docs/issues.md`` section 0c.
 """
 
 from __future__ import annotations

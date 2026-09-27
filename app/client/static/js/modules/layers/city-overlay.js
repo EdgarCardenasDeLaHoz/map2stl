@@ -26,7 +26,7 @@
  * CityFetchProgress.vue; window.cancelCityFetch() stops it.
  */
 
-import { runCityFetch, summarizeCityFetch } from './city-fetch.js';
+import { cityPanelOsmParams, runCityFetch, summarizeCityFetch } from './city-fetch.js';
 
 const ALPHA_BUCKETS = 8;   // number of opacity bands for building height shading
 
@@ -309,8 +309,9 @@ window.loadCityData = async function loadCityData() {
             ? ['buildings', 'roads', 'waterways']
             : ['buildings', 'walls', 'towers', 'churches', 'fortifications', 'roads', 'waterways'];
 
-        const simplifyTol = parseFloat(document.getElementById('citySimplifyTolerance')?.value) || 3.0;
-        const minArea     = parseFloat(document.getElementById('cityMinArea')?.value) || 5.0;
+        const { simplify_tolerance: simplifyTol, min_area: minArea } = cityPanelOsmParams(
+            document.getElementById('citySimplifyTolerance')?.value,
+            document.getElementById('cityMinArea')?.value);
         const mPerLevel   = parseFloat(document.getElementById('cityMPerLevel')?.value) || 3.5;
 
         // Check cache using the same key params as the actual data endpoint
@@ -394,6 +395,8 @@ window.loadCityData = async function loadCityData() {
         }
         window.appState.set('osmCityData', data);
         window.appState.osmCityDetail = detail;
+        // The City Model build reads the OSM cache with these (export-handlers.js).
+        window.appState.osmCityParams = { simplify_tolerance: simplifyTol, min_area: minArea, detail };
         window.syncCityBuildingsTable?.();
         window.appState.selectedCityBuildingIndex = null;
         window._invalidateCityCache();   // new data → force full re-render

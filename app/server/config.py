@@ -20,23 +20,23 @@ _log = logging.getLogger(__name__)
 # Test mode
 # ---------------------------------------------------------------------------
 
-TEST_MODE: bool = os.environ.get("STRM2STL_TEST_MODE", "0") == "1"
+TEST_MODE: bool = os.environ.get("MAP2STL_TEST_MODE", "0") == "1"
 
 # ---------------------------------------------------------------------------
 # Filesystem paths
 # ---------------------------------------------------------------------------
 
-_STRM2STL_DIR = Path(__file__).parent.parent.parent         # strm2stl/
-_PROJECT_ROOT = _STRM2STL_DIR.parent                        # Code/
+_MAP2STL_DIR = Path(__file__).parent.parent.parent         # map2stl/
+_PROJECT_ROOT = _MAP2STL_DIR.parent                        # Code/
 
-COORDINATES_PATH = _STRM2STL_DIR / "coordinates.json"
-REGION_SETTINGS_PATH = _STRM2STL_DIR / "region_settings.json"
+COORDINATES_PATH = _MAP2STL_DIR / "coordinates.json"
+REGION_SETTINGS_PATH = _MAP2STL_DIR / "region_settings.json"
 
 # Legacy OSM cache (plain JSON — migrated to CACHE_ROOT/osm/ on startup)
-OSM_CACHE_PATH = _STRM2STL_DIR / "osm_raw_cache"
+OSM_CACHE_PATH = _MAP2STL_DIR / "osm_raw_cache"
 
 # OpenTopography GeoTIFF tile cache (under unified cache/ tree)
-OPENTOPO_CACHE_PATH = _STRM2STL_DIR / "cache" / "opentopo"
+OPENTOPO_CACHE_PATH = _MAP2STL_DIR / "cache" / "opentopo"
 
 # Earth Engine / legacy ee-joblib cache
 EE_CACHE_DIR = _PROJECT_ROOT / "cache" / "ee"
@@ -51,8 +51,10 @@ EE_CACHE_DIR = _PROJECT_ROOT / "cache" / "ee"
 #   3D Maps/
 #   ├── Code/                       <- _PROJECT_ROOT
 #   └── Cities/micropolitan/_extracted/
-_MICROPOLITAN_ENV = os.environ.get("STRM2STL_MICROPOLITAN_DIR",
-                                   "../Cities/micropolitan/_extracted")
+# The pre-rename variable (STRM2STL_*) is still honoured.
+_MICROPOLITAN_ENV = (os.environ.get("MAP2STL_MICROPOLITAN_DIR")
+                     or os.environ.get("STRM2STL_MICROPOLITAN_DIR")
+                     or "../Cities/micropolitan/_extracted")
 MICROPOLITAN_STL_DIR: Path = (_PROJECT_ROOT / _MICROPOLITAN_ENV).resolve()
 
 # ---------------------------------------------------------------------------

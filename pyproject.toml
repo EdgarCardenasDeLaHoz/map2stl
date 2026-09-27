@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # city2stl importable from any working directory — no sys.path edits.
 # numpy2stl is the sibling repo, installed editable by scripts/setup-venv.ps1.
 [project]
-name = "strm2stl"
+name = "map2stl"
 version = "0.1.0"
 description = "Terrain, water and city data to printable 3D models: FastAPI app, geo2stl, city2stl"
 readme = "readme.md"

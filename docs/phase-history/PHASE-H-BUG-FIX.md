@@ -43,7 +43,7 @@ Confirmed: heights are in **actual meters**, not normalized values.
 
 ### Changes Made
 
-**File**: `strm2stl/scripts/train_phase_h.py`
+**File**: `map2stl/scripts/train_phase_h.py`
 
 **Change 1 (line 193)**:
 ```python

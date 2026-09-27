@@ -17,7 +17,7 @@ _Last updated: 2026-04-09_
 ## Current File Layout
 
 ```
-strm2stl/
+map2stl/
 ├── templates/
 │   └── index.html              ← ~1 448 lines: HTML shell + module imports
 ├── static/

@@ -17,7 +17,7 @@ the fetched raster entirely and no amount of dragging will find it. /api/refetch
 lets the tool ask for the window the user actually wants.
 
 Run with the working venv:
-    ~/.venvs/strm2stl/Scripts/python.exe tools/align_tool/server.py [--port 8766]
+    ~/.venvs/map2stl/Scripts/python.exe tools/align_tool/server.py [--port 8766]
 Then open http://localhost:8766/drag_align.html
 """
 from __future__ import annotations

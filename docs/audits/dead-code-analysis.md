@@ -164,9 +164,9 @@ Two routers independently inject the project root into `sys.path`:
 
 ```python
 # terrain.py line 60  AND  composite.py line 46
-_STRM2STL_DIR = str(Path(__file__).parent.parent.parent.parent)
-if _STRM2STL_DIR not in sys.path:
-    sys.path.insert(0, _STRM2STL_DIR)
+_MAP2STL_DIR = str(Path(__file__).parent.parent.parent.parent)
+if _MAP2STL_DIR not in sys.path:
+    sys.path.insert(0, _MAP2STL_DIR)
 ```
 
 This is already handled at startup in `server.py`. The router-level copies are defensive but redundant.  

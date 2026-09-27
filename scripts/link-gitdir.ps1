@@ -14,10 +14,10 @@
 # that PC's own database from the remote and leaves the working files alone.
 
 param(
-    [string]$Name = "strm2stl",
+    [string]$Name = "map2stl",
     # Set this default in the project's copy: on a second PC there is no local
     # database yet to read origin from.
-    [string]$Remote = "https://github.com/EdgarCardenasDeLaHoz/strm2stl.git"
+    [string]$Remote = "https://github.com/EdgarCardenasDeLaHoz/map2stl.git"
 )
 
 $ErrorActionPreference = "Stop"

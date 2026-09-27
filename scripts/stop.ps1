@@ -1,4 +1,4 @@
-# Stop the strm2stl web app (uvicorn and its --reload workers).
+# Stop the map2stl web app (uvicorn and its --reload workers).
 # Matches on command line rather than netstat PIDs, which can be stale.
 
 Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |

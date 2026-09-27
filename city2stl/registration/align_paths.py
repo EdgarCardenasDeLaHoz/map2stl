@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-#: strm2stl/ — registration -> city2stl -> strm2stl
+#: map2stl/ — registration -> city2stl -> map2stl
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALIGN_TOOL = REPO_ROOT / "tools" / "align_tool"
 MAPS_ROOT = Path(os.environ.get("MAPS_ROOT") or REPO_ROOT.parents[1])

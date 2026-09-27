@@ -1,5 +1,5 @@
 """
-schemas.py — All Pydantic request/response models for the strm2stl API.
+schemas.py — All Pydantic request/response models for the map2stl API.
 
 Extracted from location_picker.py (backend refactor, step 2).
 Import from here; location_picker.py re-exports everything for backward compat.

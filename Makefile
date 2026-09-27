@@ -1,8 +1,8 @@
-# strm2stl — common dev commands
-# Run from strm2stl/ (the directory containing this Makefile)
+# map2stl — common dev commands
+# Run from map2stl/ (the directory containing this Makefile)
 
 # The venv lives outside OneDrive; scripts/setup-venv.ps1 creates it.
-VENV := $(USERPROFILE)/.venvs/strm2stl
+VENV := $(USERPROFILE)/.venvs/map2stl
 PYTHON := $(VENV)/Scripts/python
 PYTEST := $(PYTHON) -m pytest
 RUFF := $(VENV)/Scripts/ruff

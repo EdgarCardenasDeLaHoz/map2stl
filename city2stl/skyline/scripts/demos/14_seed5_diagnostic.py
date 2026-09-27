@@ -2,7 +2,7 @@
 """Diagnostic PDF for cartagena seed_5 — visualises every pipeline step
 to expose exactly where the "10 bounding boxes" pano limit originates.
 
-Usage (from the strm2stl/ directory)::
+Usage (from the map2stl/ directory)::
 
     python city2stl/skyline/scripts/demos/14_seed5_diagnostic.py \
         [--region cartagena] [--seed seed_5] [--out <path>]
@@ -30,7 +30,7 @@ import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Rectangle
 
-ROOT = Path(__file__).resolve().parents[4]  # …/strm2stl/
+ROOT = Path(__file__).resolve().parents[4]  # …/map2stl/
 
 # ---------------------------------------------------------------------------
 # Pipeline imports (must come after path bootstrap)

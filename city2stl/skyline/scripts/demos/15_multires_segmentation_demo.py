@@ -13,7 +13,7 @@ Pipeline:
   7. Re-project the fine masks back into pano coordinates and write all
      artifacts to ``runs/multires/<region>_<seed>/``.
 
-Usage (from the strm2stl/ directory):
+Usage (from the map2stl/ directory):
 
     python city2stl/skyline/scripts/demos/15_multires_segmentation_demo.py \
         --region Cartagena --seed seed_1

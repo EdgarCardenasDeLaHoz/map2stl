@@ -1,7 +1,7 @@
 """
 Tests for /api/terrain/* endpoints (terrain.py).
 
-All tests run with STRM2STL_TEST_MODE=1 (set in conftest) so the DEM
+All tests run with MAP2STL_TEST_MODE=1 (set in conftest) so the DEM
 endpoint returns a fast deterministic gradient with no network calls.
 """
 

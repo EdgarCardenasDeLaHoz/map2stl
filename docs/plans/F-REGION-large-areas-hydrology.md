@@ -96,7 +96,7 @@ pipelines … are we able to follow those steps using the UI tool").
   - **Reports**: `GET /api/reports/registration` scans `Code/_reports/`, `_reports_regen/`,
     `Cities/micropolitan/reports/`, the app's `cache/mesh_imports/reports/` and summarises every
     `tools/align_tool/data/<slug>/meta.json` (roots overridable with
-    `STRM2STL_REGISTRATION_REPORT_ROOTS`; read-only; same traversal guard). New Registration tab.
+    `MAP2STL_REGISTRATION_REPORT_ROOTS`; read-only; same traversal guard). New Registration tab.
   - **Auto-register**: writes the numpy2stl HTML report to `cache/mesh_imports/reports/<city>_<hash>/`
     (per import source, overwritten on re-run; `write_report: false` for the old fast path) and
     returns `report_url` + `scores` (RMSE, MAE, bias, Pearson r, coverage, footprint IoU, match

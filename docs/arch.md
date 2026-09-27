@@ -1,4 +1,4 @@
-# Architecture — strm2stl
+# Architecture — map2stl
 
 _Last updated: 2026-05-17_
 

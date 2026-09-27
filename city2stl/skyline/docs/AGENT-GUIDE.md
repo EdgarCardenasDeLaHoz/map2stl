@@ -11,11 +11,11 @@ modules; earlier: cross-view smoothing, auto-seed replacement, SegFormer-b1).
 ## How to run
 
 ```powershell
-# From the strm2stl directory:
-cd "d:/OneDrive/Documents/Projects/3D Maps/Code/strm2stl"
+# From the map2stl directory:
+cd "d:/OneDrive/Documents/Projects/3D Maps/Code/map2stl"
 
 # Cartagena (canonical test region):
-SKYLINE_CV_SEGFORMER_SIZE=b1 ~/.venvs/strm2stl/Scripts/python.exe \
+SKYLINE_CV_SEGFORMER_SIZE=b1 ~/.venvs/map2stl/Scripts/python.exe \
   -m city2stl.skyline.scripts.08_region_skyline_pdf --region Cartagena
 
 # Outputs (HTML report, PDF, PNGs, JSON aggregates):
@@ -313,13 +313,13 @@ statements need the discipline.
 
 ## Tests
 
-CV-math unit tests live in `strm2stl/tests/test_skyline*.py` (7 files,
+CV-math unit tests live in `map2stl/tests/test_skyline*.py` (7 files,
 130 tests; **129 pass, 1 skip** as of 2026-06-07). They cover the
 deterministic geometry / scoring functions; orchestration is exercised
 by full-run smoke tests rather than unit tests.
 
 ```powershell
-& "$HOME\.venvs\strm2stl\Scripts\python.exe" -m pytest tests/test_skyline*.py -v
+& "$HOME\.venvs\map2stl\Scripts\python.exe" -m pytest tests/test_skyline*.py -v
 ```
 
 ## File map

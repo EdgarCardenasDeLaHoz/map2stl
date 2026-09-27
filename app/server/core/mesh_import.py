@@ -287,7 +287,7 @@ def _library_root() -> Path:
     if not MICROPOLITAN_STL_DIR.is_dir():
         raise MeshImportError(
             f"Mesh library directory not found: {MICROPOLITAN_STL_DIR} "
-            "(set STRM2STL_MICROPOLITAN_DIR to override).")
+            "(set MAP2STL_MICROPOLITAN_DIR to override).")
     return MICROPOLITAN_STL_DIR
 
 

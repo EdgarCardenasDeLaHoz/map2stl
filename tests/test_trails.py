@@ -2,7 +2,7 @@
 Tests for the trails layer: rasterizer, service dispatch, and the
 /api/terrain/trails endpoint.
 
-Endpoint tests run with STRM2STL_TEST_MODE=1 (set in conftest), so they return
+Endpoint tests run with MAP2STL_TEST_MODE=1 (set in conftest), so they return
 a deterministic two-line grid without touching Overpass or the Forest Service.
 Provider tests stub the network fetch instead of calling it.
 """

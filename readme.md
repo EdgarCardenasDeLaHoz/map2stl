@@ -1,8 +1,8 @@
-# strm2stl — 3D Map Generator
+# map2stl — 3D Map Generator
 
 Turn geographic and elevation data (SRTM/DEM terrain, GEBCO bathymetry,
 OpenStreetMap buildings/roads) into 3D-printable models (STL / OBJ / 3MF).
-strm2stl is a **FastAPI web app** with an interactive map UI, plus a **Python
+map2stl is a **FastAPI web app** with an interactive map UI, plus a **Python
 SDK** for driving the same pipeline from notebooks or scripts.
 
 > **New here?** Read [`CLAUDE.md`](CLAUDE.md) first — it's the project index —
@@ -22,11 +22,11 @@ SDK** for driving the same pipeline from notebooks or scripts.
 ## Install
 
 Requires **Python 3.11+**. The venv lives *outside* OneDrive at
-`~\.venvs\strm2stl` (OneDrive sync locks binary packages, and a synced venv breaks
+`~\.venvs\map2stl` (OneDrive sync locks binary packages, and a synced venv breaks
 on the other PC — never put the venv inside the synced tree).
 
 ```powershell
-# From this directory (strm2stl/). Run once per PC; safe to re-run.
+# From this directory (map2stl/). Run once per PC; safe to re-run.
 powershell -ExecutionPolicy Bypass -File scripts\setup-venv.ps1
 ```
 
@@ -40,7 +40,7 @@ is expected on the path alongside this repo — see [`../numpy2stl/README.md`](.
 ## Run the web app
 
 ```powershell
-& "$HOME\.venvs\strm2stl\Scripts\python.exe" -m uvicorn app.server.server:app --host 127.0.0.1 --port 9000 --reload
+& "$HOME\.venvs\map2stl\Scripts\python.exe" -m uvicorn app.server.server:app --host 127.0.0.1 --port 9000 --reload
 ```
 
 Then open <http://127.0.0.1:9000>. Equivalent shortcuts:
@@ -86,7 +86,7 @@ See [`docs/sdk-workflow.md`](docs/sdk-workflow.md) for notebook → SDK → rout
 ## Tests
 
 ```powershell
-& "$HOME\.venvs\strm2stl\Scripts\python.exe" -m pytest tests/ -v   # or: make test
+& "$HOME\.venvs\map2stl\Scripts\python.exe" -m pytest tests/ -v   # or: make test
 ```
 
 `pytest.ini` collects `tests/` and `../numpy2stl/tests`. The `tests/e2e/`
@@ -105,7 +105,7 @@ file for the full pinned list.
 ## Project structure
 
 ```
-strm2stl/
+map2stl/
 ├── app/
 │   ├── server/        # FastAPI backend — routers/ + core/ + schemas.py
 │   ├── client/        # Browser UI — static/js modules, templates/index.html

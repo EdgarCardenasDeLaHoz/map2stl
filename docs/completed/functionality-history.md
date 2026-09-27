@@ -201,16 +201,16 @@ For a shorter overview, see [`../archive/web_app_analysis.md`](../archive/web_ap
 | IMP1 | API key moved from `config.json` to `OPENTOPO_API_KEY` env var; `config.json` added to `.gitignore` |
 | IMP2 | Test suite rewritten: `httpx.AsyncClient` + `ASGITransport(app=app)` pattern for all API tests |
 | IMP3 | PERF5 viewport culling (see above) |
-| IMP6 | Stale `.gitmodules` in strm2stl repo removed |
+| IMP6 | Stale `.gitmodules` in map2stl repo removed |
 | IMP7 | `Code/cache/` stray duplicate directory deleted |
 | IMP8 | Duplicate `get_open_edges_old` functions in `numpy2stl/solid.py` deleted |
 | IMP9 | `location_picker.py` now emits `DeprecationWarning` at import time |
-| IMP10 | `Code/requirements.txt` deleted (duplicate); `strm2stl/requirements.txt` rewritten as clean UTF-8 |
+| IMP10 | `Code/requirements.txt` deleted (duplicate); `map2stl/requirements.txt` rewritten as clean UTF-8 |
 
 ### New Features
 | ID | Feature |
 |----|---------|
-| P11 | Region thumbnail previews: DEM canvas captured as 48×30 JPEG after load, stored in `regionThumbnails` (localStorage key `strm2stl_thumbs`), shown as `<img class="coordinate-item-thumb">` in sidebar list |
+| P11 | Region thumbnail previews: DEM canvas captured as 48×30 JPEG after load, stored in `regionThumbnails` (localStorage key `map2stl_thumbs`), shown as `<img class="coordinate-item-thumb">` in sidebar list |
 | OSM edge polygon fix | Coordinate clamping removed from `geoToPx` — canvas `clip()` handles bounds |
 | Projection-aware city overlay | `_buildGeoToPx()` reads `paramProjection`, applies mercator/cosine/lambert/sinusoidal |
 | Merge panel auto-populate | `_syncMergeFromCurrentLayers()` pre-populates merge panel from current DEM/water/sat layers |

@@ -21,7 +21,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# app/server/core/tile_store.py -> app/server/core -> app/server -> app -> strm2stl
+# app/server/core/tile_store.py -> app/server/core -> app/server -> app -> map2stl
 CONFIG_PATH = Path(__file__).resolve().parents[3] / "config.json"
 
 

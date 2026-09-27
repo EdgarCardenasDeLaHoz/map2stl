@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parent.parent          # strm2stl/
+_ROOT = Path(__file__).resolve().parent.parent          # map2stl/
 _APP = _ROOT / "app"
 _PY_APP = _APP / "server"
 # session/ is excluded — its print() output goes to Jupyter notebooks which

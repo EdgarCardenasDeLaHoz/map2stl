@@ -1,6 +1,6 @@
 """Microsoft Global ML Building Footprints fetcher + OSM merger (F-SKY8).
 
-The strm2stl pipeline relies on OSM building polygons as the structural
+The map2stl pipeline relies on OSM building polygons as the structural
 anchor for the skyline-CV matcher. In sparse-OSM regions (Cartagena's
 Bocagrande waterfront is the canonical example) entire rows of visible
 towers have no OSM polygon — the matcher sees them in the SegFormer

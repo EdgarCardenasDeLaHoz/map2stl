@@ -15,7 +15,7 @@
 
 param(
     [string]$Python = "python",
-    [string]$Name = "strm2stl",
+    [string]$Name = "map2stl",
     [string]$Venv = ""
 )
 

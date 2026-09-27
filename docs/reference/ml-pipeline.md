@@ -25,7 +25,7 @@ Definition lives in `tools/example/networks.py`.
 ## Directory layout
 
 ```
-strm2stl/
+map2stl/
 ├── tools/
 │   ├── example/
 │   │   └── networks.py           # Retna_V1 definition (active model)

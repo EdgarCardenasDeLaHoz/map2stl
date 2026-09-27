@@ -218,7 +218,7 @@ If Phase F identifies gaps:
 
 ### Step 1: Start Phase F
 ```bash
-cd strm2stl
+cd map2stl
 python scripts/train_phase_f_prune_first.py
 ```
 

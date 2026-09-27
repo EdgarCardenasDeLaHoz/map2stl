@@ -45,7 +45,7 @@ MAX_TILES_PER_DIM = 64
 MAX_LAT = 85.05
 #: Equatorial circumference (m); ground size of zoom 0.
 EARTH_CIRCUMFERENCE_M = 40_075_016.686
-USER_AGENT = "strm2stl/1.0"
+USER_AGENT = "map2stl/1.0"
 
 
 # ---------------------------------------------------------------------------

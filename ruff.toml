@@ -1,4 +1,4 @@
-# ruff configuration for strm2stl
+# ruff configuration for map2stl
 # Run: ruff check .      Fix: ruff check --fix .
 
 line-length = 100

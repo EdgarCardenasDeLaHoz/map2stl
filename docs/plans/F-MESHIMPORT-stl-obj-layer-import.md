@@ -122,9 +122,9 @@ faces): FastAPI `TestClient` integration test, a full manual Playwright
 browser run (screenshot: registration modal opens with DEM and mesh
 heightmap panels showing visually matching block/street patterns), and an
 opt-in e2e test (`tests/e2e/test_mesh_import.py::test_auto_register_geocodes_and_opens_prefilled_picker`,
-gated behind `STRM2STL_RUN_SLOW_NETWORK_TESTS=1` — real network + ~90-200s+
+gated behind `MAP2STL_RUN_SLOW_NETWORK_TESTS=1` — real network + ~90-200s+
 even with a warm cache, since `live_server_url` intentionally gives each
-test session a fresh, isolated `STRM2STL_CACHE` dir per `conftest.py`'s own
+test session a fresh, isolated `MAP2STL_CACHE` dir per `conftest.py`'s own
 docstring, so real mesh imports always pay a cold ray-cast in e2e).
 
 **Known follow-up, not fixed in this pass**: `auto_register()` and the
@@ -149,7 +149,7 @@ side-by-side control-point picker to establish ground truth.
 - **Mid-turn scope addition**: user asked for a mesh *library* (browse
   pre-existing STL sets, e.g. a commercial "micropolitan" city pack, with no
   embedded georeference) in addition to ad-hoc upload. Added
-  `config.MICROPOLITAN_STL_DIR` (env `STRM2STL_MICROPOLITAN_DIR`, default
+  `config.MICROPOLITAN_STL_DIR` (env `MAP2STL_MICROPOLITAN_DIR`, default
   `../Cities/micropolitan/_extracted`, relative to `Code/`), per-city
   location sidecars (`<file>.location.json`, shared bbox across
   Solid/Water/print-bed-tile siblings in the same folder), and a disk-cached
@@ -174,7 +174,7 @@ side-by-side control-point picker to establish ground truth.
   scales with pixel count and is not fast even for simple meshes: ~13s for
   a 583K-pixel grid against a 12-face test box).
 - **sys.path ordering gotcha**: `numpy2stl` (needed for the registration
-  warp) lives in `Code/`, a sibling of `strm2stl/`, not inside it.
+  warp) lives in `Code/`, a sibling of `map2stl/`, not inside it.
   `server.py`'s sys.path bootstrap runs *after* router imports at module
   load time, so a module-level `numpy2stl` import in `core/mesh_import.py`
   failed silently (caught by the `_AVAILABLE` guard) until routed through

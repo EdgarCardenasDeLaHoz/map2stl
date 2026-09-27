@@ -35,11 +35,11 @@ from app.server.routers.terrain import router as _terrain_router
 
 # Configure logging to write to a file — use an absolute path so the log
 # file never lands inside a directory watched by uvicorn's auto-reloader.
-# Under STRM2STL_TEST_MODE (set by tests/conftest.py) skip the file handler so
+# Under MAP2STL_TEST_MODE (set by tests/conftest.py) skip the file handler so
 # importing the app in tests neither writes server.log nor holds it open.
 log_file = str(Path(__file__).parent.parent.parent / "server.log")
 _log_handlers: list[logging.Handler] = [logging.StreamHandler()]  # console
-if os.environ.get("STRM2STL_TEST_MODE", "0") != "1":
+if os.environ.get("MAP2STL_TEST_MODE", "0") != "1":
     _log_handlers.append(RotatingFileHandler(
         log_file, maxBytes=5*1024*1024, backupCount=3))  # file with rotation
 logging.basicConfig(
@@ -80,7 +80,7 @@ async def _lifespan(app):
 _API_DESCRIPTION = """\
 # 3D Maps — Terrain-to-3D Pipeline API
 
-**strm2stl** is a terrain-to-3D pipeline with three main surfaces:
+**map2stl** is a terrain-to-3D pipeline with three main surfaces:
 
 - **FastAPI backend** (`app/server/`) — this API
 - **Browser client** (`app/client/`) — interactive web UI
@@ -199,7 +199,7 @@ _OPENAPI_TAGS = [
 
 # FastAPI initialization
 app = FastAPI(
-    title="3D Maps — strm2stl API",
+    title="3D Maps — map2stl API",
     version="1.0.0",
     description=_API_DESCRIPTION,
     openapi_tags=_OPENAPI_TAGS,
@@ -227,10 +227,10 @@ templates = Jinja2Templates(directory=templates_path)
 # ---------------------------------------------------------------------------
 # Mount built documentation sites (MkDocs + Sphinx) if they exist
 # ---------------------------------------------------------------------------
-_strm2stl_root = os.path.join(os.path.dirname(
+_map2stl_root = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "..", "..")
-_docs_site_path = os.path.join(_strm2stl_root, "docs_site")
-_sphinx_site_path = os.path.join(_strm2stl_root, "sphinx_site")
+_docs_site_path = os.path.join(_map2stl_root, "docs_site")
+_sphinx_site_path = os.path.join(_map2stl_root, "sphinx_site")
 
 if os.path.isdir(_docs_site_path):
     app.mount("/project-docs", StaticFiles(directory=_docs_site_path,
@@ -238,7 +238,7 @@ if os.path.isdir(_docs_site_path):
     logger.info(f"Mounted /project-docs -> {_docs_site_path}")
 else:
     logger.info(
-        "MkDocs site not built yet -- run 'mkdocs build' in strm2stl/ to enable /project-docs")
+        "MkDocs site not built yet -- run 'mkdocs build' in map2stl/ to enable /project-docs")
 
 if os.path.isdir(_sphinx_site_path):
     app.mount("/api-reference", StaticFiles(directory=_sphinx_site_path,
@@ -246,7 +246,7 @@ if os.path.isdir(_sphinx_site_path):
     logger.info(f"Mounted /api-reference -> {_sphinx_site_path}")
 else:
     logger.info(
-        "Sphinx site not built yet -- run 'sphinx-build sphinx/ sphinx_site/' in strm2stl/ to enable /api-reference")
+        "Sphinx site not built yet -- run 'sphinx-build sphinx/ sphinx_site/' in map2stl/ to enable /api-reference")
 
 # Mount static files (JS/CSS)
 # Serve via a custom route so we can add no-cache headers for .js/.css
@@ -265,7 +265,7 @@ dist_path = os.path.join(os.path.dirname(
 if not os.path.isfile(os.path.join(dist_path, "js", "vue-main.js")):
     logger.error(
         "Vue bundle missing (%s). The UI will render blank. "
-        "Run 'npm install && npm run build' in strm2stl/ to build it.",
+        "Run 'npm install && npm run build' in map2stl/ to build it.",
         os.path.normpath(os.path.join(dist_path, "js", "vue-main.js")),
     )
 

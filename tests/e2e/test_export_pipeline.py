@@ -1,6 +1,6 @@
 """Export pipeline e2e tests — DEM load through Extrude preview to STL download.
 
-Runs against STRM2STL_TEST_MODE (deterministic gradient DEM, no network) so it
+Runs against MAP2STL_TEST_MODE (deterministic gradient DEM, no network) so it
 is reliable offline/in CI. Guards against the class of bug found 2026-07-19:
 the settings-only export/preview path silently failing with "Missing DEM data"
 because its disk-cache key didn't match the DEM write key (fixed in

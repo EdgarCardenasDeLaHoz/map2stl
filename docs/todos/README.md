@@ -1,4 +1,4 @@
-# Todos — strm2stl
+# Todos — map2stl
 
 _Last updated: 2026-05-02_
 

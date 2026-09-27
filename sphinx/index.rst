@@ -1,7 +1,7 @@
 3D Maps — Python API Reference
 ================================
 
-Auto-generated documentation for the strm2stl Python backend.
+Auto-generated documentation for the map2stl Python backend.
 
 .. toctree::
    :maxdepth: 2

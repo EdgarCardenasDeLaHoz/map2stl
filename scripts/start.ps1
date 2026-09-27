@@ -1,4 +1,4 @@
-# Start the strm2stl web app on http://127.0.0.1:9000 and open it in the browser.
+# Start the map2stl web app on http://127.0.0.1:9000 and open it in the browser.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\start.ps1            # desktop use
 #   powershell -ExecutionPolicy Bypass -File scripts\start.ps1 -Dev       # --reload, no browser
@@ -13,7 +13,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$python = Join-Path $HOME '.venvs\strm2stl\Scripts\python.exe'
+$python = Join-Path $HOME '.venvs\map2stl\Scripts\python.exe'
 $url = "http://127.0.0.1:$Port"
 
 if (-not (Test-Path $python)) {

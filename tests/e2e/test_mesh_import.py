@@ -223,14 +223,14 @@ def test_mesh_layer_toggle_in_layer_view(strict_page, live_server_url_testmode, 
 # Real network (Nominatim geocoding + OSM Overpass building fetch), 30-90s
 # even with a warm cache, hundreds of seconds cold. Opt-in only — not run
 # as part of the default `pytest tests/e2e/` invocation. Run explicitly:
-#   STRM2STL_RUN_SLOW_NETWORK_TESTS=1 pytest tests/e2e/test_mesh_import.py -k auto -v
+#   MAP2STL_RUN_SLOW_NETWORK_TESTS=1 pytest tests/e2e/test_mesh_import.py -k auto -v
 #
 # Requires a real "Miami, FL"-named file in the configured mesh library dir
 # (config.MICROPOLITAN_STL_DIR) — skips cleanly if that's not present, since
 # CI/most dev machines won't have the (non-repo, licensed) micropolitan STL
 # set checked out.
 
-_RUN_SLOW = os.environ.get("STRM2STL_RUN_SLOW_NETWORK_TESTS") == "1"
+_RUN_SLOW = os.environ.get("MAP2STL_RUN_SLOW_NETWORK_TESTS") == "1"
 
 
 def _miami_library_rel_path() -> str | None:
@@ -247,7 +247,7 @@ def _miami_library_rel_path() -> str | None:
     return None
 
 
-@pytest.mark.skipif(not _RUN_SLOW, reason="slow (30-90s+) + requires real network access; opt in via STRM2STL_RUN_SLOW_NETWORK_TESTS=1")
+@pytest.mark.skipif(not _RUN_SLOW, reason="slow (30-90s+) + requires real network access; opt in via MAP2STL_RUN_SLOW_NETWORK_TESTS=1")
 def test_auto_register_geocodes_and_opens_prefilled_picker(strict_page, live_server_url):
     """Full auto-mode flow against a real library file: click Auto, wait for
     geocode + OSM registration, and confirm the manual picker opens
@@ -293,7 +293,7 @@ def test_auto_register_geocodes_and_opens_prefilled_picker(strict_page, live_ser
     # (loadDEM() here hits a real DEM source, not the instant test-mode
     # gradient, so this can take a while on top of the auto-register call).
     # A cold cache (live_server_url gives each session its own fresh
-    # STRM2STL_CACHE dir — see conftest.py) means both the auto-register
+    # MAP2STL_CACHE dir — see conftest.py) means both the auto-register
     # call's internal STL->heightmap conversion AND this component's own
     # separate /heightmap call each pay a full ray-cast against the real
     # ~940K-face Miami mesh (~35s each measured standalone), on top of the

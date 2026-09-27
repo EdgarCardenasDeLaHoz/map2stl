@@ -279,7 +279,7 @@ class TestRegistrationInventory:
         assert "secret" not in res.text
 
     def test_env_override_parses_roots(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("STRM2STL_REGISTRATION_REPORT_ROOTS",
+        monkeypatch.setenv("MAP2STL_REGISTRATION_REPORT_ROOTS",
                            f"a={tmp_path};b=relative/dir")
         roots = reports_router._default_registration_roots()
         assert roots["a"] == tmp_path

@@ -1,6 +1,6 @@
 """Geographic constants and bbox / pixel-grid helpers.
 
-The one home for metres-per-degree in strm2stl. Values are WGS84 on the
+The one home for metres-per-degree in map2stl. Values are WGS84 on the
 spherical-cos approximation used throughout the project:
 
 * ``M_PER_DEG_LAT = 110 574 m`` (one degree of latitude, taken as constant);

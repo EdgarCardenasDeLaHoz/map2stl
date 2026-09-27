@@ -1,4 +1,4 @@
-# Function Index — strm2stl Frontend
+# Function Index — map2stl Frontend
 
 _Last updated: 2026-04-19_
 

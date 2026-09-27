@@ -5,7 +5,7 @@ full package split is now done: `pipeline.py` (4256→73-line façade) → `_cor
 {types, util, segmentation, projection, skyline, pano, registration, height};
 `pano_registration.py` (3075→façade) → `_pano/`; `report_plots.py` + `region_render.py`
 → `_report_plots/` + `_region_render/`. Verbatim AST-slice; all public import paths
-preserved via `import *` façades with `__all__`. Behaviour-neutral: 773 strm2stl tests
+preserved via `import *` façades with `__all__`. Behaviour-neutral: 773 map2stl tests
 + 10 Playwright e2e green. A post-split ruff/F821 audit caught 3 NameError bugs on
 untested paths (missing `logger` in `_report_plots`/`_region_render`, missing `np` in
 `_plot_utils`) — fixed. Gotcha: `ast.get_source_segment` drops decorators, so the 4
@@ -51,11 +51,11 @@ behaviour change**:
 ## Verification gate (run after EACH step)
 
 ```powershell
-cd "d:/OneDrive/Documents/Projects/3D Maps/Code/strm2stl"
+cd "d:/OneDrive/Documents/Projects/3D Maps/Code/map2stl"
 # 1. import smoke — public API still resolves
-"C:\venvs\strm2stl\Scripts\python.exe" -c "from city2stl.skyline.region_pdf import run_region_pdf_report; import city2stl.skyline; from city2stl.skyline import pipeline, region_pdf, html_report; print('imports OK')"
+"C:\venvs\map2stl\Scripts\python.exe" -c "from city2stl.skyline.region_pdf import run_region_pdf_report; import city2stl.skyline; from city2stl.skyline import pipeline, region_pdf, html_report; print('imports OK')"
 # 2. unit tests (covers pipeline.py + html_report.py + cv math)
-"C:\venvs\strm2stl\Scripts\python.exe" -m pytest tests/test_skyline*.py -q
+"C:\venvs\map2stl\Scripts\python.exe" -m pytest tests/test_skyline*.py -q
 ```
 
 Expected: `imports OK` + **129 passed, 1 skipped**.
@@ -180,7 +180,7 @@ Dependency DAG (extract in this order so no circular imports):
   commit was needed.
 - 2026-06-07: Commit hygiene findings while landing it: (a) fixed the
   pre-commit hook's dead Python path (pointed at the removed OneDrive .venv 3.11
-  → now prefers C:\venvs\strm2stl); (b) installed the missing `triangle` dep
+  → now prefers C:\venvs\map2stl); (b) installed the missing `triangle` dep
   (20 export/puzzle tests were failing on ModuleNotFoundError). (c) The
   full-suite hook still flaky-segfaults on native code in unrelated height/
   raster tests (different test each run) — committed with --no-verify per

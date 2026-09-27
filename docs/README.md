@@ -1,4 +1,4 @@
-# Docs Index — strm2stl
+# Docs Index — map2stl
 
 _Last updated: 2026-05-23_
 

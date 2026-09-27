@@ -2,7 +2,7 @@
 Direct tests for the composite DEM arithmetic (F-COMPOSITE3).
 
 These functions had no real coverage before: the only dem-merge tests run
-under STRM2STL_TEST_MODE, which replaces the whole pipeline with a linspace
+under MAP2STL_TEST_MODE, which replaces the whole pipeline with a linspace
 stub, so blend_layers, apply_layer_processing and fetch_layer_data were never
 executed. They are pure functions, so they are tested here directly, outside
 the endpoint and outside TEST_MODE.

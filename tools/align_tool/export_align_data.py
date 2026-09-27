@@ -24,7 +24,7 @@ cv2.warpAffine; rotation about the origin, translation in target pixels;
 scale = hypot(M[0,0], M[1,0]), angle_deg = degrees(atan2(M[1,0], M[0,0])).
 
 Run with the working venv:
-    ~/.venvs/strm2stl/Scripts/python.exe tools/align_tool/export_align_data.py
+    ~/.venvs/map2stl/Scripts/python.exe tools/align_tool/export_align_data.py
 (from the Code/ directory so numpy2stl is importable)
 """
 from __future__ import annotations

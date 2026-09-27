@@ -89,7 +89,7 @@ _KNOWN_HEADINGS: dict[str, float] = {
 
 _WIKIPEDIA_API   = "https://en.wikipedia.org/w/api.php"
 _WIKIMEDIA_API   = "https://commons.wikimedia.org/w/api.php"
-_UA              = "strm2stl/1.0 skyline-seed (github.com/strm2stl)"
+_UA              = "map2stl/1.0 skyline-seed (github.com/map2stl)"
 
 
 # ---------------------------------------------------------------------------

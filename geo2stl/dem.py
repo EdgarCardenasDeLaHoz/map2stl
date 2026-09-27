@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 #
 # geo2stl must not import from app.server (the dependency runs the other way),
 # so the fallback is duplicated here rather than shared. Keep both in sync.
-# dem.py -> geo2stl -> strm2stl -> Code -> "3D Maps"; strm_h5 sits beside Code.
+# dem.py -> geo2stl -> map2stl -> Code -> "3D Maps"; strm_h5 sits beside Code.
 _H5_SRTM_ROOT: str | None = os.environ.get("STRM_H5_ROOT") or str(
     (Path(__file__).resolve().parents[3] / "strm_h5").resolve()
 )

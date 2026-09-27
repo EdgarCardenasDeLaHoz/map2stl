@@ -15,7 +15,7 @@ from pathlib import Path
 
 from app.paths import REPO_ROOT
 
-HERE = Path(__file__).resolve().parent            # strm2stl/tools/align_tool/
+HERE = Path(__file__).resolve().parent            # map2stl/tools/align_tool/
 MAPS_ROOT = Path(os.environ.get("MAPS_ROOT") or REPO_ROOT.parents[1])   # .../3D Maps/
 
 DATA = Path(os.environ.get("ALIGN_DATA_DIR") or HERE / "data")

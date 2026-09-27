@@ -24,8 +24,8 @@ Key references:
 ## Quick start
 
 ```bash
-# from strm2stl/, with the strm2stl venv active (packages are installed editable)
-export GOOGLE_MAPS_API_KEY=...   # or put in strm2stl/.env
+# from map2stl/, with the map2stl venv active (packages are installed editable)
+export GOOGLE_MAPS_API_KEY=...   # or put in map2stl/.env
 
 python city2stl/skyline/scripts/08_region_skyline_pdf.py --region Cartagena
 ```

@@ -9,11 +9,11 @@ For each city this script:
   4. Computes per-building height coverage statistics: what fraction of each
      building's footprint has a valid (non-NaN) height estimate.
   5. Computes global statistics: mean height, p50/p90, % valid pixels.
-  6. Saves per-city summaries and a combined CSV to strm2stl/output/.
+  6. Saves per-city summaries and a combined CSV to map2stl/output/.
 
 Usage
 -----
-    # from the strm2stl/ directory:
+    # from the map2stl/ directory:
     ..\\..venv\\Scripts\\python.exe -m tools.eval_pseudo_ndsm
     # or:
     ..\\..venv\\Scripts\\python.exe tools/eval_pseudo_ndsm.py
@@ -328,7 +328,7 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         metavar="DIR",
-        help="Directory for CSV output (default: strm2stl/output/).",
+        help="Directory for CSV output (default: map2stl/output/).",
     )
     parser.add_argument(
         "--no-server",

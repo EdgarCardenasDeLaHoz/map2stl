@@ -16,7 +16,7 @@ Survey: this session's read-only audit (roofs, parts, sources) — findings belo
   `roof:levels` are fetched (`fetch.py`) but unused; parts are unioned with the outline.
 - Roof classifier (`roof_classifier.py`) only decides pitched vs flat, SDK-only.
 - Heights: OSM tag > levels × 3.2 > 10 m; US lidar gives one number per building.
-- Google 3D Tiles provider is still live code although ToS-prohibited (decision needed).
+- Google 3D Tiles provider: allowed (user decision 2026-09-27); it stays a supported source.
 
 ## Approach
 

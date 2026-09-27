@@ -1,7 +1,7 @@
 """
-Shared pytest fixtures for strm2stl API tests.
+Shared pytest fixtures for map2stl API tests.
 
-Sets STRM2STL_TEST_MODE=1 so the DEM endpoint returns a fast deterministic
+Sets MAP2STL_TEST_MODE=1 so the DEM endpoint returns a fast deterministic
 response without any Earth Engine or network calls.
 """
 import os
@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 # Enable test mode before importing the app
-os.environ["STRM2STL_TEST_MODE"] = "1"
+os.environ["MAP2STL_TEST_MODE"] = "1"
 
 
 def _seed_db(db_path: Path) -> None:
@@ -43,7 +43,7 @@ def tmp_data_dir(tmp_path, monkeypatch):
     - Redirects CACHE_ROOT so cache reads/writes go to tmp/.
 
     IMPORTANT: imports use the same short paths that server.py uses
-    (e.g. `import app.server.routers.regions`, not `strm2stl.ui.routers.regions`)
+    (e.g. `import app.server.routers.regions`, not `map2stl.ui.routers.regions`)
     so monkeypatching hits the same module objects the app routes close over.
     """
     # Trigger the server import first so all modules are in sys.modules

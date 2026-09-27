@@ -146,7 +146,7 @@ Cache directories are `.gitignore`d. Delete them freely — they regenerate on n
 ## Running Tests
 
 ```bash
-# From strm2stl/ with venv active
+# From map2stl/ with venv active
 python -m pytest tests/ -v
 ```
 

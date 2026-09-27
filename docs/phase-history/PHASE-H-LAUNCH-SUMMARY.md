@@ -171,14 +171,14 @@ Consult decision tree in `PHASE-H-BENCHMARK-TIERS.md`:
 ## Files Modified/Created This Session
 
 **Modified**:
-- `strm2stl/tools/ml/data/datasets.py` — HeightTileDataset tile size normalization
-- `strm2stl/scripts/train_phase_h.py` — Removed custom collate, added completion manifest
+- `map2stl/tools/ml/data/datasets.py` — HeightTileDataset tile size normalization
+- `map2stl/scripts/train_phase_h.py` — Removed custom collate, added completion manifest
 - Memory index updated with Phase H status
 
 **Created**:
-- `strm2stl/PHASE-H-RUN-REGISTRY.json` — Run configuration snapshot
-- `strm2stl/PHASE-H-BENCHMARK-TIERS.md` — Tier definitions & decision framework
-- `strm2stl/scripts/evaluate_stratified.py` — Stratified evaluation engine
+- `map2stl/PHASE-H-RUN-REGISTRY.json` — Run configuration snapshot
+- `map2stl/PHASE-H-BENCHMARK-TIERS.md` — Tier definitions & decision framework
+- `map2stl/scripts/evaluate_stratified.py` — Stratified evaluation engine
 - Memory: `project_phase_h_status.md` — Comprehensive Phase H status doc
 
 ---

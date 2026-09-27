@@ -425,7 +425,7 @@ from app.server.core.export import (
 ### Phase 5: Run Tests
 
 ```bash
-cd strm2stl
+cd map2stl
 python -m pytest tests/ -v
 # Should pass all 532 tests
 ```

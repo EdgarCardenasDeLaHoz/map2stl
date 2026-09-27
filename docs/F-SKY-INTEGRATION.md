@@ -32,7 +32,7 @@ The F-SKY series is a set of 11+ computer-vision improvements to the skyline hei
 files were split into focused subpackages. Since 2026-09-25 only `pipeline.py` remains as
 a façade (for callers outside `skyline/`); the other three were removed and internal code
 imports the defining module. The implementation lives in `_core/`, `_pano/`, `_report_plots/`, `_region_render/`. Split
-was behaviour-neutral (773 strm2stl tests + 10 Playwright e2e green); a post-split ruff
+was behaviour-neutral (773 map2stl tests + 10 Playwright e2e green); a post-split ruff
 audit caught and fixed 3 NameError bugs on untested paths (missing `logger` in two
 plot subpackages, missing `np` in `_plot_utils`). See `docs/plans/F-CLEAN14-skyline-file-split.md`.
 

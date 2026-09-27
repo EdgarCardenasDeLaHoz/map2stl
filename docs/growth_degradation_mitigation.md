@@ -60,7 +60,7 @@
 
 1. **Run analysis script**:
    ```bash
-   cd strm2stl
+   cd map2stl
    python tools/ml/analyze_growth_degradation.py
    ```
    
