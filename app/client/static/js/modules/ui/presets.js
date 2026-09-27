@@ -11,6 +11,7 @@
  *   applyAllSettings(s)                     — restore full settings snapshot to form
  *   saveRegionSettings()                    — POST current settings for selected region
  *   loadAndApplyRegionSettings(regionName)  — GET + apply saved region settings
+ *   applyWorkflowPreset(name)               — apply City / Mountain / Coast (workflow-presets.js)
  *
  * External dependencies (accessed via window / window.appState):
  *   window.api                  — api.js module
@@ -23,6 +24,8 @@
  *   window.appState._applyCurveSettings(points, presetName)
  *   window.showToast(msg, type)        — global from app.js file-top
  */
+
+import { WORKFLOW_PRESETS, applyFields } from './workflow-presets.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State
@@ -54,6 +57,8 @@ const builtInPresets = {
 };
 
 let _userPresets = {};
+// Either a collectAllSettings() snapshot (view presets) or { workflowUndo }
+// (workflow presets, which touch controls that snapshot does not cover).
 let _presetSnapshot = null;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -70,11 +75,11 @@ function initPresetProfiles() {
             for (const [name, preset] of Object.entries(raw)) {
                 _userPresets[name] = _migratePreset(preset);
             }
-            updatePresetSelect();
         } catch (e) {
             console.warn('Failed to load user presets:', e);
         }
     }
+    updatePresetSelect();
     _setupPresetEventListeners();
     setupAutoSave();
 }
@@ -107,12 +112,26 @@ function updatePresetSelect() {
 
     select.innerHTML = '<option value="">-- Select Preset --</option>';
 
+    const workflow = document.createElement('optgroup');
+    workflow.label = 'Workflow (source, vertical, layers, puzzle)';
+    Object.entries(WORKFLOW_PRESETS).forEach(([name, preset]) => {
+        const option = document.createElement('option');
+        option.value = 'workflow:' + name;
+        option.textContent = preset.label;
+        option.title = preset.title;
+        workflow.appendChild(option);
+    });
+    select.appendChild(workflow);
+
+    const view = document.createElement('optgroup');
+    view.label = 'View';
     Object.keys(builtInPresets).forEach(name => {
         const option = document.createElement('option');
         option.value = name;
         option.textContent = name.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-        select.appendChild(option);
+        view.appendChild(option);
     });
+    select.appendChild(view);
 
     if (Object.keys(_userPresets).length > 0) {
         const optgroup = document.createElement('optgroup');
@@ -130,6 +149,10 @@ function updatePresetSelect() {
 function loadSelectedPreset() {
     const select = document.getElementById('presetSelect');
     if (!select || !select.value) { window.showToast('Select a preset first', 'warning'); return; }
+    if (select.value.startsWith('workflow:')) {
+        applyWorkflowPreset(select.value.substring('workflow:'.length));
+        return;
+    }
 
     const preset = select.value.startsWith('user:')
         ? _userPresets[select.value.substring(5)]
@@ -152,11 +175,34 @@ function loadSelectedPreset() {
  */
 function revertPreset() {
     if (!_presetSnapshot) { window.showToast('Nothing to revert', 'info'); return; }
-    applyAllSettings(_presetSnapshot);
+    if (_presetSnapshot.workflowUndo) applyFields(_presetSnapshot.workflowUndo, document);
+    else applyAllSettings(_presetSnapshot);
     _presetSnapshot = null;
     const revertBtn = document.getElementById('revertPresetBtn');
     if (revertBtn) revertBtn.style.display = 'none';
     window.showToast('Preset reverted', 'info');
+}
+
+/**
+ * Apply a City / Mountain / Coast workflow preset (workflow-presets.js) and
+ * keep its undo list for the revert button.
+ * @param {string} name - key of WORKFLOW_PRESETS
+ */
+function applyWorkflowPreset(name) {
+    const preset = WORKFLOW_PRESETS[name];
+    if (!preset) { window.showToast('Preset not found', 'error'); return; }
+    const { applied, skipped, undo } = applyFields(preset.fields, document);
+    _presetSnapshot = { workflowUndo: undo };
+    const revertBtn = document.getElementById('revertPresetBtn');
+    if (revertBtn) revertBtn.style.display = '';
+    const select = document.getElementById('presetSelect');
+    if (select && select.querySelector(`option[value="workflow:${name}"]`)) select.value = `workflow:${name}`;
+    if (skipped.length) {
+        window.showToast(`${preset.label} preset applied; skipped `
+            + skipped.map(s => `${s.id} (${s.reason})`).join(', '), 'warning', 6000);
+    } else {
+        window.showToast(`${preset.label} preset applied (${applied.length} settings changed)`, 'success');
+    }
 }
 
 /**
@@ -719,3 +765,4 @@ window.saveRegionSettings = saveRegionSettings;
 window.loadAndApplyRegionSettings = loadAndApplyRegionSettings;
 window.setupAutoSave = setupAutoSave;
 window.revertPreset = revertPreset;
+window.applyWorkflowPreset = applyWorkflowPreset;

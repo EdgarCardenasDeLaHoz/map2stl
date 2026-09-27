@@ -3629,9 +3629,10 @@
             z-index: 5;
         }
 
+        /* Top-left: the bottom-left corner holds .model-overlay (status + scale). */
         .hud-overlay {
             position: absolute;
-            bottom: 8px;
+            top: 8px;
             left: 8px;
             color: #ccc;
             font: 11px/1.4 monospace;

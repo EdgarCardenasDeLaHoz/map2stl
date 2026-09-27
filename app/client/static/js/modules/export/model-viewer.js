@@ -11,10 +11,12 @@
  *   window.resetViewerCamera()                  — fit camera to current mesh
  *   window.rebuildViewerColors(cmap)            — recolor mesh from a colormap name
  *   window.setViewerNormals(bool)               — toggle normals-debug material
+ *   window.updateBedOutline()                   — redraw the printer-bed outline
  *
  * State exposed on window.appState:
  *   window.appState.terrainMesh  — current terrain mesh (or null)
  *   window.appState.viewerScene  — the THREE.Scene
+ *   window.appState.modelPreviewState — 'idle' | 'building' | 'ready' | 'error'
  *
  * External dependencies:
  *   THREE                                       — global Three.js
@@ -23,6 +25,8 @@
  *   window.showToast(msg, type)                 — file-top global in app.js
  *   window.mapElevationToColor(t, cmap)         — from dem-loader.js (loaded first)
  */
+
+import { parseBedSize } from './print-scale.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope state
@@ -414,6 +418,49 @@ function _updateSceneOverlays(data) {
     }
     if (horizGroup.children.length > 0) modelScene.add(horizGroup);
 
+    updateBedOutline();
+    needsRender = true;
+}
+
+/**
+ * Outline of the selected printer bed (#bedSizeSelect, or the custom W×H),
+ * centred under the model at the mesh's display scale. Orange when the model
+ * footprint does not fit the bed in either orientation.
+ */
+function updateBedOutline() {
+    if (!modelScene) return;
+    const old = modelScene.getObjectByName('bedOutline');
+    if (old) {
+        old.traverse(c => { c.geometry?.dispose(); c.material?.map?.dispose(); c.material?.dispose(); });
+        modelScene.remove(old);
+    }
+    const g = geometry_scale_for_overlays;
+    if (!terrainMesh || !g.widthMm) { needsRender = true; return; }
+
+    const bed = parseBedSize(
+        document.getElementById('bedSizeSelect')?.value,
+        document.getElementById('bedCustomW')?.value,
+        document.getElementById('bedCustomH')?.value,
+    );
+    const fits = (g.widthMm <= bed.w && g.depthMm <= bed.h) || (g.widthMm <= bed.h && g.depthMm <= bed.w);
+    const color = fits ? 0x4a9fd4 : 0xe67e22;
+    const hw = bed.w * g.scale / 2;
+    const hd = bed.h * g.scale / 2;
+    const y = 0.05;   // just above the ground grid so the two do not z-fight
+
+    const group = new THREE.Group();
+    group.name = 'bedOutline';
+    const geo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(-hw, y, -hd), new THREE.Vector3(hw, y, -hd),
+        new THREE.Vector3(hw, y, hd), new THREE.Vector3(-hw, y, hd),
+        new THREE.Vector3(-hw, y, -hd),
+    ]);
+    group.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color })));
+    const label = _makeTextSprite(`bed ${bed.w}×${bed.h} mm${fits ? '' : ' (too small)'}`,
+        { fontSize: 16, color: fits ? '#8cc8f0' : '#f0a060' });
+    label.position.set(-hw + 12, y, -hd - 4);
+    group.add(label);
+    modelScene.add(group);
     needsRender = true;
 }
 
@@ -522,6 +569,7 @@ async function previewModelIn3D() {
     const ticket = _previewGate.begin(key);
     const statusEl = document.getElementById('modelStatus');
     if (statusEl) statusEl.textContent = '⏳ Building mesh…';
+    window.appState.modelPreviewState = 'building';
     document.getElementById('modelViewerContainer')?.classList.add('mesh-building');
 
     if (!modelRenderer) initModelViewer();
@@ -552,6 +600,7 @@ async function previewModelIn3D() {
             baseHeight: build.base_height,
         };
         _previewGate.settle(ticket, true);
+        window.appState.modelPreviewState = 'ready';
         window._setExportButtonsEnabled?.(true);
         window.appState._updateWorkflowStepper?.();
         if (statusEl) {
@@ -574,6 +623,7 @@ async function previewModelIn3D() {
         // export: drop the stale model and disable the buttons until a rebuild
         // succeeds.
         window.appState.generatedModelData = null;
+        window.appState.modelPreviewState = 'error';
         window._setExportButtonsEnabled?.(false);
         window.appState._updateWorkflowStepper?.();
         if (statusEl) statusEl.textContent = '❌ ' + e.message;
@@ -818,6 +868,7 @@ window.setViewerAutoRotate  = setViewerAutoRotate;
 window.resetViewerCamera    = resetViewerCamera;
 window.rebuildViewerColors  = _rebuildColors;
 window.setViewerNormals     = setViewerNormals;
+window.updateBedOutline     = updateBedOutline;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Auto-rebuild wiring
@@ -831,7 +882,7 @@ window.setViewerNormals     = setViewerNormals;
 
 const _FETCH_INPUT_IDS = [
     'mmPerPixel', 'exportModelHeight', 'exportBaseHeight',
-    'exportExaggeration', 'exportSeaLevelCap', 'viewerSolidPreview',
+    'exportExaggeration', 'exportZMode', 'exportMedian', 'exportSeaLevelCap', 'viewerSolidPreview',
     'exportEngraveLabel', 'exportContours', 'exportContourInterval', 'exportContourStyle',
 ];
 // Text input: use 'input' (not 'change') so the preview updates as you type,

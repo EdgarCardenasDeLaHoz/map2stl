@@ -46,3 +46,22 @@ height-strip puzzle. Findings behind it: `docs/sop/city-stl-and-puzzle-sop.md`.
 - No feature outside the model rectangle; no floating or buried footprint.
 - Cartagena, Granada + Alhambra, Breckenridge rebuilt at 1 px/mm and cut into puzzles with
   ≥ 99% volume conservation.
+
+## Follow-ups from the v2 renders (2026-09-27)
+
+Measured on Granada + Alhambra (797×575 px, 1:3472, 588 s, 1.07 M faces, 12 pieces):
+
+- **Merged STL is not watertight** (success criterion missed): parts touch, so edges are
+  used 4×. Finish with one manifold union of all parts (or the 3MF parts only) and gate the
+  build on the watertight check. 29 buildings are still rejected as non-manifold.
+- **Draped layers outweigh the terrain**: trails 425 k faces, green 233 k, roads 193 k vs
+  terrain 200 k. Drape on the adaptive TIN (not the pixel grid) and dissolve each layer's
+  touching slabs before the union.
+- **Printability by scale**: at 1:3472 a 2 m trail is 0.6 mm wide. Per layer: widen to a
+  minimum printed width (0.8 mm) or drop, reported as counts.
+- **Time**: fetch + height enhancement dominate; one Overpass mirror hung on a 300 s connect
+  timeout. Connect timeout ≈ 10 s with fast fail-over. Lossless simplify (86 s) and
+  assemble (52 s) run per part in parallel.
+- **Reproducibility**: write the full build spec into `report.json` and accept it back
+  (`TerrainSession.build(spec)` / CLI), and keep the three cities as a slow regression set
+  tracking faces, time, watertight and volume.

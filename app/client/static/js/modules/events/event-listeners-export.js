@@ -24,10 +24,14 @@ window._setupModelExportListeners = function _setupModelExportListeners() {
             const customRow = document.getElementById('bedCustomRow');
             if (customRow) customRow.style.display = bedSel.value === 'custom' ? 'flex' : 'none';
             window.updatePrintDimensions?.();
+            window.updateBedOutline?.();
         });
     }
     ['bedCustomW', 'bedCustomH'].forEach(id => {
-        document.getElementById(id)?.addEventListener('input', () => window.updatePrintDimensions?.());
+        document.getElementById(id)?.addEventListener('input', () => {
+            window.updatePrintDimensions?.();
+            window.updateBedOutline?.();
+        });
     });
 
     // Contours and engrave-label toggle handlers are now wired in event-listeners-map.js

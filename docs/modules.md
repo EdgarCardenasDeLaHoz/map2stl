@@ -72,6 +72,8 @@ flowchart LR
 |------|-------------|---------|
 | `model-viewer.js` | `initModelViewer`, `previewModelIn3D`, `haversineDiagKm`, `exportPuzzle3MF`, `resetViewerCamera`, `rebuildViewerColors`, `setViewerNormals`, `setViewerAutoRotate` | Three.js terrain preview; orbit/pan/zoom + pinch-zoom; puzzle cut preview; async puzzle export with progress polling |
 | `export-handlers.js` | `downloadSTL`, `downloadModel`, `downloadCrossSection` | STL/OBJ/3MF/cross-section downloads |
+| `print-scale.js` | `modelScale`, `bboxDiagonalKm`, `formatGroundLength`, `parseBedSize`, `defaultPieceMm`, `piecesNeeded` | Pure ES exports (no window): model scale and vertical exaggeration (port of `city_model.choose_scale`), bed size, puzzle piece grid (port of `puzzle.plan_grid`) |
+| `building-heights.js` | `summarizeBuildingHeights`, `heightSourceGroup`, `buildingsWithOverrides`, `hasOverrides` | Pure ES exports: height-source summary, histogram, tallest list; City Model `layer_data` payload with height overrides |
 
 ### `ui/` — UI management
 | File | Key exports | Purpose |
@@ -80,6 +82,7 @@ flowchart LR
 | `app-setup.js` | `setupOpacityControls`, `loadAllLayers`, `saveCurrentRegion` | App init wiring helpers |
 | `cache-inventory.js` | `loadCacheInventory` | Cache stats browser (Plotly chart + region table) |
 | `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset` | Preset save/load/apply; `PRESET_VERSION` migration; `_presetSnapshot` revert; `_migratePreset()` fills missing keys from built-in defaults |
+| `workflow-presets.js` | `WORKFLOW_PRESETS`, `applyFields`, `applyWorkflowPreset` | Pure ES exports: City / Mountain / Coast presets applied by setting inputs and firing input+change; returns an undo list (presets.js `window.applyWorkflowPreset` wraps it) |
 | `curve-editor-state.js` | `CurveEditorState`, `CURVE_PRESETS` | Curve editor state class + named preset definitions (shared by curve-editor.js and tests) |
 | `curve-editor.js` | `initCurveEditor`, `applyCurveTodem`, `interpolateCurve`, `undoCurve` | Elevation curve editor (spline + undo/redo) |
 | `keyboard-shortcuts.js` | (no named exports) | Keyboard shortcut event listeners |

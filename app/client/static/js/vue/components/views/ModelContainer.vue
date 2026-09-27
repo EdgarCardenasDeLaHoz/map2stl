@@ -1,15 +1,19 @@
 <template>
   <!-- Three.js model viewer — display:none toggled by switchView() -->
-  <div id="modelContainer" class="model-container hidden">
+  <!-- input/change bubble up from every Extrude control (including preset and
+       vanilla-module dispatches), which is when the scale/bed readouts recompute. -->
+  <div id="modelContainer" class="model-container hidden" @input="formTick++" @change="formTick++">
     <div class="model-layout">
       <div class="model-viewport">
         <div id="modelViewer"></div>
         <div id="modelEmptyState" class="model-empty-state">
-          <span style="font-size:40px;">🗺️</span>
-          <span>Load a DEM in the Edit tab to render the 3D model</span>
+          <span style="font-size:40px;">{{ emptyState.icon }}</span>
+          <span>{{ emptyState.text }}</span>
         </div>
         <div class="model-overlay">
           <span id="modelStatus">No model generated</span>
+          <span v-if="scaleText" id="modelScaleInfo" class="model-scale-info"
+                title="Horizontal scale from the DEM bbox and Resolution (mm/px); vertical relative to that scale (1× = true scale)">{{ scaleText }}</span>
         </div>
       </div>
 
@@ -190,6 +194,11 @@
                   <label title="Split terrain into interlocking puzzle pieces">Enable:</label>
                   <input type="checkbox" id="puzzleEnabled">
                 </div>
+                <div v-if="bedFit" class="bed-fit-note" :class="bedFit.fits ? 'ok' : 'warn'">
+                  {{ bedFitText }}
+                  <button v-if="!bedFit.fits" type="button" class="btn btn-xs" style="margin-left:4px;"
+                          title="Set Columns and Rows to this grid" @click="useBedGrid">Use</button>
+                </div>
                 <div id="puzzleParams" style="display:none;">
                   <div class="param-group">
                     <label title="Number of columns in the puzzle grid">Columns (X):</label>
@@ -271,8 +280,10 @@
                   <label for="cityPuzzleEnabled" title="Cut the merged model into interlocking jigsaw pieces">Puzzle pieces:</label>
                   <input id="cityPuzzleEnabled" type="checkbox">
                   <label for="cityPieceMm" title="Largest piece size; the grid is chosen so pieces fit (your bed)">max</label>
-                  <input id="cityPieceMm" type="number" value="200" min="30" max="1000" step="10" style="width:56px;"> mm
+                  <input id="cityPieceMm" type="number" value="200" min="30" max="1000" step="10" style="width:56px;"
+                         @input="onPieceInput"> mm
                 </div>
+                <div v-if="bedFit" class="bed-fit-note" :class="bedFit.fits ? 'ok' : 'warn'">{{ bedFitText }}</div>
                 <button id="exportCityBtn" class="btn btn-success btn-sm" style="width:100%;margin-top:6px;"
                         title="Build terrain + all enabled layers as one model and download a .zip.">
                   <span class="btn-icon">🏙️</span> Build city model (.zip)
@@ -290,7 +301,7 @@
                   <div style="margin-top:8px;padding-top:8px;border-top:1px solid #2d6a4f;">
                     <div class="dim-row" style="gap:4px;">
                       <label class="dim-label" style="flex-shrink:0;">Bed:</label>
-                      <select id="bedSizeSelect" style="flex:1;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;">
+                      <select id="bedSizeSelect" @change="onBedChange" style="flex:1;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;">
                         <option value="220x220">Ender 220×220</option>
                         <option value="235x235">Ender3 235×235</option>
                         <option value="250x210" selected>Prusa 250×210</option>
@@ -302,9 +313,9 @@
                     </div>
                     <div id="bedCustomRow" class="dim-row" style="gap:4px;display:none;">
                       <label class="dim-label">W×H (mm):</label>
-                      <input type="number" id="bedCustomW" value="220" min="50" max="1000" style="width:50px;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;">
+                      <input type="number" id="bedCustomW" @input="onBedChange" value="220" min="50" max="1000" style="width:50px;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;">
                       <span style="color:#888;">×</span>
-                      <input type="number" id="bedCustomH" value="220" min="50" max="1000" style="width:50px;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;">
+                      <input type="number" id="bedCustomH" @input="onBedChange" value="220" min="50" max="1000" style="width:50px;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;">
                     </div>
                     <div id="bedOptimizerResult" style="font-size:11px;color:#ccc;margin-top:6px;line-height:1.5;"></div>
                   </div>
@@ -321,10 +332,115 @@
   </div><!-- /modelContainer -->
 </template>
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
+import { useAppStore } from '../../stores/app';
+import {
+  defaultPieceMm, formatGroundLength, modelScale, parseBedSize, piecesNeeded,
+} from '../../../modules/export/print-scale.js';
 
 const activeTab = ref<'fetch' | 'view' | 'export'>('fetch');
+const store = useAppStore();
+
+// ── Empty state ──────────────────────────────────────────────────────────────
+// The overlay is hidden by export-handlers.js:_setExportButtonsEnabled once a
+// mesh exists; while it shows, say why: no DEM yet, mesh on its way, or failed.
+const emptyState = computed(() => {
+  const dem = store.lastDemData as { values?: ArrayLike<number> } | null;
+  if (!dem?.values?.length) return { icon: '🗺️', text: 'Load a DEM in the Edit tab to render the 3D model' };
+  if (store.modelPreviewState === 'error') return { icon: '⚠️', text: 'Mesh build failed — see the status line below' };
+  return { icon: '⏳', text: 'Building mesh…' };
+});
+
+// ── Form readouts (scale, bed fit) ───────────────────────────────────────────
+// Extrude inputs are plain DOM controls read by the vanilla modules; formTick
+// makes these computeds re-read them after any input/change inside the view.
+const formTick = ref(0);
+function _val(id: string): string | undefined {
+  return (document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null)?.value;
+}
+function _num(id: string, fallback: number): number {
+  const v = parseFloat(_val(id) ?? '');
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+}
+function _bed() {
+  return parseBedSize(_val('bedSizeSelect'), _val('bedCustomW'), _val('bedCustomH'));
+}
+
+const scale = computed(() => {
+  void formTick.value;
+  void store.modelPreviewState;
+  const dem = store.lastDemData as { width?: number; height?: number; vmin?: number; vmax?: number } | null;
+  const bbox = (store.currentDemBbox || store.selectedRegion) as
+    { north: number; south: number; east: number; west: number } | null;
+  if (!dem?.width || !dem?.height || !bbox) return null;
+  return modelScale({
+    bbox, cols: dem.width, rows: dem.height,
+    mmPerPx: _num('mmPerPixel', 1),
+    zMode: (_val('exportZMode') || 'auto') as 'auto' | 'true' | 'fit',
+    exaggeration: _num('exportExaggeration', 1),
+    fitHeightMm: _num('exportModelHeight', 30),
+    elevMin: dem.vmin ?? 0,
+    elevMax: dem.vmax ?? 0,
+  });
+});
+
+const scaleText = computed(() => {
+  const s = scale.value;
+  if (!s) return '';
+  const v = s.verticalExaggeration;
+  const vText = v >= 10 ? v.toFixed(0) : v.toFixed(v >= 1 ? 1 : 2);
+  const vert = Math.abs(v - 1) < 0.005
+    ? 'vertical 1× (true scale)'
+    : `vertical ${vText}× true scale${s.zMode === 'fit' ? ' (fit to height)' : ''}`;
+  return `1 mm = ${formatGroundLength(s.mPerMm)} (1:${s.scaleDenominator.toLocaleString()}) · ${vert}`;
+});
+
+const bedFit = computed(() => {
+  void formTick.value;
+  const s = scale.value;
+  if (!s) return null;
+  const bed = _bed();
+  const pieceMm = _num('cityPieceMm', defaultPieceMm(bed));
+  const fit = piecesNeeded(s.widthMm, s.depthMm, bed, pieceMm);
+  return { ...fit, bed, pieceMm, widthMm: s.widthMm, depthMm: s.depthMm };
+});
+
+const bedFitText = computed(() => {
+  const f = bedFit.value;
+  if (!f) return '';
+  const size = `${Math.round(f.widthMm)}×${Math.round(f.depthMm)} mm`;
+  return f.fits
+    ? `✓ ${size} fits the ${f.bed.w}×${f.bed.h} bed`
+    : `⚠ ${size} needs ${f.cols} × ${f.rows} pieces (≤ ${f.pieceMm} mm each)`;
+});
+
+function _setField(id: string, value: string) {
+  const el = document.getElementById(id) as HTMLInputElement | null;
+  if (!el || el.value === value) return;
+  el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function useBedGrid() {
+  const f = bedFit.value;
+  if (!f) return;
+  _setField('splitCols', String(f.cols));
+  _setField('splitRows', String(f.rows));
+  (window as any).updatePuzzlePreview?.();
+}
+
+// The bed sets the default City Model piece size (shorter side less 10 mm)
+// until the user types their own; after that a bed change leaves it alone.
+const pieceTouched = ref(false);
+function onPieceInput(e: Event) {
+  if (e.isTrusted) pieceTouched.value = true;
+}
+function onBedChange() {
+  if (!pieceTouched.value) _setField('cityPieceMm', String(defaultPieceMm(_bed())));
+}
+onMounted(onBedChange);
 
 // City Model layers. Defaults mirror city2stl.city_model.DEFAULT_LAYERS; the export
 // handler reads them back from the DOM ids (cityLayer_<id>_enabled/_mode/_value).
@@ -351,3 +467,18 @@ function cancelExport() {
     (window as any).cancelExport?.();
 }
 </script>
+<style scoped>
+.model-scale-info {
+  display: block;
+  font-size: 11px;
+  color: #9cc;
+  margin-top: 2px;
+}
+.bed-fit-note {
+  font-size: 11px;
+  margin: 4px 0;
+  line-height: 1.4;
+}
+.bed-fit-note.ok { color: #7c7; }
+.bed-fit-note.warn { color: #e67e22; }
+</style>

@@ -103,6 +103,8 @@ flowchart TD
 | `terrainMesh` | THREE.Mesh\|null | Current 3D terrain mesh in the Extrude viewer |
 | `viewerScene` | THREE.Scene\|null | The Three.js scene for the model viewer |
 | `generatedModelData` | Object\|null | `{values, width, height, resolution, exaggeration, baseHeight, vmin, vmax}` — last preview parameters, used by download buttons |
+| `modelPreviewState` | `'idle'\|'building'\|'ready'\|'error'` | Extrude preview lifecycle (model-viewer.js); ModelContainer.vue words its empty state from it |
+| `cityHeightOverrides` | `Record<number, number>` | Buildings-panel height overrides by feature index; sent by `exportCityModel()` as `layer_data.buildings`; reset when a new building set loads |
 
 ## Other
 
@@ -143,5 +145,7 @@ Mirrored from closure. Set via `appState.set(key, val)` or direct assignment:
 | `terrainMesh` | model-viewer | export-handlers |
 | `viewerScene` | model-viewer | (read-only) |
 | `generatedModelData` | model-viewer | export-handlers, puzzle export |
+| `modelPreviewState` | model-viewer | ModelContainer.vue |
+| `cityHeightOverrides` | CityBuildingsPanel.vue | export-handlers |
 | `_setDemEmptyState` | callback | dem-main |
 | `_updateWorkflowStepper` | callback | dem-main, model-viewer |

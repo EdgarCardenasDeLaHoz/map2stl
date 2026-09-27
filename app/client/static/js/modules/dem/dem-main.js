@@ -12,6 +12,8 @@
 
 'use strict';
 
+import { parseBedSize } from '../export/print-scale.js';
+
 // Colormap LUT cache — keyed by colormap name; rebuilt only on first use per colormap.
 const _lutCache = new Map();
 
@@ -641,7 +643,7 @@ window.updatePrintDimensions = function updatePrintDimensions() {
         document.getElementById('dimRealArea').textContent =
             `${realW_km.toFixed(1)} × ${realH_km.toFixed(1)} km`;
 
-        const scale = Math.round(realW_m / (gridW / 1000));
+        const scale = Math.round(realW_m / (footW / 1000));
         document.getElementById('dimScale').textContent = `1 : ${scale.toLocaleString()}`;
 
         const beds = [
@@ -650,7 +652,7 @@ window.updatePrintDimensions = function updatePrintDimensions() {
             { name: 'Bambu 256', w: 256, h: 256 },
             { name: 'Bambu 350', w: 350, h: 350 },
         ];
-        const fitting = beds.filter(b => gridW <= b.w && gridH <= b.h);
+        const fitting = beds.filter(b => footW <= b.w && footH <= b.h);
         const fitRow = document.getElementById('dimBedFitRow');
         const fitText = document.getElementById('dimBedFitText');
         if (fitting.length > 0) {
@@ -686,14 +688,11 @@ window._updateBedOptimizer = function _updateBedOptimizer(bbox) {
     const resultEl = document.getElementById('bedOptimizerResult');
     if (!resultEl || !bbox) return;
 
-    const sel = document.getElementById('bedSizeSelect')?.value || '250x210';
-    let bedW, bedH;
-    if (sel === 'custom') {
-        bedW = parseFloat(document.getElementById('bedCustomW')?.value) || 220;
-        bedH = parseFloat(document.getElementById('bedCustomH')?.value) || 220;
-    } else {
-        [bedW, bedH] = sel.split('x').map(Number);
-    }
+    const { w: bedW, h: bedH } = parseBedSize(
+        document.getElementById('bedSizeSelect')?.value,
+        document.getElementById('bedCustomW')?.value,
+        document.getElementById('bedCustomH')?.value,
+    );
 
     const midLat = (bbox.north + bbox.south) / 2;
     const latCos = Math.cos(midLat * Math.PI / 180);
@@ -902,6 +901,9 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
  * Falls back to leaving the markup's options in place if the call fails —
  * a stale list beats an empty one.
  */
+/** Sources listed first in #paramDemSource; everything else is under "More sources". */
+const PRIMARY_DEM_SOURCES = new Set(['h5_local', 'SRTMGL1', 'COP30']);
+
 window.populateDemSources = async function populateDemSources(attempt = 0) {
     // The select is rendered by the Vue bundle, which may mount after
     // DOMContentLoaded. Retry briefly rather than silently doing nothing.
@@ -920,6 +922,11 @@ window.populateDemSources = async function populateDemSources(attempt = 0) {
     // Preserve whatever was already chosen (a preset may have applied first).
     const previous = select.value;
     select.innerHTML = '';
+    // The common sources lead; the rest go under a "More sources" group so the
+    // list reads as a choice of three. Option values are unchanged, so nothing
+    // that reads or sets #paramDemSource notices the grouping.
+    const more = document.createElement('optgroup');
+    more.label = 'More sources';
     for (const src of data.sources) {
         const opt = document.createElement('option');
         opt.value = src.id;
@@ -930,8 +937,9 @@ window.populateDemSources = async function populateDemSources(attempt = 0) {
         // source is missing is discoverable rather than silent.
         opt.disabled = !src.available;
         if (src.note) opt.title = src.note;
-        select.appendChild(opt);
+        (PRIMARY_DEM_SOURCES.has(src.id) ? select : more).appendChild(opt);
     }
+    if (more.children.length) select.appendChild(more);
     if (previous && select.querySelector(`option[value="${CSS.escape(previous)}"]:not(:disabled)`)) {
         select.value = previous;
     } else {

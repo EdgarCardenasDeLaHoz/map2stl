@@ -389,10 +389,11 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     function _asyncBtn(btnId, fn, before) {
         document.getElementById(btnId)?.addEventListener('click', async () => {
             const btn = document.getElementById(btnId);
+            const label = btn?.textContent;
             if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
             before?.(btn);
             try { await fn(); }
-            finally { if (btn) { btn.disabled = false; btn.textContent = '⟳ Load'; } }
+            finally { if (btn) { btn.disabled = false; btn.textContent = label || '⟳ Load'; } }
         });
     }
 

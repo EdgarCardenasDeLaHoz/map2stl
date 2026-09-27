@@ -9,17 +9,21 @@
         <div class="param-group">
           <label for="paramDemSource" title="Elevation data source.">Source</label>
           <!-- Replaced at load by populateDemSources(), which asks the server which
-               sources actually work. This list is the fallback if that call fails, so
-               h5_local leads: it needs no API key and no tile folder. -->
+               sources actually work and lands on the first usable one. This list is
+               the fallback if that call fails, so h5_local leads: it needs no API key
+               and no tile folder. The three common sources come first; the rest sit
+               under "More sources" (same split as PRIMARY_DEM_SOURCES in dem-main.js). -->
           <select id="paramDemSource" class="ctrl-select">
-            <option value="h5_local">Local SRTM H5 (city-scale)</option>
-            <option value="local">Local SRTM Tiles</option>
-            <option value="SRTMGL1">OpenTopo — SRTM 30m</option>
-            <option value="SRTMGL3">OpenTopo — SRTM 90m</option>
-            <option value="AW3D30">OpenTopo — ALOS 30m</option>
-            <option value="COP30">OpenTopo — Copernicus 30m</option>
-            <option value="COP90">OpenTopo — Copernicus 90m</option>
-            <option value="SRTM15Plus">OpenTopo — SRTM15+ Bathy</option>
+            <option value="h5_local">Local SRTM H5 (City-scale, ~90m)</option>
+            <option value="SRTMGL1">SRTM 30m (Global)</option>
+            <option value="COP30">Copernicus DSM 30m</option>
+            <optgroup label="More sources">
+              <option value="local">Local SRTM Tiles</option>
+              <option value="SRTMGL3">SRTM 90m (Global)</option>
+              <option value="AW3D30">ALOS World 3D 30m</option>
+              <option value="COP90">Copernicus DSM 90m</option>
+              <option value="SRTM15Plus">SRTM15+ (Bathymetry+Land)</option>
+            </optgroup>
           </select>
           <div id="demSourceApiKeyWarning" style="font-size:10px;color:#f90;display:none;">⚠️ OpenTopography API key not configured.</div>
         </div>
@@ -40,9 +44,7 @@
           </label>
         </div>
 
-        <div class="fetch-action-row">
-          <button id="loadDemBtn" class="btn btn-primary">🏔 Load DEM</button>
-        </div>
+        <div class="fetch-help-text">Load with the 🏔 Load DEM button at the top of this panel.</div>
 
       </div>
     </details>

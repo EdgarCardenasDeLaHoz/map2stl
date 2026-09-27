@@ -13,6 +13,70 @@
     </div>
 
     <div class="city-table-panel-body">
+      <!-- Height summary: where the heights came from, how they spread, and the
+           tallest buildings (click to select, same as clicking on the map). -->
+      <div v-if="summary.total" class="city-heights" id="cityHeightSummary">
+        <div class="city-heights-title">
+          Heights <span class="city-heights-meta">{{ summary.withHeight }} of {{ summary.total }} buildings</span>
+        </div>
+        <div class="city-source-list">
+          <span v-for="g in summary.groups" :key="g.key"
+                :class="['city-source-chip', 'src-' + g.key]"
+                :title="sourceTitle(g.key)">
+            {{ g.label }} <b>{{ g.count }}</b> <span class="city-source-pct">{{ pct(g.share) }}</span>
+          </span>
+        </div>
+        <div v-if="summary.warnDefault" class="city-heights-warn">
+          ⚠ {{ pct(summary.defaultShare) }} of buildings ({{ summary.defaultCount }}) use the default height —
+          no tag, levels, lidar or raster value was found, so their heights are a guess.
+        </div>
+
+        <svg v-if="summary.histogram.maxCount" class="city-height-hist" :viewBox="`0 0 ${HIST_W} ${HIST_H + 12}`"
+             preserveAspectRatio="none" role="img" aria-label="Histogram of building heights">
+          <rect v-for="(b, i) in summary.histogram.bins" :key="i"
+                :x="i * binPx + 1" :width="Math.max(binPx - 2, 1)"
+                :y="HIST_H - barPx(b.count)" :height="barPx(b.count)"
+                class="city-height-bar">
+            <title>{{ b.lo }}–{{ b.hi }} m: {{ b.count }}</title>
+          </rect>
+          <text x="0" :y="HIST_H + 10" class="city-height-axis">0 m</text>
+          <text :x="HIST_W" :y="HIST_H + 10" text-anchor="end" class="city-height-axis">
+            {{ summary.histogram.bins[summary.histogram.bins.length - 1].hi }} m
+          </text>
+        </svg>
+
+        <details class="city-tallest" open>
+          <summary>Tallest buildings</summary>
+          <ol class="city-tallest-list">
+            <li v-for="t in summary.tallest" :key="t.index"
+                :class="{ selected: selectedIndex === t.index }"
+                :data-building-index="t.index"
+                @click="selectBuilding(t.index)">
+              <span class="city-tallest-name">{{ rowLabel(t.index) }}</span>
+              <span class="city-tallest-h">{{ t.height.toFixed(1) }} m</span>
+              <span class="city-tallest-src">{{ t.overridden ? 'override' : t.source }}</span>
+            </li>
+          </ol>
+        </details>
+
+        <!-- Per-building override, sent with the City Model build as layer_data -->
+        <div v-if="selectedIndex != null && selectedFeature" class="city-height-edit" id="cityHeightEdit">
+          <div class="city-height-edit-title">{{ rowLabel(selectedIndex) }} <span class="city-building-sub">#{{ selectedIndex + 1 }}</span></div>
+          <div class="city-height-edit-row">
+            <label for="cityHeightOverrideInput">Height (m)</label>
+            <input id="cityHeightOverrideInput" v-model="overrideDraft" type="number" min="0.5" max="1000" step="0.5"
+                   class="ctrl-input-sm" @keydown.enter="applyOverride">
+            <button type="button" class="btn btn-secondary btn-xs" @click="applyOverride">Set</button>
+            <button v-if="selectedOverride != null" type="button" class="btn btn-secondary btn-xs"
+                    title="Back to the fetched height" @click="clearOverride">Reset</button>
+          </div>
+          <div class="city-height-edit-note">
+            Fetched: {{ originalHeightText }} ({{ selectedFeature.properties?.height_source || 'unknown' }}).
+            <template v-if="overrideCount">{{ overrideCount }} override{{ overrideCount === 1 ? '' : 's' }} will be sent with the City Model build.</template>
+          </div>
+        </div>
+      </div>
+
       <div class="city-table-toolbar">
         <input
           v-model="searchText"
@@ -51,7 +115,7 @@
                 <div class="city-building-name">{{ row.label }}</div>
                 <div class="city-building-sub">#{{ row.index + 1 }}</div>
               </td>
-              <td>{{ row.heightText }}</td>
+              <td :class="{ 'city-overridden': overrides[row.index] != null }">{{ heightCell(row) }}</td>
               <td>{{ row.levelsText }}</td>
               <td>{{ row.sourceText }}</td>
               <td>{{ row.geometryText }}</td>
@@ -82,7 +146,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue';
+import { useAppStore } from '../../stores/app';
+import { summarizeBuildingHeights } from '../../../modules/layers/building-heights.js';
 
 type BuildingRow = {
   index: number;
@@ -103,6 +169,12 @@ const selectedIndex = ref<number | null>(null);
 const pageSize = 20;
 const buildingRows = ref<BuildingRow[]>([]);
 const panelWidth = ref(420);
+const store = useAppStore();
+// The features behind buildingRows, for the height summary and overrides.
+const buildingFeatures = shallowRef<any[]>([]);
+
+const HIST_W = 240;
+const HIST_H = 48;
 
 const PANEL_MIN_WIDTH = 260;
 const PANEL_MAX_WIDTH = 900;
@@ -138,6 +210,14 @@ function _geomCentroid(geom: any): [number, number] | null {
 
 function _buildRows() {
   const features = (window as any).appState?.osmCityData?.buildings?.features || [];
+  // Raw, so summarising a few thousand features does not track every property.
+  const raw = toRaw(features);
+  // Overrides are keyed by feature index, so they only mean something for the
+  // building set they were made on.
+  if (raw !== buildingFeatures.value && (raw.length || buildingFeatures.value.length)) {
+    store.cityHeightOverrides = {};
+  }
+  buildingFeatures.value = raw;
   buildingRows.value = features.map((feat: any, index: number) => {
     const props = feat?.properties || {};
     const centroid = _geomCentroid(feat?.geometry);
@@ -153,6 +233,66 @@ function _buildRows() {
       centroidText: centroid ? `${centroid[1].toFixed(5)}, ${centroid[0].toFixed(5)}` : '—',
     };
   });
+}
+
+// ── Height summary + overrides ───────────────────────────────────────────────
+const overrides = computed<Record<number, number>>(() => store.cityHeightOverrides || {});
+const overrideCount = computed(() => Object.keys(overrides.value).length);
+const summary = computed(() => summarizeBuildingHeights(buildingFeatures.value, { overrides: overrides.value }));
+const binPx = computed(() => HIST_W / Math.max(summary.value.histogram.bins.length, 1));
+function barPx(count: number) {
+  const max = summary.value.histogram.maxCount || 1;
+  return count ? Math.max(1, (count / max) * HIST_H) : 0;
+}
+function pct(share: number) {
+  return `${Math.round(share * 100)}%`;
+}
+const SOURCE_TITLES: Record<string, string> = {
+  osm_tag: 'OSM height / building:height tag',
+  osm_levels: 'OSM building:levels × metres per floor',
+  lidar: 'Lidar point cloud (e.g. USGS 3DEP)',
+  raster: 'Raster height model (nDSM / WSF3D / GHSL) or merged sources',
+  default: 'No data — fixed default height',
+  unknown: 'No height_source on the feature',
+};
+function sourceTitle(key: string) {
+  const raw = summary.value.sources.map(s => `${s.source}: ${s.count}`).join(', ');
+  return `${SOURCE_TITLES[key] || key}\n\nAll sources: ${raw}`;
+}
+function rowLabel(index: number) {
+  return buildingRows.value[index]?.label ?? `Building ${index + 1}`;
+}
+function heightCell(row: BuildingRow) {
+  const o = overrides.value[row.index];
+  return o != null ? `${o.toFixed(1)} m*` : row.heightText;
+}
+
+const selectedFeature = computed(() =>
+  selectedIndex.value != null ? buildingFeatures.value[selectedIndex.value] ?? null : null);
+const selectedOverride = computed(() =>
+  selectedIndex.value != null ? overrides.value[selectedIndex.value] ?? null : null);
+const originalHeightText = computed(() => {
+  const h = _toFiniteNumber(selectedFeature.value?.properties?.height_m);
+  return h != null ? `${h.toFixed(1)} m` : '—';
+});
+const overrideDraft = ref('');
+watch([selectedIndex, selectedOverride], () => {
+  const h = selectedOverride.value ?? _toFiniteNumber(selectedFeature.value?.properties?.height_m);
+  overrideDraft.value = h != null ? String(Math.round(h * 10) / 10) : '';
+}, { immediate: true });
+
+function applyOverride() {
+  const index = selectedIndex.value;
+  const h = parseFloat(String(overrideDraft.value));
+  if (index == null || !Number.isFinite(h) || h <= 0) return;
+  store.cityHeightOverrides = { ...overrides.value, [index]: h };
+}
+function clearOverride() {
+  const index = selectedIndex.value;
+  if (index == null) return;
+  const next = { ...overrides.value };
+  delete next[index];
+  store.cityHeightOverrides = next;
 }
 
 const filteredRows = computed(() => {
@@ -581,6 +721,133 @@ onBeforeUnmount(() => {
   font-size: 9px;
   color: #7a7a7a;
   line-height: 1.2;
+}
+
+.city-heights {
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  font-size: 10px;
+  color: #ccc;
+}
+.city-heights-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ddd;
+  margin-bottom: 4px;
+}
+.city-heights-meta {
+  font-weight: 400;
+  color: #888;
+  margin-left: 4px;
+}
+.city-source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.city-source-chip {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #2a2a2a;
+  border-left: 3px solid #666;
+  white-space: nowrap;
+}
+.city-source-chip.src-osm_tag { border-left-color: #4caf50; }
+.city-source-chip.src-osm_levels { border-left-color: #8bc34a; }
+.city-source-chip.src-lidar { border-left-color: #29b6f6; }
+.city-source-chip.src-raster { border-left-color: #ab47bc; }
+.city-source-chip.src-default { border-left-color: #e67e22; }
+.city-source-pct {
+  color: #888;
+}
+.city-heights-warn {
+  margin-top: 5px;
+  color: #e67e22;
+  line-height: 1.35;
+}
+.city-height-hist {
+  display: block;
+  width: 100%;
+  height: 64px;
+  margin-top: 6px;
+}
+.city-height-bar {
+  fill: #4a9fd4;
+}
+.city-height-axis {
+  font-size: 9px;
+  fill: #888;
+}
+.city-tallest {
+  margin-top: 6px;
+}
+.city-tallest summary {
+  cursor: pointer;
+  color: #aaa;
+  font-size: 10px;
+}
+.city-tallest-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.city-tallest-list li {
+  display: flex;
+  gap: 6px;
+  padding: 1px 2px;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.city-tallest-list li:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.city-tallest-list li.selected {
+  background: rgba(255, 210, 77, 0.14);
+}
+.city-tallest-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.city-tallest-h {
+  color: #eee;
+  font-variant-numeric: tabular-nums;
+}
+.city-tallest-src {
+  color: #777;
+  width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.city-height-edit {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #2a2a2a;
+}
+.city-height-edit-title {
+  font-weight: 600;
+  color: #eee;
+  margin-bottom: 3px;
+}
+.city-height-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.city-height-edit-row input {
+  width: 64px;
+}
+.city-height-edit-note {
+  margin-top: 3px;
+  color: #888;
+  line-height: 1.35;
+}
+.city-overridden {
+  color: #ffd24d !important;
 }
 
 .city-table-pagination {

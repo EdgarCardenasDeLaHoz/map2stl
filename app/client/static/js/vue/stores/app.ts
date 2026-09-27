@@ -77,7 +77,16 @@ export const useAppStore = defineStore('app', {
         _satImgRawCanvas: null as HTMLCanvasElement | null,
         _satImgBbox: null as BBox | null,
 
+        // ── City building edits ───────────────────────────────────────────────
+        // Buildings-panel height overrides, keyed by index into
+        // osmCityData.buildings.features; sent with the City Model build as
+        // layer_data. Reset whenever a new building set loads.
+        cityHeightOverrides: {} as Record<number, number>,
+
         // ── 3D viewer ─────────────────────────────────────────────────────────
+        // Extrude preview lifecycle, set by model-viewer.js:previewModelIn3D;
+        // ModelContainer.vue words its empty state from it.
+        modelPreviewState: 'idle' as 'idle' | 'building' | 'ready' | 'error',
         generatedModelData: null as unknown,
         terrainMesh: null as unknown,
         viewerScene: null as unknown,

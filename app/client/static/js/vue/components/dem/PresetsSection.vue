@@ -5,12 +5,20 @@
       <div class="param-group">
         <label for="presetSelect">Load Preset:</label>
         <select id="presetSelect" class="ctrl-select" style="padding:6px;">
+          <!-- Rebuilt by presets.js:updatePresetSelect() at init -->
           <option value="">-- Select Preset --</option>
-          <option value="default">Default</option>
-          <option value="high-detail">High Detail</option>
-          <option value="print-ready">Print Ready</option>
-          <option value="mountain">Mountain Focus</option>
-          <option value="coastal">Coastal Detail</option>
+          <optgroup label="Workflow (source, vertical, layers, puzzle)">
+            <option value="workflow:city">City</option>
+            <option value="workflow:mountain">Mountain</option>
+            <option value="workflow:coast">Coast</option>
+          </optgroup>
+          <optgroup label="View">
+            <option value="default">Default</option>
+            <option value="high-detail">High Detail</option>
+            <option value="print-ready">Print Ready</option>
+            <option value="mountain">Mountain</option>
+            <option value="coastal">Coastal</option>
+          </optgroup>
         </select>
       </div>
       <div class="preset-buttons">
@@ -29,7 +37,7 @@
           <button id="cancelSavePresetBtn"  class="btn btn-secondary" style="flex:1;">Cancel</button>
         </div>
       </div>
-      <div style="font-size:10px;color:#888;margin-top:8px;">Saves: Dimension, Depth/Water scales, Colormap, Elevation curve</div>
+      <div style="font-size:10px;color:#888;margin-top:8px;">Workflow presets (also the buttons at the top of this panel) set DEM source, resolution, vertical scale, City Model layers and puzzle. View presets and saved presets: Dimension, Depth/Water scales, Colormap, Elevation curve.</div>
     </div>
   </CollapsibleSection>
 </template>

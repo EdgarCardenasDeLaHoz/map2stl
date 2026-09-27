@@ -24,21 +24,24 @@
     <div class="dem-controls" id="demControls">
       <div class="dem-controls-inner" id="demControlsInner">
 
-        <!-- Save Settings row — pinned at top across tabs for quick access -->
-        <div v-show="activeTab==='fetch'" id="settingsSaveRow" class="row-gap6" style="padding:4px 0 8px;border-bottom:1px solid #333;margin-bottom:6px;">
-          <button id="saveRegionSettingsBtn" class="btn btn-primary"
-                  style="flex:1;padding:6px 0;font-size:14px;"
-                  aria-label="Save region settings"
-                  title="Save all current panel settings for the selected region">💾</button>
-          <button id="clearRegionCacheBtn" class="btn btn-secondary"
-                  style="padding:6px 8px;font-size:14px;"
+        <!-- Primary actions — pinned at the top of the Fetch tab. Load DEM is the
+             step everything else depends on, so it leads; its handler is wired
+             by id in event-listeners-map.js (window.loadDEM). Source and
+             resolution stay under Fetch Layers → DEM Source. -->
+        <div v-show="activeTab==='fetch'" id="settingsSaveRow" class="settings-primary-row">
+          <button id="loadDemBtn" class="btn btn-primary settings-load-dem-btn"
+                  title="Fetch the DEM for the selected region with the source and resolution under Fetch Layers → DEM Source">🏔 Load DEM</button>
+          <button id="saveRegionSettingsBtn" class="btn btn-secondary settings-save-btn"
+                  title="Save all current panel settings for the selected region">💾 Save settings</button>
+          <button id="clearRegionCacheBtn" class="btn btn-secondary settings-icon-btn"
                   aria-label="Clear region cache"
                   title="Clear all cached data (DEM, water, satellite, etc.) and re-fetch">🗑️</button>
-          <label class="check-label" style="font-size:11px;color:#aaa;white-space:nowrap;" title="Auto-save settings after changes">
-            <input type="checkbox" id="autoSaveEnabled" aria-label="Auto save region settings"> Auto
+          <label class="check-label settings-autosave" title="Auto-save settings after changes (does not load data)">
+            <input type="checkbox" id="autoSaveEnabled" aria-label="Auto save region settings"> Auto-save
           </label>
-          <span id="saveSettingsStatus" style="font-size:10px;color:#888;min-width:60px;text-align:right;"></span>
+          <span id="saveSettingsStatus" class="settings-save-status"></span>
         </div>
+        <WorkflowPresetBar v-show="activeTab==='fetch'" />
 
         <!-- ═══════════ Fetch tab ═══════════ -->
         <div v-show="activeTab==='fetch'">
@@ -109,6 +112,44 @@ import FetchLayersSection    from './FetchLayersSection.vue';
 import CompositeDemSection   from './CompositeDemSection.vue';
 import MeshImportSection     from './MeshImportSection.vue';
 import PresetsSection        from './PresetsSection.vue';
+import WorkflowPresetBar     from './WorkflowPresetBar.vue';
 
 const activeTab = ref<'fetch' | 'view' | 'composite'>('fetch');
 </script>
+<style scoped>
+.settings-primary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid #333;
+  margin-bottom: 6px;
+}
+.settings-load-dem-btn {
+  flex: 1 1 100%;
+  padding: 7px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-save-btn {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.settings-icon-btn {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.settings-autosave {
+  font-size: 11px;
+  color: #aaa;
+  white-space: nowrap;
+}
+.settings-save-status {
+  font-size: 10px;
+  color: #888;
+  min-width: 60px;
+  text-align: right;
+}
+</style>

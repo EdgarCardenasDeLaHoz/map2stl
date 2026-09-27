@@ -15,9 +15,12 @@
  *   window.appState.selectedRegion
  *   window.appState.generatedModelData  (written here, read by _updateWorkflowStepper)
  *   window.appState._updateWorkflowStepper()
+ *   window.appState.osmCityData, cityHeightOverrides  (City Model layer_data)
  *   showLoading(el, msg), hideLoading(el)   — file-top globals in app.js
  *   window.showToast(msg, type)                    — file-top global in app.js
  */
+
+import { buildingsWithOverrides, hasOverrides } from '../layers/building-heights.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -251,6 +254,13 @@ function exportCityModel() {
         return;
     }
     const extra = { layers: _cityLayerSettings() };
+    // Heights edited in the Buildings panel exist only here; send the edited
+    // buildings so the server uses them in place of its cached OSM copy.
+    const overrides = window.appState?.cityHeightOverrides;
+    const buildings = window.appState?.osmCityData?.buildings?.features;
+    if (extra.layers.buildings?.enabled && buildings?.length && hasOverrides(overrides)) {
+        extra.layer_data = { buildings: buildingsWithOverrides(buildings, overrides) };
+    }
     if (document.getElementById('cityPuzzleEnabled')?.checked) {
         extra.puzzle = {
             piece_mm: parseFloat(document.getElementById('cityPieceMm')?.value) || 200,
