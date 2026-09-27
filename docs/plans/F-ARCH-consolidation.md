@@ -65,3 +65,17 @@ boolean helpers. Decisions are recorded in `memory-bank/decisions.md`.
 - Defaults taken without asking: keep both mesh→heightmap methods (`method="bin"|"raycast"`);
   WGS84 metres per degree (110 574 lat, 111 320·cos φ lon); `v2/` is retired per F-FE1;
   delete notebook-only `city2stl/buildings.py`.
+
+## Decision (user, 2026-09-27): one two-stage mesh pipeline
+
+1. **Terrain stage** (raster): DEM source/merges, curve edits, median smoothing, land cover,
+   vegetation, satellite relief, water depth → one terrain heightfield. This is what the
+   composite becomes; its building / road / wall / waterway channels are removed from the
+   mesh path (they stay only for 2D preview and ML rasters). The legacy merge panel goes.
+2. **Feature stage** (vector): `city2stl.city_model` extrudes / drapes / cuts OSM features on
+   the terrain-stage heightfield and merges in 3D.
+
+Every mesh export (terrain STL/OBJ/3MF, preview, puzzle, city model) runs both stages; a
+"terrain only" export is the city model with no feature layers. The city build therefore
+resolves its DEM through the same request path as the other exports (composite spec or
+edited values first, DEM handle otherwise) instead of the raw handle.

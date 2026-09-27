@@ -39,7 +39,18 @@ jobs:
         working-directory: strm2stl
         env:
           PYTHONIOENCODING: utf-8
-        run: python -m pytest -q -p no:cacheprovider
+        run: python -m pytest -q -p no:cacheprovider --junitxml=pytest-report.xml
+
+      - name: Annotate test failures
+        if: failure()
+        shell: python
+        run: |
+          import pathlib, xml.etree.ElementTree as ET
+          for p in pathlib.Path(".").rglob("pytest-report.xml"):
+              for case in ET.parse(p).iter("testcase"):
+                  for bad in list(case.iter("failure")) + list(case.iter("error")):
+                      msg = " ".join((bad.get("message") or "").split())[:900]
+                      print(f"::error title={case.get('classname')}.{case.get('name')}::{msg}")
 
   web:
     runs-on: ubuntu-latest
