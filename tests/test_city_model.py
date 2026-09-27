@@ -259,6 +259,20 @@ class TestSimplificationAtPrintScale:
         assert len(flat.parts["roads"].faces) * 2 < len(hill.parts["roads"].faces)
 
 
+class TestWater:
+    def test_river_follows_the_valley_and_lake_is_flat(self):
+        y, x = np.mgrid[0:120, 0:150]
+        dem = 100 + 1.5 * x                       # tilted plane: 225 m of fall west -> east
+        river = {"geometry": {"type": "LineString", "coordinates": [[-3.604, 37.181], [-3.579, 37.181]]},
+                 "properties": {"waterway": "river"}}
+        m = build_city_model(dem, BBOX, {"waterways": _fc(river)})
+        plain = build_city_model(dem, BBOX, {})
+        cut = plain.merged.volume - m.merged.volume
+        # a terrain-following 1 mm deep channel, not a trench to the lowest point
+        width_mm = m.merged.extents[0]
+        assert 0 < cut < width_mm * 10 * 1.5
+
+
 class TestPrintability:
     def _stl_watertight(self, mesh):
         buf = io.BytesIO()

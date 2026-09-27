@@ -970,20 +970,11 @@ def fetch_and_rasterize_hydrology(
 
 
 def merge_rivers_with_dem(dem: np.ndarray, rivers: np.ndarray) -> np.ndarray:
+    """Carve a river depression grid into a DEM.
+
+    ``rivers`` holds depths relative to the ground (negative, 0 off-river; see
+    :func:`rasterize_hydrorivers`), so they are added to the DEM. Taking the
+    minimum of the two, as this once did, set every river cell above sea level
+    to the absolute depth (-5 m) instead of 5 m below its own terrain.
     """
-    Merge river depression grid with DEM using minimum operation.
-
-    Rivers are merged as depressions (lower elevations win).
-
-    Args:
-        dem: DEM elevation grid (float32)
-        rivers: River elevation grid with depressions (float32)
-
-    Returns:
-        Merged grid (float32)
-    """
-    # Only apply rivers where elevation != 0
-    rivers_mask = rivers != 0.0
-    merged = dem.copy()
-    merged[rivers_mask] = np.minimum(dem[rivers_mask], rivers[rivers_mask])
-    return merged
+    return (dem + np.minimum(rivers, 0.0)).astype(dem.dtype, copy=False)

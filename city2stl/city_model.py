@@ -487,6 +487,13 @@ def _slab(poly: Polygon, terrain: Terrain, top_off: float, bottom_off: float) ->
     return _close_surface(top, f, lambda xy: terrain.sample(xy[:, 0], xy[:, 1]) + bottom_off)
 
 
+def _is_flowing_water(props: dict) -> bool:
+    """A river, stream or canal (line or riverbank area), not a lake or the sea."""
+    if props.get("waterway"):
+        return True
+    return str(props.get("water") or "") in ("river", "stream", "canal", "stream_pool")
+
+
 def build_layer(name: str, features: list[dict], style: LayerStyle,
                 terrain: Terrain) -> tuple[list[Mesh], dict]:
     """Solids for one layer, plus counts for the report."""
@@ -505,9 +512,15 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
             if m is not None:
                 solids.append(m)
     elif style.mode == "water":
+        # Standing water (lakes, reservoirs, the sea) is cut flat below its lowest
+        # shore; flowing water follows the valley floor. Cut flat, a river on a
+        # slope became a trench down to its lowest point along the whole course.
         lo, hi = terrain.ranges_under(polys)
-        for poly, l_, h_ in zip(polys, lo, hi, strict=True):
-            m = _prism(poly, max(l_ - style.offset_mm, 0.1), h_ + 1.0)
+        for poly, pr, l_, h_ in zip(polys, props, lo, hi, strict=True):
+            if _is_flowing_water(pr):
+                m = _slab(poly, terrain, 1.0, -style.offset_mm)
+            else:
+                m = _prism(poly, max(l_ - style.offset_mm, 0.1), h_ + 1.0)
             if m is not None:
                 solids.append(m)
     else:
