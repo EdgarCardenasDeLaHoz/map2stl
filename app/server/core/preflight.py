@@ -102,19 +102,16 @@ def _terrain_faces_estimate(z: np.ndarray, tol: float) -> tuple[int, int]:
 def _cached_layers(bbox: dict, names: list[str], data: dict) -> tuple[dict, list[str], bool]:
     """The cached OSM payload for ``names`` (never fetched), the names missing, and
     whether the payload is one ``city_data.get_city_layers`` would refetch (stale).
-    Reads the entry the build would (``city_model_task.city_osm_params``)."""
-    from app.server.core.cache import osm_cache_key, read_osm_cache
+    Reads the entry the build would (``city_model_task.city_osm_params``), or
+    derives it from a finer / enclosing one exactly as the build would
+    (``city_data.lookup_city_layers``)."""
+    from app.server.core.city_data import lookup_city_layers
     from app.server.core.city_model_task import city_osm_params
-    from city2stl.cache_policy import (
-        city_cache_missing_building_parts,
-        city_cache_missing_height_source,
-    )
 
     tol, min_area = city_osm_params(data)
-    key = osm_cache_key(bbox["north"], bbox["south"], bbox["east"], bbox["west"], tol, min_area)
-    cached = read_osm_cache(key) or {}
-    stale = bool(cached) and (city_cache_missing_height_source(cached)
-                              or city_cache_missing_building_parts(cached))
+    cached, status = lookup_city_layers(bbox["north"], bbox["south"], bbox["east"], bbox["west"],
+                                        names, tol, min_area)
+    stale = status in ("stale", "stale_buildings")
     have = {n: cached[n] for n in names if isinstance(cached.get(n), dict)}
     return have, [n for n in names if n not in have], stale
 
@@ -139,7 +136,13 @@ def preflight(data: dict) -> dict:
         grid_edges,
         knob_size,
     )
-    from city2stl.city_model import Terrain, layer_preflight, resolve_layers, terrain_tolerance
+    from city2stl.city_model import (
+        Terrain,
+        filter_trails,
+        layer_preflight,
+        resolve_layers,
+        terrain_tolerance,
+    )
 
     t0 = time.perf_counter()
     fmt = str(data.get("format") or "city")
@@ -190,15 +193,31 @@ def preflight(data: dict) -> dict:
         if missing:
             warnings.append("Not cached yet (fetched at build time, not counted here): "
                             + ", ".join(missing))
-        if "trails" in enabled:
-            warnings.append("Trails are fetched at build time and not counted here")
         terr = Terrain(np.asarray(z, np.float64), p.bbox, field.scale)
+        trail_stats = None
+        if "trails" in enabled and "trails" not in layers:
+            # Counted only when already cached (never fetched here), filtered as the
+            # build filters them (city_model.filter_trails).
+            from app.server.core.city_model_task import _trails
+
+            got = _trails(p.bbox, cached_only=True)
+            if got is None:
+                warnings.append("Trails are fetched at build time and not counted here")
+            else:
+                need = [n for n in ("buildings", "roads") if n not in layers]
+                ctx = {**(_cached_layers(p.bbox, need, data)[0] if need else {}), **layers}
+                kept, trail_stats = filter_trails(
+                    got["features"], terr, (ctx.get("buildings") or {}).get("features"),
+                    (ctx.get("roads") or {}).get("features"))
+                layers["trails"] = {"type": "FeatureCollection", "features": kept}
         tin_density = faces / 4 / max(width * depth, 1e-9)
         for name, fc in layers.items():
             feats = (fc or {}).get("features") or []
             if not feats:
                 continue
             st = layer_preflight(name, feats, styles[name], terr, tin_density=tin_density)
+            if name == "trails" and trail_stats:
+                st.update(trail_stats)
             report["layers"][name] = st
             faces += st.get("faces_est", 0)
             volume += st.get("volume_mm3", 0.0)

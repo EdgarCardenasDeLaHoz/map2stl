@@ -22,6 +22,7 @@ import logging
 import numpy as np
 from numpy2stl.raster import burn_polygons
 
+from geo2stl.cache import json_cache_key, read_json_cache, write_json_cache
 from geo2stl.geo import M_PER_DEG_LAT, M_PER_DEG_LON_EQ
 from geo2stl.osm import use_overpass_endpoint
 
@@ -37,10 +38,39 @@ OSM_SKI_TAGS = {
     "piste:type": True,
     "route": ["piste", "ski"],
 }
+# Hiking = paths and tracks (and hiking / foot route relations). Footways are
+# fetched but kept only with a hiking signal (is_hiking_trail): in a town they are
+# sidewalks, crossings and plazas (Granada: 3,605 footways, 84 % in the built-up
+# area, 46 % along roads), not trails. Steps are town stairs; not requested.
 OSM_HIKING_TAGS = {
-    "highway": ["path", "footway", "track", "bridleway", "steps"],
+    "highway": ["path", "track", "bridleway", "footway"],
     "route": ["hiking", "foot"],
 }
+_HIKING_WAYS = {"path", "track", "bridleway"}
+_FOOTWAY_NOT_TRAIL = {"sidewalk", "crossing", "access_aisle", "traffic_island"}
+_HIKING_SIGNALS = ("sac_scale", "trail_visibility", "name")
+
+
+def _tag(props: dict, key: str) -> str:
+    v = props.get(key)
+    if v is None or (isinstance(v, float) and v != v):   # NaN from a GeoDataFrame
+        return ""
+    return str(v).strip().lower()
+
+
+def is_hiking_trail(props: dict) -> bool:
+    """A hiking trail (not a town footway): a ``route=hiking|foot`` relation, a
+    ``highway=path|track|bridleway``, or a ``highway=footway`` that is not a
+    sidewalk / crossing and carries ``sac_scale``, ``trail_visibility`` or a name."""
+    if _tag(props, "route") in ("hiking", "foot"):
+        return True
+    hw = _tag(props, "highway")
+    if hw in _HIKING_WAYS:
+        return True
+    if hw == "footway":
+        return (_tag(props, "footway") not in _FOOTWAY_NOT_TRAIL
+                and any(_tag(props, k) for k in _HIKING_SIGNALS))
+    return False
 
 # OSM `piste:difficulty` values, ordered easiest to hardest. A feature's class is
 # its index in this tuple plus one, so 0 is free to mean "no usable difficulty
@@ -61,6 +91,20 @@ USFS_TRAILS_URL = (
 # Continental-scale sanity bound for the USFS provider. Outside it the query is a
 # guaranteed empty round trip, so skip the request instead of paying the timeout.
 _USFS_BBOX = (-179.5, 17.0, -64.0, 72.0)  # west, south, east, north
+
+# JSON cache of OsmTrailsLayer.fetch results (geo2stl.cache; TTL in NAMESPACE_TTL).
+TRAILS_CACHE_NAMESPACE = "trails_osm"
+#: Part of the cache key: bump when the tags fetched or the filter change.
+TRAILS_CACHE_VERSION = 2
+
+
+def trails_cache_key(north: float, south: float, east: float, west: float,
+                     categories=CATEGORIES) -> str:
+    """Cache key of an OSM trails fetch: the bbox (to 1e-5 deg, ~1 m) and categories."""
+    return json_cache_key(TRAILS_CACHE_NAMESPACE, TRAILS_CACHE_VERSION,
+                          [round(float(v), 5) for v in (north, south, east, west)],
+                          sorted(categories))
+
 
 # Per-request budget for the Overpass queries. A resort-sized trails query on a
 # healthy mirror answers in under 10 s; 180 s leaves room for a loaded one while
@@ -290,6 +334,24 @@ class OsmTrailsLayer(TrailsLayerBase):
     categories = CATEGORIES
 
     def fetch(self, north, south, east, west, categories=CATEGORIES):
+        """``{category: FeatureCollection}``, cached per bbox + categories.
+
+        A complete answer (every category fetched without a transport failure,
+        empty included) is kept in the ``trails_osm`` JSON cache for the
+        namespace TTL (7 days, like the OSM city layers), so a city build does
+        not query Overpass for trails every time. Failures are never cached.
+        """
+        key = trails_cache_key(north, south, east, west, categories)
+        cached = read_json_cache(TRAILS_CACHE_NAMESPACE, key)
+        if isinstance(cached, dict):
+            logger.debug("OSM trails cache hit: %s", key[:8])
+            return cached
+        out = self._fetch_uncached(north, south, east, west, categories)
+        if out:
+            write_json_cache(TRAILS_CACHE_NAMESPACE, key, out)
+        return out
+
+    def _fetch_uncached(self, north, south, east, west, categories=CATEGORIES):
         try:
             import osmnx as ox
         except ImportError:
@@ -320,10 +382,13 @@ class OsmTrailsLayer(TrailsLayerBase):
                 if err:
                     failures.append(err)
             if "hiking" in categories:
-                out["hiking"], err = self._fetch_tags(
+                fc, err = self._fetch_tags(
                     ox, bbox, OSM_HIKING_TAGS,
-                    ["highway", "sac_scale", "trail_visibility", "name", "route"],
+                    ["highway", "footway", "sac_scale", "trail_visibility", "name", "route"],
                     "hiking")
+                fc["features"] = [f for f in fc.get("features", [])
+                                  if is_hiking_trail(f.get("properties") or {})]
+                out["hiking"] = fc
                 if err:
                     failures.append(err)
 

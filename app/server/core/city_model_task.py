@@ -14,6 +14,7 @@ Request (``POST /api/export/start`` with ``format="city"``)::
     median_size     DEM median filter (default 3; 0/1 = off)
     (legacy names mm_per_px, fit_height_mm, base_mm are still accepted)
     layers          {layer: {enabled, mode, offset_mm, height_scale, line_width_m, ...}}
+                    (trails are off unless enabled here; only then are they fetched)
     layer_data      {layer: FeatureCollection} to use instead of the cached OSM layer
     simplify_tolerance, min_area, detail
                     the Cities panel settings the OSM layers were loaded with, so the
@@ -94,9 +95,19 @@ def city_osm_params(data: dict) -> tuple[float, float]:
     return tol, min_area
 
 
-def _trails(bbox: dict) -> dict:
-    from geo2stl.trails import OsmTrailsLayer
-    got = OsmTrailsLayer().fetch(bbox["north"], bbox["south"], bbox["east"], bbox["west"])
+def _trails(bbox: dict, cached_only: bool = False) -> dict | None:
+    """Ski + hiking trails for the bbox as one FeatureCollection (OSM, cached 7 days
+    by ``geo2stl.trails``). ``cached_only``: None instead of a fetch on a miss."""
+    from geo2stl.cache import read_json_cache
+    from geo2stl.trails import TRAILS_CACHE_NAMESPACE, OsmTrailsLayer, trails_cache_key
+
+    box = (bbox["north"], bbox["south"], bbox["east"], bbox["west"])
+    if cached_only:
+        got = read_json_cache(TRAILS_CACHE_NAMESPACE, trails_cache_key(*box))
+        if not isinstance(got, dict):
+            return None
+    else:
+        got = OsmTrailsLayer().fetch(*box)
     feats = [f for fc in got.values() for f in (fc or {}).get("features", [])]
     return {"type": "FeatureCollection", "features": feats}
 
@@ -151,12 +162,15 @@ def run_city_model(data: dict, task: ExportTask) -> None:
     # Layers the caller edited locally (e.g. SDK roof classification) replace the
     # cached OSM copy, which has no record of those edits.
     layers.update({n: fc for n, fc in (data.get("layer_data") or {}).items() if n in enabled})
-    if "trails" in enabled:
+    trail_context = None
+    if "trails" in enabled:   # optional layer: fetched only when the request enables it
         task.update(20, "Loading trails...")
         try:
             layers["trails"] = _trails(bbox)
         except Exception as exc:
             logger.warning("Trails skipped: %s", exc)
+        # Where the town is, for filter_trails, even with buildings / roads not built.
+        trail_context = {n: osm[n] for n in ("buildings", "roads") if isinstance(osm.get(n), dict)}
 
     landmark_overrides = {}
     if data.get("landmark_overrides") and "buildings" in layers:
@@ -172,7 +186,8 @@ def run_city_model(data: dict, task: ExportTask) -> None:
     task.update(30, "Building model...")
     model = build_on_terrain(field.z_mm, bbox, field.scale, layers,
                              layer_overrides=data.get("layers"),
-                             landmark_overrides=landmark_overrides)
+                             landmark_overrides=landmark_overrides,
+                             trail_context=trail_context)
     report = dict(model.report)
     if p.composite_error:
         report["composite_error"] = p.composite_error

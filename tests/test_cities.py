@@ -150,11 +150,16 @@ class TestCitiesCoarseDetailTier:
         mock_result = {"buildings": empty_fc, "roads": empty_fc, "waterways": empty_fc}
 
         with patch("app.server.core.city_data.fetch_osm_data", return_value=mock_result) as mock_fn:
-            full_resp = client.post("/api/cities", json={**small_bbox, "detail": "full"})
             coarse_resp = client.post("/api/cities", json={**small_bbox, "detail": "coarse"})
+            full_resp = client.post("/api/cities", json={**small_bbox, "detail": "full"})
+            coarse_again = client.post("/api/cities", json={**small_bbox, "detail": "coarse"})
 
-        assert mock_fn.call_count == 2  # neither hit the other's cache entry
+        # Full is finer than coarse: it cannot be served from the coarse entry, but
+        # coarse can be derived from it (city_data.lookup_city_layers) - and was
+        # already cached under its own key.
+        assert mock_fn.call_count == 2
         assert full_resp.json()["cache_key"] != coarse_resp.json()["cache_key"]
+        assert coarse_again.json()["cache_key"] == coarse_resp.json()["cache_key"]
 
 
 # ---------------------------------------------------------------------------

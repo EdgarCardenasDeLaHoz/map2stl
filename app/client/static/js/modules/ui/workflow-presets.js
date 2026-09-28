@@ -63,15 +63,17 @@ const COSINE = { id: 'paramProjection', value: 'cosine' };
 export const WORKFLOW_PRESETS = {
     city: {
         label: 'City',
-        title: 'SRTM 30 m at 1000 px, cosine projection, true-scale vertical, every city layer on, '
-            + 'puzzle pieces sized to the bed',
+        title: 'SRTM 30 m at 1000 px, cosine projection, true-scale vertical, every city layer on '
+            + 'except trails, puzzle pieces sized to the bed',
         fields: [
             COSINE,   // before paramDim: its change event reloads the DEM right away
             { id: 'paramDemSource', value: 'SRTMGL1' },
             { id: 'paramDim', value: '1000' },
             { id: 'exportZMode', value: 'auto' },
             { id: 'exportExaggeration', value: '1' },
-            ...ALL_CITY_LAYERS.map(id => layer(id, true)),
+            // Trails are optional (off by default): paths are the point of a hiking /
+            // mountain model, clutter on a city one.
+            ...ALL_CITY_LAYERS.map(id => layer(id, id !== 'trails')),
             { id: 'cityPuzzleEnabled', checked: true },
             { id: 'cityPieceMm', value: BED_PIECE },
         ],
@@ -112,7 +114,7 @@ export const WORKFLOW_PRESETS = {
     },
     coast: {
         label: 'Coast',
-        title: 'SRTM 30 m at 1000 px, sea-level cap, water engraved 1 mm, buildings on',
+        title: 'SRTM 30 m at 1000 px, sea-level cap, water engraved 1 mm, buildings on, trails off',
         fields: [
             { id: 'paramDemSource', value: 'SRTMGL1' },
             { id: 'paramDim', value: '1000' },
@@ -121,6 +123,7 @@ export const WORKFLOW_PRESETS = {
             { id: 'cityLayer_waterways_mode', value: 'engraved' },
             { id: 'cityLayer_waterways_value', value: '1' },
             layer('buildings', true),
+            layer('trails', false),
         ],
     },
 };

@@ -84,3 +84,50 @@ Measured on Granada + Alhambra (797×575 px, 1:3472, 588 s, 1.07 M faces, 12 pie
 - Overpass: 10 s connect timeout separate from the 300 s query budget (`geo2stl/osm.py`).
 - Two-stage pipeline: `build_on_terrain` is the feature stage; `export.terrain_stage`
   the terrain stage; STL/OBJ/3MF/puzzle/city all run both (see F-ARCH).
+
+### Done (2026-09-27, build speed: reduction + caches)
+
+Granada (23,937 buildings, trails on, cached DEM + OSM): build 138 s -> 101 s cold,
+8 s unchanged rebuild; pre-flight 37 s -> 21 s cold / 14 s warm; 3MF 31 s -> 5 s;
+puzzle 39 s -> 17 s; OSM at other panel settings 979 s (refetch) -> 2 s (derived);
+trails 40 s per build (Overpass) -> 0 s (cached).
+
+- **OSM reuse** (`app/server/core/city_data.lookup_city_layers`): a missing
+  (tolerance, min_area) entry is derived from a finer entry for the same or an
+  enclosing bbox (features intersecting the bbox kept whole; buildings under min_area
+  dropped; buildings / waterways re-simplified). Entries now carry a `{key}.params.json`
+  sidecar (`geo2stl.cache.list_osm_cache_params`); older ones are found by probing
+  common values. Same staleness rules; a buildings-only-stale candidate supplies its
+  other layers. Pre-flight uses the same lookup.
+- **Trails**: `OsmTrailsLayer.fetch` cached 7 days (`trails_osm`); the layer is off by
+  default and fetched only when enabled; fetch keeps paths / tracks / bridleways /
+  hiking routes and footways with `sac_scale` / `trail_visibility` / a name (no
+  sidewalks, crossings, steps); `city_model.filter_trails` drops trails > 50 % within
+  60 m of buildings or 6 m of roads (`trails_kept` / `trails_dropped`). Granada: 4,293
+  -> 219 fetched -> 136 built.
+- **Print-scale reduction** (`city_model.merge_flat_roofs`): flat, ground-standing,
+  non-part buildings whose absolute top rounds to the same 0.1 mm layer and whose
+  outlines are < 0.4 mm apart become one prism (union, closing 0.2 mm, simplify
+  0.1 mm, lowest skirt to top). Why the absolute top: two roofs in the same print
+  layer print as one surface; a wall between them is invisible. Hillside cities merge
+  little (Granada 779 -> 580 solids); flat Cartagena 475 of 3,065 -> 229 (the
+  fetch already dissolves touching same-height buildings in lon/lat).
+- **Caches** (`city2stl/model_cache.py`; `MODEL_CACHE_VERSION` in every key, bump on
+  geometry changes): layer polygons (shared with the pre-flight), layer union solids
+  (keyed by polygons key, style, heightfield digest, landmark overrides / replaced
+  footprints), terrain TIN, and the finished model. Polygons keep their GEOS
+  precision grid across the cache (WKB drops it; slabs from grid-less copies failed).
+- **Triangle removed from draped slabs** (`triangulate_polygon`): qhull Delaunay plus
+  cavity re-triangulation with GEOS for outline edges it misses (no added points, so
+  the same face count as Triangle's CDT: Granada roads 77,316, green 96,552 faces,
+  identical; 0 rejected). A clip-the-TIN approach was tried first and rejected: 3x the
+  faces and 3-6x slower. `heightfield_tin` keeps Triangle: it only triangulates
+  unique integer pixel points with "Q" (no "p", no segments), and
+  `segmentintersection()` runs only when inserting segments.
+- **Vectorised**: `numpy2stl.core.extrude.prisms` (25k flat roofs in one pass),
+  `Terrain.cells_inside` (replaces rasterio rasterize in `ranges_under`: 8 s -> 0.3 s),
+  `assemble_parts` (only outlines overlapping a part, one padded union + difference),
+  `numpy2stl.io.write3MF` (streamed string formatting, zlib level 1).
+- Left: lossless simplification (35 s) and assembly (20 s) on a cold build; the
+  "Topological inconsistency" message still printed comes from Triangle in
+  `numpy2stl.processing.simplify._triangulate_pslg` (caught; the region is kept as-is).

@@ -75,7 +75,7 @@ describe('applyWorkflowPreset', () => {
     let doc;
     beforeEach(() => { doc = makeDoc(); });
 
-    it('City: source, resolution, vertical, all layers, puzzle sized to the bed', () => {
+    it('City: source, resolution, vertical, all layers but trails, puzzle sized to the bed', () => {
         const { skipped } = applyWorkflowPreset('city', doc);
         expect(skipped).toEqual([]);
         const e = doc.els;
@@ -85,7 +85,9 @@ describe('applyWorkflowPreset', () => {
         expect(e.paramProjection.events).toEqual(['input', 'change']);
         expect(e.exportZMode.value).toBe('auto');
         expect(e.exportExaggeration.value).toBe('1');
-        expect(e.cityLayer_trails_enabled.checked).toBe(true);
+        expect(e.cityLayer_buildings_enabled.checked).toBe(true);
+        expect(e.cityLayer_roads_enabled.checked).toBe(true);
+        expect(e.cityLayer_trails_enabled.checked).toBe(false);   // optional, off by default
         expect(e.cityPuzzleEnabled.checked).toBe(true);
         expect(e.cityPieceMm.value).toBe('246');    // 256 bed - 10 mm
         expect(e.paramDim.events).toEqual(['input', 'change']);
@@ -129,9 +131,11 @@ describe('applyWorkflowPreset', () => {
         expect(fresh.els.paramDemSource.value).toBe('h5_local');
     });
 
-    it('Coast: sea-level cap, water engraved 1 mm, buildings on', () => {
+    it('Coast: sea-level cap, water engraved 1 mm, buildings on, trails off', () => {
+        doc.els.cityLayer_trails_enabled.checked = true;
         applyWorkflowPreset('coast', doc);
         const e = doc.els;
+        expect(e.cityLayer_trails_enabled.checked).toBe(false);
         expect(e.exportSeaLevelCap.checked).toBe(true);
         expect(e.cityLayer_waterways_mode.value).toBe('engraved');
         expect(e.cityLayer_waterways_value.value).toBe('1');

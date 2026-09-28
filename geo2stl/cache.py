@@ -16,7 +16,7 @@ Directory layout (under map2stl/cache/, or $MAP2STL_CACHE)
   ├── dem/        {key}.npz  +  {key}.json
   ├── water/      {key}.npz  +  {key}.json
   ├── satellite/  {key}.npz  +  {key}.json
-  ├── osm/        {key}.json.gz
+  ├── osm/        {key}.json.gz  (+ {key}.params.json: its bbox, tol, min_area)
   ├── geocode/    {key}.json.gz   (JSON cache: Nominatim search results)
   ├── landmarks/  {key}.json.gz   (JSON cache: notable OSM features near a bbox)
   └── opentopo/   {key}.tif  (raw GeoTIFFs from OpenTopography API)
@@ -62,8 +62,14 @@ NAMESPACE_TTL = {
     "opentopo":   90 * 86400,   # 90 days (raw GeoTIFFs rarely change)
     "hydrology":  30 * 86400,   # 30 days (river network rarely changes)
     "trails":      7 * 86400,   # 7 days (OSM-derived; tracks OSM's own TTL)
+    "trails_osm":  7 * 86400,   # 7 days (trail FeatureCollections, geo2stl.trails)
     "geocode":    30 * 86400,   # 30 days (Nominatim search results)
     "landmarks":   7 * 86400,   # 7 days (OSM notable features near a bbox edge)
+    # city2stl.model_cache: derived city-model geometry (keyed by content digests)
+    "city_polygons": 30 * 86400,  # layer polygons after print-scale simplification
+    "city_solids":   30 * 86400,  # finished per-layer union solids
+    "city_terrain":  30 * 86400,  # adaptive terrain TIN solids
+    "city_models":   30 * 86400,  # finished models (merged + parts) for unchanged inputs
 }
 
 
@@ -145,18 +151,21 @@ def _atomic_write(path: Path, write) -> None:
 
 def write_array_cache(namespace: str, key: str,
                       arrays: dict[str, np.ndarray],
-                      metadata: dict[str, Any] | None = None) -> None:
+                      metadata: dict[str, Any] | None = None,
+                      keep_dtype: bool = False) -> None:
     """Save ``arrays`` as float32 .npz and ``metadata`` as .json sidecar.
 
-    Both files are written atomically; the sidecar goes last, so its presence
-    means the .npz beside it is complete.
+    ``keep_dtype`` stores the arrays as they are (meshes: float64 vertices that
+    must stay bit-exact, integer faces). Both files are written atomically; the
+    sidecar goes last, so its presence means the .npz beside it is complete.
     """
     d = _array_dir(namespace)
     npz_path = d / f"{key}.npz"
     json_path = d / f"{key}.json"
     try:
         # Downcast to float32 to keep files small
-        save_dict = {k: v.astype(np.float32) for k, v in arrays.items()}
+        save_dict = {k: (np.asarray(v) if keep_dtype else np.asarray(v).astype(np.float32))
+                     for k, v in arrays.items()}
         _atomic_write(npz_path, lambda f: np.savez_compressed(f, **save_dict))
         meta = dict(metadata or {})
         meta["_cached_at"] = time.time()
@@ -217,8 +226,15 @@ def _osm_dir() -> Path:
     return d
 
 
-def write_osm_cache(key: str, data: dict) -> None:
-    """Save GeoJSON dict as gzip-compressed JSON."""
+def write_osm_cache(key: str, data: dict, params: dict | None = None) -> None:
+    """Save GeoJSON dict as gzip-compressed JSON.
+
+    ``params`` (``north/south/east/west/tol/min_area``, as passed to
+    :func:`osm_cache_key`) is written beside the entry as ``{key}.params.json``:
+    the key is a hash, so without it a reader looking for *another* entry for the
+    same (or an enclosing) bbox would have to decompress every payload
+    (:func:`list_osm_cache_params`).
+    """
     path = _osm_dir() / f"{key}.json.gz"
     try:
         compressed = gzip.compress(json.dumps(
@@ -226,12 +242,42 @@ def write_osm_cache(key: str, data: dict) -> None:
         _atomic_write(path, lambda f: f.write(compressed))
         logger.debug(
             f"OSM cache written: {key} ({len(compressed) // 1024} KB gz)")
+        if params is not None:
+            write_osm_cache_params(key, params)
     except Exception as e:
         logger.warning(f"write_osm_cache failed ({key}): {e}")
         try:
             path.unlink(missing_ok=True)
         except Exception:
             logger.debug('Could not delete stale OSM cache file', exc_info=True)
+
+
+def write_osm_cache_params(key: str, params: dict) -> None:
+    """Record which bbox and simplification an OSM cache entry holds (sidecar)."""
+    blob = json.dumps({k: v for k, v in params.items() if k != "key"}).encode()
+    try:
+        _atomic_write(_osm_dir() / f"{key}.params.json", lambda f: f.write(blob))
+    except OSError as e:
+        logger.warning(f"write_osm_cache_params failed ({key}): {e}")
+
+
+def list_osm_cache_params() -> list[dict]:
+    """``[{key, north, south, east, west, tol, min_area, ...}]`` of every OSM cache
+    entry that has a params sidecar and is present and within the TTL."""
+    out = []
+    d = _osm_dir()
+    for p in d.glob("*.params.json"):
+        key = p.name[: -len(".params.json")]
+        gz = d / f"{key}.json.gz"
+        try:
+            if not gz.exists() or _is_stale(gz.stat().st_mtime, "osm"):
+                continue
+            meta = json.loads(p.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(meta, dict):
+            out.append({**meta, "key": key})
+    return out
 
 
 def read_osm_cache(key: str, allow_stale: bool = False) -> dict | None:

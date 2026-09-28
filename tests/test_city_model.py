@@ -360,7 +360,8 @@ class TestPrintability:
     def test_thin_lines_are_widened_to_print_width(self):
         trail = {"geometry": {"type": "LineString", "coordinates": [[-3.60, 37.18], [-3.58, 37.18]]},
                  "properties": {"width": "0.5"}}
-        m = build_city_model(_hill(), BBOX, {"trails": _fc(trail)})
+        m = build_city_model(_hill(), BBOX, {"trails": _fc(trail)},
+                             layer_overrides={"trails": {"enabled": True}})
         assert m.report["layers"]["trails"]["widened"] == 1
         ys = m.parts["trails"].vertices[:, 1]
         assert ys.max() - ys.min() >= 0.8 - 1e-6

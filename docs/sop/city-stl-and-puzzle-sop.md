@@ -172,10 +172,19 @@ mesh.
 
 | Situation | Layers on | Notes |
 |---|---|---|
-| Historic city (Granada) | all | trails are the heaviest layer (4,293 paths); drop them for a smaller file |
-| Coastal city (Cartagena) | buildings, landmarks, roads, water, green | Coast preset caps the sea at 0 m |
-| Mountain town (Breckenridge) | buildings, roads, water, trails | green is 612 k faces on steep ground — leave it off |
+| Historic city (Granada) | all but trails (City preset) | trails optional: turn on for the hill paths (Granada: 219 fetched, 136 kept) |
+| Coastal city (Cartagena) | buildings, landmarks, roads, water, green | Coast preset caps the sea at 0 m, trails off |
+| Mountain town (Breckenridge) | buildings, roads, water, trails (Mountain preset: trails on) | green is 612 k faces on steep ground — leave it off |
 | Region > 20 km | none (terrain), water | see §6 |
+
+**Trails** are off by default and fetched only when the layer is on: turn them on for
+hiking / mountain models where the paths are the point. Trails = hiking paths and tracks
+outside town (`highway=path|track|bridleway`, hiking / foot route relations, and
+footways only with `sac_scale`, `trail_visibility` or a name; never sidewalks, crossings
+or steps). City footways are excluded: the build also drops any trail with more than
+half its length within 60 m of buildings or within 6 m of a road (report:
+`trails_kept` / `trails_dropped`). Granada's old trails layer was 4,293 features,
+3,605 of them town footways.
 
 Per layer (Extrude → 📤 Export → City Model table): enabled, mode (extrude / raised / engraved / water),
 height or depth, line width. Printability rules apply to every layer: features narrower
@@ -192,8 +201,32 @@ than 0.8 mm are widened, extruded heights capped at 8 × footprint width (report
    0.01 mm, clipped to the box; extruded features sit on the highest ground under them
    with a skirt down; draped layers are one slab per connected area built on the
    terrain's own vertices; water is cut flat.
+   - **Print-scale reduction** (buildings and other extruded layers): flat-roofed
+     buildings on the ground (not `building:part`, no `min_height`, no landmark override)
+     whose *absolute* top rounds to the same 0.1 mm print layer, and whose outlines are
+     closer than 0.4 mm (one nozzle), are merged into one prism: union, closed by 0.2 mm
+     (a narrower gap fills in on the print anyway), simplified 0.1 mm, from the group's
+     lowest skirt to its top. Pitched roofs, parts and overrides stay individual. Report:
+     `merged_from` buildings → `merged_into` solids. Hillside cities merge little
+     (Granada 779 of 23,937 -> 580 solids: every building's ground differs); flat
+     ones merge more (Cartagena 475 of 3,065 -> 229, buildings faces -1.5 %: the OSM
+     fetch already dissolves touching same-height buildings, so the reduction adds the
+     sub-nozzle gaps and the same-layer neighbours of different heights). Style fields `merge_flat`, `layer_height_mm`, `min_gap_mm`,
+     `outline_tol_mm` (layer overrides) change or disable it.
+   - **Draped slabs** are triangulated without Shewchuk's Triangle: qhull Delaunay of the
+     outline + terrain vertices, outline edges recovered by re-triangulating the crossed
+     triangles with GEOS (`triangulate_polygon`); same face count as before.
 4. **Merge** (manifold3d): union → contacts separated by 0.001 mm (watertight after STL
    welding) → lossless coplanar merge.
+   - **Caches** (`city2stl/model_cache.py`, under `cache/`, 30 days): the terrain TIN
+     (`city_terrain`), each layer's polygons (`city_polygons`, shared with the
+     pre-flight), each layer's union solid (`city_solids`) and the finished model
+     (`city_models`), each keyed by a digest of everything it depends on (features,
+     bbox, scale, style, heightfield, landmark overrides, code version). An unchanged
+     rebuild loads the finished model (Granada: 8 s instead of 101 s); changing one
+     layer's style or a landmark override rebuilds only that layer, then the merge.
+     `MAP2STL_CITY_CACHE=0` disables them. OSM layers loaded at other panel settings are
+     re-derived locally from a finer or larger cached entry instead of refetched.
 5. **Puzzle**: piece outlines from the bed size (or dragged cut positions), then
    - terrain-only (*mask* path, automatic): each piece's top is the terrain TIN's vertices
      inside the outline plus the outline itself (split at the pixel spacing), triangulated
@@ -218,6 +251,7 @@ than 0.8 mm are widened, extruded heights capped at 8 × footprint width (report
 - The city fetch shows per-layer progress, but layers the build needs that *Load Cities*
   does not fetch (railways, green, trails) are fetched from Overpass during the build,
   with no progress shown; during an Overpass outage the build waits on dead mirrors.
+  Trails are then cached for 7 days (`trails_osm`), so only the first build waits.
 - **Export feedback** (fixed 2026-09-27): the progress bar and ✕ Cancel now show during
   every export, toasts stay up for their requested duration, and the browser has no
   fixed time limit: it keeps polling while the server reports progress or its worker

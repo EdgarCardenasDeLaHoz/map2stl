@@ -462,6 +462,58 @@ class TestOverpassFailure:
         assert tried == ["mirror-a", "mirror-b"]
         assert len(out["ski"]["features"]) == 1
 
+    def test_second_fetch_of_a_bbox_is_served_from_the_cache(self, monkeypatch):
+        calls = []
+
+        def _ok(ox, bbox, tags, keep_cols, label):
+            calls.append(label)
+            return _line_fc([[-75.19, 39.95], [-75.11, 39.95]]), None
+
+        monkeypatch.setattr(OsmTrailsLayer, "_endpoints", staticmethod(lambda: [None]))
+        monkeypatch.setattr(OsmTrailsLayer, "_fetch_tags", staticmethod(_ok))
+        first = OsmTrailsLayer().fetch(40.0, 39.9, -75.1, -75.2)
+        second = OsmTrailsLayer().fetch(40.0, 39.9, -75.1, -75.2)
+        assert calls == ["ski", "hiking"]           # the network was asked once
+        assert second == first
+        # Another bbox or category set is its own entry.
+        OsmTrailsLayer().fetch(40.0, 39.9, -75.1, -75.21)
+        OsmTrailsLayer().fetch(40.0, 39.9, -75.1, -75.2, ("ski",))
+        assert calls == ["ski", "hiking", "ski", "hiking", "ski"]
+
+    def test_hiking_keeps_trails_not_town_footways(self, monkeypatch):
+        def _mixed(ox, bbox, tags, keep_cols, label):
+            fc = _line_fc([[-75.19, 39.95], [-75.11, 39.95]])
+            base = fc["features"][0]
+            props = [{"highway": "path"}, {"highway": "footway", "footway": "sidewalk"},
+                     {"highway": "footway", "sac_scale": "hiking"}, {"highway": "steps"},
+                     {"highway": "footway"}, {"route": "hiking"}]
+            return {"type": "FeatureCollection",
+                    "features": [{**base, "properties": p} for p in props]}, None
+
+        monkeypatch.setattr(OsmTrailsLayer, "_endpoints", staticmethod(lambda: [None]))
+        monkeypatch.setattr(OsmTrailsLayer, "_fetch_tags", staticmethod(_mixed))
+        out = OsmTrailsLayer().fetch(40.0, 39.9, -75.1, -75.2, ("hiking",))
+        kept = [f["properties"] for f in out["hiking"]["features"]]
+        assert kept == [{"highway": "path"}, {"highway": "footway", "sac_scale": "hiking"},
+                        {"route": "hiking"}]
+
+    def test_a_failed_fetch_is_not_cached(self, monkeypatch):
+        state = {"fail": True, "calls": 0}
+
+        def _flaky(ox, bbox, tags, keep_cols, label):
+            state["calls"] += 1
+            if state["fail"]:
+                return {"type": "FeatureCollection", "features": []}, f"{label}: 502"
+            return _line_fc([[-75.19, 39.95], [-75.11, 39.95]]), None
+
+        monkeypatch.setattr(OsmTrailsLayer, "_endpoints", staticmethod(lambda: [None]))
+        monkeypatch.setattr(OsmTrailsLayer, "_fetch_tags", staticmethod(_flaky))
+        with pytest.raises(TrailsUpstreamError):
+            OsmTrailsLayer().fetch(40.0, 39.9, -75.1, -75.2, ("ski",))
+        state["fail"] = False
+        out = OsmTrailsLayer().fetch(40.0, 39.9, -75.1, -75.2, ("ski",))
+        assert len(out["ski"]["features"]) == 1
+
     def test_service_raises_rather_than_reporting_an_empty_region(self):
         svc = TrailsService()
         svc.providers = {"osm": _FailingLayer()}

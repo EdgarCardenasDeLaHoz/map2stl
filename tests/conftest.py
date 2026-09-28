@@ -131,6 +131,31 @@ def _isolate_export_tasks():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_disk_cache(request, tmp_path):
+    """Every test gets an empty disk cache (``geo2stl.cache.CACHE_ROOT``).
+
+    Library code now caches by default (trails, city-model layers and terrain), so
+    a test that never asked for ``tmp_data_dir`` would otherwise read results a
+    previous run left in ``Code/cache/`` and write its fakes there. Integration
+    tests keep the real cache. ``tmp_data_dir`` (requested explicitly, so set up
+    after this autouse fixture) redirects it again, to its own folder.
+
+    Set and restored by hand, not with ``monkeypatch``: requesting it here would
+    set it up before ``_isolate_export_tasks`` and so undo a test's patches only
+    after that fixture's teardown ran with them (a patched ``time.monotonic``).
+    """
+    if request.node.get_closest_marker("integration"):
+        yield
+        return
+    import geo2stl.cache as cache_module
+
+    saved = cache_module.CACHE_ROOT
+    cache_module.CACHE_ROOT = tmp_path / "_isolated_cache"
+    yield
+    cache_module.CACHE_ROOT = saved
+
+
+@pytest.fixture(autouse=True)
 def _no_live_height_enhancement(request, monkeypatch):
     """Keep POST /api/cities offline: height enhancement queries lidar and raster services.
 

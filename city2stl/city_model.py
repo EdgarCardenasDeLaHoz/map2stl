@@ -43,7 +43,7 @@ import manifold3d as mf
 import numpy as np
 import shapely
 import trimesh
-from numpy2stl.core.extrude import close_surface, orient_ccw, prism
+from numpy2stl.core.extrude import close_surface, orient_ccw, prism, prisms
 from numpy2stl.core.heightfield import tin_solid
 from numpy2stl.processing.boolean import from_manifold, to_manifold, union
 from numpy2stl.processing.decimate import heightfield_tin
@@ -143,6 +143,12 @@ class LayerStyle:
     min_height_mm: float = 0.4    # extrude: never thinner than this
     min_width_mm: float = PRINT_MIN_WIDTH_MM   # narrower features are widened to this
     max_slenderness: float = MAX_SLENDERNESS   # extrude: height cap as a multiple of width (0 = off)
+    # extrude: print-scale reduction of flat roofs (merge_flat_roofs). Buildings whose
+    # tops round to the same print layer are merged; gaps under min_gap_mm close.
+    merge_flat: bool = True
+    layer_height_mm: float = 0.1  # print layer: tops closer than this print as one
+    min_gap_mm: float = 0.4       # one nozzle: a narrower gap fills in on the print anyway
+    outline_tol_mm: float = 0.1   # simplification of the merged outlines
 
 
 DEFAULT_LAYERS: dict[str, LayerStyle] = {
@@ -153,7 +159,9 @@ DEFAULT_LAYERS: dict[str, LayerStyle] = {
     "churches":       LayerStyle("extrude"),
     "roads":          LayerStyle("raised", offset_mm=0.4, line_width_m=7.0),
     "railways":       LayerStyle("raised", offset_mm=0.3, line_width_m=4.0),
-    "trails":         LayerStyle("raised", offset_mm=0.3, line_width_m=3.0),
+    # Optional (off unless a request enables it): hiking paths and tracks outside
+    # town (geo2stl.trails, filter_trails); the Mountain preset turns it on.
+    "trails":         LayerStyle("raised", enabled=False, offset_mm=0.3, line_width_m=3.0),
     "green":          LayerStyle("raised", offset_mm=0.2),
     "waterways":      LayerStyle("water", offset_mm=1.0, line_width_m=6.0),
 }
@@ -236,19 +244,52 @@ class Terrain:
         lo, hi = np.full(n, np.inf), np.full(n, -np.inf)
         if not n:
             return lo, hi
-        coords, idx = shapely.get_coordinates(np.asarray(polys, dtype=object), return_index=True)
+        arr = np.asarray(polys, dtype=object)
+        coords, idx = shapely.get_coordinates(arr, return_index=True)
         zv = self.sample(coords[:, 0], coords[:, 1])
         np.minimum.at(lo, idx, zv)
         np.maximum.at(hi, idx, zv)
+        k, cells = self.cells_inside(arr)
+        zc = self.z.ravel()[cells]
+        np.minimum.at(lo, k, zc)
+        np.maximum.at(hi, k, zc)
+        return lo, hi
+
+    def cells_inside(self, polys: np.ndarray, max_cells: int = 20_000_000
+                     ) -> tuple[np.ndarray, np.ndarray]:
+        """(polygon index, flat DEM index) of every DEM cell whose centre lies inside
+        each polygon (what ``rasterize`` burns, but overlapping polygons each keep
+        their cells). One vectorised point-in-polygon test over the candidate cells
+        of every bounding box: rasterio's rasterize converted each of 25k footprints
+        through ``__geo_interface__`` (8 s for Granada). Bounding boxes adding up to
+        more than ``max_cells`` cells fall back to rasterize (largest wins overlaps).
+        """
         h, w = self.z.shape
         s = self.scale.mm_per_px
-        labels = rasterize(((p, k + 1) for k, p in enumerate(polys)), out_shape=(h, w),
-                           transform=Affine(s, 0, -0.5 * s, 0, -s, (h - 0.5) * s),
-                           fill=0, dtype="int32")
-        inside = labels > 0
-        np.minimum.at(lo, labels[inside] - 1, self.z[inside])
-        np.maximum.at(hi, labels[inside] - 1, self.z[inside])
-        return lo, hi
+        b = shapely.bounds(polys)
+        ok = np.isfinite(b).all(axis=1)
+        j0 = np.clip(np.ceil(b[:, 0] / s), 0, w)
+        j1 = np.clip(np.floor(b[:, 2] / s), -1, w - 1)
+        i0 = np.clip(np.ceil((h - 1) - b[:, 3] / s), 0, h)      # rows grow southwards
+        i1 = np.clip(np.floor((h - 1) - b[:, 1] / s), -1, h - 1)
+        nj = np.where(ok, np.maximum(j1 - j0 + 1, 0), 0).astype(np.int64)
+        ni = np.where(ok, np.maximum(i1 - i0 + 1, 0), 0).astype(np.int64)
+        cnt = nj * ni
+        total = int(cnt.sum())
+        if total > max_cells:
+            labels = rasterize(((p, k + 1) for k, p in enumerate(polys)), out_shape=(h, w),
+                               transform=Affine(s, 0, -0.5 * s, 0, -s, (h - 0.5) * s),
+                               fill=0, dtype="int32").ravel()
+            cells = np.flatnonzero(labels)
+            return labels[cells] - 1, cells
+        if not total:
+            return np.zeros(0, np.int64), np.zeros(0, np.int64)
+        k = np.repeat(np.arange(len(polys)), cnt)
+        r = np.arange(total) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+        row = i0[k].astype(np.int64) + r // nj[k]
+        col = j0[k].astype(np.int64) + r % nj[k]
+        inside = shapely.contains_xy(polys[k], col * s, ((h - 1) - row) * s)
+        return k[inside], (row * w + col)[inside]
 
 
 def prepare_dem(dem_m: np.ndarray, median_size: int = 3) -> np.ndarray:
@@ -274,9 +315,23 @@ def terrain_tin(z: np.ndarray, max_error: float = TERRAIN_MAX_ERROR_MM,
     return heightfield_tin(z, max_error, seed_step=seed_step, max_iter=max_iter)
 
 
-def terrain_solid(terrain: Terrain, max_error: float = TERRAIN_MAX_ERROR_MM) -> Mesh:
-    """Watertight terrain block: adaptive top surface, side walls, flat bottom at z = 0."""
-    v, f = tin_solid(terrain.z, max_error, mm_per_px=terrain.scale.mm_per_px)
+def terrain_solid(terrain: Terrain, max_error: float = TERRAIN_MAX_ERROR_MM,
+                  cache: bool = False) -> Mesh:
+    """Watertight terrain block: adaptive top surface, side walls, flat bottom at z = 0.
+
+    ``cache``: read / write the solid in the ``city_terrain`` disk cache, keyed by
+    the heightfield's bytes, ``max_error`` and ``mm_per_px`` (city2stl.model_cache).
+    """
+    from city2stl import model_cache
+
+    key = model_cache.terrain_key(terrain.z, max_error, terrain.scale.mm_per_px)
+    hit = model_cache.read_mesh(model_cache.NS_TERRAIN, key) if cache else None
+    if hit is not None:
+        v, f, _ = hit
+    else:
+        v, f = tin_solid(terrain.z, max_error, mm_per_px=terrain.scale.mm_per_px)
+        if cache:
+            model_cache.write_mesh(model_cache.NS_TERRAIN, key, v, f)
     terrain.tin_xy = v[: len(v) // 2, :2]
     return v, f
 
@@ -363,6 +418,21 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
     return out_polys, out_props, counts
 
 
+def _roof(props: dict, height_m: float, z_per_m: float) -> tuple[str, float]:
+    """(roof shape, roof height in mm) as built: a roof lower than 0.2 mm is flat."""
+    shape_ = str(props.get("roof:shape") or "flat").lower().strip()
+    if shape_ == "flat":
+        return shape_, 0.0
+    try:
+        roof_m = float(str(props.get("roof:height")).split()[0])
+    except (TypeError, ValueError, IndexError):
+        roof_m = 0.3 * height_m
+    roof_mm = min(max(roof_m, 0.0), 0.5 * height_m) * z_per_m
+    if roof_mm <= 0.2:            # below print resolution: flat at full height
+        return "flat", 0.0
+    return shape_, roof_mm
+
+
 def _roofed(poly: Polygon, props: dict, z_floor: float, ground_hi: float,
             z_per_m: float, style: LayerStyle, cap_mm: float = math.inf) -> list[Mesh]:
     """Solids for one building from the skirt floor to its roof (``city2stl.roofs``).
@@ -372,17 +442,11 @@ def _roofed(poly: Polygon, props: dict, z_floor: float, ground_hi: float,
     """
     height_m = float(props.get("height_m") or 10.0)
     total = max(min(height_m * z_per_m, cap_mm), style.min_height_mm)
-    shape_ = str(props.get("roof:shape") or "flat").lower().strip()
-    roof_mm = 0.0
-    if shape_ != "flat":
-        try:
-            roof_m = float(str(props.get("roof:height")).split()[0])
-        except (TypeError, ValueError, IndexError):
-            roof_m = 0.3 * height_m
-        roof_mm = min(max(roof_m, 0.0), 0.5 * height_m) * z_per_m
-        if roof_mm <= 0.2:            # below print resolution: flat at full height
-            shape_, roof_mm = "flat", 0.0
+    shape_, roof_mm = _roof(props, height_m, z_per_m)
     top = ground_hi + total
+    if shape_ == "flat":   # a prism (GEOS triangulation) is closed by construction
+        m = prism(poly, z_floor, top)
+        return [m] if m is not None else []
     try:
         solids = building_solids(poly, z_floor, top - roof_mm, roof_mm, shape_, props)
     except (RuntimeError, ValueError) as exc:   # Triangle on a sliver the snap left behind
@@ -394,6 +458,83 @@ def _roofed(poly: Polygon, props: dict, z_floor: float, ground_hi: float,
     # Keep the building if a roof cannot be closed: flat at mid-roof height.
     m = prism(poly, z_floor, top - roof_mm / 2)
     return [m] if m is not None else []
+
+
+def merge_flat_roofs(polys: list[Polygon], props: list[dict], lo: np.ndarray, hi: np.ndarray,
+                     base: np.ndarray, cap: np.ndarray, z_per_m: float, style: LayerStyle,
+                     rect: Polygon) -> tuple[list[Mesh], np.ndarray, dict]:
+    """Print-scale reduction: flat roofs that print at the same layer become one solid.
+
+    Candidates are flat-roofed buildings standing on the ground (no
+    ``building:part``, no ``min_height``; landmark overrides were already taken
+    out). Their *absolute* top - highest ground under the footprint plus the
+    height, after the min-height and slenderness rules - is rounded to
+    ``style.layer_height_mm``: two tops in the same layer print as one surface.
+    Candidates in the same layer whose outlines are closer than
+    ``style.min_gap_mm`` (one nozzle: a narrower gap fills in on the print
+    anyway) form a group; each group is unioned, closed by half that gap
+    (``buffer(+g/2).buffer(-g/2)``, mitre), simplified at ``style.outline_tol_mm``,
+    snapped and exploded, and every resulting polygon is one prism from the
+    group's lowest skirt floor to its highest top (all within one layer).
+
+    The slicer would draw the same outline, so this is lossless at print scale;
+    what it saves is one solid (and its walls against its neighbours) per
+    building. Hillside cities merge little (the ground under each building
+    differs); flat ones merge whole blocks. Buildings in no group are left to
+    the caller. Returns (solids, mask of the buildings merged, counts).
+    """
+    n = len(polys)
+    counts = {"merged_from": 0, "merged_into": 0}
+    merged = np.zeros(n, bool)
+    if not style.merge_flat or n < 2:
+        return [], merged, counts
+    height_m = np.array([float(p.get("height_m") or 10.0) for p in props])
+    flat = np.array([base[k] <= 0 and not is_part(props[k])
+                     and _roof(props[k], height_m[k], z_per_m)[0] == "flat" for k in range(n)])
+    idx = np.flatnonzero(flat)
+    if len(idx) < 2:
+        return [], merged, counts
+    total = np.maximum(np.minimum(height_m[idx] * z_per_m, cap[idx]), style.min_height_mm)
+    top = hi[idx] + total
+    floor = np.maximum(lo[idx] - 0.2, 0.0)
+    layer = np.round(top / max(style.layer_height_mm, 1e-6)).astype(np.int64)
+    arr = np.asarray(polys, dtype=object)[idx]
+    a, b = shapely.STRtree(arr).query(arr, predicate="dwithin", distance=style.min_gap_mm)
+    same = (a < b) & (layer[a] == layer[b])
+    if not same.any():
+        return [], merged, counts
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+
+    m = len(idx)
+    _, comp = connected_components(coo_matrix((np.ones(same.sum()), (a[same], b[same])),
+                                              shape=(m, m)), directed=False)
+    size = np.bincount(comp)
+    group_ids = np.flatnonzero(size > 1)
+    r = style.min_gap_mm / 2
+    unions = np.array([shapely.union_all(arr[comp == g]) for g in group_ids], dtype=object)
+    closed = shapely.buffer(shapely.buffer(unions, r, join_style="mitre"), -r, join_style="mitre")
+    closed = shapely.simplify(closed, style.outline_tol_mm, preserve_topology=True)
+    closed = shapely.set_precision(shapely.intersection(closed, rect), SNAP_MM)
+    parts, owner = shapely.get_parts(closed, return_index=True)
+    holed = shapely.get_num_interior_rings(parts) > 0
+    if holed.any():   # open pinched holes, as feature_polygons does
+        parts[holed] = shapely.buffer(shapely.buffer(parts[holed], -SNAP_MM, join_style="mitre"),
+                                      SNAP_MM, join_style="mitre")
+        parts, sub = shapely.get_parts(parts, return_index=True)
+        owner = owner[sub]
+    ok = (shapely.get_type_id(parts) == 3) & (shapely.area(parts) >= MIN_FOOTPRINT_MM2)
+    parts, g = parts[ok], group_ids[owner[ok]]
+    gfloor = np.full(comp.max() + 1, np.inf)
+    gtop = np.full(comp.max() + 1, -np.inf)
+    np.minimum.at(gfloor, comp, floor)
+    np.maximum.at(gtop, comp, top)
+    solids = [m for m in prisms(parts, gfloor[g], gtop[g]) if m is not None]
+    in_group = np.isin(comp, group_ids)
+    merged[idx[in_group]] = True
+    counts["merged_from"] = int(in_group.sum())
+    counts["merged_into"] = len(solids)
+    return solids, merged, counts
 
 
 def _slab(poly: Polygon, terrain: Terrain, top_off: float, bottom_off: float) -> Mesh | None:
@@ -419,18 +560,30 @@ def _slab(poly: Polygon, terrain: Terrain, top_off: float, bottom_off: float) ->
 
 def triangulate_polygon(poly: Polygon, extra: np.ndarray | None = None,
                         inset: float = 0.0) -> tuple[np.ndarray, np.ndarray] | None:
-    """Constrained triangulation of ``poly`` (outline and holes kept as edges) plus the
-    ``extra`` points (N, 2) lying more than ``inset`` inside it. Returns (xy, faces) or None."""
-    import triangle
+    """Triangulation of ``poly`` whose edges include its outline and holes, plus the
+    ``extra`` points (N, 2) lying more than ``inset`` inside it. Returns (xy, faces) or None.
 
-    rings = [np.asarray(poly.exterior.coords)[:-1]] + [np.asarray(r.coords)[:-1] for r in poly.interiors]
-    pts, segs, start = [], [], 0
-    for r in rings:
-        n = len(r)
-        pts.append(r)
-        k = np.arange(start, start + n)
-        segs.append(np.column_stack([k, np.roll(k, -1)]))
-        start += n
+    A constrained Delaunay triangulation built from robust pieces: qhull's
+    Delaunay of all the points; then every outline segment that is not an edge
+    of it is recovered by re-triangulating its cavity (the triangles it crosses,
+    :func:`_recover_segments`) with GEOS's polygon triangulation. No point is
+    added, so by Euler's formula the face count is that of any triangulation of
+    these vertices (the one Triangle used to return included). Triangles whose
+    centroid lies inside the polygon are kept.
+
+    This replaced Shewchuk's Triangle ("p" switch), which on the near-degenerate
+    segments snapped outlines produce can fail with "Topological inconsistency
+    after splitting a segment", or not return at all.
+    """
+    from scipy.spatial import Delaunay, QhullError
+
+    # The outline is noded first: a ring touching another at a vertex that lies
+    # inside the other's segment (valid), or crossing it (invalid input), would
+    # leave segments no triangulation can contain.
+    lines = shapely.get_parts(shapely.node(shapely.boundary(poly)))
+    coords, owner = shapely.get_coordinates(lines, return_index=True)
+    k = np.flatnonzero(owner[1:] == owner[:-1])
+    pts, segs = [coords], [np.column_stack([k, k + 1])]
     if extra is not None and len(extra):
         inner = shapely.buffer(poly, -inset) if inset > 0 else poly
         x0, y0, x1, y1 = poly.bounds
@@ -438,25 +591,121 @@ def triangulate_polygon(poly: Polygon, extra: np.ndarray | None = None,
         cand = t[(t[:, 0] > x0) & (t[:, 0] < x1) & (t[:, 1] > y0) & (t[:, 1] < y1)]
         if len(cand) and not inner.is_empty:
             pts.append(cand[shapely.contains_xy(inner, cand[:, 0], cand[:, 1])])
-    # Triangle (C) reads int32 indices and crashes on duplicate vertices or
-    # zero-length segments, e.g. where a snapped hole touches its outline.
+    # Duplicate vertices (a snapped hole touching its outline) become one.
     verts, inv = np.unique(np.concatenate(pts), axis=0, return_inverse=True)
     seg = inv.ravel()[np.concatenate(segs)]
     seg = np.unique(np.sort(seg[seg[:, 0] != seg[:, 1]], axis=1), axis=0)
-    tri_in = {"vertices": np.ascontiguousarray(verts, np.float64),
-              "segments": np.ascontiguousarray(seg, np.int32)}
-    if poly.interiors:
-        tri_in["holes"] = np.ascontiguousarray(
-            [shapely.Polygon(r).point_on_surface().coords[0] for r in poly.interiors], np.float64)
+    if len(verts) < 3 or len(seg) < 3:
+        return None
     try:
-        out = triangle.triangulate(tri_in, "pQ")
-    except Exception as exc:
+        simp = Delaunay(verts).simplices.astype(np.int64)
+    except (QhullError, ValueError) as exc:
         logger.debug("triangulate failed: %s", exc)
         return None
-    v2, f = out.get("vertices"), out.get("triangles")
-    if f is None or not len(f):
+    missing = ~_has_edges(simp, seg, len(verts))
+    if missing.any():
+        got = _recover_segments(verts, simp, seg, missing)
+        if got is None:
+            return None
+        verts, simp = got
+    c = verts[simp].mean(axis=1)
+    f = _split_flat(verts, simp[shapely.contains_xy(poly, c[:, 0], c[:, 1])])
+    if not len(f):
         return None
-    return np.asarray(v2, np.float64), np.asarray(f)
+    used, f = np.unique(f, return_inverse=True)
+    return verts[used], f.reshape(-1, 3)
+
+
+def _has_edges(simp: np.ndarray, seg: np.ndarray, n: int) -> np.ndarray:
+    """Per segment (sorted index pairs): is it an edge of the triangles ``simp``?"""
+    simp, seg = np.asarray(simp, np.int64), np.asarray(seg, np.int64)   # qhull's are int32
+    e = np.sort(np.concatenate([simp[:, [0, 1]], simp[:, [1, 2]], simp[:, [2, 0]]]), axis=1)
+    return np.isin(seg[:, 0] * n + seg[:, 1], e[:, 0] * n + e[:, 1])
+
+
+def _recover_segments(verts: np.ndarray, simp: np.ndarray, seg: np.ndarray,
+                      missing: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    """Make every segment an edge: the triangles a missing segment crosses are
+    removed, their union cut along all segments inside it (GEOS polygonize) and
+    each cell triangulated with GEOS's constrained Delaunay. Cells only have
+    existing vertices as corners (segments cross neither each other, after
+    noding, nor any triangle edge outside the cavity), so no point is added.
+    Returns (vertices, triangles), or None if a segment is still missing."""
+    tri_polys = shapely.polygons(np.concatenate([verts[simp], verts[simp][:, :1]], axis=1))
+    _, hit = shapely.STRtree(tri_polys).query(shapely.linestrings(verts[seg[missing]]),
+                                              predicate="crosses")
+    hit = np.unique(hit)
+    # The cavity's outline from indices (edges used once by its triangles): a GEOS
+    # union of the triangles would drop collinear outline vertices.
+    n = len(verts)
+    simp = np.asarray(simp, np.int64)
+    e = np.sort(np.concatenate([simp[hit][:, [0, 1]], simp[hit][:, [1, 2]], simp[hit][:, [2, 0]]]), axis=1)
+    ek, counts = np.unique(e[:, 0] * n + e[:, 1], return_counts=True)
+    rim = np.column_stack(np.divmod(ek[counts == 1], n))
+    # ... plus every segment inside it: the missing ones and those that are edges
+    # of two cavity triangles.
+    inner_seg = seg[missing | np.isin(seg[:, 0] * n + seg[:, 1], ek[counts == 2])]
+    linework = shapely.union_all(shapely.linestrings(verts[np.vstack([rim, inner_seg])]))
+    cells = shapely.get_parts(shapely.polygonize(shapely.get_parts(linework)))
+    if len(cells):
+        ci, _ = shapely.STRtree(tri_polys[hit]).query(shapely.point_on_surface(cells),
+                                                      predicate="intersects")
+        cells = cells[np.unique(ci)]
+    tris = shapely.get_parts(shapely.constrained_delaunay_triangles(cells)) if len(cells) else []
+    xy = shapely.get_coordinates(tris).reshape(-1, 4, 2)[:, :3].reshape(-1, 2)
+    # Corners are existing vertices, bit for bit; anything else (GEOS noded a
+    # near-touch) becomes a new vertex.
+    allv = np.vstack([verts, xy])
+    uniq, first, inv = np.unique(allv, axis=0, return_index=True, return_inverse=True)
+    inv = inv.ravel()
+    remap = np.arange(len(allv))
+    remap[len(verts):] = first[inv[len(verts):]]
+    extra = remap[len(verts):] >= len(verts)
+    if extra.any():
+        logger.debug("triangulate: %d cavity corners are new vertices", int(extra.sum()))
+    new = remap[len(verts):].reshape(-1, 3)
+    keep = np.ones(len(simp), bool)
+    keep[hit] = False
+    out = np.vstack([simp[keep], new])
+    if not _has_edges(out, seg, len(allv)).all():
+        logger.debug("triangulate: %d outline segments not recovered", int((~_has_edges(out, seg, len(allv))).sum()))
+        return None
+    return allv, out
+
+
+def _split_flat(xy: np.ndarray, f: np.ndarray, passes: int = 3) -> np.ndarray:
+    """Remove zero-area triangles: qhull joins three collinear points of a split
+    outline edge into one. For flat (a, b, c) with b between a and c, the
+    triangle (a, c, d) across the long edge becomes (a, b, d) + (b, c, d) (a flip
+    through b); with nobody across, the flat triangle is on the outline and is
+    dropped (the outline runs a-c, straight through b's position)."""
+    f = np.array(f, copy=True)
+    for _ in range(passes):
+        p = xy[f]
+        d1, d2 = p[:, 1] - p[:, 0], p[:, 2] - p[:, 0]
+        cross = np.abs(d1[:, 0] * d2[:, 1] - d1[:, 1] * d2[:, 0])
+        scale = np.maximum(np.einsum("ij,ij->i", d1, d1), np.einsum("ij,ij->i", d2, d2))
+        flat = np.flatnonzero(cross <= 1e-12 * np.maximum(scale, 1e-300))
+        if not len(flat):
+            return f
+        drop = []
+        for t in flat:
+            tri = f[t]
+            q = xy[tri]
+            lens = [np.sum((q[(k + 1) % 3] - q[(k + 2) % 3]) ** 2) for k in range(3)]
+            k = int(np.argmax(lens))                    # vertex opposite the long edge
+            b, a, c = tri[k], tri[(k + 1) % 3], tri[(k + 2) % 3]
+            other = np.flatnonzero((f == a).any(axis=1) & (f == c).any(axis=1))
+            other = other[other != t]
+            if len(other):
+                s = other[0]
+                dd = [v for v in f[s] if v != a and v != c][0]
+                f[t] = [a, b, dd]
+                f[s] = [b, c, dd]
+            else:
+                drop.append(t)
+        f = np.delete(f, drop, axis=0)
+    return f
 
 
 def _is_flowing_water(props: dict) -> bool:
@@ -483,21 +732,127 @@ def assemble_parts(polys: list[Polygon], props: list[dict]) -> tuple[list, list,
     part_idx = [k for k, pr in enumerate(props) if is_part(pr)]
     if not part_idx:
         return polys, props, 0, 0
-    parts = shapely.union_all([polys[k] for k in part_idx])
-    tree = shapely.STRtree([polys[k] for k in part_idx])
-    out_p, out_pr, trimmed = [], [], 0
+    # Outlines whose interior overlaps a part (one vectorised query; merely
+    # touching a part's wall is not overlapping), each trimmed by its own parts.
+    arr = np.asarray(polys, dtype=object)
+    part_arr = arr[part_idx]
+    oi, pj = shapely.STRtree(part_arr).query(arr, predicate="intersects")
+    is_part_k = np.zeros(len(polys), bool)
+    is_part_k[part_idx] = True
+    keep = ~is_part_k[oi]
+    oi, pj = oi[keep], pj[keep]
+    real = ~shapely.touches(arr[oi], part_arr[pj])
+    oi, pj = oi[real], pj[real]
+    # Each outline minus the union of its parts, all at once: the parts padded
+    # into one row per outline, unioned along the row, then one difference.
+    outl, first, cnt = np.unique(oi, return_index=True, return_counts=True)
+    order = np.argsort(oi, kind="stable")
+    grid = np.full((len(outl), int(cnt.max()) if len(cnt) else 0), None, dtype=object)
+    slot = np.arange(len(oi)) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+    grid[np.repeat(np.arange(len(outl)), cnt), slot] = part_arr[pj[order]]
+    rest = shapely.set_precision(shapely.difference(arr[outl], shapely.union_all(grid, axis=1)),
+                                 SNAP_MM)
+    pieces, owner = shapely.get_parts(rest, return_index=True)
+    good = (shapely.get_type_id(pieces) == 3) & (shapely.area(pieces) >= MIN_FOOTPRINT_MM2)
+    by_outline: dict[int, list] = {}
+    for g, o in zip(pieces[good], outl[owner[good]].tolist(), strict=True):
+        by_outline.setdefault(o, []).append(g)
+    trimmed_set = set(outl.tolist())
+    out_p, out_pr = [], []
     for k, (poly, pr) in enumerate(zip(polys, props, strict=True)):
-        if k in part_idx or not len(tree.query(poly, predicate="intersects")):
+        if k not in trimmed_set:
             out_p.append(poly)
             out_pr.append(pr)
             continue
-        rest = shapely.set_precision(poly.difference(parts), SNAP_MM)
-        trimmed += 1
-        for g in shapely.get_parts(rest):
-            if g.geom_type == "Polygon" and g.area >= MIN_FOOTPRINT_MM2:
-                out_p.append(g)
-                out_pr.append(pr)
+        for g in by_outline.get(k, []):
+            out_p.append(g)
+            out_pr.append(pr)
+    trimmed = len(trimmed_set)
     return out_p, out_pr, len(part_idx), trimmed
+
+
+TRAIL_BUILT_UP_M = 60.0   # built-up area: within this of a building
+TRAIL_ROAD_M = 6.0        # "along a road": within this of a road centreline
+TRAIL_MAX_SHARE = 0.5     # a trail with more of its length in town / on roads is dropped
+TRAIL_SAMPLE_M = 5.0      # spacing of the points the shares are measured at
+
+
+def filter_trails(features: list[dict], terrain: Terrain,
+                  buildings: list[dict] | None = None,
+                  roads: list[dict] | None = None) -> tuple[list[dict], dict]:
+    """Trail features that are hiking trails, not town footpaths.
+
+    ``geo2stl.trails`` already fetches only paths, tracks and signposted
+    footways; a path through town is still a footpath beside the streets. A
+    feature is dropped when more than ``TRAIL_MAX_SHARE`` of its length lies in
+    the built-up area (within ``TRAIL_BUILT_UP_M`` of a building: a 120 m gap
+    between houses is still town) or along the road network (within
+    ``TRAIL_ROAD_M`` of a road centreline). Shares are measured at points every
+    ``TRAIL_SAMPLE_M`` along each line; the built-up area is a distance
+    transform of the buildings rasterised on the DEM grid. Areal features pass.
+
+    Returns (kept features, ``{"trails_kept", "trails_dropped",
+    "trails_in_town", "trails_along_roads"}``).
+    """
+    stats = {"trails_kept": len(features), "trails_dropped": 0,
+             "trails_in_town": 0, "trails_along_roads": 0}
+    feats = [f for f in features if f.get("geometry")]
+    if not feats or not (buildings or roads):
+        return features, stats
+    geoms = terrain.project(shapely.from_geojson([json.dumps(f["geometry"]) for f in feats],
+                                                 on_invalid="ignore"))
+    tid = shapely.get_type_id(geoms)
+    lines = np.flatnonzero((tid == 1) | (tid == 5))
+    if not len(lines):
+        return features, stats
+    step = float(terrain.m_to_mm(TRAIL_SAMPLE_M))
+    length = shapely.length(geoms[lines])
+    n = np.maximum(2, np.ceil(length / step).astype(int) + 1)
+    owner = np.repeat(np.arange(len(lines)), n)
+    start = np.repeat(np.cumsum(n) - n, n)
+    frac = (np.arange(len(owner)) - start) / (n[owner] - 1)
+    xy = shapely.get_coordinates(shapely.line_interpolate_point(geoms[lines][owner], frac,
+                                                                normalized=True))
+    in_town = np.zeros(len(lines))
+    if buildings:
+        from scipy.ndimage import distance_transform_edt
+
+        bg = terrain.project(shapely.from_geojson(
+            [json.dumps(f["geometry"]) for f in buildings if f.get("geometry")], on_invalid="ignore"))
+        bg = bg[~shapely.is_missing(bg) & ~shapely.is_empty(bg)]
+        h, w = terrain.z.shape
+        sp = terrain.scale.mm_per_px
+        if len(bg):
+            # Cells whose centre is inside a building, plus the cell of each vertex
+            # (footprints smaller than a cell).
+            mask = np.zeros(h * w, bool)
+            mask[terrain.cells_inside(bg)[1]] = True
+            vx = shapely.get_coordinates(bg)
+            mask[np.clip(np.round((h - 1) - vx[:, 1] / sp).astype(int), 0, h - 1) * w
+                 + np.clip(np.round(vx[:, 0] / sp).astype(int), 0, w - 1)] = True
+            mask = mask.reshape(h, w)
+            dist_px = distance_transform_edt(~mask)
+            built = dist_px * terrain.scale.m_per_px <= TRAIL_BUILT_UP_M
+            col = np.clip(np.round(xy[:, 0] / sp).astype(int), 0, w - 1)
+            row = np.clip(np.round((h - 1) - xy[:, 1] / sp).astype(int), 0, h - 1)
+            in_town = np.bincount(owner, built[row, col], len(lines)) / n
+    on_road = np.zeros(len(lines))
+    if roads:
+        rg = terrain.project(shapely.from_geojson(
+            [json.dumps(f["geometry"]) for f in roads if f.get("geometry")], on_invalid="ignore"))
+        rg = rg[~shapely.is_missing(rg) & ~shapely.is_empty(rg)]
+        if len(rg):
+            pi, _ = shapely.STRtree(rg).query(shapely.points(xy), predicate="dwithin",
+                                              distance=float(terrain.m_to_mm(TRAIL_ROAD_M)))
+            near = np.zeros(len(xy))
+            near[np.unique(pi)] = 1.0
+            on_road = np.bincount(owner, near, len(lines)) / n
+    town, road = in_town > TRAIL_MAX_SHARE, on_road > TRAIL_MAX_SHARE
+    drop = np.zeros(len(feats), bool)
+    drop[lines[town | road]] = True
+    stats.update(trails_kept=len(feats) - int(drop.sum()), trails_dropped=int(drop.sum()),
+                 trails_in_town=int(town.sum()), trails_along_roads=int((road & ~town).sum()))
+    return [f for f, d in zip(feats, drop, strict=True) if not d], stats
 
 
 def terrain_tolerance(scale: ModelScale) -> float:
@@ -505,8 +860,43 @@ def terrain_tolerance(scale: ModelScale) -> float:
     return max(TERRAIN_MAX_ERROR_MM, 0.5 * SOURCE_VERTICAL_STEP_M * scale.z_mm_per_m)
 
 
+def _polygon_constants() -> dict:
+    return {"simplify": SIMPLIFY_TOL_MM, "snap": SNAP_MM, "min_footprint": MIN_FOOTPRINT_MM2}
+
+
+def _polygons_key(name: str, features: list[dict], style: LayerStyle, terrain: Terrain,
+                  features_digest: str | None = None) -> str:
+    from city2stl import model_cache as mc
+
+    return mc.polygons_key(name, features_digest or mc.digest(features), terrain.bbox,
+                           terrain.scale, terrain.z.shape, style, _polygon_constants())
+
+
+def layer_polygons(name: str, features: list[dict], style: LayerStyle, terrain: Terrain,
+                   cache: bool = True, features_digest: str | None = None
+                   ) -> tuple[list[Polygon], list[dict], dict, str]:
+    """:func:`feature_polygons` through the ``city_polygons`` disk cache.
+
+    Returns (polygons, properties, counts, cache key). The key covers the
+    features, bbox, scale, DEM shape and the style fields / constants the
+    polygons depend on (``city2stl.model_cache.polygons_key``); ``cache=False``
+    (or ``MAP2STL_CITY_CACHE=0``) computes without reading or writing.
+    """
+    from city2stl import model_cache as mc
+
+    key = _polygons_key(name, features, style, terrain, features_digest)
+    use = cache and mc.enabled()
+    got = mc.read_polygons(key) if use else None
+    if got is not None:
+        return (*got, key)
+    polys, props, counts = feature_polygons(name, features, style, terrain)
+    if use:
+        mc.write_polygons(key, polys, props, counts)
+    return polys, props, counts, key
+
+
 def layer_preflight(name: str, features: list[dict], style: LayerStyle, terrain: Terrain,
-                    tin_density: float = 0.0) -> dict:
+                    tin_density: float = 0.0, cache: bool = True) -> dict:
     """Cheap per-layer figures for the pre-flight report, without building a solid.
 
     The same ``dropped`` / ``widened`` / ``clamped`` counts :func:`build_layer`
@@ -515,9 +905,10 @@ def layer_preflight(name: str, features: list[dict], style: LayerStyle, terrain:
     ``area_mm2``, ``volume_mm3`` (added, or removed for engraved / water),
     ``surface_mm2`` (extruded: roofs + walls) and
     ``faces_est``: 4 per outline vertex, plus the terrain vertices a draped slab
-    carries (``tin_density`` = terrain vertices per mm²).
+    carries (``tin_density`` = terrain vertices per mm²). The polygons come from
+    the same disk cache the build uses (:func:`layer_polygons`).
     """
-    polys, props, counts = feature_polygons(name, features, style, terrain)
+    polys, props, counts, _ = layer_polygons(name, features, style, terrain, cache)
     out: dict = {"mode": style.mode, "features": len(features), "polygons": len(polys), **counts}
     if not polys:
         return out
@@ -552,13 +943,18 @@ def layer_preflight(name: str, features: list[dict], style: LayerStyle, terrain:
 
 
 def build_layer(name: str, features: list[dict], style: LayerStyle,
-                terrain: Terrain, landmarks: LandmarkPlan | None = None) -> tuple[list[Mesh], dict]:
+                terrain: Terrain, landmarks: LandmarkPlan | None = None,
+                polygons: tuple[list, list, dict] | None = None) -> tuple[list[Mesh], dict]:
     """Solids for one layer, plus counts for the report.
 
     ``landmarks`` (extrude layers): overridden buildings are swapped for their
     override solids before parts are assembled (``city2stl.landmarks``).
+    ``polygons``: the layer's ``feature_polygons`` result, when the caller has it
+    (e.g. from :func:`layer_polygons`' cache).
+    Extrude layers merge flat roofs printing at the same layer
+    (:func:`merge_flat_roofs`; ``merged_from`` / ``merged_into`` in the counts).
     """
-    polys, props, counts = feature_polygons(name, features, style, terrain)
+    polys, props, counts = polygons if polygons is not None else         feature_polygons(name, features, style, terrain)
     stats = {"features": len(features), "polygons": len(polys), **counts}
     solids: list[Mesh] = []
     if style.mode == "extrude":
@@ -577,9 +973,23 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
         # stands on its tower, not on the ground.
         want = np.array([float(p.get("height_m") or 10.0) for p in props]) * z_per_m - base
         stats["clamped"] = int((want > cap).sum())
-        for poly, pr, l_, h_, b_, c_ in zip(polys, props, lo, hi, base, cap, strict=True):
-            z_floor = h_ + b_ if b_ > 0 else max(l_ - 0.2, 0.0)
-            solids.extend(_roofed(poly, pr, z_floor, h_, z_per_m, style, b_ + c_))
+        merged_solids, merged, mstats = merge_flat_roofs(
+            polys, props, lo, hi, base, cap, z_per_m, style, terrain.rect)
+        stats.update(mstats)
+        solids.extend(merged_solids)
+        # As _roofed: floor on the tower for a part, the skirt otherwise; flat
+        # roofs as prisms in one vectorised pass, other roofs one by one.
+        z_floor = np.where(base > 0, hi + base, np.maximum(lo - 0.2, 0.0))
+        height = np.array([float(p.get("height_m") or 10.0) for p in props])
+        top = hi + np.maximum(np.minimum(height * z_per_m, base + cap), style.min_height_mm)
+        rest = np.flatnonzero(~merged)
+        flat = np.array([_roof(props[k], height[k], z_per_m)[0] == "flat" for k in rest], bool)
+        fk = rest[flat] if len(rest) else rest
+        solids.extend(m for m in prisms(np.asarray(polys, dtype=object)[fk], z_floor[fk], top[fk])
+                      if m is not None)
+        for k in (rest[~flat] if len(rest) else rest):
+            solids.extend(_roofed(polys[k], props[k], z_floor[k], hi[k], z_per_m, style,
+                                  base[k] + cap[k]))
     elif style.mode == "water":
         # Standing water (lakes, reservoirs, the sea) is cut flat below its lowest
         # shore; flowing water follows the valley floor. Cut flat, a river on a
@@ -608,6 +1018,57 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
                 solids.append(m)
     stats["solids"] = len(solids)
     return solids, stats
+
+
+def _layer_solid(name: str, feats: list[dict], style: LayerStyle, terrain: Terrain,
+                 plan: LandmarkPlan | None, terrain_digest: str, cache: bool
+                 ) -> tuple[mf.Manifold | None, dict, str]:
+    """One layer's union solid, report block and cache key (``city_solids`` cache).
+
+    The key adds to the polygon key the whole style, the terrain heightfield and
+    the landmark overrides the layer depends on: the overrides themselves for
+    buildings, the footprints they replaced for later extrude layers (which drop
+    features inside them), nothing otherwise. A buildings hit restores the
+    plan's footprints and report, which later layers and the report read.
+    """
+    from city2stl import model_cache as mc
+
+    t0 = time.perf_counter()
+    fd = mc.digest(feats)
+    pkey = _polygons_key(name, feats, style, terrain, fd)
+    lm = None
+    if plan and style.mode == "extrude":
+        lm = (mc.overrides_digest(plan.overrides) if name == "buildings"
+              else mc.footprints_digest(plan.footprints))
+    key = mc.solid_key(pkey, style, terrain_digest, lm) if cache else ""
+    hit = mc.read_mesh(mc.NS_SOLIDS, key) if cache else None
+    if hit is not None:
+        v, f, meta = hit
+        if plan is not None and name == "buildings" and meta.get("landmarks"):
+            plan.footprints.update({oid: shapely.from_wkb(w)
+                                    for oid, w in meta["landmarks"]["footprints"].items()})
+            plan.report.update(meta["landmarks"]["report"])
+        u = to_manifold(v, f, strict=False) if len(f) else None
+        rep = {**meta["report"], "cached": True,
+               "seconds": {"geometry": 0.0, "union": round(time.perf_counter() - t0, 2)}}
+        return u, rep, key
+    polys = layer_polygons(name, feats, style, terrain, cache, fd)
+    t1 = time.perf_counter()
+    solids, stats = build_layer(name, feats, style, terrain, plan, polygons=polys[:3])
+    t2 = time.perf_counter()
+    u, rejected = union(solids)
+    rep = {**stats, "rejected": rejected}
+    if cache:
+        meta = {"report": rep}
+        if plan is not None and name == "buildings":
+            meta["landmarks"] = {"footprints": {oid: shapely.to_wkb(fp, hex=True)
+                                                for oid, fp in plan.footprints.items()},
+                                 "report": plan.report}
+        v, f = from_manifold(u) if u is not None else (np.zeros((0, 3)), np.zeros((0, 3), np.int64))
+        mc.write_mesh(mc.NS_SOLIDS, key, v, f, meta)
+    rep = {**rep, "seconds": {"polygons": round(t1 - t0, 2), "geometry": round(t2 - t1, 2),
+                              "union": round(time.perf_counter() - t2, 2)}}
+    return u, rep, key
 
 
 # ---------------------------------------------------------------------------
@@ -711,6 +1172,8 @@ def build_city_model(
     simplify: bool = True,
     layer_overrides: dict | None = None,
     landmark_overrides: dict | None = None,
+    cache: bool = True,
+    trail_context: dict | None = None,
 ) -> CityModel:
     """Terrain from ``dem_m`` (metres, row 0 north, already projected like the
     app's DEM) plus the OSM layers in ``layers_geojson`` ({layer: FeatureCollection}).
@@ -726,7 +1189,8 @@ def build_city_model(
     return build_on_terrain(scale.z_mm(dem), bbox, scale, layers_geojson,
                             terrain_max_error_mm=terrain_max_error_mm, simplify=simplify,
                             layer_overrides=layer_overrides,
-                            landmark_overrides=landmark_overrides)
+                            landmark_overrides=landmark_overrides, cache=cache,
+                            trail_context=trail_context)
 
 
 def build_on_terrain(
@@ -739,6 +1203,8 @@ def build_on_terrain(
     simplify: bool = True,
     layer_overrides: dict | None = None,
     landmark_overrides: dict | None = None,
+    cache: bool = True,
+    trail_context: dict | None = None,
 ) -> CityModel:
     """The feature stage: OSM layers on a finished terrain heightfield.
 
@@ -751,14 +1217,30 @@ def build_on_terrain(
     ``city2stl.landmarks.resolve_overrides`` -- those buildings are replaced by an
     uploaded mesh or a surveyed nDSM solid; the report's ``landmarks`` block says
     which were applied and why any was not.
+
+    ``cache``: the terrain solid, each layer's polygons and each layer's union
+    solid are read from / written to the disk caches of ``city2stl.model_cache``
+    (keyed by digests of everything they depend on), so a rebuild with unchanged
+    inputs skips all layer geometry and changing one input rebuilds only what it
+    touches. Each layer's report says ``"cached": true`` when it was a hit.
+    Disabled by ``cache=False`` or ``MAP2STL_CITY_CACHE=0``.
+
+    Trails (when enabled) are first cut to hiking trails outside town
+    (:func:`filter_trails`) using the buildings and roads in ``layers_geojson``,
+    else in ``trail_context`` ({layer: FeatureCollection}: layers that are not
+    built but still say where the town is); the trails report carries
+    ``trails_kept`` / ``trails_dropped``.
     """
+    from city2stl import model_cache as mc
+
+    cache = cache and mc.enabled()
     dem_shape = z_mm.shape
     terrain = Terrain(np.asarray(z_mm, np.float64), bbox or {}, scale)
     if terrain_max_error_mm is None:
         terrain_max_error_mm = max(TERRAIN_MAX_ERROR_MM,
                                    0.5 * SOURCE_VERTICAL_STEP_M * scale.z_mm_per_m)
     t0 = time.perf_counter()
-    ground = terrain_solid(terrain, terrain_max_error_mm)
+    ground = terrain_solid(terrain, terrain_max_error_mm, cache=cache)
     timings = {"terrain": round(time.perf_counter() - t0, 2)}
     ground_m = _manifold(ground)
 
@@ -772,8 +1254,19 @@ def build_on_terrain(
                                       "adaptive": int(len(ground[1]))},
                     "layers": {}}
 
+    terrain_digest = mc.digest(terrain.z) if cache else ""
+    trail_stats = None
+    tstyle = styles.get("trails")
+    tfeats = (layers_geojson.get("trails") or {}).get("features") or []
+    if tstyle is not None and tstyle.enabled and tfeats and bbox:
+        ctx = {**(trail_context or {}), **layers_geojson}
+        kept, trail_stats = filter_trails(
+            tfeats, terrain, (ctx.get("buildings") or {}).get("features"),
+            (ctx.get("roads") or {}).get("features"))
+        layers_geojson = {**layers_geojson, "trails": {"type": "FeatureCollection", "features": kept}}
     adds: dict[str, mf.Manifold] = {}
     cuts: dict[str, mf.Manifold] = {}
+    layer_keys: dict[str, str] = {}
     plan = LandmarkPlan(landmark_overrides) if landmark_overrides else None
     for name in LAYER_PRIORITY + [n for n in styles if n not in LAYER_PRIORITY]:
         style = styles.get(name)
@@ -783,16 +1276,30 @@ def build_on_terrain(
         if not bbox:
             raise ValueError(f"layer {name!r} needs the model's bbox to place its features")
         t0 = time.perf_counter()
-        solids, stats = build_layer(name, feats, style, terrain, plan)
-        t1 = time.perf_counter()
-        u, rejected = union(solids)
-        report["layers"][name] = {"mode": style.mode, **stats, "rejected": rejected,
-                                  "seconds": {"geometry": round(t1 - t0, 2),
-                                              "union": round(time.perf_counter() - t1, 2)}}
+        u, rep, layer_keys[name] = _layer_solid(name, feats, style, terrain, plan,
+                                                terrain_digest, cache)
+        rep["seconds"]["total"] = round(time.perf_counter() - t0, 2)
+        report["layers"][name] = {"mode": style.mode, **rep}
+        if name == "trails" and trail_stats:
+            report["layers"][name].update(trail_stats)
         if u is not None:
             (cuts if style.mode in ("engraved", "water") else adds)[name] = u
     if plan is not None:
         report["landmarks"] = plan.report
+
+    # The whole model: with every input unchanged, assembly and the lossless
+    # simplification (most of a rebuild) are skipped too.
+    model_key = (mc.digest(mc.MODEL_CACHE_VERSION, "model", terrain_digest, terrain_max_error_mm,
+                           scale.mm_per_px, sorted(layer_keys.items()), bool(simplify))
+                 if cache else "")
+    got = _read_model(model_key) if cache else None
+    if got is not None:
+        merged, parts, cached_rep = got
+        report.update(cached_rep)
+        report["model_cached"] = True
+        timings["assemble"] = 0.0
+        report["seconds"] = timings
+        return CityModel(merged, parts, scale, report)
 
     t0 = time.perf_counter()
     cut_all = mf.Manifold.batch_boolean(list(cuts.values()), mf.OpType.Add) if cuts else None
@@ -822,4 +1329,38 @@ def build_on_terrain(
                         "volume_mm3": round(float(merged.volume), 1),
                         "size_mm": [round(float(x), 2) for x in merged.extents]}
     report["parts"] = {k: len(v.faces) for k, v in parts.items()}
+    if cache:
+        _write_model(model_key, merged, parts,
+                     {k: report[k] for k in ("merged", "parts", "lossless_simplify") if k in report})
     return CityModel(merged, parts, scale, report)
+
+
+def _read_model(key: str) -> tuple[trimesh.Trimesh, dict, dict] | None:
+    """(merged, parts, report fields) from the ``city_models`` cache, or None."""
+    from geo2stl.cache import read_array_cache
+
+    got = read_array_cache("city_models", key)
+    if got is None:
+        return None
+    arrays, meta = got
+    try:
+        mesh = {n: trimesh.Trimesh(arrays[f"{i}_v"].astype(np.float64),
+                                   arrays[f"{i}_f"].astype(np.int64), process=False)
+                for i, n in enumerate(meta["names"])}
+    except KeyError:
+        return None
+    merged = mesh.pop("__merged__")
+    return merged, mesh, meta["report"]
+
+
+def _write_model(key: str, merged: trimesh.Trimesh, parts: dict, rep: dict) -> None:
+    from geo2stl.cache import write_array_cache
+
+    names = ["__merged__", *parts]
+    meshes = [merged, *parts.values()]
+    arrays = {}
+    for i, m in enumerate(meshes):
+        arrays[f"{i}_v"] = np.asarray(m.vertices, np.float64)
+        f = np.asarray(m.faces)
+        arrays[f"{i}_f"] = f.astype(np.int32 if len(m.vertices) < 2**31 else np.int64)
+    write_array_cache("city_models", key, arrays, {"names": names, "report": rep}, keep_dtype=True)

@@ -493,7 +493,8 @@ const cityLayers = ref([
     { id: 'churches', label: 'Churches', enabled: true, mode: 'extrude', value: 1, modes: ['extrude'] },
     { id: 'roads', label: 'Roads', enabled: true, mode: 'raised', value: 0.4, modes: SURFACE },
     { id: 'railways', label: 'Rail', enabled: true, mode: 'raised', value: 0.3, modes: SURFACE },
-    { id: 'trails', label: 'Trails', enabled: true, mode: 'raised', value: 0.3, modes: SURFACE },
+    // Off by default: turn on for hiking / mountain models (the Mountain preset does).
+    { id: 'trails', label: 'Trails', enabled: false, mode: 'raised', value: 0.3, modes: SURFACE },
     { id: 'green', label: 'Parks / green', enabled: true, mode: 'raised', value: 0.2, modes: SURFACE },
     { id: 'waterways', label: 'Water', enabled: true, mode: 'water', value: 1.0, modes: ['water', 'engraved'] },
 ]);
