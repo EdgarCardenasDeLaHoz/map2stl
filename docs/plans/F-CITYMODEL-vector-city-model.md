@@ -130,4 +130,4 @@ trails 40 s per build (Overpass) -> 0 s (cached).
   `numpy2stl.io.write3MF` (streamed string formatting, zlib level 1).
 - Left: lossless simplification (35 s) and assembly (20 s) on a cold build; the
   "Topological inconsistency" message still printed comes from Triangle in
-  `numpy2stl.processing.simplify._triangulate_pslg` (caught; the region is kept as-is).
+  `numpy2stl.processing.simplify.GEOS constrained Delaunay (no Triangle)` (caught; the region is kept as-is).

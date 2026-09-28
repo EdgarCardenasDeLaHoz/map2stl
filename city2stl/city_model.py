@@ -1128,6 +1128,11 @@ def welded_watertight(mesh: trimesh.Trimesh) -> bool:
     return bool(w.is_watertight)
 
 
+def _signed_volume(v: np.ndarray, f: np.ndarray) -> float:
+    t = v[f]
+    return float(np.einsum("ij,ij->i", t[:, 0], np.cross(t[:, 1], t[:, 2])).sum() / 6.0)
+
+
 def lossless_simplify(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     """Merge coplanar regions without moving any surface (numpy2stl, verified here).
 
@@ -1136,14 +1141,20 @@ def lossless_simplify(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     """
     from numpy2stl.processing.simplify import simplify_mesh_surfaces
 
-    faces = simplify_mesh_surfaces(np.asarray(mesh.vertices), np.asarray(mesh.faces))
-    out = trimesh.Trimesh(mesh.vertices, faces, process=False)
-    out.remove_unreferenced_vertices()
+    v = np.asarray(mesh.vertices)
+    f0 = np.asarray(mesh.faces)
+    faces = simplify_mesh_surfaces(v, f0)
     # Closed = every edge used an even number of times. Solids that touch along an
     # edge (a building flush with a wall) share it four times once coincident
     # vertices are welded - exactly as they do in any STL - which is not a hole.
-    _, uses = np.unique(np.sort(out.edges, axis=1), axis=0, return_counts=True)
-    if not (uses % 2).any() and math.isclose(out.volume, mesh.volume, rel_tol=1e-6):
+    # Checked on the index arrays (1-D edge keys, signed-volume sum): trimesh's
+    # edges/volume properties cost more than the simplification itself.
+    e = np.sort(faces[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2), axis=1).astype(np.int64)
+    _, uses = np.unique(e[:, 0] * len(v) + e[:, 1], return_counts=True)
+    if not (uses % 2).any() and math.isclose(_signed_volume(v, faces), _signed_volume(v, f0),
+                                             rel_tol=1e-6):
+        out = trimesh.Trimesh(v, faces, process=False)
+        out.remove_unreferenced_vertices()
         return out
     logger.warning("lossless simplification failed its check; keeping the full mesh")
     return mesh
