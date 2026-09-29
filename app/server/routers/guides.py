@@ -1,18 +1,18 @@
-"""guides.py — the in-app Guides page: the SOPs under ``docs/sop/`` rendered as HTML.
+"""guides.py — the in-app Guides page: the SOPs under ``docs/guides/`` rendered as HTML.
 
 Serves three things (the page itself, ``GET /guides`` and ``GET /guides/{slug}``, is
 ``guides_page`` in ``server.py`` beside ``reports_page``: template ``guides.html``, script
 ``static/js/guides.js``; the slug in the path, or ``/guides#<slug>/<anchor>``, only picks the
 guide the page opens first):
 
-* ``GET /api/guides`` — ``[{slug, title, summary}]`` for every ``docs/sop/*.md``: title is the
+* ``GET /api/guides`` — ``[{slug, title, summary}]`` for every ``docs/guides/*.md``: title is the
   first ``# `` heading, summary the first paragraph as plain text. A new SOP file appears here
   without any registration.
 * ``GET /api/guides/{slug}`` — ``{slug, title, html, toc}``. Rendered here with the
   ``markdown`` package rather than in the browser so the page ships no Markdown parser and the
   image/link rewriting is tested in one place. ``toc`` lists the ``##``/``###`` headings and the
   numbered steps of the "process" section (``id`` ``step-N``), each ``{id, text, level}``.
-* ``GET /guides/img/{path}`` — the screenshots under ``docs/sop/img/``, read-only, images only,
+* ``GET /guides/img/{path}`` — the screenshots under ``docs/guides/img/``, read-only, images only,
   with a traversal guard.
 
 Relative URLs in the Markdown are rewritten while rendering: ``img/city/01-x.png`` becomes
@@ -45,8 +45,8 @@ router = APIRouter(tags=["guides"])
 
 #: map2stl/ — routers -> server -> app -> map2stl
 _MAP2STL = Path(__file__).resolve().parents[3]
-#: Where the SOPs live. Tests point this at a temporary directory.
-SOP_DIR = _MAP2STL / "docs" / "sop"
+#: Where the guides live. Tests point this at a temporary directory.
+GUIDES_DIR = _MAP2STL / "docs" / "guides"
 
 _SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
@@ -70,7 +70,7 @@ def _plain_text(el: etree.Element) -> str:
 
 
 def _rewrite_url(url: str, attr: str) -> str:
-    """Map a URL relative to ``docs/sop/`` onto the app's routes; others are left alone."""
+    """Map a URL relative to ``docs/guides/`` onto the app's routes; others are left alone."""
     if not url or url.startswith(("#", "/", "data:")):
         return url
     parts = urlsplit(url)
@@ -187,11 +187,11 @@ def _render(path: Path) -> dict:
 
 
 def guide_path(slug: str) -> Path:
-    """``docs/sop/<slug>.md``, or 404 — only plain names of files directly in SOP_DIR."""
+    """``docs/guides/<slug>.md``, or 404 — only plain names of files directly in GUIDES_DIR."""
     if not _SLUG_RE.match(slug or ""):
         raise HTTPException(status_code=404, detail="Unknown guide")
-    path = SOP_DIR / f"{slug}.md"
-    if not path.is_file() or path.resolve().parent != SOP_DIR.resolve():
+    path = GUIDES_DIR / f"{slug}.md"
+    if not path.is_file() or path.resolve().parent != GUIDES_DIR.resolve():
         raise HTTPException(status_code=404, detail="Unknown guide")
     return path
 
@@ -212,10 +212,10 @@ def load_guide(slug: str) -> dict:
 
 
 def list_guides() -> list[dict]:
-    if not SOP_DIR.is_dir():
+    if not GUIDES_DIR.is_dir():
         return []
     out = []
-    for path in sorted(SOP_DIR.glob("*.md"), key=lambda p: p.name.lower()):
+    for path in sorted(GUIDES_DIR.glob("*.md"), key=lambda p: p.name.lower()):
         if not _SLUG_RE.match(path.stem):
             continue
         try:
@@ -242,8 +242,8 @@ async def guide_detail(slug: str):
 
 @router.get("/guides/img/{rel_path:path}")
 async def guide_image(rel_path: str):
-    """One screenshot from ``docs/sop/img/`` (read-only, images only)."""
-    root = (SOP_DIR / "img").resolve()
+    """One screenshot from ``docs/guides/img/`` (read-only, images only)."""
+    root = (GUIDES_DIR / "img").resolve()
     try:
         target = (root / rel_path).resolve(strict=True)
     except (OSError, RuntimeError):

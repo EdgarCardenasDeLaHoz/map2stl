@@ -247,7 +247,7 @@ def _floor_period_for_building(
     or None when no usable period is detected (mask missing, region too
     short, autocorrelation peak below confidence threshold).
 
-    See ``docs/plans/F-SKY1-floor-periodicity.md`` for the rationale and
+    See ``docs/plans/done/skyline/F-SKY1-floor-periodicity.md`` for the rationale and
     where this signal is meant to slot into the height aggregate.
     """
     if building_mask is None or image_rgb is None:

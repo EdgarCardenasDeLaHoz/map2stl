@@ -27,7 +27,7 @@
  *   window.setupCompositeDemControls() — wire UI event listeners
  *
  * The pure spec builder lives in composite-spec.js.
- * See docs/design/composite-dem-design.md for full design rationale.
+ * See docs/reference/composite-dem-design.md for full design rationale.
  */
 
 import {

@@ -1,7 +1,7 @@
 """Score a generated city model against a surveyed or registered height reference.
 
 Promoted 2026-09-27 (F-LANDMARK §6, F-REGION §5) from the scratch "plate critic"
-described in ``Code/docs/plate-critic.md``.  The scratch code (``critic/`` in an
+described in ``docs/research/plate-critic.md``.  The scratch code (``critic/`` in an
 earlier session's scratchpad: ``plate_pairs.py``, ``fresh_raster.py``, ...) did not
 survive, so the metrics are re-implemented here from that page's definitions:
 
@@ -57,7 +57,7 @@ FLOOR_M = 2.0
 MIN_BUILDING_CELLS = 4
 #: A roof needs this many cells before its shape is compared at all.
 MIN_ROOF_CELLS = 9
-#: Above this cell size a roof is smaller than the grid can show (plate-critic.md).
+#: Above this cell size a roof is smaller than the grid can show (docs/research/plate-critic.md).
 ROOF_RESOLVABLE_CELL_M = 2.0
 #: Ground-removal opening for a rendered STL: the exporter's 80 m residual opening.
 GROUND_OPENING_M = 80.0
@@ -183,7 +183,8 @@ def score_heights(model_h, ref_h, cell_m: float, *, model_valid=None, ref_valid=
         "roofs": dict(roofs, resolvable=bool(cell_m <= ROOF_RESOLVABLE_CELL_M),
                       note=None if cell_m <= ROOF_RESOLVABLE_CELL_M else
                       f"{cell_m:.1f} m cells: a roof is smaller than the grid and the "
-                      f"registration noise (docs/plate-critic.md); read these as indicative"),
+                      "registration noise (docs/research/plate-critic.md); "
+                      "read these as indicative"),
     }
 
 

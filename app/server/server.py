@@ -329,7 +329,7 @@ async def reports_page(request: Request):
 
 @app.get("/guides", response_class=HTMLResponse)
 async def guides_page(request: Request):
-    """Step-by-step SOPs (docs/sop/*.md) rendered in the app; data comes from
+    """Step-by-step SOPs (docs/guides/*.md) rendered in the app; data comes from
     /api/guides in app/server/routers/guides.py. Deep link: /guides#<slug>/<anchor>."""
     return templates.TemplateResponse(request, "guides.html")
 

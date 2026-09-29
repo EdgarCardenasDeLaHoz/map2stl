@@ -123,7 +123,7 @@ def read_geotiff_array(data: bytes, context: str):
     """``(array float32, transform, crs, nodata)`` of GeoTIFF bytes; SurveyError if it is not one.
 
     A map service can answer with a rendered picture of the elevation rather than
-    the elevation (``docs/survey-sources.md``, "two traps"): anything that is not a
+    the elevation (``docs/reference/survey-sources.md``, "two traps"): anything that is not a
     single float/int band is refused rather than read as heights.
     """
     import io

@@ -1,16 +1,21 @@
 """
 city2stl/height — Building height data types and computational pipelines.
 
-Provides:
+Defined here:
   - HeightResult      dataclass for raster height data
   - HeightProvider    protocol that all sources implement
+  - provider_stats()  coverage / value summary of one HeightResult
+  - resolution_priority(), BUILDING_RESOLUTION_LIMIT_M
+                      cell-size weighting, and the coarsest source per-building
+                      enhancement accepts
   - merge_height_rasters()  priority-based merge of multiple HeightResults,
                             ranking by confidence scaled for cell size
-  - predict()         CNN-based height prediction (Depth Anything V2 / U-Net)
-  - train()           U-Net training loop
-  - infill_idw()      heightmap inpainting via inverse-distance weighting
-  - infill_nearest()  fast nearest-neighbour heightmap infill
-  - stl_to_heightmap() convert georeferenced STL to a 2-D heightmap
+
+Submodules (import them directly; nothing is re-exported here):
+  - infill            infill_idw() / infill_nearest() heightmap gap filling
+  - stl_import        stl_to_heightmap(): georeferenced STL to a 2-D heightmap
+  - predict, train    CNN height prediction and U-Net training (historical,
+                      not used at runtime; see docs/history/ml-height/README.md)
   - providers/        one module per external height source
   - service           provider registry, selection and enhance_city_data()
 

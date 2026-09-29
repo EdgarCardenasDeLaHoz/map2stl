@@ -86,7 +86,7 @@ OPENTOPO_DATASETS: dict[str, dict] = _opentopo.OPENTOPO_DATASETS
 #
 # Future: if the h5 file is absent, fall back to OpenTopography SRTMGL3 API
 # (same 90m SRTM3 data) or Google Earth Engine (SRTM/NASADEM, higher resolution
-# possible).  See docs/todos/README.md for the current roadmap location.
+# possible).  See docs/plans/README.md for the roadmap.
 _STRM_H5_ENV = os.environ.get("STRM_H5_ROOT")
 H5_SRTM_ROOT: str | None = (
     _STRM_H5_ENV if _STRM_H5_ENV else str((_PROJECT_ROOT / ".." / "strm_h5").resolve())

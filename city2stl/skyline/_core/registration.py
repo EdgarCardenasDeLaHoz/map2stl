@@ -97,7 +97,7 @@ def osm_anchor_silhouettes(
     the input unchanged — the function is a no-op when registration
     failed and there are no anchors to apply.
 
-    See ``docs/plans/F-SKY2-osm-anchored-segments.md``.
+    See ``docs/plans/done/skyline/F-SKY2-osm-anchored-segments.md``.
     """
     if not segments or not projections:
         return list(segments)
@@ -216,7 +216,7 @@ def osm_sam_instance_silhouettes(
       pixels (avoids over-segmenting a single tower into body + spire).
     - If 0 masks survive the floor, leave the original segment unchanged.
 
-    See ``docs/plans/F-SKY5-mobilesam-instance.md``.
+    See ``docs/plans/done/skyline/F-SKY5-mobilesam-instance.md``.
     """
     if not _mobilesam_available():
         return list(segments)

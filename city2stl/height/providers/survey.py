@@ -16,7 +16,7 @@ Contract and caching: ``_survey``. Providers (one module each):
 ``usgs_3dep``      USA, 3DEP point cloud: COPC (laspy) first, then EPT (PDAL)
 =================  ===========================================================
 
-Documented gaps (``docs/survey-sources.md``): Spain's 0.5 m PNOA 2nd/3rd-coverage
+Documented gaps (``docs/reference/survey-sources.md``): Spain's 0.5 m PNOA 2nd/3rd-coverage
 surfaces (only through an undocumented download form), Lisbon (DGT, account
 required), Barcelona ICGC (WMS returns pictures; point cloud only), Salzburg
 BEV (50 km tiles; not wired), Cartagena de Indias (no open surface model).

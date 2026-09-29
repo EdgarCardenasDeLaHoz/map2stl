@@ -20,7 +20,7 @@ Cache layout (``runs/satellite_image_cache/``):
   sat_<bbox-hash>_z<zoom>.png       — RGB composite, cropped to bbox
   sat_<bbox-hash>_z<zoom>.json      — metadata (bbox, zoom, image dims)
 
-See ``docs/plans/F-SKY10-non-ml-cross-view-registration.md``.
+See ``docs/plans/done/skyline/F-SKY10-non-ml-cross-view-registration.md``.
 """
 
 from __future__ import annotations

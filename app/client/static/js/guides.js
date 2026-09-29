@@ -1,5 +1,5 @@
 /**
- * guides.js — the /guides page: SOPs from docs/sop/*.md, rendered by the server.
+ * guides.js — the /guides page: SOPs from docs/guides/*.md, rendered by the server.
  *
  * Loaded as an ES module by templates/guides.html. GET /api/guides lists the guides and
  * GET /api/guides/{slug} returns {title, html, toc}; the HTML is already rewritten server-side
@@ -172,7 +172,7 @@ window.addEventListener('popstate', () => {
         return;
     }
     if (!state.guides.length) {
-        $('#guide').innerHTML = '<p class="status">No guides in docs/sop/ yet.</p>';
+        $('#guide').innerHTML = '<p class="status">No guides in docs/guides/ yet.</p>';
         return;
     }
     renderList();

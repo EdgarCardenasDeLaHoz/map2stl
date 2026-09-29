@@ -327,8 +327,8 @@ def score_pano_offset_keypoints(
     # predict horizon-y (camera_h/D shrinks fast) and would otherwise
     # out-vote the few near keypoints that carry the discriminative
     # signal. Set max_signal_dist_m to a huge value to recover the
-    # original equal-weight behaviour. See F-SKY-AUDIT-2026-05-24.md
-    # "Underlying issue diagnosed" section for the seed_1 case study
+    # original equal-weight behaviour. See
+    # docs/history/audits/F-SKY-AUDIT-2026-05-24.md "Underlying issue diagnosed" section for the seed_1 case study
     # that motivated this.
     weighted_sum = 0.0
     weight_total = 0.0

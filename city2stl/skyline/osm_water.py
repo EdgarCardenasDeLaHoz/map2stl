@@ -1,7 +1,7 @@
 """city2stl.skyline.osm_water — OSM coastline + water extraction (F-SKY13).
 
 OSM is the **primary** ground truth for pano↔geography coastline
-registration (see ``docs/plans/F-SKY13-osm-coastline-footprints-overlay.md``
+registration (see ``docs/plans/done/skyline/F-SKY13-osm-coastline-footprints-overlay.md``
 and feedback memory ``feedback_satellite_coastline_hsv_unreliable``).
 This module reads the waterways layer that ``city2stl.fetch.fetch_osm_data``
 already populates, extracts coastline linestrings and water polygons,

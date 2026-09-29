@@ -1,7 +1,7 @@
 """
 city2stl/height/train -- U-Net height prediction training pipeline.
 
-Phase 2.2 of 3D_plan1.md.
+Phase 2.2 of the building-height plan; history in docs/history/ml-height/README.md.
 
 Architecture:
   U-Net with EfficientNet-B4 encoder (timm).

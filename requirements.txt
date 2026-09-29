@@ -11,7 +11,7 @@ python-multipart==0.0.22
 aiofiles==25.1.0
 anyio==4.12.1
 jinja2==3.1.6           # server-side HTML templates (Jinja2Templates in server.py)
-markdown==3.11          # /guides: SOPs in docs/sop/ rendered server-side (app/server/routers/guides.py)
+markdown==3.11          # /guides: SOPs in docs/guides/ rendered server-side (app/server/routers/guides.py)
 
 # Numeric / geo
 numpy==1.26.4

@@ -5,7 +5,7 @@
  * No DOM, no window: composite-dem.js reads the panel state and passes it in,
  * and tests/js/compositeSpec.test.js exercises this directly.
  *
- * Two-stage mesh pipeline (docs/plans/F-ARCH-consolidation.md): every mesh is
+ * Two-stage mesh pipeline (docs/plans/active/F-ARCH-consolidation.md): every mesh is
  * a raster *terrain* stage (DEM, water depth, land cover, vegetation, trails)
  * followed by a vector *feature* stage (city2stl.city_model: OSM buildings,
  * roads, waterways, walls as 3D prisms/drapes/cuts). The rasterised OSM

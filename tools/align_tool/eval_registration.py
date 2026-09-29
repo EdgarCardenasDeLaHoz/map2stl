@@ -1,7 +1,7 @@
 """Score the registration pipeline against the Layer 0 hand-aligned ground truth.
 
 This is the measuring stick for the learned-registration plan
-(`docs/registration-learning-plan.md`): nothing advances a layer without a number
+(`docs/plans/active/registration-learning-plan.md`): nothing advances a layer without a number
 from here.  It reports three independent things, deliberately kept apart so a mask
 win and a registration win can be told apart:
 
@@ -19,7 +19,7 @@ win and a registration win can be told apart:
    the search taken entirely out of the picture.
 
 Inputs come from the align tool's export: `data/<slug>/` supplies the
-rasters and `meta.json`, and `_ground_truth/<slug>.json` supplies the hand placement.
+rasters and `meta.json`, and `ground_truth/<slug>.json` supplies the hand placement.
 Cities without a ground-truth file are skipped, so this runs usefully before all
 eight have been aligned.
 

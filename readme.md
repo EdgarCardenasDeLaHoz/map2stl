@@ -5,17 +5,18 @@ OpenStreetMap buildings/roads) into 3D-printable models (STL / OBJ / 3MF).
 map2stl is a **FastAPI web app** with an interactive map UI, plus a **Python
 SDK** for driving the same pipeline from notebooks or scripts.
 
-> **New here?** Read [`CLAUDE.md`](CLAUDE.md) first — it's the project index —
-> then [`docs/ai-agent-onboarding.md`](docs/ai-agent-onboarding.md) for the
-> shortest correct reading path. The workspace-level overview is in the parent
-> [`../README.md`](../README.md).
+> **New here?** Users: the step-by-step guides are in [`docs/guides/`](docs/guides/)
+> (also in the app at `/guides`). Developers and agents: start at
+> [`docs/INDEX.md`](docs/INDEX.md) (doc map, where to edit, topic → code), and read
+> [`CLAUDE.md`](CLAUDE.md) for the project rules. The workspace-level overview is in the
+> parent [`../README.md`](../README.md).
 
 ## Features
 
 - **Terrain** — DEM/SRTM elevation → 3D surfaces, with colormaps, projections, and adjustable resolution.
 - **Cities** — OSM buildings and roads extracted and extruded (`city2stl/`).
 - **Oceans** — GEBCO bathymetry with region-specific processing.
-- **Building heights** — CNN + skyline-CV estimation for realistic city models.
+- **Building heights** — OSM tags merged with raster and survey sources (Overture, GlobalBuildingAtlas, Google 3D Tiles, lidar); no CNN model runs at runtime.
 - **Web UI** — draw/select a bounding box, preview stacked layers, export a mesh.
 - **Python SDK** — `TerrainSession` drives the server over HTTP from notebooks.
 
@@ -78,7 +79,7 @@ s.export_obj()                                                       # write an 
 The clearest end-to-end example is
 [`notebooks/API_Terrain.ipynb`](notebooks/API_Terrain.ipynb); method-to-endpoint
 coverage is in [`notebooks/Session_API_Reference.ipynb`](notebooks/Session_API_Reference.ipynb).
-See [`docs/sdk-workflow.md`](docs/sdk-workflow.md) for notebook → SDK → route tracing.
+See [`docs/reference/sdk.md`](docs/reference/sdk.md) for notebook → SDK → route tracing.
 
 > There is no standalone command-line entry point; the web UI, the SDK, and the
 > notebooks are the supported ways to drive the pipeline.
@@ -108,31 +109,31 @@ file for the full pinned list.
 map2stl/
 ├── app/
 │   ├── server/        # FastAPI backend — routers/ + core/ + schemas.py
-│   ├── client/        # Browser UI — static/js modules, templates/index.html
+│   ├── client/        # Browser UI — Vue 3 components (static/js/vue/, built by Vite) + ES modules (static/js/modules/)
 │   └── session/       # Python SDK (TerrainSession)
 ├── geo2stl/           # Map projections + DEM tile stitching (library)
 ├── city2stl/          # OSM/building → mesh + skyline CV pipeline (library)
 ├── tests/             # pytest suite (e2e/ needs Playwright)
 ├── notebooks/         # Jupyter examples (API_Terrain, Session_API_Reference, …)
 ├── tools/             # Utility + ad-hoc diagnostic scripts, slicer configs
-├── docs/              # Architecture, API, module, and state reference
+├── docs/              # INDEX.md, guides/, reference/, decisions/, plans/, history/
 ├── Makefile           # serve / test / lint / fmt / install / clean-runs
 ├── requirements*.txt  # Pinned dependencies
-└── CLAUDE.md          # Project index (read first)
+└── CLAUDE.md          # Project rules and workflow
 ```
 
 ## Documentation
 
 | Topic | File |
 |---|---|
-| Project index (read first) | [`CLAUDE.md`](CLAUDE.md) |
-| Onboarding / reading path | [`docs/ai-agent-onboarding.md`](docs/ai-agent-onboarding.md) |
-| Docs index | [`docs/README.md`](docs/README.md) |
-| Architecture + data flow | [`docs/arch.md`](docs/arch.md) |
-| API routes + Pydantic models | [`docs/api.md`](docs/api.md) |
-| Frontend modules / state | [`docs/modules.md`](docs/modules.md), [`docs/state.md`](docs/state.md) |
-| Known issues / status | [`docs/issues.md`](docs/issues.md) |
-| Phase G/H model history (archived) | [`docs/phase-history/`](docs/phase-history/) |
+| The index (doc map, where to edit, topic → code) | [`docs/INDEX.md`](docs/INDEX.md) |
+| Project rules and workflow | [`CLAUDE.md`](CLAUDE.md) |
+| User guides (SOPs) | [`docs/guides/`](docs/guides/) |
+| Architecture + data flow | [`docs/reference/overview.md`](docs/reference/overview.md) |
+| API routes + Pydantic models | [`docs/reference/api.md`](docs/reference/api.md) |
+| Frontend (Vue + modules, state) | [`docs/reference/frontend.md`](docs/reference/frontend.md), [`docs/reference/frontend-modules.md`](docs/reference/frontend-modules.md) |
+| Roadmap / known issues | [`docs/plans/README.md`](docs/plans/README.md), [`docs/issues.md`](docs/issues.md) |
+| Height-model training history (archived) | [`docs/history/ml-height/`](docs/history/ml-height/README.md) |
 
 ## License
 

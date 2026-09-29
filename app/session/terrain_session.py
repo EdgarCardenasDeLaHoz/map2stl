@@ -236,7 +236,7 @@ class TerrainSession:
     """Wrap the map2stl HTTP API as a single Python object.
 
     This is the main Python SDK used by the notebooks. For a faster map of how
-    these methods relate to the server, see docs/sdk-workflow.md and docs/api.md.
+    these methods relate to the server, see docs/reference/sdk.md and docs/reference/api.md.
     """
 
     def __init__(self, port: int = 9090):
@@ -2850,7 +2850,7 @@ class TerrainSession:
     ) -> dict:
         """Collect training tiles and train the U-Net height predictor.
 
-        Phase 2.2 of 3D_plan1.md.
+        Phase 2.2 of the ML height work (docs/history/ml-height/README.md).
 
         Parameters
         ----------

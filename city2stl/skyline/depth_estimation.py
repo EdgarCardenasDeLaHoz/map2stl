@@ -21,7 +21,7 @@ A fourth helper, ``compare_heights``, returns the boolean
 Phase A does **not** modify aggregated heights. It only surfaces a second
 signal. Phase B (future) will use it for confidence weighting and rescue.
 
-See ``docs/plans/F-SKY12-depth-from-panos.md`` for the broader design.
+See ``docs/plans/done/skyline/F-SKY12-depth-from-panos.md`` for the broader design.
 """
 
 from __future__ import annotations

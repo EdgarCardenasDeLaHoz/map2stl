@@ -10,7 +10,7 @@ Formula: height = shadow_length * tan(sun_elevation)
     - This method is highly error-prone in hilly or dense urban terrain.
     - It frequently produces extreme outliers and unreliable results.
     - It is now removed from the default provider list and should only be used for research or as a last resort.
-    - See docs/completed/height-pipeline-plan.md for rationale and alternatives.
+    - See docs/plans/done/height-pipeline-plan.md for rationale and alternatives.
 
 Requirements:
     - Satellite image (RGB) for the bbox

@@ -13,8 +13,8 @@ images instead of ~120 s for the full report. No new Street View API calls
 when `runs/image_cache/` and `runs/seed_resolution_cache.json` are populated
 from a prior `08_region_skyline_pdf.py` run.
 
-Phase 1 of docs/glass-roof-height-fix-plan.md — trace ≥3 tall-tagged buildings
-before deciding whether Phase 2 monocular depth is justified.
+Phase 1 of docs/plans/done/skyline/glass-roof-height-fix-plan.md — trace ≥3
+tall-tagged buildings before deciding whether Phase 2 monocular depth is justified.
 """
 
 from __future__ import annotations

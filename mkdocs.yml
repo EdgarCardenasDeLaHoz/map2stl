@@ -34,6 +34,11 @@ markdown_extensions:
   - codehilite
   - toc:
       permalink: true
+      # GitHub-style heading ids ("2026-09-27 — X" -> "2026-09-27--x"), so the anchors the docs
+      # link to on GitHub also resolve in the built site.
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
   - admonition
   - pymdownx.details
   - pymdownx.superfences:
@@ -47,30 +52,67 @@ markdown_extensions:
 extra_javascript:
   - https://unpkg.com/mermaid@11/dist/mermaid.min.js
 
+# Docs link to repo files outside docs/ (CLAUDE.md, the skyline README, numpy2stl), which
+# MkDocs cannot resolve; link correctness is checked by Code/agent-scripts/check_doc_links.py
+# instead, so unresolved links are reported as info rather than failing --strict.
+validation:
+  links:
+    not_found: info
+    anchors: info
+
+# History, plan files (active/done/archive) and research notebooks are built but kept out of
+# the nav: reach them from the Index, the Roadmap and the History page.
+not_in_nav: |
+  /history/**
+  /plans/active/**
+  /plans/done/**
+  /plans/archive/**
+
 nav:
-  - Home: README.md
-  - Getting Started:
-      - Project Onboarding: ai-agent-onboarding.md
-      - Task Routing: task-routing.md
-  - Architecture:
-      - Overview: arch.md
-      - JS Modules: modules.md
-      - Frontend State: state.md
-      - Library Integration: libraries.md
-      - Map Projections: projections.md
-  - API Reference:
-      - Endpoints: api.md
-      - SDK Workflow: sdk-workflow.md
-  - Layer System:
-      - Layer Analysis: layer_system_analysis.md
-      - Composite DEM: composite_dem_design.md
-      - Height Pipeline: height-pipeline-plan.md
-  - Features:
-      - BBox Editing: bbox_editing_options.md
-      - PrusaSlicer Settings: prusaslicer_terrain_settings.md
-  - UX & Accessibility:
-      - UX Audit: ux-audit.md
-      - Accessibility Audit: ACCESSIBILITY_AUDIT.md
-  - Project Management:
-      - Proposals: proposals.md
-      - Known Issues: issues.md
+  - Index: INDEX.md
+  - Guides:
+      - City models and puzzles: guides/city-stl-and-puzzle-sop.md
+      - Large regions: guides/large-region-sop.md
+      - Printing (PrusaSlicer): guides/printing-prusaslicer.md
+  - Reference:
+      - Overview: reference/overview.md
+      - Pipeline: reference/pipeline.md
+      - API: reference/api.md
+      - SDK: reference/sdk.md
+      - Frontend: reference/frontend.md
+      - Frontend modules: reference/frontend-modules.md
+      - Packages: reference/packages.md
+      - Layer system: reference/layer-system.md
+      - Projections: reference/projections.md
+      - Composite DEM design: reference/composite-dem-design.md
+      - Height providers: reference/height-providers.md
+      - Survey sources: reference/survey-sources.md
+      - Roof-shape model: reference/roof-shape-model.md
+      - Align refinement: reference/align-refinement.md
+  - Decisions:
+      - About: decisions/README.md
+      - "Architecture": decisions/architecture.md
+      - "Building heights": decisions/building-heights.md
+      - "Composite DEM": decisions/composite.md
+      - "Frontend": decisions/frontend.md
+      - "Mesh pipeline": decisions/mesh-pipeline.md
+      - "Learned height models": decisions/ml-height.md
+      - "OSM, water and hydrology": decisions/osm-water-hydrology.md
+      - "Plate critic — what counts as evidence": decisions/plate-critic.md
+      - "Projections and raster conventions": decisions/projections-raster.md
+      - "Registration — locating a plate (scale, rotation, water/building solves)": decisions/registration-plate-location.md
+      - "Registration — refinement, wide window, street placement, footprint channel": decisions/registration-refinement.md
+      - "Registration — validation, ground truth, consensus": decisions/registration-validation.md
+      - "Repos, tooling and docs": decisions/repo-tooling-docs.md
+      - "Roofs and landmarks": decisions/roofs-landmarks.md
+      - "Survey and lidar sources": decisions/survey-lidar.md
+      - "Terrain and DEM": decisions/terrain-dem.md
+      - "Trails": decisions/trails.md
+  - Research:
+      - Plate critic: research/plate-critic.md
+      - Shadow heights: research/shadow-heights.md
+      - Roof-shape research: research/roof-shape-research.md
+  - Roadmap: plans/README.md
+  - Issues: issues.md
+  - Proposals: proposals.md
+  - History: history/README.md

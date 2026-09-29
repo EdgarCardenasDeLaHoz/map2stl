@@ -25,7 +25,7 @@ Entry point: ``city2stl/skyline/scripts/08_region_skyline_pdf.py``.
 
 This is the cross-view research pipeline. The ML height stack and the external
 height providers it builds on are general-purpose and live in
-``city2stl/height/``. See ``README.md`` and ``STATUS.md`` for
+``city2stl/height/``. See ``README.md`` and ``docs/STATUS.md`` for
 current strengths, weaknesses, and known failure modes.
 """
 

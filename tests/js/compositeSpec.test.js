@@ -2,7 +2,7 @@
  * compositeSpec.test.js — the Composite panel's server layer spec
  * (app/client/static/js/modules/layers/composite-spec.js).
  *
- * Two-stage mesh pipeline (docs/plans/F-ARCH-consolidation.md): the rasterised
+ * Two-stage mesh pipeline (docs/plans/active/F-ARCH-consolidation.md): the rasterised
  * OSM feature channels may appear in the 2D preview spec, but never in the
  * spec used for Apply / export, or buildings get printed twice.
  */

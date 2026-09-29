@@ -1,7 +1,7 @@
 """
 city2stl/height/predict -- CNN-based building height prediction.
 
-Phase 2 of 3D_plan1.md.
+Phase 2 of the building-height plan; history in docs/history/ml-height/README.md.
 
 Two modes:
   "pretrained"  -- Depth Anything V2 (small, ~300 MB).  Zero-shot monocular depth

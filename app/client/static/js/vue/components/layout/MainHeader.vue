@@ -17,7 +17,7 @@
     </div>
 
     <div class="header-actions">
-      <!-- Guides: the step-by-step SOPs (docs/sop/*.md) rendered at /guides -->
+      <!-- Guides: the step-by-step SOPs (docs/guides/*.md) rendered at /guides -->
       <a class="btn btn-secondary docs-menu-btn guides-btn" href="/guides" target="_blank" rel="noopener"
          title="Step-by-step guides with screenshots: city models, puzzles, large regions">
         📘 Guides

@@ -789,7 +789,8 @@ def main(only: list[str] | None = None):
         # density-scale footprints over the whole frame, which on a grid city aliases one block
         # for the next; `street_place` compares raw footprints (plus water with its bridges cut,
         # and terrain where the ground has shape) at 8 m, locally, about the geometric pose.
-        # See memory-bank/decisions.md, 2026-09-11.  STREET_PLACE=0 turns it off.
+        # See docs/decisions/registration-refinement.md, 2026-09-11 (grid cities are placed at
+        # street scale).  STREET_PLACE=0 turns it off.
         if os.environ.get("STREET_PLACE", "1") != "0" and relief["residual"] is not None:
             meta.setdefault("geometric_guess", guess)
             try:

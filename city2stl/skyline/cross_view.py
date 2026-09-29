@@ -31,7 +31,7 @@ The combined score contributes a 0.15 × [0.5 to 1.0] = 7.5–15% nudge on
 the final matcher score — conservative, but enough to break ties that
 the IoU-only path gets wrong.
 
-See ``docs/plans/F-SKY10-F-SKY11.2-IMPLEMENTATION-2026-05-17.md``.
+See ``docs/plans/done/skyline/F-SKY10-non-ml-cross-view-registration.md``.
 """
 
 from __future__ import annotations

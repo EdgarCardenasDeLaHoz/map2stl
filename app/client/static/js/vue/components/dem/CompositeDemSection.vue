@@ -105,7 +105,7 @@
     <details class="composite-layer-group">
       <summary class="composite-layer-header">🏙 City / OSM <span class="composite-2d-only">2D preview only</span></summary>
       <div class="composite-layer-body">
-        <!-- Two-stage mesh pipeline (docs/plans/F-ARCH-consolidation.md): the
+        <!-- Two-stage mesh pipeline (docs/plans/active/F-ARCH-consolidation.md): the
              3D model takes these features from the City Model's vector stage,
              so Apply to DEM and every export leave these channels out of the
              terrain — otherwise buildings would print twice. -->

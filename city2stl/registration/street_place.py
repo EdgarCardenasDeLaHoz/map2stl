@@ -3,7 +3,8 @@
 Why this exists
 ---------------
 Every placement study from 2026-09-08 to 2026-09-10 failed on the grid cities, and the failures
-came from the solver, not from the packs (memory-bank/decisions.md, 2026-09-10 and 2026-09-11):
+came from the solver, not from the packs (docs/decisions/registration-refinement.md, 2026-09-10
+and 2026-09-11 entries):
 
 * The plate was matched 1.5 times too large.  The exporter's plate raster covers the plate's own
   span and the OSM raster covers 1.5 times that (`export_align_data.py`, the comment above
@@ -41,7 +42,8 @@ Two extra channels join the footprints where they carry information the footprin
   the residual was measured from.  The DEM decides whether the channel is used (5-95% spread of at
   least 25 m under the plate), because the plate's own vertical scale is arbitrary.
 
-Both sides of the footprint channel were remodelled on 2026-09-13 (memory-bank/decisions.md):
+Both sides of the footprint channel were remodelled on 2026-09-13
+(docs/decisions/registration-refinement.md#2026-09-13--footprint-channel-remodelled-standing-coverage-map-and-mesa-plate):
 
 * Map: `map_buildings` is the covered fraction of each cell (osm_model.coverage), from the
   standing footprint classes plus raised road and rail decks, where it had been every footprint

@@ -26,7 +26,7 @@ slabs that follow the terrain, raised or engraved. Water is cut flat.
 
 Outputs: ``merged`` (one watertight solid) and ``parts`` (terrain plus one
 non-overlapping solid per layer, for multi-material 3MF).
-See docs/plans/F-CITYMODEL-vector-city-model.md.
+See docs/plans/active/F-CITYMODEL-vector-city-model.md.
 """
 
 from __future__ import annotations

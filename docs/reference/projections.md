@@ -1,9 +1,16 @@
 # Map Projections
 
-_Last updated: 2026-07-19 (F-PROJ-DIMS — maintain_dimensions default flipped to False)_
+_Last updated: 2026-09-28_
 
 All projections are implemented in `geo2stl/projections.py`.
-The active entry point is `project_coordinates(mat, bbox, projection=..., ...)`.
+The active entry point is `geo2stl/projections.py::project_coordinates`; the app calls it through
+`geo2stl/projections.py::project_grid`, `geo2stl/projections.py::project_water_arrays` and
+`geo2stl/projections.py::project_rgb_image`.
+
+- Why the raster conventions are what they are → [projections-raster.md](../decisions/projections-raster.md).
+  - Its "row 0 = south everywhere" entry is superseded: rasters are **row 0 = north by default**
+    → [architecture.md](../decisions/architecture.md), "Raster row 0 is north by default".
+- Library map → [packages.md](packages.md).
 
 ---
 
@@ -122,7 +129,7 @@ Rows near the poles reach outside the valid longitude range → NaN margins on t
 
 ## NaN handling
 
-Projections that remap pixels by scatter (cosine with `maintain_dimensions=False`, sinusoidal) produce NaN values where no source pixel lands. Two stripping strategies exist:
+Projections whose valid region is not the full rectangle (sinusoidal's curved edges; lat-warping projections at the border) produce NaN values where no source pixel lands. Cosine with `maintain_dimensions=False` no longer does: it resizes the whole image (see above). Two stripping strategies exist:
 
 | Strategy | Code | Meaning |
 |---|---|---|
@@ -146,7 +153,7 @@ project_coordinates(
 )
 ```
 
-`maintain_dimensions=False` is the pipeline default (F-PROJ-DIMS, 2026-07-19) — output reflects the projection's true geographic aspect ratio, so switching projections visibly changes the canvas/mesh shape. Every projection function computes its output shape deterministically from `(input_shape, bbox)`, so independently-projected layers (DEM, water, ESA, city, hydrology) for the same bbox/dim/projection still land on identical shapes — see `geo2stl.projections.verify_layer_alignment()` for a runtime/test guard, and `expected_aspect_ratio()` for the shared formula. Set `maintain_dimensions=True` (client: the "Keep fixed canvas shape across projections" checkbox next to the projection dropdown) to opt into the old fixed-shape behavior — same output shape as input, no NaN gaps, predictable mesh size, but the rendered aspect ratio no longer changes with projection.
+`maintain_dimensions=False` is the pipeline default (F-PROJ-DIMS, 2026-07-19) — output reflects the projection's true geographic aspect ratio, so switching projections visibly changes the canvas/mesh shape. Every projection function computes its output shape deterministically from `(input_shape, bbox)`, so independently-projected layers (DEM, water, ESA, city, hydrology) for the same bbox/dim/projection still land on identical shapes — see `geo2stl/projections.py::verify_layer_alignment` for a runtime/test guard, and `geo2stl/projections.py::expected_aspect_ratio` for the shared formula. Set `maintain_dimensions=True` (client: the "Keep fixed canvas shape across projections" checkbox next to the projection dropdown) to opt into the old fixed-shape behavior — same output shape as input, no NaN gaps, predictable mesh size, but the rendered aspect ratio no longer changes with projection.
 
 **Important:** `clip_nans=True` is automatically skipped whenever `maintain_dimensions=True` — trimming NaN border rows/cols would otherwise shrink the output below the input shape (a lat-warping projection can introduce genuine edge NaNs even when `out_m == m`), silently violating the "same shape as input" contract. This was a real bug found via Playwright verification (mercator + `clip_nans=True` + `maintain_dimensions=True` returned a shape 1px smaller than the input) — fixed in `project_coordinates()`.
 
@@ -172,7 +179,7 @@ These implementation details are essential for correct layer alignment and proje
 
 ### Satellite Mercator→Plate Carrée conversion
 
-`core/sat.py → _mercator_to_plate_carree(img, north, south)` resamples ESRI satellite imagery from Web Mercator to Plate Carrée by computing per-row latitude→Mercator-y mapping and applying bilinear interpolation along the y-axis. This is called in `fetch_satellite_tiles()` after the bbox crop and before the final resize. Without this step, satellite tiles at high latitudes (e.g., Norway ~60° N) appear shifted south.
+`geo2stl/sat2stl.py::_mercator_to_plate_carree` resamples ESRI satellite imagery from Web Mercator to Plate Carrée by computing per-row latitude→Mercator-y mapping and applying bilinear interpolation along the y-axis. Tiles are fetched and stitched by `geo2stl/imagery.py::fetch_rgb`; the conversion is called in `geo2stl/sat2stl.py::fetch_satellite_tiles` after the bbox crop and before the final resize. Without this step, satellite tiles at high latitudes (e.g., Norway ~60° N) appear shifted south.
 
 ### ESA land cover — categorical data
 
@@ -184,7 +191,7 @@ ESA WorldCover uses integer class IDs (10=Tree cover, 20=Shrubland, 30=Grassland
 
 ### Projection pipeline uniformity
 
-All raster endpoints pass data through `core/projection.py`. Key rules:
+All raster endpoints pass data through `geo2stl/projections.py`. Key rules:
 
 - `maintain_dimensions` defaults to `False` (F-PROJ-DIMS) and is threaded through from the client's `#paramMaintainDimensions` checkbox (`window.getProjectionParams()`) uniformly to every layer fetch — same value for DEM/water/ESA/satellite/hydrology/city so their outputs land on matching aspect ratios.
 - `clip_nans` must use `fill_value=np.nan` for ALL data types (categorical and continuous) so that NaN-border clipping produces consistent dimensions across layers. Automatically skipped when `maintain_dimensions=True` (see above).
@@ -198,48 +205,44 @@ Cosine projection squishes each row horizontally by `cos(lat)`. At 60° N, `cos(
 
 ### Layer compositing
 
-`stacked-layers.js` uses a shared letterboxed rectangle based on bbox aspect ratio. All layers are stretched to the same target rect via `drawImage` 9-arg form, regardless of native pixel dimensions. This means layers can have different resolutions and still align correctly as long as they cover the same geographic bbox.
+`app/client/static/js/modules/layers/stacked-layers.js` uses a shared letterboxed rectangle based on bbox aspect ratio. All layers are stretched to the same target rect via `drawImage` 9-arg form, regardless of native pixel dimensions. This means layers can have different resolutions and still align correctly as long as they cover the same geographic bbox.
 
 ### City data constraints
 
-OSM building queries via Overpass API require bbox diagonal < 15 km. The server validates this with `validate_bbox_diagonal()`. For larger regions, city data should not be fetched.
+OSM building queries via Overpass API require bbox diagonal < 15 km. The server validates this with `app/server/core/validation.py::validate_bbox_diagonal`. For larger regions, city data should not be fetched.
 
 ---
 
 ## Caching model and projection performance
 
-### Current model: cache-keyed-by-projection
+### Current model: cache plate carrée, project on every request
 
-Every raster endpoint (terrain DEM, water mask, ESA land cover, height fetch) computes the
-cache key **after** projection parameters are known. Both `projection` and `clip_nans` are
-included in `make_cache_key(...)`. The flow is:
+Raster endpoints cache the **raw (unprojected)** array once per bbox and apply projection after
+every read, cache hits included:
 
 ```
-request (bbox + projection) → cache miss → fetch (Plate Carrée) → project → write cache → return
-                                cache hit  →  skip fetch + project entirely  →  return
+request (bbox + projection) → cache miss → fetch (plate carrée) → write cache → project → return
+                                cache hit  → read raw array                    → project → return
 ```
 
-**Consequence:** the same bbox requested with different projections produces separate cache
-entries. A cosine cache hit still serves the pre-projected result with zero recomputation.
-
-**Endpoints using this model:**
-- `GET /api/terrain/dem` — `proj`, `cn` in key; `_project_grid` applied after fetch
-- `GET /api/terrain/water-mask` — `proj`, `cn` in key; `_project_water_arrays` applied after fetch
-- `GET /api/terrain/esa-land-cover` — `proj`, `cn` in key; `_project_grid` (categorical) applied after fetch
-- `GET /api/terrain/satellite` — no disk cache; `_project_rgb_image` applied on every request
-- `POST /api/height/fetch` — `projection`/`clip_nans` **not yet in key** (see below)
-
-### Known gap: `/api/height/fetch` projection not in cache key
-
-The height providers cache their raw Plate Carrée rasters internally (inside each provider via
-`write_array_cache`). The `/api/height/fetch` endpoint then applies `project_grid` *after*
-reading from the provider cache. However, the endpoint does **not** maintain its own disk cache,
-so projection is re-run on every request even when the underlying raster is cache-hot.
-
-This is correct for correctness (no stale projected data) but wasteful for repeated requests
-with the same `(bbox, providers, projection)` triple. If `/api/height/fetch` gains an endpoint-
-level disk cache, `projection` and `clip_nans` must be included in the key — matching the
-terrain endpoint pattern exactly.
+- Switching projection on the same bbox is a cache hit plus a projection.
+- `projection` and `clip_nans` / `clip_valid_region` are **not** in the keys. The DEM key does
+  carry `maintain_dimensions` (`md`); the other layers re-project on a hit, so a changed
+  setting takes effect without a new key.
+- Endpoints:
+  - `/api/terrain/dem` — key from `app/server/core/dem_cache.py::dem_cache_key` (the one
+    definition, shared with export); projected with `project_grid`.
+  - `/api/terrain/water-mask` — `water` namespace; `project_water_arrays` after the read.
+  - `/api/terrain/esa-land-cover` — `esa_lc` namespace; categorical `project_grid`.
+  - `/api/terrain/hydrology` — `hydrology` namespace; `project_grid` after the read.
+  - `/api/terrain/satellite` — no disk cache; `project_rgb_image` on every request.
+  - `/api/height/fetch` — each provider's raw raster cached in `height_<provider>`
+    (`app/server/core/height/service.py::fetch_height_payload`); merged, then projected.
+- ESA land cover and hydrology once baked the projected result into the cache and never
+  re-projected on a hit (fixed 2026-07-19). A new raster endpoint follows the DEM / water-mask
+  pattern.
+- Why → [terrain-dem.md](../decisions/terrain-dem.md), "Rasterize at the pre-projection size,
+  project once" and "The DEM cache key has exactly one definition".
 
 ### Performance characteristics of projection
 
@@ -255,31 +258,6 @@ for bilinear resampling. For a typical 256×256 raster:
 
 For 512×512 rasters costs scale approximately 4× (area).
 
-Projection is fast enough to re-run on every cache miss without concern. The main cost
-saving from caching is avoiding the **data fetch** (network or disk I/O), not the projection
-itself. This is why the terrain endpoints cache the post-projection result by default —
-it avoids both costs — rather than storing Plate Carrée and re-projecting per request.
-
-### Alternative model: cache Plate Carrée, project on request
-
-Storing raw Plate Carrée in the cache and projecting on every request is a valid alternative
-with different trade-offs:
-
-| | Current (cache post-projection) | Alternative (cache Plate Carrée) |
-|---|---|---|
-| Cache entries per bbox | One per `(bbox, projection)` combination | One per `(bbox, params)` — projection-agnostic |
-| Cache size | Larger (N projections × M bboxes) | Smaller |
-| Repeated same projection | O(1) — cache hit, no projection | O(projection) — re-project every time |
-| Switching projection on same bbox | Cache miss, full fetch + project | Cache hit, project only |
-| Alignment risk | None — each layer independently projected | Low — all layers must use same projection call |
-
-If projection switching per-request becomes a common use case (e.g., a UI dropdown that
-switches projection without re-fetching data), the Plate Carrée cache model would be
-preferable. The current model is optimal for the existing use case where projection is
-fixed per session/request.
-
-To move to the Plate Carrée model:
-1. Remove `proj` and `cn` from all `make_cache_key(...)` calls.
-2. Read the raw array from cache.
-3. Apply `project_grid` at the endpoint before returning.
-4. Accept that repeated requests with the same projection re-run the projection step.
+Projection is fast enough to re-run on every request. The cost caching saves is the **data
+fetch** (network or disk I/O), not the projection — which is why the cache stores raw
+plate-carrée data and projects after every read.

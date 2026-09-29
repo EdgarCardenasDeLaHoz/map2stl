@@ -1,11 +1,14 @@
 """
-geo2stl/sat.py — Satellite and water-mask imagery fetching.
+geo2stl/sat2stl.py — Satellite and water-mask imagery fetching.
 
 Contains:
   - fetch_water_mask        — binary water mask from ESA/JRC + SRTM bathymetry
   - fetch_water_mask_images — raw image fetch (ESA, JRC, elevation); call via run_in_executor
   - fetch_sat_overlay       — Google Earth Engine satellite overlay
   - fetch_satellite_tiles   — ESRI World Imagery bbox JPEG (tiles via geo2stl.imagery)
+  - initialize_earth_engine / fetch_bbox_image / get_aquatic_regions
+                            — Earth Engine session and cached bbox image fetches
+  - SAT_LAYER               — the satellite layer service object
 
 All functions are pure computation with no HTTP framework dependencies and
 can be called from route handlers via asyncio.run_in_executor.

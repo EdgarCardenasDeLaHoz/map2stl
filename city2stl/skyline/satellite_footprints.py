@@ -24,7 +24,7 @@ Cache layout (``runs/satellite_footprints_cache/``):
 
 All filesystem I/O is gitignored via the existing ``runs/`` exclusion.
 
-See ``docs/plans/F-SKY8-satellite-footprints.md``.
+See ``docs/plans/done/skyline/F-SKY8-satellite-footprints.md``.
 """
 
 from __future__ import annotations

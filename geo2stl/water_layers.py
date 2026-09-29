@@ -14,7 +14,7 @@ adds them *after* the 3x3 median filter (``export._prepare_dem_array``). A
 one-pixel channel is 3 of the 9 cells in a 3x3 window, so a median applied
 after carving would erase it.
 
-River size (do not re-litigate: docs/plans/F-REGION-large-areas-hydrology.md):
+River size (do not re-litigate: docs/plans/done/F-REGION-large-areas-hydrology.md):
 
 - Width and depth come from mean discharge ``Q`` (HydroRIVERS ``DIS_AV_CMS``,
   m^3/s) through the global hydraulic-geometry fit of Andreadis et al. (2013,

@@ -71,7 +71,7 @@ class RegisteredBuildingEstimate:
     # OSM-independent: floor_period_px lets us back out distance via the
     # inverse pinhole using an assumed 3.2 m floor height, and floor count
     # × floor height gives an independent height estimate. See
-    # docs/plans/F-SKY1-floor-periodicity.md.
+    # docs/plans/done/skyline/F-SKY1-floor-periodicity.md.
     floor_period_px: float | None = None
     floor_confidence: float | None = None
     inferred_distance_m: float | None = None
@@ -83,7 +83,7 @@ class RegisteredBuildingEstimate:
     # the matched OSM building distances as anchors. ``depth_disagreement``
     # is True when |estimated_height_m - depth_height_m| / max(...) > 0.4.
     # Phase A: pure diagnostic, no impact on aggregated heights. See
-    # docs/plans/F-SKY12-depth-from-panos.md.
+    # docs/plans/done/skyline/F-SKY12-depth-from-panos.md.
     depth_height_m: float | None = None
     depth_disagreement: bool | None = None
 

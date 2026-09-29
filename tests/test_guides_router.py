@@ -1,6 +1,6 @@
 """Tests for the in-app Guides (app/server/routers/guides.py + the /guides page in server.py).
 
-Most tests point ``SOP_DIR`` at a temporary tree so they do not depend on the wording of the
+Most tests point ``GUIDES_DIR`` at a temporary tree so they do not depend on the wording of the
 real SOPs; one smoke test renders the checked-in ones.
 """
 
@@ -57,7 +57,7 @@ Beta summary.
 
 @pytest.fixture()
 def sop_dir(tmp_path, monkeypatch):
-    d = tmp_path / "sop"
+    d = tmp_path / "guides"
     (d / "img" / "a").mkdir(parents=True)
     (d / "alpha.md").write_text(GUIDE_A, encoding="utf-8")
     (d / "beta.md").write_text(GUIDE_B, encoding="utf-8")
@@ -65,7 +65,7 @@ def sop_dir(tmp_path, monkeypatch):
     (d / "img" / "a" / "notes.txt").write_text("not an image", encoding="utf-8")
     (tmp_path / "secret.md").write_text("# outside", encoding="utf-8")
     (tmp_path / "secret.png").write_bytes(PNG)
-    monkeypatch.setattr(guides_router, "SOP_DIR", d)
+    monkeypatch.setattr(guides_router, "GUIDES_DIR", d)
     guides_router._cache.clear()
     yield d
     guides_router._cache.clear()

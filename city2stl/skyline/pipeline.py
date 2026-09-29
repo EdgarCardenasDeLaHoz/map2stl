@@ -39,7 +39,7 @@ Public surface (in dependency order):
     osm_anchor_silhouettes          — F-SKY2 anchored split of merged segments
     match_segments_to_buildings     — interval-IoU + width-ratio scorer
     (F-SKY3 / osm_marker_voronoi_silhouettes removed 2026-05-18 after a
-     measured MAE regression; see docs/plans/F-SKY3-osm-marker-instances.md)
+     measured MAE regression; see docs/plans/archive/skyline/F-SKY3-osm-marker-instances.md)
     osm_sam_instance_silhouettes    — F-SKY5 MobileSAM instance head
                                        (optional; no-op if MobileSAM not installed)
 
@@ -54,7 +54,7 @@ Public surface (in dependency order):
     _floor_period_for_building      — F-SKY1 facade-period diagnostic
                                        (OSM-independent height + distance check)
 
-See STATUS.md for what currently works and what doesn't. Hard dependency on
+See README.md and docs/STATUS.md for what currently works and what doesn't. Hard dependency on
 SegFormer-b0 (ADE20K) via the `transformers` library — the registration
 objective and per-building mask sampling both rely on it; no fallback path
 is intended to be functional without the model.

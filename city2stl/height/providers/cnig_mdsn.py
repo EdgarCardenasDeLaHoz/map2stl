@@ -14,7 +14,7 @@ onto the lon/lat grid here.
 Not implemented: the 0.5 m surface rasters and point clouds of the second and
 third PNOA coverages. They are only delivered through ``centrodedescargas.cnig.es``
 by an undocumented pair of form requests (``archivosTotalesSerieVisor`` then a
-POST to ``descargaDir``; a plain GET is refused) -- see ``docs/survey-sources.md``.
+POST to ``descargaDir``; a plain GET is refused) -- see ``docs/reference/survey-sources.md``.
 That is scraping a download form, so it is left out; in Andalucía use
 ``rediam_mdhn`` (1 m, 2020-21) instead.
 

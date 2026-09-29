@@ -344,7 +344,7 @@ class TestParseCityNameFromPath:
     """Filename/foldername -> city-name heuristic used to seed geocoding.
 
     Verified against the real micropolitan folder names (see
-    docs/plans/F-MESHIMPORT-stl-obj-layer-import.md's auto-mode investigation).
+    docs/plans/done/F-MESHIMPORT-stl-obj-layer-import.md's auto-mode investigation).
     """
 
     @pytest.mark.parametrize("path,expected", [

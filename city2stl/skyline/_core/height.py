@@ -200,7 +200,7 @@ def estimate_heights_from_registration(
 ) -> list[RegisteredBuildingEstimate]:
     # Optional `trace` (HeightTraceRecorder from height_trace.py): when set, the
     # function emits a row at every gate / decision point. Behaviour-neutral —
-    # see docs/glass-roof-height-fix-plan.md Phase 1.
+    # see docs/plans/done/skyline/glass-roof-height-fix-plan.md Phase 1.
     #
     # `compute_floor_period` runs the F-SKY1 facade autocorrelation diagnostic
     # that fills the floor_period_px / floor_confidence / inferred_distance_m

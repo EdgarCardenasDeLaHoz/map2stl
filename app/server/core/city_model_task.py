@@ -35,7 +35,7 @@ report.json carries the build report plus ``puzzle`` (grid, method, timings) and
 ``check`` (size vs bed, faces, watertight, widened/clamped, filament and print
 time estimates - app/server/core/preflight.py).
 
-See city2stl/city_model.py and docs/plans/F-CITYMODEL-vector-city-model.md.
+See city2stl/city_model.py and docs/plans/active/F-CITYMODEL-vector-city-model.md.
 """
 
 from __future__ import annotations
