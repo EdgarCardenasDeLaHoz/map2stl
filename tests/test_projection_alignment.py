@@ -3,8 +3,8 @@ Tests for projection alignment across layers (DEM, water, ESA, hydrology).
 
 Verifies:
 1. _project_grid produces identical output dimensions for same bbox/projection
-2. _project_water_arrays keeps water + ESA aligned
-3. API endpoints return b64-encoded data with correct keys
+2. maintain_dimensions / variable-aspect output sizes
+3. API b64 payloads decode to the advertised dimensions
 4. Session client _decode_b64_grid correctly round-trips b64 data
 """
 
@@ -36,20 +36,12 @@ def _project_grid(arr, projection, clip_nans=True, categorical=False):
 
 
 class TestProjectionDimensionConsistency:
-    """Verify that _project_grid produces identical dimensions for different
-    input arrays with the same bbox and projection."""
+    """Categorical vs continuous projection dims.
 
-    @pytest.mark.parametrize("projection", _PROJECTIONS)
-    def test_same_shape_inputs_produce_same_output(self, projection):
-        """DEM-shaped and water-shaped arrays (same dims) → same projected dims."""
-        h, w = 100, 120
-        dem = np.linspace(0, 500, h * w, dtype=np.float32).reshape(h, w)
-        water = np.random.choice([0.0, 1.0], size=(h, w)).astype(np.float32)
-
-        dem_proj = _project_grid(dem, projection, clip_nans=True)
-        water_proj = _project_grid(water, projection, clip_nans=True)
-        assert dem_proj.shape == water_proj.shape, (
-            f"{projection}: DEM {dem_proj.shape} ≠ water {water_proj.shape}")
+    Same-shape → same-output and water/ESA alignment are covered in
+    test_e2e_projection_pipeline.py (TestCoreProjectionModule, TestImportChain);
+    maintain_dimensions=True keeping the input shape is TestVariableDimensionOutput's.
+    """
 
     @pytest.mark.parametrize("projection", _PROJECTIONS)
     def test_categorical_same_shape_as_continuous(self, projection):
@@ -70,19 +62,6 @@ class TestProjectionDimensionConsistency:
             f"{projection}: ESA height {esa_proj.shape[0]} < DEM {dem_proj.shape[0]}"
             f" — clipped DEM should be <= unclipped ESA")
 
-    @pytest.mark.parametrize("projection", _PROJECTIONS)
-    def test_project_water_arrays_keeps_alignment(self, projection):
-        """_project_water_arrays guarantees water and ESA stay aligned."""
-        from app.server.routers.terrain import _project_water_arrays
-        h, w = 100, 120
-        water = np.random.choice([0.0, 1.0], size=(h, w)).astype(np.float32)
-        esa = np.random.choice([10, 20, 30, 50, 80],
-                               size=(h, w)).astype(np.float32)
-
-        wm_out, esa_out = _project_water_arrays(
-            water, esa, *_BBOX, projection, clip_valid_region=True)
-        assert wm_out.shape == esa_out.shape, (
-            f"{projection}: water {wm_out.shape} ≠ ESA {esa_out.shape}")
 
 
 # ---------------------------------------------------------------------------
@@ -291,27 +270,10 @@ class TestB64RoundTrip:
 # ---------------------------------------------------------------------------
 
 class TestEndpointB64Keys:
+    """b64 payloads decode to the advertised dims. The "uses b64 keys" checks and
+    DEM/hydrology dim agreement live in test_e2e_projection_pipeline.py
+    (TestResponseFormatConsistency, TestCrossLayerAlignment)."""
     _QS = "north=40.0&south=39.9&east=-75.1&west=-75.2"
-
-    def test_dem_returns_b64(self, client):
-        r = client.get(f"/api/terrain/dem?{self._QS}&dim=10")
-        data = r.json()
-        assert "dem_values_b64" in data
-        assert "dem_values" not in data
-
-    def test_water_mask_returns_b64(self, client):
-        r = client.get(f"/api/terrain/water-mask?{self._QS}&sat_scale=100")
-        data = r.json()
-        assert "water_mask_values_b64" in data
-        assert "water_mask_values" not in data
-        assert "esa_values_b64" in data
-        assert "esa_values" not in data
-
-    def test_hydrology_returns_b64(self, client):
-        r = client.get(f"/api/terrain/hydrology?{self._QS}&dim=10")
-        data = r.json()
-        assert "river_grid_values_b64" in data
-        assert "river_grid_values" not in data
 
     def test_water_mask_b64_decodable(self, client):
         """Water mask b64 decodes to correct shape."""
@@ -330,12 +292,3 @@ class TestEndpointB64Keys:
         raw = base64.b64decode(data["river_grid_values_b64"])
         arr = np.frombuffer(raw, dtype=np.float32)
         assert arr.shape[0] == h * w
-
-    def test_all_layers_same_dims_test_mode(self, client):
-        """In TEST_MODE with same dim, DEM and hydrology have matching dims."""
-        dem_r = client.get(f"/api/terrain/dem?{self._QS}&dim=50")
-        hydro_r = client.get(f"/api/terrain/hydrology?{self._QS}&dim=50")
-        dem_dims = dem_r.json()["dimensions"]
-        hydro_dims = hydro_r.json()["river_grid_dimensions"]
-        assert dem_dims == hydro_dims, (
-            f"DEM {dem_dims} ≠ hydrology {hydro_dims}")

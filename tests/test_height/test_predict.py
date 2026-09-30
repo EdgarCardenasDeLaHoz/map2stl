@@ -258,6 +258,7 @@ class TestPredictUNet:
         torch.save({"model_state_dict": model.state_dict()}, ckpt)
         return ckpt
 
+    @pytest.mark.ml  # needs torch; opt-in with -m ml
     def test_unet_returns_height_result(self, tmp_path):
         import city2stl.height.predict as _pm
 

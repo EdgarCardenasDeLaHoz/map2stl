@@ -431,12 +431,6 @@ class TestImportChain:
     """Verify that the new shared projection module is importable and
     that terrain.py delegates to it (not defining its own)."""
 
-    def test_geo2stl_projection_importable(self):
-        from geo2stl.projections import project_grid, project_rgb_image, project_water_arrays
-        assert callable(project_grid)
-        assert callable(project_water_arrays)
-        assert callable(project_rgb_image)
-
     def test_terrain_router_delegates_to_geo2stl(self):
         """terrain.py's _project_grid should delegate to geo2stl.projections."""
         from app.server.routers.terrain import _project_grid
@@ -515,6 +509,8 @@ class TestResponseFormatConsistency:
         data = r.json()
         assert "water_mask_values_b64" in data
         assert "water_mask_values" not in data
+        assert "esa_values_b64" in data
+        assert "esa_values" not in data
 
     def test_hydrology_uses_b64_not_tolist(self, client):
         r = client.get(f"/api/terrain/hydrology?{_BBOX_QS}&dim=10")
@@ -522,9 +518,10 @@ class TestResponseFormatConsistency:
         assert "river_grid_values_b64" in data
         assert "river_grid_values" not in data
 
-    def test_city_raster_uses_tolist_not_b64(self, client):
-        """KNOWN ISSUE: city raster still uses .tolist() instead of b64.
-        This test documents the inconsistency."""
+    @pytest.mark.xfail(strict=True, reason=(
+        "Known issue (docs/issues.md §0f): /api/cities/raster "
+        "still returns 'values' via .tolist(), not 'values_b64' like the terrain layers"))
+    def test_city_raster_uses_b64_not_tolist(self, client):
         body = {
             "north": 40.0, "south": 39.9, "east": -75.1, "west": -75.2,
             "dim": 10,
@@ -534,19 +531,22 @@ class TestResponseFormatConsistency:
         }
         r = client.post("/api/cities/raster", json=body)
         data = r.json()
-        # Currently uses "values" (tolist) — not "values_b64"
-        assert "values" in data, "Expected 'values' key (tolist format)"
-        assert isinstance(
-            data["values"], list), "values should be a list (tolist)"
+        assert "values_b64" in data
+        assert "values" not in data, "city raster should use b64, not tolist"
 
     def test_satellite_response_has_image_and_bbox(self, client):
         r = client.get(f"/api/terrain/satellite?{_BBOX_QS}&dim=10")
         data = r.json()
         assert "image" in data
         assert "bbox" in data
-        # Known gap: no "dimensions" key in satellite response
-        assert "dimensions" not in data, (
-            "Satellite response should document dimensions for alignment")
+
+    @pytest.mark.xfail(strict=True, reason=(
+        "Known issue (docs/issues.md §0f): the satellite "
+        "response has no 'dimensions' key, so clients cannot check alignment"))
+    def test_satellite_response_has_dimensions(self, client):
+        r = client.get(f"/api/terrain/satellite?{_BBOX_QS}&dim=10")
+        data = r.json()
+        assert "dimensions" in data
 
 
 # ===================================================================

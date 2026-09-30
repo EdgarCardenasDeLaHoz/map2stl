@@ -60,9 +60,9 @@ _CORE_BBOX = {"north": 1.0, "south": 0.0, "east": 1.0, "west": 0.0}
 _CORE_RES_M = 20_000.0
 
 
-@pytest.fixture()
+@pytest.fixture(autouse=True)
 def _redirect_cache(tmp_data_dir, monkeypatch):
-    """Point mesh_import's own CACHE_ROOT name at the tmp cache dir.
+    """Point mesh_import's own CACHE_ROOT name at the tmp cache dir (every test here).
 
     Mirrors the pattern conftest.py already uses for the cities router:
     `from ... import CACHE_ROOT` binds a module-local name, so the shared
@@ -160,7 +160,6 @@ def _box_stl_bytes(tmp_path):
 
 class TestUploadRoute:
     def test_upload_then_heightmap_then_register(self, client, tmp_data_dir, monkeypatch, _box_stl_bytes):
-        monkeypatch.setattr(mesh_import, "CACHE_ROOT", tmp_data_dir["cache_root"])
 
         r = client.post("/api/layers/mesh/upload",
                         files={"file": ("box.stl", _box_stl_bytes, "application/octet-stream")})
@@ -194,13 +193,11 @@ class TestUploadRoute:
         assert r.status_code == 200
 
     def test_upload_rejects_bad_extension(self, client, tmp_data_dir, monkeypatch):
-        monkeypatch.setattr(mesh_import, "CACHE_ROOT", tmp_data_dir["cache_root"])
         r = client.post("/api/layers/mesh/upload",
                         files={"file": ("model.fbx", b"data", "application/octet-stream")})
         assert r.status_code == 400
 
     def test_register_without_heightmap_returns_400(self, client, tmp_data_dir, monkeypatch, _box_stl_bytes):
-        monkeypatch.setattr(mesh_import, "CACHE_ROOT", tmp_data_dir["cache_root"])
         r = client.post("/api/layers/mesh/upload",
                         files={"file": ("box.stl", _box_stl_bytes, "application/octet-stream")})
         upload_id = r.json()["upload_id"]
@@ -218,7 +215,6 @@ class TestUploadRoute:
     def test_register_fewer_than_3_pairs_rejected_by_schema(self, client, tmp_data_dir, monkeypatch, _box_stl_bytes):
         """MeshRegisterRequest.point_pairs has min_length=3 — Pydantic 422s
         before the handler runs, so fewer than 3 pairs never reaches core logic."""
-        monkeypatch.setattr(mesh_import, "CACHE_ROOT", tmp_data_dir["cache_root"])
         r = client.post("/api/layers/mesh/upload",
                         files={"file": ("box.stl", _box_stl_bytes, "application/octet-stream")})
         upload_id = r.json()["upload_id"]
@@ -290,7 +286,6 @@ class TestMeshLibrary:
 
 class TestLibraryRoutes:
     def test_list_and_set_location_via_http(self, client, tmp_data_dir, monkeypatch, _library_dir):
-        monkeypatch.setattr(mesh_import, "CACHE_ROOT", tmp_data_dir["cache_root"])
 
         r = client.get("/api/layers/mesh/library")
         assert r.status_code == 200
@@ -324,7 +319,6 @@ class TestLibraryRoutes:
         assert r.json()["dimensions"] == [100, 100]
 
     def test_library_register_without_heightmap_returns_400(self, client, tmp_data_dir, monkeypatch, _library_dir):
-        monkeypatch.setattr(mesh_import, "CACHE_ROOT", tmp_data_dir["cache_root"])
         r = client.get("/api/layers/mesh/library")
         rel = r.json()["cities"][0]["files"][0]["rel_path"]
         r = client.post(f"/api/layers/mesh/library/{rel}/register", json={

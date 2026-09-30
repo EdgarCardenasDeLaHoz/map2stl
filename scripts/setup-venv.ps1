@@ -53,5 +53,8 @@ git -C $root config filter.nbstripout.required true
 git -C $root config diff.ipynb.textconv "`"$gitPy`" -m nbstripout -t"
 # Tracked hooks: ruff on staged files (pre-commit), test suite (pre-push).
 git -C $root config core.hooksPath .githooks
+# ../numpy2stl has its own tracked pre-push hook (its tests). Also set by its
+# scripts/link-gitdir.ps1; skipped when that repo is not linked on this PC yet.
+if (Test-Path (Join-Path $numpy2stl ".git")) { git -C $numpy2stl config core.hooksPath .githooks }
 
 Write-Host "venv ready: $vpy"

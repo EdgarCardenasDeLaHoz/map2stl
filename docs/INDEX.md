@@ -354,5 +354,7 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
 
 - Launchers: `Start 3D Maps.bat`, `Stop 3D Maps.bat` (workspace root) → `map2stl/scripts/start.ps1`, `map2stl/scripts/stop.ps1`
 - Venv: `map2stl/scripts/setup-venv.ps1` (creates `~/.venvs/map2stl`); git database link `map2stl/scripts/link-gitdir.ps1`
-- Tests: `map2stl/pytest.ini` also collects `numpy2stl/tests`; `-m integration` and `-m slow` are opt-in; `tests/e2e/` (playwright) and `tests/manual/` are never collected
+- Tests: `map2stl/pytest.ini` also collects `numpy2stl/tests`; `-m integration`, `-m slow` and `-m ml` (torch) are opt-in; `tests/e2e/` (playwright) and `tests/manual/` are never collected; `-n 6` runs in parallel (pytest-xdist)
+- Pre-push hooks: `map2stl/.githooks/pre-push` (pytest `-n 6`, vitest, eslint), `numpy2stl/.githooks/pre-push` (numpy2stl's own tests); `core.hooksPath` set by `map2stl/scripts/setup-venv.ps1` and `numpy2stl/scripts/link-gitdir.ps1`
+- Test fixtures from `numpy2stl/tests/conftest.py` apply to *every* test when collected from map2stl (pytest scopes conftests outside the rootdir globally): prefix benchmark fixtures `bench_`, and don't request `monkeypatch` in its autouse fixtures
 - Helper scripts for agents (renders, screenshots, doc link checker): `claude/scripts/README.md`

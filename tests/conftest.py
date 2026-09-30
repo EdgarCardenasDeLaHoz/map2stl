@@ -66,6 +66,11 @@ def tmp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(cities_router, "CACHE_ROOT", test_cache_root)
     # DEM handles are stored under a path fixed at import time
     monkeypatch.setattr(dem_store_module, "STORE_DIR", test_cache_root / "dem_handles")
+    # mesh_import binds its own CACHE_ROOT name (uploads go to CACHE_ROOT/mesh_imports);
+    # without this, every client test that uploads a mesh (test_landmarks_api.py)
+    # left a folder in the real cache/mesh_imports.
+    import app.server.core.mesh_import as mesh_import_module
+    monkeypatch.setattr(mesh_import_module, "CACHE_ROOT", test_cache_root)
 
     return {
         "db_path": test_db,

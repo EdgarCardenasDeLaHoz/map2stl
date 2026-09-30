@@ -1,6 +1,7 @@
 #!/bin/sh
-# Run the test suite (this repo's and ../numpy2stl's, per pytest.ini) before
-# every push. Enabled by scripts/setup-venv.ps1 (core.hooksPath .githooks).
+# Run the test suites before every push: Python (this repo's and ../numpy2stl's,
+# per pytest.ini) in parallel, then the JS unit tests and eslint.
+# Enabled by scripts/setup-venv.ps1 (core.hooksPath .githooks).
 set -e
 cd "$(git rev-parse --show-toplevel)"
 
@@ -10,5 +11,14 @@ if [ ! -f "$PYTHON" ]; then
     exit 1
 fi
 
-echo "Running test suite before push..."
-"$PYTHON" -m pytest -q --tb=short -p no:cacheprovider
+echo "Running Python test suite before push..."
+# -n 6 needs pytest-xdist (requirements-dev.txt).
+"$PYTHON" -m pytest -q --tb=short -p no:cacheprovider -x -n 6 --durations=10
+
+echo "Running JS tests..."
+npx vitest run
+
+# eslint also catches JS syntax errors (it replaced tests/js/syntaxCheck.test.js,
+# which spawned one `node --check` per file).
+echo "Running eslint..."
+npx eslint app/client/static/js

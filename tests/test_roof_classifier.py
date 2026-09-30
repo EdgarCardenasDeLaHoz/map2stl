@@ -735,6 +735,7 @@ class TestCnnOptIn:
             assert _resolve_cnn_model("mobilenet_v3_small") is None
         assert "without trained weights" in caplog.text
 
+    @pytest.mark.ml  # needs torch; opt-in with -m ml
     def test_missing_checkpoint_is_none(self, caplog):
         # Without torch the resolver bails earlier with "torch is not installed".
         pytest.importorskip("torch")

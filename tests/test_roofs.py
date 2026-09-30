@@ -63,12 +63,12 @@ def test_courtyard_building_gets_a_flat_top():
     assert m.bounds[1, 2] == pytest.approx(6.5)
 
 
-def test_random_footprints_always_give_closed_solids():
+def _check_random_footprints(n):
     """Rotated, scaled and rounded outlines (as OSM gives them) never crash or leak."""
     from shapely import affinity
 
     rng = np.random.default_rng(7)
-    for k in range(120):
+    for k in range(n):
         base = [RECT, ELL][k % 2]
         s = rng.uniform(0.05, 3)
         p = affinity.rotate(affinity.scale(base, s * rng.uniform(0.5, 2), s), rng.uniform(0, 180))
@@ -80,3 +80,14 @@ def test_random_footprints_always_give_closed_solids():
             assert rejected == 0 and u is not None
             v, f = from_manifold(u)
             assert trimesh.Trimesh(v, f, process=False).is_watertight
+
+
+def test_random_footprints_always_give_closed_solids():
+    # 30 of the 120 seeded outlines (the first 30 are the same ones); the full
+    # sweep takes ~12 s and runs with -m slow.
+    _check_random_footprints(30)
+
+
+@pytest.mark.slow
+def test_random_footprints_always_give_closed_solids_full():
+    _check_random_footprints(120)

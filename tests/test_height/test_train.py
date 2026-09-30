@@ -38,7 +38,12 @@ def _torch_available() -> bool:
         return False
 
 
-torch_required = pytest.mark.skipif(not _torch_available(), reason="torch not installed")
+_skip_without_torch = pytest.mark.skipif(not _torch_available(), reason="torch not installed")
+
+
+def torch_required(test):
+    """Opt-in ``ml`` test (run with ``-m ml``); still skips cleanly without torch."""
+    return pytest.mark.ml(_skip_without_torch(test))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -287,14 +292,18 @@ class TestCheckpointRoundtrip:
 # ──────────────────────────────────────────────────────────────────────────────
 
 class TestCollectTiles:
-    def test_unknown_city_is_skipped(self, tmp_path, capsys):
+    def test_unknown_city_is_skipped(self, tmp_path, caplog):
         from app.server.core.height.train import collect_tiles
 
-        result = collect_tiles(["UnknownCityXYZ"], tile_dir=tmp_path)
+        tile_dir = tmp_path / "tiles"
+        with caplog.at_level("WARNING", logger="app.server.core.height.train"):
+            result = collect_tiles(["UnknownCityXYZ"], tile_dir=tile_dir)
         assert result == []
-        captured = capsys.readouterr()
-        assert "Unknown city" in captured.err or True  # logged via logger
+        assert tile_dir.is_dir()            # created even when nothing is collected
+        assert list(tile_dir.iterdir()) == []
+        assert "Unknown city 'UnknownCityXYZ'" in caplog.text
 
+    @pytest.mark.integration  # fetches Copernicus / DLR tiles (~40 s)
     def test_returns_list(self, tmp_path):
         """At minimum, the function returns a list (may be empty without network)."""
         from app.server.core.height.train import collect_tiles

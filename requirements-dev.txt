@@ -7,6 +7,7 @@ pytest-asyncio==1.3.0
 ruff>=0.4.0
 nbstripout>=0.7   # git clean filter for notebooks (.gitattributes)
 pytest-benchmark>=4   # numpy2stl/tests/benchmarks (marked slow)
+pytest-xdist>=3.8    # parallel runs: pytest -n 6 (pre-push hooks)
 playwright==1.58.0    # tests/e2e (browser: chromium-1208)
 
 # Documentation
