@@ -44,6 +44,17 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   - Satellite tiles: 10.6 s (63 tiles at zoom 6).
   - Earth Engine layers (water mask, ESA land cover) now that `earthengine-api` is installed.
   - The 2D layer stack and composite at this size in the browser (usage log timings).
+  - GEBCO local store (`geo2stl/tiles.py::stitch_tiles_no_rasterio`, source `local`): reads whole
+    90° GeoTIFF tiles to crop a box (0.9 GB peak for Granada, 2.2 GB for the Amazon). Read
+    windows instead (rasterio / tifffile), as the H5 reader now does.
+- **Region-size guards found in use (2026-09-30)**:
+  - DEM source vs area: SRTMGL3 caps at 4.05 M km²; the Amazon box (17.1 M km²) was sent
+    anyway and failed. Check the source's area limit before the request and suggest GEBCO.
+  - Hydrology on small mountain boxes returns almost nothing (Breckenridge: 1 HydroRIVERS
+    feature, order ≥ 3) and reads as "failed". Say so in the toast, or fall back to OSM
+    waterways below a size.
+  - `ocean_root` in `config.json` is per PC and pointed at a moved folder (0 TIFs, silent).
+    Warn at startup when the local store is empty.
 - **Incremental rebuild**: after a layer or setting change, rebuild only the affected layer
   solids. The layer and model caches exist; the UI still asks for a full build.
   [city guide](../guides/city-stl-and-puzzle-sop.md)
