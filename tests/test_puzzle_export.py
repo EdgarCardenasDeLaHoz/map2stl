@@ -112,3 +112,17 @@ class TestPuzzleRouter:
         resp = client.post("/api/export/start", json=data)
         assert resp.status_code == 200
         assert "task_id" in resp.json()
+
+
+def test_volume_check_reports_kept_fraction_and_open_pieces():
+    from app.server.core.puzzle import Heightfield, volume_check
+
+    box = trimesh.creation.box(extents=(10.0, 10.0, 2.0))
+    half = trimesh.creation.box(extents=(5.0, 10.0, 2.0))
+    ok = volume_check({"a": (half.vertices, half.faces), "b": (half.vertices, half.faces)},
+                      mesh=box)
+    assert ok["kept"] == pytest.approx(1.0) and ok["open_pieces"] == []
+    holed = volume_check({"a": (half.vertices, half.faces[:-1])}, mesh=box)
+    assert holed["open_pieces"] == ["a"] and holed["kept"] < 0.99
+    hf = Heightfield(np.full((11, 11), 2.0), 1.0, 0.01)   # 10 x 10 mm, 2 mm tall
+    assert volume_check({"a": (box.vertices, box.faces)}, heightfield=hf)["kept"] == pytest.approx(1.0)

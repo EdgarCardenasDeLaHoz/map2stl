@@ -194,7 +194,7 @@ def run_city_model(data: dict, task: ExportTask) -> None:
 
     fd, zip_path = tempfile.mkstemp(suffix=".zip")
     os.close(fd)
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
         task.update(75, "Writing STL...")
         zf.writestr(f"{name}.stl", _stl_bytes(model.merged))
         task.update(82, "Writing 3MF...")
@@ -202,7 +202,7 @@ def run_city_model(data: dict, task: ExportTask) -> None:
         os.close(fd)
         try:
             write3MF(tmp3mf, {f"{name}_{k}": (m.vertices, m.faces) for k, m in model.parts.items()})
-            zf.write(tmp3mf, f"{name}.3mf")
+            zf.write(tmp3mf, f"{name}.3mf", compress_type=zipfile.ZIP_STORED)   # already a zip
         finally:
             os.unlink(tmp3mf)
         if data.get("puzzle"):

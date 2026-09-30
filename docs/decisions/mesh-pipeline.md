@@ -2,6 +2,32 @@
 
 How a DEM plus vector layers becomes one printable solid: the two-stage pipeline, the city model's scale rules, export formats, build speed and caches. Related: [architecture.md](architecture.md), [terrain-dem.md](terrain-dem.md).
 
+### 2026-09-29 — Cold city builds: tiled terrain TIN, prepared point tests, threaded simplify; assembly stays sequential
+- **Decision:**
+  - `numpy2stl/src/numpy2stl/processing/decimate.py::heightfield_tin` cuts grids larger than 128 px into tiles that share their edge pixels, refined on 4 threads. Same error bound, conforming seams, ~1 % more vertices on the seams.
+  - `city2stl/city_model.py::Terrain.cells_inside` prepares the polygons before `shapely.contains_xy` over a geometry array.
+  - `city2stl/city_model.py::build_on_terrain` simplifies the merged model and the parts on 4 threads.
+  - `city2stl/city_model.py::_separate_contacts` groups vertices with a lexsort of the float32 bits and builds fan centres with `bincount` over the touching faces only.
+  - Puzzle and export zips: chunk-formatted OBJ / 3MF rows (`numpy2stl/src/numpy2stl/io/writers.py::_rows`), OBJs streamed into the zip, the 3MF stored (already compressed), zlib level 1.
+  - `city2stl/city_model.py::assemble_model` keeps the sequential "layer − claimed, claimed + layer" loop.
+- **Why:** profile of Granada (24 k buildings, cache off), 2026-09-29:
+  - TIN: the refinement ends in ~17 passes that add < 1,500 vertices each but re-triangulate all 225 k (~0.65 s per pass). Tiled: 19 s → 7 s.
+  - Cartagena waterways: unprepared `contains_xy` walked every edge of 20 k-vertex coastline polygons for each candidate cell. 10 s → < 0.1 s.
+  - Simplify 22 s → 10 s. `_separate_contacts` 3.5 s → 0.4 s per call (same moves to 1e-13 mm).
+  - Assembly measured on the captured Granada layer solids: current loop 19 s (after the contacts fix). One batch union of all layers 5 s alone; per-part subtraction chains without the growing union 34 s; threads no gain (manifold3d holds the GIL); batching small layers into one union no gain.
+- **Rejected:**
+  - Qhull incremental Delaunay for the TIN tail: 3.3 s to build, 0.7 s per small addition, slower than Triangle's full rebuild (0.3 s).
+  - Adding every out-of-bound pixel (or its neighbours) in late TIN passes: flips create new misses, the tail stays 19–34 passes.
+  - Rebuilding the merged model from simplified parts: shared surfaces simplify differently on each side and no longer cancel.
+- **Supersedes / superseded by:** —
+- **Source:** `tests/test_reference_cities.py` (regression set, same session); profiler `Code/agent-scripts/profile_city.py`.
+
+### 2026-09-29 — The reference-city regression set runs on real terrain and gates puzzle volume
+- **Decision:** `tests/test_reference_cities.py` (`pytest -m slow`) rebuilds Cartagena, Granada + Alhambra and Breckenridge through the export task, model cache off, test mode off. It fails on a non-watertight STL, a puzzle keeping < 99 % of the volume or an open piece, and faces ±15 % / volume ±3 % against `tests/reference_cities_baseline.json`. Time is logged (`output/regression/reference_cities.jsonl`), not asserted. `app/server/core/puzzle.py::volume_check` puts `kept` and `open_pieces` in every puzzle report; `build_check` warns below 99 %.
+- **Why:** F-CITYMODEL success criterion (≥ 99 % volume). Its first run found a real crash (`merge_flat_roofs`: GEOS side-location conflict after mitre closing + simplify, fixed with `make_valid`) and that under test mode `/api/terrain/dem` returns a synthetic gradient, so a regression set inside pytest must switch test mode off.
+- **Rejected:** asserting build time — machine-dependent.
+- **Supersedes / superseded by:** —
+
 ### 2026-09-27 — Every mesh export runs the terrain stage, then the city model
 - **Decision:** one two-stage pipeline for every mesh export (terrain STL/OBJ/3MF, preview, puzzle, city model).
   - Terrain stage (raster), `app/server/core/export.py::terrain_stage`: DEM source/merges, composite or edited values, curve edits, 3×3 median, river/lake carve, sea-level cap, scale, label, contours → one heightfield.

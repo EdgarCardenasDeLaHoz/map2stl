@@ -656,7 +656,7 @@ def generate_puzzle(data: dict, task: ExportTask) -> None:
     fd, zip_path = tempfile.mkstemp(suffix=".zip")
     os.close(fd)
     try:
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
             info = cut_to_zip(mesh, spec, p.name, zf, progress=task.update,
                               heightfield=heightfield)
     except ValueError as exc:

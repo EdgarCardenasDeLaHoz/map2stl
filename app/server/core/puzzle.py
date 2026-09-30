@@ -37,7 +37,7 @@ from dataclasses import dataclass
 import numpy as np
 import shapely
 import trimesh
-from numpy2stl import write3MF
+from numpy2stl import write3MF, writeOBJ
 from numpy2stl.applications.puzzle import (
     engrave_underside,
     heightfield_pieces,
@@ -47,7 +47,7 @@ from numpy2stl.applications.puzzle import (
     underside_marks,
     validate_edges,
 )
-from numpy2stl.processing.boolean import cut_jigsaw
+from numpy2stl.processing.boolean import cut_jigsaw, mesh_volume
 
 MAX_PIECES = 64
 DEFAULT_BED_MM = (250.0, 210.0)
@@ -157,6 +157,8 @@ def cut_pieces(spec: dict, mesh: trimesh.Trimesh | None = None,
             "col_edges_mm": [round(float(x), 2) for x in xs],
             "row_edges_mm": [round(float(y), 2) for y in ys],
             "seconds": {"cut": round(time.perf_counter() - t0, 2)}}
+    info["volume"] = volume_check(pieces, mesh=mesh if method == "boolean" else None,
+                                  heightfield=heightfield if method == "mask" else None)
 
     if spec.get("engrave", True):
         if progress:
@@ -185,6 +187,30 @@ def _min_top(v, f) -> float:
     return float(m.triangles_center[up, 2].min()) if up.any() else float(m.bounds[1, 2])
 
 
+def volume_check(pieces: dict, mesh: trimesh.Trimesh | None = None,
+                 heightfield: Heightfield | None = None) -> dict:
+    """Volume kept by the cut (before engraving) and pieces that are not closed.
+
+    ``kept`` is pieces / model, clearance gaps included, so it is the figure the
+    ">= 99 % of the volume" success criterion reads. The cutters already refuse a
+    cut that loses more than 1 % *beyond* the gaps (numpy2stl ``max_loss``).
+    """
+    if mesh is not None:
+        model = float(mesh.volume)
+    else:   # the heightfield's volume above z = 0: mean of each cell's four corners
+        z, s = heightfield.z_mm, heightfield.mm_per_px
+        model = float((z[:-1, :-1] + z[1:, :-1] + z[:-1, 1:] + z[1:, 1:]).sum()) * s * s / 4.0
+    total, open_ = 0.0, []
+    for key, (v, f) in pieces.items():
+        total += abs(mesh_volume(v, f))
+        e = np.sort(np.asarray(f)[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2), axis=1).astype(np.int64)
+        _, uses = np.unique(e[:, 0] * len(v) + e[:, 1], return_counts=True)
+        if (uses % 2).any():
+            open_.append(key)
+    return {"model_mm3": round(model, 1), "pieces_mm3": round(total, 1),
+            "kept": round(total / model, 5) if model > 0 else 0.0, "open_pieces": open_}
+
+
 def cut_to_zip(mesh: trimesh.Trimesh | None, spec: dict, name: str, zf: zipfile.ZipFile,
                progress: Callable[[int, str], None] | None = None,
                heightfield: Heightfield | None = None) -> dict:
@@ -194,9 +220,9 @@ def cut_to_zip(mesh: trimesh.Trimesh | None, spec: dict, name: str, zf: zipfile.
     pieces, info = cut_pieces(spec, mesh=mesh, heightfield=heightfield, progress=progress)
     if progress:
         progress(85, "Writing pieces...")
-    for key, (v, f) in pieces.items():
-        zf.writestr(f"puzzle/{name}_{key}.obj",
-                    trimesh.Trimesh(v, f, process=False).export(file_type="obj"))
+    for key, vf in pieces.items():
+        with zf.open(f"puzzle/{name}_{key}.obj", "w", force_zip64=True) as out:
+            writeOBJ(out, {f"{name}_{key}": vf})
     _write_3mf(zf, f"{name}_puzzle.3mf", {f"{name}_{k}": vf for k, vf in pieces.items()})
     if spec.get("layout"):
         bed_w, bed_h = _bed(spec)
@@ -215,6 +241,6 @@ def _write_3mf(zf: zipfile.ZipFile, arcname: str, meshes: dict) -> None:
     os.close(fd)
     try:
         write3MF(tmp, meshes)
-        zf.write(tmp, arcname)
+        zf.write(tmp, arcname, compress_type=zipfile.ZIP_STORED)   # already a zip
     finally:
         os.unlink(tmp)

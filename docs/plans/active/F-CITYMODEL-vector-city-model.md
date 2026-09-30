@@ -1,8 +1,8 @@
 # F-CITYMODEL — Vector city model: one scale, seated features, merged solid
 
 Status: mostly done (2026-09-27): merged watertight solid, per-layer 3MF, jigsaw puzzle,
-printability rules and build speed are in. Open: volume-conservation check, build spec
-round-trip, slow regression set ([roadmap](../README.md#mesh-pipeline-and-city-model)).
+printability rules and build speed are in; volume check and the reference-city regression set
+done 2026-09-29. Open: build spec round-trip ([roadmap](../README.md#mesh-pipeline-and-city-model)).
 Replaced the old `city2stl.mesh` 3MF generator and the app's height-strip puzzle. Findings
 behind it: [city guide](../../guides/city-stl-and-puzzle-sop.md).
 
@@ -134,3 +134,13 @@ trails 40 s per build (Overpass) -> 0 s (cached).
 - Left: lossless simplification (35 s) and assembly (20 s) on a cold build; the
   "Topological inconsistency" message still printed comes from Triangle in
   `numpy2stl.processing.simplify.GEOS constrained Delaunay (no Triangle)` (caught; the region is kept as-is).
+
+### Done (2026-09-29)
+
+- Regression set: `tests/test_reference_cities.py` (`pytest -m slow`), baseline
+  `tests/reference_cities_baseline.json`, run log `output/regression/reference_cities.jsonl`.
+  All three cities watertight; puzzles keep 99.64–99.71 % of the volume (success criterion met).
+- It found a `merge_flat_roofs` GEOS crash on Granada (fixed) and that test mode fakes the DEM.
+- Cold build: Cartagena 108 → 47 s, Granada 183 → 92 s, Breckenridge 150 → 58 s (tiled TIN,
+  prepared point tests, threaded simplify, faster contact separation and writers). Why:
+  [mesh-pipeline decisions](../../decisions/mesh-pipeline.md).

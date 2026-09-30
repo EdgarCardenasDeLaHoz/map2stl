@@ -1,0 +1,20 @@
+{
+ "breckenridge": {
+  "faces": 759286,
+  "puzzle_pieces": 20,
+  "seconds": 57.8,
+  "volume_mm3": 33621166.1
+ },
+ "cartagena": {
+  "faces": 425562,
+  "puzzle_pieces": 25,
+  "seconds": 47.0,
+  "volume_mm3": 7496154.9
+ },
+ "granada_alhambra": {
+  "faces": 971888,
+  "puzzle_pieces": 12,
+  "seconds": 91.5,
+  "volume_mm3": 13812602.4
+ }
+}

@@ -1,6 +1,6 @@
 # Roadmap — map2stl
 
-_Last updated: 2026-09-28._ The one place for "what's next".
+_Last updated: 2026-09-29._ The one place for "what's next".
 
 - One line per open item, grouped by area; the plan link holds the detail.
 - Bugs and debt live in [../issues.md](../issues.md); unreviewed ideas in [../proposals.md](../proposals.md).
@@ -19,21 +19,18 @@ _Last updated: 2026-09-28._ The one place for "what's next".
 | [F-ARCH](active/F-ARCH-consolidation.md) | mostly done (steps 1–9, 12, 13, two-stage pipeline) | the leftover rows listed under Architecture below |
 | [F-CITYMODEL](active/F-CITYMODEL-vector-city-model.md) | mostly done (merged solid, 3MF, puzzle, build speed) | volume check and build spec (below) |
 | [F-COMPOSITE3](active/F-COMPOSITE3-server-side-composite.md) | pass 1 done | pass 2: land cover and the parity test |
-| [F-FE1 + F-DEMID](active/F-FE1-vue-consolidation.md) | DEM handles in use; step 7 (delete `v2/`) done | step 0: delete dead code |
+| [F-FE1 + F-DEMID](active/F-FE1-vue-consolidation.md) | DEM handles in use; step 7 (delete `v2/`) done; steps 0–6 not pursued | F-DEMID leftovers only |
 | [F-LANDMARK](active/F-LANDMARK-roofs-and-building-parts.md) | §1–§6 done | check the result on the landmark set |
-| [F-PROJ-EXPAND](active/F-PROJ-EXPAND-map-projections.md) | phase 1 (Miller, Gall) done | phase 2: pseudocylindrical projections |
 | F-DET, registration learning | skyline and registration plans | see the Skyline section |
 
 ## Mesh pipeline and city model
 
-- **Watertight volume check**: check that a puzzle keeps ≥ 99 % of the volume on Cartagena,
-  Granada and Breckenridge. [F-CITYMODEL](active/F-CITYMODEL-vector-city-model.md)
 - **Build spec round-trip**: write the full build spec into `report.json` and accept it back
   (`TerrainSession.build(spec)` / CLI). [F-CITYMODEL](active/F-CITYMODEL-vector-city-model.md)
-- **Slow regression set**: rebuild the three reference cities and track faces, time, watertightness
-  and volume. [F-CITYMODEL](active/F-CITYMODEL-vector-city-model.md)
-- **Cold-build cost**: lossless simplification (35 s) and assembly (20 s). A "Topological
-  inconsistency" message is still printed by the simplifier.
+- **Cold-build cost**: after the 2026-09-29 pass (Granada 183 → 92 s) the rest is assembly
+  (~19 s of manifold booleans, sequential by measurement), the buildings layer (16 s) and puzzle
+  file writing (~8 s). A "Topological inconsistency" message is still printed by the simplifier.
+  Why: [mesh-pipeline decisions](../decisions/mesh-pipeline.md).
   [F-CITYMODEL](active/F-CITYMODEL-vector-city-model.md)
 - **Incremental rebuild**: after a layer or setting change, rebuild only the affected layer
   solids. The layer and model caches exist; the UI still asks for a full build.
@@ -53,15 +50,6 @@ _Last updated: 2026-09-28._ The one place for "what's next".
   worse. [F-LANDMARK](active/F-LANDMARK-roofs-and-building-parts.md)
 - **Roof error tracking** on the landmark set, against a ≤ 1 m reference (lidar nDSM or a
   surveyed pack such as Old San Juan). [F-LANDMARK §6](active/F-LANDMARK-roofs-and-building-parts.md)
-- **Survey gaps** (not scraped):
-  - CNIG 0.5 m surfaces (download form only)
-  - Lisbon (needs an account)
-  - Barcelona ICGC (WMS returns pictures)
-  - Salzburg BEV (not wired)
-  - Cartagena de Indias (no open surface)
-  - REDIAM voids on Granada Cathedral
-
-  [F-LANDMARK §4](active/F-LANDMARK-roofs-and-building-parts.md)
 - **Landmark ranking**: in *Find landmarks*, rank by prominence (height, parts, roof detail,
   type), not by category alone. [city guide §2.4](../guides/city-stl-and-puzzle-sop.md)
 
@@ -70,8 +58,6 @@ _Last updated: 2026-09-28._ The one place for "what's next".
 - **Composite pass 2**: register `esa_landcover` as a server source and add the
   browser-vs-server parity test. Trails no longer need a composite source: they are a City
   Model layer. [F-COMPOSITE3](active/F-COMPOSITE3-server-side-composite.md)
-- **Composite pass 3**: satellite vegetation. Needs a decode-to-array path, a cache, and a
-  port of the greenness math. [F-COMPOSITE3](active/F-COMPOSITE3-server-side-composite.md)
 - **Composite design doc**: once F-COMPOSITE3 is done, archive the composite DEM design doc (reference/composite-dem-design.md) to
   history and lift its reasoning into `docs/decisions/composite.md`.
 - **Large-region guide §6**, process and pipeline:
@@ -94,7 +80,6 @@ _Last updated: 2026-09-28._ The one place for "what's next".
 
   [large-region guide §6](../guides/large-region-sop.md)
 - **Large-region guide §6**, STL:
-  - Rivers and lakes as their own 3MF part (second colour).
   - Optional river width floor in mm.
 
   [large-region guide §6](../guides/large-region-sop.md)
@@ -102,30 +87,12 @@ _Last updated: 2026-09-28._ The one place for "what's next".
   Earth Engine (`app/server/config.py`). `geo2stl.dem.default_dem_source` already picks SRTMGL1
   when a key exists.
 
-## Projections
-
-- **Phase 2**: Mollweide, Eckert IV, Robinson, Times on the 2D-warp path, each with a
-  `geoToFrac` graticule branch. [F-PROJ-EXPAND](active/F-PROJ-EXPAND-map-projections.md)
-- **Phase 3**: Winkel Tripel and Van der Grinten, probably display-only (decide before starting).
-  [F-PROJ-EXPAND](active/F-PROJ-EXPAND-map-projections.md)
-
 ## Frontend and UX (city workflow)
 
 - **F-DEMID leftovers**:
   - derived-values handles (`POST /api/dem/{id}/values`)
   - remove the settings-derived cache-key fallback and the `_demSettings` DOM fallback
   - port v2's degenerate-grid guard
-
-  [F-FE1](active/F-FE1-vue-consolidation.md)
-- **F-FE1 steps 0–6**:
-  - 0: dead code (`populateRegionsPanelTable`, `useAppStateBridge.ts`, `useEventListeners.ts`,
-    vitest helper copies)
-  - 1: one module graph (`main.js` through Vite)
-  - 2: Pinia as the state
-  - 3: typed settings with `schemaVersion`
-  - 4: migrate duplicated UI
-  - 5: wrap the engines as components
-  - 6: remove `window.*` glue
 
   [F-FE1](active/F-FE1-vue-consolidation.md)
 - **Dead viewer controls**: "Simplify" and "Surface groups" call `window.applySimplification` /
@@ -198,3 +165,18 @@ _Last updated: 2026-09-28._ The one place for "what's next".
 
 - All skyline open items (F-DET, F-SKY13/16/18, F-SKY5 validation, tests, depth > 1.2 km) are
   kept in one list: [skyline README → Open items](../../city2stl/skyline/README.md#open-items).
+
+## Not pursuing
+
+Dropped by the user on 2026-09-29 ("not interested"). Do not suggest them again unless the
+user brings them back; the plan files keep the detail.
+
+- More map projections: F-PROJ-EXPAND phases 2–3 (Mollweide, Robinson, Winkel Tripel, …).
+  Phase 1 (Miller, Gall) stays shipped.
+- Satellite vegetation as a composite layer (F-COMPOSITE3 pass 3).
+- Chasing more survey / surface sources (CNIG 0.5 m, Lisbon, Barcelona ICGC, Salzburg BEV,
+  Cartagena de Indias, REDIAM voids).
+- Frontend refactor F-FE1 steps 0–6 (Pinia state, one module graph, `window.*` removal):
+  internal only, no visible change. The F-DEMID leftovers stay.
+- Rivers and lakes as a separate 3MF part. River depth in print mm and a river width floor
+  stay (large-region §6).

@@ -43,6 +43,7 @@ FLOW_MM3_S = 8.0
 DEFAULT_BED_MM = (250.0, 210.0)
 FACE_WARN = 2_000_000
 PRINT_HOURS_WARN = 48.0
+PUZZLE_MIN_KEPT = 0.99   # pieces / model volume, clearance gaps included (F-CITYMODEL)
 FACE_EST_MAX_PIXELS = 120_000
 
 FORMULA = (f"printed = shell + {INFILL:.0%} x (volume - shell), shell = area x "
@@ -305,5 +306,13 @@ def build_check(model_report: dict, merged, data: dict, puzzle: dict | None = No
         warnings.append("Model does not fit the bed and no puzzle was cut")
     if puzzle and puzzle.get("layout", {}).get("oversize"):
         warnings.append("Pieces larger than the bed: " + ", ".join(puzzle["layout"]["oversize"]))
+    vol = (puzzle or {}).get("volume")
+    if vol:
+        check["puzzle_volume_kept"] = vol["kept"]
+        if vol["kept"] < PUZZLE_MIN_KEPT:
+            warnings.append(f"Puzzle pieces keep {vol['kept']:.1%} of the model volume "
+                            f"(expected >= {PUZZLE_MIN_KEPT:.0%})")
+        if vol["open_pieces"]:
+            warnings.append("Puzzle pieces not closed: " + ", ".join(vol["open_pieces"]))
     check["warnings"] = warnings
     return check

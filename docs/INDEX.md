@@ -137,7 +137,8 @@ Walkthrough: [reference/pipeline.md](reference/pipeline.md); why: [decisions/mes
 - Background tasks and download: `map2stl/app/server/core/export_tasks.py` (`start_export_task`, `get_task_status`, `get_task_file`)
 - City export task (layers, trails, landmark overrides): `map2stl/app/server/core/city_model_task.py::run_city_model` (`normalize_request`, `city_osm_params`)
 - Live 3D preview (TIN capped at `PREVIEW_MAX_FACES`, strided DEMs): `map2stl/app/server/core/export.py::generate_mesh_preview` (`_preview_mesh`)
-- Terrain puzzle: `map2stl/app/server/core/export.py::generate_puzzle` (`puzzle_spec`); cutting, engraving, plates `map2stl/app/server/core/puzzle.py` (`plan_grid`, `choose_method`, `cut_pieces`, `cut_to_zip`)
+- Terrain puzzle: `map2stl/app/server/core/export.py::generate_puzzle` (`puzzle_spec`); cutting, engraving, plates `map2stl/app/server/core/puzzle.py` (`plan_grid`, `choose_method`, `cut_pieces`, `cut_to_zip`, `volume_check`)
+- Reference-city regression set (Cartagena, Granada, Breckenridge: watertight, puzzle volume, faces/volume vs baseline, time log): `map2stl/tests/test_reference_cities.py::test_reference_city` (`pytest -m slow`), baseline `map2stl/tests/reference_cities_baseline.json`, runs appended to `map2stl/output/regression/reference_cities.jsonl`
 - Pre-flight (size vs bed, pieces, faces, filament/time, warnings): `map2stl/app/server/core/preflight.py::preflight` (`print_estimate`, `build_check`); per-layer counts without solids `map2stl/city2stl/city_model.py::layer_preflight` (`layer_polygons`)
 - Label engraving, contour lines, cross-section: `map2stl/app/server/core/export.py` (`_apply_label_engraving`, `_apply_contour_lines`, `generate_crosssection`)
 
@@ -151,7 +152,7 @@ Walkthrough: [reference/pipeline.md](reference/pipeline.md); why: [decisions/mes
 - Draped slab triangulation without Triangle (qhull + GEOS cavity recovery): `map2stl/city2stl/city_model.py::_slab` (`triangulate_polygon`, `_recover_segments`)
 - One layer → solid, landmark swaps, parts: `map2stl/city2stl/city_model.py::build_layer` (`_layer_solid`, `is_part`, `assemble_parts`)
 - Trails in the build (town / road filter): `map2stl/city2stl/city_model.py::filter_trails`
-- Merged watertight solid, lossless simplify: `map2stl/city2stl/city_model.py::welded_watertight` (`lossless_simplify`, `_separate_contacts`)
+- Merged watertight solid, 3MF parts, lossless simplify: `map2stl/city2stl/city_model.py::assemble_model` (`welded_watertight`, `lossless_simplify`, `_separate_contacts`)
 - Model caches (polygons, solids, terrain TIN, finished model; `MODEL_CACHE_VERSION`): `map2stl/city2stl/model_cache.py` (`polygons_key`, `solid_key`, `terrain_key`); finished model `map2stl/city2stl/city_model.py` (`_read_model`, `_write_model`)
 - Roof solids (hipped, gabled, skillion, revolved domes/spires): `map2stl/city2stl/roofs.py::building_solids` (`convex_pieces`, `_revolved`, `_skillion_plane`)
 - Vectorised flat prisms: `numpy2stl/src/numpy2stl/core/extrude.py::prisms`; streamed 3MF writer `numpy2stl/src/numpy2stl/io/writers.py::write3MF`
@@ -286,7 +287,7 @@ Package overview: `numpy2stl/README.md`. Geo-free is enforced by `numpy2stl/test
 - Polygon helpers (perimeters, area/orientation, triangulation): `numpy2stl/src/numpy2stl/core/polygon.py::triangulate_polygon` (`get_ordered_perimeter`, `get_area`, `set_orientation`, `rotation_matrix_from_vertices`)
 - Extrusion (prisms, sloped tops, robust triangulation with holes): `numpy2stl/src/numpy2stl/processing/extrusion.py::make_prism_solid` (`extrude_solid_polygon`, `make_sloped_prism_solid`, `robust_triangulate`); vectorised prisms `numpy2stl/src/numpy2stl/core/extrude.py::prisms`
 - Booleans and manifold puzzle cutting: `numpy2stl/src/numpy2stl/processing/boolean.py::union` (`cut_puzzle_pieces_manifold`, `clean_mesh`)
-- Heightfield TIN (+ face-budget variant for the preview), Hausdorff decimation: `numpy2stl/src/numpy2stl/processing/decimate.py::heightfield_tin` (`heightfield_tin_budget`, `decimate_to_tolerance`)
+- Heightfield TIN (+ face-budget variant for the preview), Hausdorff decimation: `numpy2stl/src/numpy2stl/processing/decimate.py::heightfield_tin` (tiled above `TIN_TILE_PX`; `heightfield_tin_budget`, `decimate_to_tolerance`)
 - Lossless coplanar merge (used by `lossless_simplify`): `numpy2stl/src/numpy2stl/processing/simplify.py::simplify_mesh_surfaces` (`_triangulate_regions`)
 - Building simplification and prism LOD: `numpy2stl/src/numpy2stl/processing/building_simplify/decimate.py::simplify_building_mesh` (`decimation_sweep`, `flatten_roof_clutter`); `numpy2stl/src/numpy2stl/processing/building_simplify/prism.py::prism_decompose`
 - Mesh checks: `numpy2stl/src/numpy2stl/processing/verify.py::check_model_status` (`diagnose_mesh`)

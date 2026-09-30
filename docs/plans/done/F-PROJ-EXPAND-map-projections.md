@@ -1,7 +1,7 @@
 # F-PROJ-EXPAND — Expand map projections (MapChart guide set)
 
-Status: phase 1 done (Miller and Gall in `geo2stl/projections.py`); phases 2–3 open
-([roadmap](../README.md#projections)).
+Status: phase 1 done (Miller and Gall in `geo2stl/projections.py`). Phases 2–3 not pursued
+(user, 2026-09-29; [roadmap → Not pursuing](../README.md#not-pursuing)).
 
 User-requested 2026-07-19. Goal (all three): (a) accurate real-space shape for
 printed terrain, (b) visual variety of world-map looks, (c) teaching distortion

@@ -288,6 +288,9 @@ class Terrain:
         r = np.arange(total) - np.repeat(np.cumsum(cnt) - cnt, cnt)
         row = i0[k].astype(np.int64) + r // nj[k]
         col = j0[k].astype(np.int64) + r % nj[k]
+        # Prepared, a polygon answers each point from its own index instead of walking
+        # every edge: Cartagena's coastline / wetland polygons took 10 s, now < 0.1 s.
+        shapely.prepare(polys)
         inside = shapely.contains_xy(polys[k], col * s, ((h - 1) - row) * s)
         return k[inside], (row * w + col)[inside]
 
@@ -515,6 +518,10 @@ def merge_flat_roofs(polys: list[Polygon], props: list[dict], lo: np.ndarray, hi
     unions = np.array([shapely.union_all(arr[comp == g]) for g in group_ids], dtype=object)
     closed = shapely.buffer(shapely.buffer(unions, r, join_style="mitre"), -r, join_style="mitre")
     closed = shapely.simplify(closed, style.outline_tol_mm, preserve_topology=True)
+    # Mitre closing + simplify can leave a self-touching ring (Granada: GEOS "side
+    # location conflict" in the intersection); make_valid may add stray lines, which
+    # the polygon filter below drops.
+    closed = shapely.make_valid(closed)
     closed = shapely.set_precision(shapely.intersection(closed, rect), SNAP_MM)
     parts, owner = shapely.get_parts(closed, return_index=True)
     holed = shapely.get_num_interior_rings(parts) > 0
@@ -1096,23 +1103,33 @@ def _separate_contacts(v: np.ndarray, f: np.ndarray) -> np.ndarray:
     resolution) keeps the file watertight after welding.
     """
     # Compared as STL stores them (float32): positions that differ only below
-    # that precision are welded by every reader too.
-    _, inv, counts = np.unique(v.astype(np.float32), axis=0, return_inverse=True,
-                               return_counts=True)
-    dup = counts[inv.ravel()] > 1
+    # that precision are welded by every reader too. Grouped by a lexsort of the
+    # float32 bit patterns (+0.0 folds -0.0 into 0.0): np.unique(axis=0) sorted
+    # the rows as void records, 5x slower on a 1 M-vertex model.
+    if not len(v):
+        return v
+    b = (v.astype(np.float32) + np.float32(0.0)).view(np.uint32)
+    order = np.lexsort((b[:, 2], b[:, 1], b[:, 0]))
+    sb = b[order]
+    new = np.ones(len(sb), bool)
+    new[1:] = (sb[1:] != sb[:-1]).any(axis=1)
+    inv = np.empty(len(v), np.int64)
+    inv[order] = np.cumsum(new) - 1
+    dup = np.bincount(inv)[inv] > 1
     if not dup.any():
         return v
-    centre = np.zeros_like(v)
-    n = np.zeros(len(v))
-    tri_c = v[f].mean(axis=1)
-    for k in range(3):
-        np.add.at(centre, f[:, k], tri_c)
-        np.add.at(n, f[:, k], 1)
+    # Mean centre of each duplicated vertex's triangle fan (only those faces).
+    touch = f[dup[f].any(axis=1)]
+    tri_c = v[touch].mean(axis=1)
+    ids = touch.ravel()
+    n = np.bincount(ids, minlength=len(v))
+    centre = np.column_stack([np.bincount(ids, weights=np.repeat(tri_c[:, k], 3), minlength=len(v))
+                              for k in range(3)])
     d = centre[dup] / np.maximum(n[dup], 1)[:, None] - v[dup]
     d /= np.maximum(np.linalg.norm(d, axis=1), 1e-12)[:, None]
     # Copies whose fans point the same way would land together again: the k-th
     # copy of a position moves (k + 1) steps.
-    group = inv.ravel()[dup]
+    group = inv[dup]
     order = np.argsort(group, kind="stable")
     first = np.searchsorted(group[order], group[order])
     rank = np.empty(len(group), np.int64)
@@ -1313,25 +1330,23 @@ def build_on_terrain(
         return CityModel(merged, parts, scale, report)
 
     t0 = time.perf_counter()
-    cut_all = mf.Manifold.batch_boolean(list(cuts.values()), mf.OpType.Add) if cuts else None
-    ground_cut = ground_m - cut_all if cut_all is not None else ground_m
-
-    parts: dict[str, trimesh.Trimesh] = {"terrain": _to_trimesh(ground_cut)}
-    claimed = ground_m
-    for name, m in adds.items():
-        own = m - claimed
-        if cut_all is not None:
-            own = own - cut_all
-        if not own.is_empty():
-            parts[name] = _to_trimesh(own)
-        claimed = claimed + m
-    merged = _to_trimesh(claimed - cut_all if cut_all is not None else claimed)
+    merged, parts = assemble_model(ground_m, adds, cuts)
     timings["assemble"] = round(time.perf_counter() - t0, 2)
     t0 = time.perf_counter()
     if simplify:
         before = len(merged.faces)
-        merged = lossless_simplify(merged)
-        parts = {k: lossless_simplify(v) for k, v in parts.items()}
+        # The merged model and every part are simplified separately (shared surfaces
+        # simplify differently on each side, so merged cannot be rebuilt from the
+        # parts). They are independent and mostly GEOS / numpy work that releases the
+        # GIL: 4 threads, largest first, took Granada from 22 s to 10 s.
+        from concurrent.futures import ThreadPoolExecutor
+
+        jobs = {"__merged__": merged, **parts}
+        order = sorted(jobs, key=lambda k: -len(jobs[k].faces))
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            done = dict(zip(order, ex.map(lambda k: lossless_simplify(jobs[k]), order), strict=True))
+        merged = done.pop("__merged__")
+        parts = {k: done[k] for k in parts}
         report["lossless_simplify"] = {"faces_before": before, "faces_after": len(merged.faces)}
         timings["simplify"] = round(time.perf_counter() - t0, 2)
     report["seconds"] = timings
@@ -1344,6 +1359,34 @@ def build_on_terrain(
         _write_model(model_key, merged, parts,
                      {k: report[k] for k in ("merged", "parts", "lossless_simplify") if k in report})
     return CityModel(merged, parts, scale, report)
+
+
+def assemble_model(ground_m: mf.Manifold, adds: dict[str, mf.Manifold],
+                   cuts: dict[str, mf.Manifold]
+                   ) -> tuple[trimesh.Trimesh, dict[str, trimesh.Trimesh]]:
+    """The merged solid and the disjoint 3MF parts from the terrain and layer solids.
+
+    ``adds`` (raised / extruded layers) in priority order: each part is its layer
+    minus the terrain and every earlier layer, and minus every cut (engraved /
+    water layers). The merged solid is the union of everything minus the cuts.
+    """
+    cut_all = mf.Manifold.batch_boolean(list(cuts.values()), mf.OpType.Add) if cuts else None
+    ground_cut = ground_m - cut_all if cut_all is not None else ground_m
+
+    parts: dict[str, trimesh.Trimesh] = {"terrain": _to_trimesh(ground_cut)}
+    # Sequential on purpose (2026-09-29, Granada): one batch union of all layers
+    # (5 s), per-part subtraction chains without the growing union (34 s), threads
+    # (no gain: manifold3d holds the GIL) and batching small layers were all slower.
+    claimed = ground_m
+    for name, m in adds.items():
+        own = m - claimed
+        if cut_all is not None:
+            own = own - cut_all
+        if not own.is_empty():
+            parts[name] = _to_trimesh(own)
+        claimed = claimed + m
+    merged = _to_trimesh(claimed - cut_all if cut_all is not None else claimed)
+    return merged, parts
 
 
 def _read_model(key: str) -> tuple[trimesh.Trimesh, dict, dict] | None:
