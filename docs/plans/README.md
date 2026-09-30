@@ -33,6 +33,17 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   file writing (~8 s). A "Topological inconsistency" message is still printed by the simplifier.
   Why: [mesh-pipeline decisions](../decisions/mesh-pipeline.md).
   [F-CITYMODEL](active/F-CITYMODEL-vector-city-model.md)
+- **Next profiling pass: large regions** (user, 2026-09-30). Profile the region endpoints, not
+  only the city build, on the Amazon region (40° x 34°, `h5_local`) plus Grand Canyon, Rhine and
+  Sierra Nevada, and add them to the profiler (`Code/claude/scripts/profile_city.py`, which only
+  covers city builds today):
+  - DEM: the H5 read is now block-averaged (8 s, 128 MB, was a ~20 GB crash); check the rest of
+    `/api/terrain/dem` (payload encoding, projection) at this size.
+  - Hydrology: `rasterize_hydrorivers` took 99 s for 88,799 rivers at 600 px (111 s total, plus
+    9 s simplify + buffer) on the Amazon.
+  - Satellite tiles: 10.6 s (63 tiles at zoom 6).
+  - Earth Engine layers (water mask, ESA land cover) now that `earthengine-api` is installed.
+  - The 2D layer stack and composite at this size in the browser (usage log timings).
 - **Incremental rebuild**: after a layer or setting change, rebuild only the affected layer
   solids. The layer and model caches exist; the UI still asks for a full build.
   [city guide](../guides/city-stl-and-puzzle-sop.md)
