@@ -594,6 +594,7 @@ async function previewModelIn3D() {
 
         const cmap = document.getElementById('viewerColormap')?.value || 'terrain';
         _replaceMesh(_buildMeshFromPreview(data, cmap));
+        if (cmap === 'satellite') _applySatelliteTexture();
         _fitCameraToMesh(terrainMesh);
         _updateHud(data);
         _updateSceneOverlays(data);
@@ -677,13 +678,20 @@ function _buildMeshFromPreview(data, cmap) {
 
     const positions = new Float32Array(rawVerts.length * 3);
     const colors    = new Float32Array(rawVerts.length * 3);
+    // Texture coordinates from the DEM pixel of each vertex, for the satellite
+    // drape (_applySatelliteTexture): u = column, v = 1 at row 0 (north).
+    const uvs       = new Float32Array(rawVerts.length * 2);
+    const uDen = Math.max(data.cols - 1, 1), vDen = Math.max(data.rows - 1, 1);
+    const vertexCmap = cmap === 'satellite' ? 'terrain' : cmap;
     for (let i = 0; i < rawVerts.length; i++) {
         const [c, r, z] = rawVerts[i];
+        uvs[i * 2] = c / uDen;
+        uvs[i * 2 + 1] = 1 - r / vDen;
         positions[i * 3]     = c * mmPerPx * SCALE - xOffset; // x (mm in display units)
         positions[i * 3 + 1] = z * SCALE;                     // y (z is already mm)
         positions[i * 3 + 2] = r * mmPerPx * SCALE - zOffset; // z (mm in display units)
 
-        const rgb = _elevColor((z - zMin) / zRange, cmap);
+        const rgb = _elevColor((z - zMin) / zRange, vertexCmap);
         colors[i * 3] = rgb[0]; colors[i * 3 + 1] = rgb[1]; colors[i * 3 + 2] = rgb[2];
     }
 
@@ -705,6 +713,7 @@ function _buildMeshFromPreview(data, cmap) {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('uv',       new THREE.BufferAttribute(uvs, 2));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.computeVertexNormals();
 
@@ -720,6 +729,7 @@ function _replaceMesh(newMesh) {
         terrainMesh.geometry.dispose();
         // In normals mode the saved original material also needs disposal
         if (terrainMesh._savedMaterial) terrainMesh._savedMaterial.dispose();
+        (terrainMesh._savedMaterial || terrainMesh.material).map?.dispose();
         terrainMesh.material.dispose();
     }
     terrainMesh = newMesh;
@@ -749,6 +759,9 @@ function _elevColor(t, cmap) {
 /** Recolor the current mesh with a new colormap (no server round-trip). */
 function _rebuildColors(cmap) {
     if (!terrainMesh) return;
+    if (cmap === 'satellite') { _applySatelliteTexture(); return; }
+    const mat = terrainMesh._savedMaterial || terrainMesh.material;
+    if (mat.map) { mat.map.dispose(); mat.map = null; }
     const geo    = terrainMesh.geometry;
     const posArr = geo.attributes.position.array;
     const n      = posArr.length / 3;
@@ -777,6 +790,48 @@ function _rebuildColors(cmap) {
         terrainMesh.material.color.set(0xffffff);
     }
     terrainMesh.material.needsUpdate = true;
+    needsRender = true;
+}
+
+/** Same box as the loaded DEM (the satellite canvas is fetched per box). */
+function _sameBbox(a, b) {
+    return !!a && !!b && ['north', 'south', 'east', 'west']
+        .every(k => Math.abs(Number(a[k]) - Number(b[k])) < 1e-9);
+}
+
+/**
+ * Drape the satellite image of the loaded DEM box over the mesh as a texture.
+ * Uses the Edit tab's satellite canvas (appState.satImgSourceCanvas, same box and
+ * projection as the DEM, so pixel (col, row) of the mesh lands on the same place
+ * in the image) and fetches it first when it is missing or for another box.
+ * Texture detail does not depend on the adaptive mesh density.
+ */
+async function _applySatelliteTexture() {
+    const mesh = terrainMesh;
+    if (!mesh) return;
+    const st = window.appState || {};
+    // At least the DEM grid's resolution (texture detail is free), at most 2048 px.
+    const grid = st.generatedModelData ? Math.max(st.generatedModelData.width, st.generatedModelData.height) : 1024;
+    const want = Math.min(2048, Math.max(1024, grid));
+    const have = st.satImgSourceCanvas ? Math.max(st.satImgSourceCanvas.width, st.satImgSourceCanvas.height) : 0;
+    if (!have || have < 0.9 * want || !_sameBbox(st._satImgBbox, st.currentDemBbox)) {
+        try { await window.loadSatelliteRGBImage?.({ dim: want }); } catch (_) { /* toast shown there */ }
+    }
+    const canvas = window.appState?.satImgSourceCanvas;
+    if (mesh !== terrainMesh) return;            // rebuilt while fetching: the new mesh re-drapes
+    if (!canvas) {
+        window.showToast?.('No satellite image for this region - showing the terrain colormap.', 'warning');
+        _rebuildColors('terrain');
+        return;
+    }
+    const mat = mesh._savedMaterial || mesh.material;
+    mat.map?.dispose();
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.anisotropy = modelRenderer?.capabilities?.getMaxAnisotropy?.() || 1;
+    mat.map = tex;
+    mat.vertexColors = false;
+    mat.color.set(0xffffff);
+    mat.needsUpdate = true;
     needsRender = true;
 }
 

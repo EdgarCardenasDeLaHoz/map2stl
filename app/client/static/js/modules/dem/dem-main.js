@@ -825,9 +825,11 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
  * Fetch real satellite imagery from /api/terrain/satellite (ESRI World Imagery).
  * Renders the base64 JPEG to a source canvas stored on appState.satImgSourceCanvas,
  * then triggers a stacked layers update.
+ * @param {{dim?: number}} [opts] - `dim` overrides the resolution control (the 3D
+ *   viewer's satellite drape asks for the DEM's own resolution or more).
  * @returns {Promise<void>}
  */
-window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
+window.loadSatelliteRGBImage = async function loadSatelliteRGBImage(opts = {}) {
     if (_satelliteRGBAbortController) _satelliteRGBAbortController.abort();
     _satelliteRGBAbortController = new AbortController();
     const signal = _satelliteRGBAbortController.signal;
@@ -842,7 +844,7 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage() {
     }
     const { north, south, east, west } = coords;
 
-    const dim = parseInt(
+    const dim = opts.dim || parseInt(
         document.getElementById('satImgResolution')?.value ||
         document.getElementById('paramDim')?.value || 600
     );

@@ -109,6 +109,7 @@
                   <option value="terrain" selected>Terrain</option>
                   <option value="viridis">Viridis</option>
                   <option value="gray">Gray</option>
+                  <option value="satellite">Satellite image</option>
                   <option value="none">None (flat)</option>
                 </select>
               </div>

@@ -115,7 +115,7 @@ flowchart LR
 
 | File | Key symbols | Purpose |
 |---|---|---|
-| `model-viewer.js` | `initModelViewer`, `previewModelIn3D`, `haversineDiagKm`, `updatePuzzlePreview`, `puzzleEdgesFor`, `resetPuzzleEdges`, `resetViewerCamera`, `setViewerNormals`, `setViewerAutoRotate`, `updateBedOutline` | Three.js preview of the server's mesh; draggable puzzle cuts |
+| `model-viewer.js` | `initModelViewer`, `previewModelIn3D`, `haversineDiagKm`, `updatePuzzlePreview`, `puzzleEdgesFor`, `resetPuzzleEdges`, `resetViewerCamera`, `setViewerNormals`, `setViewerAutoRotate`, `updateBedOutline`, `rebuildViewerColors` (`_applySatelliteTexture`) | Three.js preview of the server's mesh; draggable puzzle cuts; colormap or satellite drape (texture from the Edit tab's satellite canvas, fetched at ≥ the DEM's resolution, UVs from each vertex's DEM pixel) |
 | `export-handlers.js` | `downloadSTL`, `downloadModel`, `downloadCrossSection`, `exportPuzzle`, `exportCityModel`, `runPreflight`, `cancelExport`, `_demSettings`, `_asyncExport` | Exports, puzzle and City Model builds, pre-flight |
 | `export-poll.js` | `EXPORT_STALL_TIMEOUT_MS`, `createStallWatch`, `formatElapsed`, `exportProgressText` | Pure: stall-based give-up, progress text |
 | `puzzle-cuts.js` | `evenEdges`, `nearestEdge`, `moveEdge`, `minPieceMm`, `gridKey`, `isCustom`, `roundEdges` | Pure: puzzle cut positions (mm from west / south) |
@@ -274,7 +274,7 @@ One line per function. `window.*` unless marked (private) or (export).
 | `renderDEMCanvas(vals, w, h, cmap, vmin, vmax)` | Elevation LUT → canvas (via the worker) |
 | `populateDemSources()` | Fill `#paramDemSource` from `GET /api/terrain/sources` |
 | `loadSatelliteImage()` | ESA land cover (classification raster) |
-| `loadSatelliteRGBImage()` | ESRI satellite imagery |
+| `loadSatelliteRGBImage({dim?})` | ESRI satellite imagery (`dim` overrides the resolution control; the 3D drape asks for ≥ the DEM grid) |
 | `updatePrintDimensions()` | Print-size readout |
 
 ### `water-mask.js`, `hydrology-overlay.js`, `water-hydrology-combined.js`
