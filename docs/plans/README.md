@@ -21,6 +21,7 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 | [F-COMPOSITE3](active/F-COMPOSITE3-server-side-composite.md) | pass 1 done | pass 2: land cover and the parity test |
 | [F-FE1 + F-DEMID](active/F-FE1-vue-consolidation.md) | DEM handles in use; step 7 (delete `v2/`) done; steps 0–6 not pursued | F-DEMID leftovers only |
 | [F-LANDMARK](active/F-LANDMARK-roofs-and-building-parts.md) | §1–§6 done | check the result on the landmark set |
+| [F-USAGE](active/F-USAGE-local-usage-log.md) | in progress | usage log, then a flow report from real sessions |
 | F-DET, registration learning | skyline and registration plans | see the Skyline section |
 
 ## Mesh pipeline and city model

@@ -2,7 +2,7 @@
 
 _Last updated: 2026-09-28_
 
-- Routers: `app/server/routers/` — `auth`, `cache`, `cities`, `composite`, `diagnostics`, `export`, `geocode`, `guides`, `height`, `layers`, `regions`, `registration`, `reports`, `settings`, `terrain`. Logic lives in `app/server/core/`.
+- Routers: `app/server/routers/` — `auth`, `cache`, `cities`, `composite`, `diagnostics`, `export`, `geocode`, `guides`, `height`, `layers`, `regions`, `registration`, `reports`, `settings`, `terrain`, `usage`. Logic lives in `app/server/core/`.
 - Page routes (`app/server/server.py`): `GET /` (app), `GET /reports`, `GET /guides`, `GET /guides/{slug}`, `GET /static/{file_path}`.
 - Python SDK over these routes: [sdk.md](sdk.md) (method → route map); examples in `../../notebooks/Session_API_Reference.ipynb`, end-to-end in `../../notebooks/API_Terrain.ipynb`.
 - Design context: [overview.md](overview.md), [pipeline.md](pipeline.md).
@@ -241,6 +241,16 @@ Registration roots (`app/server/routers/reports.py::_REG_ROOTS`, read-only; over
   are never served
 
 The page shows them under a **Registration** tab and in the sidebar.
+
+## Usage log (`app/server/routers/usage.py`)
+
+Local-only record of how the app is used (F-USAGE), written by
+`app/client/static/js/modules/core/usage-log.js`.
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/usage` | `{session, events: [...]}` (≤ 1000 events, ≤ 512 kB): each event appended as one line to `output/usage/<YYYY-MM-DD>.jsonl` with `session`. A `value` whose control id / name / label mentions pass, key, token, secret, auth or credential is stored as `[redacted]`. `MAP2STL_USAGE_LOG=0` makes it a no-op, `MAP2STL_USAGE_DIR` moves the folder |
+| GET | `/api/usage/status` | `{enabled, dir, files: [{name, bytes}]}` |
 
 ## Guides (`app/server/routers/guides.py`)
 

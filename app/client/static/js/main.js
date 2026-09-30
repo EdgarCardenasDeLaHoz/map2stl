@@ -14,6 +14,7 @@ import './modules/core/events.js';
 import './modules/core/api.js';
 import './modules/core/cache.js';
 import './modules/core/ui-helpers.js';
+import './modules/core/usage-log.js';        // after ui-helpers (wraps showToast); local usage log (F-USAGE)
 import './modules/core/state.js';
 import './modules/dem/dem-loader.js';
 import './modules/dem/dem-gridlines.js';

@@ -34,6 +34,7 @@ from app.server.routers.registration import router as _registration_router
 from app.server.routers.reports import router as _reports_router
 from app.server.routers.settings import router as _settings_router
 from app.server.routers.terrain import router as _terrain_router
+from app.server.routers.usage import router as _usage_router
 
 # Configure logging to write to a file — use an absolute path so the log
 # file never lands inside a directory watched by uvicorn's auto-reloader.
@@ -310,6 +311,7 @@ app.include_router(_reports_router)
 app.include_router(_guides_router)
 app.include_router(_registration_router)
 app.include_router(_geocode_router)
+app.include_router(_usage_router)
 logger.info(
     "Routers loaded: regions, terrain, cities, export, cache, settings, composite, height, "
     "diagnostics, layers, reports, guides, registration")

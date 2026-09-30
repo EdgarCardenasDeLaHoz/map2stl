@@ -90,7 +90,7 @@ Paths in this part are relative to `map2stl/`.
 | Mesh import (upload / library) → heightmap → registration | `layers.py` |
 | Plate registration packs + tasks, model critic | `registration.py` |
 | Height sources | `height.py` |
-| Guides, reports | `guides.py`, `reports.py` |
+| Guides, reports, usage log | `guides.py`, `reports.py`, `usage.py` |
 | Settings, cache, API keys / tile folder, place search, diagnostics | `settings.py`, `cache.py`, `auth.py`, `geocode.py`, `diagnostics.py` |
 
 ### Frontend by view (`app/client/static/js/`)
@@ -271,6 +271,7 @@ Full map: [reference/frontend-modules.md](reference/frontend-modules.md).
 ### Guides page (/guides) and reports (/reports)
 
 - Guides: sources `map2stl/docs/guides/*.md` (+ `img/`); render, URL rewrite, step ids, routes `map2stl/app/server/routers/guides.py::load_guide` (`_rewrite_url`, `_GuideTreeprocessor`, `guide_path`, `guides_index`, `guide_detail`, `guide_image`); page `map2stl/app/client/templates/guides.html`, `map2stl/app/client/static/js/guides.js`; deep links `map2stl/app/client/static/js/modules/ui/guide-links.js`; tests `map2stl/tests/test_guides_router.py`
+- Usage log (F-USAGE, local only): browser `map2stl/app/client/static/js/modules/core/usage-log.js`; route `map2stl/app/server/routers/usage.py::post_usage` (`usage_status`, `_scrub`); log files `map2stl/output/usage/*.jsonl`; flow report `Code/agent-scripts/usage_report.py`; tests `map2stl/tests/test_usage_router.py`
 - Reports: inventory, registration reports + packs (`MAP2STL_REGISTRATION_REPORT_ROOTS`), traversal guard `map2stl/app/server/routers/reports.py::reports_registration` (`_default_registration_roots`, `_scan_report_root`, `_pack_entry`, `_safe_path`); page `map2stl/app/client/static/js/reports.js` (`renderRegistration`); skyline row parser `map2stl/city2stl/skyline/report_index.py`
 
 ### Python SDK

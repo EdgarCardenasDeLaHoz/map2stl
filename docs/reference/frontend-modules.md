@@ -63,6 +63,7 @@ flowchart LR
 | `events.js` | `window.events`, `window.EV` | Event bus + constants. `EV.BBOX_CHANGED` fires from `setBboxRectangle`, the mini-map drag and a drawn rectangle |
 | `api.js` | `window.api` | All fetch helpers: regions, terrain, export, cities (`start/status/result/cancel`, landmarks), composite (`demMerge`, city raster), registration, mesh, geocode, cache, settings |
 | `ui-helpers.js` | `showToast`, `toastAnimation`, `showLoading`, `setLayerStatus`, `getProjectionParams`, `emitStackUpdate`, `decode*Values` | Toasts, spinners, layer status; `getProjectionParams()` is the single source of projection settings for every layer fetch (F-PROJ-DIMS); base64 grid decoders |
+| `usage-log.js` | `window.usageLog` (`pause`, `resume`, `flush`, `session`) | Local usage log (F-USAGE): capture-phase clicks and committed changes, `EV.BBOX_CHANGED` / `REGION_SELECTED` / `DEM_LOADED`, wraps `window.fetch` (every `/api/` call's status and ms), `showToast`, errors; batches to `POST /api/usage` every 5 s. Secret-looking controls are redacted; `map2stl_usage_log` = `off` pauses |
 | `cache.js` | `waterMaskCache`, `setupCacheManagement`, `clearClientCache`, `clearServerCache` | In-memory water-mask LRU + cache UI |
 
 ### `dem/` — DEM rendering
@@ -187,7 +188,7 @@ Under `app/client/static/js/vue/components/`. Store and bridge: [frontend.md](fr
 Foundation before dependents; keep it:
 
 ```
-core/storage-migrate → core/events → core/api → core/cache → core/ui-helpers → core/state
+core/storage-migrate → core/events → core/api → core/cache → core/ui-helpers → core/usage-log → core/state
 dem/dem-loader → dem/dem-gridlines → ui/presets → ui/curve-editor-state → ui/curve-editor
 layers/city-overlay → layers/city-render → layers/stacked-layers → layers/composite-dem
 layers/mesh-layer → layers/mesh-registration
