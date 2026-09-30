@@ -223,7 +223,8 @@ def fetch_layer_data(
         return fetch_esa_water_layer(north, south, east, west, dim)
     elif source == "h5_local":
         try:
-            return fetch_h5_dem(north, south, east, west)
+            # 2x the requested size, so the resize to dim still averages.
+            return fetch_h5_dem(north, south, east, west, max_px=2 * dim if dim else None)
         except FileNotFoundError as exc:
             logger.warning(
                 "h5_local DEM unavailable (%s); falling back to SRTMGL3 via OpenTopography", exc
@@ -418,6 +419,7 @@ def fetch_dem(
 # ---------------------------------------------------------------------------
 
 _H5_TILE_PX: int = 6000   # pixels per tile side
+_H5_BAND_ROWS: int = 1024   # fetch_h5_dem reads each tile in row bands of about this size
 _H5_TILE_DEG: float = 5.0  # degrees per tile
 
 
@@ -438,13 +440,20 @@ def _geo_to_tile_pixel(lat: float, lon: float):
 def fetch_h5_dem(
     north: float, south: float, east: float, west: float,
     h5_file: Path | None = None,
+    max_px: int | None = None,
 ) -> np.ndarray:
     """
     Read elevation from the local SRTM HDF5 tile store (strm_data.h5).
 
     The h5 file stores SRTM3 tiles at 6000Ã—6000 px per 5Â° tile (~90m/px).
-    Returns a float64 array cropped to the requested bbox at native resolution.
-    The caller is responsible for upsampling to the desired display resolution.
+    Returns a float64 array cropped to the requested bbox at native resolution, or
+    with ``max_px`` the mean of each k x k block so the longer side is about
+    ``max_px``. Tiles are read one at a time, in row bands, and summed into the
+    output, so memory stays at one band: a 40 x 34 degree box is 40,800 x 48,000
+    native pixels, which as a full mosaic plus float64 crop needed ~20 GB and
+    killed the server. Block means, not every k-th pixel: at k = 40 a single
+    90 m sample per 3.6 km aliases peaks and valleys. The caller resizes to the
+    display resolution; finished DEMs are cached per request by the server.
 
     Tile naming convention: srtm_{tilX:02d}_{tilY:02d}
       tilX = floor(lon / 5) + 37     (1-indexed, 36 tiles wide)
@@ -476,10 +485,21 @@ def fetch_h5_dem(
     x2i, y2i = int(round(px2_abs)), int(round(py2_abs))
     span_x = (tx2 - tx1 + 1)
     span_y = (ty2 - ty1 + 1)
-    mosaic_h = span_y * _H5_TILE_PX
-    mosaic_w = span_x * _H5_TILE_PX
-    mosaic = np.zeros((mosaic_h, mosaic_w), dtype=np.int16)
+    x1i, y1i = max(0, x1i), max(0, y1i)
+    x2i = min(span_x * _H5_TILE_PX, x2i)
+    y2i = min(span_y * _H5_TILE_PX, y2i)
+    step = max(1, max(y2i - y1i, x2i - x1i) // max_px) if max_px else 1
+    out_h = -(-(y2i - y1i) // step)
+    out_w = -(-(x2i - x1i) // step)
+    total = np.zeros((out_h, out_w), dtype=np.float64)
+    count = np.zeros((out_h, out_w), dtype=np.float64)
 
+    # The datasets are stored row=lat (north at row 0), col=lon; iy walks tile rows
+    # southward, ix walks tile columns eastward. A transpose used to be applied
+    # here, which swapped the pixel axes and silently sampled a point elsewhere in
+    # the same 5-degree tile: Breckenridge read 1745-2029 m instead of its true
+    # 2860-4210 m. Verified against SRTMGL1/COP30 for the same bbox.
+    band = max(step, (_H5_BAND_ROWS // step) * step)
     tiles_found = 0
     with h5py.File(str(h5_file), "r") as fh:
         for ix, iy in _product(range(span_x), range(span_y)):
@@ -488,38 +508,41 @@ def fetch_h5_dem(
                 logger.debug(f"h5 tile missing: {key}")
                 continue
             tiles_found += 1
-            data = fh[key][:]
-            th, tw = data.shape[:2]
-            out_r = iy * _H5_TILE_PX
-            out_c = ix * _H5_TILE_PX
-            mosaic[out_r:out_r + min(th, _H5_TILE_PX),
-                   out_c:out_c + min(tw, _H5_TILE_PX)] = data[:_H5_TILE_PX, :_H5_TILE_PX]
+            ds = fh[key]
+            r0, c0 = iy * _H5_TILE_PX, ix * _H5_TILE_PX
+            # Global rows / cols of this tile inside the box.
+            ga, gb = max(y1i, r0), min(y2i, r0 + min(ds.shape[0], _H5_TILE_PX))
+            ca, cb = max(x1i, c0), min(x2i, c0 + min(ds.shape[1], _H5_TILE_PX))
+            if ga >= gb or ca >= cb:
+                continue
+            ocol = (np.arange(ca, cb) - x1i) // step
+            cstarts = np.flatnonzero(np.r_[True, ocol[1:] != ocol[:-1]])
+            for ra in range(ga, gb, band):
+                rb = min(gb, ra + band)
+                data = np.maximum(ds[ra - r0:rb - r0, ca - c0:cb - c0], 0).astype(np.float64)
+                orow = (np.arange(ra, rb) - y1i) // step
+                rstarts = np.flatnonzero(np.r_[True, orow[1:] != orow[:-1]])
+                sums = np.add.reduceat(np.add.reduceat(data, rstarts, axis=0), cstarts, axis=1)
+                n_r = np.diff(np.r_[rstarts, len(orow)])
+                n_c = np.diff(np.r_[cstarts, len(ocol)])
+                rr, cc = orow[rstarts][:, None], ocol[cstarts][None, :]
+                total[rr, cc] += sums
+                count[rr, cc] += n_r[:, None] * n_c[None, :]
 
     if tiles_found == 0:
         raise FileNotFoundError(
             f"h5 file '{Path(h5_file).name}' contains no tiles covering "
             f"bbox ({north},{south},{east},{west})"
         )
-
-    # The datasets are already stored row=lat (north at row 0), col=lon, which is
-    # also how the mosaic is assembled above — iy walks tile rows southward, ix
-    # walks tile columns eastward. A transpose used to be applied here, which
-    # swapped the pixel axes and silently sampled a point elsewhere in the same
-    # 5-degree tile: Breckenridge read 1745-2029 m instead of its true
-    # 2860-4210 m. The result still looked like plausible terrain, which is why
-    # it survived. Verified against SRTMGL1/COP30 for the same bbox.
-    x1i = max(0, x1i)
-    y1i = max(0, y1i)
-    x2i = min(mosaic.shape[1], x2i)
-    y2i = min(mosaic.shape[0], y2i)
-    cropped = mosaic[y1i:y2i, x1i:x2i].astype(np.float64)
+    # Cells no tile covers (missing tiles) stay 0, as the old mosaic did.
+    cropped = np.divide(total, count, out=np.zeros_like(total), where=count > 0)
 
     # Clamp ocean floor noise and normalise like the notebook pipeline:
     # raise negatives (depth_scale will be applied by the caller), floor at 0.
     cropped = np.maximum(cropped, 0.0)
     logger.info(
         f"h5_local DEM: bbox=({north},{south},{east},{west}) "
-        f"native_shape={cropped.shape} h5={Path(h5_file).name}"
+        f"shape={cropped.shape} step={step} h5={Path(h5_file).name}"
     )
     return cropped
 

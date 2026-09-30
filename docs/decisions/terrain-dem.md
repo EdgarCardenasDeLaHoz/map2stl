@@ -2,6 +2,16 @@
 
 DEM sources, the DEM cache key, availability, and how empty or uncovered DEMs are reported. Related: [projections-raster.md](projections-raster.md), [mesh-pipeline.md](mesh-pipeline.md).
 
+### 2026-09-30 — The local H5 DEM is read tile by tile and block-averaged to about 2x the request
+- **Decision:** `geo2stl/dem.py::fetch_h5_dem(max_px=…)` reads each 5° tile in row bands and
+  sums k x k blocks into the output (mean), so the longer side is about `max_px`;
+  `fetch_layer_array` asks for 2 x `dim`. Without `max_px` it still returns the native crop.
+- **Why:** the Amazon region (40° x 34°) built a 48,000 x 54,000 int16 mosaic and a float64 crop
+  (~20 GB) before shrinking to 600 px, and the server died. Now 8 s and 128 MB peak.
+- **Rejected:** keeping every k-th pixel (strided hyperslab read, 2.7 s) — it aliases: at k = 8
+  it differs from the block mean by 13 m on average and up to 223 m.
+- **Supersedes / superseded by:** —
+
 ### 2026-08-30 — DEM cache defaults live in exactly one module
 - **Decision:** `map2stl/app/server/core/dem_cache.py::DEM_SETTING_DEFAULTS` is the only place DEM cache-key defaults are written. Clients send their DEM settings verbatim and the server fills gaps.
 - **Why:** the session client had a fourth copy that disagreed on `maintain_dimensions`, so every settings-only city export missed a DEM that was on disk.

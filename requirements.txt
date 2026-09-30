@@ -52,6 +52,11 @@ imagecodecs>=2024.1
 # Microsoft Planetary Computer. Absent, US cities fall back to the raster height providers.
 laspy[lazrs]==2.7.0
 
+# Google Earth Engine: ESA WorldCover water mask / land cover and JRC water (geo2stl/sat2stl.py).
+# Imported lazily; without it those layers fail with "No module named 'ee'". Also needs a
+# one-time `earthengine authenticate` (Keys panel).
+earthengine-api>=1.0
+
 # Satellite imagery / geo raster I/O (skimage.io in geo2stl/tiles.py)
 scikit-image==0.26.0
 

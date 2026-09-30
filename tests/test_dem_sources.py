@@ -69,3 +69,32 @@ class TestEndpoints:
             assert source == expected
         else:
             assert source in ("h5_local", "local")
+
+
+def test_h5_dem_block_mean_downsampling(tmp_path, monkeypatch):
+    """fetch_h5_dem(max_px) averages k x k blocks read band by band, matching the
+    mean of the native crop; without max_px it returns the native crop."""
+    import h5py
+    import numpy as np
+
+    from geo2stl import dem
+
+    monkeypatch.setattr(dem, "_H5_TILE_PX", 600)     # small synthetic 5-degree tiles
+    monkeypatch.setattr(dem, "_H5_BAND_ROWS", 37)     # force several bands per tile
+    rng = np.random.default_rng(0)
+    h5 = tmp_path / "strm_data.h5"
+    tiles = {}
+    with h5py.File(h5, "w") as fh:
+        for key in ("srtm_37_12", "srtm_38_12"):      # lon 0-5 and 5-10, lat 0-5
+            tiles[key] = rng.integers(0, 3000, (600, 600)).astype(np.int16)
+            fh[key] = tiles[key]
+    bb = (4.0, 1.0, 7.5, 2.5)                          # crosses the tile seam at lon 5
+    native = dem.fetch_h5_dem(*bb, h5_file=h5)
+    mosaic = np.hstack([tiles["srtm_37_12"], tiles["srtm_38_12"]]).astype(float)
+    assert np.array_equal(native, mosaic[120:480, 300:900])
+    k = max(native.shape) // 50
+    small = dem.fetch_h5_dem(*bb, h5_file=h5, max_px=50)
+    h, w = native.shape
+    ref = np.array([[native[i:i + k, j:j + k].mean() for j in range(0, w, k)]
+                    for i in range(0, h, k)])
+    assert small.shape == ref.shape and np.allclose(small, ref)
