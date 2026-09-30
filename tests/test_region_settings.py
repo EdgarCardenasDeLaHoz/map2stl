@@ -42,6 +42,18 @@ class TestGetRegionSettings:
         assert data["settings"]["colormap"] == "viridis"
         assert data["settings"]["projection"] == "mercator"
 
+    def test_legacy_clip_nans_is_renamed_on_load(self, client):
+        """Settings saved before the clip_nans alias was retired load as clip_valid_region."""
+        saved = {"projection": {"projection": "cosine", "clip_nans": False},
+                 "clip_nans": True, "dem": {"clip_nans": True, "clip_valid_region": False}}
+        client.put("/api/regions/TestRegion/settings", json=saved)
+
+        settings = client.get("/api/regions/TestRegion/settings").json()["settings"]
+        assert settings["projection"] == {"projection": "cosine", "clip_valid_region": False}
+        assert settings["clip_valid_region"] is True and "clip_nans" not in settings
+        # An explicit clip_valid_region wins over the legacy key.
+        assert settings["dem"] == {"clip_valid_region": False}
+
     def test_name_is_url_encoded(self, client):
         """Region names with spaces should be URL-encoded."""
         # Create a region with a space in the name

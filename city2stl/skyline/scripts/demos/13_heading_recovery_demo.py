@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 from pathlib import Path
 
@@ -911,19 +912,18 @@ def _render_birdseye_page(pdf, sat_image, sat_water, sat_project,
 def main() -> int:
     args = build_parser().parse_args()
 
-    from city2stl.skyline.pipeline import _ensure_segformer as _ens
+    from city2stl.skyline._core.segmentation import _ensure_segformer as _ens
     sf_ok = _ens()
     print(f"[demo] SegFormer load: ok={sf_ok}")
     if not sf_ok:
         return 1
 
-    from city2stl.skyline.coastline_registration import detect_sat_water_mask
-    from city2stl.skyline.pipeline import (
+    from city2stl.skyline._core.pano import stitch_pano_masks, stitch_pano_views
+    from city2stl.skyline._core.segmentation import (
         _neural_sky_and_building_masks,
         _neural_water_mask,
-        stitch_pano_masks,
-        stitch_pano_views,
     )
+    from city2stl.skyline.coastline_registration import detect_sat_water_mask
     from city2stl.skyline.region_data import _load_region_bbox, _load_site_seed_urls
     from city2stl.skyline.satellite_image import fetch_region_satellite
     from city2stl.skyline.streetview_io import (
@@ -1090,4 +1090,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Library progress (skyline._pano, region_pdf) goes through logging.
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     raise SystemExit(main())

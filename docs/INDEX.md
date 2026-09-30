@@ -166,7 +166,7 @@ Walkthrough: [reference/pipeline.md](reference/pipeline.md); why: [decisions/mes
 - Buildings keep `osm_id` + landmark tags, parts kept: `map2stl/city2stl/fetch.py::_fetch_buildings` (`_reduce_buildings_keeping_parts`); tag columns `map2stl/city2stl/heights.py::LANDMARK_TAG_COLS`
 - OSM lakes for the composite `lakes` layer: `map2stl/city2stl/fetch.py::fetch_osm_lakes`
 - Metric reprojection (local UTM, not Mercator): `map2stl/city2stl/fetch.py::_to_metric`
-- Cache version and staleness (`CITY_PIPELINE_VERSION`): `map2stl/city2stl/cache_policy.py::CITY_PIPELINE_VERSION` (`city_cache_needs_enrichment`)
+- Cache version and staleness (`CITY_PIPELINE_VERSION`): `map2stl/city2stl/cache_policy.py::CITY_PIPELINE_VERSION` (`city_cache_missing_height_source`, `city_cache_stale_buildings_only`)
 - Cache-first layers, size guard (no city layers > `CITY_LAYERS_MAX_DIAGONAL_KM` unless allowed), reuse of finer/enclosing entries: `map2stl/app/server/core/city_data.py::get_city_layers` (`check_city_area`, `lookup_city_layers`, `_candidates`)
 - Coarse-tier building area floor: `map2stl/app/server/config.py::COARSE_MIN_BUILDING_AREA_M2`
 - City fetch as a background job: `map2stl/app/server/core/city_fetch_tasks.py::start_city_fetch` (`cancel_task`); routes `map2stl/app/server/routers/cities.py` (`start_city_fetch`, `city_fetch_status`, `city_fetch_result`, `cancel_city_fetch`); client `map2stl/app/client/static/js/modules/layers/city-overlay.js::loadCityData` (`cancelCityFetch`), progress `map2stl/app/client/static/js/vue/components/dem/CityFetchProgress.vue`
@@ -181,7 +181,7 @@ Overview and ranking: [reference/height-providers.md](reference/height-providers
 - Height fill and raster enhancement per building (`height_source`): `map2stl/city2stl/heights.py::enhance_buildings_with_raster` (`_fill_heights`)
 - Provider protocol and merge by resolution-scaled confidence; sources coarser than `BUILDING_RESOLUTION_LIMIT_M` refused: `map2stl/city2stl/height/__init__.py::merge_height_rasters` (`HeightProvider`, `HeightResult`, `resolution_priority`)
 - Registry, selection, enhancement (3DEP lidar first in the US): `map2stl/city2stl/height/service.py::enhance_city_data` (`_REGISTRY`, `_select_providers`, `_enhance_from_lidar`)
-- App glue (async `/api/height/*`, per-provider result cache): `map2stl/app/server/core/height/service.py::fetch_height_payload`
+- Routes `/api/height/sources`, `/api/height/fetch` (import the registry from `city2stl.height.service` directly): `map2stl/app/server/routers/height.py::height_fetch` (`height_sources`)
 - Providers (`map2stl/city2stl/height/providers/`):
   - Overture (module `open_buildings`): `map2stl/city2stl/height/providers/open_buildings.py::OpenBuildingsProvider`
   - GlobalBuildingAtlas (ranking vs Overture, tall-building deficit in its docstring): `map2stl/city2stl/height/providers/gba.py::GBAProvider` (`_fetch_buildings_for_bbox`, `_available_tiles`)
@@ -210,7 +210,7 @@ Overview and ranking: [reference/height-providers.md](reference/height-providers
 ### geo2stl — DEM, imagery, projections, water, trails
 
 - Metres per degree (the one home), bbox size, `GeoGrid` lon/lat ↔ pixel: `map2stl/geo2stl/geo.py::GeoGrid` (`m_per_deg_lon`, `bbox_size_m`, `bbox_diagonal_km`)
-- DEM for a bbox from any source (local / h5 → SRTMGL3 fallback / OpenTopography): `map2stl/geo2stl/dem.py::fetch_dem` (`fetch_local_dem`, `fetch_h5_dem`, `fetch_dem_from_source`)
+- DEM for a bbox from any source (local / h5 → SRTMGL3 fallback / OpenTopography): `map2stl/geo2stl/dem.py::fetch_dem` (`fetch_local_dem`, `fetch_h5_dem`)
 - Source native resolution, real samples, default source: `map2stl/geo2stl/dem.py::dem_sampling` (`native_resolution_m`, `default_dem_source`)
 - Layer sources registered by the server (terrain-relative ones get `base=`): `map2stl/geo2stl/dem.py::register_layer_source` (`fetch_layer_data`, `is_terrain_relative_source`)
 - DEM image/payload: `map2stl/geo2stl/dem.py::make_dem_payload` (`make_dem_image`, `compute_raw_dem`)
@@ -229,7 +229,7 @@ Overview and ranking: [reference/height-providers.md](reference/height-providers
 - HydroRIVERS / Natural Earth: `map2stl/geo2stl/hydrology.py::fetch_hydrorivers` (`rasterize_hydrorivers`, `fetch_natural_earth_rivers`, `HydrologyService`)
 - Trails (OSM ski + hiking, USFS), difficulty grid, mirror failover (`TrailsUpstreamError`), cache: `map2stl/geo2stl/trails.py::TrailsService` (`OsmTrailsLayer`, `UsfsTrailsLayer`, `rasterize_trails`, `_burn_difficulty`, `trails_cache_key`)
 - Place search (Nominatim, ≤ 1 req/s): `map2stl/geo2stl/geocode.py::search_places`; landmarks near a box edge `map2stl/geo2stl/landmarks.py::edge_landmarks` (`fetch_edge_features`, `edge_proximity`); routes `map2stl/app/server/routers/geocode.py` (`geocode_search`, `edge_landmarks`)
-- Dead code: `map2stl/geo2stl/raster.py::derive_sat_scale` (no importers); `map2stl/geo2stl/write.py::savefile` (flips rows the live export does not)
+- Dead code: `map2stl/geo2stl/write.py::savefile` (flips rows the live export does not)
 
 ### Server composite and layers
 
@@ -242,9 +242,10 @@ Overview and ranking: [reference/height-providers.md](reference/height-providers
 ### Regions, settings, DEM request (server side)
 
 - Saved regions and settings blob: `map2stl/app/server/routers/regions.py` (`list_regions`, `get_region_settings`, `save_region_settings_route`); schema `map2stl/app/server/core/db.py::init_db`
+  - The one place the retired `clip_nans` key is still read (renamed to `clip_valid_region` as saved settings load): `map2stl/app/server/routers/regions.py::_rename_legacy_clip_nans`
 - Default settings (`dem_source` from `default_dem_source`): `map2stl/app/server/routers/settings.py::get_default_settings`
 - DEM route (returns `dem_id`, `source_resolution`, empty-DEM warning): `map2stl/app/server/routers/terrain.py::get_terrain_dem` (`_fetch_dem_array`, `_dem_empty_warning`)
-- Server settings, cache paths, limits: `map2stl/app/server/config.py` (`CACHE_DIRS`, `CACHE_MAX_FILES`)
+- Server settings, cache paths, limits: `map2stl/app/server/config.py` (`EE_CACHE_DIR` under `geo2stl.cache.CACHE_ROOT`, `CACHE_DIRS`, `CACHE_MAX_FILES`)
 - Shared in-flight dedupe (hydrology, trails): `map2stl/app/server/core/inflight.py::dedupe`
 - FastAPI app, page routes, run helper: `map2stl/app/server/server.py::app` (`guides_page`, `reports_page`, `run_server`)
 
@@ -257,12 +258,13 @@ Full map: [reference/frontend-modules.md](reference/frontend-modules.md).
 - 3D preview, bed outline, draggable puzzle cuts: `map2stl/app/client/static/js/modules/export/model-viewer.js::previewModelIn3D` (`updateBedOutline`, `updatePuzzlePreview`, `_startCutDrag`); edge maths `map2stl/app/client/static/js/modules/export/puzzle-cuts.js`
 - Print scale, bed parsing, piece count (mirror `choose_scale` / `plan_grid`): `map2stl/app/client/static/js/modules/export/print-scale.js::modelScale` (`parseBedSize`, `piecesNeeded`)
 - Settings collect/apply/auto-save: `map2stl/app/client/static/js/modules/ui/presets.js::collectAllSettings` (`applyAllSettings`, `setupAutoSave`)
+  - Legacy keys in saved settings / presets renamed before apply (`projection.clip_nans` → `clip_valid_region`): `map2stl/app/client/static/js/modules/ui/settings-compat.js::normalizeSettingsKeys`
 - Workflow presets City / Mountain / Region / Coast: `map2stl/app/client/static/js/modules/ui/workflow-presets.js::applyWorkflowPreset` (`WORKFLOW_PRESETS`, `regionDemSource`)
 - Layer stack, render order, auto-fetch on show (`LAYER_AUTOLOAD`), graticule: `map2stl/app/client/static/js/modules/layers/stacked-layers.js::LAYER_STACK` (`LAYER_AUTOLOAD`, `getLayerOrder`, `moveLayer`, `drawLayerGrid`); rack `map2stl/app/client/static/js/vue/components/dem/LayerViewSection.vue`; per-layer view controls `map2stl/app/client/static/js/vue/components/dem/LayerDisplaySections.vue`
 - Building heights panel (sources, histogram, overrides): `map2stl/app/client/static/js/modules/layers/building-heights.js::summarizeBuildingHeights` (`buildingsWithOverrides`); `map2stl/app/client/static/js/vue/components/dem/CityBuildingsPanel.vue`
 - Bounding box (the one writer): `map2stl/app/client/static/js/modules/map/bbox-panel.js::setBboxRectangle`
 - Terrain overlay on the Leaflet map (resampled to Mercator): `map2stl/app/client/static/js/modules/map/map-globe.js::buildGlobalDemOverlay` (`ensureDemOverlayPane`, `toggleTerrainOverlay`)
-- Views and DEM subtabs: `map2stl/app/client/static/js/modules/ui/view-management.js::switchView` (`setupDemSubtabs`); region rectangles `map2stl/app/client/static/js/modules/regions/regions.js::loadCoordinates`
+- Views and DEM subtabs: `map2stl/app/client/static/js/modules/ui/view-management.js::switchView` (`setupDemSubtabs`, `deleteRegion`); region rectangles `map2stl/app/client/static/js/modules/regions/regions.js::loadCoordinates`; continent of a point `map2stl/app/client/static/js/modules/regions/continent.js::detectContinent`
 - Error messages from FastAPI `detail`: `map2stl/app/client/static/js/modules/core/api.js` (`_describeFailure`); HTML escaping `map2stl/app/client/static/js/modules/core/ui-helpers.js::escapeHtml`
 - Place search, POI-near-edge warnings: `map2stl/app/client/static/js/vue/components/views/LandmarkSearch.vue`, `map2stl/app/client/static/js/vue/components/views/EdgeLandmarkWarnings.vue`, `map2stl/app/client/static/js/modules/map/landmarks.js`
 - Sidebar mode (`window.setSidebarMode`): `map2stl/app/client/static/js/vue/components/sidebar/SidebarPanel.vue`
@@ -341,7 +343,7 @@ Manual drag-align, ground truth and batch export. Refinement: [reference/align-r
 ### Skyline (street-view building heights)
 
 Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape, where things live, dead ends, feature status, open items). Entry points:
-- Façade for callers outside `skyline/`: `map2stl/city2stl/skyline/pipeline.py` (code inside `skyline/` imports the defining `_core/`, `_pano/` modules).
+- CV/geometry primitives: `map2stl/city2stl/skyline/_core/` (types, segmentation, projection, skyline, pano, registration, height). There is no façade: every caller imports the defining `_core/` or `_pano/` module.
 - Per-view heights and aggregation: `map2stl/city2stl/skyline/_core/height.py::estimate_heights_from_registration` (`aggregate_building_heights`, `_ground_elev_m`)
 - View registration: `map2stl/city2stl/skyline/_pano/detect.py::_register_views`
 - Depth cross-check: `map2stl/city2stl/skyline/depth_estimation.py::calibrate_pano_depth` (`depth_height_from_segment`, `compare_heights`)

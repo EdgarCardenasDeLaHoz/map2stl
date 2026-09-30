@@ -93,8 +93,8 @@ def tight_bbox_from_extent(
     """
     import math
     half = extent_m * margin / 2.0
-    d_lat = half / 111_000.0
-    d_lon = half / (111_000.0 * math.cos(math.radians(center_lat)))
+    d_lat = half / _M_PER_DEG
+    d_lon = half / (_M_PER_DEG * math.cos(math.radians(center_lat)))
     return (
         center_lat + d_lat,
         center_lat - d_lat,

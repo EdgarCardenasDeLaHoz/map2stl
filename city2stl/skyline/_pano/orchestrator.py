@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -29,6 +30,8 @@ from .detect import (
     _smooth_pano_matches_against_views,
 )
 from .heading import _recover_anchor_offset, _recover_pano_heading
+
+logger = logging.getLogger(__name__)
 
 
 def _seed_multiview_registration(
@@ -222,8 +225,8 @@ def _seed_multiview_registration(
 
     for seed, seed_elev, is_photosphere in resolved:
         if seed.pano_id and seed.pano_id in _seen_pano_ids:
-            print(f"[dedup] {seed.name}: pano_id={seed.pano_id!r} already "
-                  "processed by an earlier seed — skipping duplicate")
+            logger.info(f"[dedup] {seed.name}: pano_id={seed.pano_id!r} already "
+                        "processed by an earlier seed — skipping duplicate")
             continue
         if seed.pano_id:
             _seen_pano_ids.add(seed.pano_id)
@@ -253,8 +256,8 @@ def _seed_multiview_registration(
         # frames as labelled examples for future negative-mining.
         if negative_seeds and seed.name in negative_seeds:
             view_rows.extend(_negative_seed_views(seed, cached_views_for_seed))
-            print(f"[negative_seed] {seed.name}: analysis skipped, "
-                  f"{len(cached_views_for_seed)} frames kept as bad-skyline example")
+            logger.warning(f"[negative_seed] {seed.name}: analysis skipped, "
+                           f"{len(cached_views_for_seed)} frames kept as bad-skyline example")
             continue
 
         # PANO SCREEN — reject bad panos right after the cheap cached
@@ -275,12 +278,12 @@ def _seed_multiview_registration(
         _cut = 0.05  # hard floor, all panos
         if _is_auto and _user_seed_covs:
             _cut = max(0.05, 0.35 * float(np.median(_user_seed_covs)))
-        print(f"[pano_screen] {seed.name}: building coverage "
-              f"{_best_cov*100:.1f}% (reject < {_cut*100:.1f}%)")
+        logger.info(f"[pano_screen] {seed.name}: building coverage "
+                    f"{_best_cov*100:.1f}% (reject < {_cut*100:.1f}%)")
         if _best_cov < _cut:
-            print(f"[pano_screen] {seed.name}: BAD PANO — coverage "
-                  f"{_best_cov*100:.1f}% < {_cut*100:.1f}%; kept as bad "
-                  f"example, no recovery/anchor/register/detect")
+            logger.warning(f"[pano_screen] {seed.name}: BAD PANO — coverage "
+                           f"{_best_cov*100:.1f}% < {_cut*100:.1f}%; kept as bad "
+                           f"example, no recovery/anchor/register/detect")
             view_rows.extend(_negative_seed_views(
                 seed, cached_views_for_seed, reason=(
                     f"low building coverage {_best_cov*100:.0f}%")))
@@ -306,11 +309,11 @@ def _seed_multiview_registration(
                 _n_labels, _ = cv2.connectedComponents(
                     (_bm3 > 0).astype(np.uint8))
                 _total_blobs += max(0, _n_labels - 1)  # 0 is background
-        print(f"[F-DET1] {seed.name}: building blobs (top-3 views) = {_total_blobs}")
+        logger.info(f"[F-DET1] {seed.name}: building blobs (top-3 views) = {_total_blobs}")
         if _total_blobs < _FDET1_MIN_BLOBS:
-            print(f"[F-DET1] {seed.name}: EARLY-OUT — "
-                  f"{_total_blobs} blobs < {_FDET1_MIN_BLOBS}; "
-                  "no skyline detected, kept as bad example")
+            logger.warning(f"[F-DET1] {seed.name}: EARLY-OUT — "
+                           f"{_total_blobs} blobs < {_FDET1_MIN_BLOBS}; "
+                           "no skyline detected, kept as bad example")
             view_rows.extend(_negative_seed_views(
                 seed, cached_views_for_seed,
                 reason=f"low building detection ({_total_blobs} blobs)"))
@@ -336,8 +339,8 @@ def _seed_multiview_registration(
                 pano_osm_iou, pano_osm_n_keypoints,
                 pano_projected_coastline, pano_projected_vegetation,
             ) = (None, None, None, None, None, None, None, None)
-            print(f"[recover] {seed.name}: skipped heading recovery "
-                  f"(manual anchor override present)")
+            logger.info(f"[recover] {seed.name}: skipped heading recovery "
+                        f"(manual anchor override present)")
         else:
             with _phase("recover pano heading (F-SKY11/13)"):
                 (
@@ -427,21 +430,17 @@ def _seed_multiview_registration(
                    if getattr(e, "inferred_distance_m", None) is not None]
             conf = [float(e.floor_confidence) for e in fp
                     if getattr(e, "floor_confidence", None) is not None]
-            print(
-                f"[F-SKY1] floor-period hits: {len(fp)}/"
-                f"{len(all_estimates)} estimates"
-                + (f"; inferred_height med "
-                   f"{_stats.median(ih):.0f}m" if ih else "")
-                + (f"; inferred_distance med "
-                   f"{_stats.median(idm):.0f}m" if idm else "")
-                + (f"; confidence med {_stats.median(conf):.2f}"
-                   if conf else "")
-            )
+            logger.info(f"[F-SKY1] floor-period hits: {len(fp)}/"
+                        f"{len(all_estimates)} estimates"
+                        + (f"; inferred_height med "
+                           f"{_stats.median(ih):.0f}m" if ih else "")
+                        + (f"; inferred_distance med "
+                           f"{_stats.median(idm):.0f}m" if idm else "")
+                        + (f"; confidence med {_stats.median(conf):.2f}"
+                           if conf else ""))
         else:
-            print(
-                f"[F-SKY1] floor-period hits: 0/{len(all_estimates)} "
-                f"estimates (no facade locked a period)"
-            )
+            logger.info(f"[F-SKY1] floor-period hits: 0/{len(all_estimates)} "
+                        f"estimates (no facade locked a period)")
 
     agg = aggregate_building_heights(all_estimates) if all_estimates else []
     return view_rows, agg, pano_results

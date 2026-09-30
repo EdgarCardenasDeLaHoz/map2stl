@@ -99,7 +99,7 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 - **UI audit 2026-09-30** ([audit](../history/audits/ui-audit-2026-09-30.md)), in priority order:
   1. contrast tokens (`--text-muted` / `--text-dim` fail on the dark theme, down to 1.1:1);
   2. keyboard: `CollapsibleSection` header as a button, global `:focus-visible`, region list as one tab stop;
-  3. shortcuts: Ctrl+2 crash, page-wide arrow keys, bare `G`, Ctrl+R;
+  3. shortcuts: page-wide arrow keys, bare `G`, Ctrl+R (Ctrl+2 crash fixed 2026-09-30);
   4. toasts announced, errors persistent and inline, escaped text;
   5. ignored controls: Fit height under Vertical = Auto;
   6. printed-size readout and clearer "model larger than bed";
@@ -107,11 +107,8 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   8. Export sub-tab: pre-flight open, city build primary;
   9. 12 px text floor, 24 px targets;
   10. one term per concept, units in labels;
-  11. orphan components and duplicate ids removed, reduced motion;
-  12. continent detection (Granada under Africa), satellite image aspect.
-- **Dead viewer controls**: "Simplify" and "Surface groups" call `window.applySimplification` /
-  `applySurfaceGroups`, which nothing defines (`event-listeners-export.js`). Wire them or remove
-  them. [F-UX](done/F-UX-sop-followups.md)
+  11. duplicate ids removed, reduced motion (orphan components removed 2026-09-30);
+  12. satellite image aspect (continent detection fixed 2026-09-30).
 - **SDK leftovers**:
   - `TerrainSession` still uses the blocking `/api/cities`.
   - `TerrainSession` and `schemas.py` still default `dem_source` to `local`.

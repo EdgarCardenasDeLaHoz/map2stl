@@ -15,7 +15,7 @@ things differ from locate._geometries plus locate._rasterize, which the placemen
 Raw elements are cached as gzipped JSON per selector and window, so a new class model does not
 cost another Overpass query.
 
-Promoted 2026-09-27 from ``tools/align_tool/osm_model.py`` (now an alias of this module).
+Promoted 2026-09-27 from ``tools/align_tool/osm_model.py``.
 """
 from __future__ import annotations
 
@@ -208,11 +208,6 @@ def sunk(tags):
         return True
     lay = _num(tags.get("layer"))
     return bool(lay and lay < 0) or tags.get("location") in ("underground",)
-
-
-def tree_radius(tags):
-    d = _num(tags.get("diameter_crown"))
-    return max(2.0, min(10.0, d / 2.0)) if d else 4.0
 
 
 def building_class(tags):

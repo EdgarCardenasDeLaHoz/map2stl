@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 import requests
 
+from geo2stl import cache as _geo_cache
 from geo2stl.raster import read_geotiff
 
 logger = logging.getLogger(__name__)
@@ -44,8 +45,8 @@ OPENTOPO_DATASETS: dict[str, dict] = {
 _MAP2STL_DIR = Path(__file__).resolve().parent.parent
 _CONFIG_PATH = _MAP2STL_DIR / "config.json"
 
-#: Downloaded GeoTIFFs, keyed by (demtype, bbox).
-CACHE_PATH: Path = _MAP2STL_DIR / "cache" / "opentopo"
+#: Downloaded GeoTIFFs, keyed by (demtype, bbox); under the shared cache root ($MAP2STL_CACHE).
+CACHE_PATH: Path = _geo_cache.CACHE_ROOT / "opentopo"
 
 
 def _load_api_key() -> str | None:

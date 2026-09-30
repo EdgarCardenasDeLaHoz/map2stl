@@ -121,7 +121,7 @@ function setSidebarMode(newMode: 'expanded' | 'normal' | 'hidden') {
   // sizes the map to the width the panel is leaving, not the one it is going
   // to, so do it again once the transition has finished.
   const relayout = () => {
-    (window as any)._globalMap?.invalidateSize?.();
+    window.getMap?.()?.invalidateSize?.();
     window.emitStackUpdate?.();
     window.dispatchEvent(new Event('resize'));
   };

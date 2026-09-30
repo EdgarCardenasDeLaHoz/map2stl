@@ -111,7 +111,7 @@ export const useAppStore = defineStore('app', {
         viewerScene: null as unknown,
 
         // ── UI state ──────────────────────────────────────────────────────────
-        activeView: 'map' as 'map' | 'dem' | 'model' | 'cache',
+        activeView: 'map' as 'map' | 'dem' | 'model',
         sidebarMode: 'expanded' as 'expanded' | 'normal' | 'hidden',
         regionThumbnails: {} as Record<string, string>,
 

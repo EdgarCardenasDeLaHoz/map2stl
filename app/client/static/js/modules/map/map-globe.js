@@ -8,7 +8,6 @@
  *   window.resetBboxColorIndex()
  *   window.setTileLayer(layerKey)
  *   window.toggleMapLabels(show)
- *   window.toggleDemOverlay(show)        → Promise<boolean>
  *   window.toggleTerrainOverlay(show)
  *   window.setTerrainOverlayOpacity(opacity)
  *   window.updateFloatingTerrainButton(active)
@@ -369,7 +368,6 @@ async function toggleDemOverlay(show) {
         return false;
     }
 }
-window.toggleDemOverlay = toggleDemOverlay;
 
 // Fallback: terrain relief overlay (hillshade tiles)
 
@@ -456,14 +454,6 @@ function initMap() {
     }
     _map.on('zoomend', _updateEditMarkerVisibility);
     _map.on('moveend', _updateEditMarkerVisibility);
-    const _refreshRegionTablesForViewport = () => {
-        if (!window.getFilterRegionsToViewport?.()) return;
-        window.renderSidebarTable?.();
-        window.populateRegionsTable?.();
-        window.populateRegionsPanelTable?.();
-    };
-    _map.on('zoomend', _refreshRegionTablesForViewport);
-    _map.on('moveend', _refreshRegionTablesForViewport);
 
     // Get next color for drawn rectangles
     /**

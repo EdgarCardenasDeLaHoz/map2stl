@@ -112,7 +112,7 @@ _TRAILS_INFLIGHT: dict[str, "asyncio.Future"] = {}
 # ---------------------------------------------------------------------------
 
 
-def _project_grid(arr, north, south, east, west, projection, clip_nans,
+def _project_grid(arr, north, south, east, west, projection, clip_valid_region,
                   categorical=False, maintain_dimensions=False):
     """Apply geo2stl projection to a 2-D array. Sync helper.
 
@@ -120,32 +120,19 @@ def _project_grid(arr, north, south, east, west, projection, clip_nans,
     so existing call-sites in this module do not change.
     """
     return _project_grid_impl(arr, north, south, east, west, projection,
-                              clip_nans, categorical=categorical,
+                              clip_valid_region, categorical=categorical,
                               maintain_dimensions=maintain_dimensions)
 
 
 def _project_water_arrays(water_mask, esa_img, north, south, east, west,
-                          projection, clip_nans, maintain_dimensions=False):
+                          projection, clip_valid_region, maintain_dimensions=False):
     """Project both water mask and ESA arrays to keep them aligned.
 
     Delegates to core.projection.project_water_arrays.
     """
     return _project_water_arrays_impl(water_mask, esa_img, north, south,
-                                      east, west, projection, clip_nans,
+                                      east, west, projection, clip_valid_region,
                                       maintain_dimensions=maintain_dimensions)
-
-
-def _parse_clip_valid_region(params, default: bool = True) -> bool:
-    """Parse projection-edge clipping flag with backward compatibility.
-
-    Preferred query key is ``clip_valid_region``.
-    Legacy ``clip_nans`` remains accepted for existing clients.
-    """
-    if "clip_valid_region" in params:
-        return _parse_bool(params, "clip_valid_region", default)
-    if "clip_nans" in params:
-        return _parse_bool(params, "clip_nans", default)
-    return default
 
 
 def _fetch_dem_array(dem_source, north, south, east, west, dim,
@@ -210,11 +197,6 @@ async def get_terrain_dem(
         None,
         description="Clip projection padding to valid data extent (recommended).",
     ),
-    clip_nans: bool | None = Query(
-        None,
-        description="Deprecated alias for clip_valid_region.",
-        deprecated=True,
-    ),
     dem_source: str | None = Query(
         None, description="DEM source: 'local', 'h5_local', or OpenTopography key"),
 ):
@@ -238,7 +220,7 @@ async def get_terrain_dem(
     # regardless of which projection was silently applied (F-PROJ-DIMS audit).
     projection = params.get("projection", "none")
     maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
-    clip_valid_region = _parse_clip_valid_region(params, default=True)
+    clip_valid_region = _parse_bool(params, "clip_valid_region", True)
     dem_source = params.get("dem_source", "local")
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
@@ -440,11 +422,6 @@ async def get_terrain_water_mask(
         None,
         description="Clip projection padding to valid data extent (recommended).",
     ),
-    clip_nans: bool | None = Query(
-        None,
-        description="Deprecated alias for clip_valid_region.",
-        deprecated=True,
-    ),
     maintain_dimensions: bool | None = Query(
         None, description="Maintain output dimensions after projection"),
 ):
@@ -459,7 +436,7 @@ async def get_terrain_water_mask(
         if water_dataset not in ("esa", "jrc"):
             water_dataset = "esa"
         projection = params.get("projection", "none")
-        clip_valid_region = _parse_clip_valid_region(params, default=True)
+        clip_valid_region = _parse_bool(params, "clip_valid_region", True)
         maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
 
         err = _validate_bbox(north, south, east, west)
@@ -583,11 +560,6 @@ async def get_terrain_esa_land_cover(
         None,
         description="Clip projection padding to valid data extent (recommended).",
     ),
-    clip_nans: bool | None = Query(
-        None,
-        description="Deprecated alias for clip_valid_region.",
-        deprecated=True,
-    ),
     maintain_dimensions: bool | None = Query(
         None, description="Maintain output dimensions after projection"),
 ):
@@ -598,7 +570,7 @@ async def get_terrain_esa_land_cover(
         north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
         dim = _parse_int(params, "dim", 600)
         projection = params.get("projection", "none")
-        clip_valid_region = _parse_clip_valid_region(params, default=True)
+        clip_valid_region = _parse_bool(params, "clip_valid_region", True)
         maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
 
         err = _validate_bbox(north, south, east, west)
@@ -723,11 +695,6 @@ async def get_terrain_satellite(
         None,
         description="Clip projection padding to valid data extent (recommended).",
     ),
-    clip_nans: bool | None = Query(
-        None,
-        description="Deprecated alias for clip_valid_region.",
-        deprecated=True,
-    ),
     maintain_dimensions: bool | None = Query(
         None, description="Maintain output dimensions after projection"),
 ):
@@ -742,7 +709,7 @@ async def get_terrain_satellite(
     north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
     dim = _parse_int(params, "dim", 600)
     projection = params.get("projection", "none")
-    clip_valid_region = _parse_clip_valid_region(params, default=True)
+    clip_valid_region = _parse_bool(params, "clip_valid_region", True)
     maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
@@ -865,11 +832,6 @@ async def get_terrain_hydrology(
         None,
         description="Clip projection padding to valid data extent (recommended).",
     ),
-    clip_nans: bool | None = Query(
-        None,
-        description="Deprecated alias for clip_valid_region.",
-        deprecated=True,
-    ),
     maintain_dimensions: bool | None = Query(
         None, description="Maintain output dimensions after projection"),
 ):
@@ -913,7 +875,7 @@ async def get_terrain_hydrology(
     width_factor = max(0.1, min(20.0, width_factor))
 
     projection = params.get("projection", "none")
-    clip_valid_region = _parse_clip_valid_region(params, default=True)
+    clip_valid_region = _parse_bool(params, "clip_valid_region", True)
     maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
@@ -1059,8 +1021,6 @@ async def get_terrain_trails(
         None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
     clip_valid_region: bool | None = Query(
         None, description="Clip projection padding to valid data extent (recommended)."),
-    clip_nans: bool | None = Query(
-        None, description="Deprecated alias for clip_valid_region.", deprecated=True),
     maintain_dimensions: bool | None = Query(
         None, description="Maintain output dimensions after projection"),
 ):
@@ -1099,7 +1059,7 @@ async def get_terrain_trails(
     ) or ("ski", "hiking")
 
     projection = params.get("projection", "none")
-    clip_valid_region = _parse_clip_valid_region(params, default=True)
+    clip_valid_region = _parse_bool(params, "clip_valid_region", True)
     maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
 
     err = _validate_bbox(north, south, east, west) or _validate_dim(dim)

@@ -26,6 +26,7 @@
  */
 
 import { WORKFLOW_PRESETS, applyFields } from './workflow-presets.js';
+import { normalizeSettingsKeys } from './settings-compat.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State
@@ -309,7 +310,7 @@ function collectAllSettings() {
         },
         projection: {
             projection: _str('paramProjection', 'none'),
-            clip_nans: _chk('paramClipNans', true),
+            clip_valid_region: _chk('paramClipNans', true),
         },
         view: {
             colormap: _str('demColormap', 'terrain'),
@@ -395,6 +396,7 @@ function collectAllSettings() {
  */
 function applyAllSettings(s) {
     if (!s) return;
+    s = normalizeSettingsKeys(s);
     const set = _set;
     const setChk = _setChk;
 
@@ -450,7 +452,7 @@ function applyAllSettings(s) {
             projDesc.textContent = descs[projVal] || '';
         }
     }
-    if (proj.clip_nans != null) setChk('paramClipNans', proj.clip_nans);
+    if (proj.clip_valid_region != null) setChk('paramClipNans', proj.clip_valid_region);
 
     // view group — gridlines now use #showGridlines (VisualizationSection)
     if (view.colormap != null) set('demColormap', view.colormap);
@@ -597,7 +599,10 @@ async function loadAndApplyRegionSettings(regionName) {
         ]);
         const defaults = !defaultsError && defaultsData?.settings ? defaultsData.settings : null;
         if (!error && data) {
-            const merged = defaults ? _mergeSettings(defaults, data.settings || {}) : (data.settings || {});
+            // Normalise both sides first: a legacy clip_nans in the saved blob
+            // must override the defaults' clip_valid_region, not sit beside it.
+            const saved = normalizeSettingsKeys(data.settings || {});
+            const merged = defaults ? _mergeSettings(normalizeSettingsKeys(defaults), saved) : saved;
             applyAllSettings(merged);
             // applyAllSettings writes to the controls, which fires the same
             // delegated input/change listeners a user edit would. Clear the
@@ -767,6 +772,4 @@ window.collectAllSettings = collectAllSettings;
 window.applyAllSettings = applyAllSettings;
 window.saveRegionSettings = saveRegionSettings;
 window.loadAndApplyRegionSettings = loadAndApplyRegionSettings;
-window.setupAutoSave = setupAutoSave;
-window.revertPreset = revertPreset;
 window.applyWorkflowPreset = applyWorkflowPreset;

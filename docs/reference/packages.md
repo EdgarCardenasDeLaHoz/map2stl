@@ -53,7 +53,7 @@ app/ (server, client, session SDK)
 | hydrology | HydroRIVERS (default) and Natural Earth river rasters | `geo2stl/hydrology.py::HYDROLOGY_LAYER`, `geo2stl/hydrology.py::fetch_and_rasterize_hydrology`, `geo2stl/hydrology.py::merge_rivers_with_dem` |
 | trails | Ski and hiking trails (OSM, USFS) rasterized per category | `geo2stl/trails.py::TRAILS_LAYER`, `geo2stl/trails.py::fetch_and_rasterize_trails`, `geo2stl/trails.py::OsmTrailsLayer` |
 | projections | Map projections and cross-layer alignment; see [projections.md](projections.md) | `geo2stl/projections.py::project_coordinates`, `geo2stl/projections.py::project_grid`, `geo2stl/projections.py::project_water_arrays`, `geo2stl/projections.py::project_rgb_image`, `geo2stl/projections.py::get_projection_info` |
-| raster | GeoTIFF reading, satellite / ESA fetch-scale helpers | `geo2stl/raster.py::read_geotiff`, `geo2stl/raster.py::derive_sat_scale`, `geo2stl/raster.py::clamp_esa_scale` |
+| raster | GeoTIFF reading | `geo2stl/raster.py::read_geotiff` |
 | tiles | Local SRTM tile discovery, cropping, stitching | `geo2stl/tiles.py::get_tile_files`, `geo2stl/tiles.py::stitch_tiles_no_rasterio` |
 | geocode | Nominatim place search (1 req/s, cached) | `geo2stl/geocode.py::search_places` |
 | landmarks | Named landmarks near a region box edge | `geo2stl/landmarks.py::edge_landmarks`, `geo2stl/landmarks.py::fetch_edge_features` |
@@ -86,7 +86,7 @@ app/ (server, client, session SDK)
 - **Fetch** — `city2stl/fetch.py::fetch_osm_data` (buildings, roads, water, POIs via osmnx),
   `city2stl/fetch.py::fetch_osm_lakes`; Overpass mirrors come from `geo2stl/osm.py`.
 - **Cache policy** — `city2stl/cache_policy.py::CITY_PIPELINE_VERSION`,
-  `city2stl/cache_policy.py::city_cache_needs_enrichment` (when a cached OSM payload is stale).
+  `city2stl/cache_policy.py::city_cache_missing_height_source` (when a cached OSM payload is stale).
 - **Rasters** — `city2stl/rasterize.py::rasterize_city_data` (row 0 = north, via
   `numpy2stl/src/numpy2stl/raster/burn.py::burn_polygons`);
   `city2stl/osm_raster.py::get_osm_building_heightmap` (registration rasters, row 0 = south).
@@ -151,10 +151,10 @@ Brief map; detail in [numpy2stl README](../../../numpy2stl/README.md).
 | OpenTopography key | `app/server/config.py`, `app/server/routers/settings.py` | `geo2stl/opentopo.py::set_api_key` |
 | Hydrology / trails | `app/server/routers/terrain.py` | `geo2stl/hydrology.py::fetch_and_rasterize_hydrology`, `geo2stl/trails.py::fetch_and_rasterize_trails` |
 | Place search, edge landmarks | `app/server/routers/geocode.py` | `geo2stl/geocode.py::search_places`, `geo2stl/landmarks.py::edge_landmarks` |
-| City OSM fetch | `app/server/core/city_data.py` | `city2stl/fetch.py::fetch_osm_data`, `city2stl/cache_policy.py::city_cache_needs_enrichment` |
+| City OSM fetch | `app/server/core/city_data.py` | `city2stl/fetch.py::fetch_osm_data`, `city2stl/cache_policy.py::city_cache_missing_height_source` |
 | City raster overlay | `app/server/routers/cities.py` | `city2stl/rasterize.py::rasterize_city_data` |
-| Height fetch / sources | `app/server/core/height/service.py`, `app/server/routers/height.py` | `city2stl/height/service.py::provider_infos`, `city2stl/height/__init__.py::merge_height_rasters` |
-| City height enhancement | `app/server/core/height/service.py`, `app/server/routers/cities.py` | `city2stl/height/service.py::enhance_city_data`, `city2stl/heights.py::enhance_buildings_with_raster` (Google 3D) |
+| Height fetch / sources | `app/server/routers/height.py` | `city2stl/height/service.py::provider_infos`, `city2stl/height/__init__.py::merge_height_rasters` |
+| City height enhancement | `app/server/core/city_data.py`, `app/server/routers/cities.py` | `city2stl/height/service.py::enhance_city_data`, `city2stl/heights.py::enhance_buildings_with_raster` (Google 3D) |
 | Mesh export (terrain + city) | `app/server/core/export.py`, `app/server/core/city_model_task.py` | `city2stl/city_model.py::build_on_terrain`, `numpy2stl/src/numpy2stl/processing/decimate.py::heightfield_tin_budget`, `numpy2stl/src/numpy2stl/io/writers.py::write3MF`, `numpy2stl/src/numpy2stl/io/writers.py::writeOBJ` |
 | Export pre-flight | `app/server/core/preflight.py` | `city2stl/city_model.py::layer_preflight`, `numpy2stl/src/numpy2stl/processing/decimate.py::heightfield_tin` |
 | Landmarks | `app/server/core/landmarks.py` | `city2stl/landmarks.py::resolve_overrides`, `city2stl/height/providers/survey.py::PROVIDERS` |
@@ -163,9 +163,10 @@ Brief map; detail in [numpy2stl README](../../../numpy2stl/README.md).
 | Puzzle | `app/server/core/puzzle.py` | `numpy2stl/src/numpy2stl/processing/boolean.py::cut_jigsaw`, `numpy2stl/src/numpy2stl/io/writers.py::write3MF` |
 | Height model training (offline) | `app/server/core/height/train.py` | `city2stl/height/train.py::train` |
 
-- The old `core/height/*` rows (provider registry and merge in the app) predate F-ARCH: the
-  registry, selection and `enhance_city_data` now live in `city2stl/height/service.py`;
-  `app/server/core/height/service.py` keeps only the async endpoints and the per-provider cache.
+- The provider registry, selection and `enhance_city_data` live in `city2stl/height/service.py`;
+  the app imports it directly. `app/server/core/height/service.py` (an unused async fetch with a
+  per-provider cache, plus a re-export) was deleted 2026-09-30; `/api/height/fetch` fetches
+  uncached in `app/server/routers/height.py::height_fetch`.
 
 ---
 
@@ -180,7 +181,8 @@ Brief map; detail in [numpy2stl README](../../../numpy2stl/README.md).
   - Registered elsewhere: each height provider registers its own through
     `city2stl/height/providers/_cache.py::register_ttl` (`ndsm`, `lidar_3dep`, `copernicus_bh`,
     `open_buildings`, `gba`, `ghsl`, `wsf3d`, `google3d`, `shadow_height`); the app writes
-    `height_<provider>` (`app/server/core/height/service.py`) and `esa_lc` (terrain router);
+    `esa_lc` (terrain router); Earth Engine joblib files go to `ee/`
+    (`geo2stl/sat2stl.py::CACHE_DIR`, `app/server/config.py::EE_CACHE_DIR`);
     `city2stl/fetch.py::fetch_osm_lakes` writes `osm_lakes`.
 - **`city2stl/model_cache.py`** — content-keyed city builds: `city_polygons`, `city_solids`,
   `city_terrain`, `city_models`. Each key digests everything the result depends on plus

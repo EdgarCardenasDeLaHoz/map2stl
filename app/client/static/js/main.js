@@ -39,7 +39,6 @@ import './modules/layers/trails-overlay.js';
 import './modules/map/map-globe.js';
 import './modules/regions/regions.js';
 import './modules/map/bbox-panel.js';
-import './modules/ui/cache-inventory.js';
 import './modules/ui/app-setup.js';
 import './modules/ui/keyboard-shortcuts.js';
 import './modules/events/event-listeners-map.js';

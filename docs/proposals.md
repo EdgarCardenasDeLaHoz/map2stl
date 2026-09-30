@@ -50,7 +50,7 @@ _Last updated: 2026-09-28_
 | R-EVENTS-A | Event bus: use `EV.DEM_LOADED` / `EV.REGION_SELECTED` (defined in `app/client/static/js/modules/core/events.js`, never emitted) instead of `window.fn()` calls and ad-hoc `CustomEvent`s. | `events/`, all modules | Large | approved, partly done |
 | R-EVENTS-B | Keyboard shortcut registry (`window.registerShortcut(key, label, fn)`). | `app/client/static/js/modules/events/` | Small | approved (not started) |
 | R-EVENTS-C | Debounce audit: gate `input` handlers where the target takes > 5 ms. | all modules | Small | approved, partly done (local debounces only) |
-| ML-3 | Remove legacy RoofNet-era training code (`tools/ml/train/`, roofnet defaults in `app/server/core/height/service.py`, `city2stl/roof_nets.py`). No CNN height model is wired at runtime. Evidence: [history/audits/dead-code-analysis.md](history/audits/dead-code-analysis.md). From `todos/` (2026-05-02). | `tools/ml/train/`, `city2stl/roof_nets.py` | Medium | approved |
+| ML-3 | Remove legacy RoofNet-era training code (`tools/ml/train/`, `city2stl/roof_nets.py`; the app-side `core/height/service.py` was deleted 2026-09-30). No CNN height model is wired at runtime. Evidence: [history/audits/dead-code-analysis.md](history/audits/dead-code-analysis.md). From `todos/` (2026-05-02). | `tools/ml/train/`, `city2stl/roof_nets.py` | Medium | approved |
 | A11Y-1 | Normalise sidebar and settings contrast tokens (the dark sidebar was never checked), then re-verify the accessibility audit ([history/audits/accessibility-audit.md](history/audits/accessibility-audit.md)). From `todos/` (2026-05-02). | `app/client/static/css/` | Small | approved, partly done |
 
 ---

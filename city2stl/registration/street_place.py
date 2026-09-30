@@ -61,7 +61,8 @@ more than 6% different); the placement is `confident` when both are at least 1.0
 Results go to `data/<slug>/placement.json`; the export's own rasters and meta.json are not touched.
 
 Promoted 2026-09-27 from ``tools/align_tool/street_place.py`` so the web app can run it
-(``app/server/core/plate_registration.py``); the tool file is now a CLI shim over this module.
+(``app/server/core/plate_registration.py``); run the batch CLI as
+``python -m city2stl.registration.street_place [slug ...] [--hide M] [--channels ...]``.
 `locate` below is ``city2stl.registration.osm_water``, the part of the tool's locate.py it used.
 """
 

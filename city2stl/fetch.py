@@ -5,7 +5,7 @@ Provides pure osmnx wrappers that fetch building, road, waterway, and POI
 data from the OpenStreetMap Overpass API. No HTTP cache or server deps --
 caching is handled at the router layer (app.server.routers.cities).
 
-Server entry point: app.server.core.osm re-exports all public symbols.
+Server callers (``app.server.core.city_data`` and the city routers) import this module directly.
 
 -- Legacy note --
 city2stl/osm2stl.py had get_roads_osmnx() and get_rivers() which fetched

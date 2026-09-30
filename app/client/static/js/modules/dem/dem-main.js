@@ -1,11 +1,9 @@
 ﻿// ============================================================
-// DEM MAIN — modules/dem-main.js
-// Extracted from app.js (DOMContentLoaded closure).
+// DEM MAIN — modules/dem/dem-main.js
 // Handles main DEM loading, canvas rendering, DEM empty-state,
 // workflow stepper, print dimensions, bed optimizer, and
 // satellite image loading.
 //
-// Loaded as a plain <script> before app.js.
 // All functions exposed on window.*
 // Closure vars accessed via window.appState.* or window.get*()/set*() getters.
 // ============================================================
@@ -68,10 +66,8 @@ function _onDemWorkerMessage({ data }) {
         return;
     }
 
-    const { canvas, ctx, onReady } = pending;
-    const img = new ImageData(pixels, width, height);
-    ctx.putImageData(img, 0, 0);
-    onReady?.(canvas);
+    const { ctx } = pending;
+    ctx.putImageData(new ImageData(pixels, width, height), 0, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -287,7 +283,7 @@ window.loadDEM = async function loadDEM(highRes = false) {
             water_scale: p.waterScale,
             subtract_water: p.subtractWater,
             maintain_dimensions: proj.maintainDimensions,
-            clip_nans: proj.clipValidRegion,
+            clip_valid_region: proj.clipValidRegion,
             show_sat: false,
         },
     };
@@ -471,11 +467,7 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
         // Always copy values to a fresh Float32Array before transferring its
         // buffer — the original `flat` may alias lastDemData.values.
         const flatValues = new Float32Array(flat);
-        _demWorkerPending.set(gen, {
-            canvas,
-            ctx,
-            onReady: (c) => window._onDemCanvasReady?.(c),
-        });
+        _demWorkerPending.set(gen, { canvas, ctx });
         worker.postMessage(
             { gen, values: flatValues, width, height, lut: lutCopy, vmin: min, vmax: max },
             [flatValues.buffer, lutCopy.buffer],
@@ -761,7 +753,7 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
     const resolution = document.getElementById('waterResolution')?.value || '600';
     const dataset = document.getElementById('waterDataset')?.value || 'esa';
     const projection = document.getElementById('paramProjection')?.value || 'none';
-    const clipNans = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
+    const clipValidRegion = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
 
     const params = new URLSearchParams({
         north, south, east, west,
@@ -769,7 +761,7 @@ window.loadSatelliteImage = async function loadSatelliteImage() {
         show_sat: true,
         dataset,
         projection,
-        clip_valid_region: clipNans,
+        clip_valid_region: clipValidRegion,
     });
 
     document.getElementById('satelliteImage').innerHTML = '<p class="loading">Loading satellite data...</p>';

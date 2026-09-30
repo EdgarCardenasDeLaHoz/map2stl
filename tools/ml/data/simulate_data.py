@@ -1,5 +1,5 @@
 """
-tools.ml.simulate_data — Synthetic shape datasets for model verification.
+tools.ml.data.simulate_data — Synthetic shape datasets for model verification.
 
 Adapted from OrBITS/retna/simulate_data.py.  Use this to confirm a model
 can learn a trivially solvable task before trusting it on real satellite data.
@@ -23,7 +23,7 @@ SimHeightDataset (mode="height")
 
 Quick verification
 ------------------
-    from tools.ml.simulate_data import smoke_test_height
+    from tools.ml.data.simulate_data import smoke_test_height
     smoke_test_height()   # prints MAE per epoch, should be <1m by epoch 10
 """
 

@@ -2,7 +2,7 @@
 routers/cities.py — /api/cities/* endpoints.
 
 Extracted from location_picker.py (backend refactor, step 6).
-Delegates OSM fetching to core/osm.py and caching to core/cache.py.
+Delegates OSM fetching and caching to core/city_data.py.
 """
 
 from __future__ import annotations
@@ -29,14 +29,6 @@ from city2stl.rasterize import rasterize_city_data as _rasterize_city_data
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cities"])
-
-
-def _city_clip_valid_region(req) -> bool:
-    """Return the preferred clip setting while accepting the legacy alias."""
-    clip_valid_region = getattr(req, "clip_valid_region", None)
-    if clip_valid_region is not None:
-        return bool(clip_valid_region)
-    return bool(getattr(req, "clip_nans", True))
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +196,7 @@ async def get_city_raster(req: CityRasterRequest):
             "bbox": payload["bbox"],
         }
 
-    clip_valid_region = _city_clip_valid_region(req)
+    clip_valid_region = bool(req.clip_valid_region)
 
     # Note: Cache key does NOT include projection or clip_valid_region.
     # Raw city raster is cached once per bbox; projection/clipping applied on fetch.

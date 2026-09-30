@@ -61,10 +61,10 @@ flowchart LR
 | `storage-migrate.js` | `migrateStorageKeys` | Imported first: copies `strm2stl_*` localStorage keys to `map2stl_*` |
 | `state.js` | `window.appState` | Pre-Vue Proxy store (`get/set/on/off/emit`); replaced by the Pinia bridge at DOMContentLoaded ([frontend.md](frontend.md#how-state-flows-windowappstate--pinia)) |
 | `events.js` | `window.events`, `window.EV` | Event bus + constants. `EV.BBOX_CHANGED` fires from `setBboxRectangle`, the mini-map drag and a drawn rectangle |
-| `api.js` | `window.api` | All fetch helpers: regions, terrain, export, cities (`start/status/result/cancel`, landmarks), composite (`demMerge`, city raster), registration, mesh, geocode, cache, settings |
+| `api.js` | `window.api` | All fetch helpers: regions, terrain, export, cities (`start/status/result/cancel`, landmarks), composite (`demMerge`, city raster), registration, mesh, geocode, cache (`clearRegion` only), settings |
 | `ui-helpers.js` | `showToast`, `toastAnimation`, `showLoading`, `setLayerStatus`, `getProjectionParams`, `emitStackUpdate`, `decode*Values` | Toasts, spinners, layer status; `getProjectionParams()` is the single source of projection settings for every layer fetch (F-PROJ-DIMS); base64 grid decoders |
 | `usage-log.js` | `window.usageLog` (`pause`, `resume`, `flush`, `session`) | Local usage log (F-USAGE): capture-phase clicks and committed changes, `EV.BBOX_CHANGED` / `REGION_SELECTED` / `DEM_LOADED`, wraps `window.fetch` (every `/api/` call's status and ms), `showToast`, errors; batches to `POST /api/usage` every 5 s. Secret-looking controls are redacted; `map2stl_usage_log` = `off` pauses |
-| `cache.js` | `waterMaskCache`, `setupCacheManagement`, `clearClientCache`, `clearServerCache` | In-memory water-mask LRU + cache UI |
+| `cache.js` | `waterMaskCache` | In-memory water-mask LRU (the cache-status panel and its 5 s poll were removed 2026-09-30) |
 
 ### `dem/` — DEM rendering
 
@@ -79,10 +79,10 @@ flowchart LR
 
 | File | Key symbols | Purpose |
 |---|---|---|
-| `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `moveLayer`, `setLayerOpacity`, `getLayerOrder`, `getActiveLayers`, `getStackMode`, `applyStackedTransform`, `setSplitViewEnabled`, `clearAllLayerBuffers`, `drawLayerGrid`, `LAYER_CANVAS_IDS`, `LAYER_AUTOLOAD` | The multi-layer stack; owns order and active set. See [layer-system.md](layer-system.md) |
+| `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `moveLayer`, `setLayerOpacity`, `getLayerOrder`, `getActiveLayers`, `applyStackedTransform`, `setSplitViewEnabled`, `clearAllLayerBuffers`, `drawLayerGrid`, `LAYER_CANVAS_IDS`, `LAYER_AUTOLOAD` | The multi-layer stack; owns order and active set. See [layer-system.md](layer-system.md) |
 | `composite-dem.js` | `computeCompositeDem`, `applyCompositeToDem`, `previewComposite`, `buildCompositeLayerSpec`, `setupCompositeDemControls` | Additive, toggleable height channels + histograms. OSM channels are 2D preview only; Apply/export use the terrain-only composite (F-ARCH). The only composite UI (the old merge panel and dem-merge.js were removed) |
 | `composite-spec.js` | `FEATURE_SOURCES`, `WATER_TERRAIN_SOURCES`, `RIVER_SOURCES`, `waterTerrainLayers`, `buildCompositeLayerSpec`, `anyFeatureChannelEnabled`, `compositeInputKey`, `compositeApplyCheck` | Pure: panel params → server `MergeLayerSpec` list; Apply-to-DEM staleness guard |
-| `mesh-layer.js` | `uploadMeshLayer`, `selectLibraryMeshFile`, `computeMeshHeightmap`, `autoRegisterMesh`, `suggestedMeshResolutionM`, `applyMeshRegistration`, `applyMeshToDem`, `clearMeshLayer` | STL/OBJ import (F-MESHIMPORT) → heightmap → registered `MeshImport` layer → optional DEM merge |
+| `mesh-layer.js` | `uploadMeshLayer`, `selectLibraryMeshFile`, `computeMeshHeightmap`, `autoRegisterMesh`, `suggestedMeshResolutionM`, `applyMeshRegistration`, `applyMeshToDem`, `clearMeshLayer` | STL/OBJ import (F-MESHIMPORT) → heightmap → registered `MeshImport` layer → optional DEM merge; `regions.js::selectCoordinate` clears it on region switch |
 | `mesh-registration.js` | `openMeshRegistrationModal`, `closeMeshRegistrationModal`, `computeMeshRegistration`, `undoLastMeshPointPair`, `clearMeshPointPairs` | Point-pair picker (DEM vs mesh) feeding the `/register` affine fit |
 | `water-mask.js` | `loadWaterMask`, `loadEsaLandCover`, `renderWaterMask`, `renderEsaLandCover`, `renderCombinedView` | Water mask + ESA land cover |
 | `hydrology-overlay.js` | `loadHydrology`, `clearHydrology`, `cancelHydroLoad`, `renderHydrology` | River depression grid fetch + render |
@@ -108,7 +108,8 @@ flowchart LR
 | File | Key symbols | Purpose |
 |---|---|---|
 | `regions.js` | `loadCoordinates`, `selectCoordinate`, `goToEdit` | Region CRUD, map boxes, selection |
-| `region-ui.js` | `renderCoordinatesList`, `populateRegionsTable`, `setupRegionsTable`, `groupRegionsByContinent`, `initRegionNotes`, `saveRegionThumbnail` | Sidebar list, paginated table, notes, thumbnails |
+| `region-ui.js` | `renderCoordinatesList`, `populateRegionsTable`, `setupRegionsTable`, `groupRegionsByContinent`, `detectContinent` (from `continent.js`), `initRegionNotes`, `saveRegionThumbnail` | Sidebar list, paginated table, notes (modal show/hide/save are module-local), thumbnails |
+| `continent.js` | `detectContinent` | Pure: continent of a lat/lon for sidebar grouping. Coarse polylines: Mediterranean coast (southern Spain, Sicily, Malta, Crete are Europe), Suez / Red Sea (Sinai, Levant, Arabia are Asia), Bosphorus (Istanbul's historic centre is Europe), Caucasus crest, Urals at 60 E |
 | `regions-import-export.js` | `exportRegionsJson`, `importRegionsJsonFile` | Bulk JSON export/import |
 
 ### `export/`
@@ -125,14 +126,14 @@ flowchart LR
 
 | File | Key symbols | Purpose |
 |---|---|---|
-| `view-management.js` | `switchView`, `switchDemSubtab`, `setupDemSubtabs`, `saveCurrentRegion`, `toggleDemSettingsPanel`, `_setSidebarViews` | Tabs and sub-tabs; sidebar list/table view (the mode itself is `SidebarPanel.vue`'s) |
+| `view-management.js` | `switchView`, `switchDemSubtab`, `setupDemSubtabs`, `saveCurrentRegion`, `deleteRegion`, `renderSidebarTable`, `toggleBboxLayerVisibility`, `toggleDemSettingsPanel`, `_setSidebarViews` | Tabs and sub-tabs (`switchView` is null-safe for any view name); sidebar list/table view (the mode itself is `SidebarPanel.vue`'s); region delete (confirm → `DELETE /api/regions/{name}` → reload); show/hide region boxes on the map |
 | `app-setup.js` | `setupOpacityControls`, `setupStackedLayers`, `loadAllLayers`, `setupAutoReload`, `clearAllBoundingBoxes` | Init wiring; `loadAllLayers` uses `Promise.allSettled` |
-| `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset`, `setupAutoSave`, `_migratePreset` | Presets, auto-save, `PRESET_VERSION` migration, revert snapshot |
+| `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset`, `setupAutoSave`, `_migratePreset` | Presets, auto-save, `PRESET_VERSION` migration, revert snapshot. Sends `projection.clip_valid_region` only |
+| `settings-compat.js` | `normalizeSettingsKeys` | Pure: renames legacy keys in saved region settings / presets (`projection.clip_nans` → `clip_valid_region`) before `applyAllSettings` reads them |
 | `workflow-presets.js` | `WORKFLOW_PRESETS`, `applyFields`, `applyWorkflowPreset`, `regionDemSource` | Pure: City / Mountain / Region / Coast presets; returns an undo list |
 | `curve-editor-state.js` | `CurveEditorState`, `CURVE_PRESETS` | Curve editor state class + presets |
 | `curve-editor.js` | `initCurveEditor`, `applyCurveTodem`, `undoCurve`, `redoCurve`, `setCurvePreset`, `drawCurve` | Elevation curve editor |
-| `cache-inventory.js` | `loadCacheInventory` | Cache browser (Plotly treemap + table) |
-| `keyboard-shortcuts.js` | `setupKeyboardShortcuts` | Keyboard shortcuts |
+| `keyboard-shortcuts.js` | `setupKeyboardShortcuts` | Ctrl+1/2/3 = Explore / Edit / Extrude (the header tabs; no Globe shortcut), Ctrl+S, Ctrl+R, Ctrl+Z/Y, Escape, arrows, G |
 | `guide-links.js` | `parseGuideLocation`, `guideHref`, `guideLinkTarget` | Pure: `/guides#slug/anchor` links |
 
 ### `events/` — listener wiring
@@ -165,9 +166,6 @@ Under `app/client/static/js/vue/components/`. Store and bridge: [frontend.md](fr
 | `dem/` | `DemSettingsPanel`, `CityBuildingsPanel` (DemContainer); in DemSettingsPanel: `WorkflowPresetBar`, `PresetsSection`, `ProjectionSection`, `FetchLayersSection`, `CityLandmarksSection`, `VisualizationSection`, `LayerViewSection`, `LayerDisplaySections`, `CompositeDemSection`, `MeshImportSection`, `PlateRegistrationSection`; in FetchLayersSection: `CityFetchProgress`, `DemSamplingInfo` |
 | `shared/` | `CollapsibleSection` (used throughout) |
 
-- **Dead (no importer):** `DemSourceSection.vue`, `EsaLandCoverSection.vue`, `SatelliteSection.vue`,
-  `WaterSection.vue`, `WaterLandCoverSection.vue` (in `dem/`); `CacheManagement.vue`,
-  `RegionParamsSection.vue` (in `sidebar/`).
 - **Layer rack:** `LayerViewSection.vue` is a view over `stacked-layers.js` and rebuilds on the
   `layer-stack-changed` window event.
   [why](../decisions/composite.md#2026-09-06--the-layer-engine-owns-stack-state-and-the-rack-is-a-view)
@@ -196,7 +194,7 @@ export/export-handlers → export/model-viewer → map/compare-view
 regions/region-ui → regions/regions-import-export → layers/water-mask
 layers/hydrology-overlay → layers/water-hydrology-combined → layers/trails-overlay
 map/map-globe → regions/regions → map/bbox-panel
-ui/cache-inventory → ui/app-setup → ui/keyboard-shortcuts
+ui/app-setup → ui/keyboard-shortcuts
 events/event-listeners-map → events/event-listeners-export → events/event-listeners-ui → events/event-listeners
 ui/view-management → dem/dem-main → app.js
 ```
@@ -322,7 +320,6 @@ One line per function. `window.*` unless marked (private) or (export).
 | `moveLayer(mode, delta)` | Swap past the next active layer; fires `layer-stack-changed` |
 | `setLayerOpacity(mode, v)` | Per-layer alpha |
 | `getLayerOrder()` / `getActiveLayers()` | Copies of the order and the active set (read by `LayerViewSection.vue`) |
-| `getStackMode()` | Last-activated layer (back-compat) |
 | `setSplitViewEnabled(on)` / `isSplitViewEnabled()` | Composite / Satellite side-by-side |
 | `applyStackedTransform()` | Shared CSS zoom/pan transform |
 | `enableStackedZoomPan()` | Wheel/drag + hover tooltip on `#layersStack` |
@@ -356,7 +353,7 @@ One line per function. `window.*` unless marked (private) or (export).
 | `suggestedMeshResolutionM(bbox)` | ~300 px on the longer side |
 | `applyMeshRegistration(result)` | Render `MeshImport`; fires `mesh-import-registered` |
 | `applyMeshToDem(blendWeight)` | Patch `lastDemData.values` inside the mesh footprint |
-| `clearMeshLayer()` | Reset mesh state |
+| `clearMeshLayer()` | Reset mesh state; called on region switch |
 | `openMeshRegistrationModal()` / `computeMeshRegistration()` | Show picker / POST pairs to `/register` |
 | `undoLastMeshPointPair()` / `clearMeshPointPairs()` | Edit pending pairs |
 
@@ -403,7 +400,7 @@ One line per function. `window.*` unless marked (private) or (export).
 | `initCurveEditor()` / `applyCurveTodem()` | Curve editor setup / apply |
 | `undoCurve()` / `redoCurve()` | Curve history |
 | `CurveEditorState.interpolate(x)` (method) | Spline value at x∈[0,1]; backs a 1024-entry LUT |
-| `switchView(view)` / `switchDemSubtab(tab)` | Tabs |
+| `switchView(view)` / `switchDemSubtab(tab)` | Tabs; `switchView` skips a missing tab or container instead of throwing |
 | `setupDemSubtabs()` | Idempotent sub-tab wiring; re-runs on each Edit entry ([why](../decisions/frontend.md#2026-09-04--a-setup-function-that-re-runs-must-bind-idempotently)) |
 | `_setSidebarViews(state)` | List or table view for a sidebar mode |
 

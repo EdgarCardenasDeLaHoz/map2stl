@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 from pathlib import Path
 
@@ -35,22 +36,25 @@ ROOT = Path(__file__).resolve().parents[4]  # …/map2stl/
 # ---------------------------------------------------------------------------
 # Pipeline imports (must come after path bootstrap)
 # ---------------------------------------------------------------------------
-from city2stl.skyline._pano.capture import _capture_pano_views  # noqa: E402
-from city2stl.skyline._pano.detect import _build_and_detect_pano  # noqa: E402
-from city2stl.skyline._pano.heading import _recover_anchor_offset  # noqa: E402
-from city2stl.skyline.pipeline import (  # noqa: E402
-    BuildingRecord,
-    CapturedView,
-    _merge_silhouette_sources,
-    _neural_sky_and_building_masks,
-    _neural_water_mask,
-    detect_building_silhouettes,
-    detect_buildings_from_mask,
+from city2stl.skyline._core.registration import (  # noqa: E402
     match_segments_to_buildings,
     osm_anchor_silhouettes,
     osm_sam_instance_silhouettes,
     register_view_to_osm,
 )
+from city2stl.skyline._core.segmentation import (  # noqa: E402
+    _neural_sky_and_building_masks,
+    _neural_water_mask,
+)
+from city2stl.skyline._core.skyline import (  # noqa: E402
+    _merge_silhouette_sources,
+    detect_building_silhouettes,
+    detect_buildings_from_mask,
+)
+from city2stl.skyline._core.types import BuildingRecord, CapturedView  # noqa: E402
+from city2stl.skyline._pano.capture import _capture_pano_views  # noqa: E402
+from city2stl.skyline._pano.detect import _build_and_detect_pano  # noqa: E402
+from city2stl.skyline._pano.heading import _recover_anchor_offset  # noqa: E402
 from city2stl.skyline.region_data import (  # noqa: E402
     _attach_building_terrain,
     _load_osm_for_region,
@@ -1058,4 +1062,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Library progress (skyline._pano, region_pdf) goes through logging.
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     raise SystemExit(main())

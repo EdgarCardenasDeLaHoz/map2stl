@@ -38,8 +38,6 @@ file owns which pipeline control, and the conventions a change must respect.
 | `app/client/static/js/vue/App.vue` | Root: teleports `SidebarPanel` into `#vue-sidebar`, `ContentArea` into `#vue-content-area`; renders `AppShell` |
 | `app/client/static/js/vue/stores/app.ts` | The one Pinia store (`app/client/static/js/vue/stores/app.ts::useAppStore`); typed state + `get`/`set` compat actions + `clearLayerCache` |
 | `app/client/static/js/vue/stores/types.ts` | Types for the store (`Region`, `DemData`, `BBox`, ...) |
-| `app/client/static/js/vue/composables/useAppStateBridge.ts` | `useAppStateBridge()` returns `{ store }`; a thin wrapper, currently unused (components call `useAppStore()` directly) |
-| `app/client/static/js/vue/composables/useEventListeners.ts` | Placeholder `onMounted` hook; not called anywhere |
 | `app/client/static/js/vue/components/**` | `layout/`, `sidebar/`, `views/`, `dem/`, `shared/` — see [frontend-modules.md § Vue components](frontend-modules.md#vue-components) |
 
 - Components that read the store directly (`useAppStore()`): `CityBuildingsPanel`,
@@ -120,11 +118,11 @@ Consequences to know:
 - The old Merge panel and dem-merge.js are gone; the Composite panel is the only composite UI.
   Stack state belongs to the layer engine, the rack is a view —
   [why](../decisions/composite.md#2026-09-06--the-layer-engine-owns-stack-state-and-the-rack-is-a-view).
-- Dead components (no importer): `DemSourceSection.vue` (duplicates every control id in
-  `FetchLayersSection.vue`; mounting it would break `getElementById`), `EsaLandCoverSection.vue`,
-  `SatelliteSection.vue`, `WaterSection.vue`, `WaterLandCoverSection.vue` (all in
-  `vue/components/dem/`), and `CacheManagement.vue`, `RegionParamsSection.vue` (in
-  `vue/components/sidebar/`). Some `docs/plans/` pages still name `DemSourceSection.vue` as live.
+- The seven never-mounted components (`DemSourceSection`, `EsaLandCoverSection`,
+  `SatelliteSection`, `WaterSection`, `WaterLandCoverSection`, `CacheManagement`,
+  `RegionParamsSection`) and the unused composables were deleted 2026-09-30. Some `docs/plans/`
+  pages still name `DemSourceSection.vue`; its controls live in `FetchLayersSection.vue` and
+  `ProjectionSection.vue`.
 
 ---
 
@@ -254,7 +252,7 @@ Module-local (not on appState):
 | `landCoverConfig` / `landCoverConfigDefaults` | S | object | ESA class → `{name, color, elevation}` |
 | `waterOpacity` | S | number | 0–1 |
 | `sidebarMode` | S | `'expanded'\|'normal'\|'hidden'` | Owned by `SidebarPanel.vue` |
-| `activeView` | S | `'map'\|'dem'\|'model'\|'cache'` | Declared for the tab migration; nothing writes it yet, so it stays `'map'` (read by `EdgeLandmarkWarnings.vue`) |
+| `activeView` | S | `'map'\|'dem'\|'model'` | Declared for the tab migration; nothing writes it yet, so it stays `'map'` (read by `EdgeLandmarkWarnings.vue`) |
 
 ### 3D viewer & export
 

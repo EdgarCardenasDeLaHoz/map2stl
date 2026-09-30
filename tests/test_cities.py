@@ -412,7 +412,7 @@ class TestCityRaster:
         """Projected raster with NaN/Inf should be JSON-safe and return 200."""
         payload = self._payload(dim=10)
         payload["projection"] = "cosine"
-        payload["clip_nans"] = False
+        payload["clip_valid_region"] = False
 
         bad_grid = np.arange(100, dtype=np.float32).reshape(10, 10)
         bad_grid[0, 1] = np.nan

@@ -67,8 +67,7 @@ class CompositeCityRasterRequest(BaseModel):
     width:  int = 512
     height: int = 512
     projection: str = "none"
-    clip_valid_region: bool | None = None
-    clip_nans: bool = True
+    clip_valid_region: bool = True
     detail: str = "full"  # "full" or "coarse" — must match the tier used by /api/cities
                           # so the OSM cache lookup key resolves to the matching entry
     maintain_dimensions: bool = False  # keep input shape after projection (legacy/opt-in)
@@ -350,8 +349,7 @@ async def get_city_raster(req: CompositeCityRasterRequest):
                              neginf=0.0).astype(np.float32)
         return safe.ravel().tolist()
 
-    clip_valid_region = (req.clip_valid_region
-                         if req.clip_valid_region is not None else req.clip_nans)
+    clip_valid_region = req.clip_valid_region
 
     out = await run_sync(_city_raster_arrays, req)
 
@@ -418,8 +416,7 @@ RETRY_SKIPPED_S = 15 * 60
 
 def compute_composite_dem(bbox: dict, dim: int, layers: list,
                           projection: str = "none",
-                          clip_valid_region: bool | None = None,
-                          clip_nans: bool = True,
+                          clip_valid_region: bool = True,
                           maintain_dimensions: bool = False,
                           *, split_carve: bool = False,
                           warnings: list | None = None):
@@ -487,8 +484,7 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
 
     specs = [spec if hasattr(spec, "source") else MergeLayerSpec(**spec)
              for spec in layers]
-    clip_valid = (clip_valid_region
-                  if clip_valid_region is not None else clip_nans)
+    clip_valid = bool(clip_valid_region)
 
     cache_key = _composite_cache_key(north, south, east, west, dim, specs,
                                      projection, clip_valid,
@@ -616,7 +612,7 @@ async def merge_dem_layers(req: MergeRequest):
         composite = await run_sync(compute_composite_dem,
                                    req.bbox, req.dim, list(req.layers),
                                    req.projection, req.clip_valid_region,
-                                   req.clip_nans, req.maintain_dimensions,
+                                   req.maintain_dimensions,
                                    warnings=warnings)
         h, w = composite.shape
         return JSONResponse(content={

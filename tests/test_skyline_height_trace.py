@@ -13,16 +13,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from city2stl.skyline import pipeline
+from city2stl.skyline._core import height as core_height
+from city2stl.skyline._core.height import estimate_heights_from_registration
+from city2stl.skyline._core.types import BuildingRecord, CapturedView, Viewpoint
 from city2stl.skyline.height_trace import (
     STAGES,
     HeightTraceRecorder,
-)
-from city2stl.skyline.pipeline import (
-    BuildingRecord,
-    CapturedView,
-    Viewpoint,
-    estimate_heights_from_registration,
 )
 
 # ---------------------------------------------------------------------------
@@ -94,8 +90,9 @@ def _registration_one(building_x_px: float, forward_m: float,
 @pytest.fixture(autouse=True)
 def _no_segformer(monkeypatch):
     """Skip SegFormer in tests — the contour path is exercised instead."""
+    # Patch where estimate_heights_from_registration looks the name up.
     monkeypatch.setattr(
-        pipeline,
+        core_height,
         "_neural_sky_and_building_masks",
         lambda image: (None, None),
     )
@@ -147,7 +144,7 @@ class TestRecorder:
 
     def test_stages_complete(self):
         # Sanity guard: pipeline-emitted stages must all appear in STAGES.
-        # If a new gate is added in pipeline.py, this catches the
+        # If a new gate is added in _core/height.py, this catches the
         # mismatch and forces the STAGES list to be updated.
         expected_min = {
             "building_start", "drop_no_projection", "closest_in_bin",

@@ -33,6 +33,7 @@ import csv
 import gzip
 import hashlib
 import json
+import logging
 import math
 from pathlib import Path
 
@@ -44,6 +45,8 @@ from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
 from ._core.types import BuildingRecord
 from ._core.util import _polygon_area_m2
+
+logger = logging.getLogger(__name__)
 
 _MS_DATASET_LINKS_URL = (
     "https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv"
@@ -152,19 +155,19 @@ def _fetch_tile(qk: str, url: str) -> Path | None:
         r = requests.get(url, timeout=300)
         r.raise_for_status()
     except Exception as e:
-        print(f"[ms_buildings] tile fetch failed qk={qk}: {e}")
+        logger.warning(f"[ms_buildings] tile fetch failed qk={qk}: {e}")
         return None
     content = r.content
     if content[:2] == b"\x1f\x8b":
         try:
             content = gzip.decompress(content)
         except Exception as e:
-            print(f"[ms_buildings] gzip decompress failed qk={qk}: {e}")
+            logger.warning(f"[ms_buildings] gzip decompress failed qk={qk}: {e}")
             return None
     try:
         out_path.write_bytes(content)
     except Exception as e:
-        print(f"[ms_buildings] cache write failed qk={qk}: {e}")
+        logger.warning(f"[ms_buildings] cache write failed qk={qk}: {e}")
         return None
     return out_path
 
@@ -185,7 +188,7 @@ def fetch_microsoft_buildings_for_bbox(
     try:
         links = _load_dataset_links()
     except Exception as e:
-        print(f"[ms_buildings] dataset-links fetch failed: {e}")
+        logger.warning(f"[ms_buildings] dataset-links fetch failed: {e}")
         return []
 
     south, west, north, east = bbox
@@ -349,11 +352,11 @@ def merge_satellite_into_osm(
                     continue
                 shifted.append({**s, "geometry": translate(sg, xoff=-dlon, yoff=-dlat)})
             sat_polygons = shifted
-            print(f"[ms_buildings] F-SKY17 registered MS->OSM by "
-                  f"({-dlon * mlon:.1f}, {-dlat * mlat:.1f}) m before dedup")
+            logger.info(f"[ms_buildings] F-SKY17 registered MS->OSM by "
+                        f"({-dlon * mlon:.1f}, {-dlat * mlat:.1f}) m before dedup")
         else:
-            print("[ms_buildings] F-SKY17 skipped — too few plausible "
-                  "OSM/MS pairs to estimate offset")
+            logger.info("[ms_buildings] F-SKY17 skipped — too few plausible "
+                        "OSM/MS pairs to estimate offset")
 
     out: list[BuildingRecord] = list(osm_buildings)
     added = 0
@@ -403,7 +406,7 @@ def merge_satellite_into_osm(
             area_m2=area_m2,
         ))
         added += 1
-    print(f"[ms_buildings] merged {added} satellite polygons "
-          f"({len(sat_polygons) - added} de-duped) into "
-          f"{len(osm_buildings)} OSM => {len(out)} total")
+    logger.info(f"[ms_buildings] merged {added} satellite polygons "
+                f"({len(sat_polygons) - added} de-duped) into "
+                f"{len(osm_buildings)} OSM => {len(out)} total")
     return out

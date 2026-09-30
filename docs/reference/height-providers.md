@@ -25,8 +25,8 @@ is what it is → [building-heights.md](../decisions/building-heights.md),
   sources coarser than `city2stl/height/__init__.py::BUILDING_RESOLUTION_LIMIT_M` (10 m) are
   refused for per-building heights. An OSM tag height is a floor, not an estimate
   (`city2stl/heights.py::height_from_tags`).
-- **App side** — `app/server/core/height/service.py::fetch_height_payload` runs providers in the
-  executor, caches each result (`height_<name>` namespace), merges and projects. Provider
+- **App side** — `app/server/routers/height.py::height_fetch` runs the selected providers in the
+  executor, merges and projects (no per-request result cache). Provider
   rasters cache through `city2stl/height/providers/_cache.py::register_ttl` (see
   [packages.md](packages.md#caches)).
 

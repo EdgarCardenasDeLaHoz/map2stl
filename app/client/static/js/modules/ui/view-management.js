@@ -1,11 +1,9 @@
 ﻿// ============================================================
-// VIEW MANAGEMENT — modules/view-management.js
-// Extracted from app.js (DOMContentLoaded closure).
+// VIEW MANAGEMENT — modules/ui/view-management.js
 // Handles top-level tab switching, sidebar state machine,
 // sidebar table rendering, bbox layer visibility, status panel,
-// region load/save/submit, and DEM sub-tab wiring.
+// region load/save/submit/delete, and DEM sub-tab wiring.
 //
-// Loaded as a plain <script> before app.js.
 // All functions exposed on window.*
 // Closure vars accessed via window.appState.* or window.get*()/set*() getters.
 // ============================================================
@@ -16,70 +14,67 @@
 // switchView
 // ---------------------------------------------------------------------------
 
+// View name -> container id. 'globe' has no header tab (the globe is normally
+// shown as an overlay by the floating Globe button); every lookup below is
+// null-safe so a view without a tab or container cannot throw.
+const VIEW_CONTAINERS = {
+    map: 'mapContainer',
+    globe: 'globeContainer',
+    dem: 'demContainer',
+    model: 'modelContainer',
+    regions: 'regionsContainer',
+    compare: 'compareContainer',
+};
+
+/**
+ * Re-measure the Leaflet map after its container changed size or visibility.
+ */
+function _invalidateMapSize() {
+    window.getMap?.()?.invalidateSize?.();
+}
+
 /**
  * Switch the main view to the specified tab.
  * Hides all containers then shows the selected one.
- * @param {'map'|'globe'|'dem'|'model'|'regions'|'compare'|'cache'} view
+ * @param {'map'|'globe'|'dem'|'model'|'regions'|'compare'} view
  */
 window.switchView = function switchView(view) {
-    const mapContainer = document.getElementById('mapContainer');
-    const globeContainer = document.getElementById('globeContainer');
-    const demContainer = document.getElementById('demContainer');
-    const modelContainer = document.getElementById('modelContainer');
-    const compareContainer = document.getElementById('compareContainer');
-    const regionsContainer = document.getElementById('regionsContainer');
-    const cacheContainer = document.getElementById('cacheInventoryContainer');
+    const containers = Object.fromEntries(
+        Object.entries(VIEW_CONTAINERS).map(([name, id]) => [name, document.getElementById(id)]));
+    const modelContainer = containers.model;
     const newRegionSection = document.getElementById('newRegionSection');
-    const tabs = document.querySelectorAll('.tab');
 
     // Restore sidebar visibility (may have been hidden in model view)
     const sidebar = document.querySelector('.sidebar');
     if (sidebar) sidebar.style.display = '';
 
     // Hide all
-    mapContainer.classList.add('hidden');
-    globeContainer.classList.add('hidden');
-    demContainer.classList.add('hidden');
-    if (modelContainer) {
-        modelContainer.classList.add('hidden');
-        modelContainer.style.display = 'none';
-    }
-    if (compareContainer) {
-        compareContainer.classList.add('hidden');
-    }
-    if (regionsContainer) {
-        regionsContainer.classList.add('hidden');
-    }
-    if (cacheContainer) {
-        cacheContainer.classList.add('hidden');
-    }
+    Object.values(containers).forEach(el => el?.classList.add('hidden'));
+    if (modelContainer) modelContainer.style.display = 'none';
 
     // Show/hide new region section (only visible in 2D Map view)
     if (newRegionSection) {
         newRegionSection.style.display = view === 'map' ? 'block' : 'none';
     }
 
-    // Remove active from tabs
-    tabs.forEach(tab => tab.classList.remove('active'));
+    // Remove active from tabs, then mark the selected one (if it has a tab)
+    document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+    document.querySelector(`[data-view="${view}"]`)?.classList.add('active');
     document.body.classList.toggle('dem-edit-mode', view === 'dem');
 
-    // Show selected
+    containers[view]?.classList.remove('hidden');
+
     if (view === 'map') {
-        mapContainer.classList.remove('hidden');
-        document.querySelector('[data-view="map"]').classList.add('active');
         // Force Leaflet to recalculate size after container becomes visible.
         // Two passes are used because panel transitions can lag one frame.
-        requestAnimationFrame(() => { window._globalMap?.invalidateSize?.(); });
+        requestAnimationFrame(_invalidateMapSize);
         setTimeout(() => {
-            window._globalMap?.invalidateSize?.();
-            window.syncRegionBboxVisibility?.();
+            _invalidateMapSize();
+            _syncBboxLayerVisibility();
         }, 120);
     } else if (view === 'globe') {
-        globeContainer.classList.remove('hidden');
-        document.querySelector('[data-view="globe"]').classList.add('active');
+        window.initGlobe?.();
     } else if (view === 'dem') {
-        demContainer.classList.remove('hidden');
-        document.querySelector('[data-view="dem"]').classList.add('active');
         // Re-bind DEM subtab handlers in case Vue components mounted after initial setup.
         window.setupDemSubtabs?.();
         // Ensure sidebar shows the region list so the user can switch regions
@@ -96,34 +91,13 @@ window.switchView = function switchView(view) {
         // or explicit user action. Auto-loading here causes duplicate requests when
         // goToEdit() calls switchView() and then loadDEM() itself.
     } else if (view === 'model') {
-        if (modelContainer) {
-            modelContainer.classList.remove('hidden');
-            modelContainer.style.display = 'flex';
-        }
-        document.querySelector('[data-view="model"]')?.classList.add('active');
+        if (modelContainer) modelContainer.style.display = 'flex';
         // Auto-collapse sidebar so the 3D viewport gets full width
-        const sidebarEl = document.querySelector('.sidebar');
-        if (sidebarEl) sidebarEl.style.display = 'none';
+        if (sidebar) sidebar.style.display = 'none';
     } else if (view === 'regions') {
-        if (regionsContainer) {
-            regionsContainer.classList.remove('hidden');
-            window.populateRegionsTable?.();
-        }
-        document.querySelector('[data-view="regions"]')?.classList.add('active');
+        if (containers.regions) window.populateRegionsTable?.();
     } else if (view === 'compare') {
-        if (compareContainer) {
-            compareContainer.classList.remove('hidden');
-            window.initCompareMode?.();
-        }
-        document.querySelector('[data-view="compare"]')?.classList.add('active');
-    } else if (view === 'cache') {
-        if (cacheContainer) {
-            cacheContainer.classList.remove('hidden');
-            window.loadCacheInventory?.();
-        }
-        const sidebarEl = document.querySelector('.sidebar');
-        if (sidebarEl) sidebarEl.style.display = 'none';
-        document.querySelector('[data-view="cache"]')?.classList.add('active');
+        if (containers.compare) window.initCompareMode?.();
     }
 };
 
@@ -167,8 +141,7 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
     tbody.innerHTML = '';
     const q = (filter || document.getElementById('sidebarTableSearch')?.value || '').toLowerCase();
     const coordinatesData = window.getCoordinatesData?.() || [];
-    const filteredBySearch = q ? coordinatesData.filter(r => r.name.toLowerCase().includes(q)) : coordinatesData;
-    const list = window.filterRegionsForMapViewport?.(filteredBySearch) || filteredBySearch;
+    const list = q ? coordinatesData.filter(r => r.name.toLowerCase().includes(q)) : coordinatesData;
     const groups = window.groupRegionsByContinent?.(list) || [];
     const selectedRegion = window.appState.selectedRegion;
 
@@ -210,17 +183,20 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
             if (selectedRegion && selectedRegion.name === region.name) tr.classList.add('selected');
             tr.dataset.label = region.label || '';
             tr.dataset.category = (region.label && region.label.trim()) ? region.label.trim() : continent;
+            const safeName = window.escapeHtml ? window.escapeHtml(region.name) : region.name;
             tr.innerHTML = `
-                <td class="tbl-name" title="${region.name}">${region.name}</td>
+                <td class="tbl-name" title="${safeName}">${safeName}</td>
                 <td class="tbl-coord">${region.north?.toFixed(2) ?? ''}</td>
                 <td class="tbl-coord">${region.south?.toFixed(2) ?? ''}</td>
                 <td class="tbl-coord">${region.east?.toFixed(2) ?? ''}</td>
                 <td class="tbl-coord">${region.west?.toFixed(2) ?? ''}</td>
                 <td class="tbl-actions">
                     <button class="tbl-btn edit" onclick="goToEdit(${originalIndex})" title="Open in Edit view">✏ Edit</button>
-                    <button class="tbl-btn danger" onclick="_deleteRegionFromTable(${originalIndex})" title="Delete region">🗑</button>
+                    <button class="tbl-btn danger" data-action="delete" title="Delete region">🗑</button>
                 </td>
             `;
+            tr.querySelector('[data-action="delete"]')
+                ?.addEventListener('click', () => { void window.deleteRegion?.(originalIndex); });
             tr.onclick = (e) => {
                 if (e.target.tagName === 'BUTTON') return;
                 window.selectCoordinate?.(originalIndex);
@@ -242,19 +218,62 @@ window.renderSidebarTable = function renderSidebarTable(filter) {
 let _bboxLayersVisible = true;
 
 /**
+ * Add or remove the saved-region rectangles and their edit markers on the
+ * Leaflet map to match `_bboxLayersVisible`.
+ */
+function _syncBboxLayerVisibility() {
+    const map = window.getMap?.();
+    if (!map) return;
+    [window.getPreloadedLayer?.(), window.getEditMarkersLayer?.()].forEach(layer => {
+        if (!layer) return;
+        const onMap = map.hasLayer(layer);
+        if (_bboxLayersVisible && !onMap) layer.addTo(map);
+        else if (!_bboxLayersVisible && onMap) map.removeLayer(layer);
+    });
+}
+
+/**
  * Toggle visibility of the preloaded-region and edit-marker Leaflet layers.
  */
 window.toggleBboxLayerVisibility = function toggleBboxLayerVisibility() {
     _bboxLayersVisible = !_bboxLayersVisible;
+    _syncBboxLayerVisibility();
     const btn = document.getElementById('bboxVisToggleBtn');
-
+    if (!btn) return;
     if (_bboxLayersVisible) {
-        window.syncRegionBboxVisibility?.();
-        if (btn) { btn.textContent = '👁'; btn.classList.remove('hidden-state'); btn.title = 'Hide region boxes on map'; }
+        btn.textContent = '👁'; btn.classList.remove('hidden-state'); btn.title = 'Hide region boxes on map';
     } else {
-        window.syncRegionBboxVisibility?.();
-        if (btn) { btn.textContent = '🙈'; btn.classList.add('hidden-state'); btn.title = 'Show region boxes on map'; }
+        btn.textContent = '🙈'; btn.classList.add('hidden-state'); btn.title = 'Show region boxes on map';
     }
+};
+
+// ---------------------------------------------------------------------------
+// deleteRegion
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete a saved region (DELETE /api/regions/{name}) after a confirm prompt,
+ * then reload the region list. Clears the selection if it was the deleted one.
+ * @param {number} index - Index into getCoordinatesData()
+ * @returns {Promise<boolean>} true when the region was deleted
+ */
+window.deleteRegion = async function deleteRegion(index) {
+    const region = (window.getCoordinatesData?.() || [])[index];
+    if (!region) return false;
+    if (!confirm(`Delete region "${region.name}"? Its saved settings are deleted too.`)) return false;
+
+    const { error } = await window.api.regions.delete(region.name);
+    if (error) {
+        window.showToast?.(`Failed to delete region: ${error}`, 'error');
+        return false;
+    }
+    if (window.appState.selectedRegion?.name === region.name) {
+        window.setSelectedRegion?.(null);
+        window.appState.selectedRegion = null;
+    }
+    window.showToast?.(`Region "${region.name}" deleted`, 'success');
+    await window.loadCoordinates?.();
+    return true;
 };
 
 // ---------------------------------------------------------------------------
@@ -421,7 +440,7 @@ window.setupDemSubtabs = function setupDemSubtabs() {
         document.getElementById('demControlsInner')?.classList.remove('hidden');
         window.events?.emit(window.EV?.STACKED_UPDATE);
         window.emitStackUpdate?.();
-        window._globalMap?.invalidateSize?.();
+        _invalidateMapSize();
         window.dispatchEvent(new Event('resize'));
         requestAnimationFrame(() => window._ensureDemViewportSpace?.());
     }

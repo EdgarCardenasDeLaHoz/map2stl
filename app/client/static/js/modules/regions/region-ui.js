@@ -4,7 +4,7 @@
  * Loaded as a plain <script> before app.js.
  *
  * Public API (all on window):
- *   detectContinent(lat, lon)            — heuristic continent name
+ *   detectContinent(lat, lon)            — heuristic continent name (continent.js)
  *   groupRegionsByContinent(regions)     — group array by continent
  *   renderCoordinatesList()              — render sidebar list view
  *   populateRegionsTable()               — render sidebar table view
@@ -12,9 +12,8 @@
  *   viewRegionOnMap(index)               — select region + switch to map
  *   setupRegionsTable()                  — wire table search + refresh
  *   initRegionNotes()                    — load notes from localStorage
- *   showNotesModal(regionName)           — open notes modal
- *   hideNotesModal()                     — close notes modal
- *   saveRegionNotes()                    — persist notes + close modal
+ *                                          (the notes modal's show / hide / save
+ *                                          stay module-local)
  *   initRegionThumbnails()               — load thumbnails from localStorage
  *   saveRegionThumbnail(name, dataURL)   — persist a thumbnail
  *
@@ -30,6 +29,8 @@
  *   window.loadCoordinates()            — from app.js
  *   window.showToast(msg, type)                — file-top global in app.js
  */
+
+import { detectContinent } from './continent.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope state
@@ -96,21 +97,6 @@ function _syncContinentFilterOptions(coordinatesData) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Continent detection + grouping
 // ─────────────────────────────────────────────────────────────────────────────
-
-function detectContinent(lat, lon) {
-    if (lat < -60) return 'Antarctica';
-    if (lat >= -55 && lat <= -10 && lon >= 110 && lon <= 180) return 'Oceania';
-    if (lat >= -10 && lat <= 0 && lon >= 130 && lon <= 180) return 'Oceania';
-    if (lat >= -56 && lat <= 13 && lon >= -82 && lon <= -34) return 'South America';
-    if (lat >= 13 && lat <= 75 && lon >= -168 && lon <= -52) return 'North America';
-    if (lat >= 8 && lat <= 28 && lon >= -90 && lon <= -52) return 'North America';
-    if (lat >= 55 && lon >= 26 && lon <= 180) return 'Asia';
-    if (lat >= -11 && lat <= 55 && lon >= 60 && lon <= 145) return 'Asia';
-    if (lat >= 25 && lat <= 43 && lon >= 35 && lon <= 60) return 'Asia';
-    if (lat >= -37 && lat <= 38 && lon >= -18 && lon <= 52) return 'Africa';
-    if (lat >= 35 && lat <= 72 && lon >= -25 && lon <= 45) return 'Europe';
-    return 'Other';
-}
 
 function groupRegionsByContinent(regions) {
     const groups = {};
@@ -481,7 +467,6 @@ function saveRegionNotes() {
 // Expose on window
 // ─────────────────────────────────────────────────────────────────────────────
 
-window.CONTINENT_HIDDEN = CONTINENT_HIDDEN;
 window.detectContinent = detectContinent;
 window.groupRegionsByContinent = groupRegionsByContinent;
 window.renderCoordinatesList = renderCoordinatesList;
@@ -492,6 +477,3 @@ window.setupRegionsTable = setupRegionsTable;
 window.initRegionThumbnails = initRegionThumbnails;
 window.saveRegionThumbnail = saveRegionThumbnail;
 window.initRegionNotes = initRegionNotes;
-window.showNotesModal = showNotesModal;
-window.hideNotesModal = hideNotesModal;
-window.saveRegionNotes = saveRegionNotes;

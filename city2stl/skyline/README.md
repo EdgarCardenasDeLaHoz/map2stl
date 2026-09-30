@@ -81,10 +81,10 @@ Matching and heights: `_core/registration.py::match_segments_to_buildings` (inte
 
 ## Where things live
 
-`pipeline.py` is a star-import **façade** over `_core/` for callers outside `skyline/` (tests, tools, app).
-Code inside `skyline/` imports the defining module directly.
+Every caller, inside `skyline/` or not (tests, demos), imports the defining `_core/` or `_pano/` module directly.
 - Why: a star import carries neither private names nor later rebinding of module globals.
-- The other façades (pano_registration, region_render, report_plots) were removed 2026-09-25.
+- The `pipeline.py` façade over `_core/` was removed 2026-09-30; the other façades (pano_registration,
+  region_render, report_plots) on 2026-09-25.
 - Split history: [F-CLEAN14](../../docs/plans/done/F-CLEAN14-skyline-file-split.md).
 
 | Path | Role | Feature tags |
@@ -318,7 +318,6 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
   - Edge-case tests for F-SKY13 OSM coastline extraction (`osm_water.py`).
 - **Housekeeping**
   - Decide on the research probes `scripts/demos/13`–`16`: fold conclusions into STATUS and archive (AUDIT-2026-06-07).
-  - Remove the `skyline/height/` re-export shim once no caller imports `city2stl.skyline.height`.
 
 ## Plans
 

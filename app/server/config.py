@@ -12,6 +12,7 @@ import logging
 import os
 from pathlib import Path
 
+from geo2stl import cache as _geo_cache
 from geo2stl import opentopo as _opentopo
 
 _log = logging.getLogger(__name__)
@@ -35,11 +36,10 @@ REGION_SETTINGS_PATH = _MAP2STL_DIR / "region_settings.json"
 # Legacy OSM cache (plain JSON — migrated to CACHE_ROOT/osm/ on startup)
 OSM_CACHE_PATH = _MAP2STL_DIR / "osm_raw_cache"
 
-# OpenTopography GeoTIFF tile cache (under unified cache/ tree)
-OPENTOPO_CACHE_PATH = _MAP2STL_DIR / "cache" / "opentopo"
-
-# Earth Engine / legacy ee-joblib cache
-EE_CACHE_DIR = _PROJECT_ROOT / "cache" / "ee"
+# Earth Engine joblib cache: the directory geo2stl.sat2stl writes, under the repo cache
+# root (map2stl/cache, or $MAP2STL_CACHE). It was Code/cache/ee, outside the repo, which
+# sat2stl had already stopped writing to.
+EE_CACHE_DIR = _geo_cache.CACHE_ROOT / "ee"
 
 # ---------------------------------------------------------------------------
 # External STL/OBJ mesh library (F-MESHIMPORT)

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import base64
 import copy
-import math
+import logging
 import subprocess
 import sys
 import time
@@ -43,7 +43,9 @@ from IPython.display import display
 from PIL import Image
 
 from app.server.config import LUMINANCE_B, LUMINANCE_G, LUMINANCE_R, OPENTOPO_API_KEY
-from geo2stl.geo import bbox_size_m
+from geo2stl.geo import bbox_diagonal_km, bbox_size_m
+
+logger = logging.getLogger(__name__)
 
 _ALLOWED_HTTP_METHODS = {"get", "post", "put", "delete", "patch"}
 
@@ -56,12 +58,12 @@ _DEFAULT_SETTINGS: dict = {
     # Applied to ALL layers (DEM, water mask, satellite, city raster).
     # projection: server-side warp applied to the raw lat/lon grid before returning.
     # maintain_dimensions: True = pad output to dim×dim; False = crop to valid data extent.
-    # clip_nans: strip all-NaN edge rows/cols after projection — keeps result rectangular.
+    # clip_valid_region: strip all-NaN edge rows/cols after projection — keeps result rectangular.
     "projection": {
         # "none"|"cosine"|"mercator"|"equal_area"|"equidistant"|"lambert"|"sinusoidal"
         "projection":          "none",
         "maintain_dimensions": False,
-        "clip_nans":           True,
+        "clip_valid_region":   True,
     },
     # ── DEM fetch ─────────────────────────────────────────────────────────
     # Sent to /api/terrain/dem and /api/export/*
@@ -338,7 +340,7 @@ class TerrainSession:
         """
         method_lc, r = self._send_request(method, endpoint, **kwargs)
         if not r.ok:
-            print(f"ERROR {r.status_code}: {r.text}")
+            logger.warning(f"ERROR {r.status_code}: {r.text}")
         r.raise_for_status()
         try:
             return r.json()
@@ -356,7 +358,7 @@ class TerrainSession:
         """
         _, response = self._send_request(method, endpoint, **kwargs)
         if not response.ok:
-            print(f"ERROR {response.status_code}: {response.text}")
+            logger.warning(f"ERROR {response.status_code}: {response.text}")
         return response
 
     def _ensure_bbox(self) -> None:
@@ -503,7 +505,7 @@ class TerrainSession:
         try:
             import psutil
         except ImportError:
-            print("Warning: psutil not installed, cannot kill stale server")
+            logger.warning("Warning: psutil not installed, cannot kill stale server")
             return
         killed = False
         try:
@@ -514,12 +516,12 @@ class TerrainSession:
                         pid_info = stale.exe()
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         continue
-                    print(f"Killing server on port {self._port} "
-                          f"(PID {conn.pid}, {pid_info})")
+                    logger.info(f"Killing server on port {self._port} "
+                                f"(PID {conn.pid}, {pid_info})")
                     _kill_tree(stale)
                     killed = True
         except psutil.AccessDenied:
-            print("Warning: access denied scanning ports (try running as admin)")
+            logger.warning("Warning: access denied scanning ports (try running as admin)")
         if killed:
             time.sleep(0.5)
 
@@ -662,7 +664,7 @@ class TerrainSession:
 
         for key, src, group_key in (
             ("maintain_dimensions", p,  "projection"),
-            ("clip_nans",          p,  "projection"),
+            ("clip_valid_region",  p,  "projection"),
             ("subtract_water",     d,  "dem"),
             ("show_sat",           d,  "dem"),
             ("sea_level_cap",      e,  "export"),
@@ -714,8 +716,8 @@ class TerrainSession:
             watch the uvicorn log output live.
         """
         if not force_restart and self._wait_for_server_ready(max_attempts=1):
-            print(f"Server already running at {self._base}")
-            print("  (use s.start(force_restart=True) or s.restart() to force reload)")
+            logger.info(f"Server already running at {self._base}")
+            logger.info("  (use s.start(force_restart=True) or s.restart() to force reload)")
             return self
 
         self._kill_stale_server()
@@ -724,10 +726,9 @@ class TerrainSession:
         python_exe = str(
             _VENV_PYTHON) if _VENV_PYTHON.exists() else sys.executable
         if self._wait_for_server_ready():
-            print(
-                f"Server running (PID {self._server_proc.pid}, python: {python_exe}, reload={reload})")
+            logger.info(f"Server running (PID {self._server_proc.pid}, python: {python_exe}, reload={reload})")
         else:
-            print("Warning: server may not be ready yet")
+            logger.warning("Warning: server may not be ready yet")
         return self
 
     def restart(self, reload: bool = False,
@@ -752,12 +753,12 @@ class TerrainSession:
             except subprocess.TimeoutExpired:
                 pass
             self._server_proc = None
-            print("Server stopped.")
+            logger.info("Server stopped.")
         else:
             # No _server_proc — but there may be a server we adopted on start().
             # Kill whatever is on the port.
             self._kill_stale_server()
-            print("Server stopped (external process).")
+            logger.info("Server stopped (external process).")
 
     def __enter__(self) -> TerrainSession:
         return self
@@ -777,12 +778,9 @@ class TerrainSession:
         can use the individual endpoints (/api/settings/projections, etc.) instead.
         """
         data = self._api_request("get", "/api/settings", timeout=10)
-        print(
-            f"Projections  : {[p['id'] for p in data.get('projections', [])]}")
-        print(
-            f"Colormaps    : {[c['id'] for c in data.get('colormaps', [])]}")
-        print(
-            f"Datasets     : {[d['id'] for d in data.get('datasets', [])]}")
+        logger.info(f"Projections  : {[p['id'] for p in data.get('projections', [])]}")
+        logger.info(f"Colormaps    : {[c['id'] for c in data.get('colormaps', [])]}")
+        logger.info(f"Datasets     : {[d['id'] for d in data.get('datasets', [])]}")
         return data
 
     def regions(self, filter_col: str | None = None,
@@ -847,8 +845,8 @@ class TerrainSession:
                             self.settings[group][api_key] = val
                             break
 
-        print(f"Region : {name}")
-        print(f"BBox   : {self.bbox}")
+        logger.info(f"Region : {name}")
+        logger.info(f"BBox   : {self.bbox}")
         return self
 
     def create_region(self, name: str, north: float, south: float,
@@ -869,7 +867,7 @@ class TerrainSession:
                                              continent=continent,
                                              source=source)
         self._api_request("post", "/api/regions", json=payload)
-        print(f"Created region: {name}")
+        logger.info(f"Created region: {name}")
         return self
 
     def update_region(self, north: float | None = None, south: float | None = None,
@@ -896,7 +894,7 @@ class TerrainSession:
             "north": payload["north"], "south": payload["south"],
             "east":  payload["east"],  "west":  payload["west"],
         }
-        print(f"Updated region: {self.region_name}")
+        logger.info(f"Updated region: {self.region_name}")
         return self
 
     def delete_region(self, name: str | None = None) -> TerrainSession:
@@ -909,7 +907,7 @@ class TerrainSession:
         if not target:
             raise RuntimeError("Provide a region name or call select() first")
         self._api_request("delete", f"/api/regions/{target}")
-        print(f"Deleted region: {target}")
+        logger.info(f"Deleted region: {target}")
         if target == self.region_name:
             self.region_name = None
             self.bbox = {}
@@ -928,7 +926,7 @@ class TerrainSession:
         payload = self._extract_flat_settings()
         self._api_request(
             "put", f"/api/regions/{self.region_name}/settings", json=payload)
-        print(f"Settings saved for: {self.region_name}")
+        logger.info(f"Settings saved for: {self.region_name}")
         return self
 
     # ------------------------------------------------------------------ #
@@ -1113,7 +1111,7 @@ class TerrainSession:
         """Standardized check for fetch_* methods: bbox exists, settings valid."""
         self._ensure_bbox()
         self._validate_settings()
-        print(f"Fetching {name}…")
+        logger.info(f"Fetching {name}…")
 
     def _prepare_array_response(
         self, values: list, h: int, w: int, dtype=np.float32
@@ -1155,12 +1153,12 @@ class TerrainSession:
         # NaN fills from projection → black (0)
         return np.nan_to_num(projected, nan=0.0).clip(0, 255).astype(np.uint8)
 
-    def _print_grid_info(self, name: str, w: int, h: int, extra: str = "") -> None:
-        """Print standardized grid dimension info."""
+    def _log_grid_info(self, name: str, w: int, h: int, extra: str = "") -> None:
+        """Log standardized grid dimension info."""
         msg = f"{name}: {w}×{h} px"
         if extra:
             msg += f"  {extra}"
-        print(msg)
+        logger.info(msg)
 
     def fetch_dem(self) -> TerrainSession:
         """POST /api/terrain/dem — fetch and store the processed DEM.
@@ -1178,8 +1176,8 @@ class TerrainSession:
         self.dem = self._api_request(
             "post", "/api/terrain/dem", params=payload, timeout=120)
         d = self.dem
-        print(f"min={d['min_elevation']:.1f} m  max={d['max_elevation']:.1f} m  "
-              f"mean={d['mean_elevation']:.1f} m  shape={d['dimensions']}")
+        logger.info(f"min={d['min_elevation']:.1f} m  max={d['max_elevation']:.1f} m  "
+                    f"mean={d['mean_elevation']:.1f} m  shape={d['dimensions']}")
         return self
 
     def show_dem(self) -> None:
@@ -1275,7 +1273,7 @@ class TerrainSession:
             msg = (
                 "No city raster available — "
                 "skipping show_city() (bbox too large or fetch_cities() not called).")
-            print(msg)
+            logger.info(msg)
             return
 
         h = self.city_raster["height"]
@@ -1694,7 +1692,7 @@ class TerrainSession:
             memory and display time reasonable.
         """
         self._require_attribute("bbox", "fetch_water_mask")
-        print("Fetching water mask…")
+        logger.info("Fetching water mask…")
         data = self._fetch_water_endpoint()
 
         pct = data.get("water_percentage", 0.0)
@@ -1706,8 +1704,7 @@ class TerrainSession:
 
         if self.settings["projection"]["projection"] != "none":
             mask_arr = self._apply_projection(mask_arr)
-            print(
-                f"  → projected to {mask_arr.shape[1]}×{mask_arr.shape[0]} px")
+            logger.info(f"  → projected to {mask_arr.shape[1]}×{mask_arr.shape[0]} px")
 
         mask_arr = self._rescale_layer(mask_arr, max_display_dim)
         h, w = mask_arr.shape
@@ -1732,7 +1729,7 @@ class TerrainSession:
             "_rescaled":      False,
         }
 
-        self._print_grid_info("Water coverage", w, h, f"{pct:.1f}%")
+        self._log_grid_info("Water coverage", w, h, f"{pct:.1f}%")
         return self
 
     def fetch_esa_landcover(self, max_display_dim: int = 1000) -> TerrainSession:
@@ -1754,7 +1751,7 @@ class TerrainSession:
         self._require_attribute("bbox", "fetch_esa_landcover")
 
         if self.esa_landcover is None:
-            print("Fetching ESA land-cover…")
+            logger.info("Fetching ESA land-cover…")
             data = self._fetch_water_endpoint()
             esa_h, esa_w = data["esa_dimensions"]
             esa_raw = self._decode_grid_response(
@@ -1789,8 +1786,7 @@ class TerrainSession:
 
             if self.settings["projection"]["projection"] != "none":
                 esa_arr = self._apply_projection(esa_arr)
-                print(
-                    f"  → projected to {esa_arr.shape[1]}×{esa_arr.shape[0]} px")
+                logger.info(f"  → projected to {esa_arr.shape[1]}×{esa_arr.shape[0]} px")
 
             esa_arr = self._rescale_layer(
                 esa_arr, max_display_dim, categorical=True)
@@ -1800,7 +1796,7 @@ class TerrainSession:
             self.esa_landcover["_rescaled"] = True
 
         h, w = self.esa_landcover["esa_dimensions"]
-        self._print_grid_info("ESA land-cover", w, h)
+        self._log_grid_info("ESA land-cover", w, h)
         return self
 
     def fetch_satellite(self) -> TerrainSession:
@@ -1812,13 +1808,12 @@ class TerrainSession:
         """
         self._require_attribute("bbox", "fetch_satellite")
         params = {**self.bbox, "dim": self.settings["satellite"]["dim"]}
-        print("Fetching satellite image…")
+        logger.info("Fetching satellite image…")
         data = self._api_request(
             "get", "/api/terrain/satellite", params=params, timeout=300
         )
         self.satellite = data["image"]
-        print(
-            f"Satellite image received ({len(self.satellite) // 1024} KB base64)")
+        logger.info(f"Satellite image received ({len(self.satellite) // 1024} KB base64)")
 
         # Apply projection per-channel so satellite aligns with the projected DEM
         if self.settings["projection"]["projection"] != "none":
@@ -1830,8 +1825,8 @@ class TerrainSession:
             buf = BytesIO()
             Image.fromarray(projected).save(buf, format="JPEG", quality=85)
             self.satellite = base64.b64encode(buf.getvalue()).decode()
-            print(f"  → projected to {projected.shape[1]}×{projected.shape[0]} px "
-                  f"({len(self.satellite) // 1024} KB)")
+            logger.info(f"  → projected to {projected.shape[1]}×{projected.shape[0]} px "
+                        f"({len(self.satellite) // 1024} KB)")
 
         return self
 
@@ -1864,14 +1859,14 @@ class TerrainSession:
             "dim":    self.settings["dem"]["dim"],
             "layers": layers,
         }
-        print(f"Merging {len(layers)} DEM layer(s)…")
+        logger.info(f"Merging {len(layers)} DEM layer(s)…")
         self.dem = self._api_request(
             "post", "/api/composite/dem-merge", json=payload, timeout=300
         )
         d = self.dem
-        print(f"min={d['min_elevation']:.1f} m  max={d['max_elevation']:.1f} m  "
-              f"mean={d['mean_elevation']:.1f} m  shape={d['dimensions']}  "
-              f"layers={d.get('layer_count', len(layers))}")
+        logger.info(f"min={d['min_elevation']:.1f} m  max={d['max_elevation']:.1f} m  "
+                    f"mean={d['mean_elevation']:.1f} m  shape={d['dimensions']}  "
+                    f"layers={d.get('layer_count', len(layers))}")
         return self
 
     def fetch_cities(self) -> TerrainSession:
@@ -1883,21 +1878,14 @@ class TerrainSession:
         self._require_attribute("bbox", "fetch_cities")
 
         # Pre-check bbox size to provide better error message
-        north, south = self.bbox["north"], self.bbox["south"]
-        east, west = self.bbox["east"], self.bbox["west"]
-        mid_lat = (north + south) / 2.0
-        R = 6371.0  # Earth radius in km
-        dLat = (north - south) * math.pi / 180
-        dLon = (east - west) * math.pi * \
-            math.cos(mid_lat * math.pi / 180) / 180
-        diag_km = math.sqrt((R * dLat) ** 2 + (R * dLon) ** 2)
+        diag_km = bbox_diagonal_km(self.bbox)
 
         if diag_km > 15:
             msg1 = f"⚠️  OSM city data requires bbox ≤15 km diagonal (current: {diag_km:.1f} km)"
             msg2 = f"   Current region: {diag_km:.0f} km × {diag_km:.0f} km (too large)"
-            print(msg1)
-            print(msg2)
-            print("   💡 Tip: Select a city-scale region or draw a smaller bounding box")
+            logger.info(msg1)
+            logger.info(msg2)
+            logger.info("   💡 Tip: Select a city-scale region or draw a smaller bounding box")
             self.city_data = None
             return self
 
@@ -1907,7 +1895,7 @@ class TerrainSession:
             "simplify_tolerance": self.settings["city"]["simplify_tolerance"],
             "min_area":           self.settings["city"]["min_area"],
         }
-        print(f"Fetching OSM city data (bbox: {diag_km:.1f} km diagonal)…")
+        logger.info(f"Fetching OSM city data (bbox: {diag_km:.1f} km diagonal)…")
         try:
             r = self._api_request_raw(
                 "post", "/api/cities", json=payload, timeout=120
@@ -1919,8 +1907,8 @@ class TerrainSession:
                     error_msg = r.json().get("error", r.text)
                 except Exception:
                     error_msg = "Bounding box too large"
-                print(f"⚠️  {error_msg}")
-                print("   💡 Use a smaller region (≤10 km diagonal for best results)")
+                logger.warning(f"⚠️  {error_msg}")
+                logger.info("   💡 Use a smaller region (≤10 km diagonal for best results)")
                 self.city_data = None
                 return self
             elif r.status_code == 400:
@@ -1928,7 +1916,7 @@ class TerrainSession:
                     error_msg = r.json().get("error", r.text)
                 except Exception:
                     error_msg = r.text
-                print(f"⚠️  Invalid request: {error_msg}")
+                logger.warning(f"⚠️  Invalid request: {error_msg}")
                 self.city_data = None
                 return self
 
@@ -1940,11 +1928,10 @@ class TerrainSession:
             n_roads = len(self.city_data.get("roads", {}).get("features", []))
             n_waterways = len(self.city_data.get(
                 "waterways", {}).get("features", []))
-            print(
-                f"✓ Fetched {n_buildings} buildings, {n_roads} roads, {n_waterways} waterways")
+            logger.info(f"✓ Fetched {n_buildings} buildings, {n_roads} roads, {n_waterways} waterways")
         except requests.exceptions.RequestException as e:
-            print(f"⚠️  Network error: {e}")
-            print(f"   Make sure the server is running on {self._base}")
+            logger.warning(f"⚠️  Network error: {e}")
+            logger.info(f"   Make sure the server is running on {self._base}")
             self.city_data = None
 
         return self
@@ -1984,13 +1971,12 @@ class TerrainSession:
         import time as _time
 
         if source == "hydrorivers":
-            print(f"Fetching HydroRIVERS hydrology "
-                  f"(min_order={min_order}, depression={depression_m} m)...")
-            print(
-                "  First call per region: downloads shapefile (~200 MB) + builds parquet")
-            print("  Subsequent calls: parquet bbox read (<1 sec) + rasterize")
+            logger.info(f"Fetching HydroRIVERS hydrology "
+                        f"(min_order={min_order}, depression={depression_m} m)...")
+            logger.info("  First call per region: downloads shapefile (~200 MB) + builds parquet")
+            logger.info("  Subsequent calls: parquet bbox read (<1 sec) + rasterize")
         else:
-            print(f"Fetching Natural Earth hydrology (scale_m={scale_m})...")
+            logger.info(f"Fetching Natural Earth hydrology (scale_m={scale_m})...")
 
         params = {
             "north":          self.bbox["north"],
@@ -2012,24 +1998,24 @@ class TerrainSession:
                 "get", "/api/terrain/hydrology", params=params, timeout=600)
         except Exception as e:
             dt = _time.perf_counter() - t0
-            print(f"  Hydrology API request failed after {dt:.1f}s: {e}")
+            logger.warning(f"  Hydrology API request failed after {dt:.1f}s: {e}")
             self.hydrology = None
             return self
         dt_api = _time.perf_counter() - t0
-        print(f"  API response in {dt_api:.1f}s")
+        logger.info(f"  API response in {dt_api:.1f}s")
 
         if "error" in resp:
-            print(f"  {resp['error']}")
+            logger.warning(f"  {resp['error']}")
             self.hydrology = None
             return self
 
         feature_count = resp.get("feature_count", 0)
         if feature_count == 0:
-            print("  No rivers found in region")
+            logger.info("  No rivers found in region")
             self.hydrology = None
             return self
 
-        print(f"  {feature_count} river features found")
+        logger.info(f"  {feature_count} river features found")
 
         t_post = _time.perf_counter()
         h, w = resp["river_grid_dimensions"]
@@ -2045,9 +2031,9 @@ class TerrainSession:
                 z_h = dem_h / river_grid.shape[0]
                 z_w = dem_w / river_grid.shape[1]
                 river_grid = zoom(river_grid, (z_h, z_w), order=1)
-                print(f"  Resized hydrology to match DEM: {dem_w}x{dem_h}")
+                logger.info(f"  Resized hydrology to match DEM: {dem_w}x{dem_h}")
             except ImportError:
-                print("  Warning: scipy not available, skipping DEM dimension match")
+                logger.warning("  Warning: scipy not available, skipping DEM dimension match")
 
         h, w = river_grid.shape
         self.hydrology = {
@@ -2060,9 +2046,9 @@ class TerrainSession:
 
         dt_post = _time.perf_counter() - t_post
         dt_total = _time.perf_counter() - t0
-        print(f"  Post-processing: {dt_post:.1f}s (prepare array + rescale)")
-        print(f"  Hydrology complete: {w}x{h} px, {dt_total:.1f}s total "
-              f"(API={dt_api:.1f}s, post={dt_post:.1f}s)")
+        logger.info(f"  Post-processing: {dt_post:.1f}s (prepare array + rescale)")
+        logger.info(f"  Hydrology complete: {w}x{h} px, {dt_total:.1f}s total "
+                    f"(API={dt_api:.1f}s, post={dt_post:.1f}s)")
         return self
 
     def merge_hydrology_with_dem(self) -> TerrainSession:
@@ -2079,7 +2065,7 @@ class TerrainSession:
         if self.dem is None:
             raise RuntimeError("Call fetch_dem() first")
         if self.hydrology is None:
-            print("⚠️  No hydrology data available (call fetch_hydrology() first)")
+            logger.warning("⚠️  No hydrology data available (call fetch_hydrology() first)")
             return self
 
         # Send bbox + DEM settings so the server resolves both arrays from
@@ -2095,7 +2081,7 @@ class TerrainSession:
                 "water_scale":  s.get("water_scale", 0.05),
                 "subtract_water":      s.get("subtract_water", True),
                 "maintain_dimensions": s.get("maintain_dimensions", True),
-                "clip_nans":    s.get("clip_nans", False),
+                "clip_valid_region": s.get("clip_valid_region", False),
                 "show_sat":     False,
             },
         }
@@ -2105,7 +2091,7 @@ class TerrainSession:
             resp = self._api_request(
                 "post", endpoint, json=payload, timeout=300)
         except Exception as e:
-            print(f"⚠️  Hydrology merge API request failed: {e}")
+            logger.warning(f"⚠️  Hydrology merge API request failed: {e}")
             return self
 
         # Update DEM with merged values (response is b64-encoded float32)
@@ -2126,9 +2112,9 @@ class TerrainSession:
             self.dem["min_elevation"] = float(merged_arr.min())
             self.dem["max_elevation"] = float(merged_arr.max())
             self.dem["mean_elevation"] = float(merged_arr.mean())
-            print("Merged hydrology depressions into DEM")
+            logger.info("Merged hydrology depressions into DEM")
         except Exception as e:
-            print(f"Failed to apply merged DEM: {e}")
+            logger.warning(f"Failed to apply merged DEM: {e}")
 
         return self
 
@@ -2182,7 +2168,7 @@ class TerrainSession:
             "knob_width_mm": sp["knob_width_mm"], "knob_depth_mm": sp["knob_depth_mm"],
             "clearance_mm": sp["clearance_mm"],
         }
-        print(f"Cutting {sp['split_cols']}x{sp['split_rows']} jigsaw puzzle…")
+        logger.info(f"Cutting {sp['split_cols']}x{sp['split_rows']} jigsaw puzzle…")
         task_id = self._api_request("post", "/api/export/start", json=body)["task_id"]
         deadline = time.time() + timeout
         while (st := self._api_request("get", f"/api/export/status/{task_id}"))["status"] == "running":
@@ -2197,7 +2183,7 @@ class TerrainSession:
         output_dir.mkdir(exist_ok=True)
         self.puzzle_path = output_dir / f"{body['name']}_puzzle.zip"
         self.puzzle_path.write_bytes(r.content)
-        print(f"Saved: {self.puzzle_path}  ({len(r.content) / 1024:.1f} KB)")
+        logger.info(f"Saved: {self.puzzle_path}  ({len(r.content) / 1024:.1f} KB)")
         return self
 
     def verify(self) -> list[dict]:
@@ -2228,15 +2214,14 @@ class TerrainSession:
     def cache_status(self) -> dict:
         """GET /api/cache — return cache stats (file count, size, recent files)."""
         data = self._api_request("get", "/api/cache", timeout=10)
-        print(
-            f"Cache: {data['total_cached_files']} files, {data['total_size_mb']:.1f} MB")
+        logger.info(f"Cache: {data['total_cached_files']} files, {data['total_size_mb']:.1f} MB")
         return data
 
     def clear_cache(self) -> dict:
         """DELETE /api/cache — clear all cached files from the server disk cache."""
         data = self._api_request("delete", "/api/cache", timeout=30)
         total = sum(c.get("files_deleted", 0) for c in data.get("cleared", []))
-        print(f"Cache cleared: {total} files deleted")
+        logger.info(f"Cache cleared: {total} files deleted")
         return data
 
     def composite_city_raster(self, width: int | None = None,
@@ -2259,7 +2244,7 @@ class TerrainSession:
             msg = (
                 "Skipping composite_city_raster() — no city data "
                 "(bbox too large or fetch_cities() not called).")
-            print(msg)
+            logger.info(msg)
             return self
         dim = self.settings["dem"]["dim"]
         proj = self.settings["projection"]
@@ -2268,14 +2253,14 @@ class TerrainSession:
             "width":      width or dim,
             "height":     height or dim,
             "projection": proj["projection"],
-            "clip_nans":  proj["clip_nans"],
+            "clip_valid_region": proj["clip_valid_region"],
         }
         self.city_raster = self._api_request(
             "post", "/api/composite/city-raster", json=payload, timeout=60
         )
         proj_label = f" (projected: {proj['projection']})" if proj["projection"] != "none" else ""
-        print(f"City raster: {self.city_raster['width']}×{self.city_raster['height']} px, "
-              f"layers: buildings, roads, waterways, walls{proj_label}")
+        logger.info(f"City raster: {self.city_raster['width']}×{self.city_raster['height']} px, "
+                    f"layers: buildings, roads, waterways, walls{proj_label}")
         return self
 
     def check_city_cache(self) -> bool:
@@ -2294,7 +2279,7 @@ class TerrainSession:
             "get", "/api/cities/cached", params=params, timeout=10
         )
         cached = data.get("cached", False)
-        print(f"City cache: {'hit ✓' if cached else 'miss'}")
+        logger.info(f"City cache: {'hit ✓' if cached else 'miss'}")
         return cached
 
     def rasterize_city(self) -> TerrainSession:
@@ -2306,7 +2291,7 @@ class TerrainSession:
         """
         self._require_attribute("bbox", "rasterize_city")
         if self.city_data is None:
-            print("Skipping rasterize_city() — call fetch_cities() first.")
+            logger.info("Skipping rasterize_city() — call fetch_cities() first.")
             return self
         c = self.settings["city"]
         proj = self.settings["projection"]
@@ -2320,7 +2305,7 @@ class TerrainSession:
             "road_depression_m":  c["road_depression_m"],
             "water_depression_m": c["water_depression_m"],
             "projection":         proj["projection"],
-            "clip_nans":          proj["clip_nans"],
+            "clip_valid_region":  proj["clip_valid_region"],
         }
         self.city_raster = self._api_request(
             "post", "/api/cities/raster", json=payload, timeout=60
@@ -2328,8 +2313,7 @@ class TerrainSession:
         w, h = self.city_raster["width"], self.city_raster["height"]
         vmin = self.city_raster.get("vmin", 0)
         vmax = self.city_raster.get("vmax", 0)
-        print(
-            f"City raster: {w}×{h} px, elevation range [{vmin:.1f}, {vmax:.1f}] m")
+        logger.info(f"City raster: {w}×{h} px, elevation range [{vmin:.1f}, {vmax:.1f}] m")
         return self
 
     def export_city_model(
@@ -2389,9 +2373,9 @@ class TerrainSession:
             body["puzzle"] = puzzle
         if self._buildings_dirty and self.city_data is not None:
             body["layer_data"] = {"buildings": self.city_data["buildings"]}
-            print("Sending locally modified building tags with the export")
+            logger.info("Sending locally modified building tags with the export")
 
-        print(f"Building city model for {body['name']}…")
+        logger.info(f"Building city model for {body['name']}…")
         task_id = self._api_request("post", "/api/export/start", json=body)["task_id"]
         deadline = time.time() + timeout
         while True:
@@ -2405,7 +2389,7 @@ class TerrainSession:
             raise RuntimeError(f"City model failed: {st.get('message')}")
         r = self._api_request_raw("get", f"/api/export/download/{task_id}", timeout=600)
         r.raise_for_status()
-        print(f"✓ City model built ({len(r.content):,} bytes zip)")
+        logger.info(f"✓ City model built ({len(r.content):,} bytes zip)")
         return r.content
 
     # ── Building height estimation ────────────────────────────────────
@@ -2489,13 +2473,13 @@ class TerrainSession:
         for name in providers:
             factory = _registry.get(name)
             if factory is None:
-                print(f"⚠️  Unknown height provider: {name}")
+                logger.warning(f"⚠️  Unknown height provider: {name}")
                 continue
             provider = factory()
             if not provider.covers(bbox):
-                print(f"  {name}: no coverage for this bbox, skipping")
+                logger.info(f"  {name}: no coverage for this bbox, skipping")
                 continue
-            print(f"  {name}: fetching…", end=" ", flush=True)
+            logger.info(f"  {name}: fetching…")
             try:
                 if name == "google3d" and dem_arr is not None:
                     hr = provider.fetch_heights(bbox, dim, dem=dem_arr)
@@ -2504,21 +2488,21 @@ class TerrainSession:
                 n_valid = int(np.sum(~np.isnan(hr.raster)))
                 total = hr.raster.size
                 pct = 100 * n_valid / total if total else 0
-                print(f"✓ {n_valid}/{total} pixels ({pct:.0f}%)")
+                logger.info(f"✓ {n_valid}/{total} pixels ({pct:.0f}%)")
                 results.append(hr)
             except Exception as exc:
-                print(f"⚠️ {exc}")
+                logger.warning(f"⚠️ {exc}")
 
         if results:
             merged = merge_height_rasters(results, target_shape=dim)
             n_valid = int(np.sum(~np.isnan(merged.raster)))
             total = merged.raster.size
             pct = 100 * n_valid / total if total else 0
-            print(f"✓ Merged building heights: {n_valid}/{total} pixels "
-                  f"({pct:.0f}%) from {len(results)} source(s)")
+            logger.info(f"✓ Merged building heights: {n_valid}/{total} pixels "
+                        f"({pct:.0f}%) from {len(results)} source(s)")
             self.building_heights = merged
         else:
-            print("⚠️  No building height data available")
+            logger.warning("⚠️  No building height data available")
             self.building_heights = None
 
         return self
@@ -2558,7 +2542,7 @@ class TerrainSession:
             self.fetch_building_heights(providers)
 
         if self.building_heights is None:
-            print("⚠️  No building heights available — skipping enrichment")
+            logger.warning("⚠️  No building heights available — skipping enrichment")
             return self
 
         from city2stl.heights import enhance_buildings_with_raster
@@ -2583,10 +2567,8 @@ class TerrainSession:
         self.city_data["buildings"] = result["buildings"]
         self._buildings_dirty = True
         stats = result["stats"]
-        print(
-            f"Building enrichment: {stats['enhanced']}/{stats['total']} updated "
-            f"({stats['unchanged']} had OSM data, {stats['no_data']} no raster coverage)"
-        )
+        logger.info(f"Building enrichment: {stats['enhanced']}/{stats['total']} updated "
+                    f"({stats['unchanged']} had OSM data, {stats['no_data']} no raster coverage)")
         return self
 
     # ------------------------------------------------------------------ #
@@ -2666,7 +2648,7 @@ class TerrainSession:
             from city2stl import roof_model as _roof_model
 
             if not (use_model and _roof_model.load() is not None):
-                print("⚠️  No satellite image available — call fetch_satellite() first")
+                logger.warning("⚠️  No satellite image available — call fetch_satellite() first")
                 return self
 
         # ── Resolve height raster ──────────────────────────────────────
@@ -2704,10 +2686,8 @@ class TerrainSession:
         self.city_data["buildings"] = result
         self._buildings_dirty = True
         stats = result.get("_stats", {})
-        print(
-            f"Roof classification: {stats.get('classified', 0)}/{stats.get('total', 0)} classified "
-            f"({stats.get('unchanged', 0)} already tagged, {stats.get('skipped', 0)} skipped)"
-        )
+        logger.info(f"Roof classification: {stats.get('classified', 0)}/{stats.get('total', 0)} classified "
+                    f"({stats.get('unchanged', 0)} already tagged, {stats.get('skipped', 0)} skipped)")
         return self
 
     def satellite_array(self, b64: str | None = None) -> np.ndarray | None:
@@ -2750,7 +2730,7 @@ class TerrainSession:
         )
         model.eval()
         self._roof_model = model
-        print(f"RoofNet loaded: {checkpoint_path}")
+        logger.info(f"RoofNet loaded: {checkpoint_path}")
         return self
 
     # ------------------------------------------------------------------ #
@@ -2817,7 +2797,7 @@ class TerrainSession:
 
         ckpt = Path(checkpoint) if checkpoint else None
 
-        print(f"Running height prediction (model={model!r})…")
+        logger.info(f"Running height prediction (model={model!r})…")
         result = _predict(
             sat_rgb,
             known_heights,
@@ -2828,12 +2808,10 @@ class TerrainSession:
         )
         n_valid = int(np.sum(~np.isnan(result.raster)))
         total = result.raster.size
-        print(
-            f"✓ Predicted heights: {n_valid}/{total} pixels  "
-            f"range=[{float(np.nanmin(result.raster)):.1f}, "
-            f"{float(np.nanmax(result.raster)):.1f}] m  "
-            f"source={result.source_name}"
-        )
+        logger.info(f"✓ Predicted heights: {n_valid}/{total} pixels  "
+                    f"range=[{float(np.nanmin(result.raster)):.1f}, "
+                    f"{float(np.nanmax(result.raster)):.1f}] m  "
+                    f"source={result.source_name}")
         self.predicted_heights = result
         return self
 
@@ -2897,14 +2875,14 @@ class TerrainSession:
         default_output = project_root / "models" / "height_unet.pt"
         output_path = Path(output) if output else default_output
 
-        print(f"Collecting tiles for {cities} from providers {providers}…")
+        logger.info(f"Collecting tiles for {cities} from providers {providers}…")
         tile_paths = collect_tiles(
             cities,
             tile_dir=tile_dir,
             providers=providers,
             tiles_per_city=tiles_per_city,
         )
-        print(f"Collected {len(tile_paths)} tiles total")
+        logger.info(f"Collected {len(tile_paths)} tiles total")
 
         if not tile_paths:
             raise RuntimeError(
@@ -2918,12 +2896,10 @@ class TerrainSession:
             device=device,
         )
 
-        print(f"Training U-Net ({cfg.epochs} epochs, device={device})…")
+        logger.info(f"Training U-Net ({cfg.epochs} epochs, device={device})…")
         result = _train(tile_paths, output_path, cfg)
-        print(
-            f"✓ Training complete  best_val_loss={result['best_val_loss']:.4f}  "
-            f"checkpoint={result['checkpoint']}"
-        )
+        logger.info(f"✓ Training complete  best_val_loss={result['best_val_loss']:.4f}  "
+                    f"checkpoint={result['checkpoint']}")
         return result
 
     # ------------------------------------------------------------------ #
@@ -2966,7 +2942,7 @@ class TerrainSession:
         if not target_bbox:
             raise RuntimeError("Provide a bbox or call select() first.")
 
-        print(f"Loading STL: {path}")
+        logger.info(f"Loading STL: {path}")
         heightmap, mask = stl_to_heightmap(
             path,
             bbox=target_bbox,
@@ -2976,11 +2952,9 @@ class TerrainSession:
         n_valid = int(mask.sum())
         total = mask.size
         pct = 100 * n_valid / total if total else 0
-        print(
-            f"✓ Imported {Path(path).name}: {heightmap.shape[1]}×{heightmap.shape[0]} px, "
-            f"{n_valid}/{total} surface pixels ({pct:.0f}%)  "
-            f"Z-range [{np.nanmin(heightmap):.2f}, {np.nanmax(heightmap):.2f}]"
-        )
+        logger.info(f"✓ Imported {Path(path).name}: {heightmap.shape[1]}×{heightmap.shape[0]} px, "
+                    f"{n_valid}/{total} surface pixels ({pct:.0f}%)  "
+                    f"Z-range [{np.nanmin(heightmap):.2f}, {np.nanmax(heightmap):.2f}]")
         self.stl_heightmap: np.ndarray | None = heightmap
         self.stl_mask: np.ndarray | None = mask
         return self
@@ -3069,7 +3043,7 @@ class TerrainSession:
             else:
                 dem_arr = dem_raw
 
-        print(f"Infilling heights ({method})…")
+        logger.info(f"Infilling heights ({method})…")
         if method == "nearest":
             filled = infill_nearest(hm)
         else:
@@ -3077,10 +3051,8 @@ class TerrainSession:
 
         nan_before = int(np.isnan(hm).sum())
         nan_after = int(np.isnan(filled).sum())
-        print(
-            f"✓ Infill complete: {nan_before} NaN → {nan_after} NaN  "
-            f"Z-range [{float(np.nanmin(filled)):.2f}, {float(np.nanmax(filled)):.2f}]"
-        )
+        logger.info(f"✓ Infill complete: {nan_before} NaN → {nan_after} NaN  "
+                    f"Z-range [{float(np.nanmin(filled)):.2f}, {float(np.nanmax(filled)):.2f}]")
         self.infilled_heights: np.ndarray | None = filled
         return self
 

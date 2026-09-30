@@ -9,11 +9,11 @@ city2stl/height/service.py — Height-provider registry, selection and per-build
   - ``enhance_city_data(payload, ...)`` fill ``default`` building heights from
                                         3DEP lidar, then the fine raster providers
 
-Synchronous and app-free: the async fetch / diagnostics endpoints and the
-per-provider result cache stay in ``app/server/core/height/service.py``. The
-OpenTopography providers start without a key (they fall back to
-``$OPENTOPO_API_KEY``); the app passes its configured key through
-``set_opentopo_api_key`` at import.
+Synchronous and app-free; the app imports it directly (``app/server/core/city_data.py``,
+``app/server/routers/height.py``, ``app/server/routers/auth.py``). The OpenTopography
+providers start without a key and fall back to ``geo2stl.opentopo.get_api_key()``
+($OPENTOPO_API_KEY / config.json); the key route rebinds them through
+``set_opentopo_api_key``.
 """
 
 from __future__ import annotations

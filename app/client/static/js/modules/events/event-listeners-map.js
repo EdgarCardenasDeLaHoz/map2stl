@@ -1,7 +1,7 @@
 /**
- * modules/event-listeners-map.js
+ * modules/events/event-listeners-map.js
  *
- * Map, DEM display, terrain overlays, grid, globe, regions panel,
+ * Map, DEM display, terrain overlays, grid, globe,
  * draw tool, and bbox fine-tune event listeners.
  *
  * Exposes on window:
@@ -253,8 +253,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
             btn?.classList.remove('active');
         }
     });
-
-    window.closeRegionsPanel = function closeRegionsPanel() {};
 
     const mapSettingsBtn = document.getElementById('floatingMapSettingsBtn');
     const mapSettingsPanel = document.getElementById('mapSettingsPanel');

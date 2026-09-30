@@ -226,7 +226,9 @@ request (bbox + projection) → cache miss → fetch (plate carrée) → write c
 ```
 
 - Switching projection on the same bbox is a cache hit plus a projection.
-- `projection` and `clip_nans` / `clip_valid_region` are **not** in the keys. The DEM key does
+- `projection` and `clip_valid_region` are **not** in the keys. (HTTP routes and saved settings call
+  the flag `clip_valid_region`; the `geo2stl.projections` functions keep the parameter name
+  `clip_nans`. The route alias `clip_nans` was removed 2026-09-30.) The DEM key does
   carry `maintain_dimensions` (`md`); the other layers re-project on a hit, so a changed
   setting takes effect without a new key.
 - Endpoints:
@@ -236,8 +238,8 @@ request (bbox + projection) → cache miss → fetch (plate carrée) → write c
   - `/api/terrain/esa-land-cover` — `esa_lc` namespace; categorical `project_grid`.
   - `/api/terrain/hydrology` — `hydrology` namespace; `project_grid` after the read.
   - `/api/terrain/satellite` — no disk cache; `project_rgb_image` on every request.
-  - `/api/height/fetch` — each provider's raw raster cached in `height_<provider>`
-    (`app/server/core/height/service.py::fetch_height_payload`); merged, then projected.
+  - `/api/height/fetch` — providers fetched on every request
+    (`app/server/routers/height.py::height_fetch`); merged, then projected.
 - ESA land cover and hydrology once baked the projected result into the cache and never
   re-projected on a hit (fixed 2026-07-19). A new raster endpoint follows the DEM / water-mask
   pattern.

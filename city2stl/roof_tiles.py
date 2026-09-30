@@ -37,18 +37,6 @@ def _sess():
     return _session
 
 
-def lon_to_gpx(lon, z):
-    return imagery.lon_to_global_px(lon, z)
-
-
-def lat_to_gpy(lat, z):
-    return imagery.lat_to_global_px(lat, z)
-
-
-def m_per_px(lat, z):
-    return imagery.m_per_px(lat, z)
-
-
 def tile(z, x, y):
     """One 256×256 tile as RGB, cached on disk. None if it cannot be had."""
     return imagery.fetch_tile(z, x, y, session=_sess(), cache_dir=CACHE, timeout=20)
@@ -71,10 +59,10 @@ def prefetch_bbox(north, south, east, west, zoom=18, workers=16, log=None):
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    x0 = lon_to_gpx(min(west, east), zoom)
-    x1 = lon_to_gpx(max(west, east), zoom)
-    y0 = lat_to_gpy(max(north, south), zoom)
-    y1 = lat_to_gpy(min(north, south), zoom)
+    x0 = imagery.lon_to_global_px(min(west, east), zoom)
+    x1 = imagery.lon_to_global_px(max(west, east), zoom)
+    y0 = imagery.lat_to_global_px(max(north, south), zoom)
+    y1 = imagery.lat_to_global_px(min(north, south), zoom)
     tx0, tx1 = int(x0 // TILE), int(x1 // TILE)
     ty0, ty1 = int(y0 // TILE), int(y1 // TILE)
 
@@ -125,10 +113,10 @@ def crop_for_ring(ring, zoom=18, pad=1.0, max_px=768):
     lats = [p[1] for p in ring]
     clat = 0.5 * (min(lats) + max(lats))
 
-    x0 = lon_to_gpx(min(lons), zoom)
-    x1 = lon_to_gpx(max(lons), zoom)
-    y0 = lat_to_gpy(max(lats), zoom)      # north edge is the smaller y
-    y1 = lat_to_gpy(min(lats), zoom)
+    x0 = imagery.lon_to_global_px(min(lons), zoom)
+    x1 = imagery.lon_to_global_px(max(lons), zoom)
+    y0 = imagery.lat_to_global_px(max(lats), zoom)      # north edge is the smaller y
+    y1 = imagery.lat_to_global_px(min(lats), zoom)
     px = max((x1 - x0) * pad, 8.0)
     py = max((y1 - y0) * pad, 8.0)
     x0, x1 = x0 - px, x1 + px
@@ -153,4 +141,4 @@ def crop_for_ring(ring, zoom=18, pad=1.0, max_px=768):
     # Geo bounds of the crop, so the caller can rasterise the ring into it.
     west, north = imagery.global_px_to_lonlat(ox + box[0], oy + box[1], zoom)
     east, south = imagery.global_px_to_lonlat(ox + box[2], oy + box[3], zoom)
-    return rgb, north, south, east, west, m_per_px(clat, zoom)
+    return rgb, north, south, east, west, imagery.m_per_px(clat, zoom)

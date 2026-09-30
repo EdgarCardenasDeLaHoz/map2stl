@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import time
 
 import numpy as np
@@ -23,6 +22,7 @@ import numpy as np
 from app.server.core import mesh_import
 from app.server.core.db import get_db, init_db
 from city2stl import landmarks as lm
+from geo2stl.geo import bbox_size_m
 
 logger = logging.getLogger(__name__)
 
@@ -116,12 +116,11 @@ def preview(buildings: dict, osm_id: str, spec: dict | None) -> dict:
         raise lm.LandmarkError(f"no building with OSM id {osm_id!r} in the city data")
     overrides = resolve({osm_id: spec}, buildings) if spec else {}
     n, s, e, w = lm._footprint_bbox(own, 0.0)
-    ext_m = max((n - s) * 111_320.0, (e - w) * 111_320.0 * math.cos(math.radians((n + s) / 2)), 1.0)
+    ext_m = max(*bbox_size_m({"north": n, "south": s, "east": e, "west": w}), 1.0)
     margin = max(0.15 * ext_m, 5.0)
     n, s, e, w = lm._footprint_bbox(own, margin)
     bbox = {"north": n, "south": s, "east": e, "west": w}
-    lat_m = (n - s) * 111_320.0
-    lon_m = (e - w) * 111_320.0 * math.cos(math.radians((n + s) / 2))
+    lon_m, lat_m = bbox_size_m(bbox)
     px_m = min(max(max(lat_m, lon_m) / PREVIEW_PX[1], 0.25), max(lat_m, lon_m) / PREVIEW_PX[0])
     shape = (max(int(round(lat_m / px_m)), 8), max(int(round(lon_m / px_m)), 8))
     scale = choose_scale(bbox, shape, 0.0, 0.0, mm_per_px=PREVIEW_SIZE_MM / max(shape),

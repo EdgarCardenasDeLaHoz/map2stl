@@ -27,7 +27,8 @@ the rest below.
   `RegionParameters()` defaults (dim 200 / height 10 / base 2). The DB defaults are
   600 / 25 / 5 (`app/server/schemas.py::RegionParameters` vs `app/server/core/db.py`).
 - **PA-10 Settings are not validated or versioned**: `save_region_settings_route` stores the
-  raw dict. `RegionSettings` is unused and there is no `schema_version`. See F-FE1 step 3.
+  raw dict; there is no settings model (the unused `RegionSettings` was deleted 2026-09-30) and no
+  `schema_version`. See F-FE1 step 3.
 - **PA-14 Silent zero-fill** (partly fixed; ESA/EE and all-tiles-failed now raise):
   - `geo2stl/dem.py::fetch_dem` (local source) returns zeros on error.
   - `geo2stl/hydrology.py` river rasteriser returns zeros on error.
@@ -42,8 +43,10 @@ the rest below.
   path directly (no temp + rename) and joins the whole mesh in memory. The app's mesh path uses
   trimesh; `writeSTL` is still reached from `geo2stl/dem.py`, `geo2stl/write.py` and numpy2stl
   `numpy2stl/src/numpy2stl/core/solid.py`.
-- **PA-12 Two caches escape `CACHE_ROOT`**: `geo2stl/opentopo.py` (own `cache/opentopo`) and
-  `app/server/config.py` `EE_CACHE_DIR`; `OPENTOPO_CACHE_PATH` in config is unused.
+- **PA-12 Two caches escape `CACHE_ROOT`** — fixed 2026-09-30: `geo2stl/opentopo.py::CACHE_PATH`,
+  `geo2stl/sat2stl.py::CACHE_DIR` and `app/server/config.py::EE_CACHE_DIR` sit under
+  `geo2stl.cache.CACHE_ROOT` (so `$MAP2STL_CACHE` moves them); `EE_CACHE_DIR` had pointed at
+  `Code/cache/ee`, which sat2stl no longer wrote. The unused `OPENTOPO_CACHE_PATH` was removed.
 - **PA-M Medium, still open**:
   - `app/server/core/db.py`: `_CREATE_REGIONS` lacks continent / source / city / tags.
   - `app/server/core/db.py::get_db` connections are never closed.
@@ -60,8 +63,6 @@ the rest below.
   - A contour-engraving failure is still downgraded to a warning by a blanket `except`
     (`export._apply_contour_lines`).
 - **PA-S Structural, still open**:
-  - `ExportRequest`, `ExportResponse`, `DEMResponse` and `RawDEMResponse` in `schemas.py`
-    have no importers.
   - Two city-raster routes (`app/server/routers/composite.py` and `app/server/routers/cities.py`).
   - Session:
     - `terrain_session.py` is 3.1k lines.
@@ -70,7 +71,6 @@ the rest below.
     - `_kill_stale_server` kills any owner of port 9090.
   - Dead code:
     - `geo2stl/write.py::savefile` (row-flipped, notebook-only).
-    - `geo2stl/dem.py::fetch_dem_from_source` has no callers.
     - `create_dem_model` / `process_region` are notebook-only.
   - `ExportContext.composite_layers` / `composite_dim` are stored but never read.
   - Presets:
@@ -195,7 +195,7 @@ last measured.
   - `prune_all_caches` (`app/server/core/cache.py`) walks only the `NAMESPACE_TTL` keys, once
     at startup, and is non-recursive.
   - Never swept: hydrorivers (4.8 GB), ndsm (1.1 GB), roof_tiles (392 MB), ee, google3d, the
-    loose root-level Overpass `.json` files, and `Code/cache` (`EE_CACHE_DIR`, see PA-12).
+    loose root-level Overpass `.json` files.
   - The opentopo tif cache (6.9 GB) has orphaned entries since `dim` left its key.
   - Fix: sweep the tree that exists. Decide per directory whether a refetch is cheap before
     deleting anything.

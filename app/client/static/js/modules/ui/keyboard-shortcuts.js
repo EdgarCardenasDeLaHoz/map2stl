@@ -2,7 +2,7 @@
  * modules/keyboard-shortcuts.js
  *
  * Global keyboard shortcuts:
- *   Ctrl+1/2/3/4  — switch views
+ *   Ctrl+1/2/3    — switch to the Explore / Edit / Extrude tabs
  *   Ctrl+S        — save region
  *   Ctrl+R        — reload layers
  *   Ctrl+Z/Y      — undo / redo curve
@@ -20,25 +20,23 @@ window.setupKeyboardShortcuts = function setupKeyboardShortcuts() {
 
         if (e.ctrlKey || e.metaKey) {
             switch (e.key) {
+                // One shortcut per header tab (MainHeader.vue data-view), in
+                // tab order. There is no Globe tab (the globe is an overlay
+                // toggled from the map), so it has no shortcut.
                 case '1':
                     e.preventDefault();
                     window.switchView?.('map');
-                    window.showToast?.('Map View (Ctrl+1)', 'info');
+                    window.showToast?.('Explore (Ctrl+1)', 'info');
                     break;
                 case '2':
                     e.preventDefault();
-                    window.switchView?.('globe');
-                    window.showToast?.('Globe View (Ctrl+2)', 'info');
+                    window.switchView?.('dem');
+                    window.showToast?.('Edit (Ctrl+2)', 'info');
                     break;
                 case '3':
                     e.preventDefault();
-                    window.switchView?.('dem');
-                    window.showToast?.('Layers View (Ctrl+3)', 'info');
-                    break;
-                case '4':
-                    e.preventDefault();
                     window.switchView?.('model');
-                    window.showToast?.('Model View (Ctrl+4)', 'info');
+                    window.showToast?.('Extrude (Ctrl+3)', 'info');
                     break;
                 case 's': case 'S':
                     e.preventDefault();

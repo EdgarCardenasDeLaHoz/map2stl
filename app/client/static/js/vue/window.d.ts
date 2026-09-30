@@ -9,10 +9,8 @@ interface Window {
     setSidebarState?: (mode: string) => void;
     _setSidebarViews?: (mode: string) => void;
 
-    // Leaflet map instance
-    _globalMap?: {
-        invalidateSize?: (options?: { animate?: boolean }) => void;
-    };
+    // Leaflet map instance (set by map-globe.js::initMap via window.setMap)
+    getMap?: () => { invalidateSize?: (options?: { animate?: boolean }) => void } | null;
 
     // DEM stack update trigger
     emitStackUpdate?: () => void;

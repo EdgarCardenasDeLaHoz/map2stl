@@ -25,6 +25,7 @@ matcher integration; the outputs are PNGs you can inspect.
 from __future__ import annotations
 
 import argparse
+import logging
 import time
 from pathlib import Path
 
@@ -33,6 +34,7 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[4]
 
+from city2stl.skyline._core.pano import stitch_pano_masks, stitch_pano_views  # noqa: E402
 from city2stl.skyline._core.segmentation import (  # noqa: E402
     _ADE20K_BUILDING_CLASSES,
     _ADE20K_SKY,
@@ -41,12 +43,8 @@ from city2stl.skyline._core.segmentation import (  # noqa: E402
     _neural_sky_and_building_masks,
     _neural_water_mask,
 )
+from city2stl.skyline._core.skyline import detect_buildings_from_mask  # noqa: E402
 from city2stl.skyline._pano.capture import _capture_pano_views  # noqa: E402
-from city2stl.skyline.pipeline import (  # noqa: E402
-    detect_buildings_from_mask,
-    stitch_pano_masks,
-    stitch_pano_views,
-)
 from city2stl.skyline.region_data import _load_site_seed_urls  # noqa: E402
 from city2stl.skyline.region_types import SkylinePoint  # noqa: E402
 from city2stl.skyline.streetview_io import (  # noqa: E402
@@ -524,4 +522,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Library progress (skyline._pano, region_pdf) goes through logging.
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     raise SystemExit(main())

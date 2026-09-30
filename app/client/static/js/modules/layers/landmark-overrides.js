@@ -10,7 +10,7 @@
  * (server: city2stl/landmarks.py).
  */
 
-export const OVERRIDE_KINDS = ['osm', 'ndsm', 'mesh'];
+const OVERRIDE_KINDS = ['osm', 'ndsm', 'mesh'];
 
 export const CATEGORY_LABELS = {
     worship: 'Place of worship',

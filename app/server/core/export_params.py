@@ -73,7 +73,7 @@ def resolve_dem(data: dict) -> tuple[list, int, int] | None:
     projection = dem.get("projection") or "none"
     if projection != "none":
         from geo2stl.projections import project_grid
-        clip = dem.get("clip_valid_region", dem.get("clip_nans", True))
+        clip = dem.get("clip_valid_region", True)
         dem_arr = project_grid(
             dem_arr.astype("float32"), north, south, east, west, projection,
             bool(clip), categorical=False,
@@ -163,7 +163,7 @@ class ExportContext:
                 composite, carve = compute_composite_dem(
                     data["bbox"], dim, composite_layers,
                     projection=dem_settings.get("projection") or "none",
-                    clip_nans=bool(dem_settings.get("clip_nans", True)),
+                    clip_valid_region=bool(dem_settings.get("clip_valid_region", True)),
                     maintain_dimensions=bool(
                         dem_settings.get("maintain_dimensions", False)),
                     split_carve=True,

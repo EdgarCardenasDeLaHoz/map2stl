@@ -27,7 +27,6 @@ import shapely
 
 import geo2stl.cache as _gc
 from app.server.core.cache import osm_cache_key, read_osm_cache, write_osm_cache
-from app.server.core.height.service import enhance_city_data
 from city2stl.cache_policy import (
     CITY_PIPELINE_VERSION,
     city_cache_missing_building_parts,
@@ -35,6 +34,7 @@ from city2stl.cache_policy import (
     city_cache_stale_buildings_only,
 )
 from city2stl.fetch import FetchCancelled, fetch_osm_data
+from city2stl.height.service import enhance_city_data
 from geo2stl.cache import list_osm_cache_params, write_osm_cache_params
 from geo2stl.geo import M_PER_DEG_LAT, bbox_diagonal_km
 

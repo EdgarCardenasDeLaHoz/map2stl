@@ -413,11 +413,6 @@ def fetch_dem(
         return np.zeros((mh, mw), dtype=float)
 
 
-def fetch_dem_from_source(source, north, south, east, west, dim, **kwargs) -> np.ndarray:
-    """One-release alias of :func:`fetch_dem` with the old argument order."""
-    return fetch_dem((north, south, east, west), dim, source, **kwargs)
-
-
 # ---------------------------------------------------------------------------
 # H5 tile constants (used by fetch_h5_dem and _geo_to_tile_pixel)
 # ---------------------------------------------------------------------------

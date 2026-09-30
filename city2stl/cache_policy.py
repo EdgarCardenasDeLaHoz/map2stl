@@ -38,19 +38,3 @@ def city_cache_missing_building_parts(payload: dict[str, Any]) -> bool:
 def city_cache_stale_buildings_only(payload: dict[str, Any]) -> bool:
     """True for a payload that is current except for its buildings layer's columns."""
     return int(payload.get("city_pipeline_version") or 0) in BUILDINGS_ONLY_STALE_VERSIONS
-
-
-def city_cache_needs_enrichment(payload: dict[str, Any]) -> bool:
-    """Return True when default-height buildings still need raster enhancement."""
-    if city_cache_missing_height_source(payload):
-        return True
-
-    features = building_features(payload)
-    if not features:
-        return False
-
-    enhancement = payload.get("height_enhancement") or {}
-    if enhancement.get("source_name") == "merged":
-        return False
-
-    return any((feat.get("properties") or {}).get("height_source") == "default" for feat in features)

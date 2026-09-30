@@ -39,7 +39,7 @@ def _default_region_settings() -> dict:
         },
         "projection": {
             "projection": "none",
-            "clip_nans": True,
+            "clip_valid_region": True,
         },
         "view": {
             "colormap": "terrain",

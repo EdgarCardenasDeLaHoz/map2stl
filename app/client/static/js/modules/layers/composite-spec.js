@@ -26,7 +26,7 @@ export const FEATURE_SOURCES = Object.freeze([
  * `add`. The mesh export carves them after its median filter. Unlike the
  * `osm_*` channels they are terrain, so they go in the export spec.
  */
-export const RIVER_SOURCES = Object.freeze(['hydrorivers', 'natural_earth_rivers']);
+const RIVER_SOURCES = Object.freeze(['hydrorivers', 'natural_earth_rivers']);
 export const WATER_TERRAIN_SOURCES = Object.freeze([...RIVER_SOURCES, 'lakes']);
 
 /**
@@ -117,7 +117,7 @@ export function anyFeatureChannelEnabled(params) {
 // ─── Apply-to-DEM guard ──────────────────────────────────────────────────────
 
 /** Terrain range (m) at or below which a composite counts as flat. */
-export const FLAT_COMPOSITE_RANGE_M = 1e-3;
+const FLAT_COMPOSITE_RANGE_M = 1e-3;
 
 /**
  * Identity of the inputs a composite was computed from: the loaded DEM (a

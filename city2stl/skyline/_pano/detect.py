@@ -1,6 +1,7 @@
 """skyline._pano.detect — extracted from pano_registration.py (A2 split)."""
 from __future__ import annotations
 
+import logging
 import math
 import os
 import time
@@ -36,6 +37,8 @@ from ..region_config import (
 )
 from ..region_data import _bearing_deg, _distance_m
 from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResult
+
+logger = logging.getLogger(__name__)
 
 
 def _register_views(
@@ -199,7 +202,7 @@ def _register_views(
                             image,
                         )
                 except Exception as _e:
-                    print(f"[cross_view] scorer build failed: {_e}")
+                    logger.warning(f"[cross_view] scorer build failed: {_e}")
                     _cv_scorer = None
             with _sub("match_segments_to_buildings"):
                 matched_segments = match_segments_to_buildings(
@@ -347,10 +350,8 @@ def _register_views(
                     _annotate_match_diagnostics(seg)
                     n_swapped += 1
         if n_swapped:
-            print(
-                f"[cross_verify] {cap.viewpoint.name}: "
-                f"corrected {n_swapped} match(es) via post-hoc rescue"
-            )
+            logger.info(f"[cross_verify] {cap.viewpoint.name}: "
+                        f"corrected {n_swapped} match(es) via post-hoc rescue")
         if timer is not None:
             timer.record("post-match cross-verify rescue",
                          time.perf_counter() - _rescue_t0, level=2)
@@ -389,21 +390,17 @@ def _register_views(
             res = [abs(d - med) for d in deltas]
             mad = float(np.median(res))
             if abs(med) > 5.0 or mad > 15.0:
-                print(
-                    f"[heading_consistency] {cap.viewpoint.name}: "
-                    f"median bearing_delta={med:+.1f}° "
-                    f"MAD={mad:.1f}° n={len(deltas)} "
-                    f"— {'heading offset may be biased' if abs(med) > 5.0 else 'matches scattered'}"
-                )
+                logger.info(f"[heading_consistency] {cap.viewpoint.name}: "
+                            f"median bearing_delta={med:+.1f}° "
+                            f"MAD={mad:.1f}° n={len(deltas)} "
+                            f"— {'heading offset may be biased' if abs(med) > 5.0 else 'matches scattered'}")
         if wide_segs:
             ratios = [f"{int(s.get('width_ratio', 0))}×" for s in wide_segs]
             covered = [str(s.get('covered_other_projs', 0)) for s in wide_segs]
-            print(
-                f"[multi_building] {cap.viewpoint.name}: "
-                f"{len(wide_segs)} wide segment(s) "
-                f"(width_ratios={','.join(ratios)} "
-                f"others_inside={','.join(covered)})"
-            )
+            logger.info(f"[multi_building] {cap.viewpoint.name}: "
+                        f"{len(wide_segs)} wide segment(s) "
+                        f"(width_ratios={','.join(ratios)} "
+                        f"others_inside={','.join(covered)})")
 
         # Sanity check on each matched segment's base_y vs the OSM
         # building's geometric expected ground row. The expected base
@@ -548,8 +545,8 @@ def _smooth_matches_across_views(
                     break
 
     if swap_count:
-        print(f"[smooth_matches] swapped {swap_count} dissenting per-view "
-              f"match(es) to seed-level popular candidates")
+        logger.info(f"[smooth_matches] swapped {swap_count} dissenting per-view "
+                    f"match(es) to seed-level popular candidates")
         # Post-swap dedup (per view): the swap can leave two segments in
         # the same view pointing at the same OSM feature_id (both were
         # dissenters with the same popular alternative). Keep the
@@ -583,8 +580,8 @@ def _smooth_matches_across_views(
                     loser.pop("seed_index", None)
                     dedup_dropped += 1
         if dedup_dropped:
-            print(f"[smooth_matches] dedup cleared {dedup_dropped} duplicate "
-                  f"match(es) created by the swap")
+            logger.info(f"[smooth_matches] dedup cleared {dedup_dropped} duplicate "
+                        f"match(es) created by the swap")
 
         # Rebuild seed_index across the seed so renamed buildings get
         # consistent badge numbers + colours. Walk views in capture
@@ -689,8 +686,8 @@ def _smooth_pano_matches_against_views(
                 break
 
     if swap_count:
-        print(f"[smooth_matches] swapped {swap_count} pano dissenting match(es) "
-              f"to per-view popular candidates")
+        logger.info(f"[smooth_matches] swapped {swap_count} pano dissenting match(es) "
+                    f"to per-view popular candidates")
 
 def _multires_sam_instances(
     pano_img: np.ndarray,
@@ -736,7 +733,7 @@ def _multires_sam_instances(
         model.eval()
         predictor = SamPredictor(model)
     except Exception as exc:
-        print(f"[multires_sam] load failed: {exc}")
+        logger.warning(f"[multires_sam] load failed: {exc}")
         return [], 0.0
 
     import numpy as np  # noqa: PLC0415
@@ -793,7 +790,7 @@ def _multires_sam_instances(
                 })
             total_t += time.perf_counter() - t0
         except Exception as exc:
-            print(f"[multires_sam] cluster {ci} predict failed: {exc}")
+            logger.warning(f"[multires_sam] cluster {ci} predict failed: {exc}")
             continue
     return out, total_t
 
@@ -967,7 +964,7 @@ def _multires_pano_refine(
                 from ..depth_estimation import predict_pano_depth  # noqa: PLC0415
                 depth_predictor = predict_pano_depth
             except Exception as exc:
-                print(f"[multires] depth unavailable: {exc}")
+                logger.warning(f"[multires] depth unavailable: {exc}")
 
         depth_total = 0.0
         depth_cuts_total = 0
@@ -1002,15 +999,13 @@ def _multires_pano_refine(
                     if int(fine_bld.sum()) < pre_count:
                         depth_cuts_total += 1
                 except Exception as exc:
-                    print(f"[multires] depth split skipped on cluster: {exc}")
+                    logger.warning(f"[multires] depth split skipped on cluster: {exc}")
             refined[y_top: y_bot + 1, xL: xR + 1] |= fine_bld
         if depth_predictor is not None:
-            print(
-                f"[multires] depth refinement: {depth_total:.2f}s "
-                f"(cut applied on {depth_cuts_total}/{len(clusters)} clusters)"
-            )
+            logger.info(f"[multires] depth refinement: {depth_total:.2f}s "
+                        f"(cut applied on {depth_cuts_total}/{len(clusters)} clusters)")
     except Exception as exc:
-        print(f"[multires] fine refinement failed: {exc}")
+        logger.warning(f"[multires] fine refinement failed: {exc}")
         return coarse, clusters, (y_top, y_bot), 0.0
 
     return refined, clusters, (y_top, y_bot), fine_total
@@ -1209,12 +1204,10 @@ def _pano_sliding_window_split(
             f" | depth-grad p50={p50:.3f} p90={p90:.3f} max={p_max:.3f}"
             f" thr={depth_jump_thresh:.3f}"
         )
-    print(
-        f"[pano_split] sliding window: W={W} win={window_w} stride={stride} "
-        f"-> {n_windows} windows, {len(segs)} raw -> {len(kept)} dedup "
-        f"-> {len(filtered)} density -> {len(depth_split)} after depth "
-        f"split (+{n_depth_cuts}){grad_diag}"
-    )
+    logger.info(f"[pano_split] sliding window: W={W} win={window_w} stride={stride} "
+                f"-> {n_windows} windows, {len(segs)} raw -> {len(kept)} dedup "
+                f"-> {len(filtered)} density -> {len(depth_split)} after depth "
+                f"split (+{n_depth_cuts}){grad_diag}")
     return depth_split
 
 def _build_and_detect_pano(
@@ -1335,12 +1328,10 @@ def _build_and_detect_pano(
                 "1", "true", "yes", "on"):
             refined, clusters, band_y, fine_t = _multires_pano_refine(
                 pano_img, pano_bmask, pano_wmask)
-            print(
-                f"[multires] seed={seed.name} clusters={len(clusters)} "
-                f"fine_inference={fine_t:.2f}s "
-                f"refined_columns_with_building={int((refined.any(axis=0)).sum())}/"
-                f"{int((pano_bmask.any(axis=0)).sum())}"
-            )
+            logger.info(f"[multires] seed={seed.name} clusters={len(clusters)} "
+                        f"fine_inference={fine_t:.2f}s "
+                        f"refined_columns_with_building={int((refined.any(axis=0)).sum())}/"
+                        f"{int((pano_bmask.any(axis=0)).sum())}")
             pano_bmask = refined
             # F-SKY20: MobileSAM per-instance silhouettes prompted by
             # OSM building centroids projected into the pano. Capped to
@@ -1377,11 +1368,9 @@ def _build_and_detect_pano(
                     pano_img, clusters, band_y[0], band_y[1],
                     osm_centroids, refined,
                 )
-                print(
-                    f"[multires_sam] seed={seed.name} prompts={len(osm_centroids)} "
-                    f"(capped at {MAX_PROMPTS_PER_CLUSTER}/cluster) "
-                    f"instances={len(sam_instances)} inference={sam_t:.2f}s"
-                )
+                logger.info(f"[multires_sam] seed={seed.name} prompts={len(osm_centroids)} "
+                            f"(capped at {MAX_PROMPTS_PER_CLUSTER}/cluster) "
+                            f"instances={len(sam_instances)} inference={sam_t:.2f}s")
         pano_band = _cbb(pano_bmask, slack_px=20)
         # F-SKY24 Phase 1: compute pano depth once for both the splitter's
         # depth-aware post-cut pass AND for the downstream HTML renderers
@@ -1416,13 +1405,11 @@ def _build_and_detect_pano(
                         pano_depth_arr[y1 + 1:] = d_crop[-1]
                 else:
                     pano_depth_arr = predict_pano_depth_tiled(_pi)
-            print(
-                f"[pano_depth] seed={seed.name} {pano_depth_arr.shape} "
-                f"band-cropped tiled-inference "
-                f"{time.perf_counter() - t_dep:.2f}s"
-            )
+            logger.info(f"[pano_depth] seed={seed.name} {pano_depth_arr.shape} "
+                        f"band-cropped tiled-inference "
+                        f"{time.perf_counter() - t_dep:.2f}s")
         except Exception as exc:
-            print(f"[pano_depth] unavailable: {exc}")
+            logger.warning(f"[pano_depth] unavailable: {exc}")
 
         # F-SKY24 Phase 3: bearing recovery via silhouette × OSM
         # cross-correlation. The existing satellite-coastline recovery
@@ -1584,8 +1571,8 @@ def _build_and_detect_pano(
                                  if v_mirror > v_best + 0.02 else "tie")
                             )
                 except Exception as _e_veg:
-                    print(f"[F-SKY18-4] seed={seed.name} veg-agree "
-                          f"diagnostic failed: {_e_veg}")
+                    logger.warning(f"[F-SKY18-4] seed={seed.name} veg-agree "
+                                   f"diagnostic failed: {_e_veg}")
 
                 # Phase 5 veto: when vegetation clearly favors the 180° mirror
                 # AND the proposed rotation is large (likely a flip into the
@@ -1603,37 +1590,29 @@ def _build_and_detect_pano(
 
                 if (abs(shift) >= 1 and improve > 0.0
                         and best_mae <= MAE_CEILING_M and not veg_veto):
-                    print(
-                        f"[bearing_xcorr] seed={seed.name} "
-                        f"shift {shift:+d}° APPLIED "
-                        f"(pre MAE {pre_mae:.0f} -> {best_mae:.0f}m, "
-                        f"improve {improve*100:.0f}%)"
-                    )
+                    logger.info(f"[bearing_xcorr] seed={seed.name} "
+                                f"shift {shift:+d}° APPLIED "
+                                f"(pre MAE {pre_mae:.0f} -> {best_mae:.0f}m, "
+                                f"improve {improve*100:.0f}%)")
                     pano_headings = (pano_headings + float(shift)) % 360.0
                     bearing_shift_deg = float(shift)
                 elif veg_veto:
-                    print(
-                        f"[bearing_xcorr] seed={seed.name} "
-                        f"shift {shift:+d}° VETOED by vegetation "
-                        f"(veg margin {(v_mirror - v_best):+.2f} "
-                        f">= {VEG_MARGIN:.2f} favours mirror; F-SKY18-5)"
-                    )
+                    logger.info(f"[bearing_xcorr] seed={seed.name} "
+                                f"shift {shift:+d}° VETOED by vegetation "
+                                f"(veg margin {(v_mirror - v_best):+.2f} "
+                                f">= {VEG_MARGIN:.2f} favours mirror; F-SKY18-5)")
                 else:
-                    print(
-                        f"[bearing_xcorr] seed={seed.name} "
-                        f"shift {shift:+d}° SKIPPED "
-                        f"(best MAE {best_mae:.0f}m > {MAE_CEILING_M:.0f}m "
-                        f"— poor alignment, keeping anchor)"
-                    )
+                    logger.info(f"[bearing_xcorr] seed={seed.name} "
+                                f"shift {shift:+d}° SKIPPED "
+                                f"(best MAE {best_mae:.0f}m > {MAE_CEILING_M:.0f}m "
+                                f"— poor alignment, keeping anchor)")
                 if v_best is not None:
-                    print(
-                        f"[F-SKY18-4] seed={seed.name} "
-                        f"veg_agree@best={v_best:.2f} "
-                        f"@mirror={v_mirror:.2f} "
-                        f"verdict={veg_verdict}"
-                    )
+                    logger.info(f"[F-SKY18-4] seed={seed.name} "
+                                f"veg_agree@best={v_best:.2f} "
+                                f"@mirror={v_mirror:.2f} "
+                                f"verdict={veg_verdict}")
         except Exception as exc:
-            print(f"[bearing_xcorr] skipped: {exc}")
+            logger.warning(f"[bearing_xcorr] skipped: {exc}")
 
         # F-SKY22 + F-SKY24: sliding-window pano splitter with depth-
         # fused post-cut. The mask-only splitter can't separate adjacent
@@ -1658,9 +1637,9 @@ def _build_and_detect_pano(
             < 0.92 * _Hp
         ]
         if len(pano_segs) != _pre_tall:
-            print(f"[pano_split] too-tall filter: {_pre_tall} -> "
-                  f"{len(pano_segs)} (dropped {_pre_tall - len(pano_segs)} "
-                  f"full-frame segments)")
+            logger.info(f"[pano_split] too-tall filter: {_pre_tall} -> "
+                        f"{len(pano_segs)} (dropped {_pre_tall - len(pano_segs)} "
+                        f"full-frame segments)")
         # Project OSM footprints to pano column coordinates BEFORE the
         # OSM-anchored split below so the splitter has the projection
         # info it needs. Same call we used to make later; just hoisted.
@@ -1683,12 +1662,10 @@ def _build_and_detect_pano(
                     pano_segs, pano_projs, building_mask=pano_bmask)
             post_n = len(pano_segs)
             if post_n != pre_n:
-                print(
-                    f"[pano_split] OSM-anchored split: {pre_n} -> {post_n} "
-                    f"(+{post_n - pre_n})"
-                )
+                logger.info(f"[pano_split] OSM-anchored split: {pre_n} -> {post_n} "
+                            f"(+{post_n - pre_n})")
         except Exception as exc:
-            print(f"[pano_split] OSM-anchored split skipped: {exc}")
+            logger.warning(f"[pano_split] OSM-anchored split skipped: {exc}")
         # F-SKY20: prepend SAM instance segments so they're first-class
         # in the splitter output; the matcher will then prefer the SAM
         # silhouettes over rule-based ones when both exist for the same
@@ -1798,12 +1775,10 @@ def _build_and_detect_pano(
                     if a > 1e-9:
                         geom_K = 1.0 / a
                         geom_horizon_row = -bint / a
-                        print(
-                            f"[geom_dist] seed={seed.name} "
-                            f"K={geom_K:.0f} horizon_row="
-                            f"{geom_horizon_row:.0f} "
-                            f"(from {len(geom_pairs)} towers)"
-                        )
+                        logger.info(f"[geom_dist] seed={seed.name} "
+                                    f"K={geom_K:.0f} horizon_row="
+                                    f"{geom_horizon_row:.0f} "
+                                    f"(from {len(geom_pairs)} towers)")
 
         # Stitch sky + vegetation as separate pano-coord channels (same
         # source view set & sort order as the building/water stitches
@@ -1848,7 +1823,7 @@ def _build_and_detect_pano(
                             if _seg.get(_k) is not None:
                                 _seg[_k] = int(_seg[_k] + roll) % _W
         except Exception as _exc:
-            print(f"[pano] north-center roll skipped: {_exc}")
+            logger.warning(f"[pano] north-center roll skipped: {_exc}")
 
         return StitchedPanoResult(
             seed_name=seed.name,
@@ -1873,8 +1848,7 @@ def _build_and_detect_pano(
             bearing_shift_deg=bearing_shift_deg,
         )
     except Exception as e:
-        import sys as _sys
-        print(f"[pano] seed={seed.name} failed: {e}", file=_sys.stderr)
+        logger.warning(f"[pano] seed={seed.name} failed: {e}")
         return None
 
 

@@ -152,36 +152,36 @@ class TestEndpointProjectionParams:
 
     def test_dem_accepts_projection_param(self, client):
         r = client.get(
-            f"/api/terrain/dem?{_BBOX_QS}&dim=20&projection=cosine&clip_nans=true")
+            f"/api/terrain/dem?{_BBOX_QS}&dim=20&projection=cosine&clip_valid_region=true")
         assert r.status_code == 200
         data = r.json()
         assert "dem_values_b64" in data
 
     def test_dem_accepts_none_projection(self, client):
         r = client.get(
-            f"/api/terrain/dem?{_BBOX_QS}&dim=20&projection=none&clip_nans=false")
+            f"/api/terrain/dem?{_BBOX_QS}&dim=20&projection=none&clip_valid_region=false")
         assert r.status_code == 200
 
     def test_satellite_accepts_projection_param(self, client):
         r = client.get(
-            f"/api/terrain/satellite?{_BBOX_QS}&dim=20&projection=cosine&clip_nans=true")
+            f"/api/terrain/satellite?{_BBOX_QS}&dim=20&projection=cosine&clip_valid_region=true")
         assert r.status_code == 200
         data = r.json()
         assert "image" in data
 
     def test_water_mask_accepts_projection_param(self, client):
         r = client.get(
-            f"/api/terrain/water-mask?{_BBOX_QS}&sat_scale=100&projection=cosine&clip_nans=true")
+            f"/api/terrain/water-mask?{_BBOX_QS}&sat_scale=100&projection=cosine&clip_valid_region=true")
         assert r.status_code == 200
 
     def test_esa_accepts_projection_param(self, client):
         r = client.get(
-            f"/api/terrain/esa-land-cover?{_BBOX_QS}&sat_scale=100&projection=cosine&clip_nans=true")
+            f"/api/terrain/esa-land-cover?{_BBOX_QS}&sat_scale=100&projection=cosine&clip_valid_region=true")
         assert r.status_code == 200
 
     def test_hydrology_accepts_projection_param(self, client):
         r = client.get(
-            f"/api/terrain/hydrology?{_BBOX_QS}&dim=20&projection=cosine&clip_nans=true")
+            f"/api/terrain/hydrology?{_BBOX_QS}&dim=20&projection=cosine&clip_valid_region=true")
         assert r.status_code == 200
 
     def test_city_raster_accepts_projection_param(self, client):
@@ -196,7 +196,7 @@ class TestEndpointProjectionParams:
             "roads": {"type": "FeatureCollection", "features": []},
             "waterways": {"type": "FeatureCollection", "features": []},
             "projection": "none",
-            "clip_nans": True,
+            "clip_valid_region": True,
         }
         r = client.post("/api/cities/raster", json=body)
         assert r.status_code == 200
@@ -219,32 +219,32 @@ class TestTestModeProjection:
     """
 
     def test_dem_applies_projection_in_test_mode(self, client):
-        """DEM with cosine + clip_nans should have different dimensions than none."""
+        """DEM with cosine + clip_valid_region should have different dimensions than none."""
         r_none = client.get(
             f"/api/terrain/dem?{_BBOX_QS}&dim=30&projection=none")
         r_cos = client.get(
-            f"/api/terrain/dem?{_BBOX_QS}&dim=30&projection=cosine&clip_nans=true")
+            f"/api/terrain/dem?{_BBOX_QS}&dim=30&projection=cosine&clip_valid_region=true")
         d_none = r_none.json()["dimensions"]
         d_cos = r_cos.json()["dimensions"]
-        # With clip_nans=True at lat ~40°N, cosine should trim width
+        # With clip_valid_region=True at lat ~40°N, cosine should trim width
         assert d_cos[1] <= d_none[1], (
             f"Cosine+clip should narrow width: none={d_none}, cos={d_cos}")
 
     def test_hydrology_applies_projection_in_test_mode(self, client):
-        """Hydrology with cosine + clip_nans should have different dimensions."""
+        """Hydrology with cosine + clip_valid_region should have different dimensions."""
         r_none = client.get(
             f"/api/terrain/hydrology?{_BBOX_QS}&dim=30&projection=none")
         r_cos = client.get(
-            f"/api/terrain/hydrology?{_BBOX_QS}&dim=30&projection=cosine&clip_nans=true")
+            f"/api/terrain/hydrology?{_BBOX_QS}&dim=30&projection=cosine&clip_valid_region=true")
         d_none = r_none.json()["river_grid_dimensions"]
         d_cos = r_cos.json()["river_grid_dimensions"]
         assert d_cos[1] <= d_none[1]
 
     def test_dem_projection_no_clip_preserves_dims(self, client):
-        """maintain_dimensions=True (explicit opt-in) + clip_nans=False should
+        """maintain_dimensions=True (explicit opt-in) + clip_valid_region=False should
         keep dim×dim. maintain_dimensions now defaults to False (F-PROJ-DIMS)."""
         r = client.get(
-            f"/api/terrain/dem?{_BBOX_QS}&dim=30&projection=cosine&clip_nans=false"
+            f"/api/terrain/dem?{_BBOX_QS}&dim=30&projection=cosine&clip_valid_region=false"
             f"&maintain_dimensions=true")
         d = r.json()["dimensions"]
         assert d == [30, 30], f"Expected [30, 30], got {d}"
@@ -254,7 +254,7 @@ class TestTestModeProjection:
         produce a narrower output than the input dim, reflecting the true
         aspect ratio, not a fixed dim×dim square (F-PROJ-DIMS)."""
         r = client.get(
-            f"/api/terrain/dem?{_BBOX_QS}&dim=30&projection=cosine&clip_nans=false")
+            f"/api/terrain/dem?{_BBOX_QS}&dim=30&projection=cosine&clip_valid_region=false")
         d = r.json()["dimensions"]
         assert d[0] == 30
         assert d[1] < 30, f"Expected narrower-than-30 width, got {d}"
@@ -262,7 +262,7 @@ class TestTestModeProjection:
     def test_satellite_applies_projection_in_test_mode(self, client):
         """Satellite with projection should produce a valid JPEG."""
         r = client.get(
-            f"/api/terrain/satellite?{_BBOX_QS}&dim=30&projection=cosine&clip_nans=false")
+            f"/api/terrain/satellite?{_BBOX_QS}&dim=30&projection=cosine&clip_valid_region=false")
         data = r.json()
         raw = base64.b64decode(data["image"])
         assert raw[:2] == b'\xff\xd8', "Projected satellite should still be valid JPEG"
@@ -271,7 +271,7 @@ class TestTestModeProjection:
     def test_dem_all_projections_succeed(self, client, projection):
         """DEM endpoint with every supported projection should succeed."""
         r = client.get(
-            f"/api/terrain/dem?{_BBOX_QS}&dim=20&projection={projection}&clip_nans=false")
+            f"/api/terrain/dem?{_BBOX_QS}&dim=20&projection={projection}&clip_valid_region=false")
         assert r.status_code == 200
         data = r.json()
         assert "dem_values_b64" in data
@@ -288,7 +288,7 @@ class TestCityRasterProjectionE2E:
     during tests, because rasterize_city_data is a pure function that
     doesn't need network I/O."""
 
-    def _make_body(self, projection="none", clip_nans=True, dim=50):
+    def _make_body(self, projection="none", clip_valid_region=True, dim=50):
         return {
             "north": 40.0, "south": 39.9, "east": -75.1, "west": -75.2,
             "dim": dim,
@@ -296,7 +296,7 @@ class TestCityRasterProjectionE2E:
             "roads": {"type": "FeatureCollection", "features": []},
             "waterways": {"type": "FeatureCollection", "features": []},
             "projection": projection,
-            "clip_nans": clip_nans,
+            "clip_valid_region": clip_valid_region,
         }
 
     def test_city_none_returns_square(self, client):
@@ -326,7 +326,7 @@ class TestCityRasterNaNBug:
     2. Switch to b64 encoding (consistent with DEM/water/hydrology)
     """
 
-    def _make_body(self, projection="none", clip_nans=True, dim=50):
+    def _make_body(self, projection="none", clip_valid_region=True, dim=50):
         return {
             "north": 40.0, "south": 39.9, "east": -75.1, "west": -75.2,
             "dim": dim,
@@ -334,7 +334,7 @@ class TestCityRasterNaNBug:
             "roads": {"type": "FeatureCollection", "features": []},
             "waterways": {"type": "FeatureCollection", "features": []},
             "projection": projection,
-            "clip_nans": clip_nans,
+            "clip_valid_region": clip_valid_region,
         }
 
     @pytest.mark.parametrize("projection", _VALID_PROJECTIONS)
@@ -343,13 +343,13 @@ class TestCityRasterNaNBug:
         np.nan_to_num(grid, nan=0.0) is applied before .flatten().tolist()
         so projection fill areas become 0.0 instead of JSON-invalid NaN."""
         r = client.post("/api/cities/raster",
-                        json=self._make_body(projection, clip_nans=False))
+                        json=self._make_body(projection, clip_valid_region=False))
         assert r.status_code == 200
 
     def test_city_cache_key_includes_projection(self, client):
         """Different projections should NOT return cached results from each other."""
         body_none = self._make_body("none")
-        body_cos = self._make_body("cosine", clip_nans=False)
+        body_cos = self._make_body("cosine", clip_valid_region=False)
         r1 = client.post("/api/cities/raster", json=body_none)
         r2 = client.post("/api/cities/raster", json=body_cos)
         assert r1.status_code == 200
@@ -372,7 +372,7 @@ class TestCrossLayerAlignment:
 
     def test_dem_and_hydrology_same_dims_with_projection(self, client):
         """DEM and hydrology with same dim + projection should match."""
-        qs = f"{_BBOX_QS}&dim=40&projection=cosine&clip_nans=true"
+        qs = f"{_BBOX_QS}&dim=40&projection=cosine&clip_valid_region=true"
         r_dem = client.get(f"/api/terrain/dem?{qs}")
         r_hyd = client.get(f"/api/terrain/hydrology?{qs}")
         assert r_dem.json()["dimensions"] == r_hyd.json()[
@@ -410,17 +410,17 @@ class TestSchemaValidation:
             buildings={}, roads={}, waterways={},
         )
         assert req.projection == "none"
-        assert req.clip_nans is True
+        assert req.clip_valid_region is True
 
     def test_city_raster_request_custom_projection(self):
         from app.server.schemas import CityRasterRequest
         req = CityRasterRequest(
             north=40, south=39.9, east=-75.1, west=-75.2,
             buildings={}, roads={}, waterways={},
-            projection="cosine", clip_nans=False,
+            projection="cosine", clip_valid_region=False,
         )
         assert req.projection == "cosine"
-        assert req.clip_nans is False
+        assert req.clip_valid_region is False
 
 
 # ===================================================================
@@ -564,7 +564,7 @@ class TestParseBool:
                 return super().get(key, default)
 
         for val in ["true", "True", "TRUE", "1", "yes", "on"]:
-            assert parse_bool(FakeParams(clip_nans=val), "clip_nans") is True, (
+            assert parse_bool(FakeParams(clip_valid_region=val), "clip_valid_region") is True, (
                 f"parse_bool should return True for '{val}'")
 
     def test_parse_bool_false_values(self):
@@ -575,7 +575,7 @@ class TestParseBool:
                 return super().get(key, default)
 
         for val in ["false", "False", "0", "no", "off"]:
-            assert parse_bool(FakeParams(clip_nans=val), "clip_nans") is False, (
+            assert parse_bool(FakeParams(clip_valid_region=val), "clip_valid_region") is False, (
                 f"parse_bool should return False for '{val}'")
 
     def test_parse_bool_missing_key(self):
@@ -585,5 +585,5 @@ class TestParseBool:
             def get(self, key, default=None):
                 return super().get(key, default)
 
-        assert parse_bool(FakeParams(), "clip_nans", True) is True
-        assert parse_bool(FakeParams(), "clip_nans", False) is False
+        assert parse_bool(FakeParams(), "clip_valid_region", True) is True
+        assert parse_bool(FakeParams(), "clip_valid_region", False) is False

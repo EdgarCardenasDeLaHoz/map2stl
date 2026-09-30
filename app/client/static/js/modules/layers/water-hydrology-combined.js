@@ -18,7 +18,6 @@
  *   window.decodeWaterMask(data)     — from water-mask.js
  *   window.decodeHydrologyValues(data) — from hydrology-overlay.js
  *   window.setLayerStatus(name, status) — from app.js
- *   window.updateCacheStatusUI()    — from app.js
  *   window.updateStackedLayers()    — from stacked-layers.js
  *   (renderer logic mirrored from water-mask.js and hydrology-overlay.js)
  */
@@ -31,8 +30,6 @@ let _combinedAbortController = null;
 let _combinedInflightPromise = null;
 let _combinedInflightKey = null;
 
-let lastWaterData = null;
-let lastHydrologyData = null;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Composite Rendering
@@ -163,7 +160,7 @@ window.loadWaterHydrology = async function loadWaterHydrology() {
   const waterDataset = document.getElementById('waterDataset')?.value || 'esa';
   const hydroSource = document.getElementById('hydroSource')?.value || 'hydrorivers';
 
-    // Get projection and clip_nans settings from DOM
+    // Get projection and clip_valid_region settings from DOM
     const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
     const maintainDims = maintainDimensions ? 'true' : 'false';
     const clipNans = clipValidRegion ? 'true' : 'false';
@@ -278,8 +275,6 @@ async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim
     const { data: waterData } = waterRes;
     const { data: hydroData } = hydroRes;
 
-    lastWaterData = waterData;
-    lastHydrologyData = hydroData;
 
     // Render combined canvas
     const combinedCanvas = renderWaterHydrologyCombined(waterData, hydroData);
@@ -288,7 +283,6 @@ async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim
     }
 
     window.setLayerStatus?.('waterHydrology', 'loaded');
-    window.updateCacheStatusUI?.();
     window.emitStackUpdate?.();
 
     const waterPct = waterData?.water_percentage?.toFixed(1) || '?';
@@ -322,8 +316,6 @@ window.clearWaterHydrology = function clearWaterHydrology() {
   if (window.appState) {
     window.appState.waterHydrologyCanvas = null;
   }
-  lastWaterData = null;
-  lastHydrologyData = null;
 
   const statusEl = document.getElementById('waterHydrologyStatus');
   if (statusEl) statusEl.textContent = '';
@@ -336,5 +328,3 @@ window.clearWaterHydrology = function clearWaterHydrology() {
 // Exports
 // ─────────────────────────────────────────────────────────────────────────────
 
-window.lastWaterData = () => lastWaterData;
-window.lastHydrologyData = () => lastHydrologyData;

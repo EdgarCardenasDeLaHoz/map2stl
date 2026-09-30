@@ -12,7 +12,7 @@
  */
 
 /** Share of default-height buildings above which the panel warns. */
-export const DEFAULT_SHARE_WARN = 0.2;
+const DEFAULT_SHARE_WARN = 0.2;
 
 /** Coarse group for a height_source value, in display order. */
 const SOURCE_GROUPS = [

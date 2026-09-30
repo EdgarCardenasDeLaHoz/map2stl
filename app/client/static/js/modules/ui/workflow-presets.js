@@ -18,12 +18,12 @@
 import { defaultPieceMm, parseBedSize } from '../export/print-scale.js';
 
 /** Resolved at apply time: the default puzzle piece for the selected bed. */
-export const BED_PIECE = '$bedPiece';
+const BED_PIECE = '$bedPiece';
 /** Resolved at apply time from the region size: 30 m source up to ~100 km, 90 m beyond. */
-export const REGION_DEM_SOURCE = '$regionDemSource';
+const REGION_DEM_SOURCE = '$regionDemSource';
 
 /** Longest bbox side (km) up to which the Region preset uses a 30 m source. */
-export const REGION_30M_MAX_KM = 100;
+const REGION_30M_MAX_KM = 100;
 
 /**
  * DEM source for a large region: SRTM 30 m (SRTMGL1) while the longer side is

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectContinent } from './helpers/detectContinent.js';
+import { detectContinent } from '../../app/client/static/js/modules/regions/continent.js';
 
 describe('detectContinent', () => {
     describe('Antarctica', () => {
@@ -93,9 +93,50 @@ describe('detectContinent', () => {
         });
     });
 
+    // The Mediterranean, Red Sea and Bosphorus boundaries (continent.js
+    // header). Istanbul's historic centre lies west of the Bosphorus, so it is
+    // Europe; the Asian shore (Kadikoy, Uskudar) is Asia.
+    describe('Mediterranean and Near East boundaries', () => {
+        it.each([
+            ['Granada', 37.18, -3.60, 'Europe'],
+            ['Seville', 37.39, -5.98, 'Europe'],
+            ['Almeria', 36.84, -2.46, 'Europe'],
+            ['Palermo, Sicily', 38.12, 13.36, 'Europe'],
+            ['Syracuse, Sicily', 37.07, 15.29, 'Europe'],
+            ['Malta', 35.90, 14.51, 'Europe'],
+            ['Heraklion, Crete', 35.34, 25.13, 'Europe'],
+            ['Rhodes', 36.43, 28.22, 'Europe'],
+            ['Athens', 37.98, 23.73, 'Europe'],
+            ['Istanbul (historic centre)', 41.01, 28.98, 'Europe'],
+            ['Moscow', 55.75, 37.62, 'Europe'],
+            ['Grozny', 43.32, 45.69, 'Europe'],
+            ['Tunis', 36.81, 10.18, 'Africa'],
+            ['Tangier', 35.77, -5.80, 'Africa'],
+            ['Algiers', 36.75, 3.06, 'Africa'],
+            ['Tripoli', 32.89, 13.19, 'Africa'],
+            ['Cairo', 30.04, 31.24, 'Africa'],
+            ['Alexandria', 31.20, 29.92, 'Africa'],
+            ['Port Sudan', 19.62, 37.22, 'Africa'],
+            ['Tel Aviv', 32.08, 34.78, 'Asia'],
+            ['Sharm el-Sheikh, Sinai', 27.92, 34.33, 'Asia'],
+            ['Jeddah', 21.54, 39.17, 'Asia'],
+            ['Riyadh', 24.71, 46.68, 'Asia'],
+            ['Sanaa', 15.37, 44.19, 'Asia'],
+            ['Kadikoy (Istanbul, Asian shore)', 40.99, 29.03, 'Asia'],
+            ['Ankara', 39.93, 32.86, 'Asia'],
+            ['Izmir', 38.42, 27.14, 'Asia'],
+            ['Nicosia, Cyprus', 35.17, 33.36, 'Asia'],
+            ['Tbilisi', 41.72, 44.79, 'Asia'],
+            ['Baku', 40.41, 49.87, 'Asia'],
+            ['Yekaterinburg', 56.84, 60.61, 'Asia'],
+        ])('%s', (_name, lat, lon, expected) => {
+            expect(detectContinent(lat, lon)).toBe(expected);
+        });
+    });
+
     describe('Other', () => {
         it('returns Other for mid-Atlantic (lat=0, lon=-30)', () => {
-            // lon=-30 is outside Africa bbox (lon >= -18) and South America bbox (lon >= -34 would be SA)
+            // lon=-30 is west of Africa (lon >= -26) and east of South America (lon <= -34)
             // lat=0, lon=-30: not in any continent bbox → Other
             expect(detectContinent(0, -30)).toBe('Other');
         });

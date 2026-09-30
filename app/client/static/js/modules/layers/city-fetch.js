@@ -21,8 +21,8 @@ export const LAYER_STATE_ICON = {
 };
 
 /** Cities panel defaults (#citySimplifyTolerance, #cityMinArea in FetchLayersSection.vue). */
-export const CITY_SIMPLIFY_TOLERANCE_DEFAULT = 3.0;
-export const CITY_MIN_AREA_DEFAULT = 5.0;
+const CITY_SIMPLIFY_TOLERANCE_DEFAULT = 3.0;
+const CITY_MIN_AREA_DEFAULT = 5.0;
 
 /**
  * The Cities panel's OSM fetch settings, parsed the way loadCityData() always
@@ -62,7 +62,7 @@ export function cityBuildOsmParams(loaded, tolerance, minArea) {
 }
 
 /** Terminal task states. */
-export const FINISHED = new Set(['done', 'error', 'cancelled']);
+const FINISHED = new Set(['done', 'error', 'cancelled']);
 
 /** "https://overpass.kumi.systems/api" → "overpass.kumi.systems". */
 export function mirrorHost(url) {

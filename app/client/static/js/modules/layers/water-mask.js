@@ -6,7 +6,6 @@
  * Public API (all on window):
  *   loadWaterMask()           — fetch water mask + ESA land cover
  *   loadEsaLandCover()       — fetch ESA land cover independently
- *   renderWaterMask(data)     — render water mask canvas
  *   renderEsaLandCover(data)  — render ESA land cover canvas
  *   renderCombinedView()      — composite DEM + water overlay
  *   setupWaterMaskListeners() — wire water mask tab events
@@ -31,7 +30,6 @@
  *   recolorDEM()                        — global from dem-loader.js
  *   window.isLayerCurrent(name)                — global from app.js file-top
  *   updateLayerStatusIndicators()       — global from app.js file-top
- *   updateCacheStatusUI()               — global from app.js file-top
  *   updateStackedLayers()               — global from stacked-layers.js
  *   window.showToast(msg, type)                — global from app.js file-top
  */
@@ -101,7 +99,6 @@ async function loadWaterMask() {
         _setLastWaterMaskData(cachedData);
         window.appState.layerBboxes.water = bbox;
         window.setLayerStatus('water', 'loaded');
-        window.updateCacheStatusUI?.();
         renderWaterMask(cachedData);
         window.emitStackUpdate();
         document.getElementById('waterMaskStats').innerHTML =
@@ -137,7 +134,6 @@ async function loadWaterMask() {
         }
 
         window.waterMaskCache.set(cacheKey, data);
-        window.updateCacheStatusUI?.();
         _setLastWaterMaskData(data);
 
         window.appState.layerBboxes.water = bbox;
@@ -500,7 +496,6 @@ function _setLastWaterMaskData(data) {
 
 window.loadWaterMask = loadWaterMask;
 window.loadEsaLandCover = loadEsaLandCover;
-window.renderWaterMask = renderWaterMask;
 window.renderEsaLandCover = renderEsaLandCover;
 window.renderCombinedView = renderCombinedView;
 window.setupWaterMaskListeners = setupWaterMaskListeners;

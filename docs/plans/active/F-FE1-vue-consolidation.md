@@ -48,7 +48,7 @@ Tests: export by id; expired id; LRU spill + reload; derived-values id; the e2e
 
 Each step: vitest + Playwright e2e green, ESLint clean, no new `window.*` exports.
 
-0. **Delete dead code**: `bbox-panel.js` `populateRegionsPanelTable` (ids exist nowhere),
+0. **Delete dead code** (done 2026-09-30, cleanup pass; steps 1–6 are not pursued, see the roadmap): `bbox-panel.js` `populateRegionsPanelTable` (ids exist nowhere),
    `cache-inventory.js`, dead buttons in `cache.js`, unused composables
    (`useAppStateBridge.ts`, `useEventListeners.ts`). Make vitest import real modules
    instead of copies in `tests/js/helpers/`.

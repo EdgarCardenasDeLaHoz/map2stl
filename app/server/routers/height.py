@@ -53,31 +53,22 @@ class HeightFetchRequest(BoundingBox):
         "none",
         description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"
     )
-    clip_nans: bool = Field(
+    clip_valid_region: bool = Field(
         True,
         description="Clip NaN-only border rows/cols from projected output"
     )
 
 
-class HeightFetchResponse(BaseModel):
-    width: int
-    height: int
-    source_name: str
-    resolution_m: float
-    coverage_pct: float = Field(description="% of pixels with data (non-NaN)")
-    stats: dict
-
-
 # ── Provider registry ───────────────────────────────────────────
 
-# The registry lives in `app.server.core.height.service` and is imported, not
+# The registry lives in `city2stl.height.service` and is imported, not
 # restated. This router used to keep its own copy of the provider list and a
 # `_PROVIDER_META` table beside it; the two drifted, and the copy here was the
 # one that went stale. It was still advertising `lidar_3dep` at 0.95 / 1 m after
 # bug 3 corrected it to 0.82 / 30 m, and it never learned about GlobalBuilding-
 # Atlas, so `/api/height/sources` denied the existence of a provider that the
 # export path was already using.
-from app.server.core.height.service import (  # noqa: E402
+from city2stl.height.service import (  # noqa: E402
     _select_providers,
     provider_infos,
 )
@@ -141,7 +132,7 @@ async def height_fetch(req: HeightFetchRequest):
     if req.projection != "none":
         raster = _project_grid(
             raster, req.north, req.south, req.east, req.west,
-            req.projection, req.clip_nans, categorical=False,
+            req.projection, req.clip_valid_region, categorical=False,
         )
 
     # Stats (computed on the post-projection raster)

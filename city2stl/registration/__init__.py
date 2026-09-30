@@ -38,6 +38,8 @@ from numpy2stl.registration import register_city_stl as _register
 from numpy2stl.registration.types import CityRegistrationReport
 
 from city2stl import osm_raster
+from geo2stl.geo import M_PER_DEG_LAT
+from geo2stl.geo import m_per_deg_lon as _m_per_deg_lon
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +108,7 @@ class OSMReference:
 
         Rings at ``search_step_km`` .. ``search_radius_km`` (33 candidates at the
         defaults).  km offsets use the initial centre's latitude for the longitude
-        cosine (1 deg ~ 111 km).  Returns [((lat, lon), bbox), ...], initial first;
+        cosine (``geo2stl.geo`` metres per degree).  Returns [((lat, lon), bbox), ...], initial first;
         empty when no centre can be geocoded or no scale anchor exists.
         """
         if not isinstance(self.city, str):
@@ -116,8 +118,8 @@ class OSMReference:
             logger.warning("candidate_targets(%r): no centre and geocoding failed.", self.city)
             return []
         base_lat, base_lon = float(initial[0]), float(initial[1])
-        m_per_deg_lat = 111_000.0
-        m_per_deg_lon = 111_000.0 * math.cos(math.radians(base_lat))
+        m_per_deg_lat = M_PER_DEG_LAT
+        m_per_deg_lon = float(_m_per_deg_lon(base_lat))
         centres = [(base_lat, base_lon)]
         for r_km in np.arange(self.search_step_km, self.search_radius_km + 1e-9,
                               self.search_step_km):

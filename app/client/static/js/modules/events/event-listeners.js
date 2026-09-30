@@ -64,7 +64,6 @@ window.setupEventListeners = function setupEventListeners() {
     }
 
     window._setupResizablePanel?.();
-    window._setupModelResizablePanel?.();
 
     window.initCurveEditor?.();
     window.initPresetProfiles?.();

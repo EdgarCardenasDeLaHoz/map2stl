@@ -126,21 +126,6 @@
                 </label>
               </div>
 
-              <div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin:4px 0;font-size:11px;">
-                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Color each connected mesh patch a distinct random hue">
-                  <input type="checkbox" id="viewerSurfaceGroups"> Surface groups
-                </label>
-              </div>
-
-              <div style="display:flex;align-items:center;gap:6px;margin:4px 0;font-size:11px;flex-wrap:wrap;">
-                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;" title="Subsample the grid client-side — no re-fetch.">
-                  <input type="checkbox" id="viewerSimplify"> Simplify
-                </label>
-                <input type="number" id="viewerSimplifyRatio" value="0.25" min="0.05" max="0.95" step="0.05"
-                  class="ctrl-input-sm" style="width:48px;" title="Keep fraction (0.05 = very coarse, 0.95 = near-full)">
-                <span style="color:#888;font-size:10px;">keep</span>
-              </div>
-
               <button id="viewerResetCamera" class="btn btn-secondary btn-sm" style="width:100%;margin-top:8px;">Reset Camera</button>
             </div>
 

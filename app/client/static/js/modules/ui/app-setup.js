@@ -264,9 +264,6 @@ window.ensureA11yLabels = function ensureA11yLabels() {
         viewerWireframe: 'Show viewer wireframe',
         viewerNormals: 'Show viewer normals',
         viewerAutoRotate: 'Enable viewer auto-rotate',
-        viewerSurfaceGroups: 'Show viewer surface groups',
-        viewerSimplify: 'Enable viewer mesh simplification',
-        viewerSimplifyRatio: 'Viewer simplify keep ratio',
     };
 
     Object.entries(byId).forEach(([id, label]) => {

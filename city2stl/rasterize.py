@@ -5,7 +5,7 @@ Provides pure-computation helpers that burn building, road, and waterway
 GeoJSON features onto a float32 numpy grid (row 0 = north) with
 ``numpy2stl.raster.burn_polygons``. No HTTP, cache, or server deps.
 
-Server entry point: app.server.core.osm re-exports all public symbols.
+Server callers (``app.server.core.city_data`` and the city routers) import this module directly.
 """
 
 from __future__ import annotations

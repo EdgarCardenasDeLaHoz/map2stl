@@ -8,7 +8,6 @@ Contains:
   - fetch_satellite_tiles   — ESRI World Imagery bbox JPEG (tiles via geo2stl.imagery)
   - initialize_earth_engine / fetch_bbox_image / get_aquatic_regions
                             — Earth Engine session and cached bbox image fetches
-  - SAT_LAYER               — the satellite layer service object
 
 All functions are pure computation with no HTTP framework dependencies and
 can be called from route handlers via asyncio.run_in_executor.
@@ -22,11 +21,10 @@ import logging
 import math
 import os
 import time
-from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 
+from geo2stl import cache as _geo_cache
 from geo2stl.geo import M_PER_DEG_LAT, bbox_size_m
 from geo2stl.geo import m_per_deg_lon as _m_per_deg_lon
 
@@ -287,8 +285,8 @@ def fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, di
 # Earth Engine-backed raster helpers (migrated from sat2stl.py)
 # ---------------------------------------------------------------------------
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CACHE_DIR = _PROJECT_ROOT / "cache" / "ee"
+# Under the shared cache root so $MAP2STL_CACHE moves it with everything else.
+CACHE_DIR = _geo_cache.CACHE_ROOT / "ee"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 map_labels = [
@@ -513,17 +511,3 @@ def map_label_elevation(img, im, size=500):
     img_map2 = transform.resize(img_map2, outsize, anti_aliasing=True)
     img_map2 = img_map2.round(0).clip(0.1)
     return img_map2
-
-# Legacy compatibility object for older call sites that still expect
-# SAT_LAYER.fetch_* attributes (e.g., notebooks/older adapters).
-SAT_LAYER = SimpleNamespace(
-    name="satellite",
-    fetch_satellite_tiles=fetch_satellite_tiles,
-    fetch_water_mask_images=fetch_water_mask_images,
-    fetch_water_mask=fetch_water_mask,
-    fetch_sat_overlay=fetch_sat_overlay,
-    initialize_earth_engine=initialize_earth_engine,
-    calculate_scale_for_dimensions=calculate_scale_for_dimensions,
-    fetch_bbox_image=fetch_bbox_image,
-    get_aquatic_regions=get_aquatic_regions,
-)

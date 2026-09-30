@@ -2,10 +2,18 @@
 
 Package layering (numpy2stl / geo2stl / city2stl / app), where shared constants live, and what is and is not the pipeline. Related: [mesh-pipeline.md](mesh-pipeline.md), [repo-tooling-docs.md](repo-tooling-docs.md).
 
+### 2026-09-30 — One-release shims were removed and library progress goes through logging
+- **Decision:**
+  - Removed with their last callers re-pointed: `city2stl/skyline/pipeline.py` (star-import façade), `city2stl/skyline/height/` shim, `app/server/core/height/service.py` (re-export plus an uncalled cached fetch), `tools/align_tool/{osm_model,street_place}.py` `sys.modules` aliases, numpy2stl `applications/{cities,lidar}.py` tombstones and `registration/align/segmentation.py`, `geo2stl/__init__.py` re-exports (import the submodule).
+  - Library code logs (`logger = logging.getLogger(__name__)`; info for progress, warning for problems) instead of printing: skyline, `geo2stl/tiles.py`, `numpy2stl/src/numpy2stl/core/solid.py::validate_object`, and the SDK `app/session/terrain_session.py` (report methods such as `settings_table`, `check_alignment`, `verify` still print). CLIs under `tools/` and `scripts/` keep `print` and call `logging.basicConfig` where they drive library code.
+  - Remaining inline metres-per-degree copies in app / registration code call `geo2stl.geo` (shifts ≤ 0.7 %: the old code used a 6371 km sphere, 111 000 or 111 320 m for latitude where `M_PER_DEG_LAT` is 110 574 m).
+- **Why:** the shims had outlived their one release with no callers; the `tools/align_tool/street_place.py` alias could not be imported under `python -m`, and a broad `except` in `export_align_data.py` turned that into street placement silently off.
+- **Supersedes / superseded by:** closes the one-release shims of the 2026-09-26 / 2026-09-27 entries below.
+
 ### 2026-09-27 — numpy2stl registration takes a reference source, and the old geo modules raise
 - **Decision:**
   - `register_city_stl` takes a `numpy2stl/src/numpy2stl/registration/reference.py::ReferenceSource` (`StaticReference` for in-memory arrays). map2stl's `city2stl/registration/__init__.py::OSMReference` implements it over `city2stl/osm_raster.py`.
-  - For one release, `numpy2stl.applications.cities` / `lidar` raise an ImportError naming `city2stl.osm_raster` / the 3DEP EPT provider. `numpy2stl/tests/test_geo_free.py` fails on any osmnx / requests / pdal / map2stl import.
+  - For one release, `numpy2stl.applications.cities` / `lidar` raise an ImportError naming `city2stl.osm_raster` / the 3DEP EPT provider (removed 2026-09-30, with the `registration.align.segmentation` alias). `numpy2stl/tests/test_geo_free.py` fails on any osmnx / requests / pdal / map2stl import.
   - The OSM raster maths (111 320 m/degree, 3.5 m/level) stays as it was so registrations do not move.
 - **Why:** numpy2stl must not fetch or know lon/lat, yet registration needs the OSM raster at three resolutions, a tight frame sized from the STL, masks, an nDSM and a centre-search ring.
 - **Rejected:** precomputed arrays only — loses the multi-resolution fetch and centre search; lazy numpy2stl → map2stl import — forbidden by the layering rule; forwarding shims — numpy2stl cannot import map2stl.

@@ -17,6 +17,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 from PIL import Image
@@ -132,4 +133,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Library progress (skyline._pano, region_pdf) goes through logging.
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     raise SystemExit(main())

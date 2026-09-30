@@ -3,7 +3,7 @@
 Constructs each provider and checks its shape only; nothing here touches the
 network. The list covers every provider class under
 ``city2stl/height/providers/`` (a superset of the server registry in
-``app/server/core/height/service.py``).
+``city2stl/height/service.py``).
 """
 from __future__ import annotations
 

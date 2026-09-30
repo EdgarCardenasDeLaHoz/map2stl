@@ -23,25 +23,18 @@ const BBOX_RECT_STYLE = { color: '#e74c3c', weight: 2, fillOpacity: 0.05 };
     }
 });
 /**
- * modules/bbox-panel.js
+ * modules/map/bbox-panel.js
  *
  * Exposed on window:
- *   setBboxInputValues, initBboxMiniMap, syncBboxMiniMap, toggleBboxMiniMap,
- *   setupGridToggle,
- *   populateRegionsPanelTable, closeRegionsPanel, toggleContinentVisibility
+ *   setBboxInputValues, setBboxRectangle, initBboxMiniMap, syncBboxMiniMap,
+ *   toggleBboxMiniMap, setupGridToggle, setupBboxKeyboardNav
  *
  * Depends on:
- *   window.appState.selectedRegion, window.appState.currentDemBbox,
- *   window.appState.lastDemData, window.appState.layerStatus
- *   window.getBoundingBox?.(), window.getMap?.(),
- *   window.getCoordinatesData?.(), window.getWaterOpacity?.(),
- *   window.getSidebarState?.(), window.getPreloadedLayer?.()
- *   window.CONTINENT_HIDDEN
+ *   window.appState.selectedRegion, window.appState.currentDemBbox
+ *   window.getBoundingBox?.(), window.setBoundingBox?.(), window.getMap?.(),
+ *   window.setSelectedRegion?.(), window.showToast?.(), window.events / window.EV
  *   window.drawGridlinesOverlay?.(), window.loadDEM?.(), window.loadWaterMask?.(),
- *   window.loadSatelliteImage?.() (alias loadSatelliteImage in app.js closure),
- *   window.clearLayerCache?.(), window.updateLayerStatusIndicators?.(),
- *   window.groupRegionsByContinent?.(), window.selectCoordinate?.(),
- *   window.goToEdit?.()
+ *   window.loadSatelliteImage?.(), window.clearLayerCache?.()
  */
 
 // ─── Mini-map state ──────────────────────────────────────────────────────────
@@ -359,131 +352,4 @@ window.setupBboxKeyboardNav = function setupBboxKeyboardNav() {
             }
         });
     });
-};
-
-// ─── populateRegionsPanelTable ────────────────────────────────────────────────
-
-/**
- * Render the floating regions panel list, grouped by continent.
- * Supports search filtering via `#regionsPanelSearch`.
- */
-window.populateRegionsPanelTable = function populateRegionsPanelTable() {
-    const container = document.getElementById('regionsPanelList');
-    const searchInput = document.getElementById('regionsPanelSearch');
-    const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
-
-    const coordinatesData = window.getCoordinatesData?.() ?? [];
-    const selectedRegion = window.appState.selectedRegion;
-
-    if (!container || !coordinatesData) return;
-    container.innerHTML = '';
-
-    if (coordinatesData.length === 0) {
-        container.innerHTML = '<div style="padding:16px;color:#666;font-size:12px;text-align:center;">No regions yet.<br>Draw a bounding box on the map to create one.</div>';
-        return;
-    }
-
-    const filtered = searchTerm
-        ? coordinatesData.filter(r => r.name.toLowerCase().includes(searchTerm))
-        : coordinatesData;
-
-    const groups = window.groupRegionsByContinent?.(filtered) ?? [];
-
-    groups.forEach(({ continent, regions: groupRegions }) => {
-        const isHidden = window.CONTINENT_HIDDEN.has(continent);
-
-        const groupEl = document.createElement('div');
-
-        const header = document.createElement('div');
-        header.className = 'continent-header';
-        header.innerHTML = `
-            <span class="continent-toggle">▾</span>
-            <span class="continent-name">${continent}</span>
-            <span class="continent-count">${groupRegions.length}</span>
-            <span class="continent-eye${isHidden ? ' hidden-continent' : ''}" title="Show/hide on map"
-                  onclick="event.stopPropagation(); toggleContinentVisibility('${continent}', this)">👁</span>
-        `;
-        header.addEventListener('click', () => {
-            header.classList.toggle('collapsed');
-            body.classList.toggle('collapsed');
-        });
-
-        const body = document.createElement('div');
-        body.className = 'continent-body';
-
-        groupRegions.forEach(region => {
-            let originalIndex = coordinatesData.indexOf(region);
-            if (originalIndex < 0) {
-                originalIndex = coordinatesData.findIndex(r =>
-                    r.name === region.name
-                    && Number(r.north) === Number(region.north)
-                    && Number(r.south) === Number(region.south)
-                    && Number(r.east) === Number(region.east)
-                    && Number(r.west) === Number(region.west)
-                );
-            }
-            if (originalIndex < 0) {
-                originalIndex = coordinatesData.findIndex(r => r.name === region.name);
-            }
-            const row = document.createElement('div');
-            row.className = 'panel-region-row';
-            if (selectedRegion && selectedRegion.name === region.name) row.classList.add('selected');
-            row.innerHTML = `
-                <span class="panel-region-name" title="${region.name}">${region.name}</span>
-                <span class="panel-region-edit" onclick="event.stopPropagation(); window.goToEdit?.(${originalIndex}); window.closeRegionsPanel?.();">✏️ Edit</span>
-            `;
-            row.addEventListener('click', () => {
-                window.selectCoordinate?.(originalIndex);
-                // Highlight in panel
-                container.querySelectorAll('.panel-region-row').forEach(r => r.classList.remove('selected'));
-                row.classList.add('selected');
-            });
-            body.appendChild(row);
-        });
-
-        groupEl.appendChild(header);
-        groupEl.appendChild(body);
-        container.appendChild(groupEl);
-    });
-};
-
-// ─── closeRegionsPanel ────────────────────────────────────────────────────────
-
-/**
- * Close the floating regions panel and deactivate the toggle button.
- */
-window.closeRegionsPanel = function closeRegionsPanel() {
-    document.getElementById('regionsPanel')?.classList.add('hidden');
-    document.getElementById('floatingRegionsToggle')?.classList.remove('active');
-};
-
-// ─── toggleContinentVisibility ────────────────────────────────────────────────
-
-/**
- * Toggle visibility of a continent group inside the floating regions panel.
- * Updates `window.CONTINENT_HIDDEN` and re-renders the panel.
- * @param {string} continent - Continent name key
- * @param {HTMLElement} eyeEl - The eye icon element to update visually
- */
-window.toggleContinentVisibility = function toggleContinentVisibility(continent, eyeEl) {
-    if (window.CONTINENT_HIDDEN.has(continent)) {
-        window.CONTINENT_HIDDEN.delete(continent);
-        eyeEl.classList.remove('hidden-continent');
-    } else {
-        window.CONTINENT_HIDDEN.add(continent);
-        eyeEl.classList.add('hidden-continent');
-    }
-    // Toggle map rectangles for regions in this continent
-    const preloadedLayer = window.getPreloadedLayer?.();
-    if (preloadedLayer) {
-        preloadedLayer.eachLayer(layer => {
-            if (layer._continentName === continent) {
-                if (window.CONTINENT_HIDDEN.has(continent)) {
-                    layer.setStyle({ opacity: 0, fillOpacity: 0 });
-                } else {
-                    layer.setStyle({ opacity: 1, fillOpacity: 0.15 });
-                }
-            }
-        });
-    }
 };

@@ -294,6 +294,8 @@ async function selectCoordinate(index, opts = {}) {
     window.clearLayerDisplays();
     // Clear city overlay so auto-load triggers for the new region
     if (typeof window.clearCityOverlay === 'function') window.clearCityOverlay();
+    // An imported mesh is registered against the previous region's bbox.
+    window.clearMeshLayer?.();
 
     // Highlight in sidebar list
     document.querySelectorAll('.coordinate-item').forEach(item => {

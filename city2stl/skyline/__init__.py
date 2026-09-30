@@ -11,15 +11,13 @@ Estimates per-building heights for a city region by:
   5. Aggregating per-view estimates with outlier-seed downweighting.
 
 Layout:
-  - ``pipeline.py``          -> ``_core/``          CV/geometry primitives, step timer
-                                (public façade for external callers; skyline's
-                                own modules import from ``_core.*`` directly)
+  - ``_core/``               — CV/geometry primitives, step timer (import the
+                                defining submodule; there is no façade)
   - ``_pano/``               — per-seed capture, heading, detection
   - ``_region_render/``      — PDF drawing and pages
   - ``_report_plots/``       — HTML-report figures
   - ``region_pdf.py``        — region orchestration; ``region_config``,
     ``region_data`` and ``region_types`` hold its flags, I/O and dataclasses
-  - ``height/``              — re-export shim for ``city2stl.height``
 
 Entry point: ``city2stl/skyline/scripts/08_region_skyline_pdf.py``.
 

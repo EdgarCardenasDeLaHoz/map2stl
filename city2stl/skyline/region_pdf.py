@@ -1,5 +1,5 @@
 """Region-driven skyline screening and PDF report generation — the
-orchestration layer of skyline. Calls into pipeline.py for the
+orchestration layer of skyline. Calls into ``_core/`` for the
 math; this module handles I/O, seed selection, multi-pass registration,
 and rendering.
 
@@ -30,7 +30,7 @@ Flow per region
    - Per-view register with ±8° around the seed anchor
    - ``estimate_heights_from_registration`` per view
    - Stitch per-view masks for the 360° pano-level result
-7. ``aggregate_building_heights`` (in pipeline.py) groups by feature_id
+7. ``aggregate_building_heights`` (in ``_core/height.py``) groups by feature_id
    with outlier-seed downweighting.
 8. ``_render_pdf`` writes the multi-page report.
 
@@ -42,7 +42,7 @@ Key state structures
   registration metadata, matched-segment list, vertical band crop)
 - ``StitchedPanoResult`` — one frozen result per seed for the pano pipeline
 
-Hard dependencies beyond pipeline.py: ``requests`` (Street View Static API
+Hard dependencies beyond ``_core/``: ``requests`` (Street View Static API
 + Overpass + open-meteo elevations), ``matplotlib`` (PDF rendering),
 ``geo2stl.cache`` (OSM cache) and the map2stl regions SQLite table, read
 by ``region_data`` without importing ``app``.
@@ -51,6 +51,7 @@ by ``region_data`` without importing ``app``.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -84,6 +85,8 @@ from .seed_selection import (
     _screen_locations,
 )
 from .streetview_io import _parse_streetview_url, _resolve_api_key
+
+logger = logging.getLogger(__name__)
 
 
 def _write_heights_json(
@@ -140,9 +143,9 @@ def _write_heights_json(
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
-        print(f"[heights_json] {len(rows)} buildings -> {path}")
+        logger.info(f"[heights_json] {len(rows)} buildings -> {path}")
     except Exception as exc:      # diagnostics must never break a run
-        print(f"[heights_json] failed: {exc}")
+        logger.warning(f"[heights_json] failed: {exc}")
 
 
 def run_region_pdf_report(
@@ -208,17 +211,15 @@ def run_region_pdf_report(
                     (bbox.south, bbox.west, bbox.north, bbox.east),
                     target_m_per_px=1.0,
                 )
-            print(
-                f"[cross_view] satellite image loaded: zoom={sat_meta['zoom']} "
-                f"shape={sat_meta['shape']} tiles={sat_meta['tiles_loaded']}/{sat_meta['tiles_total']}"
-            )
+            logger.info(f"[cross_view] satellite image loaded: zoom={sat_meta['zoom']} "
+                        f"shape={sat_meta['shape']} tiles={sat_meta['tiles_loaded']}/{sat_meta['tiles_total']}")
             cross_view_state = {
                 "sat_image": sat_image,
                 "sat_project": sat_project,
                 "sat_meta": sat_meta,
             }
         except Exception as e:
-            print(f"[cross_view] satellite image fetch failed: {e}")
+            logger.warning(f"[cross_view] satellite image fetch failed: {e}")
             cross_view_state = None
 
     # F-SKY11.1 Path B: optionally precompute coastline keypoints once
@@ -241,7 +242,7 @@ def run_region_pdf_report(
                 osm_water_features = extract_water_features(osm_data)
                 osm_green_features = extract_green_features(osm_data)
             except Exception as _e_osm_extract:
-                print(f"[pano_recovery] OSM extraction failed: {_e_osm_extract}")
+                logger.warning(f"[pano_recovery] OSM extraction failed: {_e_osm_extract}")
                 osm_coastline_features = []
                 osm_water_features = []
                 osm_green_features = []
@@ -251,8 +252,8 @@ def run_region_pdf_report(
             # provides no information we need when Phase C is on.
             if _PHASE_C_ENABLED:
                 if not osm_coastline_features:
-                    print("[pano_recovery] Phase C: no OSM coastline "
-                          "for this region — recovery skipped")
+                    logger.info("[pano_recovery] Phase C: no OSM coastline "
+                                "for this region — recovery skipped")
                 else:
                     pano_recovery_state = {
                         "primary_source": "osm",
@@ -268,9 +269,9 @@ def run_region_pdf_report(
                         "drive_anchor": bool(
                             _load_site_drive_pano_recovery_anchor(region_name)),
                     }
-                    print(f"[pano_recovery] Phase C ACTIVE  "
-                          f"osm_coastline_features={len(osm_coastline_features)} "
-                          "(OSM-primary, satellite HSV skipped)")
+                    logger.info(f"[pano_recovery] Phase C ACTIVE  "
+                                f"osm_coastline_features={len(osm_coastline_features)} "
+                                "(OSM-primary, satellite HSV skipped)")
             else:
                 # Legacy / Phase B path: satellite HSV drives recovery.
                 from .coastline_registration import (
@@ -288,8 +289,8 @@ def run_region_pdf_report(
                 sat_water = detect_sat_water_mask(sat_image)
                 water_frac = float(sat_water.mean())
                 if water_frac < 0.02:
-                    print(f"[pano_recovery] region has <2% water "
-                          f"({water_frac:.1%}) — coastline recovery skipped")
+                    logger.info(f"[pano_recovery] region has <2% water "
+                                f"({water_frac:.1%}) — coastline recovery skipped")
                 else:
                     pano_recovery_state = {
                         "primary_source": "satellite",
@@ -302,11 +303,11 @@ def run_region_pdf_report(
                         "drive_anchor": bool(
                             _load_site_drive_pano_recovery_anchor(region_name)),
                     }
-                    print(f"[pano_recovery] region satellite water "
-                          f"{water_frac:.1%} — keypoints will be computed "
-                          "per-seed inside _seed_multiview_registration")
+                    logger.info(f"[pano_recovery] region satellite water "
+                                f"{water_frac:.1%} — keypoints will be computed "
+                                "per-seed inside _seed_multiview_registration")
         except Exception as e:
-            print(f"[pano_recovery] region precomputation failed: {e}")
+            logger.warning(f"[pano_recovery] region precomputation failed: {e}")
             pano_recovery_state = None
         timer.record("F-SKY11/13 pano-recovery precompute",
                      time.perf_counter() - _pano_precompute_t0)
@@ -354,11 +355,11 @@ def run_region_pdf_report(
             region_bbox_center=_bbox_center,
         )
         if _web_out:
-            print(f"[web_seed] adding {len(_web_out)} web image seed(s) "
-                  f"for {region_name!r}")
+            logger.info(f"[web_seed] adding {len(_web_out)} web image seed(s) "
+                        f"for {region_name!r}")
             seeds = list(seeds) + _web_out
     except Exception as _web_exc:
-        print(f"[web_seed] fetch failed: {_web_exc}")
+        logger.warning(f"[web_seed] fetch failed: {_web_exc}")
 
     # Generate geometry-driven auto-proposals from OSM tall-building cluster.
     # These are screened via Street View but NOT fed into multiview registration
@@ -399,12 +400,10 @@ def run_region_pdf_report(
             seeds, auto_points, screened, skip_names=skip_replace)
     if seed_substitutions:
         for orig, repl in seed_substitutions:
-            print(
-                f"[auto_seed] {orig.name} ({orig.lat:.5f},{orig.lon:.5f} "
-                f"hdg {orig.heading:.0f}deg) -> ({repl.lat:.5f},"
-                f"{repl.lon:.5f} hdg {repl.heading:.0f}deg) "
-                f"[auto-replaced; original seed failed screening]"
-            )
+            logger.warning(f"[auto_seed] {orig.name} ({orig.lat:.5f},{orig.lon:.5f} "
+                           f"hdg {orig.heading:.0f}deg) -> ({repl.lat:.5f},"
+                           f"{repl.lon:.5f} hdg {repl.heading:.0f}deg) "
+                           f"[auto-replaced; original seed failed screening]")
 
     # Run auto-proposed standoff locations through the full pipeline in
     # ADDITION to the user-supplied seeds (skipping any consumed by the
@@ -427,18 +426,16 @@ def run_region_pdf_report(
             continue
         additional_seeds.append(ap)
     if additional_seeds:
-        print(
-            f"[auto_seed] running {len(additional_seeds)} auto-proposals "
-            f"through pipeline in addition to {len(seeds)} user seeds"
-        )
+        logger.info(f"[auto_seed] running {len(additional_seeds)} auto-proposals "
+                    f"through pipeline in addition to {len(seeds)} user seeds")
         seeds = list(seeds) + additional_seeds
 
     max_plausible_height_m = _load_site_max_plausible_height_m(region_name)
     if anchor_overrides:
-        print(f"[anchor_overrides] {anchor_overrides}")
+        logger.info(f"[anchor_overrides] {anchor_overrides}")
     if negative_seeds:
-        print(f"[negative_seeds] {sorted(negative_seeds)}")
-    print(f"[max_plausible_height_m] {max_plausible_height_m:.0f}")
+        logger.info(f"[negative_seeds] {sorted(negative_seeds)}")
+    logger.info(f"[max_plausible_height_m] {max_plausible_height_m:.0f}")
     with _timed("Multiview registration (per-seed)"):
         seed_views, building_heights, pano_results = _seed_multiview_registration(
             seeds, building_records, api_key,
@@ -497,9 +494,9 @@ def run_region_pdf_report(
                 region_bbox=bbox,
                 pano_results=pano_results,
             )
-            print(f"[timing] Render HTML: {time.perf_counter() - _html_t0:.2f}s")
+            logger.info(f"[timing] Render HTML: {time.perf_counter() - _html_t0:.2f}s")
         except Exception as _html_e:
-            print(f"[F-SKY15] HTML report failed: {_html_e}")
+            logger.warning(f"[F-SKY15] HTML report failed: {_html_e}")
 
     # Machine-readable heights. Until now the aggregated per-building result
     # existed only inside the rendered PDF and HTML, so any accuracy check —

@@ -3,8 +3,10 @@
  *
  * Loaded as a plain <script> before app.js.
  *
+ * previewModelIn3D() (build/replace terrain in the viewer) is module-local; the
+ * auto-preview watcher at the bottom of this file calls it.
+ *
  * Public API (all on window):
- *   previewModelIn3D()                          — build/replace terrain in viewer
  *   haversineDiagKm(N, S, E, W)                — bbox diagonal in km
  *   updatePuzzlePreview()                       — draw puzzle cut lines in viewer
  *   window.setViewerAutoRotate(val)             — set auto-rotate flag from app.js
@@ -1053,7 +1055,6 @@ function setViewerAutoRotate(val) {
 // Expose on window
 // ─────────────────────────────────────────────────────────────────────────────
 
-window.previewModelIn3D     = previewModelIn3D;
 window.haversineDiagKm      = haversineDiagKm;
 window.updatePuzzlePreview  = updatePuzzlePreview;
 window._readBuildParams     = _readBuildParams;

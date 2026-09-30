@@ -4,7 +4,7 @@ city2stl/heights.py — OSM building height parsing and raster enhancement.
 Provides pure-computation GeoDataFrame helpers for building height data.
 No HTTP, cache, or server dependencies.
 
-Server entry point: app.server.core.osm re-exports all public symbols.
+Server callers (``app.server.core.city_data`` and the city routers) import this module directly.
 
 ``height_from_tags`` is the one rule for OSM tag heights (``height`` with
 units, else ``building:levels`` x 3.2 m plus the roof); ``_fill_heights``

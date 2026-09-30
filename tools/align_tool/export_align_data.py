@@ -42,6 +42,8 @@ import numpy as np
 import paths  # noqa: E402
 import refine_guess
 
+from city2stl.registration import street_place
+
 ROOT = paths.CITIES / "micropolitan" / "_extracted"
 
 # Packs come from more than one vendor and do not share a directory.  The micropolitan packs
@@ -794,14 +796,16 @@ def main(only: list[str] | None = None):
         if os.environ.get("STREET_PLACE", "1") != "0" and relief["residual"] is not None:
             meta.setdefault("geometric_guess", guess)
             try:
-                import street_place
                 plate = street_place.Plate(
                     meta=meta, relief=relief["absolute"], residual=relief["residual"],
                     water=stl_water, gscale=gscale, rot_deg=rot_deg)
                 placed = street_place.place_plate(plate)
-            except Exception as exc:
-                print(f"{name}: street placement failed ({exc}); keeping the placement above",
+            except Exception as exc:  # noqa: BLE001 -- a failed placement keeps the pose above
+                # Print the traceback: this used to hide an ImportError that left street
+                # placement silently off.
+                print(f"{name}: street placement failed ({exc!r}); keeping the placement above",
                       flush=True)
+                traceback.print_exc()
                 placed = None
             if placed is not None:
                 meta["street_placement"] = placed

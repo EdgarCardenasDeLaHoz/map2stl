@@ -142,7 +142,7 @@ Primary `TerrainSession` touchpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/composite/city-raster` | Rasterize OSM features to height-delta arrays (PIL, ~50× faster than JS). Supports `projection` and `clip_nans` for uniform pipeline alignment — used by `composite-dem.js` |
+| POST | `/api/composite/city-raster` | Rasterize OSM features to height-delta arrays (PIL, ~50× faster than JS). Supports `projection` and `clip_valid_region` for uniform pipeline alignment — used by `composite-dem.js` |
 
 ## Cache & Settings (`app/server/routers/cache.py`, `app/server/routers/settings.py`)
 
@@ -203,8 +203,8 @@ with no display returns **501** and the client falls back to typing the path. Re
 ## Height Routes (`app/server/routers/height.py`)
 
 Building height rasters from multiple providers. Router prefix `/api/height`; request models
-`HeightSourcesRequest` / `HeightFetchRequest` live in the router, provider glue in
-`app/server/core/height/service.py`.
+`HeightSourcesRequest` / `HeightFetchRequest` live in the router, which imports the provider
+registry from `city2stl/height/service.py` (`provider_infos`, `_select_providers`).
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -308,11 +308,6 @@ only when the client posts it to the location route above.
 
 - `BoundingBox` — `{north, south, east, west}`
 - `RegionCreate(BoundingBox)` — `+ name, label?, description?`
-- `RegionSettings` — arbitrary settings blob `{dim?, colormap?, projection?, elevation_curve_points?, ...}`
-- `DEMRequest(BoundingBox)` — `+ dim, depth_scale, height, base, ...`
-- `DEMResponse` — `{values, width, height, min, max, bbox, ...}`
-- `WaterMaskResponse` — `{water_mask_values, water_mask_dimensions, esa_values, esa_dimensions, ...}`
-- `ExportRequest(BoundingBox)` — `+ dim, depth_scale, height, base, subtract_water, ...`
 - `CityRequest(BoundingBox)` — `+ layers: list[str], simplify_tolerance, min_area`
 - `MergeRequest` — `{bbox, dim, layers: list[MergeLayerSpec]}`
 - `MergeLayerSpec` — `{source, blend_mode, weight, processing: ProcessingSpec, options}` (river/lake sources: `blend_mode: "add"`, see `/api/composite/dem-merge`)
@@ -321,8 +316,9 @@ only when the client posts it to the location route above.
 - `PlateRegistrationStartRequest` — `{slug, place, fix, rel_path?}`
 - `CriticScoreRequest` — `{reference: CriticReference, model: CriticModel}`
 - `LandmarksRequest` — `{buildings, tallest_n, region?}`; `LandmarkPreviewRequest` — `{buildings, osm_id, override?}`
-- Also defined there: `EnhanceHeightsRequest`, `CityRasterRequest`, `HydrologyMergeRequest`, `SatelliteRequest` / `SatelliteResponse`, `WaterMaskRequest`, `RawDEMResponse`, `ExportResponse`, cache/settings response models (`CacheStatusResponse`, `ProjectionsResponse`, `ColormapsResponse`, `DatasetsResponse`), mesh-import models (`MeshUploadResponse`, `MeshHeightmapRequest`, `MeshRegisterRequest`, `MeshLibrarySetLocationRequest`, `MeshAutoRegisterResponse`, …), `CriticReference` / `CriticModel`
-- Most export routes take a raw JSON body (`await request.json()`), parsed by `app/server/core/export_params.py::ExportContext`, not a Pydantic model; `ExportRequest` documents the terrain fields.
+- Also defined there: `EnhanceHeightsRequest`, `CityRasterRequest`, `HydrologyMergeRequest`, settings item models (`ProjectionInfo`, `ColormapInfo`, `DatasetInfo`), mesh-import request models (`MeshHeightmapRequest`, `MeshRegisterRequest`, `MeshLibrarySetLocationRequest`, `MeshLibraryHeightmapRequest`, …), `CriticReference` / `CriticModel`
+- Only request models are declared: responses are plain dicts / `JSONResponse` (the unused response and terrain/export models were deleted 2026-09-30). The saved-settings blob is free-form JSON.
+- Most export routes take a raw JSON body (`await request.json()`), parsed by `app/server/core/export_params.py::ExportContext`, not a Pydantic model.
 
 ## DEM Sources
 

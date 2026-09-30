@@ -1,6 +1,7 @@
 """skyline._pano.heading — extracted from pano_registration.py (A2 split)."""
 from __future__ import annotations
 
+import logging
 from contextlib import nullcontext
 
 import numpy as np
@@ -12,6 +13,8 @@ from ..region_config import (
     _F_SKY11_1_ENABLED,
 )
 from ..region_types import SkylinePoint
+
+logger = logging.getLogger(__name__)
 
 
 def _recover_pano_heading(
@@ -143,8 +146,8 @@ def _recover_pano_heading(
                         )
                     _keypoint_source = "osm"
                 except Exception as _e_kp:
-                    print(f"[pano_recovery] seed={seed.name} "
-                          f"OSM keypoint extraction failed: {_e_kp}")
+                    logger.warning(f"[pano_recovery] seed={seed.name} "
+                                   f"OSM keypoint extraction failed: {_e_kp}")
                     keypoints = []
                     _keypoint_source = "osm-failed"
             else:
@@ -217,16 +220,14 @@ def _recover_pano_heading(
                                 )
                             _veg_scores = _v_scores
                             _veg_peak = float(_v_scores.max())
-                            print(
-                                f"[pano_recovery] seed={seed.name}  "
-                                f"vegetation_keypoints={len(_veg_keypoints)}  "
-                                f"pano_veg_frac={float(_pveg.mean()):.3f}  "
-                                f"veg_recovered={float(_v_best):.1f}deg  "
-                                f"veg_peak={_veg_peak:.3f}"
-                            )
+                            logger.info(f"[pano_recovery] seed={seed.name}  "
+                                        f"vegetation_keypoints={len(_veg_keypoints)}  "
+                                        f"pano_veg_frac={float(_pveg.mean()):.3f}  "
+                                        f"veg_recovered={float(_v_best):.1f}deg  "
+                                        f"veg_peak={_veg_peak:.3f}")
                     except Exception as _e_veg:
-                        print(f"[pano_recovery] seed={seed.name} "
-                              f"vegetation sweep failed: {_e_veg}")
+                        logger.warning(f"[pano_recovery] seed={seed.name} "
+                                       f"vegetation sweep failed: {_e_veg}")
 
                 if _veg_scores is not None and _veg_peak > 0:
                     # Peak-weighted blend: each channel contributes in
@@ -245,24 +246,20 @@ def _recover_pano_heading(
                         pano_recovered_offset = float(_cand[_blend_best_idx])
                         pano_recovered_peak = float(blended.max())
                         pano_recovered_sigma = float(blended.std())
-                        print(
-                            f"[pano_recovery] seed={seed.name}  "
-                            f"BLENDED water+veg -> offset="
-                            f"{pano_recovered_offset:.1f}deg  "
-                            f"peak={pano_recovered_peak:.3f}  "
-                            f"(w_water={w_water/total:.2f} w_veg={w_veg/total:.2f})"
-                        )
+                        logger.info(f"[pano_recovery] seed={seed.name}  "
+                                    f"BLENDED water+veg -> offset="
+                                    f"{pano_recovered_offset:.1f}deg  "
+                                    f"peak={pano_recovered_peak:.3f}  "
+                                    f"(w_water={w_water/total:.2f} w_veg={w_veg/total:.2f})")
 
-                print(
-                    f"[pano_recovery] seed={seed.name}  "
-                    f"source={_keypoint_source}  "
-                    f"keypoints={len(keypoints)}  "
-                    f"pano_views={len(_spin_views_raw)}/12  "
-                    f"pano_water_frac={pano_water_frac:.3f}  "
-                    f"recovered={pano_recovered_offset:.1f}deg  "
-                    f"peak={pano_recovered_peak:.3f}  "
-                    f"sigma={pano_recovered_sigma:.3f}"
-                )
+                logger.info(f"[pano_recovery] seed={seed.name}  "
+                            f"source={_keypoint_source}  "
+                            f"keypoints={len(keypoints)}  "
+                            f"pano_views={len(_spin_views_raw)}/12  "
+                            f"pano_water_frac={pano_water_frac:.3f}  "
+                            f"recovered={pano_recovered_offset:.1f}deg  "
+                            f"peak={pano_recovered_peak:.3f}  "
+                            f"sigma={pano_recovered_sigma:.3f}")
 
                 _pano_proj_raw: list = []
                 _pveg_raw: list = []
@@ -303,9 +300,9 @@ def _recover_pano_heading(
                                 pano_projected_coastline, _osm_snap,
                                 seed.lat, seed.lon, max_bearing_tol_deg=4.0,
                             )
-                            print(f"[F-SKY18] seed={seed.name} depth-snap: "
-                                  f"{_n_before} -> {len(pano_projected_coastline)} "
-                                  "coastline dots snapped to OSM")
+                            logger.info(f"[F-SKY18] seed={seed.name} depth-snap: "
+                                        f"{_n_before} -> {len(pano_projected_coastline)} "
+                                        "coastline dots snapped to OSM")
                     # F-SKY18 Phase 2: project pano vegetation base and snap
                     # to OSM green polygon boundaries. Bearings exact; ranges
                     # corrected by the snap so dots land on real green edges.
@@ -341,13 +338,13 @@ def _recover_pano_heading(
                                 pano_projected_vegetation, _osm_green,
                                 seed.lat, seed.lon, max_bearing_tol_deg=4.0,
                             )
-                            print(f"[F-SKY18] seed={seed.name} vegetation: "
-                                  f"{_vn} -> {len(pano_projected_vegetation)} "
-                                  "green dots snapped to OSM green "
-                                  f"({len(_osm_green)} OSM green pts)")
+                            logger.info(f"[F-SKY18] seed={seed.name} vegetation: "
+                                        f"{_vn} -> {len(pano_projected_vegetation)} "
+                                        "green dots snapped to OSM green "
+                                        f"({len(_osm_green)} OSM green pts)")
                 except Exception as _e_proj:
-                    print(f"[pano_recovery] seed={seed.name} "
-                          f"pano-projection failed: {_e_proj}")
+                    logger.warning(f"[pano_recovery] seed={seed.name} "
+                                   f"pano-projection failed: {_e_proj}")
 
                 # F-SKY16 Phase A (measure-only): register the pano-
                 # projected coastline against OSM coastline by rotation
@@ -386,13 +383,11 @@ def _recover_pano_heading(
                             _icp_min = (
                                 float(_icp_cost.min())
                                 if _icp_cost.size else float("nan"))
-                            print(
-                                f"[F-SKY16] seed={seed.name}  "
-                                f"icp_offset={_icp_off:.1f}deg  "
-                                f"icp_cost={_icp_min:.2f}deg  "
-                                f"(keypoint_sweep={pano_recovered_offset:.1f}deg)  "
-                                f"osm_pts={len(_osm_pts_icp)}"
-                            )
+                            logger.info(f"[F-SKY16] seed={seed.name}  "
+                                        f"icp_offset={_icp_off:.1f}deg  "
+                                        f"icp_cost={_icp_min:.2f}deg  "
+                                        f"(keypoint_sweep={pano_recovered_offset:.1f}deg)  "
+                                        f"osm_pts={len(_osm_pts_icp)}")
 
                             # F-SKY18 Phase 3 (measure-only): joint ICP with
                             # vegetation added as a second landmark class.
@@ -416,32 +411,26 @@ def _recover_pano_heading(
                                     k: float(v.min())
                                     for k, v in _j_per.items() if v.size
                                 }
-                                print(
-                                    f"[F-SKY18-3] seed={seed.name}  "
-                                    f"joint_icp_offset={_j_off:.1f}deg  "
-                                    f"joint_cost={_j_min:.2f}deg  "
-                                    f"per_class_min={ _per_min }  "
-                                    f"veg_pts={len(_pveg_raw)} "
-                                    f"osm_green_pts={len(_osm_green)}"
-                                )
+                                logger.info(f"[F-SKY18-3] seed={seed.name}  "
+                                            f"joint_icp_offset={_j_off:.1f}deg  "
+                                            f"joint_cost={_j_min:.2f}deg  "
+                                            f"per_class_min={ _per_min }  "
+                                            f"veg_pts={len(_pveg_raw)} "
+                                            f"osm_green_pts={len(_osm_green)}")
                             else:
-                                print(
-                                    f"[F-SKY18-3] seed={seed.name}  "
-                                    "joint ICP skipped (no vegetation/OSM-green)"
-                                )
+                                logger.info(f"[F-SKY18-3] seed={seed.name}  "
+                                            "joint ICP skipped (no vegetation/OSM-green)")
                 except Exception as _e_icp:
-                    print(f"[F-SKY16] seed={seed.name} ICP compare failed: "
-                          f"{_e_icp}")
+                    logger.warning(f"[F-SKY16] seed={seed.name} ICP compare failed: "
+                                   f"{_e_icp}")
 
                 if _primary == "osm":
                     pano_osm_iou = pano_recovered_peak
                     pano_osm_n_keypoints = len(keypoints)
-                    print(
-                        f"[pano_recovery] seed={seed.name}  "
-                        f"osm_kp={pano_osm_n_keypoints}  "
-                        f"osm_iou={pano_osm_iou:.3f}  (peak=IoU)  "
-                        f"projected_pts={len(pano_projected_coastline) if pano_projected_coastline else 0}"
-                    )
+                    logger.info(f"[pano_recovery] seed={seed.name}  "
+                                f"osm_kp={pano_osm_n_keypoints}  "
+                                f"osm_iou={pano_osm_iou:.3f}  (peak=IoU)  "
+                                f"projected_pts={len(pano_projected_coastline) if pano_projected_coastline else 0}")
                 else:
                     try:
                         from ..coastline_registration import (  # noqa: PLC0415
@@ -473,22 +462,18 @@ def _recover_pano_heading(
                                 )
                             )
                             pano_osm_n_keypoints = len(_osm_kps)
-                        print(
-                            f"[pano_recovery] seed={seed.name}  "
-                            f"osm_kp={pano_osm_n_keypoints}  "
-                            f"osm_iou={pano_osm_iou}  "
-                            f"projected_pts={len(pano_projected_coastline) if pano_projected_coastline else 0}"
-                        )
+                        logger.info(f"[pano_recovery] seed={seed.name}  "
+                                    f"osm_kp={pano_osm_n_keypoints}  "
+                                    f"osm_iou={pano_osm_iou}  "
+                                    f"projected_pts={len(pano_projected_coastline) if pano_projected_coastline else 0}")
                     except Exception as _e_osm:
-                        print(
-                            f"[pano_recovery] seed={seed.name} "
-                            f"OSM diagnostic failed: {_e_osm}"
-                        )
+                        logger.warning(f"[pano_recovery] seed={seed.name} "
+                                       f"OSM diagnostic failed: {_e_osm}")
             else:
-                print(f"[pano_recovery] seed={seed.name}  "
-                      f"keypoints={len(keypoints)} — no recovery attempted")
+                logger.info(f"[pano_recovery] seed={seed.name}  "
+                            f"keypoints={len(keypoints)} — no recovery attempted")
     except Exception as _e:
-        print(f"[pano_recovery] seed={seed.name} failed: {_e}")
+        logger.warning(f"[pano_recovery] seed={seed.name} failed: {_e}")
 
     return (
         pano_recovered_offset, pano_recovered_peak,
@@ -540,9 +525,9 @@ def _recover_anchor_offset(
         anchor_offset = float(override)
         if pano_recovered_offset is not None:
             _delta = (pano_recovered_offset - anchor_offset + 540.0) % 360.0 - 180.0
-            print(f"[pano_recovery] seed={seed.name}  "
-                  f"manual={anchor_offset:.1f}deg  "
-                  f"delta_to_recovered={_delta:+.1f}deg")
+            logger.info(f"[pano_recovery] seed={seed.name}  "
+                        f"manual={anchor_offset:.1f}deg  "
+                        f"delta_to_recovered={_delta:+.1f}deg")
         return anchor_offset
 
     if total_weight <= 0:
@@ -587,9 +572,9 @@ def _recover_anchor_offset(
                     best_sum_iou = s
                     best_anchor_offset = float(cand)
         anchor_offset = best_anchor_offset
-        print(f"[pano_recovery] seed={seed.name}  "
-              f"USED pano seed -> anchor={anchor_offset:.1f}deg  "
-              f"(joint_iou={best_sum_iou:.3f})")
+        logger.info(f"[pano_recovery] seed={seed.name}  "
+                    f"USED pano seed -> anchor={anchor_offset:.1f}deg  "
+                    f"(joint_iou={best_sum_iou:.3f})")
     else:
         coarse_offsets = np.arange(-180.0, 180.0, 3.0)
         h_token = float(seed.heading) if seed.heading is not None else None

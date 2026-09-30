@@ -10,8 +10,7 @@
  *   setCurvePreset(name)             — load a named curve preset
  *   addCurvePoint(x, y)             — add a control point
  *   drawCurve()                      — re-render the curve canvas
- *   applyCurveTodem()               — apply curve to DEM with toast
- *   applyCurveTodemSilent()         — apply curve silently (drag updates)
+ *   (applyCurveTodem / applyCurveTodemSilent are module-local: Apply button + drag)
  *   applyCurveSettings(pts, preset) — restore curve state (called by presets.js)
  *   undoCurve()                      — step back in history
  *   redoCurve()                      — step forward in history
@@ -522,7 +521,6 @@ function applyCurveSettings(points, presetName) {
 window.initCurveEditor = initCurveEditor;
 window.setCurvePreset = setCurvePreset;
 window.drawCurve = drawCurve;
-window.applyCurveTodem = applyCurveTodem;
 window.applyCurveSettings = applyCurveSettings;
 window.undoCurve = undoCurve;
 window.redoCurve = redoCurve;

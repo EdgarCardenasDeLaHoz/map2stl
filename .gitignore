@@ -21,8 +21,8 @@ config.json
 
 # Runtime / generated
 data.db
-data.db-shm
-data.db-wal
+data*.db-shm
+data*.db-wal
 server.log
 osm_raw_cache
 ee_cache/*

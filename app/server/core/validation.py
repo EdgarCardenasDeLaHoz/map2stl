@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import base64 as _b64m
-import math
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
@@ -20,8 +19,7 @@ from fastapi import Query, Request
 from fastapi.responses import JSONResponse
 
 from app.server.config import MAX_BBOX_DIAGONAL_KM, MAX_DIM
-
-EARTH_RADIUS_KM: float = 6371.0
+from geo2stl.geo import bbox_diagonal_km
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,15 +141,8 @@ def validate_dim(dim: int | None, max_dim: int = MAX_DIM) -> JSONResponse | None
 def validate_bbox_diagonal(north: float, south: float,
                            east: float, west: float,
                            max_km: float = MAX_BBOX_DIAGONAL_KM) -> tuple[float, JSONResponse | None]:
-    """Return (diagonal_km, error_response_or_None).
-
-    Uses the Haversine-approximation diagonal check from cities.py.
-    """
-    d_lat = (north - south) * math.pi / 180
-    d_lon = ((east - west) * math.pi
-             * math.cos(((north + south) / 2) * math.pi / 180) / 180)
-    diag_km = math.sqrt((EARTH_RADIUS_KM * d_lat) ** 2
-                        + (EARTH_RADIUS_KM * d_lon) ** 2)
+    """Return (diagonal_km, error_response_or_None); the diagonal is ``geo2stl.geo.bbox_diagonal_km``."""
+    diag_km = bbox_diagonal_km({"north": north, "south": south, "east": east, "west": west})
     if diag_km > max_km:
         return diag_km, JSONResponse(
             content={"error": f"Bounding box too large ({diag_km:.1f} km diagonal, "

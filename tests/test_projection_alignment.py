@@ -80,7 +80,7 @@ class TestProjectionDimensionConsistency:
                                size=(h, w)).astype(np.float32)
 
         wm_out, esa_out = _project_water_arrays(
-            water, esa, *_BBOX, projection, clip_nans=True)
+            water, esa, *_BBOX, projection, clip_valid_region=True)
         assert wm_out.shape == esa_out.shape, (
             f"{projection}: water {wm_out.shape} ≠ ESA {esa_out.shape}")
 

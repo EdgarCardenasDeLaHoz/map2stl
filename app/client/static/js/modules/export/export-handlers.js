@@ -127,7 +127,7 @@ function _demSettings() {
             water_scale: p.waterScale ?? 0.05,
             subtract_water: p.subtractWater ?? true,
             maintain_dimensions: proj.maintainDimensions,
-            clip_nans: proj.clipValidRegion,
+            clip_valid_region: proj.clipValidRegion,
             show_sat: false,
         },
     };

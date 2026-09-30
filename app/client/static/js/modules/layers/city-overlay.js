@@ -1,8 +1,8 @@
 ﻿/**
- * city-overlay.js — OSM/city data overlay for the stacked layers view.
+ * modules/layers/city-overlay.js — OSM/city data overlay for the stacked layers view.
  *
- * Extracted from app.js (TODO item 15).  Loaded as a plain <script> before app.js
- * so the functions are available in global scope when app.js runs its DOMContentLoaded.
+ * Imported by main.js before app.js, so its window.* functions exist when
+ * app.js runs its DOMContentLoaded handler.
  *
  * Shared state is read from / written to window.appState (set up by app.js):
  *   window.appState.selectedRegion   — currently selected region object

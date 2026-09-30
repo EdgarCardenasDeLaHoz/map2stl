@@ -12,12 +12,18 @@ How the notebooks, the Python session client and the backend routes connect.
 
 - **An SDK over the HTTP server, not the pipeline.**
   - `start()` launches a uvicorn subprocess; almost every method then calls the same REST routes the browser uses (`TerrainSession._api_request`).
-  - Top-level imports: only `app.server.config` constants and `geo2stl.geo::bbox_size_m`. No mesh code; nothing on the browser render path touches this file.
+  - Top-level imports: only `app.server.config` constants and `geo2stl.geo` helpers (`bbox_size_m`, `bbox_diagonal_km`). No mesh code; nothing on the browser render path touches this file.
   - Why: its size and name make it look like the core; tracing the pipeline through it is a dead end. See [architecture decision "TerrainSession is an SDK, not the pipeline"](../decisions/architecture.md#2026-08-26--terrainsession-is-an-sdk-not-the-pipeline).
 - **Exceptions that run in-process** (lazy imports, no server round-trip):
   - Building heights: `fetch_building_heights` uses `city2stl.height` providers directly (see [height-providers.md](height-providers.md))
   - Height enrichment / roofs / ML: `enrich_buildings_with_heights`, `classify_roof_shapes`, `load_roof_model`, `predict_heights`, `train_height_model`
   - STL import + infill: `load_stl` → `city2stl/height/stl_import.py::stl_to_heightmap`; `infill_heights` → `city2stl/height/infill.py::infill_idw` / `infill_nearest`
+
+## Progress output goes through logging
+
+- Progress and problems are logged on the `app.session.terrain_session` logger (`logger.info` / `logger.warning`), not printed (2026-09-30).
+  - Call `logging.basicConfig(level=logging.INFO, format="%(message)s")` once in a notebook or script to see them; the notebooks under `notebooks/` do.
+- Methods whose job is a report still `print` / `display`: `regions`, `settings_table`, `check_alignment`, `verify`.
 
 ## Mesh exports reach the two-stage pipeline
 
@@ -118,7 +124,7 @@ Background: [pipeline audit 2026-08-26](../history/audits/pipeline-audit-2026-08
 - `select` swallows any error loading saved settings and silently falls back to defaults.
 - No callers in the repo (notebooks, tests, app): `check_alignment`, `merge_hydrology_with_dem`, `enrich_buildings_with_heights`.
 - `TerrainSession._kill_stale_server` kills whatever listens on the port, regardless of owner; every instance defaults to port 9090.
-- HTTP timeouts are hardcoded per call; output is `print()` only, no `logging`.
+- HTTP timeouts are hardcoded per call.
 - Fixed: `_VENV_PYTHON` points at `~/.venvs/map2stl` (2026-09-25); the old `export_obj` / `obj_split` call to a non-existent route is gone (replaced by `export_puzzle`).
 
 ## Settings ownership

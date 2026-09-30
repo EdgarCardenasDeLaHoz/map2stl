@@ -30,7 +30,7 @@ from typing import Any
 import numpy as np
 
 # Ordered list of event stages emitted by estimate_heights_from_registration.
-# Keep in sync with the trace calls in pipeline.py — adding a new stage requires
+# Keep in sync with the trace calls in _core/height.py — adding a new stage requires
 # updating this list AND the script schema in 09_height_trace.py.
 STAGES: tuple[str, ...] = (
     "building_start",
@@ -47,7 +47,7 @@ STAGES: tuple[str, ...] = (
     "geometric_y_gate",
     "drop_geometric_gate",
     "drop_plausibility_tag",
-    # Tag-disagreement filter (pipeline.py): drops a tagged building's per-view
+    # Tag-disagreement filter (_core/height.py): drops a tagged building's per-view
     # estimate when |pred - tag| > min(2*tag, 50 m). This is the gate that
     # silently discards under-predicting glass-tower views, so it MUST be a
     # recorded stage for the Phase-1 height trace to see the failure.
@@ -88,7 +88,7 @@ class HeightTraceRecorder:
         """Record one view's RGB / contour / mask for later rendering.
 
         Idempotent — first call per view_name wins. Arrays are copied so the
-        in-memory LRU in pipeline.py can free them safely.
+        in-memory LRU in _core/segmentation.py can free them safely.
         """
         if view_name in self.view_artifacts:
             return

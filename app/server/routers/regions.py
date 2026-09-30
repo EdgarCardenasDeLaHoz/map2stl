@@ -254,6 +254,22 @@ async def delete_region(name: str):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
+def _rename_legacy_clip_nans(settings: dict) -> dict:
+    """Rename the retired ``clip_nans`` key to ``clip_valid_region`` in saved settings.
+
+    The only place the old spelling is still read. Every route dropped the ``clip_nans``
+    alias on 2026-09-30; region settings saved before then (by the SDK in its
+    ``projection`` group, or flat) may still carry it, so it is renamed as they load.
+    An explicit ``clip_valid_region`` wins.
+    """
+    groups = [settings, *(v for v in settings.values() if isinstance(v, dict))]
+    for group in groups:
+        if "clip_nans" in group:
+            legacy = group.pop("clip_nans")
+            group.setdefault("clip_valid_region", legacy)
+    return settings
+
+
 @router.get("/api/regions/{name}/settings")
 async def get_region_settings(name: str):
     """Fetch saved panel settings for a region. Returns empty settings if none saved yet."""
@@ -266,7 +282,7 @@ async def get_region_settings(name: str):
             ).fetchone()
         if row is None:
             return JSONResponse(content={"name": name, "settings": {}})
-        settings = json.loads(row["settings_json"] or "{}")
+        settings = _rename_legacy_clip_nans(json.loads(row["settings_json"] or "{}"))
         return JSONResponse(content={"name": name, "settings": settings})
     except Exception as e:
         logger.error(f"Error fetching region settings: {e}")

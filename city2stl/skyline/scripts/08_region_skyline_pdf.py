@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import faulthandler
+import logging
 import os
 
 # Pin the native math thread pools before anything imports torch. A region run
@@ -95,4 +96,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Library progress (skyline._pano, region_pdf) goes through logging.
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     raise SystemExit(main())

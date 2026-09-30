@@ -100,8 +100,8 @@ def crop_tile_np(image_array, tile_bbox, crop_bbox):
 
 
 def stitch_tiles_no_rasterio(target_bbox):
-    print("==== Stitching tiles ====")
-    print(f"Target bounding box: {target_bbox}")
+    logger.info("==== Stitching tiles ====")
+    logger.info(f"Target bounding box: {target_bbox}")
 
     rows = {}
     for filename in get_tile_files():
@@ -113,7 +113,7 @@ def stitch_tiles_no_rasterio(target_bbox):
         try:
             image_array = io.imread(filename)
         except Exception as exc:
-            print(f"WARNING: Failed to open {filename}: {exc}")
+            logger.warning(f"Failed to open {filename}: {exc}")
             continue
 
         cropped = crop_tile_np(image_array, tile_bbox, intersection)
@@ -121,7 +121,7 @@ def stitch_tiles_no_rasterio(target_bbox):
         rows.setdefault(row_key, []).append((intersection[3], cropped))
 
     if not rows:
-        print("==== No tiles matched ====")
+        logger.warning("No tiles matched %s", target_bbox)
         return None
 
     stitched_rows = []
@@ -130,5 +130,5 @@ def stitch_tiles_no_rasterio(target_bbox):
         stitched_rows.append(np.hstack([image for _, image in tiles]))
 
     final_image = np.vstack(stitched_rows)
-    print("Finished stitching")
+    logger.info("Finished stitching")
     return final_image

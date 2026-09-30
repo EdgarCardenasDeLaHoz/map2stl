@@ -5,6 +5,7 @@ session.fetch_building_heights() through provider selection, fetch,
 merge, and storage on self.building_heights.
 """
 
+import logging
 from unittest.mock import patch
 
 import numpy as np
@@ -58,8 +59,9 @@ class TestSessionPlumbing:
         with pytest.raises(RuntimeError, match="bbox"):
             s.fetch_building_heights(providers=["wsf3d"])
 
-    def test_unknown_provider_skipped(self, monkeypatch, tmp_path, capsys):
+    def test_unknown_provider_skipped(self, monkeypatch, tmp_path, caplog):
         """Unknown provider name prints a warning, doesn't crash."""
+        caplog.set_level(logging.INFO, logger="app.session.terrain_session")
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         # Mock wsf3d to avoid network
         with patch(
@@ -68,8 +70,7 @@ class TestSessionPlumbing:
         ):
             s.fetch_building_heights(providers=["bogus_provider", "wsf3d"])
 
-        captured = capsys.readouterr()
-        assert "Unknown height provider" in captured.out
+        assert "Unknown height provider" in caplog.text
         assert s.building_heights is not None
 
     def test_returns_self_for_chaining(self, monkeypatch, tmp_path):
@@ -82,8 +83,9 @@ class TestSessionPlumbing:
             result = s.fetch_building_heights(providers=["wsf3d"])
         assert result is s
 
-    def test_no_results_sets_none(self, monkeypatch, tmp_path, capsys):
+    def test_no_results_sets_none(self, monkeypatch, tmp_path, caplog):
         """When no provider returns data, building_heights is None."""
+        caplog.set_level(logging.INFO, logger="app.session.terrain_session")
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         # google3d with no API key → skipped; no other provider
         with patch(
@@ -92,8 +94,7 @@ class TestSessionPlumbing:
         ):
             s.fetch_building_heights(providers=["google3d"])
         assert s.building_heights is None
-        captured = capsys.readouterr()
-        assert "no coverage" in captured.out or "No building height" in captured.out
+        assert "no coverage" in caplog.text or "No building height" in caplog.text
 
 
 # ── single-provider pipelines ───────────────────────────────────
@@ -162,13 +163,13 @@ class TestSingleProvider:
         assert s.building_heights is not None
         assert np.nanmean(s.building_heights.raster) == pytest.approx(30.0, abs=0.1)
 
-    def test_lidar_3dep_skipped_for_europe(self, monkeypatch, tmp_path, capsys):
+    def test_lidar_3dep_skipped_for_europe(self, monkeypatch, tmp_path, caplog):
         """European bbox → lidar_3dep doesn't cover → skipped."""
+        caplog.set_level(logging.INFO, logger="app.session.terrain_session")
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
         s.fetch_building_heights(providers=["lidar_3dep"])
         assert s.building_heights is None
-        captured = capsys.readouterr()
-        assert "no coverage" in captured.out
+        assert "no coverage" in caplog.text
 
 
 # ── multi-provider merge ────────────────────────────────────────
@@ -385,8 +386,9 @@ class TestDEMInteraction:
 class TestProviderErrors:
     """Test that one provider failing doesn't break the pipeline."""
 
-    def test_provider_exception_caught(self, monkeypatch, tmp_path, capsys):
+    def test_provider_exception_caught(self, monkeypatch, tmp_path, caplog):
         """If one provider throws, others still run."""
+        caplog.set_level(logging.INFO, logger="app.session.terrain_session")
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
 
         with patch(
@@ -402,11 +404,11 @@ class TestProviderErrors:
         assert s.building_heights is not None
         assert np.nanmean(s.building_heights.raster) == pytest.approx(15.0, abs=0.5)
 
-        captured = capsys.readouterr()
-        assert "network down" in captured.out
+        assert "network down" in caplog.text
 
-    def test_all_providers_fail(self, monkeypatch, tmp_path, capsys):
+    def test_all_providers_fail(self, monkeypatch, tmp_path, caplog):
         """If all providers fail, building_heights is None."""
+        caplog.set_level(logging.INFO, logger="app.session.terrain_session")
         s = _make_session(monkeypatch=monkeypatch, tmp_path=tmp_path)
 
         with patch(

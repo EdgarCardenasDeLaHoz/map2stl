@@ -1,8 +1,8 @@
 /**
- * stacked-layers.js — Zoom/pan stacked layer view and coordinate grid overlay.
+ * modules/layers/stacked-layers.js — Zoom/pan stacked layer view and coordinate grid overlay.
  *
- * Extracted from app.js (TODO item 16).  Loaded as a plain <script> before app.js
- * so the functions are available in global scope when app.js runs its DOMContentLoaded.
+ * Imported by main.js before app.js, so its window.* functions exist when
+ * app.js runs its DOMContentLoaded handler.
  *
  * Shared state is read from window.appState (set up by app.js):
  *   window.appState.currentDemBbox   — bounding box of the currently rendered DEM
@@ -176,9 +176,6 @@ window.clearAllLayerBuffers = function clearAllLayerBuffers() {
 let _activeLayers = new Set(['Dem', 'CityOverlay']);
 let _layerOpacities = { Dem: 1, WaterHydrology: 0.75, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CityOverlay: 0.85, Trails: 0.9, MeshImport: 0.8, CompositeDem: 1 };
 
-// Kept for getStackMode() backward compat — last-toggled-on layer
-let _activeMode = 'Dem';
-
 // ─── Composite | Satellite split view ───────────────────────────────────────
 // A dual-pane alternative to the opacity-blended stack: draws the Composite
 // DEM and satellite image buffers side by side in one canvas instead of
@@ -254,7 +251,6 @@ window.setStackMode = function setStackMode(mode) {
         _freeLayerBuffer(mode);
     } else {
         _activeLayers.add(mode);
-        _activeMode = mode;
         const entry = LAYER_AUTOLOAD[mode];
         if (entry && !entry.ready()) autoload = entry.load;
     }
@@ -277,9 +273,6 @@ window.setStackMode = function setStackMode(mode) {
             .catch(err => console.warn(`Auto-load failed for ${mode}:`, err));
     }
 };
-
-/** Returns the last-activated layer mode key (backward compat). */
-window.getStackMode = function getStackMode() { return _activeMode; };
 
 /** Set per-layer opacity (0–1) and refresh. */
 window.setLayerOpacity = function setLayerOpacity(mode, value) {

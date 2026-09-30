@@ -324,6 +324,12 @@ function _syncRowsFromState() {
   if (currentPage.value >= totalPages.value) currentPage.value = totalPages.value - 1;
 }
 
+// Stable references for the window hooks, so unmount can check it still owns
+// them (comparing against _syncRowsFromState itself never matched the wrappers,
+// and the hooks were left behind pointing at an unmounted component).
+const _syncTableHook = () => _syncRowsFromState();
+const _syncSelectedHook = (index: number | null) => { void _syncSelectedRow(index); };
+
 async function _syncSelectedRow(index: number | null) {
   selectedIndex.value = typeof index === 'number' ? index : null;
   if (selectedIndex.value == null) return;
@@ -346,7 +352,7 @@ function _emitPanelResizeEffects() {
   requestAnimationFrame(() => {
     (window as any).events?.emit?.((window as any).EV?.STACKED_UPDATE);
     (window as any).emitStackUpdate?.();
-    (window as any)._globalMap?.invalidateSize?.();
+    window.getMap?.()?.invalidateSize?.();
     window.dispatchEvent(new Event('resize'));
     if ((window as any).appState?.lastDemData?.values?.length) {
       (window as any).recolorDEM?.();
@@ -482,8 +488,8 @@ onMounted(() => {
   };
   (window as any).isCityBuildingsPanelCollapsed = () => collapsed.value;
   (window as any).isCityBuildingsPanelVisible = () => !collapsed.value && tableAvailable.value;
-  (window as any).syncCityBuildingsTable = () => _syncRowsFromState();
-  (window as any).syncSelectedCityBuilding = (index: number | null) => { void _syncSelectedRow(index); };
+  (window as any).syncCityBuildingsTable = _syncTableHook;
+  (window as any).syncSelectedCityBuilding = _syncSelectedHook;
   void _syncRowsFromState();
   void _syncSelectedRow((window as any).appState?.selectedCityBuildingIndex ?? null);
   _emitPanelState();
@@ -517,10 +523,10 @@ onBeforeUnmount(() => {
   if ((window as any).isCityBuildingsPanelVisible) {
     delete (window as any).isCityBuildingsPanelVisible;
   }
-  if ((window as any).syncCityBuildingsTable === _syncRowsFromState) {
+  if ((window as any).syncCityBuildingsTable === _syncTableHook) {
     delete (window as any).syncCityBuildingsTable;
   }
-  if ((window as any).syncSelectedCityBuilding === _syncSelectedRow) {
+  if ((window as any).syncSelectedCityBuilding === _syncSelectedHook) {
     delete (window as any).syncSelectedCityBuilding;
   }
 });

@@ -11,16 +11,16 @@
 
 // Same constants as city2stl/city_model.py (_M_PER_DEG_LAT/_LON, AUTO_TRUE_SCALE_MAX_KM)
 // and window.GEO_M_PER_DEG_* in ui-helpers.js.
-export const M_PER_DEG_LAT = 110540;
-export const M_PER_DEG_LON = 111320;
+const M_PER_DEG_LAT = 110540;
+const M_PER_DEG_LON = 111320;
 export const AUTO_TRUE_SCALE_MAX_KM = 20;
 /**
  * Below this elevation range (m) fit-to-height has no relief to fit, so the
  * vertical exaggeration is meaningless (30 mm / 1e-6 m gave "3,662,321,645×").
  */
-export const MIN_FIT_RELIEF_M = 0.01;
+const MIN_FIT_RELIEF_M = 0.01;
 /** Margin taken off the bed when it sets the default puzzle piece size. */
-export const BED_MARGIN_MM = 10;
+const BED_MARGIN_MM = 10;
 
 /** Bbox diagonal in km, the flat-earth formula city_model.bbox_diagonal_km uses. */
 export function bboxDiagonalKm(bbox) {

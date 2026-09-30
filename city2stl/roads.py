@@ -15,8 +15,7 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Canonical highway widths (half-width in metres).
-# This is the authoritative source used by the server (app.server.core.osm
-# re-exports from here, and city2stl.fetch imports from here).
+# This is the authoritative source (city2stl.fetch imports from here).
 #
 # NOTE: ROAD_WIDTHS inside get_road_model() below is a legacy 7-entry subset
 # kept for backward compatibility with the old notebook pipeline.

@@ -5,18 +5,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from city2stl.skyline.pipeline import (
-    BuildingRecord,
-    RegisteredBuildingEstimate,
-    Viewpoint,
+from city2stl.skyline._core.height import _seed_from_view_name, aggregate_building_heights
+from city2stl.skyline._core.projection import _project_building
+from city2stl.skyline._core.registration import (
     _cull_occluded_projections,
     _match_projections_to_peaks,
-    _project_building,
-    _seed_from_view_name,
-    aggregate_building_heights,
-    detect_building_silhouettes,
     match_segments_to_buildings,
 )
+from city2stl.skyline._core.skyline import detect_building_silhouettes
+from city2stl.skyline._core.types import BuildingRecord, RegisteredBuildingEstimate, Viewpoint
 from city2stl.skyline.streetview_io import _parse_streetview_url
 
 

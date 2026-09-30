@@ -218,8 +218,6 @@ window.getCurrentBboxObject = getCurrentBboxObject;
 // ============================================================
 
 document.addEventListener('DOMContentLoaded', async function () {
-    console.log('DOM loaded, initializing app...');
-
     // Check if required libraries are loaded
     if (typeof L === 'undefined') {
         console.error('Leaflet library not loaded!');
@@ -229,32 +227,25 @@ document.addEventListener('DOMContentLoaded', async function () {
         return;
     }
 
-    console.log('Leaflet loaded:', typeof L);
-    console.log('Three.js loaded:', typeof THREE);
-
     try {
         window.initMap?.();
-        console.log('Map initialized');
     } catch (e) {
         console.error('Error initializing map:', e);
     }
 
     try {
         window.initGlobe?.();
-        console.log('Globe initialized');
     } catch (e) {
         console.error('Error initializing globe:', e);
     }
 
     await window.loadCoordinates?.();
-    console.log('Coordinates loaded');
 
     window.setupEventListeners?.();
     window.setupDemSubtabs?.();
     window.setupWaterMaskListeners?.();
     window.setupGridToggle?.();
     window.setupBboxKeyboardNav?.();
-    window.setupCacheManagement?.();
 
     // The sidebar starts in normal mode from SidebarPanel.vue's own onMounted.
     // Setting the classes and the toggle button's text here as well only fought
@@ -265,8 +256,6 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     // Activate default tab (map) so tab button gets .active class
     window.switchView?.('map');
-
-    console.log('App initialization complete');
 });
 
 // Backward-compat aliases — modules should prefer window.appState.xxx directly.
