@@ -131,6 +131,8 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   10. one term per concept, units in labels;
   11. duplicate ids removed, reduced motion (orphan components removed 2026-09-30);
   12. satellite image aspect (continent detection fixed 2026-09-30).
+  13. Edit tab box editor (N/S/E/W, Reload, Map, Save) sits below the window and appears only on
+      mouse hover over a 14 px handle: unreachable by keyboard, easy never to find (layout audit).
 - **SDK leftovers**:
   - `TerrainSession` still uses the blocking `/api/cities`.
   - `TerrainSession` and `schemas.py` still default `dem_source` to `local`.

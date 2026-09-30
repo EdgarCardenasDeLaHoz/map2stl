@@ -246,10 +246,20 @@
 
         .sidebar-content {
             flex: 1;
+            min-height: 0;
             padding: 0;
+            /* A column: in list mode the region list takes the space left and is the
+               only thing that scrolls (it used to be height:100% plus the sections
+               below it, so the panel scrolled too - two scrollbars). */
+            display: flex;
+            flex-direction: column;
             overflow-y: auto;
             overflow-x: hidden;
             transition: opacity 0.3s ease;
+        }
+
+        .sidebar-content > * {
+            flex-shrink: 0;
         }
 
 
@@ -3067,6 +3077,12 @@
         }
 
         /* Hidden */
+        /* The hidden attribute always wins over component display rules
+           (.control-group { display: block } used to override it). */
+        [hidden] {
+            display: none !important;
+        }
+
         .hidden {
             display: none !important;
         }
@@ -3592,7 +3608,13 @@
         .sidebar-list-view {
             display: flex;
             flex-direction: column;
-            height: 100%;
+            flex: 1 1 auto;
+            flex-shrink: 1;
+            min-height: 0;
+        }
+
+        .sidebar-list-view.hidden {
+            display: none;
         }
 
         .sidebar-list-filters {
@@ -3623,7 +3645,8 @@
 
         /* Coordinates list — takes remaining height and scrolls */
         .sidebar-coord-list {
-            flex: 1;
+            flex: 1 1 auto;
+            min-height: 0;
             overflow-y: auto;
         }
 

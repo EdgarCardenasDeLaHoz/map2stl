@@ -235,15 +235,23 @@ def snap_reaches_to_valley(geoms, dem: np.ndarray, width_m: float, height_m: flo
         return LineString(np.column_stack([(path[:, 1] + 0.5) * px_x,
                                            height_m - (path[:, 0] + 0.5) * px_y]))
 
-    out = []
-    for geom, rad in zip(geoms, radius_m, strict=True):
+    import shapely
+
+    # A part shorter than 2 px is returned as is (snap_part); decide that for all
+    # reaches in one call - at the Amazon's 3 km/px only ~8k of 315k reaches are
+    # long enough, and looping over the rest in Python cost ~35 s.
+    out = list(geoms)
+    arr = np.empty(len(out), dtype=object)
+    arr[:] = out
+    long_enough = np.flatnonzero(shapely.length(arr) >= 2 * px)
+    for i in long_enough:
+        geom, rad = out[i], radius_m[i]
         if geom is None or geom.is_empty:
-            out.append(geom)
             continue
         rp = max(1, int(round(float(rad) / px)))
         parts = list(geom.geoms) if geom.geom_type == "MultiLineString" else [geom]
         snapped = [snap_part(part, rp) for part in parts if not part.is_empty]
-        out.append(snapped[0] if len(snapped) == 1 else MultiLineString(snapped))
+        out[i] = snapped[0] if len(snapped) == 1 else MultiLineString(snapped)
     return out
 
 
@@ -283,13 +291,20 @@ def rasterize_river_depth(gdf, north: float, south: float, east: float, west: fl
 
     import geopandas as gpd
 
-    # Local metres, no CRS: buffers are then true ground distances.
-    geoms = gpd.GeoSeries(gdf.geometry.affine_transform(affine).to_numpy())
+    # Local metres, no CRS: buffers are then true ground distances. One vectorised
+    # coordinate transform (geopandas' affine_transform goes geometry by geometry:
+    # 97 s for the Amazon's 315,707 reaches).
+    import shapely
+
+    a, b, d, e, xo, yo = affine
+    geoms = gpd.GeoSeries(shapely.transform(
+        gdf.geometry.to_numpy(),
+        lambda c: np.column_stack([c[:, 0] * a + c[:, 1] * b + xo,
+                                   c[:, 0] * d + c[:, 1] * e + yo])))
     if snap and dem is not None and np.shape(dem) == (h, w):
         from shapely.geometry import box
         lines = geoms.intersection(box(0.0, 0.0, width_m, height_m)).to_numpy()
-        ok = np.array([g is not None and not g.is_empty
-                       and g.geom_type in ("LineString", "MultiLineString") for g in lines])
+        ok = (~shapely.is_empty(lines)) & np.isin(shapely.get_type_id(lines), (1, 5))  # (Multi)LineString
         if ok.any():
             orders = order[ok] if order is not None else np.full(int(ok.sum()), 3.0)
             snapped = snap_reaches_to_valley(list(lines[ok]), dem, width_m, height_m,
@@ -298,7 +313,10 @@ def rasterize_river_depth(gdf, north: float, south: float, east: float, west: fl
                 lines[i] = g
         geoms = gpd.GeoSeries(lines)
     geoms = geoms.simplify(px_m / 2.0)
-    buffered = geoms.buffer(radius)
+    # 2 segments per quarter circle: the ends are at most ~8 % of a radius off, and
+    # the radius is about a pixel, while 16 made each reach dozens of vertices that
+    # the rasteriser then had to read (Amazon: 68 s of GeoJSON alone).
+    buffered = geoms.buffer(radius, resolution=2)
     keep = (~buffered.is_empty).to_numpy()
     if not keep.any():
         return out

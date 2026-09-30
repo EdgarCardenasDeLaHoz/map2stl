@@ -649,34 +649,10 @@ def fetch_hydrorivers(
         combined = combined[combined["ORD_STRA"]
                             >= min_order].reset_index(drop=True)
 
-    # For very large extents, cap feature volume before GeoJSON serialization.
-    # This keeps continent-scale calls responsive while preserving all detail
-    # for small/medium bboxes.
-    bbox_area_deg2 = max(0.0, (east - west)) * max(0.0, (north - south))
-    if "ORD_STRA" in combined.columns and len(combined) > 180000 and bbox_area_deg2 >= 100:
-        counts_by_order = {
-            order: int((combined["ORD_STRA"] >= order).sum())
-            for order in range(1, 10)
-        }
-        adaptive_cutoff = min_order
-        target_features = 120000
-        for candidate in range(max(min_order, 1), 10):
-            if counts_by_order[candidate] <= target_features:
-                adaptive_cutoff = candidate
-                break
-
-        if adaptive_cutoff > min_order:
-            before = len(combined)
-            combined = combined[combined["ORD_STRA"] >=
-                                adaptive_cutoff].reset_index(drop=True)
-            effective_min_order = adaptive_cutoff
-            logger.info(
-                "HydroRIVERS adaptive thinning: bbox_area=%.1f deg^2, "
-                "min_order %d -> %d, features %d -> %d",
-                bbox_area_deg2, min_order, adaptive_cutoff, before, len(
-                    combined),
-            )
-
+    # No automatic thinning: the caller's min_order is honoured (2026-09-30). The
+    # Amazon at order 3 is 315,707 reaches; burning them all takes ~1 min since
+    # water_layers / rasterize_hydrorivers were vectorised, where the old cap
+    # (order 3 -> 5 above 180k reaches) silently dropped two thirds of the rivers.
     logger.info("HydroRIVERS: %d features after order-%d+ filter",
                 len(combined), effective_min_order)
 
@@ -734,30 +710,6 @@ def rasterize_hydrorivers(
         logger.info("rasterize_hydrorivers: empty input")
         return grid
 
-    # Adaptive thinning: cap features at ~2 * dim^2 for low-resolution outputs.
-    target_features = max(30000, min(180000, int(dim * dim * 2)))
-    if "ORD_STRA" in gdf.columns and len(gdf) > target_features:
-        # Find smallest cutoff such that count(order >= cutoff) <= target.
-        counts = (
-            gdf["ORD_STRA"].clip(lower=1, upper=9).astype(
-                int).value_counts().sort_index()
-        )
-        # cumulative count of order >= k, walked from 9 downward
-        running, cutoff = 0, 9
-        for order in range(9, 0, -1):
-            running += int(counts.get(order, 0))
-            if running > target_features:
-                cutoff = order + 1
-                break
-            cutoff = order
-        if cutoff > 1:
-            before = len(gdf)
-            gdf = gdf[gdf["ORD_STRA"] >= cutoff]
-            logger.info(
-                "rasterize_hydrorivers: adaptive thinning dim=%d, %d -> %d features, min_order=%d+",
-                dim, before, len(gdf), cutoff,
-            )
-
     n = len(gdf)
     logger.info("rasterize_hydrorivers: %d features, dim=%d, pixel_deg=%.5f, width_factor=%.2f",
                 n, dim, pixel_deg, width_factor)
@@ -772,10 +724,18 @@ def rasterize_hydrorivers(
     # Buffer width: same formula as the legacy code (max(min_buf, min_buf * order / 3)).
     buffers = np.maximum(min_buf_deg, min_buf_deg * order_arr / 3.0)
     geoms = gdf.geometry.simplify(pixel_deg, preserve_topology=False)
-    buffered = geoms.buffer(buffers)
-    keep = ~buffered.is_empty
-    buffered = buffered[keep]
-    order_arr = order_arr[keep.to_numpy()]
+    # A buffer under about a pixel wide burns the same cells as the line itself
+    # with all_touched, so only wider rivers are buffered: buffering every reach
+    # took 99 s for 88,799 Amazon reaches (buffered polygons have many vertices).
+    import shapely
+
+    wide = (2 * buffers > 1.5 * pixel_deg)
+    arr = geoms.to_numpy().copy()
+    if wide.any():
+        arr[wide] = shapely.buffer(arr[wide], buffers[wide], quad_segs=2)
+    keep = ~shapely.is_empty(arr)
+    buffered = arr[keep]
+    order_arr = order_arr[keep]
     dt_prep = _time.perf_counter() - t_prep
     logger.info("  vectorized simplify+buffer: %.2fs, %d shapes",
                 dt_prep, len(buffered))
@@ -783,7 +743,7 @@ def rasterize_hydrorivers(
     # Rasterize lowest order first so higher-order rivers overwrite (deeper carve).
     t_rast = _time.perf_counter()
     max_order = 9
-    geoms_arr = buffered.to_numpy()  # for boolean indexing
+    geoms_arr = buffered
     for o in sorted(set(int(x) for x in order_arr)):
         depth = depression_base * (o / max_order) ** order_exponent
         mask = order_arr == o

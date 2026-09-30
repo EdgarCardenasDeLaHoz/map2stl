@@ -1,5 +1,7 @@
 <template>
-  <div id="newRegionSection" class="control-group">
+  <!-- Hidden until a box is drawn (window.showNewRegionForm, view-management.js):
+       always shown, it took the space under the region list. -->
+  <div id="newRegionSection" class="control-group" hidden>
     <div class="new-region-section">
       <div class="new-region-form-hint">Save drawn region</div>
       <label for="regionName" class="new-region-form-label">Name</label>

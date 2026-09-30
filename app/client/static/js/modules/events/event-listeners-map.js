@@ -315,6 +315,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     if (_map) {
         _map.on(L.Draw.Event.CREATED, () => {
             document.getElementById('floatingDrawBtn')?.classList.remove('drawing');
+            window.showNewRegionForm?.(true);
         });
         _map.on(L.Draw.Event.DRAWSTOP, () => {
             document.getElementById('floatingDrawBtn')?.classList.remove('drawing');

@@ -4,6 +4,20 @@ Fetching OSM through Overpass/osmnx, telling outages from empty answers, water a
 rasterisation, and rivers and lakes carved into the terrain. Related: [composite.md](composite.md),
 [trails.md](trails.md).
 
+### 2026-09-30 — HydroRIVERS honours the requested min_order; no automatic thinning
+- **Decision:** `geo2stl/hydrology.py::fetch_hydrorivers` and `rasterize_hydrorivers` no longer
+  raise the minimum Strahler order on large boxes. Burning is fast enough to take every reach:
+  - `geo2stl/water_layers.py::rasterize_river_depth`: vectorised metric transform, snapping
+    pre-filtered to reaches ≥ 2 px, buffers with 2 segments per quarter circle;
+  - `numpy2stl` `burn_polygons`: GeoJSON built in bulk;
+  - the overlay burns reaches under ~1.5 px wide as lines, not buffered polygons.
+- **Why:** the user wants renders of all the Amazon's rivers. At order ≥ 3 that is 315,707
+  reaches; the old cap silently dropped them to order ≥ 5 (88,799). Timings (40° x 34°):
+  - export path: 348 s → 61 s at 1,200 px, with identical river pixels;
+  - overlay: 16 s for all reaches, where it took 111 s for 88,799.
+- **Rejected:** keeping the cap with a warning — it chose the rivers for the user.
+- **Supersedes / superseded by:** —
+
 ### 2026-09-27 — River and lake carves are applied after the median filter
 - **Decision:** `compute_composite_dem(..., split_carve=True)` returns `(composite, carve)`; the
   export adds the carve in `_prepare_dem_array` right after smoothing, before the sea cap and

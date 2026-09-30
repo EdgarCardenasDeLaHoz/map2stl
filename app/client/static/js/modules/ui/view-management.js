@@ -316,6 +316,20 @@ window.loadSelectedRegion = function loadSelectedRegion() {
  * Save the current bounding box as a new named region via POST /api/regions.
  * @returns {Promise<void>}
  */
+/**
+ * Show or hide the "Save drawn region" form under the region list. Shown when a
+ * new box is drawn (focus on the name), hidden after a save or when an existing
+ * region is picked, so the list has the sidebar's height the rest of the time.
+ * @param {boolean} show
+ */
+window.showNewRegionForm = function showNewRegionForm(show) {
+    const section = document.getElementById('newRegionSection');
+    if (!section) return;
+    section.hidden = !show;
+    if (show) document.getElementById('regionName')?.focus();
+};
+window.events?.on(window.EV?.REGION_SELECTED, () => window.showNewRegionForm(false));
+
 window.saveCurrentRegion = async function saveCurrentRegion() {
     const boundingBox = window.getBoundingBox?.();
     if (!boundingBox) {
@@ -359,6 +373,7 @@ window.saveCurrentRegion = async function saveCurrentRegion() {
             window.loadCoordinates?.();
             document.getElementById('regionName').value = '';
             if (regionLabelInput) regionLabelInput.value = '';
+            window.showNewRegionForm(false);
         } else {
             window.showToast?.('Error saving region: ' + (result?.error || result?.detail || error), 'error');
         }
