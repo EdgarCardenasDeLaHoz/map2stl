@@ -278,7 +278,9 @@ window.loadCityData = async function loadCityData() {
     // only regions beyond the coarse cap are rejected outright.
     const detail = diagKm > maxDiag ? 'coarse' : 'full';
     if (diagKm > maxDiagCoarse) {
-        window.showToast?.(`Region too large (${diagKm.toFixed(1)} km). Max ${maxDiagCoarse} km.`, 'error');
+        // Expected for large regions (it also runs after every DEM load): not an error.
+        window.showToast?.(`City layers skipped: region is ${Math.round(diagKm).toLocaleString()} km across `
+            + `(city data covers up to ${maxDiagCoarse} km).`, 'info');
         return;
     }
     if (detail === 'coarse') {
