@@ -2,6 +2,19 @@
 
 Repo names and layout, venvs, test markers, agent scripts, where docs and plans live, and the align tool's pack lookup. Related: [architecture.md](architecture.md).
 
+### 2026-09-30 — Agent files live in Code/claude/; the graph is found through GRAPHIFY_OUT
+- **Decision:** `Code/claude/` holds everything agents write outside the repos: `scripts/`
+  (was `Code/agent-scripts/`), `memory-bank/`, `graphify-out/`. `CLAUDE.md`, `AGENTS.md`,
+  `.claude/` and `.graphifyignore` stay at the Code root. The user variable `GRAPHIFY_OUT`
+  (absolute path to `Code/claude/graphify-out`) points the graphify CLI and its Claude hook there.
+- **Why:** the user asked to group the Claude files into one folder for a tidier root. Claude Code
+  and other agents load `CLAUDE.md` / `AGENTS.md` / `.claude/` only from the project root, and
+  graphify reads `.graphifyignore` from the folder it scans; graphify's output folder is
+  configurable only through `GRAPHIFY_OUT` (read at process start, so the app needs a restart).
+- **Rejected:** a junction at `Code/graphify-out` (another root entry, and junctions misbehave
+  in OneDrive); keeping `graphify-out/` at the root (user chose to move it).
+- **Supersedes / superseded by:** refines the 2026-09-27 "agent scripts outside the repos" choice.
+
 ### 2026-09-28 — Durable docs live in map2stl/docs, with one index and decisions per topic
 - **Decision:**
   - Every durable doc lives in a git repo; `map2stl/docs/` owns the cross-repo [INDEX](../INDEX.md), decisions and plans.
@@ -9,7 +22,7 @@ Repo names and layout, venvs, test markers, agent scripts, where docs and plans 
   - One home per fact type: how it works → `reference/`; why → `decisions/` (one file per topic, see [README](README.md)); what's next → `plans/active/` (finished → `plans/done/`, abandoned → `plans/archive/`); what broke → issues; what happened → `history/`.
   - `history/` is kept but out of the way (no mkdocs nav, still greppable).
   - Cite code as `file::symbol`, not line numbers.
-  - `Code/` keeps only CLAUDE/AGENTS/README stubs, `memory-bank/activeContext.md` (volatile, fine unversioned) and `agent-scripts/`.
+  - `Code/` keeps only CLAUDE/AGENTS/README stubs, `claude/memory-bank/activeContext.md` (volatile, fine unversioned) and `claude/scripts/`.
 - **Why:** `Code/` is not versioned, so the index, 13 topic pages and 3.7k lines of decisions had no history; ~35 % of line-number anchors had drifted within weeks; the old decision log was one 3,693-line file.
 - **Rejected:** keeping plans and the index in `Code/docs/` (the 2026-08-06 rule) — unversioned and split across two trees.
 - **Supersedes / superseded by:** supersedes [2026-08-06 — Plans live in Code/docs](#2026-08-06--plans-live-in-codedocs-not-map2stldocsplans-superseded).
@@ -19,10 +32,10 @@ Repo names and layout, venvs, test markers, agent scripts, where docs and plans 
 - **Decision:** folder `Code/map2stl`, venv `~/.venvs/map2stl`, gitdir `~/.gitdirs/map2stl`, GitHub repo `map2stl`; environment variables are `MAP2STL_*` (old names still read); browser keys migrated.
 - **How to apply:** on the other PC run `scripts/link-gitdir.ps1` then `scripts/setup-venv.ps1` in map2stl once. The local `origin` URL may still show the old name (GitHub redirects).
 - **Supersedes / superseded by:** —
-- **Source:** memory-bank activeContext 2026-09-27.
+- **Source:** claude/memory-bank activeContext 2026-09-27.
 
-### 2026-09-27 — Agent helper scripts live in Code/agent-scripts, outside the git repos
-- **Decision:** scripts Claude writes for rendering, reviewing, screenshotting or documenting go in `Code/agent-scripts/` (with a line in its README, locating the repo relative to themselves). One-off edit scripts stay in the session scratchpad. Outputs they produce for docs (e.g. guide images) may go into the repo.
+### 2026-09-27 — Agent helper scripts live in Code/claude/scripts, outside the git repos
+- **Decision:** scripts Claude writes for rendering, reviewing, screenshotting or documenting go in `Code/claude/scripts/` (with a line in its README, locating the repo relative to themselves). One-off edit scripts stay in the session scratchpad. Outputs they produce for docs (e.g. guide images) may go into the repo.
 - **Why:** the user wants the repos to hold the app and libraries only; agent tooling is kept separate but backed up by OneDrive.
 - **Rejected:** `map2stl/scripts/` or the libraries.
 - **Supersedes / superseded by:** —

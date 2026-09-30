@@ -133,7 +133,7 @@ per-building mesh/nDSM overrides, the Landmarks panel). Plan:
   - on a DSM, read roof slope from a plane fit, not the p10-p90 spread (clutter/parapets inflate it).
 - **Rejected:** see [Rejected hypotheses](#rejected-hypotheses) below.
 - **Supersedes / superseded by:** —
-- **Source:** memory-bank/shadow_heights.md lines 478-787 → [../research/roof-shape-research.md](../research/roof-shape-research.md).
+- **Source:** claude/memory-bank/shadow_heights.md lines 478-787 → [../research/roof-shape-research.md](../research/roof-shape-research.md).
 
 ### 2026-08-29 — Granada's ridge height comes from the Spanish plates, not a fixed angle [superseded]
 - **Decision (then):** replace the 26° / 6 m-cap hip with a two-parameter rise curve fitted on 7,400

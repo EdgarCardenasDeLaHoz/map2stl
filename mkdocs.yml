@@ -53,7 +53,7 @@ extra_javascript:
   - https://unpkg.com/mermaid@11/dist/mermaid.min.js
 
 # Docs link to repo files outside docs/ (CLAUDE.md, the skyline README, numpy2stl), which
-# MkDocs cannot resolve; link correctness is checked by Code/agent-scripts/check_doc_links.py
+# MkDocs cannot resolve; link correctness is checked by Code/claude/scripts/check_doc_links.py
 # instead, so unresolved links are reported as info rather than failing --strict.
 validation:
   links:

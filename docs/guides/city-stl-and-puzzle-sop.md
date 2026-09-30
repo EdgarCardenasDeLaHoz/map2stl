@@ -29,7 +29,7 @@ per-layer counts and timings, checks).
 source); server running (`Start 3D Maps.bat`).
 
 Screenshots: Granada + Alhambra (N 37.1873, S 37.1693, E −3.5780, W −3.6093), taken by
-`Code/agent-scripts/sop_screenshots.py` (outside the repo; its docstring says how to
+`Code/claude/scripts/sop_screenshots.py` (outside the repo; its docstring says how to
 refresh them). A red outline marks the control each step talks about. "Extrude → 📤
 Export" below is the Export tab inside the Extrude view (there is no top-level Export tab).
 

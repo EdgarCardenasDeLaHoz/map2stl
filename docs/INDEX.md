@@ -49,7 +49,7 @@ Links are relative to `map2stl/docs/`.
 - Skyline (street-view heights): `map2stl/city2stl/skyline/README.md` (the one skyline doc), `map2stl/city2stl/skyline/docs/STATUS.md`.
 - numpy2stl: `numpy2stl/README.md`, registration usage `numpy2stl/docs/registration.md`, registration design `numpy2stl/src/numpy2stl/registration/docs/ARCHITECTURE.md`.
 - Checkpoints on disk and which are live: `map2stl/models/README.md` (only the roof-shape GBM runs; no CNN height model at runtime).
-- Session state (unversioned): `memory-bank/activeContext.md`.
+- Session state (unversioned): `claude/memory-bank/activeContext.md`.
 
 ---
 
@@ -271,7 +271,7 @@ Full map: [reference/frontend-modules.md](reference/frontend-modules.md).
 ### Guides page (/guides) and reports (/reports)
 
 - Guides: sources `map2stl/docs/guides/*.md` (+ `img/`); render, URL rewrite, step ids, routes `map2stl/app/server/routers/guides.py::load_guide` (`_rewrite_url`, `_GuideTreeprocessor`, `guide_path`, `guides_index`, `guide_detail`, `guide_image`); page `map2stl/app/client/templates/guides.html`, `map2stl/app/client/static/js/guides.js`; deep links `map2stl/app/client/static/js/modules/ui/guide-links.js`; tests `map2stl/tests/test_guides_router.py`
-- Usage log (F-USAGE, local only): browser `map2stl/app/client/static/js/modules/core/usage-log.js`; route `map2stl/app/server/routers/usage.py::post_usage` (`usage_status`, `_scrub`); log files `map2stl/output/usage/*.jsonl`; flow report `Code/agent-scripts/usage_report.py`; tests `map2stl/tests/test_usage_router.py`
+- Usage log (F-USAGE, local only): browser `map2stl/app/client/static/js/modules/core/usage-log.js`; route `map2stl/app/server/routers/usage.py::post_usage` (`usage_status`, `_scrub`); log files `map2stl/output/usage/*.jsonl`; flow report `Code/claude/scripts/usage_report.py`; tests `map2stl/tests/test_usage_router.py`
 - Reports: inventory, registration reports + packs (`MAP2STL_REGISTRATION_REPORT_ROOTS`), traversal guard `map2stl/app/server/routers/reports.py::reports_registration` (`_default_registration_roots`, `_scan_report_root`, `_pack_entry`, `_safe_path`); page `map2stl/app/client/static/js/reports.js` (`renderRegistration`); skyline row parser `map2stl/city2stl/skyline/report_index.py`
 
 ### Python SDK
@@ -353,4 +353,4 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
 - Launchers: `Start 3D Maps.bat`, `Stop 3D Maps.bat` (workspace root) → `map2stl/scripts/start.ps1`, `map2stl/scripts/stop.ps1`
 - Venv: `map2stl/scripts/setup-venv.ps1` (creates `~/.venvs/map2stl`); git database link `map2stl/scripts/link-gitdir.ps1`
 - Tests: `map2stl/pytest.ini` also collects `numpy2stl/tests`; `-m integration` and `-m slow` are opt-in; `tests/e2e/` (playwright) and `tests/manual/` are never collected
-- Helper scripts for agents (renders, screenshots, doc link checker): `agent-scripts/README.md`
+- Helper scripts for agents (renders, screenshots, doc link checker): `claude/scripts/README.md`

@@ -20,7 +20,7 @@ How a DEM plus vector layers becomes one printable solid: the two-stage pipeline
   - Adding every out-of-bound pixel (or its neighbours) in late TIN passes: flips create new misses, the tail stays 19–34 passes.
   - Rebuilding the merged model from simplified parts: shared surfaces simplify differently on each side and no longer cancel.
 - **Supersedes / superseded by:** —
-- **Source:** `tests/test_reference_cities.py` (regression set, same session); profiler `Code/agent-scripts/profile_city.py`.
+- **Source:** `tests/test_reference_cities.py` (regression set, same session); profiler `Code/claude/scripts/profile_city.py`.
 
 ### 2026-09-29 — The reference-city regression set runs on real terrain and gates puzzle volume
 - **Decision:** `tests/test_reference_cities.py` (`pytest -m slow`) rebuilds Cartagena, Granada + Alhambra and Breckenridge through the export task, model cache off, test mode off. It fails on a non-watertight STL, a puzzle keeping < 99 % of the volume or an open piece, and faces ±15 % / volume ±3 % against `tests/reference_cities_baseline.json`. Time is logged (`output/regression/reference_cities.jsonl`), not asserted. `app/server/core/puzzle.py::volume_check` puts `kept` and `open_pieces` in every puzzle report; `build_check` warns below 99 %.

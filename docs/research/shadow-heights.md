@@ -1,6 +1,6 @@
 # Shadow-derived building heights (Track A)
 
-> Status: historical research notebook, Aug 2026 (moved from memory-bank/shadow_heights.md, lines 1-477).
+> Status: historical research notebook, Aug 2026 (moved from claude/memory-bank/shadow_heights.md, lines 1-477).
 > Conclusions live in [../decisions/building-heights.md](../decisions/building-heights.md); roof-shape part in [roof-shape-research.md](roof-shape-research.md).
 
 

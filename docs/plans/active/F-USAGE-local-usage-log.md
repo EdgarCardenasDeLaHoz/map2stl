@@ -25,13 +25,13 @@ the user backtracks or hits errors — so UI and pipeline work targets the real 
     `map2stl_usage_log` localStorage key (`off` pauses), also `window.usageLog.pause()`.
 - `app/server/routers/usage.py`: `POST /api/usage` appends to
   `output/usage/<date>.jsonl` (git-ignored, never sent anywhere); `GET /api/usage/status`.
-- `Code/agent-scripts/usage_report.py`: sessions, action sequences, time per step, errors.
+- `Code/claude/scripts/usage_report.py`: sessions, action sequences, time per step, errors.
 
 ## Target files
 
 `app/client/static/js/modules/core/usage-log.js`, `app/client/static/js/main.js`,
 `app/server/routers/usage.py`, `app/server/server.py`, `tests/test_usage_router.py`,
-`Code/agent-scripts/usage_report.py`, docs (INDEX, api.md, frontend-modules.md).
+`Code/claude/scripts/usage_report.py`, docs (INDEX, api.md, frontend-modules.md).
 
 ## Success criteria
 

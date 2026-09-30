@@ -20,7 +20,7 @@ rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 - **Supersedes / superseded by:** supersedes [v2 second implementation](#2026-08-26--v2-a-second-implementation-of-the-render-pipeline-superseded)
   and [v2 is a design probe](#2026-09-04--v2-is-a-design-probe-not-a-migration-target-superseded);
   answers the "Vue commit-or-drop" call left open in [the UI pass](#2026-08-26--ui-pass-left-three-design-calls-open).
-- **Source:** memory-bank/activeContext.md 2026-09-26/27; [F-FE1 plan](../plans/active/F-FE1-vue-consolidation.md)
+- **Source:** claude/memory-bank/activeContext.md 2026-09-26/27; [F-FE1 plan](../plans/active/F-FE1-vue-consolidation.md)
 
 ### 2026-09-05 — Occasionally needed chrome hides behind a peek, not a toggle
 - **Decision:** the bbox bar shows a 14 px peek and reveals on hover, `:focus-within`, while its

@@ -18,9 +18,9 @@ providers are merged and ranked, and how height accuracy is measured. Related:
   anywhere in the repo (only listed as an unexplained item in
   [AUDIT-2026-05-17](../history/audits/AUDIT-2026-05-17.md)).
 - **Supersedes / superseded by:** supersedes the "Google 3D Tiles probe: not approved, do not start"
-  line in memory-bank/activeContext.md and the AUDIT-2026-05-17 "can't be used (ToS)" item. No
+  line in claude/memory-bank/activeContext.md and the AUDIT-2026-05-17 "can't be used (ToS)" item. No
   decisions.md entry had forbidden it.
-- **Source:** memory project_building_heights.md; memory-bank/activeContext.md (2026-09-27);
+- **Source:** memory project_building_heights.md; claude/memory-bank/activeContext.md (2026-09-27);
   [F-LANDMARK plan](../plans/active/F-LANDMARK-roofs-and-building-parts.md) "Where it stands".
 
 ### 2026-09-04 — The WSF3D per-tile endpoint is a 453-tile sample, so a global fallback reads the BigTIFF
@@ -166,7 +166,7 @@ providers are merged and ranked, and how height accuracy is measured. Related:
   first-local-edge length; fitting acceptance thresholds to OSM tags (fits reference noise — plate and
   tags disagree by 26 m).
 - **Supersedes / superseded by:** see the Cartagena failure under [Rejected hypotheses](#2026-09-04--satellite-shadow-heights-work-in-cartagena).
-- **Source:** memory-bank/shadow_heights.md → [../research/shadow-heights.md](../research/shadow-heights.md).
+- **Source:** claude/memory-bank/shadow_heights.md → [../research/shadow-heights.md](../research/shadow-heights.md).
 
 ### 2026-08-28 — Google 3D Tiles fetch is level-order, depth tied to the output cell, faces sampled, tiles binned one at a time
 - **Decision:** in `city2stl/height/providers/google_3d.py`:
@@ -266,4 +266,4 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Also measured:** GBA does not help Granada. It adds 8276 pixels Overture lacks against 70 689
   the other way, and reads 7.5 m lower on the median (corr +0.646), the same downward bias as in
   Miami. nDSM's 100 % coverage there is ground at 30 m. GBA stays a Cartagena/Tunis source.
-- **Source:** memory-bank/activeContext.md, 2026-08-30 (moved 2026-09-28).
+- **Source:** claude/memory-bank/activeContext.md, 2026-08-30 (moved 2026-09-28).

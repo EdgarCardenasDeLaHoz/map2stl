@@ -1,6 +1,6 @@
 # Roof shape research (shadow-heights notebook, part 2)
 
-> Status: historical research notebook, Aug 2026 (moved from memory-bank/shadow_heights.md, lines 478-787).
+> Status: historical research notebook, Aug 2026 (moved from claude/memory-bank/shadow_heights.md, lines 478-787).
 > Conclusions live in [../decisions/roofs-landmarks.md](../decisions/roofs-landmarks.md); shadow part in [shadow-heights.md](shadow-heights.md).
 
 ## Roof shape: what OSM can and cannot supervise — 2026-08-29

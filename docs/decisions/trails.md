@@ -15,7 +15,7 @@ The ski and hiking trails layer: sources, grids, display, and how trails reach t
   rebuild 0 s. Town footpaths are not trails and at 1:3472 a 2 m path is 0.6 mm wide.
 - **Rejected:** trails on by default like the other city layers (F-CITYMODEL's original "all on").
 - **Supersedes / superseded by:** supersedes [Trails are an overlay only](#2026-08-27--trails-are-an-overlay-only-not-merged-into-the-stl-superseded)
-- **Source:** memory-bank/activeContext.md 2026-09-27 (commit 72fbd5a); [F-CITYMODEL](../plans/active/F-CITYMODEL-vector-city-model.md) build-speed notes; `city2stl/city_model.py::filter_trails`
+- **Source:** claude/memory-bank/activeContext.md 2026-09-27 (commit 72fbd5a); [F-CITYMODEL](../plans/active/F-CITYMODEL-vector-city-model.md) build-speed notes; `city2stl/city_model.py::filter_trails`
 
 ### 2026-08-28 — New layers enter the composite at weight 0 and signal across bundles with window events
 - **Decision:** a newly loaded layer (trails) enters the composite at weight 0 —

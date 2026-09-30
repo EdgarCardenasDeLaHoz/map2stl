@@ -3,8 +3,8 @@
 Why the code is the way it is: one file per topic.
 - Each entry records a choice, the reason for it, and what was rejected.
   - Purpose: stop the same question being re-argued in the next session.
-- Entries were split out of the old `Code/memory-bank/decisions.md` log on 2026-09-28.
-  - Old `decisions.md:NN` line references map to new anchors in `agent-scripts/decisions_line_map.json` (in `Code/`, unversioned).
+- Entries were split out of the old `Code/claude/memory-bank/decisions.md` log on 2026-09-28.
+  - Old `decisions.md:NN` line references map to new anchors in `claude/scripts/decisions_line_map.json` (in `Code/`, unversioned).
 
 ## Topics
 
@@ -57,4 +57,4 @@ Research notebooks behind some of these: [shadow heights](../research/shadow-hei
 3. If it replaces an older entry, tag the old heading ` [superseded]` and link both ways.
 4. When a plan in `../plans/active/` moves to `../plans/done/`, lift its "Decisions" section here.
    - The plan keeps a link to the entry.
-5. Check links: run `agent-scripts/check_doc_links.py` from `Code/` with `--only "map2stl/docs/decisions/**"`.
+5. Check links: run `claude/scripts/check_doc_links.py` from `Code/` with `--only "map2stl/docs/decisions/**"`.

@@ -51,7 +51,7 @@ lakes ≥ 1 ha 2 m below the shore. 0.5 mm per pixel. Run through the app's rout
 use HydroRIVERS, downloaded per continent on first use (§5); lakes use Overpass.
 
 Screenshots: Grand Canyon reference box (N 36.47, S 35.97, E −111.78, W −112.88), taken
-by `Code/agent-scripts/sop_screenshots.py` (outside the repo; its docstring says how to
+by `Code/claude/scripts/sop_screenshots.py` (outside the repo; its docstring says how to
 refresh them). A red outline marks the control each step talks about.
 
 1. **Pick the area** (Explore). Frame the river with a margin: the model's longer side is

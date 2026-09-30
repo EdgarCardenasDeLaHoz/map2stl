@@ -184,7 +184,7 @@ exactly the buildings the panorama pipeline gets most wrong.
 
 ## Carried over from the memory bank (2026-09-28)
 
-Open items that lived only in `Code/memory-bank/activeContext.md`. Dates are when each was
+Open items that lived only in `Code/claude/memory-bank/activeContext.md`. Dates are when each was
 last measured.
 
 - **Height model default path is off by one** (found 2026-09-28):
