@@ -109,8 +109,12 @@ flowchart LR
 
 | File | Key symbols | Purpose |
 |---|---|---|
-| `regions.js` | `loadCoordinates`, `selectCoordinate`, `goToEdit` | Region CRUD, map boxes, selection |
-| `region-ui.js` | `renderCoordinatesList`, `populateRegionsTable`, `setupRegionsTable`, `groupRegionsByContinent`, `detectContinent` (from `continent.js`), `initRegionNotes`, `saveRegionThumbnail` | Sidebar list, paginated table, notes (modal show/hide/save are module-local), thumbnails |
+| `regions.js` | `loadCoordinates`, `selectCoordinate`, `goToEdit` | Region load, selection |
+| `region-ui.js` | `renderCoordinatesList`, `populateRegionsTable`, `setupRegionsTable`, `groupRegionsByContinent`, `resolveRegionContinent`, `detectContinent` (from `continent.js`), `initRegionNotes`, `getRegionNote`, `setRegionNote`, `renameRegionLocalData`, `saveRegionThumbnail` | Sidebar list (the map's viewport set under a "Showing N of M in view · Show all" line; a search or Show all lists every region; ✎ button per row; row ↔ box hover link), paginated table, notes + thumbnails in localStorage |
+| `region-boxes.js` | `drawRegionBoxes`, `refreshRegionViewSet`, `getViewportRegionSet`, `highlightRegionBox` | Saved-region boxes on the Explore map: outlines over a dark halo, selected = accent, hover = brighter + name tooltip; only the viewport set is drawn, recomputed on moveend/zoomend/resize (150 ms debounce), load, selection, continent filter; the list reads the same set |
+| `viewport-regions.js` | `selectViewportRegions`, `VIEWPORT_REGION_LIMIT` | Pure: regions that intersect and fit the view, largest first, ≤ 20, plus the selected one |
+| `region-geometry.js` | `bboxSizeKm`, `formatBboxSize`, `parseBbox`, `regionBoxStyle`, `regionHaloStyle`, `REGION_ACCENT` | Pure: box size in km ("12.4 × 8.1 km · 100 km²"), N/S/E/W parsing, Leaflet box styles |
+| `region-editor.js` | `openRegionEditor`, `setupRegionEditor` | Sidebar region editor (`SidebarEditView.vue`): name (rename), group, N/S/E/W with live size readout and map box, Save (one `PUT /api/regions/{old name}`), Delete (`deleteRegion`), Notes |
 | `continent.js` | `detectContinent` | Pure: continent of a lat/lon for sidebar grouping. Coarse polylines: Mediterranean coast (southern Spain, Sicily, Malta, Crete are Europe), Suez / Red Sea (Sinai, Levant, Arabia are Asia), Bosphorus (Istanbul's historic centre is Europe), Caucasus crest, Urals at 60 E |
 | `regions-import-export.js` | `exportRegionsJson`, `importRegionsJsonFile` | Bulk JSON export/import |
 
@@ -128,7 +132,7 @@ flowchart LR
 
 | File | Key symbols | Purpose |
 |---|---|---|
-| `view-management.js` | `switchView`, `switchDemSubtab`, `setupDemSubtabs`, `saveCurrentRegion`, `deleteRegion`, `showNewRegionForm`, `renderSidebarTable`, `toggleBboxLayerVisibility`, `toggleDemSettingsPanel`, `_setSidebarViews` | Tabs and sub-tabs (`switchView` is null-safe for any view name); sidebar list/table view (the mode itself is `SidebarPanel.vue`'s); region delete (confirm → `DELETE /api/regions/{name}` → reload); show/hide region boxes on the map |
+| `view-management.js` | `switchView`, `switchDemSubtab`, `setupDemSubtabs`, `saveCurrentRegion`, `deleteRegion`, `showNewRegionForm`, `renderSidebarTable`, `toggleBboxLayerVisibility`, `toggleDemSettingsPanel`, `_setSidebarViews`, `loadSelectedRegionDem` | Tabs and sub-tabs (`switchView` is null-safe for any view name); sidebar list/table view (the mode itself is `SidebarPanel.vue`'s); region delete (confirm → `DELETE /api/regions/{name}` → reload); show/hide region boxes on the map; "Load DEM ›" on the Explore map (clicks `#tabEdit` then `#loadDemBtn`) |
 | `app-setup.js` | `setupOpacityControls`, `setupStackedLayers`, `loadAllLayers`, `setupAutoReload`, `clearAllBoundingBoxes` | Init wiring; `loadAllLayers` uses `Promise.allSettled` |
 | `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset`, `setupAutoSave`, `_migratePreset` | Presets, auto-save, `PRESET_VERSION` migration, revert snapshot. Sends `projection.clip_valid_region` only |
 | `settings-compat.js` | `normalizeSettingsKeys` | Pure: renames legacy keys in saved region settings / presets (`projection.clip_nans` → `clip_valid_region`) before `applyAllSettings` reads them |
@@ -145,7 +149,7 @@ flowchart LR
 | `event-listeners.js` | `setupEventListeners` (entry, called from `app.js`) |
 | `event-listeners-map.js` | `_setupMapAndDemListeners`, `_setupBboxListeners` |
 | `event-listeners-export.js` | `_setupModelExportListeners`, `_setupCityAndExportListeners` |
-| `event-listeners-ui.js` | `_setupSidebarEditView`, `_setupResizablePanel`, `_setupSettingsJsonToggle` |
+| `event-listeners-ui.js` | `_setupResizablePanel`, `_setupSettingsJsonToggle` |
 
 ### `workers/`
 
@@ -162,7 +166,7 @@ Under `app/client/static/js/vue/components/`. Store and bridge: [frontend.md](fr
 
 | Folder | Components (parent) |
 |---|---|
-| `layout/` | `AppShell` (App), `MainHeader`, `MeshRegistrationModal`, `RegionNotesModal` (AppShell) |
+| `layout/` | `AppShell` (App), `MainHeader`, `MeshRegistrationModal` (AppShell) |
 | `sidebar/` | `SidebarPanel` (App); `SidebarListView`, `SidebarEditView`, `RegionListTable`, `NewRegionSection` (SidebarPanel) |
 | `views/` | `ContentArea` (App); `MapContainer`, `DemContainer`, `ModelContainer` (ContentArea); `LandmarkSearch`, `EdgeLandmarkWarnings` (MapContainer, DemSettingsPanel); `PreflightPanel`, `ModelScorePanel` (ModelContainer) |
 | `dem/` | `DemSettingsPanel`, `CityBuildingsPanel` (DemContainer); in DemSettingsPanel: `WorkflowPresetBar`, `PresetsSection`, `ProjectionSection`, `FetchLayersSection`, `CityLandmarksSection`, `VisualizationSection`, `LayerViewSection`, `LayerDisplaySections`, `CompositeDemSection`, `MeshImportSection`, `PlateRegistrationSection`; in FetchLayersSection: `CityFetchProgress`, `DemSamplingInfo` |
@@ -195,7 +199,7 @@ layers/mesh-layer → layers/mesh-registration
 export/export-handlers → export/model-viewer → map/compare-view
 regions/region-ui → regions/regions-import-export → layers/water-mask
 layers/hydrology-overlay → layers/water-hydrology-combined → layers/trails-overlay
-map/map-globe → regions/regions → map/bbox-panel
+map/map-globe → regions/region-boxes → regions/regions → regions/region-editor → map/bbox-panel
 ui/app-setup → ui/keyboard-shortcuts
 events/event-listeners-map → events/event-listeners-export → events/event-listeners-ui → events/event-listeners
 ui/view-management → dem/dem-main → app.js
@@ -386,12 +390,14 @@ One line per function. `window.*` unless marked (private) or (export).
 
 | Function | Purpose |
 |---|---|
-| `loadCoordinates()` | Fetch regions, draw boxes |
+| `loadCoordinates()` | Fetch regions, draw boxes + list (`drawRegionBoxes`) |
 | `selectCoordinate(i)` | Select + fly to region |
 | `goToEdit(i)` | Open region in Edit |
 | `renderCoordinatesList()` | Sidebar list |
 | `groupRegionsByContinent(regions)` | Continent grouping |
-| `initRegionNotes()` | Notes from localStorage |
+| `initRegionNotes()` | Notes from localStorage (edited in the region editor) |
+| `openRegionEditor(i)` | Select + open the sidebar region editor |
+| `refreshRegionViewSet()` / `getViewportRegionSet()` | Viewport set shared by map boxes and list |
 | `exportRegionsJson()` / `importRegionsJsonFile(file)` | Bulk JSON |
 
 ### `ui/`

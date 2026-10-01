@@ -540,25 +540,4 @@ window._setupBboxListeners = function _setupBboxListeners() {
             window.showToast?.('Save failed: ' + err.message, 'error');
         }
     });
-
-    document.getElementById('saveRegionLabelBtn')?.addEventListener('click', async () => {
-        const selectedRegion = window.appState.selectedRegion;
-        if (!selectedRegion?.name) { window.showToast?.('No region selected', 'error'); return; }
-        const label = document.getElementById('regionLabelEdit')?.value.trim() ?? '';
-        try {
-            const { error } = await window.api.regions.update(selectedRegion.name, {
-                name: selectedRegion.name,
-                label,
-                north: selectedRegion.north, south: selectedRegion.south,
-                east: selectedRegion.east, west: selectedRegion.west,
-            });
-            if (error) throw new Error(error);
-            selectedRegion.label = label;
-            window.appState.selectedRegion = selectedRegion;
-            window.showToast?.('Label saved', 'success');
-            await window.loadCoordinates?.();
-        } catch (err) {
-            window.showToast?.('Save failed: ' + err.message, 'error');
-        }
-    });
 };

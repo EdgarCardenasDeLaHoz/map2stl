@@ -117,7 +117,9 @@ Consequences to know:
 | Model height, base, exaggeration, mm/px, export options, progress bar | `app/client/static/js/vue/components/views/ModelContainer.vue` | `app/client/static/js/modules/export/export-handlers.js::_asyncExport` |
 | Header tabs (Explore / Edit / Extrude) | `app/client/static/js/vue/components/layout/MainHeader.vue` | `app/client/static/js/modules/ui/view-management.js::switchView` |
 | Settings collect / apply / save / auto-save | `DemSettingsPanel.vue` (`#saveSettingsStatus`) | `app/client/static/js/modules/ui/presets.js::collectAllSettings`, `applyAllSettings`, `setupAutoSave` |
-| Region rectangles + hover affordances on the map | — (Leaflet) | `app/client/static/js/modules/regions/regions.js::loadCoordinates` |
+| Region boxes on the map (outlines, ≤ 20 in view + selected, hover ↔ list row) | — (Leaflet) | `app/client/static/js/modules/regions/region-boxes.js::refreshRegionViewSet`, rule `app/client/static/js/modules/regions/viewport-regions.js::selectViewportRegions` |
+| Region editor (rename, group, bounds + size, delete, notes) | `app/client/static/js/vue/components/sidebar/SidebarEditView.vue` (opened via `SidebarPanel.vue::setRegionEditorOpen`) | `app/client/static/js/modules/regions/region-editor.js::openRegionEditor` |
+| "Load DEM ›" on the Explore map | `app/client/static/js/vue/components/views/MapContainer.vue` | `app/client/static/js/modules/ui/view-management.js::loadSelectedRegionDem` |
 | Sidebar mode (width, hide) | `app/client/static/js/vue/components/sidebar/SidebarPanel.vue` | publishes `window.setSidebarMode`; nothing else writes its DOM — [why](../decisions/frontend.md#2026-08-30--vue-owns-the-sidebar-mode-and-nothing-else-touches-its-dom) |
 
 - **Edit sub-tab rule** (`DemSettingsPanel.vue`): *Fetch* holds data settings that affect

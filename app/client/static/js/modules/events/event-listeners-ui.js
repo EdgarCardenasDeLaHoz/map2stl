@@ -1,12 +1,12 @@
 /**
  * modules/event-listeners-ui.js
  *
- * Resizable settings panel, settings JSON view toggle, and sidebar edit view.
+ * Resizable settings panel and settings JSON view toggle.
+ * (The sidebar region editor is wired by modules/regions/region-editor.js.)
  *
  * Exposes on window:
  *   window._setupResizablePanel()
  *   window._setupSettingsJsonToggle()
- *   window._setupSidebarEditView()
  */
 
 window._setupResizablePanel = function _setupResizablePanel() {
@@ -152,25 +152,5 @@ window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {
 
     document.getElementById('cancelJsonSettingsBtn')?.addEventListener('click', () => {
         document.getElementById('jsonViewToggleBtn')?.click();
-    });
-};
-
-window._setupSidebarEditView = function _setupSidebarEditView() {
-    document.getElementById('sbBackBtn')?.addEventListener('click', () => {
-        document.getElementById('sidebarEditView')?.classList.add('hidden');
-        window._setSidebarViews?.(window.getSidebarState?.());
-    });
-    document.getElementById('sbReloadBtn')?.addEventListener('click', () => {
-        const n = document.getElementById('sbNorth')?.value;
-        const s = document.getElementById('sbSouth')?.value;
-        const e = document.getElementById('sbEast')?.value;
-        const w = document.getElementById('sbWest')?.value;
-        if (n != null) window.setBboxInputValues?.(n, s, e, w);
-        const nf = parseFloat(n), sf = parseFloat(s),
-            ef = parseFloat(e), wf = parseFloat(w);
-        if (!isNaN(nf) && !isNaN(sf) && !isNaN(ef) && !isNaN(wf)) {
-            window.setBboxRectangle?.(nf, sf, ef, wf);
-        }
-        window.loadAllLayers?.();
     });
 };

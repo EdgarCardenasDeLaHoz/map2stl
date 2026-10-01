@@ -52,13 +52,30 @@
     <LandmarkSearch />
     <EdgeLandmarkWarnings fetcher />
 
-    <!-- "Create Region" button -->
-    <button id="floatingDrawBtn" class="map-draw-region-btn" title="Draw a new region on the map">+ New Region</button>
+    <!-- Bottom actions: draw a new region; with a region selected, go on to
+         Edit and load its DEM (view-management.js::loadSelectedRegionDem). -->
+    <div class="map-bottom-actions" :class="{ 'has-selection': hasSelection }">
+      <button id="floatingDrawBtn" class="map-draw-region-btn" title="Draw a new region on the map">+ New Region</button>
+      <button v-show="hasSelection" id="exploreLoadDemBtn" type="button" class="map-load-dem-btn"
+              :title="`Open ${regionName} in Edit and load its DEM`"
+              :aria-label="`Load DEM for ${regionName}`"
+              @click="loadDem">Load DEM ›</button>
+    </div>
 
   </div>
 </template>
 <script setup lang="ts">
-// No local state — Leaflet initialises by reading #map after DOMContentLoaded
+// Leaflet initialises by reading #map after DOMContentLoaded.
+import { computed } from 'vue';
+import { useAppStore } from '../../stores/app';
 import EdgeLandmarkWarnings from './EdgeLandmarkWarnings.vue';
 import LandmarkSearch from './LandmarkSearch.vue';
+
+const store = useAppStore();
+const hasSelection = computed(() => !!store.selectedRegion);
+const regionName = computed(() => store.selectedRegion?.name ?? '');
+
+function loadDem() {
+  (window as any).loadSelectedRegionDem?.();
+}
 </script>

@@ -32,6 +32,8 @@ from app.server.schemas import RegionCreate, RegionParameters  # noqa: E402
 
 _PARAM_FIELDS = ("dim", "depth_scale", "water_scale",
                  "height", "base", "subtract_water", "sat_scale")
+# Every regions column except the `name` key (copied as-is by a rename).
+_REGION_COLUMNS = ("label", "description", "north", "south", "east", "west", *_PARAM_FIELDS)
 
 
 def _row_to_region(row) -> dict:
@@ -195,13 +197,48 @@ async def create_region(region: RegionCreate):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
+def _rename_region_rows(conn: sqlite3.Connection, old: str, new: str) -> None:
+    """Rename region ``old`` to ``new`` together with its settings and landmark rows.
+
+    The child tables reference ``regions(name)`` with no ON UPDATE action, so an
+    in-place ``UPDATE regions SET name`` fails the foreign-key check while children
+    exist. Instead: copy the row under the new name, repoint the children, then
+    delete the old row (its ON DELETE CASCADE then has nothing left to remove).
+    Runs inside the caller's transaction.
+    """
+    cols = ", ".join(_REGION_COLUMNS)
+    conn.execute(
+        f"INSERT INTO regions (name, {cols}) SELECT ?, {cols} FROM regions WHERE name=?",
+        (new, old))
+    conn.execute("UPDATE region_settings SET region_name=? WHERE region_name=?", (new, old))
+    conn.execute("UPDATE region_landmarks SET region_name=? WHERE region_name=?", (new, old))
+    conn.execute("DELETE FROM regions WHERE name=?", (old,))
+
+
 @router.put("/api/regions/{name}")
 async def update_region(name: str, region: RegionCreate):
-    """Update an existing saved region by name."""
+    """Update an existing saved region by name.
+
+    A body ``name`` different from the path renames the region; its saved
+    settings and landmark overrides move with it. 404 if ``name`` is unknown,
+    409 if the new name is already taken.
+    """
     try:
         _ensure_db()
         params = region.parameters
+        new_name = region.name.strip()
+        if not new_name:
+            return JSONResponse(content={"error": "Region name must not be blank"}, status_code=400)
         with get_db() as conn:
+            if not conn.execute("SELECT 1 FROM regions WHERE name=?", (name,)).fetchone():
+                return JSONResponse(content={"error": f"Region '{name}' not found"}, status_code=404)
+            if new_name != name:
+                if conn.execute("SELECT 1 FROM regions WHERE name=?", (new_name,)).fetchone():
+                    return JSONResponse(
+                        content={"error": f"A region named '{new_name}' already exists"},
+                        status_code=409)
+                _rename_region_rows(conn, name, new_name)
+                name = new_name
             if params is None:
                 # A rename or bbox edit sends no parameters. Writing the
                 # RegionParameters defaults here reset the region's stored
@@ -229,10 +266,12 @@ async def update_region(name: str, region: RegionCreate):
                         name,
                     ),
                 )
-            conn.commit()
             if cur.rowcount == 0:
                 return JSONResponse(content={"error": f"Region '{name}' not found"}, status_code=404)
-        return JSONResponse(content=model_to_dict(region))
+            conn.commit()
+        payload = model_to_dict(region)
+        payload["name"] = name
+        return JSONResponse(content=payload)
     except Exception as e:
         logger.error(f"Error updating region: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)

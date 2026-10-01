@@ -592,17 +592,23 @@
             font-size: 11px;
         }
 
-        /* Floating "New Region" draw button */
-        .map-draw-region-btn {
+        /* Bottom-centre map actions: "+ New Region" and, with a region
+           selected, "Load DEM ›" (MapContainer.vue) */
+        .map-bottom-actions {
             position: absolute;
             bottom: 24px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 1000;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .map-draw-region-btn,
+        .map-load-dem-btn {
             padding: 10px 22px;
-            background: #2e6da4;
-            color: #fff;
-            border: none;
+            min-height: 36px;
             border-radius: 20px;
             font-size: 13px;
             font-weight: 600;
@@ -612,13 +618,47 @@
             white-space: nowrap;
         }
 
+        .map-draw-region-btn {
+            background: #2e6da4;
+            color: #fff;
+            border: 1px solid transparent;
+        }
+
         .map-draw-region-btn:hover {
             background: #3a80c0;
-            transform: translateX(-50%) scale(1.04);
+            transform: scale(1.04);
+        }
+
+        /* With a region selected, Load DEM is the primary action */
+        .map-bottom-actions.has-selection .map-draw-region-btn:not(.drawing) {
+            background: rgba(40, 40, 40, 0.92);
+            border-color: #666;
+        }
+
+        .map-bottom-actions.has-selection .map-draw-region-btn:not(.drawing):hover {
+            background: rgba(64, 64, 64, 0.95);
         }
 
         .map-draw-region-btn.drawing {
             background: #e07b00;
+        }
+
+        /* The primary next step once a region is selected */
+        .map-load-dem-btn {
+            background: #2e6da4;
+            color: #fff;
+            border: 1px solid #4a9eff;
+        }
+
+        .map-load-dem-btn:hover {
+            background: #3a80c0;
+            transform: scale(1.04);
+        }
+
+        .map-draw-region-btn:focus-visible,
+        .map-load-dem-btn:focus-visible {
+            outline: 2px solid #fff;
+            outline-offset: 2px;
         }
 
         /* Sidebar new-region subsection */
@@ -2915,79 +2955,227 @@
             box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
         }
 
-        .coordinate-item-notes {
-            cursor: pointer;
-            opacity: 0.5;
-            font-size: 12px;
+        /* ✎ button on each region row: opens the region editor (region-editor.js) */
+        .coordinate-item-edit {
             margin-left: auto;
-            margin-right: 4px;
+            flex-shrink: 0;
+            min-width: 28px;
+            min-height: 28px;
+            padding: 0 6px;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            color: inherit;
+            font-size: 15px;
+            line-height: 1;
+            opacity: 0.55;
+            cursor: pointer;
         }
 
-        .coordinate-item-notes:hover {
+        .coordinate-item:hover .coordinate-item-edit,
+        .coordinate-item.selected .coordinate-item-edit,
+        .coordinate-item-edit:focus-visible {
             opacity: 1;
         }
 
-        .coordinate-item-notes.has-note {
-            opacity: 0.9;
-            color: #4ec9b0;
+        .coordinate-item-edit:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.3);
         }
 
-        .region-notes-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
+        .coordinate-item-edit:focus-visible {
+            outline: 2px solid #4a9eff;
+            outline-offset: 1px;
+        }
+
+        /* Row whose box is hovered on the map (region-boxes.js) */
+        .coordinate-item.map-hover:not(.selected) {
+            background: var(--bg-light);
+            border-left-color: #4a9eff;
+            color: #fff;
+        }
+
+        /* "Showing 20 of 71 in view · Show all" above the region list */
+        .coord-list-scope {
             display: flex;
             align-items: center;
-            justify-content: center;
-            z-index: 3000;
+            flex-wrap: wrap;
+            gap: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+            color: var(--text-muted);
+            border-bottom: 1px solid #2e2e2e;
         }
 
-        .region-notes-modal.hidden {
-            display: none;
+        .coord-list-scope-btn {
+            min-height: 24px;
+            padding: 0 6px;
+            background: none;
+            border: none;
+            border-radius: 3px;
+            color: #4a9eff;
+            font-size: 11px;
+            text-decoration: underline;
+            cursor: pointer;
         }
 
-        .region-notes-dialog {
-            background: #2d2d2d;
-            border-radius: 8px;
-            padding: 20px;
-            width: 400px;
-            max-width: 90vw;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        .coord-list-scope-btn:focus-visible {
+            outline: 2px solid #4a9eff;
         }
 
-        .region-notes-dialog h3 {
-            margin: 0 0 12px 0;
-            font-size: 16px;
-            color: #fff;
+        .coord-list-empty-hint {
+            padding: 10px 8px;
+            font-size: 12px;
+            color: var(--text-muted);
         }
 
-        .region-notes-dialog textarea {
-            width: 100%;
-            min-height: 120px;
-            background: #1e1e1e;
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            color: #fff;
-            padding: 10px;
-            font-family: inherit;
-            font-size: 13px;
-            resize: vertical;
-            box-sizing: border-box;
-        }
-
-        .region-notes-dialog textarea:focus {
-            outline: none;
-            border-color: #007acc;
-        }
-
-        .region-notes-dialog .dialog-buttons {
+        /* Region editor (SidebarEditView.vue) */
+        .region-editor-header {
             display: flex;
-            justify-content: flex-end;
-            gap: 8px;
-            margin-top: 12px;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 8px;
+            border-bottom: 1px solid #333;
+        }
+
+        .region-editor-back {
+            min-height: 28px;
+            padding: 2px 10px;
+            font-size: 12px;
+            background: #333;
+            border: 1px solid #555;
+            color: #ddd;
+            border-radius: 3px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .region-editor-title {
+            margin: 0;
+            flex: 1;
+            min-width: 0;
+            font-size: 13px;
+            font-weight: 600;
+            color: #ddd;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .region-editor-body {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 8px;
+        }
+
+        .region-editor-label {
+            font-size: 11px;
+            color: #999;
+            padding: 0;
+        }
+
+        .region-editor-input {
+            width: 100%;
+            box-sizing: border-box;
+            min-height: 28px;
+            padding: 4px 6px;
+            font-size: 12px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            color: #ddd;
+            border-radius: 3px;
+            margin-bottom: 4px;
+        }
+
+        .region-editor-input:focus-visible,
+        .region-editor-back:focus-visible,
+        .region-editor-save:focus-visible,
+        .region-editor-delete:focus-visible,
+        .region-editor-notes summary:focus-visible {
+            outline: 2px solid #4a9eff;
+            outline-offset: 1px;
+        }
+
+        .region-editor-bounds {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2px 6px;
+            margin: 4px 0 0;
+            padding: 0;
+            border: none;
+        }
+
+        .region-editor-bounds legend {
+            margin-bottom: 2px;
+        }
+
+        .region-editor-size {
+            margin: 0 0 6px;
+            font-size: 12px;
+            color: #9cdcfe;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .region-editor-size.invalid {
+            color: #f48771;
+        }
+
+        .region-editor-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .region-editor-save,
+        .region-editor-delete {
+            min-height: 30px;
+            padding: 4px 12px;
+            font-size: 12px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .region-editor-save {
+            flex: 1;
+            background: #2e6da4;
+            border: 1px solid #3a80c0;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .region-editor-save:disabled {
+            opacity: 0.6;
+            cursor: progress;
+        }
+
+        .region-editor-delete {
+            background: transparent;
+            border: 1px solid #8a3a3a;
+            color: #f48771;
+        }
+
+        .region-editor-delete:hover {
+            background: rgba(244, 135, 113, 0.12);
+        }
+
+        .region-editor-notes {
+            margin-top: 8px;
+            border-top: 1px solid #333;
+            padding-top: 6px;
+        }
+
+        .region-editor-notes summary {
+            min-height: 24px;
+            line-height: 24px;
+            font-size: 12px;
+            color: #bbb;
+            cursor: pointer;
+        }
+
+        .region-editor-notes textarea {
+            resize: vertical;
+            margin-top: 4px;
+            font-family: inherit;
         }
 
         /* Mesh registration picker (F-MESHIMPORT) */

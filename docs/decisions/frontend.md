@@ -3,6 +3,31 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-01 — Explore map draws a viewport set of ≤ 20 outlined region boxes, shared with the list
+- **Decision:** saved-region boxes are outlines (1.5 px, white 55 % over a dark halo, no visible
+  fill); selected = accent `#4a9eff`, 3 px, fill 0.08; hover brightens and shows the name. Only the
+  viewport set is drawn: regions that intersect the view **and** fit in it, largest first, ≤ 20,
+  plus the selected one (`viewport-regions.js::selectViewportRegions`). The sidebar list shows the
+  same set; a search, or "Show all", lists every region while the map keeps the viewport set.
+- **Why:** 125 filled, palette-coloured boxes overlapped and big ones tinted everything
+  (SierraNevada over Granada). One pure helper used by map and list keeps them from drifting.
+  "Show all" leaves the map alone because drawing all 125 boxes is the clutter being removed; a
+  listed region's box still appears while its row is hovered.
+- **Rejected:** fading boxes > 4× the view area (first cut this session) — still drew every box
+  that fit, so the world view stayed cluttered; replaced by the user's viewport-set rule.
+- **Supersedes / superseded by:** —
+
+### 2026-10-01 — Regions are renamed through PUT /api/regions/{name}, edited in the sidebar editor
+- **Decision:** a body `name` different from the path renames the region (copy row, repoint
+  `region_settings` / `region_landmarks`, delete old; 409 on a clash). The row's ✎ button opens
+  `SidebarEditView.vue` (name, group, bounds with size readout, delete, notes); the 📝 notes icon
+  and `RegionNotesModal.vue` are gone (the usage log showed the icon was never clicked).
+- **Why:** there was no way to rename; the editor view existed but nothing opened it. The child
+  tables' FKs have no ON UPDATE action, so an in-place `UPDATE regions SET name` fails.
+- **Rejected:** a separate `/rename` route — the PUT already carries `name`, and the SDK always
+  sends the current name, so no caller changes meaning.
+- **Supersedes / superseded by:** —
+
 ### 2026-10-01 — Edit-tab panels: Fetch = data, View = display, Composite = 3D render
 - **Decision:** each Edit-tab control lives in the sub-tab that matches what it changes.
   - **Fetch:** data settings that affect everything: sources, resolutions, projection, which

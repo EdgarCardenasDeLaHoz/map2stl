@@ -39,7 +39,8 @@ window.setupEventListeners = function setupEventListeners() {
     window._setupBboxListeners?.();
 
     // sidebarToggleBtn is handled by the Vue SidebarPanel component's @click="cycleSidebar"
-    document.getElementById('bboxVisToggleBtn')?.addEventListener('click', () => window.toggleBboxLayerVisibility?.());
+    // bboxVisToggleBtn is handled by SidebarPanel.vue's @click="toggleBboxVis"; a
+    // second listener here toggled twice per click, so the button did nothing.
 
     document.getElementById('sidebarTableSearch')?.addEventListener('input', e => window.renderSidebarTable?.(e.target.value));
     document.getElementById('statusToggleBtn')?.addEventListener('click', () => window.toggleStatusPanel?.());
@@ -73,7 +74,7 @@ window.setupEventListeners = function setupEventListeners() {
 
     window._setupSettingsJsonToggle?.();
     window._setupCityAndExportListeners?.();
-    window._setupSidebarEditView?.();
+    window.setupRegionEditor?.();
 
     // Combined Water + Hydrology section
     document.getElementById('loadWaterHydrologyBtn')?.addEventListener('click', () => window.loadWaterHydrology?.());

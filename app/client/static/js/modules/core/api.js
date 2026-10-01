@@ -212,7 +212,7 @@ window.api = (() => {
         /** POST /api/regions */
         create: (payload) => _fetch('/api/regions', _json(payload)),
 
-        /** PUT /api/regions/{name} */
+        /** PUT /api/regions/{name}; a payload.name different from `name` renames (409 if taken) */
         update: (name, payload) => _fetch(`/api/regions/${encodeURIComponent(name)}`, {
             ..._json(payload), method: 'PUT'
         }),

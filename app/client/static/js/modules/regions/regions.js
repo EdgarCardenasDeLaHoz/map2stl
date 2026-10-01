@@ -12,8 +12,7 @@
  *   window.api.regions.list()
  *   window.getCoordinatesData()     / window.setCoordinatesData(data)
  *   window.setSelectedRegion(r)
- *   window.getPreloadedLayer()
- *   window.getEditMarkersLayer()
+ *   window.drawRegionBoxes(regions) (region-boxes.js)
  *   window.getMap()
  *   window.getGlobeScene()
  *   window.BBOX_COLORS
@@ -54,8 +53,9 @@ const AUTO_SCALE = {
 // ── loadCoordinates ─────────────────────────────────────────────────────────
 
 /**
- * Fetch all saved regions from `/api/regions` and populate the UI.
- * Draws colour-coded rectangles on the map and updates the coordinates list.
+ * Fetch all saved regions from `/api/regions` and populate the UI: the sidebar
+ * list, the outline boxes on the map (region-boxes.js::drawRegionBoxes) and the
+ * globe markers.
  * @returns {Promise<void>}
  */
 async function loadCoordinates() {
@@ -74,108 +74,9 @@ async function loadCoordinates() {
 
         window.setCoordinatesData?.(data.regions || []);
 
-        // Populate coordinates list with enhanced styling
-        window.renderCoordinatesList();
-
-        const coordinatesData = window.getCoordinatesData?.() || [];
-
-        const preloadedLayer = window.getPreloadedLayer?.();
-        const editMarkersLayer = window.getEditMarkersLayer?.();
-
-        // Draw rectangles on map - sorted by size (largest first) so smaller ones are clickable
-        if (preloadedLayer) {
-            preloadedLayer.clearLayers();
-            if (editMarkersLayer) editMarkersLayer.clearLayers();
-
-            // Calculate area for each region and sort by size descending
-            const sortedRegions = coordinatesData.map((region, originalIndex) => {
-                const width = Math.abs(region.east - region.west);
-                const height = Math.abs(region.north - region.south);
-                const area = width * height;
-                return { region, originalIndex, area };
-            }).sort((a, b) => b.area - a.area); // Largest first
-
-            const BBOX_COLORS = window.BBOX_COLORS || [];
-
-            sortedRegions.forEach(({ region, originalIndex }) => {
-                const bounds = [[region.south, region.west],
-                [region.north, region.east]];
-                const colorObj = BBOX_COLORS[originalIndex % BBOX_COLORS.length];
-                const rect = L.rectangle(bounds, {
-                    color: colorObj.color,
-                    weight: 2,
-                    fill: true,
-                    fillColor: colorObj.color,
-                    fillOpacity: 0.15
-                });
-
-                // Tag rectangle with continent for visibility toggling
-                const cLat = (region.north + region.south) / 2;
-                const cLon = (region.east + region.west) / 2;
-                rect._continentName = window.detectContinent(cLat, cLon);
-
-                // Click selects the region (stays on Explore)
-                rect.on('click', () => window.selectCoordinate(originalIndex));
-
-                // Edit button pinned at the top-right corner of each bbox.
-                //
-                // Built on first hover, not up front: it is invisible until
-                // hovered anyway, and eagerly constructing one divIcon marker
-                // per region meant every page load paid for all of them (125
-                // markers in the current region set) to show at most one.
-                let editMarker = null;
-                function _ensureEditMarker() {
-                    if (editMarker) return editMarker;
-                    const editIcon = L.divIcon({
-                        html: `<div class="bbox-edit-icon">✏️ Edit</div>`,
-                        className: 'bbox-edit-marker',
-                        iconSize: [56, 22],
-                        iconAnchor: [56, 0]   // top-right corner of the icon aligns with [north, east]
-                    });
-                    editMarker = L.marker([region.north, region.east], {
-                        icon: editIcon,
-                        interactive: true,
-                        keyboard: false,
-                        zIndexOffset: 500
-                    });
-                    editMarker.on('click', () => window.goToEdit(originalIndex));
-                    // Read by map-globe.js:_updateEditMarkerVisibility to hide
-                    // the button when its bbox is smaller than ~40px on screen.
-                    editMarker._regionBounds = L.latLngBounds(bounds[0], bounds[1]);
-                    // Keep edit button visible while hovering it directly
-                    editMarker.on('mouseover', function () {
-                        editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.add('visible');
-                    });
-                    editMarker.on('mouseout', function () {
-                        editMarker.getElement()?.querySelector('.bbox-edit-icon')?.classList.remove('visible');
-                    });
-                    if (editMarkersLayer) editMarkersLayer.addLayer(editMarker);
-                    return editMarker;
-                }
-
-                // Hover: show tooltip + reveal Edit button
-                rect.on('mouseover', function (e) {
-                    // The label is the import batch tag ("coorlist" for the bulk CSV
-                    // import), not a name. Preferring it made 76 of the 125 boxes on
-                    // the map all hover as "coorlist".
-                    const label = region.name || region.label;
-                    rect.unbindTooltip();
-                    rect.bindTooltip(label, { sticky: false, direction: 'top', offset: [0, -4] });
-                    rect.openTooltip(e.latlng);
-                    _ensureEditMarker().getElement()
-                        ?.querySelector('.bbox-edit-icon')?.classList.add('visible');
-                });
-                rect.on('mouseout', function () {
-                    // Delay hiding so the user can move to the edit button
-                    setTimeout(() => {
-                        const icon = editMarker?.getElement()?.querySelector('.bbox-edit-icon');
-                        if (icon && !icon.matches(':hover')) icon.classList.remove('visible');
-                    }, 300);
-                });
-
-                preloadedLayer.addLayer(rect);
-            });
-        }
+        // Map boxes and the sidebar list, which show the same viewport set
+        // (region-boxes.js::drawRegionBoxes renders the list too).
+        window.drawRegionBoxes(window.getCoordinatesData?.() || []);
 
         // Add markers to globe
         updateGlobeMarkers();
@@ -408,27 +309,10 @@ async function goToEdit(index) {
     await window.selectCoordinate(index, { skipEditReload: true });
     window.switchView('dem');
 
-    // Populate the compact sidebar edit panel
-    const coordinatesData = window.getCoordinatesData?.() || [];
-    const region = coordinatesData[index];
-    if (region) {
-        const nameEl = document.getElementById('sbRegionName');
-        if (nameEl) nameEl.textContent = region.name;
-        const dec = 5;
-        const sbN = document.getElementById('sbNorth');
-        const sbS = document.getElementById('sbSouth');
-        const sbE = document.getElementById('sbEast');
-        const sbW = document.getElementById('sbWest');
-        if (sbN) sbN.value = parseFloat(region.north).toFixed(dec);
-        if (sbS) sbS.value = parseFloat(region.south).toFixed(dec);
-        if (sbE) sbE.value = parseFloat(region.east).toFixed(dec);
-        if (sbW) sbW.value = parseFloat(region.west).toFixed(dec);
-    }
-
     // Keep the region list visible so the user can switch to another region
     document.getElementById('sidebarListView')?.classList.remove('hidden');
     document.getElementById('sidebarTableView')?.classList.add('hidden');
-    document.getElementById('sidebarEditView')?.classList.add('hidden');
+    window.setRegionEditorOpen?.(false);
 
     // Ensure sidebar is in normal mode (visible, not expanded/hidden). Editing a
     // region needs the panel on screen; SidebarPanel.vue owns the mode, so go

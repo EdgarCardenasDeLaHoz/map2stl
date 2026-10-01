@@ -126,10 +126,6 @@
         </div>
         <!-- Inline mini-map for drag-editing the bounding box -->
         <div id="bboxMiniMap" class="bbox-mini-map hidden"></div>
-        <!-- Hidden elements kept for JS compatibility -->
-        <datalist id="regionLabelsList"></datalist>
-        <input type="hidden" id="regionLabelEdit">
-        <button id="saveRegionLabelBtn" style="display:none;"></button>
       </div>
     </div>
 

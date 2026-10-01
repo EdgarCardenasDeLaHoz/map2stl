@@ -1,19 +1,25 @@
 ﻿/**
- * modules/region-ui.js — Region list, table, notes, and thumbnail UI.
+ * modules/regions/region-ui.js — Region list, table, notes, and thumbnail UI.
  *
- * Loaded as a plain <script> before app.js.
+ * The sidebar list shows the map's viewport set (region-boxes.js::getViewportRegionSet:
+ * the ≤ 20 regions drawn on the map, plus the selected one) under a
+ * "Showing N of M in view · Show all" line; a search, or "Show all", lists every
+ * region instead. Each row selects on click / Enter and carries a ✎ button that
+ * opens the region editor (region-editor.js::openRegionEditor). Row and map-box
+ * hovers are linked (region-boxes.js::highlightRegionBox).
  *
  * Public API (all on window):
  *   detectContinent(lat, lon)            — heuristic continent name (continent.js)
  *   groupRegionsByContinent(regions)     — group array by continent
+ *   resolveRegionContinent(region)       — label-or-detected continent (filter key)
  *   renderCoordinatesList()              — render sidebar list view
  *   populateRegionsTable()               — render sidebar table view
  *   loadRegionFromTable(index)           — navigate to Edit for region
  *   viewRegionOnMap(index)               — select region + switch to map
  *   setupRegionsTable()                  — wire table search + refresh
  *   initRegionNotes()                    — load notes from localStorage
- *                                          (the notes modal's show / hide / save
- *                                          stay module-local)
+ *   getRegionNote(name) / setRegionNote(name, text) — notes (edited in the region editor)
+ *   renameRegionLocalData(old, new)      — move notes + thumbnail after a rename
  *   initRegionThumbnails()               — load thumbnails from localStorage
  *   saveRegionThumbnail(name, dataURL)   — persist a thumbnail
  *
@@ -28,6 +34,8 @@
  *   window.renderSidebarTable()         — from app.js
  *   window.loadCoordinates()            — from app.js
  *   window.showToast(msg, type)                — file-top global in app.js
+ *   window.getViewportRegionSet / refreshRegionViewSet / highlightRegionBox (region-boxes.js)
+ *   window.openRegionEditor(index)      — region-editor.js
  */
 
 import { detectContinent } from './continent.js';
@@ -40,13 +48,16 @@ const CONTINENT_HIDDEN = new Set();
 
 let regionThumbnails = {};
 let regionNotes = {};
-let currentNotesRegion = null;
 
 // ── Sidebar list pagination ───────────────────────────────────────────────────
 const LIST_PAGE_SIZE = 20;
 let _listPage = 0;
 let _lastListSearch = '';  // used to reset the page when search changes
 let _lastContinentFilter = 'all';
+// "Show all" lists every region instead of the map's viewport set. The map
+// keeps drawing the viewport set either way (drawing all of them is the
+// clutter the set exists to avoid).
+let _listShowAll = false;
 
 const KNOWN_CONTINENTS = ['North America', 'South America', 'Europe', 'Africa', 'Asia', 'Oceania', 'Antarctica', 'Other'];
 
@@ -134,11 +145,51 @@ function groupRegionsByContinent(regions) {
 // Sidebar list view
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The line above the list saying which regions it shows, with the toggle:
+ * "Showing 20 of 71 in view · Show all" / "Showing all 125 · Only those in view".
+ * @param {{inViewCount: number, shownInView: number, total: number}|null} viewSet
+ *   The viewport set, or null in show-all mode.
+ * @param {number} shownCount - Regions listed (show-all mode)
+ */
+function _renderListScope(viewSet, shownCount) {
+    const el = document.createElement('div');
+    el.className = 'coord-list-scope';
+    const text = document.createElement('span');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'coord-list-scope-btn';
+    if (viewSet) {
+        const { inViewCount, shownInView } = viewSet;
+        text.textContent = inViewCount > shownInView
+            ? `Showing ${shownInView} of ${inViewCount} in view`
+            : `${inViewCount} in view`;
+        btn.textContent = 'Show all';
+        btn.title = `List all ${viewSet.total} saved regions`;
+    } else {
+        text.textContent = `Showing all ${shownCount}`;
+        btn.textContent = 'Only those in view';
+        btn.title = 'List only the regions drawn on the map';
+    }
+    btn.addEventListener('click', () => {
+        _listShowAll = !!viewSet;   // viewport mode → show all, and back
+        _listPage = 0;
+        renderCoordinatesList();
+        document.querySelector('#coordinatesList .coord-list-scope-btn')?.focus();
+    });
+    el.append(text, ' · ', btn);
+    return el;
+}
+
 function renderCoordinatesList() {
     if (window.getSidebarState?.() === 'expanded') window.renderSidebarTable?.();
 
     const list = document.getElementById('coordinatesList');
     if (!list) return;
+    // Re-rendered on map pans too: keep keyboard focus on the same row/button.
+    const focused = list.contains(document.activeElement) ? document.activeElement : null;
+    const focusName = focused?.closest('.coordinate-item')?.dataset.regionName;
+    const focusEdit = !!focused?.classList.contains('coordinate-item-edit');
     list.innerHTML = '';
 
     const coordinatesData = window.getCoordinatesData?.() || [];
@@ -166,19 +217,37 @@ function renderCoordinatesList() {
         _lastContinentFilter = continentFilter;
     }
 
-    const filtered = coordinatesData.filter((r) => {
-        const matchesSearch = !searchVal || r.name.toLowerCase().includes(searchVal);
-        if (!matchesSearch) return false;
-        if (continentFilter === 'all') return true;
-        return _resolveRegionContinent(r) === continentFilter;
-    });
+    // Search finds any region; otherwise the list shows the map's viewport set
+    // (region-boxes.js::getViewportRegionSet), or every region after "Show all".
+    const viewportMode = !searchVal && !_listShowAll;
+    let filtered;
+    let viewSet = null;
+    if (viewportMode && window.getViewportRegionSet) {
+        viewSet = window.getViewportRegionSet();
+        filtered = viewSet.regions;
+    } else {
+        filtered = coordinatesData.filter((r) => {
+            const matchesSearch = !searchVal || r.name.toLowerCase().includes(searchVal);
+            if (!matchesSearch) return false;
+            if (continentFilter === 'all') return true;
+            return _resolveRegionContinent(r) === continentFilter;
+        });
+    }
 
-    // ── Pagination ──────────────────────────────────────────────────────────
-    const totalPages = Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
+    // ── Pagination (search / show-all only; the viewport set is ≤ 21) ──────
+    const totalPages = viewSet ? 1 : Math.max(1, Math.ceil(filtered.length / LIST_PAGE_SIZE));
     if (_listPage >= totalPages) _listPage = totalPages - 1;
-    const pageStart = _listPage * LIST_PAGE_SIZE;
-    const paginated = filtered.slice(pageStart, pageStart + LIST_PAGE_SIZE);
+    const pageStart = viewSet ? 0 : _listPage * LIST_PAGE_SIZE;
+    const paginated = viewSet ? filtered : filtered.slice(pageStart, pageStart + LIST_PAGE_SIZE);
     // ────────────────────────────────────────────────────────────────────────
+
+    if (!searchVal) list.appendChild(_renderListScope(viewSet, filtered.length));
+    if (viewSet && filtered.length === 0) {
+        const hint = document.createElement('div');
+        hint.className = 'coord-list-empty-hint';
+        hint.textContent = 'No saved regions fit this view. Zoom out, or use Show all.';
+        list.appendChild(hint);
+    }
 
     const groups = groupRegionsByContinent(paginated);
     const outerFrag = document.createDocumentFragment();
@@ -213,26 +282,30 @@ function renderCoordinatesList() {
         const itemFrag = document.createDocumentFragment();
         groupRegions.forEach(region => {
             const originalIndex = indexByName.get(region.name) ?? -1;
-            const hasNote = regionNotes[region.name] && regionNotes[region.name].trim() !== '';
             const item = document.createElement('div');
             item.className = 'coordinate-item';
             item.dataset.regionName = region.name;
             if (selected && selected.name === region.name) item.classList.add('selected');
             const esc = window.escapeHtml;
             item.innerHTML = `
-                <span class="coordinate-item-icon">📍</span>
+                <span class="coordinate-item-icon" aria-hidden="true">📍</span>
                 <span class="coordinate-item-name">${esc(region.name)}</span>
                 <span class="coordinate-item-meta">${esc(region.description || '')}</span>
-                <span class="coordinate-item-notes ${hasNote ? 'has-note' : ''}"
-                      title="${hasNote ? 'View/edit notes' : 'Add notes'}">📝</span>
+                <button type="button" class="coordinate-item-edit"
+                        aria-label="Edit ${esc(region.name)}" title="Edit region">✎</button>
             `;
-            item.querySelector('.coordinate-item-notes').addEventListener('click', (e) => {
+            const editBtn = item.querySelector('.coordinate-item-edit');
+            editBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                showNotesModal(region.name);
+                void window.openRegionEditor?.(originalIndex);
             });
+            // Enter/Space on the button must not also select through the row.
+            editBtn.addEventListener('keydown', (e) => e.stopPropagation());
             item.tabIndex = 0;
             item.setAttribute('role', 'option');
             item.onclick = () => window.selectCoordinate?.(originalIndex);
+            item.addEventListener('mouseenter', () => window.highlightRegionBox?.(region.name, true));
+            item.addEventListener('mouseleave', () => window.highlightRegionBox?.(region.name, false));
             item.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.selectCoordinate?.(originalIndex); }
                 else if (e.key === 'ArrowDown') { e.preventDefault(); const next = item.nextElementSibling || item.parentElement.nextElementSibling?.querySelector('.coordinate-item'); if (next) next.focus(); }
@@ -248,6 +321,10 @@ function renderCoordinatesList() {
     });
 
     list.appendChild(outerFrag);
+    if (focusName) {
+        const row = list.querySelector(`.coordinate-item[data-region-name="${CSS.escape(focusName)}"]`);
+        (focusEdit ? row?.querySelector('.coordinate-item-edit') : row)?.focus();
+    }
 
     // ── Pagination controls ─────────────────────────────────────────────────
     if (totalPages > 1) {
@@ -382,7 +459,9 @@ function setupRegionsTable() {
             if (!(target instanceof HTMLElement)) return;
             if (target.id !== 'coordContinentFilter') return;
             _listPage = 0;
-            renderCoordinatesList();
+            // The filter narrows the map's boxes too, so recompute the shared set.
+            if (window.refreshRegionViewSet) window.refreshRegionViewSet({ force: true });
+            else renderCoordinatesList();
         });
         window.__coordContinentFilterDelegated = true;
     }
@@ -416,51 +495,43 @@ function initRegionNotes() {
     } catch (e) {
         console.warn('Failed to load region notes:', e);
     }
-
-    const modal = document.getElementById('regionNotesModal');
-    if (modal) {
-        modal.addEventListener('click', (e) => { if (e.target === modal) hideNotesModal(); });
-        modal.querySelector('[data-action="notes-cancel"]')?.addEventListener('click', hideNotesModal);
-        modal.querySelector('[data-action="notes-save"]')?.addEventListener('click', saveRegionNotes);
-    }
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) hideNotesModal();
-    });
 }
 
-function showNotesModal(regionName) {
-    currentNotesRegion = regionName;
-    const modal = document.getElementById('regionNotesModal');
-    const nameSpan = document.getElementById('notesRegionName');
-    const textarea = document.getElementById('notesTextarea');
-
-    nameSpan.textContent = regionName;
-    textarea.value = regionNotes[regionName] || '';
-    modal.classList.remove('hidden');
-    textarea.focus();
-}
-
-function hideNotesModal() {
-    const modal = document.getElementById('regionNotesModal');
-    modal.classList.add('hidden');
-    currentNotesRegion = null;
-}
-
-function saveRegionNotes() {
-    if (!currentNotesRegion) return;
-    const textarea = document.getElementById('notesTextarea');
-    const note = textarea.value.trim();
-    if (note) {
-        regionNotes[currentNotesRegion] = note;
-    } else {
-        delete regionNotes[currentNotesRegion];
-    }
+function _persistNotes() {
     try { localStorage.setItem('map2stl_regionNotes', JSON.stringify(regionNotes)); }
     catch (_) { window.showToast('Could not save notes — storage full or unavailable', 'warning'); }
-    hideNotesModal();
-    renderCoordinatesList();
-    window.showToast('Notes saved!', 'success');
+}
+
+/** The saved note for a region ('' if none). Read by region-editor.js. */
+function getRegionNote(name) {
+    return regionNotes[name] || '';
+}
+
+/** Store (or, when blank, remove) a region's note. */
+function setRegionNote(name, text) {
+    const note = String(text || '').trim();
+    if ((regionNotes[name] || '') === note) return;
+    if (note) regionNotes[name] = note;
+    else delete regionNotes[name];
+    _persistNotes();
+}
+
+/**
+ * Move the browser-side data keyed by region name (notes, thumbnails) after a
+ * rename. The server moves its own (settings, landmarks) in PUT /api/regions/{name}.
+ */
+function renameRegionLocalData(oldName, newName) {
+    if (oldName === newName) return;
+    if (oldName in regionNotes) {
+        regionNotes[newName] = regionNotes[oldName];
+        delete regionNotes[oldName];
+        _persistNotes();
+    }
+    if (oldName in regionThumbnails) {
+        regionThumbnails[newName] = regionThumbnails[oldName];
+        delete regionThumbnails[oldName];
+        try { localStorage.setItem('map2stl_thumbs', JSON.stringify(regionThumbnails)); } catch (_) { /* best-effort */ }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -477,3 +548,7 @@ window.setupRegionsTable = setupRegionsTable;
 window.initRegionThumbnails = initRegionThumbnails;
 window.saveRegionThumbnail = saveRegionThumbnail;
 window.initRegionNotes = initRegionNotes;
+window.getRegionNote = getRegionNote;
+window.setRegionNote = setRegionNote;
+window.renameRegionLocalData = renameRegionLocalData;
+window.resolveRegionContinent = _resolveRegionContinent;

@@ -4,9 +4,6 @@
     <Teleport to="#vue-toast">
       <div id="toastContainer" class="toast-container"></div>
     </Teleport>
-    <Teleport to="#vue-notes-modal">
-      <RegionNotesModal />
-    </Teleport>
     <Teleport to="#vue-mesh-registration-modal">
       <MeshRegistrationModal />
     </Teleport>
@@ -17,6 +14,5 @@
 </template>
 <script setup lang="ts">
 import MainHeader          from './MainHeader.vue';
-import RegionNotesModal    from './RegionNotesModal.vue';
 import MeshRegistrationModal from './MeshRegistrationModal.vue';
 </script>

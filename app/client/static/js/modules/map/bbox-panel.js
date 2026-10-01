@@ -1,9 +1,14 @@
+import { REGION_ACCENT } from '../regions/region-geometry.js';
+
 // Keyboard accessibility for bbox inputs: arrow keys nudge by 0.1°
 // === Constants ===
 const BBOX_KEYBOARD_NUDGE_STEP = 0.1;
 // Shared by every caller of setBboxRectangle, so the box looks the same however
-// the user got to it.
-const BBOX_RECT_STYLE = { color: '#e74c3c', weight: 2, fillOpacity: 0.05 };
+// the user got to it. The working extent: a dashed accent outline that sits on
+// the selected region's solid box (region-boxes.js) and moves off it while the
+// region editor's N/S/E/W fields are edited. Not interactive, so hovers and
+// clicks reach the saved-region boxes underneath.
+const BBOX_RECT_STYLE = { color: REGION_ACCENT, weight: 2, dashArray: '6 4', fill: false, interactive: false };
 
 ['bboxNorth', 'bboxSouth', 'bboxEast', 'bboxWest'].forEach(id => {
     const el = document.getElementById(id);

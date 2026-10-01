@@ -20,7 +20,7 @@ Primary `TerrainSession` touchpoints:
 |--------|------|-------------|
 | GET | `/api/regions` | List all regions |
 | POST | `/api/regions` | Create region (body: `RegionCreate`), 201 |
-| PUT | `/api/regions/{name}` | Update region bbox + metadata |
+| PUT | `/api/regions/{name}` | Update region bbox + metadata. A body `name` different from the path **renames** the region; its settings and landmark overrides move with it (`regions.py::_rename_region_rows`). 404 unknown, 409 name taken, 400 blank name |
 | DELETE | `/api/regions/{name}` | Delete region + cascade settings |
 | GET | `/api/regions/{name}/settings` | Get saved panel settings (200 + `{}` if none) |
 | PUT | `/api/regions/{name}/settings` | Save panel settings |

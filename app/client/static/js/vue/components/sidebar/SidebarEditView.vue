@@ -1,40 +1,52 @@
 <template>
-  <div id="sidebarEditView" :class="{ hidden: !visible }">
-    <div class="row-gap6" style="padding:6px 8px;border-bottom:1px solid #333;">
-      <button id="sbBackBtn"
-              style="padding:2px 8px;font-size:11px;background:#333;border:1px solid #555;color:#ccc;border-radius:3px;cursor:pointer;flex-shrink:0;"
+  <!-- Region editor. Markup only: modules/regions/region-editor.js fills the
+       fields, reacts to them (live size readout, map box) and saves through
+       PUT /api/regions/{name} (which also renames). Opened by a list row's ✎
+       button through SidebarPanel.vue::setRegionEditorOpen. -->
+  <section id="sidebarEditView" class="region-editor" :class="{ hidden: !visible }"
+           aria-labelledby="sbEditTitle">
+    <div class="region-editor-header">
+      <button id="sbBackBtn" type="button" class="region-editor-back"
+              aria-label="Back to region list" title="Back to region list"
               @click="$emit('back')">← Back</button>
-      <span id="sbRegionName"
-            style="font-size:12px;font-weight:bold;color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;">
-        {{ regionName }}
-      </span>
+      <h2 id="sbEditTitle" class="region-editor-title">
+        Edit <span id="sbRegionName">{{ regionName }}</span>
+      </h2>
     </div>
-    <div style="padding:8px;">
-      <div style="margin-bottom:8px;">
-        <label for="regionLabelEdit" style="font-size:10px;color:#888;display:block;">Label</label>
-        <div style="display:flex;gap:4px;align-items:center;">
-          <input type="text" id="regionLabelEdit" list="regionLabelsList"
-                 aria-label="Region label"
-                 placeholder="e.g. City, Europe"
-                 style="flex:1;min-width:0;font-size:11px;padding:3px 4px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;box-sizing:border-box;">
-          <button id="saveRegionLabelBtn"
-                  style="padding:4px 8px;font-size:11px;background:#24462a;border:1px solid #3f7a4a;color:#d6f5dc;border-radius:3px;cursor:pointer;white-space:nowrap;"
-                  title="Save region label">Save Label</button>
+
+    <form id="regionEditorForm" class="region-editor-body" novalidate @submit.prevent>
+      <label for="regionNameEdit" class="region-editor-label">Name</label>
+      <input id="regionNameEdit" type="text" class="region-editor-input"
+             maxlength="128" autocomplete="off" required>
+
+      <label for="regionLabelEdit" class="region-editor-label">Group</label>
+      <input id="regionLabelEdit" type="text" class="region-editor-input" list="regionLabelsList"
+             maxlength="64" autocomplete="off" placeholder="e.g. City, Europe">
+      <datalist id="regionLabelsList"></datalist>
+
+      <fieldset class="region-editor-bounds">
+        <legend class="region-editor-label">Bounds (degrees)</legend>
+        <div v-for="dir in dirs" :key="dir.id" class="region-editor-bound">
+          <label :for="dir.id" class="region-editor-label">{{ dir.label }}</label>
+          <input :id="dir.id" type="number" class="region-editor-input" step="0.001"
+                 :min="dir.min" :max="dir.max">
         </div>
-        <datalist id="regionLabelsList"></datalist>
+      </fieldset>
+      <p id="sbSizeReadout" class="region-editor-size" aria-live="polite"></p>
+
+      <div class="region-editor-actions">
+        <button id="sbSaveBtn" type="submit" class="region-editor-save">Save</button>
+        <button id="sbDeleteBtn" type="button" class="region-editor-delete">Delete</button>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:6px;">
-        <div v-for="dir in dirs" :key="dir.id">
-          <label style="font-size:10px;color:#888;display:block;">{{ dir.label }}</label>
-          <input type="number" :id="dir.id" :aria-label="dir.label + ' boundary'" step="0.01"
-                 style="width:100%;font-size:11px;padding:3px 4px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;box-sizing:border-box;">
-        </div>
-      </div>
-      <button id="sbReloadBtn"
-              style="width:100%;padding:6px;background:#1a3a5c;border:1px solid #2a6aa8;color:#aad;border-radius:3px;cursor:pointer;font-size:12px;"
-              >↺ Reload Layers</button>
-    </div>
-  </div>
+
+      <details id="sbNotesSection" class="region-editor-notes">
+        <summary>Notes</summary>
+        <textarea id="sbNotesTextarea" class="region-editor-input" rows="4"
+                  aria-label="Region notes"
+                  placeholder="Notes about this region (saved in this browser)"></textarea>
+      </details>
+    </form>
+  </section>
 </template>
 
 <script setup lang="ts">
@@ -48,9 +60,9 @@ const store = useAppStore();
 const regionName = computed(() => store.selectedRegion?.name ?? '');
 
 const dirs = [
-  { id: 'sbNorth', label: 'North' },
-  { id: 'sbSouth', label: 'South' },
-  { id: 'sbEast',  label: 'East'  },
-  { id: 'sbWest',  label: 'West'  },
+  { id: 'sbNorth', label: 'North', min: -90, max: 90 },
+  { id: 'sbSouth', label: 'South', min: -90, max: 90 },
+  { id: 'sbEast',  label: 'East',  min: -180, max: 180 },
+  { id: 'sbWest',  label: 'West',  min: -180, max: 180 },
 ];
 </script>

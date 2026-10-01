@@ -113,6 +113,53 @@ class TestUpdateRegion:
         assert r.json()["name"] == "NewRegion"
 
 
+class TestRenameRegion:
+    """PUT /api/regions/{name} with a different body name renames the region."""
+
+    def test_rename_moves_region(self, client):
+        client.post("/api/regions", json=_NEW_REGION)
+        r = client.put("/api/regions/NewRegion", json=dict(_NEW_REGION, name="London"))
+        assert r.status_code == 200
+        assert r.json()["name"] == "London"
+        names = [reg["name"] for reg in client.get("/api/regions").json()["regions"]]
+        assert "London" in names and "NewRegion" not in names
+
+    def test_rename_keeps_bbox_and_parameters(self, client):
+        client.post("/api/regions", json=dict(_NEW_REGION, parameters={"dim": 900}))
+        client.put("/api/regions/NewRegion", json=dict(_NEW_REGION, name="London"))
+        reg = next(g for g in client.get("/api/regions").json()["regions"] if g["name"] == "London")
+        assert reg["north"] == pytest.approx(51.5)
+        assert reg["parameters"]["dim"] == 900
+
+    def test_rename_moves_settings_and_landmarks(self, client):
+        client.post("/api/regions", json=_NEW_REGION)
+        client.put("/api/regions/NewRegion/settings", json={"dem": {"dim": 321}})
+        r = client.put("/api/regions/NewRegion/landmarks/way/1",
+                       json={"kind": "ndsm", "provider": "auto"})
+        assert r.status_code == 200
+        r = client.put("/api/regions/NewRegion", json=dict(_NEW_REGION, name="London"))
+        assert r.status_code == 200
+        assert client.get("/api/regions/London/settings").json()["settings"] == {"dem": {"dim": 321}}
+        assert client.get("/api/regions/NewRegion/settings").json()["settings"] == {}
+        assert "way/1" in client.get("/api/regions/London/landmarks").json()["overrides"]
+
+    def test_rename_to_existing_name_returns_409(self, client):
+        client.post("/api/regions", json=_NEW_REGION)
+        r = client.put("/api/regions/NewRegion", json=dict(_NEW_REGION, name="TestRegion"))
+        assert r.status_code == 409
+        names = [reg["name"] for reg in client.get("/api/regions").json()["regions"]]
+        assert "NewRegion" in names
+
+    def test_rename_unknown_region_returns_404(self, client):
+        r = client.put("/api/regions/DoesNotExist", json=dict(_NEW_REGION, name="Other"))
+        assert r.status_code == 404
+
+    def test_blank_name_returns_400(self, client):
+        client.post("/api/regions", json=_NEW_REGION)
+        r = client.put("/api/regions/NewRegion", json=dict(_NEW_REGION, name="   "))
+        assert r.status_code == 400
+
+
 # ---------------------------------------------------------------------------
 # DELETE /api/regions/{name}
 # ---------------------------------------------------------------------------

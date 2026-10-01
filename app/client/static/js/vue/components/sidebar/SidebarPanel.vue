@@ -45,11 +45,11 @@
     <!-- Content ─────────────────────────────────────────────────────────────── -->
     <div class="sidebar-content">
 
-      <!-- Compact list (normal mode) -->
-      <SidebarListView :visible="mode === 'normal'" />
+      <!-- Compact list (normal mode); the region editor replaces it while open -->
+      <SidebarListView :visible="mode === 'normal' && !editViewOpen" />
 
-      <!-- Compact edit view -->
-      <SidebarEditView :visible="editViewOpen" @back="editViewOpen = false" />
+      <!-- Region editor (opened by a row's ✎ button, region-editor.js) -->
+      <SidebarEditView :visible="editViewOpen" @back="setRegionEditorOpen(false)" />
 
       <!-- Expanded table (expanded mode) -->
       <RegionListTable v-show="mode === 'expanded'" />
@@ -129,6 +129,15 @@ function setSidebarMode(newMode: 'expanded' | 'normal' | 'hidden') {
   window.setTimeout(relayout, 340);
 }
 
+/**
+ * Show or hide the region editor. The one way the modules open or close it
+ * (region-editor.js opens it; switching views or sidebar width closes it), so
+ * this component's state never disagrees with the DOM.
+ */
+function setRegionEditorOpen(open: boolean) {
+  editViewOpen.value = open;
+}
+
 function handleOpenSidebarClick() {
   setSidebarMode(lastVisibleMode);
 }
@@ -163,6 +172,7 @@ onMounted(() => {
   // component's store stale - the panel then snapped back to whatever the store
   // still said on its next render.
   (window as any).setSidebarMode = setSidebarMode;
+  (window as any).setRegionEditorOpen = setRegionEditorOpen;
 
   _openSidebarButton = document.getElementById('openSidebarBtn');
   _openSidebarButton?.addEventListener('click', handleOpenSidebarClick);
@@ -173,6 +183,9 @@ onBeforeUnmount(() => {
   _openSidebarButton = null;
   if ((window as any).setSidebarMode === setSidebarMode) {
     delete (window as any).setSidebarMode;
+  }
+  if ((window as any).setRegionEditorOpen === setRegionEditorOpen) {
+    delete (window as any).setRegionEditorOpen;
   }
 });
 </script>

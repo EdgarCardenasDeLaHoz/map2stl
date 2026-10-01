@@ -80,7 +80,7 @@ window.switchView = function switchView(view) {
         // Ensure sidebar shows the region list so the user can switch regions
         document.getElementById('sidebarListView')?.classList.remove('hidden');
         document.getElementById('sidebarTableView')?.classList.add('hidden');
-        document.getElementById('sidebarEditView')?.classList.add('hidden');
+        window.setRegionEditorOpen?.(false);
         // Fill bbox inputs immediately if a region is selected (they're normally filled
         // after DEM loads, leaving them blank if the user arrives via the tab button)
         const selectedRegion = window.appState.selectedRegion;
@@ -106,15 +106,15 @@ window.switchView = function switchView(view) {
 // ---------------------------------------------------------------------------
 
 /**
- * Apply a sidebar state to the DOM: show/hide the list and table views.
+ * Apply a sidebar state to the DOM: show/hide the list and table views, and
+ * close the region editor (SidebarPanel.vue::setRegionEditorOpen).
  * @param {'normal'|'expanded'|'hidden'} state
  */
 window._setSidebarViews = function _setSidebarViews(state) {
     const listView = document.getElementById('sidebarListView');
     const tableView = document.getElementById('sidebarTableView');
-    const editView = document.getElementById('sidebarEditView');
     const paramsSection = document.getElementById('regionParamsSection');
-    editView?.classList.add('hidden');
+    window.setRegionEditorOpen?.(false);
     if (state === 'expanded') {
         listView?.classList.add('hidden');
         tableView?.classList.remove('hidden');
@@ -306,6 +306,24 @@ window.loadSelectedRegion = function loadSelectedRegion() {
         return;
     }
     window.showToast?.(`Region "${selectedRegion.name}" loaded!`, 'success');
+};
+
+// ---------------------------------------------------------------------------
+// loadSelectedRegionDem
+// ---------------------------------------------------------------------------
+
+/**
+ * "Load DEM ›" on the Explore map: switch to the Edit tab and load the selected
+ * region's DEM. Clicks the existing controls (#tabEdit, then #loadDemBtn) so it
+ * is exactly what the user would do by hand, busy state of the button included.
+ */
+window.loadSelectedRegionDem = function loadSelectedRegionDem() {
+    if (!window.appState.selectedRegion) {
+        window.showToast?.('Select a region first', 'warning');
+        return;
+    }
+    document.getElementById('tabEdit')?.click();
+    document.getElementById('loadDemBtn')?.click();
 };
 
 // ---------------------------------------------------------------------------
