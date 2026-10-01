@@ -376,7 +376,7 @@ async def get_city_raster(req: CompositeCityRasterRequest):
 #: Bumped when the composite's arithmetic changes, so older cached grids are not
 #: served: 2 = projected base grid kept (not stretched to dim), rivers snapped to
 #: the valley floor, lakes levelled after the median (F-REGION step 4).
-COMPOSITE_CACHE_VERSION = 3   # 3: carve masked on open sea (2026-09-30)
+COMPOSITE_CACHE_VERSION = 4   # 4: sea mask from the unweighted base (3 erased weight-0 previews)
 
 
 def _composite_cache_key(north: float, south: float, east: float, west: float,
@@ -505,6 +505,7 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
                        else np.zeros_like(hit))
 
     carve = None
+    terrain = None
     skipped: list[str] = []
     if TEST_MODE:
         h = w = dim
@@ -560,6 +561,10 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
                     composite = _cv2.resize(
                         composite.astype(np.float32), (out_w, out_h),
                         interpolation=_cv2.INTER_AREA).astype(np.float64)
+                # The terrain itself, before its weight: the open-sea mask for the
+                # carve below must not depend on the weight (the 2D river preview
+                # sends weight 0, which made every cell "sea" and erased the rivers).
+                terrain = composite.copy()
                 # Its weight scales it, so the panel's DEM weight means the same
                 # thing here as in the browser; blend_layers never sees this layer.
                 composite = composite * float(spec.weight)
@@ -582,12 +587,12 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
 
     if carve is None:
         carve = np.zeros_like(composite)
-    elif not TEST_MODE:
+    elif not TEST_MODE and terrain is not None:
         # Rivers and lakes cut land only: carve that reaches the open sea (river
         # mouths, coast-hugging reaches) dents the sea floor along the shore and
         # leaves a ring around the coast once subtracted.
         from geo2stl.water_layers import ocean_mask
-        sea = ocean_mask(composite)
+        sea = ocean_mask(terrain)
         if sea.any():
             carve = np.where(sea, 0.0, carve)
     if skipped and warnings is not None:

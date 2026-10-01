@@ -276,11 +276,17 @@ def snap_reaches_to_valley(geoms, dem: np.ndarray, width_m: float, height_m: flo
     return out
 
 
-def rasterize_river_depth(gdf, north: float, south: float, east: float, west: float,
+def river_depth_by_order(gdf, north: float, south: float, east: float, west: float,
                           shape: tuple[int, int], *, width_scale: float = 1.0,
-                          depth_scale: float = 1.0, dem: np.ndarray | None = None,
-                          snap: bool = True) -> np.ndarray:
-    """Burn river centrelines into a relative-depth grid (negative m, 0 off-river).
+                          dem: np.ndarray | None = None,
+                          snap: bool = True) -> tuple[np.ndarray, np.ndarray]:
+    """(orders, stack): river depth (positive m) burnt separately per Strahler order.
+
+    ``stack[k]`` holds the deepest reach of order ``orders[k]`` at each cell (0
+    elsewhere; order 0 = reaches without one). The carve for a min order *m* is
+    ``-max(stack[orders >= m])`` - exact, since each cell keeps its deepest reach
+    of every order - so changing *m* is a lookup (:func:`river_carve`).
+    Everything else as :func:`rasterize_river_depth`.
 
     *gdf* is a GeoDataFrame of (Multi)LineStrings in lon/lat with optional
     ``ORD_STRA`` (Strahler order) and ``DIS_AV_CMS`` (mean discharge) columns.
@@ -292,12 +298,12 @@ def rasterize_river_depth(gdf, north: float, south: float, east: float, west: fl
     from numpy2stl.raster import burn_polygons
 
     h, w = int(shape[0]), int(shape[1])
-    out = np.zeros((h, w), dtype=np.float64)
+    empty = (np.zeros(0, dtype=np.int16), np.zeros((0, h, w), dtype=np.float32))
     if gdf is None or len(gdf) == 0:
-        return out
+        return empty
     gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty]
     if len(gdf) == 0:
-        return out
+        return empty
 
     affine, width_m, height_m = _metric_frame(north, south, east, west)
     px_m = min(width_m / w, height_m / h)
@@ -307,7 +313,7 @@ def rasterize_river_depth(gdf, north: float, south: float, east: float, west: fl
                  if "DIS_AV_CMS" in gdf.columns else None)
     widths, depths = river_size_m(order, discharge)
     widths = np.broadcast_to(widths, (len(gdf),)) * float(width_scale)
-    depths = np.broadcast_to(depths, (len(gdf),)) * float(depth_scale)
+    depths = np.broadcast_to(depths, (len(gdf),))   # depth_scale is applied in river_carve
     radius = np.maximum(widths / 2.0, _MIN_HALF_WIDTH_PX * px_m)
 
     import geopandas as gpd
@@ -340,14 +346,58 @@ def rasterize_river_depth(gdf, north: float, south: float, east: float, west: fl
     buffered = geoms.buffer(radius, resolution=2)
     keep = (~buffered.is_empty).to_numpy()
     if not keep.any():
-        return out
-    burnt = burn_polygons(list(buffered.to_numpy()[keep]), (h, w),
-                          bounds=(0.0, 0.0, width_m, height_m),
-                          values=[float(d) for d in depths[keep]], mode="max")
-    out -= burnt
-    logger.info("rasterize_river_depth: %d reaches, %d river px at %dx%d (%.0f m/px)",
-                int(keep.sum()), int(np.count_nonzero(out)), w, h, px_m)
+        return empty
+    shapes = buffered.to_numpy()[keep]
+    reach_order = (np.nan_to_num(order, nan=0.0).astype(np.int16)[keep] if order is not None
+                   else np.zeros(int(keep.sum()), dtype=np.int16))
+    vals = np.asarray(depths, dtype=np.float64)[keep]
+    orders = np.unique(reach_order)
+    stack = np.zeros((len(orders), h, w), dtype=np.float32)
+    for k, o in enumerate(orders):
+        sel = reach_order == o
+        stack[k] = burn_polygons(list(shapes[sel]), (h, w), bounds=(0.0, 0.0, width_m, height_m),
+                                 values=vals[sel].tolist(), mode="max")
+    logger.info("river_depth_by_order: %d reaches in %d orders at %dx%d (%.0f m/px)",
+                int(keep.sum()), len(orders), w, h, px_m)
+    return orders, stack
+
+
+def river_carve(orders: np.ndarray, stack: np.ndarray, min_order: int = 1,
+                depth_scale: float = 1.0) -> np.ndarray:
+    """Relative-depth grid (negative m) of the reaches of order >= *min_order*."""
+    sel = np.asarray(orders) >= int(min_order)
+    if not sel.any():
+        return np.zeros(stack.shape[1:], dtype=np.float64)
+    return -stack[sel].max(axis=0).astype(np.float64) * float(depth_scale)
+
+
+def river_order_grid(orders: np.ndarray, stack: np.ndarray, min_order: int = 1) -> np.ndarray:
+    """Highest Strahler order carved at each cell (0 none), for the colour-by-order view."""
+    out = np.zeros(stack.shape[1:], dtype=np.uint8)
+    for k, o in enumerate(orders):               # ascending, so higher orders win
+        if o >= min_order and o > 0:
+            out[stack[k] > 0] = int(o)
     return out
+
+
+def rasterize_river_depth(gdf, north: float, south: float, east: float, west: float,
+                          shape: tuple[int, int], *, width_scale: float = 1.0,
+                          depth_scale: float = 1.0, dem: np.ndarray | None = None,
+                          snap: bool = True) -> np.ndarray:
+    """Burn river centrelines into a relative-depth grid (negative m, 0 off-river).
+
+    *gdf* is a GeoDataFrame of (Multi)LineStrings in lon/lat with optional
+    ``ORD_STRA`` (Strahler order) and ``DIS_AV_CMS`` (mean discharge) columns.
+    Each reach is buffered by half its width in ground metres (never less than
+    half a pixel) and burnt at its depth; where reaches overlap the deeper wins.
+    With *dem* (the grid being carved, of *shape*) and *snap*, each reach is
+    first moved onto the valley floor (:func:`snap_reaches_to_valley`).
+    """
+    orders, stack = river_depth_by_order(gdf, north, south, east, west, shape,
+                                         width_scale=width_scale, dem=dem, snap=snap)
+    if not len(orders):
+        return np.zeros(tuple(shape), dtype=np.float64)
+    return river_carve(orders, stack, -1, depth_scale)
 
 
 def _natural_earth_order(gdf) -> np.ndarray | None:
@@ -397,19 +447,56 @@ def natural_earth_river_features(north: float, south: float, east: float, west: 
     return sub if len(sub) else None
 
 
+RIVER_CARVE_VERSION = 1   # bump when river_depth_by_order's output changes
+RIVER_BASE_ORDER = 3      # cache orders >= 3 so min orders 3..9 share one stack
+
+
+def river_carve_layers(name, fetch, north, south, east, west, dim, options, base=None):
+    """Cached (orders, stack) of :func:`river_depth_by_order` for a river source.
+
+    Keyed by source, box, grid, width scale, snapping and the DEM's bytes (the
+    reaches are snapped onto it), not by min order or depth scale - those are
+    lookups (:func:`river_carve`). The stack covers orders >= min(min order,
+    RIVER_BASE_ORDER); a lower min order builds (and caches) a fuller stack.
+    """
+    import hashlib
+
+    from geo2stl.cache import make_cache_key, read_array_cache, write_array_cache
+
+    shape = base.shape if base is not None else bbox_grid_shape(north, south, east, west, dim)
+    min_order = int(options.get("min_order", 1))
+    snap = bool(options.get("snap", True))
+    dem_hash = (hashlib.sha1(np.ascontiguousarray(base, dtype=np.float64).tobytes()).hexdigest()
+                if base is not None and snap else None)
+
+    def key(b):
+        return make_cache_key("river_carve", north, south, east, west, {
+            "src": name, "shape": list(shape), "ws": float(options.get("width_scale", 1.0)),
+            "snap": snap, "dem": dem_hash, "base": b, "v": RIVER_CARVE_VERSION,
+            "scale_m": options.get("scale_m")})
+
+    for b in range(max(min_order, 1), 0, -1):
+        hit = read_array_cache("river_carve", key(b))
+        if hit is not None:
+            return hit[0]["orders"], hit[0]["stack"]
+    b = max(1, min(min_order, RIVER_BASE_ORDER))
+    gdf = fetch(north, south, east, west, {**options, "min_order": b})
+    orders, stack = river_depth_by_order(gdf, north, south, east, west, shape,
+                                         width_scale=float(options.get("width_scale", 1.0)),
+                                         dem=base, snap=snap)
+    write_array_cache("river_carve", key(b), {"orders": orders, "stack": stack})
+    return orders, stack
+
+
 def _river_source(name: str, fetch):
     """A terrain-relative composite provider for one river dataset."""
 
     def provider(north, south, east, west, dim, options, base=None):
         options = options or {}
-        shape = (base.shape if base is not None
-                 else bbox_grid_shape(north, south, east, west, dim))
-        gdf = fetch(north, south, east, west, options)
-        return rasterize_river_depth(
-            gdf, north, south, east, west, shape,
-            width_scale=float(options.get("width_scale", 1.0)),
-            depth_scale=float(options.get("depth_scale", 1.0)),
-            dem=base, snap=bool(options.get("snap", True)))
+        orders, stack = river_carve_layers(name, fetch, north, south, east, west, dim,
+                                           options, base)
+        return river_carve(orders, stack, int(options.get("min_order", 1)),
+                           float(options.get("depth_scale", 1.0)))
 
     provider.__name__ = f"river_layer_source_{name}"
     provider.terrain_relative = True
@@ -434,6 +521,9 @@ def _fetch_natural_earth(north, south, east, west, options):
         gdf = gdf[gdf["ORD_STRA"] >= min_order]
     return gdf
 
+
+#: River sources by composite name -> fetch(north, south, east, west, options).
+RIVER_FETCH = {"hydrorivers": _fetch_hydrorivers, "natural_earth_rivers": _fetch_natural_earth}
 
 hydrorivers_layer = _river_source("hydrorivers", _fetch_hydrorivers)
 natural_earth_rivers_layer = _river_source("natural_earth_rivers", _fetch_natural_earth)

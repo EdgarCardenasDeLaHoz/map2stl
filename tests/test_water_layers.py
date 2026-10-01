@@ -431,3 +431,16 @@ def test_composite_carve_is_zero_on_open_sea(monkeypatch):
     sea_cols = comp[carve.shape[0] // 2] <= 0
     assert sea_cols.any() and (row[sea_cols] == 0).all()
     assert (row[~sea_cols] == -5).all()
+
+    # The 2D river preview sends the base with weight 0: the sea still comes from the
+    # terrain, not the weighted composite (which is all zeros and looked like sea).
+    register_layer_source("unit_sea_base", base)
+    register_layer_source("unit_sea_river", river)
+    try:
+        specs[0] = MergeLayerSpec(source="unit_sea_base", dim=60, blend_mode="base", weight=0.0)
+        _, carve0 = compute_composite_dem({"north": 1, "south": 0, "east": 1, "west": 0}, 60,
+                                          specs, projection="none", split_carve=True)
+    finally:
+        _LAYER_SOURCES.pop("unit_sea_base", None)
+        _LAYER_SOURCES.pop("unit_sea_river", None)
+    assert np.array_equal(carve0, carve)

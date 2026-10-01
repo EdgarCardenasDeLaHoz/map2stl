@@ -891,6 +891,77 @@ def _hydrorivers_payload(north, south, east, west, dim, depression_m, min_order,
     }
 
 
+def _river_print_payload(north, south, east, west, dim, dem_source, river_source,
+                         min_order, width_scale, depth_scale, projection,
+                         clip_valid_region, maintain_dimensions):
+    """Hydrology preview = what prints: the composite's river carve.
+
+    Same steps as ``composite.compute_composite_dem`` for a river layer: the base
+    DEM layer fetched and upsampled to *dim*, the reaches snapped onto it, carved
+    per discharge (``geo2stl.water_layers.river_carve_layers``, cached per order),
+    zeroed on the open sea, projected categorically. Adds the Strahler-order grid
+    and the open water for the colour-by-order view.
+    """
+    from geo2stl.dem import fetch_layer_data, upsample_dem
+    from geo2stl.hydrology import water_surface_mask
+    from geo2stl.water_layers import (
+        RIVER_FETCH,
+        ocean_mask,
+        river_carve,
+        river_carve_layers,
+        river_order_grid,
+    )
+
+    base_raw = upsample_dem(fetch_layer_data(dem_source, north, south, east, west, dim, {}), dim)
+    options = {"min_order": min_order, "width_scale": width_scale}
+    orders, stack = river_carve_layers(river_source, RIVER_FETCH[river_source], north, south,
+                                       east, west, dim, options, base_raw)
+    if len(orders):
+        carve = river_carve(orders, stack, min_order, depth_scale)
+        shown = river_order_grid(orders, stack, min_order).astype(np.float32)
+    else:
+        carve = np.zeros(base_raw.shape, dtype=np.float64)
+        shown = np.zeros(base_raw.shape, dtype=np.float32)
+    water = water_surface_mask(north, south, east, west, base_raw.shape)
+    terrain = base_raw
+    water_f = (water.astype(np.float32) if water is not None
+               else np.zeros(base_raw.shape, dtype=np.float32))
+    if projection != "none":
+        # The composite's order: project each grid (rivers categorically, the
+        # terrain continuously), then mask the sea on the projected terrain.
+        def proj(a, categorical):
+            return np.nan_to_num(_project_grid(
+                a, north, south, east, west, projection, clip_valid_region,
+                categorical=categorical, maintain_dimensions=maintain_dimensions), nan=0.0)
+        carve, shown, water_f = proj(carve, True), proj(shown, True), proj(water_f, True)
+        terrain = _project_grid(base_raw, north, south, east, west, projection,
+                                clip_valid_region, categorical=False,
+                                maintain_dimensions=maintain_dimensions)
+    sea = ocean_mask(np.nan_to_num(terrain, nan=1.0))
+    carve[sea] = 0.0
+    shown[sea] = 0.0
+    deepest = float(carve.min()) if carve.size and carve.min() < 0 else -1.0
+    if water is not None:
+        wet = water_f > 0.5
+        shown[(shown == 0) & wet] = WATER_CODE
+        carve = np.where(wet & (carve == 0), deepest, carve)
+    present = sorted({int(o) for o in np.unique(shown) if 0 < o < WATER_CODE})
+    h, w = carve.shape
+    return {
+        "river_grid_values_b64": _b64(carve.astype(np.float32)),
+        "river_grid_dimensions": [h, w],
+        "order_grid_b64": _b64(shown.astype(np.float32)),
+        "order_water_code": WATER_CODE,
+        "order_counts": {str(o): int(np.count_nonzero(shown == o)) for o in present},
+        "order_counts_unit": "px",
+        "feature_count": int(np.count_nonzero((shown > 0) & (shown < WATER_CODE))),
+        "water_surface": water is not None,
+        "model": "print",
+        "source": river_source,
+        "depression_m": deepest,
+    }
+
+
 @router.get("/api/terrain/hydrology", tags=["terrain"])
 async def get_terrain_hydrology(
     request: Request,
@@ -967,6 +1038,28 @@ async def get_terrain_hydrology(
 
     logger.debug(f"GET /api/terrain/hydrology bbox=({north},{south},{east},{west}) "
                  f"dim={dim} source={source} depression={depression_m}")
+
+    dem_source = params.get("dem_source")
+    if dem_source and not TEST_MODE:
+        # Preview = print: the composite's own river carve on the base DEM.
+        river_source = "hydrorivers" if source == "hydrorivers" else "natural_earth_rivers"
+        width_scale = _parse_float(params, "width_scale", 1.0)
+        depth_scale = _parse_float(params, "depth_scale", 1.0)
+        key = (f"print:{north}:{south}:{east}:{west}:{dim}:{dem_source}:{river_source}:"
+               f"{min_order}:{width_scale}:{depth_scale}:{projection}:{clip_valid_region}:"
+               f"{maintain_dimensions}")
+
+        async def _compute_print() -> dict:
+            return await run_sync(
+                _river_print_payload, north, south, east, west, dim, dem_source,
+                river_source, min_order, width_scale, depth_scale, projection,
+                clip_valid_region, maintain_dimensions)
+        try:
+            payload = await dedupe(_HYDRO_INFLIGHT, key, _compute_print)
+        except Exception as e:
+            logger.error(f"Error in get_terrain_hydrology: {e}", exc_info=True)
+            return error_response("Hydrology fetch failed")
+        return JSONResponse(content=payload)
 
     if source == "hydrorivers" and not TEST_MODE:
         inflight_key = f"orders:{north}:{south}:{east}:{west}:{dim}:{width_factor}:{min_order}"
