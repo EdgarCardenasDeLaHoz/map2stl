@@ -92,12 +92,11 @@ def _default_region_settings() -> dict:
             "simplify_terrain": True,
         },
         "hydrology": {
+            # Fetch > Hydrology: which rivers exist and how wide, for the preview and
+            # the print alike (depth: Composite "Depth x"); see decisions/frontend.md.
             "source": "hydrorivers",
-            "width_factor": 0.5,
-            "scale_m": 10,
-            "depression_m": -5.0,
             "min_order": 3,
-            "order_exponent": 1.5,
+            "width_scale": 1.0,
         },
     }
 

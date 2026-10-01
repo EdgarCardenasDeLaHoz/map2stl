@@ -105,7 +105,12 @@ Consequences to know:
 
 | Control group | Markup (Vue) | Behaviour (ES module) |
 |---|---|---|
-| DEM source, resolution, depth/water scale, subtract water | `app/client/static/js/vue/components/dem/FetchLayersSection.vue` | `app/client/static/js/modules/dem/dem-main.js::loadDEM` |
+| DEM source, resolution | `app/client/static/js/vue/components/dem/FetchLayersSection.vue` | `app/client/static/js/modules/dem/dem-main.js::loadDEM` |
+| DEM depth/water scale, subtract water (`#paramDepthScale`, `#paramWaterScale`, `#paramSubtractWater`) | Composite → 🏔 Base DEM in `CompositeDemSection.vue` | `event-listeners-map.js` copies them into `appState.demParams`; used by the next `loadDEM` |
+| River source / min order / width (`#hydroSource`, `#hydroMinOrder`, `#hydroWidthFactor`) | Fetch → 🌊 Hydrology in `FetchLayersSection.vue` | one source of truth: `app/client/static/js/modules/layers/hydrology-print.js::readHydrologyRiverControls`, read by the hydrology preview and `composite-dem.js::_syncRiverParamsFromHydrology` |
+| Hydrology colour mode + order legend, city colormap, composite colormap | View → 🌊 Hydrology / 🏙 City / ★ Composite Display in `LayerDisplaySections.vue` | repaint only (`water-hydrology-combined.js::rerenderWaterHydrology`, `city-render.js`, `composite-dem.js`) |
+| City 3D heights (`#cityBuildingScale`, `#cityRoadDepression`, `#cityWaterOffset`, `#cityRoofShapes`), trails relief (`#trailsReliefM`) | Composite → 🏙 City / OSM and 🥾 Trails in `CompositeDemSection.vue` | read by id at the next Load Cities / Load Trails (`city-render.js`, `trails-overlay.js`) |
+| Edit-tab map tile / terrain overlay mirrors (`#mapTileLayer`, `#showTerrainOverlay`, `#terrainOverlayOpacity`) | View → 🖼 Canvas in `VisualizationSection.vue` | synced with the Explore tab in `event-listeners-map.js` |
 | DEM source list | `#paramDemSource` in `FetchLayersSection.vue` | `window.populateDemSources` in `dem-main.js` fills it from `GET /api/terrain/sources`; unavailable sources are disabled, not hidden |
 | Layer rack (visibility, opacity, order) | `app/client/static/js/vue/components/dem/LayerViewSection.vue` | `app/client/static/js/modules/layers/stacked-layers.js::getLayerOrder`, `getActiveLayers`, `moveLayer` |
 | Composite panel | `app/client/static/js/vue/components/dem/CompositeDemSection.vue` | `app/client/static/js/modules/layers/composite-dem.js::_computeCompositeDem`, `window.applyCompositeToDem` |
@@ -115,6 +120,9 @@ Consequences to know:
 | Region rectangles + hover affordances on the map | — (Leaflet) | `app/client/static/js/modules/regions/regions.js::loadCoordinates` |
 | Sidebar mode (width, hide) | `app/client/static/js/vue/components/sidebar/SidebarPanel.vue` | publishes `window.setSidebarMode`; nothing else writes its DOM — [why](../decisions/frontend.md#2026-08-30--vue-owns-the-sidebar-mode-and-nothing-else-touches-its-dom) |
 
+- **Edit sub-tab rule** (`DemSettingsPanel.vue`): *Fetch* holds data settings that affect
+  everything, *View* visualization-only settings, *Composite* settings that only affect the
+  3D render. All three are `v-show`, so a control moved between them keeps working by id.
 - The old Merge panel and dem-merge.js are gone; the Composite panel is the only composite UI.
   Stack state belongs to the layer engine, the rack is a view —
   [why](../decisions/composite.md#2026-09-06--the-layer-engine-owns-stack-state-and-the-rack-is-a-view).
@@ -216,7 +224,7 @@ Module-local (not on appState):
 | `demLayout` | | `{x,y,w,h}` | Letterbox rect of the DEM in the stack (set by `updateStackedLayers`) |
 | `satImgSourceCanvas`, `_satImgRawCanvas`, `_satImgBbox` | S | canvas / BBox | Satellite imagery source |
 | `cityRasterSourceCanvas` | S | canvas | City height raster (`city-render.js`) |
-| `hydrologySourceCanvas` | | canvas | River depression grid (`hydrology-overlay.js`) |
+| `hydrologySourceCanvas` | | canvas | River carve grid (`hydrology-overlay.js`; not in the layer rack, filled only by the bulk load / projection refetch) |
 | `waterHydrologyCanvas` | | canvas | Combined water + hydrology layer (`water-hydrology-combined.js`) |
 | `trailsSourceCanvas`, `lastTrailsData` | | canvas / object | Trails render + retained payload (`trails-overlay.js`) |
 | `meshImport` | | object | `{uploadId, libraryRelPath, filename, heightmap, registered}` (`mesh-layer.js`) |

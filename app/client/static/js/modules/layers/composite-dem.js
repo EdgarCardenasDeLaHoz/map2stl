@@ -34,6 +34,7 @@ import {
     buildCompositeLayerSpec as _buildSpec, anyFeatureChannelEnabled, waterTerrainLayers,
     compositeInputKey, compositeApplyCheck,
 } from './composite-spec.js';
+import { readHydrologyRiverControls } from './hydrology-print.js';
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
@@ -69,6 +70,8 @@ const DEFAULTS = {
     // server (geo2stl/water_layers.py). Off by default - HydroRIVERS downloads a
     // regional dataset on first use; the Region workflow preset turns them on.
     riversEnabled: false,
+    // Source, min order and width come from Fetch > Hydrology (one source of
+    // truth, see _syncRiverParamsFromHydrology); only Depth x is set here.
     riverSource: 'hydrorivers',   // or 'natural_earth_rivers'
     riverMinOrder: 3,             // Strahler order cut-off
     riverDepthScale: 1.0,         // x hydraulic-geometry depth
@@ -134,7 +137,22 @@ function _demToken(values) {
  * the zero baseline's #paramDim square), bbox, and every panel parameter.
  * @returns {{key:string, hasDem:boolean}}
  */
+/**
+ * Copy the river dataset, min order and width from Fetch > Hydrology
+ * (#hydroSource, #hydroMinOrder, #hydroWidthFactor) into params, so the
+ * composite carve and the hydrology preview never disagree. Called wherever
+ * params are read for a request: _currentInputs, _hydroContribution and
+ * buildCompositeLayerSpec.
+ */
+function _syncRiverParamsFromHydrology() {
+    const r = readHydrologyRiverControls();
+    params.riverSource = r.riverSource;
+    params.riverMinOrder = r.minOrder;
+    params.riverWidthScale = r.widthScale;
+}
+
 function _currentInputs() {
+    _syncRiverParamsFromHydrology();
     const dem = window.appState?.lastDemData;
     const hasDem = !!dem?.values?.length;
     let W, H;
@@ -501,6 +519,7 @@ let _computeGen = 0;
  */
 let _hydroCache = null;   // { key, values }
 async function _hydroContribution(demW, demH) {
+    _syncRiverParamsFromHydrology();
     const bbox = window.appState?.currentDemBbox;
     if (!bbox) return null;
     const snapshot = window.appState?.lastDemRequest?.dem;
@@ -821,6 +840,7 @@ function _renderAllHistograms(channels) {
  * @returns {{layers: Array<Object>, unsupported: string[]}}
  */
 window.buildCompositeLayerSpec = function buildCompositeLayerSpec(opts = {}) {
+    _syncRiverParamsFromHydrology();
     const snapshot = window.appState?.lastDemRequest?.dem;
     const dim = parseInt(snapshot?.dim
         ?? document.getElementById('paramDim')?.value, 10) || 600;
@@ -952,6 +972,7 @@ function _updatePreviewThumb() {
 function _updateContribStatus() {
     const el = document.getElementById('compositeContribStatus');
     if (!el) return;
+    _syncRiverParamsFromHydrology();
 
     const parts = [];
     if (params.demEnabled) parts.push(`DEM (${params.demWeight.toFixed(1)}×)`);
@@ -999,9 +1020,7 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
         compositeVegHeight: 'vegHeight',
         compositeSatWeight: 'satWeight',
         compositeTrailsWeight: 'trailsWeight',
-        compositeRiverMinOrder: 'riverMinOrder',
         compositeRiverDepthScale: 'riverDepthScale',
-        compositeRiverWidthScale: 'riverWidthScale',
         compositeLakeDepth: 'lakeDepth',
         compositeLakeMinAreaHa: 'lakeMinAreaHa',
     };
@@ -1047,13 +1066,11 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
         });
     }
 
-    // River dataset select (HydroRIVERS / Natural Earth).
-    const riverSource = document.getElementById('compositeRiverSource');
-    if (riverSource) {
-        riverSource.value = params.riverSource;
-        riverSource.addEventListener('change', () => {
-            params.riverSource = riverSource.value;
-            _scheduleRecompute();
+    // River dataset, min order and width live in Fetch > Hydrology; a change
+    // there re-carves the composite (params are re-read at spec-build time).
+    for (const id of ['hydroSource', 'hydroMinOrder', 'hydroWidthFactor']) {
+        document.getElementById(id)?.addEventListener('change', () => {
+            if (params.riversEnabled) _scheduleRecompute();
         });
     }
 

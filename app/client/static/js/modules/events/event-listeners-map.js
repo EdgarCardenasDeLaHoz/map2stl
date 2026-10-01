@@ -404,7 +404,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
             qlResWater: { src: 'waterResolution', suffix: ' m/px' },
             qlResSat: { src: 'satImgResolution', suffix: ' px' },
             qlResEsa: { src: 'esaResolution', suffix: ' m/px' },
-            qlResHydro: { src: 'hydroDim', suffix: ' px' },
         };
         for (const [labelId, cfg] of Object.entries(map)) {
             const label = document.getElementById(labelId);
@@ -414,7 +413,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     }
     // Update on init and whenever a resolution control changes
     _updateQuickLoadLabels();
-    for (const id of ['paramDim', 'waterResolution', 'satImgResolution', 'esaResolution', 'hydroDim']) {
+    for (const id of ['paramDim', 'waterResolution', 'satImgResolution', 'esaResolution']) {
         document.getElementById(id)?.addEventListener('change', _updateQuickLoadLabels);
     }
 

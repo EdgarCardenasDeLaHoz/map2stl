@@ -1,7 +1,7 @@
 /**
  * modules/hydrology-overlay.js — Hydrology fetch, render, and clear.
  *
- * Loaded as a plain <script> before app.js.
+ * Imported by main.js.
  *
  * Public API (all on window):
  *   loadHydrology()    — fetch river depression grid and render
@@ -15,6 +15,11 @@
  *   window.showToast(msg, type)        — from app.js
  *   window.events / window.EV         — from events/events.js
  */
+
+import {
+    readHydrologyRiverControls, loadedDemGrid, hydrologyPrintQuery, readRiverDepthScale,
+    NEED_DEM_MESSAGE,
+} from './hydrology-print.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope state
@@ -85,8 +90,13 @@ function renderHydrology(data) {
 
 /**
  * Fetch river hydrology from /api/terrain/hydrology and render.
- * Reads control values from DOM: #hydroSource, #hydroDim, #hydroDepressionM,
- * #hydroMinOrder, #hydroOrderExponent.
+ *
+ * Older single-layer path: its canvas (#layerHydroCanvas) is not in the layer
+ * rack any more (the UI shows WaterHydrology), but the bulk load
+ * (app-setup.js) and the projection-change refetch (event-listeners-map.js)
+ * still call it, so it requests the same print-model carve as
+ * water-hydrology-combined.js (hydrology-print.js builds the query) and
+ * does nothing until a DEM is loaded.
  */
 window.loadHydrology = async function loadHydrology() {
     const boundingBox = window.getBoundingBox?.();
@@ -97,27 +107,20 @@ window.loadHydrology = async function loadHydrology() {
         window.showToast?.('Select a region before loading hydrology.', 'warning');
         return;
     }
-    const { north, south, east, west } = coords;
-
-    const source = document.getElementById('hydroSource')?.value ?? 'hydrorivers';
-    const dim = parseInt(
-        document.getElementById('hydroDim')?.value
-        ?? document.getElementById('paramDim')?.value
-        ?? '600'
-    );
-    const depressionM = parseFloat(document.getElementById('hydroDepressionM')?.value ?? '-5.0');
-    const minOrder = parseInt(document.getElementById('hydroMinOrder')?.value ?? '3');
-    const orderExp = parseFloat(document.getElementById('hydroOrderExponent')?.value ?? '1.5');
-    const widthFactor = parseFloat(document.getElementById('hydroWidthFactor')?.value ?? '0.5');
+    const grid = loadedDemGrid(window.appState);
+    if (!grid) {
+        const el = document.getElementById('hydroStatus');
+        if (el) el.textContent = NEED_DEM_MESSAGE;
+        return;
+    }
+    const river = readHydrologyRiverControls();
+    const source = river.hydroSource;
+    const depthScale = readRiverDepthScale();
     const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
-    const maintainDims = maintainDimensions ? 'true' : 'false';
-    const clipNans = clipValidRegion ? 'true' : 'false';
 
     // Build a stable param key for in-flight dedupe.
     const inflightKey = JSON.stringify({
-        n: north, s: south, e: east, w: west, dim, source,
-        dep: depressionM, mo: minOrder, oe: orderExp, wf: widthFactor,
-        proj: projection, md: maintainDims, cn: clipNans,
+        coords, grid, river, depthScale, projection, maintainDimensions, clipValidRegion,
     });
     if (_hydroInflightPromise && _hydroInflightKey === inflightKey) {
         return _hydroInflightPromise;
@@ -126,18 +129,9 @@ window.loadHydrology = async function loadHydrology() {
     _hydroAbortController = new AbortController();
     const signal = _hydroAbortController.signal;
 
-    const paramObj = { north, south, east, west, dim, depression_m: depressionM, source };
-    if (source === 'hydrorivers') {
-        paramObj.min_order = minOrder;
-        paramObj.order_exponent = orderExp;
-        paramObj.width_factor = widthFactor;
-    }
-    if (projection !== 'none') {
-        paramObj.projection = projection;
-        paramObj.maintain_dimensions = maintainDims;
-        paramObj.clip_valid_region = clipNans;
-    }
-    const params = new URLSearchParams(paramObj);
+    const params = hydrologyPrintQuery({
+        coords, grid, river, depthScale, projection, maintainDimensions, clipValidRegion,
+    });
 
     const statusEl = document.getElementById('hydroStatus');
     const loadBtn = document.getElementById('loadHydrologyBtn');

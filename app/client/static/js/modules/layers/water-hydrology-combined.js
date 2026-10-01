@@ -4,6 +4,11 @@
  * Loads and composites water (ESA water + land cover) and hydrology (rivers) 
  * into a single combined layer for rendering in the stacked view.
  *
+ * Preview = print: the hydrology half is requested with the loaded DEM's
+ * `dem_source` and grid, so the server returns exactly the river carve the
+ * composite / export applies (hydrology-print.js builds the query). Without a
+ * loaded DEM nothing is requested.
+ *
  * Public API (all on window):
  *   loadWaterHydrology()    — fetch water + hydrology in parallel and render combined
  *   clearWaterHydrology()   — clear canvas + state
@@ -21,6 +26,11 @@
  *   window.updateStackedLayers()    — from stacked-layers.js
  *   (renderer logic mirrored from water-mask.js and hydrology-overlay.js)
  */
+
+import {
+  readHydrologyRiverControls, loadedDemGrid, hydrologyPrintQuery, readRiverDepthScale,
+  NEED_DEM_MESSAGE,
+} from './hydrology-print.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope state
@@ -57,9 +67,11 @@ function _renderOrderLegend(hydroData) {
     return;
   }
   el.hidden = false;
+  // The print model counts carved pixels per order; the older path counted reaches.
+  const unit = hydroData.order_counts_unit === 'px' ? 'px' : 'reaches';
   el.innerHTML = Object.keys(counts).map(Number).sort((a, b) => a - b).map((o) => {
     const [r, g, b] = HYDRO_ORDER_COLORS[Math.min(o, HYDRO_ORDER_COLORS.length) - 1];
-    return `<span class="hydro-order-chip" title="${counts[o].toLocaleString()} reaches">`
+    return `<span class="hydro-order-chip" title="${counts[o].toLocaleString()} ${unit}">`
       + `<span class="hydro-order-swatch" style="background:rgb(${r},${g},${b})"></span>${o}</span>`;
   }).join('');
 }
@@ -139,7 +151,8 @@ function renderWaterHydrologyCombined(waterData, hydroData) {
     const hydroDims = hydroData.river_grid_dimensions || [h, w];
     const hydroH = hydroDims[0] || h;
     const hydroW = hydroDims[1] || w;
-    const minD = hydroData.depression_m || -5.0; // keep sign; values are typically <= 0
+    // Deepest carve (print model) or the old max depression; keep the sign.
+    const minD = hydroData.depression_m || -5.0;
     const byOrder = _hydroColorMode() === 'order';
     const orders = byOrder ? window.decodeHydrologyOrders?.(hydroData) : null;
     const waterCode = hydroData.order_water_code ?? 100;
@@ -196,7 +209,8 @@ function renderWaterHydrologyCombined(waterData, hydroData) {
  * Load water mask + hydrology in parallel and render combined.
  * Reads settings from DOM controls:
  *   - Water: #waterResolution, #waterDataset
- *   - Hydrology: #hydroSource, #hydroDim, #hydroDepressionM, #hydroMinOrder, etc.
+ *   - Hydrology: #hydroSource, #hydroMinOrder, #hydroWidthFactor (Fetch) and
+ *     #compositeRiverDepthScale (Composite Depth ×); grid = the loaded DEM's.
  */
 window.loadWaterHydrology = async function loadWaterHydrology() {
   const boundingBox = window.getBoundingBox?.();
@@ -209,21 +223,25 @@ window.loadWaterHydrology = async function loadWaterHydrology() {
   }
   const { north, south, east, west } = coords;
 
-  // Build stable key for in-flight dedupe
+  // The preview is the print carve on the loaded DEM, so it needs that DEM.
+  const grid = loadedDemGrid(window.appState);
+  if (!grid) {
+    const statusEl = document.getElementById('waterHydrologyStatus');
+    if (statusEl) statusEl.textContent = NEED_DEM_MESSAGE;
+    window.showToast?.(NEED_DEM_MESSAGE, 'warning');
+    return;
+  }
+
   const waterDim = parseInt(document.getElementById('waterResolution')?.value || '600');
-  const hydroDim = parseInt(document.getElementById('hydroDim')?.value || '600');
   const waterDataset = document.getElementById('waterDataset')?.value || 'esa';
-  const hydroSource = document.getElementById('hydroSource')?.value || 'hydrorivers';
+  const river = readHydrologyRiverControls();
+  const depthScale = readRiverDepthScale();
+  const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
 
-    // Get projection and clip_valid_region settings from DOM
-    const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
-    const maintainDims = maintainDimensions ? 'true' : 'false';
-    const clipNans = clipValidRegion ? 'true' : 'false';
-
+  // Build stable key for in-flight dedupe
   const inflightKey = JSON.stringify({
-    n: north, s: south, e: east, w: west,
-    waterDim, hydroDim, waterDataset, hydroSource
-      , projection, maintainDims, clipNans
+    n: north, s: south, e: east, w: west, waterDim, waterDataset, grid, river, depthScale,
+    projection, maintainDimensions, clipValidRegion,
   });
 
   if (_combinedInflightPromise && _combinedInflightKey === inflightKey) {
@@ -235,10 +253,14 @@ window.loadWaterHydrology = async function loadWaterHydrology() {
   _combinedAbortController = new AbortController();
   const signal = _combinedAbortController.signal;
 
+  const hydroParams = hydrologyPrintQuery({
+    coords, grid, river, depthScale, projection, maintainDimensions, clipValidRegion,
+  });
+
   _combinedInflightKey = inflightKey;
   _combinedInflightPromise = _performCombinedLoad(
-    north, south, east, west, waterDim, hydroDim, waterDataset, hydroSource, signal
-      , projection, maintainDims, clipNans
+    north, south, east, west, waterDim, waterDataset, hydroParams, river.hydroSource, signal,
+    projection, maintainDimensions ? 'true' : 'false', clipValidRegion ? 'true' : 'false',
   );
 
   try {
@@ -252,7 +274,7 @@ window.loadWaterHydrology = async function loadWaterHydrology() {
 /**
  * Internal function to perform the actual load and render.
  */
-async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim, waterDataset, hydroSource, signal, projection = 'none', maintainDims = 'false', clipNans = 'false') {
+async function _performCombinedLoad(north, south, east, west, waterDim, waterDataset, hydroParams, hydroSource, signal, projection = 'none', maintainDims = 'false', clipNans = 'false') {
 
   const statusEl = document.getElementById('waterHydrologyStatus');
   const loadBtn = document.getElementById('loadWaterHydrologyBtn');
@@ -299,21 +321,6 @@ async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim
             return res;
           })
         );
-
-    const hydroParams = new URLSearchParams({
-      north, south, east, west, dim: hydroDim, source: hydroSource,
-      depression_m: parseFloat(document.getElementById('hydroDepressionM')?.value ?? '-5.0'),
-    });
-    if (hydroSource === 'hydrorivers') {
-      hydroParams.append('min_order', parseInt(document.getElementById('hydroMinOrder')?.value ?? '3'));
-      hydroParams.append('order_exponent', parseFloat(document.getElementById('hydroOrderExponent')?.value ?? '1.5'));
-      hydroParams.append('width_factor', parseFloat(document.getElementById('hydroWidthFactor')?.value ?? '0.5'));
-    }
-    if (projection && projection !== 'none') {
-      hydroParams.append('projection', projection);
-      hydroParams.append('maintain_dimensions', maintainDims);
-      hydroParams.append('clip_valid_region', clipNans);
-    }
 
     const hydroPromise = window.api.dem.hydrology(hydroParams, signal);
 

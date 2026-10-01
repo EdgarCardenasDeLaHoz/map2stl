@@ -311,7 +311,6 @@ async function selectCoordinate(index, opts = {}) {
         const _setEl = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
         const _setChk = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.checked = Boolean(v); };
         _setEl('paramDim', rp.dim || 600);
-        _setEl('hydroDim', rp.dim || 600);
         _setEl('paramDepthScale', rp.depth_scale ?? 0.5);
         _setEl('paramWaterScale', rp.water_scale ?? 0.05);
         _setChk('paramSubtractWater', rp.subtract_water !== false);
@@ -361,18 +360,12 @@ async function selectCoordinate(index, opts = {}) {
 
         // DEM dim: only raise if lower than the auto value and no saved settings loaded.
         const dimEl = document.getElementById('paramDim');
-        const hydroDimEl = document.getElementById('hydroDim');
         if (dimEl) {
             const currentDim = parseInt(dimEl.value) || 600;
             // Raise dim if it is lower than what the region size warrants.
             // Never lower the user's explicit choice.
             // Skip if saved settings were loaded — respect the persisted dim.
             if (!hasSaved && autoDim > currentDim) dimEl.value = String(autoDim);
-        }
-        if (hydroDimEl && dimEl) {
-            // Hydrology defaults should track DEM resolution on region change unless
-            // region-specific saved settings already provided an explicit hydrology dim.
-            if (!hasSaved) hydroDimEl.value = dimEl.value || String(autoDim);
         }
     }
 

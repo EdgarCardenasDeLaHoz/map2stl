@@ -3,6 +3,29 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-01 — Edit-tab panels: Fetch = data, View = display, Composite = 3D render
+- **Decision:** each Edit-tab control lives in the sub-tab that matches what it changes.
+  - **Fetch:** data settings that affect everything: sources, resolutions, projection, which
+    rivers exist (HydroRIVERS min order, width).
+  - **View:** display only: colormaps, colour modes (hydrology by depth / Strahler order),
+    overlays, gridlines, layer visibility.
+  - **Composite:** only what the 3D render does with the data: cut depths (river Depth ×,
+    lakes, roads, water subtraction), heights and scales (buildings, trails relief), weights.
+  - One control per setting: no duplicates across panels (river source, min order and width
+    were in both Fetch and Composite).
+  - The hydrology preview is the print carve (`/api/terrain/hydrology` with `dem_source`), so
+    its settings are the export's.
+- **Why:** user, 2026-10-01: "Fetch should handle the details of settings that effect all
+  things, View should handle settings that are only related to visualization, Composite should
+  handle only settings that refer to rendering to 3D, like cut depth of rivers."
+  - An audit found depth and scale settings in Fetch, colormaps in Fetch and Composite, and
+    river settings duplicated in two panels.
+- **How to apply:** when adding a control, put it by this rule. Keep the element id when
+  moving one; modules read controls by id.
+- **Rejected:** keeping mesh import and plate registration out of Composite — user chose to
+  leave them in Composite for now.
+- **Supersedes / superseded by:** —
+
 ### 2026-09-26 — Standardise on Vue and retire v2
 - **Decision:** one frontend, Vue. The Svelte `v2/` probe is retired (deleted 2026-09-27); its
   good ideas are ported into v1 one at a time (F-DEMID DEM handle first, then F-FE1 steps).

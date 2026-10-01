@@ -78,10 +78,8 @@ window.setupEventListeners = function setupEventListeners() {
     // Combined Water + Hydrology section
     document.getElementById('loadWaterHydrologyBtn')?.addEventListener('click', () => window.loadWaterHydrology?.());
     document.getElementById('clearWaterHydrologyBtn')?.addEventListener('click', () => window.clearWaterHydrology?.());
-    document.getElementById('hydroSource')?.addEventListener('change', e => {
-        const controls = document.getElementById('hydroRiversControls');
-        if (controls) controls.classList.toggle('hidden', e.target.value !== 'hydrorivers');
-    });
+    // Min order and Width x apply to both river sources (Natural Earth gets a
+    // pseudo order), so #hydroSource no longer hides them.
 
     // qlLoadHydro (quick-load) wired in event-listeners-map.js via _asyncBtn
 

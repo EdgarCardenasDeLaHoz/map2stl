@@ -236,6 +236,7 @@ Overview and ranking: [reference/height-providers.md](reference/height-providers
 - Composite request (ordered layer list, failing non-base layers skipped with warnings, `RETRY_SKIPPED_S`, `COMPOSITE_CACHE_VERSION`): `map2stl/app/server/routers/composite.py::compute_composite_dem` (`merge_dem_layers`, `merge_hydrology`)
 - Rivers/lakes carve kept apart (`split_carve`) and added after the export's median filter: `map2stl/app/server/routers/composite.py::compute_composite_dem`, `map2stl/app/server/core/export_params.py::mesh_composite_layers`
 - City and water layer sources for geo2stl: `map2stl/app/server/routers/composite.py::register_city_layer_sources` (`register_water_sources`)
+- River controls (one source for preview and print: source, min order, Width ×): `map2stl/app/client/static/js/modules/layers/hydrology-print.js::readHydrologyRiverControls` (`hydrologyPrintQuery`); composite sync `map2stl/app/client/static/js/modules/layers/composite-dem.js::_syncRiverParamsFromHydrology`
 - Client spec and panel: `map2stl/app/client/static/js/modules/layers/composite-spec.js::buildCompositeLayerSpec` (`RIVER_SOURCES`); `map2stl/app/client/static/js/modules/layers/composite-dem.js::applyCompositeToDem`; `map2stl/app/client/static/js/vue/components/dem/CompositeDemSection.vue`
 - Design and status: [reference/composite-dem-design.md](reference/composite-dem-design.md), [decisions/composite.md](decisions/composite.md)
 

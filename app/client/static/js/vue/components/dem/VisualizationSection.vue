@@ -73,6 +73,20 @@
 
       <div id="demPixelSizeLabel" class="hidden" style="font-size:10px;color:#8af;margin-top:3px;text-align:right;"></div>
     </div>
+
+    <!-- Map tile / terrain overlay controls mirrored from the Explore tab
+         (event-listeners-map.js keeps both copies in sync by id). Display-only,
+         so they sit in View (moved from Fetch → Projection). The select and the
+         checkbox stay hidden; map-globe.js unhides the opacity group while the
+         terrain overlay is on. -->
+    <select id="mapTileLayer" style="display:none;" aria-label="Map tile layer for edit tab"></select>
+    <input  type="checkbox" id="showTerrainOverlay" style="display:none;" aria-label="Show terrain overlay (edit tab)">
+    <label  id="terrainOpacityLabel" class="hidden" for="terrainOverlayOpacity" style="font-size:11px;color:#bbb;margin-top:6px;">Terrain overlay opacity</label>
+    <div    id="terrainOpacityGroup" class="hidden" style="display:flex;align-items:center;gap:6px;">
+      <!-- 70 to match the opacity the overlay layer is actually created with. -->
+      <input type="range" id="terrainOverlayOpacity" min="0" max="100" value="70" aria-label="Terrain overlay opacity (edit tab)" style="flex:1;">
+      <span  id="terrainOpacityValue" style="font-size:11px;color:#ccc;"></span>
+    </div>
   </CollapsibleSection>
 
   <CollapsibleSection title="🏔 DEM" :start-open="false">

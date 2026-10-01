@@ -79,7 +79,9 @@ refresh them). A red outline marks the control each step talks about.
    *807 × 454 grid; the note under Resolution: 3960 × 1800 real SRTM samples, downsampled.*
 
 4. **Composite → Rivers & lakes** (Edit → ⊕ Composite, open *🌊 Rivers & lakes*): set
-   **Depth ×** from the table below, click **👁 Preview**, wait until the range under the
+   **Depth ×** from the table below (the river *Source*, *Min ord* and *Width ×* are set
+   once, in Edit → 📥 Fetch → 🌊 Hydrology; *🌊 Load Hydrology* there previews exactly this
+   carve on the loaded DEM), click **👁 Preview**, wait until the range under the
    buttons shows the terrain (e.g. `517.4m — 2811.4m`, not `0.0m — 0.0m`), then **✓ Apply
    to DEM**. Apply only uses a composite computed for the loaded DEM and the current
    settings: clicked while a recompute is running it waits for it (or starts one), and it
@@ -145,7 +147,7 @@ separate colour (§6).
 | DEM | SRTMGL1 ≤ 100 km, SRTMGL3 beyond | at 1000 px a 100 km box is ~100 m/px; 30 m is already downsampled 3× |
 | Vertical | auto (→ fit, 30 mm) | true scale would be 11–24 mm of relief at 1:120–240 k |
 | Smoothing | 3×3 median | rivers and lakes are carved after it, so it cannot erase them |
-| Rivers | HydroRIVERS, min order 3, width × 1 | order ≥ 3 is ≥ ~3 m³/s; lower orders are noise at 50–120 m/px |
+| Rivers | HydroRIVERS, min order 3, width × 1 (Fetch → Hydrology) | order ≥ 3 is ≥ ~3 m³/s; lower orders are noise at 50–120 m/px |
 | Lakes | 2 m below shore, ≥ 1 ha | below one pixel (1.5–3.5 ha here) a lake is a pit, harmless |
 | Base | 3–5 mm | 10 mm default is heavy at 400 mm |
 

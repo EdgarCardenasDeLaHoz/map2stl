@@ -43,15 +43,7 @@
       </label>
     </div>
 
-    <!-- Hidden map tile controls synced from Explore tab -->
-    <select id="mapTileLayer" style="display:none;" aria-label="Map tile layer for edit tab"></select>
-    <input  type="checkbox" id="showTerrainOverlay" style="display:none;" aria-label="Show terrain overlay (edit tab)">
-    <label  id="terrainOpacityLabel" class="hidden"></label>
-    <div    id="terrainOpacityGroup" class="hidden">
-      <!-- 70 to match the opacity the overlay layer is actually created with. -->
-      <input type="range" id="terrainOverlayOpacity" min="0" max="100" value="70" aria-label="Terrain overlay opacity (edit tab)">
-      <span  id="terrainOpacityValue"></span>
-    </div>
+    <!-- Map tile / terrain overlay mirrors: View → Canvas (VisualizationSection.vue). -->
 
   </CollapsibleSection>
 </template>

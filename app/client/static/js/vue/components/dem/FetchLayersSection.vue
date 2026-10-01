@@ -35,15 +35,7 @@
           <DemSamplingInfo />
         </div>
 
-        <div class="fetch-inline-row">
-          <label for="paramDepthScale" title="Vertical exaggeration of ocean/depth areas.">Depth</label>
-          <input type="number" id="paramDepthScale" value="0.5" min="0" max="10" step="0.1" class="ctrl-input fetch-num-sm">
-          <label for="paramWaterScale" title="How strongly to depress water areas (0–1).">Water</label>
-          <input type="number" id="paramWaterScale" value="0.05" min="0" max="1" step="0.01" class="ctrl-input fetch-num-sm">
-          <label class="check-label" title="Depress water-masked pixels.">
-            <input type="checkbox" id="paramSubtractWater" checked aria-label="Subtract water from DEM"> Subtract
-          </label>
-        </div>
+        <!-- Depth / Water / Subtract only shape the 3D terrain: Composite → Base DEM. -->
 
         <div class="fetch-help-text">Load with the 🏔 Load DEM button at the top of this panel.</div>
 
@@ -84,31 +76,18 @@
             <option value="hydrorivers" selected>HydroRIVERS (~500m)</option>
           </select>
         </div>
+        <!-- One river source of truth: the Composite carve reads these three
+             (composite-dem.js::_syncRiverParamsFromHydrology). The preview is
+             carved on the loaded DEM's grid with Composite → Depth ×, so it
+             has no resolution or depth of its own. Natural Earth rivers get a
+             pseudo order from scalerank, so Min ord applies to both sources. -->
         <div class="fetch-inline-row">
-          <label for="hydroDim" title="Grid resolution in pixels per side.">Res</label>
-          <input type="number" id="hydroDim" class="ctrl-input fetch-num-sm" value="600" min="50" max="2000" step="50">
-          <label for="hydroDepressionM" title="Maximum river depression depth (m).">Dep&nbsp;(m)</label>
-          <input type="number" id="hydroDepressionM" class="ctrl-input fetch-num-sm" value="-5.0" min="-100" max="0" step="0.5">
+          <label for="hydroMinOrder" title="Min Strahler order (1=all, 9=Amazon only).">Min&nbsp;ord</label>
+          <input type="number" id="hydroMinOrder" class="ctrl-input fetch-num-sm" value="3" min="1" max="9" step="1">
+          <label for="hydroWidthFactor" title="× river width from discharge (min 1 px)">Width&nbsp;×</label>
+          <input type="number" id="hydroWidthFactor" class="ctrl-input fetch-num-sm" value="1.0" min="0.5" max="10" step="0.5">
         </div>
-        <div id="hydroRiversControls">
-          <div class="fetch-inline-row">
-            <label for="hydroMinOrder" title="Min Strahler order (1=all, 9=Amazon only).">Min&nbsp;ord</label>
-            <input type="number" id="hydroMinOrder" class="ctrl-input fetch-num-sm" value="3" min="1" max="9" step="1">
-            <label for="hydroOrderExponent" title="Depth exponent for smaller rivers.">Exp</label>
-            <input type="number" id="hydroOrderExponent" class="ctrl-input fetch-num-sm" value="1.5" min="0.5" max="3.0" step="0.1">
-            <label for="hydroWidthFactor" title="Multiplier on rendered river width (1.0=default, 2.0=double).">Width</label>
-            <input type="number" id="hydroWidthFactor" class="ctrl-input fetch-num-sm" value="0.5" min="0.1" max="20" step="0.1">
-          </div>
-        </div>
-        
-        <div class="param-group">
-          <label for="hydroColorMode" title="How rivers are drawn in the hydrology layer. Changing it redraws without reloading.">Colour</label>
-          <select id="hydroColorMode" class="ctrl-select">
-            <option value="depth" selected>Depth (blue)</option>
-            <option value="order">Strahler order</option>
-          </select>
-        </div>
-        <div id="hydroOrderLegend" class="hydro-order-legend" hidden></div>
+        <!-- Colour mode + order legend are display-only: View → Hydrology Display. -->
 
         <!-- Unified Hydrology Load Button -->
         <div class="fetch-action-row">
@@ -190,22 +169,8 @@
           </select>
         </div>
 
-        <div class="param-group">
-          <label for="cityColormap" title="Colour scheme for the city heights raster. 'Same as DEM' follows the main DEM colormap.">Colormap</label>
-          <select id="cityColormap" class="ctrl-select" aria-label="City layer colormap">
-            <option value="inherit" selected>Same as DEM</option>
-            <option value="rainbow">Rainbow</option>
-            <option value="terrain">Terrain</option>
-            <option value="viridis">Viridis</option>
-            <option value="jet">Jet</option>
-            <option value="hot">Hot</option>
-            <option value="gray">Gray</option>
-          </select>
-        </div>
-
-        <label class="check-label" style="font-size:11px;margin:2px 0;" title="Burn slanted roof surfaces (gabled / hipped / pyramidal / skillion / dome) using OSM roof:shape tags. Visible at ≥400 px raster resolution. Slower than flat tops.">
-          <input type="checkbox" id="cityRoofShapes" aria-label="Enable slanted city roof shapes"> 🏠 Slanted roofs
-        </label>
+        <!-- Colormap: View → City Polygon Display. Slanted roofs and the 3D
+             heights (scale / road / water offsets): Composite → City / OSM. -->
 
         <div class="param-grid">
           <label for="citySimplifyTolerance" title="Polygon simplification tolerance in metres.">Tolerance (m)</label>
@@ -231,18 +196,6 @@
         <div class="fetch-action-row" style="margin-top:2px;">
            <button id="openCityTablePanelBtn" class="btn btn-secondary" @click="toggleCityTablePanel">📋 Toggle Buildings Table Panel</button>
         </div>
-
-        <details class="nested-details">
-          <summary class="nested-summary">3D Heights</summary>
-          <div class="param-grid">
-            <label for="cityBuildingScale" title="Building height scale: mm per real metre.">Bldg scale (mm/m)</label>
-            <input type="number" id="cityBuildingScale" value="0.5" min="0" max="10" step="0.1" class="ctrl-input-sm">
-            <label for="cityRoadDepression" title="Road depression relative to terrain (m).">Road dep (m)</label>
-            <input type="number" id="cityRoadDepression" value="0.0" min="-10" max="2" step="0.5" class="ctrl-input-sm">
-            <label for="cityWaterOffset" title="Waterway surface height relative to ground (m).">Water off (m)</label>
-            <input type="number" id="cityWaterOffset" value="-2.0" min="-20" max="0" step="0.5" class="ctrl-input-sm">
-          </div>
-        </details>
 
         <div id="enhanceHeightsSection" style="border-top:1px solid #333;padding-top:6px;margin-top:6px;display:none;">
           <div class="fetch-subsection-header">Height Enhancement</div>
@@ -275,12 +228,11 @@
         <div class="fetch-inline-row">
           <label for="trailsDim" title="Grid resolution in pixels per side.">Res</label>
           <input type="number" id="trailsDim" class="ctrl-input fetch-num-sm" value="600" min="50" max="2000" step="50">
-          <label for="trailsReliefM" title="Signed trail relief in metres; negative engraves the trail into the terrain.">Relief&nbsp;(m)</label>
-          <input type="number" id="trailsReliefM" class="ctrl-input fetch-num-sm" value="-2.0" min="-100" max="100" step="0.5">
           <label for="trailsWidthM" title="Rendered trail width in metres (floored at two pixels).">Width&nbsp;(m)</label>
           <input type="number" id="trailsWidthM" class="ctrl-input fetch-num-sm" value="8" min="1" max="500" step="1">
         </div>
-        <!-- Both categories are always fetched in one request, so which of them
+        <!-- Relief (m) shapes only the 3D carve: Composite → Trails.
+             Both categories are always fetched in one request, so which of them
              is drawn is a display choice and lives under Trails Display in the
              View tab, not here. -->
 

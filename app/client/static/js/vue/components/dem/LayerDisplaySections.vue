@@ -5,7 +5,34 @@
        payload that is already loaded, which is why these live in View rather
        than in Fetch. -->
 
-  <CollapsibleSection title="🏙 City Polygon Display" :start-open="false">
+  <!-- Moved from Fetch → Hydrology: colouring the loaded hydrology layer is a
+       repaint (water-hydrology-combined.js listens for #hydroColorMode changes). -->
+  <CollapsibleSection title="🌊 Hydrology Display" :start-open="false">
+    <div class="param-group">
+      <label for="hydroColorMode" title="How rivers are drawn in the hydrology layer. Changing it redraws without reloading.">Colour:</label>
+      <select id="hydroColorMode">
+        <option value="depth" selected>Depth (blue)</option>
+        <option value="order">Strahler order</option>
+      </select>
+    </div>
+    <div id="hydroOrderLegend" class="hydro-order-legend" hidden></div>
+  </CollapsibleSection>
+
+  <CollapsibleSection title="🏙 City Display" :start-open="false">
+    <!-- Moved from Fetch → Cities. city-raster.js reads it when it paints the
+         heights raster. -->
+    <div class="param-group">
+      <label for="cityColormap" title="Colour scheme for the city heights raster. 'Same as DEM' follows the main DEM colormap.">Colormap:</label>
+      <select id="cityColormap" aria-label="City layer colormap">
+        <option value="inherit" selected>Same as DEM</option>
+        <option value="rainbow">Rainbow</option>
+        <option value="terrain">Terrain</option>
+        <option value="viridis">Viridis</option>
+        <option value="jet">Jet</option>
+        <option value="hot">Hot</option>
+        <option value="gray">Gray</option>
+      </select>
+    </div>
     <div style="display:flex;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label class="check-label"><input type="checkbox" id="cityLayerBuildings" checked aria-label="Show city buildings polygons"> 🏠 Buildings</label>
       <label class="check-label"><input type="checkbox" id="cityLayerRoads" checked aria-label="Show city roads polylines"> 🛣 Roads</label>
@@ -42,6 +69,23 @@
         <span :style="{background: entry.css, width: '10px', height: '10px', borderRadius: '2px', display: 'inline-block'}"></span>{{ entry.name }}
       </span>
       <span v-if="difficultyUntagged" style="font-size:10px;color:#666;">ungraded pistes keep the ski color</span>
+    </div>
+  </CollapsibleSection>
+
+  <!-- Moved from the Composite tab header: recolouring the composite preview
+       changes nothing in the 3D model. composite-dem.js listens by id. -->
+  <CollapsibleSection title="★ Composite Display" :start-open="false">
+    <div class="param-group">
+      <label for="compositeColormap" title="Colour scheme for the composite output. 'Same as DEM' follows the main DEM colormap.">Colormap:</label>
+      <select id="compositeColormap" aria-label="Composite layer colormap">
+        <option value="inherit" selected>Same as DEM</option>
+        <option value="rainbow">Rainbow</option>
+        <option value="terrain">Terrain</option>
+        <option value="viridis">Viridis</option>
+        <option value="jet">Jet</option>
+        <option value="hot">Hot</option>
+        <option value="gray">Gray</option>
+      </select>
     </div>
   </CollapsibleSection>
 </template>

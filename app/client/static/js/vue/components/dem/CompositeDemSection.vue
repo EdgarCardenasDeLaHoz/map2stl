@@ -9,16 +9,7 @@
       <label class="check-label composite-enable-label">
         <input type="checkbox" id="compositeEnabled" checked aria-label="Enable composite DEM layer"> Enable composite layer
       </label>
-      <select id="compositeColormap" class="ctrl-select composite-colormap-select" aria-label="Composite layer colormap"
-              title="Colour scheme for the composite output. 'Same as DEM' follows the main DEM colormap.">
-        <option value="inherit" selected>Same as DEM</option>
-        <option value="rainbow">Rainbow</option>
-        <option value="terrain">Terrain</option>
-        <option value="viridis">Viridis</option>
-        <option value="jet">Jet</option>
-        <option value="hot">Hot</option>
-        <option value="gray">Gray</option>
-      </select>
+      <!-- The composite colormap is display-only: View → Composite Display. -->
     </div>
 
     <details class="composite-layer-group" open>
@@ -33,6 +24,19 @@
           <span id="compositeDemWeightLabel" class="composite-slider-value">1.0</span>
         </div>
         <canvas id="compositeHistDem" class="composite-histogram" width="240" height="20" title="Base DEM contribution distribution"></canvas>
+        <!-- Server-side DEM request params that only shape the 3D terrain (moved
+             from Fetch → DEM Source). event-listeners-map.js copies them into
+             appState.demParams by id; they take effect on the next Load DEM. -->
+        <div class="composite-subhead">DEM request (next Load DEM)</div>
+        <div class="composite-num-row">
+          <label for="paramDepthScale" title="Vertical exaggeration of ocean/depth areas.">Depth</label>
+          <input type="number" id="paramDepthScale" value="0.5" min="0" max="10" step="0.1" class="ctrl-input composite-num">
+          <label for="paramWaterScale" title="How strongly to depress water areas (0–1).">Water</label>
+          <input type="number" id="paramWaterScale" value="0.05" min="0" max="1" step="0.01" class="ctrl-input composite-num">
+          <label class="check-label" title="Depress water-masked pixels.">
+            <input type="checkbox" id="paramSubtractWater" checked aria-label="Subtract water from DEM"> Subtract
+          </label>
+        </div>
       </div>
     </details>
 
@@ -63,29 +67,17 @@
         <div class="composite-footer-hint" style="margin:0 0 4px;">
           Carved relative to the ground: channel width and depth follow discharge
           (or stream order), never narrower than one pixel. Lakes (OSM) are cut flat
-          below their lowest shore.
+          below their lowest shore. River source, min order and width are set in
+          Fetch → Hydrology (the hydrology preview shows this same carve).
         </div>
         <label class="composite-toggle-row">
           <input type="checkbox" id="compositeRiversEnabled" aria-label="Enable rivers contribution"> Rivers
         </label>
         <div class="composite-sliders">
-          <span class="composite-slider-label">Source</span>
-          <select id="compositeRiverSource" class="ctrl-select" aria-label="River dataset"
-                  title="HydroRIVERS: every river with discharge (regional download on first use). Natural Earth: major rivers only.">
-            <option value="hydrorivers" selected>HydroRIVERS</option>
-            <option value="natural_earth_rivers">Natural Earth</option>
-          </select>
-          <span></span>
-          <span class="composite-slider-label">Min order</span>
-          <input type="range" id="compositeRiverMinOrder" min="1" max="8" value="3" step="1" aria-label="Minimum Strahler order"
-                 title="Leave out streams below this Strahler order">
-          <span id="compositeRiverMinOrderLabel" class="composite-slider-value">3</span>
           <span class="composite-slider-label">Depth ×</span>
-          <input type="range" id="compositeRiverDepthScale" min="0" max="20" value="1" step="0.5" aria-label="River depth scale">
+          <input type="range" id="compositeRiverDepthScale" min="0" max="20" value="1" step="0.5" aria-label="River depth scale"
+                 title="× channel depth from discharge (also scales the hydrology preview)">
           <span id="compositeRiverDepthScaleLabel" class="composite-slider-value">1.0</span>
-          <span class="composite-slider-label">Width ×</span>
-          <input type="range" id="compositeRiverWidthScale" min="0.5" max="10" value="1" step="0.5" aria-label="River width scale">
-          <span id="compositeRiverWidthScaleLabel" class="composite-slider-value">1.0</span>
         </div>
         <label class="composite-toggle-row">
           <input type="checkbox" id="compositeLakesEnabled" aria-label="Enable lakes contribution"> Lakes
@@ -155,6 +147,22 @@
           <span id="compositeWallScaleLabel" class="composite-slider-value">1.0</span>
         </div>
         <canvas id="compositeHistWalls" class="composite-histogram" width="240" height="20" title="Walls contribution distribution"></canvas>
+
+        <!-- City heights-raster params (moved from Fetch → Cities → 3D Heights).
+             Read by city-render.js / presets.js by id; they take effect on the
+             next Load Cities. -->
+        <div class="composite-subhead">City heights raster (next Load Cities)</div>
+        <div class="composite-num-grid">
+          <label for="cityBuildingScale" title="Building height scale: mm per real metre.">Bldg scale (mm/m)</label>
+          <input type="number" id="cityBuildingScale" value="0.5" min="0" max="10" step="0.1" class="ctrl-input composite-num">
+          <label for="cityRoadDepression" title="Road depression relative to terrain (m).">Road dep (m)</label>
+          <input type="number" id="cityRoadDepression" value="0.0" min="-10" max="2" step="0.5" class="ctrl-input composite-num">
+          <label for="cityWaterOffset" title="Waterway surface height relative to ground (m).">Water off (m)</label>
+          <input type="number" id="cityWaterOffset" value="-2.0" min="-20" max="0" step="0.5" class="ctrl-input composite-num">
+        </div>
+        <label class="composite-toggle-row" title="Burn slanted roof surfaces (gabled / hipped / pyramidal / skillion / dome) using OSM roof:shape tags. Visible at ≥400 px raster resolution. Slower than flat tops.">
+          <input type="checkbox" id="cityRoofShapes" aria-label="Enable slanted city roof shapes"> 🏠 Slanted roofs
+        </label>
       </div>
     </details>
 
@@ -201,7 +209,11 @@
              and depth come from the Trails fetch section. Weight starts at 0:
              having trails loaded to look at must not silently carve them into
              an export. -->
-        <div class="composite-footer-hint" style="margin:0 0 4px;">Load the Trails layer first — depth comes from its Relief (m) setting</div>
+        <div class="composite-footer-hint" style="margin:0 0 4px;">Load the Trails layer first — depth comes from Relief (m) below, applied on the next Load Trails</div>
+        <div class="composite-num-row">
+          <label for="trailsReliefM" title="Signed trail relief in metres; negative engraves the trail into the terrain. Used by the next Load Trails.">Relief&nbsp;(m)</label>
+          <input type="number" id="trailsReliefM" class="ctrl-input composite-num" value="-2.0" min="-100" max="100" step="0.5">
+        </div>
 
         <label class="composite-toggle-row">
           <input type="checkbox" id="compositeTrailsEnabled" checked aria-label="Enable trails contribution"> Enable
@@ -247,13 +259,45 @@ import CollapsibleSection from '../shared/CollapsibleSection.vue';
     gap: 6px;
     margin: 4px 0;
 }
-.composite-colormap-select {
-    flex: 0 0 auto;
-    width: auto;
-    font-size: 11px;
-    padding: 2px 4px;
-    height: 22px;
+.composite-subhead {
+    font-size: 9px;
+    color: #6aa;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    margin: 6px 0 2px;
+    padding-bottom: 2px;
+    border-bottom: 1px solid #2a2a2a;
 }
+.composite-num-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    font-size: 11px;
+}
+.composite-num-grid {
+    display: grid;
+    grid-template-columns: 1fr 64px;
+    align-items: center;
+    gap: 3px 6px;
+    font-size: 11px;
+}
+.composite-num-row label,
+.composite-num-grid label {
+    font-size: 11px;
+    color: #bbb;
+    margin: 0;
+    white-space: nowrap;
+}
+.composite-num {
+    width: 56px;
+    padding: 3px 6px;
+    font-size: 11px;
+    height: 22px;
+    box-sizing: border-box;
+}
+.composite-num-grid .composite-num { width: 100%; }
 
 /* Collapsible per-layer group — mirrors FetchLayersSection.vue's <details> pattern */
 .composite-layer-group {

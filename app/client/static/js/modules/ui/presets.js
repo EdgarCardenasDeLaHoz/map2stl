@@ -363,12 +363,13 @@ function collectAllSettings() {
             simplify_terrain: true,
         },
         hydrology: {
+            // River source of truth for the preview and the Composite carve.
+            // width_scale (x width from discharge) replaced width_factor,
+            // whose old values meant a different width model; the preview's
+            // own dim / depression / exponent are gone (it uses the DEM grid).
             source: _str('hydroSource', 'hydrorivers'),
-            dim: _int('hydroDim', _int('paramDim', 600)),
-            depression_m: _flt('hydroDepressionM', -5.0),
             min_order: _int('hydroMinOrder', 3),
-            order_exponent: _flt('hydroOrderExponent', 1.5),
-            width_factor: _flt('hydroWidthFactor', 0.5),
+            width_scale: _flt('hydroWidthFactor', 1.0),
         },
         trails: {
             source: _str('trailsSource', 'all'),
@@ -526,12 +527,9 @@ function applyAllSettings(s) {
     // hydrology group
     const hydro = s.hydrology || {};
     if (hydro.source != null) set('hydroSource', hydro.source);
-    if (hydro.dim != null) set('hydroDim', hydro.dim);
-    else if (dem.dim != null) set('hydroDim', dem.dim);
-    if (hydro.depression_m != null) set('hydroDepressionM', hydro.depression_m);
     if (hydro.min_order != null) set('hydroMinOrder', hydro.min_order);
-    if (hydro.order_exponent != null) set('hydroOrderExponent', hydro.order_exponent);
-    if (hydro.width_factor != null) set('hydroWidthFactor', hydro.width_factor);
+    // Legacy dim / depression_m / order_exponent / width_factor are ignored.
+    if (hydro.width_scale != null) set('hydroWidthFactor', hydro.width_scale);
 
     // trails group
     const trails = s.trails || {};

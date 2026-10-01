@@ -29,6 +29,7 @@ Where each piece of browser code lives, and a one-line index of its functions.
 | `app/client/static/js/modules/export/puzzle-cuts.js` | `model-viewer.js` |
 | `app/client/static/js/modules/export/export-poll.js` | `export-handlers.js` |
 | `app/client/static/js/modules/layers/composite-spec.js` | `composite-dem.js`, `export-handlers.js` |
+| `app/client/static/js/modules/layers/hydrology-print.js` | `composite-dem.js`, `water-hydrology-combined.js`, `hydrology-overlay.js` |
 | `app/client/static/js/modules/layers/city-fetch.js` | `city-overlay.js`, `export-handlers.js`, Vue |
 | `app/client/static/js/modules/layers/building-heights.js` | `export-handlers.js`, Vue |
 | `app/client/static/js/modules/layers/landmark-overrides.js` | `export-handlers.js`, Vue |
@@ -85,8 +86,9 @@ flowchart LR
 | `mesh-layer.js` | `uploadMeshLayer`, `selectLibraryMeshFile`, `computeMeshHeightmap`, `autoRegisterMesh`, `suggestedMeshResolutionM`, `applyMeshRegistration`, `applyMeshToDem`, `clearMeshLayer` | STL/OBJ import (F-MESHIMPORT) → heightmap → registered `MeshImport` layer → optional DEM merge; `regions.js::selectCoordinate` clears it on region switch |
 | `mesh-registration.js` | `openMeshRegistrationModal`, `closeMeshRegistrationModal`, `computeMeshRegistration`, `undoLastMeshPointPair`, `clearMeshPointPairs` | Point-pair picker (DEM vs mesh) feeding the `/register` affine fit |
 | `water-mask.js` | `loadWaterMask`, `loadEsaLandCover`, `renderWaterMask`, `renderEsaLandCover`, `renderCombinedView` | Water mask + ESA land cover |
-| `hydrology-overlay.js` | `loadHydrology`, `clearHydrology`, `cancelHydroLoad`, `renderHydrology` | River depression grid fetch + render |
-| `water-hydrology-combined.js` | `loadWaterHydrology`, `clearWaterHydrology`, `renderWaterHydrologyCombined`, `rerenderWaterHydrology` | Water + hydrology as one layer; sets `appState.waterHydrologyCanvas` and `appState.lastWaterHydrology`. Samples each canvas pixel from the grid (no forward copy, which striped narrower grids). `#hydroColorMode`: depth (blue) or Strahler order (`HYDRO_ORDER_COLORS`, legend `#hydroOrderLegend`), redrawn without a request. Skips the separate water mask when the hydrology grid carries `water_surface` |
+| `hydrology-print.js` | `riverSourceFromHydro`, `readHydrologyRiverControls`, `loadedDemGrid`, `hydrologyPrintQuery`, `readRiverDepthScale`, `NEED_DEM_MESSAGE` | Pure: the one river-settings source (Fetch → Hydrology) and the print-model `/api/terrain/hydrology` query |
+| `hydrology-overlay.js` | `loadHydrology`, `clearHydrology`, `cancelHydroLoad`, `renderHydrology` | Older single-layer river grid (not in the rack; still called by the bulk load and the projection refetch); same print-model request |
+| `water-hydrology-combined.js` | `loadWaterHydrology`, `clearWaterHydrology`, `renderWaterHydrologyCombined`, `rerenderWaterHydrology` | Water + hydrology as one layer. Preview = print: the hydrology half asks for the composite's own river carve on the loaded DEM (`dem_source`, the DEM request's `dim`, Composite Depth ×); without a loaded DEM it shows "Load the DEM first" and requests nothing. Legend tooltips count px (`order_counts_unit: "px"`) or reaches; sets `appState.waterHydrologyCanvas` and `appState.lastWaterHydrology`. Samples each canvas pixel from the grid (no forward copy, which striped narrower grids). `#hydroColorMode`: depth (blue) or Strahler order (`HYDRO_ORDER_COLORS`, legend `#hydroOrderLegend`), redrawn without a request. Skips the separate water mask when the hydrology grid carries `water_surface` |
 | `trails-overlay.js` | `loadTrails`, `renderTrails`, `refreshTrailsCategories`, `clearTrails`, `cancelTrailsLoad` | Ski + hiking grids from `/api/terrain/trails`; retains `appState.lastTrailsData` so display controls repaint without refetching |
 | `city-overlay.js` | `loadCityData`, `cancelCityFetch`, `clearCityOverlay`, `selectCityBuilding`, `enhanceBuildingHeights`, `_drawCityCanvas` | OSM fetch (via `city-fetch.js`), terrain Z, feature pre-bake, building picking |
 | `city-render.js` | `renderCityOverlay`, `renderCityOnDEM`, `loadCityRaster`, `_clearCityRasterCache` | City overlay painting (off-thread in `app/client/static/js/workers/city-worker.js` when OffscreenCanvas is available) + `/api/cities/raster` layer |
@@ -283,9 +285,9 @@ One line per function. `window.*` unless marked (private) or (export).
 | `loadEsaLandCover()` | ESA land cover |
 | `renderWaterMask(data)` / `renderEsaLandCover(data)` | Render to canvas |
 | `renderCombinedView()` | DEM + water + land cover |
-| `loadHydrology()` | `/api/terrain/hydrology` → depression grid → `appState.hydrologySourceCanvas` |
+| `loadHydrology()` | `/api/terrain/hydrology` (print model) → carve grid → `appState.hydrologySourceCanvas` |
 | `clearHydrology()` / `cancelHydroLoad()` | Clear / abort |
-| `loadWaterHydrology()` | Water mask + hydrology in parallel → combined canvas |
+| `loadWaterHydrology()` | Water mask + print-model hydrology (`hydrologyPrintQuery`: `dem_source`, `dim`, `source`, `min_order`, `width_scale`, `depth_scale`, projection) in parallel → combined canvas |
 | `clearWaterHydrology()` | Clear combined canvas + `appState.waterHydrologyCanvas` |
 
 ### `trails-overlay.js`
@@ -335,7 +337,8 @@ One line per function. `window.*` unless marked (private) or (export).
 | `_trailsContribution(w, h)` (private) | Retained trails relief resampled to the DEM grid; deeper cut wins; weight defaults to 0 |
 | `applyCompositeToDem()` | Refuse stale / flat results (`compositeApplyCheck`), copy the terrain-only composite into `lastDemData.values`, publish `appState.compositeLayerSpec` |
 | `buildCompositeLayerSpec({includeFeatures})` | Wrapper over the pure builder; terrain-only unless `includeFeatures` |
-| `setupCompositeDemControls()` | Wire sliders, toggles, buttons, split view |
+| `setupCompositeDemControls()` | Wire sliders, toggles, buttons, split view; `change` on `#hydroSource` / `#hydroMinOrder` / `#hydroWidthFactor` re-carves when rivers are on |
+| `_syncRiverParamsFromHydrology()` (private) | Copy river source / min order / width from Fetch → Hydrology into `params`; called by `_currentInputs`, `_hydroContribution`, `buildCompositeLayerSpec`, `_updateContribStatus` |
 | `_drawHistogram(canvas, values)` / `_renderAllHistograms(channels)` (private) | Per-channel + combined histograms |
 | `FEATURE_SOURCES` (export) | `osm_buildings/roads/waterways/walls`; preview only, filtered out of `composite_layers` at export |
 | `buildCompositeLayerSpec(params, ctx, opts)` (export) | Panel params → ordered `MergeLayerSpec` list; `{layers, unsupported}` |
