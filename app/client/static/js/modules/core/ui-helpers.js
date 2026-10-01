@@ -361,6 +361,11 @@ window.decodeHydrologyValues = function decodeHydrologyValues(data) {
     return _decodeGrid(data.river_grid_values_b64, data.river_grid_values);
 };
 
+/** Strahler order per pixel of a HydroRIVERS response (0 none, order_water_code = open water). */
+window.decodeHydrologyOrders = function decodeHydrologyOrders(data) {
+    return data?.order_grid_b64 ? _decodeGrid(data.order_grid_b64, null) : null;
+};
+
 window.decodeSkiTrailValues = function decodeSkiTrailValues(data) {
     return _decodeGrid(data.ski_grid_values_b64, data.ski_grid_values);
 };

@@ -35,6 +35,48 @@ let _combinedInflightKey = null;
 // Composite Rendering
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Colour per Strahler order 1..10 (viridis steps: small streams dark, trunk rivers yellow).
+const HYDRO_ORDER_COLORS = [
+  [68, 1, 84], [72, 40, 120], [62, 73, 137], [49, 104, 142], [38, 130, 142],
+  [31, 158, 137], [53, 183, 121], [110, 206, 88], [181, 222, 43], [253, 231, 37],
+];
+
+/** 'depth' (blue, opacity by depth) or 'order' (colour per Strahler order). */
+function _hydroColorMode() {
+  return document.getElementById('hydroColorMode')?.value || 'depth';
+}
+
+/** Legend chips for the orders present (order mode only). */
+function _renderOrderLegend(hydroData) {
+  const el = document.getElementById('hydroOrderLegend');
+  if (!el) return;
+  const counts = hydroData?.order_counts;
+  if (_hydroColorMode() !== 'order' || !counts || !hydroData?.order_grid_b64) {
+    el.innerHTML = '';
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = Object.keys(counts).map(Number).sort((a, b) => a - b).map((o) => {
+    const [r, g, b] = HYDRO_ORDER_COLORS[Math.min(o, HYDRO_ORDER_COLORS.length) - 1];
+    return `<span class="hydro-order-chip" title="${counts[o].toLocaleString()} reaches">`
+      + `<span class="hydro-order-swatch" style="background:rgb(${r},${g},${b})"></span>${o}</span>`;
+  }).join('');
+}
+
+/** Redraw the loaded layer after a view-setting change (no new request). */
+window.rerenderWaterHydrology = function rerenderWaterHydrology() {
+  const last = window.appState?.lastWaterHydrology;
+  if (!last) return;
+  const canvas = renderWaterHydrologyCombined(last.waterData, last.hydroData);
+  if (canvas) window.appState.waterHydrologyCanvas = canvas;
+  _renderOrderLegend(last.hydroData);
+  window.emitStackUpdate?.();
+};
+document.addEventListener('change', (e) => {
+  if (e.target?.id === 'hydroColorMode') window.rerenderWaterHydrology();
+});
+
 function renderWaterHydrologyCombined(waterData, hydroData) {
   // Decode the water mask array
   const waterValues = waterData ? window.decodeWaterMask?.(waterData) : null;
@@ -64,8 +106,10 @@ function renderWaterHydrologyCombined(waterData, hydroData) {
 
   const ctx = combinedCanvas.getContext('2d');
 
-  // 1. Render water mask first (base layer)
-  if (waterValues) {
+  // 1. Render water mask first (base layer) - unless the hydrology grid already
+  //    carries the open water (water_surface): drawing both on grids of slightly
+  //    different size left a bright double-drawn outline along every coast.
+  if (waterValues && !hydroData?.water_surface) {
     const waterImg = ctx.createImageData(w, h);
     for (let i = 0; i < waterValues.length; i++) {
       const val = waterValues[i];
@@ -87,43 +131,54 @@ function renderWaterHydrologyCombined(waterData, hydroData) {
     ctx.putImageData(waterImg, 0, 0);
   }
 
-  // 2. Render hydrology on top (rivers with blue tint)
+  // 2. Render hydrology on top. Every canvas pixel samples its source pixel
+  // (inverse mapping): copying source pixels forward left ~1 in 67 canvas columns
+  // unwritten whenever the projected grid was narrower than the canvas (591 vs
+  // 600 px for the Amazon) - the vertical stripes over the sea.
   if (hydroValues && hydroData) {
     const hydroDims = hydroData.river_grid_dimensions || [h, w];
     const hydroH = hydroDims[0] || h;
     const hydroW = hydroDims[1] || w;
     const minD = hydroData.depression_m || -5.0; // keep sign; values are typically <= 0
+    const byOrder = _hydroColorMode() === 'order';
+    const orders = byOrder ? window.decodeHydrologyOrders?.(hydroData) : null;
+    const waterCode = hydroData.order_water_code ?? 100;
 
     // Read current pixels (water already rendered) so hydrology can blend on top.
     const baseImg = ctx.getImageData(0, 0, w, h);
     const px = baseImg.data;
 
-    for (let hy = 0; hy < hydroH; hy++) {
-      const ty = Math.min(h - 1, Math.max(0, Math.floor((hy / hydroH) * h)));
-      for (let hx = 0; hx < hydroW; hx++) {
+    for (let ty = 0; ty < h; ty++) {
+      const hy = Math.min(hydroH - 1, Math.floor(((ty + 0.5) / h) * hydroH));
+      for (let tx = 0; tx < w; tx++) {
+        const hx = Math.min(hydroW - 1, Math.floor(((tx + 0.5) / w) * hydroW));
         const hi = hy * hydroW + hx;
         const v = hydroValues[hi] ?? 0;
         if (v === 0) continue;
-
-        const tx = Math.min(w - 1, Math.max(0, Math.floor((hx / hydroW) * w)));
         const base = (ty * w + tx) * 4;
 
-        // Match original hydrology overlay behavior: deeper river => more opacity.
-        const t = Math.min(1, Math.max(0, v / minD));
-        const alpha = Math.round(60 + t * 160); // 60–220
-        const riverAlpha = alpha / 255;
-
-        // Existing pixel from water layer.
-        const r = px[base];
-        const g = px[base + 1];
-        const b = px[base + 2];
-        const a = px[base + 3];
-
-        // Blend river blue (30, 100, 200) over current pixel.
-        px[base] = Math.round(r * (1 - riverAlpha) + 30 * riverAlpha);
-        px[base + 1] = Math.round(g * (1 - riverAlpha) + 100 * riverAlpha);
-        px[base + 2] = Math.round(b * (1 - riverAlpha) + 200 * riverAlpha);
-        px[base + 3] = Math.max(a, alpha);
+        let cr = 30, cg = 100, cb = 200, alpha;
+        if (orders) {
+          const o = orders[hi] | 0;
+          if (o === waterCode) {
+            [cr, cg, cb] = [0, 100, 255];
+            alpha = 150;
+          } else if (o > 0) {
+            [cr, cg, cb] = HYDRO_ORDER_COLORS[Math.min(o, HYDRO_ORDER_COLORS.length) - 1];
+            alpha = 235;
+          } else {
+            continue;
+          }
+        } else {
+          // Deeper river => more opacity.
+          const t = Math.min(1, Math.max(0, v / minD));
+          alpha = Math.round(60 + t * 160); // 60–220
+        }
+        const a01 = alpha / 255;
+        px[base] = Math.round(px[base] * (1 - a01) + cr * a01);
+        px[base + 1] = Math.round(px[base + 1] * (1 - a01) + cg * a01);
+        px[base + 2] = Math.round(px[base + 2] * (1 - a01) + cb * a01);
+        px[base + 3] = Math.max(px[base + 3], alpha);
       }
     }
 
@@ -277,10 +332,12 @@ async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim
 
 
     // Render combined canvas
+    window.appState.lastWaterHydrology = { waterData, hydroData };
     const combinedCanvas = renderWaterHydrologyCombined(waterData, hydroData);
     if (combinedCanvas) {
       window.appState.waterHydrologyCanvas = combinedCanvas;
     }
+    _renderOrderLegend(hydroData);
 
     window.setLayerStatus?.('waterHydrology', 'loaded');
     window.emitStackUpdate?.();
@@ -315,7 +372,9 @@ async function _performCombinedLoad(north, south, east, west, waterDim, hydroDim
 window.clearWaterHydrology = function clearWaterHydrology() {
   if (window.appState) {
     window.appState.waterHydrologyCanvas = null;
+    window.appState.lastWaterHydrology = null;
   }
+  _renderOrderLegend(null);
 
   const statusEl = document.getElementById('waterHydrologyStatus');
   if (statusEl) statusEl.textContent = '';

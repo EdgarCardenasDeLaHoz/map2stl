@@ -101,3 +101,70 @@ class TestTerrainSources:
     def test_response_is_list_or_dict(self, client):
         r = client.get("/api/terrain/sources")
         assert isinstance(r.json(), (list, dict))
+
+
+def test_hydrology_cache_miss_returns_the_grid(monkeypatch):
+    """The first (uncached) hydrology request returns the grid, not `null`."""
+    import numpy as np
+    from fastapi.testclient import TestClient
+
+    import app.server.routers.terrain as terrain
+    from app.server.server import app
+
+    monkeypatch.setattr(terrain, "TEST_MODE", False)
+    grid = np.zeros((60, 60), np.float32)
+    grid[30, :] = -5.0
+    monkeypatch.setattr(terrain, "_fetch_and_rasterize_hydrology",
+                        lambda *a, **k: {"river_grid": grid, "feature_count": 1,
+                                         "source": "hydrorivers"})
+    r = TestClient(app).get("/api/terrain/hydrology", params={
+        "north": 1.0, "south": 0.0, "east": 1.0, "west": 0.0, "dim": 60,
+        "source": "natural_earth", "projection": "none"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body is not None and body["river_grid_dimensions"] == [60, 60]
+    assert body["feature_count"] == 1
+
+
+def test_hydrorivers_min_order_is_a_lookup_on_the_cached_order_grid(monkeypatch):
+    """HydroRIVERS: min order / depth changes reuse one order grid; the response
+    carries the order grid (rivers by order, open water coded) for the colour view."""
+    import base64
+
+    import numpy as np
+    from fastapi.testclient import TestClient
+
+    import app.server.routers.terrain as terrain
+    from app.server.server import app
+
+    monkeypatch.setattr(terrain, "TEST_MODE", False)
+    orders = np.zeros((60, 60), np.uint8)
+    orders[10, :] = 3
+    orders[20, :] = 6
+    water = np.zeros((60, 60), bool)
+    water[:, 50:] = True
+    calls = []
+
+    def layers(*a):
+        calls.append(a)
+        return orders, water, {3: 7, 6: 2}
+
+    monkeypatch.setattr(terrain, "_hydrorivers_layers", layers)
+    client = TestClient(app)
+
+    def get(min_order):
+        r = client.get("/api/terrain/hydrology", params={
+            "north": 1.0, "south": 0.0, "east": 1.0, "west": 0.0, "dim": 60,
+            "source": "hydrorivers", "min_order": min_order, "depression_m": -5,
+            "projection": "none"})
+        b = r.json()
+        dec = lambda k: np.frombuffer(base64.b64decode(b[k]), "<f4").reshape(60, 60)  # noqa: E731
+        return b, dec("river_grid_values_b64"), dec("order_grid_b64")
+
+    b3, depth3, ord3 = get(3)
+    assert b3["feature_count"] == 9 and (depth3[10, :50] < 0).all()
+    sea = ord3[:, 50:]
+    assert (ord3[10, :50] == 3).all() and (sea[~np.isin(sea, (3, 6))] == terrain.WATER_CODE).all()
+    b5, depth5, ord5 = get(5)
+    assert b5["feature_count"] == 2 and (depth5[10, :50] == 0).all() and (ord5[10, :50] == 0).all()
+    assert (depth5[20, :50] < 0).all() and (depth5[:, 50:] <= -5).all()

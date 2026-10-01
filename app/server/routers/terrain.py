@@ -808,6 +808,89 @@ async def get_terrain_sources():
 # Hydrology endpoints
 # ---------------------------------------------------------------------------
 
+HYDRO_ORDERS_VERSION = 1   # bump when the order grid or water mask changes
+HYDRO_ORDER_BASE = 3       # fetch at least orders >= 3 so 3..9 reuse one raster
+WATER_CODE = 100           # open water in the order grid sent to the client
+
+
+def _hydrorivers_layers(north, south, east, west, dim, width_factor, min_order):
+    """(order grid uint8, water bool | None, reach counts per order) for HydroRIVERS.
+
+    Cached without min order, depth or exponent - those are lookups on the order
+    grid (geo2stl.hydrology.order_depth_grid) - so stepping the min order
+    reuses one raster. The cached base covers orders >= min(min_order,
+    HYDRO_ORDER_BASE); a lower min order needs (and caches) a finer base.
+    """
+    from geo2stl.hydrology import (
+        fetch_hydrorivers,
+        rasterize_hydrorivers_orders,
+        water_surface_mask,
+    )
+
+    def key(base):
+        return make_cache_key("hydro_orders", north, south, east, west,
+                              {"dim": dim, "wf": width_factor, "base": base,
+                               "v": HYDRO_ORDERS_VERSION})
+
+    for base in range(min_order, 0, -1):
+        hit = read_array_cache("hydro_orders", key(base))
+        if hit is not None:
+            arrs, meta = hit
+            water = arrs.get("water")
+            return (arrs["orders"], None if water is None or not water.any() else water.astype(bool),
+                    {int(k): v for k, v in meta.get("counts", {}).items()})
+    base = min(min_order, HYDRO_ORDER_BASE)
+    gdf = fetch_hydrorivers(north, south, east, west, min_order=base)
+    if gdf is None or len(gdf) == 0:
+        orders, counts = np.zeros((dim, dim), np.uint8), {}
+    else:
+        orders = rasterize_hydrorivers_orders(gdf, north, south, east, west, dim, width_factor)
+        vc = gdf["ORD_STRA"].clip(lower=1, upper=10).astype(int).value_counts()
+        counts = {int(k): int(v) for k, v in vc.items()}
+    water = water_surface_mask(north, south, east, west, orders.shape)
+    write_array_cache("hydro_orders", key(base),
+                      {"orders": orders,
+                       "water": (water if water is not None else np.zeros_like(orders, bool)).astype(np.uint8)},
+                      {"counts": {str(k): v for k, v in counts.items()}})
+    return orders, water, counts
+
+
+def _hydrorivers_payload(north, south, east, west, dim, depression_m, min_order,
+                         order_exponent, width_factor, projection, clip_valid_region,
+                         maintain_dimensions):
+    """The HydroRIVERS hydrology response: depression grid (rivers united with the
+    open water) and the Strahler-order grid for the colour-by-order view."""
+    from geo2stl.hydrology import order_depth_grid, union_water_surface
+
+    orders, water, counts = _hydrorivers_layers(north, south, east, west, dim,
+                                                width_factor, min_order)
+    depth = order_depth_grid(orders, depression_m, order_exponent, min_order)
+    shown = np.where(orders >= min_order, orders, 0).astype(np.float32)
+    if water is not None:
+        depth = union_water_surface(depth, water, depression_m)
+        shown[(shown == 0) & water] = WATER_CODE
+    features = sum(v for k, v in counts.items() if k >= min_order)
+    if projection != "none":
+        depth = np.nan_to_num(_project_grid(
+            depth, north, south, east, west, projection, clip_valid_region,
+            categorical=False, maintain_dimensions=maintain_dimensions), nan=0.0)
+        shown = np.nan_to_num(_project_grid(
+            shown, north, south, east, west, projection, clip_valid_region,
+            categorical=True, maintain_dimensions=maintain_dimensions), nan=0.0)
+    h, w = depth.shape
+    return {
+        "river_grid_values_b64": _b64(depth.astype(np.float32)),
+        "river_grid_dimensions": [h, w],
+        "order_grid_b64": _b64(shown.astype(np.float32)),
+        "order_water_code": WATER_CODE,
+        "order_counts": {str(k): v for k, v in sorted(counts.items()) if k >= min_order},
+        "feature_count": int(features),
+        "water_surface": water is not None,
+        "source": "hydrorivers",
+        "depression_m": depression_m,
+    }
+
+
 @router.get("/api/terrain/hydrology", tags=["terrain"])
 async def get_terrain_hydrology(
     request: Request,
@@ -884,6 +967,23 @@ async def get_terrain_hydrology(
 
     logger.debug(f"GET /api/terrain/hydrology bbox=({north},{south},{east},{west}) "
                  f"dim={dim} source={source} depression={depression_m}")
+
+    if source == "hydrorivers" and not TEST_MODE:
+        inflight_key = f"orders:{north}:{south}:{east}:{west}:{dim}:{width_factor}:{min_order}"
+
+        async def _compute_orders() -> dict:
+            return await run_sync(
+                _hydrorivers_payload, north, south, east, west, dim, depression_m,
+                min_order, order_exponent, width_factor, projection, clip_valid_region,
+                maintain_dimensions)
+        try:
+            payload = await dedupe(_HYDRO_INFLIGHT, inflight_key + f":{depression_m}:"
+                                   f"{order_exponent}:{projection}:{clip_valid_region}:"
+                                   f"{maintain_dimensions}", _compute_orders)
+        except Exception as e:
+            logger.error(f"Error in get_terrain_hydrology: {e}", exc_info=True)
+            return error_response("Hydrology fetch failed")
+        return JSONResponse(content=payload)
 
     # Cache key covers every parameter that affects the rasterized output.
     # Cache key does NOT include projection/clip_valid_region/maintain_dimensions —
@@ -989,6 +1089,7 @@ async def get_terrain_hydrology(
             "source": result.get("source", source),
             "depression_m": depression_m,
         }
+        return payload   # missing: every cache miss answered `null` (2026-09-30)
 
     if cache_key in _HYDRO_INFLIGHT:
         logger.info("Hydrology in-flight join: %s", cache_key[:8])

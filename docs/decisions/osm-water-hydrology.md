@@ -4,6 +4,18 @@ Fetching OSM through Overpass/osmnx, telling outages from empty answers, water a
 rasterisation, and rivers and lakes carved into the terrain. Related: [composite.md](composite.md),
 [trails.md](trails.md).
 
+### 2026-10-01 — HydroRIVERS is rasterised once as a Strahler-order grid; depths are a lookup
+- **Decision:** `geo2stl/hydrology.py::rasterize_hydrorivers_orders` burns the highest order per
+  pixel; `order_depth_grid` maps orders to depths for a min order, depth and exponent.
+  `/api/terrain/hydrology` caches the order grid and water mask without those three
+  (base min order `min(requested, 3)`). It returns the order grid for the colour-by-order view.
+- **Why:** user: "it takes some time to flip between min ord layers" and asked to colour each
+  river by its order. Depth rises with the order, so the per-pixel highest order is the deepest
+  carve: identical to the old per-order minimum (checked on the Amazon, max diff 0).
+  - Amazon: the first request is 16.7 s; each min-order change after it is 0.1 s.
+- **Rejected:** caching each min order separately — every first visit still re-rasterises.
+- **Supersedes / superseded by:** —
+
 ### 2026-09-30 — Hydrology is rivers united with the open water; carve stays off the sea
 - **Decision:**
   - `geo2stl/hydrology.py::fetch_and_rasterize_hydrology` (the `/api/terrain/hydrology` layer)

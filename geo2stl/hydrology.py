@@ -665,38 +665,25 @@ def fetch_hydrorivers(
     return combined
 
 
-def rasterize_hydrorivers(
+def rasterize_hydrorivers_orders(
     gdf,
     north: float, south: float, east: float, west: float,
     dim: int,
-    depression_base: float = -5.0,
-    order_exponent: float = 1.5,
     width_factor: float = 1.0,
 ) -> np.ndarray:
-    """Rasterize a HydroRIVERS GeoDataFrame to a (dim×dim) float32 depression grid.
-
-    Depression depth is scaled by Strahler order::
-
-        depth = depression_base * (order / 9) ** order_exponent
-
-    So order-9 Amazon = ``depression_base``, order-1 stream ≈ 0.
+    """Rasterize HydroRIVERS reaches to a (dim×dim) uint8 grid of the highest
+    Strahler order per pixel (0 = no river); depths come from :func:`order_depth_grid`.
 
     Args:
         gdf: GeoDataFrame with ``geometry`` and ``ORD_STRA`` columns
-        depression_base: depth (metres, negative) for the largest rivers
-        order_exponent: controls how steeply smaller rivers are cut
         width_factor: multiplier on per-line buffer width (default 1.0).
-            Higher values produce visibly thicker rivers in the rasterized output.
 
-    Returns:
-        float32 array shape (dim, dim), 0 where no river, negative where river.
-
-    Implementation notes:
-        - Vectorized simplify + buffer via GeoPandas (C-level shapely 2.0 ops),
-          replacing a per-feature Python loop that dominated cold load times.
-        - ``rasterize(..., all_touched=True)`` paints a pixel if any part of the
-          line crosses it, so single-pixel-wide rivers stay visible without
-          requiring extra width.
+    Notes:
+        - Vectorised simplify + buffer (shapely 2); reaches under ~1.5 px wide are
+          burnt as lines, which ``all_touched`` paints at least one pixel wide.
+        - Kept separate from the depth so a new min order / depth / exponent is a
+          lookup on a cached order grid (``/api/terrain/hydrology``), and the
+          grid also drives the "colour by order" view.
     """
     import time as _time
     t0 = _time.perf_counter()
@@ -705,10 +692,9 @@ def rasterize_hydrorivers(
     min_buf_deg = pixel_deg * 0.6 * \
         float(width_factor)  # ≥1 px wide × user factor
 
-    grid = np.zeros((dim, dim), dtype=np.float32)
     if gdf is None or len(gdf) == 0:
         logger.info("rasterize_hydrorivers: empty input")
-        return grid
+        return np.zeros((dim, dim), dtype=np.uint8)
 
     n = len(gdf)
     logger.info("rasterize_hydrorivers: %d features, dim=%d, pixel_deg=%.5f, width_factor=%.2f",
@@ -740,31 +726,60 @@ def rasterize_hydrorivers(
     logger.info("  vectorized simplify+buffer: %.2fs, %d shapes",
                 dt_prep, len(buffered))
 
-    # Rasterize lowest order first so higher-order rivers overwrite (deeper carve).
+    # Highest Strahler order per pixel: lowest order first, higher orders overwrite.
     t_rast = _time.perf_counter()
-    max_order = 9
-    geoms_arr = buffered
+    orders = np.zeros((dim, dim), dtype=np.uint8)
     for o in sorted(set(int(x) for x in order_arr)):
-        depth = depression_base * (o / max_order) ** order_exponent
         mask = order_arr == o
-        if not mask.any():
-            continue
         try:
-            layer = burn_polygons(list(geoms_arr[mask]), (dim, dim),
-                                  bounds=(west, south, east, north), values=float(depth),
+            layer = burn_polygons(list(buffered[mask]), (dim, dim),
+                                  bounds=(west, south, east, north), values=float(o),
                                   mode="set", all_touched=True, dtype=np.float32)
-            layer_mask = layer != 0.0
-            grid[layer_mask] = np.minimum(grid[layer_mask], layer[layer_mask])
+            orders[layer > 0] = o
         except Exception as e:
             logger.warning("HydroRIVERS rasterize order %d: %s", o, e)
     dt_rast = _time.perf_counter() - t_rast
-
-    n_river = int(np.sum(grid != 0))
     dt_total = _time.perf_counter() - t0
     logger.info("rasterize_hydrorivers done: %d river pixels at %dx%d, "
                 "total=%.2fs (prep=%.2fs, rasterize=%.2fs)",
-                n_river, dim, dim, dt_total, dt_prep, dt_rast)
-    return grid
+                int(np.count_nonzero(orders)), dim, dim, dt_total, dt_prep, dt_rast)
+    return orders
+
+
+def order_depth_grid(orders: np.ndarray, depression_base: float = -5.0,
+                     order_exponent: float = 1.5, min_order: int = 1) -> np.ndarray:
+    """Depression grid from a Strahler-order grid (0 = no river).
+
+    ``depth = depression_base * (order / 9) ** order_exponent`` for orders at or
+    above *min_order*: order 9 (Amazon) gets the full depth, order 1 almost none.
+    The depth rises with the order, so the per-pixel highest order is also the
+    deepest carve - the same grid the old per-order minimum produced. Changing
+    *min_order*, the depth or the exponent is a lookup, not a re-rasterisation.
+    """
+    o = np.asarray(orders)
+    lut = np.zeros(256, dtype=np.float32)
+    k = np.arange(1, 256)
+    lut[1:] = np.where(k >= max(1, int(min_order)),
+                       float(depression_base) * (np.minimum(k, 9) / 9.0) ** float(order_exponent), 0.0)
+    return lut[o.astype(np.uint8)]
+
+
+def rasterize_hydrorivers(
+    gdf,
+    north: float, south: float, east: float, west: float,
+    dim: int,
+    depression_base: float = -5.0,
+    order_exponent: float = 1.5,
+    width_factor: float = 1.0,
+) -> np.ndarray:
+    """Rasterize a HydroRIVERS GeoDataFrame to a (dim×dim) float32 depression grid.
+
+    :func:`rasterize_hydrorivers_orders` then :func:`order_depth_grid`:
+    ``depth = depression_base * (order / 9) ** order_exponent``, 0 off-river.
+    """
+    return order_depth_grid(
+        rasterize_hydrorivers_orders(gdf, north, south, east, west, dim, width_factor),
+        depression_base, order_exponent)
 
 
 class HydroRiversHydrologyLayer(HydrologyLayerBase):
@@ -791,19 +806,13 @@ class HydroRiversHydrologyLayer(HydrologyLayerBase):
             return None
 
         n_features = len(gdf)
-        river_grid = rasterize_hydrorivers(
-            gdf,
-            north,
-            south,
-            east,
-            west,
-            dim,
-            depression_base=depression_m,
-            order_exponent=order_exponent,
-            width_factor=width_factor,
-        )
+        orders = rasterize_hydrorivers_orders(gdf, north, south, east, west, dim,
+                                              width_factor=width_factor)
+        counts = gdf["ORD_STRA"].clip(lower=1, upper=10).astype(int).value_counts()
         return {
-            "river_grid": river_grid,
+            "river_grid": order_depth_grid(orders, depression_m, order_exponent, min_order),
+            "order_grid": orders,
+            "order_counts": {int(k): int(v) for k, v in counts.items()},
             "feature_count": n_features,
             "source": self.name,
         }

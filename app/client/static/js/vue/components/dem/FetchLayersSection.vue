@@ -101,6 +101,15 @@
           </div>
         </div>
         
+        <div class="param-group">
+          <label for="hydroColorMode" title="How rivers are drawn in the hydrology layer. Changing it redraws without reloading.">Colour</label>
+          <select id="hydroColorMode" class="ctrl-select">
+            <option value="depth" selected>Depth (blue)</option>
+            <option value="order">Strahler order</option>
+          </select>
+        </div>
+        <div id="hydroOrderLegend" class="hydro-order-legend" hidden></div>
+
         <!-- Unified Hydrology Load Button -->
         <div class="fetch-action-row">
           <button id="loadWaterHydrologyBtn" class="btn btn-primary" style="flex:1;">🌊 Load Hydrology</button>
