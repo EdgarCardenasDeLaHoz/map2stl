@@ -376,7 +376,7 @@ async def get_city_raster(req: CompositeCityRasterRequest):
 #: Bumped when the composite's arithmetic changes, so older cached grids are not
 #: served: 2 = projected base grid kept (not stretched to dim), rivers snapped to
 #: the valley floor, lakes levelled after the median (F-REGION step 4).
-COMPOSITE_CACHE_VERSION = 2
+COMPOSITE_CACHE_VERSION = 3   # 3: carve masked on open sea (2026-09-30)
 
 
 def _composite_cache_key(north: float, south: float, east: float, west: float,
@@ -582,6 +582,14 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
 
     if carve is None:
         carve = np.zeros_like(composite)
+    elif not TEST_MODE:
+        # Rivers and lakes cut land only: carve that reaches the open sea (river
+        # mouths, coast-hugging reaches) dents the sea floor along the shore and
+        # leaves a ring around the coast once subtracted.
+        from geo2stl.water_layers import ocean_mask
+        sea = ocean_mask(composite)
+        if sea.any():
+            carve = np.where(sea, 0.0, carve)
     if skipped and warnings is not None:
         warnings.extend(skipped)
     write_array_cache("composite", cache_key, {"composite": composite, "carve": carve},

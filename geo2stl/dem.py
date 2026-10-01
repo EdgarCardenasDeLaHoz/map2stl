@@ -550,27 +550,25 @@ def fetch_h5_dem(
 def fetch_esa_water_layer(
     north: float, south: float, east: float, west: float, dim: int
 ) -> np.ndarray:
+    """Open water (sea and lakes) at *dim* on the longer side: 0 = land, 1 = water.
+
+    :func:`geo2stl.hydrology.water_surface_mask` - ESA WorldCover class 80 plus its
+    no-data (the ocean: WorldCover maps land only) united with the sea of the
+    local elevation store. Class 80 alone left the open sea out, so the
+    composite lowered lakes and rivers but not the sea, and every river mouth
+    became a notch in the coast.
     """
-    Fetch ESA WorldCover water mask (class 80) at the requested resolution.
-    Returns a float64 array: 0 = land, 1 = water.
-    """
-    img = fetch_bbox_image(north, south, east, west,
-                           scale=30, dataset="esa", use_cache=True)
+    from geo2stl.hydrology import water_surface_mask
 
-    if img is None:
-        return np.zeros((dim, dim), dtype=np.float64)
-
-    if img.ndim == 3:
-        img = img[:, :, 0]
-
-    src_h, src_w = img.shape
-    if src_h >= src_w:
-        out_h, out_w = dim, max(1, int(dim * src_w / src_h))
+    lat_span, lon_span = abs(north - south), abs(east - west)
+    if lat_span >= lon_span:
+        out_h, out_w = dim, max(1, int(round(dim * lon_span / max(lat_span, 1e-12))))
     else:
-        out_h, out_w = max(1, int(dim * src_h / src_w)), dim
-    img_r = _cv2.resize(img.astype(np.float32), (out_w, out_h),
-                        interpolation=_cv2.INTER_NEAREST)
-    return (img_r == 80).astype(np.float64)
+        out_h, out_w = max(1, int(round(dim * lat_span / lon_span))), dim
+    water = water_surface_mask(north, south, east, west, (out_h, out_w))
+    if water is None:
+        return np.zeros((out_h, out_w), dtype=np.float64)
+    return water.astype(np.float64)
 
 
 # apply_layer_processing, blend_layers, upsample_dem are re-exported above

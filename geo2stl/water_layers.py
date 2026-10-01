@@ -119,6 +119,27 @@ def resize_relative(layer: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
 # Rivers
 # ---------------------------------------------------------------------------
 
+def ocean_mask(dem: np.ndarray, sea_level: float = 0.0) -> np.ndarray:
+    """True on open sea: cells at or below *sea_level* connected to the grid edge.
+
+    Rivers and lakes are carved into land only. A river reach buffered past its
+    mouth, or one that follows the coast, otherwise lowers the sea floor along
+    the shore and leaves a ring around the coastline once the carve is
+    subtracted. Basins below sea level that do not reach the edge (Dead Sea,
+    Caspian, polders behind dikes) are land here and keep their rivers.
+    """
+    from scipy import ndimage
+
+    z = np.asarray(dem, dtype=np.float64)
+    low = np.isfinite(z) & (z <= sea_level)
+    if not low.any():
+        return low
+    labels, n = ndimage.label(low)
+    edge = np.unique(np.concatenate([labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1]]))
+    edge = edge[edge > 0]
+    return np.isin(labels, edge) if len(edge) else np.zeros_like(low)
+
+
 def order_discharge(order) -> np.ndarray:
     """Nominal mean discharge (m^3/s) for a Strahler order (see module docstring)."""
     order = np.clip(np.asarray(order, dtype=np.float64), 1, 12)

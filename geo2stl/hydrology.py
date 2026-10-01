@@ -850,10 +850,69 @@ class HydrologyService:
 HYDROLOGY_LAYER = HydrologyService()
 
 
+def water_surface_mask(north, south, east, west, shape) -> np.ndarray | None:
+    """Open water on a (rows, cols) grid over the bbox: sea and lakes, for the
+    union with the river lines (row 0 north). None when no source is available.
+
+    Union of
+      * ESA WorldCover permanent water (class 80) and its no-data (0), which is
+        where the ocean lies - WorldCover maps land only;
+      * the sea of the local elevation store (GEBCO, ``config.json``
+        ``ocean_root``): cells at or below 0 m connected to the bbox edge
+        (:func:`geo2stl.water_layers.ocean_mask`).
+    Either source may be missing (Earth Engine not set up, no local store).
+    """
+    import cv2 as _cv2
+
+    from geo2stl.water_layers import ocean_mask
+
+    h, w = int(shape[0]), int(shape[1])
+    masks = []
+    try:
+        from geo2stl.geo import bbox_size_m
+        from geo2stl.sat2stl import fetch_water_mask
+
+        wm, ht = bbox_size_m({"north": north, "south": south, "east": east, "west": west})
+        scale = max(30, int(max(wm / w, ht / h)))
+        _, esa, _ = fetch_water_mask(north, south, east, west, scale, "esa")
+        if esa is not None and esa.size:
+            esa_water = ((esa == 80) | (esa == 0)).astype(np.uint8)
+            masks.append(_cv2.resize(esa_water, (w, h), interpolation=_cv2.INTER_NEAREST) > 0)
+    except Exception as exc:   # Earth Engine missing / not authenticated / offline
+        logger.warning("water_surface_mask: ESA water unavailable (%s)", exc)
+    try:
+        from geo2stl.tiles import stitch_tiles_no_rasterio
+
+        elev = stitch_tiles_no_rasterio((north, south, east, west))
+        if elev is not None and np.size(elev):
+            sea = ocean_mask(np.asarray(elev, dtype=np.float64)).astype(np.uint8)
+            masks.append(_cv2.resize(sea, (w, h), interpolation=_cv2.INTER_NEAREST) > 0)
+    except Exception as exc:
+        logger.warning("water_surface_mask: local elevation store unavailable (%s)", exc)
+    if not masks:
+        return None
+    return np.logical_or.reduce(masks)
+
+
+def union_water_surface(river_grid: np.ndarray, water: np.ndarray | None,
+                        depression_m: float) -> np.ndarray:
+    """Rivers plus open water at the full depression depth (the deeper wins).
+
+    HydroRIVERS has no sea or lake surfaces: subtracting rivers alone leaves the
+    sea at its old level while every coastal river cuts a notch into the shore -
+    a ring of notches around the coastline. With the water surface lowered by
+    the same depth as the largest rivers, rivers run into it without a step.
+    """
+    if water is None or not np.any(water):
+        return river_grid
+    depth = np.float32(min(float(depression_m), 0.0))
+    return np.where(water, np.minimum(river_grid, depth), river_grid).astype(river_grid.dtype)
+
+
 def fetch_and_rasterize_hydrology(
     north, south, east, west, dim, scale_m, depression_m,
     source="natural_earth", min_order=3, order_exponent=1.5,
-    width_factor=1.0,
+    width_factor=1.0, water_surface=True,
 ):
     """Fetch rivers and rasterize to a depression grid. Sync — call via run_in_executor.
 
@@ -861,8 +920,13 @@ def fetch_and_rasterize_hydrology(
     source='hydrorivers':   HydroRIVERS dataset (regional shapefiles, ~500 m detail,
                             downloaded on first use and cached permanently)
 
-    Returns dict with keys ``river_grid``, ``feature_count``, ``source``
-    or None if no features were found.
+    With *water_surface* (default) the grid is the union of the rivers and the
+    open water (sea, lakes) of :func:`water_surface_mask`, so the sea is lowered
+    with the rivers instead of leaving a ring of river mouths along the coast.
+
+    Returns dict with keys ``river_grid``, ``feature_count``, ``source``,
+    ``water_surface`` (bool: open water was merged) or None if no features
+    were found.
     """
     import time as _time
 
@@ -882,7 +946,20 @@ def fetch_and_rasterize_hydrology(
             width_factor=width_factor,
         )
         if result is None:
-            return None
+            if not water_surface:
+                return None
+            # No river reaches here, but the sea / lakes still belong in the layer.
+            result = {"river_grid": np.zeros((dim, dim), dtype=np.float32),
+                      "feature_count": 0, "source": source}
+        result["water_surface"] = False
+        if water_surface:
+            water = water_surface_mask(north, south, east, west, result["river_grid"].shape)
+            if water is not None:
+                result["river_grid"] = union_water_surface(result["river_grid"], water,
+                                                           depression_m)
+                result["water_surface"] = True
+            elif result["feature_count"] == 0:
+                return None
 
         dt_total = _time.perf_counter() - t0
         logger.info(

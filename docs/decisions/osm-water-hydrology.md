@@ -4,6 +4,23 @@ Fetching OSM through Overpass/osmnx, telling outages from empty answers, water a
 rasterisation, and rivers and lakes carved into the terrain. Related: [composite.md](composite.md),
 [trails.md](trails.md).
 
+### 2026-09-30 — Hydrology is rivers united with the open water; carve stays off the sea
+- **Decision:**
+  - `geo2stl/hydrology.py::fetch_and_rasterize_hydrology` (the `/api/terrain/hydrology` layer)
+    returns the union of the river grid and `water_surface_mask`, with water at the full
+    depression depth. The mask is ESA WorldCover class 80 plus its no-data (the ocean;
+    WorldCover maps land only), united with the local store's sea (`geo2stl/water_layers.py::ocean_mask`:
+    cells ≤ 0 m connected to the box edge).
+  - The composite's `water_esa` layer (`geo2stl/dem.py::fetch_esa_water_layer`) uses the same mask.
+  - `app/server/routers/composite.py::compute_composite_dem` zeroes the river/lake carve on
+    the open sea.
+- **Why:** user: "HydroRIVERS doesn't provide ocean masks, the union of that and the other
+  water mask or the mask from ESA should be taken". Rivers alone notch the shore at every
+  coastal mouth while the sea stays at its old level — a ring around the coast once subtracted.
+  Basins below sea level that do not reach the box edge (Dead Sea, polders) are land.
+- **Rejected:** ESA class 80 alone — it misses the open ocean.
+- **Supersedes / superseded by:** —
+
 ### 2026-09-30 — HydroRIVERS honours the requested min_order; no automatic thinning
 - **Decision:** `geo2stl/hydrology.py::fetch_hydrorivers` and `rasterize_hydrorivers` no longer
   raise the minimum Strahler order on large boxes. Burning is fast enough to take every reach:

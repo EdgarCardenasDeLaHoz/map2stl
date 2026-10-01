@@ -379,3 +379,55 @@ def test_lake_is_flat_after_the_export_median():
     raw = wl.lake_depth_grid([_poly(0.3, 0.3, 0.7, 0.7, natural="water")],
                              N, S, E, W, dem, depth_m=2.0, min_area_m2=0, smooth=1)
     assert np.ptp((ndimage.median_filter(dem, size=3) + raw)[raw < 0]) > 0.5
+
+
+def test_ocean_mask_is_edge_connected_sea_only():
+    import numpy as np
+
+    from geo2stl.water_layers import ocean_mask
+
+    z = np.full((20, 30), 50.0)
+    z[:, :6] = -200.0            # open sea on the west edge
+    z[8:12, 14:18] = -30.0       # enclosed basin below sea level (Dead Sea-like)
+    z[0, 10] = 0.0               # a sea-level cell on the north edge
+    m = ocean_mask(z)
+    assert m[:, :6].all()
+    assert not m[8:12, 14:18].any()
+    assert m[0, 10]
+    assert not m[:, 6:].any() or m[0, 10]
+
+
+def test_composite_carve_is_zero_on_open_sea(monkeypatch):
+    """compute_composite_dem drops river carve on the open sea, keeps it on land."""
+    import numpy as np
+
+    import app.server.config as config
+    from app.server.routers.composite import compute_composite_dem
+    from app.server.schemas import MergeLayerSpec
+
+    def base(n, s, e, w, dim, options):
+        z = np.full((dim, dim), 100.0)
+        z[:, : dim // 4] = -50.0                       # sea along the west edge
+        return z
+
+    def river(n, s, e, w, dim, options, base=None):
+        g = np.zeros_like(base)
+        g[base.shape[0] // 2, :] = -5.0                # crosses the coast into the sea
+        return g
+
+    river.terrain_relative = True
+    register_layer_source("unit_sea_base", base)
+    register_layer_source("unit_sea_river", river)
+    monkeypatch.setattr(config, "TEST_MODE", False)
+    try:
+        specs = [MergeLayerSpec(source="unit_sea_base", dim=60, blend_mode="base", weight=1.0),
+                 MergeLayerSpec(source="unit_sea_river", dim=60, blend_mode="add", weight=1.0)]
+        comp, carve = compute_composite_dem({"north": 1, "south": 0, "east": 1, "west": 0}, 60,
+                                            specs, projection="none", split_carve=True)
+    finally:
+        _LAYER_SOURCES.pop("unit_sea_base", None)
+        _LAYER_SOURCES.pop("unit_sea_river", None)
+    row = carve[carve.shape[0] // 2]
+    sea_cols = comp[carve.shape[0] // 2] <= 0
+    assert sea_cols.any() and (row[sea_cols] == 0).all()
+    assert (row[~sea_cols] == -5).all()

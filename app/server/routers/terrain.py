@@ -895,6 +895,7 @@ async def get_terrain_hydrology(
         "dim": dim, "src": source, "dep": depression_m,
         "scl": scale_m, "mo": min_order, "oe": order_exponent,
         "wf": width_factor,
+        "ws": 1,   # rivers united with the open water surface (sea, lakes), 2026-09-30
     }
     cache_key = make_cache_key(
         "hydrology", north, south, east, west, cache_extra)
