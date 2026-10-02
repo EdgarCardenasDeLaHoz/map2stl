@@ -29,6 +29,9 @@ The app's job: **turn a box on the map into a printable 3D model.**
   composite weights, registration, mesh simplification and ML tools are ADVANCED.
 - Region settings save themselves; the header shows "✓ Saved" (`modules/ui/presets.js`).
 
+- ⚙ Settings is docked on the left and pushes the page (not a sheet over it), and lists only
+  the open page's tools (user, 2026-10-02; overrides shared §3's right-hand slide-in).
+
 ## Brand and style
 
 - Accent: blue `#0a84ff` instead of the shared pink, because the app has used blue since the

@@ -1,10 +1,12 @@
 <template>
-  <!-- ⚙ Settings: a sheet from the right over the dimmed, live page (design guidelines §3).
-       Mode and tool switches come from stores/uiMode.ts; Account & help replaces the header's
-       Guides / Results / Diagnostics / Keys / Docs buttons. The region's data / look / model
-       settings join this sheet with the Edit rebuild (F-DESIGN). -->
-  <div v-if="open" class="ss-backdrop" @click.self="$emit('close')" @keydown.esc="$emit('close')">
-    <aside class="ss-sheet" role="dialog" aria-modal="true" aria-labelledby="ssTitle">
+  <!-- ⚙ Settings: a panel docked on the left of the page (it pushes the page over; it does
+       not float over it), listing the mode and the current page's tools only: Edit tools on
+       Edit, Extrude tools on Extrude (user, 2026-10-02). Account & help replaces the header's
+       Guides / Results / Diagnostics / Keys / Docs buttons. Teleported into .app-container,
+       ordered first. -->
+  <Teleport to=".app-container">
+    <aside v-if="open" class="ss-sheet" role="complementary" aria-labelledby="ssTitle"
+           @keydown.esc="$emit('close')">
       <div class="ss-head">
         <h2 id="ssTitle">Settings</h2>
         <button type="button" class="ss-x" aria-label="Close settings" @click="$emit('close')">✕</button>
@@ -52,12 +54,13 @@
       <div v-if="!toolGroups.length && !help.length && !match('mode beginner custom everything tools')" class="ss-note">
         Nothing matches “{{ query }}”.</div>
     </aside>
-  </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import { UI_TOOLS, useUiModeStore } from '../../stores/uiMode';
+import { useAppStore } from '../../stores/app';
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: []; keys: []; diag: [] }>();
@@ -79,6 +82,9 @@ const MODES = [
 const query = ref('');
 const searchEl = ref<HTMLInputElement | null>(null);
 watch(() => props.open, async (o) => {
+  await nextTick();
+  window.dispatchEvent(new Event('resize'));
+  (window as any).getMap?.()?.invalidateSize?.();
   if (!o) return;
   query.value = '';
   await nextTick();
@@ -92,7 +98,10 @@ function match(text: string): boolean {
 
 const PAGE_TITLES = { edit: 'Edit tools', extrude: 'Extrude tools' } as const;
 const tools = computed(() => UI_TOOLS.filter((t) => match(`${t.label} ${t.hint} ${t.page}`)));
-const toolGroups = computed(() => (['edit', 'extrude'] as const)
+const app = useAppStore();
+/** Tools of the page that is open: Edit or Extrude; Explore has none. */
+const page = computed(() => ({ dem: 'edit', model: 'extrude' } as const)[app.activeView as 'dem' | 'model'] ?? null);
+const toolGroups = computed(() => (page.value ? [page.value] : [])
   .map((page) => {
     const list = tools.value.filter((t) => t.page === page);
     return { page, title: PAGE_TITLES[page], tools: list, anyOn: list.some((t) => ui.tools[t.id]) };
@@ -118,10 +127,9 @@ const help = computed(() => HELP.filter((h) => match(`${h.label} ${h.hint}`)));
 </script>
 
 <style scoped>
-.ss-backdrop { position: fixed; inset: 0; z-index: 8500; background: rgba(0, 0, 0, 0.45); }
 .ss-sheet {
-  position: absolute; top: 0; right: 0; bottom: 0; width: min(500px, 100vw); overflow-y: auto;
-  background: #151517; box-shadow: -10px 0 40px rgba(0, 0, 0, 0.6); padding: 18px 20px 24px;
+  order: -1; flex: none; width: 340px; height: 100vh; overflow-y: auto; box-sizing: border-box;
+  background: #151517; border-right: 1px solid #2f2f31; padding: 18px 18px 24px;
   display: flex; flex-direction: column; gap: 16px; color: #f5f5f7; font-size: 14px;
 }
 .ss-head { display: flex; align-items: center; }

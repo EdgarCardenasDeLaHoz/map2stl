@@ -3,6 +3,18 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-02 — ⚙ Settings is a panel docked on the left, listing the open page's tools
+- **Decision:** ⚙ opens (and closes) a 340 px panel docked on the left of the layout that
+  pushes the page over, instead of a sheet floating over a dimmed page from the right. It lists
+  the mode, the tools of the page that is open (Edit tools on Edit, Extrude tools on Extrude,
+  none on Explore) and Account & help. `switchView` now sets `appState.activeView`, which the
+  panel reads.
+- **Why:** user, 2026-10-02: "settings should not hover, they should be in the panel. Settings
+  for Edit should only appear when in Edit mode, Same for Extrude." Overrides the shared
+  guidelines' §3 slide-in-from-the-right for map2stl (appendix).
+- **Rejected:** the right-hand slide-in over a dimmed page (guidelines §3 default).
+- **Supersedes / superseded by:** —
+
 ### 2026-10-02 — Explore: one map menu, a selection card, sizes in the list
 - **Decision:** the map's five floating buttons become two in the corner: 🌍 Globe and Map ▾ (the
   existing map-settings panel: style, terrain relief, grid, labels). The selected region gets a

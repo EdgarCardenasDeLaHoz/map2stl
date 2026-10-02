@@ -61,6 +61,8 @@ window.switchView = function switchView(view) {
     document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
     document.querySelector(`[data-view="${view}"]`)?.classList.add('active');
     document.body.classList.toggle('dem-edit-mode', view === 'dem');
+    // The page the ⚙ Settings panel lists tools for (SettingsSheet.vue) and other readers.
+    window.appState.activeView = view;
 
     containers[view]?.classList.remove('hidden');
 

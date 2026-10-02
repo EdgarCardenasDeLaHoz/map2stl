@@ -33,7 +33,7 @@
       <span id="saveSettingsStatus" class="save-status" role="status" aria-live="polite"></span>
       <!-- ⚙ Settings: mode, tools, keys, diagnostics, guides and docs (SettingsSheet.vue). -->
       <button type="button" id="settingsSheetBtn" class="gear-btn" aria-label="Settings" title="Settings"
-              @click="settingsOpen = true">⚙</button>
+              :aria-pressed="settingsOpen" @click="settingsOpen = !settingsOpen">⚙</button>
     </div>
     <SettingsSheet :open="settingsOpen" @close="settingsOpen = false" @keys="openKeys" @diag="openDiag" />
 
