@@ -37,6 +37,11 @@ rules. Related: [composite.md](composite.md), [trails.md](trails.md).
   the 3D preview (80,612 faces vs 79,626); off left no composite layers.
 - **Rejected:** auto-pressing Apply after each change — compounds the carve (above); keeping the
   region list on Edit — two columns before the canvas, and the pill already says what is open.
+- **Follow-up (same day):** the page used to open with the composite and its ESA open-water
+  channel on; with the live composite that would have carved 5 m of open water into every
+  export. Both now start off, and the carve (composite on, water, rivers, lakes, depths) is saved
+  per region (`presets.js` `composite` group; a region without one carves nothing). Checked in
+  the app: the switch survives a reload, and another region does not inherit it.
 - **Supersedes / superseded by:** —
 - **Source:** [F-DESIGN](../plans/active/F-DESIGN-guidelines-redesign.md)
 

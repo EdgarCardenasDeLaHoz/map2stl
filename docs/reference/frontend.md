@@ -139,6 +139,8 @@ Consequences to know:
   grid starts off. **Live composite:** with the composite on and only server-buildable channels
   (DEM, water, rivers, lakes), `export-handlers.js::_demSettings` sends `composite_layers` with every
   preview and export, so Apply to DEM is only needed for land cover / vegetation / trails.
+  The carve is saved per region (`presets.js::collectAllSettings` `composite` group, applied with
+  change events by `_applyComposite`); a new page and a region without it carve nothing.
 - **Edit sub-tab rule** (`DemSettingsPanel.vue`): *Fetch* holds data settings that affect
   everything, *View* visualization-only settings, *Composite* settings that only affect the
   3D render. All three are `v-show`, so a control moved between them keeps working by id.

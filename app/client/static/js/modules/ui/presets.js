@@ -372,6 +372,18 @@ function collectAllSettings() {
             min_order: _int('hydroMinOrder', 3),
             width_scale: _flt('hydroWidthFactor', 1.0),
         },
+        // The terrain carve (Edit → Rivers & lakes, Composite & imports tool). Saved per region
+        // since 2026-10-02: the live composite puts it in every preview and export, so it must
+        // come back with the region, not reset to the page defaults on reload.
+        composite: {
+            enabled: _chk('compositeEnabled', false),
+            water: _chk('compositeWaterEnabled', false),
+            rivers: _chk('compositeRiversEnabled', false),
+            lakes: _chk('compositeLakesEnabled', false),
+            river_depth_scale: _flt('compositeRiverDepthScale', 1.0),
+            lake_depth_m: _flt('compositeLakeDepth', 2.0),
+            lake_min_area_ha: _flt('compositeLakeMinAreaHa', 1.0),
+        },
         trails: {
             source: _str('trailsSource', 'all'),
             dim: _int('trailsDim', _int('paramDim', 600)),
@@ -396,6 +408,29 @@ function collectAllSettings() {
  * to all form controls and appState. Accepts both grouped and legacy flat shapes.
  * @param {Object} s
  */
+/** Carve settings of a region with none saved: off. Matches the page defaults. */
+const COMPOSITE_DEFAULTS = Object.freeze({
+    enabled: false, water: false, rivers: false, lakes: false,
+    river_depth_scale: 1.0, lake_depth_m: 2.0, lake_min_area_ha: 1.0,
+});
+
+function _applyComposite(c) {
+    const fire = (el) => el?.dispatchEvent(new Event('change', { bubbles: true }));
+    const checks = { compositeWaterEnabled: c.water, compositeRiversEnabled: c.rivers,
+        compositeLakesEnabled: c.lakes, compositeEnabled: c.enabled };
+    const values = { compositeRiverDepthScale: c.river_depth_scale, compositeLakeDepth: c.lake_depth_m,
+        compositeLakeMinAreaHa: c.lake_min_area_ha };
+    for (const [id, v] of Object.entries(values)) {
+        const el = _get(id);
+        if (el && v != null && String(el.value) !== String(v)) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); fire(el); }
+    }
+    // Channels first, the master switch last, so one recompute sees the final set.
+    for (const [id, v] of Object.entries(checks)) {
+        const el = _get(id);
+        if (el && v != null && el.checked !== Boolean(v)) { el.checked = Boolean(v); fire(el); }
+    }
+}
+
 function applyAllSettings(s) {
     if (!s) return;
     s = normalizeSettingsKeys(s);
@@ -531,6 +566,10 @@ function applyAllSettings(s) {
     if (hydro.min_order != null) set('hydroMinOrder', hydro.min_order);
     // Legacy dim / depression_m / order_exponent / width_factor are ignored.
     if (hydro.width_scale != null) set('hydroWidthFactor', hydro.width_scale);
+
+    // composite group — a region saved before 2026-10-02 has none: nothing carved, as its
+    // exports had without Apply. Change events let composite-dem.js pick the values up.
+    _applyComposite({ ...COMPOSITE_DEFAULTS, ...(s.composite || {}) });
 
     // trails group
     const trails = s.trails || {};

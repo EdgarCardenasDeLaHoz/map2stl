@@ -41,7 +41,7 @@ import { readHydrologyRiverControls } from './hydrology-print.js';
 const DEFAULTS = {
     demEnabled: true,
     demWeight: 1.0,   // scales the base DEM elevation itself
-    waterEnabled: true,
+    waterEnabled: false,   // off with the composite: a new region carves nothing (2026-10-02)
     waterDepth: 5.0,   // metres to subtract where water detected
     waterWeight: 1.0,
     buildingsEnabled: true,

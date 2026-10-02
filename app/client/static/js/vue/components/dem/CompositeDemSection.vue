@@ -7,7 +7,7 @@
     </div>
     <div class="composite-enable-row">
       <label class="check-label composite-enable-label">
-        <input type="checkbox" id="compositeEnabled" checked aria-label="Enable composite DEM layer"> Enable composite layer
+        <input type="checkbox" id="compositeEnabled" aria-label="Enable composite DEM layer"> Enable composite layer
       </label>
       <!-- The composite colormap is display-only: View → Composite Display. -->
     </div>
@@ -44,7 +44,7 @@
       <summary class="composite-layer-header">💧 Water</summary>
       <div class="composite-layer-body">
         <label class="composite-toggle-row">
-          <input type="checkbox" id="compositeWaterEnabled" checked aria-label="Enable water contribution"> Enable
+          <input type="checkbox" id="compositeWaterEnabled" aria-label="Enable water contribution"> Enable
         </label>
         <div class="composite-sliders">
           <span class="composite-slider-label">Depth</span>
