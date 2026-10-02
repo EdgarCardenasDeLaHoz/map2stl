@@ -15,7 +15,7 @@
  *
  * No window access here: the document is passed in, so tests can use a fake.
  */
-import { defaultPieceMm, parseBedSize } from '../export/print-scale.js';
+import { bboxDiagonalKm, defaultPieceMm, parseBedSize } from '../export/print-scale.js';
 
 /** Resolved at apply time: the default puzzle piece for the selected bed. */
 const BED_PIECE = '$bedPiece';
@@ -197,4 +197,21 @@ export function applyWorkflowPreset(name, doc, ctx = {}) {
     const preset = WORKFLOW_PRESETS[name];
     if (!preset) throw new Error(`Unknown workflow preset "${name}"`);
     return applyFields(preset.fields, doc, ctx);
+}
+
+/** ✨ Make it printable: up to this diagonal the box gets the City preset (matches the coarse city-data cap). */
+const CITY_MAX_KM = 25;
+/** Up to this diagonal: Mountain (terrain at 30 m, trails and water); beyond: Region. */
+const MOUNTAIN_MAX_KM = 100;
+
+/**
+ * Workflow preset for a region box.
+ * @param {{north:number, south:number, east:number, west:number}} bbox
+ * @returns {'city'|'mountain'|'region'}
+ */
+export function choosePreset(bbox) {
+    const km = bboxDiagonalKm(bbox);
+    if (km <= CITY_MAX_KM) return 'city';
+    if (km <= MOUNTAIN_MAX_KM) return 'mountain';
+    return 'region';
 }

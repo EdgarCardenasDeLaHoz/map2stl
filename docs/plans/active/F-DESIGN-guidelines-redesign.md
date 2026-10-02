@@ -23,6 +23,16 @@ and one visual style. No capability is lost.
    map and model images), screenshotted at 1300×820 with headless Edge. One per page plus the
    Settings panel (Beginner and Everything). Iterate with the user before any code.
 4. **Build** to the approved mockups, page by page, Beginner first.
+   - Mockups approved as round 1 (2026-10-01): build order Extrude → Edit → Explore.
+   - **Extrude done (2026-10-01):** cards Printed size / Model / Download; tools (Vertical &
+     surface, 3D view, City model layers, Puzzle details, Engraving & contours, Cross-section,
+     Model score) in ⚙ Settings (`SettingsSheet.vue`, `stores/uiMode.ts`); header pill, ✨ Make it
+     printable (`modules/ui/make-printable.js`), default bed Ender 220 × 220; every new DEM fills
+     the bed. Build vs mockup: `claude/mockups/2026-10-01/png/build-extrude*.png`
+     (`claude/scripts/mockup_compare.py`).
+   - Next: Edit (layers with pictures left, the selected layer's settings right, region data /
+     look / model groups into the ⚙ sheet, Edit tools: projection, curve, land cover, weights,
+     landmarks, mesh import, registration, JSON), then Explore.
 5. **Compare** build screenshots with the mockups; run `ui_screens.py` and the layout audit.
 
 ## Target files

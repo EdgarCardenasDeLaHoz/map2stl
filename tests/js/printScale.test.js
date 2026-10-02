@@ -7,6 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+    fillBedMmPerPx, DEFAULT_BED,
     AUTO_TRUE_SCALE_MAX_KM, bboxDiagonalKm, defaultPieceMm, formatGroundLength,
     modelScale, parseBedSize, piecesNeeded,
 } from '../../app/client/static/js/modules/export/print-scale.js';
@@ -99,7 +100,7 @@ describe('parseBedSize / defaultPieceMm', () => {
         expect(parseBedSize('250x210')).toEqual({ w: 250, h: 210 });
         expect(parseBedSize('custom', '300', '200')).toEqual({ w: 300, h: 200 });
         expect(parseBedSize('custom', '', 'x')).toEqual({ w: 220, h: 220 });
-        expect(parseBedSize('garbage')).toEqual({ w: 250, h: 210 });
+        expect(parseBedSize('garbage')).toEqual({ w: 220, h: 220 });   // default bed
     });
 
     it('defaults the piece to the shorter bed side less 10 mm', () => {
@@ -124,5 +125,20 @@ describe('piecesNeeded', () => {
 
     it('falls back to the bed default piece', () => {
         expect(piecesNeeded(600, 300, bed, 0)).toEqual({ fits: false, cols: 3, rows: 2, pieces: 6 });
+    });
+});
+
+describe('fillBedMmPerPx', () => {
+    it('fills the default 220 x 220 bed less the margin', () => {
+        expect(DEFAULT_BED).toBe('220x220');
+        // 600 x 481 grid (Granada): 210 / 600 = 0.35 limits the width.
+        expect(fillBedMmPerPx(600, 481, { w: 220, h: 220 })).toBe(0.35);
+    });
+    it('turns the model when that makes it bigger', () => {
+        // Wide grid on a tall bed: turned, 240 / 400 = 0.6 instead of 200 / 400 = 0.5.
+        expect(fillBedMmPerPx(400, 100, { w: 210, h: 250 }, 10)).toBe(0.6);
+    });
+    it('returns 0 for an empty grid', () => {
+        expect(fillBedMmPerPx(0, 10, { w: 220, h: 220 })).toBe(0);
     });
 });

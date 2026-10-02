@@ -2,7 +2,7 @@
   <!-- Pre-flight: POST /api/export/preflight with the body the build would send
        (export-handlers.js:runPreflight). Nothing is built; see
        app/server/core/preflight.py for what is estimated and how. -->
-  <CollapsibleSection title="✈ Pre-flight check" wrap-style="margin-bottom:10px;" id="preflightSection">
+  <CollapsibleSection title="Check before printing" wrap-style="margin:4px 0 0;" id="preflightSection">
     <div class="pf-row">
       <select id="preflightFormat" v-model="format" class="ctrl-input-sm" style="width:auto;"
               title="Which build to check: the City Model (with its layers and puzzle) or the Split / Puzzle export">

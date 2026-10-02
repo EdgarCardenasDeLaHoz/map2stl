@@ -96,17 +96,20 @@ export function formatGroundLength(m) {
 }
 
 /**
- * Bed size in mm from the #bedSizeSelect value ("250x210" or "custom").
+ * Bed size in mm from the #bedSizeSelect value ("220x220" or "custom"). Default: Ender 220 x 220.
  * @returns {{w:number, h:number}}
  */
+/** Default printer bed (#bedSizeSelect value): Ender 220 x 220 (user, 2026-10-01). */
+export const DEFAULT_BED = '220x220';
+
 export function parseBedSize(value, customW, customH) {
     if (value === 'custom') {
         const w = parseFloat(customW);
         const h = parseFloat(customH);
         return { w: w > 0 ? w : 220, h: h > 0 ? h : 220 };
     }
-    const [w, h] = String(value || '250x210').split('x').map(Number);
-    return (w > 0 && h > 0) ? { w, h } : { w: 250, h: 210 };
+    const [w, h] = String(value || DEFAULT_BED).split('x').map(Number);
+    return (w > 0 && h > 0) ? { w, h } : { w: 220, h: 220 };
 }
 
 /** Default largest puzzle piece for a bed: the shorter side less a margin. */
@@ -125,4 +128,19 @@ export function piecesNeeded(widthMm, depthMm, bed, pieceMm) {
     const cols = fits ? 1 : Math.max(1, Math.ceil(widthMm / piece));
     const rows = fits ? 1 : Math.max(1, Math.ceil(depthMm / piece));
     return { fits, cols, rows, pieces: cols * rows };
+}
+
+/**
+ * mm per DEM pixel that makes a cols × rows grid fill the bed, less BED_MARGIN_MM on
+ * each axis, in whichever orientation gives the larger model (the slicer can turn it).
+ * Rounded down to 0.01 so the result never overhangs. Used by the Extrude "Fill bed"
+ * action and ✨ Make it printable.
+ * @returns {number} 0 when the grid is empty
+ */
+export function fillBedMmPerPx(cols, rows, bed, marginMm = BED_MARGIN_MM) {
+    if (!(cols > 0 && rows > 0)) return 0;
+    const w = Math.max(1, bed.w - marginMm);
+    const h = Math.max(1, bed.h - marginMm);
+    const best = Math.max(Math.min(w / cols, h / rows), Math.min(h / cols, w / rows));
+    return Math.floor(best * 100) / 100;
 }

@@ -38,7 +38,7 @@ import { parseBedSize } from './print-scale.js';
 
 function _setExportButtonsEnabled(enabled) {
     const ids = ['downloadSTLBtn', 'downloadOBJBtn', 'download3MFBtn',
-        'exportCityBtn', 'downloadCrossSectionBtn', 'exportPuzzle3MFBtn'];
+        'exportCityBtn', 'downloadCrossSectionBtn', 'exportPuzzle3MFBtn', 'modelDownloadBtn'];
     for (const id of ids) {
         const el = document.getElementById(id);
         if (!el) continue;

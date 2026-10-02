@@ -126,7 +126,7 @@ flowchart LR
 | `export-handlers.js` | `downloadSTL`, `downloadModel`, `downloadCrossSection`, `exportPuzzle`, `exportCityModel`, `runPreflight`, `cancelExport`, `_demSettings`, `_asyncExport` | Exports, puzzle and City Model builds, pre-flight |
 | `export-poll.js` | `EXPORT_STALL_TIMEOUT_MS`, `createStallWatch`, `formatElapsed`, `exportProgressText` | Pure: stall-based give-up, progress text |
 | `puzzle-cuts.js` | `evenEdges`, `nearestEdge`, `moveEdge`, `minPieceMm`, `gridKey`, `isCustom`, `roundEdges` | Pure: puzzle cut positions (mm from west / south) |
-| `print-scale.js` | `modelScale`, `bboxDiagonalKm`, `formatGroundLength`, `parseBedSize`, `defaultPieceMm`, `piecesNeeded` | Pure: model scale, bed size, piece grid (ports of `city_model.choose_scale` / `puzzle.plan_grid`) |
+| `print-scale.js` | `modelScale`, `bboxDiagonalKm`, `formatGroundLength`, `parseBedSize`, `DEFAULT_BED`, `defaultPieceMm`, `piecesNeeded`, `fillBedMmPerPx` | Pure: model scale, bed size, piece grid (ports of `city_model.choose_scale` / `puzzle.plan_grid`) |
 
 ### `ui/`
 
@@ -136,7 +136,8 @@ flowchart LR
 | `app-setup.js` | `setupOpacityControls`, `setupStackedLayers`, `loadAllLayers`, `setupAutoReload`, `clearAllBoundingBoxes` | Init wiring; `loadAllLayers` uses `Promise.allSettled` |
 | `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset`, `setupAutoSave`, `_migratePreset` | Presets, auto-save, `PRESET_VERSION` migration, revert snapshot. Sends `projection.clip_valid_region` only |
 | `settings-compat.js` | `normalizeSettingsKeys` | Pure: renames legacy keys in saved region settings / presets (`projection.clip_nans` → `clip_valid_region`) before `applyAllSettings` reads them |
-| `workflow-presets.js` | `WORKFLOW_PRESETS`, `applyFields`, `applyWorkflowPreset`, `regionDemSource` | Pure: City / Mountain / Region / Coast presets; returns an undo list |
+| `workflow-presets.js` | `WORKFLOW_PRESETS`, `applyFields`, `applyWorkflowPreset`, `regionDemSource`, `choosePreset` | Pure: City / Mountain / Region / Coast presets; returns an undo list; preset for a box size |
+| `make-printable.js` | `makePrintable` (window) | ✨ Make it printable: preset, load, fill the bed, open Extrude, `map2stl:made-printable` event with undo |
 | `curve-editor-state.js` | `CurveEditorState`, `CURVE_PRESETS` | Curve editor state class + presets |
 | `curve-editor.js` | `initCurveEditor`, `applyCurveTodem`, `undoCurve`, `redoCurve`, `setCurvePreset`, `drawCurve` | Elevation curve editor |
 | `keyboard-shortcuts.js` | `setupKeyboardShortcuts` | Ctrl+1/2/3 = Explore / Edit / Extrude (the header tabs; no Globe shortcut), Ctrl+S, Ctrl+R, Ctrl+Z/Y, Escape, arrows, G |
@@ -166,7 +167,7 @@ Under `app/client/static/js/vue/components/`. Store and bridge: [frontend.md](fr
 
 | Folder | Components (parent) |
 |---|---|
-| `layout/` | `AppShell` (App), `MainHeader`, `MeshRegistrationModal` (AppShell) |
+| `layout/` | `AppShell` (App), `MainHeader`, `MeshRegistrationModal` (AppShell), `SettingsSheet` (MainHeader) |
 | `sidebar/` | `SidebarPanel` (App); `SidebarListView`, `SidebarEditView`, `RegionListTable`, `NewRegionSection` (SidebarPanel) |
 | `views/` | `ContentArea` (App); `MapContainer`, `DemContainer`, `ModelContainer` (ContentArea); `LandmarkSearch`, `EdgeLandmarkWarnings` (MapContainer, DemSettingsPanel); `PreflightPanel`, `ModelScorePanel` (ModelContainer) |
 | `dem/` | `DemSettingsPanel`, `CityBuildingsPanel` (DemContainer); in DemSettingsPanel: `WorkflowPresetBar`, `PresetsSection`, `ProjectionSection`, `FetchLayersSection`, `CityLandmarksSection`, `VisualizationSection`, `LayerViewSection`, `LayerDisplaySections`, `CompositeDemSection`, `MeshImportSection`, `PlateRegistrationSection`; in FetchLayersSection: `CityFetchProgress`, `DemSamplingInfo` |
@@ -435,8 +436,8 @@ State on `window.guidesPage`.
 | `wrapTables(root)` | Horizontal scroll at phone width |
 | `openLightbox(img)` / `closeLightbox()` | Screenshot lightbox |
 
-"? Guide" links live in `DemSettingsPanel.vue` and `ModelContainer.vue`; the Guides button is in
-`MainHeader.vue`. Tests: `tests/js/guideLinks.test.js`.
+"? Guide" links live in `DemSettingsPanel.vue` and `ModelContainer.vue`; the Guides row is in
+the ⚙ Settings sheet (`SettingsSheet.vue`). Tests: `tests/js/guideLinks.test.js`.
 
 ### `reports.js` (standalone)
 

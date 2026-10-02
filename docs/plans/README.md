@@ -22,7 +22,7 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 | [F-FE1 + F-DEMID](active/F-FE1-vue-consolidation.md) | DEM handles in use; step 7 (delete `v2/`) done; steps 0–6 not pursued | F-DEMID leftovers only |
 | [F-LANDMARK](active/F-LANDMARK-roofs-and-building-parts.md) | §1–§6 done | check the result on the landmark set |
 | [F-USAGE](active/F-USAGE-local-usage-log.md) | in progress | usage log, then a flow report from real sessions |
-| [F-DESIGN](active/F-DESIGN-guidelines-redesign.md) | quick wins + review done; mockup round 1 sent | user feedback on mockups, then build page by page |
+| [F-DESIGN](active/F-DESIGN-guidelines-redesign.md) | mockups approved; Extrude rebuilt (cards, modes, ⚙ sheet, ✨) | Edit (layers left, selection's settings right), then Explore |
 | F-DET, registration learning | skyline and registration plans | see the Skyline section |
 
 ## Mesh pipeline and city model
@@ -125,7 +125,7 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   3. shortcuts: ~~page-wide arrow keys~~ (removed 2026-10-01), bare `G`, Ctrl+R (Ctrl+2 crash fixed 2026-09-30);
   4. ~~toasts announced, errors persistent, escaped text~~ (done 2026-10-01); validation errors inline still open;
   5. ignored controls: Fit height under Vertical = Auto;
-  6. ~~printed-size readout and clearer "model larger than bed"~~ (done 2026-10-01); presets set mm/px from the bed still open;
+  6. ~~printed-size readout and clearer "model larger than bed"~~ (done 2026-10-01); ~~presets set mm/px from the bed~~ (every new DEM fills the bed; ✨ Make it printable, 2026-10-01);
   7. preview progress with stage and Cancel;
   8. Export sub-tab: pre-flight open, city build primary;
   9. 12 px text floor, 24 px targets;

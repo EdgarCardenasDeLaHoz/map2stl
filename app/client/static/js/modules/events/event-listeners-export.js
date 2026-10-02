@@ -86,14 +86,10 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
 
     document.getElementById('exportCityBtn')?.addEventListener('click', () => window.exportCityModel?.());
 
-    const puzzleEnabledChk = document.getElementById('puzzleEnabled');
-    const puzzleParams = document.getElementById('puzzleParams');
-    if (puzzleEnabledChk && puzzleParams) {
-        puzzleEnabledChk.addEventListener('change', () => {
-            puzzleParams.style.display = puzzleEnabledChk.checked ? '' : 'none';
-            window.updatePuzzlePreview?.();
-        });
-    }
+    // Knob, clearance and plate options apply to both puzzles, so the Puzzle details
+    // card always shows them (no longer hidden while the terrain puzzle is off).
+    document.getElementById('puzzleEnabled')
+        ?.addEventListener('change', () => window.updatePuzzlePreview?.());
     ['splitCols', 'splitRows', 'splitKnobWidth', 'splitKnobDepth', 'cityPieceMm'].forEach(id => {
         document.getElementById(id)?.addEventListener('input', () => window.updatePuzzlePreview?.());
     });

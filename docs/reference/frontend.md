@@ -114,14 +114,21 @@ Consequences to know:
 | DEM source list | `#paramDemSource` in `FetchLayersSection.vue` | `window.populateDemSources` in `dem-main.js` fills it from `GET /api/terrain/sources`; unavailable sources are disabled, not hidden |
 | Layer rack (visibility, opacity, order) | `app/client/static/js/vue/components/dem/LayerViewSection.vue` | `app/client/static/js/modules/layers/stacked-layers.js::getLayerOrder`, `getActiveLayers`, `moveLayer` |
 | Composite panel | `app/client/static/js/vue/components/dem/CompositeDemSection.vue` | `app/client/static/js/modules/layers/composite-dem.js::_computeCompositeDem`, `window.applyCompositeToDem` |
-| Model height, base, exaggeration, mm/px, export options, progress bar | `app/client/static/js/vue/components/views/ModelContainer.vue` | `app/client/static/js/modules/export/export-handlers.js::_asyncExport` |
-| Header tabs (Explore / Edit / Extrude), Guides / Results / Diagnostics / Keys / Docs buttons | `app/client/static/js/vue/components/layout/MainHeader.vue` (one line from 1024 px: short title, icon-only buttons below 1200 px, `#pipelineReportsLink` → `/reports`) | `app/client/static/js/modules/ui/view-management.js::switchView` |
+| Extrude panel: Printed size, Model (printer, width → mm/px, height, base, split), Download, then one card per tool on | `app/client/static/js/vue/components/views/ModelContainer.vue` (Download clicks the hidden per-format button that matches: city zip ≤ 25 km, else 3MF / STL / OBJ or the puzzle) | `app/client/static/js/modules/export/export-handlers.js::_asyncExport`; bed fill `app/client/static/js/modules/export/print-scale.js::fillBedMmPerPx` |
+| Beginner / Custom / Everything and the tool switches | `app/client/static/js/vue/components/layout/SettingsSheet.vue` | `app/client/static/js/vue/stores/uiMode.ts::useUiModeStore` (`shows(tool)`; localStorage `map2stl_uiMode`) |
+| ✨ Make it printable | `#makePrintableBtn` in `MainHeader.vue`; Undo banner in `ModelContainer.vue` | `app/client/static/js/modules/ui/make-printable.js::makePrintable`, preset rule `app/client/static/js/modules/ui/workflow-presets.js::choosePreset` |
+| Header: title, region pill `#regionContextPill` (→ Explore), tabs, ✨, "✓ Saved", ⚙ (Guides / Results / Diagnostics / Keys / Docs are rows in the ⚙ sheet) | `app/client/static/js/vue/components/layout/MainHeader.vue`, `SettingsSheet.vue` | `app/client/static/js/modules/ui/view-management.js::switchView` |
 | Settings collect / apply / autosave | `MainHeader.vue` (`#saveSettingsStatus`) | `app/client/static/js/modules/ui/presets.js::collectAllSettings`, `applyAllSettings`, `setupAutoSave` |
 | Region boxes on the map (outlines, ≤ 20 in view + selected, hover ↔ list row) | — (Leaflet) | `app/client/static/js/modules/regions/region-boxes.js::refreshRegionViewSet`, rule `app/client/static/js/modules/regions/viewport-regions.js::selectViewportRegions` |
 | Region editor (rename, group, bounds + size, delete, notes) | `app/client/static/js/vue/components/sidebar/SidebarEditView.vue` (opened via `SidebarPanel.vue::setRegionEditorOpen`) | `app/client/static/js/modules/regions/region-editor.js::openRegionEditor` |
 | "Load DEM ›" on the Explore map | `app/client/static/js/vue/components/views/MapContainer.vue` | `app/client/static/js/modules/ui/view-management.js::loadSelectedRegionDem` |
 | Sidebar mode (width, hide) | `app/client/static/js/vue/components/sidebar/SidebarPanel.vue` | publishes `window.setSidebarMode`; nothing else writes its DOM — [why](../decisions/frontend.md#2026-08-30--vue-owns-the-sidebar-mode-and-nothing-else-touches-its-dom) |
 
+- **Design guidelines:** pages follow `Projects/design-guidelines.md` and the map2stl appendix
+  [../design-guidelines.md](../design-guidelines.md). Extrude is rebuilt to them (2026-10-01);
+  Edit and Explore are next (F-DESIGN). The printer bed (default Ender 220 × 220) and the UI mode
+  are per-browser preferences (localStorage `map2stl_bed`, `map2stl_uiMode`); mm/px is not saved
+  per region, so every new DEM is sized to fill the bed unless the model is split into pieces.
 - **Edit sub-tab rule** (`DemSettingsPanel.vue`): *Fetch* holds data settings that affect
   everything, *View* visualization-only settings, *Composite* settings that only affect the
   3D render. All three are `v-show`, so a control moved between them keeps working by id.

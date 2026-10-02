@@ -608,7 +608,7 @@ async function previewModelIn3D() {
             // this preview was made from.
             demSettings: ds,
             buildParams: build,
-            // Printed height (mm) of this preview: the Build sub-tab's size line.
+            // Printed height (mm) of this preview, base included: the Printed size card.
             zMaxMm: data.z_max,
             // Legacy names, still read by the cross-section export.
             mmPerPixel: build.mm_per_pixel,
@@ -619,6 +619,7 @@ async function previewModelIn3D() {
         _previewGate.settle(ticket, true);
         window.appState.modelPreviewState = 'ready';
         window._setExportButtonsEnabled?.(true);
+        window.updatePrintDimensions?.();     // peak height from this preview's z_max
         window.appState._updateWorkflowStepper?.();
         if (statusEl) {
             const warn = data.composite_error ? `  ⚠ composite failed, raw DEM shown` : '';

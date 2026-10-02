@@ -3,6 +3,23 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-01 — Pages follow the design guidelines; Extrude is rebuilt first
+- **Decision:** adopt the shared `Projects/design-guidelines.md` with the map2stl appendix
+  ([../design-guidelines.md](../design-guidelines.md)). Mockup round 1 (layers left, result
+  centre, the selection's settings right, everything else in ⚙ Settings with Beginner / Custom /
+  Everything) approved as is; build order Extrude → Edit → Explore. Tabs keep the names Explore /
+  Edit / Extrude. Default printer bed is **Ender 220 × 220** (was "Prusa 250 × 210").
+  "✨ Make it printable" does the full job: pick the preset (City for a small box with buildings,
+  otherwise Mountain / Region), load the DEM and layers, size the model to fill the bed, build it,
+  open Extrude, and offer Undo.
+- **Why:** user choices in the mockup form, 2026-10-01. The default model was 797 × 802 mm on a
+  250 × 210 bed ([review](../history/audits/design-review-2026-10-01.md), severe 2); Extrude
+  fixes that with the least code.
+- **Rejected:** renaming tabs to Area / Layers / Print (user kept the known names); a magic button
+  that only resizes, or asks first (user chose the full job).
+- **Supersedes / superseded by:** —
+- **Source:** [F-DESIGN](../plans/active/F-DESIGN-guidelines-redesign.md)
+
 ### 2026-10-01 — Explore map draws a viewport set of ≤ 20 outlined region boxes, shared with the list
 - **Decision:** saved-region boxes are outlines (1.5 px, white 55 % over a dark halo, no visible
   fill); selected = accent `#4a9eff`, 3 px, fill 0.08; hover brightens and shows the name. Only the

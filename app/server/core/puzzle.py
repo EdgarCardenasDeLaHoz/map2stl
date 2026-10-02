@@ -21,7 +21,7 @@ optional ``knob_width_mm``, ``knob_depth_mm`` (default: scaled to the piece
 size), ``knob_shape`` (``classic`` | ``dovetail`` | ``rectangular``),
 ``clearance_mm``, ``method`` (``auto`` | ``mask`` | ``boolean``), ``engrave``
 (default true), ``engrave_depth_mm`` (0.6), ``layout`` (default false) +
-``bed_mm`` ([w, h], default 250 x 210) + ``layout_gap_mm`` (5).
+``bed_mm`` ([w, h], default 220 x 220) + ``layout_gap_mm`` (5).
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ from numpy2stl.applications.puzzle import (
 from numpy2stl.processing.boolean import cut_jigsaw, mesh_volume
 
 MAX_PIECES = 64
-DEFAULT_BED_MM = (250.0, 210.0)
+DEFAULT_BED_MM = (220.0, 220.0)   # Ender 220 x 220, the client default (decisions/frontend.md 2026-10-01)
 ENGRAVE_DEPTH_MM = 0.6
 
 

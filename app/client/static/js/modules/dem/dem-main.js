@@ -610,10 +610,15 @@ window.updatePrintDimensions = function updatePrintDimensions() {
     const gridH = demCanvas?.height || lastDemData.height;
     const bp = window._readBuildParams?.() || {};
     const mmPerPx = bp.mm_per_pixel ?? 1.0;
-    // Relief is model height times exaggeration; the base sits under it.
-    const modelH = +((bp.model_height ?? 30) * (bp.exaggeration ?? 1)).toFixed(1);
+    // The built preview's z_max is the printed height, base included (export.py
+    // terrain_stage). Before a preview exists, estimate: fit height × exaggeration +
+    // base, which is only right in fit-to-height mode (true scale is usually lower).
     const baseH = bp.base_height ?? 0;
-    const totalH = +(modelH + baseH).toFixed(1);
+    const zMax = window.appState?.generatedModelData?.zMaxMm;
+    const totalH = Number.isFinite(zMax)
+        ? +zMax.toFixed(1)
+        : +((bp.model_height ?? 30) * (bp.exaggeration ?? 1) + baseH).toFixed(1);
+    const modelH = +(totalH - baseH).toFixed(1);
     const footW = Math.round(gridW * mmPerPx);
     const footH = Math.round(gridH * mmPerPx);
 

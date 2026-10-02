@@ -2,6 +2,12 @@
   <div class="main-header">
     <!-- Short title so the header stays on one line from 1024 px up (UI audit 2026-09-30). -->
     <div class="main-title" title="3D Maps: globe &amp; map selector">3D Maps</div>
+    <!-- Context pill: what is open (design guidelines §2). Click: back to the region list. -->
+    <button v-if="regionPill" type="button" class="ctx-pill" id="regionContextPill"
+            :title="`${regionPill.name}: choose another region`" @click="goExplore">
+      <span aria-hidden="true">📍</span> <b>{{ regionPill.name }}</b>
+      <span class="ctx-sub">{{ regionPill.size }}</span> <span aria-hidden="true">▾</span>
+    </button>
     <div class="tabs">
       <!-- data-view attributes must stay — window.switchView() reads them via querySelector -->
       <button class="tab active" data-view="map" id="tabExplore">
@@ -18,52 +24,18 @@
     </div>
 
     <div class="header-actions">
+      <!-- The whole job in one click (modules/ui/make-printable.js). -->
+      <button type="button" id="makePrintableBtn" class="magic-btn"
+              title="Pick a preset for this region, load it, size it to your printer bed and open the 3D model"
+              @click="makePrintable">✨<span class="hdr-btn-label"> Make it printable</span></button>
       <!-- Region settings save themselves (modules/ui/presets.js, autosave); this says
            whether they have. No Save button: design guidelines §1.5. -->
       <span id="saveSettingsStatus" class="save-status" role="status" aria-live="polite"></span>
-      <!-- Guides: the step-by-step SOPs (docs/guides/*.md) rendered at /guides -->
-      <a class="btn btn-secondary docs-menu-btn guides-btn" href="/guides" target="_blank" rel="noopener"
-         title="Step-by-step guides with screenshots: city models, puzzles, large regions"
-         aria-label="Guides">
-        <span aria-hidden="true">📘</span><span class="hdr-btn-label"> Guides</span>
-      </a>
-
-      <!-- Pipeline results browser (/reports, server-rendered). Was a fixed pill in index.html
-           that covered the map attribution. -->
-      <a class="btn btn-secondary docs-menu-btn guides-btn" id="pipelineReportsLink" href="/reports"
-         title="Pipeline results: browse rendered skyline pipeline reports" aria-label="Pipeline results">
-        <span aria-hidden="true">📊</span><span class="hdr-btn-label"> Results</span>
-      </a>
-
-      <!-- Diagnostics button -->
-      <button class="btn btn-secondary docs-menu-btn" @click="openDiag"
-              title="Diagnostics: check server status, keys, DEM sources, and region coverage"
-              aria-label="Diagnostics">
-        <span aria-hidden="true">🩺</span><span class="hdr-btn-label"> Diagnostics</span>
-      </button>
-
-      <!-- Keys button -->
-      <button class="btn btn-secondary docs-menu-btn" @click="openKeys"
-              title="Keys: service authentication (Earth Engine, API keys)" aria-label="Keys">
-        <span aria-hidden="true">🔑</span><span class="hdr-btn-label"> Keys</span>
-      </button>
-
-      <!-- Docs dropdown -->
-      <div class="docs-menu">
-        <button class="btn btn-secondary docs-menu-btn" id="docsMenuBtn"
-                title="Docs" aria-label="Docs" :aria-expanded="docsOpen ? 'true' : 'false'"
-                @click="docsOpen = !docsOpen">
-          <span aria-hidden="true">📖</span><span class="hdr-btn-label"> Docs</span>
-        </button>
-        <div v-if="docsOpen" class="docs-dropdown">
-          <a v-for="link in docsLinks" :key="link.href"
-             :href="link.href" target="_blank" rel="noopener"
-             class="docs-dropdown-link">
-            {{ link.label }}
-          </a>
-        </div>
-      </div>
+      <!-- ⚙ Settings: mode, tools, keys, diagnostics, guides and docs (SettingsSheet.vue). -->
+      <button type="button" id="settingsSheetBtn" class="gear-btn" aria-label="Settings" title="Settings"
+              @click="settingsOpen = true">⚙</button>
     </div>
+    <SettingsSheet :open="settingsOpen" @close="settingsOpen = false" @keys="openKeys" @diag="openDiag" />
 
     <!-- Keys modal -->
     <div v-if="keysOpen" class="keys-overlay" @click.self="keysOpen = false">
@@ -249,25 +221,31 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { computed, ref } from 'vue';
+import SettingsSheet from './SettingsSheet.vue';
+import { useAppStore } from '../../stores/app';
 
-const docsOpen = ref(false);
-const docsLinks = [
-  { label: '📋 Swagger UI',          href: '/docs' },
-  { label: '📘 ReDoc',               href: '/redoc' },
-  { label: '📚 Project Docs',        href: '/project-docs/' },
-  { label: '🐍 Python API Reference', href: '/api-reference/' },
-];
+const store = useAppStore();
+const settingsOpen = ref(false);
+// Modules (and the Extrude panel's "⚙ Settings" link) open the sheet through window.
+(window as any).openSettingsSheet = () => { settingsOpen.value = true; };
 
-// Close docs dropdown when clicking outside
-function onDocumentClick(e: Event) {
-  const btn = document.getElementById('docsMenuBtn');
-  if (btn && !btn.contains(e.target as Node)) {
-    docsOpen.value = false;
-  }
+const regionPill = computed(() => {
+  const r = store.selectedRegion as { name: string; north: number; south: number; east: number; west: number } | null;
+  if (!r) return null;
+  const lat = ((r.north + r.south) / 2) * Math.PI / 180;
+  const w = Math.abs(r.east - r.west) * 111.32 * Math.cos(lat);
+  const h = Math.abs(r.north - r.south) * 110.574;
+  const f = (km: number) => (km >= 100 ? Math.round(km).toLocaleString() : km.toFixed(1));
+  return { name: r.name, size: `${f(w)} × ${f(h)} km` };
+});
+
+function goExplore() {
+  (window as any).switchView?.('map');
 }
-onMounted(() => document.addEventListener('click', onDocumentClick));
-onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick));
+function makePrintable() {
+  (window as any).makePrintable?.();
+}
 
 // Keys modal state
 const keysOpen = ref(false);
@@ -516,10 +494,6 @@ async function saveTilePath() {
   flex-shrink: 0;
 }
 
-.docs-menu-btn {
-  white-space: nowrap;
-}
-
 .save-status {
   font-size: 12px;
   color: var(--text-muted);
@@ -530,19 +504,27 @@ async function saveTilePath() {
 .save-status.pending { color: var(--text-muted); }
 .save-status.failed  { color: #ff6b6b; }
 
-/* Below ~1200 px the right buttons show icons only (aria-label + title keep the names). */
+.ctx-pill {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 1; min-width: 0;
+  background: #1c1c1e; color: #f5f5f7; border: 0; border-radius: 999px; padding: 5px 12px;
+  font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ctx-pill:hover { background: #2c2c2e; }
+.ctx-sub { color: var(--text-muted); }
+.magic-btn {
+  border: 0; border-radius: 999px; padding: 6px 14px; cursor: pointer; white-space: nowrap;
+  background: linear-gradient(90deg, #0a84ff, #5e5ce6); color: #fff; font-weight: 600; font-size: 13px;
+}
+.magic-btn[aria-busy="true"] { opacity: 0.6; cursor: progress; }
+.gear-btn {
+  width: 32px; height: 32px; border-radius: 999px; border: 0; cursor: pointer;
+  background: #1c1c1e; color: var(--text-muted); font-size: 16px;
+}
+.gear-btn:hover { background: #2c2c2e; color: #f5f5f7; }
+
+/* Below ~1200 px the magic button shows its icon only (title keeps the name). */
 @media (max-width: 1199px) {
   .hdr-btn-label { display: none; }
-}
-
-.docs-menu {
-  position: relative;
-}
-
-.guides-btn {
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
 }
 
 /* Keys modal overlay */
