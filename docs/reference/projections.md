@@ -168,6 +168,15 @@ im = im[:, ~np.any(np.isnan(im), axis=0)]
 
 These implementation details are essential for correct layer alignment and projection behavior.
 
+### `miller` / `gall` — Miller cylindrical, Gall stereographic
+
+Cylindrical: x = s·λ, y = f(φ), sampled by `geo2stl/projections.py::_project_cylindrical_y`.
+- Miller: s = 1, y = 1.25·ln tan(π/4 + 0.4φ).
+- Gall: s = 1/√2, y = (1 + √2/2)·tan(φ/2) (`_X_SCALE`; was s = 1 until 2026-10-02).
+
+Small-box shapes of every projection are checked against these formulas in
+`tests/test_projection_shapes.py`.
+
 ### Data source coordinate systems
 
 | Source | Native CRS | Notes |

@@ -2,6 +2,21 @@
 
 Raster orientation, map-projection order and area measurement. Related: [architecture.md](architecture.md) (row 0 = north), [terrain-dem.md](terrain-dem.md) (project once).
 
+### 2026-10-02 — Gall is x = λ/√2 and sinusoidal fills its widest row; shapes are tested against textbook maths
+- **Decision:** `geo2stl/projections.py` Gall stereographic uses x = λ/√2 (`_X_SCALE`, passed to
+  `_project_cylindrical_y`), and sinusoidal samples lon = centre + x·half_width·widest_cos/cos(lat), so
+  x ∈ [−1, 1] spans the box's widest row. `tests/test_projection_shapes.py` checks each projection's
+  small-box aspect against the textbook derivatives, independent of `expected_aspect_ratio`.
+- **Why:** a live sweep of every projection (user asked "are different projections working?") gave
+  Granada (2 km, 37° N) Gall 423 × 320 px where the maths says ≈ 300, and sinusoidal 254 × 320 where it
+  says ≈ 320. Gall used Miller's x = λ (√2 too wide); sinusoidal lacked the widest_cos factor, so only
+  the middle cos(lat) of the width held data and the rest was trimmed as empty. The existing tests
+  compared outputs with `expected_aspect_ratio`, which shared the Gall formula, so they passed. After
+  the fix: Gall 299 × 320, sinusoidal 319 × 320; the new test fails on the old code (Gall 1.322 vs 0.934,
+  sinusoidal 0.794 vs 1.000).
+- **Rejected:** —
+- **Supersedes / superseded by:** —
+
 ### 2026-09-30 — Routes accept only clip_valid_region; stored clip_nans is renamed on load
 - **Decision:**
   - The deprecated `clip_nans` alias is gone from every route and request model (terrain, cities, composite, height, schemas) and from export parsing; they read only `clip_valid_region`. `/api/settings` defaults and the SDK use `clip_valid_region`.

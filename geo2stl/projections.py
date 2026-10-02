@@ -181,7 +181,7 @@ def expected_aspect_ratio(bbox: tuple[float, float, float, float],
         y_n = float(y_of_lat(np.array([north]))[0])
         y_s = float(y_of_lat(np.array([south]))[0])
         proj_height = abs(y_n - y_s)
-        proj_width = np.radians(east - west)
+        proj_width = np.radians(east - west) * _X_SCALE[projection]
         return proj_width / proj_height if proj_height else 1.0
     raise ValueError(f"Unknown projection: {projection}")
 
@@ -334,7 +334,7 @@ def project_coordinates(
     elif projection == 'gall':
         result, metadata = _project_cylindrical_y(
             mat, bbox, maintain_dimensions, fill_value, metadata,
-            _gall_y, order=order)
+            _gall_y, order=order, x_scale=_X_SCALE['gall'])
 
     else:
         raise ValueError(f"Unknown projection: {projection}")
@@ -471,6 +471,12 @@ def _miller_y(lat_deg):
     return 1.25 * np.log(np.tan(np.pi / 4 + 0.4 * phi))
 
 
+# x = scale * lambda for the cylindrical projections sharing _project_cylindrical_y.
+# Gall stereographic is x = lambda / sqrt(2) (projecting onto a cylinder secant at 45°);
+# until 2026-10-02 it used Miller's x = lambda and came out sqrt(2) too wide.
+_X_SCALE = {'miller': 1.0, 'gall': 1.0 / np.sqrt(2)}
+
+
 def _gall_y(lat_deg):
     """Gall Stereographic: y = (1 + sqrt(2)/2) * tan(phi/2). Compromise."""
     phi = np.radians(np.clip(lat_deg, -89.9, 89.9))
@@ -485,8 +491,9 @@ def _project_cylindrical_y(
     metadata: dict,
     y_of_lat,
     order: int = 1,
+    x_scale: float = 1.0,
 ) -> tuple[np.ndarray, dict]:
-    """Project a raster with a cylindrical y = y_of_lat(lat) transform.
+    """Project a raster with a cylindrical y = y_of_lat(lat), x = x_scale * lon transform.
 
     Longitude is linear in x; latitude is warped in y by ``y_of_lat`` (a
     numpy-vectorized function taking degrees). Output keeps the input shape
@@ -506,7 +513,7 @@ def _project_cylindrical_y(
         out_m, out_n = m, n
     else:
         proj_height = abs(y_north - y_south)
-        proj_width = np.radians(east - west)
+        proj_width = np.radians(east - west) * x_scale
         aspect = proj_width / proj_height if proj_height else 1.0
         out_m = m
         out_n = max(1, int(round(m * aspect)))
@@ -773,13 +780,18 @@ def _project_sinusoidal(
     x_out = np.linspace(-1.0, 1.0, out_n)          # (out_n,)
     half_width = (east - west) / 2.0
 
+    # x in [-1, 1] spans the widest row, (east-west)/2 * widest_cos either side of the
+    # centre; a row at latitude lat covers lon = centre + x * half_width * widest_cos / cos(lat).
+    # Until 2026-10-02 the widest_cos factor was missing, so only the middle cos(lat) of the
+    # width held data and the rest was trimmed: a 37° N box came out 20 % too narrow.
+    widest_cos = max(abs(np.cos(np.radians(north))), abs(np.cos(np.radians(south))))
     cos_lat = np.cos(np.radians(lat_values))       # (out_m,)
     # Guard the poles: rows with ~0 cosine can't be sampled (division blows up).
     safe = cos_lat >= 0.01
     cos_lat_safe = np.where(safe, cos_lat, 1.0)
 
-    # lon_sample[i, j] = x_out[j] * half_width / cos_lat[i] + center_lon
-    lon_sample = (x_out[None, :] * half_width) / cos_lat_safe[:, None] + center_lon
+    # lon_sample[i, j] = x_out[j] * half_width * widest_cos / cos_lat[i] + center_lon
+    lon_sample = (x_out[None, :] * half_width * widest_cos) / cos_lat_safe[:, None] + center_lon
 
     valid = (lon_sample >= west) & (lon_sample <= east) & safe[:, None]
 
