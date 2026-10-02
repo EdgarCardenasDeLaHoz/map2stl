@@ -3,6 +3,20 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-02 — Opening Extrude with a region is the whole job; ✨ Make it printable removed
+- **Decision:** opening Extrude when the loaded DEM is not the selected region's loads it with the
+  region's own settings (`view-management.js::_ensureDemForExtrude`); the new DEM fills the bed
+  and the preview builds, so "pick a region → Extrude" gives a printable model. The ✨ button,
+  its Undo banner and its size-based preset choice are gone; presets stay as Edit → Terrain →
+  Style.
+- **Why:** user asked whether Make it printable could happen by choosing Extrude after picking a
+  region, and chose "Extrude loads, no preset" (form, 2026-10-02): nothing changes behind the
+  user's back, so no Undo is needed. Checked in the app: Granada → Extrude loaded, built and
+  fitted the Ender bed (207 × 209 × 30 mm).
+- **Rejected:** a preset for new regions on Extrude; keeping ✨ next to the auto-load.
+- **Supersedes / superseded by:** supersedes the ✨ part of "Pages follow the design guidelines;
+  Extrude is rebuilt first" (2026-10-01).
+
 ### 2026-10-02 — Page settings live in the page's right-hand panel; no mode; help is a header menu
 - **Decision:** each page's right-hand panel ends with "More settings": one switch per optional
   section (Edit: Data sources & fetch details, Display, Composite & imports, Settings as JSON;

@@ -38,6 +38,23 @@ function _invalidateMapSize() {
  * Hides all containers then shows the selected one.
  * @param {'map'|'globe'|'dem'|'model'|'regions'|'compare'} view
  */
+/**
+ * Picking a region and opening Extrude is the whole job (user, 2026-10-02; replaced the
+ * ✨ Make it printable button): when the loaded DEM is not the selected region's, load it
+ * with the region's own settings. The new DEM is sized to fill the bed
+ * (ModelContainer.vue) and the preview builds when it arrives (model-viewer.js).
+ */
+function _ensureDemForExtrude() {
+    const region = window.appState?.selectedRegion;
+    if (!region) return;
+    const box = window.appState.currentDemBbox;
+    const loaded = window.appState.lastDemData && box
+        && ['north', 'south', 'east', 'west'].every((k) => Math.abs(box[k] - region[k]) < 1e-9);
+    if (loaded) return;
+    window.setBboxInputValues?.(region.north, region.south, region.east, region.west);
+    window.loadDEM?.();
+}
+
 window.switchView = function switchView(view) {
     const containers = Object.fromEntries(
         Object.entries(VIEW_CONTAINERS).map(([name, id]) => [name, document.getElementById(id)]));
@@ -96,6 +113,7 @@ window.switchView = function switchView(view) {
         if (modelContainer) modelContainer.style.display = 'flex';
         // Auto-collapse sidebar so the 3D viewport gets full width
         if (sidebar) sidebar.style.display = 'none';
+        _ensureDemForExtrude();
     } else if (view === 'regions') {
         if (containers.regions) window.populateRegionsTable?.();
     } else if (view === 'compare') {

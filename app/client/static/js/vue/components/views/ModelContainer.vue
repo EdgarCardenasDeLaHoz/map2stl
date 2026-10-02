@@ -10,13 +10,6 @@
           <span style="font-size:40px;">{{ emptyState.icon }}</span>
           <span>{{ emptyState.text }}</span>
         </div>
-        <!-- ✨ Make it printable result (modules/ui/make-printable.js), with Undo. -->
-        <div v-if="made" class="made-banner" role="status">
-          <span>✨ Made printable: <b>{{ made.label }}</b> preset, sized to fill the <b>{{ bedName }}</b> bed.
-            Adjust anything on the right.</span>
-          <button type="button" class="mlink" @click="undoMade">Undo</button>
-          <button type="button" class="made-close" aria-label="Dismiss" @click="made = null">✕</button>
-        </div>
         <div class="model-overlay">
           <span id="modelStatus">No model generated</span>
           <span v-if="scaleText" id="modelScaleInfo" class="model-scale-info"
@@ -379,7 +372,7 @@
   </div><!-- /modelContainer -->
 </template>
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import PreflightPanel from './PreflightPanel.vue';
 import ToolSwitches from '../shared/ToolSwitches.vue';
 import { useAppStore } from '../../stores/app';
@@ -400,7 +393,11 @@ const ui = useUiModeStore();
 // mesh exists; while it shows, say why: no DEM yet, mesh on its way, or failed.
 const emptyState = computed(() => {
   const dem = store.lastDemData as { values?: ArrayLike<number> } | null;
-  if (!dem?.values?.length) return { icon: '🗺️', text: 'Load a DEM in the Edit tab to render the 3D model' };
+  if (!dem?.values?.length) {
+    return store.selectedRegion
+      ? { icon: '⏳', text: 'Loading the terrain…' }
+      : { icon: '🗺️', text: 'Pick a region in Explore to see it in 3D' };
+  }
   if (store.modelPreviewState === 'error') return { icon: '⚠️', text: 'Mesh build failed — see the status line below' };
   return { icon: '⏳', text: 'Building mesh…' };
 });
@@ -683,18 +680,6 @@ function cancelExport() {
     (window as any).cancelExport?.();
 }
 
-// ── ✨ Make it printable banner ──────────────────────────────────────────────
-const made = ref<{ label: string; undo: () => Promise<void> } | null>(null);
-function onMade(e: Event) {
-  made.value = (e as CustomEvent).detail;
-}
-async function undoMade() {
-  const m = made.value;
-  made.value = null;
-  await m?.undo();
-}
-onMounted(() => window.addEventListener('map2stl:made-printable', onMade));
-onBeforeUnmount(() => window.removeEventListener('map2stl:made-printable', onMade));
 
 </script>
 <style scoped>
@@ -751,11 +736,4 @@ onBeforeUnmount(() => window.removeEventListener('map2stl:made-printable', onMad
 .model-scale-info { display: block; font-size: 11px; color: #9cc; margin-top: 2px; }
 /* Cards sit on the page background (guidelines §4: background steps, no frame around cards). */
 #modelRightPanel.model-sidebar { background: transparent; border: 0; box-shadow: none; padding: 0; }
-.made-banner {
-  position: absolute; top: 34px; left: 12px; right: 12px; z-index: 5;
-  display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 12px;
-  background: rgba(28, 28, 30, 0.95); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4); font-size: 13px;
-}
-.made-banner span { flex: 1; }
-.made-close { background: none; border: 0; color: var(--text-muted); cursor: pointer; font-size: 14px; }
 </style>

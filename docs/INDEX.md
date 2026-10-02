@@ -259,7 +259,7 @@ Full map: [reference/frontend-modules.md](reference/frontend-modules.md).
 - 3D preview, bed outline, draggable puzzle cuts: `map2stl/app/client/static/js/modules/export/model-viewer.js::previewModelIn3D` (`updateBedOutline`, `updatePuzzlePreview`, `_startCutDrag`); edge maths `map2stl/app/client/static/js/modules/export/puzzle-cuts.js`
 - Print scale, bed parsing, piece count (mirror `choose_scale` / `plan_grid`): `map2stl/app/client/static/js/modules/export/print-scale.js::modelScale` (`parseBedSize`, `piecesNeeded`, `fillBedMmPerPx`)
 - Optional settings sections ("More settings" switches per page): `map2stl/app/client/static/js/vue/stores/uiMode.ts::useUiModeStore`; list `map2stl/app/client/static/js/vue/components/shared/ToolSwitches.vue` (was ⚙ sheet `map2stl/app/client/static/js/vue/components/layout/SettingsSheet.vue`
-- ✨ Make it printable: `map2stl/app/client/static/js/modules/ui/make-printable.js::makePrintable` (preset rule `workflow-presets.js::choosePreset`)
+- Region → Extrude loads the DEM and fills the bed (replaced ✨ Make it printable): `map2stl/app/client/static/js/modules/ui/view-management.js::_ensureDemForExtrude`
 - Edit layers (what prints = what shows): `map2stl/app/client/static/js/vue/stores/editLayers.ts::EDIT_LAYERS`; panels `EditLayersPanel.vue`, `LayerProperties.vue`; write controls by id `map2stl/app/client/static/js/vue/dom-fields.ts::setField`
 - Live composite in preview/export (no Apply for DEM/water/rivers/lakes): `map2stl/app/client/static/js/modules/export/export-handlers.js::_demSettings`
 - Region size text ("2.0 × 2.0 km") for pill, list, map card, editor: `map2stl/app/client/static/js/modules/regions/region-geometry.js::formatBboxDims`

@@ -29,10 +29,10 @@ per-layer counts and timings, checks).
 right) → *Keys & data folders* (any 30 m source); server running
 (`Start 3D Maps.bat`).
 
-**Quick path**: pick the region, then **✨ Make it printable** in the header. It picks the
-*City* preset (box diagonal ≤ 25 km), *Mountain* (≤ 100 km) or *Region*, loads the DEM, sizes the
-model to fill the printer bed in one piece and opens Extrude; the banner there has
-**Undo**. The steps below are the full route, for a large model in puzzle pieces.
+**Quick path**: pick the region in Explore, then open **3 Extrude**. It loads the terrain with
+the region's own settings, sizes the model to fill your printer's bed and builds the 3D
+preview; download from the *Download* card. To start from a preset, pick a *Style* (City,
+Mountain, Region, Coast) in Edit → *Terrain* first.
 
 How the app is laid out (since 2026-10-02):
 - Settings save themselves; the header shows "✓ Saved". There is no Save button.

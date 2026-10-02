@@ -24,10 +24,6 @@
     </div>
 
     <div class="header-actions">
-      <!-- The whole job in one click (modules/ui/make-printable.js). -->
-      <button type="button" id="makePrintableBtn" class="magic-btn"
-              title="Pick a preset for this region, load it, size it to your printer bed and open the 3D model"
-              @click="makePrintable">✨<span class="hdr-btn-label"> Make it printable</span></button>
       <!-- Region settings save themselves (modules/ui/presets.js, autosave); this says
            whether they have. No Save button: design guidelines §1.5. -->
       <span id="saveSettingsStatus" class="save-status" role="status" aria-live="polite"></span>
@@ -264,9 +260,6 @@ const regionPill = computed(() => {
 
 function goExplore() {
   (window as any).switchView?.('map');
-}
-function makePrintable() {
-  (window as any).makePrintable?.();
 }
 
 // Keys modal state

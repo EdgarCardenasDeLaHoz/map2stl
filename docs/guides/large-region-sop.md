@@ -50,13 +50,9 @@ lakes ≥ 1 ha 2 m below the shore. 0.5 mm per pixel. Run through the app's rout
 **Prerequisites**: as in the city SOP (venv, OpenTopography key, server running). Rivers
 use HydroRIVERS, downloaded per continent on first use (§5); lakes use Overpass.
 
-**Quick path**: pick the region, then **✨ Make it printable** in the header. It loads the
-DEM, sizes the model to fill the bed in one piece and opens Extrude (with **Undo**), using
-the *Region* preset for a box diagonal over 100 km and *Mountain* for 25–100 km (Middle
-Rhine, Sierra Nevada: pick *Region* in step 2 instead to get rivers and lakes). Check the
-*Rivers & lakes* layer in Edit (step 4): with its switch on they are in every preview and
-download. The Explore and Edit pages, Extrude's layout and the *More settings* switches are
-described in the city SOP, §2.
+**Quick path**: pick the region in Explore, choose the *Region* style in Edit → *Terrain*,
+then open **3 Extrude**: it loads the terrain, sizes the model to fill the bed and builds the
+preview. Turn on *Split into pieces* for a print bigger than the bed.
 
 Screenshots: Grand Canyon reference box (N 36.47, S 35.97, E −111.78, W −112.88), taken
 by `Code/claude/scripts/sop_screenshots.py` (outside the repo; its docstring says how to

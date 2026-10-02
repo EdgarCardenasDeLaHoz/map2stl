@@ -136,8 +136,7 @@ flowchart LR
 | `app-setup.js` | `setupOpacityControls`, `setupStackedLayers`, `loadAllLayers`, `setupAutoReload`, `clearAllBoundingBoxes` | Init wiring; `loadAllLayers` uses `Promise.allSettled` |
 | `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset`, `setupAutoSave`, `_migratePreset` | Presets, auto-save, `PRESET_VERSION` migration, revert snapshot. Sends `projection.clip_valid_region` only |
 | `settings-compat.js` | `normalizeSettingsKeys` | Pure: renames legacy keys in saved region settings / presets (`projection.clip_nans` → `clip_valid_region`) before `applyAllSettings` reads them |
-| `workflow-presets.js` | `WORKFLOW_PRESETS`, `applyFields`, `applyWorkflowPreset`, `regionDemSource`, `choosePreset` | Pure: City / Mountain / Region / Coast presets; returns an undo list; preset for a box size |
-| `make-printable.js` | `makePrintable` (window) | ✨ Make it printable: preset, load, fill the bed, open Extrude, `map2stl:made-printable` event with undo |
+| `workflow-presets.js` | `WORKFLOW_PRESETS`, `applyFields`, `applyWorkflowPreset`, `regionDemSource` | Pure: City / Mountain / Region / Coast presets; returns an undo list |
 | `curve-editor-state.js` | `CurveEditorState`, `CURVE_PRESETS` | Curve editor state class + presets |
 | `curve-editor.js` | `initCurveEditor`, `applyCurveTodem`, `undoCurve`, `redoCurve`, `setCurvePreset`, `drawCurve` | Elevation curve editor |
 | `keyboard-shortcuts.js` | `setupKeyboardShortcuts` | Ctrl+1/2/3 = Explore / Edit / Extrude (the header tabs; no Globe shortcut), Ctrl+S, Ctrl+R, Ctrl+Z/Y, Escape, arrows, G |
