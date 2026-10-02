@@ -32,7 +32,8 @@ right) → *Keys & data folders* (any 30 m source); server running
 **Quick path**: pick the region in Explore, then open **3 Extrude**. It loads the terrain with
 the region's own settings, sizes the model to fill your printer's bed and builds the 3D
 preview; download from the *Download* card. To start from a preset, pick a *Style* (City,
-Mountain, Region, Coast) in Edit → *Terrain* first.
+Mountain, Region, Coast) in Edit → *Terrain* first. The steps below are the full route, for a
+large model in puzzle pieces.
 
 How the app is laid out (since 2026-10-02):
 - Settings save themselves; the header shows "✓ Saved". There is no Save button.

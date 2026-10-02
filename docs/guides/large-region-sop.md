@@ -53,6 +53,9 @@ use HydroRIVERS, downloaded per continent on first use (§5); lakes use Overpass
 **Quick path**: pick the region in Explore, choose the *Region* style in Edit → *Terrain*,
 then open **3 Extrude**: it loads the terrain, sizes the model to fill the bed and builds the
 preview. Turn on *Split into pieces* for a print bigger than the bed.
+Check the *Rivers & lakes* layer in Edit (step 4): with its switch on they are in every preview
+and download. The Explore and Edit pages, Extrude's layout and the *More settings* switches are
+described in the city SOP, §2.
 
 Screenshots: Grand Canyon reference box (N 36.47, S 35.97, E −111.78, W −112.88), taken
 by `Code/claude/scripts/sop_screenshots.py` (outside the repo; its docstring says how to
