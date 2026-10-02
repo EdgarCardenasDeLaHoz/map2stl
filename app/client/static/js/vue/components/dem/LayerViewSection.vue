@@ -35,9 +35,13 @@
                @change="toggleLayer(l.key)">
 
         <span class="layer-row-icon" :title="l.hint">{{ l.icon }}</span>
-        <span class="layer-row-label" :title="l.label">{{ l.label }}</span>
-        <span class="layer-row-class">{{ l.cls }}</span>
-        <span class="layer-row-res" :id="`layerRes_${l.key}`"></span>
+        <!-- Name with its kind (Terrain, Imagery...) underneath: as a column of its own the
+             kind and resolution ("Terrain · 600 px") as columns pushed the row past the
+             ~250 px panel once text was 11 px. -->
+        <span class="layer-row-name" :title="`${l.label} (${l.cls})`">
+          <span class="layer-row-label">{{ l.label }}</span>
+          <span class="layer-row-class">{{ l.cls }}<span class="layer-row-res" :id="`layerRes_${l.key}`"></span></span>
+        </span>
 
         <input type="range" class="layer-row-opacity" :id="`layerOpacity_${l.key}`"
                min="0" max="100" :value="l.opacity"
@@ -188,7 +192,7 @@ onBeforeUnmount(() => {
 
 .layer-row {
   display: grid;
-  grid-template-columns: 14px 18px minmax(46px, 0.9fr) auto 40px minmax(60px, 1.3fr) 30px 12px;
+  grid-template-columns: 14px 18px minmax(0, 1fr) minmax(40px, 54px) 32px 14px;
   gap: 0 5px;
   align-items: center;
   min-height: 28px;
@@ -214,30 +218,37 @@ onBeforeUnmount(() => {
   text-align: center;
   opacity: 0.9;
 }
+.layer-row-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
 .layer-row-label {
-  font-size: 10px;
+  font-size: 11px;
   color: #aaa;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .layer-row-class {
-  font-size: 8px;
+  font-size: 11px;
   color: #8ea6bf;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .layer-row-res {
-  font-size: 9px;
   color: var(--text-dim);
-  white-space: nowrap;
+}
+.layer-row-res:not(:empty)::before {
+  content: " · ";
 }
 .layer-row-opacity {
   width: 100%;
 }
 .layer-row-pct {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-dim);
   text-align: right;
   white-space: nowrap;
@@ -254,7 +265,7 @@ onBeforeUnmount(() => {
   color: var(--text-dim);
   cursor: pointer;
   padding: 0;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1;
 }
 .layer-arrow-btn:disabled {

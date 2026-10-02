@@ -17,7 +17,7 @@ const info = computed(() => describeDemSampling(store.demSampling as any));
 </script>
 <style scoped>
 .dem-sampling {
-  font-size: 10px;
+  font-size: 11px;
   color: #9ab;
   margin-top: 2px;
   line-height: 1.35;

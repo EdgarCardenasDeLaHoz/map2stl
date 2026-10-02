@@ -359,25 +359,25 @@ watch(() => (store as any).osmCityData, () => {
 
 <style scoped>
 .lm-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
-.lm-muted { font-size: 10px; color: var(--text-dim); }
-.lm-warn { font-size: 10px; color: #e67e22; margin: 4px 0; line-height: 1.35; }
-.lm-error { font-size: 10px; color: #e08080; margin: 4px 0; }
+.lm-muted { font-size: 11px; color: var(--text-dim); }
+.lm-warn { font-size: 11px; color: #e67e22; margin: 4px 0; line-height: 1.35; }
+.lm-error { font-size: 11px; color: #e08080; margin: 4px 0; }
 .lm-num { width: 56px; }
-.lm-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 4px; }
+.lm-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 4px; }
 .lm-table th { text-align: left; color: #aaa; font-weight: 600; padding: 3px 4px; border-bottom: 1px solid #2b2b2b; }
 .lm-table td { padding: 3px 4px; border-bottom: 1px solid #242424; color: #d5d5d5; vertical-align: top; }
 .lm-table tbody tr { cursor: pointer; }
 .lm-table tbody tr:hover { background: rgba(255, 255, 255, 0.04); }
 .lm-table tbody tr.selected { background: rgba(255, 210, 77, 0.14); box-shadow: inset 2px 0 0 #ffd24d; }
 .lm-name { font-weight: 600; color: #eee; }
-.lm-sub { font-size: 9px; color: #7a7a7a; }
+.lm-sub { font-size: 11px; color: #7a7a7a; }
 .lm-numcell { text-align: right; font-variant-numeric: tabular-nums; }
 .lm-overridden { color: #ffd24d; }
 .lm-editor { margin-top: 8px; padding-top: 6px; border-top: 1px solid #2a2a2a; font-size: 11px; }
 .lm-editor-title { font-weight: 600; color: #eee; margin-bottom: 4px; }
 .lm-kinds { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
 .lm-row { margin: 4px 0; }
-.lm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin: 4px 0; font-size: 10px; color: #bbb; }
+.lm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin: 4px 0; font-size: 11px; color: #bbb; }
 .lm-grid label { display: flex; align-items: center; gap: 4px; justify-content: space-between; }
 .lm-actions { display: flex; gap: 6px; margin: 6px 0 4px; }
 .lm-view { width: 100%; height: 220px; margin-top: 4px; border: 1px solid #2a2a2a; border-radius: 4px; overflow: hidden; }

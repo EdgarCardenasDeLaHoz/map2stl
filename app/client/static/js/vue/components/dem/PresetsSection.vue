@@ -37,7 +37,7 @@
           <button id="cancelSavePresetBtn"  class="btn btn-secondary" style="flex:1;">Cancel</button>
         </div>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:8px;">Workflow presets (also the buttons at the top of this panel) set DEM source, resolution, vertical scale, City Model layers and puzzle. View presets and saved presets: Dimension, Depth/Water scales, Colormap, Elevation curve.</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:8px;">Workflow presets (also the buttons at the top of this panel) set DEM source, resolution, vertical scale, City Model layers and puzzle. View presets and saved presets: Dimension, Depth/Water scales, Colormap, Elevation curve.</div>
     </div>
   </CollapsibleSection>
 </template>

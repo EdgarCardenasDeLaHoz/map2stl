@@ -65,7 +65,7 @@ Paths in this part are relative to `map2stl/`.
 | Processing, caching, export generation, data fetching | `app/server/core/`, or the library below it (`geo2stl/`, `city2stl/`, numpy2stl) |
 | The mesh itself (terrain, buildings, roads, water, puzzle) | [reference/pipeline.md](reference/pipeline.md); `app/server/core/export.py::terrain_stage` → `city2stl/city_model.py::build_on_terrain` |
 | Notebook / Python SDK | [reference/sdk.md](reference/sdk.md), `app/session/terrain_session.py` |
-| Browser UI | [reference/frontend.md](reference/frontend.md), [reference/frontend-modules.md](reference/frontend-modules.md) |
+| Browser UI | [design-guidelines.md](design-guidelines.md) (how pages look and behave; read first), [reference/frontend.md](reference/frontend.md), [reference/frontend-modules.md](reference/frontend-modules.md) |
 | Building heights | [reference/height-providers.md](reference/height-providers.md), `city2stl/height/` |
 | Roofs, building parts, landmarks | `city2stl/roofs.py`, `city2stl/landmarks.py`, `city2stl/city_model.py` |
 | Plate registration / align tool | [§ Registration](#registration--plates-map2stl-side), `city2stl/registration/`, numpy2stl `registration/` |

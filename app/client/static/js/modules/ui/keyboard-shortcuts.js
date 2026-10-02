@@ -7,7 +7,7 @@
  *   Ctrl+R        — reload layers
  *   Ctrl+Z/Y      — undo / redo curve
  *   Escape        — clear all bounding boxes
- *   Arrow Up/Down — navigate region list
+ *   (Arrow Up/Down are handled by the region list rows, not here)
  *   G             — toggle pixel/geo grid mode
  *
  * Exposes on window:
@@ -65,20 +65,8 @@ window.setupKeyboardShortcuts = function setupKeyboardShortcuts() {
             document.getElementById('gridPixelModeBtn')?.click();
         }
 
-        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-            e.preventDefault();
-            const regionList = document.getElementById('coordinateList');
-            const items = regionList.querySelectorAll('li');
-            if (items.length === 0) return;
-
-            const activeItem = regionList.querySelector('li.active');
-            let currentIndex = activeItem ? Array.from(items).indexOf(activeItem) : -1;
-
-            currentIndex = e.key === 'ArrowUp'
-                ? Math.max(0, currentIndex - 1)
-                : Math.min(items.length - 1, currentIndex + 1);
-
-            items[currentIndex].click();
-        }
+        // No global ↑/↓: the region list rows move focus themselves (region-ui.js). A
+        // page-wide handler looked up a missing #coordinateList, threw, and stopped
+        // arrow-key scrolling everywhere (removed 2026-10-01).
     });
 };

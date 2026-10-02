@@ -673,7 +673,7 @@ onBeforeUnmount(() => {
 }
 
 .city-table-meta {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
 }
@@ -688,7 +688,7 @@ onBeforeUnmount(() => {
 .city-table-view {
   width: 100%;
   border-collapse: collapse;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .city-table-view thead th {
@@ -727,14 +727,14 @@ onBeforeUnmount(() => {
 }
 
 .city-building-name {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: #eee;
   line-height: 1.2;
 }
 
 .city-building-sub {
-  font-size: 9px;
+  font-size: 11px;
   color: #7a7a7a;
   line-height: 1.2;
 }
@@ -744,7 +744,7 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   padding: 6px 8px;
   margin-bottom: 8px;
-  font-size: 10px;
+  font-size: 11px;
   color: #ccc;
 }
 .city-heights-title {
@@ -793,7 +793,7 @@ onBeforeUnmount(() => {
   fill: #4a9fd4;
 }
 .city-height-axis {
-  font-size: 9px;
+  font-size: 11px;
   fill: #888;
 }
 .city-tallest {
@@ -802,7 +802,7 @@ onBeforeUnmount(() => {
 .city-tallest summary {
   cursor: pointer;
   color: #aaa;
-  font-size: 10px;
+  font-size: 11px;
 }
 .city-tallest-list {
   margin: 4px 0 0;
@@ -880,7 +880,7 @@ onBeforeUnmount(() => {
 }
 
 .city-table-page-label {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
 }

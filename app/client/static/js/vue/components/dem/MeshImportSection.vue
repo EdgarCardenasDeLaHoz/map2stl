@@ -306,7 +306,7 @@ onBeforeUnmount(() => {
   background: #1e1e1e;
 }
 .mesh-import-city-name {
-  font-size: 10px;
+  font-size: 11px;
   color: #8ea6bf;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -336,7 +336,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .mesh-import-file-size {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-dim);
 }
 .mesh-import-current {
@@ -366,7 +366,7 @@ onBeforeUnmount(() => {
   padding: 5px 6px;
 }
 .mesh-import-stats {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
   display: block;
   margin-top: 4px;
@@ -397,7 +397,7 @@ onBeforeUnmount(() => {
   color: #7fb3ff;
 }
 .mesh-import-footer-hint {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
   margin-top: 4px;
 }

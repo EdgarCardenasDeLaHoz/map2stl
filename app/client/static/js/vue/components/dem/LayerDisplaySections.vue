@@ -39,9 +39,9 @@
       <label class="check-label"><input type="checkbox" id="cityLayerWaterways" checked aria-label="Show city waterways"> 💧 Waterways</label>
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-      <label style="font-size:10px;color:var(--text-dim);display:flex;align-items:center;gap:4px;">Buildings <input type="color" id="layerBuildingsColor" value="#c8b89a" class="city-color-swatch" aria-label="Buildings polygon color"></label>
-      <label style="font-size:10px;color:var(--text-dim);display:flex;align-items:center;gap:4px;">Roads <input type="color" id="layerRoadsColor" value="#cc8844" class="city-color-swatch" aria-label="Roads polyline color"></label>
-      <label style="font-size:10px;color:var(--text-dim);display:flex;align-items:center;gap:4px;">Water <input type="color" id="layerWaterwaysColor" value="#4488cc" class="city-color-swatch" aria-label="Waterways color"></label>
+      <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px;">Buildings <input type="color" id="layerBuildingsColor" value="#c8b89a" class="city-color-swatch" aria-label="Buildings polygon color"></label>
+      <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px;">Roads <input type="color" id="layerRoadsColor" value="#cc8844" class="city-color-swatch" aria-label="Roads polyline color"></label>
+      <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px;">Water <input type="color" id="layerWaterwaysColor" value="#4488cc" class="city-color-swatch" aria-label="Waterways color"></label>
     </div>
     <div style="margin-top:6px;">
       <button id="viewOpenCityTablePanelBtn" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;" @click="toggleCityTablePanel">📋 {{ cityTableToggleLabel }}</button>
@@ -55,8 +55,8 @@
       <label class="check-label"><input type="checkbox" id="trailsShowAreas" checked aria-label="Tint ski-area and piste polygon interiors"> ▨ Area fill</label>
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-      <label style="font-size:10px;color:var(--text-dim);display:flex;align-items:center;gap:4px;">Ski <input type="color" id="trailsSkiColor" value="#28bee6" class="city-color-swatch" aria-label="Ski trail color"></label>
-      <label style="font-size:10px;color:var(--text-dim);display:flex;align-items:center;gap:4px;">Hiking <input type="color" id="trailsHikingColor" value="#eb8228" class="city-color-swatch" aria-label="Hiking trail color"></label>
+      <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px;">Ski <input type="color" id="trailsSkiColor" value="#28bee6" class="city-color-swatch" aria-label="Ski trail color"></label>
+      <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px;">Hiking <input type="color" id="trailsHikingColor" value="#eb8228" class="city-color-swatch" aria-label="Hiking trail color"></label>
     </div>
     <div style="margin-top:6px;">
       <label class="check-label"><input type="checkbox" id="trailsColorByDifficulty" aria-label="Color ski pistes by difficulty grade"> 🎨 Color ski by difficulty</label>
@@ -65,10 +65,10 @@
          response carried, so the swatches always match what was painted. -->
     <div v-if="difficultyLegend.length" style="display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:6px;">
       <span v-for="entry in difficultyLegend" :key="entry.name"
-            style="font-size:10px;color:var(--text-dim);display:flex;align-items:center;gap:4px;">
+            style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px;">
         <span :style="{background: entry.css, width: '10px', height: '10px', borderRadius: '2px', display: 'inline-block'}"></span>{{ entry.name }}
       </span>
-      <span v-if="difficultyUntagged" style="font-size:10px;color:var(--text-dim);">ungraded pistes keep the ski color</span>
+      <span v-if="difficultyUntagged" style="font-size:11px;color:var(--text-dim);">ungraded pistes keep the ski color</span>
     </div>
   </CollapsibleSection>
 

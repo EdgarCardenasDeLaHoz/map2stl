@@ -567,7 +567,7 @@ function updateMapGrid() {
             const label = L.marker([lat, bounds.getCenter().lng], {
                 icon: L.divIcon({
                     className: 'grid-label',
-                    html: `<span style="background:rgba(0,0,0,0.6);color:#fff;padding:1px 3px;font-size:9px;border-radius:2px;">${lat.toFixed(lat % 1 === 0 ? 0 : 2)}°</span>`,
+                    html: `<span style="background:rgba(0,0,0,0.6);color:#fff;padding:1px 3px;font-size:11px;border-radius:2px;">${lat.toFixed(lat % 1 === 0 ? 0 : 2)}°</span>`,
                     iconSize: [40, 12]
                 })
             });
@@ -585,7 +585,7 @@ function updateMapGrid() {
             const label = L.marker([bounds.getCenter().lat, lng], {
                 icon: L.divIcon({
                     className: 'grid-label',
-                    html: `<span style="background:rgba(0,0,0,0.6);color:#fff;padding:1px 3px;font-size:9px;border-radius:2px;">${lng.toFixed(lng % 1 === 0 ? 0 : 2)}°</span>`,
+                    html: `<span style="background:rgba(0,0,0,0.6);color:#fff;padding:1px 3px;font-size:11px;border-radius:2px;">${lng.toFixed(lng % 1 === 0 ? 0 : 2)}°</span>`,
                     iconSize: [40, 12]
                 })
             });

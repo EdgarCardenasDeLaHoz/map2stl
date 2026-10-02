@@ -30,7 +30,7 @@
           <option value="20">Very Dense (20)</option>
         </select>
         <button id="gridPixelModeBtn" title="Toggle pixel coordinates"
-                style="padding:2px 5px;font-size:10px;background:#404040;color:var(--text-muted);border:1px solid #555;border-radius:3px;cursor:pointer;white-space:nowrap;">px</button>
+                style="padding:2px 5px;font-size:11px;background:#404040;color:var(--text-muted);border:1px solid #555;border-radius:3px;cursor:pointer;white-space:nowrap;">px</button>
       </div>
       <div style="display:grid;grid-template-columns:auto 1fr auto;gap:4px 6px;align-items:center;margin-top:6px;">
         <label class="check-label" style="white-space:nowrap;" title="Grid spacing mode. 'Meters' draws a constant real-world-distance section grid so projection distortion of real space is visible.">Grid units</label>
@@ -71,7 +71,7 @@
       </div>
       <div id="pixelGridDimsLabel" class="hidden" style="font-size:11px;color:#ff6b6b;margin-top:3px;text-align:right;font-weight:600;"></div>
 
-      <div id="demPixelSizeLabel" class="hidden" style="font-size:10px;color:#8af;margin-top:3px;text-align:right;"></div>
+      <div id="demPixelSizeLabel" class="hidden" style="font-size:11px;color:#8af;margin-top:3px;text-align:right;"></div>
     </div>
 
     <!-- Map tile / terrain overlay controls mirrored from the Explore tab

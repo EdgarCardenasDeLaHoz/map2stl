@@ -25,13 +25,13 @@
               <option value="SRTM15Plus">SRTM15+ (Bathymetry+Land)</option>
             </optgroup>
           </select>
-          <div id="demSourceApiKeyWarning" style="font-size:10px;color:#f90;display:none;">⚠️ OpenTopography API key not configured.</div>
+          <div id="demSourceApiKeyWarning" style="font-size:11px;color:#f90;display:none;">⚠️ OpenTopography API key not configured.</div>
         </div>
 
         <div class="param-group">
           <label for="paramDim" title="Number of grid points per side fetched from the DEM source.">Resolution</label>
           <input type="number" id="paramDim" value="600" min="50" max="2000" step="50">
-          <div id="demResWarning" style="font-size:10px;color:#f90;display:none;">⚠️ High resolution may be slow</div>
+          <div id="demResWarning" style="font-size:11px;color:#f90;display:none;">⚠️ High resolution may be slow</div>
           <DemSamplingInfo />
         </div>
 
@@ -65,7 +65,7 @@
             <option value="1000">1000 px — High Detail</option>
             <option value="1200">1200 px — Max Detail</option>
           </select>
-          <div id="waterResWarning" style="font-size:10px;color:#f90;display:none;">⚠️ May require tiling for large areas</div>
+          <div id="waterResWarning" style="font-size:11px;color:#f90;display:none;">⚠️ May require tiling for large areas</div>
         </div>
 
         <div class="fetch-subsection-header" style="margin-top:8px;">Hydrology</div>
@@ -273,9 +273,9 @@ function toggleCityTablePanel() {
 .fetch-section-header:hover { background: #2a2a2a; }
 .fetch-section-header::-webkit-details-marker { display: none; }
 .fetch-section-header::before {
-    content: '▶';
+    content: '▸';
     display: inline-block;
-    font-size: 8px;
+    font-size: 11px;
     margin-right: 4px;
     color: var(--text-dim);
     transition: transform 0.15s;
@@ -345,7 +345,7 @@ details[open] > .fetch-section-header::before { transform: rotate(90deg); }
 
 /* Sub-section divider header (Water Mask / Hydrology) */
 .fetch-subsection-header {
-    font-size: 9px;
+    font-size: 11px;
     color: #6aa;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -394,7 +394,7 @@ details[open] > .fetch-section-header::before { transform: rotate(90deg); }
 
 /* Inline status text under buttons */
 .fetch-status {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     margin-top: 2px;
     min-height: 12px;
@@ -416,7 +416,7 @@ details[open] > .fetch-section-header::before { transform: rotate(90deg); }
 
 /* Help / hint text under section header */
 .fetch-help-text {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     margin: 0 0 2px 0;
     line-height: 1.3;
@@ -427,7 +427,7 @@ details[open] > .fetch-section-header::before { transform: rotate(90deg); }
     margin-top: 4px;
 }
 .nested-summary {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-dim);
     cursor: pointer;
     user-select: none;
@@ -436,9 +436,9 @@ details[open] > .fetch-section-header::before { transform: rotate(90deg); }
 }
 .nested-summary::-webkit-details-marker { display: none; }
 .nested-summary::before {
-    content: '▶';
+    content: '▸';
     display: inline-block;
-    font-size: 7px;
+    font-size: 11px;
     margin-right: 4px;
     color: var(--text-dim);
     transition: transform 0.15s;

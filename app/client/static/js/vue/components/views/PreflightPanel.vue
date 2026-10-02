@@ -124,7 +124,7 @@ onBeforeUnmount(() => window.removeEventListener('puzzle-edges-changed', onEdges
 .pf-layers th { color: var(--text-dim); font-weight: normal; text-align: left; }
 .pf-layers td, .pf-layers th { padding: 0 4px 0 0; }
 .pf-warnings { margin: 6px 0 0; padding-left: 0; list-style: none; color: #e67e22; }
-.pf-note { color: var(--text-dim); font-size: 10px; margin-top: 4px; }
+.pf-note { color: var(--text-dim); font-size: 11px; margin-top: 4px; }
 .ok { color: #7c7; }
 .warn { color: #e67e22; }
 </style>

@@ -22,6 +22,7 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 | [F-FE1 + F-DEMID](active/F-FE1-vue-consolidation.md) | DEM handles in use; step 7 (delete `v2/`) done; steps 0–6 not pursued | F-DEMID leftovers only |
 | [F-LANDMARK](active/F-LANDMARK-roofs-and-building-parts.md) | §1–§6 done | check the result on the landmark set |
 | [F-USAGE](active/F-USAGE-local-usage-log.md) | in progress | usage log, then a flow report from real sessions |
+| [F-DESIGN](active/F-DESIGN-guidelines-redesign.md) | quick wins in progress | review + capability inventory, then HTML mockups for approval |
 | F-DET, registration learning | skyline and registration plans | see the Skyline section |
 
 ## Mesh pipeline and city model
@@ -121,7 +122,7 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 - **UI audit 2026-09-30** ([audit](../history/audits/ui-audit-2026-09-30.md)), in priority order:
   1. ~~contrast tokens (`--text-muted` / `--text-dim` fail on the dark theme, down to 1.1:1)~~ (done 2026-10-01);
   2. keyboard: `CollapsibleSection` header as a button, global `:focus-visible`, region list as one tab stop;
-  3. shortcuts: page-wide arrow keys, bare `G`, Ctrl+R (Ctrl+2 crash fixed 2026-09-30);
+  3. shortcuts: ~~page-wide arrow keys~~ (removed 2026-10-01), bare `G`, Ctrl+R (Ctrl+2 crash fixed 2026-09-30);
   4. ~~toasts announced, errors persistent, escaped text~~ (done 2026-10-01); validation errors inline still open;
   5. ignored controls: Fit height under Vertical = Auto;
   6. ~~printed-size readout and clearer "model larger than bed"~~ (done 2026-10-01); presets set mm/px from the bed still open;

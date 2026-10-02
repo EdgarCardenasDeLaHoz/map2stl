@@ -71,7 +71,7 @@
 
       <!-- JSON settings editor (hidden by default, toggled by { } JSON button) -->
       <div id="settingsJsonView" class="settings-json-view hidden">
-        <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;">Edit settings as JSON. Click Apply to update the form.</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">Edit settings as JSON. Click Apply to update the form.</div>
         <textarea id="settingsJsonEditor" class="settings-json-editor" spellcheck="false" aria-label="Settings JSON editor"></textarea>
         <div id="settingsJsonError" class="settings-json-error hidden"></div>
         <div class="row-gap6" style="margin-top:6px;">

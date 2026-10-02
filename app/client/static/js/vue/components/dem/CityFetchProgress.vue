@@ -55,7 +55,7 @@ function cancel() {
 </script>
 <style scoped>
 .city-fetch {
-  font-size: 10px;
+  font-size: 11px;
   background: #1e1e1e;
   border: 1px solid #333;
   border-radius: 3px;
@@ -64,8 +64,8 @@ function cancel() {
 }
 .city-fetch-head { display: flex; align-items: center; gap: 6px; }
 .city-fetch-summary { flex: 1; color: #bbb; }
-.city-fetch-cancel { font-size: 10px !important; padding: 1px 8px !important; }
-.city-fetch-close { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 10px; }
+.city-fetch-cancel { font-size: 11px !important; padding: 1px 8px !important; }
+.city-fetch-close { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 11px; }
 .city-fetch-layers { list-style: none; margin: 3px 0 0; padding: 0; columns: 2; column-gap: 10px; }
 .city-fetch-layers li { display: flex; gap: 4px; color: var(--text-dim); break-inside: avoid; }
 .city-fetch-icon { width: 10px; text-align: center; }

@@ -102,7 +102,7 @@ async function loadWaterMask() {
         renderWaterMask(cachedData);
         window.emitStackUpdate();
         document.getElementById('waterMaskStats').innerHTML =
-            `Water pixels: ${cachedData.water_pixels} / ${cachedData.total_pixels} (${cachedData.water_percentage.toFixed(1)}%) <span style="color:#4CAF50;font-size:10px;">[CACHED]</span>`;
+            `Water pixels: ${cachedData.water_pixels} / ${cachedData.total_pixels} (${cachedData.water_percentage.toFixed(1)}%) <span style="color:#4CAF50;font-size:11px;">[CACHED]</span>`;
         window.showToast('Water mask loaded from cache', 'success');
         return;
     }
@@ -393,7 +393,7 @@ function renderLandCoverLegend() {
         html += `<span style="font-size:11px;color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${config.name}">${config.name}</span>`;
         html += `<input type="number" value="${config.elevation}" data-lc-elev="${val}"
             step="0.01" min="-1" max="1"
-            style="width:100%;background:#3a3a3a;color:#ccc;border:1px solid #444;padding:2px;border-radius:3px;font-size:10px;">`;
+            style="width:100%;background:#3a3a3a;color:#ccc;border:1px solid #444;padding:2px;border-radius:3px;font-size:11px;">`;
     }
     html += '</div>';
     container.innerHTML = html;

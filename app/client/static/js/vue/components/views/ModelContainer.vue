@@ -268,7 +268,7 @@
 
               <!-- City Model -->
               <CollapsibleSection title="🏙️ City Model" wrap-style="margin-bottom:10px;">
-                <div style="font-size:10px;color:#aaa;margin-bottom:6px;line-height:1.4;">
+                <div style="font-size:11px;color:#aaa;margin-bottom:6px;line-height:1.4;">
                   Terrain + OSM layers merged into one solid at the Resolution and Vertical
                   settings. Downloads a .zip: merged STL, 3MF with one part per layer,
                   report, and puzzle pieces (OBJ) if enabled.
@@ -300,7 +300,7 @@
                          @input="onPieceInput"> mm
                 </div>
                 <div v-if="bedFit" class="bed-fit-note" :class="bedFit.fits ? 'ok' : 'warn'">{{ bedFitText }}</div>
-                <div style="font-size:10px;color:var(--text-dim);">Knobs, engraving, plates and dragged cuts: see Split / Puzzle
+                <div style="font-size:11px;color:var(--text-dim);">Knobs, engraving, plates and dragged cuts: see Split / Puzzle
                   (cut lines show while Split / Puzzle is off).</div>
                 <button id="exportCityBtn" class="btn btn-success btn-sm" style="width:100%;margin-top:6px;"
                         title="Build terrain + all enabled layers as one model and download a .zip.">

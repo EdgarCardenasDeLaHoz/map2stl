@@ -184,9 +184,9 @@ onBeforeUnmount(() => { if (marker) marker.remove(); unsubscribe?.(); });
 }
 .landmark-results li:hover, .landmark-results li.picked { background: #2d3b48; }
 .landmark-name { color: #eee; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.landmark-caption { color: #8ab; font-size: 10px; }
+.landmark-caption { color: #8ab; font-size: 11px; }
 .landmark-where {
-  grid-column: 1 / -1; color: var(--text-dim); font-size: 10px;
+  grid-column: 1 / -1; color: var(--text-dim); font-size: 11px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .landmark-actions {

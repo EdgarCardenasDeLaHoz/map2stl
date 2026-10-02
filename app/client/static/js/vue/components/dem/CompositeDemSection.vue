@@ -260,7 +260,7 @@ import CollapsibleSection from '../shared/CollapsibleSection.vue';
     margin: 4px 0;
 }
 .composite-subhead {
-    font-size: 9px;
+    font-size: 11px;
     color: #6aa;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -319,16 +319,16 @@ import CollapsibleSection from '../shared/CollapsibleSection.vue';
 .composite-layer-header:hover { background: #2a2a2a; }
 .composite-layer-header::-webkit-details-marker { display: none; }
 .composite-layer-header::before {
-    content: '▶';
+    content: '▸';
     display: inline-block;
-    font-size: 8px;
+    font-size: 11px;
     margin-right: 4px;
     color: var(--text-dim);
     transition: transform 0.15s;
 }
 details[open] > .composite-layer-header::before { transform: rotate(90deg); }
 .composite-2d-only {
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 400;
     color: #d9a441;
     margin-left: 4px;
