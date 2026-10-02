@@ -25,13 +25,28 @@ per-layer counts and timings, checks).
 
 ## 2. The process
 
-**Prerequisites**: venv (`scripts/setup-venv.ps1`); OpenTopography key in *Keys* (any 30 m
-source); server running (`Start 3D Maps.bat`).
+**Prerequisites**: venv (`scripts/setup-venv.ps1`); OpenTopography key in ⚙ Settings (the
+gear at the top right) → *Keys & data folders* (any 30 m source); server running
+(`Start 3D Maps.bat`).
+
+**Quick path**: pick the region, then **✨ Make it printable** in the header. It picks the
+*City* preset (box diagonal ≤ 25 km), *Mountain* (≤ 100 km) or *Region*, loads the DEM, sizes the
+model to fill the printer bed in one piece and opens Extrude; the banner there has
+**Undo**. The steps below are the full route, for a large model in puzzle pieces.
+
+How the app is laid out (since 2026-10-01):
+- Settings save themselves; the header shows "✓ Saved". There is no Save button.
+- **Extrude** is one column of cards: *Printed size*, *Model* (Printer, Width, Height,
+  Base, **Split into pieces**) and *Download* (one button, plus *Check before printing*).
+- Everything else in Extrude is a **tool card** (Vertical & surface, 3D view, City model
+  layers, Puzzle details, Engraving & contours, Cross-section, Model score). Tool cards
+  show only when switched on: ⚙ Settings → *Mode* → *Custom* and the tool's switch, or
+  *Everything* for all of them.
+- Guides, Results, Diagnostics, Keys and the API docs are in ⚙ Settings → *Account & help*.
 
 Screenshots: Granada + Alhambra (N 37.1873, S 37.1693, E −3.5780, W −3.6093), taken by
 `Code/claude/scripts/sop_screenshots.py` (outside the repo; its docstring says how to
-refresh them). A red outline marks the control each step talks about. "Extrude → 📤
-Export" below is the Export tab inside the Extrude view (there is no top-level Export tab).
+refresh them). A red outline marks the control each step talks about.
 
 1. **Pick the area** (Explore): select or draw the region (type in "Search regions…" to
    find a saved one). Check that landmarks are inside the box with margin: the
@@ -68,7 +83,7 @@ Export" below is the Export tab inside the Extrude view (there is no top-level E
 
 3. **Terrain edits** (optional, Edit → ⊕ Composite): water depth, land cover, curve edits.
    These are the *terrain stage*. The Composite's buildings / roads / waterways / walls
-   toggles are 2D preview only; in 3D those come from the City Model layers.
+   toggles are 2D preview only; in 3D those come from the City model layers (step 8).
 
    ![Composite](img/city/05-composite.png)
    *The Composite panel: City / OSM is marked "2D preview only"; ✓ Apply to DEM writes the
@@ -100,59 +115,74 @@ Export" below is the Export tab inside the Extrude view (there is no top-level E
    *Find landmarks: Catedral de Granada (50 m, 41 parts, 5 roof shapes) first; click a row
    for its editor.*
 
-5. **Model** (Extrude → **Build**; the line at its top compares the model's printed size with the bed): the line under the preview shows "1 mm = X m" and the
-   vertical exaggeration; the bed outline and its label show fit. Vertical: *auto* = true
-   scale below a 20 km diagonal, fit to *Fit height* above; override with *True scale ×
-   exag.* or *Fit to height*. Smoothing 3×3. With the City preset's puzzle on, the red
-   lines are already the piece grid.
+5. **Model** (Extrude → *Printed size* and *Model* cards): *Printed size* gives W × D × H,
+   whether it fits the printer bed ("⚠ Bigger than the … bed: lower the width, or split
+   into C × R pieces") and the scale; the line under the preview repeats "1 mm = X m ·
+   scale 1 : N". In the *Model* card:
+   - **Printer**: your bed (default Ender 220 × 220); remembered in this browser.
+   - **Width**: the model's width; it sets mm per pixel (797 px at 1 mm/px → 797 mm).
+     **Fill bed** sizes the model to the bed in one piece; a new DEM is sized that way
+     unless *Split into pieces* is on (the City preset turns it on).
+   - **Height**: vertical exaggeration (×1.0 = true scale); for regions over 20 km it is
+     the relief height in mm instead (Vertical *auto* fits them).
+   - **Base**: the solid plate under the terrain (10 mm).
+   - **Split into pieces**: a jigsaw puzzle cut to the bed; the red lines in the preview
+     are the piece grid.
+   - The exact mm/px, Vertical mode (*auto* = true scale below a 20 km diagonal, fit to
+     *Fit height* above), Smoothing (3×3) and Sea-level cap are in the *Vertical &
+     surface* tool card (switch it on in ⚙ Settings).
 
    ![Extrude](img/city/09-extrude.png)
-   *797 × 575 × 81 mm at 1 mm/px: "1 mm = 3.5 m (1:3,472) · vertical 1× (true scale)";
-   bed 250 × 210 "too small", 4 × 3 cut lines.*
+   *Width 797 mm (1 mm/px): 797 × 575 × 81 mm, "1 mm = 3.5 m · scale 1 : 3,472", Height
+   true scale ×1.0; bigger than the Ender 220 × 220 bed, so Split into pieces is on: 4 × 3
+   cut lines.*
 
-6. **Pre-flight** (Extrude → 📤 Export → ✈ Pre-flight check, *City model* or *Terrain
-   puzzle*, **Run pre-flight**; seconds for terrain, about a minute with 24 k buildings):
-   size vs the bed, scale and vertical exaggeration, piece grid, per-layer shapes with the
-   `widened` / `capped` counts the build will report, thinnest feature, tallest spike,
-   estimated faces, filament (g PLA) and print time, and a warning list. Fix what it flags
-   before building (layers not yet cached are listed, not counted).
+6. **Check before printing** (Extrude → *Download* card → *Check before printing*; pick
+   *City model* or *Terrain puzzle*, **Run pre-flight**; seconds for terrain, about 15 s
+   to a minute with 24 k buildings): size vs the bed, scale and vertical exaggeration,
+   piece grid, per-layer shapes with the `widened` / `capped` counts the build will
+   report, thinnest feature, tallest spike, estimated faces, filament (g PLA) and print
+   time, and a warning list. Fix what it flags before downloading (layers not yet cached
+   are listed, not counted).
 
-   ![Pre-flight](img/city/10-preflight.png)
-   *796 × 574 × 81 mm, 1:3,472, 4 × 3 boolean pieces; buildings: 3,291 widened, 1,449
-   capped; railways and green not cached yet (fetched at build time).*
+   ![Check before printing](img/city/10-preflight.png)
+   *796 × 574 × 81 mm, 1:3,472, 4 × 3 boolean pieces (≤ 199 × 191 mm); buildings: 3,291
+   widened, 1,448 capped; ~5.2 kg PLA, ~146 h.*
 
-7. **Puzzle options** (Extrude → 📤 Export → 🧩 Split / Puzzle; they apply to the City
-   Model puzzle too): knob shape (*classic* rounded, *dovetail*, *rectangular*), engraved
-   piece ids + north arrow on the underside (on by default), *Lay out on plates* (one 3MF
-   per bed). These controls only show while Split / Puzzle's **Enable** is ticked, and
-   while it is ticked the preview draws *its* Columns × Rows grid and the City Model build
-   ignores dragged cuts. For a City Model puzzle: tick *Enable*, set the options, untick
-   it again (the options stay), then drag the red City-grid cuts in the preview (a cut
-   stops where a piece would get too small for its knobs); *Reset cuts* (visible with
-   *Enable* ticked) goes back to equal pieces.
+7. **Puzzle details** (tool card: switch on ⚙ Settings → *Puzzle details*, or Mode
+   *Everything*). *City puzzle* is what *Split into pieces* turns on for a city box;
+   *max* is the largest piece (bed − 10 mm, 210 mm on the Ender). Knob shape (*classic*
+   rounded, *dovetail*, *rectangular*), knob width / depth and clearance apply to both
+   puzzles; engraved piece ids + north arrow on the underside (on by default); *Lay out
+   on plates* (one 3MF per bed). *Columns × Rows* belong to the *Terrain puzzle*: while
+   that box is ticked the preview draws its grid and the city build ignores dragged
+   cuts, so leave it off for a city. Drag the red cuts in the preview to move one (a cut
+   stops where a piece would get too small for its knobs); **Reset cuts** goes back to
+   equal pieces.
 
-   ![Puzzle options](img/city/11-puzzle-options.png)
-   *Enable ticked: knob shape, engraving and plate layout (Columns × Rows are the terrain
-   puzzle's).*
+   ![Puzzle details](img/city/11-puzzle-options.png)
+   *City puzzle on, max 210 mm → 4 × 3 pieces; knob shape, engraving and plate layout.*
 
    ![Dragged cut](img/city/12-drag-cuts.png)
-   *Enable unticked again: the City grid, left vertical cut dragged east — the label
-   reads "4×3 custom · drag cuts".*
+   *The City grid with a vertical cut dragged east — the label reads "4×3 custom · drag
+   cuts".*
 
-8. **Build** (Extrude → 📤 Export → 🏙️ City Model): toggle layers per situation (see §3),
-   keep *Puzzle pieces* on with *max* = bed − 10 mm (set from the Printer section's bed).
-   **Build city model (.zip)**. One build writes the merged STL, the per-layer 3MF, the
-   puzzle (pieces in place + laid-out plates) and `report.json`. The progress bar above
-   the Extrude tabs shows the server's step and the elapsed time (e.g. "Building
+8. **Download** (Extrude → *Download* card): for a box up to 25 km diagonal the button is
+   **⬇ Download model (.zip)**, or **⬇ Download model + pieces (.zip)** with *Split into
+   pieces* on. Layers per situation (see §3) are in the *City model layers* tool card
+   (switch it on in ⚙ Settings). One build writes the merged STL, the per-layer 3MF, the
+   puzzle (pieces in place + laid-out plates) and `report.json`. The progress bar at the
+   top of the Extrude panel shows the server's step and the elapsed time (e.g. "Building
    model... (4:05)") with **✕ Cancel**; the download and a "CITY ready" toast (kept up
    for its full 5 s) mark the end.
 
-   ![City Model](img/city/13-city-model.png)
-   *All ten layers, puzzle pieces ≤ 200 mm (Prusa 250 × 210 bed) → 4 × 3 pieces.*
+   ![Download and city layers](img/city/13-city-model.png)
+   *Download model + pieces (.zip) above the City model layers card: all layers on but
+   trails.*
 
    ![Build finished](img/city/14-build-finished.png)
-   *"CITY ready" after ~10 min (this run also fetched the uncached railways and green
-   layers from Overpass).*
+   *"CITY ready" after 92 s (every OSM layer already cached; a build that has to fetch
+   layers from Overpass takes up to ~10 min).*
 
 9. **QA**: open `report.json` — `check` (size vs bed, faces, watertight, widened/clamped
    per layer, filament and time from the real mesh, warnings), `merged.watertight`,
@@ -160,9 +190,9 @@ Export" below is the Export tab inside the Extrude view (there is no top-level E
    fixed", tallest spike. Slicer profile for terrain puzzles:
    [printing-prusaslicer.md](printing-prusaslicer.md).
 
-Terrain-only models (no city) use the same route: *Extrude → 📤 Export → STL/OBJ/3MF* or
-*Puzzle* build the city model with no layers, so they get the same adaptive mesh and
-scale. A terrain-only puzzle is cut the fast way (pieces meshed straight from the
+Terrain-only models (no city, box diagonal > 25 km) use the same route: the Download card offers
+*3MF / STL / OBJ*, or the terrain puzzle when *Split into pieces* is on. Both build the
+city model with no layers, so they get the same adaptive mesh and scale. A terrain-only puzzle is cut the fast way (pieces meshed straight from the
 heightfield, see §4).
 
 The Extrude preview is the adaptive mesh capped at 150 k faces (tolerance raised until it
@@ -187,7 +217,8 @@ half its length within 60 m of buildings or within 6 m of a road (report:
 `trails_kept` / `trails_dropped`). Granada's old trails layer was 4,293 features,
 3,605 of them town footways.
 
-Per layer (Extrude → 📤 Export → City Model table): enabled, mode (extrude / raised / engraved / water),
+Per layer (Extrude → *City model layers* tool card; switch it on in ⚙ Settings): enabled,
+mode (extrude / raised / engraved / water),
 height or depth, line width. Printability rules apply to every layer: features narrower
 than 0.8 mm are widened, extruded heights capped at 8 × footprint width (reported).
 

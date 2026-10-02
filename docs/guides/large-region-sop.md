@@ -50,6 +50,13 @@ lakes ≥ 1 ha 2 m below the shore. 0.5 mm per pixel. Run through the app's rout
 **Prerequisites**: as in the city SOP (venv, OpenTopography key, server running). Rivers
 use HydroRIVERS, downloaded per continent on first use (§5); lakes use Overpass.
 
+**Quick path**: pick the region, then **✨ Make it printable** in the header. It loads the
+DEM, sizes the model to fill the bed in one piece and opens Extrude (with **Undo**), using
+the *Region* preset for a box diagonal over 100 km and *Mountain* for 25–100 km (Middle
+Rhine, Sierra Nevada: pick *Region* in step 2 instead to get rivers and lakes). Rivers and
+lakes still need step 4 (Composite → Apply to DEM). Extrude's layout, tool cards and ⚙ Settings are
+described in the city SOP, §2.
+
 Screenshots: Grand Canyon reference box (N 36.47, S 35.97, E −111.78, W −112.88), taken
 by `Code/claude/scripts/sop_screenshots.py` (outside the repo; its docstring says how to
 refresh them). A red outline marks the control each step talks about.
@@ -93,35 +100,41 @@ refresh them). A red outline marks the control each step talks about.
    *HydroRIVERS, min order 3, depth ×10; the combined histogram and the range line
    (517 m — 2811 m) show the carved composite before Apply.*
 
-5. **Extrude**: *Resolution (mm/px)* = target size / longest side in px (0.5 → ~400–450
-   mm); *Fit height* 30 mm is the fitted relief; lower *Base* from 10 to 3–5 mm for large
-   prints (10 mm is ~40 % of the filament here). The line under the preview gives the
-   scale and the vertical exaggeration; the bed outline and its label show the fit.
+5. **Extrude → Model card**: a new DEM is sized to fill the printer bed (*Printer*,
+   default Ender 220 × 220). For a bigger print drag **Width** (it sets mm per pixel:
+   0.5 mm/px → ~400–450 mm; the exact value is in the *Vertical & surface* tool card).
+   **Height** is the fitted relief (30 mm) because Vertical *auto* fits regions over
+   20 km. Lower **Base** from 10 to 3–5 mm for large prints (10 mm is ~40 % of the
+   filament here). The *Printed size* card gives W × D × H, whether it fits the bed and
+   the scale; the line under the preview repeats the scale.
 
    ![Extrude](img/region/05-extrude.png)
-   *0.5 mm/px and 5 mm base: 404 × 227 mm, "1 mm = 244 m (1:244,155) · vertical 3.2× true
-   scale (fit to height)"; the bed label reads "too small".*
+   *Width 404 mm (0.5 mm/px) and 5 mm base: 404 × 227 × 35 mm, "1 mm = 244 m · scale
+   1 : 244,155"; Printed size warns it is bigger than the Ender 220 × 220 bed (2 × 2 pieces).*
 
-6. **Pre-flight** (Extrude → 📤 Export → ✈ Pre-flight check): pick *Terrain puzzle* (or
-   *City model*, which with every layer off is the terrain) and **Run pre-flight**: size
-   vs bed, scale, vertical exaggeration, piece grid. Expect 1.3–3× the estimated faces.
+6. **Split and check** (Extrude → Model card → **Split into pieces**; it sets the puzzle
+   grid to the bed), then Download card → **Check before printing**: pick *Terrain puzzle*
+   (or *City model*, which with every layer off is the terrain) and **Run pre-flight**:
+   size vs bed, scale, vertical exaggeration, piece grid. Expect 1.3–3× the estimated faces.
+   Grid, knobs and clearance are in the *Puzzle details* tool card (switch it on in
+   ⚙ Settings).
 
    ![Pre-flight](img/region/06-preflight.png)
-   *Terrain puzzle at the bed grid: 403 × 227 × 35 mm, 1:244,192, vertical 3.27×, 3 × 2
-   pieces (mask path), ~192 k faces (estimate), ~593 g, ~16.6 h.*
+   *Split into pieces on (2 × 2 needed); Terrain puzzle: 403 × 227 × 35 mm, 1:244,192,
+   vertical 3.27×, 2 × 2 pieces (mask path, ≤ 201.5 × 113.2 mm), ~192 k faces (estimate),
+   ~593 g, ~16.6 h.*
 
-7. **Export** (Extrude → 📤 Export): *STL* for one piece; for anything larger than the
-   bed open *🧩 Split / Puzzle*, tick **Enable**, click **Use** (sets Columns × Rows to the
-   bed grid), then **🧩 Export puzzle** (terrain puzzles take the mask path: fast,
-   watertight). The progress bar above the Extrude tabs shows the step and elapsed
-   time, with ✕ Cancel; the download and a "PUZZLE ready" toast mark the end (50–70 s
-   here). Watertightness is in the zip's
-   pieces, not the toast (only single-file STL/OBJ/3MF exports report faces and
+7. **Download** (Extrude → Download card): without pieces pick *3MF*, *STL* or *OBJ* and
+   **⬇ Download**; with *Split into pieces* on the button reads **⬇ Download puzzle
+   (.zip)** (terrain puzzles take the mask path: fast, watertight). The progress bar at
+   the top of the Extrude panel shows the step and elapsed time, with ✕ Cancel; the
+   download and a "PUZZLE ready" toast mark the end (15–70 s here). Watertightness is in
+   the zip's pieces, not the toast (only single-file STL/OBJ/3MF exports report faces and
    watertightness in the toast).
 
    ![Export finished](img/region/07-export-finished.png)
-   *3 × 2 puzzle: the red cut lines in the preview are the piece boundaries (drag to move
-   one); "PUZZLE ready" at the bottom right.*
+   *2 × 2 puzzle: the cut lines in the preview are the piece boundaries (drag to move
+   one; label "2×2 · drag cuts"); "PUZZLE ready" at the bottom.*
 
 8. **QA**: `X-Watertight` / toast (single-file exports), slicer size, and look at a river in the slicer's
    layer preview: it should show in at least two layers.
@@ -214,8 +227,8 @@ Process / pipeline:
 
 UI:
 1. Region preset: ~~set Projection to *Cosine Correction*~~ (done 2026-09-27), untick
-   *Water (ESA)* when Earth Engine is not configured, set Base 5 mm, and set mm/px
-   from the bed (pieces ≤ bed − 10 mm) as the City preset does.
+   *Water (ESA)* when Earth Engine is not configured, set Base 5 mm. (~~Set mm/px from
+   the bed~~: every new DEM now fills the bed, 2026-10-01.)
 2. Show the river depth on the print (mm) beside the depth slider, from the current scale.
 3. Apply to DEM: list skipped layers in the toast (the response now has `warnings`).
 4. Terrain puzzle: offer *max piece* (mm) like the City Model instead of only cols × rows.
