@@ -34,7 +34,10 @@ and one visual style. No capability is lost.
      selected layer's settings (`LayerProperties.vue`), Fetch / View / Composite / JSON as ⚙ tools,
      live composite in preview + export (no Apply for DEM/water/rivers/lakes), region list off the
      Edit page, pixel grid off by default. Build shots `claude/mockups/2026-10-01/png/build-edit*.png`.
-   - Next: Explore; then retake the old-header guide screenshots (city 01–08, region 01–04).
+   - **Explore done (2026-10-02):** map corner Globe + Map ▾, selected-region card, ＋ New region
+     under the list, In view / All toggle, sizes on rows. Shots `build-explore*.png`.
+   - Next: retake the old-header guide screenshots (city 01–08, region 01–04); then step 5
+     (consistency check across the three pages).
 5. **Compare** build screenshots with the mockups; run `ui_screens.py` and the layout audit.
 
 ## Target files

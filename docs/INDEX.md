@@ -262,6 +262,7 @@ Full map: [reference/frontend-modules.md](reference/frontend-modules.md).
 - ✨ Make it printable: `map2stl/app/client/static/js/modules/ui/make-printable.js::makePrintable` (preset rule `workflow-presets.js::choosePreset`)
 - Edit layers (what prints = what shows): `map2stl/app/client/static/js/vue/stores/editLayers.ts::EDIT_LAYERS`; panels `EditLayersPanel.vue`, `LayerProperties.vue`; write controls by id `map2stl/app/client/static/js/vue/dom-fields.ts::setField`
 - Live composite in preview/export (no Apply for DEM/water/rivers/lakes): `map2stl/app/client/static/js/modules/export/export-handlers.js::_demSettings`
+- Region size text ("2.0 × 2.0 km") for pill, list, map card, editor: `map2stl/app/client/static/js/modules/regions/region-geometry.js::formatBboxDims`
 - Settings collect/apply/auto-save: `map2stl/app/client/static/js/modules/ui/presets.js::collectAllSettings` (`applyAllSettings`, `setupAutoSave`)
   - Legacy keys in saved settings / presets renamed before apply (`projection.clip_nans` → `clip_valid_region`): `map2stl/app/client/static/js/modules/ui/settings-compat.js::normalizeSettingsKeys`
 - Workflow presets City / Mountain / Region / Coast: `map2stl/app/client/static/js/modules/ui/workflow-presets.js::applyWorkflowPreset` (`WORKFLOW_PRESETS`, `regionDemSource`)

@@ -224,6 +224,7 @@
 import { computed, ref } from 'vue';
 import SettingsSheet from './SettingsSheet.vue';
 import { useAppStore } from '../../stores/app';
+import { formatBboxDims } from '../../../modules/regions/region-geometry.js';
 
 const store = useAppStore();
 const settingsOpen = ref(false);
@@ -232,12 +233,7 @@ const settingsOpen = ref(false);
 
 const regionPill = computed(() => {
   const r = store.selectedRegion as { name: string; north: number; south: number; east: number; west: number } | null;
-  if (!r) return null;
-  const lat = ((r.north + r.south) / 2) * Math.PI / 180;
-  const w = Math.abs(r.east - r.west) * 111.32 * Math.cos(lat);
-  const h = Math.abs(r.north - r.south) * 110.574;
-  const f = (km: number) => (km >= 100 ? Math.round(km).toLocaleString() : km.toFixed(1));
-  return { name: r.name, size: `${f(w)} × ${f(h)} km` };
+  return r ? { name: r.name, size: formatBboxDims(r) } : null;
 });
 
 function goExplore() {

@@ -3,6 +3,23 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-02 — Explore: one map menu, a selection card, sizes in the list
+- **Decision:** the map's five floating buttons become two in the corner: 🌍 Globe and Map ▾ (the
+  existing map-settings panel: style, terrain relief, grid, labels). The selected region gets a
+  card at the bottom of the map (size, position, ✎ Edit box, Load DEM ›); ＋ New region moves
+  under the region list; the list's "Showing N of M · Show all" line becomes an "In view (N) /
+  All (M)" segmented control, and each row shows the box's size. Sizes everywhere (header pill,
+  list, card, editor) come from `region-geometry.js::formatBboxDims`.
+- **Why:** design guidelines §1.5 (terrain, grid and labels each had two controls, and the grid
+  button did not re-sync the menu's checkbox), §2 Manager (details of the selection with its one
+  primary action), §1.10 (segmented control for two options). A first cut of the size formatter
+  in `print-scale.js` disagreed with the region editor (3,758 vs 3,760 km) because it used
+  different metres per degree; the existing geometry module was reused instead.
+- **Rejected:** deleting the hidden floating buttons — `map-globe.js` and the listeners keep
+  terrain / grid / label state on them by id.
+- **Supersedes / superseded by:** —
+- **Source:** [F-DESIGN](../plans/active/F-DESIGN-guidelines-redesign.md)
+
 ### 2026-10-02 — Edit: a layer's switch means "in the print"; server channels need no Apply
 - **Decision:** the Edit page lists the print's layers (Terrain, Rivers & lakes, Buildings &
   roads, Satellite colour, + trails / land cover / imported mesh) with a switch each. A switch

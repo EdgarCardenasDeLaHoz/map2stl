@@ -15,6 +15,9 @@
          Once region-ui.js is fully migrated to composables, render from
          store.coordinatesData instead. -->
     <div id="coordinatesList" class="coordinates-list sidebar-coord-list"></div>
+    <!-- Draws a new box on the map (event-listeners-map.js::activateDrawTool, by id). -->
+    <button id="floatingDrawBtn" type="button" class="map-draw-region-btn sidebar-new-region-btn"
+            title="Draw a new region on the map">＋ New region</button>
   </div>
 </template>
 

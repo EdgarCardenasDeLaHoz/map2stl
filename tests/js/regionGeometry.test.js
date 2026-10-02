@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-    bboxSizeKm, formatBboxSize, parseBbox, regionBoxStyle, regionHaloStyle, REGION_ACCENT,
+    bboxSizeKm, formatBboxSize, parseBbox, regionBoxStyle, regionHaloStyle, REGION_ACCENT, formatBboxDims,
 } from '../../app/client/static/js/modules/regions/region-geometry.js';
 
 describe('bboxSizeKm', () => {
@@ -72,5 +72,17 @@ describe('regionBoxStyle', () => {
         expect(h.weight).toBe(regionBoxStyle('normal').weight + 2);
         expect(h.interactive).toBe(false);
         expect(h.fill).toBe(false);
+    });
+});
+
+describe('formatBboxDims', () => {
+    it('gives width × height, one decimal under 100 km', () => {
+        expect(formatBboxDims({ north: 37.1873, south: 37.1693, east: -3.5867, west: -3.6093 })).toBe('2.0 × 2.0 km');
+    });
+    it('rounds large boxes to whole km, matching the region editor', () => {
+        expect(formatBboxDims({ north: 15, south: -19, east: -45, west: -85 })).toBe('4,450 × 3,760 km');
+    });
+    it('is empty without a box', () => {
+        expect(formatBboxDims(null)).toBe('');
     });
 });

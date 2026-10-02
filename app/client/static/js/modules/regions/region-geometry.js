@@ -8,6 +8,7 @@
  * Exports:
  *   bboxSizeKm(b)                      — {widthKm, heightKm, areaKm2} of a lat/lon box
  *   formatBboxSize(size)               — "12.4 × 8.1 km · 100 km²"
+ *   formatBboxDims(b)                  — "12.4 × 8.1 km" for a box (header pill, list, map card)
  *   parseBbox(n, s, e, w)              — numbers from input strings, or null if invalid
  *   regionBoxStyle(state)              — Leaflet path options for a saved-region box
  *   regionHaloStyle(state)             — the dark halo drawn under it
@@ -47,7 +48,21 @@ function _fmt(v) {
  * @returns {string}
  */
 export function formatBboxSize(size) {
-    return `${_fmt(size.widthKm)} × ${_fmt(size.heightKm)} km · ${_fmt(size.areaKm2)} km²`;
+    return `${_dims(size)} · ${_fmt(size.areaKm2)} km²`;
+}
+
+function _dims(size) {
+    return `${_fmt(size.widthKm)} × ${_fmt(size.heightKm)} km`;
+}
+
+/**
+ * Width × height of a region box: "12.4 × 8.1 km". '' when an edge is not a number.
+ * @param {{north:number, south:number, east:number, west:number}|null} b
+ * @returns {string}
+ */
+export function formatBboxDims(b) {
+    if (!b || ![b.north, b.south, b.east, b.west].every(Number.isFinite)) return '';
+    return _dims(bboxSizeKm(b));
 }
 
 /**

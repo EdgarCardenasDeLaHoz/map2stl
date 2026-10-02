@@ -39,6 +39,7 @@
  */
 
 import { detectContinent } from './continent.js';
+import { formatBboxDims } from './region-geometry.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope state
@@ -153,31 +154,39 @@ function groupRegionsByContinent(regions) {
  * @param {number} shownCount - Regions listed (show-all mode)
  */
 function _renderListScope(viewSet, shownCount) {
+    // A two-option segmented control (design guidelines §1.10): "In view (20)" | "All (125)".
+    // In view lists the map's viewport set (≤ 20, largest first); All lists every region.
     const el = document.createElement('div');
     el.className = 'coord-list-scope';
-    const text = document.createElement('span');
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'coord-list-scope-btn';
-    if (viewSet) {
-        const { inViewCount, shownInView } = viewSet;
-        text.textContent = inViewCount > shownInView
-            ? `Showing ${shownInView} of ${inViewCount} in view`
-            : `${inViewCount} in view`;
-        btn.textContent = 'Show all';
-        btn.title = `List all ${viewSet.total} saved regions`;
-    } else {
-        text.textContent = `Showing all ${shownCount}`;
-        btn.textContent = 'Only those in view';
-        btn.title = 'List only the regions drawn on the map';
+    el.setAttribute('role', 'radiogroup');
+    el.setAttribute('aria-label', 'Which regions to list');
+    const total = viewSet ? viewSet.total : shownCount;
+    const inView = viewSet ? `In view (${viewSet.shownInView})` : 'In view';
+    const inViewTitle = viewSet && viewSet.inViewCount > viewSet.shownInView
+        ? `The ${viewSet.shownInView} largest of the ${viewSet.inViewCount} regions in view, as drawn on the map`
+        : 'The regions drawn on the map, largest first';
+    for (const [label, showAll, title] of [
+        [inView, false, inViewTitle],
+        [`All (${total})`, true, `List all ${total} saved regions`],
+    ]) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'coord-list-scope-btn';
+        btn.setAttribute('role', 'radio');
+        const on = showAll === !viewSet;
+        btn.setAttribute('aria-checked', String(on));
+        btn.classList.toggle('on', on);
+        btn.textContent = label;
+        btn.title = title;
+        btn.addEventListener('click', () => {
+            if (_listShowAll === showAll) return;
+            _listShowAll = showAll;
+            _listPage = 0;
+            renderCoordinatesList();
+            document.querySelector('#coordinatesList .coord-list-scope-btn.on')?.focus();
+        });
+        el.append(btn);
     }
-    btn.addEventListener('click', () => {
-        _listShowAll = !!viewSet;   // viewport mode → show all, and back
-        _listPage = 0;
-        renderCoordinatesList();
-        document.querySelector('#coordinatesList .coord-list-scope-btn')?.focus();
-    });
-    el.append(text, ' · ', btn);
     return el;
 }
 
@@ -289,8 +298,11 @@ function renderCoordinatesList() {
             const esc = window.escapeHtml;
             item.innerHTML = `
                 <span class="coordinate-item-icon" aria-hidden="true">📍</span>
-                <span class="coordinate-item-name">${esc(region.name)}</span>
-                <span class="coordinate-item-meta">${esc(region.description || '')}</span>
+                <span class="coordinate-item-text">
+                    <span class="coordinate-item-name">${esc(region.name)}</span>
+                    <span class="coordinate-item-meta">${esc([formatBboxDims(region), region.description]
+                        .filter(Boolean).join(' · '))}</span>
+                </span>
                 <button type="button" class="coordinate-item-edit"
                         aria-label="Edit ${esc(region.name)}" title="Edit region">✎</button>
             `;

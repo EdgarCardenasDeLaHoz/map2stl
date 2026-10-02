@@ -3,13 +3,16 @@
   <div id="mapContainer" class="map-container">
     <div id="map"></div>
 
-    <!-- Floating Map Controls -->
-    <div class="map-floating-controls">
-      <button id="floatingTerrainToggle" class="map-floating-btn" title="Load terrain DEM for current map view" aria-label="Load terrain">🏔️ <span class="btn-label">Terrain</span></button>
-      <button id="floatingGridToggle"    class="map-floating-btn" title="Toggle grid lines" aria-label="Toggle grid lines">📐 <span class="btn-label">Grid</span></button>
+    <!-- View controls in the map's corner (design guidelines §2 Designer, F-DESIGN): Globe and
+         the map menu. Terrain relief, grid and labels live in that menu; their old floating
+         buttons stay in the DOM (hidden) because event-listeners-map.js / map-globe.js keep
+         their state by id. -->
+    <div class="map-floating-controls map-view-ctl">
       <button id="floatingGlobeToggle"   class="map-floating-btn" title="Switch to 3D Globe view" aria-label="Switch to 3D Globe">🌍 <span class="btn-label">Globe</span></button>
-      <button id="floatingLabelsToggle"  class="map-floating-btn" title="Toggle map labels" aria-label="Toggle map labels">🏷️ <span class="btn-label">Labels</span></button>
-      <button id="floatingMapSettingsBtn" class="map-floating-btn" title="Map display settings" aria-label="Map display settings">⚙️ <span class="btn-label">Settings</span></button>
+      <button id="floatingMapSettingsBtn" class="map-floating-btn" title="Map style, terrain relief, grid and labels" aria-label="Map style and layers">🗺 <span class="btn-label">Map ▾</span></button>
+      <button id="floatingTerrainToggle" class="map-floating-btn" hidden title="Terrain relief" aria-label="Terrain relief"></button>
+      <button id="floatingGridToggle"    class="map-floating-btn" hidden title="Grid lines" aria-label="Grid lines"></button>
+      <button id="floatingLabelsToggle"  class="map-floating-btn" hidden title="Map labels" aria-label="Map labels"></button>
     </div>
 
     <!-- Map Settings Panel -->
@@ -52,11 +55,15 @@
     <LandmarkSearch />
     <EdgeLandmarkWarnings fetcher />
 
-    <!-- Bottom actions: draw a new region; with a region selected, go on to
-         Edit and load its DEM (view-management.js::loadSelectedRegionDem). -->
-    <div class="map-bottom-actions" :class="{ 'has-selection': hasSelection }">
-      <button id="floatingDrawBtn" class="map-draw-region-btn" title="Draw a new region on the map">+ New Region</button>
-      <button v-show="hasSelection" id="exploreLoadDemBtn" type="button" class="map-load-dem-btn"
+    <!-- The selected region (design guidelines §2 Manager: details of the selection, one
+         primary action). "+ New region" sits under the region list (SidebarListView.vue). -->
+    <div v-if="hasSelection" class="map-selection-card" role="region" :aria-label="`${regionName} selected`">
+      <div class="msc-text">
+        <div class="msc-name">{{ regionName }}</div>
+        <div class="msc-meta">{{ regionMeta }}</div>
+      </div>
+      <button type="button" class="msc-btn" title="Edit the name, group and bounds" @click="editBox">✎ Edit box</button>
+      <button id="exploreLoadDemBtn" type="button" class="msc-btn primary"
               :title="`Open ${regionName} in Edit and load its DEM`"
               :aria-label="`Load DEM for ${regionName}`"
               @click="loadDem">Load DEM ›</button>
@@ -70,12 +77,27 @@ import { computed } from 'vue';
 import { useAppStore } from '../../stores/app';
 import EdgeLandmarkWarnings from './EdgeLandmarkWarnings.vue';
 import LandmarkSearch from './LandmarkSearch.vue';
+import { formatBboxDims } from '../../../modules/regions/region-geometry.js';
 
 const store = useAppStore();
+type Box = { name: string; north: number; south: number; east: number; west: number };
 const hasSelection = computed(() => !!store.selectedRegion);
 const regionName = computed(() => store.selectedRegion?.name ?? '');
+const regionMeta = computed(() => {
+  const r = store.selectedRegion as Box | null;
+  if (!r) return '';
+  const lat = (r.north + r.south) / 2;
+  const lon = (r.east + r.west) / 2;
+  const pos = `${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? 'E' : 'W'}`;
+  return `${formatBboxDims(r)} · ${pos}`;
+});
 
 function loadDem() {
   (window as any).loadSelectedRegionDem?.();
+}
+function editBox() {
+  const w = window as any;
+  const i = (w.getCoordinatesData?.() || []).findIndex((r: Box) => r.name === regionName.value);
+  if (i >= 0) void w.openRegionEditor?.(i);
 }
 </script>

@@ -4169,3 +4169,66 @@
 /* F-DESIGN: the Buildings table's side tab is chrome for experts; outside Everything the
    table opens from Edit → Buildings & roads → "Building heights table". */
 body:not(.ui-everything) #cityTableCollapsedTab { display: none !important; }
+
+/* ── F-DESIGN Explore list (2026-10-02): rounded rows with the region's size under the
+   name, selection as an accent outline, "In view | All" as a segmented control. ── */
+.coordinate-item {
+    margin: 2px 6px; border: 0; border-radius: 12px; padding: 8px 10px;
+}
+.coordinate-item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.coordinate-item-text .coordinate-item-name { flex: none; font-weight: 600; }
+.coordinate-item-meta {
+    display: block; font-size: 12px; color: var(--text-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.coordinate-item.selected {
+    background: #2c2c2e; color: #f5f5f7; border: 0;
+    outline: 2px solid #0a84ff; outline-offset: -2px;
+}
+.coordinate-item.selected .coordinate-item-meta { color: var(--text-muted); }
+.coord-list-scope {
+    margin: 8px; padding: 3px; gap: 2px; border: 0; border-radius: 10px; background: #2c2c2e;
+    flex-wrap: nowrap;
+}
+.coord-list-scope-btn {
+    flex: 1; min-height: 26px; border-radius: 8px; color: var(--text-muted);
+    font-size: 12px; text-decoration: none;
+}
+.coord-list-scope-btn.on { background: #3a3a3c; color: #f5f5f7; font-weight: 600; }
+.coord-list-scope-btn:focus-visible { outline: 2px solid #0a84ff; }
+
+/* ── F-DESIGN Explore map (2026-10-02): view controls in the corner as one row of pills,
+   the map menu dropping below them, and the selected region as a floating card. ── */
+.map-view-ctl { flex-direction: row; gap: 6px; }
+.map-view-ctl .map-floating-btn {
+    flex-direction: row; gap: 6px; padding: 7px 12px; border-radius: 10px; font-size: 13px;
+    background: rgba(28, 28, 30, 0.92); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+.map-view-ctl .map-floating-btn:hover { background: rgba(44, 44, 46, 0.96); transform: none; }
+.map-view-ctl .map-floating-btn .btn-label { font-size: 13px; opacity: 1; }
+.map-view-ctl .map-floating-btn.active { background: #0a84ff; }
+.map-settings-panel { top: 52px; right: 10px; border: 0; border-radius: 14px; }
+
+.map-selection-card {
+    position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 1000;
+    display: flex; align-items: center; gap: 12px; min-width: min(520px, calc(100% - 32px));
+    max-width: calc(100% - 32px); padding: 12px 14px 12px 18px; border-radius: 18px;
+    background: rgba(28, 28, 30, 0.95); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); color: #f5f5f7;
+}
+.msc-text { flex: 1; min-width: 0; }
+.msc-name { font-weight: 700; font-size: 16px; }
+.msc-meta { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msc-btn {
+    border: 0; border-radius: 12px; padding: 10px 14px; cursor: pointer; white-space: nowrap;
+    background: #2c2c2e; color: #f5f5f7; font-weight: 600; font-size: 14px;
+}
+.msc-btn:hover { background: #3a3a3c; }
+.msc-btn.primary { background: #0a84ff; color: #fff; }
+.msc-btn.primary:hover { background: #2b95ff; }
+
+.sidebar-new-region-btn {
+    margin: 8px; padding: 10px 0; border: 0; border-radius: 12px; cursor: pointer; flex: none;
+    background: #2c2c2e; color: #f5f5f7; font-weight: 600; font-size: 14px;
+}
+.sidebar-new-region-btn:hover { background: #3a3a3c; }
+.sidebar-new-region-btn.drawing { background: #0a84ff; color: #fff; }

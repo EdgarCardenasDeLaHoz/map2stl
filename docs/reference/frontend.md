@@ -123,7 +123,9 @@ Consequences to know:
 | Settings collect / apply / autosave | `MainHeader.vue` (`#saveSettingsStatus`) | `app/client/static/js/modules/ui/presets.js::collectAllSettings`, `applyAllSettings`, `setupAutoSave` |
 | Region boxes on the map (outlines, ≤ 20 in view + selected, hover ↔ list row) | — (Leaflet) | `app/client/static/js/modules/regions/region-boxes.js::refreshRegionViewSet`, rule `app/client/static/js/modules/regions/viewport-regions.js::selectViewportRegions` |
 | Region editor (rename, group, bounds + size, delete, notes) | `app/client/static/js/vue/components/sidebar/SidebarEditView.vue` (opened via `SidebarPanel.vue::setRegionEditorOpen`) | `app/client/static/js/modules/regions/region-editor.js::openRegionEditor` |
-| "Load DEM ›" on the Explore map | `app/client/static/js/vue/components/views/MapContainer.vue` | `app/client/static/js/modules/ui/view-management.js::loadSelectedRegionDem` |
+| Selected-region card on the Explore map (size, position, ✎ Edit box, Load DEM ›) | `app/client/static/js/vue/components/views/MapContainer.vue` | `app/client/static/js/modules/ui/view-management.js::loadSelectedRegionDem`, `app/client/static/js/modules/regions/region-editor.js::openRegionEditor` |
+| Explore map corner: 🌍 Globe, Map ▾ (style, terrain relief, grid, labels) | `MapContainer.vue` (the old Terrain / Grid / Labels floating buttons stay hidden for their ids) | `app/client/static/js/modules/events/event-listeners-map.js` |
+| Region list: "In view (N) / All (M)" toggle, size under each name, ＋ New region under the list | `app/client/static/js/vue/components/sidebar/SidebarListView.vue` | `app/client/static/js/modules/regions/region-ui.js::_renderListScope`, sizes `app/client/static/js/modules/regions/region-geometry.js::formatBboxDims` |
 | Sidebar mode (width, hide) | `app/client/static/js/vue/components/sidebar/SidebarPanel.vue` | publishes `window.setSidebarMode`; nothing else writes its DOM — [why](../decisions/frontend.md#2026-08-30--vue-owns-the-sidebar-mode-and-nothing-else-touches-its-dom) |
 
 - **Design guidelines:** pages follow `Projects/design-guidelines.md` and the map2stl appendix
