@@ -14,10 +14,11 @@ and one visual style. No capability is lost.
 
 1. **Quick wins** (no mockup needed):
    - autosave with "✓ Saved" in the header, Save button and auto-save switch removed (done 2026-10-01, bbb4fd9);
-   - nothing under 11 px.
+   - nothing under 11 px (done 2026-10-01, 53b1085).
 2. **Review**: screenshots of every page, problems by severity, what works, and the capability
    inventory (every control and readout per page) so the redesign can be checked against it.
-   Output: `docs/history/audits/design-review-2026-10-01.md`.
+   Output: [design-review-2026-10-01.md](../../history/audits/design-review-2026-10-01.md) and
+   [capabilities-2026-10-01.md](../../history/audits/capabilities-2026-10-01.md) (done 2026-10-01).
 3. **Mockups**: static HTML in `Code/claude/mockups/2026-10-01/` with real data (real DEM,
    map and model images), screenshotted at 1300×820 with headless Edge. One per page plus the
    Settings panel (Beginner and Everything). Iterate with the user before any code.
