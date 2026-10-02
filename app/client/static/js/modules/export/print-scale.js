@@ -144,3 +144,17 @@ export function fillBedMmPerPx(cols, rows, bed, marginMm = BED_MARGIN_MM) {
     const best = Math.max(Math.min(w / cols, h / rows), Math.min(h / cols, w / rows));
     return Math.floor(best * 100) / 100;
 }
+
+/**
+ * Printed width × depth (mm) of a box of ground size widthKm × heightKm sized to fill the bed
+ * less BED_MARGIN_MM, turned if that is bigger (as fillBedMmPerPx does for a DEM grid). Used for
+ * the size label while drawing a new region, before any DEM exists.
+ * @returns {{w:number, h:number}} whole mm
+ */
+export function bedFitMm(widthKm, heightKm, bed, marginMm = BED_MARGIN_MM) {
+    if (!(widthKm > 0 && heightKm > 0)) return { w: 0, h: 0 };
+    const bw = Math.max(1, bed.w - marginMm);
+    const bh = Math.max(1, bed.h - marginMm);
+    const k = Math.max(Math.min(bw / widthKm, bh / heightKm), Math.min(bh / widthKm, bw / heightKm));
+    return { w: Math.floor(widthKm * k), h: Math.floor(heightKm * k) };
+}

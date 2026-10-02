@@ -21,13 +21,14 @@
         <span class="landmark-where">{{ r.display_name }}</span>
       </li>
     </ul>
-    <div v-if="picked" class="landmark-actions">
+    <!-- With a region selected, the place can extend it; making a new region from the place
+         is the map card's job (NewRegionCard.vue). -->
+    <div v-if="picked && store.selectedRegion" class="landmark-actions">
       <span v-if="pickedInside" class="landmark-inside">✓ inside the box</span>
       <button v-else-if="hasBox" id="landmarkExtendBtn" type="button" class="landmark-action-btn landmark-extend-btn"
               title="Grow the region box just enough to include this place (plus 100 m)"
               @click="extendBox">⤢ Extend the box to include it</button>
-      <span v-else class="landmark-inside">Select or draw a region to extend it</span>
-      <button type="button" class="landmark-action-btn" title="Clear" @click="clearAll">✕</button>
+      <button type="button" class="landmark-action-btn" title="Clear the search" aria-label="Clear the search" @click="clearAll">✕</button>
     </div>
   </div>
 </template>
@@ -102,10 +103,17 @@ function goTo(r: Place) {
   const map = w.getMap?.();
   const L = w.L;
   if (!map || !L) return;
-  if (r.bbox) {
-    map.fitBounds([[r.bbox.south, r.bbox.west], [r.bbox.north, r.bbox.east]], { maxZoom: 17 });
+  // Close the list: the choice is made, and the list covered the map (F3, 2026-10-02).
+  results.value = [];
+  searched.value = false;
+  if (store.selectedRegion) {
+    // Extending the selected region: show the place, not a new box.
+    if (r.bbox) map.fitBounds([[r.bbox.south, r.bbox.west], [r.bbox.north, r.bbox.east]], { maxZoom: 14 });
+    else map.setView([r.lat, r.lon], 13);
   } else {
-    map.setView([r.lat, r.lon], 16);
+    // Frame the place at a printable size and suggest a box (modules/map/new-region.js),
+    // instead of zooming a peak to street level.
+    w.newRegion?.suggest(r);
   }
   if (marker) marker.remove();
   marker = L.circleMarker([r.lat, r.lon], {
@@ -138,6 +146,8 @@ function clearAll() {
   if (marker) { marker.remove(); marker = null; }
 }
 
+// The new-region flow clears the search when it is cancelled or saved.
+w.clearLandmarkSearch = () => { clearAll(); query.value = ''; };
 onBeforeUnmount(() => { if (marker) marker.remove(); unsubscribe?.(); });
 </script>
 <style scoped>

@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-    fillBedMmPerPx, DEFAULT_BED,
+    fillBedMmPerPx, DEFAULT_BED, bedFitMm,
     AUTO_TRUE_SCALE_MAX_KM, bboxDiagonalKm, defaultPieceMm, formatGroundLength,
     modelScale, parseBedSize, piecesNeeded,
 } from '../../app/client/static/js/modules/export/print-scale.js';
@@ -140,5 +140,15 @@ describe('fillBedMmPerPx', () => {
     });
     it('returns 0 for an empty grid', () => {
         expect(fillBedMmPerPx(0, 10, { w: 220, h: 220 })).toBe(0);
+    });
+});
+
+describe('bedFitMm', () => {
+    it('fills the 220 bed less the margin', () => {
+        // Mont Blanc test box, 13.4 x 11.4 km: width limits, 210 x 178 mm.
+        expect(bedFitMm(13.4, 11.4, { w: 220, h: 220 })).toEqual({ w: 210, h: 178 });
+    });
+    it('is zero for an empty box', () => {
+        expect(bedFitMm(0, 5, { w: 220, h: 220 })).toEqual({ w: 0, h: 0 });
     });
 });

@@ -33,7 +33,6 @@ window.setupEventListeners = function setupEventListeners() {
 
     // Control buttons
     document.getElementById('loadRegionBtn')?.addEventListener('click', () => window.loadSelectedRegion?.());
-    document.getElementById('saveRegionBtn')?.addEventListener('click', () => window.saveCurrentRegion?.());
     document.getElementById('submitBtn')?.addEventListener('click', () => window.submitBoundingBox?.());
 
     window._setupBboxListeners?.();

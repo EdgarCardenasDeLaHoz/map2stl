@@ -10,14 +10,9 @@
  */
 
 window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
+    // New-region flow (modules/map/new-region.js): draw mode with a live size label.
     function activateDrawTool() {
-        const dc = window.getDrawControl?.();
-        if (dc && dc._toolbars?.draw) {
-            try { dc._toolbars.draw._modes.rectangle.handler.enable(); } catch (e) { /* best-effort; failure is non-fatal */ }
-        }
-        const btn = document.getElementById('floatingDrawBtn');
-        if (btn) btn.classList.add('drawing');
-        window.showToast?.('Draw a rectangle on the map, then enter a name and click Save Region', 'info');
+        window.newRegion?.startDraw();
     }
 
     let _colormapTimer = null;
@@ -269,6 +264,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     const mapTileLayerEdit = document.getElementById('mapTileLayer');
     mapTileLayerExplore?.addEventListener('change', () => {
         window.setTileLayer?.(mapTileLayerExplore.value);
+        try { localStorage.setItem('map2stl_mapStyle', mapTileLayerExplore.value); } catch (_) { /* per-browser preference */ }
         if (mapTileLayerEdit) mapTileLayerEdit.value = mapTileLayerExplore.value;
     });
     mapTileLayerEdit?.addEventListener('change', () => {
@@ -313,9 +309,9 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     });
     const _map = window.getMap?.();
     if (_map) {
-        _map.on(L.Draw.Event.CREATED, () => {
-            document.getElementById('floatingDrawBtn')?.classList.remove('drawing');
-            window.showNewRegionForm?.(true);
+        _map.on(L.Draw.Event.CREATED, (e) => {
+            // The drawn box becomes the pending new region, named in NewRegionCard.vue.
+            window.newRegion?.onCreated(e.layer);
         });
         _map.on(L.Draw.Event.DRAWSTOP, () => {
             document.getElementById('floatingDrawBtn')?.classList.remove('drawing');

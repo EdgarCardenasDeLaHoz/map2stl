@@ -3,6 +3,25 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-02 — New regions are made on the map: framed search, live size, named in a map card
+- **Decision:** picking a searched place frames it at a printable size and suggests a dashed box
+  (`region-geometry.js::placeBox`: the place's outline if ≥ 1 km, else a 12 km bed-shaped box), with
+  "Make a region here" or "Draw my own" in a map card. While drawing, the box shows its ground size
+  and printed size on the bed (`print-scale.js::bedFitMm`). A finished box gets drag handles and a
+  card for name (prefilled from the place) and group (your most-used groups as chips); saving
+  selects the region. Boxes are drawn in the accent blue, no "Custom region" description is
+  stored, the drawing does not linger, Escape cancels drawing or the pending box (it used to clear
+  every region box), and the Explore map opens on OpenTopoMap relief (choice remembered).
+  Code: `modules/map/new-region.js`, `vue/components/views/NewRegionCard.vue`.
+- **Why:** a simulated new region (Mont Blanc, 2026-10-02) took 4 steps and 20+ clicks with 14
+  friction points: the search zoomed to street level (7 zoom-outs to frame the massif), no size
+  until after saving, the form far from the box, and the saved region not selected. Mockups
+  `claude/mockups/2026-10-02-newregion/` approved ("Build as shown"). Checked in the app: search →
+  Make a region here → Save selected the region; drawing with a real mouse showed the live size;
+  Escape cancelled and kept the other boxes.
+- **Rejected:** keeping the sidebar form; region rotation now (user: after this flow, as its own plan).
+- **Supersedes / superseded by:** —
+
 ### 2026-10-02 — Opening Extrude with a region is the whole job; ✨ Make it printable removed
 - **Decision:** opening Extrude when the loaded DEM is not the selected region's loads it with the
   region's own settings (`view-management.js::_ensureDemForExtrude`); the new DEM fills the bed

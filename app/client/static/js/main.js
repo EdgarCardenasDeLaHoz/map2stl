@@ -30,6 +30,7 @@ import './modules/layers/mesh-registration.js';
 import './modules/export/export-handlers.js';
 import './modules/export/model-viewer.js';
 import './modules/map/compare-view.js';
+import './modules/map/new-region.js';
 import './modules/regions/region-ui.js';
 import './modules/regions/regions-import-export.js';
 import './modules/layers/water-mask.js';

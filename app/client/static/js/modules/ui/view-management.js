@@ -59,7 +59,6 @@ window.switchView = function switchView(view) {
     const containers = Object.fromEntries(
         Object.entries(VIEW_CONTAINERS).map(([name, id]) => [name, document.getElementById(id)]));
     const modelContainer = containers.model;
-    const newRegionSection = document.getElementById('newRegionSection');
 
     // Restore sidebar visibility (may have been hidden in model view)
     const sidebar = document.querySelector('.sidebar');
@@ -69,10 +68,8 @@ window.switchView = function switchView(view) {
     Object.values(containers).forEach(el => el?.classList.add('hidden'));
     if (modelContainer) modelContainer.style.display = 'none';
 
-    // Show/hide new region section (only visible in 2D Map view)
-    if (newRegionSection) {
-        newRegionSection.style.display = view === 'map' ? 'block' : 'none';
-    }
+    // A new region in progress belongs to the Explore map.
+    if (view !== 'map' && window.newRegion && window.newRegion.phase !== 'idle') window.newRegion.cancel();
 
     // Remove active from tabs, then mark the selected one (if it has a tab)
     document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
@@ -360,39 +357,32 @@ window.loadSelectedRegionDem = function loadSelectedRegionDem() {
  * region is picked, so the list has the sidebar's height the rest of the time.
  * @param {boolean} show
  */
-window.showNewRegionForm = function showNewRegionForm(show) {
-    const section = document.getElementById('newRegionSection');
-    if (!section) return;
-    section.hidden = !show;
-    if (show) document.getElementById('regionName')?.focus();
-};
-window.events?.on(window.EV?.REGION_SELECTED, () => window.showNewRegionForm(false));
-
-window.saveCurrentRegion = async function saveCurrentRegion() {
+/**
+ * Save the working box as a new region named `name` (in group `label`), then list and
+ * select it. Called by the new-region card (modules/map/new-region.js::save).
+ * @param {{name?: string, label?: string}} [opts]
+ * @returns {Promise<boolean>} saved
+ */
+window.saveCurrentRegion = async function saveCurrentRegion(opts = {}) {
     const boundingBox = window.getBoundingBox?.();
     if (!boundingBox) {
-        window.showToast?.('Please draw a bounding box first!', 'warning');
-        return;
+        window.showToast?.('Draw a box on the map first.', 'warning');
+        return false;
     }
-
-    const regionName = document.getElementById('regionName').value.trim();
+    const regionName = String(opts.name || '').trim();
     if (!regionName) {
-        window.showToast?.('Please enter a name for the region!', 'warning');
-        return;
+        window.showToast?.('Give the region a name.', 'warning');
+        return false;
     }
-
-    const bounds = typeof boundingBox.getBounds === 'function'
-        ? boundingBox.getBounds()
-        : boundingBox;
-    const regionLabelInput = document.getElementById('regionLabel');
+    const bounds = typeof boundingBox.getBounds === 'function' ? boundingBox.getBounds() : boundingBox;
     const regionData = {
         name: regionName,
-        label: (regionLabelInput?.value || '').trim() || undefined,
+        label: String(opts.label || '').trim() || undefined,
         north: bounds.getNorth(),
         south: bounds.getSouth(),
         east: bounds.getEast(),
         west: bounds.getWest(),
-        description: `Custom region: ${regionName}`,
+        // No description: the old "Custom region: <name>" repeated the name in every row.
         parameters: {
             dim: parseInt(document.getElementById('paramDim').value),
             depth_scale: window.appState.demParams.depthScale,
@@ -402,22 +392,22 @@ window.saveCurrentRegion = async function saveCurrentRegion() {
             subtract_water: window.appState.demParams.subtractWater
         }
     };
-
     try {
         const { data: result, error } = await window.api.regions.create(regionData);
-
-        if (!error) {
-            window.showToast?.(`Region "${regionName}" saved successfully!`, 'success');
-            window.loadCoordinates?.();
-            document.getElementById('regionName').value = '';
-            if (regionLabelInput) regionLabelInput.value = '';
-            window.showNewRegionForm(false);
-        } else {
-            window.showToast?.('Error saving region: ' + (result?.error || result?.detail || error), 'error');
+        if (error) {
+            window.showToast?.('Could not save the region: ' + (result?.error || result?.detail || error), 'error');
+            return false;
         }
+        window.showToast?.(`Saved "${regionName}"`, 'success');
+        await window.loadCoordinates?.();
+        // Select it, so the next step (Load DEM ›, or Extrude) is one click away.
+        const i = (window.getCoordinatesData?.() || []).findIndex((r) => r.name === regionName);
+        if (i >= 0) window.selectCoordinate?.(i);
+        return true;
     } catch (err) {
         console.error('Error:', err);
-        window.showToast?.('Failed to save region', 'error');
+        window.showToast?.('Could not save the region', 'error');
+        return false;
     }
 };
 

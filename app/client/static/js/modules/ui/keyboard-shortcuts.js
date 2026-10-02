@@ -40,7 +40,8 @@ window.setupKeyboardShortcuts = function setupKeyboardShortcuts() {
                     break;
                 case 's': case 'S':
                     e.preventDefault();
-                    window.saveCurrentRegion?.();
+                    // Saves a new region being named; region settings save themselves.
+                    window.newRegion?.requestSave();
                     break;
                 case 'r': case 'R':
                     e.preventDefault();
@@ -58,7 +59,9 @@ window.setupKeyboardShortcuts = function setupKeyboardShortcuts() {
         }
 
         if (e.key === 'Escape') {
-            window.clearAllBoundingBoxes?.();
+            // Cancels drawing or a new region. It used to clear every region box from the
+            // map, even when pressed only to stop drawing (roadmap UI item 3, fixed 2026-10-02).
+            if (window.newRegion && window.newRegion.phase !== 'idle') window.newRegion.cancel();
         }
 
         if (e.key === 'g' || e.key === 'G') {

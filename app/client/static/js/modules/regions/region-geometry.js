@@ -9,6 +9,8 @@
  *   bboxSizeKm(b)                      — {widthKm, heightKm, areaKm2} of a lat/lon box
  *   formatBboxSize(size)               — "12.4 × 8.1 km · 100 km²"
  *   formatBboxDims(b)                  — "12.4 × 8.1 km" for a box (header pill, list, map card)
+ *   boxAround(lat, lon, widthKm, aspect) — a box of that ground width centred on a point
+ *   placeBox(place, aspect)            — the box to suggest for a searched place
  *   parseBbox(n, s, e, w)              — numbers from input strings, or null if invalid
  *   regionBoxStyle(state)              — Leaflet path options for a saved-region box
  *   regionHaloStyle(state)             — the dark halo drawn under it
@@ -111,4 +113,39 @@ export function regionBoxStyle(state) {
 export function regionHaloStyle(state) {
     const { weight } = regionBoxStyle(state);
     return { color: '#000000', weight: weight + 2, opacity: 0.45, fill: false, interactive: false };
+}
+
+/**
+ * A box widthKm wide and widthKm / aspect tall (ground km), centred on lat/lon.
+ * @param {number} lat
+ * @param {number} lon
+ * @param {number} widthKm
+ * @param {number} [aspect=1] width / height
+ * @returns {{north:number, south:number, east:number, west:number}}
+ */
+export function boxAround(lat, lon, widthKm, aspect = 1) {
+    const heightKm = widthKm / (aspect > 0 ? aspect : 1);
+    const dLat = heightKm / KM_PER_DEG_LAT / 2;
+    const dLon = widthKm / (KM_PER_DEG_LON_EQUATOR * Math.max(0.01, Math.cos(lat * Math.PI / 180))) / 2;
+    return { north: lat + dLat, south: lat - dLat, east: lon + dLon, west: lon - dLon };
+}
+
+/** Ground width of the box suggested around a point place (a peak, a monument). */
+export const POINT_PLACE_KM = 12;
+
+/**
+ * The box to suggest for a searched place (new-region flow): the place's own outline when
+ * it has one at least 1 km across (a town, a park, a lake), else a POINT_PLACE_KM-wide box
+ * around it shaped like the printer bed (a peak's outline is a point).
+ * @param {{lat:number, lon:number, bbox?:{north:number, south:number, east:number, west:number}|null}} place
+ * @param {number} [aspect=1] bed width / height
+ * @returns {{north:number, south:number, east:number, west:number}}
+ */
+export function placeBox(place, aspect = 1) {
+    const b = place.bbox;
+    if (b && [b.north, b.south, b.east, b.west].every(Number.isFinite)) {
+        const { widthKm, heightKm } = bboxSizeKm(b);
+        if (Math.max(widthKm, heightKm) >= 1) return { north: b.north, south: b.south, east: b.east, west: b.west };
+    }
+    return boxAround(place.lat, place.lon, POINT_PLACE_KM, aspect);
 }

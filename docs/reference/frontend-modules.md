@@ -113,7 +113,7 @@ flowchart LR
 | `region-ui.js` | `renderCoordinatesList`, `populateRegionsTable`, `setupRegionsTable`, `groupRegionsByContinent`, `resolveRegionContinent`, `detectContinent` (from `continent.js`), `initRegionNotes`, `getRegionNote`, `setRegionNote`, `renameRegionLocalData`, `saveRegionThumbnail` | Sidebar list (the map's viewport set under a "Showing N of M in view · Show all" line; a search or Show all lists every region; ✎ button per row; row ↔ box hover link), paginated table, notes + thumbnails in localStorage |
 | `region-boxes.js` | `drawRegionBoxes`, `refreshRegionViewSet`, `getViewportRegionSet`, `highlightRegionBox` | Saved-region boxes on the Explore map: outlines over a dark halo, selected = accent, hover = brighter + name tooltip; only the viewport set is drawn, recomputed on moveend/zoomend/resize (150 ms debounce), load, selection, continent filter; the list reads the same set |
 | `viewport-regions.js` | `selectViewportRegions`, `VIEWPORT_REGION_LIMIT` | Pure: regions that intersect and fit the view, largest first, ≤ 20, plus the selected one |
-| `region-geometry.js` | `bboxSizeKm`, `formatBboxSize`, `formatBboxDims`, `parseBbox`, `regionBoxStyle`, `regionHaloStyle`, `REGION_ACCENT` | Pure: box size in km ("12.4 × 8.1 km · 100 km²"), N/S/E/W parsing, Leaflet box styles |
+| `region-geometry.js` | `bboxSizeKm`, `formatBboxSize`, `formatBboxDims`, `boxAround`, `placeBox`, `parseBbox`, `regionBoxStyle`, `regionHaloStyle`, `REGION_ACCENT` | Pure: box size in km ("12.4 × 8.1 km · 100 km²"), N/S/E/W parsing, Leaflet box styles |
 | `region-editor.js` | `openRegionEditor`, `setupRegionEditor` | Sidebar region editor (`SidebarEditView.vue`): name (rename), group, N/S/E/W with live size readout and map box, Save (one `PUT /api/regions/{old name}`), Delete (`deleteRegion`), Notes |
 | `continent.js` | `detectContinent` | Pure: continent of a lat/lon for sidebar grouping. Coarse polylines: Mediterranean coast (southern Spain, Sicily, Malta, Crete are Europe), Suez / Red Sea (Sinai, Levant, Arabia are Asia), Bosphorus (Istanbul's historic centre is Europe), Caucasus crest, Urals at 60 E |
 | `regions-import-export.js` | `exportRegionsJson`, `importRegionsJsonFile` | Bulk JSON export/import |
@@ -126,7 +126,7 @@ flowchart LR
 | `export-handlers.js` | `downloadSTL`, `downloadModel`, `downloadCrossSection`, `exportPuzzle`, `exportCityModel`, `runPreflight`, `cancelExport`, `_demSettings`, `_asyncExport` | Exports, puzzle and City Model builds, pre-flight |
 | `export-poll.js` | `EXPORT_STALL_TIMEOUT_MS`, `createStallWatch`, `formatElapsed`, `exportProgressText` | Pure: stall-based give-up, progress text |
 | `puzzle-cuts.js` | `evenEdges`, `nearestEdge`, `moveEdge`, `minPieceMm`, `gridKey`, `isCustom`, `roundEdges` | Pure: puzzle cut positions (mm from west / south) |
-| `print-scale.js` | `modelScale`, `bboxDiagonalKm`, `formatGroundLength`, `parseBedSize`, `DEFAULT_BED`, `defaultPieceMm`, `piecesNeeded`, `fillBedMmPerPx` | Pure: model scale, bed size, piece grid (ports of `city_model.choose_scale` / `puzzle.plan_grid`) |
+| `print-scale.js` | `modelScale`, `bboxDiagonalKm`, `formatGroundLength`, `parseBedSize`, `DEFAULT_BED`, `defaultPieceMm`, `piecesNeeded`, `fillBedMmPerPx`, `bedFitMm` | Pure: model scale, bed size, piece grid (ports of `city_model.choose_scale` / `puzzle.plan_grid`) |
 
 ### `ui/`
 

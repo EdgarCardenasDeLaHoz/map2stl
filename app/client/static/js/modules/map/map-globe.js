@@ -74,7 +74,8 @@ const TILE_LAYERS = {
     },
     'osm-topo': {
         url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-        attribution: '&copy; OpenTopoMap contributors'
+        attribution: 'Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, SRTM | '
+            + 'Map style &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)'
     },
     'esri-world': {
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -430,7 +431,16 @@ function initMap() {
     window.setMap?.(_map);
 
     // Use tile layer system
-    setTileLayer('osm');
+    // Relief (OpenTopoMap) by default, so mountains and valleys show while choosing an area to
+    // print (F-DESIGN new-region flow, 2026-10-02); the Map ▾ choice is remembered.
+    let style = 'osm-topo';
+    try { style = localStorage.getItem('map2stl_mapStyle') || style; } catch (_) { /* default */ }
+    if (!TILE_LAYERS[style]) style = 'osm-topo';
+    setTileLayer(style);
+    for (const id of ['mapTileLayerExplore', 'mapTileLayer']) {
+        const sel = document.getElementById(id);
+        if (sel) sel.value = style;
+    }
 
     _preloadedLayer = new L.FeatureGroup().addTo(_map);
     _editMarkersLayer = new L.FeatureGroup().addTo(_map);
@@ -470,9 +480,9 @@ function initMap() {
         draw: {
             rectangle: {
                 shapeOptions: {
-                    color: '#ff4444',
-                    weight: 3,
-                    fillOpacity: 0.2
+                    color: '#0a84ff',   // the selection accent (F-DESIGN), was red
+                    weight: 2,
+                    fillOpacity: 0.1
                 }
             },
             polygon: false,

@@ -57,7 +57,10 @@
 
     <!-- The selected region (design guidelines §2 Manager: details of the selection, one
          primary action). "+ New region" sits under the region list (SidebarListView.vue). -->
-    <div v-if="hasSelection" class="map-selection-card" role="region" :aria-label="`${regionName} selected`">
+    <!-- New region: a searched place, drawing, or a box being named (new-region.js). -->
+    <NewRegionCard />
+
+    <div v-if="hasSelection && newRegionPhase === 'idle'" class="map-selection-card" role="region" :aria-label="`${regionName} selected`">
       <div class="msc-text">
         <div class="msc-name">{{ regionName }}</div>
         <div class="msc-meta">{{ regionMeta }}</div>
@@ -73,10 +76,11 @@
 </template>
 <script setup lang="ts">
 // Leaflet initialises by reading #map after DOMContentLoaded.
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useAppStore } from '../../stores/app';
 import EdgeLandmarkWarnings from './EdgeLandmarkWarnings.vue';
 import LandmarkSearch from './LandmarkSearch.vue';
+import NewRegionCard from './NewRegionCard.vue';
 import { formatBboxDims } from '../../../modules/regions/region-geometry.js';
 
 const store = useAppStore();
@@ -91,6 +95,11 @@ const regionMeta = computed(() => {
   const pos = `${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? 'E' : 'W'}`;
   return `${formatBboxDims(r)} · ${pos}`;
 });
+
+const newRegionPhase = ref('idle');
+const onNewRegion = (e: Event) => { newRegionPhase.value = (e as CustomEvent).detail.phase; };
+onMounted(() => window.addEventListener('map2stl:new-region', onNewRegion));
+onBeforeUnmount(() => window.removeEventListener('map2stl:new-region', onNewRegion));
 
 function loadDem() {
   (window as any).loadSelectedRegionDem?.();

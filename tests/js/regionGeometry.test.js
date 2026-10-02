@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-    bboxSizeKm, formatBboxSize, parseBbox, regionBoxStyle, regionHaloStyle, REGION_ACCENT, formatBboxDims,
+    bboxSizeKm, formatBboxSize, parseBbox, regionBoxStyle, regionHaloStyle, REGION_ACCENT, formatBboxDims, boxAround, placeBox, POINT_PLACE_KM,
 } from '../../app/client/static/js/modules/regions/region-geometry.js';
 
 describe('bboxSizeKm', () => {
@@ -84,5 +84,24 @@ describe('formatBboxDims', () => {
     });
     it('is empty without a box', () => {
         expect(formatBboxDims(null)).toBe('');
+    });
+});
+
+describe('boxAround / placeBox', () => {
+    it('makes a box of the asked ground size', () => {
+        const b = boxAround(45.83, 6.865, 12, 1.2);
+        const s = bboxSizeKm(b);
+        expect(s.widthKm).toBeCloseTo(12, 1);
+        expect(s.heightKm).toBeCloseTo(10, 1);
+    });
+    it('uses a place outline at least 1 km across', () => {
+        const town = { lat: 37.18, lon: -3.6, bbox: { north: 37.25, south: 37.12, east: -3.55, west: -3.68 } };
+        expect(placeBox(town)).toEqual(town.bbox);
+    });
+    it('puts a bed-shaped box around a point place', () => {
+        const peak = { lat: 45.8326, lon: 6.8652, bbox: { north: 45.8327, south: 45.8325, east: 6.8653, west: 6.8651 } };
+        const s = bboxSizeKm(placeBox(peak, 1));
+        expect(s.widthKm).toBeCloseTo(POINT_PLACE_KM, 1);
+        expect(s.heightKm).toBeCloseTo(POINT_PLACE_KM, 1);
     });
 });

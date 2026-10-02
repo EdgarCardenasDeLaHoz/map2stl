@@ -4232,3 +4232,11 @@
 }
 .sidebar-new-region-btn:hover { background: #3a3a3c; }
 .sidebar-new-region-btn.drawing { background: #0a84ff; color: #fff; }
+
+/* New-region size label on the box (Leaflet tooltip; modules/map/new-region.js). */
+.leaflet-tooltip.nr-size-tag {
+    background: #0a84ff; color: #fff; border: 0; border-radius: 8px; padding: 4px 9px;
+    font-size: 12px; font-weight: 600; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); white-space: nowrap;
+}
+.leaflet-tooltip.nr-size-tag.muted { background: #3a3a3c; }
+.leaflet-tooltip.nr-size-tag::before { display: none; }
