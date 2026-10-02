@@ -3,21 +3,10 @@
   <div id="settingsPanelResizeHandle" class="settings-resize-handle" title="Drag to resize settings panel"></div>
   <div class="dem-right-panel" id="demRightPanel">
 
-    <!-- Tab strip — mirrors the Extrude panel's Fetch/View/Export pattern -->
-    <!-- The full panels are ⚙ tools now (F-DESIGN): Data sources (Fetch), Display (View),
-         Composite & imports (Composite), Settings as JSON. Beginner shows only the selected
-         layer's settings (LayerProperties.vue) above. -->
-    <div v-show="anyTool" class="dem-strip" id="demStrip">
-      <button v-show="ui.shows('editData')" :class="['dem-strip-btn', tab==='fetch' && 'active']"
-              @click="activeTab='fetch'"
-              title="DEM source, projection, and per-layer fetch parameters">📥 Fetch</button>
-      <div class="dem-strip-divider"></div>
-      <button v-show="ui.shows('editLook')" :class="['dem-strip-btn', tab==='view' && 'active']"
-              @click="activeTab='view'"
-              title="Canvas display mode and per-layer visibility / opacity">👁 View</button>
-      <button v-show="ui.shows('editModel')" :class="['dem-strip-btn', tab==='composite' && 'active']"
-              @click="activeTab='composite'"
-              title="Composite DEM and saved presets">⊕ Composite</button>
+    <!-- Strip: the guide, hiding the panel, and the JSON editor when that section is on. The
+         old Fetch / View / Composite tabs are now sections switched on under "More settings"
+         and stacked in this panel (F-DESIGN, user 2026-10-02). -->
+    <div class="dem-strip" id="demStrip">
       <div style="flex:1"></div>
       <a class="dem-strip-btn guide-link" :href="guideLink" target="_blank" rel="noopener"
          title="Open the step-by-step guide for this part (new tab)">? Guide</a>
@@ -31,24 +20,25 @@
         <!-- Landmarks near the box edge (a warning, so it shows in every mode). -->
         <EdgeLandmarkWarnings compact :max="3" />
         <LayerProperties />
-        <div v-if="!anyTool" class="lp-more">Every other setting is a tool in
-          <button type="button" class="lp-more-link" @click="openSettings">⚙ Settings</button>.</div>
+        <ToolSwitches page="edit" />
 
         <!-- Primary actions — pinned at the top of the Fetch tab. Load DEM is the
              step everything else depends on, so it leads; its handler is wired
              by id in event-listeners-map.js (window.loadDEM). Source and
              resolution stay under Fetch Layers → DEM Source. -->
-        <div v-show="tab==='fetch'" id="settingsSaveRow" class="settings-primary-row">
+        <!-- ═══════════ Data sources & fetch details (was the Fetch tab) ═══════════ -->
+        <h3 v-show="ui.shows('editData')" class="tool-head">📥 Data sources &amp; fetch details</h3>
+        <div v-show="ui.shows('editData')" id="settingsSaveRow" class="settings-primary-row">
           <button id="loadDemBtn" class="btn btn-primary settings-load-dem-btn"
                   title="Fetch the DEM for the selected region with the source and resolution under Fetch Layers → DEM Source">🏔 Load DEM</button>
           <button id="clearRegionCacheBtn" class="btn btn-secondary settings-icon-btn"
                   aria-label="Clear region cache"
                   title="Clear all cached data (DEM, water, satellite, etc.) and re-fetch">🗑️</button>
         </div>
-        <WorkflowPresetBar v-show="tab==='fetch'" />
+        <WorkflowPresetBar v-show="ui.shows('editData')" />
 
         <!-- ═══════════ Fetch tab ═══════════ -->
-        <div v-show="tab==='fetch'">
+        <div v-show="ui.shows('editData')">
           <ProjectionSection />
           <FetchLayersSection />
           <CityLandmarksSection />
@@ -60,14 +50,16 @@
         <!-- Global chrome first, then one section per layer in render-stack
              order: DEM, land cover, city, trails. These used to interleave,
              with Canvas sitting between two per-layer blocks. -->
-        <div v-show="tab==='view'">
+        <h3 v-show="ui.shows('editLook')" class="tool-head">👁 Display</h3>
+        <div v-show="ui.shows('editLook')">
           <LayerViewSection />
           <VisualizationSection />
           <LayerDisplaySections />
         </div>
 
         <!-- ═══════════ Composite tab ═══════════ -->
-        <div v-show="tab==='composite'">
+        <h3 v-show="ui.shows('editModel')" class="tool-head">⊕ Composite &amp; imports</h3>
+        <div v-show="ui.shows('editModel')">
           <CompositeDemSection />
           <MeshImportSection />
           <PlateRegistrationSection />
@@ -91,7 +83,7 @@
   <button id="settingsCollapsedTab" class="settings-collapsed-tab" title="Open settings panel">⚙ Settings</button>
 </template>
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { guideHref } from '../../../modules/ui/guide-links.js';
 import VisualizationSection  from './VisualizationSection.vue';
 import LayerViewSection      from './LayerViewSection.vue';
@@ -107,26 +99,18 @@ import WorkflowPresetBar     from './WorkflowPresetBar.vue';
 import EdgeLandmarkWarnings  from '../views/EdgeLandmarkWarnings.vue';
 import LayerProperties       from './LayerProperties.vue';
 import { useUiModeStore }    from '../../stores/uiMode';
+import ToolSwitches          from '../shared/ToolSwitches.vue';
 
 const ui = useUiModeStore();
-const TAB_TOOL = { fetch: 'editData', view: 'editLook', composite: 'editModel' } as const;
-const activeTab = ref<'fetch' | 'view' | 'composite'>('fetch');
-const anyTool = computed(() => ['editData', 'editLook', 'editModel', 'editJson'].some((t) => ui.shows(t)));
-/** The tab shown: the chosen one while its tool is on, else the first tool that is. */
-const tab = computed(() => {
-  if (ui.shows(TAB_TOOL[activeTab.value])) return activeTab.value;
-  return (Object.keys(TAB_TOOL) as (keyof typeof TAB_TOOL)[]).find((k) => ui.shows(TAB_TOOL[k])) ?? null;
-});
-// City SOP: step 2 (Load terrain) for Fetch/View, step 3 (Terrain edits) for Composite.
+// City SOP: step 2 (Load terrain) for terrain and data, step 3 (Terrain edits) for the carve.
 const guideLink = computed(() => guideHref('city-stl-and-puzzle-sop',
-  tab.value === 'composite' ? 'step-3' : 'step-2'));
-function openSettings() {
-  (window as any).openSettingsSheet?.();
-}
+  ui.shows('editModel') && !ui.shows('editData') ? 'step-3' : 'step-2'));
 </script>
 <style scoped>
-.lp-more { color: var(--text-muted); font-size: 12px; text-align: center; padding: 0 8px 12px; }
-.lp-more-link { background: none; border: 0; padding: 0; color: #0a84ff; font-size: 12px; cursor: pointer; }
+.tool-head {
+  margin: 14px 4px 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-muted);
+}
 .settings-primary-row {
   display: flex;
   flex-wrap: wrap;

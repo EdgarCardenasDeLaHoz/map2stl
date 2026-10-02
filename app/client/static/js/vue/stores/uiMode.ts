@@ -1,16 +1,15 @@
 /**
- * Beginner / Custom / Everything (design guidelines §1.4, F-DESIGN).
+ * Optional settings sections ("tools") per page (F-DESIGN).
  *
- * Beginner shows each page's essentials. Each tool adds its own card or row when
- * switched on in ⚙ Settings; switching any tool on sets Custom. Everything shows
- * every tool. A page asks `ui.shows('<tool>')`.
+ * Each page's right-hand panel shows its essentials, then a "More settings" list of switches
+ * (ToolSwitches.vue); a switched-on tool shows its full section in the same panel. A page asks
+ * `ui.shows('<tool>')`. The Beginner / Custom / Everything mode was removed on 2026-10-02
+ * (user: "get rid of Mode … that feature should be rethought"); see the roadmap.
  *
- * The mode is a per-viewer preference (like a remembered tab), so it lives in
+ * The switches are a per-viewer preference (like a remembered tab), so they live in
  * localStorage, not in the region settings on the server.
  */
 import { defineStore } from 'pinia';
-
-export type UiMode = 'beginner' | 'custom' | 'everything';
 
 export interface UiTool {
     id: string;
@@ -49,23 +48,21 @@ export const UI_TOOLS: UiTool[] = [
 
 const KEY = 'map2stl_uiMode';
 
-interface Stored { mode: UiMode; tools: Record<string, boolean> }
+interface Stored { tools: Record<string, boolean> }
 
-/** Parse the stored preference; anything unreadable means a fresh Beginner. */
+/**
+ * Parse the stored switches; anything unreadable means all off. Stores written while the
+ * mode existed ({mode, tools}) keep their tools; "everything" turned every tool on.
+ */
 export function parseStored(raw: string | null): Stored {
     try {
         const v = JSON.parse(raw || '');
-        const mode: UiMode = ['beginner', 'custom', 'everything'].includes(v?.mode) ? v.mode : 'beginner';
-        const tools = v?.tools && typeof v.tools === 'object' ? v.tools : {};
-        return { mode, tools };
+        const tools = v?.tools && typeof v.tools === 'object' ? { ...v.tools } : {};
+        if (v?.mode === 'everything') for (const t of UI_TOOLS) tools[t.id] = true;
+        return { tools };
     } catch {
-        return { mode: 'beginner', tools: {} };
+        return { tools: {} };
     }
-}
-
-/** Whether a tool's controls show in this mode. */
-export function toolShown(mode: UiMode, tools: Record<string, boolean>, id: string): boolean {
-    return mode === 'everything' || (mode === 'custom' && !!tools[id]);
 }
 
 function _load(): Stored {
@@ -75,21 +72,22 @@ function _load(): Stored {
 export const useUiModeStore = defineStore('uiMode', {
     state: () => _load(),
     getters: {
-        shows: (s) => (id: string) => toolShown(s.mode, s.tools, id),
+        shows: (s) => (id: string) => !!s.tools[id],
     },
     actions: {
-        setMode(mode: UiMode) {
-            this.mode = mode;
-            this._save();
-        },
         setTool(id: string, on: boolean) {
             this.tools = { ...this.tools, [id]: on };
-            // Guidelines §1.4: turning any tool on sets Custom.
-            if (on && this.mode === 'beginner') this.mode = 'custom';
+            this._save();
+        },
+        /** Every tool of a page (or of all pages) on or off: screenshot scripts, Reset. */
+        setAll(on: boolean, page?: UiTool['page']) {
+            const next = { ...this.tools };
+            for (const t of UI_TOOLS) if (!page || t.page === page) next[t.id] = on;
+            this.tools = next;
             this._save();
         },
         _save() {
-            try { localStorage.setItem(KEY, JSON.stringify({ mode: this.mode, tools: this.tools })); } catch { /* private window */ }
+            try { localStorage.setItem(KEY, JSON.stringify({ tools: this.tools })); } catch { /* private window */ }
         },
     },
 });

@@ -131,6 +131,35 @@
               </div>
             </section>
 
+            <!-- ═══ DOWNLOAD ═══ -->
+            <section class="mcard">
+              <div class="mcap">Download</div>
+              <div v-if="isCity" class="mhint" style="margin-bottom:10px;">Terrain with buildings, roads and water:
+                a .zip with one STL and a 3MF with a part per layer{{ splitOn ? ', plus the puzzle pieces' : '' }}.</div>
+              <div v-else class="mseg" role="radiogroup" aria-label="File format">
+                <button v-for="f in FORMATS" :key="f.id" type="button" role="radio"
+                        :aria-checked="format === f.id" :class="{ on: format === f.id }"
+                        :title="f.title" @click="format = f.id">{{ f.label }}</button>
+              </div>
+              <button id="modelDownloadBtn" type="button" class="btn btn-primary mdownload" @click="download">
+                ⬇ {{ downloadLabel }}
+              </button>
+              <!-- The per-format buttons the export modules wire by id; the button above clicks the
+                   matching one, so enabling, progress and errors stay in export-handlers.js. -->
+              <div hidden>
+                <button id="downloadSTLBtn" type="button">STL</button>
+                <button id="downloadOBJBtn" type="button">OBJ</button>
+                <button id="download3MFBtn" type="button">3MF</button>
+                <button id="exportCityBtn" type="button">City model</button>
+                <button id="exportPuzzle3MFBtn" type="button">Puzzle</button>
+              </div>
+              <!-- "Check before printing": size vs bed, pieces, filament, time, warnings -->
+              <PreflightPanel :form-tick="formTick" />
+            </section>
+
+            <!-- More settings: switches for the sections below (F-DESIGN, user 2026-10-02). -->
+            <ToolSwitches page="extrude" />
+
             <!-- ═══ Vertical & surface (tool) ═══ -->
             <section v-show="ui.shows('vertical')" class="mcard">
               <div class="mcap">Vertical &amp; surface</div>
@@ -166,32 +195,6 @@
                   <input type="checkbox" id="viewerSolidPreview" checked> Solid mesh
                 </label>
               </div>
-            </section>
-
-            <!-- ═══ DOWNLOAD ═══ -->
-            <section class="mcard">
-              <div class="mcap">Download</div>
-              <div v-if="isCity" class="mhint" style="margin-bottom:10px;">Terrain with buildings, roads and water:
-                a .zip with one STL and a 3MF with a part per layer{{ splitOn ? ', plus the puzzle pieces' : '' }}.</div>
-              <div v-else class="mseg" role="radiogroup" aria-label="File format">
-                <button v-for="f in FORMATS" :key="f.id" type="button" role="radio"
-                        :aria-checked="format === f.id" :class="{ on: format === f.id }"
-                        :title="f.title" @click="format = f.id">{{ f.label }}</button>
-              </div>
-              <button id="modelDownloadBtn" type="button" class="btn btn-primary mdownload" @click="download">
-                ⬇ {{ downloadLabel }}
-              </button>
-              <!-- The per-format buttons the export modules wire by id; the button above clicks the
-                   matching one, so enabling, progress and errors stay in export-handlers.js. -->
-              <div hidden>
-                <button id="downloadSTLBtn" type="button">STL</button>
-                <button id="downloadOBJBtn" type="button">OBJ</button>
-                <button id="download3MFBtn" type="button">3MF</button>
-                <button id="exportCityBtn" type="button">City model</button>
-                <button id="exportPuzzle3MFBtn" type="button">Puzzle</button>
-              </div>
-              <!-- "Check before printing": size vs bed, pieces, filament, time, warnings -->
-              <PreflightPanel :form-tick="formTick" />
             </section>
 
             <!-- ═══ City model layers (tool) ═══ -->
@@ -368,11 +371,6 @@
                 <button id="viewerResetCamera" type="button" class="btn btn-secondary btn-sm">Reset view</button>
               </div>
             </section>
-
-            <div v-if="ui.mode !== 'everything'" class="mhint mmore">Puzzle details, city layers, engraving,
-              cross-section and more are tools in
-              <button type="button" class="mlink" @click="openSettings">⚙ Settings</button>.</div>
-
           </div><!-- /dem-controls-inner -->
         </div><!-- /dem-controls -->
 
@@ -383,6 +381,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import PreflightPanel from './PreflightPanel.vue';
+import ToolSwitches from '../shared/ToolSwitches.vue';
 import { useAppStore } from '../../stores/app';
 import { useUiModeStore } from '../../stores/uiMode';
 import { guideHref } from '../../../modules/ui/guide-links.js';
@@ -697,9 +696,6 @@ async function undoMade() {
 onMounted(() => window.addEventListener('map2stl:made-printable', onMade));
 onBeforeUnmount(() => window.removeEventListener('map2stl:made-printable', onMade));
 
-function openSettings() {
-    (window as any).openSettingsSheet?.();
-}
 </script>
 <style scoped>
 /* Extrude cards (design guidelines §4: cards 18 px radius, background steps, 11 px floor). */

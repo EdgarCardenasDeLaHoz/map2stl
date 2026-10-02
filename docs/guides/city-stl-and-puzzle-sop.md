@@ -25,8 +25,8 @@ per-layer counts and timings, checks).
 
 ## 2. The process
 
-**Prerequisites**: venv (`scripts/setup-venv.ps1`); OpenTopography key in ⚙ Settings (the
-gear at the top right) → *Keys & data folders* (any 30 m source); server running
+**Prerequisites**: venv (`scripts/setup-venv.ps1`); OpenTopography key in the **?** menu (top
+right) → *Keys & data folders* (any 30 m source); server running
 (`Start 3D Maps.bat`).
 
 **Quick path**: pick the region, then **✨ Make it printable** in the header. It picks the
@@ -45,16 +45,15 @@ How the app is laid out (since 2026-10-02):
   middle, and the selected layer's settings on the right. Each layer has a picture, a dot
   (green when loaded) and a switch: on means *in the print*. Click a layer to see its
   settings. The header's region pill goes back to Explore to switch regions.
-- The full Edit panels (*Fetch*, *View*, *Composite*, JSON) are **Edit tools** in
-  ⚙ Settings: *Data sources & fetch details*, *Display*, *Composite & imports*, *Settings
-  as JSON*. Switched on, they show as tabs above the right-hand panel.
+- The full Edit panels (*Fetch*, *View*, *Composite*, JSON) are switches under **More
+  settings** at the end of Edit's right-hand panel: *Data sources & fetch details*,
+  *Display*, *Composite & imports*, *Settings as JSON*. Switched on, each shows in that panel.
 - **Extrude** is one column of cards: *Printed size*, *Model* (Printer, Width, Height,
   Base, **Split into pieces**) and *Download* (one button, plus *Check before printing*).
-- Everything else in Extrude is a **tool card** (Vertical & surface, 3D view, City model
-  layers, Puzzle details, Engraving & contours, Cross-section, Model score).
-- Tools (Edit and Extrude) show only when switched on: ⚙ Settings → *Mode* → *Custom* and
-  the tool's switch, or *Everything* for all of them.
-- Guides, Results, Diagnostics, Keys and the API docs are in ⚙ Settings → *Account & help*.
+- Everything else in Extrude is a **More settings** switch at the end of its right-hand panel
+  (Vertical & surface, 3D view, City model layers, Puzzle details, Engraving & contours,
+  Cross-section, Model score); switched on, its card shows in that panel.
+- Guides, Results, Diagnostics, Keys and the API docs are in the header's **?** menu.
 
 Screenshots: Granada + Alhambra (N 37.1873, S 37.1693, E −3.5780, W −3.6093), taken by
 `Code/claude/scripts/sop_screenshots.py` (outside the repo; its docstring says how to
@@ -167,7 +166,7 @@ refresh them). A red outline marks the control each step talks about.
      are the piece grid.
    - The exact mm/px, Vertical mode (*auto* = true scale below a 20 km diagonal, fit to
      *Fit height* above), Smoothing (3×3) and Sea-level cap are in the *Vertical &
-     surface* tool card (switch it on in ⚙ Settings).
+     surface* card (switch it on under *More settings*).
 
    ![Extrude](img/city/09-extrude.png)
    *Width 797 mm (1 mm/px): 797 × 575 × 81 mm, "1 mm = 3.5 m · scale 1 : 3,472", Height
@@ -186,8 +185,8 @@ refresh them). A red outline marks the control each step talks about.
    *796 × 574 × 81 mm, 1:3,472, 4 × 3 boolean pieces (≤ 199 × 191 mm); buildings: 3,291
    widened, 1,448 capped; ~5.2 kg PLA, ~146 h.*
 
-7. **Puzzle details** (tool card: switch on ⚙ Settings → *Puzzle details*, or Mode
-   *Everything*). *City puzzle* is what *Split into pieces* turns on for a city box;
+7. **Puzzle details** (card: switch on *More settings* → *Puzzle details* in Extrude's
+   right-hand panel). *City puzzle* is what *Split into pieces* turns on for a city box;
    *max* is the largest piece (bed − 10 mm, 210 mm on the Ender). Knob shape (*classic*
    rounded, *dovetail*, *rectangular*), knob width / depth and clearance apply to both
    puzzles; engraved piece ids + north arrow on the underside (on by default); *Lay out
@@ -207,7 +206,7 @@ refresh them). A red outline marks the control each step talks about.
 8. **Download** (Extrude → *Download* card): for a box up to 25 km diagonal the button is
    **⬇ Download model (.zip)**, or **⬇ Download model + pieces (.zip)** with *Split into
    pieces* on. Layers per situation (see §3) are in the *City model layers* tool card
-   (switch it on in ⚙ Settings). One build writes the merged STL, the per-layer 3MF, the
+   (switch it on under *More settings*). One build writes the merged STL, the per-layer 3MF, the
    puzzle (pieces in place + laid-out plates) and `report.json`. The progress bar at the
    top of the Extrude panel shows the server's step and the elapsed time (e.g. "Building
    model... (4:05)") with **✕ Cancel**; the download and a "CITY ready" toast (kept up
@@ -254,7 +253,7 @@ half its length within 60 m of buildings or within 6 m of a road (report:
 `trails_kept` / `trails_dropped`). Granada's old trails layer was 4,293 features,
 3,605 of them town footways.
 
-Per layer (Extrude → *City model layers* tool card; switch it on in ⚙ Settings): enabled,
+Per layer (Extrude → *City model layers* card; switch it on under *More settings*): enabled,
 mode (extrude / raised / engraved / water),
 height or depth, line width. Printability rules apply to every layer: features narrower
 than 0.8 mm are widened, extruded heights capped at 8 × footprint width (reported).

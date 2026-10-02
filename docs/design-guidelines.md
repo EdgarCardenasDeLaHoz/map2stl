@@ -29,8 +29,9 @@ The app's job: **turn a box on the map into a printable 3D model.**
   composite weights, registration, mesh simplification and ML tools are ADVANCED.
 - Region settings save themselves; the header shows "✓ Saved" (`modules/ui/presets.js`).
 
-- ⚙ Settings is docked on the left and pushes the page (not a sheet over it), and lists only
-  the open page's tools (user, 2026-10-02; overrides shared §3's right-hand slide-in).
+- No separate Settings panel and no Beginner / Custom / Everything mode (user, 2026-10-02):
+  each page's right-hand panel ends with "More settings", one switch per optional section,
+  shown in that panel. Account & help is a "?" menu in the header. Overrides shared §1.4 / §3.
 
 ## Brand and style
 

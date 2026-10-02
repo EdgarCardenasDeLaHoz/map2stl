@@ -4166,9 +4166,9 @@
 .hydro-order-chip { display: inline-flex; align-items: center; gap: 3px; color: #ddd; }
 .hydro-order-swatch { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
 
-/* F-DESIGN: the Buildings table's side tab is chrome for experts; outside Everything the
-   table opens from Edit → Buildings & roads → "Building heights table". */
-body:not(.ui-everything) #cityTableCollapsedTab { display: none !important; }
+/* F-DESIGN: the Buildings table opens from Edit → Buildings & roads → "Building heights
+   table"; its vertical side tab no longer splits the page into four columns. */
+#cityTableCollapsedTab { display: none !important; }
 
 /* ── F-DESIGN Explore list (2026-10-02): rounded rows with the region's size under the
    name, selection as an accent outline, "In view | All" as a segmented control. ── */

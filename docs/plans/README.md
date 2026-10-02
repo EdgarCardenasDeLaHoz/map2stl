@@ -22,7 +22,7 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 | [F-FE1 + F-DEMID](active/F-FE1-vue-consolidation.md) | DEM handles in use; step 7 (delete `v2/`) done; steps 0–6 not pursued | F-DEMID leftovers only |
 | [F-LANDMARK](active/F-LANDMARK-roofs-and-building-parts.md) | §1–§6 done | check the result on the landmark set |
 | [F-USAGE](active/F-USAGE-local-usage-log.md) | in progress | usage log, then a flow report from real sessions |
-| [F-DESIGN](active/F-DESIGN-guidelines-redesign.md) | Explore, Edit and Extrude rebuilt (cards, layers, modes, ⚙ sheet, ✨, live composite) | retake old guide screenshots; consistency pass |
+| [F-DESIGN](active/F-DESIGN-guidelines-redesign.md) | Explore, Edit and Extrude rebuilt (cards, layers, More settings in each right panel, ✨, live composite) | retake old guide screenshots; consistency pass |
 | F-DET, registration learning | skyline and registration plans | see the Skyline section |
 
 ## Mesh pipeline and city model
@@ -119,6 +119,9 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   - port v2's degenerate-grid guard
 
   [F-FE1](active/F-FE1-vue-consolidation.md)
+- **Rethink progressive disclosure** (user, 2026-10-02): the Beginner / Custom / Everything mode was
+  removed; pages now show essentials plus per-section "More settings" switches. Decide whether
+  anything replaces the mode (e.g. remembering sections per region, or a single "show all").
 - **UI audit 2026-09-30** ([audit](../history/audits/ui-audit-2026-09-30.md)), in priority order:
   1. ~~contrast tokens (`--text-muted` / `--text-dim` fail on the dark theme, down to 1.1:1)~~ (done 2026-10-01);
   2. keyboard: `CollapsibleSection` header as a button, global `:focus-visible`, region list as one tab stop;

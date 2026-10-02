@@ -167,7 +167,8 @@ Under `app/client/static/js/vue/components/`. Store and bridge: [frontend.md](fr
 
 | Folder | Components (parent) |
 |---|---|
-| `layout/` | `AppShell` (App), `MainHeader`, `MeshRegistrationModal` (AppShell), `SettingsSheet` (MainHeader) |
+| `layout/` | `AppShell` (App), `MainHeader`, `MeshRegistrationModal` (AppShell) |
+| `shared/` | `CollapsibleSection`, `ToolSwitches` (DemSettingsPanel, ModelContainer) |
 | `dem/` (F-DESIGN) | `EditLayersPanel` (DemContainer), `LayerProperties` (DemSettingsPanel) |
 | `sidebar/` | `SidebarPanel` (App); `SidebarListView`, `SidebarEditView`, `RegionListTable`, `NewRegionSection` (SidebarPanel) |
 | `views/` | `ContentArea` (App); `MapContainer`, `DemContainer`, `ModelContainer` (ContentArea); `LandmarkSearch`, `EdgeLandmarkWarnings` (MapContainer, DemSettingsPanel); `PreflightPanel`, `ModelScorePanel` (ModelContainer) |
@@ -438,7 +439,7 @@ State on `window.guidesPage`.
 | `openLightbox(img)` / `closeLightbox()` | Screenshot lightbox |
 
 "? Guide" links live in `DemSettingsPanel.vue` and `ModelContainer.vue`; the Guides row is in
-the ⚙ Settings sheet (`SettingsSheet.vue`). Tests: `tests/js/guideLinks.test.js`.
+the header's "?" help menu (`MainHeader.vue`). Tests: `tests/js/guideLinks.test.js`.
 
 ### `reports.js` (standalone)
 

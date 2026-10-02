@@ -55,7 +55,7 @@ DEM, sizes the model to fill the bed in one piece and opens Extrude (with **Undo
 the *Region* preset for a box diagonal over 100 km and *Mountain* for 25–100 km (Middle
 Rhine, Sierra Nevada: pick *Region* in step 2 instead to get rivers and lakes). Check the
 *Rivers & lakes* layer in Edit (step 4): with its switch on they are in every preview and
-download. The Explore and Edit pages, Extrude's layout, tool cards and ⚙ Settings are
+download. The Explore and Edit pages, Extrude's layout and the *More settings* switches are
 described in the city SOP, §2.
 
 Screenshots: Grand Canyon reference box (N 36.47, S 35.97, E −111.78, W −112.88), taken
@@ -127,8 +127,8 @@ refresh them). A red outline marks the control each step talks about.
    grid to the bed), then Download card → **Check before printing**: pick *Terrain puzzle*
    (or *City model*, which with every layer off is the terrain) and **Run pre-flight**:
    size vs bed, scale, vertical exaggeration, piece grid. Expect 1.3–3× the estimated faces.
-   Grid, knobs and clearance are in the *Puzzle details* tool card (switch it on in
-   ⚙ Settings).
+   Grid, knobs and clearance are in the *Puzzle details* card (switch it on under
+   *More settings* in Extrude's right-hand panel).
 
    ![Pre-flight](img/region/06-preflight.png)
    *Split into pieces on (2 × 2 needed); Terrain puzzle: 403 × 227 × 35 mm, 1:244,192,

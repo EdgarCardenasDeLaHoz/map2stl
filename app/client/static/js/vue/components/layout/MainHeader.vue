@@ -31,11 +31,23 @@
       <!-- Region settings save themselves (modules/ui/presets.js, autosave); this says
            whether they have. No Save button: design guidelines §1.5. -->
       <span id="saveSettingsStatus" class="save-status" role="status" aria-live="polite"></span>
-      <!-- ⚙ Settings: mode, tools, keys, diagnostics, guides and docs (SettingsSheet.vue). -->
-      <button type="button" id="settingsSheetBtn" class="gear-btn" aria-label="Settings" title="Settings"
-              :aria-pressed="settingsOpen" @click="settingsOpen = !settingsOpen">⚙</button>
+      <!-- Account & help: keys, diagnostics, guides, results and docs, as one menu (user,
+           2026-10-02). Page settings live in each page's right-hand panel. -->
+      <div class="help-menu">
+        <button type="button" id="helpMenuBtn" class="gear-btn" aria-label="Account and help" title="Account and help"
+                aria-haspopup="menu" :aria-expanded="helpOpen" @click.stop="helpOpen = !helpOpen">?</button>
+        <div v-if="helpOpen" class="help-dropdown" role="menu" @click.stop>
+          <component :is="h.href ? 'a' : 'button'" v-for="h in HELP" :key="h.label" role="menuitem"
+                     class="help-item" :href="h.href" :target="h.href ? '_blank' : undefined"
+                     :rel="h.href ? 'noopener' : undefined" :type="h.href ? undefined : 'button'"
+                     @click="helpOpen = false; h.action?.()">
+            <span class="help-ic" aria-hidden="true">{{ h.icon }}</span>
+            <span class="help-text"><span class="help-n">{{ h.label }}</span><span class="help-d">{{ h.hint }}</span></span>
+          </component>
+        </div>
+      </div>
     </div>
-    <SettingsSheet :open="settingsOpen" @close="settingsOpen = false" @keys="openKeys" @diag="openDiag" />
+
 
     <!-- Keys modal -->
     <div v-if="keysOpen" class="keys-overlay" @click.self="keysOpen = false">
@@ -221,15 +233,29 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import SettingsSheet from './SettingsSheet.vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { useUiModeStore } from '../../stores/uiMode';
 import { useAppStore } from '../../stores/app';
 import { formatBboxDims } from '../../../modules/regions/region-geometry.js';
 
 const store = useAppStore();
-const settingsOpen = ref(false);
-// Modules (and the Extrude panel's "⚙ Settings" link) open the sheet through window.
-(window as any).openSettingsSheet = () => { settingsOpen.value = true; };
+const helpOpen = ref(false);
+const ui = useUiModeStore();
+// Screenshot and SOP scripts show every section of a page (or all pages) without clicking.
+(window as any).setUiTools = (on: boolean, page?: 'edit' | 'extrude') => ui.setAll(on, page);
+function closeHelp() { helpOpen.value = false; }
+onMounted(() => document.addEventListener('click', closeHelp));
+onBeforeUnmount(() => document.removeEventListener('click', closeHelp));
+const HELP = [
+  { icon: '🔑', label: 'Keys & data folders', hint: 'Earth Engine, OpenTopography, local elevation tiles', action: () => openKeys() },
+  { icon: '🩺', label: 'Diagnostics', hint: 'Server, keys, elevation sources, cache', action: () => openDiag() },
+  { icon: '📘', label: 'Guides', hint: 'Step-by-step guides with screenshots', href: '/guides' },
+  { icon: '📊', label: 'Pipeline results', hint: 'Skyline and registration reports', href: '/reports' },
+  { icon: '📋', label: 'API docs', hint: 'Swagger UI', href: '/docs' },
+  { icon: '📘', label: 'API reference (ReDoc)', hint: 'The same API, as a document', href: '/redoc' },
+  { icon: '📚', label: 'Project docs', hint: 'How map2stl works', href: '/project-docs/' },
+  { icon: '🐍', label: 'Python API reference', hint: 'numpy2stl, geo2stl, city2stl', href: '/api-reference/' },
+];
 
 const regionPill = computed(() => {
   const r = store.selectedRegion as { name: string; north: number; south: number; east: number; west: number } | null;
@@ -517,6 +543,22 @@ async function saveTilePath() {
   background: #1c1c1e; color: var(--text-muted); font-size: 16px;
 }
 .gear-btn:hover { background: #2c2c2e; color: #f5f5f7; }
+.help-menu { position: relative; }
+#helpMenuBtn { font-weight: 700; font-size: 15px; }
+.help-dropdown {
+  position: absolute; right: 0; top: 40px; z-index: 9000; width: 300px; padding: 6px;
+  background: #1c1c1e; border-radius: 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
+}
+.help-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0;
+  border-radius: 10px; background: none; color: #f5f5f7; text-align: left; text-decoration: none;
+  font: inherit; cursor: pointer;
+}
+.help-item:hover, .help-item:focus-visible { background: #2c2c2e; outline: none; }
+.help-ic { width: 26px; height: 26px; border-radius: 8px; background: #2c2c2e; display: grid; place-items: center; flex: none; }
+.help-text { display: flex; flex-direction: column; min-width: 0; }
+.help-n { font-weight: 600; font-size: 13px; }
+.help-d { color: var(--text-muted); font-size: 12px; }
 
 /* Below ~1200 px the magic button shows its icon only (title keeps the name). */
 @media (max-width: 1199px) {

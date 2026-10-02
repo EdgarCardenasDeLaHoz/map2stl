@@ -117,9 +117,9 @@ Consequences to know:
 | Layer rack (visibility, opacity, order) | `app/client/static/js/vue/components/dem/LayerViewSection.vue` | `app/client/static/js/modules/layers/stacked-layers.js::getLayerOrder`, `getActiveLayers`, `moveLayer` |
 | Composite panel | `app/client/static/js/vue/components/dem/CompositeDemSection.vue` | `app/client/static/js/modules/layers/composite-dem.js::_computeCompositeDem`, `window.applyCompositeToDem` |
 | Extrude panel: Printed size, Model (printer, width → mm/px, height, base, split), Download, then one card per tool on | `app/client/static/js/vue/components/views/ModelContainer.vue` (Download clicks the hidden per-format button that matches: city zip ≤ 25 km, else 3MF / STL / OBJ or the puzzle) | `app/client/static/js/modules/export/export-handlers.js::_asyncExport`; bed fill `app/client/static/js/modules/export/print-scale.js::fillBedMmPerPx` |
-| Beginner / Custom / Everything and the tool switches | `app/client/static/js/vue/components/layout/SettingsSheet.vue` | `app/client/static/js/vue/stores/uiMode.ts::useUiModeStore` (`shows(tool)`; localStorage `map2stl_uiMode`) |
+| "More settings" switches at the end of each page's right panel | `app/client/static/js/vue/components/shared/ToolSwitches.vue` | `app/client/static/js/vue/stores/uiMode.ts::useUiModeStore` (`shows(tool)`; localStorage `map2stl_uiMode`) |
 | ✨ Make it printable | `#makePrintableBtn` in `MainHeader.vue`; Undo banner in `ModelContainer.vue` | `app/client/static/js/modules/ui/make-printable.js::makePrintable`, preset rule `app/client/static/js/modules/ui/workflow-presets.js::choosePreset` |
-| Header: title, region pill `#regionContextPill` (→ Explore), tabs, ✨, "✓ Saved", ⚙ (Guides / Results / Diagnostics / Keys / Docs are rows in the ⚙ sheet) | `app/client/static/js/vue/components/layout/MainHeader.vue`, `SettingsSheet.vue` | `app/client/static/js/modules/ui/view-management.js::switchView` |
+| Header: title, region pill `#regionContextPill` (→ Explore), tabs, ✨, "✓ Saved", "?" menu (keys, diagnostics, guides, results, docs) | `app/client/static/js/vue/components/layout/MainHeader.vue` | `app/client/static/js/modules/ui/view-management.js::switchView` |
 | Settings collect / apply / autosave | `MainHeader.vue` (`#saveSettingsStatus`) | `app/client/static/js/modules/ui/presets.js::collectAllSettings`, `applyAllSettings`, `setupAutoSave` |
 | Region boxes on the map (outlines, ≤ 20 in view + selected, hover ↔ list row) | — (Leaflet) | `app/client/static/js/modules/regions/region-boxes.js::refreshRegionViewSet`, rule `app/client/static/js/modules/regions/viewport-regions.js::selectViewportRegions` |
 | Region editor (rename, group, bounds + size, delete, notes) | `app/client/static/js/vue/components/sidebar/SidebarEditView.vue` (opened via `SidebarPanel.vue::setRegionEditorOpen`) | `app/client/static/js/modules/regions/region-editor.js::openRegionEditor` |
@@ -134,8 +134,8 @@ Consequences to know:
   are per-browser preferences (localStorage `map2stl_bed`, `map2stl_uiMode`); mm/px is not saved
   per region, so every new DEM is sized to fill the bed unless the model is split into pieces.
 - **Edit page (F-DESIGN, 2026-10-02):** Layers left, canvas centre, the selected layer's settings
-  right. The Fetch / View / Composite tabs and the JSON editor are ⚙ tools (Data sources, Display,
-  Composite & imports, Settings as JSON); with none on, the tab strip is hidden. The debug pixel
+  right. The old Fetch / View / Composite tabs and the JSON editor are sections switched on under
+  "More settings" (Data sources, Display, Composite & imports, Settings as JSON), stacked in the panel. The debug pixel
   grid starts off. **Live composite:** with the composite on and only server-buildable channels
   (DEM, water, rivers, lakes), `export-handlers.js::_demSettings` sends `composite_layers` with every
   preview and export, so Apply to DEM is only needed for land cover / vegetation / trails.

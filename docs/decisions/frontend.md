@@ -3,7 +3,23 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
-### 2026-10-02 — ⚙ Settings is a panel docked on the left, listing the open page's tools
+### 2026-10-02 — Page settings live in the page's right-hand panel; no mode; help is a header menu
+- **Decision:** each page's right-hand panel ends with "More settings": one switch per optional
+  section (Edit: Data sources & fetch details, Display, Composite & imports, Settings as JSON;
+  Extrude: Vertical & surface, 3D view, City model layers, Puzzle details, Engraving & contours,
+  Cross-section, Model score). A switched-on section shows in the same panel under the list
+  (`shared/ToolSwitches.vue`, `stores/uiMode.ts`). The Beginner / Custom / Everything mode and
+  the separate ⚙ Settings panel are gone; Edit's Fetch / View / Composite tabs became stacked
+  sections. Keys, Diagnostics, Guides, Results and the docs are a "?" menu in the header.
+- **Why:** user, 2026-10-02: "I prefer settings on the Right and merge it with the current panel
+  on the right. I think we can get rid of Mode … that feature should be rethought. Account and
+  Help should probably be a button at the top."
+- **Rejected:** a left-docked settings panel (earlier the same day); a page-wide mode switch.
+- **Supersedes / superseded by:** supersedes the left-docked panel entry below; the mode is on
+  the roadmap to rethink.
+- **Source:** [F-DESIGN](../plans/active/F-DESIGN-guidelines-redesign.md)
+
+### 2026-10-02 — ⚙ Settings is a panel docked on the left, listing the open page's tools [superseded]
 - **Decision:** ⚙ opens (and closes) a 340 px panel docked on the left of the layout that
   pushes the page over, instead of a sheet floating over a dimmed page from the right. It lists
   the mode, the tools of the page that is open (Edit tools on Edit, Extrude tools on Extrude,
@@ -13,7 +29,7 @@ rules. Related: [composite.md](composite.md), [trails.md](trails.md).
   for Edit should only appear when in Edit mode, Same for Extrude." Overrides the shared
   guidelines' §3 slide-in-from-the-right for map2stl (appendix).
 - **Rejected:** the right-hand slide-in over a dimmed page (guidelines §3 default).
-- **Supersedes / superseded by:** —
+- **Supersedes / superseded by:** superseded by "Page settings live in the page's right-hand panel; no mode" (same day).
 
 ### 2026-10-02 — Explore: one map menu, a selection card, sizes in the list
 - **Decision:** the map's five floating buttons become two in the corner: 🌍 Globe and Map ▾ (the
