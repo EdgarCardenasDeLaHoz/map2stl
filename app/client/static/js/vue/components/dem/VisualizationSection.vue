@@ -57,7 +57,7 @@
       <!-- Pixel grid: independent red grid in DEM pixel space (shows raster dims) -->
       <div style="display:grid;grid-template-columns:auto 1fr auto;gap:4px 6px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid #333;">
         <label class="check-label" style="white-space:nowrap;" title="Overlay a grid in DEM pixel space (independent of the geographic grid). Shows the raster's pixel dimensions.">
-          <input type="checkbox" id="showPixelGrid" checked aria-label="Show pixel grid"> 🟥 Pixel grid
+          <input type="checkbox" id="showPixelGrid" aria-label="Show pixel grid"> 🟥 Pixel grid
         </label>
         <div style="display:flex;align-items:center;gap:4px;">
           <span style="font-size:11px;color:#ccc;white-space:nowrap;">every</span>

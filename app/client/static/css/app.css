@@ -4165,3 +4165,7 @@
 .hydro-order-legend { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 4px 0 6px; font-size: 12px; }
 .hydro-order-chip { display: inline-flex; align-items: center; gap: 3px; color: #ddd; }
 .hydro-order-swatch { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
+
+/* F-DESIGN: the Buildings table's side tab is chrome for experts; outside Everything the
+   table opens from Edit → Buildings & roads → "Building heights table". */
+body:not(.ui-everything) #cityTableCollapsedTab { display: none !important; }

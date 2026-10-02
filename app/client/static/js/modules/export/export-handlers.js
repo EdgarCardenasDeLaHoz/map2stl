@@ -172,6 +172,18 @@ function _demSettings() {
                 settings.width = dem.width;
             }
         }
+    } else if (document.getElementById('compositeEnabled')?.checked) {
+        // Live composite (F-DESIGN, 2026-10-02): with the composite on and every enabled
+        // channel buildable by the server (DEM, water, rivers, lakes), the layer spec goes
+        // with each preview and export without pressing Apply. The server carves them on
+        // the base DEM, so nothing compounds; Apply is still needed for channels it cannot
+        // build yet (land cover, vegetation, trails).
+        const spec = window.buildCompositeLayerSpec?.();
+        const terrainLayers = (spec?.layers || []).filter(l => !FEATURE_SOURCES.includes(l.source));
+        if (terrainLayers.some(l => l.blend_mode !== 'base') && !spec.unsupported?.length) {
+            settings.composite_layers = terrainLayers;
+            settings.composite_dim = settings.dem.dim;
+        }
     }
     return settings;
 }

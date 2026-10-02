@@ -4,45 +4,51 @@
   <div class="dem-right-panel" id="demRightPanel">
 
     <!-- Tab strip — mirrors the Extrude panel's Fetch/View/Export pattern -->
-    <div class="dem-strip" id="demStrip">
-      <button :class="['dem-strip-btn', activeTab==='fetch' && 'active']"
+    <!-- The full panels are ⚙ tools now (F-DESIGN): Data sources (Fetch), Display (View),
+         Composite & imports (Composite), Settings as JSON. Beginner shows only the selected
+         layer's settings (LayerProperties.vue) above. -->
+    <div v-show="anyTool" class="dem-strip" id="demStrip">
+      <button v-show="ui.shows('editData')" :class="['dem-strip-btn', tab==='fetch' && 'active']"
               @click="activeTab='fetch'"
               title="DEM source, projection, and per-layer fetch parameters">📥 Fetch</button>
       <div class="dem-strip-divider"></div>
-      <button :class="['dem-strip-btn', activeTab==='view' && 'active']"
+      <button v-show="ui.shows('editLook')" :class="['dem-strip-btn', tab==='view' && 'active']"
               @click="activeTab='view'"
               title="Canvas display mode and per-layer visibility / opacity">👁 View</button>
-      <button :class="['dem-strip-btn', activeTab==='composite' && 'active']"
+      <button v-show="ui.shows('editModel')" :class="['dem-strip-btn', tab==='composite' && 'active']"
               @click="activeTab='composite'"
               title="Composite DEM and saved presets">⊕ Composite</button>
       <div style="flex:1"></div>
       <a class="dem-strip-btn guide-link" :href="guideLink" target="_blank" rel="noopener"
          title="Open the step-by-step guide for this part (new tab)">? Guide</a>
       <button class="dem-strip-btn" id="settingsHideBtn" title="Hide settings panel">◀ Hide</button>
-      <button class="dem-strip-btn" id="jsonViewToggleBtn" title="Toggle between form and JSON editor">{ } JSON</button>
+      <button v-show="ui.shows('editJson')" class="dem-strip-btn" id="jsonViewToggleBtn" title="Toggle between form and JSON editor">{ } JSON</button>
     </div>
 
     <!-- Main scrollable settings area -->
     <div class="dem-controls" id="demControls">
       <div class="dem-controls-inner" id="demControlsInner">
+        <!-- Landmarks near the box edge (a warning, so it shows in every mode). -->
+        <EdgeLandmarkWarnings compact :max="3" />
+        <LayerProperties />
+        <div v-if="!anyTool" class="lp-more">Every other setting is a tool in
+          <button type="button" class="lp-more-link" @click="openSettings">⚙ Settings</button>.</div>
 
         <!-- Primary actions — pinned at the top of the Fetch tab. Load DEM is the
              step everything else depends on, so it leads; its handler is wired
              by id in event-listeners-map.js (window.loadDEM). Source and
              resolution stay under Fetch Layers → DEM Source. -->
-        <div v-show="activeTab==='fetch'" id="settingsSaveRow" class="settings-primary-row">
+        <div v-show="tab==='fetch'" id="settingsSaveRow" class="settings-primary-row">
           <button id="loadDemBtn" class="btn btn-primary settings-load-dem-btn"
                   title="Fetch the DEM for the selected region with the source and resolution under Fetch Layers → DEM Source">🏔 Load DEM</button>
           <button id="clearRegionCacheBtn" class="btn btn-secondary settings-icon-btn"
                   aria-label="Clear region cache"
                   title="Clear all cached data (DEM, water, satellite, etc.) and re-fetch">🗑️</button>
         </div>
-        <WorkflowPresetBar v-show="activeTab==='fetch'" />
-        <!-- Landmarks near the box edge; fetched by the Explore map's instance. -->
-        <EdgeLandmarkWarnings v-show="activeTab==='fetch'" compact :max="3" />
+        <WorkflowPresetBar v-show="tab==='fetch'" />
 
         <!-- ═══════════ Fetch tab ═══════════ -->
-        <div v-show="activeTab==='fetch'">
+        <div v-show="tab==='fetch'">
           <ProjectionSection />
           <FetchLayersSection />
           <CityLandmarksSection />
@@ -54,14 +60,14 @@
         <!-- Global chrome first, then one section per layer in render-stack
              order: DEM, land cover, city, trails. These used to interleave,
              with Canvas sitting between two per-layer blocks. -->
-        <div v-show="activeTab==='view'">
+        <div v-show="tab==='view'">
           <LayerViewSection />
           <VisualizationSection />
           <LayerDisplaySections />
         </div>
 
         <!-- ═══════════ Composite tab ═══════════ -->
-        <div v-show="activeTab==='composite'">
+        <div v-show="tab==='composite'">
           <CompositeDemSection />
           <MeshImportSection />
           <PlateRegistrationSection />
@@ -99,13 +105,28 @@ import PlateRegistrationSection from './PlateRegistrationSection.vue';
 import PresetsSection        from './PresetsSection.vue';
 import WorkflowPresetBar     from './WorkflowPresetBar.vue';
 import EdgeLandmarkWarnings  from '../views/EdgeLandmarkWarnings.vue';
+import LayerProperties       from './LayerProperties.vue';
+import { useUiModeStore }    from '../../stores/uiMode';
 
+const ui = useUiModeStore();
+const TAB_TOOL = { fetch: 'editData', view: 'editLook', composite: 'editModel' } as const;
 const activeTab = ref<'fetch' | 'view' | 'composite'>('fetch');
+const anyTool = computed(() => ['editData', 'editLook', 'editModel', 'editJson'].some((t) => ui.shows(t)));
+/** The tab shown: the chosen one while its tool is on, else the first tool that is. */
+const tab = computed(() => {
+  if (ui.shows(TAB_TOOL[activeTab.value])) return activeTab.value;
+  return (Object.keys(TAB_TOOL) as (keyof typeof TAB_TOOL)[]).find((k) => ui.shows(TAB_TOOL[k])) ?? null;
+});
 // City SOP: step 2 (Load terrain) for Fetch/View, step 3 (Terrain edits) for Composite.
 const guideLink = computed(() => guideHref('city-stl-and-puzzle-sop',
-  activeTab.value === 'composite' ? 'step-3' : 'step-2'));
+  tab.value === 'composite' ? 'step-3' : 'step-2'));
+function openSettings() {
+  (window as any).openSettingsSheet?.();
+}
 </script>
 <style scoped>
+.lp-more { color: var(--text-muted); font-size: 12px; text-align: center; padding: 0 8px 12px; }
+.lp-more-link { background: none; border: 0; padding: 0; color: #0a84ff; font-size: 12px; cursor: pointer; }
 .settings-primary-row {
   display: flex;
   flex-wrap: wrap;

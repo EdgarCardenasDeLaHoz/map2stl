@@ -21,11 +21,11 @@
         </div>
       </section>
 
-      <section v-if="tools.length">
-        <div class="ss-cap">Extrude tools
-          <button v-if="anyToolOn" type="button" class="ss-reset" @click="resetTools">Reset</button></div>
+      <section v-for="g in toolGroups" :key="g.page">
+        <div class="ss-cap">{{ g.title }}
+          <button v-if="g.anyOn" type="button" class="ss-reset" @click="resetTools(g.page)">Reset</button></div>
         <div class="ss-group">
-          <label v-for="t in tools" :key="t.id" class="ss-row">
+          <label v-for="t in g.tools" :key="t.id" class="ss-row">
             <span class="ss-ic">{{ t.icon }}</span>
             <span class="ss-grow"><span class="ss-n">{{ t.label }}</span><span class="ss-d">{{ t.hint }}</span></span>
             <input type="checkbox" role="switch" class="ss-switch" :aria-label="t.label"
@@ -33,8 +33,8 @@
                    @change="ui.setTool(t.id, ($event.target as HTMLInputElement).checked)">
           </label>
         </div>
-        <div v-if="ui.mode === 'everything'" class="ss-note">Everything shows every tool. Pick Custom to choose.</div>
       </section>
+      <div v-if="toolGroups.length && ui.mode === 'everything'" class="ss-note">Everything shows every tool. Pick Custom to choose.</div>
 
       <section v-if="help.length">
         <div class="ss-cap">Account &amp; help</div>
@@ -49,7 +49,7 @@
         </div>
       </section>
 
-      <div v-if="!tools.length && !help.length && !match('mode beginner custom everything tools')" class="ss-note">
+      <div v-if="!toolGroups.length && !help.length && !match('mode beginner custom everything tools')" class="ss-note">
         Nothing matches “{{ query }}”.</div>
     </aside>
   </div>
@@ -64,6 +64,11 @@ const emit = defineEmits<{ close: []; keys: []; diag: [] }>();
 const ui = useUiModeStore();
 // Screenshot and SOP scripts switch modes without clicking through the sheet.
 (window as any).setUiMode = (m: 'beginner' | 'custom' | 'everything') => ui.setMode(m);
+// body.ui-<mode> lets CSS hide legacy chrome (e.g. the Buildings side tab) outside Everything.
+watch(() => ui.mode, (m) => {
+  document.body.classList.remove('ui-beginner', 'ui-custom', 'ui-everything');
+  document.body.classList.add(`ui-${m}`);
+}, { immediate: true });
 
 const MODES = [
   { id: 'beginner', label: 'Beginner' },
@@ -85,10 +90,16 @@ function match(text: string): boolean {
   return !q || text.toLowerCase().includes(q);
 }
 
+const PAGE_TITLES = { edit: 'Edit tools', extrude: 'Extrude tools' } as const;
 const tools = computed(() => UI_TOOLS.filter((t) => match(`${t.label} ${t.hint} ${t.page}`)));
-const anyToolOn = computed(() => Object.values(ui.tools).some(Boolean));
-function resetTools() {
-  for (const t of UI_TOOLS) ui.setTool(t.id, false);
+const toolGroups = computed(() => (['edit', 'extrude'] as const)
+  .map((page) => {
+    const list = tools.value.filter((t) => t.page === page);
+    return { page, title: PAGE_TITLES[page], tools: list, anyOn: list.some((t) => ui.tools[t.id]) };
+  })
+  .filter((g) => g.tools.length));
+function resetTools(page: 'edit' | 'extrude') {
+  for (const t of UI_TOOLS) if (t.page === page) ui.setTool(t.id, false);
 }
 
 const HELP = [

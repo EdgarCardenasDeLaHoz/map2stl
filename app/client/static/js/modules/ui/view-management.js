@@ -77,9 +77,9 @@ window.switchView = function switchView(view) {
     } else if (view === 'dem') {
         // Re-bind DEM subtab handlers in case Vue components mounted after initial setup.
         window.setupDemSubtabs?.();
-        // Ensure sidebar shows the region list so the user can switch regions
-        document.getElementById('sidebarListView')?.classList.remove('hidden');
-        document.getElementById('sidebarTableView')?.classList.add('hidden');
+        // The Layers panel takes the region list's place (F-DESIGN, 2026-10-02); the
+        // header's region pill switches back to Explore to pick another region.
+        if (sidebar) sidebar.style.display = 'none';
         window.setRegionEditorOpen?.(false);
         // Fill bbox inputs immediately if a region is selected (they're normally filled
         // after DEM loads, leaving them blank if the user arrives via the tab button)
@@ -536,7 +536,8 @@ window.setupDemSubtabs = function setupDemSubtabs() {
 
         const cityCollapsedTabW = document.getElementById('cityTableCollapsedTab')?.getBoundingClientRect().width || 0;
         const settingsHandleW = document.getElementById('settingsPanelResizeHandle')?.getBoundingClientRect().width || 0;
-        const targetMax = Math.max(220, demContainer.clientWidth - minCenter - cityCollapsedTabW - settingsHandleW);
+        const layersPanelW = document.getElementById('editLayersPanel')?.getBoundingClientRect().width || 0;
+        const targetMax = Math.max(220, demContainer.clientWidth - minCenter - cityCollapsedTabW - settingsHandleW - layersPanelW);
         const currentW = right.getBoundingClientRect().width;
         right.style.width = `${Math.max(220, Math.min(currentW, targetMax))}px`;
 

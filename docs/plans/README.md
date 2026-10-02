@@ -22,7 +22,7 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 | [F-FE1 + F-DEMID](active/F-FE1-vue-consolidation.md) | DEM handles in use; step 7 (delete `v2/`) done; steps 0–6 not pursued | F-DEMID leftovers only |
 | [F-LANDMARK](active/F-LANDMARK-roofs-and-building-parts.md) | §1–§6 done | check the result on the landmark set |
 | [F-USAGE](active/F-USAGE-local-usage-log.md) | in progress | usage log, then a flow report from real sessions |
-| [F-DESIGN](active/F-DESIGN-guidelines-redesign.md) | mockups approved; Extrude rebuilt (cards, modes, ⚙ sheet, ✨) | Edit (layers left, selection's settings right), then Explore |
+| [F-DESIGN](active/F-DESIGN-guidelines-redesign.md) | Extrude and Edit rebuilt (cards, layers, modes, ⚙ sheet, ✨, live composite) | Explore, then retake old guide screenshots |
 | F-DET, registration learning | skyline and registration plans | see the Skyline section |
 
 ## Mesh pipeline and city model

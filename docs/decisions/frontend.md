@@ -3,6 +3,26 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-02 — Edit: a layer's switch means "in the print"; server channels need no Apply
+- **Decision:** the Edit page lists the print's layers (Terrain, Rivers & lakes, Buildings &
+  roads, Satellite colour, + trails / land cover / imported mesh) with a switch each. A switch
+  sets the model flags (composite rivers / lakes / open water; City model layers; satellite
+  colour) and shows the matching preview layer. With the composite on and only channels the
+  server can build, the layer spec goes with every preview and export, so the browser never
+  rewrites the DEM; Apply to DEM stays for land cover, vegetation and trails. Switching water
+  off turns the composite off unless land cover or vegetation contributes (weight > 0). The
+  region list leaves the Edit page (the header pill switches regions); the debug pixel grid
+  starts off; the full Fetch / View / Composite panels are ⚙ tools.
+- **Why:** design guidelines §1.5 / §1.6 (no Apply buttons; what you see is what prints) and the
+  review's severe items 4–5. Apply replaced `lastDemData.values` with the composite, which the
+  next composite then used as its base, so running Apply automatically would have carved the
+  rivers twice. Checked in the app 2026-10-02: one switch on Granada put HydroRIVERS + lakes into
+  the 3D preview (80,612 faces vs 79,626); off left no composite layers.
+- **Rejected:** auto-pressing Apply after each change — compounds the carve (above); keeping the
+  region list on Edit — two columns before the canvas, and the pill already says what is open.
+- **Supersedes / superseded by:** —
+- **Source:** [F-DESIGN](../plans/active/F-DESIGN-guidelines-redesign.md)
+
 ### 2026-10-01 — Pages follow the design guidelines; Extrude is rebuilt first
 - **Decision:** adopt the shared `Projects/design-guidelines.md` with the map2stl appendix
   ([../design-guidelines.md](../design-guidelines.md)). Mockup round 1 (layers left, result

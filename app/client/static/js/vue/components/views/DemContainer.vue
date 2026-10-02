@@ -1,6 +1,9 @@
 <template>
   <!-- DEM/Edit view — IMPORTANT: never use v-if on canvas elements; use hidden class only -->
   <div id="demContainer" class="dem-container hidden">
+    <!-- Layers of the print (F-DESIGN): replaces the region list on this page; the header's
+         region pill goes back to Explore to switch regions. -->
+    <EditLayersPanel />
     <div class="dem-image-section">
 
       <!-- Empty state when no DEM loaded -->
@@ -139,5 +142,6 @@
 <script setup lang="ts">
 import DemSettingsPanel from '../dem/DemSettingsPanel.vue';
 import CityBuildingsPanel from '../dem/CityBuildingsPanel.vue';
+import EditLayersPanel from '../dem/EditLayersPanel.vue';
 // All canvas elements are never conditionally unmounted — JS modules hold direct refs
 </script>

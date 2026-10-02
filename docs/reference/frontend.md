@@ -112,6 +112,8 @@ Consequences to know:
 | City 3D heights (`#cityBuildingScale`, `#cityRoadDepression`, `#cityWaterOffset`, `#cityRoofShapes`), trails relief (`#trailsReliefM`) | Composite → 🏙 City / OSM and 🥾 Trails in `CompositeDemSection.vue` | read by id at the next Load Cities / Load Trails (`city-render.js`, `trails-overlay.js`) |
 | Edit-tab map tile / terrain overlay mirrors (`#mapTileLayer`, `#showTerrainOverlay`, `#terrainOverlayOpacity`) | View → 🖼 Canvas in `VisualizationSection.vue` | synced with the Explore tab in `event-listeners-map.js` |
 | DEM source list | `#paramDemSource` in `FetchLayersSection.vue` | `window.populateDemSources` in `dem-main.js` fills it from `GET /api/terrain/sources`; unavailable sources are disabled, not hidden |
+| Edit Layers panel (picture tiles, status dots, in-the-model switches; replaces the region list on Edit) | `app/client/static/js/vue/components/dem/EditLayersPanel.vue` | layer definitions `app/client/static/js/vue/stores/editLayers.ts::EDIT_LAYERS` (switch = model flags + preview layer via `setStackMode`) |
+| Selected layer's settings (Edit, right) | `app/client/static/js/vue/components/dem/LayerProperties.vue` | writes existing controls by id: `app/client/static/js/vue/dom-fields.ts::setField` |
 | Layer rack (visibility, opacity, order) | `app/client/static/js/vue/components/dem/LayerViewSection.vue` | `app/client/static/js/modules/layers/stacked-layers.js::getLayerOrder`, `getActiveLayers`, `moveLayer` |
 | Composite panel | `app/client/static/js/vue/components/dem/CompositeDemSection.vue` | `app/client/static/js/modules/layers/composite-dem.js::_computeCompositeDem`, `window.applyCompositeToDem` |
 | Extrude panel: Printed size, Model (printer, width → mm/px, height, base, split), Download, then one card per tool on | `app/client/static/js/vue/components/views/ModelContainer.vue` (Download clicks the hidden per-format button that matches: city zip ≤ 25 km, else 3MF / STL / OBJ or the puzzle) | `app/client/static/js/modules/export/export-handlers.js::_asyncExport`; bed fill `app/client/static/js/modules/export/print-scale.js::fillBedMmPerPx` |
@@ -129,6 +131,12 @@ Consequences to know:
   Edit and Explore are next (F-DESIGN). The printer bed (default Ender 220 × 220) and the UI mode
   are per-browser preferences (localStorage `map2stl_bed`, `map2stl_uiMode`); mm/px is not saved
   per region, so every new DEM is sized to fill the bed unless the model is split into pieces.
+- **Edit page (F-DESIGN, 2026-10-02):** Layers left, canvas centre, the selected layer's settings
+  right. The Fetch / View / Composite tabs and the JSON editor are ⚙ tools (Data sources, Display,
+  Composite & imports, Settings as JSON); with none on, the tab strip is hidden. The debug pixel
+  grid starts off. **Live composite:** with the composite on and only server-buildable channels
+  (DEM, water, rivers, lakes), `export-handlers.js::_demSettings` sends `composite_layers` with every
+  preview and export, so Apply to DEM is only needed for land cover / vegetation / trails.
 - **Edit sub-tab rule** (`DemSettingsPanel.vue`): *Fetch* holds data settings that affect
   everything, *View* visualization-only settings, *Composite* settings that only affect the
   3D render. All three are `v-show`, so a control moved between them keeps working by id.

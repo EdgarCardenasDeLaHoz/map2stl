@@ -30,9 +30,11 @@ and one visual style. No capability is lost.
      printable (`modules/ui/make-printable.js`), default bed Ender 220 × 220; every new DEM fills
      the bed. Build vs mockup: `claude/mockups/2026-10-01/png/build-extrude*.png`
      (`claude/scripts/mockup_compare.py`).
-   - Next: Edit (layers with pictures left, the selected layer's settings right, region data /
-     look / model groups into the ⚙ sheet, Edit tools: projection, curve, land cover, weights,
-     landmarks, mesh import, registration, JSON), then Explore.
+   - **Edit done (2026-10-02):** Layers panel (`EditLayersPanel.vue`, `stores/editLayers.ts`),
+     selected layer's settings (`LayerProperties.vue`), Fetch / View / Composite / JSON as ⚙ tools,
+     live composite in preview + export (no Apply for DEM/water/rivers/lakes), region list off the
+     Edit page, pixel grid off by default. Build shots `claude/mockups/2026-10-01/png/build-edit*.png`.
+   - Next: Explore; then retake the old-header guide screenshots (city 01–08, region 01–04).
 5. **Compare** build screenshots with the mockups; run `ui_screens.py` and the layout audit.
 
 ## Target files
