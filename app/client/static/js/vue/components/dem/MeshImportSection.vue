@@ -337,7 +337,7 @@ onBeforeUnmount(() => {
 }
 .mesh-import-file-size {
   font-size: 9px;
-  color: #888;
+  color: var(--text-dim);
 }
 .mesh-import-current {
   font-size: 11px;
@@ -349,7 +349,7 @@ onBeforeUnmount(() => {
 }
 .mesh-import-hint {
   font-size: 11px;
-  color: #888;
+  color: var(--text-dim);
   padding: 4px;
 }
 .mesh-import-error {
@@ -367,7 +367,7 @@ onBeforeUnmount(() => {
 }
 .mesh-import-stats {
   font-size: 10px;
-  color: #888;
+  color: var(--text-dim);
   display: block;
   margin-top: 4px;
 }
@@ -398,7 +398,7 @@ onBeforeUnmount(() => {
 }
 .mesh-import-footer-hint {
   font-size: 10px;
-  color: #666;
+  color: var(--text-dim);
   margin-top: 4px;
 }
 </style>

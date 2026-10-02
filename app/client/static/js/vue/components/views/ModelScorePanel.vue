@@ -163,7 +163,7 @@ onMounted(loadReferences);
 .model-score-head .btn:first-child { flex: 1; }
 .model-score-row { margin: 4px 0; }
 .model-score-row select { max-width: 100%; }
-.model-score-muted { font-size: 10px; color: #888; }
+.model-score-muted { font-size: 10px; color: var(--text-dim); }
 .model-score-error { color: #e08080; margin: 4px 0; }
 .model-score-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
 .model-score-table th { text-align: left; font-weight: normal; color: #8ea6bf; padding: 1px 4px; }

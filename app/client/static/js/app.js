@@ -144,10 +144,10 @@ function clearLayerCache() {
  */
 function clearLayerDisplays() {
     const placeholders = {
-        demImage: '<p style="text-align:center;padding:50px;color:#888;">Select a region to view DEM</p>',
-        waterMaskImage: '<p style="text-align:center;padding:50px;color:#888;">Select a region to view water mask</p>',
-        satelliteImage: '<p style="text-align:center;padding:50px;color:#888;">Select a region to view land cover</p>',
-        combinedImage: '<p style="text-align:center;padding:50px;color:#888;">Select a region to view combined layers</p>'
+        demImage: '<p style="text-align:center;padding:50px;color:var(--text-dim);">Select a region to view DEM</p>',
+        waterMaskImage: '<p style="text-align:center;padding:50px;color:var(--text-dim);">Select a region to view water mask</p>',
+        satelliteImage: '<p style="text-align:center;padding:50px;color:var(--text-dim);">Select a region to view land cover</p>',
+        combinedImage: '<p style="text-align:center;padding:50px;color:var(--text-dim);">Select a region to view combined layers</p>'
     };
 
     Object.keys(placeholders).forEach(id => {

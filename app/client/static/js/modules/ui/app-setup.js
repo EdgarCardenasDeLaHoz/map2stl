@@ -121,10 +121,10 @@ window.clearAllBoundingBoxes = function clearAllBoundingBoxes() {
     const waterMaskImage  = document.getElementById('waterMaskImage');
     const satelliteImage  = document.getElementById('satelliteImage');
     const combinedImage   = document.getElementById('combinedImage');
-    if (demImage)       demImage.innerHTML       = '<p style="text-align:center;padding:50px;color:#888;">Select a region to view DEM</p>';
-    if (waterMaskImage) waterMaskImage.innerHTML = '<p style="text-align:center;padding:50px;color:#888;">Select a region to view water mask</p>';
-    if (satelliteImage) satelliteImage.innerHTML = '<p style="text-align:center;padding:50px;color:#888;">Select a region to view land cover</p>';
-    if (combinedImage)  combinedImage.innerHTML  = '<p style="text-align:center;padding:50px;color:#888;">Select a region to view combined layers</p>';
+    if (demImage)       demImage.innerHTML       = '<p style="text-align:center;padding:50px;color:var(--text-dim);">Select a region to view DEM</p>';
+    if (waterMaskImage) waterMaskImage.innerHTML = '<p style="text-align:center;padding:50px;color:var(--text-dim);">Select a region to view water mask</p>';
+    if (satelliteImage) satelliteImage.innerHTML = '<p style="text-align:center;padding:50px;color:var(--text-dim);">Select a region to view land cover</p>';
+    if (combinedImage)  combinedImage.innerHTML  = '<p style="text-align:center;padding:50px;color:var(--text-dim);">Select a region to view combined layers</p>';
 
     window.showToast('All selections cleared', 'info');
 };

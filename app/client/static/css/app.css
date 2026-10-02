@@ -1,15 +1,18 @@
-﻿        :root {
+        :root {
             --bg-dark: #1a1a1a;
             --bg-mid: #2a2a2a;
             --bg-light: #333;
             --border: #444;
             --border-light: #555;
-            --text-dim: #333;
-            /* WCAG AA: 10.1:1 on white (was #666 = 3.1:1) */
-            --text-muted: #555;
-            /* WCAG AA: 6.8:1 on white (was #888 = 2.1:1) */
-            --text-disabled: #666;
-            /* WCAG AA disabled text */
+            /* Text tokens for the dark theme (WCAG AA 4.5:1). Contrast is checked by
+               tests/js/contrastTokens.test.js against panels #2d2d2d and inputs #404040.
+               --text-muted #b3b3b3: 6.6:1 on #2d2d2d, 4.9:1 on #404040 (safe on inputs).
+               --text-dim   #a0a0a0: 5.3:1 on #2d2d2d, 4.8:1 on #333 (panels only, not inputs).
+               Both stay visibly below body text #e0e0e0 (10.4:1). */
+            --text-muted: #b3b3b3;
+            --text-dim: #a0a0a0;
+            /* Disabled controls also get opacity (WCAG-exempt). */
+            --text-disabled: #8a8a8a;
             --panel-width: 250px;
         }
 
@@ -266,6 +269,18 @@
         /* Vue teleport placeholder divs — must not break flex layout chains */
         #vue-main-header {
             flex-shrink: 0;
+            /* The header's width is the main column's, not the window's (a wide region
+               sidebar narrows it), so its narrow layout is a container query. */
+            container-type: inline-size;
+        }
+
+        /* Narrow main column (e.g. 1024 px window with the region table expanded):
+           drop the title and the step arrows so the tabs and buttons stay on screen. */
+        @container (max-width: 640px) {
+            .main-title,
+            .tab-arrow {
+                display: none;
+            }
         }
 
         #vue-content-area {
@@ -289,12 +304,17 @@
             align-items: center;
             justify-content: space-between;
             flex-shrink: 0;
+            flex-wrap: nowrap;
+            gap: 12px;
+            min-width: 0;
         }
 
         .main-title {
             font-size: 14px;
             font-weight: 600;
             color: var(--text-muted);
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
         /* Status panel on the right of the visualization */
@@ -347,7 +367,7 @@
         }
 
         .status-dot.empty {
-            background: var(--text-dim);
+            background: var(--border-light);
         }
 
         .status-dot.loading {
@@ -370,6 +390,8 @@
             display: flex;
             gap: 3px;
             align-items: center;
+            flex-wrap: nowrap;
+            flex-shrink: 0;
         }
 
         .tab {
@@ -382,6 +404,7 @@
             transition: all 0.2s ease;
             font-size: 12px;
             font-weight: 500;
+            white-space: nowrap;
         }
 
         .tab:hover {
@@ -433,7 +456,7 @@
         }
 
         .tab-arrow {
-            color: #555;
+            color: var(--text-dim);
             font-size: 16px;
             line-height: 1;
             align-self: center;
@@ -882,12 +905,12 @@
 
         .continent-count {
             font-size: 10px;
-            color: var(--border-light);
+            color: var(--text-dim);
         }
 
         .continent-eye {
             font-size: 12px;
-            color: var(--border-light);
+            color: var(--text-dim);
             cursor: pointer;
             padding: 2px 4px;
             border-radius: 3px;
@@ -2133,14 +2156,22 @@
         }
 
         /* Toast Notifications */
+        /* Bottom-centre stack over the main view: clear of the right-hand settings
+           panels and the Leaflet attribution, and above the Explore map's bottom
+           buttons (+ New Region / Load DEM ›). showToast keeps at most 3 on screen;
+           errors stay until closed. */
         .toast-container {
             position: fixed;
-            bottom: 20px;
-            right: 20px;
+            bottom: 76px;
+            left: 50%;
+            transform: translateX(-50%);
             z-index: 10000;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            align-items: center;
+            gap: 8px;
+            width: max-content;
+            max-width: min(440px, calc(100vw - 32px));
             pointer-events: none;
         }
 
@@ -2157,7 +2188,8 @@
                so it matches the duration passed to showToast. */
             animation: slideIn 0.3s ease;
             pointer-events: auto;
-            max-width: 350px;
+            max-width: 100%;
+            padding: 10px 10px 10px 16px;
         }
 
         .toast.success {
@@ -2185,16 +2217,36 @@
             flex: 1;
             font-size: 13px;
             line-height: 1.4;
+            white-space: pre-line;
+            overflow-wrap: anywhere;
+        }
+
+        .toast-close {
+            flex-shrink: 0;
+            min-width: 24px;
+            min-height: 24px;
+            background: none;
+            border: none;
+            border-radius: 4px;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .toast-close:hover,
+        .toast-close:focus-visible {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.1);
         }
 
         @keyframes slideIn {
             from {
-                transform: translateX(100%);
+                transform: translateY(12px);
                 opacity: 0;
             }
 
             to {
-                transform: translateX(0);
+                transform: translateY(0);
                 opacity: 1;
             }
         }
@@ -2248,7 +2300,7 @@
 
         .btn-secondary:hover {
             background: #4a4a4a;
-            border-color: var(--text-dim);
+            border-color: var(--border-light);
         }
 
         .btn-success {
@@ -2498,7 +2550,15 @@
         }
 
         .search-input::placeholder {
-            color: var(--text-dim);
+            color: var(--text-muted);
+            opacity: 1;
+        }
+
+        /* Placeholders: browser default (~#757575) fails 4.5:1 on #404040 inputs. */
+        input::placeholder,
+        textarea::placeholder {
+            color: var(--text-muted);
+            opacity: 1;
         }
 
         /* Progress Bar */
@@ -2684,7 +2744,7 @@
 
         .sidebar-table-view th {
             background: #252525;
-            color: #999;
+            color: var(--text-dim);
             font-weight: 600;
             padding: 4px 3px;
             border-bottom: 1px solid var(--border);
@@ -2840,7 +2900,7 @@
         }
 
         .sidebar-vis-btn.hidden-state {
-            color: var(--border-light);
+            color: var(--text-dim);
             border-color: var(--border);
         }
 
@@ -2926,14 +2986,14 @@
             flex: 1;
             font-size: 10px;
             font-weight: 700;
-            color: #777;
+            color: var(--text-dim);
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
 
         .continent-count-sidebar {
             font-size: 10px;
-            color: var(--border-light);
+            color: var(--text-dim);
         }
 
         .continent-body-sidebar.collapsed {
@@ -3071,7 +3131,7 @@
 
         .region-editor-label {
             font-size: 11px;
-            color: #999;
+            color: var(--text-dim);
             padding: 0;
         }
 
@@ -3212,7 +3272,7 @@
             cursor: pointer; line-height: 1; padding: 0 4px;
         }
         .mesh-reg-close-btn:hover { color: #fff; }
-        .mesh-reg-hint { font-size: 11px; color: #888; }
+        .mesh-reg-hint { font-size: 11px; color: var(--text-dim); }
         .mesh-reg-panels {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -3332,7 +3392,7 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            color: #444;
+            color: var(--text-dim);
             font-size: 14px;
             gap: 10px;
             pointer-events: none;
@@ -3694,6 +3754,31 @@
             font-size: 11px;
         }
 
+        /* Extrude settings: each value sits right after its label (compact two-column
+           grid), not label far-left / input far-right across the panel. Units are in the
+           labels. (UI audit 2026-09-30) */
+        #modelControls .param-grid {
+            grid-template-columns: max-content auto;
+            justify-content: start;
+            column-gap: 10px;
+        }
+
+        #modelControls .param-group {
+            justify-content: flex-start;
+            gap: 10px;
+            margin: 6px 0;
+        }
+
+        #modelControls .param-group label {
+            flex: 0 0 9.5em;
+        }
+
+        #modelControls .param-group input:not([type="checkbox"]) {
+            flex: 0 0 auto;
+            width: 72px;
+            padding: 3px 6px;
+        }
+
         /* ====================================================
            Utility classes — replace inline styles (CLEAN-1)
            ==================================================== */
@@ -3756,7 +3841,7 @@
 
         .viewer-unavailable {
             padding: 20px;
-            color: #888;
+            color: var(--text-dim);
             text-align: center;
         }
 
@@ -3780,7 +3865,7 @@
             align-items: center;
             justify-content: center;
             height: 300px;
-            color: #555;
+            color: var(--text-dim);
             font-size: 14px;
             gap: 10px;
         }
@@ -3841,13 +3926,13 @@
         /* New-region form — padding and label styles */
         .new-region-form-hint {
             font-size: 11px;
-            color: #888;
+            color: var(--text-dim);
             margin-bottom: 4px;
         }
 
         .new-region-form-label {
             font-size: 11px;
-            color: #888;
+            color: var(--text-dim);
         }
 
         /* Sidebar list pagination controls */
@@ -3973,13 +4058,13 @@
 
         .sidebar-empty-state-hint {
             font-size: 11px;
-            color: #888;
+            color: var(--text-dim);
         }
 
         /* Composite DEM info box */
         .composite-info-box {
             font-size: 10px;
-            color: #777;
+            color: var(--text-dim);
             margin-bottom: 4px;
             padding: 3px 6px;
             background: #2a2a2a;
@@ -4031,7 +4116,7 @@
 
         .composite-contrib-status {
             font-size: 10px;
-            color: #888;
+            color: var(--text-dim);
             margin-top: 2px;
         }
 
@@ -4055,7 +4140,7 @@
 
         .composite-footer-hint {
             font-size: 10px;
-            color: #666;
+            color: var(--text-dim);
             margin-top: 1px;
         }
 
@@ -4066,7 +4151,7 @@
 
         .new-region-optional-hint {
             font-size: 10px;
-            color: #666;
+            color: var(--text-dim);
         }
 
         .new-region-save-row {

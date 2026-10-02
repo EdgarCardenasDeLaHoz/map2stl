@@ -186,7 +186,7 @@ onBeforeUnmount(() => { if (marker) marker.remove(); unsubscribe?.(); });
 .landmark-name { color: #eee; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .landmark-caption { color: #8ab; font-size: 10px; }
 .landmark-where {
-  grid-column: 1 / -1; color: #888; font-size: 10px;
+  grid-column: 1 / -1; color: var(--text-dim); font-size: 10px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .landmark-actions {

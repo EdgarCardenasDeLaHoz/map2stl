@@ -230,7 +230,7 @@ onBeforeUnmount(() => {
 }
 .layer-row-res {
   font-size: 9px;
-  color: #666;
+  color: var(--text-dim);
   white-space: nowrap;
 }
 .layer-row-opacity {
@@ -238,7 +238,7 @@ onBeforeUnmount(() => {
 }
 .layer-row-pct {
   font-size: 9px;
-  color: #888;
+  color: var(--text-dim);
   text-align: right;
   white-space: nowrap;
 }
@@ -251,14 +251,14 @@ onBeforeUnmount(() => {
 .layer-arrow-btn {
   background: none;
   border: none;
-  color: #888;
+  color: var(--text-dim);
   cursor: pointer;
   padding: 0;
   font-size: 9px;
   line-height: 1;
 }
 .layer-arrow-btn:disabled {
-  color: #333;
+  opacity: 0.35;
   cursor: default;
 }
 </style>

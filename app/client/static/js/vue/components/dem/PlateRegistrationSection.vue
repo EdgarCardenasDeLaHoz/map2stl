@@ -287,9 +287,9 @@ onBeforeUnmount(() => {
   color: #ccc;
   margin: 4px 0;
 }
-.plate-reg-hint { font-size: 11px; color: #888; padding: 4px; }
+.plate-reg-hint { font-size: 11px; color: var(--text-dim); padding: 4px; }
 .plate-reg-error { color: #e08080; }
-.plate-reg-muted { color: #888; font-size: 10px; }
+.plate-reg-muted { color: var(--text-dim); font-size: 10px; }
 .plate-reg-progress { font-size: 11px; color: #ccc; margin: 4px 0; }
 .plate-reg-bar {
   height: 4px;

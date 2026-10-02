@@ -26,7 +26,7 @@
         <div class="dem-strip" id="modelStrip">
           <button :class="['dem-strip-btn', activeTab==='fetch' && 'active']"
                   @click="activeTab='fetch'"
-                  title="Build parameters — change any value to auto-rebuild the model">📥 Fetch</button>
+                  title="Build parameters — change any value to auto-rebuild the model">Build</button>
           <div class="dem-strip-divider"></div>
           <button :class="['dem-strip-btn', activeTab==='view' && 'active']"
                   @click="activeTab='view'"
@@ -57,9 +57,12 @@
                       @click="cancelExport">✕ Cancel</button>
             </div>
 
-            <!-- ═══════════ Fetch tab ═══════════ -->
+            <!-- ═══════════ Build tab (activeTab 'fetch'; label renamed, UI audit 2026-09-30) ═══════════ -->
             <div v-show="activeTab==='fetch'">
-              <div style="font-size:11px;color:#888;margin:2px 0 8px;line-height:1.4;">
+              <!-- Printed size vs bed, before any setting (G12 size first). -->
+              <div v-if="printSizeText" id="modelPrintSize" class="print-size-line"
+                   :class="bedFit && bedFit.fits ? 'ok' : 'warn'">{{ printSizeText }}</div>
+              <div style="font-size:11px;color:var(--text-dim);margin:2px 0 8px;line-height:1.4;">
                 Changes here automatically rebuild the 3D model.
               </div>
 
@@ -260,7 +263,7 @@
                 <button id="downloadCrossSectionBtn" class="btn btn-success btn-sm" style="margin-top:6px;">
                   <span class="btn-icon">✂️</span> Download Cross-Section STL
                 </button>
-                <div id="crossSectionStatus" style="font-size:11px;color:#888;margin-top:4px;"></div>
+                <div id="crossSectionStatus" style="font-size:11px;color:var(--text-dim);margin-top:4px;"></div>
               </CollapsibleSection>
 
               <!-- City Model -->
@@ -285,7 +288,7 @@
                     <td style="white-space:nowrap;">
                       <input :id="'cityLayer_' + l.id + '_value'" v-model.number="l.value" type="number"
                              :disabled="!l.enabled" min="0" step="0.1" class="ctrl-input-sm" style="width:52px;">
-                      <span style="color:#888;">{{ l.mode === 'extrude' ? '× height' : 'mm' }}</span>
+                      <span style="color:var(--text-dim);">{{ l.mode === 'extrude' ? '× height' : 'mm' }}</span>
                     </td>
                   </tr>
                 </table>
@@ -297,7 +300,7 @@
                          @input="onPieceInput"> mm
                 </div>
                 <div v-if="bedFit" class="bed-fit-note" :class="bedFit.fits ? 'ok' : 'warn'">{{ bedFitText }}</div>
-                <div style="font-size:10px;color:#888;">Knobs, engraving, plates and dragged cuts: see Split / Puzzle
+                <div style="font-size:10px;color:var(--text-dim);">Knobs, engraving, plates and dragged cuts: see Split / Puzzle
                   (cut lines show while Split / Puzzle is off).</div>
                 <button id="exportCityBtn" class="btn btn-success btn-sm" style="width:100%;margin-top:6px;"
                         title="Build terrain + all enabled layers as one model and download a .zip.">
@@ -330,7 +333,7 @@
                     <div id="bedCustomRow" class="dim-row" style="gap:4px;display:none;">
                       <label class="dim-label">W×H (mm):</label>
                       <input type="number" id="bedCustomW" @input="onBedChange" value="220" min="50" max="1000" style="width:50px;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;">
-                      <span style="color:#888;">×</span>
+                      <span style="color:var(--text-dim);">×</span>
                       <input type="number" id="bedCustomH" @input="onBedChange" value="220" min="50" max="1000" style="width:50px;font-size:11px;background:#1a1a1a;border:1px solid #444;color:#ccc;border-radius:3px;padding:2px;">
                     </div>
                     <div id="bedOptimizerResult" style="font-size:11px;color:#ccc;margin-top:6px;line-height:1.5;"></div>
@@ -440,6 +443,21 @@ const bedFitText = computed(() => {
     : `⚠ ${size} needs ${f.cols} × ${f.rows} pieces (≤ ${f.pieceMm} mm each)`;
 });
 
+// "Model 797 × 802 × 88 mm · bed 250 × 210 mm — larger than the bed: …" at the top of
+// the Build sub-tab. Width/depth follow the inputs live (DEM cols/rows × mm/px); the
+// height is the last preview's z_max (model-viewer.js stores it as generatedModelData.zMaxMm).
+const printSizeText = computed(() => {
+  const f = bedFit.value;
+  if (!f) return '';
+  const gm = store.generatedModelData as { zMaxMm?: number } | null;
+  const h = Number.isFinite(gm?.zMaxMm) ? ` × ${Math.round(gm!.zMaxMm as number)}` : '';
+  const size = `Model ${Math.round(f.widthMm)} × ${Math.round(f.depthMm)}${h} mm`;
+  const bed = `bed ${f.bed.w} × ${f.bed.h} mm`;
+  return f.fits
+    ? `✓ ${size} · fits the ${bed}`
+    : `⚠ ${size} · ${bed} — larger than the bed: enable Puzzle (Export) or lower mm/px`;
+});
+
 function _setField(id: string, value: string) {
   const el = document.getElementById(id) as HTMLInputElement | null;
   if (!el || el.value === value) return;
@@ -510,5 +528,15 @@ function cancelExport() {
   line-height: 1.4;
 }
 .bed-fit-note.ok { color: #7c7; }
+.print-size-line {
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 2px 0 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.print-size-line.ok { color: #7c7; }
+.print-size-line.warn { color: #f0a050; }
 .bed-fit-note.warn { color: #e67e22; }
 </style>

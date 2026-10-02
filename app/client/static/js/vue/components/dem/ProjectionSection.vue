@@ -23,7 +23,7 @@
         <input type="checkbox" id="paramClipNans" checked aria-label="Clip projection NaN edges"> Clip edges
       </label>
     </div>
-    <div id="projectionDescription" style="font-size:10px;color:#666;margin-top:3px;">
+    <div id="projectionDescription" style="font-size:10px;color:var(--text-dim);margin-top:3px;">
       Horizontal scaling by cos(latitude). Corrects east-west distances.
     </div>
 
@@ -31,7 +31,7 @@
            title="Off (default): output shape reflects the projection's true geographic aspect ratio — switching projections visibly changes the canvas shape. On: output always keeps the DEM's current pixel dimensions (legacy behavior), only the content within that fixed grid warps.">
       <input type="checkbox" id="paramMaintainDimensions" aria-label="Maintain fixed output dimensions across projections"> Keep fixed canvas shape across projections
     </label>
-    <div id="noneProjectionNote" style="font-size:10px;color:#666;margin-top:3px;">
+    <div id="noneProjectionNote" style="font-size:10px;color:var(--text-dim);margin-top:3px;">
       Note: "None" is equal-angle (equal degrees lat/lon per pixel), not equal-distance — pixels are only square on the ground near the equator. This is standard Plate Carrée convention, not a bug.
     </div>
 

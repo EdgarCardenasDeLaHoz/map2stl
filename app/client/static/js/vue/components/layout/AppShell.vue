@@ -2,7 +2,8 @@
   <div style="display:contents">
     <!-- Toast container stays in DOM — written by window.showToast() in ui-helpers.js -->
     <Teleport to="#vue-toast">
-      <div id="toastContainer" class="toast-container"></div>
+      <!-- aria-live: each toast also carries role=status (info/success/warning) or role=alert (error) -->
+      <div id="toastContainer" class="toast-container" aria-live="polite" aria-relevant="additions"></div>
     </Teleport>
     <Teleport to="#vue-mesh-registration-modal">
       <MeshRegistrationModal />

@@ -77,7 +77,7 @@
 
       <!-- JSON settings editor (hidden by default, toggled by { } JSON button) -->
       <div id="settingsJsonView" class="settings-json-view hidden">
-        <div style="font-size:10px;color:#888;margin-bottom:4px;">Edit settings as JSON. Click Apply to update the form.</div>
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;">Edit settings as JSON. Click Apply to update the form.</div>
         <textarea id="settingsJsonEditor" class="settings-json-editor" spellcheck="false" aria-label="Settings JSON editor"></textarea>
         <div id="settingsJsonError" class="settings-json-error hidden"></div>
         <div class="row-gap6" style="margin-top:6px;">
@@ -143,7 +143,7 @@ const guideLink = computed(() => guideHref('city-stl-and-puzzle-sop',
 }
 .settings-save-status {
   font-size: 10px;
-  color: #888;
+  color: var(--text-dim);
   min-width: 60px;
   text-align: right;
 }

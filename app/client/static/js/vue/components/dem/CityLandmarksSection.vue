@@ -359,7 +359,7 @@ watch(() => (store as any).osmCityData, () => {
 
 <style scoped>
 .lm-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
-.lm-muted { font-size: 10px; color: #888; }
+.lm-muted { font-size: 10px; color: var(--text-dim); }
 .lm-warn { font-size: 10px; color: #e67e22; margin: 4px 0; line-height: 1.35; }
 .lm-error { font-size: 10px; color: #e08080; margin: 4px 0; }
 .lm-num { width: 56px; }

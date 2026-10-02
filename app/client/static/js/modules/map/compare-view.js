@@ -164,7 +164,7 @@ function updateRegionParamsTable(region) {
     const tbody = document.getElementById('regionParamsBody');
     if (!tbody) return;
     if (!region) {
-        tbody.innerHTML = '<tr><td colspan="2" style="color:#888;text-align:center;">Select a region</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="2" style="color:var(--text-dim);text-align:center;">Select a region</td></tr>';
         return;
     }
     const params = [

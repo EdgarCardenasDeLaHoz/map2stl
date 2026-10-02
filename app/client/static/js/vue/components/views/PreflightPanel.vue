@@ -119,12 +119,12 @@ onBeforeUnmount(() => window.removeEventListener('puzzle-edges-changed', onEdges
 .pf-report.stale { opacity: 0.6; }
 .pf-stale { color: #e6b422; margin-bottom: 4px; }
 .pf-grid { display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; }
-.pf-grid > span:nth-child(odd) { color: #888; }
+.pf-grid > span:nth-child(odd) { color: var(--text-dim); }
 .pf-layers { width: 100%; border-collapse: collapse; margin-top: 6px; }
-.pf-layers th { color: #888; font-weight: normal; text-align: left; }
+.pf-layers th { color: var(--text-dim); font-weight: normal; text-align: left; }
 .pf-layers td, .pf-layers th { padding: 0 4px 0 0; }
 .pf-warnings { margin: 6px 0 0; padding-left: 0; list-style: none; color: #e67e22; }
-.pf-note { color: #777; font-size: 10px; margin-top: 4px; }
+.pf-note { color: var(--text-dim); font-size: 10px; margin-top: 4px; }
 .ok { color: #7c7; }
 .warn { color: #e67e22; }
 </style>

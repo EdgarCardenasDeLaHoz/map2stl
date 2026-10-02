@@ -119,16 +119,16 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 
   [F-FE1](active/F-FE1-vue-consolidation.md)
 - **UI audit 2026-09-30** ([audit](../history/audits/ui-audit-2026-09-30.md)), in priority order:
-  1. contrast tokens (`--text-muted` / `--text-dim` fail on the dark theme, down to 1.1:1);
+  1. ~~contrast tokens (`--text-muted` / `--text-dim` fail on the dark theme, down to 1.1:1)~~ (done 2026-10-01);
   2. keyboard: `CollapsibleSection` header as a button, global `:focus-visible`, region list as one tab stop;
   3. shortcuts: page-wide arrow keys, bare `G`, Ctrl+R (Ctrl+2 crash fixed 2026-09-30);
-  4. toasts announced, errors persistent and inline, escaped text;
+  4. ~~toasts announced, errors persistent, escaped text~~ (done 2026-10-01); validation errors inline still open;
   5. ignored controls: Fit height under Vertical = Auto;
-  6. printed-size readout and clearer "model larger than bed";
+  6. ~~printed-size readout and clearer "model larger than bed"~~ (done 2026-10-01); presets set mm/px from the bed still open;
   7. preview progress with stage and Cancel;
   8. Export sub-tab: pre-flight open, city build primary;
   9. 12 px text floor, 24 px targets;
-  10. one term per concept, units in labels;
+  10. one term per concept, units in labels (Extrude "Fetch" → "Build" done 2026-10-01);
   11. duplicate ids removed, reduced motion (orphan components removed 2026-09-30);
   12. satellite image aspect (continent detection fixed 2026-09-30).
   13. Edit tab box editor (N/S/E/W, Reload, Map, Save) sits below the window and appears only on

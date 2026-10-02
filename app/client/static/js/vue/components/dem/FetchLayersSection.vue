@@ -277,7 +277,7 @@ function toggleCityTablePanel() {
     display: inline-block;
     font-size: 8px;
     margin-right: 4px;
-    color: #888;
+    color: var(--text-dim);
     transition: transform 0.15s;
 }
 details[open] > .fetch-section-header::before { transform: rotate(90deg); }
@@ -395,7 +395,7 @@ details[open] > .fetch-section-header::before { transform: rotate(90deg); }
 /* Inline status text under buttons */
 .fetch-status {
     font-size: 10px;
-    color: #888;
+    color: var(--text-dim);
     margin-top: 2px;
     min-height: 12px;
 }
@@ -417,7 +417,7 @@ details[open] > .fetch-section-header::before { transform: rotate(90deg); }
 /* Help / hint text under section header */
 .fetch-help-text {
     font-size: 10px;
-    color: #888;
+    color: var(--text-dim);
     margin: 0 0 2px 0;
     line-height: 1.3;
 }
@@ -428,7 +428,7 @@ details[open] > .fetch-section-header::before { transform: rotate(90deg); }
 }
 .nested-summary {
     font-size: 10px;
-    color: #888;
+    color: var(--text-dim);
     cursor: pointer;
     user-select: none;
     padding: 2px 4px;
@@ -440,7 +440,7 @@ details[open] > .fetch-section-header::before { transform: rotate(90deg); }
     display: inline-block;
     font-size: 7px;
     margin-right: 4px;
-    color: #666;
+    color: var(--text-dim);
     transition: transform 0.15s;
 }
 .nested-details[open] > .nested-summary::before { transform: rotate(90deg); }

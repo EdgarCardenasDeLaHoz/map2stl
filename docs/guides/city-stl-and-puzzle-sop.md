@@ -35,7 +35,7 @@ Export" below is the Export tab inside the Extrude view (there is no top-level E
 
 1. **Pick the area** (Explore): select or draw the region (type in "Search regions…" to
    find a saved one). Check that landmarks are inside the box with margin: the
-   *Near the box edge* box (bottom left of the map, and at the top of Edit → 📥 Fetch)
+   *Near the box edge* line ("⚠ N landmarks near the box edge · Show": under the map's search bar, and at the top of Edit → 📥 Fetch; *Show* lists them)
    lists named places within 200 m of an edge, inside or out.
 
    ![Edge landmark warning](img/city/01-edge-landmark-warning.png)
@@ -100,7 +100,7 @@ Export" below is the Export tab inside the Extrude view (there is no top-level E
    *Find landmarks: Catedral de Granada (50 m, 41 parts, 5 roof shapes) first; click a row
    for its editor.*
 
-5. **Model** (Extrude → 📥 Fetch): the line under the preview shows "1 mm = X m" and the
+5. **Model** (Extrude → **Build**; the line at its top compares the model's printed size with the bed): the line under the preview shows "1 mm = X m" and the
    vertical exaggeration; the bed outline and its label show fit. Vertical: *auto* = true
    scale below a 20 km diagonal, fit to *Fit height* above; override with *True scale ×
    exag.* or *Fit to height*. Smoothing 3×3. With the City preset's puzzle on, the red

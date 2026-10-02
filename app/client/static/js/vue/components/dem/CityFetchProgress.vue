@@ -65,12 +65,12 @@ function cancel() {
 .city-fetch-head { display: flex; align-items: center; gap: 6px; }
 .city-fetch-summary { flex: 1; color: #bbb; }
 .city-fetch-cancel { font-size: 10px !important; padding: 1px 8px !important; }
-.city-fetch-close { background: none; border: none; color: #777; cursor: pointer; font-size: 10px; }
+.city-fetch-close { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 10px; }
 .city-fetch-layers { list-style: none; margin: 3px 0 0; padding: 0; columns: 2; column-gap: 10px; }
-.city-fetch-layers li { display: flex; gap: 4px; color: #999; break-inside: avoid; }
+.city-fetch-layers li { display: flex; gap: 4px; color: var(--text-dim); break-inside: avoid; }
 .city-fetch-icon { width: 10px; text-align: center; }
 .city-fetch-name { flex: 1; }
-.city-fetch-state { color: #666; }
+.city-fetch-state { color: var(--text-dim); }
 .st-fetching { color: #4a9fd4 !important; }
 .st-done, .st-cached { color: #6c6 !important; }
 .st-failed { color: #e74c3c !important; }

@@ -577,23 +577,30 @@ onBeforeUnmount(() => {
   display: none;
 }
 
+/* Collapsed Buildings tab: a calm narrow tab near the top of the edge (not a
+   full-height bright bar); the accent colour only on hover / keyboard focus.
+   view-management.js reads its width for the layout. (UI audit 2026-09-30) */
 .city-table-collapsed-tab {
   display: none;
   writing-mode: vertical-rl;
   text-orientation: mixed;
   align-items: center;
   justify-content: center;
+  align-self: flex-start;
   gap: 6px;
-  padding: 16px 10px;
-  background: #007acc;
-  border: none;
-  border-left: 1px solid var(--bg-light);
-  color: #fff;
+  margin-top: 8px;
+  padding: 10px 4px;
+  min-width: 24px;
+  background: var(--bg-light);
+  border: 1px solid var(--border-light);
+  border-right: none;
+  border-radius: 4px 0 0 4px;
+  color: var(--text-muted);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.15s;
+  transition: background 0.15s, color 0.15s;
   letter-spacing: 0.04em;
 }
 
@@ -601,8 +608,11 @@ onBeforeUnmount(() => {
   display: flex;
 }
 
-.city-table-collapsed-tab:hover {
-  background: #0088e0;
+.city-table-collapsed-tab:hover,
+.city-table-collapsed-tab:focus-visible {
+  background: #007acc;
+  border-color: #007acc;
+  color: #fff;
 }
 
 .city-table-panel-header {
@@ -664,7 +674,7 @@ onBeforeUnmount(() => {
 
 .city-table-meta {
   font-size: 10px;
-  color: #888;
+  color: var(--text-dim);
   white-space: nowrap;
 }
 
@@ -712,7 +722,7 @@ onBeforeUnmount(() => {
 
 .city-table-empty {
   text-align: center;
-  color: #777;
+  color: var(--text-dim);
   padding: 12px 6px;
 }
 
@@ -745,7 +755,7 @@ onBeforeUnmount(() => {
 }
 .city-heights-meta {
   font-weight: 400;
-  color: #888;
+  color: var(--text-dim);
   margin-left: 4px;
 }
 .city-source-list {
@@ -766,7 +776,7 @@ onBeforeUnmount(() => {
 .city-source-chip.src-raster { border-left-color: #ab47bc; }
 .city-source-chip.src-default { border-left-color: #e67e22; }
 .city-source-pct {
-  color: #888;
+  color: var(--text-dim);
 }
 .city-heights-warn {
   margin-top: 5px;
@@ -823,7 +833,7 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 .city-tallest-src {
-  color: #777;
+  color: var(--text-dim);
   width: 72px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -849,7 +859,7 @@ onBeforeUnmount(() => {
 }
 .city-height-edit-note {
   margin-top: 3px;
-  color: #888;
+  color: var(--text-dim);
   line-height: 1.35;
 }
 .city-overridden {
@@ -871,7 +881,7 @@ onBeforeUnmount(() => {
 
 .city-table-page-label {
   font-size: 10px;
-  color: #888;
+  color: var(--text-dim);
   white-space: nowrap;
 }
 </style>

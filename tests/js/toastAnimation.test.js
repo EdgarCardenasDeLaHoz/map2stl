@@ -42,3 +42,23 @@ describe('toastAnimation', () => {
         expect(bad.delay + bad.fade).toBeCloseTo(3000);
     });
 });
+
+// Toast stack (UI audit 2026-09-30): at most 3 on screen; the oldest
+// non-error toast is dropped first, errors only when all are errors.
+describe('toastDropIndex', () => {
+    const drop = (types) => globalThis.window.toastDropIndex(types, 3);
+
+    it('drops nothing up to the limit', () => {
+        expect(drop([])).toBe(-1);
+        expect(drop(['info', 'error', 'success'])).toBe(-1);
+    });
+
+    it('drops the oldest non-error toast first', () => {
+        expect(drop(['error', 'info', 'success', 'warning'])).toBe(1);
+        expect(drop(['info', 'error', 'error', 'error'])).toBe(0);
+    });
+
+    it('drops the oldest error when all are errors', () => {
+        expect(drop(['error', 'error', 'error', 'error'])).toBe(0);
+    });
+});

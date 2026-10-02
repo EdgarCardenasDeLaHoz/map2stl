@@ -1,6 +1,7 @@
 <template>
   <div class="main-header">
-    <div class="main-title">3D Maps Globe &amp; Map Selector</div>
+    <!-- Short title so the header stays on one line from 1024 px up (UI audit 2026-09-30). -->
+    <div class="main-title" title="3D Maps: globe &amp; map selector">3D Maps</div>
     <div class="tabs">
       <!-- data-view attributes must stay — window.switchView() reads them via querySelector -->
       <button class="tab active" data-view="map" id="tabExplore">
@@ -19,25 +20,37 @@
     <div class="header-actions">
       <!-- Guides: the step-by-step SOPs (docs/guides/*.md) rendered at /guides -->
       <a class="btn btn-secondary docs-menu-btn guides-btn" href="/guides" target="_blank" rel="noopener"
-         title="Step-by-step guides with screenshots: city models, puzzles, large regions">
-        📘 Guides
+         title="Step-by-step guides with screenshots: city models, puzzles, large regions"
+         aria-label="Guides">
+        <span aria-hidden="true">📘</span><span class="hdr-btn-label"> Guides</span>
+      </a>
+
+      <!-- Pipeline results browser (/reports, server-rendered). Was a fixed pill in index.html
+           that covered the map attribution. -->
+      <a class="btn btn-secondary docs-menu-btn guides-btn" id="pipelineReportsLink" href="/reports"
+         title="Pipeline results: browse rendered skyline pipeline reports" aria-label="Pipeline results">
+        <span aria-hidden="true">📊</span><span class="hdr-btn-label"> Results</span>
       </a>
 
       <!-- Diagnostics button -->
-      <button class="btn btn-secondary docs-menu-btn" @click="openDiag" title="Check server status, keys, DEM sources, and region coverage">
-        🩺 Diagnostics
+      <button class="btn btn-secondary docs-menu-btn" @click="openDiag"
+              title="Diagnostics: check server status, keys, DEM sources, and region coverage"
+              aria-label="Diagnostics">
+        <span aria-hidden="true">🩺</span><span class="hdr-btn-label"> Diagnostics</span>
       </button>
 
       <!-- Keys button -->
-      <button class="btn btn-secondary docs-menu-btn" @click="openKeys">
-        🔑 Keys
+      <button class="btn btn-secondary docs-menu-btn" @click="openKeys"
+              title="Keys: service authentication (Earth Engine, API keys)" aria-label="Keys">
+        <span aria-hidden="true">🔑</span><span class="hdr-btn-label"> Keys</span>
       </button>
 
       <!-- Docs dropdown -->
       <div class="docs-menu">
         <button class="btn btn-secondary docs-menu-btn" id="docsMenuBtn"
+                title="Docs" aria-label="Docs" :aria-expanded="docsOpen ? 'true' : 'false'"
                 @click="docsOpen = !docsOpen">
-          📖 Docs
+          <span aria-hidden="true">📖</span><span class="hdr-btn-label"> Docs</span>
         </button>
         <div v-if="docsOpen" class="docs-dropdown">
           <a v-for="link in docsLinks" :key="link.href"
@@ -54,7 +67,7 @@
       <div class="keys-modal">
         <div class="keys-modal-header">
           <span>🔑 Service Authentication</span>
-          <button class="keys-close-btn" aria-label="Close keyboard shortcuts" title="Close" @click="keysOpen = false">✕</button>
+          <button class="keys-close-btn" aria-label="Close keys dialog" title="Close" @click="keysOpen = false">✕</button>
         </div>
 
         <div class="keys-modal-body">
@@ -497,6 +510,16 @@ async function saveTilePath() {
   align-items: center;
   gap: 6px;
   margin-left: auto;
+  flex-shrink: 0;
+}
+
+.docs-menu-btn {
+  white-space: nowrap;
+}
+
+/* Below ~1200 px the right buttons show icons only (aria-label + title keep the names). */
+@media (max-width: 1199px) {
+  .hdr-btn-label { display: none; }
 }
 
 .docs-menu {
@@ -579,11 +602,11 @@ async function saveTilePath() {
 }
 .keys-badge-ok      { background: #1a4a1a; color: #6fcf6f; }
 .keys-badge-error   { background: #4a1a1a; color: #cf6f6f; }
-.keys-badge-checking { background: #333; color: #888; }
+.keys-badge-checking { background: #333; color: var(--text-dim); }
 
 .keys-service-desc {
   font-size: 12px;
-  color: #888;
+  color: var(--text-dim);
   margin: 4px 0 8px;
 }
 
@@ -629,7 +652,7 @@ async function saveTilePath() {
 
 .keys-hint {
   font-size: 11px;
-  color: #777;
+  color: var(--text-dim);
   margin-top: 6px;
 }
 .keys-hint a { color: #6aacff; }

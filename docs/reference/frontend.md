@@ -115,7 +115,7 @@ Consequences to know:
 | Layer rack (visibility, opacity, order) | `app/client/static/js/vue/components/dem/LayerViewSection.vue` | `app/client/static/js/modules/layers/stacked-layers.js::getLayerOrder`, `getActiveLayers`, `moveLayer` |
 | Composite panel | `app/client/static/js/vue/components/dem/CompositeDemSection.vue` | `app/client/static/js/modules/layers/composite-dem.js::_computeCompositeDem`, `window.applyCompositeToDem` |
 | Model height, base, exaggeration, mm/px, export options, progress bar | `app/client/static/js/vue/components/views/ModelContainer.vue` | `app/client/static/js/modules/export/export-handlers.js::_asyncExport` |
-| Header tabs (Explore / Edit / Extrude) | `app/client/static/js/vue/components/layout/MainHeader.vue` | `app/client/static/js/modules/ui/view-management.js::switchView` |
+| Header tabs (Explore / Edit / Extrude), Guides / Results / Diagnostics / Keys / Docs buttons | `app/client/static/js/vue/components/layout/MainHeader.vue` (one line from 1024 px: short title, icon-only buttons below 1200 px, `#pipelineReportsLink` → `/reports`) | `app/client/static/js/modules/ui/view-management.js::switchView` |
 | Settings collect / apply / save / auto-save | `DemSettingsPanel.vue` (`#saveSettingsStatus`) | `app/client/static/js/modules/ui/presets.js::collectAllSettings`, `applyAllSettings`, `setupAutoSave` |
 | Region boxes on the map (outlines, ≤ 20 in view + selected, hover ↔ list row) | — (Leaflet) | `app/client/static/js/modules/regions/region-boxes.js::refreshRegionViewSet`, rule `app/client/static/js/modules/regions/viewport-regions.js::selectViewportRegions` |
 | Region editor (rename, group, bounds + size, delete, notes) | `app/client/static/js/vue/components/sidebar/SidebarEditView.vue` (opened via `SidebarPanel.vue::setRegionEditorOpen`) | `app/client/static/js/modules/regions/region-editor.js::openRegionEditor` |
@@ -177,6 +177,33 @@ Consequences to know:
 | Leaving with unsaved settings | Native `beforeunload` prompt (`presets.js`) |
 
 - Auto-save defaults **on**; only `localStorage.map2stl_autoSave === "false"` turns it off.
+- **Toasts** (`app/client/static/js/modules/core/ui-helpers.js::showToast`, container
+  `#toastContainer` in `AppShell.vue`): a stack at the bottom centre of the window, clear of the
+  right-hand panels and the Leaflet attribution. At most 3 on screen
+  (`ui-helpers.js::toastDropIndex` drops the oldest non-error one). Errors persist until closed
+  (✕) with `role="alert"`; info / success / warning auto-hide with `role="status"`; the container
+  is `aria-live="polite"`. The message is plain text (`textContent`, `
+` breaks a line); there
+  is no HTML option.
+- **Edge landmarks** (`EdgeLandmarkWarnings.vue`): one line "⚠ N landmarks near the box edge ·
+  Show" that expands to the list. On the Explore map it is a chip under the landmark search,
+  in the Edit Fetch panel it is inline; dismissible per box. No toast.
+- **Printed size** (`ModelContainer.vue::printSizeText`, `#modelPrintSize`): first line of the
+  Extrude *Build* sub-tab, "Model W × D × H mm · bed … — fits / larger than the bed". W × D follow
+  the inputs (DEM cols/rows × mm/px), H is the last preview's `z_max`
+  (`appState.generatedModelData.zMaxMm`). The 3D bed outline says "— model larger" when it
+  does not fit.
+
+### Theme tokens (dark theme, `app.css :root`)
+
+| Token | Value | Contrast | Use |
+|---|---|---|---|
+| body text | `#e0e0e0` | 10.4:1 on `#2d2d2d` | default |
+| `--text-muted` | `#b3b3b3` | 6.6:1 on `#2d2d2d`, 4.9:1 on `#404040` | secondary text; placeholders (safe on inputs) |
+| `--text-dim` | `#a0a0a0` | 5.3:1 on `#2d2d2d`, 4.8:1 on `#333` | hints, captions on panels; **not** on `#404040` inputs (4.0:1) |
+
+- Use the tokens, not hard-coded greys: `#888` and darker fail 4.5:1 on the panels.
+  `tests/js/contrastTokens.test.js` checks the tokens. Disabled controls may use opacity instead.
 
 ---
 
@@ -269,7 +296,7 @@ Module-local (not on appState):
 | Key | S | Type | Description |
 |---|---|---|---|
 | `terrainMesh` / `viewerScene` | S | Three.js | Extrude preview mesh and scene |
-| `generatedModelData` | S | object | Last preview parameters, used by downloads |
+| `generatedModelData` | S | object | Last preview parameters, used by downloads; `zMaxMm` (printed height) feeds the Build sub-tab size line |
 | `modelPreviewState` | S | `'idle'\|'building'\|'ready'\|'error'` | Set by `previewModelIn3D`; `ModelContainer.vue` words its empty state from it |
 | `puzzleEdges` | S | `{cols, rows, key} \| null` | Dragged puzzle cuts in mm; sent as `col_edges_mm` / `row_edges_mm` |
 

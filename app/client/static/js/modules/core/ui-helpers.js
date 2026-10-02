@@ -9,6 +9,7 @@
  *   window.escapeHtml(value)
  *   window.showToast(message, type, duration)
  *   window.toastAnimation(duration)
+ *   window.toastDropIndex(types, max)
  *   window.toggleCollapsible(header)
  *   window.showLoading(container, message)
  *   window.hideLoading(container)
@@ -40,12 +41,6 @@ window.escapeHtml = function escapeHtml(value) {
 // ============================================================
 
 /**
- * Show a brief toast notification in the top-right corner.
- * @param {string} message - Message text to display
- * @param {'success'|'error'|'warning'|'info'} [type='info'] - Visual style
- * @param {number} [duration=3000] - Auto-dismiss delay in milliseconds
- */
-/**
  * CSS `animation` value for a toast shown for `duration` ms: slide in, stay,
  * then fade out so the fade ends exactly at `duration` (when the element is
  * removed). The fade timing lives here, not in app.css, so a 6–8 s toast
@@ -60,30 +55,77 @@ window.toastAnimation = function toastAnimation(duration) {
     return `slideIn 0.3s ease, fadeOut ${fadeMs / 1000}s ease ${delayMs / 1000}s forwards`;
 };
 
+/** Most toasts on screen at once; older ones are dropped (see toastDropIndex). */
+window.TOAST_MAX_VISIBLE = 3;
+
+/**
+ * Which toast to drop when more than `max` are shown: the oldest non-error one,
+ * or the oldest error when all are errors. Returns -1 when nothing needs dropping.
+ * Pure (takes the types oldest-first) so it is unit-tested without a DOM.
+ * @param {string[]} types - Toast types, oldest first
+ * @param {number} [max=window.TOAST_MAX_VISIBLE]
+ * @returns {number}
+ */
+window.toastDropIndex = function toastDropIndex(types, max = window.TOAST_MAX_VISIBLE) {
+    if (types.length <= max) return -1;
+    const i = types.findIndex((t) => t !== 'error');
+    return i === -1 ? 0 : i;
+};
+
+/**
+ * Show a toast in the stack at the bottom centre of the main view (#toastContainer).
+ *
+ * - The message is plain text (set with textContent, never parsed as HTML);
+ *   "
+" becomes a line break. There is no allow-HTML option: no caller needs one.
+ * - Errors persist until the user closes them (✕) and are announced with
+ *   role="alert"; other types auto-hide after `duration` and use role="status".
+ * - At most TOAST_MAX_VISIBLE are shown; the oldest non-error toast is dropped first.
+ * @param {string} message - Message text to display
+ * @param {'success'|'error'|'warning'|'info'} [type='info'] - Visual style
+ * @param {number} [duration=3000] - Auto-dismiss delay in ms (ignored for errors)
+ * @returns {HTMLElement|undefined} the toast element
+ */
 window.showToast = function showToast(message, type = 'info', duration = 3000) {
     const container = document.getElementById('toastContainer');
-    if (!container) return;
+    if (!container) return undefined;
 
-    const icons = {
-        success: '✓',
-        error: '✕',
-        warning: '⚠',
-        info: 'ℹ'
-    };
+    const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+    const kind = icons[type] ? type : 'info';
+    const persist = kind === 'error';
 
     const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.innerHTML = `
-        <span class="toast-icon">${icons[type] || icons.info}</span>
-        <span class="toast-message">${message}</span>
-    `;
+    toast.className = `toast ${kind}`;
+    toast.dataset.type = kind;
+    toast.setAttribute('role', persist ? 'alert' : 'status');
 
-    toast.style.animation = window.toastAnimation(duration);
+    const icon = document.createElement('span');
+    icon.className = 'toast-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = icons[kind];
+
+    const msg = document.createElement('span');
+    msg.className = 'toast-message';
+    msg.textContent = message == null ? '' : String(message);
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'toast-close';
+    close.setAttribute('aria-label', 'Dismiss notification');
+    close.title = 'Dismiss';
+    close.textContent = '✕';
+    close.addEventListener('click', () => toast.remove());
+
+    toast.append(icon, msg, close);
+    toast.style.animation = persist ? 'slideIn 0.3s ease' : window.toastAnimation(duration);
     container.appendChild(toast);
 
-    setTimeout(() => {
-        toast.remove();
-    }, duration);
+    const shown = Array.from(container.children);
+    const drop = window.toastDropIndex(shown.map((el) => el.dataset.type || 'info'));
+    if (drop >= 0) shown[drop].remove();
+
+    if (!persist) setTimeout(() => toast.remove(), duration);
+    return toast;
 };
 
 // ============================================================

@@ -470,7 +470,7 @@ function updateBedOutline() {
         new THREE.Vector3(-hw, y, -hd),
     ]);
     group.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color })));
-    const label = _makeTextSprite(`bed ${bed.w}×${bed.h} mm${fits ? '' : ' (too small)'}`,
+    const label = _makeTextSprite(`bed ${bed.w}×${bed.h} mm${fits ? '' : ' — model larger'}`,
         { fontSize: 16, color: fits ? '#8cc8f0' : '#f0a060' });
     label.position.set(-hw + 12, y, -hd - 4);
     group.add(label);
@@ -608,6 +608,8 @@ async function previewModelIn3D() {
             // this preview was made from.
             demSettings: ds,
             buildParams: build,
+            // Printed height (mm) of this preview: the Build sub-tab's size line.
+            zMaxMm: data.z_max,
             // Legacy names, still read by the cross-section export.
             mmPerPixel: build.mm_per_pixel,
             modelHeight: build.model_height,

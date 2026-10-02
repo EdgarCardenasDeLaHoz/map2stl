@@ -4,18 +4,27 @@
        one Overpass query per box, cached server-side. The instance with `fetcher`
        (Explore map) watches the box and fills appState.edgeLandmarks; the others
        only display it. -->
+  <!-- One compact line ("⚠ 20 landmarks near the box edge · Show") that expands to the
+       list on click; on the Explore map it is a small chip under the search bar so it no
+       longer covers the box (UI audit 2026-09-30). Dismissible per box. -->
   <div v-if="state && visibleList.length && !dismissed" :id="fetcher ? 'edgeLandmarkWarnings' : undefined"
-       class="edge-landmarks" :class="{ compact }">
+       class="edge-landmarks" :class="{ compact, open }" role="status">
     <div class="edge-landmarks-head">
-      <span>⚠️ Near the box edge</span>
+      <button type="button" class="edge-landmarks-toggle" :aria-expanded="open ? 'true' : 'false'"
+              :title="open ? 'Hide the list' : 'Show the landmarks near the box edge'" @click="open = !open">
+        <span aria-hidden="true">⚠</span> {{ totalCount }} landmark{{ totalCount === 1 ? '' : 's' }} near the box edge
+        · <span class="edge-landmarks-show">{{ open ? 'Hide' : 'Show' }}</span>
+      </button>
       <button type="button" class="edge-landmarks-close" aria-label="Dismiss landmark warning"
               title="Dismiss for this box" @click="dismiss">✕</button>
     </div>
-    <ul>
-      <li v-for="l in visibleList" :key="l.name + l.lat" :title="`${l.class || ''} ${l.type || ''}`.trim()"
-          @click="panTo(l)">{{ l.message }}</li>
+    <ul v-if="open">
+      <li v-for="l in visibleList" :key="l.name + l.lat">
+        <button type="button" class="edge-landmarks-item" :title="`${l.class || ''} ${l.type || ''}`.trim()"
+                @click="panTo(l)">{{ l.message }}</button>
+      </li>
     </ul>
-    <div v-if="hiddenCount" class="edge-landmarks-more">+{{ hiddenCount }} more</div>
+    <div v-if="open && hiddenCount" class="edge-landmarks-more">+{{ hiddenCount }} more</div>
   </div>
 </template>
 <script setup lang="ts">
@@ -36,7 +45,9 @@ const state = computed(() => store.edgeLandmarks as State | null);
 const dismissedKey = ref('');
 const dismissed = computed(() => !!state.value && dismissedKey.value === state.value.key);
 const visibleList = computed(() => (state.value?.landmarks || []).slice(0, props.max));
-const hiddenCount = computed(() => Math.max(0, (state.value?.landmarks?.length || 0) - props.max));
+const totalCount = computed(() => state.value?.landmarks?.length || 0);
+const hiddenCount = computed(() => Math.max(0, totalCount.value - props.max));
+const open = ref(false);
 
 function dismiss() { dismissedKey.value = state.value?.key || ''; }
 
@@ -63,11 +74,9 @@ async function check(bbox: any) {
   if (signal.aborted) return;
   if (error) console.warn('Edge landmark check failed:', error);
   const landmarks: Landmark[] = error ? [] : (data?.landmarks || []);
+  // No toast: the chip itself (role=status) announces the count.
   store.edgeLandmarks = { key, loading: false, error: error ? String(error) : null, landmarks };
-  if (landmarks.length) {
-    const more = landmarks.length > 1 ? ` (+${landmarks.length - 1} more)` : '';
-    w.showToast?.(`${landmarks[0].message}${more}`, 'warning', 8000);
-  }
+  open.value = false;
 }
 
 function onBboxChanged(bbox: any) {
@@ -95,29 +104,41 @@ onBeforeUnmount(() => {
 });
 </script>
 <style scoped>
+/* Explore map: a chip under the landmark search bar (LandmarkSearch.vue sits at top 10 / left 60). */
 .edge-landmarks {
   position: absolute;
-  left: 10px;
-  bottom: 28px;
-  z-index: 1000;
-  max-width: min(360px, calc(100% - 20px));
+  left: 60px;
+  top: 46px;
+  z-index: 999; /* below the search results dropdown (1000) */
+  max-width: min(360px, calc(100% - 120px));
   background: rgba(40, 30, 10, 0.94);
   border: 1px solid #a8741a;
-  border-radius: 4px;
-  padding: 5px 8px;
-  font-size: 11px;
+  border-radius: 12px;
+  padding: 2px 4px 2px 8px;
+  font-size: 12px;
   color: #f3d9a4;
 }
+.edge-landmarks.open { border-radius: 6px; padding-bottom: 5px; }
 .edge-landmarks.compact {
   position: static;
   max-width: none;
   margin: 4px 0 0;
-  font-size: 10px;
 }
-.edge-landmarks-head { display: flex; justify-content: space-between; font-weight: 600; color: #f90; }
-.edge-landmarks-close { background: none; border: none; color: #caa; cursor: pointer; }
+.edge-landmarks-head { display: flex; align-items: center; gap: 4px; }
+.edge-landmarks-toggle {
+  flex: 1; min-height: 24px; padding: 0; text-align: left;
+  background: none; border: none; color: #ffb84d; font: inherit; font-weight: 600; cursor: pointer;
+}
+.edge-landmarks-show { text-decoration: underline; white-space: nowrap; }
+.edge-landmarks-toggle:hover .edge-landmarks-show,
+.edge-landmarks-toggle:focus-visible .edge-landmarks-show { color: #fff; }
+.edge-landmarks-close { min-width: 24px; min-height: 24px; background: none; border: none; color: #e0c8a8; cursor: pointer; }
+.edge-landmarks-close:hover { color: #fff; }
 .edge-landmarks ul { list-style: none; margin: 3px 0 0; padding: 0; }
-.edge-landmarks li { cursor: pointer; padding: 1px 0; }
-.edge-landmarks li:hover { color: #fff; }
-.edge-landmarks-more { color: #b98; margin-top: 2px; }
+.edge-landmarks-item {
+  display: block; width: 100%; padding: 2px 0; text-align: left;
+  background: none; border: none; color: inherit; font: inherit; cursor: pointer;
+}
+.edge-landmarks-item:hover, .edge-landmarks-item:focus-visible { color: #fff; }
+.edge-landmarks-more { color: #d9b98a; margin-top: 2px; }
 </style>

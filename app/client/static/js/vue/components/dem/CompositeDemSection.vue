@@ -323,7 +323,7 @@ import CollapsibleSection from '../shared/CollapsibleSection.vue';
     display: inline-block;
     font-size: 8px;
     margin-right: 4px;
-    color: #888;
+    color: var(--text-dim);
     transition: transform 0.15s;
 }
 details[open] > .composite-layer-header::before { transform: rotate(90deg); }
