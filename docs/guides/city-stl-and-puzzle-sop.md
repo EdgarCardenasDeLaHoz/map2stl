@@ -34,86 +34,123 @@ gear at the top right) → *Keys & data folders* (any 30 m source); server runni
 model to fill the printer bed in one piece and opens Extrude; the banner there has
 **Undo**. The steps below are the full route, for a large model in puzzle pieces.
 
-How the app is laid out (since 2026-10-01):
+How the app is laid out (since 2026-10-02):
 - Settings save themselves; the header shows "✓ Saved". There is no Save button.
+- **Explore** is the map and the region list. The selected region shows a card at the
+  bottom of the map with its size and position, **✎ Edit box** and **Load DEM ›**;
+  **＋ New region** is under the list. The map's corner has **🌍 Globe** and **Map ▾**
+  (map style, terrain relief, grid, labels).
+- **Edit** is three columns: **Layers** on the left (Terrain, Rivers & lakes, Buildings &
+  roads, Satellite colour; **＋ Add layer** adds trails and land cover), the map in the
+  middle, and the selected layer's settings on the right. Each layer has a picture, a dot
+  (green when loaded) and a switch: on means *in the print*. Click a layer to see its
+  settings. The header's region pill goes back to Explore to switch regions.
+- The full Edit panels (*Fetch*, *View*, *Composite*, JSON) are **Edit tools** in
+  ⚙ Settings: *Data sources & fetch details*, *Display*, *Composite & imports*, *Settings
+  as JSON*. Switched on, they show as tabs above the right-hand panel.
 - **Extrude** is one column of cards: *Printed size*, *Model* (Printer, Width, Height,
   Base, **Split into pieces**) and *Download* (one button, plus *Check before printing*).
 - Everything else in Extrude is a **tool card** (Vertical & surface, 3D view, City model
-  layers, Puzzle details, Engraving & contours, Cross-section, Model score). Tool cards
-  show only when switched on: ⚙ Settings → *Mode* → *Custom* and the tool's switch, or
-  *Everything* for all of them.
+  layers, Puzzle details, Engraving & contours, Cross-section, Model score).
+- Tools (Edit and Extrude) show only when switched on: ⚙ Settings → *Mode* → *Custom* and
+  the tool's switch, or *Everything* for all of them.
 - Guides, Results, Diagnostics, Keys and the API docs are in ⚙ Settings → *Account & help*.
 
 Screenshots: Granada + Alhambra (N 37.1873, S 37.1693, E −3.5780, W −3.6093), taken by
 `Code/claude/scripts/sop_screenshots.py` (outside the repo; its docstring says how to
 refresh them). A red outline marks the control each step talks about.
 
-1. **Pick the area** (Explore): select or draw the region (type in "Search regions…" to
-   find a saved one). Check that landmarks are inside the box with margin: the
-   *Near the box edge* line ("⚠ N landmarks near the box edge · Show": under the map's search bar, and at the top of Edit → 📥 Fetch; *Show* lists them)
-   lists named places within 200 m of an edge, inside or out.
+1. **Pick the area** (Explore): click the region in the list, or **＋ New region** (under
+   the list) to draw one. Type in "Search regions…" to find a saved one; the list's
+   *In view / All* toggle shows the regions on the map or every region, each with its
+   size. The selected region's card at the bottom of the map gives its size and position;
+   **✎ Edit box** changes its name, group and bounds. Check that landmarks are inside the
+   box with margin: the chip under the map's search bar ("⚠ N landmarks near the box edge
+   · Show"; also at the top of Edit's right-hand panel) lists named places within 200 m of
+   an edge, inside or out. Then **Load DEM ›** on the card opens Edit.
 
    ![Edge landmark warning](img/city/01-edge-landmark-warning.png)
-   *Granada's saved box: "Alhambra crosses the east edge (150 m sticks out)".*
+   *Granada's saved box (2.0 × 2.0 km), list open: "Alhambra crosses the east edge (150 m
+   sticks out)".*
 
    ![Pick the area](img/city/02-pick-area.png)
-   *The box widened to E −3.5780: the Alhambra is inside; the remaining entries stick out
-   by metres (Fuente de las Granadas 1 m) and can be ignored.*
+   *The box widened to E −3.5780 (2.8 × 2.0 km): the Alhambra is off the list (inside). The
+   rest are places on the edge that are not the subject (Fuente de las Granadas 1 m out,
+   Abadía del Sacromonte 181 m out) and can be ignored. The card at the bottom: size,
+   position, ✎ Edit box, Load DEM ›.*
 
-2. **Load terrain** (Edit → 📥 Fetch): switching to Edit may already load the DEM with
-   the region's saved (or default) settings. Click a preset in the *Preset* row — *City*,
-   *Mountain*, *Region* or *Coast* — then **🏔 Load DEM** (top of the panel) to reload
-   with it. Presets set source, resolution, vertical mode, layers and puzzle options; ↩
-   (in *Parameter Presets*, further down) reverts. *City* and *Region* also set
-   **Projection → Cosine Correction**; with *Mountain*, *Coast* or no preset, check
-   **Projection** yourself — a region without saved settings starts at *None* (Plate
-   Carrée), which makes Granada 1000 × 575 px (a model 25 % too wide) instead of
-   797 × 575. Use SRTM 30 m or Copernicus 30 m (the local file is ~90 m). Avoid
-   Copernicus **DSM** under OSM buildings: it already contains roofs.
+2. **Load terrain** (Edit → *Terrain*): Load DEM › (or the Edit tab) loads the DEM with the
+   region's saved (or default) settings. Click **Terrain** in the Layers list, then a
+   *Style*: *City*, *Mountain*, *Region* or *Coast*. A style sets source, detail, vertical
+   mode, layers and puzzle options; when it changes the projection or detail the terrain
+   reloads by itself, otherwise click **↺ Reload terrain**. The Terrain dot turns green and
+   shows the height range when it is loaded.
+   - *City* and *Region* also set **Projection → Cosine Correction**. With *Mountain*,
+     *Coast* or no style, check **Projection** yourself (switch on the ⚙ *Data sources &
+     fetch details* tool: 📥 Fetch tab → Projection). A region without saved settings
+     starts at *None* (Plate Carrée), which makes Granada 1000 × 575 px (a model 25 % too
+     wide) instead of 797 × 575.
+   - *Elevation source*: SRTM 30 m or Copernicus 30 m (the local file is ~90 m). Avoid
+     Copernicus **DSM** under OSM buildings: it already contains roofs.
+   - The same tool has the sampling note under *Resolution* (Granada: ~30 m → 113 × 65
+     real samples upsampled 8.8× to 797 × 575; at city scale every source is
+     interpolated, so less *Detail* loses no real detail) and *💾 Parameter Presets*,
+     whose ↩ reverts the last style.
 
    ![City preset](img/city/03-city-preset.png)
-   *City preset, Cosine Correction, SRTM 30 m (Global) at 1000 px. The sampling note
-   still describes the DEM Edit loaded on entry (1000 × 575, projection None) until Load
-   DEM is clicked.*
+   *Terrain selected: Style City, elevation source SRTM 30 m (Global), detail 1000 points
+   across.*
 
    ![Load DEM](img/city/04-load-dem.png)
-   *The note under Resolution: ~30 m → 113 × 65 real samples upsampled 8.8× to
-   797 × 575 — at city scale every source is interpolated; a lower Resolution loses no
-   real detail.*
+   *The terrain loaded: the Terrain dot is green with the height range (658 – 906 m); ↺
+   Reload terrain loads it again after a change.*
 
-3. **Terrain edits** (optional, Edit → ⊕ Composite): water depth, land cover, curve edits.
-   These are the *terrain stage*. The Composite's buildings / roads / waterways / walls
-   toggles are 2D preview only; in 3D those come from the City model layers (step 8).
+3. **Terrain edits** (optional): what is carved into the ground, the *terrain stage*.
+   - **Rivers & lakes**: its switch puts HydroRIVERS rivers, OSM lakes and open water into
+     the model; the map shows them as they are carved. Click the layer for *Rivers* (*Big
+     only*, *Most*, *All*), *River depth ×*, *River width ×* and *Lakes*. Nothing else to
+     press: every preview and download includes them.
+   - **Land cover, vegetation and curve edits**: switch on the ⚙ *Composite & imports*
+     tool (⊕ Composite tab). These still need **✓ Apply to DEM** there. The Composite's
+     buildings / roads / waterways / walls toggles are 2D preview only; in 3D those come
+     from the City model layers (step 8).
 
-   ![Composite](img/city/05-composite.png)
-   *The Composite panel: City / OSM is marked "2D preview only"; ✓ Apply to DEM writes the
-   terrain channels into the DEM.*
+   ![Rivers and lakes layer](img/city/05-rivers-lakes-layer.png)
+   *Rivers & lakes selected: in the model (switch on, HydroRIVERS · carved in), Most rivers
+   (Strahler order 3 and up), depth and width ×1, lakes off.*
 
-4. **City data** (Edit → 📥 Fetch → 🗂 Fetch Layers → 🏙 Cities → **📥 Load Cities**):
-   first fetch 1–5 min, cached after; the progress box lists each OSM layer (cached /
-   fetching / done) with *Cancel*. *Tolerance (m)* (default 3) and *Min area (m²)* are
-   sent with the City Model build, which reads exactly the OSM cache entry Load Cities
-   wrote (and the height overrides made on it), so the build fetches only the layers
-   Load Cities does not (railways, green, trails). Open the **Buildings panel** (📋 Toggle Buildings Table
-   Panel, or the 📋 Buildings tab at the right edge of the map) and check the height
-   sources, histogram, the "> 20 % default height" warning (only shown above 20 %), the
-   tallest list. Fix wrong heights with the per-building override (click a building, *Height
-   (m)*, *Set*) — it is sent with the build. **🏛 Landmarks** (same tab, below Fetch Layers)
-   → *🔎 Find landmarks* lists places of worship, town halls, castles, attractions and the
-   tallest buildings with part count, roof shapes and height source; click one to build it
-   from *OSM parts* (default), a surveyed *nDSM* or an *Uploaded mesh*, *👁 Preview* it and
-   *💾 Save* (stored per region, sent with the City Model build).
+4. **City data** (Edit → *Buildings & roads*): switch the layer on (the City style already
+   does); the OSM buildings, roads, water, rail and parks load and the dot turns green
+   with the building count. First fetch 1–5 min, cached after. Click the layer for its
+   parts (*Buildings*, *Roads*, *Water*, *Rail*, *Parks*), *Building height* (true height
+   or ×), and roads *Raised* or *Engraved*.
+   - **Building heights table ›** opens the Buildings panel: check the height sources,
+     histogram, the "> 20 % default height" warning (only shown above 20 %) and the
+     tallest list. Fix wrong heights with the per-building override (click a building,
+     *Height (m)*, *Set*); it is sent with the build.
+   - The fetch details are in the ⚙ *Data sources & fetch details* tool (📥 Fetch → 🗂 Fetch
+     Layers → 🏙 Cities): **📥 Load Cities** shows the progress per OSM layer (cached /
+     fetching / done) with *Cancel*; *Tolerance (m)* (default 3) and *Min area (m²)* are
+     sent with the City Model build, which reads exactly the OSM cache entry that was
+     loaded (and the height overrides made on it), so the build fetches only the layers
+     this load does not (railways, green, trails).
+   - **🏛 Landmarks** (same tool and tab, below Fetch Layers) → *🔎 Find landmarks* lists
+     places of worship, town halls, castles, attractions and the tallest buildings with
+     part count, roof shapes and height source; click one to build it from *OSM parts*
+     (default), a surveyed *nDSM* or an *Uploaded mesh*, *👁 Preview* it and *💾 Save*
+     (stored per region, sent with the City Model build).
 
-   ![Load Cities](img/city/06-load-cities.png)
-   *Tolerance 0.5 m (the build's); "Done · 7/7 layers", each served from cache.*
+   ![Buildings and roads](img/city/06-buildings-roads.png)
+   *Buildings & roads: 24,007 buildings, 3D in the print; every part on, true height,
+   roads raised; Building heights table › opens the panel below.*
 
    ![Buildings panel](img/city/07-buildings-panel.png)
    *24,007 buildings: 98 % from OSM levels, 115 (0 %) at the default height — no warning;
    histogram 0–70 m; tallest 64 m.*
 
    ![Landmarks](img/city/08-landmarks.png)
-   *Find landmarks: Catedral de Granada (50 m, 41 parts, 5 roof shapes) first; click a row
-   for its editor.*
+   *Landmarks (Data sources & fetch details tool): Catedral de Granada (50 m, 41 parts, 5
+   roof shapes) first; click a row for its editor.*
 
 5. **Model** (Extrude → *Printed size* and *Model* cards): *Printed size* gives W × D × H,
    whether it fits the printer bed ("⚠ Bigger than the … bed: lower the width, or split
@@ -294,8 +331,8 @@ than 0.8 mm are widened, extruded heights capped at 8 × footprint width (report
 ## 6. Large regions (> 20 km)
 
 Buildings are below print resolution at these scales; build terrain only with the
-*Region* preset (Vertical *auto* → fit, rivers + lakes from the Composite panel, then
-*Apply to DEM*). Full procedure, reference results (Grand Canyon, Middle Rhine, Sierra
+*Region* style (Vertical *auto* → fit, and the *Rivers & lakes* layer switched on in
+Edit; no Apply needed). Full procedure, reference results (Grand Canyon, Middle Rhine, Sierra
 Nevada), river-depth table and known limits: **[large-region-sop.md](large-region-sop.md)**.
 
 ## History

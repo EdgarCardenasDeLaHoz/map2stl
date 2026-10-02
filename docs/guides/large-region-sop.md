@@ -53,8 +53,9 @@ use HydroRIVERS, downloaded per continent on first use (§5); lakes use Overpass
 **Quick path**: pick the region, then **✨ Make it printable** in the header. It loads the
 DEM, sizes the model to fill the bed in one piece and opens Extrude (with **Undo**), using
 the *Region* preset for a box diagonal over 100 km and *Mountain* for 25–100 km (Middle
-Rhine, Sierra Nevada: pick *Region* in step 2 instead to get rivers and lakes). Rivers and
-lakes still need step 4 (Composite → Apply to DEM). Extrude's layout, tool cards and ⚙ Settings are
+Rhine, Sierra Nevada: pick *Region* in step 2 instead to get rivers and lakes). Check the
+*Rivers & lakes* layer in Edit (step 4): with its switch on they are in every preview and
+download. The Explore and Edit pages, Extrude's layout, tool cards and ⚙ Settings are
 described in the city SOP, §2.
 
 Screenshots: Grand Canyon reference box (N 36.47, S 35.97, E −111.78, W −112.88), taken
@@ -66,39 +67,49 @@ refresh them). A red outline marks the control each step talks about.
    cos(lat) (Grand Canyon: 1000 → 807 px).
 
    ![Pick the area](img/region/01-pick-area.png)
-   *The saved box (red) on the Explore map; type in "Search regions…" to find it in a long list.*
+   *The saved box on the Explore map; the card at the bottom gives its size (98.8 × 55.3 km)
+   and position, with ✎ Edit box and Load DEM ›. Type in "Search regions…" to find it in a
+   long list.*
 
-2. **Region preset** (Edit → 📥 Fetch, *Preset* row; switching to Edit may already load
-   the DEM with the region's saved or default settings — load it again in step 3): sets
-   SRTM 30 m (≤ 100 km) or 90 m, 1000 px, Vertical auto, city layers and puzzle off,
-   Composite rivers + lakes on, and **Projection → Cosine Correction**. (The default for
-   a region without saved settings is *None* (Plate Carrée), which keeps the grid in
+2. **Region style** (Edit → *Terrain* → *Style* → **Region**; **Load DEM ›** on the region's
+   card opens Edit and loads the DEM with the region's saved or default settings): sets
+   SRTM 30 m (≤ 100 km) or 90 m, 1000 points across, Vertical auto, city layers and puzzle
+   off, rivers + lakes on, and **Projection → Cosine Correction**. (The default for a
+   region without saved settings is *None* (Plate Carrée), which keeps the grid in
    degrees — Grand Canyon 1000 × 454 px instead of 807 × 454, a model 24 % too wide
-   east-west — so check Projection if you skip the preset.)
+   east-west — so check Projection if you skip the style: ⚙ *Data sources & fetch
+   details* tool → 📥 Fetch → Projection.)
 
    ![Region preset](img/region/02-region-preset.png)
-   *Region preset, Cosine Correction and SRTM 30 m set; the DEM is not reloaded yet.*
+   *Terrain selected: Style Region, elevation source SRTM 30 m (Global), detail 1000
+   points across; Rivers & lakes is switched on.*
 
-3. **Load DEM** (top of the panel). ~13 s cold for 100 km, cached after. The note under
-   *Resolution* compares the source's real samples with the grid.
+3. **Load the terrain**: the style reloads it by itself when it changes the projection or
+   detail; otherwise click **↺ Reload terrain**. ~13 s cold for 100 km, cached after. The
+   Terrain dot turns green with the height range. (The note under *Resolution*, in the
+   *Data sources & fetch details* tool, compares the source's real samples with the grid:
+   807 × 454 from 3960 × 1800 SRTM samples, downsampled.)
 
    ![Load DEM](img/region/03-load-dem.png)
-   *807 × 454 grid; the note under Resolution: 3960 × 1800 real SRTM samples, downsampled.*
+   *The terrain loaded: 577 – 2811 m; ↺ Reload terrain loads it again after a change.*
 
-4. **Composite → Rivers & lakes** (Edit → ⊕ Composite, open *🌊 Rivers & lakes*): set
-   **Depth ×** from the table below (the river *Source*, *Min ord* and *Width ×* are set
-   once, in Edit → 📥 Fetch → 🌊 Hydrology; *🌊 Load Hydrology* there previews exactly this
-   carve on the loaded DEM), click **👁 Preview**, wait until the range under the
-   buttons shows the terrain (e.g. `517.4m — 2811.4m`, not `0.0m — 0.0m`), then **✓ Apply
-   to DEM**. Apply only uses a composite computed for the loaded DEM and the current
-   settings: clicked while a recompute is running it waits for it (or starts one), and it
-   refuses a flat or all-zero result with a toast instead of replacing the DEM. Skipped layers are not shown in the UI yet (only in the `dem-merge`
-   response's `warnings` and the server log): Water (ESA) needs Earth Engine; untick
-   *💧 Water → Enable* if it is not set up — lakes do the same job.
+4. **Rivers & lakes** (Edit → *Rivers & lakes*): its switch puts the rivers, lakes and open
+   water into the model (the Region style turns it on). Click the layer and set:
+   - *Rivers*: **Most** (Strahler order 3 and up; *Big only* is 5 and up, *All* every
+     stream).
+   - **River depth ×** from the table below (the slider goes to ×10; up to ×20 in the
+     ⚙ *Composite & imports* tool). *River width ×* and *Lakes* (larger than 1 ha, *Lake
+     depth* below the shore) are here too.
+
+   The map shows the rivers as they are carved; every preview and download includes them,
+   with no Apply. Skipped channels are not shown in the UI yet (only in the server log):
+   open water (ESA) needs Earth Engine and is skipped without it — lakes do the same job.
+   The river *Source* (HydroRIVERS or Natural Earth) is in the ⚙ *Data sources & fetch
+   details* tool (📥 Fetch → 🌊 Hydrology).
 
    ![Rivers and lakes](img/region/04-rivers-lakes.png)
-   *HydroRIVERS, min order 3, depth ×10; the combined histogram and the range line
-   (517 m — 2811 m) show the carved composite before Apply.*
+   *Rivers & lakes in the model (switch on, dot green: HydroRIVERS · carved in): Most (order
+   3 and up), depth ×10, width ×1, lakes on, 2 m below the shore.*
 
 5. **Extrude → Model card**: a new DEM is sized to fill the printer bed (*Printer*,
    default Ender 220 × 220). For a bigger print drag **Width** (it sets mm per pixel:
@@ -160,7 +171,7 @@ separate colour (§6).
 | DEM | SRTMGL1 ≤ 100 km, SRTMGL3 beyond | at 1000 px a 100 km box is ~100 m/px; 30 m is already downsampled 3× |
 | Vertical | auto (→ fit, 30 mm) | true scale would be 11–24 mm of relief at 1:120–240 k |
 | Smoothing | 3×3 median | rivers and lakes are carved after it, so it cannot erase them |
-| Rivers | HydroRIVERS, min order 3, width × 1 (Fetch → Hydrology) | order ≥ 3 is ≥ ~3 m³/s; lower orders are noise at 50–120 m/px |
+| Rivers | HydroRIVERS, *Most* (min order 3), width × 1 (Edit → Rivers & lakes) | order ≥ 3 is ≥ ~3 m³/s; lower orders are noise at 50–120 m/px |
 | Lakes | 2 m below shore, ≥ 1 ha | below one pixel (1.5–3.5 ha here) a lake is a pit, harmless |
 | Base | 3–5 mm | 10 mm default is heavy at 400 mm |
 
@@ -182,9 +193,9 @@ separate colour (§6).
 
 - **Overpass** is the slow and fragile step: the lakes fetch waits ~40 s on a dead mirror
   before trying the next, and an outage costs ~2 min before the lakes are skipped (the
-  composite is kept and re-tried after 15 min). The skip is in the Apply response and the
-  server log only; the export and pre-flight do not show it yet.
-- **Earth Engine**: Water (ESA) is on by default in the Composite panel and fails
+  composite is kept and re-tried after 15 min). The skip is in the `dem-merge` response and
+  the server log only; Edit, the export and the pre-flight do not show it yet.
+- **Earth Engine**: open water (ESA) goes on with the *Rivers & lakes* switch and fails
   without Earth Engine (`ee` is not installed in the venv). It is now skipped; before
   this run it failed the whole composite, so the Region preset exported *no* rivers.
 - **HydroRIVERS first use** per continent: 66–108 MB download, then ~4 min to simplify
@@ -204,7 +215,8 @@ separate colour (§6).
   and ✕ Cancel) shows during every export and toasts stay up for their requested
   duration. The browser gives up only after 3 min with no progress and no server
   heartbeat, not after a fixed 10 min.
-- **Apply to DEM** (fixed 2026-09-27) waits for / starts the recompute for the loaded
+- **Apply to DEM** (⚙ *Composite & imports* tool; since 2026-10-02 only needed for land
+  cover, vegetation and trails, not rivers and lakes) (fixed 2026-09-27) waits for / starts the recompute for the loaded
   DEM and refuses a stale, all-zero or flat composite; a flat DEM shows "vertical: DEM
   is flat" on the Extrude scale line instead of a billions-× exaggeration.
 
@@ -229,8 +241,9 @@ UI:
 1. Region preset: ~~set Projection to *Cosine Correction*~~ (done 2026-09-27), untick
    *Water (ESA)* when Earth Engine is not configured, set Base 5 mm. (~~Set mm/px from
    the bed~~: every new DEM now fills the bed, 2026-10-01.)
-2. Show the river depth on the print (mm) beside the depth slider, from the current scale.
-3. Apply to DEM: list skipped layers in the toast (the response now has `warnings`).
+2. Show the river depth on the print (mm) beside the *River depth* slider, from the current scale.
+3. Show skipped channels (ESA water, lakes during an Overpass outage) on the *Rivers &
+   lakes* layer (the `dem-merge` response has `warnings`).
 4. Terrain puzzle: offer *max piece* (mm) like the City Model instead of only cols × rows.
 
 STL:
