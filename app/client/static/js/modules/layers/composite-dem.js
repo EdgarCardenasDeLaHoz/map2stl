@@ -1000,9 +1000,12 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
     const enableCb = document.getElementById('compositeEnabled');
 
     // Recompute (or clear) when enable checkbox changes
-    enableCb?.addEventListener('change', () => {
-        // Switch to composite view mode when enabling
-        if (enableCb.checked) window.setStackMode?.('CompositeDem');
+    enableCb?.addEventListener('change', (e) => {
+        // A click on this box in the Composite panel also shows the composite preview. When
+        // the Edit page's Rivers & lakes switch or a region's saved settings turn it on
+        // (synthetic events), the canvas keeps showing the layers themselves: the opaque
+        // composite preview would hide the river layer it carves (2026-10-02).
+        if (enableCb.checked && e.isTrusted) window.setStackMode?.('CompositeDem');
         _scheduleRecompute();
     });
 

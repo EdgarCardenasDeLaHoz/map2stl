@@ -50,6 +50,7 @@
                   @click="setMinOrder(r.order)">{{ r.label }}</button>
         </div>
         <div class="lp-hint">{{ riverSourceLabel }} · Strahler order {{ minOrder }} and up</div>
+        <div v-if="noRivers" class="lp-hint lp-warn">No river this size crosses this area{{ minOrder > 1 ? ': try All' : '' }}.</div>
       </div>
       <div class="lp-ctl">
         <div class="lp-lbl"><label for="lpRiverDepth"><b>River depth</b></label><span>× {{ fmt(pickNum('compositeRiverDepthScale', 1)) }}</span></div>
@@ -217,6 +218,11 @@ function applyPreset(id: string) {
 }
 
 const minOrder = computed(() => pickNum('hydroMinOrder', 3));
+const noRivers = computed(() => {
+  void store.tick;
+  const h = w().appState?.lastWaterHydrology?.hydroData;
+  return !!h && h.feature_count === 0;
+});
 const riverSourceLabel = computed(() => (pick('hydroSource') === 'natural_earth' ? 'Natural Earth' : 'HydroRIVERS'));
 function setMinOrder(o: number) {
   setField('hydroMinOrder', String(o));
@@ -274,6 +280,7 @@ function setOpacity(v: number) {
   background: #2c2c2e; color: #f5f5f7; font-size: 13px; font-weight: 600;
 }
 .lp-btn:hover { background: #3a3a3c; }
+.lp-warn { color: #ff9f0a; }
 .lp-opacity { border-top: 1px solid #2f2f31; padding-top: 12px; }
 .lp-switch {
   appearance: none; -webkit-appearance: none; flex: none; position: relative; cursor: pointer;

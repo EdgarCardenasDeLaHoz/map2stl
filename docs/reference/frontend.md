@@ -141,6 +141,9 @@ Consequences to know:
   preview and export, so Apply to DEM is only needed for land cover / vegetation / trails.
   The carve is saved per region (`presets.js::collectAllSettings` `composite` group, applied with
   change events by `_applyComposite`); a new page and a region without it carve nothing.
+  When a terrain loads, the Layers panel shows the preview of every layer in the print, and
+  `stacked-layers.js::_loadEmptyActiveLayers` fetches active layers that are still empty; the
+  Composite preview layer only takes over the canvas on a real click in the Composite panel.
 - **Edit sub-tab rule** (`DemSettingsPanel.vue`): *Fetch* holds data settings that affect
   everything, *View* visualization-only settings, *Composite* settings that only affect the
   3D render. All three are `v-show`, so a control moved between them keeps working by id.

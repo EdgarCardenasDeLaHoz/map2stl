@@ -97,8 +97,8 @@ export const WORKFLOW_PRESETS = {
         label: 'Region',
         title: 'Large area: terrain only (city layers off), rivers + lakes carved, cosine '
             + 'projection, vertical auto (fit above 20 km), SRTM 30 m up to ~100 km and 90 m beyond',
-        // Rivers and lakes live in the Composite panel: load the DEM, then Apply.
-        hint: 'Load the DEM, then Composite → Apply to DEM to carve rivers and lakes.',
+        // Rivers and lakes go into the model as soon as they load (live composite, 2026-10-02).
+        hint: 'Rivers and lakes are carved in: see Edit → Rivers & lakes.',
         fields: [
             COSINE,   // before paramDim: its change event reloads the DEM right away
             { id: 'paramDemSource', value: REGION_DEM_SOURCE },

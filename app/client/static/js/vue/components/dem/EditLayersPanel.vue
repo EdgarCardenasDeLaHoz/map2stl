@@ -29,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from 'vue';
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
 import { EDIT_LAYERS, setPreviewVisible, useEditLayersStore, type EditLayer, type EditLayerId } from '../../stores/editLayers';
 import { useUiModeStore } from '../../stores/uiMode';
 import { useAppStore } from '../../stores/app';
@@ -72,9 +72,15 @@ function switchTitle(l: EditLayer): string {
 function hasPicture(l: EditLayer): boolean {
   return l.pictures().some((c) => !!c && c.width > 0 && c.height > 0);
 }
+/** The hydrology result is in, and no river of the chosen size crosses this box. */
+function noRivers(): boolean {
+  const h = w().appState?.lastWaterHydrology?.hydroData;
+  return !!h && h.feature_count === 0;
+}
 function dotClass(l: EditLayer): string {
   if (l.id === 'terrain') return app.lastDemData ? 'ok' : 'off';
   if (!on(l)) return 'off';
+  if (l.id === 'water' && noRivers()) return 'busy';
   return hasPicture(l) ? 'ok' : 'busy';
 }
 
@@ -86,6 +92,8 @@ function status(l: EditLayer): string {
       return dem ? `${Math.round(dem.vmin ?? 0)} – ${Math.round(dem.vmax ?? 0)} m` : 'Not loaded yet';
     case 'water': {
       if (!on(l)) return 'Not in the model';
+      if (!app.lastDemData) return 'Waiting for the terrain';
+      if (noRivers()) return 'No rivers this size here';
       const src = val('hydroSource') === 'natural_earth' ? 'Natural Earth' : 'HydroRIVERS';
       return `${src} · carved in`;
     }
@@ -147,6 +155,17 @@ function paintThumbs() {
 // refreshes on a slow timer while the Edit view is open.
 let timer: number | undefined;
 const bump = () => { store.bump(); requestAnimationFrame(paintThumbs); };
+// What prints is what shows (§1.6): the canvas's layer visibility is not saved with the
+// region, so when a terrain arrives, show the preview of every layer that is in the print
+// (switching a preview on also fetches it, stacked-layers.js LAYER_AUTOLOAD).
+function showPrintedPreviews() {
+  for (const l of EDIT_LAYERS) {
+    if (!l.fixed && !l.extra && l.inModel()) setPreviewVisible(l.stack, true);
+  }
+  bump();
+}
+// The store, not the event bus: Vue mounts before modules/core/events.js has run.
+watch(() => app.lastDemData, (d) => { if (d) showPrintedPreviews(); });
 onMounted(() => {
   window.addEventListener('layer-stack-changed', bump);
   document.addEventListener('change', bump, true);

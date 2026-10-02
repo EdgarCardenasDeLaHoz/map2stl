@@ -108,6 +108,25 @@ const LAYER_AUTOLOAD = {
     },
 };
 
+/**
+ * A layer switched on before the DEM existed (e.g. Edit → Rivers & lakes before Load DEM)
+ * stays active with no data: its loader refuses without a DEM, and only switching it on
+ * calls the loader. So when a DEM arrives, fetch every active layer that is still empty.
+ * Ready layers are left alone: a full reload (loadAllLayers) already fetches them.
+ */
+function _loadEmptyActiveLayers() {
+    for (const mode of _activeLayers) {
+        const entry = LAYER_AUTOLOAD[mode];
+        if (mode === 'Dem' || !entry || entry.ready()) continue;
+        Promise.resolve(entry.load()).catch((e) => console.warn(`[stacked-layers] ${mode} after DEM load:`, e));
+    }
+}
+function _listenForDem() {
+    window.events?.on(window.EV?.DEM_LOADED, _loadEmptyActiveLayers);
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _listenForDem);
+else setTimeout(_listenForDem, 0);
+
 /** Return the layer buffer canvas for the given mode, or null if not found. */
 function _getLayerBuffer(mode) {
     return getOrCreateCanvas(mode);
