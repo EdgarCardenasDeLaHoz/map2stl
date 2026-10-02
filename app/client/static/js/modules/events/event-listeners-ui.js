@@ -86,7 +86,6 @@ window._setupResizablePanel = function _setupResizablePanel() {
 };
 
 window._setupSettingsJsonToggle = function _setupSettingsJsonToggle() {
-    document.getElementById('saveRegionSettingsBtn')?.addEventListener('click', () => window.saveRegionSettings?.());
 
     document.getElementById('clearRegionCacheBtn')?.addEventListener('click', async () => {
         const btn = document.getElementById('clearRegionCacheBtn');

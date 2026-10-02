@@ -10,6 +10,7 @@
  *   collectAllSettings()                    — return full settings snapshot
  *   applyAllSettings(s)                     — restore full settings snapshot to form
  *   saveRegionSettings()                    — POST current settings for selected region
+ *                                             (called by autosave; there is no Save button)
  *   loadAndApplyRegionSettings(regionName)  — GET + apply saved region settings
  *   applyWorkflowPreset(name)               — apply City / Mountain / Coast (workflow-presets.js)
  *
@@ -554,26 +555,28 @@ function applyAllSettings(s) {
 // Region settings persistence
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function saveRegionSettings() {
-    const region = window.appState.selectedRegion;
-    if (!region) { window.showToast('Select a region first', 'warning'); return; }
-    const settings = collectAllSettings();
-    const statusEl = document.getElementById('saveSettingsStatus');
-    if (statusEl) statusEl.textContent = 'Saving…';
+/**
+ * POST the current settings for *regionName* (default: the selected region).
+ * Autosave calls this; the header status says "✓ Saved" or why it did not.
+ * @returns {Promise<boolean>} true when saved
+ */
+async function saveRegionSettings(regionName) {
+    const name = regionName || window.appState.selectedRegion?.name;
+    if (!name) return false;
+    _setStatus('pending', 'Saving…');
+    let error;
     try {
-        const { error } = await window.api.regions.saveSettings(region.name, settings);
-        if (!error) {
-            _setDirty(false);
-            if (statusEl) { statusEl.textContent = 'Saved ✓'; statusEl.style.color = '#4CAF50'; setTimeout(() => { if (statusEl && !_dirty) statusEl.textContent = ''; }, 2000); }
-            window.showToast('Settings saved for ' + region.name, 'success');
-        } else {
-            window.showToast('Save failed: ' + error, 'error');
-            if (statusEl) statusEl.textContent = 'Error';
-        }
+        ({ error } = await window.api.regions.saveSettings(name, collectAllSettings()));
     } catch (e) {
-        window.showToast('Save failed: ' + e.message, 'error');
-        if (statusEl) statusEl.textContent = 'Error';
+        error = e.message;
     }
+    if (error) {
+        _setStatus('failed', '⚠ Not saved');
+        throw new Error(error);
+    }
+    _setDirty(false);
+    _setStatus('saved', '✓ Saved');
+    return true;
 }
 
 function _mergeSettings(base, overlay) {
@@ -601,16 +604,11 @@ async function loadAndApplyRegionSettings(regionName) {
             // must override the defaults' clip_valid_region, not sit beside it.
             const saved = normalizeSettingsKeys(data.settings || {});
             const merged = defaults ? _mergeSettings(normalizeSettingsKeys(defaults), saved) : saved;
-            applyAllSettings(merged);
-            // applyAllSettings writes to the controls, which fires the same
-            // delegated input/change listeners a user edit would. Clear the
-            // flag afterwards so freshly-loaded settings do not read as unsaved.
-            setTimeout(() => _setDirty(false), 0);
+            _applyStored(merged);
             return true;
         }
         if (defaults) {
-            applyAllSettings(defaults);
-            setTimeout(() => _setDirty(false), 0);
+            _applyStored(defaults);
             return false;
         }
     } catch (_) { /* network error — use defaults */ }
@@ -672,54 +670,64 @@ let _autoSaveTimer = null;
 /** True when a control has changed since the last successful save. */
 let _dirty = false;
 
+/** True while stored settings are being written into the form (not a user edit). */
+let _applying = false;
+
+/** Debounce between the last edit and the save. Short, so switching region rarely drops one. */
+const AUTOSAVE_MS = 800;
+/** Wait before retrying a failed save. */
+const RETRY_MS = 5000;
+
 /**
- * Reflect unsaved state in #saveSettingsStatus.
- *
- * Settings previously changed with no visible acknowledgement at all: with
- * auto-save off (the old default) an edit was simply lost on reload, and with
- * it on there was no way to tell a saved state from a pending one. The status
- * line now always says which of the three it is.
+ * Settings save themselves; there is no Save button or auto-save switch
+ * (design guidelines §1.5, 2026-10-01). Before, a 💾 button and an "Auto-save"
+ * checkbox sat side by side, and with the box unticked an edit was lost on
+ * reload. The header's #saveSettingsStatus says which state the settings are in:
+ * "Saving…", "✓ Saved" or "⚠ Not saved" (retried every RETRY_MS).
  */
+function _setStatus(state, text) {
+    const el = document.getElementById('saveSettingsStatus');
+    if (!el) return;
+    el.textContent = text;
+    el.className = `save-status ${state}`;
+    el.title = state === 'failed'
+        ? 'The server did not take the last change. Retrying; your edits stay in the form.'
+        : '';
+}
+
 function _setDirty(dirty) {
     _dirty = dirty;
-    const status = document.getElementById('saveSettingsStatus');
-    if (!status) return;
-    if (dirty) {
-        status.textContent = 'Unsaved changes';
-        status.style.color = '#f90';
-    } else if (status.textContent === 'Unsaved changes') {
-        status.textContent = '';
+    if (dirty) _setStatus('pending', 'Saving…');
+}
+
+/** Write stored settings into the form without treating it as an edit. */
+function _applyStored(settings) {
+    _applying = true;
+    try {
+        applyAllSettings(settings);
+    } finally {
+        // applyAllSettings fires the same input/change events a user edit does,
+        // some of them on the next tick; let those pass before listening again.
+        setTimeout(() => {
+            _applying = false;
+            clearTimeout(_autoSaveTimer);
+            _dirty = false;
+            _setStatus('saved', '✓ Saved');
+        }, 0);
     }
 }
 
 function setupAutoSave() {
-    // Restore preference from localStorage.
-    const chk = document.getElementById('autoSaveEnabled');
-    if (!chk) return;
-    try {
-        // Default ON. It used to default OFF, which meant every setting a user
-        // touched was silently discarded on reload unless they found this
-        // checkbox first. Only an explicit opt-out turns it back off.
-        chk.checked = localStorage.getItem('map2stl_autoSave') !== 'false';
-    } catch (_) {
-        chk.checked = true;
+    // Edit settings and the Extrude panel's export / puzzle settings are both
+    // part of collectAllSettings(), so edits in either save.
+    for (const id of ['demControlsInner', 'modelRightPanel']) {
+        const container = document.getElementById(id);
+        if (!container) continue;
+        container.addEventListener('change', _scheduleAutoSave);
+        container.addEventListener('input', _scheduleAutoSave);
     }
 
-    chk.addEventListener('change', () => {
-        try { localStorage.setItem('map2stl_autoSave', chk.checked); } catch (_) { /* best-effort; failure is non-fatal */ }
-        // Turning auto-save on should flush whatever is already pending.
-        if (chk.checked && _dirty) _scheduleAutoSave();
-    });
-
-    // Delegated listener on the settings container
-    const container = document.getElementById('demControlsInner');
-    if (!container) return;
-
-    container.addEventListener('change', _scheduleAutoSave);
-    container.addEventListener('input', _scheduleAutoSave);
-
-    // Last line of defence: with auto-save off, or with a save still pending
-    // in the 3s debounce window, warn before the tab goes away.
+    // A save still pending in the debounce window, or failing: warn before the tab goes away.
     window.addEventListener('beforeunload', (e) => {
         if (!_dirty || !window.appState?.selectedRegion) return;
         e.preventDefault();
@@ -728,37 +736,26 @@ function setupAutoSave() {
     });
 }
 
-function _scheduleAutoSave(e) {
-    // Don't track or save when there's no region to save to.
-    if (!window.appState?.selectedRegion) return;
-    // Ignore the auto-save checkbox itself
-    if (e?.target?.id === 'autoSaveEnabled') return;
-
+function _scheduleAutoSave() {
+    if (_applying) return;
+    const region = window.appState?.selectedRegion?.name;
+    if (!region) return;
     _setDirty(true);
-
-    const chk = document.getElementById('autoSaveEnabled');
-    if (!chk?.checked) return;
-
     clearTimeout(_autoSaveTimer);
-    _autoSaveTimer = setTimeout(async () => {
-        const status = document.getElementById('saveSettingsStatus');
-        try {
-            await saveRegionSettings();
-            _setDirty(false);
-            if (status) {
-                status.textContent = 'Auto-saved ✓';
-                status.style.color = '#4CAF50';
-                setTimeout(() => { if (!_dirty) status.textContent = ''; }, 2000);
-            }
-        } catch (err) {
-            console.warn('Auto-save failed:', err);
-            // Stay dirty — the unload guard should still fire.
-            if (status) {
-                status.textContent = 'Auto-save failed — use 💾 Save';
-                status.style.color = '#f44';
-            }
-        }
-    }, 3000);
+    _autoSaveTimer = setTimeout(() => _autoSave(region), AUTOSAVE_MS);
+}
+
+async function _autoSave(region) {
+    // The form now shows another region's settings: saving it under *region*
+    // would overwrite that region with the new one's values.
+    if (window.appState?.selectedRegion?.name !== region) return;
+    try {
+        await saveRegionSettings(region);
+    } catch (err) {
+        console.warn('Autosave failed:', err);
+        clearTimeout(_autoSaveTimer);
+        _autoSaveTimer = setTimeout(() => _autoSave(region), RETRY_MS);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

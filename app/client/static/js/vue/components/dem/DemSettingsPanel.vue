@@ -33,15 +33,9 @@
         <div v-show="activeTab==='fetch'" id="settingsSaveRow" class="settings-primary-row">
           <button id="loadDemBtn" class="btn btn-primary settings-load-dem-btn"
                   title="Fetch the DEM for the selected region with the source and resolution under Fetch Layers → DEM Source">🏔 Load DEM</button>
-          <button id="saveRegionSettingsBtn" class="btn btn-secondary settings-save-btn"
-                  title="Save all current panel settings for the selected region">💾 Save settings</button>
           <button id="clearRegionCacheBtn" class="btn btn-secondary settings-icon-btn"
                   aria-label="Clear region cache"
                   title="Clear all cached data (DEM, water, satellite, etc.) and re-fetch">🗑️</button>
-          <label class="check-label settings-autosave" title="Auto-save settings after changes (does not load data)">
-            <input type="checkbox" id="autoSaveEnabled" aria-label="Auto save region settings"> Auto-save
-          </label>
-          <span id="saveSettingsStatus" class="settings-save-status"></span>
         </div>
         <WorkflowPresetBar v-show="activeTab==='fetch'" />
         <!-- Landmarks near the box edge; fetched by the Explore map's instance. -->
@@ -122,29 +116,13 @@ const guideLink = computed(() => guideHref('city-stl-and-puzzle-sop',
   margin-bottom: 6px;
 }
 .settings-load-dem-btn {
-  flex: 1 1 100%;
+  flex: 1;
   padding: 7px 0;
   font-size: 13px;
   font-weight: 600;
 }
-.settings-save-btn {
-  flex: 1;
-  padding: 4px 8px;
-  font-size: 11px;
-}
 .settings-icon-btn {
   padding: 4px 8px;
   font-size: 12px;
-}
-.settings-autosave {
-  font-size: 11px;
-  color: #aaa;
-  white-space: nowrap;
-}
-.settings-save-status {
-  font-size: 10px;
-  color: var(--text-dim);
-  min-width: 60px;
-  text-align: right;
 }
 </style>

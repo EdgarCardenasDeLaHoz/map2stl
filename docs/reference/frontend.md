@@ -116,7 +116,7 @@ Consequences to know:
 | Composite panel | `app/client/static/js/vue/components/dem/CompositeDemSection.vue` | `app/client/static/js/modules/layers/composite-dem.js::_computeCompositeDem`, `window.applyCompositeToDem` |
 | Model height, base, exaggeration, mm/px, export options, progress bar | `app/client/static/js/vue/components/views/ModelContainer.vue` | `app/client/static/js/modules/export/export-handlers.js::_asyncExport` |
 | Header tabs (Explore / Edit / Extrude), Guides / Results / Diagnostics / Keys / Docs buttons | `app/client/static/js/vue/components/layout/MainHeader.vue` (one line from 1024 px: short title, icon-only buttons below 1200 px, `#pipelineReportsLink` → `/reports`) | `app/client/static/js/modules/ui/view-management.js::switchView` |
-| Settings collect / apply / save / auto-save | `DemSettingsPanel.vue` (`#saveSettingsStatus`) | `app/client/static/js/modules/ui/presets.js::collectAllSettings`, `applyAllSettings`, `setupAutoSave` |
+| Settings collect / apply / autosave | `MainHeader.vue` (`#saveSettingsStatus`) | `app/client/static/js/modules/ui/presets.js::collectAllSettings`, `applyAllSettings`, `setupAutoSave` |
 | Region boxes on the map (outlines, ≤ 20 in view + selected, hover ↔ list row) | — (Leaflet) | `app/client/static/js/modules/regions/region-boxes.js::refreshRegionViewSet`, rule `app/client/static/js/modules/regions/viewport-regions.js::selectViewportRegions` |
 | Region editor (rename, group, bounds + size, delete, notes) | `app/client/static/js/vue/components/sidebar/SidebarEditView.vue` (opened via `SidebarPanel.vue::setRegionEditorOpen`) | `app/client/static/js/modules/regions/region-editor.js::openRegionEditor` |
 | "Load DEM ›" on the Explore map | `app/client/static/js/vue/components/views/MapContainer.vue` | `app/client/static/js/modules/ui/view-management.js::loadSelectedRegionDem` |
@@ -173,10 +173,11 @@ Consequences to know:
 | Export cancelled | Bar resets, info toast. Client-side only: polling stops and the server task expires under its TTL |
 | Export stalled | Gives up after `EXPORT_STALL_TIMEOUT_MS` with no status change and no heartbeat (`app/client/static/js/modules/export/export-poll.js::createStallWatch`), not a wall-clock limit |
 | Export with no DEM | Buttons disabled, empty state shown, toast names the missing DEM |
-| Settings edited | `#saveSettingsStatus`: "Unsaved changes", then auto-saved after the debounce |
+| Settings edited (Edit panel or Extrude panel) | Header `#saveSettingsStatus`: "Saving…", then "✓ Saved" after the 0.8 s debounce; "⚠ Not saved" retries every 5 s |
 | Leaving with unsaved settings | Native `beforeunload` prompt (`presets.js`) |
 
-- Auto-save defaults **on**; only `localStorage.map2stl_autoSave === "false"` turns it off.
+- Settings always save themselves: no Save button, no auto-save switch (design guidelines
+  §1.5, 2026-10-01). A pending save is dropped, not misfiled, if the region changes first.
 - **Toasts** (`app/client/static/js/modules/core/ui-helpers.js::showToast`, container
   `#toastContainer` in `AppShell.vue`): a stack at the bottom centre of the window, clear of the
   right-hand panels and the Leaflet attribution. At most 3 on screen

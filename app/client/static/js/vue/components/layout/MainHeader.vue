@@ -18,6 +18,9 @@
     </div>
 
     <div class="header-actions">
+      <!-- Region settings save themselves (modules/ui/presets.js, autosave); this says
+           whether they have. No Save button: design guidelines §1.5. -->
+      <span id="saveSettingsStatus" class="save-status" role="status" aria-live="polite"></span>
       <!-- Guides: the step-by-step SOPs (docs/guides/*.md) rendered at /guides -->
       <a class="btn btn-secondary docs-menu-btn guides-btn" href="/guides" target="_blank" rel="noopener"
          title="Step-by-step guides with screenshots: city models, puzzles, large regions"
@@ -516,6 +519,16 @@ async function saveTilePath() {
 .docs-menu-btn {
   white-space: nowrap;
 }
+
+.save-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  margin-right: 4px;
+}
+.save-status.saved   { color: #30d158; }
+.save-status.pending { color: var(--text-muted); }
+.save-status.failed  { color: #ff6b6b; }
 
 /* Below ~1200 px the right buttons show icons only (aria-label + title keep the names). */
 @media (max-width: 1199px) {
