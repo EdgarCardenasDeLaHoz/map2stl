@@ -9,7 +9,7 @@ rules. Related: [composite.md](composite.md), [trails.md](trails.md).
     `app/client/static/js/modules/export/model-viewer.js::_scheduleFullModel` waits 1.5 s,
     then starts the Download button's own request (`window.cityExportBody`, same body as
     `exportCityModel`).
-  - The city task also writes the model's parts (`city_model_task.py::write_model_parts`),
+  - The city task also writes the model's parts (`numpy2stl.io.write_parts_file`),
     served by `/api/export/model-parts/{task_id}`.
   - `_showCityFull` replaces the quick view with every part but the terrain, each in its
     own colour. The preview's terrain stays: it comes from the same terrain stage.

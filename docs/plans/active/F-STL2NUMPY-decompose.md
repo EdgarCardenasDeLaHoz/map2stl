@@ -73,6 +73,26 @@ code (numpy2stl rule): placing the result on the map stays in city2stl/registrat
   span) or the table stays in model units.
 - Roads have no geometric signature on many models; may only come from parts.
 
+## Progress
+
+Order set by the user (2026-10-03): DTM, then parts, then the building table, try the round
+trip scoring, water and roads last once the others are proven.
+
+- **DTM** (in progress): `numpy2stl/raster/terrain.py`. Fixtures: our City Models of Granada,
+  Philadelphia, Cartagena saved as parts files (`claude/scripts/stl2numpy_fixtures.py`);
+  scored by `claude/scripts/dtm_eval.py` (true ground = the terrain part).
+  - Granada, terrain + buildings, 2 m cells: wide opening (today) 4.12 m MAE, 7.34 m under
+    buildings; progressive filter (slope 0.15) 0.26 m / 0.53 m, 0.1 % of roofs taken for
+    ground; step regions 0.94 m / 2.12 m.
+  - Synthetic hillside with 60 m roofs: step regions exact, progressive filter misses the wide
+    roofs (its slope allowance at a 60 m window exceeds the roof height).
+  - Our models raise roads 0.4 mm (4 m at Granada's scale); with them, every method's error
+    grows (road slabs read as raised) - that is the roads step's job.
+  - Open: Philadelphia and Cartagena scores; pick the default (or combine).
+- **Parts** (done): `numpy2stl/io/parts.py::load_parts` keeps 3MF objects, pack files and parts
+  files apart; `part_role` from names; stdlib `read3MF` (trimesh's needs lxml, not installed);
+  the parts-file writer moved here from `city_model_task.py`.
+
 ## Decisions
 
 - (to be lifted into `docs/decisions/` when done)

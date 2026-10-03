@@ -27,7 +27,7 @@ class ExportTask:
     progress: int = 0                # 0-100
     message: str = "Starting..."
     result_path: str | None = None
-    # City builds: the model's parts for the Extrude viewer (write_model_parts).
+    # City builds: the model's parts for the Extrude viewer (numpy2stl.io.write_parts_file).
     viewer_path: str | None = None
     filename: str | None = None
     media_type: str = "application/octet-stream"
@@ -145,7 +145,7 @@ def get_task_file(task_id: str):
 
 
 def get_task_viewer_file(task_id: str):
-    """The finished city model's parts for the viewer (``write_model_parts``), or None.
+    """The finished city model's parts for the viewer (``numpy2stl.io.write_parts_file``), or None.
 
     Unlike the download, reading it keeps the task: the viewer reads it, the user may
     still download, and the TTL sweep removes both files.

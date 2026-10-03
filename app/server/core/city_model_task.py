@@ -120,26 +120,6 @@ _LEGACY_NAMES = {"mm_per_px": "mm_per_pixel", "fit_height_mm": "model_height",
                  "base_mm": "base_height"}
 
 
-def write_model_parts(parts: dict, path: str) -> None:
-    """The model's parts as one binary file for the Extrude viewer.
-
-    Layout: uint32 header length, the UTF-8 JSON header
-    ``{"parts": [{"name", "vertices", "faces"}, ...]}`` padded to 4 bytes, then per
-    part its float32 vertices (model mm, x east, y north, z up) and uint32 faces.
-    """
-    import numpy as np
-    names = [k for k, m in parts.items() if len(m.faces)]
-    header = json.dumps({"parts": [{"name": k, "vertices": len(parts[k].vertices),
-                                    "faces": len(parts[k].faces)} for k in names]}).encode()
-    header += b" " * (-len(header) % 4)
-    with open(path, "wb") as f:
-        f.write(np.uint32(len(header)).tobytes())
-        f.write(header)
-        for k in names:
-            f.write(np.ascontiguousarray(parts[k].vertices, dtype=np.float32).tobytes())
-            f.write(np.ascontiguousarray(parts[k].faces, dtype=np.uint32).tobytes())
-
-
 def normalize_request(data: dict) -> dict:
     """The city defaults (fit height 30 mm) and legacy field names applied."""
     data = {"model_height": 30.0, **data}
@@ -237,7 +217,8 @@ def run_city_model(data: dict, task: ExportTask) -> None:
 
     fd, viewer_path = tempfile.mkstemp(suffix=".parts")
     os.close(fd)
-    write_model_parts(model.parts, viewer_path)
+    from numpy2stl.io import write_parts_file
+    write_parts_file(model.parts, viewer_path)
     task.viewer_path = viewer_path
     task.complete(zip_path, f"{name}_city.zip",
                   {"X-City-Report": json.dumps(report["merged"]),

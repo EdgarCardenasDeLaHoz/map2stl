@@ -117,7 +117,7 @@ async def export_status(task_id: str):
 @router.get("/api/export/model-parts/{task_id}")
 async def export_model_parts(task_id: str):
     """The finished city model's parts for the Extrude viewer (binary, see
-    ``city_model_task.write_model_parts``); the task stays for the download."""
+    ``numpy2stl.io.write_parts_file``); the task stays for the download."""
     response = get_task_viewer_file(task_id)
     if response is None:
         return JSONResponse(content={"error": "Task not found, not complete or not a city build"},

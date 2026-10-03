@@ -1,7 +1,7 @@
 /**
  * cityFullmodel.test.js — the finished City Model's parts in the Extrude viewer
  * (app/client/static/js/modules/export/city-fullmodel.js). The file layout matches
- * app/server/core/city_model_task.py::write_model_parts (tests/test_model_parts.py).
+ * numpy2stl.io.write_parts_file (tests/test_model_parts.py).
  */
 import { describe, it, expect } from 'vitest';
 import { parseModelParts, partColor, toViewerFrame } from '../../app/client/static/js/modules/export/city-fullmodel.js';

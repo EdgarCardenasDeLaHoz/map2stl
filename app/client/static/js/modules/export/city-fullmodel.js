@@ -8,7 +8,7 @@
  *
  * Pure: parsing and coordinate mapping only (vitest imports it).
  *
- * File layout (app/server/core/city_model_task.py::write_model_parts): uint32 header
+ * File layout (numpy2stl.io.write_parts_file): uint32 header
  * length, UTF-8 JSON header {parts: [{name, vertices, faces}]} padded to 4 bytes, then
  * per part float32 vertices (model mm: x east, y north, z up) and uint32 faces.
  */

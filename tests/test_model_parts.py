@@ -1,14 +1,14 @@
 """The finished city model's parts file for the Extrude viewer (2026-10-03).
 
-``city_model_task.write_model_parts`` writes it; ``city-fullmodel.js`` reads the same
+``numpy2stl.io.write_parts_file`` writes it (and ``read_parts_file`` reads it); ``city-fullmodel.js`` reads the same
 layout: uint32 header length, JSON header, then float32 vertices and uint32 faces
 per part.
 """
 import json
 
 import numpy as np
+from numpy2stl.io import read_parts_file, write_parts_file
 
-from app.server.core.city_model_task import write_model_parts
 from city2stl.city_model import build_city_model
 
 BBOX = dict(north=37.19, south=37.172, east=-3.578, west=-3.605)
@@ -35,8 +35,9 @@ def test_parts_round_trip(tmp_path):
         {"geometry": {"type": "Polygon", "coordinates": [ring]}, "properties": {"height_m": 20}}]}}
     m = build_city_model(np.full((60, 80), 100.0), BBOX, layers)
     path = tmp_path / "model.parts"
-    write_model_parts(m.parts, str(path))
+    write_parts_file(m.parts, str(path))
     got = _read(path)
+    assert {k: len(v.faces) for k, v in read_parts_file(path).items()} == {k: len(f) for k, (_, f) in got.items()}
     assert set(got) == {k for k, part in m.parts.items() if len(part.faces)}
     for k, (v, f) in got.items():
         assert np.allclose(v, m.parts[k].vertices, atol=1e-4)
