@@ -584,10 +584,14 @@ def merge_flat_roofs(polys: list[Polygon], props: list[dict], lo: np.ndarray, hi
                                       SNAP_MM, join_style="mitre")
         parts, sub = shapely.get_parts(parts, return_index=True)
         owner = owner[sub]
-    ok = (shapely.get_type_id(parts) == 3) & (shapely.area(parts) >= MIN_FOOTPRINT_MM2)
-    parts, g = parts[ok], group_ids[owner[ok]]
-    # Footprints arrive unwidened (feature_polygons): widen what the merge left thin.
+    # Footprints arrive unwidened (feature_polygons): widen what the merge left thin,
+    # before the area test - a group of sheds under MIN_FOOTPRINT_MM2 was dropped while
+    # its members counted as merged, so they vanished from the print.
+    poly = shapely.get_type_id(parts) == 3
+    parts, owner = parts[poly], owner[poly]
     parts, counts["widened"] = widen_thin(parts, style.min_width_mm)
+    ok = shapely.area(parts) >= MIN_FOOTPRINT_MM2
+    parts, g = parts[ok], group_ids[owner[ok]]
     gfloor = np.full(comp.max() + 1, np.inf)
     gtop = np.full(comp.max() + 1, -np.inf)
     np.minimum.at(gfloor, comp, floor)

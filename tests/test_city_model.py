@@ -388,6 +388,17 @@ class TestPrintability:
         assert ext[1] == pytest.approx(25 * mm_per_m, abs=0.1)
         assert m.report["layers"]["buildings"]["widened"] == 0
 
+    def test_small_merged_sheds_still_print(self):
+        """Two touching 3 m sheds of one height merge into a group smaller than
+        MIN_FOOTPRINT_MM2; the group is widened, not dropped (2026-10-02: such
+        groups vanished, their members counted as merged)."""
+        sheds = [self._house(i, 3, d_m=3) for i in range(2)]
+        m = build_city_model(np.full((120, 150), 100.0), BBOX, {"buildings": _fc(*sheds)})
+        b = m.report["layers"]["buildings"]
+        assert b["merged_from"] == 2 and b["merged_into"] == 1
+        assert "buildings" in m.parts
+        assert m.parts["buildings"].extents[:2].min() >= DEFAULT_LAYERS["buildings"].min_width_mm - 0.02
+
     def test_lone_thin_building_is_still_widened(self):
         m = build_city_model(np.full((120, 150), 100.0), BBOX,
                              {"buildings": _fc(self._house(0, 9))})

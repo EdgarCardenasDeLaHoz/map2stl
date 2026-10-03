@@ -18,8 +18,11 @@ How a DEM plus vector layers becomes one printable solid: the two-stage pipeline
     "Merge first, then widen".
   - 5 m rowhouses are 0.2 mm at 1:24 000, so 52 of 66 buildings were each grown 0.3 mm on
     every side, into the street.
-  - Same block, against raw OSM: IoU 0.677 → 0.858; added area +47 % → +14 %; largest
-    deviation 0.89 → 0.58 mm; buildings widened 52 → 4.
+  - Same block, against raw OSM: IoU 0.677 → 0.846; added area +47 % → +17 %; lost area
+    0.2 % → 0.9 %; largest deviation 0.89 → 0.58 mm; buildings widened 52 → 6.
+  - `merge_flat_roofs` widens merged outlines before its `MIN_FOOTPRINT_MM2` test. With
+    unwidened input, a group of sheds under 0.3 mm² was dropped while its members counted
+    as merged; four buildings of the block vanished.
   - Mixed-height rows do not merge (different print layers) but print as one footprint, so
     widening them by cluster is what the union needs.
   - What is left is by design: gaps under 0.4 mm close (rear yards), and lone sheds widen to
