@@ -27,6 +27,7 @@
 
 import { buildingsWithOverrides, hasOverrides } from '../layers/building-heights.js';
 import { cityBuildOsmParams } from '../layers/city-fetch.js';
+import { readRiverDepthMm } from '../layers/hydrology-print.js';
 import { FEATURE_SOURCES } from '../layers/composite-spec.js';
 import { overridesForBuild } from '../layers/landmark-overrides.js';
 import { EXPORT_STALL_TIMEOUT_MS, createStallWatch, exportProgressText } from './export-poll.js';
@@ -185,6 +186,9 @@ function _demSettings() {
             settings.composite_dim = settings.dem.dim;
         }
     }
+    // Rivers and lakes are carved in print mm, not metres: at 30 mm of relief for the
+    // Amazon's 9.5 km, a 5 m channel was 0.016 mm deep (2026-10-02).
+    if (settings.composite_layers) settings.river_depth_mm = readRiverDepthMm();
     return settings;
 }
 

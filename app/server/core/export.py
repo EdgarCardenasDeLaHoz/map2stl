@@ -96,6 +96,15 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
     task.complete(temp_path, f"{p.name}.{fmt}", headers)
 
 
+# TerrainField.water value of the open sea (carve depths are 0..1).
+WATER_SEA = 2.0
+
+# Narrowest river channel on the print with river_depth_mm: a 0.4 mm nozzle cannot
+# draw a 1-px (0.26 mm on the Amazon at 205 mm) channel, and the every-2-px preview
+# skipped it.
+RIVER_MIN_WIDTH_MM = 0.5
+
+
 @dataclass
 class TerrainField:
     """Output of the terrain stage: the top surface in model mm and its scale."""
@@ -104,6 +113,9 @@ class TerrainField:
     scale: ModelScale
     elev_min_m: float
     elev_max_m: float
+    # Water for the viewer to colour like the Edit map: 0 dry, 0..1 relative carve
+    # depth (rivers, lakes, open water), WATER_SEA on the open sea. None without a carve.
+    water: np.ndarray | None = None
 
 
 def terrain_stage(p: ExportContext, data: dict) -> TerrainField:
@@ -113,7 +125,8 @@ def terrain_stage(p: ExportContext, data: dict) -> TerrainField:
     ``p.dem_values``): median filter, sea-level cap, vertical scale, then the
     label and contour engraving. Features belong to the vector stage.
     """
-    im, im_min, im_max, scale = _prepare_dem_array(p)
+    masks: dict = {}
+    im, im_min, im_max, scale = _prepare_dem_array(p, masks)
     label_text = data.get("label_text", p.name)
     if data.get("engrave_label") and label_text:
         im = _apply_label_engraving(im, label_text, p.base_height)
@@ -124,10 +137,11 @@ def terrain_stage(p: ExportContext, data: dict) -> TerrainField:
         im = _apply_contour_lines(im, im_min, im_max, p.model_height * p.exaggeration,
                                   p.base_height, contour_interval,
                                   data.get("contour_style", "engraved"))
-    return TerrainField(im, scale, im_min, im_max)
+    return TerrainField(im, scale, im_min, im_max, masks.get("water"))
 
 
-def _prepare_dem_array(p: ExportContext) -> tuple[np.ndarray, float, float, ModelScale]:
+def _prepare_dem_array(p: ExportContext, masks: dict | None = None
+                       ) -> tuple[np.ndarray, float, float, ModelScale]:
     """
     Reshape, fill, median-filter, sea-level-clip and scale the DEM into model mm.
 
@@ -143,15 +157,36 @@ def _prepare_dem_array(p: ExportContext) -> tuple[np.ndarray, float, float, Mode
     is known. A 3x3 median (``median_size``) removes the blocky artefacts of an
     upsampled DEM. NaNs (projection edges, JSON nulls) are filled with the lowest
     real elevation so they print as the floor of the relief.
+
+    Rivers / lakes (``carve_m``) carve after the median. With ``river_depth_mm`` the
+    carve is applied after scaling, in print millimetres: the main river (the
+    99.5th-percentile carve depth) is that many mm deep, shallower carve keeps its
+    ratios and deeper carve is capped; the vertical scale then comes from the
+    uncarved terrain, and channels are widened to ``RIVER_MIN_WIDTH_MM`` on the print.
+    Without it the carve is in metres, added before scaling. A ``masks`` dict gets
+    ``"water"`` (see :attr:`TerrainField.water`) when there is a carve.
     """
     from city2stl.city_model import choose_scale, prepare_dem
 
     im = np.array(p.dem_values, dtype=np.float64).reshape(p.height, p.width)
     im = prepare_dem(im, p.median_size)
-    if p.carve_m is not None and p.carve_m.shape == im.shape:
-        # Rivers / lakes carve after the median: a 1-px channel is 3 of 9 cells in
-        # a 3x3 window, so smoothing after carving would erase it (F-REGION).
-        im = im + p.carve_m
+    carve = p.carve_m if p.carve_m is not None and p.carve_m.shape == im.shape else None
+    carve_in_mm = carve is not None and bool(p.river_depth_mm)
+    if carve_in_mm:
+        # Widen channels to RIVER_MIN_WIDTH_MM on the print (deepest neighbour wins).
+        width_px = int(np.ceil(RIVER_MIN_WIDTH_MM / max(p.mm_per_pixel, 1e-6) - 1e-9))
+        if width_px >= 2:
+            from scipy.ndimage import minimum_filter
+            carve = minimum_filter(carve, size=width_px, mode="nearest")
+    if carve is not None and masks is not None and (carve < 0).any():
+        from geo2stl.water_layers import ocean_mask
+        deep = float(np.percentile(-carve[carve < 0], 99.5, method="lower"))
+        water = np.clip(-carve / deep, 0.0, 1.0) if deep > 0 else (carve < 0).astype(float)
+        masks["water"] = np.where(ocean_mask(im), WATER_SEA, water)
+    if carve is not None and not carve_in_mm:
+        # A 1-px channel is 3 of 9 cells in a 3x3 window, so smoothing after
+        # carving would erase it (F-REGION).
+        im = im + carve
 
     if p.sea_level_cap:
         # Raise everything below sea level to zero so the sea prints flat. (This was
@@ -168,6 +203,15 @@ def _prepare_dem_array(p: ExportContext) -> tuple[np.ndarray, float, float, Mode
                          fit_height_mm=p.model_height, base_mm=p.base_height)
     # A genuinely flat region (a lake, a salt pan) prints as a flat plate.
     im = np.full_like(im, p.base_height) if flat else scale.z_mm(im)
+    if carve_in_mm and (carve < 0).any():
+        # The reference is the depth only the deepest 0.5 % of carved cells exceed
+        # (the main river), not the single deepest cell: on the Amazon a few -30 m
+        # open-water cells left the 11 m main channels at 0.2 mm. Deeper cells are
+        # capped at the print depth.
+        ref = float(np.percentile(-carve[carve < 0], 99.5, method="lower"))
+        if ref > 0:
+            im = np.maximum(im + np.maximum(carve / ref, -1.0) * p.river_depth_mm,
+                            max(0.1, p.base_height * 0.5))
     return im, im_min, im_max, scale
 
 
@@ -520,7 +564,19 @@ def generate_mesh_preview(data: dict):
     v_rounded[:, :2] = np.round(v_rounded[:, :2]).astype(np.int32)
     v_rounded[:, 2]  = np.round(v_rounded[:, 2], 2)
 
+    # Water vertices, for the viewer to colour like the Edit map: vertex index and
+    # relative depth in % (WATER_SEA → 200 for the open sea).
+    water = {}
+    if field.water is not None and len(vertices):
+        cols = np.clip(v_rounded[:, 0].astype(int), 0, im.shape[1] - 1)
+        rows = np.clip(v_rounded[:, 1].astype(int), 0, im.shape[0] - 1)
+        w = field.water[rows, cols]
+        idx = np.flatnonzero(w > 0)
+        water = {"water_idx": idx.tolist(),
+                 "water_pct": np.round(w[idx] * 100).astype(int).tolist()}
+
     return JSONResponse(content={
+        **water,
         "vertices":     v_rounded.tolist(),
         "faces":        faces.tolist(),
         "face_count":   int(len(faces)),

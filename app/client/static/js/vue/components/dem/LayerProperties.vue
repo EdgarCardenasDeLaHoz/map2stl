@@ -53,11 +53,11 @@
         <div v-if="noRivers" class="lp-hint lp-warn">No river this size crosses this area{{ minOrder > 1 ? ': try All' : '' }}.</div>
       </div>
       <div class="lp-ctl">
-        <div class="lp-lbl"><label for="lpRiverDepth"><b>River depth</b></label><span>× {{ fmt(pickNum('compositeRiverDepthScale', 1)) }}</span></div>
-        <input id="lpRiverDepth" type="range" class="lp-range" min="0.5" max="10" step="0.5"
-               :value="pickNum('compositeRiverDepthScale', 1)"
-               @change="setField('compositeRiverDepthScale', ($event.target as HTMLInputElement).value)">
-        <div class="lp-hint">× the depth HydroRIVERS gives each river from its flow</div>
+        <div class="lp-lbl"><label for="lpRiverDepth"><b>River depth</b></label><span>{{ fmt(pickNum('compositeRiverDepthMm', 0.5)) }} mm on the print</span></div>
+        <input id="lpRiverDepth" type="range" class="lp-range" min="0.1" max="2" step="0.1"
+               :value="pickNum('compositeRiverDepthMm', 0.5)"
+               @change="setField('compositeRiverDepthMm', ($event.target as HTMLInputElement).value)">
+        <div class="lp-hint">The biggest river; smaller rivers and lakes in proportion to their depth</div>
       </div>
       <div class="lp-ctl">
         <div class="lp-lbl"><label for="lpRiverWidth"><b>River width</b></label><span>× {{ fmt(pickNum('hydroWidthFactor', 1)) }}</span></div>

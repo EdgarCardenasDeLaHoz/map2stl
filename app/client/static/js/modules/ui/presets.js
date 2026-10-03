@@ -381,6 +381,7 @@ function collectAllSettings() {
             rivers: _chk('compositeRiversEnabled', false),
             lakes: _chk('compositeLakesEnabled', false),
             river_depth_scale: _flt('compositeRiverDepthScale', 1.0),
+            river_depth_mm: _flt('compositeRiverDepthMm', 0.5),
             lake_depth_m: _flt('compositeLakeDepth', 2.0),
             lake_min_area_ha: _flt('compositeLakeMinAreaHa', 1.0),
         },
@@ -418,7 +419,8 @@ function _applyComposite(c) {
     const fire = (el) => el?.dispatchEvent(new Event('change', { bubbles: true }));
     const checks = { compositeWaterEnabled: c.water, compositeRiversEnabled: c.rivers,
         compositeLakesEnabled: c.lakes, compositeEnabled: c.enabled };
-    const values = { compositeRiverDepthScale: c.river_depth_scale, compositeLakeDepth: c.lake_depth_m,
+    const values = { compositeRiverDepthScale: c.river_depth_scale, compositeRiverDepthMm: c.river_depth_mm,
+        compositeLakeDepth: c.lake_depth_m,
         compositeLakeMinAreaHa: c.lake_min_area_ha };
     for (const [id, v] of Object.entries(values)) {
         const el = _get(id);

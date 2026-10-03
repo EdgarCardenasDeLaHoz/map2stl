@@ -136,6 +136,10 @@ class ExportContext:
     # from the composite spec. Kept out of dem_values so the terrain stage can
     # add it after the median filter, which would erase a one-pixel channel.
     carve_m: Any = None
+    # Print depth (mm) of the main river (99.5th-percentile carve); the rest keeps its ratios.
+    # None: the carve stays in metres and shrinks with the vertical scale, which made
+    # the Amazon's rivers 0.016 mm deep at 30 mm of relief (2026-10-02).
+    river_depth_mm: float | None = None
 
     @classmethod
     def from_request(cls, data: dict) -> ExportContext:
@@ -206,6 +210,7 @@ class ExportContext:
             z_mode=str(data.get("z_mode", "auto")),
             median_size=int(data.get("median_size", 3)),
             carve_m=carve_m,
+            river_depth_mm=float(data["river_depth_mm"]) if data.get("river_depth_mm") else None,
         )
 
 

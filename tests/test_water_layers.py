@@ -227,6 +227,72 @@ def test_river_survives_the_median_filter(composite_env):
     assert lo_baked == 200.0
 
 
+def test_river_depth_in_print_mm(composite_env):
+    """river_depth_mm: the deepest carve is that many mm on the print whatever the
+    vertical scale, and the scale comes from the uncarved terrain."""
+    from app.server.core.export import _prepare_dem_array
+    from app.server.core.export_params import ExportContext
+
+    hill = (np.arange(64)[None, :] * 50.0 + np.zeros((64, 1))).ravel().tolist()   # 0-3150 m
+    carve = np.zeros((64, 64))
+    carve[20, 5:60], carve[40, 5:60] = -5.0, -2.5          # a big and a half-depth river
+    carve[50, 30] = -30.0                                   # one deep open-water cell
+    flat = ExportContext(dem_values=hill, height=64, width=64, z_mode="fit", model_height=30,
+                         base_height=5, median_size=0, bbox=BBOX)
+    plain, lo, hi, _ = _prepare_dem_array(flat)
+    for depth in (0.5, 1.2):
+        p = ExportContext(**{**flat.__dict__, "carve_m": carve, "river_depth_mm": depth})
+        z, lo_c, hi_c, _ = _prepare_dem_array(p)
+        assert (lo_c, hi_c) == (lo, hi)
+        assert (plain - z)[20, 30] == pytest.approx(depth)
+        assert (plain - z)[40, 30] == pytest.approx(depth / 2)
+        assert (plain - z)[50, 30] == pytest.approx(depth)  # capped, not the reference
+        assert np.allclose(np.delete(plain - z, [20, 40, 50], axis=0), 0)
+    metres = ExportContext(**{**flat.__dict__, "carve_m": carve})
+    z_m, _, _, _ = _prepare_dem_array(metres)
+    assert (plain - z_m)[20, 30] < 0.1        # 5 m at 30 mm per 3150 m: invisible
+
+
+def test_river_width_floor_in_print_mm(composite_env):
+    """A 1-px river is widened to RIVER_MIN_WIDTH_MM on the print (2 px at 0.26 mm/px)."""
+    from app.server.core.export import RIVER_MIN_WIDTH_MM, _prepare_dem_array
+    from app.server.core.export_params import ExportContext
+
+    hill = (np.arange(32)[None, :] * 50.0 + np.zeros((32, 1))).ravel().tolist()
+    carve = np.zeros((32, 32))
+    carve[16, :] = -5.0
+    base = dict(dem_values=hill, height=32, width=32, z_mode="fit", model_height=30,
+                base_height=5, median_size=0, bbox=BBOX, carve_m=carve, river_depth_mm=0.5)
+    for mm_px, rows in ((0.26, 2), (1.0, 1)):
+        z, *_ = _prepare_dem_array(ExportContext(**base, mm_per_pixel=mm_px))
+        plain, *_ = _prepare_dem_array(ExportContext(**{**base, "carve_m": None}, mm_per_pixel=mm_px))
+        carved_rows = np.flatnonzero(((plain - z) > 0.4).all(axis=1))
+        assert len(carved_rows) == rows and 16 in carved_rows
+        assert rows * mm_px >= RIVER_MIN_WIDTH_MM
+
+
+def test_preview_marks_the_river_vertices(composite_env):
+    """The 3D preview lists the carved river's vertices, so the viewer colours them
+    like the Edit map (2026-10-02: the Amazon's rivers were invisible in 3D)."""
+    import json
+
+    from app.server.core.export import generate_mesh_preview
+
+    register_layer_source("unit_slope", lambda n, s, e, w, dim, o:
+                          np.tile(np.linspace(200.0, 400.0, dim), (dim, 1)))
+    try:
+        resp = generate_mesh_preview({
+            "bbox": BBOX, "composite_dim": 64, "z_mode": "fit", "model_height": 20,
+            "mm_per_pixel": 1.0, "river_depth_mm": 0.5,
+            "composite_layers": [{**LAYERS[0], "source": "unit_slope"}, LAYERS[1]]})
+    finally:
+        _LAYER_SOURCES.pop("unit_slope", None)
+    data = json.loads(resp.body)
+    rows = {data["vertices"][i][1] for i in data["water_idx"]}
+    assert data["water_idx"] and rows <= {30, 31, 32}
+    assert max(data["water_pct"]) == 100
+
+
 # ---------------------------------------------------------------------------
 # City-layer size guard
 # ---------------------------------------------------------------------------

@@ -4,6 +4,37 @@ Fetching OSM through Overpass/osmnx, telling outages from empty answers, water a
 rasterisation, and rivers and lakes carved into the terrain. Related: [composite.md](composite.md),
 [trails.md](trails.md).
 
+### 2026-10-02 — Rivers and lakes are carved in print millimetres, at least 0.5 mm wide, and coloured in 3D
+- **Decision:**
+  - With `river_depth_mm` (Edit → Rivers & lakes → *River depth*, `#compositeRiverDepthMm`,
+    default 0.5, saved per region) `app/server/core/export.py::_prepare_dem_array` scales the
+    terrain from the uncarved DEM, then adds the carve in mm.
+  - The main river (99.5th-percentile carve depth, `method="lower"`) gets that depth;
+    shallower carve keeps its ratios, deeper carve is capped.
+  - Channels are widened to `RIVER_MIN_WIDTH_MM` (0.5 mm) on the print with a minimum filter.
+  - The preview returns the water vertices (`water_idx`, `water_pct`), and
+    `model-viewer.js::_paintWater` colours them like the Edit map (rivers 30/100/200, deeper
+    = more opaque from 0; open sea 0/100/255).
+  - *Depth ×* stays in the Composite panel as the river-vs-lake ratio. Requests without
+    `river_depth_mm` (SDK) still carve in metres.
+- **Why:**
+  - User: "Amazon was rendered without rivers subtracted" and "They should match how they
+    rendered in the edit view".
+  - Measured, the carve was there but invisible:
+    - 5 m at 30 mm per 9,515 m of relief is 0.016 mm.
+    - Normalising to the deepest cell gave the main channels 0.2 mm: a few −30 m ESA
+      open-water cells set the reference.
+    - Rivers were 1 px = 0.26 mm wide, under a 0.4 mm nozzle; the every-2-px preview
+      skipped them.
+    - Even at 0.5 mm, an uncoloured groove barely showed.
+  - Edit's 60/255 opacity floor tinted all the land blue in 3D: vertex colours spread over
+    triangles, and order-1 streams are 62 % of the Amazon's cells.
+- **Rejected:**
+  - Normalising to the single deepest cell — an outlier sets the scale.
+  - Keeping *depth ×* as the main control — every region needed a different multiplier
+    (large-region guide §2).
+- **Supersedes / superseded by:** —
+
 ### 2026-10-02 — OSM lakes skip boxes over 10 000 km²; one fetch per box at a time; failed mirrors go last
 - **Decision:** `geo2stl/water_layers.py::make_lakes_source` returns an empty layer over
   `LAKES_MAX_AREA_KM2`; `city2stl/fetch.py::fetch_osm_lakes` holds a lock per cache key;

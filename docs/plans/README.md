@@ -85,12 +85,10 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 - **Composite design doc**: once F-COMPOSITE3 is done, archive the composite DEM design doc (reference/composite-dem-design.md) to
   history and lift its reasoning into `docs/decisions/composite.md`.
 - **Large-region guide §6**, process and pipeline:
-  - River depth in print mm (`export._prepare_dem_array`): the main river is *N* mm deep
-    (default 0.5 mm), keeping the ratios between rivers; drops *depth ×* as the primary control.
   - Composite warnings reach the export and pre-flight (`ExportContext`), plus an
     `X-Composite-Warning` header.
-  - Overpass: remember an unhealthy mirror for the session (instead of 40 s per fetch); prefetch
-    lakes when the Region preset is applied.
+  - Overpass: prefetch lakes when the Region preset is applied (a mirror that failed is
+    already tried last, 2026-10-02).
   - Lakes as absolute levels applied after the median on the export grid, so rims are flat too.
   - Pre-flight face estimate: under-counts rugged terrain 1.3–3×; calibrate it.
 
@@ -98,13 +96,8 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 - **Large-region guide §6**, UI:
   - Region preset: untick *Water (ESA)* without Earth Engine, set Base 5 mm, and set mm/px from
     the bed.
-  - Show the river depth on the print (mm) beside the depth slider.
   - Apply to DEM: list skipped layers in the toast.
   - Terrain puzzle: a *max piece (mm)* option.
-
-  [large-region guide §6](../guides/large-region-sop.md)
-- **Large-region guide §6**, STL:
-  - Optional river width floor in mm.
 
   [large-region guide §6](../guides/large-region-sop.md)
 - **H5 fallback**: when the local H5 store is absent, fall back to OpenTopography SRTMGL3 or

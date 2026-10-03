@@ -108,5 +108,14 @@ export function readRiverDepthScale(doc = globalThis.document) {
     return Number.isFinite(v) ? v : 1;
 }
 
+/**
+ * Print depth of the deepest river or lake carve, mm (#compositeRiverDepthMm), default 0.5:
+ * the export scales the whole carve to it, keeping the ratios between rivers and lakes.
+ */
+export function readRiverDepthMm(doc = globalThis.document) {
+    const v = parseFloat(doc?.getElementById?.('compositeRiverDepthMm')?.value);
+    return Number.isFinite(v) && v > 0 ? v : 0.5;
+}
+
 /** Status / toast text when the preview is asked for before a DEM exists. */
 export const NEED_DEM_MESSAGE = 'Load the DEM first — the hydrology preview is carved on it';

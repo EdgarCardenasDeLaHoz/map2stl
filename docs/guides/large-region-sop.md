@@ -222,15 +222,15 @@ separate colour (§6).
 ## 6. What to improve (prioritised)
 
 Process / pipeline:
-1. **River depth in print millimetres** (`export._prepare_dem_array`): scale the carve so
-   the main river is *N* mm deep on the print (default 0.5 mm), keeping the
-   discharge-based ratios between rivers; drop *depth ×* as the primary control. Every
-   region above needed a different multiplier, and the Sierra could not be reached.
+1. ~~**River depth in print millimetres**~~ (done 2026-10-02): Edit → Rivers & lakes →
+   *River depth* is the main river's depth on the print (default 0.5 mm), channels are at
+   least 0.5 mm wide, and the 3D view colours water like the Edit map.
+   See `docs/decisions/osm-water-hydrology.md`.
 2. **Surface composite warnings in the export** (`export_params.ExportContext`): carry
    `compute_composite_dem(..., warnings=)` into the pre-flight warnings and an
    `X-Composite-Warning` header, as `composite_error` already is.
-3. **Overpass**: remember an unhealthy mirror for the session instead of re-probing it
-   (40 s per fetch); fetch lakes in the background when the Region preset is applied.
+3. **Overpass**: ~~remember an unhealthy mirror~~ (done 2026-10-02: tried last for
+   10 min); fetch lakes in the background when the Region preset is applied.
 4. **Lakes as absolute levels**: carry each lake's level (NaN elsewhere) and apply
    `min(z, level)` after the median on the export grid — exactly flat, rims included.
 5. **Pre-flight face estimate**: the strided TIN under-counts rugged terrain by 1.3–3×;
@@ -240,7 +240,7 @@ UI:
 1. Region preset: ~~set Projection to *Cosine Correction*~~ (done 2026-09-27), untick
    *Water (ESA)* when Earth Engine is not configured, set Base 5 mm. (~~Set mm/px from
    the bed~~: every new DEM now fills the bed, 2026-10-01.)
-2. Show the river depth on the print (mm) beside the *River depth* slider, from the current scale.
+2. ~~Show the river depth on the print (mm)~~: the slider is in mm (2026-10-02).
 3. Show skipped channels (ESA water, lakes during an Overpass outage) on the *Rivers &
    lakes* layer (the `dem-merge` response has `warnings`).
 4. Terrain puzzle: offer *max piece* (mm) like the City Model instead of only cols × rows.

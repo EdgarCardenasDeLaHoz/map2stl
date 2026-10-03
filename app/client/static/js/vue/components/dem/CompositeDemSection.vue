@@ -78,6 +78,10 @@
           <input type="range" id="compositeRiverDepthScale" min="0" max="20" value="1" step="0.5" aria-label="River depth scale"
                  title="× channel depth from discharge (also scales the hydrology preview)">
           <span id="compositeRiverDepthScaleLabel" class="composite-slider-value">1.0</span>
+          <span class="composite-slider-label">On the print</span>
+          <input type="range" id="compositeRiverDepthMm" min="0.1" max="2" value="0.5" step="0.1" aria-label="Deepest river on the print, mm"
+                 title="The deepest river or lake carve on the print; the rest keep their depth ratios (3D only)">
+          <span id="compositeRiverDepthMmLabel" class="composite-slider-value">0.5 mm</span>
         </div>
         <label class="composite-toggle-row">
           <input type="checkbox" id="compositeLakesEnabled" aria-label="Enable lakes contribution"> Lakes

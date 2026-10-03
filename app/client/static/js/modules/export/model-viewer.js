@@ -700,6 +700,8 @@ function _buildMeshFromPreview(data, cmap) {
         colors[i * 3] = rgb[0]; colors[i * 3 + 1] = rgb[1]; colors[i * 3 + 2] = rgb[2];
     }
 
+    if (cmap !== 'none') _paintWater(colors, data.water_idx, data.water_pct);
+
     // Stash physical dims (mm) and the display-scale factor for overlay code.
     geometry_scale_for_overlays = {
         scale: SCALE,
@@ -725,7 +727,31 @@ function _buildMeshFromPreview(data, cmap) {
     const material = new THREE.MeshStandardMaterial({
         vertexColors: true, flatShading: false, side: THREE.DoubleSide,
     });
-    return new THREE.Mesh(geometry, material);
+    const mesh = new THREE.Mesh(geometry, material);
+    // Kept so a colormap change (_rebuildColors) paints the water again.
+    mesh.userData.water = { idx: data.water_idx, pct: data.water_pct };
+    return mesh;
+}
+
+/**
+ * Colour the carved rivers, lakes and the open sea like the Edit map does
+ * (water-hydrology-combined.js): rivers (30, 100, 200), more opaque the deeper,
+ * open sea (0, 100, 255). The server sends the water vertices and their relative
+ * carve depth in % (200 = open sea). Opacity starts at 0, not Edit's 60/255: vertex
+ * colours spread over whole triangles, so the Amazon's order-1 streams (62 % of the
+ * cells) tinted all the land blue.
+ */
+function _paintWater(colors, idx, pct) {
+    if (!idx?.length) return;
+    for (let k = 0; k < idx.length; k++) {
+        const sea = pct[k] > 100;
+        const [r, g, b] = sea ? [0, 100 / 255, 1] : [30 / 255, 100 / 255, 200 / 255];
+        const a = sea ? 150 / 255 : Math.min(1, pct[k] / 100) * 220 / 255;
+        const i = idx[k] * 3;
+        colors[i] = colors[i] * (1 - a) + r * a;
+        colors[i + 1] = colors[i + 1] * (1 - a) + g * a;
+        colors[i + 2] = colors[i + 2] * (1 - a) + b * a;
+    }
 }
 
 function _replaceMesh(newMesh) {
@@ -784,6 +810,7 @@ function _rebuildColors(cmap) {
         const rgb = _elevColor((posArr[i * 3 + 1] - yMin) / yRange, cmap);
         colors[i * 3] = rgb[0]; colors[i * 3 + 1] = rgb[1]; colors[i * 3 + 2] = rgb[2];
     }
+    _paintWater(colors, terrainMesh.userData.water?.idx, terrainMesh.userData.water?.pct);
 
     if (cmap === 'none') {
         terrainMesh.material.vertexColors = false;

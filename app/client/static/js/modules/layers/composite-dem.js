@@ -1043,6 +1043,13 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
         });
     }
 
+    // Print depth of the deepest carve (mm): it only changes the 3D model, so no 2D recompute.
+    const depthMm = document.getElementById('compositeRiverDepthMm');
+    const depthMmLabel = document.getElementById('compositeRiverDepthMmLabel');
+    depthMm?.addEventListener('input', () => {
+        if (depthMmLabel) depthMmLabel.textContent = `${parseFloat(depthMm.value).toFixed(1)} mm`;
+    });
+
     // Wire per-channel enable toggles (DEM + each city sub-layer).
     const toggleMap = {
         compositeDemEnabled: 'demEnabled',

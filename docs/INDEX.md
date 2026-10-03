@@ -128,7 +128,7 @@ Paths in this part are relative to `map2stl/`.
 Every mesh export is `terrain_stage` (raster → heightfield) then `build_on_terrain` (vectors on it).
 Walkthrough: [reference/pipeline.md](reference/pipeline.md); why: [decisions/mesh-pipeline.md](decisions/mesh-pipeline.md).
 
-- Stage 1, DEM → `TerrainField` (mm, row 0 north): `map2stl/app/server/core/export.py::terrain_stage` (`TerrainField`, `_prepare_dem_array`)
+- Stage 1, DEM → `TerrainField` (mm, row 0 north): `map2stl/app/server/core/export.py::terrain_stage` (`TerrainField`, `_prepare_dem_array`; rivers in print mm: `RIVER_MIN_WIDTH_MM`, `WATER_SEA`)
 - Stage 2, city layers on the terrain → `CityModel`: `map2stl/city2stl/city_model.py::build_on_terrain`
   - Terrain-only export = the city model with no layers; old entry `build_city_model` wraps it.
 - Export entry points: `map2stl/app/server/core/export.py` (`generate_stl`, `generate_obj`, `generate_3mf`, `_prepare_export_mesh`, `_repair_mesh`, `_write_mesh`)
