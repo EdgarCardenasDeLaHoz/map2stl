@@ -245,3 +245,48 @@ class TestRegistry:
         monkeypatch.setattr(ign_lidarhd, "ndsm_for_bbox", lambda bbox, res: seen.setdefault("r", res))
         survey.ndsm_for_bbox("ign_lidarhd", PARIS)
         assert seen["r"] == 0.5
+
+
+class TestEptLaspy:
+    """USGS EPT read with laspy (F-SKYBENCH): project choice and the octree walk, offline."""
+
+    def test_project_year_takes_latest(self):
+        from city2stl.height.providers.lidar_3dep_ept_laspy import _project_year
+        assert _project_year("USGS_LPC_IL_4County_Cook_2017_LAS_2019") == 2019
+        assert _project_year("MA_NE_CMGP_Sandy_Z19_A1_2015") == 2015
+        assert _project_year("NoYearHere") == 0
+
+    def test_newest_project_first(self, monkeypatch):
+        from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+        sq = {"type": "Polygon", "coordinates": [[[-72, 42], [-70, 42], [-70, 43], [-72, 43], [-72, 42]]]}
+        far = {"type": "Polygon", "coordinates": [[[-100, 30], [-99, 30], [-99, 31], [-100, 31], [-100, 30]]]}
+        monkeypatch.setattr(ept, "_resources", lambda: {"features": [
+            {"properties": {"name": "MA_Old_2013"}, "geometry": sq},
+            {"properties": {"name": "MA_New_2021"}, "geometry": sq},
+            {"properties": {"name": "TX_Far_2022"}, "geometry": far},
+        ]})
+        names = [p["name"] for p in ept.projects_for_bbox((42.5, 42.4, -71.0, -71.1))]
+        assert names == ["MA_New_2021", "MA_Old_2013"]
+
+    def test_node_bounds_halves_per_level(self):
+        from city2stl.height.providers.lidar_3dep_ept_laspy import node_bounds
+        cube = [0.0, 0.0, 0.0, 100.0, 100.0, 100.0]
+        assert node_bounds(cube, "0-0-0-0") == (0.0, 0.0, 100.0, 100.0)
+        assert node_bounds(cube, "1-1-0-0") == (50.0, 0.0, 100.0, 50.0)
+        assert node_bounds(cube, "2-3-3-1") == (75.0, 75.0, 100.0, 100.0)
+
+    def test_walk_reads_every_level_and_sub_hierarchies(self):
+        from city2stl.height.providers.lidar_3dep_ept_laspy import nodes_for_bounds
+        ept = {"bounds": [0.0, 0.0, 0.0, 100.0, 100.0, 100.0]}
+        files = {
+            "b/ept-hierarchy/0-0-0-0.json": {"0-0-0-0": 10, "1-0-0-0": 5, "1-1-1-0": 5,
+                                             "2-0-0-0": -1},
+            "b/ept-hierarchy/2-0-0-0.json": {"2-0-0-0": 7, "3-0-0-0": 3},
+        }
+        got = nodes_for_bounds("b", ept, (1.0, 1.0, 10.0, 10.0), max_depth=3,
+                               get_json=files.__getitem__)
+        # root, the SW child, its sub-hierarchy node and that node's child; not the NE child
+        assert got == ["0-0-0-0", "1-0-0-0", "2-0-0-0", "3-0-0-0"]
+        shallow = nodes_for_bounds("b", ept, (1.0, 1.0, 10.0, 10.0), max_depth=1,
+                                   get_json=files.__getitem__)
+        assert shallow == ["0-0-0-0", "1-0-0-0"]

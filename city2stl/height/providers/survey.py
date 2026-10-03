@@ -13,7 +13,8 @@ Contract and caching: ``_survey``. Providers (one module each):
 ``rediam_mdhn``    Andalucía, REDIAM MDHN, 1 m, 2020-21 (regional COG)
 ``cnig_mdsn``      Spain, CNIG MDSn edificación, 2.5 m, 2008-15 (IDEE WCS)
 ``cuzk_dmp``       Czechia, ČÚZK DMP 1G − DMR 5G, ~1 m (ArcGIS ImageServer)
-``usgs_3dep``      USA, 3DEP point cloud: COPC (laspy) first, then EPT (PDAL)
+``usgs_3dep``      USA, 3DEP point cloud: COPC (laspy), then EPT (laspy), then EPT (PDAL)
+``usgs_3dep_ept``  USA, 3DEP point cloud, newest USGS EPT project only (laspy)
 =================  ===========================================================
 
 Documented gaps (``docs/reference/survey-sources.md``): Spain's 0.5 m PNOA 2nd/3rd-coverage
@@ -26,16 +27,29 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from . import cnig_mdsn, cuzk_dmp, ign_lidarhd, lidar_3dep_copc, lidar_3dep_ept, rediam_mdhn
+from . import (
+    cnig_mdsn,
+    cuzk_dmp,
+    ign_lidarhd,
+    lidar_3dep_copc,
+    lidar_3dep_ept,
+    lidar_3dep_ept_laspy,
+    rediam_mdhn,
+)
 from ._survey import SurveyError, as_nsew
 
 __all__ = ["PROVIDERS", "SurveyError", "available_for_bbox", "ndsm_for_bbox"]
 
 
 def _usgs_ndsm(bbox, resolution_m: float = 1.0):
-    """COPC (laspy, per-request HTTP ranges) first; the PDAL/EPT path if that is missing."""
+    """COPC (laspy, per-request HTTP ranges) first; then USGS's own EPT octree read with
+    laspy (Planetary Computer's COPC collection has no tiles over central Miami or
+    Seattle); the PDAL/EPT path if laspy is missing."""
     if lidar_3dep_copc.available():
-        return lidar_3dep_copc.ndsm_for_bbox(bbox, resolution_m)
+        got = lidar_3dep_copc.ndsm_for_bbox(bbox, resolution_m)
+        if got is not None:
+            return got
+        return lidar_3dep_ept_laspy.ndsm_for_bbox(bbox, resolution_m)
     return lidar_3dep_ept.ndsm_for_bbox(bbox, resolution_m)
 
 
@@ -47,9 +61,18 @@ usgs_3dep = SimpleNamespace(
     ndsm_for_bbox=_usgs_ndsm,
 )
 
+usgs_3dep_ept = SimpleNamespace(
+    name="usgs_3dep_ept",
+    label="USGS 3DEP lidar, newest EPT project (USA, ~1 m)",
+    resolution_m=1.0,
+    covers=lidar_3dep_ept_laspy.covers,
+    ndsm_for_bbox=lidar_3dep_ept_laspy.ndsm_for_bbox,
+)
+
 #: name -> provider (module-like: name, label, resolution_m, covers, ndsm_for_bbox).
 #: Order is preference where two overlap (Andalucía: REDIAM 1 m before CNIG 2.5 m).
-PROVIDERS = {p.name: p for p in (ign_lidarhd, rediam_mdhn, cnig_mdsn, cuzk_dmp, usgs_3dep)}
+PROVIDERS = {p.name: p for p in (ign_lidarhd, rediam_mdhn, cnig_mdsn, cuzk_dmp, usgs_3dep,
+                                  usgs_3dep_ept)}
 
 
 def available_for_bbox(bbox) -> list[dict]:
@@ -59,6 +82,8 @@ def available_for_bbox(bbox) -> list[dict]:
         note = ""
         if p is usgs_3dep and not (lidar_3dep_copc.available() or lidar_3dep_ept._deps()):
             note = "needs laspy[lazrs] (or PDAL + py3dep)"
+        if p is usgs_3dep_ept and not lidar_3dep_ept_laspy.available():
+            note = "needs laspy[lazrs]"
         out.append({"name": p.name, "label": p.label, "resolution_m": p.resolution_m,
                     "available": bool(p.covers(bbox)) and not note, "note": note})
     return out

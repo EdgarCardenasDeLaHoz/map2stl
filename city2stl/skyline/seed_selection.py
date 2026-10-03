@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 from pathlib import Path
 
@@ -30,7 +31,34 @@ from .region_data import (
 from .region_types import RegionBBox, SkylinePoint
 from .streetview_io import _meta_location, _streetview_image, _streetview_metadata
 
+logger = logging.getLogger(__name__)
+
 _SCREEN_CACHE_DIR = Path(__file__).parent / "runs" / "screen_cache"
+_PROPOSALS_DIR = Path(__file__).parent / "runs" / "auto_proposals"
+
+
+def _persisted_proposals(region_name: str, propose, proposals_dir: Path | None = None
+                         ) -> list[SkylinePoint]:
+    """Auto-proposals for ``region_name``: the saved set if there is one, else ``propose()``
+    (saved for next time).
+
+    Why: proposals come from a live OSM fetch, so two runs of one region could look from
+    different places and a score change would mix code and camera position (F-SKYBENCH).
+    Delete ``runs/auto_proposals/<region>.json`` to propose afresh. An empty result is
+    not saved, so a failed OSM fetch does not pin "no proposals".
+    """
+    path = (proposals_dir or _PROPOSALS_DIR) / f"{region_name.lower()}.json"
+    if path.exists():
+        try:
+            rows = json.loads(path.read_text(encoding="utf-8"))
+            return [SkylinePoint(**row) for row in rows]
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning("[auto_seed] ignoring unreadable %s: %s", path.name, exc)
+    points = list(propose())
+    if points:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps([vars(pt) for pt in points], indent=1), encoding="utf-8")
+    return points
 
 def _propose_standoff_locations(
     bbox: RegionBBox,

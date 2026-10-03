@@ -1,0 +1,16 @@
+{
+  "name": "la_defense",
+  "north": 48.9401,
+  "south": 48.8449,
+  "east": 2.3094,
+  "west": 2.1646,
+  "max_plausible_height_m": 240,
+  "use_satellite_footprints": false,
+  "use_cross_view_scoring": true,
+  "use_pano_coastline_recovery": true,
+  "drive_pano_recovery_anchor": true,
+  "pano_only_pdf": true,
+  "seed_urls": [],
+  "anchor_offsets_deg": {},
+  "negative_seeds": []
+}

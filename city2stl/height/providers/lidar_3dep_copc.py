@@ -292,20 +292,17 @@ def ndsm_for_bbox(bbox, resolution_m: float = 1.0):
 
 def _grid_ndsm(bbox, res: float):
     from pyproj import Transformer
-    from scipy.interpolate import griddata
 
-    from ._survey import SurveyError, as_nsew, lonlat_grid
+    from ._survey import SurveyError, as_nsew
 
     n, s, e, w = as_nsew(bbox)
-    h, wd, transform = lonlat_grid(bbox, res)
     try:
         items = _search_items((n, s, e, w))
     except requests.RequestException as exc:
         raise SurveyError(f"3DEP COPC: STAC search failed ({exc})") from exc
     if not items:
         return None
-    dsm = np.full((h, wd), -np.inf)
-    ground: list[np.ndarray] = []
+    chunks = []
     tokens: dict[str, str] = {}
     for item in items:
         horiz, h_unit, v_unit = _item_crs(item)
@@ -319,7 +316,28 @@ def _grid_ndsm(bbox, res: float):
         except Exception as exc:
             raise SurveyError(f"3DEP COPC tile {item.get('id')}: {exc}") from exc
         lon, lat = to_ll.transform(x, y)
-        lon, lat = np.asarray(lon), np.asarray(lat)
+        chunks.append((np.asarray(lon), np.asarray(lat), z, cls))
+    return grid_points_ndsm(chunks, (n, s, e, w), res)
+
+
+def grid_points_ndsm(chunks, bbox, res: float, max_height_m: float = _MAX_HEIGHT_M):
+    """Grid lidar returns into height above ground on the survey lon/lat grid.
+
+    ``chunks``: iterable of ``(lon, lat, z metres, LAS class)`` arrays. Surface = highest
+    return per cell; ground = the class-2 returns interpolated (linear, nearest outside
+    their hull) to the cell centres. Shared by the COPC reader and the laspy EPT reader
+    (``lidar_3dep_ept_laspy``). ``(array row0=north, Affine)``, or None when there is no
+    ground or no return lands in the bbox.
+    """
+    from scipy.interpolate import griddata
+
+    from ._survey import as_nsew, clean_heights, lonlat_grid
+
+    n, s, e, w = as_nsew(bbox)
+    h, wd, transform = lonlat_grid(bbox, res)
+    dsm = np.full((h, wd), -np.inf)
+    ground: list[np.ndarray] = []
+    for lon, lat, z, cls in chunks:
         g = cls == 2
         if g.any():
             ground.append(np.column_stack([lon[g], lat[g], z[g]]))
@@ -337,5 +355,4 @@ def _grid_ndsm(bbox, res: float):
         near = griddata(gp[:, :2], gp[:, 2], (cx, cy), method="nearest")
         dtm = np.where(np.isnan(dtm), near, dtm)
     out = np.where(np.isfinite(dsm), dsm - dtm, np.nan)
-    from ._survey import clean_heights
-    return clean_heights(out, hi=_MAX_HEIGHT_M), transform
+    return clean_heights(out, hi=max_height_m), transform

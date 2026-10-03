@@ -1,0 +1,16 @@
+{
+  "name": "seattle",
+  "north": 47.6528,
+  "south": 47.5572,
+  "east": -122.2741,
+  "west": -122.4159,
+  "max_plausible_height_m": 290,
+  "use_satellite_footprints": false,
+  "use_cross_view_scoring": true,
+  "use_pano_coastline_recovery": true,
+  "drive_pano_recovery_anchor": true,
+  "pano_only_pdf": true,
+  "seed_urls": [],
+  "anchor_offsets_deg": {},
+  "negative_seeds": []
+}

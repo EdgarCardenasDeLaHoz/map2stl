@@ -572,7 +572,8 @@ class Google3DProvider:
         return self._api_key is not None
 
     def fetch_heights(self, bbox: BBox, dim: tuple[int, int],
-                      dem: np.ndarray | None = None) -> HeightResult:
+                      dem: np.ndarray | None = None, *,
+                      require_built: bool = True) -> HeightResult:
         """Fetch 3D Tiles for *bbox* and return height above ground.
 
         Parameters
@@ -583,6 +584,11 @@ class Google3DProvider:
                altitude). If None, the ground is estimated from the mesh
                itself, which avoids the ellipsoidal-versus-orthometric datum
                mismatch an external DEM would introduce.
+        require_built : when True (default) a raster with no building-sized
+               relief anywhere is treated as "outside photorealistic coverage"
+               and returned empty (``_looks_built``). A caller that samples
+               small boxes over low-rise blocks and cross-checks the result
+               (the skyline benchmark) passes False.
         """
         if not self._api_key:
             logger.warning("Google 3D Tiles: no API key configured")
@@ -697,7 +703,7 @@ class Google3DProvider:
 
         # Tiles outside Google's photorealistic cities are bare terrain, and
         # nothing about the fetch says so -- see ``_looks_built``.
-        if not _looks_built(raster, bbox):
+        if require_built and not _looks_built(raster, bbox):
             logger.warning(
                 "Google 3D Tiles: %d tiles over this bbox contain no "
                 "buildings (surface relief below %.0f m); the area is "

@@ -1,0 +1,16 @@
+{
+  "name": "prague_pankrac",
+  "north": 50.0981,
+  "south": 50.0029,
+  "east": 14.5126,
+  "west": 14.3644,
+  "max_plausible_height_m": 120,
+  "use_satellite_footprints": false,
+  "use_cross_view_scoring": true,
+  "use_pano_coastline_recovery": true,
+  "drive_pano_recovery_anchor": true,
+  "pano_only_pdf": true,
+  "seed_urls": [],
+  "anchor_offsets_deg": {},
+  "negative_seeds": []
+}

@@ -1,0 +1,16 @@
+{
+  "name": "boston",
+  "north": 42.4103,
+  "south": 42.3147,
+  "east": -70.9878,
+  "west": -71.1172,
+  "max_plausible_height_m": 250,
+  "use_satellite_footprints": false,
+  "use_cross_view_scoring": true,
+  "use_pano_coastline_recovery": true,
+  "drive_pano_recovery_anchor": true,
+  "pano_only_pdf": true,
+  "seed_urls": [],
+  "anchor_offsets_deg": {},
+  "negative_seeds": []
+}

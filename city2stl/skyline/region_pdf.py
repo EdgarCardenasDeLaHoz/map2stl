@@ -81,6 +81,7 @@ from .region_data import (
 from .region_types import SkylinePoint
 from .seed_selection import (
     _auto_replace_bad_seeds,
+    _persisted_proposals,
     _propose_standoff_locations,
     _screen_locations,
 )
@@ -364,7 +365,9 @@ def run_region_pdf_report(
     # Generate geometry-driven auto-proposals from OSM tall-building cluster.
     # These are screened via Street View but NOT fed into multiview registration
     # unless the user explicitly promotes them to seed_urls in the sites JSON.
-    auto_points = _propose_standoff_locations(bbox, high_rises, osm_data)
+    # Saved per region after the first run, so repeated runs look from the same places.
+    auto_points = _persisted_proposals(
+        region_name, lambda: _propose_standoff_locations(bbox, high_rises, osm_data))
 
     # If no seeds were provided, use the top 3 auto-proposals as provisional
     # seeds so that cities without a sites/<region>.json still run end-to-end.

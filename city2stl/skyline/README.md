@@ -232,6 +232,31 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
 - `runs/image_cache/*.png` — Street View images keyed by request hash (API key excluded).
 - `runs/satellite_footprints_cache/` — ~12 MB per quadkey tile (F-SKY8).
 
+## Benchmark (F-SKYBENCH)
+
+Height accuracy is scored on surveyed truth, never on Cartagena (no open survey; its truth was
+22 OSM `building:levels` values). Plan: [F-SKYBENCH](../../docs/plans/active/F-SKYBENCH-height-benchmark.md).
+
+```powershell
+# from map2stl/; runs each region in its own process, then scores it
+& "$HOME\.venvs\map2stl\Scripts\python.exe" -m city2stl.skyline.scripts.10_benchmark --regions miami boston
+# re-score the newest existing report per region, no Street View calls
+& "$HOME\.venvs\map2stl\Scripts\python.exe" -m city2stl.skyline.scripts.10_benchmark --score-only
+```
+
+- Regions and their survey (`benchmark.py::REGIONS`): Miami, Chicago, Seattle, Boston (USGS 3DEP via
+  the EPT octree, `city2stl/height/providers/lidar_3dep_ept_laspy.py`), Benidorm and Madrid (CNIG),
+  La Défense (IGN LiDAR HD), Prague Pankrác (ČÚZK).
+- Truth per footprint (`benchmark.py::footprint_truth`): p95 of the nDSM inside the footprint shrunk
+  by 1 m, from the survey and from Google 3D Tiles. `confirmed` when they agree within
+  max(3 m, 10 %); only confirmed buildings make the headline, `disputed` ones are counted.
+- Measured on the footprints a run scored (`heights.json` → `footprint_lonlat`), keyed by geometry,
+  cached in `runs/benchmark/truth/<region>.json`.
+- Output: `runs/benchmark/<stamp>/summary.json` (MAE, median AE, bias, within 15/25 %, per height
+  band, per view and seed count, and how far OSM tags sit from truth) and one printed table.
+- Same cameras every run: auto-proposals are saved in `runs/auto_proposals/<region>.json`
+  (`seed_selection.py::_persisted_proposals`); delete the file to propose afresh.
+
 ## Tests
 
 ```powershell
@@ -312,7 +337,6 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
   - F-SKY5: only revisit on a region with merged towers F-SKY2 can't split; Cartagena showed no gain.
   - Wire Miami and Chicago to the opt-in flags (F-SKY8/11.1/13, `pano_only_pdf`) and record per-seed recovery
     accuracy in STATUS (was F-CLEAN13).
-  - Persist auto-proposal positions per region so coverage stops drifting with live OSM.
 - **Tests**
   - Unit test for `coastline_registration.py::sweep_pano_heading_offset` on synthetic keypoints.
   - Edge-case tests for F-SKY13 OSM coastline extraction (`osm_water.py`).
