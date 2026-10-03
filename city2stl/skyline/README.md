@@ -212,8 +212,8 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
 | `SKYLINE_SV_TALL_FRAME` | unset | `1` requests 640×640 instead of 640×540. |
 | `SKYLINE_CV_SEGFORMER_SIZE` | `b3` | `b0`…`b5`. **Production pins `b1`**: ~3× faster than b3, no matched-building loss on Cartagena. b3 became the default 2026-05-16 (vs b0: matched tagged 8 → 17, MAE 22.1 → 13.7 m). |
 | `SKYLINE_CV_SEGFORMER_INPUT_SIZE` | `512` | `384` is ~12 % faster but loses ~14 % of matches. |
-| `SKYLINE_CV_SEGFORMER_BATCH` | `12` | Images per batched forward pass (`prefetch_label_maps`); 2.4× faster, bit-identical. `1` disables. |
-| `SKYLINE_CV_SEGFORMER_DEVICE` | auto | `cpu`/`cuda`. The installed torch is CPU-only, so `cuda` is unreachable until a CUDA wheel is installed. |
+| `SKYLINE_CV_SEGFORMER_BATCH` | `12` (CPU); on CUDA by model: b0/b1 8, b2/b3 4, b4/b5 2 | Images per batched forward pass (`prefetch_label_maps`); 2.4× faster, bit-identical. `1` disables. On a 4 GB GPU, b3 at 12 spills into shared memory and runs 9× slower than at 4. |
+| `SKYLINE_CV_SEGFORMER_DEVICE` | auto | `cpu`/`cuda`. `scripts/setup-venv.ps1` installs the CUDA build of torch when an NVIDIA GPU is present (torch 2.6.0+cu124 since 2026-10-03). GTX 1650: b3 0.20 s/image on CUDA vs 3.6 s on CPU (18×), b0 0.036 vs 0.20 s (`claude/scripts/segformer_bench.py`). |
 | `SKYLINE_CV_HTML_REPORT` | `1` | `0` skips the HTML report. |
 | `SKYLINE_CV_F_SKY1` | `1` | Floor periodicity. |
 | `SKYLINE_CV_F_SKY5` | `0` | MobileSAM head; needs `pip install git+https://github.com/ChaoningZhang/MobileSAM.git` and `vit_t.pth` at `~/.cache/mobile_sam/` (or `MOBILESAM_CHECKPOINT_PATH`). |

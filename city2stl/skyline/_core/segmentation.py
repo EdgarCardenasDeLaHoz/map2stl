@@ -236,6 +236,10 @@ def _ensure_label_map(image_rgb: np.ndarray) -> np.ndarray | None:
         _neural_cache_put(img_id, {"label_map": None}, image_rgb)
         return None
 
+#: Default batch on CUDA per SegFormer size (4 GB card; see _segformer_batch_size).
+_CUDA_BATCH = {"b0": 8, "b1": 8, "b2": 4, "b3": 4, "b4": 2, "b5": 2}
+
+
 def _segformer_batch_size() -> int:
     """Resolve the prefetch forward-pass batch size (images per call).
 
@@ -244,12 +248,22 @@ def _segformer_batch_size() -> int:
     cost on the 12-view spin once the model itself is warm. Bounded so peak
     activation memory stays modest on CPU-only machines. Override with
     ``SKYLINE_CV_SEGFORMER_BATCH`` (integer ≥ 1; 1 disables batching).
+
+    On CUDA the default follows the model, to stay inside a 4 GB card: measured on a
+    GTX 1650 (2026-10-03, claude/scripts/segformer_bench.py), b3 needs 2.0 GB at batch 4
+    and 5.5 GB at batch 12, which spills into shared memory and runs 9x slower
+    (0.20 -> 1.82 s/image); b0 fits batch 8 in 1.3 GB.
     """
-    raw = os.environ.get("SKYLINE_CV_SEGFORMER_BATCH", "12").strip()
-    try:
-        return max(1, int(raw))
-    except ValueError:
-        return 12
+    raw = os.environ.get("SKYLINE_CV_SEGFORMER_BATCH", "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    if _segformer_device == "cuda":
+        size = _SEGFORMER_MODEL_ID.split("segformer-")[-1][:2]
+        return _CUDA_BATCH.get(size, 4)
+    return 12
 
 def prefetch_label_maps(images: list[np.ndarray]) -> int:
     """Run SegFormer once on a *batch* of images, populating the neural cache.

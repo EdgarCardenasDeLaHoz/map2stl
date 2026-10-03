@@ -111,8 +111,21 @@ trip scoring, water and roads last once the others are proven.
   0.4 mm tall (about 9.5 m at Philadelphia's scale), Philadelphia's heights partly come from
   3DEP lidar, and outlines are simplified and merged by print layer. A fair round trip
   needs the model's own building inputs (after height enhancement): open.
-- **Round trip** (tried): above. Next: the 9 Micropolitan packs (no truth; scored against
-  OSM through the registration critic).
+- **Round trip** (tried): above.
+- **Registration packs** (Micropolitan plates and miniatures; `claude/scripts/micropolitan_eval.py`):
+  the new terrain + building table against the registration's own building mask, both warped
+  onto OSM by the pack's `register_transform`, footprint IoU inside the plate:
+  - better on 7 of 13: Valencia +0.07, Lisbon +0.04, Philadelphia miniature +0.04, Paris
+    +0.03, Prague, Barcelona, Paris miniature +0.01;
+  - worse on 6: Miami -0.11, Salzburg -0.07, Bilbao -0.07, Granada (Alhambra) -0.06,
+    Boston -0.04, Philadelphia -0.04, Denver -0.03.
+  - The new table over-detects (Salzburg 51 % of the plate called built vs OSM 25 %): these
+    prints carry trees and terrain bumps. The pack's mask also had OSM vegetation and
+    bridges removed (`semantic_exclusion`, not saved separately), so the comparison favours
+    it. Heights: 6-26 m error for both, the vertical scale from the tallest building is too
+    rough on these models.
+  - Next: tell trees from buildings (rough, rounded tops vs flat or planar roofs); apply
+    the same vegetation exclusion to both before comparing.
 - **Water and roads**: last, as asked. Our models raise roads 0.4 mm and green 0.2 mm, which
   every terrain method reads as raised ground today.
 - **Parts** (done): `numpy2stl/io/parts.py::load_parts` keeps 3MF objects, pack files and parts

@@ -37,6 +37,15 @@ if ($LASTEXITCODE -ne 0) { throw "pip install of requirements failed" }
 & $vpy -m pip install --no-deps -e $numpy2stl -e $root
 if ($LASTEXITCODE -ne 0) { throw "editable install failed (is ../numpy2stl checked out?)" }
 
+# Neural models (skyline SegFormer, tools/ml) on the GPU when there is one. The plain PyPI
+# torch wheel is CPU-only on Windows, so CUDA was unreachable; pin the CUDA 12.4 build
+# (GTX 1650, driver 566: SegFormer b3 18x faster than on CPU, 2026-10-03).
+if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+    & $vpy -m pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+    if ($LASTEXITCODE -ne 0) { throw "CUDA torch install failed" }
+    & $vpy -m pip install "transformers>=4.40"
+}
+
 # Keep bytecode out of the synced folder for every run of this venv, not only
 # the ones launched through a script: a .pth line runs at interpreter start.
 $site = & $vpy -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"

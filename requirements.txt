@@ -60,9 +60,10 @@ earthengine-api>=1.0
 # Satellite imagery / geo raster I/O (skimage.io in geo2stl/tiles.py)
 scikit-image==0.26.0
 
-# Optional: CNN height prediction (Phase 2)
-# Uncomment (and optionally add segmentation-models-pytorch) to enable
-# predict_heights() and train_height_model() in TerrainSession.
+# Optional: CNN height prediction (Phase 2) and the skyline SegFormer.
+# scripts/setup-venv.ps1 installs the CUDA build of torch + torchvision and transformers
+# when an NVIDIA GPU is present (the PyPI torch wheel is CPU-only on Windows); otherwise
+# uncomment below (and optionally add segmentation-models-pytorch) for the CPU build.
 # torch>=2.0
 # torchvision>=0.15
 # timm>=0.9
