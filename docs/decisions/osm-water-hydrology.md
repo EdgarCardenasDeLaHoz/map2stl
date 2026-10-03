@@ -4,6 +4,19 @@ Fetching OSM through Overpass/osmnx, telling outages from empty answers, water a
 rasterisation, and rivers and lakes carved into the terrain. Related: [composite.md](composite.md),
 [trails.md](trails.md).
 
+### 2026-10-02 — OSM lakes skip boxes over 10 000 km²; one fetch per box at a time; failed mirrors go last
+- **Decision:** `geo2stl/water_layers.py::make_lakes_source` returns an empty layer over
+  `LAKES_MAX_AREA_KM2`; `city2stl/fetch.py::fetch_osm_lakes` holds a lock per cache key;
+  `geo2stl/osm.py::healthy_overpass_endpoints` orders mirrors that failed a real query in the
+  last `FAILURE_MEMORY_S` after the healthy ones. Fetch failures from network errors log one
+  line (`city2stl/fetch.py::_log_fetch_failure`), others keep the traceback.
+- **Why:** end-to-end run 2026-10-02. The Amazon Extrude hung > 10 min on a continent-wide
+  Overpass lakes query (open water there is the ESA layer anyway). Philadelphia fetched the same
+  lakes twice at once and kept retrying overpass-api.de, which was timing out: 175 s → 9 s.
+- **Rejected:** a coarser lakes source for big boxes — ESA WorldCover water already covers
+  lakes at that scale.
+- **Supersedes / superseded by:** —
+
 ### 2026-10-01 — HydroRIVERS is rasterised once as a Strahler-order grid; depths are a lookup
 - **Decision:** `geo2stl/hydrology.py::rasterize_hydrorivers_orders` burns the highest order per
   pixel; `order_depth_grid` maps orders to depths for a min order, depth and exponent.

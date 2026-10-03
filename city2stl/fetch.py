@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class OverpassUpstreamError(RuntimeError):
 from geo2stl.geo import M_PER_DEG_LAT  # noqa: E402
 from geo2stl.osm import OVERPASS_ENDPOINTS as _OVERPASS_ENDPOINTS  # noqa: E402
 from geo2stl.osm import healthy_overpass_endpoints as _healthy_overpass_endpoints  # noqa: E402
-from geo2stl.osm import use_overpass_endpoint  # noqa: E402
+from geo2stl.osm import mark_overpass_failure, use_overpass_endpoint  # noqa: E402
 
 # Per-request budget for the Overpass queries themselves. A city-sized
 # buildings query on a healthy mirror is ~60 s; 300 s leaves room for a loaded
@@ -55,6 +56,17 @@ from .cache_policy import CITY_PIPELINE_VERSION  # noqa: E402
 from .heights import LANDMARK_TAG_COLS, _fill_heights, _reduce_buildings  # noqa: E402
 from .rasterize import _count_verts, _empty_fc  # noqa: E402
 from .roads import get_road_width_m as _get_road_width_m  # noqa: E402
+
+
+def _log_fetch_failure(label: str, e: Exception) -> None:
+    """One line for a network failure (an Overpass mirror down or slow is routine and the
+    caller moves to the next one); the traceback only for anything else. A failed fetch used to
+    log ~60 traceback lines each, burying real errors (seen 2026-10-02)."""
+    import requests
+    if isinstance(e, (requests.exceptions.RequestException, TimeoutError, ConnectionError)):
+        logger.warning("OSM %s fetch failed: %s", label, type(e).__name__)
+    else:
+        logger.warning("OSM %s fetch failed: %s", label, e, exc_info=True)
 
 
 def _insufficient_response_error():
@@ -184,7 +196,7 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
         logger.info(f"OSM buildings: none in region ({e})")
         return _empty_fc()
     except Exception as e:
-        logger.warning(f"OSM buildings fetch failed: {e}", exc_info=True)
+        _log_fetch_failure("buildings", e)
         return _empty_fc(str(e))
 
 
@@ -221,7 +233,7 @@ def _fetch_roads(ox, bbox) -> dict:
         logger.info(f"OSM roads: none in region ({e})")
         return _empty_fc()
     except Exception as e:
-        logger.warning(f"OSM roads fetch failed: {e}", exc_info=True)
+        _log_fetch_failure("roads", e)
         return _empty_fc(str(e))
 
 
@@ -265,7 +277,7 @@ def _fetch_waterways(ox, bbox, tol_deg: float, simplify_tolerance: float) -> dic
         logger.info(f"OSM waterways: none in region ({e})")
         return _empty_fc()
     except Exception as e:
-        logger.warning(f"OSM waterways fetch failed: {e}", exc_info=True)
+        _log_fetch_failure("waterways", e)
         return _empty_fc(str(e))
 
 
@@ -281,7 +293,7 @@ def _fetch_pois(ox, bbox) -> dict:
         logger.info(f"OSM pois: none in region ({e})")
         return _empty_fc()
     except Exception as e:
-        logger.warning(f"OSM pois fetch failed: {e}", exc_info=True)
+        _log_fetch_failure("pois", e)
         return _empty_fc(str(e))
 
 
@@ -311,7 +323,7 @@ def _fetch_polygon_layer(
         logger.info(f"OSM {label}: none in region ({e})")
         return _empty_fc()
     except Exception as e:
-        logger.warning(f"OSM {label} fetch failed: {e}", exc_info=True)
+        _log_fetch_failure(f"{label}", e)
         return _empty_fc(str(e))
 
 
@@ -394,6 +406,7 @@ def fetch_osm_data(
         failed = _layers_failed(result, layers)
         if not failed:
             break
+        mark_overpass_failure(endpoint)
         pending = failed
         remaining = len(healthy) - attempt - 1
         logger.warning(
@@ -410,6 +423,10 @@ def fetch_osm_data(
     return result
 
 
+_LAKES_LOCKS: dict = {}
+_LAKES_LOCKS_GUARD = threading.Lock()
+
+
 def fetch_osm_lakes(north: float, south: float, east: float, west: float) -> dict:
     """OSM ``natural=water`` / reservoir polygons for a bbox, disk-cached.
 
@@ -424,10 +441,18 @@ def fetch_osm_lakes(north: float, south: float, east: float, west: float) -> dic
     cached = read_osm_cache(key)
     if cached is not None:
         return cached
-    fc = fetch_osm_data(north, south, east, west, ["lakes"])["lakes"]
-    if not fc.get("error"):
-        write_osm_cache(key, fc)
-    return fc
+    # The 2D composite and the 3D preview ask for the same lakes at the same moment; without
+    # this lock both missed the cache and fetched them twice (~100 s each with a slow mirror).
+    with _LAKES_LOCKS_GUARD:
+        lock = _LAKES_LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        cached = read_osm_cache(key)
+        if cached is not None:
+            return cached
+        fc = fetch_osm_data(north, south, east, west, ["lakes"])["lakes"]
+        if not fc.get("error"):
+            write_osm_cache(key, fc)
+        return fc
 
 
 def _layers_failed(result: dict, layers: list[str]) -> list[str]:
@@ -543,7 +568,7 @@ def _fetch_layers(ox, bbox, layers: list[str], tol_deg: float,
         except FetchCancelled:
             cancelled = True
         except Exception as e:
-            logger.warning(f"OSM {name} fetch failed: {e}", exc_info=True)
+            _log_fetch_failure(f"{name}", e)
             if progress:
                 progress(name, "failed")
             result[name] = _empty_fc(str(e))

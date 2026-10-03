@@ -200,23 +200,27 @@ window._buildGeoToPx = _buildGeoToPx;
  *
  * If bakKey matches feat._px.key the feature is already up to date and skipped.
  * Baking is O(total vertices) and only runs when the canvas layout or bbox changes.
+ * The DEM view bakes into its own slot (`_pxDem`) so the two views don't rebake
+ * each other's coordinates on every render.
  *
  * @param {Array}    features  — GeoJSON Feature array (mutated in place)
  * @param {Function} geoToPx  — projection function from _buildGeoToPx
  * @param {string}   bakKey   — stable key for the current canvas/bbox/projection config
+ * @param {string}   [slot]   — feature property to bake into (default `_px`)
  */
-function _prebakeFeatures(features, geoToPx, bakKey) {
+function _prebakeFeatures(features, geoToPx, bakKey, slot = '_px') {
     for (const feat of features) {
+        const cur = feat[slot];
         const hasValidPx = !!(
-            feat._px &&
-            feat._px.key === bakKey &&
-            feat._px.buf?.buffer?.byteLength > 0 &&
-            feat._px.counts?.buffer?.byteLength > 0
+            cur &&
+            cur.key === bakKey &&
+            cur.buf?.buffer?.byteLength > 0 &&
+            cur.counts?.buffer?.byteLength > 0
         );
         if (hasValidPx) continue;   // already baked for this config and buffers are usable
 
         const geom = feat.geometry;
-        if (!geom?.coordinates) { feat._px = null; continue; }
+        if (!geom?.coordinates) { feat[slot] = null; continue; }
 
         let rings;
         switch (geom.type) {
@@ -227,7 +231,7 @@ function _prebakeFeatures(features, geoToPx, bakKey) {
             case 'Point':           rings = [[geom.coordinates]];      break;
             default:                rings = null;
         }
-        if (!rings) { feat._px = null; continue; }
+        if (!rings) { feat[slot] = null; continue; }
 
         // Count total vertices across all rings
         const counts = new Uint16Array(rings.length);
@@ -247,7 +251,7 @@ function _prebakeFeatures(features, geoToPx, bakKey) {
                 if (_pt.y < y0) y0 = _pt.y;  if (_pt.y > y1) y1 = _pt.y;
             }
         }
-        feat._px = { buf, counts, key: bakKey, x0, y0, x1, y1 };
+        feat[slot] = { buf, counts, key: bakKey, x0, y0, x1, y1 };
     }
 }
 

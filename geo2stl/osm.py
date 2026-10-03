@@ -10,6 +10,7 @@ request per selector rather than osmnx (the align tools).
 from __future__ import annotations
 
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -54,14 +55,33 @@ def healthy_overpass_endpoints() -> list[str]:
     except Exception:  # pragma: no cover - osmnx is a hard dependency of the callers
         headers = {}
     healthy: list[str] = []
+    recently_failed: list[str] = []
+    now = time.monotonic()
     for endpoint in OVERPASS_ENDPOINTS:
         try:
             resp = requests.get(f"{endpoint}/status", headers=headers, timeout=PROBE_TIMEOUT_S)
             resp.raise_for_status()
-            healthy.append(endpoint)
         except Exception as e:
-            logger.warning(f"Overpass endpoint {endpoint} not healthy: {e}")
-    return healthy
+            logger.warning("Overpass endpoint %s not healthy: %s", endpoint, type(e).__name__)
+            continue
+        if now - _FAILED_AT.get(endpoint, -1e9) < FAILURE_MEMORY_S:
+            recently_failed.append(endpoint)
+        else:
+            healthy.append(endpoint)
+    # A mirror can answer /status yet time out on real queries (overpass-api.de, 2026-10-02:
+    # ~100 s per request before the next mirror was tried). One that failed a real query in the
+    # last FAILURE_MEMORY_S goes last, so it is only tried when nothing else is up.
+    return healthy + recently_failed
+
+
+#: How long a mirror that failed a real query is tried last.
+FAILURE_MEMORY_S = 600.0
+_FAILED_AT: dict[str, float] = {}
+
+
+def mark_overpass_failure(endpoint: str) -> None:
+    """Remember that *endpoint* failed a real query (see :func:`healthy_overpass_endpoints`)."""
+    _FAILED_AT[endpoint] = time.monotonic()
 
 
 def use_overpass_endpoint(ox, endpoint: str, query_timeout_s: float) -> None:

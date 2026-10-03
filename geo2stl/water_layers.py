@@ -618,6 +618,15 @@ def lake_depth_grid(features, north: float, south: float, east: float, west: flo
     return out
 
 
+#: Largest box (km²) the OSM lakes layer fetches: about 100 × 100 km, a few Overpass queries.
+LAKES_MAX_AREA_KM2 = 10_000.0
+
+
+def _bbox_area_km2(north: float, south: float, east: float, west: float) -> float:
+    lat = np.radians((north + south) / 2)
+    return abs(north - south) * 110.574 * abs(east - west) * 111.32 * float(np.cos(lat))
+
+
 def make_lakes_source(fetch_features):
     """A terrain-relative ``lakes`` provider over *fetch_features(n, s, e, w)*.
 
@@ -632,6 +641,14 @@ def make_lakes_source(fetch_features):
         if base is None:
             logger.warning("lakes layer needs a base DEM layer first; skipped")
             return np.zeros(bbox_grid_shape(north, south, east, west, dim))
+        area_km2 = _bbox_area_km2(north, south, east, west)
+        if area_km2 > LAKES_MAX_AREA_KM2:
+            # OSM lake outlines for a continent mean thousands of Overpass sub-queries (osmnx:
+            # Amazon was "6,910 times" its query-area limit) and a preview that never finishes.
+            # At this scale the open-water (ESA) layer already carries the large lakes.
+            logger.info("lakes layer skipped: %.0f km² is over %.0f km²; open water comes from "
+                        "the ESA water layer", area_km2, LAKES_MAX_AREA_KM2)
+            return np.zeros(base.shape)
         fc = fetch_features(north, south, east, west) or {}
         return lake_depth_grid(fc.get("features") or [], north, south, east, west, base,
                                depth_m=float(options.get("depth_m", 2.0)),

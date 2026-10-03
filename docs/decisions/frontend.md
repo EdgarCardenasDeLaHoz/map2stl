@@ -3,6 +3,25 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-02 — Both city overlays draw in the worker and keep their last picture
+- **Decision:** `app/client/static/js/modules/layers/city-render.js::_renderViaWorker` draws the
+  stacked-layers and the DEM-canvas city overlay in `workers/city-worker.js`. Each view keeps its
+  last ImageBitmap keyed by everything that changes its pixels (data version, size, bbox,
+  selection, toggles, colours) and repaints it; a render whose key is already being drawn waits
+  for it. Feature buffers are copied to the worker, not transferred. The DEM view bakes into
+  its own slot (`feat._pxDem`, `city-overlay.js::_prebakeFeatures` `slot`).
+- **Why:** end-to-end run on Philadelphia (58 k cached buildings): the Edit page stopped
+  responding (screenshot timed out after 60 s). Profile: 100 s of main-thread blocking in
+  2 min, 55 s in `_drawFeatPath`. The stack path transferred the buffers and called
+  `_invalidateCityCache` after every dispatch, which also emptied the DEM view's cache, so
+  every redraw re-baked and redrew all 58 k buildings on the main thread; the two views also
+  overwrote each other's `_px`. After: 8 s blocking (the DEM JSON parse is the largest left),
+  Philadelphia walk 220 s → 75 s. Transferring also emptied `_px`, so building picking found
+  nothing until the next bake.
+- **Rejected:** skipping the DEM overlay while `#demImage` is hidden — needs a re-render hook on
+  every way the DEM view is shown; the worker path fixes both views.
+- **Supersedes / superseded by:** —
+
 ### 2026-10-02 — New regions are made on the map: framed search, live size, named in a map card
 - **Decision:** picking a searched place frames it at a printable size and suggests a dashed box
   (`region-geometry.js::placeBox`: the place's outline if ≥ 1 km, else a 12 km bed-shaped box), with

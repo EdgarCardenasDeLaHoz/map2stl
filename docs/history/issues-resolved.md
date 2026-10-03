@@ -10,6 +10,21 @@ because code cites them.
   `city2stl/skyline/height/` → `city2stl/height/`, `app/server/core/height/` →
   `city2stl/height/`).
 
+## Fixed 2026-10 (end-to-end run, Amazon + Philadelphia)
+
+### 0g. Lake outlines fetched twice; continent-sized lakes query; city overlay froze the page — fixed 2026-10-02
+- **Lakes fetched twice** (Granada, Philadelphia): two concurrent misses. Fixed with a lock per
+  cache key in `city2stl/fetch.py::fetch_osm_lakes` (re-checks the cache inside the lock).
+- **Amazon Extrude never finished:** the OSM lakes query asked Overpass for a continent.
+  `geo2stl/water_layers.py::make_lakes_source` now skips boxes over `LAKES_MAX_AREA_KM2`
+  (10 000 km²); open water there comes from the ESA layer. Amazon Extrude: >10 min → 13 s.
+- **Dead mirror retried first:** `geo2stl/osm.py::mark_overpass_failure` puts a mirror that
+  failed a real query last for `FAILURE_MEMORY_S` (10 min). Philadelphia Extrude 175 s → 9 s
+  (with the lock).
+- **Philadelphia Edit froze the page** (58 k cached buildings, 100 s of main-thread blocking in
+  2 min): see `docs/decisions/frontend.md` (city overlay worker cache). Blocking 100 s → 8 s.
+- Tests: `tests/test_osm_fetch_performance.py`.
+
 ## Fixed 2026-08 to 2026-09 (were under "Active Bugs")
 
 ### 1. City raster endpoint 500 — NaN values in JSON response — fixed 2026-05-26

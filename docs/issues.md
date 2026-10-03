@@ -98,14 +98,6 @@ the rest below.
 
 ## Active technical debt
 
-### 0g. Lake outlines fetched twice when the 2D composite and 3D preview ask at once (seen 2026-10-02)
-- Turning Rivers & lakes on for Granada logged `[lakes] fetched 42 features` twice (2D composite
-  `/api/composite/dem-merge`, then `/api/export/preview`), ~50 s each while two Overpass mirrors
-  timed out; the preview took ~2 min.
-- `city2stl/fetch.py::fetch_osm_lakes` is disk-cached, so the likely cause is two concurrent
-  misses (no in-flight de-duplication, unlike `/api/terrain/hydrology`'s `dedupe`), or a result
-  carrying `error` (not cached). Fix: an in-flight lock per cache key in `fetch_osm_lakes`.
-
 ### 0a. Skyline height pipeline — known weaknesses (audit 2026-08-28)
 Found while fixing the elevation-datum bug below. All are reported, none are fixed:
 

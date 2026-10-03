@@ -19,12 +19,12 @@
  *   window._setupCityRasterLayer    — wire city raster visibility toggle & opacity slider
  *   window._cancelCityRenders       — cancel any pending RAF renders (called by clearCityOverlay)
  *
- * PERF6B — Web Worker offload
- *   _doRenderCityOverlay dispatches the draw to city-worker.js when OffscreenCanvas
- *   is available.  The worker receives pre-baked Float32Array buffers (already computed
- *   by _prebakeFeatures) + DOM-extracted style/toggle values, so it never touches the DOM.
- *   The main thread blits the returned ImageBitmap onto the visible overlay canvas.
- *   Stale replies are discarded via a monotonically-increasing generation counter.
+ * PERF6B — Web Worker offload (_renderViaWorker)
+ *   Both views (stacked layers and DEM canvas) draw in city-worker.js when OffscreenCanvas
+ *   is available.  The worker receives copies of the pre-baked Float32Array buffers
+ *   (stack view: feat._px, DEM view: feat._pxDem) + DOM-extracted style/toggle values.
+ *   Each view keeps its last ImageBitmap and repaints it while the pixels' key is unchanged;
+ *   a render whose key is already being drawn waits for that reply; older replies are dropped.
  *   Falls back to the synchronous _drawCityCanvas path if workers are unavailable.
  */
 
@@ -33,7 +33,12 @@
 // ---------------------------------------------------------------------------
 
 let _cityWorker = null;
-let _cityWorkerGen = 0;   // incremented per dispatch; stale replies are dropped
+let _cityWorkerGen = 0;   // incremented per dispatch
+const _workerHandlers = new Map();                // gen → reply handler
+const _workerLatest = { stack: 0, dem: 0 };       // newest gen per view; older replies are dropped
+const _workerInFlight = { stack: '', dem: '' };   // key of the picture being drawn per view
+/** Last worker picture per view, painted again until something that changes its pixels changes. */
+const _workerResult = { stack: { key: '', bitmap: null }, dem: { key: '', bitmap: null } };
 
 /** Initialise (or reuse) the city rendering worker. Returns null if unsupported. */
 function _getCityWorker() {
@@ -41,9 +46,17 @@ function _getCityWorker() {
     if (typeof Worker === 'undefined') return null;
     try {
         _cityWorker = new Worker('/static/js/workers/city-worker.js');
+        _cityWorker.onmessage = (e) => {
+            const handler = _workerHandlers.get(e.data.gen);
+            _workerHandlers.delete(e.data.gen);
+            if (handler) handler(e.data);
+            else e.data.bitmap?.close();
+        };
         _cityWorker.onerror = (e) => {
             console.warn('city-worker error — disabling worker path:', e.message);
             _cityWorker = null;
+            _workerHandlers.clear();
+            _workerInFlight.stack = _workerInFlight.dem = '';
         };
     } catch (_) {
         _cityWorker = null;
@@ -54,23 +67,24 @@ function _getCityWorker() {
 /**
  * Serialise a GeoJSON FeatureCollection's pre-baked pixel data into a
  * plain-object array that can be structured-cloned to the worker.
- * Only features with valid _px (baked) buffers are included; unbaked features
- * are silently skipped (they'll be picked up on the next bake cycle).
+ * The buffers are copied, not transferred: the baked coords stay valid for the
+ * next render and for building picking. Unbaked features are skipped.
  *
- * @param {Object|null} geojson  - GeoJSON FeatureCollection with _px on features
+ * @param {Object|null} geojson  - GeoJSON FeatureCollection with baked features
  * @param {string}      propKey  - property to copy ('height_m' or 'road_width_m')
+ * @param {string}      [slot]   - baked-coords property (`_px` stack view, `_pxDem` DEM view)
  * @returns {{ features: BakedFeature[] } | null}
  */
-function _serialiseLayer(geojson, propKey) {
+function _serialiseLayer(geojson, propKey, slot = '_px') {
     if (!geojson?.features?.length) return null;
     const features = [];
     for (let i = 0; i < geojson.features.length; i++) {
         const feat = geojson.features[i];
-        const px = feat._px;
+        const px = feat[slot];
         if (!px?.buf) continue;
         features.push({
-            buf: px.buf,         // Float32Array — transferred, not copied
-            counts: px.counts,      // Uint16Array  — transferred
+            buf: px.buf,
+            counts: px.counts,
             x0: px.x0, y0: px.y0,
             x1: px.x1, y1: px.y1,
             type: feat.geometry?.type || '',
@@ -81,30 +95,73 @@ function _serialiseLayer(geojson, propKey) {
     return features.length ? { features } : null;
 }
 
+/** Serialise every city layer for the worker from one baked-coords slot. */
+function _serialiseLayers(osmCityData, slot) {
+    return {
+        buildings: _serialiseLayer(osmCityData.buildings, 'height_m', slot),
+        roads: _serialiseLayer(osmCityData.roads, 'road_width_m', slot),
+        waterways: _serialiseLayer(osmCityData.waterways, 'height_m', slot),
+        walls: _serialiseLayer(osmCityData.walls, 'height_m', slot),
+    };
+}
+
 /**
- * Collect all transferable ArrayBuffers from a serialised layer set.
- * Worker ownership means these buffers become neutered on the main thread —
- * but _prebakeFeatures will rebake them on the next render call, so this is safe.
+ * Draw one view's city layers in the worker and paint the picture.
+ * `key` covers everything that changes the pixels (data, size, bbox, selection,
+ * toggles, colours). The last picture with the same key is painted again without
+ * drawing; a render whose key is already being drawn waits for that reply.
+ * (Each redraw used to run again from scratch: 58 k Philadelphia buildings froze
+ * the page for 100 s of a 2-minute Edit load.)
+ *
+ * @param {'stack'|'dem'} view
+ * @param {string}   key
+ * @param {Function} paint     - paint(bitmap) onto the view's overlay canvas
+ * @param {Function} buildMsg  - () → render message fields (built only when drawing)
+ * @param {Function} onError   - main-thread fallback draw
+ * @returns {boolean} false when no worker is available
  */
-function _collectTransferables(layers) {
-    const list = [];
-    const seen = new Set();
-    for (const layer of Object.values(layers)) {
-        if (!layer) continue;
-        for (const feat of layer.features) {
-            const b0 = feat.buf?.buffer;
-            const b1 = feat.counts?.buffer;
-            if (b0 && b0.byteLength > 0 && !seen.has(b0)) {
-                seen.add(b0);
-                list.push(b0);
-            }
-            if (b1 && b1.byteLength > 0 && !seen.has(b1)) {
-                seen.add(b1);
-                list.push(b1);
-            }
+function _renderViaWorker(view, key, paint, buildMsg, onError) {
+    const worker = _getCityWorker();
+    if (!worker) return false;
+    const done = _workerResult[view];
+    if (done.key === key && done.bitmap) { paint(done.bitmap); return true; }
+    if (_workerInFlight[view] === key) return true;
+    const gen = ++_cityWorkerGen;
+    _workerLatest[view] = gen;
+    _workerInFlight[view] = key;
+    _workerHandlers.set(gen, (reply) => {
+        if (_workerLatest[view] !== gen) { reply.bitmap?.close(); return; }
+        _workerInFlight[view] = '';
+        if (reply.type === 'bitmap') {
+            done.bitmap?.close();
+            done.key = key;
+            done.bitmap = reply.bitmap;
+            paint(reply.bitmap);
+        } else {
+            console.warn('city-worker render error:', reply.message);
+            onError();
         }
+    });
+    try {
+        worker.postMessage({ type: 'render', gen, ...buildMsg() });
+    } catch (err) {
+        _workerHandlers.delete(gen);
+        _workerInFlight[view] = '';
+        console.warn('city-worker postMessage failed, using sync fallback:', err?.message || err);
+        onError();
     }
-    return list;
+    return true;
+}
+
+/** Paint a worker picture onto the current overlay canvas (looked up again: it may have been removed). */
+function _paintOnto(container, selector) {
+    return (bitmap) => {
+        const canvas = container.querySelector(selector);
+        if (!canvas) return;
+        const c = canvas.getContext('2d');
+        c.clearRect(0, 0, canvas.width, canvas.height);
+        c.drawImage(bitmap, 0, 0);
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -172,8 +229,10 @@ if (window.appState?.on) {
 window._cancelCityRenders = function () {
     if (_stackRafId) { cancelAnimationFrame(_stackRafId); _stackRafId = null; }
     if (_demRafId) { cancelAnimationFrame(_demRafId); _demRafId = null; }
-    // Bump generation so any in-flight worker reply is discarded
-    _cityWorkerGen++;
+    // Drop any in-flight worker reply and the kept pictures
+    _workerLatest.stack = _workerLatest.dem = 0;
+    _workerInFlight.stack = _workerInFlight.dem = '';
+    for (const r of Object.values(_workerResult)) { r.bitmap?.close(); r.bitmap = null; r.key = ''; }
 };
 
 // ---------------------------------------------------------------------------
@@ -249,8 +308,10 @@ function _doRenderCityOverlay() {
         `${bboxKey}|sel:${selectedBuildingIndex ?? -1}`
     );
 
-    overlay.width = W;
-    overlay.height = H;
+    // Setting the size clears the canvas: only when it changed, so the last picture
+    // stays up while the worker draws the next one.
+    if (overlay.width !== W) overlay.width = W;
+    if (overlay.height !== H) overlay.height = H;
     const ctx = overlay.getContext('2d');
 
     // Test OffscreenCanvas support once (same browser capability for the entire session)
@@ -286,58 +347,15 @@ function _doRenderCityOverlay() {
         waterways: !!document.getElementById(rs.LAYER_TOGGLES.waterways)?.checked,
     };
 
-    // ── PERF6B: try Web Worker path ────────────────────────────────────────────
-    const worker = rs.offscreenOk ? _getCityWorker() : null;
+    // ── PERF6B: worker path ────────────────────────────────────────────────────
+    const syncDraw = () => _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs);
+    const workerKey = `${cacheKey}|${JSON.stringify(toggles)}|${styles.buildingsColor}${styles.roadsColor}${styles.waterwaysColor}`;
+    const viaWorker = rs.offscreenOk && _renderViaWorker('stack', workerKey, _paintOnto(stack, '.osm-overlay'),
+        () => ({ W, H, tX, tY, tW, tH, invZ, layers: _serialiseLayers(osmCityData, '_px'), styles, toggles, selectedBuildingIndex }),
+        syncDraw);
 
-    if (worker) {
-        // Check if all toggled layers are already cached for this cacheKey
-        const allCached = rs.LAYER_NAMES.every(
-            layer => !toggles[layer] || (rs.stackLayer[layer].key === cacheKey && rs.stackLayer[layer].canvas)
-        );
-
-        if (allCached) {
-            // Fast path: just composite from existing per-layer caches
-            ctx.clearRect(0, 0, W, H);
-            for (const layer of rs.LAYER_NAMES) {
-                if (!toggles[layer] || !rs.stackLayer[layer].canvas) continue;
-                ctx.drawImage(rs.stackLayer[layer].canvas, 0, 0);
-            }
-        } else {
-            // Slow path: dispatch to worker. Buffers are transferred (zero-copy).
-            // _prebakeFeatures will rebake them on the next render call after transfer.
-            const gen = ++_cityWorkerGen;
-            const layers = {
-                buildings: _serialiseLayer(osmCityData.buildings, 'height_m'),
-                roads: _serialiseLayer(osmCityData.roads, 'road_width_m'),
-                waterways: _serialiseLayer(osmCityData.waterways, 'height_m'),
-                walls: _serialiseLayer(osmCityData.walls, 'height_m'),
-            };
-            const transferables = _collectTransferables(layers);
-
-            // Invalidate baked caches for transferred layers so next bake recreates them
-            window._invalidateCityCache();
-
-            worker.onmessage = (e) => {
-                const reply = e.data;
-                if (reply.gen !== gen) return;  // stale — a newer render is in flight
-                if (reply.type === 'bitmap') {
-                    ctx.clearRect(0, 0, W, H);
-                    ctx.drawImage(reply.bitmap, 0, 0);
-                    reply.bitmap.close();
-                } else if (reply.type === 'error') {
-                    console.warn('city-worker render error:', reply.message);
-                    _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs);
-                }
-            };
-
-            try {
-                worker.postMessage({ type: 'render', gen, W, H, tX, tY, tW, tH, invZ, layers, styles, toggles, selectedBuildingIndex }, transferables);
-            } catch (err) {
-                // If a stale detached buffer slips through, fall back to sync rendering for this frame.
-                console.warn('city-worker postMessage failed, using sync fallback:', err?.message || err);
-                _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs);
-            }
-        }
+    if (viaWorker) {
+        // drawn (or repainted from the last picture) by _renderViaWorker
     } else if (rs.offscreenOk) {
         // PERF6 Part A: per-layer OffscreenCanvas on main thread (no worker)
         _syncRenderCityOverlay(ctx, geoToPx, invZ, osmCityData, W, tW, bboxLonM, clipRect, cacheKey, rs);
@@ -421,8 +439,8 @@ function _doRenderCityOnDEM() {
         overlay.className = 'city-dem-overlay';
         demContainer.appendChild(overlay);
     }
-    overlay.width = W;
-    overlay.height = H;
+    if (overlay.width !== W) overlay.width = W;
+    if (overlay.height !== H) overlay.height = H;
 
     // Position overlay to match the DEM canvas's actual CSS rect within #demImage
     // (#demImage uses flexbox centering, so the canvas may not start at top:0)
@@ -458,16 +476,20 @@ function _doRenderCityOnDEM() {
     const geoToPx = window._buildGeoToPx(north, south, east, west, 0, 0, W, H);
     const clipRect = { x0: 0, y0: 0, x1: W, y1: H };
 
-    // PERF4: pre-bake pixel coords (DEM view has different geoToPx than stack view)
+    // PERF4: pre-bake pixel coords. The DEM view has its own geoToPx, so with the worker
+    // it bakes into its own slot (_pxDem) and leaves the stack view's _px alone.
     const bakKey = `dem|${W}|${H}|${bboxKey}|${document.getElementById('paramProjection')?.value || 'none'}`;
     const rs = window._cityRenderState;
-    for (const layer of rs.LAYER_NAMES) {
-        if (osmCityData[layer]?.features) window._prebakeFeatures(osmCityData[layer].features, geoToPx, bakKey);
-    }
-    // Walls rendered inside buildings layer pass but stored separately
-    if (osmCityData.walls?.features) window._prebakeFeatures(osmCityData.walls.features, geoToPx, bakKey);
-    if (rs.offscreenOk) {
-        // PERF6 Part A: per-layer offscreen cache for DEM view
+    const bake = (slot) => {
+        for (const layer of rs.LAYER_NAMES) {
+            if (osmCityData[layer]?.features) window._prebakeFeatures(osmCityData[layer].features, geoToPx, bakKey, slot);
+        }
+        // Walls rendered inside buildings layer pass but stored separately
+        if (osmCityData.walls?.features) window._prebakeFeatures(osmCityData.walls.features, geoToPx, bakKey, slot);
+    };
+    const syncDraw = () => {
+        // _drawCityCanvas reads _px: bake the DEM layout there for this draw
+        bake('_px');
         for (const layer of rs.LAYER_NAMES) {
             if (rs.demLayer[layer].key === cacheKey && rs.demLayer[layer].canvas) continue;
             const offscreen = new OffscreenCanvas(W, H);
@@ -481,8 +503,26 @@ function _doRenderCityOnDEM() {
             if (!document.getElementById(rs.LAYER_TOGGLES[layer])?.checked) continue;
             ctx.drawImage(rs.demLayer[layer].canvas, 0, 0);
         }
+    };
+    const toggles = Object.fromEntries(rs.LAYER_NAMES.map(l => [l, !!document.getElementById(rs.LAYER_TOGGLES[l])?.checked]));
+    const styles = {
+        buildingsColor: document.getElementById('layerBuildingsColor')?.value || '#c8b89a',
+        roadsColor: document.getElementById('layerRoadsColor')?.value || '#cc8844',
+        waterwaysColor: document.getElementById('layerWaterwaysColor')?.value || '#4488cc',
+        roadBaseWidth: 1.5,
+        bboxLonM,
+    };
+    const workerKey = `${cacheKey}|${JSON.stringify(toggles)}|${styles.buildingsColor}${styles.roadsColor}${styles.waterwaysColor}`;
+    if (rs.offscreenOk && _getCityWorker()) {
+        _renderViaWorker('dem', workerKey, _paintOnto(demContainer, '.city-dem-overlay'), () => {
+            bake('_pxDem');
+            return { W, H, tX: 0, tY: 0, tW: W, tH: H, invZ: 1, layers: _serialiseLayers(osmCityData, '_pxDem'), styles, toggles, selectedBuildingIndex };
+        }, syncDraw);
+    } else if (rs.offscreenOk) {
+        syncDraw();
     } else {
         // Fallback: draw all visible layers directly to visible canvas
+        bake('_px');
         ctx.clearRect(0, 0, W, H);
         window._drawCityCanvas(ctx, geoToPx, 1, osmCityData, W, W, bboxLonM, clipRect, null);
     }
