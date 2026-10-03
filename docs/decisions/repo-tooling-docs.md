@@ -2,6 +2,24 @@
 
 Repo names and layout, venvs, test markers, agent scripts, where docs and plans live, and the align tool's pack lookup. Related: [architecture.md](architecture.md).
 
+### 2026-10-02 — Faster tests: lazy heavy imports, overlapped pre-push, quicktest for the inner loop
+- **Decision:**
+  - osmnx (and with it scikit-learn and matplotlib), IPython and pymeshlab load on first use
+    (`city2stl/fetch.py::_insufficient_response_error`, `city2stl/osm_raster.py::_ox`,
+    `app/session/terrain_session.py`, numpy2stl `processing/boolean.py::_intersect_pymeshlab`).
+  - The pre-push hook runs vitest and eslint in the background while pytest runs.
+  - `scripts/quicktest.py` runs only the tests the uncommitted changes touch (plus last failures),
+    Python and JS at once; the full suite stays in the pre-push hook.
+  - pytest stays at `-n 6`.
+- **Why:** user asked to use parallelism to cut test and development time (2026-10-02). Measured:
+  every Python process spent ~9.4 s importing before running a test (osmnx 3.3 s, IPython 1 s,
+  scikit-learn 1.2 s); 10 workers was slower than 6 (115 s vs 80 s) because each worker pays that
+  cost and they compete for 12 cores. After: server import ~6.2 s, suite at `-n 6` 48 s (was
+  62–80 s), quicktest on a 5-file change 22 s.
+- **Rejected:** more xdist workers (slower, above); pytest-testmon (coverage tracking slows every
+  run, and its xdist support is limited) in favour of the import-based selection in quicktest.
+- **Supersedes / superseded by:** —
+
 ### 2026-09-30 — Agent files live in Code/claude/; the graph is found through GRAPHIFY_OUT
 - **Decision:** `Code/claude/` holds everything agents write outside the repos: `scripts/`
   (was `Code/agent-scripts/`), `memory-bank/`, `graphify-out/`. `CLAUDE.md`, `AGENTS.md`,

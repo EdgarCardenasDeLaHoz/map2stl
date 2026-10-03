@@ -15,6 +15,7 @@ Rasters have row 0 = south and match
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import re
 import time
@@ -199,12 +200,14 @@ def estimate_bbox_from_stl(
     )
     return tight_bbox_from_extent(clat, clon, extent_m, margin=osm_margin)
 
-try:
-    import osmnx as ox
-    HAS_OSMNX = True
-except ImportError:
-    ox = None
-    HAS_OSMNX = False
+# osmnx is imported on first use (_ox): importing it costs ~3 s (it pulls in scikit-learn and
+# matplotlib), paid by every test worker and server start that imports this module.
+HAS_OSMNX = importlib.util.find_spec("osmnx") is not None
+
+
+def _ox():
+    import osmnx
+    return osmnx
 
 try:
     import geopandas as gpd
@@ -242,7 +245,7 @@ def get_city_bbox(city_name: str) -> tuple[float, float, float, float]:
     if not HAS_OSMNX:
         raise ImportError("osmnx is required. Install with: pip install osmnx")
 
-    gdf = ox.geocode_to_gdf(city_name)
+    gdf = _ox().geocode_to_gdf(city_name)
     if gdf is None or len(gdf) == 0:
         raise ValueError(f"Could not geocode city: {city_name!r}")
 
@@ -293,7 +296,7 @@ def get_city_center_point(city_name: str) -> tuple[float, float] | None:
     if not HAS_OSMNX:
         return None
     try:
-        lat, lon = ox.geocode(f"Downtown {city_name}")
+        lat, lon = _ox().geocode(f"Downtown {city_name}")
         return (float(lat), float(lon))
     except Exception as exc:
         logger.info("Could not geocode 'Downtown %s' (%s); falling back to city centroid.",
@@ -340,7 +343,7 @@ def _features_from_bbox(N, S, E, W, tags: dict, attempts: int = 5):
     delay = 15.0
     for attempt in range(1, attempts + 1):
         try:
-            return ox.features_from_bbox(bbox=(W, S, E, N), tags=tags)
+            return _ox().features_from_bbox(bbox=(W, S, E, N), tags=tags)
         except Exception as exc:
             if attempt == attempts:
                 raise

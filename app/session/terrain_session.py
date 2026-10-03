@@ -39,7 +39,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import requests
-from IPython.display import display
 from PIL import Image
 
 from app.server.config import LUMINANCE_B, LUMINANCE_G, LUMINANCE_R, OPENTOPO_API_KEY
@@ -801,6 +800,7 @@ class TerrainSession:
         } for r in raw])
         if filter_col and filter_val:
             df = df[df[filter_col] == filter_val].reset_index(drop=True)
+        from IPython.display import display  # notebook-only; ~1 s to import
         display(df)
         print(f"Showing {len(df)} regions")
         return df
@@ -940,6 +940,7 @@ class TerrainSession:
                 print(f"── {group} ── (unexpected value: {vals!r})")
                 continue
             print(f"── {group} ──")
+            from IPython.display import display  # notebook-only; ~1 s to import
             display(pd.DataFrame(
                 {"value": {k: str(v) if isinstance(
                     v, (list, dict)) else v for k, v in vals.items()}}

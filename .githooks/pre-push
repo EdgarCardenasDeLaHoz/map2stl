@@ -1,7 +1,11 @@
 #!/bin/sh
-# Run the test suites before every push: Python (this repo's and ../numpy2stl's,
-# per pytest.ini) in parallel, then the JS unit tests and eslint.
+# Run the test suites before every push: Python (this repo's and ../numpy2stl's, per
+# pytest.ini) with 6 workers, and at the same time the JS unit tests and eslint.
 # Enabled by scripts/setup-venv.ps1 (core.hooksPath .githooks).
+#
+# The JS checks (~20 s) used to run after pytest; overlapping them saves that time.
+# More pytest workers does not help on a 12-core PC: 10 workers measured slower than 6
+# (2026-10-02), because each worker pays the import cost and they compete for the cores.
 set -e
 cd "$(git rev-parse --show-toplevel)"
 
@@ -11,14 +15,30 @@ if [ ! -f "$PYTHON" ]; then
     exit 1
 fi
 
-echo "Running Python test suite before push..."
+LOG_DIR="$(mktemp -d)"
+trap 'rm -rf "$LOG_DIR"' EXIT
+
+echo "Running JS tests and eslint in the background..."
+# eslint also catches JS syntax errors (it replaced tests/js/syntaxCheck.test.js).
+( npx vitest run > "$LOG_DIR/vitest.log" 2>&1; echo $? > "$LOG_DIR/vitest.rc" ) &
+( npx eslint app/client/static/js > "$LOG_DIR/eslint.log" 2>&1; echo $? > "$LOG_DIR/eslint.rc" ) &
+
+echo "Running Python test suite..."
 # -n 6 needs pytest-xdist (requirements-dev.txt).
-"$PYTHON" -m pytest -q --tb=short -p no:cacheprovider -x -n 6 --durations=10
+PY_RC=0
+"$PYTHON" -m pytest -q --tb=short -p no:cacheprovider -x -n 6 --durations=10 || PY_RC=$?
 
-echo "Running JS tests..."
-npx vitest run
-
-# eslint also catches JS syntax errors (it replaced tests/js/syntaxCheck.test.js,
-# which spawned one `node --check` per file).
-echo "Running eslint..."
-npx eslint app/client/static/js
+wait
+FAILED=0
+[ "$PY_RC" -eq 0 ] || { echo "pre-push: Python tests failed" >&2; FAILED=1; }
+for step in vitest eslint; do
+    rc=$(cat "$LOG_DIR/$step.rc" 2>/dev/null || echo 1)
+    if [ "$rc" -ne 0 ]; then
+        echo "----- $step (failed) -----" >&2
+        cat "$LOG_DIR/$step.log" >&2
+        FAILED=1
+    else
+        echo "$step: ok ($(tail -n 3 "$LOG_DIR/$step.log" | grep -m1 -E 'Tests|passed|problems' || echo 'no problems'))"
+    fi
+done
+exit $FAILED

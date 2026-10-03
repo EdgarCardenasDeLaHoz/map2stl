@@ -21,6 +21,7 @@ Venv: `~/.venvs/map2stl` (local, never under OneDrive). Create/refresh it with
 cd map2stl && source ~/.venvs/map2stl/Scripts/activate
 python -m uvicorn app.server.server:app --port 9000 --reload   # starts FastAPI
 python -m pytest tests/ -v    # also runs ../numpy2stl/tests; e2e/, integration and slow are opt-in
+python scripts/quicktest.py    # while developing: only tests the uncommitted changes touch (+ last failures), Python and JS at once
 npm install && npm run build  # after editing .vue / .ts (the Vue bundle in dist/ is gitignored)
 ```
 

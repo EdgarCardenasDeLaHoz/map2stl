@@ -56,11 +56,21 @@ from .heights import LANDMARK_TAG_COLS, _fill_heights, _reduce_buildings  # noqa
 from .rasterize import _count_verts, _empty_fc  # noqa: E402
 from .roads import get_road_width_m as _get_road_width_m  # noqa: E402
 
-try:
-    from osmnx._errors import InsufficientResponseError
-except Exception:  # pragma: no cover - osmnx layout change
-    #: Nothing will match, so every failure keeps the old "worth another mirror" reading.
-    InsufficientResponseError = ()
+
+def _insufficient_response_error():
+    """osmnx's "no data" exception class, imported on first use.
+
+    Importing osmnx costs ~3 s (it pulls in scikit-learn and matplotlib), paid by every test
+    worker and server start that imports this module. ``except`` clauses evaluate their class
+    only when an exception reaches them, so ``except _insufficient_response_error():`` loads
+    osmnx only once a fetch (which uses osmnx anyway) has failed. Returns ``()`` when osmnx's
+    layout changed: nothing matches, so every failure keeps the "worth another mirror" reading.
+    """
+    try:
+        from osmnx._errors import InsufficientResponseError
+    except Exception:  # pragma: no cover - osmnx layout change
+        return ()
+    return InsufficientResponseError
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +104,7 @@ def _features_or_none(ox, bbox, tags):
     """
     try:
         return ox.features_from_bbox(bbox, tags=tags)
-    except InsufficientResponseError:
+    except _insufficient_response_error():
         return None
 
 
@@ -170,7 +180,7 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
         ]
         gdf = gdf[[c for c in keep if c in gdf.columns]]
         return json.loads(gdf.to_json())
-    except InsufficientResponseError as e:
+    except _insufficient_response_error() as e:
         logger.info(f"OSM buildings: none in region ({e})")
         return _empty_fc()
     except Exception as e:
@@ -207,7 +217,7 @@ def _fetch_roads(ox, bbox) -> dict:
         keep = ["geometry", "highway", "name", "lanes", "maxspeed", "road_width_m"]
         edges = edges[[c for c in keep if c in edges.columns]]
         return json.loads(edges.to_json())
-    except InsufficientResponseError as e:
+    except _insufficient_response_error() as e:
         logger.info(f"OSM roads: none in region ({e})")
         return _empty_fc()
     except Exception as e:
@@ -251,7 +261,7 @@ def _fetch_waterways(ox, bbox, tol_deg: float, simplify_tolerance: float) -> dic
         keep = ["geometry", "waterway", "natural", "name", "water"]
         gdf = gdf[[c for c in keep if c in gdf.columns]]
         return json.loads(gdf.to_json())
-    except InsufficientResponseError as e:
+    except _insufficient_response_error() as e:
         logger.info(f"OSM waterways: none in region ({e})")
         return _empty_fc()
     except Exception as e:
@@ -267,7 +277,7 @@ def _fetch_pois(ox, bbox) -> dict:
         keep = ["geometry", "amenity", "tourism", "historic", "name"]
         gdf = gdf[[c for c in keep if c in gdf.columns]]
         return json.loads(gdf.to_json())
-    except InsufficientResponseError as e:
+    except _insufficient_response_error() as e:
         logger.info(f"OSM pois: none in region ({e})")
         return _empty_fc()
     except Exception as e:
@@ -297,7 +307,7 @@ def _fetch_polygon_layer(
         result = json.loads(gdf.to_json())
         logger.info(f"[{label}] fetched {len(gdf)} features")
         return result
-    except InsufficientResponseError as e:
+    except _insufficient_response_error() as e:
         logger.info(f"OSM {label}: none in region ({e})")
         return _empty_fc()
     except Exception as e:

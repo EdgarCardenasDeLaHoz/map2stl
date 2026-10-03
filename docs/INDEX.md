@@ -71,7 +71,7 @@ Paths in this part are relative to `map2stl/`.
 | Plate registration / align tool | [§ Registration](#registration--plates-map2stl-side), `city2stl/registration/`, numpy2stl `registration/` |
 | Skyline (street-view heights) | `city2stl/skyline/README.md` |
 | User guides (/guides) | `docs/guides/*.md` (content), `app/server/routers/guides.py` (rendering) |
-| Tests | `tests/conftest.py`, the matching `tests/test_*.py`; JS tests in `tests/js/` |
+| Tests | `tests/conftest.py`, the matching `tests/test_*.py`; JS tests in `tests/js/`; while developing `scripts/quicktest.py` (affected tests only) |
 
 ### Router or core?
 - Edit `app/server/routers/` when the HTTP shape, validation boundary or endpoint orchestration changes.
