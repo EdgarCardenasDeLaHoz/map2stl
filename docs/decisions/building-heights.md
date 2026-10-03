@@ -5,6 +5,19 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
+### 2026-10-03 — Skyline height accuracy is judged on surveyed truth, not on Cartagena
+- **Decision:** skyline (street-view) height changes are scored on eight cities with per-footprint
+  truth from survey lidar and Google 3D Tiles, cross-checked: Miami, Chicago, Seattle, Boston,
+  Benidorm, Paris La Défense, Madrid Cuatro Torres, Prague Pankrác. Cartagena stays a heading and
+  registration smoke test only.
+- **Why:** user, 2026-10-03: Cartagena "has poor ground truth for building heights, it might
+  confuse results". Its truth is 22 OSM `building:levels` × 3.4 m values and no open survey exists.
+  Earlier skyline decisions rested on about 20 such buildings.
+- **Rejected:** OSM height tags as the yardstick (sparse, floor-count estimates); one truth source
+  alone (the user chose both, so new construction and ground-estimate errors show as disputes).
+- **Supersedes / superseded by:** —
+- **Source:** [F-SKYBENCH](../plans/active/F-SKYBENCH-height-benchmark.md)
+
 ### 2026-09-27 — Google 3D Tiles is allowed as a height and geometry source
 - **Decision:** Google Photorealistic 3D Tiles stay a supported provider
   (`city2stl/height/providers/google_3d.py::Google3DProvider`), usable for heights, roof geometry and

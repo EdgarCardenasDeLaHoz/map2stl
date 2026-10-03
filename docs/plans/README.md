@@ -23,6 +23,7 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 | [F-LANDMARK](active/F-LANDMARK-roofs-and-building-parts.md) | §1–§6 done | check the result on the landmark set |
 | [F-USAGE](active/F-USAGE-local-usage-log.md) | in progress | usage log, then a flow report from real sessions |
 | [F-DESIGN](active/F-DESIGN-guidelines-redesign.md) | Explore, Edit and Extrude rebuilt (cards, layers, More settings in each right panel, ✨, live composite) | retake old guide screenshots; consistency pass |
+| [F-SKYBENCH](active/F-SKYBENCH-height-benchmark.md) | planned | truth per footprint (survey + 3D Tiles), then the scorer |
 | F-DET, registration learning | skyline and registration plans | see the Skyline section |
 
 ## Mesh pipeline and city model
@@ -93,6 +94,9 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   - Pre-flight face estimate: under-counts rugged terrain 1.3–3×; calibrate it.
 
   [large-region guide §6](../guides/large-region-sop.md)
+- **F-TREES** (first): buildings vs trees / viaducts in printed models, inside F-STL2NUMPY
+  ([plan](active/F-TREES-buildings-vs-vegetation.md)). Then the neural proposals F-NN-WATER and
+  F-NN-ROOF ([proposals](../proposals.md)).
 - **F-STL2NUMPY**: decompose 3D city models into DSM, slope-aware DTM, a building table and
   water/road layers ([plan](active/F-STL2NUMPY-decompose.md)). Includes measuring the mesh
   simplifiers on our own outputs.
@@ -207,6 +211,8 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 
 ## Skyline
 
+- **Height benchmark on surveyed truth** (before any further height tuning): eight cities,
+  lidar + 3D Tiles cross-checked. [F-SKYBENCH](active/F-SKYBENCH-height-benchmark.md)
 - All skyline open items (F-DET, F-SKY13/16/18, F-SKY5 validation, tests, depth > 1.2 km) are
   kept in one list: [skyline README → Open items](../../city2stl/skyline/README.md#open-items).
 
