@@ -332,12 +332,20 @@ function exportPuzzle() {
     return _asyncExport('puzzle', extra, `${_regionName()}_puzzle.zip`);
 }
 
-function exportCityModel() {
+async function exportCityModel() {
     if (!window.appState?.lastDemRequest?.dem_id) {
         window.showToast?.('Load the DEM first', 'warning');
         return;
     }
-    return _asyncExport('city', _cityExtra(), `${_regionName()}_city.zip`);
+    const extra = _cityExtra();
+    // The Extrude viewer may be building this exact model in the background: wait for it,
+    // so this build is a model-cache hit rather than a second full build alongside it.
+    const running = window.cityFullModelRun?.(JSON.stringify({ format: 'city', ..._exportParams(), ...extra }));
+    if (running) {
+        _progressEl().set(5, 'Finishing the model being built for the 3D view...');
+        await running;
+    }
+    return _asyncExport('city', extra, `${_regionName()}_city.zip`);
 }
 
 /**

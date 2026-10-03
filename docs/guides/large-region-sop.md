@@ -229,8 +229,9 @@ Process / pipeline:
 2. **Surface composite warnings in the export** (`export_params.ExportContext`): carry
    `compute_composite_dem(..., warnings=)` into the pre-flight warnings and an
    `X-Composite-Warning` header, as `composite_error` already is.
-3. **Overpass**: ~~remember an unhealthy mirror~~ (done 2026-10-02: tried last for
-   10 min); fetch lakes in the background when the Region preset is applied.
+3. **Overpass**: ~~remember an unhealthy mirror~~ (done: a failed query is tried last for
+   10 min, 2026-10-02; probes are parallel and remembered 2 min, 2026-10-03); fetch lakes
+   in the background when the Region preset is applied.
 4. **Lakes as absolute levels**: carry each lake's level (NaN elsewhere) and apply
    `min(z, level)` after the median on the export grid — exactly flat, rims included.
 5. **Pre-flight face estimate**: the strided TIN under-counts rugged terrain by 1.3–3×;

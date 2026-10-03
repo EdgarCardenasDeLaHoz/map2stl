@@ -35,6 +35,16 @@ rasterisation, and rivers and lakes carved into the terrain. Related: [composite
     (large-region guide §2).
 - **Supersedes / superseded by:** —
 
+### 2026-10-03 — Overpass mirror probes run in parallel and are remembered for 2 minutes
+- **Decision:** `geo2stl/osm.py::healthy_overpass_endpoints` probes the mirrors' `/status`
+  in parallel and reuses each result for `PROBE_MEMORY_S` (120 s), under a lock.
+- **Why:** Miami walk (2026-10-03): overpass.kumi.systems timed out its probe six times in
+  70 s, 10 s each, once per fetch (buildings, lakes, railways, green), and probes ran one
+  mirror after the other. The Miami preview waited about 6.5 min.
+- **Rejected:** a shorter probe timeout — a busy but working mirror would be skipped.
+- **Supersedes / superseded by:** completes the "remember an unhealthy mirror" item of the
+  large-region guide §6.
+
 ### 2026-10-02 — OSM lakes skip boxes over 10 000 km²; one fetch per box at a time; failed mirrors go last
 - **Decision:** `geo2stl/water_layers.py::make_lakes_source` returns an empty layer over
   `LAKES_MAX_AREA_KM2`; `city2stl/fetch.py::fetch_osm_lakes` holds a lock per cache key;

@@ -10,6 +10,7 @@ request per selector rather than osmnx (the align tools).
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 logger = logging.getLogger(__name__)
@@ -54,16 +55,32 @@ def healthy_overpass_endpoints() -> list[str]:
         headers = {"User-Agent": ox.settings.http_user_agent}
     except Exception:  # pragma: no cover - osmnx is a hard dependency of the callers
         headers = {}
-    healthy: list[str] = []
-    recently_failed: list[str] = []
-    now = time.monotonic()
-    for endpoint in OVERPASS_ENDPOINTS:
+
+    def probe(endpoint: str) -> bool:
         try:
             resp = requests.get(f"{endpoint}/status", headers=headers, timeout=PROBE_TIMEOUT_S)
             resp.raise_for_status()
+            return True
         except Exception as e:
             logger.warning("Overpass endpoint %s not healthy: %s", endpoint, type(e).__name__)
-            continue
+            return False
+
+    # Probes run in parallel and are remembered for PROBE_MEMORY_S: one slow mirror cost
+    # a 10 s timeout per fetch, and a city load fetches buildings, lakes, railways and
+    # green within seconds of each other (Miami, 2026-10-03: six probes in 70 s).
+    now = time.monotonic()
+    with _PROBE_LOCK:
+        stale = [e for e in OVERPASS_ENDPOINTS
+                 if now - _PROBED.get(e, (-1e9, False))[0] >= PROBE_MEMORY_S]
+        if stale:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(len(stale)) as pool:
+                for e, ok in zip(stale, pool.map(probe, stale), strict=True):
+                    _PROBED[e] = (time.monotonic(), ok)
+        up = [e for e in OVERPASS_ENDPOINTS if _PROBED[e][1]]
+    healthy: list[str] = []
+    recently_failed: list[str] = []
+    for endpoint in up:
         if now - _FAILED_AT.get(endpoint, -1e9) < FAILURE_MEMORY_S:
             recently_failed.append(endpoint)
         else:
@@ -76,6 +93,10 @@ def healthy_overpass_endpoints() -> list[str]:
 
 #: How long a mirror that failed a real query is tried last.
 FAILURE_MEMORY_S = 600.0
+#: How long a /status probe result is reused.
+PROBE_MEMORY_S = 120.0
+_PROBED: dict[str, tuple[float, bool]] = {}
+_PROBE_LOCK = threading.Lock()
 _FAILED_AT: dict[str, float] = {}
 
 

@@ -14,6 +14,9 @@ rules. Related: [composite.md](composite.md), [trails.md](trails.md).
   - `_showCityFull` replaces the quick view with every part but the terrain, each in its
     own colour. The preview's terrain stays: it comes from the same terrain stage.
   - Download then hits the model cache: 9.8 s instead of 75 s for Philadelphia.
+  - A Download click while that build runs (or is still in its 1.5 s wait) waits for it
+    (`window.cityFullModelRun`, `export-handlers.js::exportCityModel`). Granada ran two
+    identical builds side by side: 320 s.
 - **Why:** user chose "Quick view, then full" (2026-10-02) when Philadelphia showed no
   buildings in 3D. The finished model is what prints: merged roofs, roads, water, green.
 - **Rejected:**

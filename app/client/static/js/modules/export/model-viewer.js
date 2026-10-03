@@ -54,7 +54,8 @@ let terrainMesh   = null;
 let cityQuickMesh = null;      // buildings on the preview until the City Model replaces them
 let cityFullGroup = null;      // the finished City Model's parts (city-fullmodel.js)
 // The background City Model build: its request key, state and finished parts file.
-const _full = { key: '', state: 'idle', buffer: null, timer: null, frame: null };
+const _full = { key: '', state: 'idle', buffer: null, timer: null, frame: null,
+                pendingKey: '', pendingStatus: '', run: null };
 let viewerAutoRotate = false;
 let needsRender   = true;
 let _normalsActive = false;     // true when MeshNormalMaterial is active
@@ -801,8 +802,24 @@ function _scheduleFullModel(data, baseStatus) {
     const key = JSON.stringify(window.cityExportBody());
     if (key === _full.key && _full.buffer) { _showCityFull(baseStatus); return; }
     if (key === _full.key && _full.state === 'running') return;
-    _full.timer = setTimeout(() => _runFullModel(key, baseStatus), 1500);
+    Object.assign(_full, { pendingKey: key, pendingStatus: baseStatus });
+    _full.timer = setTimeout(() => { _full.timer = null; _full.run = _runFullModel(key, baseStatus); }, 1500);
 }
+
+/**
+ * The background build of this exact request, started now if it is only scheduled, or
+ * null. The Download button waits for it (export-handlers.js::exportCityModel), so its
+ * own build is a model-cache hit instead of a second full build (Granada: two
+ * identical builds at once took 320 s).
+ */
+window.cityFullModelRun = function cityFullModelRun(key) {
+    if (_full.timer && _full.pendingKey === key) {
+        clearTimeout(_full.timer);
+        _full.timer = null;
+        _full.run = _runFullModel(key, _full.pendingStatus);
+    }
+    return _full.key === key && _full.state === 'running' ? _full.run : null;
+};
 
 async function _runFullModel(key, baseStatus) {
     Object.assign(_full, { key, state: 'running', buffer: null });

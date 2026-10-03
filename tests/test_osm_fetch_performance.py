@@ -2,16 +2,24 @@
 
 * the OSM lakes layer is skipped for continent-sized boxes (Amazon's preview never finished);
 * the same lakes asked for twice at once are fetched once (Philadelphia fetched them twice);
-* an Overpass mirror that failed a real query is tried last for a while.
+* an Overpass mirror that failed a real query is tried last for a while;
+* mirror probes run in parallel and are remembered (2026-10-03, Miami: a dead mirror cost
+  a 10 s probe timeout on every fetch).
 """
 import threading
 import time
 
 import numpy as np
+import pytest
 
 import city2stl.fetch as fetch
 import geo2stl.osm as osm
 from geo2stl.water_layers import LAKES_MAX_AREA_KM2, make_lakes_source
+
+
+@pytest.fixture(autouse=True)
+def _fresh_probes(monkeypatch):
+    monkeypatch.setattr(osm, "_PROBED", {})
 
 
 def test_lakes_skipped_for_continent_sized_boxes():
@@ -63,3 +71,30 @@ def test_mirror_that_failed_a_query_is_tried_last(monkeypatch):
     assert order[-1] == first and len(order) == len(osm.OVERPASS_ENDPOINTS)
     monkeypatch.setattr(osm, "FAILURE_MEMORY_S", 0.0)
     assert osm.healthy_overpass_endpoints()[0] == first
+
+
+def test_probes_run_in_parallel_and_are_remembered(monkeypatch):
+    calls = []
+
+    def get(url, **kw):
+        calls.append(url)
+        if "kumi" in url:
+            time.sleep(0.3)
+            raise TimeoutError("probe")
+
+        class Ok:
+            def raise_for_status(self):
+                pass
+        return Ok()
+
+    monkeypatch.setattr("requests.get", get)
+    monkeypatch.setattr(osm, "_FAILED_AT", {})
+    t0 = time.time()
+    first = osm.healthy_overpass_endpoints()
+    assert time.time() - t0 < 0.3 * len(osm.OVERPASS_ENDPOINTS)       # not one after the other
+    assert not any("kumi" in e for e in first)
+    n = len(calls)
+    assert osm.healthy_overpass_endpoints() == first and len(calls) == n   # remembered
+    monkeypatch.setattr(osm, "PROBE_MEMORY_S", 0.0)
+    osm.healthy_overpass_endpoints()
+    assert len(calls) == 2 * n                                             # probed again once stale
