@@ -40,3 +40,25 @@ def test_fetch_dem_local_failure_returns_zero_array():
     with patch.object(dem, "fetch_local_dem", side_effect=RuntimeError("no tiles")):
         out = dem.fetch_dem((2.0, 0.0, 1.0, 0.0), 100)
     assert out.shape == (100, 50) and not out.any()
+
+
+NORTH_SEA = (67.0, 53.0, 38.0, -2.0)      # 3.3 M km2 by OpenTopography's count
+
+
+@pytest.mark.parametrize("asked, used", [
+    ("SRTMGL1", "SRTMGL3"), ("COP30", "COP90"), ("SRTMGL3", "SRTMGL3"), ("local", "local")])
+def test_dataset_for_area_falls_back_to_a_covering_dataset(asked, used):
+    """2026-10-03: the North Sea on SRTM 30 m got OpenTopography's 400 (cap 450 000 km2)."""
+    assert opentopo.dataset_for_area(asked, *NORTH_SEA) == used
+    assert opentopo.dataset_for_area(asked, 37.19, 37.17, -3.59, -3.61) == asked   # Granada
+
+
+def test_continent_falls_back_to_srtm15plus():
+    assert opentopo.dataset_for_area("SRTMGL1", 70, 0, 60, -20) == "SRTM15Plus"
+
+
+def test_fetch_requests_the_covering_dataset(tmp_path, monkeypatch):
+    monkeypatch.setattr(opentopo, "CACHE_PATH", tmp_path)
+    with patch.object(opentopo, "request_geotiff", side_effect=RuntimeError("stop")) as req,             pytest.raises(RuntimeError):
+        opentopo.fetch_opentopo_dem(*NORTH_SEA, demtype="SRTMGL1", api_key="k", dim=100)
+    assert req.call_args.args[0] == "SRTMGL3"

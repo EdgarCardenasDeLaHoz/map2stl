@@ -2,6 +2,18 @@
 
 DEM sources, the DEM cache key, availability, and how empty or uncovered DEMs are reported. Related: [projections-raster.md](projections-raster.md), [mesh-pipeline.md](mesh-pipeline.md).
 
+### 2026-10-03 — A box over an OpenTopography dataset's area cap uses the next coarser dataset
+- **Decision:** `geo2stl/opentopo.py::dataset_for_area` picks the dataset that covers the box
+  (`OPENTOPO_DATASETS[...]["max_area_km2"]`, `"coarser"`: 30 m → 90 m → SRTM15+).
+  `fetch_opentopo_dem` uses it, so the DEM route, exports and composites all benefit.
+  `/api/terrain/dem` adds `source_note`, shown as a toast.
+- **Why:** the North Sea region (saved source SRTMGL1, 3.3 M km²) failed with
+  OpenTopography's 400 "maximum area for SRTMGL1 is 450,000 km2". The app only told the user
+  to pick another dataset. At ≤ ~1000 px, a box that size is kilometres per pixel, so the
+  coarser dataset loses nothing visible.
+- **Rejected:** keeping the error — the user can't easily tell which dataset fits.
+- **Supersedes / superseded by:** —
+
 ### 2026-09-30 — The local H5 DEM is read tile by tile and block-averaged to about 2x the request
 - **Decision:** `geo2stl/dem.py::fetch_h5_dem(max_px=…)` reads each 5° tile in row bands and
   sums k x k blocks into the output (mean), so the longer side is about `max_px`;

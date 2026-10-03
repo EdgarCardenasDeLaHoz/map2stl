@@ -355,6 +355,8 @@ window.loadDEM = async function loadDEM(highRes = false) {
             // as 'loaded'; the toast carries the actionable warning.
             window.showToast?.(msg + ' (See 🩺 Diagnostics or 🔑 Keys.)', 'warning', 9000);
         }
+        // The chosen dataset cannot cover an area this large; the server used a coarser one.
+        if (data.source_note) window.showToast?.(data.source_note, 'info', 8000);
 
         // Remove loading overlay from stacked layers
         const stackC = document.getElementById('dem-image-section');

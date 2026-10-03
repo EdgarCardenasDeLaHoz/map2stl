@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 from pathlib import Path
 
@@ -31,15 +32,47 @@ logger = logging.getLogger(__name__)
 GLOBALDEM_URL = "https://portal.opentopography.org/API/globaldem"
 
 #: Global DEM types offered as DEM sources.
-#: ``arcsec`` is the native grid spacing; ``resolution_m`` its nominal size at the equator.
+#: ``arcsec`` is the native grid spacing; ``resolution_m`` its nominal size at the equator;
+#: ``max_area_km2`` OpenTopography's per-request area cap (None: not known to have one),
+#: ``coarser`` the dataset :func:`dataset_for_area` falls back to above it.
 OPENTOPO_DATASETS: dict[str, dict] = {
-    "SRTMGL1":    {"label": "SRTM 30m (Global)",          "resolution_m": 30,  "arcsec": 1},
-    "SRTMGL3":    {"label": "SRTM 90m (Global)",          "resolution_m": 90,  "arcsec": 3},
-    "AW3D30":     {"label": "ALOS World 3D 30m",          "resolution_m": 30,  "arcsec": 1},
-    "COP30":      {"label": "Copernicus DSM 30m",         "resolution_m": 30,  "arcsec": 1},
-    "COP90":      {"label": "Copernicus DSM 90m",         "resolution_m": 90,  "arcsec": 3},
-    "SRTM15Plus": {"label": "SRTM15+ (Bathymetry+Land)", "resolution_m": 500, "arcsec": 15},
+    "SRTMGL1":    {"label": "SRTM 30m (Global)",          "resolution_m": 30,  "arcsec": 1,
+                   "max_area_km2": 450_000, "coarser": "SRTMGL3"},
+    "SRTMGL3":    {"label": "SRTM 90m (Global)",          "resolution_m": 90,  "arcsec": 3,
+                   "max_area_km2": 4_050_000, "coarser": "SRTM15Plus"},
+    "AW3D30":     {"label": "ALOS World 3D 30m",          "resolution_m": 30,  "arcsec": 1,
+                   "max_area_km2": 450_000, "coarser": "SRTMGL3"},
+    "COP30":      {"label": "Copernicus DSM 30m",         "resolution_m": 30,  "arcsec": 1,
+                   "max_area_km2": 450_000, "coarser": "COP90"},
+    "COP90":      {"label": "Copernicus DSM 90m",         "resolution_m": 90,  "arcsec": 3,
+                   "max_area_km2": 4_050_000, "coarser": "SRTM15Plus"},
+    "SRTM15Plus": {"label": "SRTM15+ (Bathymetry+Land)", "resolution_m": 500, "arcsec": 15,
+                   "max_area_km2": None, "coarser": None},
 }
+
+
+def bbox_area_km2(north: float, south: float, east: float, west: float) -> float:
+    """Area of a lat/lon box on a sphere (km²). About 5 % above OpenTopography's own
+    figure (North Sea: 3.45 M vs 3.30 M km²), so a fallback comes slightly early."""
+    r = 6371.0088
+    return r * r * math.radians(abs(east - west)) * abs(
+        math.sin(math.radians(north)) - math.sin(math.radians(south)))
+
+
+def dataset_for_area(demtype: str, north: float, south: float, east: float, west: float) -> str:
+    """*demtype*, or the first coarser dataset whose area cap covers the box.
+
+    OpenTopography rejects a box over a dataset's cap with a 400 (North Sea, 3.3 M km²,
+    on SRTM 30 m: 450 000 km²). At the DEM sizes this app asks for (≤ ~1000 px) a box
+    that large is kilometres per pixel, so the coarser dataset loses nothing visible.
+    """
+    area = bbox_area_km2(north, south, east, west)
+    while demtype in OPENTOPO_DATASETS:
+        info = OPENTOPO_DATASETS[demtype]
+        if info["max_area_km2"] is None or area <= info["max_area_km2"] or not info["coarser"]:
+            break
+        demtype = info["coarser"]
+    return demtype
 
 # map2stl root (geo2stl/opentopo.py -> geo2stl -> map2stl)
 _MAP2STL_DIR = Path(__file__).resolve().parent.parent
@@ -127,9 +160,18 @@ def fetch_opentopo_dem(
     Responses are cached under :data:`CACHE_PATH`. *api_key* None means
     :func:`get_api_key`.
 
+    A box over *demtype*'s area cap is fetched from the first coarser dataset that
+    covers it (:func:`dataset_for_area`).
+
     Raises:
         RuntimeError  if the API returns an error or the GeoTIFF cannot be read.
     """
+    covering = dataset_for_area(demtype, north, south, east, west)
+    if covering != demtype:
+        logger.info("%s covers at most %s km2; this %.0f km2 box uses %s",
+                    demtype, f"{OPENTOPO_DATASETS[demtype]['max_area_km2']:,}",
+                    bbox_area_km2(north, south, east, west), covering)
+        demtype = covering
     # NOTE: `dim` is deliberately NOT part of this key. The GeoTIFF that
     # OpenTopography returns depends only on (demtype, bbox) — `dim` never
     # reaches the API, it only sets `fit_dim` on the read below.

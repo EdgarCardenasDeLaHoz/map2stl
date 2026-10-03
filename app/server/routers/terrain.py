@@ -340,6 +340,14 @@ async def get_terrain_dem(
 
         # Flag DEMs that came back with no real relief (source had no coverage
         # for this bbox) so the client can warn instead of showing a flat map.
+        # A box over the dataset's area cap was fetched from a coarser one: say so.
+        from geo2stl.opentopo import OPENTOPO_DATASETS, bbox_area_km2, dataset_for_area
+        used = dataset_for_area(dem_source, north, south, east, west)
+        if used != dem_source:
+            asked, got = OPENTOPO_DATASETS[dem_source], OPENTOPO_DATASETS[used]
+            response_content["source_note"] = (
+                f"{asked['label']} covers at most {asked['max_area_km2']:,} km²; this "
+                f"{bbox_area_km2(north, south, east, west):,.0f} km² area uses {got['label']}.")
         _empty_warning = _dem_empty_warning(im)
         if _empty_warning:
             response_content["dem_empty"] = True
