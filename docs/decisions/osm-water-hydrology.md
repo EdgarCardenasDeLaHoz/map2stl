@@ -35,6 +35,19 @@ rasterisation, and rivers and lakes carved into the terrain. Related: [composite
     (large-region guide §2).
 - **Supersedes / superseded by:** —
 
+### 2026-10-03 — OSM lakes are left out after 60 s and cached when the fetch finishes
+- **Decision:** `city2stl/fetch.py::fetch_osm_lakes` runs the fetch on its own pool (one
+  per bbox, shared by every caller). A caller waits at most `LAKES_WAIT_S` (60 s) and then
+  gets `TimeoutError`, which the composite reports as a skipped layer. The fetch carries
+  on and caches its result for the next preview or export.
+- **Why:** user chose "Time limit, then skip" after Lake George's preview waited 4+ min on
+  a slow Overpass (377 lakes in a 30 × 60 km box).
+- **Rejected:**
+  - Show without lakes, then update — needs a preview refresh path.
+  - Keep waiting — minutes on a slow day.
+- **Superseded by:** — (user, same day: OSM is not the best lake source for large boxes;
+  see the HydroLAKES plan).
+
 ### 2026-10-03 — Overpass mirror probes run in parallel and are remembered for 2 minutes
 - **Decision:** `geo2stl/osm.py::healthy_overpass_endpoints` probes the mirrors' `/status`
   in parallel and reuses each result for `PROBE_MEMORY_S` (120 s), under a lock.

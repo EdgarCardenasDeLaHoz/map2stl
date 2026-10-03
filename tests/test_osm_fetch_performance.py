@@ -3,6 +3,7 @@
 * the OSM lakes layer is skipped for continent-sized boxes (Amazon's preview never finished);
 * the same lakes asked for twice at once are fetched once (Philadelphia fetched them twice);
 * an Overpass mirror that failed a real query is tried last for a while;
+* a slow lakes fetch is left out after LAKES_WAIT_S and cached when it finishes;
 * mirror probes run in parallel and are remembered (2026-10-03, Miami: a dead mirror cost
   a 10 s probe timeout on every fetch).
 """
@@ -98,3 +99,20 @@ def test_probes_run_in_parallel_and_are_remembered(monkeypatch):
     monkeypatch.setattr(osm, "PROBE_MEMORY_S", 0.0)
     osm.healthy_overpass_endpoints()
     assert len(calls) == 2 * n                                             # probed again once stale
+
+
+def test_slow_lakes_are_skipped_then_cached(monkeypatch):
+    """Lake George, 2026-10-03: the preview waited 4+ min for OSM lakes."""
+    store = {}
+    monkeypatch.setattr("geo2stl.cache.read_osm_cache", lambda k: store.get(k))
+    monkeypatch.setattr("geo2stl.cache.write_osm_cache", lambda k, v: store.__setitem__(k, v))
+
+    def slow_fetch(n, s, e, w, layers):
+        time.sleep(0.4)
+        return {"lakes": {"type": "FeatureCollection", "features": [{"id": 7}]}}
+
+    monkeypatch.setattr(fetch, "fetch_osm_data", slow_fetch)
+    with pytest.raises(TimeoutError, match="left out"):
+        fetch.fetch_osm_lakes(2.0, 1.0, 2.0, 1.0, wait_s=0.05)
+    time.sleep(0.6)                                       # the fetch went on in the background
+    assert fetch.fetch_osm_lakes(2.0, 1.0, 2.0, 1.0, wait_s=0.05)["features"] == [{"id": 7}]

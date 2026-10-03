@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 
 logger = logging.getLogger(__name__)
 
@@ -423,36 +425,61 @@ def fetch_osm_data(
     return result
 
 
-_LAKES_LOCKS: dict = {}
+_LAKES_INFLIGHT: dict = {}   # cache key -> Future of the fetch in flight
 _LAKES_LOCKS_GUARD = threading.Lock()
 
 
-def fetch_osm_lakes(north: float, south: float, east: float, west: float) -> dict:
+#: How long a caller waits for OSM lakes before the layer is skipped (user, 2026-10-03:
+#: "Time limit, then skip"). The fetch carries on in the background and caches its
+#: result, so the next preview or export gets the lakes without waiting.
+LAKES_WAIT_S = 60.0
+_LAKES_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="osm-lakes")
+
+
+def _fetch_and_cache_lakes(key: str, north: float, south: float, east: float, west: float) -> dict:
+    from geo2stl.cache import write_osm_cache
+    try:
+        fc = fetch_osm_data(north, south, east, west, ["lakes"])["lakes"]
+        if not fc.get("error"):
+            write_osm_cache(key, fc)
+        return fc
+    finally:
+        with _LAKES_LOCKS_GUARD:
+            _LAKES_INFLIGHT.pop(key, None)
+
+
+def fetch_osm_lakes(north: float, south: float, east: float, west: float,
+                    wait_s: float | None = None) -> dict:
     """OSM ``natural=water`` / reservoir polygons for a bbox, disk-cached.
 
     The source of the composite ``lakes`` terrain layer (``geo2stl.water_layers``).
     Cached in the OSM cache under its own key (namespace ``osm_lakes``), so it
     never collides with the city payload; an Overpass outage raises
     (:class:`OverpassUpstreamError`) instead of caching an empty region.
+
+    Callers asking for the same lakes at once share one fetch (the 2D composite and the
+    3D preview used to fetch them twice). A caller waits at most *wait_s*
+    (``LAKES_WAIT_S``) and then gets :class:`TimeoutError`, which the composite reports
+    as a skipped layer; the fetch goes on and caches its result (Lake George, 2026-10-03:
+    the preview waited over 4 minutes on a slow Overpass).
     """
-    from geo2stl.cache import make_cache_key, read_osm_cache, write_osm_cache
+    from geo2stl.cache import make_cache_key, read_osm_cache
 
     key = make_cache_key("osm_lakes", north, south, east, west)
     cached = read_osm_cache(key)
     if cached is not None:
         return cached
-    # The 2D composite and the 3D preview ask for the same lakes at the same moment; without
-    # this lock both missed the cache and fetched them twice (~100 s each with a slow mirror).
     with _LAKES_LOCKS_GUARD:
-        lock = _LAKES_LOCKS.setdefault(key, threading.Lock())
-    with lock:
-        cached = read_osm_cache(key)
-        if cached is not None:
-            return cached
-        fc = fetch_osm_data(north, south, east, west, ["lakes"])["lakes"]
-        if not fc.get("error"):
-            write_osm_cache(key, fc)
-        return fc
+        fut = _LAKES_INFLIGHT.get(key)
+        if fut is None:
+            fut = _LAKES_POOL.submit(_fetch_and_cache_lakes, key, north, south, east, west)
+            _LAKES_INFLIGHT[key] = fut
+    wait = LAKES_WAIT_S if wait_s is None else wait_s
+    try:
+        return fut.result(timeout=wait)
+    except FuturesTimeout:
+        raise TimeoutError(f"OSM lakes took over {wait:.0f} s (Overpass is slow); left out "
+                           "for now, they are cached once the fetch finishes") from None
 
 
 def _layers_failed(result: dict, layers: list[str]) -> list[str]:
@@ -539,7 +566,6 @@ def _fetch_layers(ox, bbox, layers: list[str], tol_deg: float,
     :func:`fetch_osm_data`; a layer whose turn comes after cancellation is skipped,
     and the pass then raises :class:`FetchCancelled`.
     """
-    from concurrent.futures import ThreadPoolExecutor
 
     jobs = _layer_jobs(ox, bbox, tol_deg, simplify_tolerance, min_area)
     wanted = [name for name in jobs if name in layers]
