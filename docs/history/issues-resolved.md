@@ -25,6 +25,13 @@ because code cites them.
   2 min): see `docs/decisions/frontend.md` (city overlay worker cache). Blocking 100 s → 8 s.
 - Tests: `tests/test_osm_fetch_performance.py`.
 
+### 0h. Edit terrain stayed empty for the Amazon until a layer changed — fixed 2026-10-03
+- Every DEM is coloured in `workers/dem-render-worker.js`; its reply
+  (`app/client/static/js/modules/dem/dem-main.js::_onDemWorkerMessage`) filled the canvas but
+  never redrew the Edit stack, which copies it. Philadelphia looked right only because its
+  city data arrived later and triggered a redraw; the Amazon (no city data) showed gridlines
+  only. The handler now calls `emitStackUpdate`: terrain drawn 1.7 s after the DEM.
+
 ## Fixed 2026-08 to 2026-09 (were under "Active Bugs")
 
 ### 1. City raster endpoint 500 — NaN values in JSON response — fixed 2026-05-26

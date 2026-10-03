@@ -68,6 +68,10 @@ function _onDemWorkerMessage({ data }) {
 
     const { ctx } = pending;
     ctx.putImageData(new ImageData(pixels, width, height), 0, 0);
+    // The Edit stack copies this canvas: redraw it now that the pixels are in. Without
+    // this, a region with no later layer update (the Amazon: no city data) kept an
+    // empty terrain view (2026-10-03).
+    window.emitStackUpdate?.();
 }
 
 // ---------------------------------------------------------------------------
