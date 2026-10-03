@@ -70,4 +70,28 @@ Options to continue (user to choose): re-grid the packs from the STLs at the pri
 resolution (1-2 m, z-buffer) and check label alignment per tile; hand-label a few tiles as
 clean truth; or a small U-Net, which would face the same label noise.
 
+2026-10-03, third attempt: print resolution (user chose "Re-grid at print resolution";
+script `claude/scripts/trees_fine.py`, grids in `claude/e2e/trees/fine/<slug>_v3.npz`).
+11 packs (the Boston, Denver and Paris miniatures are OneDrive cloud-only, not downloaded).
+
+- **Re-grid works:** each STL rendered with `mesh_to_heightmap(method="zbuffer")` at
+  512·k (1.5-1.7 m cells); its block max matches the pack's own render at r 0.93-1.00, and
+  OSM burned at the same resolution matches the pack's OSM raster at IoU 0.82-0.94 (after a
+  `flipud`: the packs are south-up).
+- **The packs' `register_transform` is the main label error:** printed buildings vs OSM
+  were 50-170 m apart, not uniformly (Salzburg's quadrants 6-35 px apart), so a per-pack
+  affine ECC fit of OSM onto the raised cells (`trees_fine.py::refine_labels`) was added.
+  It worked on 5 packs (ECC ≥ 0.48; Salzburg raised-vs-OSM IoU 0.195 → 0.450, Bilbao
+  0.476 → 0.680) and failed on 5 (Barcelona, Lisbon, Paris, Prague, Valencia, ECC ≤ 0.14:
+  dense block prints with no distinctive layout).
+- **Scores (leave-one-city-out, per cell, texture at 4/10/20 m):** on the aligned packs AUC
+  0.76-0.91 (Bilbao, Miami, Philadelphia, Salzburg), at chance elsewhere. Still, keeping
+  cells with p ≥ 0.5 beat keeping all raised cells on **1 of 11** (Miami, 0.452 → 0.498),
+  also when trained on aligned packs only (`--min-ecc 0.4`). The ranking is real but every
+  cut removes more building cells than tree cells: trees are a small share of raised cells,
+  and courtyards, roof edges and small buildings score like canopy.
+- **Not shipped:** no keep-filter in `building_table`. Remaining options: hand-labelled
+  tiles as clean truth (would also settle how much of the shortfall is label noise), or a
+  small U-Net trained on the 4-5 aligned packs, scored on the rest.
+
 ## Decisions
