@@ -93,6 +93,9 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   - Pre-flight face estimate: under-counts rugged terrain 1.3–3×; calibrate it.
 
   [large-region guide §6](../guides/large-region-sop.md)
+- **F-STL2NUMPY**: decompose 3D city models into DSM, slope-aware DTM, a building table and
+  water/road layers ([plan](active/F-STL2NUMPY-decompose.md)). Includes measuring the mesh
+  simplifiers on our own outputs.
 - **HydroLAKES** for continent-scale boxes: global lake polygons ≥ 10 ha with surface
   elevation and mean depth (one 820 MB download from data.hydrosheds.org, then offline). Today
   boxes over 500 km² take lakes from the ESA water mask (`geo2stl/water_layers.py::water_mask_lakes`).
