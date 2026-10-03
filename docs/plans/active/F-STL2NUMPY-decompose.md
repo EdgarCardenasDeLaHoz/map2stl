@@ -78,17 +78,27 @@ code (numpy2stl rule): placing the result on the map stays in city2stl/registrat
 Order set by the user (2026-10-03): DTM, then parts, then the building table, try the round
 trip scoring, water and roads last once the others are proven.
 
-- **DTM** (in progress): `numpy2stl/raster/terrain.py`. Fixtures: our City Models of Granada,
-  Philadelphia, Cartagena saved as parts files (`claude/scripts/stl2numpy_fixtures.py`);
-  scored by `claude/scripts/dtm_eval.py` (true ground = the terrain part).
-  - Granada, terrain + buildings, 2 m cells: wide opening (today) 4.12 m MAE, 7.34 m under
-    buildings; progressive filter (slope 0.15) 0.26 m / 0.53 m, 0.1 % of roofs taken for
-    ground; step regions 0.94 m / 2.12 m.
-  - Synthetic hillside with 60 m roofs: step regions exact, progressive filter misses the wide
-    roofs (its slope allowance at a 60 m window exceeds the roof height).
-  - Our models raise roads 0.4 mm (4 m at Granada's scale); with them, every method's error
-    grows (road slabs read as raised) - that is the roads step's job.
-  - Open: Philadelphia and Cartagena scores; pick the default (or combine).
+- **DTM** (done): `numpy2stl/raster/terrain.py::estimate_dtm`. Ground = the cells both the
+  progressive filter (`ground_mask_pmf`, slope 0.15) and the wall-step regions
+  (`ground_mask_steps`) call ground; under buildings, linear from the block-median grid.
+  Fixtures: our City Models of Cartagena, Granada, Philadelphia (`claude/scripts/stl2numpy_fixtures.py`),
+  scored by `claude/scripts/dtm_eval.py` (truth = the terrain part), terrain + buildings at 2 m:
+
+  | Error under buildings | Wide opening (before) | Steps | Progressive | Both (default) |
+  |---|---|---|---|---|
+  | Cartagena | 5.0 m | 0.27 m | 0.73 m | **0.19 m** |
+  | Granada | 7.3 m | 4.2 m | 0.50 m | **0.46 m** |
+  | Philadelphia | 6.4 m | 1.28 m | 1.18 m | **0.68 m** |
+
+  - Walls: `neighbour_edges` - a step over 1.5 m that differs from both steps beside it, so
+    steep roofs and slopes are never walls (a plain |dz| cut them into strips).
+  - Our models raise roads 0.4 mm (4 m at Granada's scale); with them every method's error
+    grows - the roads step's job.
+  - Surface grids: `mesh_to_heightmap(method="zbuffer")`, the raycast answer (to 1e-14)
+    vectorized; raycast took over an hour at 2,500 x 2,500 cells, `bin` misread walls.
+- **Building table** (first version): `numpy2stl/stl2numpy/buildings.py::building_table` -
+  footprint, area, base, height (per cell over its ground), top, roof (flat / sloped /
+  complex from one plane fit); buildings split at walls. Next: score against our models.
 - **Parts** (done): `numpy2stl/io/parts.py::load_parts` keeps 3MF objects, pack files and parts
   files apart; `part_role` from names; stdlib `read3MF` (trimesh's needs lxml, not installed);
   the parts-file writer moved here from `city_model_task.py`.
