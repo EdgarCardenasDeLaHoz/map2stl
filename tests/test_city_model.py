@@ -366,6 +366,34 @@ class TestPrintability:
         ys = m.parts["trails"].vertices[:, 1]
         assert ys.max() - ys.min() >= 0.8 - 1e-6
 
+    @staticmethod
+    def _house(i, height_m, lon0=-3.59, w_m=3, d_m=25):
+        lat, m_lon, m_lat = 37.18, 1 / (111_320 * np.cos(np.radians(37.18))), 1 / 111_320
+        x0, x1 = lon0 + i * w_m * m_lon, lon0 + (i + 1) * w_m * m_lon
+        ring = [[x0, lat], [x1, lat], [x1, lat + d_m * m_lat], [x0, lat + d_m * m_lat], [x0, lat]]
+        return {"geometry": {"type": "Polygon", "coordinates": [ring]}, "properties": {"height_m": height_m}}
+
+    @pytest.mark.parametrize("heights", [[9] * 8, [9, 15] * 4], ids=["same height", "mixed heights"])
+    def test_rowhouses_print_as_their_block(self, heights):
+        """Thin touching rowhouses are not widened one by one: the row keeps its own
+        outline instead of every house growing 0.3 mm into the street (2026-10-02,
+        Philadelphia: 5 m houses are 0.2 mm wide). Same heights merge; mixed heights
+        do not, but their cluster is wide enough to print."""
+        houses = [self._house(i, h) for i, h in enumerate(heights)]      # 3 m x 25 m, touching
+        m = build_city_model(np.full((120, 150), 100.0), BBOX, {"buildings": _fc(*houses)})
+        mm_per_m = m.scale.mm_per_px / m.scale.m_per_px
+        assert 3 * mm_per_m < DEFAULT_LAYERS["buildings"].min_width_mm      # each house is thin
+        ext = m.parts["buildings"].extents
+        assert ext[0] == pytest.approx(24 * mm_per_m, abs=0.1)              # the row, not +0.6 mm
+        assert ext[1] == pytest.approx(25 * mm_per_m, abs=0.1)
+        assert m.report["layers"]["buildings"]["widened"] == 0
+
+    def test_lone_thin_building_is_still_widened(self):
+        m = build_city_model(np.full((120, 150), 100.0), BBOX,
+                             {"buildings": _fc(self._house(0, 9))})
+        assert m.report["layers"]["buildings"]["widened"] == 1
+        assert m.parts["buildings"].extents[:2].min() >= DEFAULT_LAYERS["buildings"].min_width_mm - 0.02
+
     def test_slender_towers_are_clamped(self):
         tower = {"geometry": _square(-3.59, 37.18, d=0.00002), "properties": {"height_m": 300}}
         m = build_city_model(_hill(), BBOX, {"towers": _fc(tower)})

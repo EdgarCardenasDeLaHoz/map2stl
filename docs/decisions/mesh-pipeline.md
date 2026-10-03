@@ -2,6 +2,33 @@
 
 How a DEM plus vector layers becomes one printable solid: the two-stage pipeline, the city model's scale rules, export formats, build speed and caches. Related: [architecture.md](architecture.md), [terrain-dem.md](terrain-dem.md).
 
+### 2026-10-02 — Buildings are widened after the flat-roof merge, and only where their footprint cluster is too thin
+- **Decision:**
+  - `city2stl/city_model.py::feature_polygons` no longer widens extruded footprints and
+    keeps any non-empty one.
+  - `build_layer` widens after `merge_flat_roofs`: merged outlines by `widen_thin`, the
+    rest by `widen_thin_clusters`. A footprint is widened only when its cluster (every
+    footprint within `min_gap_mm`, any height) is narrower than `min_width_mm`.
+  - Height caps use `print_widths` (the width as printed).
+  - Pre-flight counts thin footprints as an upper bound.
+  - `MODEL_CACHE_VERSION` 4.
+- **Why:**
+  - User, looking at one Philadelphia block before and after (`claude/scripts/block_simplify.py`):
+    "The red outlines dont look like very good approximations of the gray areas"; chose
+    "Merge first, then widen".
+  - 5 m rowhouses are 0.2 mm at 1:24 000, so 52 of 66 buildings were each grown 0.3 mm on
+    every side, into the street.
+  - Same block, against raw OSM: IoU 0.677 → 0.858; added area +47 % → +14 %; largest
+    deviation 0.89 → 0.58 mm; buildings widened 52 → 4.
+  - Mixed-height rows do not merge (different print layers) but print as one footprint, so
+    widening them by cluster is what the union needs.
+  - What is left is by design: gaps under 0.4 mm close (rear yards), and lone sheds widen to
+    0.8 mm.
+- **Rejected:**
+  - Widening across only — neighbours still overlap.
+  - A 0.4 mm minimum — single-line walls are fragile.
+- **Supersedes / superseded by:** refines the printability bullet of [2026-09-27 — Every mesh export runs the terrain stage, then the city model](#2026-09-27--every-mesh-export-runs-the-terrain-stage-then-the-city-model).
+
 ### 2026-09-29 — Cold city builds: tiled terrain TIN, prepared point tests, threaded simplify; assembly stays sequential
 - **Decision:**
   - `numpy2stl/src/numpy2stl/processing/decimate.py::heightfield_tin` cuts grids larger than 128 px into tiles that share their edge pixels, refined on 4 threads. Same error bound, conforming seams, ~1 % more vertices on the seams.

@@ -41,7 +41,8 @@ from geo2stl.cache import read_array_cache, read_json_cache, write_array_cache, 
 logger = logging.getLogger(__name__)
 
 #: Part of every key. Bump when geometry code changes (see the module docstring).
-MODEL_CACHE_VERSION = 3   # 3: tiled terrain TIN (numpy2stl heightfield_tin), 2026-09-29
+MODEL_CACHE_VERSION = 4   # 4: buildings widened after the flat-roof merge, 2026-10-02
+# 3: tiled terrain TIN (numpy2stl heightfield_tin), 2026-09-29
 
 NS_POLYGONS = "city_polygons"
 NS_SOLIDS = "city_solids"
