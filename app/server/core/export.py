@@ -590,6 +590,10 @@ def generate_mesh_preview(data: dict):
         "exaggeration": p.exaggeration,
         "composite_error": p.composite_error,
         "preview": info,
+        # z_mm = base_mm + (elev_m - elev_min_m) * z_mm_per_m: the viewer stands the
+        # quick building view (city-quickview.js) on the terrain with it.
+        "scale": {"z_mm_per_m": field.scale.z_mm_per_m, "elev_min_m": field.scale.elev_min_m,
+                  "base_mm": field.scale.base_mm, "sea_level_cap": p.sea_level_cap},
     })
 
 

@@ -36,6 +36,8 @@
  */
 
 import { parseBedSize, piecesNeeded } from './print-scale.js';
+import { buildingPrisms, demGroundMm } from './city-quickview.js';
+import { buildingsWithOverrides, hasOverrides } from '../layers/building-heights.js';
 import {
     evenEdges, gridKey, isCustom, minPieceMm, moveEdge, nearestEdge, roundEdges,
 } from './puzzle-cuts.js';
@@ -48,6 +50,7 @@ let modelScene    = null;
 let modelCamera   = null;
 let modelRenderer = null;
 let terrainMesh   = null;
+let cityQuickMesh = null;      // buildings on the preview until the City Model replaces them
 let viewerAutoRotate = false;
 let needsRender   = true;
 let _normalsActive = false;     // true when MeshNormalMaterial is active
@@ -600,6 +603,7 @@ async function previewModelIn3D() {
         _fitCameraToMesh(terrainMesh);
         _updateHud(data);
         _updateSceneOverlays(data);
+        const quick = _updateCityQuickView(data);
 
         window.appState.generatedModelData = {
             values: ldd.values, width: ldd.width, height: ldd.height,
@@ -625,7 +629,8 @@ async function previewModelIn3D() {
             const warn = data.composite_error ? `  ⚠ composite failed, raw DEM shown` : '';
             statusEl.textContent = `Preview: ${ldd.width}×${ldd.height}, `
                 + `${data.face_count.toLocaleString()} faces, `
-                + `${(data.z_max ?? 0).toFixed(1)} mm tall${warn}`;
+                + `${(data.z_max ?? 0).toFixed(1)} mm tall`
+                + (quick ? `, ${quick.toLocaleString()} buildings (quick view)` : '') + warn;
         }
         if (data.composite_error) {
             window.showToast('Server composite failed - preview shows the raw DEM: '
@@ -752,6 +757,60 @@ function _paintWater(colors, idx, pct) {
         colors[i + 1] = colors[i + 1] * (1 - a) + g * a;
         colors[i + 2] = colors[i + 2] * (1 - a) + b * a;
     }
+}
+
+/**
+ * Buildings on the terrain preview (city-quickview.js) for a city-sized box with the
+ * Buildings layer on and loaded; removed otherwise. Returns the building count.
+ */
+/** The plain object behind a Vue reactive proxy (or the value itself). */
+const _raw = (o) => o?.__v_raw ?? o;
+
+function _updateCityQuickView(data) {
+    if (cityQuickMesh) {
+        modelScene.remove(cityQuickMesh);
+        cityQuickMesh.geometry.dispose();
+        cityQuickMesh.material.dispose();
+        cityQuickMesh = null;
+    }
+    const st = window.appState;
+    const bbox = st?.currentDemBbox || st?.selectedRegion;
+    let feats = st?.osmCityData?.buildings?.features;
+    const on = document.getElementById('cityLayer_buildings_enabled')?.checked ?? true;
+    if (!bbox || !feats?.length || !on || !data.scale || !st.lastDemData?.values?.length
+        || haversineDiagKm(bbox.north, bbox.south, bbox.east, bbox.west) > (window.CITY_COARSE_MAX_DIAG_KM ?? 25)) {
+        return 0;
+    }
+    if (hasOverrides(st.cityHeightOverrides)) feats = buildingsWithOverrides(feats, st.cityHeightOverrides);
+    const geoToPx = window._buildGeoToPx(bbox.north, bbox.south, bbox.east, bbox.west, 0, 0, data.cols, data.rows);
+    const t0 = performance.now();
+    const g = buildingPrisms(feats, {
+        // geoToPx gives pixel-edge coordinates; preview vertices sit on pixel centres.
+        toPx: (lat, lon) => { const p = geoToPx(lat, lon); return { x: p.x - 0.5, y: p.y - 0.5 }; },
+        // lastDemData stays reactive (vmin/vmax change in place); read its raw grid.
+        groundMm: demGroundMm(_raw(st.lastDemData), data.cols, data.rows, data.scale),
+        zMmPerM: data.scale.z_mm_per_m,
+        mmPerPx: data.mm_per_pixel ?? 1,
+        multiplier: parseFloat(document.getElementById('cityLayer_buildings_value')?.value) || 1,
+        triangulate: (contour, holes) => THREE.ShapeUtils.triangulateShape(
+            contour.map(([x, y]) => new THREE.Vector2(x, y)),
+            holes.map(h => h.map(([x, y]) => new THREE.Vector2(x, y)))),
+    });
+    const { scale, xOffset, zOffset } = geometry_scale_for_overlays;
+    const p = g.positions;
+    for (let i = 0; i < p.length; i += 3) {
+        p[i] = p[i] * scale - xOffset; p[i + 1] *= scale; p[i + 2] = p[i + 2] * scale - zOffset;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(p, 3));
+    geometry.setIndex(new THREE.BufferAttribute(g.indices, 1));
+    geometry.computeVertexNormals();
+    const color = document.getElementById('layerBuildingsColor')?.value || '#c8b89a';
+    cityQuickMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide }));
+    modelScene.add(cityQuickMesh);
+    needsRender = true;
+    console.info(`[preview] ${g.count} buildings (quick view) in ${Math.round(performance.now() - t0)} ms`);
+    return g.count;
 }
 
 function _replaceMesh(newMesh) {

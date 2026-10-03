@@ -81,6 +81,10 @@ const RAW_KEYS = new Set([
     'cityRasterSourceCanvas', 'compositeDemSourceCanvas',
     'satImgSourceCanvas', '_satImgRawCanvas',
     'terrainMesh', 'viewerScene',
+    // Tens of thousands of features: deep reactivity put a Vue proxy on every read of
+    // the city overlay and the 3D quick view (~1 s per pass on Philadelphia). Replaced
+    // whole, never changed in place, so watchers on the key still fire.
+    'osmCityData',
     '_setDemEmptyState', '_updateWorkflowStepper', '_applyCurveSettings',
     'showToast', 'haversineDiagKm',
 ]);

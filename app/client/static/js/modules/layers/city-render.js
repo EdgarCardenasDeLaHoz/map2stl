@@ -265,7 +265,9 @@ function _doRenderCityOverlay() {
     if (!bbox) return;
 
     const stack = document.getElementById('layersStack');
-    if (!stack) return;
+    // Hidden (Extrude, Explore): nothing to draw. Entering Extrude resized it and re-baked
+    // 58 k Philadelphia buildings (0.84 s); updateStackedLayers renders it when shown.
+    if (!stack?.offsetParent) return;
 
     const { north, south, east, west } = bbox;
     const latRange = north - south;
@@ -424,7 +426,7 @@ function _doRenderCityOnDEM() {
     if (!bbox) return;
 
     const demContainer = document.getElementById('demImage');
-    if (!demContainer) return;
+    if (!demContainer?.offsetParent) return;      // hidden: drawn by renderDEMCanvas when shown
 
     // Match the DEM canvas pixel resolution (exclude gridline/overlay canvases)
     const demCanvas = demContainer.querySelector(window.DEM_CANVAS_SELECTOR);

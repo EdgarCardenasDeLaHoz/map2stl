@@ -145,7 +145,8 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   - face estimates are ±40 %
   - one flow rate for print time
   - the thinnest feature includes slivers clipped at the model edge
-  - the preview shows terrain only (no city layers)
+  - the preview shows the buildings as a quick view (prisms, no merge/widen); the finished
+    City Model is not swapped in yet
 
   [F-UX part B](done/F-UX-sop-followups.md)
 - **Presets and mm/px**: presets do not set mm/px, so City at 1000 px is a 1 m model cut into

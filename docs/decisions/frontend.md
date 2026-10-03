@@ -3,6 +3,28 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-02 — The 3D preview shows the buildings as a quick view; city data is kept out of Vue's reactivity
+- **Decision:**
+  - After each terrain preview of a city-sized box, `app/client/static/js/modules/export/model-viewer.js::_updateCityQuickView`
+    adds every loaded building as a prism (`city-quickview.js::buildingPrisms`).
+  - The prisms use the City Model's rule: top = highest ground under the footprint +
+    max(height × `z_mm_per_m` × multiplier, 0.4 mm).
+  - The preview returns `scale` for it.
+  - `osmCityData` is in `RAW_KEYS` (`vue/main-vue.ts`). The city overlays skip drawing
+    while hidden.
+- **Why:**
+  - User: "the philadelphia region was rendered in 3d without buildings"; chose "Quick view,
+    then full".
+  - A cold City Model build is 140 s for Philadelphia, so it cannot be the first view.
+  - First version: 3.75 s on 40,825 buildings. Fixes: typed arrays (2 s + 0.85 s GC → 0.1 s),
+    raw `osmCityData` (the Vue proxy cost ~0.8 s per pass, here and in the city overlay), no
+    hidden-overlay re-bake on entering Extrude (0.84 s). Result: 325 ms.
+  - The store already said osmCityData was "markRaw — never made deeply reactive"; nothing
+    enforced it. `lastDemData` stays reactive: `vmin`/`vmax` change in place (curve editor,
+    gridlines).
+- **Rejected:** waiting for the City Model build — minutes with nothing shown.
+- **Supersedes / superseded by:** —
+
 ### 2026-10-02 — Both city overlays draw in the worker and keep their last picture
 - **Decision:** `app/client/static/js/modules/layers/city-render.js::_renderViaWorker` draws the
   stacked-layers and the DEM-canvas city overlay in `workers/city-worker.js`. Each view keeps its
