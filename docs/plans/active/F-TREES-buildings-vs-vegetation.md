@@ -49,4 +49,25 @@ Measured by footprint IoU against OSM on the 13 registration packs, leave-one-ci
 
 ## Progress
 
+2026-10-03, first two attempts (scripts `claude/scripts/trees_eval.py`, `trees_cells.py`;
+features `numpy2stl/stl2numpy/buildings.py::region_features`). Both failed:
+
+- **Per region, gradient boosting, leave-one-city-out:** AUC 0.51-0.82 (most 0.5-0.6);
+  filtering lowered IoU on 12 of 14 packs. Cause, from Salzburg's map
+  (`claude/e2e/trees/salzburg_regions.png`): canopies break into many small regions (their
+  steps read as walls), buildings into merged blocks, so region features compare fragments
+  with blocks.
+- **Per cell, window texture at 3 scales:** AUC 0.48-0.90 (half the cities at chance);
+  better than today on 1 of 14.
+- **Suspected cause: the labels**, not only the features. OSM is placed on the plate by the
+  registration (correlation 0.28-0.81 per pack) and OSM vegetation polygons are land use,
+  not printed trees. At 5-10 m cells (the packs' 512 px grid, coarser than the print)
+  canopy texture is mostly gone.
+- The region features themselves work on a controlled case (test
+  `test_region_features_tell_a_roof_from_a_canopy`).
+
+Options to continue (user to choose): re-grid the packs from the STLs at the print's own
+resolution (1-2 m, z-buffer) and check label alignment per tile; hand-label a few tiles as
+clean truth; or a small U-Net, which would face the same label noise.
+
 ## Decisions
