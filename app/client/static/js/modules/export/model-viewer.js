@@ -37,6 +37,7 @@
 
 import { parseBedSize, piecesNeeded } from './print-scale.js';
 import { buildingPrisms, demGroundMm } from './city-quickview.js';
+import { parseModelParts, partColor, toViewerFrame } from './city-fullmodel.js';
 import { buildingsWithOverrides, hasOverrides } from '../layers/building-heights.js';
 import {
     evenEdges, gridKey, isCustom, minPieceMm, moveEdge, nearestEdge, roundEdges,
@@ -51,6 +52,9 @@ let modelCamera   = null;
 let modelRenderer = null;
 let terrainMesh   = null;
 let cityQuickMesh = null;      // buildings on the preview until the City Model replaces them
+let cityFullGroup = null;      // the finished City Model's parts (city-fullmodel.js)
+// The background City Model build: its request key, state and finished parts file.
+const _full = { key: '', state: 'idle', buffer: null, timer: null, frame: null };
 let viewerAutoRotate = false;
 let needsRender   = true;
 let _normalsActive = false;     // true when MeshNormalMaterial is active
@@ -632,6 +636,7 @@ async function previewModelIn3D() {
                 + `${(data.z_max ?? 0).toFixed(1)} mm tall`
                 + (quick ? `, ${quick.toLocaleString()} buildings (quick view)` : '') + warn;
         }
+        _scheduleFullModel(data, statusEl?.textContent || '');
         if (data.composite_error) {
             window.showToast('Server composite failed - preview shows the raw DEM: '
                 + data.composite_error, 'error', 8000);
@@ -759,13 +764,111 @@ function _paintWater(colors, idx, pct) {
     }
 }
 
+/** The plain object behind a Vue reactive proxy (or the value itself). */
+const _raw = (o) => o?.__v_raw ?? o;
+
+/** True for a box the Download button builds as a City Model (≤ CITY_COARSE_MAX_DIAG_KM). */
+function _isCityBox() {
+    const b = window.appState?.currentDemBbox || window.appState?.selectedRegion;
+    return !!b && haversineDiagKm(b.north, b.south, b.east, b.west) <= (window.CITY_COARSE_MAX_DIAG_KM ?? 25);
+}
+
+function _removeCityFull() {
+    if (!cityFullGroup) return;
+    modelScene.remove(cityFullGroup);
+    cityFullGroup.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+    cityFullGroup = null;
+    needsRender = true;
+}
+
+function _setStatusSuffix(base, suffix) {
+    const el = document.getElementById('modelStatus');
+    if (el) el.textContent = base + (suffix ? ` · ${suffix}` : '');
+}
+
+/**
+ * After a city preview, build the finished City Model in the background (the same
+ * request the Download button sends, so the download then hits the model cache) and
+ * show its parts in place of the quick view. Waits 1.5 s for the settings to settle;
+ * a newer request supersedes an older one (the server task still runs to its end).
+ */
+function _scheduleFullModel(data, baseStatus) {
+    clearTimeout(_full.timer);
+    _removeCityFull();
+    if (!_isCityBox() || typeof window.cityExportBody !== 'function') return;
+    const { scale, xOffset, zOffset } = geometry_scale_for_overlays;
+    _full.frame = { scale, xOffset, zOffset, rows: data.rows, mmPerPx: data.mm_per_pixel ?? 1 };
+    const key = JSON.stringify(window.cityExportBody());
+    if (key === _full.key && _full.buffer) { _showCityFull(baseStatus); return; }
+    if (key === _full.key && _full.state === 'running') return;
+    _full.timer = setTimeout(() => _runFullModel(key, baseStatus), 1500);
+}
+
+async function _runFullModel(key, baseStatus) {
+    Object.assign(_full, { key, state: 'running', buffer: null });
+    try {
+        const start = await fetch('/api/export/start', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key,
+        });
+        if (!start.ok) throw new Error(`HTTP ${start.status}`);
+        const { task_id: id } = await start.json();
+        for (;;) {
+            await new Promise(r => setTimeout(r, 1000));
+            if (_full.key !== key) return;                     // superseded
+            const st = await fetch(`/api/export/status/${id}`).then(r => (r.ok ? r.json() : null));
+            if (!st) throw new Error('the build task is gone');
+            if (st.status === 'error') throw new Error(st.message);
+            if (st.status === 'complete') break;
+            _setStatusSuffix(baseStatus, `finished model ${st.progress}%: ${st.message}`);
+        }
+        const res = await fetch(`/api/export/model-parts/${id}`);
+        if (!res.ok) throw new Error(`parts HTTP ${res.status}`);
+        const buffer = await res.arrayBuffer();
+        if (_full.key !== key) return;
+        Object.assign(_full, { state: 'done', buffer });
+        _showCityFull(baseStatus);
+    } catch (e) {
+        if (_full.key !== key) return;
+        _full.state = 'error';
+        console.warn('[preview] finished model failed:', e);
+        _setStatusSuffix(baseStatus, `finished model failed: ${e.message}`);
+    }
+}
+
+/** Replace the quick view with the finished model's parts (all but the terrain). */
+function _showCityFull(baseStatus) {
+    _removeCityFull();
+    const buildingsColor = document.getElementById('layerBuildingsColor')?.value || '#c8b89a';
+    const group = new THREE.Group();
+    let faces = 0;
+    // parse a copy: toViewerFrame works in place and the buffer is shown again later
+    for (const part of parseModelParts(_full.buffer.slice(0))) {
+        if (part.name === 'terrain') continue;
+        toViewerFrame(part, _full.frame);
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(part.positions, 3));
+        g.setIndex(new THREE.BufferAttribute(part.indices, 1));
+        g.computeVertexNormals();
+        group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: partColor(part.name, buildingsColor) })));
+        faces += part.indices.length / 3;
+    }
+    if (cityQuickMesh) {
+        modelScene.remove(cityQuickMesh);
+        cityQuickMesh.geometry.dispose();
+        cityQuickMesh.material.dispose();
+        cityQuickMesh = null;
+    }
+    cityFullGroup = group;
+    modelScene.add(group);
+    needsRender = true;
+    _setStatusSuffix(baseStatus.replace(/, [\d,]+ buildings \(quick view\)/, ''),
+        `finished model as printed (${faces.toLocaleString()} faces)`);
+}
+
 /**
  * Buildings on the terrain preview (city-quickview.js) for a city-sized box with the
  * Buildings layer on and loaded; removed otherwise. Returns the building count.
  */
-/** The plain object behind a Vue reactive proxy (or the value itself). */
-const _raw = (o) => o?.__v_raw ?? o;
-
 function _updateCityQuickView(data) {
     if (cityQuickMesh) {
         modelScene.remove(cityQuickMesh);

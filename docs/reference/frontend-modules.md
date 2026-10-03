@@ -28,6 +28,7 @@ Where each piece of browser code lives, and a one-line index of its functions.
 | `app/client/static/js/modules/export/print-scale.js` | `dem-main.js`, `export-handlers.js`, `model-viewer.js`, `workflow-presets.js`, Vue |
 | `app/client/static/js/modules/export/puzzle-cuts.js` | `model-viewer.js` |
 | `app/client/static/js/modules/export/city-quickview.js` | `model-viewer.js` |
+| `app/client/static/js/modules/export/city-fullmodel.js` | `model-viewer.js` |
 | `app/client/static/js/modules/export/export-poll.js` | `export-handlers.js` |
 | `app/client/static/js/modules/layers/composite-spec.js` | `composite-dem.js`, `export-handlers.js` |
 | `app/client/static/js/modules/layers/hydrology-print.js` | `composite-dem.js`, `water-hydrology-combined.js`, `hydrology-overlay.js` |
@@ -123,8 +124,9 @@ flowchart LR
 
 | File | Key symbols | Purpose |
 |---|---|---|
+| `city-fullmodel.js` | `parseModelParts`, `toViewerFrame`, `partColor` | Pure: the finished City Model's parts file (`/api/export/model-parts/{task_id}`) mapped into the viewer's frame |
 | `city-quickview.js` | `buildingPrisms`, `demGroundMm`, `MIN_HEIGHT_MM` | Pure: building footprints as prisms on the 3D preview by the City Model's height rule (quick view until the City Model build) |
-| `model-viewer.js` | `initModelViewer`, `previewModelIn3D`, `haversineDiagKm`, `updatePuzzlePreview`, `puzzleEdgesFor`, `resetPuzzleEdges`, `resetViewerCamera`, `setViewerNormals`, `setViewerAutoRotate`, `updateBedOutline`, `rebuildViewerColors` (`_applySatelliteTexture`, `_paintWater`, `_updateCityQuickView`) | Three.js preview of the server's mesh; draggable puzzle cuts; colormap or satellite drape (texture from the Edit tab's satellite canvas, fetched at ≥ the DEM's resolution, UVs from each vertex's DEM pixel) |
+| `model-viewer.js` | `initModelViewer`, `previewModelIn3D`, `haversineDiagKm`, `updatePuzzlePreview`, `puzzleEdgesFor`, `resetPuzzleEdges`, `resetViewerCamera`, `setViewerNormals`, `setViewerAutoRotate`, `updateBedOutline`, `rebuildViewerColors` (`_applySatelliteTexture`, `_paintWater`, `_updateCityQuickView`, `_scheduleFullModel`, `_showCityFull`) | Three.js preview of the server's mesh; draggable puzzle cuts; colormap or satellite drape (texture from the Edit tab's satellite canvas, fetched at ≥ the DEM's resolution, UVs from each vertex's DEM pixel) |
 | `export-handlers.js` | `downloadSTL`, `downloadModel`, `downloadCrossSection`, `exportPuzzle`, `exportCityModel`, `runPreflight`, `cancelExport`, `_demSettings`, `_asyncExport` | Exports, puzzle and City Model builds, pre-flight |
 | `export-poll.js` | `EXPORT_STALL_TIMEOUT_MS`, `createStallWatch`, `formatElapsed`, `exportProgressText` | Pure: stall-based give-up, progress text |
 | `puzzle-cuts.js` | `evenEdges`, `nearestEdge`, `moveEdge`, `minPieceMm`, `gridKey`, `isCustom`, `roundEdges` | Pure: puzzle cut positions (mm from west / south) |

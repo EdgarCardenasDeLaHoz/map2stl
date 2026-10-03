@@ -3,6 +3,30 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-03 — Extrude builds the finished City Model in the background and shows it in place of the quick view
+- **Decision:**
+  - After a city preview (box ≤ `CITY_COARSE_MAX_DIAG_KM`),
+    `app/client/static/js/modules/export/model-viewer.js::_scheduleFullModel` waits 1.5 s,
+    then starts the Download button's own request (`window.cityExportBody`, same body as
+    `exportCityModel`).
+  - The city task also writes the model's parts (`city_model_task.py::write_model_parts`),
+    served by `/api/export/model-parts/{task_id}`.
+  - `_showCityFull` replaces the quick view with every part but the terrain, each in its
+    own colour. The preview's terrain stays: it comes from the same terrain stage.
+  - Download then hits the model cache: 9.8 s instead of 75 s for Philadelphia.
+- **Why:** user chose "Quick view, then full" (2026-10-02) when Philadelphia showed no
+  buildings in 3D. The finished model is what prints: merged roofs, roads, water, green.
+- **Rejected:**
+  - Replacing the terrain mesh too — the colormap, satellite drape and puzzle preview all
+    work on the preview terrain.
+  - Reusing the task's zip for the download — the model cache already makes it fast, and a
+    download deletes its task.
+- **Known cost:**
+  - 1.75 M faces for Philadelphia; one 1.4 s main-thread task when the parts arrive.
+  - The server build cannot be cancelled: a changed setting starts a new build and the old
+    one runs to its end.
+- **Supersedes / superseded by:** —
+
 ### 2026-10-02 — The 3D preview shows the buildings as a quick view; city data is kept out of Vue's reactivity
 - **Decision:**
   - After each terrain preview of a city-sized box, `app/client/static/js/modules/export/model-viewer.js::_updateCityQuickView`

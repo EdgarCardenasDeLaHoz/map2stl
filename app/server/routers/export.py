@@ -25,6 +25,7 @@ from app.server.core.export import (  # noqa: E402
 from app.server.core.export_tasks import (  # noqa: E402
     get_task_file,
     get_task_status,
+    get_task_viewer_file,
     start_export_task,
 )
 from app.server.core.preflight import preflight  # noqa: E402
@@ -111,6 +112,17 @@ async def export_status(task_id: str):
     if status is None:
         return JSONResponse(content={"error": "Task not found"}, status_code=404)
     return JSONResponse(content=status)
+
+
+@router.get("/api/export/model-parts/{task_id}")
+async def export_model_parts(task_id: str):
+    """The finished city model's parts for the Extrude viewer (binary, see
+    ``city_model_task.write_model_parts``); the task stays for the download."""
+    response = get_task_viewer_file(task_id)
+    if response is None:
+        return JSONResponse(content={"error": "Task not found, not complete or not a city build"},
+                            status_code=404)
+    return response
 
 
 @router.get("/api/export/download/{task_id}")

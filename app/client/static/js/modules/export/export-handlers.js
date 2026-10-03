@@ -532,6 +532,9 @@ window.downloadSTL = downloadSTL;
 window.downloadModel = downloadModel;
 window.downloadCrossSection = downloadCrossSection;
 window.exportCityModel = exportCityModel;
+// The City Model export request, as exportCityModel sends it: the viewer builds the same
+// one in the background (model-viewer.js::_scheduleFullModel), so a download hits the cache.
+window.cityExportBody = () => ({ format: 'city', ..._exportParams(), ..._cityExtra() });
 window.exportPuzzle = exportPuzzle;
 window.runPreflight = runPreflight;
 window.cancelExport = cancelExport;

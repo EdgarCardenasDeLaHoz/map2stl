@@ -27,6 +27,8 @@ class ExportTask:
     progress: int = 0                # 0-100
     message: str = "Starting..."
     result_path: str | None = None
+    # City builds: the model's parts for the Extrude viewer (write_model_parts).
+    viewer_path: str | None = None
     filename: str | None = None
     media_type: str = "application/octet-stream"
     headers: dict[str, str] = field(default_factory=dict)
@@ -83,9 +85,15 @@ def _cleanup_stale_tasks() -> None:
     for tid in stale:
         with _export_tasks_lock:
             task = _export_tasks.pop(tid, None)
-        if task and task.result_path and os.path.exists(task.result_path):
+        if task:
+            _unlink_files(task)
+
+
+def _unlink_files(task: ExportTask) -> None:
+    for path in (task.result_path, task.viewer_path):
+        if path and os.path.exists(path):
             try:
-                os.unlink(task.result_path)
+                os.unlink(path)
             except OSError:
                 pass
 
@@ -123,10 +131,7 @@ def get_task_file(task_id: str):
         return None
 
     def _cleanup():
-        try:
-            os.unlink(task.result_path)
-        except OSError:
-            pass
+        _unlink_files(task)
         with _export_tasks_lock:
             _export_tasks.pop(task_id, None)
 
@@ -137,6 +142,20 @@ def get_task_file(task_id: str):
         background=BackgroundTask(_cleanup),
         headers=task.headers,
     )
+
+
+def get_task_viewer_file(task_id: str):
+    """The finished city model's parts for the viewer (``write_model_parts``), or None.
+
+    Unlike the download, reading it keeps the task: the viewer reads it, the user may
+    still download, and the TTL sweep removes both files.
+    """
+    from fastapi.responses import FileResponse
+    with _export_tasks_lock:
+        task = _export_tasks.get(task_id)
+    if not task or task.status != "complete" or not task.viewer_path             or not os.path.exists(task.viewer_path):
+        return None
+    return FileResponse(task.viewer_path, media_type="application/octet-stream")
 
 
 def start_export_task(data: dict, fmt: str) -> str:
