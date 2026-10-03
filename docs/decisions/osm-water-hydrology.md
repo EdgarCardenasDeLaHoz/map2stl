@@ -35,6 +35,29 @@ rasterisation, and rivers and lakes carved into the terrain. Related: [composite
     (large-region guide §2).
 - **Supersedes / superseded by:** —
 
+### 2026-10-03 — Lakes come from OSM up to 500 km², from the ESA water mask above; lakes are coloured as open water in 3D
+- **Decision:**
+  - `geo2stl/water_layers.py::make_lakes_source` uses OSM lakes up to
+    `OSM_LAKES_MAX_AREA_KM2` (500 km²). Larger boxes use `water_mask_lakes`: components of
+    the ESA open-water mask off the sea, at least 1 ha, flattened as `lake_depth_grid` does
+    (shared `_flatten_lakes`).
+  - Components whose own surface spreads over `LAKE_SURFACE_SPREAD_M` (5 m) are rivers
+    and are left to the rivers layer.
+  - `compute_composite_dem(water_out=)` returns a still-water grid (lake carve + ESA water,
+    cached; `COMPOSITE_CACHE_VERSION` 6). The preview marks those vertices as open water.
+- **Why:** user: "there are better sources for large lakes than osm ... lake george is one
+  such case"; chose "Both, by size" (ESA now, HydroLAKES later).
+  - Lake George: 451 s → 42 s.
+  - Telling lakes from rivers by the shore spread classed Lake George itself as a river:
+    the shore ring climbs the valley sides. SRTM flattens lake surfaces, so the surface
+    spread is the test: 67 lakes, 19,995 px (OSM: 22,158 px).
+  - A 2 m lake carve against ~10 m rivers was barely tinted in 3D; Edit draws lakes as
+    open water.
+- **Rejected:** HydroLAKES now — an 820 MB download; planned for continent-scale boxes
+  (roadmap).
+- **Supersedes / superseded by:** supersedes the 10,000 km² skip of [2026-10-02 — OSM lakes
+  skip boxes over 10 000 km²](#2026-10-02--osm-lakes-skip-boxes-over-10-000-km-one-fetch-per-box-at-a-time-failed-mirrors-go-last).
+
 ### 2026-10-03 — OSM lakes are left out after 60 s and cached when the fetch finishes
 - **Decision:** `city2stl/fetch.py::fetch_osm_lakes` runs the fetch on its own pool (one
   per bbox, shared by every caller). A caller waits at most `LAKES_WAIT_S` (60 s) and then
@@ -45,8 +68,7 @@ rasterisation, and rivers and lakes carved into the terrain. Related: [composite
 - **Rejected:**
   - Show without lakes, then update — needs a preview refresh path.
   - Keep waiting — minutes on a slow day.
-- **Superseded by:** — (user, same day: OSM is not the best lake source for large boxes;
-  see the HydroLAKES plan).
+- **Supersedes / superseded by:** — (still applies to boxes up to 500 km², which keep OSM).
 
 ### 2026-10-03 — Overpass mirror probes run in parallel and are remembered for 2 minutes
 - **Decision:** `geo2stl/osm.py::healthy_overpass_endpoints` probes the mirrors' `/status`
@@ -58,7 +80,7 @@ rasterisation, and rivers and lakes carved into the terrain. Related: [composite
 - **Supersedes / superseded by:** completes the "remember an unhealthy mirror" item of the
   large-region guide §6.
 
-### 2026-10-02 — OSM lakes skip boxes over 10 000 km²; one fetch per box at a time; failed mirrors go last
+### 2026-10-02 — OSM lakes skip boxes over 10 000 km²; one fetch per box at a time; failed mirrors go last [partly superseded: large boxes use the ESA water mask, 2026-10-03]
 - **Decision:** `geo2stl/water_layers.py::make_lakes_source` returns an empty layer over
   `LAKES_MAX_AREA_KM2`; `city2stl/fetch.py::fetch_osm_lakes` holds a lock per cache key;
   `geo2stl/osm.py::healthy_overpass_endpoints` orders mirrors that failed a real query in the

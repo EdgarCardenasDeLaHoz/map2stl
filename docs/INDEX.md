@@ -225,7 +225,7 @@ Overview and ranking: [reference/height-providers.md](reference/height-providers
   - Hydraulic geometry from discharge / order: `map2stl/geo2stl/water_layers.py::river_size_m` (`order_discharge`)
   - Valley snapping (least-cost path in a corridor): `map2stl/geo2stl/water_layers.py::snap_reaches_to_valley` (`snap_radius_m`)
   - River depth raster, thin-channel-safe resize: `map2stl/geo2stl/water_layers.py::rasterize_river_depth` (`resize_relative`)
-  - Lakes flat at shore minimum minus depth: `map2stl/geo2stl/water_layers.py::lake_depth_grid` (`make_lakes_source`)
+  - Lakes flat at shore minimum minus depth: `map2stl/geo2stl/water_layers.py::lake_depth_grid` (`make_lakes_source`; OSM up to 500 km², above it the ESA water mask: `water_mask_lakes`); still water for the 3D colours: `app/server/routers/composite.py::compute_composite_dem` (`water_out`)
 - HydroRIVERS / Natural Earth: `map2stl/geo2stl/hydrology.py::fetch_hydrorivers` (`rasterize_hydrorivers_orders`, `order_depth_grid`, `rasterize_hydrorivers`, `water_surface_mask`, `union_water_surface`, `fetch_natural_earth_rivers`, `HydrologyService`); route cache `map2stl/app/server/routers/terrain.py::_hydrorivers_layers` (`_hydrorivers_payload`)
 - Trails (OSM ski + hiking, USFS), difficulty grid, mirror failover (`TrailsUpstreamError`), cache: `map2stl/geo2stl/trails.py::TrailsService` (`OsmTrailsLayer`, `UsfsTrailsLayer`, `rasterize_trails`, `_burn_difficulty`, `trails_cache_key`)
 - Place search (Nominatim, ≤ 1 req/s): `map2stl/geo2stl/geocode.py::search_places`; landmarks near a box edge `map2stl/geo2stl/landmarks.py::edge_landmarks` (`fetch_edge_features`, `edge_proximity`); routes `map2stl/app/server/routers/geocode.py` (`geocode_search`, `edge_landmarks`)

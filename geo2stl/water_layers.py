@@ -561,7 +561,6 @@ def lake_depth_grid(features, north: float, south: float, east: float, west: flo
     printed lake (F-REGION step 4). ``smooth`` <= 1 uses the raw grid.
     """
     from numpy2stl.raster import burn_polygons
-    from scipy import ndimage
     from shapely.affinity import affine_transform
     from shapely.geometry import shape as _shape
 
@@ -591,15 +590,30 @@ def lake_depth_grid(features, north: float, south: float, east: float, west: flo
     labels = burn_polygons(polys, (h, w), bounds=(0.0, 0.0, width_m, height_m),
                            values=list(range(1, len(polys) + 1)), mode="set",
                            dtype=np.float64).astype(np.int64)
-    ids = np.unique(labels[labels > 0])
-    if not len(ids):
-        return out
+    return _flatten_lakes(labels, base, depth_m=depth_m, smooth=smooth)
 
+
+def _smoothed(base: np.ndarray, smooth: int) -> np.ndarray:
+    """*base* after the export's ``smooth`` x ``smooth`` median (NaN kept)."""
+    from scipy import ndimage
     if smooth and smooth > 1:
         filled = np.where(np.isfinite(base), base, np.nanmax(base) if np.isfinite(base).any()
                           else 0.0)
-        base = np.where(np.isfinite(base), ndimage.median_filter(filled, size=int(smooth)),
+        return np.where(np.isfinite(base), ndimage.median_filter(filled, size=int(smooth)),
                         np.nan)
+    return base
+
+
+def _flatten_lakes(labels: np.ndarray, base: np.ndarray, *, depth_m: float,
+                   smooth: int) -> np.ndarray:
+    """Relative grid lowering each labelled lake to ``min(shore) - depth_m`` (see
+    :func:`lake_depth_grid`); *labels* is 0 off-lake, k > 0 for lake k."""
+    from scipy import ndimage
+    out = np.zeros(base.shape, dtype=np.float64)
+    ids = np.unique(labels[labels > 0])
+    if not len(ids):
+        return out
+    base = _smoothed(base, smooth)
     finite = np.where(np.isfinite(base), base, np.inf)
     # Shore ring: pixels outside every lake that touch lake k.
     grown = ndimage.grey_dilation(labels, size=(3, 3))
@@ -618,8 +632,53 @@ def lake_depth_grid(features, north: float, south: float, east: float, west: flo
     return out
 
 
-#: Largest box (km²) the OSM lakes layer fetches: about 100 × 100 km, a few Overpass queries.
-LAKES_MAX_AREA_KM2 = 10_000.0
+#: Largest box (km²) whose lakes come from OSM (the most precise outlines, a few Overpass
+#: queries). Larger boxes take them from the ESA water mask (:func:`water_mask_lakes`):
+#: user, 2026-10-03, "there are better sources for large lakes than osm" - Lake George
+#: (1,800 km²) waited 4+ min for 377 OSM lakes. HydroLAKES is the planned source for
+#: continent-scale boxes.
+OSM_LAKES_MAX_AREA_KM2 = 500.0
+#: An ESA water body whose own surface elevations spread more than this (m, 10th to 90th
+#: percentile) is flowing water - a wide river, carved by the rivers layer - not a lake:
+#: SRTM flattens lake surfaces, a river falls along its course. (The shore was used first,
+#: but in mountains the shore ring climbs the valley sides: Lake George itself, 50 km long,
+#: came out as a river.)
+LAKE_SURFACE_SPREAD_M = 5.0
+
+
+def water_mask_lakes(water: np.ndarray, base: np.ndarray, north: float, south: float,
+                     east: float, west: float, *, depth_m: float = 2.0,
+                     min_area_m2: float = 10_000.0, smooth: int = 3) -> np.ndarray:
+    """Lakes from an open-water mask on *base*'s grid, flattened as :func:`lake_depth_grid`.
+
+    Water bodies are the 8-connected components of *water* (> 0.5) off the open sea
+    (:func:`ocean_mask`), at least *min_area_m2* and one pixel. Components whose surface
+    spreads over :data:`LAKE_SURFACE_SPREAD_M` are rivers and are left out.
+    """
+    from scipy import ndimage
+    base = np.asarray(base, dtype=np.float64)
+    h, w = base.shape
+    wet = (np.asarray(water) > 0.5) & ~ocean_mask(base) & np.isfinite(base)
+    labels, n = ndimage.label(wet, structure=np.ones((3, 3), bool))
+    if not n:
+        return np.zeros((h, w), dtype=np.float64)
+    _, width_m, height_m = _metric_frame(north, south, east, west)
+    px_area = (width_m / w) * (height_m / h)
+    ids = np.arange(1, n + 1)
+    size = np.asarray(ndimage.sum(wet, labels, ids))
+    keep = size * px_area >= max(float(min_area_m2), px_area)
+    surface = np.where(np.isfinite(base), base, np.nan)
+    spread = ndimage.labeled_comprehension(
+        surface, labels, ids,
+        lambda v: float(np.nanpercentile(v, 90) - np.nanpercentile(v, 10)) if len(v) else 0.0,
+        float, 0.0)
+    keep &= np.asarray(spread) <= LAKE_SURFACE_SPREAD_M
+    remap = np.zeros(n + 1, dtype=np.int64)
+    remap[ids[keep]] = np.arange(1, int(keep.sum()) + 1)
+    logger.info("water_mask_lakes: %d water bodies, %d lakes (%d rivers, %d too small)",
+                n, int(keep.sum()), int((size * px_area >= min_area_m2).sum() - keep.sum()),
+                int((size * px_area < min_area_m2).sum()))
+    return _flatten_lakes(remap[labels], base, depth_m=depth_m, smooth=smooth)
 
 
 def _bbox_area_km2(north: float, south: float, east: float, west: float) -> float:
@@ -627,13 +686,18 @@ def _bbox_area_km2(north: float, south: float, east: float, west: float) -> floa
     return abs(north - south) * 110.574 * abs(east - west) * 111.32 * float(np.cos(lat))
 
 
-def make_lakes_source(fetch_features):
+def make_lakes_source(fetch_features, water_mask=None):
     """A terrain-relative ``lakes`` provider over *fetch_features(n, s, e, w)*.
 
     *fetch_features* returns a GeoJSON FeatureCollection of water polygons
     (the app passes ``city2stl.fetch.fetch_osm_lakes``, cached). Options:
     ``depth_m`` (default 2) and ``min_area_m2`` (default 10 000 = 1 ha). The
     shore level needs the DEM, so without a base grid the layer is empty.
+
+    Boxes over :data:`OSM_LAKES_MAX_AREA_KM2` take their lakes from *water_mask(n, s, e, w,
+    shape)* - an open-water mask on the base grid; default
+    :func:`geo2stl.hydrology.water_surface_mask`, the ESA layer the composite already
+    uses - through :func:`water_mask_lakes`.
     """
 
     def provider(north, south, east, west, dim, options, base=None):
@@ -641,19 +705,23 @@ def make_lakes_source(fetch_features):
         if base is None:
             logger.warning("lakes layer needs a base DEM layer first; skipped")
             return np.zeros(bbox_grid_shape(north, south, east, west, dim))
+        kw = dict(depth_m=float(options.get("depth_m", 2.0)),
+                  min_area_m2=float(options.get("min_area_m2", 10_000.0)),
+                  smooth=int(options.get("smooth", 3)))
         area_km2 = _bbox_area_km2(north, south, east, west)
-        if area_km2 > LAKES_MAX_AREA_KM2:
-            # OSM lake outlines for a continent mean thousands of Overpass sub-queries (osmnx:
-            # Amazon was "6,910 times" its query-area limit) and a preview that never finishes.
-            # At this scale the open-water (ESA) layer already carries the large lakes.
-            logger.info("lakes layer skipped: %.0f km² is over %.0f km²; open water comes from "
-                        "the ESA water layer", area_km2, LAKES_MAX_AREA_KM2)
-            return np.zeros(base.shape)
+        if area_km2 > OSM_LAKES_MAX_AREA_KM2:
+            # OSM outlines for a large box mean many slow Overpass sub-queries (the Amazon
+            # never finished; Lake George took 4+ min): use the open-water mask instead.
+            mask_fn = water_mask
+            if mask_fn is None:
+                from geo2stl.hydrology import water_surface_mask as mask_fn
+            water = mask_fn(north, south, east, west, base.shape)
+            if water is None:
+                logger.info("lakes layer: no open-water mask for this box; left out")
+                return np.zeros(base.shape)
+            return water_mask_lakes(water, base, north, south, east, west, **kw)
         fc = fetch_features(north, south, east, west) or {}
-        return lake_depth_grid(fc.get("features") or [], north, south, east, west, base,
-                               depth_m=float(options.get("depth_m", 2.0)),
-                               min_area_m2=float(options.get("min_area_m2", 10_000.0)),
-                               smooth=int(options.get("smooth", 3)))
+        return lake_depth_grid(fc.get("features") or [], north, south, east, west, base, **kw)
 
     provider.__name__ = "lakes_layer_source"
     provider.terrain_relative = True

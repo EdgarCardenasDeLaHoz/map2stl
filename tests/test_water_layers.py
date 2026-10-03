@@ -271,6 +271,31 @@ def test_river_width_floor_in_print_mm(composite_env):
         assert rows * mm_px >= RIVER_MIN_WIDTH_MM
 
 
+def test_composite_reports_lakes_as_still_water(composite_env, monkeypatch):
+    """water_out["still"] marks the cells the lakes layer carves, so the 3D viewer colours
+    lakes as open water (2026-10-03: Lake George's 2 m carve came out barely tinted)."""
+    from app.server.routers.composite import compute_composite_dem
+
+    def lakes(n, s, e, w, dim, o, base=None):
+        out = np.zeros(base.shape)
+        out[5:10, 5:10] = -2.0
+        return out
+    lakes.terrain_relative = True
+    saved = _LAYER_SOURCES.get("lakes")
+    register_layer_source("lakes", lakes)
+    try:
+        water: dict = {}
+        compute_composite_dem(BBOX, 64, [LAYERS[0], {"source": "lakes", "dim": 64,
+                                                     "blend_mode": "add", "weight": 1.0}],
+                              split_carve=True, water_out=water)
+    finally:
+        _LAYER_SOURCES.pop("lakes", None)
+        if saved is not None:
+            _LAYER_SOURCES["lakes"] = saved
+    still = water["still"]
+    assert still.shape == (64, 64) and still[5:10, 5:10].all() and still.sum() == 25
+
+
 def test_preview_marks_the_river_vertices(composite_env):
     """The 3D preview lists the carved river's vertices, so the viewer colours them
     like the Edit map (2026-10-02: the Amazon's rivers were invisible in 3D)."""

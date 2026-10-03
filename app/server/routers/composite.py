@@ -376,7 +376,10 @@ async def get_city_raster(req: CompositeCityRasterRequest):
 #: Bumped when the composite's arithmetic changes, so older cached grids are not
 #: served: 2 = projected base grid kept (not stretched to dim), rivers snapped to
 #: the valley floor, lakes levelled after the median (F-REGION step 4).
-COMPOSITE_CACHE_VERSION = 4   # 4: sea mask from the unweighted base (3 erased weight-0 previews)
+COMPOSITE_CACHE_VERSION = 6   # 6: still-water grid cached; 5: large-box lakes from ESA water
+#: Layers whose cells are standing water (water_out["still"] of compute_composite_dem).
+STILL_WATER_SOURCES = ("lakes", "water_esa")
+# 4: sea mask from the unweighted base (3 erased weight-0 previews)
 
 
 def _composite_cache_key(north: float, south: float, east: float, west: float,
@@ -419,7 +422,8 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
                           clip_valid_region: bool = True,
                           maintain_dimensions: bool = False,
                           *, split_carve: bool = False,
-                          warnings: list | None = None):
+                          warnings: list | None = None,
+                          water_out: dict | None = None):
     """Run the dem-merge pipeline and return a numpy array.
 
     Used both by the HTTP endpoint and inline by the export pipeline so the
@@ -455,6 +459,10 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
     reused for :data:`RETRY_SKIPPED_S` only (so pre-flight, preview and export
     agree and an Overpass outage is not waited out three times), then rebuilt.
     The base layer failing still raises.
+
+    *water_out*, when given, receives ``"still"``: a boolean grid of standing water
+    (cells the ``lakes`` layer carves, or the ``water_esa`` mask covers) on the
+    composite grid, so the 3D viewer colours lakes like the Edit map (cached too).
     """
     import cv2 as _cv2
 
@@ -501,11 +509,15 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
         logger.debug("Composite cache hit (%s)", cache_key[:8])
         hit = cached[0]["composite"]
         carve = cached[0].get("carve")
+        still = cached[0].get("still")
+        if water_out is not None and still is not None and still.shape == hit.shape:
+            water_out["still"] = still.astype(bool)
         return _result(hit, carve if carve is not None and carve.shape == hit.shape
                        else np.zeros_like(hit))
 
     carve = None
     terrain = None
+    still_parts = []   # standing-water grids (any shape), resized onto the composite below
     skipped: list[str] = []
     if TEST_MODE:
         h = w = dim
@@ -542,6 +554,8 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
 
             processed = apply_layer_processing(raw, spec.processing)
 
+            if spec.source in STILL_WATER_SOURCES:
+                still_parts.append((spec.source, processed))
             if is_relative:
                 relative.append((processed, float(spec.weight)))
             elif composite is None:
@@ -595,9 +609,19 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
         sea = ocean_mask(terrain)
         if sea.any():
             carve = np.where(sea, 0.0, carve)
+    still = np.zeros(composite.shape, dtype=bool)
+    for source, grid in still_parts:
+        g = np.nan_to_num(np.asarray(grid, dtype=np.float32), nan=0.0)
+        if g.shape != composite.shape:
+            g = _cv2.resize(g, (composite.shape[1], composite.shape[0]),
+                            interpolation=_cv2.INTER_NEAREST)
+        still |= (g < 0) if source == "lakes" else (g > 0.5)
+    if water_out is not None:
+        water_out["still"] = still
     if skipped and warnings is not None:
         warnings.extend(skipped)
-    write_array_cache("composite", cache_key, {"composite": composite, "carve": carve},
+    write_array_cache("composite", cache_key, {"composite": composite, "carve": carve,
+                                               "still": still.astype(np.uint8)},
                       {"skipped": skipped} if skipped else None)
     logger.info("Composite cached (%s, %s%s)", cache_key[:8], composite.shape,
                 f", {len(skipped)} layer(s) skipped" if skipped else "")

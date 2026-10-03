@@ -178,11 +178,17 @@ def _prepare_dem_array(p: ExportContext, masks: dict | None = None
         if width_px >= 2:
             from scipy.ndimage import minimum_filter
             carve = minimum_filter(carve, size=width_px, mode="nearest")
-    if carve is not None and masks is not None and (carve < 0).any():
+    still = p.still_water if p.still_water is not None and p.still_water.shape == im.shape else None
+    if masks is not None and ((carve is not None and (carve < 0).any()) or still is not None):
         from geo2stl.water_layers import ocean_mask
-        deep = float(np.percentile(-carve[carve < 0], 99.5, method="lower"))
-        water = np.clip(-carve / deep, 0.0, 1.0) if deep > 0 else (carve < 0).astype(float)
-        masks["water"] = np.where(ocean_mask(im), WATER_SEA, water)
+        water = np.zeros(im.shape)
+        if carve is not None and (carve < 0).any():
+            deep = float(np.percentile(-carve[carve < 0], 99.5, method="lower"))
+            water = np.clip(-carve / deep, 0.0, 1.0) if deep > 0 else (carve < 0).astype(float)
+        # Lakes and open water are coloured as open water, as the Edit map draws them
+        # (a 2 m lake carve against 10 m rivers came out barely tinted).
+        open_water = ocean_mask(im) | (still if still is not None else False)
+        masks["water"] = np.where(open_water, WATER_SEA, water)
     if carve is not None and not carve_in_mm:
         # A 1-px channel is 3 of 9 cells in a 3x3 window, so smoothing after
         # carving would erase it (F-REGION).

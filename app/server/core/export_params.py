@@ -140,6 +140,8 @@ class ExportContext:
     # None: the carve stays in metres and shrinks with the vertical scale, which made
     # the Amazon's rivers 0.016 mm deep at 30 mm of relief (2026-10-02).
     river_depth_mm: float | None = None
+    # Standing water (lakes, ESA open water) on the composite grid, for the viewer's colours.
+    still_water: Any = None
 
     @classmethod
     def from_request(cls, data: dict) -> ExportContext:
@@ -158,6 +160,7 @@ class ExportContext:
         composite_layers = mesh_composite_layers(data.get("composite_layers"))
         composite_error = None
         carve_m = None
+        water: dict = {}
         if composite_layers and data.get("bbox"):
             try:
                 # Lazy import — avoids circular deps with the composite router.
@@ -171,6 +174,7 @@ class ExportContext:
                     maintain_dimensions=bool(
                         dem_settings.get("maintain_dimensions", False)),
                     split_carve=True,
+                    water_out=water,
                 )
                 dem_values = composite.flatten().tolist()
                 height, width = composite.shape
@@ -211,6 +215,7 @@ class ExportContext:
             median_size=int(data.get("median_size", 3)),
             carve_m=carve_m,
             river_depth_mm=float(data["river_depth_mm"]) if data.get("river_depth_mm") else None,
+            still_water=water.get("still"),
         )
 
 

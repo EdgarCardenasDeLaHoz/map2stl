@@ -93,6 +93,9 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   - Pre-flight face estimate: under-counts rugged terrain 1.3–3×; calibrate it.
 
   [large-region guide §6](../guides/large-region-sop.md)
+- **HydroLAKES** for continent-scale boxes: global lake polygons ≥ 10 ha with surface
+  elevation and mean depth (one 820 MB download from data.hydrosheds.org, then offline). Today
+  boxes over 500 km² take lakes from the ESA water mask (`geo2stl/water_layers.py::water_mask_lakes`).
 - **Large-region guide §6**, UI:
   - Region preset: untick *Water (ESA)* without Earth Engine, set Base 5 mm, and set mm/px from
     the bed.
