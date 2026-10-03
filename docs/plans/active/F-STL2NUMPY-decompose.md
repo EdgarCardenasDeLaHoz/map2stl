@@ -96,9 +96,25 @@ trip scoring, water and roads last once the others are proven.
     grows - the roads step's job.
   - Surface grids: `mesh_to_heightmap(method="zbuffer")`, the raycast answer (to 1e-14)
     vectorized; raycast took over an hour at 2,500 x 2,500 cells, `bin` misread walls.
-- **Building table** (first version): `numpy2stl/stl2numpy/buildings.py::building_table` -
-  footprint, area, base, height (per cell over its ground), top, roof (flat / sloped /
-  complex from one plane fit); buildings split at walls. Next: score against our models.
+- **Building table** (done, first version): `numpy2stl/stl2numpy/buildings.py::building_table`
+  - footprint, area, base, height (per cell over its ground), top, roof (flat / sloped /
+  complex from one plane fit); buildings split at walls. Scored by
+  `claude/scripts/buildings_eval.py` (2 m cells, terrain + buildings surface):
+
+  | | Table on estimated vs true ground: IoU, matched, height error (median / p90) | vs the OSM input: IoU, height error (median / p90) |
+  |---|---|---|
+  | Cartagena | 0.92, 100 %, 0.03 / 0.13 m | 0.74, 1.5 / 6.2 m |
+  | Granada | 0.97, 100 %, 0.26 / 0.86 m | 0.84, 2.4 / 12.8 m |
+  | Philadelphia | 0.97, 100 %, 0.06 / 0.25 m | 0.67, 1.6 / 6.1 m |
+
+  The OSM gap is mostly the print model, not the decomposition: buildings print at least
+  0.4 mm tall (about 9.5 m at Philadelphia's scale), Philadelphia's heights partly come from
+  3DEP lidar, and outlines are simplified and merged by print layer. A fair round trip
+  needs the model's own building inputs (after height enhancement): open.
+- **Round trip** (tried): above. Next: the 9 Micropolitan packs (no truth; scored against
+  OSM through the registration critic).
+- **Water and roads**: last, as asked. Our models raise roads 0.4 mm and green 0.2 mm, which
+  every terrain method reads as raised ground today.
 - **Parts** (done): `numpy2stl/io/parts.py::load_parts` keeps 3MF objects, pack files and parts
   files apart; `part_role` from names; stdlib `read3MF` (trimesh's needs lxml, not installed);
   the parts-file writer moved here from `city_model_task.py`.
