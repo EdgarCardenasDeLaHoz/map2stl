@@ -230,6 +230,10 @@ def preflight(data: dict) -> dict:
             if st.get("widened"):
                 warnings.append(f"{name}: {st['widened']} features narrower than "
                                 f"{styles[name].min_width_mm} mm will be widened")
+            if st.get("thin"):
+                warnings.append(f"{name}: {st['thin']} footprints narrower than "
+                                f"{styles[name].min_width_mm} mm print as drawn; the slicer "
+                                "may thin out or drop them")
             if st.get("clamped"):
                 warnings.append(f"{name}: {st['clamped']} features taller than "
                                 f"{styles[name].max_slenderness:g}x their width will be "

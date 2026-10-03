@@ -29,7 +29,7 @@ def _rect(lon, lat, dx, dy):
 
 BUILDINGS = {"type": "FeatureCollection", "features": [
     {"geometry": _rect(-3.588, 37.183, 0.0004, 0.0004), "properties": {"height_m": 20}},
-    # ~2 m wide at ~1:20,000: below 0.8 mm, widened
+    # ~2 m wide at ~1:20,000: below 0.8 mm, printed as drawn
     {"geometry": _rect(-3.595, 37.178, 0.00001, 0.0003), "properties": {"height_m": 8}},
     # a 150 m tower on a ~9 m footprint: taller than 8x its width, clamped
     {"geometry": _rect(-3.585, 37.176, 0.00005, 0.00004), "properties": {"height_m": 150}},
@@ -57,12 +57,13 @@ class TestPreflight:
         got = pf["layers"]["buildings"]
         for k in ("polygons", "widened", "clamped", "dropped"):
             assert got[k] == built[k], k
-        assert got["widened"] >= 1 and got["clamped"] >= 1
+        # Buildings print as drawn (2026-10-02): the 2 m one is reported, not widened.
+        assert got["widened"] == 0 and got["thin"] >= 1 and got["clamped"] >= 1
+        assert any("print as drawn" in w for w in pf["warnings"]), pf["warnings"]
         assert pf["size_mm"][:2] == [149.0, 119.0]
-        assert pf["thinnest_feature_mm"] >= 0.8 - 1e-6
+        assert pf["thinnest_feature_mm"] < 0.8
         assert pf["fits_bed"] is False
         assert any("does not fit" in w for w in pf["warnings"])
-        assert any("widened" in w for w in pf["warnings"])
         assert any("capped" in w for w in pf["warnings"])
         est = pf["estimate"]
         assert est["filament_g"] > 0 and est["print_hours"] > 0 and "1.24" in est["formula"]

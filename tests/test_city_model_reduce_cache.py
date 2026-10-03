@@ -57,9 +57,14 @@ class TestFlatRoofMerge:
         assert m.report["merged"]["watertight"]
         assert len(m.parts["buildings"].split(only_watertight=False)) == 1
 
-    def test_gap_narrower_than_a_nozzle_closes(self):
+    def test_gap_narrower_than_a_nozzle_stays_as_drawn(self):
+        """User, 2026-10-02: "Keep gaps as drawn" - min_gap_mm is 0 by default."""
         gap_m = 0.25 / _mm_per_m()                    # 0.25 mm < 0.4 mm
-        m = _build(_b(0), _b(60 + gap_m))
+        assert _build(_b(0), _b(60 + gap_m)).report["layers"]["buildings"]["solids"] == 2
+
+    def test_gap_closing_is_still_available(self):
+        gap_m = 0.25 / _mm_per_m()
+        m = _build(_b(0), _b(60 + gap_m), layer_overrides={"buildings": {"min_gap_mm": 0.4}})
         assert m.report["layers"]["buildings"]["solids"] == 1
         assert m.report["merged"]["watertight"]
 

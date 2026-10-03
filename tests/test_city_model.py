@@ -390,20 +390,29 @@ class TestPrintability:
 
     def test_small_merged_sheds_still_print(self):
         """Two touching 3 m sheds of one height merge into a group smaller than
-        MIN_FOOTPRINT_MM2; the group is widened, not dropped (2026-10-02: such
+        MIN_FOOTPRINT_MM2; the group prints as drawn, not dropped (2026-10-02: such
         groups vanished, their members counted as merged)."""
         sheds = [self._house(i, 3, d_m=3) for i in range(2)]
         m = build_city_model(np.full((120, 150), 100.0), BBOX, {"buildings": _fc(*sheds)})
         b = m.report["layers"]["buildings"]
         assert b["merged_from"] == 2 and b["merged_into"] == 1
-        assert "buildings" in m.parts
-        assert m.parts["buildings"].extents[:2].min() >= DEFAULT_LAYERS["buildings"].min_width_mm - 0.02
+        mm_per_m = m.scale.mm_per_px / m.scale.m_per_px
+        assert m.parts["buildings"].extents[:2] == pytest.approx([6 * mm_per_m, 3 * mm_per_m], abs=0.03)
 
-    def test_lone_thin_building_is_still_widened(self):
+    def test_lone_thin_building_prints_as_drawn(self):
+        """User, 2026-10-02: no widening; a 3 m shed (0.19 mm) keeps its outline."""
         m = build_city_model(np.full((120, 150), 100.0), BBOX,
                              {"buildings": _fc(self._house(0, 9))})
-        assert m.report["layers"]["buildings"]["widened"] == 1
-        assert m.parts["buildings"].extents[:2].min() >= DEFAULT_LAYERS["buildings"].min_width_mm - 0.02
+        mm_per_m = m.scale.mm_per_px / m.scale.m_per_px
+        assert m.report["layers"]["buildings"]["widened"] == 0
+        assert m.parts["buildings"].extents[0] == pytest.approx(3 * mm_per_m, abs=0.03)
+
+    def test_gaps_between_buildings_stay_as_drawn(self):
+        """Two same-height rows 2 m apart (0.13 mm, under a nozzle) stay two outlines."""
+        a = [self._house(i, 9) for i in range(4)]                     # 12 m row
+        b = [self._house(i, 9, lon0=-3.59 + 14 / (111_320 * np.cos(np.radians(37.18)))) for i in range(4)]
+        m = build_city_model(np.full((120, 150), 100.0), BBOX, {"buildings": _fc(*a, *b)})
+        assert m.report["layers"]["buildings"]["merged_into"] == 2
 
     def test_slender_towers_are_clamped(self):
         tower = {"geometry": _square(-3.59, 37.18, d=0.00002), "properties": {"height_m": 300}}

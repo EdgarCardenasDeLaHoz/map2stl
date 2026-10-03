@@ -143,12 +143,14 @@ class LayerStyle:
     min_height_mm: float = 0.4    # extrude: never thinner than this
     min_width_mm: float = PRINT_MIN_WIDTH_MM   # narrower features are widened to this
     max_slenderness: float = MAX_SLENDERNESS   # extrude: height cap as a multiple of width (0 = off)
-    # extrude: print-scale reduction of flat roofs (merge_flat_roofs). Buildings whose
-    # tops round to the same print layer are merged; gaps under min_gap_mm close.
+    # extrude: print-scale reduction of flat roofs (merge_flat_roofs). Touching buildings
+    # whose tops round to the same print layer become one solid. The outline stays as
+    # drawn by default (user, 2026-10-02: "Keep gaps as drawn"); min_gap_mm > 0 also
+    # closes narrower gaps and outline_tol_mm > 0 simplifies the merged outline.
     merge_flat: bool = True
     layer_height_mm: float = 0.1  # print layer: tops closer than this print as one
-    min_gap_mm: float = 0.4       # one nozzle: a narrower gap fills in on the print anyway
-    outline_tol_mm: float = 0.1   # simplification of the merged outlines
+    min_gap_mm: float = 0.0       # 0: only touching footprints merge, no gap is closed
+    outline_tol_mm: float = 0.0   # 0: merged outlines are not simplified further
 
 
 DEFAULT_LAYERS: dict[str, LayerStyle] = {
@@ -377,53 +379,15 @@ def widen_thin(geoms: np.ndarray, min_width_mm: float) -> tuple[np.ndarray, int]
     return geoms, int(thin.sum())
 
 
-def widen_thin_clusters(polys, which: np.ndarray, min_width_mm: float,
-                        gap_mm: float) -> tuple[np.ndarray, int]:
-    """``polys[which]`` widened where their footprint cluster is too thin to print.
-
-    A cluster is every footprint within *gap_mm* of another (any height): the print
-    is their union, so a 0.2 mm rowhouse between neighbours prints as part of its
-    row and is left as drawn. Members of a cluster narrower than *min_width_mm* are
-    widened on their own (:func:`widen_thin`). Returns (polys[which] as built, count).
-    """
-    arr = np.asarray(polys, dtype=object)
-    sel = arr[np.asarray(which, dtype=int)]
-    if not len(sel):
-        return sel, 0
-    thin = _widths(sel) < min_width_mm
-    if not thin.any():
-        return sel, 0
-    from scipy.sparse import coo_matrix
-    from scipy.sparse.csgraph import connected_components
-
-    a, b = shapely.STRtree(arr).query(arr, predicate="dwithin", distance=gap_mm)
-    _, comp = connected_components(coo_matrix((np.ones(len(a)), (a, b)),
-                                              shape=(len(arr), len(arr))), directed=False)
-    cw = {}
-    for c in np.unique(comp[np.asarray(which, dtype=int)[thin]]):
-        cw[c] = float(_widths(np.array([shapely.union_all(arr[comp == c])], dtype=object))[0])
-    grow = thin & np.array([cw.get(c, np.inf) < min_width_mm
-                            for c in comp[np.asarray(which, dtype=int)]])
-    out = sel.copy()
-    out[grow], n = widen_thin(sel[grow], min_width_mm)
-    return out, n
-
-
-def print_widths(polys, style: LayerStyle) -> np.ndarray:
-    """Footprint widths as printed: extruded footprints are widened to ``min_width_mm``."""
-    w = _widths(np.asarray(polys, dtype=object))
-    return np.maximum(w, style.min_width_mm) if style.mode == "extrude" else w
-
-
 def feature_polygons(name: str, features: list[dict], style: LayerStyle,
                      terrain: Terrain) -> tuple[list[Polygon], list[dict], dict]:
     """Features as clipped, simplified, snapped model-mm polygons (vectorised).
 
     Features narrower than ``style.min_width_mm`` at model scale are widened to it
     (a 2 m trail at 1:3500 is 0.6 mm: below what a 0.4 mm nozzle lays down).
-    Extruded footprints (buildings) are not: :func:`build_layer` widens them after
-    :func:`merge_flat_roofs`, so a row of 0.2 mm rowhouses prints as its block and
-    does not grow 0.3 mm into the street at every house (2026-10-02).
+    Extruded footprints (buildings) are not, and none is dropped for its size: they
+    print as drawn (user, 2026-10-02: widening grew 0.2 mm rowhouses 0.3 mm into the
+    street, and lone sheds into blobs; the slicer prints what it can of a thin one).
     Returns (polygons, their properties, counts: ``dropped`` = features that
     produced nothing, ``widened``).
     """
@@ -462,8 +426,7 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
                                       SNAP_MM, join_style="mitre")
         parts, sub = shapely.get_parts(parts, return_index=True)
         owner = owner[sub]
-    # Extruded footprints are widened later (build_layer), which brings any of them to
-    # at least min_width_mm square: only an empty one is dropped here.
+    # Extruded footprints print as drawn: only an empty one is dropped.
     min_area = 0.0 if style.mode == "extrude" else MIN_FOOTPRINT_MM2
     area = shapely.area(parts)
     polys_mask = (shapely.get_type_id(parts) == 3) & (area > 0) & (area >= min_area)
@@ -527,12 +490,12 @@ def merge_flat_roofs(polys: list[Polygon], props: list[dict], lo: np.ndarray, hi
     out). Their *absolute* top - highest ground under the footprint plus the
     height, after the min-height and slenderness rules - is rounded to
     ``style.layer_height_mm``: two tops in the same layer print as one surface.
-    Candidates in the same layer whose outlines are closer than
-    ``style.min_gap_mm`` (one nozzle: a narrower gap fills in on the print
-    anyway) form a group; each group is unioned, closed by half that gap
-    (``buffer(+g/2).buffer(-g/2)``, mitre), simplified at ``style.outline_tol_mm``,
-    snapped and exploded, and every resulting polygon is one prism from the
-    group's lowest skirt floor to its highest top (all within one layer).
+    Candidates in the same layer that touch (or are closer than
+    ``style.min_gap_mm``, 0 by default) form a group; each group is unioned,
+    closed by half that gap (``buffer(+g/2).buffer(-g/2)``, mitre; skipped at 0),
+    simplified at ``style.outline_tol_mm`` (skipped at 0), snapped and exploded,
+    and every resulting polygon is one prism from the group's lowest skirt floor
+    to its highest top (all within one layer).
 
     The slicer would draw the same outline, so this is lossless at print scale;
     what it saves is one solid (and its walls against its neighbours) per
@@ -541,7 +504,7 @@ def merge_flat_roofs(polys: list[Polygon], props: list[dict], lo: np.ndarray, hi
     the caller. Returns (solids, mask of the buildings merged, counts).
     """
     n = len(polys)
-    counts = {"merged_from": 0, "merged_into": 0, "widened": 0}
+    counts = {"merged_from": 0, "merged_into": 0}
     merged = np.zeros(n, bool)
     if not style.merge_flat or n < 2:
         return [], merged, counts
@@ -570,8 +533,10 @@ def merge_flat_roofs(polys: list[Polygon], props: list[dict], lo: np.ndarray, hi
     group_ids = np.flatnonzero(size > 1)
     r = style.min_gap_mm / 2
     unions = np.array([shapely.union_all(arr[comp == g]) for g in group_ids], dtype=object)
-    closed = shapely.buffer(shapely.buffer(unions, r, join_style="mitre"), -r, join_style="mitre")
-    closed = shapely.simplify(closed, style.outline_tol_mm, preserve_topology=True)
+    closed = (shapely.buffer(shapely.buffer(unions, r, join_style="mitre"), -r, join_style="mitre")
+              if r > 0 else unions)
+    if style.outline_tol_mm > 0:
+        closed = shapely.simplify(closed, style.outline_tol_mm, preserve_topology=True)
     # Mitre closing + simplify can leave a self-touching ring (Granada: GEOS "side
     # location conflict" in the intersection); make_valid may add stray lines, which
     # the polygon filter below drops.
@@ -584,13 +549,10 @@ def merge_flat_roofs(polys: list[Polygon], props: list[dict], lo: np.ndarray, hi
                                       SNAP_MM, join_style="mitre")
         parts, sub = shapely.get_parts(parts, return_index=True)
         owner = owner[sub]
-    # Footprints arrive unwidened (feature_polygons): widen what the merge left thin,
-    # before the area test - a group of sheds under MIN_FOOTPRINT_MM2 was dropped while
-    # its members counted as merged, so they vanished from the print.
-    poly = shapely.get_type_id(parts) == 3
-    parts, owner = parts[poly], owner[poly]
-    parts, counts["widened"] = widen_thin(parts, style.min_width_mm)
-    ok = shapely.area(parts) >= MIN_FOOTPRINT_MM2
+    # Any non-empty part prints, as feature_polygons keeps any footprint: a group of
+    # sheds under MIN_FOOTPRINT_MM2 was dropped while its members counted as merged,
+    # so they vanished from the print (2026-10-02).
+    ok = (shapely.get_type_id(parts) == 3) & (shapely.area(parts) > 0)
     parts, g = parts[ok], group_ids[owner[ok]]
     gfloor = np.full(comp.max() + 1, np.inf)
     gtop = np.full(comp.max() + 1, -np.inf)
@@ -982,10 +944,10 @@ def layer_preflight(name: str, features: list[dict], style: LayerStyle, terrain:
     arr = np.asarray(polys, dtype=object)
     area = shapely.area(arr)
     nverts = shapely.get_num_coordinates(arr)
-    out["thinnest_mm"] = round(float(print_widths(arr, style).min()), 3)
+    out["thinnest_mm"] = round(float(_widths(arr).min()), 3)
     if style.mode == "extrude":
-        # Widened in build_layer, after the merge: an upper bound here.
-        out["widened"] = out.get("widened", 0) + int((_widths(arr) < style.min_width_mm).sum())
+        # Printed as drawn, not widened: the slicer may thin out or drop these.
+        out["thin"] = int((_widths(arr) < style.min_width_mm).sum())
     out["area_mm2"] = round(float(area.sum()), 1)
     if style.mode == "extrude":
         polys, props, _, _ = assemble_parts(polys, props)
@@ -993,7 +955,7 @@ def layer_preflight(name: str, features: list[dict], style: LayerStyle, terrain:
         z_per_m = terrain.scale.z_mm_per_m * style.height_scale
         lo, hi = terrain.ranges_under(polys)
         base = np.array([min_height_from_tags(p) for p in props]) * z_per_m
-        cap = (style.max_slenderness * print_widths(arr, style)
+        cap = (style.max_slenderness * _widths(arr)
                if style.max_slenderness > 0 else np.full(len(polys), np.inf))
         height = np.array([float(p.get("height_m") or 10.0) for p in props]) * z_per_m
         out["clamped"] = int((height - base > cap).sum())
@@ -1037,7 +999,7 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
         z_per_m = terrain.scale.z_mm_per_m * style.height_scale
         lo, hi = terrain.ranges_under(polys)
         base = np.array([min_height_from_tags(p) for p in props]) * z_per_m
-        cap = (style.max_slenderness * print_widths(polys, style)
+        cap = (style.max_slenderness * _widths(np.asarray(polys, dtype=object))
                if style.max_slenderness > 0 and polys else np.full(len(polys), np.inf))
         # The slenderness rule applies to each solid's own extent: a spire part
         # stands on its tower, not on the ground.
@@ -1045,23 +1007,14 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
         stats["clamped"] = int((want > cap).sum())
         merged_solids, merged, mstats = merge_flat_roofs(
             polys, props, lo, hi, base, cap, z_per_m, style, terrain.rect)
-        stats["widened"] = stats.get("widened", 0) + mstats.pop("widened")
         stats.update(mstats)
         solids.extend(merged_solids)
-        # Buildings left unmerged are widened only where their touching cluster is
-        # still too thin to print (after the merge, see feature_polygons).
-        rest = np.flatnonzero(~merged)
-        if len(rest):
-            wide, n = widen_thin_clusters(polys, rest, style.min_width_mm, style.min_gap_mm)
-            polys = list(polys)
-            for k, p in zip(rest, wide, strict=True):
-                polys[k] = p
-            stats["widened"] += n
         # As _roofed: floor on the tower for a part, the skirt otherwise; flat
         # roofs as prisms in one vectorised pass, other roofs one by one.
         z_floor = np.where(base > 0, hi + base, np.maximum(lo - 0.2, 0.0))
         height = np.array([float(p.get("height_m") or 10.0) for p in props])
         top = hi + np.maximum(np.minimum(height * z_per_m, base + cap), style.min_height_mm)
+        rest = np.flatnonzero(~merged)
         flat = np.array([_roof(props[k], height[k], z_per_m)[0] == "flat" for k in rest], bool)
         fk = rest[flat] if len(rest) else rest
         solids.extend(m for m in prisms(np.asarray(polys, dtype=object)[fk], z_floor[fk], top[fk])

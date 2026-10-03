@@ -256,8 +256,10 @@ half its length within 60 m of buildings or within 6 m of a road (report:
 
 Per layer (Extrude → *City model layers* card; switch it on under *More settings*): enabled,
 mode (extrude / raised / engraved / water),
-height or depth, line width. Printability rules apply to every layer: features narrower
-than 0.8 mm are widened, extruded heights capped at 8 × footprint width (reported).
+height or depth, line width. Printability rules: roads, paths and other raised or engraved
+features narrower than 0.8 mm are widened; buildings print as drawn (the pre-flight lists
+those under 0.8 mm, which the slicer may thin out); extruded heights are capped at
+8 × footprint width (reported).
 
 ## 4. How the model is built (for troubleshooting)
 

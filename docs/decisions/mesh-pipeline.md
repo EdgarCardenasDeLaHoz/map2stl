@@ -2,7 +2,32 @@
 
 How a DEM plus vector layers becomes one printable solid: the two-stage pipeline, the city model's scale rules, export formats, build speed and caches. Related: [architecture.md](architecture.md), [terrain-dem.md](terrain-dem.md).
 
-### 2026-10-02 — Buildings are widened after the flat-roof merge, and only where their footprint cluster is too thin
+### 2026-10-02 — Buildings print as drawn: no widening, no gap closing, no merged-outline smoothing
+- **Decision:**
+  - Extruded footprints (buildings, churches, towers) are never widened, and none is dropped
+    for its size (`city2stl/city_model.py::feature_polygons`).
+  - `merge_flat_roofs` merges only touching footprints in one print layer
+    (`LayerStyle.min_gap_mm` = 0) and does not simplify the merged outline
+    (`outline_tol_mm` = 0). Both stay available as layer overrides.
+  - Pre-flight reports `thin` (footprints under `min_width_mm`) with a warning that they
+    print as drawn.
+  - Line features (walls) are still buffered to at least `min_width_mm`.
+  - `MODEL_CACHE_VERSION` 5.
+- **Why:**
+  - User: "The red area is still wrong, why do we need the widening, buildings touching to
+    make blocks should be large enough"; chose "Keep as drawn" for lone thin buildings and
+    "Keep gaps as drawn" for yards.
+  - Measured on the Philadelphia block (`claude/scripts/block_simplify.py`) against raw OSM:
+    - With cluster widening, about two thirds of the added area (+17 %) came from 6 lone
+      sheds grown to 0.8 mm. The rest was rear yards closed by the 0.4 mm gap rule.
+    - Now: IoU 0.978, +0.7 % / −1.1 % area, largest deviation 0.05 mm.
+- **Rejected:**
+  - Widening across only — still blobs at 0.15 mm.
+  - Dropping thin buildings — they disappear.
+  - Closing sub-nozzle gaps — the slicer decides what a 0.2 mm gap prints as.
+- **Supersedes / superseded by:** supersedes [2026-10-02 — Buildings are widened after the flat-roof merge](#2026-10-02--buildings-are-widened-after-the-flat-roof-merge-and-only-where-their-footprint-cluster-is-too-thin-superseded).
+
+### 2026-10-02 — Buildings are widened after the flat-roof merge, and only where their footprint cluster is too thin [superseded]
 - **Decision:**
   - `city2stl/city_model.py::feature_polygons` no longer widens extruded footprints and
     keeps any non-empty one.
@@ -30,7 +55,7 @@ How a DEM plus vector layers becomes one printable solid: the two-stage pipeline
 - **Rejected:**
   - Widening across only — neighbours still overlap.
   - A 0.4 mm minimum — single-line walls are fragile.
-- **Supersedes / superseded by:** refines the printability bullet of [2026-09-27 — Every mesh export runs the terrain stage, then the city model](#2026-09-27--every-mesh-export-runs-the-terrain-stage-then-the-city-model).
+- **Supersedes / superseded by:** superseded by [2026-10-02 — Buildings print as drawn](#2026-10-02--buildings-print-as-drawn-no-widening-no-gap-closing-no-merged-outline-smoothing); refines the printability bullet of [2026-09-27 — Every mesh export runs the terrain stage, then the city model](#2026-09-27--every-mesh-export-runs-the-terrain-stage-then-the-city-model).
 
 ### 2026-09-29 — Cold city builds: tiled terrain TIN, prepared point tests, threaded simplify; assembly stays sequential
 - **Decision:**
