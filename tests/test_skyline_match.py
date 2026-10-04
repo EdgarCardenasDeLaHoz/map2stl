@@ -71,3 +71,32 @@ def test_photo_profile_ignores_trees_and_open_sky():
     sky[:, 3] = True                  # column 3: all sky
     prof = sm.photo_profile(sky, bld)
     assert prof.y_top[0] == 3 and np.isnan(prof.y_top[2]) and np.isnan(prof.y_top[3])
+
+
+def _outline_loop(t, cam_xy, h_cam=2.0, min_dist_m=60.0):
+    """The original per-tower loop, kept here as the reference for the vectorised version."""
+    out = np.zeros(sm.N_BINS)
+    own = np.full(sm.N_BINS, -1)
+    for i, (v, H) in enumerate(zip(t.verts, t.height_m, strict=True)):
+        dx, dy = v[:, 0] - cam_xy[0], v[:, 1] - cam_xy[1]
+        dmin = float(np.hypot(dx, dy).min())
+        if dmin < min_dist_m:
+            continue
+        b = np.degrees(np.arctan2(dx, dy)) % 360.0
+        rel = (b - b[0] + 180.0) % 360.0 - 180.0
+        lo, hi = b[0] + rel.min(), b[0] + rel.max()
+        elev = math.degrees(math.atan2(H - h_cam, dmin))
+        idx = np.arange(math.floor(lo / sm.BIN_DEG), math.ceil(hi / sm.BIN_DEG) + 1) % sm.N_BINS
+        win = elev > out[idx]
+        out[idx[win]] = elev
+        own[idx[win]] = i
+    return out, own
+
+
+def test_vectorised_outline_matches_the_loop():
+    towers = _city(seed=3, n=60)
+    for cam in [(-2400.0, 300.0), (0.0, -1500.0), (900.0, 50.0)]:   # last one inside downtown
+        ref_out, ref_own = _outline_loop(towers, cam)
+        out, own = sm.predicted_outline(towers, cam, owners=True)
+        assert np.allclose(out, ref_out)
+        assert (own == ref_own).all()

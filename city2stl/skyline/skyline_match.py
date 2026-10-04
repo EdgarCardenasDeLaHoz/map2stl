@@ -129,33 +129,52 @@ def photo_profile(sky: np.ndarray, building: np.ndarray, min_run: int = 3) -> Ph
 # --------------------------------------------------------------------------- model
 
 
+def _flat(t: Towers):
+    """All footprint corners in one array, with the tower each belongs to (cached on ``t``)."""
+    cache = t.__dict__.get("_flat")
+    if cache is None:
+        xy = np.concatenate(t.verts)
+        owner = np.repeat(np.arange(len(t.verts)), [len(v) for v in t.verts])
+        starts = np.r_[0, np.cumsum([len(v) for v in t.verts])[:-1]]
+        cache = (xy, owner, starts)
+        t.__dict__["_flat"] = cache  # frozen dataclass: cache outside the fields
+    return cache
+
+
 def predicted_outline(t: Towers, cam_xy: tuple[float, float], h_cam: float = 2.0,
                       min_dist_m: float = 60.0, owners: bool = False):
     """Highest roof elevation (deg) per 0.1-deg bearing bin, seen from ``cam_xy``.
 
     With ``owners`` also returns, per bin, the index of the tower forming the skyline (-1 none).
+    Vectorised over towers (one pass over all footprint corners, one ``maximum.at``): the
+    per-tower Python loop it replaced made a full search 3-5 min per photo (2026-10-04).
     """
+    xy, owner, starts = _flat(t)
+    dx, dy = xy[:, 0] - cam_xy[0], xy[:, 1] - cam_xy[1]
+    d = np.hypot(dx, dy)
+    b = np.degrees(np.arctan2(dx, dy)) % 360.0
+    dmin = np.minimum.reduceat(d, starts)
+    ref = b[starts][owner]                                   # each tower's first corner
+    rel = (b - ref + 180.0) % 360.0 - 180.0                  # handles the 0/360 wrap
+    lo = b[starts] + np.minimum.reduceat(rel, starts)
+    hi = b[starts] + np.maximum.reduceat(rel, starts)
+    elev = np.degrees(np.arctan2(t.height_m - h_cam, dmin))
+    keep = dmin >= min_dist_m
+    i0 = np.floor(lo[keep] / BIN_DEG).astype(int)
+    i1 = np.ceil(hi[keep] / BIN_DEG).astype(int)
+    n = i1 - i0 + 1
+    tower = np.repeat(np.flatnonzero(keep), n)
+    offs = np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)
+    idx = (np.repeat(i0, n) + offs) % N_BINS
+    ev = np.repeat(elev[keep], n)
     out = np.zeros(N_BINS)
+    np.maximum.at(out, idx, ev)
+    if not owners:
+        return out
     own = np.full(N_BINS, -1)
-    cx, cy = cam_xy
-    for _tower_index, (v, H) in enumerate(zip(t.verts, t.height_m, strict=True)):
-        dx, dy = v[:, 0] - cx, v[:, 1] - cy
-        d = np.hypot(dx, dy)
-        dmin = float(d.min())
-        if dmin < min_dist_m:
-            continue
-        b = np.degrees(np.arctan2(dx, dy)) % 360.0
-        # angular span of the footprint, handling the 0/360 wrap
-        ref = b[0]
-        rel = (b - ref + 180.0) % 360.0 - 180.0
-        lo, hi = ref + rel.min(), ref + rel.max()
-        elev = math.degrees(math.atan2(H - h_cam, dmin))
-        i0, i1 = int(math.floor(lo / BIN_DEG)), int(math.ceil(hi / BIN_DEG))
-        idx = np.arange(i0, i1 + 1) % N_BINS
-        win = elev > out[idx]
-        out[idx[win]] = elev
-        own[idx[win]] = _tower_index
-    return (out, own) if owners else out
+    top = (ev == out[idx]) & (ev > 0)
+    own[idx[top]] = tower[top]
+    return out, own
 
 
 def photo_angles(prof: PhotoProfile, hfov_deg: float, projection: str = "pinhole"):
