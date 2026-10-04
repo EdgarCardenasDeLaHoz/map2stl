@@ -114,20 +114,28 @@ def _load_osm_for_region(bbox: RegionBBox) -> tuple[dict, str]:
         (0.5, 20.0),
         (2.0, 5.0),
     ]
-    def _ensure_green(data: dict, key: str) -> None:
-        # F-SKY18: vegetation landmarks need OSM green polygons (parks/grass/
-        # forest). The layer was added after the OSM cache format, so cached
-        # data may lack it — fetch green-only once and merge + rewrite cache.
-        if "green" in data:
+    def _ensure_layer(data: dict, layer: str, key: str | None = None) -> None:
+        # Optional layers are fetched on their own and never fail the run:
+        # - green (F-SKY18 vegetation landmarks) was added after the OSM cache
+        #   format, so cached data may lack it;
+        # - waterways only add river/canal landmarks, and a mirror that times
+        #   out on them cost Benidorm and Madrid three runs (2026-10-04) while
+        #   buildings came back fine.
+        # With ``key`` the merged data is written back to that cache entry.
+        if layer in data:
             return
         try:
             extra = fetch_osm_data(
-                bbox.north, bbox.south, bbox.east, bbox.west, ["green"])
-            data["green"] = extra.get("green", {"type": "FeatureCollection", "features": []})
-            write_osm_cache(key, data)
+                bbox.north, bbox.south, bbox.east, bbox.west, [layer])
+            data[layer] = extra.get(layer, {"type": "FeatureCollection", "features": []})
+            if key is not None:
+                write_osm_cache(key, data)
         except Exception as _e:
-            print(f"[osm_cache] green supplemental fetch failed (non-fatal): {_e}")
-            data["green"] = {"type": "FeatureCollection", "features": []}
+            print(f"[osm_cache] {layer} supplemental fetch failed (non-fatal): {_e}")
+            data[layer] = {"type": "FeatureCollection", "features": []}
+
+    def _ensure_green(data: dict, key: str) -> None:
+        _ensure_layer(data, "green", key)
 
     for tol, min_area in key_params:
         key = osm_cache_key(bbox.north, bbox.south,
@@ -143,7 +151,9 @@ def _load_osm_for_region(bbox: RegionBBox) -> tuple[dict, str]:
             bbox.south,
             bbox.east,
             bbox.west,
-            ["buildings", "roads", "waterways"],
+            # Buildings are the only required layer. Roads were requested here
+            # too, but nothing in skyline reads them (dropped 2026-10-04).
+            ["buildings"],
             simplify_tolerance=0.5,
             min_area=5.0,
         )
@@ -183,6 +193,8 @@ def _load_osm_for_region(bbox: RegionBBox) -> tuple[dict, str]:
             "OSM fetch returned no buildings for "
             f"{bbox.name} and no cached copy exists: "
             + str(fetched.get("buildings", {}).get("error", "no error reported")))
+
+    _ensure_layer(fetched, "waterways")
 
     # Persist under the (0.5, 5.0) key — matches the first key_params entry
     # the reader probes — so the next run hits the cache instead of re-querying

@@ -164,3 +164,25 @@ def test_auto_proposals_persist_per_region(tmp_path):
     # an empty proposal set (failed OSM fetch) is not pinned
     assert _persisted_proposals("Nowhere", lambda: [], tmp_path) == []
     assert not (tmp_path / "nowhere.json").exists()
+
+
+def test_osm_load_survives_a_waterways_timeout(monkeypatch):
+    """Buildings are the only required OSM layer; a waterways timeout must not fail the run."""
+    from city2stl.skyline import region_data as rd
+    from city2stl.skyline.region_types import RegionBBox
+
+    asked = []
+
+    def fake_fetch(n, s, e, w, layers, **kw):
+        asked.append(list(layers))
+        if layers == ["buildings"]:
+            return {"buildings": {"type": "FeatureCollection", "features": [{"id": 1}]}}
+        raise TimeoutError("ConnectTimeout")
+
+    monkeypatch.setattr(rd, "fetch_osm_data", fake_fetch)
+    monkeypatch.setattr(rd, "read_osm_cache", lambda key, allow_stale=False: None)
+    monkeypatch.setattr(rd, "write_osm_cache", lambda key, data: None)
+    data, source = rd._load_osm_for_region(RegionBBox("X", 1.0, 0.0, 1.0, 0.0))
+    assert source == "live_fetch"
+    assert data["buildings"]["features"] and data["waterways"]["features"] == []
+    assert asked == [["buildings"], ["waterways"]]  # roads are no longer requested
