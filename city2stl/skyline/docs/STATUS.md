@@ -52,6 +52,47 @@ Madrid `2026-10-04_1425`, after the Overpass outage). How to run: [README → Be
     buildings are 3D Tiles only and stay out of the headline.
 - Cartagena is not scored: no open survey exists, and its old figures rested on ~20 OSM tags.
 
+## Photos from Wikimedia Commons, identify then measure (F-WEB2, 2026-10-04, Miami)
+
+Plan and progress: [F-WEB2](../../../docs/plans/active/F-WEB2-commons-skyline-photos.md).
+Why: the best skyline shots are not Street View, and inside one Street View view building
+pairs are ordered at chance (Miami 44 %), which points at roof-to-building assignment.
+
+- **Photo pool** (`commons_photos.py`): Miami's 9 Commons skyline categories hold 300 JPEGs.
+  - 68 usable with a camera location (after the review below), 209 landscape without one
+    (92 of those carry a 35 mm-equivalent focal length, so a known FOV).
+  - Review of the rejects (user, 2026-10-04): the EXIF-hour "night" rule was wrong for 8 of 19
+    (camera clocks); night is now judged from sky brightness. Photos wider than 3:1 are crops
+    or stitched panoramas, usable once the FOV is solved (the solver supports cylindrical).
+- **Through the existing segment matcher**: 3 Commons photos passed the screen, 1 registered,
+  36 % pair order. Better photos do not help while the matcher assigns roofs wrongly.
+- **Camera solver** (`camera_solver.py`, `photo_localize.py`): pose from identified buildings.
+  Known-answer photo "Common Downtown shot 2011 with buildings tagged" (labels transcribed to
+  `sites/annotations/`): Watson Island, 25.78513,-80.17930 ±5 m, heading 215, 3.9 px RMS with
+  the EXIF focal length; ±820 m without it (telephoto: distance and zoom trade off).
+- **Identify, then measure** (`photo_heights.py`): a photo column belongs to the tower the
+  predicted outline puts on top; tilt and camera height fitted leave-one-out on the other
+  towers' OSM heights. "Downtown Miami skyline May 2011" at its known pose:
+
+  | 19 confirmed towers | Photo | Street View on Miami |
+  |---|---|---|
+  | Pair order | 74 % | 42 % |
+  | MAE | 29.0 m (bias −9.5) | 97 m |
+
+  Misses: two towers read ~68 m vs ~168 m (something nearer and untagged tops them in the
+  photo); Southeast Financial Center 155 vs 235 m (stepped top; the core median hits a step).
+  Only OSM-tagged towers can be identified from one photo; untagged buildings need 2+ photos.
+- **Locating photos without a location** (`skyline_match.py`): SIFT feature matching recognises
+  only copies of the same shot. Skyline outline matching against OSM-tagged towers, on 12
+  located photos with their location hidden:
+  - FOV, heading and position all free: 1 of 12 within 300 m; wrong fits picked FOVs of
+    8-95 deg and some scored better than the right one.
+  - FOV fixed from EXIF (heading and position free): first 4 photos — Vizcaya Metrorail 82 m,
+    Downtown Miami and Brickell 29 m (was 3.2 km), both with a clear margin (misfit 0.105 vs
+    0.273; 0.172 vs 0.358); the cruise-ship deck (camera ~40 m up) and a cruise-terminal shot
+    blocked by the ship still fail. Run in progress.
+- Speed: the predicted outline is vectorised (Miami 101.7 → 3.9 ms per grid cell).
+
 ## Headline metrics (full pipeline, 2026-06-07)
 
 | Region | Seeds (user + auto) | `seed_extracted_buildings` | Bearing recovery |
@@ -154,6 +195,10 @@ Madrid `2026-10-04_1425`, after the Overpass outage). How to run: [README → Be
 
 ## Known issues
 
+- **Photos (F-WEB2):** untagged buildings cannot be identified from one photo (the outline needs
+  a height to know which building is on top); elevated cameras (ship decks, stations) need the
+  camera height in the search; a photo whose skyline is mostly blocked fits a sliver almost
+  perfectly (misfit 0.015), so a minimum-coverage gate is needed.
 - **Untagged buildings read 65–113 m too tall** (benchmark above) — the main product gap since
   2026-10-04. Roofs of farther towers are credited to near low buildings; the tag filter hides it
   on tagged buildings.
