@@ -216,6 +216,24 @@ app = FastAPI(
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
+@app.middleware("http")
+async def _perf_request(request: Request, call_next):
+    """``perf`` line per API request (method, path, query, status, seconds).
+
+    Read with the step lines by claude/scripts/perf_audit.py; the usage log is
+    left out (it fires on every click).
+    """
+    path = request.url.path
+    if not path.startswith("/api/") or path == "/api/usage":
+        return await call_next(request)
+    from geo2stl.perf import perf_step
+    with perf_step("request", method=request.method, path=path,
+                   query=str(request.url.query)) as info:
+        response = await call_next(request)
+        info["status"] = response.status_code
+    return response
+
+
 @app.exception_handler(DemGone)
 async def _dem_gone(_request: Request, exc: DemGone):
     # An expired or pre-restart DEM handle: the client should reload, not retry.

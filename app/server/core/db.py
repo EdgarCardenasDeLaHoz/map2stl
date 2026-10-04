@@ -43,6 +43,7 @@ region_landmarks   (F-LANDMARK §3: per-building overrides, one row per OSM id)
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 from pathlib import Path
 
@@ -53,7 +54,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Path
 # ---------------------------------------------------------------------------
-DB_PATH: Path = COORDINATES_PATH.parent / "data.db"
+# MAP2STL_DB_PATH points a server at another database (the performance audit runs on
+# a copy, so its settings changes never reach the user's regions).
+DB_PATH: Path = (Path(os.environ["MAP2STL_DB_PATH"]) if os.environ.get("MAP2STL_DB_PATH")
+                 else COORDINATES_PATH.parent / "data.db")
 
 _CREATE_REGIONS = """
 CREATE TABLE IF NOT EXISTS regions (

@@ -496,10 +496,12 @@ def river_carve_layers(name, fetch, north, south, east, west, dim, options, base
         hit = read_array_cache("river_carve", key(b))
         if hit is not None:
             return hit[0]["orders"], hit[0]["stack"]
-        gdf = fetch(north, south, east, west, {**options, "min_order": b})
-        orders, stack = river_depth_by_order(gdf, north, south, east, west, shape,
-                                             width_scale=float(options.get("width_scale", 1.0)),
-                                             dem=base, snap=snap)
+        from geo2stl.perf import perf_step
+        with perf_step("river_carve", key=key(b), src=name, shape=list(shape)):
+            gdf = fetch(north, south, east, west, {**options, "min_order": b})
+            orders, stack = river_depth_by_order(
+                gdf, north, south, east, west, shape,
+                width_scale=float(options.get("width_scale", 1.0)), dem=base, snap=snap)
         write_array_cache("river_carve", key(b), {"orders": orders, "stack": stack})
     return orders, stack
 

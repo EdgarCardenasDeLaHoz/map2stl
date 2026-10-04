@@ -117,7 +117,9 @@ def stitch_tiles_no_rasterio(target_bbox):
             _STITCH_MEMO.move_to_end(key)
             hit = _STITCH_MEMO[key]
             return None if hit is None else hit.copy()
-        out = _stitch_tiles(target_bbox)
+        from geo2stl.perf import perf_step
+        with perf_step("stitch", bbox=list(key)):
+            out = _stitch_tiles(target_bbox)
         _STITCH_MEMO[key] = out
         while len(_STITCH_MEMO) > _STITCH_MEMO_MAX:
             _STITCH_MEMO.popitem(last=False)

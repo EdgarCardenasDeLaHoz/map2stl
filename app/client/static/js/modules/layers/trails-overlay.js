@@ -300,7 +300,10 @@ window.loadTrails = async function loadTrails({ activate = true } = {}) {
             if (isEmptyResult) {
                 if (window.appState) window.appState.lastTrailsData = null;
                 if (window.appState) window.appState.trailsSourceCanvas = null;
-                if (statusEl) statusEl.textContent = 'No trails found in this region';
+                // A region too large for trails comes back the same way, with the reason.
+                if (statusEl) statusEl.textContent = data.skipped
+                    ? (data.error || 'Trails are skipped for a region this large')
+                    : 'No trails found in this region';
                 window.setLayerStatus?.('trails', 'loaded');
                 window.emitStackUpdate();
                 return;

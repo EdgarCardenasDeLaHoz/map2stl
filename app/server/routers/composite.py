@@ -511,7 +511,9 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
     cache_key = _composite_cache_key(north, south, east, west, dim, specs,
                                      projection, clip_valid,
                                      maintain_dimensions)
-    with _single_flight(cache_key):
+    from geo2stl.perf import perf_step
+    with _single_flight(cache_key), perf_step("composite", key=cache_key,
+                                              sources=[s.source for s in specs], dim=dim):
         return _composite_for_key(cache_key, specs, north, south, east, west, dim,
                                   projection, clip_valid, maintain_dimensions,
                                   _result, warnings, water_out)

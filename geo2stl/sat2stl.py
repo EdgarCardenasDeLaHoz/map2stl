@@ -20,6 +20,7 @@ import json
 import logging
 import math
 import os
+import threading
 import time
 
 import numpy as np
@@ -371,11 +372,6 @@ def calculate_scale_for_dimensions(N, S, E, W, target_dim=500):
 
 def fetch_bbox_image(N, S, E, W, scale=None, dataset="copernicus", use_cache=True, target_dim=None):
     """Fetch Earth Engine raster for bbox and dataset."""
-    from io import BytesIO
-
-    import requests
-    from PIL import Image
-
     if scale is None:
         if target_dim is not None:
             scale = calculate_scale_for_dimensions(N, S, E, W, target_dim)
@@ -411,16 +407,46 @@ def fetch_bbox_image(N, S, E, W, scale=None, dataset="copernicus", use_cache=Tru
     cache_path = CACHE_DIR / f"{cache_hash}.jbl"
     meta_path = CACHE_DIR / f"{cache_hash}.meta"
 
-    if use_cache and cache_path.exists() and meta_path.exists() and joblib is not None:
+    def cached():
+        if not (use_cache and cache_path.exists() and meta_path.exists() and joblib is not None):
+            return None
         try:
             meta = json.loads(meta_path.read_text())
-            cached_scale = meta.get("scale", float("inf"))
-            if cached_scale <= scale:
+            if meta.get("scale", float("inf")) <= scale:
                 arr = joblib.load(cache_path)
                 if isinstance(arr, np.ndarray) and arr.size > 0:
                     return arr
         except Exception as e:
             logger.warning("EE cache read failed, refetching: %s", e)
+        return None
+
+    arr = cached()
+    if arr is not None:
+        return arr
+    # One download per image at a time: the water mask and the lakes layer asked
+    # for the same ESA image together and both downloaded it (8.8 s + 8.5 s, perf
+    # audit 2026-10-03). The second caller waits, then reads the disk cache.
+    with _EE_GUARD:
+        lock = _EE_LOCKS.setdefault(cache_hash, threading.Lock())
+    with lock:
+        arr = cached()
+        if arr is not None:
+            return arr
+        from geo2stl.perf import perf_step
+        with perf_step("ee_download", key=bbox_str):
+            return _ee_download(N, S, E, W, scale, dataset, use_cache, cache_path, meta_path)
+
+
+_EE_GUARD = threading.Lock()
+_EE_LOCKS: dict[str, threading.Lock] = {}   # one per image key; few distinct keys per session
+
+
+def _ee_download(N, S, E, W, scale, dataset, use_cache, cache_path, meta_path):
+    """fetch_bbox_image after a disk-cache miss: download from Earth Engine and cache it."""
+    from io import BytesIO
+
+    import requests
+    from PIL import Image
 
     initialize_earth_engine()
     import ee

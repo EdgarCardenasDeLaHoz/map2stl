@@ -1067,9 +1067,12 @@ async def get_terrain_hydrology(
             hit = read_json_cache("hydrology", ck)
             if hit is not None:
                 return hit
-            payload = _river_print_payload(
-                north, south, east, west, dim, dem_source, river_source, min_order,
-                width_scale, depth_scale, projection, clip_valid_region, maintain_dimensions)
+            from geo2stl.perf import perf_step
+            with perf_step("rivers_preview", key=ck):
+                payload = _river_print_payload(
+                    north, south, east, west, dim, dem_source, river_source, min_order,
+                    width_scale, depth_scale, projection, clip_valid_region,
+                    maintain_dimensions)
             write_json_cache("hydrology", ck, payload)
             return payload
 
@@ -1219,6 +1222,10 @@ async def get_terrain_hydrology(
 # Trails — ski pistes and hiking paths
 # ---------------------------------------------------------------------------
 
+#: Largest region (bbox diagonal) trails are fetched for; see get_terrain_trails.
+TRAILS_MAX_DIAG_KM = 300.0
+
+
 @router.get("/api/terrain/trails", tags=["terrain"])
 async def get_terrain_trails(
     request: Request,
@@ -1284,6 +1291,25 @@ async def get_terrain_trails(
 
     logger.debug(f"GET /api/terrain/trails bbox=({north},{south},{east},{west}) "
                  f"dim={dim} source={source} categories={categories}")
+
+    from geo2stl.geo import bbox_size_m
+    w_m, h_m = bbox_size_m({"north": north, "south": south, "east": east, "west": west})
+    diag_km = float(np.hypot(w_m, h_m)) / 1000.0
+    if diag_km > TRAILS_MAX_DIAG_KM and not TEST_MODE:
+        # A trail is metres wide, far under a pixel of such a box, and Overpass
+        # splits the query: Colombia (2,800 km across) became ~2,000 sub-queries
+        # that held a worker for over 10 minutes (2026-10-03 perf audit).
+        return JSONResponse(content={
+            "ski_grid_values_b64": None, "hiking_grid_values_b64": None,
+            "ski_area_grid_values_b64": None, "hiking_area_grid_values_b64": None,
+            "ski_difficulty_grid_values_b64": None,
+            "difficulty_classes": list(SKI_DIFFICULTY_CLASSES),
+            "grid_dimensions": [dim, dim], "ski_count": 0, "hiking_count": 0,
+            "feature_count": 0, "sources": [], "source": source, "relief_m": relief_m,
+            "skipped": "too_large",
+            "error": (f"Trails are skipped for regions over {TRAILS_MAX_DIAG_KM:.0f} km across "
+                      f"(this one is {diag_km:,.0f} km): a trail is far thinner than a pixel."),
+        })
 
     def _project_many(*grids, categorical=False):
         """Apply the requested projection to every grid, or return them unchanged.

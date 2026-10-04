@@ -665,7 +665,9 @@ def fetch_hydrorivers(
         combined = hit
         logger.info("HydroRIVERS: %d features from memory", len(combined))
     else:
-        combined = _read_region_parquets(regions, west, south, east, north, use_o3, _time)
+        from geo2stl.perf import perf_step
+        with perf_step("hydrorivers_read", key=list(memo_key)):
+            combined = _read_region_parquets(regions, west, south, east, north, use_o3, _time)
         if combined is None:
             logger.info("HydroRIVERS: no features found in bbox")
             return None

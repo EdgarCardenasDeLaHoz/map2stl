@@ -187,8 +187,10 @@ def fetch_opentopo_dem(
     if not cache_file.exists():
         logger.info(
             f"Fetching OpenTopography DEM: {demtype} bbox=({north},{south},{east},{west})")
-        cache_file.write_bytes(
-            request_geotiff(demtype, north, south, east, west, api_key=api_key))
+        from geo2stl.perf import perf_step
+        with perf_step("opentopo_download", demtype=demtype, bbox=[north, south, east, west]):
+            cache_file.write_bytes(
+                request_geotiff(demtype, north, south, east, west, api_key=api_key))
         logger.info(f"Cached OpenTopography response to {cache_file}")
 
     try:
