@@ -107,6 +107,22 @@ pairs are ordered at chance (Miami 44 %), which points at roof-to-building assig
   Best photos: "Miami, Florida, Skyline 4" (found by search) 6.4 m / 99 %; Vizcaya Metrorail
   9.0 m / 98 %. One kept photo is wrong ("Downtown Miami (8110579514)": 74.8 m / 53 %).
   Rejected: 62 searches on the margin gate, 19 recorded photos on misfit > 0.3.
+- **Miami run 2** (every candidate measured, camera heights 2/30/60 m, linked fallback, rescue
+  gate: fit/margin OR >= 12 towers within 20 m of their OSM heights): 27 photos kept, 193
+  buildings, 142 confirmed.
+
+  | | n | MAE | pairs in order | Spearman |
+  |---|---|---|---|---|
+  | Photos | 142 | 23.2 m | 86 % | 0.81 |
+  | **OSM height tags, same buildings** | 142 | **8.9 m** | **95 %** | 0.91 |
+  | Photos, same buildings as Street View | 34 | 13.0 m | 91 % | 0.89 |
+  | OSM tags, those buildings | 34 | 5.9 m | 98 % | 0.99 |
+  | Street View, those buildings | 34 | 71.8 m | 55 % | 0.14 |
+
+  Photos beat Street View but not OSM where OSM has a height: the outline model only knows
+  OSM-tagged towers, so it measures exactly the buildings OSM already covers. Photos add
+  information only for untagged buildings (multi-photo step C2) and for bad tags. The winning
+  margin did not predict accuracy; agreement with OSM did (wrong poses sit 45-63 m off).
 - Speed: the predicted outline is vectorised (Miami 101.7 → 3.9 ms per grid cell).
 
 ## Headline metrics (full pipeline, 2026-06-07)

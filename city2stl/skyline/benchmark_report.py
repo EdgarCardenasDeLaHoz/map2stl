@@ -150,8 +150,12 @@ measured from photos, {ps.get('confirmed', 0)} with confirmed truth. Each buildi
 the photos that measured it.</p>
 <table><tr><th>source</th><th>n</th><th>MAE m</th><th>bias m</th><th>pairs in order</th><th>Spearman</th></tr>
 {row('photos, all confirmed', ps.get('photo_vs_truth'))}
+{row('OSM height tags, same buildings', ps.get('osm_vs_truth'))}
 {row('photos, same buildings as Street View', sb.get('photo'))}
-{row('Street View, same buildings', sb.get('street_view'))}</table>"""
+{row('OSM height tags, those buildings', sb.get('osm'))}
+{row('Street View, those buildings', sb.get('street_view'))}</table>
+<p class=mut>Every tower measured from photos has an OSM height (the outline model uses OSM-tagged
+towers), so OSM tags are the yardstick photos must beat to add information.</p>"""
 
 
 def write_benchmark_page(report_dir: str | Path, score: dict, buildings: list[dict],
