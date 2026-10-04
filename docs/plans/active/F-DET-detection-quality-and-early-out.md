@@ -1,6 +1,6 @@
 # F-DET — Detection Quality & Early-Out
 
-**Status**: F-DET1/2/3/5 done; F-DET4a–c on hold pending the instrumentation in "Critical review" (open items tracked in `city2stl/skyline/README.md`)  
+**Status**: F-DET1/2/3/5 done; F-DET4a–c on hold pending the instrumentation in "Critical review"; F-DET6 (footprint-first detection for elevated panoramas, seed_5) in progress 2026-10-04 (open items tracked in `city2stl/skyline/README.md`)  
 **Date**: 2026-06-13 / implemented 2026-06-20  
 **Trigger**: User feedback from per-pano landing page review across 17 regions / 82 panos
 
@@ -303,3 +303,72 @@ distance cut because it degrades gracefully.
 4. **Then, and only then,** apply the confirmed 4a/4b/4c fixes — preferring the
    graceful bearing-penalty over the hard snap cut, and adding a held-out region to
    check the thresholds generalise.
+
+---
+
+## F-DET6 — Footprint-first detection for elevated panoramas (Cartagena seed_5), 2026-10-04
+
+User: "Make a plan for how to improve building detection and matching for seed 5 and implement
+it"; "we can detect parks and streets from the drone angle and use those to position locations
+as well, those will be available in osm".
+
+### What is wrong today (seed_5, a drone Photo Sphere over the Castillogrande bay)
+
+Read from the code (pano path: `_pano/detect.py::_build_and_detect_pano`) and the report
+overlays:
+
+- **Missed towers.** The pano path splits only the building mask (`detect_buildings_from_mask`,
+  peaks of building pixels per column); a continuous wall of towers gives few peaks, and white
+  towers SegFormer labels outside {building, house, skyscraper} are absent from the mask.
+- **Front building wins.** `match_segments_to_buildings` takes every candidate within 0.10 of
+  the best score and the **nearest wins**; no depth, no roof angle. In shared columns the near
+  short building takes the segment.
+- **Bottoms in the water.** The hole fill promotes everything under a continuous building band
+  to building; the ground cap trims only to the waterline; the bbox base cap is not applied in
+  the pano path.
+- **Camera height.** 1.7 m is assumed everywhere; the drone is roughly 100 m+ up, so roofs sit
+  below the horizon and bases far below it. Sky-based steps (screening, contour) fail.
+- **F-DET1 early-out** counts mask fragments, not buildings: a continuous city is one blob per
+  view, so the known-good drone seed_4 scored 3 < 6 and was dropped.
+- Side findings: `_smooth_pano_matches_against_views` swaps matches with no dedup;
+  `_pano/runs/seed_resolution_cache.json` is where the code really caches (README says `runs/`).
+
+### Approach (new module `city2stl/skyline/footprint_detect.py`, demo script per seed)
+
+A. **Offline harness.** Rebuild seed_5's stitched pano from the cached spin views (Photo Sphere
+   capture, as the pipeline does): RGB, full SegFormer label map, per-column frame heading,
+   pitch (URL tilt 82.71 -> +7.3 deg). No production code changes.
+B. **Camera pose from the ground (the user's idea).** From a drone the near waterline sits below
+   the horizon by atan(h / d_shore); OSM coastline/water gives d_shore for every bearing.
+   Per column: observed elevation of the top of the near water run vs predicted
+   -atan(h / d_shore(bearing)). Fit heading offset, camera height h and a pitch correction
+   (the open-sea horizon pins pitch). Parks/green (OSM leisure/landuse) and beaches next.
+C. **Footprint-first detection.** Every OSM footprint in view (tagged or not): columns from its
+   vertex bearings at the fitted pose; base row from atan(h / d_near). Measured nearest first;
+   the per-column top of nearer measured buildings is the occluder line for farther ones. A
+   building's top = where its own building pixels end going up from its visible bottom: against
+   sky, water, or a farther building (depth discontinuity in Depth Anything V2). Height =
+   h + d_near * tan(elevation of the top row) — negative angles allowed (roof below horizon).
+D. **Compare and check without truth.** Old vs new boxes on seed_5 side by side; predicted vs
+   observed base rows (validates h and heading); OSM towers in view measured vs old matches;
+   agreement with seed_1 on shared buildings once seed_1 runs the same way; anchors: Hotel
+   Estelar 202 m (Wikidata), GBA heights as a weak reference. Cartagena has no survey truth and
+   Google 3D Tiles has no buildings there (2026-10-04 probe), so these are the checks.
+
+### Success criteria (seed_5)
+
+- Pose: heading within 2 deg of the manual anchor (320 deg, report correction -16 deg) and a
+  camera height consistent across waterline columns (robust spread < 20 %).
+- Base rows: median |predicted - observed| < 10 px where the base is visible.
+- Detection: >= 80 % of OSM footprints with a visible extent >= 20 px measured (the old path
+  matched 35 segments).
+- Consistency: seed_1 and seed_5 agree within 25 % on shared buildings (today: seed_1 reads
+  36 m higher than seed_5 on 78 % of 9).
+
+### Risks
+
+- Photo Sphere frame vs geographic heading: re-estimated by the waterline fit, not assumed.
+- Shoreline in OSM vs the real waterline (seawalls, beaches): a few metres; at 500 m and 100 m
+  height that is ~1 px.
+- Depth Anything gives relative depth; only discontinuities are used, not values.
+- Buildings built after OSM was drawn (or demolished) show as unexplained columns.
