@@ -10,7 +10,8 @@ the same ``s`` plus a tilt offset), whatever the year, light or camera. SIFT mat
 of one shot.
 
     sim = outline_similarity(ya, wa, yb, wb)      # best (misfit, s, t, overlap)
-    groups = group_photos(profiles, max_misfit=0.15)
+    links = link_to_located(pairs, located)       # unlocated -> a located photo of the same spot
+    groups = cliques(pairs, unlocated_keys)       # unlocated photos that all match each other
 
 Outlines are resampled to ``N_COLS`` columns with rows in the same units, so a pair is scored
 for every shift at once by FFT cross-correlation of the masked outlines (as in
@@ -110,32 +111,45 @@ def _scan(a0, ma, yb, wb, scales, min_overlap, min_cols) -> Similarity | None:
     return best
 
 
-def group_photos(keys: list[str], profiles: dict[str, tuple[np.ndarray, int]],
-                 max_misfit: float = 0.15, **kw) -> tuple[list[list[str]], dict]:
-    """Connected groups of photos whose outlines agree (either direction) below ``max_misfit``.
+#: Same-spot threshold. Miami (2026-10-04), pairs of located photos: misfit <= 0.05 all within
+#: 500 m (median 0 m); 0.10+ at chance (~2.7 km). Without chaining, every located pair up to
+#: 0.07 was within 500 m (12 of 12); chained groups at 0.05 already mixed cameras 13 km apart.
+SAME_SPOT_MISFIT = 0.07
 
-    Returns the groups (largest first) and the pairwise similarities that formed edges.
+
+def link_to_located(pairs, located: set[str], max_misfit: float = SAME_SPOT_MISFIT
+                    ) -> dict[str, tuple[str, float]]:
+    """Unlocated photo -> (the located photo it matches best directly, misfit). No chaining."""
+    best: dict[str, tuple[str, float]] = {}
+    for a, b, mis, *_ in pairs:
+        if mis > max_misfit:
+            continue
+        for u, loc in ((a, b), (b, a)):
+            if u not in located and loc in located and (u not in best or mis < best[u][1]):
+                best[u] = (loc, float(mis))
+    return best
+
+
+def cliques(pairs, keys: set[str], max_misfit: float = SAME_SPOT_MISFIT) -> list[set[str]]:
+    """Greedy complete-linkage groups among ``keys``: every pair inside a group matches.
+
+    Why not connected components: chaining (A~B, B~C) merged 180 of Miami's 244 photos into
+    one group at misfit 0.15, and photos 13 km apart already at 0.05.
     """
-    parent = {k: k for k in keys}
-
-    def find(k):
-        while parent[k] != k:
-            parent[k] = parent[parent[k]]
-            k = parent[k]
-        return k
-
-    edges = {}
-    for i, ka in enumerate(keys):
-        ya, wa = profiles[ka]
-        for kb in keys[i + 1:]:
-            yb, wb = profiles[kb]
-            s1 = outline_similarity(ya, wa, yb, wb, **kw)
-            s2 = outline_similarity(yb, wb, ya, wa, **kw)
-            best = min((s for s in (s1, s2) if s is not None), key=lambda s: s.misfit, default=None)
-            if best is not None and best.misfit <= max_misfit:
-                edges[(ka, kb)] = best
-                parent[find(ka)] = find(kb)
-    groups: dict[str, list[str]] = {}
-    for k in keys:
-        groups.setdefault(find(k), []).append(k)
-    return sorted(groups.values(), key=len, reverse=True), edges
+    E: dict[str, set[str]] = {k: set() for k in keys}
+    for a, b, mis, *_ in pairs:
+        if mis <= max_misfit and a in E and b in E:
+            E[a].add(b)
+            E[b].add(a)
+    left = {k for k in keys if E[k]}
+    out = []
+    while left:
+        v = max(sorted(left), key=lambda k: len(E[k] & left))
+        c = {v}
+        for u in sorted(E[v] & left, key=lambda k: (-len(E[k] & left), k)):
+            if all(u in E[w] for w in c):
+                c.add(u)
+        if len(c) > 1:
+            out.append(c)
+        left -= c
+    return sorted(out, key=len, reverse=True)

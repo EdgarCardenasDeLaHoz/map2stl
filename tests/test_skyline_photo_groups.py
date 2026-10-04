@@ -42,10 +42,25 @@ def test_other_city_does_not_match():
     assert s is None or s.misfit > 0.3
 
 
-def test_groups_join_same_spot_only():
+def test_cliques_join_same_spot_only():
     a = _outline(3)
     profs = {"a": (a, 1600),
              "a_zoom": (_view(a, 1600, 1.3, -200, 10, 1600), 1600),
              "other": (_outline(4), 1600)}
-    groups, edges = pg.group_photos(list(profs), profs, max_misfit=0.15)
-    assert sorted(map(sorted, groups)) == [["a", "a_zoom"], ["other"]]
+    keys = list(profs)
+    pairs = []
+    for i, ka in enumerate(keys):
+        for kb in keys[i + 1:]:
+            s = pg.outline_similarity(profs[ka][0], 1600, profs[kb][0], 1600)
+            if s is not None:
+                pairs.append((ka, kb, s.misfit, s.scale, s.shift, s.overlap))
+    assert pg.cliques(pairs, set(keys)) == [{"a", "a_zoom"}]
+
+
+def test_links_and_cliques_do_not_chain():
+    pairs = [("u1", "L", 0.02, 1, 0, 1), ("u2", "u1", 0.03, 1, 0, 1),   # u2 only via u1
+             ("u3", "u4", 0.04, 1, 0, 1), ("u4", "u5", 0.04, 1, 0, 1)]  # u3~u4~u5 but not u3~u5
+    links = pg.link_to_located(pairs, {"L"})
+    assert links == {"u1": ("L", 0.02)}
+    groups = pg.cliques(pairs, {"u1", "u2", "u3", "u4", "u5"})
+    assert {"u3", "u4", "u5"} not in groups and all(len(g) == 2 for g in groups)
