@@ -11,7 +11,8 @@
 
 The headline. Truth per footprint = survey lidar and Google 3D Tiles agreeing within
 max(3 m, 10 %) ("confirmed"); production settings (`SKYLINE_CV_SEGFORMER_SIZE=b1`, tag filter on);
-run `runs/benchmark/2026-10-03_1952`, scored `2026-10-04_1415`. How to run: [README → Benchmark](../README.md#benchmark-f-skybench).
+run `runs/benchmark/2026-10-03_1952`, scored `2026-10-04_1415` (Benidorm `2026-10-04_1357`,
+Madrid `2026-10-04_1425`, after the Overpass outage). How to run: [README → Benchmark](../README.md#benchmark-f-skybench).
 
 | Region | Scored | Confirmed | Disputed | MAE | Median AE | Bias | Within 25 % | Untagged MAE / bias (n) | Tagged MAE / bias (n) |
 |---|---|---|---|---|---|---|---|---|---|
@@ -22,7 +23,7 @@ run `runs/benchmark/2026-10-03_1952`, scored `2026-10-04_1415`. How to run: [REA
 | La Défense | 101 | 87 | 14 | 108.7 | 114.5 | +108.4 | 2 % | 113.2 / +112.9 (83) | 15.3 / +15.3 (4) |
 | Prague Pankrác | 77 | 23 | 54 | 29.7 | 24.5 | +9.7 | 9 % | 45.6 / +29.5 (7) | 22.8 / +1.0 (16) |
 | Benidorm | 98 | 33 | 62 | 31.6 | 27.9 | +30.3 | 15 % | 89.1 / +89.1 (4) | 23.7 / +22.2 (29) |
-| Madrid Cuatro Torres | — | — | — | — | — | — | — | auto-proposals saw no skyline; re-run with four hand-picked seeds pending | |
+| Madrid Cuatro Torres | 197 | 64 | 129 | 62.1 | 30.5 | +53.7 | 6 % | 84.6 / +83.2 (42) | 19.3 / −2.6 (22) |
 
 - **The main product gap is untagged buildings read far too tall** (+65 to +113 m bias), in every
   city. Mostly small low buildings (Miami: true median 9.7 m, footprint ~420 m², estimate median
@@ -39,8 +40,10 @@ run `runs/benchmark/2026-10-03_1952`, scored `2026-10-04_1415`. How to run: [REA
     hills; 185 disputes.
   - Prague: 3D Tiles returned one value (104.15 m) over many low footprints, a coarse-tile
     artefact; the cross-check rejects them, leaving 23 confirmed buildings.
-  - Benidorm: 3D Tiles reads +5.6 m above CNIG (IQR +3.8 to +9.7 m); CNIG MDSn is a 2.5 m grid
-    from 2008-15, so new and refurbished towers dispute. 33 confirmed.
+  - Benidorm and Madrid: 3D Tiles reads +5.6 / +5.4 m above CNIG (IQR about +3 to +9 m) in both
+    Spanish cities, so the offset is CNIG's (MDSn: 2.5 m grid, 2008-15), not one city's. Only 33
+    and 64 confirmed; none of Madrid's four towers confirm.
+  - Madrid needed four hand-picked seeds: its auto-proposals saw no skyline (0 buildings).
   - Miami: the only USGS EPT project (2019 Keys topobathy) has points on the coast only; inland
     buildings are 3D Tiles only and stay out of the headline.
 - Cartagena is not scored: no open survey exists, and its old figures rested on ~20 OSM tags.
