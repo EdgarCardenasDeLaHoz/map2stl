@@ -64,3 +64,29 @@ Why now (2026-10-04):
 ## Progress
 
 - 2026-10-04: plan written; Miami Commons survey above.
+- 2026-10-04: steps 1-2 done (relative metrics `25f510a`; finder `181cd9e`, filter review
+  `2703a0f`). Review of Miami's rejects (user): over-filtering. EXIF-hour "night" was wrong for
+  8 of 19 (camera clocks); now judged from sky brightness. Still dropped and wanted: 215
+  unlocated photos and 8 wide (> 3:1) skylines.
+- 2026-10-04: Commons photos through the existing matcher: of 3 that passed the screen, 1
+  registered, 36 % pair order (Street View views 42 %). The matcher, not the photo, is the limit.
+- 2026-10-04: camera solver (`camera_solver.py`, `photo_localize.py`, `1ea4663`). Known-answer
+  photo: "Common Downtown shot 2011 with buildings tagged" (labels transcribed to
+  `sites/annotations/`). With its EXIF focal length (66 mm eq., 30.5 deg) it places the camera
+  on Watson Island, 25.78513,-80.17930 +-5 m, heading 215, 3.9 px RMS. Without the focal length
+  the position is +-820 m along the line of sight (telephoto: distance and zoom trade off).
+- 2026-10-04: heights at those identified towers (roof row at each label tip, distance from
+  the solved pose, tilt and camera height fitted): 82 % pair order, leave-one-out MAE 13.5 m
+  over 5 confirmed towers (Street View on Miami: 96.6 m). Correct identification is the lever.
+
+## Revised steps (2026-10-04, user: use the unlocated and the wide photos)
+
+5a. **Identify, then measure**: for a photo with a solved pose, measure each identified
+    building at its own columns (the projected footprint), instead of the segment matcher.
+5b. **Locate unlabelled photos** by feature matching (OpenCV SIFT) against located photos
+    (Commons with coordinates, the labelled photo, Street View views), transferring
+    identifications through the matches, then `solve_pose`.
+5c. **Skyline matching** for photos nothing matches: search position and heading for the
+    OSM-predicted tower outline (OSM heights only, never the benchmark truth).
+6.  **Wide photos**: cylindrical projection in the solver (done) and in the measurement step;
+    FOV solved, not read from EXIF (crops keep the full-frame EXIF).
