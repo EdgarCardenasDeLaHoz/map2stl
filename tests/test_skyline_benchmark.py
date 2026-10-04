@@ -129,6 +129,7 @@ def test_score_buildings_bands_and_tags():
     assert s["overall"]["bias_m"] == pytest.approx(-27.5)
     assert s["bands"]["0-30m"]["n"] == 1 and s["bands"]["100+m"]["bias_m"] == pytest.approx(-60.0)
     assert s["views"]["2-3"]["n"] == 1 and s["seeds"]["2+"]["n"] == 1
+    assert s["osm_tag"]["tagged"]["n"] == 1 and s["osm_tag"]["untagged"]["n"] == 1
     assert s["osm_tags"]["tag_vs_truth"]["mae_m"] == pytest.approx(3.0)
 
 

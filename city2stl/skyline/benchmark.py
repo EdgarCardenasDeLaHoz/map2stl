@@ -354,6 +354,7 @@ def score_buildings(buildings: list[dict], truth: dict[str, dict],
     pred = np.array([r[0] for r in rows])
     tru = np.array([r[1] for r in rows])
     nv = np.array([r[2] for r in rows])
+    tg_mask = np.array([r[4] is not None and r[5] not in (None, "default") for r in rows])
     ns = np.array([r[3] for r in rows])
     out = {
         "n_buildings": len(buildings),
@@ -366,6 +367,11 @@ def score_buildings(buildings: list[dict], truth: dict[str, dict],
                   (("1", nv == 1), ("2-3", (nv >= 2) & (nv <= 3)), ("4+", nv >= 4))},
         "seeds": {lab: _errors(pred[m], tru[m]) for lab, m in
                   (("1", ns <= 1), ("2+", ns >= 2))},
+        # SKYLINE_TAG_FILTER (on by default) drops per-view estimates far from a building's
+        # OSM height tag, so tagged buildings are helped by their tag; untagged ones show
+        # the pipeline unaided.
+        "osm_tag": {lab: _errors(pred[m], tru[m]) for lab, m in
+                    (("tagged", tg_mask), ("untagged", ~tg_mask))},
     }
     tagged = [(r[0], r[1], float(r[4])) for r in rows
               if r[4] is not None and r[5] not in (None, "default")]
