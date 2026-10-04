@@ -214,6 +214,8 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 
 - **Height benchmark on surveyed truth** (before any further height tuning): eight cities,
   lidar + 3D Tiles cross-checked. [F-SKYBENCH](active/F-SKYBENCH-height-benchmark.md)
+- **Skyline photos from Wikimedia Commons** with a solved camera (any vantage, not only Street
+  View); Miami first, judged on relative heights. [F-WEB2](active/F-WEB2-commons-skyline-photos.md)
 - All skyline open items (F-DET, F-SKY13/16/18, F-SKY5 validation, tests, depth > 1.2 km) are
   kept in one list: [skyline README → Open items](../../city2stl/skyline/README.md#open-items).
 
