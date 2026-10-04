@@ -101,3 +101,12 @@ def test_is_dark_reads_the_sky_not_the_clock():
     night = np.full((90, 120, 3), 20, np.uint8)
     night[60:] = 120                       # lit buildings and water at the bottom
     assert not cp.is_dark(day) and cp.is_dark(night)
+
+
+def test_deep_blue_day_sky_is_not_dark():
+    import numpy as np
+    blue = np.zeros((90, 120, 3), np.uint8)
+    blue[...] = (40, 90, 170)              # Bridgemiami's noon sky: luma ~ 84, value 170
+    storm = np.zeros((90, 120, 3), np.uint8)
+    storm[...] = (100, 70, 40)             # orange storm-lit night: luma ~ 75, value 100
+    assert not cp.is_dark(blue) and cp.is_dark(storm)

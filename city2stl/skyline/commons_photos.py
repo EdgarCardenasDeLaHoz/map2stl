@@ -42,10 +42,13 @@ MAX_ASPECT = 3.0
 MAX_OUTSIDE_KM = 15.0
 #: Night skylines segment badly. Judged from the image (``is_dark``), not the EXIF hour:
 #: camera clocks are often in the wrong time zone, and the hour rule dropped 8 of Miami's
-#: 19 "night" photos that were broad daylight (2026-10-04 review). 85 on the median luma of
-#: the top third: Miami's lit-towers-under-dark-sky shots measure 3-81, daylight, sunrise and
-#: sunset 91-188.
+#: 19 "night" photos that were broad daylight (2026-10-04 review). Measured on the top third:
+#: luma alone called a deep-blue noon sky dark (Bridgemiami: luma 71, value 134), so dark is
+#: value < DARK_SKY_VALUE, or luma < DARK_SKY_LUMA with value < DIM_SKY_VALUE (a storm or
+#: lit-city night: luma 75, value 100). Miami: night 4-100 by value, day and dusk 128-221.
+DARK_SKY_VALUE = 90.0
 DARK_SKY_LUMA = 85.0
+DIM_SKY_VALUE = 110.0
 MAX_CATEGORIES = 40
 
 
@@ -232,15 +235,16 @@ def usable(p: CommonsPhoto, bbox_nsew) -> str | None:
 
 
 def is_dark(img) -> bool:
-    """True for a night or deep-dusk photo: the top third (mostly sky) is dark.
+    """True for a night or deep-dusk photo, from the top third of the image (mostly sky).
 
     ``img``: H x W x 3 uint8 RGB. Applied after download, since only pixels can tell.
     """
     import numpy as np
 
     top = np.asarray(img[: max(1, img.shape[0] // 3)], dtype=np.float32)
-    luma = 0.299 * top[..., 0] + 0.587 * top[..., 1] + 0.114 * top[..., 2]
-    return float(np.median(luma)) < DARK_SKY_LUMA
+    luma = float(np.median(0.299 * top[..., 0] + 0.587 * top[..., 1] + 0.114 * top[..., 2]))
+    value = float(np.median(top.max(axis=2)))
+    return value < DARK_SKY_VALUE or (luma < DARK_SKY_LUMA and value < DIM_SKY_VALUE)
 
 
 def rank_key(p: CommonsPhoto) -> tuple:
