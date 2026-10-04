@@ -87,10 +87,13 @@ pairs are ordered at chance (Miami 44 %), which points at roof-to-building assig
   located photos with their location hidden:
   - FOV, heading and position all free: 1 of 12 within 300 m; wrong fits picked FOVs of
     8-95 deg and some scored better than the right one.
-  - FOV fixed from EXIF (heading and position free): first 4 photos — Vizcaya Metrorail 82 m,
-    Downtown Miami and Brickell 29 m (was 3.2 km), both with a clear margin (misfit 0.105 vs
-    0.273; 0.172 vs 0.358); the cruise-ship deck (camera ~40 m up) and a cruise-terminal shot
-    blocked by the ship still fail. Run in progress.
+  - FOV fixed from EXIF (heading and position free): 3 of 12 within 300 m (Vizcaya Metrorail
+    82 m, Downtown Miami and Brickell 29 m, "Miami, FL Skyline" 162 m). The misfit alone does
+    not separate right from wrong (right 0.105-0.271, wrong from 0.130); the **margin over the
+    runner-up** does: right 0.168 and 0.186 (one 0.0), wrong 0.009-0.035. A margin gate of 0.1
+    keeps 2 of 3 right and none of 9 wrong. Failures: elevated cameras (ship decks), the ship
+    blocking the skyline, and several distant shots with only a narrow slice of towers.
+  - Next: group photos by viewpoint and locate a group jointly (plan step G).
 - Speed: the predicted outline is vectorised (Miami 101.7 → 3.9 ms per grid cell).
 
 ## Headline metrics (full pipeline, 2026-06-07)
