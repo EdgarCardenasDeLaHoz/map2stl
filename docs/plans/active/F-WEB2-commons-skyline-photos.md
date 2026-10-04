@@ -141,6 +141,21 @@ What the evidence says so far:
 - Glass tops reflect the sky, so the roof row under-reads (the known glass-tower problem).
 - Distance, tilt and camera height trade off; anchors spread in distance are needed.
 
+### Phase 2 progress
+
+- B done (`a8bb933`): outline vectorised, 101.7 -> 3.9 ms per grid cell on Miami.
+- C1 done (`photo_heights.py`): towers identified by the outline owner, measured, tilt and
+  camera height fitted leave-one-out on the other towers' OSM heights. "Downtown Miami skyline
+  May 2011" at its known pose: 19 confirmed towers, 74 % pair order, MAE 29.0 m (bias -9.5 m);
+  Street View on Miami: 42 %, 97 m. Misses: two towers read ~68 m vs ~168 m (they own only
+  18-24 columns in the model; something nearer, probably untagged, tops them in the photo) and
+  Southeast Financial Center 155 vs 235 m (stepped top: the core median lands on a lower step;
+  try the peak).
+- Gap found: one photo can identify only towers with OSM heights (the outline needs a height to
+  know who is on top). **C2: untagged buildings from 2+ located photos** — the building that
+  really forms the skyline gives the same implied height from every photo; wrong candidates
+  do not. No height guess needed.
+
 ### Findings kept from the earlier revised steps
 
 - 5b feature matching (SIFT, 209 unlocated photos vs the labelled one): only copies of the same

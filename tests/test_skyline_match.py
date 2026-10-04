@@ -100,3 +100,18 @@ def test_vectorised_outline_matches_the_loop():
         out, own = sm.predicted_outline(towers, cam, owners=True)
         assert np.allclose(out, ref_out)
         assert (own == ref_own).all()
+
+
+def test_photo_heights_recover_towers_leave_one_out():
+    """Measured from a synthetic photo with unknown tilt, each tower comes back from the others."""
+    from city2stl.skyline import photo_heights as ph
+
+    towers = _city(seed=5, n=40)
+    cam, heading, fov, tilt = (-2400.0, 300.0), 95.0, 40.0, 2.5
+    prof = _photo(towers, cam, heading, fov, width=2400, height=1600, tilt_deg=tilt)
+    lat, lon = towers.to_ll(*cam)
+    ms = ph.measure_towers(prof, towers, ph.PhotoPose(lat, lon, heading, fov))
+    assert len(ms) >= 6
+    est = ph.loo_heights(ms)
+    err = [abs(est[m.index] - towers.height_m[m.index]) for m in ms if m.index in est]
+    assert np.median(err) < 5.0          # 0.1-deg bins and pixel rows are the only noise
