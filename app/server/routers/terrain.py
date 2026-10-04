@@ -1057,11 +1057,24 @@ async def get_terrain_hydrology(
                f"{min_order}:{width_scale}:{depth_scale}:{projection}:{clip_valid_region}:"
                f"{maintain_dimensions}")
 
+        def _cached_print() -> dict:
+            # The finished preview is cached too, not only the river carve inside
+            # it: a repeat open still re-fetched the DEM and water mask and
+            # rebuilt the payload (~3 s for Colombia_2).
+            from geo2stl.cache import json_cache_key, read_json_cache, write_json_cache
+            from geo2stl.water_layers import RIVER_CARVE_VERSION
+            ck = json_cache_key("hydrology", "print", 1, RIVER_CARVE_VERSION, key)
+            hit = read_json_cache("hydrology", ck)
+            if hit is not None:
+                return hit
+            payload = _river_print_payload(
+                north, south, east, west, dim, dem_source, river_source, min_order,
+                width_scale, depth_scale, projection, clip_valid_region, maintain_dimensions)
+            write_json_cache("hydrology", ck, payload)
+            return payload
+
         async def _compute_print() -> dict:
-            return await run_sync(
-                _river_print_payload, north, south, east, west, dim, dem_source,
-                river_source, min_order, width_scale, depth_scale, projection,
-                clip_valid_region, maintain_dimensions)
+            return await run_sync(_cached_print)
         try:
             payload = await dedupe(_HYDRO_INFLIGHT, key, _compute_print)
         except Exception as e:

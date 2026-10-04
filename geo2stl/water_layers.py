@@ -41,6 +41,8 @@ the next valley. ``options.snap = false`` turns it off.
 from __future__ import annotations
 
 import logging
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -487,12 +489,38 @@ def river_carve_layers(name, fetch, north, south, east, west, dim, options, base
         if hit is not None:
             return hit[0]["orders"], hit[0]["stack"]
     b = max(1, min(min_order, RIVER_BASE_ORDER))
-    gdf = fetch(north, south, east, west, {**options, "min_order": b})
-    orders, stack = river_depth_by_order(gdf, north, south, east, west, shape,
-                                         width_scale=float(options.get("width_scale", 1.0)),
-                                         dem=base, snap=snap)
-    write_array_cache("river_carve", key(b), {"orders": orders, "stack": stack})
+    # One build per key at a time: the composite and the rivers preview asked for
+    # the same carve together (Colombia at 800 px) and both built it, ~35 s each
+    # side by side. The second caller waits, then reads the cache.
+    with _carve_lock(key(b)):
+        hit = read_array_cache("river_carve", key(b))
+        if hit is not None:
+            return hit[0]["orders"], hit[0]["stack"]
+        gdf = fetch(north, south, east, west, {**options, "min_order": b})
+        orders, stack = river_depth_by_order(gdf, north, south, east, west, shape,
+                                             width_scale=float(options.get("width_scale", 1.0)),
+                                             dem=base, snap=snap)
+        write_array_cache("river_carve", key(b), {"orders": orders, "stack": stack})
     return orders, stack
+
+
+_CARVE_GUARD = threading.Lock()
+_CARVE_LOCKS: dict[str, list] = {}    # cache key -> [lock, callers holding or waiting]
+
+
+@contextmanager
+def _carve_lock(key: str):
+    with _CARVE_GUARD:
+        entry = _CARVE_LOCKS.setdefault(key, [threading.Lock(), 0])
+        entry[1] += 1
+    try:
+        with entry[0]:
+            yield
+    finally:
+        with _CARVE_GUARD:
+            entry[1] -= 1
+            if entry[1] == 0:
+                _CARVE_LOCKS.pop(key, None)
 
 
 def _river_source(name: str, fetch):
