@@ -159,7 +159,10 @@ export const GROUPS: Record<string, LayerGroups> = {
       { kind: 'slider', label: 'River depth', icon: '↧', color: '#0a84ff', id: 'compositeRiverDepthMm',
         min: 0.1, max: 2, step: 0.1, fmt: (v) => `${f1(v)} mm`, hint: 'The biggest river; the rest in proportion' },
       { kind: 'slider', label: 'River width', icon: '↔', color: '#0a84ff', id: 'hydroWidthFactor',
-        min: 0.5, max: 10, step: 0.5, fmt: (v) => `× ${f1(v)}`, hint: "× the width from the river's flow" },
+        min: 0.5, max: 10, step: 0.5, fmt: (v) => `× ${f1(v)}`, hint: "× the width from the river's flow",
+        // The map's rivers are the print's carve: reload them too (the composite recomputes on
+        // its own; the server builds the shared carve once, perf audit 2026-10-04).
+        click: 'loadWaterHydrologyBtn' },
       { kind: 'switch', label: 'Rivers', icon: '〰', color: '#0a84ff', id: 'compositeRiversEnabled', adv: true },
       { kind: 'slider', label: 'Depth from flow', icon: '≋', color: '#0a84ff', id: 'compositeRiverDepthScale', adv: true,
         min: 0, max: 20, step: 0.5, fmt: (v) => `× ${f1(v)}`, hint: 'How much deeper big rivers are than small' },
