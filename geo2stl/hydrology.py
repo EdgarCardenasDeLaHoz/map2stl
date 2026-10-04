@@ -16,6 +16,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import threading
 import zipfile
 from pathlib import Path
 
@@ -582,40 +583,16 @@ def _ensure_region_parquet(region: str) -> Path | None:
         return None
 
 
-def fetch_hydrorivers(
-    north: float, south: float, east: float, west: float,
-    min_order: int = 3,
-):
-    """Fetch HydroRIVERS features intersecting the bbox as a GeoDataFrame.
+#: Last few HydroRIVERS bbox reads (before the order filter). Opening Colombia read
+#: the same 126k reaches six times (composite, water mask, hydrology overlay), 3-30 s each.
+_RIVERS_MEMO: dict = {}
+_RIVERS_MEMO_MAX = 3
+_RIVERS_LOCK = threading.Lock()
 
-    Uses a three-tier cache:
-    1. Regional shapefiles (simplified with collinear point reduction) — permanent
-    2. Per-region GeoParquet with bbox covering columns — fast bbox-filtered reads
-    3. In-memory Strahler order filter — no I/O for parameter changes
 
-    Args:
-        north/south/east/west: bounding box in WGS-84 degrees
-        min_order: minimum Strahler order (1=all, 3=medium+, 5=major only).
-
-    Returns:
-        GeoDataFrame with columns ``ORD_STRA``, ``DIS_AV_CMS``, ``geometry``, or
-        None on failure.  Returned directly (no GeoJSON serialization) so the
-        rasterizer can operate on shapely geometries without a round-trip.
-    """
-    try:
-        import geopandas as gpd
-    except ImportError:
-        logger.error("geopandas not installed; cannot read HydroRIVERS")
-        return None
-
-    import time as _time
-    t0 = _time.perf_counter()
-
-    regions = _regions_for_bbox(west, south, east, north)
-    logger.info("HydroRIVERS bbox (%.2f,%.2f,%.2f,%.2f) regions=%s, min_order=%d",
-                west, south, east, north, regions, min_order)
-
-    use_o3 = min_order >= _ORDER3PLUS_THRESHOLD
+def _read_region_parquets(regions, west, south, east, north, use_o3, _time):
+    """Concatenated bbox reads of the regions' parquet files, or None when empty."""
+    import geopandas as gpd
 
     gdfs = []
     for region in regions:
@@ -638,11 +615,65 @@ def fetch_hydrorivers(
                 "HydroRIVERS parquet read failed for '%s': %s", region, e)
 
     if not gdfs:
-        logger.info("HydroRIVERS: no features found in bbox")
         return None
 
     import pandas as pd
-    combined = pd.concat(gdfs, ignore_index=True)
+    return pd.concat(gdfs, ignore_index=True)
+
+
+def fetch_hydrorivers(
+    north: float, south: float, east: float, west: float,
+    min_order: int = 3,
+):
+    """Fetch HydroRIVERS features intersecting the bbox as a GeoDataFrame.
+
+    Uses a three-tier cache:
+    1. Regional shapefiles (simplified with collinear point reduction) — permanent
+    2. Per-region GeoParquet with bbox covering columns — fast bbox-filtered reads
+    3. In-memory Strahler order filter — no I/O for parameter changes
+    4. The last few bbox reads kept in memory (_RIVERS_MEMO) — one region open
+       reads the same box from several endpoints
+
+    Args:
+        north/south/east/west: bounding box in WGS-84 degrees
+        min_order: minimum Strahler order (1=all, 3=medium+, 5=major only).
+
+    Returns:
+        GeoDataFrame with columns ``ORD_STRA``, ``DIS_AV_CMS``, ``geometry``, or
+        None on failure.  Returned directly (no GeoJSON serialization) so the
+        rasterizer can operate on shapely geometries without a round-trip.
+    """
+    try:
+        import geopandas  # noqa: F401 - availability check; the read is in _read_region_parquets
+    except ImportError:
+        logger.error("geopandas not installed; cannot read HydroRIVERS")
+        return None
+
+    import time as _time
+    t0 = _time.perf_counter()
+
+    regions = _regions_for_bbox(west, south, east, north)
+    logger.info("HydroRIVERS bbox (%.2f,%.2f,%.2f,%.2f) regions=%s, min_order=%d",
+                west, south, east, north, regions, min_order)
+
+    use_o3 = min_order >= _ORDER3PLUS_THRESHOLD
+
+    memo_key = (round(west, 6), round(south, 6), round(east, 6), round(north, 6), use_o3)
+    with _RIVERS_LOCK:
+        hit = _RIVERS_MEMO.get(memo_key)
+    if hit is not None:
+        combined = hit
+        logger.info("HydroRIVERS: %d features from memory", len(combined))
+    else:
+        combined = _read_region_parquets(regions, west, south, east, north, use_o3, _time)
+        if combined is None:
+            logger.info("HydroRIVERS: no features found in bbox")
+            return None
+        with _RIVERS_LOCK:
+            _RIVERS_MEMO[memo_key] = combined
+            while len(_RIVERS_MEMO) > _RIVERS_MEMO_MAX:
+                _RIVERS_MEMO.pop(next(iter(_RIVERS_MEMO)))
+    combined = combined.copy(deep=False)   # callers may add columns; the memo stays as read
 
     effective_min_order = max(1, min_order)
     if "ORD_STRA" in combined.columns and min_order > 1:

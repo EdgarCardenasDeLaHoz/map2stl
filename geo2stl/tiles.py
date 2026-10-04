@@ -5,6 +5,8 @@ import json
 import logging
 import os
 import re
+import threading
+from collections import OrderedDict
 
 import numpy as np
 from skimage import io
@@ -99,7 +101,30 @@ def crop_tile_np(image_array, tile_bbox, crop_bbox):
     return image_array[y1:y2, x1:x2]
 
 
+#: Last few stitched grids by bbox. One region open stitched the same 20 x 20 deg box
+#: (46 MB, ~3 s) up to six times: the DEM, water mask, lakes and hydrology paths
+#: each call this. Callers get a copy, so the cached grid is never modified.
+_STITCH_MEMO: OrderedDict[tuple, np.ndarray | None] = OrderedDict()
+_STITCH_MEMO_MAX = 3
+_STITCH_LOCK = threading.Lock()
+
+
 def stitch_tiles_no_rasterio(target_bbox):
+    """Stitch the local SRTM tiles over *target_bbox* (N, S, E, W); None when none match."""
+    key = tuple(round(float(v), 6) for v in target_bbox)
+    with _STITCH_LOCK:            # also makes concurrent identical calls stitch once
+        if key in _STITCH_MEMO:
+            _STITCH_MEMO.move_to_end(key)
+            hit = _STITCH_MEMO[key]
+            return None if hit is None else hit.copy()
+        out = _stitch_tiles(target_bbox)
+        _STITCH_MEMO[key] = out
+        while len(_STITCH_MEMO) > _STITCH_MEMO_MAX:
+            _STITCH_MEMO.popitem(last=False)
+        return None if out is None else out.copy()
+
+
+def _stitch_tiles(target_bbox):
     logger.info("==== Stitching tiles ====")
     logger.info(f"Target bounding box: {target_bbox}")
 

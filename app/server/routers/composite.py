@@ -36,7 +36,9 @@ POST /api/composite/hydrology-merge
 """
 
 import logging
+import threading
 import time
+from contextlib import contextmanager
 
 import numpy as np
 from fastapi import APIRouter
@@ -417,6 +419,30 @@ def _composite_cache_key(north: float, south: float, east: float, west: float,
 RETRY_SKIPPED_S = 15 * 60
 
 
+_inflight_guard = threading.Lock()
+_inflight: dict[str, list] = {}     # cache key -> [lock, number of callers holding or waiting]
+
+
+@contextmanager
+def _single_flight(key: str):
+    """One computation per key at a time: a second identical request waits, then hits the cache.
+
+    Opening Colombia (20 x 20 deg, 126k river reaches) sent the same dem-merge twice;
+    both computed the whole composite side by side for ~6.5 min each.
+    """
+    with _inflight_guard:
+        entry = _inflight.setdefault(key, [threading.Lock(), 0])
+        entry[1] += 1
+    try:
+        with entry[0]:
+            yield
+    finally:
+        with _inflight_guard:
+            entry[1] -= 1
+            if entry[1] == 0:
+                _inflight.pop(key, None)
+
+
 def compute_composite_dem(bbox: dict, dim: int, layers: list,
                           projection: str = "none",
                           clip_valid_region: bool = True,
@@ -464,19 +490,7 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
     (cells the ``lakes`` layer carves, or the ``water_esa`` mask covers) on the
     composite grid, so the 3D viewer colours lakes like the Edit map (cached too).
     """
-    import cv2 as _cv2
-
-    from app.server.config import TEST_MODE
-    from app.server.core.cache import read_array_cache, write_array_cache
     from app.server.schemas import MergeLayerSpec
-    from geo2stl.dem import (
-        apply_layer_processing,
-        blend_layers,
-        fetch_layer_data,
-        is_terrain_relative_source,
-        upsample_dem,
-    )
-    from geo2stl.water_layers import resize_relative
 
     def _result(composite, carve):
         if split_carve:
@@ -497,6 +511,28 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
     cache_key = _composite_cache_key(north, south, east, west, dim, specs,
                                      projection, clip_valid,
                                      maintain_dimensions)
+    with _single_flight(cache_key):
+        return _composite_for_key(cache_key, specs, north, south, east, west, dim,
+                                  projection, clip_valid, maintain_dimensions,
+                                  _result, warnings, water_out)
+
+
+def _composite_for_key(cache_key, specs, north, south, east, west, dim, projection,
+                       clip_valid, maintain_dimensions, _result, warnings, water_out):
+    """compute_composite_dem's body, run under its single-flight lock."""
+    import cv2 as _cv2
+
+    from app.server.config import TEST_MODE
+    from app.server.core.cache import read_array_cache, write_array_cache
+    from geo2stl.dem import (
+        apply_layer_processing,
+        blend_layers,
+        fetch_layer_data,
+        is_terrain_relative_source,
+        upsample_dem,
+    )
+    from geo2stl.water_layers import resize_relative
+
     cached = read_array_cache("composite", cache_key)
     if cached is not None and cached[0].get("composite") is not None:
         skipped_before = list(cached[1].get("skipped") or [])

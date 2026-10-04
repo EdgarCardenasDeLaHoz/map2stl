@@ -229,9 +229,10 @@ def snap_reaches_to_valley(geoms, dem: np.ndarray, width_m: float, height_m: flo
     def snap_part(line, rp):
         if line.length < 2 * px:
             return line
-        dense = np.array([line.interpolate(d).coords[0]
-                          for d in np.linspace(0.0, line.length,
-                                               max(2, int(np.ceil(2 * line.length / px))))])
+        # One GEOS call for all points (a Python loop of line.interpolate cost 41 s
+        # over Colombia's 2,125 snapped reaches).
+        dense = shapely.get_coordinates(shapely.line_interpolate_point(
+            line, np.linspace(0.0, line.length, max(2, int(np.ceil(2 * line.length / px))))))
         rows, cols = to_px(dense)
         floor = floors.get(rp)
         if floor is None:
@@ -330,7 +331,13 @@ def river_depth_by_order(gdf, north: float, south: float, east: float, west: flo
                                    c[:, 0] * d + c[:, 1] * e + yo])))
     if snap and dem is not None and np.shape(dem) == (h, w):
         from shapely.geometry import box
-        lines = geoms.intersection(box(0.0, 0.0, width_m, height_m)).to_numpy()
+        # Clip only the reaches that cross the frame: intersecting all of them cost
+        # 22 s for Colombia's 126k reaches, nearly all of which lie inside.
+        frame = box(0.0, 0.0, width_m, height_m)
+        shapely.prepare(frame)
+        lines = geoms.to_numpy().copy()
+        crossing = ~shapely.contains(frame, lines)
+        lines[crossing] = shapely.intersection(lines[crossing], frame)
         ok = (~shapely.is_empty(lines)) & np.isin(shapely.get_type_id(lines), (1, 5))  # (Multi)LineString
         if ok.any():
             orders = order[ok] if order is not None else np.full(int(ok.sum()), 3.0)

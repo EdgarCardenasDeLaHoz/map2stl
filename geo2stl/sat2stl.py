@@ -316,9 +316,12 @@ def initialize_earth_engine():
     ESA land cover + the combined water/hydrology layer) pays that 3s tax
     repeatedly and stacks up into many seconds of pure waiting before the
     (unavoidable) failure. Cache the outcome for a few minutes so repeated
-    calls fail fast; a successful init is cheap to repeat so it isn't cached.
+    calls fail fast. A success is remembered for the process too: ee.Initialize()
+    was measured at 6.7 s per call (2026-10-03), paid by every cache-missing fetch.
     """
     now = time.time()
+    if _ee_status_cache["ok"] is True:
+        return
     if (_ee_status_cache["ok"] is False
             and now - _ee_status_cache["checked_at"] < _EE_STATUS_TTL_S):
         raise RuntimeError(_ee_status_cache["error"])
@@ -401,7 +404,9 @@ def fetch_bbox_image(N, S, E, W, scale=None, dataset="copernicus", use_cache=Tru
             return np.zeros((td, td), dtype=np.uint8)
         return np.zeros((td, td), dtype=np.int16)
 
-    bbox_str = f"{N}_{S}_{E}_{W}_{scale}_{dataset}"
+    # floats, so 14 and 14.0 (JSON body vs query string) share one cache entry:
+    # they were two keys and the same ESA image was fetched from Earth Engine twice.
+    bbox_str = f"{float(N)}_{float(S)}_{float(E)}_{float(W)}_{scale}_{dataset}"
     cache_hash = hashlib.md5(bbox_str.encode()).hexdigest()
     cache_path = CACHE_DIR / f"{cache_hash}.jbl"
     meta_path = CACHE_DIR / f"{cache_hash}.meta"

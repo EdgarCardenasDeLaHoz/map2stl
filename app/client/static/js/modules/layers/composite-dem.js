@@ -517,7 +517,7 @@ let _computeGen = 0;
  * terrain-relative layers the export carves, fetched through dem-merge on a
  * zero-weight base DEM so only the carve comes back. Cached per request body.
  */
-let _hydroCache = null;   // { key, values }
+let _hydroCache = null;   // { key, values: Promise<Float32Array|null> }
 async function _hydroContribution(demW, demH) {
     _syncRiverParamsFromHydrology();
     const bbox = window.appState?.currentDemBbox;
@@ -537,7 +537,17 @@ async function _hydroContribution(demW, demH) {
         maintain_dimensions: maintainDimensions,
     };
     const key = JSON.stringify(body) + `->${demW}x${demH}`;
+    // The promise is cached, not only the result: a second caller while the first
+    // request is still running shares it (opening Colombia sent the same
+    // 6-minute dem-merge twice). A failed fetch is dropped so the next call retries.
     if (_hydroCache?.key === key) return _hydroCache.values;
+    const values = _fetchHydro(body, demW, demH);
+    _hydroCache = { key, values };
+    values.then((v) => { if (v == null && _hydroCache?.key === key) _hydroCache = null; });
+    return values;
+}
+
+async function _fetchHydro(body, demW, demH) {
     const { data, error } = await (window.api?.composite?.demMerge(body)
         ?? Promise.resolve({ data: null, error: 'api not ready' }));
     if (error || !data || data.error) {
@@ -547,9 +557,7 @@ async function _hydroContribution(demW, demH) {
     const vals = window.decodeDemValues?.(data);
     const [h, w] = data.dimensions || [];
     if (!vals?.length || !h || !w) return null;
-    const values = _resampleGrid(new Float32Array(vals), w, h, demW, demH);
-    _hydroCache = { key, values };
-    return values;
+    return _resampleGrid(new Float32Array(vals), w, h, demW, demH);
 }
 
 window.computeCompositeDem = function computeCompositeDem() {
