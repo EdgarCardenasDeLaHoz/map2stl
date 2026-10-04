@@ -187,8 +187,13 @@ def _solve_once(obs: list[Obs], image_width: int, projection: str, search_radius
 
     best = None
     for _, gx, gy, psi, f in cands[:5]:
-        p0 = [gx, gy, psi] + ([] if f_prior_px else [math.log(f)])
-        r = least_squares(resid, p0, loss="soft_l1", f_scale=15.0)
+        # focal length bounded to 0.05-50 x the width (FOV ~2-170 deg): degenerate
+        # identifications otherwise drive it to 0 (seen in skyline matching, 2026-10-04)
+        lo_f, hi_f = math.log(0.05 * image_width), math.log(50.0 * image_width)
+        p0 = [gx, gy, psi] + ([] if f_prior_px else [min(max(math.log(f), lo_f + 1e-6), hi_f - 1e-6)])
+        bounds = ([-np.inf] * 3 + ([] if f_prior_px else [lo_f]),
+                  [np.inf] * 3 + ([] if f_prior_px else [hi_f]))
+        r = least_squares(resid, p0, loss="soft_l1", f_scale=15.0, bounds=bounds)
         if best is None or r.cost < best.cost:
             best = r
     p = best.x
