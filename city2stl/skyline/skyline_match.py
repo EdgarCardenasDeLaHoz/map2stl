@@ -312,11 +312,17 @@ def refine(prof: PhotoProfile, towers: Towers, hit: Hit, radius_m: float = 600.0
     return Hit(lat, lon, hd, fv, off, rms, mis, n)
 
 
-def locate(prof: PhotoProfile, towers: Towers, top: int = 8, **search_kw) -> list[Hit]:
-    """Coarse search, then ``refine`` the best ``top`` hits; best first."""
+def locate(prof: PhotoProfile, towers: Towers, top: int = 8, fov_span: float = 0.35,
+           **search_kw) -> list[Hit]:
+    """Coarse search, then ``refine`` the best ``top`` hits; best first.
+
+    ``fov_span``: how far refinement may move the FOV (log units, +-35 % by default). Narrow
+    it when the FOV comes from EXIF: with the FOV free, a slice of skyline fits somewhere,
+    and 11 of 12 located photos were placed km off with FOVs of 8-95 deg (2026-10-04).
+    """
     projection = search_kw.get("projection", "pinhole")
     coarse = search(prof, towers, top=top, **search_kw)
-    fine = [refine(prof, towers, h, projection=projection) for h in coarse]
+    fine = [refine(prof, towers, h, projection=projection, fov_span=fov_span) for h in coarse]
     return sorted(fine, key=lambda h: h.misfit)
 
 
