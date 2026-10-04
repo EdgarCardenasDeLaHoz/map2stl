@@ -64,3 +64,13 @@ def test_links_and_cliques_do_not_chain():
     assert links == {"u1": ("L", 0.02)}
     groups = pg.cliques(pairs, {"u1", "u2", "u3", "u4", "u5"})
     assert {"u3", "u4", "u5"} not in groups and all(len(g) == 2 for g in groups)
+
+
+def test_embed_links_need_both_signals():
+    keys = ["L1", "L2", "u_good", "u_lookalike", "u_far"]
+    v = np.array([[1, 0, 0], [0, 1, 0], [0.99, 0.14, 0], [0.98, 0.2, 0], [0, 0, 1]], float)
+    v /= np.linalg.norm(v, axis=1, keepdims=True)
+    pairs = [("u_good", "L1", 0.04, 1, 0, 1), ("u_lookalike", "L1", 0.4, 1, 0, 1),
+             ("u_far", "L2", 0.03, 1, 0, 1)]
+    got = pg.embed_links(keys, v, pairs, {"L1", "L2"}, min_cos=0.9, max_misfit=0.1)
+    assert set(got) == {"u_good"} and got["u_good"][0] == "L1"

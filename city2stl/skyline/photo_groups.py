@@ -153,3 +153,46 @@ def cliques(pairs, keys: set[str], max_misfit: float = SAME_SPOT_MISFIT) -> list
             out.append(c)
         left -= c
     return sorted(out, key=len, reverse=True)
+
+
+#: Embedding + outline thresholds. Miami (2026-10-04), DINOv2-small: located pairs with
+#: cosine >= 0.9 were all the same spot, 0.8-0.9 only 38 %. Unlocated -> located links at
+#: cos >= 0.75 and misfit <= 0.15: 4 of 6 right by eye; the 2 wrong (aerial vs aerial, two
+#: different rooftop views) had the lowest cosines (0.83, 0.77), every right one >= 0.84.
+#: A working threshold from a small sample, not a measured rate.
+LINK_MIN_COS = 0.84
+LINK_MAX_MISFIT = 0.15
+
+
+def embed_links(keys: list[str], vecs: np.ndarray, pairs, located: set[str],
+                min_cos: float = LINK_MIN_COS, max_misfit: float = LINK_MAX_MISFIT,
+                top_k: int = 5
+                ) -> dict[str, tuple[str, float, float]]:
+    """Unlocated photo -> (located photo, cosine, outline misfit), when both agree.
+
+    Candidates are the ``top_k`` located photos nearest by image embedding (``vecs``:
+    L2-normalised rows); the first whose cosine is at least ``min_cos`` and whose outline fit
+    (from ``pairs``) is at most ``max_misfit`` wins. Why both: the outline alone linked a marina
+    to a night skyline and a mall to a cruise-ship sunrise (3-4 of 18 right, 2026-10-04); the
+    embedding sees the whole scene, the outline checks the geometry.
+    """
+    mis = {}
+    for a, b, m, *_ in pairs:
+        mis[(a, b)] = mis[(b, a)] = float(m)
+    idx = {k: i for i, k in enumerate(keys)}
+    loc = [k for k in keys if k in located]
+    if not loc:
+        return {}
+    L = vecs[[idx[k] for k in loc]]
+    out = {}
+    for u in keys:
+        if u in located:
+            continue
+        cos = L @ vecs[idx[u]]
+        for j in np.argsort(-cos)[:top_k]:
+            lk = loc[int(j)]
+            m = mis.get((u, lk))
+            if cos[j] >= min_cos and m is not None and m <= max_misfit:
+                out[u] = (lk, float(cos[j]), m)
+                break
+    return out
