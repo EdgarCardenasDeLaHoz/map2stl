@@ -128,8 +128,35 @@ def _photos_html(photos: list[dict]) -> str:
     return "<div class=cards>" + "".join(cards) + "</div>"
 
 
+def _photo_summary_html(ps: dict | None) -> str:
+    if not ps:
+        return ""
+    sb = ps.get("same_buildings", {})
+
+    def row(label, d):
+        if not d or not d.get("n"):
+            return ""
+        return (f"<tr><td>{label}</td><td>{d['n']}</td><td>{_fmt(d.get('mae_m'))}</td>"
+                f"<td>{_fmt(d.get('bias_m'), '+.1f')}</td>"
+                f"<td>{_fmt(d.get('pair_order') and 100 * d['pair_order'], '.0f')}%</td>"
+                f"<td>{_fmt(d.get('spearman'), '.2f')}</td></tr>")
+
+    kept = ps.get("kept", {})
+    tried = ps.get("photos", {})
+    routes = " · ".join(f"{k} {kept.get(k, 0)}/{tried.get(k, 0)}" for k in tried)
+    return f"""<h2>Heights from photos</h2>
+<p class=mut>Photos kept by route (kept/tried): {routes}. {ps.get('buildings_measured', 0)} buildings
+measured from photos, {ps.get('confirmed', 0)} with confirmed truth. Each building: median over
+the photos that measured it.</p>
+<table><tr><th>source</th><th>n</th><th>MAE m</th><th>bias m</th><th>pairs in order</th><th>Spearman</th></tr>
+{row('photos, all confirmed', ps.get('photo_vs_truth'))}
+{row('photos, same buildings as Street View', sb.get('photo'))}
+{row('Street View, same buildings', sb.get('street_view'))}</table>"""
+
+
 def write_benchmark_page(report_dir: str | Path, score: dict, buildings: list[dict],
-                         truth: dict, photos: list[dict] | None = None) -> Path:
+                         truth: dict, photos: list[dict] | None = None,
+                         photo_summary: dict | None = None) -> Path:
     report_dir = Path(report_dir)
     if photos is None and (report_dir / "photos.json").exists():
         photos = json.loads((report_dir / "photos.json").read_text(encoding="utf-8"))
@@ -169,6 +196,7 @@ Only confirmed buildings are scored. Run: {html.escape(str(score.get('report', '
 dropped); untagged ones show the pipeline unaided.</p>
 <h2>Predicted vs true</h2>
 <div class=plots><img src="{scatter}" alt="scatter"><img src="{mapimg}" alt="error map"></div>
+{_photo_summary_html(photo_summary)}
 <h2>Photos</h2>
 <p class=mut>Wikimedia Commons skyline photos (F-WEB2). Camera from the photo's own location, a
 solved pose, or labels; towers measured by identify-then-measure, tilt and camera height fitted

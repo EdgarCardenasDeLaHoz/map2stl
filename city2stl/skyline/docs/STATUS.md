@@ -94,6 +94,19 @@ pairs are ordered at chance (Miami 44 %), which points at roof-to-building assig
     keeps 2 of 3 right and none of 9 wrong. Failures: elevated cameras (ship decks), the ship
     blocking the skyline, and several distant shots with only a narrow slice of towers.
   - Next: group photos by viewpoint and locate a group jointly (plan step G).
+- **Full Miami photo run** (`scripts/17_photo_pipeline.py`, 2026-10-04): 13 photos kept (labels
+  1/1, recorded GPS + EXIF 11/30, linked 0, skyline search 1/69); 138 buildings measured, 101
+  with confirmed truth.
+
+  | | n | MAE | bias | pairs in order | Spearman |
+  |---|---|---|---|---|---|
+  | Photos, all confirmed | 101 | 23.2 m | +8.7 | 85 % | 0.79 |
+  | Photos, same buildings as Street View | 27 | 13.2 m | +2.6 | 91 % | 0.90 |
+  | Street View, same buildings | 27 | 68.0 m | −36.7 | 49 % | −0.02 |
+
+  Best photos: "Miami, Florida, Skyline 4" (found by search) 6.4 m / 99 %; Vizcaya Metrorail
+  9.0 m / 98 %. One kept photo is wrong ("Downtown Miami (8110579514)": 74.8 m / 53 %).
+  Rejected: 62 searches on the margin gate, 19 recorded photos on misfit > 0.3.
 - Speed: the predicted outline is vectorised (Miami 101.7 → 3.9 ms per grid cell).
 
 ## Headline metrics (full pipeline, 2026-06-07)
