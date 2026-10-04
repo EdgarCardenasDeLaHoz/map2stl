@@ -79,14 +79,70 @@ Why now (2026-10-04):
   the solved pose, tilt and camera height fitted): 82 % pair order, leave-one-out MAE 13.5 m
   over 5 confirmed towers (Street View on Miami: 96.6 m). Correct identification is the lever.
 
-## Revised steps (2026-10-04, user: use the unlocated and the wide photos)
+## Phase 2 plan: heights from photos, identify then measure (2026-10-04)
 
-5a. **Identify, then measure**: for a photo with a solved pose, measure each identified
-    building at its own columns (the projected footprint), instead of the segment matcher.
-5b. **Locate unlabelled photos** by feature matching (OpenCV SIFT) against located photos
-    (Commons with coordinates, the labelled photo, Street View views), transferring
-    identifications through the matches, then `solve_pose`.
-5c. **Skyline matching** for photos nothing matches: search position and heading for the
-    OSM-predicted tower outline (OSM heights only, never the benchmark truth).
-6.  **Wide photos**: cylindrical projection in the solver (done) and in the measurement step;
-    FOV solved, not read from EXIF (crops keep the full-frame EXIF).
+User asks: use the unlocated and the wide photos; the labelled photo is valuable.
+
+What the evidence says so far:
+- The segment matcher is the limit, not the photos (36 % pair order on a Commons photo).
+- With correct identification the same geometry gives 82 % pair order and 13.5 m MAE.
+- SIFT recognises only copies of one shot; skyline outline matching recovers a pose from the
+  outline alone (known-answer photo: 152 m, heading 3.5 deg off, FOV right).
+- Per-tower identification at a found pose is still noisy, so the outline misfit ranks poses.
+
+### Pipeline (one script per city: `scripts/12_photo_heights.py --region miami`)
+
+1. **Collect.** Commons finder, now including unlocated and wide photos; 1600 px; brightness
+   filter; SegFormer masks on the GPU (one GPU job at a time, batch 4).
+2. **Locate**, by what the photo carries:
+   - labels: `photo_localize.solve_from_labels` (known answer);
+   - GPS (+ EXIF FOV and compass): `skyline_match.refine` in a ±500 m window around the prior;
+   - nothing: `skyline_match.locate` (full search);
+   - wide (> 3:1): the same with the cylindrical projection, FOV solved.
+   - **Gate:** keep a pose only when its misfit is below tau and beats the runner-up by delta.
+     tau and delta are calibrated on the located-photo validation (distance error vs misfit).
+3. **Identify.** At the pose, the towers that form the skyline over at least N degrees. Each
+   tower's columns are its projected footprint span. A roof is credited only to the tower the
+   model puts on top in those columns. This is the change that addresses the Street View
+   mis-assignment (+65 to +113 m on untagged buildings).
+4. **Measure.** The roof row is the photo skyline's median over the central 60 % of the
+   tower's columns (edges are shared with neighbours). Elevation angle from the row; distance
+   from the pose to the footprint's nearest point; `H = h_cam + d * tan(e + tilt)`.
+5. **Calibrate tilt and camera height** per photo on **anchors**: towers in view with OSM height
+   tags (never the benchmark truth). With no anchors, report relative heights only.
+6. **Aggregate** across photos: per-building median, spread, number of photos.
+7. **Score** with `scripts/10_benchmark.py --report` (write a compatible `heights.json`).
+   Report untagged buildings separately: anchors are tagged, so the untagged ones are the honest
+   score.
+
+### Work order (parallel where independent)
+
+- A. Located-photo validation (running): distance and heading error vs misfit -> tau, delta.
+- B. Speed: the outline model loops over 561 towers per grid cell in Python (~3-5 min per
+  photo). Vectorise over towers, then a process pool within the shared CPU budget (<= 4).
+- C. `photo_heights.py`: identify + measure + calibrate (steps 3-5), tested on the labelled
+  photo (its labels are the identification truth) and a synthetic city.
+- D. Wide photos through C (cylindrical columns and rows).
+- E. Miami end to end (step 7), then Chicago and Boston (the strongest truth).
+
+### Success criteria
+
+- Validation: >= 70 % of located photos placed within 300 m and 3 deg of heading.
+- Miami photo heights on confirmed untagged buildings: pair order >= 70 % and MAE < 30 m
+  (Street View: 42 % and 116 m).
+- >= 100 confirmed buildings measured from photos in Miami.
+
+### Risks
+
+- Anchor heights are OSM tags (Miami tags vs truth: 13 m MAE); calibrated heights inherit
+  their bias. Relative metrics do not.
+- Photo age: towers built after the photo are in OSM but not in the photo (or the reverse).
+  Prefer photos from 2015 on; flag older ones.
+- Glass tops reflect the sky, so the roof row under-reads (the known glass-tower problem).
+- Distance, tilt and camera height trade off; anchors spread in distance are needed.
+
+### Findings kept from the earlier revised steps
+
+- 5b feature matching (SIFT, 209 unlocated photos vs the labelled one): only copies of the same
+  shot match (3,700-4,800 inliers); everything else is 20-66, at chance level. Not pursued;
+  a learned matcher (LightGlue) stays an option for later.
