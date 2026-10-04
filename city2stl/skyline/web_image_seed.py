@@ -237,6 +237,56 @@ def _wikimedia_search(city_name: str, max_photos: int = 3) -> list[dict]:
 # Public API
 # ---------------------------------------------------------------------------
 
+def commons_skyline_seeds(
+    city_name: str,
+    bbox_nsew: tuple[float, float, float, float],
+    max_images: int = 5,
+    cache_dir: Path | None = None,
+) -> tuple[list[SkylinePoint], dict[str, np.ndarray]]:
+    """F-WEB2: seeds from located Wikimedia Commons skyline photos, posed from their own data.
+
+    Location from the Commons camera coordinates, heading from EXIF GPSImgDirection (else the
+    bearing to the bbox centre), FOV from the 35 mm-equivalent focal length (else 60 deg).
+    The registration sweep refines heading as for any seed. Writes ``commons_photos.json``
+    (title, pose, author, licence) beside the images: Commons files need attribution.
+    """
+    import json  # noqa: PLC0415
+
+    from .commons_photos import find_skyline_photos  # noqa: PLC0415
+    from .region_types import SkylinePoint  # noqa: PLC0415
+
+    cache_dir = Path(cache_dir) if cache_dir is not None else None
+    label = city_name.replace("_", " ").strip()
+    photos = find_skyline_photos(label, bbox_nsew, max_photos=max_images)
+    centre = ((bbox_nsew[0] + bbox_nsew[1]) / 2, (bbox_nsew[2] + bbox_nsew[3]) / 2)
+    seeds: list[SkylinePoint] = []
+    cache: dict[str, np.ndarray] = {}
+    manifest = []
+    for i, p in enumerate(photos, 1):
+        img = _download_image(p.url, cache_dir)
+        if img is None:
+            continue
+        name = f"commons_{i}"
+        heading = p.heading_deg if p.heading_deg is not None else _bearing(p.lat, p.lon, *centre)
+        fov = p.hfov_deg if p.hfov_deg is not None else 60.0
+        seeds.append(SkylinePoint(name=name, lat=p.lat, lon=p.lon, heading=float(heading),
+                                  source="web", score=0.8, fov=float(fov), pitch=0.0,
+                                  pano_id=None))
+        cache[name] = img
+        manifest.append({"seed": name, "title": p.title, "page": p.page_url, "lat": p.lat,
+                         "lon": p.lon, "heading_deg": heading,
+                         "heading_from": "exif" if p.heading_deg is not None else "bbox centre",
+                         "hfov_deg": fov, "taken": p.taken, "author": p.author,
+                         "licence": p.licence, "image_px": list(img.shape[1::-1])})
+        print(f"[commons_seed] {name}: {p.title!r} @ {p.lat:.5f},{p.lon:.5f} "
+              f"heading {heading:.0f} fov {fov:.0f}")
+    if cache_dir is not None and manifest:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "commons_photos.json").write_text(json.dumps(manifest, indent=1),
+                                                            encoding="utf-8")
+    return seeds, cache
+
+
 def web_skyline_seeds(
     city_name: str,
     max_images: int = 3,

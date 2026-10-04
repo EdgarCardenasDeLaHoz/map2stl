@@ -73,6 +73,7 @@ from .region_data import (
     _load_site_pano_only_pdf,
     _load_site_render_pdf,
     _load_site_seed_urls,
+    _load_site_use_commons_photos,
     _load_site_use_cross_view_scoring,
     _load_site_use_pano_coastline_recovery,
     _load_site_use_satellite_footprints,
@@ -349,12 +350,20 @@ def run_region_pdf_report(
             (bbox.north + bbox.south) * 0.5,
             (bbox.east + bbox.west) * 0.5,
         )
-        _web_out, web_image_cache = _web_seeds(
-            city_name=region_name,
-            max_images=3,
-            cache_dir=output_pdf.parent / output_pdf.stem / "web_images",
-            region_bbox_center=_bbox_center,
-        )
+        if _load_site_use_commons_photos(region_name):
+            from .web_image_seed import commons_skyline_seeds  # noqa: PLC0415
+            _web_out, web_image_cache = commons_skyline_seeds(
+                city_name=region_name,
+                bbox_nsew=(bbox.north, bbox.south, bbox.east, bbox.west),
+                cache_dir=output_pdf.parent / output_pdf.stem / "web_images",
+            )
+        else:
+            _web_out, web_image_cache = _web_seeds(
+                city_name=region_name,
+                max_images=3,
+                cache_dir=output_pdf.parent / output_pdf.stem / "web_images",
+                region_bbox_center=_bbox_center,
+            )
         if _web_out:
             logger.info(f"[web_seed] adding {len(_web_out)} web image seed(s) "
                         f"for {region_name!r}")

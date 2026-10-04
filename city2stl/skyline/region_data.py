@@ -614,6 +614,12 @@ def _load_site_render_pdf(region_name: str) -> bool:
     """
     return bool(_read_site_config(region_name).get("render_pdf", False))
 
+def _load_site_use_commons_photos(region_name: str) -> bool:
+    """Per-region opt-in for F-WEB2: web seeds from located Wikimedia Commons skyline photos
+    (camera location, EXIF focal length and compass) instead of F-WEB1's guessed viewpoint.
+    Default False so regions without it keep their benchmark baseline."""
+    return bool(_read_site_config(region_name).get("use_commons_photos", False))
+
 def _load_site_use_satellite_footprints(region_name: str) -> bool:
     """Per-region opt-in for Microsoft Buildings polygons. True →
     ``fetch_microsoft_buildings_for_bbox`` runs and the de-duped
