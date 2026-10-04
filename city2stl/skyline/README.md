@@ -313,6 +313,12 @@ Height accuracy is scored on surveyed truth, never on Cartagena (no open survey;
 The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/` points here rather than repeating it).
 
 - **Heights**
+  - **First: untagged buildings read 65–113 m too tall** in all six benchmarked cities
+    ([STATUS](docs/STATUS.md#height-accuracy-on-surveyed-truth-f-skybench-baseline-2026-10-04)).
+    A roof pixel is credited to a near low building when a farther tower owns it. Check the
+    owner before crediting: per-column depth vs each candidate's OSM distance, and the
+    closest-in-column gate (`_core/height.py::estimate_heights_from_registration`). Measure with
+    `scripts/10_benchmark.py --score-only` on the 2026-10-03 baseline reports.
   - Glass-tower under-prediction (50–100 m): run the Phase 1 trace on ≥ 3 tall tagged towers and pick the dominant
     cause before any Phase 2 depth work
     ([glass-roof plan](../../docs/plans/done/skyline/glass-roof-height-fix-plan.md)).
@@ -333,6 +339,11 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
   - A2: correlate the good/medium/weak label with per-building height MAE on curated regions.
   - A4: make the F-DET2 OSM-FOV gate count satellite footprints too (it currently rejects the OSM-sparse cities
     F-DET4a targets).
+- **Benchmark truth**
+  - Benidorm and Madrid: re-run once Overpass recovers (2026-10-04 outage).
+  - Seattle: 3D Tiles reads +3.9 m above lidar on hills; check `google_3d.py::_ground_from_dsm` on slopes.
+  - Prague: 3D Tiles gave one value (104.15 m) over many low footprints; find the coarse-tile cause.
+  - Miami inland has no USGS EPT lidar; Miami-Dade County's survey would be the next source.
 - **Validation and regions**
   - F-SKY5: only revisit on a region with merged towers F-SKY2 can't split; Cartagena showed no gain.
   - Wire Miami and Chicago to the opt-in flags (F-SKY8/11.1/13, `pano_only_pdf`) and record per-seed recovery

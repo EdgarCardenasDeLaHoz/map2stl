@@ -7,6 +7,41 @@
 - **Snapshot:** metrics from the 2026-06-07 full runs; later changes are dated inline.
 - Code citations use `file::symbol` (line numbers drift). Paths are relative to `city2stl/skyline/`.
 
+## Height accuracy on surveyed truth (F-SKYBENCH baseline, 2026-10-04)
+
+The headline. Truth per footprint = survey lidar and Google 3D Tiles agreeing within
+max(3 m, 10 %) ("confirmed"); production settings (`SKYLINE_CV_SEGFORMER_SIZE=b1`, tag filter on);
+run `runs/benchmark/2026-10-03_1952`, scored `2026-10-04_1415`. How to run: [README → Benchmark](../README.md#benchmark-f-skybench).
+
+| Region | Scored | Confirmed | Disputed | MAE | Median AE | Bias | Within 25 % | Untagged MAE / bias (n) | Tagged MAE / bias (n) |
+|---|---|---|---|---|---|---|---|---|---|
+| Miami | 463 | 192 | 37 | 102.3 | 90.2 | +86.6 | 7 % | 115.5 / +104.7 (163) | 28.5 / −15.3 (29) |
+| Chicago | 348 | 265 | 74 | 50.5 | 30.1 | +38.8 | 18 % | 80.3 / +75.8 (130) | 21.9 / +3.1 (135) |
+| Seattle | 346 | 156 | 185 | 62.2 | 39.4 | +56.1 | 15 % | 77.9 / +72.6 (115) | 18.0 / +9.8 (41) |
+| Boston | 707 | 587 | 108 | 47.1 | 24.9 | +40.2 | 19 % | 68.0 / +65.5 (344) | 17.5 / +4.5 (243) |
+| La Défense | 101 | 87 | 14 | 108.7 | 114.5 | +108.4 | 2 % | 113.2 / +112.9 (83) | 15.3 / +15.3 (4) |
+| Prague Pankrác | 77 | 23 | 54 | 29.7 | 24.5 | +9.7 | 9 % | 45.6 / +29.5 (7) | 22.8 / +1.0 (16) |
+| Benidorm, Madrid | — | — | — | — | — | — | — | Overpass outage on 2026-10-04; re-run pending | |
+
+- **The main product gap is untagged buildings read far too tall** (+65 to +113 m bias), in every
+  city. Mostly small low buildings (Miami: true median 9.7 m, footprint ~420 m², estimate median
+  123 m): a tower roof behind them is credited to them. Every seed shows it, so it is not one bad
+  heading.
+- **Tagged buildings look good because of the tag filter** (`_core/height.py::_tag_filter_enabled`):
+  per-view estimates far from the OSM tag are dropped, so the tag rescues them. Scores against OSM
+  tags (the old yardstick) hid the problem; the benchmark reports the two groups separately.
+- Towers > 100 m still read low (−15 to −34 m bias) but are now the smaller error.
+- More views help only at 4+ (Miami: 4+ views MAE 40 m vs 103 m for one view).
+- Truth quality per city:
+  - Chicago, Boston, La Défense, Miami: sources agree (median 3D Tiles − survey +0.2 to +1.4 m).
+  - Seattle: 3D Tiles reads +3.9 m above lidar (IQR +1 to +8 m), likely its ground estimate on
+    hills; 185 disputes.
+  - Prague: 3D Tiles returned one value (104.15 m) over many low footprints, a coarse-tile
+    artefact; the cross-check rejects them, leaving 23 confirmed buildings.
+  - Miami: the only USGS EPT project (2019 Keys topobathy) has points on the coast only; inland
+    buildings are 3D Tiles only and stay out of the headline.
+- Cartagena is not scored: no open survey exists, and its old figures rested on ~20 OSM tags.
+
 ## Headline metrics (full pipeline, 2026-06-07)
 
 | Region | Seeds (user + auto) | `seed_extracted_buildings` | Bearing recovery |
@@ -109,7 +144,12 @@
 
 ## Known issues
 
-- **Tall glass towers under-predict by 50–100 m** — the main product gap.
+- **Untagged buildings read 65–113 m too tall** (benchmark above) — the main product gap since
+  2026-10-04. Roofs of farther towers are credited to near low buildings; the tag filter hides it
+  on tagged buildings.
+
+- **Tall glass towers under-predict** — 15–34 m on the 2026-10-04 benchmark (was "50–100 m" on
+  Cartagena/Miami tags).
   - Hypotheses: mask under-reach on reflective tops; closest-in-column gate drops the tall tower; roof-y → height math.
   - Trace plan and Phase 1 tooling: [glass-roof-height-fix-plan.md](../../../docs/plans/done/skyline/glass-roof-height-fix-plan.md),
     `scripts/09_height_trace.py`.

@@ -109,3 +109,17 @@ Cartagena stays a heading and registration smoke test, not an accuracy benchmark
 ## Progress
 
 - 2026-10-03: plan written; set and truth sources chosen by the user.
+- 2026-10-03/04 (branch `f-skybench`, worktree `~/worktrees/map2stl-skybench`):
+  - Steps 1, 2, 3, 5 done: `benchmark.py`, `scripts/10_benchmark.py`, persisted auto-proposals
+    (`seed_selection.py::_persisted_proposals`); new sites La Défense, Madrid, Prague.
+  - Deviation: US truth reads USGS's EPT octree with laspy (`lidar_3dep_ept_laspy.py`, user
+    choice): Planetary Computer's COPC has no tiles over central Miami or Seattle.
+  - Deviation: no "coverage over all OSM buildings in the bbox"; truth is measured only on
+    scored footprints (a 10 km bbox of 3D Tiles is hours per city).
+  - Baseline (step 6) for six cities is in `city2stl/skyline/docs/STATUS.md`. Benidorm and Madrid
+    failed on an Overpass outage; skyline now needs only the buildings layer (`7ff7ba5`).
+  - Finding: untagged buildings read 65–113 m too tall in every city; the tag filter hides it on
+    tagged ones (scorer now reports both groups).
+  - Success criteria: ≥ 150 confirmed in Miami (192), Chicago (265), Seattle (156), Boston (587);
+    not La Défense (87, small run) or Prague (23, 3D Tiles artefact). Agreement ≥ 80 % fails in
+    Seattle (46 %) and Prague (30 %), see STATUS.
