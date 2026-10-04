@@ -84,23 +84,60 @@ export function parseBbox(n, s, e, w) {
 export const REGION_ACCENT = '#4a9eff';
 
 /**
- * Leaflet path options for a saved-region rectangle.
+ * Region colours (user 2026-10-04: "introduce colors again, and add the color to the table").
+ * Bright hues that read over the dark halo on both satellite and street tiles; the blue of
+ * REGION_ACCENT is left out so the box being edited stays distinct.
+ */
+export const REGION_PALETTE = [
+    '#ff6b6b', '#ffa94d', '#ffd43b', '#a9e34b', '#51cf66',
+    '#38d9a9', '#3bc9db', '#9775fa', '#da77f2', '#f783ac',
+];
+
+/**
+ * A region's colour, the same on the map and in the list: picked from REGION_PALETTE by
+ * its name (FNV-1a hash), so it stays the same across reloads and when regions are added.
+ * @param {string} name
+ * @returns {string}
+ */
+export function regionColor(name) {
+    let h = 0x811c9dc5;
+    for (const ch of String(name ?? '')) {
+        h ^= ch.codePointAt(0);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return REGION_PALETTE[h % REGION_PALETTE.length];
+}
+
+/**
+ * Regions in drawing order: largest first, so a small box is drawn over a large one and
+ * takes the clicks inside it (user 2026-10-04). The selected region gets no special place:
+ * putting it on top let a large selected box swallow the small ones inside it.
+ * @param {Array<{north:number, south:number, east:number, west:number}>} regions
+ * @returns {Array} a sorted copy
+ */
+export function regionDrawOrder(regions) {
+    return [...regions].sort((a, b) => bboxSizeKm(b).areaKm2 - bboxSizeKm(a).areaKm2);
+}
+
+/**
+ * Leaflet path options for a saved-region rectangle, outlined in the region's colour.
  *
- * Boxes are outlines only. `fill` stays true with zero opacity so the interior
- * still takes clicks and hovers (SVG only hit-tests painted areas, and a
- * zero-opacity fill counts as painted; `fill: false` would leave only the
- * 1.5 px stroke clickable).
+ * Boxes are outlines; only the selected one is tinted. `fill` stays true with zero opacity
+ * so the interior still takes clicks and hovers (SVG only hit-tests painted areas, and a
+ * zero-opacity fill counts as painted; `fill: false` would leave only the stroke clickable).
+ * Filled boxes for every region tinted the whole map (2026-10-01), hence outlines.
  * @param {'normal'|'hover'|'selected'} state
+ * @param {string} [color] the region's colour (regionColor)
  * @returns {object}
  */
-export function regionBoxStyle(state) {
+export function regionBoxStyle(state, color = '#ffffff') {
     switch (state) {
         case 'selected':
-            return { color: REGION_ACCENT, weight: 3, opacity: 1, fill: true, fillColor: REGION_ACCENT, fillOpacity: 0.08 };
+            return { color, weight: 3.5, opacity: 1, fill: true, fillColor: color, fillOpacity: 0.14 };
         case 'hover':
-            return { color: '#ffffff', weight: 2.5, opacity: 1, fill: true, fillColor: '#ffffff', fillOpacity: 0.06 };
+            return { color, weight: 2.5, opacity: 1, fill: true, fillColor: color, fillOpacity: 0.08 };
         default:
-            return { color: '#ffffff', weight: 1.5, opacity: 0.55, fill: true, fillColor: '#ffffff', fillOpacity: 0 };
+            return { color, weight: 1.5, opacity: 0.85, fill: true, fillColor: color, fillOpacity: 0 };
     }
 }
 

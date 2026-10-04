@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-    bboxSizeKm, formatBboxSize, parseBbox, regionBoxStyle, regionHaloStyle, REGION_ACCENT, formatBboxDims, boxAround, placeBox, POINT_PLACE_KM,
+    bboxSizeKm, formatBboxSize, parseBbox, regionBoxStyle, regionHaloStyle, regionColor, regionDrawOrder, REGION_PALETTE, formatBboxDims, boxAround, placeBox, POINT_PLACE_KM,
 } from '../../app/client/static/js/modules/regions/region-geometry.js';
 
 describe('bboxSizeKm', () => {
@@ -56,10 +56,14 @@ describe('regionBoxStyle', () => {
         expect(s.weight).toBe(1.5);
     });
 
-    it('highlights the selected region in the accent colour', () => {
-        const s = regionBoxStyle('selected');
-        expect(s.color).toBe(REGION_ACCENT);
-        expect(s.fillOpacity).toBeCloseTo(0.08);
+    it('outlines a region in its colour and tints only the selected one', () => {
+        const c = '#ff6b6b';
+        expect(regionBoxStyle('normal', c).color).toBe(c);
+        expect(regionBoxStyle('normal', c).fillOpacity).toBe(0);
+        const s = regionBoxStyle('selected', c);
+        expect(s.color).toBe(c);
+        expect(s.fillColor).toBe(c);
+        expect(s.fillOpacity).toBeGreaterThan(0);
         expect(s.weight).toBeGreaterThan(regionBoxStyle('normal').weight);
     });
 
@@ -103,5 +107,27 @@ describe('boxAround / placeBox', () => {
         const s = bboxSizeKm(placeBox(peak, 1));
         expect(s.widthKm).toBeCloseTo(POINT_PLACE_KM, 1);
         expect(s.heightKm).toBeCloseTo(POINT_PLACE_KM, 1);
+    });
+});
+
+describe('regionColor', () => {
+    it('gives a region the same palette colour every time', () => {
+        expect(regionColor('Granada')).toBe(regionColor('Granada'));
+        expect(REGION_PALETTE).toContain(regionColor('Granada'));
+        expect(REGION_PALETTE).toContain(regionColor(''));
+    });
+
+    it('spreads regions over the palette', () => {
+        const names = ['Granada', 'Colombia', 'Colombia_2', 'Mexico', 'Amazon', 'Philadelphia', 'Paris', 'Lisbon'];
+        expect(new Set(names.map(regionColor)).size).toBeGreaterThanOrEqual(5);
+    });
+});
+
+describe('regionDrawOrder', () => {
+    it('draws the largest first so smaller boxes sit on top', () => {
+        const big = { name: 'big', north: 10, south: 0, east: 10, west: 0 };
+        const mid = { name: 'mid', north: 5, south: 0, east: 5, west: 0 };
+        const small = { name: 'small', north: 1, south: 0, east: 1, west: 0 };
+        expect(regionDrawOrder([small, big, mid]).map((r) => r.name)).toEqual(['big', 'mid', 'small']);
     });
 });

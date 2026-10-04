@@ -2,9 +2,11 @@
  * modules/regions/region-boxes.js — saved-region boxes on the Explore (Leaflet) map,
  * and the viewport set the sidebar list shares with it.
  *
- * - Boxes are outlines over a dark halo, not filled tiles, so overlapping regions
- *   do not tint the map. Selected = accent colour; hovered = brighter + name tooltip.
- *   Styles: region-geometry.js::regionBoxStyle / regionHaloStyle.
+ * - Boxes are outlines in each region's colour (region-geometry.js::regionColor, the same
+ *   swatch as its list row) over a dark halo; only the selected one is tinted. Hovered =
+ *   thicker + name tooltip. Styles: region-geometry.js::regionBoxStyle / regionHaloStyle.
+ * - Drawn largest first (regionDrawOrder), so a small box sits on top of a large one and
+ *   can be clicked where they overlap; hover and selection never reorder them.
  * - Only the viewport set is drawn: viewport-regions.js::selectViewportRegions
  *   (≤ 20 regions that intersect and fit the view, largest first, plus the
  *   selected one), recomputed on moveend/zoomend/resize (debounced 150 ms), on region
@@ -27,7 +29,7 @@
  *   window.selectCoordinate(i), window.goToEdit(i), window.events / window.EV
  */
 
-import { regionBoxStyle, regionHaloStyle } from './region-geometry.js';
+import { regionBoxStyle, regionColor, regionDrawOrder, regionHaloStyle } from './region-geometry.js';
 import { selectViewportRegions } from './viewport-regions.js';
 
 const VIEW_DEBOUNCE_MS = 150;
@@ -63,9 +65,8 @@ function _stateFor(name) {
 
 function _style(box) {
     const state = _stateFor(box.region.name);
-    box.rect.setStyle(regionBoxStyle(state));
+    box.rect.setStyle(regionBoxStyle(state, box.color));
     box.halo.setStyle(regionHaloStyle(state));
-    if (state !== 'normal') { box.halo.bringToFront(); box.rect.bringToFront(); }
 }
 
 function _markRow(name, on) {
@@ -75,14 +76,13 @@ function _markRow(name, on) {
     row?.classList.toggle('map-hover', on);
 }
 
-/** Put exactly the view set on the map, largest first so small boxes sit on top. */
+/** Put exactly the view set on the map, largest first so small boxes sit on top (and take the clicks). */
 function _applyMapSet() {
     const layer = window.getPreloadedLayer?.();
     if (!layer || !_viewSet) return;
     layer.clearLayers();
     _drawn = [];
-    // The set is largest first, except the selected region appended at the end.
-    for (const region of _viewSet.regions) {
+    for (const region of regionDrawOrder(_viewSet.regions)) {
         const box = _boxes.get(region.name);
         if (!box) continue;
         layer.addLayer(box.halo);
@@ -185,9 +185,10 @@ function _editMarkerFor(bounds, index) {
 function _buildBox(region, index) {
     const bounds = L.latLngBounds([region.south, region.west], [region.north, region.east]);
     const halo = L.rectangle(bounds, regionHaloStyle('normal'));
-    const rect = L.rectangle(bounds, regionBoxStyle('normal'));
+    const color = regionColor(region.name);
+    const rect = L.rectangle(bounds, regionBoxStyle('normal', color));
     const ensureEditMarker = _editMarkerFor(bounds, index);
-    const box = { region, index, rect, halo };
+    const box = { region, index, rect, halo, color };
 
     rect.on('click', () => window.selectCoordinate(index));
     rect.on('mouseover', (e) => {

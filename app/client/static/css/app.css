@@ -2728,6 +2728,15 @@
             opacity: 0.6;
         }
 
+        /* The region's colour, the same as its box on the map (region-geometry.js::regionColor). */
+        .coordinate-item-swatch {
+            flex: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+        }
+
         .coordinate-item-name {
             flex: 1;
             font-size: 14px;

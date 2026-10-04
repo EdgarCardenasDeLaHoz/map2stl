@@ -39,7 +39,7 @@
  */
 
 import { detectContinent } from './continent.js';
-import { formatBboxDims } from './region-geometry.js';
+import { formatBboxDims, regionColor } from './region-geometry.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope state
@@ -297,7 +297,7 @@ function renderCoordinatesList() {
             if (selected && selected.name === region.name) item.classList.add('selected');
             const esc = window.escapeHtml;
             item.innerHTML = `
-                <span class="coordinate-item-icon" aria-hidden="true">📍</span>
+                <span class="coordinate-item-swatch" aria-hidden="true" style="background:${regionColor(region.name)}"></span>
                 <span class="coordinate-item-text">
                     <span class="coordinate-item-name">${esc(region.name)}</span>
                     <span class="coordinate-item-meta">${esc([formatBboxDims(region), region.description]

@@ -104,6 +104,21 @@ rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 - **Supersedes / superseded by:** supersedes the ✨ part of "Pages follow the design guidelines;
   Extrude is rebuilt first" (2026-10-01).
 
+### 2026-10-04 — Explore boxes: one colour per region (outline + list swatch), small boxes drawn on top
+- **Decision:** each region has a stable colour from a 10-hue palette, picked by its name
+  (`region-geometry.js::regionColor`); its box is outlined in it and its list row shows it as a
+  swatch (replacing 📍). Only the selected box is tinted (its own colour, 14 %). Boxes are drawn
+  largest first (`regionDrawOrder`), and hover or selection no longer brings a box to the front.
+- **Why:** user, 2026-10-04: "regions boxes should be rendered with small ones on top so you can
+  click on smaller ones when they overlap, introduce colors again, and add the color to the
+  table." A selected or hovered large box was brought to the front and took the clicks meant
+  for the small boxes inside it.
+- **Rejected:** filled palette boxes (2026-10-01: they tinted the map); a single accent for the
+  selected box (with per-region colours, thickness + tint marks the selection instead).
+- **Supersedes / superseded by:** amends the 2026-10-01 viewport-set entry below (white
+  outlines, accent selection).
+- **Source:** user request, this session.
+
 ### 2026-10-04 — Edit's right panel is the selected layer's Fetch / View / Composite, then Canvas
 - **Decision:** with a layer selected on the left, the panel shows only that layer: FETCH, VIEW
   and COMPOSITE groups (one row per setting, per-group Reset, ADVANCED rows behind "Show
