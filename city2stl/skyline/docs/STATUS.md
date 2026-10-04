@@ -25,6 +25,10 @@ Madrid `2026-10-04_1425`, after the Overpass outage). How to run: [README → Be
 | Benidorm | 98 | 33 | 62 | 31.6 | 27.9 | +30.3 | 15 % | 89.1 / +89.1 (4) | 23.7 / +22.2 (29) |
 | Madrid Cuatro Torres | 197 | 64 | 129 | 62.1 | 30.5 | +53.7 | 6 % | 84.6 / +83.2 (42) | 19.3 / −2.6 (22) |
 
+- **Relative heights are near chance** (scored `2026-10-04_1527`): building pairs in the right
+  order inside one view — Miami 44 %, Seattle 48 %, Madrid 47 %, Prague 53 %, Boston 56 %,
+  La Défense 59 %, Chicago 66 %, Benidorm 86 % (mostly tagged buildings). A camera-height error
+  would keep the order, so the wrong order points at roof-to-building assignment.
 - **The main product gap is untagged buildings read far too tall** (+65 to +113 m bias), in every
   city. Mostly small low buildings (Miami: true median 9.7 m, footprint ~420 m², estimate median
   123 m): a tower roof behind them is credited to them. Every seed shows it, so it is not one bad

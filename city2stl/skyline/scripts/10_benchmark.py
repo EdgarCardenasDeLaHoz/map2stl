@@ -81,17 +81,21 @@ def _fmt(v, spec):
 
 def print_table(results: list[dict]) -> None:
     head = (f"{'region':22s} {'scored':>6s} {'truth':>5s} {'disp':>4s} {'MAE':>6s} {'medAE':>6s} "
-            f"{'bias':>6s} {'<=25%':>5s} {'100m+ n':>7s} {'100m+ bias':>10s}")
+            f"{'bias':>6s} {'<=25%':>5s} {'100m+ n':>7s} {'100m+ bias':>10s} {'pairs/view':>10s} "
+            f"{'pairs/city':>10s}")
     print(head)
     print("-" * len(head))
     for r in results:
         o, tall = r.get("overall", {}), r.get("bands", {}).get("100+m", {})
+        rel = r.get("relative", {})
         st = r.get("status", {})
         print(f"{r['region']:22s} {r.get('n_buildings', 0):6d} {o.get('n', 0):5d} "
               f"{st.get('disputed', 0):4d} {_fmt(o.get('mae_m'), '6.1f')} "
               f"{_fmt(o.get('median_ae_m'), '6.1f')} {_fmt(o.get('bias_m'), '+6.1f')} "
               f"{_fmt(o.get('within_25pct'), '5.0%')} {tall.get('n', 0):7d} "
-              f"{_fmt(tall.get('bias_m'), '+10.1f')}")
+              f"{_fmt(tall.get('bias_m'), '+10.1f')} "
+              f"{_fmt(rel.get('per_view', {}).get('pair_order'), '10.0%')} "
+              f"{_fmt(rel.get('city', {}).get('pair_order'), '10.0%')}")
 
 
 def main() -> int:

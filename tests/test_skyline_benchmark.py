@@ -186,3 +186,27 @@ def test_osm_load_survives_a_waterways_timeout(monkeypatch):
     assert source == "live_fetch"
     assert data["buildings"]["features"] and data["waterways"]["features"] == []
     assert asked == [["buildings"], ["waterways"]]  # roads are no longer requested
+
+
+def test_relative_metrics_ignore_offset_and_scale():
+    truth = np.array([10.0, 40.0, 90.0, 150.0])
+    pred = truth * 0.5 + 30.0          # wrong scale and offset, right order
+    r = bm.relative_metrics(pred, truth)
+    assert r["pair_order"] == 1.0 and r["spearman"] == pytest.approx(1.0)
+    flipped = bm.relative_metrics(truth[::-1].copy(), truth)
+    assert flipped["pair_order"] == 0.0
+
+
+def test_pairs_skip_near_equal_truth():
+    ok, n = bm._pairs(np.array([5.0, 9.0, 100.0]), np.array([20.0, 21.0, 80.0]))
+    assert n == 2 and ok == 2           # 20 vs 21 m is inside the truth tolerance
+
+
+def test_per_view_relative_pools_views():
+    truth = {k: {"status": "confirmed", "truth_m": h}
+             for k, h in zip("abcdef", (10.0, 20.0, 40.0, 80.0, 120.0, 160.0), strict=True)}
+    good = [("a", 1), ("b", 2), ("c", 3), ("d", 4), ("e", 5)]
+    blds = [{"key": k, "views": [{"view_name": "v1", "height_m": h}]} for k, h in good]
+    blds.append({"key": "f", "views": [{"view_name": "v2", "height_m": 1.0}]})  # lone view: skipped
+    r = bm.per_view_relative(blds, truth)
+    assert r["views"] == 1 and r["pair_order"] == 1.0 and r["pairs"] == 10

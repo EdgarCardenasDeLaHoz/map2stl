@@ -316,6 +316,64 @@ def load_report(heights_json: Path) -> tuple[str, list[dict]]:
     return data.get("region", Path(heights_json).parent.name), out
 
 
+def _pairs(pred: np.ndarray, truth: np.ndarray) -> tuple[int, int]:
+    """``(correctly ordered, compared)`` building pairs.
+
+    Pairs whose true heights are within the truth tolerance (max(AGREE_ABS_M, AGREE_REL x the
+    taller)) are skipped: the survey cannot say which is taller.
+    """
+    if pred.size < 2:
+        return 0, 0
+    i, j = np.triu_indices(pred.size, 1)
+    dt = truth[i] - truth[j]
+    keep = np.abs(dt) > np.maximum(AGREE_ABS_M, AGREE_REL * np.maximum(truth[i], truth[j]))
+    good = np.sign(pred[i] - pred[j])[keep] == np.sign(dt[keep])
+    return int(good.sum()), int(keep.sum())
+
+
+def relative_metrics(pred: np.ndarray, truth: np.ndarray) -> dict:
+    """Scale-free agreement: pair order (share of building pairs in the right order) and
+    Spearman rank correlation. Unchanged by any camera-height offset or overall scale, which is
+    why F-WEB2 photos (unknown camera height) are judged on them."""
+    from scipy.stats import spearmanr
+
+    ok, n = _pairs(pred, truth)
+    rho = float(spearmanr(pred, truth).statistic) if pred.size >= 3 else None
+    return {"n": int(pred.size), "pairs": n,
+            "pair_order": round(ok / n, 3) if n else None,
+            "spearman": None if rho is None or math.isnan(rho) else round(rho, 3)}
+
+
+def per_view_relative(buildings: list[dict], truth: dict[str, dict], min_buildings: int = 5) -> dict:
+    """Relative metrics inside each single view (one image, one camera), pooled.
+
+    ``pair_order`` pools pairs over all views with at least ``min_buildings`` confirmed
+    buildings; ``median_spearman`` is the median over those views.
+    """
+    by_view: dict[str, list[tuple[float, float]]] = {}
+    for b in buildings:
+        t = truth.get(b["key"])
+        if not t or t["status"] != "confirmed":
+            continue
+        for v in b.get("views") or []:
+            if v.get("height_m") is not None:
+                by_view.setdefault(v["view_name"], []).append((float(v["height_m"]), t["truth_m"]))
+    ok = n = 0
+    rhos = []
+    used = 0
+    for rows in by_view.values():
+        if len(rows) < min_buildings:
+            continue
+        p, t = (np.array(c) for c in zip(*rows, strict=True))
+        k, m = _pairs(p, t)
+        ok, n, used = ok + k, n + m, used + 1
+        r = relative_metrics(p, t)["spearman"]
+        if r is not None:
+            rhos.append(r)
+    return {"views": used, "pairs": n, "pair_order": round(ok / n, 3) if n else None,
+            "median_spearman": round(float(np.median(rhos)), 3) if rhos else None}
+
+
 def _errors(pred: np.ndarray, truth: np.ndarray) -> dict:
     if pred.size == 0:
         return {"n": 0}
@@ -372,6 +430,9 @@ def score_buildings(buildings: list[dict], truth: dict[str, dict],
         # the pipeline unaided.
         "osm_tag": {lab: _errors(pred[m], tru[m]) for lab, m in
                     (("tagged", tg_mask), ("untagged", ~tg_mask))},
+        # Scale-free: does the taller building come out taller? City-wide and inside each view.
+        "relative": {"city": relative_metrics(pred, tru),
+                     "per_view": per_view_relative(buildings, truth)},
     }
     tagged = [(r[0], r[1], float(r[4])) for r in rows
               if r[4] is not None and r[5] not in (None, "default")]
