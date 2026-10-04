@@ -101,12 +101,14 @@ function renderWaterHydrologyCombined(waterData, hydroData) {
   }
 
 
-  // Determine canvas size from dimensions
+  // Canvas size: the rivers grid when there is one. Sizing it from the water mask
+  // (600 px) sampled a 1000 px river grid down and broke the one-pixel rivers
+  // into dashes (Colombia, 2026-10-04); the mask is resampled onto it instead.
   let w, h;
-  if (waterData?.water_mask_dimensions) {
-    [h, w] = waterData.water_mask_dimensions;
-  } else if (hydroData?.river_grid_dimensions) {
+  if (hydroValues && hydroData?.river_grid_dimensions) {
     [h, w] = hydroData.river_grid_dimensions;
+  } else if (waterData?.water_mask_dimensions) {
+    [h, w] = waterData.water_mask_dimensions;
   } else {
     console.warn('Could not determine canvas dimensions');
     return null;
@@ -123,8 +125,12 @@ function renderWaterHydrologyCombined(waterData, hydroData) {
   //    different size left a bright double-drawn outline along every coast.
   if (waterValues && !hydroData?.water_surface) {
     const waterImg = ctx.createImageData(w, h);
-    for (let i = 0; i < waterValues.length; i++) {
-      const val = waterValues[i];
+    const [wmH, wmW] = waterData.water_mask_dimensions || [h, w];
+    for (let i = 0; i < w * h; i++) {
+      // Nearest water-mask cell of canvas pixel i (the grids may differ in size).
+      const my = Math.min(wmH - 1, Math.floor(((Math.floor(i / w) + 0.5) / h) * wmH));
+      const mx = Math.min(wmW - 1, Math.floor((((i % w) + 0.5) / w) * wmW));
+      const val = waterValues[my * wmW + mx];
       const idx = i * 4;
       if (val > 0.5) {
         // Water pixel: semi-transparent blue

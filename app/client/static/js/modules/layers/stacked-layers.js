@@ -499,24 +499,6 @@ window.updateStackedLayers = function updateStackedLayers() {
         window.appState.demLayout = { x: targetX, y: targetY, w: targetWidth, h: targetHeight };
     }
 
-    /**
-     * Draw a source canvas into a destination canvas at the shared target rect.
-     * Avoids resetting canvas dimensions when unchanged (prevents GPU context loss).
-     * @param {HTMLCanvasElement} destCanvas   - Destination canvas
-     * @param {HTMLCanvasElement} sourceCanvas - Source rendered canvas
-     */
-    function drawLayerToTarget(destCanvas, sourceCanvas) {
-        if (!destCanvas || !sourceCanvas) return;
-        // Only reset dimensions when they actually change (avoids GPU flush)
-        if (destCanvas.width !== stackWidth) destCanvas.width = stackWidth;
-        if (destCanvas.height !== stackHeight) destCanvas.height = stackHeight;
-        const ctx = destCanvas.getContext('2d');
-        ctx.clearRect(0, 0, stackWidth, stackHeight);
-        ctx.drawImage(sourceCanvas,
-            0, 0, sourceCanvas.width, sourceCanvas.height,
-            targetX, targetY, targetWidth, targetHeight);
-    }
-
     // Source canvas for each layer mode
     const sourceMap = {
         Dem: () => demCanvas,
@@ -528,6 +510,45 @@ window.updateStackedLayers = function updateStackedLayers() {
         MeshImport: () => window.appState?.meshSourceCanvas || null,
         CompositeDem: () => window.appState?.compositeDemSourceCanvas || null,
     };
+
+    // Pixel density of the stack: at least the layers' own resolution (up to 3x the
+    // view). Drawing a 1000 px river grid into a 600 px canvas dropped rows and
+    // columns of the one-pixel rivers, and zooming in (a CSS transform) showed the
+    // dashes it left (Colombia, 2026-10-04). The canvases keep their CSS size.
+    let srcMax = 0;
+    LAYER_STACK.forEach(mode => {
+        if (!_activeLayers.has(mode) || mode === 'CityOverlay') return;
+        const src = sourceMap[mode]?.();
+        if (src?.width) srcMax = Math.max(srcMax, src.width / targetWidth, src.height / targetHeight);
+    });
+    const density = Math.min(3, Math.max(1, Math.ceil(srcMax), Math.ceil(window.devicePixelRatio || 1)));
+    const pxW = Math.round(stackWidth * density);
+    const pxH = Math.round(stackHeight * density);
+
+    /** Give a stack canvas the stack's pixel size, keeping its CSS size (no GPU flush when unchanged). */
+    function sizeCanvas(c) {
+        if (c.width !== pxW) c.width = pxW;
+        if (c.height !== pxH) c.height = pxH;
+        const cssW = `${stackWidth}px`, cssH = `${stackHeight}px`;
+        if (c.style.width !== cssW) c.style.width = cssW;
+        if (c.style.height !== cssH) c.style.height = cssH;
+    }
+
+    /**
+     * Draw a source canvas into a destination canvas at the shared target rect.
+     * @param {HTMLCanvasElement} destCanvas   - Destination canvas
+     * @param {HTMLCanvasElement} sourceCanvas - Source rendered canvas
+     */
+    function drawLayerToTarget(destCanvas, sourceCanvas) {
+        if (!destCanvas || !sourceCanvas) return;
+        sizeCanvas(destCanvas);
+        const ctx = destCanvas.getContext('2d');
+        ctx.clearRect(0, 0, pxW, pxH);
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(sourceCanvas,
+            0, 0, sourceCanvas.width, sourceCanvas.height,
+            targetX * density, targetY * density, targetWidth * density, targetHeight * density);
+    }
 
     // Draw each active layer into its own buffer
     LAYER_STACK.forEach(mode => {
@@ -541,13 +562,12 @@ window.updateStackedLayers = function updateStackedLayers() {
     // Composite all active layers onto the display canvas in render order
     const displayCanvas = document.getElementById('stackViewCanvas');
     if (displayCanvas) {
-        if (displayCanvas.width !== stackWidth) displayCanvas.width = stackWidth;
-        if (displayCanvas.height !== stackHeight) displayCanvas.height = stackHeight;
+        sizeCanvas(displayCanvas);
         const dCtx = displayCanvas.getContext('2d');
-        dCtx.clearRect(0, 0, stackWidth, stackHeight);
+        dCtx.clearRect(0, 0, pxW, pxH);
 
         if (_splitViewEnabled) {
-            _drawSplitView(dCtx, stackWidth, stackHeight);
+            _drawSplitView(dCtx, pxW, pxH);
         } else {
             const masterOpacity = (document.getElementById('activeLayerOpacity')?.value ?? 100) / 100;
             LAYER_STACK.forEach(mode => {
