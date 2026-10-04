@@ -125,6 +125,19 @@ What the evidence says so far:
 - D. Wide photos through C (cylindrical columns and rows).
 - E. Miami end to end (step 7), then Chicago and Boston (the strongest truth).
 
+- G. **Group photos by viewpoint before locating** (user, 2026-10-04): unlocated photos taken
+  from the same spot are located together.
+  - Similarity: the skyline outline (shift + zoom search between two photos; robust to year,
+    light and camera), SIFT inliers for exact duplicates.
+  - A group with a located member (GPS or labels) passes its camera to the rest, each then only
+    refined locally (the reliable case: 82 m and 29 m in the EXIF-FOV validation).
+  - A group with none gets one joint search: a pose must fit every member, which a sliver of
+    skyline cannot fake. One search per group instead of per photo.
+  - Members solving to different places flag a bad group or a bad solve.
+  - Gallery of groups for user review before anything relies on them.
+- Speed idea for later (usage steward, 2026-10-04): the position x FOV search is independent
+  FFTs; batch it on the GPU (torch.fft) if profiling shows refinement dominates.
+
 ### Success criteria
 
 - Validation: >= 70 % of located photos placed within 300 m and 3 deg of heading.
