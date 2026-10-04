@@ -12,8 +12,8 @@ FOV 80 deg); this module reads it from the file.
 
 Search: the city's Commons categories whose name contains "skyline" (found by category
 search, recursing only into "skyline" subcategories), or ``categories`` given explicitly.
-Ranking: located near the region, landscape (<= 3:1; stitched panoramas are cylindrical, not
-pinhole), daytime, then newest, compass present, widest. Network: the Commons API only, with a
+Ranking: located near the region, landscape (<= 3:1, see ``MAX_ASPECT``), then newest, compass
+present, widest; night photos are dropped after download (``is_dark``). Network: the Commons API only, with a
 descriptive User-Agent as Wikimedia asks; no key.
 """
 
@@ -37,10 +37,15 @@ FULL_FRAME_DIAG_MM = math.hypot(36.0, 24.0)
 FETCH_WIDTH = 2048
 #: Photos wider than this aspect are stitched panoramas (cylindrical), skipped in v1.
 MAX_ASPECT = 3.0
-#: Camera may stand outside the region bbox (a ship offshore), up to this far, km.
-MAX_OUTSIDE_KM = 8.0
-#: Daytime window (local hour from EXIF DateTimeOriginal); night skylines segment badly.
-DAY_HOURS = (7, 18)
+#: Camera may stand outside the region bbox (a ship offshore), up to this far, km. 8 km
+#: dropped Miami's "skyline from the ocean" (2020), a good offshore telephoto.
+MAX_OUTSIDE_KM = 15.0
+#: Night skylines segment badly. Judged from the image (``is_dark``), not the EXIF hour:
+#: camera clocks are often in the wrong time zone, and the hour rule dropped 8 of Miami's
+#: 19 "night" photos that were broad daylight (2026-10-04 review). 85 on the median luma of
+#: the top third: Miami's lit-towers-under-dark-sky shots measure 3-81, daylight, sunrise and
+#: sunset 91-188.
+DARK_SKY_LUMA = 85.0
 MAX_CATEGORIES = 40
 
 
@@ -223,9 +228,19 @@ def usable(p: CommonsPhoto, bbox_nsew) -> str | None:
         return "panorama wider than 3:1"
     if p.height > p.width:
         return "portrait"
-    if p.hour is not None and not (DAY_HOURS[0] <= p.hour <= DAY_HOURS[1]):
-        return "night"
     return None
+
+
+def is_dark(img) -> bool:
+    """True for a night or deep-dusk photo: the top third (mostly sky) is dark.
+
+    ``img``: H x W x 3 uint8 RGB. Applied after download, since only pixels can tell.
+    """
+    import numpy as np
+
+    top = np.asarray(img[: max(1, img.shape[0] // 3)], dtype=np.float32)
+    luma = 0.299 * top[..., 0] + 0.587 * top[..., 1] + 0.114 * top[..., 2]
+    return float(np.median(luma)) < DARK_SKY_LUMA
 
 
 def rank_key(p: CommonsPhoto) -> tuple:

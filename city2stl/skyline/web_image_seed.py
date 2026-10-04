@@ -252,21 +252,27 @@ def commons_skyline_seeds(
     """
     import json  # noqa: PLC0415
 
-    from .commons_photos import find_skyline_photos  # noqa: PLC0415
+    from .commons_photos import find_skyline_photos, is_dark  # noqa: PLC0415
     from .region_types import SkylinePoint  # noqa: PLC0415
 
     cache_dir = Path(cache_dir) if cache_dir is not None else None
     label = city_name.replace("_", " ").strip()
-    photos = find_skyline_photos(label, bbox_nsew, max_photos=max_images)
+    # Rank more than needed: night photos are only found after download.
+    photos = find_skyline_photos(label, bbox_nsew, max_photos=max_images * 3)
     centre = ((bbox_nsew[0] + bbox_nsew[1]) / 2, (bbox_nsew[2] + bbox_nsew[3]) / 2)
     seeds: list[SkylinePoint] = []
     cache: dict[str, np.ndarray] = {}
     manifest = []
-    for i, p in enumerate(photos, 1):
+    for p in photos:
+        if len(seeds) >= max_images:
+            break
         img = _download_image(p.url, cache_dir)
         if img is None:
             continue
-        name = f"commons_{i}"
+        if is_dark(img):
+            print(f"[commons_seed] skip (dark): {p.title!r}")
+            continue
+        name = f"commons_{len(seeds) + 1}"
         heading = p.heading_deg if p.heading_deg is not None else _bearing(p.lat, p.lon, *centre)
         fov = p.hfov_deg if p.hfov_deg is not None else 60.0
         seeds.append(SkylinePoint(name=name, lat=p.lat, lon=p.lon, heading=float(heading),

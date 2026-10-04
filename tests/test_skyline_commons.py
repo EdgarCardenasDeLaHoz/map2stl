@@ -56,10 +56,10 @@ def test_photo_from_page_reads_pose_and_credit():
 @pytest.mark.parametrize("kw,why", [
     ({}, None),
     ({"coords": None}, "no camera location"),
-    ({"coords": (26.5, -80.19)}, "camera far from region"),
+    ({"coords": (26.0, -80.19)}, "camera far from region"),
     ({"w": 12000, "h": 3000}, "panorama wider than 3:1"),
     ({"w": 3024, "h": 4032}, "portrait"),
-    ({"taken": "2023:08:31 21:40:00"}, "night"),
+    ({"taken": "2023:08:31 21:40:00"}, None),  # EXIF hour no longer decides night
     ({"coords": (25.70, -80.17)}, None),  # a few km off the bbox (offshore) is fine
 ])
 def test_usable(kw, why):
@@ -93,3 +93,11 @@ def test_find_skyline_photos_end_to_end(monkeypatch):
     assert [p.title for p in got] == ["File:A.jpg"]
     cats = [c["cmtitle"] for c in calls if c.get("list") == "categorymembers"]
     assert cats == ["Category:Miami, Florida skyline in the 2020s"]  # no Houston, no street subcat
+
+
+def test_is_dark_reads_the_sky_not_the_clock():
+    import numpy as np
+    day = np.full((90, 120, 3), 200, np.uint8)
+    night = np.full((90, 120, 3), 20, np.uint8)
+    night[60:] = 120                       # lit buildings and water at the bottom
+    assert not cp.is_dark(day) and cp.is_dark(night)
