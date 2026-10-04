@@ -10,7 +10,12 @@
   "use_pano_coastline_recovery": true,
   "drive_pano_recovery_anchor": true,
   "pano_only_pdf": true,
-  "seed_urls": [],
+  "seed_urls": [
+    "https://www.google.com/maps/@40.4664418,-3.6888172,3a,75y,1.37h,90t/data=!3m6!1e1!3m4!1sCAoSFkNJSE0wb2dLRUlDQWdJRDRyTzdXVXc.!2e0",
+    "https://www.google.com/maps/@40.4811633,-3.6873978,3a,75y,190.19h,90t/data=!3m6!1e1!3m4!1sCAoSFkNJSE0wb2dLRUlDQWdJQ2E4c2FCTnc.!2e0",
+    "https://www.google.com/maps/@40.4790398,-3.7020135,3a,75y,103.87h,90t/data=!3m6!1e1!3m4!1s2EmFTRSC1zeM5PF1I-5ofA!2e0",
+    "https://www.google.com/maps/@40.4718704,-3.6795846,3a,75y,304.32h,90t/data=!3m6!1e1!3m4!1sv7ASiOH8gf5But9xq1vgcg!2e0"
+  ],
   "anchor_offsets_deg": {},
   "negative_seeds": []
 }

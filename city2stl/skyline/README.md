@@ -340,7 +340,8 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
   - A4: make the F-DET2 OSM-FOV gate count satellite footprints too (it currently rejects the OSM-sparse cities
     F-DET4a targets).
 - **Benchmark truth**
-  - Benidorm and Madrid: re-run once Overpass recovers (2026-10-04 outage).
+  - Benidorm: CNIG reads 5.6 m under 3D Tiles (2.5 m grid, 2008-15); only 33 confirmed. Spain's
+    0.5 m PNOA surfaces would help (download form only, see `reference/survey-sources.md`).
   - Seattle: 3D Tiles reads +3.9 m above lidar on hills; check `google_3d.py::_ground_from_dsm` on slopes.
   - Prague: 3D Tiles gave one value (104.15 m) over many low footprints; find the coarse-tile cause.
   - Miami inland has no USGS EPT lidar; Miami-Dade County's survey would be the next source.

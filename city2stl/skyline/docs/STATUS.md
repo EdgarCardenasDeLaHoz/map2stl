@@ -21,7 +21,8 @@ run `runs/benchmark/2026-10-03_1952`, scored `2026-10-04_1415`. How to run: [REA
 | Boston | 707 | 587 | 108 | 47.1 | 24.9 | +40.2 | 19 % | 68.0 / +65.5 (344) | 17.5 / +4.5 (243) |
 | La Défense | 101 | 87 | 14 | 108.7 | 114.5 | +108.4 | 2 % | 113.2 / +112.9 (83) | 15.3 / +15.3 (4) |
 | Prague Pankrác | 77 | 23 | 54 | 29.7 | 24.5 | +9.7 | 9 % | 45.6 / +29.5 (7) | 22.8 / +1.0 (16) |
-| Benidorm, Madrid | — | — | — | — | — | — | — | Overpass outage on 2026-10-04; re-run pending | |
+| Benidorm | 98 | 33 | 62 | 31.6 | 27.9 | +30.3 | 15 % | 89.1 / +89.1 (4) | 23.7 / +22.2 (29) |
+| Madrid Cuatro Torres | — | — | — | — | — | — | — | auto-proposals saw no skyline; re-run with four hand-picked seeds pending | |
 
 - **The main product gap is untagged buildings read far too tall** (+65 to +113 m bias), in every
   city. Mostly small low buildings (Miami: true median 9.7 m, footprint ~420 m², estimate median
@@ -38,6 +39,8 @@ run `runs/benchmark/2026-10-03_1952`, scored `2026-10-04_1415`. How to run: [REA
     hills; 185 disputes.
   - Prague: 3D Tiles returned one value (104.15 m) over many low footprints, a coarse-tile
     artefact; the cross-check rejects them, leaving 23 confirmed buildings.
+  - Benidorm: 3D Tiles reads +5.6 m above CNIG (IQR +3.8 to +9.7 m); CNIG MDSn is a 2.5 m grid
+    from 2008-15, so new and refurbished towers dispute. 33 confirmed.
   - Miami: the only USGS EPT project (2019 Keys topobathy) has points on the coast only; inland
     buildings are 3D Tiles only and stay out of the headline.
 - Cartagena is not scored: no open survey exists, and its old figures rested on ~20 OSM tags.
