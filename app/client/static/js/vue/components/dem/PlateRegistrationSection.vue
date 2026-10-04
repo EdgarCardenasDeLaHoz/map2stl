@@ -1,5 +1,5 @@
 <template>
-  <CollapsibleSection title="🧭 Plate registration" :start-open="false"
+  <CollapsibleSection title="🧭 Plate registration" sub="plate" :start-open="false"
                       header-title="Place a library plate on the map by its streets, check the placement by tile consensus, and save it to the plate's location sidecar.">
 
     <div class="param-group plate-reg-row">

@@ -20,17 +20,21 @@ The app's job: **turn a box on the map into a printable 3D model.**
 
 ## Settings
 
-- The Edit panel rule (decisions/frontend.md, 2026-09-30) becomes the settings groups (names
-  proposed; confirmed or changed in the mockup round):
-  - **Data** (was Fetch): what is fetched, and settings that affect everything.
-  - **Look** (was View): display only; never changes the model.
-  - **Model** (was Composite): only what changes the 3D result (carve depth, layer weights).
+- The Edit panel shows the selected layer only, in four groups (decisions/frontend.md,
+  2026-10-04; user's names):
+  - **Fetch**: what is fetched for that layer (source, resolution, reload).
+  - **View**: display only; never changes the model.
+  - **Composite**: only what changes the 3D result (carve depth, heights, weights).
+  - **Canvas**: the map view itself (grid, map under the terrain, layer order); the same
+    under every layer.
+  - One row per setting; ADVANCED rows behind "Show advanced" per group; a resolution
+    follows the terrain's Detail unless "Own resolution" is ticked.
 - Beginner shows the region, the size on the bed, and the layer switches. Projection, curve,
   composite weights, registration, mesh simplification and ML tools are ADVANCED.
 - Region settings save themselves; the header shows "✓ Saved" (`modules/ui/presets.js`).
 
 - No separate Settings panel and no Beginner / Custom / Everything mode (user, 2026-10-02):
-  each page's right-hand panel ends with "More settings", one switch per optional section,
+  Extrude's right-hand panel ends with "More settings", one switch per optional section,
   shown in that panel. Account & help is a "?" menu in the header. Overrides shared §1.4 / §3.
 
 ## Brand and style

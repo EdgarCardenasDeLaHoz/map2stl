@@ -92,7 +92,7 @@ export const EDIT_LAYERS: EditLayer[] = [
     pictures: () => [document.querySelector('#satelliteImage canvas') as HTMLCanvasElement | null],
   },
   {
-    id: 'mesh', name: 'Imported mesh', icon: '📐', stack: 'MeshImport', extra: true, tool: 'editModel',
+    id: 'mesh', name: 'Imported mesh', icon: '📐', stack: 'MeshImport', extra: true,
     inModel: () => !!(w().getActiveLayers?.() as Set<string> | undefined)?.has('MeshImport'),
     setInModel: () => {},
     pictures: () => [],

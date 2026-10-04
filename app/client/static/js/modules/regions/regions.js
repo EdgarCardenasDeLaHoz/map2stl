@@ -162,8 +162,8 @@ function createGlobeMarker(lat, lng, color = 0xff0000) {
  *  3. Calls `clearCityOverlay()` if available so city auto-load triggers for the new region.
  *  4. Awaits `window.loadAndApplyRegionSettings(name)` — writes demParams, dim, sat_scale etc.
  *     Falls back to `selectedRegion.parameters` if no saved settings exist.
- *  5. Auto-sets `#waterResolution`, `#landCoverResolution`, and `#paramDim` via AUTO_SCALE
- *     breakpoints; never lowers a user's explicit dim choice.
+ *  5. Without saved settings: raises `#paramDim` to the AUTO_SCALE breakpoint for the region's
+ *     size (never lowers it) and sets every layer resolution to it.
  *  6. Calls `window.updateRegionParamsTable` if the sidebar is expanded.
  *  7. Calls `map.fitBounds` (wrapped in try/catch — fails silently if map is hidden).
  *  8. If the Edit (DEM) view is visible: fires `loadDEM` → then `loadWaterMask`,
@@ -254,10 +254,6 @@ async function selectCoordinate(index, opts = {}) {
         // Use the same breakpoint table to auto-set waterResolution and esaResolution
         // (both now hold pixel counts, not m/px).
         const autoDim = AUTO_SCALE.dim.find(t => diagKm <= t.maxKm)?.dim ?? 600;
-        const waterResEl = document.getElementById('waterResolution');
-        if (waterResEl) waterResEl.value = String(autoDim);
-        const esaResEl = document.getElementById('esaResolution');
-        if (esaResEl) esaResEl.value = String(autoDim);
 
         // DEM dim: only raise if lower than the auto value and no saved settings loaded.
         const dimEl = document.getElementById('paramDim');
@@ -267,6 +263,14 @@ async function selectCoordinate(index, opts = {}) {
             // Never lower the user's explicit choice.
             // Skip if saved settings were loaded — respect the persisted dim.
             if (!hasSaved && autoDim > currentDim) dimEl.value = String(autoDim);
+        }
+        // Every layer's resolution follows the terrain's Detail unless the region saved its
+        // own (F-EDITPANEL, user 2026-10-04: "a number entry and a check box to override").
+        if (!hasSaved && dimEl) {
+            for (const id of ['waterResolution', 'esaResolution', 'satImgResolution', 'cityRasterDim', 'trailsDim']) {
+                const el = document.getElementById(id);
+                if (el) el.value = dimEl.value;
+            }
         }
     }
 

@@ -1,4 +1,6 @@
 <template>
+  <!-- Per-layer resolutions are numbers (F-EDITPANEL): each follows #paramDim unless the
+       layer has its own (LayerSettings.vue), so a fixed list of sizes no longer fits. -->
   <CollapsibleSection title="🗂 Fetch Layers">
 
     <!-- ═══ DEM Source ═══ -->
@@ -57,14 +59,7 @@
         </div>
         <div class="param-group">
           <label for="waterResolution" title="Output resolution in pixels per side.">Resolution</label>
-          <select id="waterResolution" class="ctrl-select">
-            <option value="100">100 px — Very Fast</option>
-            <option value="200">200 px — Fast</option>
-            <option value="400">400 px — Medium</option>
-            <option value="600" selected>600 px — Default</option>
-            <option value="1000">1000 px — High Detail</option>
-            <option value="1200">1200 px — Max Detail</option>
-          </select>
+          <input type="number" id="waterResolution" class="ctrl-input" value="600" min="50" max="4000" step="50">
           <div id="waterResWarning" style="font-size:11px;color:#f90;display:none;">⚠️ May require tiling for large areas</div>
         </div>
 
@@ -107,14 +102,7 @@
 
         <div class="param-group">
           <label for="esaResolution" title="Output resolution in pixels per side for ESA WorldCover.">Resolution</label>
-          <select id="esaResolution" class="ctrl-select">
-            <option value="100">100 px — Very Fast</option>
-            <option value="200">200 px — Fast</option>
-            <option value="400">400 px — Medium</option>
-            <option value="600" selected>600 px — Default</option>
-            <option value="1000">1000 px — High Detail</option>
-            <option value="1200">1200 px — Max Detail</option>
-          </select>
+          <input type="number" id="esaResolution" class="ctrl-input" value="600" min="50" max="4000" step="50">
         </div>
         <div class="fetch-action-row">
           <button id="loadEsaBtn" class="btn btn-secondary">🌿 Load ESA Land Cover</button>
@@ -131,14 +119,7 @@
         <div class="fetch-help-text">Real satellite tiles from ESRI World Imagery (WMTS).</div>
         <div class="param-group">
           <label for="satImgResolution" title="Satellite image resolution (pixels per side).">Resolution</label>
-          <select id="satImgResolution" class="ctrl-select">
-            <option value="200">200 px</option>
-            <option value="400">400 px</option>
-            <option value="600" selected>600 px</option>
-            <option value="800">800 px</option>
-            <option value="1000">1000 px</option>
-            <option value="1200">1200 px</option>
-          </select>
+          <input type="number" id="satImgResolution" class="ctrl-input" value="600" min="50" max="4000" step="50">
         </div>
         <div class="fetch-action-row">
           <button id="loadSatImgBtn"  class="btn btn-secondary">🛰 Load</button>
@@ -160,13 +141,7 @@
 
         <div class="param-group">
           <label for="cityRasterDim" title="Resolution of the city heights raster (pixels per side).">Raster res</label>
-          <select id="cityRasterDim" class="ctrl-select">
-            <option value="100">100 px — Fast</option>
-            <option value="200" selected>200 px — Default</option>
-            <option value="400">400 px — Detail</option>
-            <option value="600">600 px — High</option>
-            <option value="1000">1000 px — Max</option>
-          </select>
+          <input type="number" id="cityRasterDim" class="ctrl-input" value="200" min="50" max="4000" step="50">
         </div>
 
         <!-- Colormap: View → City Polygon Display. Slanted roofs and the 3D

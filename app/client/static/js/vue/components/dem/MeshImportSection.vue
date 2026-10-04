@@ -1,5 +1,5 @@
 <template>
-  <CollapsibleSection title="📐 Mesh Import (STL/OBJ)" :start-open="false"
+  <CollapsibleSection title="📐 Mesh Import (STL/OBJ)" sub="mesh" :start-open="false"
                       header-title="Import an STL/OBJ mesh as a heightmap layer, register it against the current DEM, and optionally merge it in.">
 
     <div class="mesh-import-source-row">

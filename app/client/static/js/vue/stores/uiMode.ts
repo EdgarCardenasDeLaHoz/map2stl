@@ -22,14 +22,8 @@ export interface UiTool {
 
 /** Tools per page, in the order Settings lists them. */
 export const UI_TOOLS: UiTool[] = [
-    { id: 'editData', icon: '📥', label: 'Data sources & fetch details', page: 'edit',
-      hint: 'Projection, per-layer sources and resolutions, landmarks, saved presets' },
-    { id: 'editLook', icon: '👁', label: 'Display', page: 'edit',
-      hint: 'Layer rack, grids, colour maps, height curve, land-cover colours' },
-    { id: 'editModel', icon: '⊕', label: 'Composite & imports', page: 'edit',
-      hint: 'Layer weights and depths, mesh import, plate registration' },
-    { id: 'editJson', icon: '{ }', label: 'Settings as JSON', page: 'edit',
-      hint: 'Edit the region settings as text' },
+    // The Edit page's tools (Data sources, Display, Composite & imports, JSON) became the
+    // per-layer Fetch / View / Composite groups (F-EDITPANEL, 2026-10-04).
     { id: 'vertical', icon: '↕', label: 'Vertical & surface', page: 'extrude',
       hint: 'Fit height, vertical mode, smoothing, sea-level cap' },
     { id: 'viewer', icon: '👁', label: '3D view options', page: 'extrude',

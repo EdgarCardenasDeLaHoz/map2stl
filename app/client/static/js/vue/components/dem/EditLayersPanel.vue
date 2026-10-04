@@ -2,7 +2,7 @@
   <!-- Edit page, left: the layers of the print, each a picture from its own canvas, a status
        line and a switch for whether it is in the model (design guidelines §2 Designer; mockup
        claude/mockups/2026-10-01/edit.html). Clicking a row selects it; its settings show on the
-       right (LayerProperties.vue). Definitions: stores/editLayers.ts. -->
+       right (LayerSettings.vue). Definitions: stores/editLayers.ts. -->
   <aside id="editLayersPanel" class="el-panel" aria-label="Layers">
     <div class="el-cap">Layers</div>
     <div v-for="l in shown" :key="l.id" class="el-row" role="button" tabindex="0"

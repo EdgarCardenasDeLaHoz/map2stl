@@ -3,63 +3,44 @@
   <div id="settingsPanelResizeHandle" class="settings-resize-handle" title="Drag to resize settings panel"></div>
   <div class="dem-right-panel" id="demRightPanel">
 
-    <!-- Strip: the guide, hiding the panel, and the JSON editor when that section is on. The
-         old Fetch / View / Composite tabs are now sections switched on under "More settings"
-         and stacked in this panel (F-DESIGN, user 2026-10-02). -->
+    <!-- Strip: the guide and hiding the panel. The JSON editor's toggle stays here (hidden) as
+         the target of the Terrain panel's "Settings as JSON" link. -->
     <div class="dem-strip" id="demStrip">
       <div style="flex:1"></div>
       <a class="dem-strip-btn guide-link" :href="guideLink" target="_blank" rel="noopener"
          title="Open the step-by-step guide for this part (new tab)">? Guide</a>
       <button class="dem-strip-btn" id="settingsHideBtn" title="Hide settings panel">◀ Hide</button>
-      <button v-show="ui.shows('editJson')" class="dem-strip-btn" id="jsonViewToggleBtn" title="Toggle between form and JSON editor">{ } JSON</button>
+      <button v-show="false" class="dem-strip-btn" id="jsonViewToggleBtn" title="Toggle between form and JSON editor">{ } JSON</button>
     </div>
 
     <!-- Main scrollable settings area -->
     <div class="dem-controls" id="demControls">
       <div class="dem-controls-inner" id="demControlsInner">
-        <!-- Landmarks near the box edge (a warning, so it shows in every mode). -->
+        <!-- Landmarks near the box edge (a warning, so it shows on every layer). -->
         <EdgeLandmarkWarnings compact :max="3" />
-        <LayerProperties />
-        <ToolSwitches page="edit" />
+        <!-- The selected layer's Fetch / View / Composite and the Canvas group (F-EDITPANEL). -->
+        <LayerSettings />
 
-        <!-- Primary actions — pinned at the top of the Fetch tab. Load DEM is the
-             step everything else depends on, so it leads; its handler is wired
-             by id in event-listeners-map.js (window.loadDEM). Source and
-             resolution stay under Fetch Layers → DEM Source. -->
-        <!-- ═══════════ Data sources & fetch details (was the Fetch tab) ═══════════ -->
-        <h3 v-show="ui.shows('editData')" class="tool-head">📥 Data sources &amp; fetch details</h3>
-        <div v-show="ui.shows('editData')" id="settingsSaveRow" class="settings-primary-row">
-          <button id="loadDemBtn" class="btn btn-primary settings-load-dem-btn"
-                  title="Fetch the DEM for the selected region with the source and resolution under Fetch Layers → DEM Source">🏔 Load DEM</button>
-          <button id="clearRegionCacheBtn" class="btn btn-secondary settings-icon-btn"
-                  aria-label="Clear region cache"
-                  title="Clear all cached data (DEM, water, satellite, etc.) and re-fetch">🗑️</button>
-        </div>
-        <WorkflowPresetBar v-show="ui.shows('editData')" />
-
-        <!-- ═══════════ Fetch tab ═══════════ -->
-        <div v-show="ui.shows('editData')">
+        <!-- The old sections, hidden: they hold the controls (by id) the rows above write and
+             the modules read. The richer ones open as sub-pages of LayerSettings (their
+             CollapsibleSection `sub`). Never v-if: modules bind to these ids at startup, and
+             the Rendering section holds #curveCanvas. -->
+        <div id="legacyControls" hidden>
+          <div id="settingsSaveRow" class="settings-primary-row">
+            <button id="loadDemBtn" class="btn btn-primary settings-load-dem-btn"
+                    title="Fetch the DEM for the selected region">🏔 Load DEM</button>
+            <button id="clearRegionCacheBtn" class="btn btn-secondary settings-icon-btn"
+                    aria-label="Clear region cache"
+                    title="Clear all cached data (DEM, water, satellite, etc.) and re-fetch">🗑️</button>
+          </div>
+          <WorkflowPresetBar />
           <ProjectionSection />
           <FetchLayersSection />
           <CityLandmarksSection />
           <PresetsSection />
-        </div>
-
-        <!-- ═══════════ View tab ═══════════ -->
-        <!-- IMPORTANT: Rendering section contains #curveCanvas — never use v-if here, only v-show -->
-        <!-- Global chrome first, then one section per layer in render-stack
-             order: DEM, land cover, city, trails. These used to interleave,
-             with Canvas sitting between two per-layer blocks. -->
-        <h3 v-show="ui.shows('editLook')" class="tool-head">👁 Display</h3>
-        <div v-show="ui.shows('editLook')">
           <LayerViewSection />
           <VisualizationSection />
           <LayerDisplaySections />
-        </div>
-
-        <!-- ═══════════ Composite tab ═══════════ -->
-        <h3 v-show="ui.shows('editModel')" class="tool-head">⊕ Composite &amp; imports</h3>
-        <div v-show="ui.shows('editModel')">
           <CompositeDemSection />
           <MeshImportSection />
           <PlateRegistrationSection />
@@ -97,20 +78,15 @@ import PlateRegistrationSection from './PlateRegistrationSection.vue';
 import PresetsSection        from './PresetsSection.vue';
 import WorkflowPresetBar     from './WorkflowPresetBar.vue';
 import EdgeLandmarkWarnings  from '../views/EdgeLandmarkWarnings.vue';
-import LayerProperties       from './LayerProperties.vue';
-import { useUiModeStore }    from '../../stores/uiMode';
-import ToolSwitches          from '../shared/ToolSwitches.vue';
+import LayerSettings         from './LayerSettings.vue';
+import { useEditLayersStore } from '../../stores/editLayers';
 
-const ui = useUiModeStore();
-// City SOP: step 2 (Load terrain) for terrain and data, step 3 (Terrain edits) for the carve.
+const layers = useEditLayersStore();
+// City SOP: step 2 (Load terrain) for the terrain, step 3 (Terrain edits) for the carved layers.
 const guideLink = computed(() => guideHref('city-stl-and-puzzle-sop',
-  ui.shows('editModel') && !ui.shows('editData') ? 'step-3' : 'step-2'));
+  layers.selected === 'terrain' ? 'step-2' : 'step-3'));
 </script>
 <style scoped>
-.tool-head {
-  margin: 14px 4px 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--text-muted);
-}
 .settings-primary-row {
   display: flex;
   flex-wrap: wrap;

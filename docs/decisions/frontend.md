@@ -104,6 +104,26 @@ rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 - **Supersedes / superseded by:** supersedes the ✨ part of "Pages follow the design guidelines;
   Extrude is rebuilt first" (2026-10-01).
 
+### 2026-10-04 — Edit's right panel is the selected layer's Fetch / View / Composite, then Canvas
+- **Decision:** with a layer selected on the left, the panel shows only that layer: FETCH, VIEW
+  and COMPOSITE groups (one row per setting, per-group Reset, ADVANCED rows behind "Show
+  advanced"), then CANVAS (grid, map under the terrain, layer order, compare view), the same
+  under every layer. Duplicates merged into one row each (river width, depth, lakes, style
+  presets, Reload terrain = Load DEM, colours, opacity, building table; the print's building
+  switches and height drive the 2D preview's). Per-layer resolutions follow the terrain's
+  Detail unless "Own resolution" is ticked (a number). Rich sections open as one-level
+  sub-pages (›). Edit's "More settings" switches are gone; Extrude keeps its own.
+- **Why:** user, 2026-10-04: "removing duplicates and organize everything under Fetch, View,
+  Composite… make it only appear when the layer is selected on the left"; resolution "a number
+  entry and a check box to override the resolution of the DEM. Use this model for every
+  layer"; "General settings, like the grid, should be in their own Canvas group". Review:
+  237 controls, the same setting under two or three names, four levels deep.
+- **Rejected:** keeping subsystem sections regrouped by task (settings of one layer stay spread
+  out); a separate Settings sheet (overturns 2026-10-02 below); resolution dropdowns (fixed
+  sizes; no way to say "same as the terrain").
+- **Supersedes / superseded by:** supersedes the Edit half of the 2026-10-02 entry below.
+- **Source:** [F-EDITPANEL](../plans/active/F-EDITPANEL-fetch-view-composite.md)
+
 ### 2026-10-02 — Page settings live in the page's right-hand panel; no mode; help is a header menu
 - **Decision:** each page's right-hand panel ends with "More settings": one switch per optional
   section (Edit: Data sources & fetch details, Display, Composite & imports, Settings as JSON;

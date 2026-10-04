@@ -1,5 +1,5 @@
 <template>
-  <CollapsibleSection id="cityLandmarksSection" title="🏛 Landmarks" :start-open="false"
+  <CollapsibleSection id="cityLandmarksSection" title="🏛 Landmarks" sub="landmarks" :start-open="false"
                       header-title="Notable buildings of the loaded city data: build them from OSM parts, a surveyed nDSM, or an uploaded mesh (F-LANDMARK)">
     <div class="lm-head">
       <button id="findLandmarksBtn" class="btn btn-secondary btn-sm" :disabled="!!busy" @click="loadList"

@@ -1,5 +1,5 @@
 <template>
-  <CollapsibleSection title="🖼 Canvas" :start-open="false" wrap-style="margin-top:0;">
+  <CollapsibleSection title="🖼 Canvas" sub="grid" :start-open="false" wrap-style="margin-top:0;">
     <div class="row-gap6" style="margin-bottom:10px;">
       <button id="layersStripBtn" class="dem-strip-btn active" data-subtab="layers"
               style="flex:1;font-size:11px;padding:5px 8px;"
@@ -118,12 +118,12 @@
       </label>
     </div>
 
-    <CollapsibleSection title="📊 Histogram" :start-open="false">
+    <CollapsibleSection title="📊 Histogram" sub="curve" :start-open="false">
       <div id="histogram"></div>
     </CollapsibleSection>
 
     <!-- IMPORTANT: #curveCanvas must never be unmounted — curve-editor.js holds a direct ref -->
-    <CollapsibleSection title="📈 Curve Editor" :start-open="false">
+    <CollapsibleSection title="📈 Curve Editor" sub="curve" :start-open="false">
       <div class="curve-editor">
         <div class="curve-canvas-container" title="Left-click to add · Drag to move · Right-click to delete">
           <canvas id="curveCanvas"></canvas>
@@ -149,7 +149,7 @@
     </CollapsibleSection>
   </CollapsibleSection>
 
-  <CollapsibleSection title="🎨 Land Use Cover" :start-open="false">
+  <CollapsibleSection title="🎨 Land Use Cover" sub="landuse" :start-open="false">
     <div id="landCoverLegend" class="landcover-legend"></div>
     <div class="landcover-actions">
       <button id="applyLandCoverMapping" class="btn btn-secondary">Apply Colors</button>

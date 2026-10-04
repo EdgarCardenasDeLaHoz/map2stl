@@ -1,5 +1,5 @@
 <template>
-  <CollapsibleSection title="💾 Parameter Presets" wrap-style="margin-bottom:10px;"
+  <CollapsibleSection title="💾 Parameter Presets" sub="presets" wrap-style="margin-bottom:10px;"
                       header-title="Save and load named snapshots of your current visualization settings.">
     <div class="preset-profiles">
       <div class="param-group">

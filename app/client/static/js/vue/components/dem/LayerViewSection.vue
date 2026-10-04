@@ -8,7 +8,7 @@
        rather than replacing it. Before this, the visible rack offered opacity
        alone and the reorder arrows lived in a rack rendered into a hidden div,
        so z-order worked in the engine and was unreachable from the UI. -->
-  <CollapsibleSection title="🗺️ Layers" :start-open="false" wrap-style="">
+  <CollapsibleSection title="🗺️ Layers" sub="layers" :start-open="false" wrap-style="">
 
     <!-- Kept as the quick all-layers toggle strip. trails-overlay.js:327 and
          app-setup.js:31 both query these buttons by selector, and the row

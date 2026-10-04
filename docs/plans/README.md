@@ -22,6 +22,7 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 | [F-FE1 + F-DEMID](active/F-FE1-vue-consolidation.md) | DEM handles in use; step 7 (delete `v2/`) done; steps 0–6 not pursued | F-DEMID leftovers only |
 | [F-LANDMARK](active/F-LANDMARK-roofs-and-building-parts.md) | §1–§6 done | check the result on the landmark set |
 | [F-USAGE](active/F-USAGE-local-usage-log.md) | in progress | usage log, then a flow report from real sessions |
+| [F-EDITPANEL](active/F-EDITPANEL-fetch-view-composite.md) | Edit right panel: selected layer only, Fetch / View / Composite / Canvas, one control per setting, resolution follows Detail | build to the approved mockup |
 | [F-DESIGN](active/F-DESIGN-guidelines-redesign.md) | Explore, Edit and Extrude rebuilt (cards, layers, More settings in each right panel, ✨, live composite) | retake old guide screenshots; consistency pass |
 | [F-SKYBENCH](active/F-SKYBENCH-height-benchmark.md) | planned | truth per footprint (survey + 3D Tiles), then the scorer |
 | F-DET, registration learning | skyline and registration plans | see the Skyline section |
