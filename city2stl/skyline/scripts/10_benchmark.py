@@ -9,7 +9,8 @@
 Each region runs ``08_region_skyline_pdf`` in its own process (a native crash in one city
 must not end the batch), into ``runs/benchmark/<stamp>/``. Truth comes from
 ``city2stl.skyline.benchmark`` (survey nDSM + 3D Tiles, cross-checked, cached per region).
-Writes ``summary.json`` beside the reports and prints one table.
+Writes ``summary.json`` beside the reports, a ``benchmark.html`` page into each scored report
+(``benchmark_report.write_benchmark_page``, linked from its index), and prints one table.
 """
 
 from __future__ import annotations
@@ -71,8 +72,14 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
                         region)
     truth = bm.footprint_truth(region, {b["key"]: b["footprint_lonlat"] for b in buildings},
                                provider, use_tiles=use_tiles)
-    return {"region": region, "report": str(heights), "survey": provider,
-            **bm.score_buildings(buildings, truth)}
+    result = {"region": region, "report": str(heights), "survey": provider,
+              **bm.score_buildings(buildings, truth)}
+    try:  # the report's benchmark page; a plotting failure must not lose the score
+        from city2stl.skyline.benchmark_report import write_benchmark_page
+        write_benchmark_page(heights.parent, result, buildings, truth)
+    except Exception as exc:  # noqa: BLE001
+        logging.warning("[bench] benchmark page for %s failed: %s", region, exc)
+    return result
 
 
 def _fmt(v, spec):

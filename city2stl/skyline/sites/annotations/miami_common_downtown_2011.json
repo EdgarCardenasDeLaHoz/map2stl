@@ -5,19 +5,95 @@
   "author": "B137",
   "licence": "CC BY-SA 4.0",
   "taken": "2011-05-01 12:06:53",
-  "image_px": [4608, 3072],
+  "image_px": [
+    4608,
+    3072
+  ],
   "projection": "pinhole",
   "transcribed": "2026-10-04 by hand from the labels drawn on the photo (no ImageNote data); x, y = the tip of each label's pointer, full-resolution pixels, about +-10 px",
   "labels": [
-    {"label": "One Miami", "osm_names": ["one miami west tower", "one miami east tower", "one miami"], "x": 399, "y": 1509},
-    {"label": "Hotel InterContinental", "osm_names": ["intercontinental miami"], "x": 688, "y": 1632},
-    {"label": "Miami Center", "osm_names": [], "x": 1310, "y": 1486},
-    {"label": "Southeast Financial Center", "osm_names": ["southeast financial center"], "x": 1594, "y": 1109},
-    {"label": "Wells Fargo Center", "osm_names": ["wells fargo center"], "x": 2082, "y": 1397},
-    {"label": "One Biscayne Tower", "osm_names": ["one biscayne tower"], "x": 2379, "y": 1512},
-    {"label": "50 Biscayne", "osm_names": ["50 biscayne"], "x": 2724, "y": 1300},
-    {"label": "Miami Tower (BoA bldg)", "osm_names": ["miami tower"], "x": 3115, "y": 1469},
-    {"label": "New World Tower", "osm_names": [], "x": 3233, "y": 1685},
-    {"label": "Vizcayne", "osm_names": ["vizcayne north tower", "vizcayne south tower"], "x": 3924, "y": 1296}
-  ]
+    {
+      "label": "One Miami",
+      "osm_names": [
+        "one miami west tower",
+        "one miami east tower",
+        "one miami"
+      ],
+      "x": 399,
+      "y": 1509
+    },
+    {
+      "label": "Hotel InterContinental",
+      "osm_names": [
+        "intercontinental miami"
+      ],
+      "x": 688,
+      "y": 1632
+    },
+    {
+      "label": "Miami Center",
+      "osm_names": [],
+      "x": 1310,
+      "y": 1486
+    },
+    {
+      "label": "Southeast Financial Center",
+      "osm_names": [
+        "southeast financial center"
+      ],
+      "x": 1594,
+      "y": 1109
+    },
+    {
+      "label": "Wells Fargo Center",
+      "osm_names": [
+        "wells fargo center"
+      ],
+      "x": 2082,
+      "y": 1397
+    },
+    {
+      "label": "One Biscayne Tower",
+      "osm_names": [
+        "one biscayne tower"
+      ],
+      "x": 2379,
+      "y": 1512
+    },
+    {
+      "label": "50 Biscayne",
+      "osm_names": [
+        "50 biscayne"
+      ],
+      "x": 2724,
+      "y": 1300
+    },
+    {
+      "label": "Miami Tower (BoA bldg)",
+      "osm_names": [
+        "miami tower"
+      ],
+      "x": 3115,
+      "y": 1469
+    },
+    {
+      "label": "New World Tower",
+      "osm_names": [],
+      "x": 3233,
+      "y": 1685
+    },
+    {
+      "label": "Vizcayne",
+      "osm_names": [
+        "vizcayne north tower",
+        "vizcayne south tower"
+      ],
+      "x": 3924,
+      "y": 1296
+    }
+  ],
+  "same_pose_as": [
+    "File:Downtown Miami skyline May 2011.jpg"
+  ],
+  "same_pose_note": "the unlabelled original of the same frame (SIFT homography, 6,422 inliers; same solved pose); measure it instead: the drawn labels sit in the sky"
 }
