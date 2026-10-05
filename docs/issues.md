@@ -12,11 +12,8 @@ _Last updated: 2026-10-05_
 ## Active bugs — from the full code audit (2026-10-05)
 
 Source and full list: [history/audits/AUDIT-2026-10-05.md](history/audits/AUDIT-2026-10-05.md).
-Eight of its silent wrong-answer bugs were fixed the same day
-([issues-resolved](history/issues-resolved.md)). Still open:
-
-- **`numpy2stl` `stl2numpy/heightmap.py::_auto_resolution` swaps rows and cols**, so the grid comes out stretched.
-  The fix belongs in the numpy2stl repo.
+Its silent wrong-answer bugs were all fixed the same day, the last one by T15
+([issues-resolved](history/issues-resolved.md)).
 
 ## Active bugs — from the pipeline audit
 

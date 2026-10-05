@@ -67,6 +67,12 @@ because code cites them.
   a layer with no canvas id; `LAYER_CANVAS_IDS` says why CityOverlay is absent. Test:
   `tests/js/stackedLayersCanvas.test.js`.
 
+### numpy2stl `_auto_resolution` swapped rows and cols — fixed 2026-10-05 (T15)
+- It returned `(nx, ny)`, which `mesh_to_heightmap` reads as `(rows, cols)`, so an auto-sized grid
+  that was not square came out stretched.
+- numpy2stl `stl2numpy/heightmap.py::_auto_resolution` returns `(rows, cols)`. Test:
+  numpy2stl `tests/test_stl2numpy.py::TestMeshToHeightmap::test_auto_resolution_follows_the_mesh_aspect`.
+
 ## Fixed 2026-10-05 (full code audit)
 
 ### Silent wrong answers — fixed 2026-10-05
