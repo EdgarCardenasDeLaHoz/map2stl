@@ -139,18 +139,24 @@ def _c2_scene():
     return world, anchors, table
 
 
-def _c2_implied(world, anchors, table, cams):
+CAM_Y = -1500.0   # U (y 400) is ~1.9 km away: inside UNTAGGED_MAX_DIST_M
+
+
+def _c2_implied(world, anchors, table, cams, spans=None, **kw):
     from city2stl.skyline import photo_heights as ph
 
     per = []
     for cx in cams:
-        cam = (cx, -1800.0)
-        hd = math.degrees(math.atan2(-cx, 2200.0)) % 360
+        cam = (cx, CAM_Y)
+        hd = math.degrees(math.atan2(-cx, 400.0 - CAM_Y)) % 360
         prof = _photo(world, cam, hd, 50.0)
         pose = ph.PhotoPose(*world.to_ll(*cam), hd, 50.0)
         ms = ph.measure_towers(prof, anchors, pose)
         tilt, h = ph.fit_tilt_height(ms, np.array([m.osm_height_m for m in ms]))
-        per.append(ph.implied_heights(prof, pose, table, tilt, h))
+        sp = {}
+        per.append(ph.implied_heights(prof, pose, table, tilt, h, occluders=ms, spans=sp, **kw))
+        if spans is not None:
+            spans.append(sp)
     return per
 
 
@@ -211,11 +217,11 @@ def test_pipeline_untagged_rows_and_worker_step(monkeypatch):
     monkeypatch.setitem(pl._W, "towers", anchors)
     monkeypatch.setitem(pl._W, "untagged", table)
     cx = 0.0
-    hd = math.degrees(math.atan2(-cx, 2200.0)) % 360
-    prof = _photo(world, (cx, -1800.0), hd, 50.0)
-    imp = pl._implied_untagged(prof, ph.PhotoPose(*world.to_ll(cx, -1800.0), hd, 50.0),
-                               5000.0, 2.0)
-    assert float(imp["0"]) == pytest.approx(230.0, rel=0.02)
+    hd = math.degrees(math.atan2(-cx, 400.0 - CAM_Y)) % 360
+    prof = _photo(world, (cx, CAM_Y), hd, 50.0)
+    imp, spans = pl._implied_untagged(prof, ph.PhotoPose(*world.to_ll(cx, CAM_Y), hd, 50.0),
+                                      5000.0, 2.0)
+    assert float(imp["0"]) == pytest.approx(230.0, rel=0.02) and "0" in spans
 
     # finish side: features whose untagged table equals ``table`` (same frame, same order)
     def feat(v):
@@ -224,9 +230,14 @@ def test_pipeline_untagged_rows_and_worker_step(monkeypatch):
                 "properties": {"height_source": "default"}}
 
     osm = {"buildings": {"features": [feat(v) for v in table.verts]}}
-    monkeypatch.setattr(pl.bm, "footprint_truth",
-                        lambda region, fps, prov: {k: {"status": "confirmed", "truth_m": 228.0}
-                                                   for k in fps})
+    keys = ph.untagged_table(osm["buildings"]["features"], frame=anchors).keys
+    monkeypatch.setattr(pl.bm, "load_truth_cache",
+                        lambda region: {keys[0]: {"status": "confirmed", "truth_m": 228.0}})
+
+    def no_fetch(*a, **k):
+        raise AssertionError("cached truth must not fetch")
+
+    monkeypatch.setattr(pl.bm, "footprint_truth", no_fetch)
     results = [{"kept": True, "untagged": {"0": 231.0, "1": 25.0}},
                {"kept": True, "untagged": {"0": 229.0, "1": 80.0}},
                {"kept": False, "untagged": {"1": 25.0}}]       # not kept: ignored
@@ -234,3 +245,66 @@ def test_pipeline_untagged_rows_and_worker_step(monkeypatch):
     assert [r["index"] for r in rows] == [0]
     assert rows[0]["photo_m"] == pytest.approx(230.0) and rows[0]["truth_m"] == 228.0
     assert summary["buildings"] == 1 and summary["confirmed"] == 1
+
+    # --untagged-truth fetch: measured for the agreed footprints only
+    asked = []
+    monkeypatch.setattr(pl.bm, "footprint_truth", lambda region, fps, prov: asked.append(
+        set(fps)) or {k: {"status": "confirmed", "truth_m": 231.0} for k in fps})
+    rows, _ = pl._untagged_rows(SimpleNamespace(region="miami", untagged_truth="fetch"),
+                                results, anchors, osm)
+    assert asked == [{keys[0]}] and rows[0]["truth_m"] == 231.0
+
+    # --untagged-candidates truth: only footprints in the truth cache are candidates
+    t = pl._untagged_table("miami", osm, anchors, "truth")
+    assert list(t.keys) == [keys[0]]
+
+
+def test_untagged_tolerance_does_not_grow_with_height():
+    """At 10 % two photos at 1000 m and 1025 m would agree; the 10 m cap rejects that."""
+    from city2stl.skyline import photo_heights as ph
+
+    assert 7 not in ph.agreed_heights([{7: 1000.0}, {7: 1025.0}])
+    assert 7 in ph.agreed_heights([{7: 1000.0}, {7: 1008.0}])
+    assert 7 in ph.agreed_heights([{7: 60.0}, {7: 65.5}])           # 10 % below the cap
+
+
+def test_implied_heights_cap_and_distance():
+    from city2stl.skyline import photo_heights as ph
+
+    world, anchors, table = _c2_scene()
+    per = _c2_implied(world, anchors, table, (0,), max_height_m=200.0)
+    assert 0 not in per[0] and 1 in per[0]              # U (230 m) dropped, not clipped
+    assert _c2_implied(world, anchors, table, (0,), max_dist_m=1500.0)[0].keys() == {1}
+
+
+def test_tagged_tower_occludes_footprint_behind_it():
+    """A footprint right behind a tagged tower whose roof forms the skyline there gets no
+    columns: only the nearest plausible owner can be the skyline-former."""
+    from city2stl.skyline import photo_heights as ph
+
+    world, anchors, _ = _c2_scene()
+    hidden = sm.Towers(LAT0, LON0, [_box(-350, 760)], np.array([np.nan]), ["X"])
+    without = []
+    for occl in (True, False):
+        cx = -350.0
+        hd = math.degrees(math.atan2(-cx, 400.0 - CAM_Y)) % 360
+        prof = _photo(world, (cx, CAM_Y), hd, 50.0)
+        pose = ph.PhotoPose(*world.to_ll(cx, CAM_Y), hd, 50.0)
+        ms = ph.measure_towers(prof, anchors, pose)
+        tilt, h = ph.fit_tilt_height(ms, np.array([m.osm_height_m for m in ms]))
+        without.append(ph.implied_heights(prof, pose, hidden, tilt, h, max_dist_m=3000.0,
+                                          occluders=ms if occl else None))
+    assert without[0] == {} and 0 in without[1]
+
+
+def test_agreed_building_occludes_coincidence_behind_it():
+    """B, behind agreed A in both photos, agrees with itself by coincidence: dropped.
+    C, in front of A but not agreed, does not take A's columns away."""
+    from city2stl.skyline import photo_heights as ph
+
+    per = [{0: 150.0, 1: 400.0, 2: 60.0}, {0: 152.0, 1: 405.0, 2: 110.0}]
+    spans = [{0: (100, 140, 1000.0), 1: (105, 135, 1800.0), 2: (90, 150, 500.0)},
+             {0: (300, 330, 1100.0), 1: (302, 328, 1700.0), 2: (280, 340, 600.0)}]
+    assert set(ph.agreed_heights(per)) == {0, 1}                    # the coincidence
+    est = ph.agreed_with_occlusion(per, spans)
+    assert set(est) == {0} and est[0][0] == pytest.approx(151.0)

@@ -29,9 +29,15 @@ Street View on the same buildings (the report's ``heights.json``). Writes ``phot
 
 ``--untagged`` (F-WEB2 C2): also heights for untagged buildings. Each candidate photo fits its
 tilt and camera height on its tagged towers and implies a height for every untagged footprint
-in view (``photo_heights.implied_heights``); a building is kept when 2+ kept photos agree
-within max(3 m, 10 %) (``photo_heights.agreed_heights``). Written to ``photo_heights.json``
-(``untagged``) and scored against the benchmark truth.
+in view within ``--untagged-max-dist-m`` (``photo_heights.implied_heights``), dropping heights
+above min(the site's ``max_plausible_height_m``, 1.2x the tallest tagged tower in view) and
+columns a nearer tagged tower explains. A building is kept when 2+ kept photos agree within
+max(3 m, min(10 %, 10 m)), with footprints behind an agreed building dropped from the photos
+where it covers them (``photo_heights.agreed_with_occlusion``). Written to
+``photo_heights.json`` (``untagged``) and scored against the benchmark truth cache
+(``--untagged-truth fetch`` measures missing footprints: paid 3D Tiles reads).
+``--untagged-candidates truth`` limits candidates to footprints the truth cache holds, so a
+run can be scored without fetching.
 """
 
 from __future__ import annotations
@@ -62,14 +68,19 @@ log = logging.getLogger("photo_pipeline")
 _W: dict = {}
 
 
-def _init(region: str, untagged: bool = False):
+def _init(region: str, untagged: bool = False, candidates: str = "all"):
     """Worker state: towers and outlines, loaded once per process."""
-    from city2stl.skyline.region_data import _load_osm_for_region, _load_region_bbox
+    from city2stl.skyline.region_data import (
+        _load_osm_for_region,
+        _load_region_bbox,
+        _load_site_max_plausible_height_m,
+    )
 
     osm, _ = _load_osm_for_region(_load_region_bbox(region))
     _W["towers"] = sm.tower_table(osm["buildings"]["features"])
     if untagged:
-        _W["untagged"] = ph.untagged_table(osm["buildings"]["features"], frame=_W["towers"])
+        _W["untagged"] = _untagged_table(region, osm, _W["towers"], candidates)
+        _W["max_height_m"] = _load_site_max_plausible_height_m(region)
     d = ROOT / "runs" / "commons_cache" / region
     _W["prof"] = dict(np.load(d / "profiles.npz"))
 
@@ -147,20 +158,38 @@ def _job(job: dict) -> dict:
     h_cam = (res.get("camera") or {}).get("h_cam", 2.0)
     res["towers"], res["anchor_dev_m"] = _measure(prof, pose, job["max_dist_m"], h_cam)
     if "untagged" in _W:
-        res["untagged"] = _implied_untagged(prof, pose, job["max_dist_m"], h_cam)
+        res["untagged"], res["untagged_spans"] = _implied_untagged(
+            prof, pose, job["max_dist_m"], h_cam,
+            job.get("untagged_max_dist_m", ph.UNTAGGED_MAX_DIST_M))
     return res
 
 
-def _implied_untagged(prof, pose: ph.PhotoPose, max_dist_m: float, h_cam: float) -> dict:
-    """{untagged footprint index: implied height} for one photo, with tilt and camera height
-    fitted on all its tagged towers (no tower's estimate is involved, so no leave-one-out)."""
+def _untagged_table(region: str, osm: dict, frame, candidates: str = "all"):
+    """The untagged footprints C2 measures; ``candidates="truth"``: only those the region's
+    benchmark truth cache holds (Miami: 942), so the run is scored without fetching."""
+    only = set(bm.load_truth_cache(region)) if candidates == "truth" else None
+    return ph.untagged_table(osm["buildings"]["features"], frame=frame, only_keys=only)
+
+
+def _implied_untagged(prof, pose: ph.PhotoPose, max_dist_m: float, h_cam: float,
+                      untagged_max_dist_m: float = ph.UNTAGGED_MAX_DIST_M
+                      ) -> tuple[dict, dict]:
+    """``({index: implied height}, {index: [first col, last col, distance]})`` for one photo,
+    with tilt and camera height fitted on all its tagged towers (no tower's estimate is
+    involved, so no leave-one-out). Heights above min(site maximum, 1.2x the tallest tagged
+    tower in view) are dropped; the tagged towers occlude footprints behind them."""
     ms = [m for m in ph.measure_towers(prof, _W["towers"], pose, h_cam=h_cam)
           if m.dist_m <= max_dist_m]
     if len(ms) < 2:
-        return {}
+        return {}, {}
     tilt, h = ph.fit_tilt_height(ms, np.array([m.osm_height_m for m in ms]))
-    imp = ph.implied_heights(prof, pose, _W["untagged"], tilt, h, max_dist_m=max_dist_m)
-    return {str(i): round(v, 2) for i, v in imp.items()}
+    cap = min(_W.get("max_height_m", math.inf), 1.2 * max(m.osm_height_m for m in ms))
+    spans: dict = {}
+    imp = ph.implied_heights(prof, pose, _W["untagged"], tilt, h,
+                             max_dist_m=min(max_dist_m, untagged_max_dist_m),
+                             max_height_m=cap, occluders=ms, spans=spans)
+    return ({str(i): round(v, 2) for i, v in imp.items()},
+            {str(i): [c0, c1, round(d, 1)] for i, (c0, c1, d) in spans.items()})
 
 
 def _run(ex, jobs: list[dict], label: str) -> list[dict]:
@@ -210,7 +239,8 @@ def place(args, meta: dict, osm: dict) -> list[dict]:
     d = ROOT / "runs" / "commons_cache" / args.region
     by_title = {m["title"]: m for m in meta.values()}
     common = {"max_misfit": args.max_misfit, "min_margin": args.min_margin,
-              "min_coverage": args.min_coverage, "max_dist_m": args.max_dist_m}
+              "min_coverage": args.min_coverage, "max_dist_m": args.max_dist_m,
+              "untagged_max_dist_m": getattr(args, "untagged_max_dist_m", ph.UNTAGGED_MAX_DIST_M)}
     from city2stl.skyline.photo_localize import building_index, load_annotations, solve_from_labels
 
     index = building_index(osm["buildings"]["features"])
@@ -237,7 +267,8 @@ def place(args, meta: dict, osm: dict) -> list[dict]:
              and m["title"] not in done_titles and not m.get("why_not_usable")]
     results = []
     with ProcessPoolExecutor(args.workers, initializer=_init,
-                             initargs=(args.region, args.untagged)) as ex:
+                             initargs=(args.region, args.untagged,
+                                       getattr(args, "untagged_candidates", "all"))) as ex:
         results += _run(ex, jobs1 + jobs2, "place")
         ok_cam = {r["key"]: r["camera"] for r in results if _keep(r, args)}
         links = {}
@@ -374,24 +405,33 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
 
 
 def _untagged_rows(args, results: list[dict], towers, osm: dict) -> tuple[list[dict], dict]:
-    """Untagged buildings two or more kept photos agree on, with their truth and a score."""
-    table = ph.untagged_table(osm["buildings"]["features"], frame=towers)
-    per = [{int(k): v for k, v in (r.get("untagged") or {}).items()}
-           for r in results if r.get("kept")]
-    est = ph.agreed_heights(per)
-    rings = {i: [list(table.to_ll(x, y))[::-1] for x, y in table.verts[i]] for i in est}
-    keys = {i: bm.footprint_key(r) for i, r in rings.items()}
-    truth = (bm.footprint_truth(args.region, {keys[i]: rings[i] for i in est},
-                                bm.REGIONS.get(args.region)) if est else {})
+    """Untagged buildings two or more kept photos agree on, with their truth and a score.
+
+    Truth comes from the region's benchmark truth cache; ``--untagged-truth fetch`` measures
+    the missing footprints (3D Tiles reads: hours and money for a city's worth of them)."""
+    table = _untagged_table(args.region, osm, towers,
+                            getattr(args, "untagged_candidates", "all"))
+    kept = [r for r in results if r.get("kept")]
+    per = [{int(k): v for k, v in (r.get("untagged") or {}).items()} for r in kept]
+    spans = [{int(k): tuple(v) for k, v in (r.get("untagged_spans") or {}).items()}
+             for r in kept]
+    est = ph.agreed_with_occlusion(per, spans)
+    keys = {i: table.keys[i] for i in est}
+    if getattr(args, "untagged_truth", "cached") == "fetch" and est:
+        truth = bm.footprint_truth(args.region, {keys[i]: table.rings[i] for i in est},
+                                   bm.REGIONS.get(args.region))
+    else:
+        truth = bm.load_truth_cache(args.region)
     rows = []
     for i, (h, n, spread) in sorted(est.items()):
-        t = truth.get(keys[i], {})
+        t = truth.get(keys[i]) or {}
         rows.append({"index": i, "name": table.names[i], "key": keys[i],
-                     "footprint_lonlat": rings[i], "photo_m": round(h, 1), "n_photos": n,
+                     "footprint_lonlat": table.rings[i], "photo_m": round(h, 1), "n_photos": n,
                      "spread_m": round(spread, 1),
                      "truth_m": t.get("truth_m") if t.get("status") == "confirmed" else None})
     conf = [r for r in rows if r["truth_m"] is not None]
     return rows, {"buildings": len(rows), "confirmed": len(conf),
+                  "with_truth": sum(1 for i in est if keys[i] in truth),
                   "photo_vs_truth": _score([r["photo_m"] for r in conf],
                                            [r["truth_m"] for r in conf])}
 
@@ -417,6 +457,13 @@ def main() -> int:
     ap.add_argument("--rescue-min-towers", type=int, default=12)
     ap.add_argument("--untagged", action="store_true",
                     help="also measure untagged buildings that 2+ kept photos agree on (C2)")
+    ap.add_argument("--untagged-max-dist-m", type=float, default=ph.UNTAGGED_MAX_DIST_M,
+                    help="C2 candidates farther than this from the camera are skipped")
+    ap.add_argument("--untagged-truth", choices=("cached", "fetch"), default="cached",
+                    help="score C2 on the benchmark truth cache, or fetch missing footprints "
+                         "(paid 3D Tiles reads)")
+    ap.add_argument("--untagged-candidates", choices=("all", "truth"), default="all",
+                    help="truth: only footprints the truth cache holds (scoring without fetches)")
     ap.add_argument("--rescore", action="store_true",
                     help="no placing: apply the gates to the saved photo_results.json")
     args = ap.parse_args()
