@@ -79,3 +79,4 @@ tools/align_tool/data/
 tools/align_tool/cache/
 tools/align_tool/_debug/
 .coverage
+.claude/worktrees/
