@@ -370,6 +370,10 @@ def main() -> int:
     ap.add_argument("--rescore", action="store_true",
                     help="no placing: apply the gates to the saved photo_results.json")
     args = ap.parse_args()
+    if not args.rescore:                        # placing photos is a heavy job (CLAUDE.md)
+        from city2stl.resources import wait_for_ram
+
+        wait_for_ram()
     d = ROOT / "runs" / "commons_cache" / args.region
     meta = {m["key"]: m for m in json.loads((d / "profiles.json").read_text(encoding="utf-8"))
             if "px" in m}

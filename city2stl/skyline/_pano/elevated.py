@@ -182,13 +182,14 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
         import torch
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
+    from city2stl.resources import free_gpu_cache, wait_for_gpu
+
     from ..depth_estimation import predict_pano_depth_tiled
 
-    depth = predict_pano_depth_tiled(pano.rgb, device=device)
     if device == "cuda":
-        import torch
-
-        torch.cuda.empty_cache()
+        wait_for_gpu(1.0)                       # Depth Anything on 518 px tiles
+    depth = predict_pano_depth_tiled(pano.rgb, device=device)
+    free_gpu_cache()
     fps, fids = footprints_from_records(buildings)
     ms = fd.measure_footprints(pano, pf.pose, fps, depth=depth)
     logger.info("[elevated] %s: %d footprints measured (%d with the base visible)",

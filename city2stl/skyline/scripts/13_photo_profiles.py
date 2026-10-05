@@ -47,6 +47,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--region", required=True)
     args = ap.parse_args()
+    from city2stl.resources import wait_for_ram
+
+    wait_for_ram()                              # CLAUDE.md "Shared machine resources"
     from city2stl.skyline._core.segmentation import _neural_sky_and_building_masks
 
     site = json.loads((ROOT / "sites" / f"{args.region}.json").read_text(encoding="utf-8-sig"))
@@ -86,9 +89,9 @@ def main() -> int:
                 else:
                     sky, bld = _neural_sky_and_building_masks(img)
                     try:
-                        import torch
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
+                        from city2stl.resources import free_gpu_cache
+
+                        free_gpu_cache()                # other jobs share the card
                     except Exception:  # noqa: BLE001
                         pass
                     if sky is None:

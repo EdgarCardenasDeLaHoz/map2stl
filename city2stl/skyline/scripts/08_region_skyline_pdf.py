@@ -85,6 +85,9 @@ def main() -> int:
         ROOT / "city2stl" / "skyline" / "runs" /
         "region_reports" / f"{args.region}_skyline_report.pdf"
     )
+    from city2stl.resources import wait_for_ram
+
+    wait_for_ram()                              # a region run is a heavy job (CLAUDE.md)
     result = run_region_pdf_report(
         region_name=args.region,
         output_pdf=out,

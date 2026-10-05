@@ -40,6 +40,20 @@ def ram_ok(min_free_gb: float = HEAVY_JOB_MIN_FREE_GB) -> bool:
     return True
 
 
+def wait_for_ram(min_free_gb: float = HEAVY_JOB_MIN_FREE_GB, *, poll_s: float = GPU_POLL_S,
+                 timeout_s: float = 3 * GPU_TIMEOUT_S, _sleep=time.sleep) -> None:
+    """Block until *min_free_gb* of RAM is free (a heavy job's start rule); ``TimeoutError``
+    after *timeout_s*."""
+    waited = 0.0
+    while (free := free_ram_gb()) < min_free_gb:
+        if waited >= timeout_s:
+            raise TimeoutError(f"RAM: {free:.1f} GB free after {waited:.0f} s, need {min_free_gb:.1f} GB")
+        if waited == 0:
+            logger.info("Waiting for %.1f GB of free RAM (%.1f GB free)", min_free_gb, free)
+        _sleep(poll_s)
+        waited += poll_s
+
+
 def free_vram_gb(device: int = 0) -> float | None:
     """Free GPU memory in GB, or None without CUDA."""
     try:

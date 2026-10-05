@@ -28,6 +28,7 @@ import numpy as np
 import requests
 from PIL import Image
 
+from city2stl.resources import free_gpu_cache, wait_for_ram
 from city2stl.skyline import commons_photos as cp
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +44,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--region", required=True)
     args = ap.parse_args()
+    wait_for_ram()                              # CLAUDE.md "Shared machine resources"
     import torch
     from transformers import AutoImageProcessor, AutoModel
 
@@ -70,6 +72,10 @@ def main() -> int:
     logging.info("[embed] %d thumbnails cached", len(meta))
 
     dev = "cuda" if torch.cuda.is_available() else "cpu"
+    if dev == "cuda":
+        from city2stl.resources import wait_for_gpu
+
+        wait_for_gpu(1.0)                       # DINOv2-small and a batch of thumbnails
     proc = AutoImageProcessor.from_pretrained(MODEL)
     model = AutoModel.from_pretrained(MODEL).to(dev).eval()
     keys, vecs = [], []
@@ -86,7 +92,7 @@ def main() -> int:
             keys += [m["key"] for m in batch]
     del model
     if dev == "cuda":
-        torch.cuda.empty_cache()
+        free_gpu_cache()
     np.savez_compressed(d / "embed.npz", keys=np.array(keys), vecs=np.concatenate(vecs))
     print(f"{args.region}: {len(keys)} embeddings ({MODEL}, {dev})")
     return 0

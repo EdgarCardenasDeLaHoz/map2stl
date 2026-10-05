@@ -9,6 +9,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from city2stl.resources import free_gpu_cache
 from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
 from .._core.height import aggregate_building_heights
@@ -235,6 +236,7 @@ def _seed_multiview_registration(
         # A seed's views are fresh arrays, so the previous seed's label maps, masks and anchored
         # images in the SegFormer cache can never hit again: free them (0.3-0.7 GB, 2026-10-05).
         clear_neural_cache()
+        free_gpu_cache()                        # and the card's cache (CLAUDE.md)
         if seed.pano_id and seed.pano_id in _seen_pano_ids:
             logger.info(f"[dedup] {seed.name}: pano_id={seed.pano_id!r} already "
                         "processed by an earlier seed — skipping duplicate")

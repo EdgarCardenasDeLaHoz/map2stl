@@ -183,13 +183,14 @@ def _detect(seed: str, out: Path, pano, pose, fps, device: str) -> list[fd.Measu
     if dp.exists():
         depth = np.load(dp)
     else:
+        from city2stl.resources import free_gpu_cache, wait_for_gpu
         from city2stl.skyline.depth_estimation import predict_pano_depth_tiled
 
-        depth = predict_pano_depth_tiled(pano.rgb, device=device)
-        np.save(dp, depth)
         if device == "cuda":
-            import torch
-            torch.cuda.empty_cache()
+            wait_for_gpu(1.0)                   # Depth Anything on 518 px tiles
+        depth = predict_pano_depth_tiled(pano.rgb, device=device)
+        free_gpu_cache()
+        np.save(dp, depth)
     t = time.time()
     ms = fd.measure_footprints(pano, pose, fps, depth=depth)
     summary = {"seed": seed, "measured": len(ms), "base_visible": sum(m.base_visible for m in ms),

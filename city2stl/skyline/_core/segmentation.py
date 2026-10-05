@@ -83,6 +83,10 @@ _mobilesam_predictor = None
 
 _segformer_device: str = "cpu"
 
+#: GPU memory SegFormer needs (weights and a 512 px batch), GB, per size; ``_ensure_segformer``
+#: waits for it before loading onto the card.
+_SEGFORMER_VRAM_GB = {"b0": 0.6, "b1": 0.8, "b2": 1.1, "b3": 1.5, "b4": 2.2, "b5": 2.6}
+
 def _ensure_segformer() -> bool:
     """Lazily load SegFormer-b0 (ADE20K). Returns True if the model is ready.
 
@@ -127,13 +131,23 @@ def _ensure_segformer() -> bool:
             _segformer_device = "cuda"
         else:
             _segformer_device = "cpu"
-        try:
+        # CLAUDE.md "Shared machine resources": a GPU job waits for VRAM; it does not fall
+        # back to the CPU because another job holds the card (that takes the CPU from every
+        # other job). An explicit SKYLINE_CV_SEGFORMER_DEVICE=cpu still runs on the CPU.
+        if _segformer_device.startswith("cuda"):
+            from city2stl.resources import free_gpu_cache, wait_for_gpu  # noqa: PLC0415
+
+            need = _SEGFORMER_VRAM_GB.get(_SEGFORMER_MODEL_ID.split("segformer-")[-1][:2], 1.5)
+            wait_for_gpu(need)
+            try:
+                _segformer_model.to(_segformer_device)  # type: ignore[union-attr]
+            except RuntimeError:                       # the card filled up meanwhile
+                free_gpu_cache()
+                wait_for_gpu(need)
+                _segformer_model.to(_segformer_device)  # type: ignore[union-attr]
+        else:
             _segformer_model.to(_segformer_device)  # type: ignore[union-attr]
-            print(f"[segformer] device={_segformer_device}  model={_SEGFORMER_MODEL_ID.split('/')[-1]}  input={_input_n}px")
-        except Exception as _e_dev:
-            print(f"[segformer] failed to move to {_segformer_device}: {_e_dev} — falling back to CPU")
-            _segformer_device = "cpu"
-            _segformer_model.to("cpu")  # type: ignore[union-attr]
+        print(f"[segformer] device={_segformer_device}  model={_SEGFORMER_MODEL_ID.split('/')[-1]}  input={_input_n}px")
         _SEGFORMER_OK = True
     except Exception:
         _SEGFORMER_OK = False
@@ -226,8 +240,10 @@ def _upsampled_labels(logits, h: int, w: int) -> np.ndarray:
         del part
     labels = best_idx.to(torch.uint8).cpu().numpy()
     if best_idx.is_cuda and h * w > 4_000_000:           # a photo: hand the blocks back
+        from city2stl.resources import free_gpu_cache  # noqa: PLC0415
+
         del best_val, best_idx
-        torch.cuda.empty_cache()
+        free_gpu_cache()
     return labels
 
 def _ensure_label_map(image_rgb: np.ndarray) -> np.ndarray | None:

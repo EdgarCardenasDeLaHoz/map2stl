@@ -85,6 +85,9 @@ def _run_region(region: str, out_dir: Path, env: dict) -> Path | None:
     log = out_dir / f"{region}.log"
     cmd = [sys.executable, "-u", "-m", "city2stl.skyline.scripts.08_region_skyline_pdf",
            "--region", region, "--out", str(out_pdf)]
+    from city2stl.resources import wait_for_ram
+
+    wait_for_ram()                              # each region run is a heavy job (CLAUDE.md)
     logging.info("[bench] running %s (log: %s)", region, log)
     with log.open("w", encoding="utf-8") as fh:
         rc = subprocess.run(cmd, cwd=ROOT, stdout=fh, stderr=subprocess.STDOUT,
