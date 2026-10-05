@@ -1,5 +1,5 @@
 """
-tools/eval_roof_classifier.py — Evaluate roof-shape classification quality
+tools/eval/eval_roof_classifier.py — Evaluate roof-shape classification quality
 across the five ROOF-2 evaluation cities.
 
 For each city the script:
@@ -16,9 +16,9 @@ For each city the script:
 Usage
 -----
     # from the map2stl/ directory:
-    ..\\..venv\\Scripts\\python.exe -m tools.eval_roof_classifier
+    python -m tools.eval.eval_roof_classifier
     # or:
-    ..\\..venv\\Scripts\\python.exe tools/eval_roof_classifier.py
+    python tools/eval/eval_roof_classifier.py
 
 Outputs
 -------

@@ -1,5 +1,5 @@
 """
-tools/eval_pseudo_ndsm.py — Evaluate the quality of building-height rasters
+tools/eval/eval_pseudo_ndsm.py — Evaluate the quality of building-height rasters
 across the ROOF-2 evaluation cities.
 
 For each city this script:
@@ -14,9 +14,9 @@ For each city this script:
 Usage
 -----
     # from the map2stl/ directory:
-    ..\\..venv\\Scripts\\python.exe -m tools.eval_pseudo_ndsm
+    python -m tools.eval.eval_pseudo_ndsm
     # or:
-    ..\\..venv\\Scripts\\python.exe tools/eval_pseudo_ndsm.py
+    python tools/eval/eval_pseudo_ndsm.py
 
 Outputs
 -------

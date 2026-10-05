@@ -97,7 +97,7 @@ app/ (server, client, session SDK)
   - `city2stl/roof_model.py::RoofShapeModel` — trained flat-vs-pitched call; details in
     [roof-shape-model.md](roof-shape-model.md).
   - `city2stl/roof_features.py::extract`, `city2stl/roof_tiles.py::crop_for_ring` (zoom-18
-    crops), `city2stl/roof_nets.py::RoofNetV2` (architecture, lazy `torch`).
+    crops).
 - **Landmarks** — `city2stl/landmarks.py::list_landmarks`, `city2stl/landmarks.py::resolve_overrides`
   (replace one building by mesh or survey nDSM).
 - **Model cache** — `city2stl/model_cache.py` (see [Caches](#caches)).

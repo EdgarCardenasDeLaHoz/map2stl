@@ -35,7 +35,7 @@ import time
 #
 # Bounding boxes are small urban patches (~3 km wide) chosen for high OSM
 # roof-tag coverage and variety of roof shapes.  The same bboxes are used
-# by tools/eval_roof_tags.py so results are directly comparable.
+# by tools/eval/eval_roof_tags.py so results are directly comparable.
 # ---------------------------------------------------------------------------
 
 EVAL_CITIES: dict[str, dict] = {
