@@ -1,6 +1,7 @@
 """F-DET6 in the region report: the adapter from footprint measurements to pipeline records."""
 
 import numpy as np
+import pytest
 from shapely.geometry import Polygon
 
 from city2stl.skyline import footprint_detect as fd
@@ -71,7 +72,7 @@ def test_site_lists_the_cartagena_drone_seeds():
 def test_chunked_upsample_gives_the_full_argmax_labels():
     """The full-resolution upsample of all 150 class scores needed 6.6 GB for one Commons
     photo; the chunked running maximum must give exactly the same labels, ties included."""
-    import torch
+    torch = pytest.importorskip("torch")              # the cloud venv has no torch
     import torch.nn.functional as F
 
     from city2stl.skyline._core.segmentation import _upsampled_labels
