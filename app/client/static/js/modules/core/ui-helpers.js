@@ -1,8 +1,8 @@
 /**
- * modules/ui-helpers.js — Toast notifications, loading overlays, layer-status UI,
+ * modules/ui-helpers.js — Toast notifications, layer-status UI,
  * collapsible sections, and coordinate search.
  *
- * Loaded as a plain <script> before app.js. All functions exposed on window.*.
+ * Imported by main.js. All functions exposed on window.*.
  * Reads layer status via window.appState.layerStatus (shared reference with app.js).
  *
  * Public API:
@@ -11,8 +11,6 @@
  *   window.toastAnimation(duration)
  *   window.toastDropIndex(types, max)
  *   window.toggleCollapsible(header)
- *   window.showLoading(container, message)
- *   window.hideLoading(container)
  *   window.setLayerStatus(layer, status)
  *   window.updateLayerStatusUI()
  *   window.updateLayerStatusIndicators()
@@ -162,51 +160,6 @@ window.toggleCollapsible = function toggleCollapsible(header) {
                 }
             }, 50);
         }
-    }
-};
-
-// ============================================================
-// LOADING OVERLAYS
-// ============================================================
-
-/**
- * Show a spinner loading overlay on a container element.
- * Removes any existing overlay first.
- * @param {HTMLElement|string} container - DOM element or element ID
- * @param {string} [message='Loading...'] - Text shown below the spinner
- */
-window.showLoading = function showLoading(container, message = 'Loading...') {
-    window.hideLoading(container);
-
-    const overlay = document.createElement('div');
-    overlay.className = 'loading-overlay';
-    overlay.innerHTML = `
-        <span class="spinner"></span>
-        <p>${message}</p>
-    `;
-
-    if (typeof container === 'string') {
-        container = document.getElementById(container);
-    }
-
-    if (container) {
-        container.classList.add('pos-relative');
-        container.appendChild(overlay);
-    }
-};
-
-/**
- * Remove the loading overlay from a container element.
- * @param {HTMLElement|string} container - DOM element or element ID
- */
-window.hideLoading = function hideLoading(container) {
-    if (typeof container === 'string') {
-        container = document.getElementById(container);
-    }
-
-    if (container) {
-        const overlay = container.querySelector('.loading-overlay');
-        if (overlay) overlay.remove();
     }
 };
 

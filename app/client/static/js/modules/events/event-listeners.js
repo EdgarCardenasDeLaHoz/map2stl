@@ -60,7 +60,6 @@ window.setupEventListeners = function setupEventListeners() {
     window.initCurveEditor?.();
     window.initPresetProfiles?.();
     window.initRegionNotes?.();
-    window.initRegionThumbnails?.();
     window.enableStackedZoomPan?.();
 
     window._setupSettingsJsonToggle?.();

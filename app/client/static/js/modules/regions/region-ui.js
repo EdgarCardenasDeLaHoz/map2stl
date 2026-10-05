@@ -1,5 +1,5 @@
 ﻿/**
- * modules/regions/region-ui.js — Region list, table, notes, and thumbnail UI.
+ * modules/regions/region-ui.js — Region list, continent filter and notes UI.
  *
  * The sidebar list shows the map's viewport set (region-boxes.js::getViewportRegionSet:
  * the ≤ 20 regions drawn on the map, plus the selected one) under a
@@ -16,15 +16,12 @@
  *   setupContinentFilter()               — wire the sidebar continent filter
  *   initRegionNotes()                    — load notes from localStorage
  *   getRegionNote(name) / setRegionNote(name, text) — notes (edited in the region editor)
- *   renameRegionLocalData(old, new)      — move notes + thumbnail after a rename
- *   initRegionThumbnails()               — load thumbnails from localStorage
- *   saveRegionThumbnail(name, dataURL)   — persist a thumbnail
+ *   renameRegionLocalData(old, new)      — move notes after a rename
  *
  * External dependencies:
  *   window.getCoordinatesData()          — accessor for coordinatesData closure var
  *   window.getSidebarState()             — accessor for sidebarState closure var
  *   window.appState.selectedRegion
- *   window.appState.regionThumbnails    — set by initRegionThumbnails()
  *   window.selectCoordinate(index)      — from app.js
  *   window.goToEdit(index)              — from app.js
  *   window.switchView(view)             — from app.js
@@ -44,7 +41,6 @@ import { formatBboxDims, regionColor } from './region-geometry.js';
 
 const CONTINENT_HIDDEN = new Set();
 
-let regionThumbnails = {};
 let regionNotes = {};
 
 // ── Sidebar list pagination ───────────────────────────────────────────────────
@@ -379,23 +375,6 @@ function setupContinentFilter() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Region thumbnails
-// ─────────────────────────────────────────────────────────────────────────────
-
-function initRegionThumbnails() {
-    try {
-        const saved = localStorage.getItem('map2stl_thumbs');
-        if (saved) regionThumbnails = JSON.parse(saved);
-    } catch (_) { /* best-effort; failure is non-fatal */ }
-    window.appState.regionThumbnails = regionThumbnails;
-}
-
-function saveRegionThumbnail(name, dataURL) {
-    regionThumbnails[name] = dataURL;
-    try { localStorage.setItem('map2stl_thumbs', JSON.stringify(regionThumbnails)); } catch (_) { /* best-effort; failure is non-fatal */ }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Region notes
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -428,7 +407,7 @@ function setRegionNote(name, text) {
 }
 
 /**
- * Move the browser-side data keyed by region name (notes, thumbnails) after a
+ * Move the browser-side data keyed by region name (notes) after a
  * rename. The server moves its own (settings, landmarks) in PUT /api/regions/{name}.
  */
 function renameRegionLocalData(oldName, newName) {
@@ -437,11 +416,6 @@ function renameRegionLocalData(oldName, newName) {
         regionNotes[newName] = regionNotes[oldName];
         delete regionNotes[oldName];
         _persistNotes();
-    }
-    if (oldName in regionThumbnails) {
-        regionThumbnails[newName] = regionThumbnails[oldName];
-        delete regionThumbnails[oldName];
-        try { localStorage.setItem('map2stl_thumbs', JSON.stringify(regionThumbnails)); } catch (_) { /* best-effort */ }
     }
 }
 
@@ -453,8 +427,6 @@ window.detectContinent = detectContinent;
 window.groupRegionsByContinent = groupRegionsByContinent;
 window.renderCoordinatesList = renderCoordinatesList;
 window.setupContinentFilter = setupContinentFilter;
-window.initRegionThumbnails = initRegionThumbnails;
-window.saveRegionThumbnail = saveRegionThumbnail;
 window.initRegionNotes = initRegionNotes;
 window.getRegionNote = getRegionNote;
 window.setRegionNote = setRegionNote;

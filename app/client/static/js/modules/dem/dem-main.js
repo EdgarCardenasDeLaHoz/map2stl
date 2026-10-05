@@ -175,18 +175,6 @@ function _applyDemResult(data, north, south, east, west) {
     // Enable zoom/pan on new canvas
     window.enableZoomAndPan?.(canvas);
 
-    // Capture a small thumbnail for the sidebar
-    const currentSelectedRegion = window.appState.selectedRegion;
-    if (currentSelectedRegion?.name) {
-        try {
-            const thumbCanvas = document.createElement('canvas');
-            thumbCanvas.width = 48; thumbCanvas.height = 30;
-            thumbCanvas.getContext('2d').drawImage(canvas, 0, 0, 48, 30);
-            window.saveRegionThumbnail?.(currentSelectedRegion.name, thumbCanvas.toDataURL('image/jpeg', 0.6));
-            window.renderCoordinatesList?.();
-        } catch (_) { /* best-effort; failure is non-fatal */ }
-    }
-
     // Store bbox on lastDemData for physical dimensions calculation
     if (window.appState.lastDemData) window.appState.lastDemData.bbox = { north, south, east, west };
 
@@ -301,20 +289,10 @@ window.loadDEM = async function loadDEM(highRes = false) {
     // Update layer status
     window.setLayerStatus('dem', 'loading');
 
-    // Show loading overlay on stacked layers view
-    const stackContainer = document.getElementById('dem-image-section');
-    if (stackContainer) window.showLoading?.(stackContainer, 'Loading DEM...');
-
     // Show loading indicator and clear old DEM
     const demImageContainer = document.getElementById('demImage');
     demImageContainer.innerHTML = `<div class="loading"><span class="spinner"></span>Loading DEM... <button onclick="window.loadDEM._controller&&window.loadDEM._controller.abort()" class="dem-cancel-btn">✕ Cancel</button></div>`;
     window.showToast?.('Loading DEM data...', 'info');
-
-    // Optionally, show a progress bar
-    let progressBar = document.createElement('div');
-    progressBar.className = 'dem-progress-bar';
-    progressBar.innerHTML = '<div style="width:0%" id="demProgress"></div>';
-    demImageContainer.appendChild(progressBar);
 
     try {
         const { data, error: loadErr } = await window.api.dem.load(params, signal);
@@ -358,10 +336,6 @@ window.loadDEM = async function loadDEM(highRes = false) {
         // The chosen dataset cannot cover an area this large; the server used a coarser one.
         if (data.source_note) window.showToast?.(data.source_note, 'info', 8000);
 
-        // Remove loading overlay from stacked layers
-        const stackC = document.getElementById('dem-image-section');
-        if (stackC) window.hideLoading?.(stackC);
-
         // Client-side rendering of DEM data
         if ((data.dem_values || data.dem_values_b64) && data.dimensions) {
             _applyDemResult(data, north, south, east, west);
@@ -381,9 +355,6 @@ window.loadDEM = async function loadDEM(highRes = false) {
         _showErr('demImage', `Failed to load DEM: ${error.message || error}`);
         window.setLayerStatus('dem', 'error');
         window.showToast?.('Failed to load DEM', 'error');
-    } finally {
-        const stackF = document.getElementById('dem-image-section');
-        if (stackF) window.hideLoading?.(stackF);
     }
 };
 
@@ -732,92 +703,16 @@ window._updateBedOptimizer = function _updateBedOptimizer(bbox) {
 // loadSatelliteImage
 // ---------------------------------------------------------------------------
 
-let _satelliteAbortController = null;
 let _satelliteRGBAbortController = null;
 
 /**
- * Load satellite/land cover imagery from /api/terrain/dem with show_sat=true.
- * Renders the result to the #satelliteImage container.
+ * ESA land cover. Older name kept for its callers: it routes through the
+ * dedicated loader (water-mask.js::loadEsaLandCover) so the auto-load and the
+ * manual "Load ESA Land Cover" use identical settings and cannot race.
  * @returns {Promise<void>}
  */
 window.loadSatelliteImage = async function loadSatelliteImage() {
-    // Keep legacy callers functional, but route through the dedicated ESA loader
-    // so initial auto-load and manual "Load ESA Land Cover" use identical settings
-    // (resolution, projection, rendering) and cannot race/overwrite each other.
-    if (typeof window.loadEsaLandCover === 'function') {
-        return await window.loadEsaLandCover();
-    }
-
-    if (_satelliteAbortController) _satelliteAbortController.abort();
-    _satelliteAbortController = new AbortController();
-    const signal = _satelliteAbortController.signal;
-
-    const boundingBox = window.getBoundingBox?.();
-    const selectedRegion = window.appState.selectedRegion;
-
-    const coords = _getBboxCoords(boundingBox, selectedRegion);
-    if (!coords) {
-        document.getElementById('satelliteImage').innerHTML = '<p>Please select a region or draw a bounding box first.</p>';
-        return;
-    }
-    const { north, south, east, west } = coords;
-    const resolution = document.getElementById('waterResolution')?.value || '600';
-    const dataset = document.getElementById('waterDataset')?.value || 'esa';
-    const projection = document.getElementById('paramProjection')?.value || 'none';
-    const clipValidRegion = document.getElementById('paramClipNans')?.checked ? 'true' : 'false';
-
-    const params = new URLSearchParams({
-        north, south, east, west,
-        dim: resolution,
-        show_sat: true,
-        dataset,
-        projection,
-        clip_valid_region: clipValidRegion,
-    });
-
-    document.getElementById('satelliteImage').innerHTML = '<p class="loading">Loading satellite data...</p>';
-
-    try {
-        const { data, error: satErr } = await window.api.dem.load(params, signal);
-        if (satErr) {
-            _showErr('satelliteImage', satErr);
-            return;
-        }
-
-        if (data.error) {
-            _showErr('satelliteImage', data.error);
-            return;
-        }
-
-        if (data.sat_values && data.sat_dimensions && data.sat_available) {
-            if (dataset === 'esa' && typeof window.renderEsaLandCover === 'function') {
-                // ESA values are categorical class IDs; render with class palette,
-                // not a continuous viridis gradient.
-                window.renderEsaLandCover({
-                    esa_values: data.sat_values,
-                    esa_values_b64: data.sat_values_b64,
-                    esa_dimensions: data.sat_dimensions,
-                });
-            } else {
-                const sat_h = data.sat_dimensions[0];
-                const sat_w = data.sat_dimensions[1];
-                const canvas = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
-                canvas.classList.add('dem-canvas-responsive');
-                document.getElementById('satelliteImage').innerHTML = '';
-                document.getElementById('satelliteImage').appendChild(canvas);
-            }
-            window.appState.satEsaLoaded = true;
-            window.emitStackUpdate();
-        } else {
-            window.appState.satEsaLoaded = false;
-            document.getElementById('satelliteImage').innerHTML =
-                '<div class="sat-unavailable"><p>Satellite data not available</p><p>Earth Engine module required</p></div>';
-        }
-    } catch (error) {
-        if (error.name === 'AbortError') return;
-        console.error('Error loading satellite image:', error);
-        document.getElementById('satelliteImage').innerHTML = '<p>Failed to load satellite image.</p>';
-    }
+    return await window.loadEsaLandCover?.();
 };
 
 // ---------------------------------------------------------------------------
