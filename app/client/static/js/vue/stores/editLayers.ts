@@ -112,6 +112,19 @@ export const useEditLayersStore = defineStore('editLayers', {
   },
 });
 
+/**
+ * Whether a layer's data is needed: it is in the model, or its preview is on the canvas.
+ * modules/ui/app-setup.js::loadAllLayers asks before fetching the costly layers: the Amazon's
+ * switched-off rivers were carved for 200 s after every terrain load (perf audit 2026-10-04).
+ */
+export function isEditLayerWanted(id: EditLayerId): boolean {
+  const l = EDIT_LAYERS.find((x) => x.id === id);
+  if (!l) return true;
+  const active = w().getActiveLayers?.() as Set<string> | undefined;
+  return l.inModel() || !!active?.has(l.stack);
+}
+w().isEditLayerWanted = isEditLayerWanted;
+
 /** Show or hide a layer's preview on the canvas (loads it the first time). */
 export function setPreviewVisible(stack: string, on: boolean): void {
   const active = w().getActiveLayers?.() as Set<string> | undefined;

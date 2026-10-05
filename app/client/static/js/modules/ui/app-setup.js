@@ -162,16 +162,20 @@ window.loadAllLayers = async function loadAllLayers() {
         // dem-main.js) — call it once, not both, or the second call's
         // AbortController cancels the first mid-flight (ERR_ABORTED + a
         // confusing "signal is aborted" error toast for no reason).
+        // Rivers, satellite image and trails only when the layer is in the model or shown
+        // (stores/editLayers.ts::isEditLayerWanted): on a continent-sized box the rivers alone
+        // took minutes for a layer that was off (Amazon, 2026-10-04). Switching one on later
+        // loads it (stacked-layers.js LAYER_AUTOLOAD).
+        const wanted = (id) => (window.isEditLayerWanted ? window.isEditLayerWanted(id) : true);
         const tasks = [
             window.loadWaterMask?.(),
-            window.loadWaterHydrology?.(),
+            wanted('water') && window.loadWaterHydrology?.(),
             window.loadEsaLandCover?.(),
-            window.loadSatelliteRGBImage?.(),
-            window.loadHydrology?.(),
-            // activate:false - a bulk load fetches every layer and must not
-            // change which one the user is looking at.
-            window.loadTrails?.({ activate: false }),
-        ];
+            wanted('satellite') && window.loadSatelliteRGBImage?.(),
+            wanted('water') && window.loadHydrology?.(),
+            // activate:false - a bulk load must not change which layer the user is looking at.
+            wanted('trails') && window.loadTrails?.({ activate: false }),
+        ].filter(Boolean);
 
         // haversineDiagKm lives on window (model-viewer.js), not appState, and
         // takes the bbox as explicit args — this previously always evaluated to
