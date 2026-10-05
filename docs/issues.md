@@ -17,8 +17,6 @@ Eight of its silent wrong-answer bugs were fixed the same day
 
 - **`numpy2stl` `stl2numpy/heightmap.py::_auto_resolution` swaps rows and cols**, so the grid comes out stretched.
   The fix belongs in the numpy2stl repo.
-- **Frontend `renderDEMCanvas` re-announces the DEM** on every recolour and resize frame:
-  `app/client/static/js/modules/dem/dem-main.js::renderDEMCanvas`.
 
 ## Active bugs — from the pipeline audit
 

@@ -23,6 +23,17 @@ because code cites them.
 - The two strict xfails in `tests/test_e2e_projection_pipeline.py::TestResponseFormatConsistency`
   are now plain tests.
 
+## Fixed 2026-10-05 (task board)
+
+### `renderDEMCanvas` re-announced the DEM on every recolour and resize frame — fixed 2026-10-05 (T10)
+- Each call replaced `lastDemData` (losing `bbox` / `sourceDimensions`), emitted `DEM_LOADED` and
+  rebuilt the model, so a panel resize refetched empty layers, redrew every building and projected
+  the composite's city raster twice.
+- `app/client/static/js/modules/dem/dem-main.js::renderDEMCanvas` now announces only a new DEM
+  (values array, size or display range differ from the last announced one); drawing the same DEM
+  again updates the colormap in place. `bbox` and `sourceDimensions` carry over while the grid
+  size is unchanged (curve and composite applies). Test: `tests/js/renderDemCanvas.test.js`.
+
 ## Fixed 2026-10-05 (full code audit)
 
 ### Silent wrong answers — fixed 2026-10-05

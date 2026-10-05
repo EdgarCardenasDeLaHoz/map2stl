@@ -362,9 +362,15 @@ window.loadDEM = async function loadDEM(highRes = false) {
 // renderDEMCanvas
 // ---------------------------------------------------------------------------
 
+/** What the last state-updating render announced: re-announce only when it changes. */
+let _announced = null;
+
 /**
  * Render elevation values to a canvas element using a colour lookup table.
- * Stores data in appState.lastDemData, then updates layer status — unless
+ * A new DEM (values array, size or display range differ from the last announced one)
+ * is stored in appState.lastDemData, announced (DEM_LOADED, model auto-rebuild) and its
+ * layer status updated; drawing the same DEM again (recolour, resize) only updates the
+ * colormap. The bbox and source size carry over while the grid size is unchanged. Unless
  * `skipStateUpdate` is set, for callers (mesh heightmap preview/registration)
  * that only want the colorized canvas and must not clobber the real DEM's
  * lastDemData/curveData/workflow state with their own unrelated raster.
@@ -380,25 +386,40 @@ window.loadDEM = async function loadDEM(highRes = false) {
  */
 window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colormap, vmin, vmax, opts = {}) {
     if (!opts.skipStateUpdate) {
-        // Store last DEM data
-        const lastDemData = { values: _isArrayLike(values) ? values : [], width, height, colormap, vmin, vmax };
-        window.appState.lastDemData = lastDemData;
+        const prev = window.appState.lastDemData;
+        const a = _announced;
+        const sameDem = !!a && a.values === values && a.width === width && a.height === height;
+        if (sameDem && a.vmin === vmin && a.vmax === vmax) {
+            // A recolour or a resize frame: the same DEM, drawn again. Re-announcing it
+            // (DEM_LOADED, model rebuild, a fresh lastDemData without bbox /
+            // sourceDimensions) refetched empty layers, rebuilt the model and projected
+            // the composite's city raster twice (audit 2026-10-05).
+            if (prev && prev.values === values) prev.colormap = colormap;
+        } else {
+            _announced = { values, width, height, vmin, vmax };
+            // Same grid (a curve or composite apply): keep where it is and its source size.
+            const keep = prev && prev.width === width && prev.height === height
+                ? { bbox: prev.bbox, sourceDimensions: prev.sourceDimensions } : {};
+            const lastDemData = { ...keep, values: _isArrayLike(values) ? values : [],
+                                  width, height, colormap, vmin, vmax };
+            window.appState.lastDemData = lastDemData;
 
-        window._setDemEmptyState?.(false);
-        window._updateWorkflowStepper?.();
+            window._setDemEmptyState?.(false);
+            window._updateWorkflowStepper?.();
 
-        // Notify curve-editor.js (and any other listeners) that a new DEM is loaded.
-        window.events?.emit(window.EV?.DEM_LOADED, vmin, vmax);
-        // Auto-rebuild the 3D model if the Extrude view is currently open.
-        window._modelViewerAutoRebuild?.();
-        window.appState.curveDataVmin = vmin;
-        window.appState.curveDataVmax = vmax;
+            // Notify curve-editor.js (and any other listeners) that a new DEM is loaded.
+            window.events?.emit(window.EV?.DEM_LOADED, vmin, vmax);
+            // Auto-rebuild the 3D model if the Extrude view is currently open.
+            window._modelViewerAutoRebuild?.();
+            window.appState.curveDataVmin = vmin;
+            window.appState.curveDataVmax = vmax;
 
-        // Track DEM layer bbox
-        const currentDemBbox = window.appState.currentDemBbox;
-        if (currentDemBbox) {
-            window.appState.layerBboxes.dem = { ...currentDemBbox };
-            window.setLayerStatus('dem', 'loaded');
+            // Track DEM layer bbox
+            const currentDemBbox = window.appState.currentDemBbox;
+            if (currentDemBbox) {
+                window.appState.layerBboxes.dem = { ...currentDemBbox };
+                window.setLayerStatus('dem', 'loaded');
+            }
         }
     }
 
