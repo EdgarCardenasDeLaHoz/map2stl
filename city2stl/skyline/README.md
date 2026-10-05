@@ -48,7 +48,7 @@ run_region_pdf_report(region_name)                      region_pdf.py
   └─ per seed: _seed_multiview_registration              _pano/orchestrator.py
        ├─ capture 12-view spin (every 30°)               _pano/capture.py::_capture_pano_views
        ├─ batched SegFormer prefetch                     _core/segmentation.py::prefetch_label_maps
-       ├─ F-DET1 blob-count early-out                    _pano/orchestrator.py (inline)
+       ├─ F-DET1 building-count early-out                _pano/detect.py::_count_skyline_buildings
        ├─ pano heading (water + vegetation)              _pano/heading.py::_recover_pano_heading
        ├─ joint anchor sweep                             _pano/heading.py::_recover_anchor_offset
        ├─ per-view match (±8° around anchor)             _pano/detect.py::_register_views

@@ -518,6 +518,39 @@ def _dedup_matches(segments: list[dict], restore_swapped: bool = False) -> int:
     return dropped
 
 
+def _count_skyline_buildings(mask: np.ndarray, min_step_frac: float = 0.02,
+                             min_width_frac: float = 0.01) -> int:
+    """Buildings in a building mask, for the F-DET1 early-out (T26).
+
+    Counting connected components called a continuous city one building, so good
+    far-skyline seeds were dropped (Cartagena ``auto_180_2000m``: 4 blobs). This walks the
+    mask's top edge instead: after a median filter (``min_width_frac`` of the width, so
+    1-2 px mask noise does not count), the edge is cut wherever it jumps by at least
+    ``min_step_frac`` of the image height or drops to no building, and every piece at least
+    ``min_width_frac`` wide is a building. Towers side by side give one piece each, a sloped
+    roof one. Never less than the old component count.
+    """
+    import cv2  # noqa: PLC0415
+    from scipy.ndimage import median_filter  # noqa: PLC0415
+
+    m = np.asarray(mask) > 0
+    if m.ndim != 2 or not m.any():
+        return 0
+    h_img, w_img = m.shape
+    has = m.any(axis=0)
+    prof = np.where(has, h_img - m.argmax(axis=0), 0).astype(float)
+    k = max(3, int(min_width_frac * w_img)) | 1
+    prof = median_filter(prof, size=k, mode="nearest")
+    cut = np.abs(np.diff(prof)) >= min_step_frac * h_img
+    cut |= (prof[1:] == 0) != (prof[:-1] == 0)
+    bounds = np.concatenate([[0], np.flatnonzero(cut) + 1, [w_img]])
+    min_w = max(1, int(min_width_frac * w_img))
+    pieces = sum(1 for a, b in zip(bounds[:-1], bounds[1:], strict=True)
+                 if b - a >= min_w and prof[a:b].max() > 0)
+    n_components = cv2.connectedComponents(m.astype(np.uint8))[0] - 1
+    return max(pieces, n_components)
+
+
 def _smooth_matches_across_views(
     seed_view_rows: list[SeedViewRegistration],
     min_popularity_swap: int = 2,
@@ -1882,6 +1915,7 @@ __all__ = [
     '_register_views',
     '_smooth_matches_across_views',
     '_smooth_pano_matches_against_views',
+    '_count_skyline_buildings',
     '_multires_sam_instances',
     '_split_by_depth_discontinuity',
     '_multires_pano_refine',

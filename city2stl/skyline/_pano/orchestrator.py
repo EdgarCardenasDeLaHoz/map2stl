@@ -6,7 +6,6 @@ import logging
 from contextlib import nullcontext
 from pathlib import Path
 
-import cv2
 import numpy as np
 
 from city2stl.resources import free_gpu_cache
@@ -30,6 +29,7 @@ from ..streetview_io import _meta_location, _streetview_image, _streetview_metad
 from .capture import _capture_pano_views
 from .detect import (
     _build_and_detect_pano,
+    _count_skyline_buildings,
     _register_views,
     _smooth_matches_across_views,
     _smooth_pano_matches_against_views,
@@ -347,32 +347,33 @@ def _seed_multiview_registration(
         if not _is_auto:
             _user_seed_covs.append(_best_cov)
 
-        # F-DET1: blob-count early-out.
-        # Count cv2 connected building-mask components across the best 3 views
-        # (SegFormer already batched above = cache hits, ~1 ms each).
-        # If total blobs < threshold, the camera almost certainly isn't facing
-        # a skyline — skip the entire 30–60 s recovery+anchor+register chain.
-        _FDET1_MIN_BLOBS = 6
+        # F-DET1: building-count early-out.
+        # Count buildings (pieces of the building mask's top edge, cut at
+        # height steps; ``_count_skyline_buildings``) across the best 3 views
+        # (SegFormer already batched above = cache hits, ~1 ms each). If the
+        # total is below the threshold, the camera almost certainly isn't
+        # facing a skyline — skip the 30–60 s recovery+anchor+register chain.
+        # Counting connected components alone (before T26) read a continuous
+        # city as one blob and dropped good far-skyline seeds.
+        _FDET1_MIN_BUILDINGS = 6
         _top3_views = sorted(
             cached_views_for_seed,
             key=lambda _cv: _cv.get("sv_score", 0.0),
             reverse=True,
         )[:3]
-        _total_blobs = 0
+        _total_buildings = 0
         for _cv3 in _top3_views:
             _, _bm3 = _neural_sky_and_building_masks(_cv3["image"])
-            if _bm3 is not None and _bm3.any():
-                _n_labels, _ = cv2.connectedComponents(
-                    (_bm3 > 0).astype(np.uint8))
-                _total_blobs += max(0, _n_labels - 1)  # 0 is background
-        logger.info(f"[F-DET1] {seed.name}: building blobs (top-3 views) = {_total_blobs}")
-        if _total_blobs < _FDET1_MIN_BLOBS:
+            if _bm3 is not None:
+                _total_buildings += _count_skyline_buildings(_bm3)
+        logger.info(f"[F-DET1] {seed.name}: buildings (top-3 views) = {_total_buildings}")
+        if _total_buildings < _FDET1_MIN_BUILDINGS:
             logger.warning(f"[F-DET1] {seed.name}: EARLY-OUT — "
-                           f"{_total_blobs} blobs < {_FDET1_MIN_BLOBS}; "
+                           f"{_total_buildings} buildings < {_FDET1_MIN_BUILDINGS}; "
                            "no skyline detected, kept as bad example")
             view_rows.extend(_negative_seed_views(
                 seed, cached_views_for_seed,
-                reason=f"low building detection ({_total_blobs} blobs)"))
+                reason=f"low building detection ({_total_buildings} buildings)"))
             continue
 
         # Retrieve the effective pitch from the helper's output.
