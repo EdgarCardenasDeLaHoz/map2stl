@@ -602,10 +602,18 @@ class Google3DProvider:
         cache_key = make_cache_key(_NAMESPACE, north, south, east, west,
                                    extra={"dim": list(dim), "dem": dem is not None,
                                           "max_tiles": self._max_tiles})
+        # require_built is applied to a cache hit as to a fresh fetch, not put in the key:
+        # a raster cached by a require_built=False caller (the F-SKYBENCH truth reads)
+        # would otherwise reach a require_built=True caller as heights, and a key change
+        # would re-download (paid) every cached raster once.
         hit = read_array_cache(_NAMESPACE, cache_key)
         if hit is not None:
             arrays, _meta = hit
             raster = arrays.get("height")
+            if raster is not None and require_built and not _looks_built(raster, bbox):
+                logger.info("Google 3D Tiles: cached raster has no buildings; "
+                            "treating the area as outside coverage")
+                return _empty_result(dim)
             if raster is not None:
                 confidence = np.where(np.isnan(raster), 0.0,
                                       _CONFIDENCE).astype(np.float32)

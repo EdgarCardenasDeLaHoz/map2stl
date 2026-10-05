@@ -437,3 +437,18 @@ def test_api_key_read_from_map2stl_config(monkeypatch, tmp_path):
     (tmp_path / "map2stl" / "config.json").write_text(json.dumps({"google_maps_api_key": "k1"}))
     monkeypatch.setattr(g3d, "__file__", str(fake))
     assert g3d.get_api_key() == "k1"
+
+
+def test_cached_unbuilt_raster_respects_require_built(monkeypatch):
+    """A raster cached by a require_built=False caller (flat terrain) must not reach a
+    require_built=True caller as heights (T8)."""
+    import city2stl.height.providers.google_3d as g3d
+
+    flat = np.zeros((128, 128), np.float32)                 # bare terrain: no buildings
+    monkeypatch.setattr(g3d, "read_array_cache", lambda ns, key: ({"height": flat}, {}))
+    p = g3d.Google3DProvider(api_key="test")
+    bbox = (41.400, 41.390, 2.180, 2.170)
+    loose = p.fetch_heights(bbox, (128, 128), require_built=False)
+    assert np.array_equal(loose.raster, flat)               # the benchmark still gets it
+    strict = p.fetch_heights(bbox, (128, 128))
+    assert np.isnan(strict.raster).all()                    # treated as outside coverage
