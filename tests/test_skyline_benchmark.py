@@ -19,8 +19,8 @@ T = Affine((E - W) / WD, 0.0, W, 0.0, -(N - S) / H, N)
 
 def _cell_box(r0, r1, c0, c1):
     """Lon/lat box covering grid rows r0:r1, cols c0:c1."""
-    x0, y0 = T * (c0, r0)
-    x1, y1 = T * (c1, r1)
+    x0, y0 = T @ (c0, r0)
+    x1, y1 = T @ (c1, r1)
     return box(x0, y1, x1, y0)
 
 
