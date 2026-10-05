@@ -32,8 +32,6 @@ window.setupEventListeners = function setupEventListeners() {
     document.addEventListener('click', _onCollapsibleClick);
 
     // Control buttons
-    document.getElementById('loadRegionBtn')?.addEventListener('click', () => window.loadSelectedRegion?.());
-    document.getElementById('submitBtn')?.addEventListener('click', () => window.submitBoundingBox?.());
 
     window._setupBboxListeners?.();
 

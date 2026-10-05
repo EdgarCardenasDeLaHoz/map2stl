@@ -526,11 +526,6 @@ async function saveTilePath() {
 }
 .ctx-pill:hover { background: #2c2c2e; }
 .ctx-sub { color: var(--text-muted); }
-.magic-btn {
-  border: 0; border-radius: 999px; padding: 6px 14px; cursor: pointer; white-space: nowrap;
-  background: linear-gradient(90deg, #0a84ff, #5e5ce6); color: #fff; font-weight: 600; font-size: 13px;
-}
-.magic-btn[aria-busy="true"] { opacity: 0.6; cursor: progress; }
 .gear-btn {
   width: 32px; height: 32px; border-radius: 999px; border: 0; cursor: pointer;
   background: #1c1c1e; color: var(--text-muted); font-size: 16px;
@@ -552,11 +547,6 @@ async function saveTilePath() {
 .help-text { display: flex; flex-direction: column; min-width: 0; }
 .help-n { font-weight: 600; font-size: 13px; }
 .help-d { color: var(--text-muted); font-size: 12px; }
-
-/* Below ~1200 px the magic button shows its icon only (title keeps the name). */
-@media (max-width: 1199px) {
-  .hdr-btn-label { display: none; }
-}
 
 /* Keys modal overlay */
 .keys-overlay {
@@ -645,13 +635,6 @@ async function saveTilePath() {
   color: #ccc;
 }
 .keys-instructions p { margin: 4px 0; }
-
-.keys-code-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 6px 0;
-}
 
 .keys-code {
   flex: 1;

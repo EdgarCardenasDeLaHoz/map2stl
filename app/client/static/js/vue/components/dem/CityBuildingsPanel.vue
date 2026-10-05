@@ -413,18 +413,6 @@ function _emitPanelState() {
   }));
 }
 
-watch(
-  () => (window as any).appState?.osmCityData,
-  () => _syncRowsFromState(),
-  { immediate: true }
-);
-
-watch(
-  () => (window as any).appState?.selectedCityBuildingIndex,
-  (index) => { void _syncSelectedRow(typeof index === 'number' ? index : null); },
-  { immediate: true }
-);
-
 watch(searchText, () => {
   currentPage.value = 0;
 });

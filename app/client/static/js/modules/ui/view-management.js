@@ -285,22 +285,6 @@ window.deleteRegion = async function deleteRegion(index) {
 };
 
 // ---------------------------------------------------------------------------
-// loadSelectedRegion
-// ---------------------------------------------------------------------------
-
-/**
- * Apply the currently selected region's bbox to the map.
- */
-window.loadSelectedRegion = function loadSelectedRegion() {
-    const selectedRegion = window.appState.selectedRegion;
-    if (!selectedRegion) {
-        window.showToast?.('Please select a region first.', 'warning');
-        return;
-    }
-    window.showToast?.(`Region "${selectedRegion.name}" loaded!`, 'success');
-};
-
-// ---------------------------------------------------------------------------
 // loadSelectedRegionDem
 // ---------------------------------------------------------------------------
 
@@ -322,16 +306,6 @@ window.loadSelectedRegionDem = function loadSelectedRegionDem() {
 // saveCurrentRegion
 // ---------------------------------------------------------------------------
 
-/**
- * Save the current bounding box as a new named region via POST /api/regions.
- * @returns {Promise<void>}
- */
-/**
- * Show or hide the "Save drawn region" form under the region list. Shown when a
- * new box is drawn (focus on the name), hidden after a save or when an existing
- * region is picked, so the list has the sidebar's height the rest of the time.
- * @param {boolean} show
- */
 /**
  * Save the working box as a new region named `name` (in group `label`), then list and
  * select it. Called by the new-region card (modules/map/new-region.js::save).
@@ -384,23 +358,6 @@ window.saveCurrentRegion = async function saveCurrentRegion(opts = {}) {
         window.showToast?.('Could not save the region', 'error');
         return false;
     }
-};
-
-// ---------------------------------------------------------------------------
-// submitBoundingBox
-// ---------------------------------------------------------------------------
-
-/**
- * Submit the current bounding box: switches to Edit view and triggers DEM load.
- */
-window.submitBoundingBox = function submitBoundingBox() {
-    const boundingBox = window.getBoundingBox?.();
-    if (!boundingBox) {
-        window.showToast?.('Please draw a bounding box first!', 'warning');
-        return;
-    }
-    window.switchView?.('dem');
-    window.loadDEM?.();
 };
 
 // ---------------------------------------------------------------------------

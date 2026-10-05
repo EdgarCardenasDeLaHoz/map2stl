@@ -278,10 +278,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     });
 
     document.getElementById('floatingDrawBtn')?.addEventListener('click', activateDrawTool);
-    document.getElementById('startDrawBtn')?.addEventListener('click', () => {
-        activateDrawTool();
-        window.switchView?.('map');
-    });
     const _map = window.getMap?.();
     if (_map) {
         _map.on(L.Draw.Event.CREATED, (e) => {

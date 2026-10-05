@@ -379,6 +379,9 @@ import { useAppStore } from '../../stores/app';
 import { useUiModeStore } from '../../stores/uiMode';
 import { guideHref } from '../../../modules/ui/guide-links.js';
 import {
+  el as _el, val as _val, num, checked as _checked, setField as _setField, setChecked as _setChecked,
+} from '../../dom-fields';
+import {
   DEFAULT_BED, bboxDiagonalKm, defaultPieceMm, fillBedMmPerPx, formatGroundLength, modelScale,
   parseBedSize, piecesNeeded,
 } from '../../../modules/export/print-scale.js';
@@ -406,34 +409,13 @@ const emptyState = computed(() => {
 // Extrude inputs are plain DOM controls read by the vanilla modules; formTick
 // makes these computeds re-read them after any input/change inside the view.
 const formTick = ref(0);
-function _el(id: string) {
-  return document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
-}
-function _val(id: string): string | undefined {
-  return _el(id)?.value;
-}
+/** A positive number from a control, else `fallback`. */
 function _num(id: string, fallback: number): number {
-  const v = parseFloat(_val(id) ?? '');
-  return Number.isFinite(v) && v > 0 ? v : fallback;
-}
-function _checked(id: string): boolean {
-  return !!(_el(id) as HTMLInputElement | null)?.checked;
+  const v = num(id, NaN);
+  return v > 0 ? v : fallback;
 }
 function _bed() {
   return parseBedSize(_val('bedSizeSelect'), _val('bedCustomW'), _val('bedCustomH'));
-}
-function _setField(id: string, value: string) {
-  const el = _el(id) as HTMLInputElement | null;
-  if (!el || el.value === value) return;
-  el.value = value;
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-  el.dispatchEvent(new Event('change', { bubbles: true }));
-}
-function _setChecked(id: string, on: boolean) {
-  const el = _el(id) as HTMLInputElement | null;
-  if (!el || el.checked === on) return;
-  el.checked = on;
-  el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 const dem = computed(() => store.lastDemData as
@@ -730,7 +712,6 @@ function cancelExport() {
 .mdownload { width: 100%; padding: 10px 0; font-size: 14px; font-weight: 600; border-radius: 12px; margin-bottom: 8px; }
 .mchecks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 10px 0 4px; font-size: 12px; }
 .mchecks label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-.mmore { text-align: center; padding: 4px 8px 12px; }
 .city-layer-table { width: 100%; font-size: 12px; border-collapse: collapse; }
 .model-progress { margin-bottom: 0; }
 .model-scale-info { display: block; font-size: 11px; color: #9cc; margin-top: 2px; }

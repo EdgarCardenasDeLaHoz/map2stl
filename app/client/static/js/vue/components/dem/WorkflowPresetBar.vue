@@ -20,21 +20,3 @@ function apply(name: string) {
   (window as any).applyWorkflowPreset?.(name);
 }
 </script>
-<style scoped>
-.workflow-preset-bar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0 0 8px;
-}
-.workflow-preset-label {
-  font-size: 11px;
-  color: #aaa;
-  margin-right: 2px;
-}
-.workflow-preset-btn {
-  flex: 1;
-  font-size: 11px !important;
-  padding: 3px 6px !important;
-}
-</style>

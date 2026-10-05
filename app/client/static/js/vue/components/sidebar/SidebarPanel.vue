@@ -54,9 +54,6 @@
       <!-- Expanded table (expanded mode) -->
       <RegionListTable v-show="mode === 'expanded'" />
 
-      <!-- New region -->
-      <NewRegionSection />
-
     </div>
   </div>
 </template>
@@ -68,7 +65,6 @@ import { useAppStore } from '../../stores/app';
 import SidebarListView      from './SidebarListView.vue';
 import SidebarEditView      from './SidebarEditView.vue';
 import RegionListTable      from './RegionListTable.vue';
-import NewRegionSection     from './NewRegionSection.vue';
 
 const store = useAppStore();
 

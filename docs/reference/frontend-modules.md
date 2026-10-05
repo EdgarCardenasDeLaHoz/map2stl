@@ -135,7 +135,7 @@ flowchart LR
 
 | File | Key symbols | Purpose |
 |---|---|---|
-| `view-management.js` | `switchView`, `switchDemSubtab`, `setupDemSubtabs`, `saveCurrentRegion`, `deleteRegion`, `showNewRegionForm`, `renderSidebarTable`, `toggleBboxLayerVisibility`, `toggleDemSettingsPanel`, `_setSidebarViews`, `loadSelectedRegionDem` | Tabs and sub-tabs (`switchView` is null-safe for any view name); sidebar list/table view (the mode itself is `SidebarPanel.vue`'s); region delete (confirm → `DELETE /api/regions/{name}` → reload); show/hide region boxes on the map; "Load DEM ›" on the Explore map (clicks `#tabEdit` then `#loadDemBtn`) |
+| `view-management.js` | `switchView`, `switchDemSubtab`, `setupDemSubtabs`, `saveCurrentRegion`, `deleteRegion`, `renderSidebarTable`, `toggleBboxLayerVisibility`, `toggleDemSettingsPanel`, `_setSidebarViews`, `loadSelectedRegionDem` | Tabs and sub-tabs (`switchView` is null-safe for any view name); sidebar list/table view (the mode itself is `SidebarPanel.vue`'s); region delete (confirm → `DELETE /api/regions/{name}` → reload); show/hide region boxes on the map; "Load DEM ›" on the Explore map (clicks `#tabEdit` then `#loadDemBtn`) |
 | `app-setup.js` | `setupStackedLayers`, `loadAllLayers`, `setupAutoReload` | Init wiring; `loadAllLayers` uses `Promise.allSettled` |
 | `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset`, `setupAutoSave`, `_migratePreset` | Presets, auto-save, `PRESET_VERSION` migration, revert snapshot. Sends `projection.clip_valid_region` only |
 | `settings-compat.js` | `normalizeSettingsKeys` | Pure: renames legacy keys in saved region settings / presets (`projection.clip_nans` → `clip_valid_region`) before `applyAllSettings` reads them |
@@ -172,7 +172,7 @@ Under `app/client/static/js/vue/components/`. Store and bridge: [frontend.md](fr
 | `layout/` | `AppShell` (App), `MainHeader`, `MeshRegistrationModal` (AppShell) |
 | `shared/` | `CollapsibleSection`, `ToolSwitches` (DemSettingsPanel, ModelContainer) |
 | `dem/` (F-DESIGN, F-EDITPANEL) | `EditLayersPanel` (DemContainer), `LayerSettings` + `settings/SetRow` (DemSettingsPanel) |
-| `sidebar/` | `SidebarPanel` (App); `SidebarListView`, `SidebarEditView`, `RegionListTable`, `NewRegionSection` (SidebarPanel) |
+| `sidebar/` | `SidebarPanel` (App); `SidebarListView`, `SidebarEditView`, `RegionListTable` (SidebarPanel) |
 | `views/` | `ContentArea` (App); `MapContainer`, `DemContainer`, `ModelContainer` (ContentArea); `LandmarkSearch`, `EdgeLandmarkWarnings` (MapContainer, DemSettingsPanel); `PreflightPanel`, `ModelScorePanel` (ModelContainer) |
 | `dem/` | `DemSettingsPanel`, `CityBuildingsPanel` (DemContainer); in DemSettingsPanel: `WorkflowPresetBar`, `PresetsSection`, `ProjectionSection`, `FetchLayersSection`, `CityLandmarksSection`, `VisualizationSection`, `LayerViewSection`, `LayerDisplaySections`, `CompositeDemSection`, `MeshImportSection`, `PlateRegistrationSection`; in FetchLayersSection: `CityFetchProgress`, `DemSamplingInfo` |
 | `shared/` | `CollapsibleSection` (used throughout) |
