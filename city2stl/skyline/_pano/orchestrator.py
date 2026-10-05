@@ -13,7 +13,11 @@ from city2stl.resources import free_gpu_cache
 from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
 from .._core.height import aggregate_building_heights
-from .._core.segmentation import _neural_sky_and_building_masks, clear_neural_cache
+from .._core.segmentation import (
+    _neural_sky_and_building_masks,
+    clear_neural_cache,
+    skyline_column_share,
+)
 from .._core.timing import _StepTimer
 from .._core.types import BuildingRecord
 from .._region_render._draw import _negative_seed_views
@@ -34,6 +38,18 @@ from .elevated import elevated_estimates, measure_elevated_seed
 from .heading import _recover_anchor_offset, _recover_pano_heading
 
 logger = logging.getLogger(__name__)
+
+#: Pano screen, second measure (T35): a pano whose best view has a building meeting the sky in
+#: at least this share of its columns passes even below the building-coverage cut. A far skyline
+#: across water is a thin band: Boston's auto_270_1400m covers 4.3 % of the frame with a skyline
+#: in every column, and Benidorm's view across the bay 5-16 % with one in half of them. The
+#: rejected La Défense panos (no buildings) score 0-0.2 %, a tree-lined Madrid park 18 %.
+SKYLINE_COLUMNS_PASS = 0.40
+
+
+def _passes_pano_screen(coverage: float, column_share: float, cut: float) -> bool:
+    """Keep a pano with enough building pixels, or with a skyline across enough columns."""
+    return coverage >= cut or column_share >= SKYLINE_COLUMNS_PASS
 
 
 def _seed_multiview_registration(
@@ -217,13 +233,16 @@ def _seed_multiview_registration(
     # as Cartagena's weak one). Populated as user seeds are processed.
     _user_seed_covs: list[float] = []
 
-    def _best_building_coverage(views: list[dict]) -> float:
-        best = 0.0
+    def _best_building_coverage(views: list[dict]) -> tuple[float, float]:
+        """Best building-pixel share and best skyline-column share over the views."""
+        best = best_cols = 0.0
         for cv in views:
-            _, _bm = _neural_sky_and_building_masks(cv["image"])
+            _sm, _bm = _neural_sky_and_building_masks(cv["image"])
             if _bm is not None and _bm.size:
                 best = max(best, float(_bm.mean()))
-        return best
+                if _sm is not None:
+                    best_cols = max(best_cols, skyline_column_share(_sm, _bm))
+        return best, best_cols
 
     # Track resolved pano_ids to skip duplicates. Multiple auto-proposed seeds
     # (or user seeds at similar positions) often snap to the same Street View
@@ -305,16 +324,21 @@ def _seed_multiview_registration(
         #     don't transfer (Chicago's rich far-skyline autos sit at the
         #     same 8-10% as Cartagena's weak near one), so judge per
         #     region. Only good user seeds feed the baseline.
-        _best_cov = _best_building_coverage(cached_views_for_seed)
+        # A pano below the cut still passes when a building meets the sky
+        # across SKYLINE_COLUMNS_PASS of its columns: a far skyline across
+        # water is a thin band of the frame (T35).
+        _best_cov, _best_cols = _best_building_coverage(cached_views_for_seed)
         _is_auto = seed.name.startswith("auto")
         _cut = 0.05  # hard floor, all panos
         if _is_auto and _user_seed_covs:
             _cut = max(0.05, 0.35 * float(np.median(_user_seed_covs)))
         logger.info(f"[pano_screen] {seed.name}: building coverage "
-                    f"{_best_cov*100:.1f}% (reject < {_cut*100:.1f}%)")
-        if _best_cov < _cut:
+                    f"{_best_cov*100:.1f}% (reject < {_cut*100:.1f}%), skyline columns "
+                    f"{_best_cols*100:.0f}% (pass >= {SKYLINE_COLUMNS_PASS*100:.0f}%)")
+        if not _passes_pano_screen(_best_cov, _best_cols, _cut):
             logger.warning(f"[pano_screen] {seed.name}: BAD PANO — coverage "
-                           f"{_best_cov*100:.1f}% < {_cut*100:.1f}%; kept as bad "
+                           f"{_best_cov*100:.1f}% < {_cut*100:.1f}% and skyline columns "
+                           f"{_best_cols*100:.0f}% < {SKYLINE_COLUMNS_PASS*100:.0f}%; kept as bad "
                            f"example, no recovery/anchor/register/detect")
             view_rows.extend(_negative_seed_views(
                 seed, cached_views_for_seed, reason=(

@@ -574,6 +574,28 @@ def _neural_sky_and_building_masks(
         entry["building"] = building_mask
     return sky_mask, building_mask
 
+def skyline_column_share(sky_mask: np.ndarray, building_mask: np.ndarray,
+                         gap_px: int = 5) -> float:
+    """Share of image columns where a building meets the sky: the column has sky, and the first
+    non-sky pixel below the top of that sky is building (within ``gap_px`` rows, for the
+    unlabelled seam between the two masks).
+
+    The pano screen's second measure (T35, 2026-10-05). A far skyline across water is a thin
+    band, so its building *area* is small: Boston's Charles River view covers 4.3 % of the frame
+    but has a skyline in every column, while water, trees, a road or a wall with no sky above
+    score near 0.
+    """
+    h, w = sky_mask.shape
+    rows = np.arange(h)[:, None]
+    has_sky = sky_mask.any(axis=0)
+    top = np.argmax(sky_mask, axis=0)                     # first sky row per column
+    below = ~sky_mask & (rows >= top[None, :])
+    has_edge = below.any(axis=0)
+    edge = np.argmax(below, axis=0)                       # first non-sky row under it
+    near = np.clip(edge[None, :] + np.arange(gap_px)[:, None], 0, h - 1)
+    building_at_edge = building_mask[near, np.arange(w)[None, :]].any(axis=0)
+    return float((has_sky & has_edge & building_at_edge).mean())
+
 def _neural_water_mask(image_rgb: np.ndarray) -> np.ndarray | None:
     """Return the cached water-class boolean mask for this image.
 

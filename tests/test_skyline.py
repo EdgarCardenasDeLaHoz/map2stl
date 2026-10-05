@@ -381,3 +381,59 @@ def test_fill_enclosed_holes_with_building_in_top_left_corner():
     assert (out[45:55, 55:65] == 255).all()      # the enclosed hole is filled
     assert (out[:30, 31:] == 0).all()            # open sky stays sky
     assert (out[:, :30] == 255).all()
+
+
+# ── Pano screen: skyline columns (T35, 2026-10-05) ───────────────────────────
+
+def _far_skyline_masks(h=120, w=200, band=(50, 55), x_bld=(0, 200)):
+    """Sky above row ``band[0]``, a thin building band to ``band[1]`` over ``x_bld``, water below."""
+    sky = np.zeros((h, w), bool)
+    sky[:band[0]] = True
+    bld = np.zeros((h, w), bool)
+    bld[band[0]:band[1], x_bld[0]:x_bld[1]] = True
+    sky[band[0]:band[1], :x_bld[0]] = True       # no building there: the sky reaches the water
+    sky[band[0]:band[1], x_bld[1]:] = True
+    return sky, bld
+
+
+def test_skyline_column_share_far_skyline_is_a_thin_band_in_every_column():
+    from city2stl.skyline._core.segmentation import skyline_column_share
+
+    sky, bld = _far_skyline_masks()
+    assert bld.mean() < 0.05                     # under the 5 % building-coverage floor
+    assert skyline_column_share(sky, bld) == 1.0
+
+
+def test_skyline_column_share_counts_only_columns_with_a_building_under_the_sky():
+    from city2stl.skyline._core.segmentation import skyline_column_share
+
+    sky, bld = _far_skyline_masks(x_bld=(0, 100))
+    assert skyline_column_share(sky, bld) == 0.5     # the bay half: sky meets water
+    sky[:, 150:] = False                             # a tree in front, no sky in those columns
+    assert skyline_column_share(sky, bld) == 0.5
+    sky2, bld2 = _far_skyline_masks()
+    sky2[48:50] = False                              # a 2-row unlabelled seam under the sky
+    assert skyline_column_share(sky2, bld2) == 1.0
+    sky2[40:50] = False                              # a 10-row gap (trees, haze) is not a skyline
+    assert skyline_column_share(sky2, bld2) == 0.0
+
+
+def test_skyline_column_share_without_sky_or_buildings_is_zero():
+    from city2stl.skyline._core.segmentation import skyline_column_share
+
+    h, w = 60, 80
+    assert skyline_column_share(np.zeros((h, w), bool), np.ones((h, w), bool)) == 0.0   # a wall
+    sky = np.zeros((h, w), bool)
+    sky[:30] = True
+    assert skyline_column_share(sky, np.zeros((h, w), bool)) == 0.0                 # open water
+
+
+def test_pano_screen_passes_a_far_skyline_below_the_coverage_cut():
+    from city2stl.skyline._pano.orchestrator import SKYLINE_COLUMNS_PASS, _passes_pano_screen
+
+    assert _passes_pano_screen(0.043, 1.0, 0.05)          # Boston's Charles River view
+    assert _passes_pano_screen(0.159, 0.51, 0.165)        # Benidorm across the bay
+    assert not _passes_pano_screen(0.002, 0.0, 0.05)      # La Défense, no buildings
+    assert not _passes_pano_screen(0.073, 0.18, 0.155)    # Madrid park behind trees
+    assert _passes_pano_screen(0.127, 0.04, 0.082)        # coverage alone still passes
+    assert not _passes_pano_screen(0.01, SKYLINE_COLUMNS_PASS - 0.01, 0.05)
