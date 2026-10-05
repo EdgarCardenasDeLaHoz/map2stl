@@ -9,6 +9,12 @@ from pathlib import Path
 
 import pytest
 
+# One BLAS / OpenMP thread per test process, set before numpy loads (an explicit setting
+# wins). openblas64 starts 12 threads per process, so 6 xdist workers ran 30-41 threads
+# each on 12 hardware threads; the workers inherit this from the controlling process.
+for _var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_var, "1")
+
 # Enable test mode before importing the app
 os.environ["MAP2STL_TEST_MODE"] = "1"
 
