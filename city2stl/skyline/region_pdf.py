@@ -68,6 +68,7 @@ from .region_data import (
     _load_region_bbox,
     _load_site_anchor_overrides,
     _load_site_drive_pano_recovery_anchor,
+    _load_site_elevated_seeds,
     _load_site_max_plausible_height_m,
     _load_site_negative_seeds,
     _load_site_pano_only_pdf,
@@ -399,6 +400,7 @@ def run_region_pdf_report(
 
     anchor_overrides = _load_site_anchor_overrides(region_name)
     negative_seeds = _load_site_negative_seeds(region_name)
+    elevated_seeds = _load_site_elevated_seeds(region_name)
 
     # Auto-replace bad seeds: when a user-supplied seed snaps to a
     # location with no clear skyline (Street View "no buildings in any
@@ -406,8 +408,10 @@ def run_region_pdf_report(
     # Skips seeds listed in ``negative_seeds`` (intentionally bad — we'd
     # waste a productive auto-proposal slot) and seeds with a manual
     # ``anchor_offsets_deg`` (the override is location-specific; swapping
-    # would silently invalidate the user's calibration).
-    skip_replace = set(negative_seeds or ()) | set((anchor_overrides or {}).keys())
+    # would silently invalidate the user's calibration). Drone seeds (``elevated_seeds``) are
+    # kept too: the screen judges street views.
+    skip_replace = (set(negative_seeds or ()) | set((anchor_overrides or {}).keys())
+                    | set(elevated_seeds))
     with _timed("Auto-replace bad seeds"):
         seeds, seed_substitutions = _auto_replace_bad_seeds(
             seeds, auto_points, screened, skip_names=skip_replace)
@@ -449,6 +453,12 @@ def run_region_pdf_report(
     if negative_seeds:
         logger.info(f"[negative_seeds] {sorted(negative_seeds)}")
     logger.info(f"[max_plausible_height_m] {max_plausible_height_m:.0f}")
+    elevated_state = None
+    if elevated_seeds:
+        logger.info(f"[elevated_seeds] {sorted(elevated_seeds)}")
+        from ._pano.elevated import ground_layers  # noqa: PLC0415
+        with _timed("OSM ground layers (elevated seeds)"):
+            elevated_state = ground_layers(osm_data, bbox, region_name)
     with _timed("Multiview registration (per-seed)"):
         seed_views, building_heights, pano_results = _seed_multiview_registration(
             seeds, building_records, api_key,
@@ -460,6 +470,8 @@ def run_region_pdf_report(
             pano_recovery_state=pano_recovery_state,
             timer=timer,
             web_image_cache=web_image_cache or None,
+            elevated_seeds=elevated_seeds,
+            elevated_state=elevated_state,
         )
 
     # Load surveyed ground-truth heights from sites/<region>.json if present.

@@ -198,6 +198,15 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
   - Why kept: the IoU objective is multi-modal when buildings surround the seed; peninsula seeds have a 180° twin.
   - Drop one only after measuring (dropping seed_1's on Cartagena cost 54 matched buildings).
 - `negative_seeds` — excluded from aggregation, still rendered (Cartagena: `["seed_2", "seed_3"]`).
+- `elevated_seeds` — drone Photo Spheres (Cartagena: `["seed_1", "seed_4", "seed_5"]`), measured
+  footprint first (`_pano/elevated.py`, F-DET6) instead of by the street-level path:
+  - camera from the waterline, then its position (waterline over ±600 m, parks and streets
+    nearby); seed_4's recorded position was ~360 m off;
+  - every OSM footprint in view measured with Depth Anything; seeds fused (the nearer,
+    better-seen view wins a disagreement) before the usual aggregation.
+  - Why: the street path assumes a camera 1.7 m up, so a drone view's heights are wrong by
+    construction; the screens and F-DET1 also judge street views and dropped good drone seeds.
+    Anchor offsets don't apply to these seeds.
 - `max_plausible_height_m` (default 300) — bounds the glass-facade contour override and the y-consistency gate.
   Set just above the region's tallest tower (Cartagena 200).
 - Opt-ins: `use_satellite_footprints`, `use_cross_view_scoring`, `use_pano_coastline_recovery`,

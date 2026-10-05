@@ -29,6 +29,7 @@ from .detect import (
     _smooth_matches_across_views,
     _smooth_pano_matches_against_views,
 )
+from .elevated import elevated_estimates, measure_elevated_seed
 from .heading import _recover_anchor_offset, _recover_pano_heading
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,8 @@ def _seed_multiview_registration(
     pano_recovery_state: dict | None = None,
     timer: _StepTimer | None = None,
     web_image_cache: dict[str, np.ndarray] | None = None,
+    elevated_seeds: set[str] | None = None,
+    elevated_state: dict | None = None,
 ) -> tuple[list[SeedViewRegistration], list[dict], list[StitchedPanoResult]]:
     """Capture a full 360° spin (every spin_step_deg) at each seed location.
 
@@ -67,6 +70,10 @@ def _seed_multiview_registration(
       _recover_anchor_offset     — joint IoU optimization across all views
       _register_views            — Pass 2: per-view registration + heights
       _build_and_detect_pano     — Pass 3: 360° pano stitch + matching
+
+    Seeds in ``elevated_seeds`` (drone Photo Spheres, the site's ``elevated_seeds``) skip all
+    of that: ``_pano/elevated.py`` measures every OSM footprint from the waterline-fitted camera
+    (F-DET6), using ``elevated_state`` (OSM coastline, water, roads and green).
     """
     # ── Step 1: resolve every seed to a renderable pano position. ──────────
     # Cached to keep multi-run results reproducible (the Static API's
@@ -180,6 +187,7 @@ def _seed_multiview_registration(
     view_rows: list[SeedViewRegistration] = []
     pano_results: list[StitchedPanoResult] = []
     all_estimates: list = []
+    elevated: list = []          # ElevatedSeed per drone seed, fused after the loop
 
     def _buildings_near_seed(seed_lat: float, seed_lon: float, radius_m: float = 4500.0):
         mlat = M_PER_DEG_LAT
@@ -238,6 +246,25 @@ def _seed_multiview_registration(
                 seed, api_key, spin_headings, is_photosphere, timer=timer,
                 web_image_cache=web_image_cache,
             )
+
+        # Elevated (drone) seed: footprint-first measurement from the waterline-fitted camera
+        # instead of the street-level chain below, which assumes a camera 1.7 m up. Runs before
+        # the screens: they judge street views (F-DET1 dropped the good drone seed_4).
+        if elevated_seeds and seed.name in elevated_seeds and elevated_state:
+            with _phase("elevated seed (F-DET6 footprint-first)"):
+                try:
+                    got = measure_elevated_seed(seed, prefetch, effective_pitch, spin_step_deg,
+                                                seed_buildings, elevated_state)
+                except Exception as exc:          # never lose the run to the new path
+                    logger.warning(f"[elevated] {seed.name}: failed ({exc!r})")
+                    got = None
+            if got is not None:
+                elevated.append(got)
+                view_rows.extend(got.view_rows)
+                pano_results.append(got.pano_result)
+                continue
+            logger.warning(f"[elevated] {seed.name}: no waterline fit; street-level path instead")
+
         if not cached_views_for_seed:
             continue
 
@@ -441,6 +468,11 @@ def _seed_multiview_registration(
         else:
             logger.info(f"[F-SKY1] floor-period hits: 0/{len(all_estimates)} "
                         f"estimates (no facade locked a period)")
+
+    if elevated:
+        # Across drone seeds the nearer, better-seen reading wins a disagreement
+        # (footprint_detect.fuse_heights); only the kept readings reach the aggregate.
+        all_estimates.extend(elevated_estimates(elevated))
 
     agg = aggregate_building_heights(all_estimates) if all_estimates else []
     return view_rows, agg, pano_results

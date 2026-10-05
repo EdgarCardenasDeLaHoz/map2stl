@@ -104,7 +104,6 @@ def load_seed_pano(region: str, seed_name: str, step_deg: float = 30.0) -> Pano:
     import json
     from pathlib import Path
 
-    from ._core.pano import stitch_pano_views
     from ._pano.capture import _capture_pano_views
     from .region_data import _load_site_seed_urls
     from .region_types import SkylinePoint
@@ -130,13 +129,22 @@ def load_seed_pano(region: str, seed_name: str, step_deg: float = 30.0) -> Pano:
     headings = tuple(float(x) for x in np.arange(0.0, 360.0, step_deg))
     prefetch, eff_pitch, _cached = _capture_pano_views(
         seed, _resolve_api_key(), headings, is_photosphere=is_photosphere)
-    views = [v for v in prefetch if v.get("image") is not None]
+    return pano_from_views(seed_name, lat, lon, prefetch, fov, step_deg, eff_pitch)
+
+
+def pano_from_views(name: str, lat: float, lon: float, views: list[dict], fov_deg: float,
+                    step_deg: float, pitch_deg: float) -> Pano:
+    """Stitch captured spin views (``_capture_pano_views``' prefetch list: dicts with
+    ``image`` and ``geo_heading``) and their ADE20K labels into a :class:`Pano`."""
+    from ._core.pano import stitch_pano_views
+
+    views = [v for v in views if v.get("image") is not None]
     rgb, frame = stitch_pano_views([{"image": v["image"], "geo_heading": v["geo_heading"]}
-                                    for v in views], fov, step_deg)
-    labels = _stitch_labels(views, fov, step_deg)
+                                    for v in views], fov_deg, step_deg)
+    labels = _stitch_labels(views, fov_deg, step_deg)
     w_view = views[0]["image"].shape[1]
-    f = 0.5 * w_view / math.tan(math.radians(fov) / 2)
-    return Pano(seed_name, lat, lon, rgb, labels, np.asarray(frame, float), f, float(eff_pitch))
+    f = 0.5 * w_view / math.tan(math.radians(fov_deg) / 2)
+    return Pano(name, lat, lon, rgb, labels, np.asarray(frame, float), f, float(pitch_deg))
 
 
 # --------------------------------------------------------------------------- waterline
@@ -268,20 +276,27 @@ class GroundMap:
     half_m: float
     res_m: float
 
+    def _land(self, ex, ny):
+        n = self.codes.shape[0]
+        return self.codes[np.clip(((self.half_m - ny) / self.res_m).astype(int), 0, n - 1),
+                          np.clip(((ex + self.half_m) / self.res_m).astype(int), 0, n - 1)] != G_WATER
+
     def shore_distances(self, dx_m: float = 0.0, dy_m: float = 0.0, max_m: float = 4000.0,
-                        step_m: float = 2.0) -> np.ndarray:
+                        step_m: float = 12.0) -> np.ndarray:
         """Like :func:`shore_distance_table` for a camera ``dx_m`` east and ``dy_m`` north of
         the map centre: distance to the first non-water cell per 0.1-deg bearing (``inf``:
-        none within ``max_m``). Within a cell of the vector table; fast enough for a grid of
-        positions."""
-        n = self.codes.shape[0]
+        none within ``max_m``). Rays are sampled every ``step_m``, then the first crossing is
+        refined to the map's cell size: about 0.1 s, fast enough for a grid of positions (a
+        strip of land narrower than ``step_m`` can be stepped over)."""
         r = np.arange(5.0, max_m, step_m)
         t = np.radians(np.arange(N_BEARINGS) * BEARING_BIN_DEG)
-        ex = dx_m + np.sin(t)[:, None] * r[None, :]
-        ny = dy_m + np.cos(t)[:, None] * r[None, :]
-        land = self.codes[np.clip(((self.half_m - ny) / self.res_m).astype(int), 0, n - 1),
-                          np.clip(((ex + self.half_m) / self.res_m).astype(int), 0, n - 1)] != G_WATER
-        return np.where(land.any(axis=1), r[land.argmax(axis=1)], np.inf)
+        s, c = np.sin(t)[:, None], np.cos(t)[:, None]
+        land = self._land(dx_m + s * r[None, :], dy_m + c * r[None, :])
+        hit = land.any(axis=1)
+        first = r[land.argmax(axis=1)]
+        fine = first[:, None] - step_m + np.arange(1, int(step_m / self.res_m) + 1) * self.res_m
+        land2 = self._land(dx_m + s * fine, dy_m + c * fine)
+        return np.where(hit, fine[np.arange(len(fine)), land2.argmax(axis=1)], np.inf)
 
 
 def waterline_position_scan(pano: Pano, pose: PanoPose, gmap: GroundMap, search_m: float = 150.0,
@@ -293,16 +308,98 @@ def waterline_position_scan(pano: Pano, pose: PanoPose, gmap: GroundMap, search_
     grid = np.arange(-search_m, search_m + 1e-6, step_m)
     hs = pose.camera_h_m * np.exp(np.linspace(math.log(0.6), math.log(1.6), 25))
     offs = pose.offset_deg + np.arange(-3.0, 3.01, 0.25)
-    mis = np.full((grid.size, grid.size), np.nan)
+    mis, best = _waterline_grid(pano, gmap, grid, grid, offs, hs)
+    return grid, mis, best
+
+
+def _waterline_grid(pano: Pano, gmap: GroundMap, xs, ys, offs, hs):
+    """Waterline misfit at every (x east, y north) camera position, heading and height refit
+    at each: ``(misfit[i_y, j_x], (dx, dy, PanoPose) of the best)``."""
+    mis = np.full((len(ys), len(xs)), np.nan)
     best = None
-    for i, dy in enumerate(grid):
-        for j, dx in enumerate(grid):
+    for i, dy in enumerate(ys):
+        for j, dx in enumerate(xs):
             p = fit_pose_from_waterline(pano, gmap.shore_distances(dx, dy), heights_m=hs,
                                         offsets_deg=offs)
             mis[i, j] = p.misfit_deg
             if best is None or p.misfit_deg < best[2].misfit_deg:
                 best = (float(dx), float(dy), p)
-    return grid, mis, best
+    return mis, best
+
+
+@dataclass(frozen=True)
+class PositionFit:
+    dx_m: float                  # camera east of the recorded position
+    dy_m: float                  # north
+    pose: PanoPose               # heading offset, camera height, pitch there
+    waterline_at_seed_deg: float
+    waterline_deg: float         # waterline misfit at the waterline fit
+    ground_at_waterline: float   # parks/streets/water score there
+    ground: float                # and at the final position
+    source: str                  # recorded, waterline, ground or waterline+ground
+
+
+def fit_camera_position(pano: Pano, pose: PanoPose, gmap: GroundMap, search_m: float = 600.0,
+                        min_gain: float = 0.3, ground_m: float = 80.0,
+                        min_ground_gain: float = 0.01, ground_max_misfit_deg: float = 0.3,
+                        d_range=(30.0, 1500.0)) -> PositionFit:
+    """Where the drone was. A Photo Sphere's recorded position can be where the pilot stood:
+    seed_4 (2026-10-05) sat ~360 m from where its waterline fits.
+
+    1. The waterline misfit over +-``search_m`` (100 m steps, then 20 m around the best),
+       heading (+-6 deg) and height (x0.5-2) refit at each position. The camera moves only when
+       the misfit drops by ``min_gain`` of its value at the recorded position (seed_4: 0.68 ->
+       0.18 deg; seed_5: lowest at its recorded position; seed_1: flat, 1.1 deg).
+    2. Parks, streets and water (the score of :func:`fit_position_from_ground`) within
+       +-``ground_m`` of that position, offset +-1.5 deg, height +-15 %: they pin the position
+       along the shore, where the waterline is loose. Only after a good waterline fit (misfit
+       under ``ground_max_misfit_deg``), kept when the score gains ``min_ground_gain`` and the
+       waterline misfit there stays within 1.5x its best. seed_4: 0.395 -> 0.430 at 57 m, its
+       tagged towers then landed on their buildings and the OSM-tag error fell from 113 to
+       33 m; seed_1 (waterline 1.14 deg, flat) moved 64 m on the ground score alone and its
+       OSM-tag error rose from 11-16 to 34 m, hence the waterline condition.
+
+    ``gmap`` must reach ``search_m`` + 4 km from the recorded position (``ground_map`` with
+    ``half_m`` ~4800 and ``res_m`` 3).
+    """
+    hs = pose.camera_h_m * np.exp(np.linspace(math.log(0.5), math.log(2.0), 21))
+    offs = pose.offset_deg + np.arange(-6.0, 6.01, 0.5)
+    at_seed = fit_pose_from_waterline(pano, gmap.shore_distances(0.0, 0.0), heights_m=hs,
+                                      offsets_deg=offs)
+    coarse = np.arange(-search_m, search_m + 1e-6, 100.0)          # 1 deg, 11 heights: 4x faster
+    _, (bx, by, bp) = _waterline_grid(pano, gmap, coarse, coarse, offs[::2], hs[::2])
+    fine = np.arange(-100.0, 100.01, 20.0)
+    _, (bx, by, bp) = _waterline_grid(pano, gmap, bx + fine, by + fine, offs, hs)
+    if bp.misfit_deg > (1.0 - min_gain) * at_seed.misfit_deg:
+        bx, by, bp = 0.0, 0.0, at_seed
+    source = "recorded" if (bx, by) == (0.0, 0.0) else "waterline"
+    if bp.misfit_deg > ground_max_misfit_deg:
+        return PositionFit(float(bx), float(by), bp, at_seed.misfit_deg, bp.misfit_deg, float("nan"),
+                           float("nan"), source)
+    sc = _GroundScorer(pano, bp, gmap, d_range, 3)
+    ex, ny, obs = sc.project(bp.offset_deg, bp.camera_h_m)
+    g0 = sc.score(ex, ny, obs, bx, by)
+    best = (g0, bx, by, bp.offset_deg, bp.camera_h_m)
+    steps = np.arange(-ground_m, ground_m + 1e-6, 10.0)
+    for off in bp.offset_deg + np.arange(-1.5, 1.51, 0.75):
+        for h in bp.camera_h_m * np.array([0.9, 1.0, 1.1]):
+            ex, ny, obs = sc.project(off, h)
+            for ddx in steps:
+                for ddy in steps:
+                    s = sc.score(ex, ny, obs, bx + ddx, by + ddy)
+                    if s > best[0]:
+                        best = (s, bx + ddx, by + ddy, float(off), float(h))
+    g, gx, gy, goff, gh = best
+    fx, fy, fp, gf = bx, by, bp, g0
+    if g >= g0 + min_ground_gain:
+        there = fit_pose_from_waterline(pano, gmap.shore_distances(gx, gy), heights_m=hs,
+                                        offsets_deg=offs)
+        if there.misfit_deg <= 1.5 * bp.misfit_deg:
+            fx, fy, gf = gx, gy, g
+            fp = PanoPose(goff % 360.0, gh, bp.pitch_fix_deg, there.misfit_deg, bp.n_cols)
+            source = "waterline+ground" if source == "waterline" else "ground"
+    return PositionFit(float(fx), float(fy), fp, at_seed.misfit_deg, bp.misfit_deg, g0,
+                       float(gf), source)
 
 
 @dataclass(frozen=True)
@@ -513,15 +610,19 @@ def _local(lat0: float, lon0: float, ring: np.ndarray) -> np.ndarray:
 
 
 def _column_run(labels_col: np.ndarray, depth_col, start_row: int, near_lim: float,
-                stop: float, gap_px: int):
+                stop_ratio: float, floor: float, gap_px: int, local_px: int = 8):
     """One building's rows in one column: ``(top, bottom, edge)`` or None.
 
     Going up from ``start_row``: skip building rows nearer than this building (inverse depth
     above ``near_lim``: something in front that the occlusion line missed) and up to ``gap_px``
     other rows (a palm, a lamp post); the first building row at this building's depth is its
-    visible bottom. Then follow building rows while the inverse depth stays at or above
-    ``stop`` (below it: the surface behind). ``edge`` says what ends the run: sky, depth (a
-    building behind), other (a label that is neither), or image (the top row).
+    visible bottom. Then follow building rows until the inverse depth drops below
+    ``stop_ratio`` x the median of the ``local_px`` rows just below (a step to the surface
+    behind) or below ``floor``. Against the local level, not the base: Depth Anything lets a
+    tall facade drift 10-20 % farther towards its top, and a stop at 0.92 x the base level cut
+    the tallest towers short (2026-10-05: Ravello, tag 160 m, read 17 m); a roofline is a step
+    over a few rows. ``edge`` says what ends the run: sky, depth (a building behind), other (a
+    label that is neither), or image (the top row).
     """
     is_b = np.isin(labels_col, BUILDING_CLASSES)
     y, gap = int(start_row), 0
@@ -539,7 +640,11 @@ def _column_run(labels_col: np.ndarray, depth_col, start_row: int, near_lim: flo
     if y < 0:
         return None
     bottom = y
-    while y - 1 >= 0 and is_b[y - 1] and (depth_col is None or depth_col[y - 1] >= stop):
+    while y - 1 >= 0 and is_b[y - 1]:
+        if depth_col is not None:
+            d = depth_col[y - 1]
+            if d < floor or d < stop_ratio * float(np.median(depth_col[y:min(bottom, y + local_px - 1) + 1])):
+                break
         y -= 1
     if y == 0:
         edge = "image"
@@ -573,7 +678,7 @@ def fuse_heights(by_seed: dict, agree: float = 0.25) -> dict:
     for seed, ms in by_seed.items():
         for m in ms:
             d = m if isinstance(m, dict) else m.__dict__
-            rows.setdefault(int(d["footprint"]), []).append((seed, d, measurement_weight(d)))
+            rows.setdefault(d["footprint"], []).append((seed, d, measurement_weight(d)))
     out = {}
     for fp, got in rows.items():
         got.sort(key=lambda r: -r[2])
@@ -612,7 +717,8 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
                        min_cols: int = 6, core: float = 0.6, depth_ratio: float = 0.7,
                        base_window_px: int = 6, near_ratio: float = 1.35,
                        max_step: float = 0.92, gap_px: int = 8,
-                       min_visible_frac: float = 0.25, min_run_px: int = 3) -> list[Measured]:
+                       min_visible_frac: float = 0.25, min_run_px: int = 3,
+                       local_px: int = 40) -> list[Measured]:
     """Measure every footprint in view, nearest first (see module docstring).
 
     ``depth``: Depth Anything V2 inverse depth (closer = higher) on the pano grid, or None
@@ -625,10 +731,11 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
     - nearer surfaces (above ``near_ratio`` x the reference) are skipped, so a building the
       occlusion line missed is not measured as this one (2026-10-04: a 620 m building read as
       a footprint 887 m away);
-    - the run stops where the depth falls to the midpoint between the reference and the level
-      of the next OSM footprint behind it in that column, clipped to ``depth_ratio`` ..
-      ``max_step`` x the reference (a fixed 0.7 only separated a tower 1.4x farther; the rows
-      of Bocagrande are 10-30 % apart);
+    - the run stops at a step down to the midpoint between this building's level and that of
+      the next OSM footprint behind it in that column, as a ratio clipped to ``depth_ratio`` ..
+      ``max_step`` (a fixed 0.7 only separated a tower 1.4x farther; the rows of Bocagrande
+      are 10-30 % apart), measured against the run's own last rows (see :func:`_column_run`)
+      and never below ``depth_ratio`` x the reference;
     - a building whose base is hidden and of which under ``min_visible_frac`` of the
       base-to-top height shows is dropped: the rows just above a nearer roof are as likely the
       building behind it;
@@ -702,7 +809,7 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
                 y0 = int(round(min(base, occ[x] - 1))) - 1
                 if y0 >= H or y0 < 1:
                     continue
-                near_lim, stop = np.inf, -np.inf
+                near_lim, ratio, floor = np.inf, 0.0, -np.inf
                 if dz is not None:
                     ref = None
                     if occ[x] - 1 >= base - 0.5:          # base not behind a measured roof
@@ -715,14 +822,14 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
                         else:
                             ref = level
                     near_lim = near_ratio * ref
-                    stop = depth_ratio * ref
+                    ratio, floor = depth_ratio, depth_ratio * ref
                     if model is not None:
                         k = np.searchsorted(behind[x], dn * 1.08)
                         if k < len(behind[x]):            # next OSM footprint behind, this column
-                            far = (model[0] / behind[x][k] + model[1]) * ref / level
-                            stop = min(max(0.5 * (ref + far), depth_ratio * ref), max_step * ref)
+                            far = (model[0] / behind[x][k] + model[1]) / level
+                            ratio = min(max(0.5 * (1.0 + far), depth_ratio), max_step)
                 got = _column_run(pano.labels[:, x], None if dz is None else dz[:, x], y0,
-                                  near_lim, stop, gap_px)
+                                  near_lim, ratio, floor, gap_px, local_px)
                 if got is None or got[2] == "image" or got[1] - got[0] + 1 < min_run_px:
                     continue
                 t, bot, edge = got

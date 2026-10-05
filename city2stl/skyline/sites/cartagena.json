@@ -24,6 +24,7 @@
     "seed_5": 320.0
   },
   "negative_seeds": ["seed_2", "seed_3"],
+  "elevated_seeds": ["seed_1", "seed_4", "seed_5"],
   "viewpoints": [
     {
       "name": "baluarte_santo_domingo",

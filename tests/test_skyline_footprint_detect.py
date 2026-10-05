@@ -249,3 +249,18 @@ def test_fusion_averages_agreeing_seeds_and_outvotes_a_far_misread():
     close = dict(near, height_m=28.0, dist_m=700.0, base_visible=False, visible_frac=0.6)
     got = fd.fuse_heights({"seed_1": [near], "seed_5": [far], "seed_9": [close]})[7]
     assert 26.0 < got["height_m"] < 27.0 and got["disputed"] and got["used"] == ["seed_1", "seed_9"]
+
+
+def test_a_tall_facade_that_drifts_farther_is_followed_to_its_roof():
+    """Depth Anything lets a tall tower's facade read 15 % farther at the top than at the base;
+    against the base level the stop at 0.92 cut it short (Ravello, tag 160 m, read 17 m)."""
+    labels, depth, fps = _scene([("tower", 0.0, 400.0, 160.0, 10.0, True),
+                                 ("behind", 0.0, 440.0, 20.0, 12.0, True)])   # 10 % farther, hidden
+    col = np.flatnonzero((labels == BUILDING).any(axis=0) & (np.abs(np.arange(W) - W // 2) < 6))
+    rows = np.flatnonzero(labels[:, W // 2] == BUILDING)
+    ramp = np.linspace(0.85, 1.0, rows.size)                                    # top .. base
+    depth[np.ix_(rows, col)] *= ramp[:, None]
+    pano, depth = _pano(labels, depth, offset=180.0)
+    got = {m.name: m for m in fd.measure_footprints(pano, fd.PanoPose(0.0, 60.0, 0.0, 0.0, 0), fps,
+                                                    depth=depth, min_cols=4)}
+    assert got["tower"].height_m == pytest.approx(160.0, abs=8.0)

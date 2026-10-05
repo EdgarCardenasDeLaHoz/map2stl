@@ -562,6 +562,15 @@ def _load_site_negative_seeds(region_name: str) -> set[str]:
     raw = _read_site_config(region_name).get("negative_seeds")
     return {str(x) for x in raw} if isinstance(raw, list) else set()
 
+def _load_site_elevated_seeds(region_name: str) -> set[str]:
+    """Seed names listed in ``elevated_seeds`` are drone Photo Spheres, tens of metres over the
+    water. They are measured footprint first from the waterline-fitted camera
+    (``_pano/elevated.py``, F-DET6) instead of by the street-level path, which assumes a
+    camera 1.7 m up; a seed whose waterline does not fit falls back to the street path.
+    """
+    raw = _read_site_config(region_name).get("elevated_seeds")
+    return {str(x) for x in raw} if isinstance(raw, list) else set()
+
 def _load_site_drive_pano_recovery_anchor(region_name: str) -> bool:
     """Second-stage opt-in: even with ``use_pano_coastline_recovery``
     enabled, the recovered offset only LOGS by default. Set this True
