@@ -1,4 +1,4 @@
-"""city2stl/resources.py: wait_for_gpu and ram_ok, with the GPU and RAM readings stubbed."""
+"""city2stl/resources.py: wait_for_gpu, ram_ok and wait_for_ram, with the GPU and RAM readings stubbed."""
 import pytest
 
 from city2stl import resources
@@ -33,10 +33,7 @@ def test_wait_for_gpu_times_out(monkeypatch):
 
 
 def test_wait_for_ram_blocks_until_enough_is_free(monkeypatch):
-    import pytest
-
-    from city2stl import resources as r
-
+    r = resources
     free = iter([2.0, 4.0, 7.5])
     monkeypatch.setattr(r, "free_ram_gb", lambda: next(free))
     slept = []

@@ -4,9 +4,8 @@ The rules (CLAUDE.md › "Shared machine resources"): GPU jobs wait for free VRA
 falling back to CPU because the GPU looks busy, and a heavy job starts only with enough free
 RAM. Several agents share one laptop (6 cores, 32 GB RAM, 4 GB VRAM).
 
-    from city2stl.resources import wait_for_gpu, ram_ok, free_gpu_cache
-    if not ram_ok():
-        raise SystemExit("less than 6 GB RAM free; wait for the other jobs")
+    from city2stl.resources import wait_for_gpu, wait_for_ram, free_gpu_cache
+    wait_for_ram()             # 6 GB free before a heavy job (ram_ok() to check without waiting)
     wait_for_gpu(2.0)          # SegFormer b3, batch 4
     ...
     free_gpu_cache()           # between photos / models
