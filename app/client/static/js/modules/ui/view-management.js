@@ -22,8 +22,6 @@ const VIEW_CONTAINERS = {
     globe: 'globeContainer',
     dem: 'demContainer',
     model: 'modelContainer',
-    regions: 'regionsContainer',
-    compare: 'compareContainer',
 };
 
 /**
@@ -36,7 +34,7 @@ function _invalidateMapSize() {
 /**
  * Switch the main view to the specified tab.
  * Hides all containers then shows the selected one.
- * @param {'map'|'globe'|'dem'|'model'|'regions'|'compare'} view
+ * @param {'map'|'globe'|'dem'|'model'} view
  */
 /**
  * Picking a region and opening Extrude is the whole job (user, 2026-10-02; replaced the
@@ -111,10 +109,6 @@ window.switchView = function switchView(view) {
         // Auto-collapse sidebar so the 3D viewport gets full width
         if (sidebar) sidebar.style.display = 'none';
         _ensureDemForExtrude();
-    } else if (view === 'regions') {
-        if (containers.regions) window.populateRegionsTable?.();
-    } else if (view === 'compare') {
-        if (containers.compare) window.initCompareMode?.();
     }
 };
 

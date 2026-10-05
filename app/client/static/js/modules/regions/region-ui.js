@@ -13,10 +13,7 @@
  *   groupRegionsByContinent(regions)     — group array by continent
  *   resolveRegionContinent(region)       — label-or-detected continent (filter key)
  *   renderCoordinatesList()              — render sidebar list view
- *   populateRegionsTable()               — render sidebar table view
- *   loadRegionFromTable(index)           — navigate to Edit for region
- *   viewRegionOnMap(index)               — select region + switch to map
- *   setupRegionsTable()                  — wire table search + refresh
+ *   setupContinentFilter()               — wire the sidebar continent filter
  *   initRegionNotes()                    — load notes from localStorage
  *   getRegionNote(name) / setRegionNote(name, text) — notes (edited in the region editor)
  *   renameRegionLocalData(old, new)      — move notes + thumbnail after a rename
@@ -363,108 +360,10 @@ function renderCoordinatesList() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Regions table view
+// Continent filter
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TABLE_PAGE_SIZE = 20;
-let _tablePage = 0;
-let _tableSearch = '';
-
-function populateRegionsTable() {
-    const tbody = document.getElementById('regionsTableBody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-
-    const coordinatesData = window.getCoordinatesData?.() || [];
-    if (coordinatesData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);">No regions loaded</td></tr>';
-        _renderTablePagination(0, 0);
-        return;
-    }
-
-    const q = _tableSearch.toLowerCase();
-    const filtered = q
-        ? coordinatesData.filter((r) => r.name.toLowerCase().includes(q))
-        : coordinatesData;
-
-    const totalPages = Math.max(1, Math.ceil(filtered.length / TABLE_PAGE_SIZE));
-    if (_tablePage >= totalPages) _tablePage = totalPages - 1;
-
-    const start = _tablePage * TABLE_PAGE_SIZE;
-    const pageData = filtered.slice(start, start + TABLE_PAGE_SIZE);
-
-    const selected = window.appState?.selectedRegion;
-    const indexByName = new Map(coordinatesData.map((r, i) => [r.name, i]));
-
-    pageData.forEach((region) => {
-        const index = indexByName.get(region.name) ?? -1;
-        const tr = document.createElement('tr');
-        tr.dataset.regionIndex = index;
-        if (selected && selected.name === region.name) tr.classList.add('selected');
-        tr.innerHTML = `
-            <td>${window.escapeHtml(region.name)}</td>
-            <td>${region.north?.toFixed(5) || ''}</td>
-            <td>${region.south?.toFixed(5) || ''}</td>
-            <td>${region.east?.toFixed(5) || ''}</td>
-            <td>${region.west?.toFixed(5) || ''}</td>
-            <td class="actions-cell">
-                <button class="action-btn load" onclick="loadRegionFromTable(${index})">Load</button>
-                <button class="action-btn" onclick="viewRegionOnMap(${index})">📍 Map</button>
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-
-    _renderTablePagination(filtered.length, totalPages);
-}
-
-function _renderTablePagination(total, totalPages) {
-    const el = document.getElementById('regionsPagination');
-    if (!el) return;
-    if (total <= TABLE_PAGE_SIZE) {
-        el.innerHTML = '';
-        return;
-    }
-    const start = _tablePage * TABLE_PAGE_SIZE + 1;
-    const end = Math.min((_tablePage + 1) * TABLE_PAGE_SIZE, total);
-    el.innerHTML = `
-        <button id="regPagePrev" ${_tablePage === 0 ? 'disabled' : ''}>&#8249; Prev</button>
-        <span>${start}–${end} of ${total}</span>
-        <button id="regPageNext" ${_tablePage >= totalPages - 1 ? 'disabled' : ''}>Next &#8250;</button>
-    `;
-    el.querySelector('#regPagePrev')?.addEventListener('click', () => { _tablePage--; populateRegionsTable(); });
-    el.querySelector('#regPageNext')?.addEventListener('click', () => { _tablePage++; populateRegionsTable(); });
-}
-
-function loadRegionFromTable(index) {
-    const coordinatesData = window.getCoordinatesData?.() || [];
-    if (index >= 0 && index < coordinatesData.length) window.goToEdit?.(index);
-}
-
-function viewRegionOnMap(index) {
-    const coordinatesData = window.getCoordinatesData?.() || [];
-    if (index >= 0 && index < coordinatesData.length) {
-        window.selectCoordinate?.(index);
-        window.switchView?.('map');
-    }
-}
-
-function setupRegionsTable() {
-    const searchInput = document.getElementById('regionsSearch');
-    if (searchInput) {
-        searchInput.addEventListener('input', (e) => {
-            _tableSearch = e.target.value;
-            _tablePage = 0;
-            populateRegionsTable();
-        });
-    }
-
-    document.getElementById('refreshRegionsBtn')?.addEventListener('click', async () => {
-        await window.loadCoordinates?.();
-        populateRegionsTable();
-        window.showToast('Regions refreshed', 'success');
-    });
-
+function setupContinentFilter() {
     if (!window.__coordContinentFilterDelegated) {
         document.addEventListener('change', (e) => {
             const target = e.target;
@@ -553,10 +452,7 @@ function renameRegionLocalData(oldName, newName) {
 window.detectContinent = detectContinent;
 window.groupRegionsByContinent = groupRegionsByContinent;
 window.renderCoordinatesList = renderCoordinatesList;
-window.populateRegionsTable = populateRegionsTable;
-window.loadRegionFromTable = loadRegionFromTable;
-window.viewRegionOnMap = viewRegionOnMap;
-window.setupRegionsTable = setupRegionsTable;
+window.setupContinentFilter = setupContinentFilter;
 window.initRegionThumbnails = initRegionThumbnails;
 window.saveRegionThumbnail = saveRegionThumbnail;
 window.initRegionNotes = initRegionNotes;

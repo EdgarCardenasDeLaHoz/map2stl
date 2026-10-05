@@ -104,7 +104,7 @@ flowchart LR
 |---|---|---|
 | `map-globe.js` | `initMap`, `initGlobe`, `setTileLayer`, `toggleDemOverlay`, `toggleTerrainOverlay`, `toggleMapGrid`, `updateBboxIndicator` | Leaflet map + Three.js globe; raster overlays go through Mercator ([why](../decisions/frontend.md#2026-08-30--raster-overlays-are-resampled-to-mercator-before-they-touch-the-map)) |
 | `bbox-panel.js` | `setBboxRectangle`, `setBboxInputValues`, `initBboxMiniMap`, `syncBboxMiniMap`, `toggleBboxMiniMap`, `setupBboxKeyboardNav` | Bbox bar + mini-map. `setBboxRectangle` is the one writer of `appState.boundingBox`; `setBboxInputValues` is display only ([why](../decisions/frontend.md#2026-08-28--one-helper-owns-appstateboundingbox)) |
-| `compare-view.js` | `initCompareMode`, `loadCompareRegion`, `updateCompareCanvases`, `applyRegionParams` | Side-by-side region comparison |
+| `compare-view.js` | `updateCompareCanvases` | Inline side-by-side layer compare in the Edit view |
 | `landmarks.js` | `toBbox`, `bboxKey`, `extendBboxToInclude`, `bboxContains`, `placeCaption` | Pure helpers for `LandmarkSearch.vue` and `EdgeLandmarkWarnings.vue` |
 
 ### `regions/`
@@ -112,7 +112,7 @@ flowchart LR
 | File | Key symbols | Purpose |
 |---|---|---|
 | `regions.js` | `loadCoordinates`, `selectCoordinate`, `goToEdit` | Region load, selection |
-| `region-ui.js` | `renderCoordinatesList`, `populateRegionsTable`, `setupRegionsTable`, `groupRegionsByContinent`, `resolveRegionContinent`, `detectContinent` (from `continent.js`), `initRegionNotes`, `getRegionNote`, `setRegionNote`, `renameRegionLocalData`, `saveRegionThumbnail` | Sidebar list (the map's viewport set under a "Showing N of M in view · Show all" line; a search or Show all lists every region; ✎ button per row; row ↔ box hover link), paginated table, notes + thumbnails in localStorage |
+| `region-ui.js` | `renderCoordinatesList`, `setupContinentFilter`, `groupRegionsByContinent`, `resolveRegionContinent`, `detectContinent` (from `continent.js`), `initRegionNotes`, `getRegionNote`, `setRegionNote`, `renameRegionLocalData`, `saveRegionThumbnail` | Sidebar list (the map's viewport set under a "Showing N of M in view · Show all" line; a search or Show all lists every region; ✎ button per row; row ↔ box hover link), continent filter, notes + thumbnails in localStorage |
 | `region-boxes.js` | `drawRegionBoxes`, `refreshRegionViewSet`, `getViewportRegionSet`, `highlightRegionBox` | Saved-region boxes on the Explore map: outlines over a dark halo, selected = accent, hover = brighter + name tooltip; only the viewport set is drawn, recomputed on moveend/zoomend/resize (150 ms debounce), load, selection, continent filter; the list reads the same set |
 | `viewport-regions.js` | `selectViewportRegions`, `VIEWPORT_REGION_LIMIT` | Pure: regions that intersect and fit the view, largest first, ≤ 20, plus the selected one |
 | `region-geometry.js` | `bboxSizeKm`, `formatBboxSize`, `formatBboxDims`, `boxAround`, `placeBox`, `parseBbox`, `regionBoxStyle`, `regionHaloStyle`, `REGION_ACCENT` | Pure: box size in km ("12.4 × 8.1 km · 100 km²"), N/S/E/W parsing, Leaflet box styles |
@@ -426,7 +426,7 @@ One line per function. `window.*` unless marked (private) or (export).
 | `initMap()` / `initGlobe()` | Leaflet map + draw control / Three.js globe |
 | `setTileLayer(key)` | Switch base tiles |
 | `toggleDemOverlay(show)` | Terrain overlay on the map |
-| `initCompareMode()` / `loadCompareRegion(side)` | Compare view |
+| `updateCompareCanvases()` | Inline layer compare (Edit view) |
 
 ### `guides.js` (standalone, ES module)
 

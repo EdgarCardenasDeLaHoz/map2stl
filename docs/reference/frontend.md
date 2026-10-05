@@ -257,11 +257,9 @@ Consequences to know:
 
 Module-local (not on appState):
 
-- `app/client/static/js/modules/regions/region-ui.js`: `TABLE_PAGE_SIZE` (20), `_tablePage`,
-  `_tableSearch`, `regionNotes` (persisted as `map2stl_regionNotes`).
+- `app/client/static/js/modules/regions/region-ui.js`: `regionNotes` (persisted as `map2stl_regionNotes`).
 - `app/client/static/js/modules/ui/presets.js`: `PRESET_VERSION` (1), `_presetSnapshot` (taken
   before loading a preset; cleared on revert).
-- `app/client/static/js/modules/map/compare-view.js`: `compareData` (left/right panels).
 
 ### DEM & layer data
 

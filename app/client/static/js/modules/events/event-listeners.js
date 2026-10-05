@@ -43,7 +43,6 @@ window.setupEventListeners = function setupEventListeners() {
 
     document.getElementById('sidebarTableSearch')?.addEventListener('input', e => window.renderSidebarTable?.(e.target.value));
     document.getElementById('statusToggleBtn')?.addEventListener('click', () => window.toggleStatusPanel?.());
-    document.getElementById('applyParamsBtn')?.addEventListener('click', () => window.applyRegionParams?.());
     document.getElementById('clearBboxBtn')?.addEventListener('click', () => window.clearAllBoundingBoxes?.());
 
     window._setupModelExportListeners?.();
@@ -53,15 +52,8 @@ window.setupEventListeners = function setupEventListeners() {
     window.setupAutoReload?.();
     window.setupStackedLayers?.();
     window.setupCoordinateSearch?.();
-    window.setupRegionsTable?.();
+    window.setupContinentFilter?.();
     window.setupKeyboardShortcuts?.();
-
-    // Compare view — region load, colormap, exaggeration
-    for (const side of ['Left', 'Right']) {
-        document.getElementById(`compare${side}Region`)?.addEventListener('change', () => window.loadCompareRegion?.(side.toLowerCase()));
-        document.getElementById(`compare${side}Colormap`)?.addEventListener('change', () => window.applyCompareColormap?.(side.toLowerCase()));
-        document.getElementById(`compare${side}Exag`)?.addEventListener('change', () => window.updateCompareExagLabel?.(side.toLowerCase()));
-    }
 
     window._setupResizablePanel?.();
 

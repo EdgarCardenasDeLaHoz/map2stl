@@ -1,35 +1,12 @@
 ﻿/**
- * modules/compare-view.js — Side-by-side region DEM comparison panel.
- *
- * Loaded as a plain <script> before app.js.
+ * modules/compare-view.js — Inline side-by-side layer compare in the Edit view
+ * (#compareInlineContainer, DemContainer.vue).
  *
  * Public API (all on window):
- *   initCompareMode()               — wire layer selects (idempotent)
- *   renderCompareLayer(side)        — copy a layer canvas into the compare panel
- *   updateCompareCanvases()         — init + render both sides
- *   loadCompareRegion(side)         — async: fetch DEM for one side
- *   applyCompareColormap(side)      — reload with new colormap
- *   updateCompareExagLabel(side)    — update exaggeration label + reload
- *   updateRegionParamsTable(region) — populate param table for region
- *   applyRegionParams()             — read param table → apply to form + reload layers
+ *   updateCompareCanvases()         — wire the layer selects (once) + render both sides
  *
- * External dependencies:
- *   window.getCoordinatesData()     — accessor for coordinatesData closure var
- *   window.appState.selectedRegion
- *   window.loadAllLayers()          — trigger DEM + layers reload
- *   window.mapElevationToColor(t, cmap)    — global from dem-loader.js
- *   window.showToast(msg, type)            — file-top global in app.js
- *   api.dem.load(params)            — from api.js
+ * renderCompareLayer(side) copies a layer canvas into one compare panel.
  */
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Module-scope state
-// ─────────────────────────────────────────────────────────────────────────────
-
-let compareData = {
-    left: { region: null, image: null },
-    right: { region: null, image: null }
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Inline compare (simple canvas copy)
@@ -79,151 +56,7 @@ function updateCompareCanvases() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Region DEM load for compare panel
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function loadCompareRegion(side) {
-    const cap = side.charAt(0).toUpperCase() + side.slice(1);
-    const select = document.getElementById(`compare${cap}Region`);
-    const nameSpan = document.getElementById(`compare${cap}Name`);
-    const imageEl = document.getElementById(`compare${cap}Image`);
-    const empty = document.getElementById(`compare${cap}Empty`);
-
-    if (!select || !select.value) {
-        if (nameSpan) nameSpan.textContent = '--';
-        if (imageEl) imageEl.classList.add('hidden');
-        if (empty) { empty.textContent = 'Select a region to compare'; empty.classList.remove('hidden'); }
-        compareData[side].region = null;
-        return;
-    }
-
-    const coordinatesData = window.getCoordinatesData?.() || [];
-    const region = coordinatesData[parseInt(select.value)];
-    if (!region) return;
-
-    if (nameSpan) nameSpan.textContent = region.name;
-    if (empty) { empty.textContent = 'Loading…'; empty.classList.remove('hidden'); }
-    if (imageEl) imageEl.classList.add('hidden');
-
-    try {
-        const colormap = document.getElementById(`compare${cap}Colormap`)?.value || 'terrain';
-        const params = new URLSearchParams({ north: region.north, south: region.south, east: region.east, west: region.west, dim: 200 });
-        const { data, error: demErr } = await window.api.dem.load(params);
-        if (demErr) throw new Error(demErr);
-        if (!(data.dem_values || data.dem_values_b64) || !data.dimensions) throw new Error(data.error || 'No DEM data returned');
-
-        let demVals = window.decodeDemValues(data);
-        let h = Number(data.dimensions[0]);
-        let w = Number(data.dimensions[1]);
-        if (Array.isArray(demVals) && Array.isArray(demVals[0])) { h = demVals.length; w = demVals[0].length; demVals = demVals.flat(); }
-
-        const vmin = data.min_elevation ?? demVals.filter(Number.isFinite).reduce((a, b) => a < b ? a : b, Infinity);
-        const vmax = data.max_elevation ?? demVals.filter(Number.isFinite).reduce((a, b) => a > b ? a : b, -Infinity);
-        const range = (vmax - vmin) || 1;
-
-        const off = document.createElement('canvas');
-        off.width = w; off.height = h;
-        const ctx = off.getContext('2d');
-        const imgData = ctx.createImageData(w, h);
-        for (let i = 0; i < w * h; i++) {
-            const t = Math.max(0, Math.min(1, (demVals[i] - vmin) / range));
-            const [r, g, b] = window.mapElevationToColor(t, colormap);
-            imgData.data[i * 4] = Math.round((r || 0) * 255);
-            imgData.data[i * 4 + 1] = Math.round((g || 0) * 255);
-            imgData.data[i * 4 + 2] = Math.round((b || 0) * 255);
-            imgData.data[i * 4 + 3] = 255;
-        }
-        ctx.putImageData(imgData, 0, 0);
-
-        if (imageEl) { imageEl.src = off.toDataURL(); imageEl.classList.remove('hidden'); }
-        if (empty) empty.classList.add('hidden');
-        compareData[side].region = region;
-        compareData[side].image = data;
-    } catch (e) {
-        console.error('Compare load error:', e);
-        if (empty) { empty.textContent = 'Error: ' + e.message; empty.classList.remove('hidden'); }
-        if (imageEl) imageEl.classList.add('hidden');
-    }
-}
-
-function applyCompareColormap(side) { loadCompareRegion(side); }
-
-function updateCompareExagLabel(side) {
-    const cap = side.charAt(0).toUpperCase() + side.slice(1);
-    const exagInput = document.getElementById(`compare${cap}Exag`);
-    const exagLabel = document.getElementById(`compare${cap}ExagLabel`);
-    if (exagLabel && exagInput) exagLabel.textContent = parseFloat(exagInput.value).toFixed(1) + 'x';
-    loadCompareRegion(side);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Region params table
-// ─────────────────────────────────────────────────────────────────────────────
-
-function updateRegionParamsTable(region) {
-    const tbody = document.getElementById('regionParamsBody');
-    if (!tbody) return;
-    if (!region) {
-        tbody.innerHTML = '<tr><td colspan="2" style="color:var(--text-dim);text-align:center;">Select a region</td></tr>';
-        return;
-    }
-    const params = [
-        { key: 'name', label: 'Name', value: region.name || '', type: 'text', readonly: true },
-        { key: 'north', label: 'North', value: region.north || '', type: 'number', step: '0.0001' },
-        { key: 'south', label: 'South', value: region.south || '', type: 'number', step: '0.0001' },
-        { key: 'east', label: 'East', value: region.east || '', type: 'number', step: '0.0001' },
-        { key: 'west', label: 'West', value: region.west || '', type: 'number', step: '0.0001' },
-        { key: 'dim', label: 'Dimension', value: document.getElementById('paramDim')?.value || 200, type: 'number', min: 50, max: 1000 },
-        { key: 'depth_scale', label: 'Depth Scale', value: window.appState.demParams.depthScale, type: 'number', step: '0.1' },
-        { key: 'water_scale', label: 'Water Scale', value: window.appState.demParams.waterScale, type: 'number', step: '0.01' },
-        { key: 'sat_scale', label: 'Satellite Scale', value: window.appState.demParams.satScale, type: 'number', min: 100, max: 5000 }
-    ];
-    tbody.innerHTML = params.map(p => `
-        <tr>
-            <td>${p.label}</td>
-            <td>
-                <input type="${p.type}" data-param="${p.key}" value="${p.value}"
-                       ${p.readonly ? 'readonly' : ''}
-                       ${p.step ? `step="${p.step}"` : ''}
-                       ${p.min !== undefined ? `min="${p.min}"` : ''}
-                       ${p.max !== undefined ? `max="${p.max}"` : ''}
-                       style="width:100%;background:#404040;color:#fff;border:1px solid #555;padding:4px;border-radius:3px;">
-            </td>
-        </tr>`).join('');
-}
-
-function applyRegionParams() {
-    const tbody = document.getElementById('regionParamsBody');
-    if (!tbody) return;
-    const inputs = tbody.querySelectorAll('input[data-param]');
-    const region = window.appState?.selectedRegion;
-
-    inputs.forEach(input => {
-        const p = input.dataset.param;
-        const v = input.value;
-        switch (p) {
-            case 'dim': { const el = document.getElementById('paramDim'); if (el) el.value = v; } break;
-            case 'depth_scale': window.appState.demParams.depthScale = parseFloat(v); break;
-            case 'water_scale': window.appState.demParams.waterScale = parseFloat(v); break;
-            case 'sat_scale': window.appState.demParams.satScale = parseInt(v); break;
-            case 'north': case 'south': case 'east': case 'west':
-                if (region) region[p] = parseFloat(v);
-                break;
-        }
-    });
-
-    window.showToast('Parameters applied! Loading layers...', 'success');
-    window.loadAllLayers?.();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Expose on window
 // ─────────────────────────────────────────────────────────────────────────────
 
-window.initCompareMode = initCompareMode;
 window.updateCompareCanvases = updateCompareCanvases;
-window.loadCompareRegion = loadCompareRegion;
-window.applyCompareColormap = applyCompareColormap;
-window.updateCompareExagLabel = updateCompareExagLabel;
-window.updateRegionParamsTable = updateRegionParamsTable;
-window.applyRegionParams = applyRegionParams;
