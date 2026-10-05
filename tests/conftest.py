@@ -236,3 +236,56 @@ def _no_live_height_enhancement(request, monkeypatch):
         return
     import app.server.core.city_data as city_data
     monkeypatch.setattr(city_data, "enhance_city_data", lambda result, *a, **k: result)
+
+
+# ---------------------------------------------------------------------------
+# Local-only resources (cloud sessions, fresh clones): see .claude/hooks/session-start.sh.
+# A test marked requires_cache / requires_gpu / requires_network / requires_keys is skipped,
+# with the reason, when this machine lacks the resource; integration tests (live calls) also
+# count as requires_network. The default run needs none of them.
+# ---------------------------------------------------------------------------
+_RESOURCES: dict = {}
+
+
+def _have(resource: str) -> bool:
+    if resource in _RESOURCES:
+        return _RESOURCES[resource]
+    ok = False
+    if resource == "cache":
+        root = Path(os.environ.get("MAP2STL_CACHE") or Path(__file__).resolve().parents[1] / "cache")
+        ok = root.is_dir() and any(root.iterdir())
+    elif resource == "gpu":
+        try:
+            import torch
+            ok = bool(torch.cuda.is_available())
+        except Exception:  # noqa: BLE001 - no torch or a broken CUDA install: no GPU
+            ok = False
+    elif resource == "network":
+        import socket
+        try:
+            socket.create_connection(("1.1.1.1", 443), timeout=2).close()
+            ok = True
+        except OSError:
+            ok = False
+    elif resource == "keys":
+        root = Path(__file__).resolve().parents[1]
+        env = root / ".env"
+        ok = bool(os.environ.get("GOOGLE_MAPS_API_KEY")
+                  or (env.is_file() and "GOOGLE_MAPS_API_KEY" in env.read_text(errors="ignore"))
+                  or (root / "config.json").is_file())
+    _RESOURCES[resource] = ok
+    return ok
+
+
+def pytest_collection_modifyitems(config, items):
+    reasons = {"cache": "no local cache (cache/ or MAP2STL_CACHE)", "gpu": "no CUDA GPU",
+               "network": "no network", "keys": "no API keys (.env / config.json)"}
+    for item in items:
+        need = {m.name.removeprefix("requires_") for m in item.iter_markers()
+                if m.name.startswith("requires_")}
+        if item.get_closest_marker("integration"):
+            need.add("network")
+        for r in sorted(need):
+            if r in reasons and not _have(r):
+                item.add_marker(pytest.mark.skip(reason=reasons[r]))
+                break

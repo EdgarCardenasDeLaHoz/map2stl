@@ -94,6 +94,28 @@ See [`docs/reference/sdk.md`](docs/reference/sdk.md) for notebook → SDK → ro
 Playwright suite needs a live server + `pytest-playwright` and is excluded from
 the default run (invoke explicitly with `--browser chromium`).
 
+### Running in the cloud
+
+Tests and refactors can run in a Linux cloud session (Claude Code on the web) without the
+laptop's GPU, cache or keys:
+
+The SessionStart hook `.claude/hooks/session-start.sh` sets the session up (clones
+`../numpy2stl`, builds `~/.venvs/map2stl` without torch, runs `npm install`); then:
+
+```bash
+python -m pytest -n auto -q
+```
+
+- The default run needs nothing local: every test gets an empty temporary cache, outbound
+  network is blocked (`_block_network`), and live calls (`integration`), torch (`ml`) and
+  benchmarks (`slow`) are opt-in markers.
+- Tests that need what a fresh clone lacks carry a marker and skip themselves, with the
+  reason, when it is missing: `requires_cache` (the gitignored `cache/` or `MAP2STL_CACHE`),
+  `requires_gpu` (CUDA), `requires_network` (also implied by `integration`) and
+  `requires_keys` (`GOOGLE_MAPS_API_KEY`, the OpenTopography key in `config.json`).
+- GPU work (skyline, SegFormer, training) and anything that reads the real cache stay on the
+  local PCs (`scripts/setup-venv.ps1`).
+
 ## Dependencies
 
 Key libraries: `fastapi` + `uvicorn` (server), `numpy`/`scipy`/`shapely`
