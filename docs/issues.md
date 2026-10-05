@@ -209,5 +209,3 @@ last measured.
   silently, and a cached empty layer is never retried (the Lisbon case in
   [decisions/registration-refinement.md](decisions/registration-refinement.md)). Nine plates
   have an empty water mask image.
-- **Frontend**: `LAYER_CANVAS_IDS` in `stacked-layers.js` has no `CityOverlay` entry, although
-  `_layerOrder` lists it (2026-08-30).

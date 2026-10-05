@@ -56,6 +56,8 @@ const LAYER_STACK = _layerOrder;  // alias kept for backward compat
  * Maps each layer mode key to its DOM canvas element ID.
  * Kept separate from mode names so the HTML IDs can differ (e.g. Hydrology → layerHydroCanvas).
  */
+// Every layer in _layerOrder except CityOverlay, which is not a canvas buffer: it is the
+// `#layersStack .osm-overlay` element, shown, hidden and faded by _syncCityOverlayLayerState.
 const LAYER_CANVAS_IDS = {
     Dem: 'layerDemCanvas',
     WaterHydrology: 'layerWaterHydrologyCanvas',
@@ -141,7 +143,9 @@ function _getLayerBuffer(mode) {
  * Return (or lazily create) the hidden source canvas for a given layer mode.
  * Checks the in-memory registry first; falls back to the existing static DOM
  * element (kept in DemContainer.vue for backward compat); creates a new canvas
- * and appends it to #layersStack if neither exists.
+ * and appends it to #layersStack if neither exists. Null for a layer with no
+ * canvas buffer (CityOverlay): clearAllLayerBuffers walks every layer, and used to
+ * append a stray id-less canvas for it on the first region change.
  *
  * @param {string} layerName - One of the LAYER_CANVAS_IDS keys
  * @returns {HTMLCanvasElement|null}
@@ -149,10 +153,11 @@ function _getLayerBuffer(mode) {
 function getOrCreateCanvas(layerName) {
     if (_canvasRegistry.has(layerName)) return _canvasRegistry.get(layerName);
     const id = LAYER_CANVAS_IDS[layerName];
-    let c = id ? document.getElementById(id) : null;
+    if (!id) return null;
+    let c = document.getElementById(id);
     if (!c) {
         c = document.createElement('canvas');
-        if (id) c.id = id;
+        c.id = id;
         c.className = 'layer-canvas hidden';
         document.getElementById('layersStack')?.appendChild(c);
     }

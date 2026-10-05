@@ -59,6 +59,14 @@ because code cites them.
   (missing tile, all-void block) is still 0. Test:
   `tests/test_dem_sources.py::test_h5_dem_voids_excluded_and_negatives_kept`.
 
+### `LAYER_CANVAS_IDS` had no `CityOverlay` entry — fixed 2026-10-05 (T14)
+- Deliberate: the city overlay is the `#layersStack .osm-overlay` element, not a canvas buffer,
+  and every compositing loop skips it. But `clearAllLayerBuffers` walks every layer, and
+  `getOrCreateCanvas('CityOverlay')` appended a stray id-less hidden canvas to `#layersStack`.
+- `app/client/static/js/modules/layers/stacked-layers.js::getOrCreateCanvas` now returns null for
+  a layer with no canvas id; `LAYER_CANVAS_IDS` says why CityOverlay is absent. Test:
+  `tests/js/stackedLayersCanvas.test.js`.
+
 ## Fixed 2026-10-05 (full code audit)
 
 ### Silent wrong answers — fixed 2026-10-05
