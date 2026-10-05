@@ -470,8 +470,9 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
     _remap(results, towers)
     all_t = {t["tower"] for r in results for t in r.get("towers") or []}
     # saved results index the tower table; a changed region box or OSM data makes another table
+    # (names can't tell: measured readings carry display names such as "tower65")
     stale = [t for r in results for t in r.get("towers") or []
-             if t["tower"] >= len(towers.verts) or towers.names[t["tower"]] != t["name"]]
+             if t["tower"] >= len(towers.verts) or ("fp" not in t and t["osm_m"] != float(towers.height_m[t["tower"]]))]
     if stale:
         raise SystemExit(f"photo_results.json was written with another tower table ({len(stale)} "
                          "readings don't match; the region box or OSM changed): run without --rescore")
