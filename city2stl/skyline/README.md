@@ -176,7 +176,8 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
   Satellite polygons fall back to `_core/registration.py::_height_proxy`.
 - **Cross-view consensus** (`_pano/detect.py::_smooth_matches_across_views`): a segment whose building is seen in only
   one view swaps to a candidate seen in ≥ 2 views, then a post-swap dedup restores 1:1 (the swap alone doesn't
-  enforce it). The pano gets the same pass. `seed_index` is rebuilt after smoothing.
+  enforce it; `_pano/detect.py::_dedup_matches`). The pano gets the same pass, and a swapped pano segment that
+  loses the dedup goes back to its own match. `seed_index` is rebuilt after smoothing.
 - **Water filter** (`region_data.py::_drop_buildings_in_water`): centroid in water, or > 15 % polygon overlap.
   The wet-side-of-coastline test is removed (see Dead ends).
 - **Auto-replace bad seeds** (`seed_selection.py::_auto_replace_bad_seeds`): a rejected seed or `screen_score < 0.20`

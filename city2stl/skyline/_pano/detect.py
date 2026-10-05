@@ -477,6 +477,47 @@ def _register_views(
 
     return view_rows, estimates
 
+def _dedup_matches(segments: list[dict], restore_swapped: bool = False) -> int:
+    """One segment per OSM feature_id (the F-SKY6 one-to-one rule) after a smoothing swap.
+
+    Among segments matched to the same feature, the one whose ``match_diagnostics`` scores
+    that feature highest (``combined``; else its ``matched_combined``) keeps it. A loser is
+    cleared, or with ``restore_swapped`` put back on its pre-smoothing match when it was
+    swapped and nothing else holds that feature. Returns the number of losers.
+    """
+    claimants: dict[str, list[dict]] = {}
+    for seg in segments:
+        m = seg.get("matched_projection")
+        fid = str(m.get("feature_id", "")) if m else ""
+        if fid:
+            claimants.setdefault(fid, []).append(seg)
+    dropped = 0
+    for fid, segs in list(claimants.items()):
+        if len(segs) <= 1:
+            continue
+
+        def _score(s, fid=fid):
+            for d in s.get("match_diagnostics", []) or []:
+                if str(d.get("feature_id", "")) == fid:
+                    return float(d.get("combined", 0.0))
+            return float(s.get("matched_combined", 0.0))
+
+        segs.sort(key=_score, reverse=True)
+        for loser in segs[1:]:
+            loser["matched_projection_pre_dedup"] = loser.get("matched_projection")
+            prev = loser.get("matched_projection_pre_smoothing") if restore_swapped else None
+            prev_fid = str(prev.get("feature_id", "")) if prev else ""
+            if prev_fid and prev_fid not in claimants:
+                loser["matched_projection"] = prev
+                loser["match_smoothed"] = False
+                claimants[prev_fid] = [loser]
+            else:
+                loser["matched_projection"] = None
+                loser.pop("seed_index", None)
+            dropped += 1
+    return dropped
+
+
 def _smooth_matches_across_views(
     seed_view_rows: list[SeedViewRegistration],
     min_popularity_swap: int = 2,
@@ -554,31 +595,8 @@ def _smooth_matches_across_views(
         # candidate — measured by the candidate's combined score in
         # ``match_diagnostics`` — and clear the losers. Mirrors the
         # F-SKY6 one-to-one constraint enforced by the per-view matcher.
-        dedup_dropped = 0
-        for sv in seed_view_rows:
-            claimants: dict[str, list[dict]] = {}
-            for seg in sv.matched_segments or []:
-                m = seg.get("matched_projection")
-                if not m:
-                    continue
-                fid = str(m.get("feature_id", ""))
-                if fid:
-                    claimants.setdefault(fid, []).append(seg)
-            for fid, segs in claimants.items():
-                if len(segs) <= 1:
-                    continue
-                def _score(s, fid=fid):
-                    for d in s.get("match_diagnostics", []) or []:
-                        if str(d.get("feature_id", "")) == fid:
-                            return float(d.get("combined", 0.0))
-                    return float(s.get("matched_combined", 0.0))
-                segs.sort(key=_score, reverse=True)
-                for loser in segs[1:]:
-                    loser["matched_projection_pre_dedup"] = loser.get(
-                        "matched_projection")
-                    loser["matched_projection"] = None
-                    loser.pop("seed_index", None)
-                    dedup_dropped += 1
+        dedup_dropped = sum(_dedup_matches(sv.matched_segments or [])
+                            for sv in seed_view_rows)
         if dedup_dropped:
             logger.info(f"[smooth_matches] dedup cleared {dedup_dropped} duplicate "
                         f"match(es) created by the swap")
@@ -635,6 +653,10 @@ def _smooth_pano_matches_against_views(
     is treated as the dissenter and swapped to A if A is also a top-3
     candidate in the pano segment's ``match_diagnostics``. Mirrors the
     per-view smoothing pass for cross-view consistency.
+
+    A swap can hand a segment a feature another pano segment already holds (T25): the
+    better match keeps it (``_dedup_matches``) and a swapped loser goes back to its own
+    pre-smoothing match.
     """
     if pano_result is None or not pano_result.matched_segments:
         return
@@ -688,6 +710,10 @@ def _smooth_pano_matches_against_views(
     if swap_count:
         logger.info(f"[smooth_matches] swapped {swap_count} pano dissenting match(es) "
                     f"to per-view popular candidates")
+        dropped = _dedup_matches(pano_result.matched_segments, restore_swapped=True)
+        if dropped:
+            logger.info(f"[smooth_matches] pano dedup resolved {dropped} duplicate "
+                        f"match(es) created by the swap")
 
 def _multires_sam_instances(
     pano_img: np.ndarray,
