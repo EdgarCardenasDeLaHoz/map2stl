@@ -9,11 +9,10 @@ Data sources:
   - GLO-30: AWS Open Data HTTPS tiles (no auth, per-degree COG tiles)
   - SRTM:   OpenTopography global DEM API (requires OPENTOPO_API_KEY)
 
-FABDEM (Bristol uni, data.bris.ac.uk) was the original DTM source but
-all tiles returned 404 from early 2026. SRTM via OpenTopography is the
-replacement; FABDEM tile download is kept as a secondary fallback.
+FABDEM (Bristol uni) was the original DTM source until its tiles went 404
+in early 2026; its fallback was removed 2026-10-05.
 
-Coverage: global (GLO-30 ±90°, SRTM ±60°).
+Coverage: SRTM's, 56°S to 60°N (GLO-30 is global).
 Resolution: ~30 m.
 """
 
@@ -51,8 +50,7 @@ NDSM_CONFIDENCE = 0.8
 # building. See `resolution_priority` in city2stl/height/__init__.py.
 NDSM_RESOLUTION_M = 30.0
 
-# OpenTopography global DEM API (geo2stl.opentopo) — used to fetch SRTM as DTM
-# source. FABDEM (Bristol uni) tiles are no longer available at data.bris.ac.uk.
+# OpenTopography global DEM API (geo2stl.opentopo) — used to fetch SRTM as DTM source.
 _OT_TIMEOUT = 120
 
 
@@ -102,18 +100,6 @@ def _tile_url_glo30(lat: int, lon: int) -> str:
     return f"https://copernicus-dem-30m.s3.eu-central-1.amazonaws.com/{name}/{name}.tif"
 
 
-def _tile_url_fabdem(lat: int, lon: int) -> str:
-    """HTTPS URL for a FABDEM tile.
-
-    FABDEM is distributed via several mirrors. We use the GAIA/Bristol
-    direct download link pattern.
-    """
-    ns = "N" if lat >= 0 else "S"
-    ew = "E" if lon >= 0 else "W"
-    name = f"{ns}{abs(lat):02d}{ew}{abs(lon):03d}_FABDEM_V1-2"
-    return f"https://data.bris.ac.uk/datasets/s5hqmjcdj8yo2ibzi9b4ew3sn/{name}.tif"
-
-
 def _tiles_for_bbox(bbox: BBox) -> list[tuple[int, int]]:
     """Return list of (lat, lon) SW corners covering *bbox*.
 
@@ -159,13 +145,13 @@ def _download_tile(url: str, dest: Path) -> bool:
         return False
 
 
-def _get_tile(source: str, lat: int, lon: int) -> np.ndarray | None:
-    """Fetch a single 1° tile (cached). *source* is 'glo30' or 'fabdem'.
+def _get_tile(lat: int, lon: int) -> np.ndarray | None:
+    """Fetch a single 1° GLO-30 DSM tile (cached).
 
     Returns float32 array or None if tile unavailable.
     """
     cache_dir = _tile_cache_dir()
-    cache_name = f"{source}_{lat:+03d}_{lon:+04d}.npz"
+    cache_name = f"glo30_{lat:+03d}_{lon:+04d}.npz"
     cache_path = cache_dir / cache_name
 
     # Check local cache
@@ -176,11 +162,7 @@ def _get_tile(source: str, lat: int, lon: int) -> np.ndarray | None:
         except Exception:
             cache_path.unlink(missing_ok=True)
 
-    # Download
-    if source == "glo30":
-        url = _tile_url_glo30(lat, lon)
-    else:
-        url = _tile_url_fabdem(lat, lon)
+    url = _tile_url_glo30(lat, lon)
 
     with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
         tmp_path = Path(tmp.name)
@@ -281,7 +263,7 @@ def _stitch_tiles(tiles: dict[tuple[int, int], np.ndarray],
 # ── Public API ───────────────────────────────────────────────────
 
 class NDSMProvider:
-    """nDSM = GLO-30 DSM − FABDEM DTM.  Global, ~30m, free, no API key."""
+    """nDSM = GLO-30 DSM − SRTM DTM.  ~30 m, 56°S–60°N, needs an OpenTopography key."""
 
     name = "ndsm"
 
@@ -291,9 +273,9 @@ class NDSMProvider:
         self.api_key = api_key
 
     def covers(self, bbox: BBox) -> bool:
-        """nDSM is global (FABDEM covers ±80° latitude)."""
+        """SRTM (the DTM) covers 56°S to 60°N."""
         north, south, _, _ = bbox
-        return -80 <= south and north <= 80
+        return -56 <= south and north <= 60
 
     def fetch_heights(self, bbox: BBox, dim: tuple[int, int]) -> HeightResult:
         """Fetch nDSM for *bbox*, resample to *dim* = (H, W)."""
@@ -316,7 +298,7 @@ class NDSMProvider:
         # Download GLO-30 DSM tiles (AWS S3 COG — reliable)
         dsm_tiles: dict[tuple[int, int], np.ndarray] = {}
         for lat, lon in tile_coords:
-            dsm = _get_tile("glo30", lat, lon)
+            dsm = _get_tile(lat, lon)
             if dsm is not None:
                 dsm_tiles[(lat, lon)] = dsm
 
@@ -328,19 +310,8 @@ class NDSMProvider:
             conf = np.zeros(dim, dtype=np.float32)
             return HeightResult(raster, conf, self.name, 30.0)
 
-        # DTM: SRTM via OpenTopography (primary) or FABDEM tiles (fallback).
-        # FABDEM from Bristol uni (data.bris.ac.uk) has been 404 since early 2026.
+        # DTM: SRTM via OpenTopography.
         dtm_stitched = _fetch_srtm_opentopo(bbox, self.api_key)
-
-        if dtm_stitched is None:
-            # Fallback: per-tile FABDEM (kept for when Bristol restores the mirror)
-            dtm_tiles: dict[tuple[int, int], np.ndarray] = {}
-            for lat, lon in tile_coords:
-                dtm = _get_tile("fabdem", lat, lon)
-                if dtm is not None:
-                    dtm_tiles[(lat, lon)] = dtm
-            fb = _stitch_tiles(dtm_tiles, bbox)
-            dtm_stitched = fb if fb.size > 0 else None
 
         # Compute nDSM = DSM − DTM
         if dtm_stitched is not None:
@@ -348,7 +319,7 @@ class NDSMProvider:
                 dtm_stitched = _resample(dtm_stitched, dsm_stitched.shape)
             ndsm = dsm_stitched - dtm_stitched
         else:
-            logger.warning("nDSM: DTM not available (SRTM/FABDEM failed), returning NaN")
+            logger.warning("nDSM: SRTM DTM not available, returning NaN")
             ndsm = np.full(dsm_stitched.shape, np.nan, dtype=np.float32)
 
         # Clamp negative values (below-ground artefacts) to 0

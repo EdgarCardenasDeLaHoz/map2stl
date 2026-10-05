@@ -191,7 +191,7 @@ Overview and ranking: [reference/height-providers.md](reference/height-providers
   - GeoTIFF reader shared by providers: `map2stl/geo2stl/raster.py::read_geotiff` (wrapped in `map2stl/city2stl/height/providers/_raster.py`)
 - Survey nDSM providers, one interface `ndsm_for_bbox(bbox, res)`: `map2stl/city2stl/height/providers/survey.py::ndsm_for_bbox` (`PROVIDERS`, `available_for_bbox`); contract, grid, sanity checks, cache `map2stl/city2stl/height/providers/_survey.py` (`lonlat_grid`, `read_geotiff_array`, `cached_ndsm`)
   - France IGN `ign_lidarhd.py`, Andalucía `rediam_mdhn.py`, Spain CNIG `cnig_mdsn.py`, Czechia `cuzk_dmp.py`; per-city sources [reference/survey-sources.md](reference/survey-sources.md)
-- Height-gap infill (IDW, nearest): `map2stl/city2stl/height/infill.py::infill_idw` (`infill_nearest`); mesh import applies it through `map2stl/app/server/core/mesh_import.py::_apply_infill`
+- Height-gap infill (linear Delaunay, nearest): `map2stl/city2stl/height/infill.py::infill_idw` (`infill_nearest`); mesh import applies it through `map2stl/app/server/core/mesh_import.py::_apply_infill`
 - Georeferenced STL → heightmap: `map2stl/city2stl/height/stl_import.py::stl_to_heightmap`
 - CNN height prediction/training: `map2stl/city2stl/height/predict.py::predict` — not used at runtime; see [history/ml-height/README.md](history/ml-height/README.md)
 - Provider accuracy and defect history: [issues.md](issues.md), [decisions/building-heights.md](decisions/building-heights.md)
@@ -245,10 +245,10 @@ Overview and ranking: [reference/height-providers.md](reference/height-providers
 - Saved regions and settings blob: `map2stl/app/server/routers/regions.py` (`list_regions`, `get_region_settings`, `save_region_settings_route`); schema `map2stl/app/server/core/db.py::init_db`
   - The one place the retired `clip_nans` key is still read (renamed to `clip_valid_region` as saved settings load): `map2stl/app/server/routers/regions.py::_rename_legacy_clip_nans`
 - Default settings (`dem_source` from `default_dem_source`): `map2stl/app/server/routers/settings.py::get_default_settings`
-- DEM route (returns `dem_id`, `source_resolution`, empty-DEM warning): `map2stl/app/server/routers/terrain.py::get_terrain_dem` (`_fetch_dem_array`, `_dem_empty_warning`)
+- DEM route (returns `dem_id`, `source_resolution`, empty-DEM warning): `map2stl/app/server/routers/terrain.py::get_terrain_dem` (`_dem_empty_warning`)
 - Server settings, cache paths, limits: `map2stl/app/server/config.py` (`EE_CACHE_DIR` under `geo2stl.cache.CACHE_ROOT`, `CACHE_DIRS`, `CACHE_MAX_FILES`)
 - Shared in-flight dedupe (hydrology, trails): `map2stl/app/server/core/inflight.py::dedupe`
-- FastAPI app, page routes, run helper: `map2stl/app/server/server.py::app` (`guides_page`, `reports_page`, `run_server`)
+- FastAPI app, page routes: `map2stl/app/server/server.py::app` (`guides_page`, `reports_page`)
 
 ### Frontend
 

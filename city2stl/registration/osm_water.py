@@ -345,7 +345,7 @@ def _rasterize(geoms: list, bbox, grid: int) -> np.ndarray:
 
     North-up is what `numpy2stl.raster.burn_polygons` produces and row 0 = south
     is what `mesh_to_heightmap` produces, so the result is flipped to match the
-    plate raster -- the same correction `cities._rasterize_rasterio` makes.
+    plate raster -- the same correction `osm_raster._rasterize_buildings` makes.
     """
     from numpy2stl.raster import burn_polygons
 

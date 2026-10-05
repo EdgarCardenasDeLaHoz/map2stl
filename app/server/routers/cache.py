@@ -8,67 +8,16 @@ from __future__ import annotations
 
 import logging
 import time
-from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
-from app.server.config import CACHE_CLEAR_INTERVAL, CACHE_DIRS, CACHE_MAX_FILES, EE_CACHE_DIR
-from app.server.core.cache import CACHE_ROOT as CORE_CACHE_ROOT
-from app.server.core.cache_inspector import (
-    build_region_tree as _build_region_tree,
-)
-from app.server.core.cache_inspector import (
-    build_tree_node as _build_tree_node,
-)
-from app.server.core.cache_inspector import (
-    flatten_files as _flatten_files,
-)
+from app.server.config import CACHE_CLEAR_INTERVAL, CACHE_DIRS, CACHE_MAX_FILES
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["cache"])
 
 _last_cache_clear: float = 0.0
-
-
-def _iter_cache_roots() -> list[Path]:
-    """Return unique existing cache directories used by the app."""
-    candidates = [CORE_CACHE_ROOT, EE_CACHE_DIR, *CACHE_DIRS]
-    dedup: list[Path] = []
-    seen: set[str] = set()
-    for raw in candidates:
-        try:
-            p = Path(raw).resolve()
-        except Exception:
-            logger.debug('Could not resolve cache root path', exc_info=True)
-            continue
-        key = str(p).lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        if p.exists() and p.is_dir():
-            dedup.append(p)
-    return dedup
-
-
-def _load_regions() -> list[dict[str, Any]]:
-    from app.server.core.db import get_db
-
-    try:
-        with get_db() as conn:
-            rows = conn.execute(
-                "SELECT name, north, south, east, west FROM regions ORDER BY name"
-            ).fetchall()
-    except Exception:
-        return []
-
-    regions: list[dict[str, Any]] = []
-    for row in rows:
-        item = dict(row)
-        item["area"] = max(0.0, (item["north"] - item["south"]) * (item["east"] - item["west"]))
-        regions.append(item)
-    return regions
 
 
 # ---------------------------------------------------------------------------
@@ -187,57 +136,4 @@ async def check_cache(
         "cached": cached, "cache_key": cache_key,
         "bbox": {"north": north, "south": south, "east": east, "west": west},
         "dataset": dataset, "scale": scale,
-    })
-
-
-@router.get("/api/cache/inventory")
-async def get_cache_inventory():
-    """Return full cache file inventory and directory tree for UI visualization."""
-    roots = _iter_cache_roots()
-    regions = _load_regions()
-
-    root_nodes: list[dict[str, Any]] = []
-    files: list[dict[str, Any]] = []
-    total_size = 0
-    total_files = 0
-
-    for root in roots:
-        node = _build_tree_node(root, root)
-        if node is None:
-            continue
-        root_name = root.name
-        node["path"] = root_name
-        node["root_path"] = str(root)
-        root_nodes.append(node)
-        _flatten_files(node, root_name, root, regions, files)
-        total_size += int(node.get("size_bytes", 0))
-        total_files += int(node.get("file_count", 0))
-
-    files.sort(key=lambda f: (str(f.get("region_group", "")), -int(f.get("size_bytes", 0))))
-    region_tree = _build_region_tree(files)
-
-    return JSONResponse(content={
-        "status": "ok",
-        "generated_at": time.time(),
-        "total_size_bytes": total_size,
-        "total_files": total_files,
-        "roots": [
-            {
-                "name": n.get("name"),
-                "path": n.get("root_path", ""),
-                "size_bytes": int(n.get("size_bytes", 0)),
-                "file_count": int(n.get("file_count", 0)),
-            }
-            for n in root_nodes
-        ],
-        "tree": region_tree,
-        "physical_tree": {
-            "name": "cache",
-            "path": "cache",
-            "is_dir": True,
-            "size_bytes": total_size,
-            "file_count": total_files,
-            "children": root_nodes,
-        },
-        "files": files,
     })

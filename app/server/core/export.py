@@ -111,8 +111,6 @@ class TerrainField:
 
     z_mm: np.ndarray       # (H, W), row 0 north, base included
     scale: ModelScale
-    elev_min_m: float
-    elev_max_m: float
     # Water for the viewer to colour like the Edit map: 0 dry, 0..1 relative carve
     # depth (rivers, lakes, open water), WATER_SEA on the open sea. None without a carve.
     water: np.ndarray | None = None
@@ -137,7 +135,7 @@ def terrain_stage(p: ExportContext, data: dict) -> TerrainField:
         im = _apply_contour_lines(im, im_min, im_max, p.model_height * p.exaggeration,
                                   p.base_height, contour_interval,
                                   data.get("contour_style", "engraved"))
-    return TerrainField(im, scale, im_min, im_max, masks.get("water"))
+    return TerrainField(im, scale, masks.get("water"))
 
 
 def _prepare_dem_array(p: ExportContext, masks: dict | None = None

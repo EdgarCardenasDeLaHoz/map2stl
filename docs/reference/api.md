@@ -35,7 +35,7 @@ Primary `TerrainSession` touchpoints:
 - `fetch_dem()` uses `/api/terrain/dem`
 - `fetch_water_mask()` and `fetch_esa_landcover()` both use `/api/terrain/water-mask`
 - `fetch_satellite()` uses `/api/terrain/satellite`
-- `fetch_hydrology()` uses `/api/terrain/hydrology`; `merge_hydrology_with_dem()` uses `/api/composite/hydrology-merge`
+- `fetch_hydrology()` uses `/api/terrain/hydrology`
 - `merge_dem()` uses `/api/composite/dem-merge`
 
 Terrain bbox parsing is centralized in `app/server/core/validation.py::parse_bbox_query`, so
@@ -53,7 +53,6 @@ because they operate on the terrain DEM). DEM previews are under Export Routes.
 | GET | `/api/terrain/sources` | List DEM data sources; each has `native_resolution_m` (`geo2stl.dem.DEM_SOURCE_INFO`). `default_source` is `SRTMGL1` when an OpenTopography key is configured, else `h5_local` / `local` (`default_dem_source`); the client selects it until a preset, saved settings or the user choose. |
 | GET | `/api/terrain/hydrology` | River depression grid for the bbox, united with the open water (sea, lakes; `water_surface`). HydroRIVERS also returns `order_grid_b64` (Strahler order per pixel, `order_water_code` = open water) and `order_counts`; its order grid and water mask are cached without `min_order` / depth / exponent, so changing those is a lookup (`_hydrorivers_payload`) |
 | GET | `/api/terrain/trails` | Fetch ski and hiking trail relief grids for bbox. **Params:** `dim` (default 600), `relief_m` (default -2.0, negative engraves), `width_m` (default 8, clamped 1–500), `source` (`osm` \| `usfs` \| `all`), `categories` (comma-separated subset of `ski,hiking`). Returns **both** grids (`ski_grid_values_b64`, `hiking_grid_values_b64`) in one response so client-side category toggles need no refetch. Also returns `ski_area_grid_values_b64` and `hiking_area_grid_values_b64`: display-only 0/1 masks of the interiors of features mapped as closed ways (piste and ski-area polygons). The relief grids carry only linework, boundaries included, so an areal feature can never engrave a filled region into the DEM. Also returns `ski_difficulty_grid_values_b64` - the piste grade per pixel as a 1-based index into `difficulty_classes` (0 means no usable `piste:difficulty` tag), sent as float32 like the other grids because the values are small integers and survive the cast exactly. A reader must treat it as class indices and never interpolate it; the server reprojects it nearest-neighbour for the same reason. Where two pistes cross, the harder grade wins. On an Overpass outage the response is HTTP 200 with null grids, `upstream_error: true`, and an `error` naming the failure - distinct from a region that genuinely holds no trails, which returns null grids with `feature_count: 0` and no `upstream_error`. Nothing is cached in either failure case. |
-| POST | `/api/composite/hydrology-merge` | Merge hydrology depression into DEM array |
 | POST | `/api/composite/dem-merge` | Merge multiple DEM layers (`MergeRequest`). Layers are an ordered list: each names a source, a blend mode (`add` raises, `rivers` cuts), a weight and a processing pipeline. Sources are geo2stl's built-ins plus anything the server registered — `osm_buildings`, `osm_roads`, `osm_waterways`, `osm_walls`, and the terrain-relative water sources `hydrorivers`, `natural_earth_rivers`, `lakes` (F-REGION, `geo2stl/water_layers.py`: negative metres below the ground on the base DEM grid, blend `add`; options `min_order`, `width_scale`, `snap` (default true: re-route onto the DEM valley floor) for rivers, `depth_m`, `min_area_m2`, `smooth` (default 3) for lakes). The same spec is what an export sends as `composite_layers`; there the river/lake carve is added after the median filter. A layer after the first whose source fails (ESA water without Earth Engine, an Overpass outage) is skipped and named in the response's `warnings` list; the base layer failing is an error. The grid is the projected base grid, the same one `/api/terrain/dem` returns. |
 
 ## Export Routes (`app/server/routers/export.py`)
@@ -159,7 +158,6 @@ Primary `TerrainSession` touchpoints:
 | DELETE | `/api/cache` | Clear server cache |
 | DELETE | `/api/cache/region` | Clear cache for a specific region bbox |
 | GET | `/api/cache/check` | Check if specific bbox is cached |
-| GET | `/api/cache/inventory` | Full cache file inventory and directory tree for the cache UI |
 | GET | `/api/settings/projections` | Available projections |
 | GET | `/api/settings/colormaps` | Available colormaps |
 | GET | `/api/settings/datasets` | Available DEM datasets |
@@ -317,7 +315,7 @@ only when the client posts it to the location route above.
 - `PlateRegistrationStartRequest` — `{slug, place, fix, rel_path?}`
 - `CriticScoreRequest` — `{reference: CriticReference, model: CriticModel}`
 - `LandmarksRequest` — `{buildings, tallest_n, region?}`; `LandmarkPreviewRequest` — `{buildings, osm_id, override?}`
-- Also defined there: `EnhanceHeightsRequest`, `CityRasterRequest`, `HydrologyMergeRequest`, settings item models (`ProjectionInfo`, `ColormapInfo`, `DatasetInfo`), mesh-import request models (`MeshHeightmapRequest`, `MeshRegisterRequest`, `MeshLibrarySetLocationRequest`, `MeshLibraryHeightmapRequest`, …), `CriticReference` / `CriticModel`
+- Also defined there: `EnhanceHeightsRequest`, `CityRasterRequest`, settings item models (`ProjectionInfo`, `ColormapInfo`, `DatasetInfo`), mesh-import request models (`MeshHeightmapRequest`, `MeshRegisterRequest`, `MeshLibrarySetLocationRequest`, `MeshLibraryHeightmapRequest`, …), `CriticReference` / `CriticModel`
 - Only request models are declared: responses are plain dicts / `JSONResponse` (the unused response and terrain/export models were deleted 2026-09-30). The saved-settings blob is free-form JSON.
 - Most export routes take a raw JSON body (`await request.json()`), parsed by `app/server/core/export_params.py::ExportContext`, not a Pydantic model.
 

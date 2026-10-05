@@ -70,13 +70,13 @@ from geo2stl.processing import (
     upsample_dem as _upsample_dem,
 )
 from geo2stl.projections import (
-    project_grid as _project_grid_impl,
+    project_grid as _project_grid,
 )
 from geo2stl.projections import (
     project_rgb_image as _project_rgb_image,
 )
 from geo2stl.projections import (
-    project_water_arrays as _project_water_arrays_impl,
+    project_water_arrays as _project_water_arrays,
 )
 from geo2stl.sat2stl import (
     fetch_sat_overlay as _fetch_sat_overlay,
@@ -110,43 +110,6 @@ _TRAILS_INFLIGHT: dict[str, "asyncio.Future"] = {}
 # ---------------------------------------------------------------------------
 # Sync compute helpers (called via run_in_executor to avoid blocking the loop)
 # ---------------------------------------------------------------------------
-
-
-def _project_grid(arr, north, south, east, west, projection, clip_valid_region,
-                  categorical=False, maintain_dimensions=False):
-    """Apply geo2stl projection to a 2-D array. Sync helper.
-
-    Delegates to core.projection.project_grid — kept as a thin wrapper
-    so existing call-sites in this module do not change.
-    """
-    return _project_grid_impl(arr, north, south, east, west, projection,
-                              clip_valid_region, categorical=categorical,
-                              maintain_dimensions=maintain_dimensions)
-
-
-def _project_water_arrays(water_mask, esa_img, north, south, east, west,
-                          projection, clip_valid_region, maintain_dimensions=False):
-    """Project both water mask and ESA arrays to keep them aligned.
-
-    Delegates to core.projection.project_water_arrays.
-    """
-    return _project_water_arrays_impl(water_mask, esa_img, north, south,
-                                      east, west, projection, clip_valid_region,
-                                      maintain_dimensions=maintain_dimensions)
-
-
-def _fetch_dem_array(dem_source, north, south, east, west, dim,
-                     depth_scale, water_scale, subtract_water, maintain_dimensions):
-    """Fetch a plate-carrée DEM array. Sync — call via run_in_executor.
-
-    Source routing, the h5 -> SRTMGL3 fallback and the zero array on a local
-    failure (detected by _dem_empty_warning) are ``geo2stl.dem.fetch_dem``;
-    projection is applied by the caller.
-    """
-    return _fetch_dem((north, south, east, west), dim, dem_source,
-                      depth_scale=depth_scale, water_scale=water_scale,
-                      subtract_water=subtract_water,
-                      maintain_dimensions=maintain_dimensions)
 
 
 def _dem_empty_warning(im: np.ndarray) -> str | None:
@@ -292,18 +255,13 @@ async def get_terrain_dem(
             payload["dimensions"])
         return JSONResponse(content=payload)
 
-    # Guard: bbox already validated above but south/north could be None only in edge cases
-    if north is None or south is None:
-        south, north = -0.01, 0.01
-    if east is None or west is None:
-        west, east = -0.01, 0.01
-
     try:
         if im_raw is None:
-            im_raw = await run_sync(_fetch_dem_array, dem_source,
-                                    north, south, east, west, dim,
-                                    depth_scale, water_scale,
-                                    subtract_water, maintain_dimensions)
+            im_raw = await run_sync(_fetch_dem, (north, south, east, west), dim,
+                                    dem_source, depth_scale=depth_scale,
+                                    water_scale=water_scale,
+                                    subtract_water=subtract_water,
+                                    maintain_dimensions=maintain_dimensions)
             im_raw = _upsample_dem(im_raw, dim)
 
         # Apply projection uniformly for ALL sources.

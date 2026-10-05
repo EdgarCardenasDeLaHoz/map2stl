@@ -1,20 +1,11 @@
 """
-Copernicus EU Building Height provider.
+Copernicus EU Building Height provider (10 m, Europe only).
 
-Data: GHS-BUILT-H from the GHSL (Global Human Settlement Layer) project.
-- Raster building height, 10m resolution within Europe, 100m globally.
-- European coverage via Copernicus Land Monitoring Service.
-- Access: HTTPS download, no API key required.
-
-We use the JRC GHSL R2023A release which provides building heights globally.
-For European cities, the 10m EU product is available via WCS.
-Fallback: JRC GHSL GHS-BUILT-H 100m (global).
-
-License: CC-BY-4.0
-
-Alternative approach: Copernicus Land Monitoring Service provides Urban Atlas
-Building Height (10m, EU only) but access requires user registration and
-download by Functional Urban Area. The GHSL WMS/WCS endpoint is simpler.
+Data: the Copernicus Land Monitoring Service Building Height 2012 raster, read
+through the EEA discomap WCS (``_EU_WCS_URL``). HTTPS, no API key. CC-BY-4.0.
+Outside Europe ``covers`` is False; WSF3D and nDSM cover the global case. (A
+GHSL GHS-BUILT-H global fallback was never implemented; its stub was removed
+2026-10-05.)
 """
 
 from __future__ import annotations
@@ -43,22 +34,7 @@ _RESOLUTION_M = 10.0  # EU product
 _NAMESPACE = "copernicus_bh"
 _DOWNLOAD_TIMEOUT = 90
 
-# GHSL GHS-BUILT-H R2023A — JRC HTTPS tile distribution
-# The data is distributed as 10° × 10° tiles in Mollweide projection.
-# For our use case, we use the OGC WCS endpoint which accepts
-# geographic bounding boxes and returns GeoTIFF directly.
-
-# JRC Data Portal WCS endpoint (no key required):
-_WCS_BASE = (
-    "https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/GHSL/"
-    "GHS_BUILT_H_GLOBE_R2023A/GHS_BUILT_H_ANBH_E2018_GLOBE_R2023A_54009_10/V1-0/"
-)
-
-# Alternative: direct tile download for known tile indices.
-# Tiles follow Mollweide 10°×10° grid. Converting bbox → tile index is complex.
-# Instead, we provide a simpler approach using the REST endpoint.
-
-# EU Building Height WCS (alternative, simpler for Europe):
+# EU Building Height WCS:
 _EU_WCS_URL = (
     "https://image.discomap.eea.europa.eu/arcgis/services/"
     "GioLand/BuildingHeight2012/MapServer/WCSServer"
@@ -116,27 +92,13 @@ def _fetch_eu_wcs(bbox: BBox, dim: tuple[int, int]) -> np.ndarray | None:
         return None
 
 
-def _fetch_ghsl_tiles(bbox: BBox, dim: tuple[int, int]) -> np.ndarray | None:
-    """Fetch GHSL GHS-BUILT-H tiles (global, 100m).
-
-    This is the fallback for non-European areas.
-    Uses a simplified approach: download pre-computed tiles from JRC FTP.
-    """
-    # GHSL tiles are in Mollweide projection with complex naming.
-    # For now, return None — this will be implemented when we need
-    # non-European coverage from GHSL specifically.
-    # Other providers (WSF3D, nDSM) cover the global case.
-    logger.debug("GHSL global tile fetch not yet implemented")
-    return None
-
-
 def _parse_geotiff_bytes(data: bytes) -> np.ndarray | None:
     """Parse building-height GeoTIFF bytes (zero/negative = no building)."""
     return read_geotiff_bytes(data, zero_as_nodata=True, context="Copernicus GeoTIFF")
 
 
 class CopernicusProvider:
-    """Copernicus EU Building Height (10m, Europe) + GHSL fallback."""
+    """Copernicus EU Building Height (10m, Europe)."""
 
     name = "copernicus"
 
@@ -145,7 +107,7 @@ class CopernicusProvider:
         return _is_in_europe(bbox)
 
     def fetch_heights(self, bbox: BBox, dim: tuple[int, int]) -> HeightResult:
-        """Fetch building heights from Copernicus/GHSL sources."""
+        """Fetch building heights from the EU WCS (empty outside Europe or on failure)."""
         north, south, east, west = bbox
         cache_key = make_cache_key(_NAMESPACE, north, south, east, west,
                                    {"dim": list(dim)})
@@ -155,18 +117,7 @@ class CopernicusProvider:
         if hit is not None:
             return hit
 
-        raster = None
-        resolution = _RESOLUTION_M
-
-        # Try EU WCS first (better resolution)
-        if _is_in_europe(bbox):
-            raster = _fetch_eu_wcs(bbox, dim)
-
-        # Fallback to GHSL global
-        if raster is None:
-            raster = _fetch_ghsl_tiles(bbox, dim)
-            resolution = 100.0
-
+        raster = _fetch_eu_wcs(bbox, dim) if _is_in_europe(bbox) else None
         if raster is None:
             return _empty_result(dim)
 
@@ -178,7 +129,7 @@ class CopernicusProvider:
             np.isnan(raster), 0.0, _CONFIDENCE
         ).astype(np.float32)
 
-        result = HeightResult(raster, confidence, self.name, resolution)
+        result = HeightResult(raster, confidence, self.name, _RESOLUTION_M)
 
         # Cache
         write_height_result(_NAMESPACE, cache_key, result)

@@ -90,7 +90,7 @@ app/ (server, client, session SDK)
 - **Rasters** — `city2stl/rasterize.py::rasterize_city_data` (row 0 = north, via
   `numpy2stl/src/numpy2stl/raster/burn.py::burn_polygons`);
   `city2stl/osm_raster.py::get_osm_building_heightmap` (registration rasters, row 0 = south).
-- **Roads** — `city2stl/roads.py::get_road_width_m`, `city2stl/roads.py::get_road_model`.
+- **Roads** — `city2stl/roads.py::get_road_width_m` (total width by `highway` tag).
 - **Roofs**
   - `city2stl/roofs.py::building_solids` — pitched-roof solids (hipped / gabled).
   - `city2stl/roof_classifier.py::classify_roof_shapes` — satellite-signal cascade.
@@ -161,7 +161,7 @@ Brief map; detail in [numpy2stl README](../../../numpy2stl/README.md).
 | STL import / registration | `app/server/core/mesh_import.py` | `city2stl/height/stl_import.py::stl_to_heightmap`, `city2stl/height/infill.py::infill_idw`, `city2stl/registration/__init__.py::register_city_stl` |
 | Plate registration | `app/server/core/plate_registration.py`, `app/server/routers/registration.py` | `city2stl/registration/street_place.py::place_plate`, `city2stl/registration/consensus.py::score_export`, `city2stl/registration/critic.py::score_model` |
 | Puzzle | `app/server/core/puzzle.py` | `numpy2stl/src/numpy2stl/processing/boolean.py::cut_jigsaw`, `numpy2stl/src/numpy2stl/io/writers.py::write3MF` |
-| Height model training (offline) | `app/server/core/height/train.py` | `city2stl/height/train.py::train` |
+| Height model training (offline) | — (`app/server/core/height/train.py` deleted 2026-10-05) | `city2stl/height/train.py::train` |
 
 - The provider registry, selection and `enhance_city_data` live in `city2stl/height/service.py`;
   the app imports it directly. `app/server/core/height/service.py` (an unused async fetch with a

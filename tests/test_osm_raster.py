@@ -93,21 +93,26 @@ class TestMakeResult:
         assert N_out == pytest.approx(40.0)
 
 
+def _philadelphia(resolution: int) -> dict:
+    from city2stl.osm_raster import get_osm_building_heightmap
+    return get_osm_building_heightmap((40.060, 39.860, -74.950, -75.280), resolution=resolution)
+
+
 @pytest.mark.integration
 @pytest.mark.skipif(not HAS_OSMNX or not HAS_GEOPANDAS, reason="osmnx/geopandas not installed")
-class TestGetPhiladelphiaHeightmap:
+class TestPhiladelphiaHeightmap:
+    """get_osm_building_heightmap over the full Philadelphia extent (live Overpass)."""
+
 
     def test_returns_correct_format(self):
-        from city2stl.osm_raster import get_philadelphia_heightmap
-        result = get_philadelphia_heightmap(resolution=64)
+        result = _philadelphia(resolution=64)
         assert "heightmap" in result
         assert result["heightmap"].dtype == np.float64
         assert result["heightmap"].shape == (64, 64)
         assert result["projection"] == "max"
 
     def test_bounds_are_latitude_longitude(self):
-        from city2stl.osm_raster import get_philadelphia_heightmap
-        result = get_philadelphia_heightmap(resolution=64)
+        result = _philadelphia(resolution=64)
         W, E = result["bounds"]["x"]
         S, N = result["bounds"]["y"]
         # Philadelphia is in the western hemisphere, ~40°N
@@ -119,8 +124,7 @@ class TestGetPhiladelphiaHeightmap:
         assert S < N
 
     def test_has_some_buildings(self):
-        from city2stl.osm_raster import get_philadelphia_heightmap
-        result = get_philadelphia_heightmap(resolution=64)
+        result = _philadelphia(resolution=64)
         valid = result["heightmap"][~np.isnan(result["heightmap"])]
         assert len(valid) > 0
         assert valid.max() > 5.0  # at least some buildings > 5 m

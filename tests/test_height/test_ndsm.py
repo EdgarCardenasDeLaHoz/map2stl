@@ -11,7 +11,6 @@ from city2stl.height.providers.ndsm import (
     _crop_to_bbox,
     _stitch_tiles,
     _tile_name_glo30,
-    _tile_url_fabdem,
     _tile_url_glo30,
     _tiles_for_bbox,
 )
@@ -28,11 +27,6 @@ class TestTileNaming:
     def test_glo30_url(self):
         url = _tile_url_glo30(41, 2)
         assert "copernicus-dem-30m.s3" in url
-        assert url.endswith(".tif")
-
-    def test_fabdem_url(self):
-        url = _tile_url_fabdem(41, 2)
-        assert "FABDEM" in url
         assert url.endswith(".tif")
 
 
@@ -116,23 +110,19 @@ class TestNDSMCovers:
 # ── Provider fetch (mocked tiles) ────────────────────────────────
 
 class TestNDSMFetch:
-    def _mock_get_tile(self, dsm_val: float, dtm_val: float):
-        """Return a mock _get_tile that returns constant-value arrays."""
-        def fake(source, lat, lon):
-            if source == "glo30":
-                return np.full((100, 100), dsm_val, dtype=np.float32)
-            elif source == "fabdem":
-                return np.full((100, 100), dtm_val, dtype=np.float32)
-            return None
-        return fake
+    @staticmethod
+    def _mock_sources(mock_tile, mock_srtm, dsm_val: float, dtm_val: float):
+        """Constant GLO-30 DSM tiles and a constant SRTM DTM (other grid size)."""
+        mock_tile.return_value = np.full((100, 100), dsm_val, dtype=np.float32)
+        mock_srtm.return_value = np.full((40, 40), dtm_val, dtype=np.float32)
 
     @patch("city2stl.height.providers.ndsm.read_height_result", return_value=None)
     @patch("city2stl.height.providers.ndsm.write_height_result")
-    @patch("city2stl.height.providers.ndsm._fetch_srtm_opentopo", return_value=None)
+    @patch("city2stl.height.providers.ndsm._fetch_srtm_opentopo")
     @patch("city2stl.height.providers.ndsm._get_tile")
     def test_basic_subtraction(self, mock_tile, mock_srtm, mock_write, mock_read):
-        """DSM=150m, DTM=130m → nDSM=20m building height (SRTM off → FABDEM tiles)."""
-        mock_tile.side_effect = self._mock_get_tile(150.0, 130.0)
+        """DSM=150m, DTM=130m → nDSM=20m building height."""
+        self._mock_sources(mock_tile, mock_srtm, 150.0, 130.0)
         p = NDSMProvider()
         result = p.fetch_heights((41.5, 41.3, 2.3, 2.1), (50, 50))
 
@@ -144,11 +134,11 @@ class TestNDSMFetch:
 
     @patch("city2stl.height.providers.ndsm.read_height_result", return_value=None)
     @patch("city2stl.height.providers.ndsm.write_height_result")
-    @patch("city2stl.height.providers.ndsm._fetch_srtm_opentopo", return_value=None)
+    @patch("city2stl.height.providers.ndsm._fetch_srtm_opentopo")
     @patch("city2stl.height.providers.ndsm._get_tile")
     def test_negative_clamped_to_zero(self, mock_tile, mock_srtm, mock_write, mock_read):
         """DTM > DSM (artefact) → clamped to 0, not negative."""
-        mock_tile.side_effect = self._mock_get_tile(100.0, 105.0)
+        self._mock_sources(mock_tile, mock_srtm, 100.0, 105.0)
         p = NDSMProvider()
         result = p.fetch_heights((41.5, 41.3, 2.3, 2.1), (20, 20))
         assert np.all(result.raster >= 0)
@@ -167,13 +157,9 @@ class TestNDSMFetch:
     @patch("city2stl.height.providers.ndsm.write_height_result")
     @patch("city2stl.height.providers.ndsm._fetch_srtm_opentopo", return_value=None)
     @patch("city2stl.height.providers.ndsm._get_tile")
-    def test_no_fabdem_returns_nan(self, mock_tile, mock_srtm, mock_write, mock_read):
-        """DSM available but no SRTM/FABDEM → nDSM is NaN (can't subtract)."""
-        def fake(source, lat, lon):
-            if source == "glo30":
-                return np.full((100, 100), 150.0, dtype=np.float32)
-            return None
-        mock_tile.side_effect = fake
+    def test_no_dtm_returns_nan(self, mock_tile, mock_srtm, mock_write, mock_read):
+        """DSM available but no SRTM → nDSM is NaN (can't subtract)."""
+        mock_tile.return_value = np.full((100, 100), 150.0, dtype=np.float32)
         p = NDSMProvider()
         result = p.fetch_heights((41.5, 41.3, 2.3, 2.1), (20, 20))
         assert np.all(np.isnan(result.raster))

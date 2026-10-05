@@ -428,35 +428,13 @@ class TestSchemaValidation:
 # ===================================================================
 
 class TestImportChain:
-    """Verify that the new shared projection module is importable and
-    that terrain.py delegates to it (not defining its own)."""
+    """terrain.py uses geo2stl.projections directly (no local re-implementation)."""
 
-    def test_terrain_router_delegates_to_geo2stl(self):
-        """terrain.py's _project_grid should delegate to geo2stl.projections."""
-        from app.server.routers.terrain import _project_grid
-        from geo2stl.projections import project_grid
-        # The thin wrapper should exist and be callable
-        assert callable(_project_grid)
-        # Verify it's a wrapper, not a re-implementation
-        # (the wrapper calls project_grid internally — we can't easily verify
-        # without mocking, but we can verify it accepts the same args)
-        h, w = 30, 40
-        arr = np.linspace(0, 100, h * w, dtype=np.float32).reshape(h, w)
-        # Both should produce identical output
-        r1 = _project_grid(arr, *_BBOX, "cosine", True)
-        r2 = project_grid(arr, *_BBOX, "cosine", True)
-        np.testing.assert_array_equal(r1, r2)
-
-    def test_terrain_water_arrays_delegates_to_core(self):
-        from app.server.routers.terrain import _project_water_arrays
-        from geo2stl.projections import project_water_arrays
-        h, w = 30, 40
-        water = np.random.choice([0.0, 1.0], size=(h, w)).astype(np.float32)
-        esa = np.random.choice([10, 20, 80], size=(h, w)).astype(np.float32)
-        wm1, e1 = _project_water_arrays(water, esa, *_BBOX, "cosine", True)
-        wm2, e2 = project_water_arrays(water, esa, *_BBOX, "cosine", True)
-        np.testing.assert_array_equal(wm1, wm2)
-        np.testing.assert_array_equal(e1, e2)
+    def test_terrain_router_uses_geo2stl_projections(self):
+        from app.server.routers import terrain
+        from geo2stl.projections import project_grid, project_water_arrays
+        assert terrain._project_grid is project_grid
+        assert terrain._project_water_arrays is project_water_arrays
 
 
 # ===================================================================

@@ -347,9 +347,9 @@ window.api = (() => {
     // Cache
     // -------------------------------------------------------------------------
     // Only the per-region clear is wired to the UI (the Edit view's clear
-    // button). GET /api/cache, /api/cache/inventory, /api/cache/check and DELETE
-    // /api/cache lost their client wrappers with the cache-status panel and cache-inventory
-    // view (removed 2026-09-30); the routes remain for scripts.
+    // button). GET /api/cache, /api/cache/check and DELETE /api/cache lost their
+    // client wrappers with the cache-status panel (removed 2026-09-30); the routes
+    // remain for scripts. /api/cache/inventory was deleted 2026-10-05.
     const cache = {
         /** DELETE /api/cache/region?north=...&south=...&east=...&west=... */
         clearRegion: (bbox) => _fetch(

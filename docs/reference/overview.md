@@ -52,7 +52,7 @@ flowchart LR
 | `app/server/routers/terrain.py` | DEM (returns a `dem_id`), water mask, ESA land cover, satellite, hydrology, trails, sources |
 | `app/server/routers/export.py` | STL/OBJ/3MF sync routes, preview, preflight, cross-section, puzzle, async `start`/`status`/`download` |
 | `app/server/routers/cities.py` | OSM city layers (sync + task), city raster, height enhancement, landmarks, survey sources |
-| `app/server/routers/composite.py` | server composite (`city-raster`, `dem-merge`, `hydrology-merge`) |
+| `app/server/routers/composite.py` | server composite (`city-raster`, `dem-merge`) |
 | `app/server/routers/regions.py` | saved regions, their settings blob, per-region landmark overrides |
 | `app/server/routers/layers.py` | mesh import (upload / library) → heightmap → registration |
 | `app/server/routers/registration.py` | plate-registration packs and tasks, model critic scores |
@@ -146,8 +146,7 @@ flowchart LR
     OSM shorthand `geo2stl/cache.py::osm_cache_key`.
   - TTL per namespace: `geo2stl/cache.py::NAMESPACE_TTL`. Root: `geo2stl/cache.py::CACHE_ROOT`
     (`map2stl/cache/` or `$MAP2STL_CACHE`).
-- **App-side:** `app/server/core/cache.py::prune_all_caches` at startup; per-bbox clearing;
-  the cache inventory route.
+- **App-side:** `app/server/core/cache.py::prune_all_caches` at startup; per-bbox clearing.
 - **City model caches:** `city2stl/model_cache.py` — layer polygons, layer solids, terrain TIN,
   keyed by content digests plus `city2stl/model_cache.py::MODEL_CACHE_VERSION` (bump on any
   geometry change). Disabled with `MAP2STL_CITY_CACHE=0`.
