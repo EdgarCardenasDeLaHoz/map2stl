@@ -25,11 +25,27 @@ python scripts/quicktest.py    # while developing: only tests the uncommitted ch
 npm install && npm run build  # after editing .vue / .ts (the Vue bundle in dist/ is gitignored)
 ```
 
-Cloud sessions (claude.ai/code): `.claude/hooks/session-start.sh` clones `../numpy2stl`, builds
-`~/.venvs/map2stl` (no torch) and runs `npm install`, so pytest, ruff, vitest and the build work.
-No Google key and no survey/Overpass hosts unless the environment's settings add them.
-**Cloud sessions follow the rules in readme.md › "Rules for cloud sessions"** (one small branch
-from current master, no deletions without approval, owned areas off-limits, never merge to master).
+## Cloud agents
+
+Cloud sessions (claude.ai/code) take their work from [docs/agents/TASKS.md](docs/agents/TASKS.md):
+only tasks with Owner `cloud` and Status `todo`. Setup is automatic:
+`.claude/hooks/session-start.sh` clones `../numpy2stl`, builds `~/.venvs/map2stl` (no torch) and
+runs `npm install`. No Google key and no survey/Overpass hosts unless the environment adds them.
+
+- **Branches:** start every task from the latest `origin/master`; one branch per task, named
+  `cloud/<task-id>-<slug>`, about 10 files, with tests. Never push to master or another agent's
+  branch; never merge (a local session merges, see TASKS.md › Merge process).
+- **No deletions without approval:** list modules or files you'd remove in the task's Notes (or
+  the branch description) for the user. Keep `tools/ml/`, `city2stl/roof_nets.py` and all model code.
+- **Local-only resources:** no GPU/CUDA, no local `cache/` data, no Google Maps / Street View /
+  Earth Engine requests that need keys or cost money. Use the `requires_cache`, `requires_gpu`,
+  `requires_network`, `requires_keys` test markers.
+- **Owned areas:** don't edit `city2stl/skyline/` or the F-SKYBENCH plan unless the task says so
+  (the local panoramic session owns them), nor the Edit panel (`components/dem/LayerSettings.vue`,
+  `settings/`) or the shared docs (`docs/plans/README.md`, `docs/proposals.md`, `docs/decisions/`).
+- **Performance:** BLAS threads = 1 in pool workers (`OPENBLAS_NUM_THREADS` / `OMP_NUM_THREADS`),
+  no polling loops, no `find /`.
+- **When done:** push the branch and set the task to `review` with the test counts.
 
 ## Where things are
 

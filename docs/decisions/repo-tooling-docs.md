@@ -3,7 +3,8 @@
 Repo names and layout, venvs, test markers, agent scripts, where docs and plans live, and the align tool's pack lookup. Related: [architecture.md](architecture.md).
 
 ### 2026-10-05 — Cloud sessions work on small branches from master and never merge
-- **Decision:** cloud (claude.ai/code) sessions follow readme.md › "Rules for cloud sessions":
+- **Decision:** cloud (claude.ai/code) sessions take tasks from `docs/agents/TASKS.md` (Owner
+  `cloud`, Status `todo`) and follow CLAUDE.md › "Cloud agents":
   one task per branch from current `origin/master`, about 10 files, with tests; no deletions
   without the user's approval; skyline, ML, the Edit panel and the shared docs are off-limits
   unless named; repo-and-CPU work only; a local session reviews and merges.
