@@ -213,6 +213,15 @@ def _shared_buildings(results: list[dict], rows: list[dict]) -> list[dict]:
     return sorted(out, key=lambda b: (-len(b["reads"]), b["name"]))
 
 
+def _truth(args, footprints: dict) -> dict:
+    """Benchmark truth for ``footprints``; with ``--no-truth-fetch`` only what the cache holds
+    (no survey or paid 3D Tiles reads)."""
+    if getattr(args, "no_truth_fetch", False):
+        cache = bm.load_truth_cache(args.region)
+        return {k: cache[k] for k in footprints if k in cache}
+    return bm.footprint_truth(args.region, footprints, bm.REGIONS.get(args.region))
+
+
 def _flag(t: dict, h_cam: float = 2.0) -> str | None:
     """Why a stored tower reading isn't trusted (``ph.reading_flag``), or None; works on photo
     results written before the flags existed."""
@@ -437,10 +446,15 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
     towers = sm.tower_table(osm["buildings"]["features"])
     # truth for every candidate tower (kept or not), so the gates can be judged per photo
     all_t = {t["tower"] for r in results for t in r.get("towers") or []}
+    # saved results index the tower table; a changed region box or OSM data makes another table
+    stale = [t for r in results for t in r.get("towers") or []
+             if t["tower"] >= len(towers.verts) or towers.names[t["tower"]] != t["name"]]
+    if stale:
+        raise SystemExit(f"photo_results.json was written with another tower table ({len(stale)} "
+                         "readings don't match; the region box or OSM changed): run without --rescore")
     rings = {ti: [list(towers.to_ll(x, y))[::-1] for x, y in towers.verts[ti]] for ti in all_t}
     keys = {ti: bm.footprint_key(r) for ti, r in rings.items()}
-    truth = bm.footprint_truth(args.region, {keys[ti]: rings[ti] for ti in all_t},
-                               bm.REGIONS.get(args.region))
+    truth = _truth(args, {keys[ti]: rings[ti] for ti in all_t})
 
     def tv(ti):
         t = truth.get(keys[ti], {})
@@ -544,11 +558,11 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
         r["title"] = titles[r["key"]]
     summary["groups"] = _photo_groups(results)
     summary["shared_buildings"] = _shared_buildings(results, rows)
+    (args.report / "photo_heights.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
     if heights.exists():
         from city2stl.skyline.benchmark_report import write_benchmark_page
         _name, sv_b = bm.load_report(heights)
-        tr = bm.footprint_truth(args.region, {b["key"]: b["footprint_lonlat"] for b in sv_b},
-                                bm.REGIONS.get(args.region))
+        tr = _truth(args, {b["key"]: b["footprint_lonlat"] for b in sv_b})
         sc = {"region": args.region, "report": str(heights), **bm.score_buildings(sv_b, tr)}
         write_benchmark_page(args.report, sc, sv_b, tr, cards, photo_summary=summary)
     return summary
@@ -659,6 +673,8 @@ def main() -> int:
                          "over its columns (counted in summary.untagged.rules)")
     ap.add_argument("--untagged-candidates", choices=("all", "truth"), default="all",
                     help="truth: only footprints the truth cache holds (scoring without fetches)")
+    ap.add_argument("--no-truth-fetch", action="store_true",
+                    help="score on the cached truth only (no survey or paid 3D Tiles reads)")
     ap.add_argument("--rescore", action="store_true",
                     help="no placing: apply the gates to the saved photo_results.json")
     args = ap.parse_args()
