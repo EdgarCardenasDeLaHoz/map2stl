@@ -42,6 +42,14 @@ because code cites them.
   model, async tasks) and `generate_crosssection`; `/api/export/start` and `/api/export/puzzle`
   answer 400 before queuing a task. Tests: `tests/test_export.py::TestExportGridCheck`.
 
+### PA-17 `TerrainSession.select()` swallowed errors — fixed 2026-10-05 (T12)
+- `except Exception: saved = {}` turned a network error or a 500 on the settings load into the
+  default settings, silently, after the bbox had already switched.
+- `app/session/terrain_session.py::TerrainSession._saved_region_settings` now raises
+  `RuntimeError` naming the region (a 404 still means "no saved settings"), and `select` assigns
+  the region, bbox and settings only after both requests succeed. Tests:
+  `tests/test_session_e2e.py::TestSelectSettingsErrors`.
+
 ## Fixed 2026-10-05 (full code audit)
 
 ### Silent wrong answers — fixed 2026-10-05

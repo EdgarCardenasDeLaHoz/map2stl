@@ -678,3 +678,48 @@ class TestSessionHydrologySmoke:
         assert "river_grid_dimensions" in data
         assert "river_grid_values_b64" in data
         assert "feature_count" in data
+
+
+# ---------------------------------------------------------------------------
+# PA-17: select() reports a failed settings load instead of reverting to defaults
+# ---------------------------------------------------------------------------
+
+class TestSelectSettingsErrors:
+    def _settings_route(self, session, monkeypatch, status=None, exc=None):
+        """Make GET /api/regions/<name>/settings fail with ``exc``, or with an HTTP
+        error carrying ``status`` (shaped like requests' / httpx's)."""
+        if exc is None:
+            exc = Exception(f"{status} error")
+            exc.response = type("Resp", (), {"status_code": status})()
+        real = session._api_request
+
+        def fake(method, endpoint, **kw):
+            if endpoint.endswith("/settings"):
+                raise exc
+            return real(method, endpoint, **kw)
+
+        monkeypatch.setattr(session, "_api_request", fake)
+
+    def test_server_error_raises_and_keeps_previous_region(self, session, monkeypatch):
+        session.create_region("Other", north=1.0, south=0.0, east=1.0, west=0.0)
+        session.select("TestRegion")
+        before = (session.region_name, dict(session.bbox))
+        self._settings_route(session, monkeypatch, status=500)
+        with pytest.raises(RuntimeError, match="Other"):
+            session.select("Other")
+        assert (session.region_name, session.bbox) == before
+
+    def test_connection_error_raises(self, session, monkeypatch):
+        self._settings_route(session, monkeypatch, exc=ConnectionError("refused"))
+        with pytest.raises(RuntimeError, match="TestRegion"):
+            session.select("TestRegion")
+
+    def test_404_means_no_saved_settings(self, session, monkeypatch):
+        self._settings_route(session, monkeypatch, status=404)
+        session.select("TestRegion")
+        assert session.region_name == "TestRegion"
+
+    def test_region_without_saved_settings_gets_defaults(self, session):
+        session.create_region("Fresh", north=2.0, south=1.0, east=2.0, west=1.0)
+        session.select("Fresh")
+        assert session.settings == _ts_module._DEFAULT_SETTINGS

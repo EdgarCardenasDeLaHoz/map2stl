@@ -775,23 +775,20 @@ class TerrainSession:
         """Select a region by name and hydrate bbox plus saved settings.
 
         Reads the region list from GET /api/regions and then loads persisted
-        panel settings from GET /api/regions/{name}/settings.
+        panel settings from GET /api/regions/{name}/settings. A region with no saved
+        settings gets the defaults; a failed settings request raises (``RuntimeError``)
+        instead of silently reverting the region to defaults (PA-17), and the session
+        keeps its previous region.
         """
         raw = self._api_request("get", "/api/regions")["regions"]
         region = next((r for r in raw if r["name"] == name), None)
         if region is None:
             raise ValueError(f"Region '{name}' not found")
+        bbox = {k: region[k] for k in ("north", "south", "east", "west")}
+        saved = self._saved_region_settings(name)
 
         self.region_name = name
-        self.bbox = {k: region[k] for k in ("north", "south", "east", "west")}
-
-        try:
-            saved_resp = self._api_request(
-                "get", f"/api/regions/{name}/settings")
-            saved = saved_resp.get("settings", {})
-        except Exception:
-            saved = {}
-
+        self.bbox = bbox
         self.settings = copy.deepcopy(_DEFAULT_SETTINGS)
         # Overlay saved region settings.
         # Supports both the new grouped dict ({"dem": {...}, "view": {...}, ...})
@@ -814,6 +811,23 @@ class TerrainSession:
         logger.info(f"Region : {name}")
         logger.info(f"BBox   : {self.bbox}")
         return self
+
+    def _saved_region_settings(self, name: str) -> dict:
+        """The region's saved panel settings (``{}`` when none are saved).
+
+        The server answers ``{"settings": {}}`` for a region with no saved settings; a 404
+        (an older server without the route) means the same. Anything else - the server
+        unreachable, a 500 - raises, naming the region.
+        """
+        try:
+            resp = self._api_request("get", f"/api/regions/{name}/settings")
+        except Exception as exc:  # requests / httpx HTTP errors, connection errors
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status == 404:
+                return {}
+            raise RuntimeError(
+                f"Could not load saved settings for region '{name}': {exc}") from exc
+        return resp.get("settings") or {}
 
     def create_region(self, name: str, north: float, south: float,
                       east: float, west: float,

@@ -26,9 +26,6 @@ the rest below.
 
 - **PA-15 SRTM void clamped to 0**: `geo2stl/dem.py::fetch_h5_dem` clamps with `np.maximum(…, 0)`
   and has no NaN step for −32768. Voids and real below-sea-level ground both become 0.
-- **PA-17 `select()` swallows errors**: `app/session/terrain_session.py::TerrainSession`
-  `select` has `except Exception: saved = {}`, so a network error silently reverts the region
-  to defaults.
 - **PA-9 Region create resets parameters** (update fixed): `create_region` uses the
   `RegionParameters()` defaults (dim 200 / height 10 / base 2). The DB defaults are
   600 / 25 / 5 (`app/server/schemas.py::RegionParameters` vs `app/server/core/db.py`).
