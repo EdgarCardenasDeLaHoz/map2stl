@@ -146,3 +146,25 @@ Cartagena stays a heading and registration smoke test, not an accuracy benchmark
   Decide separately, since either needs a new baseline: the tag filter off, and dropping the
   Cartagena opt-ins (`pano_only_pdf`, cross-view, coastline) that six of the eight site files
   carry. Miami and Chicago don't carry them, so the benchmark runs two code paths.
+- 2026-10-05: eight-city run `2026-10-05_0633` (git `aef4119`: T3-T8, the memory fixes and the
+  cloud audit fixes), run unattended by `claude/scripts/skyline_queue.py`.
+  - Scored with today's truth on the buildings both runs measured, it is flat against
+    `2026-10-04_1527`:
+
+    | City | Paired | MAE old → new (m) |
+    |---|---|---|
+    | Miami | 151 | 106.7 → 108.9 |
+    | Chicago | 246 | 50.4 → 51.3 |
+    | Seattle | 156 | 62.2 → 62.2 |
+    | Boston | 333 | 48.1 → 52.0 |
+    | Benidorm | 29 | 25.1 → 20.8 |
+    | La Défense | 87 | 108.7 → 108.7 |
+    | Madrid | 61 | 56.7 → 56.7 |
+    | Prague | 21 | 31.6 → 31.8 |
+
+  - The summary moved more (Boston 47.1 → 57.5 m) because the reports cover different buildings.
+    Boston lost seed `auto_270_1400m` (299 buildings): its coverage is 4.3 %, under the 5 % screen
+    floor. It passed before at 9.0 % only through a bug: the old hole fill flooded from pixel
+    (0,0), turned the Charles River into "building", and the ground cap left 67 columns of it.
+    The fill fix (`0d48702`) is right. The floor is wrong for a far skyline across water, which
+    is a thin band of the frame (T35).

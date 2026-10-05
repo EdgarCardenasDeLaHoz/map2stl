@@ -183,7 +183,16 @@ What the evidence says so far:
     12 a tagged tower behind the footprint explains the skyline over half its span or more.
   - Asked of T16: count viewpoints, not files (two or more, at least 15° apart at the
     footprint), and treat a reading as a cap where a tagged tower behind explains the span.
-    That leaves 2-3 of the 16 here, none with truth: Miami's Commons set is thin for C2.
+  - Prototype of both rules on the saved poses (all untagged candidates):
+    - Miami: 7 agreements, 1 with truth, the untagged Four Seasons Hotel at 259.8 m against
+      231.4 m (Street View never measured it).
+    - Chicago (147 kept photos, 114 viewpoints): 61 agreements, 3 with truth. Aqua reads 256.6 m
+      against 250.9 m, but two low buildings still read 248.5 m and 123.6 m (truth 16.7 m and
+      13.5 m), probably below an untagged tower that owns the skyline.
+    - Treating any untagged footprint behind as a possible owner leaves nothing in either city;
+      so does a slenderness prior (height ≤ 6-8 × √area). Next on T16: agreed footprints explain
+      the columns they own, far to near, then truth fetched for the agreed footprints (4 of
+      Chicago's 80 have truth today).
 
 ### Findings kept from the earlier revised steps
 
