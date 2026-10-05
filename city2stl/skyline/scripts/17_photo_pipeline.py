@@ -402,6 +402,8 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
                       "status": ("measured" if r["kept"] else f"not kept: {why}") + f" ({r['route']})",
                       "towers": r.get("towers") if r["kept"] else [],
                       "score": r["score"] if r["kept"] else {}})
+        if r["kept"]:
+            cards[-1].update(_card_images(args, r, m, towers, osm))
     (args.report / "photos.json").write_text(json.dumps(cards, indent=1), encoding="utf-8")
     if heights.exists():
         from city2stl.skyline.benchmark_report import write_benchmark_page
@@ -411,6 +413,35 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
         sc = {"region": args.region, "report": str(heights), **bm.score_buildings(sv_b, tr)}
         write_benchmark_page(args.report, sc, sv_b, tr, cards, photo_summary=summary)
     return summary
+
+
+def _card_images(args, r: dict, m: dict, towers, osm: dict) -> dict:
+    """The kept photo with its towers numbered, and its location map (``photo_cards``), so the
+    page shows which building is which, as the seed pages do (user, 2026-10-05). Labels go
+    onto the card's tower rows. Nothing when the cached image or outline is missing."""
+    from city2stl.skyline import photo_cards as pc
+
+    cache = ROOT / "runs" / "commons_cache" / args.region
+    img_path = cache / "img" / f"{r['key']}.jpg"
+    if "prof" not in _CARDS:
+        _CARDS["prof"] = dict(np.load(cache / "profiles.npz"))
+        _CARDS["bg"] = pc.background_polygons(osm["buildings"]["features"], towers)
+    if not img_path.exists() or r["key"] not in _CARDS["prof"]:
+        return {}
+    import cv2
+
+    c = r["camera"]
+    out = pc.render_photo_card(
+        cv2.cvtColor(cv2.imread(str(img_path)), cv2.COLOR_BGR2RGB),
+        sm.PhotoProfile(_CARDS["prof"][r["key"]].astype(float), m["px"][0], m["px"][1]),
+        ph.PhotoPose(c["lat"], c["lon"], c["heading_deg"], c["hfov_deg"]), c.get("h_cam", 2.0),
+        towers, r.get("towers") or [], _CARDS["bg"], args.report / "assets" / "photos", r["key"])
+    for t in r.get("towers") or []:
+        t["label"] = out["labels"].get(t["tower"])
+    return {"overlay": out["overlay"], "map": out["map"]}
+
+
+_CARDS: dict = {}
 
 
 def _untagged_rows(args, results: list[dict], towers, osm: dict) -> tuple[list[dict], dict]:

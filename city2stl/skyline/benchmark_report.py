@@ -4,7 +4,9 @@ Writes ``<report>/benchmark.html`` and links it from the report's ``index.html``
 - scores against surveyed truth (overall, height bands, tagged vs untagged, relative order);
 - predicted vs true heights (scatter) and a map of buildings coloured by signed error;
 - photos (optional ``photos.json`` beside the report): each Commons photo with its camera
-  (recorded or solved), FOV, attribution and the tower heights measured from it.
+  (recorded or solved), FOV, attribution and the tower heights measured from it. A kept photo
+  shows, as the seed pages do, the photo with its towers numbered beside a map of the camera
+  and its view (``photo_cards``); the numbers are the rows of its table.
 
     write_benchmark_page(report_dir, score, buildings, truth, photos=None)
 
@@ -106,15 +108,28 @@ def _photos_html(photos: list[dict]) -> str:
     cards = []
     for p in photos:
         cam = p.get("camera") or {}
-        towers = p.get("towers") or []
+        towers = sorted(p.get("towers") or [],
+                        key=lambda t: (t.get("label") is None, t.get("label") or 0))
         rows = "".join(
-            f"<tr><td>{html.escape(t['name'])}</td><td>{_fmt(t.get('dist_m'), '.0f')}</td>"
-            f"<td>{_fmt(t.get('photo_m'))}</td><td>{_fmt(t.get('truth_m'))}</td>"
+            f"<tr><td>{'' if t.get('label') is None else t['label']}</td>"
+            f"<td>{html.escape(t['name'] or str(t.get('tower', '')))}</td><td>{_fmt(t.get('dist_m'), '.0f')}</td>"
+            f"<td>{_fmt(t.get('photo_m'))}</td><td>{_fmt(t.get('osm_m'))}</td><td>{_fmt(t.get('truth_m'))}</td>"
             f"<td>{_fmt(None if t.get('photo_m') is None or t.get('truth_m') is None else t['photo_m'] - t['truth_m'], '+.1f')}</td></tr>"
             for t in towers)
         score = p.get("score") or {}
-        cards.append(f"""<div class=card>
-<a href="{html.escape(p.get('page', ''))}"><img src="{html.escape(p.get('thumb', ''))}" alt=""></a>
+        if p.get("overlay"):
+            # the seed-page style: the photo with its towers numbered beside the camera's map
+            top = (f'<div class=pair><a href="{html.escape(p.get("page", ""))}">'
+                   f'<img src="{html.escape(p["overlay"])}" alt="photo with the OSM towers numbered"></a>'
+                   f'<img src="{html.escape(p["map"])}" alt="camera location, view and towers"></div>'
+                   "<p class=\"mut small\">Numbers = table rows. Solid line: roof measured in the "
+                   "photo; dashed: roof the OSM height predicts; white: the photo's skyline outline. "
+                   "Map: camera (triangle), view cone, the same towers.</p>")
+        else:
+            top = (f'<a href="{html.escape(p.get("page", ""))}">'
+                   f'<img src="{html.escape(p.get("thumb", ""))}" alt=""></a>')
+        cards.append(f"""<div class="card{' wide' if p.get('overlay') else ''}">
+{top}
 <h3>{html.escape(p.get('title', ''))}</h3>
 <p class=mut>{html.escape(p.get('attribution', ''))}</p>
 <p><b>Camera</b> {html.escape(cam.get('source', ''))}: {_fmt(cam.get('lat'), '.5f')}, {_fmt(cam.get('lon'), '.5f')}
@@ -123,7 +138,7 @@ def _photos_html(photos: list[dict]) -> str:
 <a href="https://www.openstreetmap.org/?mlat={cam.get('lat')}&mlon={cam.get('lon')}#map=15/{cam.get('lat')}/{cam.get('lon')}">map</a></p>
 <p><b>Status</b> {html.escape(p.get('status', ''))}</p>
 {f"<p><b>Towers measured</b> {score.get('n', 0)} confirmed · pair order {_fmt(score.get('pair_order') and 100 * score['pair_order'], '.0f')}% · MAE {_fmt(score.get('mae_m'))} m</p>" if score else ''}
-{f'<table><tr><th>tower</th><th>dist m</th><th>photo m</th><th>truth m</th><th>error</th></tr>{rows}</table>' if rows else ''}
+{f'<table><tr><th>#</th><th>tower</th><th>dist m</th><th>photo m</th><th>OSM m</th><th>truth m</th><th>error</th></tr>{rows}</table>' if rows else ''}
 </div>""")
     return "<div class=cards>" + "".join(cards) + "</div>"
 
@@ -182,6 +197,8 @@ th{{background:var(--card)}} td:first-child,th:first-child{{text-align:left}}
 .kpi b{{display:block;font-size:22px}} .plots{{display:flex;gap:12px;flex-wrap:wrap}} .plots img{{max-width:100%;background:#fff;border-radius:8px}}
 .cards{{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}}
 .card{{background:var(--card);border-radius:10px;padding:10px}} .card img{{width:100%;border-radius:6px}} .card h3{{font-size:15px;margin:8px 0 4px}}
+.card.wide{{grid-column:1/-1}} .pair{{display:grid;grid-template-columns:2fr 1fr;gap:8px;align-items:start}} .small{{font-size:13px}}
+@media (max-width:760px){{.pair{{grid-template-columns:1fr}}}}
 </style></head><body>
 <p><a href="index.html">← {region} report</a></p>
 <h1>{region}: heights against surveyed truth</h1>
