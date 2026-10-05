@@ -117,20 +117,7 @@ def _photos_html(photos: list[dict]) -> str:
             f"<td>{_fmt(None if t.get('photo_m') is None or t.get('truth_m') is None else t['photo_m'] - t['truth_m'], '+.1f')}</td></tr>"
             for t in towers)
         score = p.get("score") or {}
-        if p.get("overlay"):
-            # the seed-page style: the photo with its towers numbered beside the camera's map
-            top = (f'<div class=pair><a href="{html.escape(p.get("page", ""))}">'
-                   f'<img src="{html.escape(p["overlay"])}" alt="photo with the OSM towers numbered"></a>'
-                   f'<img src="{html.escape(p["map"])}" alt="camera location, view and towers"></div>'
-                   "<p class=\"mut small\">Numbers = table rows. Solid line: roof measured in the "
-                   "photo; dashed: roof the OSM height predicts; white: the photo's skyline outline. "
-                   "Map: camera (triangle), view cone, the same towers.</p>")
-        else:
-            top = (f'<a href="{html.escape(p.get("page", ""))}">'
-                   f'<img src="{html.escape(p.get("thumb", ""))}" alt=""></a>')
-        cards.append(f"""<div class="card{' wide' if p.get('overlay') else ''}">
-{top}
-<h3>{html.escape(p.get('title', ''))}</h3>
+        info = f"""<h3>{html.escape(p.get('title', ''))}</h3>
 <p class=mut>{html.escape(p.get('attribution', ''))}</p>
 <p><b>Camera</b> {html.escape(cam.get('source', ''))}: {_fmt(cam.get('lat'), '.5f')}, {_fmt(cam.get('lon'), '.5f')}
 · heading {_fmt(cam.get('heading_deg'), '.0f')}° · FOV {_fmt(cam.get('hfov_deg'), '.0f')}°
@@ -138,7 +125,21 @@ def _photos_html(photos: list[dict]) -> str:
 <a href="https://www.openstreetmap.org/?mlat={cam.get('lat')}&mlon={cam.get('lon')}#map=15/{cam.get('lat')}/{cam.get('lon')}">map</a></p>
 <p><b>Status</b> {html.escape(p.get('status', ''))}</p>
 {f"<p><b>Towers measured</b> {score.get('n', 0)} confirmed · pair order {_fmt(score.get('pair_order') and 100 * score['pair_order'], '.0f')}% · MAE {_fmt(score.get('mae_m'))} m</p>" if score else ''}
-{f'<table><tr><th>#</th><th>tower</th><th>dist m</th><th>photo m</th><th>OSM m</th><th>truth m</th><th>error</th></tr>{rows}</table>' if rows else ''}
+{f'<table><tr><th>#</th><th>tower</th><th>dist m</th><th>photo m</th><th>OSM m</th><th>truth m</th><th>error</th></tr>{rows}</table>' if rows else ''}"""
+        if p.get("overlay"):
+            # the seed-page style: the photo full width with its towers numbered, then the
+            # camera's map beside the numbered table
+            cards.append(f"""<div class="card wide">
+<a href="{html.escape(p.get('page', ''))}"><img src="{html.escape(p['overlay'])}" alt="photo with the OSM towers numbered"></a>
+<p class="mut small">Numbers = table rows. Solid line: roof measured in the photo; dashed: roof the
+OSM height predicts; white: the photo's skyline outline. Map: camera (triangle), view cone, the
+same towers.</p>
+<div class=pair><img src="{html.escape(p['map'])}" alt="camera location, view and towers"><div>{info}</div></div>
+</div>""")
+        else:
+            cards.append(f"""<div class="card">
+<a href="{html.escape(p.get('page', ''))}"><img src="{html.escape(p.get('thumb', ''))}" alt=""></a>
+{info}
 </div>""")
     return "<div class=cards>" + "".join(cards) + "</div>"
 
@@ -197,7 +198,8 @@ th{{background:var(--card)}} td:first-child,th:first-child{{text-align:left}}
 .kpi b{{display:block;font-size:22px}} .plots{{display:flex;gap:12px;flex-wrap:wrap}} .plots img{{max-width:100%;background:#fff;border-radius:8px}}
 .cards{{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}}
 .card{{background:var(--card);border-radius:10px;padding:10px}} .card img{{width:100%;border-radius:6px}} .card h3{{font-size:15px;margin:8px 0 4px}}
-.card.wide{{grid-column:1/-1}} .pair{{display:grid;grid-template-columns:2fr 1fr;gap:8px;align-items:start}} .small{{font-size:13px}}
+.card.wide{{grid-column:1/-1}} .pair{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:14px;align-items:start}} .small{{font-size:13px}}
+.pair img{{background:#fff}}
 @media (max-width:760px){{.pair{{grid-template-columns:1fr}}}}
 </style></head><body>
 <p><a href="index.html">← {region} report</a></p>

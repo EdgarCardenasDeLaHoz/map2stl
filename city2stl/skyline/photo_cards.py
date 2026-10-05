@@ -133,7 +133,7 @@ def draw_location_map(path: Path, towers, pose, ordered: list[dict], bg) -> None
                     for a in np.linspace(-half, half, 24)]
     ax.add_patch(MplPolygon(cone, closed=True, facecolor="#1f77b4", alpha=0.08,
                             edgecolor="#1f77b4", lw=0.8))
-    sep = span * 0.045                       # minimum spacing between labels, metres
+    sep = span * 0.06                        # minimum spacing between labels, metres
     spots: list[np.ndarray] = []
     for n, v in enumerate(verts, 1):
         col = np.array(label_color(n)) / 255.0
@@ -148,8 +148,8 @@ def draw_location_map(path: Path, towers, pose, ordered: list[dict], bg) -> None
         spots.append(pos)
         if np.hypot(*(pos - c)) > 1:
             ax.plot([c[0], pos[0]], [c[1], pos[1]], color=col, lw=0.8)
-        ax.text(pos[0], pos[1], str(n), fontsize=8, ha="center", va="center", color="white",
-                weight="bold", bbox=dict(boxstyle="circle,pad=0.18", fc=col, ec="k", lw=0.4))
+        ax.text(pos[0], pos[1], str(n), fontsize=11, ha="center", va="center", color="white",
+                weight="bold", bbox=dict(boxstyle="circle,pad=0.2", fc=col, ec="k", lw=0.4))
     ax.plot(*cam, marker="^", color="#1f77b4", ms=10, mec="k")
     ax.set_xlim(mid[0] - span / 2, mid[0] + span / 2)
     ax.set_ylim(mid[1] - span / 2, mid[1] + span / 2)
