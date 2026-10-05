@@ -37,7 +37,8 @@ kept when kept photos from 2+ viewpoints (cameras within 100 m are one) with 15 
 directions at the footprint agree within max(3 m, min(10 %, 10 m)), with footprints behind an
 agreed building dropped from the photos where it covers them
 (``photo_heights.agreed_with_occlusion``); ``summary.untagged.rules`` counts what each rule
-removed. Written to
+removed; ``--untagged-far-first`` (experiment) also lets a farther agreed building cap the
+nearer footprints over its columns. Written to
 ``photo_heights.json`` (``untagged``) and scored against the benchmark truth cache
 (``--untagged-truth fetch`` measures missing footprints: paid 3D Tiles reads).
 ``--untagged-candidates truth`` limits candidates to footprints the truth cache holds, so a
@@ -429,7 +430,8 @@ def _untagged_rows(args, results: list[dict], towers, osm: dict) -> tuple[list[d
     seen = {i for p in per for i in p}
     centroids = {i: tuple(table.verts[i][:-1].mean(axis=0)) for i in seen}
     rules: dict = {}
-    est = ph.agreed_with_occlusion(per, spans, cams_xy=cams, centroids=centroids, stats=rules)
+    est = ph.agreed_with_occlusion(per, spans, cams_xy=cams, centroids=centroids, stats=rules,
+                                   far_first=getattr(args, "untagged_far_first", False))
     rules["capped_readings"] = sum(len(r.get("untagged_capped") or {}) for r in kept)
     vp = ph.viewpoints(cams)
     keys = {i: table.keys[i] for i in est}
@@ -482,6 +484,9 @@ def main() -> int:
     ap.add_argument("--untagged-truth", choices=("cached", "fetch"), default="cached",
                     help="score C2 on the benchmark truth cache, or fetch missing footprints "
                          "(paid 3D Tiles reads)")
+    ap.add_argument("--untagged-far-first", action="store_true",
+                    help="C2 experiment: a farther agreed building caps the nearer footprints "
+                         "over its columns (counted in summary.untagged.rules)")
     ap.add_argument("--untagged-candidates", choices=("all", "truth"), default="all",
                     help="truth: only footprints the truth cache holds (scoring without fetches)")
     ap.add_argument("--rescore", action="store_true",

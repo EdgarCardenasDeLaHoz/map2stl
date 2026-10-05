@@ -388,3 +388,22 @@ def test_low_building_in_front_of_a_tagged_tower_does_not_agree():
     assert ph.agreed_heights(per, cams_xy=cams, centroids={0: (0.0, 150.0)}) == {}  # rule (a)
     per, caps = run(occlude=True)
     assert per == [{}, {}] and all(0 in c for c in caps)         # rule (b): caps only
+
+
+def test_far_first_lets_an_agreed_tower_behind_cap_the_low_building_in_front():
+    """Chicago failure (2026-10-05): low building L (index 0, ~600 m) in front of untagged
+    tower T (index 1, ~1500 m) agrees on T's skyline from two directions. Nearest-wins keeps
+    L and drops T; ``far_first`` keeps T and turns L's readings into caps."""
+    from city2stl.skyline import photo_heights as ph
+
+    per = [{0: 120.0, 1: 250.0}, {0: 124.0, 1: 252.0}]
+    spans = [{0: (90, 160, 600.0), 1: (110, 140, 1500.0)},
+             {0: (300, 370, 650.0), 1: (320, 350, 1450.0)}]
+    assert set(ph.agreed_with_occlusion(per, spans)) == {0}           # the wrong one wins
+    st = {}
+    est = ph.agreed_with_occlusion(per, spans, far_first=True, stats=st)
+    assert set(est) == {1} and est[1][0] == pytest.approx(251.0)
+    assert st["capped_by_agreed"] == 2 and st["agreed"] == 1
+    # a farther building that does not explain its own columns in a photo caps nothing there
+    per_bad = [{0: 120.0, 1: 250.0}, {0: 124.0, 1: 300.0}]
+    assert 0 in ph.agreed_with_occlusion(per_bad, spans, far_first=True)

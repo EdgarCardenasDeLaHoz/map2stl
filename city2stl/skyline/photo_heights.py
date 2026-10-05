@@ -417,8 +417,21 @@ def agreed_heights(per_photo: list[dict[int, float]], min_photos: int = 2,
     return out
 
 
+def _cover(span: tuple, others: list[tuple], core: float = 1.0) -> float:
+    """Share of ``span``'s columns (its central ``core`` share) covered by the
+    ``(first, last)`` column ranges ``others``."""
+    c0, c1 = span[0], span[1]
+    cut = int((c1 - c0 + 1) * (1 - core) / 2)
+    c0, c1 = c0 + cut, c1 - cut
+    cover = np.zeros(c1 - c0 + 1, bool)
+    for a, b in others:
+        cover[max(a, c0) - c0:min(b, c1) - c0 + 1] = True
+    return float(cover.mean())
+
+
 def agreed_with_occlusion(per_photo: list[dict[int, float]], spans: list[dict],
-                          max_rounds: int = 4, **kw) -> dict[int, tuple[float, int, float]]:
+                          max_rounds: int = 4, far_first: bool = False,
+                          **kw) -> dict[int, tuple[float, int, float]]:
     """``agreed_heights`` where, in each photo, a footprint behind an agreed building is not
     a candidate over the columns that building owns.
 
@@ -428,27 +441,47 @@ def agreed_with_occlusion(per_photo: list[dict[int, float]], spans: list[dict],
     (more than ``OCCLUDED_SHARE``) from nearer up is dropped from that photo, agreed or not
     (two photos can agree by coincidence on a footprint behind), and agreement is re-run
     until nothing changes. ``spans[k]`` is photo ``k``'s ``implied_heights(spans=)``.
+    ``far_first`` (opt-in, for comparison on data): also the reverse. In each photo, from far
+    to near, a footprint whose core columns are at least ``BEHIND_SHARE`` covered by a
+    *farther* agreed building that explains its own columns there (its implied height in
+    that photo within the agreement tolerance of its agreed height) is only bounded by it,
+    so that reading is dropped: an
+    untagged tower behind can form the skyline over a low building, as a tagged one can
+    (``implied_heights(caps=)``). Chicago, 2026-10-05: two low buildings read 248.5 m and
+    123.6 m against 16.7 m and 13.5 m after the viewpoint and tagged-cap rules.
+
     Other keywords go to ``agreed_heights``; ``stats`` gets its first-pass counts plus
-    ``occluded`` (agreed at first, dropped by occlusion) and the final ``agreed``.
+    ``occluded`` (agreed at first, dropped by occlusion), ``capped_by_agreed`` (readings
+    dropped by ``far_first``) and the final ``agreed``.
     """
     per = [dict(p) for p in per_photo]
     stats = kw.pop("stats", None)
     first: dict = {}
     est = agreed_heights(per, **kw, stats=first)
     est0 = set(est)
+    capped = 0
     for _ in range(max_rounds):
         changed = False
         for p, sp in zip(per, spans, strict=True):
+            if far_first:
+                kept: list[tuple] = []                    # agreed owners, farther first
+                for i in sorted((i for i in p if i in sp), key=lambda i: -sp[i][2]):
+                    # the reading comes from the core columns (``implied_heights``), so
+                    # that is where a farther owner makes it a bound
+                    if kept and _cover(sp[i], [o[:2] for o in kept if o[2] > sp[i][2]],
+                                       core=0.6) >= BEHIND_SHARE:
+                        del p[i]
+                        capped += 1
+                        changed = True
+                    elif i in est and abs(p[i] - est[i][0]) <= _agree_tol(est[i][0]):
+                        kept.append(sp[i])
             owners = {j: sp[j] for j in est if j in p and j in sp}
             for i in list(p):
                 if i not in sp:
                     continue
-                c0, c1, d = sp[i]
-                cover = np.zeros(c1 - c0 + 1, bool)
-                for j, (a, b, dj) in owners.items():
-                    if j != i and dj < d:
-                        cover[max(a, c0) - c0:min(b, c1) - c0 + 1] = True
-                if cover.mean() > OCCLUDED_SHARE:
+                d = sp[i][2]
+                near = [(a, b) for j, (a, b, dj) in owners.items() if j != i and dj < d]
+                if near and _cover(sp[i], near) > OCCLUDED_SHARE:
                     del p[i]
                     changed = True
         if not changed:
@@ -458,5 +491,6 @@ def agreed_with_occlusion(per_photo: list[dict[int, float]], spans: list[dict],
         stats.clear()
         stats.update(first)
         stats["occluded"] = len(est0 - set(est))
+        stats["capped_by_agreed"] = capped
         stats["agreed"] = len(est)
     return est
