@@ -423,6 +423,15 @@ def _errors(pred: np.ndarray, truth: np.ndarray) -> dict:
     }
 
 
+def street_view_buildings(buildings: list[dict]) -> list[dict] | None:
+    """The run's buildings with the Street View height put back where T28 withheld it
+    (``street_view_m``), so the benchmark can score both; None when nothing was withheld."""
+    if not any("street_view_m" in b for b in buildings):
+        return None
+    return [{**b, "effective_height_m": b["street_view_m"]} if "street_view_m" in b else b
+            for b in buildings]
+
+
 def score_buildings(buildings: list[dict], truth: dict[str, dict],
                     pred_field: str = "effective_height_m") -> dict:
     """Score a run's buildings against ``truth`` (confirmed buildings only).

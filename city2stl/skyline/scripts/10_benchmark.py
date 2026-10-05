@@ -42,6 +42,9 @@ PINNED_FLAGS = {
     "SKYLINE_CV_SEGFORMER_SIZE": "b1",
     "SKYLINE_CV_SEGFORMER_INPUT_SIZE": "512",
     "SKYLINE_TAG_FILTER": "1",
+    # T28: the published height withholds untagged Street View values; both are scored
+    # (``street_view_unwithheld`` is the 2026-10-04 baseline's yardstick)
+    "SKYLINE_WITHHOLD_UNTAGGED": "1",
     "SKYLINE_SV_TALL_FRAME": "0",
     "SKYLINE_CV_MULTIRES": "0",
     "SKYLINE_CV_PHASE_C": "0",
@@ -119,6 +122,9 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
                                provider, use_tiles=use_tiles, refresh=refresh_truth)
     result = {"region": region, "report": str(heights), "survey": provider,
               **bm.score_buildings(buildings, truth)}
+    sv = bm.street_view_buildings(buildings)
+    if sv is not None:  # T28 withheld untagged Street View heights: score them too
+        result["street_view_unwithheld"] = bm.score_buildings(sv, truth)
     try:  # the report's benchmark page; a plotting failure must not lose the score
         from city2stl.skyline.benchmark_report import write_benchmark_page
         write_benchmark_page(heights.parent, result, buildings, truth)

@@ -56,6 +56,7 @@ import os
 import time
 from pathlib import Path
 
+from ._core.height import withhold_untagged_street_view
 from ._core.timing import _StepTimer
 from ._core.types import BuildingRecord
 from ._pano.orchestrator import _seed_multiview_registration
@@ -473,6 +474,12 @@ def run_region_pdf_report(
             elevated_seeds=elevated_seeds,
             elevated_state=elevated_state,
         )
+    # T28: untagged buildings get the fallback height; the Street View value stays in
+    # each row (``street_view_m``) for the benchmark. SKYLINE_WITHHOLD_UNTAGGED=0 turns it off.
+    n_withheld = withhold_untagged_street_view(building_heights, building_records)
+    if n_withheld:
+        logger.info(f"[withhold_untagged] {n_withheld} untagged building(s): Street View "
+                    f"height withheld, fallback used")
 
     # Load surveyed ground-truth heights from sites/<region>.json if present.
     known_heights = _load_known_heights(region_name, building_records)

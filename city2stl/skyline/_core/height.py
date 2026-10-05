@@ -668,6 +668,57 @@ def _seed_from_view_name(view_name: str) -> str:
         return parts[0]
     return view_name
 
+#: OSM height sources that count as a tag; anything else ("default") is untagged.
+TAGGED_SOURCES = ("osm_tag", "osm_levels")
+#: The height a withheld untagged building gets when no better source is passed: the
+#: app's default building height (``city2stl/rasterize.py``). On Miami's 162 confirmed
+#: untagged buildings a constant 11 m scored MAE 17.1 m against Street View's 108.6 m.
+UNTAGGED_FALLBACK_M = 10.0
+
+
+def _withhold_untagged_enabled() -> bool:
+    """Whether Street View heights on untagged buildings are replaced by a fallback.
+
+    On by default (T28, user-approved 2026-10-05): untagged buildings read 65-113 m too
+    tall in every benchmark city, because a farther tower's roof is credited to the low
+    building in front (roof-to-building assignment). Set ``SKYLINE_WITHHOLD_UNTAGGED=0``
+    to publish the Street View value again, e.g. once assignment is fixed.
+    """
+    return os.environ.get("SKYLINE_WITHHOLD_UNTAGGED", "1").strip().lower() not in (
+        "0", "false", "no", "off")
+
+
+def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRecord],
+                                  fallback=None) -> int:
+    """Replace the Street View height of every untagged building in ``rows`` (the output of
+    ``aggregate_building_heights``) by a fallback; returns how many were replaced.
+
+    The Street View value is kept for scoring: ``street_view_m`` and
+    ``street_view_source`` hold what ``effective_height_m`` / ``effective_height_source``
+    were, ``effective_height_source`` becomes ``"withheld:<fallback source>"``.
+    ``fallback(record) -> (height_m, source)`` picks the replacement (T29 decides the best
+    source); by default ``UNTAGGED_FALLBACK_M``, source ``"default"``. A fallback height of
+    None leaves the row as it was. Idempotent; a no-op when the flag is off.
+    """
+    if not _withhold_untagged_enabled():
+        return 0
+    by_id = {r.feature_id: r for r in records}
+    n = 0
+    for row in rows:
+        rec = by_id.get(row.get("feature_id"))
+        if rec is None or rec.height_source in TAGGED_SOURCES or "street_view_m" in row:
+            continue
+        h, src = fallback(rec) if fallback is not None else (UNTAGGED_FALLBACK_M, "default")
+        if h is None:
+            continue
+        row["street_view_m"] = row.get("effective_height_m")
+        row["street_view_source"] = row.get("effective_height_source")
+        row["effective_height_m"] = float(h)
+        row["effective_height_source"] = f"withheld:{src}"
+        n += 1
+    return n
+
+
 def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) -> list[dict]:
     grouped: dict[str, list[RegisteredBuildingEstimate]] = {}
     for estimate in estimates:
@@ -877,6 +928,7 @@ def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) 
 
 
 __all__ = [
+    'withhold_untagged_street_view',
     'augment_estimates_with_depth',
     'estimate_heights_from_registration',
     '_seed_from_view_name',

@@ -525,7 +525,10 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
                 j = int(np.argmin(dd))
                 b = sv_b[j] if dd[j] < 30 else None
             if b is not None:
-                r["street_view_m"] = round(float(b["effective_height_m"]), 1)
+                # the Street View reading itself, also where T28 withheld it
+                sv_m = b.get("street_view_m", b["effective_height_m"])
+                if sv_m is not None:
+                    r["street_view_m"] = round(float(sv_m), 1)
     conf = [r for r in rows if r["truth_m"] is not None]
     both = [r for r in conf if "street_view_m" in r]
     routes = ("labels", "recorded", "linked", "search")
