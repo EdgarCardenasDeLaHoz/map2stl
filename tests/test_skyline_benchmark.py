@@ -164,3 +164,17 @@ def test_persisted_standoff_locations_round_trip(tmp_path, monkeypatch):
     ss._persisted_standoff_locations("Miami", bbox, [], {}, proposals_dir=tmp_path, refresh=True)
     assert len(calls) == 2
     assert (tmp_path / "miami.json").exists()
+
+
+def test_persisted_standoff_locations_recompute_on_bbox_change(tmp_path, monkeypatch):
+    from city2stl.skyline import seed_selection as ss
+    from city2stl.skyline.region_types import SkylinePoint
+
+    calls = []
+    monkeypatch.setattr(ss, "_propose_standoff_locations", lambda *a, **k: calls.append(1) or [
+        SkylinePoint("auto_000_0600m", 25.77, -80.18, 90.0, "auto", 3.5)])
+    ss._persisted_standoff_locations("miami", RegionBBox("miami", N, S, E, W), [], {},
+                                     proposals_dir=tmp_path)
+    ss._persisted_standoff_locations("miami", RegionBBox("miami", N + 0.01, S, E, W), [], {},
+                                     proposals_dir=tmp_path)
+    assert len(calls) == 2

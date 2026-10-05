@@ -15,8 +15,8 @@ This is the "propose pano locations -> pull -> filter" discovery loop: panos
 with no Street View within ``radius_m`` (ZERO_RESULTS — e.g. a vantage that
 fell in open water) are skipped, so only real, reachable seeds are written.
 
-Run:  python -m city2stl.skyline.scripts.discover_city_seeds [city ...]
-      (no city = every city in ``CITIES``; each run overwrites its site file)
+Run:  python -m city2stl.skyline.scripts.discover_city_seeds [city ...] [--force]
+      (no city = every city in ``CITIES``; an existing site file is kept unless --force)
 """
 
 from __future__ import annotations
@@ -168,13 +168,32 @@ def _seed_url(lat: float, lon: float, heading: float, pano_id: str) -> str:
             f"{heading:.2f}h,90t/data=!3m6!1e1!3m4!1s{pano_id}!2e0")
 
 
-def main(cities: list[str] | None = None) -> None:
+#: F-SKYBENCH cities: written without the per-site opt-ins below, like the
+#: curated miami/chicago sites, so every benchmark city runs the same code path.
+BENCHMARK_CITIES = {"la_defense", "madrid_cuatro_torres", "prague_pankrac"}
+
+#: Opt-ins written for the other discovered cities (the Cartagena set).
+_SITE_OPT_INS = {
+    "use_satellite_footprints": False,
+    "use_cross_view_scoring": True,
+    "use_pano_coastline_recovery": True,
+    "drive_pano_recovery_anchor": True,
+    "pano_only_pdf": True,
+}
+
+
+def main(cities: list[str] | None = None, *, force: bool = False) -> None:
     key = _resolve_api_key()
     unknown = sorted(set(cities or ()) - set(CITIES))
     if unknown:
         raise SystemExit(f"unknown cities: {', '.join(unknown)}")
     for city, spec in CITIES.items():
         if cities and city not in cities:
+            continue
+        out = _SITES_DIR / f"{city}.json"
+        if out.exists() and not force:
+            # Site files carry hand-set anchors and negative seeds.
+            print(f"{city}: {out.name} exists, skipped (--force to overwrite)")
             continue
         n, s, e, w = spec["bbox"]
         tlat, tlon = spec["target"]
@@ -211,19 +230,15 @@ def main(cities: list[str] | None = None) -> None:
             "name": city,
             "north": n, "south": s, "east": e, "west": w,
             "max_plausible_height_m": spec["max_h"],
-            "use_satellite_footprints": False,
-            "use_cross_view_scoring": True,
-            "use_pano_coastline_recovery": True,
-            "drive_pano_recovery_anchor": True,
-            "pano_only_pdf": True,
+            **({} if city in BENCHMARK_CITIES else _SITE_OPT_INS),
             "seed_urls": urls,
             "anchor_offsets_deg": {},
             "negative_seeds": [],
         }
-        out = _SITES_DIR / f"{city}.json"
         out.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         print(f"{city}: {len(urls)}/{len(spec['vantages'])} seeds -> {out.name}")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:] or None)
+    args = [a for a in sys.argv[1:] if a != "--force"]
+    main(args or None, force="--force" in sys.argv[1:])

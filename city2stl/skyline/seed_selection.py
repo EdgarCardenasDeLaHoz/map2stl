@@ -258,14 +258,17 @@ def _persisted_standoff_locations(
     The proposals follow live OSM, so two runs a week apart used to see
     different panoramas and their scores differed for reasons outside the code
     (F-SKYBENCH "stable runs"). The first run writes
-    ``runs/seed_proposals/<region>.json``; later runs reuse it. ``refresh``
+    ``runs/seed_proposals/<region>.json``; later runs reuse it while the bbox
+    is unchanged. ``refresh``
     (``SKYLINE_REFRESH_PROPOSALS=1``) recomputes and overwrites it.
     """
     path = (proposals_dir or _PROPOSALS_DIR) / f"{region_name.lower()}.json"
+    bbox_nsew = [bbox.north, bbox.south, bbox.east, bbox.west]
     if not refresh and path.exists():
         try:
             doc = json.loads(path.read_text(encoding="utf-8"))
-            return [SkylinePoint(**p) for p in doc["points"]]
+            if doc.get("bbox_nsew") == bbox_nsew:      # a resized region recomputes
+                return [SkylinePoint(**p) for p in doc["points"]]
         except (ValueError, KeyError, TypeError):
             pass      # unreadable: recompute below
     points = _propose_standoff_locations(bbox, high_rises, osm_data)
@@ -273,7 +276,7 @@ def _persisted_standoff_locations(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({
             "region": region_name,
-            "bbox_nsew": [bbox.north, bbox.south, bbox.east, bbox.west],
+            "bbox_nsew": bbox_nsew,
             "points": [p.__dict__ for p in points],
         }, indent=2), encoding="utf-8")
     except OSError:

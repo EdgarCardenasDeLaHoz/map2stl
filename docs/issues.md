@@ -1,6 +1,6 @@
 # Known Issues — map2stl
 
-_Last updated: 2026-09-30_
+_Last updated: 2026-10-05_
 
 - Live bugs and technical debt only. Planned work is in the roadmap,
   [plans/README.md](plans/README.md); ideas are in [proposals.md](proposals.md).
@@ -8,6 +8,29 @@ _Last updated: 2026-09-30_
   full write-ups (the fixed §2–§2e, §4, §0, §0d and all older resolved entries are there).
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
+
+## Active bugs — from the full code audit (2026-10-05)
+
+Source and full list: [history/audits/AUDIT-2026-10-05.md](history/audits/AUDIT-2026-10-05.md).
+Silent wrong answers first; each is a small fix.
+
+- **IDW infill is a no-op on STL import**: `app/server/core/mesh_import.py` passes the
+  valid-pixel mask to `city2stl/height/infill.py::infill_idw`, which treats it as the area to fill.
+- **Microsoft footprints get a 0.6 m height proxy**:
+  `city2stl/skyline/satellite_footprints.py::merge_satellite_into_osm` stores areas in deg².
+- **`numpy2stl` `stl2numpy/heightmap.py::_auto_resolution` swaps rows and cols**, so the grid comes out stretched.
+- **Skyline mask flood-fill**: `city2stl/skyline/_core/segmentation.py::_neural_sky_and_building_masks`
+  seeds `floodFill` at (0,0). A building in that corner turns the whole mask into building.
+- **`osm_*` composite channels are zero**: `composite.py` / `cities.py` read OSM at 0.5 m
+  tolerance while the panel fetches at 3.0 m.
+- **Google 3D Tiles fed an orthometric DEM** (geoid error) by `/api/cities/enhance-heights`; its
+  cache key ignores `dem`. `google_3d.get_api_key` also reads the wrong `config.json`.
+- **`city2stl/osm_raster.py::_resolve_building_height`**: "40 ft" is read as 40 m and "12;15" as 1215 m.
+- **Trails outage reported as "no trails"**: `geo2stl/trails.py::fetch_and_rasterize_trails`
+  swallows `TrailsUpstreamError`.
+- **Frontend `renderDEMCanvas` re-announces the DEM** on every recolour and resize frame:
+  `app/client/static/js/modules/dem/dem-main.js::renderDEMCanvas`.
+- **`tests/manual/test-cache-semantics.py` deletes the real `cache/`** if run.
 
 ## Active bugs — from the pipeline audit
 

@@ -91,7 +91,15 @@ def _mesh_upload_root() -> Path:
     return CACHE_ROOT / "mesh_imports"
 
 
+_UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
 def _upload_dir(upload_id: str) -> Path:
+    """The upload's directory. ``upload_id`` must be what ``save_upload`` issued
+    (``uuid4().hex``): anything else, ".." included, would let a request reach
+    outside the upload root (``delete_upload`` would rmtree the whole cache)."""
+    if not _UPLOAD_ID_RE.match(upload_id or ""):
+        raise MeshImportError(f"invalid upload id {upload_id!r}")
     return _mesh_upload_root() / upload_id
 
 

@@ -118,6 +118,11 @@ Cartagena stays a heading and registration smoke test, not an accuracy benchmark
     `madrid_cuatro_torres`, `prague_pankrac`) with first-guess vantages; `sites/` is gitignored,
     so the site files are made locally by
     `python -m city2stl.skyline.scripts.discover_city_seeds la_defense madrid_cuatro_torres prague_pankrac`.
+  - Audit 2026-10-05 ([AUDIT-2026-10-05 §5](../../history/audits/AUDIT-2026-10-05.md)):
+    `PINNED_FLAGS` now also pins `SKYLINE_TAG_FILTER=0` (unaided error), SegFormer b1/512,
+    MULTIRES, tall frames and HTML off; benchmark sites get no per-site opt-ins; proposals
+    recompute on a bbox change. Still leaking: web seeds (no flag), the screen-cache key, and
+    the MS footprint area bug (only matters with `use_satellite_footprints`).
   - Next (local, needs the key): run `pytest tests/test_skyline_benchmark.py`; make the three
     sites and check their snapped panos; check Miami 3DEP coverage
     (`survey.available_for_bbox`); run `10_benchmark` on all eight; put the table in STATUS.md.

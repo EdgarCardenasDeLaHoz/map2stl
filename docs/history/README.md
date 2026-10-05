@@ -8,7 +8,7 @@ hold are in [../decisions/](../decisions/).
 
 ## Folders
 
-- [audits/](audits/): full-project and subsystem audits (2026-05-09, 05-17, 06-07, F-SKY ×2,
+- [audits/](audits/): full-project and subsystem audits (2026-10-05 full line-by-line, 2026-05-09, 05-17, 06-07, F-SKY ×2,
   pipeline 2026-08-26, terrain API, accessibility, dead code, test coverage, UX).
   Items still open are tracked in [../issues.md](../issues.md).
 - [issues-resolved.md](issues-resolved.md): resolved entries moved out of `issues.md`.

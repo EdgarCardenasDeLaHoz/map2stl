@@ -10,6 +10,18 @@ because code cites them.
   `city2stl/skyline/height/` → `city2stl/height/`, `app/server/core/height/` →
   `city2stl/height/`).
 
+## Fixed 2026-10-05 (full code audit)
+
+### Static-file path traversal and cache wipe through a mesh upload id — fixed 2026-10-05
+- `GET /static/..%2F..%2F..%2Fpyproject.toml` returned the file, so any readable file was
+  exposed, `config.json` (API keys) included. `app/server/server.py::serve_static` now resolves the path
+  and requires it to stay under `static/` or `dist/`.
+- `DELETE /api/layers/mesh/%2E%2E` reached `shutil.rmtree(CACHE_ROOT)`.
+  `app/server/core/mesh_import.py::_upload_dir` now accepts only the `uuid4().hex` ids that
+  `save_upload` issues.
+- Tests: `tests/test_static_route.py`, `tests/test_mesh_import.py`. Source:
+  [audits/AUDIT-2026-10-05.md](audits/AUDIT-2026-10-05.md).
+
 ## Fixed 2026-10 (end-to-end run, Amazon + Philadelphia)
 
 ### 0g. Lake outlines fetched twice; continent-sized lakes query; city overlay froze the page — fixed 2026-10-02

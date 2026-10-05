@@ -43,6 +43,14 @@ PINNED_FLAGS = {
     "SKYLINE_CV_F_SKY11_1": "0",
     "SKYLINE_CV_F_SKY1": "1",
     "SKYLINE_REFRESH_PROPOSALS": "0",
+    "SKYLINE_CV_MULTIRES": "0",
+    "SKYLINE_CV_SEGFORMER_SIZE": "b1",        # production setting
+    "SKYLINE_CV_SEGFORMER_INPUT_SIZE": "512",
+    "SKYLINE_SV_TALL_FRAME": "0",
+    "SKYLINE_CV_HTML_REPORT": "0",            # heights.json is all the scorer reads
+    # Unaided error: with the filter on, OSM height tags steer the estimates
+    # the benchmark then scores (and the OSM-tag comparison becomes circular).
+    "SKYLINE_TAG_FILTER": "0",
 }
 
 REPORTS_DIR = ROOT / "city2stl" / "skyline" / "runs" / "region_reports"
@@ -139,6 +147,8 @@ def main() -> int:
     out.write_text(json.dumps({
         "git": _git_hash(),
         "flags": {k: os.environ.get(k) for k in PINNED_FLAGS},
+        # Not pinnable here: signing changes the image size (1280 vs 640 px).
+        "signed_streetview": bool(os.environ.get("GOOGLE_MAPS_SIGN_SECRET")),
         "statuses": list(statuses),
         "score_only": args.score_only,
         "skipped": skipped,
