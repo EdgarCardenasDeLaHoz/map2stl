@@ -168,6 +168,22 @@ What the evidence says so far:
   know who is on top). **C2: untagged buildings from 2+ located photos** — the building that
   really forms the skyline gives the same implied height from every photo; wrong candidates
   do not. No height guess needed.
+- 2026-10-05, C2 on real data (T16 review, Miami, the 27 kept photos of the `2026-10-05_0124`
+  report):
+  - First a key bug: the truth cache keys untagged footprints at the report's 6 decimals
+    (`region_pdf.py` rounds `footprint_lonlat`), C2 hashed the raw 7-decimal OSM rings, so none
+    of the 4,770 untagged footprints matched. Rounded: 173 (93 confirmed).
+  - Then 16 agreements over all 3,642 untagged footprints of 150 m² or more; 2 have confirmed
+    truth and both read about 100 m too tall (109.4 m against 11.6 m, 108.9 m against 29.9 m).
+    A constant 11 m is 9.8 m off on them.
+  - Why: an implied height is an upper bound for every footprint in front of the building that
+    really forms the skyline, and becomes a reading only when photos see it from different
+    directions. 7 of the 16 agreements are photos from one spot (0° spread of view directions at
+    the footprint; linked photos inherit the located photo's camera), 12 are under 15°, and in
+    12 a tagged tower behind the footprint explains the skyline over half its span or more.
+  - Asked of T16: count viewpoints, not files (two or more, at least 15° apart at the
+    footprint), and treat a reading as a cap where a tagged tower behind explains the span.
+    That leaves 2-3 of the 16 here, none with truth: Miami's Commons set is thin for C2.
 
 ### Findings kept from the earlier revised steps
 
