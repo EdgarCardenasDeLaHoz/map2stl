@@ -26,6 +26,12 @@ heights) can be tuned with ``--rescore`` without placing photos again. Refinemen
 heights ``--h-cams`` (street, deck, rooftop). Scored against the benchmark truth and against
 Street View on the same buildings (the report's ``heights.json``). Writes ``photos.json``,
 ``photo_heights.json`` and the report's ``benchmark.html``.
+
+``--untagged`` (F-WEB2 C2): also heights for untagged buildings. Each candidate photo fits its
+tilt and camera height on its tagged towers and implies a height for every untagged footprint
+in view (``photo_heights.implied_heights``); a building is kept when 2+ kept photos agree
+within max(3 m, 10 %) (``photo_heights.agreed_heights``). Written to ``photo_heights.json``
+(``untagged``) and scored against the benchmark truth.
 """
 
 from __future__ import annotations
@@ -56,12 +62,14 @@ log = logging.getLogger("photo_pipeline")
 _W: dict = {}
 
 
-def _init(region: str):
+def _init(region: str, untagged: bool = False):
     """Worker state: towers and outlines, loaded once per process."""
     from city2stl.skyline.region_data import _load_osm_for_region, _load_region_bbox
 
     osm, _ = _load_osm_for_region(_load_region_bbox(region))
     _W["towers"] = sm.tower_table(osm["buildings"]["features"])
+    if untagged:
+        _W["untagged"] = ph.untagged_table(osm["buildings"]["features"], frame=_W["towers"])
     d = ROOT / "runs" / "commons_cache" / region
     _W["prof"] = dict(np.load(d / "profiles.npz"))
 
@@ -136,9 +144,23 @@ def _job(job: dict) -> dict:
     # every candidate is measured, kept or not, so the gates can be tuned afterwards against
     # the truth (``--rescore``) without placing the photos again
     res["gate_ok"] = res.pop("kept")
-    res["towers"], res["anchor_dev_m"] = _measure(prof, pose, job["max_dist_m"],
-                                                  (res.get("camera") or {}).get("h_cam", 2.0))
+    h_cam = (res.get("camera") or {}).get("h_cam", 2.0)
+    res["towers"], res["anchor_dev_m"] = _measure(prof, pose, job["max_dist_m"], h_cam)
+    if "untagged" in _W:
+        res["untagged"] = _implied_untagged(prof, pose, job["max_dist_m"], h_cam)
     return res
+
+
+def _implied_untagged(prof, pose: ph.PhotoPose, max_dist_m: float, h_cam: float) -> dict:
+    """{untagged footprint index: implied height} for one photo, with tilt and camera height
+    fitted on all its tagged towers (no tower's estimate is involved, so no leave-one-out)."""
+    ms = [m for m in ph.measure_towers(prof, _W["towers"], pose, h_cam=h_cam)
+          if m.dist_m <= max_dist_m]
+    if len(ms) < 2:
+        return {}
+    tilt, h = ph.fit_tilt_height(ms, np.array([m.osm_height_m for m in ms]))
+    imp = ph.implied_heights(prof, pose, _W["untagged"], tilt, h, max_dist_m=max_dist_m)
+    return {str(i): round(v, 2) for i, v in imp.items()}
 
 
 def _run(ex, jobs: list[dict], label: str) -> list[dict]:
@@ -214,7 +236,8 @@ def place(args, meta: dict, osm: dict) -> list[dict]:
              for m in meta.values() if m["lat"] is not None and m.get("hfov_deg")
              and m["title"] not in done_titles and not m.get("why_not_usable")]
     results = []
-    with ProcessPoolExecutor(args.workers, initializer=_init, initargs=(args.region,)) as ex:
+    with ProcessPoolExecutor(args.workers, initializer=_init,
+                             initargs=(args.region, args.untagged)) as ex:
         results += _run(ex, jobs1 + jobs2, "place")
         ok_cam = {r["key"]: r["camera"] for r in results if _keep(r, args)}
         links = {}
@@ -325,8 +348,10 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
             "osm": _score([r["osm_m"] for r in both], [r["truth_m"] for r in both]),
             "street_view": _score([r["street_view_m"] for r in both], [r["truth_m"] for r in both])},
     }
-    (args.report / "photo_heights.json").write_text(
-        json.dumps({"summary": summary, "buildings": rows}, indent=1), encoding="utf-8")
+    out = {"summary": summary, "buildings": rows}
+    if args.untagged:
+        out["untagged"], summary["untagged"] = _untagged_rows(args, results, towers, osm)
+    (args.report / "photo_heights.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
     cards = []
     for r in sorted(results, key=lambda r: (not r["kept"], r["route"], r["title"])):
         m = meta[r["key"]]
@@ -348,6 +373,29 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
     return summary
 
 
+def _untagged_rows(args, results: list[dict], towers, osm: dict) -> tuple[list[dict], dict]:
+    """Untagged buildings two or more kept photos agree on, with their truth and a score."""
+    table = ph.untagged_table(osm["buildings"]["features"], frame=towers)
+    per = [{int(k): v for k, v in (r.get("untagged") or {}).items()}
+           for r in results if r.get("kept")]
+    est = ph.agreed_heights(per)
+    rings = {i: [list(table.to_ll(x, y))[::-1] for x, y in table.verts[i]] for i in est}
+    keys = {i: bm.footprint_key(r) for i, r in rings.items()}
+    truth = (bm.footprint_truth(args.region, {keys[i]: rings[i] for i in est},
+                                bm.REGIONS.get(args.region)) if est else {})
+    rows = []
+    for i, (h, n, spread) in sorted(est.items()):
+        t = truth.get(keys[i], {})
+        rows.append({"index": i, "name": table.names[i], "key": keys[i],
+                     "footprint_lonlat": rings[i], "photo_m": round(h, 1), "n_photos": n,
+                     "spread_m": round(spread, 1),
+                     "truth_m": t.get("truth_m") if t.get("status") == "confirmed" else None})
+    conf = [r for r in rows if r["truth_m"] is not None]
+    return rows, {"buildings": len(rows), "confirmed": len(conf),
+                  "photo_vs_truth": _score([r["photo_m"] for r in conf],
+                                           [r["truth_m"] for r in conf])}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--region", required=True)
@@ -367,6 +415,8 @@ def main() -> int:
                     help="keep a photo failing its fit/margin gate when its towers sit within "
                          "this many m of their OSM heights (median); see _keep")
     ap.add_argument("--rescue-min-towers", type=int, default=12)
+    ap.add_argument("--untagged", action="store_true",
+                    help="also measure untagged buildings that 2+ kept photos agree on (C2)")
     ap.add_argument("--rescore", action="store_true",
                     help="no placing: apply the gates to the saved photo_results.json")
     args = ap.parse_args()

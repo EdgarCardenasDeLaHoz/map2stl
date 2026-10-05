@@ -375,7 +375,7 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
   - Camera from OSM towers: `map2stl/city2stl/skyline/skyline_match.py::locate_and_solve` (`refine`, `identify`).
   - Labelled photos: `photo_localize.py::solve_from_labels`, with `camera_solver.py::solve_pose`.
   - Same-spot groups: `photo_groups.py::embed_links`.
-  - Tower heights: `photo_heights.py::loo_heights`.
+  - Tower heights: `photo_heights.py::loo_heights`; untagged buildings from 2+ photos (C2, `17_photo_pipeline --untagged`): `photo_heights.py::agreed_heights` (`implied_heights`, `untagged_table`).
   - Pipeline: `scripts/13_photo_profiles.py` through `scripts/17_photo_pipeline.py`.
 - Drone Photo Sphere seeds, footprint first (F-DET6):
   - Camera from the waterline: `map2stl/city2stl/skyline/footprint_detect.py::fit_pose_from_waterline`.
