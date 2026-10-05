@@ -9,6 +9,8 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   - `active/` — work in progress.
   - `done/` — finished; the "Decisions" section points to `docs/decisions/`.
   - `archive/` — abandoned, failed or superseded.
+  - `proposals/` — written proposals awaiting a decision (2026-10-05: the skyline improvement plan
+    and technology review; the approved items are tasks T28–T34 on `docs/agents/TASKS.md`).
 - When an item ships, delete its line here and update the plan's Progress section. A plan
   moves to `done/` when its last line here is gone.
 
