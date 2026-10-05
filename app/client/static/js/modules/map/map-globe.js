@@ -28,8 +28,6 @@
  *   window.setEditMarkersLayer(layer)
  *   window.setDrawnItems(items)
  *   window.setGlobeScene(scene)
- *   window.setGlobeCamera(camera)
- *   window.setGlobeRenderer(renderer)
  *   window.setGlobe(globe)
  */
 
@@ -646,8 +644,6 @@ function initGlobe() {
         container.appendChild(_globeRenderer.domElement);
 
         window.setGlobeScene?.(_globeScene);
-        window.setGlobeCamera?.(_globeCamera);
-        window.setGlobeRenderer?.(_globeRenderer);
 
         // Create globe geometry
         const geometry = new THREE.SphereGeometry(5, 64, 64);

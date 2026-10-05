@@ -876,6 +876,5 @@ document.addEventListener('DOMContentLoaded', () => {
     window.populateDemSources?.();
 
     // Wire appState callbacks so other modules (e.g., presets.js) can trigger them
-    window.appState._setDemEmptyState = window._setDemEmptyState;
     window.appState._updateWorkflowStepper = window._updateWorkflowStepper;
 });

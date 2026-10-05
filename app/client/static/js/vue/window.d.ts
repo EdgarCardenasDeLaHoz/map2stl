@@ -18,6 +18,5 @@ interface Window {
     // Legacy app state proxy (replaced by Pinia in Stage 7+)
     appState?: Record<string, unknown> & {
         on?: (key: string, cb: (val: unknown) => void) => void;
-        off?: (key: string, cb: (val: unknown) => void) => void;
     };
 }

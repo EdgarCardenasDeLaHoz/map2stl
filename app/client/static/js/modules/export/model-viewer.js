@@ -24,7 +24,6 @@
  *
  * State exposed on window.appState:
  *   window.appState.terrainMesh  — current terrain mesh (or null)
- *   window.appState.viewerScene  — the THREE.Scene
  *   window.appState.modelPreviewState — 'idle' | 'building' | 'ready' | 'error'
  *
  * External dependencies:
@@ -156,8 +155,6 @@ function initModelViewer() {
         needsRender = true;
     };
     window.addEventListener('resize', _resizeHandler);
-
-    window.appState.viewerScene = modelScene;
 
     (function animate() {
         requestAnimationFrame(animate);

@@ -8,7 +8,6 @@
  *   window.appState.selectedRegion   — currently selected region object
  *   window.appState.currentDemBbox   — bounding box of the currently rendered DEM
  *   window.appState.osmCityData      — last fetched OSM feature collections
- *   window.appState.showToast        — toast notification function
  *   window.appState.haversineDiagKm  — bbox diagonal distance helper
  *
  * Performance notes:

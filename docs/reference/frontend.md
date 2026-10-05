@@ -36,7 +36,7 @@ file owns which pipeline control, and the conventions a change must respect.
 |---|---|
 | `app/client/static/js/vue/main-vue.ts` | Creates the app + Pinia, mounts `App.vue` on `#vue-app`, registers `ModelScorePanel` globally, installs the appState bridge |
 | `app/client/static/js/vue/App.vue` | Root: teleports `SidebarPanel` into `#vue-sidebar`, `ContentArea` into `#vue-content-area`; renders `AppShell` |
-| `app/client/static/js/vue/stores/app.ts` | The one Pinia store (`app/client/static/js/vue/stores/app.ts::useAppStore`); typed state + `get`/`set` compat actions + `clearLayerCache` |
+| `app/client/static/js/vue/stores/app.ts` | The one Pinia store (`app/client/static/js/vue/stores/app.ts::useAppStore`); typed state (no actions) |
 | `app/client/static/js/vue/stores/types.ts` | Types for the store (`Region`, `DemData`, `BBox`, ...) |
 | `app/client/static/js/vue/components/**` | `layout/`, `sidebar/`, `views/`, `dem/`, `shared/` — see [frontend-modules.md § Vue components](frontend-modules.md#vue-components) |
 
@@ -77,8 +77,8 @@ sequenceDiagram
      into the store (`$patch`);
    - wraps `app/client/static/js/vue/main-vue.ts::RAW_KEYS` (Leaflet/Three objects, canvases,
      callbacks) in `markRaw` so Vue never deep-proxies them;
-   - replaces `window.appState` with a bridge Proxy whose reads and writes go to the store, and
-     sets `window.__vuePiniaActive = true`.
+   - replaces `window.appState` with a bridge Proxy (`get/set/on`) whose reads and writes go to
+     the store.
 3. **After:** a module writing `window.appState.x = v` and a component reading `store.x` see the
    same value; Vue re-renders reactively.
 
@@ -241,7 +241,7 @@ Consequences to know:
 | Key | S | Type | Description |
 |---|---|---|---|
 | `map` | S | `L.Map` | Main 2D map |
-| `globeScene` / `globeCamera` / `globeRenderer` / `globe` | S | Three.js | Globe scene objects |
+| `globeScene` / `globe` | S | Three.js | Globe scene objects |
 | `drawnItems` | S | `L.FeatureGroup` | Drawn bbox rectangles |
 | `preloadedLayer` | S | `L.FeatureGroup` | Saved-region boxes |
 | `editMarkersLayer` | S | `L.FeatureGroup` | Edit buttons inside each bbox |
@@ -253,7 +253,6 @@ Consequences to know:
 |---|---|---|---|
 | `coordinatesData` | S | `Region[]` | Saved regions |
 | `selectedRegion` | S | `Region \| null` | Current region |
-| `regionThumbnails` | S | `Record<string,string>` | Region name → thumbnail |
 
 Module-local (not on appState):
 
@@ -286,7 +285,6 @@ Module-local (not on appState):
 | Key | S | Type | Description |
 |---|---|---|---|
 | `compositeDemSourceCanvas` | S | canvas | Composite output (`composite-dem.js`) |
-| `compositeFeatures` | S | object | Per-channel Float32Arrays + histograms |
 | `compositeCityRaster` | S | object | Cached city raster used by the composite |
 | `compositeLayerSpec` | | `{layers, unsupported}` | Terrain-only server spec published by `applyCompositeToDem()`; never contains `osm_*` sources. [why](../decisions/composite.md#2026-09-06--both-engines-keep-compositing-and-the-export-falls-back-to-the-browsers-values) |
 | `_newCompositeApplied` | | bool | Set by Apply, cleared by a fresh `loadDEM()`; tells `_demSettings()` to send the spec (or inline values). Not saved with the region |
@@ -317,15 +315,14 @@ Module-local (not on appState):
 
 | Key | S | Type | Description |
 |---|---|---|---|
-| `terrainMesh` / `viewerScene` | S | Three.js | Extrude preview mesh and scene |
+| `terrainMesh` | S | Three.js | Extrude preview mesh |
 | `generatedModelData` | S | object | Last preview parameters, used by downloads; `zMaxMm` (printed height) feeds the Build sub-tab size line |
 | `modelPreviewState` | S | `'idle'\|'building'\|'ready'\|'error'` | Set by `previewModelIn3D`; `ModelContainer.vue` words its empty state from it |
 | `puzzleEdges` | S | `{cols, rows, key} \| null` | Dragged puzzle cuts in mm; sent as `col_edges_mm` / `row_edges_mm` |
 
 ### Callbacks (markRaw)
 
-`_setDemEmptyState`, `_updateWorkflowStepper` (set by `dem-main.js`), `_applyCurveSettings`,
-`showToast`, `haversineDiagKm`.
+`_updateWorkflowStepper` (set by `dem-main.js`), `_applyCurveSettings`, `haversineDiagKm`.
 
 ---
 

@@ -18,8 +18,6 @@ if (!window.appState?.set) window.appState = {};   // fallback if state.js not l
 // Map & globe instances (set once during init by map-globe.js)
 window.appState.map = null;
 window.appState.globeScene = null;
-window.appState.globeCamera = null;
-window.appState.globeRenderer = null;
 window.appState.globe = null;
 
 // Map layers
@@ -41,7 +39,6 @@ window.appState.lastWaterMaskData = null;
 window.appState.satEsaLoaded = false;
 
 // Shared helpers (set later by modules)
-window.appState.showToast = null;
 window.appState.haversineDiagKm = null;
 
 // Land cover configuration — owned by water-mask.js; exposed on window.appState.
@@ -266,8 +263,6 @@ window.setDrawnItems = (d) => { window.appState.drawnItems = d; };
 window.getDrawnItems = () => window.appState.drawnItems;
 window.setGlobeScene = (s) => { window.appState.globeScene = s; };
 window.getGlobeScene = () => window.appState.globeScene;
-window.setGlobeCamera = (c) => { window.appState.globeCamera = c; };
-window.setGlobeRenderer = (r) => { window.appState.globeRenderer = r; };
 window.setGlobe = (g) => { window.appState.globe = g; };
 window.setSidebarState = (s) => { window.appState.sidebarState = s; };
 
