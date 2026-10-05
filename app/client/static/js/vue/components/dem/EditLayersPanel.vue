@@ -20,9 +20,6 @@
              :aria-label="`${l.name} in the model`" :title="switchTitle(l)"
              :checked="on(l)" :disabled="blocked(l)" @click.stop @change="toggle(l, $event)">
     </div>
-    <button v-if="extras.length" type="button" class="el-add" @click="store.showExtras = !store.showExtras">
-      {{ store.showExtras ? '− Fewer layers' : '＋ Add layer (' + extras.map(e => e.name.toLowerCase()).join(', ') + ')' }}
-    </button>
     <div class="el-spacer"></div>
     <div class="el-hint">A layer loads when switched on; its dot turns green when it is ready.</div>
   </aside>
@@ -42,14 +39,8 @@ const app = useAppStore();
 const w = () => window as any;
 
 const available = computed(() => EDIT_LAYERS.filter((l) => !l.tool || ui.shows(l.tool)));
-const shown = computed(() => {
-  void store.tick;
-  return available.value.filter((l) => !l.extra || store.showExtras || on(l) || store.selected === l.id);
-});
-const extras = computed(() => {
-  void store.tick;
-  return available.value.filter((l) => l.extra && !on(l) && store.selected !== l.id);
-});
+// Every layer is listed from the start (user 2026-10-05: no "+ Add layer" to unfold).
+const shown = available;
 
 function on(l: EditLayer): boolean {
   void store.tick;
@@ -165,7 +156,7 @@ const bump = () => { store.bump(); requestAnimationFrame(paintThumbs); };
 // (switching a preview on also fetches it, stacked-layers.js LAYER_AUTOLOAD).
 function showPrintedPreviews() {
   for (const l of EDIT_LAYERS) {
-    if (!l.fixed && !l.extra && l.inModel()) setPreviewVisible(l.stack, true);
+    if (!l.fixed && l.inModel()) setPreviewVisible(l.stack, true);
   }
   bump();
 }
@@ -224,10 +215,6 @@ onBeforeUnmount(() => {
 .el-switch:checked::after { left: 18px; }
 .el-switch:disabled { opacity: 0.4; cursor: not-allowed; }
 .el-switch:focus-visible { outline: 2px solid #0a84ff; outline-offset: 2px; }
-.el-add {
-  background: none; border: 0; color: #0a84ff; font-size: 13px; text-align: left;
-  padding: 8px; cursor: pointer; line-height: 1.4;
-}
 .el-spacer { flex: 1; }
 .el-hint { font-size: 12px; color: var(--text-muted); padding: 0 8px; line-height: 1.4; }
 </style>

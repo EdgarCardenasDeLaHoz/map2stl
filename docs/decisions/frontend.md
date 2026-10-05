@@ -3,6 +3,31 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-05 — Edit settings: Canvas on top and collapsible; the layer's groups are tabs
+- **Decision:** the right panel starts with Canvas (the map view's rows, the same under every
+  layer), folded open or closed with its caption. Below it the selected layer's name, then tabs
+  View / Fetch / Composite showing one group at a time
+  (`components/dem/LayerSettings.vue`). A tab with nothing in it for this layer is disabled
+  (Borders: Composite); the chosen tab stays when another layer is selected, falling back to
+  the first tab with content. Tab, fold and "Show advanced" are kept per viewer in
+  localStorage (`stores/editPanel.ts`).
+- **Why:** user, 2026-10-05: "Have the following tabs on the Top: View, Fetch, Composite.
+  Canvas should always on top, make collapsable."
+- **Rejected:** Canvas as a fourth tab: the user asked for it above the tabs and always there.
+- **Supersedes / superseded by:** the stacked FETCH / VIEW / COMPOSITE / CANVAS groups of the
+  2026-10-04 Edit panel entry.
+
+### 2026-10-05 — Edit: every layer listed from the start, in a fixed order
+- **Decision:** the Layers panel lists all eight layers at once, in this order: Terrain, Land cover,
+  Satellite, Rivers & lakes, Borders, Trails, Buildings & roads, Import layer
+  (`stores/editLayers.ts::EDIT_LAYERS`). The "＋ Add layer" button and the `extra` flag are gone;
+  "Satellite colour" is "Satellite", "Imported mesh" is "Import layer".
+- **Why:** user, 2026-10-05: "show all from start, no need to hide and unhide", with that order.
+  A layer that is in the print shows its preview when a terrain loads, trails included now.
+- **Rejected:** renaming "Buildings & roads" to "Buildings": the layer switches the roads too.
+- **Supersedes / superseded by:** the "+ trails / land cover / imported mesh" part of
+  [2026-10-02 — Edit: a layer's switch means "in the print"](#2026-10-02--edit-a-layers-switch-means-in-the-print-server-channels-need-no-apply).
+
 ### 2026-10-03 — Extrude builds the finished City Model in the background and shows it in place of the quick view
 - **Decision:**
   - After a city preview (box ≤ `CITY_COARSE_MAX_DIAG_KM`),

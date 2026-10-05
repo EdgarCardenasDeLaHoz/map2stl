@@ -41,8 +41,8 @@ How the app is laid out (since 2026-10-02):
   bottom of the map with its size and position, **✎ Edit box** and **Load DEM ›**;
   **＋ New region** is under the list. The map's corner has **🌍 Globe** and **Map ▾**
   (map style, terrain relief, grid, labels).
-- **Edit** is three columns: **Layers** on the left (Terrain, Rivers & lakes, Buildings &
-  roads, Satellite colour; **＋ Add layer** adds trails and land cover), the map in the
+- **Edit** is three columns: **Layers** on the left (Terrain, Land cover, Satellite, Rivers &
+  lakes, Borders, Trails, Buildings & roads, Import layer), the map in the
   middle, and the selected layer's settings on the right. Each layer has a picture, a dot
   (green when loaded) and a switch: on means *in the print*. Click a layer to see its
   settings. The header's region pill goes back to Explore to switch regions.

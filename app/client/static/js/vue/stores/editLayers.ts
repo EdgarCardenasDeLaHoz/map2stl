@@ -19,8 +19,6 @@ export interface EditLayer {
   icon: string;
   /** stacked-layers.js key of the preview layer. */
   stack: string;
-  /** Listed under "+ Add layer" until switched on. */
-  extra?: boolean;
   /** Always in the model (no switch). */
   fixed?: boolean;
   /** Only with this ⚙ tool (or Everything). */
@@ -42,6 +40,7 @@ const OTHER_CARVED: [string, string][] = [
 ];
 const CITY_IDS = ['buildings', 'fortifications', 'walls', 'towers', 'churches', 'roads', 'railways', 'green', 'waterways'];
 
+/** In the panel's order (user 2026-10-05), all listed from the start. */
 export const EDIT_LAYERS: EditLayer[] = [
   {
     id: 'terrain', name: 'Terrain', icon: '⛰', stack: 'Dem', fixed: true,
@@ -51,6 +50,19 @@ export const EDIT_LAYERS: EditLayer[] = [
       document.querySelector(`#demImage ${w().DEM_CANVAS_SELECTOR || 'canvas'}`) as HTMLCanvasElement | null,
       document.getElementById('layerDemCanvas') as HTMLCanvasElement | null,
     ],
+  },
+  {
+    id: 'landcover', name: 'Land cover', icon: '🌿', stack: 'Sat',
+    // Preview only: land cover has no server-side channel yet (composite-spec.js).
+    inModel: () => !!(w().getActiveLayers?.() as Set<string> | undefined)?.has('Sat'),
+    setInModel: () => {},
+    pictures: () => [document.querySelector('#satelliteImage canvas') as HTMLCanvasElement | null],
+  },
+  {
+    id: 'satellite', name: 'Satellite', icon: '🛰', stack: 'SatImg',
+    inModel: () => val('viewerColormap') === 'satellite',
+    setInModel: (on) => setField('viewerColormap', on ? 'satellite' : 'terrain'),
+    pictures: () => [w().appState?.satImgSourceCanvas],
   },
   {
     id: 'water', name: 'Rivers & lakes', icon: '💧', stack: 'WaterHydrology',
@@ -67,39 +79,26 @@ export const EDIT_LAYERS: EditLayer[] = [
     pictures: () => [w().appState?.waterHydrologyCanvas],
   },
   {
-    id: 'city', name: 'Buildings & roads', icon: '🏙', stack: 'CityOverlay',
-    inModel: () => checked('cityLayer_buildings_enabled') || checked('cityLayer_roads_enabled'),
-    setInModel: (on) => { for (const id of CITY_IDS) setChecked(`cityLayer_${id}_enabled`, on); },
-    pictures: () => [w().appState?.cityRasterSourceCanvas, document.getElementById('layerCityRasterCanvas') as HTMLCanvasElement | null],
-  },
-  {
-    id: 'satellite', name: 'Satellite colour', icon: '🛰', stack: 'SatImg',
-    inModel: () => val('viewerColormap') === 'satellite',
-    setInModel: (on) => setField('viewerColormap', on ? 'satellite' : 'terrain'),
-    pictures: () => [w().appState?.satImgSourceCanvas],
-  },
-  {
-    id: 'trails', name: 'Trails', icon: '🥾', stack: 'Trails', extra: true,
-    inModel: () => checked('cityLayer_trails_enabled'),
-    setInModel: (on) => setChecked('cityLayer_trails_enabled', on),
-    pictures: () => [document.getElementById('layerTrailsCanvas') as HTMLCanvasElement | null],
-  },
-  {
-    id: 'landcover', name: 'Land cover', icon: '🌿', stack: 'Sat', extra: true,
-    // Preview only: land cover has no server-side channel yet (composite-spec.js).
-    inModel: () => !!(w().getActiveLayers?.() as Set<string> | undefined)?.has('Sat'),
-    setInModel: () => {},
-    pictures: () => [document.querySelector('#satelliteImage canvas') as HTMLCanvasElement | null],
-  },
-  {
-    id: 'borders', name: 'Borders', icon: '🗺', stack: 'Borders', extra: true,
+    id: 'borders', name: 'Borders', icon: '🗺', stack: 'Borders',
     // View only (user 2026-10-05): country and state lines on the map, never in the print.
     inModel: () => !!(w().getActiveLayers?.() as Set<string> | undefined)?.has('Borders'),
     setInModel: () => {},
     pictures: () => [w().appState?.bordersSourceCanvas],
   },
   {
-    id: 'mesh', name: 'Imported mesh', icon: '📐', stack: 'MeshImport', extra: true,
+    id: 'trails', name: 'Trails', icon: '🥾', stack: 'Trails',
+    inModel: () => checked('cityLayer_trails_enabled'),
+    setInModel: (on) => setChecked('cityLayer_trails_enabled', on),
+    pictures: () => [document.getElementById('layerTrailsCanvas') as HTMLCanvasElement | null],
+  },
+  {
+    id: 'city', name: 'Buildings & roads', icon: '🏙', stack: 'CityOverlay',
+    inModel: () => checked('cityLayer_buildings_enabled') || checked('cityLayer_roads_enabled'),
+    setInModel: (on) => { for (const id of CITY_IDS) setChecked(`cityLayer_${id}_enabled`, on); },
+    pictures: () => [w().appState?.cityRasterSourceCanvas, document.getElementById('layerCityRasterCanvas') as HTMLCanvasElement | null],
+  },
+  {
+    id: 'mesh', name: 'Import layer', icon: '📐', stack: 'MeshImport',
     inModel: () => !!(w().getActiveLayers?.() as Set<string> | undefined)?.has('MeshImport'),
     setInModel: () => {},
     pictures: () => [],
@@ -111,7 +110,6 @@ export const useEditLayersStore = defineStore('editLayers', {
     selected: 'terrain' as EditLayerId,
     /** Bumped whenever a control, a load or the layer stack changes; computeds re-read the DOM. */
     tick: 0,
-    showExtras: false,
   }),
   actions: {
     select(id: EditLayerId) { this.selected = id; },
