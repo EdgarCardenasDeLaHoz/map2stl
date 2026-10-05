@@ -152,6 +152,31 @@ def loo_heights(ms: list[TowerMeasure], min_anchors: int = 2) -> dict[int, float
     return out
 
 
+#: A tower reading is trusted only within this ratio of the tower's OSM height. On 2,791
+#: readings with confirmed truth (Miami, Chicago; 2026-10-05) those outside were wrong 98-99 %
+#: of the time, and truth sided with OSM in 94-99 % of them: a reading that far from the tag
+#: measured another building (one in front, or the gap beside the tower), not a bad tag.
+#: Inside 0.8-1.25 only 6 % were off by more than 25 %.
+PLAUSIBLE_RATIO = (0.6, 1.6)
+#: ... and only for towers whose OSM roof rises at least this far above the camera's horizon:
+#: under 1 deg, 53 % of readings were off by more than 25 % (1-2 deg: 39 %; above 2 deg: ~19 %).
+#: Distance alone predicted nothing (tall towers 3 km away read fine).
+MIN_APPARENT_DEG = 1.5
+
+
+def reading_flag(photo_m: float, osm_m: float, dist_m: float, h_cam: float = 2.0) -> str | None:
+    """Why a tower reading is not trusted, or None: ``"hidden"`` (at or below 0 m: something in
+    front forms the outline), ``"far from its OSM height"`` (outside ``PLAUSIBLE_RATIO``) or
+    ``"low on the horizon"`` (under ``MIN_APPARENT_DEG``)."""
+    if photo_m <= 0:
+        return "hidden"
+    if not PLAUSIBLE_RATIO[0] <= photo_m / osm_m <= PLAUSIBLE_RATIO[1]:
+        return "far from its OSM height"
+    if math.degrees(math.atan2(osm_m - h_cam, dist_m)) < MIN_APPARENT_DEG:
+        return "low on the horizon"
+    return None
+
+
 # --------------------------------------------------------------------------- untagged (C2)
 
 #: Photos agree on a building's height within max(AGREE_ABS_M, min(AGREE_REL x height,

@@ -102,24 +102,121 @@ def _measure(prof, pose: ph.PhotoPose, max_dist_m: float, h_cam: float = 2.0):
     towers = _W["towers"]
     ms = [m for m in ph.measure_towers(prof, towers, pose, h_cam=h_cam) if m.dist_m <= max_dist_m]
     est = ph.loo_heights(ms)
-    # a tower reading at or below 0 m is hidden: the outline over its columns is something in
-    # front (a tree, a lamp post, a parapet; Cartagena 2026-10-05, towers 3 km away). Refit the
-    # others without it, since its row would bias their tilt and camera height too.
-    hidden = {i: h for i, h in est.items() if h <= 0}
-    if hidden:
-        est = {**ph.loo_heights([m for m in ms if m.index not in hidden]), **hidden}
+    # readings the photo can't be trusted on (``ph.reading_flag``: hidden behind something in
+    # front, far from the OSM height, low on the horizon) measured another building; they would
+    # bias the others' tilt and camera-height fit too, so refit without them and flag them
+    flags = {m.index: f for m in ms if m.index in est
+             and (f := ph.reading_flag(est[m.index], m.osm_height_m, m.dist_m, h_cam))}
+    if flags:
+        refit = ph.loo_heights([m for m in ms if m.index not in flags])
+        est = {**refit, **{i: est[i] for i in flags}}
+        flags.update({m.index: f for m in ms if m.index in refit
+                      and (f := ph.reading_flag(refit[m.index], m.osm_height_m, m.dist_m, h_cam))})
     rows = [{"tower": m.index, "name": m.name, "dist_m": round(m.dist_m),
              "photo_m": round(est[m.index], 1), "osm_m": m.osm_height_m,
-             **({"hidden": True} if m.index in hidden else {})}
+             **({"flag": flags[m.index]} if m.index in flags else {})}
             for m in ms if m.index in est]
-    seen = [r for r in rows if not r.get("hidden")]
-    dev = float(np.median([abs(r["photo_m"] - r["osm_m"]) for r in seen])) if seen else None
+    # every reading counts here: a misplaced photo shows up as many towers far from their tags
+    dev = float(np.median([abs(r["photo_m"] - r["osm_m"]) for r in rows])) if rows else None
     return rows, dev
 
 
-def _hidden(t: dict) -> bool:
-    """A tower reading that measured something in front of the tower (see ``_measure``)."""
-    return bool(t.get("hidden")) or t["photo_m"] <= 0
+#: Two photos confirm each other on a tower when their readings lie within max(CROSS_ABS_M,
+#: CROSS_REL x the other photos' median).
+CROSS_ABS_M = 5.0
+CROSS_REL = 0.15
+
+
+def _cross_check(results: list[dict]) -> None:
+    """Photos that claim the same tower must agree on it (user, 2026-10-05).
+
+    Per used reading of a kept photo: ``others`` = how many other kept photos read that tower,
+    ``confirmed_by`` = how many of them agree with it. A reading that two or more other photos
+    read and none agrees with is flagged "other photos disagree" and not used. On 2,472
+    readings with confirmed truth (Miami, Chicago): confirmed readings were more than 25 % off
+    in 11 % of cases, contradicted ones in 62 %, readings no other photo had in 32 %.
+    """
+    by: dict[int, list[tuple[int, dict]]] = {}
+    for k, r in enumerate(results):
+        if r.get("kept"):
+            for t in r.get("towers") or []:
+                if not t.get("flag"):
+                    by.setdefault(t["tower"], []).append((k, t))
+    for lst in by.values():
+        for k, t in lst:
+            others = [o["photo_m"] for k2, o in lst if k2 != k]
+            t["others"] = len(others)
+            if others:
+                tol = max(CROSS_ABS_M, CROSS_REL * float(np.median(others)))
+                t["confirmed_by"] = int(sum(abs(h - t["photo_m"]) <= tol for h in others))
+    for lst in by.values():
+        for _k, t in lst:
+            if t["others"] >= 2 and not t.get("confirmed_by"):
+                t["flag"] = "other photos disagree"
+
+
+def _photo_groups(results: list[dict], min_shared: int = 4) -> list[dict]:
+    """Kept photos grouped by the towers they show: linked when two share ``min_shared`` used
+    tower readings, groups = connected sets. Per group: its photos, the towers read by 2+ of
+    them, and the share of those readings another photo confirms."""
+    kept = [r for r in results if r.get("kept")]
+    sets = [{t["tower"] for t in r.get("towers") or [] if not t.get("flag")} for r in kept]
+    parent = list(range(len(kept)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(kept)):
+        for j in range(i + 1, len(kept)):
+            if len(sets[i] & sets[j]) >= min_shared:
+                parent[find(i)] = find(j)
+    members: dict[int, list[int]] = {}
+    for i in range(len(kept)):
+        members.setdefault(find(i), []).append(i)
+    out = []
+    for ms in members.values():
+        shared = {ti for ti in set().union(*(sets[i] for i in ms)) if sum(ti in sets[i] for i in ms) >= 2}
+        reads = [t for i in ms for t in kept[i]["towers"]
+                 if t["tower"] in shared and t.get("others") and not t.get("flag")]
+        flagged = [t for i in ms for t in kept[i]["towers"]
+                   if t["tower"] in shared and t.get("flag") == "other photos disagree"]
+        out.append({"photos": [kept[i]["key"] for i in ms], "titles": [kept[i]["title"] for i in ms],
+                    "towers": len(shared), "readings": len(reads) + len(flagged),
+                    "confirmed": sum(1 for t in reads if t.get("confirmed_by")),
+                    "contradicted": len(flagged)})
+    return sorted(out, key=lambda g: (-len(g["photos"]), -g["towers"]))
+
+
+def _shared_buildings(results: list[dict], rows: list[dict]) -> list[dict]:
+    """Every tower two or more kept photos read: each photo's reading (and card label), the
+    consensus and truth, most-seen first."""
+    by: dict[int, list[dict]] = {}
+    for r in results:
+        if r.get("kept"):
+            for t in r.get("towers") or []:
+                by.setdefault(t["tower"], []).append(
+                    {"photo": r["key"], "title": r["title"], "label": t.get("label"),
+                     "photo_m": t["photo_m"], "flag": t.get("flag"),
+                     "confirmed_by": t.get("confirmed_by", 0)})
+    row = {r["tower"]: r for r in rows}
+    out = []
+    for ti, reads in by.items():
+        if len(reads) < 2:
+            continue
+        b = row.get(ti, {})
+        out.append({"tower": ti, "name": b.get("name") or "", "reads": reads,
+                    "photo_m": b.get("photo_m"), "osm_m": b.get("osm_m"), "truth_m": b.get("truth_m"),
+                    "confirmed": sum(1 for x in reads if x["confirmed_by"] and not x["flag"])})
+    return sorted(out, key=lambda b: (-len(b["reads"]), b["name"]))
+
+
+def _flag(t: dict, h_cam: float = 2.0) -> str | None:
+    """Why a stored tower reading isn't trusted (``ph.reading_flag``), or None; works on photo
+    results written before the flags existed."""
+    return t.get("flag") or ph.reading_flag(t["photo_m"], t["osm_m"], t["dist_m"], h_cam)
 
 
 def _job(job: dict) -> dict:
@@ -351,19 +448,27 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
 
     for r in results:
         r["kept"] = _keep(r, args)
+        h_cam = (r.get("camera") or {}).get("h_cam", 2.0)
         for t in r.get("towers") or []:
             t["truth_m"] = tv(t["tower"])
+            f = _flag(t, h_cam)
+            if f:
+                t["flag"] = f                    # shown on the card, left out of everything below
         ct = [(t["photo_m"], t["truth_m"]) for t in r.get("towers") or []
-              if t["truth_m"] is not None and not _hidden(t)]
+              if t["truth_m"] is not None and not t.get("flag")]
         r["score"] = _score(*zip(*ct, strict=True)) if len(ct) >= 2 else {}
+    _cross_check(results)
     per: dict[int, list[float]] = {}
+    confirmed: dict[int, int] = {}
     for r in results:
         if r["kept"]:
             for t in r.get("towers") or []:
-                if not _hidden(t):
+                if not t.get("flag"):
                     per.setdefault(t["tower"], []).append(t["photo_m"])
+                    confirmed[t["tower"]] = confirmed.get(t["tower"], 0) + bool(t.get("confirmed_by"))
     rows = [{"tower": int(ti), "name": towers.names[ti], "key": keys[ti],
              "photo_m": round(float(np.median(hs)), 1), "n_photos": len(hs),
+             "n_confirmed": confirmed.get(ti, 0),
              "spread_m": round(float(np.ptp(hs)), 1) if len(hs) > 1 else 0.0,
              "osm_m": float(towers.height_m[ti]), "truth_m": tv(ti)}
             for ti, hs in per.items()]
@@ -395,6 +500,17 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
         "kept": {k: sum(1 for r in results if r["route"] == k and r["kept"]) for k in routes},
         "buildings_measured": len(rows), "confirmed": len(conf),
         "photo_vs_truth": _score([r["photo_m"] for r in conf], [r["truth_m"] for r in conf]),
+        # buildings two photos agree on, against those only one photo read (_cross_check)
+        "photo_vs_truth_confirmed": _score([r["photo_m"] for r in conf if r["n_confirmed"]],
+                                           [r["truth_m"] for r in conf if r["n_confirmed"]]),
+        "photo_vs_truth_single": _score([r["photo_m"] for r in conf if r["n_photos"] == 1],
+                                        [r["truth_m"] for r in conf if r["n_photos"] == 1]),
+        "readings": {"used": sum(1 for r in results if r["kept"] for t in r.get("towers") or []
+                                 if not t.get("flag")),
+                     "not_used": {f: sum(1 for r in results if r["kept"] for t in r.get("towers") or []
+                                         if t.get("flag") == f)
+                                  for f in sorted({t["flag"] for r in results if r["kept"]
+                                                   for t in r.get("towers") or [] if t.get("flag")})}},
         # the yardstick photos must beat to add anything: every photo-measured tower has an
         # OSM height (the tower table is OSM-tagged towers only)
         "osm_vs_truth": _score([r["osm_m"] for r in conf], [r["truth_m"] for r in conf]),
@@ -411,7 +527,8 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
     for r in sorted(results, key=lambda r: (not r["kept"], r["route"], r["title"])):
         m = meta[r["key"]]
         why = r.get("why") or (f"OSM disagreement {r.get('anchor_dev_m')} m" if r.get("gate_ok") else "")
-        cards.append({"title": m["title"][5:], "page": m.get("page_url", ""), "thumb": _thumb(m["url"]),
+        cards.append({"key": r["key"], "title": m["title"][5:], "page": m.get("page_url", ""),
+                      "thumb": _thumb(m["url"]),
                       "attribution": f"{m.get('author', '')}, {m.get('licence', '')}",
                       "camera": r.get("camera") or {},
                       "status": ("measured" if r["kept"] else f"not kept: {why}") + f" ({r['route']})",
@@ -420,6 +537,13 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
         if r["kept"]:
             cards[-1].update(_card_images(args, r, m, towers, osm))
     (args.report / "photos.json").write_text(json.dumps(cards, indent=1), encoding="utf-8")
+    # photos grouped by the buildings they show, and every building 2+ photos read (after the
+    # cards, so the readings carry their card numbers)
+    titles = {r["key"]: meta[r["key"]]["title"][5:] for r in results}
+    for r in results:
+        r["title"] = titles[r["key"]]
+    summary["groups"] = _photo_groups(results)
+    summary["shared_buildings"] = _shared_buildings(results, rows)
     if heights.exists():
         from city2stl.skyline.benchmark_report import write_benchmark_page
         _name, sv_b = bm.load_report(heights)

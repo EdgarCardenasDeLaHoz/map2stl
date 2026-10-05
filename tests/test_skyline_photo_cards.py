@@ -103,8 +103,59 @@ def test_a_tower_hidden_behind_something_in_front_is_flagged_and_left_out(monkey
     monkeypatch.setitem(pl._W, "towers", towers)
     rows, dev = pl._measure(sm.PhotoProfile(y, prof.width, prof.height), pose, 5000.0)
     by = {r["tower"]: r for r in rows}
-    assert by[victim.index].get("hidden") and by[victim.index]["photo_m"] <= 0
-    assert not any(r.get("hidden") for r in rows if r["tower"] != victim.index)
-    errs = [abs(r["photo_m"] - r["osm_m"]) for r in rows if not r.get("hidden")]
-    assert np.median(errs) < 5.0 and dev == np.median(errs)  # the others are still right
-    assert pl._hidden(by[victim.index]) and not pl._hidden({"photo_m": 12.0})
+    assert by[victim.index]["flag"] == "hidden" and by[victim.index]["photo_m"] <= 0
+    assert all(r.get("flag") != "hidden" for r in rows if r["tower"] != victim.index)
+    used = [abs(r["photo_m"] - r["osm_m"]) for r in rows if not r.get("flag")]
+    assert len(used) >= 3 and np.median(used) < 5.0          # the others are still right
+    assert dev == np.median([abs(r["photo_m"] - r["osm_m"]) for r in rows])   # the keep gate sees all
+    assert pl._flag(by[victim.index]) == "hidden"
+    assert pl._flag({"photo_m": 120.0, "osm_m": 125.0, "dist_m": 900.0}) is None
+
+
+def test_reading_flag():
+    assert ph.reading_flag(-5.0, 100.0, 1000.0) == "hidden"
+    assert ph.reading_flag(50.0, 100.0, 1000.0) == "far from its OSM height"     # 0.5 x OSM
+    assert ph.reading_flag(170.0, 100.0, 1000.0) == "far from its OSM height"    # 1.7 x OSM
+    assert ph.reading_flag(45.0, 40.0, 3000.0) == "low on the horizon"          # 0.7 deg up
+    assert ph.reading_flag(95.0, 100.0, 1000.0) is None
+
+
+def _results(readings):
+    """Kept photo results from {photo: {tower: height}}."""
+    return [{"key": k, "title": k, "kept": True,
+             "towers": [{"tower": ti, "name": f"t{ti}", "photo_m": h, "osm_m": h, "dist_m": 900.0}
+                        for ti, h in towers.items()]}
+            for k, towers in readings.items()]
+
+
+def test_cross_check_flags_a_reading_the_other_photos_contradict():
+    import importlib
+
+    pl = importlib.import_module("city2stl.skyline.scripts.17_photo_pipeline")
+    res = _results({"a": {1: 100.0, 2: 50.0, 3: 30.0}, "b": {1: 103.0, 2: 80.0},
+                    "c": {1: 150.0}})
+    pl._cross_check(res)
+    t = {(r["key"], x["tower"]): x for r in res for x in r["towers"]}
+    assert t["a", 1]["confirmed_by"] == 1 and t["b", 1]["confirmed_by"] == 1
+    assert t["c", 1]["flag"] == "other photos disagree"            # 2 others, neither agrees
+    assert t["a", 2]["others"] == 1 and not t["a", 2].get("flag")   # 1 vs 1: can't tell which
+    assert t["a", 3]["others"] == 0 and "confirmed_by" not in t["a", 3]
+
+
+def test_photo_groups_and_shared_buildings_page():
+    import importlib
+
+    from city2stl.skyline.benchmark_report import _shared_html
+
+    pl = importlib.import_module("city2stl.skyline.scripts.17_photo_pipeline")
+    same = {i: 100.0 + i for i in range(1, 6)}
+    res = _results({"a": same, "b": {i: h + 1 for i, h in same.items()}, "c": {9: 40.0}})
+    pl._cross_check(res)
+    groups = pl._photo_groups(res)
+    assert groups[0]["photos"] == ["a", "b"] and groups[0]["towers"] == 5
+    assert groups[0]["confirmed"] == 10 and groups[0]["contradicted"] == 0
+    rows = [{"tower": i, "name": f"t{i}", "photo_m": h, "osm_m": h, "truth_m": None} for i, h in same.items()]
+    shared = pl._shared_buildings(res, rows)
+    assert len(shared) == 5 and all(len(b["reads"]) == 2 for b in shared)
+    page = _shared_html({"groups": groups, "shared_buildings": shared})
+    assert "Photos of the same buildings" in page and 'href="#photo-a"' in page

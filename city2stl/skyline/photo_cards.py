@@ -32,9 +32,14 @@ _TAB10 = ((31, 119, 180), (255, 127, 14), (44, 160, 44), (214, 39, 40), (148, 10
           (140, 86, 75), (227, 119, 194), (127, 127, 127), (188, 189, 34), (23, 190, 207))
 
 
-def label_color(n: int) -> tuple[int, int, int]:
-    """RGB colour of label ``n`` (1-based), shared by the photo and the map."""
-    return _TAB10[(n - 1) % len(_TAB10)]
+#: Colour of a tower whose reading is not used (``row["flag"]``).
+FLAG_GREY = (150, 150, 150)
+
+
+def label_color(n: int, row: dict | None = None) -> tuple[int, int, int]:
+    """RGB colour of label ``n`` (1-based), shared by the photo and the map; grey for a reading
+    that is not used."""
+    return FLAG_GREY if row is not None and row.get("flag") else _TAB10[(n - 1) % len(_TAB10)]
 
 
 def background_polygons(features: list[dict], towers) -> tuple[list[np.ndarray], np.ndarray]:
@@ -79,7 +84,7 @@ def draw_photo_overlay(image_rgb: np.ndarray, prof, pose, ordered: list[dict], m
     lw, fs, tick = max(2, w // 500), max(0.6, w / 1600), int(h * 0.06)
     placed: list[tuple[int, int, int, int]] = []
     for n, row in enumerate(ordered, 1):
-        m, col = measures[row["tower"]], label_color(n)
+        m, col = measures[row["tower"]], label_color(n, row)
         x0, x1 = int(m.x0 * sx), int(m.x1 * sx)
         y_roof = int(m.roof_row * sy)
         e_osm = math.degrees(math.atan((m.osm_height_m - h_cam) / m.dist_m)) - tilt_deg
@@ -135,8 +140,8 @@ def draw_location_map(path: Path, towers, pose, ordered: list[dict], bg) -> None
                             edgecolor="#1f77b4", lw=0.8))
     sep = span * 0.06                        # minimum spacing between labels, metres
     spots: list[np.ndarray] = []
-    for n, v in enumerate(verts, 1):
-        col = np.array(label_color(n)) / 255.0
+    for n, (v, row) in enumerate(zip(verts, ordered, strict=True), 1):
+        col = np.array(label_color(n, row)) / 255.0
         ax.add_patch(MplPolygon(v, closed=True, facecolor=col, edgecolor="k", lw=0.6, alpha=0.95))
         c = v.mean(axis=0)
         pos = c
