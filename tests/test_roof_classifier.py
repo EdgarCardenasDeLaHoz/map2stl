@@ -8,6 +8,7 @@ valid output.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from city2stl.roof_classifier import (
     _classify,
@@ -414,6 +415,7 @@ class TestClassifyFusion:
     def test_no_signals_returns_none(self):
         shape, conf = _classify(
             self._zero_elev, self._zero_rgb, self._zero_shadow, self._zero_mt,
+            cnn=(None, 0.0),
         )
         assert shape is None
 
@@ -421,6 +423,7 @@ class TestClassifyFusion:
         flat_elev = _ElevFeatures(0.1, 0.1, 0.0, 0.5, 0.0, 20)
         shape, conf = _classify(
             flat_elev, self._zero_rgb, self._zero_shadow, self._zero_mt,
+            cnn=(None, 0.0),
         )
         assert shape == "flat"
         assert conf > 0.5
@@ -429,6 +432,7 @@ class TestClassifyFusion:
         gable_elev = _ElevFeatures(1.5, 3.0, 0.8, 0.9, 0.1, 50)
         shape, conf = _classify(
             gable_elev, self._zero_rgb, self._zero_shadow, self._zero_mt,
+            cnn=(None, 0.0),
         )
         assert shape in ("gabled", "hipped")
 
@@ -436,13 +440,33 @@ class TestClassifyFusion:
         pyr_elev = _ElevFeatures(2.0, 4.0, 0.2, 0.5, 0.8, 50)
         shape, conf = _classify(
             pyr_elev, self._zero_rgb, self._zero_shadow, self._zero_mt,
+            cnn=(None, 0.0),
         )
         assert shape == "pyramidal"
+
+    def test_high_confidence_cnn_wins(self):
+        """CNN output with conf ≥ 0.55 should override elevation profile."""
+        gable_elev = _ElevFeatures(1.5, 3.0, 0.8, 0.9, 0.1, 50)
+        shape, conf = _classify(
+            gable_elev, self._zero_rgb, self._zero_shadow, self._zero_mt,
+            cnn=("flat", 0.90),
+        )
+        assert shape == "flat"
+
+    def test_low_confidence_cnn_ignored(self):
+        """CNN output with conf < 0.55 should be ignored."""
+        gable_elev = _ElevFeatures(1.5, 3.0, 0.8, 0.9, 0.1, 50)
+        shape, conf = _classify(
+            gable_elev, self._zero_rgb, self._zero_shadow, self._zero_mt,
+            cnn=("flat", 0.30),
+        )
+        assert shape != "flat" or conf != 0.30  # cnn shouldn't dictate result
 
     def test_directional_rgb_gradient_returns_pitched(self):
         aniso_rgb = _RGBFeatures(0.15, 0.70, 0.20)
         shape, conf = _classify(
             self._zero_elev, aniso_rgb, self._zero_shadow, self._zero_mt,
+            cnn=(None, 0.0),
         )
         assert shape in ("gabled", "hipped", "pyramidal")
 
@@ -450,6 +474,7 @@ class TestClassifyFusion:
         elong_shadow = _ShadowFeatures(0.20, 3.0, 0.30, 0.60)
         shape, conf = _classify(
             self._zero_elev, self._zero_rgb, elong_shadow, self._zero_mt,
+            cnn=(None, 0.0),
         )
         assert shape == "gabled"
 
@@ -457,6 +482,7 @@ class TestClassifyFusion:
         pyr_shadow = _ShadowFeatures(0.20, 3.0, 0.70, 0.60)
         shape, conf = _classify(
             self._zero_elev, self._zero_rgb, pyr_shadow, self._zero_mt,
+            cnn=(None, 0.0),
         )
         assert shape == "pyramidal"
 
@@ -464,6 +490,7 @@ class TestClassifyFusion:
         tall_mt = _MultiTemporalFeatures(5.0, 0.80, 3.0, 2)
         shape, conf = _classify(
             self._zero_elev, self._zero_rgb, self._zero_shadow, tall_mt,
+            cnn=(None, 0.0),
         )
         assert shape in ("gabled", "hipped")
 
@@ -685,15 +712,52 @@ class TestMultiTemporalStack:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# The removed CNN tier's argument is accepted and ignored
+# CNN tier is opt-in and needs trained weights
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestCnnModelIgnored:
+class TestCnnOptIn:
     _BBOX = (51.502, 51.498, 0.004, -0.002)
 
-    def test_cnn_model_warns_and_is_ignored(self, caplog):
-        with caplog.at_level("WARNING"):
-            result = classify_roof_shapes(_simple_geojson(), _solid_rgb(),
-                                          self._BBOX, cnn_model="x.pt")
+    def test_default_never_calls_cnn(self, monkeypatch):
+        from city2stl import roof_classifier as rc
+
+        def boom(*a, **k):
+            raise AssertionError("CNN must not run without trained weights")
+
+        monkeypatch.setattr(rc, "_roofnet_classify_patch", boom)
+        result = classify_roof_shapes(_simple_geojson(), _solid_rgb(), self._BBOX)
         assert result["_stats"]["total"] == 1
-        assert "cnn_model is ignored" in caplog.text
+
+    def test_architecture_name_is_refused(self, caplog):
+        from city2stl.roof_classifier import _resolve_cnn_model
+
+        with caplog.at_level("WARNING"):
+            assert _resolve_cnn_model("mobilenet_v3_small") is None
+        assert "without trained weights" in caplog.text
+
+    @pytest.mark.ml  # needs torch; opt-in with -m ml
+    def test_missing_checkpoint_is_none(self, caplog):
+        # Without torch the resolver bails earlier with "torch is not installed".
+        pytest.importorskip("torch")
+        from city2stl.roof_classifier import _resolve_cnn_model
+
+        with caplog.at_level("WARNING"):
+            assert _resolve_cnn_model("no/such/roofnet.pt") is None
+        assert "not found" in caplog.text
+
+    def test_model_resolved_once_per_call(self, monkeypatch):
+        from city2stl import roof_classifier as rc
+
+        net = object()
+        calls = []
+        monkeypatch.setattr(rc, "_resolve_cnn_model",
+                            lambda m: calls.append(m) or net)
+        monkeypatch.setattr(rc, "_roofnet_classify_patch",
+                            lambda crops, mask, model: ("dome", 0.9))
+        geo = _simple_geojson()
+        geo["features"] = geo["features"] * 2
+        result = classify_roof_shapes(geo, _solid_rgb(), self._BBOX,
+                                      cnn_model=net)
+        assert calls == [net]
+        shapes = [f["properties"].get("roof:shape") for f in result["features"]]
+        assert shapes == ["dome", "dome"]

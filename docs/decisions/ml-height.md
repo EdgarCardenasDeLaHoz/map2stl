@@ -2,7 +2,18 @@
 
 What happened to the Retna building-height CNN work, what is actually live, and how checkpoints are kept. The training history is in `history/ml-height/`. Related: [architecture.md](architecture.md).
 
-### 2026-10-05 — The legacy CNN training code and the roof CNN tier are deleted (ML-3)
+### 2026-10-05 — The CNN training code and the roof CNN tier stay (ML-3 deletion reversed)
+- **Decision:** keep `tools/ml/` (Retna / RoofNet training, analysis, datasets, scoreboard),
+  `city2stl/roof_nets.py`, the CNN tier of `map2stl/city2stl/roof_classifier.py::classify_roof_shapes`,
+  `app/server/core/height/train.py` and the SDK's `TerrainSession.predict_heights` /
+  `train_height_model`. The four evaluation scripts stay moved to `map2stl/tools/eval/`.
+- **Why:** user, 2026-10-05: keep the ML training code (relayed by the usage-steward session);
+  F-TREES, F-NN-WATER and F-NN-ROOF are planned neural work that builds on it.
+- **Rejected:** the audit's deletion (entry below): not wanted by the user.
+- **Supersedes / superseded by:** supersedes the ML-3 entry below.
+- **Source:** branch `audit-fixes-keep-ml`.
+
+### 2026-10-05 — The legacy CNN training code and the roof CNN tier are deleted (ML-3) [superseded]
 - **Decision:** delete `tools/ml/` (Retna / RoofNet training, analysis, datasets, scoreboard), `city2stl/roof_nets.py` and the CNN tier of `map2stl/city2stl/roof_classifier.py::classify_roof_shapes`. Its `cnn_model` argument is kept but ignored with a warning until the SDK caller drops it. The four live evaluation scripts moved to `map2stl/tools/eval/`.
 - **Why:** no checkpoint for either network is loaded at runtime (2026-09-28 entry), and the code was rotting (missing imports, wrong `Usage:` lines, `os.chdir`). Roof shape is the GBM's job.
 - **Rejected:** keeping `roof_nets.py` for F-NN-ROOF — a new roof net would start from a current backbone; the old one stays recoverable from version control.

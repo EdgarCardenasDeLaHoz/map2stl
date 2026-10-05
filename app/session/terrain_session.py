@@ -2230,6 +2230,175 @@ class TerrainSession:
     # STL import + infill                                                   #
     # ------------------------------------------------------------------ #
 
+    def predict_heights(
+        self,
+        model: str = "pretrained",
+        checkpoint: Union[str, Path] | None = None,
+        device: str = "cpu",
+    ) -> TerrainSession:
+        """Predict building heights from satellite imagery using a CNN.
+
+        Requires ``self.satellite`` to be populated (call ``fetch_satellite()``
+        first).  Uses OSM / Phase-1 heights in ``self.building_heights`` as
+        calibration data when available.
+
+        Parameters
+        ----------
+        model : str
+            ``"pretrained"`` — Depth Anything V2 Small (HuggingFace, zero-shot,
+            calibrated to metres using known OSM heights in the tile).
+            ``"unet"``       — Trained U-Net checkpoint (see
+            ``train_height_model()``).  Requires ``checkpoint`` path.
+        checkpoint : str or Path, optional
+            Path to a U-Net .pt checkpoint.  Defaults to
+            ``models/height_unet.pt`` in the project root.
+        device : str
+            ``"cpu"`` or ``"cuda"``.
+
+        After this call:
+            ``self.predicted_heights`` : HeightResult with (H, W) float32
+            raster in metres and per-pixel confidence.
+
+        Returns self for chaining.
+        """
+        from city2stl.height.predict import predict as _predict
+
+        if getattr(self, "satellite", None) is None:
+            raise RuntimeError("Call fetch_satellite() before predict_heights().")
+
+        # Decode satellite RGB
+        import base64 as _b64
+        sat_b64 = self.satellite.get("image_b64") or self.satellite.get("data")
+        if sat_b64 is None:
+            raise RuntimeError(
+                "Satellite data not found in self.satellite.  "
+                "Expected 'image_b64' or 'data' key."
+            )
+        sat_bytes = _b64.b64decode(sat_b64)
+        sat_rgb = np.array(Image.open(BytesIO(sat_bytes)).convert("RGB"))
+
+        # Known heights for calibration
+        known_heights = None
+        if getattr(self, "building_heights", None) is not None:
+            known_heights = self.building_heights.raster
+
+        north = self.bbox["north"]
+        south = self.bbox["south"]
+        east = self.bbox["east"]
+        west = self.bbox["west"]
+        bbox = (north, south, east, west)
+
+        ckpt = Path(checkpoint) if checkpoint else None
+
+        logger.info(f"Running height prediction (model={model!r})…")
+        result = _predict(
+            sat_rgb,
+            known_heights,
+            bbox,
+            model=model,
+            checkpoint=ckpt,
+            device=device,
+        )
+        n_valid = int(np.sum(~np.isnan(result.raster)))
+        total = result.raster.size
+        logger.info(f"✓ Predicted heights: {n_valid}/{total} pixels  "
+                    f"range=[{float(np.nanmin(result.raster)):.1f}, "
+                    f"{float(np.nanmax(result.raster)):.1f}] m  "
+                    f"source={result.source_name}")
+        self.predicted_heights = result
+        return self
+
+    def train_height_model(
+        self,
+        cities: list | None = None,
+        epochs: int = 50,
+        batch_size: int = 8,
+        lr: float = 1e-4,
+        device: str = "cpu",
+        output: Union[str, Path] | None = None,
+        tiles_per_city: int = 100,
+        providers: list | None = None,
+    ) -> dict:
+        """Collect training tiles and train the U-Net height predictor.
+
+        Phase 2.2 of the ML height work (docs/history/ml-height/README.md).
+
+        Parameters
+        ----------
+        cities : list of city names to collect tiles from.
+            Available: ``"Barcelona"``, ``"Granada"``, ``"Cartagena"``.
+            Defaults to ``["Barcelona"]``.
+        epochs : number of training epochs (default 50).
+        batch_size : mini-batch size (default 8).
+        lr : learning rate (default 1e-4).
+        device : ``"cpu"`` or ``"cuda"``.
+        output : Path to save checkpoint.  Defaults to
+            ``<project_root>/models/height_unet.pt``.
+        tiles_per_city : max tiles to collect per city (default 100).
+        providers : height provider names for tile collection.
+            Defaults to ``["ndsm", "wsf3d", "google3d"]``.
+
+        Returns
+        -------
+        dict with ``best_val_loss``, ``epochs_trained``, ``n_train``,
+        ``n_val``, ``checkpoint``.
+        """
+        from app.server.core.height.train import collect_tiles
+        from city2stl.height.train import (
+            _DEFAULT_CITIES,
+            TrainConfig,
+        )
+        from city2stl.height.train import (
+            train as _train,
+        )
+
+        cities = cities or ["Barcelona"]
+        providers = providers or ["ndsm", "wsf3d"]
+
+        # Validate city names
+        unknown = [c for c in cities if c not in _DEFAULT_CITIES]
+        if unknown:
+            raise ValueError(
+                f"Unknown cities: {unknown}.  "
+                f"Available: {list(_DEFAULT_CITIES)}"
+            )
+
+        project_root = Path(__file__).resolve().parents[3]
+        tile_dir = project_root / "cache" / "height_tiles"
+        default_output = project_root / "models" / "height_unet.pt"
+        output_path = Path(output) if output else default_output
+
+        logger.info(f"Collecting tiles for {cities} from providers {providers}…")
+        tile_paths = collect_tiles(
+            cities,
+            tile_dir=tile_dir,
+            providers=providers,
+            tiles_per_city=tiles_per_city,
+        )
+        logger.info(f"Collected {len(tile_paths)} tiles total")
+
+        if not tile_paths:
+            raise RuntimeError(
+                "No tiles collected.  Check provider availability or city coverage."
+            )
+
+        cfg = TrainConfig(
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            device=device,
+        )
+
+        logger.info(f"Training U-Net ({cfg.epochs} epochs, device={device})…")
+        result = _train(tile_paths, output_path, cfg)
+        logger.info(f"✓ Training complete  best_val_loss={result['best_val_loss']:.4f}  "
+                    f"checkpoint={result['checkpoint']}")
+        return result
+
+    # ------------------------------------------------------------------ #
+    # STL import + infill                                                   #
+    # ------------------------------------------------------------------ #
+
     def load_stl(
         self,
         path: Union[str, Path],
