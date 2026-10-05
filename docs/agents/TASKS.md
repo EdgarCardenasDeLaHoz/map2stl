@@ -40,9 +40,9 @@ instead of having tasks pasted in.
 | T7 | F-SKYBENCH port: `discover_city_seeds` city filter; keep existing site files unless `--force` | cloud | todo | | As T3. |
 | T8 | F-SKYBENCH port: `google_3d` cache key gets `require_built` | cloud | todo | | As T3. `dem` and `max_tiles` are already in the key (audit fix on master). |
 | T9 | Large regions: building the river channels takes 150–190 s on the Amazon (315k reaches at 900 px); profile and cut it | local-map2stl | todo | | Needs the local HydroRIVERS cache. Perf audit `claude/scripts/perf_audit.py`, 2026-10-04. |
-| T10 | `renderDEMCanvas` re-announces the DEM on every recolour and resize frame | cloud | suggested | | [issues.md](../issues.md) › audit 2026-10-05. Frontend only; vitest + eslint. |
-| T11 | PA-5: export has no resolution cap; raw `dem_values` / `height` / `width` go straight through | cloud | suggested | | [issues.md](../issues.md) › pipeline audit. Server-side validation + tests. |
-| T12 | PA-17: `TerrainSession.select()` swallows errors | cloud | suggested | | [issues.md](../issues.md). SDK only; tests with the HTTP layer stubbed. |
-| T13 | PA-15: SRTM voids clamped to 0 in `geo2stl/dem.py::fetch_h5_dem` | cloud | suggested | | [issues.md](../issues.md). Unit test on a synthetic array; no real H5 data needed. |
-| T14 | `stacked-layers.js` `LAYER_CANVAS_IDS` has no `CityOverlay` entry | cloud | suggested | | [issues.md](../issues.md) › carried over 2026-09-28. Frontend only. |
-| T15 | numpy2stl `stl2numpy/heightmap.py::_auto_resolution` swaps rows and cols | cloud | suggested | | In the numpy2stl repo (cloned next to map2stl); its own tests. |
+| T10 | `renderDEMCanvas` re-announces the DEM on every recolour and resize frame | cloud | todo | | [issues.md](../issues.md) › audit 2026-10-05. Frontend only; vitest + eslint. |
+| T11 | PA-5: export has no resolution cap; raw `dem_values` / `height` / `width` go straight through | cloud | todo | | [issues.md](../issues.md) › pipeline audit. Server-side validation + tests. |
+| T12 | PA-17: `TerrainSession.select()` swallows errors | cloud | todo | | [issues.md](../issues.md). SDK only; tests with the HTTP layer stubbed. |
+| T13 | PA-15: SRTM voids clamped to 0 in `geo2stl/dem.py::fetch_h5_dem` | cloud | todo | | [issues.md](../issues.md). Unit test on a synthetic array; no real H5 data needed. |
+| T14 | `stacked-layers.js` `LAYER_CANVAS_IDS` has no `CityOverlay` entry | cloud | todo | | [issues.md](../issues.md) › carried over 2026-09-28. Frontend only. |
+| T15 | numpy2stl `stl2numpy/heightmap.py::_auto_resolution` swaps rows and cols | cloud | todo | | In the **numpy2stl** repo (cloned next to map2stl): branch `cloud/T15-auto-resolution` there, its own tests (`numpy2stl/tests`, also run from map2stl's pytest). local-map2stl merges it in numpy2stl. |
