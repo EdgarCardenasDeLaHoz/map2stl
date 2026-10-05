@@ -362,6 +362,25 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
 - Depth cross-check: `map2stl/city2stl/skyline/depth_estimation.py::calibrate_pano_depth` (`depth_height_from_segment`, `compare_heights`)
 - Region data (bbox from the regions table or `sites/<region>.json`, OSM → records, terrain): `map2stl/city2stl/skyline/region_data.py::_osm_to_building_records` (`_load_region_bbox`, `_attach_building_terrain`)
 - Region PDF: `map2stl/city2stl/skyline/scripts/08_region_skyline_pdf.py`
+- Height benchmark on surveyed truth (F-SKYBENCH, eight cities, results in `skyline/docs/STATUS.md`):
+  - Truth per footprint: `map2stl/city2stl/skyline/benchmark.py::footprint_truth`. Survey nDSM or Google 3D Tiles, cross-checked.
+  - Scoring: `score_buildings` (with `relative_metrics`).
+  - Runner: `map2stl/city2stl/skyline/scripts/10_benchmark.py`.
+  - Page: `map2stl/city2stl/skyline/benchmark_report.py::write_benchmark_page`.
+  - US lidar where Planetary Computer has none: `map2stl/city2stl/height/providers/lidar_3dep_ept_laspy.py::ndsm_for_bbox`.
+- Heights from Wikimedia Commons skyline photos (F-WEB2):
+  - Finder: `map2stl/city2stl/skyline/commons_photos.py::find_skyline_photos` (`usable`, `is_dark`, `hfov_from_35mm`).
+  - Camera from OSM towers: `map2stl/city2stl/skyline/skyline_match.py::locate_and_solve` (`refine`, `identify`).
+  - Labelled photos: `photo_localize.py::solve_from_labels`, with `camera_solver.py::solve_pose`.
+  - Same-spot groups: `photo_groups.py::embed_links`.
+  - Tower heights: `photo_heights.py::loo_heights`.
+  - Pipeline: `scripts/13_photo_profiles.py` through `scripts/17_photo_pipeline.py`.
+- Drone Photo Sphere seeds, footprint first (F-DET6):
+  - Camera from the waterline: `map2stl/city2stl/skyline/footprint_detect.py::fit_pose_from_waterline`.
+  - Per-footprint heights with depth gating: `measure_footprints`.
+  - One height across seeds: `fuse_heights`.
+  - Position check from parks, streets and water: `fit_position_from_ground` and `waterline_position_scan`.
+  - Script: `scripts/18_footprint_detect.py`.
 
 ### Entry points, scripts, tests
 
