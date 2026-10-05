@@ -1,7 +1,7 @@
 # scripts/
 
 Repository setup. Operator and research tools live in `tools/` and run as modules
-from the repo root, e.g. `python -m tools.ml.train.train_retna`.
+from the repo root, e.g. `python -m tools.eval.eval_roof_tags`.
 
 ## `setup-venv.ps1`
 

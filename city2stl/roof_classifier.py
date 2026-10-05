@@ -81,20 +81,19 @@ from geo2stl.geo import M_PER_DEG_LAT
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Lightweight CNN availability check
+# torch availability check
 # ─────────────────────────────────────────────────────────────────────────────
 # The classifier degrades gracefully when torch / torchvision are absent:
 #
 #   Tier 0 (always):  shadow triangulation + RGB gradient + elevation profile
-#   Tier 1 (torch, opt-in): trained RoofNetV2 checkpoint (city2stl.roof_nets)
-#   Tier 2 (torch):   RAFT-Small optical-flow depth from multi-temporal stack
+#   Tier 1 (torch):   RAFT-Small optical-flow depth from multi-temporal stack
 #
 # RAFT-Small (1 M params, ~5 MB) handles optical-flow parallax between
 # temporal acquisitions.  DepthAnything-V2-Small (~25 M) or MiDaS-DPT-Small
 # (~15 M) can produce a monocular pseudo-DEM when a height raster is absent.
 #
 # Availability is probed without importing: torch costs seconds at import and
-# is only needed when a trained checkpoint is actually supplied.
+# is only needed for the multi-temporal parallax tier.
 _TORCH_AVAILABLE: bool = importlib.util.find_spec("torch") is not None
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -631,168 +630,6 @@ def _flow_parallax_rise(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Signal 5: lightweight CNN classification (Tier 1 — optional, torch only)
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Roof shape labels in model output order
-_SHAPE_LABELS = ["flat", "gabled", "hipped", "pyramidal", "skillion", "dome"]
-
-
-def _roofnet_classify_patch(
-    rgb_crops: list[np.ndarray],
-    footprint_mask: np.ndarray,
-    roofnet: object,
-) -> tuple[str | None, float]:
-    """Classify a roof-shape patch using a RoofNet or RoofNetV2 instance.
-
-    The model returns a ``(height_map, shape_logits)`` tuple.  This
-    helper extracts the *shape_logits* and converts them to a class label.
-
-    Supports both:
-    - Legacy RoofNet (tools.networks): 64x64, no ImageNet normalisation
-    - RoofNetV2 (city2stl.roof_nets): 128x128, ImageNet normalisation
-
-    Parameters
-    ----------
-    rgb_crops : list of H*W*3 uint8 ndarray (temporal stack)
-    footprint_mask : H*W bool/float ndarray (1 = inside footprint)
-    roofnet : RoofNet or RoofNetV2 instance (eval mode)
-
-    Returns
-    -------
-    (shape_label, confidence) -- or (None, 0.0) on failure
-    """
-    if not _TORCH_AVAILABLE or not rgb_crops:
-        return None, 0.0
-    try:
-        import torch
-        from PIL import Image
-
-        h, w = rgb_crops[0].shape[:2]
-        if h < 4 or w < 4:
-            return None, 0.0
-
-        # Detect RoofNetV2 by checking for the backbone attribute
-        is_v2 = hasattr(roofnet, "backbone") and hasattr(roofnet, "fpn")
-        target = 128 if is_v2 else 64
-
-        # Temporal early-fusion: stack along channel dim
-        stack = np.concatenate(
-            [c[:h, :w, :3].astype(np.float32) / 255.0 for c in rgb_crops], axis=2
-        )  # H * W * (N*3)
-
-        # Apply footprint mask to suppress background context
-        mask_f = footprint_mask.astype(np.float32)
-        for ch in range(stack.shape[2]):
-            stack[:, :, ch] *= mask_f
-
-        channels = [
-            np.array(
-                Image.fromarray((stack[:, :, ci] * 255).astype(np.uint8)).resize(
-                    (target, target), Image.BILINEAR
-                ),
-                dtype=np.float32,
-            ) / 255.0
-            for ci in range(stack.shape[2])
-        ]
-        inp = torch.tensor(
-            np.stack(channels, axis=0)[None], dtype=torch.float32
-        )
-
-        # RoofNetV2 expects ImageNet-normalised 3-channel input
-        if is_v2 and inp.shape[1] == 3:
-            mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-            std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-            inp = (inp - mean) / std
-
-        mask_t = torch.tensor(
-            np.array(
-                Image.fromarray((mask_f * 255).astype(np.uint8)).resize(
-                    (target, target), Image.BILINEAR
-                ),
-                dtype=np.float32,
-            ) / 255.0
-        ).unsqueeze(0).unsqueeze(0)
-
-        with torch.no_grad():
-            _, logits = roofnet(inp, mask=mask_t)
-            probs = torch.softmax(logits[0], dim=0).numpy()
-
-        best_idx = int(np.argmax(probs))
-        if best_idx < len(_SHAPE_LABELS):
-            return _SHAPE_LABELS[best_idx], float(probs[best_idx])
-        return None, 0.0
-
-    except Exception as exc:
-        logger.debug("RoofNet classify patch failed: %s", exc)
-        return None, 0.0
-
-
-def _load_roof_checkpoint(path: str) -> object | None:
-    """Load a trained RoofNetV2 checkpoint, or return ``None`` with a warning.
-
-    Only tensor state is accepted (``weights_only=True``): a pickled whole
-    model would execute arbitrary code on load, so legacy full-model saves are
-    refused rather than trusted.  Both ``{"model_state_dict": ...}`` wrappers
-    and bare state dicts are read.
-    """
-    if not _TORCH_AVAILABLE:
-        logger.warning("roof CNN checkpoint %s ignored: torch is not installed",
-                       path)
-        return None
-    from pathlib import Path
-
-    ckpt = Path(path)
-    if not ckpt.exists():
-        ckpt = Path(__file__).resolve().parents[1] / path
-    if not ckpt.exists():
-        logger.warning("roof CNN checkpoint not found: %s", path)
-        return None
-    try:
-        import torch
-
-        from city2stl.roof_nets import RoofNetV2
-
-        state = torch.load(str(ckpt), map_location="cpu", weights_only=True)
-        if isinstance(state, dict) and "model_state_dict" in state:
-            state = state["model_state_dict"]
-        # The checkpoint supplies every weight, so skip the ImageNet download.
-        model = RoofNetV2(pretrained=False)
-        model.load_state_dict(state)
-        model.eval()
-        return model
-    except Exception as exc:                                # noqa: BLE001
-        logger.warning("failed to load roof CNN checkpoint %s: %s", ckpt, exc)
-        return None
-
-
-def _resolve_cnn_model(cnn_model: str | object | None) -> object | None:
-    """Turn the ``cnn_model`` argument into a ready model, or ``None``.
-
-    The CNN tier is opt-in and only runs with trained weights:
-
-    - ``None``: no CNN.
-    - a path ending in ``.pt`` / ``.pth``: a RoofNetV2 checkpoint, loaded once.
-    - a model instance (RoofNet / RoofNetV2 in eval mode): used as is.
-    - any other string (a torchvision architecture name such as
-      ``"mobilenet_v3_small"``): refused with a warning.  Those names used to
-      build a randomly initialised network whose output was then trusted at
-      confidence >= 0.55; there are no trained weights for them.
-    """
-    if cnn_model is None:
-        return None
-    if not isinstance(cnn_model, str):
-        return cnn_model
-    if cnn_model.endswith((".pt", ".pth")):
-        return _load_roof_checkpoint(cnn_model)
-    logger.warning(
-        "cnn_model=%r names an architecture without trained weights; the CNN "
-        "tier is skipped. Pass a RoofNetV2 checkpoint path or model instance.",
-        cnn_model)
-    return None
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Classification fusion
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -801,25 +638,17 @@ def _classify(
     rgb: _RGBFeatures,
     shadow: _ShadowFeatures,
     mt: _MultiTemporalFeatures,
-    cnn: tuple[str | None, float],
     pixel_m: float = 1.0,
 ) -> tuple[str | None, float]:
     """Fuse all signals into a (roof_shape, confidence) decision.
 
     Priority order:
-      1. CNN output (if confidence ≥ 0.55 and torch was available)
-      2. Elevation profile (real or predicted DEM, if ≥ 8 footprint pixels)
-      3. Multi-temporal triangulation (if ≥ 2 images with spread sun azimuths)
-      4. RGB gradient appearance
-      5. Shadow geometry fallback
+      1. Elevation profile (real or predicted DEM, if ≥ 8 footprint pixels)
+      2. Multi-temporal triangulation (if ≥ 2 images with spread sun azimuths)
+      3. RGB gradient appearance
+      4. Shadow geometry fallback
     """
-    cnn_shape, cnn_conf = cnn
-
-    # ── Tier 1: CNN ─────────────────────────────────────────────────────
-    if cnn_shape is not None and cnn_conf >= 0.55:
-        return cnn_shape, cnn_conf
-
-    # ── Tier 2: elevation profile ─────────────────────────────────────
+    # ── Tier 1: elevation profile ─────────────────────────────────────
     if elev.n_pixels >= 8 and elev.roof_rise > 0.3 and elev.height_std > 0.3:
         if elev.apex_score > 0.55:
             return "pyramidal", float(np.clip(0.65 + 0.25 * elev.apex_score, 0, 1))
@@ -831,7 +660,7 @@ def _classify(
     if elev.n_pixels >= 8 and elev.height_std <= 0.3:
         return "flat", 0.70
 
-    # ── Tier 3: multi-temporal triangulation ─────────────────────────
+    # ── Tier 2: multi-temporal triangulation ─────────────────────────
     if mt.tri_confidence > 0.30 and mt.n_images >= 2:
         # Use the estimated height to decide pitched vs. flat
         if mt.tri_height_m > 1.5:
@@ -843,7 +672,7 @@ def _classify(
         if mt.tri_height_m <= 0.5:
             return "flat", float(np.clip(0.50 + 0.20 * mt.tri_confidence, 0, 1))
 
-    # ── Tier 4: RGB appearance ─────────────────────────────────────────
+    # ── Tier 3: RGB appearance ─────────────────────────────────────────
     if rgb.gradient_strength > 0.05:
         if rgb.gradient_anisotropy > 0.55:
             if rgb.brightness_ridge > 0.12:
@@ -853,7 +682,7 @@ def _classify(
             return "pyramidal", 0.35
         return "flat", 0.45
 
-    # ── Tier 5: shadow geometry ────────────────────────────────────────
+    # ── Tier 4: shadow geometry ────────────────────────────────────────
     if shadow.confidence >= 0.15:
         if shadow.shadow_ratio < 0.05:
             return "flat", 0.50
@@ -893,23 +722,20 @@ def classify_roof_shapes(
     (Salzburg came back 100 per cent pitched, Cartagena 99.6 per cent
     pyramidal).  It is off by default only because it fetches its own tiles.
 
-    Combines up to five complementary signals in priority order:
+    Combines up to four complementary signals in priority order:
 
-    1. **Trained CNN** (RoofNetV2) — opt-in; requires ``torch`` and trained
-       weights passed as ``cnn_model``.  Skipped entirely otherwise.
-
-    2. **Elevation profile** — from a real nDSM / LiDAR raster or from a
+    1. **Elevation profile** — from a real nDSM / LiDAR raster or from a
        predicted DEM (DepthAnything-V2-Small, MiDaS-DPT-Small, or a U-Net).
 
-    3. **Multi-temporal pseudo-stereo** — pass a list of N ≥ 2 images taken
+    2. **Multi-temporal pseudo-stereo** — pass a list of N ≥ 2 images taken
        at different times.  Different sun positions give shadow triangulation;
        slightly different off-nadir angles give optical-flow parallax depth
        (RAFT-Small when torch available, Farneback otherwise).
 
-    4. **Roof-face RGB appearance** — directional brightness gradient, ridge
+    3. **Roof-face RGB appearance** — directional brightness gradient, ridge
        line contrast, gradient anisotropy from the roof surface itself.
 
-    5. **Shadow geometry** — fallback; shape and length of cast shadows.
+    4. **Shadow geometry** — fallback; shape and length of cast shadows.
 
     Args:
         buildings_geojson: GeoJSON FeatureCollection of building polygons.
@@ -926,12 +752,10 @@ def classify_roof_shapes(
             Used for sun-position estimation.  Defaults to June (6).
         acquisition_hours: Hour of day (0–23, local solar) for each image.
             Defaults to 10 AM.
-        cnn_model: ``None`` (default, no CNN), a path to a RoofNetV2
-            checkpoint (``.pt`` / ``.pth``, loaded once with
-            ``weights_only=True``), or a ``RoofNet`` / ``RoofNetV2`` instance
-            in eval mode.  Its shape-classification head is used.  Bare
-            torchvision architecture names are refused with a warning: they
-            have no trained weights.
+        cnn_model: Ignored.  The RoofNet CNN tier was removed (ML-3, see
+            ``docs/decisions/ml-height.md``); the argument stays only so
+            existing callers keep working, and a non-``None`` value logs a
+            warning.  Use *use_model* for the trained GBM.
         use_model: Consult the trained ``roof_shape_gbm`` checkpoint first,
             fetching a zoom-18 crop per building rather than reading the
             supplied city-wide image.  Falls back to the signal cascade for
@@ -958,8 +782,9 @@ def classify_roof_shapes(
                            "falling back to the signal cascade",
                            _roof_model.MODEL_PATH)
 
-    # Resolve (and load, if a checkpoint path) the CNN once for the whole call.
-    cnn_net = _resolve_cnn_model(cnn_model)
+    if cnn_model is not None:
+        logger.warning("cnn_model is ignored: the RoofNet CNN tier was removed "
+                       "(ML-3); pass use_model=True for the trained GBM")
 
     # ── Normalise input to a list of images ─────────────────────────────
     # No image at all is a supported case once the model is loaded: it reads
@@ -1104,14 +929,9 @@ def classify_roof_shapes(
             ring, c_north, c_south, c_east, c_west, crop_h, crop_w
         )
 
-        # ── Signal 1: CNN ──────────────────────────────────────────────
         rgb_crops = [img[cr0:cr1, cc0:cc1] for img in rgb_stack]
-        cnn_result = ((None, 0.0)
-                      if model_shape is not None or cnn_net is None
-                      else _roofnet_classify_patch(rgb_crops, footprint_mask,
-                                                   cnn_net))
 
-        # ── Signal 2: elevation profile ────────────────────────────────
+        # ── Signal 1: elevation profile ────────────────────────────────
         if height_raster is not None:
             dem_crop = height_raster[cr0:cr1, cc0:cc1].astype(np.float32)
             elev_feat = _extract_elev_features(dem_crop, footprint_mask)
@@ -1119,7 +939,7 @@ def classify_roof_shapes(
             elev_feat = _ElevFeatures(0.0, 0.0, 0.0, 0.5, 0.0, 0)
             dem_crop = None
 
-        # ── Signal 3: multi-temporal ────────────────────────────────────
+        # ── Signal 2: multi-temporal ────────────────────────────────────
         shadow_crops = [sm[cr0:cr1, cc0:cc1] for sm in shadow_stack]
         if n_images >= 2:
             mt_feat = _extract_multitemporal_features(
@@ -1130,10 +950,10 @@ def classify_roof_shapes(
         else:
             mt_feat = _MultiTemporalFeatures(0.0, 0.0, 0.0, 1)
 
-        # ── Signal 4: RGB appearance ────────────────────────────────────
+        # ── Signal 3: RGB appearance ────────────────────────────────────
         rgb_feat = _extract_rgb_features(rgb_crops[0], footprint_mask)
 
-        # ── Signal 5: shadow geometry ───────────────────────────────────
+        # ── Signal 4: shadow geometry ───────────────────────────────────
         shadow_feat = _extract_shadow_features(shadow_crops[0], footprint_mask)
 
         # ── Fuse ───────────────────────────────────────────────────────
@@ -1142,7 +962,7 @@ def classify_roof_shapes(
             by_model += 1
         else:
             roof_shape, conf = _classify(
-                elev_feat, rgb_feat, shadow_feat, mt_feat, cnn_result, pixel_m
+                elev_feat, rgb_feat, shadow_feat, mt_feat, pixel_m
             )
 
         if roof_shape is None:

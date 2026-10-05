@@ -2,6 +2,14 @@
 
 What happened to the Retna building-height CNN work, what is actually live, and how checkpoints are kept. The training history is in `history/ml-height/`. Related: [architecture.md](architecture.md).
 
+### 2026-10-05 — The legacy CNN training code and the roof CNN tier are deleted (ML-3)
+- **Decision:** delete `tools/ml/` (Retna / RoofNet training, analysis, datasets, scoreboard), `city2stl/roof_nets.py` and the CNN tier of `map2stl/city2stl/roof_classifier.py::classify_roof_shapes`. Its `cnn_model` argument is kept but ignored with a warning until the SDK caller drops it. The four live evaluation scripts moved to `map2stl/tools/eval/`.
+- **Why:** no checkpoint for either network is loaded at runtime (2026-09-28 entry), and the code was rotting (missing imports, wrong `Usage:` lines, `os.chdir`). Roof shape is the GBM's job.
+- **Rejected:** keeping `roof_nets.py` for F-NN-ROOF — a new roof net would start from a current backbone; the old one stays recoverable from version control.
+- **Kept for now:** `city2stl/height/predict.py` and `city2stl/height/train.py` (and their tests), because `app/session/terrain_session.py` and `app/server/core/height/train.py` still import them, and skyline reads the Depth Anything helpers from `predict.py`.
+- **Supersedes / superseded by:** —
+- **Source:** [AUDIT-2026-10-05](../history/audits/AUDIT-2026-10-05.md) §6, §8; proposal ML-3.
+
 ### 2026-09-28 — No learned height model runs at runtime; only the roof-shape GBM is live
 - **Decision:** treat the Retna CNN as history. Building heights come from providers and OSM tags, not a CNN.
   - The only live model is `models/roof_shape_gbm.joblib`, loaded by `map2stl/city2stl/roof_model.py`.

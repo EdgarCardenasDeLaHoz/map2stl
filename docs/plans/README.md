@@ -187,7 +187,7 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   [F-ARCH](active/F-ARCH-consolidation.md)
 - Remaining burns: `plate_vectors._burn` (cv2 edge rule), roof / city-model burns, and the
   composite line draws. [F-ARCH](active/F-ARCH-consolidation.md)
-- Tool dedupes left: `tune_osmnx`, tools/ml osmnx fetches, and a public affine-decompose helper.
+- Tool dedupes left: `tune_osmnx` and a public affine-decompose helper.
   [F-ARCH](active/F-ARCH-consolidation.md)
 - Split `terrain_session.py` (3.2k lines) and `app/server/routers/terrain.py`.
 - Break up the long functions named by the 2026-09-17 code-quality audit:
@@ -196,8 +196,6 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 
 ## Registration and tooling
 
-- `tools/align_tool/_fix_sat_flip.py` still exists, although the scale-window plan said to
-  delete it. It undoes itself if run twice: delete it, or guard it against a second run.
 - Registration learning plan (L0–L3 gates, `tools/align_tool/eval_registration.py`) is active;
   it moves to `active/` with the reference docs.
 - Street placement leftovers (2026-09-14; why in
