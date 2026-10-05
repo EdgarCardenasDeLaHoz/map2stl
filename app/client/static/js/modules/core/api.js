@@ -1,8 +1,7 @@
 /**
  * modules/api.js — Centralized API route definitions and fetch helpers.
  *
- * Loaded as a plain <script> before app.js. All functions exposed on window.api.
- * app.js gradually migrates raw fetch() calls to use these helpers.
+ * Imported by main.js. All functions exposed on window.api.
  *
  * Usage:
  *   const regions = await api.regions.list();
@@ -272,15 +271,6 @@ window.api = (() => {
     // Export
     // -------------------------------------------------------------------------
     const exportApi = {
-        /** POST /api/export/stl → blob */
-        stl: (body) => _fetch('/api/export/stl', _json(body)),
-
-        /** POST /api/export/{format} → blob */
-        model: (format, body) => _fetch(`/api/export/${format}`, _json(body)),
-
-        /** POST /api/export/crosssection → blob */
-        crossSection: (body) => _fetch('/api/export/crosssection', _json(body)),
-
         /** POST /api/export/preview → mesh data for 3D viewer */
         preview: (body) => _fetch('/api/export/preview', _json(body)),
 
@@ -362,16 +352,8 @@ window.api = (() => {
     // Settings
     // -------------------------------------------------------------------------
     const settings = {
-        projections: () => _fetch('/api/settings/projections'),
-        colormaps: () => _fetch('/api/settings/colormaps'),
-        datasets: () => _fetch('/api/settings/datasets'),
         default: () => _fetch('/api/settings/default'),
     };
-
-    // -------------------------------------------------------------------------
-    // Misc
-    // -------------------------------------------------------------------------
-    const misc = {};
 
     // -------------------------------------------------------------------------
     // Composite DEM
@@ -401,10 +383,6 @@ window.api = (() => {
         /** POST /api/layers/mesh/{upload_id}/register */
         register: (uploadId, body) => _fetch(
             `/api/layers/mesh/${encodeURIComponent(uploadId)}/register`, _json(body)),
-
-        /** DELETE /api/layers/mesh/{upload_id} */
-        delete: (uploadId) => _fetch(
-            `/api/layers/mesh/${encodeURIComponent(uploadId)}`, { method: 'DELETE' }),
 
         /** GET /api/layers/mesh/library → {cities: [{city, files: [...]}]} */
         library: () => _fetch('/api/layers/mesh/library'),
@@ -456,5 +434,5 @@ window.api = (() => {
         criticScore: (body) => _fetch('/api/registration/critic/score', _json(body)),
     };
 
-    return { _fetch, regions, dem, export: exportApi, cities, geocode, composite, cache, settings, misc, mesh, registration };
+    return { _fetch, regions, dem, export: exportApi, cities, geocode, composite, cache, settings, mesh, registration };
 })();

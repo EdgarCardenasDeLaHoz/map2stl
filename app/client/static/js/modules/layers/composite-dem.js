@@ -657,15 +657,6 @@ async function _computeCompositeDem() {
         await _yieldToMain(); if (gen !== _computeGen) return;
     }
 
-    // Store feature channels on appState for ML pipeline access (lazy — only non-null)
-    if (window.appState) {
-        window.appState.compositeFeatures = {
-            dem: demFeat, water: waterFeat, hydro: hydroFeat, city: cityFeat, cityComponents,
-            landcover: lcFeat, satellite: satFeat, trails: trailsFeat,
-            width: W, height: H,
-        };
-    }
-
     // Terrain stage first (DEM already folded into `composite` above).
     _addWeightedFeature(composite, waterFeat, params.waterEnabled ? params.waterWeight : 0);
     _addWeightedFeature(composite, hydroFeat, 1);   // server already applied the weights
@@ -943,7 +934,7 @@ window.applyCompositeToDem = async function applyCompositeToDem() {
     return true;
 };
 
-// ─── Preview & thumbnail ─────────────────────────────────────────────────────
+// ─── Preview ─────────────────────────────────────────────────────────────────
 
 /**
  * Preview the composite layer — switch view mode and trigger recompute.
@@ -956,23 +947,9 @@ window.previewComposite = async function previewComposite() {
     window.setStackMode?.('CompositeDem');
     await window.computeCompositeDem();
     window.updateStackedLayers?.();
-    _updatePreviewThumb();
     _updateContribStatus();
     window.showToast?.('Composite preview updated', 'info');
 };
-
-/**
- * Render a scaled-down preview of the composite into the thumbnail canvas.
- */
-function _updatePreviewThumb() {
-    const thumbCanvas = document.getElementById('compositePreviewThumb');
-    const src = window.appState?.compositeDemSourceCanvas;
-    if (!thumbCanvas || !src || !src.width || !src.height) return;
-
-    const ctx = thumbCanvas.getContext('2d');
-    ctx.clearRect(0, 0, thumbCanvas.width, thumbCanvas.height);
-    ctx.drawImage(src, 0, 0, thumbCanvas.width, thumbCanvas.height);
-}
 
 /**
  * Update the contribution status text showing which layers are active.
@@ -1127,7 +1104,6 @@ function _scheduleRecompute() {
     _recomputeTimer = setTimeout(async () => {
         await window.computeCompositeDem();
         window.updateStackedLayers?.();
-        _updatePreviewThumb();
         _updateContribStatus();
     }, 80);
 }

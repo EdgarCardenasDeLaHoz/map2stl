@@ -107,7 +107,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
                 // osmCityData (not cleared) so we only re-fetch when the raster was loaded.
                 const hadCity = !!window.appState.cityRasterSourceCanvas;
                 const hadCityPolygons = !!window.appState.osmCityData;
-                const hadHydro = !!window.appState.hydrologySourceCanvas;
 
                 window.showToast?.('Projection changed — re-fetching layers…', 'info');
 
@@ -121,7 +120,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
                 if (hadSat) tasks.push(window.loadSatelliteRGBImage?.());
                 if (hadSatEsa) tasks.push(window.loadSatelliteImage?.());
                 if (hadCity) tasks.push(window.loadCityRaster?.());
-                if (hadHydro) tasks.push(window.loadHydrology?.());
                 if (tasks.length) await Promise.all(tasks);
 
                 // City polygon overlays are frontend-rendered; force cache invalidation + redraw
@@ -183,29 +181,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     document.getElementById('floatingTerrainToggle')?.addEventListener('click', () => {
         const cb = document.getElementById('showTerrainOverlay');
         if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
-    });
-
-    const genGlobalDemBtn = document.getElementById('genGlobalDemBtn');
-    genGlobalDemBtn?.addEventListener('click', async () => {
-        const status = document.getElementById('genGlobalDemStatus');
-        genGlobalDemBtn.disabled = true;
-        if (status) status.textContent = 'Generating…';
-        window.showToast?.('Generating terrain cache — this runs once and may take a minute', 'info', 5000);
-        try {
-            const { error } = await window.api.misc.globalDemOverview(true);
-            if (!error) {
-                if (status) status.textContent = '✓ Done';
-                window.showToast?.('Terrain cache generated', 'success');
-            } else {
-                if (status) status.textContent = '✗ Failed';
-                window.showToast?.('Failed: ' + error, 'error');
-            }
-        } catch (e) {
-            if (status) status.textContent = '✗ Error';
-            window.showToast?.('Error generating cache', 'error');
-        } finally {
-            genGlobalDemBtn.disabled = false;
-        }
     });
 
     function _setLabels(show) {
@@ -303,10 +278,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     });
 
     document.getElementById('floatingDrawBtn')?.addEventListener('click', activateDrawTool);
-    document.getElementById('startDrawBtn')?.addEventListener('click', () => {
-        activateDrawTool();
-        window.switchView?.('map');
-    });
     const _map = window.getMap?.();
     if (_map) {
         _map.on(L.Draw.Event.CREATED, (e) => {
@@ -394,31 +365,10 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
 
     // --- Quick-load resolution labels ---
     // Sync the quick-load bar labels with the actual resolution controls in fetch sections.
-    function _updateQuickLoadLabels() {
-        const map = {
-            qlResDem: { src: 'paramDim', suffix: ' px' },
-            qlResWater: { src: 'waterResolution', suffix: ' m/px' },
-            qlResSat: { src: 'satImgResolution', suffix: ' px' },
-            qlResEsa: { src: 'esaResolution', suffix: ' m/px' },
-        };
-        for (const [labelId, cfg] of Object.entries(map)) {
-            const label = document.getElementById(labelId);
-            const src = document.getElementById(cfg.src);
-            if (label && src) label.textContent = src.value + cfg.suffix;
-        }
-    }
-    // Update on init and whenever a resolution control changes
-    _updateQuickLoadLabels();
-    for (const id of ['paramDim', 'waterResolution', 'satImgResolution', 'esaResolution']) {
-        document.getElementById(id)?.addEventListener('change', _updateQuickLoadLabels);
-    }
-
     // Fetch section load buttons
     // loadWaterHydrologyBtn and related wired in event-listeners.js
     // loadSatImgBtn wired in app-setup.js (also switches to SatImg mode)
-    // (legacy button support - most users will use loadWaterHydrologyBtn)
     _asyncBtn('loadDemBtn', () => window.loadDEM?.());
-    _asyncBtn('loadWaterMaskBtn', () => window.loadWaterMask?.());
     _asyncBtn('loadEsaBtn', () => window.loadEsaLandCover?.());
     // Satellite clear button
     document.getElementById('clearSatImgBtn')?.addEventListener('click', () => {
@@ -427,13 +377,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         window.events?.emit(window.EV?.STACKED_UPDATE);
         window.showToast?.('Satellite layer cleared', 'info');
     });
-
-    // Quick-load bar buttons (LayerViewSection)
-    _asyncBtn('qlLoadDem', () => window.loadDEM?.());
-    _asyncBtn('qlLoadWater', () => window.loadWaterMask?.());
-    _asyncBtn('qlLoadSat', () => window.loadSatelliteRGBImage?.());
-    _asyncBtn('qlLoadEsa', () => window.loadEsaLandCover?.());
-    _asyncBtn('qlLoadHydro', () => window.loadHydrology?.());
 };
 
 window._setupBboxListeners = function _setupBboxListeners() {

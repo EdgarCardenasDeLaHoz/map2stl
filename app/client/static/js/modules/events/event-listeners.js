@@ -32,8 +32,6 @@ window.setupEventListeners = function setupEventListeners() {
     document.addEventListener('click', _onCollapsibleClick);
 
     // Control buttons
-    document.getElementById('loadRegionBtn')?.addEventListener('click', () => window.loadSelectedRegion?.());
-    document.getElementById('submitBtn')?.addEventListener('click', () => window.submitBoundingBox?.());
 
     window._setupBboxListeners?.();
 
@@ -42,33 +40,21 @@ window.setupEventListeners = function setupEventListeners() {
     // second listener here toggled twice per click, so the button did nothing.
 
     document.getElementById('sidebarTableSearch')?.addEventListener('input', e => window.renderSidebarTable?.(e.target.value));
-    document.getElementById('statusToggleBtn')?.addEventListener('click', () => window.toggleStatusPanel?.());
-    document.getElementById('applyParamsBtn')?.addEventListener('click', () => window.applyRegionParams?.());
-    document.getElementById('clearBboxBtn')?.addEventListener('click', () => window.clearAllBoundingBoxes?.());
 
     window._setupModelExportListeners?.();
     window._setupMapAndDemListeners?.();
 
-    window.setupOpacityControls?.();
     window.setupAutoReload?.();
     window.setupStackedLayers?.();
     window.setupCoordinateSearch?.();
-    window.setupRegionsTable?.();
+    window.setupContinentFilter?.();
     window.setupKeyboardShortcuts?.();
-
-    // Compare view — region load, colormap, exaggeration
-    for (const side of ['Left', 'Right']) {
-        document.getElementById(`compare${side}Region`)?.addEventListener('change', () => window.loadCompareRegion?.(side.toLowerCase()));
-        document.getElementById(`compare${side}Colormap`)?.addEventListener('change', () => window.applyCompareColormap?.(side.toLowerCase()));
-        document.getElementById(`compare${side}Exag`)?.addEventListener('change', () => window.updateCompareExagLabel?.(side.toLowerCase()));
-    }
 
     window._setupResizablePanel?.();
 
     window.initCurveEditor?.();
     window.initPresetProfiles?.();
     window.initRegionNotes?.();
-    window.initRegionThumbnails?.();
     window.enableStackedZoomPan?.();
 
     window._setupSettingsJsonToggle?.();
@@ -80,8 +66,6 @@ window.setupEventListeners = function setupEventListeners() {
     document.getElementById('clearWaterHydrologyBtn')?.addEventListener('click', () => window.clearWaterHydrology?.());
     // Min order and Width x apply to both river sources (Natural Earth gets a
     // pseudo order), so #hydroSource no longer hides them.
-
-    // qlLoadHydro (quick-load) wired in event-listeners-map.js via _asyncBtn
 
     // Trails section. Only the two buttons here are fetch controls; everything
     // below repaints from the retained payload rather than refetching, since one

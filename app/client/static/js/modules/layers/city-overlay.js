@@ -8,7 +8,6 @@
  *   window.appState.selectedRegion   — currently selected region object
  *   window.appState.currentDemBbox   — bounding box of the currently rendered DEM
  *   window.appState.osmCityData      — last fetched OSM feature collections
- *   window.appState.showToast        — toast notification function
  *   window.appState.haversineDiagKm  — bbox diagonal distance helper
  *
  * Performance notes:
@@ -18,7 +17,7 @@
  *   Both render functions are debounced through requestAnimationFrame.
  *
  * Render functions (renderCityOverlay, renderCityOnDEM) and raster helpers
- * (loadCityRaster, _setupCityRasterLayer, _clearCityRasterCache, _updateCitiesLoadButton)
+ * (loadCityRaster, _updateCitiesLoadButton)
  * live in city-render.js, which must be loaded immediately after this file.
  *
  * loadCityData() runs the fetch as a background job (POST /api/cities/start, see
@@ -391,11 +390,9 @@ window.loadCityData = async function loadCityData() {
         // Remove POIs entirely
         delete data.pois;
 
-        // Cities 7: annotate features with terrain_z from the current DEM
-        const demData = window.appState?.lastDemData;
-        _computeTerrainZ(data.buildings, demData);
-        _computeTerrainZ(data.roads,     demData);
-        _computeTerrainZ(data.walls,     demData);
+        _computeFeatureBboxes(data.buildings);
+        _computeFeatureBboxes(data.roads);
+        _computeFeatureBboxes(data.walls);
         if (data.buildings?.features) {
             data.buildings.features.forEach((feat, idx) => { feat._cityIndex = idx; });
         }
@@ -449,28 +446,8 @@ window.cancelCityFetch = function cancelCityFetch() {
 };
 
 // ---------------------------------------------------------------------------
-// Terrain Z annotation
+// Feature bounding boxes
 // ---------------------------------------------------------------------------
-
-/**
- * Return the [lon, lat] centroid of any GeoJSON geometry by averaging all coordinates.
- * @param {Object} geom - GeoJSON geometry object
- * @returns {[number, number]|null} [lon, lat] or null if no coordinates found
- */
-function _geomCentroid(geom) {
-    if (!geom?.coordinates) return null;
-    const coords = [];
-    function collect(c) {
-        if (!Array.isArray(c)) return;
-        if (typeof c[0] === 'number') { coords.push(c); return; }
-        c.forEach(collect);
-    }
-    collect(geom.coordinates);
-    if (!coords.length) return null;
-    const lon = coords.reduce((s, c) => s + c[0], 0) / coords.length;
-    const lat = coords.reduce((s, c) => s + c[1], 0) / coords.length;
-    return [lon, lat];
-}
 
 /**
  * Compute the geo bounding box of a GeoJSON geometry by scanning all coordinates.
@@ -626,51 +603,16 @@ window.selectCityBuilding = function selectCityBuilding(index) {
 };
 
 /**
- * Annotate each feature in a FeatureCollection with:
- *  - `terrain_z` property: DEM elevation sampled at the feature centroid (Cities 7)
- *  - `_bbox`: geo bounding box {minLon, maxLon, minLat, maxLat} for sub-pixel culling
+ * Annotate each feature in a FeatureCollection with `_bbox`, its geo bounding
+ * box {minLon, maxLon, minLat, maxLat}, for sub-pixel culling in draw.
  *
  * @param {Object|null} geojson - GeoJSON FeatureCollection (mutated in-place)
- * @param {Object|null} demData - lastDemData: {dem_values, dimensions, bbox}
  */
-function _computeTerrainZ(geojson, demData) {
+function _computeFeatureBboxes(geojson) {
     if (!geojson?.features) return;
-
-    // Pre-compute geo bbox for every feature (used for sub-pixel culling in draw)
     for (const feat of geojson.features) {
         feat._bbox = _computeGeomBbox(feat.geometry);
     }
-
-    // Support both {values, width, height} (lastDemData) and legacy {dem_values, dimensions}
-    const vals = demData?.values ?? demData?.dem_values;
-    if (!vals) return;
-    const demH = demData.height ?? (demData.dimensions || [])[0] ?? 0;
-    const demW = demData.width  ?? (demData.dimensions || [])[1] ?? 0;
-    if (!demH || !demW) return;
-    // bbox may be [west, south, east, north] array or {north,south,east,west} object
-    let bWest, bSouth, bEast, bNorth;
-    const b = demData.bbox;
-    if (Array.isArray(b)) {
-        [bWest, bSouth, bEast, bNorth] = b;
-    } else if (b && typeof b === 'object') {
-        ({ west: bWest, south: bSouth, east: bEast, north: bNorth } = b);
-    } else {
-        return;
-    }
-    if (bWest == null) return;
-    const latRange = bNorth - bSouth;
-    const lonRange = bEast - bWest;
-    geojson.features.forEach(feat => {
-        const ctr = _geomCentroid(feat.geometry);
-        if (!ctr) return;
-        const [lon, lat] = ctr;
-        const col = Math.round(((lon - bWest)  / lonRange) * (demW - 1));
-        const row = Math.round(((bNorth - lat)  / latRange) * (demH - 1));
-        const ci  = Math.max(0, Math.min(demH - 1, row)) * demW
-                  + Math.max(0, Math.min(demW - 1, col));
-        feat.properties = feat.properties || {};
-        feat.properties.terrain_z = vals[ci] ?? 0;
-    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1076,9 +1018,6 @@ window.enhanceBuildingHeights = async function enhanceBuildingHeights() {
 // Re-render overlays automatically when data or bbox changes.
 // ---------------------------------------------------------------------------
 function _initCityOverlaySubscriptions() {
-    // Wire city heights raster layer controls
-    window._setupCityRasterLayer?.();
-
     // Check Google 3D API key availability (non-blocking)
     _checkGoogle3dAvailable();
 
@@ -1098,18 +1037,6 @@ function _initCityOverlaySubscriptions() {
         const y = (e.clientY - rect.top) * (canvas.height / rect.height);
         const picked = _pickCityBuildingAtPx(x, y);
         if (picked >= 0) window.selectCityBuilding(picked);
-    });
-
-    // When DEM data changes, re-compute terrain Z for existing city features and re-render
-    window.appState.on('lastDemData', (demData) => {
-        const city = window.appState.osmCityData;
-        if (!city) return;
-        _computeTerrainZ(city.buildings, demData);
-        _computeTerrainZ(city.roads, demData);
-        _computeTerrainZ(city.walls, demData);
-        window._invalidateCityCache();
-        window.renderCityOverlay?.();
-        window.renderCityOnDEM?.();
     });
 
     // When bbox changes, cache is stale — re-render with new projection

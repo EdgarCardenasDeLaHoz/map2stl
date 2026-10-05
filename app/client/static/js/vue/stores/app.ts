@@ -1,5 +1,4 @@
 import { defineStore } from 'pinia';
-import { markRaw } from 'vue';
 import type {
     Region, DemData, WaterMaskData, BBox,
     LayerBboxes, LayerStatus, DemParams, LandCoverConfig,
@@ -27,8 +26,6 @@ export const useAppStore = defineStore('app', {
         // ── Map & globe instances ───────────────────────────────────────────
         map: null as unknown,
         globeScene: null as unknown,
-        globeCamera: null as unknown,
-        globeRenderer: null as unknown,
         globe: null as unknown,
         drawnItems: null as unknown,
         preloadedLayer: null as unknown,
@@ -71,7 +68,6 @@ export const useAppStore = defineStore('app', {
         osmCityData: null as OsmCityData | null,
         cityRasterSourceCanvas: null as HTMLCanvasElement | null,
         compositeDemSourceCanvas: null as HTMLCanvasElement | null,
-        compositeFeatures: null as unknown,
         compositeCityRaster: null as unknown,
         satImgSourceCanvas: null as HTMLCanvasElement | null,
         _satImgRawCanvas: null as HTMLCanvasElement | null,
@@ -108,58 +104,17 @@ export const useAppStore = defineStore('app', {
         modelPreviewState: 'idle' as 'idle' | 'building' | 'ready' | 'error',
         generatedModelData: null as unknown,
         terrainMesh: null as unknown,
-        viewerScene: null as unknown,
 
         // ── UI state ──────────────────────────────────────────────────────────
         activeView: 'map' as 'map' | 'dem' | 'model',
         sidebarMode: 'expanded' as 'expanded' | 'normal' | 'hidden',
-        regionThumbnails: {} as Record<string, string>,
 
         // ── Callbacks registered by modules (non-reactive) ────────────────────
         // These are stored with markRaw to prevent Vue from making them reactive.
-        _setDemEmptyState: null as ((empty: boolean) => void) | null,
         _updateWorkflowStepper: null as (() => void) | null,
         _applyCurveSettings: null as ((...args: unknown[]) => void) | null,
-        showToast: null as ((...args: unknown[]) => void) | null,
         haversineDiagKm: null as ((...args: unknown[]) => number) | null,
     }),
-
-    actions: {
-        // ── Compat API — used by the window.appState bridge ───────────────────
-
-        /** Read a key (mirrors existing window.appState.get(key)) */
-        get(key: string): unknown {
-            return (this as unknown as Record<string, unknown>)[key];
-        },
-
-        /** Write a key and notify Pinia watchers (mirrors window.appState.set(key, val)) */
-        set(key: string, val: unknown): void {
-            // Wrap canvas/Three.js objects so Vue doesn't make them deeply reactive
-            if (val instanceof HTMLCanvasElement || (val !== null && typeof val === 'object' && '_isThree' in val)) {
-                val = markRaw(val as object);
-            }
-            (this as unknown as Record<string, unknown>)[key] = val;
-        },
-
-        // ── Domain actions ────────────────────────────────────────────────────
-
-        clearLayerCache(): void {
-            this.lastDemData = null;
-            this.currentDemBbox = null;
-            this.originalDemValues = null;
-            this.curveDataVmin = null;
-            this.curveDataVmax = null;
-            this.layerBboxes = { dem: null, water: null, landCover: null };
-            this.layerStatus = { dem: 'empty', water: 'empty', landCover: 'empty' };
-            this.cityRasterSourceCanvas = null;
-            this.compositeDemSourceCanvas = null;
-            this.compositeFeatures = null;
-            this.compositeCityRaster = null;
-            this.satImgSourceCanvas = null;
-            this._satImgRawCanvas = null;
-            this._satImgBbox = null;
-        },
-    },
 });
 
 // Type export for use in components / composables

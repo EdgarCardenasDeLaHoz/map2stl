@@ -18,7 +18,7 @@ file owns which pipeline control, and the conventions a change must respect.
 
 | Half | Source | Served as | Owns |
 |---|---|---|---|
-| Vue 3 + Pinia + PrimeVue | `app/client/static/js/vue/` (TypeScript, `.vue`) | /static/js/vue-main.js, a Vite build into `dist/` | Nearly all markup; a growing set of reactive panels |
+| Vue 3 + Pinia | `app/client/static/js/vue/` (TypeScript, `.vue`) | /static/js/vue-main.js, a Vite build into `dist/` | Nearly all markup; a growing set of reactive panels |
 | Plain ES modules | `app/client/static/js/modules/**`, `app.js`, entry `main.js` | Raw files, no build step | Most behaviour: fetches, canvases, export, presets |
 
 - **Direction: one frontend, Vue.** Vanilla code moves behind components and stores one piece at a
@@ -36,7 +36,7 @@ file owns which pipeline control, and the conventions a change must respect.
 |---|---|
 | `app/client/static/js/vue/main-vue.ts` | Creates the app + Pinia, mounts `App.vue` on `#vue-app`, registers `ModelScorePanel` globally, installs the appState bridge |
 | `app/client/static/js/vue/App.vue` | Root: teleports `SidebarPanel` into `#vue-sidebar`, `ContentArea` into `#vue-content-area`; renders `AppShell` |
-| `app/client/static/js/vue/stores/app.ts` | The one Pinia store (`app/client/static/js/vue/stores/app.ts::useAppStore`); typed state + `get`/`set` compat actions + `clearLayerCache` |
+| `app/client/static/js/vue/stores/app.ts` | The one Pinia store (`app/client/static/js/vue/stores/app.ts::useAppStore`); typed state (no actions) |
 | `app/client/static/js/vue/stores/types.ts` | Types for the store (`Region`, `DemData`, `BBox`, ...) |
 | `app/client/static/js/vue/components/**` | `layout/`, `sidebar/`, `views/`, `dem/`, `shared/` — see [frontend-modules.md § Vue components](frontend-modules.md#vue-components) |
 
@@ -77,8 +77,8 @@ sequenceDiagram
      into the store (`$patch`);
    - wraps `app/client/static/js/vue/main-vue.ts::RAW_KEYS` (Leaflet/Three objects, canvases,
      callbacks) in `markRaw` so Vue never deep-proxies them;
-   - replaces `window.appState` with a bridge Proxy whose reads and writes go to the store, and
-     sets `window.__vuePiniaActive = true`.
+   - replaces `window.appState` with a bridge Proxy (`get/set/on`) whose reads and writes go to
+     the store.
 3. **After:** a module writing `window.appState.x = v` and a component reading `store.x` see the
    same value; Vue re-renders reactively.
 
@@ -241,7 +241,7 @@ Consequences to know:
 | Key | S | Type | Description |
 |---|---|---|---|
 | `map` | S | `L.Map` | Main 2D map |
-| `globeScene` / `globeCamera` / `globeRenderer` / `globe` | S | Three.js | Globe scene objects |
+| `globeScene` / `globe` | S | Three.js | Globe scene objects |
 | `drawnItems` | S | `L.FeatureGroup` | Drawn bbox rectangles |
 | `preloadedLayer` | S | `L.FeatureGroup` | Saved-region boxes |
 | `editMarkersLayer` | S | `L.FeatureGroup` | Edit buttons inside each bbox |
@@ -253,15 +253,12 @@ Consequences to know:
 |---|---|---|---|
 | `coordinatesData` | S | `Region[]` | Saved regions |
 | `selectedRegion` | S | `Region \| null` | Current region |
-| `regionThumbnails` | S | `Record<string,string>` | Region name → thumbnail |
 
 Module-local (not on appState):
 
-- `app/client/static/js/modules/regions/region-ui.js`: `TABLE_PAGE_SIZE` (20), `_tablePage`,
-  `_tableSearch`, `regionNotes` (persisted as `map2stl_regionNotes`).
+- `app/client/static/js/modules/regions/region-ui.js`: `regionNotes` (persisted as `map2stl_regionNotes`).
 - `app/client/static/js/modules/ui/presets.js`: `PRESET_VERSION` (1), `_presetSnapshot` (taken
   before loading a preset; cleared on revert).
-- `app/client/static/js/modules/map/compare-view.js`: `compareData` (left/right panels).
 
 ### DEM & layer data
 
@@ -278,7 +275,6 @@ Module-local (not on appState):
 | `demLayout` | | `{x,y,w,h}` | Letterbox rect of the DEM in the stack (set by `updateStackedLayers`) |
 | `satImgSourceCanvas`, `_satImgRawCanvas`, `_satImgBbox` | S | canvas / BBox | Satellite imagery source |
 | `cityRasterSourceCanvas` | S | canvas | City height raster (`city-render.js`) |
-| `hydrologySourceCanvas` | | canvas | River carve grid (`hydrology-overlay.js`; not in the layer rack, filled only by the bulk load / projection refetch) |
 | `waterHydrologyCanvas` | | canvas | Combined water + hydrology layer (`water-hydrology-combined.js`) |
 | `trailsSourceCanvas`, `lastTrailsData` | | canvas / object | Trails render + retained payload (`trails-overlay.js`) |
 | `meshImport` | | object | `{uploadId, libraryRelPath, filename, heightmap, registered}` (`mesh-layer.js`) |
@@ -289,7 +285,6 @@ Module-local (not on appState):
 | Key | S | Type | Description |
 |---|---|---|---|
 | `compositeDemSourceCanvas` | S | canvas | Composite output (`composite-dem.js`) |
-| `compositeFeatures` | S | object | Per-channel Float32Arrays + histograms |
 | `compositeCityRaster` | S | object | Cached city raster used by the composite |
 | `compositeLayerSpec` | | `{layers, unsupported}` | Terrain-only server spec published by `applyCompositeToDem()`; never contains `osm_*` sources. [why](../decisions/composite.md#2026-09-06--both-engines-keep-compositing-and-the-export-falls-back-to-the-browsers-values) |
 | `_newCompositeApplied` | | bool | Set by Apply, cleared by a fresh `loadDEM()`; tells `_demSettings()` to send the spec (or inline values). Not saved with the region |
@@ -320,15 +315,14 @@ Module-local (not on appState):
 
 | Key | S | Type | Description |
 |---|---|---|---|
-| `terrainMesh` / `viewerScene` | S | Three.js | Extrude preview mesh and scene |
+| `terrainMesh` | S | Three.js | Extrude preview mesh |
 | `generatedModelData` | S | object | Last preview parameters, used by downloads; `zMaxMm` (printed height) feeds the Build sub-tab size line |
 | `modelPreviewState` | S | `'idle'\|'building'\|'ready'\|'error'` | Set by `previewModelIn3D`; `ModelContainer.vue` words its empty state from it |
 | `puzzleEdges` | S | `{cols, rows, key} \| null` | Dragged puzzle cuts in mm; sent as `col_edges_mm` / `row_edges_mm` |
 
 ### Callbacks (markRaw)
 
-`_setDemEmptyState`, `_updateWorkflowStepper` (set by `dem-main.js`), `_applyCurveSettings`,
-`showToast`, `haversineDiagKm`.
+`_updateWorkflowStepper` (set by `dem-main.js`), `_applyCurveSettings`, `haversineDiagKm`.
 
 ---
 

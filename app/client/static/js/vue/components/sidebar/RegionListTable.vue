@@ -109,14 +109,9 @@ onMounted(() => {
   (window as any).events?.on?.((window as any).EV?.REGION_SELECTED, () => refreshCategories());
 });
 
-watch(tableSearch, (val) => {
-  // Notify existing JS handler attached to #sidebarTableSearch
-  const el = document.getElementById('sidebarTableSearch') as HTMLInputElement | null;
-  if (el && el.value !== val) {
-    el.value = val;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-  // Reapply category filter after search updates DOM
+// The input's own `input` event reaches event-listeners.js (renderSidebarTable);
+// reapply the category filter once that has re-rendered the rows.
+watch(tableSearch, () => {
   setTimeout(applyTableFilter, 50);
 });
 

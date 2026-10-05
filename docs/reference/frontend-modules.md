@@ -31,7 +31,7 @@ Where each piece of browser code lives, and a one-line index of its functions.
 | `app/client/static/js/modules/export/city-fullmodel.js` | `model-viewer.js` |
 | `app/client/static/js/modules/export/export-poll.js` | `export-handlers.js` |
 | `app/client/static/js/modules/layers/composite-spec.js` | `composite-dem.js`, `export-handlers.js` |
-| `app/client/static/js/modules/layers/hydrology-print.js` | `composite-dem.js`, `water-hydrology-combined.js`, `hydrology-overlay.js` |
+| `app/client/static/js/modules/layers/hydrology-print.js` | `composite-dem.js`, `water-hydrology-combined.js` |
 | `app/client/static/js/modules/layers/city-fetch.js` | `city-overlay.js`, `export-handlers.js`, Vue |
 | `app/client/static/js/modules/layers/building-heights.js` | `export-handlers.js`, Vue |
 | `app/client/static/js/modules/layers/landmark-overrides.js` | `export-handlers.js`, Vue |
@@ -64,10 +64,10 @@ flowchart LR
 | `storage-migrate.js` | `migrateStorageKeys` | Imported first: copies `strm2stl_*` localStorage keys to `map2stl_*` |
 | `state.js` | `window.appState` | Pre-Vue Proxy store (`get/set/on/off/emit`); replaced by the Pinia bridge at DOMContentLoaded ([frontend.md](frontend.md#how-state-flows-windowappstate--pinia)) |
 | `events.js` | `window.events`, `window.EV` | Event bus + constants. `EV.BBOX_CHANGED` fires from `setBboxRectangle`, the mini-map drag and a drawn rectangle |
-| `api.js` | `window.api` | All fetch helpers: regions, terrain, export, cities (`start/status/result/cancel`, landmarks), composite (`demMerge`, city raster), registration, mesh, geocode, cache (`clearRegion` only), settings |
-| `ui-helpers.js` | `showToast`, `toastAnimation`, `toastDropIndex`, `showLoading`, `setLayerStatus`, `getProjectionParams`, `emitStackUpdate`, `decode*Values` | Toasts (plain text, max 3, errors persist; see frontend.md "Feedback surfaces"), spinners, layer status; `getProjectionParams()` is the single source of projection settings for every layer fetch (F-PROJ-DIMS); base64 grid decoders |
+| `api.js` | `window.api` | All fetch helpers: regions, terrain, export, cities (`start/status/result/cancel`, landmarks), composite (`demMerge`, city raster), registration, mesh, geocode, cache (`clearRegion` only), settings (`default` only) |
+| `ui-helpers.js` | `showToast`, `toastAnimation`, `toastDropIndex`, `setLayerStatus`, `getProjectionParams`, `emitStackUpdate`, `decode*Values` | Toasts (plain text, max 3, errors persist; see frontend.md "Feedback surfaces"), layer status; `getProjectionParams()` is the single source of projection settings for every layer fetch (F-PROJ-DIMS); base64 grid decoders |
 | `usage-log.js` | `window.usageLog` (`pause`, `resume`, `flush`, `session`) | Local usage log (F-USAGE): capture-phase clicks and committed changes, `EV.BBOX_CHANGED` / `REGION_SELECTED` / `DEM_LOADED`, wraps `window.fetch` (every `/api/` call's status and ms), `showToast`, errors; batches to `POST /api/usage` every 5 s. Secret-looking controls are redacted; `map2stl_usage_log` = `off` pauses |
-| `cache.js` | `waterMaskCache` | In-memory water-mask LRU (the cache-status panel and its 5 s poll were removed 2026-09-30) |
+| `cache.js` | `waterMaskCache` | In-memory water-mask cache, oldest-inserted evicted first (the cache-status panel and its 5 s poll were removed 2026-09-30) |
 
 ### `dem/` — DEM rendering
 
@@ -89,11 +89,10 @@ flowchart LR
 | `mesh-registration.js` | `openMeshRegistrationModal`, `closeMeshRegistrationModal`, `computeMeshRegistration`, `undoLastMeshPointPair`, `clearMeshPointPairs` | Point-pair picker (DEM vs mesh) feeding the `/register` affine fit |
 | `water-mask.js` | `loadWaterMask`, `loadEsaLandCover`, `renderWaterMask`, `renderEsaLandCover`, `renderCombinedView` | Water mask + ESA land cover |
 | `hydrology-print.js` | `riverSourceFromHydro`, `readHydrologyRiverControls`, `loadedDemGrid`, `hydrologyPrintQuery`, `readRiverDepthScale`, `readRiverDepthMm`, `NEED_DEM_MESSAGE` | Pure: the one river-settings source (Fetch → Hydrology) and the print-model `/api/terrain/hydrology` query |
-| `hydrology-overlay.js` | `loadHydrology`, `clearHydrology`, `cancelHydroLoad`, `renderHydrology` | Older single-layer river grid (not in the rack; still called by the bulk load and the projection refetch); same print-model request |
 | `water-hydrology-combined.js` | `loadWaterHydrology`, `clearWaterHydrology`, `renderWaterHydrologyCombined`, `rerenderWaterHydrology` | Water + hydrology as one layer. Preview = print: the hydrology half asks for the composite's own river carve on the loaded DEM (`dem_source`, the DEM request's `dim`, Composite Depth ×); without a loaded DEM it shows "Load the DEM first" and requests nothing. Legend tooltips count px (`order_counts_unit: "px"`) or reaches; sets `appState.waterHydrologyCanvas` and `appState.lastWaterHydrology`. Samples each canvas pixel from the grid (no forward copy, which striped narrower grids). `#hydroColorMode`: depth (blue) or Strahler order (`HYDRO_ORDER_COLORS`, legend `#hydroOrderLegend`), redrawn without a request. Skips the separate water mask when the hydrology grid carries `water_surface` |
 | `trails-overlay.js` | `loadTrails`, `renderTrails`, `refreshTrailsCategories`, `clearTrails`, `cancelTrailsLoad` | Ski + hiking grids from `/api/terrain/trails`; retains `appState.lastTrailsData` so display controls repaint without refetching |
 | `city-overlay.js` | `loadCityData`, `cancelCityFetch`, `clearCityOverlay`, `selectCityBuilding`, `enhanceBuildingHeights`, `_drawCityCanvas` | OSM fetch (via `city-fetch.js`), terrain Z, feature pre-bake, building picking |
-| `city-render.js` | `renderCityOverlay`, `renderCityOnDEM`, `_renderViaWorker`, `loadCityRaster`, `_clearCityRasterCache` | City overlay painting (off-thread in `app/client/static/js/workers/city-worker.js` when OffscreenCanvas is available; each view keeps its last picture) + `/api/cities/raster` layer |
+| `city-render.js` | `renderCityOverlay`, `renderCityOnDEM`, `_renderViaWorker`, `loadCityRaster` | City overlay painting (off-thread in `app/client/static/js/workers/city-worker.js` when OffscreenCanvas is available; each view keeps its last picture) + `/api/cities/raster` layer |
 | `city-fetch.js` | `runCityFetch`, `summarizeCityFetch`, `mirrorHost`, `LAYER_STATE_ICON`, `cityPanelOsmParams`, `cityBuildOsmParams` | Pure: start → poll → result of the background city fetch; per-layer summary for `CityFetchProgress.vue` |
 | `building-heights.js` | `summarizeBuildingHeights`, `heightSourceGroup`, `buildingsWithOverrides`, `hasOverrides` | Pure: height-source summary, histogram; City Model `layer_data` with overrides |
 | `landmark-overrides.js` | `overridesForBuild`, `draftFromSpec`, `specFromDraft`, `overrideLabel`, `meshBounds`, `CATEGORY_LABELS` | Pure: landmark override specs (osm / ndsm / mesh), F-LANDMARK |
@@ -102,9 +101,9 @@ flowchart LR
 
 | File | Key symbols | Purpose |
 |---|---|---|
-| `map-globe.js` | `initMap`, `initGlobe`, `setTileLayer`, `toggleDemOverlay`, `toggleTerrainOverlay`, `toggleMapGrid`, `updateBboxIndicator` | Leaflet map + Three.js globe; raster overlays go through Mercator ([why](../decisions/frontend.md#2026-08-30--raster-overlays-are-resampled-to-mercator-before-they-touch-the-map)) |
-| `bbox-panel.js` | `setBboxRectangle`, `setBboxInputValues`, `initBboxMiniMap`, `syncBboxMiniMap`, `toggleBboxMiniMap`, `setupBboxKeyboardNav` | Bbox bar + mini-map. `setBboxRectangle` is the one writer of `appState.boundingBox`; `setBboxInputValues` is display only ([why](../decisions/frontend.md#2026-08-28--one-helper-owns-appstateboundingbox)) |
-| `compare-view.js` | `initCompareMode`, `loadCompareRegion`, `updateCompareCanvases`, `applyRegionParams` | Side-by-side region comparison |
+| `map-globe.js` | `initMap`, `initGlobe`, `setTileLayer`, `toggleDemOverlay`, `toggleTerrainOverlay`, `toggleMapGrid` | Leaflet map + Three.js globe; raster overlays go through Mercator ([why](../decisions/frontend.md#2026-08-30--raster-overlays-are-resampled-to-mercator-before-they-touch-the-map)) |
+| `bbox-panel.js` | `setBboxRectangle`, `setBboxInputValues`, `initBboxMiniMap`, `syncBboxMiniMap`, `toggleBboxMiniMap` | Bbox bar + mini-map. `setBboxRectangle` is the one writer of `appState.boundingBox`; `setBboxInputValues` is display only ([why](../decisions/frontend.md#2026-08-28--one-helper-owns-appstateboundingbox)) |
+| `compare-view.js` | `updateCompareCanvases` | Inline side-by-side layer compare in the Edit view |
 | `landmarks.js` | `toBbox`, `bboxKey`, `extendBboxToInclude`, `bboxContains`, `placeCaption` | Pure helpers for `LandmarkSearch.vue` and `EdgeLandmarkWarnings.vue` |
 
 ### `regions/`
@@ -112,7 +111,7 @@ flowchart LR
 | File | Key symbols | Purpose |
 |---|---|---|
 | `regions.js` | `loadCoordinates`, `selectCoordinate`, `goToEdit` | Region load, selection |
-| `region-ui.js` | `renderCoordinatesList`, `populateRegionsTable`, `setupRegionsTable`, `groupRegionsByContinent`, `resolveRegionContinent`, `detectContinent` (from `continent.js`), `initRegionNotes`, `getRegionNote`, `setRegionNote`, `renameRegionLocalData`, `saveRegionThumbnail` | Sidebar list (the map's viewport set under a "Showing N of M in view · Show all" line; a search or Show all lists every region; ✎ button per row; row ↔ box hover link), paginated table, notes + thumbnails in localStorage |
+| `region-ui.js` | `renderCoordinatesList`, `setupContinentFilter`, `groupRegionsByContinent`, `resolveRegionContinent`, `detectContinent` (from `continent.js`), `initRegionNotes`, `getRegionNote`, `setRegionNote`, `renameRegionLocalData` | Sidebar list (the map's viewport set under a "Showing N of M in view · Show all" line; a search or Show all lists every region; ✎ button per row; row ↔ box hover link), continent filter, notes in localStorage |
 | `region-boxes.js` | `drawRegionBoxes`, `refreshRegionViewSet`, `getViewportRegionSet`, `highlightRegionBox` | Saved-region boxes on the Explore map: outlines over a dark halo, selected = accent, hover = brighter + name tooltip; only the viewport set is drawn, recomputed on moveend/zoomend/resize (150 ms debounce), load, selection, continent filter; the list reads the same set |
 | `viewport-regions.js` | `selectViewportRegions`, `VIEWPORT_REGION_LIMIT` | Pure: regions that intersect and fit the view, largest first, ≤ 20, plus the selected one |
 | `region-geometry.js` | `bboxSizeKm`, `formatBboxSize`, `formatBboxDims`, `boxAround`, `placeBox`, `parseBbox`, `regionBoxStyle`, `regionHaloStyle`, `REGION_ACCENT` | Pure: box size in km ("12.4 × 8.1 km · 100 km²"), N/S/E/W parsing, Leaflet box styles |
@@ -136,8 +135,8 @@ flowchart LR
 
 | File | Key symbols | Purpose |
 |---|---|---|
-| `view-management.js` | `switchView`, `switchDemSubtab`, `setupDemSubtabs`, `saveCurrentRegion`, `deleteRegion`, `showNewRegionForm`, `renderSidebarTable`, `toggleBboxLayerVisibility`, `toggleDemSettingsPanel`, `_setSidebarViews`, `loadSelectedRegionDem` | Tabs and sub-tabs (`switchView` is null-safe for any view name); sidebar list/table view (the mode itself is `SidebarPanel.vue`'s); region delete (confirm → `DELETE /api/regions/{name}` → reload); show/hide region boxes on the map; "Load DEM ›" on the Explore map (clicks `#tabEdit` then `#loadDemBtn`) |
-| `app-setup.js` | `setupOpacityControls`, `setupStackedLayers`, `loadAllLayers`, `setupAutoReload`, `clearAllBoundingBoxes` | Init wiring; `loadAllLayers` uses `Promise.allSettled` |
+| `view-management.js` | `switchView`, `switchDemSubtab`, `setupDemSubtabs`, `saveCurrentRegion`, `deleteRegion`, `renderSidebarTable`, `toggleBboxLayerVisibility`, `toggleDemSettingsPanel`, `_setSidebarViews`, `loadSelectedRegionDem` | Tabs and sub-tabs (`switchView` is null-safe for any view name); sidebar list/table view (the mode itself is `SidebarPanel.vue`'s); region delete (confirm → `DELETE /api/regions/{name}` → reload); show/hide region boxes on the map; "Load DEM ›" on the Explore map (clicks `#tabEdit` then `#loadDemBtn`) |
+| `app-setup.js` | `setupStackedLayers`, `loadAllLayers`, `setupAutoReload` | Init wiring; `loadAllLayers` uses `Promise.allSettled` |
 | `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset`, `setupAutoSave`, `_migratePreset` | Presets, auto-save, `PRESET_VERSION` migration, revert snapshot. Sends `projection.clip_valid_region` only |
 | `settings-compat.js` | `normalizeSettingsKeys` | Pure: renames legacy keys in saved region settings / presets (`projection.clip_nans` → `clip_valid_region`) before `applyAllSettings` reads them |
 | `workflow-presets.js` | `WORKFLOW_PRESETS`, `applyFields`, `applyWorkflowPreset`, `regionDemSource` | Pure: City / Mountain / Region / Coast presets; returns an undo list |
@@ -173,7 +172,7 @@ Under `app/client/static/js/vue/components/`. Store and bridge: [frontend.md](fr
 | `layout/` | `AppShell` (App), `MainHeader`, `MeshRegistrationModal` (AppShell) |
 | `shared/` | `CollapsibleSection`, `ToolSwitches` (DemSettingsPanel, ModelContainer) |
 | `dem/` (F-DESIGN, F-EDITPANEL) | `EditLayersPanel` (DemContainer), `LayerSettings` + `settings/SetRow` (DemSettingsPanel) |
-| `sidebar/` | `SidebarPanel` (App); `SidebarListView`, `SidebarEditView`, `RegionListTable`, `NewRegionSection` (SidebarPanel) |
+| `sidebar/` | `SidebarPanel` (App); `SidebarListView`, `SidebarEditView`, `RegionListTable` (SidebarPanel) |
 | `views/` | `ContentArea` (App); `MapContainer`, `DemContainer`, `ModelContainer` (ContentArea); `LandmarkSearch`, `EdgeLandmarkWarnings` (MapContainer, DemSettingsPanel); `PreflightPanel`, `ModelScorePanel` (ModelContainer) |
 | `dem/` | `DemSettingsPanel`, `CityBuildingsPanel` (DemContainer); in DemSettingsPanel: `WorkflowPresetBar`, `PresetsSection`, `ProjectionSection`, `FetchLayersSection`, `CityLandmarksSection`, `VisualizationSection`, `LayerViewSection`, `LayerDisplaySections`, `CompositeDemSection`, `MeshImportSection`, `PlateRegistrationSection`; in FetchLayersSection: `CityFetchProgress`, `DemSamplingInfo` |
 | `shared/` | `CollapsibleSection` (used throughout) |
@@ -204,7 +203,7 @@ layers/city-overlay → layers/city-render → layers/stacked-layers → layers/
 layers/mesh-layer → layers/mesh-registration
 export/export-handlers → export/model-viewer → map/compare-view
 regions/region-ui → regions/regions-import-export → layers/water-mask
-layers/hydrology-overlay → layers/water-hydrology-combined → layers/trails-overlay
+layers/water-hydrology-combined → layers/trails-overlay
 map/map-globe → regions/region-boxes → regions/regions → regions/region-editor → map/bbox-panel
 ui/app-setup → ui/keyboard-shortcuts
 events/event-listeners-map → events/event-listeners-export → events/event-listeners-ui → events/event-listeners
@@ -227,7 +226,7 @@ Not part of `main.js`; each owns its page.
 ## Notes
 
 - Vendor globals: `window.L` (`/static/vendor/leaflet.js`, `leaflet-draw.js`), `window.THREE`
-  (cdnjs r128) load before the module scripts; `window.Plotly` loads after them.
+  (cdnjs r128) load before the module scripts.
 - Colormap names in the UI must match the branches in
   `app/client/static/js/modules/dem/dem-loader.js::mapElevationToColor`.
 
@@ -287,7 +286,7 @@ One line per function. `window.*` unless marked (private) or (export).
 | `loadSatelliteRGBImage({dim?})` | ESRI satellite imagery (`dim` overrides the resolution control; the 3D drape asks for ≥ the DEM grid) |
 | `updatePrintDimensions()` | Print-size readout |
 
-### `water-mask.js`, `hydrology-overlay.js`, `water-hydrology-combined.js`
+### `water-mask.js`, `water-hydrology-combined.js`
 
 | Function | Purpose |
 |---|---|
@@ -295,8 +294,6 @@ One line per function. `window.*` unless marked (private) or (export).
 | `loadEsaLandCover()` | ESA land cover |
 | `renderWaterMask(data)` / `renderEsaLandCover(data)` | Render to canvas |
 | `renderCombinedView()` | DEM + water + land cover |
-| `loadHydrology()` | `/api/terrain/hydrology` (print model) → carve grid → `appState.hydrologySourceCanvas` |
-| `clearHydrology()` / `cancelHydroLoad()` | Clear / abort |
 | `loadWaterHydrology()` | Water mask + print-model hydrology (`hydrologyPrintQuery`: `dem_source`, `dim`, `source`, `min_order`, `width_scale`, `depth_scale`, projection) in parallel → combined canvas |
 | `clearWaterHydrology()` | Clear combined canvas + `appState.waterHydrologyCanvas` |
 
@@ -426,7 +423,7 @@ One line per function. `window.*` unless marked (private) or (export).
 | `initMap()` / `initGlobe()` | Leaflet map + draw control / Three.js globe |
 | `setTileLayer(key)` | Switch base tiles |
 | `toggleDemOverlay(show)` | Terrain overlay on the map |
-| `initCompareMode()` / `loadCompareRegion(side)` | Compare view |
+| `updateCompareCanvases()` | Inline layer compare (Edit view) |
 
 ### `guides.js` (standalone, ES module)
 
