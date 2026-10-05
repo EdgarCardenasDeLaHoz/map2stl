@@ -28,6 +28,8 @@ npm install && npm run build  # after editing .vue / .ts (the Vue bundle in dist
 Cloud sessions (claude.ai/code): `.claude/hooks/session-start.sh` clones `../numpy2stl`, builds
 `~/.venvs/map2stl` (no torch) and runs `npm install`, so pytest, ruff, vitest and the build work.
 No Google key and no survey/Overpass hosts unless the environment's settings add them.
+**Cloud sessions follow the rules in readme.md › "Rules for cloud sessions"** (one small branch
+from current master, no deletions without approval, owned areas off-limits, never merge to master).
 
 ## Where things are
 

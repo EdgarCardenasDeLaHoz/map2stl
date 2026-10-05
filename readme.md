@@ -116,6 +116,24 @@ python -m pytest -n auto -q
 - GPU work (skyline, SegFormer, training) and anything that reads the real cache stay on the
   local PCs (`scripts/setup-venv.ps1`).
 
+#### Rules for cloud sessions
+
+Agreed with the user on 2026-10-05, after the first cloud audit. Its fixes were good, but it
+duplicated local work, deleted code the user wanted kept, and branched from stale code:
+
+1. **One task, one branch, from the current `origin/master`** (fetch first; it moves). Include
+   tests. Keep a branch small (about 10 files); split larger work.
+2. **Don't delete code or remove features without the user's approval.** An audit lists
+   deletion candidates, with reasons, instead of deleting them.
+3. **Off-limits unless the task names them:**
+   - areas another session owns: `city2stl/skyline/` (panoramic work), `tools/ml/` and the
+     ML code, the Edit panel (`components/dem/LayerSettings.vue`, `settings/`);
+   - the shared docs: `docs/plans/README.md`, `docs/proposals.md`, `docs/decisions/`.
+4. **Good cloud work** needs only the repo and a CPU: test fixes, refactors with tests, audits
+   that report, doc checks. Anything needing the cache, a GPU or keys stays local.
+5. **Push the branch; never merge to master.** A local session reviews and merges cloud
+   branches, one at a time.
+
 ## Dependencies
 
 Key libraries: `fastapi` + `uvicorn` (server), `numpy`/`scipy`/`shapely`

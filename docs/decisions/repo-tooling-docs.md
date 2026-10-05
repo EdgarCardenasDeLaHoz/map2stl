@@ -2,6 +2,21 @@
 
 Repo names and layout, venvs, test markers, agent scripts, where docs and plans live, and the align tool's pack lookup. Related: [architecture.md](architecture.md).
 
+### 2026-10-05 — Cloud sessions work on small branches from master and never merge
+- **Decision:** cloud (claude.ai/code) sessions follow readme.md › "Rules for cloud sessions":
+  one task per branch from current `origin/master`, about 10 files, with tests; no deletions
+  without the user's approval; skyline, ML, the Edit panel and the shared docs are off-limits
+  unless named; repo-and-CPU work only; a local session reviews and merges.
+- **Why:** the first cloud audit (2026-10-05) found real bugs (a static-file path traversal
+  exposing `config.json`, mesh-import cache wipe, skyline mask, footprint area units), but it
+  also duplicated the local F-SKYBENCH and setup work, deleted the ML code the user kept, and
+  branched from stale code, which took two merges with 9 conflicts to reconcile.
+- **Rejected:** no cloud work (loses the laptop offload and the audit's finds); broad tasks
+  like "full audit and fix" (the source of the chaos).
+- **Supersedes / superseded by:** —
+- **Source:** user, 2026-10-05.
+
+
 ### 2026-10-02 — Faster tests: lazy heavy imports, overlapped pre-push, quicktest for the inner loop
 - **Decision:**
   - osmnx (and with it scikit-learn and matplotlib), IPython and pymeshlab load on first use
