@@ -54,7 +54,12 @@ def main() -> int:
     S = requests.Session()
     S.headers["User-Agent"] = cp.UA
     cp.FETCH_WIDTH = WIDTH
-    photos = cp.describe_files(S, cp.category_files(S, cp.skyline_categories(S, args.region.replace("_", " "))))
+    # The site's ``commons_categories`` add neighbourhoods whose categories don't say "skyline"
+    # (Cartagena: Bocagrande, its beaches, Hotel Estelar).
+    cats = list(dict.fromkeys(cp.skyline_categories(S, args.region.replace("_", " "))
+                              + list(site.get("commons_categories", []))))
+    print(f"[profiles] {args.region}: categories {cats}")
+    photos = cp.describe_files(S, cp.category_files(S, cats))
     meta, arrs = load_profiles(args.region)
     done = {m["title"] for m in meta}
     d = cache_dir(args.region)

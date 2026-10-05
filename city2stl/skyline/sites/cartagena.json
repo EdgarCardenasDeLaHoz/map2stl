@@ -25,6 +25,7 @@
   },
   "negative_seeds": ["seed_2", "seed_3"],
   "elevated_seeds": ["seed_1", "seed_4", "seed_5"],
+  "commons_categories": ["Category:Bocagrande", "Category:Beaches in Bocagrande", "Category:Hotel Estelar"],
   "viewpoints": [
     {
       "name": "baluarte_santo_domingo",

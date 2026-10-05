@@ -207,6 +207,10 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
   - Why: the street path assumes a camera 1.7 m up, so a drone view's heights are wrong by
     construction; the screens and F-DET1 also judge street views and dropped good drone seeds.
     Anchor offsets don't apply to these seeds.
+- `commons_categories` — extra Wikimedia Commons categories for the photo pipeline
+  (`scripts/13_photo_profiles.py`), beside the "<city> skyline" ones it finds itself. Use it for
+  neighbourhoods whose categories don't say "skyline" (Cartagena: Bocagrande, its beaches,
+  Hotel Estelar).
 - `max_plausible_height_m` (default 300) — bounds the glass-facade contour override and the y-consistency gate.
   Set just above the region's tallest tower (Cartagena 200).
 - Opt-ins: `use_satellite_footprints`, `use_cross_view_scoring`, `use_pano_coastline_recovery`,
