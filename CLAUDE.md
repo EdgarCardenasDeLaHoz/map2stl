@@ -25,6 +25,21 @@ python scripts/quicktest.py    # while developing: only tests the uncommitted ch
 npm install && npm run build  # after editing .vue / .ts (the Vue bundle in dist/ is gitignored)
 ```
 
+## Shared machine resources (local and cloud agents)
+
+Several agents share one laptop (6 cores / 12 threads, 32 GB RAM, 4 GB VRAM). Helpers:
+`city2stl/resources.py` (`wait_for_gpu`, `ram_ok`, `free_gpu_cache`).
+
+- **GPU queue, no CPU fallback:** SegFormer, Depth Anything, MobileSAM and training jobs wait
+  for GPU memory (`wait_for_gpu(need_gb)`: checks every 30 s, times out after an hour; SegFormer b3
+  at batch 4 needs about 2 GB). Never set `SKYLINE_CV_SEGFORMER_DEVICE=cpu` because the GPU looks
+  busy. Use the CPU only for a handful of images or when the user says so.
+  Call `free_gpu_cache()` (`torch.cuda.empty_cache()`) between photos and between models.
+- **Concurrency budget, across all agents:** at most 2 heavy pipelines (region PDF,
+  `photo_profiles`, river carve, training) plus 1 `pytest -n` suite at a time. Start a heavy job
+  only with ≥ 6 GB RAM free (`ram_ok()`). BLAS/OMP threads = 1 in every multiprocessing or xdist
+  worker. (2 region PDFs + 2 `pytest -n 6` suites once committed 71 of 71 GB.)
+
 ## Cloud agents
 
 Cloud sessions (claude.ai/code) take their work from [docs/agents/TASKS.md](docs/agents/TASKS.md):
