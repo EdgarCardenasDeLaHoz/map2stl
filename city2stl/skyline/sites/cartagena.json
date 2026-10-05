@@ -1,9 +1,9 @@
 {
   "name": "cartagena",
-  "north": 10.48,
-  "south": 10.34,
-  "east": -75.44,
-  "west": -75.59,
+  "north": 10.4295,
+  "south": 10.3845,
+  "east": -75.5221,
+  "west": -75.5679,
   "max_plausible_height_m": 200,
   "use_satellite_footprints": false,
   "use_cross_view_scoring": true,
