@@ -1,0 +1,50 @@
+{
+ "seed_4": {
+  "dx_m": -320.0,
+  "dy_m": -200.0,
+  "pose": {
+   "offset_deg": 176.5,
+   "camera_h_m": 52.34347022966125,
+   "pitch_fix_deg": -0.5055968375808169,
+   "misfit_deg": 0.16334536153805918,
+   "n_cols": 2688
+  },
+  "waterline_at_seed_deg": 0.6191831737143285,
+  "waterline_deg": 0.16334536153805918,
+  "ground_at_waterline": 0.4176926438423109,
+  "ground": 0.4176926438423109,
+  "source": "waterline"
+ },
+ "seed_5": {
+  "dx_m": 0.0,
+  "dy_m": 0.0,
+  "pose": {
+   "offset_deg": 309.0,
+   "camera_h_m": 97.67636923159732,
+   "pitch_fix_deg": 0.35349239908115493,
+   "misfit_deg": 0.3876403822566511,
+   "n_cols": 2453
+  },
+  "waterline_at_seed_deg": 0.3876403822566511,
+  "waterline_deg": 0.3876403822566511,
+  "ground_at_waterline": 0.35414779326643614,
+  "ground": 0.35414779326643614,
+  "source": "recorded"
+ },
+ "seed_1": {
+  "dx_m": 40.0,
+  "dy_m": -50.0,
+  "pose": {
+   "offset_deg": 135.5,
+   "camera_h_m": 36.228414309999295,
+   "pitch_fix_deg": 0.3582124527737356,
+   "misfit_deg": 1.0190086160688714,
+   "n_cols": 2688
+  },
+  "waterline_at_seed_deg": 1.1430080000959797,
+  "waterline_deg": 1.1430080000959797,
+  "ground_at_waterline": 0.29970000216604936,
+  "ground": 0.3350498997644012,
+  "source": "ground"
+ }
+}

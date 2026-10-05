@@ -1,0 +1,102 @@
+key,title,route,kept,gate_ok,coverage,anchor_dev_m,cam_lat,cam_lon,heading_deg,hfov_deg,cam_sigma_m,cam_source,n_towers,score_n,score_mae_m,score_bias_m,score_pair_order,score_spearman
+p4,File:Downtown Miami skyline May 2011.jpg,labels,True,True,1.0,26.6,25.785129632336844,-80.17930106038484,215.1,30.5,4.9,solved from labels,23,19,29.1,-9.5,0.737,0.526
+p31,File:Cape Florida Lighthouse (5).jpg,recorded,False,False,0.8,,25.663962066475026,-80.16166979488581,324.1,22.9,,"recorded, refined 583 m, camera 2 m up (misfit 0.61)",0,,,,,
+p24,File:Miami - panoramio (17).jpg,recorded,False,False,0.7,73.6,25.787061555874956,-80.22915033846574,61.9,17.3,,"recorded, refined 522 m, camera 2 m up (misfit 0.38)",14,,,,,
+p32,File:Miami Beach and Port of Miami Skyline (2720195951).jpg,recorded,False,False,0.4,12.3,25.743661755300035,-80.20222255897716,327.3,21.3,,"recorded, refined 412 m, camera 30 m up (misfit 0.45)",4,,,,,
+p78,File:Miami Skyline from Rickenbacker Bridge - Panorama urbano desde el puente rickenbacker - panoramio.jpg,recorded,False,False,1.0,44.6,25.747553311174993,-80.18872744102283,352.3,17.9,,"recorded, refined 141 m, camera 30 m up (misfit 0.38)",11,7,52.5,13.9,0.706,0.286
+p21,File:Estatua de la libertad al fonfo - panoramio.jpg,recorded,True,True,0.9,5.0,25.77997540028746,-80.18404277948858,215.3,16.4,,"recorded, refined 453 m, camera 2 m up (misfit 0.21)",5,3,11.4,11.4,1.0,1.0
+p22,File:Miami - panoramio (3).jpg,recorded,False,False,1.0,28.0,25.782154244699964,-80.1776982051142,357.3,47.2,,"recorded, refined 640 m, camera 2 m up (misfit 0.35)",14,3,31.5,31.5,0.667,0.5
+p25,File:Miami - panoramio (19).jpg,recorded,True,True,1.0,62.4,25.776353311174994,-80.20305745642007,315.3,56.4,,"recorded, refined 364 m, camera 2 m up (misfit 0.25)",12,,,,,
+p71,File:Miami Port Drive - panoramio.jpg,recorded,True,True,1.0,15.3,25.779585,-80.18049788204567,221.2,70.4,,"recorded, refined 200 m, camera 30 m up (misfit 0.23)",30,26,18.2,5.0,0.9,0.88
+p79,File:Miami skyline west view 2011.jpg,recorded,False,False,1.0,46.3,25.747688910887533,-80.2241792051142,44.3,71.4,,"recorded, refined 610 m, camera 30 m up (misfit 0.67)",48,28,56.2,13.8,0.626,0.275
+p84,File:Miami Skyline (46732423931).jpg,recorded,True,True,1.0,9.8,25.782032933524974,-80.17333288204567,316.3,16.5,,"recorded, refined 361 m, camera 60 m up (misfit 0.22)",10,8,43.1,40.0,0.56,0.214
+p85,File:Miami Sunset (45863661094).jpg,recorded,False,False,1.0,16.1,25.779787155587496,-80.17832067693148,17.2,58.0,,"recorded, refined 304 m, camera 30 m up (misfit 0.71)",3,3,15.9,2.4,1.0,0.5
+p121,"File:Miami, Florida - panoramio.jpg",recorded,False,False,1.0,,25.783404755300037,-80.17922622051142,309.9,11.1,,"recorded, refined 403 m, camera 30 m up (misfit 0.86)",0,,,,,
+p123,"File:Miami, FLA (39886682813).jpg",recorded,True,True,1.0,14.5,25.783829555874956,-80.17582677948857,326.2,36.6,,"recorded, refined 502 m, camera 60 m up (misfit 0.22)",22,7,48.7,44.1,0.556,0.214
+p124,"File:Miami, FL Skyline.jpg",recorded,True,True,1.0,25.0,25.775781311174992,-80.16335788204567,253.8,63.4,,"recorded, refined 224 m, camera 2 m up (misfit 0.26)",50,41,31.8,15.8,0.787,0.653
+p135,"File:Miami, Florida (2019).jpg",recorded,True,True,1.0,13.6,25.783831555874958,-80.17582577948858,326.1,36.1,,"recorded, refined 502 m, camera 60 m up (misfit 0.22)",22,7,48.0,43.8,0.556,0.214
+p168,File:North View of Miami and Miami River from 1st St 20160709 1.jpg,recorded,True,True,0.7,25.6,25.76906635971254,-80.19935584102284,156.0,85.6,,"recorded, refined 461 m, camera 60 m up (misfit 0.09)",25,22,25.1,2.8,0.892,0.834
+p176,File:Skyline Miami 2.jpg,recorded,False,False,0.8,21.2,25.715741466762484,-80.21191222051142,348.0,28.2,,"recorded, refined 158 m, camera 2 m up (misfit 0.41)",4,,,,,
+p170,File:Porto de Miami - panoramio (2).jpg,recorded,False,False,0.8,24.8,25.786440155587496,-80.17219945642006,109.5,29.0,,"recorded, refined 354 m, camera 60 m up (misfit 0.59)",10,10,39.4,13.7,0.568,0.067
+p231,"File:Brickell from Vizcaya Metrorail Station, Miami FL 2023.jpg",recorded,True,True,0.9,9.0,25.749847,-80.21338911795432,71.6,23.9,,"recorded, refined 200 m, camera 2 m up (misfit 0.11)",17,14,9.0,6.6,0.975,0.965
+p219,File:Miami Skyline 2020.jpg,recorded,True,True,1.0,16.0,25.778946155587498,-80.18464322051142,200.4,59.0,,"recorded, refined 71 m, camera 60 m up (misfit 0.25)",18,15,16.6,9.8,0.941,0.9
+p234,File:Brickell Miami Florida Skyline 31 August 2023.jpg,recorded,False,False,1.0,61.5,25.76995,-80.193139,185.5,71.6,,"recorded, refined 0 m, camera 2 m up (misfit 1.00)",17,11,43.7,-4.9,0.531,0.055
+p264,File:Miami - panoramio (2).jpg,recorded,True,False,1.0,20.0,25.76732908911247,-80.18058223590864,262.6,54.3,,"recorded, refined 532 m, camera 2 m up (misfit 0.74)",18,18,28.1,1.3,0.768,0.692
+p268,File:Downtown Miami (8110579514).jpg,recorded,True,True,0.8,36.6,25.785144089112467,-80.19099633846574,8.5,43.6,,"recorded, refined 381 m, camera 60 m up (misfit 0.23)",4,2,26.9,13.1,0.0,
+p235,"File:Downtown Miami and Brickell, 31 December 2023.jpg",recorded,True,True,1.0,6.8,25.765731,-80.186561,325.0,71.6,,"recorded, refined 0 m, camera 2 m up (misfit 0.18)",16,15,12.0,-1.4,0.954,0.943
+p270,File:Miami florida. (23969339004).jpg,recorded,True,True,1.0,34.0,25.781202533237515,-80.221748,261.6,73.7,,"recorded, refined 150 m, camera 2 m up (misfit 0.25)",3,,,,,
+p275,File:Virgin Atlantic Cruise Ship and Cruise Terminal Miami Florida June 2023 -2.jpg,recorded,True,True,0.3,47.8,25.786245244699963,-80.17331520511419,338.4,32.7,,"recorded, refined 640 m, camera 60 m up (misfit 0.06)",3,2,45.6,-45.6,,
+p285,File:Miami Skyline at Sunrise 9 Apr 2025 from arriving cruise ship.jpg,recorded,False,False,1.0,19.0,25.77620931117499,-80.17103101539723,121.1,30.3,,"recorded, refined 461 m, camera 2 m up (misfit 0.61)",7,7,26.3,11.5,0.571,0.143
+p276,File:Virgin Atlantic Cruise Ship and Cruise Terminal Miami Florida June 2023 -3.jpg,recorded,False,False,1.0,22.0,25.77951091088753,-80.18029811795432,233.1,69.9,,"recorded, refined 403 m, camera 60 m up (misfit 0.36)",34,28,26.8,4.1,0.8,0.723
+p293,File:Port blvd - panoramio.jpg,recorded,False,False,0.9,3.6,25.782585155587498,-80.1879307948858,197.2,47.2,,"recorded, refined 502 m, camera 30 m up (misfit 0.52)",3,2,21.3,5.5,1.0,
+p294,"File:Майами, Флорида - panoramio (5).jpg",recorded,True,False,1.0,11.5,25.76662305793748,-80.16363089897716,282.6,26.2,,"recorded, refined 269 m, camera 30 m up (misfit 0.39)",32,25,12.4,6.2,0.896,0.799
+p9,File:MIami Beach.jpg,search,False,False,0.0,,,,,,,,0,,,,,
+p14,File:DowntownMiami banner.jpg,linked,False,False,0.9,,25.785880445874955,-80.17623076357994,5.8,42.3,,"linked, refined 610 m, camera 60 m up (misfit 0.36)",0,,,,,
+p251,File:Miami downtown by Tom Schaefer - Miamitom.jpg,linked,False,False,1.0,24.2,25.777102844412504,-80.18393522051142,227.3,55.3,,"linked, refined 71 m, camera 60 m up (misfit 0.35)",15,11,35.2,3.8,0.889,0.7
+p59,File:Miami skyline summer 2011.JPG,linked,True,True,0.9,8.8,25.779582777937478,-80.19213945642007,103.2,68.3,,"linked, refined 430 m, camera 30 m up (misfit 0.21)",3,2,15.9,11.4,1.0,
+p15,File:Downtown Miami photo (version 2) Don Ramey Logan.jpg,search,True,False,1.0,14.2,25.745706358052338,-80.19125590076702,7.8,31.8,,"skyline search (misfit 0.16, margin 0.01)",21,19,27.2,8.0,0.874,0.833
+p2,File:Central Downtown Miami 20090513.jpg,search,False,False,1.0,13.8,25.80454574001425,-80.21370097775316,194.2,23.8,,"skyline search (misfit 0.33, margin 0.01)",11,,,,,
+p3,File:Downtown Miami summer shower 20100707.jpg,search,False,False,0.9,44.2,25.78163880505198,-80.23415093678497,120.9,69.6,,"skyline search (misfit 0.16, margin 0.01)",41,21,95.2,61.6,0.63,0.37
+p0,File:Downtown Miami from north 20080408.jpg,search,False,False,1.0,49.5,25.774452315652052,-80.13489381855739,150.1,38.9,,"skyline search (misfit 0.12, margin 0.01)",3,3,36.0,5.0,1.0,1.0
+p20,"File:Dinner Key Marina, Coconut Grove, Miami, Florida.jpg",search,False,False,0.5,29.7,25.777596404764523,-80.2361460547393,64.5,70.1,,"skyline search (misfit 0.21, margin 0.09)",20,7,65.8,7.0,0.909,0.321
+p36,File:Camino hacia el Downtown-Miami..jpg,search,False,False,0.5,22.0,25.810384762651694,-80.18078153150682,217.2,65.1,,"skyline search (misfit 0.15, margin 0.04)",10,,,,,
+p37,File:Florida view.jpg,search,False,False,0.6,3.5,25.775350626827045,-80.19774003411857,350.8,60.7,,"skyline search (misfit 0.06, margin 0.00)",5,,,,,
+p38,File:Miami (49167870223).jpg,search,False,False,1.0,32.4,25.799605028551802,-80.17978397252966,196.0,16.1,,"skyline search (misfit 0.30, margin 0.02)",20,17,33.1,-3.7,0.835,0.647
+p44,File:Downtown Coconut Grove.jpg,search,False,False,0.6,,25.710223066640193,-80.26407770609983,0.0,73.6,,"skyline search (misfit 0.38, margin 0.02)",0,,,,,
+p50,File:Miami skyline 20080328.jpg,search,False,False,1.0,25.8,25.732680846014972,-80.23016070087633,45.5,24.3,,"skyline search (misfit 0.55, margin 0.03)",10,7,31.3,16.3,0.684,0.643
+p54,File:Miami skyline northern Brickell 20100206.jpg,search,False,False,1.0,48.8,25.742113113352374,-80.14536818781758,16.5,61.0,,"skyline search (misfit 0.43, margin 0.02)",22,22,49.6,5.3,0.677,0.434
+p60,File:Miami from the bridge.JPG,search,False,False,1.0,29.4,25.80768982912672,-80.21419975724174,149.6,62.1,,"skyline search (misfit 0.41, margin 0.05)",42,25,56.5,22.1,0.705,0.449
+p61,File:Miami Skyline-02.jpg,search,False,False,0.9,7.0,25.81083391823919,-80.19823881360715,248.1,30.8,,"skyline search (misfit 0.19, margin 0.00)",5,,,,,
+p80,File:Miami with cranes.jpg,search,False,False,0.7,9.1,25.80903729588921,-80.18876200332411,95.8,48.0,,"skyline search (misfit 0.15, margin 0.02)",3,,,,,
+p93,File:Miami skylines 343.jpg,search,False,False,1.0,16.0,25.756036936564737,-80.18227786997257,254.3,19.2,,"skyline search (misfit 0.31, margin 0.03)",10,6,29.4,19.0,0.909,0.886
+p92,File:Miami skylines 22.jpg,search,False,False,1.0,39.9,25.778494715939512,-80.16232669042932,232.2,19.6,,"skyline search (misfit 0.20, margin 0.03)",18,15,48.3,0.1,0.649,0.409
+p98,File:Miamisunset2004.jpg,search,False,False,0.5,15.3,25.824308585864053,-80.21769121366181,212.3,53.2,,"skyline search (misfit 0.39, margin 0.09)",7,,,,,
+p94,File:Miami skylines 3.jpg,search,False,False,1.0,17.5,25.840927342601386,-80.16182791094074,205.0,15.1,,"skyline search (misfit 0.39, margin 0.06)",5,,,,,
+p107,File:Miamiskyline20070811.jpg,search,False,False,1.0,35.7,25.821164496751585,-80.20771562389018,200.1,37.6,,"skyline search (misfit 0.55, margin 0.01)",18,,,,,
+p108,File:Miamitemplate.jpg,search,False,False,1.0,24.8,25.73268084601497,-80.23016070087633,45.5,25.3,,"skyline search (misfit 0.55, margin 0.02)",10,7,32.0,15.9,0.684,0.643
+p109,File:Midtownmiami20080104.jpg,search,False,False,1.0,,25.73178253483998,-80.2022290495158,66.7,25.3,,"skyline search (misfit 0.45, margin 0.01)",0,,,,,
+p112,File:Miamicruiseships20071208.jpg,search,False,False,1.0,23.0,25.735375779539943,-80.22916314189916,54.8,23.0,,"skyline search (misfit 0.36, margin 0.09)",18,9,32.8,13.9,0.812,0.667
+p120,File:Miami-Dade Skyline.jpeg,search,False,False,0.9,31.9,25.796011783851835,-80.22467412650194,134.0,84.2,,"skyline search (misfit 0.40, margin 0.01)",47,21,64.0,-0.2,0.607,0.177
+p126,"File:Miami, Florida. - 48977952042.jpg",search,False,False,1.0,37.5,25.76097764802719,-80.22267900854762,130.2,63.5,,"skyline search (misfit 0.51, margin 0.02)",20,10,52.5,7.1,0.475,0.006
+p146,File:Mouth of Miami River 20100211.jpg,search,False,False,0.9,,,,,,,,0,,,,,
+p150,File:One Biscayne Plaza.jpg,search,False,False,0.0,,,,,,,,0,,,,,
+p154,File:SbI95hovmiami.JPG,search,False,False,0.0,,,,,,,,0,,,,,
+p130,File:Miamiomni2007.jpg,search,False,False,1.0,23.3,25.79196938356438,-80.2151973162189,143.5,15.9,,"skyline search (misfit 0.34, margin 0.03)",21,17,45.4,11.3,0.786,0.583
+p137,"File:Miami, Florida, Skyline.jpg",search,False,False,0.7,,25.728189290140016,-80.1967424751414,327.0,9.5,,"skyline search (misfit 0.29, margin 0.01)",0,,,,,
+p136,"File:Miami, Florida skyline.jpg",search,True,False,1.0,17.9,25.759181025677204,-80.17280105968953,309.5,22.5,,"skyline search (misfit 0.27, margin 0.01)",24,22,20.5,5.1,0.868,0.779
+p138,"File:Miami, Florida, Skyline 4.jpg",search,True,True,1.0,6.2,25.749299602752302,-80.18327542894973,351.2,21.9,,"skyline search (misfit 0.10, margin 0.11)",21,20,6.4,1.3,0.987,0.959
+p139,"File:Miami, Florida, Skyline 2.jpg",search,False,False,1.0,28.0,25.787477827689422,-80.17778885457534,270.5,21.2,,"skyline search (misfit 0.20, margin 0.04)",15,4,30.7,16.4,1.0,1.0
+p142,File:Downtown Miami night north 20080514.jpg,search,False,False,1.0,47.5,25.774452315652052,-80.13489381855739,150.9,36.1,,"skyline search (misfit 0.11, margin 0.01)",3,3,35.0,4.8,1.0,1.0
+p143,File:Port Boulevard.jpg,search,True,False,0.9,15.2,25.779842182702,-80.1239206698086,286.5,38.3,,"skyline search (misfit 0.46, margin 0.01)",14,14,24.5,3.1,0.676,0.371
+p157,File:Operatower.jpg,search,False,False,1.0,,25.831045919676487,-80.21170585979884,117.8,6.0,,"skyline search (misfit 0.32, margin 0.02)",0,,,,,
+p166,"File:The sunset from Key Biscayne off the causeway with the shore and water in the foreground with coconut trees and the Miami, FL skyline and storm clouds to the west lit up by the setting sun 2014-04-25.jpg",search,False,False,0.1,,25.716062089277635,-80.2386399521822,32.5,80.7,,"skyline search (misfit 0.09, margin 0.01)",0,,,,,
+p173,File:Panoramic view of Miami district.jpg,search,False,False,1.0,32.9,25.761426803614686,-80.17280105968953,303.3,27.6,,"skyline search (misfit 0.36, margin 0.07)",24,22,36.1,-4.9,0.601,0.181
+p174,File:The Miami Herald - Former Site in Downtown Miami 03.jpg,search,False,False,0.6,27.3,25.75468946980225,-80.21070830082168,185.2,60.0,,"skyline search (misfit 0.28, margin 0.04)",5,,,,,
+p184,File:Sunrays on Miami (38848867460).jpg,search,False,False,0.5,2.4,25.724146889852555,-80.2231777880362,2.4,77.0,,"skyline search (misfit 0.10, margin 0.01)",6,2,3.7,3.7,,
+p185,File:Storm over Miami (28636432288).jpg,search,False,False,0.6,,25.79196938356438,-80.20372538798154,340.6,46.8,,"skyline search (misfit 0.19, margin 0.08)",0,,,,,
+p191,File:Skyline Miami.jpg,search,True,False,1.0,14.5,25.808588140301712,-80.228165582922,141.3,49.0,,"skyline search (misfit 0.46, margin 0.03)",21,12,28.7,8.3,0.755,0.524
+p192,File:Miami skyline 20080517.jpg,search,False,False,1.0,15.7,25.77265569330207,-80.13888405446603,32.6,53.7,,"skyline search (misfit 0.48, margin 0.00)",11,10,35.7,12.9,0.6,0.139
+p193,File:American Airlines Arena backside.jpg,search,False,False,1.0,10.2,25.797359250614324,-80.20023393156147,26.4,10.4,,"skyline search (misfit 0.11, margin 0.03)",3,,,,,
+p194,File:Biscayne Bay south.jpg,search,False,False,1.0,24.3,25.76367258155216,-80.21818999315039,356.6,57.0,,"skyline search (misfit 0.44, margin 0.04)",13,,,,,
+p197,File:Central Downtown Miami 200811.jpg,search,False,False,1.0,4.1,25.794215161501853,-80.22367656752478,147.1,25.3,,"skyline search (misfit 0.36, margin 0.02)",11,,,,,
+p199,File:Miami Night Skyline from across the Biscayne Bay-Downtown-March 2011.JPG,search,False,False,1.0,24.0,25.80185080648928,-80.17679129559818,198.6,23.4,,"skyline search (misfit 0.29, margin 0.02)",27,22,29.0,4.4,0.763,0.624
+p203,File:Miami Palmed Skyline.jpg,search,False,False,1.0,15.8,25.758282714502215,-80.1787864135525,348.8,15.8,,"skyline search (misfit 0.16, margin 0.08)",11,9,42.2,17.6,0.588,0.133
+p244,File:Brickell House site (2).jpg,search,False,False,0.0,,,,,,,,0,,,,,
+p236,File:Miami - Skyline from Harbor.jpg,search,False,False,1.0,33.5,25.78074049387699,-80.20721684440161,121.4,83.1,,"skyline search (misfit 0.25, margin 0.04)",39,23,65.4,2.5,0.534,0.11
+p240,File:Brickell Key 20100206.jpg,search,False,False,0.9,8.3,25.790172761214397,-80.20372538798154,225.6,35.7,,"skyline search (misfit 0.41, margin 0.02)",7,,,,,
+p239,File:Brickell Avenue 20100203.jpg,search,False,False,0.1,,25.803647428839263,-80.1917546802556,110.8,58.6,,"skyline search (misfit 0.05, margin 0.01)",0,,,,,
+p241,File:Brickell Key from north 20100211.jpg,search,False,False,1.0,26.3,25.765020048314646,-80.19923637258431,71.1,47.6,,"skyline search (misfit 0.19, margin 0.02)",11,7,54.7,24.1,0.6,0.321
+p242,File:Cavalia in Miami 20100211.jpg,search,False,False,1.0,52.8,25.82071534116409,-80.18078153150682,201.2,49.4,,"skyline search (misfit 0.37, margin 0.01)",22,7,64.6,-39.9,0.667,0.357
+p243,File:Miami from North Bay Village 20100813.jpg,search,False,False,1.0,,25.83688494231393,-80.19873759309573,138.3,12.8,,"skyline search (misfit 0.38, margin 0.04)",0,,,,,
+p252,File:Brickell skyline 2012.jpg,search,False,False,1.0,16.2,25.775350626827045,-80.12791090571724,356.3,22.9,,"skyline search (misfit 0.24, margin 0.08)",9,7,33.9,27.0,0.462,-0.214
+p272,File:Miami desde la tyerraza de jhonatan 2018.jpg,search,False,False,0.0,,,,,,,,0,,,,,
+p255,File:Downtown Miami wide photo Don Ramey Logan.jpg,search,True,False,1.0,14.2,25.745706358052338,-80.19125590076702,7.8,31.8,,"skyline search (misfit 0.16, margin 0.01)",21,19,27.2,8.0,0.874,0.833
+p256,File:Miami Florida by Don Ramey Logan.jpg,search,False,False,1.0,62.6,25.807240673539226,-80.23215581883065,132.6,62.9,,"skyline search (misfit 0.55, margin 0.05)",34,17,105.1,-9.7,0.437,-0.118
+p261,File:Common Downtown shot 2011 all tagged including OBP.jpg,search,True,False,1.0,19.3,25.785232049751947,-80.17778885457534,218.5,29.9,,"skyline search (misfit 0.34, margin 0.03)",24,20,21.5,4.0,0.897,0.867
+p262,File:Miami aerial pano.jpg,search,False,False,0.9,34.7,25.729536756902505,-80.22517290599052,46.4,84.2,,"skyline search (misfit 0.41, margin 0.00)",11,,,,,
+p269,File:Brickell skyline 2012 from Rickenbacker.jpg,search,True,False,1.0,12.7,25.760528492439693,-80.12541700827434,322.8,16.2,,"skyline search (misfit 0.14, margin 0.01)",13,13,35.2,-10.3,0.667,0.538
+p274,File:Miami (49471683943).jpg,search,True,False,1.0,14.8,25.779393027114505,-80.18377420843831,210.3,70.6,,"skyline search (misfit 0.29, margin 0.07)",26,23,23.6,7.4,0.79,0.557
+p281,File:Miami - City Skyline from Biscayne Bay 1.jpg,search,False,False,0.5,16.9,25.758282714502215,-80.19574491616424,326.5,30.9,,"skyline search (misfit 0.41, margin 0.03)",9,,,,,
+p280,"File:PortMiami main channel with city skyline in the background (March 11, 2024).jpg",search,False,False,1.0,34.0,25.75558778097724,-80.14337306986326,320.4,73.4,,"skyline search (misfit 0.44, margin 0.05)",22,19,51.5,30.7,0.833,0.796
+p282,File:Miami - City Skyline from Biscayne Bay 2.jpg,search,False,False,0.8,13.7,25.806342362364234,-80.1917546802556,273.2,19.4,,"skyline search (misfit 0.42, margin 0.04)",4,,,,,
+p283,File:Miami - City Skyline from Biscayne Bay 3.jpg,search,False,False,0.8,6.8,25.80679151795173,-80.23514849576213,140.3,12.8,,"skyline search (misfit 0.30, margin 0.01)",5,,,,,

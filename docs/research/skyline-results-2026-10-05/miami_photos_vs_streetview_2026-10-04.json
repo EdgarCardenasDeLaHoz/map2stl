@@ -1,0 +1,172 @@
+{
+ "stamp": "2026-10-04_1531",
+ "git": "2703a0f",
+ "env": {
+  "SKYLINE_CV_SEGFORMER_SIZE": "b1"
+ },
+ "truth_rule": {
+  "percentile": 95.0,
+  "erode_m": 1.0,
+  "agree_abs_m": 3.0,
+  "agree_rel": 0.1
+ },
+ "results": [
+  {
+   "region": "miami",
+   "report": "C:\\Users\\eac84\\worktrees\\map2stl-skybench\\city2stl\\skyline\\runs\\benchmark\\2026-10-04_1531\\miami_skyline_report\\heights.json",
+   "survey": "usgs_3dep_ept",
+   "n_buildings": 528,
+   "status": {
+    "confirmed": 190,
+    "disputed": 38,
+    "tiles_only": 295,
+    "unmeasured": 4,
+    "survey_only": 1
+   },
+   "overall": {
+    "n": 190,
+    "mae_m": 96.75,
+    "median_ae_m": 86.53,
+    "bias_m": 77.58,
+    "within_15pct": 0.058,
+    "within_25pct": 0.079
+   },
+   "bands": {
+    "0-30m": {
+     "n": 139,
+     "mae_m": 110.36,
+     "median_ae_m": 106.85,
+     "bias_m": 107.97,
+     "within_15pct": 0.029,
+     "within_25pct": 0.029
+    },
+    "30-60m": {
+     "n": 21,
+     "mae_m": 60.96,
+     "median_ae_m": 32.51,
+     "bias_m": 30.8,
+     "within_15pct": 0.048,
+     "within_25pct": 0.095
+    },
+    "60-100m": {
+     "n": 12,
+     "mae_m": 44.39,
+     "median_ae_m": 30.55,
+     "bias_m": -1.18,
+     "within_15pct": 0.25,
+     "within_25pct": 0.25
+    },
+    "100+m": {
+     "n": 18,
+     "mae_m": 68.36,
+     "median_ae_m": 52.68,
+     "bias_m": -50.07,
+     "within_15pct": 0.167,
+     "within_25pct": 0.333
+    }
+   },
+   "views": {
+    "1": {
+     "n": 120,
+     "mae_m": 95.81,
+     "median_ae_m": 86.53,
+     "bias_m": 70.96,
+     "within_15pct": 0.058,
+     "within_25pct": 0.083
+    },
+    "2-3": {
+     "n": 65,
+     "mae_m": 103.04,
+     "median_ae_m": 87.61,
+     "bias_m": 92.87,
+     "within_15pct": 0.046,
+     "within_25pct": 0.062
+    },
+    "4+": {
+     "n": 5,
+     "mae_m": 37.54,
+     "median_ae_m": 21.45,
+     "bias_m": 37.54,
+     "within_15pct": 0.2,
+     "within_25pct": 0.2
+    }
+   },
+   "seeds": {
+    "1": {
+     "n": 177,
+     "mae_m": 97.4,
+     "median_ae_m": 87.14,
+     "bias_m": 77.07,
+     "within_15pct": 0.056,
+     "within_25pct": 0.079
+    },
+    "2+": {
+     "n": 13,
+     "mae_m": 87.92,
+     "median_ae_m": 64.99,
+     "bias_m": 84.46,
+     "within_15pct": 0.077,
+     "within_25pct": 0.077
+    }
+   },
+   "osm_tag": {
+    "tagged": {
+     "n": 28,
+     "mae_m": 28.41,
+     "median_ae_m": 29.86,
+     "bias_m": -21.18,
+     "within_15pct": 0.143,
+     "within_25pct": 0.286
+    },
+    "untagged": {
+     "n": 162,
+     "mae_m": 108.57,
+     "median_ae_m": 106.25,
+     "bias_m": 94.65,
+     "within_15pct": 0.043,
+     "within_25pct": 0.043
+    }
+   },
+   "relative": {
+    "city": {
+     "n": 190,
+     "pairs": 14704,
+     "pair_order": 0.414,
+     "spearman": -0.21
+    },
+    "per_view": {
+     "views": 19,
+     "pairs": 1781,
+     "pair_order": 0.429,
+     "median_spearman": -0.139
+    }
+   },
+   "osm_tags": {
+    "tag_vs_truth": {
+     "n": 28,
+     "mae_m": 7.84,
+     "median_ae_m": 6.75,
+     "bias_m": -3.72,
+     "within_15pct": 0.643,
+     "within_25pct": 0.786
+    },
+    "run_vs_tag": {
+     "n": 28,
+     "mae_m": 23.9,
+     "median_ae_m": 21.64,
+     "bias_m": -17.46,
+     "within_15pct": 0.179,
+     "within_25pct": 0.25
+    },
+    "run_vs_truth_same_buildings": {
+     "n": 28,
+     "mae_m": 28.41,
+     "median_ae_m": 29.86,
+     "bias_m": -21.18,
+     "within_15pct": 0.143,
+     "within_25pct": 0.286
+    }
+   }
+  }
+ ]
+}

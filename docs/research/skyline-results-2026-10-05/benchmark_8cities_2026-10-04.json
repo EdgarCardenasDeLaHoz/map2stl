@@ -1,0 +1,1194 @@
+{
+ "stamp": "2026-10-04_1527",
+ "git": "112f80a",
+ "env": {},
+ "truth_rule": {
+  "percentile": 95.0,
+  "erode_m": 1.0,
+  "agree_abs_m": 3.0,
+  "agree_rel": 0.1
+ },
+ "results": [
+  {
+   "region": "miami",
+   "report": "C:\\Users\\eac84\\worktrees\\map2stl-skybench\\city2stl\\skyline\\runs\\benchmark\\2026-10-03_1952\\miami_skyline_report\\heights.json",
+   "survey": "usgs_3dep_ept",
+   "n_buildings": 463,
+   "status": {
+    "confirmed": 192,
+    "tiles_only": 230,
+    "disputed": 37,
+    "unmeasured": 3,
+    "survey_only": 1
+   },
+   "overall": {
+    "n": 192,
+    "mae_m": 102.35,
+    "median_ae_m": 90.23,
+    "bias_m": 86.61,
+    "within_15pct": 0.057,
+    "within_25pct": 0.073
+   },
+   "bands": {
+    "0-30m": {
+     "n": 141,
+     "mae_m": 117.75,
+     "median_ae_m": 114.0,
+     "bias_m": 115.4,
+     "within_15pct": 0.021,
+     "within_25pct": 0.021
+    },
+    "30-60m": {
+     "n": 21,
+     "mae_m": 61.22,
+     "median_ae_m": 32.51,
+     "bias_m": 36.31,
+     "within_15pct": 0.095,
+     "within_25pct": 0.095
+    },
+    "60-100m": {
+     "n": 12,
+     "mae_m": 59.4,
+     "median_ae_m": 35.85,
+     "bias_m": 12.18,
+     "within_15pct": 0.167,
+     "within_25pct": 0.25
+    },
+    "100+m": {
+     "n": 18,
+     "mae_m": 58.36,
+     "median_ae_m": 45.68,
+     "bias_m": -30.62,
+     "within_15pct": 0.222,
+     "within_25pct": 0.333
+    }
+   },
+   "views": {
+    "1": {
+     "n": 115,
+     "mae_m": 103.08,
+     "median_ae_m": 90.79,
+     "bias_m": 82.54,
+     "within_15pct": 0.052,
+     "within_25pct": 0.07
+    },
+    "2-3": {
+     "n": 68,
+     "mae_m": 109.32,
+     "median_ae_m": 105.1,
+     "bias_m": 101.35,
+     "within_15pct": 0.059,
+     "within_25pct": 0.074
+    },
+    "4+": {
+     "n": 9,
+     "mae_m": 40.46,
+     "median_ae_m": 37.46,
+     "bias_m": 27.19,
+     "within_15pct": 0.111,
+     "within_25pct": 0.111
+    }
+   },
+   "seeds": {
+    "1": {
+     "n": 165,
+     "mae_m": 103.57,
+     "median_ae_m": 90.79,
+     "bias_m": 86.58,
+     "within_15pct": 0.055,
+     "within_25pct": 0.073
+    },
+    "2+": {
+     "n": 27,
+     "mae_m": 94.89,
+     "median_ae_m": 64.99,
+     "bias_m": 86.78,
+     "within_15pct": 0.074,
+     "within_25pct": 0.074
+    }
+   },
+   "osm_tag": {
+    "tagged": {
+     "n": 29,
+     "mae_m": 28.54,
+     "median_ae_m": 29.87,
+     "bias_m": -15.34,
+     "within_15pct": 0.172,
+     "within_25pct": 0.276
+    },
+    "untagged": {
+     "n": 163,
+     "mae_m": 115.48,
+     "median_ae_m": 110.6,
+     "bias_m": 104.74,
+     "within_15pct": 0.037,
+     "within_25pct": 0.037
+    }
+   },
+   "relative": {
+    "city": {
+     "n": 192,
+     "pairs": 14968,
+     "pair_order": 0.416,
+     "spearman": -0.202
+    },
+    "per_view": {
+     "views": 22,
+     "pairs": 1791,
+     "pair_order": 0.438,
+     "median_spearman": -0.086
+    }
+   },
+   "osm_tags": {
+    "tag_vs_truth": {
+     "n": 29,
+     "mae_m": 7.72,
+     "median_ae_m": 7.11,
+     "bias_m": -3.42,
+     "within_15pct": 0.69,
+     "within_25pct": 0.828
+    },
+    "run_vs_tag": {
+     "n": 29,
+     "mae_m": 22.58,
+     "median_ae_m": 20.27,
+     "bias_m": -11.92,
+     "within_15pct": 0.207,
+     "within_25pct": 0.31
+    },
+    "run_vs_truth_same_buildings": {
+     "n": 29,
+     "mae_m": 28.54,
+     "median_ae_m": 29.87,
+     "bias_m": -15.34,
+     "within_15pct": 0.172,
+     "within_25pct": 0.276
+    }
+   }
+  },
+  {
+   "region": "chicago",
+   "report": "C:\\Users\\eac84\\worktrees\\map2stl-skybench\\city2stl\\skyline\\runs\\benchmark\\2026-10-03_1952\\chicago_skyline_report\\heights.json",
+   "survey": "usgs_3dep_ept",
+   "n_buildings": 348,
+   "status": {
+    "confirmed": 265,
+    "disputed": 74,
+    "unmeasured": 8,
+    "tiles_only": 1
+   },
+   "overall": {
+    "n": 265,
+    "mae_m": 50.52,
+    "median_ae_m": 30.14,
+    "bias_m": 38.77,
+    "within_15pct": 0.083,
+    "within_25pct": 0.177
+   },
+   "bands": {
+    "0-30m": {
+     "n": 160,
+     "mae_m": 57.96,
+     "median_ae_m": 31.05,
+     "bias_m": 57.01,
+     "within_15pct": 0.019,
+     "within_25pct": 0.05
+    },
+    "30-60m": {
+     "n": 31,
+     "mae_m": 47.4,
+     "median_ae_m": 24.43,
+     "bias_m": 43.08,
+     "within_15pct": 0.065,
+     "within_25pct": 0.097
+    },
+    "60-100m": {
+     "n": 44,
+     "mae_m": 34.58,
+     "median_ae_m": 23.28,
+     "bias_m": 6.28,
+     "within_15pct": 0.273,
+     "within_25pct": 0.409
+    },
+    "100+m": {
+     "n": 30,
+     "mae_m": 37.43,
+     "median_ae_m": 31.7,
+     "bias_m": -15.31,
+     "within_15pct": 0.167,
+     "within_25pct": 0.6
+    }
+   },
+   "views": {
+    "1": {
+     "n": 118,
+     "mae_m": 59.82,
+     "median_ae_m": 30.6,
+     "bias_m": 46.34,
+     "within_15pct": 0.076,
+     "within_25pct": 0.169
+    },
+    "2-3": {
+     "n": 139,
+     "mae_m": 42.98,
+     "median_ae_m": 29.0,
+     "bias_m": 32.38,
+     "within_15pct": 0.086,
+     "within_25pct": 0.173
+    },
+    "4+": {
+     "n": 8,
+     "mae_m": 44.41,
+     "median_ae_m": 21.11,
+     "bias_m": 38.12,
+     "within_15pct": 0.125,
+     "within_25pct": 0.375
+    }
+   },
+   "seeds": {
+    "1": {
+     "n": 261,
+     "mae_m": 50.32,
+     "median_ae_m": 30.14,
+     "bias_m": 38.39,
+     "within_15pct": 0.084,
+     "within_25pct": 0.172
+    },
+    "2+": {
+     "n": 4,
+     "mae_m": 63.67,
+     "median_ae_m": 48.23,
+     "bias_m": 63.67,
+     "within_15pct": 0.0,
+     "within_25pct": 0.5
+    }
+   },
+   "osm_tag": {
+    "tagged": {
+     "n": 135,
+     "mae_m": 21.86,
+     "median_ae_m": 19.52,
+     "bias_m": 3.15,
+     "within_15pct": 0.141,
+     "within_25pct": 0.289
+    },
+    "untagged": {
+     "n": 130,
+     "mae_m": 80.29,
+     "median_ae_m": 55.16,
+     "bias_m": 75.76,
+     "within_15pct": 0.023,
+     "within_25pct": 0.062
+    }
+   },
+   "relative": {
+    "city": {
+     "n": 265,
+     "pairs": 31138,
+     "pair_order": 0.596,
+     "spearman": 0.228
+    },
+    "per_view": {
+     "views": 24,
+     "pairs": 4336,
+     "pair_order": 0.664,
+     "median_spearman": 0.37
+    }
+   },
+   "osm_tags": {
+    "tag_vs_truth": {
+     "n": 135,
+     "mae_m": 8.85,
+     "median_ae_m": 4.07,
+     "bias_m": -2.75,
+     "within_15pct": 0.659,
+     "within_25pct": 0.837
+    },
+    "run_vs_tag": {
+     "n": 135,
+     "mae_m": 21.48,
+     "median_ae_m": 20.21,
+     "bias_m": 5.9,
+     "within_15pct": 0.126,
+     "within_25pct": 0.281
+    },
+    "run_vs_truth_same_buildings": {
+     "n": 135,
+     "mae_m": 21.86,
+     "median_ae_m": 19.52,
+     "bias_m": 3.15,
+     "within_15pct": 0.141,
+     "within_25pct": 0.289
+    }
+   }
+  },
+  {
+   "region": "seattle",
+   "report": "C:\\Users\\eac84\\worktrees\\map2stl-skybench\\city2stl\\skyline\\runs\\benchmark\\2026-10-03_1952\\seattle_skyline_report\\heights.json",
+   "survey": "usgs_3dep_ept",
+   "n_buildings": 346,
+   "status": {
+    "confirmed": 156,
+    "disputed": 185,
+    "unmeasured": 5
+   },
+   "overall": {
+    "n": 156,
+    "mae_m": 62.2,
+    "median_ae_m": 39.41,
+    "bias_m": 56.07,
+    "within_15pct": 0.09,
+    "within_25pct": 0.154
+   },
+   "bands": {
+    "0-30m": {
+     "n": 117,
+     "mae_m": 75.16,
+     "median_ae_m": 61.04,
+     "bias_m": 74.21,
+     "within_15pct": 0.068,
+     "within_25pct": 0.094
+    },
+    "30-60m": {
+     "n": 23,
+     "mae_m": 18.52,
+     "median_ae_m": 12.81,
+     "bias_m": 6.62,
+     "within_15pct": 0.087,
+     "within_25pct": 0.348
+    },
+    "60-100m": {
+     "n": 16,
+     "mae_m": 30.17,
+     "median_ae_m": 31.77,
+     "bias_m": -5.54,
+     "within_15pct": 0.25,
+     "within_25pct": 0.312
+    },
+    "100+m": {
+     "n": 0
+    }
+   },
+   "views": {
+    "1": {
+     "n": 68,
+     "mae_m": 72.52,
+     "median_ae_m": 49.61,
+     "bias_m": 68.35,
+     "within_15pct": 0.059,
+     "within_25pct": 0.103
+    },
+    "2-3": {
+     "n": 81,
+     "mae_m": 57.09,
+     "median_ae_m": 34.94,
+     "bias_m": 49.59,
+     "within_15pct": 0.111,
+     "within_25pct": 0.198
+    },
+    "4+": {
+     "n": 7,
+     "mae_m": 21.0,
+     "median_ae_m": 16.29,
+     "bias_m": 11.67,
+     "within_15pct": 0.143,
+     "within_25pct": 0.143
+    }
+   },
+   "seeds": {
+    "1": {
+     "n": 156,
+     "mae_m": 62.2,
+     "median_ae_m": 39.41,
+     "bias_m": 56.07,
+     "within_15pct": 0.09,
+     "within_25pct": 0.154
+    },
+    "2+": {
+     "n": 0
+    }
+   },
+   "osm_tag": {
+    "tagged": {
+     "n": 41,
+     "mae_m": 18.04,
+     "median_ae_m": 16.72,
+     "bias_m": 9.8,
+     "within_15pct": 0.171,
+     "within_25pct": 0.317
+    },
+    "untagged": {
+     "n": 115,
+     "mae_m": 77.94,
+     "median_ae_m": 68.04,
+     "bias_m": 72.56,
+     "within_15pct": 0.061,
+     "within_25pct": 0.096
+    }
+   },
+   "relative": {
+    "city": {
+     "n": 156,
+     "pairs": 10165,
+     "pair_order": 0.372,
+     "spearman": -0.346
+    },
+    "per_view": {
+     "views": 15,
+     "pairs": 2412,
+     "pair_order": 0.478,
+     "median_spearman": -0.089
+    }
+   },
+   "osm_tags": {
+    "tag_vs_truth": {
+     "n": 41,
+     "mae_m": 10.18,
+     "median_ae_m": 7.12,
+     "bias_m": -4.12,
+     "within_15pct": 0.293,
+     "within_25pct": 0.61
+    },
+    "run_vs_tag": {
+     "n": 41,
+     "mae_m": 19.69,
+     "median_ae_m": 20.27,
+     "bias_m": 13.91,
+     "within_15pct": 0.195,
+     "within_25pct": 0.268
+    },
+    "run_vs_truth_same_buildings": {
+     "n": 41,
+     "mae_m": 18.04,
+     "median_ae_m": 16.72,
+     "bias_m": 9.8,
+     "within_15pct": 0.171,
+     "within_25pct": 0.317
+    }
+   }
+  },
+  {
+   "region": "boston",
+   "report": "C:\\Users\\eac84\\worktrees\\map2stl-skybench\\city2stl\\skyline\\runs\\benchmark\\2026-10-03_1952\\boston_skyline_report\\heights.json",
+   "survey": "usgs_3dep_ept",
+   "n_buildings": 707,
+   "status": {
+    "confirmed": 587,
+    "unmeasured": 12,
+    "disputed": 108
+   },
+   "overall": {
+    "n": 587,
+    "mae_m": 47.07,
+    "median_ae_m": 24.95,
+    "bias_m": 40.23,
+    "within_15pct": 0.104,
+    "within_25pct": 0.187
+   },
+   "bands": {
+    "0-30m": {
+     "n": 432,
+     "mae_m": 53.36,
+     "median_ae_m": 28.38,
+     "bias_m": 50.69,
+     "within_15pct": 0.069,
+     "within_25pct": 0.123
+    },
+    "30-60m": {
+     "n": 102,
+     "mae_m": 30.79,
+     "median_ae_m": 21.26,
+     "bias_m": 18.33,
+     "within_15pct": 0.147,
+     "within_25pct": 0.304
+    },
+    "60-100m": {
+     "n": 43,
+     "mae_m": 20.55,
+     "median_ae_m": 15.61,
+     "bias_m": 3.55,
+     "within_15pct": 0.372,
+     "within_25pct": 0.605
+    },
+    "100+m": {
+     "n": 10,
+     "mae_m": 55.82,
+     "median_ae_m": 53.94,
+     "bias_m": -30.84,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    }
+   },
+   "views": {
+    "1": {
+     "n": 252,
+     "mae_m": 56.95,
+     "median_ae_m": 29.06,
+     "bias_m": 50.19,
+     "within_15pct": 0.083,
+     "within_25pct": 0.127
+    },
+    "2-3": {
+     "n": 262,
+     "mae_m": 42.93,
+     "median_ae_m": 23.36,
+     "bias_m": 36.38,
+     "within_15pct": 0.107,
+     "within_25pct": 0.21
+    },
+    "4+": {
+     "n": 73,
+     "mae_m": 27.85,
+     "median_ae_m": 13.41,
+     "bias_m": 19.62,
+     "within_15pct": 0.164,
+     "within_25pct": 0.315
+    }
+   },
+   "seeds": {
+    "1": {
+     "n": 471,
+     "mae_m": 50.94,
+     "median_ae_m": 27.06,
+     "bias_m": 43.85,
+     "within_15pct": 0.089,
+     "within_25pct": 0.157
+    },
+    "2+": {
+     "n": 116,
+     "mae_m": 31.36,
+     "median_ae_m": 14.98,
+     "bias_m": 25.51,
+     "within_15pct": 0.164,
+     "within_25pct": 0.31
+    }
+   },
+   "osm_tag": {
+    "tagged": {
+     "n": 243,
+     "mae_m": 17.48,
+     "median_ae_m": 12.82,
+     "bias_m": 4.51,
+     "within_15pct": 0.173,
+     "within_25pct": 0.321
+    },
+    "untagged": {
+     "n": 344,
+     "mae_m": 67.98,
+     "median_ae_m": 57.19,
+     "bias_m": 65.46,
+     "within_15pct": 0.055,
+     "within_25pct": 0.093
+    }
+   },
+   "relative": {
+    "city": {
+     "n": 587,
+     "pairs": 146378,
+     "pair_order": 0.497,
+     "spearman": -0.007
+    },
+    "per_view": {
+     "views": 40,
+     "pairs": 17364,
+     "pair_order": 0.565,
+     "median_spearman": 0.068
+    }
+   },
+   "osm_tags": {
+    "tag_vs_truth": {
+     "n": 243,
+     "mae_m": 8.26,
+     "median_ae_m": 4.92,
+     "bias_m": -5.48,
+     "within_15pct": 0.449,
+     "within_25pct": 0.691
+    },
+    "run_vs_tag": {
+     "n": 243,
+     "mae_m": 17.47,
+     "median_ae_m": 15.9,
+     "bias_m": 9.99,
+     "within_15pct": 0.152,
+     "within_25pct": 0.243
+    },
+    "run_vs_truth_same_buildings": {
+     "n": 243,
+     "mae_m": 17.48,
+     "median_ae_m": 12.82,
+     "bias_m": 4.51,
+     "within_15pct": 0.173,
+     "within_25pct": 0.321
+    }
+   }
+  },
+  {
+   "region": "benidorm",
+   "report": "C:\\Users\\eac84\\worktrees\\map2stl-skybench\\city2stl\\skyline\\runs\\benchmark\\2026-10-04_1357\\benidorm_skyline_report\\heights.json",
+   "survey": "cnig_mdsn",
+   "n_buildings": 98,
+   "status": {
+    "disputed": 62,
+    "confirmed": 33,
+    "unmeasured": 3
+   },
+   "overall": {
+    "n": 33,
+    "mae_m": 31.62,
+    "median_ae_m": 27.92,
+    "bias_m": 30.32,
+    "within_15pct": 0.121,
+    "within_25pct": 0.152
+   },
+   "bands": {
+    "0-30m": {
+     "n": 12,
+     "mae_m": 39.37,
+     "median_ae_m": 16.52,
+     "bias_m": 39.37,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    },
+    "30-60m": {
+     "n": 7,
+     "mae_m": 31.59,
+     "median_ae_m": 27.92,
+     "bias_m": 31.59,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    },
+    "60-100m": {
+     "n": 12,
+     "mae_m": 28.12,
+     "median_ae_m": 31.0,
+     "bias_m": 24.54,
+     "within_15pct": 0.167,
+     "within_25pct": 0.25
+    },
+    "100+m": {
+     "n": 2,
+     "mae_m": 6.28,
+     "median_ae_m": 6.28,
+     "bias_m": 6.28,
+     "within_15pct": 1.0,
+     "within_25pct": 1.0
+    }
+   },
+   "views": {
+    "1": {
+     "n": 25,
+     "mae_m": 30.7,
+     "median_ae_m": 29.19,
+     "bias_m": 28.98,
+     "within_15pct": 0.16,
+     "within_25pct": 0.2
+    },
+    "2-3": {
+     "n": 8,
+     "mae_m": 34.53,
+     "median_ae_m": 16.72,
+     "bias_m": 34.53,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    },
+    "4+": {
+     "n": 0
+    }
+   },
+   "seeds": {
+    "1": {
+     "n": 33,
+     "mae_m": 31.62,
+     "median_ae_m": 27.92,
+     "bias_m": 30.32,
+     "within_15pct": 0.121,
+     "within_25pct": 0.152
+    },
+    "2+": {
+     "n": 0
+    }
+   },
+   "osm_tag": {
+    "tagged": {
+     "n": 29,
+     "mae_m": 23.69,
+     "median_ae_m": 24.46,
+     "bias_m": 22.21,
+     "within_15pct": 0.138,
+     "within_25pct": 0.172
+    },
+    "untagged": {
+     "n": 4,
+     "mae_m": 89.13,
+     "median_ae_m": 92.86,
+     "bias_m": 89.13,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    }
+   },
+   "relative": {
+    "city": {
+     "n": 33,
+     "pairs": 428,
+     "pair_order": 0.853,
+     "spearman": 0.764
+    },
+    "per_view": {
+     "views": 3,
+     "pairs": 190,
+     "pair_order": 0.858,
+     "median_spearman": 0.901
+    }
+   },
+   "osm_tags": {
+    "tag_vs_truth": {
+     "n": 29,
+     "mae_m": 4.42,
+     "median_ae_m": 3.36,
+     "bias_m": 3.47,
+     "within_15pct": 0.69,
+     "within_25pct": 0.724
+    },
+    "run_vs_tag": {
+     "n": 29,
+     "mae_m": 21.4,
+     "median_ae_m": 22.24,
+     "bias_m": 18.75,
+     "within_15pct": 0.103,
+     "within_25pct": 0.241
+    },
+    "run_vs_truth_same_buildings": {
+     "n": 29,
+     "mae_m": 23.69,
+     "median_ae_m": 24.46,
+     "bias_m": 22.21,
+     "within_15pct": 0.138,
+     "within_25pct": 0.172
+    }
+   }
+  },
+  {
+   "region": "la_defense",
+   "report": "C:\\Users\\eac84\\worktrees\\map2stl-skybench\\city2stl\\skyline\\runs\\benchmark\\2026-10-03_1952\\la_defense_skyline_report\\heights.json",
+   "survey": "ign_lidarhd",
+   "n_buildings": 101,
+   "status": {
+    "confirmed": 87,
+    "disputed": 14
+   },
+   "overall": {
+    "n": 87,
+    "mae_m": 108.68,
+    "median_ae_m": 114.46,
+    "bias_m": 108.4,
+    "within_15pct": 0.011,
+    "within_25pct": 0.023
+   },
+   "bands": {
+    "0-30m": {
+     "n": 81,
+     "mae_m": 108.64,
+     "median_ae_m": 106.92,
+     "bias_m": 108.64,
+     "within_15pct": 0.012,
+     "within_25pct": 0.025
+    },
+    "30-60m": {
+     "n": 6,
+     "mae_m": 109.12,
+     "median_ae_m": 118.43,
+     "bias_m": 105.18,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    },
+    "60-100m": {
+     "n": 0
+    },
+    "100+m": {
+     "n": 0
+    }
+   },
+   "views": {
+    "1": {
+     "n": 56,
+     "mae_m": 118.08,
+     "median_ae_m": 136.28,
+     "bias_m": 117.65,
+     "within_15pct": 0.0,
+     "within_25pct": 0.018
+    },
+    "2-3": {
+     "n": 31,
+     "mae_m": 91.69,
+     "median_ae_m": 100.42,
+     "bias_m": 91.68,
+     "within_15pct": 0.032,
+     "within_25pct": 0.032
+    },
+    "4+": {
+     "n": 0
+    }
+   },
+   "seeds": {
+    "1": {
+     "n": 87,
+     "mae_m": 108.68,
+     "median_ae_m": 114.46,
+     "bias_m": 108.4,
+     "within_15pct": 0.011,
+     "within_25pct": 0.023
+    },
+    "2+": {
+     "n": 0
+    }
+   },
+   "osm_tag": {
+    "tagged": {
+     "n": 4,
+     "mae_m": 15.31,
+     "median_ae_m": 15.37,
+     "bias_m": 15.31,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    },
+    "untagged": {
+     "n": 83,
+     "mae_m": 113.17,
+     "median_ae_m": 122.62,
+     "bias_m": 112.89,
+     "within_15pct": 0.012,
+     "within_25pct": 0.024
+    }
+   },
+   "relative": {
+    "city": {
+     "n": 87,
+     "pairs": 2984,
+     "pair_order": 0.556,
+     "spearman": 0.135
+    },
+    "per_view": {
+     "views": 4,
+     "pairs": 1725,
+     "pair_order": 0.588,
+     "median_spearman": 0.141
+    }
+   },
+   "osm_tags": {
+    "tag_vs_truth": {
+     "n": 4,
+     "mae_m": 2.8,
+     "median_ae_m": 2.94,
+     "bias_m": 2.8,
+     "within_15pct": 0.0,
+     "within_25pct": 0.5
+    },
+    "run_vs_tag": {
+     "n": 4,
+     "mae_m": 12.51,
+     "median_ae_m": 12.6,
+     "bias_m": 12.51,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    },
+    "run_vs_truth_same_buildings": {
+     "n": 4,
+     "mae_m": 15.31,
+     "median_ae_m": 15.37,
+     "bias_m": 15.31,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    }
+   }
+  },
+  {
+   "region": "madrid_cuatro_torres",
+   "report": "C:\\Users\\eac84\\worktrees\\map2stl-skybench\\city2stl\\skyline\\runs\\benchmark\\2026-10-04_1425\\madrid_cuatro_torres_skyline_report\\heights.json",
+   "survey": "cnig_mdsn",
+   "n_buildings": 197,
+   "status": {
+    "disputed": 129,
+    "confirmed": 64,
+    "unmeasured": 4
+   },
+   "overall": {
+    "n": 64,
+    "mae_m": 62.15,
+    "median_ae_m": 30.51,
+    "bias_m": 53.7,
+    "within_15pct": 0.016,
+    "within_25pct": 0.062
+   },
+   "bands": {
+    "0-30m": {
+     "n": 49,
+     "mae_m": 67.52,
+     "median_ae_m": 41.04,
+     "bias_m": 65.73,
+     "within_15pct": 0.02,
+     "within_25pct": 0.061
+    },
+    "30-60m": {
+     "n": 14,
+     "mae_m": 45.65,
+     "median_ae_m": 26.93,
+     "bias_m": 13.34,
+     "within_15pct": 0.0,
+     "within_25pct": 0.071
+    },
+    "60-100m": {
+     "n": 1,
+     "mae_m": 29.72,
+     "median_ae_m": 29.72,
+     "bias_m": 29.72,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    },
+    "100+m": {
+     "n": 0
+    }
+   },
+   "views": {
+    "1": {
+     "n": 35,
+     "mae_m": 94.28,
+     "median_ae_m": 89.95,
+     "bias_m": 89.35,
+     "within_15pct": 0.0,
+     "within_25pct": 0.029
+    },
+    "2-3": {
+     "n": 26,
+     "mae_m": 24.11,
+     "median_ae_m": 13.96,
+     "bias_m": 11.87,
+     "within_15pct": 0.038,
+     "within_25pct": 0.115
+    },
+    "4+": {
+     "n": 3,
+     "mae_m": 16.88,
+     "median_ae_m": 21.18,
+     "bias_m": 0.44,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    }
+   },
+   "seeds": {
+    "1": {
+     "n": 64,
+     "mae_m": 62.15,
+     "median_ae_m": 30.51,
+     "bias_m": 53.7,
+     "within_15pct": 0.016,
+     "within_25pct": 0.062
+    },
+    "2+": {
+     "n": 0
+    }
+   },
+   "osm_tag": {
+    "tagged": {
+     "n": 22,
+     "mae_m": 19.33,
+     "median_ae_m": 19.94,
+     "bias_m": -2.59,
+     "within_15pct": 0.045,
+     "within_25pct": 0.136
+    },
+    "untagged": {
+     "n": 42,
+     "mae_m": 84.57,
+     "median_ae_m": 70.01,
+     "bias_m": 83.19,
+     "within_15pct": 0.0,
+     "within_25pct": 0.024
+    }
+   },
+   "relative": {
+    "city": {
+     "n": 64,
+     "pairs": 1603,
+     "pair_order": 0.442,
+     "spearman": -0.123
+    },
+    "per_view": {
+     "views": 12,
+     "pairs": 335,
+     "pair_order": 0.472,
+     "median_spearman": -0.054
+    }
+   },
+   "osm_tags": {
+    "tag_vs_truth": {
+     "n": 22,
+     "mae_m": 4.29,
+     "median_ae_m": 4.04,
+     "bias_m": -0.43,
+     "within_15pct": 0.5,
+     "within_25pct": 0.727
+    },
+    "run_vs_tag": {
+     "n": 22,
+     "mae_m": 17.81,
+     "median_ae_m": 14.31,
+     "bias_m": -2.16,
+     "within_15pct": 0.0,
+     "within_25pct": 0.136
+    },
+    "run_vs_truth_same_buildings": {
+     "n": 22,
+     "mae_m": 19.33,
+     "median_ae_m": 19.94,
+     "bias_m": -2.59,
+     "within_15pct": 0.045,
+     "within_25pct": 0.136
+    }
+   }
+  },
+  {
+   "region": "prague_pankrac",
+   "report": "C:\\Users\\eac84\\worktrees\\map2stl-skybench\\city2stl\\skyline\\runs\\benchmark\\2026-10-03_1952\\prague_pankrac_skyline_report\\heights.json",
+   "survey": "cuzk_dmp",
+   "n_buildings": 77,
+   "status": {
+    "disputed": 54,
+    "confirmed": 23
+   },
+   "overall": {
+    "n": 23,
+    "mae_m": 29.72,
+    "median_ae_m": 24.47,
+    "bias_m": 9.69,
+    "within_15pct": 0.043,
+    "within_25pct": 0.087
+   },
+   "bands": {
+    "0-30m": {
+     "n": 16,
+     "mae_m": 29.89,
+     "median_ae_m": 18.51,
+     "bias_m": 18.19,
+     "within_15pct": 0.0,
+     "within_25pct": 0.062
+    },
+    "30-60m": {
+     "n": 2,
+     "mae_m": 21.34,
+     "median_ae_m": 21.34,
+     "bias_m": 21.34,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    },
+    "60-100m": {
+     "n": 1,
+     "mae_m": 26.01,
+     "median_ae_m": 26.01,
+     "bias_m": 26.01,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    },
+    "100+m": {
+     "n": 4,
+     "mae_m": 34.18,
+     "median_ae_m": 35.04,
+     "bias_m": -34.18,
+     "within_15pct": 0.25,
+     "within_25pct": 0.25
+    }
+   },
+   "views": {
+    "1": {
+     "n": 10,
+     "mae_m": 27.83,
+     "median_ae_m": 17.97,
+     "bias_m": 5.77,
+     "within_15pct": 0.1,
+     "within_25pct": 0.2
+    },
+    "2-3": {
+     "n": 13,
+     "mae_m": 31.18,
+     "median_ae_m": 26.01,
+     "bias_m": 12.71,
+     "within_15pct": 0.0,
+     "within_25pct": 0.0
+    },
+    "4+": {
+     "n": 0
+    }
+   },
+   "seeds": {
+    "1": {
+     "n": 23,
+     "mae_m": 29.72,
+     "median_ae_m": 24.47,
+     "bias_m": 9.69,
+     "within_15pct": 0.043,
+     "within_25pct": 0.087
+    },
+    "2+": {
+     "n": 0
+    }
+   },
+   "osm_tag": {
+    "tagged": {
+     "n": 16,
+     "mae_m": 22.78,
+     "median_ae_m": 24.36,
+     "bias_m": 1.03,
+     "within_15pct": 0.0,
+     "within_25pct": 0.062
+    },
+    "untagged": {
+     "n": 7,
+     "mae_m": 45.58,
+     "median_ae_m": 36.0,
+     "bias_m": 29.5,
+     "within_15pct": 0.143,
+     "within_25pct": 0.143
+    }
+   },
+   "relative": {
+    "city": {
+     "n": 23,
+     "pairs": 216,
+     "pair_order": 0.634,
+     "spearman": 0.312
+    },
+    "per_view": {
+     "views": 4,
+     "pairs": 60,
+     "pair_order": 0.533,
+     "median_spearman": 0.164
+    }
+   },
+   "osm_tags": {
+    "tag_vs_truth": {
+     "n": 16,
+     "mae_m": 4.84,
+     "median_ae_m": 4.02,
+     "bias_m": -1.28,
+     "within_15pct": 0.562,
+     "within_25pct": 0.812
+    },
+    "run_vs_tag": {
+     "n": 16,
+     "mae_m": 20.69,
+     "median_ae_m": 21.44,
+     "bias_m": 2.31,
+     "within_15pct": 0.0,
+     "within_25pct": 0.062
+    },
+    "run_vs_truth_same_buildings": {
+     "n": 16,
+     "mae_m": 22.78,
+     "median_ae_m": 24.36,
+     "bias_m": 1.03,
+     "within_15pct": 0.0,
+     "within_25pct": 0.062
+    }
+   }
+  }
+ ]
+}
