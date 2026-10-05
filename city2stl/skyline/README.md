@@ -27,7 +27,8 @@ $env:SKYLINE_CV_SEGFORMER_SIZE = "b1"     # production setting (see Environment 
   - `runs/region_reports/Cartagena_skyline_report.pdf` — compact archival PDF (`pano_only_pdf: true` trims tables).
 - Cost: a Cartagena run is a few minutes and ~$0.10 of Street View quota (12 spin views × seeds + screening probes).
 - `scripts/build_landing_page.py` builds the cross-region landing page; `scripts/discover_city_seeds.py`
-  proposes seeds for a new city.
+  proposes seeds for a new city (`discover_city_seeds <city> ...`; an existing `sites/<city>.json`
+  is kept unless `--force`).
 
 ## Pipeline shape
 

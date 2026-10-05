@@ -376,3 +376,48 @@ def test_run_settings_record_flags_and_signing():
     assert rec["env"]["SKYLINE_TAG_FILTER"] == "1"
     assert "PYTHONIOENCODING" not in rec["env"] and "GOOGLE_MAPS_SIGN_SECRET" not in rec["env"]
     assert s._run_settings(s._region_env(base={}))["signed_streetview"] is False
+
+
+# ── discover_city_seeds: city filter, keep existing site files (T7) ─────────
+
+def _discover(monkeypatch, tmp_path):
+    import importlib
+    d = importlib.import_module("city2stl.skyline.scripts.discover_city_seeds")
+    monkeypatch.setattr(d, "_SITES_DIR", tmp_path)
+    monkeypatch.setattr(d, "_resolve_api_key", lambda *a, **k: "test-key")
+    calls = []
+
+    def meta(key, lat, lon, heading, radius_m=350):
+        calls.append((lat, lon))
+        return {"status": "OK", "location": {"lat": lat, "lng": lon}, "pano_id": "p1"}
+
+    monkeypatch.setattr(d, "_streetview_metadata", meta)
+    monkeypatch.setattr(d, "_geocode", lambda name, key: (40.0, -3.7))
+    return d, calls
+
+
+def test_discover_writes_only_the_named_cities(monkeypatch, tmp_path):
+    d, calls = _discover(monkeypatch, tmp_path)
+    city = next(iter(d.CITIES))
+    d.main([city])
+    assert [p.stem for p in tmp_path.glob("*.json")] == [city]
+    assert calls                                          # metadata asked for that city
+
+
+def test_discover_keeps_existing_site_files_unless_force(monkeypatch, tmp_path):
+    import json
+    d, calls = _discover(monkeypatch, tmp_path)
+    city = next(iter(d.CITIES))
+    site = tmp_path / f"{city}.json"
+    site.write_text(json.dumps({"name": city, "anchor_offsets_deg": {"seed_1": 4.0}}))
+    d.main([city])
+    assert calls == []                                    # no Street View request at all
+    assert json.loads(site.read_text())["anchor_offsets_deg"] == {"seed_1": 4.0}
+    d.main([city, "--force"])
+    assert calls and json.loads(site.read_text())["seed_urls"]
+
+
+def test_discover_rejects_unknown_cities(monkeypatch, tmp_path):
+    d, _ = _discover(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        d.main(["atlantis"])

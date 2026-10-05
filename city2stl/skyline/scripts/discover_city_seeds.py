@@ -15,11 +15,16 @@ This is the "propose pano locations -> pull -> filter" discovery loop: panos
 with no Street View within ``radius_m`` (ZERO_RESULTS — e.g. a vantage that
 fell in open water) are skipped, so only real, reachable seeds are written.
 
-Run:  python -m city2stl.skyline.scripts.discover_city_seeds
+Run:  python -m city2stl.skyline.scripts.discover_city_seeds [city ...] [--force]
+
+With no city, every city in ``CITIES``. An existing ``sites/<city>.json`` is kept (it can
+carry hand-set anchors, negative seeds and seed URLs) unless ``--force``; the check runs
+before any Street View request, so a skipped city costs nothing.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 from pathlib import Path
@@ -148,9 +153,36 @@ def _seed_url(lat: float, lon: float, heading: float, pano_id: str) -> str:
             f"{heading:.2f}h,90t/data=!3m6!1e1!3m4!1s{pano_id}!2e0")
 
 
-def main() -> None:
+def _cities_to_write(names: list[str] | None, force: bool) -> list[str]:
+    """The cities to (re)write, in ``CITIES`` order: ``names`` (all when empty) minus those
+    whose site file exists, unless ``force``. Unknown names exit with an error."""
+    unknown = sorted(set(names or ()) - set(CITIES))
+    if unknown:
+        raise SystemExit(f"unknown cities: {', '.join(unknown)} "
+                         f"(known: {', '.join(CITIES)})")
+    out = []
+    for city in CITIES:
+        if names and city not in names:
+            continue
+        if not force and (_SITES_DIR / f"{city}.json").exists():
+            print(f"{city}: sites/{city}.json exists, kept (--force to overwrite)")
+            continue
+        out.append(city)
+    return out
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("cities", nargs="*", help="cities from CITIES (default: all)")
+    ap.add_argument("--force", action="store_true",
+                    help="overwrite existing sites/<city>.json files")
+    args = ap.parse_args(argv)
+    todo = _cities_to_write(args.cities, args.force)
+    if not todo:
+        return
     key = _resolve_api_key()
-    for city, spec in CITIES.items():
+    for city in todo:
+        spec = CITIES[city]
         n, s, e, w = spec["bbox"]
         tlat, tlon = spec["target"]
         urls: list[str] = []
