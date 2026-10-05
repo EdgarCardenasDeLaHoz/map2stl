@@ -98,7 +98,8 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 
   [large-region guide §6](../guides/large-region-sop.md)
 - **F-TREES** (first): buildings vs trees / viaducts in printed models, inside F-STL2NUMPY
-  ([plan](active/F-TREES-buildings-vs-vegetation.md)). Then the neural proposals F-NN-WATER and
+  ([plan](active/F-TREES-buildings-vs-vegetation.md)). Four attempts; the U-Net wins on the 4 packs
+  with aligned labels, loses on 7, not shipped. Next step needs clean truth (user to choose). Then the neural proposals F-NN-WATER and
   F-NN-ROOF ([proposals](../proposals.md)).
 - **F-STL2NUMPY**: decompose 3D city models into DSM, slope-aware DTM, a building table and
   water/road layers ([plan](active/F-STL2NUMPY-decompose.md)). Includes measuring the mesh

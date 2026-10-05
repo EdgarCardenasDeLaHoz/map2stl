@@ -94,4 +94,38 @@ script `claude/scripts/trees_fine.py`, grids in `claude/e2e/trees/fine/<slug>_v3
   tiles as clean truth (would also settle how much of the shortfall is label noise), or a
   small U-Net trained on the 4-5 aligned packs, scored on the rest.
 
+2026-10-03, fourth attempt: a small U-Net on the GPU (user chose "Small U-Net on GPU";
+script `claude/scripts/trees_unet.py`). Inputs per cell: height above ground and the surface
+high-pass (DSM minus a 10 m blur); target: the refined OSM building mask; loss on raised cells
+only. Trained on the 5 packs with ECC ≥ 0.4 (Bilbao, Granada, Miami, Philadelphia, Salzburg),
+each held out in turn; one model on all five scores the other 6. Tiled fp32 prediction
+(autocast gave NaN).
+
+| held-out pack | ECC | AUC | IoU raised → kept | built fraction OSM / kept |
+|---|---|---|---|---|
+| Salzburg | 0.55 | 0.94 | 0.450 → **0.645** | 0.22 / 0.18 |
+| Bilbao | 0.78 | 0.93 | 0.680 → **0.778** | 0.38 / 0.35 |
+| Philadelphia | 0.75 | 0.92 | 0.703 → **0.748** | 0.46 / 0.39 |
+| Miami | 0.59 | 0.88 | 0.452 → **0.540** | 0.22 / 0.20 |
+| Granada | 0.48 | 0.67 | 0.241 → 0.157 | 0.29 / 0.08 |
+| Barcelona | 0.14 | 0.56 | 0.383 → 0.324 | 0.49 / 0.38 |
+| Lisbon | 0.07 | 0.52 | 0.340 → 0.257 | 0.37 / 0.32 |
+| Paris | 0.07 | 0.53 | 0.352 → 0.291 | 0.45 / 0.39 |
+| Philadelphia (miniature) | 0.39 | 0.52 | 0.348 → 0.297 | 0.45 / 0.42 |
+| Prague | 0.05 | 0.56 | 0.296 → 0.275 | 0.39 / 0.38 |
+| Valencia | 0.10 | 0.52 | 0.269 → 0.248 | 0.31 / 0.41 |
+
+- **Better on 4 of 11**, all four on packs whose labels aligned (ECC ≥ 0.55): the U-Net learns
+  trees vs buildings where the truth is clean. Salzburg's built fraction (0.18 vs OSM 0.22) now
+  meets the second success criterion.
+- **Worse on 7**, by 0.02-0.08. Six have labels that never aligned (ECC 0.05-0.39) and are
+  scored against OSM that is 50-170 m off, so their AUC at chance may be the labels, not the
+  model; Granada (ECC 0.48,
+  AUC 0.67) is a real loss: its terraced hillside buildings are cut as canopy.
+- **Criterion 1 not met** (10 of 13, none worse by > 0.03). Not shipped; no keep-filter in
+  `building_table`.
+- **To settle it:** clean truth for the misaligned packs (hand-labelled tiles, or a better
+  registration of the dense block prints) would show whether the 6 losses are real. Applying the
+  filter only when the print has distinctive tree texture (a confidence gate) is the other path.
+
 ## Decisions
