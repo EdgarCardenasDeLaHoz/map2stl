@@ -123,3 +123,26 @@ Cartagena stays a heading and registration smoke test, not an accuracy benchmark
   - Success criteria: ≥ 150 confirmed in Miami (192), Chicago (265), Seattle (156), Boston (587);
     not La Défense (87, small run) or Prague (23, 3D Tiles artefact). Agreement ≥ 80 % fails in
     Seattle (46 %) and Prague (30 %), see STATUS.
+- 2026-10-05: a cloud session wrote a second F-SKYBENCH, `56cb97d` on
+  `claude/jolly-gates-1y7gay`. It was never run on data and is not in master. **This branch is
+  canonical**:
+  - it ran on the eight cities;
+  - the EPT reader covers central Miami and Seattle, where that version's COPC source has no
+    tiles;
+  - its 1.7 km tile boxes would hit the 3D Tiles cap of 1,000 tiles;
+  - one failure there aborts a city, and its proposal cache saves empty lists.
+
+  Worth porting from it, as small commits:
+  - Pin the `SKYLINE_CV_*` flags, record whether Street View signing was on, and pin the values
+    the baseline used: b1/512, tag filter on.
+  - Make the auto-proposal cache recompute when the bbox changes; it is keyed by name today.
+  - `--refresh-truth`, and stop caching reads that failed or ran with `--no-tiles`.
+    `footprint_truth` keeps a survey-only or tiles-only result for good.
+  - Accept a source only where at least 50% of the footprint's cells are finite (Miami's lidar
+    covers only the coast).
+  - `discover_city_seeds`: the city filter, and keep existing site files unless `--force`.
+  - The `google_3d` cache key: add the dem and max_tiles, plus `require_built`.
+
+  Decide separately, since either needs a new baseline: the tag filter off, and dropping the
+  Cartagena opt-ins (`pano_only_pdf`, cross-view, coastline) that six of the eight site files
+  carry. Miami and Chicago don't carry them, so the benchmark runs two code paths.
