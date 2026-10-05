@@ -439,28 +439,79 @@ seed_1 --out <dir>`. It needs the Street View API on a capture-cache miss, a GPU
     and green), `GroundMap.shore_distances` and `waterline_position_scan`.
   - Script flag: `18_footprint_detect --position-check`, which reports and does not move.
   - Result on the Cartagena seeds: no move.
-    - seed_5: the waterline misfit is lowest at the seed position, 0.39�. It rises to 1.8�
-      150 m north, so the waterline pins the position across the shore, but only to 0.58�
+    - seed_5: the waterline misfit is lowest at the seed position, 0.39°. It rises to 1.8°
+      150 m north, so the waterline pins the position across the shore, but only to 0.58°
       150 m east, so it pins it loosely along the shore.
     - seed_5: the ground-class fit would move the camera 124 m, to where the waterline misfit is
-      1.17�. Building bases and seed_1 agreement are also best at the seed position.
+      1.17°. Building bases and seed_1 agreement are also best at the seed position.
     - seed_1: both scores are flat; no evidence either way.
   - Why no move: from 98 m over the bay, buildings hide nearly all the streets, leaving water,
     the beach strip and a few parks. **Decision:** keep the seed position when the waterline
     fits. Use the ground fit only for seeds over land, and only where it agrees with the
     waterline.
 - **Measurement fixes:**
-  - **Single-row runs** no longer count; they had read 0.9�2.7 m for whole buildings.
+  - **Single-row runs** no longer count; they had read 0.9–2.7 m for whole buildings.
   - **Nested footprints:** a footprint holding smaller ones is measured on the columns its inner
     footprints leave free. The test podium read 116 m (its tower) before the fix and 20 m after.
 - **Fusion** (`fuse_heights`):
   - Seeds within 25% are averaged, weighted by visibility over distance squared. Otherwise the
     most reliable seed wins and the footprint is marked disputed.
-  - Why: of the 12 footprints both seeds measured, the seed 1.1�2.5 km away misread most
-    disagreements (13 against 81 m, 26 against 111 m). seed_1 (400�600 m) is 17 m off the OSM
+  - Why: of the 12 footprints both seeds measured, the seed 1.1–2.5 km away misread most
+    disagreements (13 against 81 m, 26 against 111 m). seed_1 (400–600 m) is 17 m off the OSM
     tags, seed_5 56 m off.
   - Combined: 326 footprints, 23 OSM-tagged, median 28 m off the tags.
   - `compare_<a>_<b>.png` shows every shared footprint in both panos.
-- **Cross-seed agreement doesn't show progress any more.** 12 shared footprints, 25�36% within
+- **Cross-seed agreement doesn't show progress any more.** 12 shared footprints, 25–36% within
   25%, moving with small pose changes. Only 5 pairs have both seeds within 1 km. The check
   needs more seeds near the same blocks, or the drone-photo height anchors.
+
+### Progress, 2026-10-05 (later): seed_4, camera position, region report
+
+- **seed_4 is a drone seed too** (98 m by the waterline at its recorded position). The F-DET1
+  early-out had dropped it. It shares 74–95 measured footprints with seed_5, which gives the
+  cross-seed check real numbers.
+- **seed_4's recorded position is ~360 m off.** This supersedes this morning's "keep the seed
+  position".
+  - The waterline misfit is 0.68° at the recorded position. It has a clear minimum of 0.16–0.18°
+    320–340 m west and 200–220 m south, with a 51 m camera instead of 98 m.
+  - At the recorded position, the large pitch correction (−2.2°) was compensating for the
+    position error.
+  - Checks at the fitted position:
+    - building bases line up within 2 px, against 5 px;
+    - the gap to seed_5 falls from 34.9 m to 20.8–25.5 m over about 90 shared footprints.
+  - Parks and streets then refine it along the shore:
+    - score 0.395 → 0.430, 57 m away;
+    - the tagged towers land on their buildings (Ravello 147 m against a 160 m tag);
+    - the OSM-tag error falls from 113 m to 33 m.
+  - **Rule now in `fit_camera_position`:**
+    - Waterline over ±600 m (100 m grid, then 20 m). Move only on a 30% misfit drop.
+    - Then parks and streets within ±80 m, only after a good waterline fit (under 0.3°), with a
+      gain of at least 0.01.
+    - Why the waterline condition: seed_1's waterline is flat and poor (1.14°). The ground score
+      alone moved it 64 m, and its OSM-tag error rose from 11–16 m to 34 m.
+  - seed_5 stays at its recorded position (its misfit minimum).
+- **Stop rule.**
+  - Depth Anything lets a tall façade read 10–20% farther at its top, so the 0.92 stop against
+    the base level cut tall towers short. Ravello (tag 160 m) read 17 m.
+  - The stop now compares each row with the last 40 rows of the run (`local_px`).
+  - A sweep of 8, 20, 40 and 1000 rows × 0.88 and 0.92 changed little on the three seeds: the
+    seed_4/seed_5 gap stayed at 23–31 m with about 30% within 25%.
+  - 40 rows follows a slow drift, as in the synthetic test where the committed rule read a
+    160 m tower as 90 m.
+- **In the region report (`_pano/elevated.py`).**
+  - Seeds listed in the site's `elevated_seeds` skip the street-level chain, which assumes a
+    1.7 m camera, and go through: waterline pose, camera position, Depth Anything, then every
+    OSM footprint measured.
+  - The result feeds the existing report as a `StitchedPanoResult`, frames-only view rows, and
+    estimates fused across drone seeds before `aggregate_building_heights`.
+  - The branch runs before the street-view screens and F-DET1, and drone seeds skip
+    auto-replace.
+  - The region's building cache held an empty waterways layer and no roads, so
+    `ground_layers` fetches the missing layers and caches them in `runs/osm_layers/`.
+  - Side finding: with that empty layer, the street-level coastline heading recovery has had no
+    coastline for Cartagena.
+- **Speed.**
+  - The shore trace was 0.65 s per position; coarse 12 m steps refined to the cell size bring
+    it to about 0.1 s.
+  - The coarse position grid uses a cheaper heading and height search.
+  - Before these changes the position fit took about 5 minutes per seed.

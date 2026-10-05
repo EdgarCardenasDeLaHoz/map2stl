@@ -381,7 +381,8 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
   - Camera from the waterline: `map2stl/city2stl/skyline/footprint_detect.py::fit_pose_from_waterline`.
   - Per-footprint heights with depth gating: `measure_footprints`.
   - One height across seeds: `fuse_heights`.
-  - Position check from parks, streets and water: `fit_position_from_ground` and `waterline_position_scan`.
+  - Camera position (waterline over ±600 m, then parks and streets): `fit_camera_position`; diagnostics `fit_position_from_ground`, `waterline_position_scan`.
+  - In the region report, for the site's `elevated_seeds`: `map2stl/city2stl/skyline/_pano/elevated.py::measure_elevated_seed` (called from `_pano/orchestrator.py::_seed_multiview_registration`; OSM ground layers `ground_layers`, fused estimates `elevated_estimates`).
   - Script: `scripts/18_footprint_detect.py`.
 
 ### Entry points, scripts, tests
