@@ -366,6 +366,15 @@ class TestSessionSettingsValidation:
         with pytest.raises(ValueError, match="unknown layers"):
             session._validate_settings()
 
+    def test_every_server_city_layer_accepted(self, session):
+        """settings['city']['layers'] accepts each layer /api/cities can fetch."""
+        from app.session.terrain_session import CITY_LAYERS
+        from city2stl.fetch import _layer_jobs
+        server_layers = set(_layer_jobs(None, None, 0.0, 0.0, 0.0))
+        assert set(CITY_LAYERS) == server_layers
+        session.settings["city"]["layers"] = sorted(server_layers)
+        session._validate_settings()
+
     def test_water_dim_below_1_raises(self, session):
         session.settings["water"]["dim"] = 0
         with pytest.raises(ValueError, match="integer"):
@@ -441,6 +450,27 @@ class TestSessionCityFlows:
         assert session.city_raster is not None
         assert "width" in session.city_raster
         assert "height" in session.city_raster
+
+
+    def test_rasterize_city_burns_fetched_buildings(self, session):
+        """rasterize_city posts the fetched GeoJSON (the route's schema wants
+        FeatureCollections, not flags) and gets a raster with the building."""
+        n, s, e, w = 40.001, 40.000, -75.000, -75.001
+        session.create_region("RasterizeCityRegion", north=n, south=s, east=e, west=w)
+        empty = {"type": "FeatureCollection", "features": []}
+        session.city_data = {
+            "buildings": {"type": "FeatureCollection", "features": [{
+                "type": "Feature", "properties": {"height_m": 20.0},
+                "geometry": {"type": "Polygon", "coordinates": [[
+                    [w, s], [e, s], [e, n], [w, n], [w, s]]]},
+            }]},
+            "roads": empty,
+            "waterways": empty,
+        }
+        session.settings["city"]["dim"] = 32
+        session.rasterize_city()
+        assert session.city_raster["width"] == 32
+        assert session.city_raster["vmax"] > 0
 
 
 # ---------------------------------------------------------------------------

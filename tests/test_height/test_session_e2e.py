@@ -38,6 +38,12 @@ def _make_session(bbox=None, dem=None, monkeypatch=None, tmp_path=None):
     return s
 
 
+def _dem_b64(value, h, w):
+    """A DEM grid as POST /api/terrain/dem sends it (base64 float32)."""
+    import base64
+    return base64.b64encode(np.full((h, w), value, dtype=np.float32).tobytes()).decode("ascii")
+
+
 def _synthetic_height_result(dim, value, confidence, name, res_m=90.0):
     """Build a HeightResult with a uniform raster."""
     h, w = dim
@@ -317,7 +323,7 @@ class TestDEMInteraction:
     def test_dim_from_dem(self, monkeypatch, tmp_path):
         """When DEM is available, target dim matches DEM dimensions."""
         dem = {
-            "values": [100.0] * (50 * 50),
+            "dem_values_b64": _dem_b64(100.0, 50, 50),
             "dimensions": [50, 50],
             "min_elevation": 80.0,
             "max_elevation": 120.0,
@@ -352,9 +358,10 @@ class TestDEMInteraction:
         assert call_args[0][1] == (300, 300)
 
     def test_google3d_receives_dem_array(self, monkeypatch, tmp_path):
-        """Google3D provider receives the DEM array for DSM subtraction."""
+        """Google3D provider receives the DEM array (decoded from the real
+        ``dem_values_b64`` payload key) for DSM subtraction."""
         dem = {
-            "values": [100.0] * (10 * 10),
+            "dem_values_b64": _dem_b64(100.0, 10, 10),
             "dimensions": [10, 10],
             "min_elevation": 100.0,
             "max_elevation": 100.0,

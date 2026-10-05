@@ -33,7 +33,6 @@ from io import BytesIO
 from pathlib import Path
 from typing import Union
 
-import matplotlib.cm as cm
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
@@ -41,12 +40,16 @@ import pandas as pd
 import requests
 from PIL import Image
 
-from app.server.config import LUMINANCE_B, LUMINANCE_G, LUMINANCE_R, OPENTOPO_API_KEY
+from app.server.config import OPENTOPO_API_KEY
 from geo2stl.geo import bbox_diagonal_km, bbox_size_m
 
 logger = logging.getLogger(__name__)
 
 _ALLOWED_HTTP_METHODS = {"get", "post", "put", "delete", "patch"}
+
+#: OSM layer names settings['city']['layers'] may hold (city2stl/fetch.py::_layer_jobs).
+CITY_LAYERS = ("buildings", "roads", "waterways", "pois", "walls", "towers", "churches",
+               "fortifications", "green", "railways", "lakes")
 
 # Paths relative to this file (app/session/ → app/ → map2stl/)
 _MAP2STL_DIR = Path(__file__).parent.parent.parent   # map2stl/
@@ -460,45 +463,6 @@ class TerrainSession:
         plt.tight_layout()
         plt.show()
 
-    def _compute_edge_map(self, arr: np.ndarray) -> np.ndarray:
-        """Convert RGB or grayscale to normalized Sobel edge map.
-
-        Used by check_alignment() for cross-correlation registration.
-        Returns zero-mean, unit-variance gradient magnitude for stable registration.
-        """
-        import cv2 as _cv2
-
-        # Perceptual luminance
-        if arr.ndim == 3:
-            luma = (arr[:, :, 0] * LUMINANCE_R +
-                    arr[:, :, 1] * LUMINANCE_G +
-                    arr[:, :, 2] * LUMINANCE_B)
-        else:
-            luma = arr.astype(np.float32)
-
-        # Normalise to [0, 255] so Sobel scale is consistent
-        lo, hi = luma.min(), luma.max()
-        if hi > lo:
-            luma = (luma - lo) / (hi - lo) * 255.0
-
-        luma8 = luma.astype(np.float32)
-        # Sobel in x and y
-        sx = _cv2.Sobel(luma8, _cv2.CV_32F, 1, 0, ksize=3)
-        sy = _cv2.Sobel(luma8, _cv2.CV_32F, 0, 1, ksize=3)
-        mag = np.sqrt(sx ** 2 + sy ** 2)
-
-        # Mild Gaussian blur to suppress 1-px noise
-        mag = _cv2.GaussianBlur(mag, (5, 5), sigmaX=1.0)
-
-        # Zero-mean / unit-std
-        std = mag.std()
-        if std > 0:
-            mag = (mag - mag.mean()) / std
-        else:
-            mag = mag - mag.mean()
-
-        return mag.astype(np.float32)
-
     def _kill_stale_server(self) -> None:
         """Find and kill any existing server on our port."""
         try:
@@ -680,7 +644,9 @@ class TerrainSession:
         """Validate city layers list."""
         c = self.settings["city"]
         layers = c.get("layers")
-        _valid_layers = {"buildings", "roads", "waterways"}
+        # The layers /api/cities can fetch: city2stl/fetch.py::_layer_jobs
+        # (tests/test_session_layers.py keeps the two in step).
+        _valid_layers = set(CITY_LAYERS)
 
         if layers is not None:
             if not isinstance(layers, list):
@@ -1007,42 +973,6 @@ class TerrainSession:
         return _cv2.resize(arr, (new_w, new_h), interpolation=interp)
 
     @staticmethod
-    def _colorize_dem(arr: np.ndarray) -> np.ndarray:
-        """Convert a float elevation array to uint8 RGB.
-
-        Above sea level: terrain colormap (green lowlands → brown → white peaks).
-        Below sea level (< 0): remapped to blue shades (deep = dark blue).
-        Returns shape (H, W, 3) uint8.
-        """
-        h, w = arr.shape
-        out = np.zeros((h, w, 3), dtype=np.uint8)
-
-        # ── Above sea level: terrain colormap over [0, max] ──────────────
-        land = arr.copy()
-        land_mask = land >= 0
-        if land_mask.any():
-            lo, hi = 0.0, float(land[land_mask].max()) or 1.0
-            t = np.clip((land - lo) / (hi - lo), 0, 1)
-            rgba = (cm.terrain(t) * 255).astype(np.uint8)
-            out[land_mask] = rgba[land_mask, :3]
-
-        # ── Below sea level: blue channel, intensity ∝ depth ─────────────
-        sea_mask = ~land_mask
-        if sea_mask.any():
-            depth = np.abs(arr)
-            max_depth = float(depth[sea_mask].max()) or 1.0
-            t = np.clip(depth / max_depth, 0, 1)
-            # dark navy (0,0,80) → bright blue (30,144,255) as depth decreases
-            r_ch = (30 * (1 - t)).astype(np.uint8)
-            g_ch = (144 * (1 - t)).astype(np.uint8)
-            b_ch = (80 + 175 * (1 - t)).astype(np.uint8)
-            out[sea_mask, 0] = r_ch[sea_mask]
-            out[sea_mask, 1] = g_ch[sea_mask]
-            out[sea_mask, 2] = b_ch[sea_mask]
-
-        return out
-
-    @staticmethod
     def _colorize_esa(arr: np.ndarray) -> np.ndarray:
         """Map ESA WorldCover class values to semantic RGB colors.
 
@@ -1191,18 +1121,10 @@ class TerrainSession:
         relative to the image dimensions.
         """
         self._require_attribute("dem", "fetch_dem")
-        import base64
 
         from app.session.viz import plot_data
         H, W = self.dem["dimensions"]
-        # Server returns dem_values_b64 (base64-encoded float32 data)
-        if "dem_values_b64" in self.dem:
-            b64_data = self.dem["dem_values_b64"]
-            decoded = base64.b64decode(b64_data)
-            grid = np.frombuffer(decoded, dtype=np.float32).reshape(H, W)
-        else:
-            # Fallback for older API that returned dem_values directly
-            grid = np.array(self.dem["dem_values"]).reshape(H, W)
+        grid = self._decode_grid_response(self.dem, "dem_values_b64", "dem_values", H, W)
 
         # Compute metres-per-pixel from the bbox geographic extent.
         lon_span_m, lat_span_m = bbox_size_m(self.bbox)
@@ -1299,368 +1221,6 @@ class TerrainSession:
             f"{self.region_name} — City layers",
             legend_handles=legend_patches if legend_patches else None,
             figsize=(7, 7))
-
-    def check_alignment(
-        self,
-        upsample_factor: int = 10,
-        target_dim: int = 512,
-        aspect_tol: float = 0.05,
-        min_shift_px: float = 2.0,
-    ) -> dict:
-        """Check spatial alignment of all fetched layers against the DEM.
-
-        Builds Sobel edge maps from each layer, runs phase_cross_correlation
-        against the DEM edge map, then measures NCC similarity before and after
-        applying the suggested integer-pixel shift.  Shifts smaller than
-        *min_shift_px* (Euclidean magnitude) are treated as negligible and
-        reported as not applied.
-
-        Parameters
-        ----------
-        upsample_factor : int
-            Sub-pixel precision of phase_cross_correlation (default 10 → 0.1 px).
-        target_dim : int
-            Longer-axis size to rescale all layers to before registration.
-        aspect_tol : float
-            Maximum allowed fractional difference in aspect ratio between layers
-            before raising a warning (default 0.05 = 5 %).
-        min_shift_px : float
-            Euclidean magnitude threshold in scaled pixels below which a suggested
-            shift is considered negligible and not applied (default 2.0 px).
-
-        Returns
-        -------
-        dict  keyed by layer name →
-            {
-              "shift_raw":    [dy, dx],   # sub-pixel shift from phase_cross_correlation
-              "shift_int":    [dy, dx],   # rounded to nearest integer pixel
-              "magnitude":    float,      # Euclidean magnitude of shift_int
-              "applied":      bool,       # False if magnitude < min_shift_px
-              "ncc_before":   float,      # NCC similarity of edge maps before shift  [-1, 1]
-              "ncc_after":    float,      # NCC similarity of edge maps after shift   [-1, 1]
-              "ncc_gain":     float,      # ncc_after - ncc_before (positive = improvement)
-              "phasediff":    float,
-            }
-        """
-        from skimage.registration import phase_cross_correlation
-        from skimage.transform import resize as sk_resize
-
-        if self.dem is None:
-            raise RuntimeError(
-                "Call fetch_dem() first — DEM is the registration reference.")
-
-        # ── 1. Extract north-up semantic RGB arrays from each layer ─────────
-        # Using semantic colorization as the shared representation:
-        #  - DEM:        terrain colormap (green→brown→white) + sub-zero→blue
-        #  - Water mask: blue where water (1), grey-white where land (0)
-        #  - ESA:        semantic class colors (water=blue, trees=green, etc.)
-        #  - Satellite:  raw RGB (already in color space)
-        #  - City:       composite heat map (roads/buildings → warm tones)
-        # All layers are RGB (H,W,3) float32 in [0,255] before normalization.
-
-        def _dem_rgb() -> np.ndarray:
-            H, W = self.dem["dimensions"]
-            elev = np.array(self.dem["dem_values"],
-                            dtype=np.float32).reshape(H, W)
-            return self._colorize_dem(elev).astype(np.float32)
-
-        def _water_rgb() -> np.ndarray | None:
-            if self.water_mask is None:
-                return None
-            h, w = self.water_mask["water_mask_dimensions"]
-            mask = np.array(self.water_mask["water_mask_values"],
-                            dtype=np.float32).reshape(h, w)
-            # Binary: water=1 → dodger blue (bright), land=0 → dark green.
-            # High contrast at coastlines correlates with the DEM sea-level boundary.
-            rgb = np.zeros((h, w, 3), dtype=np.float32)
-            rgb[mask >= 0.5] = [30, 144, 255]   # water → blue
-            rgb[mask < 0.5] = [34,  85,  34]   # land  → dark green
-            return rgb
-
-        def _esa_rgb() -> np.ndarray | None:
-            if self.esa_landcover is None:
-                return None
-            h, w = self.esa_landcover["esa_dimensions"]
-            esa = np.array(self.esa_landcover["esa_values"],
-                           dtype=np.float32).reshape(h, w)
-            return self._colorize_esa(esa).astype(np.float32)
-
-        def _satellite_rgb() -> np.ndarray | None:
-            if self.satellite is None:
-                return None
-            img = Image.open(
-                BytesIO(base64.b64decode(self.satellite))).convert("RGB")
-            return np.array(img, dtype=np.float32)
-
-        def _city_rgb() -> np.ndarray | None:
-            if self.city_raster is None:
-                return None
-            h = self.city_raster["height"]
-            w = self.city_raster["width"]
-            # Same semantic colours as show_city, blended back→front
-            rgb = np.zeros((h, w, 3), dtype=np.float32)
-            for lname, color in _CITY_LAYER_COLORS.items():
-                if lname not in self.city_raster:
-                    continue
-                mask = np.array(self.city_raster[lname],
-                                dtype=np.float32).reshape(h, w)
-                alpha = np.clip(mask, 0, 1)[:, :, np.newaxis]
-                layer_rgb = np.array(color, dtype=np.float32)[
-                    np.newaxis, np.newaxis, :]
-                rgb = rgb * (1 - alpha) + layer_rgb * alpha
-            return rgb
-
-        layers: dict[str, np.ndarray] = {"dem": _dem_rgb()}
-        for name, fn in (("water_mask", _water_rgb),
-                         ("esa",        _esa_rgb),
-                         ("satellite",  _satellite_rgb),
-                         ("city",       _city_rgb)):
-            arr = fn()
-            if arr is not None:
-                layers[name] = arr
-
-        if len(layers) == 1:
-            print("Only DEM available — nothing to register against.")
-            return {}
-
-        # ── 2. Check aspect ratios (degree-based W/H) ───────────────────────
-        lon_range = self.bbox["east"] - self.bbox["west"]
-        lat_range = self.bbox["north"] - self.bbox["south"]
-        geo_aspect = lon_range / lat_range  # W/H in degrees
-
-        def _aspect(arr: np.ndarray) -> float:
-            # W/H works for both 2-D and 3-D
-            return arr.shape[1] / arr.shape[0]
-
-        aspect_ok = True
-        for name, arr in layers.items():
-            a = _aspect(arr)
-            diff = abs(a - geo_aspect) / geo_aspect
-            status = "OK" if diff <= aspect_tol else "MISMATCH"
-            if diff > aspect_tol and name != "dem":
-                aspect_ok = False
-            marker = "[reference geo]" if name == "dem" else f"[{status}]"
-            print(f"  {name:12s}  {arr.shape[1]:5d}×{arr.shape[0]:4d} px  "
-                  f"aspect={a:.4f}  Δ={diff*100:.1f}%  {marker}")
-        print(
-            f"  {'(expected)':12s}  {'geo W/H':>10s}  aspect={geo_aspect:.4f}  [geographic]")
-        if not aspect_ok:
-            print("WARNING: aspect ratio mismatch — layer may cover a different extent "
-                  "or projection was applied to DEM but not other layers.")
-
-        # ── 3. Rescale all layers to target_dim on the longer axis ──────────
-        def _scale_rgb(arr: np.ndarray) -> np.ndarray:
-            h, w = arr.shape[:2]
-            if w >= h:
-                new_w, new_h = target_dim, max(
-                    1, int(round(target_dim * h / w)))
-            else:
-                new_h, new_w = target_dim, max(
-                    1, int(round(target_dim * w / h)))
-            if arr.ndim == 2:
-                return sk_resize(arr, (new_h, new_w),
-                                 anti_aliasing=True, preserve_range=True).astype(np.float32)
-            # RGB: resize each channel
-            return sk_resize(arr, (new_h, new_w, arr.shape[2]),
-                             anti_aliasing=True, preserve_range=True).astype(np.float32)
-
-        scaled = {name: _scale_rgb(arr) for name, arr in layers.items()}
-        ref = scaled["dem"]
-
-        # ── 4. Match all layers to the reference spatial shape (pad or crop) ─
-        def _match_shape(arr: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
-            # Crop to target first (handles layers larger than ref)
-            arr = arr[:target_h, :target_w]
-            ph = target_h - arr.shape[0]
-            pw = target_w - arr.shape[1]
-            if arr.ndim == 2:
-                return np.pad(arr, ((0, max(0, ph)), (0, max(0, pw))), mode="constant")
-            return np.pad(arr, ((0, max(0, ph)), (0, max(0, pw)), (0, 0)), mode="constant")
-
-        ref_h, ref_w = ref.shape[:2]
-        padded = {name: _match_shape(arr, ref_h, ref_w)
-                  for name, arr in scaled.items()}
-
-        # ── 5. Convert each RGB layer to an edge map for registration ────────
-        # phase_cross_correlation needs *shared structural signal* across layers.
-        # Raw pixel values differ completely (elevation ≠ satellite texture ≠ ESA
-        # class IDs), but edges (coastlines, ridge lines, building outlines) ARE
-        # shared.  Strategy:
-        #   a) RGB → luminance  (perceptual weights)
-        #   b) Sobel gradient magnitude  → emphasises boundaries
-        #   c) Gaussian blur  → reduce noise
-        #   d) zero-mean / unit-std normalisation so amplitudes match
-
-        edges = {name: self._compute_edge_map(
-            arr) for name, arr in padded.items()}
-
-        # ── 6. Run phase_cross_correlation pairwise vs DEM ───────────────────
-        results: dict = {}
-        other_names = [n for n in edges if n != "dem"]
-        n_other = len(other_names)
-
-        fig, axes = plt.subplots(2, n_other + 1,
-                                 figsize=(4 * (n_other + 1), 8))
-        if n_other == 0:
-            axes = axes.reshape(2, 1)
-        axes = np.array(axes)
-
-        # Top row: colorized RGB previews
-        dem_rgb_prev = (padded["dem"] / 255.0).clip(0, 1)
-        axes[0, 0].imshow(dem_rgb_prev, origin="upper")
-        axes[0, 0].set_title("DEM (colorized)", fontsize=8)
-        axes[0, 0].axis("off")
-
-        # Bottom row: edge maps used for registration
-        axes[1, 0].imshow(edges["dem"], cmap="gray", origin="upper")
-        axes[1, 0].set_title("DEM (edges for reg.)", fontsize=8)
-        axes[1, 0].axis("off")
-
-        def _ncc_rgb(a: np.ndarray, b: np.ndarray) -> float:
-            """Normalised cross-correlation averaged across RGB channels.
-
-            Correlating each channel independently then averaging gives more
-            signal than collapsing to luminance first — colour differences
-            between classes (blue water vs green land vs brown bare) each
-            contribute a separate correlation term.
-            """
-            a = a.astype(np.float32)
-            b = b.astype(np.float32)
-            scores = []
-            for c in range(a.shape[2] if a.ndim == 3 else 1):
-                ac = a[:, :, c] if a.ndim == 3 else a
-                bc = b[:, :, c] if b.ndim == 3 else b
-                ac = ac - ac.mean()
-                bc = bc - bc.mean()
-                denom = np.sqrt((ac ** 2).sum() * (bc ** 2).sum())
-                scores.append(float(np.sum(ac * bc) / denom)
-                              if denom > 1e-9 else 0.0)
-            return float(np.mean(scores))
-
-        ref_edge = edges["dem"]
-        # Use satellite as ground truth for NCC if available — it's the actual
-        # photo of the ground so colour correlation against it is most meaningful.
-        # Fall back to DEM colorization if satellite wasn't fetched.
-        ncc_ref_rgb = padded.get("satellite", padded["dem"])
-        ncc_ref_name = "satellite" if "satellite" in padded else "dem"
-
-        # Satellite is already the NCC reference — skip registering it against
-        # itself (would always give shift=0, ncc=1.0, which is trivially true).
-        for col, name in enumerate(other_names, start=1):
-            # Satellite used as NCC reference — report ncc=1 trivially, no shift
-            if name == ncc_ref_name:
-                results[name] = {
-                    "shift_raw":  [0.0, 0.0],
-                    "shift_int":  [0, 0],
-                    "magnitude":  0.0,
-                    "applied":    False,
-                    "ncc_before": 1.0,
-                    "ncc_after":  1.0,
-                    "ncc_gain":   0.0,
-                    "phasediff":  0.0,
-                    "note":       "NCC reference — not registered against itself",
-                }
-                label = "NCC reference\nncc=1.000 (self)"
-                rgb_prev = (padded[name] / 255.0).clip(0, 1)
-                axes[0, col].imshow(rgb_prev, origin="upper")
-                axes[0, col].set_title(f"{name}\n{label}", fontsize=8)
-                axes[0, col].axis("off")
-                axes[1, col].imshow(edges[name], cmap="gray", origin="upper")
-                axes[1, col].set_title(f"{name} (edges)", fontsize=8)
-                axes[1, col].axis("off")
-                continue
-
-            # Check edge coverage — layers with very few edges (near-uniform,
-            # e.g. almost-no-water masks) produce garbage shifts from noise peaks.
-            edge_coverage = float((np.abs(edges[name]) > 0.5).mean())
-            # For water_mask, also guard on actual water percentage — a mask that
-            # is 99% land has almost no coastline edges so any detected shift is noise.
-            if name == "water_mask" and self.water_mask is not None:
-                water_pct = self.water_mask.get("water_percentage", 50.0)
-                # Require at least 5% water AND 5% land to have meaningful coastline edges
-                feature_pct = min(water_pct, 100.0 - water_pct)
-                low_coverage = edge_coverage < 0.02 or feature_pct < 5.0
-            else:
-                low_coverage = edge_coverage < 0.02  # < 2% edge pixels
-
-            # Note: phase_cross_correlation 'error' is deprecated in skimage >= 0.20
-            # and always returns 1.0.  Use shift + phasediff only.
-            shift, _error, phasediff = phase_cross_correlation(
-                ref_edge, edges[name], upsample_factor=upsample_factor)
-
-            # Round to integer pixels — sub-pixel shifts can't be applied to
-            # discrete rasters and tiny fractional values add noise.
-            shift_int = np.round(shift).astype(int)
-            dy_i, dx_i = int(shift_int[0]), int(shift_int[1])
-            magnitude = float(np.sqrt(dy_i ** 2 + dx_i ** 2))
-
-            # NCC on full RGB vs satellite (or DEM if no satellite)
-            ncc_before = _ncc_rgb(ncc_ref_rgb, padded[name])
-
-            # Skip applying shift if: magnitude < threshold OR layer has too few
-            # edges (correlation result is unreliable noise).
-            if magnitude >= min_shift_px and not low_coverage:
-                shifted_rgb = np.roll(padded[name], (dy_i, dx_i), axis=(0, 1))
-                applied = True
-            else:
-                shifted_rgb = padded[name]
-                applied = False
-
-            ncc_after = _ncc_rgb(ncc_ref_rgb, shifted_rgb)
-
-            results[name] = {
-                "shift_raw":  shift.tolist(),
-                "shift_int":  [dy_i, dx_i],
-                "magnitude":  magnitude,
-                "applied":    applied,
-                "ncc_before": ncc_before,
-                "ncc_after":  ncc_after,
-                "ncc_gain":      ncc_after - ncc_before,
-                "phasediff":     float(phasediff),
-                "edge_coverage": edge_coverage,
-                "low_coverage":  low_coverage,
-            }
-
-            if low_coverage:
-                status = f"skip (low edges {edge_coverage*100:.1f}%)"
-            elif applied:
-                status = f"shift=({dy_i:+d},{dx_i:+d})px"
-            else:
-                status = f"no shift (<{min_shift_px:.0f}px)"
-            label = f"{status}\nncc {ncc_before:.3f}→{ncc_after:.3f}"
-
-            rgb_prev = (padded[name] / 255.0).clip(0, 1)
-            axes[0, col].imshow(rgb_prev, origin="upper")
-            axes[0, col].set_title(f"{name}\n{label}", fontsize=8)
-            axes[0, col].axis("off")
-
-            axes[1, col].imshow(edges[name], cmap="gray", origin="upper")
-            axes[1, col].set_title(
-                f"{name} (edges  {edge_coverage*100:.1f}%)", fontsize=8)
-            axes[1, col].axis("off")
-
-        fig.suptitle(
-            f"{self.region_name} — Layer alignment (target {target_dim} px)", fontsize=10)
-        plt.tight_layout()
-        plt.show()
-
-        header = (
-            f"\nAlignment results  "
-            f"(shift via DEM edges, NCC vs {ncc_ref_name}, min_shift={min_shift_px}px):")
-        print(header)
-        print(f"  {'layer':12s}  {'shift(dy,dx)':>14s}  {'mag':>5s}  {'applied':>7s}  "
-              f"{'ncc_before':>10s}  {'ncc_after':>9s}  {'gain':>6s}  {'note'}")
-        for name, r in results.items():
-            dy, dx = r["shift_int"]
-            note = r.get("note", "")
-            if not note and r.get("low_coverage"):
-                note = f"low edges ({r['edge_coverage']*100:.1f}%) — shift unreliable"
-            print(f"  {name:12s}  ({dy:+4d},{dx:+4d}) px  "
-                  f"{r['magnitude']:5.1f}  {'yes' if r['applied'] else 'no':>7s}  "
-                  f"{r['ncc_before']:10.4f}  {r['ncc_after']:9.4f}  {r['ncc_gain']:+.4f}"
-                  + (f"  [{note}]" if note else ""))
-
-        return results
 
     def _fetch_water_endpoint(self) -> dict:
         """Call /api/terrain/water-mask and return the raw response dict.
@@ -1948,8 +1508,6 @@ class TerrainSession:
           downloaded on first use (~30–100 MB each) and cached permanently under
           ``cache/hydrorivers/``.  Uses ``min_order`` and ``order_exponent``.
 
-        The resulting grid can be merged with the DEM via ``merge_hydrology_with_dem()``.
-
         Parameters
         ----------
         max_display_dim : int
@@ -2050,73 +1608,6 @@ class TerrainSession:
         logger.info(f"  Post-processing: {dt_post:.1f}s (prepare array + rescale)")
         logger.info(f"  Hydrology complete: {w}x{h} px, {dt_total:.1f}s total "
                     f"(API={dt_api:.1f}s, post={dt_post:.1f}s)")
-        return self
-
-    def merge_hydrology_with_dem(self) -> TerrainSession:
-        """Merge hydrology depressions with DEM elevation values.
-
-        Applies self.hydrology as a depression layer to self.dem using element-wise minimum.
-        This should be called AFTER fetch_dem() and fetch_hydrology().
-        Internally posts both arrays to /api/terrain/hydrology/merge.
-
-        Returns
-        -------
-        self
-        """
-        if self.dem is None:
-            raise RuntimeError("Call fetch_dem() first")
-        if self.hydrology is None:
-            logger.warning("⚠️  No hydrology data available (call fetch_hydrology() first)")
-            return self
-
-        # Send bbox + DEM settings so the server resolves both arrays from
-        # its disk cache — avoids re-transmitting multi-MB arrays.
-        s = self.settings["dem"]
-        payload = {
-            "bbox": self.bbox,
-            "dem": {
-                "dim":          s.get("dim", 200),
-                "dem_source":   s.get("dem_source", "local"),
-                "projection":   s.get("projection", "cosine"),
-                "depth_scale":  s.get("depth_scale", 0.5),
-                "water_scale":  s.get("water_scale", 0.05),
-                "subtract_water":      s.get("subtract_water", True),
-                "maintain_dimensions": s.get("maintain_dimensions", True),
-                "clip_valid_region": s.get("clip_valid_region", False),
-                "show_sat":     False,
-            },
-        }
-
-        try:
-            endpoint = "/api/composite/hydrology-merge"
-            resp = self._api_request(
-                "post", endpoint, json=payload, timeout=300)
-        except Exception as e:
-            logger.warning(f"⚠️  Hydrology merge API request failed: {e}")
-            return self
-
-        # Update DEM with merged values (response is b64-encoded float32)
-        try:
-            import base64 as _b64
-            merged_b64 = resp.get("merged_dem_b64", "")
-            if merged_b64:
-                merged_arr = np.frombuffer(
-                    _b64.b64decode(merged_b64), dtype=np.float32)
-                self.dem["dem_values_b64"] = merged_b64
-            else:
-                # Fallback for raw list response (backwards compat)
-                merged_arr = np.array(
-                    resp.get("merged_dem_values", []), dtype=np.float32)
-                self.dem["dem_values_b64"] = _b64.b64encode(
-                    merged_arr.tobytes()).decode("ascii")
-            self.dem.pop("dem_values", None)
-            self.dem["min_elevation"] = float(merged_arr.min())
-            self.dem["max_elevation"] = float(merged_arr.max())
-            self.dem["mean_elevation"] = float(merged_arr.mean())
-            logger.info("Merged hydrology depressions into DEM")
-        except Exception as e:
-            logger.warning(f"Failed to apply merged DEM: {e}")
-
         return self
 
     def show_hydrology(self) -> None:
@@ -2299,9 +1790,10 @@ class TerrainSession:
         payload = {
             **self.bbox,
             "dim":                c.get("dim", self.settings["dem"]["dim"]),
-            "buildings":          True,
-            "roads":              True,
-            "waterways":          True,
+            # The server burns the GeoJSON it is sent; it does not read the OSM cache.
+            "buildings":          self.city_data.get("buildings") or {},
+            "roads":              self.city_data.get("roads") or {},
+            "waterways":          self.city_data.get("waterways") or {},
             "building_scale":     c["building_scale"],
             "road_depression_m":  c["road_depression_m"],
             "water_depression_m": c["water_depression_m"],
@@ -2455,8 +1947,8 @@ class TerrainSession:
         # Build DEM array for DSM→height subtraction (google3d needs it)
         dem_arr = None
         if self.dem is not None:
-            dem_arr = np.array(self.dem["values"],
-                               dtype=np.float32).reshape(dim_h, dim_w)
+            dem_arr = self._decode_grid_response(
+                self.dem, "dem_values_b64", "dem_values", dim_h, dim_w)
 
         # Registry of available providers
         _registry = {
@@ -2733,175 +2225,6 @@ class TerrainSession:
         self._roof_model = model
         logger.info(f"RoofNet loaded: {checkpoint_path}")
         return self
-
-    # ------------------------------------------------------------------ #
-    # CNN height prediction (Phase 2)                                       #
-    # ------------------------------------------------------------------ #
-
-    def predict_heights(
-        self,
-        model: str = "pretrained",
-        checkpoint: Union[str, Path] | None = None,
-        device: str = "cpu",
-    ) -> TerrainSession:
-        """Predict building heights from satellite imagery using a CNN.
-
-        Requires ``self.satellite`` to be populated (call ``fetch_satellite()``
-        first).  Uses OSM / Phase-1 heights in ``self.building_heights`` as
-        calibration data when available.
-
-        Parameters
-        ----------
-        model : str
-            ``"pretrained"`` — Depth Anything V2 Small (HuggingFace, zero-shot,
-            calibrated to metres using known OSM heights in the tile).
-            ``"unet"``       — Trained U-Net checkpoint (see
-            ``train_height_model()``).  Requires ``checkpoint`` path.
-        checkpoint : str or Path, optional
-            Path to a U-Net .pt checkpoint.  Defaults to
-            ``models/height_unet.pt`` in the project root.
-        device : str
-            ``"cpu"`` or ``"cuda"``.
-
-        After this call:
-            ``self.predicted_heights`` : HeightResult with (H, W) float32
-            raster in metres and per-pixel confidence.
-
-        Returns self for chaining.
-        """
-        from city2stl.height.predict import predict as _predict
-
-        if getattr(self, "satellite", None) is None:
-            raise RuntimeError("Call fetch_satellite() before predict_heights().")
-
-        # Decode satellite RGB
-        import base64 as _b64
-        sat_b64 = self.satellite.get("image_b64") or self.satellite.get("data")
-        if sat_b64 is None:
-            raise RuntimeError(
-                "Satellite data not found in self.satellite.  "
-                "Expected 'image_b64' or 'data' key."
-            )
-        sat_bytes = _b64.b64decode(sat_b64)
-        sat_rgb = np.array(Image.open(BytesIO(sat_bytes)).convert("RGB"))
-
-        # Known heights for calibration
-        known_heights = None
-        if getattr(self, "building_heights", None) is not None:
-            known_heights = self.building_heights.raster
-
-        north = self.bbox["north"]
-        south = self.bbox["south"]
-        east = self.bbox["east"]
-        west = self.bbox["west"]
-        bbox = (north, south, east, west)
-
-        ckpt = Path(checkpoint) if checkpoint else None
-
-        logger.info(f"Running height prediction (model={model!r})…")
-        result = _predict(
-            sat_rgb,
-            known_heights,
-            bbox,
-            model=model,
-            checkpoint=ckpt,
-            device=device,
-        )
-        n_valid = int(np.sum(~np.isnan(result.raster)))
-        total = result.raster.size
-        logger.info(f"✓ Predicted heights: {n_valid}/{total} pixels  "
-                    f"range=[{float(np.nanmin(result.raster)):.1f}, "
-                    f"{float(np.nanmax(result.raster)):.1f}] m  "
-                    f"source={result.source_name}")
-        self.predicted_heights = result
-        return self
-
-    def train_height_model(
-        self,
-        cities: list | None = None,
-        epochs: int = 50,
-        batch_size: int = 8,
-        lr: float = 1e-4,
-        device: str = "cpu",
-        output: Union[str, Path] | None = None,
-        tiles_per_city: int = 100,
-        providers: list | None = None,
-    ) -> dict:
-        """Collect training tiles and train the U-Net height predictor.
-
-        Phase 2.2 of the ML height work (docs/history/ml-height/README.md).
-
-        Parameters
-        ----------
-        cities : list of city names to collect tiles from.
-            Available: ``"Barcelona"``, ``"Granada"``, ``"Cartagena"``.
-            Defaults to ``["Barcelona"]``.
-        epochs : number of training epochs (default 50).
-        batch_size : mini-batch size (default 8).
-        lr : learning rate (default 1e-4).
-        device : ``"cpu"`` or ``"cuda"``.
-        output : Path to save checkpoint.  Defaults to
-            ``<project_root>/models/height_unet.pt``.
-        tiles_per_city : max tiles to collect per city (default 100).
-        providers : height provider names for tile collection.
-            Defaults to ``["ndsm", "wsf3d", "google3d"]``.
-
-        Returns
-        -------
-        dict with ``best_val_loss``, ``epochs_trained``, ``n_train``,
-        ``n_val``, ``checkpoint``.
-        """
-        from app.server.core.height.train import collect_tiles
-        from city2stl.height.train import (
-            _DEFAULT_CITIES,
-            TrainConfig,
-        )
-        from city2stl.height.train import (
-            train as _train,
-        )
-
-        cities = cities or ["Barcelona"]
-        providers = providers or ["ndsm", "wsf3d"]
-
-        # Validate city names
-        unknown = [c for c in cities if c not in _DEFAULT_CITIES]
-        if unknown:
-            raise ValueError(
-                f"Unknown cities: {unknown}.  "
-                f"Available: {list(_DEFAULT_CITIES)}"
-            )
-
-        project_root = Path(__file__).resolve().parents[3]
-        tile_dir = project_root / "cache" / "height_tiles"
-        default_output = project_root / "models" / "height_unet.pt"
-        output_path = Path(output) if output else default_output
-
-        logger.info(f"Collecting tiles for {cities} from providers {providers}…")
-        tile_paths = collect_tiles(
-            cities,
-            tile_dir=tile_dir,
-            providers=providers,
-            tiles_per_city=tiles_per_city,
-        )
-        logger.info(f"Collected {len(tile_paths)} tiles total")
-
-        if not tile_paths:
-            raise RuntimeError(
-                "No tiles collected.  Check provider availability or city coverage."
-            )
-
-        cfg = TrainConfig(
-            epochs=epochs,
-            batch_size=batch_size,
-            lr=lr,
-            device=device,
-        )
-
-        logger.info(f"Training U-Net ({cfg.epochs} epochs, device={device})…")
-        result = _train(tile_paths, output_path, cfg)
-        logger.info(f"✓ Training complete  best_val_loss={result['best_val_loss']:.4f}  "
-                    f"checkpoint={result['checkpoint']}")
-        return result
 
     # ------------------------------------------------------------------ #
     # STL import + infill                                                   #
