@@ -28,7 +28,7 @@ npm install && npm run build  # after editing .vue / .ts (the Vue bundle in dist
 ## Cloud agents
 
 Cloud sessions (claude.ai/code) take their work from [docs/agents/TASKS.md](docs/agents/TASKS.md):
-only tasks with Owner `cloud` and Status `todo`. Setup is automatic:
+only tasks with Owner `cloud`, Status `todo`, and no `cloud/T<n>-*` branch on origin yet. Setup is automatic:
 `.claude/hooks/session-start.sh` clones `../numpy2stl`, builds `~/.venvs/map2stl` (no torch) and
 runs `npm install`. No Google key and no survey/Overpass hosts unless the environment adds them.
 
@@ -45,7 +45,10 @@ runs `npm install`. No Google key and no survey/Overpass hosts unless the enviro
   `settings/`) or the shared docs (`docs/plans/README.md`, `docs/proposals.md`, `docs/decisions/`).
 - **Performance:** BLAS threads = 1 in pool workers (`OPENBLAS_NUM_THREADS` / `OMP_NUM_THREADS`),
   no polling loops, no `find /`.
-- **When done:** push the branch and set the task to `review` with the test counts.
+- **Claim by branch:** a task is taken when `git ls-remote --heads origin 'cloud/T<n>-*'` shows a
+  branch; push a first commit early. Don't edit `docs/agents/TASKS.md` on a branch.
+- **When done:** push the branch with the test counts (and any deletion list) in the last commit
+  message; the local session that merges it updates the board.
 
 ## Where things are
 

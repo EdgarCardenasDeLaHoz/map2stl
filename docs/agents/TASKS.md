@@ -6,9 +6,13 @@ instead of having tasks pasted in.
 
 ## Rules
 
-- **Cloud sessions take only tasks with Owner `cloud` and Status `todo`.** Set the task to
-  `in-progress` with the branch name when starting, and to `review` with the test counts when
-  the branch is pushed. Edit only your own task's row (commit the board change on your branch).
+- **Cloud sessions take only tasks with Owner `cloud` and Status `todo` whose branch does not
+  exist yet.** A task is claimed by its branch: before starting, run
+  `git ls-remote --heads origin 'cloud/T<n>-*'`; if a branch shows up, another session has it.
+  Push the branch early (a first commit) so the claim is visible.
+- **Cloud branches don't edit this file** (every branch editing it made merge conflicts, and a
+  status set on a branch never reached master). Put the test counts and any deletion list in
+  the branch's last commit message; the merging session updates the board on master.
 - **Only the user or a local agent adds tasks, assigns owners, or moves a task to `todo` or
   `done`.** A `suggested` task waits for the user to confirm it.
 - One task, one branch: `cloud/<task-id>-<slug>`, from the latest `origin/master`. Never push
@@ -19,7 +23,8 @@ instead of having tasks pasted in.
 
 ## Merge process
 
-1. The agent pushes `cloud/<task-id>-<slug>` and sets the task to `review`.
+1. The agent pushes `cloud/<task-id>-<slug>` with the test counts in its last commit message.
+   A local session that sees the branch may mark the task `in-progress` or `review` on master.
 2. `local-map2stl` reviews the branch, rebases it on master if needed, runs the full suite
    (pytest `-n 4`, vitest, eslint) and a browser smoke test for UI changes, then merges it
    into master and pushes. Anything under `city2stl/skyline/` or F-SKYBENCH is reviewed by
