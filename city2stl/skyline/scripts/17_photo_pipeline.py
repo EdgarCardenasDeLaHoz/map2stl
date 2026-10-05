@@ -113,7 +113,7 @@ def _measure(prof, pose: ph.PhotoPose, max_dist_m: float, h_cam: float = 2.0):
         flags.update({m.index: f for m in ms if m.index in refit
                       and (f := ph.reading_flag(refit[m.index], m.osm_height_m, m.dist_m, h_cam))})
     rows = [{"tower": m.index, "name": m.name, "dist_m": round(m.dist_m),
-             "photo_m": round(est[m.index], 1), "osm_m": m.osm_height_m,
+             "photo_m": round(est[m.index], 1), "osm_m": m.osm_height_m, "fp": _tower_key(towers, m.index),
              **({"flag": flags[m.index]} if m.index in flags else {})}
             for m in ms if m.index in est]
     # every reading counts here: a misplaced photo shows up as many towers far from their tags
@@ -211,6 +211,28 @@ def _shared_buildings(results: list[dict], rows: list[dict]) -> list[dict]:
                     "photo_m": b.get("photo_m"), "osm_m": b.get("osm_m"), "truth_m": b.get("truth_m"),
                     "confirmed": sum(1 for x in reads if x["confirmed_by"] and not x["flag"])})
     return sorted(out, key=lambda b: (-len(b["reads"]), b["name"]))
+
+
+def _tower_key(towers, ti: int) -> str:
+    """Stable id of a tower (its footprint key): the table index changes when OSM is re-fetched."""
+    return bm.footprint_key([list(towers.to_ll(x, y))[::-1] for x, y in towers.verts[ti]])
+
+
+def _remap(results: list[dict], towers) -> None:
+    """Point saved readings at the current tower table by footprint key (readings without a key
+    keep their index and are checked by name in ``finish``); a tower gone from OSM is dropped."""
+    if not any("fp" in t for r in results for t in r.get("towers") or []):
+        return
+    index = {_tower_key(towers, i): i for i in range(len(towers.verts))}
+    for r in results:
+        kept = []
+        for t in r.get("towers") or []:
+            if "fp" in t:
+                if t["fp"] not in index:
+                    continue
+                t["tower"] = index[t["fp"]]
+            kept.append(t)
+        r["towers"] = kept
 
 
 def _truth(args, footprints: dict) -> dict:
@@ -445,6 +467,7 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
     """Keep decision, per-building medians, truth, Street View comparison, report page."""
     towers = sm.tower_table(osm["buildings"]["features"])
     # truth for every candidate tower (kept or not), so the gates can be judged per photo
+    _remap(results, towers)
     all_t = {t["tower"] for r in results for t in r.get("towers") or []}
     # saved results index the tower table; a changed region box or OSM data makes another table
     stale = [t for r in results for t in r.get("towers") or []
