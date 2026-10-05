@@ -1194,6 +1194,67 @@ async def get_terrain_hydrology(
 # Trails — ski pistes and hiking paths
 # ---------------------------------------------------------------------------
 
+@router.get("/api/terrain/borders", tags=["terrain"])
+async def get_terrain_borders(
+    request: Request,
+    bbox: BboxQueryParams = Depends(_parse_bbox_query),
+    dim: int | None = Query(None, description="Grid resolution (the longer side, like the DEM)"),
+    projection: str | None = Query(None, description="Map projection: 'none', 'cosine', 'mercator', ..."),
+    clip_valid_region: bool | None = Query(None, description="Clip projection padding to valid data extent"),
+    maintain_dimensions: bool | None = Query(None, description="Maintain output dimensions after projection"),
+):
+    """Country and state/province borders on a grid over the box, for the Edit map (view only).
+
+    Grid codes: 0 none, 1 state/province line, 2 country border (``geo2stl/borders.py``,
+    Natural Earth 10 m). The raw grid is cached per box and size; the projection is
+    applied per request, nearest-neighbour (the codes are classes).
+    """
+    from geo2stl.borders import borders_grid
+    from geo2stl.water_layers import bbox_grid_shape
+
+    params = request.query_params
+    north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
+    dim = _parse_int(params, "dim", 600)
+    projection = params.get("projection", "none")
+    clip_valid_region = _parse_bool(params, "clip_valid_region", True)
+    maintain_dimensions = _parse_bool(params, "maintain_dimensions", False)
+    err = _validate_bbox(north, south, east, west) or _validate_dim(dim)
+    if err:
+        return err
+    shape = bbox_grid_shape(north, south, east, west, dim)
+
+    def _compute() -> tuple[np.ndarray, dict]:
+        if TEST_MODE:   # no Natural Earth download in tests: a cross of a country and a state line
+            g = np.zeros(shape, dtype=np.uint8)
+            g[shape[0] // 2, :] = 2
+            g[:, shape[1] // 2] = 1
+            return g, {"countries": 1, "states": 1}
+        key = make_cache_key("borders", north, south, east, west, {"shape": list(shape), "v": 1})
+        hit = read_array_cache("borders", key)
+        if hit is not None and hit[0].get("grid") is not None:
+            return hit[0]["grid"].astype(np.uint8), dict(hit[1].get("counts") or {})
+        g, counts = borders_grid(north, south, east, west, shape)
+        write_array_cache("borders", key, {"grid": g}, {"counts": counts})
+        return g, counts
+
+    try:
+        grid, counts = await run_sync(_compute)
+    except Exception as e:  # noqa: BLE001 - offline or a bad archive: say so, don't 500 the page
+        logger.warning("Borders unavailable: %s", e)
+        return error_response(f"Borders unavailable: {e}")
+    if projection != "none":
+        grid = np.nan_to_num(_project_grid(
+            grid.astype(np.float32), north, south, east, west, projection, clip_valid_region,
+            categorical=True, maintain_dimensions=maintain_dimensions), nan=0.0)
+    h, w = grid.shape
+    return JSONResponse(content={
+        "grid_values_b64": _b64(np.asarray(grid, dtype=np.float32)),
+        "grid_dimensions": [h, w],
+        "codes": {"state": 1, "country": 2},
+        "counts": counts,
+    })
+
+
 #: Largest region (bbox diagonal) trails are fetched for; see get_terrain_trails.
 TRAILS_MAX_DIAG_KM = 300.0
 

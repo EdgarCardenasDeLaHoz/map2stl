@@ -111,6 +111,11 @@ function status(l: EditLayer): string {
       return on(l) ? 'Preview only' : 'Off';
     case 'mesh':
       return on(l) ? 'Shown on the map' : 'Off';
+    case 'borders': {
+      if (!on(l)) return 'Off';
+      const c = (window as any).appState?.lastBordersData?.counts;
+      return c ? `Map only · ${c.countries ?? 0} country, ${c.states ?? 0} state lines` : 'Map only';
+    }
   }
   return '';
 }

@@ -257,6 +257,9 @@ window.api = (() => {
         /** GET /api/terrain/hydrology?{params} */
         hydrology: (params, signal) => _fetch(`/api/terrain/hydrology?${params}`, signal ? { signal } : {}),
 
+        /** GET /api/terrain/borders?{params} — country/state border grid (view only) */
+        borders: (params, signal) => _fetch(`/api/terrain/borders?${params}`, signal ? { signal } : {}),
+
         /** GET /api/terrain/trails?{params} */
         trails: (params, signal) => _fetch(`/api/terrain/trails?${params}`, signal ? { signal } : {}),
 

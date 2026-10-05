@@ -305,6 +305,22 @@ export const GROUPS: Record<string, LayerGroups> = {
     ],
   },
 
+  borders: {
+    fetch: [],
+    reload: { label: '↺ Reload borders', click: 'reloadBordersBtn' },
+    view: [
+      opacityRow('Borders'),
+      { kind: 'switch', label: 'Countries', icon: '🏳', color: '#ff453a', id: 'bordersShowCountries',
+        hint: 'Borders between countries' },
+      { kind: 'switch', label: 'States and provinces', icon: '▦', color: '#ffd60a', id: 'bordersShowStates',
+        hint: 'First-level divisions' },
+      { kind: 'color', label: 'Country colour', icon: '■', color: '#ff453a', id: 'bordersCountryColor' },
+      { kind: 'color', label: 'State colour', icon: '■', color: '#ffd60a', id: 'bordersStateColor' },
+    ],
+    composite: [],
+    note: 'View only: borders are drawn on the map, not printed. Natural Earth 1:10m.',
+  },
+
   mesh: {
     fetch: [{ kind: 'sub', label: 'Import a mesh', icon: '📐', color: '#5e5ce6', sub: 'mesh', hint: 'STL or OBJ: upload, library, convert' }],
     view: [opacityRow('MeshImport')],

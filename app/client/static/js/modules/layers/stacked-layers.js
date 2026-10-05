@@ -49,7 +49,7 @@ window.setGridPixelMode = function setGridPixelMode(on) {
 // All layer canvas IDs — render order (first = bottom, last = top).
 // Mutable so users can reorder via the UI.
 // NOTE: Water and Hydrology are combined into WaterHydrology for unified rendering
-let _layerOrder = ['Dem', 'WaterHydrology', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'Trails', 'MeshImport', 'CompositeDem'];
+let _layerOrder = ['Dem', 'WaterHydrology', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'Trails', 'MeshImport', 'CompositeDem', 'Borders'];
 const LAYER_STACK = _layerOrder;  // alias kept for backward compat
 
 /**
@@ -65,6 +65,7 @@ const LAYER_CANVAS_IDS = {
     Trails: 'layerTrailsCanvas',
     MeshImport: 'layerMeshImportCanvas',
     CompositeDem: 'layerCompositeDemCanvas',
+    Borders: 'layerBordersCanvas',
 };
 
 /**
@@ -100,6 +101,10 @@ const LAYER_AUTOLOAD = {
     CityOverlay: {
         ready: () => !!window.appState?.osmCityData,
         load: () => window.loadCityData?.(),
+    },
+    Borders: {
+        ready: () => !!window.appState?.bordersSourceCanvas,
+        load: () => window.loadBorders?.({ activate: false }),
     },
     Trails: {
         ready: () => !!window.appState?.lastTrailsData,
@@ -193,7 +198,7 @@ window.clearAllLayerBuffers = function clearAllLayerBuffers() {
 
 // Multi-layer state: set of active layer keys + per-layer opacity (0–1)
 let _activeLayers = new Set(['Dem', 'CityOverlay']);
-let _layerOpacities = { Dem: 1, WaterHydrology: 0.75, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CityOverlay: 0.85, Trails: 0.9, MeshImport: 0.8, CompositeDem: 1 };
+let _layerOpacities = { Dem: 1, WaterHydrology: 0.75, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CityOverlay: 0.85, Trails: 0.9, MeshImport: 0.8, CompositeDem: 1, Borders: 0.9 };
 
 // ─── Composite | Satellite split view ───────────────────────────────────────
 // A dual-pane alternative to the opacity-blended stack: draws the Composite
@@ -507,6 +512,7 @@ window.updateStackedLayers = function updateStackedLayers() {
         SatImg: () => window.appState?.satImgSourceCanvas || null,
         CityRaster: () => window.appState?.cityRasterSourceCanvas || null,
         Trails: () => window.appState?.trailsSourceCanvas || null,
+        Borders: () => window.appState?.bordersSourceCanvas || null,
         MeshImport: () => window.appState?.meshSourceCanvas || null,
         CompositeDem: () => window.appState?.compositeDemSourceCanvas || null,
     };

@@ -89,6 +89,7 @@ const LAYERS = [
   { key: 'CityOverlay',     icon: '⬡',  short: 'City Poly', label: 'City ⬡',      cls: 'City',     hint: 'City vector polygons',        res: null,              def: 85 },
   { key: 'Trails',          icon: '🥾', short: 'Trails',    label: 'Trails',      cls: 'Trails',   hint: 'Ski and hiking trails',       res: 'trailsDim',       def: 90 },
   { key: 'MeshImport',      icon: '📐', short: 'Mesh',      label: 'Mesh Import', cls: 'Imported', hint: 'Imported STL/OBJ mesh layer', res: null,              def: 80 },
+  { key: 'Borders',         icon: '🗺', short: 'Borders',   label: 'Borders',     cls: 'Borders',  hint: 'Country and state borders',   res: null,              def: 90 },
   { key: 'CompositeDem',    icon: '★',  short: 'Composite', label: 'Composite',   cls: 'Composite', hint: 'Composite DEM',              res: null,              def: 100 },
 ];
 

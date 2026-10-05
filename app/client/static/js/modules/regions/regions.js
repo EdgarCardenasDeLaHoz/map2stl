@@ -195,6 +195,7 @@ async function selectCoordinate(index, opts = {}) {
     if (typeof window.clearCityOverlay === 'function') window.clearCityOverlay();
     // An imported mesh is registered against the previous region's bbox.
     window.clearMeshLayer?.();
+    window.clearBorders?.();
 
     // Highlight in sidebar list
     document.querySelectorAll('.coordinate-item').forEach(item => {

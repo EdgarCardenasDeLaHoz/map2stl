@@ -14,7 +14,7 @@
       <h2 class="ls-title">{{ layer.name }}</h2>
       <div class="ls-subt">{{ subtitle }}</div>
 
-      <template v-for="g in groups" :key="g.key">
+      <template v-for="g in shownGroups" :key="g.key">
         <div class="ls-cap">
           <span>{{ g.title }}</span>
           <button type="button" class="ls-link" @click="reset(g.rows)">Reset</button>
@@ -30,7 +30,7 @@
             <button v-for="l in def.links" :key="l.label" type="button" class="ls-link" @click="click(l.click)">{{ l.label }}</button>
           </div>
         </template>
-        <div v-if="g.key.endsWith(':composite') && def.note" class="ls-note">{{ def.note }}</div>
+        <div v-if="g.key === noteKey && def.note" class="ls-note">{{ def.note }}</div>
         <button v-if="g.rows.some((r) => r.adv)" type="button" class="ls-link ls-adv" @click="panel.toggleAdvanced(g.key)">
           {{ panel.advanced[g.key] ? 'Hide advanced' : 'Show advanced' }}
         </button>
@@ -60,6 +60,7 @@ const SUBTITLES: Record<string, string> = {
   trails: 'Ski pistes and hiking paths',
   landcover: 'Forest, fields, built-up areas',
   mesh: 'A model you imported, placed on the terrain',
+  borders: 'Country and state lines on the map; not printed',
 };
 const subtitle = computed(() => SUBTITLES[layer.value.id] || '');
 
@@ -81,6 +82,16 @@ const groups = computed(() => {
     { key: `${id}:composite`, title: 'Composite', rows: def.value.composite },
     { key: 'canvas', title: 'Canvas', rows: CANVAS },
   ];
+});
+
+// A group with no rows and no action is left out (Borders: nothing to fetch or print).
+const shownGroups = computed(() => groups.value.filter((g) =>
+  g.rows.length || (g.key.endsWith(':fetch') && (def.value.reload || def.value.links?.length))));
+// The layer's note goes under Composite, or under View when it has no Composite group.
+const noteKey = computed(() => {
+  const keys = shownGroups.value.map((g) => g.key);
+  const id = layer.value.id;
+  return keys.includes(`${id}:composite`) ? `${id}:composite` : `${id}:view`;
 });
 
 function visible(rows: Row[], key: string): Row[] {

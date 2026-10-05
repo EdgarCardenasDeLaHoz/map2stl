@@ -349,6 +349,11 @@ window.decodeRasterValues = function decodeRasterValues(data) {
     return _decodeGrid(data.values_b64, data.values);
 };
 
+/** Borders grid from /api/terrain/borders (0 none, 1 state line, 2 country border). */
+window.decodeBordersGrid = function decodeBordersGrid(data) {
+    return _decodeGrid(data.grid_values_b64, data.grid_values);
+};
+
 window.decodeWaterMask = function decodeWaterMask(data) {
     return _decodeGrid(data.water_mask_values_b64, data.water_mask_values);
 };

@@ -44,6 +44,14 @@
           <CompositeDemSection />
           <MeshImportSection />
           <PlateRegistrationSection />
+          <!-- Borders layer (view only): read by modules/layers/borders-overlay.js -->
+          <div id="bordersControls">
+            <input type="checkbox" id="bordersShowCountries" checked aria-label="Show country borders">
+            <input type="checkbox" id="bordersShowStates" checked aria-label="Show state and province borders">
+            <input type="color" id="bordersCountryColor" value="#ff453a" aria-label="Country border colour">
+            <input type="color" id="bordersStateColor" value="#ffd60a" aria-label="State border colour">
+            <button type="button" id="reloadBordersBtn" @click="reloadBorders">Reload borders</button>
+          </div>
         </div>
 
       </div><!-- /dem-controls-inner -->
@@ -82,6 +90,7 @@ import LayerSettings         from './LayerSettings.vue';
 import { useEditLayersStore } from '../../stores/editLayers';
 
 const layers = useEditLayersStore();
+const reloadBorders = () => (window as any).loadBorders?.({ activate: true });
 // City SOP: step 2 (Load terrain) for the terrain, step 3 (Terrain edits) for the carved layers.
 const guideLink = computed(() => guideHref('city-stl-and-puzzle-sop',
   layers.selected === 'terrain' ? 'step-2' : 'step-3'));

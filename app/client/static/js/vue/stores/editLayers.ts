@@ -11,7 +11,7 @@
 import { defineStore } from 'pinia';
 import { checked, num, setChecked, setField, val } from '../dom-fields';
 
-export type EditLayerId = 'terrain' | 'water' | 'city' | 'satellite' | 'trails' | 'landcover' | 'mesh';
+export type EditLayerId = 'terrain' | 'water' | 'city' | 'satellite' | 'trails' | 'landcover' | 'mesh' | 'borders';
 
 export interface EditLayer {
   id: EditLayerId;
@@ -90,6 +90,13 @@ export const EDIT_LAYERS: EditLayer[] = [
     inModel: () => !!(w().getActiveLayers?.() as Set<string> | undefined)?.has('Sat'),
     setInModel: () => {},
     pictures: () => [document.querySelector('#satelliteImage canvas') as HTMLCanvasElement | null],
+  },
+  {
+    id: 'borders', name: 'Borders', icon: '🗺', stack: 'Borders', extra: true,
+    // View only (user 2026-10-05): country and state lines on the map, never in the print.
+    inModel: () => !!(w().getActiveLayers?.() as Set<string> | undefined)?.has('Borders'),
+    setInModel: () => {},
+    pictures: () => [w().appState?.bordersSourceCanvas],
   },
   {
     id: 'mesh', name: 'Imported mesh', icon: '📐', stack: 'MeshImport', extra: true,
