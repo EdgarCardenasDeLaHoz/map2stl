@@ -18,7 +18,7 @@
  *   Both render functions are debounced through requestAnimationFrame.
  *
  * Render functions (renderCityOverlay, renderCityOnDEM) and raster helpers
- * (loadCityRaster, _setupCityRasterLayer, _clearCityRasterCache, _updateCitiesLoadButton)
+ * (loadCityRaster, _updateCitiesLoadButton)
  * live in city-render.js, which must be loaded immediately after this file.
  *
  * loadCityData() runs the fetch as a background job (POST /api/cities/start, see
@@ -1076,9 +1076,6 @@ window.enhanceBuildingHeights = async function enhanceBuildingHeights() {
 // Re-render overlays automatically when data or bbox changes.
 // ---------------------------------------------------------------------------
 function _initCityOverlaySubscriptions() {
-    // Wire city heights raster layer controls
-    window._setupCityRasterLayer?.();
-
     // Check Google 3D API key availability (non-blocking)
     _checkGoogle3dAvailable();
 

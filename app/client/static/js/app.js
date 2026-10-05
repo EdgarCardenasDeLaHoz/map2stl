@@ -106,7 +106,6 @@ function clearLayerCache() {
     // Reset layer tracking
     window.appState.layerBboxes = { dem: null, water: null, landCover: null };
     window.appState.layerStatus = { dem: 'empty', water: 'empty', landCover: 'empty' };
-    window._clearCityRasterCache?.();
     window.appState.cityRasterSourceCanvas = null;
     window.appState.compositeDemSourceCanvas = null;
     window.appState.compositeFeatures = null;
@@ -204,7 +203,7 @@ function isLayerCurrent(layerName) {
 window.getCurrentBboxObject = getCurrentBboxObject;
 
 // BBOX_COLORS and currentBboxColorIndex defined in modules/map-globe.js
-// and exposed as window.BBOX_COLORS / window.resetBboxColorIndex there.
+// and exposed as window.BBOX_COLORS there.
 
 // ============================================================
 // INITIALIZATION
@@ -238,7 +237,6 @@ document.addEventListener('DOMContentLoaded', async function () {
     window.setupDemSubtabs?.();
     window.setupWaterMaskListeners?.();
     window.setupGridToggle?.();
-    window.setupBboxKeyboardNav?.();
 
     // The sidebar starts in normal mode from SidebarPanel.vue's own onMounted.
     // Setting the classes and the toggle button's text here as well only fought

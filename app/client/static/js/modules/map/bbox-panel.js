@@ -1,8 +1,6 @@
 import { REGION_ACCENT } from '../regions/region-geometry.js';
 
-// Keyboard accessibility for bbox inputs: arrow keys nudge by 0.1°
 // === Constants ===
-const BBOX_KEYBOARD_NUDGE_STEP = 0.1;
 // Shared by every caller of setBboxRectangle, so the box looks the same however
 // the user got to it. The working extent: a dashed accent outline that sits on
 // the selected region's solid box (region-boxes.js) and moves off it while the
@@ -10,29 +8,12 @@ const BBOX_KEYBOARD_NUDGE_STEP = 0.1;
 // clicks reach the saved-region boxes underneath.
 const BBOX_RECT_STYLE = { color: REGION_ACCENT, weight: 2, dashArray: '6 4', fill: false, interactive: false };
 
-['bboxNorth', 'bboxSouth', 'bboxEast', 'bboxWest'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-        el.addEventListener('keydown', (e) => {
-            let step = BBOX_KEYBOARD_NUDGE_STEP;
-            if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
-                el.value = (parseFloat(el.value) + step).toFixed(2);
-                el.dispatchEvent(new Event('change'));
-                e.preventDefault();
-            } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
-                el.value = (parseFloat(el.value) - step).toFixed(2);
-                el.dispatchEvent(new Event('change'));
-                e.preventDefault();
-            }
-        });
-    }
-});
 /**
  * modules/map/bbox-panel.js
  *
  * Exposed on window:
  *   setBboxInputValues, setBboxRectangle, initBboxMiniMap, syncBboxMiniMap,
- *   toggleBboxMiniMap, setupGridToggle, setupBboxKeyboardNav
+ *   toggleBboxMiniMap, setupGridToggle
  *
  * Depends on:
  *   window.appState.selectedRegion, window.appState.currentDemBbox
@@ -294,67 +275,5 @@ window.setupGridToggle = function setupGridToggle() {
         _resizeTimer = setTimeout(() => {
             if (window.appState.currentDemBbox) redrawAllGridlines();
         }, 200);
-    });
-};
-
-// ─── setupBboxKeyboardNav ────────────────────────────────────────────────────
-
-/**
- * Wire keyboard navigation to N/S/E/W bbox coordinate inputs.
- * Arrow keys (±) adjust by 0.01 degrees (~1 km at equator).
- * Enter confirms the change and reloads DEM.
- * Escape cancels (reverts to previous value).
- */
-window.setupBboxKeyboardNav = function setupBboxKeyboardNav() {
-    const bboxInputs = [
-        { el: document.getElementById('bboxNorth'), key: 'north', isLat: true },
-        { el: document.getElementById('bboxSouth'), key: 'south', isLat: true },
-        { el: document.getElementById('bboxEast'), key: 'east', isLat: false },
-        { el: document.getElementById('bboxWest'), key: 'west', isLat: false }
-    ];
-
-    bboxInputs.forEach(({ el }) => {
-        if (!el) return;
-
-        el.addEventListener('keydown', (e) => {
-            const step = 0.01;  // ~1 km at equator
-            let newValue = parseFloat(el.value);
-
-            if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
-                e.preventDefault();
-                el.value = (newValue + step).toFixed(5);
-            } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
-                e.preventDefault();
-                el.value = (newValue - step).toFixed(5);
-            } else if (e.key === 'Enter') {
-                e.preventDefault();
-                const n = parseFloat(document.getElementById('bboxNorth')?.value || 0);
-                const s = parseFloat(document.getElementById('bboxSouth')?.value || 0);
-                const e_val = parseFloat(document.getElementById('bboxEast')?.value || 0);
-                const w = parseFloat(document.getElementById('bboxWest')?.value || 0);
-
-                let selectedRegion = window.appState.selectedRegion;
-                if (!selectedRegion) selectedRegion = {};
-                selectedRegion.north = n; selectedRegion.south = s;
-                selectedRegion.east = e_val; selectedRegion.west = w;
-                window.appState.selectedRegion = selectedRegion;
-                window.setSelectedRegion?.(selectedRegion);
-
-                const currentDemBbox = { north: n, south: s, east: e_val, west: w };
-                window.appState.currentDemBbox = currentDemBbox;
-
-                window.clearLayerCache?.();
-                window.loadDEM?.().then(() => {
-                    window.loadWaterMask?.();
-                    window.loadSatelliteImage?.();
-                });
-
-                el.blur();
-                window.showToast?.('Bbox updated', 'info');
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                el.blur();
-            }
-        });
     });
 };

@@ -124,17 +124,14 @@ window.switchView = function switchView(view) {
 window._setSidebarViews = function _setSidebarViews(state) {
     const listView = document.getElementById('sidebarListView');
     const tableView = document.getElementById('sidebarTableView');
-    const paramsSection = document.getElementById('regionParamsSection');
     window.setRegionEditorOpen?.(false);
     if (state === 'expanded') {
         listView?.classList.add('hidden');
         tableView?.classList.remove('hidden');
-        paramsSection?.classList.add('hidden');
         window.renderSidebarTable?.();
     } else {
         listView?.classList.remove('hidden');
         tableView?.classList.add('hidden');
-        paramsSection?.classList.add('hidden');
     }
 };
 
@@ -285,22 +282,6 @@ window.deleteRegion = async function deleteRegion(index) {
     window.showToast?.(`Region "${region.name}" deleted`, 'success');
     await window.loadCoordinates?.();
     return true;
-};
-
-// ---------------------------------------------------------------------------
-// toggleStatusPanel
-// ---------------------------------------------------------------------------
-
-/**
- * Toggle the small status/info panel on the right edge of the visualisation area.
- */
-window.toggleStatusPanel = function toggleStatusPanel() {
-    const panel = document.getElementById('statusPanel');
-    const btn = document.getElementById('statusToggleBtn');
-    if (!panel) return;
-    const collapsed = panel.classList.toggle('collapsed');
-    panel.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
-    if (btn) btn.textContent = collapsed ? '◀' : '▶';
 };
 
 // ---------------------------------------------------------------------------
@@ -468,10 +449,7 @@ window.setupDemSubtabs = function setupDemSubtabs() {
         document.getElementById('settingsPanelResizeHandle')
             ?.classList.toggle('hidden', collapsed);
 
-        const stripBtn = document.getElementById('settingsStripBtn');
-        if (stripBtn) stripBtn.classList.toggle('active', !collapsed);
         document.getElementById('layersContainer')?.classList.remove('hidden');
-        document.getElementById('citiesPanel')?.classList.add('hidden');
         document.getElementById('compareInlineContainer')?.classList.add('hidden');
         document.getElementById('combinedContainer')?.classList.add('hidden');
         document.getElementById('demControlsInner')?.classList.remove('hidden');
@@ -509,7 +487,6 @@ window.setupDemSubtabs = function setupDemSubtabs() {
             ?.setAttribute('aria-expanded', String(pinned));
     });
 
-    bindSettingsToggle('settingsStripBtn', () => toggleSettingsPanel());
     bindSettingsToggle('settingsExternalBtn', () => toggleSettingsPanel());
     bindSettingsToggle('settingsHideBtn', () => toggleSettingsPanel(true));
     bindSettingsToggle('settingsCollapsedTab', () => toggleSettingsPanel(false));

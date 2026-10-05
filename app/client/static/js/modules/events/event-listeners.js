@@ -42,13 +42,10 @@ window.setupEventListeners = function setupEventListeners() {
     // second listener here toggled twice per click, so the button did nothing.
 
     document.getElementById('sidebarTableSearch')?.addEventListener('input', e => window.renderSidebarTable?.(e.target.value));
-    document.getElementById('statusToggleBtn')?.addEventListener('click', () => window.toggleStatusPanel?.());
-    document.getElementById('clearBboxBtn')?.addEventListener('click', () => window.clearAllBoundingBoxes?.());
 
     window._setupModelExportListeners?.();
     window._setupMapAndDemListeners?.();
 
-    window.setupOpacityControls?.();
     window.setupAutoReload?.();
     window.setupStackedLayers?.();
     window.setupCoordinateSearch?.();

@@ -13,10 +13,8 @@
  * Public API (all attached to window):
  *   window.renderCityOverlay        — debounced render onto stacked-layers canvas
  *   window.renderCityOnDEM          — debounced render onto DEM canvas overlay
- *   window._clearCityRasterCache    — reset city raster cache on region change
  *   window._updateCitiesLoadButton  — show/hide "Load Cities" button by region size
  *   window.loadCityRaster           — fetch /api/cities/raster and paint result
- *   window._setupCityRasterLayer    — wire city raster visibility toggle & opacity slider
  *   window._cancelCityRenders       — cancel any pending RAF renders (called by clearCityOverlay)
  *
  * PERF6B — Web Worker offload (_renderViaWorker)
@@ -234,11 +232,6 @@ window._cancelCityRenders = function () {
     _workerInFlight.stack = _workerInFlight.dem = '';
     for (const r of Object.values(_workerResult)) { r.bitmap?.close(); r.bitmap = null; r.key = ''; }
 };
-
-// ---------------------------------------------------------------------------
-// City raster state — only used by raster functions in this file.
-// ---------------------------------------------------------------------------
-let _lastCityRasterData = null;
 
 // ---------------------------------------------------------------------------
 // Public render functions — both debounced via requestAnimationFrame
@@ -531,11 +524,8 @@ function _doRenderCityOnDEM() {
 }
 
 // ---------------------------------------------------------------------------
-// City Heights raster layer (loadCityRaster, _setupCityRasterLayer)
+// City Heights raster layer (loadCityRaster)
 // ---------------------------------------------------------------------------
-
-/** Called by app.js clearLayerCache() when the region changes. */
-window._clearCityRasterCache = function () { _lastCityRasterData = null; };
 
 /**
  * Show or hide the "Load Cities" button based on region diagonal (max 10 km).
@@ -614,7 +604,6 @@ window.loadCityRaster = async function loadCityRaster() {
             clip_valid_region: cityProj.clipValidRegion,
         });
         if (rasterErr) throw new Error(rasterErr);
-        _lastCityRasterData = data;
 
         const colormap = window.getLayerColormap?.('city') || document.getElementById('demColormap')?.value || 'terrain';
         // Render city raster to a standalone canvas WITHOUT overwriting DEM state.
@@ -634,69 +623,5 @@ window.loadCityRaster = async function loadCityRaster() {
     } catch (e) {
         window.setLayerStatus('cityRaster', 'error');
         window.showToast('City raster failed: ' + e.message, 'error');
-    }
-};
-
-/** Wire the City Heights visibility toggle and opacity slider. */
-window._setupCityRasterLayer = function _setupCityRasterLayer() {
-    const toggle = document.getElementById('layerCityRasterVisible');
-    const opacity = document.getElementById('layerCityRasterOpacity');
-    const label = document.getElementById('layerCityRasterOpacityLabel');
-    const canvas = document.getElementById('layerCityRasterCanvas');
-    if (!toggle || !canvas) return;
-
-    toggle.addEventListener('change', () => {
-        if (toggle.checked) {
-            canvas.style.display = '';
-            if (!_lastCityRasterData && window.appState?.osmCityData) window.loadCityRaster();
-        } else {
-            canvas.style.display = 'none';
-        }
-        window.events?.emit(window.EV?.STACKED_UPDATE);
-    });
-
-    if (opacity && label) {
-        opacity.addEventListener('input', () => {
-            label.textContent = opacity.value + '%';
-            canvas.style.opacity = opacity.value / 100;
-        });
-    }
-
-    // Per-layer city colormap — re-colour the cached raster without re-fetching.
-    document.getElementById('cityColormap')?.addEventListener('change', () => {
-        if (_lastCityRasterData) {
-            const d = _lastCityRasterData;
-            const cm = window.getLayerColormap?.('city') || 'terrain';
-            const c = _renderRasterCanvas(d.values, d.width, d.height, cm, d.vmin, d.vmax);
-            if (c && window.appState) {
-                window.appState._cityRasterRawCanvas = c;
-                window.appState.cityRasterSourceCanvas = c;
-            }
-            window.events?.emit(window.EV?.STACKED_UPDATE);
-        } else if (document.getElementById('layerCityRasterVisible')?.checked && window.appState?.osmCityData) {
-            window.loadCityRaster?.();
-        }
-    });
-
-    if (window.appState?.on) {
-        window.appState.on('osmCityData', (data) => {
-            const badge = document.getElementById('citiesSettingsBadge');
-            if (badge) {
-                if (data) {
-                    const nb = data.buildings?.features?.length || 0;
-                    const nr = data.roads?.features?.length || 0;
-                    badge.textContent = `${nb} buildings · ${nr} roads`;
-                    badge.style.color = '#4a9';
-                } else {
-                    badge.textContent = '';
-                }
-            }
-            if (data) {
-                const sec = document.getElementById('citiesSettingsSection');
-                if (sec?.classList.contains('collapsed')) sec.classList.remove('collapsed');
-            }
-            _lastCityRasterData = null;
-            if (document.getElementById('layerCityRasterVisible')?.checked) window.loadCityRaster();
-        });
     }
 };

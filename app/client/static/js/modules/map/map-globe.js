@@ -5,7 +5,6 @@
  * bounding box drawing tools, and Three.js globe.
  *
  * Public API (exposed on window):
- *   window.resetBboxColorIndex()
  *   window.setTileLayer(layerKey)
  *   window.toggleMapLabels(show)
  *   window.toggleTerrainOverlay(show)
@@ -13,7 +12,6 @@
  *   window.updateFloatingTerrainButton(active)
  *   window.initMap()
  *   window.toggleMapGrid(show)
- *   window.updateBboxIndicator(color)
  *   window.initGlobe()
  *   window.BBOX_COLORS        (array)
  *   window.getDrawControl()
@@ -98,10 +96,6 @@ const TILE_LAYERS = {
         attribution: '&copy; Stadia Maps, Stamen Design'
     }
 };
-
-// ── Public: bbox colour index reset ────────────────────────────────────────
-
-window.resetBboxColorIndex = () => { currentBboxColorIndex = 0; };
 
 // ── Tile layer ──────────────────────────────────────────────────────────────
 
@@ -511,9 +505,6 @@ function initMap() {
         const b = layer.getBounds();
         window.events?.emit(window.EV?.BBOX_CHANGED, {
             north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() });
-
-        // Update the current box indicator
-        updateBboxIndicator(bboxColor);
     });
 
     // Initialize map grid
@@ -634,21 +625,6 @@ function toggleMapGrid(show) {
     }
 }
 window.toggleMapGrid = toggleMapGrid;
-
-// ── BBox colour indicator ───────────────────────────────────────────────────
-
-/**
- * Update the bounding box colour indicator element in the UI.
- * @param {string} color - CSS colour string (e.g. '#ff4444')
- */
-function updateBboxIndicator(color) {
-    const indicator = document.getElementById('bboxColorIndicator');
-    if (indicator) {
-        indicator.style.backgroundColor = color;
-        indicator.title = `Current selection: ${color}`;
-    }
-}
-window.updateBboxIndicator = updateBboxIndicator;
 
 // ── Globe ───────────────────────────────────────────────────────────────────
 

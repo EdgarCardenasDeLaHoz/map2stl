@@ -592,7 +592,6 @@ async function previewModelIn3D() {
     const statusEl = document.getElementById('modelStatus');
     if (statusEl) statusEl.textContent = '⏳ Building mesh…';
     window.appState.modelPreviewState = 'building';
-    document.getElementById('modelViewerContainer')?.classList.add('mesh-building');
 
     if (!modelRenderer) initModelViewer();
 
@@ -657,10 +656,6 @@ async function previewModelIn3D() {
         window.appState._updateWorkflowStepper?.();
         if (statusEl) statusEl.textContent = '❌ ' + e.message;
         window.showToast('Preview failed: ' + e.message, 'error');
-    } finally {
-        if (seq === _previewSeq) {
-            document.getElementById('modelViewerContainer')?.classList.remove('mesh-building');
-        }
     }
 }
 
