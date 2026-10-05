@@ -521,3 +521,40 @@ def test_stale_fallback_does_not_write_back(monkeypatch):
     data, source = rd._load_osm_for_region(RegionBBox("X", 1.0, 0.0, 1.0, 0.0))
     assert source.startswith("stale_cache:")
     assert len(data["waterways"]["features"]) == 1 and writes == []
+
+
+class _KeylessTiles:
+    """Google3DProvider without a key: ``covers()`` is False, as in the real provider."""
+    _api_key = None
+
+    def covers(self, bbox):
+        return self._api_key is not None
+
+    def fetch_heights(self, *a, **k):
+        raise AssertionError("must not fetch without a key")
+
+
+def test_tiles_without_a_key_is_a_failed_source(tmp_path, monkeypatch):
+    """T36: a missing key used to read as "not covered", so a survey-only record was
+    cached for good. Now it raises, the tile counts as incomplete and nothing is cached."""
+    with pytest.raises(bm.TilesUnavailable):
+        bm.tiles_ndsm((1.0, 0.0, 1.0, 0.0), provider=_KeylessTiles())
+
+    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    survey, t, _ = _grid()
+    _paint(survey, 20, 20, 30, 30, 50.0)
+    monkeypatch.setattr(bm, "survey_ndsm", lambda provider, bbox, res: (survey, t))
+    truth = bm.footprint_truth("Testville", {"A": _ring(20, 20, 30, 30)}, "usgs_3dep",
+                               tiles_provider=_KeylessTiles())
+    assert truth["A"]["status"] == "survey_only"            # scored this time
+    assert bm.load_truth_cache("Testville") == {}            # but not pinned
+
+
+def test_tiles_with_a_key_and_no_coverage_is_still_none():
+    class Uncovered(_KeylessTiles):
+        _api_key = "k"
+
+        def covers(self, bbox):
+            return False
+
+    assert bm.tiles_ndsm((1.0, 0.0, 1.0, 0.0), provider=Uncovered()) is None

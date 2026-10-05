@@ -208,8 +208,18 @@ def survey_ndsm(provider: str, bbox, resolution_m: float = RESOLUTION_M):
     return survey.ndsm_for_bbox(provider, bbox, resolution_m)
 
 
+class TilesUnavailable(RuntimeError):
+    """3D Tiles could not be asked at all (no API key): a failed source, not "not covered"."""
+
+
 def tiles_ndsm(bbox, resolution_m: float = RESOLUTION_M, provider=None):
-    """``(ndsm, transform)`` from Google 3D Tiles on the bbox's lon/lat grid, or None."""
+    """``(ndsm, transform)`` from Google 3D Tiles on the bbox's lon/lat grid, or None when
+    the tiles have no data there.
+
+    Raises ``TilesUnavailable`` when the provider has no API key. ``covers()`` is False
+    then too, and returning None made ``footprint_truth`` cache a survey-only record for
+    good (T36: a worktree without ``.env`` pinned 63 of them).
+    """
     from rasterio.transform import from_bounds as t_from_bounds
 
     from city2stl.height.providers.google_3d import Google3DProvider
@@ -217,6 +227,8 @@ def tiles_ndsm(bbox, resolution_m: float = RESOLUTION_M, provider=None):
 
     _load_env_file_if_present()  # the key lives in map2stl/.env (GOOGLE_MAPS_API_KEY)
     provider = provider or Google3DProvider()
+    if not getattr(provider, "_api_key", None):
+        raise TilesUnavailable("no Google Maps API key (GOOGLE_MAPS_API_KEY): 3D Tiles not read")
     if not provider.covers(bbox):
         return None
     h, w = _grid_dim(bbox, resolution_m)

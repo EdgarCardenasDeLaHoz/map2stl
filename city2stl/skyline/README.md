@@ -268,7 +268,8 @@ Height accuracy is scored on surveyed truth, never on Cartagena (no open survey;
   max(3 m, 10 %); only confirmed buildings make the headline, `disputed` ones are counted.
 - Measured on the footprints a run scored (`heights.json` → `footprint_lonlat`), keyed by geometry,
   cached in `runs/benchmark/truth/<region>.json`. Only complete reads are cached (every source
-  answered, "not covered" included): a failed source or a `--no-tiles` run is scored but not
+  answered, "not covered" included): a failed source (3D Tiles without a Google key counts as
+  failed, `benchmark.py::TilesUnavailable`) or a `--no-tiles` run is scored but not
   saved. `--refresh-truth` re-measures cached footprints.
 - Output: `runs/benchmark/<stamp>/summary.json` (MAE, median AE, bias, within 15/25 %, per height
   band, per view and seed count, and how far OSM tags sit from truth) and one printed table.
