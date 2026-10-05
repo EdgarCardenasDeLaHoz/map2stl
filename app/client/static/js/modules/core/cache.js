@@ -1,22 +1,18 @@
 ﻿/**
- * modules/core/cache.js — Client-side water mask LRU cache.
+ * modules/core/cache.js — Client-side water mask cache.
  *
- * Loaded as a plain <script> before app.js. Exposes:
- *   window.waterMaskCache  — LRU cache for water mask API responses
- *     .get(bbox)           — return cached data or null; increments hit/miss stats
- *     .set(bbox, data)     — store data; evicts oldest entry when over maxSize
- *     .has(bbox)           — return true if bbox is cached
+ * Imported by main.js. Exposes:
+ *   window.waterMaskCache  — cache for water mask API responses
+ *     .get(bbox)           — return cached data or null
+ *     .set(bbox, data)     — store data; evicts the oldest-inserted entry over maxSize
  *     .generateKey(bbox)   — return the string cache key for a bbox
  *     .dedupe(bbox, fetchFn) — share one in-flight request across concurrent
  *                              callers for the same key (see below)
- *     .getStats()          — return { hits, misses, preloaded, memorySize, hitRate }
- *     .clear()             — clear all entries and reset stats
  */
 
 window.waterMaskCache = {
     memory: new Map(),
     maxSize: 50,
-    stats: { hits: 0, misses: 0, preloaded: 0 },
     // In-flight request promises, keyed the same way as `memory`. Lets two
     // callers that want the same water mask at (nearly) the same moment share
     // one network request instead of both paying for it independently — this
@@ -40,12 +36,7 @@ window.waterMaskCache = {
 
     get(bbox) {
         const key = this.generateKey(bbox);
-        if (this.memory.has(key)) {
-            this.stats.hits++;
-            return this.memory.get(key).data;
-        }
-        this.stats.misses++;
-        return null;
+        return this.memory.has(key) ? this.memory.get(key).data : null;
     },
 
     set(bbox, data) {
@@ -56,10 +47,6 @@ window.waterMaskCache = {
                 .sort((a, b) => a[1].timestamp - b[1].timestamp)[0];
             this.memory.delete(oldest[0]);
         }
-    },
-
-    has(bbox) {
-        return this.memory.has(this.generateKey(bbox));
     },
 
     /**
@@ -80,15 +67,4 @@ window.waterMaskCache = {
         this._inflight.set(key, promise);
         return promise;
     },
-
-    getStats() {
-        const total = this.stats.hits + this.stats.misses;
-        const hitRate = total > 0 ? ((this.stats.hits / total) * 100).toFixed(1) : 0;
-        return { ...this.stats, memorySize: this.memory.size, hitRate };
-    },
-
-    clear() {
-        this.memory.clear();
-        this.stats = { hits: 0, misses: 0, preloaded: 0 };
-    }
 };

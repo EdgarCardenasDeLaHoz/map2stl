@@ -108,7 +108,6 @@ function clearLayerCache() {
     window.appState.layerStatus = { dem: 'empty', water: 'empty', landCover: 'empty' };
     window.appState.cityRasterSourceCanvas = null;
     window.appState.compositeDemSourceCanvas = null;
-    window.appState.compositeFeatures = null;
     window.appState.compositeCityRaster = null;
     window.appState.satImgSourceCanvas = null;
     window.appState._satImgRawCanvas = null;
