@@ -2,7 +2,8 @@
 
 Split out of region_pdf.py (F-CLEAN14, 2026-06-07). Generates auto-standoff
 candidate camera positions, screens each with a 1-image Street View probe +
-sky/contour quality gate, and swaps bad user seeds for nearby proposals. No
+sky/contour quality gate, and swaps bad user seeds for nearby proposals. The
+proposals are persisted per region (``_persisted_standoff_locations``). No
 rendering. region_pdf re-imports these.
 """
 
@@ -31,6 +32,7 @@ from .region_types import RegionBBox, SkylinePoint
 from .streetview_io import _meta_location, _streetview_image, _streetview_metadata
 
 _SCREEN_CACHE_DIR = Path(__file__).parent / "runs" / "screen_cache"
+_PROPOSALS_DIR = Path(__file__).parent / "runs" / "seed_proposals"
 
 def _propose_standoff_locations(
     bbox: RegionBBox,
@@ -241,6 +243,43 @@ def _propose_standoff_locations(
         if len(kept) >= n_max:
             break
     return kept
+
+def _persisted_standoff_locations(
+    region_name: str,
+    bbox: RegionBBox,
+    high_rises: list[tuple[float, float, float]],
+    osm_data: dict,
+    *,
+    refresh: bool = False,
+    proposals_dir: Path | None = None,
+) -> list[SkylinePoint]:
+    """``_propose_standoff_locations`` computed once per region, then read back.
+
+    The proposals follow live OSM, so two runs a week apart used to see
+    different panoramas and their scores differed for reasons outside the code
+    (F-SKYBENCH "stable runs"). The first run writes
+    ``runs/seed_proposals/<region>.json``; later runs reuse it. ``refresh``
+    (``SKYLINE_REFRESH_PROPOSALS=1``) recomputes and overwrites it.
+    """
+    path = (proposals_dir or _PROPOSALS_DIR) / f"{region_name.lower()}.json"
+    if not refresh and path.exists():
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            return [SkylinePoint(**p) for p in doc["points"]]
+        except (ValueError, KeyError, TypeError):
+            pass      # unreadable: recompute below
+    points = _propose_standoff_locations(bbox, high_rises, osm_data)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "region": region_name,
+            "bbox_nsew": [bbox.north, bbox.south, bbox.east, bbox.west],
+            "points": [p.__dict__ for p in points],
+        }, indent=2), encoding="utf-8")
+    except OSError:
+        pass          # persistence is a convenience; the run goes on
+    return points
+
 
 def _screen_score_from_image(image: np.ndarray, pitch: float = 0.0) -> tuple[float, str, bool, bool]:
     """Cache wrapper around the SegFormer screening gate.

@@ -361,6 +361,7 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
 - Depth cross-check: `map2stl/city2stl/skyline/depth_estimation.py::calibrate_pano_depth` (`depth_height_from_segment`, `compare_heights`)
 - Region data (bbox from the regions table or `sites/<region>.json`, OSM → records, terrain): `map2stl/city2stl/skyline/region_data.py::_osm_to_building_records` (`_load_region_bbox`, `_attach_building_terrain`)
 - Region PDF: `map2stl/city2stl/skyline/scripts/08_region_skyline_pdf.py`
+- Height benchmark on surveyed truth (F-SKYBENCH): `map2stl/city2stl/skyline/benchmark.py::score_region` (`footprint_truth`, `cross_check`, `match_footprints`, `BENCHMARK_REGIONS`); command `map2stl/city2stl/skyline/scripts/10_benchmark.py`; persisted seed proposals `map2stl/city2stl/skyline/seed_selection.py::_persisted_standoff_locations`
 
 ### Entry points, scripts, tests
 

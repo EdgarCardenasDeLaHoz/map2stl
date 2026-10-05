@@ -5,6 +5,20 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
+### 2026-10-05 — Benchmark truth is the survey p95 inside an inward-buffered footprint; runs join on geometry
+- **Decision:** a footprint's truth is the p95 of the survey nDSM inside the footprint shrunk by
+  1.5 m, `confirmed` when Google 3D Tiles (same statistic) agrees within max(3 m, 10 %); the survey
+  value is the reported truth. Run rows join truth by footprint IoU ≥ 0.5. Auto-proposed seed
+  positions are persisted per region by default (`SKYLINE_REFRESH_PROPOSALS=1` recomputes).
+- **Why:** p95 reads the main roof, not one mast pixel (max) or setbacks (median), the convention
+  `tools/align_tool/plate_height_truth.py` already uses (p90); the inward buffer drops facade and
+  street cells. `feature_id` is a sort index over the live OSM fetch and changes between fetches.
+  Persisted proposals make two runs see the same panoramas (plan success criterion).
+- **Rejected:** mean of the two sources (hides which one moved); centroid-distance join (merges
+  neighbours in dense blocks); recomputing proposals every run (coverage drifted with OSM edits).
+- **Supersedes / superseded by:** —
+- **Source:** [F-SKYBENCH](../plans/active/F-SKYBENCH-height-benchmark.md)
+
 ### 2026-10-03 — Skyline height accuracy is judged on surveyed truth, not on Cartagena
 - **Decision:** skyline (street-view) height changes are scored on eight cities with per-footprint
   truth from survey lidar and Google 3D Tiles, cross-checked: Miami, Chicago, Seattle, Boston,

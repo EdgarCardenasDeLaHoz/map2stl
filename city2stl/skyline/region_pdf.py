@@ -18,7 +18,7 @@ Flow per region
 4. Resolve user-provided + auto-proposed seed locations:
    - ``_parse_streetview_url`` parses the URL's pano_id / lat / lon /
      heading / pitch / FOV
-   - ``_propose_standoff_locations`` adds 8 dirs × 3 standoff radii
+   - ``_persisted_standoff_locations`` (cached per region) adds 8 dirs × 3 standoff radii
      positions weighted toward water-adjacent placements
 5. Screen each candidate with a 1-image probe + a sky/contour quality
    gate (``_screen_score_from_image``).
@@ -60,7 +60,7 @@ from ._core.timing import _StepTimer
 from ._core.types import BuildingRecord
 from ._pano.orchestrator import _seed_multiview_registration
 from ._region_render._pages import _load_known_heights, _render_pdf
-from .region_config import _PHASE_C_ENABLED
+from .region_config import _PHASE_C_ENABLED, _REFRESH_PROPOSALS
 from .region_data import (
     _drop_buildings_in_water,
     _extract_high_rises,
@@ -81,7 +81,7 @@ from .region_data import (
 from .region_types import SkylinePoint
 from .seed_selection import (
     _auto_replace_bad_seeds,
-    _propose_standoff_locations,
+    _persisted_standoff_locations,
     _screen_locations,
 )
 from .streetview_io import _parse_streetview_url, _resolve_api_key
@@ -364,7 +364,9 @@ def run_region_pdf_report(
     # Generate geometry-driven auto-proposals from OSM tall-building cluster.
     # These are screened via Street View but NOT fed into multiview registration
     # unless the user explicitly promotes them to seed_urls in the sites JSON.
-    auto_points = _propose_standoff_locations(bbox, high_rises, osm_data)
+    # Persisted per region so coverage stops drifting with live OSM.
+    auto_points = _persisted_standoff_locations(
+        region_name, bbox, high_rises, osm_data, refresh=_REFRESH_PROPOSALS)
 
     # If no seeds were provided, use the top 3 auto-proposals as provisional
     # seeds so that cities without a sites/<region>.json still run end-to-end.

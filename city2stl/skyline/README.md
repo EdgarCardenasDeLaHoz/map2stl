@@ -96,7 +96,8 @@ Every caller, inside `skyline/` or not (tests, demos), imports the defining `_co
 | `_report_plots/` | PNG renderers for the HTML report (`_plot_utils`, `_view_plots`, `_pano_plots`) | F-SKY15, pano report v2 |
 | `html_report.py` | HTML report assembly (per-building tables) | F-SKY15, F-DET3 |
 | `report_index.py` | Parses per-seed stats back out of a report's `index.html` (landing page, `/api/reports/index`) | F-DET5 |
-| `seed_selection.py` | Standoff proposals, screening, auto-replace, OSM-FOV gate | F-DET2 |
+| `seed_selection.py` | Standoff proposals (persisted per region), screening, auto-replace, OSM-FOV gate | F-DET2, F-SKYBENCH |
+| `benchmark.py` | Surveyed truth per footprint (lidar × 3D Tiles cross-check) and the scorer | F-SKYBENCH |
 | `region_data.py` | Bbox (SQLite), OSM fetch, `BuildingRecord`, water filter, `sites/*.json` readers | F-SKY8 merge |
 | `streetview_io.py` | Street View Static API: URL parse/sign, metadata, image cache | — |
 | `region_types.py` | Frozen dataclasses: `RegionBBox`, `SkylinePoint`, `SeedViewRegistration`, `StitchedPanoResult` | — |
@@ -108,7 +109,7 @@ Every caller, inside `skyline/` or not (tests, demos), imports the defining `_co
 | `satellite_footprints.py` / `satellite_image.py` | MS Building Footprints; ESRI satellite tiles | F-SKY8, F-SKY10 |
 | `height_trace.py` / `height_trace_render.py` | Per-building gate-decision tracer + render | glass-roof Phase 1 |
 | `web_image_seed.py` | Wikipedia/Wikimedia/Flickr skyline image seeds | F-WEB1 |
-| `scripts/` | `08_region_skyline_pdf.py` (production), `09_height_trace.py`, `build_landing_page.py`, `discover_city_seeds.py`, `height_diagnostic_report.py`; research probes 13–16 in `scripts/demos/` | — |
+| `scripts/` | `08_region_skyline_pdf.py` (production), `09_height_trace.py`, `10_benchmark.py` (F-SKYBENCH), `build_landing_page.py`, `discover_city_seeds.py`, `height_diagnostic_report.py`; research probes 13–16 in `scripts/demos/` | — |
 | `sites/*.json` | Per-region config (17 regions) | — |
 
 Module DAG (acyclic): `region_types`/`region_config` ← `region_data`/`streetview_io` ← `seed_selection` ←
@@ -222,6 +223,7 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
 | `SKYLINE_CV_F_SKY13` / `SKYLINE_CV_F_SKY13_SAT_BG` | `1` / `0` | OSM coastline minimap overlay / satellite minimap background. |
 | `SKYLINE_CV_PHASE_C` | `0` | F-SKY13 Phase C: OSM keypoints drive the heading sweep. |
 | `SKYLINE_CV_MULTIRES` | `0` | F-SKY19 multi-resolution segmentation. |
+| `SKYLINE_REFRESH_PROPOSALS` | `0` | `1` recomputes the auto-proposed seed positions from today's OSM (else `runs/seed_proposals/<region>.json` is reused). |
 | `SKYLINE_TAG_FILTER` | `1` | `0` measures unaided error (don't filter using OSM height tags). |
 | `OPENTOPO_API_KEY`, `FLICKR_API_KEY` | unset | DEM terrain for building bases; Flickr web seeds (Wikimedia is the keyless fallback). |
 
@@ -231,6 +233,24 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
   Why: the Static API's location snap drifts between calls. Delete to re-resolve.
 - `runs/image_cache/*.png` — Street View images keyed by request hash (API key excluded).
 - `runs/satellite_footprints_cache/` — ~12 MB per quadkey tile (F-SKY8).
+- `runs/seed_proposals/<region>.json` — auto-proposed standoff seeds, so runs stop drifting with live OSM.
+  Delete (or `SKYLINE_REFRESH_PROPOSALS=1`) to recompute.
+- `map2stl/runs/benchmark/<region>_truth.json` — F-SKYBENCH truth per footprint;
+  `map2stl/runs/benchmark/<date>/summary.json` — one benchmark run.
+
+## Benchmark (F-SKYBENCH)
+
+```powershell
+python -m city2stl.skyline.scripts.discover_city_seeds la_defense madrid_cuatro_torres prague_pankrac  # once: new sites
+python -m city2stl.skyline.scripts.10_benchmark                 # run + truth + score, all eight cities
+python -m city2stl.skyline.scripts.10_benchmark --score-only    # re-score cached reports, no network
+```
+
+- Truth: p95 of a lidar nDSM and of Google 3D Tiles inside each footprint (1.5 m inward buffer);
+  `confirmed` when they agree within max(3 m, 10 %). The headline uses confirmed rows only
+  (`--allow-single-source` adds `survey_only` / `tiles_only`).
+- Join: footprint IoU ≥ 0.5, not `feature_id`. Flags pinned in `10_benchmark.py::PINNED_FLAGS`.
+- Plan and baseline status: [F-SKYBENCH](../../docs/plans/active/F-SKYBENCH-height-benchmark.md).
 
 ## Tests
 
@@ -238,7 +258,7 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
 & "$HOME\.venvs\map2stl\Scripts\python.exe" -m pytest tests/test_skyline*.py -q
 ```
 
-- 8 files, 152 pass + 1 skip (2026-09-28, ~45 s).
+- 8 files, 152 pass + 1 skip (2026-09-28, ~45 s). `test_skyline_benchmark.py` (F-SKYBENCH, synthetic nDSM) added 2026-10-05, not yet run (written in a cloud session without numpy2stl).
 - Cover CV math: URL parsing, projection, occlusion, matching, silhouettes, aggregation, depth/pano-inverse
   geometry, height datum, OSM water, height trace, HTML report.
 - Orchestration (`region_pdf.py`, `_pano/`) is exercised only by full region runs.
@@ -312,7 +332,6 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
   - F-SKY5: only revisit on a region with merged towers F-SKY2 can't split; Cartagena showed no gain.
   - Wire Miami and Chicago to the opt-in flags (F-SKY8/11.1/13, `pano_only_pdf`) and record per-seed recovery
     accuracy in STATUS (was F-CLEAN13).
-  - Persist auto-proposal positions per region so coverage stops drifting with live OSM.
 - **Tests**
   - Unit test for `coastline_registration.py::sweep_pano_heading_offset` on synthetic keypoints.
   - Edge-case tests for F-SKY13 OSM coastline extraction (`osm_water.py`).

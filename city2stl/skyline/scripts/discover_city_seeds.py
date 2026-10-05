@@ -15,13 +15,15 @@ This is the "propose pano locations -> pull -> filter" discovery loop: panos
 with no Street View within ``radius_m`` (ZERO_RESULTS — e.g. a vantage that
 fell in open water) are skipped, so only real, reachable seeds are written.
 
-Run:  python -m city2stl.skyline.scripts.discover_city_seeds
+Run:  python -m city2stl.skyline.scripts.discover_city_seeds [city ...]
+      (no city = every city in ``CITIES``; each run overwrites its site file)
 """
 
 from __future__ import annotations
 
 import json
 import math
+import sys
 from pathlib import Path
 
 import requests
@@ -140,6 +142,24 @@ CITIES: dict[str, dict] = {
         "vantages": ["Tsim Sha Tsui Promenade, Hong Kong",
                      "Avenue of Stars, Hong Kong",
                      "West Kowloon Art Park, Hong Kong"]},
+    # F-SKYBENCH tall-tower sites (2026-10-05). Vantages are first guesses
+    # (place names are geocoded); check the snapped panos before benchmarking.
+    "la_defense": {
+        "bbox": (48.900, 48.882, 2.260, 2.215), "max_h": 240,   # Tour First 231 m
+        "target": (48.8905, 2.2400),
+        "vantages": ["Pont de Neuilly, Neuilly-sur-Seine",
+                     "Parc André Malraux, Nanterre",
+                     (48.8850, 2.2560)]},
+    "madrid_cuatro_torres": {
+        "bbox": (40.485, 40.470, -3.678, -3.698), "max_h": 260,  # Torre de Cristal 249 m
+        "target": (40.4772, -3.6878),
+        "vantages": [(40.4675, -3.6895), (40.4720, -3.6800),
+                     (40.4800, -3.6985)]},
+    "prague_pankrac": {
+        "bbox": (50.058, 50.043, 14.448, 14.425), "max_h": 120,  # City Tower 109 m
+        "target": (50.0505, 14.4360),
+        "vantages": ["Vyšehrad, Praha", (50.0618, 14.4295),
+                     (50.0440, 14.4480)]},
 }
 
 
@@ -148,9 +168,14 @@ def _seed_url(lat: float, lon: float, heading: float, pano_id: str) -> str:
             f"{heading:.2f}h,90t/data=!3m6!1e1!3m4!1s{pano_id}!2e0")
 
 
-def main() -> None:
+def main(cities: list[str] | None = None) -> None:
     key = _resolve_api_key()
+    unknown = sorted(set(cities or ()) - set(CITIES))
+    if unknown:
+        raise SystemExit(f"unknown cities: {', '.join(unknown)}")
     for city, spec in CITIES.items():
+        if cities and city not in cities:
+            continue
         n, s, e, w = spec["bbox"]
         tlat, tlon = spec["target"]
         urls: list[str] = []
@@ -201,4 +226,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:] or None)

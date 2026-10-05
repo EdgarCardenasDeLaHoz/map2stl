@@ -1,6 +1,6 @@
 # F-SKYBENCH — Skyline height benchmark on surveyed truth
 
-**Status**: planned (user-requested 2026-10-03)
+**Status**: code done, baseline not run (2026-10-05)
 **Owner module**: `city2stl/skyline/` (reads `city2stl/height/providers/`, writes nothing back)
 
 ## Goal
@@ -109,3 +109,15 @@ Cartagena stays a heading and registration smoke test, not an accuracy benchmark
 ## Progress
 
 - 2026-10-03: plan written; set and truth sources chosen by the user.
+- 2026-10-05 (cloud session, no Google key, no numpy2stl checkout, so nothing was run):
+  - Done: `benchmark.py` (truth per footprint over 1.5 km tiles, cross-check, scorer, table),
+    `scripts/10_benchmark.py` (`--score-only`, `--refresh-truth`, `--allow-single-source`,
+    `PINNED_FLAGS`, git hash in `summary.json`), persisted proposals
+    (`seed_selection.py::_persisted_standoff_locations`), `tests/test_skyline_benchmark.py`.
+  - New sites: specs added to `discover_city_seeds.py::CITIES` (`la_defense`,
+    `madrid_cuatro_torres`, `prague_pankrac`) with first-guess vantages; `sites/` is gitignored,
+    so the site files are made locally by
+    `python -m city2stl.skyline.scripts.discover_city_seeds la_defense madrid_cuatro_torres prague_pankrac`.
+  - Next (local, needs the key): run `pytest tests/test_skyline_benchmark.py`; make the three
+    sites and check their snapped panos; check Miami 3DEP coverage
+    (`survey.available_for_bbox`); run `10_benchmark` on all eight; put the table in STATUS.md.

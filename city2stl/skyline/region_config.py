@@ -69,6 +69,13 @@ _F_SKY1_ENABLED = os.environ.get("SKYLINE_CV_F_SKY1", "1").strip().lower() in (
 )
 
 
+# F-SKYBENCH: auto-proposed seed positions are persisted per region
+# (runs/seed_proposals/<region>.json) so runs stay comparable. Set
+# SKYLINE_REFRESH_PROPOSALS=1 to recompute them from today's OSM.
+_REFRESH_PROPOSALS = os.environ.get("SKYLINE_REFRESH_PROPOSALS", "0").strip().lower() in (
+    "1", "true", "yes", "on"
+)
+
 # Flickr REST API key for web skyline image seeds (F-WEB1).
 # Free at https://www.flickr.com/services/api/keys/.
 # When absent, Wikimedia Commons is tried as a keyless fallback.
