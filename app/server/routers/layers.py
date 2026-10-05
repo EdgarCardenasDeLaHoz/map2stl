@@ -153,7 +153,10 @@ async def mesh_register(upload_id: str, body: MeshRegisterRequest):
 @router.delete("/api/layers/mesh/{upload_id}")
 async def delete_mesh(upload_id: str):
     """Remove a stored mesh upload."""
-    mesh_import.delete_upload(upload_id)
+    try:
+        mesh_import.delete_upload(upload_id)
+    except mesh_import.MeshImportError as e:
+        return error_response(str(e), status=400)
     return JSONResponse(content={"deleted": upload_id})
 
 

@@ -111,7 +111,7 @@ class TestComputeHeightmap:
 
     def test_unknown_upload_id_raises(self, _redirect_cache):
         with pytest.raises(mesh_import.MeshImportError, match="Unknown upload_id"):
-            mesh_import.compute_heightmap("does-not-exist", _CORE_BBOX, resolution_m=_CORE_RES_M)
+            mesh_import.compute_heightmap("0" * 32, _CORE_BBOX, resolution_m=_CORE_RES_M)
 
     def test_caches_last_heightmap_for_register(self, _redirect_cache, tmp_path):
         data = _make_box_stl(tmp_path / "box.stl")
@@ -443,3 +443,32 @@ class TestAutoRegisterReport:
         assert loc["placement"] == {"pack": "testcity", "turn_deg": 1.5}
         mesh_import.set_library_location(rel, _BBOX)
         assert "placement" not in mesh_import.get_library_location(rel)
+
+
+# ── upload ids are opaque hex: no path traversal (audit 2026-10-05) ─────────
+
+@pytest.mark.parametrize("bad", ["..", "../x", "", "ABC", "a" * 31, "g" * 32])
+def test_upload_id_must_be_hex(bad):
+    with pytest.raises(mesh_import.MeshImportError):
+        mesh_import._upload_dir(bad)
+
+
+def test_delete_route_rejects_traversal(client):
+    # "%2E%2E" arrives as upload_id=".."; it used to rmtree the cache root.
+    r = client.delete("/api/layers/mesh/%2E%2E")
+    assert r.status_code == 400
+
+
+@pytest.mark.parametrize("method", ["idw", "nearest"])
+def test_apply_infill_fills_gaps(method):
+    # A 20x20 grid with a 5x5 hole: IDW used to get the valid-pixel mask and
+    # fill nothing (audit 2026-10-05).
+    hm = np.ones((20, 20), dtype=np.float32)
+    hm[5:10, 5:10] = np.nan
+    out = mesh_import._apply_infill(hm, method)
+    assert not np.isnan(out).any()
+
+
+def test_apply_infill_rejects_unknown_method():
+    with pytest.raises(mesh_import.MeshImportError):
+        mesh_import._apply_infill(np.zeros((2, 2), np.float32), "bogus")

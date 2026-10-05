@@ -293,15 +293,21 @@ if not os.path.isfile(os.path.join(dist_path, "js", "vue-main.js")):
 
 @app.get("/static/{file_path:path}")
 async def serve_static(file_path: str):
-    full_path = os.path.join(static_path, file_path)
-    if not os.path.isfile(full_path):
-        # Fallback: check Vite dist/ for built bundles (e.g. vue-main.js)
-        dist_full = os.path.join(dist_path, file_path)
-        if os.path.isfile(dist_full):
-            full_path = dist_full
-        else:
-            from fastapi import HTTPException
-            raise HTTPException(status_code=404)
+    from fastapi import HTTPException
+
+    def _inside(root: str) -> str | None:
+        # realpath + commonpath: an encoded "..%2F" reaches here decoded and
+        # would otherwise serve any file the process can read (config.json).
+        root = os.path.realpath(root)
+        path = os.path.realpath(os.path.join(root, file_path))
+        if os.path.commonpath([root, path]) != root or not os.path.isfile(path):
+            return None
+        return path
+
+    # Fallback: Vite dist/ for built bundles (e.g. vue-main.js)
+    full_path = _inside(static_path) or _inside(dist_path)
+    if full_path is None:
+        raise HTTPException(status_code=404)
     mime, _ = _mimetypes.guess_type(full_path)
     headers = {}
     if full_path.endswith((".js", ".css")):

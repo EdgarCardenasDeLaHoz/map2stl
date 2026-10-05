@@ -159,3 +159,28 @@ class TestEnclosingBbox:
         wider = dict(BBOX, east=BBOX["east"] + 0.01)
         _, fetch = _get(0.5, 5.0, bbox=wider, fetched=_payload([]))
         assert fetch.call_count == 1
+
+
+class TestAnyToleranceRead:
+    """Raster readers find the panel's 3.0 m entry (audit 2026-10-05: they read
+    only the 0.5 m key, so the composite osm_* channels came back as zeros)."""
+
+    def _read(self, bbox=BBOX, min_area=5.0):
+        return city_data.read_city_layers_any_tolerance(
+            bbox["north"], bbox["south"], bbox["east"], bbox["west"], min_area=min_area)
+
+    def test_coarser_entry_is_found(self, tmp_data_dir):
+        key = _seed(_payload([_building(100, 100, 20, 10, jog_m=1.0)]), tol=3.0, min_area=5.0)
+        out, used = self._read()
+        assert used == key
+        assert len(out["buildings"]["features"]) == 1
+
+    def test_enclosing_entry_is_clipped(self, tmp_data_dir):
+        inner = dict(north=39.955, south=39.950, east=-75.155, west=-75.170)
+        _seed(_payload([_building(100, 100, 20, 10), _building(2000, 900, 20, 10)]),
+              tol=3.0, min_area=5.0)
+        out, _ = self._read(bbox=inner)
+        assert len(out["buildings"]["features"]) == 1
+
+    def test_nothing_cached(self, tmp_data_dir):
+        assert self._read() == ({}, None)
