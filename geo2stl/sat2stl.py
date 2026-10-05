@@ -572,7 +572,9 @@ def _resample_to_scale(arr: np.ndarray, src_scale: float, scale: float,
                      (w, h), interpolation=interp)
     if out.ndim < arr.ndim:          # cv2 drops a trailing single channel
         out = out[..., None]
-    return np.rint(out).astype(arr.dtype) if interp == cv2.INTER_AREA else out.astype(arr.dtype)
+    if interp == cv2.INTER_AREA and np.issubdtype(arr.dtype, np.integer):
+        out = np.rint(out)             # averaged classes/counts back to whole values
+    return out.astype(arr.dtype)       # float data (elevation) keeps its fraction
 
 
 def get_aquatic_regions(N, S, E, W, dataset="esa", scale=None, use_cache=True, target_dim=500):

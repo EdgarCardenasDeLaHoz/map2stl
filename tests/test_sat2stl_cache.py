@@ -79,3 +79,15 @@ def test_use_cache_false_downloads(fake_ee):
     sat.fetch_bbox_image(*BBOX, scale=10, dataset="copernicus")
     sat.fetch_bbox_image(*BBOX, scale=40, dataset="copernicus", use_cache=False)
     assert fake_ee == [10, 40]
+
+
+
+def test_resample_keeps_float_values():
+    """Area-averaged float data (elevation) keeps its fraction; integer data is rounded."""
+    from geo2stl.sat2stl import _resample_to_scale
+    f = np.array([[0.25, 0.75], [0.25, 0.75]], dtype=np.float32)
+    out = _resample_to_scale(f, 10.0, 20.0, categorical=False)
+    assert out.shape[:2] == (1, 1) and out.dtype == np.float32
+    assert float(out.ravel()[0]) == pytest.approx(0.5)
+    i = np.array([[1, 2], [1, 2]], dtype=np.uint8)
+    assert _resample_to_scale(i, 10.0, 20.0, categorical=False).ravel()[0] in (1, 2)
