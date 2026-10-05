@@ -420,6 +420,8 @@ def fetch_dem(
 
 _H5_TILE_PX: int = 6000   # pixels per tile side
 _H5_BAND_ROWS: int = 1024   # fetch_h5_dem reads each tile in row bands of about this size
+#: SRTM's no-data value (voids: steep terrain, water); excluded from block means.
+_SRTM_VOID: int = -32768
 _H5_TILE_DEG: float = 5.0  # degrees per tile
 
 
@@ -446,6 +448,7 @@ def fetch_h5_dem(
     Read elevation from the local SRTM HDF5 tile store (strm_data.h5).
 
     The h5 file stores SRTM3 tiles at 6000Ã—6000 px per 5Â° tile (~90m/px).
+    SRTM voids (-32768) are excluded; real below-sea-level ground stays negative.
     Returns a float64 array cropped to the requested bbox at native resolution, or
     with ``max_px`` the mean of each k x k block so the longer side is about
     ``max_px``. Tiles are read one at a time, in row bands, and summed into the
@@ -519,27 +522,29 @@ def fetch_h5_dem(
             cstarts = np.flatnonzero(np.r_[True, ocol[1:] != ocol[:-1]])
             for ra in range(ga, gb, band):
                 rb = min(gb, ra + band)
-                data = np.maximum(ds[ra - r0:rb - r0, ca - c0:cb - c0], 0).astype(np.float64)
+                raw = ds[ra - r0:rb - r0, ca - c0:cb - c0]
+                valid = raw != _SRTM_VOID
+                data = np.where(valid, raw, 0).astype(np.float64)
                 orow = (np.arange(ra, rb) - y1i) // step
                 rstarts = np.flatnonzero(np.r_[True, orow[1:] != orow[:-1]])
                 sums = np.add.reduceat(np.add.reduceat(data, rstarts, axis=0), cstarts, axis=1)
-                n_r = np.diff(np.r_[rstarts, len(orow)])
-                n_c = np.diff(np.r_[cstarts, len(ocol)])
+                ns = np.add.reduceat(np.add.reduceat(valid.astype(np.float64), rstarts, axis=0),
+                                     cstarts, axis=1)
                 rr, cc = orow[rstarts][:, None], ocol[cstarts][None, :]
                 total[rr, cc] += sums
-                count[rr, cc] += n_r[:, None] * n_c[None, :]
+                count[rr, cc] += ns
 
     if tiles_found == 0:
         raise FileNotFoundError(
             f"h5 file '{Path(h5_file).name}' contains no tiles covering "
             f"bbox ({north},{south},{east},{west})"
         )
-    # Cells no tile covers (missing tiles) stay 0, as the old mosaic did.
+    # Voids (-32768) are left out of each block's mean; a cell with no valid sample (a
+    # missing tile, an all-void block) stays 0, as the old mosaic did. Real negatives
+    # (Dead Sea, polders) are kept: they used to be floored at 0 together with the
+    # voids (PA-15); the caller scales sub-zero values by depth_scale as for the other
+    # sources.
     cropped = np.divide(total, count, out=np.zeros_like(total), where=count > 0)
-
-    # Clamp ocean floor noise and normalise like the notebook pipeline:
-    # raise negatives (depth_scale will be applied by the caller), floor at 0.
-    cropped = np.maximum(cropped, 0.0)
     logger.info(
         f"h5_local DEM: bbox=({north},{south},{east},{west}) "
         f"shape={cropped.shape} step={step} h5={Path(h5_file).name}"

@@ -98,3 +98,29 @@ def test_h5_dem_block_mean_downsampling(tmp_path, monkeypatch):
     ref = np.array([[native[i:i + k, j:j + k].mean() for j in range(0, w, k)]
                     for i in range(0, h, k)])
     assert small.shape == ref.shape and np.allclose(small, ref)
+
+
+def test_h5_dem_voids_excluded_and_negatives_kept(tmp_path, monkeypatch):
+    """PA-15: SRTM voids (-32768) used to be clamped to 0 and averaged in, and real
+    below-sea-level ground (Dead Sea, polders) was floored at 0 with them."""
+    import h5py
+    import numpy as np
+
+    from geo2stl import dem
+
+    monkeypatch.setattr(dem, "_H5_TILE_PX", 600)
+    tile = np.full((600, 600), 100, dtype=np.int16)
+    tile[:, :300] = -400                                    # west half below sea level
+    tile[0:300:2, 300:] = dem._SRTM_VOID                    # every other row void, east half
+    tile[300:310, 300:310] = dem._SRTM_VOID                 # an all-void patch
+    h5 = tmp_path / "strm_data.h5"
+    with h5py.File(h5, "w") as fh:
+        fh["srtm_37_12"] = tile                             # lon 0-5, lat 0-5
+    bb = (5.0, 0.0, 5.0, 0.0)
+    native = dem.fetch_h5_dem(*bb, h5_file=h5)
+    assert native.min() == -400                             # not floored at 0
+    assert native[0, 400] == 0 and native[1, 400] == 100    # a void cell has no value
+    small = dem.fetch_h5_dem(*bb, h5_file=h5, max_px=60)    # 10 x 10 blocks
+    assert np.allclose(small[:15, 30:], 100)                # voids left out of the mean
+    assert np.allclose(small[:, :30], -400)
+    assert small[30, 30] == 0                               # an all-void block stays 0

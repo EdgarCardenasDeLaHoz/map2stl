@@ -24,8 +24,6 @@ Source: [history/audits/pipeline-audit-2026-08-26.md](history/audits/pipeline-au
 (ids = its numbering). Re-checked against the code 2026-09-28: 12 findings fixed, 2 obsolete,
 the rest below.
 
-- **PA-15 SRTM void clamped to 0**: `geo2stl/dem.py::fetch_h5_dem` clamps with `np.maximum(…, 0)`
-  and has no NaN step for −32768. Voids and real below-sea-level ground both become 0.
 - **PA-9 Region create resets parameters** (update fixed): `create_region` uses the
   `RegionParameters()` defaults (dim 200 / height 10 / base 2). The DB defaults are
   600 / 25 / 5 (`app/server/schemas.py::RegionParameters` vs `app/server/core/db.py`).

@@ -50,6 +50,15 @@ because code cites them.
   the region, bbox and settings only after both requests succeed. Tests:
   `tests/test_session_e2e.py::TestSelectSettingsErrors`.
 
+### PA-15 SRTM voids clamped to 0 — fixed 2026-10-05 (T13)
+- `geo2stl/dem.py::fetch_h5_dem` clamped every sample with `np.maximum(…, 0)`: voids (−32768)
+  became 0 and were averaged into the block means, and real below-sea-level ground (Dead Sea,
+  polders) was floored at 0 with them.
+- Voids (`_SRTM_VOID`) are now left out of each block's sum and count; negatives are kept (the
+  caller scales them by `depth_scale`, as for the other sources). A cell with no valid sample
+  (missing tile, all-void block) is still 0. Test:
+  `tests/test_dem_sources.py::test_h5_dem_voids_excluded_and_negatives_kept`.
+
 ## Fixed 2026-10-05 (full code audit)
 
 ### Silent wrong answers — fixed 2026-10-05
