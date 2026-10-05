@@ -276,7 +276,6 @@ Module-local (not on appState):
 | `demLayout` | | `{x,y,w,h}` | Letterbox rect of the DEM in the stack (set by `updateStackedLayers`) |
 | `satImgSourceCanvas`, `_satImgRawCanvas`, `_satImgBbox` | S | canvas / BBox | Satellite imagery source |
 | `cityRasterSourceCanvas` | S | canvas | City height raster (`city-render.js`) |
-| `hydrologySourceCanvas` | | canvas | River carve grid (`hydrology-overlay.js`; not in the layer rack, filled only by the bulk load / projection refetch) |
 | `waterHydrologyCanvas` | | canvas | Combined water + hydrology layer (`water-hydrology-combined.js`) |
 | `trailsSourceCanvas`, `lastTrailsData` | | canvas / object | Trails render + retained payload (`trails-overlay.js`) |
 | `meshImport` | | object | `{uploadId, libraryRelPath, filename, heightmap, registered}` (`mesh-layer.js`) |

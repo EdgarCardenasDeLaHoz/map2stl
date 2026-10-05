@@ -117,15 +117,8 @@ function clearLayerCache() {
     window.appState.satEsaLoaded = false;
     window.appState.waterHydrologyCanvas = null;
 
-    // Hydrology can be in flight while the user switches regions; cancel it
-    // and clear the visible layer immediately so old river rasters cannot bleed
-    // into the new region while the fresh fetch is loading.
-    window.cancelHydroLoad?.();
-    window.clearHydrology?.();
-    window.appState.hydrologySourceCanvas = null;
-
-    // Trails are fetched the same way and need the same treatment: a slow
-    // Overpass query started for the old region must not paint over the new one.
+    // A slow trails (Overpass) query started for the old region must not paint
+    // over the new one.
     window.cancelTrailsLoad?.();
     window.clearTrails?.();
     window.appState.trailsSourceCanvas = null;

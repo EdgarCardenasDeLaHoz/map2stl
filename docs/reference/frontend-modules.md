@@ -31,7 +31,7 @@ Where each piece of browser code lives, and a one-line index of its functions.
 | `app/client/static/js/modules/export/city-fullmodel.js` | `model-viewer.js` |
 | `app/client/static/js/modules/export/export-poll.js` | `export-handlers.js` |
 | `app/client/static/js/modules/layers/composite-spec.js` | `composite-dem.js`, `export-handlers.js` |
-| `app/client/static/js/modules/layers/hydrology-print.js` | `composite-dem.js`, `water-hydrology-combined.js`, `hydrology-overlay.js` |
+| `app/client/static/js/modules/layers/hydrology-print.js` | `composite-dem.js`, `water-hydrology-combined.js` |
 | `app/client/static/js/modules/layers/city-fetch.js` | `city-overlay.js`, `export-handlers.js`, Vue |
 | `app/client/static/js/modules/layers/building-heights.js` | `export-handlers.js`, Vue |
 | `app/client/static/js/modules/layers/landmark-overrides.js` | `export-handlers.js`, Vue |
@@ -89,7 +89,6 @@ flowchart LR
 | `mesh-registration.js` | `openMeshRegistrationModal`, `closeMeshRegistrationModal`, `computeMeshRegistration`, `undoLastMeshPointPair`, `clearMeshPointPairs` | Point-pair picker (DEM vs mesh) feeding the `/register` affine fit |
 | `water-mask.js` | `loadWaterMask`, `loadEsaLandCover`, `renderWaterMask`, `renderEsaLandCover`, `renderCombinedView` | Water mask + ESA land cover |
 | `hydrology-print.js` | `riverSourceFromHydro`, `readHydrologyRiverControls`, `loadedDemGrid`, `hydrologyPrintQuery`, `readRiverDepthScale`, `readRiverDepthMm`, `NEED_DEM_MESSAGE` | Pure: the one river-settings source (Fetch → Hydrology) and the print-model `/api/terrain/hydrology` query |
-| `hydrology-overlay.js` | `loadHydrology`, `clearHydrology`, `cancelHydroLoad`, `renderHydrology` | Older single-layer river grid (not in the rack; still called by the bulk load and the projection refetch); same print-model request |
 | `water-hydrology-combined.js` | `loadWaterHydrology`, `clearWaterHydrology`, `renderWaterHydrologyCombined`, `rerenderWaterHydrology` | Water + hydrology as one layer. Preview = print: the hydrology half asks for the composite's own river carve on the loaded DEM (`dem_source`, the DEM request's `dim`, Composite Depth ×); without a loaded DEM it shows "Load the DEM first" and requests nothing. Legend tooltips count px (`order_counts_unit: "px"`) or reaches; sets `appState.waterHydrologyCanvas` and `appState.lastWaterHydrology`. Samples each canvas pixel from the grid (no forward copy, which striped narrower grids). `#hydroColorMode`: depth (blue) or Strahler order (`HYDRO_ORDER_COLORS`, legend `#hydroOrderLegend`), redrawn without a request. Skips the separate water mask when the hydrology grid carries `water_surface` |
 | `trails-overlay.js` | `loadTrails`, `renderTrails`, `refreshTrailsCategories`, `clearTrails`, `cancelTrailsLoad` | Ski + hiking grids from `/api/terrain/trails`; retains `appState.lastTrailsData` so display controls repaint without refetching |
 | `city-overlay.js` | `loadCityData`, `cancelCityFetch`, `clearCityOverlay`, `selectCityBuilding`, `enhanceBuildingHeights`, `_drawCityCanvas` | OSM fetch (via `city-fetch.js`), terrain Z, feature pre-bake, building picking |
@@ -204,7 +203,7 @@ layers/city-overlay → layers/city-render → layers/stacked-layers → layers/
 layers/mesh-layer → layers/mesh-registration
 export/export-handlers → export/model-viewer → map/compare-view
 regions/region-ui → regions/regions-import-export → layers/water-mask
-layers/hydrology-overlay → layers/water-hydrology-combined → layers/trails-overlay
+layers/water-hydrology-combined → layers/trails-overlay
 map/map-globe → regions/region-boxes → regions/regions → regions/region-editor → map/bbox-panel
 ui/app-setup → ui/keyboard-shortcuts
 events/event-listeners-map → events/event-listeners-export → events/event-listeners-ui → events/event-listeners
@@ -287,7 +286,7 @@ One line per function. `window.*` unless marked (private) or (export).
 | `loadSatelliteRGBImage({dim?})` | ESRI satellite imagery (`dim` overrides the resolution control; the 3D drape asks for ≥ the DEM grid) |
 | `updatePrintDimensions()` | Print-size readout |
 
-### `water-mask.js`, `hydrology-overlay.js`, `water-hydrology-combined.js`
+### `water-mask.js`, `water-hydrology-combined.js`
 
 | Function | Purpose |
 |---|---|
@@ -295,8 +294,6 @@ One line per function. `window.*` unless marked (private) or (export).
 | `loadEsaLandCover()` | ESA land cover |
 | `renderWaterMask(data)` / `renderEsaLandCover(data)` | Render to canvas |
 | `renderCombinedView()` | DEM + water + land cover |
-| `loadHydrology()` | `/api/terrain/hydrology` (print model) → carve grid → `appState.hydrologySourceCanvas` |
-| `clearHydrology()` / `cancelHydroLoad()` | Clear / abort |
 | `loadWaterHydrology()` | Water mask + print-model hydrology (`hydrologyPrintQuery`: `dem_source`, `dim`, `source`, `min_order`, `width_scale`, `depth_scale`, projection) in parallel → combined canvas |
 | `clearWaterHydrology()` | Clear combined canvas + `appState.waterHydrologyCanvas` |
 

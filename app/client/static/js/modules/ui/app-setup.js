@@ -167,7 +167,6 @@ window.loadAllLayers = async function loadAllLayers() {
             window.loadWaterHydrology?.(),
             window.loadEsaLandCover?.(),
             window.loadSatelliteRGBImage?.(),
-            window.loadHydrology?.(),
             // activate:false - a bulk load fetches every layer and must not
             // change which one the user is looking at.
             window.loadTrails?.({ activate: false }),

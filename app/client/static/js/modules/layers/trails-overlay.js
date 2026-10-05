@@ -1,7 +1,7 @@
 /**
  * modules/trails-overlay.js — Trails fetch, render, and clear.
  *
- * Loaded as a plain <script> before app.js. Modelled on hydrology-overlay.js.
+ * Imported by main.js.
  *
  * The server returns both categories (ski and hiking) in one response, so the
  * per-category checkboxes are a client-side repaint: the last payload is kept

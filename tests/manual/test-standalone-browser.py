@@ -117,7 +117,7 @@ async def main():
                     window.setStackMode('Hydrology');
                 }
             """)
-            await page.wait_for_function("() => !!window.appState?.hydrologySourceCanvas", timeout=60000)
+            await page.wait_for_function("() => !!window.appState?.waterHydrologyCanvas", timeout=60000)
             await page.evaluate("""() => window.updateStackedLayers?.()""")
             await page.wait_for_timeout(1000)
 
@@ -138,7 +138,7 @@ async def main():
                         demCanvas: document.getElementById('layerDemCanvas'),
                         hydroCanvas: document.getElementById('layerHydroCanvas'),
                         stackCanvas: document.getElementById('stackViewCanvas'),
-                        hydroSourceCanvas: window.appState?.hydrologySourceCanvas || null
+                        hydroSourceCanvas: window.appState?.waterHydrologyCanvas || null
                     };
 
                     const stats = {};

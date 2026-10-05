@@ -107,7 +107,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
                 // osmCityData (not cleared) so we only re-fetch when the raster was loaded.
                 const hadCity = !!window.appState.cityRasterSourceCanvas;
                 const hadCityPolygons = !!window.appState.osmCityData;
-                const hadHydro = !!window.appState.hydrologySourceCanvas;
 
                 window.showToast?.('Projection changed — re-fetching layers…', 'info');
 
@@ -121,7 +120,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
                 if (hadSat) tasks.push(window.loadSatelliteRGBImage?.());
                 if (hadSatEsa) tasks.push(window.loadSatelliteImage?.());
                 if (hadCity) tasks.push(window.loadCityRaster?.());
-                if (hadHydro) tasks.push(window.loadHydrology?.());
                 if (tasks.length) await Promise.all(tasks);
 
                 // City polygon overlays are frontend-rendered; force cache invalidation + redraw
@@ -427,13 +425,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         window.events?.emit(window.EV?.STACKED_UPDATE);
         window.showToast?.('Satellite layer cleared', 'info');
     });
-
-    // Quick-load bar buttons (LayerViewSection)
-    _asyncBtn('qlLoadDem', () => window.loadDEM?.());
-    _asyncBtn('qlLoadWater', () => window.loadWaterMask?.());
-    _asyncBtn('qlLoadSat', () => window.loadSatelliteRGBImage?.());
-    _asyncBtn('qlLoadEsa', () => window.loadEsaLandCover?.());
-    _asyncBtn('qlLoadHydro', () => window.loadHydrology?.());
 };
 
 window._setupBboxListeners = function _setupBboxListeners() {

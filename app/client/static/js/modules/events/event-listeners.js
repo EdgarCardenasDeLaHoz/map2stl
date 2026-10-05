@@ -73,8 +73,6 @@ window.setupEventListeners = function setupEventListeners() {
     // Min order and Width x apply to both river sources (Natural Earth gets a
     // pseudo order), so #hydroSource no longer hides them.
 
-    // qlLoadHydro (quick-load) wired in event-listeners-map.js via _asyncBtn
-
     // Trails section. Only the two buttons here are fetch controls; everything
     // below repaints from the retained payload rather than refetching, since one
     // response already carries both categories, the area masks, and the piste

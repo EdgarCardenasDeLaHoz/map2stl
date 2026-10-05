@@ -34,7 +34,6 @@ import './modules/map/new-region.js';
 import './modules/regions/region-ui.js';
 import './modules/regions/regions-import-export.js';
 import './modules/layers/water-mask.js';
-import './modules/layers/hydrology-overlay.js';
 import './modules/layers/water-hydrology-combined.js';
 import './modules/layers/trails-overlay.js';
 import './modules/map/map-globe.js';
