@@ -201,7 +201,7 @@ class TestEndpointProjectionParams:
         r = client.post("/api/cities/raster", json=body)
         assert r.status_code == 200
         data = r.json()
-        assert "values" in data
+        assert "values_b64" in data
         assert "width" in data
         assert "height" in data
 
@@ -307,10 +307,10 @@ class TestCityRasterProjectionE2E:
         assert data["height"] == 50
 
     def test_city_values_count_matches_dims_no_projection(self, client):
-        """values array length == width * height (no projection)."""
+        """values_b64 decodes to width * height float32 values (no projection)."""
         r = client.post("/api/cities/raster", json=self._make_body("none"))
         data = r.json()
-        assert len(data["values"]) == data["width"] * data["height"]
+        assert len(base64.b64decode(data["values_b64"])) == 4 * data["width"] * data["height"]
 
 
 class TestCityRasterNaNBug:
@@ -496,9 +496,6 @@ class TestResponseFormatConsistency:
         assert "river_grid_values_b64" in data
         assert "river_grid_values" not in data
 
-    @pytest.mark.xfail(strict=True, reason=(
-        "Known issue (docs/issues.md §0f): /api/cities/raster "
-        "still returns 'values' via .tolist(), not 'values_b64' like the terrain layers"))
     def test_city_raster_uses_b64_not_tolist(self, client):
         body = {
             "north": 40.0, "south": 39.9, "east": -75.1, "west": -75.2,
@@ -518,13 +515,10 @@ class TestResponseFormatConsistency:
         assert "image" in data
         assert "bbox" in data
 
-    @pytest.mark.xfail(strict=True, reason=(
-        "Known issue (docs/issues.md §0f): the satellite "
-        "response has no 'dimensions' key, so clients cannot check alignment"))
     def test_satellite_response_has_dimensions(self, client):
         r = client.get(f"/api/terrain/satellite?{_BBOX_QS}&dim=10")
         data = r.json()
-        assert "dimensions" in data
+        assert data["dimensions"] == [10, 10]
 
 
 # ===================================================================

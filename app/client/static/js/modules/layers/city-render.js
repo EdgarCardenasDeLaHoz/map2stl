@@ -609,7 +609,7 @@ window.loadCityRaster = async function loadCityRaster() {
         // Render city raster to a standalone canvas WITHOUT overwriting DEM state.
         // Do NOT call renderDEMCanvas here — it clobbers lastDemData/curveData/workflow.
         const canvas = _renderRasterCanvas(
-            data.values, data.width, data.height, colormap, data.vmin, data.vmax
+            window.decodeRasterValues(data), data.width, data.height, colormap, data.vmin, data.vmax
         );
         if (canvas) {
             if (window.appState) {

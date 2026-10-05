@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import numpy as np
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
@@ -17,7 +18,7 @@ from app.server.core import city_fetch_tasks
 from app.server.core.cache import CACHE_ROOT, osm_cache_key
 from app.server.core.city_data import get_city_layers, read_city_layers_any_tolerance
 from app.server.core.responses import error_response
-from app.server.core.validation import run_sync, validate_bbox_diagonal
+from app.server.core.validation import b64_encode, run_sync, validate_bbox_diagonal
 from app.server.schemas import (
     CityRasterRequest,
     CityRequest,
@@ -234,7 +235,7 @@ async def get_city_raster(req: CityRasterRequest):
                 "bbox": {"north": req.north, "south": req.south,
                          "east": req.east, "west": req.west},
             })
-            return JSONResponse(content=cached_result)
+            return JSONResponse(content=_raster_wire_payload(cached_result))
         except Exception as e:
             logger.debug(f"City raster cache read failed: {e}")
 
@@ -304,12 +305,21 @@ async def get_city_raster(req: CityRasterRequest):
 
     result = _sanitize_raster_result(result)
 
-    return JSONResponse(content=result)
+    return JSONResponse(content=_raster_wire_payload(result))
 
 
 # ---------------------------------------------------------------------------
 # Google 3D height enhancement
 # ---------------------------------------------------------------------------
+
+def _raster_wire_payload(result: dict) -> dict:
+    """The city raster as sent to clients: ``values`` packed as ``values_b64``
+    (little-endian float32, like the terrain layers) instead of a JSON list
+    (docs/history/issues-resolved.md §0f)."""
+    out = {k: v for k, v in result.items() if k != "values"}
+    out["values_b64"] = b64_encode(np.asarray(result["values"], dtype=np.float32))
+    return out
+
 
 @router.get("/api/cities/google3d-available")
 async def google3d_available():

@@ -649,6 +649,20 @@ async def get_terrain_esa_land_cover(
         return error_response(str(e))
 
 
+def _satellite_payload(b64: str, north: float, south: float,
+                       east: float, west: float) -> dict:
+    """Satellite response: the JPEG, its bbox, and ``dimensions`` ``[h, w]`` (the
+    DEM payload's convention) so a client can check it lines up with the DEM grid
+    (docs/history/issues-resolved.md §0f). The size comes from the JPEG header; nothing is decoded."""
+    import base64
+    from io import BytesIO
+
+    from PIL import Image
+    with Image.open(BytesIO(base64.b64decode(b64))) as img:
+        w, h = img.size
+    return {"image": b64, "bbox": [west, south, east, north], "dimensions": [h, w]}
+
+
 @router.get("/api/terrain/satellite", tags=["terrain"])
 async def get_terrain_satellite(
     request: Request,
@@ -698,7 +712,7 @@ async def get_terrain_satellite(
         buf = BytesIO()
         img.save(buf, format="JPEG", quality=80)
         b64 = base64.b64encode(buf.getvalue()).decode()
-        return JSONResponse(content={"image": b64, "bbox": [west, south, east, north]})
+        return JSONResponse(content=_satellite_payload(b64, north, south, east, west))
 
     try:
         b64 = await run_sync(
@@ -725,7 +739,7 @@ async def get_terrain_satellite(
             out_img.save(buf, format="JPEG", quality=85)
             b64 = _b64mod.b64encode(buf.getvalue()).decode()
 
-        return JSONResponse(content={"image": b64, "bbox": [west, south, east, north]})
+        return JSONResponse(content=_satellite_payload(b64, north, south, east, west))
     except Exception as e:
         logger.error(f"Error fetching satellite tiles: {e}", exc_info=True)
         return error_response(str(e))
