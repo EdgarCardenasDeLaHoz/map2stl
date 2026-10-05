@@ -101,6 +101,30 @@ def mesh_composite_layers(layers: list | None) -> list | None:
     return kept or None
 
 
+def check_dem_grid(dem_values, height, width, max_dim: int | None = None) -> None:
+    """Raise ``ValueError`` unless ``dem_values`` is a ``height`` x ``width`` grid with
+    each side at most ``max_dim`` (default ``config.MAX_DIM``), as the DEM endpoints allow.
+
+    Export used to reshape whatever the request sent (PA-5): a mismatched count failed
+    deep in numpy, and an oversized grid could run the server out of memory. An empty
+    ``dem_values`` passes (callers report "Missing DEM data" themselves).
+    """
+    if dem_values is None or len(dem_values) == 0:
+        return
+    if max_dim is None:
+        from app.server.config import MAX_DIM as max_dim
+    try:
+        h, w = int(height), int(width)
+    except (TypeError, ValueError):
+        raise ValueError(f"DEM height/width must be integers, got {height!r} x {width!r}") from None
+    if h < 1 or w < 1 or h != height or w != width:
+        raise ValueError(f"DEM height/width must be positive integers, got {height!r} x {width!r}")
+    if h > max_dim or w > max_dim:
+        raise ValueError(f"DEM grid {h} x {w} is over the {max_dim} px limit per side")
+    if len(dem_values) != h * w:
+        raise ValueError(f"DEM has {len(dem_values)} values, expected {h} x {w} = {h * w}")
+
+
 @dataclass
 class ExportContext:
     """Typed container for parsed export parameters.
@@ -187,6 +211,8 @@ class ExportContext:
             resolved = resolve_dem(data)
             if resolved is not None:
                 dem_values, height, width = resolved
+
+        check_dem_grid(dem_values, height, width)
 
         bbox = data.get("bbox") or None
         if not bbox and data.get("dem_id"):

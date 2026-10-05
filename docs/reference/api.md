@@ -78,6 +78,7 @@ Primary `TerrainSession` touchpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
+| — | all `/api/export/*` | An inline `dem_values` grid must be `height` x `width` values with each side ≤ `MAX_DIM` (2000); otherwise 400 (`app/server/core/export_params.py::check_dem_grid`; the async routes answer before queuing a task) |
 | POST | `/api/export/stl` | Generate + download STL (sync) |
 | POST | `/api/export/obj` | Generate + download OBJ (sync) |
 | POST | `/api/export/3mf` | Generate + download 3MF (sync) |

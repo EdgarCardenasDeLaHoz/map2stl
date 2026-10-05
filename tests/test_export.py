@@ -163,3 +163,50 @@ class TestAsyncExportFlow:
     def test_unknown_task_returns_404(self, client):
         r = client.get("/api/export/status/not-a-task")
         assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PA-5: export checks the inline grid (size cap, value count) everywhere
+# ---------------------------------------------------------------------------
+
+class TestExportGridCheck:
+    def test_check_dem_grid(self):
+        import pytest
+
+        from app.server.core.export_params import check_dem_grid
+        check_dem_grid(_DEM_VALUES, _H, _W)                     # fine
+        check_dem_grid([], 0, 0)                                # empty: caller's "missing"
+        for vals, h, w in ([1.0] * 24, 5, 5),               \
+                          ([1.0] * 6, 2.5, 2.4),            \
+                          ([1.0] * 6, "a", 3),              \
+                          ([1.0] * 6, -2, -3):
+            with pytest.raises(ValueError):
+                check_dem_grid(vals, h, w)
+        with pytest.raises(ValueError, match="limit"):
+            check_dem_grid([0.0] * 9, 3, 3, max_dim=2)
+
+    def test_count_mismatch_is_400_on_every_sync_route(self, client):
+        body = {**_EXPORT_BODY, "dem_values": _DEM_VALUES[:-1]}
+        for route in ("stl", "obj", "3mf", "preview", "preflight"):
+            r = client.post(f"/api/export/{route}", json=body)
+            assert r.status_code == 400, route
+            assert "expected" in r.json()["error"], route
+
+    def test_oversized_grid_is_rejected(self, client, monkeypatch):
+        import app.server.config as config
+        monkeypatch.setattr(config, "MAX_DIM", 4)
+        r = client.post("/api/export/stl", json=_EXPORT_BODY)        # 5 x 5 > 4
+        assert r.status_code == 400 and "limit" in r.json()["error"]
+
+    def test_async_start_rejects_bad_grid_before_queuing(self, client):
+        body = {**_EXPORT_BODY, "dem_values": _DEM_VALUES[:-1], "format": "stl"}
+        r = client.post("/api/export/start", json=body)
+        assert r.status_code == 400 and "task_id" not in r.json()
+        r = client.post("/api/export/puzzle", json={**_EXPORT_BODY, "dem_values": [1.0]})
+        assert r.status_code == 400
+
+    def test_crosssection_rejects_count_mismatch(self, client):
+        body = {**_EXPORT_BODY, "dem_values": _DEM_VALUES[:-1],
+                "north": 1.0, "south": 0.0, "east": 1.0, "west": 0.0}
+        r = client.post("/api/export/crosssection", json=body)
+        assert r.status_code == 400

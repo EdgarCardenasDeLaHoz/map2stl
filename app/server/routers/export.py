@@ -22,6 +22,7 @@ from app.server.core.export import (  # noqa: E402
     generate_obj,
     generate_stl,
 )
+from app.server.core.export_params import check_dem_grid  # noqa: E402
 from app.server.core.export_tasks import (  # noqa: E402
     get_task_file,
     get_task_status,
@@ -40,6 +41,16 @@ async def _off_loop(fn, data):
         return await loop.run_in_executor(None, fn, data)
     except ValueError as exc:
         return JSONResponse(content={"error": str(exc)}, status_code=400)
+
+
+def _inline_grid_error(data: dict) -> JSONResponse | None:
+    """A 400 for an inline ``dem_values`` grid that export would reject, before a task is
+    queued for it (the background task would only fail later)."""
+    try:
+        check_dem_grid(data.get("dem_values"), data.get("height"), data.get("width"))
+    except ValueError as exc:
+        return JSONResponse(content={"error": str(exc)}, status_code=400)
+    return None
 
 
 @router.post("/api/export/stl")
@@ -86,6 +97,8 @@ async def export_crosssection(request: Request):
 async def export_puzzle(request: Request):
     """Start an async puzzle 3MF export. Returns {task_id} for polling."""
     data = await request.json()
+    if err := _inline_grid_error(data):
+        return err
     task_id = start_export_task(data, "puzzle")
     return JSONResponse(content={"task_id": task_id})
 
@@ -101,6 +114,8 @@ async def export_start(request: Request):
     fmt = data.pop("format", "stl")
     if fmt not in ("stl", "obj", "3mf", "puzzle", "city"):
         return JSONResponse(content={"error": f"Unsupported format: {fmt}"}, status_code=400)
+    if err := _inline_grid_error(data):
+        return err
     task_id = start_export_task(data, fmt)
     return JSONResponse(content={"task_id": task_id})
 

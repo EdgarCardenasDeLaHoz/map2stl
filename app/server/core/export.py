@@ -32,6 +32,7 @@ from starlette.background import BackgroundTask
 from app.server.core.export_params import (
     ExportContext,
     _parse_export_params,
+    check_dem_grid,
     resolve_dem,
 )
 from app.server.core.export_tasks import ExportTask
@@ -47,10 +48,6 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
     p = _parse_export_params(data)
     if not p.dem_values or not p.height or not p.width:
         task.fail("Missing DEM data")
-        return
-    if len(p.dem_values) != p.height * p.width:
-        task.fail(f"DEM has {len(p.dem_values)} values, expected "
-                  f"{p.height} x {p.width}")
         return
 
     task.update(10, "Preparing terrain...")
@@ -766,6 +763,7 @@ def generate_crosssection(data: dict):
 
     if not dem_values or not height or not width:
         return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
+    check_dem_grid(dem_values, height, width)   # ValueError -> 400 in the router
     if north <= south or east <= west:
         return JSONResponse(content={"error": "Invalid bbox for cross-section"},
                             status_code=400)

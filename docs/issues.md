@@ -24,9 +24,6 @@ Source: [history/audits/pipeline-audit-2026-08-26.md](history/audits/pipeline-au
 (ids = its numbering). Re-checked against the code 2026-09-28: 12 findings fixed, 2 obsolete,
 the rest below.
 
-- **PA-5 Export has no resolution cap**: raw `dem_values` / `height` / `width` go straight to a
-  reshape with no `validate_dim` and no `h × w == len` check. This is also an out-of-memory
-  risk. `app/server/core/export_params.py::ExportContext`, `app/server/core/export.py::_prepare_dem_array`.
 - **PA-15 SRTM void clamped to 0**: `geo2stl/dem.py::fetch_h5_dem` clamps with `np.maximum(…, 0)`
   and has no NaN step for −32768. Voids and real below-sea-level ground both become 0.
 - **PA-17 `select()` swallows errors**: `app/session/terrain_session.py::TerrainSession`

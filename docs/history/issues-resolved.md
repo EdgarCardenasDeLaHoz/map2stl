@@ -34,6 +34,14 @@ because code cites them.
   again updates the colormap in place. `bbox` and `sourceDimensions` carry over while the grid
   size is unchanged (curve and composite applies). Test: `tests/js/renderDemCanvas.test.js`.
 
+### PA-5 Export had no resolution cap — fixed 2026-10-05 (T11)
+- Raw `dem_values` / `height` / `width` went straight to a reshape: a mismatched count failed deep
+  in numpy, an oversized grid risked running the server out of memory.
+- `app/server/core/export_params.py::check_dem_grid` (integer sides ≥ 1, each ≤ `config.MAX_DIM`,
+  count = h × w) runs in `ExportContext.from_request` (preview, STL/OBJ/3MF, preflight, city
+  model, async tasks) and `generate_crosssection`; `/api/export/start` and `/api/export/puzzle`
+  answer 400 before queuing a task. Tests: `tests/test_export.py::TestExportGridCheck`.
+
 ## Fixed 2026-10-05 (full code audit)
 
 ### Silent wrong answers — fixed 2026-10-05
