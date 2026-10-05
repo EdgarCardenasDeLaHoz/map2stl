@@ -715,8 +715,9 @@ async def get_terrain_satellite(
         return JSONResponse(content=_satellite_payload(b64, north, south, east, west))
 
     try:
+        # On the DEM's unprojected grid, so the projection below lands it on the DEM.
         b64 = await run_sync(
-            _fetch_satellite_tiles, north, south, east, west, dim)
+            _fetch_satellite_tiles, north, south, east, west, dim, degree_grid=True)
 
         # Apply map projection to the satellite image (channel-by-channel)
         if projection != "none":

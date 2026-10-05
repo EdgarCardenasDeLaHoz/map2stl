@@ -92,12 +92,6 @@ export const GROUPS: Record<string, LayerGroups> = {
         hint: 'Where the heights come from' },
       { kind: 'number', label: 'Detail', icon: '▦', color: '#30a46c', id: 'paramDim', unit: 'px',
         min: 50, max: 2000, step: 50, hint: 'Points across; layers follow it' },
-      { kind: 'select', label: 'Projection', icon: '🌐', color: '#0a84ff', id: 'paramProjection',
-        hint: 'For a large area' },
-      { kind: 'switch', label: 'Trim empty edges', icon: '✂', color: '#636366', id: 'paramClipNans', adv: true,
-        hint: 'Drop the blank border a projection leaves' },
-      { kind: 'switch', label: 'Keep the grid size', icon: '⤢', color: '#636366', id: 'paramMaintainDimensions', adv: true,
-        hint: 'Stretch back to the full size after projecting' },
       { kind: 'switch', label: 'Reload when the box moves', icon: '↻', color: '#636366', id: 'autoReloadLayers',
         hint: 'Fetch every layer again after a box edit' },
       { kind: 'sub', label: 'Landmarks', icon: '🏛', color: '#ff9f0a', sub: 'landmarks',
@@ -330,6 +324,14 @@ export const GROUPS: Record<string, LayerGroups> = {
 
 /** The map view itself: the same group under every layer (user 2026-10-04). */
 export const CANVAS: Row[] = [
+  // Projection shapes every layer and the print, so it sits here, under every layer
+  // (user 2026-10-05), not under Terrain > Fetch.
+  { kind: 'select', label: 'Projection', icon: '🌐', color: '#0a84ff', id: 'paramProjection',
+    hint: 'Shapes the map and the print, every layer' },
+  { kind: 'switch', label: 'Trim empty edges', icon: '✂', color: '#636366', id: 'paramClipNans', adv: true,
+    hint: 'Drop the blank border a projection leaves' },
+  { kind: 'switch', label: 'Keep the grid size', icon: '⤢', color: '#636366', id: 'paramMaintainDimensions', adv: true,
+    hint: 'Stretch back to the full size after projecting' },
   { kind: 'switch', label: 'Grid', icon: '#', color: '#636366', id: 'showGridlines', hint: 'Lat/lon lines' },
   { kind: 'sub', label: 'Grid & map options', icon: '🗺', color: '#0a84ff', sub: 'grid', hint: 'Spacing, pixel grid, map under the terrain' },
   { kind: 'sub', label: 'Layer order', icon: '☰', color: '#5e5ce6', sub: 'layers', hint: "What's drawn on top, on the map only" },

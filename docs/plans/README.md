@@ -174,9 +174,8 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   - *Hidden fetches*: layers the build needs that Load Cities does not fetch (railways, green,
     trails) are fetched during the build with no progress. Fetch them in Load Cities or show
     their progress.
-  - *Presets and auto-save*: a preset needs a second click on Load DEM, and a region without
-    saved settings starts at projection *None*. Make preset → load → auto-save one step, with
-    Cosine as the default.
+  - *Presets and auto-save*: a preset needs a second click on Load DEM. Make preset → load →
+    auto-save one step. (Cosine is the default since 2026-10-05.)
   - *Result summary*: show the `report.json` `check` block (size vs bed, faces, watertight,
     widened/clamped, filament and time) in the UI after a build.
   - *Map rendering*: the 2D map still draws fetched heights, not the user's height overrides.

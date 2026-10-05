@@ -24,6 +24,12 @@ class TestGetRegionSettings:
         assert data["name"] == "TestRegion"
         assert data["settings"] == {}
 
+    def test_defaults_use_cosine_projection(self, client):
+        """A region with no saved projection opens with cosine (true east-west distances),
+        not "none", which stretched it by 1/cos(lat)."""
+        proj = client.get("/api/settings/default").json()["settings"]["projection"]
+        assert proj["projection"] == "cosine"
+
     def test_returns_empty_when_region_not_in_db(self, client):
         """Region with no saved settings → 200 with empty settings."""
         resp = client.get("/api/regions/TestRegion/settings")

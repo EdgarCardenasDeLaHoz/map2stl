@@ -95,7 +95,8 @@ def _mercator_to_plate_carree(img, north: float, south: float):
     return Image.fromarray(result)
 
 
-def fetch_satellite_tiles(north: float, south: float, east: float, west: float, dim: int = 600) -> str:
+def fetch_satellite_tiles(north: float, south: float, east: float, west: float, dim: int = 600,
+                          *, degree_grid: bool = False) -> str:
     """
     Stitch ESRI World Imagery tiles into a bbox-cropped JPEG and return it as base64.
 
@@ -104,6 +105,13 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
     gets zoom 14-18 and a 1000 km region zoom 8-12, and at most 64 tiles per side
     are fetched. The Mercator crop is resampled to plate carrée (uniform latitude
     rows, row 0 = north) and resized so its longer side is ``dim``.
+
+    The image keeps the ground's shape (square pixels in metres), unless
+    ``degree_grid``: then it is sized like the DEM before projection (width : height =
+    longitude span : latitude span, square pixels in degrees), the grid every other
+    layer arrives on. The app's satellite endpoint asks for that, since it projects
+    the image afterwards; projecting the ground-shaped image applied the cosine factor
+    twice (Banff 600 x 235 vs the terrain's 600 x 376).
 
     Returns a base64-encoded JPEG string; raises RuntimeError if every tile fails.
     """
@@ -124,6 +132,8 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
     crop = _mercator_to_plate_carree(Image.fromarray(rgb), north, south)
 
     cw, ch = crop.size
+    if degree_grid:
+        cw, ch = east - west, north - south
     if cw >= ch:
         out_w, out_h = dim, max(1, round(dim * ch / cw))
     else:

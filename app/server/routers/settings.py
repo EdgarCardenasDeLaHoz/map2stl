@@ -39,7 +39,9 @@ def _default_region_settings() -> dict:
             "show_sat": False,
         },
         "projection": {
-            "projection": "none",
+            # Cosine: true east-west distances. "none" stretched every region without a
+            # saved projection by 1/cos(lat) (Banff 1.6x, Norway 2.3x; user 2026-10-05).
+            "projection": "cosine",
             "clip_valid_region": True,
         },
         "view": {

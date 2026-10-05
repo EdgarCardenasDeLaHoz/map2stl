@@ -2,6 +2,25 @@
 
 DEM sources, the DEM cache key, availability, and how empty or uncovered DEMs are reported. Related: [projections-raster.md](projections-raster.md), [mesh-pipeline.md](mesh-pipeline.md).
 
+### 2026-10-05 — Cosine is the default projection; the satellite image arrives on the DEM's grid
+- **Decision:** a region without a saved projection opens with cosine
+  (`app/server/routers/settings.py::_default_region_settings`); regions that saved "none" keep
+  it. The satellite endpoint asks `geo2stl/sat2stl.py::fetch_satellite_tiles` for
+  `degree_grid=True`: the image is sized like the unprojected DEM (lon span : lat span) before
+  the endpoint projects it, like every other layer.
+- **Why:** checked 2026-10-05 (user asked whether projection does anything). It does: every
+  layer request carries it and the server projects terrain, water, borders, hydrology and
+  satellite, and a projection change reloads them. But (1) the defaults said "none", so 112 of 125
+  regions (all but the 13 with a saved projection) printed stretched east-west by 1/cos(lat): Banff 1.6x, Norway
+  2.3x; (2) the satellite image came back in the ground's shape and was then projected again:
+  Banff 600 x 235 under the terrain's 600 x 376 (cosine), 600 x 376 under 600 x 600 (none), so it
+  was stretched back blurred. After: every layer 600 x 376 / 600 x 600 in a click-through.
+- **Rejected:** changing the image for every caller: the deprecated shadow-height provider
+  measures pixels on the ground-shaped image, so the default stays.
+- **Supersedes / superseded by:** —
+- **Source:** tests `tests/test_sat2stl_cache.py::test_satellite_tiles_degree_grid`,
+  `tests/test_region_settings.py::TestGetRegionSettings::test_defaults_use_cosine_projection`.
+
 ### 2026-10-03 — A box over an OpenTopography dataset's area cap uses the next coarser dataset
 - **Decision:** `geo2stl/opentopo.py::dataset_for_area` picks the dataset that covers the box
   (`OPENTOPO_DATASETS[...]["max_area_km2"]`, `"coarser"`: 30 m → 90 m → SRTM15+).

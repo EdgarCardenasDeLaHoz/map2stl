@@ -3,6 +3,17 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-05 — Projection is a Canvas row
+- **Decision:** Projection, Trim empty edges and Keep the grid size (advanced) moved from
+  Terrain › Fetch to the Canvas group (`settings/layerGroups.ts::CANVAS`), hint "Shapes the map
+  and the print, every layer". Canvas now holds what applies under every layer, the print's
+  shape included, not only the map view.
+- **Why:** user, 2026-10-05: "projection settings should affect all layers, so that should
+  probably exist in canvas". It does affect all of them (see
+  [terrain-dem › cosine default](terrain-dem.md#2026-10-05--cosine-is-the-default-projection-the-satellite-image-arrives-on-the-dems-grid)).
+- **Rejected:** —
+- **Supersedes / superseded by:** —
+
 ### 2026-10-05 — Edit settings: Canvas on top and collapsible; the layer's groups are tabs
 - **Decision:** the right panel starts with Canvas (the map view's rows, the same under every
   layer), folded open or closed with its caption. Below it the selected layer's name, then tabs
