@@ -4,6 +4,16 @@
   "south": 10.3845,
   "east": -75.5221,
   "west": -75.5679,
+  "known_heights_m": {
+    "_note": "Published heights (en.wikipedia.org/wiki/List_of_tallest_buildings_in_Cartagena, 2026-10-05) for validation; position = the OSM footprint's centroid. Google 3D Tiles have no building mesh over Cartagena (truth reads 0-19 m), so these are the only independent heights here.",
+    "Hotel Estelar Bocagrande": {"lat": 10.40974, "lon": -75.55125, "height_m": 202, "floors": 52},
+    "Allure": {"lat": 10.40254, "lon": -75.5528, "height_m": 180},
+    "Gran Bay Club": {"lat": 10.39823, "lon": -75.55549, "height_m": 170, "floors": 42},
+    "Portomarine": {"lat": 10.40626, "lon": -75.55099, "height_m": 162.5, "floors": 41},
+    "Nautica": {"lat": 10.39415, "lon": -75.54942, "height_m": 160},
+    "Ravello": {"lat": 10.39433, "lon": -75.54959, "height_m": 143.83, "floors": 38},
+    "Palmetto Eliptic": {"lat": 10.40277, "lon": -75.55637, "height_m": 125, "floors": 38}
+  },
   "max_plausible_height_m": 200,
   "use_satellite_footprints": false,
   "use_cross_view_scoring": true,
