@@ -257,8 +257,9 @@ Height accuracy is scored on surveyed truth, never on Cartagena (no open survey;
 - Same flags every run: each region's process gets `scripts/10_benchmark.py::PINNED_FLAGS` (the
   baseline's b1/512, tag filter on, experimental flags off) over the shell's values; `--keep-env`
   lets the shell through. `summary.json` records the flags and whether Street View signing was on.
-- Same cameras every run: auto-proposals are saved in `runs/auto_proposals/<region>.json`
-  (`seed_selection.py::_persisted_proposals`); delete the file to propose afresh.
+- Same cameras every run: auto-proposals are saved in `runs/auto_proposals/<region>.json` with the
+  region's bbox (`seed_selection.py::_persisted_proposals`); a changed bbox proposes afresh, and
+  so does deleting the file. Files from before the bbox was saved are kept and upgraded.
 
 ## Tests
 

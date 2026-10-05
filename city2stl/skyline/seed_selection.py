@@ -37,28 +37,55 @@ _SCREEN_CACHE_DIR = Path(__file__).parent / "runs" / "screen_cache"
 _PROPOSALS_DIR = Path(__file__).parent / "runs" / "auto_proposals"
 
 
-def _persisted_proposals(region_name: str, propose, proposals_dir: Path | None = None
-                         ) -> list[SkylinePoint]:
-    """Auto-proposals for ``region_name``: the saved set if there is one, else ``propose()``
-    (saved for next time).
+def _bbox_key(bbox) -> list[float] | None:
+    """``[north, south, east, west]`` rounded to ~0.1 m, or None (a RegionBBox, a 4-sequence)."""
+    if bbox is None:
+        return None
+    if hasattr(bbox, "north"):
+        bbox = (bbox.north, bbox.south, bbox.east, bbox.west)
+    return [round(float(v), 6) for v in bbox]
+
+
+def _persisted_proposals(region_name: str, propose, proposals_dir: Path | None = None,
+                         *, bbox=None) -> list[SkylinePoint]:
+    """Auto-proposals for ``region_name``: the saved set if there is one for this ``bbox``,
+    else ``propose()`` (saved for next time).
 
     Why: proposals come from a live OSM fetch, so two runs of one region could look from
     different places and a score change would mix code and camera position (F-SKYBENCH).
-    Delete ``runs/auto_proposals/<region>.json`` to propose afresh. An empty result is
-    not saved, so a failed OSM fetch does not pin "no proposals".
+    The file (``runs/auto_proposals/<region>.json``) is ``{"bbox_nsew": [...], "points": [...]}``:
+    a region whose bbox changed proposes afresh instead of reusing cameras chosen for the
+    old area. A file from before the bbox was recorded (a bare list) is kept, since baseline
+    runs used it, and gets ``bbox`` written beside it. Delete the file to propose afresh. An
+    empty result is not saved, so a failed OSM fetch does not pin "no proposals".
     """
     path = (proposals_dir or _PROPOSALS_DIR) / f"{region_name.lower()}.json"
+    want = _bbox_key(bbox)
+
+    def save(points):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        doc = {"bbox_nsew": want, "points": [vars(pt) for pt in points]}
+        path.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+
     if path.exists():
         try:
-            rows = json.loads(path.read_text(encoding="utf-8"))
-            return [SkylinePoint(**row) for row in rows]
-        except (OSError, ValueError, TypeError) as exc:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(doc, list):                      # pre-bbox file: keep, upgrade
+                points = [SkylinePoint(**row) for row in doc]
+                if want is not None:
+                    save(points)
+                return points
+            if want is None or doc.get("bbox_nsew") == want:
+                return [SkylinePoint(**row) for row in doc["points"]]
+            logger.info("[auto_seed] %s: bbox changed (%s -> %s); proposing afresh",
+                        path.name, doc.get("bbox_nsew"), want)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
             logger.warning("[auto_seed] ignoring unreadable %s: %s", path.name, exc)
     points = list(propose())
     if points:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps([vars(pt) for pt in points], indent=1), encoding="utf-8")
+        save(points)
     return points
+
 
 def _propose_standoff_locations(
     bbox: RegionBBox,

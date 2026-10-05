@@ -166,6 +166,61 @@ def test_auto_proposals_persist_per_region(tmp_path):
     assert not (tmp_path / "nowhere.json").exists()
 
 
+def _proposer(calls, lat=25.7):
+    from city2stl.skyline.region_types import SkylinePoint
+
+    def propose():
+        calls.append(1)
+        return [SkylinePoint("auto_000_0900m", lat, -80.2, 12.5, "auto", 0.8)]
+    return propose
+
+
+def test_auto_proposals_recompute_when_the_bbox_changes(tmp_path):
+    from city2stl.skyline.region_types import RegionBBox
+    from city2stl.skyline.seed_selection import _persisted_proposals
+
+    calls = []
+    small = RegionBBox("miami", 25.80, 25.75, -80.15, -80.20)
+    big = RegionBBox("miami", 25.85, 25.70, -80.10, -80.25)
+    a = _persisted_proposals("miami", _proposer(calls), tmp_path, bbox=small)
+    b = _persisted_proposals("miami", _proposer(calls), tmp_path, bbox=small)
+    assert a == b and len(calls) == 1                     # same bbox: reused
+    c = _persisted_proposals("miami", _proposer(calls, lat=25.71), tmp_path, bbox=big)
+    assert len(calls) == 2 and c[0].lat == 25.71          # bbox changed: proposed afresh
+    d = _persisted_proposals("miami", _proposer(calls), tmp_path, bbox=big)
+    assert d == c and len(calls) == 2                     # and saved for the new bbox
+
+
+def test_legacy_proposal_file_is_kept_and_upgraded(tmp_path):
+    import json
+
+    from city2stl.skyline.region_types import RegionBBox
+    from city2stl.skyline.seed_selection import _persisted_proposals
+
+    (tmp_path / "miami.json").write_text(json.dumps([
+        {"name": "auto_090_0600m", "lat": 25.76, "lon": -80.18, "heading": 270.0,
+         "source": "auto", "score": 1.0}]), encoding="utf-8")
+    calls = []
+    bbox = RegionBBox("miami", 25.80, 25.75, -80.15, -80.20)
+    pts = _persisted_proposals("miami", _proposer(calls), tmp_path, bbox=bbox)
+    assert calls == [] and pts[0].name == "auto_090_0600m"   # baseline cameras kept
+    doc = json.loads((tmp_path / "miami.json").read_text(encoding="utf-8"))
+    assert doc["bbox_nsew"] == [25.8, 25.75, -80.15, -80.2] and len(doc["points"]) == 1
+
+
+def test_failed_recompute_keeps_the_old_file(tmp_path):
+    from city2stl.skyline.region_types import RegionBBox
+    from city2stl.skyline.seed_selection import _persisted_proposals
+
+    calls = []
+    old = RegionBBox("miami", 25.80, 25.75, -80.15, -80.20)
+    _persisted_proposals("miami", _proposer(calls), tmp_path, bbox=old)
+    new = RegionBBox("miami", 25.85, 25.70, -80.10, -80.25)
+    assert _persisted_proposals("miami", lambda: [], tmp_path, bbox=new) == []
+    assert _persisted_proposals("miami", _proposer(calls), tmp_path, bbox=old) != []
+    assert len(calls) == 1                                # the old bbox's set survived
+
+
 def test_osm_load_survives_a_waterways_timeout(monkeypatch):
     """Buildings are the only required OSM layer; a waterways timeout must not fail the run."""
     from city2stl.skyline import region_data as rd
