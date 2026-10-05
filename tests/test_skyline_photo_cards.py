@@ -84,3 +84,27 @@ def test_photos_html_shows_the_numbered_photo_and_map():
     assert page.index(">First<") < page.index(">Second<")          # rows in label order
     plain = _photos_html([{**card, "overlay": None, "map": None, "towers": []}])
     assert "https://thumb/x" in plain and 'class="card"' in plain
+
+
+def test_a_tower_hidden_behind_something_in_front_is_flagged_and_left_out(monkeypatch):
+    """A tree in front of one tower makes the outline there low, so that tower reads below 0 m:
+    it is flagged hidden, the others are refitted without it, and it stays out of the medians."""
+    import importlib
+
+    pl = importlib.import_module("city2stl.skyline.scripts.17_photo_pipeline")
+    towers = _city()
+    cam, heading, fov = (-2400.0, 300.0), 95.0, 40.0
+    prof = _photo(towers, cam, heading, fov)
+    pose = ph.PhotoPose(*towers.to_ll(*cam), heading, fov)
+    ms = ph.measure_towers(prof, towers, pose)
+    victim = max(ms, key=lambda m: m.x1 - m.x0)
+    y = prof.y_top.copy()
+    y[victim.x0:victim.x1 + 1] = prof.height * 0.9          # the outline drops to a foreground tree
+    monkeypatch.setitem(pl._W, "towers", towers)
+    rows, dev = pl._measure(sm.PhotoProfile(y, prof.width, prof.height), pose, 5000.0)
+    by = {r["tower"]: r for r in rows}
+    assert by[victim.index].get("hidden") and by[victim.index]["photo_m"] <= 0
+    assert not any(r.get("hidden") for r in rows if r["tower"] != victim.index)
+    errs = [abs(r["photo_m"] - r["osm_m"]) for r in rows if not r.get("hidden")]
+    assert np.median(errs) < 5.0 and dev == np.median(errs)  # the others are still right
+    assert pl._hidden(by[victim.index]) and not pl._hidden({"photo_m": 12.0})

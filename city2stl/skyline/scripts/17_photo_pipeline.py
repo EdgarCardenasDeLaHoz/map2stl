@@ -102,11 +102,24 @@ def _measure(prof, pose: ph.PhotoPose, max_dist_m: float, h_cam: float = 2.0):
     towers = _W["towers"]
     ms = [m for m in ph.measure_towers(prof, towers, pose, h_cam=h_cam) if m.dist_m <= max_dist_m]
     est = ph.loo_heights(ms)
+    # a tower reading at or below 0 m is hidden: the outline over its columns is something in
+    # front (a tree, a lamp post, a parapet; Cartagena 2026-10-05, towers 3 km away). Refit the
+    # others without it, since its row would bias their tilt and camera height too.
+    hidden = {i: h for i, h in est.items() if h <= 0}
+    if hidden:
+        est = {**ph.loo_heights([m for m in ms if m.index not in hidden]), **hidden}
     rows = [{"tower": m.index, "name": m.name, "dist_m": round(m.dist_m),
-             "photo_m": round(est[m.index], 1), "osm_m": m.osm_height_m}
+             "photo_m": round(est[m.index], 1), "osm_m": m.osm_height_m,
+             **({"hidden": True} if m.index in hidden else {})}
             for m in ms if m.index in est]
-    dev = float(np.median([abs(r["photo_m"] - r["osm_m"]) for r in rows])) if rows else None
+    seen = [r for r in rows if not r.get("hidden")]
+    dev = float(np.median([abs(r["photo_m"] - r["osm_m"]) for r in seen])) if seen else None
     return rows, dev
+
+
+def _hidden(t: dict) -> bool:
+    """A tower reading that measured something in front of the tower (see ``_measure``)."""
+    return bool(t.get("hidden")) or t["photo_m"] <= 0
 
 
 def _job(job: dict) -> dict:
@@ -340,13 +353,15 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
         r["kept"] = _keep(r, args)
         for t in r.get("towers") or []:
             t["truth_m"] = tv(t["tower"])
-        ct = [(t["photo_m"], t["truth_m"]) for t in r.get("towers") or [] if t["truth_m"] is not None]
+        ct = [(t["photo_m"], t["truth_m"]) for t in r.get("towers") or []
+              if t["truth_m"] is not None and not _hidden(t)]
         r["score"] = _score(*zip(*ct, strict=True)) if len(ct) >= 2 else {}
     per: dict[int, list[float]] = {}
     for r in results:
         if r["kept"]:
             for t in r.get("towers") or []:
-                per.setdefault(t["tower"], []).append(t["photo_m"])
+                if not _hidden(t):
+                    per.setdefault(t["tower"], []).append(t["photo_m"])
     rows = [{"tower": int(ti), "name": towers.names[ti], "key": keys[ti],
              "photo_m": round(float(np.median(hs)), 1), "n_photos": len(hs),
              "spread_m": round(float(np.ptp(hs)), 1) if len(hs) > 1 else 0.0,

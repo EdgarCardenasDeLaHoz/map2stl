@@ -110,11 +110,14 @@ def _photos_html(photos: list[dict]) -> str:
         cam = p.get("camera") or {}
         towers = sorted(p.get("towers") or [],
                         key=lambda t: (t.get("label") is None, t.get("label") or 0))
+        def hidden(t):            # something in front of the tower formed the outline
+            return t.get("hidden") or (t.get("photo_m") is not None and t["photo_m"] <= 0)
+
         rows = "".join(
             f"<tr><td>{'' if t.get('label') is None else t['label']}</td>"
             f"<td>{html.escape(t['name'] or str(t.get('tower', '')))}</td><td>{_fmt(t.get('dist_m'), '.0f')}</td>"
-            f"<td>{_fmt(t.get('photo_m'))}</td><td>{_fmt(t.get('osm_m'))}</td><td>{_fmt(t.get('truth_m'))}</td>"
-            f"<td>{_fmt(None if t.get('photo_m') is None or t.get('truth_m') is None else t['photo_m'] - t['truth_m'], '+.1f')}</td></tr>"
+            f"<td>{'hidden' if hidden(t) else _fmt(t.get('photo_m'))}</td><td>{_fmt(t.get('osm_m'))}</td><td>{_fmt(t.get('truth_m'))}</td>"
+            f"<td>{_fmt(None if hidden(t) or t.get('photo_m') is None or t.get('truth_m') is None else t['photo_m'] - t['truth_m'], '+.1f')}</td></tr>"
             for t in towers)
         score = p.get("score") or {}
         info = f"""<h3>{html.escape(p.get('title', ''))}</h3>
@@ -132,8 +135,9 @@ def _photos_html(photos: list[dict]) -> str:
             cards.append(f"""<div class="card wide">
 <a href="{html.escape(p.get('page', ''))}"><img src="{html.escape(p['overlay'])}" alt="photo with the OSM towers numbered"></a>
 <p class="mut small">Numbers = table rows. Solid line: roof measured in the photo; dashed: roof the
-OSM height predicts; white: the photo's skyline outline. Map: camera (triangle), view cone, the
-same towers.</p>
+OSM height predicts; white: the photo's skyline outline; "hidden": something in front of the
+tower (a tree, a lamp post) forms the outline there. Map: camera (triangle), view cone, the same
+towers.</p>
 <div class=pair><img src="{html.escape(p['map'])}" alt="camera location, view and towers"><div>{info}</div></div>
 </div>""")
         else:
