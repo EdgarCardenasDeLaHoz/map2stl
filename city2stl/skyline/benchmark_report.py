@@ -125,7 +125,7 @@ def _photos_html(photos: list[dict]) -> str:
 <a href="https://www.openstreetmap.org/?mlat={cam.get('lat')}&mlon={cam.get('lon')}#map=15/{cam.get('lat')}/{cam.get('lon')}">map</a></p>
 <p><b>Status</b> {html.escape(p.get('status', ''))}</p>
 {f"<p><b>Towers measured</b> {score.get('n', 0)} confirmed · pair order {_fmt(score.get('pair_order') and 100 * score['pair_order'], '.0f')}% · MAE {_fmt(score.get('mae_m'))} m</p>" if score else ''}
-{f'<table><tr><th>#</th><th>tower</th><th>dist m</th><th>photo m</th><th>OSM m</th><th>truth m</th><th>error</th></tr>{rows}</table>' if rows else ''}"""
+{f'<table class=towers><tr><th>#</th><th>tower</th><th>dist m</th><th>photo m</th><th>OSM m</th><th>truth m</th><th>error</th></tr>{rows}</table>' if rows else ''}"""
         if p.get("overlay"):
             # the seed-page style: the photo full width with its towers numbered, then the
             # camera's map beside the numbered table
@@ -199,7 +199,7 @@ th{{background:var(--card)}} td:first-child,th:first-child{{text-align:left}}
 .cards{{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}}
 .card{{background:var(--card);border-radius:10px;padding:10px}} .card img{{width:100%;border-radius:6px}} .card h3{{font-size:15px;margin:8px 0 4px}}
 .card.wide{{grid-column:1/-1}} .pair{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:14px;align-items:start}} .small{{font-size:13px}}
-.pair img{{background:#fff}}
+.pair img{{background:#fff}} .towers td:nth-child(2),.towers th:nth-child(2){{text-align:left}}
 @media (max-width:760px){{.pair{{grid-template-columns:1fr}}}}
 </style></head><body>
 <p><a href="index.html">← {region} report</a></p>
