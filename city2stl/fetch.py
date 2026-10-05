@@ -51,7 +51,7 @@ from geo2stl.osm import mark_overpass_failure, use_overpass_endpoint  # noqa: E4
 _OVERPASS_REQUEST_TIMEOUT_S = 300
 
 
-# _HIGHWAY_WIDTHS is defined in city2stl.roads (authoritative source).
+# Road widths (total, metres) are defined in city2stl.roads (authoritative source).
 # Imported here so fetch.py is the single osm-facing module without callers
 # needing to know the internal split between roads.py and fetch.py.
 from .cache_policy import CITY_PIPELINE_VERSION  # noqa: E402

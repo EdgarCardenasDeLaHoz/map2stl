@@ -30,7 +30,6 @@ def data_dir() -> Path:
     return Path(os.environ.get("ALIGN_DATA_DIR") or ALIGN_TOOL / "data")
 
 
-DATA = data_dir()
 #: Overpass water layers cached by ``osm_water`` (always beside the tool, as before).
 WATER_CACHE = ALIGN_TOOL / "data" / "water_cache"
 #: Raw OSM elements and DEM tiles cached by the street placement.

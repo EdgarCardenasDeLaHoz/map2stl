@@ -83,8 +83,7 @@ from city2stl.registration import osm_model
 from city2stl.registration import osm_water as locate
 from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
-# Packs and caches stay where the align tool has always written them (align_paths).
-DATA = _paths.DATA
+# Caches stay where the align tool has always written them (align_paths).
 CACHE = _paths.STREET_CACHE
 
 PLATE_RES = 256          # the plate is read at this many cells across before posing

@@ -7,7 +7,7 @@ for typical city-scale grids (256 x 256 to 1024 x 1024 pixels).
 
 Public API
 ----------
-infill_idw(heightmap, mask, dem_baseline=None, power=2)
+infill_idw(heightmap, mask, dem_baseline=None)
     -> np.ndarray (H, W) float32, no NaN in known+filled area
 
 infill_nearest(heightmap)
@@ -35,15 +35,13 @@ def infill_idw(
     heightmap: np.ndarray,
     mask: np.ndarray | None = None,
     dem_baseline: np.ndarray | None = None,
-    power: float = 2.0,
 ) -> np.ndarray:
-    """Fill NaN pixels in *heightmap* using Inverse Distance Weighting.
+    """Fill NaN pixels in *heightmap* by interpolating the known pixels.
 
-    For each unknown pixel, the fill value is a weighted mean of all known
-    pixels, where the weight of known pixel k is ``1 / dist(k, unknown)^power``.
-    When many known pixels exist, scipy.interpolate.griddata with ``method='linear'``
-    (Delaunay triangulation) is used as a computationally efficient proxy,
-    with a ``nearest``-neighbour fallback for pixels outside the convex hull.
+    Despite the name this is not inverse-distance weighting:
+    ``scipy.interpolate.griddata(method='linear')`` (Delaunay triangulation) fills
+    the unknown pixels, with a ``nearest``-neighbour fallback for pixels outside the
+    convex hull or when fewer than four pixels are known.
 
     If *dem_baseline* is provided, fill values are blended toward the DEM
     surface far from known data.  This prevents the infill from diverging in
@@ -59,8 +57,6 @@ def infill_idw(
     dem_baseline : (H, W) float32 ndarray, optional
         Background DEM surface.  Where provided, far-from-data fill values
         are blended toward the DEM to keep results physically plausible.
-    power : float
-        IDW power parameter (default 2).  Higher = more localised.
 
     Returns
     -------

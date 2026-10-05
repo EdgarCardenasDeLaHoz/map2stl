@@ -1904,8 +1904,8 @@ class TerrainSession:
             ``"wsf3d"``          — DLR World Settlement Footprint 3D (~90 m, global)
             ``"ghsl"``           — JRC GHS-BUILT-H global (~100 m, global, Phase 1b)
             ``"open_buildings"`` — Google Open Buildings (~5 m, developing regions, Phase 1b)
-            ``"ndsm"``           — GLO-30 minus FABDEM (~30 m, global)
-            ``"copernicus"``     — JRC GHSL building height (~10 m EU, 100 m global)
+            ``"ndsm"``           — GLO-30 minus SRTM (~30 m, 56°S–60°N)
+            ``"copernicus"``     — Copernicus EU Building Height (~10 m, Europe only)
             ``"lidar_3dep"``     — USGS 3DEP LiDAR nDSM (~1 m, US only)
             ``"shadow_height"``  — Shadow-based estimation (~5 m, global, Phase 1b placeholder)
             ``"google3d"``       — Google Photorealistic 3D Tiles (~1 m, API key)
@@ -2313,22 +2313,18 @@ class TerrainSession:
         self,
         method: str = "idw",
         use_dem_baseline: bool = True,
-        power: float = 2.0,
     ) -> TerrainSession:
         """Fill NaN gaps in ``self.stl_heightmap`` using deterministic infill.
 
         Parameters
         ----------
         method : str
-            ``"idw"``     — Inverse Distance Weighting via Delaunay triangulation
-                            (smooth, recommended).
+            ``"idw"``     — linear interpolation over a Delaunay triangulation
+                            (smooth, recommended; see ``infill_idw``).
             ``"nearest"`` — Pure nearest-neighbour (fast, sharp boundaries).
         use_dem_baseline : bool
             If True and DEM is available, blend fill values toward the DEM
             surface far from known data (default True).
-        power : float
-            IDW distance-weighting exponent (only used when method="idw",
-            default 2).
 
         After this call:
             ``self.infilled_heights`` : (H, W) float32 — complete heightmap,
@@ -2346,16 +2342,8 @@ class TerrainSession:
         dem_arr = None
         if use_dem_baseline and self.dem is not None:
             dim_h, dim_w = self.dem["dimensions"]
-            if "dem_values_b64" in self.dem:
-                import base64 as _b64
-                dem_raw = np.frombuffer(
-                    _b64.b64decode(self.dem["dem_values_b64"]),
-                    dtype=np.float32
-                ).reshape(dim_h, dim_w)
-            else:
-                dem_raw = np.array(
-                    self.dem["dem_values"], dtype=np.float32
-                ).reshape(dim_h, dim_w)
+            dem_raw = self._decode_grid_response(
+                self.dem, "dem_values_b64", "dem_values", dim_h, dim_w)
 
             # Resize DEM baseline to match STL heightmap if needed
             if dem_raw.shape != hm.shape:
@@ -2371,7 +2359,7 @@ class TerrainSession:
         if method == "nearest":
             filled = infill_nearest(hm)
         else:
-            filled = infill_idw(hm, mask=mask, dem_baseline=dem_arr, power=power)
+            filled = infill_idw(hm, mask=mask, dem_baseline=dem_arr)
 
         nan_before = int(np.isnan(hm).sum())
         nan_after = int(np.isnan(filled).sum())

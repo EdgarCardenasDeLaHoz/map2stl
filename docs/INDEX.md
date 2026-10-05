@@ -191,7 +191,7 @@ Overview and ranking: [reference/height-providers.md](reference/height-providers
   - GeoTIFF reader shared by providers: `map2stl/geo2stl/raster.py::read_geotiff` (wrapped in `map2stl/city2stl/height/providers/_raster.py`)
 - Survey nDSM providers, one interface `ndsm_for_bbox(bbox, res)`: `map2stl/city2stl/height/providers/survey.py::ndsm_for_bbox` (`PROVIDERS`, `available_for_bbox`); contract, grid, sanity checks, cache `map2stl/city2stl/height/providers/_survey.py` (`lonlat_grid`, `read_geotiff_array`, `cached_ndsm`)
   - France IGN `ign_lidarhd.py`, Andalucía `rediam_mdhn.py`, Spain CNIG `cnig_mdsn.py`, Czechia `cuzk_dmp.py`; per-city sources [reference/survey-sources.md](reference/survey-sources.md)
-- Height-gap infill (IDW, nearest): `map2stl/city2stl/height/infill.py::infill_idw` (`infill_nearest`)
+- Height-gap infill (linear Delaunay, nearest): `map2stl/city2stl/height/infill.py::infill_idw` (`infill_nearest`)
 - Georeferenced STL → heightmap: `map2stl/city2stl/height/stl_import.py::stl_to_heightmap`
 - CNN height prediction/training: `map2stl/city2stl/height/predict.py::predict` — not used at runtime; see [history/ml-height/README.md](history/ml-height/README.md)
 - Provider accuracy and defect history: [issues.md](issues.md), [decisions/building-heights.md](decisions/building-heights.md)

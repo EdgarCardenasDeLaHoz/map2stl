@@ -35,8 +35,8 @@ is what it is → [building-heights.md](../decisions/building-heights.md),
 | Provider | Source | Resolution | Confidence |
 |---|---|---|---|
 | `lidar_3dep.py` | Copernicus COP30 DSM − SRTM DTM via OpenTopography (US; not lidar despite the name) | 30 m | 0.82 |
-| `ndsm.py` | GLO-30 (AWS) − SRTM (OpenTopography), FABDEM fallback | 30 m | 0.80 |
-| `copernicus.py` | JRC GHSL GHS-BUILT-H; 10 m EU product, 100 m global fallback | 10 m | 0.70 |
+| `ndsm.py` | GLO-30 (AWS) − SRTM (OpenTopography); 56°S–60°N | 30 m | 0.80 |
+| `copernicus.py` | Copernicus EU Building Height 2012 (EEA WCS); Europe only | 10 m | 0.70 |
 | `open_buildings.py` | Overture Maps buildings `height` / `num_floors` (not Google Open Buildings) | per footprint (~5 m) | 0.60 |
 | `gba.py` | GlobalBuildingAtlas LoD1 (TUM), Source Cooperative parquet; global and complete | 3 m | 0.55 |
 | `wsf3d.py` | DLR World Settlement Footprint 3D tiles; `wsf3d_global.py` reads the global BigTIFF by HTTP range when a tile 404s | ~90 m | 0.50 |

@@ -90,7 +90,7 @@ app/ (server, client, session SDK)
 - **Rasters** — `city2stl/rasterize.py::rasterize_city_data` (row 0 = north, via
   `numpy2stl/src/numpy2stl/raster/burn.py::burn_polygons`);
   `city2stl/osm_raster.py::get_osm_building_heightmap` (registration rasters, row 0 = south).
-- **Roads** — `city2stl/roads.py::get_road_width_m`, `city2stl/roads.py::get_road_model`.
+- **Roads** — `city2stl/roads.py::get_road_width_m` (total width by `highway` tag).
 - **Roofs**
   - `city2stl/roofs.py::building_solids` — pitched-roof solids (hipped / gabled).
   - `city2stl/roof_classifier.py::classify_roof_shapes` — satellite-signal cascade.
