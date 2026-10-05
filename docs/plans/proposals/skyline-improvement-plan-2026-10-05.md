@@ -6,6 +6,8 @@
 [F-SKYBENCH](../active/F-SKYBENCH-height-benchmark.md),
 [F-WEB2](../active/F-WEB2-commons-skyline-photos.md),
 [F-DET](../active/F-DET-detection-quality-and-early-out.md) (F-DET6).
+**Follow-up:** [technology review](skyline-technology-review-2026-10-05.md): other approaches,
+photogrammetry, and scoring the shipped height merge as the baseline (do that first).
 
 Numbers are from the bundle files unless a section says otherwise. "SV" = the Street View
 pipeline. "Confirmed" = survey and 3D Tiles agree within max(3 m, 10 %).
