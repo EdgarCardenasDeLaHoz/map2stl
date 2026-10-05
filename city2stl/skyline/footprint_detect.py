@@ -251,6 +251,7 @@ def fit_pose_from_waterline(pano: Pano, shore_m: np.ndarray,
 #: ADE20K classes counted as building surface when tracing a building's top: building,
 #: house, skyscraper, tower. ("wall" is left out: sea walls and fences.)
 BUILDING_CLASSES = (1, 25, 48, 84)
+SKY_CLASS = 2
 
 
 @dataclass(frozen=True)
@@ -274,6 +275,8 @@ class Measured:
     n_cols: int
     base_visible: bool
     osm_height_m: float | None
+    visible_frac: float = 1.0        # share of the base-to-top image height that is seen
+    top_edge: str = "sky"            # what ends the run in most columns: sky, depth, other
 
 
 def bearing_columns(pano: Pano, pose: PanoPose):
@@ -301,37 +304,95 @@ def _local(lat0: float, lon0: float, ring: np.ndarray) -> np.ndarray:
     return np.column_stack([(ring[:, 0] - lon0) * kx, (ring[:, 1] - lat0) * M_PER_DEG_LAT])
 
 
-def _trace_top(labels_col: np.ndarray, depth_col, start_row: int, ref_depth, min_ratio: float):
-    """Topmost row of the run of building pixels above ``start_row`` that stays at roughly the
-    reference depth (inverse depth >= ``min_ratio`` x the reference). None if ``start_row``
-    itself is not building."""
-    y = int(start_row)
-    if y < 0 or y >= len(labels_col) or not np.isin(labels_col[y], BUILDING_CLASSES):
+def _column_run(labels_col: np.ndarray, depth_col, start_row: int, near_lim: float,
+                stop: float, gap_px: int):
+    """One building's rows in one column: ``(top, bottom, edge)`` or None.
+
+    Going up from ``start_row``: skip building rows nearer than this building (inverse depth
+    above ``near_lim``: something in front that the occlusion line missed) and up to ``gap_px``
+    other rows (a palm, a lamp post); the first building row at this building's depth is its
+    visible bottom. Then follow building rows while the inverse depth stays at or above
+    ``stop`` (below it: the surface behind). ``edge`` says what ends the run: sky, depth (a
+    building behind), other (a label that is neither), or image (the top row).
+    """
+    is_b = np.isin(labels_col, BUILDING_CLASSES)
+    y, gap = int(start_row), 0
+    if y < 0 or y >= len(labels_col):
         return None
-    top = y
-    while y - 1 >= 0 and np.isin(labels_col[y - 1], BUILDING_CLASSES):
-        if depth_col is not None and ref_depth is not None and depth_col[y - 1] < min_ratio * ref_depth:
-            break
+    while y >= 0:
+        if is_b[y]:
+            if depth_col is None or depth_col[y] <= near_lim:
+                break
+        else:
+            gap += 1
+            if gap > gap_px:
+                return None
         y -= 1
-        top = y
-    return top
+    if y < 0:
+        return None
+    bottom = y
+    while y - 1 >= 0 and is_b[y - 1] and (depth_col is None or depth_col[y - 1] >= stop):
+        y -= 1
+    if y == 0:
+        edge = "image"
+    elif labels_col[y - 1] == SKY_CLASS:
+        edge = "sky"
+    elif is_b[y - 1]:
+        edge = "depth"
+    else:
+        edge = "other"
+    return y, bottom, edge
+
+
+def fit_depth_model(dist_m, inv_depth) -> tuple[float, float] | None:
+    """``inv_depth ~ a / d + b`` from buildings whose base is visible (Depth Anything output is
+    inverse depth up to scale and shift). Least squares, refit once without points beyond 3
+    MADs; under 8 points only the scale (b = 0). None without points."""
+    d = np.asarray(dist_m, float)
+    z = np.asarray(inv_depth, float)
+    if not d.size:
+        return None
+    if d.size < 8:
+        return float(np.median(z * d)), 0.0
+    A = np.column_stack([1.0 / d, np.ones(d.size)])
+    coef = np.linalg.lstsq(A, z, rcond=None)[0]
+    r = z - A @ coef
+    keep = np.abs(r - np.median(r)) <= 3 * 1.4826 * np.median(np.abs(r - np.median(r))) + 1e-9
+    if keep.sum() >= 8:
+        coef = np.linalg.lstsq(A[keep], z[keep], rcond=None)[0]
+    return float(coef[0]), float(coef[1])
 
 
 def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
                        depth: np.ndarray | None = None, max_dist_m: float = 3000.0,
                        min_cols: int = 6, core: float = 0.6, depth_ratio: float = 0.7,
-                       base_window_px: int = 6) -> list[Measured]:
+                       base_window_px: int = 6, near_ratio: float = 1.35,
+                       max_step: float = 0.92, gap_px: int = 8,
+                       min_visible_frac: float = 0.25) -> list[Measured]:
     """Measure every footprint in view, nearest first (see module docstring).
 
     ``depth``: Depth Anything V2 inverse depth (closer = higher) on the pano grid, or None
-    (labels only). A building's reference depth is the median over the rows just above its base
-    when the base is visible; otherwise the per-pano fit ``depth ~ a / d + b`` from the
-    base-visible buildings, which also decides whether a partly hidden building shows at all.
+    (labels only). Pass 1 measures with each base-visible building's own base depth as its
+    reference; the base-visible buildings then fit ``depth ~ a / d + b`` (:func:`fit_depth_model`)
+    and pass 2 measures again with it:
+
+    - reference level: the base depth when the base is visible and agrees with the model,
+      else the model level at the building's distance;
+    - nearer surfaces (above ``near_ratio`` x the reference) are skipped, so a building the
+      occlusion line missed is not measured as this one (2026-10-04: a 620 m building read as
+      a footprint 887 m away);
+    - the run stops where the depth falls to the midpoint between the reference and the level
+      of the next OSM footprint behind it in that column, clipped to ``depth_ratio`` ..
+      ``max_step`` x the reference (a fixed 0.7 only separated a tower 1.4x farther; the rows
+      of Bocagrande are 10-30 % apart);
+    - a building whose base is hidden and of which under ``min_visible_frac`` of the
+      base-to-top height shows is dropped: the rows just above a nearer roof are as likely the
+      building behind it.
     """
     H, W = pano.labels.shape
     bu, b0 = bearing_columns(pano, pose)
     h = pose.camera_h_m
-    cand = []
+    cand, behind = [], [[] for _ in range(W)]
     for i, fp in enumerate(footprints):
         xy = _local(pano.lat, pano.lon, np.asarray(fp.ring, float))
         d = np.hypot(xy[:, 0], xy[:, 1])
@@ -342,68 +403,92 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
         rel = (bear - bear[0] + 180.0) % 360.0 - 180.0
         lo, hi = bear[0] + rel.min(), bear[0] + rel.max()
         c0, c1 = column_of(lo % 360.0, bu, b0), column_of(hi % 360.0, bu, b0)
-        if not (np.isfinite(c0) and np.isfinite(c1)) or c1 - c0 < min_cols:
+        if not (np.isfinite(c0) and np.isfinite(c1)):
+            continue
+        x0, x1 = int(math.ceil(c0)), int(math.floor(c1))
+        for x in range(max(0, x0), min(W, x1 + 1)):
+            behind[x].append(dn)
+        if c1 - c0 < min_cols:
             continue
         base = float(_row_of(pano, pose, -math.degrees(math.atan2(h, dn))))
-        cand.append((dn, i, int(math.ceil(c0)), int(math.floor(c1)), base))
+        cand.append((dn, i, x0, x1, base))
     cand.sort()
+    behind = [np.sort(np.asarray(v, float)) for v in behind]
+    dz = None
+    if depth is not None:
+        from scipy.ndimage import median_filter
+
+        dz = median_filter(np.asarray(depth, float), size=(5, 1))    # vertical: keeps edges
 
     def core_cols(x0, x1):
         n = x1 - x0 + 1
         cut = int(n * (1 - core) / 2)
         return np.arange(x0 + cut, x1 - cut + 1)
 
-    def run(passes_model):
+    def run(model):
         occ = np.full(W, H, dtype=float)   # topmost row of nearer measured buildings
         out = []
         for dn, i, x0, x1, base in cand:
+            level = None if model is None else model[0] / dn + model[1]
             cols = core_cols(x0, x1)
-            tops, bottoms, vis = [], [], 0
+            tops, bottoms, edges, vis = [], [], [], 0
             for x in cols:
-                vis_bottom = min(base, occ[x] - 1)
-                y0 = int(round(vis_bottom)) - 1
+                y0 = int(round(min(base, occ[x] - 1))) - 1
                 if y0 >= H or y0 < 1:
                     continue
-                base_vis = vis_bottom >= base - 0.5
-                ref = None
-                if depth is not None:
-                    if base_vis:
-                        lo_r = max(0, y0 - base_window_px)
-                        ref = float(np.median(depth[lo_r:y0 + 1, x]))
-                    elif passes_model is not None:
-                        a, b = passes_model
-                        ref = a / dn + b
-                        if depth[y0, x] < depth_ratio * ref:   # a farther surface: hidden here
-                            continue
-                t = _trace_top(pano.labels[:, x], None if depth is None else depth[:, x],
-                               y0, ref, depth_ratio)
-                if t is None:
+                near_lim, stop = np.inf, -np.inf
+                if dz is not None:
+                    ref = None
+                    if occ[x] - 1 >= base - 0.5:          # base not behind a measured roof
+                        ref = float(np.median(dz[max(0, y0 - base_window_px):y0 + 1, x]))
+                        if level is not None and not level / near_ratio <= ref <= level * near_ratio:
+                            ref = None                    # the base row shows something else
+                    if ref is None:
+                        if level is None:                 # pass 1: no model yet
+                            ref = float(dz[y0, x])
+                        else:
+                            ref = level
+                    near_lim = near_ratio * ref
+                    stop = depth_ratio * ref
+                    if model is not None:
+                        k = np.searchsorted(behind[x], dn * 1.08)
+                        if k < len(behind[x]):            # next OSM footprint behind, this column
+                            far = (model[0] / behind[x][k] + model[1]) * ref / level
+                            stop = min(max(0.5 * (ref + far), depth_ratio * ref), max_step * ref)
+                got = _column_run(pano.labels[:, x], None if dz is None else dz[:, x], y0,
+                                  near_lim, stop, gap_px)
+                if got is None or got[2] == "image":
                     continue
+                t, bot, edge = got
                 tops.append(t)
-                bottoms.append(vis_bottom)
-                vis += base_vis
+                bottoms.append(bot)
+                edges.append(edge)
+                vis += bot >= base - 3
             if len(tops) < max(3, len(cols) // 3):
                 continue
             top = float(np.median(tops))
+            bottom = float(np.median(bottoms))
+            base_vis = vis >= len(tops) / 2
+            frac = float(np.clip((bottom - top) / max(1.0, base - top), 0.0, 1.0))
+            if not base_vis and frac < min_visible_frac:
+                continue
             hm = h + dn * math.tan(math.radians(float(_elev_of(pano, pose, top))))
             fp = footprints[i]
-            out.append(Measured(i, fp.name, x0, x1, top, float(np.median(bottoms)), base, dn, hm,
-                                len(tops), vis >= len(tops) / 2, fp.osm_height_m))
+            edge = max(set(edges), key=edges.count)
+            out.append(Measured(i, fp.name, x0, x1, top, bottom, base, dn, hm, len(tops),
+                                base_vis, fp.osm_height_m, frac, edge))
             occ[x0:x1 + 1] = np.minimum(occ[x0:x1 + 1], top)
         return out
 
     first = run(None)
-    model = None
-    if depth is not None:
-        pts = []
-        for m in first:
-            if m.base_visible:
+    if dz is None:
+        return first
+    pts = []
+    for m in first:
+        if m.base_visible:
+            y0 = int(round(m.base_row)) - 1
+            if 0 <= y0 < H:
                 xs = core_cols(m.x0, m.x1)
-                y0 = int(round(m.base_row)) - 1
-                if 0 <= y0 < H:
-                    pts.append((1.0 / m.dist_m, float(np.median(depth[max(0, y0 - base_window_px):y0 + 1, xs]))))
-        if len(pts) >= 8:
-            X = np.array(pts)
-            A = np.column_stack([X[:, 0], np.ones(len(X))])
-            model = tuple(np.linalg.lstsq(A, X[:, 1], rcond=None)[0])
+                pts.append((m.dist_m, float(np.median(dz[max(0, y0 - base_window_px):y0 + 1, xs]))))
+    model = fit_depth_model([p[0] for p in pts], [p[1] for p in pts]) if pts else None
     return run(model) if model is not None else first

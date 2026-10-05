@@ -106,3 +106,85 @@ def test_roof_below_the_horizon_gives_a_positive_height():
     near = next(m for m in fd.measure_footprints(pano, pose, fps, depth=depth, min_cols=4)
                 if m.name == "near")
     assert near.height_m == pytest.approx(30.0, abs=3.0)
+
+
+def _ring_at(bearing_deg, near_m, half=10.0):
+    """Square footprint whose near face is ``near_m`` from the camera along ``bearing_deg``."""
+    t = math.radians(bearing_deg)
+    u, v = (math.sin(t), math.cos(t)), (math.cos(t), -math.sin(t))   # along, across
+    c = near_m + half
+    return np.array([_ll(u[0] * (c + a * half) + v[0] * b * half, u[1] * (c + a * half) + v[1] * b * half)
+                     for a, b in ((-1, -1), (1, -1), (1, 1), (-1, 1), (-1, -1))])
+
+
+#: Base-visible towers east, south-east and west that calibrate the depth model.
+CALIBRATION = [("cal_e", 90.0, 150.0, 40.0, 10.0, True), ("cal_se", 135.0, 250.0, 40.0, 10.0, True),
+               ("cal_w", -90.0, 350.0, 40.0, 10.0, True)]
+
+
+def _scene(buildings, h_cam=60.0):
+    """Labels and inverse depth (1000 / distance) of square towers on water, nearer ones drawn
+    over farther ones; north mid-pano. ``buildings``: (name, bearing_deg, near_m, height_m,
+    half_m, mapped). Returns labels, depth and the mapped footprints."""
+    labels = np.full((H, W), SKY)
+    depth = np.zeros((H, W))
+    elev = np.degrees(np.arctan((H / 2.0 - np.arange(H)) / F))
+    below = elev < 0
+    labels[below, :] = WATER
+    depth[below, :] = (1000.0 * np.tan(np.radians(-elev[below])) / h_cam)[:, None]
+    fps = []
+    for name, bearing, near, height, half, mapped in sorted(buildings + CALIBRATION,
+                                                             key=lambda b: -b[2]):
+        ring = _ring_at(bearing, near, half)
+        xy = fd._local(LAT, LON, ring)
+        dn = float(np.hypot(xy[:, 0], xy[:, 1]).min())
+        bear = np.degrees(np.arctan2(xy[:, 0], xy[:, 1]))
+        c0, c1 = int(math.ceil((bear.min() + 180) / 0.25)), int(math.floor((bear.max() + 180) / 0.25))
+        y0 = int(round(_row(math.degrees(math.atan((height - h_cam) / dn)))))
+        y1 = int(round(_row(-math.degrees(math.atan(h_cam / dn)))))
+        labels[y0:y1, c0:c1 + 1] = BUILDING
+        depth[y0:y1, c0:c1 + 1] = 1000.0 / dn
+        if mapped:
+            fps.append(fd.Footprint(name, ring))
+    return labels, depth, fps
+
+
+def _measure(buildings):
+    labels, depth, fps = _scene(buildings)
+    pano, depth = _pano(labels, depth, offset=180.0)
+    pose = fd.PanoPose(0.0, 60.0, 0.0, 0.0, 0)
+    return {m.name: m for m in fd.measure_footprints(pano, pose, fps, depth=depth, min_cols=4)}
+
+
+def test_tower_a_quarter_farther_is_not_read_as_the_near_roof():
+    """A fixed 0.7 depth ratio only split surfaces 1.4x apart; Bocagrande's rows are 10-30 %
+    apart, so the near building read the tower's top. The next footprint behind sets the stop."""
+    got = _measure([("near", 0.0, 400.0, 50.0, 10.0, True), ("tower", 0.0, 500.0, 150.0, 8.0, True)])
+    assert got["near"].height_m == pytest.approx(50.0, abs=4.0)
+    assert got["near"].top_edge == "depth"
+    assert got["tower"].height_m == pytest.approx(150.0, abs=6.0)
+
+
+def test_unmapped_building_in_front_is_skipped():
+    """No measured roof hides the target's base, but an unmapped building does: its pixels sit
+    nearer than the target's depth, so the run starts above it."""
+    got = _measure([("target", 0.0, 300.0, 120.0, 10.0, True),
+                    ("unmapped", 0.0, 200.0, 60.0, 15.0, False)])
+    assert got["target"].height_m == pytest.approx(120.0, abs=5.0)
+    assert not got["target"].base_visible
+    assert 0.3 < got["target"].visible_frac < 0.7
+
+
+def test_a_sliver_above_a_nearer_roof_is_not_measured():
+    got = _measure([("hidden", 0.0, 400.0, 45.0, 10.0, True), ("front", 0.0, 200.0, 50.0, 15.0, True)])
+    assert got["front"].height_m == pytest.approx(50.0, abs=3.0)
+    assert "hidden" not in got
+
+
+def test_depth_model_ignores_outliers():
+    d = np.linspace(100.0, 2000.0, 30)
+    z = 120.0 / d + 0.02
+    z[[3, 11, 20]] *= 1.8                       # bases hidden by something unmapped and nearer
+    a, b = fd.fit_depth_model(d, z)
+    assert a == pytest.approx(120.0, rel=0.02)
+    assert b == pytest.approx(0.02, abs=0.003)

@@ -372,3 +372,61 @@ D. **Compare and check without truth.** Old vs new boxes on seed_5 side by side;
   height that is ~1 px.
 - Depth Anything gives relative depth; only discontinuities are used, not values.
 - Buildings built after OSM was drawn (or demolished) show as unexplained columns.
+
+### Progress, 2026-10-04
+
+Run: `python -m city2stl.skyline.scripts.18_footprint_detect --region cartagena --seeds seed_5
+seed_1 --out <dir>`. It needs the Street View API on a capture-cache miss, a GPU for speed
+(SegFormer, Depth Anything V2), and Overpass for the OSM coastline.
+
+- **Pose (B), done.**
+  - seed_5: offset 309°, camera 98 m, pitch fix +0.23°, misfit 0.41°.
+  - seed_1: offset 135° (the manual anchor), 43 m, misfit 1.13°.
+  - Shore table vectorised: 2 s, was 5 min.
+- **Detection (C).**
+  - seed_5 measures 226 OSM footprints; the old path matched 35 segments. 132 have a visible base.
+  - Predicted against observed base row: median 6 px.
+- **Measurement v2.** Diagnosed on column profiles of RGB, depth and labels:
+  - Depth Anything follows `a / d + b` closely. Implied distance is within 10–25%, saturating
+    beyond about 1.5 km in seed_1.
+  - The old fixed 0.7 stop only split surfaces 1.4× apart. Bocagrande's rows are 10–30% apart.
+  - Nearer surfaces were never rejected: a 620 m building was read as a footprint 887 m away.
+  - Fixes:
+    - Skip surfaces more than 35% nearer.
+    - Stop at the midpoint to the next OSM footprint behind, clipped to 0.70–0.92× of the
+      footprint's own level.
+    - Accept a base only if its depth agrees with the footprint's distance.
+    - Robust depth fit.
+    - Drop base-hidden slivers under 25% visible.
+  - Results:
+
+    | Check | Before | After |
+    |---|---|---|
+    | seed_1 / seed_5 median gap | 58.7 m | 30.6 m (12 shared) |
+    | Share within 25% | 20% | 33% |
+    | seed_1 vs OSM tags (14 buildings) | 38 m | 16 m |
+
+  - Hotel Estelar: 185 m from seed_1, against 202 m (Wikidata).
+- **Still wrong, with causes seen in the crops:**
+  1. **Bearing offset near the camera.** Nautica (tagged 161 m) reads 40 m at 271 m in seed_5.
+     Its columns land on the lower building in front of the glass tower to their right: about
+     5°, or 24 m at that range. The cause is the seed position or the footprint geometry. The
+     parks-and-streets position fit below is aimed at this.
+  2. **Nested footprints.** The Plaza Bocagrande mall (tagged 44.8 m) reads 180 m from seed_1:
+     the tower on its podium sits at the same depth. Measure contained or overlapping parts first
+     and take their columns out of the container.
+  3. **OSM tags are a weak yardstick here.** Allure (tagged 190 m) reads 62 m from seed_5 and
+     32 m from seed_1; both views show a mid-rise and a crane on that spot, so the tag may be a
+     planned height.
+  4. **Far buildings (beyond about 1.5 km).** Depth saturates, and 1 px is about 3.5 m. Pairs at
+     1.6–2.5 km disagree (201 m against 11 m).
+- **Next:**
+  - Fit the camera position from parks and streets. SegFormer road, sidewalk and path (6, 11, 52)
+    and grass, tree and field (9, 4, 29) below the horizon, against OSM roads and green projected
+    from (lat, lon, h). Search ±100 m around the seed, with heading, height and pitch from the
+    waterline.
+  - Handle nested footprints.
+  - Fuse the seeds into one height per footprint, weighted by visible base, visible fraction and
+    1/distance.
+  - Then replace the pano path for elevated seeds in the region report, and fix the F-DET1
+    fragment count.
