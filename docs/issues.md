@@ -66,13 +66,11 @@ the rest below.
   - Two city-raster routes (`app/server/routers/composite.py` and `app/server/routers/cities.py`).
   - Session:
     - `terrain_session.py` is 3.1k lines.
-    - `check_alignment`, `merge_hydrology_with_dem` and `enrich_buildings_with_heights` have
-      no callers.
+    - `enrich_buildings_with_heights` has no callers.
     - `_kill_stale_server` kills any owner of port 9090.
   - Dead code:
     - `geo2stl/write.py::savefile` (row-flipped, notebook-only).
     - `create_dem_model` / `process_region` are notebook-only.
-  - `ExportContext.composite_layers` / `composite_dim` are stored but never read.
   - Presets:
     - `satImgResolution` is not re-applied.
     - `hydrology.scale_m` is not collected.

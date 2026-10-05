@@ -30,9 +30,6 @@ POST /api/composite/city-raster
 POST /api/composite/dem-merge
   Merge multiple elevation/mask layers into one composite DEM with
   per-layer processing (clip, smooth, sharpen, normalize) and blend modes.
-
-POST /api/composite/hydrology-merge
-  Merge river depression values into a DEM elevation grid.
 """
 
 import logging
@@ -53,8 +50,8 @@ from app.server.core.cache import (
     read_osm_cache,
     write_array_cache,
 )
-from app.server.core.validation import run_sync
-from app.server.schemas import HydrologyMergeRequest, MergeRequest
+from app.server.core.validation import model_to_dict, run_sync
+from app.server.schemas import MergeRequest
 from geo2stl.geo import m_per_deg_lon
 
 logger = logging.getLogger(__name__)
@@ -397,16 +394,7 @@ def _composite_cache_key(north: float, south: float, east: float, west: float,
     """
     from app.server.core.cache import make_cache_key
     # Render each spec to a JSON-serializable form for stable hashing
-    spec_dicts = []
-    for spec in layers:
-        if hasattr(spec, "model_dump"):
-            spec_dicts.append(spec.model_dump())
-        elif hasattr(spec, "dict"):
-            spec_dicts.append(spec.dict())
-        elif isinstance(spec, dict):
-            spec_dicts.append(spec)
-        else:
-            spec_dicts.append(dict(spec))
+    spec_dicts = [model_to_dict(spec) for spec in layers]
     return make_cache_key("composite", north, south, east, west,
                           {"v": COMPOSITE_CACHE_VERSION, "dim": dim, "layers": spec_dicts,
                            "projection": projection,
@@ -704,88 +692,3 @@ async def merge_dem_layers(req: MergeRequest):
     except Exception as e:
         logger.error(f"DEM merge failed: {e}", exc_info=True)
         return JSONResponse(content={"error": "DEM merge failed"}, status_code=500)
-
-
-# ---------------------------------------------------------------------------
-# Hydrology merge — combine river depressions with a DEM grid
-# ---------------------------------------------------------------------------
-
-@router.post("/api/composite/hydrology-merge")
-async def merge_hydrology(req: HydrologyMergeRequest):
-    """
-    Merge hydrology depression values into a DEM elevation grid.
-
-    Both arrays must have identical dimensions. River depression values
-    (negative) are added to the DEM via element-wise minimum.
-    """
-    from app.server.config import TEST_MODE
-    from app.server.core.validation import b64_encode
-    from geo2stl.hydrology import merge_rivers_with_dem
-
-    dem_values = req.dem_values
-    dem_dims = req.dem_dimensions
-    river_values = req.river_grid_values
-    river_dims = req.river_grid_dimensions
-
-    # Settings-only mode: resolve DEM from cache
-    if not dem_values and (req.dem_id or req.bbox):
-        from app.server.core.export_params import resolve_dem
-        req_dict = req.model_dump() if hasattr(req, "model_dump") else req.dict()
-        resolved = resolve_dem(req_dict)
-        if resolved:
-            dem_values_list, h, w = resolved
-            dem_values = dem_values_list
-            dem_dims = [h, w]
-        else:
-            return JSONResponse(content={"error": "DEM not in cache — load DEM first"}, status_code=400)
-
-    # Resolve hydrology from cache
-    if not river_values and req.bbox:
-        from app.server.core.cache import make_cache_key, read_array_cache
-        bbox = req.bbox
-        hydro_key = make_cache_key("hydrology", bbox["north"], bbox["south"],
-                                   bbox["east"], bbox["west"])
-        cached = read_array_cache("hydrology", hydro_key)
-        if cached and cached[0].get("river_grid") is not None:
-            rg = cached[0]["river_grid"]
-            river_values = rg.ravel().tolist()
-            river_dims = list(rg.shape)
-        else:
-            return JSONResponse(content={"error": "Hydrology not in cache — load hydrology first"}, status_code=400)
-
-    if not dem_values or not dem_dims or not river_values or not river_dims:
-        return JSONResponse(content={"error": "Missing DEM or river data"}, status_code=400)
-
-    dem_h, dem_w = dem_dims
-    river_h, river_w = river_dims
-
-    try:
-        dem_arr = np.array(dem_values, dtype=np.float32).reshape(dem_h, dem_w)
-        river_arr = np.array(
-            river_values, dtype=np.float32).reshape(river_h, river_w)
-    except Exception as e:
-        return JSONResponse(content={"error": f"Failed to reshape arrays: {e}"}, status_code=400)
-
-    if dem_arr.shape != river_arr.shape:
-        return JSONResponse(
-            content={
-                "error": f"DEM shape {dem_arr.shape} != river shape {river_arr.shape}"},
-            status_code=400)
-
-    if TEST_MODE:
-        return JSONResponse(content={
-            "merged_dem_b64": b64_encode(dem_arr),
-            "merged_dimensions": [dem_h, dem_w],
-        })
-
-    try:
-        merged = await run_sync(merge_rivers_with_dem, dem_arr, river_arr)
-        if merged is None:
-            return JSONResponse(content={"error": "Merge operation failed"}, status_code=500)
-        return JSONResponse(content={
-            "merged_dem_b64": b64_encode(merged),
-            "merged_dimensions": [merged.shape[0], merged.shape[1]],
-        })
-    except Exception as e:
-        logger.error(f"Hydrology merge failed: {e}", exc_info=True)
-        return JSONResponse(content={"error": "Hydrology merge failed"}, status_code=500)

@@ -361,14 +361,6 @@ async def guides_page_for(request: Request, slug: str):
     return templates.TemplateResponse(request, "guides.html")
 
 
-# Function to run FastAPI server
-
-
-def run_server():
-    port = int(os.environ.get('UI_PORT', '9000'))
-    uvicorn.run(app, host="127.0.0.1", port=port)
-
-
 if __name__ == "__main__":
     # Run the server when script is executed directly
     logger.info("Starting 3D Maps Globe Selector server...")

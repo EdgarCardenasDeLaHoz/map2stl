@@ -6,7 +6,7 @@ Routers import their models from here.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -246,23 +246,6 @@ class MergeRequest(BaseModel):
     projection: str = "none"
     clip_valid_region: bool = True
     maintain_dimensions: bool = False
-
-
-class HydrologyMergeRequest(BaseModel):
-    """Request body for POST /api/composite/hydrology-merge.
-
-    Both arrays can be omitted — the endpoint resolves them from the
-    server-side DEM and hydrology caches when bbox + dem settings are
-    provided instead.
-    """
-    dem_values: list[float] | None = None
-    dem_dimensions: Annotated[list[int], Field(min_length=2, max_length=2)] | None = None
-    river_grid_values: list[float] | None = None
-    river_grid_dimensions: Annotated[list[int], Field(min_length=2, max_length=2)] | None = None
-    # Settings-only mode fields
-    dem_id: str | None = None
-    bbox: dict[str, float] | None = None
-    dem: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

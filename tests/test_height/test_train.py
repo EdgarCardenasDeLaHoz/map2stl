@@ -1,4 +1,4 @@
-"""Tests for core/height/train.py — U-Net height model training pipeline.
+"""Tests for city2stl/height/train.py — U-Net height model training pipeline.
 
 Uses synthetic small datasets and mocks to avoid GPU or real provider calls.
 All torch-dependent tests are auto-skipped when torch is not installed.
@@ -285,28 +285,3 @@ class TestCheckpointRoundtrip:
         model2 = _TinyUNet()
         state = torch.load(ckpt, weights_only=False, map_location="cpu")
         model2.load_state_dict(state["model_state_dict"])  # should not raise
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# collect_tiles — mock providers
-# ──────────────────────────────────────────────────────────────────────────────
-
-class TestCollectTiles:
-    def test_unknown_city_is_skipped(self, tmp_path, caplog):
-        from app.server.core.height.train import collect_tiles
-
-        tile_dir = tmp_path / "tiles"
-        with caplog.at_level("WARNING", logger="app.server.core.height.train"):
-            result = collect_tiles(["UnknownCityXYZ"], tile_dir=tile_dir)
-        assert result == []
-        assert tile_dir.is_dir()            # created even when nothing is collected
-        assert list(tile_dir.iterdir()) == []
-        assert "Unknown city 'UnknownCityXYZ'" in caplog.text
-
-    @pytest.mark.integration  # fetches Copernicus / DLR tiles (~40 s)
-    def test_returns_list(self, tmp_path):
-        """At minimum, the function returns a list (may be empty without network)."""
-        from app.server.core.height.train import collect_tiles
-
-        result = collect_tiles(["Barcelona"], tile_dir=tmp_path, tiles_per_city=1)
-        assert isinstance(result, list)

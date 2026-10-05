@@ -161,7 +161,7 @@ Brief map; detail in [numpy2stl README](../../../numpy2stl/README.md).
 | STL import / registration | `app/server/core/mesh_import.py` | `city2stl/height/stl_import.py::stl_to_heightmap`, `city2stl/height/infill.py::infill_idw`, `city2stl/registration/__init__.py::register_city_stl` |
 | Plate registration | `app/server/core/plate_registration.py`, `app/server/routers/registration.py` | `city2stl/registration/street_place.py::place_plate`, `city2stl/registration/consensus.py::score_export`, `city2stl/registration/critic.py::score_model` |
 | Puzzle | `app/server/core/puzzle.py` | `numpy2stl/src/numpy2stl/processing/boolean.py::cut_jigsaw`, `numpy2stl/src/numpy2stl/io/writers.py::write3MF` |
-| Height model training (offline) | `app/server/core/height/train.py` | `city2stl/height/train.py::train` |
+| Height model training (offline) | — (`app/server/core/height/train.py` deleted 2026-10-05) | `city2stl/height/train.py::train` |
 
 - The provider registry, selection and `enhance_city_data` live in `city2stl/height/service.py`;
   the app imports it directly. `app/server/core/height/service.py` (an unused async fetch with a
