@@ -29,7 +29,6 @@ from shapely.ops import polylabel
 Mesh = tuple[np.ndarray, np.ndarray]
 
 HIPPED = {"hipped", "half-hipped", "mansard", "pyramidal", "side_hipped"}
-GABLED = {"gabled", "gambrel", "saltbox", "sawtooth"}
 REVOLVED = {"dome", "onion", "cone", "round"}
 REVOLVE_SEGMENTS = 32
 
