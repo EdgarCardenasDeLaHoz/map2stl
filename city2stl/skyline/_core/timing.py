@@ -5,8 +5,34 @@ report module to time its steps.
 """
 from __future__ import annotations
 
+import sys
 import time
 from contextlib import contextmanager
+
+
+def _rss_gb() -> float | None:
+    """Resident memory of this process in GiB (None without psutil). Printed with every step
+    so a run's log shows which step holds memory (Miami reached 8 GB, 2026-10-05)."""
+    try:
+        import psutil
+
+        return psutil.Process().memory_info().rss / 2**30
+    except Exception:
+        return None
+
+
+def _mem(m0: float | None) -> str:
+    m1 = _rss_gb()
+    if m1 is None:
+        return ""
+    out = f"  rss {m1:.2f} GB" + ("" if m0 is None else f" ({m1 - m0:+.2f})")
+    torch = sys.modules.get("torch")                      # only when the run already loaded it
+    try:
+        if torch is not None and torch.cuda.is_available() and torch.cuda.is_initialized():
+            out += f", gpu reserved {torch.cuda.memory_reserved() / 2**30:.2f} GB"
+    except Exception:
+        pass
+    return out
 
 
 class _StepTimer:
@@ -38,20 +64,20 @@ class _StepTimer:
         e.g. a large try/except where wrapping would force a re-indent)."""
         key = self._register(label, level)
         self._totals[key] += dt
-        print(f"[timing]{'  ' * level} {label}: +{dt:.2f}s")
+        print(f"[timing]{'  ' * level} {label}: +{dt:.2f}s{_mem(None)}")
 
     @contextmanager
     def timed(self, label: str, level: int = 0):
         # Register order on *enter* so parents precede their children in the
         # rendered table; finalise the duration on *exit*.
         key = self._register(label, level)
-        t0 = time.perf_counter()
+        t0, m0 = time.perf_counter(), _rss_gb()
         try:
             yield
         finally:
             dt = time.perf_counter() - t0
             self._totals[key] += dt
-            print(f"[timing]{'  ' * level} {label}: +{dt:.2f}s")
+            print(f"[timing]{'  ' * level} {label}: +{dt:.2f}s{_mem(m0)}")
 
     @property
     def rows(self) -> list[tuple[str, float, int]]:

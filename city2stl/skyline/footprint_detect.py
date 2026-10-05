@@ -342,7 +342,8 @@ class PositionFit:
 def fit_camera_position(pano: Pano, pose: PanoPose, gmap: GroundMap, search_m: float = 600.0,
                         min_gain: float = 0.3, ground_m: float = 80.0,
                         min_ground_gain: float = 0.01, ground_max_misfit_deg: float = 0.3,
-                        d_range=(30.0, 1500.0)) -> PositionFit:
+                        d_range=(30.0, 1500.0), coarse_step_m: float = 100.0,
+                        fine_half_m: float = 100.0, fine_step_m: float = 20.0) -> PositionFit:
     """Where the drone was. A Photo Sphere's recorded position can be where the pilot stood:
     seed_4 (2026-10-05) sat ~360 m from where its waterline fits.
 
@@ -366,9 +367,9 @@ def fit_camera_position(pano: Pano, pose: PanoPose, gmap: GroundMap, search_m: f
     offs = pose.offset_deg + np.arange(-6.0, 6.01, 0.5)
     at_seed = fit_pose_from_waterline(pano, gmap.shore_distances(0.0, 0.0), heights_m=hs,
                                       offsets_deg=offs)
-    coarse = np.arange(-search_m, search_m + 1e-6, 100.0)          # 1 deg, 11 heights: 4x faster
+    coarse = np.arange(-search_m, search_m + 1e-6, coarse_step_m)  # 1 deg, 11 heights: 4x faster
     _, (bx, by, bp) = _waterline_grid(pano, gmap, coarse, coarse, offs[::2], hs[::2])
-    fine = np.arange(-100.0, 100.01, 20.0)
+    fine = np.arange(-fine_half_m, fine_half_m + 1e-6, fine_step_m)
     _, (bx, by, bp) = _waterline_grid(pano, gmap, bx + fine, by + fine, offs, hs)
     if bp.misfit_deg > (1.0 - min_gain) * at_seed.misfit_deg:
         bx, by, bp = 0.0, 0.0, at_seed

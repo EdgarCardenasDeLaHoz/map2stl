@@ -252,7 +252,7 @@ def commons_skyline_seeds(
     """
     import json  # noqa: PLC0415
 
-    from .commons_photos import find_skyline_photos, is_dark  # noqa: PLC0415
+    from .commons_photos import FETCH_WIDTH, find_skyline_photos, is_dark  # noqa: PLC0415
     from .region_types import SkylinePoint  # noqa: PLC0415
 
     cache_dir = Path(cache_dir) if cache_dir is not None else None
@@ -269,6 +269,14 @@ def commons_skyline_seeds(
         img = _download_image(p.url, cache_dir)
         if img is None:
             continue
+        if img.shape[1] > FETCH_WIDTH:
+            # The thumbnail URL asks for FETCH_WIDTH, but Commons serves some photos (and older
+            # caches hold them) at full size: 3840 px photos made every array of their seed 3.5x
+            # larger and took Miami's run to 8 GB (memory audit 2026-10-05).
+            import cv2  # noqa: PLC0415
+
+            img = cv2.resize(img, (FETCH_WIDTH, round(img.shape[0] * FETCH_WIDTH / img.shape[1])),
+                             interpolation=cv2.INTER_AREA)
         if is_dark(img):
             print(f"[commons_seed] skip (dark): {p.title!r}")
             continue

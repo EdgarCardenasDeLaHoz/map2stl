@@ -12,7 +12,7 @@ import numpy as np
 from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
 from .._core.height import aggregate_building_heights
-from .._core.segmentation import _neural_sky_and_building_masks
+from .._core.segmentation import _neural_sky_and_building_masks, clear_neural_cache
 from .._core.timing import _StepTimer
 from .._core.types import BuildingRecord
 from .._region_render._draw import _negative_seed_views
@@ -232,6 +232,9 @@ def _seed_multiview_registration(
     _seen_pano_ids: set[str] = set()
 
     for seed, seed_elev, is_photosphere in resolved:
+        # A seed's views are fresh arrays, so the previous seed's label maps, masks and anchored
+        # images in the SegFormer cache can never hit again: free them (0.3-0.7 GB, 2026-10-05).
+        clear_neural_cache()
         if seed.pano_id and seed.pano_id in _seen_pano_ids:
             logger.info(f"[dedup] {seed.name}: pano_id={seed.pano_id!r} already "
                         "processed by an earlier seed — skipping duplicate")

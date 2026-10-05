@@ -264,3 +264,31 @@ def test_a_tall_facade_that_drifts_farther_is_followed_to_its_roof():
     got = {m.name: m for m in fd.measure_footprints(pano, fd.PanoPose(0.0, 60.0, 0.0, 0.0, 0), fps,
                                                     depth=depth, min_cols=4)}
     assert got["tower"].height_m == pytest.approx(160.0, abs=8.0)
+
+
+def test_camera_position_found_from_the_waterline():
+    """seed_4 (2026-10-05) was published ~360 m from where the drone flew. A bay with shores
+    north and east pins the camera; the fit moves it back from the recorded position."""
+    half, res, h, true = 4400.0, 10.0, 60.0, (-120.0, 60.0)
+    n = int(2 * half / res)
+    yy, xx = np.mgrid[0:n, 0:n]
+    x, y = xx * res - half + res / 2, half - yy * res - res / 2
+    codes = np.full((n, n), fd.G_WATER, np.uint8)
+    codes[(y > 500 + 0.2 * x) | (x > 700 - 0.3 * y)] = fd.G_LAND      # north and east shores
+    gmap = fd.GroundMap(codes, LAT, LON, half, res)
+    labels = np.full((H, W), SKY)
+    pano, _ = _pano(labels, None, offset=180.0)
+    shore = gmap.shore_distances(*true)
+    for col in range(W):
+        d = shore[int(round(pano.frame_heading[col] / fd.BEARING_BIN_DEG)) % fd.N_BEARINGS]
+        y_w = int(round(_row(-math.degrees(math.atan(h / d))))) if np.isfinite(d) else H // 2
+        pano.labels[y_w:, col] = WATER
+        if np.isfinite(d):
+            pano.labels[int(_row(3.0)):y_w, col] = BUILDING
+    pose0 = fd.fit_pose_from_waterline(pano, gmap.shore_distances(), offset_step_deg=1.0)
+    fit = fd.fit_camera_position(pano, pose0, gmap, search_m=200.0, coarse_step_m=50.0,
+                                 fine_half_m=40.0, fine_step_m=10.0)
+    assert fit.source.startswith("waterline")
+    assert fit.waterline_deg < 0.5 * fit.waterline_at_seed_deg
+    assert abs(fit.dx_m - true[0]) <= 20.0 and abs(fit.dy_m - true[1]) <= 20.0
+    assert fit.pose.camera_h_m == pytest.approx(h, rel=0.15)

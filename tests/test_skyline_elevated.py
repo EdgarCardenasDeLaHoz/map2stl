@@ -66,3 +66,20 @@ def test_site_lists_the_cartagena_drone_seeds():
 
     assert _load_site_elevated_seeds("cartagena") == {"seed_1", "seed_4", "seed_5"}
     assert _load_site_elevated_seeds("miami") == set()
+
+
+def test_chunked_upsample_gives_the_full_argmax_labels():
+    """The full-resolution upsample of all 150 class scores needed 6.6 GB for one Commons
+    photo; the chunked running maximum must give exactly the same labels, ties included."""
+    import torch
+    import torch.nn.functional as F
+
+    from city2stl.skyline._core.segmentation import _upsampled_labels
+
+    g = torch.Generator().manual_seed(0)
+    logits = torch.randn(1, 150, 17, 23, generator=g)
+    logits[0, 37] = logits[0, 5]                       # exact ties: the first class must win
+    full = F.interpolate(logits, size=(70, 90), mode="bilinear", align_corners=False)[0].argmax(0)
+    got = _upsampled_labels(logits, 70, 90)
+    assert got.dtype == np.uint8 and got.shape == (70, 90)
+    assert np.array_equal(got, full.numpy())

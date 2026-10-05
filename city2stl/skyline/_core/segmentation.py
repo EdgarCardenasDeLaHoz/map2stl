@@ -188,6 +188,48 @@ def _neural_cache_put(img_id: int, entry: dict, image_rgb: np.ndarray) -> None:
     while len(_neural_cache) > _NEURAL_CACHE_CAPACITY:
         _neural_cache.popitem(last=False)
 
+def clear_neural_cache() -> None:
+    """Drop every cached label map and mask (and the images they anchor). A region run calls
+    it between seeds: a seed's views are fresh arrays, so nothing carries over, while 64
+    entries of one seed's label maps, masks and anchored images held 0.3-0.7 GB (memory
+    audit 2026-10-05). Report rows keep their own masks."""
+    _neural_cache.clear()
+
+#: Classes upsampled at a time by :func:`_upsampled_labels`.
+_UPSAMPLE_CLASS_CHUNK = 8
+
+def _upsampled_labels(logits, h: int, w: int) -> np.ndarray:
+    """``argmax`` over classes of ``logits`` (1, C, h0, w0) bilinearly upsampled to (h, w), as
+    uint8 labels, without the full (C, h, w) float32 tensor.
+
+    The full upsample needed 6.6 GB for one 3840x2880 Commons photo (150 classes; memory audit
+    2026-10-05). Classes go ``_UPSAMPLE_CLASS_CHUNK`` at a time with a running maximum: each
+    output pixel is interpolated per class exactly as before, and a strict ``>`` across chunks
+    keeps the first maximum on ties, as ``torch.argmax`` does, so the labels are identical.
+    ADE20K's 150 classes fit uint8 (was int64: 8x the memory per label map).
+    """
+    import torch  # noqa: PLC0415
+    import torch.nn.functional as F  # noqa: PLC0415
+
+    best_val = best_idx = None
+    for c0 in range(0, logits.shape[1], _UPSAMPLE_CLASS_CHUNK):
+        part = F.interpolate(logits[:, c0:c0 + _UPSAMPLE_CLASS_CHUNK], size=(h, w),
+                             mode="bilinear", align_corners=False)[0]
+        val, idx = part.max(dim=0)
+        idx = idx + c0
+        if best_val is None:
+            best_val, best_idx = val, idx
+        else:
+            better = val > best_val
+            best_val = torch.where(better, val, best_val)
+            best_idx = torch.where(better, idx, best_idx)
+        del part
+    labels = best_idx.to(torch.uint8).cpu().numpy()
+    if best_idx.is_cuda and h * w > 4_000_000:           # a photo: hand the blocks back
+        del best_val, best_idx
+        torch.cuda.empty_cache()
+    return labels
+
 def _ensure_label_map(image_rgb: np.ndarray) -> np.ndarray | None:
     """Run SegFormer-b0 (ADE20K) and return the per-pixel argmax label map.
 
@@ -211,7 +253,6 @@ def _ensure_label_map(image_rgb: np.ndarray) -> np.ndarray | None:
 
     try:
         import torch  # noqa: PLC0415
-        import torch.nn.functional as F  # noqa: PLC0415
         from PIL import Image as PILImage  # noqa: PLC0415
 
         h, w = image_rgb.shape[:2]
@@ -223,13 +264,8 @@ def _ensure_label_map(image_rgb: np.ndarray) -> np.ndarray | None:
             inputs = {k: v.to(_segformer_device) for k, v in inputs.items()}
         with torch.no_grad():
             outputs = _segformer_model(**inputs)  # type: ignore[misc]
-        # logits: (1, num_classes, H/4, W/4) → upsample to original resolution
-        upsampled = F.interpolate(
-            outputs.logits, size=(h, w), mode="bilinear", align_corners=False
-        )
-        # argmax on-device, then transfer the small int64 (H, W) result to CPU
-        # for the downstream numpy work — cheaper than moving the full logits.
-        label_map = upsampled.squeeze(0).argmax(dim=0).cpu().numpy()
+            # logits: (1, num_classes, H/4, W/4) → labels at the original resolution
+            label_map = _upsampled_labels(outputs.logits, h, w)
         _neural_cache_put(img_id, {"label_map": label_map}, image_rgb)
         return label_map
     except Exception:
@@ -307,7 +343,6 @@ def prefetch_label_maps(images: list[np.ndarray]) -> int:
 
     try:
         import torch  # noqa: PLC0415
-        import torch.nn.functional as F  # noqa: PLC0415
         from PIL import Image as PILImage  # noqa: PLC0415
 
         batch_n = _segformer_batch_size()
@@ -321,19 +356,15 @@ def prefetch_label_maps(images: list[np.ndarray]) -> int:
                 inputs = {k: v.to(_segformer_device) for k, v in inputs.items()}
             with torch.no_grad():
                 outputs = _segformer_model(**inputs)  # type: ignore[misc]
-            # logits: (N, num_classes, H/4, W/4). Upsample + argmax per image
-            # at its own native resolution (the spin views are uniform size,
-            # but this stays correct if a caller mixes sizes) — and avoids
-            # one giant (N, C, H, W) full-res tensor.
-            logits = outputs.logits
-            for i, img in enumerate(chunk):
-                h, w = img.shape[:2]
-                upsampled = F.interpolate(
-                    logits[i:i + 1], size=(h, w),
-                    mode="bilinear", align_corners=False)
-                label_map = upsampled.squeeze(0).argmax(dim=0).cpu().numpy()
-                _neural_cache_put(id(img), {"label_map": label_map}, img)
-                ran += 1
+                # logits: (N, num_classes, H/4, W/4). Labels per image at its own
+                # native resolution (the spin views are uniform size, but this
+                # stays correct if a caller mixes sizes).
+                logits = outputs.logits
+                for i, img in enumerate(chunk):
+                    h, w = img.shape[:2]
+                    label_map = _upsampled_labels(logits[i:i + 1], h, w)
+                    _neural_cache_put(id(img), {"label_map": label_map}, img)
+                    ran += 1
         return ran
     except Exception:
         # Leave the cache untouched; lazy per-image inference still works.
