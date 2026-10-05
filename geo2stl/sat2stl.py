@@ -408,17 +408,20 @@ def fetch_bbox_image(N, S, E, W, scale=None, dataset="copernicus", use_cache=Tru
     meta_path = CACHE_DIR / f"{cache_hash}.meta"
 
     def cached():
-        if not (use_cache and cache_path.exists() and meta_path.exists() and joblib is not None):
+        if not use_cache or joblib is None:
             return None
-        try:
-            meta = json.loads(meta_path.read_text())
-            if meta.get("scale", float("inf")) <= scale:
-                arr = joblib.load(cache_path)
-                if isinstance(arr, np.ndarray) and arr.size > 0:
-                    return arr
-        except Exception as e:
-            logger.warning("EE cache read failed, refetching: %s", e)
-        return None
+        if cache_path.exists() and meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                if meta.get("scale", float("inf")) <= scale:
+                    arr = joblib.load(cache_path)
+                    if isinstance(arr, np.ndarray) and arr.size > 0:
+                        return arr
+            except Exception as e:
+                logger.warning("EE cache read failed, refetching: %s", e)
+        # A finer image of the same bbox and dataset serves this coarser request:
+        # each Detail change on a large region used to re-download from EE.
+        return _from_finer_cache(N, S, E, W, scale, dataset)
 
     arr = cached()
     if arr is not None:
@@ -490,21 +493,86 @@ def _ee_download(N, S, E, W, scale, dataset, use_cache, cache_path, meta_path):
 
     img_array = np.array(Image.open(BytesIO(response.content)))
 
-    if use_cache and joblib is not None:
-        try:
-            joblib.dump(img_array, cache_path)
-            meta = {
-                "scale": scale,
-                "bbox": {"N": N, "S": S, "E": E, "W": W},
-                "dataset": dataset,
-                "shape": list(img_array.shape),
-                "timestamp": time.time(),
-            }
-            meta_path.write_text(json.dumps(meta))
-        except Exception as e:
-            logger.warning("Failed to cache EE raster: %s", e)
-
+    if use_cache:
+        _write_ee_cache(img_array, N, S, E, W, scale, dataset, cache_path, meta_path)
     return img_array
+
+
+def _write_ee_cache(img_array, N, S, E, W, scale, dataset, cache_path, meta_path) -> None:
+    """Store one downloaded EE image and the metadata ``_from_finer_cache`` matches on."""
+    if joblib is None:
+        return
+    try:
+        joblib.dump(img_array, cache_path)
+        meta = {
+            "scale": scale,
+            "bbox": {"N": N, "S": S, "E": E, "W": W},
+            "dataset": dataset,
+            "shape": list(img_array.shape),
+            "timestamp": time.time(),
+        }
+        meta_path.write_text(json.dumps(meta))
+    except Exception as e:
+        logger.warning("Failed to cache EE raster: %s", e)
+
+
+#: Class-coded datasets: resampled by nearest neighbour so no invented class values.
+_CATEGORICAL_DATASETS = frozenset({"esa"})
+
+
+def _from_finer_cache(N, S, E, W, scale, dataset):
+    """A cached image of this bbox and dataset at a finer scale, resampled to ``scale``,
+    or None.
+
+    The coarsest of the finer entries is used (least resampling). Continuous data
+    (elevation, JRC occurrence) is area-averaged; ESA classes take the nearest pixel.
+    The output shape follows the scale ratio, as EE would size a thumbnail at
+    ``scale`` over the same region (to within a pixel at the edges).
+    """
+    bbox = tuple(float(v) for v in (N, S, E, W))
+    best = None
+    for meta_path in CACHE_DIR.glob("*.meta"):
+        try:
+            meta = json.loads(meta_path.read_text())
+            b = meta.get("bbox") or {}
+            src_scale = float(meta["scale"])
+            if (meta.get("dataset") != dataset or src_scale >= scale
+                    or tuple(float(b[k]) for k in ("N", "S", "E", "W")) != bbox):
+                continue
+        except (ValueError, KeyError, TypeError):
+            continue
+        if best is None or src_scale > best[0]:
+            best = (src_scale, meta_path.with_suffix(".jbl"))
+    if best is None or not best[1].exists():
+        return None
+    src_scale, path = best
+    try:
+        src = joblib.load(path)
+    except Exception as e:
+        logger.warning("EE finer-cache read failed (%s): %s", path.name, e)
+        return None
+    if not isinstance(src, np.ndarray) or src.size == 0:
+        return None
+    out = _resample_to_scale(src, src_scale, scale, categorical=dataset in _CATEGORICAL_DATASETS)
+    logger.info("EE %s at scale %s served from cached scale %s (%s -> %s)",
+                dataset, scale, src_scale, src.shape[:2], out.shape[:2])
+    return out
+
+
+def _resample_to_scale(arr: np.ndarray, src_scale: float, scale: float,
+                       *, categorical: bool) -> np.ndarray:
+    """``arr`` (taken at ``src_scale`` m/px) as if taken at the coarser ``scale``."""
+    import cv2
+
+    ratio = src_scale / scale
+    h = max(1, int(round(arr.shape[0] * ratio)))
+    w = max(1, int(round(arr.shape[1] * ratio)))
+    interp = cv2.INTER_NEAREST if categorical or arr.ndim == 3 else cv2.INTER_AREA
+    out = cv2.resize(arr.astype(np.float32) if interp == cv2.INTER_AREA else arr,
+                     (w, h), interpolation=interp)
+    if out.ndim < arr.ndim:          # cv2 drops a trailing single channel
+        out = out[..., None]
+    return np.rint(out).astype(arr.dtype) if interp == cv2.INTER_AREA else out.astype(arr.dtype)
 
 
 def get_aquatic_regions(N, S, E, W, dataset="esa", scale=None, use_cache=True, target_dim=500):
