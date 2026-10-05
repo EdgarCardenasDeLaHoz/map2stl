@@ -184,16 +184,6 @@ exactly the buildings the panorama pipeline gets most wrong.
 - Full write-up with the seven-city tables:
   [history/issues-resolved.md](history/issues-resolved.md) (§3).
 
-### 0f. API response formats are inconsistent
-Pinned by `strict` xfail tests in `tests/test_e2e_projection_pipeline.py::TestResponseFormatConsistency`
-(fixing one makes its test XPASS and fail: remove the `xfail` then).
-- **City raster uses `.tolist()`**: `POST /api/cities/raster` returns `values` as a JSON list
-  (`app/server/routers/cities.py`), not `values_b64` like the terrain layers.
-  Test: `test_city_raster_uses_b64_not_tolist`.
-- **Satellite response has no `dimensions`**: `GET /api/terrain/satellite` returns `image` +
-  `bbox` only, so a client cannot check it lines up with the DEM grid.
-  Test: `test_satellite_response_has_dimensions`.
-
 ## Audits to re-verify
 
 - Re-verify the colour-contrast and UX audit items against the running UI:

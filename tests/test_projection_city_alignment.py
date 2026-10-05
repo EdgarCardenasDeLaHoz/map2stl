@@ -120,7 +120,7 @@ class TestProjectionCityAlignment:
         assert resp.status_code == 200
         body = resp.json()
 
-        assert "values" in body
+        assert "values_b64" in body
         assert body["width"] > 0 and body["height"] > 0
         print("✓ Cities raster projection='none': OK")
 
@@ -137,7 +137,7 @@ class TestProjectionCityAlignment:
         assert resp.status_code == 200
         body = resp.json()
 
-        assert "values" in body
+        assert "values_b64" in body
         assert body["width"] > 0 and body["height"] > 0
         print("✓ Cities raster projection='mercator': OK")
 

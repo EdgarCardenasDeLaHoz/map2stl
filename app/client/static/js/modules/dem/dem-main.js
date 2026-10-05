@@ -769,6 +769,12 @@ window.loadSatelliteRGBImage = async function loadSatelliteRGBImage(opts = {}) {
                 raw.width = img.naturalWidth;
                 raw.height = img.naturalHeight;
                 raw.getContext('2d').drawImage(img, 0, 0);
+                // `dimensions` ([h, w], as for the DEM) is the size the server built:
+                // flag a decoded image of another size (it would misalign with the DEM).
+                const [dh, dw] = data.dimensions || [];
+                if (dh && (dh !== img.naturalHeight || dw !== img.naturalWidth)) {
+                    console.warn(`Satellite image is ${img.naturalWidth}x${img.naturalHeight}, server said ${dw}x${dh}`);
+                }
                 window.appState._satImgRawCanvas = raw;
                 window.appState._satImgBbox = bbox;
                 window.appState.satImgSourceCanvas = raw;

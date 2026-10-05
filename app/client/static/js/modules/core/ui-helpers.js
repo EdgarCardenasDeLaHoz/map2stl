@@ -344,6 +344,11 @@ window.decodeDemValues = function decodeDemValues(data) {
     return _decodeGrid(data.dem_values_b64, data.dem_values);
 };
 
+/** City raster values: `values_b64` from /api/cities/raster (plain `values` from older servers). */
+window.decodeRasterValues = function decodeRasterValues(data) {
+    return _decodeGrid(data.values_b64, data.values);
+};
+
 window.decodeWaterMask = function decodeWaterMask(data) {
     return _decodeGrid(data.water_mask_values_b64, data.water_mask_values);
 };

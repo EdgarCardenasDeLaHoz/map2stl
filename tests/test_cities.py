@@ -302,6 +302,13 @@ SMALL_BBOX = {"north": 39.960, "south": 39.950,
               "east": -75.140, "west": -75.170}
 
 
+def _values(body) -> list[float]:
+    """The raster's values, decoded from ``values_b64`` (docs/issues.md §0f)."""
+    import base64
+
+    return np.frombuffer(base64.b64decode(body["values_b64"]), dtype="<f4").tolist()
+
+
 class TestCityRaster:
     """POST /api/cities/raster — rasterize OSM features to a DEM-format height map."""
 
@@ -321,7 +328,7 @@ class TestCityRaster:
     def test_response_has_dem_format_fields(self, client, tmp_data_dir):
         resp = client.post("/api/cities/raster", json=self._payload())
         body = resp.json()
-        for key in ("values", "width", "height", "vmin", "vmax", "bbox"):
+        for key in ("values_b64", "width", "height", "vmin", "vmax", "bbox"):
             assert key in body, f"Missing field: {key}"
 
     def test_dimensions_match_dim_param(self, client, tmp_data_dir):
@@ -330,12 +337,12 @@ class TestCityRaster:
         body = resp.json()
         assert body["width"] == dim
         assert body["height"] == dim
-        assert len(body["values"]) == dim * dim
+        assert len(_values(body)) == dim * dim
 
     def test_empty_features_produce_zero_values(self, client, tmp_data_dir):
         resp = client.post("/api/cities/raster", json=self._payload())
         body = resp.json()
-        assert all(v == 0.0 for v in body["values"])
+        assert all(v == 0.0 for v in _values(body))
 
     def test_building_feature_raises_nonzero_values(self, client, tmp_data_dir):
         """A building covering the full bbox should produce nonzero height values."""
@@ -357,14 +364,14 @@ class TestCityRaster:
         resp = client.post("/api/cities/raster",
                            json=self._payload(dim=10, buildings=building_fc))
         body = resp.json()
-        assert any(v > 0 for v in body["values"])
+        assert any(v > 0 for v in _values(body))
 
     def test_cache_hit_returns_same_values(self, client, tmp_data_dir):
         """Two identical requests should return identical results (cache hit on second)."""
         payload = self._payload(dim=10)
         r1 = client.post("/api/cities/raster", json=payload).json()
         r2 = client.post("/api/cities/raster", json=payload).json()
-        assert r1["values"] == r2["values"]
+        assert _values(r1) == _values(r2)
 
     def test_multipolygon_building_rasterizes_all_parts(self, client, tmp_data_dir):
         """A MultiPolygon footprint should burn all constituent polygons into the raster."""
@@ -400,7 +407,7 @@ class TestCityRaster:
                            json=self._payload(dim=dim, buildings=building_fc))
         assert resp.status_code == 200
         body = resp.json()
-        arr = np.array(body["values"], dtype=np.float32).reshape(dim, dim)
+        arr = np.array(_values(body), dtype=np.float32).reshape(dim, dim)
 
         # One polygon in SW-ish area and one in NE-ish area should both appear as raised cells.
         sw_nonzero = np.count_nonzero(arr[22:39, 0:18] > 0)
@@ -424,7 +431,7 @@ class TestCityRaster:
 
         assert resp.status_code == 200
         body = resp.json()
-        assert len(body["values"]) == 100
-        assert all(np.isfinite(v) for v in body["values"])
+        assert len(_values(body)) == 100
+        assert all(np.isfinite(v) for v in _values(body))
         assert np.isfinite(body["vmin"])
         assert np.isfinite(body["vmax"])

@@ -10,6 +10,19 @@ because code cites them.
   `city2stl/skyline/height/` → `city2stl/height/`, `app/server/core/height/` →
   `city2stl/height/`).
 
+## Fixed 2026-10-05 (response formats)
+
+### 0f. API response formats were inconsistent — fixed 2026-10-05
+- `POST /api/cities/raster` returned `values` as a JSON list (`.tolist()`). It now sends
+  `values_b64` (little-endian float32, like the terrain layers):
+  `app/server/routers/cities.py::_raster_wire_payload`; client `window.decodeRasterValues`
+  (`app/client/static/js/modules/core/ui-helpers.js`).
+- `GET /api/terrain/satellite` had no `dimensions`. It now returns `[h, w]` read from the JPEG
+  header (`app/server/routers/terrain.py::_satellite_payload`); the client warns when the decoded
+  image differs.
+- The two strict xfails in `tests/test_e2e_projection_pipeline.py::TestResponseFormatConsistency`
+  are now plain tests.
+
 ## Fixed 2026-10-05 (full code audit)
 
 ### Silent wrong answers — fixed 2026-10-05
