@@ -104,7 +104,8 @@ def _newest_report(region: str) -> Path | None:
     return max(found, key=lambda p: p.stat().st_mtime) if found else None
 
 
-def score_report(heights: Path, region: str | None = None, use_tiles: bool = True) -> dict:
+def score_report(heights: Path, region: str | None = None, use_tiles: bool = True,
+                 refresh_truth: bool = False) -> dict:
     name, buildings = bm.load_report(heights)
     region = region or bm.region_key(name)
     provider = bm.REGIONS.get(region)
@@ -112,7 +113,7 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
         logging.warning("[bench] %s is not a benchmark region; scoring with 3D Tiles only",
                         region)
     truth = bm.footprint_truth(region, {b["key"]: b["footprint_lonlat"] for b in buildings},
-                               provider, use_tiles=use_tiles)
+                               provider, use_tiles=use_tiles, refresh=refresh_truth)
     result = {"region": region, "report": str(heights), "survey": provider,
               **bm.score_buildings(buildings, truth)}
     try:  # the report's benchmark page; a plotting failure must not lose the score
@@ -155,7 +156,9 @@ def main() -> int:
     ap.add_argument("--report", action="append", default=[], type=Path,
                     help="score this heights.json (repeatable; implies --score-only)")
     ap.add_argument("--no-tiles", action="store_true",
-                    help="survey truth only (no 3D Tiles; nothing is 'confirmed')")
+                    help="survey truth only (no 3D Tiles; nothing is 'confirmed'; not cached)")
+    ap.add_argument("--refresh-truth", action="store_true",
+                    help="re-measure truth for footprints already in the region's truth cache")
     ap.add_argument("--keep-env", action="store_true",
                     help="don't pin PINNED_FLAGS: run with the shell's SKYLINE_* values")
     args = ap.parse_args()
@@ -177,7 +180,8 @@ def main() -> int:
         if heights is None:
             results.append({"region": region, "error": "no report"})
             continue
-        results.append(score_report(heights, region, use_tiles=not args.no_tiles))
+        results.append(score_report(heights, region, use_tiles=not args.no_tiles,
+                                    refresh_truth=args.refresh_truth))
 
     summary = {
         "stamp": stamp, "git": _git_head(),

@@ -110,6 +110,59 @@ def test_footprint_truth_cross_checks_and_caches(tmp_path, monkeypatch):
     assert again == truth and calls == {"survey": 1, "tiles": 1}
 
 
+def _truth_fakes(monkeypatch, tmp_path, *, survey_fails=False, tiles_cover=True):
+    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    survey, t, _ = _grid()
+    _paint(survey, 20, 20, 30, 30, 50.0)
+    calls = {"survey": 0, "tiles": 0}
+
+    def fake_survey(provider, bbox, res):
+        calls["survey"] += 1
+        if survey_fails:
+            raise RuntimeError("endpoint down")
+        return survey, t
+
+    def fake_tiles(bbox, res, provider):
+        calls["tiles"] += 1
+        return (survey, t) if tiles_cover else None
+
+    monkeypatch.setattr(bm, "survey_ndsm", fake_survey)
+    monkeypatch.setattr(bm, "tiles_ndsm", fake_tiles)
+    return calls, {"A": _ring(20, 20, 30, 30)}
+
+
+def test_no_tiles_read_is_scored_but_not_cached(tmp_path, monkeypatch):
+    calls, fps = _truth_fakes(monkeypatch, tmp_path)
+    first = bm.footprint_truth("Testville", fps, "usgs_3dep", use_tiles=False)
+    assert first["A"]["status"] == "survey_only"
+    assert bm.load_truth_cache("Testville") == {}
+    full = bm.footprint_truth("Testville", fps, "usgs_3dep")   # a later full run measures again
+    assert full["A"]["status"] == "confirmed" and calls == {"survey": 2, "tiles": 1}
+
+
+def test_failed_source_is_not_cached(tmp_path, monkeypatch):
+    calls, fps = _truth_fakes(monkeypatch, tmp_path, survey_fails=True)
+    out = bm.footprint_truth("Testville", fps, "usgs_3dep")
+    assert out["A"]["status"] == "tiles_only"
+    assert bm.load_truth_cache("Testville") == {}
+
+
+def test_not_covered_is_an_answer_and_cached(tmp_path, monkeypatch):
+    calls, fps = _truth_fakes(monkeypatch, tmp_path, tiles_cover=False)
+    out = bm.footprint_truth("Testville", fps, "usgs_3dep")
+    assert out["A"]["status"] == "survey_only"
+    assert "A" in bm.load_truth_cache("Testville")
+    bm.footprint_truth("Testville", fps, "usgs_3dep")
+    assert calls == {"survey": 1, "tiles": 1}
+
+
+def test_refresh_remeasures_cached_footprints(tmp_path, monkeypatch):
+    calls, fps = _truth_fakes(monkeypatch, tmp_path)
+    bm.footprint_truth("Testville", fps, "usgs_3dep")
+    bm.footprint_truth("Testville", fps, "usgs_3dep", refresh=True)
+    assert calls == {"survey": 2, "tiles": 2}
+
+
 def test_score_buildings_bands_and_tags():
     truth = {"a": {"status": "confirmed", "truth_m": 20.0},
              "b": {"status": "confirmed", "truth_m": 150.0},

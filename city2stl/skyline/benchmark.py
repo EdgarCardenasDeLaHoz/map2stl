@@ -261,31 +261,39 @@ def save_truth_cache(region: str, truth: dict) -> None:
 
 def footprint_truth(region: str, footprints: dict[str, list], survey_provider: str | None,
                     *, use_tiles: bool = True, resolution_m: float = RESOLUTION_M,
-                    tiles_provider=None) -> dict[str, dict]:
+                    tiles_provider=None, refresh: bool = False) -> dict[str, dict]:
     """Truth record per footprint key, from the region cache plus any missing tiles.
 
     ``footprints``: key (``footprint_key``) → lon/lat ring. Returns key → ``{survey_m,
     survey_cells, tiles_m, tiles_cells, status, truth_m}``. Measured records are written
     back to the cache after every tile, so an interrupted run keeps what it fetched.
+
+    Only complete reads are cached: every source this region has (the survey, and 3D Tiles
+    unless ``use_tiles`` is False) answered, "not covered" included. A source that raised,
+    or a ``--no-tiles`` run, is scored this time but not saved, so it cannot pin a
+    survey-only or tiles-only record for good. ``refresh`` re-measures cached footprints.
     """
     cache = load_truth_cache(region)
     todo = {k: _erode(_polygon(ring), ERODE_M) for k, ring in footprints.items()
-            if k not in cache}
+            if refresh or k not in cache}
+    fresh: dict[str, dict] = {}
     tiles = tiles_for(todo)
     for i, tile in enumerate(tiles, 1):
         logger.info("[bench] %s tile %d/%d: %d footprints", region, i, len(tiles),
                     len(tile.keys))
-        grids = {}
+        grids, complete = {}, use_tiles
         if survey_provider:
             try:
                 grids["survey"] = survey_ndsm(survey_provider, tile.bbox, resolution_m)
             except Exception as exc:  # one bad tile must not lose the rest
+                complete = False
                 logger.warning("[bench] survey %s failed on %s: %s", survey_provider,
                                tile.bbox, exc)
         if use_tiles:
             try:
                 grids["tiles"] = tiles_ndsm(tile.bbox, resolution_m, tiles_provider)
             except Exception as exc:
+                complete = False
                 logger.warning("[bench] 3D Tiles failed on %s: %s", tile.bbox, exc)
         for k in tile.keys:
             rec: dict = {}
@@ -296,9 +304,15 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
                 rec[f"{src}_cells"] = cells
             rec["status"], truth_m = classify(rec["survey_m"], rec["tiles_m"])
             rec["truth_m"] = None if truth_m is None else round(truth_m, 2)
-            cache[k] = rec
-        save_truth_cache(region, cache)
-    return {k: cache[k] for k in footprints if k in cache}
+            fresh[k] = rec
+            if complete:
+                cache[k] = rec
+        if complete:
+            save_truth_cache(region, cache)
+        else:
+            logger.info("[bench] %s tile %d/%d not cached (a source failed or was skipped)",
+                        region, i, len(tiles))
+    return {k: fresh.get(k, cache.get(k)) for k in footprints if k in fresh or k in cache}
 
 
 # --------------------------------------------------------------------------- scoring
