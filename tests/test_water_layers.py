@@ -535,3 +535,31 @@ def test_composite_carve_is_zero_on_open_sea(monkeypatch):
         _LAYER_SOURCES.pop("unit_sea_base", None)
         _LAYER_SOURCES.pop("unit_sea_river", None)
     assert np.array_equal(carve0, carve)
+
+
+def test_parallel_carve_matches_one_pass(monkeypatch):
+    """Worker processes give the very grid one pass gives: reaches are independent and
+    overlaps combine by max (geo2stl/water_layers.py::_carve_parallel)."""
+    import sys
+
+    main = sys.modules.get("__main__")
+    if not (getattr(main, "__file__", None) or getattr(main, "__spec__", None)):
+        pytest.skip("this runner's main module cannot be re-imported by spawned workers")
+    rng = np.random.default_rng(3)
+    k = 300
+    x0 = rng.uniform(W, E, k)
+    y0 = rng.uniform(S, N, k)
+    lines = [LineString([(x, y), (x + dx, y + dy), (x + 2 * dx, y + dy / 2)])
+             for x, y, dx, dy in zip(x0, y0, rng.normal(0, 0.004, k), rng.normal(0, 0.004, k), strict=True)]
+    gdf = gpd.GeoDataFrame({"geometry": lines, "ORD_STRA": rng.integers(1, 7, k),
+                            "DIS_AV_CMS": rng.uniform(0.5, 500, k)}, crs="EPSG:4326")
+    h, w = 80, 90
+    dem = 100.0 + 15.0 * np.abs(np.arange(h)[:, None] - 40) + np.zeros((1, w))
+    monkeypatch.setattr(wl, "CARVE_PARALLEL_MIN", 10**9)
+    o1, s1 = wl.river_depth_by_order(gdf, N, S, E, W, (h, w), dem=dem)
+    monkeypatch.setattr(wl, "CARVE_PARALLEL_MIN", 10)
+    monkeypatch.setattr(wl, "CARVE_WORKERS", 2)
+    o2, s2 = wl.river_depth_by_order(gdf, N, S, E, W, (h, w), dem=dem)
+    assert np.array_equal(o1, o2)
+    assert np.array_equal(s1, s2)
+    assert (s1 > 0).sum() > 100

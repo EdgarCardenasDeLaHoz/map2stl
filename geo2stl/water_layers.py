@@ -41,6 +41,7 @@ the next valley. ``options.snap = false`` turns it off.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -298,7 +299,6 @@ def river_depth_by_order(gdf, north: float, south: float, east: float, west: flo
     With *dem* (the grid being carved, of *shape*) and *snap*, each reach is
     first moved onto the valley floor (:func:`snap_reaches_to_valley`).
     """
-    from numpy2stl.raster import burn_polygons
 
     h, w = int(shape[0]), int(shape[1])
     empty = (np.zeros(0, dtype=np.int16), np.zeros((0, h, w), dtype=np.float32))
@@ -331,44 +331,126 @@ def river_depth_by_order(gdf, north: float, south: float, east: float, west: flo
         gdf.geometry.to_numpy(),
         lambda c: np.column_stack([c[:, 0] * a + c[:, 1] * b + xo,
                                    c[:, 0] * d + c[:, 1] * e + yo])))
-    if snap and dem is not None and np.shape(dem) == (h, w):
+    lines = geoms.to_numpy().copy()
+    do_snap = snap and dem is not None and np.shape(dem) == (h, w)
+    ok = np.zeros(len(lines), dtype=bool)
+    if do_snap:
         from shapely.geometry import box
         # Clip only the reaches that cross the frame: intersecting all of them cost
         # 22 s for Colombia's 126k reaches, nearly all of which lie inside.
         frame = box(0.0, 0.0, width_m, height_m)
         shapely.prepare(frame)
-        lines = geoms.to_numpy().copy()
         crossing = ~shapely.contains(frame, lines)
         lines[crossing] = shapely.intersection(lines[crossing], frame)
         ok = (~shapely.is_empty(lines)) & np.isin(shapely.get_type_id(lines), (1, 5))  # (Multi)LineString
-        if ok.any():
-            orders = order[ok] if order is not None else np.full(int(ok.sum()), 3.0)
-            snapped = snap_reaches_to_valley(list(lines[ok]), dem, width_m, height_m,
-                                             snap_radius_m(orders))
-            for i, g in zip(np.flatnonzero(ok), snapped, strict=True):
-                lines[i] = g
-        geoms = gpd.GeoSeries(lines)
-    geoms = geoms.simplify(px_m / 2.0)
+    reach_order = (np.nan_to_num(order, nan=0.0).astype(np.int16) if order is not None
+                   else np.zeros(len(lines), dtype=np.int16))
+    snap_r = (snap_radius_m(order if order is not None else np.full(len(lines), 3.0))
+              if do_snap else np.zeros(len(lines)))
+    vals = np.asarray(depths, dtype=np.float64)
+    orders = np.unique(reach_order)
+    ctx = (np.asarray(dem, dtype=np.float64) if do_snap else None, width_m, height_m, h, w, px_m)
+    stack, kept = _carve_parallel(lines, ok, np.asarray(radius, dtype=np.float64), snap_r,
+                                  reach_order, vals, orders, ctx)
+    if not kept.any():
+        return empty
+    orders, stack = orders[kept > 0], stack[kept > 0]
+    logger.info("river_depth_by_order: %d reaches in %d orders at %dx%d (%.0f m/px)",
+                int(kept.sum()), len(orders), w, h, px_m)
+    return orders, stack
+
+
+#: Reaches above which river_depth_by_order builds in worker processes, and how many.
+#: Each reach is snapped and burned on its own and overlaps combine by max, so chunks
+#: give the same grid as one pass (Amazon "All rivers", 1.2M reaches: ~98 s serial).
+CARVE_PARALLEL_MIN = 50_000
+CARVE_WORKERS = 4
+
+_CARVE_CTX = None
+
+
+def _carve_init(ctx):
+    global _CARVE_CTX
+    _CARVE_CTX = ctx
+
+
+def _carve_chunk(lines, ok, radius, snap_r, reach_order, vals, orders, ctx=None):
+    """Snap, simplify, buffer and burn one set of reaches into a per-order stack.
+
+    Returns (stack ``(len(orders), h, w)`` float32, kept count per order). *lines* may be
+    shapely geometries or WKB (from a worker); *ctx* is (dem or None, width_m, height_m,
+    h, w, px_m), or the worker's initializer context.
+    """
+    import shapely
+    from numpy2stl.raster import burn_polygons
+    dem, width_m, height_m, h, w, px_m = ctx if ctx is not None else _CARVE_CTX
+    lines = np.asarray(lines, dtype=object)
+    if len(lines) and isinstance(lines[0], (bytes, bytearray)):
+        lines = shapely.from_wkb(lines)
+    lines = lines.copy()
+    if dem is not None and ok.any():
+        snapped = snap_reaches_to_valley(list(lines[ok]), dem, width_m, height_m, snap_r[ok])
+        for i, g in zip(np.flatnonzero(ok), snapped, strict=True):
+            lines[i] = g
+    lines = shapely.simplify(lines, px_m / 2.0)
     # 2 segments per quarter circle: the ends are at most ~8 % of a radius off, and
     # the radius is about a pixel, while 16 made each reach dozens of vertices that
     # the rasteriser then had to read (Amazon: 68 s of GeoJSON alone).
-    buffered = geoms.buffer(radius, resolution=2)
-    keep = (~buffered.is_empty).to_numpy()
-    if not keep.any():
-        return empty
-    shapes = buffered.to_numpy()[keep]
-    reach_order = (np.nan_to_num(order, nan=0.0).astype(np.int16)[keep] if order is not None
-                   else np.zeros(int(keep.sum()), dtype=np.int16))
-    vals = np.asarray(depths, dtype=np.float64)[keep]
-    orders = np.unique(reach_order)
+    shapes = shapely.buffer(lines, radius, quad_segs=2)
+    keep = ~shapely.is_empty(shapes) & ~shapely.is_missing(shapes)
     stack = np.zeros((len(orders), h, w), dtype=np.float32)
+    kept = np.zeros(len(orders), dtype=np.int64)
     for k, o in enumerate(orders):
-        sel = reach_order == o
-        stack[k] = burn_polygons(list(shapes[sel]), (h, w), bounds=(0.0, 0.0, width_m, height_m),
-                                 values=vals[sel].tolist(), mode="max")
-    logger.info("river_depth_by_order: %d reaches in %d orders at %dx%d (%.0f m/px)",
-                int(keep.sum()), len(orders), w, h, px_m)
-    return orders, stack
+        sel = keep & (reach_order == o)
+        kept[k] = int(sel.sum())
+        if kept[k]:
+            stack[k] = burn_polygons(list(shapes[sel]), (h, w), bounds=(0.0, 0.0, width_m, height_m),
+                                     values=vals[sel].tolist(), mode="max")
+    return stack, kept
+
+
+def _carve_worker(args):
+    return _carve_chunk(*args)
+
+
+def _carve_parallel(lines, ok, radius, snap_r, reach_order, vals, orders, ctx):
+    """_carve_chunk over all reaches: in CARVE_WORKERS processes above CARVE_PARALLEL_MIN
+    reaches (chunks combined by max, which is what one pass computes), else in this one.
+    Falls back to one pass if the pool cannot start."""
+    n = len(lines)
+    workers = min(CARVE_WORKERS, max(1, (os.cpu_count() or 2) - 2))
+    # Spawned workers re-import the main module: a script piped through stdin or an
+    # interactive session has none to import, and its pool would never start.
+    import sys
+    main = sys.modules.get("__main__")
+    importable_main = bool(getattr(main, "__file__", None) or getattr(main, "__spec__", None))
+    if n < CARVE_PARALLEL_MIN or workers < 2 or not importable_main:
+        return _carve_chunk(lines, ok, radius, snap_r, reach_order, vals, orders, ctx)
+    from concurrent.futures import ProcessPoolExecutor
+
+    import shapely
+    wkb = shapely.to_wkb(lines)
+    # Interleaved chunks: neighbouring reaches (similar sizes) spread over the workers.
+    parts = [np.arange(i, n, workers) for i in range(workers)]
+    saved = {v: os.environ.get(v) for v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS")}
+    try:
+        os.environ.update({v: "1" for v in saved})   # inherited by the spawned workers
+        with ProcessPoolExecutor(workers, initializer=_carve_init, initargs=(ctx,)) as pool:
+            results = list(pool.map(_carve_worker, [
+                (wkb[ix], ok[ix], radius[ix], snap_r[ix], reach_order[ix], vals[ix], orders)
+                for ix in parts]))
+    except Exception as exc:  # noqa: BLE001 - a broken pool must not lose the carve
+        logger.warning("river carve: worker pool failed (%s); one pass instead", exc)
+        return _carve_chunk(lines, ok, radius, snap_r, reach_order, vals, orders, ctx)
+    finally:
+        for v, old in saved.items():
+            if old is None:
+                os.environ.pop(v, None)
+            else:
+                os.environ[v] = old
+    stack = np.maximum.reduce([r[0] for r in results])
+    kept = np.sum([r[1] for r in results], axis=0)
+    return stack, kept
 
 
 def river_carve(orders: np.ndarray, stack: np.ndarray, min_order: int = 1,
