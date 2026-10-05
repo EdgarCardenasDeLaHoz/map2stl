@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-import re
 import time
 from pathlib import Path
 from typing import Union
@@ -26,6 +25,7 @@ import numpy as np
 import pandas as pd
 from numpy2stl.raster import burn_polygons
 
+from city2stl.heights import parse_length_m
 from geo2stl import cache as _geo_cache
 
 logger = logging.getLogger(__name__)
@@ -671,14 +671,15 @@ def _resolve_building_height(
     default_height: float,
     levels_to_meters: float,
 ) -> float:
-    """Height priority: OSM 'height' tag → building:levels × factor → default."""
-    # 1. Try 'height' tag (may be "15", "15 m", "15.5m")
-    h = row.get("height", None)
-    if h is not None and h == h:  # not NaN
-        try:
-            return float(re.sub(r"[^\d.]", "", str(h)))
-        except ValueError:
-            pass
+    """Height priority: OSM 'height' tag → building:levels × factor → default.
+
+    The tag is parsed by ``heights.parse_length_m`` (units, ``"40 ft"``, first
+    of ``"12;15"``). Stripping non-digits used to read those as 40 m and
+    1215 m (audit 2026-10-05). Levels keep this module's own factor.
+    """
+    h = parse_length_m(row.get("height", None))
+    if h is not None:
+        return h
 
     # 2. Try 'building:levels' tag
     lvl = row.get("building:levels", None)

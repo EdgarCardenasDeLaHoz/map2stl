@@ -36,6 +36,13 @@ class TestResolveBuildingHeight:
         row = {"height": "15 m", "building:levels": None}
         assert _resolve_building_height(row, 10.0, 3.5) == pytest.approx(15.0)
 
+    @pytest.mark.parametrize("tag, metres", [("40 ft", 12.192), ("12;15", 12.0)])
+    def test_height_tag_units_and_lists(self, tag, metres):
+        # Stripping non-digits read these as 40 m and 1215 m (audit 2026-10-05).
+        from city2stl.osm_raster import _resolve_building_height
+        row = {"height": tag, "building:levels": None}
+        assert _resolve_building_height(row, 10.0, 3.5) == pytest.approx(metres)
+
     def test_levels_fallback(self):
         from city2stl.osm_raster import _resolve_building_height
         row = {"height": None, "building:levels": "4"}

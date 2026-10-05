@@ -533,3 +533,16 @@ class TestOverpassFailure:
         svc.providers = {"osm": _EmptyLayer()}
         assert svc.fetch_and_rasterize(40.0, 39.9, -75.1, -75.2, 32,
                                        source="osm") is None
+
+
+def test_fetch_and_rasterize_trails_propagates_upstream_errors(monkeypatch):
+    # An outage must reach the router's TrailsUpstreamError branch, not turn
+    # into None ("no trails found") (audit 2026-10-05).
+    import geo2stl.trails as trails
+
+    def _down(*a, **k):
+        raise TrailsUpstreamError("Overpass is unreachable")
+
+    monkeypatch.setattr(trails.TRAILS_LAYER, "fetch_and_rasterize", _down)
+    with pytest.raises(TrailsUpstreamError):
+        trails.fetch_and_rasterize_trails(40.0, 39.9, -75.1, -75.2, 64)

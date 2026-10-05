@@ -179,16 +179,25 @@ def compute_heightmap(
     heightmap, mask = _stl_to_heightmap(
         mesh_path, bbox, resolution_m=resolution_m, up_axis=up_axis)
 
-    if infill != "none":
-        if infill == "idw":
-            heightmap = _infill_idw(heightmap, mask)
-        elif infill == "nearest":
-            heightmap = _infill_nearest(heightmap)
-        else:
-            raise MeshImportError(f"Unknown infill method: {infill!r}")
-
+    heightmap = _apply_infill(heightmap, infill)
     _save_last_heightmap(_upload_dir(upload_id), heightmap, mask)
     return heightmap, mask
+
+
+def _apply_infill(heightmap: np.ndarray, infill: str) -> np.ndarray:
+    """Fill the NaN gaps of a mesh heightmap ("none" | "idw" | "nearest").
+
+    ``infill_idw`` is called without a mask on purpose: its ``mask`` is the
+    region to fill, and the mask ``stl_to_heightmap`` returns marks the
+    *valid* pixels, so passing it made IDW fill nothing (audit 2026-10-05).
+    """
+    if infill == "none":
+        return heightmap
+    if infill == "idw":
+        return _infill_idw(heightmap)
+    if infill == "nearest":
+        return _infill_nearest(heightmap)
+    raise MeshImportError(f"Unknown infill method: {infill!r}")
 
 
 def _save_last_heightmap(session_dir: Path, heightmap: np.ndarray, mask: np.ndarray) -> None:
@@ -434,8 +443,7 @@ def compute_library_heightmap(
     heightmap, mask = _stl_to_heightmap(
         mesh_path, bbox, resolution_m=resolution_m, up_axis=up_axis)
 
-    if infill != "none":
-        heightmap = _infill_idw(heightmap, mask) if infill == "idw" else _infill_nearest(heightmap)
+    heightmap = _apply_infill(heightmap, infill)
 
     write_array_cache(
         "mesh_import", key,

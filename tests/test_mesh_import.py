@@ -457,3 +457,18 @@ def test_delete_route_rejects_traversal(client):
     # "%2E%2E" arrives as upload_id=".."; it used to rmtree the cache root.
     r = client.delete("/api/layers/mesh/%2E%2E")
     assert r.status_code == 400
+
+
+@pytest.mark.parametrize("method", ["idw", "nearest"])
+def test_apply_infill_fills_gaps(method):
+    # A 20x20 grid with a 5x5 hole: IDW used to get the valid-pixel mask and
+    # fill nothing (audit 2026-10-05).
+    hm = np.ones((20, 20), dtype=np.float32)
+    hm[5:10, 5:10] = np.nan
+    out = mesh_import._apply_infill(hm, method)
+    assert not np.isnan(out).any()
+
+
+def test_apply_infill_rejects_unknown_method():
+    with pytest.raises(mesh_import.MeshImportError):
+        mesh_import._apply_infill(np.zeros((2, 2), np.float32), "bogus")

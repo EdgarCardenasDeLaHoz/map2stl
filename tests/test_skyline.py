@@ -366,3 +366,18 @@ class TestAggregateBuildingHeights:
         # Weighted average must be lower than the naive equal-weight mean (60m)
         # because view 0 (h=100) had its confidence halved → pulls weight toward view 1.
         assert row["weighted_height_m"] < 60.0
+
+
+# ── _fill_enclosed_holes (audit 2026-10-05) ──────────────────────────────────
+
+def test_fill_enclosed_holes_with_building_in_top_left_corner():
+    from city2stl.skyline._core.segmentation import _fill_enclosed_holes
+
+    b = np.zeros((90, 90), np.uint8)
+    b[:, :30] = 255                 # near tower at the left edge, covers (0, 0)
+    b[40:60, 50:70] = 255           # a second tower ...
+    b[45:55, 55:65] = 0             # ... with a dark-glass hole inside
+    out = _fill_enclosed_holes(b)
+    assert (out[45:55, 55:65] == 255).all()      # the enclosed hole is filled
+    assert (out[:30, 31:] == 0).all()            # open sky stays sky
+    assert (out[:, :30] == 255).all()

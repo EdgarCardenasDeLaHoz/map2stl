@@ -404,3 +404,36 @@ class TestGoogle3DProvider:
             assert np.median(valid) == pytest.approx(50.0, abs=30.0)
             # Confidence should be 0.9 where valid
             assert np.all(result.confidence[~np.isnan(result.raster)] == 0.9)
+
+
+# ── cache key and key lookup (audit 2026-10-05) ─────────────────────────────
+
+def test_cache_key_separates_dem_and_mesh_grounded_results(monkeypatch):
+    import city2stl.height.providers.google_3d as g3d
+
+    keys = []
+
+    def _hit(ns, key):
+        keys.append(key)
+        return {"height": np.zeros((4, 4), np.float32)}, {}
+
+    monkeypatch.setattr(g3d, "read_array_cache", _hit)
+    p = g3d.Google3DProvider(api_key="test")
+    bbox = (25.78, 25.77, -80.18, -80.19)
+    p.fetch_heights(bbox, (4, 4))
+    p.fetch_heights(bbox, (4, 4), dem=np.zeros((4, 4), np.float32))
+    assert keys[0] != keys[1]
+
+
+def test_api_key_read_from_map2stl_config(monkeypatch, tmp_path):
+    import json
+
+    import city2stl.height.providers.google_3d as g3d
+
+    monkeypatch.delenv("GOOGLE_MAPS_API_KEY", raising=False)
+    fake = tmp_path / "map2stl" / "city2stl" / "height" / "providers" / "google_3d.py"
+    fake.parent.mkdir(parents=True)
+    fake.write_text("")
+    (tmp_path / "map2stl" / "config.json").write_text(json.dumps({"google_maps_api_key": "k1"}))
+    monkeypatch.setattr(g3d, "__file__", str(fake))
+    assert g3d.get_api_key() == "k1"
