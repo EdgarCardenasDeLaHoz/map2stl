@@ -168,3 +168,13 @@ Cartagena stays a heading and registration smoke test, not an accuracy benchmark
     (0,0), turned the Charles River into "building", and the ground cap left 67 columns of it.
     The fill fix (`0d48702`) is right. The floor is wrong for a far skyline across water, which
     is a thin band of the frame (T35).
+  - T35 (branch `t35-pano-screen`, `9fec9f6`): a pano also passes when a building meets the sky
+    in 40 % of the columns of its best view (`segmentation.skyline_column_share`). On the eight
+    cities' cached views only three rejected seeds flip: Boston `auto_270_1400m` (100 %) and
+    `auto_270_2000m` (63 %), and Benidorm's bay view `auto_180_2000m` (51 %; the adaptive cut had
+    rejected it at 15.9 % against 16.5 %). La Défense's empty panos (0-0.2 %) and Madrid's park
+    behind trees (18 %) stay out. Re-run `2026-10-05_1151`:
+    - Boston: 789 scored, 660 confirmed (was 523 and 427). On the 427 both runs measured, MAE
+      57.6 → 55.0 m; the 232 new confirmed buildings score 42.4 m.
+    - Benidorm: 309 scored, 85 confirmed (was 134 and 42). The 42 shared buildings are
+      unchanged (20.3 m); the bay view adds 43 at 24.5 m.

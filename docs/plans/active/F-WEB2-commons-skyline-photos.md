@@ -193,6 +193,18 @@ What the evidence says so far:
       so does a slenderness prior (height ≤ 6-8 × √area). Next on T16: agreed footprints explain
       the columns they own, far to near, then truth fetched for the agreed footprints (4 of
       Chicago's 80 have truth today).
+- 2026-10-05, T16 with both rules and far-first (`43b0352`) on the saved poses: Miami 3-4
+  agreements, Chicago 54-60. Against the truth now cached for them (mostly survey lidar alone,
+  not cross-checked with 3D Tiles), C2 is still wrong: Chicago MAE 74 m on ~50 buildings, truth
+  median 14 m against C2 median 91 m, 5 of 53 within 25 %; of 41 readings over 60 m, 7 are real
+  towers. A constant 11 m scores 21.7 m. In a dense downtown nearly every low building has a
+  taller one behind it from every direction, so agreement does not turn the bound into a reading.
+- What holds is the bound itself: an implied height is an upper bound for every footprint on
+  that line of sight. The lowest bound over the kept photos sits above confirmed truth for 30 of
+  30 untagged Miami buildings and 79 of 87 in Chicago. Capping Street View's untagged estimates
+  with it: Miami 102.0 → 58.5 m MAE on the 30 it bounds, Chicago 77.8 → 45.8 m on 87. A
+  constant 11 m still beats both (9.6 m and 24.9 m on the same buildings), which supports
+  withholding Street View heights on untagged buildings (T28) more than C2 does.
 
 ### Findings kept from the earlier revised steps
 
