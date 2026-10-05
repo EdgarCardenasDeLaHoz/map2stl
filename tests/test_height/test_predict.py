@@ -308,16 +308,58 @@ class TestPredictUNet:
 # Missing-dependency error messages
 # ──────────────────────────────────────────────────────────────────────────────
 
+class TestDa2PerDevice:
+    """T24: the loaded model is keyed by device (and variant), not one singleton."""
+
+    def _fake_transformers(self, calls):
+        import types
+
+        def pipeline(task, model, device, cache_dir):
+            calls.append((model, device))
+            return object()
+        return types.SimpleNamespace(pipeline=pipeline)
+
+    def test_each_device_gets_its_own_model(self, monkeypatch):
+        import sys
+
+        import city2stl.height.predict as _pm
+
+        calls = []
+        monkeypatch.delenv("SKYLINE_CV_DA2_VARIANT", raising=False)
+        with patch.dict(_pm._da2_models, clear=True), \
+                patch.dict(sys.modules, {"transformers": self._fake_transformers(calls)}):
+            cpu = _pm._load_da2("cpu")
+            gpu = _pm._load_da2("cuda")
+            assert gpu is not cpu
+            assert _pm._load_da2("cpu") is cpu and _pm._load_da2("cuda") is gpu
+        assert [d for _, d in calls] == ["cpu", "cuda"]      # one load per device
+
+    def test_variant_is_part_of_the_key(self, monkeypatch):
+        import sys
+
+        import city2stl.height.predict as _pm
+
+        calls = []
+        with patch.dict(_pm._da2_models, clear=True), \
+                patch.dict(sys.modules, {"transformers": self._fake_transformers(calls)}):
+            monkeypatch.setenv("SKYLINE_CV_DA2_VARIANT", "Small")
+            small = _pm._load_da2("cpu")
+            monkeypatch.setenv("SKYLINE_CV_DA2_VARIANT", "Base")
+            assert _pm._load_da2("cpu") is not small
+            monkeypatch.setenv("SKYLINE_CV_DA2_VARIANT", "bogus")   # falls back to Small
+            assert _pm._load_da2("cpu") is small
+        assert [m.rsplit("-", 2)[-2] for m, _ in calls] == ["Small", "Base"]
+
+
 class TestMissingDependencies:
     def test_load_da2_raises_helpful_error_without_transformers(self):
         import sys
 
         import city2stl.height.predict as _pm
 
-        # Remove _da2_model singleton so the function tries to import
-        _pm._da2_model = None
-
-        with patch.dict(sys.modules, {"transformers": None}):
+        # Empty the per-device cache so the function tries to import
+        with patch.dict(_pm._da2_models, clear=True), \
+                patch.dict(sys.modules, {"transformers": None}):
             with pytest.raises(ImportError, match="transformers"):
                 _pm._load_da2()
 

@@ -45,14 +45,28 @@ _DA2_CACHE_DIR = _MODELS_DIR / "depth_anything_v2"
 # Depth Anything V2 helpers
 # ------------------------------------------------------------------------------
 
-_da2_model = None  # module-level singleton after first load
+# Loaded pipelines keyed by (device, variant). One singleton served every later
+# device: a CPU call first left region runs on the CPU (T24).
+_da2_models: dict[tuple[str, str], object] = {}
+
+
+def _da2_variant() -> str:
+    """``SKYLINE_CV_DA2_VARIANT``: Small (default), Base or Large."""
+    import os as _os  # noqa: PLC0415
+    variant = _os.environ.get("SKYLINE_CV_DA2_VARIANT", "Small").strip()
+    return variant if variant in ("Small", "Base", "Large") else "Small"
 
 
 def _load_da2(device: str = "cpu"):
-    """Load Depth Anything V2 Small.  Cached after first call."""
-    global _da2_model
-    if _da2_model is not None:
-        return _da2_model
+    """Load Depth Anything V2 on *device*; cached per (device, variant)."""
+    # F-SKY24 depth experiment: the variant env var selects Small / Base /
+    # Large. Default Small — empirical test on Miami showed Base produces
+    # visually identical output at ~3x CPU cost (Method 2 finding). Larger
+    # variants kept as opt-in for users with GPU budget who want to retest.
+    variant = _da2_variant()
+    key = (str(device), variant)
+    if key in _da2_models:
+        return _da2_models[key]
 
     try:
         from transformers import pipeline as hf_pipeline
@@ -62,26 +76,17 @@ def _load_da2(device: str = "cpu"):
             "Install with: pip install transformers"
         ) from exc
 
-    # F-SKY24 depth experiment: env var ``SKYLINE_CV_DA2_VARIANT``
-    # selects Small / Base / Large. Default Small — empirical test on
-    # Miami showed Base produces visually identical output at ~3x CPU
-    # cost (Method 2 finding). Larger variants kept as opt-in for users
-    # with GPU budget who want to retest the comparison.
-    import os as _os  # noqa: PLC0415
-    variant = _os.environ.get(
-        "SKYLINE_CV_DA2_VARIANT", "Small").strip()
-    if variant not in ("Small", "Base", "Large"):
-        variant = "Small"
     model_id = f"depth-anything/Depth-Anything-V2-{variant}-hf"
-    logger.info("Loading Depth Anything V2 %s from HuggingFace...", variant)
-    _da2_model = hf_pipeline(
+    logger.info("Loading Depth Anything V2 %s on %s...", variant, device)
+    pipe = hf_pipeline(
         task="depth-estimation",
         model=model_id,
         device=device,
         cache_dir=str(_DA2_CACHE_DIR),
     )
-    logger.info("Depth Anything V2 %s loaded", variant)
-    return _da2_model
+    _da2_models[key] = pipe
+    logger.info("Depth Anything V2 %s loaded on %s", variant, device)
+    return pipe
 
 
 def _depth_anything_inference(
