@@ -125,6 +125,9 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
     sv = bm.street_view_buildings(buildings)
     if sv is not None:  # T28 withheld untagged Street View heights: score them too
         result["street_view_unwithheld"] = bm.score_buildings(sv, truth)
+    else:  # a pre-T28 report: score what T28 would publish
+        result["withheld_simulated"] = bm.score_buildings(bm.withheld_buildings(buildings),
+                                                          truth)
     try:  # the report's benchmark page; a plotting failure must not lose the score
         from city2stl.skyline.benchmark_report import write_benchmark_page
         write_benchmark_page(heights.parent, result, buildings, truth)

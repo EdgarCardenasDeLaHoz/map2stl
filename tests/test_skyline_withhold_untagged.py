@@ -63,3 +63,12 @@ def test_benchmark_scores_both(monkeypatch):
     assert published["overall"]["mae_m"] < unwithheld["overall"]["mae_m"]
     assert rows[2]["effective_height_m"] == UNTAGGED_FALLBACK_M             # input unchanged
     assert bm.street_view_buildings([{"effective_height_m": 1.0}]) is None
+
+
+def test_old_report_simulated_withholding():
+    old = [{"key": "a", "effective_height_m": 95.0, "height_source": "osm_tag"},
+           {"key": "b", "effective_height_m": 120.0, "height_source": "default"},
+           {"key": "c", "effective_height_m": 60.0, "height_source": None}]
+    w = bm.withheld_buildings(old)
+    assert [b["effective_height_m"] for b in w] == [95.0, UNTAGGED_FALLBACK_M, UNTAGGED_FALLBACK_M]
+    assert w[1]["street_view_m"] == 120.0 and old[1]["effective_height_m"] == 120.0

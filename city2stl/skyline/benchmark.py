@@ -432,6 +432,23 @@ def street_view_buildings(buildings: list[dict]) -> list[dict] | None:
             for b in buildings]
 
 
+def withheld_buildings(buildings: list[dict]) -> list[dict]:
+    """A pre-T28 report's buildings as T28 would publish them: untagged ones (height
+    source not ``osm_tag`` / ``osm_levels``) get ``UNTAGGED_FALLBACK_M``, the Street View
+    value moved to ``street_view_m``. Lets ``--score-only`` show the effect on old runs."""
+    from ._core.height import TAGGED_SOURCES, UNTAGGED_FALLBACK_M
+
+    out = []
+    for b in buildings:
+        if b.get("height_source") in TAGGED_SOURCES or "street_view_m" in b:
+            out.append(b)
+        else:
+            out.append({**b, "street_view_m": b.get("effective_height_m"),
+                        "effective_height_m": UNTAGGED_FALLBACK_M,
+                        "effective_height_source": "withheld:default"})
+    return out
+
+
 def score_buildings(buildings: list[dict], truth: dict[str, dict],
                     pred_field: str = "effective_height_m") -> dict:
     """Score a run's buildings against ``truth`` (confirmed buildings only).
