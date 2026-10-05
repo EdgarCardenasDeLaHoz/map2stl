@@ -107,6 +107,23 @@ def _load_region_bbox(
         f"sites/{region_name.lower()}.json exists."
     )
 
+_OPTIONAL_LAYERS = ("green", "waterways")
+# Set on an optional layer that was fetched and is really empty, so it is not
+# fetched again; an unmarked empty layer is a failed fetch (T23).
+_FETCHED_EMPTY = "fetched_empty"
+
+
+def _empty_layer() -> dict:
+    return {"type": "FeatureCollection", "features": []}
+
+
+def _layer_present(fc) -> bool:
+    """True when a cached optional layer needs no new fetch."""
+    if not isinstance(fc, dict):
+        return False
+    return bool(fc.get("features")) or bool(fc.get(_FETCHED_EMPTY))
+
+
 def _load_osm_for_region(bbox: RegionBBox) -> tuple[dict, str]:
     key_params = [
         (0.5, 5.0),
@@ -118,31 +135,42 @@ def _load_osm_for_region(bbox: RegionBBox) -> tuple[dict, str]:
         # Optional layers are fetched on their own and never fail the run:
         # - green (F-SKY18 vegetation landmarks) was added after the OSM cache
         #   format, so cached data may lack it;
-        # - waterways only add river/canal landmarks, and a mirror that times
-        #   out on them cost Benidorm and Madrid three runs (2026-10-04) while
-        #   buildings came back fine.
+        # - waterways only add river/canal landmarks and the coastline heading
+        #   recovery, and a mirror that times out on them cost Benidorm and
+        #   Madrid three runs (2026-10-04) while buildings came back fine.
         # With ``key`` the merged data is written back to that cache entry.
-        if layer in data:
+        if _layer_present(data.get(layer)):
             return
         try:
             extra = fetch_osm_data(
                 bbox.north, bbox.south, bbox.east, bbox.west, [layer])
-            data[layer] = extra.get(layer, {"type": "FeatureCollection", "features": []})
-            if key is not None:
-                write_osm_cache(key, data)
+            fc = extra.get(layer) or _empty_layer()
+            if not fc.get("features") and not fc.get("error"):
+                # A fetch that worked and found nothing: don't ask again.
+                fc[_FETCHED_EMPTY] = True
         except Exception as _e:
             print(f"[osm_cache] {layer} supplemental fetch failed (non-fatal): {_e}")
-            data[layer] = {"type": "FeatureCollection", "features": []}
+            # Unmarked, so the next run fetches it again (T23: a failed
+            # waterways fetch cached as empty left Cartagena without a coastline).
+            data[layer] = _empty_layer()
+            return
+        data[layer] = fc
+        if key is not None:
+            try:
+                write_osm_cache(key, data)
+            except Exception as _e:
+                print(f"[osm_cache] write failed (non-fatal): {_e}")
 
-    def _ensure_green(data: dict, key: str) -> None:
-        _ensure_layer(data, "green", key)
+    def _ensure_optional(data: dict, key: str | None) -> None:
+        for layer in _OPTIONAL_LAYERS:
+            _ensure_layer(data, layer, key)
 
     for tol, min_area in key_params:
         key = osm_cache_key(bbox.north, bbox.south,
                             bbox.east, bbox.west, tol, min_area)
         cached = read_osm_cache(key)
         if cached and (cached.get("buildings", {}).get("features") or []):
-            _ensure_green(cached, key)
+            _ensure_optional(cached, key)
             return cached, f"cache:{key[:8]} tol={tol} area={min_area}"
 
     try:
@@ -172,7 +200,7 @@ def _load_osm_for_region(bbox: RegionBBox) -> tuple[dict, str]:
             if stale and (stale.get("buildings", {}).get("features") or []):
                 print(f"[osm_cache] live fetch failed ({fetch_exc}); "
                       f"falling back to stale cache {key[:8]}")
-                _ensure_green(stale, key)
+                _ensure_optional(stale, None)
                 return stale, f"stale_cache:{key[:8]} tol={tol} area={min_area}"
         raise
     # A fetch that came back with no buildings is not a region worth caching —
@@ -187,14 +215,14 @@ def _load_osm_for_region(bbox: RegionBBox) -> tuple[dict, str]:
             if stale and (stale.get("buildings", {}).get("features") or []):
                 print(f"[osm_cache] fetch returned 0 buildings; "
                       f"falling back to stale cache {key[:8]}")
-                _ensure_green(stale, key)
+                _ensure_optional(stale, None)
                 return stale, f"stale_cache:{key[:8]} tol={tol} area={min_area}"
         raise RuntimeError(
             "OSM fetch returned no buildings for "
             f"{bbox.name} and no cached copy exists: "
             + str(fetched.get("buildings", {}).get("error", "no error reported")))
 
-    _ensure_layer(fetched, "waterways")
+    _ensure_layer(fetched, "waterways")  # written with the buildings below
 
     # Persist under the (0.5, 5.0) key — matches the first key_params entry
     # the reader probes — so the next run hits the cache instead of re-querying

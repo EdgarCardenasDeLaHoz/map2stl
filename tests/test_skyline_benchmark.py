@@ -1,5 +1,6 @@
 """F-SKYBENCH: truth per footprint and the scorer, on synthetic grids (no network)."""
 
+import copy
 import math
 
 import numpy as np
@@ -421,3 +422,102 @@ def test_discover_rejects_unknown_cities(monkeypatch, tmp_path):
     d, _ = _discover(monkeypatch, tmp_path)
     with pytest.raises(SystemExit):
         d.main(["atlantis"])
+
+
+def _osm_region(monkeypatch, cache: dict, fetch):
+    """Run ``_load_osm_for_region`` on a dict cache; returns (data, source, writes)."""
+    from city2stl.skyline import region_data as rd
+    from city2stl.skyline.region_types import RegionBBox
+
+    writes = []
+    monkeypatch.setattr(rd, "fetch_osm_data", fetch)
+    monkeypatch.setattr(rd, "read_osm_cache",
+                        lambda key, allow_stale=False: cache.get(key))
+    monkeypatch.setattr(rd, "write_osm_cache",
+                        lambda key, data: writes.append((key, copy.deepcopy(data))))
+    bbox = RegionBBox("X", 1.0, 0.0, 1.0, 0.0)
+    key = rd.osm_cache_key(bbox.north, bbox.south, bbox.east, bbox.west, 0.5, 5.0)
+    data, source = rd._load_osm_for_region(bbox)
+    return data, source, writes, key
+
+
+def _fc(n=0):
+    return {"type": "FeatureCollection", "features": [{"id": i} for i in range(n)]}
+
+
+def test_cached_empty_waterways_is_fetched_again(monkeypatch):
+    """T23: a waterways layer cached empty by a failed fetch is not taken as 'no water'."""
+    from city2stl.skyline import region_data as rd
+
+    asked = []
+
+    def fetch(n, s, e, w, layers, **kw):
+        asked.append(list(layers))
+        return {layers[0]: _fc(3)}
+
+    key = rd.osm_cache_key(1.0, 0.0, 1.0, 0.0, 0.5, 5.0)
+    cache = {key: {"buildings": _fc(2), "green": _fc(1), "waterways": _fc(0)}}
+    data, source, writes, _ = _osm_region(monkeypatch, cache, fetch)
+    assert source.startswith("cache:")
+    assert asked == [["waterways"]]                     # green had features: kept
+    assert len(data["waterways"]["features"]) == 3
+    assert writes and len(writes[-1][1]["waterways"]["features"]) == 3  # written back
+
+
+def test_really_empty_layer_is_marked_and_not_fetched_again(monkeypatch):
+    from city2stl.skyline import region_data as rd
+
+    asked = []
+
+    def fetch(n, s, e, w, layers, **kw):
+        asked.append(list(layers))
+        return {layers[0]: _fc(0)}                      # Overpass answered: no water here
+
+    key = rd.osm_cache_key(1.0, 0.0, 1.0, 0.0, 0.5, 5.0)
+    cache = {key: {"buildings": _fc(2), "green": _fc(1)}}
+    _, _, writes, _ = _osm_region(monkeypatch, cache, fetch)
+    assert asked == [["waterways"]]
+    cache[key] = writes[-1][1]                          # next run reads the write-back
+    asked.clear()
+    _osm_region(monkeypatch, cache, fetch)
+    assert asked == []
+
+
+def test_failed_optional_fetch_stays_unmarked(monkeypatch):
+    """A failed fetch leaves an empty, unmarked layer, so the next run tries again."""
+    from city2stl.skyline import region_data as rd
+
+    def fetch(n, s, e, w, layers, **kw):
+        if layers == ["buildings"]:
+            return {"buildings": _fc(2)}
+        raise TimeoutError("ConnectTimeout")
+
+    data, source, writes, key = _osm_region(monkeypatch, {}, fetch)
+    assert source == "live_fetch"
+    assert data["waterways"] == {"type": "FeatureCollection", "features": []}
+    assert not rd._layer_present(writes[-1][1]["waterways"])
+
+
+def test_stale_fallback_does_not_write_back(monkeypatch):
+    """Writing a stale entry back would make it look fresh; the optional layer is filled in memory."""
+    from city2stl.skyline import region_data as rd
+
+    def fetch(n, s, e, w, layers, **kw):
+        if layers == ["buildings"]:
+            raise TimeoutError("mirror down")
+        return {layers[0]: _fc(1)}
+
+    key = rd.osm_cache_key(1.0, 0.0, 1.0, 0.0, 0.5, 5.0)
+    stale = {"buildings": _fc(2), "green": _fc(1), "waterways": _fc(0)}
+
+    def read(k, allow_stale=False):
+        return stale if allow_stale and k == key else None
+
+    monkeypatch.setattr(rd, "fetch_osm_data", fetch)
+    monkeypatch.setattr(rd, "read_osm_cache", read)
+    writes = []
+    monkeypatch.setattr(rd, "write_osm_cache", lambda k, d: writes.append(k))
+    from city2stl.skyline.region_types import RegionBBox
+    data, source = rd._load_osm_for_region(RegionBBox("X", 1.0, 0.0, 1.0, 0.0))
+    assert source.startswith("stale_cache:")
+    assert len(data["waterways"]["features"]) == 1 and writes == []
