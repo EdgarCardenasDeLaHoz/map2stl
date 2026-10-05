@@ -414,7 +414,7 @@ def fetch_sat(bbox_nsew, shape_hw: tuple[int, int]) -> np.ndarray:
     (already de-projected from Web Mercator to equirectangular) as a normal
     image: row 0 is the NORTH edge. The OSM and STL rasters use the opposite
     convention -- row 0 = south -- set by mesh_to_heightmap and matched by the
-    np.flipud in cities.py's _rasterize_rasterio. So the satellite has to be
+    np.flipud in osm_raster.py's _rasterize_buildings. So the satellite has to be
     flipped vertically before it shares a pixel frame with them; without the
     flip it is mirrored north-south against every other layer in the tool.
     Needs no API key or Earth Engine credentials.

@@ -22,8 +22,6 @@ const VIEW_CONTAINERS = {
     globe: 'globeContainer',
     dem: 'demContainer',
     model: 'modelContainer',
-    regions: 'regionsContainer',
-    compare: 'compareContainer',
 };
 
 /**
@@ -36,7 +34,7 @@ function _invalidateMapSize() {
 /**
  * Switch the main view to the specified tab.
  * Hides all containers then shows the selected one.
- * @param {'map'|'globe'|'dem'|'model'|'regions'|'compare'} view
+ * @param {'map'|'globe'|'dem'|'model'} view
  */
 /**
  * Picking a region and opening Extrude is the whole job (user, 2026-10-02; replaced the
@@ -111,10 +109,6 @@ window.switchView = function switchView(view) {
         // Auto-collapse sidebar so the 3D viewport gets full width
         if (sidebar) sidebar.style.display = 'none';
         _ensureDemForExtrude();
-    } else if (view === 'regions') {
-        if (containers.regions) window.populateRegionsTable?.();
-    } else if (view === 'compare') {
-        if (containers.compare) window.initCompareMode?.();
     }
 };
 
@@ -130,17 +124,14 @@ window.switchView = function switchView(view) {
 window._setSidebarViews = function _setSidebarViews(state) {
     const listView = document.getElementById('sidebarListView');
     const tableView = document.getElementById('sidebarTableView');
-    const paramsSection = document.getElementById('regionParamsSection');
     window.setRegionEditorOpen?.(false);
     if (state === 'expanded') {
         listView?.classList.add('hidden');
         tableView?.classList.remove('hidden');
-        paramsSection?.classList.add('hidden');
         window.renderSidebarTable?.();
     } else {
         listView?.classList.remove('hidden');
         tableView?.classList.add('hidden');
-        paramsSection?.classList.add('hidden');
     }
 };
 
@@ -294,38 +285,6 @@ window.deleteRegion = async function deleteRegion(index) {
 };
 
 // ---------------------------------------------------------------------------
-// toggleStatusPanel
-// ---------------------------------------------------------------------------
-
-/**
- * Toggle the small status/info panel on the right edge of the visualisation area.
- */
-window.toggleStatusPanel = function toggleStatusPanel() {
-    const panel = document.getElementById('statusPanel');
-    const btn = document.getElementById('statusToggleBtn');
-    if (!panel) return;
-    const collapsed = panel.classList.toggle('collapsed');
-    panel.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
-    if (btn) btn.textContent = collapsed ? '◀' : '▶';
-};
-
-// ---------------------------------------------------------------------------
-// loadSelectedRegion
-// ---------------------------------------------------------------------------
-
-/**
- * Apply the currently selected region's bbox to the map.
- */
-window.loadSelectedRegion = function loadSelectedRegion() {
-    const selectedRegion = window.appState.selectedRegion;
-    if (!selectedRegion) {
-        window.showToast?.('Please select a region first.', 'warning');
-        return;
-    }
-    window.showToast?.(`Region "${selectedRegion.name}" loaded!`, 'success');
-};
-
-// ---------------------------------------------------------------------------
 // loadSelectedRegionDem
 // ---------------------------------------------------------------------------
 
@@ -347,16 +306,6 @@ window.loadSelectedRegionDem = function loadSelectedRegionDem() {
 // saveCurrentRegion
 // ---------------------------------------------------------------------------
 
-/**
- * Save the current bounding box as a new named region via POST /api/regions.
- * @returns {Promise<void>}
- */
-/**
- * Show or hide the "Save drawn region" form under the region list. Shown when a
- * new box is drawn (focus on the name), hidden after a save or when an existing
- * region is picked, so the list has the sidebar's height the rest of the time.
- * @param {boolean} show
- */
 /**
  * Save the working box as a new region named `name` (in group `label`), then list and
  * select it. Called by the new-region card (modules/map/new-region.js::save).
@@ -412,23 +361,6 @@ window.saveCurrentRegion = async function saveCurrentRegion(opts = {}) {
 };
 
 // ---------------------------------------------------------------------------
-// submitBoundingBox
-// ---------------------------------------------------------------------------
-
-/**
- * Submit the current bounding box: switches to Edit view and triggers DEM load.
- */
-window.submitBoundingBox = function submitBoundingBox() {
-    const boundingBox = window.getBoundingBox?.();
-    if (!boundingBox) {
-        window.showToast?.('Please draw a bounding box first!', 'warning');
-        return;
-    }
-    window.switchView?.('dem');
-    window.loadDEM?.();
-};
-
-// ---------------------------------------------------------------------------
 // setupDemSubtabs
 // ---------------------------------------------------------------------------
 
@@ -474,10 +406,7 @@ window.setupDemSubtabs = function setupDemSubtabs() {
         document.getElementById('settingsPanelResizeHandle')
             ?.classList.toggle('hidden', collapsed);
 
-        const stripBtn = document.getElementById('settingsStripBtn');
-        if (stripBtn) stripBtn.classList.toggle('active', !collapsed);
         document.getElementById('layersContainer')?.classList.remove('hidden');
-        document.getElementById('citiesPanel')?.classList.add('hidden');
         document.getElementById('compareInlineContainer')?.classList.add('hidden');
         document.getElementById('combinedContainer')?.classList.add('hidden');
         document.getElementById('demControlsInner')?.classList.remove('hidden');
@@ -515,7 +444,6 @@ window.setupDemSubtabs = function setupDemSubtabs() {
             ?.setAttribute('aria-expanded', String(pinned));
     });
 
-    bindSettingsToggle('settingsStripBtn', () => toggleSettingsPanel());
     bindSettingsToggle('settingsExternalBtn', () => toggleSettingsPanel());
     bindSettingsToggle('settingsHideBtn', () => toggleSettingsPanel(true));
     bindSettingsToggle('settingsCollapsedTab', () => toggleSettingsPanel(false));

@@ -11,6 +11,7 @@ import logging
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from app.server.core.validation import model_to_dict
 from app.server.schemas import ColormapInfo, DatasetInfo, ProjectionInfo
 
 logger = logging.getLogger(__name__)
@@ -101,23 +102,16 @@ def _default_region_settings() -> dict:
     }
 
 
-def _model_to_dict(model) -> dict:
-    """Serialize Pydantic model instances for both v1 and v2."""
-    if hasattr(model, "model_dump"):
-        return model.model_dump()
-    return model.dict()
-
-
 def _default_projections() -> list[dict]:
     return [
-        _model_to_dict(
+        model_to_dict(
             ProjectionInfo(
                 id="none",
                 name="None",
                 description="No projection applied",
             )
         ),
-        _model_to_dict(
+        model_to_dict(
             ProjectionInfo(
                 id="cosine",
                 name="Cosine",
@@ -134,7 +128,7 @@ def _load_projections() -> list[dict]:
 
         info = get_projection_info()
         return [
-            _model_to_dict(
+            model_to_dict(
                 ProjectionInfo(
                     id=projection_id,
                     name=projection_meta.get("name", projection_id),
@@ -166,7 +160,7 @@ def _list_colormaps() -> list[dict]:
         ColormapInfo(
             id="RdBu",     description="Diverging red-blue for anomaly maps"),
     ]
-    return [_model_to_dict(c) for c in colormaps]
+    return [model_to_dict(c) for c in colormaps]
 
 
 def _list_datasets() -> list[dict]:
@@ -184,7 +178,7 @@ def _list_datasets() -> list[dict]:
         DatasetInfo(id="jrc",       name="JRC Global Surface Water",   description="Water occurrence 1984–2021",
                     source="JRC/GSW1_4/GlobalSurfaceWater",    requires_auth=True),
     ]
-    return [_model_to_dict(d) for d in datasets]
+    return [model_to_dict(d) for d in datasets]
 
 
 # ---------------------------------------------------------------------------

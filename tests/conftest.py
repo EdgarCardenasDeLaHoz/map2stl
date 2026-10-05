@@ -109,13 +109,15 @@ def _proxy_addresses() -> set[tuple[str, int]]:
 
 @pytest.fixture(autouse=True)
 def _block_network(request):
-    """No outbound connections unless the test is marked ``integration``.
+    """No outbound connections unless the test is marked ``integration`` or
+    ``requires_network`` (those are skipped offline, see ``pytest_collection_modifyitems``).
 
     The default run must not depend on the internet: two skyline report tests
     used to fetch 192 live ESRI tiles (~50 s; audit 2026-10-05). Loopback
     stays allowed (live-server tests), except a proxy listening there.
     """
-    if request.node.get_closest_marker("integration"):
+    if (request.node.get_closest_marker("integration")
+            or request.node.get_closest_marker("requires_network")):
         yield
         return
     import socket
@@ -133,7 +135,7 @@ def _block_network(request):
             if not local or (host, port) in proxies:
                 raise NetworkBlocked(
                     f"network access to {host}:{port} in {request.node.nodeid}; "
-                    "stub it, or mark the test @pytest.mark.integration")
+                    "stub it, or mark the test @pytest.mark.requires_network")
 
     def connect(sock, address):
         _check(sock, address)

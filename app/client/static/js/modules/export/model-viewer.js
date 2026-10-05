@@ -24,7 +24,6 @@
  *
  * State exposed on window.appState:
  *   window.appState.terrainMesh  — current terrain mesh (or null)
- *   window.appState.viewerScene  — the THREE.Scene
  *   window.appState.modelPreviewState — 'idle' | 'building' | 'ready' | 'error'
  *
  * External dependencies:
@@ -156,8 +155,6 @@ function initModelViewer() {
         needsRender = true;
     };
     window.addEventListener('resize', _resizeHandler);
-
-    window.appState.viewerScene = modelScene;
 
     (function animate() {
         requestAnimationFrame(animate);
@@ -592,7 +589,6 @@ async function previewModelIn3D() {
     const statusEl = document.getElementById('modelStatus');
     if (statusEl) statusEl.textContent = '⏳ Building mesh…';
     window.appState.modelPreviewState = 'building';
-    document.getElementById('modelViewerContainer')?.classList.add('mesh-building');
 
     if (!modelRenderer) initModelViewer();
 
@@ -657,10 +653,6 @@ async function previewModelIn3D() {
         window.appState._updateWorkflowStepper?.();
         if (statusEl) statusEl.textContent = '❌ ' + e.message;
         window.showToast('Preview failed: ' + e.message, 'error');
-    } finally {
-        if (seq === _previewSeq) {
-            document.getElementById('modelViewerContainer')?.classList.remove('mesh-building');
-        }
     }
 }
 

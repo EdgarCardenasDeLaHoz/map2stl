@@ -17,7 +17,6 @@
  *   window.getGlobeScene()
  *   window.BBOX_COLORS
  *   window.getSidebarState()        / window.setSidebarState(s)
- *   window.updateRegionParamsTable(region)
  *   window.clearCityOverlay?.()
  *   window.haversineDiagKm(n, s, e, w)
  *   window.loadDEM?.()
@@ -164,11 +163,10 @@ function createGlobeMarker(lat, lng, color = 0xff0000) {
  *     Falls back to `selectedRegion.parameters` if no saved settings exist.
  *  5. Without saved settings: raises `#paramDim` to the AUTO_SCALE breakpoint for the region's
  *     size (never lowers it) and sets every layer resolution to it.
- *  6. Calls `window.updateRegionParamsTable` if the sidebar is expanded.
- *  7. Calls `map.fitBounds` (wrapped in try/catch — fails silently if map is hidden).
- *  8. If the Edit (DEM) view is visible: fires `loadDEM` → then `loadWaterMask`,
+ *  6. Calls `map.fitBounds` (wrapped in try/catch — fails silently if map is hidden).
+ *  7. If the Edit (DEM) view is visible: fires `loadDEM` → then `loadWaterMask`,
  *     `loadSatelliteImage`, and optionally `loadCityData` (only if diagKm ≤ 15) in parallel.
- *  9. Calls `window.appState._updateWorkflowStepper`.
+ *  8. Calls `window.appState._updateWorkflowStepper`.
  *
  * @param {number} index - Index into `coordinatesData` (from `window.getCoordinatesData()`)
  * @param {{skipEditReload?: boolean}} [opts]
@@ -272,11 +270,6 @@ async function selectCoordinate(index, opts = {}) {
                 if (el) el.value = dimEl.value;
             }
         }
-    }
-
-    // Update region params table if sidebar is expanded
-    if (document.getElementById('sidebar').classList.contains('expanded')) {
-        window.updateRegionParamsTable?.(selectedRegion);
     }
 
     // Fly to region on map (if map is visible)

@@ -3,10 +3,10 @@ Evaluate shadow-based building height estimation for multiple cities.
 
 Usage:
   cd map2stl
-  python -m tools.eval_shadow_heights                   # all cities, offline (synthetic)
-  python -m tools.eval_shadow_heights --live             # fetch real satellite imagery
-  python -m tools.eval_shadow_heights --cities Barcelona Cartagena
-  python -m tools.eval_shadow_heights --live --dim 200   # higher DEM grid resolution
+  python -m tools.eval.eval_shadow_heights                   # all cities, offline (synthetic)
+  python -m tools.eval.eval_shadow_heights --live             # fetch real satellite imagery
+  python -m tools.eval.eval_shadow_heights --cities Barcelona Cartagena
+  python -m tools.eval.eval_shadow_heights --live --dim 200   # higher DEM grid resolution
 
 Each city gets a small bbox centred on its urban core. The script:
   1. Creates a synthetic RGB image with known shadow geometry (offline mode)

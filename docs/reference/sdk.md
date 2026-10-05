@@ -16,14 +16,14 @@ How the notebooks, the Python session client and the backend routes connect.
   - Why: its size and name make it look like the core; tracing the pipeline through it is a dead end. See [architecture decision "TerrainSession is an SDK, not the pipeline"](../decisions/architecture.md#2026-08-26--terrainsession-is-an-sdk-not-the-pipeline).
 - **Exceptions that run in-process** (lazy imports, no server round-trip):
   - Building heights: `fetch_building_heights` uses `city2stl.height` providers directly (see [height-providers.md](height-providers.md))
-  - Height enrichment / roofs / ML: `enrich_buildings_with_heights`, `classify_roof_shapes`, `load_roof_model`, `predict_heights`, `train_height_model`
+  - Height enrichment / roofs / ML: `enrich_buildings_with_heights`, `classify_roof_shapes`, `load_roof_model`
   - STL import + infill: `load_stl` → `city2stl/height/stl_import.py::stl_to_heightmap`; `infill_heights` → `city2stl/height/infill.py::infill_idw` / `infill_nearest`
 
 ## Progress output goes through logging
 
 - Progress and problems are logged on the `app.session.terrain_session` logger (`logger.info` / `logger.warning`), not printed (2026-09-30).
   - Call `logging.basicConfig(level=logging.INFO, format="%(message)s")` once in a notebook or script to see them; the notebooks under `notebooks/` do.
-- Methods whose job is a report still `print` / `display`: `regions`, `settings_table`, `check_alignment`, `verify`.
+- Methods whose job is a report still `print` / `display`: `regions`, `settings_table`, `verify`.
 
 ## Mesh exports reach the two-stage pipeline
 
@@ -83,10 +83,9 @@ Cite as `app/session/terrain_session.py::TerrainSession.<method>`.
 
 **Process**
 - `merge_dem` → `/api/composite/dem-merge`
-- `merge_hydrology_with_dem` → `/api/composite/hydrology-merge`
 - `composite_city_raster` → `/api/composite/city-raster`
-- `rasterize_city` → `/api/cities/raster`; `check_city_cache` → `/api/cities/cached`
-- Local: `enrich_buildings_with_heights`, `classify_roof_shapes`, `load_roof_model`, `predict_heights`, `train_height_model`, `infill_heights`, `check_alignment`, `satellite_array`
+- `rasterize_city` → `/api/cities/raster` (posts the fetched GeoJSON); `check_city_cache` → `/api/cities/cached`
+- Local: `enrich_buildings_with_heights`, `classify_roof_shapes`, `load_roof_model`, `infill_heights`, `satellite_array`
 
 **Export**: `export_puzzle`, `export_city_model`, `verify`, `run_all` (see above)
 
@@ -101,13 +100,12 @@ Cite as `app/session/terrain_session.py::TerrainSession.<method>`.
 - Order (not enforced beyond those guards):
 
 ```
-start ─> select ─┬─> fetch_dem ─┬─> show_dem / check_alignment
-                 │              ├─> merge_hydrology_with_dem
+start ─> select ─┬─> fetch_dem ─┬─> show_dem
                  │              ├─> export_puzzle ─> verify
                  │              └─> export_city_model
                  ├─> merge_dem (sets self.dem itself)
                  ├─> fetch_water_mask / fetch_esa_landcover
-                 ├─> fetch_satellite ──> predict_heights
+                 ├─> fetch_satellite
                  └─> fetch_cities ─┬─> enrich_buildings_with_heights
                                    ├─> classify_roof_shapes
                                    └─> export_city_model
@@ -122,7 +120,8 @@ load_stl ─> preview_stl / infill_heights
 
 Background: [pipeline audit 2026-08-26](../history/audits/pipeline-audit-2026-08-26.md) ("Structural observations"). Rechecked 2026-09-28:
 - `select` swallows any error loading saved settings and silently falls back to defaults.
-- No callers in the repo (notebooks, tests, app): `check_alignment`, `merge_hydrology_with_dem`, `enrich_buildings_with_heights`.
+- No callers in the repo (notebooks, tests, app): `enrich_buildings_with_heights`.
+- Removed 2026-10-05 ([audit](../history/audits/AUDIT-2026-10-05.md) §1): `check_alignment`, `merge_hydrology_with_dem`, `predict_heights`, `train_height_model` (broken on current payloads). Fixed: `rasterize_city` (sent flags, not GeoJSON), `fetch_building_heights` (read `dem["values"]`, now `dem_values_b64`), `settings['city']['layers']` validation (accepts every `/api/cities` layer, `TerrainSession.CITY_LAYERS`).
 - `TerrainSession._kill_stale_server` kills whatever listens on the port, regardless of owner; every instance defaults to port 9090.
 - HTTP timeouts are hardcoded per call.
 - Fixed: `_VENV_PYTHON` points at `~/.venvs/map2stl` (2026-09-25); the old `export_obj` / `obj_split` call to a non-existent route is gone (replaced by `export_puzzle`).

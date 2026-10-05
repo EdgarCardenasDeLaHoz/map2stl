@@ -161,7 +161,7 @@ sequenceDiagram
     BE->>HDB: fetch_hydrorivers (download + simplify once per region)
     BE->>BE: rasterize_hydrorivers → depression grid
     BE-->>FE: {values, width, height}
-    FE->>FE: appState.hydrologySourceCanvas
+    FE->>FE: hydrology grid
     FE->>FE: combined with water → appState.waterHydrologyCanvas
 ```
 
@@ -304,7 +304,7 @@ city overlay re-render: immediately if scale changed > 15 %, else 300 ms after z
 | Buffer canvases (static) | `app/client/static/js/vue/components/views/DemContainer.vue` |
 | DEM rendering | `app/client/static/js/modules/dem/dem-main.js`, `app/client/static/js/modules/dem/dem-loader.js` |
 | Water mask / land cover | `app/client/static/js/modules/layers/water-mask.js` |
-| Hydrology + combined water | `app/client/static/js/modules/layers/hydrology-overlay.js`, `app/client/static/js/modules/layers/water-hydrology-combined.js` |
+| Hydrology + combined water | `app/client/static/js/modules/layers/water-hydrology-combined.js` |
 | Trails | `app/client/static/js/modules/layers/trails-overlay.js` |
 | City overlay / raster | `app/client/static/js/modules/layers/city-overlay.js`, `app/client/static/js/modules/layers/city-render.js` |
 | Composite DEM | `app/client/static/js/modules/layers/composite-dem.js` |

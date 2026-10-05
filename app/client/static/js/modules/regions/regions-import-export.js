@@ -147,7 +147,6 @@ async function importRegionsJsonFile(file) {
     }
 
     await window.loadCoordinates?.();
-    window.populateRegionsTable?.();
 
     if (imported > 0) {
         const message = failed > 0

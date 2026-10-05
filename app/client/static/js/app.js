@@ -18,8 +18,6 @@ if (!window.appState?.set) window.appState = {};   // fallback if state.js not l
 // Map & globe instances (set once during init by map-globe.js)
 window.appState.map = null;
 window.appState.globeScene = null;
-window.appState.globeCamera = null;
-window.appState.globeRenderer = null;
 window.appState.globe = null;
 
 // Map layers
@@ -41,7 +39,6 @@ window.appState.lastWaterMaskData = null;
 window.appState.satEsaLoaded = false;
 
 // Shared helpers (set later by modules)
-window.appState.showToast = null;
 window.appState.haversineDiagKm = null;
 
 // Land cover configuration — owned by water-mask.js; exposed on window.appState.
@@ -106,10 +103,8 @@ function clearLayerCache() {
     // Reset layer tracking
     window.appState.layerBboxes = { dem: null, water: null, landCover: null };
     window.appState.layerStatus = { dem: 'empty', water: 'empty', landCover: 'empty' };
-    window._clearCityRasterCache?.();
     window.appState.cityRasterSourceCanvas = null;
     window.appState.compositeDemSourceCanvas = null;
-    window.appState.compositeFeatures = null;
     window.appState.compositeCityRaster = null;
     window.appState.satImgSourceCanvas = null;
     window.appState._satImgRawCanvas = null;
@@ -117,15 +112,8 @@ function clearLayerCache() {
     window.appState.satEsaLoaded = false;
     window.appState.waterHydrologyCanvas = null;
 
-    // Hydrology can be in flight while the user switches regions; cancel it
-    // and clear the visible layer immediately so old river rasters cannot bleed
-    // into the new region while the fresh fetch is loading.
-    window.cancelHydroLoad?.();
-    window.clearHydrology?.();
-    window.appState.hydrologySourceCanvas = null;
-
-    // Trails are fetched the same way and need the same treatment: a slow
-    // Overpass query started for the old region must not paint over the new one.
+    // A slow trails (Overpass) query started for the old region must not paint
+    // over the new one.
     window.cancelTrailsLoad?.();
     window.clearTrails?.();
     window.appState.trailsSourceCanvas = null;
@@ -211,7 +199,7 @@ function isLayerCurrent(layerName) {
 window.getCurrentBboxObject = getCurrentBboxObject;
 
 // BBOX_COLORS and currentBboxColorIndex defined in modules/map-globe.js
-// and exposed as window.BBOX_COLORS / window.resetBboxColorIndex there.
+// and exposed as window.BBOX_COLORS there.
 
 // ============================================================
 // INITIALIZATION
@@ -245,7 +233,6 @@ document.addEventListener('DOMContentLoaded', async function () {
     window.setupDemSubtabs?.();
     window.setupWaterMaskListeners?.();
     window.setupGridToggle?.();
-    window.setupBboxKeyboardNav?.();
 
     // The sidebar starts in normal mode from SidebarPanel.vue's own onMounted.
     // Setting the classes and the toggle button's text here as well only fought
@@ -276,8 +263,6 @@ window.setDrawnItems = (d) => { window.appState.drawnItems = d; };
 window.getDrawnItems = () => window.appState.drawnItems;
 window.setGlobeScene = (s) => { window.appState.globeScene = s; };
 window.getGlobeScene = () => window.appState.globeScene;
-window.setGlobeCamera = (c) => { window.appState.globeCamera = c; };
-window.setGlobeRenderer = (r) => { window.appState.globeRenderer = r; };
 window.setGlobe = (g) => { window.appState.globe = g; };
 window.setSidebarState = (s) => { window.appState.sidebarState = s; };
 

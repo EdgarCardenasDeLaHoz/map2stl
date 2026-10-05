@@ -21,7 +21,6 @@
  *   window.appState.osmCityParams  (OSM tolerance / min area / detail the city data
  *                                   was loaded with; sent with the City Model build)
  *   window.appState.cityLandmarkOverrides  (City Model landmark_overrides, F-LANDMARK)
- *   showLoading(el, msg), hideLoading(el)   — file-top globals in app.js
  *   window.showToast(msg, type)                    — file-top global in app.js
  */
 

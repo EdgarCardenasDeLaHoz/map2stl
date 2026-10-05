@@ -1,5 +1,5 @@
 /**
- * main-vue.ts — Vue 3 + PrimeVue entry point.
+ * main-vue.ts — Vue 3 + Pinia entry point.
  *
  * Loaded BEFORE main.js in index.html (both are type="module" so both defer,
  * but script order within deferred modules is preserved by the browser).
@@ -10,10 +10,6 @@
  */
 import { createApp, markRaw, watch } from 'vue';
 import { createPinia } from 'pinia';
-import PrimeVue from 'primevue/config';
-import Aura from '@primevue/themes/aura';
-import ToastService from 'primevue/toastservice';
-import ConfirmationService from 'primevue/confirmationservice';
 
 import App from './App.vue';
 // Registered globally so the Export tab mounts it with one template line (F-LANDMARK 6).
@@ -26,17 +22,6 @@ const pinia = createPinia();
 const app = createApp(App);
 
 app.use(pinia);
-app.use(PrimeVue, {
-    theme: {
-        preset: Aura,
-        options: {
-            // Match the existing dark HTML element; our app is always dark.
-            darkModeSelector: 'html',
-        },
-    },
-});
-app.use(ToastService);
-app.use(ConfirmationService);
 app.component('ModelScorePanel', ModelScorePanel);
 
 app.mount('#vue-app');
@@ -52,12 +37,12 @@ app.mount('#vue-app');
 //   a) Snapshot the current window.appState (the hand-rolled Proxy from state.js)
 //   b) $patch those values into the Pinia store
 //   c) Replace window.appState with a new Proxy that reads/writes the store
-//   d) Preserve the .get/.set/.on/.off/.emit API surface
+//   d) Preserve the .get/.set/.on API surface
 //
 // After this point every window.appState.foo read/write goes to Pinia.
 
 const ALL_KEYS = [
-    'map', 'globeScene', 'globeCamera', 'globeRenderer', 'globe',
+    'map', 'globeScene', 'globe',
     'drawnItems', 'preloadedLayer', 'editMarkersLayer', 'boundingBox',
     'selectedRegion', 'coordinatesData',
     'lastDemData', 'currentDemBbox', 'lastWaterMaskData',
@@ -66,31 +51,27 @@ const ALL_KEYS = [
     'waterOpacity', 'curvePoints', 'activeCurvePreset',
     'originalDemValues', 'curveDataVmin', 'curveDataVmax',
     'osmCityData', 'cityRasterSourceCanvas', 'compositeDemSourceCanvas',
-    'compositeFeatures', 'compositeCityRaster',
+    'compositeCityRaster',
     'satImgSourceCanvas', '_satImgRawCanvas', '_satImgBbox',
-    'generatedModelData', 'terrainMesh', 'viewerScene',
-    'regionThumbnails',
-    '_setDemEmptyState', '_updateWorkflowStepper', '_applyCurveSettings',
-    'showToast', 'haversineDiagKm',
+    'generatedModelData', 'terrainMesh',
+    '_updateWorkflowStepper', '_applyCurveSettings',
+    'haversineDiagKm',
 ] as const;
 
 // Canvas / function keys that must not be made reactive by Pinia
 const RAW_KEYS = new Set([
-    'map', 'globeScene', 'globeCamera', 'globeRenderer', 'globe',
+    'map', 'globeScene', 'globe',
     'drawnItems', 'preloadedLayer', 'editMarkersLayer', 'boundingBox',
     'cityRasterSourceCanvas', 'compositeDemSourceCanvas',
     'satImgSourceCanvas', '_satImgRawCanvas',
-    'terrainMesh', 'viewerScene',
+    'terrainMesh',
     // Tens of thousands of features: deep reactivity put a Vue proxy on every read of
     // the city overlay and the 3D quick view (~1 s per pass on Philadelphia). Replaced
     // whole, never changed in place, so watchers on the key still fire.
     'osmCityData',
-    '_setDemEmptyState', '_updateWorkflowStepper', '_applyCurveSettings',
-    'showToast', 'haversineDiagKm',
+    '_updateWorkflowStepper', '_applyCurveSettings',
+    'haversineDiagKm',
 ]);
-
-// Per-key watcher unsubscribe handles (for .on/.off compat)
-const _watchStops: Record<string, (() => void)[]> = {};
 
 function installAppStateBridge(): void {
     const store = useAppStore();
@@ -120,32 +101,17 @@ function installAppStateBridge(): void {
             (store as unknown as Record<string, unknown>)[key] = val;
         },
         on(key: string, fn: (val: unknown) => void): void {
-            const stop = watch(
+            watch(
                 () => (store as unknown as Record<string, unknown>)[key],
                 fn,
                 { immediate: false },
             );
-            if (!_watchStops[key]) _watchStops[key] = [];
-            _watchStops[key].push(stop);
-        },
-        off(key: string, fn: (val: unknown) => void): void {
-            // Vue's watch() returns a stop function; we can't match by fn,
-            // so stop ALL watchers for this key if fn is not tracked.
-            // For correctness, track fn→stop pairs via a WeakMap.
-            void fn; // handled via _fnStopMap in production; simple stop-all for now
-            (_watchStops[key] || []).forEach(stop => stop());
-            _watchStops[key] = [];
-        },
-        emit(key: string): void {
-            // Trigger watchers by momentarily storing the same value
-            const val = (store as unknown as Record<string, unknown>)[key];
-            (store as unknown as Record<string, unknown>)[key] = val;
         },
     };
 
     const bridgeProxy = new Proxy(_methods, {
         get(target, prop: string) {
-            // Expose .get/.set/.on/.off/.emit by name; read state for everything else
+            // Expose .get/.set/.on by name; read state for everything else
             return prop in target
                 ? target[prop as keyof typeof target]
                 : (store as unknown as Record<string, unknown>)[prop];
@@ -164,9 +130,6 @@ function installAppStateBridge(): void {
 
     // (d) Replace window.appState
     (window as unknown as Record<string, unknown>).appState = bridgeProxy;
-
-    // Signal that the Pinia bridge is active (state.js checks this)
-    (window as unknown as Record<string, unknown>).__vuePiniaActive = true;
 
     console.log('[vue] appState bridge installed — backed by Pinia store');
 }

@@ -123,7 +123,6 @@ class ExportContext:
     # pipeline before scaling/extrusion so the 3D model matches what the user
     # configured in the Composite tab.
     composite_layers: list | None = None
-    composite_dim: int | None = None
     bbox: dict | None = None
     # Set when a composite spec was sent but could not be built. The request
     # still succeeds on the plain DEM, so callers must surface this; a model
@@ -208,7 +207,6 @@ class ExportContext:
             name=data.get("name", "terrain"),
             mm_per_pixel=float(data.get("mm_per_pixel", 1.0)),
             composite_layers=composite_layers,
-            composite_dim=int(data["composite_dim"]) if data.get("composite_dim") else None,
             bbox=bbox,
             composite_error=composite_error,
             z_mode=str(data.get("z_mode", "auto")),

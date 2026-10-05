@@ -1,13 +1,13 @@
 ﻿/**
  * modules/water-mask.js — Water mask fetch, render, land cover editor.
  *
- * Loaded as a plain <script> before app.js.
+ * Imported by main.js.
  *
  * Public API (all on window):
  *   loadWaterMask()           — fetch water mask + ESA land cover
  *   loadEsaLandCover()       — fetch ESA land cover independently
  *   renderEsaLandCover(data)  — render ESA land cover canvas
- *   renderCombinedView()      — composite DEM + water overlay
+ *   renderCombinedView()      — DEM + water into #combinedImage (the inline compare's "Combined")
  *   setupWaterMaskListeners() — wire water mask tab events
  *   clearLastWaterMaskData()  — reset cached water mask data
  *
@@ -328,7 +328,7 @@ async function renderCombinedView() {
     const ctx = canvas.getContext('2d');
     const imgData = ctx.createImageData(width, height);
 
-    const waterScale = parseFloat(document.getElementById('waterScaleSlider')?.value || 0.05);
+    const waterScale = 0.05;   // no control sets it
     const opacityVal = window.getWaterOpacity?.() ?? 0.7;
     const wmDims = lastWaterMaskData?.water_mask_dimensions;
     const wmRaw = lastWaterMaskData ? window.decodeWaterMask(lastWaterMaskData) : null;
@@ -441,13 +441,6 @@ function setupLandCoverEditor() {
         if (esaData?.esa_values) renderEsaLandCover(esaData);
         window.showToast('Land cover colors reset to defaults', 'info');
     });
-
-    // In merged mode, water resolution changes should be applied by the combined
-    // loader button, not by legacy standalone water-mask auto-fetch.
-    const hasCombinedLoader = !!document.getElementById('loadWaterHydrologyBtn');
-    if (!hasCombinedLoader) {
-        document.getElementById('waterResolution')?.addEventListener('change', () => loadWaterMask());
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -456,29 +449,6 @@ function setupLandCoverEditor() {
 
 function setupWaterMaskListeners() {
     setupLandCoverEditor();
-
-    // applyWaterSubtract / previewWaterSubtract removed (unused feature)
-
-    const waterScaleSlider = document.getElementById('waterScaleSlider');
-    if (waterScaleSlider) {
-        waterScaleSlider.addEventListener('input', () => {
-            document.getElementById('waterScaleValue').textContent = waterScaleSlider.value;
-        });
-    }
-
-    const waterOpacityEl = document.getElementById('waterOpacity');
-    if (waterOpacityEl) {
-        waterOpacityEl.addEventListener('input', () => {
-            document.getElementById('waterOpacityValue').textContent = waterOpacityEl.value;
-        });
-    }
-
-    const waterThreshold = document.getElementById('waterThreshold');
-    if (waterThreshold) {
-        waterThreshold.addEventListener('input', () => {
-            document.getElementById('waterThresholdValue').textContent = waterThreshold.value;
-        });
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

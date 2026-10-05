@@ -77,20 +77,18 @@ the rest below.
   - Two city-raster routes (`app/server/routers/composite.py` and `app/server/routers/cities.py`).
   - Session:
     - `terrain_session.py` is 3.1k lines.
-    - `check_alignment`, `merge_hydrology_with_dem` and `enrich_buildings_with_heights` have
-      no callers.
+    - `enrich_buildings_with_heights` has no callers.
     - `_kill_stale_server` kills any owner of port 9090.
   - Dead code:
     - `geo2stl/write.py::savefile` (row-flipped, notebook-only).
     - `create_dem_model` / `process_region` are notebook-only.
-  - `ExportContext.composite_layers` / `composite_dim` are stored but never read.
   - Presets:
     - `satImgResolution` is not re-applied.
     - `hydrology.scale_m` is not collected.
     - `wat.dim ?? wat.sat_scale` lets `dim` override the legacy `sat_scale`.
   - The `rotation` setting has no consumer.
-- **PA-F Frontend**: two client stacks (`main.js` + `vue/`); three.js r128 and Plotly load from
-  CDNs (`app/client/templates/index.html`). See F-FE1.
+- **PA-F Frontend**: two client stacks (`main.js` + `vue/`); three.js r128 loads from a
+  CDN (`app/client/templates/index.html`). See F-FE1.
 
 ## Active data limitations
 

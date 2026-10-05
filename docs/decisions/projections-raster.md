@@ -36,7 +36,7 @@ Raster orientation, map-projection order and area measurement. Related: [archite
 ### 2026-08-06 — The satellite-flip fix script is a one-shot, not a tool
 - **Decision:** `map2stl/tools/align_tool/_fix_sat_flip.py` flips already-exported sat.png files in place and rebuilds align_data.js. It must never run after a full re-export and should be deleted once that lands.
 - **Why:** it is destructive by repetition — a second run undoes the fix and reintroduces the bug.
-- **Status 2026-09-28:** the file still exists.
+- **Status 2026-10-05:** deleted with the one-off tools (AUDIT-2026-10-05 §8).
 - **Supersedes / superseded by:** —
 - **Source:** decisions.md 2026-08-06 entry.
 

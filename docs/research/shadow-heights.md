@@ -165,7 +165,7 @@ second half only; the first needs the buildings solved jointly rather than one a
 
 `city2stl/height/providers/shadow_height.py` is deprecated and should stay that
 way, but it was deprecated on impression rather than measurement — its eval script
-(`tools/ml/eval/eval_shadow_heights.py`) reports component counts with no error metric and no
+(`tools/eval/eval_shadow_heights.py`) reports component counts with no error metric and no
 ground truth. Five of its defects independently prevent the method from working: the sun elevation
 is guessed as June/10:00 for every image and latitude (x1.89 height bias at Miami); the azimuth is
 never used, length being the bounding-box long side; shadows are never associated with footprints;

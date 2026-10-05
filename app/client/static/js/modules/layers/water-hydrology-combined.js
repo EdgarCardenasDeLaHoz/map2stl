@@ -21,10 +21,10 @@
  *   window.getBboxCoords(bb, region) — helper from app.js
  *   window.showToast(msg, type)     — from app.js
  *   window.decodeWaterMask(data)     — from water-mask.js
- *   window.decodeHydrologyValues(data) — from hydrology-overlay.js
+ *   window.decodeHydrologyValues(data) — from ui-helpers.js
  *   window.setLayerStatus(name, status) — from app.js
  *   window.updateStackedLayers()    — from stacked-layers.js
- *   (renderer logic mirrored from water-mask.js and hydrology-overlay.js)
+ *   (renderer logic mirrored from water-mask.js)
  */
 
 import {

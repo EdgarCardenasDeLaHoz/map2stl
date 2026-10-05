@@ -11,8 +11,6 @@
     <link rel="stylesheet" href="/static/css/app.css" />
     <!-- Vite-built CSS for Vue components (scoped styles). Path is stable via vite.config.js asset name. -->
     <link rel="stylesheet" href="/static/css/vue-main.css" />
-    <!-- PrimeVue icons (loaded from dist; no global CSS needed for Aura unstyled theme) -->
-    <link rel="stylesheet" href="/static/vendor/primeicons.css" />
 </head>
 
 <body>
@@ -47,9 +45,6 @@
     <!-- vue-main.js loads BEFORE main.js so Pinia store is ready when existing modules run -->
     <script type="module" src="/static/js/vue-main.js"></script>
     <script type="module" src="/static/js/main.js"></script>
-
-    <!-- Load third-party libs from CDN -->
-    <script src="https://cdn.plot.ly/plotly-2.29.1.min.js"></script>
 
     <!-- Dev error overlay: catches uncaught JS errors and shows them on-screen -->
     <div id="devErrorOverlay" style="

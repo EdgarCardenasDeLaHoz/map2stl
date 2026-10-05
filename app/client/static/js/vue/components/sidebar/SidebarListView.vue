@@ -3,7 +3,6 @@
        class="sidebar-list-view">
     <div class="sidebar-list-filters">
       <input type="text" id="coordSearch" class="search-input sidebar-search-input"
-             v-model="searchQuery"
              placeholder="Search regions...">
       <select id="coordContinentFilter" class="sidebar-continent-filter" aria-label="Filter regions by continent">
         <option value="all" selected>All Continents</option>
@@ -22,17 +21,6 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
-import { useAppStore } from '../../stores/app';
-
+// #coordSearch is wired by ui-helpers.js::setupCoordinateSearch.
 defineProps<{ visible: boolean }>();
-useAppStore();
-const searchQuery = ref('');
-
-// Sync search input to the existing coordSearch handler
-// (event-listeners-ui.js listens to #coordSearch input event)
-watch(searchQuery, (val) => {
-  const el = document.getElementById('coordSearch') as HTMLInputElement | null;
-  if (el && el.value !== val) el.value = val;
-});
 </script>

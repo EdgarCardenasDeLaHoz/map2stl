@@ -1,6 +1,6 @@
 /**
  * hydrology-print.js — one source of truth for the river settings, shared by
- * the hydrology preview (water-hydrology-combined.js, hydrology-overlay.js) and
+ * the hydrology preview (water-hydrology-combined.js) and
  * the Composite panel (composite-dem.js).
  *
  * The river dataset, minimum Strahler order and width multiplier live in

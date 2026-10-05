@@ -97,7 +97,7 @@ H5_SRTM_FILE: Path | None = (
 H5_SRTM_AVAILABLE: bool = bool(H5_SRTM_FILE and H5_SRTM_FILE.exists())
 
 # ---------------------------------------------------------------------------
-# Legacy EE cache management constants (kept for clear_caches_if_needed())
+# Earth Engine tile cache (cleared and reported by routers/cache.py)
 # ---------------------------------------------------------------------------
 
 CACHE_DIRS = [EE_CACHE_DIR]

@@ -24,6 +24,7 @@ from typing import Union
 import numpy as np
 import pandas as pd
 from numpy2stl.raster import burn_polygons
+from rasterio.transform import from_bounds
 
 from city2stl.heights import parse_length_m
 from geo2stl import cache as _geo_cache
@@ -208,21 +209,6 @@ HAS_OSMNX = importlib.util.find_spec("osmnx") is not None
 def _ox():
     import osmnx
     return osmnx
-
-try:
-    import geopandas as gpd
-    HAS_GEOPANDAS = True
-except ImportError:
-    gpd = None
-    HAS_GEOPANDAS = False
-
-try:
-    import rasterio
-    from rasterio.transform import from_bounds
-    HAS_RASTERIO = True
-except ImportError:
-    rasterio = None
-    HAS_RASTERIO = False
 
 
 # ---------------------------------------------------------------------------
@@ -694,20 +680,13 @@ def _resolve_building_height(
     return default_height
 
 
-def _rasterize_buildings(gdf, N, S, E, W, resolution: int) -> np.ndarray:
-    """Rasterize building polygons with their heights into a (rows, cols) array."""
-    if HAS_RASTERIO:
-        return _rasterize_rasterio(gdf, N, S, E, W, resolution)
-    return _rasterize_numpy(gdf, N, S, E, W, resolution)
-
-
 # The building raster is drawn at this multiple of the requested grid and then averaged
 # down, and a cell is called built when at least this fraction of it is covered.
 _RASTER_SUPERSAMPLE = 4
 _MIN_CELL_COVERAGE = 0.30
 
 
-def _rasterize_rasterio(gdf, N, S, E, W, resolution: int) -> np.ndarray:
+def _rasterize_buildings(gdf, N, S, E, W, resolution: int) -> np.ndarray:
     """Rasterize buildings by area coverage, so the streets between them survive.
 
     ``all_touched=True`` marks every cell a polygon so much as clips, which grows each
@@ -761,14 +740,6 @@ def _rasterize_rasterio(gdf, N, S, E, W, resolution: int) -> np.ndarray:
     return np.flipud(arr)
 
 
-def _rasterize_numpy(gdf, N, S, E, W, resolution: int) -> np.ndarray:
-    """Rasterio-free fallback: highest polygon per cell centre, row 0 = south."""
-    arr = burn_polygons(list(gdf.geometry), (resolution, resolution), bounds=(W, S, E, N),
-                        values=gdf["height_m"].astype(float).to_numpy(), mode="max",
-                        fill=np.nan)
-    return np.flipud(arr)
-
-
 def grid_cell_size_m(N, S, E, W, shape: tuple[int, int]) -> float:
     """Mean metres per pixel of an (N, S, E, W) grid of ``shape`` (rows, cols)."""
     import math
@@ -798,13 +769,3 @@ def _make_result(heightmap: np.ndarray, N, S, E, W, resolution: int) -> dict:
         "projection": "max",
         "cell_size_m": grid_cell_size_m(N, S, E, W, heightmap.shape),
     }
-
-
-# ---------------------------------------------------------------------------
-# Named city wrappers (hardcoded bboxes for reproducibility)
-# ---------------------------------------------------------------------------
-
-def get_philadelphia_heightmap(resolution: int = 512) -> dict:
-    """Philadelphia, PA — covers the full city extent."""
-    bbox = (40.060, 39.860, -74.950, -75.280)  # (N, S, E, W)
-    return get_osm_building_heightmap(bbox, resolution=resolution)
