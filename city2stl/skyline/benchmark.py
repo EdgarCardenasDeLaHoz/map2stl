@@ -40,6 +40,10 @@ ERODE_M = 1.0
 ROOF_PERCENTILE = 95.0
 #: Fewer valid cells than this and a source does not measure the building.
 MIN_CELLS = 4
+#: ...nor when under this fraction of the footprint's cells are valid: a survey that covers
+#: only the edge of a building (Miami's lidar stops at the coast) reads a wall or a
+#: neighbour, not the roof.
+MIN_FINITE_FRACTION = 0.5
 #: Two sources agree within max(AGREE_ABS_M, AGREE_REL × height).
 AGREE_ABS_M = 3.0
 AGREE_REL = 0.10
@@ -118,11 +122,14 @@ def _erode(poly, metres: float):
 
 def footprint_stat(ndsm: np.ndarray, transform, poly,
                    percentile: float = ROOF_PERCENTILE,
-                   min_cells: int = MIN_CELLS) -> tuple[float | None, int]:
+                   min_cells: int = MIN_CELLS,
+                   min_finite_fraction: float = MIN_FINITE_FRACTION
+                   ) -> tuple[float | None, int]:
     """``(p<percentile> height, valid cell count)`` of ``ndsm`` inside ``poly``.
 
     ``ndsm``: height above ground, row 0 = north, ``transform`` an Affine from
-    (col, row) to (lon, lat). Height is None when fewer than ``min_cells`` are valid.
+    (col, row) to (lon, lat). Height is None when fewer than ``min_cells`` are valid,
+    or when under ``min_finite_fraction`` of the cells inside the footprint are.
     """
     from rasterio.features import geometry_mask
     from rasterio.windows import from_bounds
@@ -142,8 +149,9 @@ def footprint_stat(ndsm: np.ndarray, transform, poly,
         inside = geometry_mask([poly], out_shape=sub.shape, transform=sub_t, invert=True,
                                all_touched=True)
     vals = sub[inside]
+    n_inside = vals.size
     vals = vals[np.isfinite(vals)]
-    if vals.size < min_cells:
+    if vals.size < min_cells or vals.size < min_finite_fraction * n_inside:
         return None, int(vals.size)
     return float(np.percentile(vals, percentile)), int(vals.size)
 

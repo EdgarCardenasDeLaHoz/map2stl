@@ -188,6 +188,7 @@ def main() -> int:
         # For --score-only these are this process's settings, not the scored reports'.
         "pinned": not args.keep_env, **_run_settings(env),
         "truth_rule": {"percentile": bm.ROOF_PERCENTILE, "erode_m": bm.ERODE_M,
+                       "min_cells": bm.MIN_CELLS, "min_finite_fraction": bm.MIN_FINITE_FRACTION,
                        "agree_abs_m": bm.AGREE_ABS_M, "agree_rel": bm.AGREE_REL},
         "results": results,
     }

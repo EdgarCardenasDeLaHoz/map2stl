@@ -50,6 +50,21 @@ def test_footprint_stat_too_few_cells():
     assert h is None and cells == 0
 
 
+def test_footprint_stat_needs_half_the_footprint_covered():
+    # Survey coverage ends inside the building: only the west strip has data (Miami's coast).
+    arr, t, _ = _grid()
+    _paint(arr, 50, 50, 30, 20, 42.0)
+    arr[:, 60:] = np.nan                        # east of x = 60 m: no survey
+    poly = bm._polygon(_ring(50, 50, 30, 20))
+    h, cells = bm.footprint_stat(arr, t, poly)
+    assert h is None and cells > bm.MIN_CELLS   # enough cells, too small a share
+    arr2, t2, _ = _grid()
+    _paint(arr2, 50, 50, 30, 20, 42.0)
+    arr2[:, 72:] = np.nan                       # ~70 % covered: accepted
+    h2, _ = bm.footprint_stat(arr2, t2, poly)
+    assert h2 == pytest.approx(42.0)
+
+
 def test_erode_keeps_tiny_footprints():
     poly = bm._polygon(_ring(0, 0, 1.5, 1.5))
     assert bm._erode(poly, 1.0).equals(poly)

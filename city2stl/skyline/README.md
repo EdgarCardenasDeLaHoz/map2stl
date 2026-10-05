@@ -248,7 +248,8 @@ Height accuracy is scored on surveyed truth, never on Cartagena (no open survey;
   the EPT octree, `city2stl/height/providers/lidar_3dep_ept_laspy.py`), Benidorm and Madrid (CNIG),
   La Défense (IGN LiDAR HD), Prague Pankrác (ČÚZK).
 - Truth per footprint (`benchmark.py::footprint_truth`): p95 of the nDSM inside the footprint shrunk
-  by 1 m, from the survey and from Google 3D Tiles. `confirmed` when they agree within
+  by 1 m, from the survey and from Google 3D Tiles; a source counts only where at least half the
+  footprint's cells have a value (`MIN_FINITE_FRACTION`). `confirmed` when they agree within
   max(3 m, 10 %); only confirmed buildings make the headline, `disputed` ones are counted.
 - Measured on the footprints a run scored (`heights.json` → `footprint_lonlat`), keyed by geometry,
   cached in `runs/benchmark/truth/<region>.json`. Only complete reads are cached (every source
