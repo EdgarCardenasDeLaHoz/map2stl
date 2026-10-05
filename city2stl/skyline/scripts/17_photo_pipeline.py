@@ -220,7 +220,7 @@ def _tower_key(towers, ti: int) -> str:
 
 def _remap(results: list[dict], towers) -> None:
     """Point saved readings at the current tower table by footprint key (readings without a key
-    keep their index and are checked by name in ``finish``); a tower gone from OSM is dropped."""
+    keep their index and are checked against their OSM height in ``finish``); a tower gone from OSM is dropped."""
     if not any("fp" in t for r in results for t in r.get("towers") or []):
         return
     index = {_tower_key(towers, i): i for i in range(len(towers.verts))}
