@@ -185,11 +185,12 @@ def render_photo_card(image_rgb: np.ndarray, prof, pose, h_cam: float, towers, r
         tilt, h_fit = ph.fit_tilt_height(used, np.array([m.osm_height_m for m in used]))
     else:
         tilt, h_fit = 0.0, h_cam
+    # draw at OVERLAY_WIDTH: a small cached photo (some are 500 px) is enlarged first so the
+    # lines and numbers stay sharp on the page; a large one is reduced
+    s = OVERLAY_WIDTH / image_rgb.shape[1]
+    image_rgb = cv2.resize(image_rgb, (OVERLAY_WIDTH, int(round(image_rgb.shape[0] * s))),
+                           interpolation=cv2.INTER_CUBIC if s > 1 else cv2.INTER_AREA)
     over = draw_photo_overlay(image_rgb, prof, pose, ordered, measures, tilt, h_fit)
-    s = min(1.0, OVERLAY_WIDTH / over.shape[1])
-    if s < 1.0:
-        over = cv2.resize(over, (int(over.shape[1] * s), int(over.shape[0] * s)),
-                          interpolation=cv2.INTER_AREA)
     cv2.imwrite(str(out_dir / f"{key}_osm.jpg"), cv2.cvtColor(over, cv2.COLOR_RGB2BGR),
                 [cv2.IMWRITE_JPEG_QUALITY, 88])
     draw_location_map(out_dir / f"{key}_map.png", towers, pose, ordered, bg)
