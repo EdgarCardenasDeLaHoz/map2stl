@@ -18,7 +18,7 @@ file owns which pipeline control, and the conventions a change must respect.
 
 | Half | Source | Served as | Owns |
 |---|---|---|---|
-| Vue 3 + Pinia + PrimeVue | `app/client/static/js/vue/` (TypeScript, `.vue`) | /static/js/vue-main.js, a Vite build into `dist/` | Nearly all markup; a growing set of reactive panels |
+| Vue 3 + Pinia | `app/client/static/js/vue/` (TypeScript, `.vue`) | /static/js/vue-main.js, a Vite build into `dist/` | Nearly all markup; a growing set of reactive panels |
 | Plain ES modules | `app/client/static/js/modules/**`, `app.js`, entry `main.js` | Raw files, no build step | Most behaviour: fetches, canvases, export, presets |
 
 - **Direction: one frontend, Vue.** Vanilla code moves behind components and stores one piece at a

@@ -1,5 +1,5 @@
 /**
- * main-vue.ts — Vue 3 + PrimeVue entry point.
+ * main-vue.ts — Vue 3 + Pinia entry point.
  *
  * Loaded BEFORE main.js in index.html (both are type="module" so both defer,
  * but script order within deferred modules is preserved by the browser).
@@ -10,10 +10,6 @@
  */
 import { createApp, markRaw, watch } from 'vue';
 import { createPinia } from 'pinia';
-import PrimeVue from 'primevue/config';
-import Aura from '@primevue/themes/aura';
-import ToastService from 'primevue/toastservice';
-import ConfirmationService from 'primevue/confirmationservice';
 
 import App from './App.vue';
 // Registered globally so the Export tab mounts it with one template line (F-LANDMARK 6).
@@ -26,17 +22,6 @@ const pinia = createPinia();
 const app = createApp(App);
 
 app.use(pinia);
-app.use(PrimeVue, {
-    theme: {
-        preset: Aura,
-        options: {
-            // Match the existing dark HTML element; our app is always dark.
-            darkModeSelector: 'html',
-        },
-    },
-});
-app.use(ToastService);
-app.use(ConfirmationService);
 app.component('ModelScorePanel', ModelScorePanel);
 
 app.mount('#vue-app');

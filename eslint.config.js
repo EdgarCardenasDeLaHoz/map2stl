@@ -9,7 +9,6 @@ import vueParser from 'vue-eslint-parser';
 const vendorGlobals = {
   L: 'readonly',
   THREE: 'readonly',
-  Plotly: 'readonly',
   JSZip: 'readonly',
   turf: 'readonly',
   Chart: 'readonly',

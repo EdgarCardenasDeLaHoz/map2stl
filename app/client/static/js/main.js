@@ -2,7 +2,7 @@
  * main.js — ES module entry point.
  *
  * Imports all application modules in dependency order.
- * Third-party libs (Leaflet, Three.js, Plotly) remain as plain <script> tags
+ * Third-party libs (Leaflet, Three.js) remain as plain <script> tags
  * loaded before this module in index.html.
  *
  * Because this is a type="module" script it always defers, so the DOM is

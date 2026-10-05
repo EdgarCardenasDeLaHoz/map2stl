@@ -78,8 +78,8 @@ the rest below.
     - `hydrology.scale_m` is not collected.
     - `wat.dim ?? wat.sat_scale` lets `dim` override the legacy `sat_scale`.
   - The `rotation` setting has no consumer.
-- **PA-F Frontend**: two client stacks (`main.js` + `vue/`); three.js r128 and Plotly load from
-  CDNs (`app/client/templates/index.html`). See F-FE1.
+- **PA-F Frontend**: two client stacks (`main.js` + `vue/`); three.js r128 loads from a
+  CDN (`app/client/templates/index.html`). See F-FE1.
 
 ## Active data limitations
 

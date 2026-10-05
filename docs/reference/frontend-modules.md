@@ -227,7 +227,7 @@ Not part of `main.js`; each owns its page.
 ## Notes
 
 - Vendor globals: `window.L` (`/static/vendor/leaflet.js`, `leaflet-draw.js`), `window.THREE`
-  (cdnjs r128) load before the module scripts; `window.Plotly` loads after them.
+  (cdnjs r128) load before the module scripts.
 - Colormap names in the UI must match the branches in
   `app/client/static/js/modules/dem/dem-loader.js::mapElevationToColor`.
 
