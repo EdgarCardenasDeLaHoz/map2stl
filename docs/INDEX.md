@@ -365,7 +365,7 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
 - Height benchmark on surveyed truth (F-SKYBENCH, eight cities, results in `skyline/docs/STATUS.md`):
   - Truth per footprint: `map2stl/city2stl/skyline/benchmark.py::footprint_truth`. Survey nDSM or Google 3D Tiles, cross-checked.
   - Scoring: `score_buildings` (with `relative_metrics`).
-  - Runner: `map2stl/city2stl/skyline/scripts/10_benchmark.py`.
+  - Runner: `map2stl/city2stl/skyline/scripts/10_benchmark.py` (flags pinned by `PINNED_FLAGS`, `_region_env`).
   - Page: `map2stl/city2stl/skyline/benchmark_report.py::write_benchmark_page`.
   - US lidar where Planetary Computer has none: `map2stl/city2stl/height/providers/lidar_3dep_ept_laspy.py::ndsm_for_bbox`.
 - Heights from Wikimedia Commons skyline photos (F-WEB2):

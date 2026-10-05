@@ -11,6 +11,11 @@ must not end the batch), into ``runs/benchmark/<stamp>/``. Truth comes from
 ``city2stl.skyline.benchmark`` (survey nDSM + 3D Tiles, cross-checked, cached per region).
 Writes ``summary.json`` beside the reports, a ``benchmark.html`` page into each scored report
 (``benchmark_report.write_benchmark_page``, linked from its index), and prints one table.
+
+Every flag that changes the heights is pinned to ``PINNED_FLAGS`` in each region's process (the
+values the 2026-10-04 baseline ran with), so a developer's shell cannot leak into a run;
+``--keep-env`` lets the shell's values through, for trying a flag. ``summary.json`` records the
+flags each region ran with and whether Street View signing was on (it changes the image size).
 """
 
 from __future__ import annotations
@@ -29,6 +34,42 @@ from city2stl.skyline import benchmark as bm
 ROOT = Path(__file__).resolve().parents[3]
 REPORTS = ROOT / "city2stl" / "skyline" / "runs" / "region_reports"
 
+#: The flags that change the heights, at the values the 2026-10-04 baseline ran with
+#: (production SegFormer b1 at 512 px, tag filter on). Report-only flags
+#: (SKYLINE_CV_HTML_*, _PANO_LAYERED, _F_SKY13_SAT_BG) and speed-only ones
+#: (SKYLINE_CV_SEGFORMER_DEVICE, _BATCH: bit-identical output) are left to the shell.
+PINNED_FLAGS = {
+    "SKYLINE_CV_SEGFORMER_SIZE": "b1",
+    "SKYLINE_CV_SEGFORMER_INPUT_SIZE": "512",
+    "SKYLINE_TAG_FILTER": "1",
+    "SKYLINE_SV_TALL_FRAME": "0",
+    "SKYLINE_CV_MULTIRES": "0",
+    "SKYLINE_CV_PHASE_C": "0",
+    "SKYLINE_CV_F_SKY1": "1",
+    "SKYLINE_CV_F_SKY5": "0",
+    "SKYLINE_CV_F_SKY11_1": "0",
+    "SKYLINE_CV_F_SKY12": "0",
+    "SKYLINE_CV_F_SKY13": "1",
+}
+
+
+def _region_env(keep_env: bool = False, base: dict | None = None) -> dict:
+    """Environment for one region's pipeline process: ``base`` (default ``os.environ``)
+    with ``PINNED_FLAGS`` on top unless ``keep_env``."""
+    env = {**(os.environ if base is None else base), "PYTHONIOENCODING": "utf-8"}
+    if not keep_env:
+        env.update(PINNED_FLAGS)
+    return env
+
+
+def _run_settings(env: dict) -> dict:
+    """What summary.json records about how the regions ran."""
+    return {
+        "env": {k: v for k, v in sorted(env.items()) if k.startswith("SKYLINE_")},
+        # Signed requests get 1280 px spin views instead of 640: a different input.
+        "signed_streetview": bool(env.get("GOOGLE_MAPS_SIGN_SECRET")),
+    }
+
 
 def _git_head() -> str:
     try:
@@ -38,7 +79,7 @@ def _git_head() -> str:
         return "unknown"
 
 
-def _run_region(region: str, out_dir: Path) -> Path | None:
+def _run_region(region: str, out_dir: Path, env: dict) -> Path | None:
     """Run the production pipeline for ``region``; return its heights.json, or None."""
     out_pdf = out_dir / f"{region}_skyline_report.pdf"
     log = out_dir / f"{region}.log"
@@ -47,7 +88,7 @@ def _run_region(region: str, out_dir: Path) -> Path | None:
     logging.info("[bench] running %s (log: %s)", region, log)
     with log.open("w", encoding="utf-8") as fh:
         rc = subprocess.run(cmd, cwd=ROOT, stdout=fh, stderr=subprocess.STDOUT,
-                            env={**os.environ, "PYTHONIOENCODING": "utf-8"}).returncode
+                            env=env).returncode
     heights = out_dir / f"{region}_skyline_report" / "heights.json"
     if rc != 0 or not heights.exists():
         logging.error("[bench] %s failed (exit %s); see %s", region, rc, log)
@@ -115,7 +156,10 @@ def main() -> int:
                     help="score this heights.json (repeatable; implies --score-only)")
     ap.add_argument("--no-tiles", action="store_true",
                     help="survey truth only (no 3D Tiles; nothing is 'confirmed')")
+    ap.add_argument("--keep-env", action="store_true",
+                    help="don't pin PINNED_FLAGS: run with the shell's SKYLINE_* values")
     args = ap.parse_args()
+    env = _region_env(args.keep_env)
 
     stamp = dt.datetime.now().strftime("%Y-%m-%d_%H%M")
     out_dir = bm.BENCHMARK_ROOT / stamp
@@ -126,7 +170,7 @@ def main() -> int:
     elif args.score_only:
         jobs = [(r, _newest_report(r)) for r in args.regions]
     else:
-        jobs = [(r, _run_region(r, out_dir)) for r in args.regions]
+        jobs = [(r, _run_region(r, out_dir, env)) for r in args.regions]
 
     results = []
     for region, heights in jobs:
@@ -137,7 +181,8 @@ def main() -> int:
 
     summary = {
         "stamp": stamp, "git": _git_head(),
-        "env": {k: v for k, v in sorted(os.environ.items()) if k.startswith("SKYLINE_")},
+        # For --score-only these are this process's settings, not the scored reports'.
+        "pinned": not args.keep_env, **_run_settings(env),
         "truth_rule": {"percentile": bm.ROOF_PERCENTILE, "erode_m": bm.ERODE_M,
                        "agree_abs_m": bm.AGREE_ABS_M, "agree_rel": bm.AGREE_REL},
         "results": results,

@@ -210,3 +210,46 @@ def test_per_view_relative_pools_views():
     blds.append({"key": "f", "views": [{"view_name": "v2", "height_m": 1.0}]})  # lone view: skipped
     r = bm.per_view_relative(blds, truth)
     assert r["views"] == 1 and r["pair_order"] == 1.0 and r["pairs"] == 10
+
+
+# ── 10_benchmark: pinned flags (F-SKYBENCH port, T3) ────────────────────────
+
+def _bench_script():
+    import importlib
+    return importlib.import_module("city2stl.skyline.scripts.10_benchmark")
+
+
+def test_region_env_pins_flags_over_the_shell():
+    s = _bench_script()
+    env = s._region_env(base={"SKYLINE_TAG_FILTER": "0", "SKYLINE_CV_SEGFORMER_SIZE": "b3",
+                              "PATH": "/bin"})
+    assert env["SKYLINE_TAG_FILTER"] == "1"                 # baseline value, not the shell's
+    assert env["SKYLINE_CV_SEGFORMER_SIZE"] == "b1"
+    assert env["SKYLINE_CV_SEGFORMER_INPUT_SIZE"] == "512"
+    assert env["PATH"] == "/bin" and env["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_keep_env_lets_shell_values_through():
+    s = _bench_script()
+    env = s._region_env(keep_env=True, base={"SKYLINE_TAG_FILTER": "0"})
+    assert env["SKYLINE_TAG_FILTER"] == "0"
+    assert "SKYLINE_CV_SEGFORMER_SIZE" not in env
+
+
+def test_pinned_flags_are_flags_the_pipeline_reads():
+    # A renamed or removed flag would silently stop being pinned.
+    from pathlib import Path
+
+    src = "".join(p.read_text(encoding="utf-8")
+                  for p in Path(bm.__file__).parent.rglob("*.py") if "scripts" not in p.parts)
+    for flag in _bench_script().PINNED_FLAGS:
+        assert f'"{flag}"' in src, flag
+
+
+def test_run_settings_record_flags_and_signing():
+    s = _bench_script()
+    rec = s._run_settings({**s._region_env(base={}), "GOOGLE_MAPS_SIGN_SECRET": "x"})
+    assert rec["signed_streetview"] is True
+    assert rec["env"]["SKYLINE_TAG_FILTER"] == "1"
+    assert "PYTHONIOENCODING" not in rec["env"] and "GOOGLE_MAPS_SIGN_SECRET" not in rec["env"]
+    assert s._run_settings(s._region_env(base={}))["signed_streetview"] is False

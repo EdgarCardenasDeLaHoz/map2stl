@@ -254,6 +254,9 @@ Height accuracy is scored on surveyed truth, never on Cartagena (no open survey;
   cached in `runs/benchmark/truth/<region>.json`.
 - Output: `runs/benchmark/<stamp>/summary.json` (MAE, median AE, bias, within 15/25 %, per height
   band, per view and seed count, and how far OSM tags sit from truth) and one printed table.
+- Same flags every run: each region's process gets `scripts/10_benchmark.py::PINNED_FLAGS` (the
+  baseline's b1/512, tag filter on, experimental flags off) over the shell's values; `--keep-env`
+  lets the shell through. `summary.json` records the flags and whether Street View signing was on.
 - Same cameras every run: auto-proposals are saved in `runs/auto_proposals/<region>.json`
   (`seed_selection.py::_persisted_proposals`); delete the file to propose afresh.
 
