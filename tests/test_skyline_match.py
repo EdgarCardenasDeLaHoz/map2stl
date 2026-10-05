@@ -219,7 +219,7 @@ def test_pipeline_untagged_rows_and_worker_step(monkeypatch):
     cx = 0.0
     hd = math.degrees(math.atan2(-cx, 400.0 - CAM_Y)) % 360
     prof = _photo(world, (cx, CAM_Y), hd, 50.0)
-    imp, spans = pl._implied_untagged(prof, ph.PhotoPose(*world.to_ll(cx, CAM_Y), hd, 50.0),
+    imp, spans, _caps = pl._implied_untagged(prof, ph.PhotoPose(*world.to_ll(cx, CAM_Y), hd, 50.0),
                                       5000.0, 2.0)
     assert float(imp["0"]) == pytest.approx(230.0, rel=0.02) and "0" in spans
 
@@ -238,13 +238,20 @@ def test_pipeline_untagged_rows_and_worker_step(monkeypatch):
         raise AssertionError("cached truth must not fetch")
 
     monkeypatch.setattr(pl.bm, "footprint_truth", no_fetch)
-    results = [{"kept": True, "untagged": {"0": 231.0, "1": 25.0}},
-               {"kept": True, "untagged": {"0": 229.0, "1": 80.0}},
-               {"kept": False, "untagged": {"1": 25.0}}]       # not kept: ignored
+    def cam(x):
+        lat, lon = anchors.to_ll(x, CAM_Y)
+        return {"lat": lat, "lon": lon}
+
+    # cameras 950 m apart: two viewpoints, ~28 deg of view directions at U
+    results = [{"kept": True, "camera": cam(-500.0), "untagged": {"0": 231.0, "1": 25.0}},
+               {"kept": True, "camera": cam(450.0), "untagged": {"0": 229.0, "1": 80.0}},
+               {"kept": False, "camera": cam(0.0), "untagged": {"1": 25.0}}]  # not kept
     rows, summary = pl._untagged_rows(SimpleNamespace(region="miami"), results, anchors, osm)
     assert [r["index"] for r in rows] == [0]
     assert rows[0]["photo_m"] == pytest.approx(230.0) and rows[0]["truth_m"] == 228.0
     assert summary["buildings"] == 1 and summary["confirmed"] == 1
+    assert rows[0]["n_viewpoints"] == 2 and rows[0]["view_spread_deg"] > 15
+    assert summary["rules"]["agreed"] == 1 and summary["rules"]["disagree"] == 1
 
     # --untagged-truth fetch: measured for the agreed footprints only
     asked = []
@@ -269,7 +276,6 @@ def test_untagged_tolerance_does_not_grow_with_height():
 
 
 def test_implied_heights_cap_and_distance():
-    from city2stl.skyline import photo_heights as ph
 
     world, anchors, table = _c2_scene()
     per = _c2_implied(world, anchors, table, (0,), max_height_m=200.0)
@@ -308,3 +314,77 @@ def test_agreed_building_occludes_coincidence_behind_it():
     assert set(ph.agreed_heights(per)) == {0, 1}                    # the coincidence
     est = ph.agreed_with_occlusion(per, spans)
     assert set(est) == {0} and est[0][0] == pytest.approx(151.0)
+
+
+def test_untagged_key_matches_the_report_rounding():
+    """The truth cache keys footprints by the report's 6-decimal ``footprint_lonlat``; a raw
+    7-decimal OSM ring must give the same candidate key (Miami matched 0 of 4,770 before)."""
+    from city2stl.skyline import benchmark as bm
+    from city2stl.skyline import photo_heights as ph
+
+    x0, y0, s_ = -80.1912345, 25.7712345, 3e-4
+    raw = [[x0, y0], [x0 + s_, y0], [x0 + s_, y0 + s_], [x0, y0 + s_], [x0, y0]]
+    feat = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [raw]},
+            "properties": {"height_source": "default"}}
+    report_ring = [[round(x, 6), round(y, 6)] for x, y in raw]
+    key = bm.footprint_key(report_ring)
+    assert ph.untagged_table([feat]).keys == (key,)
+    assert ph.untagged_table([feat], only_keys={key}).keys == (key,)
+    assert ph.untagged_table([feat]).rings[0] == raw          # the ring itself stays raw
+
+
+def test_viewpoints_and_view_spread():
+    from city2stl.skyline import photo_heights as ph
+
+    assert ph.viewpoints([(0, 0), (60, 0), (110, 0), (1000, 0)]) == [0, 0, 0, 1]  # chained
+    assert ph.view_spread_deg((0, 1000), [(0, 0), (0, 0)]) == 0.0
+    assert ph.view_spread_deg((0, 1000), [(-500, 0), (500, 0)]) == pytest.approx(53.13, abs=0.01)
+    # one spot, two files: agree on heights, rejected; two spots with 15+ deg: kept
+    st = {}
+    same = ph.agreed_heights([{0: 50.0}, {0: 51.0}], cams_xy=[(0, 0), (30, 0)],
+                             centroids={0: (0, 1000)}, stats=st)
+    assert same == {} and st["one_viewpoint"] == 1
+    narrow = ph.agreed_heights([{0: 50.0}, {0: 51.0}], cams_xy=[(0, 0), (200, 0)],
+                               centroids={0: (0, 1000)}, stats=st)
+    assert narrow == {} and st["narrow_spread"] == 1
+    wide = ph.agreed_heights([{0: 50.0}, {0: 51.0}], cams_xy=[(0, 0), (400, 0)],
+                             centroids={0: (0, 1000)})
+    assert set(wide) == {0}
+
+
+def test_low_building_in_front_of_a_tagged_tower_does_not_agree():
+    """Regression (Miami review, 2026-10-05): a low untagged building L in front of a tall
+    tagged tower T, seen from two nearly identical spots, implies the same (wrong) height in
+    both. Each rule alone rejects it: T behind explains L's columns (cap, not a reading), and
+    the two photos are one viewpoint with ~1 deg of spread."""
+    from city2stl.skyline import photo_heights as ph
+
+    tagged = [(-700, 400, 120), (-350, 650, 160), (350, 500, 140), (700, 300, 100),
+              (0, 600, 220)]                                       # T: (0, 600)
+    verts = [_box(x, y, 40.0) for x, y, _ in tagged] + [_box(0, 150)]
+    hs = np.array([h for *_, h in tagged] + [20.0])
+    world = sm.Towers(LAT0, LON0, verts, hs, [f"t{i}" for i in range(5)] + ["L"])
+    anchors = sm.Towers(LAT0, LON0, verts[:5], hs[:5], world.names[:5])
+    table = sm.Towers(LAT0, LON0, verts[5:], np.full(1, np.nan), ["L"])
+    cams = [(-20.0, CAM_Y), (20.0, CAM_Y)]
+
+    def run(occlude):
+        per, caps = [], []
+        for cam in cams:
+            hd = math.degrees(math.atan2(-cam[0], 600.0 - CAM_Y)) % 360
+            prof = _photo(world, cam, hd, 50.0)
+            pose = ph.PhotoPose(*world.to_ll(*cam), hd, 50.0)
+            ms = ph.measure_towers(prof, anchors, pose)
+            tilt, h = ph.fit_tilt_height(ms, np.array([m.osm_height_m for m in ms]))
+            c = {}
+            per.append(ph.implied_heights(prof, pose, table, tilt, h,
+                                          occluders=ms if occlude else None, caps=c))
+            caps.append(c)
+        return per, caps
+
+    per, _ = run(occlude=False)
+    assert set(ph.agreed_heights(per)) == {0}                   # the trap: L "agrees", ~100 m
+    assert per[0][0] > 60.0
+    assert ph.agreed_heights(per, cams_xy=cams, centroids={0: (0.0, 150.0)}) == {}  # rule (a)
+    per, caps = run(occlude=True)
+    assert per == [{}, {}] and all(0 in c for c in caps)         # rule (b): caps only

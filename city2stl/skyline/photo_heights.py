@@ -28,7 +28,8 @@ buildings need several photos (step C2):
     sp = {}
     imp = implied_heights(prof, pose, table, tilt, h, max_height_m=cap,
                           occluders=ms, spans=sp)                # {index: height} per photo
-    est = agreed_with_occlusion([imp_a, imp_b, ...], [sp_a, sp_b, ...])
+    est = agreed_with_occlusion([imp_a, imp_b, ...], [sp_a, sp_b, ...],
+                                cams_xy=[cam_a, cam_b, ...], centroids=...)
 
 Each photo implies a height for every untagged footprint in view, from the skyline over the
 footprint's bearings. The building that forms the skyline there implies the same height from
@@ -36,7 +37,9 @@ every viewpoint; a building in front of or behind it does not (its distance diff
 outline does not), so agreement across photos identifies it. Guards (Miami review,
 2026-10-05): candidates within ``UNTAGGED_MAX_DIST_M``; implied heights above a plausible
 maximum dropped; agreement tolerance capped at ``AGREE_MAX_M``; columns a nearer tagged tower
-explains, or a nearer *agreed* building owns, are not a farther footprint's.
+explains, or a nearer *agreed* building owns, are not a farther footprint's; where a farther
+tagged tower explains the footprint's columns the implied height is only a cap; agreement
+needs 2+ viewpoints (not files) and 15 deg of view-direction spread at the footprint.
 """
 
 from __future__ import annotations
@@ -164,12 +167,26 @@ UNTAGGED_MAX_DIST_M = 2000.0
 #: A footprint loses a photo when nearer agreed buildings cover more than this share of its
 #: columns there (``agreed_with_occlusion``).
 OCCLUDED_SHARE = 0.5
+#: In a photo where a tagged tower *behind* a footprint explains at least this share of the
+#: footprint's columns, its implied height is only an upper bound, not a reading.
+BEHIND_SHARE = 0.5
+#: Agreement needs this many separate viewpoints (cameras within VIEW_RADIUS_M are one) and
+#: this spread of view directions at the footprint. From one spot every footprint along a
+#: sight line implies a consistent height (Miami review: 7 of 16 agreements came from photos
+#: at the same spot, both wrong confirmed ones had 0-7 deg of spread).
+MIN_VIEWPOINTS = 2
+MIN_SPREAD_DEG = 15.0
+VIEW_RADIUS_M = 100.0
+#: The report rounds ``footprint_lonlat`` (the truth cache's key source) to 6 decimals.
+KEY_DECIMALS = 6
 
 
 @dataclass(frozen=True)
 class UntaggedTable(Towers):
     """``Towers`` of untagged footprints, plus each one's original lon/lat ring and its
-    ``benchmark.footprint_key`` (computed on that ring, so it matches the truth cache)."""
+    ``benchmark.footprint_key``. The key is computed on the ring rounded to ``KEY_DECIMALS``,
+    as the skyline report writes ``footprint_lonlat``, so it matches the truth cache; a raw
+    7-decimal OSM ring matched none of Miami's untagged truth (2026-10-05)."""
     rings: tuple = ()
     keys: tuple = ()
 
@@ -202,7 +219,8 @@ def untagged_table(features: list[dict], min_area_m2: float = 150.0,
             continue
         g = g if g.geom_type == "Polygon" else max(g.geoms, key=lambda q: q.area)
         ring = [[float(x), float(y)] for x, y in np.asarray(g.exterior.coords)[:, :2]]
-        key = footprint_key(ring)
+        key = footprint_key([[round(x, KEY_DECIMALS), round(y, KEY_DECIMALS)]
+                             for x, y in ring])
         if only_keys is not None and key not in only_keys:
             continue
         rows.append((np.asarray(ring), str(p.get("name") or ""), ring, key))
@@ -238,7 +256,7 @@ def implied_heights(prof: PhotoProfile, pose: PhotoPose, table: Towers, tilt_deg
                     max_dist_m: float = UNTAGGED_MAX_DIST_M, min_dist_m: float = 60.0,
                     max_height_m: float | None = None,
                     occluders: list[TowerMeasure] | None = None,
-                    spans: dict | None = None) -> dict[int, float]:
+                    spans: dict | None = None, caps: dict | None = None) -> dict[int, float]:
     """Height each footprint of ``table`` would need to form this photo's skyline over its
     bearings: ``h_cam + d * tan(e + tilt)``, with ``e`` the skyline elevation (median over the
     central ``core`` share of the footprint's free columns) and ``d`` its nearest corner's
@@ -253,6 +271,9 @@ def implied_heights(prof: PhotoProfile, pose: PhotoPose, table: Towers, tilt_deg
     - ``occluders``: the photo's measured tagged towers. A column a *nearer* tagged tower
       explains (its OSM roof reaches the skyline there, within the agreement tolerance) is
       not free for footprints behind it: only the nearest plausible owner forms the skyline.
+      Where a *farther* tagged tower explains at least ``BEHIND_SHARE`` of a footprint's
+      columns, the footprint's implied height is only an upper bound (the tower may be the
+      skyline there): it goes to ``caps``, not to the result.
     - ``spans``: if given, filled with ``{index: (first col, last col, distance)}`` for every
       footprint returned, for ``agreed_with_occlusion``.
     """
@@ -262,13 +283,16 @@ def implied_heights(prof: PhotoProfile, pose: PhotoPose, table: Towers, tilt_deg
     xs = np.arange(prof.width) + 0.5 - prof.width / 2.0
     elev_col = np.degrees(np.arctan((prof.height / 2.0 - prof.y_top) / f))   # NaN where no sky
     # per column, the distance of the nearest tagged tower that explains the skyline there
+    # (nearest and farthest, for the "behind" test)
     claimed = np.full(prof.width, np.inf)
+    behind = np.full(prof.width, -np.inf)
     for m in occluders or ():
         c = np.arange(max(m.x0, 0), min(m.x1, prof.width - 1) + 1)
         with np.errstate(invalid="ignore"):
             need = h_cam + m.dist_m * np.tan(np.radians(elev_col[c] + tilt_deg))
             ok = np.isfinite(need) & (need <= m.osm_height_m + _agree_tol(m.osm_height_m))
         claimed[c[ok]] = np.minimum(claimed[c[ok]], m.dist_m)
+        behind[c[ok]] = np.maximum(behind[c[ok]], m.dist_m)
     out: dict[int, float] = {}
     for i, v in enumerate(table.verts):
         dx, dy = v[:, 0] - cam[0], v[:, 1] - cam[1]
@@ -298,35 +322,98 @@ def implied_heights(prof: PhotoProfile, pose: PhotoPose, table: Towers, tilt_deg
         h = h_cam + d * math.tan(math.radians(elev + tilt_deg))
         if max_height_m is not None and h > max_height_m:
             continue
+        if np.mean(behind[span] > d) >= BEHIND_SHARE:
+            if caps is not None:
+                caps[i] = h
+            continue
         out[i] = h
         if spans is not None:
             spans[i] = (int(span[0]), int(span[-1]), d)
     return out
 
 
+def viewpoints(cams_xy: list[tuple[float, float]], radius_m: float = VIEW_RADIUS_M) -> list[int]:
+    """Viewpoint id per camera: cameras within ``radius_m`` of each other (transitively) are
+    one viewpoint. Linked photos inherit a located photo's camera, so they collapse here."""
+    n = len(cams_xy)
+    parent = list(range(n))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    for a in range(n):
+        for b in range(a + 1, n):
+            if math.dist(cams_xy[a], cams_xy[b]) <= radius_m:
+                parent[find(a)] = find(b)
+    roots = {r: k for k, r in enumerate(dict.fromkeys(find(a) for a in range(n)))}
+    return [roots[find(a)] for a in range(n)]
+
+
+def view_spread_deg(target_xy: tuple[float, float], cams_xy: list[tuple[float, float]]) -> float:
+    """Largest angle between the directions from ``target_xy`` to the cameras (degrees)."""
+    az = [math.atan2(cx - target_xy[0], cy - target_xy[1]) for cx, cy in cams_xy]
+    best = 0.0
+    for a in range(len(az)):
+        for b in range(a + 1, len(az)):
+            diff = abs((az[a] - az[b] + math.pi) % (2 * math.pi) - math.pi)
+            best = max(best, diff)
+    return math.degrees(best)
+
+
 def agreed_heights(per_photo: list[dict[int, float]], min_photos: int = 2,
                    abs_m: float = AGREE_ABS_M, rel: float = AGREE_REL,
-                   max_m: float = AGREE_MAX_M) -> dict[int, tuple[float, int, float]]:
+                   max_m: float = AGREE_MAX_M, *, cams_xy: list | None = None,
+                   centroids: dict | None = None, min_viewpoints: int = MIN_VIEWPOINTS,
+                   min_spread_deg: float = MIN_SPREAD_DEG, stats: dict | None = None
+                   ) -> dict[int, tuple[float, int, float]]:
     """``{index: (height, n_photos, spread)}`` for footprints whose implied heights agree.
 
     A footprint is kept when at least ``min_photos`` photos imply a height for it and they
     all lie within ``max(abs_m, min(rel x median, max_m))`` of their median; the height is
     that median. Implied heights at or below 0 m (the skyline is lower than the footprint can
     explain) are ignored.
+
+    With ``cams_xy`` (one camera per photo, in the table's frame) and ``centroids``
+    (``{index: (x, y)}``), agreement also needs ``min_viewpoints`` separate viewpoints
+    (``viewpoints``) and ``min_spread_deg`` of view directions at the footprint
+    (``view_spread_deg``): an implied height is a measurement only when the footprint is seen
+    from different directions. ``stats`` counts what each rule removed.
     """
-    by: dict[int, list[float]] = {}
-    for ph in per_photo:
+    st = {"candidates": 0, "one_photo": 0, "disagree": 0, "one_viewpoint": 0,
+          "narrow_spread": 0, "agreed": 0}
+    vp = viewpoints(cams_xy) if cams_xy is not None else None
+    by: dict[int, list[tuple[float, int]]] = {}
+    for k, ph in enumerate(per_photo):
         for i, h in ph.items():
             if h > 0:
-                by.setdefault(i, []).append(h)
+                by.setdefault(i, []).append((h, k))
     out = {}
-    for i, hs in by.items():
-        if len(hs) < min_photos:
+    for i, hk in by.items():
+        st["candidates"] += 1
+        if len(hk) < min_photos:
+            st["one_photo"] += 1
             continue
-        a = np.asarray(hs)
+        a = np.asarray([h for h, _ in hk])
         med = float(np.median(a))
-        if np.all(np.abs(a - med) <= _agree_tol(med, abs_m, rel, max_m)):
-            out[i] = (med, len(hs), float(np.ptp(a)))
+        if not np.all(np.abs(a - med) <= _agree_tol(med, abs_m, rel, max_m)):
+            st["disagree"] += 1
+            continue
+        if vp is not None and centroids is not None and i in centroids:
+            photos = [k for _, k in hk]
+            if len({vp[k] for k in photos}) < min_viewpoints:
+                st["one_viewpoint"] += 1
+                continue
+            if view_spread_deg(centroids[i], [cams_xy[k] for k in photos]) < min_spread_deg:
+                st["narrow_spread"] += 1
+                continue
+        st["agreed"] += 1
+        out[i] = (med, len(hk), float(np.ptp(a)))
+    if stats is not None:
+        stats.clear()
+        stats.update(st)
     return out
 
 
@@ -341,9 +428,14 @@ def agreed_with_occlusion(per_photo: list[dict[int, float]], spans: list[dict],
     (more than ``OCCLUDED_SHARE``) from nearer up is dropped from that photo, agreed or not
     (two photos can agree by coincidence on a footprint behind), and agreement is re-run
     until nothing changes. ``spans[k]`` is photo ``k``'s ``implied_heights(spans=)``.
+    Other keywords go to ``agreed_heights``; ``stats`` gets its first-pass counts plus
+    ``occluded`` (agreed at first, dropped by occlusion) and the final ``agreed``.
     """
     per = [dict(p) for p in per_photo]
-    est = agreed_heights(per, **kw)
+    stats = kw.pop("stats", None)
+    first: dict = {}
+    est = agreed_heights(per, **kw, stats=first)
+    est0 = set(est)
     for _ in range(max_rounds):
         changed = False
         for p, sp in zip(per, spans, strict=True):
@@ -362,4 +454,9 @@ def agreed_with_occlusion(per_photo: list[dict[int, float]], spans: list[dict],
         if not changed:
             break
         est = agreed_heights(per, **kw)
+    if stats is not None:
+        stats.clear()
+        stats.update(first)
+        stats["occluded"] = len(est0 - set(est))
+        stats["agreed"] = len(est)
     return est

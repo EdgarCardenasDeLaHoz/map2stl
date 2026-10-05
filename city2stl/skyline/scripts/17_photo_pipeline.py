@@ -31,13 +31,17 @@ Street View on the same buildings (the report's ``heights.json``). Writes ``phot
 tilt and camera height on its tagged towers and implies a height for every untagged footprint
 in view within ``--untagged-max-dist-m`` (``photo_heights.implied_heights``), dropping heights
 above min(the site's ``max_plausible_height_m``, 1.2x the tallest tagged tower in view) and
-columns a nearer tagged tower explains. A building is kept when 2+ kept photos agree within
-max(3 m, min(10 %, 10 m)), with footprints behind an agreed building dropped from the photos
-where it covers them (``photo_heights.agreed_with_occlusion``). Written to
+columns a nearer tagged tower explains; where a tagged tower behind the footprint explains
+its columns the height is only an upper bound (``untagged_capped``, not counted). A building is
+kept when kept photos from 2+ viewpoints (cameras within 100 m are one) with 15 deg of view
+directions at the footprint agree within max(3 m, min(10 %, 10 m)), with footprints behind an
+agreed building dropped from the photos where it covers them
+(``photo_heights.agreed_with_occlusion``); ``summary.untagged.rules`` counts what each rule
+removed. Written to
 ``photo_heights.json`` (``untagged``) and scored against the benchmark truth cache
 (``--untagged-truth fetch`` measures missing footprints: paid 3D Tiles reads).
 ``--untagged-candidates truth`` limits candidates to footprints the truth cache holds, so a
-run can be scored without fetching.
+run can be scored without fetching (the default ``all`` keeps competing owners in play).
 """
 
 from __future__ import annotations
@@ -158,7 +162,7 @@ def _job(job: dict) -> dict:
     h_cam = (res.get("camera") or {}).get("h_cam", 2.0)
     res["towers"], res["anchor_dev_m"] = _measure(prof, pose, job["max_dist_m"], h_cam)
     if "untagged" in _W:
-        res["untagged"], res["untagged_spans"] = _implied_untagged(
+        res["untagged"], res["untagged_spans"], res["untagged_capped"] = _implied_untagged(
             prof, pose, job["max_dist_m"], h_cam,
             job.get("untagged_max_dist_m", ph.UNTAGGED_MAX_DIST_M))
     return res
@@ -173,23 +177,27 @@ def _untagged_table(region: str, osm: dict, frame, candidates: str = "all"):
 
 def _implied_untagged(prof, pose: ph.PhotoPose, max_dist_m: float, h_cam: float,
                       untagged_max_dist_m: float = ph.UNTAGGED_MAX_DIST_M
-                      ) -> tuple[dict, dict]:
-    """``({index: implied height}, {index: [first col, last col, distance]})`` for one photo,
-    with tilt and camera height fitted on all its tagged towers (no tower's estimate is
-    involved, so no leave-one-out). Heights above min(site maximum, 1.2x the tallest tagged
-    tower in view) are dropped; the tagged towers occlude footprints behind them."""
+                      ) -> tuple[dict, dict, dict]:
+    """``({index: implied height}, {index: [first col, last col, distance]},
+    {index: upper bound})`` for one photo, with tilt and camera height fitted on all its
+    tagged towers (no tower's estimate is involved, so no leave-one-out). Heights above
+    min(site maximum, 1.2x the tallest tagged tower in view) are dropped; the tagged towers
+    occlude footprints behind them, and a footprint in front of a tagged tower that explains
+    its columns gets only an upper bound (not counted toward agreement)."""
     ms = [m for m in ph.measure_towers(prof, _W["towers"], pose, h_cam=h_cam)
           if m.dist_m <= max_dist_m]
     if len(ms) < 2:
-        return {}, {}
+        return {}, {}, {}
     tilt, h = ph.fit_tilt_height(ms, np.array([m.osm_height_m for m in ms]))
     cap = min(_W.get("max_height_m", math.inf), 1.2 * max(m.osm_height_m for m in ms))
     spans: dict = {}
+    caps: dict = {}
     imp = ph.implied_heights(prof, pose, _W["untagged"], tilt, h,
                              max_dist_m=min(max_dist_m, untagged_max_dist_m),
-                             max_height_m=cap, occluders=ms, spans=spans)
+                             max_height_m=cap, occluders=ms, spans=spans, caps=caps)
     return ({str(i): round(v, 2) for i, v in imp.items()},
-            {str(i): [c0, c1, round(d, 1)] for i, (c0, c1, d) in spans.items()})
+            {str(i): [c0, c1, round(d, 1)] for i, (c0, c1, d) in spans.items()},
+            {str(i): round(v, 2) for i, v in caps.items()})
 
 
 def _run(ex, jobs: list[dict], label: str) -> list[dict]:
@@ -415,7 +423,15 @@ def _untagged_rows(args, results: list[dict], towers, osm: dict) -> tuple[list[d
     per = [{int(k): v for k, v in (r.get("untagged") or {}).items()} for r in kept]
     spans = [{int(k): tuple(v) for k, v in (r.get("untagged_spans") or {}).items()}
              for r in kept]
-    est = ph.agreed_with_occlusion(per, spans)
+    # viewpoints, not files: the kept cameras in the table's frame, and each candidate's
+    # centroid for the view-direction spread
+    cams = [table.to_xy(r["camera"]["lat"], r["camera"]["lon"]) for r in kept]
+    seen = {i for p in per for i in p}
+    centroids = {i: tuple(table.verts[i][:-1].mean(axis=0)) for i in seen}
+    rules: dict = {}
+    est = ph.agreed_with_occlusion(per, spans, cams_xy=cams, centroids=centroids, stats=rules)
+    rules["capped_readings"] = sum(len(r.get("untagged_capped") or {}) for r in kept)
+    vp = ph.viewpoints(cams)
     keys = {i: table.keys[i] for i in est}
     if getattr(args, "untagged_truth", "cached") == "fetch" and est:
         truth = bm.footprint_truth(args.region, {keys[i]: table.rings[i] for i in est},
@@ -425,12 +441,16 @@ def _untagged_rows(args, results: list[dict], towers, osm: dict) -> tuple[list[d
     rows = []
     for i, (h, n, spread) in sorted(est.items()):
         t = truth.get(keys[i]) or {}
+        photos = [k for k, p in enumerate(per) if i in p]
         rows.append({"index": i, "name": table.names[i], "key": keys[i],
                      "footprint_lonlat": table.rings[i], "photo_m": round(h, 1), "n_photos": n,
+                     "n_viewpoints": len({vp[k] for k in photos}),
+                     "view_spread_deg": round(ph.view_spread_deg(
+                         centroids[i], [cams[k] for k in photos]), 1),
                      "spread_m": round(spread, 1),
                      "truth_m": t.get("truth_m") if t.get("status") == "confirmed" else None})
     conf = [r for r in rows if r["truth_m"] is not None]
-    return rows, {"buildings": len(rows), "confirmed": len(conf),
+    return rows, {"buildings": len(rows), "confirmed": len(conf), "rules": rules,
                   "with_truth": sum(1 for i in est if keys[i] in truth),
                   "photo_vs_truth": _score([r["photo_m"] for r in conf],
                                            [r["truth_m"] for r in conf])}
