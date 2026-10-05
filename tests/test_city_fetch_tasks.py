@@ -52,7 +52,11 @@ def test_start_reports_layers_then_result_matches_sync_payload(client, tmp_data_
         assert start.status_code == 200
         body = start.json()
         assert body["status"] in ("running", "done")
-        assert [lyr["name"] for lyr in body["layers"]] == LAYERS
+        # The task runs in the background: when it has already reached the
+        # height step, the snapshot lists "heights" after the requested layers
+        # (that race made this fail ~1 run in 3 under -n 6).
+        names = [lyr["name"] for lyr in body["layers"]]
+        assert names in (LAYERS, [*LAYERS, "heights"])
         final = _wait(client, body["task_id"])
 
     assert final["status"] == "done"

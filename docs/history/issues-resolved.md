@@ -10,6 +10,42 @@ because code cites them.
   `city2stl/skyline/height/` → `city2stl/height/`, `app/server/core/height/` →
   `city2stl/height/`).
 
+## Fixed 2026-10-05 (full code audit)
+
+### Silent wrong answers — fixed 2026-10-05
+Each had a test added. Source: [audits/AUDIT-2026-10-05.md](audits/AUDIT-2026-10-05.md).
+- **STL-import IDW infill filled nothing.** `mesh_import` passed the valid-pixel mask, which
+  `infill_idw` reads as the region to fill. Now `app/server/core/mesh_import.py::_apply_infill`,
+  which also rejects unknown methods on the library path (it used to fall back to nearest).
+- **Microsoft footprints got a 0.6 m height proxy.** `city2stl/skyline/satellite_footprints.py::merge_satellite_into_osm`
+  passed a shapely polygon to a ring-based area function, and the fallback stored deg².
+- **A building in the top-left corner turned the whole skyline mask into building.** The hole
+  fill flooded from (0,0) only. Now `city2stl/skyline/_core/segmentation.py::_fill_enclosed_holes`
+  treats every border-touching region as exterior.
+- **Composite `osm_*` channels, `/api/cities/raster` and enhance-heights found no OSM data**
+  when the panel had fetched at 3.0 m: they read only the 0.5 m key.
+  `app/server/core/city_data.py::read_city_layers_any_tolerance`.
+- **Google 3D Tiles were grounded on an orthometric DEM** by `/api/cities/enhance-heights` (geoid
+  error). The route now lets the provider ground from the mesh. `Google3DProvider.fetch_heights`'s
+  cache key now includes `dem` and `max_tiles`, and `get_api_key` reads `map2stl/config.json` first.
+- **`city2stl/osm_raster.py::_resolve_building_height` read "40 ft" as 40 m and "12;15" as 1215 m.**
+  It now uses `heights.parse_length_m`.
+- **A trails outage showed as "no trails found".** `geo2stl/trails.py::fetch_and_rasterize_trails`
+  re-raises `TrailsUpstreamError` for the router.
+- **`tests/manual/test-cache-semantics.py` deleted the real `cache/`.** The script is removed.
+- **Flaky `tests/test_city_fetch_tasks.py::test_start_reports_layers_then_result_matches_sync_payload`.**
+  The `/start` snapshot can already list the `heights` step. The test now accepts it.
+
+### Static-file path traversal and cache wipe through a mesh upload id — fixed 2026-10-05
+- `GET /static/..%2F..%2F..%2Fpyproject.toml` returned the file, so any readable file was
+  exposed, `config.json` (API keys) included. `app/server/server.py::serve_static` now resolves the path
+  and requires it to stay under `static/` or `dist/`.
+- `DELETE /api/layers/mesh/%2E%2E` reached `shutil.rmtree(CACHE_ROOT)`.
+  `app/server/core/mesh_import.py::_upload_dir` now accepts only the `uuid4().hex` ids that
+  `save_upload` issues.
+- Tests: `tests/test_static_route.py`, `tests/test_mesh_import.py`. Source:
+  [audits/AUDIT-2026-10-05.md](audits/AUDIT-2026-10-05.md).
+
 ## Fixed 2026-10 (end-to-end run, Amazon + Philadelphia)
 
 ### 0g. Lake outlines fetched twice; continent-sized lakes query; city overlay froze the page — fixed 2026-10-02

@@ -100,17 +100,21 @@ _ROOT_URL = "https://tile.googleapis.com/v1/3dtiles/root.json"
 # ── API key resolution ──────────────────────────────────────────
 
 def get_api_key() -> str | None:
-    """Read Google Maps API key from env or config.json."""
+    """Google Maps API key from ``GOOGLE_MAPS_API_KEY`` or ``config.json``."""
     key = os.environ.get("GOOGLE_MAPS_API_KEY")
     if key:
         return key
-    try:
-        cfg_path = Path(__file__).parent.parent.parent.parent.parent / "config.json"
-        if cfg_path.exists():
-            cfg = json.loads(cfg_path.read_text())
-            return cfg.get("google_maps_api_key") or None
-    except Exception:
-        pass
+    # map2stl/config.json (where the app keeps its other keys) first, then the
+    # workspace one above it, which is where this used to look exclusively.
+    here = Path(__file__).resolve()
+    for cfg_path in (here.parents[3] / "config.json", here.parents[4] / "config.json"):
+        try:
+            if cfg_path.exists():
+                key = json.loads(cfg_path.read_text()).get("google_maps_api_key")
+                if key:
+                    return key
+        except Exception:
+            logger.debug("Could not read %s", cfg_path, exc_info=True)
     return None
 
 
@@ -587,8 +591,11 @@ class Google3DProvider:
         north, south, east, west = bbox
 
         # Check cache first
+        # dem and max_tiles change the result, so they are part of the key;
+        # without them a DEM-grounded raster was served to mesh-grounded calls.
         cache_key = make_cache_key(_NAMESPACE, north, south, east, west,
-                                   extra={"dim": list(dim)})
+                                   extra={"dim": list(dim), "dem": dem is not None,
+                                          "max_tiles": self._max_tiles})
         hit = read_array_cache(_NAMESPACE, cache_key)
         if hit is not None:
             arrays, _meta = hit

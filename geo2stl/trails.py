@@ -636,7 +636,8 @@ def fetch_and_rasterize_trails(
     source='all':  union of the above (default)
 
     Returns the dict described in :meth:`TrailsService.fetch_and_rasterize`, or
-    None when no provider found any feature.
+    None when no provider found any feature. Raises :class:`TrailsUpstreamError`
+    when every provider failed to answer.
     """
     import time as _time
 
@@ -654,6 +655,10 @@ def fetch_and_rasterize_trails(
             result["ski_count"], result["hiking_count"],
             ", ".join(result["sources"]) or source)
         return result
+    except TrailsUpstreamError:
+        # The router reports an outage differently from an empty region;
+        # swallowing it here showed every outage as "no trails found".
+        raise
     except Exception as e:
         logger.error(f"Trails fetch/rasterize failed: {e}", exc_info=True)
         return None

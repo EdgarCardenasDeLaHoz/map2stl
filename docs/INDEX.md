@@ -167,7 +167,7 @@ Walkthrough: [reference/pipeline.md](reference/pipeline.md); why: [decisions/mes
 - OSM lakes for the composite `lakes` layer: `map2stl/city2stl/fetch.py::fetch_osm_lakes`
 - Metric reprojection (local UTM, not Mercator): `map2stl/city2stl/fetch.py::_to_metric`
 - Cache version and staleness (`CITY_PIPELINE_VERSION`): `map2stl/city2stl/cache_policy.py::CITY_PIPELINE_VERSION` (`city_cache_missing_height_source`, `city_cache_stale_buildings_only`)
-- Cache-first layers, size guard (no city layers > `CITY_LAYERS_MAX_DIAGONAL_KM` unless allowed), reuse of finer/enclosing entries: `map2stl/app/server/core/city_data.py::get_city_layers` (`check_city_area`, `lookup_city_layers`, `_candidates`)
+- Cache-first layers, size guard (no city layers > `CITY_LAYERS_MAX_DIAGONAL_KM` unless allowed), reuse of finer/enclosing entries: `map2stl/app/server/core/city_data.py::get_city_layers` (`check_city_area`, `lookup_city_layers`, `_candidates`); raster readers (composite `osm_*`, `/api/cities/raster`, enhance-heights) take any tolerance: `read_city_layers_any_tolerance`
 - Coarse-tier building area floor: `map2stl/app/server/config.py::COARSE_MIN_BUILDING_AREA_M2`
 - City fetch as a background job: `map2stl/app/server/core/city_fetch_tasks.py::start_city_fetch` (`cancel_task`); routes `map2stl/app/server/routers/cities.py` (`start_city_fetch`, `city_fetch_status`, `city_fetch_result`, `cancel_city_fetch`); client `map2stl/app/client/static/js/modules/layers/city-overlay.js::loadCityData` (`cancelCityFetch`), progress `map2stl/app/client/static/js/vue/components/dem/CityFetchProgress.vue`
 - Overpass health probe (osmnx user agent; overpass-api.de 406s python-requests), pacing, raw QL: `map2stl/geo2stl/osm.py::healthy_overpass_endpoints` (`overpass_wait`, `overpass_backoff`, `overpass_query`)
@@ -191,7 +191,7 @@ Overview and ranking: [reference/height-providers.md](reference/height-providers
   - GeoTIFF reader shared by providers: `map2stl/geo2stl/raster.py::read_geotiff` (wrapped in `map2stl/city2stl/height/providers/_raster.py`)
 - Survey nDSM providers, one interface `ndsm_for_bbox(bbox, res)`: `map2stl/city2stl/height/providers/survey.py::ndsm_for_bbox` (`PROVIDERS`, `available_for_bbox`); contract, grid, sanity checks, cache `map2stl/city2stl/height/providers/_survey.py` (`lonlat_grid`, `read_geotiff_array`, `cached_ndsm`)
   - France IGN `ign_lidarhd.py`, Andalucía `rediam_mdhn.py`, Spain CNIG `cnig_mdsn.py`, Czechia `cuzk_dmp.py`; per-city sources [reference/survey-sources.md](reference/survey-sources.md)
-- Height-gap infill (IDW, nearest): `map2stl/city2stl/height/infill.py::infill_idw` (`infill_nearest`)
+- Height-gap infill (IDW, nearest): `map2stl/city2stl/height/infill.py::infill_idw` (`infill_nearest`); mesh import applies it through `map2stl/app/server/core/mesh_import.py::_apply_infill`
 - Georeferenced STL → heightmap: `map2stl/city2stl/height/stl_import.py::stl_to_heightmap`
 - CNN height prediction/training: `map2stl/city2stl/height/predict.py::predict` — not used at runtime; see [history/ml-height/README.md](history/ml-height/README.md)
 - Provider accuracy and defect history: [issues.md](issues.md), [decisions/building-heights.md](decisions/building-heights.md)
@@ -356,6 +356,7 @@ Manual drag-align, ground truth and batch export. Refinement: [reference/align-r
 
 Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape, where things live, dead ends, feature status, open items). Entry points:
 - CV/geometry primitives: `map2stl/city2stl/skyline/_core/` (types, segmentation, projection, skyline, pano, registration, height). There is no façade: every caller imports the defining `_core/` or `_pano/` module.
+- Building/sky masks and glass-tower hole fill: `map2stl/city2stl/skyline/_core/segmentation.py::_neural_sky_and_building_masks` (`_fill_enclosed_holes`)
 - Per-view heights and aggregation: `map2stl/city2stl/skyline/_core/height.py::estimate_heights_from_registration` (`aggregate_building_heights`, `_ground_elev_m`)
 - View registration: `map2stl/city2stl/skyline/_pano/detect.py::_register_views`
 - Depth cross-check: `map2stl/city2stl/skyline/depth_estimation.py::calibrate_pano_depth` (`depth_height_from_segment`, `compare_heights`)
@@ -366,7 +367,7 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
 
 - Launchers: `Start 3D Maps.bat`, `Stop 3D Maps.bat` (workspace root) → `map2stl/scripts/start.ps1`, `map2stl/scripts/stop.ps1`
 - Venv: `map2stl/scripts/setup-venv.ps1` (creates `~/.venvs/map2stl`); git database link `map2stl/scripts/link-gitdir.ps1`
-- Tests: `map2stl/pytest.ini` also collects `numpy2stl/tests`; `-m integration`, `-m slow` and `-m ml` (torch) are opt-in; `tests/e2e/` (playwright) and `tests/manual/` are never collected; `-n 6` runs in parallel (pytest-xdist)
+- Tests: `map2stl/pytest.ini` also collects `numpy2stl/tests`; `-m integration`, `-m slow` and `-m ml` (torch) are opt-in; the default run has no network (`map2stl/tests/conftest.py::_block_network`: outbound sockets raise unless the test is marked `integration`); `tests/e2e/` (playwright) and `tests/manual/` are never collected; `-n 6` runs in parallel (pytest-xdist)
 - Pre-push hooks: `map2stl/.githooks/pre-push` (pytest `-n 6`, vitest, eslint), `numpy2stl/.githooks/pre-push` (numpy2stl's own tests); `core.hooksPath` set by `map2stl/scripts/setup-venv.ps1` and `numpy2stl/scripts/link-gitdir.ps1`
 - Test fixtures from `numpy2stl/tests/conftest.py` apply to *every* test when collected from map2stl (pytest scopes conftests outside the rootdir globally): prefix benchmark fixtures `bench_`, and don't request `monkeypatch` in its autouse fixtures
 - Helper scripts for agents (renders, screenshots, doc link checker): `claude/scripts/README.md`

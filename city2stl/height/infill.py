@@ -15,9 +15,10 @@ infill_nearest(heightmap)
 
 Notes
 -----
-- "mask" here means the same mask as returned by stl_to_heightmap -- True
-  where the heightmap has a valid measurement.  NaN pixels inside the mask
-  are treated as unknown; pixels outside the mask are preserved as NaN.
+- ``mask`` is the region of interest: NaN pixels inside it are filled, pixels
+  outside it stay NaN.  It is *not* the valid-pixel mask ``stl_to_heightmap``
+  returns (that one has no NaN inside it, so nothing would be filled); pass
+  no mask to fill every gap.
 - ``infill_idw`` is the recommended method for STL-sourced partial maps.
 - ``infill_nearest`` is a fast fallback with sharp fill boundaries.
 """

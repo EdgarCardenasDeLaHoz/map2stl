@@ -14,8 +14,8 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from app.server.core import city_fetch_tasks
-from app.server.core.cache import CACHE_ROOT, osm_cache_key, read_osm_cache
-from app.server.core.city_data import get_city_layers
+from app.server.core.cache import CACHE_ROOT, osm_cache_key
+from app.server.core.city_data import get_city_layers, read_city_layers_any_tolerance
 from app.server.core.responses import error_response
 from app.server.core.validation import run_sync, validate_bbox_diagonal
 from app.server.schemas import (
@@ -245,8 +245,8 @@ async def get_city_raster(req: CityRasterRequest):
     _from_cache = False
     if (not buildings.get("features") and not roads.get("features")
             and not waterways.get("features")):
-        osm_key = osm_cache_key(req.north, req.south, req.east, req.west)
-        osm_data = read_osm_cache(osm_key)
+        osm_data, osm_key = read_city_layers_any_tolerance(
+            req.north, req.south, req.east, req.west)
         if osm_data:
             buildings = osm_data.get("buildings", buildings)
             roads = osm_data.get("roads", roads)
@@ -347,8 +347,8 @@ async def enhance_heights(req: EnhanceHeightsRequest):
     # Resolve buildings from OSM cache when not provided
     buildings = req.buildings
     if (not buildings or not buildings.get("features")):
-        osm_key = osm_cache_key(req.north, req.south, req.east, req.west)
-        osm_data = read_osm_cache(osm_key)
+        osm_data, osm_key = read_city_layers_any_tolerance(
+            req.north, req.south, req.east, req.west)
         if osm_data and osm_data.get("buildings"):
             buildings = osm_data["buildings"]
             logger.debug(
@@ -360,21 +360,12 @@ async def enhance_heights(req: EnhanceHeightsRequest):
     dim = (req.dim, req.dim)
 
     try:
-        # Fetch terrain DEM for ground subtraction (DSM - DEM = building height)
-        from geo2stl.dem import compute_raw_dem
-        dem_result = await run_sync(
-            compute_raw_dem, req.north, req.south, req.east, req.west,
-            req.dim, 1,  # depth_scale=1 (no bathymetry scaling)
-        )
-        dem_array = None
-        if dem_result is not None:
-            dem_array = np.asarray(dem_result, dtype=np.float32)
-
-        # Fetch Google 3D height raster
+        # No external DEM: the provider takes the ground from the mesh itself.
+        # The orthometric DEM this used to pass is tens of metres off the
+        # tiles' ellipsoidal heights (the provider's own docstring warns of
+        # the geoid separation) (audit 2026-10-05).
         provider = Google3DProvider()
-        height_result = await run_sync(
-            provider.fetch_heights, bbox, dim, dem_array
-        )
+        height_result = await run_sync(provider.fetch_heights, bbox, dim)
 
         valid_px = int(np.count_nonzero(~np.isnan(height_result.raster)))
         logger.info(

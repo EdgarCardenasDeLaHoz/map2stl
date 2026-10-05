@@ -88,6 +88,72 @@ def client(tmp_data_dir):
     return TestClient(app)
 
 
+class NetworkBlocked(OSError):
+    """Raised for an outbound connection from a test not marked ``integration``."""
+
+
+def _proxy_addresses() -> set[tuple[str, int]]:
+    """(host, port) of every configured HTTP(S) proxy. In a cloud session the
+    proxy listens on 127.0.0.1, so "loopback is local" alone would let traffic out."""
+    from urllib.parse import urlsplit
+
+    out = set()
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY"):
+        url = os.environ.get(var)
+        if url:
+            parts = urlsplit(url)
+            if parts.hostname and parts.port:
+                out.add((parts.hostname, parts.port))
+    return out
+
+
+@pytest.fixture(autouse=True)
+def _block_network(request):
+    """No outbound connections unless the test is marked ``integration``.
+
+    The default run must not depend on the internet: two skyline report tests
+    used to fetch 192 live ESRI tiles (~50 s; audit 2026-10-05). Loopback
+    stays allowed (live-server tests), except a proxy listening there.
+    """
+    if request.node.get_closest_marker("integration"):
+        yield
+        return
+    import socket
+
+    proxies = _proxy_addresses()
+    proxy_vars = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY")
+    saved_env = {v: os.environ.pop(v) for v in proxy_vars if v in os.environ}
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+
+    def _check(sock, address):
+        if sock.family in (socket.AF_INET, socket.AF_INET6) and isinstance(address, tuple):
+            host, port = address[0], address[1]
+            local = host in ("127.0.0.1", "::1", "localhost")
+            if not local or (host, port) in proxies:
+                raise NetworkBlocked(
+                    f"network access to {host}:{port} in {request.node.nodeid}; "
+                    "stub it, or mark the test @pytest.mark.integration")
+
+    def connect(sock, address):
+        _check(sock, address)
+        return real_connect(sock, address)
+
+    def connect_ex(sock, address):
+        _check(sock, address)
+        return real_connect_ex(sock, address)
+
+    # Patched by hand, not with ``monkeypatch``: requesting that fixture here
+    # would make it outlive other fixtures' teardown, so a test's own patches
+    # (e.g. a fake ``time.monotonic``) would still be live during it.
+    socket.socket.connect, socket.socket.connect_ex = connect, connect_ex
+    try:
+        yield
+    finally:
+        socket.socket.connect, socket.socket.connect_ex = real_connect, real_connect_ex
+        os.environ.update(saved_env)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_export_tasks():
     """Drain export threads started by a test and restore the task registry.

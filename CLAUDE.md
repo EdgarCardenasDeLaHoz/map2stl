@@ -25,6 +25,10 @@ python scripts/quicktest.py    # while developing: only tests the uncommitted ch
 npm install && npm run build  # after editing .vue / .ts (the Vue bundle in dist/ is gitignored)
 ```
 
+Cloud sessions (claude.ai/code): `.claude/hooks/session-start.sh` clones `../numpy2stl`, builds
+`~/.venvs/map2stl` (no torch) and runs `npm install`, so pytest, ruff, vitest and the build work.
+No Google key and no survey/Overpass hosts unless the environment's settings add them.
+
 ## Where things are
 
 - **Index:** [docs/INDEX.md](docs/INDEX.md). Start every task there.

@@ -1,6 +1,6 @@
 # Known Issues — map2stl
 
-_Last updated: 2026-09-30_
+_Last updated: 2026-10-05_
 
 - Live bugs and technical debt only. Planned work is in the roadmap,
   [plans/README.md](plans/README.md); ideas are in [proposals.md](proposals.md).
@@ -8,6 +8,17 @@ _Last updated: 2026-09-30_
   full write-ups (the fixed §2–§2e, §4, §0, §0d and all older resolved entries are there).
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
+
+## Active bugs — from the full code audit (2026-10-05)
+
+Source and full list: [history/audits/AUDIT-2026-10-05.md](history/audits/AUDIT-2026-10-05.md).
+Eight of its silent wrong-answer bugs were fixed the same day
+([issues-resolved](history/issues-resolved.md)). Still open:
+
+- **`numpy2stl` `stl2numpy/heightmap.py::_auto_resolution` swaps rows and cols**, so the grid comes out stretched.
+  The fix belongs in the numpy2stl repo.
+- **Frontend `renderDEMCanvas` re-announces the DEM** on every recolour and resize frame:
+  `app/client/static/js/modules/dem/dem-main.js::renderDEMCanvas`.
 
 ## Active bugs — from the pipeline audit
 

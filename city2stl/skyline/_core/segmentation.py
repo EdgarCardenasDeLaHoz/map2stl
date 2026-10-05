@@ -339,6 +339,25 @@ def prefetch_label_maps(images: list[np.ndarray]) -> int:
         # Leave the cache untouched; lazy per-image inference still works.
         return 0
 
+def _fill_enclosed_holes(b_u8: np.ndarray) -> np.ndarray:
+    """Promote non-building regions that touch no image border to building.
+
+    Seeded from every border pixel, not one corner: a single ``floodFill``
+    from (0,0) floods nothing when that pixel is building (a near tower at
+    the left edge), and then every non-building pixel counted as an
+    enclosed hole -- the whole mask became building, the sky mask emptied
+    and the contour fell back to h/2 silently (audit 2026-10-05).
+    """
+    inv = (b_u8 == 0).astype(np.uint8)
+    _n, labels = cv2.connectedComponents(inv, connectivity=4)
+    border = np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]])
+    exterior = np.unique(border[border > 0])
+    holes = (labels > 0) & ~np.isin(labels, exterior)
+    out = b_u8.copy()
+    out[holes] = 255
+    return out
+
+
 def _neural_sky_and_building_masks(
     image_rgb: np.ndarray,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
@@ -390,29 +409,20 @@ def _neural_sky_and_building_masks(
     b_u8 = cv2.morphologyEx(b_u8, cv2.MORPH_CLOSE, close_k)
     s_u8 = cv2.morphologyEx(s_u8, cv2.MORPH_OPEN, open_k)
     # Glass-tower top repair: a tall narrow vertical closing (1 col ×
-    # 11 rows) bridges short sky strips that mirrored-sky reflections
+    # 25 rows) bridges short sky strips that mirrored-sky reflections
     # carve into a glass facade — the canonical Cartagena Bocagrande
     # failure where the mask top has a wavy edge a row of grey-blue
     # pixels below the actual roofline. Vertical-only kernel preserves
     # the HORIZONTAL inter-tower gaps that F-SKY2 splitting depends
-    # on (a 5×5 isotropic closing would erase those too). Capped at
-    # 11 px so windows-and-cornice gaps two storeys tall don't get
-    # mistakenly filled in.
+    # on (a 5×5 isotropic closing would erase those too). 25 rows tall,
+    # so taller gaps (sky between separate towers) survive.
     vert_k = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 25))
     b_u8 = cv2.morphologyEx(b_u8, cv2.MORPH_CLOSE, vert_k)
     # Glass-tower hole-fill: any non-building region NOT reachable from
     # the image border (i.e. fully enclosed by building) is almost
-    # certainly a mis-classified dark glass facade. Flood-fill the
-    # complement from (0,0); cells still untouched after the fill are
-    # interior holes worth promoting to building.
-    inv = (b_u8 == 0).astype(np.uint8)
-    h_full, w_full = inv.shape[:2]
-    ff_mask = np.zeros((h_full + 2, w_full + 2), dtype=np.uint8)
-    flood = inv.copy()
-    cv2.floodFill(flood, ff_mask, (0, 0), 2)
-    interior_holes = (flood == 1)
-    if interior_holes.any():
-        b_u8[interior_holes] = 255
+    # certainly a mis-classified dark glass facade.
+    b_u8 = _fill_enclosed_holes(b_u8)
+    h_full = b_u8.shape[0]
     # Beach/sand/earth-as-building cap (Cartagena coast): SegFormer-b1
     # routinely labels coastal sand strips as "building" (class 1), which
     # the hole-fill above then fuses with real tower bases — producing

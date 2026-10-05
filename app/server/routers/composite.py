@@ -48,11 +48,10 @@ from pydantic import BaseModel
 
 from app.server.core.cache import (
     make_cache_key,
-    osm_cache_key,
     read_array_cache,
-    read_osm_cache,
     write_array_cache,
 )
+from app.server.core.city_data import read_city_layers_any_tolerance
 from app.server.core.validation import run_sync
 from app.server.schemas import HydrologyMergeRequest, MergeRequest
 from geo2stl.geo import m_per_deg_lon
@@ -217,11 +216,9 @@ def _rasterize_city(req: CompositeCityRasterRequest) -> dict:
     # key (which is hashed from bbox + tol + min_area) will miss entirely.
     from app.server.config import COARSE_MIN_BUILDING_AREA_M2
     min_area = COARSE_MIN_BUILDING_AREA_M2 if req.detail == "coarse" else 5.0
-    osm_key = osm_cache_key(N, S, E, W, min_area=min_area)
-    osm_data = read_osm_cache(osm_key)
+    osm_data, _osm_key = read_city_layers_any_tolerance(N, S, E, W, min_area=min_area)
     if not osm_data:
-        logger.debug(
-            f"No OSM cache for composite city-raster ({osm_key[:8]}...)")
+        logger.debug("No OSM cache for composite city-raster")
         return _empty_result()
 
     building_arr = _rasterize_buildings(

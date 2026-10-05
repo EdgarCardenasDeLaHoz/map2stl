@@ -140,6 +140,10 @@ def _params(north, south, east, west, tol, min_area, **extra) -> dict:
             "tol": tol, "min_area": min_area, **extra}
 
 
+#: Upper bound on a simplification tolerance, for lookups that accept any.
+_ANY_TOLERANCE_M = 1000.0
+
+
 def _usable(payload: dict) -> bool:
     """A payload get_city_layers would serve as it is (no layer outdated)."""
     return (bool(payload) and not city_cache_missing_height_source(payload)
@@ -303,3 +307,35 @@ def lookup_city_layers(north: float, south: float, east: float, west: float,
                                                   min_area, derived_from=cand["key"]))
         return derived, "derived"
     return {}, status
+
+
+def read_city_layers_any_tolerance(north: float, south: float, east: float, west: float,
+                                   min_area: float = 5.0) -> tuple[dict, str | None]:
+    """A cached city payload for this bbox, whatever tolerance it was
+    fetched at: ``(payload, cache_key)``, or ``({}, None)``. Never fetches.
+
+    For the raster readers (composite ``osm_*`` channels, ``/api/cities/raster``,
+    enhance-heights), which do not depend on the simplification tolerance. They
+    used to read the exact 0.5 m key; the Cities panel fetches at 3.0 m, and
+    :func:`lookup_city_layers` only derives coarser from finer, so they found
+    nothing and the channels came back as zeros (audit 2026-10-05).
+
+    The best candidate (exact bbox first, then the smallest enclosing one) is
+    clipped to the bbox and filtered at ``min_area``; it is not re-simplified.
+    """
+    for cand in _candidates(north, south, east, west, _ANY_TOLERANCE_M, min_area):
+        # Not _usable(): an older payload (e.g. without height sources) still
+        # has the right geometry to rasterise, and the exact-key read this
+        # replaces served it as well.
+        src = read_osm_cache(cand["key"]) or {}
+        if not any(_is_fc(src.get(n)) for n in ("buildings", "roads", "waterways", "walls")):
+            continue
+        tol = float(cand["tol"])
+        if _bbox4(cand["north"], cand["south"], cand["east"], cand["west"]) \
+                == _bbox4(north, south, east, west) and float(cand["min_area"]) == min_area:
+            return src, cand["key"]
+        return (derive_city_payload(src, tol, float(cand["min_area"]),
+                                    north, south, east, west, tol, float(min_area)),
+                cand["key"])
+    return {}, None
+

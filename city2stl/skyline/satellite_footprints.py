@@ -385,10 +385,12 @@ def merge_satellite_into_osm(
         # Stable id derived from polygon WKT — re-running on the same
         # tile produces the same ids.
         fid = "ms_" + hashlib.md5(sg.wkt.encode("utf-8")).hexdigest()[:8]
-        try:
-            area_m2 = _polygon_area_m2(sg)
-        except Exception:
-            area_m2 = float(sg.area)
+        # _polygon_area_m2 takes a lon/lat ring, not a shapely geometry.
+        # Passing the polygon raised, and the old fallback stored sg.area
+        # in deg² (~1e-7), which made _height_proxy return 0.6 m for every
+        # satellite record (audit 2026-10-05).
+        parts = list(getattr(sg, "geoms", [sg]))
+        area_m2 = sum(_polygon_area_m2(list(p.exterior.coords)) for p in parts)
         # Surface a Microsoft-derived height when the source had one
         # (US tiles; -1 elsewhere → None here). Tagged satellite records
         # get the same downstream treatment as OSM-tagged ones.
