@@ -188,3 +188,64 @@ def test_depth_model_ignores_outliers():
     a, b = fd.fit_depth_model(d, z)
     assert a == pytest.approx(120.0, rel=0.02)
     assert b == pytest.approx(0.02, abs=0.003)
+
+
+def test_ground_map_draws_roads_parks_and_the_water_around_the_camera():
+    from shapely.geometry import Polygon
+
+    shore = LineString([_ll(-3000, 200), _ll(3000, 200)])                    # land to the north
+    road = LineString([_ll(-500, 400), _ll(500, 400)])
+    park = Polygon([_ll(100, 500), _ll(300, 500), _ll(300, 700), _ll(100, 700)])
+    g = fd.ground_map(LAT, LON, coast_lines=[shore], roads=[(road, 12.0)], green=[park],
+                      half_m=1000.0, res_m=2.0)
+
+    def at(x, y):
+        return g.codes[int((g.half_m - y) / g.res_m), int((x + g.half_m) / g.res_m)]
+
+    assert at(0, -300) == fd.G_WATER and at(0, 150) == fd.G_WATER
+    assert at(0, 300) == fd.G_LAND and at(0, 400) == fd.G_ROAD and at(200, 600) == fd.G_GREEN
+
+
+def test_ground_fit_recovers_the_camera_position():
+    """The waterline barely fixes the position along the shore; streets and a park pin it."""
+    half, res, h, true = 800.0, 2.0, 60.0, (40.0, -30.0)
+    n = int(2 * half / res)
+    yy, xx = np.mgrid[0:n, 0:n]
+    x, y = xx * res - half + res / 2, half - yy * res - res / 2
+    codes = np.full((n, n), fd.G_WATER, np.uint8)
+    land = y > 120 + 0.3 * x                                   # a slanted shore
+    codes[land] = fd.G_LAND
+    codes[land & ((np.abs(x % 90) < 6) | (np.abs(y % 110) < 6))] = fd.G_ROAD
+    codes[land & (x > 100) & (x < 220) & (y > 300) & (y < 420)] = fd.G_GREEN
+    gmap = fd.GroundMap(codes, LAT, LON, half, res)
+    label_of = {fd.G_WATER: WATER, fd.G_LAND: 13, fd.G_ROAD: 6, fd.G_GREEN: 9}
+    labels = np.full((H, W), SKY)
+    pano, _ = _pano(labels, None, offset=180.0)
+    elev = np.degrees(np.arctan((H / 2.0 - np.arange(H)) / F))
+    rows = np.flatnonzero(elev < -0.2)
+    d = h / np.tan(np.radians(-elev[rows]))[:, None]
+    b = np.radians(pano.frame_heading)[None, :]
+    ci = np.clip(((true[0] + d * np.sin(b) + half) / res).astype(int), 0, n - 1)
+    ri = np.clip(((half - true[1] - d * np.cos(b)) / res).astype(int), 0, n - 1)
+    pano.labels[rows] = np.vectorize(label_of.get)(codes[ri, ci])
+    fit = fd.fit_position_from_ground(pano, fd.PanoPose(0.0, h, 0.0, 0.0, 0), gmap, search_m=90.0)
+    assert (fit.dx_m, fit.dy_m) == (pytest.approx(true[0], abs=6.0), pytest.approx(true[1], abs=6.0))
+    assert fit.camera_h_m == pytest.approx(h, rel=0.05)
+    assert fit.score > fit.score_at_seed
+
+
+def test_a_podium_is_not_read_as_the_tower_mapped_inside_it():
+    """Plaza Bocagrande: a mall footprint with a tower mapped inside it read 180 m (tag 45 m).
+    The tower's columns belong to the tower; the podium is read on the rest."""
+    got = _measure([("podium", 0.0, 300.0, 20.0, 40.0, True), ("tower", 0.0, 320.0, 120.0, 15.0, True)])
+    assert got["podium"].height_m == pytest.approx(20.0, abs=3.0)
+    assert got["tower"].height_m == pytest.approx(120.0, abs=6.0)
+
+
+def test_fusion_averages_agreeing_seeds_and_outvotes_a_far_misread():
+    near = {"footprint": 7, "name": "a", "height_m": 26.0, "dist_m": 600.0, "base_visible": True,
+            "visible_frac": 0.9}
+    far = dict(near, height_m=111.0, dist_m=1116.0)                  # read the tower behind
+    close = dict(near, height_m=28.0, dist_m=700.0, base_visible=False, visible_frac=0.6)
+    got = fd.fuse_heights({"seed_1": [near], "seed_5": [far], "seed_9": [close]})[7]
+    assert 26.0 < got["height_m"] < 27.0 and got["disputed"] and got["used"] == ["seed_1", "seed_9"]

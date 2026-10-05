@@ -430,3 +430,37 @@ seed_1 --out <dir>`. It needs the Street View API on a capture-cache miss, a GPU
     1/distance.
   - Then replace the pano path for elevated seeds in the region report, and fix the F-DET1
     fragment count.
+
+### Progress, 2026-10-05
+
+- **Camera position from parks, streets and water (the user's idea), tested.**
+  - New code: `ground_map` (OSM water, roads, green and buildings on a 2 m grid),
+    `fit_position_from_ground` (the image's ground pixels cast onto it; IoU of water, road
+    and green), `GroundMap.shore_distances` and `waterline_position_scan`.
+  - Script flag: `18_footprint_detect --position-check`, which reports and does not move.
+  - Result on the Cartagena seeds: no move.
+    - seed_5: the waterline misfit is lowest at the seed position, 0.39°. It rises to 1.8°
+      150 m north, so the waterline pins the position across the shore, but only to 0.58°
+      150 m east, so it pins it loosely along the shore.
+    - seed_5: the ground-class fit would move the camera 124 m, to where the waterline misfit is
+      1.17°. Building bases and seed_1 agreement are also best at the seed position.
+    - seed_1: both scores are flat; no evidence either way.
+  - Why no move: from 98 m over the bay, buildings hide nearly all the streets, leaving water,
+    the beach strip and a few parks. **Decision:** keep the seed position when the waterline
+    fits. Use the ground fit only for seeds over land, and only where it agrees with the
+    waterline.
+- **Measurement fixes:**
+  - **Single-row runs** no longer count; they had read 0.9–2.7 m for whole buildings.
+  - **Nested footprints:** a footprint holding smaller ones is measured on the columns its inner
+    footprints leave free. The test podium read 116 m (its tower) before the fix and 20 m after.
+- **Fusion** (`fuse_heights`):
+  - Seeds within 25% are averaged, weighted by visibility over distance squared. Otherwise the
+    most reliable seed wins and the footprint is marked disputed.
+  - Why: of the 12 footprints both seeds measured, the seed 1.1–2.5 km away misread most
+    disagreements (13 against 81 m, 26 against 111 m). seed_1 (400–600 m) is 17 m off the OSM
+    tags, seed_5 56 m off.
+  - Combined: 326 footprints, 23 OSM-tagged, median 28 m off the tags.
+  - `compare_<a>_<b>.png` shows every shared footprint in both panos.
+- **Cross-seed agreement doesn't show progress any more.** 12 shared footprints, 25–36% within
+  25%, moving with small pose changes. Only 5 pairs have both seeds within 1 km. The check
+  needs more seeds near the same blocks, or the drone-photo height anchors.
