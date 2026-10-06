@@ -273,6 +273,10 @@ Height accuracy is scored on surveyed truth, never on Cartagena (no open survey;
   answered, "not covered" included): a failed source (3D Tiles without a Google key counts as
   failed, `benchmark.py::TilesUnavailable`) or a `--no-tiles` run is scored but not
   saved. `--refresh-truth` re-measures cached footprints.
+- A 3D Tiles area without a building mesh (Cartagena: terrain only) is not covered: when the
+  report's OSM-tagged towers (>= 30 m) mostly read under 30 % of their tag, per tile and over the
+  region, the tiles readings are dropped, cached records included (`benchmark.py::flat_mesh`,
+  records marked `tiles_flat`). `10_benchmark` passes the tags; no new reads are needed.
 - Output: `runs/benchmark/<stamp>/summary.json` (MAE, median AE, bias, within 15/25 %, per height
   band, per view and seed count, and how far OSM tags sit from truth) and one printed table.
 - Same flags every run: each region's process gets `scripts/10_benchmark.py::PINNED_FLAGS` (the

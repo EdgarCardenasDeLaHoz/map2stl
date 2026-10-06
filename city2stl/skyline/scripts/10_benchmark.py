@@ -119,8 +119,11 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
     if provider is None:
         logging.warning("[bench] %s is not a benchmark region; scoring with 3D Tiles only",
                         region)
+    tags = {b["key"]: float(b["height_tag_m"]) for b in buildings
+            if b.get("height_tag_m") is not None and b.get("height_source") != "default"}
     truth = bm.footprint_truth(region, {b["key"]: b["footprint_lonlat"] for b in buildings},
-                               provider, use_tiles=use_tiles, refresh=refresh_truth)
+                               provider, use_tiles=use_tiles, refresh=refresh_truth,
+                               tags_m=tags)
     result = {"region": region, "report": str(heights), "survey": provider,
               **bm.score_buildings(buildings, truth)}
     sv = bm.street_view_buildings(buildings)

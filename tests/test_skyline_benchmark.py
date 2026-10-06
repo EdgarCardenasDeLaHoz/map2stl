@@ -558,3 +558,62 @@ def test_tiles_with_a_key_and_no_coverage_is_still_none():
             return False
 
     assert bm.tiles_ndsm((1.0, 0.0, 1.0, 0.0), provider=Uncovered()) is None
+
+
+def test_flat_mesh_rule():
+    tags = {"a": 150.0, "b": 200.0, "c": 125.0, "d": 12.0}
+    assert bm.flat_mesh({"a": 9.0, "b": 15.0, "c": 4.0, "d": 11.0}, tags)       # towers read flat
+    assert not bm.flat_mesh({"a": 148.0, "b": 15.0, "c": 120.0}, tags)          # mostly right
+    assert not bm.flat_mesh({"a": 9.0, "b": 15.0}, tags)                        # too few towers
+    assert not bm.flat_mesh({"a": 9.0, "b": 15.0, "c": 4.0}, {})                # no tags: no say
+
+
+def test_flat_tiles_are_not_cached_as_truth(tmp_path, monkeypatch):
+    """T40: a 3D Tiles area without a building mesh (Cartagena) reads every footprint near
+    the ground. With the OSM tags, the tile is not covered: no tiles_only record."""
+    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    flat, t, _ = _grid()
+    for x in (20, 60, 100, 140):
+        _paint(flat, x, 20, 25, 25, 8.0)          # towers tagged 150 m, tiles say 8 m
+    monkeypatch.setattr(bm, "tiles_ndsm", lambda bbox, res, provider: (flat, t))
+    fps = {k: _ring(x, 20, 25, 25) for k, x in zip("ABCD", (20, 60, 100, 140), strict=True)}
+    tags = dict.fromkeys("ABC", 150.0)
+    truth = bm.footprint_truth("Flatville", fps, None, tags_m=tags)
+    assert all(r["status"] == "unmeasured" and r["tiles_m"] is None and r["tiles_flat"]
+               for r in truth.values())
+    cached = bm.load_truth_cache("Flatville")
+    assert set(cached) == set("ABCD") and all(r["status"] == "unmeasured" for r in cached.values())
+
+
+def test_cached_flat_records_are_dropped_without_new_reads(tmp_path, monkeypatch):
+    """Records cached before T40 (tiles_only from a flat mesh) are dropped on the next
+    scoring with tags, from the cache too, without fetching anything."""
+    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    old = {k: {"survey_m": None, "survey_cells": 0, "tiles_m": v, "tiles_cells": 40,
+               "status": "tiles_only", "truth_m": v}
+           for k, v in zip("ABCD", (7.0, 12.0, 3.0, 9.0), strict=True)}
+    bm.save_truth_cache("Flatville", old)
+
+    def no_fetch(*a, **k):
+        raise AssertionError("cached records must not be fetched again")
+
+    monkeypatch.setattr(bm, "tiles_ndsm", no_fetch)
+    monkeypatch.setattr(bm, "survey_ndsm", no_fetch)
+    fps = {k: _ring(20, 20, 25, 25) for k in "ABCD"}
+    truth = bm.footprint_truth("Flatville", fps, None, tags_m=dict.fromkeys("ABC", 180.0))
+    assert {r["status"] for r in truth.values()} == {"unmeasured"}
+    assert all(r["tiles_m"] is None for r in bm.load_truth_cache("Flatville").values())
+    # without tags nothing changes: the rule needs towers to judge by
+    bm.save_truth_cache("Flatville", old)
+    assert bm.footprint_truth("Flatville", fps, None)["A"]["status"] == "tiles_only"
+
+
+def test_real_mesh_is_kept_with_tags(tmp_path, monkeypatch):
+    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    tall, t, _ = _grid()
+    for x in (20, 60, 100):
+        _paint(tall, x, 20, 25, 25, 150.0)
+    monkeypatch.setattr(bm, "tiles_ndsm", lambda bbox, res, provider: (tall, t))
+    fps = {k: _ring(x, 20, 25, 25) for k, x in zip("ABC", (20, 60, 100), strict=True)}
+    truth = bm.footprint_truth("Towerville", fps, None, tags_m=dict.fromkeys("ABC", 150.0))
+    assert all(r["status"] == "tiles_only" for r in truth.values())

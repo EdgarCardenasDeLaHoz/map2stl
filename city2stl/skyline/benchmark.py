@@ -279,9 +279,40 @@ def save_truth_cache(region: str, truth: dict) -> None:
     p.write_text(json.dumps(truth, indent=1, sort_keys=True), encoding="utf-8")
 
 
+#: A 3D Tiles area without a building mesh (T40). Cartagena's tiles are terrain only: all
+#: 900 truth records read 0-19 m while its towers are 125-202 m (published). Such an area is
+#: recognised by its OSM-tagged towers: when at least ``FLAT_MIN_TOWERS`` footprints tagged
+#: ``FLAT_TAG_MIN_M`` or taller have a tiles reading and ``FLAT_SHARE`` of them read under
+#: ``FLAT_READ_SHARE`` of their tag, the tiles there are "not covered", not truth.
+FLAT_TAG_MIN_M = 30.0
+FLAT_READ_SHARE = 0.3
+FLAT_MIN_TOWERS = 3
+FLAT_SHARE = 0.8
+
+
+def flat_mesh(tiles_m: dict[str, float | None], tags_m: dict[str, float]) -> bool:
+    """Whether 3D Tiles readings ``tiles_m`` (key -> m) come from a mesh without buildings,
+    judged on the OSM height tags ``tags_m`` (key -> m) of the same footprints."""
+    pairs = [(tiles_m[k], t) for k, t in tags_m.items()
+             if t is not None and t >= FLAT_TAG_MIN_M and tiles_m.get(k) is not None]
+    if len(pairs) < FLAT_MIN_TOWERS:
+        return False
+    low = sum(1 for v, t in pairs if v < FLAT_READ_SHARE * t)
+    return low >= FLAT_SHARE * len(pairs)
+
+
+def _drop_tiles(rec: dict) -> dict:
+    """``rec`` with its 3D Tiles reading removed (a flat mesh: not covered) and reclassified."""
+    rec = {**rec, "tiles_m": None, "tiles_cells": 0, "tiles_flat": True}
+    rec["status"], truth_m = classify(rec.get("survey_m"), None)
+    rec["truth_m"] = None if truth_m is None else round(truth_m, 2)
+    return rec
+
+
 def footprint_truth(region: str, footprints: dict[str, list], survey_provider: str | None,
                     *, use_tiles: bool = True, resolution_m: float = RESOLUTION_M,
-                    tiles_provider=None, refresh: bool = False) -> dict[str, dict]:
+                    tiles_provider=None, refresh: bool = False,
+                    tags_m: dict[str, float] | None = None) -> dict[str, dict]:
     """Truth record per footprint key, from the region cache plus any missing tiles.
 
     ``footprints``: key (``footprint_key``) → lon/lat ring. Returns key → ``{survey_m,
@@ -292,6 +323,11 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
     unless ``use_tiles`` is False) answered, "not covered" included. A source that raised,
     or a ``--no-tiles`` run, is scored this time but not saved, so it cannot pin a
     survey-only or tiles-only record for good. ``refresh`` re-measures cached footprints.
+
+    ``tags_m`` (key -> OSM height tag) enables the flat-mesh test (``flat_mesh``, T40): per
+    tile, and over all of the region's records (cached ones included, so old records from a
+    flat mesh are dropped without new reads), 3D Tiles from a mesh without buildings are
+    treated as not covered. Such records carry ``tiles_flat``.
     """
     cache = load_truth_cache(region)
     todo = {k: _erode(_polygon(ring), ERODE_M) for k, ring in footprints.items()
@@ -315,6 +351,7 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
             except Exception as exc:
                 complete = False
                 logger.warning("[bench] 3D Tiles failed on %s: %s", tile.bbox, exc)
+        recs: dict[str, dict] = {}
         for k in tile.keys:
             rec: dict = {}
             for src in ("survey", "tiles"):
@@ -324,6 +361,13 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
                 rec[f"{src}_cells"] = cells
             rec["status"], truth_m = classify(rec["survey_m"], rec["tiles_m"])
             rec["truth_m"] = None if truth_m is None else round(truth_m, 2)
+            recs[k] = rec
+        if tags_m and flat_mesh({k: r["tiles_m"] for k, r in recs.items()}, tags_m):
+            logger.warning("[bench] %s tile %d/%d: 3D Tiles have no building mesh here "
+                           "(tagged towers read flat); treated as not covered", region, i,
+                           len(tiles))
+            recs = {k: _drop_tiles(r) for k, r in recs.items()}
+        for k, rec in recs.items():
             fresh[k] = rec
             if complete:
                 cache[k] = rec
@@ -332,7 +376,18 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
         else:
             logger.info("[bench] %s tile %d/%d not cached (a source failed or was skipped)",
                         region, i, len(tiles))
-    return {k: fresh.get(k, cache.get(k)) for k in footprints if k in fresh or k in cache}
+    out = {k: fresh.get(k, cache.get(k)) for k in footprints if k in fresh or k in cache}
+    if tags_m and flat_mesh({k: r.get("tiles_m") for k, r in out.items()}, tags_m):
+        # the whole region's tiles are a flat mesh: drop them from every record, cached ones
+        # too (no new reads), so no tiles-only "truth" survives from it
+        logger.warning("[bench] %s: 3D Tiles have no building mesh in this region; "
+                       "tiles readings dropped from %d records", region, len(cache))
+        cache = {k: _drop_tiles(r) if r.get("tiles_m") is not None else r
+                 for k, r in cache.items()}
+        save_truth_cache(region, cache)
+        out = {k: _drop_tiles(r) if r.get("tiles_m") is not None else r
+               for k, r in out.items()}
+    return out
 
 
 # --------------------------------------------------------------------------- scoring
