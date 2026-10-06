@@ -25,7 +25,8 @@ hands the kept measurements to ``aggregate_building_heights`` as ordinary estima
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -37,8 +38,17 @@ from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResul
 
 logger = logging.getLogger(__name__)
 
-#: Below this waterline-fitted camera height the seed is not a drone: use the street path.
+#: Below this waterline-fitted camera height the seed is not a drone: use the street path --
+#: unless the OSM towers' outline fits a drone camera (:data:`OUTLINE_ONLY_H_M`).
 MIN_ELEVATED_H_M = 15.0
+#: Camera height search of the tower-outline refinement, as factors of the waterline height.
+HEIGHT_FACTORS = (0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25)
+#: A drone right over a peninsula sees its near shore below the frame (-33 deg at the default
+#: capture), so the waterline fit only finds the far shore and a camera a few metres up
+#: (Cartagena seed_6, 2026-10-06). Such a seed is fitted from the tower outline alone, from
+#: these heights; kept when the outline misfit is under OUTLINE_ONLY_MAX_MISFIT_DEG.
+OUTLINE_ONLY_H_M = (40.0, 60.0, 80.0, 100.0, 130.0, 160.0, 200.0, 250.0)
+OUTLINE_ONLY_MAX_MISFIT_DEG = 1.5
 #: Ground map around the seed: the position search (+-600 m) plus 4 km of shore rays.
 GROUND_HALF_M, GROUND_RES_M = 4800.0, 3.0
 #: High-resolution capture of a drone seed (:func:`capture_hires_views`): 30-deg views (21 px
@@ -250,23 +260,57 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
     except ValueError as exc:
         logger.warning("[elevated] %s: %s", seed.name, exc)
         return None
-    if pose0.camera_h_m < MIN_ELEVATED_H_M:
+    towers = _towers(buildings)
+    outline_only = pose0.camera_h_m < MIN_ELEVATED_H_M
+    if outline_only and towers is None:
         logger.warning("[elevated] %s: waterline puts the camera %.0f m up; not a drone view",
                        seed.name, pose0.camera_h_m)
         return None
-    pf = fd.fit_camera_position(pano, pose0, gmap)
+    if outline_only:
+        logger.warning("[elevated] %s: waterline puts the camera %.0f m up; trying the tower "
+                       "outline alone", seed.name, pose0.camera_h_m)
+        h0 = OUTLINE_ONLY_H_M[0]
+        pose0 = replace(pose0, camera_h_m=h0)
+        pf = fd.PositionFit(0.0, 0.0, pose0, pose0.misfit_deg, pose0.misfit_deg, math.nan,
+                            math.nan, "tower outline")
+        factors = tuple(h / h0 for h in OUTLINE_ONLY_H_M)
+    else:
+        pf = fd.fit_camera_position(pano, pose0, gmap)
+        factors = HEIGHT_FACTORS
     logger.info("[elevated] %s: camera %s, %+.0f m E %+.0f m N of the recorded position, %.0f m "
                 "up, heading offset %.1f deg; waterline misfit %.2f -> %.2f deg, ground %.3f -> %.3f",
                 seed.name, pf.source, pf.dx_m, pf.dy_m, pf.pose.camera_h_m, pf.pose.offset_deg,
                 pf.waterline_at_seed_deg, pf.waterline_deg, pf.ground_at_waterline, pf.ground)
+    recorded = pano
     pano = fd.moved(pano, pf.dx_m, pf.dy_m)
     pose = pf.pose
-    towers = _towers(buildings)
-    if towers is not None:                      # the bearing the waterline leaves loose
-        of = fd.refine_on_outline(pano, pose, towers)
+    if towers is not None:                      # the bearing (and height) the waterline leaves loose
+        if outline_only:                        # no usable heading either: full circle first
+            wide = fd.refine_on_outline(pano, pose, towers, search_deg=180.0, step_deg=1.0,
+                                        move_m=0.0, height_factors=factors, min_gain_deg=0.0)
+            pose = wide.pose
+            factors = (0.85, 0.92, 1.0, 1.08, 1.15)
+        of = fd.refine_on_outline(pano, pose, towers, height_factors=factors)
+        if not outline_only and (pf.dx_m, pf.dy_m) != (0.0, 0.0):
+            # a high drone's waterline can pull the camera hundreds of metres (seed_7: 340 m);
+            # keep the recorded position when the towers fit it better
+            at_rec = fd.refine_on_outline(recorded, pf.pose, towers, height_factors=factors)
+            # and on as many tower columns: from 180 m up, 87 columns fitted 0.06 deg by
+            # turning to the edge of the search (seed_7, 2026-10-06)
+            if (at_rec.misfit_deg < of.misfit_deg - 0.3
+                    and at_rec.n_cols >= max(150, 0.8 * of.n_cols)):
+                logger.info("[elevated] %s: tower outline fits the recorded position better "
+                            "(%.2f vs %.2f deg)", seed.name, at_rec.misfit_deg, of.misfit_deg)
+                pano, of = recorded, at_rec
+                pf = replace(pf, dx_m=0.0, dy_m=0.0, source=pf.source + ", recorded by outline")
+        if outline_only and not (of.misfit_deg <= OUTLINE_ONLY_MAX_MISFIT_DEG):
+            logger.warning("[elevated] %s: tower outline misfit %.2f deg; not a drone view",
+                           seed.name, of.misfit_deg)
+            return None
         logger.info("[elevated] %s: tower outline moves the bearing %+.1f deg and the camera "
-                    "%+.0f m E %+.0f m N; misfit %.2f -> %.2f deg over %d cols", seed.name,
-                    of.shift_deg, of.dx_m, of.dy_m, of.misfit_before_deg, of.misfit_deg, of.n_cols)
+                    "%+.0f m E %+.0f m N, %.0f m up; misfit %.2f -> %.2f deg over %d cols",
+                    seed.name, of.shift_deg, of.dx_m, of.dy_m, of.pose.camera_h_m,
+                    of.misfit_before_deg, of.misfit_deg, of.n_cols)
         pano, pose = fd.moved(pano, of.dx_m, of.dy_m), of.pose
     if device is None:
         import torch

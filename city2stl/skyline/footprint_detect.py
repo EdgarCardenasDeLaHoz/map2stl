@@ -425,13 +425,14 @@ class OutlineFit:
 
 
 def outline_misfit(pano: Pano, pose: PanoPose, model: np.ndarray, shift_deg: float = 0.0,
-                   min_elev_deg: float = 3.0) -> tuple[float, int]:
+                   min_elev_deg: float = 3.0, top_rows: np.ndarray | None = None) -> tuple[float, int]:
     """Median |observed outline - OSM tower outline| (deg) over the columns where the towers
     rise above ``min_elev_deg``, and that column count. ``model``: ``skyline_match.predicted_outline``
     from the camera; the observed outline is each column's first non-sky row."""
     from .skyline_match import BIN_DEG, N_BINS
 
-    top = np.argmax(pano.labels != SKY_CLASS, axis=0).astype(float)
+    top = (np.argmax(pano.labels != SKY_CLASS, axis=0).astype(float) if top_rows is None
+           else top_rows)                       # callers in a search pass it once
     obs = pano.elevation_deg(top) + pose.pitch_fix_deg
     bear = (pano.frame_heading + pose.offset_deg + shift_deg) % 360.0
     pred = model[np.round(bear / BIN_DEG).astype(int) % N_BINS]
@@ -443,7 +444,8 @@ def outline_misfit(pano: Pano, pose: PanoPose, model: np.ndarray, shift_deg: flo
 
 def refine_on_outline(pano: Pano, pose: PanoPose, towers, search_deg: float = 10.0,
                       step_deg: float = 0.2, move_m: float = 150.0, move_step_m: float = 50.0,
-                      min_cols: int = 50, min_gain_deg: float = 0.3) -> OutlineFit:
+                      min_cols: int = 50, min_gain_deg: float = 0.3,
+                      height_factors=(1.0,)) -> OutlineFit:
     """Bearing (and a small position nudge) from the OSM-tagged towers' outline.
 
     The waterline pins the camera height and pitch but leaves the bearing loose: on the three
@@ -453,6 +455,11 @@ def refine_on_outline(pano: Pano, pose: PanoPose, towers, search_deg: float = 10
     one by up to ``search_deg`` and moves the camera up to ``move_m``; kept only when the
     misfit drops by ``min_gain_deg``. 2026-10-05: published tower heights MAE 82.5 -> 32.9 m,
     readings within 25 % of their tag 19 -> 40 %.
+
+    ``height_factors`` also searches the camera height (x the given one): from a drone high
+    over the city the waterline height can be far off, and a tower's elevation above the
+    horizon depends on it as much as on the bearing (2026-10-06, Cartagena seed_7: waterline
+    180 m up, no tower left above 3 deg, so no outline to fit).
     """
     from dataclasses import replace
 
@@ -460,34 +467,40 @@ def refine_on_outline(pano: Pano, pose: PanoPose, towers, search_deg: float = 10
 
     cam0 = np.array(towers.to_xy(pano.lat, pano.lon), float)
     model0 = predicted_outline(towers, tuple(cam0), h_cam=pose.camera_h_m)
-    before, n0 = outline_misfit(pano, pose, model0)
-    best = (before, 0.0, 0.0, 0.0, n0)
+    top = np.argmax(pano.labels != SKY_CLASS, axis=0).astype(float)
+    before, n0 = outline_misfit(pano, pose, model0, top_rows=top)
+    best = (before if n0 >= min_cols else math.inf, 0.0, 0.0, 0.0, n0, 1.0)
     steps = np.arange(-move_m, move_m + 1e-6, move_step_m)
-    for dx in steps:
-        for dy in steps:
-            model = model0 if dx == 0 and dy == 0 else predicted_outline(
-                towers, tuple(cam0 + (dx, dy)), h_cam=pose.camera_h_m)
-            for s in np.arange(-search_deg, search_deg + 1e-6, step_deg):
-                e, n = outline_misfit(pano, pose, model, s)
-                if n >= min_cols and e < best[0]:
-                    best = (e, float(s), float(dx), float(dy), n)
+    for hf in height_factors:
+        hp = replace(pose, camera_h_m=pose.camera_h_m * hf)
+        for dx in steps:
+            for dy in steps:
+                model = model0 if dx == 0 and dy == 0 and hf == 1.0 else predicted_outline(
+                    towers, tuple(cam0 + (dx, dy)), h_cam=hp.camera_h_m)
+                for s in np.arange(-search_deg, search_deg + 1e-6, step_deg):
+                    e, n = outline_misfit(pano, hp, model, s, top_rows=top)
+                    if n >= min_cols and e < best[0]:
+                        best = (e, float(s), float(dx), float(dy), n, float(hf))
     # then a finer pass around the best: the readings of towers deep in a cluster change with
     # tens of metres (Cartagena seed_4 from two starts 100 m apart: Gran Bay 155 vs 84 m)
-    if move_m > 0 and best[1:] != (0.0, 0.0, 0.0):
-        _e, s0, dx0, dy0, _n = best
+    if move_m > 0 and math.isfinite(best[0]) and best[1:4] != (0.0, 0.0, 0.0):
+        _e, s0, dx0, dy0, _n, hf = best
+        hp = replace(pose, camera_h_m=pose.camera_h_m * hf)
         fine = np.arange(-move_step_m, move_step_m + 1e-6, move_step_m / 5)
         for ddx in fine:
             for ddy in fine:
                 model = predicted_outline(towers, tuple(cam0 + (dx0 + ddx, dy0 + ddy)),
-                                          h_cam=pose.camera_h_m)
+                                          h_cam=hp.camera_h_m)
                 for s in np.arange(s0 - step_deg, s0 + step_deg + 1e-6, step_deg / 4):
-                    e, n = outline_misfit(pano, pose, model, s)
+                    e, n = outline_misfit(pano, hp, model, s, top_rows=top)
                     if n >= min_cols and e < best[0]:
-                        best = (e, float(s), float(dx0 + ddx), float(dy0 + ddy), n)
-    if before - best[0] < min_gain_deg:
+                        best = (e, float(s), float(dx0 + ddx), float(dy0 + ddy), n, hf)
+    gain = (before if n0 >= min_cols else math.inf) - best[0]
+    if not math.isfinite(best[0]) or gain < min_gain_deg:
         return OutlineFit(0.0, 0.0, pose, 0.0, before, before, n0)
-    e, s, dx, dy, n = best
-    return OutlineFit(dx, dy, replace(pose, offset_deg=(pose.offset_deg + s) % 360.0), s, before, e, n)
+    e, s, dx, dy, n, hf = best
+    return OutlineFit(dx, dy, replace(pose, offset_deg=(pose.offset_deg + s) % 360.0,
+                                      camera_h_m=pose.camera_h_m * hf), s, before, e, n)
 
 
 @dataclass(frozen=True)

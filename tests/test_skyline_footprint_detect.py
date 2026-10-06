@@ -383,3 +383,33 @@ def test_building_instances_is_none_without_mobilesam(monkeypatch):
 
     monkeypatch.setattr(sg, "_ensure_mobilesam", lambda: False)
     assert bi.building_instances(np.zeros((8, 8, 3), np.uint8), np.ones((8, 8), bool)) is None
+
+
+def test_refine_on_outline_recovers_the_camera_height():
+    """A drone 100 m up given as 160 m (Cartagena seed_7's waterline put it 180 m up): with a
+    height search the tower outline gives the height back along with the bearing."""
+    from city2stl.skyline import skyline_match as sm
+
+    rng = np.random.default_rng(5)
+    verts, hs = [], []
+    for _ in range(40):
+        cx, cy = rng.uniform(-900, 900), rng.uniform(300, 1500)
+        w = rng.uniform(15, 35)
+        verts.append(np.array([[cx - w, cy - w], [cx + w, cy - w], [cx + w, cy + w], [cx - w, cy + w], [cx - w, cy - w]]))
+        hs.append(rng.uniform(120, 220))
+    towers = sm.Towers(10.40, -75.55, verts, np.array(hs), [f"t{i}" for i in range(40)])
+    lat, lon = towers.to_ll(0.0, 0.0)
+    W, H, f_px = 1800, 900, 1800 / (2 * np.pi)
+    model = sm.predicted_outline(towers, (0.0, 0.0), h_cam=100.0)
+    bear = np.arange(W) * 360.0 / W
+    labels = np.full((H, W), 1, dtype=np.uint8)
+    for x, b in enumerate(bear):
+        e = model[int(round(b / sm.BIN_DEG)) % sm.N_BINS]
+        row = int(round(H / 2 - f_px * np.tan(np.radians(max(e, -5.0)))))
+        labels[:max(row, 0), x] = fd.SKY_CLASS
+    pano = fd.Pano("p", lat, lon, np.zeros((H, W, 3), np.uint8), labels, (bear - 2.0) % 360.0, f_px, 0.0)
+    pose = fd.PanoPose(0.0, 160.0, 0.0, 0.1, W)
+    fit = fd.refine_on_outline(pano, pose, towers, move_m=0.0,
+                               height_factors=(0.5, 0.5625, 0.625, 0.75, 1.0))
+    assert fit.pose.camera_h_m == pytest.approx(100.0)
+    assert abs(fit.shift_deg - 2.0) <= 0.2
