@@ -583,3 +583,17 @@ def test_a_published_height_goes_to_the_tower_not_the_podium_around_it():
     got, why = match_known_tower(15 / 111_320.0, 230 / 111_320.0, 202.0,
                                  "Hotel Estelar Bocagrande", [lone, row("y", "", None, 240, 0, 260, 30)])
     assert got["feature_id"] == "x" and why == "name"
+
+
+def test_the_report_loads_cartagenas_published_heights():
+    """The loader looked for sites/ inside _region_render/ and silently found nothing."""
+    from shapely.geometry import Point
+
+    from city2stl.skyline._core.types import BuildingRecord
+    from city2stl.skyline._region_render._pages import _load_known_heights
+
+    rec = BuildingRecord("b1", "", Point(-75.55125, 10.40974).buffer(0.0001), 10.40974, -75.55125,
+                         202.0, "osm_tag", 400.0)
+    got = _load_known_heights("cartagena", [rec])
+    assert len(got) >= 7
+    assert any(k["matched_id"] == "b1" for k in got)

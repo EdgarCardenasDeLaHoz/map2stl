@@ -442,8 +442,9 @@ def _load_known_heights(
     Returns a list of dicts with keys:
       name, ctbuh_m, floors, lat, lon, matched_id, matched_dist_m.
     """
-    cfg = Path(__file__).resolve().parent / \
-        "sites" / f"{region_name.lower()}.json"
+    # sites/ is beside the skyline package, one level up from _region_render/ (the split left
+    # this pointing at _region_render/sites, so no report had a known-heights table)
+    cfg = Path(__file__).resolve().parent.parent / "sites" / f"{region_name.lower()}.json"
     if not cfg.exists():
         return []
     try:
