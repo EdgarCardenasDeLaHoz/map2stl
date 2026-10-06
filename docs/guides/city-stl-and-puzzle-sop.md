@@ -31,8 +31,7 @@ right) → *Keys & data folders* (any 30 m source); server running
 
 **Quick path**: pick the region in Explore, then open **3 Extrude**. It loads the terrain with
 the region's own settings, sizes the model to fill your printer's bed and builds the 3D
-preview; download from the *Download* card. To start from a preset, pick a *Style* (City,
-Mountain, Region, Coast) in Edit → *Terrain* first. The steps below are the full route, for a
+preview; download from the *Download* card. The steps below are the full route, for a
 large model in puzzle pieces.
 
 How the app is laid out (since 2026-10-02):
@@ -79,27 +78,21 @@ refresh them). A red outline marks the control each step talks about.
    Abadía del Sacromonte 181 m out) and can be ignored. The card at the bottom: size,
    position, ✎ Edit box, Load DEM ›.*
 
-2. **Load terrain** (Edit → *Terrain*): Load DEM › (or the Edit tab) loads the DEM with the
-   region's saved (or default) settings. Click **Terrain** in the Layers list, then a
-   *Style*: *City*, *Mountain*, *Region* or *Coast*. A style sets source, detail, vertical
-   mode, layers and puzzle options; when it changes the projection or detail the terrain
-   reloads by itself, otherwise click **↺ Reload terrain**. The Terrain dot turns green and
-   shows the height range when it is loaded.
-   - *City* and *Region* also set **Projection → Cosine Correction**. With *Mountain*,
-     *Coast* or no style, check **Projection** yourself (switch on the ⚙ *Data sources &
-     fetch details* tool: 📥 Fetch tab → Projection). A region without saved settings
-     starts at *None* (Plate Carrée), which makes Granada 1000 × 575 px (a model 25 % too
-     wide) instead of 797 × 575.
-   - *Elevation source*: SRTM 30 m or Copernicus 30 m (the local file is ~90 m). Avoid
-     Copernicus **DSM** under OSM buildings: it already contains roofs.
-   - The same tool has the sampling note under *Resolution* (Granada: ~30 m → 113 × 65
-     real samples upsampled 8.8× to 797 × 575; at city scale every source is
-     interpolated, so less *Detail* loses no real detail) and *💾 Parameter Presets*,
-     whose ↩ reverts the last style.
+2. **Load terrain**: Load DEM › (or the Edit tab) loads the DEM with the region's saved (or
+   default) settings. Check three things, then click **↺ Reload terrain** if you changed the
+   source:
+   - **Canvas** (first row of the Layers list) → *Fetch*: **Projection** *Cosine Correction*
+     (the default since 2026-10-05; *None* makes Granada 1000 × 575 px, a model 25 % too
+     wide, instead of 797 × 575) and **Detail** 1000 points across. A change to either reloads
+     the terrain by itself.
+   - **Terrain** → *Fetch* → **Elevation source**: SRTM 30 m or Copernicus 30 m (the local
+     file is ~90 m). Avoid Copernicus **DSM** under OSM buildings: it already contains roofs.
+   - In the Layers list: **Buildings & roads** on; **Trails** only for hill paths (§3).
 
-   ![City preset](img/city/03-city-preset.png)
-   *Terrain selected: Style City, elevation source SRTM 30 m (Global), detail 1000 points
-   across.*
+   The Terrain dot turns green and shows the height range when it is loaded. At city scale
+   every source is interpolated (Granada: ~30 m → 113 × 65 real samples upsampled 8.8× to
+   797 × 575), so less *Detail* loses no real detail. *Saved presets* (Canvas → Fetch) saves
+   and reloads a whole setup.
 
    ![Load DEM](img/city/04-load-dem.png)
    *The terrain loaded: the Terrain dot is green with the height range (658 – 906 m); ↺
@@ -119,8 +112,7 @@ refresh them). A red outline marks the control each step talks about.
    *Rivers & lakes selected: in the model (switch on, HydroRIVERS · carved in), Most rivers
    (Strahler order 3 and up), depth and width ×1, lakes off.*
 
-4. **City data** (Edit → *Buildings & roads*): switch the layer on (the City style already
-   does); the OSM buildings, roads, water, rail and parks load and the dot turns green
+4. **City data** (Edit → *Buildings & roads*): switch the layer on; the OSM buildings, roads, water, rail and parks load and the dot turns green
    with the building count. First fetch 1–5 min, cached after. Click the layer for its
    parts (*Buildings*, *Roads*, *Water*, *Rail*, *Parks*), *Building height* (true height
    or ×), and roads *Raised* or *Engraved*.
@@ -159,7 +151,7 @@ refresh them). A red outline marks the control each step talks about.
    - **Printer**: your bed (default Ender 220 × 220); remembered in this browser.
    - **Width**: the model's width; it sets mm per pixel (797 px at 1 mm/px → 797 mm).
      **Fill bed** sizes the model to the bed in one piece; a new DEM is sized that way
-     unless *Split into pieces* is on (the City preset turns it on).
+     unless *Split into pieces* is on (turn it on for a city larger than the bed).
    - **Height**: vertical exaggeration (×1.0 = true scale); for regions over 20 km it is
      the relief height in mm instead (Vertical *auto* fits them).
    - **Base**: the solid plate under the terrain (10 mm).
@@ -240,9 +232,9 @@ mesh.
 
 | Situation | Layers on | Notes |
 |---|---|---|
-| Historic city (Granada) | all but trails (City preset) | trails optional: turn on for the hill paths (Granada: 219 fetched, 136 kept) |
-| Coastal city (Cartagena) | buildings, landmarks, roads, water, green | Coast preset caps the sea at 0 m, trails off |
-| Mountain town (Breckenridge) | buildings, roads, water, trails (Mountain preset: trails on) | green is 612 k faces on steep ground — leave it off |
+| Historic city (Granada) | all but trails | trails optional: turn on for the hill paths (Granada: 219 fetched, 136 kept) |
+| Coastal city (Cartagena) | buildings, landmarks, roads, water, green | cap the sea at 0 m (Extrude → *Sea level cap*), trails off |
+| Mountain town (Breckenridge) | buildings, roads, water, trails | green is 612 k faces on steep ground — leave it off |
 | Region > 20 km | none (terrain), water | see §6 |
 
 **Trails** are off by default and fetched only when the layer is on: turn them on for
@@ -332,9 +324,9 @@ those under 0.8 mm, which the slicer may thin out); extruded heights are capped 
 
 ## 6. Large regions (> 20 km)
 
-Buildings are below print resolution at these scales; build terrain only with the
-*Region* style (Vertical *auto* → fit, and the *Rivers & lakes* layer switched on in
-Edit; no Apply needed). Full procedure, reference results (Grand Canyon, Middle Rhine, Sierra
+Buildings are below print resolution at these scales; build terrain only
+(Vertical *auto* → fit, city layers off, the *Rivers & lakes* layer switched on in Edit; no
+Apply needed). Full procedure, reference results (Grand Canyon, Middle Rhine, Sierra
 Nevada), river-depth table and known limits: **[large-region-sop.md](large-region-sop.md)**.
 
 ## History

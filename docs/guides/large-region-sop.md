@@ -10,7 +10,7 @@ profile per river depth) and `<region>_oblique.png`.
 
 ## 1. Reference results (2026-09-27)
 
-Region preset: SRTM 30 m (SRTMGL1, longer side ≤ 100 km), 1000 px, cosine projection,
+Settings: SRTM 30 m (SRTMGL1, longer side ≤ 100 km), 1000 px, cosine projection,
 Vertical *auto* (→ *fit*, 30 mm relief), base 10 mm, 3×3 median, HydroRIVERS order ≥ 3,
 lakes ≥ 1 ha 2 m below the shore. 0.5 mm per pixel. Run through the app's routes
 (`/api/terrain/dem` → `/api/composite/dem-merge` → `/api/export/preflight` →
@@ -50,8 +50,8 @@ lakes ≥ 1 ha 2 m below the shore. 0.5 mm per pixel. Run through the app's rout
 **Prerequisites**: as in the city SOP (venv, OpenTopography key, server running). Rivers
 use HydroRIVERS, downloaded per continent on first use (§5); lakes use Overpass.
 
-**Quick path**: pick the region in Explore, choose the *Region* style in Edit → *Terrain*,
-then open **3 Extrude**: it loads the terrain, sizes the model to fill the bed and builds the
+**Quick path**: pick the region in Explore, switch *Buildings & roads* off and *Rivers &
+lakes* on in Edit, then open **3 Extrude**: it loads the terrain, sizes the model to fill the bed and builds the
 preview. Turn on *Split into pieces* for a print bigger than the bed.
 Check the *Rivers & lakes* layer in Edit (step 4): with its switch on they are in every preview
 and download. The Explore and Edit pages, Extrude's layout and the *More settings* switches are
@@ -70,21 +70,20 @@ refresh them). A red outline marks the control each step talks about.
    and position, with ✎ Edit box and Load DEM ›. Type in "Search regions…" to find it in a
    long list.*
 
-2. **Region style** (Edit → *Terrain* → *Style* → **Region**; **Load DEM ›** on the region's
-   card opens Edit and loads the DEM with the region's saved or default settings): sets
-   SRTM 30 m (≤ 100 km) or 90 m, 1000 points across, Vertical auto, city layers and puzzle
-   off, rivers + lakes on, and **Projection → Cosine Correction**. (The default for a
-   region without saved settings is *None* (Plate Carrée), which keeps the grid in
-   degrees — Grand Canyon 1000 × 454 px instead of 807 × 454, a model 24 % too wide
-   east-west — so check Projection if you skip the style: ⚙ *Data sources & fetch
-   details* tool → 📥 Fetch → Projection.)
+2. **Settings** (**Load DEM ›** on the region's card opens Edit and loads the DEM with the
+   region's saved or default settings):
+   - **Canvas** (first row of the Layers list) → *Fetch*: **Projection** *Cosine Correction*
+     (the default since 2026-10-05; *None* keeps the grid in degrees: Grand Canyon 1000 × 454
+     px instead of 807 × 454, a model 24 % too wide east-west) and **Detail** 1000 points
+     across.
+   - **Terrain** → *Fetch* → **Elevation source**: SRTM 30 m up to ~100 km across, SRTM 90 m
+     beyond (at 1000 px a 100 km box is 100 m per pixel, so 30 m data is already
+     downsampled 3×).
+   - In the Layers list: **Buildings & roads** and **Trails** off; **Rivers & lakes** on.
+   - Extrude → *Model*: **Vertical** *auto* and *Split into pieces* off.
 
-   ![Region preset](img/region/02-region-preset.png)
-   *Terrain selected: Style Region, elevation source SRTM 30 m (Global), detail 1000
-   points across; Rivers & lakes is switched on.*
-
-3. **Load the terrain**: the style reloads it by itself when it changes the projection or
-   detail; otherwise click **↺ Reload terrain**. ~13 s cold for 100 km, cached after. The
+3. **Load the terrain**: a Projection or Detail change reloads it by itself; after a new
+   elevation source click **↺ Reload terrain**. ~13 s cold for 100 km, cached after. The
    Terrain dot turns green with the height range. (The note under *Resolution*, in the
    *Data sources & fetch details* tool, compares the source's real samples with the grid:
    807 × 454 from 3960 × 1800 SRTM samples, downsampled.)
@@ -93,7 +92,7 @@ refresh them). A red outline marks the control each step talks about.
    *The terrain loaded: 577 – 2811 m; ↺ Reload terrain loads it again after a change.*
 
 4. **Rivers & lakes** (Edit → *Rivers & lakes*): its switch puts the rivers, lakes and open
-   water into the model (the Region style turns it on). Click the layer and set:
+   water into the model. Click the layer and set:
    - *Rivers*: **Most** (Strahler order 3 and up; *Big only* is 5 and up, *All* every
      stream).
    - **River depth ×** from the table below (the slider goes to ×10; up to ×20 in the
@@ -196,7 +195,7 @@ separate colour (§6).
   the server log only; Edit, the export and the pre-flight do not show it yet.
 - **Earth Engine**: open water (ESA) goes on with the *Rivers & lakes* switch and fails
   without Earth Engine (`ee` is not installed in the venv). It is now skipped; before
-  this run it failed the whole composite, so the Region preset exported *no* rivers.
+  this run it failed the whole composite, so the region exported *no* rivers.
 - **HydroRIVERS first use** per continent: 66–108 MB download, then ~4 min to simplify
   and build the parquet files (Europe: 230 s + 23 s); later reads take < 1 s. Regions
   already cached: af, ar, as, au, eu, na, sa (not si).
@@ -231,15 +230,16 @@ Process / pipeline:
    `X-Composite-Warning` header, as `composite_error` already is.
 3. **Overpass**: ~~remember an unhealthy mirror~~ (done: a failed query is tried last for
    10 min, 2026-10-02; probes are parallel and remembered 2 min, 2026-10-03); fetch lakes
-   in the background when the Region preset is applied.
+   in the background when Rivers & lakes is switched on.
 4. **Lakes as absolute levels**: carry each lake's level (NaN elsewhere) and apply
    `min(z, level)` after the median on the export grid — exactly flat, rims included.
 5. **Pre-flight face estimate**: the strided TIN under-counts rugged terrain by 1.3–3×;
    calibrate the `sqrt(stride)` factor or estimate from a full-resolution TIN of a tile.
 
 UI:
-1. Region preset: ~~set Projection to *Cosine Correction*~~ (done 2026-09-27), untick
-   *Water (ESA)* when Earth Engine is not configured, set Base 5 mm. (~~Set mm/px from
+1. Rivers & lakes: untick *Water (ESA)* when Earth Engine is not configured. (The Region
+   preset that set Projection, Base and the layers was removed 2026-10-05; cosine is the
+   default projection.) (~~Set mm/px from
    the bed~~: every new DEM now fills the bed, 2026-10-01.)
 2. ~~Show the river depth on the print (mm)~~: the slider is in mm (2026-10-02).
 3. Show skipped channels (ESA water, lakes during an Overpass outage) on the *Rivers &

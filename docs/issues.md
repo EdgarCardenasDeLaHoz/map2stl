@@ -94,6 +94,19 @@ the rest below.
 
 ## Active technical debt
 
+### 0. Guide screenshots are stale (found 2026-10-05)
+- `claude/scripts/sop_screenshots.py` (which renders `docs/guides/img/`) still drives the Edit
+  panel from before the 2026-10-04 rebuild: `.lp-seg` / `.lp-btn` / `#lpDemSource` /
+  `#lpRiverDepth`, `window.setUiTools`, and the removed Style setups (`apply_style`). It cannot
+  run as is, so the city and large-region guides' Edit screenshots predate the Layers list,
+  the View / Fetch / Composite tabs and the Canvas row.
+- 2026-10-05: the two step-2 shots (`03-city-preset.png`, `02-region-preset.png`) showed the
+  removed Style row and were dropped with their captions; the guide text describes Canvas →
+  Fetch instead.
+- Fix: port the walker to `LayerSettings.vue` (`.ls-tab`, `.ls-btn`, rows by label as in
+  `claude/scripts/edit_panel_check.py::row`), select `canvas` for Projection / Detail, and
+  rerun both guides.
+
 ### 0a. Skyline height pipeline — known weaknesses (audit 2026-08-28)
 Found while fixing the elevation-datum bug below. All are reported, none are fixed:
 
