@@ -143,8 +143,18 @@ def building_instances(rgb: np.ndarray, building: np.ndarray, device: str | None
                     xs = np.flatnonzero(mm.any(0))
                     if xs[-1] - xs[0] > max_width_frac * (x1 - x0):
                         continue
+                    # cut by an inner window edge: the overlapping window (half a window on)
+                    # sees this building whole; kept cuts showed as straight vertical seams
+                    # through towers (seed_6, 2026-10-06)
+                    if (xs[0] == 0 and x0 > 0) or (xs[-1] == x1 - x0 - 1 and x1 < W):
+                        continue
                     found.append(_crop(float(sc[j, k]), mm & sub, x0))
                     break
+            # neighbouring prompts on one building return the same mask: dedupe as they come,
+            # so a window holds one crop per building, not one per prompt (a downward pano's
+            # near-roof masks took ~7 GB of RAM, 2026-10-06)
+            if len(found) > 2 * batch:
+                found = _dedupe(found, iou)
         masks.extend(_dedupe(found, iou))
     pred.reset_image()
     lab = paint(_dedupe(masks, iou), (H, W))

@@ -343,6 +343,14 @@ def height_from_floors(est: FloorEstimate, kind: str = "residential"):
 HIGH_RISE_FLOORS = 10
 
 
+#: Faces must agree on the storey count within this share (they share the floors, not the
+#: period: two faces of one tower lie at different ranges, so their periods in tan(e) differ).
+MAX_FLOOR_SPREAD = 0.10
+#: A floor-implied distance may exceed the one the building's visible base gives by this factor
+#: (the base row is an upper bound on the range when the base is hidden behind a nearer roof).
+MAX_BASE_RATIO = 1.35
+
+
 @dataclass(frozen=True)
 class InstanceFloors:
     """Storeys of one building instance, found without knowing which building it is."""
@@ -354,30 +362,20 @@ class InstanceFloors:
     dist_range_m: tuple[float, float]  # over the floor heights a residential tower can have
     period_px: float
     acf_peak: float
-    spread: float                     # left/right halves' period disagreement
+    spread: float                     # the agreeing strips' storey-count spread
     high_rise: bool
     accepted: bool
     reason: str
+    n_strips: int = 0                 # column strips that agree on the storeys
+    base_dist_m: float = math.nan     # range the visible base row gives (camera height known)
 
 
-def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instances: np.ndarray,
-                    instance: int, min_cols: int = 6, trim: float = 0.2) -> InstanceFloors | None:
-    """Storeys and distance of one MobileSAM building instance, before any footprint match.
-
-    On one column a vertical facade at range ``d`` has ``z = d * tan(e)``, so the floor bands are
-    periodic in ``t = tan(e)`` with period ``floor / d``: resampling on a uniform ``t`` grid
-    (:func:`rectify_columns` with ``d = 1``) gives the visible storeys as extent / period with no
-    distance at all, and the distance as ``NOMINAL_FLOOR_M`` / period (+-15 %, the spread of
-    floor heights). Bearing plus that distance picks the plot (:func:`match_plot`); ten or more
-    storeys mark a high-rise. ``trim``: share of the instance's columns dropped at each side
-    (edges and corners mix two walls)."""
-    m = instances == instance
-    cols = np.flatnonzero(m.sum(0) >= 8)
-    if len(cols) < min_cols:
+def _strip_floors(pano, pose, gray, instances, instance, cols):
+    """(floors, period in tan(e), acf peak, px per floor, t_hi, t_lo) of one column strip."""
+    m = instances[:, cols] == instance
+    rows = np.flatnonzero(m.any(1))
+    if len(rows) < 8:
         return None
-    n = len(cols)
-    cols = cols[int(n * trim): n - int(n * trim)] if n - 2 * int(n * trim) >= min_cols else cols
-    rows = np.flatnonzero(m[:, cols].any(1))
     r0, r1 = int(rows[0]), int(rows[-1])
     t_hi = math.tan(math.radians(float(fd._elev_of(pano, pose, r0))))
     t_lo = math.tan(math.radians(float(fd._elev_of(pano, pose, r1))))
@@ -388,37 +386,134 @@ def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instance
     rr = np.clip(np.round(_rows_at(pano, pose, t[:, None], ones[None, :])), 0, pano.height - 1)
     valid &= instances[rr.astype(int), cols[None, :]] == instance
     R = np.where(valid, R, np.nan)
-    b = float((pano.frame_heading[cols[len(cols) // 2]] + pose.offset_deg) % 360.0)
-
-    def period(sl):
-        prof = band_profile(R[:, sl], valid[:, sl], hp_m=40 * dt, dz=dt, cols=cols[sl])
-        return floor_period(prof, dz=dt, lag_min=4 * dt, lag_max=(t_hi - t_lo) / 3.0)
-
-    fit = period(slice(None))
-    half = len(cols) // 2
-    halves = [period(slice(0, half)), period(slice(half, None))] if half >= min_cols // 2 else []
+    prof = band_profile(R, valid, hp_m=40 * dt, dz=dt, cols=cols)
+    fit = floor_period(prof, dz=dt, lag_min=4 * dt, lag_max=(t_hi - t_lo) / 3.0)
     if not math.isfinite(fit.period_m):
-        return InstanceFloors(instance, int(cols[len(cols) // 2]), b, math.nan, math.nan,
-                              (math.nan, math.nan), math.nan, math.nan, math.nan, False, False,
-                              "no floor pattern")
-    p = fit.period_m
-    hp = [h.period_m for h in halves if math.isfinite(h.period_m)]
-    spread = (max(hp) - min(hp)) / p if len(hp) == 2 else math.nan
-    floors = (t_hi - t_lo) / p
+        return None
+    return ((t_hi - t_lo) / fit.period_m, fit.period_m, fit.acf_peak, fit.period_m / dt, t_hi,
+            t_lo, r1, prof, dt)
+
+
+def _subharmonic(prof, dt, period, acf_peak, k_max, frac=0.5, min_px=MIN_PX_PER_FLOOR):
+    """The largest ``k`` (2..k_max) whose period / k is also a local autocorrelation peak at least
+    ``frac`` x the found one and at least ``min_px`` long, else 1."""
+    lag = period / dt
+    a = _acf(np.asarray(prof, float), int(lag) + 3)
+    for k in range(int(k_max), 1, -1):
+        j = lag / k
+        if j < min_px:
+            continue
+        i = int(round(j))
+        win = a[max(1, i - 1): i + 2]
+        if np.isfinite(win).all() and len(win) == 3 and win[1] == win.max() and \
+                win[1] >= frac * acf_peak:
+            return k
+    return 1
+
+
+def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instances: np.ndarray,
+                    instance: int, min_cols: int = 6, trim: float = 0.1,
+                    n_strips: int = 3, depth: np.ndarray | None = None) -> InstanceFloors | None:
+    """Storeys and distance of one MobileSAM building instance, before any footprint match.
+
+    On one column a vertical facade at range ``d`` has ``z = d * tan(e)``, so the floor bands are
+    periodic in ``t = tan(e)`` with period ``floor / d``: resampling on a uniform ``t`` grid
+    (:func:`rectify_columns` with ``d = 1``) gives the visible storeys as extent / period with no
+    distance at all, and the distance as ``NOMINAL_FLOOR_M`` / period (+-15 %, the spread of
+    floor heights). Bearing plus that distance picks the plot (:func:`match_plot`); ten or more
+    storeys mark a high-rise.
+
+    The instance is read in ``n_strips`` column strips, and accepted when at least two agree on
+    the storey count within :data:`MAX_FLOOR_SPREAD`: a tower seen on a corner shows two faces at
+    different ranges, so their periods differ while their storeys do not (requiring equal
+    periods rejected 28 of 35 tall instances on seed_6, 2026-10-06). With the camera height known
+    (``pose.camera_h_m > 0``), a floor-implied distance farther than :data:`MAX_BASE_RATIO` x the
+    range the visible base row allows is refused: that is how roof equipment read as "floors" a
+    few metres away shows itself."""
+    m = instances == instance
+    cols = np.flatnonzero(m.sum(0) >= 8)
+    if len(cols) < min_cols:
+        return None
+    n = len(cols)
+    cut = int(n * trim)
+    cols = cols[cut: n - cut] if n - 2 * cut >= min_cols else cols
+    b = float((pano.frame_heading[cols[len(cols) // 2]] + pose.offset_deg) % 360.0)
+    k = n_strips if len(cols) >= n_strips * max(4, min_cols // 2) else 2 if len(cols) >= 8 else 1
+    parts = [p for p in np.array_split(cols, k) if len(p) >= 4]
+    got = [g for g in (_strip_floors(pano, pose, gray, instances, instance, p) for p in parts)
+           if g is not None and g[2] >= MIN_ACF_PEAK]
+    centre = int(cols[len(cols) // 2])
+
+    def refuse(reason, floors=math.nan, p=math.nan, acf=math.nan, ppx=math.nan, spread=math.nan,
+               ns=0, dbase=math.nan):
+        lo, hi = KIND_RANGE_M["residential"]
+        return InstanceFloors(instance, centre, b, floors, NOMINAL_FLOOR_M / p if p else math.nan,
+                              (lo / p, hi / p) if p else (math.nan, math.nan), ppx, acf, spread,
+                              False, False, reason, ns, dbase)
+
+    if not got:
+        return refuse("no floor pattern")
+    # the largest group of strips agreeing on the storeys
+    best = []
+    for g in got:
+        grp = [h for h in got if abs(h[0] - g[0]) <= MAX_FLOOR_SPREAD * g[0]]
+        if len(grp) > len(best):
+            best = grp
+    floors = float(np.median([g[0] for g in best]))
+    p = float(np.median([g[1] for g in best]))
+    acf = float(np.median([g[2] for g in best]))
+    ppx = float(np.median([g[3] for g in best]))
+    spread = (max(g[0] for g in best) - min(g[0] for g in best)) / floors if len(best) > 1 else math.nan
     d = NOMINAL_FLOOR_M / p
-    lo, hi = KIND_RANGE_M["residential"]
+    d_base = math.nan
+    base_seen = False
+    if pose.camera_h_m > 0:
+        r_b = float(np.median([g[6] for g in best]))
+        e_b = float(fd._elev_of(pano, pose, r_b))
+        if e_b < -0.5:
+            d_base = pose.camera_h_m / math.tan(math.radians(-e_b))
+            # the base row bounds the range, so a period k x too long (every k-th floor) is
+            # allowed back when the profile repeats at period / k too (seed_6's tallest tower
+            # read 15 floors at 86 m: every third of ~45, its base 339 m out; 2026-10-06)
+            k_max = min(5, int(MAX_BASE_RATIO * d_base / d))
+            if k_max >= 2:
+                ks = [_subharmonic(g[7], g[8], g[1], g[2], k_max) for g in best]
+                sub = int(np.median(ks))
+                if sub > 1:
+                    floors, p, ppx, d = floors * sub, p / sub, ppx / sub, d * sub
+            # ground (not building, not sky) just under the instance: its base is in view, so the
+            # base row is the range, not only a bound on it
+            rb = int(round(r_b))
+            below = pano.labels[min(pano.height - 1, rb + 2):min(pano.height, rb + 8), cols]
+            if below.size:
+                ground = (below >= 0) & ~np.isin(below, fd.BUILDING_CLASSES) & (below != fd.SKY_CLASS)
+                base_seen = bool(ground.mean() >= 0.6)
+            if not base_seen and depth is not None:
+                # what lies under the mask is not nearer (Depth Anything inverse depth): the
+                # building's own podium, not an occluder, so its base is about there (seed_6's
+                # tallest tower, 2026-10-06: a 2-4 floor facade module read as 15 floors at 86 m
+                # with its podium 339 m out)
+                lo_r, hi_r = max(0, rb - 6), min(pano.height, rb + 8)
+                inside = depth[lo_r:rb + 1, cols]
+                under = depth[min(pano.height - 1, rb + 2):hi_r, cols]
+                if inside.size and under.size:
+                    base_seen = bool(np.nanmedian(under) <= 1.1 * np.nanmedian(inside))
     reason = []
-    if fit.acf_peak < MIN_ACF_PEAK:
-        reason.append(f"weak pattern ({fit.acf_peak:.2f})")
-    if p / dt < MIN_PX_PER_FLOOR:
-        reason.append(f"{p / dt:.1f} px per floor")
-    if not (spread <= MAX_STRIP_SPREAD):
-        reason.append(f"halves disagree ({spread:.0%})" if math.isfinite(spread) else "halves unreadable")
+    if len(best) < 2 and len(got) >= 1 and k > 1:
+        reason.append("one strip only" if len(got) == 1 else f"strips disagree ({len(got)} read)")
+    if ppx < MIN_PX_PER_FLOOR:
+        reason.append(f"{ppx:.1f} px per floor")
     if floors < 3:
         reason.append(f"{floors:.1f} floors")
-    return InstanceFloors(instance, int(cols[len(cols) // 2]), b, float(floors), float(d),
-                          (lo / p, hi / p), float(p / dt), float(fit.acf_peak), float(spread),
-                          bool(floors >= HIGH_RISE_FLOORS), not reason, "; ".join(reason) or "ok")
+    if math.isfinite(d_base) and (d > MAX_BASE_RATIO * d_base
+                                  or (base_seen and d < d_base / MAX_BASE_RATIO)):
+        # seen base: both ways (seed_6, 2026-10-06: the tallest tower read 15 floors at 86 m
+        # with its base on the street 339 m out; a port blob read 3 floors at 119 m)
+        reason.append(f"floors put it {d:.0f} m away, its base {d_base:.0f} m")
+    lo, hi = KIND_RANGE_M["residential"]
+    return InstanceFloors(instance, centre, b, floors, float(d), (lo / p, hi / p), ppx, acf,
+                          float(spread), bool(floors >= HIGH_RISE_FLOORS), not reason,
+                          "; ".join(reason) or "ok", len(best), float(d_base))
 
 
 def match_plot(est: InstanceFloors, pano: fd.Pano, pose: fd.PanoPose, rings_xy: list,
