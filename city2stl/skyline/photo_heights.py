@@ -153,11 +153,12 @@ def loo_heights(ms: list[TowerMeasure], min_anchors: int = 2) -> dict[int, float
 
 
 #: A tower reading is trusted only within this ratio of the tower's OSM height. On 2,791
-#: readings with confirmed truth (Miami, Chicago; 2026-10-05) those outside were wrong 98-99 %
-#: of the time, and truth sided with OSM in 94-99 % of them: a reading that far from the tag
-#: measured another building (one in front, or the gap beside the tower), not a bad tag.
-#: Inside 0.8-1.25 only 6 % were off by more than 25 %.
-PLAUSIBLE_RATIO = (0.6, 1.6)
+#: readings with confirmed truth (Miami, Chicago; 2026-10-05) a reading outside 0.6-1.6 was
+#: wrong 98-99 % of the time with truth siding with OSM; the blind review T37
+#: (docs/research/ml-blind-2026-10-05/T37-results.md) found a 25 % gate better still, and no
+#: model beating it out of city: kept-reading MAE 14.0 / 14.5 m (Miami / Chicago) against
+#: 19.5 m at 0.6-1.6, and the tag was the wrong one in 3 % of the flagged readings.
+PLAUSIBLE_RATIO = (0.75, 1.25)
 #: ... and only for towers whose OSM roof rises at least this far above the camera's horizon:
 #: under 1 deg, 53 % of readings were off by more than 25 % (1-2 deg: 39 %; above 2 deg: ~19 %).
 #: Distance alone predicted nothing (tall towers 3 km away read fine).

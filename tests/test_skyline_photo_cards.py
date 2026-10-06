@@ -115,7 +115,7 @@ def test_a_tower_hidden_behind_something_in_front_is_flagged_and_left_out(monkey
 def test_reading_flag():
     assert ph.reading_flag(-5.0, 100.0, 1000.0) == "hidden"
     assert ph.reading_flag(50.0, 100.0, 1000.0) == "far from its OSM height"     # 0.5 x OSM
-    assert ph.reading_flag(170.0, 100.0, 1000.0) == "far from its OSM height"    # 1.7 x OSM
+    assert ph.reading_flag(130.0, 100.0, 1000.0) == "far from its OSM height"    # 1.3 x OSM
     assert ph.reading_flag(45.0, 40.0, 3000.0) == "low on the horizon"          # 0.7 deg up
     assert ph.reading_flag(95.0, 100.0, 1000.0) is None
 
