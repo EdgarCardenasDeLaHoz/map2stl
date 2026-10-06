@@ -544,14 +544,20 @@ def match_known_tower(lat: float, lon: float, height_m: float, name: str, rows: 
     """
     from shapely.geometry import Point
 
-    cands = []
+    cands, rejected = [], 0
     for r in rows:
         d = math.hypot((r["centroid_lat"] - lat) * M_PER_DEG_LAT,
                        (r["centroid_lon"] - lon) * M_PER_DEG_LAT * math.cos(math.radians(lat)))
-        if d <= radius_m:
-            cands.append((d, r))
+        if d > radius_m:
+            continue
+        tag = r.get("height_tag_m")
+        if tag and not 0.5 <= tag / height_m <= 2.0:
+            rejected += 1                       # mapped with another height: not this tower
+            continue                            # (Miami: Panorama Tower 249 m -> a 16 m row)
+        cands.append((d, r))
     if not cands:
-        return None, "none within radius"
+        return None, (f"no plausible match ({rejected} tagged far off)" if rejected
+                      else "none within radius")
     polys = {id(r): _polygon(r["footprint_lonlat"]) if r.get("footprint_lonlat") else None
              for _, r in cands}
     words = _name_words(name)
