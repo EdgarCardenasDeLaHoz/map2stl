@@ -461,6 +461,19 @@ def refine_on_outline(pano: Pano, pose: PanoPose, towers, search_deg: float = 10
                 e, n = outline_misfit(pano, pose, model, s)
                 if n >= min_cols and e < best[0]:
                     best = (e, float(s), float(dx), float(dy), n)
+    # then a finer pass around the best: the readings of towers deep in a cluster change with
+    # tens of metres (Cartagena seed_4 from two starts 100 m apart: Gran Bay 155 vs 84 m)
+    if move_m > 0 and best[1:] != (0.0, 0.0, 0.0):
+        _e, s0, dx0, dy0, _n = best
+        fine = np.arange(-move_step_m, move_step_m + 1e-6, move_step_m / 5)
+        for ddx in fine:
+            for ddy in fine:
+                model = predicted_outline(towers, tuple(cam0 + (dx0 + ddx, dy0 + ddy)),
+                                          h_cam=pose.camera_h_m)
+                for s in np.arange(s0 - step_deg, s0 + step_deg + 1e-6, step_deg / 4):
+                    e, n = outline_misfit(pano, pose, model, s)
+                    if n >= min_cols and e < best[0]:
+                        best = (e, float(s), float(dx0 + ddx), float(dy0 + ddy), n)
     if before - best[0] < min_gain_deg:
         return OutlineFit(0.0, 0.0, pose, 0.0, before, before, n0)
     e, s, dx, dy, n = best
