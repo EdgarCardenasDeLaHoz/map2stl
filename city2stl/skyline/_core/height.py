@@ -670,10 +670,28 @@ def _seed_from_view_name(view_name: str) -> str:
 
 #: OSM height sources that count as a tag; anything else ("default") is untagged.
 TAGGED_SOURCES = ("osm_tag", "osm_levels")
-#: The height a withheld untagged building gets when no better source is passed: the
-#: app's default building height (``city2stl/rasterize.py``). On Miami's 162 confirmed
-#: untagged buildings a constant 11 m scored MAE 17.1 m against Street View's 108.6 m.
-UNTAGGED_FALLBACK_M = 10.0
+#: The height a withheld untagged building gets when no better source is passed (the T41
+#: prior, ``untagged_prior.py``, is passed by ``region_pdf``). 12 m: the median confirmed
+#: untagged height of the benchmark cities is 11.5-13.1 m whichever city is left out, and
+#: a 12 m constant scores MAE 11.2 m against 11.4 m for 10 m (T38).
+UNTAGGED_FALLBACK_M = 12.0
+
+
+def untagged_fallback(records: Sequence[BuildingRecord], region: str | None = None):
+    """The fallback ``withhold_untagged_street_view`` uses: the T41 height prior
+    (``untagged_prior.fallback_for``) unless ``SKYLINE_UNTAGGED_FALLBACK=constant``; the
+    constant also when the prior cannot run (no scikit-learn). Returns None for the
+    constant."""
+    if os.environ.get("SKYLINE_UNTAGGED_FALLBACK", "model").strip().lower() == "constant":
+        return None
+    try:
+        from ..untagged_prior import fallback_for  # noqa: PLC0415
+        return fallback_for(records, exclude_city=region)
+    except Exception as exc:  # noqa: BLE001 - a run must never fail on its fallback
+        logging.getLogger(__name__).warning(
+            "[withhold_untagged] height prior unavailable (%s); %.0f m constant", exc,
+            UNTAGGED_FALLBACK_M)
+        return None
 
 
 def _prefer_tags_enabled() -> bool:
@@ -961,6 +979,7 @@ def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) 
 
 
 __all__ = [
+    'untagged_fallback',
     'withhold_untagged_street_view',
     'augment_estimates_with_depth',
     'estimate_heights_from_registration',

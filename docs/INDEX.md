@@ -358,7 +358,7 @@ Manual drag-align, ground truth and batch export. Refinement: [reference/align-r
 Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape, where things live, dead ends, feature status, open items). Entry points:
 - CV/geometry primitives: `map2stl/city2stl/skyline/_core/` (types, segmentation, projection, skyline, pano, registration, height). There is no façade: every caller imports the defining `_core/` or `_pano/` module.
 - Building/sky masks and glass-tower hole fill: `map2stl/city2stl/skyline/_core/segmentation.py::_neural_sky_and_building_masks` (`_fill_enclosed_holes`)
-- Per-view heights and aggregation: `map2stl/city2stl/skyline/_core/height.py::estimate_heights_from_registration` (`aggregate_building_heights`, `_ground_elev_m`); untagged buildings withheld (T28): `_core/height.py::withhold_untagged_street_view`
+- Per-view heights and aggregation: `map2stl/city2stl/skyline/_core/height.py::estimate_heights_from_registration` (`aggregate_building_heights`, `_ground_elev_m`); untagged buildings withheld (T28): `_core/height.py::withhold_untagged_street_view`, their fallback height (T41): `untagged_prior.py::fallback_for`
 - View registration: `map2stl/city2stl/skyline/_pano/detect.py::_register_views`
 - Depth cross-check: `map2stl/city2stl/skyline/depth_estimation.py::calibrate_pano_depth` (`depth_height_from_segment`, `compare_heights`)
 - Region data (bbox from the regions table or `sites/<region>.json`, OSM → records, terrain): `map2stl/city2stl/skyline/region_data.py::_osm_to_building_records` (`_load_region_bbox`, `_attach_building_terrain`)

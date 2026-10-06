@@ -24,3 +24,4 @@ include = ["app*", "geo2stl*", "city2stl*"]
 
 [tool.setuptools.package-data]
 "app.client" = ["static/**/*", "templates/**/*"]
+"city2stl.skyline" = ["data/*.csv"]

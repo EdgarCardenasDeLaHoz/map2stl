@@ -45,6 +45,7 @@ PINNED_FLAGS = {
     # T28: the published height withholds untagged Street View values; both are scored
     # (``street_view_unwithheld`` is the 2026-10-04 baseline's yardstick)
     "SKYLINE_WITHHOLD_UNTAGGED": "1",
+    "SKYLINE_UNTAGGED_FALLBACK": "model",   # T41: the height prior, not a constant
     "SKYLINE_SV_TALL_FRAME": "0",
     "SKYLINE_CV_MULTIRES": "0",
     "SKYLINE_CV_PHASE_C": "0",
@@ -125,9 +126,11 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
     sv = bm.street_view_buildings(buildings)
     if sv is not None:  # T28 withheld untagged Street View heights: score them too
         result["street_view_unwithheld"] = bm.score_buildings(sv, truth)
-    else:  # a pre-T28 report: score what T28 would publish
-        result["withheld_simulated"] = bm.score_buildings(bm.withheld_buildings(buildings),
-                                                          truth)
+    else:  # a pre-T28 report: score what T28 would publish, with each fallback
+        result["withheld_simulated"] = bm.score_buildings(
+            bm.withheld_buildings(buildings, "model", region), truth)
+        result["withheld_simulated_constant"] = bm.score_buildings(
+            bm.withheld_buildings(buildings, "constant"), truth)
     try:  # the report's benchmark page; a plotting failure must not lose the score
         from city2stl.skyline.benchmark_report import write_benchmark_page
         write_benchmark_page(heights.parent, result, buildings, truth)

@@ -238,7 +238,8 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
 | `SKYLINE_CV_PHASE_C` | `0` | F-SKY13 Phase C: OSM keypoints drive the heading sweep. |
 | `SKYLINE_CV_MULTIRES` | `0` | F-SKY19 multi-resolution segmentation. |
 | `SKYLINE_TAG_FILTER` | `1` | `0` measures unaided error (don't filter using OSM height tags). |
-| `SKYLINE_WITHHOLD_UNTAGGED` | `1` | Untagged buildings get the fallback height (`_core/height.py::withhold_untagged_street_view`, 10 m until T29 picks a source); the Street View value stays in `heights.json` as `street_view_m`, scored as `street_view_unwithheld` by `10_benchmark` (a pre-T28 report gets `withheld_simulated` instead). `0` publishes Street View again. |
+| `SKYLINE_WITHHOLD_UNTAGGED` | `1` | Untagged buildings get the fallback height (`_core/height.py::withhold_untagged_street_view`); the Street View value stays in `heights.json` as `street_view_m`, scored as `street_view_unwithheld` by `10_benchmark` (a pre-T28 report gets `withheld_simulated`, with the prior, and `withheld_simulated_constant` instead). `0` publishes Street View again. |
+| `SKYLINE_UNTAGGED_FALLBACK` | `model` | The withheld buildings' height: the T41 prior (`untagged_prior.py`: footprint shape + neighbours' OSM tags, trained on the benchmark cities' confirmed untagged buildings, the region itself left out), or `constant` (`_core/height.py::UNTAGGED_FALLBACK_M`, 12 m; also used when scikit-learn is missing). |
 | `OPENTOPO_API_KEY`, `FLICKR_API_KEY` | unset | DEM terrain for building bases; Flickr web seeds (Wikimedia is the keyless fallback). |
 
 ## Caches (under `runs/`, gitignored)

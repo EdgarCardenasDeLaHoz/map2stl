@@ -56,7 +56,7 @@ import os
 import time
 from pathlib import Path
 
-from ._core.height import withhold_untagged_street_view
+from ._core.height import untagged_fallback, withhold_untagged_street_view
 from ._core.timing import _StepTimer
 from ._core.types import BuildingRecord
 from ._pano.orchestrator import _seed_multiview_registration
@@ -496,8 +496,14 @@ def run_region_pdf_report(
         )
     # T28: untagged buildings get the fallback height; the Street View value stays in
     # each row (``street_view_m``) for the benchmark. SKYLINE_WITHHOLD_UNTAGGED=0 turns it off.
-    n_withheld = withhold_untagged_street_view(building_heights, building_records,
-                                               measured_seeds=set(elevated_seeds or ()))
+    # The fallback is the T41 height prior; its neighbours are the buildings the run
+    # estimated, as in its training data. Drone seeds' trusted readings win over it.
+    _est_ids = {row.get("feature_id") for row in building_heights}
+    n_withheld = withhold_untagged_street_view(
+        building_heights, building_records,
+        fallback=untagged_fallback([r for r in building_records if r.feature_id in _est_ids],
+                                   region=region_name),
+        measured_seeds=set(elevated_seeds or ()))
     if n_withheld:
         logger.info(f"[withhold_untagged] {n_withheld} untagged building(s): Street View "
                     f"height withheld, fallback used")

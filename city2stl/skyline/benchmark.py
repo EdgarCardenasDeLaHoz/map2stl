@@ -435,20 +435,31 @@ def street_view_buildings(buildings: list[dict]) -> list[dict] | None:
             for b in buildings]
 
 
-def withheld_buildings(buildings: list[dict]) -> list[dict]:
+def withheld_buildings(buildings: list[dict], fallback: str = "constant",
+                       region: str | None = None) -> list[dict]:
     """A pre-T28 report's buildings as T28 would publish them: untagged ones (height
-    source not ``osm_tag`` / ``osm_levels``) get ``UNTAGGED_FALLBACK_M``, the Street View
-    value moved to ``street_view_m``. Lets ``--score-only`` show the effect on old runs."""
+    source not ``osm_tag`` / ``osm_levels``) get the fallback, the Street View value moved
+    to ``street_view_m``. Lets ``--score-only`` show the effect on old runs.
+
+    ``fallback``: ``"constant"`` (``UNTAGGED_FALLBACK_M``) or ``"model"`` (the T41 height
+    prior, trained without ``region`` so the score stays out-of-sample; neighbours are
+    the report's buildings, as at run time)."""
     from ._core.height import TAGGED_SOURCES, UNTAGGED_FALLBACK_M
 
+    heights = [UNTAGGED_FALLBACK_M] * len(buildings)
+    src = "default"
+    if fallback == "model":
+        from .untagged_prior import predict, report_rows
+
+        heights = [float(h) for h in predict(report_rows(buildings), exclude_city=region)]
+        src = "prior_gbm"
     out = []
-    for b in buildings:
+    for b, h in zip(buildings, heights, strict=True):
         if b.get("height_source") in TAGGED_SOURCES or "street_view_m" in b:
             out.append(b)
         else:
             out.append({**b, "street_view_m": b.get("effective_height_m"),
-                        "effective_height_m": UNTAGGED_FALLBACK_M,
-                        "effective_height_source": "withheld:default"})
+                        "effective_height_m": h, "effective_height_source": f"withheld:{src}"})
     return out
 
 
