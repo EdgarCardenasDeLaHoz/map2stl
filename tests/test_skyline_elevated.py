@@ -94,3 +94,15 @@ def test_only_sky_topped_base_visible_drone_readings_are_trusted():
     assert trusted(SimpleNamespace(top_edge="sky", base_visible=True))
     assert not trusted(SimpleNamespace(top_edge="depth", base_visible=True))
     assert not trusted(SimpleNamespace(top_edge="sky", base_visible=False))
+
+
+def test_seed_page_lists_the_numbered_buildings():
+    from types import SimpleNamespace
+
+    from city2stl.skyline.html_report import _segments_table_html
+
+    pr = SimpleNamespace(seed_lat=10.40693, seed_lon=-75.55608, matched_segments=[
+        {"seed_index": 91, "true_bearing_deg": 102.0, "height_m": 95.0, "base_visible": True,
+         "matched_projection": {"feature_id": "b0812", "name": "b0812", "distance_m": 289.0}}])
+    page = _segments_table_html(SimpleNamespace(seed_lat=0, seed_lon=0), pr)
+    assert 'id="seg-91"' in page and "b0812" in page and ">95<" in page and "10.40639" in page
