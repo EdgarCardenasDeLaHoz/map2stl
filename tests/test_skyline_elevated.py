@@ -65,7 +65,7 @@ def test_footprints_from_records_keep_ids_and_tags():
 def test_site_lists_the_cartagena_drone_seeds():
     from city2stl.skyline.region_data import _load_site_elevated_seeds
 
-    assert _load_site_elevated_seeds("cartagena") == {"seed_1", "seed_4", "seed_5"}
+    assert _load_site_elevated_seeds("cartagena") == {"seed_1", "seed_4", "seed_5", "seed_6", "seed_7"}
     assert _load_site_elevated_seeds("miami") == set()
 
 
