@@ -340,10 +340,13 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
 
 def load_report(heights_json: Path) -> tuple[str, list[dict]]:
     """``(region, buildings)`` from a skyline ``heights.json``; each building gains
-    ``key`` (``footprint_key``). Buildings without a footprint are dropped."""
+    ``key`` (``footprint_key``). Buildings without a footprint are dropped, and so are rows
+    the run did not measure (``measured: False``: tagged buildings listed with their tag)."""
     data = json.loads(Path(heights_json).read_text(encoding="utf-8"))
     out = []
     for b in data.get("buildings", []):
+        if b.get("measured") is False:
+            continue
         ring = b.get("footprint_lonlat")
         if ring and len(ring) >= 3:
             out.append({**b, "key": footprint_key(ring)})

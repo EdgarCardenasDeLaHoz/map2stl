@@ -131,3 +131,29 @@ def test_records_keep_the_parsed_height_tag():
          "properties": {"name": "Allure", "height_m": 190.0, "height_source": "osm_tag", "building:levels": "43"}}]}}
     (rec,) = _osm_to_building_records(osm)
     assert rec.height_tag_m == 190.0 and rec.height_source == "osm_tag"
+
+
+def test_heights_json_lists_unmeasured_tagged_buildings_and_the_benchmark_skips_them(tmp_path):
+    from shapely.geometry import Polygon
+
+    from city2stl.skyline.region_pdf import _write_heights_json
+
+    poly = Polygon([(-75.553, 10.402), (-75.5526, 10.402), (-75.5526, 10.4024), (-75.553, 10.4024)])
+    recs = [BuildingRecord("a", "Measured", poly, 10.4022, -75.5528, None, "default", 900.0),
+            BuildingRecord("b", "Allure", poly, 10.4022, -75.5528, 190.0, "osm_tag", 900.0),
+            BuildingRecord("c", "Plain", poly, 10.4022, -75.5528, None, "default", 900.0)]
+    rows = [{"feature_id": "a", "effective_height_m": 12.0, "effective_height_source": "withheld:default"}]
+    path = tmp_path / "heights.json"
+    _write_heights_json(path, region_name="x", bbox=SimpleBBox, building_heights=rows,
+                        building_records=recs, known_heights=None)
+    import json
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    names = {b["name"] if "name" in b else b["feature_id"]: b for b in doc["buildings"]}
+    assert names["Allure"]["measured"] is False and names["Allure"]["effective_height_m"] == 190.0
+    assert "Plain" not in names                                   # untagged, unmeasured: not listed
+    _region, scored = bm.load_report(path)
+    assert [b["feature_id"] for b in scored] == ["a"]
+
+
+class SimpleBBox:
+    north, south, east, west = 10.43, 10.38, -75.52, -75.57

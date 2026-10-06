@@ -136,6 +136,26 @@ def _write_heights_json(
                                        for x, y in ring]
         except Exception:
             row["footprint_lonlat"] = None
+    # every OSM-tagged building, measured or not: its tag is the published height
+    # (SKYLINE_PREFER_TAGS), so the data product is complete where the tags are. Cartagena
+    # 2026-10-06: two published towers fell out once only trusted drone readings counted.
+    # ``measured: False`` rows are not scored (benchmark.load_report).
+    seen = {row["feature_id"] for row in rows}
+    for rec in building_records:
+        if rec.feature_id in seen or rec.height_source not in ("osm_tag", "osm_levels") \
+                or not rec.height_tag_m or rec.geometry is None:
+            continue
+        try:
+            ring = [[round(x, 6), round(y, 6)] for x, y in rec.geometry.exterior.coords]
+        except Exception:
+            continue
+        rows.append({"feature_id": rec.feature_id, "name": rec.name, "measured": False,
+                     "effective_height_m": float(rec.height_tag_m),
+                     "effective_height_source": rec.height_source, "n_views": 0,
+                     "n_seeds": 0, "per_seed_median_m": {},
+                     "centroid_lat": rec.centroid_lat, "centroid_lon": rec.centroid_lon,
+                     "area_m2": rec.area_m2, "height_tag_m": rec.height_tag_m,
+                     "height_source": rec.height_source, "footprint_lonlat": ring})
 
     doc = {
         "region": region_name,
