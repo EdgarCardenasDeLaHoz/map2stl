@@ -51,9 +51,28 @@ def _dedupe(masks: list[Mask], iou: float) -> list[Mask]:
     """Highest score first; drop a mask whose IoU with a kept one exceeds ``iou`` (only masks
     whose boxes overlap are compared)."""
     keep: list[Mask] = []
+    # kept boxes and areas as arrays: the box test rejects most pairs in numpy, and the exact
+    # IoU runs only where boxes overlap enough to pass (a downward drone pano gave tens of
+    # thousands of masks and the all-pairs loop ran past an hour, 2026-10-06)
+    box = np.zeros((len(masks), 4))
+    area = np.zeros(len(masks))
+    n = 0
     for m in sorted(masks, key=lambda t: -t[0]):
-        if all(_iou(m, k) <= iou for k in keep):
-            keep.append(m)
+        _s, y, x, a = m
+        h, w = a.shape
+        am = float(a.sum())
+        if n:
+            iy = np.minimum(box[:n, 0] + box[:n, 2], y + h) - np.maximum(box[:n, 0], y)
+            ix = np.minimum(box[:n, 1] + box[:n, 3], x + w) - np.maximum(box[:n, 1], x)
+            # IoU <= box-overlap area / larger mask area: only those that could pass are checked
+            cand = np.flatnonzero((iy > 0) & (ix > 0)
+                                  & (iy * ix > iou * np.maximum(area[:n], am)))
+            if any(_iou(m, keep[j]) > iou for j in cand):
+                continue
+        keep.append(m)
+        box[n] = (y, x, h, w)
+        area[n] = am
+        n += 1
     return keep
 
 
