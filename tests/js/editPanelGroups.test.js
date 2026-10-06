@@ -3,16 +3,13 @@
  * app/client/static/js/vue/components/dem/settings/layerGroups.ts): one control per setting.
  */
 import { describe, it, expect } from 'vitest';
-import { CANVAS, GROUPS, RES_IDS, SUB_TITLES } from '../../app/client/static/js/vue/components/dem/settings/layerGroups.ts';
+import { GROUPS, RES_IDS, SUB_TITLES } from '../../app/client/static/js/vue/components/dem/settings/layerGroups.ts';
 
-const allRows = () => [
-    ...Object.values(GROUPS).flatMap((g) => [...g.fetch, ...g.view, ...g.composite]),
-    ...CANVAS,
-];
+const allRows = () => Object.values(GROUPS).flatMap((g) => [...g.fetch, ...g.view, ...g.composite]);
 
 describe('Edit panel groups', () => {
     it('has Fetch, View and Composite for every layer', () => {
-        for (const id of ['terrain', 'water', 'city', 'satellite', 'trails', 'landcover', 'mesh']) {
+        for (const id of ['canvas', 'terrain', 'water', 'city', 'satellite', 'trails', 'landcover', 'mesh']) {
             expect(GROUPS[id], id).toBeTruthy();
             for (const k of ['fetch', 'view', 'composite']) expect(Array.isArray(GROUPS[id][k]), `${id}.${k}`).toBe(true);
         }
@@ -35,6 +32,17 @@ describe('Edit panel groups', () => {
             if (r.kind === 'sub') expect(SUB_TITLES[r.sub], r.label).toBeTruthy();
             if (r.kind === 'button') expect(r.click, r.label).toBeTruthy();
         }
+    });
+
+    it('keeps what applies to every layer under Canvas, not Terrain', () => {
+        const ids = (id) => [...GROUPS[id].fetch, ...GROUPS[id].view, ...GROUPS[id].composite].map((r) => r.id).filter(Boolean);
+        for (const id of ['paramProjection', 'paramDim', 'autoReloadLayers', 'showGridlines', 'compositeEnabled']) {
+            expect(ids('canvas'), id).toContain(id);
+            expect(ids('terrain'), id).not.toContain(id);
+        }
+        // Removed 2026-10-05: one-tap Style setups and the terrain's weight in the combined map.
+        expect(allRows().map((r) => r.label)).not.toContain('Style');
+        expect(allRows().map((r) => r.id)).not.toContain('compositeDemWeight');
     });
 
     it('offers "Own resolution" for every layer resolution that follows Detail', () => {

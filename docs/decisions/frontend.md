@@ -3,6 +3,27 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-05 — Canvas is the first row of the Layers list; Style and the terrain weight are gone
+- **Decision:** Canvas (the whole map and print) is a fixed row at the top of the Layers list
+  with the same View / Fetch / Composite tabs (`stores/editLayers.ts::EDIT_LAYERS`,
+  `settings/layerGroups.ts::GROUPS` `canvas`). Fetch: Projection, Detail, "Reload all layers
+  after a Detail change", Saved presets (advanced: Trim empty edges, Keep the grid size; links:
+  clear cache, settings JSON). View: grid, map options, layer order, compare. Composite: Combine
+  layers, Preview, Apply. The Canvas group no longer sits above every layer's settings.
+  Removed: the one-tap Style setups (City / Mountain / Region / Coast: the row, the Saved
+  presets entries, `workflow-presets.js`, `WorkflowPresetBar.vue`) and "Include the terrain" /
+  "Terrain weight" (the combined map always takes the terrain at x 1).
+- **Why:** user, 2026-10-05, after the mockup `claude/mockups/2026-10-05-canvas-row/canvas.png`:
+  Canvas as its own layer, Projection in Fetch; "I dont understand Style", then "Remove it";
+  drop the terrain weight (it was a second height control beside Terrain's Height). The
+  reload switch's old label ("when the box moves") was wrong: box edits always reload; the
+  switch reloads every layer after a Detail change.
+- **Rejected:** keeping the setups as Saved presets entries, or renamed "Start from" with a
+  description (offered; the user chose removal). The large-region and city guides used them as
+  step 2.
+- **Supersedes / superseded by:** [2026-10-05 — Projection is a Canvas row](#2026-10-05--projection-is-a-canvas-row)
+  and the Canvas-on-top part of [2026-10-05 — Edit settings: Canvas on top](#2026-10-05--edit-settings-canvas-on-top-and-collapsible-the-layers-groups-are-tabs).
+
 ### 2026-10-05 — Projection is a Canvas row
 - **Decision:** Projection, Trim empty edges and Keep the grid size (advanced) moved from
   Terrain › Fetch to the Canvas group (`settings/layerGroups.ts::CANVAS`), hint "Shapes the map

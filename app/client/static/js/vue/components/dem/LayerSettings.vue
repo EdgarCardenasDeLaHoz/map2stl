@@ -1,8 +1,8 @@
 <template>
   <!-- Edit page, right: the selected layer's settings (F-EDITPANEL, mockup
-       claude/mockups/2026-10-04-edit-panel/panel.png). CANVAS first (the map view, the same under
-       every layer; collapsible), then the layer with tabs View / Fetch / Composite (user
-       2026-10-05). Rows: settings/layerGroups.ts.
+       claude/mockups/2026-10-04-edit-panel/panel.png): the selected layer with tabs View / Fetch /
+       Composite (user 2026-10-05). Canvas (the whole map and print) is a layer row of its own
+       (mockup claude/mockups/2026-10-05-canvas-row). Rows: settings/layerGroups.ts.
        A sub-page (›) shows one of the old sections, moved here by its CollapsibleSection. -->
   <section id="layerProperties" class="ls" :aria-label="`${layer.name} settings`">
     <div v-show="panel.sub" class="ls-sub">
@@ -12,24 +12,7 @@
     </div>
 
     <div v-show="!panel.sub">
-      <!-- Canvas: the map view, the same under every layer; always first, folds away. -->
-      <div class="ls-cap ls-canvas">
-        <button type="button" class="ls-fold" :aria-expanded="panel.canvasOpen" aria-controls="lsCanvasBody"
-                @click="panel.toggleCanvas()">
-          <span class="ls-chev" :class="{ open: panel.canvasOpen }" aria-hidden="true">›</span>Canvas
-        </button>
-        <button v-show="panel.canvasOpen" type="button" class="ls-link" @click="reset(CANVAS)">Reset</button>
-      </div>
-      <div v-show="panel.canvasOpen" id="lsCanvasBody">
-        <div class="ls-grp">
-          <SetRow v-for="r in visible(CANVAS, 'canvas')" :key="r.label" :row="r" />
-        </div>
-        <button v-if="CANVAS.some((r) => r.adv)" type="button" class="ls-link ls-adv" @click="panel.toggleAdvanced('canvas')">
-          {{ panel.advanced.canvas ? 'Hide advanced' : 'Show advanced' }}
-        </button>
-      </div>
-
-      <h2 class="ls-title ls-layer">{{ layer.name }}</h2>
+      <h2 class="ls-title">{{ layer.name }}</h2>
       <div class="ls-subt">{{ subtitle }}</div>
 
       <div class="ls-tabs" role="tablist" :aria-label="`${layer.name} settings`">
@@ -70,7 +53,7 @@ import { EDIT_LAYERS, useEditLayersStore } from '../../stores/editLayers';
 import { useEditPanelStore, type PanelTab } from '../../stores/editPanel';
 import { setChecked, setField, val } from '../../dom-fields';
 import SetRow from './settings/SetRow.vue';
-import { CANVAS, GROUPS, RES_IDS, click, type Row } from './settings/layerGroups';
+import { GROUPS, RES_IDS, click, type Row } from './settings/layerGroups';
 
 const store = useEditLayersStore();
 const panel = useEditPanelStore();
@@ -78,6 +61,7 @@ const layer = computed(() => EDIT_LAYERS.find((l) => l.id === store.selected) ||
 const def = computed(() => GROUPS[layer.value.id] || GROUPS.terrain);
 
 const SUBTITLES: Record<string, string> = {
+  canvas: 'The whole map and print: every layer',
   terrain: 'The ground every other layer sits on',
   water: 'Carved into the model, as printed',
   city: 'Raised from the terrain in the 3D model',
@@ -198,18 +182,12 @@ onBeforeUnmount(() => document.removeEventListener('change', onChange, true));
 .ls-note { color: #a1a1a6; font-size: 11.5px; margin: 6px 4px 0; }
 .ls-back { background: none; border: 0; color: #f5f5f7; text-decoration: underline; font-size: 13px; padding: 0; cursor: pointer; margin-bottom: 8px; }
 .ls-sub-body { margin-top: 10px; }
-.ls-canvas { margin-top: 0; }
-.ls-fold { display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0; cursor: pointer;
-  color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
-.ls-chev { display: inline-block; font-size: 15px; line-height: 1; transition: transform .15s; }
-.ls-chev.open { transform: rotate(90deg); }
-.ls-layer { margin-top: 18px; padding-top: 14px; border-top: 1px solid #38383a; }
 .ls-tabs { display: flex; background: #2c2c2e; border-radius: 9px; padding: 2px; margin: 10px 0 0; }
 .ls-tab { flex: 1; border: 0; background: none; color: #f5f5f7; padding: 6px 4px; border-radius: 7px;
   font-size: 13px; cursor: pointer; }
 .ls-tab.on { background: #636366; font-weight: 600; }
 .ls-tab:disabled { color: #636366; cursor: default; }
-.ls-tab:focus-visible, .ls-fold:focus-visible { outline: 2px solid #0a84ff; outline-offset: 1px; }
+.ls-tab:focus-visible { outline: 2px solid #0a84ff; outline-offset: 1px; }
 .ls-tabcap { margin-top: 8px; }
 .ls-sub-body :deep(.collapsible-section) { margin: 0 0 12px; background: #2c2c2e; border-radius: 12px; padding: 10px; }
 </style>

@@ -82,24 +82,47 @@ const COLORMAPS: Opt[] = [
 ];
 
 export const GROUPS: Record<string, LayerGroups> = {
+  // Canvas: what applies to the whole map and print, under every layer (user 2026-10-05:
+  // its own row first in the Layers list; mockup claude/mockups/2026-10-05-canvas-row).
+  canvas: {
+    fetch: [
+      { kind: 'select', label: 'Projection', icon: '🌐', color: '#0a84ff', id: 'paramProjection',
+        hint: 'Shapes the map and the print, every layer' },
+      { kind: 'number', label: 'Detail', icon: '▦', color: '#30a46c', id: 'paramDim', unit: 'px',
+        min: 50, max: 2000, step: 50, hint: 'Points across; every layer follows it' },
+      { kind: 'switch', label: 'Reload all layers after a Detail change', icon: '↻', color: '#636366', id: 'autoReloadLayers',
+        hint: 'Fetch every layer again at the new Detail' },
+      { kind: 'sub', label: 'Saved presets', icon: '💾', color: '#636366', sub: 'presets', hint: 'Load, save or delete a setup' },
+      { kind: 'switch', label: 'Trim empty edges', icon: '✂', color: '#636366', id: 'paramClipNans', adv: true,
+        hint: 'Drop the blank border a projection leaves' },
+      { kind: 'switch', label: 'Keep the grid size', icon: '⤢', color: '#636366', id: 'paramMaintainDimensions', adv: true,
+        hint: 'Stretch back to the full size after projecting' },
+    ],
+    links: [{ label: 'Clear cached downloads', click: 'clearRegionCacheBtn' }, { label: 'Settings as JSON', click: 'jsonViewToggleBtn' }],
+    view: [
+      { kind: 'switch', label: 'Grid', icon: '#', color: '#636366', id: 'showGridlines', hint: 'Lat/lon lines' },
+      { kind: 'sub', label: 'Grid & map options', icon: '🗺', color: '#0a84ff', sub: 'grid', hint: 'Spacing, pixel grid, map under the terrain' },
+      { kind: 'sub', label: 'Layer order', icon: '☰', color: '#5e5ce6', sub: 'layers', hint: "What's drawn on top, on the map only" },
+      { kind: 'button', label: 'Compare with satellite', icon: '◫', color: '#636366', click: 'splitViewToggleBtn', hint: 'Split view on the map' },
+    ],
+    composite: [
+      { kind: 'switch', label: 'Combine layers', icon: '⊕', color: '#5e5ce6', id: 'compositeEnabled',
+        hint: 'Carve rivers, lakes and land cover into the terrain' },
+      { kind: 'button', label: 'Preview the combined map', icon: '👁', color: '#636366', click: 'previewCompositeBtn' },
+      { kind: 'button', label: 'Apply to the terrain', icon: '✓', color: '#0a84ff', click: 'applyCompositeToDemBtn',
+        hint: 'Replace the terrain with the combined heights' },
+    ],
+    note: 'Apply is needed for land cover, vegetation and trails; rivers and lakes are carved in live.',
+  },
+
   terrain: {
     fetch: [
-      { kind: 'seg', label: 'Style', icon: '✨', color: '#5e5ce6', hint: 'Sets sources, layers and size in one tap',
-        options: [{ value: 'city', label: 'City' }, { value: 'mountain', label: 'Mountain' },
-                  { value: 'region', label: 'Region' }, { value: 'coast', label: 'Coast' }],
-        get: () => '', set: (v) => w().applyWorkflowPreset?.(String(v)) },
       { kind: 'select', label: 'Elevation source', icon: '⛰', color: '#8e6e4e', id: 'paramDemSource',
         hint: 'Where the heights come from' },
-      { kind: 'number', label: 'Detail', icon: '▦', color: '#30a46c', id: 'paramDim', unit: 'px',
-        min: 50, max: 2000, step: 50, hint: 'Points across; layers follow it' },
-      { kind: 'switch', label: 'Reload when the box moves', icon: '↻', color: '#636366', id: 'autoReloadLayers',
-        hint: 'Fetch every layer again after a box edit' },
       { kind: 'sub', label: 'Landmarks', icon: '🏛', color: '#ff9f0a', sub: 'landmarks',
         hint: 'Notable buildings in the box, their heights' },
-      { kind: 'sub', label: 'Saved presets', icon: '💾', color: '#636366', sub: 'presets', hint: 'Load, save or delete a setup' },
     ],
     reload: { label: '↺ Reload terrain', click: 'loadDemBtn', primary: true },
-    links: [{ label: 'Clear cached downloads', click: 'clearRegionCacheBtn' }, { label: 'Settings as JSON', click: 'jsonViewToggleBtn' }],
     view: [
       { kind: 'seg', label: 'Colours', icon: '🎨', color: '#30a46c', id: 'demColormap', options: COLORMAPS },
       { kind: 'switch', label: 'Fit colours to the heights', icon: '↕', color: '#8e6e4e', id: 'autoRescale',
@@ -119,14 +142,6 @@ export const GROUPS: Record<string, LayerGroups> = {
         hint: 'Water sits below the shore' },
       { kind: 'number', label: 'Water lowered by', icon: '↧', color: '#0a84ff', id: 'paramWaterScale', unit: '× height',
         min: 0, max: 1, step: 0.01, adv: true },
-      { kind: 'switch', label: 'Combine layers', icon: '⊕', color: '#5e5ce6', id: 'compositeEnabled', adv: true,
-        hint: 'Carve rivers, raise land cover into the terrain' },
-      { kind: 'switch', label: 'Include the terrain', icon: '⛰', color: '#8e6e4e', id: 'compositeDemEnabled', adv: true },
-      { kind: 'slider', label: 'Terrain weight', icon: '⚖', color: '#8e6e4e', id: 'compositeDemWeight', adv: true,
-        min: 0, max: 2, step: 0.1, fmt: (v) => `× ${f1(v)}` },
-      { kind: 'button', label: 'Preview the combined map', icon: '👁', color: '#636366', click: 'previewCompositeBtn', adv: true },
-      { kind: 'button', label: 'Apply to the terrain', icon: '✓', color: '#0a84ff', click: 'applyCompositeToDemBtn', adv: true,
-        hint: 'Replace the terrain with the combined heights' },
     ],
   },
 
@@ -323,20 +338,6 @@ export const GROUPS: Record<string, LayerGroups> = {
 };
 
 /** The map view itself: the same group under every layer (user 2026-10-04). */
-export const CANVAS: Row[] = [
-  // Projection shapes every layer and the print, so it sits here, under every layer
-  // (user 2026-10-05), not under Terrain > Fetch.
-  { kind: 'select', label: 'Projection', icon: '🌐', color: '#0a84ff', id: 'paramProjection',
-    hint: 'Shapes the map and the print, every layer' },
-  { kind: 'switch', label: 'Trim empty edges', icon: '✂', color: '#636366', id: 'paramClipNans', adv: true,
-    hint: 'Drop the blank border a projection leaves' },
-  { kind: 'switch', label: 'Keep the grid size', icon: '⤢', color: '#636366', id: 'paramMaintainDimensions', adv: true,
-    hint: 'Stretch back to the full size after projecting' },
-  { kind: 'switch', label: 'Grid', icon: '#', color: '#636366', id: 'showGridlines', hint: 'Lat/lon lines' },
-  { kind: 'sub', label: 'Grid & map options', icon: '🗺', color: '#0a84ff', sub: 'grid', hint: 'Spacing, pixel grid, map under the terrain' },
-  { kind: 'sub', label: 'Layer order', icon: '☰', color: '#5e5ce6', sub: 'layers', hint: "What's drawn on top, on the map only" },
-  { kind: 'button', label: 'Compare with satellite', icon: '◫', color: '#636366', click: 'splitViewToggleBtn', hint: 'Split view on the map' },
-];
 
 /** Sub-page titles. */
 export const SUB_TITLES: Record<string, string> = {
@@ -346,7 +347,7 @@ export const SUB_TITLES: Record<string, string> = {
 
 /** Every control id the rows write: the inventory test checks each exists once in the page. */
 export function rowIds(): string[] {
-  const all = [...Object.values(GROUPS).flatMap((g) => [...g.fetch, ...g.view, ...g.composite]), ...CANVAS];
+  const all = Object.values(GROUPS).flatMap((g) => [...g.fetch, ...g.view, ...g.composite]);
   return [...new Set(all.map((r) => r.id || r.click).filter(Boolean) as string[])];
 }
 

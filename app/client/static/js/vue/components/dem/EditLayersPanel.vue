@@ -6,7 +6,7 @@
   <aside id="editLayersPanel" class="el-panel" aria-label="Layers">
     <div class="el-cap">Layers</div>
     <div v-for="l in shown" :key="l.id" class="el-row" role="button" tabindex="0"
-         :class="{ sel: store.selected === l.id }" :aria-pressed="store.selected === l.id"
+         :class="{ sel: store.selected === l.id, 'el-canvas': l.id === 'canvas' }" :aria-pressed="store.selected === l.id"
          :aria-label="`${l.name}: ${status(l)}. Show its settings`"
          :data-layer="l.id" @click="store.select(l.id)" @keydown.enter.prevent="store.select(l.id)"
          @keydown.space.prevent="store.select(l.id)">
@@ -69,16 +69,24 @@ function noRivers(): boolean {
   return !!h && h.feature_count === 0;
 }
 function dotClass(l: EditLayer): string {
-  if (l.id === 'terrain') return app.lastDemData ? 'ok' : 'off';
+  if (l.id === 'terrain' || l.id === 'canvas') return app.lastDemData ? 'ok' : 'off';
   if (!on(l)) return 'off';
   if (l.id === 'water' && noRivers()) return 'busy';
   return hasPicture(l) ? 'ok' : 'busy';
 }
 
+/** Short projection names for Canvas's status line (the select's labels are long). */
+const PROJ_NAMES: Record<string, string> = {
+  none: 'No projection', cosine: 'Cosine', mercator: 'Mercator', equidistant: 'Equidistant',
+  lambert: 'Lambert', miller: 'Miller', gall: 'Gall', sinusoidal: 'Sinusoidal',
+};
+
 function status(l: EditLayer): string {
   void store.tick;
   const dem = app.lastDemData as { vmin?: number; vmax?: number } | null;
   switch (l.id) {
+    case 'canvas':
+      return `${PROJ_NAMES[val('paramProjection') || 'none'] || val('paramProjection')} · ${val('paramDim') || '?'} px`;
     case 'terrain':
       return dem ? `${Math.round(dem.vmin ?? 0)} – ${Math.round(dem.vmax ?? 0)} m` : 'Not loaded yet';
     case 'water': {
@@ -139,6 +147,7 @@ function paintThumbs() {
       const s = Math.min(src.width, src.height);
       ctx.drawImage(src, (src.width - s) / 2, (src.height - s) / 2, s, s, 0, 0, t.width, t.height);
     } else {
+      ctx.fillStyle = '#a1a1a6';   // a plain glyph (Canvas's ▦) would otherwise draw in the tile colour
       ctx.font = '34px system-ui, "Segoe UI Emoji", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -191,6 +200,10 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 12px; cursor: pointer;
 }
 .el-row:hover { background: #232326; }
+.el-row.el-canvas { margin-bottom: 6px; position: relative; }
+.el-row.el-canvas::after {
+  content: ""; position: absolute; left: 8px; right: 8px; bottom: -4px; height: 1px; background: #38383a;
+}
 .el-row.sel { background: #2c2c2e; outline: 2px solid #0a84ff; outline-offset: -2px; }
 .el-row:focus-visible { outline: 2px solid #0a84ff; outline-offset: -2px; }
 .el-thumb { width: 40px; height: 40px; border-radius: 10px; flex: none; }

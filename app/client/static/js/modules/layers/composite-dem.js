@@ -40,7 +40,7 @@ import { readHydrologyRiverControls } from './hydrology-print.js';
 
 const DEFAULTS = {
     demEnabled: true,
-    demWeight: 1.0,   // scales the base DEM elevation itself
+    demWeight: 1.0,   // fixed: no control since 2026-10-05 (Terrain's Height scales the ground)
     waterEnabled: false,   // off with the composite: a new region carves nothing (2026-10-02)
     waterDepth: 5.0,   // metres to subtract where water detected
     waterWeight: 1.0,
@@ -996,7 +996,6 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
 
     // Wire all sliders
     const sliderMap = {
-        compositeDemWeight: 'demWeight',
         compositeWaterDepth: 'waterDepth',
         compositeWaterWeight: 'waterWeight',
         compositeBuildingScale: 'buildingScale',
@@ -1037,7 +1036,6 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
 
     // Wire per-channel enable toggles (DEM + each city sub-layer).
     const toggleMap = {
-        compositeDemEnabled: 'demEnabled',
         compositeWaterEnabled: 'waterEnabled',
         compositeBuildingsEnabled: 'buildingsEnabled',
         compositeRoadsEnabled: 'roadsEnabled',

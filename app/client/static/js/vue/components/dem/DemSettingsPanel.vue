@@ -33,7 +33,6 @@
                     aria-label="Clear region cache"
                     title="Clear all cached data (DEM, water, satellite, etc.) and re-fetch">🗑️</button>
           </div>
-          <WorkflowPresetBar />
           <ProjectionSection />
           <FetchLayersSection />
           <CityLandmarksSection />
@@ -84,7 +83,6 @@ import CompositeDemSection   from './CompositeDemSection.vue';
 import MeshImportSection     from './MeshImportSection.vue';
 import PlateRegistrationSection from './PlateRegistrationSection.vue';
 import PresetsSection        from './PresetsSection.vue';
-import WorkflowPresetBar     from './WorkflowPresetBar.vue';
 import EdgeLandmarkWarnings  from '../views/EdgeLandmarkWarnings.vue';
 import LayerSettings         from './LayerSettings.vue';
 import { useEditLayersStore } from '../../stores/editLayers';

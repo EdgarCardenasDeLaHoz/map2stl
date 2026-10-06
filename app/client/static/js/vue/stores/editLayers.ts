@@ -11,13 +11,13 @@
 import { defineStore } from 'pinia';
 import { checked, num, setChecked, setField, val } from '../dom-fields';
 
-export type EditLayerId = 'terrain' | 'water' | 'city' | 'satellite' | 'trails' | 'landcover' | 'mesh' | 'borders';
+export type EditLayerId = 'canvas' | 'terrain' | 'water' | 'city' | 'satellite' | 'trails' | 'landcover' | 'mesh' | 'borders';
 
 export interface EditLayer {
   id: EditLayerId;
   name: string;
   icon: string;
-  /** stacked-layers.js key of the preview layer. */
+  /** stacked-layers.js key of the preview layer ('' for Canvas, which has none). */
   stack: string;
   /** Always in the model (no switch). */
   fixed?: boolean;
@@ -42,6 +42,14 @@ const CITY_IDS = ['buildings', 'fortifications', 'walls', 'towers', 'churches', 
 
 /** In the panel's order (user 2026-10-05), all listed from the start. */
 export const EDIT_LAYERS: EditLayer[] = [
+  {
+    // Not a layer of the print but the whole of it: projection, detail, the map view and
+    // the combined height map (user 2026-10-05: Canvas as its own row, first).
+    id: 'canvas', name: 'Canvas', icon: '▦', stack: '', fixed: true,
+    inModel: () => true,
+    setInModel: () => {},
+    pictures: () => [],
+  },
   {
     id: 'terrain', name: 'Terrain', icon: '⛰', stack: 'Dem', fixed: true,
     inModel: () => true,

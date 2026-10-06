@@ -15,14 +15,8 @@
     <details class="composite-layer-group" open>
       <summary class="composite-layer-header">🏔 Base DEM</summary>
       <div class="composite-layer-body">
-        <label class="composite-toggle-row">
-          <input type="checkbox" id="compositeDemEnabled" checked aria-label="Enable base DEM contribution"> Include base elevation
-        </label>
-        <div class="composite-sliders">
-          <span class="composite-slider-label">Weight</span>
-          <input type="range" id="compositeDemWeight" min="0" max="2" value="1" step="0.1" aria-label="Composite DEM weight">
-          <span id="compositeDemWeightLabel" class="composite-slider-value">1.0</span>
-        </div>
+        <!-- The terrain always goes in at x 1 (its "Include" and "Weight" controls were removed
+             2026-10-05: Height already scales it). -->
         <canvas id="compositeHistDem" class="composite-histogram" width="240" height="20" title="Base DEM contribution distribution"></canvas>
         <!-- Server-side DEM request params that only shape the 3D terrain (moved
              from Fetch → DEM Source). event-listeners-map.js copies them into

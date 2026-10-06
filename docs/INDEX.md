@@ -271,7 +271,6 @@ Full map: [reference/frontend-modules.md](reference/frontend-modules.md).
 - Region size text ("2.0 × 2.0 km") for pill, list, map card, editor: `map2stl/app/client/static/js/modules/regions/region-geometry.js::formatBboxDims`
 - Settings collect/apply/auto-save: `map2stl/app/client/static/js/modules/ui/presets.js::collectAllSettings` (`applyAllSettings`, `setupAutoSave`)
   - Legacy keys in saved settings / presets renamed before apply (`projection.clip_nans` → `clip_valid_region`): `map2stl/app/client/static/js/modules/ui/settings-compat.js::normalizeSettingsKeys`
-- Workflow presets City / Mountain / Region / Coast: `map2stl/app/client/static/js/modules/ui/workflow-presets.js::applyWorkflowPreset` (`WORKFLOW_PRESETS`, `regionDemSource`)
 - Layer stack, render order, auto-fetch on show (`LAYER_AUTOLOAD`), graticule: `map2stl/app/client/static/js/modules/layers/stacked-layers.js::LAYER_STACK` (`LAYER_AUTOLOAD`, `getLayerOrder`, `moveLayer`, `drawLayerGrid`); rack `map2stl/app/client/static/js/vue/components/dem/LayerViewSection.vue`; per-layer view controls `map2stl/app/client/static/js/vue/components/dem/LayerDisplaySections.vue`
 - Building heights panel (sources, histogram, overrides): `map2stl/app/client/static/js/modules/layers/building-heights.js::summarizeBuildingHeights` (`buildingsWithOverrides`); `map2stl/app/client/static/js/vue/components/dem/CityBuildingsPanel.vue`
 - Bounding box (the one writer): `map2stl/app/client/static/js/modules/map/bbox-panel.js::setBboxRectangle`

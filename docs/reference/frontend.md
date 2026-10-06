@@ -134,9 +134,10 @@ Consequences to know:
   Edit and Explore are next (F-DESIGN). The printer bed (default Ender 220 × 220) and the UI mode
   are per-browser preferences (localStorage `map2stl_bed`, `map2stl_uiMode`); mm/px is not saved
   per region, so every new DEM is sized to fill the bed unless the model is split into pieces.
-- **Edit page (F-EDITPANEL, 2026-10-04; tabs 2026-10-05):** Layers left (all eight, fixed
-  order), canvas centre, settings right: CANVAS first (collapsible), then the selected layer with
-  tabs View / Fetch / Composite (tab and fold kept in `stores/editPanel.ts`). The old section
+- **Edit page (F-EDITPANEL, 2026-10-04; tabs and the Canvas row 2026-10-05):** Layers left
+  (Canvas, then the eight layers in a fixed order), canvas centre, settings right: the selected
+  row with tabs View / Fetch / Composite (tab kept in `stores/editPanel.ts`). Canvas holds what
+  applies to every layer: projection, detail, the map view, the combined height map. The old section
   components stay mounted in a hidden `#legacyControls` as the holders of the control ids; the
   richer ones open as sub-pages. Layer resolutions follow `#paramDim` unless overridden. The debug pixel
   grid starts off. **Live composite:** with the composite on and only server-buildable channels

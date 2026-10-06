@@ -25,7 +25,7 @@ Where each piece of browser code lives, and a one-line index of its functions.
 
 | Pure module | Imported by |
 |---|---|
-| `app/client/static/js/modules/export/print-scale.js` | `dem-main.js`, `export-handlers.js`, `model-viewer.js`, `workflow-presets.js`, Vue |
+| `app/client/static/js/modules/export/print-scale.js` | `dem-main.js`, `export-handlers.js`, `model-viewer.js`, Vue |
 | `app/client/static/js/modules/export/puzzle-cuts.js` | `model-viewer.js` |
 | `app/client/static/js/modules/export/city-quickview.js` | `model-viewer.js` |
 | `app/client/static/js/modules/export/city-fullmodel.js` | `model-viewer.js` |
@@ -35,7 +35,6 @@ Where each piece of browser code lives, and a one-line index of its functions.
 | `app/client/static/js/modules/layers/city-fetch.js` | `city-overlay.js`, `export-handlers.js`, Vue |
 | `app/client/static/js/modules/layers/building-heights.js` | `export-handlers.js`, Vue |
 | `app/client/static/js/modules/layers/landmark-overrides.js` | `export-handlers.js`, Vue |
-| `app/client/static/js/modules/ui/workflow-presets.js` | `presets.js`, Vue |
 | `app/client/static/js/modules/ui/guide-links.js` | `guides.js`, Vue |
 | `app/client/static/js/modules/dem/dem-sampling.js` | Vue (`DemSamplingInfo.vue`) |
 | `app/client/static/js/modules/map/landmarks.js` | Vue (`LandmarkSearch.vue`, `EdgeLandmarkWarnings.vue`) |
@@ -140,7 +139,6 @@ flowchart LR
 | `app-setup.js` | `setupStackedLayers`, `loadAllLayers`, `setupAutoReload` | Init wiring; `loadAllLayers` uses `Promise.allSettled` |
 | `presets.js` | `initPresetProfiles`, `applyPreset`, `collectAllSettings`, `applyAllSettings`, `saveNewPreset`, `revertPreset`, `loadSelectedPreset`, `setupAutoSave`, `_migratePreset` | Presets, auto-save, `PRESET_VERSION` migration, revert snapshot. Sends `projection.clip_valid_region` only |
 | `settings-compat.js` | `normalizeSettingsKeys` | Pure: renames legacy keys in saved region settings / presets (`projection.clip_nans` → `clip_valid_region`) before `applyAllSettings` reads them |
-| `workflow-presets.js` | `WORKFLOW_PRESETS`, `applyFields`, `applyWorkflowPreset`, `regionDemSource` | Pure: City / Mountain / Region / Coast presets; returns an undo list |
 | `curve-editor-state.js` | `CurveEditorState`, `CURVE_PRESETS` | Curve editor state class + presets |
 | `curve-editor.js` | `initCurveEditor`, `applyCurveTodem`, `undoCurve`, `redoCurve`, `setCurvePreset`, `drawCurve` | Elevation curve editor |
 | `keyboard-shortcuts.js` | `setupKeyboardShortcuts` | Ctrl+1/2/3 = Explore / Edit / Extrude (the header tabs; no Globe shortcut), Ctrl+S, Ctrl+R, Ctrl+Z/Y, Escape, arrows, G |
@@ -175,7 +173,7 @@ Under `app/client/static/js/vue/components/`. Store and bridge: [frontend.md](fr
 | `dem/` (F-DESIGN, F-EDITPANEL) | `EditLayersPanel` (DemContainer), `LayerSettings` + `settings/SetRow` (DemSettingsPanel) |
 | `sidebar/` | `SidebarPanel` (App); `SidebarListView`, `SidebarEditView`, `RegionListTable` (SidebarPanel) |
 | `views/` | `ContentArea` (App); `MapContainer`, `DemContainer`, `ModelContainer` (ContentArea); `LandmarkSearch`, `EdgeLandmarkWarnings` (MapContainer, DemSettingsPanel); `PreflightPanel`, `ModelScorePanel` (ModelContainer) |
-| `dem/` | `DemSettingsPanel`, `CityBuildingsPanel` (DemContainer); in DemSettingsPanel: `WorkflowPresetBar`, `PresetsSection`, `ProjectionSection`, `FetchLayersSection`, `CityLandmarksSection`, `VisualizationSection`, `LayerViewSection`, `LayerDisplaySections`, `CompositeDemSection`, `MeshImportSection`, `PlateRegistrationSection`; in FetchLayersSection: `CityFetchProgress`, `DemSamplingInfo` |
+| `dem/` | `DemSettingsPanel`, `CityBuildingsPanel` (DemContainer); in DemSettingsPanel: `PresetsSection`, `ProjectionSection`, `FetchLayersSection`, `CityLandmarksSection`, `VisualizationSection`, `LayerViewSection`, `LayerDisplaySections`, `CompositeDemSection`, `MeshImportSection`, `PlateRegistrationSection`; in FetchLayersSection: `CityFetchProgress`, `DemSamplingInfo` |
 | `shared/` | `CollapsibleSection` (used throughout) |
 
 - **Layer rack:** `LayerViewSection.vue` is a view over `stacked-layers.js` and rebuilds on the
