@@ -27,28 +27,42 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-def _dedupe(masks: list[tuple[float, np.ndarray]], iou: float) -> list[tuple[float, np.ndarray]]:
-    """Highest score first; drop a mask whose IoU with a kept one exceeds ``iou`` (on 1/4-res
-    copies: a few thousand full-res pairwise IoUs took minutes)."""
-    if not masks:
-        return []
-    small = np.stack([m[::4, ::4].ravel() for _, m in masks]).astype(np.float32)
-    inter = small @ small.T
-    area = small.sum(1)
-    keep: list[int] = []
-    for i in np.argsort([-s for s, _ in masks]):
-        if all(inter[i, j] / (area[i] + area[j] - inter[i, j] + 1e-6) <= iou for j in keep):
-            keep.append(int(i))
-    return [masks[i] for i in keep]
+#: One mask: (score, top row, left column, boolean crop to its bounding box). Full-pano masks
+#: took 4.4 GB on a hi-res drone pano (454 masks of 1270 x 7680, 2026-10-06).
+Mask = tuple[float, int, int, np.ndarray]
 
 
-def paint(masks: list[tuple[float, np.ndarray]], shape: tuple[int, int],
-          min_px: int = 40) -> np.ndarray:
+def _crop(score: float, m: np.ndarray, x_off: int) -> Mask:
+    ys, xs = np.flatnonzero(m.any(1)), np.flatnonzero(m.any(0))
+    return (score, int(ys[0]), int(xs[0]) + x_off, m[ys[0]:ys[-1] + 1, xs[0]:xs[-1] + 1].copy())
+
+
+def _iou(a: Mask, b: Mask) -> float:
+    (_, ay, ax, am), (_, by, bx, bm) = a, b
+    y0, y1 = max(ay, by), min(ay + am.shape[0], by + bm.shape[0])
+    x0, x1 = max(ax, bx), min(ax + am.shape[1], bx + bm.shape[1])
+    if y0 >= y1 or x0 >= x1:
+        return 0.0
+    inter = int((am[y0 - ay:y1 - ay, x0 - ax:x1 - ax] & bm[y0 - by:y1 - by, x0 - bx:x1 - bx]).sum())
+    return inter / (int(am.sum()) + int(bm.sum()) - inter + 1e-6)
+
+
+def _dedupe(masks: list[Mask], iou: float) -> list[Mask]:
+    """Highest score first; drop a mask whose IoU with a kept one exceeds ``iou`` (only masks
+    whose boxes overlap are compared)."""
+    keep: list[Mask] = []
+    for m in sorted(masks, key=lambda t: -t[0]):
+        if all(_iou(m, k) <= iou for k in keep):
+            keep.append(m)
+    return keep
+
+
+def paint(masks: list[Mask], shape: tuple[int, int], min_px: int = 40) -> np.ndarray:
     """Label map (0 = none, 1.. = instance) with larger masks painted first, so smaller ones
     win; labels left with fewer than ``min_px`` pixels are dropped."""
     lab = np.zeros(shape, np.int32)
-    for i, (_s, m) in enumerate(sorted(masks, key=lambda t: -int(t[1].sum())), 1):
-        lab[m] = i
+    for i, (_s, y, x, m) in enumerate(sorted(masks, key=lambda t: -int(t[3].sum())), 1):
+        lab[y:y + m.shape[0], x:x + m.shape[1]][m] = i
     ids, cnt = np.unique(lab[lab > 0], return_counts=True)
     for i, c in zip(ids, cnt, strict=True):
         if c < min_px:
@@ -78,7 +92,7 @@ def building_instances(rgb: np.ndarray, building: np.ndarray, device: str | None
     half = window_px // 2
     cols = np.flatnonzero(building.sum(0) >= 4)
     starts = sorted({min(max(0, int(c) - half), W - window_px) // half * half for c in cols})
-    masks: list[tuple[float, np.ndarray]] = []
+    masks: list[Mask] = []
     for x0 in starts:
         x1 = min(W, x0 + window_px)
         sub = building[:, x0:x1]
@@ -110,12 +124,9 @@ def building_instances(rgb: np.ndarray, building: np.ndarray, device: str | None
                     xs = np.flatnonzero(mm.any(0))
                     if xs[-1] - xs[0] > max_width_frac * (x1 - x0):
                         continue
-                    found.append((float(sc[j, k]), mm & sub))
+                    found.append(_crop(float(sc[j, k]), mm & sub, x0))
                     break
-        for s, mm in _dedupe(found, iou):
-            full = np.zeros((H, W), bool)
-            full[:, x0:x1] = mm
-            masks.append((s, full))
+        masks.extend(_dedupe(found, iou))
     pred.reset_image()
     lab = paint(_dedupe(masks, iou), (H, W))
     logger.info("[instances] %d building instances from %d windows", len(np.unique(lab)) - 1,

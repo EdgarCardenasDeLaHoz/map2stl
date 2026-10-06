@@ -373,7 +373,9 @@ def test_painted_instances_let_the_smaller_mask_win():
     big[:, :] = True
     small = np.zeros((20, 20), bool)
     small[5:15, 5:15] = True
-    lab = paint([(0.9, small), (0.95, big)], (20, 20), min_px=1)
+    from city2stl.skyline.building_instances import _crop
+
+    lab = paint([_crop(0.9, small, 0), _crop(0.95, big, 0)], (20, 20), min_px=1)
     assert lab[10, 10] != lab[0, 0] and lab[10, 10] > 0 and lab[0, 0] > 0
 
 
