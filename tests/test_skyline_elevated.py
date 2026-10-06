@@ -84,3 +84,13 @@ def test_chunked_upsample_gives_the_full_argmax_labels():
     got = _upsampled_labels(logits, 70, 90)
     assert got.dtype == np.uint8 and got.shape == (70, 90)
     assert np.array_equal(got, full.numpy())
+
+
+def test_only_sky_topped_base_visible_drone_readings_are_trusted():
+    from types import SimpleNamespace
+
+    from city2stl.skyline._pano.elevated import trusted
+
+    assert trusted(SimpleNamespace(top_edge="sky", base_visible=True))
+    assert not trusted(SimpleNamespace(top_edge="depth", base_visible=True))
+    assert not trusted(SimpleNamespace(top_edge="sky", base_visible=False))

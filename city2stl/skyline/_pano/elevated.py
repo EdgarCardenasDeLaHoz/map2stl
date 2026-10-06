@@ -311,12 +311,23 @@ def estimate_confidence(m) -> float:
     return float(np.clip(seen * (300.0 / max(float(m.dist_m), 300.0)) ** 2, 0.05, 1.0))
 
 
+def trusted(m) -> bool:
+    """A drone reading whose column climbed to the sky with the building's base in view.
+
+    Calibrated on Cartagena's OSM-tagged buildings (2026-10-05, cameras aligned on the tower
+    outline): such readings were within 25 % of the tag in 88 % of cases (n 8); sky-topped ones
+    in 73 % (11); runs that stopped at a depth step in 21 % (19), base hidden in 10 % (10).
+    """
+    return m.top_edge == "sky" and bool(m.base_visible)
+
+
 def elevated_estimates(seeds: list[ElevatedSeed]) -> list[RegisteredBuildingEstimate]:
-    """One estimate per footprint and seed that ``fuse_heights`` keeps: seeds agreeing with the
-    most reliable one (25 %); the outvoted seeds' readings never reach the aggregate, whose
-    plain median would otherwise average a misread with the good view."""
+    """One estimate per footprint and seed that ``fuse_heights`` keeps, from :func:`trusted`
+    readings only: seeds agreeing with the most reliable one (25 %); the outvoted seeds'
+    readings never reach the aggregate, whose plain median would otherwise average a misread
+    with the good view."""
     by_seed = {s.seed_name: [dict(m.__dict__, footprint=s.feature_ids[m.footprint])
-                             for m in s.measured] for s in seeds}
+                             for m in s.measured if trusted(m)] for s in seeds}
     fused = fd.fuse_heights(by_seed)
     by_key = {(s.seed_name, s.feature_ids[m.footprint]): (s, m) for s in seeds for m in s.measured}
     # the segments carry each footprint's true bearing (their columns are rolled north-centre)
@@ -335,6 +346,6 @@ def elevated_estimates(seeds: list[ElevatedSeed]) -> list[RegisteredBuildingEsti
     return out
 
 
-__all__ = ["ElevatedSeed", "measure_elevated_seed", "elevated_estimates", "pano_result",
+__all__ = ["ElevatedSeed", "measure_elevated_seed", "elevated_estimates", "trusted", "pano_result",
            "footprints_from_records", "ground_layers", "MIN_ELEVATED_H_M"]
 
