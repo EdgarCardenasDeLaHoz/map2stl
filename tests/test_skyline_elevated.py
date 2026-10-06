@@ -108,35 +108,42 @@ def test_seed_page_lists_the_numbered_buildings():
     assert 'id="seg-91"' in page and "b0812" in page and ">95<" in page and "10.40639" in page
 
 
-def _render_view(pitch_deg: float, f: float, w: int, h: int, cy: float | None = None) -> np.ndarray:
-    """A pinhole view (heading 0) of a synthetic sphere whose colour encodes azimuth and
-    elevation, so a mis-warped pixel shows."""
-    from city2stl.skyline._pano.elevated import _pitch_rotation
+def _sphere_colour(az, el):
+    """A synthetic sphere: R and G encode azimuth (two harmonics, so the wrap is seamless) and
+    B elevation; a mis-sampled pixel shows."""
+    a = np.radians(az)
+    return np.stack([127 + 120 * np.sin(a), 127 + 120 * np.cos(a), (el + 90) * 1.4], -1).clip(0, 255)
 
-    cy = h / 2 if cy is None else cy
+
+def _render_view(heading, pitch, f, w, h):
+    from city2stl.skyline._pano.elevated import _camera_axes
+
+    r, d, fw = _camera_axes(heading, pitch)
     yy, xx = np.mgrid[0:h, 0:w].astype(float)
-    rays = np.stack([(xx - w / 2) / f, (yy - cy) / f, np.ones_like(xx)], -1) @ _pitch_rotation(pitch_deg).T
-    az = np.degrees(np.arctan2(rays[..., 0], rays[..., 2]))
-    el = np.degrees(np.arctan2(-rays[..., 1], np.hypot(rays[..., 0], rays[..., 2])))
-    return np.stack([(az + 90) * 1.4, (el + 90) * 1.4, np.full_like(az, 128)], -1).clip(0, 255).astype(np.uint8)
+    ray = (fw[None, None] + ((xx - w / 2) / f)[..., None] * r[None, None]
+           + ((yy - h / 2) / f)[..., None] * d[None, None])
+    ray /= np.linalg.norm(ray, axis=-1, keepdims=True)
+    az = np.degrees(np.arctan2(ray[..., 0], ray[..., 1])) % 360
+    el = np.degrees(np.arcsin(ray[..., 2]))
+    return _sphere_colour(az, el).astype(np.uint8)
 
 
-def test_pitch_rows_merge_into_one_taller_view_at_the_mean_pitch():
-    from city2stl.skyline._pano.elevated import combine_pitch_rows
+def test_sphere_pano_puts_every_pixel_at_its_direction_even_pointed_down():
+    """Pinhole crops stitched side by side tore apart at the seams 36 deg down (seed_6); the
+    reprojected pano samples each heading/elevation from the view that sees it best."""
+    from city2stl.skyline._pano.elevated import sphere_pano
 
-    fov, w = 30.0, 160
+    fov, w = 30.0, 96
     f = 0.5 * w / np.tan(np.radians(fov / 2))
-    # the renderer itself: a view pitched up 8 deg sees elevation 8 at its centre, 23 at the top
-    up = _render_view(8.0, f, w, w)
-    assert up[w // 2, w // 2, 1] / 1.4 - 90 == pytest.approx(8.0, abs=1.0)
-    assert up[0, w // 2, 1] / 1.4 - 90 == pytest.approx(8.0 + fov / 2, abs=1.5)
-    rows = {8.0: up, -18.0: _render_view(-18.0, f, w, w)}
-    img, pv = combine_pitch_rows(rows, fov)
-    assert pv == -5.0
-    half_v = np.degrees(np.arctan(0.5 * w / f))
-    cy = f * np.tan(np.radians(8.0 + half_v - pv))
-    want = _render_view(pv, f, w, img.shape[0], cy)
-    covered = img.any(-1)
-    assert covered[:, w // 4:3 * w // 4].mean() > 0.98      # the two rows leave no gap mid-frame
-    err = np.abs(img.astype(int) - want.astype(int))[covered]
-    assert np.median(err) <= 1 and np.percentile(err, 99) <= 4
+    views = {(float(hd), float(p)): _render_view(hd, p, f, w, w)
+             for hd in range(0, 360, 30) for p in (-10, -36, -62)}
+    pano = sphere_pano("t", 0.0, 0.0, views, fov)
+    rows = np.arange(pano.height)
+    el = pano.elevation_deg(rows + 0.5)
+    az2, el2 = np.broadcast_arrays(pano.frame_heading[None, :], el[:, None])
+    want = _sphere_colour(az2, el2)
+    covered = pano.rgb.any(-1)
+    assert covered.mean() > 0.98                        # a sliver near -77 deg no view covers
+    err = np.abs(pano.rgb.astype(float) - want)[covered]
+    assert np.median(err) <= 1.5 and np.percentile(err, 99) <= 6
+    assert pano.elevation_deg(0) > 4 and pano.elevation_deg(pano.height - 1) < -76

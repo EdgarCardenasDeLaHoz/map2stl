@@ -51,71 +51,99 @@ OUTLINE_ONLY_H_M = (40.0, 60.0, 80.0, 100.0, 130.0, 160.0, 200.0, 250.0)
 OUTLINE_ONLY_MAX_MISFIT_DEG = 1.5
 #: Ground map around the seed: the position search (+-600 m) plus 4 km of shore rays.
 GROUND_HALF_M, GROUND_RES_M = 4800.0, 3.0
-#: High-resolution capture of a drone seed (:func:`capture_hires_views`): 30-deg views (21 px
-#: per degree, against 8.5 at the default 75 deg; the Photo Spheres hold ~23) in two pitch rows
-#: that together cover -33..+23 deg: tower tops from 36-100 m up and the near waterline.
+#: High-resolution capture of a drone seed (:func:`capture_sphere_pano`): 30-deg views (21 px
+#: per degree, against 8.5 at the default 75 deg; the Photo Spheres hold ~23) in pitch rows
+#: that together cover -33..+23 deg: tower tops from 36-100 m up and the near waterline. A drone
+#: high over land needs rows pointed down (seed_6: -10, -36, -62 covers +5..-77 deg).
 HIRES_FOV_DEG = 30.0
 HIRES_PITCHES_DEG = (8.0, -18.0)
 HIRES_SIZE_PX = 640
 
 
-def _pitch_rotation(pitch_deg: float) -> np.ndarray:
-    """Camera-to-world rotation (x right, y down, z forward) of a camera pitched up by
-    ``pitch_deg``."""
-    t = np.radians(pitch_deg)
-    c, s = np.cos(t), np.sin(t)
-    return np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]])   # forward -> (0, -sin, cos)
+def _camera_axes(heading_deg: float, pitch_deg: float):
+    """World (east, north, up) unit vectors of a camera's right, down and forward axes."""
+    h, p = np.radians(heading_deg), np.radians(pitch_deg)
+    fwd = np.array([np.sin(h) * np.cos(p), np.cos(h) * np.cos(p), np.sin(p)])
+    right = np.array([np.cos(h), -np.sin(h), 0.0])
+    down = np.array([np.sin(h) * np.sin(p), np.cos(h) * np.sin(p), -np.cos(p)])
+    return right, down, fwd
 
 
-def combine_pitch_rows(rows: dict[float, np.ndarray], fov_deg: float,
-                       pitch_deg: float | None = None) -> tuple[np.ndarray, float]:
-    """One taller pinhole view at ``pitch_deg`` (default: the rows' mean) from views of one
-    heading at several pitches, each warped by its pure-rotation homography; a pixel comes from
-    the row whose centre is nearest in elevation. Same focal length and width, so the result
-    stitches like any spin view. Returns (image, pitch)."""
+def sphere_pano(name: str, lat: float, lon: float, views: dict[tuple[float, float], np.ndarray],
+                fov_deg: float, labels: dict | None = None, step_deg: float = 30.0) -> fd.Pano:
+    """One pano from pinhole views at several headings and pitches, by exact reprojection.
+
+    Each output column is one heading (uniform; the views' focal length in px per radian) and
+    each row one elevation, following :class:`footprint_detect.Pano`'s model (a pinhole at the
+    rows' mid pitch, the same for every column), so the rest of the drone path works unchanged.
+    A pixel is sampled from the view that sees its direction closest to that view's axis, among
+    the views at its own heading and the two beside it. Stitching pinhole crops side by side
+    (``pano_from_views``) assumes a row is one elevation in every column, true only near the
+    horizon: pointed 36 deg down, neighbouring views tore apart at their seams (2026-10-06,
+    seed_6). ``labels``: ADE20K label maps per view (same keys), reprojected the same way.
+    """
     import cv2
 
-    ps = sorted(rows, reverse=True)
-    h, w = rows[ps[0]].shape[:2]
-    f = 0.5 * w / np.tan(np.radians(fov_deg) / 2)
-    pv = float(np.mean(ps)) if pitch_deg is None else float(pitch_deg)
-    half_v = np.degrees(np.arctan(0.5 * h / f))
-    top, bot = max(ps) + half_v - pv, pv - (min(ps) - half_v)
-    cy = f * np.tan(np.radians(top))               # principal row of the virtual view
-    H = int(np.ceil(cy + f * np.tan(np.radians(bot))))
-    H += H % 2
-    Kv = np.array([[f, 0, w / 2], [0, f, cy], [0, 0, 1.0]])
-    Ks = np.array([[f, 0, w / 2], [0, f, h / 2], [0, 0, 1.0]])
-    out = np.zeros((H, w, 3), np.uint8)
-    best = np.full((H, w), np.inf)
-    yy = np.arange(H, dtype=np.float64)[:, None] * np.ones((1, w))
-    ray_el = np.degrees(np.arctan2(cy - yy, f)) + pv
-    for p in ps:
-        # source pixel of a virtual pixel: K_s R_s^T R_v K_v^-1
-        M = Ks @ _pitch_rotation(p).T @ _pitch_rotation(pv) @ np.linalg.inv(Kv)
-        warped = cv2.warpPerspective(rows[p], M, (w, H),
-                                     flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP)
-        valid = cv2.warpPerspective(np.full((h, w), 255, np.uint8), M, (w, H),
-                                    flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP) > 0
-        d = np.where(valid, np.abs(ray_el - p), np.inf)
-        take = d < best
-        out[take] = warped[take]
-        best[take] = d[take]
-    return out, pv
+    keys = sorted(views)
+    pitches = sorted({p for _h, p in keys})
+    h0, w0 = views[keys[0]].shape[:2]
+    f = 0.5 * w0 / math.tan(math.radians(fov_deg) / 2)
+    half_v = math.degrees(math.atan(0.5 * h0 / f))
+    e_top, e_bot = max(pitches) + half_v, min(pitches) - half_v
+    pv = 0.5 * (e_top + e_bot)
+    H = int(round(2 * f * math.tan(math.radians(e_top - pv))))
+    W = int(round(2 * math.pi * f))
+    cols = np.arange(W)
+    az = cols * 360.0 / W
+    el = pv + np.degrees(np.arctan((H / 2.0 - (np.arange(H) + 0.5)) / f))
+    rgb = np.zeros((H, W, 3), np.uint8)
+    lab = np.full((H, W), -1, np.int16)
+    for hd in sorted({hd for hd, _p in keys}):
+        lo = (hd - step_deg / 2) % 360.0
+        sel = cols[((az - lo) % 360.0) < step_deg]
+        if not len(sel):
+            continue
+        a = np.radians(az[sel])[None, :]
+        e = np.radians(el)[:, None]
+        ray = np.stack([np.sin(a) * np.cos(e), np.cos(a) * np.cos(e),
+                        np.broadcast_to(np.sin(e), (H, len(sel)))], -1).astype(np.float32)
+        best = np.full((H, len(sel)), -np.inf, np.float32)
+        out = np.zeros((H, len(sel), 3), np.uint8)
+        out_l = np.full((H, len(sel)), -1, np.int16)
+        for (vh, vp) in keys:
+            if abs((vh - hd + 180.0) % 360.0 - 180.0) > step_deg + 1e-6:
+                continue
+            img = views[(vh, vp)]
+            r_ax, d_ax, f_ax = (x.astype(np.float32) for x in _camera_axes(vh, vp))
+            z = ray @ f_ax
+            zz = np.maximum(z, 1e-6)
+            u = (f * (ray @ r_ax) / zz + img.shape[1] / 2.0).astype(np.float32)
+            v = (f * (ray @ d_ax) / zz + img.shape[0] / 2.0).astype(np.float32)
+            ok = (z > 0.05) & (u >= 0) & (u <= img.shape[1] - 1) & (v >= 0) & (v <= img.shape[0] - 1)
+            take = ok & (z > best)
+            if not take.any():
+                continue
+            best[take] = z[take]
+            out[take] = cv2.remap(img, u, v, cv2.INTER_LINEAR)[take]
+            if labels is not None and labels.get((vh, vp)) is not None:
+                out_l[take] = cv2.remap(np.asarray(labels[(vh, vp)], np.int16), u, v,
+                                        cv2.INTER_NEAREST)[take]
+        rgb[:, sel] = out
+        lab[:, sel] = out_l
+    return fd.Pano(name, lat, lon, rgb, lab, az.astype(float), f, pv)
 
 
-def capture_hires_views(seed: SkylinePoint, api_key: str, headings, is_photosphere: bool,
+def capture_sphere_pano(seed: SkylinePoint, api_key: str, headings, is_photosphere: bool,
                         fov_deg: float = HIRES_FOV_DEG, pitches=HIRES_PITCHES_DEG,
-                        size_px: int = HIRES_SIZE_PX) -> tuple[list[dict], float] | None:
-    """Spin views of a drone seed at ``fov_deg`` in ``pitches`` rows (Street View Static,
-    ``len(headings) * len(pitches)`` images, cached on disk like every fetch), each heading's
-    rows merged by :func:`combine_pitch_rows`. Returns (views, pitch) for
-    :func:`measure_elevated_seed` with ``seed.fov = fov_deg``, or None when a fetch fails."""
+                        size_px: int = HIRES_SIZE_PX) -> fd.Pano | None:
+    """A drone seed's pano from 30-deg Street View views in ``pitches`` rows
+    (``len(headings) * len(pitches)`` images, cached on disk like every fetch) with their
+    SegFormer labels, by :func:`sphere_pano`. None when a fetch fails."""
+    from .._core.segmentation import _ensure_label_map
     from ..streetview_io import _streetview_image
 
-    views, pv = [], 0.0
+    views, labels = {}, {}
     for hd in headings:
-        rows = {}
         for p in pitches:
             img = _streetview_image(api_key, seed.lat, seed.lon, float(hd), fov=fov_deg,
                                     pitch=float(p), width=size_px, height=size_px,
@@ -124,10 +152,10 @@ def capture_hires_views(seed: SkylinePoint, api_key: str, headings, is_photosphe
                 logger.warning("[elevated] %s: hi-res fetch failed at %.0f deg, pitch %.0f",
                                seed.name, hd, p)
                 return None
-            rows[float(p)] = img
-        img, pv = combine_pitch_rows(rows, fov_deg)
-        views.append({"geo_heading": float(hd), "image": img})
-    return views, pv
+            views[(float(hd), float(p))] = img
+            labels[(float(hd), float(p))] = _ensure_label_map(img)
+    return sphere_pano(seed.name, seed.lat, seed.lon, views, fov_deg, labels,
+                       360.0 / len(headings))
 
 
 @dataclass
@@ -242,15 +270,21 @@ def _view_rows(seed: SkylinePoint, views: list[dict], pano: fd.Pano, pose: fd.Pa
 
 def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: float,
                           step_deg: float, buildings: list[BuildingRecord], state: dict,
-                          device: str | None = None) -> ElevatedSeed | None:
+                          device: str | None = None,
+                          pano: fd.Pano | None = None) -> ElevatedSeed | None:
     """Measure one drone seed footprint first (see module docstring). ``state``: shapely
     geometries in lon/lat, ``coast_lines``, ``water_polys``, ``roads`` ((line, width_m)) and
     ``green``. None when the waterline does not fit or the camera is not elevated: the caller
-    then runs the street-level path."""
+    then runs the street-level path. ``pano``: a pano already built for the seed
+    (:func:`capture_sphere_pano`); the spin views then only feed the report's view rows."""
     views = [v for v in views if v.get("image") is not None]
-    if len(views) < 6 or not (state.get("coast_lines") or state.get("water_polys")):
+    if not (state.get("coast_lines") or state.get("water_polys")):
         return None
-    pano = fd.pano_from_views(seed.name, seed.lat, seed.lon, views, seed.fov, step_deg, pitch_deg)
+    if pano is None:
+        if len(views) < 6:
+            return None
+        pano = fd.pano_from_views(seed.name, seed.lat, seed.lon, views, seed.fov, step_deg,
+                                  pitch_deg)
     gmap = fd.ground_map(pano.lat, pano.lon, coast_lines=state.get("coast_lines", ()),
                          water_polys=state.get("water_polys", ()), roads=state.get("roads", ()),
                          green=state.get("green", ()), buildings=[b.geometry for b in buildings],

@@ -99,11 +99,11 @@ def _stitch_labels(views: list[dict], fov_deg: float, step_deg: float) -> np.nda
 
 
 def load_seed_pano(region: str, seed_name: str, step_deg: float = 30.0,
-                   hires: bool = False) -> Pano:
+                   hires: bool = False, hires_pitches: tuple[float, ...] | None = None) -> Pano:
     """Rebuild a seed's stitched pano from its spin views the way the pipeline captures them
     (Photo Sphere seeds by pano id). Views come from ``runs/image_cache`` when cached. ``hires``:
-    the drone capture of ``_pano.elevated.capture_hires_views`` (30-deg views in two pitch
-    rows, twice the images)."""
+    the drone capture of ``_pano.elevated.capture_sphere_pano`` (30-deg views in pitch
+    rows reprojected onto one sphere; ``hires_pitches`` overrides the rows)."""
     import json
     from pathlib import Path
 
@@ -131,12 +131,13 @@ def load_seed_pano(region: str, seed_name: str, step_deg: float = 30.0,
                         score=1.0, fov=fov, pitch=pitch, pano_id=pano_id)
     headings = tuple(float(x) for x in np.arange(0.0, 360.0, step_deg))
     if hires:
-        from ._pano.elevated import HIRES_FOV_DEG, capture_hires_views
+        from ._pano.elevated import capture_sphere_pano
 
-        got = capture_hires_views(seed, _resolve_api_key(), headings, is_photosphere)
+        got = capture_sphere_pano(seed, _resolve_api_key(), headings, is_photosphere,
+                                  **({"pitches": hires_pitches} if hires_pitches else {}))
         if got is None:
             raise RuntimeError(f"{seed_name}: hi-res capture failed")
-        return pano_from_views(seed_name, lat, lon, got[0], HIRES_FOV_DEG, step_deg, got[1])
+        return got
     prefetch, eff_pitch, _cached = _capture_pano_views(
         seed, _resolve_api_key(), headings, is_photosphere=is_photosphere)
     return pano_from_views(seed_name, lat, lon, prefetch, fov, step_deg, eff_pitch)
