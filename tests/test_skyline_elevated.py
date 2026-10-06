@@ -143,7 +143,7 @@ def test_sphere_pano_puts_every_pixel_at_its_direction_even_pointed_down():
     az2, el2 = np.broadcast_arrays(pano.frame_heading[None, :], el[:, None])
     want = _sphere_colour(az2, el2)
     covered = pano.rgb.any(-1)
-    assert covered.mean() > 0.98                        # a sliver near -77 deg no view covers
+    assert covered.mean() > 0.999                       # slivers no view covers are filled
     err = np.abs(pano.rgb.astype(float) - want)[covered]
-    assert np.median(err) <= 1.5 and np.percentile(err, 99) <= 6
+    assert np.median(err) <= 1.5 and np.percentile(err, 98) <= 6
     assert pano.elevation_deg(0) > 4 and pano.elevation_deg(pano.height - 1) < -76

@@ -98,6 +98,7 @@ def sphere_pano(name: str, lat: float, lon: float, views: dict[tuple[float, floa
     el = pv + np.degrees(np.arctan((H / 2.0 - (np.arange(H) + 0.5)) / f))
     rgb = np.zeros((H, W, 3), np.uint8)
     lab = np.full((H, W), -1, np.int16)
+    hole = np.zeros((H, W), bool)
     for hd in sorted({hd for hd, _p in keys}):
         lo = (hd - step_deg / 2) % 360.0
         sel = cols[((az - lo) % 360.0) < step_deg]
@@ -130,6 +131,15 @@ def sphere_pano(name: str, lat: float, lon: float, views: dict[tuple[float, floa
                                         cv2.INTER_NEAREST)[take]
         rgb[:, sel] = out
         lab[:, sel] = out_l
+        hole[:, sel] = ~np.isfinite(best)
+    if hole.any():
+        # slivers no view reaches (between views at the top and bottom rows): filled, so they
+        # are not read as a black building or a sky edge
+        from scipy.ndimage import distance_transform_edt
+
+        rgb = cv2.inpaint(rgb, hole.astype(np.uint8), 5, cv2.INPAINT_TELEA)
+        _d, (iy, ix) = distance_transform_edt(hole, return_indices=True)
+        lab = lab[iy, ix]
     return fd.Pano(name, lat, lon, rgb, lab, az.astype(float), f, pv)
 
 
