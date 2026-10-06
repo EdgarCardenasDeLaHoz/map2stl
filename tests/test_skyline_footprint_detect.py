@@ -292,3 +292,34 @@ def test_camera_position_found_from_the_waterline():
     assert fit.waterline_deg < 0.5 * fit.waterline_at_seed_deg
     assert abs(fit.dx_m - true[0]) <= 20.0 and abs(fit.dy_m - true[1]) <= 20.0
     assert fit.pose.camera_h_m == pytest.approx(h, rel=0.15)
+
+
+def test_refine_on_outline_recovers_a_bearing_error():
+    """A drone pano whose bearing is 4 deg off: the OSM tower outline puts it back (2026-10-05:
+    the Cartagena seeds were 4-6 deg off and footprints fell on the building beside them)."""
+    from city2stl.skyline import skyline_match as sm
+
+    rng = np.random.default_rng(3)
+    verts, hs = [], []
+    for _ in range(40):
+        cx, cy = rng.uniform(-900, 900), rng.uniform(300, 1500)
+        w = rng.uniform(15, 35)
+        verts.append(np.array([[cx - w, cy - w], [cx + w, cy - w], [cx + w, cy + w], [cx - w, cy + w], [cx - w, cy - w]]))
+        hs.append(rng.uniform(60, 200))
+    towers = sm.Towers(10.40, -75.55, verts, np.array(hs), [f"t{i}" for i in range(40)])
+    lat, lon = towers.to_ll(0.0, 0.0)
+    h_cam, W, H, f_px = 50.0, 1800, 900, 1800 / (2 * np.pi)
+    model = sm.predicted_outline(towers, (0.0, 0.0), h_cam=h_cam)
+    true_bear = np.arange(W) * 360.0 / W
+    labels = np.full((H, W), 1, dtype=np.uint8)                      # building
+    for x, b in enumerate(true_bear):
+        e = model[int(round(b / sm.BIN_DEG)) % sm.N_BINS]
+        row = int(round(H / 2 - f_px * np.tan(np.radians(max(e, -5.0)))))
+        labels[:max(row, 0), x] = fd.SKY_CLASS
+    pano = fd.Pano("p", lat, lon, np.zeros((H, W, 3), np.uint8), labels, (true_bear - 4.0) % 360.0, f_px, 0.0)
+    pose = fd.PanoPose(0.0, h_cam, 0.0, 0.1, W)                       # offset 0: 4 deg short
+    fit = fd.refine_on_outline(pano, pose, towers, move_m=0.0)
+    assert abs(fit.shift_deg - 4.0) <= 0.2 and abs(fit.pose.offset_deg - 4.0) <= 0.2
+    assert fit.misfit_deg < fit.misfit_before_deg - 1.0
+    ok = fd.refine_on_outline(pano, fit.pose, towers, move_m=0.0)       # already right: unchanged
+    assert ok.shift_deg == 0.0

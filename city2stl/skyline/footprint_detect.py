@@ -404,6 +404,70 @@ def fit_camera_position(pano: Pano, pose: PanoPose, gmap: GroundMap, search_m: f
 
 
 @dataclass(frozen=True)
+class OutlineFit:
+    dx_m: float                  # camera moved east of the given pano position
+    dy_m: float                  # ... and north
+    pose: PanoPose               # with the bearing offset corrected
+    shift_deg: float             # added to the bearing offset
+    misfit_before_deg: float     # median |observed - OSM tower outline| on tower columns
+    misfit_deg: float
+    n_cols: int
+
+
+def outline_misfit(pano: Pano, pose: PanoPose, model: np.ndarray, shift_deg: float = 0.0,
+                   min_elev_deg: float = 3.0) -> tuple[float, int]:
+    """Median |observed outline - OSM tower outline| (deg) over the columns where the towers
+    rise above ``min_elev_deg``, and that column count. ``model``: ``skyline_match.predicted_outline``
+    from the camera; the observed outline is each column's first non-sky row."""
+    from .skyline_match import BIN_DEG, N_BINS
+
+    top = np.argmax(pano.labels != SKY_CLASS, axis=0).astype(float)
+    obs = pano.elevation_deg(top) + pose.pitch_fix_deg
+    bear = (pano.frame_heading + pose.offset_deg + shift_deg) % 360.0
+    pred = model[np.round(bear / BIN_DEG).astype(int) % N_BINS]
+    m = pred > min_elev_deg
+    if not m.any():
+        return math.inf, 0
+    return float(np.median(np.abs(obs[m] - pred[m]))), int(m.sum())
+
+
+def refine_on_outline(pano: Pano, pose: PanoPose, towers, search_deg: float = 10.0,
+                      step_deg: float = 0.2, move_m: float = 150.0, move_step_m: float = 50.0,
+                      min_cols: int = 50, min_gain_deg: float = 0.3) -> OutlineFit:
+    """Bearing (and a small position nudge) from the OSM-tagged towers' outline.
+
+    The waterline pins the camera height and pitch but leaves the bearing loose: on the three
+    Cartagena drone seeds it was 4-6 deg off, so a footprint's columns fell on the building
+    beside it (Nautica, a 160 m tower, read 42 m off a low block next to it). Slides the
+    predicted outline of ``towers`` (``skyline_match.Towers``, OSM heights) over the observed
+    one by up to ``search_deg`` and moves the camera up to ``move_m``; kept only when the
+    misfit drops by ``min_gain_deg``. 2026-10-05: published tower heights MAE 82.5 -> 32.9 m,
+    readings within 25 % of their tag 19 -> 40 %.
+    """
+    from dataclasses import replace
+
+    from .skyline_match import predicted_outline
+
+    cam0 = np.array(towers.to_xy(pano.lat, pano.lon), float)
+    model0 = predicted_outline(towers, tuple(cam0), h_cam=pose.camera_h_m)
+    before, n0 = outline_misfit(pano, pose, model0)
+    best = (before, 0.0, 0.0, 0.0, n0)
+    steps = np.arange(-move_m, move_m + 1e-6, move_step_m)
+    for dx in steps:
+        for dy in steps:
+            model = model0 if dx == 0 and dy == 0 else predicted_outline(
+                towers, tuple(cam0 + (dx, dy)), h_cam=pose.camera_h_m)
+            for s in np.arange(-search_deg, search_deg + 1e-6, step_deg):
+                e, n = outline_misfit(pano, pose, model, s)
+                if n >= min_cols and e < best[0]:
+                    best = (e, float(s), float(dx), float(dy), n)
+    if before - best[0] < min_gain_deg:
+        return OutlineFit(0.0, 0.0, pose, 0.0, before, before, n0)
+    e, s, dx, dy, n = best
+    return OutlineFit(dx, dy, replace(pose, offset_deg=(pose.offset_deg + s) % 360.0), s, before, e, n)
+
+
+@dataclass(frozen=True)
 class GroundFit:
     dx_m: float                  # camera east of the seed position
     dy_m: float                  # camera north of it

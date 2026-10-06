@@ -9,7 +9,8 @@ pano path:
 1. the stitched pano and its ADE20K labels from the views already captured;
 2. heading offset, camera height and pitch from the waterline, then the camera position:
    waterline over +-600 m, parks and streets nearby (``footprint_detect.fit_camera_position``;
-   seed_4's recorded position was ~360 m off);
+   seed_4's recorded position was ~360 m off), then the bearing from the OSM-tagged towers'
+   outline (``footprint_detect.refine_on_outline``: the seeds were 4-6 deg off);
 3. Depth Anything V2 on the pano, and every OSM footprint in view measured
    (``footprint_detect.measure_footprints``).
 
@@ -178,6 +179,14 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
                 seed.name, pf.source, pf.dx_m, pf.dy_m, pf.pose.camera_h_m, pf.pose.offset_deg,
                 pf.waterline_at_seed_deg, pf.waterline_deg, pf.ground_at_waterline, pf.ground)
     pano = fd.moved(pano, pf.dx_m, pf.dy_m)
+    pose = pf.pose
+    towers = _towers(buildings)
+    if towers is not None:                      # the bearing the waterline leaves loose
+        of = fd.refine_on_outline(pano, pose, towers)
+        logger.info("[elevated] %s: tower outline moves the bearing %+.1f deg and the camera "
+                    "%+.0f m E %+.0f m N; misfit %.2f -> %.2f deg over %d cols", seed.name,
+                    of.shift_deg, of.dx_m, of.dy_m, of.misfit_before_deg, of.misfit_deg, of.n_cols)
+        pano, pose = fd.moved(pano, of.dx_m, of.dy_m), of.pose
     if device is None:
         import torch
 
@@ -191,11 +200,27 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
     depth = predict_pano_depth_tiled(pano.rgb, device=device)
     free_gpu_cache()
     fps, fids = footprints_from_records(buildings)
-    ms = fd.measure_footprints(pano, pf.pose, fps, depth=depth)
+    ms = fd.measure_footprints(pano, pose, fps, depth=depth)
     logger.info("[elevated] %s: %d footprints measured (%d with the base visible)",
                 seed.name, len(ms), sum(m.base_visible for m in ms))
-    return ElevatedSeed(seed.name, pf, ms, fids, pano_result(seed, pano, pf.pose, ms, fids, depth),
-                        _view_rows(seed, views, pano, pf.pose, len(ms)))
+    return ElevatedSeed(seed.name, pf, ms, fids, pano_result(seed, pano, pose, ms, fids, depth),
+                        _view_rows(seed, views, pano, pose, len(ms)))
+
+
+def _towers(buildings: list[BuildingRecord]):
+    """``skyline_match.Towers`` of the OSM-tagged buildings, for the outline fit; None if none."""
+    from shapely.geometry import mapping
+
+    from ..skyline_match import tower_table
+
+    feats = [{"geometry": mapping(b.geometry),
+              "properties": {"height_m": b.height_tag_m, "height_source": b.height_source,
+                             "name": b.name}}
+             for b in buildings if b.geometry is not None and b.height_tag_m]
+    try:
+        return tower_table(feats)
+    except ValueError:
+        return None
 
 
 #: Road widths by OSM class when the fetch gave none (m).
