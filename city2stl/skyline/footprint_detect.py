@@ -98,9 +98,12 @@ def _stitch_labels(views: list[dict], fov_deg: float, step_deg: float) -> np.nda
     return np.concatenate(crops, axis=1)
 
 
-def load_seed_pano(region: str, seed_name: str, step_deg: float = 30.0) -> Pano:
+def load_seed_pano(region: str, seed_name: str, step_deg: float = 30.0,
+                   hires: bool = False) -> Pano:
     """Rebuild a seed's stitched pano from its spin views the way the pipeline captures them
-    (Photo Sphere seeds by pano id). Views come from ``runs/image_cache`` when cached."""
+    (Photo Sphere seeds by pano id). Views come from ``runs/image_cache`` when cached. ``hires``:
+    the drone capture of ``_pano.elevated.capture_hires_views`` (30-deg views in two pitch
+    rows, twice the images)."""
     import json
     from pathlib import Path
 
@@ -127,6 +130,13 @@ def load_seed_pano(region: str, seed_name: str, step_deg: float = 30.0) -> Pano:
     seed = SkylinePoint(name=seed_name, lat=lat, lon=lon, heading=heading, source="seed",
                         score=1.0, fov=fov, pitch=pitch, pano_id=pano_id)
     headings = tuple(float(x) for x in np.arange(0.0, 360.0, step_deg))
+    if hires:
+        from ._pano.elevated import HIRES_FOV_DEG, capture_hires_views
+
+        got = capture_hires_views(seed, _resolve_api_key(), headings, is_photosphere)
+        if got is None:
+            raise RuntimeError(f"{seed_name}: hi-res capture failed")
+        return pano_from_views(seed_name, lat, lon, got[0], HIRES_FOV_DEG, step_deg, got[1])
     prefetch, eff_pitch, _cached = _capture_pano_views(
         seed, _resolve_api_key(), headings, is_photosphere=is_photosphere)
     return pano_from_views(seed_name, lat, lon, prefetch, fov, step_deg, eff_pitch)

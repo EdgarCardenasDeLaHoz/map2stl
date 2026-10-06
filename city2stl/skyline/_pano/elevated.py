@@ -41,6 +41,83 @@ logger = logging.getLogger(__name__)
 MIN_ELEVATED_H_M = 15.0
 #: Ground map around the seed: the position search (+-600 m) plus 4 km of shore rays.
 GROUND_HALF_M, GROUND_RES_M = 4800.0, 3.0
+#: High-resolution capture of a drone seed (:func:`capture_hires_views`): 30-deg views (21 px
+#: per degree, against 8.5 at the default 75 deg; the Photo Spheres hold ~23) in two pitch rows
+#: that together cover -33..+23 deg: tower tops from 36-100 m up and the near waterline.
+HIRES_FOV_DEG = 30.0
+HIRES_PITCHES_DEG = (8.0, -18.0)
+HIRES_SIZE_PX = 640
+
+
+def _pitch_rotation(pitch_deg: float) -> np.ndarray:
+    """Camera-to-world rotation (x right, y down, z forward) of a camera pitched up by
+    ``pitch_deg``."""
+    t = np.radians(pitch_deg)
+    c, s = np.cos(t), np.sin(t)
+    return np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]])   # forward -> (0, -sin, cos)
+
+
+def combine_pitch_rows(rows: dict[float, np.ndarray], fov_deg: float,
+                       pitch_deg: float | None = None) -> tuple[np.ndarray, float]:
+    """One taller pinhole view at ``pitch_deg`` (default: the rows' mean) from views of one
+    heading at several pitches, each warped by its pure-rotation homography; a pixel comes from
+    the row whose centre is nearest in elevation. Same focal length and width, so the result
+    stitches like any spin view. Returns (image, pitch)."""
+    import cv2
+
+    ps = sorted(rows, reverse=True)
+    h, w = rows[ps[0]].shape[:2]
+    f = 0.5 * w / np.tan(np.radians(fov_deg) / 2)
+    pv = float(np.mean(ps)) if pitch_deg is None else float(pitch_deg)
+    half_v = np.degrees(np.arctan(0.5 * h / f))
+    top, bot = max(ps) + half_v - pv, pv - (min(ps) - half_v)
+    cy = f * np.tan(np.radians(top))               # principal row of the virtual view
+    H = int(np.ceil(cy + f * np.tan(np.radians(bot))))
+    H += H % 2
+    Kv = np.array([[f, 0, w / 2], [0, f, cy], [0, 0, 1.0]])
+    Ks = np.array([[f, 0, w / 2], [0, f, h / 2], [0, 0, 1.0]])
+    out = np.zeros((H, w, 3), np.uint8)
+    best = np.full((H, w), np.inf)
+    yy = np.arange(H, dtype=np.float64)[:, None] * np.ones((1, w))
+    ray_el = np.degrees(np.arctan2(cy - yy, f)) + pv
+    for p in ps:
+        # source pixel of a virtual pixel: K_s R_s^T R_v K_v^-1
+        M = Ks @ _pitch_rotation(p).T @ _pitch_rotation(pv) @ np.linalg.inv(Kv)
+        warped = cv2.warpPerspective(rows[p], M, (w, H),
+                                     flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP)
+        valid = cv2.warpPerspective(np.full((h, w), 255, np.uint8), M, (w, H),
+                                    flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP) > 0
+        d = np.where(valid, np.abs(ray_el - p), np.inf)
+        take = d < best
+        out[take] = warped[take]
+        best[take] = d[take]
+    return out, pv
+
+
+def capture_hires_views(seed: SkylinePoint, api_key: str, headings, is_photosphere: bool,
+                        fov_deg: float = HIRES_FOV_DEG, pitches=HIRES_PITCHES_DEG,
+                        size_px: int = HIRES_SIZE_PX) -> tuple[list[dict], float] | None:
+    """Spin views of a drone seed at ``fov_deg`` in ``pitches`` rows (Street View Static,
+    ``len(headings) * len(pitches)`` images, cached on disk like every fetch), each heading's
+    rows merged by :func:`combine_pitch_rows`. Returns (views, pitch) for
+    :func:`measure_elevated_seed` with ``seed.fov = fov_deg``, or None when a fetch fails."""
+    from ..streetview_io import _streetview_image
+
+    views, pv = [], 0.0
+    for hd in headings:
+        rows = {}
+        for p in pitches:
+            img = _streetview_image(api_key, seed.lat, seed.lon, float(hd), fov=fov_deg,
+                                    pitch=float(p), width=size_px, height=size_px,
+                                    pano_id=seed.pano_id, pano_only=is_photosphere)
+            if img is None:
+                logger.warning("[elevated] %s: hi-res fetch failed at %.0f deg, pitch %.0f",
+                               seed.name, hd, p)
+                return None
+            rows[float(p)] = img
+        img, pv = combine_pitch_rows(rows, fov_deg)
+        views.append({"geo_heading": float(hd), "image": img})
+    return views, pv
 
 
 @dataclass

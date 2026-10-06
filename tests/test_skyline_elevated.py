@@ -106,3 +106,37 @@ def test_seed_page_lists_the_numbered_buildings():
          "matched_projection": {"feature_id": "b0812", "name": "b0812", "distance_m": 289.0}}])
     page = _segments_table_html(SimpleNamespace(seed_lat=0, seed_lon=0), pr)
     assert 'id="seg-91"' in page and "b0812" in page and ">95<" in page and "10.40639" in page
+
+
+def _render_view(pitch_deg: float, f: float, w: int, h: int, cy: float | None = None) -> np.ndarray:
+    """A pinhole view (heading 0) of a synthetic sphere whose colour encodes azimuth and
+    elevation, so a mis-warped pixel shows."""
+    from city2stl.skyline._pano.elevated import _pitch_rotation
+
+    cy = h / 2 if cy is None else cy
+    yy, xx = np.mgrid[0:h, 0:w].astype(float)
+    rays = np.stack([(xx - w / 2) / f, (yy - cy) / f, np.ones_like(xx)], -1) @ _pitch_rotation(pitch_deg).T
+    az = np.degrees(np.arctan2(rays[..., 0], rays[..., 2]))
+    el = np.degrees(np.arctan2(-rays[..., 1], np.hypot(rays[..., 0], rays[..., 2])))
+    return np.stack([(az + 90) * 1.4, (el + 90) * 1.4, np.full_like(az, 128)], -1).clip(0, 255).astype(np.uint8)
+
+
+def test_pitch_rows_merge_into_one_taller_view_at_the_mean_pitch():
+    from city2stl.skyline._pano.elevated import combine_pitch_rows
+
+    fov, w = 30.0, 160
+    f = 0.5 * w / np.tan(np.radians(fov / 2))
+    # the renderer itself: a view pitched up 8 deg sees elevation 8 at its centre, 23 at the top
+    up = _render_view(8.0, f, w, w)
+    assert up[w // 2, w // 2, 1] / 1.4 - 90 == pytest.approx(8.0, abs=1.0)
+    assert up[0, w // 2, 1] / 1.4 - 90 == pytest.approx(8.0 + fov / 2, abs=1.5)
+    rows = {8.0: up, -18.0: _render_view(-18.0, f, w, w)}
+    img, pv = combine_pitch_rows(rows, fov)
+    assert pv == -5.0
+    half_v = np.degrees(np.arctan(0.5 * w / f))
+    cy = f * np.tan(np.radians(8.0 + half_v - pv))
+    want = _render_view(pv, f, w, img.shape[0], cy)
+    covered = img.any(-1)
+    assert covered[:, w // 4:3 * w // 4].mean() > 0.98      # the two rows leave no gap mid-frame
+    err = np.abs(img.astype(int) - want.astype(int))[covered]
+    assert np.median(err) <= 1 and np.percentile(err, 99) <= 4

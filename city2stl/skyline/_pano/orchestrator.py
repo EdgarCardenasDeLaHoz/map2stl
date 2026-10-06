@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 
 import cv2
@@ -34,10 +36,21 @@ from .detect import (
     _smooth_matches_across_views,
     _smooth_pano_matches_against_views,
 )
-from .elevated import elevated_estimates, measure_elevated_seed
+from .elevated import (
+    HIRES_FOV_DEG,
+    capture_hires_views,
+    elevated_estimates,
+    measure_elevated_seed,
+)
 from .heading import _recover_anchor_offset, _recover_pano_heading
 
 logger = logging.getLogger(__name__)
+
+#: Drone seeds captured at 30 deg in two pitch rows (``elevated.capture_hires_views``, 24
+#: images per seed instead of 12) for ~2.5x the angular resolution. Opt-in (=1) until the
+#: pixel thresholds of measure_footprints are scaled for it (2026-10-06: seed_1 got worse).
+_ELEVATED_HIRES_ENABLED = os.environ.get("SKYLINE_ELEVATED_HIRES", "0").strip().lower() in (
+    "1", "true", "yes", "on")
 
 #: Pano screen, second measure (T35): a pano whose best view has a building meeting the sky in
 #: at least this share of its columns passes even below the building-coverage cut. A far skyline
@@ -277,7 +290,13 @@ def _seed_multiview_registration(
         if elevated_seeds and seed.name in elevated_seeds and elevated_state:
             with _phase("elevated seed (F-DET6 footprint-first)"):
                 try:
-                    got = measure_elevated_seed(seed, prefetch, effective_pitch, spin_step_deg,
+                    e_seed, e_views, e_pitch = seed, prefetch, effective_pitch
+                    if _ELEVATED_HIRES_ENABLED:
+                        hi = capture_hires_views(seed, api_key, spin_headings, is_photosphere)
+                        if hi is not None:
+                            e_views, e_pitch = hi
+                            e_seed = replace(seed, fov=HIRES_FOV_DEG)
+                    got = measure_elevated_seed(e_seed, e_views, e_pitch, spin_step_deg,
                                                 seed_buildings, elevated_state)
                 except Exception as exc:          # never lose the run to the new path
                     logger.warning(f"[elevated] {seed.name}: failed ({exc!r})")
