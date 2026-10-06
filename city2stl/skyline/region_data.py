@@ -364,6 +364,12 @@ def _osm_to_building_records(osm_data: dict, min_area_m2: float = 8.0) -> list[B
         c = poly.centroid
         props = feat.get("properties") or {}
         h, hs = height_from_tags(props)
+        # the OSM loader already parsed the tags into height_m / height_source and dropped
+        # "height": reading only the raw tags fell back to levels x 3.2 (Cartagena's Allure,
+        # height=190 and 43 levels, became 140.8 m; 2026-10-05)
+        if props.get("height_m") and props.get("height_source") in ("osm_tag", "osm_levels") \
+                and not (hs == "osm_tag" and h is not None):
+            h, hs = float(props["height_m"]), str(props["height_source"])
         raw.append((float(c.y), float(c.x), poly, props, area_m2, h, hs))
 
     # Stable ordering — sort south→north then west→east.

@@ -1,11 +1,19 @@
 """T28: Street View heights withheld on untagged buildings, kept for scoring."""
 
+import pytest
+
 from city2stl.skyline import benchmark as bm
 from city2stl.skyline._core.height import (
     UNTAGGED_FALLBACK_M,
     withhold_untagged_street_view,
 )
 from city2stl.skyline._core.types import BuildingRecord
+
+
+@pytest.fixture(autouse=True)
+def _tags_not_preferred(monkeypatch):
+    """These tests cover the untagged side; tagged rows publishing their tag has its own test."""
+    monkeypatch.setenv("SKYLINE_PREFER_TAGS", "0")
 
 
 def _rec(fid, source, tag=None):
@@ -93,3 +101,33 @@ def test_untagged_building_a_drone_seed_measured_keeps_the_drone_height(monkeypa
     assert row["effective_height_m"] == 185.0 and row["effective_height_source"] == "withheld:elevated"
     assert row["street_view_m"] == 113.0
     assert other["effective_height_m"] == hm.UNTAGGED_FALLBACK_M
+
+
+def test_tagged_building_publishes_its_osm_height(monkeypatch):
+    from types import SimpleNamespace
+
+    from city2stl.skyline._core import height as hm
+
+    monkeypatch.setenv("SKYLINE_WITHHOLD_UNTAGGED", "1")
+    monkeypatch.setenv("SKYLINE_PREFER_TAGS", "1")
+    rec = SimpleNamespace(feature_id="t", height_source="osm_tag", height_tag_m=190.0)
+    row = {"feature_id": "t", "effective_height_m": 97.0, "effective_height_source": "geometric"}
+    assert hm.withhold_untagged_street_view([row], [rec]) == 1
+    assert row["effective_height_m"] == 190.0 and row["effective_height_source"] == "osm_tag"
+    assert row["street_view_m"] == 97.0
+    monkeypatch.setenv("SKYLINE_PREFER_TAGS", "0")
+    row2 = {"feature_id": "t", "effective_height_m": 97.0, "effective_height_source": "geometric"}
+    assert hm.withhold_untagged_street_view([row2], [rec]) == 0 and row2["effective_height_m"] == 97.0
+
+
+def test_records_keep_the_parsed_height_tag():
+    """The OSM loader parses ``height`` into ``height_m`` and drops it; the records used to fall
+    back to levels x 3.2 (Cartagena's Allure: tag 190 m, 43 levels -> 140.8 m)."""
+    from city2stl.skyline.region_data import _osm_to_building_records
+
+    ring = [[-75.5530, 10.4024], [-75.5526, 10.4024], [-75.5526, 10.4028], [-75.5530, 10.4028], [-75.5530, 10.4024]]
+    osm = {"buildings": {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [ring]},
+         "properties": {"name": "Allure", "height_m": 190.0, "height_source": "osm_tag", "building:levels": "43"}}]}}
+    (rec,) = _osm_to_building_records(osm)
+    assert rec.height_tag_m == 190.0 and rec.height_source == "osm_tag"

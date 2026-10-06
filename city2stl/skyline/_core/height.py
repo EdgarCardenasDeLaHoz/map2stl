@@ -676,6 +676,19 @@ TAGGED_SOURCES = ("osm_tag", "osm_levels")
 UNTAGGED_FALLBACK_M = 10.0
 
 
+def _prefer_tags_enabled() -> bool:
+    """Whether a tagged building publishes its OSM height instead of the Street View value.
+
+    On by default (2026-10-05): on Miami's 29 confirmed tagged buildings the tag is 9.2 m off
+    the truth and Street View 26.6 m; and the blind review T37 found a photo reading more than
+    25 % from its tag wrong far more often than the tag. ``SKYLINE_PREFER_TAGS=0`` publishes
+    the measurement again.
+    """
+    import os
+
+    return os.environ.get("SKYLINE_PREFER_TAGS", "1") != "0"
+
+
 def _withhold_untagged_enabled() -> bool:
     """Whether Street View heights on untagged buildings are replaced by a fallback.
 
@@ -691,7 +704,8 @@ def _withhold_untagged_enabled() -> bool:
 def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRecord],
                                   fallback=None, measured_seeds=()) -> int:
     """Replace the Street View height of every untagged building in ``rows`` (the output of
-    ``aggregate_building_heights``) by a fallback; returns how many were replaced.
+    ``aggregate_building_heights``) by a fallback, and (``SKYLINE_PREFER_TAGS``, default on)
+    that of every tagged building by its OSM height; returns how many were replaced.
 
     The Street View value is kept for scoring: ``street_view_m`` and
     ``street_view_source`` hold what ``effective_height_m`` / ``effective_height_source``
@@ -712,7 +726,15 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
     n = 0
     for row in rows:
         rec = by_id.get(row.get("feature_id"))
-        if rec is None or rec.height_source in TAGGED_SOURCES or "street_view_m" in row:
+        if rec is None or "street_view_m" in row:
+            continue
+        if rec.height_source in TAGGED_SOURCES:
+            if _prefer_tags_enabled() and rec.height_tag_m:
+                row["street_view_m"] = row.get("effective_height_m")
+                row["street_view_source"] = row.get("effective_height_source")
+                row["effective_height_m"] = float(rec.height_tag_m)
+                row["effective_height_source"] = rec.height_source
+                n += 1
             continue
         drone = [v for k, v in (row.get("per_seed_median_m") or {}).items()
                  if k in measured_seeds and v is not None]
