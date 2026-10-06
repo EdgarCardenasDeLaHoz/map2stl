@@ -322,10 +322,9 @@ def trusted(m) -> bool:
 
 
 def elevated_estimates(seeds: list[ElevatedSeed]) -> list[RegisteredBuildingEstimate]:
-    """One estimate per footprint and seed that ``fuse_heights`` keeps, from :func:`trusted`
-    readings only: seeds agreeing with the most reliable one (25 %); the outvoted seeds'
-    readings never reach the aggregate, whose plain median would otherwise average a misread
-    with the good view."""
+    """One estimate per footprint and seed, from :func:`trusted` readings only, for footprints
+    whose seeds agree (``fuse_heights``, 25 %): a footprint the seeds disagree on gets no drone
+    height at all, rather than the most reliable view's, since any of them may be the misread."""
     by_seed = {s.seed_name: [dict(m.__dict__, footprint=s.feature_ids[m.footprint])
                              for m in s.measured if trusted(m)] for s in seeds}
     fused = fd.fuse_heights(by_seed)
@@ -335,6 +334,11 @@ def elevated_estimates(seeds: list[ElevatedSeed]) -> list[RegisteredBuildingEsti
                for s in seeds for seg in s.pano_result.matched_segments}
     out = []
     for fid, f in fused.items():
+        if f["disputed"]:
+            # seeds that saw it disagree (Cartagena 2026-10-06: seed pairs agreed within 25 % on
+            # 5-36 % of shared footprints, the far or older view reading another building):
+            # no drone height; the untagged prior or the tag takes over
+            continue
         for seed_name in f["used"]:
             s, m = by_key[(seed_name, fid)]
             b = int(round(bearing.get((seed_name, fid), 0.0))) % 360
