@@ -515,3 +515,97 @@ def score_buildings(buildings: list[dict], truth: dict[str, dict],
         out["osm_tags"] = {"tag_vs_truth": _errors(tg, tt), "run_vs_tag": _errors(tp, tg),
                            "run_vs_truth_same_buildings": _errors(tp, tt)}
     return out
+
+
+# --------------------------------------------------------------------------- published heights
+
+#: Words that name a kind of building, not a building: ignored when matching names.
+_GENERIC_WORDS = {"hotel", "edificio", "torre", "tower", "building", "centro", "comercial",
+                  "cartagena", "indias", "residencial", "apartamentos", "condominio"}
+
+
+def _name_words(name: str | None) -> set[str]:
+    import re
+
+    return {w for w in re.findall(r"[a-z0-9]+", (name or "").lower())
+            if len(w) >= 4 and w not in _GENERIC_WORDS}
+
+
+def match_known_tower(lat: float, lon: float, height_m: float, name: str, rows: list[dict],
+                      radius_m: float = 60.0) -> tuple[dict | None, str]:
+    """The heights.json row that a published height belongs to, and why.
+
+    The nearest centroid is not enough: a hotel's convention-centre podium is mapped around
+    its tower, and its centroid can be the nearer one (2026-10-06, Cartagena: the Estelar
+    podium, read 57 m, scored against the tower's 202 m) -- and the podium can carry the
+    hotel's name while the tower is unnamed. Among rows within ``radius_m``: an OSM tag within
+    35 % of the published height first, then rows that do not contain another candidate (a
+    podium), then a name sharing a distinctive word, then distance.
+    """
+    from shapely.geometry import Point
+
+    cands = []
+    for r in rows:
+        d = math.hypot((r["centroid_lat"] - lat) * M_PER_DEG_LAT,
+                       (r["centroid_lon"] - lon) * M_PER_DEG_LAT * math.cos(math.radians(lat)))
+        if d <= radius_m:
+            cands.append((d, r))
+    if not cands:
+        return None, "none within radius"
+    polys = {id(r): _polygon(r["footprint_lonlat"]) if r.get("footprint_lonlat") else None
+             for _, r in cands}
+    words = _name_words(name)
+
+    def rank(c):
+        d, r = c
+        named = bool(words & _name_words(r.get("name")))
+        tag = r.get("height_tag_m")
+        tag_ok = bool(tag) and 1 / 1.35 <= tag / height_m <= 1.35
+        p = polys[id(r)]
+        podium = p is not None and any(
+            q is not r and p.contains(Point(q["centroid_lon"], q["centroid_lat"]))
+            for _, q in cands)
+        return (not tag_ok, podium, not named, d)
+
+    best = min(cands, key=rank)
+    no_tag, podium, no_name, _d = rank(best)
+    why = ("OSM tag" if not no_tag else "name" if not no_name else
+           "nearest (not a podium)" if not podium else "nearest")
+    return best[1], why
+
+
+def score_known(heights_json: Path, region: str, elevated_seeds: tuple[str, ...] = ()) -> dict:
+    """The report's heights against the site's published heights (``sites/<region>.json``
+    ``known_heights_m``), each matched by :func:`match_known_tower`. Rows: published, the
+    report's height and source, Street View, and the drone seeds' median."""
+    site = Path(__file__).parent / "sites" / f"{region.lower()}.json"
+    if not site.exists():
+        return {}
+    cfg = json.loads(site.read_text(encoding="utf-8-sig"))
+    known = {k: v for k, v in (cfg.get("known_heights_m") or {}).items()
+             if not k.startswith("_") and isinstance(v, dict)}
+    if not known:
+        return {}
+    elevated = tuple(elevated_seeds) or tuple(cfg.get("elevated_seeds") or ())
+    rows = [b for b in json.loads(Path(heights_json).read_text(encoding="utf-8"))["buildings"]
+            if b.get("centroid_lat") is not None]
+    out = []
+    for name, v in known.items():
+        r, why = match_known_tower(float(v["lat"]), float(v["lon"]), float(v["height_m"]), name, rows)
+        row = {"name": name, "published_m": float(v["height_m"]), "match": why}
+        if r is not None:
+            drone = [h for s, h in (r.get("per_seed_median_m") or {}).items() if s in elevated]
+            row.update(feature_id=r.get("feature_id"), osm_name=r.get("name"),
+                       tag_m=r.get("height_tag_m"), report_m=r.get("effective_height_m"),
+                       report_source=r.get("effective_height_source"),
+                       street_view_m=r.get("street_view_m"),
+                       drone_m=float(np.median(drone)) if drone else None)
+        out.append(row)
+
+    def mae(key):
+        e = [abs(x[key] - x["published_m"]) for x in out if x.get(key) is not None]
+        return {"n": len(e), "mae_m": float(np.mean(e)) if e else None,
+                "median_ae_m": float(np.median(e)) if e else None}
+
+    return {"towers": out, "report": mae("report_m"), "drone": mae("drone_m"),
+            "street_view": mae("street_view_m"), "osm_tag": mae("tag_m")}

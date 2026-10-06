@@ -456,6 +456,17 @@ def _load_known_heights(
     if not isinstance(raw, dict):
         return []
 
+    from shapely.geometry import mapping
+
+    from ..benchmark import match_known_tower
+
+    rows = []
+    for b in buildings:
+        g = b.geometry
+        g = g if g.geom_type == "Polygon" else max(g.geoms, key=lambda q: q.area)
+        rows.append({"feature_id": b.feature_id, "name": b.name, "centroid_lat": b.centroid_lat,
+                     "centroid_lon": b.centroid_lon, "height_tag_m": b.height_tag_m,
+                     "footprint_lonlat": mapping(g)["coordinates"][0]})
     out: list[dict] = []
     for bname, info in raw.items():
         if bname.startswith("_"):
@@ -467,13 +478,11 @@ def _load_known_heights(
             floors = int(info.get("floors", 0))
         except Exception:
             continue
-        best_id: str | None = None
-        best_dist = float("inf")
-        for b in buildings:
-            d = _distance_m(klat, klon, b.centroid_lat, b.centroid_lon)
-            if d < best_dist:
-                best_dist = d
-                best_id = b.feature_id
+        # tower-aware: a podium mapped around its tower is not the tower (benchmark.match_known_tower)
+        best, _why = match_known_tower(klat, klon, ctbuh_m, bname, rows, match_radius_m)
+        best_id = best["feature_id"] if best is not None else None
+        best_dist = (_distance_m(klat, klon, best["centroid_lat"], best["centroid_lon"])
+                     if best is not None else float("inf"))
         out.append({
             "name": bname,
             "ctbuh_m": ctbuh_m,

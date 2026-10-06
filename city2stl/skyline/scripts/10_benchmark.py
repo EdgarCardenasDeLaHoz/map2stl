@@ -131,6 +131,9 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
             bm.withheld_buildings(buildings, "model", region), truth)
         result["withheld_simulated_constant"] = bm.score_buildings(
             bm.withheld_buildings(buildings, "constant"), truth)
+    known = bm.score_known(heights, region)
+    if known:  # published heights (Cartagena: the only truth; 3D Tiles have no buildings there)
+        result["known"] = known
     try:  # the report's benchmark page; a plotting failure must not lose the score
         from city2stl.skyline.benchmark_report import write_benchmark_page
         write_benchmark_page(heights.parent, result, buildings, truth)
@@ -160,6 +163,21 @@ def print_table(results: list[dict]) -> None:
               f"{_fmt(tall.get('bias_m'), '+10.1f')} "
               f"{_fmt(rel.get('per_view', {}).get('pair_order'), '10.0%')} "
               f"{_fmt(rel.get('city', {}).get('pair_order'), '10.0%')}")
+
+
+def print_known(region: str, known: dict) -> None:
+    """Published heights, tower by tower: the report, the drone seeds, Street View, OSM tag."""
+    print()
+    print(f"{region}: published heights")
+    print(f"{'tower':28s} {'pub':>5s} {'report':>7s} {'source':>10s} {'drone':>6s} {'SV':>6s} "
+          f"{'tag':>5s}  match")
+    for t in known["towers"]:
+        print(f"{t['name'][:28]:28s} {t['published_m']:5.0f} {_fmt(t.get('report_m'), '7.0f')} "
+              f"{(t.get('report_source') or '-')[:10]:>10s} {_fmt(t.get('drone_m'), '6.0f')} "
+              f"{_fmt(t.get('street_view_m'), '6.0f')} {_fmt(t.get('tag_m'), '5.0f')}  {t['match']}")
+    for k in ("report", "drone", "street_view", "osm_tag"):
+        s = known[k]
+        print(f"  {k:12s} n {s['n']:2d}  MAE {_fmt(s['mae_m'], '6.1f')}  median {_fmt(s['median_ae_m'], '6.1f')}")
 
 
 def main() -> int:
@@ -209,6 +227,9 @@ def main() -> int:
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     print_table([r for r in results if "error" not in r])
+    for r in results:
+        if r.get("known"):
+            print_known(r["region"], r["known"])
     for r in results:
         if "error" in r:
             print(f"{r['region']}: {r['error']}")

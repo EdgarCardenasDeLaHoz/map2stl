@@ -558,3 +558,28 @@ def test_tiles_with_a_key_and_no_coverage_is_still_none():
             return False
 
     assert bm.tiles_ndsm((1.0, 0.0, 1.0, 0.0), provider=Uncovered()) is None
+
+
+def test_a_published_height_goes_to_the_tower_not_the_podium_around_it():
+    """Cartagena's Estelar: the convention-centre podium carries the hotel's name and is mapped
+    around the unnamed tower; nearest-centroid matching scored the podium's 57 m against 202 m."""
+    from city2stl.skyline.benchmark import match_known_tower
+
+    def row(fid, name, tag, x0, y0, x1, y1):
+        k = 1 / 111_320.0
+        ring = [[x0 * k, y0 * k], [x1 * k, y0 * k], [x1 * k, y1 * k], [x0 * k, y1 * k], [x0 * k, y0 * k]]
+        return {"feature_id": fid, "name": name, "height_tag_m": tag, "footprint_lonlat": ring,
+                "centroid_lon": (x0 + x1) / 2 * k, "centroid_lat": (y0 + y1) / 2 * k}
+
+    podium = row("p", "ESTELAR Hotel & Centro de Convenciones", None, -60, -40, 60, 40)
+    tower = row("t", "", None, 20, 0, 50, 30)
+    pt = (5 / 111_320.0, 0.0)                                 # published point: podium centre
+    got, why = match_known_tower(pt[0], pt[1], 202.0, "Hotel Estelar Bocagrande", [podium, tower])
+    assert got["feature_id"] == "t" and why == "nearest (not a podium)"   # untagged: not the podium
+    tower["height_tag_m"] = 202.0
+    got, why = match_known_tower(pt[0], pt[1], 202.0, "Hotel Estelar Bocagrande", [podium, tower])
+    assert got["feature_id"] == "t" and why == "OSM tag"
+    lone = row("x", "Estelar annex", None, 200, 0, 230, 30)  # a named building on its own
+    got, why = match_known_tower(15 / 111_320.0, 230 / 111_320.0, 202.0,
+                                 "Hotel Estelar Bocagrande", [lone, row("y", "", None, 240, 0, 260, 30)])
+    assert got["feature_id"] == "x" and why == "name"
