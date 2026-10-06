@@ -301,11 +301,23 @@ def commons_skyline_seeds(
     return seeds, cache
 
 
+def _outside_m(lat: float, lon: float, bbox_nsew: tuple[float, float, float, float]) -> float:
+    """Distance (m) from a point to the box (0 inside)."""
+    import math
+
+    n, s, e, w = bbox_nsew
+    dy = max(0.0, lat - n, s - lat) * 111_320.0
+    dx = max(0.0, lon - e, w - lon) * 111_320.0 * math.cos(math.radians(lat))
+    return math.hypot(dx, dy)
+
+
 def web_skyline_seeds(
     city_name: str,
     max_images: int = 3,
     cache_dir: Path | None = None,
     region_bbox_center: tuple[float, float] | None = None,
+    bbox_nsew: tuple[float, float, float, float] | None = None,
+    max_outside_m: float = 2000.0,
 ) -> tuple[list[SkylinePoint], dict[str, np.ndarray]]:
     """Fetch web skyline images and return (SkylinePoint list, image cache).
 
@@ -316,6 +328,10 @@ def web_skyline_seeds(
     max_images         : Maximum number of seeds to return (default 3).
     cache_dir          : Directory for downloaded image disk cache.
     region_bbox_center : (lat, lon) of city centre; improves heading accuracy.
+    bbox_nsew          : the region box; a seed placed more than ``max_outside_m`` outside it
+                         is dropped. Images without GPS take the city's curated viewpoint, and
+                         Cartagena's sat 4.3 km east of the region (inland), so every web seed
+                         there looked at the city from the wrong place (2026-10-06).
     """
     from .region_types import SkylinePoint  # noqa: PLC0415
 
@@ -389,6 +405,10 @@ def web_skyline_seeds(
         else:
             heading = 0.0  # due north — pipeline will correct via anchor recovery
 
+        if bbox_nsew is not None and _outside_m(float(lat), float(lon), bbox_nsew) > max_outside_m:
+            print(f"[web_seed] skip {cand.get('title', '')!r}: {lat:.4f},{lon:.4f} is "
+                  f"{_outside_m(float(lat), float(lon), bbox_nsew) / 1000:.1f} km outside the region")
+            continue
         seed_name = f"web_{idx + 1}"
         seed = SkylinePoint(
             name=seed_name,

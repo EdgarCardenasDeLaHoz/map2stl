@@ -385,6 +385,7 @@ def run_region_pdf_report(
                 max_images=3,
                 cache_dir=output_pdf.parent / output_pdf.stem / "web_images",
                 region_bbox_center=_bbox_center,
+                bbox_nsew=(bbox.north, bbox.south, bbox.east, bbox.west),
             )
         if _web_out:
             logger.info(f"[web_seed] adding {len(_web_out)} web image seed(s) "
