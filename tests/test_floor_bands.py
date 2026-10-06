@@ -220,3 +220,34 @@ def test_sphere_pano_pitch_rows_agree():
     assert est is not None and est.accepted, est
     assert est.period_m == pytest.approx(3.2, rel=0.03)
     assert est.strip_spread <= 0.02 and abs(est.n_floors - 13) <= 1
+
+
+# --------------------------------------------------------------------------- without a footprint
+
+def _instance_map(pano, pose, bld, top):
+    """Label 1 on the facade's pixels (from the scene geometry, as MobileSAM would give)."""
+    d, _ = fl.facade_ranges(pano, pose, bld[0], np.arange(pano.width), max_incidence_deg=90.0)
+    inst = np.zeros((pano.height, pano.width), np.int32)
+    for x in np.flatnonzero(np.isfinite(d)):
+        r_top = fd._row_of(pano, pose, math.degrees(math.atan2(top - CAM_H, d[x])))
+        r_base = fd._row_of(pano, pose, math.degrees(math.atan2(-CAM_H, d[x])))
+        inst[max(0, int(math.ceil(r_top))):min(pano.height, int(r_base)), x] = 1
+    return inst
+
+
+def test_storeys_and_distance_without_a_footprint():
+    """The user's point (2026-10-06): floors are an estimate even without heights, and they
+    give the distance and whether a plot is a high-rise, before any footprint match."""
+    pano, bld, top = _direct_pano(400.0)
+    inst = _instance_map(pano, POSE, bld, top)
+    gray = pano.rgb[..., 0].astype(np.float32)
+    est = fl.instance_floors(pano, POSE, gray, inst, 1)
+    assert est is not None and est.accepted, est
+    assert 12.5 <= est.floors_visible <= 15.0                 # 13 storeys + ground floor extra
+    assert est.high_rise
+    d_true = float(np.nanmedian(fl.facade_ranges(pano, POSE, bld[0], [est.col], 90.0)[0]))
+    assert abs(est.dist_m - d_true * 3.1 / 3.2) / d_true < 0.06      # nominal 3.1 m floor
+    near = bld[0] * 0.5                                        # a plot in front, same bearing
+    far = bld[0] * 2.0                                         # and one behind
+    hits = fl.match_plot(est, pano, POSE, [near, bld[0], far])
+    assert hits and hits[0][0] == 1

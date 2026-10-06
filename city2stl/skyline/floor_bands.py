@@ -334,3 +334,104 @@ def height_from_floors(est: FloorEstimate, kind: str = "residential"):
     h = n * fh + 0.5 * (a0 + a1)
     sigma = math.sqrt((0.5 * fh) ** 2 + (0.1 * fh * n) ** 2 + ((a1 - a0) / math.sqrt(12)) ** 2)
     return float(h), float(sigma)
+
+
+# --------------------------------------------------------------------------- without a footprint
+
+#: Storeys from which a building counts as a high-rise (the user's point, 2026-10-06: half the
+#: battle is telling which plots hold towers).
+HIGH_RISE_FLOORS = 10
+
+
+@dataclass(frozen=True)
+class InstanceFloors:
+    """Storeys of one building instance, found without knowing which building it is."""
+    instance: int
+    col: int                          # centre column
+    bearing_deg: float
+    floors_visible: float             # extent / period: independent of distance
+    dist_m: float                     # NOMINAL_FLOOR_M / period in tan(elevation)
+    dist_range_m: tuple[float, float]  # over the floor heights a residential tower can have
+    period_px: float
+    acf_peak: float
+    spread: float                     # left/right halves' period disagreement
+    high_rise: bool
+    accepted: bool
+    reason: str
+
+
+def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instances: np.ndarray,
+                    instance: int, min_cols: int = 6, trim: float = 0.2) -> InstanceFloors | None:
+    """Storeys and distance of one MobileSAM building instance, before any footprint match.
+
+    On one column a vertical facade at range ``d`` has ``z = d * tan(e)``, so the floor bands are
+    periodic in ``t = tan(e)`` with period ``floor / d``: resampling on a uniform ``t`` grid
+    (:func:`rectify_columns` with ``d = 1``) gives the visible storeys as extent / period with no
+    distance at all, and the distance as ``NOMINAL_FLOOR_M`` / period (+-15 %, the spread of
+    floor heights). Bearing plus that distance picks the plot (:func:`match_plot`); ten or more
+    storeys mark a high-rise. ``trim``: share of the instance's columns dropped at each side
+    (edges and corners mix two walls)."""
+    m = instances == instance
+    cols = np.flatnonzero(m.sum(0) >= 8)
+    if len(cols) < min_cols:
+        return None
+    n = len(cols)
+    cols = cols[int(n * trim): n - int(n * trim)] if n - 2 * int(n * trim) >= min_cols else cols
+    rows = np.flatnonzero(m[:, cols].any(1))
+    r0, r1 = int(rows[0]), int(rows[-1])
+    t_hi = math.tan(math.radians(float(fd._elev_of(pano, pose, r0))))
+    t_lo = math.tan(math.radians(float(fd._elev_of(pano, pose, r1))))
+    e_mid = math.radians(float(fd._elev_of(pano, pose, 0.5 * (r0 + r1))))
+    dt = math.cos(e_mid - math.radians(pano.pitch_deg)) ** 2 / (pano.f_px * math.cos(e_mid) ** 2)
+    ones = np.ones(len(cols))
+    t, R, valid = rectify_columns(pano, pose, gray, cols, ones, t_lo, t_hi, dt)
+    rr = np.clip(np.round(_rows_at(pano, pose, t[:, None], ones[None, :])), 0, pano.height - 1)
+    valid &= instances[rr.astype(int), cols[None, :]] == instance
+    R = np.where(valid, R, np.nan)
+    b = float((pano.frame_heading[cols[len(cols) // 2]] + pose.offset_deg) % 360.0)
+
+    def period(sl):
+        prof = band_profile(R[:, sl], valid[:, sl], hp_m=40 * dt, dz=dt, cols=cols[sl])
+        return floor_period(prof, dz=dt, lag_min=4 * dt, lag_max=(t_hi - t_lo) / 3.0)
+
+    fit = period(slice(None))
+    half = len(cols) // 2
+    halves = [period(slice(0, half)), period(slice(half, None))] if half >= min_cols // 2 else []
+    if not math.isfinite(fit.period_m):
+        return InstanceFloors(instance, int(cols[len(cols) // 2]), b, math.nan, math.nan,
+                              (math.nan, math.nan), math.nan, math.nan, math.nan, False, False,
+                              "no floor pattern")
+    p = fit.period_m
+    hp = [h.period_m for h in halves if math.isfinite(h.period_m)]
+    spread = (max(hp) - min(hp)) / p if len(hp) == 2 else math.nan
+    floors = (t_hi - t_lo) / p
+    d = NOMINAL_FLOOR_M / p
+    lo, hi = KIND_RANGE_M["residential"]
+    reason = []
+    if fit.acf_peak < MIN_ACF_PEAK:
+        reason.append(f"weak pattern ({fit.acf_peak:.2f})")
+    if p / dt < MIN_PX_PER_FLOOR:
+        reason.append(f"{p / dt:.1f} px per floor")
+    if not (spread <= MAX_STRIP_SPREAD):
+        reason.append(f"halves disagree ({spread:.0%})" if math.isfinite(spread) else "halves unreadable")
+    if floors < 3:
+        reason.append(f"{floors:.1f} floors")
+    return InstanceFloors(instance, int(cols[len(cols) // 2]), b, float(floors), float(d),
+                          (lo / p, hi / p), float(p / dt), float(fit.acf_peak), float(spread),
+                          bool(floors >= HIGH_RISE_FLOORS), not reason, "; ".join(reason) or "ok")
+
+
+def match_plot(est: InstanceFloors, pano: fd.Pano, pose: fd.PanoPose, rings_xy: list,
+               tol: float = 0.2) -> list[tuple[int, float]]:
+    """Footprints whose wall the instance's centre bearing hits within the floor-implied
+    distance range (widened by ``tol``): ``[(index, range_m)]``, best first (nearest to
+    ``est.dist_m`` in log range). ``rings_xy``: footprints in local metres (``fd._local``)."""
+    if not (est.accepted and math.isfinite(est.dist_m)):
+        return []
+    lo, hi = est.dist_range_m[0] * (1 - tol), est.dist_range_m[1] * (1 + tol)
+    out = []
+    for i, ring in enumerate(rings_xy):
+        d, _inc = facade_ranges(pano, pose, ring, [est.col], max_incidence_deg=89.0)
+        if np.isfinite(d[0]) and lo <= d[0] <= hi:
+            out.append((i, float(d[0])))
+    return sorted(out, key=lambda t: abs(math.log(t[1] / est.dist_m)))
