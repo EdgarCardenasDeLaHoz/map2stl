@@ -11,8 +11,10 @@ pano path:
    waterline over +-600 m, parks and streets nearby (``footprint_detect.fit_camera_position``;
    seed_4's recorded position was ~360 m off), then the bearing from the OSM-tagged towers'
    outline (``footprint_detect.refine_on_outline``: the seeds were 4-6 deg off);
-3. Depth Anything V2 on the pano, and every OSM footprint in view measured
-   (``footprint_detect.measure_footprints``).
+3. Depth Anything V2 and MobileSAM building instances (``building_instances``) on the pano,
+   and every OSM footprint in view measured (``footprint_detect.measure_footprints``: a run
+   never stops inside one instance; 2026-10-06 on Cartagena seeds 1/4/5, tagged readings within
+   25 % of their tag 50/67/50 % -> 80/67/100 %).
 
 The report keeps working unchanged: each seed gives a ``StitchedPanoResult`` (pano page and
 boxes) and frames-only view rows, and after all seeds :func:`elevated_estimates` fuses the
@@ -82,7 +84,8 @@ def _label_masks(labels: np.ndarray) -> dict:
 
 
 def pano_result(seed: SkylinePoint, pano: fd.Pano, pose: fd.PanoPose, measured: list,
-                feature_ids: list[str], depth: np.ndarray | None) -> StitchedPanoResult:
+                feature_ids: list[str], depth: np.ndarray | None,
+                instances: np.ndarray | None = None) -> StitchedPanoResult:
     """The report's pano result for an elevated seed: image, masks, depth and per-column
     headings rolled so north is mid-strip (as ``_build_and_detect_pano`` does), and one matched
     segment per measured footprint with its box, bearing, height and OSM feature."""
@@ -121,6 +124,7 @@ def pano_result(seed: SkylinePoint, pano: fd.Pano, pose: fd.PanoPose, measured: 
         pano_building_mask=masks["building"], pano_water_mask=masks["water"],
         pano_sky_mask=masks["sky"], pano_vegetation_mask=masks["vegetation"],
         pano_depth=None if depth is None else np.roll(depth, roll, axis=1),
+        pano_instances=None if instances is None else np.roll(instances, roll, axis=1),
         # F-SKY25's distance model for an elevated camera: a base at distance d sits
         # f * h / d rows below the horizon.
         geom_K=float(pose.camera_h_m * pano.f_px), geom_horizon_row=horizon,
@@ -199,11 +203,20 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
         wait_for_gpu(1.0)                       # Depth Anything on 518 px tiles
     depth = predict_pano_depth_tiled(pano.rgb, device=device)
     free_gpu_cache()
+    from ..building_instances import building_instances
+
+    if device == "cuda":
+        wait_for_gpu(1.0)                       # MobileSAM vit_t
+    instances = building_instances(pano.rgb, np.isin(pano.labels, fd.BUILDING_CLASSES),
+                                   device=device)
+    free_gpu_cache()
     fps, fids = footprints_from_records(buildings)
-    ms = fd.measure_footprints(pano, pose, fps, depth=depth)
-    logger.info("[elevated] %s: %d footprints measured (%d with the base visible)",
-                seed.name, len(ms), sum(m.base_visible for m in ms))
-    return ElevatedSeed(seed.name, pf, ms, fids, pano_result(seed, pano, pose, ms, fids, depth),
+    ms = fd.measure_footprints(pano, pose, fps, depth=depth, instances=instances)
+    logger.info("[elevated] %s: %d footprints measured (%d with the base visible)%s",
+                seed.name, len(ms), sum(m.base_visible for m in ms),
+                "" if instances is None else f", {int(instances.max())} MobileSAM instances")
+    return ElevatedSeed(seed.name, pf, ms, fids,
+                        pano_result(seed, pano, pose, ms, fids, depth, instances),
                         _view_rows(seed, views, pano, pose, len(ms)))
 
 

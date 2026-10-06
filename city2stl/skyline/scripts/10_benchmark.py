@@ -50,7 +50,7 @@ PINNED_FLAGS = {
     "SKYLINE_CV_MULTIRES": "0",
     "SKYLINE_CV_PHASE_C": "0",
     "SKYLINE_CV_F_SKY1": "1",
-    "SKYLINE_CV_F_SKY5": "0",
+    "SKYLINE_CV_F_SKY5": "1",               # MobileSAM by default (2026-10-06)
     "SKYLINE_CV_F_SKY11_1": "0",
     "SKYLINE_CV_F_SKY12": "0",
     "SKYLINE_CV_F_SKY13": "1",

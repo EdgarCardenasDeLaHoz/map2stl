@@ -579,7 +579,21 @@ def _render_pano_segformer_overlay_png(
     # stays dominant.
     base = _blend(base, water, (27, 76, 204), 0.40)
     base = _blend(base, veg, (54, 160, 74), 0.35)
-    base = _blend(base, bld, (230, 66, 53), 0.55)
+    inst = getattr(pano_result, "pano_instances", None)
+    if inst is not None and np.asarray(inst).shape == base.shape[:2] and np.asarray(inst).max() > 0:
+        # one colour per MobileSAM building instance, white outlines; building pixels SAM
+        # left unlabelled stay in the class red
+        inst = np.asarray(inst)
+        base = _blend(base, bld & (inst == 0) if bld is not None else None, (230, 66, 53), 0.55)
+        pal = np.random.default_rng(3).integers(40, 255, (int(inst.max()) + 1, 3)).astype(np.float32)
+        on = inst > 0
+        base[on] = base[on] * 0.4 + pal[inst[on]] * 0.6
+        edge = np.zeros_like(on)
+        edge[1:, :] |= inst[1:, :] != inst[:-1, :]
+        edge[:, 1:] |= inst[:, 1:] != inst[:, :-1]
+        base[edge & on] = 255.0
+    else:
+        base = _blend(base, bld, (230, 66, 53), 0.55)
     out = np.clip(base, 0, 255).astype(np.uint8)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(out).save(out_path, optimize=True)

@@ -323,3 +323,63 @@ def test_refine_on_outline_recovers_a_bearing_error():
     assert fit.misfit_deg < fit.misfit_before_deg - 1.0
     ok = fd.refine_on_outline(pano, fit.pose, towers, move_m=0.0)       # already right: unchanged
     assert ok.shift_deg == 0.0
+
+
+def _column(step: bool):
+    """One column: sky 0-9, building 10-49, water 50-59; inverse depth halves above row 30
+    when ``step`` (a farther building behind)."""
+    labels = np.full(60, fd.SKY_CLASS, np.int16)
+    labels[10:50] = BUILDING
+    labels[50:] = 21
+    depth = np.ones(60)
+    if step:
+        depth[10:30] = 0.5
+    return labels, depth
+
+
+def _run(labels, depth, inst=None):
+    return fd._column_run(labels, depth, 49, np.inf, 0.7, 0.3, 8, 8, inst)
+
+
+def test_a_run_inside_one_instance_goes_to_its_top_past_a_depth_step():
+    labels, depth = _column(step=True)
+    assert _run(labels, depth)[0] == 30                       # depth alone stops at the step
+    inst = np.zeros(60, np.int32)
+    inst[10:50] = 1                                          # MobileSAM: one building
+    top, bottom, edge = _run(labels, depth, inst)
+    assert (top, bottom, edge) == (10, 49, "sky")
+
+
+def test_a_run_stops_where_the_instance_changes_and_the_depth_steps():
+    labels, depth = _column(step=True)
+    inst = np.zeros(60, np.int32)
+    inst[30:50], inst[10:30] = 1, 2
+    assert _run(labels, depth, inst)[:3] == (30, 49, "depth")
+
+
+def test_a_podium_instance_in_front_does_not_cut_the_tower_short():
+    """Stopping at every instance change cut towers at their podium (Cartagena seed_4,
+    Portomarine 180 -> 28 m): without a depth step the run continues into the next instance."""
+    labels, depth = _column(step=False)
+    inst = np.zeros(60, np.int32)
+    inst[40:50], inst[10:40] = 1, 2
+    assert _run(labels, depth, inst)[0] == 10
+
+
+def test_painted_instances_let_the_smaller_mask_win():
+    from city2stl.skyline.building_instances import paint
+
+    big = np.zeros((20, 20), bool)
+    big[:, :] = True
+    small = np.zeros((20, 20), bool)
+    small[5:15, 5:15] = True
+    lab = paint([(0.9, small), (0.95, big)], (20, 20), min_px=1)
+    assert lab[10, 10] != lab[0, 0] and lab[10, 10] > 0 and lab[0, 0] > 0
+
+
+def test_building_instances_is_none_without_mobilesam(monkeypatch):
+    from city2stl.skyline import building_instances as bi
+    from city2stl.skyline._core import segmentation as sg
+
+    monkeypatch.setattr(sg, "_ensure_mobilesam", lambda: False)
+    assert bi.building_instances(np.zeros((8, 8, 3), np.uint8), np.ones((8, 8), bool)) is None

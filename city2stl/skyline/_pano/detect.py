@@ -1364,8 +1364,7 @@ def _build_and_detect_pano(
             # ``MAX_PROMPTS_PER_CLUSTER`` nearest-by-distance candidates
             # per cluster — without this, a 3000-building region produces
             # 200+ s of SAM inference (run validated this empirically).
-            if os.environ.get("SKYLINE_CV_F_SKY5", "0").strip() in (
-                    "1", "true", "yes", "on") and clusters:
+            if _F_SKY5_ENABLED and clusters:
                 MAX_PROMPTS_PER_CLUSTER = 15
                 _pano_projs_for_sam = project_buildings_to_pano(
                     seed_buildings, seed.lat, seed.lon, pano_headings)

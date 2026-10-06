@@ -63,6 +63,9 @@ class StitchedPanoResult:
     pano_water_mask: np.ndarray | None = None
     pano_sky_mask: np.ndarray | None = None
     pano_vegetation_mask: np.ndarray | None = None
+    # Building instances (``building_instances``, MobileSAM): int label per pixel, 0 = none,
+    # on the ``pano_image`` grid; the seg overlay colours each instance. None when unavailable.
+    pano_instances: np.ndarray | None = None
     # F-SKY24: pano-wide depth map (Depth Anything V2 inverse depth,
     # [0, 1] scaled). Computed once in ``_build_and_detect_pano`` so the
     # splitter + downstream renderers (depth pano, reconstruction polar

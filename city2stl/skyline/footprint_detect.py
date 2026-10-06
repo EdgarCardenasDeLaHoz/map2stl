@@ -688,7 +688,8 @@ def _local(lat0: float, lon0: float, ring: np.ndarray) -> np.ndarray:
 
 
 def _column_run(labels_col: np.ndarray, depth_col, start_row: int, near_lim: float,
-                stop_ratio: float, floor: float, gap_px: int, local_px: int = 8):
+                stop_ratio: float, floor: float, gap_px: int, local_px: int = 8,
+                inst_col: np.ndarray | None = None):
     """One building's rows in one column: ``(top, bottom, edge)`` or None.
 
     Going up from ``start_row``: skip building rows nearer than this building (inverse depth
@@ -701,6 +702,11 @@ def _column_run(labels_col: np.ndarray, depth_col, start_row: int, near_lim: flo
     the tallest towers short (2026-10-05: Ravello, tag 160 m, read 17 m); a roofline is a step
     over a few rows. ``edge`` says what ends the run: sky, depth (a building behind), other (a
     label that is neither), or image (the top row).
+
+    ``inst_col``: building instance labels (``building_instances``) for the column. Inside one
+    instance the run never stops (Depth Anything's drift up a tall facade); the depth step is
+    tested only where the instance changes. Stopping at every instance change instead cut
+    towers at the podium in front of them (2026-10-06, Cartagena seed_4: Portomarine 180 -> 28 m).
     """
     is_b = np.isin(labels_col, BUILDING_CLASSES)
     y, gap = int(start_row), 0
@@ -719,6 +725,9 @@ def _column_run(labels_col: np.ndarray, depth_col, start_row: int, near_lim: flo
         return None
     bottom = y
     while y - 1 >= 0 and is_b[y - 1]:
+        if inst_col is not None and inst_col[y] > 0 and inst_col[y - 1] == inst_col[y]:
+            y -= 1                                  # inside one instance: never a roofline
+            continue
         if depth_col is not None:
             d = depth_col[y - 1]
             if d < floor or d < stop_ratio * float(np.median(depth_col[y:min(bottom, y + local_px - 1) + 1])):
@@ -796,7 +805,7 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
                        base_window_px: int = 6, near_ratio: float = 1.35,
                        max_step: float = 0.92, gap_px: int = 8,
                        min_visible_frac: float = 0.25, min_run_px: int = 3,
-                       local_px: int = 40) -> list[Measured]:
+                       local_px: int = 40, instances: np.ndarray | None = None) -> list[Measured]:
     """Measure every footprint in view, nearest first (see module docstring).
 
     ``depth``: Depth Anything V2 inverse depth (closer = higher) on the pano grid, or None
@@ -822,6 +831,9 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
     - a footprint that holds smaller ones (a podium with its tower mapped separately, the
       Plaza Bocagrande mall) is measured on the columns its inner footprints leave free, so
       the tower is not read as the podium.
+
+    ``instances``: a building instance label map on the pano grid (``building_instances``); a
+    column's run then ends at its instance's top (see :func:`_column_run`).
     """
     import shapely
 
@@ -907,7 +919,8 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
                             far = (model[0] / behind[x][k] + model[1]) / level
                             ratio = min(max(0.5 * (1.0 + far), depth_ratio), max_step)
                 got = _column_run(pano.labels[:, x], None if dz is None else dz[:, x], y0,
-                                  near_lim, ratio, floor, gap_px, local_px)
+                                  near_lim, ratio, floor, gap_px, local_px,
+                                  None if instances is None else instances[:, x])
                 if got is None or got[2] == "image" or got[1] - got[0] + 1 < min_run_px:
                     continue
                 t, bot, edge = got

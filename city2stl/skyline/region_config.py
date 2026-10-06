@@ -39,10 +39,11 @@ _F_SKY13_SAT_BG_ENABLED = os.environ.get(
 
 # F-SKY5: MobileSAM instance head — splits merged blobs using SAM point prompts
 # sourced from OSM centroids. Fires only on segments with ≥ 2 contained OSM
-# markers (the cases F-SKY2 gap-splitting does not resolve). Default OFF; set
-# SKYLINE_CV_F_SKY5=1 to enable. Requires MobileSAM installed + checkpoint at
-# MOBILESAM_CHECKPOINT_PATH (default ~/.cache/mobile_sam/vit_t.pth).
-_F_SKY5_ENABLED = os.environ.get("SKYLINE_CV_F_SKY5", "0").strip().lower() in (
+# markers (the cases F-SKY2 gap-splitting does not resolve). Default ON since
+# 2026-10-06 (user: MobileSAM for all segmentation; the drone seeds use it through
+# ``building_instances``); SKYLINE_CV_F_SKY5=0 turns it off. Without MobileSAM or the
+# checkpoint at MOBILESAM_CHECKPOINT_PATH (default ~/.cache/mobile_sam/vit_t.pth) it is a no-op.
+_F_SKY5_ENABLED = os.environ.get("SKYLINE_CV_F_SKY5", "1").strip().lower() in (
     "1", "true", "yes", "on"
 )
 
