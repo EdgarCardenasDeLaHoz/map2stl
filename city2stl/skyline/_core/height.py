@@ -689,7 +689,7 @@ def _withhold_untagged_enabled() -> bool:
 
 
 def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRecord],
-                                  fallback=None) -> int:
+                                  fallback=None, measured_seeds=()) -> int:
     """Replace the Street View height of every untagged building in ``rows`` (the output of
     ``aggregate_building_heights``) by a fallback; returns how many were replaced.
 
@@ -699,6 +699,12 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
     ``fallback(record) -> (height_m, source)`` picks the replacement (T29 decides the best
     source); by default ``UNTAGGED_FALLBACK_M``, source ``"default"``. A fallback height of
     None leaves the row as it was. Idempotent; a no-op when the flag is off.
+
+    ``measured_seeds``: seeds that measure footprint first (the drone seeds, ``elevated_seeds``),
+    not by Street View's roof assignment. An untagged building one of them read publishes the
+    median of those readings (source ``"withheld:elevated"``) instead of the fallback:
+    2026-10-05, Cartagena's Hotel Estelar (202 m published) read 185 m from seed_1 but 113 m
+    from a street seed, and was published at the 10 m fallback.
     """
     if not _withhold_untagged_enabled():
         return 0
@@ -708,7 +714,12 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
         rec = by_id.get(row.get("feature_id"))
         if rec is None or rec.height_source in TAGGED_SOURCES or "street_view_m" in row:
             continue
-        h, src = fallback(rec) if fallback is not None else (UNTAGGED_FALLBACK_M, "default")
+        drone = [v for k, v in (row.get("per_seed_median_m") or {}).items()
+                 if k in measured_seeds and v is not None]
+        if drone:
+            h, src = float(np.median(drone)), "elevated"
+        else:
+            h, src = fallback(rec) if fallback is not None else (UNTAGGED_FALLBACK_M, "default")
         if h is None:
             continue
         row["street_view_m"] = row.get("effective_height_m")

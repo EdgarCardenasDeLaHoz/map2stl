@@ -72,3 +72,24 @@ def test_old_report_simulated_withholding():
     w = bm.withheld_buildings(old)
     assert [b["effective_height_m"] for b in w] == [95.0, UNTAGGED_FALLBACK_M, UNTAGGED_FALLBACK_M]
     assert w[1]["street_view_m"] == 120.0 and old[1]["effective_height_m"] == 120.0
+
+
+def test_untagged_building_a_drone_seed_measured_keeps_the_drone_height(monkeypatch):
+    """Cartagena 2026-10-05: Hotel Estelar (untagged) read 185 m from drone seed_1 and 113 m
+    from a street seed; withholding gave it the 10 m fallback."""
+    from types import SimpleNamespace
+
+    from city2stl.skyline._core import height as hm
+
+    monkeypatch.setenv("SKYLINE_WITHHOLD_UNTAGGED", "1")
+    rec = SimpleNamespace(feature_id="f1", height_source="default")
+    row = {"feature_id": "f1", "effective_height_m": 113.0, "effective_height_source": "geometric",
+           "per_seed_median_m": {"seed_1": 185.0, "auto_090_1400m": 113.0}}
+    other = {"feature_id": "f2", "effective_height_m": 90.0, "effective_height_source": "geometric",
+             "per_seed_median_m": {"auto_090_1400m": 90.0}}
+    rec2 = SimpleNamespace(feature_id="f2", height_source="default")
+    n = hm.withhold_untagged_street_view([row, other], [rec, rec2], measured_seeds={"seed_1"})
+    assert n == 2
+    assert row["effective_height_m"] == 185.0 and row["effective_height_source"] == "withheld:elevated"
+    assert row["street_view_m"] == 113.0
+    assert other["effective_height_m"] == hm.UNTAGGED_FALLBACK_M

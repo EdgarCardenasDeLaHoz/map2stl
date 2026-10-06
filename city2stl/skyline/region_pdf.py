@@ -476,7 +476,8 @@ def run_region_pdf_report(
         )
     # T28: untagged buildings get the fallback height; the Street View value stays in
     # each row (``street_view_m``) for the benchmark. SKYLINE_WITHHOLD_UNTAGGED=0 turns it off.
-    n_withheld = withhold_untagged_street_view(building_heights, building_records)
+    n_withheld = withhold_untagged_street_view(building_heights, building_records,
+                                               measured_seeds=set(elevated_seeds or ()))
     if n_withheld:
         logger.info(f"[withhold_untagged] {n_withheld} untagged building(s): Street View "
                     f"height withheld, fallback used")
