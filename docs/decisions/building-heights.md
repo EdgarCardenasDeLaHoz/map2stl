@@ -353,6 +353,26 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Source:** scratchpad `satellite_cities/validation.md`, backed up to
   `Code/claude/scratch_backup_2026-10-07/`.
 
+### 2026-10-07 — Far and overhead drone spheres are dropped from height readings
+- **Decision:** only drone spheres close to their towers with a waterline fit are used (Cartagena
+  seeds 1/4/5/6, Miami seed_4). Far drones (0.7-6.6 km) and overhead fits other than seed_6 are
+  not read.
+- **Why:** their failure is the camera position, which no cue we have resolves.
+  - A Photo Sphere's recorded position can be 100 m+ off (a pilot or ground position). On seed_7,
+    near towers and a far landmark need headings 18 deg apart (parallax).
+  - Heading, height and position then trade off against the ground score, the lowest-foot residual
+    and the tower outline. All gave flat or ambiguous minima (seed_7, Chicago wickerSKY, Miami
+    Martinez).
+  - Benidorm izalko reads 2-3x too tall from footprint distance, not from pitch or scale: the error
+    shrinks as 0.96 deg + 1949/d, and the footprint bases project into the sea.
+  - seed_6 reads well only because its recorded position happens to be right.
+- **Rejected:** a tower-outline heading cue for overhead seeds (ambiguous minima, 90 tower columns
+  on seed_6); a camera-height scan (entry below).
+- **Open:** a joint position fit from near and far landmarks would be needed. The outline step
+  should also reject fits at its search edge or on fewer than about 100 columns (Benidorm's
+  150 m move passed a "> 150" check).
+- **Source:** scratch `r8/` (2026-10-07).
+
 ### 2026-10-07 — Overhead drone camera height from a lowest-foot scan
 - **Hypothesis:** scanning camera height (30-800 m) for the best match between predicted and observed
   building feet fixes the overhead fits that sat at the 260 m grid top (Chicago wickerSKY, Miami
