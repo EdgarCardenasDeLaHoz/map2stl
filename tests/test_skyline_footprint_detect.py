@@ -505,17 +505,3 @@ def test_measurement_weight_scales_a_fill_reading():
     m = dict(top_edge="roof", confidence=0.8, dist_m=400.0, base_visible=True, visible_frac=1.0)
     assert fd.measurement_weight(dict(m, weight_scale=0.25)) == pytest.approx(
         0.25 * fd.measurement_weight(m))
-
-
-def test_waterline_ignores_steep_rows_labelled_by_the_sea_floor():
-    """Miami seed_4 (2026-10-07): from a -44 deg view SegFormer labels the shallow bay below
-    about -30 deg as vegetation (its seagrass floor), so no column ended in water. The waterline
-    is read from rows at or above ``WATERLINE_MIN_ELEV_DEG`` only."""
-    labels = np.full((H, W), SKY, np.int16)
-    labels[int(_row(-10.0)):, :] = WATER
-    labels[int(_row(-31.0)):, :] = 4                                  # "tree": the seagrass
-    pano, _ = _pano(labels)
-    assert fd.WATERLINE_MIN_ELEV_DEG > -31.0
-    y = fd.near_water_top(pano)
-    assert np.isfinite(y).all() and np.allclose(y, int(_row(-10.0)))
-    assert np.isnan(fd.near_water_top(pano, min_elev_deg=-89.0)).all()   # every row: none

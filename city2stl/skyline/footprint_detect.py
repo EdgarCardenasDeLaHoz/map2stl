@@ -164,32 +164,15 @@ def pano_from_views(name: str, lat: float, lon: float, views: list[dict], fov_de
 # --------------------------------------------------------------------------- waterline
 
 
-#: Rows below this elevation (deg, capture pitch) are left out of the waterline: looking
-#: steeply down, SegFormer labels shallow bay water by its bottom. Miami seed_4 (2026-10-07), a
-#: sphere with a -44 deg pitch row: the bay under -30 deg came out vegetation (seagrass) where
-#: OSM has water, only 492 of 7504 columns ended in water and the fit put the camera 190 m up
-#: (84 m from the 8/-18 rows alone). -28, not -35: the sphere takes a pixel from the view whose
-#: axis is nearest, so the -44 view labels rows up to -31 (at -35: 1259 columns, 64 m; -30:
-#: 6966; -28: all 7504 and the 8/-18 fit, 76 m before the outline step). The 8/-18 and spin
-#: panos reach -25..-33 and keep their fits. None: every row.
-WATERLINE_MIN_ELEV_DEG: float | None = -28.0
-
-
-def near_water_top(pano: Pano, min_run: int = 6,
-                   min_elev_deg: float | None = None) -> np.ndarray:
+def near_water_top(pano: Pano, min_run: int = 6) -> np.ndarray:
     """Per column: the row where the bottom water run ends going up (NaN when the column's
     bottom is not water). From an elevated camera over the bay this is the near shoreline, or
-    the horizon in open-sea columns. The column's bottom is the lowest row at or above
-    ``min_elev_deg`` (default :data:`WATERLINE_MIN_ELEV_DEG`)."""
+    the horizon in open-sea columns."""
     water = np.isin(pano.labels, _ADE20K_WATER_CLASSES)
     h, w = water.shape
-    lim = WATERLINE_MIN_ELEV_DEG if min_elev_deg is None else min_elev_deg
-    if lim is not None:
-        yb = int(math.floor(float(pano.row_of_elevation(lim))))
-        h = int(np.clip(yb + 1, min_run + 1, h))
     out = np.full(w, np.nan)
     for x in range(w):
-        col = water[:h, x]
+        col = water[:, x]
         if not col[h - min_run:].all():
             continue
         y = h - 1
