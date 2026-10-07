@@ -5,6 +5,33 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
+### 2026-10-07 — Two agreeing satellite shadows do not verify a height; satellite readings are weighted by method and height
+- **Decision:** a building counts as verified by two images only when independent methods agree:
+  two drone seeds, drone and satellite, or satellite lean and shadow on a tall building. Shadow
+  agreement across scenes alone does not count. In fusion, a satellite reading gets
+  `weight_scale = min(1, (0.15 / sigma_log)^2)` by method and band:
+  - lean over 100 m: 1;
+  - lean 40-100 m: 0.35-0.9 by confidence;
+  - lean under 40 m: dropped;
+  - shadow over 40 m: 1;
+  - shadow 15-40 m: 0.05;
+  - shadow under 15 m: 0.03-0.5 by confidence.
+  A shadow is a lower bound and never outvotes a higher photo reading. Several shadow scenes of
+  one building count as one reading.
+- **Why:** tested on 1,794 LiDAR-confirmed buildings in 7 cities (Prague, Miami, Seattle,
+  Madrid, Benidorm, La Défense, Chicago).
+  - One satellite reading is within 25 % of truth 37 % of the time; two agreeing readings 64 %.
+  - Miami shadows from different scenes agreed on 8 towers over 100 m and 1 was right: a shadow
+    cut by a podium or neighbour is cut the same way in every scene. Shadows read 20-40 % low.
+  - Lean over 100 m is within 25 % 94 % of the time (Chicago WV03). Where lean and shadow agree
+    on a building over 100 m, 26 of 27 are right.
+- **Rejected:** counting any two agreeing satellite scenes as verified. On Cartagena that gave
+  214 "sat-sat verified" buildings, overstating the result.
+- **Supersedes / superseded by:** —
+- **Source:** scratchpad satellite_cities/validation.md (2026-10-07), copied to
+  `Code/claude/scratch_backup_2026-10-07/`. Multi-scene stereo is unvalidated: Miami's archive is
+  near-nadir orthos, and Chicago's scenes are not fetched yet.
+
 ### 2026-10-06 — Drone fusion and trust rules for elevated seeds
 - **Decision:** `city2stl/skyline/footprint_detect.py::fuse_heights` overrules by a factor `overrule=3`.
   - A reading 3x off the other seeds' agreeing value is dropped.
