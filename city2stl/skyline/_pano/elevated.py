@@ -808,6 +808,14 @@ def trusted(m) -> bool:
 #: is the one that moved no fused height already read by a trusted run (0.5 and 1.0 let a fill
 #: outvote one: b0940 192 -> 121 m, b0217 87 -> 133 m, both untagged).
 ROOF_FILL_WEIGHT: float | None = 0.25
+#: ... and a fill counts only this close (m), nearer than an overhead roof fit
+#: (:data:`ROOF_TRUST_MAX_DIST_M`): from a drone below the tower tops, a low roof past ~750 m
+#: shows a sliver over the nearer roofs and its fitted top is the tower behind. 2026-10-07,
+#: Miami LiDAR (5 waterline seeds, 53 trusted fills): within 25 % 22/53 -> 13/16; the dropped
+#: ones read 100-190 m on 22-108 m buildings (The Loft 1 177/82, The Guild 183/107, Brickell
+#: Key I 157/68, all 840-930 m out); right fills lost: 9, mostly towers 800-900 m out that
+#: the street run or another seed also reads. Cartagena's tagged fills are all within 670 m.
+FILL_MAX_DIST_M: float = 750.0
 
 
 def measure_waterline(pano: fd.Pano, pose: fd.PanoPose, footprints, depth=None, instances=None,
@@ -819,9 +827,10 @@ def measure_waterline(pano: fd.Pano, pose: fd.PanoPose, footprints, depth=None, 
     The two paths have their own trust: a run is trusted by its top edge and base
     (:func:`trusted`), a roof fit by its confidence and distance (``ROOF_TRUST``,
     ``ROOF_TRUST_MAX_DIST_M``). A footprint keeps its trusted run; one without gets the roof
-    fit when that is trusted (the untrusted run is then dropped, so a seed gives one reading per
-    footprint), else keeps its untrusted run. A fill reading's fusion weight
-    (``footprint_detect.measurement_weight``: confidence over distance squared) is scaled by
+    fit when that is trusted and within :data:`FILL_MAX_DIST_M` (the untrusted run is then
+    dropped, so a seed gives one reading per footprint), else keeps its untrusted run. A fill
+    reading's fusion weight (``footprint_detect.measurement_weight``: confidence over distance
+    squared) is scaled by
     ``fill_weight`` (default :data:`ROOF_FILL_WEIGHT`): it stands in where the primary method
     failed, so a trusted run from another seed outweighs it at a similar distance."""
     from . import roof_fit
@@ -836,7 +845,7 @@ def measure_waterline(pano: fd.Pano, pose: fd.PanoPose, footprints, depth=None, 
     fills = {m.footprint: replace(m, weight_scale=float(w))
              for m in roof_fit.fit_roof_heights(pano, pose, footprints, depth=depth,
                                                 instances=instances)
-             if m.footprint not in have and trusted(m)
+             if m.footprint not in have and trusted(m) and m.dist_m <= FILL_MAX_DIST_M
              and not (BEHIND_FILLS and explained(m, pano))}
     return sorted([m for m in ms if m.footprint not in fills] + list(fills.values()),
                   key=lambda m: m.dist_m)

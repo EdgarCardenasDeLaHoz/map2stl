@@ -235,6 +235,24 @@ def test_waterline_seed_fills_untrusted_footprints_with_trusted_roof_fits(monkey
         ["sky", "depth", "depth"]
 
 
+def test_waterline_fill_only_within_fill_distance(monkeypatch):
+    """2026-10-07, Miami LiDAR: fills 840-930 m out read the tower behind (The Loft 1 177/82 m,
+    Brickell Key I 157/68 m); a fill past FILL_MAX_DIST_M keeps the untrusted run instead."""
+    from city2stl.skyline._pano import roof_fit as rf
+
+    near, far = el.FILL_MAX_DIST_M - 50.0, el.FILL_MAX_DIST_M + 100.0
+    runs = [fd.Measured(i, f"b{i}", 0, 9, 40.0, 60.0, 61.0, d, 30.0, 10, False, None, 0.1, "depth")
+            for i, d in ((0, near), (1, far))]
+    fits = [rf.RoofMeasured(i, f"b{i}", 0, 9, 40.0, 60.0, 61.0, d, 170.0, 30, False, None, 0.05,
+                            "roof", 170.0, 2.0, 30, 0, 0.95) for i, d in ((0, near), (1, far))]
+    assert all(el.trusted(f) for f in fits)                                # both confident
+    monkeypatch.setattr(fd, "measure_footprints", lambda *a, **k: list(runs))
+    monkeypatch.setattr(rf, "fit_roof_heights", lambda *a, **k: list(fits))
+    got = {m.footprint: m for m in el.measure_waterline(_pano(), fd.PanoPose(0, 80, 0, 0, W), [])}
+    assert got[0].top_edge == "roof"
+    assert got[1].top_edge == "depth" and not el.trusted(got[1])
+
+
 def test_outline_gate_rejects_sea_level_panos_and_keeps_drones():
     """2026-10-07: drone seeds fit the tower outline within 1.3 deg and move under 110 m; a
     Miami boat deck and a Chicago street pano fitted 3.96-4.63 deg after moving 184-228 m."""
