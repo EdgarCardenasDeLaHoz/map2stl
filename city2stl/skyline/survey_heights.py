@@ -2,14 +2,15 @@
 
 The same measurement as the benchmark's survey truth, so a published survey height and the
 truth it is checked against are one number: the p95 of the survey nDSM inside the footprint
-shrunk by ``benchmark.ERODE_M``, footprints grouped into ``benchmark.tiles_for`` tiles, read
-with ``benchmark.footprint_stat``. Only the survey is read: never Google 3D Tiles (a run-time
+shrunk by ``benchmark.ERODE_M``, footprints grouped into ``benchmark.tiles_for`` tiles (a fixed
+world grid, so the value does not depend on the other footprints: ``stat`` 2), read with
+``benchmark.footprint_stat``. Only the survey is read: never Google 3D Tiles (a run-time
 source would spend the monthly free cap, decision 2026-10-07).
 
     pick_provider(bbox, region=None) -> provider name | None
     survey_footprint_heights(region, footprints, provider=None) -> {key: record}
 
-A record is ``{survey_m, survey_cells, provider, years}`` (``years``: ``(first, last)`` survey
+A record is ``{survey_m, survey_cells, provider, years, stat}`` (``years``: ``(first, last)`` survey
 year from ``providers/survey.py::years_for_bbox``, or None). Cached per region in
 ``runs/survey/<region>.json``; a tile whose read failed (``SurveyError`` or any other error) is
 returned with ``error`` and not cached, so a down endpoint never pins "no survey here". A tile
@@ -68,8 +69,14 @@ def save_cache(region: str, cache: dict) -> None:
     p.write_text(json.dumps(cache, indent=1, sort_keys=True), encoding="utf-8")
 
 
-def _years(provider: str, bbox) -> list[int] | None:
+def _years(provider: str, bbox, part: str | None = None) -> list[int] | None:
     from city2stl.height.providers import survey
+
+    if part is not None and provider == "usgs_3dep_ept":  # the EPT project read (bm.survey_part)
+        from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+
+        y = ept._project_year(part)
+        return [y, y] if y else None
 
     try:
         y = survey.years_for_bbox(provider, bbox)
@@ -87,7 +94,8 @@ def survey_footprint_heights(region: str, footprints: dict[str, list],
 
     ``footprints``: key -> lon/lat ring. ``provider``: a ``providers/survey.py`` name; by
     default ``pick_provider`` over the footprints' bbox. Returns {} when no survey covers them.
-    Cached records of the same provider are reused unless ``refresh``.
+    Cached records of the same provider and stat version (``benchmark.STAT_VERSION``) are
+    reused unless ``refresh``; older records are re-measured.
     """
     if not footprints:
         return {}
@@ -97,26 +105,29 @@ def survey_footprint_heights(region: str, footprints: dict[str, list],
         return {}
     cache = load_cache(region)
     todo = {k: bm._erode(bm._polygon(ring), bm.ERODE_M) for k, ring in footprints.items()
-            if refresh or (cache.get(k) or {}).get("provider") != provider}
+            if refresh or (cache.get(k) or {}).get("provider") != provider
+            or (cache.get(k) or {}).get("stat") != bm.STAT_VERSION}
     fresh: dict[str, dict] = {}
-    tiles = bm.tiles_for(todo)
+    tiles = bm.tiles_for(todo, resolution_m=resolution_m,
+                         part=lambda p: bm.survey_part(provider, p))
     for i, tile in enumerate(tiles, 1):
         logger.info("[survey_heights] %s tile %d/%d: %d footprints", region, i, len(tiles),
                     len(tile.keys))
         try:
-            grid = bm.survey_ndsm(provider, tile.bbox, resolution_m)
+            grid = (bm.survey_ndsm(provider, tile.bbox, resolution_m, tile.part) if tile.part
+                    else bm.survey_ndsm(provider, tile.bbox, resolution_m))
         except Exception as exc:  # SurveyError above all; one bad tile must not lose the rest
             logger.warning("[survey_heights] %s failed on %s: %s", provider, tile.bbox, exc)
             for k in tile.keys:
                 fresh[k] = {"survey_m": None, "survey_cells": 0, "provider": provider,
                             "years": None, "error": str(exc)}
             continue
-        years = _years(provider, tile.bbox) if grid is not None else None
+        years = _years(provider, tile.bbox, tile.part) if grid is not None else None
         for k in tile.keys:
             hgt, cells = (None, 0) if grid is None else bm.footprint_stat(grid[0], grid[1],
                                                                           todo[k])
             rec = {"survey_m": None if hgt is None else round(hgt, 2), "survey_cells": cells,
-                   "provider": provider, "years": years}
+                   "provider": provider, "years": years, "stat": bm.STAT_VERSION}
             fresh[k] = cache[k] = rec
         save_cache(region, cache)
     return {k: fresh.get(k, cache.get(k)) for k in footprints if k in fresh or k in cache}

@@ -97,6 +97,28 @@ def test_tiles_group_by_cell_and_cover_footprints():
             assert w < minx and maxx < e and s < miny and maxy < n
 
 
+def test_tiles_are_a_fixed_world_grid_on_the_cell_lattice():
+    from city2stl.height.providers._survey import lonlat_grid
+
+    a = bm._polygon(_ring(0, 0, 10, 10))
+    alone = bm.tiles_for({"a": a})
+    crowd = bm.tiles_for({"a": a, "b": bm._polygon(_ring(-200, 150, 40, 40)),
+                          "c": bm._polygon(_ring(250, -90, 20, 20))})
+    tile_of_a = [t for t in crowd if "a" in t.keys]
+    assert len(alone) == 1 and alone[0].bbox == tile_of_a[0].bbox   # same raster for "a"
+    # exactly (tile + 2 pad) / res cells, so the cell size is the same fixed lattice
+    h, wd, t = lonlat_grid(alone[0].bbox, bm.RESOLUTION_M)
+    side = int((bm.TILE_M + 2 * bm.TILE_PAD_M) / bm.RESOLUTION_M)
+    assert (h, wd) == (side, side)
+    assert abs(t.e) * bm.M_PER_DEG_LAT == pytest.approx(bm.RESOLUTION_M, rel=1e-6)
+    # a footprint too big for its tile gets its own bbox, covering it
+    big = bm._polygon(_ring(-300, 0, 800, 50))
+    own = bm.tiles_for({"big": big})
+    n, s, e, w = own[0].bbox
+    minx, miny, maxx, maxy = big.bounds
+    assert w < minx and maxx < e and s < miny and maxy < n
+
+
 def test_footprint_truth_cross_checks_and_caches(tmp_path, monkeypatch):
     monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
     survey, t, _ = _grid()

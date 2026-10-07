@@ -163,31 +163,100 @@ def footprint_stat(ndsm: np.ndarray, transform, poly,
 class Tile:
     bbox: tuple[float, float, float, float]  # (north, south, east, west)
     keys: tuple[str, ...]
+    #: Survey part (``survey_part``) every footprint of the tile is read from, or None.
+    part: str | None = None
+
+
+#: Version of the per-footprint survey statistic (records carry it as ``stat``). 1: tiles
+#: were the union of the run's footprints, so a footprint's p95 changed with the other
+#: footprints in the run (the raster's cell size and phase followed the tile's bbox; Prague:
+#: 30 of 79 equal, one off by 46 m). 2: tiles on a fixed world grid (``tile_cell``) with a
+#: fixed bbox each (``tile_bbox``), so the raster under a footprint depends on it alone.
+STAT_VERSION = 2
+#: Shrinks a grid bbox by this many cells per side, so ``lonlat_grid``'s ``ceil`` returns
+#: the exact cell count despite float error (1e-6 m: no effect on the cells' positions).
+_SNAP_EPS_CELLS = 1e-6
+
+
+def tile_cell(lon: float, lat: float, tile_m: float = TILE_M) -> tuple[int, int]:
+    """``(col, row)`` of the fixed world tile holding (lon, lat).
+
+    Rows are ``tile_m`` of latitude from the equator; each row's columns are ``tile_m``
+    wide at the row's centre latitude (an equirectangular frame per row). Nothing depends on
+    which other footprints are in the run.
+    """
+    row = math.floor(lat * M_PER_DEG_LAT / tile_m)
+    kx = M_PER_DEG_LAT * math.cos(math.radians((row + 0.5) * tile_m / M_PER_DEG_LAT))
+    return math.floor(lon * kx / tile_m), row
+
+
+def _snapped_bbox(lat_lo_m: float, lat_hi_m: float, lon_lo: float, lon_hi: float,
+                  resolution_m: float) -> tuple[float, float, float, float]:
+    """``(n, s, e, w)`` whose edges sit on the ``resolution_m`` lattice: latitude edges at
+    multiples of ``resolution_m`` metres from the equator, longitude edges at multiples of
+    ``resolution_m`` at the bbox's centre latitude (where ``lonlat_grid`` measures its cell
+    width). ``lat_*_m`` are metres north of the equator, ``lon_*`` degrees."""
+    r = resolution_m
+    s_m, n_m = math.floor(lat_lo_m / r) * r, math.ceil(lat_hi_m / r) * r
+    kx = M_PER_DEG_LAT * math.cos(math.radians((s_m + n_m) / 2 / M_PER_DEG_LAT))
+    w_m, e_m = math.floor(lon_lo * kx / r) * r, math.ceil(lon_hi * kx / r) * r
+    eps = _SNAP_EPS_CELLS * r
+    return ((n_m - eps) / M_PER_DEG_LAT, (s_m + eps) / M_PER_DEG_LAT,
+            (e_m - eps) / kx, (w_m + eps) / kx)
+
+
+def tile_bbox(cell: tuple[int, int], tile_m: float = TILE_M, pad_m: float = TILE_PAD_M,
+              resolution_m: float = RESOLUTION_M) -> tuple[float, float, float, float]:
+    """Fixed ``(n, s, e, w)`` of world tile ``cell`` plus ``pad_m``, on the cell lattice."""
+    col, row = cell
+    kx = M_PER_DEG_LAT * math.cos(math.radians((row + 0.5) * tile_m / M_PER_DEG_LAT))
+    return _snapped_bbox(row * tile_m - pad_m, (row + 1) * tile_m + pad_m,
+                         (col * tile_m - pad_m) / kx, ((col + 1) * tile_m + pad_m) / kx,
+                         resolution_m)
+
+
+def _own_bbox(poly, pad_m: float, resolution_m: float) -> tuple[float, float, float, float]:
+    """Bbox of a footprint too big for its tile: its bounds plus ``pad_m``, on the lattice
+    (depends on the footprint alone)."""
+    minx, miny, maxx, maxy = poly.bounds
+    kx = M_PER_DEG_LAT * math.cos(math.radians((miny + maxy) / 2))
+    return _snapped_bbox(miny * M_PER_DEG_LAT - pad_m, maxy * M_PER_DEG_LAT + pad_m,
+                         minx - pad_m / kx, maxx + pad_m / kx, resolution_m)
+
+
+def _inside(bounds, bbox) -> bool:
+    minx, miny, maxx, maxy = bounds
+    n, s, e, w = bbox
+    return w <= minx and maxx <= e and s <= miny and maxy <= n
 
 
 def tiles_for(polys: dict[str, object], tile_m: float = TILE_M,
-              pad_m: float = TILE_PAD_M) -> list[Tile]:
-    """Group footprints into tiles of ``tile_m`` by centroid; each tile's bbox is the
-    union of its footprints plus ``pad_m``. Empty cells produce no tile, so a sparse
-    set of scored buildings across a 10 km region costs only the tiles it touches."""
-    if not polys:
-        return []
-    lat0 = float(np.mean([p.centroid.y for p in polys.values()]))
-    kx = M_PER_DEG_LAT * math.cos(math.radians(lat0))
-    cells: dict[tuple[int, int], list[str]] = {}
+              pad_m: float = TILE_PAD_M, resolution_m: float = RESOLUTION_M,
+              part=None) -> list[Tile]:
+    """Group footprints by the fixed world tile (``tile_cell``) of their centroid; a tile's
+    bbox is ``tile_bbox`` (the cell plus ``pad_m``, on the ``resolution_m`` lattice), the
+    same whichever footprints are in the run. A footprint reaching past its tile's bbox
+    gets a tile of its own (``_own_bbox``). Empty cells produce no tile, so a sparse set of
+    scored buildings across a 10 km region costs only the tiles it touches.
+
+    ``part`` (poly -> str | None, e.g. ``survey_part``) splits a cell's footprints by the
+    survey part each is read from, so the part follows the footprint, not the tile.
+
+    Stat version 2 (``STAT_VERSION``): a footprint's raster, hence its statistic, no longer
+    depends on the other footprints in the run.
+    """
+    cells: dict[tuple, list[str]] = {}
+    own: list[Tile] = []
     for k, p in polys.items():
         c = p.centroid
-        cells.setdefault((int(c.x * kx // tile_m), int(c.y * M_PER_DEG_LAT // tile_m)),
-                         []).append(k)
-    pad_lat, pad_lon = pad_m / M_PER_DEG_LAT, pad_m / kx
-    out = []
-    for cell in sorted(cells):
-        keys = cells[cell]
-        b = np.array([polys[k].bounds for k in keys])  # minx, miny, maxx, maxy
-        out.append(Tile((float(b[:, 3].max() + pad_lat), float(b[:, 1].min() - pad_lat),
-                         float(b[:, 2].max() + pad_lon), float(b[:, 0].min() - pad_lon)),
-                        tuple(keys)))
-    return out
+        cell = tile_cell(c.x, c.y, tile_m)
+        pt = part(p) if part else None
+        if _inside(p.bounds, tile_bbox(cell, tile_m, pad_m, resolution_m)):
+            cells.setdefault((cell, pt or ""), []).append(k)
+        else:
+            own.append(Tile(_own_bbox(p, pad_m, resolution_m), (k,), pt))
+    return [Tile(tile_bbox(cell, tile_m, pad_m, resolution_m), tuple(cells[cell, pt]), pt or None)
+            for cell, pt in sorted(cells)] + own
 
 
 def _grid_dim(bbox, resolution_m: float) -> tuple[int, int]:
@@ -201,10 +270,31 @@ def _grid_dim(bbox, resolution_m: float) -> tuple[int, int]:
 # --------------------------------------------------------------------------- sources
 
 
-def survey_ndsm(provider: str, bbox, resolution_m: float = RESOLUTION_M):
-    """``(ndsm, transform)`` from a survey provider, or None (not covered)."""
+def survey_part(provider: str, poly) -> str | None:
+    """The part of ``provider`` a footprint is read from, chosen on the footprint alone.
+
+    ``usgs_3dep_ept``: the newest EPT project meeting the footprint. Chosen on a tile's bbox
+    it changed with the tile: a 2019 topobathy project clipping the corner of a Miami tile
+    won over the city's project and left the tile without points. Other providers: None.
+    """
+    if provider != "usgs_3dep_ept":
+        return None
+    from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+
+    minx, miny, maxx, maxy = poly.bounds
+    found = ept.projects_for_bbox((maxy, miny, maxx, minx))
+    return found[0]["name"] if found else None
+
+
+def survey_ndsm(provider: str, bbox, resolution_m: float = RESOLUTION_M, part: str | None = None):
+    """``(ndsm, transform)`` from a survey provider, or None (not covered). ``part``: from
+    ``survey_part`` (an EPT project), else the provider's own choice for the bbox."""
     from city2stl.height.providers import survey
 
+    if part is not None and provider == "usgs_3dep_ept":
+        from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+
+        return ept.ndsm_for_bbox(survey.as_nsew(bbox), resolution_m, project=part)
     return survey.ndsm_for_bbox(provider, bbox, resolution_m)
 
 
@@ -333,14 +423,17 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
     todo = {k: _erode(_polygon(ring), ERODE_M) for k, ring in footprints.items()
             if refresh or k not in cache}
     fresh: dict[str, dict] = {}
-    tiles = tiles_for(todo)
+    part = (lambda p: survey_part(survey_provider, p)) if survey_provider else None
+    tiles = tiles_for(todo, resolution_m=resolution_m, part=part)
     for i, tile in enumerate(tiles, 1):
         logger.info("[bench] %s tile %d/%d: %d footprints", region, i, len(tiles),
                     len(tile.keys))
         grids, complete = {}, use_tiles
         if survey_provider:
             try:
-                grids["survey"] = survey_ndsm(survey_provider, tile.bbox, resolution_m)
+                grids["survey"] = (survey_ndsm(survey_provider, tile.bbox, resolution_m, tile.part)
+                                   if tile.part else
+                                   survey_ndsm(survey_provider, tile.bbox, resolution_m))
             except Exception as exc:  # one bad tile must not lose the rest
                 complete = False
                 logger.warning("[bench] survey %s failed on %s: %s", survey_provider,
@@ -361,6 +454,7 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
                 rec[f"{src}_cells"] = cells
             rec["status"], truth_m = classify(rec["survey_m"], rec["tiles_m"])
             rec["truth_m"] = None if truth_m is None else round(truth_m, 2)
+            rec["stat"] = STAT_VERSION  # absent: version 1 (tiles grouped by the run)
             recs[k] = rec
         if tags_m and flat_mesh({k: r["tiles_m"] for k, r in recs.items()}, tags_m):
             logger.warning("[bench] %s tile %d/%d: 3D Tiles have no building mesh here "

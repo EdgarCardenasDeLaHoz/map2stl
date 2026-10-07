@@ -121,3 +121,70 @@ def test_years_for_bbox(monkeypatch):
     with pytest.raises(KeyError):
         survey.years_for_bbox("nope", (1, 0, 1, 0))
     assert set(survey.YEARS) == set(survey.PROVIDERS)
+
+
+def _field_ndsm(bbox, resolution_m=1.0):
+    """A provider's answer: an analytic roof field sampled at the cell centres of the
+    ``lonlat_grid`` of ``bbox`` (what ČÚZK / CNIG return), so the values under a footprint
+    move whenever the grid's phase or cell size does."""
+    from city2stl.height.providers._survey import lonlat_grid
+
+    h, wd, t = lonlat_grid(bbox, resolution_m)
+    rows, cols = np.mgrid[0:h, 0:wd]
+    lon, lat = t * (cols + 0.5, rows + 0.5)
+    x_m, y_m = (lon - LON) * KX, (lat - LAT) * bm.M_PER_DEG_LAT
+    return (20 + 40 * np.abs(np.sin(x_m / 7.3) * np.cos(y_m / 5.1))).astype(np.float32), t
+
+
+def test_a_footprint_reads_the_same_whatever_else_is_in_the_run(monkeypatch):
+    # F-SKY26 2b finding: tiles were the union of the run's footprints, so the raster under a
+    # footprint (cell size, phase) and its p95 changed with the others (Prague: 30 of 79 equal)
+    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0: _field_ndsm(b, r))
+    target = {"t": _ring(37.3, 11.9, 23.0)}
+    sets = [target,
+            {**target, "w": _ring(-310.0, -150.0)},                     # widens the old tile
+            {**target, "n": _ring(120.0, 260.0), "e": _ring(430.0, 40.0)},
+            {**target, "big": _ring(-700.0, -40.0, 900.0)}]             # spans tiles: own tile
+    got = []
+    for i, fps in enumerate(sets):
+        rec = sh.survey_footprint_heights(f"benidorm_{i}", fps, "cnig_mdsn")["t"]
+        got.append((rec["survey_m"], rec["survey_cells"], rec["stat"]))
+    assert len(set(got)) == 1 and got[0][2] == bm.STAT_VERSION
+    assert got[0][0] is not None
+    truth = bm.footprint_truth("benidorm", sets[2], "cnig_mdsn", use_tiles=False)["t"]
+    assert (truth["survey_m"], truth["survey_cells"], truth["stat"]) == got[0]
+
+
+def test_old_stat_records_are_re_measured(monkeypatch):
+    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0: _field_ndsm(b, r))
+    sh.save_cache("benidorm", {k: {"survey_m": 1.0, "survey_cells": 9, "provider": "cnig_mdsn",
+                                   "years": None} for k in FOOTPRINTS})
+    got = sh.survey_footprint_heights("benidorm", FOOTPRINTS)
+    assert all(r["stat"] == bm.STAT_VERSION and r["survey_m"] != 1.0 for r in got.values())
+
+
+def test_ept_project_follows_the_footprint_not_the_tile(monkeypatch):
+    # Miami: a newer topobathy project clipping a tile's corner won the whole tile, which then
+    # had no points. Each footprint now picks the newest project meeting itself.
+    from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+
+    coast_lon = LON + 100 / KX                     # the "coast" project lies east of here
+
+    def projects(bbox):
+        n, s, e, w = bbox
+        out = [{"name": "CITY_2018", "url": "", "year": 2018}]
+        return ([{"name": "COAST_2019", "url": "", "year": 2019}] if e > coast_lon else []) + out
+
+    reads = []
+
+    def fake(provider, bbox, res=1.0, part=None):
+        reads.append(part)
+        arr, t = _synthetic_ndsm(bbox, res)
+        return (arr * (0 if part == "COAST_2019" else 1)) + (0 if part else np.nan), t
+
+    monkeypatch.setattr(ept, "projects_for_bbox", projects)
+    monkeypatch.setattr(bm, "survey_ndsm", fake)
+    got = sh.survey_footprint_heights("miami", FOOTPRINTS, "usgs_3dep_ept")
+    assert sorted(reads) == ["CITY_2018", "COAST_2019"]          # one tile per project
+    assert 12.0 < got["low"]["survey_m"] < 15.0                     # read from its own project
+    assert got["low"]["years"] == [2018, 2018] and got["tall"]["years"] == [2019, 2019]

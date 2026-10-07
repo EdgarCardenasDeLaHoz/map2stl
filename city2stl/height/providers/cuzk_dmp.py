@@ -31,6 +31,7 @@ from ._survey import (
     intersects,
     lonlat_grid,
     read_geotiff_array,
+    warp_to_grid,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,16 @@ def covers(bbox) -> bool:
     return intersects(bbox, EXTENTS)
 
 
-def _export(service: str, bbox, h: int, wd: int) -> np.ndarray:
+def _export(service: str, bbox, h: int, wd: int, res: float) -> np.ndarray:
+    """``service`` over ``bbox`` on ``lonlat_grid(bbox, res)`` (``h`` x ``wd``), NaN = no data.
+
+    The server keeps its pixels square in degrees: asked for ``wd`` x ``h`` over a bbox whose
+    cells are not square in degrees (every lon/lat metre grid away from the equator), it
+    returns ``wd`` x ``h`` pixels over a taller extent, centred on the bbox (at Prague 1.56x).
+    Reading that as the asked bbox put each roof ``0.56 x`` its distance from the bbox centre
+    too far north or south (F-SKY26: up to 109 m on a 620 m tile). So the answer is warped
+    from the transform the server returns onto the asked grid.
+    """
     n, s, e, w = as_nsew(bbox)
     params = {
         "bbox": f"{w},{s},{e},{n}", "bboxSR": 4326, "imageSR": 4326, "size": f"{wd},{h}",
@@ -57,7 +67,7 @@ def _export(service: str, bbox, h: int, wd: int) -> np.ndarray:
         "interpolation": "RSP_BilinearInterpolation", "f": "image",
     }
     ctx = f"ČÚZK {service}"
-    arr, _t, _crs, nodata = read_geotiff_array(
+    arr, transform, crs, nodata = read_geotiff_array(
         http_get(SERVICE_URL.format(service=service), params, ctx), ctx)
     if arr.shape != (h, wd):
         raise SurveyError(f"{ctx}: asked for {wd}x{h}, got {arr.shape[1]}x{arr.shape[0]}")
@@ -65,13 +75,14 @@ def _export(service: str, bbox, h: int, wd: int) -> np.ndarray:
     if nodata is not None:
         bad |= arr == nodata
     arr[bad] = np.nan
-    return arr
+    out, _t = warp_to_grid(arr, transform, crs or "EPSG:4326", bbox, res)
+    return out
 
 
 def _fetch(bbox, res: float):
     h, wd, transform = lonlat_grid(bbox, res)
-    surface = _export(SURFACE, bbox, h, wd)
-    ground = _export(GROUND, bbox, h, wd)
+    surface = _export(SURFACE, bbox, h, wd, res)
+    ground = _export(GROUND, bbox, h, wd, res)
     return clean_heights(surface - ground), transform
 
 
@@ -79,4 +90,6 @@ def ndsm_for_bbox(bbox, resolution_m: float = resolution_m):
     """DMP 1G − DMR 5G over ``bbox`` on a lon/lat grid, or None outside Czechia."""
     if not covers(bbox):
         return None
-    return cached_ndsm(f"survey_{name}", bbox, resolution_m, lambda: _fetch(bbox, resolution_m))
+    # v2: rasters cached before the returned extent was honoured are misplaced (``_export``)
+    return cached_ndsm(f"survey_{name}_v2", bbox, resolution_m,
+                       lambda: _fetch(bbox, resolution_m))

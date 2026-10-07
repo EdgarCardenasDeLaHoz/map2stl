@@ -131,6 +131,29 @@ class TestCUZK:
     def test_outside(self):
         assert cuzk_dmp.ndsm_for_bbox(PARIS) is None
 
+    def test_square_pixel_answer_is_placed_where_the_server_says(self, monkeypatch):
+        # The ImageServer keeps pixels square in degrees: asked wd x h over PRAGUE it returns
+        # wd x h over a taller extent centred on the bbox. A roof in the northern quarter
+        # of the bbox must stay there (it was read 0.56 x its offset further north).
+        n, s, e, w = PRAGUE
+        roof_lat = s + 0.75 * (n - s)
+
+        def fake_get(url, params, context, timeout=90.0):
+            wd, h = (int(v) for v in params["size"].split(","))
+            px = (e - w) / wd                       # square pixels, extent grown in latitude
+            mid = (n + s) / 2
+            t = from_bounds(w, mid - h * px / 2, e, mid + h * px / 2, wd, h)
+            rows, cols = np.mgrid[0:h, 0:wd]
+            _, lat = t * (cols + 0.5, rows + 0.5)
+            base = 225.0 if "dmr5g" in url else 225.0 + 30.0 * (np.abs(lat - roof_lat) < 2e-5)
+            return _tiff(np.broadcast_to(base, (h, wd)).astype(np.float32), t)
+
+        monkeypatch.setattr(cuzk_dmp, "http_get", fake_get)
+        arr, t = cuzk_dmp.ndsm_for_bbox(PRAGUE, 1.0)
+        rows = np.where(np.nanmax(arr, axis=1) > 15)[0]
+        _, lat = t * (0.5, rows.mean() + 0.5)
+        assert lat == pytest.approx(roof_lat, abs=2e-5)
+
 
 class TestCNIG:
     def test_wcs_subset_and_warp(self, monkeypatch):

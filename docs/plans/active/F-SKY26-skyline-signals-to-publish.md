@@ -144,6 +144,26 @@ Two constraints follow:
   every headline field identical to the run before the change (n 162, MAE 5.83, median 3.12,
   bias +0.38, within 25 % 0.556). By tier: tag 0.68 (n 81), prior 0.43 (n 81); no drone seeds in
   Miami, so no `verified_2` / `single` rows yet.
+- 2026-10-07, step 2b follow-up done: a footprint's survey p95 no longer depends on the other
+  footprints in the run (stat version 2, `benchmark.STAT_VERSION`; survey records carry `stat`,
+  older ones are re-measured). Three causes, all fixed:
+  - tiles were the union of the run's footprints, so the raster's cell size and phase followed the
+    grouping. Now `benchmark.tiles_for` uses fixed 500 m world tiles (`tile_cell`) with a fixed bbox
+    each (`tile_bbox`: + 60 m pad, edges on the 1 m lattice); a footprint reaching past its tile gets
+    its own bbox (`_own_bbox`);
+  - ČÚZK's ImageServer answers square-degree pixels over a taller extent; `cuzk_dmp.py` ignored the
+    returned transform, so each roof was read 0.56 x its offset from the tile centre too far N/S
+    (the 46 m outlier). `_export` now warps from the returned transform; cache namespace `_v2`;
+  - the newest EPT project was chosen on the tile bbox (a Keys topobathy project clipping a Miami
+    tile won it). Now chosen per footprint: `benchmark.survey_part`, tiles split by project.
+  - Proof: same footprint, different sets: Prague 72/72, Benidorm 85/85, Miami 4/4 identical
+    (synthetic test too). New vs cached truth `survey_m`: Prague median |d| 2.2 m, p95 88 m (old
+    values were misplaced; new values agree with `tiles_m` more often, 25 vs 19 of 84 within 3 m);
+    Benidorm median 0.10, p95 5.5 m (69/307 equal); Miami (21 compared, 12 tiles) median 0.03, p95
+    1.4 m. Survey truth must be re-measured (Prague above all); keep the cached 3D Tiles values and
+    re-read only the survey side (0 3D Tiles requests). Survey fetch: Prague, Benidorm about 1 min
+    each; Miami about 1.5 min a tile, about 90 tiles, so 2 to 2.5 h.
+  - Cost note: new `footprint_truth` footprints now read full 620 m tiles from 3D Tiles too.
 
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered
