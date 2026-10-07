@@ -296,28 +296,32 @@ def _streetview_metadata(
 def _is_no_imagery_placeholder(img: np.ndarray) -> bool:
     """Detect Google's gray 'Sorry, we have no imagery here' placeholder.
 
-    Two known placeholder styles are caught:
-    1. Classic near-uniform bright-gray frame (mean > 210, std < 20).
-    2. Current-style placeholder: mean ≈ 187, std ≈ 26 but nearly perfectly
-       grayscale (per-channel mean spread < 3.0).  Real Street View imagery
-       always has meaningful colour variation (spread typically 8–40+).
-       A std cap of < 32 prevents misclassifying real low-contrast dawn/dusk
-       shots that happen to be near-monochrome.
+    Only a truly flat grey frame counts (a rejected frame gets a permanent negative-cache
+    marker, so a false positive loses a real view for good):
+    1. Near-uniform frame: std < 6 (any brightness).
+    2. The bright text placeholder: no colour anywhere (95th percentile of per-pixel
+       max-min channel spread <= 4), bright (mean > 150), and one grey level covering
+       >= 50 % of the frame (the flat background around the text).
+    Real dusk, fog and haze views are dark or low-contrast but keep per-pixel colour
+    noise (chroma p95 20-33 on the 7 Chicago wickerSKY views the old channel-mean rule
+    rejected) and no dominant grey level, so they pass.
     """
     if img is None or img.size == 0:
         return True
     s = float(img.std())
-    m = float(img.mean())
-    # Style 1: original near-uniform bright gray
-    if s < 20.0 and m > 210.0:
+    if s < 6.0:
         return True
-    # Style 2: current placeholder — monochromatic but lower mean
-    if img.ndim == 3 and img.shape[2] >= 3:
-        ch_means = [float(img[:, :, c].mean()) for c in range(3)]
-        ch_spread = float(np.std(ch_means))
-        if ch_spread < 3.0 and s < 32.0:
-            return True
-    return False
+    if img.ndim != 3 or img.shape[2] < 3:
+        return False
+    sub = img[::4, ::4, :3].astype(np.int16)
+    if float(sub.mean()) <= 150.0:
+        return False
+    chroma = sub.max(axis=2) - sub.min(axis=2)
+    if float(np.percentile(chroma, 95)) > 4.0:
+        return False
+    grey = (sub.mean(axis=2) / 4.0).astype(np.int32).ravel()
+    dominant = float(np.bincount(grey).max()) / float(grey.size)
+    return dominant >= 0.5
 
 def _streetview_image(
     api_key: str,
