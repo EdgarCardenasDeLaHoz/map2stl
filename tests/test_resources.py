@@ -71,3 +71,24 @@ def test_free_gpu_cache_releases_the_lock(monkeypatch, tmp_path):
     assert resources._try_gpu_lock() and resources._gpu_lock_fd is not None
     resources.free_gpu_cache()
     assert resources._gpu_lock_fd is None
+
+
+def test_scratch_guard_sets_threads_and_caps_workers(monkeypatch):
+    monkeypatch.setattr(resources, "wait_for_ram", lambda gb: True)
+    monkeypatch.setattr(resources.os, "cpu_count", lambda: 12)
+    for k in resources._THREAD_ENV:
+        monkeypatch.delenv(k, raising=False)
+    assert resources.scratch_guard(max_workers=20) == 8
+    assert resources.scratch_guard(max_workers=3) == 3
+    assert all(resources.os.environ[k] == "1" for k in resources._THREAD_ENV)
+
+
+def test_scratch_guard_waits_for_other_gpu_jobs(monkeypatch):
+    monkeypatch.setattr(resources, "wait_for_ram", lambda gb: True)
+    seen = iter([{4242: 3000}, {4242: 3000}, {}])
+    monkeypatch.setattr(resources, "other_gpu_jobs_mb", lambda: next(seen))
+    got = []
+    monkeypatch.setattr(resources, "wait_for_gpu", lambda gb, **kw: got.append(gb) or True)
+    sleeps = []
+    resources.scratch_guard(gpu_gb=2.0, _sleep=sleeps.append, poll_s=30)
+    assert sleeps == [30, 30] and got == [2.0]

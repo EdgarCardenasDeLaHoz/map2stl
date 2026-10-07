@@ -14,6 +14,12 @@ RAM. Several agents share one laptop (6 cores, 32 GB RAM, 4 GB VRAM).
 ``free_gpu_cache`` releases, so only one process runs a GPU model at a time: checking free memory
 alone let two jobs that started together both load and spill into shared system RAM
 (2026-10-07). The OS drops the lock when its process dies. ``MAP2STL_GPU_LOCK=off`` disables it.
+
+Scratch scripts and agent helpers start with :func:`scratch_guard` (repo code gets the same
+limits from conftest/env; scratch scripts skipped them four times on 2026-10-06/07)::
+
+    from city2stl.resources import scratch_guard
+    workers = scratch_guard(gpu_gb=2.0, max_workers=8)   # before importing numpy / cv2 / torch
 """
 from __future__ import annotations
 
@@ -145,6 +151,64 @@ def wait_for_gpu(need_gb: float, *, device: int = 0, poll_s: float = GPU_POLL_S,
         _empty_cache()
         free = free_vram_gb(device)
     return True
+
+
+#: Thread variables every BLAS/OpenMP library reads at import.
+_THREAD_ENV = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS")
+#: Another process holding more GPU memory than this counts as a running GPU job.
+OTHER_GPU_JOB_MB = 1024
+
+
+def other_gpu_jobs_mb() -> dict[int, int]:
+    """{pid: MB} of other processes holding GPU memory (nvidia-smi), {} when unavailable."""
+    import subprocess
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory",
+                              "--format=csv,noheader,nounits"], capture_output=True, text=True,
+                             timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    jobs = {}
+    for line in out.splitlines():
+        try:
+            pid, mb = (int(v) for v in line.split(","))
+        except ValueError:
+            continue
+        if pid != os.getpid():
+            jobs[pid] = mb
+    return jobs
+
+
+def scratch_guard(gpu_gb: float | None = None, ram_gb: float = HEAVY_JOB_MIN_FREE_GB,
+                  max_workers: int | None = None, *, poll_s: float = GPU_POLL_S,
+                  timeout_s: float = GPU_TIMEOUT_S, _sleep=time.sleep) -> int:
+    """First line of a scratch script or agent helper: one BLAS/OpenMP thread per process,
+    wait for *ram_gb* free RAM, and with *gpu_gb* wait until no other process holds more than
+    :data:`OTHER_GPU_JOB_MB` of GPU memory, then take the GPU lock (:func:`wait_for_gpu`).
+    Returns a safe pool size: ``min(max_workers, cpu_count - 4)``, at least 1.
+
+    The thread variables only take effect when this runs before numpy / cv2 / torch are
+    imported (this module imports none of them)."""
+    for k in _THREAD_ENV:
+        os.environ[k] = "1"
+    try:
+        import cv2
+        cv2.setNumThreads(0)
+    except ImportError:
+        pass
+    wait_for_ram(ram_gb)
+    if gpu_gb is not None:
+        waited = 0.0
+        while busy := {p: mb for p, mb in other_gpu_jobs_mb().items() if mb > OTHER_GPU_JOB_MB}:
+            if waited >= timeout_s:
+                raise TimeoutError(f"GPU still used by {busy} after {waited:.0f} s")
+            if waited == 0:
+                logger.info("Waiting for GPU jobs %s to finish", busy)
+            _sleep(poll_s)
+            waited += poll_s
+        wait_for_gpu(gpu_gb, poll_s=poll_s, timeout_s=timeout_s, _sleep=_sleep)
+    cap = max(1, (os.cpu_count() or 8) - 4)
+    return cap if max_workers is None else max(1, min(max_workers, cap))
 
 
 def free_gpu_cache() -> None:
