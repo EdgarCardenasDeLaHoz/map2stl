@@ -393,19 +393,30 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
 
     # depth and instances depend on the image only (a camera move changes lat/lon, not pixels),
     # so they come first: the overhead pose needs them
-    if device == "cuda":
-        wait_for_gpu(1.0)                       # Depth Anything on 518 px tiles
-    depth = predict_pano_depth_tiled(pano.rgb, device=device)
-    free_gpu_cache()
-    if device == "cuda":
-        wait_for_gpu(1.0)                       # MobileSAM vit_t
+    def gpu_depth():
+        if device == "cuda":
+            wait_for_gpu(1.0)                   # Depth Anything on 518 px tiles
+        out = predict_pano_depth_tiled(pano.rgb, device=device)
+        free_gpu_cache()
+        return out
+
     # prompt grid and window in degrees: the defaults suit the 75-deg capture (~7.5 px/deg);
     # at ~20.8 px/deg a 12 px grid made ~8x the prompts and ran past an hour (seed_6)
     k = max(1.0, pano.f_px / 417.0)
-    instances = building_instances(pano.rgb, np.isin(pano.labels, fd.BUILDING_CLASSES),
-                                   device=device, window_px=int(448 * k),
-                                   grid_px=int(round(12 * k)))
-    free_gpu_cache()
+    win, grid = int(448 * k), int(round(12 * k))
+
+    def gpu_instances():
+        if device == "cuda":
+            wait_for_gpu(1.0)                   # MobileSAM vit_t
+        out = building_instances(pano.rgb, np.isin(pano.labels, fd.BUILDING_CLASSES),
+                                 device=device, window_px=win, grid_px=grid)
+        free_gpu_cache()
+        return out
+
+    # cached per pano image: re-runs (and review rounds) are CPU-only and can run side by side
+    depth = _pano_cached(pano, f"depth_v{DEPTH_CACHE_VERSION}", gpu_depth)
+    instances = _pano_cached(pano, f"inst_v{INSTANCES_CACHE_VERSION}_w{win}_g{grid}",
+                             gpu_instances)
     fps, fids = footprints_from_records(buildings)
     towers = _towers(buildings)
     if pose0.camera_h_m < MIN_ELEVATED_H_M:
@@ -437,6 +448,33 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
                        _view_rows(seed, views, pano, pose, len(ms)))
     if keep:
         out.pano, out.pose, out.depth, out.instances = pano, pose, depth, instances
+    return out
+
+
+#: Bump when the depth or instance code changes, so cached maps are recomputed.
+DEPTH_CACHE_VERSION = 1
+INSTANCES_CACHE_VERSION = 3
+#: Per-pano GPU outputs (depth, MobileSAM instances), keyed by the pano's pixels.
+PANO_CACHE_DIR = Path(__file__).resolve().parents[1] / "runs" / "pano_cache"
+
+
+def _pano_cached(pano: fd.Pano, what: str, compute):
+    """``compute()`` cached on disk by a hash of the pano's pixels (the labels follow from them;
+    SegFormer on the GPU is not bit-exact, so they are left out of the key): Depth Anything and
+    MobileSAM took 2-9 min a seed and ran again on every review round (2026-10-06)."""
+    import hashlib
+
+    h = hashlib.sha1(pano.rgb.tobytes())
+    path = PANO_CACHE_DIR / f"{h.hexdigest()[:20]}_{what}.npy"
+    if path.exists():
+        try:
+            return np.load(path)
+        except (OSError, ValueError):
+            pass
+    out = compute()
+    if out is not None:
+        PANO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        np.save(path, out)
     return out
 
 
