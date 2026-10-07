@@ -49,6 +49,9 @@ class Pano:
     frame_heading: np.ndarray       # W, degrees in the capture frame
     f_px: float
     pitch_deg: float
+    # elevation (deg, this pano's row model) of the open-sea horizon after any tilt correction;
+    # NaN when not measured. The true horizon dips atan(sqrt(2h/R)): the pitch fix follows.
+    horizon_deg: float = float("nan")
 
     @property
     def height(self) -> int:

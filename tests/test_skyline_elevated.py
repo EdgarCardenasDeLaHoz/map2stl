@@ -147,3 +147,47 @@ def test_sphere_pano_puts_every_pixel_at_its_direction_even_pointed_down():
     err = np.abs(pano.rgb.astype(float) - want)[covered]
     assert np.median(err) <= 1.5 and np.percentile(err, 98) <= 6
     assert pano.elevation_deg(0) > 4 and pano.elevation_deg(pano.height - 1) < -76
+
+
+def test_a_tilted_sphere_is_rebuilt_level_and_its_tilt_read_from_the_horizon():
+    """seed_6's Photo Sphere was tilted ~1 deg (its sea horizon swung 1.06 deg around the
+    circle); rebuilt with the tilt, every row is a true elevation again."""
+    from city2stl.skyline import footprint_detect as fd
+    from city2stl.skyline._pano.elevated import (
+        _camera_axes,
+        _tilt_rotation,
+        horizon_tilt,
+        sphere_pano,
+    )
+
+    tilt = (1.5, 75.0)
+    Rt = _tilt_rotation(tilt)
+    fov, w = 30.0, 96
+    f = 0.5 * w / np.tan(np.radians(fov / 2))
+
+    def view(hd, p):
+        r, d, fw = _camera_axes(hd, p)
+        yy, xx = np.mgrid[0:w, 0:w].astype(float)
+        u = fw[None, None] + ((xx - w / 2) / f)[..., None] * r + ((yy - w / 2) / f)[..., None] * d
+        u /= np.linalg.norm(u, axis=-1, keepdims=True)
+        wdir = u @ Rt                                   # world direction seen by the tilted camera
+        az = np.degrees(np.arctan2(wdir[..., 0], wdir[..., 1])) % 360
+        el = np.degrees(np.arcsin(np.clip(wdir[..., 2], -1, 1)))
+        lab = np.where(el > -0.5, fd.SKY_CLASS, 21).astype(np.int16)   # sky above, water below
+        return _sphere_colour(az, el).astype(np.uint8), lab
+
+    keys = [(float(hd), float(p)) for hd in range(0, 360, 30) for p in (8, -18)]
+    vv = {k: view(*k) for k in keys}
+    views = {k: v[0] for k, v in vv.items()}
+    labels = {k: v[1] for k, v in vv.items()}
+    raw = sphere_pano("t", 0.0, 0.0, views, fov, labels)
+    t = horizon_tilt(raw, min_cols=100)
+    assert t is not None and abs(t[1] - tilt[0]) < 0.3
+    assert abs(((t[2] - tilt[1]) + 180) % 360 - 180) < 10
+    level = sphere_pano("t", 0.0, 0.0, views, fov, labels, tilt_deg=(t[1], t[2]))
+    el = level.elevation_deg(np.arange(level.height) + 0.5)
+    az2, el2 = np.broadcast_arrays(level.frame_heading[None, :], el[:, None])
+    err = np.abs(level.rgb.astype(float) - _sphere_colour(az2, el2))
+    assert np.median(err) <= 1.5
+    t2 = horizon_tilt(level, min_cols=100)
+    assert t2 is not None and t2[1] < 0.3

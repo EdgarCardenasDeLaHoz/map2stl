@@ -64,8 +64,50 @@ def _camera_axes(heading_deg: float, pitch_deg: float):
     return right, down, fwd
 
 
+def _tilt_rotation(tilt_deg: tuple[float, float] | None) -> np.ndarray:
+    """Rotation taking a level direction into the frame of a sphere tilted ``amp`` deg toward
+    frame heading ``phi`` (``tilt_deg = (amp, phi)``): the direction at heading ``phi`` rises by
+    ``amp`` (Rodrigues about the horizontal axis ``a(phi) x up``)."""
+    if not tilt_deg or not tilt_deg[0]:
+        return np.eye(3)
+    amp, phi = math.radians(tilt_deg[0]), math.radians(tilt_deg[1])
+    k = np.array([math.cos(phi), -math.sin(phi), 0.0])
+    K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+    return np.eye(3) + math.sin(amp) * K + (1 - math.cos(amp)) * (K @ K)
+
+
+def horizon_tilt(pano: fd.Pano, min_cols: int = 500, max_resid_deg: float = 0.5):
+    """``(mean, amp, phi, n_cols, resid)`` of the open-sea horizon: per column where sky meets
+    water that continues 40 rows down, its elevation, fitted as ``mean + amp cos(heading - phi)``.
+    A level sphere gives amp ~ 0; seed_6's horizon swung 1.06 deg around the circle (the Photo
+    Sphere was tilted, 2026-10-06), which no single pitch can fix. None without enough open sea."""
+    water = np.isin(pano.labels, _ADE20K_WATER_CLASSES)
+    sky = pano.labels == fd.SKY_CLASS
+    top = np.argmax(water, axis=0)
+    has = water.any(axis=0) & (top > 4)
+    xs = []
+    for x in np.flatnonzero(has):
+        r = top[x]
+        if sky[r - 4:r, x].all() and water[r:r + 40, x].mean() > 0.95:
+            xs.append(x)
+    if len(xs) < min_cols:
+        return None
+    xs = np.array(xs)
+    e = pano.elevation_deg(top[xs].astype(float))
+    a = np.radians(pano.frame_heading[xs])
+    A = np.column_stack([np.ones_like(a), np.cos(a), np.sin(a)])
+    coef, *_ = np.linalg.lstsq(A, e, rcond=None)
+    resid = float(np.median(np.abs(e - A @ coef)))
+    if resid > max_resid_deg:
+        return None
+    amp = math.hypot(coef[1], coef[2])
+    phi = math.degrees(math.atan2(coef[2], coef[1])) % 360.0
+    return float(coef[0]), float(amp), float(phi), int(len(xs)), resid
+
+
 def sphere_pano(name: str, lat: float, lon: float, views: dict[tuple[float, float], np.ndarray],
-                fov_deg: float, labels: dict | None = None, step_deg: float = 30.0) -> fd.Pano:
+                fov_deg: float, labels: dict | None = None, step_deg: float = 30.0,
+                tilt_deg: tuple[float, float] | None = None) -> fd.Pano:
     """One pano from pinhole views at several headings and pitches, by exact reprojection.
 
     Each output column is one heading (uniform; the views' focal length in px per radian) and
@@ -76,6 +118,8 @@ def sphere_pano(name: str, lat: float, lon: float, views: dict[tuple[float, floa
     (``pano_from_views``) assumes a row is one elevation in every column, true only near the
     horizon: pointed 36 deg down, neighbouring views tore apart at their seams (2026-10-06,
     seed_6). ``labels``: ADE20K label maps per view (same keys), reprojected the same way.
+    ``tilt_deg``: the sphere's tilt ``(amp, phi)`` (:func:`horizon_tilt`), undone so that rows
+    are true elevations everywhere around the circle.
     """
     import cv2
 
@@ -103,6 +147,7 @@ def sphere_pano(name: str, lat: float, lon: float, views: dict[tuple[float, floa
         e = np.radians(el)[:, None]
         ray = np.stack([np.sin(a) * np.cos(e), np.cos(a) * np.cos(e),
                         np.broadcast_to(np.sin(e), (H, len(sel)))], -1).astype(np.float32)
+        ray = ray @ _tilt_rotation(tilt_deg).T.astype(np.float32)
         best = np.full((H, len(sel)), -np.inf, np.float32)
         out = np.zeros((H, len(sel), 3), np.uint8)
         out_l = np.full((H, len(sel)), -1, np.int16)
@@ -159,8 +204,18 @@ def capture_sphere_pano(seed: SkylinePoint, api_key: str, headings, is_photosphe
                 return None
             views[(float(hd), float(p))] = img
             labels[(float(hd), float(p))] = _ensure_label_map(img)
-    return sphere_pano(seed.name, seed.lat, seed.lon, views, fov_deg, labels,
-                       360.0 / len(headings))
+    step = 360.0 / len(headings)
+    pano = sphere_pano(seed.name, seed.lat, seed.lon, views, fov_deg, labels, step)
+    t = horizon_tilt(pano)
+    if t is not None and t[1] > 0.15:
+        logger.info("[elevated] %s: sphere tilted %.2f deg toward %.0f deg (horizon over %d "
+                    "cols); rebuilt level", seed.name, t[1], t[2], t[3])
+        pano = sphere_pano(seed.name, seed.lat, seed.lon, views, fov_deg, labels, step,
+                           tilt_deg=(t[1], t[2]))
+        t = horizon_tilt(pano)
+    if t is not None:
+        pano = replace(pano, horizon_deg=t[0])
+    return pano
 
 
 @dataclass
@@ -171,6 +226,12 @@ class ElevatedSeed:
     feature_ids: list[str]               # Measured.footprint -> feature_id
     pano_result: StitchedPanoResult
     view_rows: list[SeedViewRegistration] = field(default_factory=list)
+    # the measured pano (moved to the fitted camera), its pose and the depth/instance maps:
+    # kept only when asked (``keep=True``), for review renders; a region run drops them (memory)
+    pano: fd.Pano | None = None
+    pose: fd.PanoPose | None = None
+    depth: np.ndarray | None = None
+    instances: np.ndarray | None = None
 
 
 def _ring(geom) -> np.ndarray | None:
@@ -276,7 +337,7 @@ def _view_rows(seed: SkylinePoint, views: list[dict], pano: fd.Pano, pose: fd.Pa
 def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: float,
                           step_deg: float, buildings: list[BuildingRecord], state: dict,
                           device: str | None = None,
-                          pano: fd.Pano | None = None) -> ElevatedSeed | None:
+                          pano: fd.Pano | None = None, keep: bool = False) -> ElevatedSeed | None:
     """Measure one drone seed footprint first (see module docstring). ``state``: shapely
     geometries in lon/lat, ``coast_lines``, ``water_polys``, ``roads`` ((line, width_m)) and
     ``green``. None when the waterline does not fit or the camera is not elevated: the caller
@@ -351,9 +412,12 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
     logger.info("[elevated] %s: %d footprints measured (%d with the base visible)%s",
                 seed.name, len(ms), sum(m.base_visible for m in ms),
                 "" if instances is None else f", {int(instances.max())} MobileSAM instances")
-    return ElevatedSeed(seed.name, pf, ms, fids,
-                        pano_result(seed, pano, pose, ms, fids, depth, instances),
-                        _view_rows(seed, views, pano, pose, len(ms)))
+    out = ElevatedSeed(seed.name, pf, ms, fids,
+                       pano_result(seed, pano, pose, ms, fids, depth, instances),
+                       _view_rows(seed, views, pano, pose, len(ms)))
+    if keep:
+        out.pano, out.pose, out.depth, out.instances = pano, pose, depth, instances
+    return out
 
 
 def _waterline_camera(seed: SkylinePoint, pano: fd.Pano, pose0: fd.PanoPose, gmap, towers):
@@ -419,7 +483,14 @@ def overhead_pose(pano: fd.Pano, gmap, footprints, depth, instances, iters: int 
                     for o in np.arange(0.0, 360.0, 5.0))
     if s < OVERHEAD_MIN_GROUND:
         return None
-    pose = fd.PanoPose(off % 360.0, h, 0.0, 0.0, pano.width)
+    def horizon_fix(h_cam):
+        """Pitch fix putting the measured sea horizon at its true dip (refraction ~8 %)."""
+        if not math.isfinite(pano.horizon_deg):
+            return 0.0
+        dip = 0.92 * math.degrees(math.sqrt(2.0 * h_cam / 6.371e6))
+        return -dip - pano.horizon_deg
+
+    pose = fd.PanoPose(off % 360.0, h, horizon_fix(h), 0.0, pano.width)
     check = None
     for _ in range(iters):
         check = check_pose_from_bases(pano, pose, footprints, depth=depth, instances=instances)
@@ -428,7 +499,8 @@ def overhead_pose(pano: fd.Pano, gmap, footprints, depth, instances, iters: int 
             break
         done = abs(h_new - pose.camera_h_m) <= 0.01 * pose.camera_h_m
         s, off = max((ground(o, h_new), float(o)) for o in pose.offset_deg + np.arange(-3.0, 3.01, 0.5))
-        pose = replace(pose, offset_deg=off % 360.0, camera_h_m=h_new)
+        pose = replace(pose, offset_deg=off % 360.0, camera_h_m=h_new,
+                       pitch_fix_deg=horizon_fix(h_new))
         if done:
             break
     return pose, float(s), check
