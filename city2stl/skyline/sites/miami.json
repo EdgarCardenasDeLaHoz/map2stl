@@ -20,8 +20,8 @@
   "known_heights_m": {
     "_note": "OSM + CTBUH verified heights for validation \u2014 compare pipeline estimates against these.",
     "Panorama Tower": {
-      "lat": 25.7639,
-      "lon": -80.1929,
+      "lat": 25.76304,
+      "lon": -80.19036,
       "height_m": 249,
       "floors": 85
     },
@@ -38,14 +38,14 @@
       "floors": 67
     },
     "Four Seasons Miami": {
-      "lat": 25.7685,
-      "lon": -80.1916,
+      "lat": 25.75899,
+      "lon": -80.19169,
       "height_m": 240,
       "floors": 64
     },
     "Brickell World Plaza": {
-      "lat": 25.7699,
-      "lon": -80.1947,
+      "lat": 25.7675,
+      "lon": -80.191,
       "height_m": 138,
       "floors": 40
     },
@@ -56,14 +56,14 @@
       "floors": 42
     },
     "SLS Lux Brickell": {
-      "lat": 25.7638,
-      "lon": -80.1938,
+      "lat": 25.76598,
+      "lon": -80.19291,
       "height_m": 196,
       "floors": 57
     },
     "Santa Maria": {
-      "lat": 25.7628,
-      "lon": -80.196,
+      "lat": 25.75544,
+      "lon": -80.19496,
       "height_m": 175,
       "floors": 50
     }
