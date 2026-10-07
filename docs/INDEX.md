@@ -189,7 +189,7 @@ Overview and ranking: [reference/height-providers.md](reference/height-providers
   - WSF3D 90 m + global BigTIFF fallback: `map2stl/city2stl/height/providers/wsf3d.py::WSF3DProvider` (`tiles_for_bbox`, `_global_result`), `map2stl/city2stl/height/providers/wsf3d_global.py`
   - USGS 3DEP lidar per footprint (Planetary Computer COPC): `map2stl/city2stl/height/providers/lidar_3dep_copc.py::footprint_heights` (`ndsm_for_bbox`); EPT nDSM `map2stl/city2stl/height/providers/lidar_3dep_ept.py::get_ndsm`
   - GeoTIFF reader shared by providers: `map2stl/geo2stl/raster.py::read_geotiff` (wrapped in `map2stl/city2stl/height/providers/_raster.py`)
-- Survey nDSM providers, one interface `ndsm_for_bbox(bbox, res)`: `map2stl/city2stl/height/providers/survey.py::ndsm_for_bbox` (`PROVIDERS`, `available_for_bbox`); contract, grid, sanity checks, cache `map2stl/city2stl/height/providers/_survey.py` (`lonlat_grid`, `read_geotiff_array`, `cached_ndsm`)
+- Survey nDSM providers, one interface `ndsm_for_bbox(bbox, res)`: `map2stl/city2stl/height/providers/survey.py::ndsm_for_bbox` (`PROVIDERS`, `available_for_bbox`); contract, grid, sanity checks, cache `map2stl/city2stl/height/providers/_survey.py` (`lonlat_grid`, `read_geotiff_array`, `cached_ndsm`); survey years per provider: `survey.py::YEARS`, `survey.py::years_for_bbox` (USGS EPT: the newest project's year)
   - France IGN `ign_lidarhd.py`, Andalucía `rediam_mdhn.py`, Spain CNIG `cnig_mdsn.py`, Czechia `cuzk_dmp.py`; per-city sources [reference/survey-sources.md](reference/survey-sources.md)
 - Height-gap infill (linear Delaunay, nearest): `map2stl/city2stl/height/infill.py::infill_idw` (`infill_nearest`); mesh import applies it through `map2stl/app/server/core/mesh_import.py::_apply_infill`
 - Georeferenced STL → heightmap: `map2stl/city2stl/height/stl_import.py::stl_to_heightmap`
@@ -366,6 +366,7 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
 - Region PDF: `map2stl/city2stl/skyline/scripts/08_region_skyline_pdf.py`
 - Height benchmark on surveyed truth (F-SKYBENCH, eight cities, results in `skyline/docs/STATUS.md`):
   - Truth per footprint: `map2stl/city2stl/skyline/benchmark.py::footprint_truth`. Survey nDSM or Google 3D Tiles, cross-checked.
+  - Survey height per footprint for a run (F-SKY26 2b, same p95 as the truth, no 3D Tiles, cached in `runs/survey/<region>.json`): `map2stl/city2stl/skyline/survey_heights.py::survey_footprint_heights` (`pick_provider`).
   - Scoring: `score_buildings` (with `relative_metrics`).
   - Runner: `map2stl/city2stl/skyline/scripts/10_benchmark.py` (flags pinned by `PINNED_FLAGS`, `_region_env`).
   - Page: `map2stl/city2stl/skyline/benchmark_report.py::write_benchmark_page`.

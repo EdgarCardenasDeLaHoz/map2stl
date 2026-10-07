@@ -5,6 +5,7 @@ landmark nDSM override (``city2stl.landmarks``)::
 
     ndsm_for_bbox(name, bbox, resolution_m=None) -> (array row0=north, lon/lat Affine) | None
     available_for_bbox(bbox) -> [{name, label, resolution_m, available, note}, ...]
+    years_for_bbox(name, bbox) -> (first, last) survey year | None   (``YEARS``)
 
 Contract and caching: ``_survey``. Providers (one module each):
 
@@ -38,7 +39,8 @@ from . import (
 )
 from ._survey import SurveyError, as_nsew
 
-__all__ = ["PROVIDERS", "SurveyError", "available_for_bbox", "ndsm_for_bbox"]
+__all__ = ["PROVIDERS", "YEARS", "SurveyError", "available_for_bbox", "ndsm_for_bbox",
+           "years_for_bbox"]
 
 
 def _usgs_ndsm(bbox, resolution_m: float = 1.0):
@@ -73,6 +75,35 @@ usgs_3dep_ept = SimpleNamespace(
 #: Order is preference where two overlap (Andalucía: REDIAM 1 m before CNIG 2.5 m).
 PROVIDERS = {p.name: p for p in (ign_lidarhd, rediam_mdhn, cnig_mdsn, cuzk_dmp, usgs_3dep,
                                   usgs_3dep_ept)}
+
+
+#: name -> ``(first, last)`` survey year of the flights behind the provider's surface, or None
+#: when it depends on the place (USGS: one project per area; ``years_for_bbox`` looks it up).
+#: Used to suspect a survey height of being stale (F-SKY26 2d: an OSM ``start_date`` at or
+#: after the survey year). IGN LiDAR HD: flown department by department from 2021.
+YEARS: dict[str, tuple[int, int] | None] = {
+    "ign_lidarhd": (2021, 2025),
+    "rediam_mdhn": (2020, 2021),
+    "cnig_mdsn": (2008, 2015),
+    "cuzk_dmp": (2009, 2013),
+    "usgs_3dep": None,
+    "usgs_3dep_ept": None,
+}
+
+
+def years_for_bbox(name: str, bbox) -> tuple[int, int] | None:
+    """``(first, last)`` survey year of provider ``name`` over ``bbox``, or None if unknown.
+
+    ``usgs_3dep_ept`` reads the newest EPT project meeting the bbox, so its year is that
+    project's (from its name; the boundary index is cached for 30 days). ``usgs_3dep`` may
+    serve an older COPC copy first, so its year stays unknown.
+    """
+    if name not in PROVIDERS:
+        raise KeyError(f"unknown nDSM provider {name!r}; known: {', '.join(PROVIDERS)}")
+    if name == "usgs_3dep_ept":
+        projects = [p for p in lidar_3dep_ept_laspy.projects_for_bbox(as_nsew(bbox)) if p["year"]]
+        return (projects[0]["year"], projects[0]["year"]) if projects else None
+    return YEARS.get(name)
 
 
 def available_for_bbox(bbox) -> list[dict]:

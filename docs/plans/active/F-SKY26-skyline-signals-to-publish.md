@@ -127,6 +127,13 @@ Two constraints follow:
   `withhold_untagged_street_view` on Miami (375 rows) and Cartagena v7 (449 rows) gives identical
   value, source and `street_view_m` on every row. Cartagena v7 tiers: verified_2 3, single 74
   (69 `prior_disagrees`), tag 13, prior 359; Miami (no drone seeds): tag 227, prior 148.
+- 2026-10-07, step 2b done: `skyline/survey_heights.py` (`pick_provider`,
+  `survey_footprint_heights`, cache `runs/survey/<region>.json`, a failed tile not cached, no 3D
+  Tiles); `providers/survey.py::YEARS` / `years_for_bbox`. Same footprints, same tiles: survey_m
+  equals the cached truth exactly (Prague 77/77, Benidorm 98/98). **Found:** the p95 depends on
+  the tile grid. Prague's newest report groups 79 footprints differently from the run that
+  measured the truth: only 30 of 79 equal, one off by 46 m (ČÚZK). 2d must snap tiles to a fixed
+  grid, or re-measure truth and survey on one grid, before survey and truth can be compared.
 
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered
