@@ -250,3 +250,40 @@ def test_outline_gate_rejects_sea_level_panos_and_keeps_drones():
     assert "deg" in el.outline_gate(of(10.0, 0.0, 3.0))
     assert " m " in el.outline_gate(of(170.0, -150.0, 1.0))               # ran off the search
     assert el.outline_gate(of(170.0, -150.0, 9.0, n=20)) is None          # too few tower columns
+
+
+def _fp_at(name, b0, b1, d, depth_m=30.0, tag=None, lat=10.4, lon=-75.55):
+    """A footprint spanning bearings ``b0..b1`` (deg) from ``d`` to ``d + depth_m`` metres."""
+    kx = fd.M_PER_DEG_LAT * np.cos(np.radians(lat))
+    pts = [(r * np.sin(np.radians(b)), r * np.cos(np.radians(b)))
+           for r, b in ((d, b0), (d, b1), (d + depth_m, b1), (d + depth_m, b0))]
+    ring = np.array([(lon + x / kx, lat + y / fd.M_PER_DEG_LAT) for x, y in pts + pts[:1]])
+    return fd.Footprint(name, ring, tag)
+
+
+def test_a_run_onto_a_tagged_tower_behind_is_not_trusted(monkeypatch):
+    """Miami seed_3 (2026-10-07): Kaseya Center (43 m) read 138 m, its run climbing from the
+    arena's MobileSAM instance onto the towers behind. A sky-topped run whose top instance is not
+    its base's, with its top where a farther tagged footprint puts its tag, becomes ``behind``."""
+    from city2stl.skyline._pano import roof_fit as rf
+
+    pano, pose = _pano(), fd.PanoPose(0.0, 80.0, 0.0, 0.3, W)
+    fps = [_fp_at("arena", 10.0, 20.0, 400.0), _fp_at("tower", 12.0, 18.0, 1000.0, tag=180.0)]
+    top = float(fd._row_of(pano, pose, np.degrees(np.arctan2(180.0 - 80.0, 1000.0))))
+    run = fd.Measured(0, "arena", 10, 20, top, 60.0, 61.0, 400.0, 150.0, 11, True, None, 1.0, "sky")
+    monkeypatch.setattr(fd, "measure_footprints", lambda *a, **k: [run])
+    monkeypatch.setattr(rf, "fit_roof_heights", lambda *a, **k: [])
+    inst = np.zeros((H, W), np.int32)
+    inst[:50, :] = 2                                                 # the tower behind
+    inst[50:, :] = 1                                                 # the arena
+    got = el.measure_waterline(pano, pose, fps, instances=inst)
+    assert got[0].top_edge == "behind" and not el.trusted(got[0])
+    same = np.ones((H, W), np.int32)                                 # one instance: kept
+    assert el.measure_waterline(pano, pose, fps, instances=same)[0].top_edge == "sky"
+    fps[1] = _fp_at("tower", 12.0, 18.0, 1000.0, tag=260.0)          # tag puts its top elsewhere
+    assert el.measure_waterline(pano, pose, fps, instances=inst)[0].top_edge == "sky"
+    fps[1] = _fp_at("tower", 12.0, 18.0, 420.0, tag=180.0)           # not farther: kept
+    assert el.measure_waterline(pano, pose, fps, instances=inst)[0].top_edge == "sky"
+    monkeypatch.setattr(el, "BEHIND_TOL_PX", None)                    # off
+    fps[1] = _fp_at("tower", 12.0, 18.0, 1000.0, tag=180.0)
+    assert el.measure_waterline(pano, pose, fps, instances=inst)[0].top_edge == "sky"

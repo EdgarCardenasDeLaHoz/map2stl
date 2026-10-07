@@ -515,7 +515,9 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
         pano = replace(pano, lat=lat, lon=lon)          # fd.moved: the camera moved, not pixels
         ms = _sc.cached("measured", MEASURED_CACHE_VERSION,
                         (_sc.Digest(pose_key), branch, ROOF_FILL_WEIGHT,
-                         _sc.source_hash(measure_waterline, trusted)),
+                         BEHIND_TOL_PX, BEHIND_INST_DIFF, BEHIND_FILLS, BEHIND_DIST_RATIO,
+                         _sc.source_hash(measure_waterline, trusted, _tag_behind, _inst_change,
+                                         _untrust_behind)),
                         lambda: measure_waterline(pano, pose, fps, depth=depth,
                                                   instances=instances),
                         kind="pickle")
@@ -826,15 +828,89 @@ def measure_waterline(pano: fd.Pano, pose: fd.PanoPose, footprints, depth=None, 
 
     w = ROOF_FILL_WEIGHT if fill_weight is None else fill_weight
     ms = fd.measure_footprints(pano, pose, footprints, depth=depth, instances=instances)
+    explained = _tag_behind(pano, pose, footprints)
+    ms = [_untrust_behind(m, explained, instances, pano) for m in ms]
     if w is None:
         return ms
     have = {m.footprint for m in ms if trusted(m)}
     fills = {m.footprint: replace(m, weight_scale=float(w))
              for m in roof_fit.fit_roof_heights(pano, pose, footprints, depth=depth,
                                                 instances=instances)
-             if m.footprint not in have and trusted(m)}
+             if m.footprint not in have and trusted(m)
+             and not (BEHIND_FILLS and explained(m, pano))}
     return sorted([m for m in ms if m.footprint not in fills] + list(fills.values()),
                   key=lambda m: m.dist_m)
+
+
+#: A reading's top row within this many pixels (of the default spin pano, scaled by
+#: ``footprint_detect.px_scale``) of where a farther OSM-tagged footprint over its columns puts
+#: its tagged top is that footprint's top (:func:`_tag_behind`); None turns the test off.
+BEHIND_TOL_PX: float | None = 4.0
+#: ... a run counts only when its top-row MobileSAM instance differs from its base-row one in at
+#: least this share of its core columns (the run crossed from the low building onto another).
+BEHIND_INST_DIFF = 0.3
+#: ... and roof-fit fills are tested too. Off: on Miami (2026-10-07, LiDAR truth) the test
+#: dropped 6 wrong fills and 5 right ones (One Tequesta Point 106/95 m, b6312 151/152 m): a fill's
+#: top often lines up with a tagged tower behind by chance, and fills have no instance change to
+#: confirm the crossing.
+BEHIND_FILLS = False
+#: Farther footprints must be this much farther than the reading's (nearest vertex).
+BEHIND_DIST_RATIO = 1.15
+
+
+def _tag_behind(pano: fd.Pano, pose: fd.PanoPose, footprints):
+    """``explained(m, pano) -> bool``: does a farther OSM-tagged footprint over at least 30 % of
+    ``m``'s columns (of the narrower span) put its tagged top on ``m``'s top row (within
+    :data:`BEHIND_TOL_PX`)? Then ``m`` read that tower over a lower building in front."""
+    from .roof_fit import _candidates
+
+    if BEHIND_TOL_PX is None:
+        return lambda m, p: False
+    h = pose.camera_h_m
+    tags = [(c.dn, c.x0, c.x1, float(fd._row_of(pano, pose, math.degrees(math.atan2(
+                float(footprints[c.i].osm_height_m) - h, c.dn)))))
+            for c in _candidates(pano, pose, footprints, 3500.0, 1)
+            if footprints[c.i].osm_height_m]
+    if not tags:
+        return lambda m, p: False
+    arr = np.array(tags, float)
+    tol = BEHIND_TOL_PX * fd.px_scale(pano)
+
+    def explained(m, p) -> bool:
+        far = arr[:, 0] >= BEHIND_DIST_RATIO * float(m.dist_m)
+        ov = (np.minimum(arr[:, 2], m.x1) - np.maximum(arr[:, 1], m.x0)) / np.maximum(
+            1.0, np.minimum(arr[:, 2] - arr[:, 1], m.x1 - m.x0))
+        hit = far & (ov >= 0.3) & (np.abs(arr[:, 3] - float(m.top_row)) <= tol)
+        return bool(hit.any())
+    return explained
+
+
+def _inst_change(m, instances, core: float = 0.6) -> float:
+    """Share of ``m``'s core columns whose MobileSAM instance at the top row differs from the one
+    at the bottom row (both labelled)."""
+    if instances is None:
+        return 0.0
+    Hh, W = instances.shape
+    xs = np.arange(m.x0, m.x1 + 1)
+    cut = int(len(xs) * (1 - core) / 2)
+    xs = xs[cut:len(xs) - cut]
+    xs = xs[(xs >= 0) & (xs < W)]
+    if not len(xs):
+        return 0.0
+    it = instances[min(Hh - 1, int(round(m.top_row)) + 1), xs]
+    ib = instances[max(0, int(round(m.bottom_row)) - 1), xs]
+    return float(np.mean((it > 0) & (ib > 0) & (it != ib)))
+
+
+def _untrust_behind(m, explained, instances, pano):
+    """A trusted sky-topped run whose top is a farther tagged tower's (:func:`_tag_behind`) and
+    whose top instance is not its base's becomes ``top_edge="behind"`` (not :func:`trusted`).
+    2026-10-07, Miami seed_3 sphere: Kaseya Center (LiDAR 43 m) read 138 m, its run climbing from
+    the arena (instance 50) onto the towers of Museum Park behind it (instances 25, 20)."""
+    if (m.top_edge != "sky" or not trusted(m) or not explained(m, pano)
+            or _inst_change(m, instances) < BEHIND_INST_DIFF):
+        return m
+    return replace(m, top_edge="behind")
 
 
 def elevated_estimates(seeds: list[ElevatedSeed]) -> list[RegisteredBuildingEstimate]:
