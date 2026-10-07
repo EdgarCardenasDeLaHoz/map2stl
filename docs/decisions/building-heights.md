@@ -353,6 +353,20 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Source:** scratchpad `satellite_cities/validation.md`, backed up to
   `Code/claude/scratch_backup_2026-10-07/`.
 
+### 2026-10-07 — Overhead drone camera height from a lowest-foot scan
+- **Hypothesis:** scanning camera height (30-800 m) for the best match between predicted and observed
+  building feet fixes the overhead fits that sat at the 260 m grid top (Chicago wickerSKY, Miami
+  Martinez) without the bases fixed point locking onto nearby edges.
+- **Measured:**
+  - Cartagena seed_6: 189 -> 198 m, tagged within 25 % 1.00 -> 0.75.
+  - Cartagena seed_7: gained a wrong trusted reading (5x its tag).
+  - Chicago and Miami do move off the grid top (254 m, 362 m), but residuals are 2-4 deg, and
+    height trades against heading on seed_7.
+  - Benidorm izalko reads 1.9x too tall even at the scan's 35 m, so its error is the horizon, not
+    the height.
+- **Verdict:** refused (reverted; patch in scratch `r7/height_scan.patch`). It needs a sharper
+  heading cue first (the tower outline); far drones stay unreliable.
+
 ### 2026-10-07 — Placing no-GPS Commons photos with trusted heights or LightGlue
 - **Hypothesis:** with LiDAR heights (instead of OSM tags) the skyline outline search places Commons
   photos; or DISK+LightGlue matches to the Miami drone panoramas plus PnP on tower blocks does.
