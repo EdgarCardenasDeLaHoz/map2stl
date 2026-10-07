@@ -57,6 +57,7 @@ import time
 from pathlib import Path
 
 from ._core.height import untagged_fallback, withhold_untagged_street_view
+from ._core.tiers import tier_counts, tier_fields
 from ._core.timing import _StepTimer
 from ._core.types import BuildingRecord
 from ._pano.orchestrator import _seed_multiview_registration
@@ -91,6 +92,10 @@ from .seed_selection import (
 from .streetview_io import _parse_streetview_url, _resolve_api_key
 
 logger = logging.getLogger(__name__)
+
+
+#: ``heights.json`` layout version; 2 added ``tier_counts`` and per-row tiers (F-SKY26).
+HEIGHTS_SCHEMA_VERSION = 2
 
 
 def _write_heights_json(
@@ -155,13 +160,18 @@ def _write_heights_json(
                      "n_seeds": 0, "per_seed_median_m": {},
                      "centroid_lat": rec.centroid_lat, "centroid_lon": rec.centroid_lon,
                      "area_m2": rec.area_m2, "height_tag_m": rec.height_tag_m,
-                     "height_source": rec.height_source, "footprint_lonlat": ring})
+                     "height_source": rec.height_source, "footprint_lonlat": ring,
+                     **tier_fields([], published_m=float(rec.height_tag_m),
+                                   tag_m=float(rec.height_tag_m))})
 
     doc = {
+        # 2: rows carry verification tiers and the survey-blind answer (F-SKY26 2a/2c)
+        "schema_version": HEIGHTS_SCHEMA_VERSION,
         "region": region_name,
         "bbox_nsew": [bbox.north, bbox.south, bbox.east, bbox.west],
         "n_building_records": len(building_records),
         "known_heights": known_heights or [],
+        "tier_counts": tier_counts(rows),
         "buildings": rows,
     }
     try:

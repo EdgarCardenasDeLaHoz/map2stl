@@ -120,6 +120,13 @@ Two constraints follow:
     agreements still count as "sat-sat verified" (57-70): step 3 comes next.
   - Miami trusted drone readings: sigma_log 0.74, bias +0.46, 45 % within 25 % (seed_3 sphere worst,
     seed_4 spin best at 86 %): the roof-fill readings are the main error source.
+- 2026-10-07, addendum step 2a done: `_core/tiers.py` (`verification_tier`, `independent`,
+  `INDEPENDENT`, `tier_fields`); every row of `withhold_untagged_street_view` carries `tier`,
+  `tier_methods`, `verified`, `disputed_by`, `prior_disagrees`; `heights.json` has
+  `schema_version: 2` and `tier_counts`. Published values unchanged: replaying the old and new
+  `withhold_untagged_street_view` on Miami (375 rows) and Cartagena v7 (449 rows) gives identical
+  value, source and `street_view_m` on every row. Cartagena v7 tiers: verified_2 3, single 74
+  (69 `prior_disagrees`), tag 13, prior 359; Miami (no drone seeds): tag 227, prior 148.
 
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered

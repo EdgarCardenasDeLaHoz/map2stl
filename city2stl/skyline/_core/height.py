@@ -730,43 +730,54 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
     were, ``effective_height_source`` becomes ``"withheld:<fallback source>"``.
     ``fallback(record) -> (height_m, source)`` picks the replacement (T29 decides the best
     source); by default ``UNTAGGED_FALLBACK_M``, source ``"default"``. A fallback height of
-    None leaves the row as it was. Idempotent; a no-op when the flag is off.
+    None leaves the row as it was. Idempotent; replaces nothing when the flag is off.
 
     ``measured_seeds``: seeds that measure footprint first (the drone seeds, ``elevated_seeds``),
     not by Street View's roof assignment. An untagged building one of them read publishes the
     median of those readings (source ``"withheld:elevated"``) instead of the fallback:
     2026-10-05, Cartagena's Hotel Estelar (202 m published) read 185 m from seed_1 but 113 m
     from a street seed, and was published at the 10 m fallback.
+
+    Every row with a record (flag on or off) also gets its verification tier (F-SKY26 2a,
+    ``tiers.tier_fields``: ``tier``, ``tier_methods``, ``verified``, ``disputed_by``,
+    ``prior_disagrees``) from the readings behind what it publishes.
     """
-    if not _withhold_untagged_enabled():
-        return 0
+    from .tiers import reading, tier_fields  # noqa: PLC0415
+
+    enabled = _withhold_untagged_enabled()
     by_id = {r.feature_id: r for r in records}
     n = 0
     for row in rows:
         rec = by_id.get(row.get("feature_id"))
         if rec is None or "street_view_m" in row:
             continue
-        if rec.height_source in TAGGED_SOURCES:
+        seeds = {k: v for k, v in (row.get("per_seed_median_m") or {}).items() if v is not None}
+        drone = [reading("drone", v, k) for k, v in seeds.items() if k in measured_seeds]
+        street = [reading("street", v, k) for k, v in seeds.items() if k not in measured_seeds]
+        tagged = rec.height_source in TAGGED_SOURCES
+        h = src = prior = None
+        if enabled and tagged:
             if _prefer_tags_enabled() and rec.height_tag_m:
-                row["street_view_m"] = row.get("effective_height_m")
-                row["street_view_source"] = row.get("effective_height_source")
-                row["effective_height_m"] = float(rec.height_tag_m)
-                row["effective_height_source"] = rec.height_source
-                n += 1
-            continue
-        drone = [v for k, v in (row.get("per_seed_median_m") or {}).items()
-                 if k in measured_seeds and v is not None]
-        if drone:
-            h, src = float(np.median(drone)), "elevated"
-        else:
-            h, src = fallback(rec) if fallback is not None else (UNTAGGED_FALLBACK_M, "default")
-        if h is None:
-            continue
-        row["street_view_m"] = row.get("effective_height_m")
-        row["street_view_source"] = row.get("effective_height_source")
-        row["effective_height_m"] = float(h)
-        row["effective_height_source"] = f"withheld:{src}"
-        n += 1
+                h, src = float(rec.height_tag_m), rec.height_source
+        elif enabled:
+            prior = fallback(rec) if fallback is not None else (UNTAGGED_FALLBACK_M, "default")
+            if drone:
+                h, src = float(np.median([r["value_m"] for r in drone])), "withheld:elevated"
+            elif prior[0] is not None:
+                h, src = float(prior[0]), f"withheld:{prior[1]}"
+        if h is not None:
+            row["street_view_m"] = row.get("effective_height_m")
+            row["street_view_source"] = row.get("effective_height_source")
+            row["effective_height_m"] = h
+            row["effective_height_source"] = src
+            n += 1
+        # the readings behind what the row publishes: none for the prior, the drone seeds
+        # for a tag or a drone median, and Street View too where it is still published
+        published = drone + street if h is None else drone
+        row.update(tier_fields(
+            published, published_m=row.get("effective_height_m"),
+            tag_m=h if (h is not None and tagged) else None,
+            prior_m=prior[0] if prior else None, prior_source=prior[1] if prior else None))
     return n
 
 
