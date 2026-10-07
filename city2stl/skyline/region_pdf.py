@@ -162,7 +162,9 @@ def _write_heights_json(
                      "area_m2": rec.area_m2, "height_tag_m": rec.height_tag_m,
                      "height_source": rec.height_source, "footprint_lonlat": ring,
                      **tier_fields([], published_m=float(rec.height_tag_m),
-                                   tag_m=float(rec.height_tag_m))})
+                                   tag_m=float(rec.height_tag_m)),
+                     "no_survey_height_m": float(rec.height_tag_m),
+                     "no_survey_source": rec.height_source, "no_survey_tier": "tag"})
 
     doc = {
         # 2: rows carry verification tiers and the survey-blind answer (F-SKY26 2a/2c)

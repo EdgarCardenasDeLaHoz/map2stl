@@ -740,7 +740,9 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
 
     Every row with a record (flag on or off) also gets its verification tier (F-SKY26 2a,
     ``tiers.tier_fields``: ``tier``, ``tier_methods``, ``verified``, ``disputed_by``,
-    ``prior_disagrees``) from the readings behind what it publishes.
+    ``prior_disagrees``) from the readings behind what it publishes, and the survey-blind
+    answer the benchmark scores (2c): ``no_survey_height_m`` / ``_source`` / ``_tier``, equal to
+    the published value until survey heights are published (2d).
     """
     from .tiers import reading, tier_fields  # noqa: PLC0415
 
@@ -778,6 +780,11 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
             published, published_m=row.get("effective_height_m"),
             tag_m=h if (h is not None and tagged) else None,
             prior_m=prior[0] if prior else None, prior_source=prior[1] if prior else None))
+        # the survey-blind answer the benchmark headline scores (2c); the published one
+        # until survey heights are published (2d)
+        row["no_survey_height_m"] = row.get("effective_height_m")
+        row["no_survey_source"] = row.get("effective_height_source")
+        row["no_survey_tier"] = row["tier"]
     return n
 
 

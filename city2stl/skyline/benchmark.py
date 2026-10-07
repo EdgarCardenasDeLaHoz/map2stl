@@ -525,6 +525,12 @@ def score_buildings(buildings: list[dict], truth: dict[str, dict],
     Returns overall errors, errors per truth-height band, per view count and per seed
     count, the status counts, and the OSM-tag yardstick (how far the tags themselves
     sit from confirmed truth, and the run scored against tags).
+
+    ``pred_field``: the height scored. The ``10_benchmark`` headline scores
+    ``no_survey_height_m``, the survey-blind answer (F-SKY26 2c): a survey height is
+    measured the same way as the truth, so scoring it would be circular. A row without
+    ``pred_field`` (a report from before 2c) is scored on ``effective_height_m``, which was
+    survey-blind then.
     """
     rows = []
     status_counts: dict[str, int] = {}
@@ -532,8 +538,9 @@ def score_buildings(buildings: list[dict], truth: dict[str, dict],
         t = truth.get(b["key"])
         status = t["status"] if t else "unmeasured"
         status_counts[status] = status_counts.get(status, 0) + 1
-        if status == "confirmed" and b.get(pred_field) is not None:
-            rows.append((float(b[pred_field]), float(t["truth_m"]), int(b.get("n_views") or 0),
+        pred = b.get(pred_field, b.get("effective_height_m"))
+        if status == "confirmed" and pred is not None:
+            rows.append((float(pred), float(t["truth_m"]), int(b.get("n_views") or 0),
                          int(b.get("n_seeds") or 0), b.get("height_tag_m"),
                          b.get("height_source")))
     if not rows:
@@ -569,6 +576,85 @@ def score_buildings(buildings: list[dict], truth: dict[str, dict],
         tp, tt, tg = (np.array(c) for c in zip(*tagged, strict=True))
         out["osm_tags"] = {"tag_vs_truth": _errors(tg, tt), "run_vs_tag": _errors(tp, tg),
                            "run_vs_truth_same_buildings": _errors(tp, tt)}
+    return out
+
+
+def label_tiers(buildings: list[dict], measured_seeds=()) -> list[dict]:
+    """``buildings`` with a verification tier on rows that lack one (a report from before
+    F-SKY26 2a), worked out from the row as ``withhold_untagged_street_view`` would have:
+    the tag when the tag is published, the prior when a fallback is, else the drone seeds
+    (``measured_seeds``) and, where Street View is still published, its seeds. No
+    ``prior_disagrees``: the prior's height is not in an old report."""
+    from ._core.height import TAGGED_SOURCES
+    from ._core.tiers import reading, tier_fields
+
+    out = []
+    for b in buildings:
+        if b.get("tier"):
+            out.append(b)
+            continue
+        src = b.get("effective_height_source") or ""
+        seeds = {k: v for k, v in (b.get("per_seed_median_m") or {}).items() if v is not None}
+        drone = [reading("drone", v, k) for k, v in seeds.items() if k in measured_seeds]
+        street = [reading("street", v, k) for k, v in seeds.items() if k not in measured_seeds]
+        tagged = b.get("height_source") in TAGGED_SOURCES and src == b.get("height_source")
+        if tagged or src == "withheld:elevated":
+            readings = drone
+        elif src.startswith("withheld:"):
+            readings = []
+        else:
+            readings = drone + street
+        f = tier_fields(readings, published_m=b.get("effective_height_m"),
+                        tag_m=b.get("height_tag_m") if tagged else None,
+                        prior_source=src.split(":", 1)[1] if src.startswith("withheld:") else None)
+        out.append({**b, **f})
+    return out
+
+
+def score_survey_rows(buildings: list[dict], truth: dict[str, dict]) -> dict:
+    """Rows that publish a survey height (tier ``survey``, F-SKY26 2d), scored against the
+    3D Tiles reading only (``tiles_m``, flat meshes excluded): the survey half of the truth
+    is the same measurement. Success criterion: within 25 % of ``tiles_m`` 90 % of the time."""
+    rows = [(float(b["effective_height_m"]), float(t["tiles_m"])) for b in buildings
+            if b.get("tier") == "survey" and b.get("effective_height_m") is not None
+            and (t := truth.get(b["key"])) and t.get("tiles_m") is not None
+            and not t.get("tiles_flat")]
+    n_survey = sum(1 for b in buildings if b.get("tier") == "survey")
+    if not rows:
+        return {"n_survey_rows": n_survey, "vs_tiles": {"n": 0}}
+    pred, tiles = (np.array(c) for c in zip(*rows, strict=True))
+    return {"n_survey_rows": n_survey, "vs_tiles": _errors(pred, tiles)}
+
+
+def score_by_tier(buildings: list[dict], truth: dict[str, dict],
+                  pred_field: str = "effective_height_m", tier_field: str = "tier") -> dict:
+    """Errors per verification tier: do the tiers mean what they say? Within 25 % should
+    fall in tier order (``verified_2`` at least 0.85). Non-survey tiers are scored on
+    confirmed truth; ``survey`` rows against ``tiles_m`` only (``score_survey_rows``).
+    Rows without a tier (run ``label_tiers`` first) count as ``unlabelled``."""
+    from ._core.tiers import TIERS
+
+    by: dict[str, list[tuple[float, float]]] = {}
+    for b in buildings:
+        tier = b.get(tier_field) or "unlabelled"
+        pred = b.get(pred_field, b.get("effective_height_m"))
+        t = truth.get(b["key"])
+        if pred is None or not t:
+            continue
+        if tier == "survey":
+            if t.get("tiles_m") is None or t.get("tiles_flat"):
+                continue
+            ref = t["tiles_m"]
+        elif t["status"] == "confirmed":
+            ref = t["truth_m"]
+        else:
+            continue
+        by.setdefault(tier, []).append((float(pred), float(ref)))
+    out = {}
+    for tier in (*TIERS, "unlabelled"):
+        if tier in by:
+            pred, ref = (np.array(c) for c in zip(*by[tier], strict=True))
+            out[tier] = _errors(pred, ref)
     return out
 
 

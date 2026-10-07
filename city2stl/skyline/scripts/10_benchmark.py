@@ -9,7 +9,9 @@
 Each region runs ``08_region_skyline_pdf`` in its own process (a native crash in one city
 must not end the batch), into ``runs/benchmark/<stamp>/``. Truth comes from
 ``city2stl.skyline.benchmark`` (survey nDSM + 3D Tiles, cross-checked, cached per region).
-Writes ``summary.json`` beside the reports, a ``benchmark.html`` page into each scored report
+The headline scores the survey-blind height (``no_survey_height_m``, F-SKY26 2c); rows that
+publish a survey height are scored against 3D Tiles alone (``survey_rows``), and every tier
+separately (``tiers``). Writes ``summary.json`` beside the reports, a ``benchmark.html`` page into each scored report
 (``benchmark_report.write_benchmark_page``, linked from its index), and prints one table.
 
 Every flag that changes the heights is pinned to ``PINNED_FLAGS`` in each region's process (the
@@ -124,8 +126,16 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
     truth = bm.footprint_truth(region, {b["key"]: b["footprint_lonlat"] for b in buildings},
                                provider, use_tiles=use_tiles, refresh=refresh_truth,
                                tags_m=tags)
+    from city2stl.skyline.region_data import _load_site_elevated_seeds
+
+    # tiers for a report from before F-SKY26 2a, from the site's drone seeds
+    buildings = bm.label_tiers(buildings, set(_load_site_elevated_seeds(region) or ()))
+    # the headline is the survey-blind answer (F-SKY26 2c): survey rows would be scored
+    # against a truth they are half of; they are scored against 3D Tiles alone instead
     result = {"region": region, "report": str(heights), "survey": provider,
-              **bm.score_buildings(buildings, truth)}
+              **bm.score_buildings(buildings, truth, pred_field="no_survey_height_m"),
+              "tiers": bm.score_by_tier(buildings, truth),
+              "survey_rows": bm.score_survey_rows(buildings, truth)}
     sv = bm.street_view_buildings(buildings)
     if sv is not None:  # T28 withheld untagged Street View heights: score them too
         result["street_view_unwithheld"] = bm.score_buildings(sv, truth)
@@ -166,6 +176,20 @@ def print_table(results: list[dict]) -> None:
               f"{_fmt(tall.get('bias_m'), '+10.1f')} "
               f"{_fmt(rel.get('per_view', {}).get('pair_order'), '10.0%')} "
               f"{_fmt(rel.get('city', {}).get('pair_order'), '10.0%')}")
+
+
+def print_tiers(results: list[dict]) -> None:
+    """Within 25 % per verification tier (F-SKY26): it should fall in tier order."""
+    tiers = ("survey", "verified_2", "tag", "single", "prior", "unlabelled")
+    print()
+    print(f"{'within 25 % by tier':22s} " + " ".join(f"{t:>14s}" for t in tiers))
+    for r in results:
+        cells = []
+        for t in tiers:
+            e = r.get("tiers", {}).get(t)
+            cells.append(f"{_fmt(e and e.get('within_25pct'), '5.0%')} (n {e['n']:3d})" if e
+                         else f"{'-':>14s}")
+        print(f"{r['region']:22s} " + " ".join(f"{c:>14s}" for c in cells))
 
 
 def print_known(region: str, known: dict) -> None:
@@ -230,6 +254,7 @@ def main() -> int:
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     print_table([r for r in results if "error" not in r])
+    print_tiers([r for r in results if "error" not in r])
     for r in results:
         if r.get("known"):
             print_known(r["region"], r["known"])

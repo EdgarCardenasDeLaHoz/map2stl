@@ -279,6 +279,17 @@ Height accuracy is scored on surveyed truth, never on Cartagena (no open survey;
   records marked `tiles_flat`). `10_benchmark` passes the tags; no new reads are needed.
 - Output: `runs/benchmark/<stamp>/summary.json` (MAE, median AE, bias, within 15/25 %, per height
   band, per view and seed count, and how far OSM tags sit from truth) and one printed table.
+- The headline scores the survey-blind height `no_survey_height_m` (F-SKY26 2c; a report from
+  before it falls back to `effective_height_m`). Rows publishing a survey height are scored against
+  3D Tiles only (`benchmark.py::score_survey_rows`), and each verification tier separately
+  (`benchmark.py::score_by_tier`, printed as "within 25 % by tier", a table on `benchmark.html`);
+  old reports get their tiers from `benchmark.py::label_tiers`.
+- Verification tiers (`_core/tiers.py`, F-SKY26 2a): every `heights.json` row has `tier`
+  (`survey` / `verified_2` / `tag` / `single` / `prior`), `tier_methods`, `verified`,
+  `disputed_by`, `prior_disagrees`; the file has `schema_version: 2` and `tier_counts`.
+- Survey height per footprint for a run (`survey_heights.py`, F-SKY26 2b): the truth's survey
+  statistic without 3D Tiles, cached in `runs/survey/<region>.json`. The p95 depends on the tile
+  grid (`tiles_for` groups by the footprint set), so it equals the truth's only on the same tiles.
 - Same flags every run: each region's process gets `scripts/10_benchmark.py::PINNED_FLAGS` (the
   baseline's b1/512, tag filter on, experimental flags off) over the shell's values; `--keep-env`
   lets the shell through. `summary.json` records the flags and whether Street View signing was on.

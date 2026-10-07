@@ -367,9 +367,9 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
 - Height benchmark on surveyed truth (F-SKYBENCH, eight cities, results in `skyline/docs/STATUS.md`):
   - Truth per footprint: `map2stl/city2stl/skyline/benchmark.py::footprint_truth`. Survey nDSM or Google 3D Tiles, cross-checked.
   - Survey height per footprint for a run (F-SKY26 2b, same p95 as the truth, no 3D Tiles, cached in `runs/survey/<region>.json`): `map2stl/city2stl/skyline/survey_heights.py::survey_footprint_heights` (`pick_provider`).
-  - Scoring: `score_buildings` (with `relative_metrics`).
-  - Runner: `map2stl/city2stl/skyline/scripts/10_benchmark.py` (flags pinned by `PINNED_FLAGS`, `_region_env`).
-  - Page: `map2stl/city2stl/skyline/benchmark_report.py::write_benchmark_page`.
+  - Scoring: `score_buildings` (with `relative_metrics`); headline on the survey-blind `no_survey_height_m` (F-SKY26 2c), per tier `score_by_tier` (`label_tiers` for old reports), survey rows against 3D Tiles only `score_survey_rows`.
+  - Runner: `map2stl/city2stl/skyline/scripts/10_benchmark.py` (flags pinned by `PINNED_FLAGS`, `_region_env`; per-tier table `print_tiers`).
+  - Page: `map2stl/city2stl/skyline/benchmark_report.py::write_benchmark_page` (per-tier table `_tiers_html`).
   - US lidar where Planetary Computer has none: `map2stl/city2stl/height/providers/lidar_3dep_ept_laspy.py::ndsm_for_bbox`.
 - Heights from Wikimedia Commons skyline photos (F-WEB2):
   - Finder: `map2stl/city2stl/skyline/commons_photos.py::find_skyline_photos` (`usable`, `is_dark`, `hfov_from_35mm`).

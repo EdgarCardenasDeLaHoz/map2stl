@@ -1,7 +1,8 @@
 """Benchmark page for a skyline HTML report (F-SKYBENCH / F-WEB2).
 
 Writes ``<report>/benchmark.html`` and links it from the report's ``index.html``:
-- scores against surveyed truth (overall, height bands, tagged vs untagged, relative order);
+- scores against surveyed truth (overall, height bands, tagged vs untagged, relative order,
+  per verification tier: ``score['tiers']``, ``benchmark.score_by_tier``);
 - predicted vs true heights (scatter) and a map of buildings coloured by signed error;
 - photos (optional ``photos.json`` beside the report): each Commons photo with its camera
   (recorded or solved), FOV, attribution and the tower heights measured from it. A kept photo
@@ -222,6 +223,18 @@ towers), so OSM tags are the yardstick photos must beat to add information.</p>
 {_readings_html(ps.get('readings'))}"""
 
 
+def _tiers_html(tiers: dict | None) -> str:
+    """Scores per verification tier (F-SKY26): within 25 % should fall in tier order."""
+    if not tiers:
+        return ""
+    return f"""<h2>By verification tier</h2>
+<table><tr><th>tier</th><th>n</th><th>MAE m</th><th>median AE m</th><th>bias m</th><th>within 25 %</th></tr>
+{_rows(tiers, '')}</table>
+<p class=mut>survey: the survey lidar height, scored against 3D Tiles only; verified_2: two
+independent readings agree; tag: the OSM tag; single: one reading, unverified; prior: no reading,
+the height prior.</p>"""
+
+
 def _readings_html(rd: dict | None) -> str:
     if not rd:
         return ""
@@ -274,6 +287,7 @@ Only confirmed buildings are scored. Run: {html.escape(str(score.get('report', '
 {_rows({'all': o}, '')}{_rows(score.get('osm_tag', {}), 'OSM')}{_rows(score.get('bands', {}), 'truth')}{_rows(score.get('views', {}), 'views')}</table>
 <p class=mut>OSM-tagged buildings are helped by the tag filter (estimates far from the tag are
 dropped); untagged ones show the pipeline unaided.</p>
+{_tiers_html(score.get('tiers'))}
 <h2>Predicted vs true</h2>
 <div class=plots><img src="{scatter}" alt="scatter"><img src="{mapimg}" alt="error map"></div>
 {_photo_summary_html(photo_summary)}

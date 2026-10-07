@@ -203,3 +203,78 @@ def test_heights_json_has_schema_2_and_tier_counts(tmp_path):
     assert doc["tier_counts"] == {"survey": 0, "verified_2": 0, "tag": 1, "single": 0, "prior": 1}
     allure = next(b for b in doc["buildings"] if b["feature_id"] == "b")
     assert allure["tier"] == "tag" and allure["effective_height_m"] == 190.0
+
+
+# --------------------------------------------------------------------------- 2c: survey-blind benchmark
+
+def test_no_survey_fields_always_written(monkeypatch):
+    for flag in ("1", "0"):
+        monkeypatch.setenv("SKYLINE_WITHHOLD_UNTAGGED", flag)
+        monkeypatch.delenv("SKYLINE_PREFER_TAGS", raising=False)
+        rows, recs = _fixture()
+        withhold_untagged_street_view(rows, recs, fallback=lambda r: (14.0, "prior_gbm"),
+                                      measured_seeds={"seed_1", "seed_2"})
+        for r in rows:
+            assert r["no_survey_height_m"] == r["effective_height_m"]
+            assert r["no_survey_source"] == r["effective_height_source"]
+            assert r["no_survey_tier"] == r["tier"]
+
+
+def _scored():
+    truth = {"a": {"status": "confirmed", "truth_m": 50.0, "tiles_m": 50.0},
+             "b": {"status": "confirmed", "truth_m": 20.0, "tiles_m": 21.0},
+             "c": {"status": "survey_only", "truth_m": 30.0, "tiles_m": None},
+             "d": {"status": "disputed", "truth_m": None, "tiles_m": 100.0, "survey_m": 60.0}}
+    buildings = [
+        {"key": "a", "effective_height_m": 52.0, "no_survey_height_m": 52.0, "tier": "verified_2"},
+        {"key": "b", "effective_height_m": 40.0, "no_survey_height_m": 40.0, "tier": "prior"},
+        {"key": "c", "effective_height_m": 30.0, "no_survey_height_m": 12.0, "tier": "survey"},
+        # a survey row on a disputed footprint: scored against 3D Tiles only (60 vs 100)
+        {"key": "d", "effective_height_m": 60.0, "no_survey_height_m": 12.0, "tier": "survey"},
+    ]
+    return buildings, truth
+
+
+def test_score_buildings_scores_the_survey_blind_field_and_falls_back():
+    from city2stl.skyline import benchmark as bm
+    buildings, truth = _scored()
+    buildings[0]["no_survey_height_m"] = 25.0                     # differs from published
+    s = bm.score_buildings(buildings, truth, pred_field="no_survey_height_m")
+    assert s["overall"]["n"] == 2 and s["overall"]["mae_m"] == pytest.approx((25 + 20) / 2)
+    old = [{k: v for k, v in b.items() if k != "no_survey_height_m"} for b in buildings]
+    assert bm.score_buildings(old, truth, pred_field="no_survey_height_m")["overall"] == \
+        bm.score_buildings(old, truth)["overall"]                 # pre-2c report: published
+
+
+def test_score_by_tier_and_survey_rows():
+    from city2stl.skyline import benchmark as bm
+    buildings, truth = _scored()
+    t = bm.score_by_tier(buildings, truth)
+    assert t["verified_2"]["n"] == 1 and t["verified_2"]["within_25pct"] == 1.0
+    assert t["prior"]["within_25pct"] == 0.0
+    assert t["survey"]["n"] == 1 and t["survey"]["mae_m"] == 40.0   # d vs tiles; c has none
+    sr = bm.score_survey_rows(buildings, truth)
+    assert sr["n_survey_rows"] == 2 and sr["vs_tiles"]["n"] == 1
+    truth["d"]["tiles_flat"] = True                                  # flat mesh: not truth
+    assert bm.score_survey_rows(buildings, truth)["vs_tiles"] == {"n": 0}
+
+
+def test_label_tiers_on_an_old_report():
+    from city2stl.skyline import benchmark as bm
+    old = [
+        {"key": "t", "effective_height_m": 100.0, "effective_height_source": "osm_tag",
+         "height_source": "osm_tag", "height_tag_m": 100.0, "per_seed_median_m": {"s9": 60.0}},
+        {"key": "p", "effective_height_m": 14.0, "effective_height_source": "withheld:prior_gbm",
+         "height_source": "default", "per_seed_median_m": {"s9": 90.0}},
+        {"key": "e", "effective_height_m": 51.0, "effective_height_source": "withheld:elevated",
+         "height_source": "default", "per_seed_median_m": {"seed_1": 50.0, "seed_2": 52.0}},
+        {"key": "g", "effective_height_m": 33.0, "effective_height_source": "geometric",
+         "height_source": "default", "per_seed_median_m": {"s9": 33.0}},
+        {"key": "x", "tier": "survey", "effective_height_m": 9.0},
+    ]
+    got = {b["key"]: b for b in bm.label_tiers(old, {"seed_1", "seed_2"})}
+    assert got["t"]["tier"] == "tag"
+    assert got["p"]["tier"] == "prior" and got["p"]["tier_methods"] == ["prior_gbm"]
+    assert got["e"]["tier"] == "verified_2"
+    assert got["g"]["tier"] == "single" and got["g"]["tier_methods"] == ["street:s9"]
+    assert got["x"]["tier"] == "survey"                              # labelled rows kept

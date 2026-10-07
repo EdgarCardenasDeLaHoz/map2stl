@@ -134,6 +134,16 @@ Two constraints follow:
   the tile grid. Prague's newest report groups 79 footprints differently from the run that
   measured the truth: only 30 of 79 equal, one off by 46 m (ČÚZK). 2d must snap tiles to a fixed
   grid, or re-measure truth and survey on one grid, before survey and truth can be compared.
+  Miami (USGS EPT 2019), footprints of the run that first measured its truth: 337 of 463
+  equal; the rest were re-measured later on other groupings.
+- 2026-10-07, step 2c done: every row also has `no_survey_height_m` / `_source` / `_tier` (equal to
+  the published value until 2d). `benchmark.py::score_buildings(pred_field=...)` (falls back to
+  `effective_height_m` on old reports), `score_survey_rows` (against `tiles_m` only),
+  `score_by_tier`, `label_tiers`; `10_benchmark` headline scores `no_survey_height_m` and prints
+  "within 25 % by tier"; `benchmark.html` has a tier table. Miami `--score-only` (cache only):
+  every headline field identical to the run before the change (n 162, MAE 5.83, median 3.12,
+  bias +0.38, within 25 % 0.556). By tier: tag 0.68 (n 81), prior 0.43 (n 81); no drone seeds in
+  Miami, so no `verified_2` / `single` rows yet.
 
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered
