@@ -10,11 +10,14 @@ pano path:
 2. heading offset, camera height and pitch from the waterline, then the camera position:
    waterline over +-600 m, parks and streets nearby (``footprint_detect.fit_camera_position``;
    seed_4's recorded position was ~360 m off), then the bearing from the OSM-tagged towers'
-   outline (``footprint_detect.refine_on_outline``: the seeds were 4-6 deg off);
+   outline (``footprint_detect.refine_on_outline``: the seeds were 4-6 deg off); a camera whose
+   tower outline still misfits, or that the outline drags to the edge of its search, is not a
+   drone over water (:func:`outline_gate`: boat decks and street panos at sea level);
 3. Depth Anything V2 and MobileSAM building instances (``building_instances``) on the pano,
    and every OSM footprint in view measured (``footprint_detect.measure_footprints``: a run
    never stops inside one instance; 2026-10-06 on Cartagena seeds 1/4/5, tagged readings within
-   25 % of their tag 50/67/50 % -> 80/67/100 %).
+   25 % of their tag 50/67/50 % -> 80/67/100 %), then a roof fit for the footprints without a
+   trusted reading (:func:`measure_waterline`).
 
 The report keeps working unchanged: each seed gives a ``StitchedPanoResult`` (pano page and
 boxes) and frames-only view rows, and after all seeds :func:`elevated_estimates` fuses the
@@ -35,6 +38,7 @@ from .. import footprint_detect as fd
 from .._core.segmentation import _ADE20K_VEGETATION_CLASSES, _ADE20K_WATER_CLASSES
 from .._core.types import BuildingRecord, RegisteredBuildingEstimate
 from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResult
+from . import stage_cache as _sc  # not ``sc``: overhead_pose has a local one
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +197,6 @@ def capture_sphere_pano(seed: SkylinePoint, api_key: str, headings, is_photosphe
     """A drone seed's pano from 30-deg Street View views in ``pitches`` rows
     (``len(headings) * len(pitches)`` images, cached on disk like every fetch) with their
     SegFormer labels, by :func:`sphere_pano`. None when a fetch fails."""
-    from .._core.segmentation import _ensure_label_map
     from ..streetview_io import _streetview_image
 
     views, labels = {}, {}
@@ -207,9 +210,9 @@ def capture_sphere_pano(seed: SkylinePoint, api_key: str, headings, is_photosphe
                                seed.name, hd, p)
                 return None
             views[(float(hd), float(p))] = img
-            labels[(float(hd), float(p))] = _ensure_label_map(img)
-    return level_pano(seed.name, seed.lat, seed.lon, views, fov_deg, labels,
-                      360.0 / len(headings))
+            labels[(float(hd), float(p))] = _cached_labels(img)
+    return _cached_level_pano(seed.name, seed.lat, seed.lon, views, fov_deg, labels,
+                              360.0 / len(headings))
 
 
 def level_pano(name: str, lat: float, lon: float, views: dict, fov_deg: float, labels: dict,
@@ -234,12 +237,33 @@ def level_pano_from_spin(name: str, lat: float, lon: float, views: list[dict], f
     """The spin views (``_capture_pano_views`` prefetch: ``geo_heading`` + ``image``, one pitch)
     reprojected onto one level sphere -- the drone path's pano, so a tilted Photo Sphere is
     levelled for the 75-deg capture too (no new images)."""
-    from .._core.segmentation import _ensure_label_map
-
     vv = {(float(v["geo_heading"]), float(pitch_deg)): v["image"] for v in views
           if v.get("image") is not None}
-    labels = {k: _ensure_label_map(img) for k, img in vv.items()}
-    return level_pano(name, lat, lon, vv, fov_deg, labels, step_deg)
+    labels = {k: _cached_labels(img) for k, img in vv.items()}
+    return _cached_level_pano(name, lat, lon, vv, fov_deg, labels, step_deg)
+
+
+def _cached_labels(img: np.ndarray):
+    """SegFormer labels of one view through the ``labels`` stage cache. SegFormer on the GPU is
+    not bit-exact, so the first output of a view is stored and becomes the reference: the pano,
+    its tilt and everything keyed on them then stay stable from run to run."""
+    from .._core import segmentation as seg
+
+    parts = (img, seg._SEGFORMER_MODEL_ID, seg._segformer_input_size())
+    return _sc.cached("labels", LABELS_CACHE_VERSION, parts, lambda: seg._ensure_label_map(img))
+
+
+def _cached_level_pano(name: str, lat: float, lon: float, views: dict, fov_deg: float,
+                       labels: dict, step_deg: float) -> fd.Pano:
+    """:func:`level_pano` through the ``pano`` stage cache, keyed by the views and their labels
+    (pixels), the capture geometry and the stitching code."""
+    keys = sorted(views)
+    parts = ("sphere", name, float(lat), float(lon), float(fov_deg), float(step_deg),
+             [(k, views[k], labels.get(k)) for k in keys],
+             _sc.source_hash(sphere_pano, level_pano, horizon_tilt, _tilt_rotation, _camera_axes))
+    return _sc.cached("pano", STITCH_CACHE_VERSION, parts,
+                      lambda: level_pano(name, lat, lon, views, fov_deg, labels, step_deg),
+                      kind="pickle")
 
 
 @dataclass
@@ -373,19 +397,16 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
     if pano is None:
         if len(views) < 6:
             return None
-        pano = fd.pano_from_views(seed.name, seed.lat, seed.lon, views, seed.fov, step_deg,
-                                  pitch_deg)
-    gmap = fd.ground_map(pano.lat, pano.lon, coast_lines=state.get("coast_lines", ()),
-                         water_polys=state.get("water_polys", ()), roads=state.get("roads", ()),
-                         green=state.get("green", ()), buildings=[b.geometry for b in buildings],
-                         half_m=GROUND_HALF_M, res_m=GROUND_RES_M)
-    try:
-        pose0 = fd.fit_pose_from_waterline(pano, gmap.shore_distances())
-    except ValueError as exc:
-        # no column ends in water: pointed down over land (seed_6 at -10/-36/-62 deg); the
-        # overhead fit below decides whether it is a drone view
-        logger.warning("[elevated] %s: %s", seed.name, exc)
-        pose0 = fd.PanoPose(0.0, 0.0, 0.0, math.nan, 0)
+        from .._core import pano as core_pano
+
+        strip = [(float(v["geo_heading"]), v["image"]) for v in views]
+        pano = _sc.cached("pano", STITCH_CACHE_VERSION,
+                          ("strip", seed.name, float(seed.lat), float(seed.lon), float(seed.fov),
+                           float(step_deg), float(pitch_deg), strip,
+                           _sc.source_hash(fd.pano_from_views, core_pano)),
+                          lambda: fd.pano_from_views(seed.name, seed.lat, seed.lon, views,
+                                                     seed.fov, step_deg, pitch_deg),
+                          kind="pickle")
     if device is None:
         import torch
 
@@ -417,21 +438,66 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
         free_gpu_cache()
         return out
 
-    # cached per pano image: re-runs (and review rounds) are CPU-only and can run side by side
-    depth = _pano_cached(pano, f"depth_v{DEPTH_CACHE_VERSION}", gpu_depth)
-    instances = _pano_cached(pano, f"inst_v{INSTANCES_CACHE_VERSION}_w{win}_g{grid}",
-                             gpu_instances)
+    # cached per pano image (stage cache, compact; an old runs/pano_cache .npy is read and
+    # converted): re-runs (and review rounds) are CPU-only and can run side by side
+    pdig = _sc.pano_digest(pano.rgb)
+    depth = _sc.cached("depth", DEPTH_CACHE_VERSION, _sc.depth_parts(pdig), gpu_depth,
+                       legacy_path=_sc.legacy_path(pdig, f"depth_v{DEPTH_CACHE_VERSION}"),
+                       lossy_float16=_sc.depth_float16())
+    instances = _sc.cached("instances", INSTANCES_CACHE_VERSION,
+                           _sc.instances_parts(pdig, win, grid), gpu_instances,
+                           legacy_path=_sc.legacy_path(
+                               pdig, f"inst_v{INSTANCES_CACHE_VERSION}_w{win}_g{grid}"))
     fps, fids = footprints_from_records(buildings)
-    towers = _towers(buildings)
-    if not MIN_ELEVATED_H_M <= pose0.camera_h_m <= OVERHEAD_FROM_H_M:
-        # over land (no waterline, seed_6), or so high that the waterline and the tower outline
-        # move the camera hundreds of metres to fit a few towers (seed_7: 304 m up, 380 m north,
-        # then 9.4 deg of bearing at a 0.03 deg misfit, Nautica read 263 m)
-        got = overhead_pose(pano, gmap, fps, depth, instances)
+    from .. import skyline_match
+    from . import roof_fit
+
+    # the pose and the measurements depend on the whole pano, the ground layers, the buildings,
+    # the depth/instance maps (their versions) and the code: an edit to footprint_detect,
+    # roof_fit, skyline_match or the camera functions here invalidates them, no bump needed
+    pose_key = _sc.stage_key("pose", POSE_CACHE_VERSION, (
+        pano, state, buildings, DEPTH_CACHE_VERSION, INSTANCES_CACHE_VERSION, win, grid,
+        _sc.depth_float16(), MIN_ELEVATED_H_M, OVERHEAD_FROM_H_M, HEIGHT_FACTORS, GROUND_HALF_M,
+        GROUND_RES_M, OVERHEAD_H_GRID_M, OVERHEAD_MIN_GROUND,
+        MAX_OUTLINE_MISFIT_DEG, MAX_OUTLINE_MOVE_M,
+        _sc.source_hash(fd, roof_fit, skyline_match, _waterline_camera, outline_gate,
+                        overhead_pose, _towers)))
+
+    def fit_pose():
+        gmap = fd.ground_map(pano.lat, pano.lon, coast_lines=state.get("coast_lines", ()),
+                             water_polys=state.get("water_polys", ()),
+                             roads=state.get("roads", ()), green=state.get("green", ()),
+                             buildings=[b.geometry for b in buildings],
+                             half_m=GROUND_HALF_M, res_m=GROUND_RES_M)
+        try:
+            pose0 = fd.fit_pose_from_waterline(pano, gmap.shore_distances())
+        except ValueError as exc:
+            # no column ends in water: pointed down over land (seed_6 at -10/-36/-62 deg); the
+            # overhead fit below decides whether it is a drone view
+            logger.warning("[elevated] %s: %s", seed.name, exc)
+            pose0 = fd.PanoPose(0.0, 0.0, 0.0, math.nan, 0)
+        if not MIN_ELEVATED_H_M <= pose0.camera_h_m <= OVERHEAD_FROM_H_M:
+            # over land (no waterline, seed_6), or so high that the waterline and the tower
+            # outline move the camera hundreds of metres to fit a few towers (seed_7: 304 m
+            # up, 380 m north, then 9.4 deg of bearing at a 0.03 deg misfit, Nautica read 263 m)
+            return "overhead", pose0.camera_h_m, overhead_pose(pano, gmap, fps, depth, instances)
+        moved_pano, pose, pf, of = _waterline_camera(seed, pano, pose0, gmap, _towers(buildings))
+        why = outline_gate(of)
+        if why:
+            return "rejected", pose0.camera_h_m, why
+        return "waterline", pose0.camera_h_m, (moved_pano.lat, moved_pano.lon, pose, pf)
+
+    branch, h_waterline, got = _sc.cached("pose", POSE_CACHE_VERSION, (_sc.Digest(pose_key),),
+                                          fit_pose, kind="pickle")
+    if branch == "rejected":
+        logger.warning("[elevated] %s: waterline puts the camera %.0f m up, but %s; not a drone "
+                       "view", seed.name, h_waterline, got)
+        return None
+    if branch == "overhead":
         if got is None:
             logger.warning("[elevated] %s: waterline puts the camera %.0f m up and the ground "
                            "does not fit an overhead camera; not a drone view",
-                           seed.name, pose0.camera_h_m)
+                           seed.name, h_waterline)
             return None
         pose, score, check = got
         pf = fd.PositionFit(0.0, 0.0, pose, math.nan, math.nan, score, score,
@@ -440,12 +506,19 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
         logger.info("[elevated] %s: overhead camera %.0f m up, heading offset %.1f deg (ground "
                     "%.3f); building bases say %.0f m", seed.name, pose.camera_h_m,
                     pose.offset_deg, score, check.h_bases_m)
-        from .roof_fit import fit_roof_heights
-
-        ms = fit_roof_heights(pano, pose, fps, depth=depth, instances=instances)
+        ms = _sc.cached("measured", MEASURED_CACHE_VERSION, (_sc.Digest(pose_key), branch),
+                        lambda: roof_fit.fit_roof_heights(pano, pose, fps, depth=depth,
+                                                          instances=instances),
+                        kind="pickle")
     else:
-        pano, pose, pf = _waterline_camera(seed, pano, pose0, gmap, towers)
-        ms = fd.measure_footprints(pano, pose, fps, depth=depth, instances=instances)
+        lat, lon, pose, pf = got
+        pano = replace(pano, lat=lat, lon=lon)          # fd.moved: the camera moved, not pixels
+        ms = _sc.cached("measured", MEASURED_CACHE_VERSION,
+                        (_sc.Digest(pose_key), branch, ROOF_FILL_WEIGHT,
+                         _sc.source_hash(measure_waterline, trusted)),
+                        lambda: measure_waterline(pano, pose, fps, depth=depth,
+                                                  instances=instances),
+                        kind="pickle")
     logger.info("[elevated] %s: %d footprints measured (%d with the base visible)%s",
                 seed.name, len(ms), sum(m.base_visible for m in ms),
                 "" if instances is None else f", {int(instances.max())} MobileSAM instances")
@@ -457,37 +530,26 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
     return out
 
 
-#: Bump when the depth or instance code changes, so cached maps are recomputed.
+#: Stage-cache versions (``stage_cache``: ``runs/stage_cache/<stage>/v<N>``). Bump one when its
+#: stage's code changes in a way its key does not see. Depth and instances are keyed by the
+#: pano's pixels only (the labels follow from them, and are cached per view so they stay
+#: stable); Depth Anything and MobileSAM took 2-9 min a seed and ran again on every review round,
+#: and labels, stitching and the pose fit another ~90-125 s (2026-10-06). The pano, pose and
+#: measurement keys also hash their code (``stage_cache.source_hash``).
 DEPTH_CACHE_VERSION = 1
 INSTANCES_CACHE_VERSION = 3
-#: Per-pano GPU outputs (depth, MobileSAM instances), keyed by the pano's pixels.
-PANO_CACHE_DIR = Path(__file__).resolve().parents[1] / "runs" / "pano_cache"
-
-
-def _pano_cached(pano: fd.Pano, what: str, compute):
-    """``compute()`` cached on disk by a hash of the pano's pixels (the labels follow from them;
-    SegFormer on the GPU is not bit-exact, so they are left out of the key): Depth Anything and
-    MobileSAM took 2-9 min a seed and ran again on every review round (2026-10-06)."""
-    import hashlib
-
-    h = hashlib.sha1(pano.rgb.tobytes())
-    path = PANO_CACHE_DIR / f"{h.hexdigest()[:20]}_{what}.npy"
-    if path.exists():
-        try:
-            return np.load(path)
-        except (OSError, ValueError):
-            pass
-    out = compute()
-    if out is not None:
-        PANO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        np.save(path, out)
-    return out
+LABELS_CACHE_VERSION = 1
+STITCH_CACHE_VERSION = 1
+POSE_CACHE_VERSION = 1
+MEASURED_CACHE_VERSION = 1
+#: The old raw-.npy cache of depth and instances: read (and converted) on a miss only.
+PANO_CACHE_DIR = _sc.LEGACY_PANO_CACHE_DIR
 
 
 def _waterline_camera(seed: SkylinePoint, pano: fd.Pano, pose0: fd.PanoPose, gmap, towers):
     """Camera of a drone over water: waterline position and height, then the bearing (and
     height) from the OSM towers' outline; the recorded position is kept when the towers fit it
-    clearly better. Returns (moved pano, pose, PositionFit)."""
+    clearly better. Returns (moved pano, pose, PositionFit, OutlineFit or None without towers)."""
     pf = fd.fit_camera_position(pano, pose0, gmap)
     logger.info("[elevated] %s: camera %s, %+.0f m E %+.0f m N of the recorded position, %.0f m "
                 "up, heading offset %.1f deg; waterline misfit %.2f -> %.2f deg, ground %.3f -> %.3f",
@@ -497,7 +559,7 @@ def _waterline_camera(seed: SkylinePoint, pano: fd.Pano, pose0: fd.PanoPose, gma
     pano = fd.moved(pano, pf.dx_m, pf.dy_m)
     pose = pf.pose
     if towers is None:
-        return pano, pose, pf
+        return pano, pose, pf, None
     of = fd.refine_on_outline(pano, pose, towers, height_factors=HEIGHT_FACTORS)
     if (pf.dx_m, pf.dy_m) != (0.0, 0.0):
         # a high drone's waterline can pull the camera hundreds of metres (seed_7: 340 m);
@@ -514,7 +576,38 @@ def _waterline_camera(seed: SkylinePoint, pano: fd.Pano, pose0: fd.PanoPose, gma
                 "%+.0f m E %+.0f m N, %.0f m up; misfit %.2f -> %.2f deg over %d cols",
                 seed.name, of.shift_deg, of.dx_m, of.dy_m, of.pose.camera_h_m,
                 of.misfit_before_deg, of.misfit_deg, of.n_cols)
-    return fd.moved(pano, of.dx_m, of.dy_m), of.pose, pf
+    return fd.moved(pano, of.dx_m, of.dy_m), of.pose, pf, of
+
+
+#: A drone over water fits the OSM towers' outline (``refine_on_outline``) within ~1.3 deg
+#: (Cartagena seeds 1/4/5 spin 0.4-0.9, seed_4 hi-res 1.24; Miami seed_4 0.61). Panos from sea
+#: level also pass ``MIN_ELEVATED_H_M`` (a boat deck in Miami fitted 24-30 m up, a Chicago street
+#: pano 36-45 m from lake polygons) but their outline never fits: 3.96-4.63 deg after the
+#: outline step dragged the camera to the edge of its search, 184-228 m (2026-10-07).
+MAX_OUTLINE_MISFIT_DEG = 2.5
+#: ... and the drone seeds' outline step moved the camera at most 110 m (seed_4 hi-res); the
+#: search reaches 150 m (+50 m fine), so a move past this is the fit running off the edge.
+MAX_OUTLINE_MOVE_M = 150.0
+
+
+def outline_gate(of) -> str | None:
+    """Why a waterline-fitted camera is not a drone over water (None: it is).
+
+    Not the distance from the recorded position: a Photo Sphere's recorded position can be
+    where the pilot stood (Cartagena seed_4, 340 m off, fitted by the waterline and the
+    ground). Not a coastline requirement either: a lake shore comes as water polygons only
+    (Chicago), and the boat-deck spheres had the coastline. The tower outline decides: only
+    when at least ``refine_on_outline``'s ``min_cols`` tower columns were fitted (no towers in
+    view: no verdict)."""
+    if of is None or of.n_cols < 50 or not math.isfinite(of.misfit_deg):
+        return None
+    move = math.hypot(of.dx_m, of.dy_m)
+    if of.misfit_deg > MAX_OUTLINE_MISFIT_DEG:
+        return (f"the OSM tower outline fits {of.misfit_deg:.2f} deg off over {of.n_cols} "
+                f"columns (> {MAX_OUTLINE_MISFIT_DEG})")
+    if move > MAX_OUTLINE_MOVE_M:
+        return f"the tower outline moves the camera {move:.0f} m (> {MAX_OUTLINE_MOVE_M:.0f})"
+    return None
 
 
 #: Roof-fit confidence from which an overhead reading is trusted (:func:`trusted`).
@@ -703,6 +796,45 @@ def trusted(m) -> bool:
     return m.top_edge == "sky" and (bool(m.base_visible) or m.visible_frac >= SKY_SEEN_TRUST)
 
 
+#: Fusion weight factor of a roof fit that fills in for a footprint the street run gave no
+#: trusted reading (:func:`measure_waterline`); None turns the fill off. 2026-10-07, Cartagena
+#: seeds 1/4/5/6/7: the fill took trusted footprints 226 -> 273, verified by 2 seeds 11 -> 17
+#: (tall 3 -> 6), the fused OSM-tag error 5.7 -> 2.8 % median and the published towers 6.7 ->
+#: 4.2 % median (seed_5 Nautica 159/160, Ravello 161/160 tag) at 0.25, 0.5 or 1.0 alike; 0.25
+#: is the one that moved no fused height already read by a trusted run (0.5 and 1.0 let a fill
+#: outvote one: b0940 192 -> 121 m, b0217 87 -> 133 m, both untagged).
+ROOF_FILL_WEIGHT: float | None = 0.25
+
+
+def measure_waterline(pano: fd.Pano, pose: fd.PanoPose, footprints, depth=None, instances=None,
+                      fill_weight: float | None = None) -> list:
+    """Every footprint in view from a drone below most roofs: ``measure_footprints``, then a
+    roof fit (``roof_fit.fit_roof_heights``) for the footprints it gave no :func:`trusted`
+    reading.
+
+    The two paths have their own trust: a run is trusted by its top edge and base
+    (:func:`trusted`), a roof fit by its confidence and distance (``ROOF_TRUST``,
+    ``ROOF_TRUST_MAX_DIST_M``). A footprint keeps its trusted run; one without gets the roof
+    fit when that is trusted (the untrusted run is then dropped, so a seed gives one reading per
+    footprint), else keeps its untrusted run. A fill reading's fusion weight
+    (``footprint_detect.measurement_weight``: confidence over distance squared) is scaled by
+    ``fill_weight`` (default :data:`ROOF_FILL_WEIGHT`): it stands in where the primary method
+    failed, so a trusted run from another seed outweighs it at a similar distance."""
+    from . import roof_fit
+
+    w = ROOF_FILL_WEIGHT if fill_weight is None else fill_weight
+    ms = fd.measure_footprints(pano, pose, footprints, depth=depth, instances=instances)
+    if w is None:
+        return ms
+    have = {m.footprint for m in ms if trusted(m)}
+    fills = {m.footprint: replace(m, weight_scale=float(w))
+             for m in roof_fit.fit_roof_heights(pano, pose, footprints, depth=depth,
+                                                instances=instances)
+             if m.footprint not in have and trusted(m)}
+    return sorted([m for m in ms if m.footprint not in fills] + list(fills.values()),
+                  key=lambda m: m.dist_m)
+
+
 def elevated_estimates(seeds: list[ElevatedSeed]) -> list[RegisteredBuildingEstimate]:
     """One estimate per footprint and seed, from :func:`trusted` readings only, for footprints
     whose seeds agree (``fuse_heights``, 25 %): a footprint the seeds disagree on gets no drone
@@ -733,5 +865,6 @@ def elevated_estimates(seeds: list[ElevatedSeed]) -> list[RegisteredBuildingEsti
 
 
 __all__ = ["ElevatedSeed", "measure_elevated_seed", "elevated_estimates", "trusted", "pano_result",
-           "footprints_from_records", "ground_layers", "MIN_ELEVATED_H_M"]
+           "footprints_from_records", "ground_layers", "MIN_ELEVATED_H_M", "measure_waterline",
+           "outline_gate"]
 

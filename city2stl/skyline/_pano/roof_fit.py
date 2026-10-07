@@ -207,6 +207,9 @@ class RoofMeasured(fd.Measured):
     n_trusted: int = 0
     n_censored: int = 0
     confidence: float = 0.0
+    # fusion weight factor (``footprint_detect.measurement_weight``): below 1 for a roof fit
+    # that only fills in for a missing street-run reading (``elevated.measure_waterline``)
+    weight_scale: float = 1.0
 
 
 @dataclass(frozen=True)

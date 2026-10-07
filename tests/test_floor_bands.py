@@ -251,3 +251,51 @@ def test_storeys_and_distance_without_a_footprint():
     far = bld[0] * 2.0                                         # and one behind
     hits = fl.match_plot(est, pano, POSE, [near, bld[0], far])
     assert hits and hits[0][0] == 1
+
+
+def _two_floor_module(fine=11.8, n=600):
+    """A floor every ``fine`` lags with every second floor different (a 2-floor module)."""
+    x = np.arange(n)
+    return np.sin(2 * np.pi * x / fine) + 0.5 * np.sin(np.pi * x / fine)
+
+
+def test_subharmonic_peak_within_a_lag():
+    """The finer peak may sit a lag off period / k: rounding period / 2 to the nearest lag
+    missed seed_6's 19-floor tower read at every second floor (2026-10-06)."""
+    prof = _two_floor_module()                    # floors at 11.8 lags, the module at 23.6
+    a = fl._acf(prof, 40)
+    assert np.isfinite(fl._peak_near(a, 12.7, 1.0))
+    # a coarse period refined to 25.4 lags: its half (12.7) rounds to 13, the peak is at 12
+    assert fl._subharmonic(prof, 1.0, 25.4, float(np.nanmax(a[20:30])), 3) == 2
+    plain = np.sin(2 * np.pi * np.arange(600) / 23.6)
+    assert fl._subharmonic(plain, 1.0, 23.6, 0.9, 3) == 1
+
+
+def test_strip_candidates_offer_the_finer_period():
+    prof = _two_floor_module()
+    g = (24.0, 0.025, 0.6, 23.6, 0.0, 0.0, 0, prof, 0.001)      # (floors, period, acf, px, ...)
+    ks = {c[4]: c for c in fl._strip_candidates(g)}
+    assert set(ks) >= {1, 2}
+    assert ks[2][0] == pytest.approx(48.0) and ks[2][3] == pytest.approx(11.8)
+    plain = (24.0, 0.025, 0.6, 23.6, 0.0, 0.0, 0, np.sin(2 * np.pi * np.arange(600) / 23.6), 0.001)
+    assert [c[4] for c in fl._strip_candidates(plain)] == [1]
+
+
+def test_base_ratio_allows_tall_tower_floors():
+    """Cartagena's towers are 4.3-4.4 m a floor (Allure 190 m / 43): within the ratio."""
+    assert fl.MAX_BASE_RATIO >= 4.4 / fl.NOMINAL_FLOOR_M
+
+
+def test_footprint_on_the_bearing_must_match_the_floor_range():
+    """With footprints given, the floor-implied range must land on one of their walls, base
+    seen or not (seed_5's "3 floors at 58 m", every wall on its bearing past 450 m)."""
+    pano, bld, top = _direct_pano(400.0)
+    inst = _instance_map(pano, POSE, bld, top)
+    gray = pano.rgb[..., 0].astype(np.float32)
+    ok = fl.instance_floors(pano, POSE, gray, inst, 1, rings_xy=[bld[0] * 0.3, bld[0]])
+    assert ok is not None and ok.accepted, ok
+    off = fl.instance_floors(pano, POSE, gray, inst, 1, rings_xy=[bld[0] * 0.3, bld[0] * 3.0])
+    assert off is not None and not off.accepted and "no footprint there" in off.reason, off
+    assert off.floors_visible == pytest.approx(ok.floors_visible)
+    none = fl.instance_floors(pano, POSE, gray, inst, 1, rings_xy=[])
+    assert none is not None and none.accepted                  # nothing on the bearing: no check

@@ -203,3 +203,50 @@ def test_a_tilted_sphere_is_rebuilt_level_and_its_tilt_read_from_the_horizon():
     assert np.median(err) <= 1.5
     t2 = horizon_tilt(level, min_cols=100)
     assert t2 is not None and t2[1] < 0.3
+
+
+def test_waterline_seed_fills_untrusted_footprints_with_trusted_roof_fits(monkeypatch):
+    """A low drone's run that never reached the sky (Cartagena seed_5, Nautica/Ravello) gets the
+    roof fit instead when that is trusted; a trusted run is kept; the fill weighs less."""
+    from city2stl.skyline._pano import roof_fit as rf
+
+    def roof(i, h, conf, dist=500.0):
+        return rf.RoofMeasured(i, f"b{i}", 0, 9, 40.0, 60.0, 61.0, dist, h, 10, True, None, 1.0,
+                               "roof", h, 2.0, 10, 0, conf)
+
+    runs = [_m(0, 0, 9, 50.0, 400.0),                                       # trusted run: kept
+            fd.Measured(1, "b1", 0, 9, 40.0, 60.0, 61.0, 450.0, 30.0, 10, True, None, 1.0, "depth"),
+            fd.Measured(2, "b2", 0, 9, 40.0, 60.0, 61.0, 470.0, 20.0, 10, True, None, 1.0, "depth")]
+    fits = [roof(0, 70.0, 0.9), roof(1, 150.0, 0.8), roof(2, 90.0, 0.2), roof(3, 60.0, 0.7),
+            roof(4, 60.0, 0.9, dist=1500.0)]
+    monkeypatch.setattr(fd, "measure_footprints", lambda *a, **k: list(runs))
+    monkeypatch.setattr(rf, "fit_roof_heights", lambda *a, **k: list(fits))
+    got = {m.footprint: m for m in el.measure_waterline(_pano(), fd.PanoPose(0, 80, 0, 0, W), [])}
+    assert got[0].top_edge == "sky" and got[0].height_m == 50.0           # the run stays
+    assert got[1].top_edge == "roof" and got[1].height_m == 150.0         # filled
+    assert got[1].weight_scale == el.ROOF_FILL_WEIGHT
+    assert got[2].top_edge == "depth"                                     # roof fit not trusted
+    assert got[3].top_edge == "roof"                                      # no run at all
+    assert 4 not in got                                                   # past 1 km: not trusted
+    assert fd.measurement_weight(got[1]) == pytest.approx(
+        el.ROOF_FILL_WEIGHT * 0.8 / 500.0 ** 2)
+    monkeypatch.setattr(el, "ROOF_FILL_WEIGHT", None)                     # off
+    assert [m.top_edge for m in el.measure_waterline(_pano(), fd.PanoPose(0, 80, 0, 0, W), [])] == \
+        ["sky", "depth", "depth"]
+
+
+def test_outline_gate_rejects_sea_level_panos_and_keeps_drones():
+    """2026-10-07: drone seeds fit the tower outline within 1.3 deg and move under 110 m; a
+    Miami boat deck and a Chicago street pano fitted 3.96-4.63 deg after moving 184-228 m."""
+    pose = fd.PanoPose(0.0, 60.0, 0.0, 0.3, W)
+
+    def of(dx, dy, mis, n=300):
+        return fd.OutlineFit(dx, dy, pose, 1.0, mis + 1.0, mis, n)
+
+    assert el.outline_gate(None) is None                                  # no towers: no verdict
+    assert el.outline_gate(of(0.0, -40.0, 0.61)) is None                  # Miami seed_4
+    assert el.outline_gate(of(110.0, 10.0, 1.24)) is None                 # Cartagena seed_4 hi-res
+    assert "deg" in el.outline_gate(of(200.0, -110.0, 4.28))              # Miami seed_2 boat deck
+    assert "deg" in el.outline_gate(of(10.0, 0.0, 3.0))
+    assert " m " in el.outline_gate(of(170.0, -150.0, 1.0))               # ran off the search
+    assert el.outline_gate(of(170.0, -150.0, 9.0, n=20)) is None          # too few tower columns

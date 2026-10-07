@@ -255,3 +255,13 @@ def test_pose_check_from_bases(clean):
     assert not ok.flagged
     bad = rf.check_pose_from_bases(pano, _pose(h=CAM_H * 1.15), fps, depth=depth, instances=inst)
     assert bad.flagged
+
+
+def test_roof_reading_weight_scale_defaults_to_one():
+    m = rf.RoofMeasured(0, "a", 0, 9, 1.0, 2.0, 3.0, 400.0, 50.0, 10, True, None, 1.0, "roof",
+                        confidence=0.6)
+    assert m.weight_scale == 1.0
+    assert fd.measurement_weight(m) == pytest.approx(0.6 / 400.0 ** 2)
+    from dataclasses import replace
+
+    assert fd.measurement_weight(replace(m, weight_scale=0.5)) == pytest.approx(0.3 / 400.0 ** 2)

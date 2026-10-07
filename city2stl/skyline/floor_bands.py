@@ -346,9 +346,15 @@ HIGH_RISE_FLOORS = 10
 #: Faces must agree on the storey count within this share (they share the floors, not the
 #: period: two faces of one tower lie at different ranges, so their periods in tan(e) differ).
 MAX_FLOOR_SPREAD = 0.10
-#: A floor-implied distance may exceed the one the building's visible base gives by this factor
-#: (the base row is an upper bound on the range when the base is hidden behind a nearer roof).
-MAX_BASE_RATIO = 1.35
+#: A floor-implied distance may differ from the one the building's visible base (or its matched
+#: footprint) gives by this factor: 4.5 m / 3.1 m, the tallest floor :data:`FLOOR_PRIOR_M` allows
+#: over the nominal one. Cartagena's luxury towers really are 4.3-4.4 m a floor (Allure 190 m / 43,
+#: Portomarine 188 m / 44); at 1.35 seed_5's waterfront towers (base 290-340 m, floors 210-235 m)
+#: were all refused (2026-10-06).
+MAX_BASE_RATIO = 1.45
+#: A strip's period may be read k x too long (every k-th floor, a 2-3 floor facade module) when its
+#: autocorrelation also peaks at period / k with at least this share of the found peak.
+HARMONIC_FRAC = 0.5
 
 
 @dataclass(frozen=True)
@@ -394,26 +400,52 @@ def _strip_floors(pano, pose, gray, instances, instance, cols):
             t_lo, r1, prof, dt)
 
 
-def _subharmonic(prof, dt, period, acf_peak, k_max, frac=0.5, min_px=MIN_PX_PER_FLOOR):
+def _peak_near(a: np.ndarray, j: float, tol: float) -> float:
+    """The highest local maximum of ``a`` within ``tol`` lags of ``j`` (NaN if none)."""
+    best = math.nan
+    for i in range(max(1, int(math.floor(j - tol))), int(math.ceil(j + tol)) + 1):
+        if i + 1 >= len(a):
+            break
+        if np.isfinite(a[i - 1:i + 2]).all() and a[i] >= a[i - 1] and a[i] > a[i + 1] and a[i] > 0 \
+                and not best >= a[i]:
+            best = float(a[i])
+    return best
+
+
+def _subharmonic(prof, dt, period, acf_peak, k_max, frac=HARMONIC_FRAC, min_px=MIN_PX_PER_FLOOR):
     """The largest ``k`` (2..k_max) whose period / k is also a local autocorrelation peak at least
-    ``frac`` x the found one and at least ``min_px`` long, else 1."""
+    ``frac`` x the found one and at least ``min_px`` long, else 1. The peak may sit a lag (or 4 %)
+    off period / k: the period is itself refined between lags, and rounding it to the nearest one
+    missed seed_6's 19-floor tower whose half-period peak was one lag up (2026-10-06)."""
     lag = period / dt
     a = _acf(np.asarray(prof, float), int(lag) + 3)
     for k in range(int(k_max), 1, -1):
         j = lag / k
         if j < min_px:
             continue
-        i = int(round(j))
-        win = a[max(1, i - 1): i + 2]
-        if np.isfinite(win).all() and len(win) == 3 and win[1] == win.max() and \
-                win[1] >= frac * acf_peak:
+        if _peak_near(a, j, max(1.0, 0.04 * j)) >= frac * acf_peak:
             return k
     return 1
 
 
+def _strip_candidates(g, k_max=4, frac=HARMONIC_FRAC, min_px=MIN_PX_PER_FLOOR):
+    """``[(floors, period, acf, px per floor, k)]`` one strip may mean: its reading (k = 1) and
+    each k x finer period its autocorrelation also peaks at (see :func:`_subharmonic`)."""
+    out = [(g[0], g[1], g[2], g[3], 1)]
+    a = _acf(np.asarray(g[7], float), int(g[3]) + 3)
+    for k in range(2, k_max + 1):
+        j = g[3] / k
+        if j < min_px:
+            break
+        if _peak_near(a, j, max(1.0, 0.04 * j)) >= frac * g[2]:
+            out.append((g[0] * k, g[1] / k, g[2], g[3] / k, k))
+    return out
+
+
 def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instances: np.ndarray,
                     instance: int, min_cols: int = 6, trim: float = 0.1,
-                    n_strips: int = 3, depth: np.ndarray | None = None) -> InstanceFloors | None:
+                    n_strips: int = 3, depth: np.ndarray | None = None,
+                    rings_xy: list | None = None) -> InstanceFloors | None:
     """Storeys and distance of one MobileSAM building instance, before any footprint match.
 
     On one column a vertical facade at range ``d`` has ``z = d * tan(e)``, so the floor bands are
@@ -429,7 +461,17 @@ def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instance
     periods rejected 28 of 35 tall instances on seed_6, 2026-10-06). With the camera height known
     (``pose.camera_h_m > 0``), a floor-implied distance farther than :data:`MAX_BASE_RATIO` x the
     range the visible base row allows is refused: that is how roof equipment read as "floors" a
-    few metres away shows itself."""
+    few metres away shows itself.
+
+    Each strip also counts at the k x finer periods its autocorrelation supports
+    (:func:`_strip_candidates`), so a strip that locked onto every second floor still agrees with
+    the others; the group needing the fewest such multiples wins. With ``rings_xy`` (footprints in
+    local metres, ``fd._local``) the floor-implied range must also lie within
+    :data:`MAX_BASE_RATIO` of a footprint wall on the instance's bearing, base seen or not; when
+    it is too near for all of them a finer period the strips support is tried, else the reading
+    is refused (seed_5, 2026-10-06: "3 floors at 58 m" with every wall on that bearing past
+    450 m). On the five Cartagena seeds these changes and the 1.45 ratio took the plot-matched
+    readings from 25 to 46 (seed_6 16 -> 32) and refused 7 unmatched ones (2026-10-06)."""
     m = instances == instance
     cols = np.flatnonzero(m.sum(0) >= 8)
     if len(cols) < min_cols:
@@ -453,34 +495,54 @@ def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instance
 
     if not got:
         return refuse("no floor pattern")
-    # the largest group of strips agreeing on the storeys
-    best = []
-    for g in got:
-        grp = [h for h in got if abs(h[0] - g[0]) <= MAX_FLOOR_SPREAD * g[0]]
-        if len(grp) > len(best):
-            best = grp
+    # the largest group of strips agreeing on the storeys, each strip also read at the finer
+    # periods its autocorrelation supports: one strip reading every second floor (a 2-floor
+    # module, or the strongest peak a multiple) no longer outvotes the others (seed_6, 2026-10-06)
+    cands = [(c, si) for si, g in enumerate(got) for c in _strip_candidates(g)]
+    best, key = [], None
+    for c, _si in cands:
+        grp = {}
+        for h, sj in cands:
+            if abs(h[0] - c[0]) <= MAX_FLOOR_SPREAD * c[0] and (
+                    sj not in grp or abs(h[0] - c[0]) < abs(grp[sj][0][0] - c[0])):
+                grp[sj] = (h, sj)
+        kk = (len(grp), -sum(h[4] for h, _ in grp.values()),
+              float(np.median([h[2] for h, _ in grp.values()])))
+        if key is None or kk > key:
+            best, key = list(grp.values()), kk
+    strips = [got[sj] for _h, sj in best]           # the agreeing strips' raw readings
+    mult = [h[4] for h, _sj in best]                # and the k each is read at
+    best = [h for h, _sj in best]
     floors = float(np.median([g[0] for g in best]))
     p = float(np.median([g[1] for g in best]))
     acf = float(np.median([g[2] for g in best]))
     ppx = float(np.median([g[3] for g in best]))
     spread = (max(g[0] for g in best) - min(g[0] for g in best)) / floors if len(best) > 1 else math.nan
     d = NOMINAL_FLOOR_M / p
+
+    def finer(limit_m):
+        """The agreed k (median over the strips) by which the period is too long, given that
+        the range may be up to ``limit_m``."""
+        k_max = min(5, int(limit_m / d))
+        if k_max < 2:
+            return 1
+        return int(np.median([_subharmonic(g[7], g[8], g[1] / m_, g[2], k_max)
+                              for g, m_ in zip(strips, mult, strict=True)]))
+
     d_base = math.nan
     base_seen = False
     if pose.camera_h_m > 0:
-        r_b = float(np.median([g[6] for g in best]))
+        r_b = float(np.median([g[6] for g in strips]))
         e_b = float(fd._elev_of(pano, pose, r_b))
         if e_b < -0.5:
             d_base = pose.camera_h_m / math.tan(math.radians(-e_b))
             # the base row bounds the range, so a period k x too long (every k-th floor) is
             # allowed back when the profile repeats at period / k too (seed_6's tallest tower
             # read 15 floors at 86 m: every third of ~45, its base 339 m out; 2026-10-06)
-            k_max = min(5, int(MAX_BASE_RATIO * d_base / d))
-            if k_max >= 2:
-                ks = [_subharmonic(g[7], g[8], g[1], g[2], k_max) for g in best]
-                sub = int(np.median(ks))
-                if sub > 1:
-                    floors, p, ppx, d = floors * sub, p / sub, ppx / sub, d * sub
+            sub = finer(MAX_BASE_RATIO * d_base)
+            if sub > 1:
+                floors, p, ppx, d = floors * sub, p / sub, ppx / sub, d * sub
+                mult = [m_ * sub for m_ in mult]
             # ground (not building, not sky) just under the instance: its base is in view, so the
             # base row is the range, not only a bound on it
             rb = int(round(r_b))
@@ -501,19 +563,66 @@ def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instance
     reason = []
     if len(best) < 2 and len(got) >= 1 and k > 1:
         reason.append("one strip only" if len(got) == 1 else f"strips disagree ({len(got)} read)")
-    if ppx < MIN_PX_PER_FLOOR:
-        reason.append(f"{ppx:.1f} px per floor")
-    if floors < 3:
-        reason.append(f"{floors:.1f} floors")
     if math.isfinite(d_base) and (d > MAX_BASE_RATIO * d_base
                                   or (base_seen and d < d_base / MAX_BASE_RATIO)):
         # seen base: both ways (seed_6, 2026-10-06: the tallest tower read 15 floors at 86 m
         # with its base on the street 339 m out; a port blob read 3 floors at 119 m)
         reason.append(f"floors put it {d:.0f} m away, its base {d_base:.0f} m")
+    elif rings_xy is not None:
+        # footprints on the bearing: the floor-implied range must land on one of their walls,
+        # hidden base or not (seed_5, 2026-10-06: a slim tower read 3 floors at 58 m, every wall
+        # on its bearing hundreds of metres out). Too near for all of them: the period may be k x
+        # too long, so the finer periods the strips support are tried first.
+        r = _bearing_ranges(pano, pose, rings_xy, centre)
+        if len(r) and not _near_any(d, r):
+            sub = finer(MAX_BASE_RATIO * float(r.max()))
+            if sub > 1 and _near_any(d * sub, r):
+                floors, p, ppx, d = floors * sub, p / sub, ppx / sub, d * sub
+            else:
+                near = float(r[np.argmin(np.abs(np.log(r / d)))])
+                reason.append(f"floors put it {d:.0f} m away, no footprint there (nearest {near:.0f} m)")
+    if ppx < MIN_PX_PER_FLOOR:
+        reason.append(f"{ppx:.1f} px per floor")
+    if floors < 3:
+        reason.append(f"{floors:.1f} floors")
     lo, hi = KIND_RANGE_M["residential"]
     return InstanceFloors(instance, centre, b, floors, float(d), (lo / p, hi / p), ppx, acf,
                           float(spread), bool(floors >= HIGH_RISE_FLOORS), not reason,
                           "; ".join(reason) or "ok", len(best), float(d_base))
+
+
+def _bearing_ranges(pano, pose, rings_xy, col) -> np.ndarray:
+    """Range to each footprint's first wall along column ``col``'s bearing (misses dropped)."""
+    edges, owner = [], []
+    for i, ring in enumerate(rings_xy):
+        ring = np.asarray(ring, float)
+        if len(ring) < 3:
+            continue
+        if np.allclose(ring[0], ring[-1]):
+            ring = ring[:-1]
+        edges.append(np.concatenate([ring, np.roll(ring, -1, axis=0)], axis=1))
+        owner.append(np.full(len(ring), i))
+    if not edges:
+        return np.zeros(0)
+    e, own = np.concatenate(edges), np.concatenate(owner)
+    bb = math.radians((pano.frame_heading[col] + pose.offset_deg) % 360.0)
+    ux, uy = math.sin(bb), math.cos(bb)
+    px, py, ex, ey = e[:, 0], e[:, 1], e[:, 2] - e[:, 0], e[:, 3] - e[:, 1]
+    den = ux * ey - uy * ex
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = (px * ey - py * ex) / den
+        s = (px * uy - py * ux) / den
+    hit = (np.abs(den) > 1e-12) & (t > 0) & (s >= 0) & (s <= 1)
+    if not hit.any():
+        return np.zeros(0)
+    t, own = t[hit], own[hit]
+    first = np.full(own.max() + 1, np.inf)
+    np.minimum.at(first, own, t)
+    return first[np.isfinite(first)]
+
+
+def _near_any(d: float, ranges: np.ndarray) -> bool:
+    return bool(np.any((ranges / MAX_BASE_RATIO <= d) & (d <= ranges * MAX_BASE_RATIO)))
 
 
 def match_plot(est: InstanceFloors, pano: fd.Pano, pose: fd.PanoPose, rings_xy: list,

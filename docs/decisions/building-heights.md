@@ -5,6 +5,18 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
+### 2026-10-06 — Drone fusion and trust rules for elevated seeds
+- **Decision:** `city2stl/skyline/footprint_detect.py::fuse_heights` overrules by a factor `overrule=3`.
+  - A reading 3x off the other seeds' agreeing value is dropped.
+- **Decision:** `city2stl/skyline/_pano/elevated.py::trusted` accepts a roof reading only with confidence >= 0.5 and distance <= 1000 m.
+- **Decision:** the overhead camera fit (`_pano/elevated.py::overhead_pose`) is used when the waterline camera height is < 15 m, the waterline fit fails, or the height is > 130 m.
+- **Why:**
+  - Gran Bay: seed_4 read 20 m at a depth edge, seed_6 read 170 m from a confident roof fit; the tag agrees with 170.
+  - Untrusted readings are wrong (median 200-400 % against tags), so the gates are not relaxed.
+- **Rejected:** looser trust gates — coverage has to come from more images, not weaker gates (see Rejected hypotheses, 2026-10-06).
+- **Supersedes / superseded by:** —
+- **Source:** T43 in [TASKS](../agents/TASKS.md); `city2stl/skyline/_pano/roof_fit.py::fit_roof_heights`.
+
 ### 2026-10-03 — Skyline height accuracy is judged on surveyed truth, not on Cartagena
 - **Decision:** skyline (street-view) height changes are scored on eight cities with per-footprint
   truth from survey lidar and Google 3D Tiles, cross-checked: Miami, Chicago, Seattle, Boston,
@@ -254,6 +266,31 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Source:** decisions.md 2026-08-05 entry.
 
 ## Rejected hypotheses
+
+### 2026-10-06 — Relaxing the trust gates to get more coverage
+- **Hypothesis:** loosening the confidence and distance gates of `_pano/elevated.py::trusted` adds usable readings.
+- **Measured:** untrusted readings are wrong: median error 200-400 % against tags.
+- **Verdict:** refused; coverage must come from more images (more seeds, the satellite cross-check T44), not looser gates.
+
+### 2026-10-06 — A shared-top-edge occlusion check
+- **Hypothesis:** a trusted reading whose top row matches a farther footprint's top row is an occluder and wrong.
+- **Measured:** caught none of the 5 wrong trusted readings and flagged 25 good ones.
+- **Verdict:** refused.
+
+### 2026-10-06 — The "behind" flag for occluded tops
+- **Hypothesis:** flag a tower top that lies behind a nearer surface.
+- **Measured:** over-flagged (good readings marked).
+- **Verdict:** removed.
+
+### 2026-10-06 — Street-fit camera cost from SegFormer road labels
+- **Hypothesis:** fit the drone camera to the street network using SegFormer road pixels.
+- **Measured:** the cost surface is flat; the road mask is too patchy.
+- **Verdict:** refused; the overhead roof fit (`_pano/elevated.py::overhead_pose`) is used instead.
+
+### 2026-10-06 — Placing no-GPS Commons photos by outline search, SIFT, building_groups voting or photo_columns
+- **Hypothesis:** a Commons photo with no GPS can be placed by searching its outline, by SIFT matches, by `building_groups` voting, or by `city2stl/skyline/photo_columns.py::photo_columns`.
+- **Measured:** the oracle (best possible choice) got only 4/7 headings and 1/17 rank.
+- **Verdict:** refused.
 
 ### 2026-09-04 — Satellite shadow heights work in Cartagena
 - **Hypothesis:** the shadow pipeline fails in Cartagena because of a wrong shadow bearing.

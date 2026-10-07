@@ -714,9 +714,31 @@ def _local(lat0: float, lon0: float, ring: np.ndarray) -> np.ndarray:
     return np.column_stack([(ring[:, 0] - lon0) * kx, (ring[:, 1] - lat0) * M_PER_DEG_LAT])
 
 
+#: A footprint's ``top_edge`` is its columns' most common edge; a tie goes to the first here.
+#: ``max(set(edges), key=edges.count)`` broke ties by string-hash order, so a reading's trust
+#: changed between runs (Cartagena seed_4, 2026-10-06: 12 of 172 readings, 84 or 72 trusted).
+#: Depth first: half the columns not reaching the sky is not a sky-topped reading.
+EDGE_TIE_ORDER = ("depth", "other", "sky")
+
+
+def _top_edge(edges: list[str]) -> str:
+    """The most common of a footprint's column edges, a tie broken by :data:`EDGE_TIE_ORDER`."""
+    return max(EDGE_TIE_ORDER, key=lambda e: (edges.count(e), -EDGE_TIE_ORDER.index(e)))
+
+
+#: Labels that hide a building's foot from a drone without being another building: trees and
+#: palms, grass and plants, road surface (road, sidewalk, path, car), water, sand and pier (the
+#: beach front of Bocagrande). A run may cross more of them than ``gap_px``
+#: (:func:`_column_run`'s ``soft_gap_px``). Cartagena seed_5 (2026-10-07): 13-22 pier rows under
+#: Nautica and Ravello at 260-271 m, so both runs ended in the gap and Nautica's columns went
+#: to the footprint behind it (b0111, read 173 m).
+OCCLUDER_CLASSES = tuple(_ADE20K_VEGETATION_CLASSES) + (72,) + ROAD_CLASSES + tuple(
+    _ADE20K_WATER_CLASSES) + (46, 140)
+
+
 def _column_run(labels_col: np.ndarray, depth_col, start_row: int, near_lim: float,
                 stop_ratio: float, floor: float, gap_px: int, local_px: int = 8,
-                inst_col: np.ndarray | None = None):
+                inst_col: np.ndarray | None = None, soft_gap_px: int | None = None):
     """One building's rows in one column: ``(top, bottom, edge)`` or None.
 
     Going up from ``start_row``: skip building rows nearer than this building (inverse depth
@@ -734,9 +756,15 @@ def _column_run(labels_col: np.ndarray, depth_col, start_row: int, near_lim: flo
     instance the run never stops (Depth Anything's drift up a tall facade); the depth step is
     tested only where the instance changes. Stopping at every instance change instead cut
     towers at the podium in front of them (2026-10-06, Cartagena seed_4: Portomarine 180 -> 28 m).
+
+    ``soft_gap_px``: below the building, up to this many rows in all may be skipped as long as
+    no more than ``gap_px`` of them are other than :data:`OCCLUDER_CLASSES` (trees, road, sea
+    in front of the foot).
     """
     is_b = np.isin(labels_col, BUILDING_CLASSES)
-    y, gap = int(start_row), 0
+    y, gap, hard = int(start_row), 0, 0
+    max_gap = gap_px if soft_gap_px is None else max(gap_px, int(soft_gap_px))
+    soft = np.isin(labels_col, OCCLUDER_CLASSES) if max_gap > gap_px else None
     if y < 0 or y >= len(labels_col):
         return None
     while y >= 0:
@@ -745,7 +773,8 @@ def _column_run(labels_col: np.ndarray, depth_col, start_row: int, near_lim: flo
                 break
         else:
             gap += 1
-            if gap > gap_px:
+            hard += soft is None or not soft[y]
+            if hard > gap_px or gap > max_gap:
                 return None
         y -= 1
     if y < 0:
@@ -780,7 +809,8 @@ def measurement_weight(m) -> float:
         seen = float(get("confidence"))         # a roof fit from above (roof_fit): its own score
     else:
         seen = 1.0 if get("base_visible") else float(get("visible_frac"))
-    return seen / max(float(get("dist_m")), 100.0) ** 2
+    scale = get("weight_scale")
+    return (1.0 if scale is None else float(scale)) * seen / max(float(get("dist_m")), 100.0) ** 2
 
 
 def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0) -> dict:
@@ -836,13 +866,29 @@ def fit_depth_model(dist_m, inv_depth) -> tuple[float, float] | None:
     return float(coef[0]), float(coef[1])
 
 
+#: Focal length (px per radian) of the default 75-deg spin pano, for which the pixel
+#: parameters of :func:`measure_footprints` were tuned (Cartagena seeds 1/4/5, 2026-10-05/06).
+REF_F_PX = 417.0
+
+
+def px_scale(pano: Pano) -> float:
+    """Pixel scale of ``pano`` against the spin pano the pixel constants were tuned on; never
+    below 1 (a coarser pano keeps the tuned pixels, as the MobileSAM window in ``elevated``)."""
+    return max(1.0, float(pano.f_px) / REF_F_PX)
+
+
+def _scaled(px: int, k: float) -> int:
+    return max(1, int(round(px * k)))
+
+
 def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
                        depth: np.ndarray | None = None, max_dist_m: float = 3000.0,
                        min_cols: int = 6, core: float = 0.6, depth_ratio: float = 0.7,
                        base_window_px: int = 6, near_ratio: float = 1.35,
                        max_step: float = 0.92, gap_px: int = 8,
                        min_visible_frac: float = 0.25, min_run_px: int = 3,
-                       local_px: int = 40, instances: np.ndarray | None = None) -> list[Measured]:
+                       local_px: int = 40, instances: np.ndarray | None = None,
+                       occluder_h_m: float | None = 10.0) -> list[Measured]:
     """Measure every footprint in view, nearest first (see module docstring).
 
     ``depth``: Depth Anything V2 inverse depth (closer = higher) on the pano grid, or None
@@ -859,7 +905,8 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
       the next OSM footprint behind it in that column, as a ratio clipped to ``depth_ratio`` ..
       ``max_step`` (a fixed 0.7 only separated a tower 1.4x farther; the rows of Bocagrande
       are 10-30 % apart), measured against the run's own last rows (see :func:`_column_run`)
-      and never below ``depth_ratio`` x the reference;
+      and never below ``depth_ratio`` x the reference -- or x the base's own depth when the
+      base is in view and lower (a far tower Depth Anything puts behind the model level);
     - a building whose base is hidden and of which under ``min_visible_frac`` of the
       base-to-top height shows is dropped: the rows just above a nearer roof are as likely the
       building behind it;
@@ -871,10 +918,27 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
 
     ``instances``: a building instance label map on the pano grid (``building_instances``); a
     column's run then ends at its instance's top (see :func:`_column_run`).
+
+    Pixel parameters (``min_cols``, ``base_window_px``, ``gap_px``, ``min_run_px``,
+    ``local_px``, the depth median window and the base tolerance) are in pixels of the default
+    75-deg spin pano (``f_px`` :data:`REF_F_PX`, 7.3 px/deg) and scale with the pano's
+    ``f_px`` (:func:`px_scale`): the same angles on a hi-res sphere (1194 px, 2.86x).
+    ``occluder_h_m``: below the building, a run may cross up to ``atan(occluder_h_m / d)`` of
+    trees, road, sand, pier or sea (:data:`OCCLUDER_CLASSES`) in front of its foot, beyond
+    ``gap_px`` (see :func:`_column_run`); None: ``gap_px`` only. 10 m (2026-10-07, Cartagena
+    seeds 1/4/5/6/7): seed_5 reads Nautica 160 m (tag 161) from its own run, no tagged reading
+    lost or worse; 12.5 m lost a verified footprint, 14-20 m also crossed Ravello's 22 pier
+    rows but added a 40 m building read 123 m (fused tag within 25 % 73 -> 67 %); a flat 24 px
+    gap broke the tagged median (4 -> 41 %).
     """
     import shapely
 
     H, W = pano.labels.shape
+    k_px = px_scale(pano)
+    min_cols, base_window_px, gap_px, min_run_px, local_px = (
+        _scaled(v, k_px) for v in (min_cols, base_window_px, gap_px, min_run_px, local_px))
+    med_win = _scaled(5, k_px) | 1                 # odd
+    base_tol = 3.0 * k_px
     bu, b0 = bearing_columns(pano, pose)
     h = pose.camera_h_m
     cand, behind, rings = [], [[] for _ in range(W)], {}
@@ -914,7 +978,7 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
     if depth is not None:
         from scipy.ndimage import median_filter
 
-        dz = median_filter(np.asarray(depth, float), size=(5, 1))    # vertical: keeps edges
+        dz = median_filter(np.asarray(depth, float), size=(med_win, 1))    # vertical: keeps edges
 
     def core_cols(x0, x1):
         n = x1 - x0 + 1
@@ -927,6 +991,8 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
         for k, (dn, i, x0, x1, base) in enumerate(cand):
             level = None if model is None else model[0] / dn + model[1]
             cols = core_cols(x0, x1)
+            soft_gap = None if not occluder_h_m else int(round(
+                pano.f_px * math.atan(occluder_h_m / dn)))
             for a, b in inner.get(k, ()):
                 cols = cols[(cols < a) | (cols > b)]
             if cols.size < 3:
@@ -938,9 +1004,9 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
                     continue
                 near_lim, ratio, floor = np.inf, 0.0, -np.inf
                 if dz is not None:
-                    ref = None
+                    ref = bref = None
                     if occ[x] - 1 >= base - 0.5:          # base not behind a measured roof
-                        ref = float(np.median(dz[max(0, y0 - base_window_px):y0 + 1, x]))
+                        ref = bref = float(np.median(dz[max(0, y0 - base_window_px):y0 + 1, x]))
                         if level is not None and not level / near_ratio <= ref <= level * near_ratio:
                             ref = None                    # the base row shows something else
                     if ref is None:
@@ -949,7 +1015,11 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
                         else:
                             ref = level
                     near_lim = near_ratio * ref
-                    ratio, floor = depth_ratio, depth_ratio * ref
+                    # the floor from the lower of the reference and the base's own depth: past
+                    # ~700 m Depth Anything puts single buildings at 0.6-1.4x the model level
+                    # (Cartagena seed_4, Gran Bay at 809 m: base 0.048, model 0.071), and a floor
+                    # at 0.7x the model cut its whole facade (read 20 m, tag 170 m)
+                    ratio, floor = depth_ratio, depth_ratio * (ref if bref is None else min(ref, bref))
                     if model is not None:
                         k = np.searchsorted(behind[x], dn * 1.08)
                         if k < len(behind[x]):            # next OSM footprint behind, this column
@@ -957,14 +1027,14 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
                             ratio = min(max(0.5 * (1.0 + far), depth_ratio), max_step)
                 got = _column_run(pano.labels[:, x], None if dz is None else dz[:, x], y0,
                                   near_lim, ratio, floor, gap_px, local_px,
-                                  None if instances is None else instances[:, x])
+                                  None if instances is None else instances[:, x], soft_gap)
                 if got is None or got[2] == "image" or got[1] - got[0] + 1 < min_run_px:
                     continue
                 t, bot, edge = got
                 tops.append(t)
                 bottoms.append(bot)
                 edges.append(edge)
-                vis += bot >= base - 3
+                vis += bot >= base - base_tol
             if len(tops) < max(3, len(cols) // 3):
                 continue
             top = float(np.median(tops))
@@ -975,7 +1045,7 @@ def measure_footprints(pano: Pano, pose: PanoPose, footprints: list[Footprint],
                 continue
             hm = h + dn * math.tan(math.radians(float(_elev_of(pano, pose, top))))
             fp = footprints[i]
-            edge = max(set(edges), key=edges.count)
+            edge = _top_edge(edges)
             out.append(Measured(i, fp.name, x0, x1, top, bottom, base, dn, hm, len(tops),
                                 base_vis, fp.osm_height_m, frac, edge))
             occ[x0:x1 + 1] = np.minimum(occ[x0:x1 + 1], top)

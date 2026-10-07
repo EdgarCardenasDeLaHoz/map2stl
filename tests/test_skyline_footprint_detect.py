@@ -418,3 +418,90 @@ def test_refine_on_outline_recovers_the_camera_height():
                                height_factors=(0.5, 0.5625, 0.625, 0.75, 1.0))
     assert fit.pose.camera_h_m == pytest.approx(100.0)
     assert abs(fit.shift_deg - 2.0) <= 0.2
+
+
+def test_a_far_tower_set_back_by_depth_anything_is_followed_to_the_sky():
+    """Past ~700 m Depth Anything puts single buildings at 0.6-1.4x the model level. The run's
+    floor at 0.7x the model then cut the whole facade (2026-10-06, Cartagena seed_4: Gran Bay
+    read 20 m, tag 170 m); with its base in view the floor follows the base's own depth."""
+    tower = ("tower", 0.0, 800.0, 150.0, 10.0, True)
+    labels, depth, fps = _scene([tower])
+    xy = fd._local(LAT, LON, _ring_at(0.0, 800.0))
+    on = (labels == BUILDING) & np.isclose(depth, 1000.0 / np.hypot(xy[:, 0], xy[:, 1]).min())
+    depth[on] *= 0.6
+    pano, depth = _pano(labels, depth, offset=180.0)
+    got = {m.name: m for m in fd.measure_footprints(pano, fd.PanoPose(0.0, 60.0, 0.0, 0.0, 0), fps,
+                                                    depth=depth, min_cols=4)}
+    assert got["tower"].height_m == pytest.approx(150.0, abs=8.0)
+    assert got["tower"].top_edge == "sky"
+
+
+def test_a_tied_edge_vote_is_not_sky():
+    """``max(set(edges), key=edges.count)`` broke ties by string-hash order, so a reading's
+    trust changed from run to run; a tie now goes to depth."""
+    assert fd._top_edge(["sky", "depth", "sky", "depth"]) == "depth"
+    assert fd._top_edge(["sky", "other"]) == "other"
+    assert fd._top_edge(["sky", "sky", "depth"]) == "sky"
+
+
+def _foot_hidden(rows: int, label: int):
+    """A tower at 300 m whose lowest ``rows`` rows (above its predicted base) show ``label``."""
+    tower = ("tower", 0.0, 300.0, 120.0, 10.0, True)
+    labels, depth, fps = _scene([tower])
+    base = int(round(_row(-math.degrees(math.atan(60.0 / 300.0)))))
+    cols = np.arange(W // 2 - 40, W // 2 + 40)                 # north (+-10 deg): the tower only
+    cols = cols[labels[base - 1, cols] == BUILDING]
+    labels[base - rows:base, cols] = label
+    pano, depth = _pano(labels, depth, offset=180.0)
+    return pano, fd.PanoPose(0.0, 60.0, 0.0, 0.0, 0), fps, depth
+
+
+def test_pixel_gaps_scale_with_the_pano_resolution(monkeypatch):
+    """The pixel constants were tuned on the 7.3 px/deg spin pano; a hi-res sphere (2.86x)
+    crosses the same angle of lamp posts and palms under a foot."""
+    pano, pose, fps, depth = _foot_hidden(14, 12)               # 14 rows of "person": not an occluder
+    assert "tower" not in {m.name for m in fd.measure_footprints(pano, pose, fps, depth=depth, min_cols=4)}
+    monkeypatch.setattr(fd, "REF_F_PX", F / 2.0)                # the same scene at 2x the tuned px/deg
+    assert fd.px_scale(pano) == 2.0
+    got = {m.name: m for m in fd.measure_footprints(pano, pose, fps, depth=depth, min_cols=2)}
+    assert got["tower"].height_m == pytest.approx(120.0, abs=5.0)
+    monkeypatch.setattr(fd, "REF_F_PX", F * 4.0)                # coarser than tuned: never below 1
+    assert fd.px_scale(pano) == 1.0
+
+
+def test_trees_road_and_sea_under_a_foot_are_crossed_by_distance():
+    """Cartagena seed_5: 13-22 pier rows under Nautica and Ravello (260-271 m) ended both runs
+    and the footprint behind took their columns. Occluder labels may fill ``atan(h / d)``."""
+    for label, crossed in ((4, True), (140, True), (21, True), (12, False)):     # tree, pier, sea, person
+        pano, pose, fps, depth = _foot_hidden(14, label)
+        plain = {m.name for m in fd.measure_footprints(pano, pose, fps, depth=depth, min_cols=4,
+                                                       occluder_h_m=None)}
+        got = {m.name: m for m in fd.measure_footprints(pano, pose, fps, depth=depth, min_cols=4,
+                                                        occluder_h_m=15.0)}  # 200 px/rad x 15/300: 10 px
+        assert "tower" not in plain
+        assert "tower" not in got                               # 14 rows > max(8, 10)
+        got = {m.name: m for m in fd.measure_footprints(pano, pose, fps, depth=depth, min_cols=4,
+                                                        occluder_h_m=25.0)}  # 17 px
+        assert ("tower" in got) is crossed, label
+        if crossed:
+            assert got["tower"].height_m == pytest.approx(120.0, abs=5.0)
+
+
+def test_column_run_soft_gap_counts_other_labels_against_gap_px():
+    labels = np.full(80, fd.SKY_CLASS, np.int16)
+    labels[10:50] = BUILDING
+    labels[50:62] = 4                                          # 12 rows of trees
+    labels[62:] = 21
+    depth = np.ones(80)
+    assert fd._column_run(labels, depth, 61, np.inf, 0.7, 0.3, 8, 8) is None
+    assert fd._column_run(labels, depth, 61, np.inf, 0.7, 0.3, 8, 8, None, 16)[:2] == (10, 49)
+    labels[55:58] = 12                                         # 3 other rows among them: 3 <= 8
+    assert fd._column_run(labels, depth, 61, np.inf, 0.7, 0.3, 8, 8, None, 16)[:2] == (10, 49)
+    labels[50:62] = 12                                         # 12 other rows: hard gap > 8
+    assert fd._column_run(labels, depth, 61, np.inf, 0.7, 0.3, 8, 8, None, 16) is None
+
+
+def test_measurement_weight_scales_a_fill_reading():
+    m = dict(top_edge="roof", confidence=0.8, dist_m=400.0, base_visible=True, visible_frac=1.0)
+    assert fd.measurement_weight(dict(m, weight_scale=0.25)) == pytest.approx(
+        0.25 * fd.measurement_weight(m))

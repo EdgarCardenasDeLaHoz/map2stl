@@ -9,11 +9,18 @@ RAM. Several agents share one laptop (6 cores, 32 GB RAM, 4 GB VRAM).
     wait_for_gpu(2.0)          # SegFormer b3, batch 4
     ...
     free_gpu_cache()           # between photos / models
+
+``wait_for_gpu`` also takes a machine-wide GPU lock (a file under ``~/.cache``) that
+``free_gpu_cache`` releases, so only one process runs a GPU model at a time: checking free memory
+alone let two jobs that started together both load and spill into shared system RAM
+(2026-10-07). The OS drops the lock when its process dies. ``MAP2STL_GPU_LOCK=off`` disables it.
 """
 from __future__ import annotations
 
 import logging
+import os
 import time
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +72,53 @@ def free_vram_gb(device: int = 0) -> float | None:
     return free / 1e9
 
 
+#: Lock file shared by every process on the machine (home, not %TEMP%: the desktop app's
+#: sandbox redirects its temp folder, so its processes and the user's would not see one file).
+GPU_LOCK_PATH = Path.home() / ".cache" / "map2stl_gpu.lock"
+_gpu_lock_fd: int | None = None
+
+
+def _try_gpu_lock() -> bool:
+    """Take the machine-wide GPU lock without blocking; True when this process holds it."""
+    global _gpu_lock_fd
+    if _gpu_lock_fd is not None or os.environ.get("MAP2STL_GPU_LOCK", "").lower() == "off":
+        return True
+    GPU_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(GPU_LOCK_PATH, os.O_RDWR | os.O_CREAT)
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return False
+    _gpu_lock_fd = fd
+    return True
+
+
+def release_gpu_lock() -> None:
+    """Let the next process have the GPU (called by :func:`free_gpu_cache`)."""
+    global _gpu_lock_fd
+    if _gpu_lock_fd is None:
+        return
+    try:
+        if os.name == "nt":
+            import msvcrt
+            os.lseek(_gpu_lock_fd, 0, os.SEEK_SET)
+            msvcrt.locking(_gpu_lock_fd, msvcrt.LK_UNLCK, 1)
+    except OSError:
+        pass
+    os.close(_gpu_lock_fd)
+    _gpu_lock_fd = None
+
+
 def wait_for_gpu(need_gb: float, *, device: int = 0, poll_s: float = GPU_POLL_S,
                  timeout_s: float = GPU_TIMEOUT_S, _sleep=time.sleep) -> bool:
-    """Block until *need_gb* of GPU memory is free; True when it is, False without CUDA.
+    """Block until this process holds the GPU lock and *need_gb* of GPU memory is free; True
+    when it is, False without CUDA.
 
     Raises ``TimeoutError`` after *timeout_s*. Never falls back to the CPU: the caller asked
     for the GPU, and a CPU run of a GPU model takes the CPU from every other job.
@@ -76,6 +127,13 @@ def wait_for_gpu(need_gb: float, *, device: int = 0, poll_s: float = GPU_POLL_S,
     if free is None:
         return False
     waited = 0.0
+    while not _try_gpu_lock():
+        if waited >= timeout_s:
+            raise TimeoutError(f"GPU lock still held by another process after {waited:.0f} s")
+        if waited == 0:
+            logger.info("Waiting for the GPU lock (%s)", GPU_LOCK_PATH)
+        _sleep(poll_s)
+        waited += poll_s
     while free < need_gb:
         if waited >= timeout_s:
             raise TimeoutError(f"GPU memory: {free:.1f} GB free after {waited:.0f} s, "
@@ -84,13 +142,19 @@ def wait_for_gpu(need_gb: float, *, device: int = 0, poll_s: float = GPU_POLL_S,
             logger.info("Waiting for %.1f GB of GPU memory (%.1f GB free)", need_gb, free)
         _sleep(poll_s)
         waited += poll_s
-        free_gpu_cache()
+        _empty_cache()
         free = free_vram_gb(device)
     return True
 
 
 def free_gpu_cache() -> None:
-    """Release this process's cached GPU memory (call between photos and between models)."""
+    """Release this process's cached GPU memory and the GPU lock (call between photos and
+    between models)."""
+    _empty_cache()
+    release_gpu_lock()
+
+
+def _empty_cache() -> None:
     try:
         import torch
     except ImportError:

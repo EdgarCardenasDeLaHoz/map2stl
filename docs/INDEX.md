@@ -382,6 +382,8 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
   - One height across seeds: `fuse_heights`.
   - Camera position (waterline over ±600 m, then parks and streets): `fit_camera_position`; diagnostics `fit_position_from_ground`, `waterline_position_scan`.
   - In the region report, for the site's `elevated_seeds`: `map2stl/city2stl/skyline/_pano/elevated.py::measure_elevated_seed` (called from `_pano/orchestrator.py::_seed_multiview_registration`; OSM ground layers `ground_layers`, fused estimates `elevated_estimates`).
+  - Roof-fit heights from above: `map2stl/city2stl/skyline/_pano/roof_fit.py::fit_roof_heights`; per-instance floors: `map2stl/city2stl/skyline/floor_bands.py::instance_floors`.
+  - Drone pano and camera: `map2stl/city2stl/skyline/_pano/elevated.py::sphere_pano`, `level_pano`, `overhead_pose` (camera fit from roofs seen from above).
   - Script: `scripts/18_footprint_detect.py`.
 
 ### Entry points, scripts, tests

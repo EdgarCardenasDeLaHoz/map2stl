@@ -42,3 +42,32 @@ def test_wait_for_ram_blocks_until_enough_is_free(monkeypatch):
     monkeypatch.setattr(r, "free_ram_gb", lambda: 1.0)
     with pytest.raises(TimeoutError):
         r.wait_for_ram(6.0, poll_s=30.0, timeout_s=60.0, _sleep=lambda s: None)
+
+
+def test_gpu_lock_is_exclusive_across_processes(monkeypatch, tmp_path):
+    """A second process cannot take the GPU lock until the first releases it."""
+    import subprocess
+    import sys
+    lock = tmp_path / "gpu.lock"
+    monkeypatch.setattr(resources, "GPU_LOCK_PATH", lock)
+    monkeypatch.setattr(resources, "_gpu_lock_fd", None)
+    monkeypatch.delenv("MAP2STL_GPU_LOCK", raising=False)
+    probe = ("import sys; from pathlib import Path; import city2stl.resources as r; "
+             f"r.GPU_LOCK_PATH = Path(r'{lock}'); sys.exit(0 if r._try_gpu_lock() else 3)")
+
+    def other_gets_it():
+        return subprocess.run([sys.executable, "-c", probe], cwd=str(resources.Path(resources.__file__).parents[1])).returncode == 0
+
+    assert resources._try_gpu_lock()
+    assert not other_gets_it()
+    resources.release_gpu_lock()
+    assert other_gets_it()
+
+
+def test_free_gpu_cache_releases_the_lock(monkeypatch, tmp_path):
+    monkeypatch.setattr(resources, "GPU_LOCK_PATH", tmp_path / "gpu.lock")
+    monkeypatch.setattr(resources, "_gpu_lock_fd", None)
+    monkeypatch.delenv("MAP2STL_GPU_LOCK", raising=False)
+    assert resources._try_gpu_lock() and resources._gpu_lock_fd is not None
+    resources.free_gpu_cache()
+    assert resources._gpu_lock_fd is None
