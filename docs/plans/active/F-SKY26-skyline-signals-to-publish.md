@@ -106,3 +106,17 @@ Two constraints follow:
 ## Progress
 - 2026-10-07: plan written from a design review. Floor counts fixed first: storey height from the
   footprint range, one plot per instance (`611bbf9`).
+- 2026-10-07, step 0 done: `seed_experiment.py` region-aware (`--region`, `--floors`, `--sat`,
+  caught/false-dispute, high-rise P/R, independent coverage); Cartagena metrics identical to the old
+  harness. **Step 1 dry run fails:** the floors factor-2 check caught 0 of 50 wrong trusted Miami
+  drone readings (only 5-6 of 91 have a floors reading on the same plot) and falsely disputed 2
+  correct towers (One Biscayne, SE Financial: floors 46 / 83 m on partly hidden facades counted as
+  full); Cartagena has 1-3 wrong readings per set, too few to judge. Not wired. Needs a `base_seen`
+  field in `InstanceFloors` and floors coverage on matched plots first.
+  - Storey height: Cartagena 4.32 m (LOO sigma_log 0.11, n=5); Miami 3.08 m but sigma_log 1.08:
+    Miami floor counts are unreliable.
+  - High-rise flag: Miami precision 0.92 (n=12), recall 0.11; Cartagena precision 0.5-0.73.
+  - Satellite with today's weight lowers fused within-25 % (0.73-0.89 -> 0.61-0.67) and stereo
+    agreements still count as "sat-sat verified" (57-70): step 3 comes next.
+  - Miami trusted drone readings: sigma_log 0.74, bias +0.46, 45 % within 25 % (seed_3 sphere worst,
+    seed_4 spin best at 86 %): the roof-fill readings are the main error source.
