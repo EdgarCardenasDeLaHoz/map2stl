@@ -314,6 +314,24 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Measured:** the cost surface is flat; the road mask is too patchy.
 - **Verdict:** refused; the overhead roof fit (`_pano/elevated.py::overhead_pose`) is used instead.
 
+### 2026-10-07 — Low-rises: survey LiDAR where free, tiers everywhere, survey-blind benchmark
+- **Decision:**
+  - A region run publishes the per-footprint survey nDSM height (p95 inside the footprint shrunk
+    by 1 m) ahead of the OSM tag, drone and satellite, unless it is suspected stale.
+  - Every published row carries a tier: `survey`, `verified_2`, `tag`, `single` or `prior`.
+    `single` rows are published and labelled unverified.
+  - Near-field street views are studied as a second image for low-rises.
+  - The benchmark headline scores the survey-blind answer (`no_survey_height_m`). Survey rows are
+    scored only against 3D Tiles.
+- **Why:** user choice (2026-10-07: all three options). Satellite data can't verify low-rises (the
+  stereo entry above). Free survey LiDAR covers the US, Spain, France, Czechia and Andalusia.
+  Scoring survey heights against survey-based truth would be circular.
+- **Rejected:**
+  - 3D Tiles as a run-time source: ~81 % of the monthly free cap was used by 2026-10-07;
+  - counting correlated pairs as verified.
+- **Supersedes / superseded by:** extends the 2026-10-03 truth entry.
+- **Source:** [F-SKY26](../plans/active/F-SKY26-skyline-signals-to-publish.md) addendum.
+
 ### 2026-10-07 — Multi-date satellite stereo verifies mid- and high-rises, not low-rises
 - **Decision:** stereo (roof shift between dated WorldView scenes) is dropped below 40 m. It is
   weighted 0.6 at 40-100 m and 0.4 above 100 m. A confident multiview peak (conf >= 0.3) and

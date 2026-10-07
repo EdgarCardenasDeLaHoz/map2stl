@@ -120,3 +120,44 @@ Two constraints follow:
     agreements still count as "sat-sat verified" (57-70): step 3 comes next.
   - Miami trusted drone readings: sigma_log 0.74, bias +0.46, 45 % within 25 % (seed_3 sphere worst,
     seed_4 spin best at 86 %): the roof-fill readings are the main error source.
+
+## Addendum (2026-10-07): survey LiDAR and verification tiers
+The user chose all three ways to handle low-rises: near-field street views (being studied), tiered
+verification, and survey LiDAR where it is free. Design review findings:
+- **Where survey LiDAR is used today:**
+  - the app merge uses 3DEP COPC only, to fill `default` heights (p50);
+  - skyline publishing never uses survey LiDAR;
+  - every benchmark city has survey coverage.
+
+Steps:
+- **2a. Tier labels, no value changes.**
+  - `_core/tiers.py::verification_tier` / `::independent`.
+  - Tiers: `survey`, `verified_2`, `tag`, `single`, `prior`.
+  - `verified_2` counts: drone+drone; drone+satellite (lean, multiview, or stereo at 40 m or
+    more); lean+shadow over 100 m; floors+drone from different seeds.
+  - `verified_2` does not count: shadow+shadow, stereo+stereo, floors+drone from the same seed,
+    street+street.
+  - A `single` reading more than 2x from the prior gets `prior_disagrees`.
+  - `heights.json` gets `schema_version: 2` and `tier_counts`.
+- **2b. Per-footprint survey reader.**
+  - `skyline/survey_heights.py`: same p95 statistic as the truth (`benchmark.footprint_stat`).
+  - Provider years in `providers/survey.py`.
+  - Cached in `runs/survey/<region>.json`. No 3D Tiles.
+- **2c. Benchmark stays honest (before 2d).**
+  - Every run also writes `no_survey_height_m/_source/_tier`.
+  - The `10_benchmark` headline scores the survey-blind value.
+  - Survey rows are scored only against `tiles_m`.
+  - `score_by_tier` checks that the tiers mean what they say.
+- **2d. Publish survey heights.**
+  - Opt-in `use_survey_heights`.
+  - Survey beats tag, drone and satellite unless suspected stale: OSM `start_date` at or after the
+    survey year, `building=construction`, an empty lot later built, or a verified value at least
+    2x higher.
+- **2e.** Extend tiers as new reading kinds land.
+- **2f.** Display tiers in the HTML report, the PDF and the app, with survey attribution lines.
+
+Success criteria:
+- the survey-blind headline is identical to before on all 8 cities;
+- fresh survey rows are within 25 % of `tiles_m` at least 90 % of the time;
+- within-25 % falls in tier order (`verified_2` at least 0.85);
+- no `verified_2` rests only on correlated methods.
