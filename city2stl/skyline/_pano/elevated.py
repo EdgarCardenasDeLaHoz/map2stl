@@ -42,6 +42,10 @@ logger = logging.getLogger(__name__)
 #: a street view, or a drone high over land (its near shore below the frame, seed_6), which
 #: :func:`overhead_pose` places from the ground and the building bases instead.
 MIN_ELEVATED_H_M = 15.0
+#: Above this waterline-fitted height the drone is placed like an overhead one (recorded
+#: position, ground heading, height from building bases): the waterline + outline fit
+#: overfits a few towers (seed_7, 2026-10-06).
+OVERHEAD_FROM_H_M = 130.0
 #: Camera height search of the tower-outline refinement, as factors of the waterline height.
 HEIGHT_FACTORS = (0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25)
 #: Ground map around the seed: the position search (+-600 m) plus 4 km of shore rays.
@@ -419,8 +423,10 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
                              gpu_instances)
     fps, fids = footprints_from_records(buildings)
     towers = _towers(buildings)
-    if pose0.camera_h_m < MIN_ELEVATED_H_M:
-        # over land, not water: the waterline cannot place the camera (seed_6)
+    if not MIN_ELEVATED_H_M <= pose0.camera_h_m <= OVERHEAD_FROM_H_M:
+        # over land (no waterline, seed_6), or so high that the waterline and the tower outline
+        # move the camera hundreds of metres to fit a few towers (seed_7: 304 m up, 380 m north,
+        # then 9.4 deg of bearing at a 0.03 deg misfit, Nautica read 263 m)
         got = overhead_pose(pano, gmap, fps, depth, instances)
         if got is None:
             logger.warning("[elevated] %s: waterline puts the camera %.0f m up and the ground "
@@ -513,6 +519,8 @@ def _waterline_camera(seed: SkylinePoint, pano: fd.Pano, pose0: fd.PanoPose, gma
 
 #: Roof-fit confidence from which an overhead reading is trusted (:func:`trusted`).
 ROOF_TRUST = 0.5
+#: ... and only this close (m).
+ROOF_TRUST_MAX_DIST_M = 1000.0
 #: Share of a sky-topped building that must show when its base is hidden (:func:`trusted`).
 SKY_SEEN_TRUST = 0.5
 #: Camera heights the overhead heading search tries before the bases refine it.
@@ -687,7 +695,11 @@ def trusted(m) -> bool:
     and the published towers from 3 to 7 (median 7 %, 6 of 7 within 25 %), 2026-10-06.
     """
     if m.top_edge == "roof":
-        return float(getattr(m, "confidence", 0.0)) >= ROOF_TRUST
+        # and within ROOF_TRUST_MAX_DIST_M: past 1 km low buildings read the towers behind
+        # them with high confidence (seed_6 b0372 104/55 m at 1.0 km, seed_7 b0265 234/50 m at
+        # 1.6 km); every confident roof fit within 810 m was right (2026-10-06)
+        return (float(getattr(m, "confidence", 0.0)) >= ROOF_TRUST
+                and m.dist_m <= ROOF_TRUST_MAX_DIST_M)
     return m.top_edge == "sky" and (bool(m.base_visible) or m.visible_frac >= SKY_SEEN_TRUST)
 
 

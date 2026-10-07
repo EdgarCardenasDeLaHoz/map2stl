@@ -100,8 +100,12 @@ def test_trusted_drone_readings():
     assert not trusted(N(top_edge="depth", base_visible=True, visible_frac=1.0))
     assert trusted(N(top_edge="sky", base_visible=False, visible_frac=0.6))       # half shows
     assert not trusted(N(top_edge="sky", base_visible=False, visible_frac=0.3))
-    assert trusted(N(top_edge="roof", base_visible=False, visible_frac=1.0, confidence=0.7))
-    assert not trusted(N(top_edge="roof", base_visible=False, visible_frac=1.0, confidence=0.2))
+    assert trusted(N(top_edge="roof", base_visible=False, visible_frac=1.0, confidence=0.7,
+                     dist_m=600.0))
+    assert not trusted(N(top_edge="roof", base_visible=False, visible_frac=1.0, confidence=0.2,
+                         dist_m=600.0))
+    assert not trusted(N(top_edge="roof", base_visible=False, visible_frac=1.0, confidence=0.7,
+                         dist_m=1500.0))                   # far: low roofs read the towers behind
 
 
 def test_seed_page_lists_the_numbered_buildings():
