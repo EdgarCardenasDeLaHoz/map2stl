@@ -513,6 +513,8 @@ def _waterline_camera(seed: SkylinePoint, pano: fd.Pano, pose0: fd.PanoPose, gma
 
 #: Roof-fit confidence from which an overhead reading is trusted (:func:`trusted`).
 ROOF_TRUST = 0.5
+#: Share of a sky-topped building that must show when its base is hidden (:func:`trusted`).
+SKY_SEEN_TRUST = 0.5
 #: Camera heights the overhead heading search tries before the bases refine it.
 OVERHEAD_H_GRID_M = (60.0, 90.0, 130.0, 180.0, 260.0)
 #: Below this ground score (mean IoU of water, road and green) an overhead fit is not trusted.
@@ -679,10 +681,14 @@ def trusted(m) -> bool:
     A roof fit from above (``roof_fit``, top edge ``roof``) counts when its confidence is 0.5 or
     more (seed_6, 2026-10-06: Estelar 199/202, Portomarine 189/188, Gran Bay 170/170 published or
     tagged; none of its confident readings was left out before).
+    A sky-topped reading with its base hidden counts when at least half the building shows
+    (``visible_frac`` >= :data:`SKY_SEEN_TRUST`): on Cartagena seeds 1/4/5/6 that took the fused
+    heights from 215 to 276 buildings, the OSM-tag error from 58 % (n 7) to 12 % (n 14) median
+    and the published towers from 3 to 7 (median 7 %, 6 of 7 within 25 %), 2026-10-06.
     """
     if m.top_edge == "roof":
         return float(getattr(m, "confidence", 0.0)) >= ROOF_TRUST
-    return m.top_edge == "sky" and bool(m.base_visible)
+    return m.top_edge == "sky" and (bool(m.base_visible) or m.visible_frac >= SKY_SEEN_TRUST)
 
 
 def elevated_estimates(seeds: list[ElevatedSeed]) -> list[RegisteredBuildingEstimate]:

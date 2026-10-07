@@ -91,14 +91,17 @@ def test_chunked_upsample_gives_the_full_argmax_labels():
     assert np.array_equal(got, full.numpy())
 
 
-def test_only_sky_topped_base_visible_drone_readings_are_trusted():
-    from types import SimpleNamespace
+def test_trusted_drone_readings():
+    from types import SimpleNamespace as N
 
     from city2stl.skyline._pano.elevated import trusted
 
-    assert trusted(SimpleNamespace(top_edge="sky", base_visible=True))
-    assert not trusted(SimpleNamespace(top_edge="depth", base_visible=True))
-    assert not trusted(SimpleNamespace(top_edge="sky", base_visible=False))
+    assert trusted(N(top_edge="sky", base_visible=True, visible_frac=1.0))
+    assert not trusted(N(top_edge="depth", base_visible=True, visible_frac=1.0))
+    assert trusted(N(top_edge="sky", base_visible=False, visible_frac=0.6))       # half shows
+    assert not trusted(N(top_edge="sky", base_visible=False, visible_frac=0.3))
+    assert trusted(N(top_edge="roof", base_visible=False, visible_frac=1.0, confidence=0.7))
+    assert not trusted(N(top_edge="roof", base_visible=False, visible_frac=1.0, confidence=0.2))
 
 
 def test_seed_page_lists_the_numbered_buildings():
