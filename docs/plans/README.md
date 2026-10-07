@@ -216,6 +216,8 @@ _Last updated: 2026-09-29._ The one place for "what's next".
   lidar + 3D Tiles cross-checked. [F-SKYBENCH](active/F-SKYBENCH-height-benchmark.md)
 - **Skyline photos from Wikimedia Commons** with a solved camera (any vantage, not only Street
   View); Miami first, judged on relative heights. [F-WEB2](active/F-WEB2-commons-skyline-photos.md)
+- **Research signals into publishing** (floors as a fusion source and check, high-rise flags,
+  satellite readings): [F-SKY26](active/F-SKY26-skyline-signals-to-publish.md)
 - All skyline open items (F-DET, F-SKY13/16/18, F-SKY5 validation, tests, depth > 1.2 km) are
   kept in one list: [skyline README → Open items](../../city2stl/skyline/README.md#open-items).
 
