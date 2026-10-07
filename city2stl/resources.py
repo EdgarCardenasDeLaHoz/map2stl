@@ -202,8 +202,9 @@ def other_gpu_jobs_mb() -> dict[int, int]:
     return jobs
 
 
-#: Another python process holding more dedicated GPU memory than this counts as a GPU job.
-OTHER_GPU_JOB_MB = 300
+#: Another python process holding more dedicated GPU memory than this counts as a GPU job. An
+#: idle CUDA context alone holds ~400 MB, so 300 blocked every job behind an idle one (2026-10-07).
+OTHER_GPU_JOB_MB = 1024
 
 
 def scratch_guard(gpu_gb: float | None = None, ram_gb: float = HEAVY_JOB_MIN_FREE_GB,

@@ -314,6 +314,20 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Measured:** the cost surface is flat; the road mask is too patchy.
 - **Verdict:** refused; the overhead roof fit (`_pano/elevated.py::overhead_pose`) is used instead.
 
+### 2026-10-07 — Placing no-GPS Commons photos with trusted heights or LightGlue
+- **Hypothesis:** with LiDAR heights (instead of OSM tags) the skyline outline search places Commons
+  photos; or DISK+LightGlue matches to the Miami drone panoramas plus PnP on tower blocks does.
+- **Measured** on 53-57 Miami photos with known locations (location hidden):
+  - outline search with LiDAR heights and EXIF focal: 15 % within 300 m (OSM tags 11 %), true
+    place first 5 of 27, median rank 145;
+  - a score lead of >= 0.1 over the runner-up placed 5 photos, 4 correctly. That is a precise gate
+    for about 15 % of photos;
+  - LightGlue: 1 of 55 within 300 m. The references are 2026 drone views 86-260 m up at only 4
+    places; the matches land on 2-4 towers, so PnP is degenerate.
+- **Verdict:** refused for the pipeline. At most, keep the EXIF + 0.1-lead gate as a high-precision
+  placer. Learned matching would need references like the photos (Street View or posed Commons
+  photos), not drone panoramas. Labels plus EXIF remain the reliable route (±5 m).
+
 ### 2026-10-06 — Placing no-GPS Commons photos by outline search, SIFT, building_groups voting or photo_columns
 - **Hypothesis:** a Commons photo with no GPS can be placed by searching its outline, by SIFT matches, by `building_groups` voting, or by `city2stl/skyline/photo_columns.py::photo_columns`.
 - **Measured:** the oracle (best possible choice) got only 4/7 headings and 1/17 rank.
