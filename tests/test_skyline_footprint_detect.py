@@ -254,6 +254,49 @@ def test_fusion_averages_agreeing_seeds_and_outvotes_a_far_misread():
     assert fd.fuse_heights({"seed_1": [near], "seed_4": [rival]})[7]["disputed"]
 
 
+def test_satellite_reading_distance_from_sigma_log():
+    """validation.md: dist_m = max(100, 3300 sigma_log); lean and stereo under 40 m dropped;
+    a shadow is a lower bound."""
+    lean = fd.satellite_reading(7, "lean", 150.0, 0.8)
+    assert lean["dist_m"] == pytest.approx(3300 * 0.07) and lean["kind"] == "sat_lean"
+    assert fd.satellite_reading(7, "lean", 30.0, 0.9) is None
+    assert fd.satellite_reading(7, "stereo", 30.0, 0.9) is None
+    assert fd.satellite_reading(7, "stereo", 60.0, 0.5)["dist_m"] == pytest.approx(3300 * 0.19)
+    sh = fd.satellite_reading(7, "shadow", 10.0, 0.2)
+    assert sh["lower_bound"] and sh["dist_m"] == pytest.approx(3300 * 0.85)
+    assert fd.satellite_reading(7, "ls", 120.0, 0.8)["dist_m"] == pytest.approx(3300 * 0.07)
+
+
+def test_a_shadow_never_outvotes_a_higher_photo_reading():
+    drone = {"footprint": 7, "name": "a", "height_m": 150.0, "dist_m": 900.0, "base_visible": True,
+             "visible_frac": 1.0}
+    shadow = fd.satellite_reading(7, "shadow", 60.0, 0.9)              # 430 m: weighs 4x more
+    assert fd.measurement_weight(shadow) > 3 * fd.measurement_weight(drone)
+    got = fd.fuse_heights({"seed_1": [drone], "sat_shadow": [shadow]})[7]
+    assert got["height_m"] == 150.0 and not got["disputed"] and got["used"] == ["seed_1"]
+    # a shadow above the photo reading is evidence: it outvotes as usual
+    tall = fd.satellite_reading(7, "shadow", 300.0, 0.9)
+    assert fd.fuse_heights({"seed_1": [drone], "sat_shadow": [tall]})[7]["height_m"] == 300.0
+    # among satellite readings only it is a full reading (b0373: shadow 63, stereo 204, tag 60)
+    st = fd.satellite_reading(7, "stereo", 204.0, 0.5)
+    got = fd.fuse_heights({"sat_shadow": [fd.satellite_reading(7, "shadow", 63.0, 0.9)],
+                           "sat_stereo": [st]})[7]
+    assert got["height_m"] == pytest.approx(63.0) and got["lower_bound"]
+
+
+def test_satellite_agreement_alone_is_not_verified():
+    lean = fd.satellite_reading(7, "lean", 150.0, 0.8)
+    st = fd.satellite_reading(7, "stereo", 155.0, 0.5)
+    got = fd.fuse_heights({"sat_lean": [lean], "sat_stereo": [st]})[7]
+    assert got["n_sources"] == 1 and not got["verified"]
+    drone = {"footprint": 7, "name": "a", "height_m": 148.0, "dist_m": 600.0, "base_visible": True,
+             "visible_frac": 1.0}
+    got = fd.fuse_heights({"sat_lean": [lean], "sat_stereo": [st], "seed_1": [drone]})[7]
+    assert got["n_sources"] == 2 and got["verified"]
+    two = fd.fuse_heights({"seed_1": [drone], "seed_4": [dict(drone, height_m=152.0)]})[7]
+    assert two["verified"] and not two["lower_bound"]
+
+
 def test_a_tall_facade_that_drifts_farther_is_followed_to_its_roof():
     """Depth Anything lets a tall tower's facade read 15 % farther at the top than at the base;
     against the base level the stop at 0.92 cut it short (Ravello, tag 160 m, read 17 m)."""

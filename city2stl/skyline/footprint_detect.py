@@ -813,6 +813,60 @@ def measurement_weight(m) -> float:
     return (1.0 if scale is None else float(scale)) * seen / max(float(get("dist_m")), 100.0) ** 2
 
 
+#: Robust sigma of log(h / truth) of satellite readings by method, measured height and
+#: confidence (``S/satellite_cities/validation.md``, LiDAR truth in 7 cities, 2026-10-07; bands by
+#: the *measured* height, which is what fusion sees). None: the reading is dropped.
+def satellite_sigma_log(kind: str, h: float, conf: float) -> float | None:
+    """sigma_log of one satellite reading; ``kind`` is lean, shadow, stereo or ls (lean and
+    shadow agreeing). Lean under 40 m and stereo under 40 m are dropped (sigma >= 0.5; stereo
+    0.61-0.84 on Chicago)."""
+    h, c = float(h), float(conf)
+    if kind == "lean":
+        if h < 40.0:
+            return None
+        if h > 100.0:
+            return 0.07 if c >= 0.7 else 0.15 if c >= 0.5 else 0.28
+        return 0.16 if c >= 0.7 else 0.25 if c >= 0.5 else 0.43
+    if kind == "shadow":
+        if h > 40.0:
+            return 0.13
+        if h >= 15.0:
+            return 0.67
+        return 0.21 if c >= 0.7 else 0.41 if c >= 0.3 else 0.85
+    if kind == "stereo":                    # Chicago pair consensus: weight 0.6 / 0.4
+        if h < 40.0:
+            return None
+        return 0.19 if h <= 100.0 else 0.24
+    if kind == "ls":
+        lean, shadow = satellite_sigma_log("lean", h, c), satellite_sigma_log("shadow", h, c)
+        return min(s for s in (lean, shadow, 0.15) if s is not None)
+    raise ValueError(kind)
+
+
+#: Drone sigma_log grows ~0.15 per 500 m of distance, so a satellite reading of sigma_log s
+#: weighs as a fully seen drone reading at ``SAT_DIST_PER_SIGMA_M`` x s (validation.md).
+SAT_DIST_PER_SIGMA_M = 3300.0
+
+
+def satellite_reading(fid, kind: str, h: float, conf: float, name=None) -> dict | None:
+    """A satellite height as a fusion reading (a dict :func:`fuse_heights` takes): fully seen,
+    ``dist_m = max(100, 3300 x sigma_log)``, weight scale 1, ``kind`` ``sat_<kind>``; a shadow
+    is a ``lower_bound`` (it reads low when cut short: bias -20 to -40 %). None when dropped.
+    Before (2026-10-07) every satellite reading entered at 100 m: a weight-1 reading outweighed
+    a drone reading at 400 m 16x whatever its error."""
+    s = satellite_sigma_log(kind, h, conf)
+    if s is None:
+        return None
+    return dict(footprint=fid, name=name if name is not None else fid, height_m=float(h),
+                dist_m=max(100.0, SAT_DIST_PER_SIGMA_M * s), base_visible=True,
+                visible_frac=1.0, top_edge="satellite", confidence=float(conf),
+                weight_scale=1.0, kind=f"sat_{kind}", lower_bound=kind == "shadow")
+
+
+def _is_sat(d) -> bool:
+    return str(d.get("kind") or "").startswith("sat")
+
+
 def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0) -> dict:
     """One height per footprint from several seeds' measurements (``{seed: [Measured or dict]}``).
 
@@ -826,6 +880,15 @@ def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0) -> d
     weight is ``overrule`` x every outvoted reading's, the dispute is settled in its favour
     (2026-10-06, Cartagena: Gran Bay read 20 m from seed_4 at a depth edge 1.3 km out and 170 m
     from seed_6's confident roof fit; dropping such footprints lost a published tower).
+
+    A reading with ``lower_bound`` (a satellite shadow) only says "at least" against a photo
+    (non-``sat_*``) reading above it: it is then never the anchor, it neither outvotes nor
+    disputes that reading, and it is left out of the average. Against satellite readings only
+    it competes as a full reading (Cartagena b0373: shadow 63 m, stereo 204 m, tag 60 m).
+    ``kind`` ``sat_*`` readings are one source together: ``n_sources`` counts the drone seeds
+    kept plus 1 for any satellite reading kept, and ``verified`` (>= 2 sources) never comes from
+    satellite readings alone. ``lower_bound`` in the result: the height rests on lower bounds
+    only.
     """
     rows: dict = {}
     for seed, ms in by_seed.items():
@@ -835,15 +898,29 @@ def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0) -> d
     out = {}
     for fp, got in rows.items():
         got.sort(key=lambda r: -r[2])
-        best = got[0][1]["height_m"]
-        keep = [r for r in got if abs(r[1]["height_m"] - best) <= agree * max(1.0, best)]
+        photo = [r[1]["height_m"] for r in got if not _is_sat(r[1]) and not r[1].get("lower_bound")]
+        top_photo = max(photo, default=-math.inf)
+
+        def bound(r, top=top_photo):            # a lower bound under a photo reading
+            h = r[1]["height_m"]
+            return bool(r[1].get("lower_bound")) and top > h + agree * max(1.0, h)
+
+        anchor = next((r for r in got if not bound(r)), got[0])
+        best = anchor[1]["height_m"]
+        tol = agree * max(1.0, best)
+        keep = [r for r in got if abs(r[1]["height_m"] - best) <= tol and not bound(r)]
+        out_v = [r for r in got if r not in keep and not (bound(r) and r[1]["height_m"] < best)]
         w = np.array([r[2] for r in keep])
-        out[fp] = {"name": got[0][1]["name"],
+        drones = {r[0] for r in keep if not _is_sat(r[1])}
+        n_src = len(drones) + (1 if any(_is_sat(r[1]) for r in keep) else 0)
+        out[fp] = {"name": anchor[1]["name"],
                    "height_m": float(np.average([r[1]["height_m"] for r in keep], weights=w)),
                    "seeds": {r[0]: round(float(r[1]["height_m"]), 1) for r in got},
                    "used": [r[0] for r in keep],
-                   "disputed": any(r not in keep and w.sum() < overrule * r[2] for r in got),
-                   "osm_height_m": got[0][1].get("osm_height_m")}
+                   "disputed": any(w.sum() < overrule * r[2] for r in out_v),
+                   "osm_height_m": anchor[1].get("osm_height_m"),
+                   "n_sources": n_src, "verified": n_src >= 2,
+                   "lower_bound": all(r[1].get("lower_bound") for r in keep)}
     return out
 
 
