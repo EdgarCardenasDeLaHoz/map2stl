@@ -160,7 +160,10 @@ OTHER_GPU_JOB_MB = 1024
 
 
 def other_gpu_jobs_mb() -> dict[int, int]:
-    """{pid: MB} of other processes holding GPU memory (nvidia-smi), {} when unavailable."""
+    """{pid: MB} of other processes holding GPU memory (nvidia-smi), {} when unavailable.
+
+    Windows WDDM drivers report ``[N/A]`` per process, so on this laptop the dict is empty and
+    the GPU lock (:func:`wait_for_gpu`) is what keeps GPU jobs apart."""
     import subprocess
     try:
         out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory",
