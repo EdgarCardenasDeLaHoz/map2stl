@@ -813,34 +813,13 @@ def measurement_weight(m) -> float:
     return (1.0 if scale is None else float(scale)) * seen / max(float(get("dist_m")), 100.0) ** 2
 
 
-#: Robust sigma of log(h / truth) of satellite readings by method, measured height and
-#: confidence (``S/satellite_cities/validation.md``, LiDAR truth in 7 cities, 2026-10-07; bands by
-#: the *measured* height, which is what fusion sees). None: the reading is dropped.
 def satellite_sigma_log(kind: str, h: float, conf: float) -> float | None:
-    """sigma_log of one satellite reading; ``kind`` is lean, shadow, stereo or ls (lean and
-    shadow agreeing). Lean under 40 m and stereo under 40 m are dropped (sigma >= 0.5; stereo
-    0.61-0.84 on Chicago)."""
-    h, c = float(h), float(conf)
-    if kind == "lean":
-        if h < 40.0:
-            return None
-        if h > 100.0:
-            return 0.07 if c >= 0.7 else 0.15 if c >= 0.5 else 0.28
-        return 0.16 if c >= 0.7 else 0.25 if c >= 0.5 else 0.43
-    if kind == "shadow":
-        if h > 40.0:
-            return 0.13
-        if h >= 15.0:
-            return 0.67
-        return 0.21 if c >= 0.7 else 0.41 if c >= 0.3 else 0.85
-    if kind == "stereo":                    # Chicago pair consensus: weight 0.6 / 0.4
-        if h < 40.0:
-            return None
-        return 0.19 if h <= 100.0 else 0.24
-    if kind == "ls":
-        lean, shadow = satellite_sigma_log("lean", h, c), satellite_sigma_log("shadow", h, c)
-        return min(s for s in (lean, shadow, 0.15) if s is not None)
-    raise ValueError(kind)
+    """sigma_log of one satellite reading (``city2stl.height.satellite.weights.sigma_log``, the
+    decision table of 2026-10-07): ``kind`` lean, shadow, stereo, multiview or ls (lean and
+    shadow agreeing); None when the reading is dropped (lean, stereo, multiview under 40 m)."""
+    from city2stl.height.satellite.weights import sigma_log  # noqa: PLC0415
+
+    return sigma_log(kind, h, conf)
 
 
 #: Drone sigma_log grows ~0.15 per 500 m of distance, so a satellite reading of sigma_log s
