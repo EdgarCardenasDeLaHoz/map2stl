@@ -204,18 +204,38 @@ def capture_sphere_pano(seed: SkylinePoint, api_key: str, headings, is_photosphe
                 return None
             views[(float(hd), float(p))] = img
             labels[(float(hd), float(p))] = _ensure_label_map(img)
-    step = 360.0 / len(headings)
-    pano = sphere_pano(seed.name, seed.lat, seed.lon, views, fov_deg, labels, step)
+    return level_pano(seed.name, seed.lat, seed.lon, views, fov_deg, labels,
+                      360.0 / len(headings))
+
+
+def level_pano(name: str, lat: float, lon: float, views: dict, fov_deg: float, labels: dict,
+               step_deg: float) -> fd.Pano:
+    """:func:`sphere_pano`, rebuilt level when the sea horizon shows a tilt over 0.15 deg
+    (:func:`horizon_tilt`); ``horizon_deg`` set from the open-sea horizon when there is one."""
+    pano = sphere_pano(name, lat, lon, views, fov_deg, labels, step_deg)
     t = horizon_tilt(pano)
     if t is not None and t[1] > 0.15:
         logger.info("[elevated] %s: sphere tilted %.2f deg toward %.0f deg (horizon over %d "
-                    "cols); rebuilt level", seed.name, t[1], t[2], t[3])
-        pano = sphere_pano(seed.name, seed.lat, seed.lon, views, fov_deg, labels, step,
+                    "cols); rebuilt level", name, t[1], t[2], t[3])
+        pano = sphere_pano(name, lat, lon, views, fov_deg, labels, step_deg,
                            tilt_deg=(t[1], t[2]))
         t = horizon_tilt(pano)
     if t is not None:
         pano = replace(pano, horizon_deg=t[0])
     return pano
+
+
+def level_pano_from_spin(name: str, lat: float, lon: float, views: list[dict], fov_deg: float,
+                         pitch_deg: float, step_deg: float) -> fd.Pano:
+    """The spin views (``_capture_pano_views`` prefetch: ``geo_heading`` + ``image``, one pitch)
+    reprojected onto one level sphere -- the drone path's pano, so a tilted Photo Sphere is
+    levelled for the 75-deg capture too (no new images)."""
+    from .._core.segmentation import _ensure_label_map
+
+    vv = {(float(v["geo_heading"]), float(pitch_deg)): v["image"] for v in views
+          if v.get("image") is not None}
+    labels = {k: _ensure_label_map(img) for k, img in vv.items()}
+    return level_pano(name, lat, lon, vv, fov_deg, labels, step_deg)
 
 
 @dataclass
@@ -453,6 +473,8 @@ def _waterline_camera(seed: SkylinePoint, pano: fd.Pano, pose0: fd.PanoPose, gma
     return fd.moved(pano, of.dx_m, of.dy_m), of.pose, pf
 
 
+#: Roof-fit confidence from which an overhead reading is trusted (:func:`trusted`).
+ROOF_TRUST = 0.5
 #: Camera heights the overhead heading search tries before the bases refine it.
 OVERHEAD_H_GRID_M = (60.0, 90.0, 130.0, 180.0, 260.0)
 #: Below this ground score (mean IoU of water, road and green) an overhead fit is not trusted.
@@ -616,7 +638,12 @@ def trusted(m) -> bool:
     Calibrated on Cartagena's OSM-tagged buildings (2026-10-05, cameras aligned on the tower
     outline): such readings were within 25 % of the tag in 88 % of cases (n 8); sky-topped ones
     in 73 % (11); runs that stopped at a depth step in 21 % (19), base hidden in 10 % (10).
+    A roof fit from above (``roof_fit``, top edge ``roof``) counts when its confidence is 0.5 or
+    more (seed_6, 2026-10-06: Estelar 199/202, Portomarine 189/188, Gran Bay 170/170 published or
+    tagged; none of its confident readings was left out before).
     """
+    if m.top_edge == "roof":
+        return float(getattr(m, "confidence", 0.0)) >= ROOF_TRUST
     return m.top_edge == "sky" and bool(m.base_visible)
 
 

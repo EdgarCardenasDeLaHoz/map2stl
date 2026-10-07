@@ -538,9 +538,9 @@ def match_known_tower(lat: float, lon: float, height_m: float, name: str, rows: 
     The nearest centroid is not enough: a hotel's convention-centre podium is mapped around
     its tower, and its centroid can be the nearer one (2026-10-06, Cartagena: the Estelar
     podium, read 57 m, scored against the tower's 202 m) -- and the podium can carry the
-    hotel's name while the tower is unnamed. Among rows within ``radius_m``: an OSM tag within
-    35 % of the published height first, then rows that do not contain another candidate (a
-    podium), then a name sharing a distinctive word, then distance.
+    hotel's name while the tower is unnamed. Among rows within ``radius_m``: a named building
+    that is not a podium first, then an OSM tag within 35 % of the published height, then rows
+    that do not contain another candidate (a podium), then a name, then distance.
     """
     from shapely.geometry import Point
 
@@ -571,11 +571,14 @@ def match_known_tower(lat: float, lon: float, height_m: float, name: str, rows: 
         podium = p is not None and any(
             q is not r and p.contains(Point(q["centroid_lon"], q["centroid_lat"]))
             for _, q in cands)
-        return (not tag_ok, podium, not named, d)
+        # a building named like the tower and not a podium first: tags can be wrong in a way
+        # that matches a neighbour (Cartagena: Ravello tagged 160, Nautica's published height,
+        # so Nautica was scored on Ravello's footprint, 2026-10-06)
+        return (not (named and not podium), not tag_ok, podium, not named, d)
 
     best = min(cands, key=rank)
-    no_tag, podium, no_name, _d = rank(best)
-    why = ("OSM tag" if not no_tag else "name" if not no_name else
+    named_tower, no_tag, podium, no_name, _d = rank(best)
+    why = ("name" if not named_tower else "OSM tag" if not no_tag else "name" if not no_name else
            "nearest (not a podium)" if not podium else "nearest")
     return best[1], why
 

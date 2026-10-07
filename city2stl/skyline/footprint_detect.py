@@ -775,19 +775,28 @@ def measurement_weight(m) -> float:
     """Reliability of one measurement: the seen share of the building over distance squared
     (a pixel is ``d`` x 0.13 deg of height, and from past ~1 km a tower behind is within the
     depth noise). A visible base counts as fully seen. Takes a Measured or its dict."""
-    get = m.get if isinstance(m, dict) else lambda k: getattr(m, k)
-    seen = 1.0 if get("base_visible") else float(get("visible_frac"))
+    get = m.get if isinstance(m, dict) else lambda k: getattr(m, k, None)
+    if get("top_edge") == "roof" and get("confidence") is not None:
+        seen = float(get("confidence"))         # a roof fit from above (roof_fit): its own score
+    else:
+        seen = 1.0 if get("base_visible") else float(get("visible_frac"))
     return seen / max(float(get("dist_m")), 100.0) ** 2
 
 
-def fuse_heights(by_seed: dict, agree: float = 0.25) -> dict:
+def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0) -> dict:
     """One height per footprint from several seeds' measurements (``{seed: [Measured or dict]}``).
 
     Seeds within ``agree`` (relative) of the most reliable one (:func:`measurement_weight`) are
     averaged with those weights; the rest are outvoted, and the footprint is marked disputed
     when any were. 2026-10-04, Cartagena: where seed_1 (400-600 m) and seed_5 (1.1-1.3 km)
     disagreed, the far seed read the tower behind (13 vs 81 m, 26 vs 111 m); the near seed is
-    17 m off the OSM tags, the far one 56 m."""
+    17 m off the OSM tags, the far one 56 m.
+
+    ``disputed`` only when the outvoted readings were not much weaker: if the kept group's
+    weight is ``overrule`` x every outvoted reading's, the dispute is settled in its favour
+    (2026-10-06, Cartagena: Gran Bay read 20 m from seed_4 at a depth edge 1.3 km out and 170 m
+    from seed_6's confident roof fit; dropping such footprints lost a published tower).
+    """
     rows: dict = {}
     for seed, ms in by_seed.items():
         for m in ms:
@@ -802,7 +811,8 @@ def fuse_heights(by_seed: dict, agree: float = 0.25) -> dict:
         out[fp] = {"name": got[0][1]["name"],
                    "height_m": float(np.average([r[1]["height_m"] for r in keep], weights=w)),
                    "seeds": {r[0]: round(float(r[1]["height_m"]), 1) for r in got},
-                   "used": [r[0] for r in keep], "disputed": len(keep) < len(got),
+                   "used": [r[0] for r in keep],
+                   "disputed": any(r not in keep and w.sum() < overrule * r[2] for r in got),
                    "osm_height_m": got[0][1].get("osm_height_m")}
     return out
 

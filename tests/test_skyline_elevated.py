@@ -38,7 +38,7 @@ def test_pano_result_centres_north_and_carries_one_box_per_footprint():
     assert res.n_matched == 2 and res.geom_K == 80.0 * 57.3
 
 
-def test_estimates_drop_a_footprint_the_seeds_disagree_on():
+def test_estimates_settle_lopsided_disputes_and_drop_even_ones():
     pano = _pano()
     pose = fd.PanoPose(0.0, 80.0, 0.0, 0.3, W)
     pf = fd.PositionFit(0.0, 0.0, pose, 0.3, 0.3, 0.4, 0.4, "recorded")
@@ -48,7 +48,12 @@ def test_estimates_drop_a_footprint_the_seeds_disagree_on():
     far_m = _m(0, 10, 20, 111.0, 1116.0)                           # read the tower behind
     far = el.ElevatedSeed("seed_5", pf, [far_m], ["way/7"],
                           el.pano_result(seed, pano, pose, [far_m], ["way/7"], None))
-    assert el.elevated_estimates([near, far]) == []                # disputed: no drone height
+    est = el.elevated_estimates([near, far])                       # the near seed outweighs 3x+
+    assert [e.view_name for e in est] == ["seed_1_015"]
+    rival_m = _m(0, 10, 20, 60.0, 650.0)                           # as near, twice the height
+    rival = el.ElevatedSeed("seed_4", pf, [rival_m], ["way/7"],
+                            el.pano_result(seed, pano, pose, [rival_m], ["way/7"], None))
+    assert el.elevated_estimates([near, rival]) == []              # disputed: no drone height
     est = el.elevated_estimates([near])                            # one seed: kept
     assert est[0].view_name == "seed_1_015" and est[0].estimated_height_m == 26.0
     agg = aggregate_building_heights(est)

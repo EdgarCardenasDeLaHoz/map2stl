@@ -248,7 +248,10 @@ def test_fusion_averages_agreeing_seeds_and_outvotes_a_far_misread():
     far = dict(near, height_m=111.0, dist_m=1116.0)                  # read the tower behind
     close = dict(near, height_m=28.0, dist_m=700.0, base_visible=False, visible_frac=0.6)
     got = fd.fuse_heights({"seed_1": [near], "seed_5": [far], "seed_9": [close]})[7]
-    assert 26.0 < got["height_m"] < 27.0 and got["disputed"] and got["used"] == ["seed_1", "seed_9"]
+    # the near group outweighs the far misread 3x and more: settled, not disputed
+    assert 26.0 < got["height_m"] < 27.0 and not got["disputed"] and got["used"] == ["seed_1", "seed_9"]
+    rival = dict(near, height_m=60.0, dist_m=650.0)                  # as trusted, 2x the height
+    assert fd.fuse_heights({"seed_1": [near], "seed_4": [rival]})[7]["disputed"]
 
 
 def test_a_tall_facade_that_drifts_farther_is_followed_to_its_roof():
