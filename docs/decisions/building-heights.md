@@ -314,6 +314,27 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Measured:** the cost surface is flat; the road mask is too patchy.
 - **Verdict:** refused; the overhead roof fit (`_pano/elevated.py::overhead_pose`) is used instead.
 
+### 2026-10-07 — Multi-date satellite stereo verifies mid- and high-rises, not low-rises
+- **Decision:** stereo (roof shift between dated WorldView scenes) is dropped below 40 m. It is
+  weighted 0.6 at 40-100 m and 0.4 above 100 m. A confident multiview peak (conf >= 0.3) and
+  stereo + lean agreement get up to 1.0 / ~0.7. Satellite readings take a drone-equivalent
+  distance `dist_m = max(100, ~3300 * sigma_log)` instead of a fixed 100 m. The 3300 constant is
+  provisional until drone sigma is measured against distance.
+- **Why:** Chicago, 882 LiDAR buildings, 5 scenes, 9 pairs.
+  - Stereo is within 25 % for 10 % of buildings under 15 m and 34 % at 15-40 m. It reaches 59 % at
+    40-100 m.
+  - Multiview at conf >= 0.3 is within 25 % 84 % of the time above 40 m (sigma_log 0.08-0.12).
+  - Multiview plus lean agreement: 93-100 %, but on only 28 buildings.
+  - A 10 m roof shifts 3-9 m between scenes, and low roofs have too little texture to match.
+- **Consequence:** satellite data cannot provide the second image for low-rises. Verifying
+  low-rises needs near-field imagery (drone or street level) or survey LiDAR.
+- **Also found:** the sun-time search started at ~04:00 UTC the next day (the time zone was
+  subtracted twice). That, more than missing tiles, broke the Miami sun solve; it is fixed in the
+  scratch `w3_geom.py`. Wayback release 2016 WV02 serves the 2017 image (duplicate).
+- **Supersedes / superseded by:** extends the 2026-10-07 satellite weights entry.
+- **Source:** scratchpad `satellite_cities/validation.md`, backed up to
+  `Code/claude/scratch_backup_2026-10-07/`.
+
 ### 2026-10-07 — Placing no-GPS Commons photos with trusted heights or LightGlue
 - **Hypothesis:** with LiDAR heights (instead of OSM tags) the skyline outline search places Commons
   photos; or DISK+LightGlue matches to the Miami drone panoramas plus PnP on tower blocks does.
