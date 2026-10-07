@@ -355,6 +355,16 @@ MAX_BASE_RATIO = 1.45
 #: A strip's period may be read k x too long (every k-th floor, a 2-3 floor facade module) when its
 #: autocorrelation also peaks at period / k with at least this share of the found peak.
 HARMONIC_FRAC = 0.5
+#: Storey heights a matched footprint may imply (period in tan(e) x its range). Distance from the
+#: geometry, not an assumed floor: Cartagena's towers are 4.3-4.8 m a floor (Allure 190 m / 43,
+#: Portomarine 188 / 44), which the 3.1 m nominal floor and the 1.45 ratio (at most 4.5 m) refused
+#: (seed_5's tower left of centre, 2026-10-07: 36.5 floors at an implied 220 m, base 338 m).
+STOREY_M = (2.7, 5.0)
+#: A footprint covers an instance when its walls are hit in at least this share of its columns.
+MIN_COVER = 0.5
+#: A matched footprint may lie this factor beyond the range the instance's lowest row gives (mask
+#: bleed; a hidden base lies nearer, never farther), and, with the base seen, this factor nearer.
+BASE_TOL = 1.2
 
 
 @dataclass(frozen=True)
@@ -374,6 +384,15 @@ class InstanceFloors:
     reason: str
     n_strips: int = 0                 # column strips that agree on the storeys
     base_dist_m: float = math.nan     # range the visible base row gives (camera height known)
+    storey_m: float = math.nan        # period x the matched footprint's range (NaN: no match)
+    plot: int | None = None           # the matched footprint (index into rings_xy)
+    plot_dist_m: float = math.nan     # its median first-wall range over the instance's columns
+    #: footprints that cover the instance's columns at a plausible storey height, nearest first:
+    #: ``(index, range_m, k, storey_m)`` (``k``: the period read k x too long)
+    plot_cands: tuple = ()
+    covering: tuple = ()              # every footprint covering the columns, nearest first
+    extent_px: float = 0.0            # median rows of the instance per column
+    members: tuple = ()               # instances counted together (pano_floors); () = itself
 
 
 def _strip_floors(pano, pose, gray, instances, instance, cols):
@@ -530,7 +549,8 @@ def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instance
                               for g, m_ in zip(strips, mult, strict=True)]))
 
     d_base = math.nan
-    base_seen = False
+    base_seen = base_ground = False
+    sub_base = 1
     if pose.camera_h_m > 0:
         r_b = float(np.median([g[6] for g in strips]))
         e_b = float(fd._elev_of(pano, pose, r_b))
@@ -539,10 +559,7 @@ def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instance
             # the base row bounds the range, so a period k x too long (every k-th floor) is
             # allowed back when the profile repeats at period / k too (seed_6's tallest tower
             # read 15 floors at 86 m: every third of ~45, its base 339 m out; 2026-10-06)
-            sub = finer(MAX_BASE_RATIO * d_base)
-            if sub > 1:
-                floors, p, ppx, d = floors * sub, p / sub, ppx / sub, d * sub
-                mult = [m_ * sub for m_ in mult]
+            sub_base = finer(MAX_BASE_RATIO * d_base)
             # ground (not building, not sky) just under the instance: its base is in view, so the
             # base row is the range, not only a bound on it
             rb = int(round(r_b))
@@ -550,6 +567,7 @@ def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instance
             if below.size:
                 ground = (below >= 0) & ~np.isin(below, fd.BUILDING_CLASSES) & (below != fd.SKY_CLASS)
                 base_seen = bool(ground.mean() >= 0.6)
+            base_ground = base_seen
             if not base_seen and depth is not None:
                 # what lies under the mask is not nearer (Depth Anything inverse depth): the
                 # building's own podium, not an occluder, so its base is about there (seed_6's
@@ -563,32 +581,180 @@ def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instance
     reason = []
     if len(best) < 2 and len(got) >= 1 and k > 1:
         reason.append("one strip only" if len(got) == 1 else f"strips disagree ({len(got)} read)")
-    if math.isfinite(d_base) and (d > MAX_BASE_RATIO * d_base
-                                  or (base_seen and d < d_base / MAX_BASE_RATIO)):
-        # seen base: both ways (seed_6, 2026-10-06: the tallest tower read 15 floors at 86 m
-        # with its base on the street 339 m out; a port blob read 3 floors at 119 m)
-        reason.append(f"floors put it {d:.0f} m away, its base {d_base:.0f} m")
-    elif rings_xy is not None:
-        # footprints on the bearing: the floor-implied range must land on one of their walls,
-        # hidden base or not (seed_5, 2026-10-06: a slim tower read 3 floors at 58 m, every wall
-        # on its bearing hundreds of metres out). Too near for all of them: the period may be k x
-        # too long, so the finer periods the strips support are tried first.
-        r = _bearing_ranges(pano, pose, rings_xy, centre)
-        if len(r) and not _near_any(d, r):
-            sub = finer(MAX_BASE_RATIO * float(r.max()))
-            if sub > 1 and _near_any(d * sub, r):
-                floors, p, ppx, d = floors * sub, p / sub, ppx / sub, d * sub
-            else:
-                near = float(r[np.argmin(np.abs(np.log(r / d)))])
-                reason.append(f"floors put it {d:.0f} m away, no footprint there (nearest {near:.0f} m)")
+    # footprints covering the instance's columns: their range is the geometry's, and the storey
+    # height it implies (period x range) is what must be plausible (2026-10-07)
+    cover = _covering(pano, pose, rings_xy, cols) if rings_xy is not None else []
+    pcands = []
+    if cover:
+        ks = [1] + [kk for kk in range(2, 5) if _supports(strips, mult, kk)]
+        d_occ = _occluder_range(pano, pose, instances, m, cols)
+        for i, dd in cover:
+            # unblocked: whatever stands under the mask down to the ground is in front of the
+            # building (or its own podium), so a footprint nearer than that ground is not it
+            # (seed_6: "16 fl, OSM 2", a 2-floor plot at 161 m in front of a pool deck whose
+            # ground is ~200 m out)
+            if dd < d_occ / BASE_TOL:
+                continue
+            # only ground under the mask bounds the range from below: the building's own podium
+            # (base_seen from depth) puts the lowest row above the ground, so it reads too far
+            # (seed_5's tower on its podium: base 346 m, its footprint 272 m)
+            if math.isfinite(d_base) and (dd > BASE_TOL * d_base
+                                          or (base_ground and dd < d_base / BASE_TOL)):
+                continue
+            for kk in ks:
+                s = p / kk * dd
+                if STOREY_M[0] <= s <= STOREY_M[1]:
+                    pcands.append((i, dd, kk, s))
+                    break
+    plot, plot_d, storey = None, math.nan, math.nan
+    if pcands:
+        # the nearest covering footprint that fits: a farther one never wins over a nearer one
+        plot, plot_d, kk, storey = pcands[0]
+        floors, p, ppx, d = floors * kk, p / kk, ppx / kk, plot_d
+    elif cover:
+        dd = cover[0][1]
+        reason.append(f"no covering footprint at {STOREY_M[0]}-{STOREY_M[1]} m a floor "
+                      f"(nearest {dd:.0f} m: {p * dd:.1f} m)")
+    else:
+        if sub_base > 1:
+            floors, p, ppx, d = floors * sub_base, p / sub_base, ppx / sub_base, d * sub_base
+        if math.isfinite(d_base) and (d > MAX_BASE_RATIO * d_base
+                                      or (base_seen and d < d_base / MAX_BASE_RATIO)):
+            # seen base: both ways (seed_6, 2026-10-06: the tallest tower read 15 floors at 86 m
+            # with its base on the street 339 m out; a port blob read 3 floors at 119 m)
+            reason.append(f"floors put it {d:.0f} m away, its base {d_base:.0f} m")
+        elif rings_xy is not None:
+            # footprints on the bearing: the floor-implied range must land on one of their walls,
+            # hidden base or not (seed_5, 2026-10-06: a slim tower read 3 floors at 58 m, every
+            # wall on its bearing hundreds of metres out). Too near for all of them: the period
+            # may be k x too long, so the finer periods the strips support are tried first.
+            r = _bearing_ranges(pano, pose, rings_xy, centre)
+            if len(r) and not _near_any(d, r):
+                sub = finer(MAX_BASE_RATIO * float(r.max()))
+                if sub > 1 and _near_any(d * sub, r):
+                    floors, p, ppx, d = floors * sub, p / sub, ppx / sub, d * sub
+                else:
+                    near = float(r[np.argmin(np.abs(np.log(r / d)))])
+                    reason.append(f"floors put it {d:.0f} m away, no footprint there "
+                                  f"(nearest {near:.0f} m)")
     if ppx < MIN_PX_PER_FLOOR:
         reason.append(f"{ppx:.1f} px per floor")
     if floors < 3:
         reason.append(f"{floors:.1f} floors")
     lo, hi = KIND_RANGE_M["residential"]
+    ext = float(np.median(m[:, cols].sum(0)))
     return InstanceFloors(instance, centre, b, floors, float(d), (lo / p, hi / p), ppx, acf,
                           float(spread), bool(floors >= HIGH_RISE_FLOORS), not reason,
-                          "; ".join(reason) or "ok", len(best), float(d_base))
+                          "; ".join(reason) or "ok", len(best), float(d_base), float(storey),
+                          plot, float(plot_d), tuple(pcands), tuple(i for i, _ in cover), ext)
+
+
+#: Ground under a mask: not one of these (ADE20K wall, building, house, skyscraper, tower, tree,
+#: plant, palm) and not sky.
+_STACK_CLASSES = tuple(fd.BUILDING_CLASSES) + (0, 4, 17, 72)
+
+
+def _occluder_range(pano, pose, instances, m, cols, look: int = 6, gap: int = 3) -> float:
+    """Range of the ground under the mask ``m``, through what stands right below it: per column,
+    the first other instance within ``look`` rows under the mask's lowest row, followed down to
+    its end (gaps up to ``gap`` rows); ground there instead: the mask's own base. The nearest
+    end row's range, ``camera_h / tan(-e)``; 0 when unknown (no camera height, nothing usable below,
+    or above the horizon). Only the instance right below counts: from above, the buildings in
+    front of it run on for hundreds of rows."""
+    if not pose.camera_h_m > 0:
+        return 0.0
+    H = pano.height
+    ends = []
+    for c in cols:
+        r = np.flatnonzero(m[:, c])
+        if not len(r):
+            continue
+        r0 = int(r[-1]) + 1
+        below = instances[r0:min(H, r0 + look), c]
+        own = instances[r[-1], c]
+        hit = np.flatnonzero((below > 0) & (below != own))
+        if not len(hit):
+            lab = pano.labels[r0:min(H, r0 + look), c]
+            if len(lab) and np.mean((lab >= 0) & ~np.isin(lab, _STACK_CLASSES)
+                                    & (lab != fd.SKY_CLASS)) >= 0.6:
+                ends.append(r0)
+            continue
+        j, row, miss = below[hit[0]], r0 + int(hit[0]), 0
+        while row + 1 < H and miss <= gap:
+            row += 1
+            miss = 0 if instances[row, c] == j else miss + 1
+        ends.append(row - miss)
+    if len(ends) < max(3, 0.3 * len(cols)):
+        return 0.0
+    # the nearest end (90th percentile row): columns where the mask stops on a neighbour mask
+    # (two faces of one tower) end high and read too far (seed_5's tower: 350 m, podium 293 m)
+    e = float(fd._elev_of(pano, pose, float(np.percentile(ends, 90))))
+    return pose.camera_h_m / math.tan(math.radians(-e)) if e < -0.5 else 0.0
+
+
+def _supports(strips, mult, k, frac=HARMONIC_FRAC, min_px=MIN_PX_PER_FLOOR) -> bool:
+    """Whether most agreeing strips' autocorrelation also peaks at their period / ``k``."""
+    ok = []
+    for g, m_ in zip(strips, mult, strict=True):
+        lag = g[3] / m_ / k
+        if lag < min_px:
+            ok.append(False)
+            continue
+        a = _acf(np.asarray(g[7], float), int(g[3] / m_) + 3)
+        ok.append(_peak_near(a, lag, max(1.0, 0.04 * lag)) >= frac * g[2])
+    return bool(ok) and sum(ok) >= 0.5 * len(ok)
+
+
+_EDGE_CACHE: dict = {}
+
+
+def _edges(rings_xy):
+    """All footprint walls as ``(x0, y0, x1, y1)`` rows and their footprint index (cached)."""
+    hit = _EDGE_CACHE.get(id(rings_xy))
+    if hit is not None and hit[0] is rings_xy:
+        return hit[1], hit[2]
+    edges, owner = [], []
+    for i, ring in enumerate(rings_xy):
+        ring = np.asarray(ring, float)
+        if len(ring) < 3:
+            continue
+        if np.allclose(ring[0], ring[-1]):
+            ring = ring[:-1]
+        edges.append(np.concatenate([ring, np.roll(ring, -1, axis=0)], axis=1))
+        owner.append(np.full(len(ring), i))
+    e = np.concatenate(edges) if edges else np.zeros((0, 4))
+    own = np.concatenate(owner) if owner else np.zeros(0, int)
+    _EDGE_CACHE.clear()
+    _EDGE_CACHE[id(rings_xy)] = (rings_xy, e, own)
+    return e, own
+
+
+def _covering(pano, pose, rings_xy, cols, n_samp: int = 15, min_cover: float = MIN_COVER):
+    """``[(index, range_m)]`` of the footprints whose walls the bearings of at least
+    ``min_cover`` of ``cols`` hit (``range_m``: their median first-wall range), nearest first."""
+    e, own = _edges(rings_xy)
+    if not len(e):
+        return []
+    cols = np.asarray(cols)
+    cs = cols[np.unique(np.linspace(0, len(cols) - 1, min(n_samp, len(cols))).astype(int))]
+    bb = np.radians((pano.frame_heading[cs] + pose.offset_deg) % 360.0)
+    ux, uy = np.sin(bb)[:, None], np.cos(bb)[:, None]
+    px, py = e[None, :, 0], e[None, :, 1]
+    ex, ey = e[None, :, 2] - px, e[None, :, 3] - py
+    den = ux * ey - uy * ex
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = (px * ey - py * ex) / den
+        s = (px * uy - py * ux) / den
+    hit = (np.abs(den) > 1e-12) & (t > 0) & (s >= 0) & (s <= 1)
+    cand = np.unique(own[hit.any(0)])
+    t = np.where(hit, t, np.inf)
+    out = []
+    for i in cand:
+        r = t[:, own == i].min(1)
+        fin = np.isfinite(r)
+        if fin.mean() >= min_cover:
+            out.append((int(i), float(np.median(r[fin]))))
+    return sorted(out, key=lambda q: q[1])
 
 
 def _bearing_ranges(pano, pose, rings_xy, col) -> np.ndarray:
@@ -629,9 +795,16 @@ def match_plot(est: InstanceFloors, pano: fd.Pano, pose: fd.PanoPose, rings_xy: 
                tol: float = 0.2) -> list[tuple[int, float]]:
     """Footprints whose wall the instance's centre bearing hits within the floor-implied
     distance range (widened by ``tol``): ``[(index, range_m)]``, best first (nearest to
-    ``est.dist_m`` in log range). ``rings_xy``: footprints in local metres (``fd._local``)."""
+    ``est.dist_m`` in log range). ``rings_xy``: footprints in local metres (``fd._local``).
+
+    An instance :func:`instance_floors` already matched (``est.plot``: the nearest footprint
+    covering its columns at a plausible storey height) gives that plot first, then its other
+    candidates."""
     if not (est.accepted and math.isfinite(est.dist_m)):
         return []
+    if est.plot is not None:
+        rest = [(c[0], float(c[1])) for c in est.plot_cands if c[0] != est.plot]
+        return [(est.plot, float(est.plot_dist_m))] + rest
     lo, hi = est.dist_range_m[0] * (1 - tol), est.dist_range_m[1] * (1 + tol)
     out = []
     for i, ring in enumerate(rings_xy):
@@ -639,3 +812,114 @@ def match_plot(est: InstanceFloors, pano: fd.Pano, pose: fd.PanoPose, rings_xy: 
         if np.isfinite(d[0]) and lo <= d[0] <= hi:
             out.append((i, float(d[0])))
     return sorted(out, key=lambda t: abs(math.log(t[1] / est.dist_m)))
+
+
+# --------------------------------------------------------------------------- one pano, all instances
+
+def _on_plot(est: InstanceFloors, cand) -> InstanceFloors:
+    """``est`` re-read against the plot candidate ``cand`` (index, range, k, storey)."""
+    import dataclasses
+
+    k0 = next((c[2] for c in est.plot_cands if c[0] == est.plot), 1)
+    i, dd, kk, s = cand
+    floors = est.floors_visible / k0 * kk
+    p = est.storey_m / est.plot_dist_m * k0 / kk if est.plot is not None else s / dd
+    lo, hi = KIND_RANGE_M["residential"]
+    return dataclasses.replace(est, floors_visible=floors, dist_m=float(dd), plot=int(i),
+                               plot_dist_m=float(dd), storey_m=float(s),
+                               period_px=est.period_px * k0 / kk, dist_range_m=(lo / p, hi / p),
+                               high_rise=bool(floors >= HIGH_RISE_FLOORS))
+
+
+def _touch(instances, a: int, b: int, grow: int = 4, min_px: int = 20) -> bool:
+    """Whether masks ``a`` and ``b`` touch (``a`` dilated by ``grow`` px meets ``min_px`` of ``b``)."""
+    from scipy.ndimage import binary_dilation
+
+    ra, ca = np.nonzero(instances == a)
+    if not len(ra):
+        return False
+    r0, r1 = max(0, ra.min() - grow), min(instances.shape[0], ra.max() + grow + 1)
+    c0, c1 = max(0, ca.min() - grow), min(instances.shape[1], ca.max() + grow + 1)
+    sub = instances[r0:r1, c0:c1]
+    near = binary_dilation(sub == a, iterations=grow)
+    return int((near & (sub == b)).sum()) >= min_px
+
+
+def pano_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instances: np.ndarray, ids,
+                depth: np.ndarray | None = None, rings_xy: list | None = None,
+                levels: list | None = None, merge: bool = True):
+    """Storeys of every instance in ``ids`` with one plot per instance and one instance per plot:
+    ``[(InstanceFloors, (plot, range_m) | None)]`` for the accepted ones (2026-10-07).
+
+    - Each instance takes the nearest footprint covering its columns at a plausible storey
+      height (:func:`instance_floors`). Several wanting one plot: the plot goes to the instance
+      that explains it best, the largest vertical extent, scaled down by how far its floors are
+      from the plot's ``levels`` (OSM ``building:levels`` per ring, None if untagged) when given;
+      the others fall back to their next candidate (stable matching). seed_5: the podium under
+      the tower left of centre took the tower's plot ("5 fl, OSM 42").
+    - A loser left without a plot that touches the winner of its first choice is the same
+      building in two masks (a tower on its podium, two faces): with ``merge`` they are counted
+      together, re-read as one instance (``members``)."""
+    import dataclasses
+
+    ests = {}
+    for i in ids:
+        e = instance_floors(pano, pose, gray, instances, int(i), depth=depth, rings_xy=rings_xy)
+        if e is not None and e.accepted:
+            ests[int(i)] = e
+    if rings_xy is None:
+        return [(e, match_plot(e, pano, pose, []) or None) for e in ests.values()]
+
+    def score(e, cand):
+        f = e.floors_visible / next((c[2] for c in e.plot_cands if c[0] == e.plot), 1) * cand[2]
+        lv = levels[cand[0]] if levels is not None else None
+        w = math.exp(-2.0 * abs(math.log(f / lv))) if lv and lv > 0 and f > 0 else 1.0
+        return e.extent_px * w
+
+    def assign(ests):
+        nxt = {i: 0 for i in ests}
+        owner = {}
+        free = sorted(ests, key=lambda i: -ests[i].extent_px)
+        while free:
+            i = free.pop(0)
+            cands = ests[i].plot_cands
+            if nxt[i] >= len(cands):
+                continue
+            c = cands[nxt[i]]
+            nxt[i] += 1
+            j = owner.get(c[0])
+            if j is None:
+                owner[c[0]] = (i, c)
+            elif score(ests[i], c) > score(ests[j[0]], j[1]):
+                owner[c[0]] = (i, c)
+                free.append(j[0])
+            else:
+                free.append(i)
+        return {i: c for i, c in owner.values()}
+
+    got = assign(ests)
+    if merge:
+        first = {e.plot: i for i, e in ests.items() if i in got and got[i][0] == e.plot}
+        groups = {}
+        for i, e in ests.items():
+            w = first.get(e.plot)
+            if i not in got and e.plot is not None and w is not None and _touch(instances, w, i):
+                groups.setdefault(w, [w]).append(i)
+        for w, mem in groups.items():
+            lab = np.where(np.isin(instances, mem), w, instances)
+            u = instance_floors(pano, pose, gray, lab, w, depth=depth, rings_xy=rings_xy)
+            c = next((c for c in (u.plot_cands if u is not None and u.accepted else ())
+                      if c[0] == got[w][0]), None)
+            if c is not None:
+                ests[w] = dataclasses.replace(_on_plot(u, c), members=tuple(sorted(mem)))
+                got[w] = c
+                for i in mem[1:]:
+                    ests.pop(i, None)
+    out = []
+    for i, e in ests.items():
+        if i in got:
+            e = _on_plot(e, got[i]) if got[i][0] != e.plot else e
+            out.append((e, (e.plot, e.plot_dist_m)))
+        elif e.plot is None:
+            out.append((e, None))
+    return out

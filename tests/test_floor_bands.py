@@ -295,7 +295,44 @@ def test_footprint_on_the_bearing_must_match_the_floor_range():
     ok = fl.instance_floors(pano, POSE, gray, inst, 1, rings_xy=[bld[0] * 0.3, bld[0]])
     assert ok is not None and ok.accepted, ok
     off = fl.instance_floors(pano, POSE, gray, inst, 1, rings_xy=[bld[0] * 0.3, bld[0] * 3.0])
-    assert off is not None and not off.accepted and "no footprint there" in off.reason, off
+    assert off is not None and not off.accepted and "no covering footprint" in off.reason, off
     assert off.floors_visible == pytest.approx(ok.floors_visible)
     none = fl.instance_floors(pano, POSE, gray, inst, 1, rings_xy=[])
     assert none is not None and none.accepted                  # nothing on the bearing: no check
+
+
+def test_storey_height_comes_from_the_footprint_range():
+    """Distance from the geometry, not an assumed floor (2026-10-07): a footprint 1.45 x farther
+    than a 3.1 m floor allows means 4.6 m floors (Cartagena's towers run 4.3-4.8 m), accepted
+    with that storey height; the nearest covering footprint at a plausible one wins."""
+    pano, bld, top = _direct_pano(400.0)
+    inst = _instance_map(pano, POSE, bld, top)
+    gray = pano.rgb[..., 0].astype(np.float32)
+    pose = fd.PanoPose(0.0, 0.0, 0.0, 0.1, 100)                  # no base row to bound the range
+    tall = fl.instance_floors(pano, pose, gray, inst, 1, rings_xy=[bld[0] * 0.3, bld[0] * 1.45])
+    assert tall is not None and tall.accepted and tall.plot == 1, tall
+    assert tall.storey_m == pytest.approx(3.2 * 1.45, rel=0.05)
+    assert tall.dist_m == pytest.approx(tall.plot_dist_m)
+    both = fl.instance_floors(pano, pose, gray, inst, 1, rings_xy=[bld[0] * 1.45, bld[0]])
+    assert both.plot == 1 and both.storey_m == pytest.approx(3.2, rel=0.05), both
+    assert fl.match_plot(both, pano, pose, [bld[0] * 1.45, bld[0]])[0][0] == 1
+
+
+def test_one_plot_one_instance_and_split_masks_count_together():
+    """2026-10-07, seed_5: a tower split into masks (its podium below) has one plot; the small
+    mask must not take it alone, and the two count together for the storeys."""
+    pano, bld, top = _direct_pano(400.0)
+    inst = _instance_map(pano, POSE, bld, top)
+    gray = pano.rgb[..., 0].astype(np.float32)
+    pose = fd.PanoPose(0.0, 0.0, 0.0, 0.1, 100)
+    whole = fl.instance_floors(pano, pose, gray, inst, 1, rings_xy=[bld[0]])
+    rows = np.flatnonzero((inst == 1).any(1))
+    split = inst.copy()
+    cut = rows[0] + int(0.62 * (rows[-1] - rows[0]))
+    split[cut:][split[cut:] == 1] = 2                         # the lower ~5 floors: a second mask
+    res = fl.pano_floors(pano, pose, gray, split, [1, 2], rings_xy=[bld[0]])
+    plots = [hit[0] for _e, hit in res if hit]
+    assert plots == [0], res                                  # one instance holds the plot
+    e = next(e for e, hit in res if hit)
+    assert e.members == (1, 2)
+    assert e.floors_visible == pytest.approx(whole.floors_visible, rel=0.1), (e, whole)
