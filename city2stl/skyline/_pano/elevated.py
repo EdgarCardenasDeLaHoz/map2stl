@@ -413,7 +413,7 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
         device = "cuda" if torch.cuda.is_available() else "cpu"
     from city2stl.resources import free_gpu_cache, wait_for_gpu
 
-    from ..building_instances import building_instances
+    from ..building_instances_fast import building_instances
     from ..depth_estimation import predict_pano_depth_tiled
 
     # depth and instances depend on the image only (a camera move changes lat/lon, not pixels),
@@ -535,9 +535,11 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
 #: pano's pixels only (the labels follow from them, and are cached per view so they stay
 #: stable); Depth Anything and MobileSAM took 2-9 min a seed and ran again on every review round,
 #: and labels, stitching and the pose fit another ~90-125 s (2026-10-06). The pano, pose and
-#: measurement keys also hash their code (``stage_cache.source_hash``).
+#: measurement keys also hash their code (``stage_cache.source_hash``). Instances v4: T42
+#: building_instances_fast (memory-sized batches, 7x faster; full_cover prompts the last
+#: half-window the original skipped), 2026-10-07.
 DEPTH_CACHE_VERSION = 1
-INSTANCES_CACHE_VERSION = 3
+INSTANCES_CACHE_VERSION = 4
 LABELS_CACHE_VERSION = 1
 STITCH_CACHE_VERSION = 1
 POSE_CACHE_VERSION = 1
