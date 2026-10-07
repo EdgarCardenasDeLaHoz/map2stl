@@ -155,31 +155,55 @@ def wait_for_gpu(need_gb: float, *, device: int = 0, poll_s: float = GPU_POLL_S,
 
 #: Thread variables every BLAS/OpenMP library reads at import.
 _THREAD_ENV = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS")
-#: Another process holding more GPU memory than this counts as a running GPU job.
-OTHER_GPU_JOB_MB = 1024
-
-
 def other_gpu_jobs_mb() -> dict[int, int]:
-    """{pid: MB} of other processes holding GPU memory (nvidia-smi), {} when unavailable.
+    """{pid: MB} of other Python processes holding dedicated GPU memory, {} when unavailable.
 
-    Windows WDDM drivers report ``[N/A]`` per process, so on this laptop the dict is empty and
-    the GPU lock (:func:`wait_for_gpu`) is what keeps GPU jobs apart."""
+    On Windows nvidia-smi reports ``[N/A]`` per process (WDDM), so the "GPU Process Memory"
+    performance counters are read instead (typeperf). Only python processes count: the desktop
+    and browsers hold some VRAM all the time. The GPU lock (:func:`wait_for_gpu`) stays the main
+    guard; this catches jobs that never take it."""
+    import csv
+    import re
     import subprocess
     try:
-        out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory",
-                              "--format=csv,noheader,nounits"], capture_output=True, text=True,
-                             timeout=20).stdout
-    except (OSError, subprocess.SubprocessError):
+        if os.name == "nt":
+            out = subprocess.run(["typeperf", r"\GPU Process Memory(*)\Dedicated Usage", "-sc", "1"],
+                                 capture_output=True, text=True, timeout=30).stdout
+            rows = [r for r in csv.reader(out.splitlines()) if len(r) > 1]
+            used: dict[int, float] = {}
+            for name, val in zip(rows[0][1:], rows[1][1:], strict=False):
+                m = re.search(r"pid_(\d+)_", name)
+                if m:
+                    used[int(m.group(1))] = used.get(int(m.group(1)), 0.0) + float(val or 0) / 2**20
+        else:
+            out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory",
+                                  "--format=csv,noheader,nounits"], capture_output=True, text=True,
+                                 timeout=20).stdout
+            used = {}
+            for line in out.splitlines():
+                try:
+                    pid, mb = (int(v) for v in line.split(","))
+                except ValueError:
+                    continue
+                used[pid] = mb
+    except (OSError, subprocess.SubprocessError, IndexError, ValueError):
         return {}
+    import psutil
     jobs = {}
-    for line in out.splitlines():
-        try:
-            pid, mb = (int(v) for v in line.split(","))
-        except ValueError:
+    for pid, mb in used.items():
+        if pid == os.getpid() or mb < 1:
             continue
-        if pid != os.getpid():
-            jobs[pid] = mb
+        try:
+            if "python" not in psutil.Process(pid).name().lower():
+                continue
+        except psutil.Error:
+            continue
+        jobs[pid] = int(mb)
     return jobs
+
+
+#: Another python process holding more dedicated GPU memory than this counts as a GPU job.
+OTHER_GPU_JOB_MB = 300
 
 
 def scratch_guard(gpu_gb: float | None = None, ram_gb: float = HEAVY_JOB_MIN_FREE_GB,

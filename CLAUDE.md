@@ -28,13 +28,20 @@ npm install && npm run build  # after editing .vue / .ts (the Vue bundle in dist
 ## Shared machine resources (local and cloud agents)
 
 Several agents share one laptop (6 cores / 12 threads, 32 GB RAM, 4 GB VRAM). Helpers:
-`city2stl/resources.py` (`wait_for_gpu`, `wait_for_ram`, `ram_ok`, `free_gpu_cache`).
+`city2stl/resources.py` (`scratch_guard`, `wait_for_gpu`, `wait_for_ram`, `ram_ok`, `free_gpu_cache`).
 
 - **GPU queue, no CPU fallback:** SegFormer, Depth Anything, MobileSAM and training jobs wait
-  for GPU memory (`wait_for_gpu(need_gb)`: checks every 30 s, times out after an hour; SegFormer b3
-  at batch 4 needs about 2 GB). Never set `SKYLINE_CV_SEGFORMER_DEVICE=cpu` because the GPU looks
-  busy. Use the CPU only for a handful of images or when the user says so.
-  Call `free_gpu_cache()` (`torch.cuda.empty_cache()`) between photos and between models.
+  for GPU memory (`wait_for_gpu(need_gb)`: takes a machine-wide GPU lock, checks every 30 s, times
+  out after an hour; SegFormer b3 at batch 4 needs about 2 GB). Never set
+  `SKYLINE_CV_SEGFORMER_DEVICE=cpu` because the GPU looks busy. Use the CPU only for a handful of
+  images or when the user says so. Call `free_gpu_cache()` (empties the cache and releases the
+  lock) between photos and between models. Size batches from `torch.cuda.mem_get_info()`, never
+  a fixed large batch: overflow spills into system RAM.
+- **Scratch scripts and agent helpers** (anything outside the repo's app and tests) start with
+  `from city2stl.resources import scratch_guard; workers = scratch_guard(gpu_gb=..., max_workers=...)`
+  before importing numpy/cv2/torch: one BLAS thread, waits for RAM, waits while another python
+  process holds GPU memory, takes the GPU lock, returns a safe pool size. Put the same line in
+  subagent prompts.
 - **Concurrency budget, across all agents:** at most 2 heavy pipelines (region PDF,
   `photo_profiles`, river carve, training) plus 1 `pytest -n` suite at a time. Start a heavy job
   only with ≥ 6 GB RAM free (`wait_for_ram()`). BLAS/OMP threads = 1 in every multiprocessing or xdist
