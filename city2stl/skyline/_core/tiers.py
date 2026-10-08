@@ -24,6 +24,12 @@ Not listed, so never verified: shadow + shadow and stereo + stereo (one podium o
 pair cuts every reading the same way), floors + drone from the same seed (one image),
 street + street (the roof-to-building assignment errs the same way from every street seed).
 
+Tag + one reading (the user's rule, 2026-10-08, ``tag_witness``): an OSM ``height`` tag
+(``osm_tag``; never ``osm_levels``) that agrees within ``AGREE_REL`` with one independent image
+reading is ``verified_2`` (methods ``["osm_tag", <reading>]``). The reading can be a (trusted)
+drone reading, a satellite lean or multiview, or a stereo reading of ``SAT_MIN_M`` or more; never
+a shadow (a lower bound), floors alone, or Street View.
+
 ``prior_disagrees``: a ``single`` row whose published height is more than
 ``PRIOR_DISAGREE_FACTOR`` from the prior.
 
@@ -124,14 +130,48 @@ def _pair_value(pair: tuple[dict, dict]) -> float:
     return (pair[0]["value_m"] + pair[1]["value_m"]) / 2
 
 
+#: Reading kinds that can verify an OSM height tag on their own (``tag_witness``); stereo only
+#: at ``SAT_MIN_M`` or more. Not shadow (a lower bound), floors, or street.
+TAG_WITNESS_KINDS = ("drone", "lean", "multiview", "stereo")
+#: The tag source a single reading can verify: a height tag, not a level count.
+TAG_WITNESS_SOURCE = "osm_tag"
+
+
+def _can_witness(r: dict) -> bool:
+    if r["kind"] not in TAG_WITNESS_KINDS:
+        return False
+    return r["kind"] != "stereo" or r["value_m"] >= SAT_MIN_M
+
+
+def tag_witness(readings: Sequence[dict], tag_m: float | None,
+                tag_source: str | None) -> dict | None:
+    """The image reading that verifies an OSM height tag on its own, or None: ``tag_source``
+    must be ``osm_tag`` and the reading a ``TAG_WITNESS_KINDS`` kind within ``AGREE_REL`` of the
+    tag (the closest one when several agree)."""
+    if tag_m is None or tag_source != TAG_WITNESS_SOURCE:
+        return None
+    best, best_d = None, None
+    for r in readings:
+        v = r.get("value_m")
+        if v is None or v <= 0 or not _can_witness(r) or not agree(v, float(tag_m)):
+            continue
+        d = abs(v - float(tag_m))
+        if best_d is None or d < best_d:
+            best, best_d = r, d
+    return best
+
+
 def verification_tier(readings: Sequence[dict], tag_m: float | None = None,
-                      survey: float | None = None) -> tuple[str, list[str]]:
+                      survey: float | None = None,
+                      tag_source: str | None = None) -> tuple[str, list[str]]:
     """``(tier, methods)`` for one building.
 
     ``readings``: the building's published-kind readings (see module docstring); ``tag_m``:
-    its OSM height tag when that is what is published; ``survey``: its survey nDSM height
-    when that is published. A verified pair must also agree with the tag when there is one;
-    otherwise the tag stands (tier ``tag``). ``methods`` name what the tier rests on.
+    its OSM height tag when that is what is published; ``tag_source``: that tag's source
+    (``osm_tag`` / ``osm_levels``); ``survey``: its survey nDSM height when that is published.
+    A verified pair must also agree with the tag when there is one. Otherwise an ``osm_tag``
+    tag one reading agrees with (``tag_witness``) is ``verified_2`` too, unless an independent
+    pair disputes it; else the tag stands (tier ``tag``). ``methods`` name what the tier rests on.
     """
     if survey is not None:
         return "survey", ["survey"]
@@ -139,6 +179,9 @@ def verification_tier(readings: Sequence[dict], tag_m: float | None = None,
     if pair is not None and (tag_m is None or agree(_pair_value(pair), float(tag_m))):
         return "verified_2", sorted(label(r) for r in pair)
     if tag_m is not None:
+        w = tag_witness(readings, tag_m, tag_source) if pair is None else None
+        if w is not None:
+            return "verified_2", ["osm_tag", label(w)]
         return "tag", ["osm_tag"]
     rs = [r for r in readings if r.get("value_m") is not None]
     if rs:
@@ -148,7 +191,8 @@ def verification_tier(readings: Sequence[dict], tag_m: float | None = None,
 
 def tier_fields(readings: Sequence[dict], *, published_m: float | None,
                 tag_m: float | None = None, survey: float | None = None,
-                prior_m: float | None = None, prior_source: str | None = None) -> dict:
+                prior_m: float | None = None, prior_source: str | None = None,
+                tag_source: str | None = None) -> dict:
     """The tier fields of a published row: ``tier``, ``tier_methods``, ``verified``,
     ``disputed_by`` and ``prior_disagrees``.
 
@@ -156,8 +200,9 @@ def tier_fields(readings: Sequence[dict], *, published_m: float | None,
     ``published_m`` (e.g. two drone seeds against the tag); such a pair never verifies the
     row, so an untagged row it disputes drops to ``single``. ``prior_m`` / ``prior_source``:
     the prior's height (for ``prior_disagrees``) and name (the ``prior`` tier's method).
+    ``tag_source``: the published tag's source; ``osm_tag`` lets one reading verify it.
     """
-    tier, methods = verification_tier(readings, tag_m, survey)
+    tier, methods = verification_tier(readings, tag_m, survey, tag_source)
     disputed_by: list[str] = []
     pair = verified_pair(readings)
     if pair is not None and published_m is not None \

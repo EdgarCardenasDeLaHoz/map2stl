@@ -165,8 +165,13 @@ def _write_heights_json(
     building_heights: list,
     building_records: list[BuildingRecord],
     known_heights: list[dict] | None,
+    satellite: dict | None = None,
 ) -> None:
     """Dump the aggregated per-building heights next to the HTML report.
+
+    ``satellite``: ``{feature_id: [SatReading]}`` (``satellite_fusion.load_region``): an
+    unmeasured tagged row's readings, so one agreeing reading can verify its ``osm_tag``
+    (``tiers.tag_witness``).
 
     The aggregation is the pipeline's actual answer, and it used to live only
     inside a rendered figure. Anything that wants to score the run — a vendor
@@ -213,6 +218,15 @@ def _write_heights_json(
             ring = [[round(x, 6), round(y, 6)] for x, y in rec.geometry.exterior.coords]
         except Exception:
             continue
+        sat_rs = (satellite or {}).get(rec.feature_id) or []
+        sat_readings = []
+        if sat_rs:
+            from .satellite_fusion import tier_readings  # noqa: PLC0415
+            sat_readings = tier_readings(sat_rs)
+        tf = tier_fields(sat_readings, published_m=float(rec.height_tag_m),
+                         tag_m=float(rec.height_tag_m), tag_source=rec.height_source)
+        extra = ({"satellite": {r.method: [round(r.height_m, 1), round(r.conf, 2)]
+                                for r in sat_rs}} if sat_rs else {})
         rows.append({"feature_id": rec.feature_id, "name": rec.name, "measured": False,
                      "effective_height_m": float(rec.height_tag_m),
                      "effective_height_source": rec.height_source, "n_views": 0,
@@ -220,10 +234,9 @@ def _write_heights_json(
                      "centroid_lat": rec.centroid_lat, "centroid_lon": rec.centroid_lon,
                      "area_m2": rec.area_m2, "height_tag_m": rec.height_tag_m,
                      "height_source": rec.height_source, "footprint_lonlat": ring,
-                     **tier_fields([], published_m=float(rec.height_tag_m),
-                                   tag_m=float(rec.height_tag_m)),
+                     **extra, **tf,
                      "no_survey_height_m": float(rec.height_tag_m),
-                     "no_survey_source": rec.height_source, "no_survey_tier": "tag"})
+                     "no_survey_source": rec.height_source, "no_survey_tier": tf["tier"]})
 
     doc = {
         # 2: rows carry verification tiers and the survey-blind answer (F-SKY26 2a/2c)
@@ -592,7 +605,8 @@ def run_region_pdf_report(
         building_heights, building_records,
         fallback=untagged_fallback([r for r in building_records if r.feature_id in _est_ids],
                                    region=region_name),
-        measured_seeds=set(elevated_seeds or ()), satellite=satellite)
+        measured_seeds=set(elevated_seeds or ()), satellite=satellite,
+        floors=(elevated_state or {}).get("floors"))
     _fill_unread_heights(building_heights)
     if n_withheld:
         logger.info(f"[withhold_untagged] {n_withheld} untagged building(s): Street View "
@@ -659,6 +673,7 @@ def run_region_pdf_report(
         building_heights=building_heights,
         building_records=building_records,
         known_heights=known_heights,
+        satellite=satellite,
     )
 
     good = len([r for r in screened if r["coverage"] == "good"])

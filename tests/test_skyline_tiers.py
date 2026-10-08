@@ -11,6 +11,7 @@ from city2stl.skyline._core.tiers import (
     independent,
     reading,
     single_withheld,
+    tag_witness,
     tier_counts,
     tier_fields,
     verification_tier,
@@ -121,6 +122,93 @@ def test_tier_fields_dispute_and_prior_disagrees():
     assert tier_fields(pair, published_m=51.0, prior_m=10.0)["prior_disagrees"] is False
 
 
+# --------------------------------------------------------------------------- tag + one reading
+
+@pytest.mark.parametrize("r", [R("drone", 170, "seed_1"), R("lean", 168), R("multiview", 175),
+                               R("stereo", 160)])
+def test_osm_tag_verified_by_one_reading(r):
+    tier, methods = verification_tier([r], tag_m=190.0, tag_source="osm_tag")
+    want = "drone:seed_1" if r["seed"] else r["kind"]
+    assert tier == "verified_2" and methods == ["osm_tag", want]
+    f = tier_fields([r], published_m=190.0, tag_m=190.0, tag_source="osm_tag")
+    assert f["tier"] == "verified_2" and f["verified"] and f["disputed_by"] == []
+
+
+@pytest.mark.parametrize("readings,source", [
+    ([R("shadow", 185)], "osm_tag"),                     # a lower bound
+    ([R("drone", 185, "seed_1")], "osm_levels"),         # a level count, not a height tag
+    ([R("drone", 133, "seed_1")], "osm_tag"),            # 30 % off the tag
+    ([R("lean", 260)], "osm_tag"),                       # 27 % of the larger
+    ([R("floors", 185, "seed_1")], "osm_tag"),           # floors alone
+    ([R("street", 185, "seed_9")], "osm_tag"),           # Street View
+    ([R("stereo", 36)], "osm_tag"),                      # stereo under 40 m
+    ([R("drone", 185, "seed_1")], None),                 # source unknown (old callers)
+])
+def test_osm_tag_not_verified(readings, source):
+    tag = 36.0 if readings[0]["kind"] == "stereo" else 190.0
+    assert verification_tier(readings, tag_m=tag, tag_source=source) == ("tag", ["osm_tag"])
+    assert tag_witness(readings, tag, source) is None
+
+
+def test_tag_witness_picks_the_closest_and_a_disputing_pair_blocks_it():
+    rs = [R("lean", 160), R("drone", 185, "seed_1")]
+    assert tag_witness(rs, 190.0, "osm_tag")["kind"] == "drone"
+    # two drone seeds agree with each other at 100 m against the tag: no verification by one
+    pair = [R("drone", 100, "seed_1"), R("drone", 102, "seed_2"), R("lean", 185)]
+    f = tier_fields(pair, published_m=190.0, tag_m=190.0, tag_source="osm_tag")
+    assert f["tier"] == "tag" and f["disputed_by"] == ["drone:seed_1", "drone:seed_2"]
+
+
+def test_wiring_tagged_row_verified_by_a_satellite_lean(monkeypatch):
+    from types import SimpleNamespace as NS
+    for k in ("SKYLINE_WITHHOLD_UNTAGGED", "SKYLINE_PREFER_TAGS", "SKYLINE_WITHHOLD_SINGLE"):
+        monkeypatch.delenv(k, raising=False)
+    sat = {"allure": [NS(method="lean", height_m=167.5, conf=1.0),
+                      NS(method="shadow", height_m=12.3, conf=0.26)],
+           "lv": [NS(method="lean", height_m=60.0, conf=1.0)]}
+    rows = [{"feature_id": f, "effective_height_m": 207.0, "effective_height_source": "geometric",
+             "per_seed_median_m": {"auto_090_1400m": 207.0}} for f in ("allure", "lv")]
+    recs = [_rec("allure", "osm_tag", 190.0), _rec("lv", "osm_levels", 62.0)]
+    withhold_untagged_street_view(rows, recs, measured_seeds={"seed_1"}, satellite=sat)
+    a, lv = rows
+    assert a["effective_height_m"] == 190.0 and a["tier"] == "verified_2"
+    assert a["tier_methods"] == ["osm_tag", "lean"] and a["no_survey_tier"] == "verified_2"
+    assert lv["tier"] == "tag"                                       # levels: never by one reading
+
+
+# --------------------------------------------------------------------------- high-rise hook
+
+def _floors_info(flagged=True, floors=30):
+    return {"floors": floors, "lower_bound": True, "storey_m": 3.5, "floors_m": floors * 3.5 + 3,
+            "seeds": ["seed_6"], "high_rise_seen": flagged}
+
+
+def test_high_rise_publishes_floors_and_is_exempt_from_the_2x_rule(monkeypatch):
+    for k in ("SKYLINE_WITHHOLD_UNTAGGED", "SKYLINE_PREFER_TAGS", "SKYLINE_WITHHOLD_SINGLE"):
+        monkeypatch.delenv(k, raising=False)
+    rows = [{"feature_id": f, "effective_height_m": 40.0, "effective_height_source": "geometric",
+             "per_seed_median_m": {"seed_9": 40.0}} for f in ("hr", "notflagged", "drone")]
+    rows[2]["per_seed_median_m"] = {"seed_1": 99.0}
+    recs = [_rec(f, "default") for f in ("hr", "notflagged", "drone")]
+    floors = {"hr": _floors_info(), "notflagged": _floors_info(False), "drone": _floors_info()}
+    withhold_untagged_street_view(rows, recs, fallback=lambda r: (14.0, "prior_gbm"),
+                                  measured_seeds={"seed_1"}, floors=floors)
+    hr, nf, dr = rows
+    assert (hr["effective_height_m"], hr["effective_height_source"]) == (108.0, "withheld:high_rise")
+    assert hr["tier"] == "single" and hr["tier_methods"] == ["floors"]   # 108 > 2x 14: kept
+    assert "withheld_reason" not in hr and hr["high_rise"]["floors"] == 30
+    assert hr["no_survey_height_m"] == 108.0
+    assert (nf["effective_height_m"], nf["tier"]) == (14.0, "prior")    # not flagged: prior
+    # a drone reading comes first, and stays under the 2x rule
+    assert dr["tier"] == "prior" and dr["single_source"] == "withheld:elevated"
+    # never lowers the prior
+    rows = [{"feature_id": "hr", "effective_height_m": 40.0, "effective_height_source": "g",
+             "per_seed_median_m": {}}]
+    withhold_untagged_street_view(rows, recs[:1], fallback=lambda r: (200.0, "prior_gbm"),
+                                  floors={"hr": _floors_info(floors=10)})
+    assert rows[0]["effective_height_m"] == 200.0
+
+
 def test_tier_counts():
     rows = [{"tier": "tag"}, {"tier": "tag"}, {"tier": "prior"}, {}]
     assert tier_counts(rows) == {"survey": 0, "verified_2": 0, "tag": 2, "single": 0,
@@ -166,7 +254,9 @@ def test_wiring_keeps_published_values_and_labels_tiers(monkeypatch):
     by = {r["feature_id"]: r for r in rows}
     assert {k: (r["effective_height_m"], r["effective_height_source"]) for k, r in by.items()} \
         == EXPECTED_PUBLISHED
-    assert by["tag"]["tier"] == "tag"
+    # the osm_tag (100 m) and drone seed_1 (98 m) agree: verified by one reading (2026-10-08)
+    assert by["tag"]["tier"] == "verified_2"
+    assert by["tag"]["tier_methods"] == ["osm_tag", "drone:seed_1"]
     assert by["drone2"]["tier"] == "verified_2" and by["drone2"]["verified"]
     assert by["drone2"]["tier_methods"] == ["drone:seed_1", "drone:seed_2"]
     d1 = by["drone1"]                                                 # 61 vs 14: withheld
@@ -273,6 +363,32 @@ def test_drone_seen_footprint_without_a_reading_gets_a_prior_row(monkeypatch):
     withhold_untagged_street_view(rows2, recs, measured_seeds={"seed_1"})
     _fill_unread_heights(rows2)
     assert rows2 == []
+
+
+def test_heights_json_unmeasured_tag_verified_by_a_satellite_reading(tmp_path):
+    from types import SimpleNamespace as NS
+
+    from shapely.geometry import Polygon
+
+    from city2stl.skyline.region_pdf import _write_heights_json
+
+    class BBox:
+        north, south, east, west = 10.43, 10.38, -75.52, -75.57
+
+    poly = Polygon([(-75.553, 10.402), (-75.5526, 10.402), (-75.5526, 10.4024), (-75.553, 10.4024)])
+    recs = [BuildingRecord("b", "Allure", poly, 10.4022, -75.5528, 190.0, "osm_tag", 900.0),
+            BuildingRecord("c", "Levels", poly, 10.4022, -75.5528, 60.0, "osm_levels", 900.0)]
+    sat = {"b": [NS(method="lean", height_m=168.0, conf=1.0)],
+           "c": [NS(method="lean", height_m=58.0, conf=1.0)]}
+    path = tmp_path / "heights.json"
+    _write_heights_json(path, region_name="x", bbox=BBox, building_heights=[],
+                        building_records=recs, known_heights=None, satellite=sat)
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    by = {b["feature_id"]: b for b in doc["buildings"]}
+    assert by["b"]["tier"] == "verified_2" and by["b"]["tier_methods"] == ["osm_tag", "lean"]
+    assert by["b"]["no_survey_tier"] == "verified_2" and by["b"]["satellite"] == {"lean": [168.0, 1.0]}
+    assert by["c"]["tier"] == "tag"
+    assert doc["tier_counts"]["verified_2"] == 1 and doc["tier_counts"]["tag"] == 1
 
 
 def test_heights_json_has_schema_2_and_tier_counts(tmp_path):
