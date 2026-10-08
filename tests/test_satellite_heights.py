@@ -134,6 +134,9 @@ def _rec(fid, source, tag=None):
 
 def test_tiers_with_satellite(monkeypatch):
     monkeypatch.delenv("SKYLINE_WITHHOLD_UNTAGGED", raising=False)
+    # the satellite singles here are over 2x the 12 m prior, which the single-over-2x rule
+    # would withhold (test_skyline_tiers); this test is about the satellite wiring
+    monkeypatch.setenv("SKYLINE_WITHHOLD_SINGLE", "0")
     sat = {
         "d": sr.footprint_readings(lean={"height_m": 110.0, "conf": 0.8}),       # drone + lean
         "s": sr.footprint_readings(lean={"height_m": 130.0, "conf": 0.8}),       # satellite only
@@ -156,6 +159,14 @@ def test_tiers_with_satellite(monkeypatch):
     assert ssr["satellite_lower_bound"]                       # shadows only: a lower bound
     assert lo["effective_height_source"] == "withheld:prior" and lo["tier"] == "prior"
     assert lo["satellite"] == {"shadow": [20.0, 0.9]}
+    # rule on: the satellite-only single (130 m vs a 12 m prior) publishes the prior
+    monkeypatch.setenv("SKYLINE_WITHHOLD_SINGLE", "1")
+    rows = [{"feature_id": "s", "effective_height_m": 50.0, "effective_height_source": "geometric",
+             "per_seed_median_m": {"seed_9": 50.0}}]
+    withhold_untagged_street_view(rows, [_rec("s", "default")], fallback=lambda r: (12.0, "prior"),
+                                  measured_seeds={"seed_1"}, satellite=sat)
+    assert rows[0]["effective_height_m"] == 12.0 and rows[0]["tier"] == "prior"
+    assert rows[0]["single_source"] == "withheld:satellite" and rows[0]["single_reading_m"] == 130.0
 
 
 def test_elevated_estimates_skip_satellite_keys_and_satellite_can_dispute():

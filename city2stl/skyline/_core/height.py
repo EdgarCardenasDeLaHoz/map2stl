@@ -719,6 +719,18 @@ def _withhold_untagged_enabled() -> bool:
         "0", "false", "no", "off")
 
 
+def _withhold_single_enabled() -> bool:
+    """Whether an untagged ``single`` reading more than 2x the prior publishes the prior.
+
+    On by default (the user's rule, 2026-10-07/08; ``tiers.single_withheld``): on Cartagena v9,
+    164 single rows read over 2x their prior at a median of ~99 m, and the tower-behind check
+    (``elevated.tower_behind``) showed such a reading is often a farther tower's top.
+    ``SKYLINE_WITHHOLD_SINGLE=0`` publishes the single reading again.
+    """
+    return os.environ.get("SKYLINE_WITHHOLD_SINGLE", "1").strip().lower() not in (
+        "0", "false", "no", "off")
+
+
 def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRecord],
                                   fallback=None, measured_seeds=(), satellite=None) -> int:
     """Replace the Street View height of every untagged building in ``rows`` (the output of
@@ -750,8 +762,19 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
     kind never do), and an untagged row with no drone reading publishes the satellite-only height
     (``satellite_fusion.publishable``, source ``"withheld:satellite"``) instead of the prior when
     its best reading's sigma_log is at most 0.25. Rows carry ``satellite`` ({method: [m, conf]}).
+
+    A ``single`` row (drone median or satellite-only, unconfirmed, untagged) more than 2x its
+    prior publishes the prior instead (``SKYLINE_WITHHOLD_SINGLE``, default on; the user's rule
+    2026-10-08): tier ``prior``, ``prior_disagrees`` True, and the reading kept as unverified
+    evidence in ``single_reading_m`` / ``single_source`` / ``single_methods`` with
+    ``withheld_reason`` ``"single over 2x prior"``. Singles within 2x publish as before.
     """
-    from .tiers import reading, tier_fields  # noqa: PLC0415
+    from .tiers import (  # noqa: PLC0415
+        SINGLE_WITHHELD_REASON,
+        reading,
+        single_withheld,
+        tier_fields,
+    )
     if satellite:
         from ..satellite_fusion import publishable, tier_readings  # noqa: PLC0415
 
@@ -799,6 +822,18 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
             published, published_m=row.get("effective_height_m"),
             tag_m=h if (h is not None and tagged) else None,
             prior_m=prior[0] if prior else None, prior_source=prior[1] if prior else None))
+        if (prior is not None and _withhold_single_enabled()
+                and single_withheld(row["tier"], h, prior[0])):
+            # the user's rule (2026-10-08): one unconfirmed reading over 2x the prior is kept
+            # as evidence only; the prior is published
+            row["single_reading_m"] = h
+            row["single_source"] = src
+            row["single_methods"] = row["tier_methods"]
+            row["withheld_reason"] = SINGLE_WITHHELD_REASON
+            row["effective_height_m"] = float(prior[0])
+            row["effective_height_source"] = f"withheld:{prior[1]}"
+            row.update(tier="prior", tier_methods=[prior[1]], verified=False,
+                       prior_disagrees=True)
         # the survey-blind answer the benchmark headline scores (2c); the published one
         # until survey heights are published (2d)
         row["no_survey_height_m"] = row.get("effective_height_m")

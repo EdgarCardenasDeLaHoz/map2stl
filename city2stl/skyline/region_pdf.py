@@ -56,7 +56,7 @@ import os
 import time
 from pathlib import Path
 
-from ._core.height import untagged_fallback, withhold_untagged_street_view
+from ._core.height import TAGGED_SOURCES, untagged_fallback, withhold_untagged_street_view
 from ._core.tiers import tier_counts, tier_fields
 from ._core.timing import _StepTimer
 from ._core.types import BuildingRecord
@@ -97,6 +97,64 @@ logger = logging.getLogger(__name__)
 
 #: ``heights.json`` layout version; 2 added ``tier_counts`` and per-row tiers (F-SKY26).
 HEIGHTS_SCHEMA_VERSION = 2
+
+
+def _drone_seen_rows(building_heights: list, building_records: list[BuildingRecord],
+                     pano_results: list, elevated_seeds) -> list[dict]:
+    """Rows for the untagged footprints a drone seed measured that got no estimate, to be
+    appended to ``building_heights`` before ``withhold_untagged_street_view`` gives them the
+    prior, like any untagged footprint a seed read.
+
+    A drone reading reaches the aggregate only when it is trusted, not flagged by the
+    tower-behind check (``elevated.tower_behind``) and not disputed in fusion; a footprint whose
+    only reading was left out had no row at all, so it vanished from ``heights.json``
+    (Cartagena v9, 2026-10-07: 41 footprints lost their only drone reading to the tower-behind
+    check). The drone seeds that measured it are in ``drone_seen``; their heights are not used.
+    ``pano_results``: the run's (an elevated seed's carries one segment per measured footprint).
+    """
+    seeds = set(elevated_seeds or ())
+    if not seeds:
+        return []
+    have = {row.get("feature_id") for row in building_heights}
+    by_id = {r.feature_id: r for r in building_records}
+    seen: dict[str, set] = {}
+    for pr in pano_results or ():
+        if getattr(pr, "seed_name", None) not in seeds:
+            continue
+        for seg in getattr(pr, "matched_segments", None) or ():
+            if seg.get("height_src") != "footprint":
+                continue
+            fid = (seg.get("matched_projection") or {}).get("feature_id")
+            if fid:
+                seen.setdefault(fid, set()).add(pr.seed_name)
+    out = []
+    for fid, by in sorted(seen.items()):
+        rec = by_id.get(fid)
+        if fid in have or rec is None or rec.height_source in TAGGED_SOURCES:
+            continue
+        out.append({"feature_id": fid, "name": rec.name, "n_views": 0,
+                    "n_views_after_outlier_filter": 0, "n_view_outliers_dropped": 0,
+                    "n_seeds": 0, "n_outlier_seeds": 0, "outlier_seeds": [],
+                    "median_height_m": None, "weighted_height_m": None, "mad_m": None,
+                    "mean_confidence": 0.0, "per_seed_median_m": {},
+                    "seed_disagreement_m": None, "seed_std_m": None, "f_sky1_height_m": None,
+                    "f_sky1_n_views": 0, "depth_rescue_height_m": None, "views": [],
+                    "effective_height_m": None, "effective_height_source": None,
+                    "drone_seen": sorted(by)})
+    return out
+
+
+def _fill_unread_heights(rows: list[dict]) -> None:
+    """Give ``_drone_seen_rows`` rows their published height as median / weighted height (the
+    report pages plot ``weighted_height_m``); drop the ones that got no height."""
+    for row in list(rows):
+        if "drone_seen" not in row or row.get("median_height_m") is not None:
+            continue
+        h = row.get("effective_height_m")
+        if h is None:
+            rows.remove(row)
+        else:
+            row["median_height_m"] = row["weighted_height_m"] = float(h)
 
 
 def _write_heights_json(
@@ -523,11 +581,19 @@ def run_region_pdf_report(
     # The fallback is the T41 height prior; its neighbours are the buildings the run
     # estimated, as in its training data. Drone seeds' trusted readings win over it.
     _est_ids = {row.get("feature_id") for row in building_heights}
+    # footprints a drone seed measured but whose readings all were left out (tower behind,
+    # untrusted, disputed) get a row too, so the prior publishes for them (F-SKY26, 2026-10-08)
+    _unread = _drone_seen_rows(building_heights, building_records, pano_results, elevated_seeds)
+    if _unread:
+        logger.info(f"[elevated] {len(_unread)} untagged footprint(s) measured by a drone seed "
+                    f"with no usable reading: prior row added")
+        building_heights.extend(_unread)
     n_withheld = withhold_untagged_street_view(
         building_heights, building_records,
         fallback=untagged_fallback([r for r in building_records if r.feature_id in _est_ids],
                                    region=region_name),
         measured_seeds=set(elevated_seeds or ()), satellite=satellite)
+    _fill_unread_heights(building_heights)
     if n_withheld:
         logger.info(f"[withhold_untagged] {n_withheld} untagged building(s): Street View "
                     f"height withheld, fallback used")

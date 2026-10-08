@@ -26,6 +26,12 @@ street + street (the roof-to-building assignment errs the same way from every st
 
 ``prior_disagrees``: a ``single`` row whose published height is more than
 ``PRIOR_DISAGREE_FACTOR`` from the prior.
+
+Publish rule (the user's choice, 2026-10-08, ``single_withheld``): a ``single`` reading more than
+``SINGLE_WITHHOLD_FACTOR`` x the prior publishes the prior instead (tier ``prior``); the reading
+stays in the row as unverified evidence (``single_reading_m``, ``single_source``,
+``withheld_reason``). On Cartagena v9 the tower-behind check showed such readings are often a
+farther tower's top, and the 164 singles over 2x the prior had a median of ~99 m.
 """
 
 from __future__ import annotations
@@ -47,6 +53,11 @@ LEAN_SHADOW_MIN_M = 100.0
 #: A ``single`` height more than this factor from the prior is flagged ``prior_disagrees``.
 PRIOR_DISAGREE_FACTOR = 2.0
 SATELLITE_KINDS = ("lean", "multiview", "stereo")
+#: A ``single`` height more than this factor *over* the prior publishes the prior instead
+#: (``single_withheld``; the user's rule, 2026-10-08). Singles under the prior are kept.
+SINGLE_WITHHOLD_FACTOR = 2.0
+#: ``withheld_reason`` of a row whose single reading was withheld.
+SINGLE_WITHHELD_REASON = "single over 2x prior"
 
 
 def reading(kind: str, value_m: float, seed: str | None = None) -> dict:
@@ -161,6 +172,14 @@ def tier_fields(readings: Sequence[dict], *, published_m: float | None,
         and max(prior_m, published_m) > PRIOR_DISAGREE_FACTOR * min(prior_m, published_m))
     return {"tier": tier, "tier_methods": methods, "verified": tier in VERIFIED_TIERS,
             "disputed_by": disputed_by, "prior_disagrees": prior_disagrees}
+
+
+def single_withheld(tier: str, published_m: float | None, prior_m: float | None,
+                    factor: float = SINGLE_WITHHOLD_FACTOR) -> bool:
+    """Whether a row's ``single`` height is withheld for the prior: tier ``single`` and the
+    published height more than ``factor`` x the prior (a prior of None or 0 withholds nothing)."""
+    return bool(tier == "single" and prior_m and published_m
+                and float(published_m) > factor * float(prior_m))
 
 
 def tier_counts(rows: Sequence[dict]) -> dict[str, int]:

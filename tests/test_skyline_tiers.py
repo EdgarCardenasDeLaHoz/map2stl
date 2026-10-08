@@ -10,6 +10,7 @@ from city2stl.skyline._core.tiers import (
     agree,
     independent,
     reading,
+    single_withheld,
     tier_counts,
     tier_fields,
     verification_tier,
@@ -149,9 +150,10 @@ def _fixture():
     return rows, recs
 
 
-EXPECTED_PUBLISHED = {  # what the code before tiers published (commit a22afec)
+EXPECTED_PUBLISHED = {  # what the code before tiers published (commit a22afec), except drone1:
+    # a single reading over 2x the prior publishes the prior (the user's rule, 2026-10-08)
     "tag": (100.0, "osm_tag"), "drone2": (62.0, "withheld:elevated"),
-    "drone1": (61.0, "withheld:elevated"), "street": (14.0, "withheld:prior_gbm")}
+    "drone1": (14.0, "withheld:prior_gbm"), "street": (14.0, "withheld:prior_gbm")}
 
 
 def test_wiring_keeps_published_values_and_labels_tiers(monkeypatch):
@@ -167,11 +169,63 @@ def test_wiring_keeps_published_values_and_labels_tiers(monkeypatch):
     assert by["tag"]["tier"] == "tag"
     assert by["drone2"]["tier"] == "verified_2" and by["drone2"]["verified"]
     assert by["drone2"]["tier_methods"] == ["drone:seed_1", "drone:seed_2"]
-    assert by["drone1"]["tier"] == "single" and by["drone1"]["prior_disagrees"]  # 61 vs 14
+    d1 = by["drone1"]                                                 # 61 vs 14: withheld
+    assert d1["tier"] == "prior" and d1["prior_disagrees"] and not d1["verified"]
+    assert d1["tier_methods"] == ["prior_gbm"]
+    assert (d1["single_reading_m"], d1["single_source"]) == (61.0, "withheld:elevated")
+    assert d1["single_methods"] == ["drone:seed_1"]
+    assert d1["withheld_reason"] == "single over 2x prior"
     assert by["street"]["tier"] == "prior" and by["street"]["tier_methods"] == ["prior_gbm"]
     for r in rows:
         assert set(r) >= {"tier", "tier_methods", "verified", "disputed_by", "prior_disagrees"}
     json.dumps(rows)                                                   # serialisable
+
+
+def test_single_withheld_rule():
+    assert single_withheld("single", 41.0, 20.0) is True
+    assert single_withheld("single", 40.0, 20.0) is False           # exactly 2x publishes
+    assert single_withheld("single", 5.0, 20.0) is False            # under the prior: kept
+    assert single_withheld("verified_2", 200.0, 20.0) is False
+    assert single_withheld("single", 50.0, None) is False
+
+
+def _single_rows(value, sat=None):
+    rows = [{"feature_id": "s", "effective_height_m": 30.0, "effective_height_source": "geometric",
+             "per_seed_median_m": {"seed_1": value}}]
+    return rows, [_rec("s", "default")]
+
+
+def test_single_within_2x_still_publishes_as_single(monkeypatch):
+    for k in ("SKYLINE_WITHHOLD_UNTAGGED", "SKYLINE_PREFER_TAGS", "SKYLINE_WITHHOLD_SINGLE"):
+        monkeypatch.delenv(k, raising=False)
+    rows, recs = _single_rows(27.0)
+    withhold_untagged_street_view(rows, recs, fallback=lambda r: (14.0, "prior_gbm"),
+                                  measured_seeds={"seed_1"})
+    r = rows[0]
+    assert (r["effective_height_m"], r["tier"]) == (27.0, "single")
+    assert "single_reading_m" not in r and "withheld_reason" not in r
+    assert r["no_survey_height_m"] == 27.0 and r["no_survey_tier"] == "single"
+
+
+def test_single_over_2x_publishes_prior_and_keeps_the_reading(monkeypatch):
+    for k in ("SKYLINE_WITHHOLD_UNTAGGED", "SKYLINE_PREFER_TAGS", "SKYLINE_WITHHOLD_SINGLE"):
+        monkeypatch.delenv(k, raising=False)
+    rows, recs = _single_rows(99.0)
+    withhold_untagged_street_view(rows, recs, fallback=lambda r: (14.0, "prior_gbm"),
+                                  measured_seeds={"seed_1"})
+    r = rows[0]
+    assert (r["effective_height_m"], r["effective_height_source"]) == (14.0, "withheld:prior_gbm")
+    assert r["tier"] == "prior" and r["prior_disagrees"] is True
+    assert (r["single_reading_m"], r["single_source"]) == (99.0, "withheld:elevated")
+    assert r["no_survey_height_m"] == 14.0 and r["no_survey_tier"] == "prior"
+    assert r["street_view_m"] == 30.0                                # what aggregate had
+    json.dumps(rows)
+    # the flag turns the rule off
+    monkeypatch.setenv("SKYLINE_WITHHOLD_SINGLE", "0")
+    rows, recs = _single_rows(99.0)
+    withhold_untagged_street_view(rows, recs, fallback=lambda r: (14.0, "prior_gbm"),
+                                  measured_seeds={"seed_1"})
+    assert (rows[0]["effective_height_m"], rows[0]["tier"]) == (99.0, "single")
 
 
 def test_flag_off_labels_street_view_as_single(monkeypatch):
@@ -180,6 +234,45 @@ def test_flag_off_labels_street_view_as_single(monkeypatch):
     assert withhold_untagged_street_view(rows, recs, measured_seeds={"seed_1"}) == 0
     assert rows[3]["effective_height_m"] == 120.0 and rows[3]["tier"] == "single"
     assert rows[3]["tier_methods"] == ["street:seed_9"]
+
+
+def test_drone_seen_footprint_without_a_reading_gets_a_prior_row(monkeypatch):
+    """Cartagena v9: footprints whose only drone reading the tower-behind check left out had
+    no estimate, so no row; they now get the prior like any untagged footprint."""
+    from types import SimpleNamespace
+
+    from city2stl.skyline.region_pdf import _drone_seen_rows, _fill_unread_heights
+    for k in ("SKYLINE_WITHHOLD_UNTAGGED", "SKYLINE_PREFER_TAGS", "SKYLINE_WITHHOLD_SINGLE"):
+        monkeypatch.delenv(k, raising=False)
+
+    def seg(fid, src="footprint"):
+        return {"height_src": src, "matched_projection": {"feature_id": fid}}
+
+    recs = [_rec("kept", "default"), _rec("behind", "default"), _rec("tagged", "osm_tag", 50.0),
+            _rec("street_only", "default")]
+    rows = [{"feature_id": "kept", "effective_height_m": 30.0, "effective_height_source": "x",
+             "per_seed_median_m": {"seed_1": 30.0}}]
+    prs = [SimpleNamespace(seed_name="seed_1", matched_segments=[seg("kept"), seg("behind"),
+                                                                 seg("tagged")]),
+           SimpleNamespace(seed_name="seed_4", matched_segments=[seg("behind")]),
+           SimpleNamespace(seed_name="seed_9", matched_segments=[seg("street_only", "pano")])]
+    extra = _drone_seen_rows(rows, recs, prs, {"seed_1", "seed_4"})
+    assert [(r["feature_id"], r["drone_seen"]) for r in extra] == [("behind", ["seed_1", "seed_4"])]
+    assert _drone_seen_rows(rows, recs, prs, set()) == []
+    rows.extend(extra)
+    withhold_untagged_street_view(rows, recs, fallback=lambda r: (14.0, "prior_gbm"),
+                                  measured_seeds={"seed_1", "seed_4"})
+    _fill_unread_heights(rows)
+    b = next(r for r in rows if r["feature_id"] == "behind")
+    assert (b["effective_height_m"], b["effective_height_source"]) == (14.0, "withheld:prior_gbm")
+    assert b["tier"] == "prior" and b["weighted_height_m"] == 14.0
+    json.dumps(rows)
+    # with the withhold flag off there is no prior: the row is dropped again
+    monkeypatch.setenv("SKYLINE_WITHHOLD_UNTAGGED", "0")
+    rows2 = _drone_seen_rows([], recs, prs, {"seed_1"})
+    withhold_untagged_street_view(rows2, recs, measured_seeds={"seed_1"})
+    _fill_unread_heights(rows2)
+    assert rows2 == []
 
 
 def test_heights_json_has_schema_2_and_tier_counts(tmp_path):

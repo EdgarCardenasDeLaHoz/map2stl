@@ -90,6 +90,9 @@ def test_untagged_building_a_drone_seed_measured_keeps_the_drone_height(monkeypa
     from city2stl.skyline._core import height as hm
 
     monkeypatch.setenv("SKYLINE_WITHHOLD_UNTAGGED", "1")
+    # one drone seed, so a single reading: here 185 m against the 12 m constant, which the
+    # single-over-2x rule (tested in test_skyline_tiers) would withhold; turn it off here
+    monkeypatch.setenv("SKYLINE_WITHHOLD_SINGLE", "0")
     rec = SimpleNamespace(feature_id="f1", height_source="default")
     row = {"feature_id": "f1", "effective_height_m": 113.0, "effective_height_source": "geometric",
            "per_seed_median_m": {"seed_1": 185.0, "auto_090_1400m": 113.0}}
