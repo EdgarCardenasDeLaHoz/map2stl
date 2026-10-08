@@ -188,3 +188,72 @@ def test_ept_project_follows_the_footprint_not_the_tile(monkeypatch):
     assert sorted(reads) == ["CITY_2018", "COAST_2019"]          # one tile per project
     assert 12.0 < got["low"]["survey_m"] < 15.0                     # read from its own project
     assert got["low"]["years"] == [2018, 2018] and got["tall"]["years"] == [2019, 2019]
+
+
+def _stat1_truth():
+    """Cached stat-1 truth: 'low' had a misread survey (disputed), 'tall' agreed, 'gone' has
+    no footprint any more."""
+    return {"low": {"survey_m": 30.0, "survey_cells": 700, "tiles_m": 14.0, "tiles_cells": 784,
+                    "status": "disputed", "truth_m": None},
+            "tall": {"survey_m": 64.0, "survey_cells": 700, "tiles_m": 63.0, "tiles_cells": 784,
+                     "status": "confirmed", "truth_m": 63.5},
+            "gone": {"survey_m": 9.0, "survey_cells": 50, "tiles_m": 30.0, "tiles_cells": 60,
+                     "status": "disputed", "truth_m": None}}
+
+
+def test_refresh_survey_truth_keeps_tiles_and_reclassifies(monkeypatch):
+    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0, part=None: _synthetic_ndsm(b, r))
+    old = _stat1_truth()
+    bm.save_truth_cache("benidorm", old)
+    out = bm.refresh_survey_truth("benidorm", FOOTPRINTS)
+    new = bm.load_truth_cache("benidorm")
+    assert sorted(out["refreshed"]) == ["low", "tall"] and out["no_ring"] == ["gone"]
+    for k in ("low", "tall"):
+        assert new[k]["tiles_m"] == old[k]["tiles_m"]            # 3D Tiles side untouched
+        assert new[k]["tiles_cells"] == old[k]["tiles_cells"]
+        assert new[k]["stat"] == bm.STAT_VERSION
+        assert new[k]["survey_m"] == sh.load_cache("benidorm")[k]["survey_m"]
+    assert 12.0 < new["low"]["survey_m"] < 15.0
+    assert new["low"]["status"] == "confirmed"                    # reclassified
+    assert new["low"]["truth_m"] == pytest.approx((new["low"]["survey_m"] + 14.0) / 2, abs=0.01)
+    assert new["gone"] == old["gone"]                             # no ring: left as it was
+    backup = bm._truth_cache_path("benidorm").with_suffix(".stat1.json")
+    assert out["backup"] == backup and json.loads(backup.read_text(encoding="utf-8")) == old
+    again = bm.refresh_survey_truth("benidorm", FOOTPRINTS)       # stat 2 already: nothing to do
+    assert again["refreshed"] == [] and json.loads(backup.read_text(encoding="utf-8")) == old
+
+
+def test_refresh_survey_truth_never_constructs_google3d(monkeypatch):
+    from city2stl.height.providers import google_3d
+
+    built = []
+
+    class Spy:
+        def __init__(self, *a, **k):
+            built.append(1)
+
+    monkeypatch.setattr(google_3d, "Google3DProvider", Spy)
+    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0, part=None: _synthetic_ndsm(b, r))
+    bm.save_truth_cache("benidorm", _stat1_truth())
+    bm.refresh_survey_truth("benidorm", FOOTPRINTS, refresh=True)
+    assert built == []
+
+
+def test_refresh_survey_truth_keeps_record_when_survey_fails(monkeypatch):
+    def down(*_a, **_k):
+        raise SurveyError("IDEE WCS 503")
+
+    monkeypatch.setattr(bm, "survey_ndsm", down)
+    old = _stat1_truth()
+    bm.save_truth_cache("benidorm", old)
+    out = bm.refresh_survey_truth("benidorm", FOOTPRINTS)
+    assert sorted(out["failed"]) == ["low", "tall"] and out["refreshed"] == []
+    assert bm.load_truth_cache("benidorm") == old
+
+
+def test_parallel_tile_reads_give_the_same_records(monkeypatch):
+    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0, part=None: _field_ndsm(b, r))
+    fps = {**FOOTPRINTS, "far": _ring(900.0, 700.0), "farther": _ring(-1500.0, 300.0)}
+    one = sh.survey_footprint_heights("benidorm_a", fps, "cnig_mdsn")
+    four = sh.survey_footprint_heights("benidorm_b", fps, "cnig_mdsn", workers=4)
+    assert one == four and len(one) == 4

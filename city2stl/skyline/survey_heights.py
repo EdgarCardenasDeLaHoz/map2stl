@@ -21,6 +21,7 @@ Publishing these heights is step 2d (``use_survey_heights``), not done here.
 
 from __future__ import annotations
 
+import gc
 import json
 import logging
 from pathlib import Path
@@ -86,16 +87,45 @@ def _years(provider: str, bbox, part: str | None = None) -> list[int] | None:
     return None if y is None else [int(y[0]), int(y[1])]
 
 
+def _bounded(fn, items, workers: int):
+    """``fn(item)`` for each item, at most ``workers`` at once (threads), yielded as they finish.
+
+    Only the calls in flight hold their results: a finished one is handed over and forgotten,
+    so a region's peak memory is ``workers`` tile rasters, not every tile read so far (all
+    futures submitted up front kept each raster alive until the end: 4-5 GB per region).
+    """
+    if workers <= 1 or len(items) <= 1:
+        yield from map(fn, items)
+        return
+    from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+
+    todo = iter(items)
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="survey") as pool:
+        running = {pool.submit(fn, it) for _, it in zip(range(workers), todo, strict=False)}
+        while running:
+            done, running = wait(running, return_when=FIRST_COMPLETED)
+            for f in done:
+                nxt = next(todo, None)
+                if nxt is not None:
+                    running.add(pool.submit(fn, nxt))
+                res = f.result()
+                del f
+                yield res
+                del res
+
+
 def survey_footprint_heights(region: str, footprints: dict[str, list],
                              provider: str | None = None, *,
                              resolution_m: float = bm.RESOLUTION_M,
-                             refresh: bool = False) -> dict[str, dict]:
+                             refresh: bool = False, workers: int = 1) -> dict[str, dict]:
     """Survey height record per footprint key (``benchmark.footprint_key``).
 
     ``footprints``: key -> lon/lat ring. ``provider``: a ``providers/survey.py`` name; by
     default ``pick_provider`` over the footprints' bbox. Returns {} when no survey covers them.
     Cached records of the same provider and stat version (``benchmark.STAT_VERSION``) are
-    reused unless ``refresh``; older records are re-measured.
+    reused unless ``refresh``; older records are re-measured. ``workers`` > 1 reads that many
+    tiles at once (threads; the reads wait on the network and on numpy); results are taken
+    and cached one at a time, so a stopped run keeps every finished tile.
     """
     if not footprints:
         return {}
@@ -110,24 +140,32 @@ def survey_footprint_heights(region: str, footprints: dict[str, list],
     fresh: dict[str, dict] = {}
     tiles = bm.tiles_for(todo, resolution_m=resolution_m,
                          part=lambda p: bm.survey_part(provider, p))
-    for i, tile in enumerate(tiles, 1):
-        logger.info("[survey_heights] %s tile %d/%d: %d footprints", region, i, len(tiles),
-                    len(tile.keys))
+
+    def read(tile):
         try:
             grid = (bm.survey_ndsm(provider, tile.bbox, resolution_m, tile.part) if tile.part
                     else bm.survey_ndsm(provider, tile.bbox, resolution_m))
         except Exception as exc:  # SurveyError above all; one bad tile must not lose the rest
+            return tile, None, None, exc
+        return tile, grid, (_years(provider, tile.bbox, tile.part) if grid is not None
+                            else None), None
+
+    for i, (tile, grid, years, exc) in enumerate(_bounded(read, tiles, workers), 1):
+        logger.info("[survey_heights] %s tile %d/%d: %d footprints", region, i, len(tiles),
+                    len(tile.keys))
+        if exc is not None:
             logger.warning("[survey_heights] %s failed on %s: %s", provider, tile.bbox, exc)
             for k in tile.keys:
                 fresh[k] = {"survey_m": None, "survey_cells": 0, "provider": provider,
                             "years": None, "error": str(exc)}
             continue
-        years = _years(provider, tile.bbox, tile.part) if grid is not None else None
         for k in tile.keys:
             hgt, cells = (None, 0) if grid is None else bm.footprint_stat(grid[0], grid[1],
                                                                           todo[k])
             rec = {"survey_m": None if hgt is None else round(hgt, 2), "survey_cells": cells,
                    "provider": provider, "years": years, "stat": bm.STAT_VERSION}
             fresh[k] = cache[k] = rec
-        save_cache(region, cache)
+        save_cache(region, cache)  # checkpoint, then drop the tile's raster before the next
+        del grid
+        gc.collect()
     return {k: fresh.get(k, cache.get(k)) for k in footprints if k in fresh or k in cache}

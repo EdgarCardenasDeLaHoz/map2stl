@@ -484,6 +484,62 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
     return out
 
 
+def refresh_survey_truth(region: str, footprints: dict[str, list],
+                         survey_provider: str | None = None, *,
+                         resolution_m: float = RESOLUTION_M, refresh: bool = False,
+                         workers: int = 1) -> dict:
+    """Re-read the survey side of the region's cached truth with the current statistic
+    (``STAT_VERSION``); the 3D Tiles side is kept as cached.
+
+    Truth records of stat version 1 carry a survey p95 that followed the run's footprint
+    grouping, ČÚZK rasters read off their returned transform, and an EPT project chosen per
+    tile (see ``STAT_VERSION``). This re-reads ``survey_m`` / ``survey_cells`` per footprint
+    with ``survey_heights.survey_footprint_heights`` (the same tiles and p95 as
+    ``footprint_truth``, cached in ``runs/survey/``), keeps ``tiles_m`` / ``tiles_cells`` /
+    ``tiles_flat`` untouched, sets ``stat`` and reclassifies (``classify``). Never reads 3D
+    Tiles, so it costs nothing against the Google cap.
+
+    ``footprints``: key -> lon/lat ring for the cached keys (keys not in the cache are
+    ignored; cached keys without a ring are left as they are). Records already at
+    ``STAT_VERSION`` are skipped unless ``refresh``. A footprint whose survey read failed keeps
+    its old record. Before the first write the cache is copied to ``<region>.stat1.json``
+    (once; a later run keeps the original backup). Returns ``{"old": cache before,
+    "new": cache after, "refreshed": keys, "failed": keys, "no_ring": keys, "backup": path}``.
+    ``workers``: survey tiles read at once (``survey_footprint_heights``).
+    """
+    from . import survey_heights as sh
+
+    provider = survey_provider or REGIONS.get(region_key(region))
+    if provider is None:
+        raise ValueError(f"{region}: no survey provider (not a benchmark region)")
+    old = load_truth_cache(region)
+    todo = {k: footprints[k] for k, r in old.items()
+            if k in footprints and (refresh or r.get("stat") != STAT_VERSION)}
+    no_ring = sorted(k for k in old if k not in footprints)
+    backup = _truth_cache_path(region).with_suffix(".stat1.json")
+    if todo and not backup.exists():
+        backup.write_text(json.dumps(old, indent=1, sort_keys=True), encoding="utf-8")
+    got = sh.survey_footprint_heights(region, todo, provider, resolution_m=resolution_m,
+                                      refresh=refresh, workers=workers) if todo else {}
+    new = {k: dict(r) for k, r in old.items()}
+    refreshed, failed = [], []
+    for k in todo:
+        s = got.get(k)
+        if s is None or s.get("error") or s.get("stat") != STAT_VERSION:
+            failed.append(k)
+            continue
+        rec = new[k]
+        rec["survey_m"], rec["survey_cells"] = s["survey_m"], s["survey_cells"]
+        rec["status"], truth_m = classify(rec["survey_m"], rec.get("tiles_m"))
+        rec["truth_m"] = None if truth_m is None else round(truth_m, 2)
+        rec["stat"] = STAT_VERSION
+        refreshed.append(k)
+    if refreshed:
+        save_truth_cache(region, new)
+    return {"old": old, "new": new, "refreshed": refreshed, "failed": failed,
+            "no_ring": no_ring, "backup": backup}
+
+
 # --------------------------------------------------------------------------- scoring
 
 
