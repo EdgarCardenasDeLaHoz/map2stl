@@ -5,6 +5,67 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
+### 2026-10-08 — Floor counts flag high-rises and join fusion; they never publish alone
+- **Why:** F-SKY26 steps 4 and 5. Untagged towers no drone read fall to the ~12 m prior; floor
+  counts (MobileSAM instances, `floor_bands.pano_floors`) say which plots hold towers and give a
+  second, pose-free height.
+- **Changed:**
+  - `floor_bands.calibrate_storey` (a city's storey from OSM *height* tags, never levels;
+    leave-one-out sigma_log), `high_rise_plots` (>= 10 floors, a lower bound counts, `low=`
+    veto), `floor_readings` (floors x storey + 3 m; lower bound when the base is hidden; sigma_log
+    = hypot(calibration sigma, strip spread), weighted as a drone reading at 3300 x sigma m; none
+    when the calibration's sigma_log > 0.25), `high_rise_height` (the publisher's hook).
+  - `footprint_detect.fuse_heights`: `kind` "floors" readings carry their `seed`; they are one
+    source together, counted only when one comes from a seed with no drone reading kept (`group=`
+    merges captures from one camera); `floors_only` in the result.
+  - `_pano/elevated.py`: `seed_floors` (stage-cached, `ElevatedSeed.floors`), `floors_info`,
+    `elevated_estimates` returns an `ElevatedEstimates` list with `.floors` (`high_rise_seen`,
+    `floors`, `storey_m` ...) and `.storey`; `orchestrator` puts it in `elevated_state["floors"]`.
+- **Base in view** = ground under the mask (`InstanceFloors.base_seen`) **or** the same seed's
+  reading of that plot saw its base. The mask test alone left Cartagena 2 calibration samples
+  (140 of 153 counts lower bounds); with either: 85 lower bounds, 6 samples, storey 4.13 m,
+  sigma_log 0.13 (reliable). Miami: 10 samples, sigma_log 1.01: not reliable, so no Miami floors
+  readings (the hook uses the nominal 3.1 m there).
+- **Satellite veto on the flag:** Cartagena's 3 flagged tagged plots under 30 m (b0634 10 m,
+  b0639 10 m, b0645 6 m) all had their base hidden: the count was the tower behind the low
+  building. A plot whose confident satellite readings are all under 40 m (`elevated._sat_max`,
+  the tower-behind test's rule) is never flagged; it removes b0634 and b0639 (stereo 5.5 / 7 m).
+  b0645 stays (stereo 49 m, shadow 56 m: its 6 m tag may be the wrong one).
+- **Measured** (`seed_experiment.py --floors --s45`; Cartagena hi-res states seeds 1/4/5/6/7, truth
+  = tags + published; Miami 6 states, truth = confirmed LiDAR; prior for the hook 12 m):
+
+  | high-rise flag (>= 10 floors) | flagged | with truth | precision | recall (truth >= 30 m) | untagged precision | hook within 25 % (prior) |
+  |---|---|---|---|---|---|---|
+  | Cartagena, no veto | 113 | 11 | 0.73 | 0.36 (22) | n 0 | 0.45 (0.18) |
+  | Cartagena, satellite veto | 72 | 9 | 0.89 | 0.36 | n 0 | 0.56 (0.00) |
+  | Cartagena, base seen only | 57 | 6 | 1.00 | 0.27 | n 0 | 0.83 (0.00) |
+  | Miami (no satellite) | 21 | 12 | 0.92 | 0.11 (101) | 1.00 (n 2) | 0.33 (0.08) |
+
+  - Fusion, drone + floors vs drone only: Cartagena fused within 25 % 0.89 (n 9) -> 1.00 (n 8),
+    sigma_log 0.44 -> 0.06; 10 footprints newly disputed, 1 with truth (b1158: drone 183 m, tag
+    45 m: caught), 0 false; 24 newly verified (2 with truth, both within 25 %). With the
+    satellite readings too: 0.83 -> 0.83 (n 6), sigma_log 0.114 -> 0.119, 9 newly disputed, none
+    with truth. Miami: unchanged (no readings).
+  - Published towers: the 7 publish their tags, unchanged. Fused values: Gran Bay 159 -> 176
+    (170), Portomarine 188 -> 178 (162.5), Nautica 161 -> 159 (160), Ravello 146 -> 164 (144),
+    Estelar 198 (202) unchanged; Allure gets a floors-only lower bound of 98 m (180), not
+    published.
+  - Floors-only footprints: 47 (42 untagged); the 2 with truth are lower bounds reading 37 % low,
+    none with the base seen has truth.
+- **Verdict:**
+  - high-rise flag: >= 10 floors, lower bounds count, satellite veto. Precision 0.89-0.92 on all
+    plots with truth, 1.0 on Miami's only 2 untagged confirmed ones (Cartagena has no untagged
+    truth): the >= 0.9 target is met only on small samples. 63 untagged Cartagena plots flagged,
+    22 of them with no drone reading.
+  - floors in fusion: on (`elevated.FLOORS_IN_FUSION`), only where the storey calibration is
+    reliable. `FLOORS_PUBLISH_ALONE` = False.
+  - publishing: the hook is written, not wired into `withhold_untagged_street_view`. It
+    conflicts with the 2026-10-08 rule "a single reading over 2x the prior publishes the prior":
+    every high-rise height (>= 10 x 3.1 + 3 = 34 m) is over 2x a 12 m prior, so wiring it needs
+    the user's call on exempting `withheld:high_rise` rows from that rule.
+- **Source:** plan F-SKY26 steps 4/5; outputs `<scratch>/out/seed_exp/s45_cart.json`,
+  `s45_miami.json`.
+
 ### 2026-10-07 — Commons photo screen loosened after the user's review of 38 rejects
 - **Why:** the user reviewed 38 Commons photos the photo pipeline had rejected (Miami, Chicago,
   Cartagena; review item set c3): 25 were usable skyline photos.

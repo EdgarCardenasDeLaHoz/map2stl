@@ -243,6 +243,26 @@ Two constraints follow:
     mask only; the depth podium test reads 0.98-1.03 on every instance), flat strips refused
     (`MIN_ASPECT` 0.1: seed_6 inst 288, a road). OSM levels are not truth (inst 63 "16 fl / OSM 2"
     was right).
+- 2026-10-08, steps 4 and 5 done (library and fusion; publishing hook not wired): see decision
+  "Floor counts flag high-rises and join fusion; they never publish alone".
+  - `floor_bands`: `calibrate_storey` (height tags only), `high_rise_plots` (>= 10 floors, lower
+    bounds count, satellite-low veto), `floor_readings`, `high_rise_height` (hook);
+    `fuse_heights` floors independence (same seed: one source); `elevated.seed_floors` (stage
+    cache `floors`), `floors_info`, `ElevatedEstimates.floors`; orchestrator stores it in
+    `elevated_state["floors"]`. Harness: `seed_experiment.py --floors --s45` (floors caches
+    refreshed for `base_seen`).
+  - High-rise flag: Cartagena precision 0.73 -> 0.89 with the satellite veto (n 9, recall 0.36),
+    Miami 0.92 (n 12, recall 0.11), untagged 1.0 (Miami n 2; Cartagena no untagged truth). Hook
+    height within 25 %: Cartagena 0.56, Miami 0.33, prior 0.0 / 0.08.
+  - Storey: Cartagena 4.13 m (n 6, sigma_log 0.13, base seen by mask or by the seed's reading);
+    Miami not reliable (sigma_log 1.01): no Miami floors readings.
+  - Fusion: Cartagena drone + floors within 25 % 0.89 -> 1.00, 1 caught, 0 false disputes; with
+    satellite 0.83 -> 0.83. The 7 published towers unchanged. `FLOORS_PUBLISH_ALONE` False.
+  - **Publisher wiring open:** in `withhold_untagged_street_view`, untagged, no drone reading, no
+    publishable satellite, `floors[fid]["high_rise_seen"]` -> `floor_bands.high_rise_height(prior,
+    floors[fid])`, source `withheld:high_rise`, with `region_pdf` passing
+    `floors=elevated_state["floors"]`. Blocked on the user's call: the single-over-2x-prior rule
+    (4a73d5a) would turn every such value back into the prior.
 
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered
