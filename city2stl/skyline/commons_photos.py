@@ -331,12 +331,13 @@ def pano_hfov_guess(width: int, height: int) -> float:
 
 
 #: ``skyline_quality`` gate, for low-light photos only (sky value below ``LOW_LIGHT_SKY_VALUE``).
-#: User review 2026-10-07 of six "night" rejects: "decide on quality". The three the user
-#: rejected are the low-light ones (sky value 94-158) and score 0.02-0.11 (hazy dusk, glare,
-#: skyline half lost); the three usable ones were bright (194-207, EXIF-hour "night") and score
-#: 0.12-0.28. Day photos are not gated on it: 23 % of all outlines score < 0.11 in haze, and no
-#: review says they are bad (the fit's coverage and misfit gates judge them).
-MIN_SKYLINE_QUALITY = 0.12
+#: User review 2026-10-07, "decide on quality": the three "night" photos the user rejected are
+#: low-light (sky value 94-158) and score 0.02-0.108; the three usable ones were bright (194-207,
+#: EXIF-hour "night"). Among the other reviewed low-light photos, Chicago's usable night
+#: panorama scores 0.110 and a rejected Miami one 0.094. Tuned on those same verdicts and the
+#: margin is thin (0.108 vs 0.110): more verdicts are needed. Day photos are not gated on it:
+#: 23 % of all outlines score < 0.11 in haze, and no review says they are bad.
+MIN_SKYLINE_QUALITY = 0.11
 LOW_LIGHT_SKY_VALUE = 170.0
 #: Rows above and below the skyline compared for its edge strength (at 1600 px image width).
 EDGE_BAND_PX = 6
