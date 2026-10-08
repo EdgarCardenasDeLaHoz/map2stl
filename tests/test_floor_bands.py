@@ -336,3 +336,30 @@ def test_one_plot_one_instance_and_split_masks_count_together():
     e = next(e for e, hit in res if hit)
     assert e.members == (1, 2)
     assert e.floors_visible == pytest.approx(whole.floors_visible, rel=0.1), (e, whole)
+
+
+def test_base_hidden_makes_the_count_a_lower_bound_and_a_flat_strip_is_refused():
+    """User review (2026-10-07): 7 of 16 floor labels were too few floors, all with the base or
+    lower floors hidden, so a count is a lower bound unless ground is seen under the mask; one
+    "3 fl" was a road (seed_6 inst 288, 18 rows over 276 columns)."""
+    import dataclasses
+
+    pano, bld, top = _direct_pano(400.0)
+    inst = _instance_map(pano, POSE, bld, top)
+    gray = pano.rgb[..., 0].astype(np.float32)
+    lab = pano.labels.copy()
+    rows = np.flatnonzero(inst.any(1))
+    lab[rows.max() + 1:, :] = fd.BUILDING_CLASSES[0]            # a nearer building under it
+    hidden = fl.instance_floors(dataclasses.replace(pano, labels=lab), POSE, gray, inst, 1)
+    assert hidden.accepted and not hidden.base_seen and hidden.lower_bound
+    lab[rows.max() + 1:, :] = 6                                   # road: the base is in view
+    seen = fl.instance_floors(dataclasses.replace(pano, labels=lab), POSE, gray, inst, 1)
+    assert seen.base_seen and not seen.lower_bound
+    # the facade is 121 rows over ~154 trimmed columns (0.79): refused once that counts as flat
+    assert "flat strip" not in seen.reason
+    fl_min, fl.MIN_ASPECT = fl.MIN_ASPECT, 0.9
+    try:
+        flat = fl.instance_floors(pano, POSE, gray, inst, 1)
+    finally:
+        fl.MIN_ASPECT = fl_min
+    assert not flat.accepted and "flat strip" in flat.reason

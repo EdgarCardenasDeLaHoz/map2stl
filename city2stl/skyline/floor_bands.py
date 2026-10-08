@@ -365,6 +365,9 @@ MIN_COVER = 0.5
 #: A matched footprint may lie this factor beyond the range the instance's lowest row gives (mask
 #: bleed; a hidden base lies nearer, never farther), and, with the base seen, this factor nearer.
 BASE_TOL = 1.2
+#: An instance at least this many rows tall (median per column) per column of width: a flatter
+#: one is a strip of road or roof, not a facade (seed_6 inst 288: 18 rows over 276 columns, 0.065).
+MIN_ASPECT = 0.1
 
 
 @dataclass(frozen=True)
@@ -393,6 +396,18 @@ class InstanceFloors:
     covering: tuple = ()              # every footprint covering the columns, nearest first
     extent_px: float = 0.0            # median rows of the instance per column
     members: tuple = ()               # instances counted together (pano_floors); () = itself
+    #: ground (not building, not sky) under the mask: the base is in view. Otherwise
+    #: ``floors_visible`` may count only the floors above an occluder: a lower bound. The depth
+    #: "own podium" test (used above to bound the range) does not set it: Depth Anything's under /
+    #: inside ratio was 0.98-1.03 on all 27 seed_6/seed_7 instances checked, the 5 the user judged
+    #: partial (seed_6 33/56/139/269, seed_7 107) and the complete ones alike (2026-10-07)
+    base_seen: bool = False
+
+    @property
+    def lower_bound(self) -> bool:
+        """The storey count is "at least": the base is hidden (user review 2026-10-07: 7 of 16
+        judged labels were too few floors, all with the base or lower floors hidden)."""
+        return not self.base_seen
 
 
 def _strip_floors(pano, pose, gray, instances, instance, cols):
@@ -643,10 +658,15 @@ def instance_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instance
         reason.append(f"{floors:.1f} floors")
     lo, hi = KIND_RANGE_M["residential"]
     ext = float(np.median(m[:, cols].sum(0)))
+    if ext < MIN_ASPECT * len(cols):
+        # a flat strip, not a facade: seed_6 inst 288, "3 fl" on a road (18 rows over 276
+        # columns; user review 2026-10-07); the flattest building accepted was 0.14
+        reason.append(f"flat strip ({ext:.0f} rows over {len(cols)} columns)")
     return InstanceFloors(instance, centre, b, floors, float(d), (lo / p, hi / p), ppx, acf,
                           float(spread), bool(floors >= HIGH_RISE_FLOORS), not reason,
                           "; ".join(reason) or "ok", len(best), float(d_base), float(storey),
-                          plot, float(plot_d), tuple(pcands), tuple(i for i, _ in cover), ext)
+                          plot, float(plot_d), tuple(pcands), tuple(i for i, _ in cover), ext,
+                          base_seen=bool(base_ground))
 
 
 #: Ground under a mask: not one of these (ADE20K wall, building, house, skyscraper, tower, tree,
