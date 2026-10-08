@@ -78,6 +78,30 @@ Why now (2026-10-04):
 - 2026-10-04: heights at those identified towers (roof row at each label tip, distance from
   the solved pose, tilt and camera height fitted): 82 % pair order, leave-one-out MAE 13.5 m
   over 5 confirmed towers (Street View on Miami: 96.6 m). Correct identification is the lever.
+- 2026-10-07: screen loosened after the user's review of 38 rejected photos (25 usable; see
+  `docs/decisions/building-heights.md`; `af06f6a`, `801bd21`, `1e76b83`):
+  - wide panoramas fit as cylindrical views; unlocated photos and wrong geotags go to a
+    placement queue (`placement_queue.json`: linked / EXIF + 0.1-lead search, else manual
+    labels); cameras up to 20 km out; low-light photos kept when their skyline is clear
+    (`skyline_quality`); located photos without EXIF FOV reach the fit; EXIF FOV retried at
+    +-40 % when the gate fails.
+  - Screen, Miami (300 photos): fit 30 -> 62, placement queue 71 -> 169, rejected 199 -> 69.
+    Chicago (1,697): fit 153 -> 439, queue 229 -> 719, rejected 1,315 -> 539.
+  - Miami pipeline: photos fitted 101 -> 130, kept 27 -> 44, towers read 502 -> 844, buildings
+    measured 128 -> 150 (confirmed by 2+ photos 54 -> 77); MAE 14.0 -> 15.3 m, pair order
+    0.92 -> 0.91. Placement queue: 11 placed, 159 to label by hand.
+  - Chicago pipeline (new fits tried camera heights 2 and 30 m only, for time): photos fitted
+    415 -> 686, kept 147 -> 277, towers read 2,979 -> 5,884; queue 66 placed, 657 to label.
+    Its height scores are not comparable with the 2026-10-03 run (older code and truth cache).
+  - The 38 reviewed: 25 decisions now match the user (was 13). Of the 25 usable, 7 are measured,
+    1 reaches the fit (Cartagena, not run), 8 wait in the placement queue, 9 are still rejected
+    (4 wide panoramas and 3 photos at misfit 0.44-0.92, 1 night photo on clarity, 1 at misfit
+    0.54). Of the 13 bad, 9 stay rejected; 2 are kept by the rescue gate, 2 sit in the queue.
+  - Open: cylindrical fits pass 1 of 5 wide panoramas (misfit 0.45-0.55: stitching seams and
+    the guessed FOV); the manual-label list is now the main way in for new photos (Miami 159,
+    Chicago 657); the 0.1 lead places few; the clarity threshold sits on a thin margin (0.108
+    vs 0.110); the rescue gate (OSM dev <= 20 m, >= 12 towers) keeps 2 photos the user called
+    bad (Miami p20, p79).
 
 ## Phase 2 plan: heights from photos, identify then measure (2026-10-04)
 

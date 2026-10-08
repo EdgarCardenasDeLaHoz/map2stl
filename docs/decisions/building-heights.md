@@ -5,6 +5,52 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
+### 2026-10-07 — Commons photo screen loosened after the user's review of 38 rejects
+- **Why:** the user reviewed 38 Commons photos the photo pipeline had rejected (Miami, Chicago,
+  Cartagena; review item set c3): 25 were usable skyline photos.
+  - wide (> 3:1) 6 of 6 usable; no location 7 of 8; camera fit failed 7 of 12; "night" 3 of 6;
+    camera far from region 2 of 4; not a skyline 0 of 1; portraits 0 of 1.
+- **Changed** (`commons_photos.screen`, `pipeline_status`, `fit_prior`, `skyline_quality`):
+  - wide panoramas fit as cylindrical views (FOV guessed from the aspect at 35 deg vertical,
+    +-60 % free); not split into crops: a crop of a cylindrical image is not pinhole either.
+  - unlocated photos, and geotags > 200 km away (Cartagena p107 carries Cartagena, Spain), go
+    to a placement queue: linked refinement or the EXIF + 0.1-lead search (the gate from
+    "Placing no-GPS Commons photos with trusted heights or LightGlue"), else
+    `placement_queue.json` "manual_label" (labels place to +-5 m).
+  - cameras up to 20 km outside the region (was 15): the usable Chicago one sat at 16.3 km, the
+    two the user agreed were too far at 29.9 and 36.3 km.
+  - night: no pixel-dark drop. A low-light photo (sky value < 170) is kept when its skyline
+    clarity (edge step across the outline x coverage) is >= 0.11. The three "night" photos the
+    user called usable were bright (sky 194-207; EXIF-hour night); the three rejected are
+    low-light and score 0.02-0.108; Chicago's usable night panorama scores 0.110 (thin margin,
+    tuned on these verdicts). Day photos are not gated on clarity (23 % of day outlines score
+    < 0.11 in haze, unreviewed). No previously kept Miami or Chicago photo is lost to it.
+  - located photos without EXIF focal length now reach the fit (FOV 55 deg, +-50 % free).
+  - camera fit: when the EXIF FOV fails the misfit gate, retry at +-40 % (Commons crops keep
+    the full frame's EXIF).
+- **Camera-fit failures examined** (the 4 located usable ones, 4 the user agreed were bad as
+  controls; refine within 500 m unless stated):
+  - p234: a black-and-white photo, SegFormer found no sky (outline flat at row 0, misfit 1.0):
+    segmentation, not the camera. Now "flat outline", manual-label list.
+  - p78: EXIF 16.8 deg, fits 25 deg at misfit 0.28 (passes at +-40 %); p276: EXIF 74 deg, best
+    50 deg (a crop; misfit 0.32 in the pipeline, kept by the OSM-agreement rescue; its bases are
+    hidden by a cruise ship); p170: 0.54 at best (unexplained).
+  - +-40 % FOV: no control passed (0.40-0.93). A wider radius (1.5 km) moved poses 1.6-2 km
+    and turned heading 100 deg: not used.
+  - **Roll (T19) refused here:** a +-3 deg roll scan let the control p121 pass (0.93 -> 0.24)
+    and p79 nearly (0.67 -> 0.37); it fits wrong poses.
+  - the 3 unlocated ones (p2, p3, p15) fail the 0.1 lead at 0.01: manual-label list (p15 is
+    still measured through the rescue gate).
+- **Result** (re-run on the cached outlines; Chicago's new fits at camera heights 2 and 30 m):
+  - screen, Miami: fit 30 -> 62, placement queue 71 -> 169, rejected 199 -> 69; Chicago: fit
+    153 -> 439, queue 229 -> 719, rejected 1,315 -> 539.
+  - photos fitted / kept: Miami 101 / 27 -> 130 / 44 (towers read 502 -> 844; MAE 14.0 -> 15.3 m,
+    pair order 0.92 -> 0.91); Chicago 415 / 147 -> 686 / 277 (towers 2,979 -> 5,884).
+  - the 38 reviewed: 25 match the user (was 13); 16 of 25 usable no longer rejected, 9 of 13 bad
+    still rejected.
+- **Refused:** roll in the fit (above); crops of panoramas; a clarity gate on day photos.
+- **Source:** user review 2026-10-07 (review items c3_*, `Code/claude/review_feedback/`); scratch `t40f/`.
+
 ### 2026-10-07 — A drone reading of the tower behind is untrusted when the satellite says low and a farther footprint explains its top
 - **Decision:** `_pano/elevated.py::tower_behind` leaves a trusted drone reading out of fusion when
   both hold:
