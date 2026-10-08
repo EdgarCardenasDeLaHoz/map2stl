@@ -80,6 +80,7 @@ from .region_data import (
     _load_site_use_cross_view_scoring,
     _load_site_use_pano_coastline_recovery,
     _load_site_use_satellite_footprints,
+    _load_site_use_satellite_heights,
     _osm_to_building_records,
 )
 from .region_types import SkylinePoint
@@ -493,6 +494,14 @@ def run_region_pdf_report(
         from ._pano.elevated import ground_layers  # noqa: PLC0415
         with _timed("OSM ground layers (elevated seeds)"):
             elevated_state = ground_layers(osm_data, bbox, region_name)
+    # F-SKY26 step 7: offline satellite readings (site flag use_satellite_heights); the run
+    # only reads runs/satellite/<region>/readings.json
+    satellite = None
+    if _load_site_use_satellite_heights(region_name):
+        from .satellite_fusion import fusion_readings, load_region  # noqa: PLC0415
+        satellite = load_region(region_name, building_records) or None
+        if satellite and elevated_state is not None:
+            elevated_state["satellite"] = fusion_readings(satellite)
     with _timed("Multiview registration (per-seed)"):
         seed_views, building_heights, pano_results = _seed_multiview_registration(
             seeds, building_records, api_key,
@@ -516,7 +525,7 @@ def run_region_pdf_report(
         building_heights, building_records,
         fallback=untagged_fallback([r for r in building_records if r.feature_id in _est_ids],
                                    region=region_name),
-        measured_seeds=set(elevated_seeds or ()))
+        measured_seeds=set(elevated_seeds or ()), satellite=satellite)
     if n_withheld:
         logger.info(f"[withhold_untagged] {n_withheld} untagged building(s): Street View "
                     f"height withheld, fallback used")

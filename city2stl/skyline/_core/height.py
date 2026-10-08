@@ -720,7 +720,7 @@ def _withhold_untagged_enabled() -> bool:
 
 
 def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRecord],
-                                  fallback=None, measured_seeds=()) -> int:
+                                  fallback=None, measured_seeds=(), satellite=None) -> int:
     """Replace the Street View height of every untagged building in ``rows`` (the output of
     ``aggregate_building_heights``) by a fallback, and (``SKYLINE_PREFER_TAGS``, default on)
     that of every tagged building by its OSM height; returns how many were replaced.
@@ -743,8 +743,17 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
     ``prior_disagrees``) from the readings behind what it publishes, and the survey-blind
     answer the benchmark scores (2c): ``no_survey_height_m`` / ``_source`` / ``_tier``, equal to
     the published value until survey heights are published (2d).
+
+    ``satellite``: ``{feature_id: [SatReading]}`` (``satellite_fusion.load_region``, site flag
+    ``use_satellite_heights``, F-SKY26 step 7). The readings join the tier readings of every row
+    (drone + satellite at 40 m or more, lean + shadow over 100 m verify; satellite pairs of one
+    kind never do), and an untagged row with no drone reading publishes the satellite-only height
+    (``satellite_fusion.publishable``, source ``"withheld:satellite"``) instead of the prior when
+    its best reading's sigma_log is at most 0.25. Rows carry ``satellite`` ({method: [m, conf]}).
     """
     from .tiers import reading, tier_fields  # noqa: PLC0415
+    if satellite:
+        from ..satellite_fusion import publishable, tier_readings  # noqa: PLC0415
 
     enabled = _withhold_untagged_enabled()
     by_id = {r.feature_id: r for r in records}
@@ -756,8 +765,13 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
         seeds = {k: v for k, v in (row.get("per_seed_median_m") or {}).items() if v is not None}
         drone = [reading("drone", v, k) for k, v in seeds.items() if k in measured_seeds]
         street = [reading("street", v, k) for k, v in seeds.items() if k not in measured_seeds]
+        sat_rs = (satellite or {}).get(row.get("feature_id")) or []
+        sat = tier_readings(sat_rs) if sat_rs else []
+        if sat_rs:
+            row["satellite"] = {r.method: [round(r.height_m, 1), round(r.conf, 2)] for r in sat_rs}
         tagged = rec.height_source in TAGGED_SOURCES
         h = src = prior = None
+        sat_pub = None
         if enabled and tagged:
             if _prefer_tags_enabled() and rec.height_tag_m:
                 h, src = float(rec.height_tag_m), rec.height_source
@@ -765,6 +779,10 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
             prior = fallback(rec) if fallback is not None else (UNTAGGED_FALLBACK_M, "default")
             if drone:
                 h, src = float(np.median([r["value_m"] for r in drone])), "withheld:elevated"
+            elif sat_rs and (sat_pub := publishable(sat_rs)) is not None:
+                h, src = sat_pub["height_m"], "withheld:satellite"
+                row["satellite_methods"] = sat_pub["methods"]
+                row["satellite_lower_bound"] = sat_pub["lower_bound"]
             elif prior[0] is not None:
                 h, src = float(prior[0]), f"withheld:{prior[1]}"
         if h is not None:
@@ -775,7 +793,8 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
             n += 1
         # the readings behind what the row publishes: none for the prior, the drone seeds
         # for a tag or a drone median, and Street View too where it is still published
-        published = drone + street if h is None else drone
+        published = drone + street + sat if h is None else drone + (
+            sat if (tagged or drone or sat_pub) else [])
         row.update(tier_fields(
             published, published_m=row.get("effective_height_m"),
             tag_m=h if (h is not None and tagged) else None,

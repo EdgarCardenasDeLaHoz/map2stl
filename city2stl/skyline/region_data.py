@@ -663,6 +663,13 @@ def _load_site_use_commons_photos(region_name: str) -> bool:
     Default False so regions without it keep their benchmark baseline."""
     return bool(_read_site_config(region_name).get("use_commons_photos", False))
 
+def _load_site_use_satellite_heights(region_name: str) -> bool:
+    """Per-region opt-in for satellite heights (F-SKY26 step 7): the run reads
+    ``runs/satellite/<region>/readings.json`` (written offline by
+    ``scripts/20_satellite_heights.py``) into drone fusion, the tiers and the untagged fallback.
+    Default False."""
+    return bool(_read_site_config(region_name).get("use_satellite_heights", False))
+
 def _load_site_use_satellite_footprints(region_name: str) -> bool:
     """Per-region opt-in for Microsoft Buildings polygons. True →
     ``fetch_microsoft_buildings_for_bbox`` runs and the de-duped

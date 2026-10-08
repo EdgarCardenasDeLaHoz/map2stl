@@ -1,0 +1,179 @@
+"""F-SKY26 step 7: satellite height package (city2stl.height.satellite) and its skyline wiring."""
+
+import datetime as dt
+import math
+
+import numpy as np
+import pytest
+
+from city2stl.height.satellite import measure as sm
+from city2stl.height.satellite import readings as sr
+from city2stl.height.satellite import scene as ss
+from city2stl.height.satellite import weights as sw
+from city2stl.skyline import footprint_detect as fd
+from city2stl.skyline import satellite_fusion as sf
+from city2stl.skyline._core.height import withhold_untagged_street_view
+from city2stl.skyline._core.types import BuildingRecord
+
+
+# ------------------------------------------------------------------------------ weights
+def test_sigma_table_matches_the_decision_and_footprint_detect_delegates():
+    assert sw.sigma_log("lean", 150, 0.8) == 0.07
+    assert sw.sigma_log("lean", 30, 0.9) is None                  # lean under 40 m dropped
+    assert sw.sigma_log("shadow", 60, 0.2) == 0.13
+    assert sw.sigma_log("shadow", 20, 0.9) == 0.67
+    assert sw.sigma_log("stereo", 39, 1.0) is None
+    assert sw.sigma_log("multiview", 60, 0.3) == 0.08
+    assert sw.sigma_log("multiview", 60, 0.29) is None            # conf < 0.3
+    assert sw.sigma_log("multiview", 30, 0.9) is None
+    assert sw.weight_scale("shadow", 20, 0.9) == pytest.approx((0.15 / 0.67) ** 2)
+    assert sw.weight_scale("lean", 150, 0.8) == 1.0
+    for k, h, c in (("lean", 150, 0.8), ("shadow", 10, 0.2), ("stereo", 60, 0.5), ("ls", 120, 0.8)):
+        assert fd.satellite_sigma_log(k, h, c) == sw.sigma_log(k, h, c)
+
+
+# ------------------------------------------------------------------------------ scene
+def test_sunpos_and_unit_vectors():
+    az, el = ss.sunpos(dt.datetime(2026, 3, 20, 12, 7), 0.0, 0.0)   # equinox, noon at Greenwich
+    assert el > 88.0
+    az, el = ss.sunpos(dt.datetime(2026, 2, 10, 15, 44), 10.405, -75.552)
+    assert 135 < az < 145 and 55 < el < 60                          # Cartagena LG01 scene
+    assert np.allclose(ss.uv(90.0), [1.0, 0.0]) and np.allclose(ss.uv(180.0), [0.0, 1.0])
+    assert ss.scene_name({"SRC_DATE": 20260210, "SRC_DESC": "LG01"}) == "2026-02-10_LG01"
+
+
+def test_tile_source_crops_global_pixels(tmp_path):
+    from PIL import Image
+
+    Image.new("RGB", (256, 256), (90, 90, 90)).save(tmp_path / "18_10_20.jpg")
+    src = ss.TileSource(tmp_path)
+    g, have = src.crop(10 * 256 - 8, 20 * 256 - 8, 10 * 256 + 8, 20 * 256 + 8)
+    assert g.shape == (16, 16) and have[8:, 8:].all() and not have[:8, :8].any()
+    assert abs(float(g[12, 12]) - 90) < 3
+
+
+# ------------------------------------------------------------------------------ measure
+def test_shadow_height_reads_a_synthetic_shadow():
+    """A 30 m box on bright ground with its shadow drawn at bearing 320, sun 45 deg: the dark
+    run from the roof edge to the tip gives the height (no lean: base == roof edge)."""
+    from skimage.draw import polygon as skpoly
+
+    M, Hb, el, bearing = 0.5, 30.0, 45.0, 320.0
+    gray = np.full((800, 800), 180.0, np.float32)
+    ub = ss.uv(bearing)
+    sq = np.array([[380, 380], [420, 380], [420, 420], [380, 420]], float)   # 20 m square
+    L = Hb / math.tan(math.radians(el)) / M                                   # shadow length, px
+    for fr in np.linspace(0, 1, 200):                                         # swept footprint
+        rr, cc = skpoly(sq[:, 1] + ub[1] * L * fr, sq[:, 0] + ub[0] * L * fr, gray.shape)
+        gray[rr, cc] = 30.0
+    rr, cc = skpoly(sq[:, 1], sq[:, 0], gray.shape)
+    gray[rr, cc] = 200.0                                                      # the roof
+    lab = np.zeros(gray.shape, np.int32)
+    lab[rr, cc] = 1
+    ctx = sm.ShadowCtx(gray=gray, lab=lab, water=np.zeros(gray.shape, bool),
+                       veg=np.zeros(gray.shape, bool), B={0: dict(P=[sq], tag=None)}, ub=ub,
+                       COT=1.0, p_ls=0.0, DEN_ROOF=1.0, DARK=80.0, M=M)
+    got = sm.shadow_height(ctx, 0)
+    assert got["height_m"] == pytest.approx(Hb, abs=2.0) and got["conf"] > 0.3
+
+
+def test_pair_consensus_takes_the_height_most_pairs_support():
+    st = dict(per_pair_h=[100.0, 102.0, 99.0, 40.0], pairs=["a|b", "a|c", "b|c", "c|d"])
+    c = sm.consensus(st)
+    assert c["n_agree"] == 3 and c["height_m"] == 100.0 and c["agreeing_pairs"] == ["a|b", "a|c", "b|c"]
+    assert sm.consensus(dict(per_pair_h=[10.0], pairs=["a|b"])) is None
+
+
+# ------------------------------------------------------------------------------ readings
+def test_shadow_scenes_merge_to_one_lower_bound_reading_and_lean_shadow_make_ls():
+    rs = sr.footprint_readings(
+        lean={"height_m": 120.0, "conf": 0.8},
+        shadows={"s1": {"height_m": 110.0, "conf": 0.6}, "s2": {"height_m": 112.0, "conf": 0.4},
+                 "s3": {"height_m": 40.0, "conf": 0.3}, "s4": {"height_m": 90.0, "conf": 0.1}},
+        stereo={"height_m": 118.0, "conf": 0.5, "n_pairs": 9, "n_agree": 4},
+        multiview={"height_m": 119.0, "conf": 0.2}, ref_scene="s1")
+    by = {r.method: r for r in rs}
+    assert [r.method for r in rs] == ["ls", "lean", "shadow", "stereo"]     # multiview conf < 0.3
+    sh = by["shadow"]
+    assert sh.lower_bound and sh.n_scenes == 2 and sh.scene == "s1+s2"      # s3 outside 25 %, s4 < 0.15
+    assert sh.height_m == pytest.approx((110 * 0.6 + 112 * 0.4) / 1.0)
+    assert by["ls"].height_m == pytest.approx((120 * 0.8 + sh.height_m * 0.6) / 1.4)
+    assert by["ls"].conf == 0.8
+
+
+def test_readings_round_trip(tmp_path):
+    rs = {"b0001": [sr.SatReading("shadow", 12.0, 0.5, "s1", True, 2)]}
+    sr.save(tmp_path / "r.json", rs, {"scenes": {"s1": {"date": "20260210"}}},
+            {"b0001": {"lat": 10.4, "lon": -75.55}})
+    meta, got = sr.load(tmp_path / "r.json")
+    assert meta["scenes"]["s1"]["date"] == "20260210" and meta["version"] == sr.READINGS_VERSION
+    assert got["b0001"]["lat"] == 10.4 and got["b0001"]["readings"][0] == rs["b0001"][0]
+    assert sr.load(tmp_path / "missing.json") == ({}, {})
+
+
+# ------------------------------------------------------------------------------ skyline wiring
+def test_fusion_readings_use_ls_in_place_of_lean_and_shadow():
+    rs = {"b1": sr.footprint_readings(lean={"height_m": 150, "conf": 0.8},
+                                      shadows={"s": {"height_m": 140, "conf": 0.7}})}
+    ds = sf.fusion_readings(rs)["b1"]
+    assert [d["kind"] for d in ds] == ["sat_ls"]
+    assert ds[0]["dist_m"] == pytest.approx(3300 * 0.07)
+
+
+def test_publishable_only_when_sigma_is_small():
+    low = sr.footprint_readings(shadows={"s": {"height_m": 20.0, "conf": 0.9}})   # sigma 0.67
+    assert sf.publishable(low) is None
+    tall = sr.footprint_readings(lean={"height_m": 130.0, "conf": 0.8})          # sigma 0.07
+    p = sf.publishable(tall)
+    assert p["height_m"] == 130.0 and p["methods"] == ["sat_lean"] and not p["lower_bound"]
+
+
+def _rec(fid, source, tag=None):
+    return BuildingRecord(fid, fid, None, 10.4, -75.55, tag, source, 400.0)
+
+
+def test_tiers_with_satellite(monkeypatch):
+    monkeypatch.delenv("SKYLINE_WITHHOLD_UNTAGGED", raising=False)
+    sat = {
+        "d": sr.footprint_readings(lean={"height_m": 110.0, "conf": 0.8}),       # drone + lean
+        "s": sr.footprint_readings(lean={"height_m": 130.0, "conf": 0.8}),       # satellite only
+        "ss": sr.footprint_readings(shadows={"a": {"height_m": 60, "conf": 0.9},  # shadows only
+                                            "b": {"height_m": 61, "conf": 0.9}}),
+        "lo": sr.footprint_readings(shadows={"a": {"height_m": 20, "conf": 0.9}}),
+    }
+    rows = [{"feature_id": f, "effective_height_m": 50.0, "effective_height_source": "geometric",
+             "per_seed_median_m": ({"seed_1": 100.0, "seed_9": 50.0} if f == "d" else {"seed_9": 50.0})}
+            for f in ("d", "s", "ss", "lo")]
+    recs = [_rec(f, "default") for f in ("d", "s", "ss", "lo")]
+    withhold_untagged_street_view(rows, recs, fallback=lambda r: (12.0, "prior"),
+                                  measured_seeds={"seed_1"}, satellite=sat)
+    d, s, ssr, lo = rows
+    assert d["effective_height_source"] == "withheld:elevated" and d["tier"] == "verified_2"
+    assert d["tier_methods"] == ["drone:seed_1", "lean"]
+    assert s["effective_height_source"] == "withheld:satellite" and s["effective_height_m"] == 130.0
+    assert s["tier"] == "single"
+    assert ssr["effective_height_source"] == "withheld:satellite" and ssr["tier"] == "single"
+    assert ssr["satellite_lower_bound"]                       # shadows only: a lower bound
+    assert lo["effective_height_source"] == "withheld:prior" and lo["tier"] == "prior"
+    assert lo["satellite"] == {"shadow": [20.0, 0.9]}
+
+
+def test_elevated_estimates_skip_satellite_keys_and_satellite_can_dispute():
+    from city2stl.skyline._pano import elevated as el
+    from city2stl.skyline.region_types import SkylinePoint
+
+    H, W = 100, 360
+    frame = np.arange(W) * 1.0
+    labels = np.full((H, W), fd.SKY_CLASS, np.int16)
+    labels[60:, :] = 21
+    pano = fd.Pano("seed_9", 10.4, -75.55, np.zeros((H, W, 3), np.uint8), labels, frame, 57.3, 0.0)
+    pose = fd.PanoPose(0.0, 80.0, 0.0, 0.3, W)
+    pf = fd.PositionFit(0.0, 0.0, pose, 0.3, 0.3, 0.4, 0.4, "recorded")
+    seed = SkylinePoint("seed_9", 10.4, -75.55, 0.0, "seed", 1.0)
+    m = fd.Measured(0, "", 10, 20, 40.0, 60.0, 61.0, 900.0, 150.0, 11, True, None, 1.0, "sky")
+    s1 = el.ElevatedSeed("seed_1", pf, [m], ["b7"], el.pano_result(seed, pano, pose, [m], ["b7"], None))
+    agree = sf.fusion_readings({"b7": sr.footprint_readings(lean={"height_m": 155.0, "conf": 0.8})})
+    est = el.elevated_estimates([s1], satellite=agree)
+    assert [e.view_name for e in est] == ["seed_1_015"]           # no KeyError on sat_lean
+    against = sf.fusion_readings({"b7": sr.footprint_readings(lean={"height_m": 60.0, "conf": 0.8})})
+    assert el.elevated_estimates([s1], satellite=against) == []    # lean at 528 m-eq outweighs 900 m

@@ -514,7 +514,8 @@ def _seed_multiview_registration(
     if elevated:
         # Across drone seeds the nearer, better-seen reading wins a disagreement
         # (footprint_detect.fuse_heights); only the kept readings reach the aggregate.
-        all_estimates.extend(elevated_estimates(elevated))
+        all_estimates.extend(elevated_estimates(
+            elevated, satellite=(elevated_state or {}).get("satellite")))
 
     agg = aggregate_building_heights(all_estimates) if all_estimates else []
     return view_rows, agg, pano_results

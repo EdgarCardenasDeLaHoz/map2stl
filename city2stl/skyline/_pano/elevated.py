@@ -922,12 +922,24 @@ def _untrust_behind(m, explained, instances, pano):
     return replace(m, top_edge="behind")
 
 
-def elevated_estimates(seeds: list[ElevatedSeed]) -> list[RegisteredBuildingEstimate]:
+def elevated_estimates(seeds: list[ElevatedSeed],
+                       satellite: dict | None = None) -> list[RegisteredBuildingEstimate]:
     """One estimate per footprint and seed, from :func:`trusted` readings only, for footprints
     whose seeds agree (``fuse_heights``, 25 %): a footprint the seeds disagree on gets no drone
-    height at all, rather than the most reliable view's, since any of them may be the misread."""
+    height at all, rather than the most reliable view's, since any of them may be the misread.
+
+    ``satellite``: ``{feature_id: [fuse_heights dict]}`` (``satellite_fusion.fusion_readings``,
+    site flag ``use_satellite_heights``). They join the fusion of the footprints a drone seed read,
+    one pseudo-seed per kind (``sat_lean`` ...): weighted by sigma_log, they can outvote and so
+    dispute a drone reading, or anchor which drone readings are kept. Only drone readings are
+    emitted: a satellite key in ``used`` has no ``by_key`` entry and is skipped."""
     by_seed = {s.seed_name: [dict(m.__dict__, footprint=s.feature_ids[m.footprint])
                              for m in s.measured if trusted(m)] for s in seeds}
+    if satellite:
+        drone_fids = {d["footprint"] for ms in by_seed.values() for d in ms}
+        for fid in drone_fids:
+            for d in satellite.get(fid, ()):
+                by_seed.setdefault(d["kind"], []).append(d)
     fused = fd.fuse_heights(by_seed)
     by_key = {(s.seed_name, s.feature_ids[m.footprint]): (s, m) for s in seeds for m in s.measured}
     # the segments carry each footprint's true bearing (their columns are rolled north-centre)
@@ -941,6 +953,8 @@ def elevated_estimates(seeds: list[ElevatedSeed]) -> list[RegisteredBuildingEsti
             # no drone height; the untagged prior or the tag takes over
             continue
         for seed_name in f["used"]:
+            if (seed_name, fid) not in by_key:      # a satellite pseudo-seed
+                continue
             s, m = by_key[(seed_name, fid)]
             b = int(round(bearing.get((seed_name, fid), 0.0))) % 360
             out.append(RegisteredBuildingEstimate(

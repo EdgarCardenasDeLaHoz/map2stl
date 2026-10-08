@@ -388,6 +388,11 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
   - Roof-fit heights from above: `map2stl/city2stl/skyline/_pano/roof_fit.py::fit_roof_heights`; per-instance floors: `map2stl/city2stl/skyline/floor_bands.py::instance_floors`.
   - Drone pano and camera: `map2stl/city2stl/skyline/_pano/elevated.py::sphere_pano`, `level_pano`, `overhead_pose` (camera fit from roofs seen from above).
   - Script: `scripts/18_footprint_detect.py`.
+- Satellite heights (F-SKY26 step 7; free Esri World Imagery / Wayback, no key):
+  - Package `map2stl/city2stl/height/satellite/`: scenes `scene.py::Scene` (`TileSource`, `identify`, `fetch_tiles`, `sunpos`, `fit_lean`, `solve_sun`); measurements `measure.py::shadow_height`, `lean_height`, `measure_single`, `measure_multi` (plane sweep), `consensus`; readings `readings.py::SatReading`, `footprint_readings` (shadow scenes merged to one), `from_measurements`, `save` / `load`; weights `weights.py::sigma_log` (the decision table; `footprint_detect.satellite_sigma_log` delegates), `weight_scale`; footprints `__init__.py::footprints_from_records`.
+  - Offline producer: `map2stl/city2stl/skyline/scripts/20_satellite_heights.py` -> `runs/satellite/<region>/readings.json` (+ `scenes.json`, tiles).
+  - In the region run (site flag `use_satellite_heights`, `region_data.py::_load_site_use_satellite_heights`): adapter `map2stl/city2stl/skyline/satellite_fusion.py::load_region`, `fusion_readings` (into `elevated_estimates(satellite=)`), `tier_readings`, `publishable` (untagged rows in `withhold_untagged_street_view(satellite=)`, source `withheld:satellite`).
+  - Fusion weight of one reading: `footprint_detect.py::satellite_reading` (drone-equivalent `dist_m = max(100, 3300 sigma_log)`).
 
 ### Entry points, scripts, tests
 
