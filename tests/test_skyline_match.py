@@ -407,3 +407,17 @@ def test_far_first_lets_an_agreed_tower_behind_cap_the_low_building_in_front():
     # a farther building that does not explain its own columns in a photo caps nothing there
     per_bad = [{0: 120.0, 1: 250.0}, {0: 124.0, 1: 300.0}]
     assert 0 in ph.agreed_with_occlusion(per_bad, spans, far_first=True)
+
+
+def test_refine_caps_panorama_fov():
+    """A wide panorama's free FOV range can pass 360 deg; refine must not overflow the bins."""
+    import numpy as np
+
+    from city2stl.skyline import skyline_match as sm
+
+    towers = sm.Towers(0.0, 0.0, [np.array([[0, 500], [20, 500], [20, 520], [0, 520]], float)],
+                       np.array([100.0]), ["t"])
+    prof = sm.PhotoProfile(np.linspace(100, 120, 600), 600, 100)
+    hit = sm.refine(prof, towers, sm.Hit(0.0, 0.0, 0.0, 300.0, 0, 0, 1, 0), radius_m=0,
+                    fov_span=0.6, projection="cylindrical")
+    assert hit.hfov_deg <= sm.MAX_FOV_DEG

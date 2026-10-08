@@ -35,6 +35,8 @@ import numpy as np
 M_PER_DEG_LAT = 111_320.0
 BIN_DEG = 0.1
 N_BINS = int(round(360 / BIN_DEG))
+#: Widest view a photo outline may span (a 360-degree panorama would wrap onto itself).
+MAX_FOV_DEG = 350.0
 
 
 @dataclass(frozen=True)
@@ -287,7 +289,9 @@ def refine(prof: PhotoProfile, towers: Towers, hit: Hit, radius_m: float = 600.0
     near it the misfit drops sharply, while false hits stay flat.
     """
     x0, y0 = towers.to_xy(hit.lat, hit.lon)
-    fovs = hit.hfov_deg * np.exp(np.linspace(-fov_span, fov_span, fov_steps))
+    # a panorama's FOV range can pass 360 deg; the photo must fit inside the bearing bins
+    fovs = np.unique(np.clip(hit.hfov_deg * np.exp(np.linspace(-fov_span, fov_span, fov_steps)),
+                             1.0, MAX_FOV_DEG))
     photos = {float(fv): photo_angles(prof, float(fv), projection) for fv in fovs}
     g = np.arange(-radius_m, radius_m + 1, step_m)
     best = None

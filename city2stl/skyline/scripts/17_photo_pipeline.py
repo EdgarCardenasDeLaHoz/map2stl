@@ -374,8 +374,11 @@ def _reusable(j: dict) -> dict | None:
     route, and not a failed recorded fit (those now get the FOV retry). Linked jobs are always
     re-run (their prior may come from a newly kept photo)."""
     r = _REUSE.get(j["meta"]["key"])
-    if (r is None or r.get("title") != j["meta"]["title"] or r.get("route") != j["route"]
-            or j["route"] == "linked"):
+    def bare(t):                                # results store titles without "File:"
+        return str(t or "").removeprefix("File:")
+
+    if (r is None or bare(r.get("title")) != bare(j["meta"]["title"])
+            or r.get("route") != j["route"] or j["route"] == "linked"):
         return None
     if j["route"] == "recorded" and not r.get("gate_ok"):
         return None
@@ -391,9 +394,15 @@ def _run(ex, jobs: list[dict], label: str) -> list[dict]:
     jobs = [j for j in jobs if _reusable(j) is None]
     if out:
         log.info("[%s] reused %d earlier results, placing %d", label, len(out), len(jobs))
-    futs = [ex.submit(_job, j) for j in jobs]
+    futs = {ex.submit(_job, j): j for j in jobs}
     for i, f in enumerate(as_completed(futs), 1):
-        r = f.result()
+        try:
+            r = f.result()
+        except Exception as e:  # noqa: BLE001 - one bad photo must not end the run
+            m = futs[f]["meta"]
+            log.exception("[%s] %s failed", label, m["key"])
+            r = {"key": m["key"], "title": m["title"], "route": futs[f]["route"],
+                 "gate_ok": False, "why": f"error: {e}", "towers": [], "anchor_dev_m": None}
         out.append(r)
         n = len(r.get("towers") or [])
         dev = r.get("anchor_dev_m")

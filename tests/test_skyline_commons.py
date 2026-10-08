@@ -173,7 +173,7 @@ def test_pipeline_reuses_only_unchanged_outcomes(monkeypatch):
 
     pp = importlib.import_module("city2stl.skyline.scripts.17_photo_pipeline")
     monkeypatch.setattr(pp, "_REUSE", {
-        "p1": {"key": "p1", "title": "File:A.jpg", "route": "search", "gate_ok": False},
+        "p1": {"key": "p1", "title": "A.jpg", "route": "search", "gate_ok": False},
         "p2": {"key": "p2", "title": "File:B.jpg", "route": "recorded", "gate_ok": False},
         "p3": {"key": "p3", "title": "File:C.jpg", "route": "recorded", "gate_ok": True},
     })
