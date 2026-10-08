@@ -369,6 +369,34 @@ def test_estimates_leave_out_tower_behind_readings_given_raw_satellite():
     assert {e.feature_id for e in el.elevated_estimates([s], satellite=fused)} == {"w/1", "w/2"}
 
 
+def test_segments_carry_trust_and_the_reason_a_reading_is_left_out():
+    """The seed pages' reason column: top_edge, trusted, untrusted_reason on every segment."""
+    from dataclasses import asdict, replace
+
+    from city2stl.skyline._pano.roof_fit import RoofMeasured
+
+    def roof(m, conf):
+        return RoofMeasured(**{**asdict(m), "top_edge": "roof"}, confidence=conf)
+    ms = [_m(0, 10, 20, 110.0, 600.0),                               # trusted, then tower behind
+          _m(1, 30, 40, 40.0, 500.0),                                # trusted
+          _m(2, 50, 60, 40.0, 500.0, base=False, frac=0.2),          # base hidden
+          replace(_m(3, 70, 80, 40.0, 500.0), top_edge="depth"),
+          replace(_m(4, 90, 100, 40.0, 500.0), top_edge="behind"),
+          roof(_m(5, 110, 120, 40.0, 500.0), 0.3),
+          roof(_m(6, 130, 140, 40.0, 1500.0), 0.9)]
+    fids = [f"w/{i}" for i in range(1, 8)]
+    s = _seed_with("seed_1", ms, fids, {0: (("w/9", 150.0, 150.0),)})
+    seg = {g["matched_projection"]["feature_id"]: g for g in s.pano_result.matched_segments}
+    assert [(seg[f]["top_edge"], seg[f]["trusted"], seg[f]["untrusted_reason"]) for f in fids] == [
+        ("sky", True, None), ("sky", True, None), ("sky", False, "base_hidden"),
+        ("depth", False, "depth_edge"), ("behind", False, "tag_behind"),
+        ("roof", False, "roof_conf_low"), ("roof", False, "roof_beyond_1000m")]
+    raw = {"w/1": [{"method": "stereo", "height_m": 9.0, "conf": 1.0}]}
+    el.elevated_estimates([s], satellite=raw)
+    assert (seg["w/1"]["trusted"], seg["w/1"]["untrusted_reason"]) == (False, "tower_behind")
+    assert seg["w/2"]["trusted"] is True
+
+
 def test_floors_flag_high_rises_join_fusion_and_never_publish_alone():
     """F-SKY26 steps 4/5: the storey from tagged plots counted with their base in view, the
     high-rise flag on an untagged plot (not where satellite says low), floors readings from

@@ -343,6 +343,10 @@ def pano_result(seed: SkylinePoint, pano: fd.Pano, pose: fd.PanoPose, measured: 
             "true_bearing_deg": float(headings[mid]), "seed_index": index[fid],
             "height_m": float(m.height_m), "height_src": "footprint",
             "base_visible": bool(m.base_visible), "visible_frac": float(m.visible_frac),
+            # why the reading is or is not used (the seed pages' reason column);
+            # elevated_estimates adds "tower_behind" after fusion
+            "top_edge": str(m.top_edge), "trusted": trusted(m),
+            "untrusted_reason": untrusted_reason(m),
             "matched_projection": {
                 "feature_id": fid, "name": m.name, "x_px": float(mid), "x_left_px": float(x0),
                 "x_right_px": float(x1), "forward_m": float(m.dist_m), "lateral_m": 0.0,
@@ -816,6 +820,38 @@ def trusted(m) -> bool:
     return m.top_edge == "sky" and (bool(m.base_visible) or m.visible_frac >= SKY_SEEN_TRUST)
 
 
+def untrusted_reason(m) -> str | None:
+    """Why :func:`trusted` refuses a reading (None when it is trusted), for the report:
+    ``roof_conf_low`` / ``roof_beyond_<N>m`` (an overhead roof fit), ``tag_behind`` (its top is a
+    farther tagged tower's, :func:`_untrust_behind`), ``depth_edge`` (the run stopped at a depth
+    step), ``top_<edge>`` (another top edge), ``base_hidden`` (sky-topped, base hidden, under
+    :data:`SKY_SEEN_TRUST` seen). ``tower_behind`` is set later, by :func:`elevated_estimates`."""
+    if trusted(m):
+        return None
+    if m.top_edge == "roof":
+        if float(getattr(m, "confidence", 0.0)) < ROOF_TRUST:
+            return "roof_conf_low"
+        return f"roof_beyond_{ROOF_TRUST_MAX_DIST_M:.0f}m"
+    if m.top_edge == "behind":
+        return "tag_behind"
+    if m.top_edge == "depth":
+        return "depth_edge"
+    if m.top_edge != "sky":
+        return f"top_{m.top_edge}"
+    return "base_hidden"
+
+
+def _mark_tower_behind(seeds, behind: dict) -> None:
+    """Set ``trusted`` False and ``untrusted_reason`` ``"tower_behind"`` on the report segments
+    of the readings :func:`tower_behind` left out."""
+    for s in seeds:
+        for seg in getattr(s.pano_result, "matched_segments", None) or ():
+            fid = (seg.get("matched_projection") or {}).get("feature_id")
+            if (s.seed_name, fid) in behind:
+                seg["trusted"] = False
+                seg["untrusted_reason"] = "tower_behind"
+
+
 #: Fusion weight factor of a roof fit that fills in for a footprint the street run gave no
 #: trusted reading (:func:`measure_waterline`); None turns the fill off. 2026-10-07, Cartagena
 #: seeds 1/4/5/6/7: the fill took trusted footprints 226 -> 273, verified by 2 seeds 11 -> 17
@@ -1221,6 +1257,7 @@ def elevated_estimates(seeds: list[ElevatedSeed],
     publisher (``floor_bands.high_rise_height``)."""
     satellite, raw = _split_satellite(satellite)
     behind = tower_behind(seeds, raw)
+    _mark_tower_behind(seeds, behind)
     if behind:
         logger.info("[elevated] tower behind: %d trusted readings on %d footprints untrusted "
                     "(satellite low, a farther footprint's evidence explains the top)",
