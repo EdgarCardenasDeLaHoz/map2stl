@@ -5,6 +5,48 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
+### 2026-10-07 — A drone reading of the tower behind is untrusted when the satellite says low and a farther footprint explains its top
+- **Decision:** `_pano/elevated.py::tower_behind` leaves a trusted drone reading out of fusion when
+  both hold:
+  - its footprint's confident satellite readings (lean, ls, stereo, multiview; conf >= 0.5; >= 3 m,
+    lower is a failed match) are all under 40 m, the reading is over 2x their largest, and no
+    confident shadow says >= 40 m;
+  - a footprint >= 1.15x farther over its columns (`behind_map`) would have the reading's top row as
+    its top at a height its own evidence matches within 25 %: OSM tag, any seed's trusted drone
+    reading, or a satellite reading >= 40 m.
+  No re-credit: the reading is dropped, not moved to the tower.
+- **Why:** each test alone fails; together they flag no right reading (saved states of Cartagena
+  seeds 1/4/5/6/7 and Miami seeds 2/3/4 and spheres, every trusted reading):
+  - geometry alone (a farther footprint with matching evidence) flagged 6 of 14 tag-correct
+    Cartagena readings and 20 of 37 LiDAR-correct Miami ones: adjacent towers explain each
+    other's tops, as the refused shared-top-edge check found;
+  - satellite-low alone is unsafe on 40-90 m towers whose stereo failed (b0289, tag 90 m: stereo
+    and multiview 2 m); 9 of 16 tagged 40-80 m footprints have every confident reading < 40 m;
+  - together: 65 readings on 61 footprints, 0 of 14 tag-correct, 3 of 4 tag-wrong, 51 of 141 over
+    2x every satellite reading. Published towers unchanged; tagged within 25 % fused 0.73 -> 0.80.
+  - Region run v9 vs v8: single 270 -> 223, drone singles > 2x prior 212 -> 164 (all satellite
+    readings < 40 m: 155 -> 111); verified_2 38 -> 32; the 7 towers unchanged.
+- **Rejected:**
+  - re-crediting the height to the tower behind: the tower is chosen because its evidence agrees,
+    so the re-credited reading would verify it by construction (29 of 65 towers already read by
+    the same seed);
+  - the floor-distance cue of the F-SKY26 design (below, Rejected hypotheses);
+  - an instance change as a requirement: present on 7 % of the readings over 2x the satellite.
+- **Limits:** needs satellite readings, so Miami (none yet) is unchanged; 158 of v8's 212 drone
+  singles stay, mostly with no tagged, satellite-tall or drone-read footprint behind them.
+- **Supersedes / superseded by:** extends the tagged-tower `_untrust_behind` (commit `9238e00`).
+- **Source:** [F-SKY26](../plans/active/F-SKY26-skyline-signals-to-publish.md) step 6.
+
+### 2026-10-07 — A floor count is a lower bound unless ground is seen under the instance
+- **Decision:** `floor_bands.InstanceFloors.base_seen` is true only with ground (not building, not
+  sky) under the mask; otherwise `lower_bound`. Instances flatter than `MIN_ASPECT` (0.1 rows per
+  column) are refused. OSM `building:levels` is not truth for floors.
+- **Why:** user review of 16 floor labels: 8 right (including seed_6 inst 63 "16 fl / OSM 2"), 7 too
+  few floors with the base or lower floors hidden, 1 a road (seed_6 inst 288, 18 rows over 276
+  columns; the flattest accepted building is 0.14). The depth "own podium" test read 0.98-1.03
+  under/inside on all 27 instances checked, partial or not, so it does not mark a base seen.
+- **Source:** [F-SKY26](../plans/active/F-SKY26-skyline-signals-to-publish.md) Progress, 2026-10-07.
+
 ### 2026-10-07 — Satellite heights go live in the skyline run, opt-in per site
 - **Decision:** the region run reads offline satellite readings when the site sets
   `use_satellite_heights` (on for Cartagena). It never measures or fetches imagery itself.
@@ -348,6 +390,13 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Hypothesis:** a trusted reading whose top row matches a farther footprint's top row is an occluder and wrong.
 - **Measured:** caught none of the 5 wrong trusted readings and flagged 25 good ones.
 - **Verdict:** refused.
+
+### 2026-10-07 — Floor-implied distance alone as the tower-behind test
+- **Hypothesis:** an accepted floor instance covering a reading's top, matched to a farther plot,
+  shows the run climbed onto that plot (F-SKY26 step 6 design).
+- **Measured:** 0 wrong readings matched, 3 right ones did (none of either with the instance change
+  required); seeds have 0-38 accepted floor instances.
+- **Verdict:** refused; the satellite + evidence test is used instead.
 
 ### 2026-10-06 — The "behind" flag for occluded tops
 - **Hypothesis:** flag a tower top that lies behind a nearer surface.

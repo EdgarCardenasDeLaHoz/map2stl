@@ -209,6 +209,40 @@ Two constraints follow:
     is the next lever.
   - Tier map: `tiers_map.png`, `tiers_map_bocagrande.png` in the v8 report folder (the HTML report
     shows no tiers yet: 2f).
+- 2026-10-07, step 6 done (`b198c17`; floors fix `deb0a26`): `elevated.behind_map` (per seed: the
+  footprints >= 1.15x farther over a trusted reading's columns and the height its top row gives
+  each) and `elevated.tower_behind`: a reading is left out of fusion when its footprint's confident
+  satellite readings (lean/ls/stereo/multiview, conf >= 0.5, >= 3 m; a confident shadow >= 40 m
+  blocks) are all under 40 m with the reading > 2x, **and** a farther footprint's tag, any seed's
+  trusted drone reading or satellite >= 40 m agrees within 25 % with the implied height.
+  `elevated_estimates` takes the raw satellite readings (`region_pdf` passes them now). Harness:
+  `seed_experiment.py --remeasure --behind`.
+  - Cartagena (saved states, seeds 1/4/5/6/7, 305 trusted readings): 65 readings on 61 footprints
+    untrusted; tag-wrong 3 of 4 caught (b0634 69/10 m, b0628 105/42, b0622 74/6); 51 of 141
+    readings > 2x every satellite reading; 11 unlabelled; **0 of 14 tag-correct readings** and 0 of
+    16 readings near a confident satellite reading flagged. Published towers: same 7 values;
+    tagged within 25 %: drone trusted 0.82 -> 0.88, fused 0.73 -> 0.80; verified by 2 seeds
+    16 -> 14 (b0116, b0896: two seeds reading the same tower behind, satellite 5.5 / 23.5 m).
+  - Miami: no satellite readings, so 0 flagged; every metric identical (trusted within 25 %
+    unchanged).
+  - Region run v9 (`runs/region_reports/Cartagena_v9_skyline_report/`, cache-only, 0 Street View
+    misses): 79 readings on 72 footprints untrusted. Tiers v8 -> v9: verified_2 38 -> 32, tag
+    143 -> 143, single 270 -> 223, prior 237 -> 248 (rows 688 -> 646). Singles > 2x prior 259 ->
+    211; drone ones 212 -> 164 (median 102.8 -> 98.5 m), with every satellite reading < 40 m
+    155 -> 111. Of v8's 212: 12 now prior, 1 satellite, 41 have no drone estimate left (no row in
+    heights.json), 158 unchanged. The 7 towers keep values and tiers (5 verified). Map:
+    `tiers_map_bocagrande.png` (v8 beside v9).
+  - Not done: re-credit to the tower behind. 29 of 65 flagged readings already have the tower
+    read by the same seed; where it is tagged the implied height is 1.04-1.26x the tag (6 of 7,
+    one 4.5x), but the tower is chosen because its evidence agrees, so a re-credited reading would
+    count as a second source by construction. The floors cue (an accepted instance on the top
+    matched to a farther plot, + instance change) matched 0 wrong readings and 3 right ones.
+  - Still open: 158 of v8's drone singles stay > 2x the prior; most have no farther footprint whose
+    evidence explains the top, and Miami has no satellite cue at all.
+  - Floors (user review of 16 labels): `InstanceFloors.base_seen` / `.lower_bound` (ground under the
+    mask only; the depth podium test reads 0.98-1.03 on every instance), flat strips refused
+    (`MIN_ASPECT` 0.1: seed_6 inst 288, a road). OSM levels are not truth (inst 63 "16 fl / OSM 2"
+    was right).
 
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered

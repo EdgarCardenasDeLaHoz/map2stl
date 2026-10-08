@@ -946,9 +946,9 @@ def _untrust_behind(m, explained, instances, pano):
 #: - the satellite test alone is unsafe on 40-90 m towers whose stereo failed (b0289, tag 90 m:
 #:   stereo 2 m at conf 1.0, multiview 2 m at 0.86; 9 of 16 tagged 40-80 m footprints have
 #:   every confident reading under 40 m);
-#: - together: 80 readings on 76 footprints, none within 25 % of a tag; all 3 tag-wrong
-#:   readings (b0634 69/10 m, b0628 105/42 m, b0622 74/6 m) and 61 of 141 readings over 2x
-#:   every satellite reading; 0 of 16 readings within 35 % of a confident satellite reading.
+#: - together (with SAT_MIN_M and the shadow block): 65 readings on 61 footprints, none within
+#:   25 % of a tag; 3 of 4 tag-wrong readings (b0634 69/10 m, b0628 105/42 m, b0622 74/6 m) and 51
+#:   of 141 readings over 2x every satellite reading; 0 of 16 near a confident satellite reading.
 #: Floors (the plan's cue: an accepted floor instance on the top matched to a farther plot)
 #: matched 0 wrong readings and 3 right ones: too few instances pass the floor checks that far
 #: out (0-38 a seed). Miami has no satellite readings, so nothing changes there.
