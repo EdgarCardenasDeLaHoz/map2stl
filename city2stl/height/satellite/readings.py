@@ -12,7 +12,14 @@ One footprint gets at most one reading per method (``SatReading``):
 
 Readings under ``weights.MIN_CONF`` (0.15) are not made. The rules are those of the F-SKY26
 harness ``Code/claude/scripts/seed_experiment.py::load_sat`` (2026-10-07), which the satellite
-weights were scored with; ``tests/test_satellite_heights.py`` checks they match.
+weights were scored with; ``tests/test_satellite_heights.py`` checks they match. Since
+2026-10-08 :func:`calibrate` then corrects two confidences the measurement's peak shape gets
+wrong (LiDAR-checked; ``calibrate=False`` gives the 2026-10-07 readings):
+
+- a lean under ``weights.TALL_M`` is capped at :data:`LOW_LEAN_MAX_CONF`;
+- a stereo or multiview reading a confident tall lean is :data:`UNDER_LEAN_FACTOR` x or more
+  above is dropped: the sweep matched a lower level of the footprint (podium, setback). Its
+  height stays in the lean's ``extra`` (``stereo_under_lean``, ``multiview_under_lean``).
 
 ``readings.json`` (``runs/satellite/<region>/readings.json``) holds ``{"_meta": {...}, fid:
 {"lat", "lon", "osm_id", "readings": [SatReading as dict]}}``; ``_meta.scenes`` lists the scene
@@ -28,13 +35,26 @@ from pathlib import Path
 
 import numpy as np
 
-from .weights import MIN_CONF, MULTIVIEW_MIN_CONF
+from .weights import MIN_CONF, MULTIVIEW_MIN_CONF, TALL_M
 
 #: Two readings agree within this share (the benchmark's 25 % yardstick).
 AGREE = 0.25
 #: Methods a footprint can have, in the order fusion considers them.
 METHODS = ("ls", "lean", "shadow", "stereo", "multiview")
 READINGS_VERSION = 1
+#: A lean under ``TALL_M`` is not a roof reading whatever its peak shape. LiDAR (2026-10-08,
+#: S/satellite_cities/val): Chicago lean 15-40 m at conf >= 0.7 within 25 % of truth 1 of 61
+#: (44 % under 0.6x truth), 3-15 m 1 of 16; Cartagena Ravello (published 144 m) lean 38 m at conf
+#: 1.0. Capped at this, nothing reads it as confident (``elevated.tower_behind`` takes >= 0.5);
+#: the peak-shape value stays in ``extra["conf_peak"]``. Fusion already drops it (weights).
+LOW_LEAN_MAX_CONF = 0.3
+#: A lean of at least ``TALL_M`` and :data:`LEAN_TRUST_CONF` this many times a stereo or
+#: multiview reading drops that reading. Chicago (2026-10-08): stereo >= 40 m conf >= 0.6 with
+#: such a lean 1.25x or more above it: stereo within 25 % of LiDAR 1 of 20, the lean 16 of 20;
+#: within 1.25x both are about as good (66 % / 59 %, n 98). Cartagena Allure (180 m): lean 168 m,
+#: stereo 77 m at conf 0.83.
+UNDER_LEAN_FACTOR = 1.25
+LEAN_TRUST_CONF = 0.7
 
 
 @dataclass
@@ -80,14 +100,36 @@ def group(vals: list[tuple[float, float]]) -> tuple[float, float, int, list]:
     return float(np.average([h for h, _ in g], weights=w)), float(w.max()), len(g), g
 
 
+def calibrate(rs: list[SatReading]) -> list[SatReading]:
+    """One footprint's readings with the 2026-10-08 confidence corrections (module docstring):
+    lean under ``TALL_M`` capped at :data:`LOW_LEAN_MAX_CONF`; stereo / multiview under a
+    confident tall lean (:data:`UNDER_LEAN_FACTOR`) dropped. Idempotent; the input is not
+    changed."""
+    by = {r.method: r for r in rs}
+    lean = by.get("lean")
+    if lean is None:
+        return list(rs)
+    if lean.height_m < TALL_M and lean.conf > LOW_LEAN_MAX_CONF:
+        lean = SatReading(**{**lean.__dict__, "conf": LOW_LEAN_MAX_CONF,
+                             "extra": {**lean.extra, "conf_peak": lean.conf}})
+    elif lean.height_m >= TALL_M and lean.conf >= LEAN_TRUST_CONF:
+        drop = {m: by[m].height_m for m in ("stereo", "multiview")
+                if m in by and lean.height_m >= UNDER_LEAN_FACTOR * by[m].height_m}
+        if drop:
+            lean = SatReading(**{**lean.__dict__, "extra": {
+                **lean.extra, **{f"{m}_under_lean": round(h, 1) for m, h in drop.items()}}})
+            rs = [r for r in rs if r.method not in drop]
+    return [lean if r.method == "lean" else r for r in rs]
+
+
 def footprint_readings(*, lean: dict | None = None, shadows: dict | None = None,
                        stereo: dict | None = None, multiview: dict | None = None,
-                       ref_scene: str | None = None) -> list[SatReading]:
+                       ref_scene: str | None = None, calibrate: bool = True) -> list[SatReading]:
     """One footprint's readings from its raw measurements.
 
     ``lean``: ``{height_m, conf}`` of the reference scene (key ``qc`` accepted for ``conf``);
     ``shadows``: ``{scene: {height_m, conf}}``; ``stereo``: the consensus; ``multiview``: the
-    plane-sweep peak.
+    plane-sweep peak. ``calibrate``: apply :func:`calibrate` (False: the 2026-10-07 rules).
     """
     out: list[SatReading] = []
     by: dict[str, SatReading] = {}
@@ -119,7 +161,10 @@ def footprint_readings(*, lean: dict | None = None, shadows: dict | None = None,
     for m in METHODS:
         if m in by:
             out.append(by[m])
-    return out
+    return _calibrate(out) if calibrate else out
+
+
+_calibrate = calibrate
 
 
 def from_measurements(single: dict | None, multi: dict | None, ref_scene: str) -> dict:
@@ -167,5 +212,6 @@ def load(path: str | os.PathLike) -> tuple[dict, dict]:
     return meta, out
 
 
-__all__ = ["SatReading", "footprint_readings", "from_measurements", "group", "save", "load",
-           "METHODS", "AGREE", "READINGS_VERSION"]
+__all__ = ["SatReading", "footprint_readings", "from_measurements", "calibrate", "group", "save",
+           "load", "METHODS", "AGREE", "READINGS_VERSION", "LOW_LEAN_MAX_CONF", "UNDER_LEAN_FACTOR",
+           "LEAN_TRUST_CONF"]

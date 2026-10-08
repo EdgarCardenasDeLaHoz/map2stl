@@ -12,13 +12,18 @@ Per region (F-SKY26 step 7; methods in ``city2stl.height.satellite``):
    <scene>/`` (``--seed-tiles DIR`` copies an existing ``DIR/<scene>/`` cache first); missing
    tiles are fetched only with ``--fetch`` (free Esri imagery, 4 concurrent);
 3. geometry per scene: lean and registration (``scene.fit_lean``), sun (``scene.solve_sun``);
-   cached in ``scenes.json`` (``--refit`` redoes it);
+   cached in ``scenes.json`` (``--refit`` redoes it); each scene's outline in its release
+   (``scene.scene_polygon``, cached in ``polygons.json``): a release mosaics several captures, so
+   outside the outline its tiles are another image with another lean and sun. Tiles are fetched,
+   the reference scene measures and the other scenes add shadows and stereo only inside it;
 4. measurements: shadow + lean on ``--ref`` (``measure.measure_single``), per-scene shadows and
    the plane sweep (``measure.measure_multi``) for footprints whose centre tile the reference
    scene has cached;
 5. readings (``readings.from_measurements``) to ``readings.json``, keyed by footprint id, with
    lat/lon to re-match later runs. Cached by scene names and dates: an unchanged scene set is not
-   re-measured unless ``--force``.
+   re-measured unless ``--force``. ``--add`` (same scenes) measures only the footprints not
+   measured yet (e.g. after ``--fetch`` extended the tiles) and keeps the others' readings and
+   the shadow grey threshold (``_meta.dark``).
 
 The region run never measures; it reads ``readings.json`` when the site has
 ``use_satellite_heights`` (``city2stl/skyline/satellite_fusion.py``).
@@ -116,8 +121,14 @@ def main(argv=None) -> int:
     ap.add_argument("--wayback-config", default=None, help="cached waybackconfig.json to use")
     ap.add_argument("--sun", action="append", default=[], metavar="SCENE=BEARING,EL",
                     help="fix a scene's sun (e.g. visually verified) instead of the time search")
+    ap.add_argument("--add", action="store_true",
+                    help="same scenes: measure only footprints not measured yet, keep the rest")
+    ap.add_argument("--recalibrate", action="store_true",
+                    help="only re-apply readings.calibrate to the stored readings (no measuring)")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    if a.recalibrate:
+        return recalibrate(readings_path(a.region))
     t0 = time.time()
     rd = region_dir(a.region)
     rd.mkdir(parents=True, exist_ok=True)
@@ -145,18 +156,25 @@ def main(argv=None) -> int:
             for p in (Path(a.seed_tiles) / n).glob("18_*.jpg"):
                 if not (d / p.name).exists():
                     shutil.copy2(p, d / p.name)
-    # footprints measured: centre tile cached in the reference scene
+    # footprints measured: centre tile cached in the reference scene, inside its outline
     ref_src = ss.TileSource(rd / "tiles" / ref)
     lat0 = float(np.mean([f["lat"] for f in fps])) if fps else lat_c
     M = ss.mpp(lat0)
+    log.info("before: %d of %d footprints on cached %s tiles", len(on_tiles(fps, ref_src)), len(fps), ref)
+    polys = scene_polygons(rd / "polygons.json", names, scenes_rel, fps, (lat_c, lon_c),
+                           (lambda: ss.wayback_config(cfg_path)) if a.fetch else None)
+    inside = {n: covered_fids(polys.get(n), fps) for n in names}
+    for n in names:
+        log.info("scene %s outline: %s of %d footprints inside", n,
+                 "unknown (all)" if polys.get(n) is None else len(inside[n]), len(fps))
     if a.fetch:
         cfg = ss.wayback_config(cfg_path)
-        need = scene_tiles(fps, M)
         for n in names:
+            need = scene_tiles([f for f in fps if f["fid"] in inside[n]], M)
             stats[n] = ss.fetch_tiles(cfg[scenes_rel[n]]["itemURL"], rd / "tiles" / n, need)
             log.info("tiles %s %s", n, stats[n])
         ref_src.refresh()
-    sel = [f for f in fps if (int(np.mean(f["bb"][0::2]) // 256), int(np.mean(f["bb"][1::2]) // 256)) in ref_src.tiles]
+    sel = [f for f in on_tiles(fps, ref_src) if f["fid"] in inside[ref]]
     if not sel:
         log.error("no footprint on the reference scene's cached tiles")
         return 1
@@ -187,6 +205,8 @@ def main(argv=None) -> int:
             sc.meta["sun"] = "fixed (--sun)"
         elif g.get("sun"):
             sc.shadow_bearing, sc.sun_el = g["sun"]["shadow_bearing"], g["sun"]["el"]
+        if len(inside[n]) < len(fps):
+            sc.covered = inside[n]
         scenes.append(sc)
     if ref not in {s.name for s in scenes}:
         log.error("reference scene %s has no geometry", ref)
@@ -195,25 +215,44 @@ def main(argv=None) -> int:
     key = {s.name: dict(date=s.date, L=[round(float(v), 4) for v in s.lean],
                         sun=[s.shadow_bearing, s.sun_el]) for s in scenes}
     out = readings_path(a.region)
-    if out.exists() and not a.force:
-        meta, _ = sr.load(out)
-        if meta.get("scenes") == json.loads(json.dumps(key)):
-            log.info("readings for these scenes exist: %s (--force to redo)", out)
-            return 0
+    prev_meta, prev = sr.load(out) if (a.add or not a.force) else ({}, {})
+    same = bool(prev_meta) and prev_meta.get("scenes") == json.loads(json.dumps(key))
+    if a.add and prev_meta and not same:
+        log.error("--add: the scenes changed since %s; re-measure all with --force", out)
+        return 1
+    done = measured_before(prev_meta, prev) if (a.add and same) else set()
+    todo = [f for f in sel if f["fid"] not in done]
+    if same and not a.force and not (a.add and todo):
+        log.info("readings for these scenes exist: %s (--force to redo, --add after --fetch)", out)
+        return 0
     # ---- measure
     if ref_sc.shadow_bearing is not None:
-        gray, hv = ref_sc.tiles.crop(*_window(sel))
-        ref_sc.dark = float(0.5 * (np.percentile(gray[hv], 3) + np.percentile(gray[hv], 50)))
-        del gray, hv
-    only = {f["fid"] for f in sel}
+        if done and prev_meta.get("dark") is not None:
+            ref_sc.dark = float(prev_meta["dark"])
+        else:   # the reference window: the footprints measured before when adding
+            win = [f for f in sel if f["fid"] in done] or sel
+            gray, hv = ref_sc.tiles.crop(*_window(win))
+            ref_sc.dark = float(0.5 * (np.percentile(gray[hv], 3) + np.percentile(gray[hv], 50)))
+            del gray, hv
+    log.info("measuring %d footprints (%d measured before); dark %.1f", len(todo), len(done),
+             ref_sc.dark or float("nan"))
+    only = {f["fid"] for f in todo}
     single = sm.measure_single(fps, ref_sc, M, dark=ref_sc.dark or 80.0, only=only, progress=log.info) \
-        if ref_sc.shadow_bearing is not None else {}
-    multi = sm.finish_multi(sm.measure_multi(fps, scenes, ref, [f["fid"] for f in sel], M, progress=log.info)) \
-        if len(scenes) >= 2 else {}
+        if ref_sc.shadow_bearing is not None and only else {}
+    multi = sm.finish_multi(sm.measure_multi(fps, scenes, ref, [f["fid"] for f in todo], M, progress=log.info)) \
+        if len(scenes) >= 2 and only else {}
     rs = sr.from_measurements(single, multi, ref)
-    where = {f["fid"]: dict(lat=round(f["lat"], 7), lon=round(f["lon"], 7)) for f in sel}
+    where = {f["fid"]: dict(lat=round(f["lat"], 7), lon=round(f["lon"], 7)) for f in todo}
+    if done:                                    # --add: keep what was measured before
+        for fid, v in prev.items():
+            if fid not in rs:
+                rs[fid] = v["readings"]
+                where[fid] = {k: v[k] for k in ("lat", "lon", "osm_id") if k in v}
+    measured = sorted(done | only)
     meta = dict(region=a.region, scenes=key, ref=ref, releases={n: scenes_rel[n] for n in names},
-                n_footprints=len(sel), n_with_readings=len(rs), mpp=M, fetch=stats,
+                n_footprints=len(measured), n_with_readings=len(rs), mpp=M, fetch=stats,
+                dark=ref_sc.dark, measured=measured,
+                outline_footprints={n: len(inside[n]) for n in names},
                 built=time.strftime("%Y-%m-%d %H:%M"), seconds=round(time.time() - t0))
     sr.save(out, rs, meta, where)
     by_m = {}
@@ -222,6 +261,58 @@ def main(argv=None) -> int:
             by_m[r.method] = by_m.get(r.method, 0) + 1
     log.info("wrote %s: %d footprints with readings %s, %.0f s", out, len(rs), by_m, time.time() - t0)
     return 0
+
+
+def recalibrate(path: Path) -> int:
+    """Re-apply ``readings.calibrate`` (2026-10-08 confidence corrections) to a stored
+    ``readings.json``: it needs only the stored readings, so nothing is re-measured."""
+    meta, data = sr.load(path)
+    if not data:
+        log.error("no readings at %s", path)
+        return 1
+    rs = {fid: sr.calibrate(v["readings"]) for fid, v in data.items()}
+    rs = {fid: v for fid, v in rs.items() if v}
+    n = sum(1 for fid in rs if [r.to_json() for r in rs[fid]] != [r.to_json() for r in data[fid]["readings"]])
+    where = {fid: {k: v[k] for k in ("lat", "lon", "osm_id") if k in v} for fid, v in data.items()}
+    sr.save(path, rs, dict(meta, calibrated=time.strftime("%Y-%m-%d"), n_with_readings=len(rs)), where)
+    log.info("recalibrated %s: %d of %d footprints changed", path, n, len(data))
+    return 0
+
+
+def on_tiles(fps, src: ss.TileSource) -> list:
+    """The footprints whose centre tile ``src`` has cached."""
+    return [f for f in fps if (int(np.mean(f["bb"][0::2]) // 256), int(np.mean(f["bb"][1::2]) // 256)) in src.tiles]
+
+
+def scene_polygons(path: Path, names, scenes_rel: dict, fps, centre, cfg_fn=None) -> dict:
+    """``{scene: rings or None}``, cached in ``path``; missing ones are looked up only with
+    ``cfg_fn`` (the Wayback config loader; network), at the region centre and then at the tallest
+    tagged footprints (where the scene geometry was fitted)."""
+    polys = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    missing = [n for n in names if n not in polys]
+    if missing and cfg_fn is not None:
+        cfg = cfg_fn()
+        pts = [centre] + [(f["lat"], f["lon"]) for f in
+                          sorted((f for f in fps if f["tag"]), key=lambda f: -f["tag"])[:6]]
+        for n in missing:
+            polys[n] = ss.scene_polygon(cfg, scenes_rel[n], n, pts)
+            if polys[n] is None:
+                log.warning("scene %s: outline not found in release %s", n, scenes_rel[n])
+        path.write_text(json.dumps(polys), encoding="utf-8")
+    return polys
+
+
+def covered_fids(rings, fps) -> set:
+    """Footprint ids whose centroid is inside the scene outline (all when it is unknown)."""
+    if not rings or not fps:
+        return {f["fid"] for f in fps}
+    ok = ss.in_rings(rings, [f["lon"] for f in fps], [f["lat"] for f in fps])
+    return {f["fid"] for f, k in zip(fps, ok, strict=True) if k}
+
+
+def measured_before(meta: dict, data: dict) -> set:
+    """Footprint ids an earlier run measured (``_meta.measured``; else those with readings)."""
+    return set(meta.get("measured") or data)
 
 
 def _window(fps, pad: int = 64):

@@ -188,3 +188,73 @@ def test_elevated_estimates_skip_satellite_keys_and_satellite_can_dispute():
     assert [e.view_name for e in est] == ["seed_1_015"]           # no KeyError on sat_lean
     against = sf.fusion_readings({"b7": sr.footprint_readings(lean={"height_m": 60.0, "conf": 0.8})})
     assert el.elevated_estimates([s1], satellite=against) == []    # lean at 528 m-eq outweighs 900 m
+
+
+# ------------------------------------------------------------------------------ calibration
+def test_calibrate_caps_a_low_lean_and_drops_stereo_under_a_confident_tall_lean():
+    """2026-10-08, Chicago LiDAR: lean under 40 m is not a roof reading whatever its peak shape;
+    stereo 1.25x or more under a confident tall lean matched a lower level (podium, setback)."""
+    # Ravello (published 144 m): lean 38 m at conf 1.0, stereo 161 m
+    rav = sr.footprint_readings(lean={"height_m": 38.0, "conf": 1.0},
+                                stereo={"height_m": 161.0, "conf": 1.0, "n_pairs": 18})
+    by = {r.method: r for r in rav}
+    assert by["lean"].conf == sr.LOW_LEAN_MAX_CONF and by["lean"].extra["conf_peak"] == 1.0
+    assert by["stereo"].conf == 1.0
+    # Allure (180 m): lean 167.5 m at conf 1.0, stereo 77 m at 0.83 -> stereo dropped, kept as evidence
+    al = sr.footprint_readings(lean={"height_m": 167.5, "conf": 1.0},
+                               stereo={"height_m": 77.0, "conf": 0.83, "n_pairs": 18},
+                               multiview={"height_m": 150.0, "conf": 0.5})
+    assert [r.method for r in al] == ["lean", "multiview"]
+    assert al[0].extra == {"stereo_under_lean": 77.0}
+    # an unsure lean (conf < 0.7) never drops stereo; within 1.25x both stay
+    assert [r.method for r in sr.footprint_readings(
+        lean={"height_m": 167.5, "conf": 0.6}, stereo={"height_m": 77.0, "conf": 0.83})] == ["lean", "stereo"]
+    assert [r.method for r in sr.footprint_readings(
+        lean={"height_m": 120.0, "conf": 0.9}, stereo={"height_m": 100.0, "conf": 0.83})] == ["lean", "stereo"]
+    # idempotent, and calibrate=False keeps the 2026-10-07 readings
+    assert sr.calibrate(al) == al and sr.calibrate(rav) == rav
+    raw = sr.footprint_readings(lean={"height_m": 38.0, "conf": 1.0}, calibrate=False)
+    assert raw[0].conf == 1.0 and sr.calibrate(raw)[0].conf == sr.LOW_LEAN_MAX_CONF and raw[0].conf == 1.0
+
+
+def test_calibrated_low_lean_no_longer_says_low_for_the_tower_behind_test():
+    from city2stl.skyline._pano.elevated import _sat_max
+
+    rs = sr.footprint_readings(lean={"height_m": 22.0, "conf": 1.0})
+    assert _sat_max(sr.footprint_readings(lean={"height_m": 22.0, "conf": 1.0}, calibrate=False)) == 22.0
+    assert _sat_max(rs) is None
+
+
+# ------------------------------------------------------------------------------ region coverage
+def _script():
+    import importlib
+
+    return importlib.import_module("city2stl.skyline.scripts.20_satellite_heights")
+
+
+def test_scene_outline_rings_are_even_odd_and_select_footprints():
+    outer = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
+    hole = [[4, 4], [6, 4], [6, 6], [4, 6], [4, 4]]
+    part = [[20, 20], [22, 20], [22, 22], [20, 22], [20, 20]]
+    got = ss.in_rings([outer, hole, part], [1, 5, 21, 15], [1, 5, 21, 15])
+    assert got.tolist() == [True, False, True, False]
+    fps = [dict(fid="a", lon=1.0, lat=1.0), dict(fid="b", lon=5.0, lat=5.0), dict(fid="c", lon=15.0, lat=1.0)]
+    s = _script()
+    assert s.covered_fids([outer, hole], fps) == {"a"}
+    assert s.covered_fids(None, fps) == {"a", "b", "c"}          # unknown outline: all
+
+
+def test_add_keeps_earlier_footprints_and_recalibrate_rewrites_stored_readings(tmp_path):
+    s = _script()
+    p = tmp_path / "readings.json"
+    rs = {"b1": sr.footprint_readings(lean={"height_m": 167.5, "conf": 1.0},
+                                      stereo={"height_m": 77.0, "conf": 0.83}, calibrate=False),
+          "b2": sr.footprint_readings(lean={"height_m": 30.0, "conf": 0.9}, calibrate=False)}
+    sr.save(p, rs, {"scenes": {"s": {}}}, {"b1": {"lat": 10.4, "lon": -75.5}, "b2": {"lat": 10.5, "lon": -75.5}})
+    meta, data = sr.load(p)
+    assert s.measured_before(meta, data) == {"b1", "b2"}
+    assert s.measured_before({"measured": ["b1", "b9"]}, data) == {"b1", "b9"}
+    assert s.recalibrate(p) == 0
+    meta, data = sr.load(p)
+    assert [r.method for r in data["b1"]["readings"]] == ["lean"] and data["b1"]["lat"] == 10.4
+    assert data["b2"]["readings"][0].conf == sr.LOW_LEAN_MAX_CONF and meta["calibrated"]

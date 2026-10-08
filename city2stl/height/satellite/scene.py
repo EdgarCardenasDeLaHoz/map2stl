@@ -248,6 +248,30 @@ def scene_name(attrs: dict) -> str:
     return f"{d[:4]}-{d[4:6]}-{d[6:8]}_{str(attrs.get('SRC_DESC') or '').replace(' ', '')}"
 
 
+def scene_polygon(cfg: dict, rel: str, name: str,
+                  points: Iterable[tuple[float, float]]) -> list | None:
+    """The outline (lon/lat rings) of scene ``name`` in release ``rel``: identify at each
+    ``(lat, lon)`` of ``points`` until one shows that scene. A release mosaics several captures,
+    so outside the polygon its tiles show another image, whose lean and sun differ."""
+    for lat, lon in points:
+        got = identify(cfg, rel, lat, lon, geometry=True)
+        if got and scene_name(got["attrs"]) == name and got.get("rings"):
+            return got["rings"]
+    return None
+
+
+def in_rings(rings: Sequence, lon, lat) -> np.ndarray:
+    """Points inside Esri polygon rings (even-odd over every ring: holes and parts)."""
+    from matplotlib.path import Path as MplPath  # noqa: PLC0415
+
+    pts = np.c_[np.ravel(lon), np.ravel(lat)]
+    odd = np.zeros(len(pts), bool)
+    for r in rings or []:
+        if len(r) >= 3:
+            odd ^= MplPath(np.asarray(r, float)[:, :2]).contains_points(pts)
+    return odd
+
+
 def fetch_tiles(url_template: str, folder: str | os.PathLike, tiles: Iterable[tuple[int, int]],
                 *, offline: bool = False) -> dict:
     """Fetch missing z18 tiles of one release into ``folder`` (4 concurrent, 3 tries each).
@@ -488,5 +512,5 @@ def solve_sun(src: TileSource, footprints_by_fid: dict, tower_fids: Sequence, re
 
 
 __all__ = ["Scene", "TileSource", "sunpos", "mpp", "uv", "outline", "area_m2", "wayback_config",
-           "release_date", "identify", "scene_name", "fetch_tiles", "fit_lean", "solve_sun", "Z",
-           "MAX_CONCURRENT"]
+           "release_date", "identify", "scene_name", "scene_polygon", "in_rings", "fetch_tiles",
+           "fit_lean", "solve_sun", "Z", "MAX_CONCURRENT"]
