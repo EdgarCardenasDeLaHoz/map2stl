@@ -12,9 +12,12 @@ FOV 80 deg); this module reads it from the file.
 
 Search: the city's Commons categories whose name contains "skyline" (found by category
 search, recursing only into "skyline" subcategories), or ``categories`` given explicitly.
-Ranking: located near the region, landscape (<= 3:1, see ``MAX_ASPECT``), then newest, compass
-present, widest; night photos are dropped after download (``is_dark``). Network: the Commons API only, with a
-descriptive User-Agent as Wikimedia asks; no key.
+Web seeds (``find_skyline_photos``): located near the region, landscape (<= 3:1, see
+``MAX_ASPECT``), then newest, compass present, widest; night photos are dropped after download
+(``is_dark``). The photo pipeline screens more loosely (``screen``, ``pipeline_status``: user
+review 2026-10-07): wide panoramas fit as cylindrical views, unlocated photos go to a placement
+queue, low-light photos stay when their skyline is clear (``skyline_quality``). Network: the
+Commons API only, with a descriptive User-Agent as Wikimedia asks; no key.
 """
 
 from __future__ import annotations
@@ -37,9 +40,20 @@ FULL_FRAME_DIAG_MM = math.hypot(36.0, 24.0)
 FETCH_WIDTH = 2048
 #: Photos wider than this aspect are stitched panoramas (cylindrical), skipped in v1.
 MAX_ASPECT = 3.0
-#: Camera may stand outside the region bbox (a ship offshore), up to this far, km. 8 km
-#: dropped Miami's "skyline from the ocean" (2020), a good offshore telephoto.
-MAX_OUTSIDE_KM = 15.0
+#: Camera may stand outside the region bbox (a ship offshore, a far shore), up to this far, km.
+#: 8 km dropped Miami's "skyline from the ocean" (2020), a good offshore telephoto; 15 km
+#: dropped Chicago's "panoramio (12)" (16.3 km, user review 2026-10-07: usable). The two
+#: Miami photos the user agreed were too far sit at 29.9 and 36.3 km.
+MAX_OUTSIDE_KM = 20.0
+#: A recorded location this far outside is not the camera's but a wrong geotag (Cartagena,
+#: Colombia's "Cartagena2011-Skyline-Habour" carries Cartagena, Spain: 7,237 km). Such a photo
+#: is treated as unlocated (placement queue), not dropped.
+WRONG_LOCATION_KM = 200.0
+#: A stitched panorama is cylindrical: columns are linear in bearing. Its total field of view
+#: is not in EXIF (the focal length is one frame's), so it is guessed from the aspect at this
+#: vertical field of view and left free in the fit (``PANO_FOV_SPAN``).
+PANO_VFOV_GUESS_DEG = 35.0
+PANO_FOV_SPAN = 0.6
 #: Night skylines segment badly. Judged from the image (``is_dark``), not the EXIF hour:
 #: camera clocks are often in the wrong time zone, and the hour rule dropped 8 of Miami's
 #: 19 "night" photos that were broad daylight (2026-10-04 review). Measured on the top third:
@@ -222,7 +236,9 @@ def _km_outside(lat: float, lon: float, bbox_nsew) -> float:
 
 
 def usable(p: CommonsPhoto, bbox_nsew) -> str | None:
-    """Why ``p`` cannot be a seed, or None when it can."""
+    """Why ``p`` cannot be a web seed (pinhole, located), or None when it can.
+
+    The photo pipeline uses ``screen`` instead, which keeps unlocated and wide photos."""
     if p.lat is None or p.lon is None:
         return "no camera location"
     if _km_outside(p.lat, p.lon, bbox_nsew) > MAX_OUTSIDE_KM:
@@ -234,10 +250,156 @@ def usable(p: CommonsPhoto, bbox_nsew) -> str | None:
     return None
 
 
+#: ``screen`` statuses.
+FIT = "fit"                 # has a usable location: straight to the camera fit
+PLACEMENT = "placement"     # no (or a wrong) location: placement queue, then manual labels
+REJECT = "reject"
+
+
+def _get(p, k):
+    return p.get(k) if isinstance(p, dict) else getattr(p, k, None)
+
+
+def screen(p, bbox_nsew) -> tuple[str, str | None, str]:
+    """``(status, reason, projection)`` for the photo pipeline; ``p`` is a ``CommonsPhoto`` or a
+    ``profiles.json`` row.
+
+    User review of 38 rejected photos (2026-10-07): 25 were usable, so only portraits and
+    cameras 20-200 km out are rejected here. Unlocated photos (and wrong geotags) go to the
+    placement queue; panoramas wider than ``MAX_ASPECT`` are fitted as cylindrical views (6 of 6
+    were wrongly rejected). Night/quality is judged from pixels (``skyline_quality``).
+    """
+    w, h = _get(p, "width") or 0, _get(p, "height") or 0
+    if not w or not h:
+        return REJECT, "no image size", "pinhole"
+    if h > w:
+        return REJECT, "portrait", "pinhole"
+    projection = "cylindrical" if w / h > MAX_ASPECT else "pinhole"
+    lat, lon = _get(p, "lat"), _get(p, "lon")
+    if lat is None or lon is None:
+        return PLACEMENT, "no camera location", projection
+    km = _km_outside(lat, lon, bbox_nsew)
+    if km > WRONG_LOCATION_KM:
+        return PLACEMENT, f"wrong geotag ({km:.0f} km away)", projection
+    if km > MAX_OUTSIDE_KM:
+        return REJECT, "camera far from region", projection
+    return FIT, ("wide panorama, cylindrical" if projection == "cylindrical" else None), projection
+
+
+#: FOV assumed for a located photo without EXIF focal length (a normal lens), refined over
+#: +-``FREE_FOV_SPAN`` (log units). Before 2026-10-07 such photos never reached the fit.
+DEFAULT_HFOV_DEG = 55.0
+FREE_FOV_SPAN = 0.5
+#: EXIF FOV is trusted to +-8 % (``skyline_match.locate``).
+EXIF_FOV_SPAN = 0.08
+#: Second try when the EXIF FOV fails the fit gate (crops keep the full frame's EXIF).
+FOV_RETRY_SPAN = 0.4
+
+
+def fit_prior(row) -> tuple[float, float, str]:
+    """``(hfov_deg, fov_span, projection)`` the camera fit starts from for a ``profiles.json``
+    row: EXIF FOV (narrow span) for a normal photo, a free FOV without EXIF, and a cylindrical
+    guess for a wide panorama (its EXIF focal length is one frame's)."""
+    w, h = _get(row, "width") or 1, _get(row, "height") or 1
+    if w / h > MAX_ASPECT:
+        return pano_hfov_guess(w, h), PANO_FOV_SPAN, "cylindrical"
+    fov = _get(row, "hfov_deg")
+    if fov:
+        return float(fov), EXIF_FOV_SPAN, "pinhole"
+    return DEFAULT_HFOV_DEG, FREE_FOV_SPAN, "pinhole"
+
+
+def pipeline_status(row, bbox_nsew) -> tuple[str, str | None]:
+    """``(status, reason)`` of a ``profiles.json`` row for the photo pipeline: ``FIT`` (camera
+    fit from its location), ``PLACEMENT`` (placement queue: EXIF + lead-gate search, else
+    manual labels) or ``REJECT``. Combines ``screen``, the outline cache and the clarity
+    gate."""
+    status, reason, _proj = screen(row, bbox_nsew)
+    if status == REJECT:
+        return status, reason
+    if "px" not in row:
+        return REJECT, row.get("skip") or "no outline"
+    why = quality_reject(row.get("quality"), row.get("sky_value"))
+    if why:
+        return REJECT, why
+    return status, reason
+
+
+def pano_hfov_guess(width: int, height: int) -> float:
+    """Total horizontal FOV (deg) guessed for a cylindrical panorama from its aspect."""
+    return float(min(360.0, PANO_VFOV_GUESS_DEG * width / max(height, 1)))
+
+
+#: ``skyline_quality`` gate, for low-light photos only (sky value below ``LOW_LIGHT_SKY_VALUE``).
+#: User review 2026-10-07 of six "night" rejects: "decide on quality". The three the user
+#: rejected are the low-light ones (sky value 94-158) and score 0.02-0.11 (hazy dusk, glare,
+#: skyline half lost); the three usable ones were bright (194-207, EXIF-hour "night") and score
+#: 0.12-0.28. Day photos are not gated on it: 23 % of all outlines score < 0.11 in haze, and no
+#: review says they are bad (the fit's coverage and misfit gates judge them).
+MIN_SKYLINE_QUALITY = 0.12
+LOW_LIGHT_SKY_VALUE = 170.0
+#: Rows above and below the skyline compared for its edge strength (at 1600 px image width).
+EDGE_BAND_PX = 6
+
+
+def skyline_quality(img, y_top, prof_height: int) -> dict:
+    """How clearly the skyline stands out, from the image and its outline (``y_top`` per column
+    of a ``prof_height``-row frame; ``img`` may be any size, H x W x 3 uint8).
+
+    - ``edge``: median over outline columns of |sky luma - building luma| in thin bands just
+      above and below the outline, /255 (a lit night tower on a black sky is a strong edge, a
+      silhouette lost in dusk haze a weak one);
+    - ``coverage``: share of columns with an outline;
+    - ``score`` = edge x coverage.
+    Replaces the night rule (``is_dark``): the user's review said decide on quality, not time.
+    """
+    import numpy as np
+
+    img = np.asarray(img)
+    H, W = img.shape[:2]
+    y = np.asarray(y_top, dtype=float)
+    luma = (0.299 * img[..., 0] + 0.587 * img[..., 1] + 0.114 * img[..., 2]).astype(np.float32)
+    cols = np.clip(((np.arange(len(y)) + 0.5) * W / len(y)).astype(int), 0, W - 1)
+    s = H / float(prof_height)
+    band = max(2, int(round(EDGE_BAND_PX * W / 1600.0)))
+    ok = np.isfinite(y)
+    steps = []
+    for c, yy in zip(cols[ok], y[ok] * s, strict=True):
+        r = int(round(yy))
+        a0, b1 = r - band - 1, r + band + 2
+        if a0 < 0 or b1 > H:
+            continue
+        steps.append(abs(float(luma[a0:r - 1, c].mean()) - float(luma[r + 2:b1, c].mean())))
+    coverage = float(ok.mean()) if len(y) else 0.0
+    edge = float(np.median(steps)) / 255.0 if steps else 0.0
+    return {"edge": round(edge, 4), "coverage": round(coverage, 4),
+            "score": round(edge * coverage, 4)}
+
+
+def sky_value(img) -> float:
+    """Median brightest channel of the top third (mostly sky); see ``is_dark``."""
+    import numpy as np
+
+    top = np.asarray(img[: max(1, img.shape[0] // 3)])
+    return float(np.median(top.max(axis=2)))
+
+
+def quality_reject(q: dict | None, sky: float | None) -> str | None:
+    """Why the photo's skyline is too unclear to fit, or None. Replaces the night rule: a
+    low-light photo (night, dusk, glare) is kept when its skyline still stands out."""
+    if q is None or sky is None or sky >= LOW_LIGHT_SKY_VALUE:
+        return None
+    if q.get("score", 0.0) >= MIN_SKYLINE_QUALITY:
+        return None
+    return f"unclear low-light skyline (quality {q.get('score', 0.0):.2f})"
+
+
 def is_dark(img) -> bool:
     """True for a night or deep-dusk photo, from the top third of the image (mostly sky).
 
-    ``img``: H x W x 3 uint8 RGB. Applied after download, since only pixels can tell.
+    ``img``: H x W x 3 uint8 RGB. Applied after download, since only pixels can tell. The photo
+    pipeline no longer drops dark photos on this (``skyline_quality`` decides); the web seeds
+    still use it.
     """
     import numpy as np
 

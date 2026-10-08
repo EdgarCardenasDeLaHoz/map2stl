@@ -10,13 +10,18 @@ the route's gate passes:
 
 1. labels (``sites/annotations/<region>_*.json``): ``photo_localize.solve_from_labels``;
    the unlabelled copy in ``same_pose_as`` is measured;
-2. recorded location + EXIF FOV: ``skyline_match.refine`` within 500 m; gate misfit <= 0.3
-   and skyline coverage >= 25 %;
+2. recorded location (``commons_photos.pipeline_status`` FIT): ``skyline_match.refine`` within
+   500 m from ``commons_photos.fit_prior`` (EXIF FOV +-8 %, retried at +-40 % when the gate
+   fails; a free FOV without EXIF; a cylindrical projection for panoramas wider than 3:1);
+   gate misfit <= 0.3 and skyline coverage >= 25 %;
 3. unlocated, linked to a located photo of the same spot (``photo_groups.embed_links``):
    refine from that photo's kept camera; same gate;
 4. unlocated with EXIF FOV, not linked: full ``skyline_match.locate``; gate: the best pose
    beats the runner-up by >= 0.1 misfit (EXIF-FOV validation, 2026-10-04: right 0.17-0.19,
    wrong <= 0.035).
+   Unlocated photos (and wrong geotags) not placed by 3 or 4 go to the manual-label list in
+   ``placement_queue.json`` (labels place a photo to +-5 m). Screen and routes: user review of
+   38 rejected photos, 2026-10-07 (``docs/decisions/building-heights.md``).
 
 Towers in each kept photo: ``photo_heights.measure_towers`` + ``loo_heights``, towers beyond
 ``--max-dist-m`` dropped (a tower 7.7 km away read +208 m). Per building: median over photos.
@@ -257,6 +262,12 @@ def _job(job: dict) -> dict:
     towers = _W["towers"]
     cover = float(np.isfinite(prof.y_top).mean())
     res = {"key": m["key"], "title": m["title"], "route": route, "coverage": cover}
+    projection = job.get("projection", "pinhole")
+    if route != "labels" and cover > 0 and float(np.nanstd(prof.y_top)) < 1.0:
+        # a flat outline is a segmentation failure, not a skyline (Miami p234: a black-and-
+        # white photo, no sky found, every column's top at row 0; the fit returned misfit 1.0)
+        return {**res, "gate_ok": False, "why": "flat outline (no sky found)", "towers": [],
+                "anchor_dev_m": None}
     if route == "labels":
         p = job["pose"]
         pose = ph.PhotoPose(p["lat"], p["lon"], p["heading_deg"], p["hfov_deg"])
@@ -268,18 +279,29 @@ def _job(job: dict) -> dict:
         # camera height: street, station/deck, high deck/rooftop (best misfit wins); 19 of
         # 30 recorded Miami photos failed the misfit gate at 2 m, some from ship decks
         h_best, hit = 2.0, None
-        for h in job.get("h_cams", (2.0,)):
-            cand = sm.refine(prof, towers, prior, radius_m=500.0, step_m=50.0,
-                             fov_span=job.get("fov_span", 0.08), h_cam=h)
-            if hit is None or cand.misfit < hit.misfit:
-                h_best, hit = h, cand
+        spans = [(job.get("fov_span", 0.08), job.get("fov_steps", 9))]
+        if job.get("fov_retry_span"):
+            spans.append((job["fov_retry_span"], 13))
+        for span, steps in spans:
+            # retry with the FOV freer only when the EXIF FOV fails the gate: Commons crops
+            # keep the uncropped frame's EXIF (Miami p276 fits 50 deg, EXIF 74; p78 25 vs 17,
+            # passing at 0.28). +-40 % passed none of the 4 photos the user agreed were bad
+            # (2026-10-07); a roll search did (p121 0.93 -> 0.24 at 3 deg), so no roll.
+            if hit is not None and hit.misfit <= job["max_misfit"]:
+                break
+            for h in job.get("h_cams", (2.0,)):
+                cand = sm.refine(prof, towers, prior, radius_m=500.0, step_m=50.0,
+                                 fov_span=span, h_cam=h, fov_steps=steps, projection=projection)
+                if hit is None or cand.misfit < hit.misfit:
+                    h_best, hit = h, cand
         moved = math.hypot((hit.lat - pr["lat"]) * 111320,
                            (hit.lon - pr["lon"]) * 111320 * math.cos(math.radians(pr["lat"])))
         kept = hit.misfit <= job["max_misfit"] and cover >= job["min_coverage"]
-        pose = ph.PhotoPose(hit.lat, hit.lon, hit.heading_deg, hit.hfov_deg)
+        pose = ph.PhotoPose(hit.lat, hit.lon, hit.heading_deg, hit.hfov_deg,
+                            projection=projection)
         res.update(camera={"lat": hit.lat, "lon": hit.lon, "heading_deg": hit.heading_deg,
                            "hfov_deg": hit.hfov_deg, "misfit": hit.misfit, "moved_m": moved,
-                           "h_cam": h_best,
+                           "h_cam": h_best, "projection": projection,
                            "source": f"{route}, refined {moved:.0f} m, camera {h_best:.0f} m up "
                                      f"(misfit {hit.misfit:.2f})"},
                    kept=kept, why=None if kept else f"misfit {hit.misfit:.2f}, coverage {cover:.0%}")
@@ -342,10 +364,33 @@ def _implied_untagged(prof, pose: ph.PhotoPose, max_dist_m: float, h_cam: float,
             {str(i): round(v, 2) for i, v in caps.items()})
 
 
+#: ``--reuse``: earlier results by photo key; a job whose route and outcome cannot change
+#: under the current code is copied instead of placed again.
+_REUSE: dict = {}
+
+
+def _reusable(j: dict) -> dict | None:
+    """The earlier result for job ``j`` when placing it again would give the same answer: same
+    route, and not a failed recorded fit (those now get the FOV retry). Linked jobs are always
+    re-run (their prior may come from a newly kept photo)."""
+    r = _REUSE.get(j["meta"]["key"])
+    if (r is None or r.get("title") != j["meta"]["title"] or r.get("route") != j["route"]
+            or j["route"] == "linked"):
+        return None
+    if j["route"] == "recorded" and not r.get("gate_ok"):
+        return None
+    if j.get("projection", "pinhole") != (r.get("camera") or {}).get("projection", "pinhole"):
+        return None
+    return r
+
+
 def _run(ex, jobs: list[dict], label: str) -> list[dict]:
     """Submit ``jobs`` and log each photo as it finishes, so a run can be reviewed while it
     works (user, 2026-10-04), not only between stages."""
-    out = []
+    out = [r for j in jobs if (r := _reusable(j)) is not None]
+    jobs = [j for j in jobs if _reusable(j) is None]
+    if out:
+        log.info("[%s] reused %d earlier results, placing %d", label, len(out), len(jobs))
     futs = [ex.submit(_job, j) for j in jobs]
     for i, f in enumerate(as_completed(futs), 1):
         r = f.result()
@@ -410,11 +455,24 @@ def place(args, meta: dict, osm: dict) -> list[dict]:
                 jobs1.append({"meta": by_title[t], "route": "labels", "pose": p, **common})
                 done_titles.add(t)
         done_titles.add(ann["file"])
-    jobs2 = [{"meta": m, "route": "recorded", "h_cams": args.h_cams, **common,
-              "prior": {"lat": m["lat"], "lon": m["lon"], "heading_deg": m["heading_deg"],
-                        "hfov_deg": m["hfov_deg"]}}
-             for m in meta.values() if m["lat"] is not None and m.get("hfov_deg")
-             and m["title"] not in done_titles and not m.get("why_not_usable")]
+    # route by ``commons_photos.pipeline_status`` (user review 2026-10-07): located photos
+    # without EXIF FOV and wide panoramas (cylindrical) now reach the fit too; unlocated ones
+    # and wrong geotags go to the placement queue; low-light photos stay when their skyline
+    # is clear
+    site = json.loads((ROOT / "sites" / f"{args.region}.json").read_text(encoding="utf-8-sig"))
+    bbox = (site["north"], site["south"], site["east"], site["west"])
+    status = {k: cp.pipeline_status(m, bbox) for k, m in meta.items()}
+    jobs2 = []
+    for k, m in meta.items():
+        if status[k][0] != cp.FIT or m["title"] in done_titles:
+            continue
+        fov, span, proj = cp.fit_prior(m)
+        jobs2.append({"meta": m, "route": "recorded", "h_cams": args.h_cams, **common,
+                      "fov_span": span, "fov_steps": 9 if span <= 0.1 else 13,
+                      "fov_retry_span": cp.FOV_RETRY_SPAN if span <= 0.1 else None,
+                      "projection": proj,
+                      "prior": {"lat": m["lat"], "lon": m["lon"],
+                                "heading_deg": m["heading_deg"], "hfov_deg": fov}})
     results = []
     with ProcessPoolExecutor(args.workers, initializer=_init,
                              initargs=(args.region, args.untagged,
@@ -425,12 +483,12 @@ def place(args, meta: dict, osm: dict) -> list[dict]:
         if (d / "embed.npz").exists() and (d / "pairs.json").exists():
             E = np.load(d / "embed.npz")
             keys = [str(k) for k in E["keys"]]
-            located = {k for k in keys if meta[k]["lat"] is not None}
+            located = {k for k in keys if k in status and status[k][0] == cp.FIT}
             links = pg.embed_links(keys, E["vecs"], json.loads((d / "pairs.json").read_text()),
                                    located)
-        jobs3, jobs4 = [], []
+        jobs3, jobs4, manual = [], [], []
         for k, m in meta.items():
-            if m["lat"] is not None or m["title"] in done_titles:
+            if status[k][0] != cp.PLACEMENT or m["title"] in done_titles:
                 continue
             if k in links:
                 # the linked photo's kept camera, or its recorded GPS + EXIF when its own
@@ -445,11 +503,48 @@ def place(args, meta: dict, osm: dict) -> list[dict]:
                                         "heading_deg": c["heading_deg"],
                                         "hfov_deg": m.get("hfov_deg") or c["hfov_deg"]}})
             elif m.get("hfov_deg") and m["px"][0] / m["px"][1] <= cp.MAX_ASPECT:
+                # the EXIF + lead-gate placer (decisions/building-heights.md, 2026-10-07:
+                # 4 of 5 right at lead >= 0.1)
                 jobs4.append({"meta": m, "route": "search", **common})
-        log.info("[pipeline] labels %d, recorded %d (kept %d), linked %d, search %d",
-                 len(jobs1), len(jobs2), len(ok_cam), len(jobs3), len(jobs4))
+            else:
+                manual.append({"key": k, "title": m["title"],
+                               "why": "no EXIF focal length" if not m.get("hfov_deg")
+                               else "wide panorama without location"})
+        log.info("[pipeline] labels %d, recorded %d (kept %d), linked %d, search %d, manual %d",
+                 len(jobs1), len(jobs2), len(ok_cam), len(jobs3), len(jobs4), len(manual))
         results += _run(ex, jobs3 + jobs4, "place2")
+    write_queue(args.report, meta, status, results, manual, args)
     return results
+
+
+def write_queue(report: Path, meta: dict, status: dict, results: list[dict],
+                manual: list[dict], args) -> dict:
+    """``placement_queue.json``: the unlocated photos (and wrong geotags), placed when the
+    linked refinement or the EXIF + lead-gate search passed, otherwise on the manual-label
+    list (``sites/annotations/<region>_*.json`` places those to +-5 m); and every photo's
+    screen status, so a filter change can be compared without placing again."""
+    by_key = {r["key"]: r for r in results}
+    placed, to_label = [], list(manual)
+    # located photos whose outline failed (no sky found) can still be placed by hand
+    to_label += [{"key": r["key"], "title": r["title"], "route": r["route"], "why": r["why"]}
+                 for r in results if str(r.get("why", "")).startswith("flat outline")]
+    for k, (st, _why) in status.items():
+        if st != cp.PLACEMENT or k not in by_key:
+            continue
+        r = by_key[k]
+        if _keep(r, args):
+            placed.append({"key": k, "title": r["title"], "route": r["route"],
+                           "camera": r.get("camera")})
+        else:
+            to_label.append({"key": k, "title": r["title"], "route": r["route"],
+                             "why": r.get("why") or "gate"})
+    out = {"placed": placed, "manual_label": sorted(to_label, key=lambda x: x["key"]),
+           "status": {k: {"status": st, "why": why, "title": meta[k]["title"]}
+                      for k, (st, why) in status.items()}}
+    report.mkdir(parents=True, exist_ok=True)
+    (report / "placement_queue.json").write_text(json.dumps(out, indent=0), encoding="utf-8")
+    log.info("[queue] placed %d, manual labels %d", len(placed), len(to_label))
+    return out
 
 
 def _score(pred, tru):
@@ -614,7 +709,7 @@ def _card_images(args, r: dict, m: dict, towers, osm: dict) -> dict:
     out = pc.render_photo_card(
         cv2.cvtColor(cv2.imread(str(img_path)), cv2.COLOR_BGR2RGB),
         sm.PhotoProfile(_CARDS["prof"][r["key"]].astype(float), m["px"][0], m["px"][1]),
-        ph.PhotoPose(c["lat"], c["lon"], c["heading_deg"], c["hfov_deg"]), c.get("h_cam", 2.0),
+        ph.PhotoPose(c["lat"], c["lon"], c["heading_deg"], c["hfov_deg"], projection=c.get("projection", "pinhole")), c.get("h_cam", 2.0),
         towers, r.get("towers") or [], _CARDS["bg"], args.report / "assets" / "photos", r["key"])
     for t in r.get("towers") or []:
         t["label"] = out["labels"].get(t["tower"])
@@ -702,6 +797,9 @@ def main() -> int:
                     help="truth: only footprints the truth cache holds (scoring without fetches)")
     ap.add_argument("--no-truth-fetch", action="store_true",
                     help="score on the cached truth only (no survey or paid 3D Tiles reads)")
+    ap.add_argument("--reuse", type=Path, default=None,
+                    help="an earlier photo_results.json: photos whose route is unchanged (and "
+                         "not a failed recorded fit) are copied, not placed again")
     ap.add_argument("--rescore", action="store_true",
                     help="no placing: apply the gates to the saved photo_results.json")
     args = ap.parse_args()
@@ -719,6 +817,8 @@ def main() -> int:
     if args.rescore:
         results = json.loads(saved.read_text(encoding="utf-8"))
     else:
+        if args.reuse:
+            _REUSE.update({r["key"]: r for r in json.loads(args.reuse.read_text(encoding="utf-8"))})
         results = place(args, meta, osm)
         saved.write_text(json.dumps(results, indent=0), encoding="utf-8")
     summary = finish(args, results, meta, osm)
