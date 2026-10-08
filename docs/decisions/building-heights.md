@@ -5,6 +5,51 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
+### 2026-10-07 — Satellite heights go live in the skyline run, opt-in per site
+- **Decision:** the region run reads offline satellite readings when the site sets
+  `use_satellite_heights` (on for Cartagena). It never measures or fetches imagery itself.
+  - Producer: `city2stl/skyline/scripts/20_satellite_heights.py` (library
+    `city2stl/height/satellite/`) writes `runs/satellite/<region>/readings.json`, cached by scene
+    names and dates. Free Esri Wayback / World Imagery only, 4 concurrent requests.
+  - One reading per footprint and method: lean (reference scene), shadow (all scenes merged to
+    one lower-bound reading), pair-consensus stereo, multiview peak (conf >= 0.3, >= 40 m: sigma_log
+    0.08 / 0.10 from the Chicago table), and `ls` when lean and shadow agree.
+  - Drone fusion: the readings join `fuse_heights` as `sat_*` pseudo-seeds on footprints a drone
+    read, at `dist_m = max(100, 3300 sigma_log)`; they can outvote and so dispute a drone reading.
+    Only drone readings are published from fusion.
+  - Tiers: drone + satellite (>= 40 m) and lean + shadow (> 100 m) count as `verified_2`; two
+    satellite readings of one kind never do (`tiers.INDEPENDENT`, unchanged).
+  - Untagged rows with no drone reading publish the satellite-only height
+    (`withheld:satellite`, tier `single`) only when the best kept reading's sigma_log is <= 0.25;
+    otherwise the T41 prior stays and the readings only label the row (`satellite`).
+  - Low-rises (user, 2026-10-07): an unverified low-rise publishes its single reading, labelled
+    unverified (tier `single`), flagged `prior_disagrees` when it is more than 2x from the prior
+    estimate. This was already the behaviour; kept as the rule.
+- **Why:** the weights (entries below) were validated on 7 LiDAR cities; the library reproduces
+  the validated scratch code exactly (Cartagena, 67 footprints, 7 scenes: 0 differences in lean,
+  per-scene shadows, multiview, consensus and combine; readings layer 1225/1225 identical to the
+  harness `load_sat`). Opt-in because readings exist only where scenes are cached and solved.
+- **Not done / rejected:**
+  - publishing noisy satellite-only readings (sigma_log > 0.25: low-rise shadows at conf < 0.7,
+    15-40 m shadows) over the prior;
+  - the Cartagena-only scratch variant (`s28`/`s29`, behind the old `all_buildings_multi.json`):
+    the library ports the generalised v1/w4 code the weights were scored on. On Cartagena the two
+    agree within 25 % on 68 % of shadow readings and 52 % of stereo readings (stereo under 40 m is
+    dropped anyway).
+  - the Cartagena scene geometry comes from scratch `s27` (lean from satellite heights; LG01 sun
+    fixed at bearing 320, el 58.07, visually verified), not from `scene.fit_lean` / `solve_sun`
+    (ported, not yet run on Cartagena).
+- **Consequence (Cartagena v8 vs v7):** same 7 published towers and values (all tagged); towers
+  verified 1 -> 5 (Estelar drone seed_1 + seed_6; Gran Bay drone + lean; Portomarine two drones;
+  Nautica drone + stereo; Ravello drone + stereo). Region tiers (all rows, v7 via
+  `benchmark.label_tiers`): verified_2 3 -> 38, tag 148 -> 143, single 80 -> 270, prior 353 -> 237
+  (584 -> 688 rows: seed_6 and hi-res spheres read more footprints). 52 rows publish a satellite
+  height. Open: 212 drone `single` rows are > 2x the prior (median 102 m); on 160 of them every
+  satellite reading is under 40 m, which suggests tower-behind credit (F-SKY26 step 6), but those
+  satellite readings are too noisy to dispute a drone at 400-900 m.
+- **Supersedes / superseded by:** extends the two satellite entries below.
+- **Source:** [F-SKY26](../plans/active/F-SKY26-skyline-signals-to-publish.md) step 7 and 8.
+
 ### 2026-10-07 — Two agreeing satellite shadows do not verify a height; satellite readings are weighted by method and height
 - **Decision:** a building counts as verified by two images only when independent methods agree:
   two drone seeds, drone and satellite, or satellite lean and shadow on a tall building. Shadow

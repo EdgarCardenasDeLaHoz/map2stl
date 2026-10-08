@@ -164,6 +164,33 @@ Two constraints follow:
     re-read only the survey side (0 3D Tiles requests). Survey fetch: Prague, Benidorm about 1 min
     each; Miami about 1.5 min a tile, about 90 tiles, so 2 to 2.5 h.
   - Cost note: new `footprint_truth` footprints now read full 620 m tiles from 3D Tiles too.
+- 2026-10-07, step 7 done (9563867, 4e41a0d): `city2stl/height/satellite/` (`scene.py`,
+  `measure.py`, `readings.py`, `weights.py`), `scripts/20_satellite_heights.py` ->
+  `runs/satellite/<region>/readings.json`, adapter `skyline/satellite_fusion.py`, site flag
+  `use_satellite_heights` (on for Cartagena), wiring in `elevated_estimates(satellite=)` and
+  `withhold_untagged_street_view(satellite=)`.
+  - Reproduction: scratch `v1_single.py` + `w4_multi.py` and the library on the same Cartagena
+    inputs (67 footprints, 27 tagged >= 40 m, 7 Wayback scenes): 0 differences (lean 65,
+    single-scene shadow 30, per-scene shadows 143, multiview 67, consensus 67, combine 62). Readings
+    layer vs `seed_experiment.load_sat` on `all_buildings_multi.json`: 1225/1225 identical. The
+    library ports the generalised v1/w4 code; against the older Cartagena-only s28/s29 values it
+    agrees within 25 % on 68 % of shadows and 52 % of stereo.
+  - Cartagena readings: 756 footprints on the cached Bocagrande tiles, 749 with readings (lean 479,
+    shadow 358, stereo 715, multiview 274, ls 13), 22 min; scene geometry from scratch s27 (LG01 sun
+    fixed 320 / 58.07); `fit_lean` / `solve_sun` ported but not run on Cartagena.
+- 2026-10-07, step 8 (Cartagena v8 region run, `runs/region_reports/Cartagena_v8_skyline_report/`):
+  seeds 1/4/5/6 elevated (seed_6 moved into `seed_urls`), hi-res spheres (seed_6 at its cached
+  pitches -10/-36/-62), Street View cache-only (0 misses), satellite on, 36 min.
+  - Tiers v7 -> v8: verified_2 3 -> 38, tag 148 -> 143, single 80 -> 270, prior 353 -> 237.
+  - Towers: the 7 published values unchanged (all tagged); verified 1 -> 5.
+  - 139 rows changed source (79 prior -> drone, 45 prior -> satellite, 8 drone -> prior,
+    7 drone -> satellite); 52 rows publish a satellite height.
+  - Low-rise rule (user, 2026-10-07): single readings published, labelled unverified, flagged
+    `prior_disagrees` when > 2x the prior: 259 of 270 single rows are flagged. 212 are drone readings
+    (median 102 m); on 160 of these all satellite readings are under 40 m: step 6 (tower-behind)
+    is the next lever.
+  - Tier map: `tiers_map.png`, `tiers_map_bocagrande.png` in the v8 report folder (the HTML report
+    shows no tiers yet: 2f).
 
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered
