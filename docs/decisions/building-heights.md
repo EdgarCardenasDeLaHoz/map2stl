@@ -359,6 +359,19 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Measured:** the cost surface is flat; the road mask is too patchy.
 - **Verdict:** refused; the overhead roof fit (`_pano/elevated.py::overhead_pose`) is used instead.
 
+### 2026-10-07 — Benchmark survey truth re-measured with the stat-2 survey p95
+- **Decision:** every cached truth record's survey side is re-read with stat version 2
+  (`benchmark.refresh_survey_truth`); the cached 3D Tiles side is kept and each record reclassified.
+- **Why:** stat-1 survey values depended on the run's footprint grouping (tile bbox set the raster's
+  cell size and phase), ČÚZK rasters were read 0.56 x their N/S offset off (Prague, up to 46 m),
+  and the EPT project was chosen per tile (commit `3c1a017`). Re-reading only the survey side
+  costs no 3D Tiles requests (~81 % of the monthly free cap used).
+- **Measured:** confirmed records Prague 24 -> 30, Miami 763 -> 774, other cities -6 to +3;
+  survey within 3 m of 3D Tiles Prague 19 -> 25 of 84. Headline: Miami MAE 5.83 -> 5.62 m, within
+  25 % 0.556 -> 0.571 (n 162 -> 168); Prague MAE 31.0 -> 33.8 m (n 22 -> 28); other cities move
+  under 1.3 m MAE. This is a truth correction, not a model change.
+- **Source:** [F-SKY26](../plans/active/F-SKY26-skyline-signals-to-publish.md) Progress, 2026-10-07.
+
 ### 2026-10-07 — Low-rises: survey LiDAR where free, tiers everywhere, survey-blind benchmark
 - **Decision:**
   - A region run publishes the per-footprint survey nDSM height (p95 inside the footprint shrunk

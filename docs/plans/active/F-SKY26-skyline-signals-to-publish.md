@@ -164,6 +164,24 @@ Two constraints follow:
     re-read only the survey side (0 3D Tiles requests). Survey fetch: Prague, Benidorm about 1 min
     each; Miami about 1.5 min a tile, about 90 tiles, so 2 to 2.5 h.
   - Cost note: new `footprint_truth` footprints now read full 620 m tiles from 3D Tiles too.
+- 2026-10-07, survey truth re-measured at stat 2: `benchmark.refresh_survey_truth` +
+  `scripts/19_refresh_survey_truth.py` re-read `survey_m` for every cached truth record of the eight
+  cities (5,031 records, all re-read, 0 3D Tiles requests); `tiles_m` kept, status reclassified,
+  old caches in `runs/benchmark/truth/<region>.stat1.json`, shift in `<region>.refresh.json`.
+  - Confirmed before -> after: Prague 24 -> 30, Benidorm 89 -> 92, Madrid 111 -> 109, La Défense
+    97 -> 94, Seattle 165 -> 163, Chicago 933 -> 927, Boston 743 -> 741, Miami 763 -> 774.
+  - Median |d survey_m|: Prague 2.19 m (p95 88 m, the ČÚZK misplacement), Benidorm 0.10, the rest
+    0.02-0.04. Within 3 m of `tiles_m`: Prague 19 -> 25 of 84 (median diff 9.8 -> 5.3 m), Miami
+    716/892 -> 731/910 (26 footprints gained a survey reading: 22 tiles_only -> confirmed); the
+    others move by at most 5.
+  - Headline (`--score-only --no-tiles`, newest reports, a truth correction, not a model change):
+    Miami n 162 -> 168, MAE 5.83 -> 5.62 m, within 25 % 0.556 -> 0.571; Prague n 22 -> 28, MAE
+    31.0 -> 33.8, within 25 % 0.09 -> 0.11; every other city within 1.3 m MAE and 1 point.
+  - Run notes: 3 processes x 4 tile reads plus EPT's 16 node threads drew S3 connection resets
+    (about 15 % of tiles, the Chicago Loop tile three times); failed tiles are not cached and were
+    re-read one at a time, the last ones with `lidar_3dep_ept_laspy._WORKERS` = 4. Submitting every
+    tile future up front held every raster (4-5 GB a region); `survey_heights._bounded` now keeps
+    only the reads in flight.
 - 2026-10-07, step 7 done (9563867, 4e41a0d): `city2stl/height/satellite/` (`scene.py`,
   `measure.py`, `readings.py`, `weights.py`), `scripts/20_satellite_heights.py` ->
   `runs/satellite/<region>/readings.json`, adapter `skyline/satellite_fusion.py`, site flag
