@@ -45,7 +45,9 @@ _RESOURCES = ("https://raw.githubusercontent.com/hobuinc/usgs-lidar/master/bound
 _BUCKET = "https://s3-us-west-2.amazonaws.com/usgs-lidar-public"
 _RESOURCES_TTL_S = 30 * 86400
 _TIMEOUT_S = 60
-_WORKERS = 16
+#: Parallel EPT node reads per tile. 16 drew S3 connection resets on ~15 % of tiles once several
+#: tiles were read at a time (survey truth refresh, 2026-10-07); 4 cleared them.
+_WORKERS = 4
 #: Pad around the bbox so the ground interpolation has returns on every side.
 _PAD_M = 15.0
 #: LAS classes that are never a surface: low/high noise, withheld overlap.
