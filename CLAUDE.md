@@ -42,6 +42,9 @@ Several agents share one laptop (6 cores / 12 threads, 32 GB RAM, 4 GB VRAM). He
   before importing numpy/cv2/torch: one BLAS thread, waits for RAM, waits while another python
   process holds GPU memory, takes the GPU lock, returns a safe pool size. Put the same line in
   subagent prompts.
+- **Never search from a drive root** (`find /`, `dir C:\ /s`): an orphaned `find /` leaked 349k
+  handles in 15 minutes (2026-10-07). Search the worktree (`git ls-files`, `rg --files -g`,
+  `find . -iname`) or read the script's output argument. Log monitors use `tail --pid=<pid> -f`.
 - **Concurrency budget, across all agents:** at most 2 heavy pipelines (region PDF,
   `photo_profiles`, river carve, training) plus 1 `pytest -n` suite at a time. Start a heavy job
   only with ≥ 6 GB RAM free (`wait_for_ram()`). BLAS/OMP threads = 1 in every multiprocessing or xdist
