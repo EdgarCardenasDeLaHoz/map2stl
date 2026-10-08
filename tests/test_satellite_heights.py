@@ -258,3 +258,14 @@ def test_add_keeps_earlier_footprints_and_recalibrate_rewrites_stored_readings(t
     meta, data = sr.load(p)
     assert [r.method for r in data["b1"]["readings"]] == ["lean"] and data["b1"]["lat"] == 10.4
     assert data["b2"]["readings"][0].conf == sr.LOW_LEAN_MAX_CONF and meta["calibrated"]
+
+
+def test_block_groups_keep_measure_multi_blocks_whole_and_balanced():
+    s = _script()
+
+    def f(fid, x, y):
+        return dict(fid=fid, bb=(x, y, x + 10, y + 10))
+    todo = [f("a", 10, 10), f("b", 20, 20), f("c", 30, 30), f("d", 2000, 10), f("e", 5000, 5000)]
+    g = s.block_groups(todo, 2)
+    assert sorted(map(sorted, g)) == [["a", "b", "c"], ["d", "e"]]       # a/b/c share block (0, 0)
+    assert s.block_groups(todo, 1) == [["a", "b", "c", "d", "e"]] and s.block_groups([], 3) == []

@@ -23,7 +23,10 @@ Per region (F-SKY26 step 7; methods in ``city2stl.height.satellite``):
    lat/lon to re-match later runs. Cached by scene names and dates: an unchanged scene set is not
    re-measured unless ``--force``. ``--add`` (same scenes) measures only the footprints not
    measured yet (e.g. after ``--fetch`` extended the tiles) and keeps the others' readings and
-   the shadow grey threshold (``_meta.dark``).
+   the shadow grey threshold (``_meta.dark``). ``--jobs N`` measures in N processes (whole
+   ``measure_multi`` blocks each; Cartagena ~2.5 s per footprint in one); ``--fids FILE`` /
+   ``--out FILE`` measure a subset into another file (a quick look before a long run);
+   ``--recalibrate`` re-applies ``readings.calibrate`` to the stored file.
 
 The region run never measures; it reads ``readings.json`` when the site has
 ``use_satellite_heights`` (``city2stl/skyline/satellite_fusion.py``).
@@ -125,6 +128,11 @@ def main(argv=None) -> int:
                     help="same scenes: measure only footprints not measured yet, keep the rest")
     ap.add_argument("--recalibrate", action="store_true",
                     help="only re-apply readings.calibrate to the stored readings (no measuring)")
+    ap.add_argument("--fids", default=None, help="file of footprint ids: measure only these")
+    ap.add_argument("--out", default=None,
+                    help="write here instead (the region's readings.json is still read for --add)")
+    ap.add_argument("--jobs", type=int, default=1,
+                    help=f"measuring processes (block groups; at most the guard's {workers})")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     if a.recalibrate:
@@ -222,6 +230,9 @@ def main(argv=None) -> int:
         return 1
     done = measured_before(prev_meta, prev) if (a.add and same) else set()
     todo = [f for f in sel if f["fid"] not in done]
+    if a.fids:
+        keep = set(Path(a.fids).read_text(encoding="utf-8").split())
+        todo = [f for f in todo if f["fid"] in keep]
     if same and not a.force and not (a.add and todo):
         log.info("readings for these scenes exist: %s (--force to redo, --add after --fetch)", out)
         return 0
@@ -237,10 +248,18 @@ def main(argv=None) -> int:
     log.info("measuring %d footprints (%d measured before); dark %.1f", len(todo), len(done),
              ref_sc.dark or float("nan"))
     only = {f["fid"] for f in todo}
-    single = sm.measure_single(fps, ref_sc, M, dark=ref_sc.dark or 80.0, only=only, progress=log.info) \
-        if ref_sc.shadow_bearing is not None and only else {}
-    multi = sm.finish_multi(sm.measure_multi(fps, scenes, ref, [f["fid"] for f in todo], M, progress=log.info)) \
-        if len(scenes) >= 2 and only else {}
+    jobs = max(1, min(a.jobs, workers))
+    parts = block_groups(todo, jobs) if only else []
+    single, multi = {}, {}
+    if len(parts) > 1:
+        from concurrent.futures import ProcessPoolExecutor  # noqa: PLC0415
+
+        with ProcessPoolExecutor(len(parts)) as ex:
+            for s1, m1 in ex.map(_measure_part, [(fps, ref_sc, scenes, ref, M, p) for p in parts]):
+                single.update(s1)
+                multi.update(m1)
+    elif parts:
+        single, multi = _measure_part((fps, ref_sc, scenes, ref, M, parts[0]))
     rs = sr.from_measurements(single, multi, ref)
     where = {f["fid"]: dict(lat=round(f["lat"], 7), lon=round(f["lon"], 7)) for f in todo}
     if done:                                    # --add: keep what was measured before
@@ -254,6 +273,7 @@ def main(argv=None) -> int:
                 dark=ref_sc.dark, measured=measured,
                 outline_footprints={n: len(inside[n]) for n in names},
                 built=time.strftime("%Y-%m-%d %H:%M"), seconds=round(time.time() - t0))
+    out = Path(a.out) if a.out else out
     sr.save(out, rs, meta, where)
     by_m = {}
     for v in rs.values():
@@ -261,6 +281,30 @@ def main(argv=None) -> int:
             by_m[r.method] = by_m.get(r.method, 0) + 1
     log.info("wrote %s: %d footprints with readings %s, %.0f s", out, len(rs), by_m, time.time() - t0)
     return 0
+
+
+def block_groups(todo, n: int, bs: int = 1024) -> list[list]:
+    """``todo``'s footprint ids in ``n`` groups of whole ``measure_multi`` blocks (``bs`` px),
+    balanced by count."""
+    blocks: dict = {}
+    for f in todo:
+        k = (int((f["bb"][0] + f["bb"][2]) / 2 // bs), int((f["bb"][1] + f["bb"][3]) / 2 // bs))
+        blocks.setdefault(k, []).append(f["fid"])
+    groups: list[list] = [[] for _ in range(max(1, n))]
+    for ids in sorted(blocks.values(), key=len, reverse=True):
+        min(groups, key=len).extend(ids)
+    return [g for g in groups if g]
+
+
+def _measure_part(job) -> tuple[dict, dict]:
+    """Shadow + lean on the reference scene and the multi-scene sweep for one group of ids."""
+    fps, ref_sc, scenes, ref, M, ids = job
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")   # spawned workers
+    single = sm.measure_single(fps, ref_sc, M, dark=ref_sc.dark or 80.0, only=set(ids),
+                               progress=log.info) if ref_sc.shadow_bearing is not None else {}
+    multi = sm.finish_multi(sm.measure_multi(fps, scenes, ref, list(ids), M, progress=log.info)) \
+        if len(scenes) >= 2 else {}
+    return single, multi
 
 
 def recalibrate(path: Path) -> int:
