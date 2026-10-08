@@ -305,3 +305,65 @@ def test_a_run_onto_a_tagged_tower_behind_is_not_trusted(monkeypatch):
     monkeypatch.setattr(el, "BEHIND_TOL_PX", None)                    # off
     fps[1] = _fp_at("tower", 12.0, 18.0, 1000.0, tag=180.0)
     assert el.measure_waterline(pano, pose, fps, instances=inst)[0].top_edge == "sky"
+
+
+def _seed_with(name, ms, fids, behind=None):
+    pano, pose = _pano(), fd.PanoPose(0.0, 80.0, 0.0, 0.3, W)
+    pf = fd.PositionFit(0.0, 0.0, pose, 0.3, 0.3, 0.4, 0.4, "recorded")
+    sp = SkylinePoint(name, 10.4, -75.55, 0.0, "seed", 1.0)
+    return el.ElevatedSeed(name, pf, ms, fids, el.pano_result(sp, pano, pose, ms, fids, None),
+                           behind=behind or {})
+
+
+def test_behind_map_lists_farther_footprints_with_the_height_the_top_row_gives_them():
+    pano, pose = _pano(), fd.PanoPose(0.0, 80.0, 0.0, 0.3, W)
+    fps = [_fp_at("low", 10.0, 20.0, 400.0), _fp_at("tower", 12.0, 18.0, 1000.0, tag=180.0),
+           _fp_at("beside", 60.0, 70.0, 1000.0), _fp_at("close", 12.0, 18.0, 420.0)]
+    top = float(fd._row_of(pano, pose, np.degrees(np.arctan2(180.0 - 80.0, 1000.0))))
+    run = fd.Measured(0, "low", 10, 20, top, 60.0, 61.0, 400.0, 120.0, 11, True, None, 1.0, "sky")
+    got = el.behind_map(pano, pose, fps, ["w/0", "w/1", "w/2", "w/3"], [run])
+    (g, hg, tag), = got[0]                         # not beside it, not barely farther
+    assert g == "w/1" and tag == 180.0 and hg == pytest.approx(180.0, rel=0.03)
+    untrusted = fd.Measured(0, "low", 10, 20, top, 60.0, 61.0, 400.0, 120.0, 11, False, None,
+                            0.2, "sky")
+    assert el.behind_map(pano, pose, fps, ["w/0", "w/1", "w/2", "w/3"], [untrusted]) == {}
+
+
+def test_tower_behind_needs_a_low_satellite_and_a_farther_footprint_that_explains_the_top():
+    """F-SKY26 step 6 (2026-10-07, Cartagena v8: 212 drone singles over 2x the prior, median
+    102 m, on 160 every satellite reading under 40 m)."""
+    low = _m(0, 10, 20, 110.0, 600.0)
+    behind = {0: (("w/9", 150.0, None),)}
+    sat = {"w/1": [{"method": "stereo", "height_m": 9.0, "conf": 1.0}],
+           "w/9": [{"method": "lean", "height_m": 160.0, "conf": 0.9}]}
+    s = _seed_with("seed_1", [low], ["w/1"], behind)
+    assert el.tower_behind([s], sat) == {("seed_1", "w/1"): ("w/9", 150.0, 160.0)}
+    assert el.tower_behind([s], None) == {}                               # no satellite: off
+    hi = dict(sat, **{"w/1": [{"method": "stereo", "height_m": 95.0, "conf": 1.0}]})
+    assert el.tower_behind([s], hi) == {}                                  # satellite says tall
+    weak = dict(sat, **{"w/1": [{"method": "stereo", "height_m": 9.0, "conf": 0.3}]})
+    assert el.tower_behind([s], weak) == {}                                # not confident
+    shadow = dict(sat, **{"w/1": [{"method": "shadow", "height_m": 9.0, "conf": 0.9}]})
+    assert el.tower_behind([s], shadow) == {}                              # a lower bound only
+    near = dict(sat, **{"w/1": [{"method": "stereo", "height_m": 60.0 / 2.2, "conf": 1.0}]})
+    assert el.tower_behind([_seed_with("seed_1", [_m(0, 10, 20, 50.0, 600.0)], ["w/1"], behind)],
+                           near) == {}                                     # not 2x the satellite
+    off = dict(sat, **{"w/9": [{"method": "lean", "height_m": 240.0, "conf": 0.9}]})
+    assert el.tower_behind([s], off) == {}                                 # G's evidence disagrees
+    # G's evidence from a tag, or from another seed's trusted reading of G
+    tagged = _seed_with("seed_1", [low], ["w/1"], {0: (("w/9", 150.0, 140.0),)})
+    assert el.tower_behind([tagged], {"w/1": sat["w/1"]})[("seed_1", "w/1")][2] == 140.0
+    other = _seed_with("seed_4", [_m(0, 30, 40, 155.0, 900.0)], ["w/9"])
+    assert el.tower_behind([s, other], {"w/1": sat["w/1"]})[("seed_1", "w/1")][2] == 155.0
+
+
+def test_estimates_leave_out_tower_behind_readings_given_raw_satellite():
+    low = _m(0, 10, 20, 110.0, 600.0)
+    s = _seed_with("seed_1", [low, _m(1, 30, 40, 40.0, 500.0)], ["w/1", "w/2"],
+                   {0: (("w/9", 150.0, 150.0),)})
+    raw = {"w/1": [{"method": "stereo", "height_m": 9.0, "conf": 1.0}]}
+    assert {e.feature_id for e in el.elevated_estimates([s])} == {"w/1", "w/2"}
+    assert {e.feature_id for e in el.elevated_estimates([s], satellite=raw)} == {"w/2"}
+    # fusion-form readings (no low ones) leave the reading in, as before
+    fused = {"w/1": [fd.satellite_reading("w/1", "stereo", 105.0, 1.0)]}
+    assert {e.feature_id for e in el.elevated_estimates([s], satellite=fused)} == {"w/1", "w/2"}

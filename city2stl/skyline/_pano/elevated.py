@@ -280,6 +280,10 @@ class ElevatedSeed:
     pose: fd.PanoPose | None = None
     depth: np.ndarray | None = None
     instances: np.ndarray | None = None
+    #: ``{Measured.footprint: ((feature_id, height_m, tag_m | None), ...)}``: the farther
+    #: footprints over each trusted reading's columns and the height each would have if the
+    #: reading's top row were its top (:func:`behind_map`, F-SKY26 step 6)
+    behind: dict = field(default_factory=dict)
 
 
 def _ring(geom) -> np.ndarray | None:
@@ -526,7 +530,8 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
                 "" if instances is None else f", {int(instances.max())} MobileSAM instances")
     out = ElevatedSeed(seed.name, pf, ms, fids,
                        pano_result(seed, pano, pose, ms, fids, depth, instances),
-                       _view_rows(seed, views, pano, pose, len(ms)))
+                       _view_rows(seed, views, pano, pose, len(ms)),
+                       behind=behind_map(pano, pose, fps, fids, ms))
     if keep:
         out.pano, out.pose, out.depth, out.instances = pano, pose, depth, instances
     return out
@@ -922,6 +927,145 @@ def _untrust_behind(m, explained, instances, pano):
     return replace(m, top_edge="behind")
 
 
+#: F-SKY26 step 6, the tower behind without a tag. A trusted reading on footprint F is untrusted
+#: (:func:`tower_behind`) when both hold:
+#: - F's satellite says low: it has readings of :data:`SAT_LOW_METHODS` with confidence >=
+#:   :data:`SAT_LOW_CONF`, all under :data:`SAT_LOW_M`, and the reading is over
+#:   :data:`SAT_LOW_FACTOR` x their largest (at least :data:`SAT_LOW_FLOOR_M`);
+#: - a footprint G at least ``BEHIND_DIST_RATIO`` x farther over its columns
+#:   (:func:`behind_map`) would be :data:`CREDIT_MIN_M` or taller with the reading's top row as
+#:   its top, and G's own evidence agrees within :data:`CREDIT_TOL`: its OSM tag, any seed's
+#:   trusted drone reading of G, or a satellite reading of G (same methods and confidence) of
+#:   ``SAT_LOW_M`` or more.
+#: Neither alone is safe. 2026-10-07, saved states of Cartagena seeds 1/4/5/6/7 and Miami seeds
+#: 2/3/4 (+ spheres), every trusted reading:
+#: - the geometric test alone (a G with evidence explains the top) flagged 6 of 14 Cartagena
+#:   readings within 25 % of their tag and 20 of 37 Miami readings within 25 % of LiDAR, against
+#:   3 / 63 / 24 wrong ones: adjacent towers explain each other's tops (the shared-top-edge check
+#:   refused 2026-10-06);
+#: - the satellite test alone is unsafe on 40-90 m towers whose stereo failed (b0289, tag 90 m:
+#:   stereo 2 m at conf 1.0, multiview 2 m at 0.86; 9 of 16 tagged 40-80 m footprints have
+#:   every confident reading under 40 m);
+#: - together: 80 readings on 76 footprints, none within 25 % of a tag; all 3 tag-wrong
+#:   readings (b0634 69/10 m, b0628 105/42 m, b0622 74/6 m) and 61 of 141 readings over 2x
+#:   every satellite reading; 0 of 16 readings within 35 % of a confident satellite reading.
+#: Floors (the plan's cue: an accepted floor instance on the top matched to a farther plot)
+#: matched 0 wrong readings and 3 right ones: too few instances pass the floor checks that far
+#: out (0-38 a seed). Miami has no satellite readings, so nothing changes there.
+SAT_LOW_M = 40.0
+SAT_LOW_CONF = 0.5
+SAT_LOW_FACTOR = 2.0
+SAT_LOW_FLOOR_M = 5.0
+SAT_LOW_METHODS = ("ls", "lean", "stereo", "multiview")
+#: Readings under this are failures (ground matched), not a low roof: b0289 (tag 90 m) stereo
+#: 2 m, b0075 (drone 111-118 m from two seeds) stereo 1.2 m.
+SAT_MIN_M = 3.0
+CREDIT_TOL = 0.25
+CREDIT_MIN_M = 30.0
+
+
+def behind_map(pano: fd.Pano, pose: fd.PanoPose, footprints, feature_ids, ms) -> dict:
+    """For each trusted reading in ``ms``: the footprints at least ``BEHIND_DIST_RATIO`` x
+    farther (nearest vertex) over >= 30 % of its columns (of the narrower span), each with the
+    height its top would have on the reading's top row (camera height + range x tan(elevation)):
+    ``{m.footprint: ((feature_id, height_m, osm_height_m | None), ...)}``."""
+    from .roof_fit import _candidates
+
+    ms = [m for m in ms if trusted(m)]
+    if not ms:
+        return {}
+    cands = _candidates(pano, pose, footprints, 3500.0, 1)
+    if not cands:
+        return {}
+    arr = np.array([(c.dn, c.i, c.x0, c.x1) for c in cands], float)
+    h = float(pose.camera_h_m)
+    out = {}
+    for m in ms:
+        far = arr[:, 0] >= BEHIND_DIST_RATIO * float(m.dist_m)
+        ov = (np.minimum(arr[:, 3], m.x1) - np.maximum(arr[:, 2], m.x0)) / np.maximum(
+            1.0, np.minimum(arr[:, 3] - arr[:, 2], m.x1 - m.x0))
+        t = math.tan(math.radians(float(fd._elev_of(pano, pose, m.top_row))))
+        got = []
+        for dn, i, _x0, _x1 in arr[far & (ov >= 0.3)]:
+            hg = h + float(dn) * t
+            if hg >= CREDIT_MIN_M:
+                f = footprints[int(i)]
+                got.append((feature_ids[int(i)], hg, float(f.osm_height_m) if f.osm_height_m
+                            else None))
+        if got:
+            out[m.footprint] = tuple(got)
+    return out
+
+
+def _sat_fields(r) -> tuple[str, float, float]:
+    if isinstance(r, dict):
+        return str(r.get("method")), float(r.get("height_m")), float(r.get("conf"))
+    return str(r.method), float(r.height_m), float(r.conf)
+
+
+def _sat_max(rs) -> float | None:
+    """Largest confident satellite reading (:data:`SAT_LOW_METHODS`, conf >= SAT_LOW_CONF, at
+    least :data:`SAT_MIN_M`); a confident shadow (a lower bound) at or over :data:`SAT_LOW_M`
+    counts too, so it keeps the footprint from looking low."""
+    v = [h for k, h, c in map(_sat_fields, rs or ())
+         if c >= SAT_LOW_CONF and ((k in SAT_LOW_METHODS and h >= SAT_MIN_M)
+                                   or (k == "shadow" and h >= SAT_LOW_M))]
+    return max(v) if v else None
+
+
+def tower_behind(seeds: list[ElevatedSeed], satellite_raw: dict | None) -> dict:
+    """``{(seed_name, feature_id): (G feature_id, G height_m, evidence_m)}``: the trusted readings
+    that read a farther tower (see :data:`SAT_LOW_M`). ``satellite_raw``: ``{feature_id:
+    [SatReading or its dict]}`` (``satellite_fusion.load_region``); without it nothing is
+    flagged."""
+    if not satellite_raw:
+        return {}
+    drone: dict = {}
+    for s in seeds:
+        for m in s.measured:
+            if trusted(m):
+                drone.setdefault(s.feature_ids[m.footprint], []).append(float(m.height_m))
+    smax = {f: _sat_max(rs) for f, rs in satellite_raw.items()}
+    out = {}
+    for s in seeds:
+        for m in s.measured:
+            fid = s.feature_ids[m.footprint]
+            low = smax.get(fid)
+            if (not trusted(m) or low is None or low >= SAT_LOW_M
+                    or float(m.height_m) <= SAT_LOW_FACTOR * max(low, SAT_LOW_FLOOR_M)):
+                continue
+            for g, hg, tag in s.behind.get(m.footprint, ()):
+                ev = ([tag] if tag else []) + drone.get(g, [])
+                sg = smax.get(g)
+                if sg is not None and sg >= SAT_LOW_M:
+                    ev.append(sg)
+                e = next((e for e in ev if e >= CREDIT_MIN_M and abs(hg - e) <= CREDIT_TOL * e),
+                         None)
+                if e is not None:
+                    out[(s.seed_name, fid)] = (g, float(hg), float(e))
+                    break
+    return out
+
+
+def _split_satellite(satellite: dict | None) -> tuple[dict | None, dict | None]:
+    """(fusion readings, raw readings) from either form: ``satellite_fusion.fusion_readings``
+    dicts (``kind`` keys) or the raw ``load_region`` readings (``method``)."""
+    if not satellite:
+        return None, None
+    first = next((r for rs in satellite.values() for r in rs), None)
+    if first is None:
+        return None, None
+    if (first.get("kind") if isinstance(first, dict) else None):
+        return satellite, None
+    from city2stl.height.satellite.readings import SatReading
+
+    from ..satellite_fusion import fusion_readings
+
+    raw = {f: [SatReading.from_json(r) if isinstance(r, dict) else r for r in rs]
+           for f, rs in satellite.items()}
+    return fusion_readings(raw), raw
+
+
 def elevated_estimates(seeds: list[ElevatedSeed],
                        satellite: dict | None = None) -> list[RegisteredBuildingEstimate]:
     """One estimate per footprint and seed, from :func:`trusted` readings only, for footprints
@@ -932,9 +1076,21 @@ def elevated_estimates(seeds: list[ElevatedSeed],
     site flag ``use_satellite_heights``). They join the fusion of the footprints a drone seed read,
     one pseudo-seed per kind (``sat_lean`` ...): weighted by sigma_log, they can outvote and so
     dispute a drone reading, or anchor which drone readings are kept. Only drone readings are
-    emitted: a satellite key in ``used`` has no ``by_key`` entry and is skipped."""
+    emitted: a satellite key in ``used`` has no ``by_key`` entry and is skipped.
+
+    Raw satellite readings (``satellite_fusion.load_region``, ``method`` keys) are converted
+    here and also drive :func:`tower_behind`: the readings it flags are left out (F-SKY26 step 6;
+    no re-credit to the tower behind)."""
+    satellite, raw = _split_satellite(satellite)
+    behind = tower_behind(seeds, raw)
+    if behind:
+        logger.info("[elevated] tower behind: %d trusted readings on %d footprints untrusted "
+                    "(satellite low, a farther footprint's evidence explains the top)",
+                    len(behind), len({f for _s, f in behind}))
     by_seed = {s.seed_name: [dict(m.__dict__, footprint=s.feature_ids[m.footprint])
-                             for m in s.measured if trusted(m)] for s in seeds}
+                             for m in s.measured if trusted(m)
+                             and (s.seed_name, s.feature_ids[m.footprint]) not in behind]
+               for s in seeds}
     if satellite:
         drone_fids = {d["footprint"] for ms in by_seed.values() for d in ms}
         for fid in drone_fids:

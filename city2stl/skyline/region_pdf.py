@@ -498,10 +498,12 @@ def run_region_pdf_report(
     # only reads runs/satellite/<region>/readings.json
     satellite = None
     if _load_site_use_satellite_heights(region_name):
-        from .satellite_fusion import fusion_readings, load_region  # noqa: PLC0415
+        from .satellite_fusion import load_region  # noqa: PLC0415
         satellite = load_region(region_name, building_records) or None
         if satellite and elevated_state is not None:
-            elevated_state["satellite"] = fusion_readings(satellite)
+            # raw readings: elevated_estimates makes the fusion readings and also uses the
+            # low ones (dropped from fusion) for the tower-behind test (F-SKY26 step 6)
+            elevated_state["satellite"] = satellite
     with _timed("Multiview registration (per-seed)"):
         seed_views, building_heights, pano_results = _seed_multiview_registration(
             seeds, building_records, api_key,
